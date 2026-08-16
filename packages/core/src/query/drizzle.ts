@@ -5,7 +5,8 @@
 import { sql } from "drizzle-orm"
 
 import { createCursor } from "./cursor.ts"
-import type { FilterAST, SortField } from "./types.ts"
+import { filterBySelect } from "./fields.ts"
+import type { FilterAST, ParsedFields, SortField } from "./types.ts"
 
 type DrizzleListOptions = {
 	limit: number
@@ -71,6 +72,24 @@ function drizzleListOptions(query: {
 
 type DrizzleListResult<T> = T & { _total?: number }
 
+/** `_total` is a window extra, never a public field. Callers read pagination.count. */
+function stripWindowTotal<T extends Record<string, unknown>>(row: T): T {
+	if (!Object.hasOwn(row, "_total")) return row
+	const rest = { ...row }
+	delete rest["_total"]
+	return rest
+}
+
+/**
+ * Last mutation of item shape. Query stays fat; the returned object is the
+ * public subset. No-op (minus `_total`) when parsedFields is null.
+ */
+function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T {
+	const publicRow = stripWindowTotal(row)
+	if (!parsedFields) return publicRow
+	return filterBySelect(publicRow, parsedFields) as T
+}
+
 /** Create pagination result from drizzle query results with _total extra */
 function drizzlePaginationResult<T extends { id?: string }>(
 	items: DrizzleListResult<T>[],
@@ -78,6 +97,7 @@ function drizzlePaginationResult<T extends { id?: string }>(
 		cursor?: string
 		limit: number
 		page?: number
+		parsedFields?: ParsedFields | null | undefined
 		parsedSort: SortField[]
 	},
 ) {
@@ -102,7 +122,14 @@ function drizzlePaginationResult<T extends { id?: string }>(
 		page: query.cursor ? null : (query.page ?? 1),
 	}
 
-	return [sliced, pagination] as const
+	/* Project after the slice so count / hasMore / cursor still see the fat row. */
+	const projected = sliced.map((item) => applySelect(item as T & Record<string, unknown>, query.parsedFields ?? null))
+
+	return [projected, pagination] as const
+}
+
+function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T {
+	return applySelect(row, parsedFields)
 }
 
 const drizzle = {
@@ -111,6 +138,7 @@ const drizzle = {
 	filterValues: extractFilterValues,
 	listOptions: drizzleListOptions,
 	paginate: drizzlePaginationResult,
+	project: drizzleProject,
 }
 
 export { drizzle, type DrizzleListOptions }

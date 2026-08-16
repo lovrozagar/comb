@@ -519,7 +519,9 @@ const ast = result?.ast
 select=id,title,author(display_name)
 ```
 
-`getEntityColumns()`, `buildColumns()`, `buildRelationColumns()`, `getRelationSelection()`, `hasScalarsRequested()`, and `filterBySelect()` turn the parsed selection into what Drizzle's `columns` and `with` options expect.
+`createListQuerySchema({ fields })` is what puts `select` on the wire and `selectable` on `x-comb`. Without `fields`, the param is omitted. The query stays fat (sort / id / `_total` / merge keys); the response gets thin. `drizzle.paginate` and `drizzle.project` honor `parsedFields` as the last mutation of item shape. Do not apply `select=` in the HTTP framework.
+
+`getEntityColumns()`, `buildColumns()`, `buildRelationColumns()`, `getRelationSelection()`, `hasRelation()`, `hasScalarsRequested()`, and `filterBySelect()` turn the parsed selection into what Drizzle's `columns` and `with` options expect. `filterBySelect` stays exported for odd call sites; `drizzle.project` is the one-row wrapper.
 
 ### Pagination and cursors
 

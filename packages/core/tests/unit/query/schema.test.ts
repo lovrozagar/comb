@@ -20,6 +20,15 @@ describe("createListQuerySchema", () => {
 			expect(result.data.limit).toBe(PAGINATION_DEFAULTS.defaultLimit)
 			expect(result.data.parsedSort).toHaveLength(1)
 			expect(result.data.parsedSort[0]?.field).toBe("createdAt")
+			expect(result.data.parsedFields).toBeNull()
+		}
+	})
+
+	it("ignores a select param when fields is omitted", () => {
+		const result = schema.safeParse({ select: "id" })
+		expect(result.success).toBe(true)
+		if (result.success) {
+			expect(result.data.parsedFields).toBeNull()
 		}
 	})
 
@@ -177,6 +186,28 @@ describe("createListQuerySchema", () => {
 			})
 		}
 	})
+
+	it("populates parsedFields as data when fields is set", () => {
+		const withFields = createListQuerySchema({
+			fields: {
+				relationFields: { author: ["id", "name"] },
+				relations: ["author"],
+				scalars: ["id", "name"],
+			},
+			sort: ["createdAt"] as const,
+		})
+		const result = withFields.safeParse({ select: "id,author(name)" })
+		expect(result.success).toBe(true)
+		if (result.success) {
+			expect(result.data.parsedFields).toEqual({
+				root: {
+					relations: { author: { relations: {}, scalars: ["name"] } },
+					scalars: ["id"],
+				},
+			})
+			expect(result.data.parsedFields).not.toHaveProperty("hasRelation")
+		}
+	})
 })
 
 describe("createRetrieveQuerySchema", () => {
@@ -222,9 +253,27 @@ describe("createListQuerySchema → JSON Schema", () => {
 		expect(jsonSchema.type).toBe("object")
 		const props = jsonSchema.properties as Record<string, unknown>
 		expect(props).toBeDefined()
-		for (const key of ["cursor", "filter", "limit", "order", "page", "q", "select"]) {
+		for (const key of ["cursor", "filter", "limit", "order", "page", "q"]) {
 			expect(Object.keys(props)).toContain(key)
 		}
+		expect(Object.keys(props)).not.toContain("select")
+	})
+
+	it("omits select from the input schema when fields is not set", () => {
+		const schema = createListQuerySchema({ sort: ["createdAt"] as const })
+		const jsonSchema = z.toJSONSchema(schema, { io: "input" }) as Record<string, unknown>
+		const props = jsonSchema.properties as Record<string, unknown>
+		expect(Object.keys(props)).not.toContain("select")
+	})
+
+	it("includes select in the input schema when fields is set", () => {
+		const schema = createListQuerySchema({
+			fields: { scalars: ["id", "name"] },
+			sort: ["createdAt"] as const,
+		})
+		const jsonSchema = z.toJSONSchema(schema, { io: "input" }) as Record<string, unknown>
+		const props = jsonSchema.properties as Record<string, unknown>
+		expect(Object.keys(props)).toContain("select")
 	})
 
 	it("z.toJSONSchema with io:input includes lang property (lang is in base shape)", () => {
@@ -235,10 +284,13 @@ describe("createListQuerySchema → JSON Schema", () => {
 		expect(Object.keys(props)).toContain("lang")
 	})
 
-	/* pins the reason Honey must pass io:input — if Zod stops throwing, revisit */
-	it("z.toJSONSchema with default options THROWS due to unrepresentable custom types in pipe output", () => {
+	it("z.toJSONSchema with default options succeeds because pipe output is a real object tree", () => {
 		const schema = createListQuerySchema({ sort: ["createdAt"] as const })
-		expect(() => z.toJSONSchema(schema)).toThrow()
+		const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>
+		expect(jsonSchema.type).toBe("object")
+		const props = jsonSchema.properties as Record<string, unknown>
+		expect(Object.keys(props)).toContain("parsedFields")
+		expect(Object.keys(props)).toContain("filterAst")
 	})
 
 	it("emits description + examples for every list query param under io:input", () => {

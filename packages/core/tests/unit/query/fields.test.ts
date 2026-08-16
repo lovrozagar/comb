@@ -5,6 +5,7 @@ import {
 	filterBySelect,
 	getEntityColumns,
 	getRelationSelection,
+	hasRelation,
 	hasScalarsRequested,
 	parseSelect,
 } from "../../../src/query/fields.ts"
@@ -33,7 +34,7 @@ describe("parseSelect", () => {
 	it("parses single scalar", () => {
 		const result = parseSelect("id")
 		expect(result?.root.scalars).toEqual(["id"])
-		expect(result?.root.relations.size).toBe(0)
+		expect(result?.root.relations).toEqual({})
 	})
 
 	it("parses comma-separated scalars", () => {
@@ -51,7 +52,7 @@ describe("parseSelect", () => {
 	it("parses top-level wildcard", () => {
 		const result = parseSelect("*")
 		expect(result?.root.scalars).toEqual(["*"])
-		expect(result?.root.relations.size).toBe(0)
+		expect(result?.root.relations).toEqual({})
 	})
 
 	it("parses wildcard mixed with scalars", () => {
@@ -64,63 +65,63 @@ describe("parseSelect", () => {
 	it("parses relation with one field", () => {
 		const result = parseSelect("author(name)")
 		expect(result?.root.scalars).toEqual([])
-		expect(result?.root.relations.get("author")?.scalars).toEqual(["name"])
-		expect(result?.root.relations.get("author")?.relations.size).toBe(0)
+		expect(result?.root.relations["author"]?.scalars).toEqual(["name"])
+		expect(result?.root.relations["author"]?.relations).toEqual({})
 	})
 
 	it("parses relation with multiple fields", () => {
 		const result = parseSelect("author(id,name)")
-		expect(result?.root.relations.get("author")?.scalars).toEqual(["id", "name"])
+		expect(result?.root.relations["author"]?.scalars).toEqual(["id", "name"])
 	})
 
 	it("parses scalar then relation", () => {
 		const result = parseSelect("id,author(name)")
 		expect(result?.root.scalars).toEqual(["id"])
-		expect(result?.root.relations.get("author")?.scalars).toEqual(["name"])
+		expect(result?.root.relations["author"]?.scalars).toEqual(["name"])
 	})
 
 	/* Single relation, wildcard inside (2) */
 
 	it("parses relation with explicit wildcard", () => {
 		const result = parseSelect("author(*)")
-		expect(result?.root.relations.get("author")?.scalars).toEqual(["*"])
-		expect(result?.root.relations.get("author")?.relations.size).toBe(0)
+		expect(result?.root.relations["author"]?.scalars).toEqual(["*"])
+		expect(result?.root.relations["author"]?.relations).toEqual({})
 	})
 
 	it("relation with no fields is rejected (empty parens returns null on that relation)", () => {
 		const result = parseSelect("author()")
-		expect(result?.root.relations.size).toBe(0)
+		expect(result?.root.relations).toEqual({})
 	})
 
 	/* Nested relations (3) */
 
 	it("parses two-level nested relation", () => {
 		const result = parseSelect("author(posts(title))")
-		expect(result?.root.relations.get("author")?.relations.get("posts")?.scalars).toEqual(["title"])
+		expect(result?.root.relations["author"]?.relations["posts"]?.scalars).toEqual(["title"])
 	})
 
 	it("parses mixed scalar + nested relation", () => {
 		const result = parseSelect("author(id,posts(title))")
-		expect(result?.root.relations.get("author")?.scalars).toEqual(["id"])
-		expect(result?.root.relations.get("author")?.relations.get("posts")?.scalars).toEqual(["title"])
+		expect(result?.root.relations["author"]?.scalars).toEqual(["id"])
+		expect(result?.root.relations["author"]?.relations["posts"]?.scalars).toEqual(["title"])
 	})
 
 	it("parses deeply nested (3 levels)", () => {
 		const result = parseSelect("a(b(c(d)))")
-		expect(result?.root.relations.get("a")?.relations.get("b")?.relations.get("c")?.scalars).toEqual(["d"])
+		expect(result?.root.relations["a"]?.relations["b"]?.relations["c"]?.scalars).toEqual(["d"])
 	})
 
 	/* Nested wildcards (2) */
 
 	it("nested relation with wildcard inside", () => {
 		const result = parseSelect("author(posts(*))")
-		expect(result?.root.relations.get("author")?.relations.get("posts")?.scalars).toEqual(["*"])
+		expect(result?.root.relations["author"]?.relations["posts"]?.scalars).toEqual(["*"])
 	})
 
 	it("scalar + nested relation with wildcard", () => {
 		const result = parseSelect("id,author(posts(*))")
 		expect(result?.root.scalars).toEqual(["id"])
-		expect(result?.root.relations.get("author")?.relations.get("posts")?.scalars).toEqual(["*"])
+		expect(result?.root.relations["author"]?.relations["posts"]?.scalars).toEqual(["*"])
 	})
 
 	/* Computed fields (@ prefix) (3) */
@@ -132,13 +133,13 @@ describe("parseSelect", () => {
 
 	it("parses @ computed field inside relation embed", () => {
 		const result = parseSelect("author(id,@bio)")
-		expect(result?.root.relations.get("author")?.scalars).toEqual(["id", "@bio"])
+		expect(result?.root.relations["author"]?.scalars).toEqual(["id", "@bio"])
 	})
 
 	it("@ prefix before relation is a literal scalar, not a relation", () => {
 		const result = parseSelect("@computed")
 		expect(result?.root.scalars).toEqual(["@computed"])
-		expect(result?.root.relations.size).toBe(0)
+		expect(result?.root.relations).toEqual({})
 	})
 
 	/* Whitespace + trailing commas (2) */
@@ -146,7 +147,7 @@ describe("parseSelect", () => {
 	it("tolerates whitespace around names + commas", () => {
 		const result = parseSelect(" id , name , author ( id , name ) ")
 		expect(result?.root.scalars).toEqual(["id", "name"])
-		expect(result?.root.relations.get("author")?.scalars).toEqual(["id", "name"])
+		expect(result?.root.relations["author"]?.scalars).toEqual(["id", "name"])
 	})
 
 	it("skips empty comma parts", () => {
@@ -159,24 +160,24 @@ describe("parseSelect", () => {
 	it("treats ~ prefix as literal character, NOT relation", () => {
 		const result = parseSelect("~author")
 		expect(result?.root.scalars).toEqual(["~author"])
-		expect(result?.root.relations.size).toBe(0)
+		expect(result?.root.relations).toEqual({})
 	})
 
 	it("treats dot-path as literal character, NOT nesting", () => {
 		const result = parseSelect("author.name")
 		expect(result?.root.scalars).toEqual(["author.name"])
-		expect(result?.root.relations.size).toBe(0)
+		expect(result?.root.relations).toEqual({})
 	})
 
 	it("bare relation name without parens is a scalar", () => {
 		const result = parseSelect("author")
 		expect(result?.root.scalars).toEqual(["author"])
-		expect(result?.root.relations.size).toBe(0)
+		expect(result?.root.relations).toEqual({})
 	})
 
 	it("unmatched open paren is tolerated — treat up to end-of-input as relation body", () => {
 		const result = parseSelect("author(id,name")
-		expect(result?.root.relations.get("author")?.scalars).toEqual(["id", "name"])
+		expect(result?.root.relations["author"]?.scalars).toEqual(["id", "name"])
 	})
 
 	/* Malformed / edge cases (3) */
@@ -188,12 +189,12 @@ describe("parseSelect", () => {
 
 	it("empty relation body after trim", () => {
 		const result = parseSelect("author(   )")
-		expect(result?.root.relations.size).toBe(0)
+		expect(result?.root.relations).toEqual({})
 	})
 
 	it("relation name with digits is valid", () => {
 		const result = parseSelect("author1(name)")
-		expect(result?.root.relations.get("author1")?.scalars).toEqual(["name"])
+		expect(result?.root.relations["author1"]?.scalars).toEqual(["name"])
 	})
 })
 
@@ -237,7 +238,7 @@ describe("buildRelationColumns", () => {
 
 	it("builds columns from nested selection", () => {
 		const fields = parseSelect("author(id,name)")
-		const selection = fields?.root.relations.get("author")
+		const selection = fields?.root.relations["author"]
 		if (selection) {
 			const result = buildRelationColumns(selection, { email: true, id: true, name: true })
 			expect(result).toEqual({ id: true, name: true })
@@ -328,19 +329,19 @@ describe("filterBySelect", () => {
 describe("parseSelect — repeated relations merge", () => {
 	it("unions the fields when the same relation appears twice", () => {
 		const parsed = parseSelect("author(name),author(email)")
-		const author = parsed?.root.relations.get("author")
+		const author = parsed?.root.relations["author"]
 		expect(author?.scalars.sort()).toEqual(["email", "name"])
 	})
 
 	it("does not duplicate a field named in both occurrences", () => {
 		const parsed = parseSelect("author(name),author(name,email)")
-		const author = parsed?.root.relations.get("author")
+		const author = parsed?.root.relations["author"]
 		expect(author?.scalars.filter((s) => s === "name")).toHaveLength(1)
 	})
 
 	it("merges nested relations recursively", () => {
 		const parsed = parseSelect("author(org(id)),author(org(name))")
-		const org = parsed?.root.relations.get("author")?.relations.get("org")
+		const org = parsed?.root.relations["author"]?.relations["org"]
 		expect(org?.scalars.sort()).toEqual(["id", "name"])
 	})
 })
@@ -404,5 +405,23 @@ describe("filterBySelect — nested shapes", () => {
 	it("skips a selected scalar the data does not carry", () => {
 		const parsed = parseSelect("id,missing")!
 		expect(filterBySelect({ id: "1" }, parsed)).toEqual({ id: "1" })
+	})
+})
+
+describe("hasRelation", () => {
+	it("returns false when fields is null", () => {
+		expect(hasRelation(null, "author")).toBe(false)
+	})
+
+	it("returns true when the relation was selected", () => {
+		expect(hasRelation(parseSelect("author(name)"), "author")).toBe(true)
+	})
+
+	it("returns false when the name is a scalar, not a relation", () => {
+		expect(hasRelation(parseSelect("id,author"), "author")).toBe(false)
+	})
+
+	it("returns false for an empty-parens relation that was skipped", () => {
+		expect(hasRelation(parseSelect("author()"), "author")).toBe(false)
 	})
 })

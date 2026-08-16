@@ -35,22 +35,19 @@ function parseSelect(selectStr: string | undefined): ParsedFields | null {
 
 	/* Return null only when input was purely separators (no name tokens attempted).
 	 * "author()" has a name token but skips the empty relation — root is empty but
-	 * result must be non-null so callers can inspect root.relations.size === 0.
+	 * result must be non-null so callers can inspect the empty root.
 	 * ",,," has no name tokens at all — return null. */
 	const hasContent = /[^,\s]/.test(selectStr)
 	if (!hasContent) {
 		return null
 	}
 
-	return {
-		hasRelation: (name: string) => root.relations.has(name),
-		root,
-	}
+	return { root }
 }
 
 function parseSelectList(str: string, start: number, end: number): FieldSelection {
 	const selection: FieldSelection = {
-		relations: new Map(),
+		relations: {},
 		scalars: [],
 	}
 
@@ -78,7 +75,7 @@ function parseSelectList(str: string, start: number, end: number): FieldSelectio
 			const parenStart = i + 1
 			const parenEnd = findMatchingParen(str, i, end)
 			const nested = parseSelectList(str, parenStart, parenEnd)
-			if (nested.scalars.length === 0 && nested.relations.size === 0) {
+			if (nested.scalars.length === 0 && Object.keys(nested.relations).length === 0) {
 				/* empty parens — skip the relation entirely; nothing selected */
 			} else {
 				mergeRelation(selection.relations, name, nested)
@@ -106,21 +103,26 @@ function findMatchingParen(str: string, openPos: number, end: number): number {
 	return depth === 0 ? i - 1 : end
 }
 
-function mergeRelation(relations: Map<string, FieldSelection | null>, name: string, value: FieldSelection): void {
-	const existing = relations.get(name)
+function mergeRelation(relations: Record<string, FieldSelection | null>, name: string, value: FieldSelection): void {
+	const existing = relations[name]
 
 	if (!existing) {
-		relations.set(name, value)
+		relations[name] = value
 	} else {
 		for (const s of value.scalars) {
 			if (!existing.scalars.includes(s)) {
 				existing.scalars.push(s)
 			}
 		}
-		for (const [k, v] of value.relations) {
+		for (const [k, v] of Object.entries(value.relations)) {
 			if (v !== null) mergeRelation(existing.relations, k, v)
 		}
 	}
+}
+
+function hasRelation(fields: ParsedFields | null, name: string): boolean {
+	if (!fields) return false
+	return Object.hasOwn(fields.root.relations, name)
 }
 
 function buildColumns<T extends Record<string, true>>(
@@ -146,11 +148,11 @@ function getRelationSelection(fields: ParsedFields | null, relationName: string)
 		return null
 	}
 
-	if (!fields.root.relations.has(relationName)) {
+	if (!Object.hasOwn(fields.root.relations, relationName)) {
 		return undefined
 	}
 
-	return fields.root.relations.get(relationName)
+	return fields.root.relations[relationName]
 }
 
 function buildRelationColumns<T extends Record<string, true>>(
@@ -201,7 +203,7 @@ function filterBySelection(data: Record<string, unknown>, selection: FieldSelect
 	if (hasWildcard) {
 		for (const key of Object.keys(data)) {
 			/* skip keys that are explicitly selected as nested relations — handled below */
-			if (!selection.relations.has(key)) result[key] = data[key]
+			if (!Object.hasOwn(selection.relations, key)) result[key] = data[key]
 		}
 	} else {
 		for (const scalar of selection.scalars) {
@@ -211,7 +213,7 @@ function filterBySelection(data: Record<string, unknown>, selection: FieldSelect
 		}
 	}
 
-	for (const [relationName, nestedSelection] of selection.relations) {
+	for (const [relationName, nestedSelection] of Object.entries(selection.relations)) {
 		if (!(relationName in data)) continue
 
 		const relationData = data[relationName]
@@ -248,6 +250,7 @@ export {
 	filterBySelect,
 	getEntityColumns,
 	getRelationSelection,
+	hasRelation,
 	hasScalarsRequested,
 	parseSelect,
 }

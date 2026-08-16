@@ -26,6 +26,7 @@ export {
 	filterBySelect,
 	getEntityColumns,
 	getRelationSelection,
+	hasRelation,
 	hasScalarsRequested,
 	parseSelect,
 } from "./fields.ts"

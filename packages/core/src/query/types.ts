@@ -5,12 +5,11 @@
 import type { SQL } from "drizzle-orm"
 
 type FieldSelection = {
-	relations: Map<string, FieldSelection | null>
+	relations: Record<string, FieldSelection | null>
 	scalars: string[]
 }
 
 type ParsedFields = {
-	hasRelation: (name: string) => boolean
 	root: FieldSelection
 }
 

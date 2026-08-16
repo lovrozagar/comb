@@ -27,7 +27,16 @@ import {
 	SELECT_DESCRIPTION,
 	SELECT_EXAMPLES,
 } from "./descriptions.ts"
-import type { FieldType, FilterAST, ListQueryCapabilities, ParsedFields, SortDirection, SortField } from "./types.ts"
+import type {
+	FieldSelection,
+	FieldType,
+	FilterAST,
+	FilterGroup,
+	ListQueryCapabilities,
+	ParsedFields,
+	SortDirection,
+	SortField,
+} from "./types.ts"
 
 const PAGINATION_DEFAULTS = {
 	defaultLimit: 20,
@@ -143,7 +152,7 @@ function validateSelectWithConfig(
 		}
 	}
 
-	for (const [relationName, selection] of parsed.root.relations) {
+	for (const [relationName, selection] of Object.entries(parsed.root.relations)) {
 		if (!relationSet.has(relationName)) {
 			ctx.addIssue({
 				code: "custom",
@@ -178,15 +187,17 @@ function validateSelectWithConfig(
 	return parsed
 }
 
+const selectQueryField = z.string().max(500).optional().meta({
+	description: SELECT_DESCRIPTION,
+	examples: SELECT_EXAMPLES,
+})
+
 const baseRetrieveShape = {
 	lang: z.string().min(2).max(10).optional().meta({
 		description: LANG_DESCRIPTION,
 		examples: LANG_EXAMPLES,
 	}),
-	select: z.string().max(500).optional().meta({
-		description: SELECT_DESCRIPTION,
-		examples: SELECT_EXAMPLES,
-	}),
+	select: selectQueryField,
 }
 
 const baseRetrieveSchema = z.object(baseRetrieveShape)
@@ -242,11 +253,36 @@ const baseListQueryShape = {
 		description: Q_DESCRIPTION,
 		examples: Q_EXAMPLES,
 	}),
-	select: z.string().max(500).optional().meta({
-		description: SELECT_DESCRIPTION,
-		examples: SELECT_EXAMPLES,
-	}),
 }
+
+const fieldSelectionSchema: z.ZodType<FieldSelection, FieldSelection> = z.lazy(() =>
+	z.object({
+		relations: z.record(z.string(), fieldSelectionSchema.nullable()),
+		scalars: z.array(z.string()),
+	}),
+)
+
+const parsedFieldsSchema: z.ZodType<ParsedFields, ParsedFields> = z.object({
+	root: fieldSelectionSchema,
+})
+
+const filterGroupSchema: z.ZodType<FilterGroup, FilterGroup> = z.lazy(() =>
+	z.object({
+		conditions: z.array(
+			z.object({
+				field: z.string(),
+				operator: z.enum(["contains", "eq", "gt", "gte", "ilike", "in", "is", "like", "lt", "lte", "ne", "neq", "nin"]),
+				value: z.unknown(),
+			}),
+		),
+		logic: z.enum(["and", "or"]),
+		subgroups: z.array(filterGroupSchema),
+	}),
+)
+
+const filterAstSchema: z.ZodType<FilterAST, FilterAST> = z.object({
+	root: filterGroupSchema,
+})
 
 const sortDirectionEnum = z.enum(["asc", "desc"])
 
@@ -287,9 +323,13 @@ function createListQuerySchema<
 				examples: LIMIT_EXAMPLES,
 			})
 
+	/* Advertised only when `fields` is set — otherwise oat sees a param
+	   that parsedFields can never honor. */
+	const selectShape = fieldsConfig ? { select: selectQueryField } : {}
+
 	const schema = extendFields
-		? z.object({ ...baseListQueryShape, limit: limitSchema, ...extendFields })
-		: z.object({ ...baseListQueryShape, limit: limitSchema })
+		? z.object({ ...baseListQueryShape, ...selectShape, limit: limitSchema, ...extendFields })
+		: z.object({ ...baseListQueryShape, ...selectShape, limit: limitSchema })
 
 	type ExtendedOutput = ListQueryOutput<TSortField> & {
 		[K in keyof T]: z.infer<T[K]>
@@ -308,12 +348,12 @@ function createListQuerySchema<
 		sortOrderBy: z.ZodType<Partial<Record<TSortField, SortDirection>>, Partial<Record<TSortField, SortDirection>>>
 	}
 	const outputBaseShape = {
-		cursor: z.union([z.string(), z.undefined()]),
-		filterAst: z.custom<FilterAST | null>(),
-		lang: z.union([z.string(), z.undefined()]),
+		cursor: z.string().optional(),
+		filterAst: filterAstSchema.nullable(),
+		lang: z.string().optional(),
 		limit: z.number(),
-		page: z.union([z.number(), z.undefined()]),
-		parsedFields: z.custom<ParsedFields | null>(),
+		page: z.number().optional(),
+		parsedFields: parsedFieldsSchema.nullable(),
 		parsedSort: z
 			.object({
 				direction: sortDirectionEnum,
@@ -321,7 +361,7 @@ function createListQuerySchema<
 				nulls: z.enum(["first", "last"]).optional(),
 			})
 			.array(),
-		q: z.union([z.string(), z.undefined()]),
+		q: z.string().optional(),
 		sortOrderBy: z.partialRecord(sortFieldSchema, sortDirectionEnum),
 	} satisfies z.ZodRawShape
 
@@ -372,7 +412,8 @@ function createListQuerySchema<
 			sortOrderBy[sort.field] = sort.direction
 		}
 
-		const parsedFields = fieldsConfig ? validateSelectWithConfig(data.select, fieldsConfig, ctx) : null
+		const selectValue = "select" in data && typeof data.select === "string" ? data.select : undefined
+		const parsedFields = fieldsConfig ? validateSelectWithConfig(selectValue, fieldsConfig, ctx) : null
 
 		/* cursor takes precedence over page — both accepted gracefully */
 

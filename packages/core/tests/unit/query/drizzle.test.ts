@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { decodeCursor } from "../../../src/query/cursor.ts"
 import { drizzle } from "../../../src/query/drizzle.ts"
+import { parseSelect } from "../../../src/query/fields.ts"
 import type { FilterAST } from "../../../src/query/types.ts"
 
 describe("drizzle.countExtra", () => {
@@ -131,6 +132,64 @@ describe("drizzle.paginate", () => {
 		expect(pagination.page).toBe(1)
 	})
 
+	it("strips _total from returned items while keeping pagination.count", () => {
+		const items = [
+			{ _total: 2, id: "1", name: "a" },
+			{ _total: 2, id: "2", name: "b" },
+		]
+		const [resultItems, pagination] = drizzle.paginate(items, { ...defaultQuery, limit: 5 })
+
+		expect(pagination.count).toBe(2)
+		expect(resultItems).toEqual([
+			{ id: "1", name: "a" },
+			{ id: "2", name: "b" },
+		])
+		for (const item of resultItems) {
+			expect(item).not.toHaveProperty("_total")
+		}
+	})
+
+	it("projects items through parsedFields after the slice", () => {
+		const items = [
+			{ _total: 10, email: "a@b.com", id: "1", name: "a" },
+			{ _total: 10, email: "c@d.com", id: "2", name: "b" },
+			{ _total: 10, email: "e@f.com", id: "3", name: "c" },
+		]
+		const [resultItems, pagination] = drizzle.paginate(items, {
+			...defaultQuery,
+			limit: 2,
+			parsedFields: parseSelect("id"),
+		})
+
+		expect(pagination.count).toBe(10)
+		expect(pagination.hasMore).toBe(true)
+		expect(resultItems).toEqual([{ id: "1" }, { id: "2" }])
+	})
+
+	it("returns the full public row when parsedFields is null", () => {
+		const items = [{ _total: 1, id: "1", name: "a" }]
+		const [resultItems] = drizzle.paginate(items, { ...defaultQuery, limit: 10, parsedFields: null })
+
+		expect(resultItems).toEqual([{ id: "1", name: "a" }])
+	})
+
+	it("encodes nextCursor from the pre-project last row", () => {
+		const items = [
+			{ _total: 3, createdAt: "2024-01-03", id: "c", name: "C" },
+			{ _total: 3, createdAt: "2024-01-02", id: "b", name: "B" },
+			{ _total: 3, createdAt: "2024-01-01", id: "a", name: "A" },
+		]
+		const [resultItems, pagination] = drizzle.paginate(items, {
+			limit: 2,
+			parsedFields: parseSelect("name"),
+			parsedSort: [{ direction: "desc", field: "createdAt" }],
+		})
+
+		expect(resultItems).toEqual([{ name: "C" }, { name: "B" }])
+		expect(pagination.hasMore).toBe(true)
+		expect(decodeCursor(pagination.nextCursor)).toEqual({ c: "2024-01-02", i: "b" })
+	})
+
 	it("detects hasMore when items exceed limit", () => {
 		const items = [
 			{ _total: 10, id: "1" },
@@ -239,5 +298,25 @@ describe("drizzle.paginate", () => {
 
 		expect(pagination.nextCursor).toBeNull()
 		expect(pagination.hasMore).toBe(false)
+	})
+})
+
+describe("drizzle.project", () => {
+	it("strips _total and keeps the rest when parsedFields is null", () => {
+		expect(drizzle.project({ _total: 9, id: "1", name: "n" }, null)).toEqual({ id: "1", name: "n" })
+	})
+
+	it("projects a single row through parsedFields", () => {
+		expect(drizzle.project({ _total: 9, email: "a@b.com", id: "1", name: "n" }, parseSelect("id"))).toEqual({
+			id: "1",
+		})
+	})
+
+	it("is a no-op on a row that already lacks _total when parsedFields is null", () => {
+		expect(drizzle.project({ id: "1", name: "n" }, null)).toEqual({ id: "1", name: "n" })
+	})
+
+	it("drops _total even under a wildcard select", () => {
+		expect(drizzle.project({ _total: 3, id: "1", name: "n" }, parseSelect("*"))).toEqual({ id: "1", name: "n" })
 	})
 })

@@ -232,6 +232,15 @@ layer up. `searchable` is therefore `null` from `createListQuerySchema`, and pop
 Making it load-bearing at the schema layer — having `createListQuerySchema` reject `q` when no
 column is searchable — is the right fix and is tracked as future work, not smuggled in here.
 
+### 6.6 `select=` is advertised only when it can be honored
+
+The query stays fat (sort keys, id, `_total`, join keys). The response gets thin.
+`createListQuerySchema({ fields })` is what puts `select` on the wire and `selectable` on
+`x-comb`. Without `fields`, both are absent — so a contract tester cannot report "accepted but
+ignored". `drizzle.paginate` / `drizzle.project` is what honors `parsedFields`, as the last
+mutation of item shape. Do not apply `select=` in the HTTP framework: the output schema is the
+full entity, and a runtime subset would fail a consumer that validates the body as that schema.
+
 ### 6.2 Foreign keys are immutable, and nearly went unpublished
 
 The first draft derived `immutable` from `nomutate` alone, as the brief described. The parity test
