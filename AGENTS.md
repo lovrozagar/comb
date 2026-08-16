@@ -16,7 +16,8 @@ assume it can.
 
 ## Before you call it done
 
-From the repo root; CI runs the same set.
+From the repo root. CI runs `fmt:check` in place of `fmt`, and covers `test` via
+`test:coverage`.
 
     bun run fmt          # oxfmt, rewrites in place
     bun run lint         # oxlint
