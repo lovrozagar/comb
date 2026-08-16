@@ -1,0 +1,104 @@
+{
+	"name": "@lovrozagar/comb",
+	"version": "0.1.0",
+	"description": "Database framework for Cloudflare D1, PostgreSQL, and SQLite. Schema builders, error handling, D1 sessions, sharding, codegen, migrations.",
+	"keywords": [
+		"cloudflare-d1",
+		"comb",
+		"database",
+		"drizzle",
+		"framework",
+		"migrations",
+		"postgresql",
+		"sharding",
+		"sqlite"
+	],
+	"homepage": "https://github.com/lovrozagar/comb#readme",
+	"bugs": {
+		"url": "https://github.com/lovrozagar/comb/issues"
+	},
+	"license": "MIT",
+	"author": "lovrozagar",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/lovrozagar/comb.git",
+		"directory": "packages/core"
+	},
+	"bin": {
+		"comb": "./src/cli.ts"
+	},
+	"files": [
+		"docs",
+		"src"
+	],
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		".": "./src/index.ts",
+		"./cli": "./src/cli.ts",
+		"./codegen": "./src/codegen/index.ts",
+		"./codegen/generators": "./src/codegen/generators/index.ts",
+		"./meta": "./src/meta.ts",
+		"./migrate": "./src/migrate/index.ts",
+		"./pg/columns": "./src/pg/columns.ts",
+		"./pg/error-handler": "./src/pg/error-handler.ts",
+		"./query": "./src/query/index.ts",
+		"./query/sqlite": "./src/query/sqlite/index.ts",
+		"./sqlite/columns": "./src/sqlite/columns.ts",
+		"./sqlite/constraint-handler": "./src/sqlite/constraint-handler.ts",
+		"./sqlite/constraints": "./src/sqlite/constraints.ts",
+		"./sqlite/d1/bookmark": "./src/sqlite/d1/bookmark.ts",
+		"./sqlite/d1/error-handler": "./src/sqlite/d1/error-handler.ts",
+		"./sqlite/d1/session": "./src/sqlite/d1/session.ts",
+		"./sqlite/d1/sharding": "./src/sqlite/d1/sharding/index.ts",
+		"./sqlite/patterns": "./src/sqlite/patterns.ts",
+		"./types": "./src/types.ts"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"scripts": {
+		"prepack": "cp ../../README.md ../../LICENSE .",
+		"test": "vitest run",
+		"test:bun": "bun test tests/bun",
+		"test:coverage": "vitest run --coverage",
+		"test:all": "vitest run && bun test tests/bun",
+		"test:watch": "vitest",
+		"type:check": "tsc --noEmit",
+		"type:check:strict": "tsc --noEmit -p tsconfig.strict.json"
+	},
+	"dependencies": {
+		"pluralize": "8.0.0"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "catalog:",
+		"@libsql/client": "catalog:",
+		"@total-typescript/ts-reset": "catalog:",
+		"@types/node": "catalog:",
+		"@types/pluralize": "catalog:",
+		"@vitest/coverage-v8": "catalog:",
+		"bun-types": "catalog:",
+		"drizzle-orm": "catalog:",
+		"ts-morph": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:",
+		"zod": "catalog:"
+	},
+	"peerDependencies": {
+		"@libsql/client": ">=0.15.0",
+		"drizzle-orm": ">=1.0.0-rc.1",
+		"ts-morph": ">=25.0.0",
+		"zod": ">=3.0.0"
+	},
+	"peerDependenciesMeta": {
+		"@libsql/client": {
+			"optional": true
+		},
+		"ts-morph": {
+			"optional": true
+		},
+		"zod": {
+			"optional": true
+		}
+	}
+}

@@ -1,0 +1,47 @@
+{
+	"name": "comb-monorepo",
+	"version": "0.1.0",
+	"private": true,
+	"workspaces": {
+		"packages": [
+			"packages/*"
+		],
+		"catalog": {
+			"@cloudflare/workers-types": "5.20260815.1",
+			"@libsql/client": "0.17.4",
+			"@total-typescript/ts-reset": "0.6.1",
+			"@types/node": "26.2.0",
+			"@types/pluralize": "0.0.33",
+			"@vitest/coverage-v8": "4.1.10",
+			"bun-types": "1.3.14",
+			"drizzle-orm": "1.0.0-rc.4",
+			"pluralize": "8.0.0",
+			"ts-morph": "28.0.0",
+			"typescript": "7.0.2",
+			"vitest": "4.1.10",
+			"zod": "4.4.3"
+		}
+	},
+	"type": "module",
+	"scripts": {
+		"prepare": "git config --get core.hooksPath >/dev/null || git config core.hooksPath .githooks || true",
+		"test": "bun run --filter @lovrozagar/comb test",
+		"test:bun": "bun run --filter @lovrozagar/comb test:bun",
+		"test:coverage": "bun run --filter @lovrozagar/comb test:coverage",
+		"test:all": "bun run --filter @lovrozagar/comb test:all",
+		"test:watch": "bun run --filter @lovrozagar/comb test:watch",
+		"typecheck": "bun run --filter @lovrozagar/comb type:check",
+		"typecheck:strict": "bun run --filter @lovrozagar/comb type:check:strict",
+		"lint": "oxlint",
+		"lint:fix": "oxlint --fix",
+		"fmt": "oxfmt",
+		"fmt:check": "oxfmt --check"
+	},
+	"devDependencies": {
+		"@commitlint/cli": "21.2.2",
+		"@commitlint/config-conventional": "21.2.2",
+		"oxfmt": "^0.63.0",
+		"oxlint": "^1.78.0"
+	},
+	"packageManager": "bun@1.3.11"
+}

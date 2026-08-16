@@ -1,0 +1,43 @@
+# dependencies
+node_modules
+**/node_modules
+
+# build
+**/dist/
+**/*.tsbuildinfo
+**/.wrangler/
+**/.comb
+
+# testing
+**/coverage/
+**/test-results/
+
+# generated + migration scratch
+**/_gen/
+**/*.gen.ts
+**/atlas.hcl
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# editor / os
+.DS_Store
+*.swp
+*.log
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# local
+.local
+*.local
+.tmp
+.tmp-*
+.temp
+.cache/
+
+# copied in from the repo root at pack time (see the prepack script)
+packages/core/README.md
+packages/core/LICENSE

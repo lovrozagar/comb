@@ -1,0 +1,6 @@
+[install]
+linker = "hoisted"
+auto = "auto"
+exact = true
+frozenLockfile = false
+production = false

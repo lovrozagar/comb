@@ -1,0 +1,18 @@
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"printWidth": 120,
+	"useTabs": true,
+	"semi": false,
+	"singleQuote": false,
+	"ignorePatterns": [
+		"dist/**",
+		"coverage/**",
+		"**/.wrangler/**",
+		"**/.comb/**",
+		"**/.cache/**",
+		"**/_gen/**",
+		"**/*.gen.ts",
+		"**/drizzle/**",
+		"*.lock",
+	],
+}
