@@ -450,6 +450,30 @@ the same source key twice; comb's side needs no change either way.
 resolvable on its own schema, with the drop reproduced against a transcription of honey's own
 search so the fix has a concrete case to satisfy.
 
+## 8.2 The entity manifest
+
+The stamp travels on a Zod schema, which is the right channel for honey and wrong for everyone
+else — a Go service, a migration audit, a dashboard, anything that will not run TypeScript to
+learn the shape of the database.
+
+`comb codegen -g manifest` writes `db.<name>.manifest.gen.json` alongside the generated entities:
+per entity, its identity and id prefix, every column with the helper that declared it and its
+declared bounds, enum values, relations with their referential actions, unique indexes, check
+constraints, and the same `softDelete` / `tenantColumn` / generated / immutable facts the stamp
+carries.
+
+It is a **projection**, not a second derivation. Every entity-level fact comes from
+`deriveEntityMeta`, the function the schema stamp uses, so the manifest cannot claim something the
+document does not — the rule §6.2 was written to enforce, applied to a second output. A test
+asserts the two agree field by field.
+
+Entities are sorted by name and the file carries a checksum header, so regenerating an unchanged
+schema is a no-op and a real change is a readable diff. `v` follows the same rule as the contract:
+additive fields never bump it.
+
+This is also the substrate for the deferred query-tap work — a committed artifact a reviewer reads
+in a pull request, which is the only shape that work may take.
+
 ## 9. Tests, and why they are shaped this way
 
 `tests/unit/meta/` holds three files:

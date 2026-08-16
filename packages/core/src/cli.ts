@@ -199,6 +199,16 @@ async function runCodegenDirect(tablesPath: string, cwd: string, generator?: str
 		)
 	}
 
+	if (shouldRun("manifest")) {
+		const { generateManifest } = await import("./codegen/generators/manifest.ts")
+		generateManifest(
+			analysis.tables,
+			analysis.dbName,
+			{ output: path.join(tablesDir, `db.${analysis.dbName}.manifest.gen.json`) },
+			tablesDir,
+		)
+	}
+
 	if (shouldRun("enum-checks")) {
 		const { generateEnumChecks } = await import("./codegen/generators/enum-checks.ts")
 		generateEnumChecks(
@@ -241,6 +251,7 @@ async function runCodegenForDb(
 			"enum-checks",
 			"field-names",
 			"fts",
+			"manifest",
 			"orm",
 			"relations",
 			"rows",
@@ -324,6 +335,16 @@ async function runCodegenForDb(
 				output: output["entities"] ?? path.join(tablesDir, `${fp}.entities.gen.ts`),
 				updatePackageJson: true,
 			},
+			cwd,
+		)
+	}
+
+	if (shouldRun("manifest")) {
+		const { generateManifest } = await import("./codegen/generators/manifest.ts")
+		generateManifest(
+			analysis.tables,
+			analysis.dbName,
+			{ output: output["manifest"] ?? path.join(tablesDir, `${fp}.manifest.gen.json`) },
 			cwd,
 		)
 	}
