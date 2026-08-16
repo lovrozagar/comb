@@ -24,10 +24,12 @@ export const statusKeyToCode: Record<StatusKey, number> = {
 /** Database-related error key constants */
 export const combErrorKeys = {
 	CHECK_CONSTRAINT_VIOLATION: "check_constraint_violation",
+	CURSOR_PAGINATION_UNSUPPORTED: "cursor_pagination_unsupported",
 	DATABASE_IO_ERROR: "database_io_error",
 	DATABASE_READONLY: "database_readonly",
 	DATABASE_UNAVAILABLE: "database_unavailable",
 	FOREIGN_KEY_VIOLATION: "foreign_key_violation",
+	INVALID_STATE_TRANSITION: "invalid_state_transition",
 	PRIMARY_KEY_VIOLATION: "primary_key_violation",
 	REQUIRED_FIELD_MISSING: "required_field_missing",
 	STORAGE_LIMIT_REACHED: "tier_database_limit_reached",

@@ -1,5 +1,7 @@
 import { and, asc, desc, eq, getTableColumns, gt, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
+import { CombError } from "../../error.ts"
+import { combErrorKeys } from "../../types.ts"
 import { CURSOR_TIEBREAK_COLUMN, parseCursorForQuery } from "../cursor.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
@@ -144,7 +146,24 @@ function buildCursorWhere(
 	const columns = getTableColumns(table)
 	const sortCol = columns[primarySortField] as SQLiteColumn | undefined
 	const idCol = columns[CURSOR_TIEBREAK_COLUMN] as SQLiteColumn | undefined
-	if (!sortCol || !idCol) return null
+
+	/* A cursor was supplied and decoded, so the caller is asking for keyset
+	   pagination. Without a tiebreak column there is no predicate to add, and
+	   returning null here would quietly re-serve the first page — rows duplicate
+	   across pages and rows are skipped, with nothing to notice. Refuse loudly
+	   instead: this is a schema mistake, not a runtime condition. */
+	if (!idCol) {
+		throw new CombError({
+			cause: `Table has no "${CURSOR_TIEBREAK_COLUMN}" property to break ties on`,
+			errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
+			status: "internal_server_error",
+		})
+	}
+
+	/* An unknown sort field is the query layer's business, not ours — it has
+	   already been validated, and a cursor over a field this table lacks simply
+	   has no predicate to express. */
+	if (!sortCol) return null
 
 	if (parsed.direction === "desc") {
 		return or(lt(sortCol, parsed.sortValue), and(eq(sortCol, parsed.sortValue), lt(idCol, parsed.idValue))) ?? null

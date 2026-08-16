@@ -21,6 +21,7 @@ const c = {
 	id: (_p: string) => text("id").primaryKey(),
 	serialId: () => integer("id").primaryKey({ autoIncrement: true }),
 	text: (name: string, _o?: { max?: number; nomutate?: boolean; private?: boolean }) => text(name),
+	enum: (name: string, _v: readonly string[], _s?: object) => text(name),
 	ref: (name: string, _o?: { tenant?: boolean }) => text(name),
 	createdAt: (name: string) => integer(name, { mode: "number" }).notNull(),
 	updatedAt: (name: string) => integer(name, { mode: "number" }).notNull(),
@@ -198,18 +199,19 @@ describe("a mismatch fails loudly", () => {
 		return validateTables(fp)
 	}
 
-	it("rejects a primary key whose property is not the cursor tiebreak column", () => {
-		/* buildCursorWhere resolves the tiebreak by property name and returns null
-		   when it misses — no cursor predicate, so pages silently duplicate rows.
-		   Publishing stableTiebreak forced this invariant to be stated. */
+	it("warns, but does not block codegen, when the primary key is not the tiebreak column", () => {
+		/* Plenty of tables are never listed — join tables, lookup maps, comb's own
+		   shard_map. Blocking codegen for those would force a rename of a column
+		   that is named correctly. The exact guarantee lives in buildListQuery. */
 		const result = validateSource(`
 export const post = createTable("post", {
 	pk: c.id("pst"),
 	title: c.text("title"),
 })
 `)
-		expect(result.errors.join("\n")).toMatch(/primary key is declared as "pk"/)
-		expect(result.errors.join("\n")).toContain("cursor pagination")
+		expect(result.errors).toEqual([])
+		expect(result.warnings.join("\n")).toMatch(/primary key is declared as "pk"/)
+		expect(result.warnings.join("\n")).toContain("cannot be")
 	})
 
 	it("accepts the conventional shape without complaint", () => {
@@ -334,5 +336,78 @@ export const post = createTable("post", {
 
 		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
 		expect(generated).toContain(`tenantColumn: "org_id"`)
+	})
+})
+
+describe("states is declared on c.enum, published without transitions", () => {
+	let tmpDir: string
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-states-meta-"))
+	})
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { force: true, recursive: true })
+	})
+
+	function analyzeSource(source: string) {
+		const fp = path.join(tmpDir, "db.test.tables.ts")
+		fs.writeFileSync(fp, PRELUDE + source)
+		return { analysis: analyze(fp), tablesPath: fp }
+	}
+
+	const machine = `
+export const delivery = createTable("delivery", {
+	id: c.id("dlv"),
+	status: c.enum("status", ["queued", "sending", "sent"], {
+		initial: "queued",
+		terminal: ["sent"],
+		transitions: { queued: ["sending"], sending: ["sent"] },
+	}),
+})
+`
+
+	it("publishes column, values, initial and terminal — not transitions", () => {
+		const { analysis } = analyzeSource(machine)
+		expect(deriveEntityMeta(analysis.tables[0]!)?.states).toEqual({
+			column: "status",
+			initial: "queued",
+			terminal: ["sent"],
+			values: ["queued", "sending", "sent"],
+		})
+	})
+
+	it("stays null when no machine is declared", () => {
+		const { analysis } = analyzeSource(`
+export const delivery = createTable("delivery", {
+	id: c.id("dlv"),
+	status: c.enum("status", ["queued", "sent"]),
+})
+`)
+		expect(deriveEntityMeta(analysis.tables[0]!)?.states).toBeNull()
+	})
+
+	it("takes only the first declaring column", () => {
+		const { analysis } = analyzeSource(`
+export const delivery = createTable("delivery", {
+	id: c.id("dlv"),
+	status: c.enum("status", ["a", "b"], { terminal: ["b"] }),
+	phase: c.enum("phase", ["x", "y"], { terminal: ["y"] }),
+})
+`)
+		expect(deriveEntityMeta(analysis.tables[0]!)?.states?.column).toBe("status")
+	})
+
+	it("reaches the generated read schema without the graph", () => {
+		const { analysis, tablesPath } = analyzeSource(machine)
+		const outDir = path.join(tmpDir, "dtos")
+		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
+
+		const generated = fs.readFileSync(path.join(outDir, "delivery", "index.gen.ts"), "utf-8")
+		expect(generated).toContain(`column: "status"`)
+		expect(generated).toContain(`initial: "queued"`)
+		expect(generated).toContain(`terminal: ["sent"]`)
+		expect(generated).toContain(`values: ["queued", "sending", "sent"]`)
+		expect(generated).not.toMatch(/transitions/)
 	})
 })

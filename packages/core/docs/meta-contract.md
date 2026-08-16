@@ -51,6 +51,7 @@ One reserved key, `x-comb`, carrying a flat discriminated union.
 		"generated": ["id", "created_at", "updated_at"],
 		"immutable": ["id", "created_at"],
 		"softDelete": "deleted_at",
+		"states": null,
 		"tenantColumn": null,
 	},
 }
@@ -97,6 +98,7 @@ const postReadSchema = z.object({/* … */}).meta(
 		generated: ["id", "created_at", "updated_at"],
 		immutable: ["id", "created_at"],
 		softDelete: "deleted_at",
+		states: null,
 		tenantColumn: null,
 	}),
 )
@@ -263,6 +265,11 @@ other direction: a fact restated in a second place is a fact that will drift.
 
 ### 6.3 `tenantColumn` is declared, never inferred
 
+This field is **opt-in per table**. `null` is the honest default, not a missing
+annotation comb forgot to fill. A consumer that has not written `{ tenant: true }`
+on any column should not expect tenancy facts from comb — that is the contract,
+not a bug in 0.1.1.
+
 This is the highest-value field in the contract. Downstream, a missing tenant declaration is why
 oat reports a cross-tenant read as `AMBIGUITY` rather than `SECURITY` — the strongest check in the
 suite is advisory for want of one fact.
@@ -306,6 +313,18 @@ once comb can name the column.
 there is no single identity to publish. comb omits the entity stamp entirely rather than picking
 one column, and warns. A composite-key entity is not addressable by a single-id item route, so
 the downstream checks were not going to apply regardless.
+
+### 6.5 `states` describes a lifecycle, not how to drive it
+
+`null` when the table declares no machine. Otherwise the published subset of the
+column's state machine: `column`, `values`, `initial`, `terminal`. `transitions`
+is a write-side rule and is **not** published — a document consumer testing a
+live API has no use for the graph, and publishing it would invite a consumer to
+drive state by walking it. The entity manifest keeps the graph, because that
+artifact is for tools that operate on the model, not for a black-box tester.
+
+At most one machine per table. A second declaring column is warned and dropped.
+See `docs/state-machines.md`.
 
 ## 7. `stableTiebreak`, and a bug it surfaced
 
@@ -459,8 +478,8 @@ learn the shape of the database.
 `comb codegen -g manifest` writes `db.<name>.manifest.gen.json` alongside the generated entities:
 per entity, its identity and id prefix, every column with the helper that declared it and its
 declared bounds, enum values, relations with their referential actions, unique indexes, check
-constraints, and the same `softDelete` / `tenantColumn` / generated / immutable facts the stamp
-carries.
+constraints, and the same `softDelete` / `tenantColumn` / `states` / generated / immutable facts the stamp
+carries. The manifest also keeps `transitions` on the declaring column, which the stamp does not.
 
 It is a **projection**, not a second derivation. Every entity-level fact comes from
 `deriveEntityMeta`, the function the schema stamp uses, so the manifest cannot claim something the
@@ -534,10 +553,11 @@ build — then follows from measurement rather than from a guess. comb's exposur
 51 errors; honey's is reportedly ~480, dominated by `noUncheckedIndexedAccess`, which comb has
 none of. Same rule, different answers, and that is the point: measure first.
 
-**Export surface.** 19 entry points, down from 21. `./codegen/analyze` and `./migrate/drivers`
-were dropped as redundant — `./codegen` and `./migrate` already re-export their contents — and
-`./meta` was added. 0.x promises nothing about these; the contract in §4 is versioned separately
-from the package, precisely so the two can move at different speeds.
+**Export surface.** 20 entry points, down from 21 then up one for `./states`.
+`./codegen/analyze` and `./migrate/drivers` were dropped as redundant —
+`./codegen` and `./migrate` already re-export their contents — and `./meta` and
+`./states` were added. 0.x promises nothing about these; the contract in §4 is
+versioned separately from the package, precisely so the two can move at different speeds.
 
 ## 11. Rejected alternatives
 
@@ -570,11 +590,11 @@ would make the tester self-confirming. §6.1.
    `parsedSort = []` and the SQLite builder then defaults to `created_at desc`. Those two defaults
    are declared in different files and can diverge; currently the stamp reports the schema's view.
    Unifying them is worth doing before either is depended on.
-3. **Terminal-state modeling (`x-async`).** Designed but not implemented: a `states:
-{ values, terminal, success }` annotation on `c.enum()` would let `x-async`'s `until` /
-   `successWhen` predicates be derived rather than hand-written, and is independently useful for
-   state-transition validation on write. It needs a third argument on `c.enum`, which is the first
-   breaking-shaped change in this area — worth batching with any other `c.*` signature change.
+3. **Terminal-state modeling.** Implemented. `c.enum` takes an optional third argument
+   (`initial` / `terminal` / `transitions`); the published subset is `CombEntityMeta.states`
+   (`column`, `values`, `initial`, `terminal` — not `transitions`). See
+   `docs/state-machines.md`. `successWhen` is still not derivable: comb knows which states
+   are final, not which of them mean success.
 4. **Does `v` belong per-kind?** Entity and query facts will not evolve at the same rate, and one
    shared integer means a query-only breaking change forces entity readers to update. A
    `{ v: { entity: 1, query: 2 } }` split was considered and deferred as premature.

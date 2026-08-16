@@ -37,8 +37,24 @@ type CombEntityMeta = {
 	immutable: string[]
 	/** Tombstone column, or null when the entity is hard-deleted */
 	softDelete: string | null
-	/** Column scoping rows to a tenant, or null when comb cannot know (see docs §6.2) */
+	/** Column scoping rows to a tenant, or null when comb cannot know (see docs §6.3) */
 	tenantColumn: string | null
+	/**
+	 * Lifecycle of the entity's state column, or null when none is declared.
+	 *
+	 * `transitions` is deliberately absent: it is a write-side rule, and
+	 * publishing the graph would invite a consumer to drive state by walking it.
+	 * See docs/state-machines.md §5.
+	 */
+	states: CombStatesMeta | null
+}
+
+/** The published subset of a column state machine — describes a lifecycle, not how to drive it. */
+type CombStatesMeta = {
+	column: string
+	values: string[]
+	initial: string | null
+	terminal: string[]
 }
 
 /** Facts about a list query, derived from the config that parses the request. */
@@ -159,9 +175,32 @@ function readEntity(raw: Record<string, unknown>, v: number, diagnose: (m: strin
 		return diagnose("entity payload needs string-or-null `softDelete` and `tenantColumn`")
 	}
 
+	const states = readStates(raw["states"])
+	if (states === "invalid") return diagnose("entity payload has a malformed `states`")
+
 	/* Unknown fields are dropped, not rejected — that is what makes additive
 	   growth free for a producer newer than this reader. */
-	return { generated, identity, immutable, kind: "entity", name, softDelete, tenantColumn, v }
+	return { generated, identity, immutable, kind: "entity", name, softDelete, states, tenantColumn, v }
+}
+
+/**
+ * `states` arrived in a later comb than the contract's v1, so a payload without
+ * it is normal and reads as null — absence is not an error, only a malformed
+ * value is.
+ */
+function readStates(raw: unknown): CombStatesMeta | null | "invalid" {
+	if (raw === undefined || raw === null) return null
+	if (!isRecord(raw)) return "invalid"
+
+	const column = raw["column"]
+	const values = raw["values"]
+	const terminal = raw["terminal"]
+	const initial = raw["initial"]
+
+	if (typeof column !== "string" || !isStringArray(values) || !isStringArray(terminal)) return "invalid"
+	if (initial !== null && initial !== undefined && typeof initial !== "string") return "invalid"
+
+	return { column, initial: initial ?? null, terminal, values }
 }
 
 function readQuery(raw: Record<string, unknown>, v: number, diagnose: (m: string) => null): CombQueryMeta | null {
@@ -252,6 +291,7 @@ export {
 	type CombMetaStamp,
 	type CombQueryMeta,
 	type CombQueryMetaInput,
+	type CombStatesMeta,
 	readCombEntityMeta,
 	readCombMeta,
 	readCombQueryMeta,

@@ -7,7 +7,13 @@
 import { sql } from "drizzle-orm"
 import { integer, real, text } from "drizzle-orm/sqlite-core"
 import type * as z from "zod"
-import type { IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "./constraints.ts"
+import type {
+	EnumStates,
+	IntegerConstraints,
+	JsonConstraints,
+	TextConstraints,
+	TimestampConstraints,
+} from "./constraints.ts"
 
 const timestampDefaults = {
 	now: () => sql`(unixepoch() * 1000)`,
@@ -26,7 +32,8 @@ export const c = {
 		integer(name, { mode: "number" }),
 
 	/* Enum stored as text with type annotation */
-	enum: <T extends readonly string[]>(name: string, _values: T) => text(name).$type<T[number]>(),
+	enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) =>
+		text(name).$type<T[number]>(),
 
 	/* Text primary key — prefix is type-erased metadata for codegen */
 	id: (_prefix: string) => text("id").primaryKey(),

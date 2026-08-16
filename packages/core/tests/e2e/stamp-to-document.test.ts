@@ -72,6 +72,7 @@ const EXPECTED_ENTITY = {
 	kind: "entity",
 	name: "article",
 	softDelete: "deleted_at",
+	states: null,
 	tenantColumn: null,
 	v: 1,
 }

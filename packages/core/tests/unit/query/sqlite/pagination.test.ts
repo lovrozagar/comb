@@ -93,3 +93,59 @@ describe("buildCursorSQL", () => {
 		expect(sql).toContain("p.created_at_ms")
 	})
 })
+
+describe("buildListQuery — refusing to page a table it cannot tiebreak", () => {
+	it("throws rather than silently re-serving the first page", async () => {
+		const { buildListQuery } = await import("../../../../src/query/sqlite/build-list-query.ts")
+		const { encodeCursor } = await import("../../../../src/query/cursor.ts")
+		const { CombError } = await import("../../../../src/error.ts")
+
+		/* Primary key declared under a property other than the tiebreak name. */
+		const odd = sqliteTable("odd", { created_at: integer("created_at"), pk: text("pk").primaryKey() })
+
+		expect(() =>
+			buildListQuery({
+				parsed: {
+					cursor: encodeCursor({ c: 1, d: "desc", i: "x" }),
+					limit: 20,
+					parsedSort: [{ direction: "desc", field: "created_at" }],
+				},
+				table: odd,
+			}),
+		).toThrow(CombError)
+	})
+
+	it("names the missing property and the consequence", async () => {
+		const { buildListQuery } = await import("../../../../src/query/sqlite/build-list-query.ts")
+		const { encodeCursor } = await import("../../../../src/query/cursor.ts")
+
+		const odd = sqliteTable("odd", { created_at: integer("created_at"), pk: text("pk").primaryKey() })
+		try {
+			buildListQuery({
+				parsed: {
+					cursor: encodeCursor({ c: 1, d: "desc", i: "x" }),
+					limit: 20,
+					parsedSort: [{ direction: "desc", field: "created_at" }],
+				},
+				table: odd,
+			})
+			expect.unreachable("should throw")
+		} catch (e) {
+			const err = e as { errorKey: string; status: number }
+			expect(err.errorKey).toBe("cursor_pagination_unsupported")
+			expect(err.status).toBe(500)
+		}
+	})
+
+	it("does not throw when no cursor was requested", async () => {
+		const { buildListQuery } = await import("../../../../src/query/sqlite/build-list-query.ts")
+		const odd = sqliteTable("odd", { created_at: integer("created_at"), pk: text("pk").primaryKey() })
+
+		expect(() =>
+			buildListQuery({
+				parsed: { limit: 20, parsedSort: [{ direction: "desc", field: "created_at" }] },
+				table: odd,
+			}),
+		).not.toThrow()
+	})
+})

@@ -183,3 +183,135 @@ export const post_tag = createTable("post_tag", { post_id: c.ref("post_id"), tag
 		expect(result.warnings.join("\n")).not.toContain("no primary key")
 	})
 })
+
+describe("validateTables — state machines", () => {
+	let tmpDir: string
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-states-"))
+	})
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { force: true, recursive: true })
+	})
+
+	const PRELUDE = `
+import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
+const c = {
+	id: () => text("id").primaryKey(),
+	enum: (n: string, _v: readonly string[], _s?: object) => text(n),
+}
+`
+
+	function validate(body: string) {
+		const fp = path.join(tmpDir, "db.test.tables.ts")
+		fs.writeFileSync(fp, PRELUDE + body)
+		return validateTables(fp)
+	}
+
+	it("accepts a well-formed machine", () => {
+		const result = validate(`
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", ["queued", "sending", "sent"], {
+		initial: "queued",
+		terminal: ["sent"],
+		transitions: { queued: ["sending"], sending: ["sent"] },
+	}),
+})
+`)
+		expect(result.errors).toEqual([])
+	})
+
+	it("rejects a name that is not a declared value", () => {
+		const result = validate(`
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", ["queued", "sent"], { initial: "draft", terminal: ["done"] }),
+})
+`)
+		expect(result.errors.join("\n")).toContain('initial names "draft"')
+		expect(result.errors.join("\n")).toContain('terminal names "done"')
+	})
+
+	it("rejects a terminal state that also has outgoing transitions", () => {
+		const result = validate(`
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", ["queued", "sent"], {
+		terminal: ["sent"],
+		transitions: { sent: ["queued"] },
+	}),
+})
+`)
+		expect(result.errors.join("\n")).toContain("listed as terminal but also has outgoing transitions")
+	})
+
+	it("rejects a dead state when transitions are declared in full", () => {
+		const result = validate(`
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", ["queued", "sending", "sent", "orphaned"], {
+		initial: "queued",
+		terminal: ["sent"],
+		transitions: { queued: ["sending"], sending: ["sent"], orphaned: ["sent"] },
+	}),
+})
+`)
+		expect(result.errors.join("\n")).toContain('"orphaned" is neither initial nor reachable')
+	})
+
+	it("does not reject an unnamed state when the transitions map is partial", () => {
+		const result = validate(`
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", ["queued", "sending", "sent"], {
+		terminal: ["sent"],
+		transitions: { queued: ["sending"] },
+	}),
+})
+`)
+		expect(result.errors).toEqual([])
+	})
+
+	it("warns when a partial map names a non-terminal with no outgoing edges", () => {
+		/* `review` is a non-terminal the map does not name, so this is partial
+		   rather than "declared in full" — dead-state checking stays off. */
+		const result = validate(`
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", ["queued", "stuck", "review", "sent"], {
+		terminal: ["sent"],
+		transitions: { queued: ["sent"], stuck: [] },
+	}),
+})
+`)
+		expect(result.errors).toEqual([])
+		expect(result.warnings.join("\n")).toContain('"stuck" has no outgoing transitions')
+	})
+
+	it("warns when the value list is a const reference it cannot read", () => {
+		const result = validate(`
+const STATUSES = ["queued", "sent"] as const
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", STATUSES, { terminal: ["sent"] }),
+})
+`)
+		expect(result.errors).toEqual([])
+		expect(result.warnings.join("\n")).toContain("enum values are a reference")
+	})
+
+	it("warns when two columns declare a machine", () => {
+		const result = validate(`
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", ["a", "b"], { terminal: ["b"] }),
+	phase: c.enum("phase", ["x", "y"], { terminal: ["y"] }),
+})
+`)
+		expect(result.errors).toEqual([])
+		expect(result.warnings.join("\n")).toMatch(/2 columns declare a state machine/)
+		expect(result.warnings.join("\n")).toContain("status, phase")
+	})
+})

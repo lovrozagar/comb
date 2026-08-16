@@ -26,6 +26,7 @@ function makeField(overrides: Partial<FieldMeta> & { name: string }): FieldMeta 
 		drizzleHelper: "text",
 		enumName: null,
 		enumValues: null,
+		states: null,
 		foreignKey: null,
 		isNotNull: false,
 		isPrimaryKey: false,

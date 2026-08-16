@@ -21,7 +21,9 @@ import {
 	createProjectFromTablesDir,
 	extractDbName,
 	extractEnumFromType,
+	extractEnumValues,
 	extractLength,
+	extractStates,
 	getTableName,
 	getTablesImportPath,
 	isTableDefinition,
@@ -67,26 +69,6 @@ function extractForeignKey(raw: string, fieldName: string): ForeignKeyRef | null
 	}
 }
 
-/**
- * Extract inline enum values from c.enum("name", ["a", "b", "c"]).
- * Returns null for const references like c.enum("name", MY_CONST).
- */
-function extractEnumValues(raw: string): string[] | null {
-	const match = raw.match(/c\.enum\(\s*["'][^"']+["']\s*,\s*\[([^\]]+)\]\s*\)/)
-	if (!match || match[1] === undefined) return null
-
-	const values: string[] = []
-	for (const item of match[1].split(",")) {
-		const trimmed = item.trim()
-		const unquoted = trimmed.replace(/^["']|["']$/g, "")
-		if (unquoted) {
-			values.push(unquoted)
-		}
-	}
-
-	return values.length > 0 ? values : null
-}
-
 /** Parse a single field from a property assignment node. */
 function parseField(key: string, raw: string): FieldMeta {
 	const constraints = parseFieldConstraints(raw, key)
@@ -95,6 +77,7 @@ function parseField(key: string, raw: string): FieldMeta {
 	const drizzleHelper = extractDrizzleHelper(raw)
 	const enumName = extractEnumFromType(raw)
 	const enumValues = extractEnumValues(raw)
+	const states = extractStates(raw)
 	const jsonSchemaName = extractJsonSchemaFromCall(raw)
 	const foreignKey = extractForeignKey(raw, key)
 	const length = extractLength(raw)
@@ -117,6 +100,7 @@ function parseField(key: string, raw: string): FieldMeta {
 		drizzleHelper,
 		enumName,
 		enumValues,
+		states,
 		foreignKey: fk,
 		isNotNull,
 		isPrimaryKey,

@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm"
 import { boolean, doublePrecision, integer, jsonb, serial, text } from "drizzle-orm/pg-core"
 /* Constraint types are dialect-agnostic; they live under sqlite/ because that is
    the published export path and moving them would be a breaking change. */
-import type { TextConstraints } from "../sqlite/constraints.ts"
+import type { EnumStates, TextConstraints } from "../sqlite/constraints.ts"
 
 const timestampDefaults = {
 	now: () => sql`(extract(epoch from now()) * 1000)::integer`,
@@ -24,7 +24,8 @@ export const c = {
 	deletedAt: (name: "deletedAt" | "deleted_at") => integer(name),
 
 	/* Enum stored as text with type annotation */
-	enum: <T extends readonly string[]>(name: string, _values: T) => text(name).$type<T[number]>(),
+	enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) =>
+		text(name).$type<T[number]>(),
 
 	/* Text primary key — prefix is type-erased metadata for codegen */
 	id: (_prefix: string) => text("id").primaryKey(),

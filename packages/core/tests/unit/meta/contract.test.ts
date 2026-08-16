@@ -18,6 +18,7 @@ const entityInput: CombEntityMetaInput = {
 	kind: "entity",
 	name: "post",
 	softDelete: "deleted_at",
+	states: null,
 	tenantColumn: null,
 }
 
@@ -116,6 +117,46 @@ describe("versioning", () => {
 	it("distinguishes 'known to be nothing' from 'not said' on softDelete", () => {
 		const hard = readCombEntityMeta({ [COMB_META_KEY]: { ...entityInput, softDelete: null, v: 1 } })
 		expect(hard?.softDelete).toBeNull()
+	})
+
+	it("treats a missing states field as null — it arrived after v1 shipped", () => {
+		const { states: _dropped, ...legacy } = entityInput
+		const meta = readCombEntityMeta({ [COMB_META_KEY]: { ...legacy, v: 1 } })
+		expect(meta?.states).toBeNull()
+	})
+
+	it("reads a well-formed states payload and drops transitions", () => {
+		const meta = readCombEntityMeta({
+			[COMB_META_KEY]: {
+				...entityInput,
+				states: {
+					column: "status",
+					initial: "queued",
+					terminal: ["sent"],
+					transitions: { queued: ["sent"] },
+					values: ["queued", "sent"],
+				},
+				v: 1,
+			},
+		})
+		expect(meta?.states).toEqual({
+			column: "status",
+			initial: "queued",
+			terminal: ["sent"],
+			values: ["queued", "sent"],
+		})
+		expect(meta?.states).not.toHaveProperty("transitions")
+	})
+
+	it("refuses a malformed states payload rather than guessing", () => {
+		const messages: string[] = []
+		expect(
+			readCombMeta(
+				{ [COMB_META_KEY]: { ...entityInput, states: { column: 1 }, v: 1 } },
+				{ onDiagnostic: (m) => messages.push(m) },
+			),
+		).toBeNull()
+		expect(messages.join(" ")).toContain("malformed `states`")
 	})
 })
 

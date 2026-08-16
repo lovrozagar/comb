@@ -4,8 +4,10 @@ import {
 	extractConstraints,
 	extractDbName,
 	extractEnumFromType,
+	extractEnumValues,
 	extractJsonSchemaImports,
 	extractLength,
+	extractStates,
 	getTablesImportPath,
 	isTableDefinition,
 	setIdentifierValueMap,
@@ -48,8 +50,76 @@ describe("extractEnumFromType", () => {
 		expect(extractEnumFromType('c.enum("status", STATUS_ENUM)')).toBe("STATUS_ENUM")
 	})
 
+	it("still sees the const name when a state machine follows", () => {
+		expect(extractEnumFromType('c.enum("status", STATUS_ENUM, { terminal: ["done"] })')).toBe("STATUS_ENUM")
+	})
+
 	it("returns null for no enum", () => {
 		expect(extractEnumFromType('c.text("name")')).toBeNull()
+	})
+})
+
+describe("extractEnumValues", () => {
+	it("reads an inline list", () => {
+		expect(extractEnumValues('c.enum("status", ["draft", "sent"])')).toEqual(["draft", "sent"])
+	})
+
+	it("still reads the list when a state machine is the third argument", () => {
+		expect(extractEnumValues('c.enum("status", ["draft", "sent"], { terminal: ["sent"] })')).toEqual(["draft", "sent"])
+	})
+
+	it("returns null for a const reference", () => {
+		expect(extractEnumValues('c.enum("status", STATUS_ENUM)')).toBeNull()
+		expect(extractEnumValues('c.enum("status", STATUS_ENUM, { terminal: ["done"] })')).toBeNull()
+	})
+
+	it("returns null for a non-enum column", () => {
+		expect(extractEnumValues('c.text("name")')).toBeNull()
+	})
+})
+
+describe("extractStates", () => {
+	it("reads a full machine off the third argument", () => {
+		expect(
+			extractStates(
+				'c.enum("status", ["queued", "sending", "sent"], { initial: "queued", terminal: ["sent"], transitions: { queued: ["sending"], sending: ["sent"] } })',
+			),
+		).toEqual({
+			initial: "queued",
+			terminal: ["sent"],
+			transitions: { queued: ["sending"], sending: ["sent"] },
+		})
+	})
+
+	it("accepts the cheap half — terminal only", () => {
+		expect(extractStates('c.enum("status", ["a", "b"], { terminal: ["b"] })')).toEqual({
+			initial: null,
+			terminal: ["b"],
+			transitions: null,
+		})
+	})
+
+	it("reads a machine next to a const value list", () => {
+		expect(extractStates('c.enum("status", STATUSES, { terminal: ["done"] })')).toEqual({
+			initial: null,
+			terminal: ["done"],
+			transitions: null,
+		})
+	})
+
+	it("returns null when there is no third argument, or the object is empty", () => {
+		expect(extractStates('c.enum("status", ["a", "b"])')).toBeNull()
+		expect(extractStates('c.enum("status", ["a"], {})')).toBeNull()
+	})
+
+	it("ignores a non-enum column whose braces look similar", () => {
+		expect(extractStates('c.text("name", { max: 10, min: 1 })')).toBeNull()
+	})
+})
+
+describe("extractConstraints does not swallow a state machine", () => {
+	it("returns an empty map for c.enum, even when a third argument is present", () => {
+		expect(extractConstraints('c.enum("status", ["a", "b"], { terminal: ["b"], private: true })')).toEqual({})
 	})
 })
 

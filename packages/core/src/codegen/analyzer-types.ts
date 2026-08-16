@@ -21,6 +21,13 @@ type FieldConstraintsMeta = {
 	url: boolean
 }
 
+/** State machine declared on an enum column */
+type StateMachineMeta = {
+	initial: string | null
+	terminal: string[] | null
+	transitions: Record<string, string[]> | null
+}
+
 /** Foreign key reference from this field to another table */
 type ForeignKeyRef = {
 	column: string
@@ -39,6 +46,8 @@ type FieldMeta = {
 	enumName: string | null
 	/** Inline enum values if c.enum("name", ["a", "b"]), null if const ref */
 	enumValues: string[] | null
+	/** State machine declared as c.enum's third argument, null when absent */
+	states: StateMachineMeta | null
 	/** FK reference if .references(() => table.column) */
 	foreignKey: ForeignKeyRef | null
 	/** Whether .notNull() is present */
@@ -122,6 +131,7 @@ export type {
 	FieldMeta,
 	ForeignKeyRef,
 	ImportsMeta,
+	StateMachineMeta,
 	TableMeta,
 	TimestampsMeta,
 	UniqueIndexMeta,

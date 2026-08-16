@@ -57,6 +57,27 @@ function tenantColumnOf(table: TableMeta): string | null {
 }
 
 /**
+ * The published subset of a declared state machine, or null.
+ *
+ * `transitions` is not published: it is a write-side rule, and a document
+ * consumer has no use for the graph. Only the first declaring column is taken —
+ * a table with two independent lifecycles is real but rare, and a shape a
+ * consumer can read without branching is worth more than completeness here.
+ * See docs/state-machines.md §5.
+ */
+function statesOf(table: TableMeta): CombEntityMetaInput["states"] {
+	const field = table.fields.find((f) => f.states !== null && f.enumValues !== null)
+	if (!field?.states || !field.enumValues) return null
+
+	return {
+		column: field.name,
+		initial: field.states.initial,
+		terminal: field.states.terminal ?? [],
+		values: field.enumValues,
+	}
+}
+
+/**
  * Build entity facts, or null when the table has no single identity to publish.
  *
  * A composite primary key has no one identifier, and picking a column would be
@@ -91,6 +112,7 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 		kind: "entity",
 		name: table.sqlName,
 		softDelete: table.timestamps.deletedAt ? timestampNames(table).deletedAt : null,
+		states: statesOf(table),
 		tenantColumn: tenantColumnOf(table),
 	}
 }

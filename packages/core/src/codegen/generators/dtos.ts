@@ -1015,6 +1015,20 @@ function getTimestampFields(
  * Keys are emitted in a fixed order so regenerating an unchanged table
  * produces an identical file and the checksum header stays put.
  */
+/** Render the published state subset, or `null`. */
+function renderStates(states: CombEntityMetaInput["states"]): string {
+	if (states === null) return "null"
+	const list = (values: string[]) => `[${values.map((v) => JSON.stringify(v)).join(", ")}]`
+	return [
+		"{",
+		`\t\tcolumn: ${JSON.stringify(states.column)},`,
+		`\t\tinitial: ${states.initial === null ? "null" : JSON.stringify(states.initial)},`,
+		`\t\tterminal: ${list(states.terminal)},`,
+		`\t\tvalues: ${list(states.values)},`,
+		"\t}",
+	].join("\n")
+}
+
 function renderCombMeta(meta: CombEntityMetaInput): string {
 	const list = (values: string[]) => `[${values.map((v) => JSON.stringify(v)).join(", ")}]`
 	const nullable = (value: string | null) => (value === null ? "null" : JSON.stringify(value))
@@ -1026,6 +1040,7 @@ function renderCombMeta(meta: CombEntityMetaInput): string {
 		`\tkind: "entity",`,
 		`\tname: ${JSON.stringify(meta.name)},`,
 		`\tsoftDelete: ${nullable(meta.softDelete)},`,
+		`\tstates: ${renderStates(meta.states)},`,
 		`\ttenantColumn: ${nullable(meta.tenantColumn)},`,
 		"}",
 	].join("\n")

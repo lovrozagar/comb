@@ -5,7 +5,13 @@
  */
 import { SyntaxKind } from "ts-morph"
 import { CURSOR_TIEBREAK_COLUMN } from "../../query/cursor.ts"
-import { createProjectFromTablesDir, getTableName, isTableDefinition } from "./ts-morph.ts"
+import {
+	createProjectFromTablesDir,
+	extractEnumValues,
+	extractStates,
+	getTableName,
+	isTableDefinition,
+} from "./ts-morph.ts"
 
 type ValidationResult = {
 	errors: string[]
@@ -65,6 +71,7 @@ export function validateTables(tablesPath: string): ValidationResult {
 			let hasCompositePrimaryKey = false
 			const fieldNames = new Set<string>()
 			const constraintNames = new Set<string>()
+			const stateColumns: string[] = []
 
 			for (const p of schemaObj.getProperties()) {
 				const prop = p.asKind(SyntaxKind.PropertyAssignment)
@@ -85,6 +92,65 @@ export function validateTables(tablesPath: string): ValidationResult {
 				if (/\.primaryKey\(/.test(raw) || /c\.id\(/.test(raw)) {
 					hasPrimaryKey = true
 					primaryKeyProperty = key
+				}
+
+				/* Declared state machine — a typo silently disables a rule, so the
+				   names are checked against the value list rather than trusted. */
+				const states = extractStates(raw)
+				if (states) {
+					stateColumns.push(key)
+					const values = extractEnumValues(raw)
+					if (values === null) {
+						warnings.push(`${varName}.${key}: states declared but the enum values are a reference comb cannot read`)
+					} else {
+						const known = new Set(values)
+						const unknown = (names: string[], where: string) => {
+							for (const n of names) {
+								if (!known.has(n))
+									errors.push(`${varName}.${key}: ${where} names "${n}", which is not a declared value`)
+							}
+						}
+						if (states.initial !== null) unknown([states.initial], "initial")
+						if (states.terminal) unknown(states.terminal, "terminal")
+
+						const terminal = new Set(states.terminal ?? [])
+						const transitions = states.transitions ?? null
+						if (transitions) {
+							for (const [from, to] of Object.entries(transitions)) {
+								unknown([from], "transitions")
+								unknown(to, `transitions.${from}`)
+								if (terminal.has(from)) {
+									errors.push(`${varName}.${key}: "${from}" is listed as terminal but also has outgoing transitions`)
+								}
+							}
+
+							/* A map that names every non-terminal is "declared in full".
+							   Unreachable states are then almost always a rename that
+							   missed a spot. A partial map is how an app declares only
+							   the part it knows, so dead-state checking stays off. */
+							const nonTerminal = values.filter((v) => !terminal.has(v))
+							const declaredFull = nonTerminal.every((v) => Object.hasOwn(transitions, v))
+							if (declaredFull) {
+								const reachable = new Set<string>()
+								if (states.initial !== null) reachable.add(states.initial)
+								for (const to of Object.values(transitions)) {
+									for (const dest of to) reachable.add(dest)
+								}
+								for (const state of values) {
+									if (!reachable.has(state)) {
+										errors.push(`${varName}.${key}: "${state}" is neither initial nor reachable through any transition`)
+									}
+								}
+							}
+
+							for (const [from, to] of Object.entries(transitions)) {
+								if (to.length === 0 && !terminal.has(from) && known.has(from)) {
+									const report = declaredFull ? errors : warnings
+									report.push(`${varName}.${key}: "${from}" has no outgoing transitions and is not terminal`)
+								}
+							}
+						}
+					}
 				}
 
 				/* Declared tenant scope */
@@ -139,17 +205,30 @@ export function validateTables(tablesPath: string): ValidationResult {
 				)
 			}
 
+			/* v1 publishes at most one machine per table. A second declaration is
+			   real but dropped, so say so rather than letting the extra one vanish. */
+			if (stateColumns.length > 1) {
+				warnings.push(
+					`${varName}: ${stateColumns.length} columns declare a state machine (${stateColumns.join(", ")}). ` +
+						`Only the first is published.`,
+				)
+			}
+
 			/* Keyset pagination resolves its tiebreak column by the property name
-			   CURSOR_TIEBREAK_COLUMN. When the primary key sits under a different
-			   property, buildCursorWhere finds nothing and returns null — which is
-			   not an error, it just omits the cursor predicate, so the same page is
-			   returned again and rows silently duplicate and skip. Reject the shape
-			   rather than let it fail quietly at runtime. */
+			   CURSOR_TIEBREAK_COLUMN, so a primary key declared under any other
+			   property cannot be cursor-paginated.
+
+			   A warning, not an error: plenty of tables are never listed — join
+			   tables, config tables, lookup maps — and for those the property name
+			   is a free choice that codegen has no business blocking. The exact
+			   guarantee lives where it can be exact, in buildListQuery, which
+			   throws when it is actually asked to page such a table. */
 			if (primaryKeyProperty !== null && !hasCompositePrimaryKey && primaryKeyProperty !== CURSOR_TIEBREAK_COLUMN) {
-				errors.push(
-					`${varName}: primary key is declared as "${primaryKeyProperty}" but cursor pagination ` +
-						`resolves its tiebreak by the property name "${CURSOR_TIEBREAK_COLUMN}". ` +
-						`Rename the property to "${CURSOR_TIEBREAK_COLUMN}" (the SQL column name is unaffected).`,
+				warnings.push(
+					`${varName}: primary key is declared as "${primaryKeyProperty}", so this table cannot be ` +
+						`cursor-paginated — buildListQuery resolves its tiebreak by the property name ` +
+						`"${CURSOR_TIEBREAK_COLUMN}". Harmless if the table is never listed; otherwise rename the ` +
+						`property to "${CURSOR_TIEBREAK_COLUMN}" (the SQL column name is unaffected).`,
 				)
 			}
 		}

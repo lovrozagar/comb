@@ -1,6 +1,8 @@
-# Column state machines — design
+# Column state machines
 
-Status: **design, not implemented.** Written before code, per the brief.
+Status: **implemented** in `@lovrozagar/comb` (`packages/core`). The declaration
+is the third argument to `c.enum`; the runtime guard lives at `@lovrozagar/comb/states`;
+the published subset is `CombEntityMeta.states`.
 
 ## 1. What this is for
 
@@ -71,18 +73,33 @@ It warns, and does not reject, on:
 
 ## 4. Runtime
 
+Hold the machine as a const and pass the same object to `c.enum` and to the guard.
+`c.enum`'s third argument is type-erased, like every other constraint; the const is
+what survives at runtime.
+
 ```ts
-import { assertTransition, canTransition } from "@lovrozagar/comb/states"
+import { assertTransition, canTransition, type StateMachine } from "@lovrozagar/comb/states"
+
+const deliveryStates = {
+	values: ["queued", "sending", "sent", "partial", "failed", "cancelled"],
+	initial: "queued",
+	terminal: ["sent", "partial", "failed", "cancelled"],
+	transitions: {
+		queued: ["sending", "cancelled"],
+		sending: ["sent", "partial", "failed"],
+	},
+} as const satisfies StateMachine
+
+status: c.enum("status", deliveryStates.values, deliveryStates)
 
 canTransition(deliveryStates, "queued", "sending") // true
 canTransition(deliveryStates, "sent", "queued") // false — sent is terminal
+canTransition(deliveryStates, "sent", "sent") // true — staying put is not a transition
 assertTransition(deliveryStates, current, next) // throws CombError, 422
 ```
 
-The machine is emitted by codegen as a plain object next to the enum constants, so this is a data
-lookup with no dependency on the ORM and nothing to instantiate. Failure raises `CombError` with
-`status: "unprocessable_entity"` and a new key `invalid_state_transition`, matching how every other
-comb-detected violation surfaces.
+Failure raises `CombError` with `status: "unprocessable_entity"` and
+`invalid_state_transition`, matching how every other comb-detected violation surfaces.
 
 Deliberately **not** an automatic hook on update. comb does not own the write path — a caller may
 be doing a bulk correction, a backfill, or a migration where the transition rules do not apply. An
@@ -137,19 +154,17 @@ contract considers success, and honey maps both onto the tag.
 The predicate _syntax_ is likewise not comb's. comb publishes `terminal: ["sent", "partial"]`; the
 consumer renders `status.in.sent,partial` if that is its grammar, or something else if it is not.
 
-## 7. Open questions
+## 7. Decisions (were open, now closed)
 
-1. **One machine per table, or several?** v1 says one, as `states: {…} | null`. An array is more
-   future-proof but costs every consumer a loop for a case most tables never have. Deciding this
-   before publishing matters, because narrowing an array to an object later _is_ a `v` bump.
-2. **Does `initial` belong in the published payload?** It is genuinely useful for transition
-   validation and for a diagram, and near-useless to a contract tester. Included above on the
-   grounds that the payload describes the lifecycle rather than any one consumer's needs, but it is
-   the weakest of the three.
-3. **Should `transitions` drive the generated CHECK constraint?** Today `c.enum` generates
-   `CHECK (status IN (…))`. A transition rule cannot be expressed as a column CHECK without a
-   trigger, and comb does not generate triggers. Out of scope, worth stating so it is not
-   rediscovered.
-4. **Interaction with `softDelete`.** Is a soft-deleted row still in its declared state, or in an
-   implicit terminal one? Current answer: unchanged — the tombstone is orthogonal, and conflating
-   them would make `terminal` mean two things.
+1. **One machine per table.** `states` is `{…} | null`. A second declaring column is warned
+   at generate time and dropped from the published payload. Widening to an array later is
+   additive only if readers treat a lone object as the one-item case; we would rather bump
+   `v` than make every consumer loop for a case most tables never have.
+2. **`initial` is published.** The payload describes the lifecycle, not any one consumer's
+   needs. A contract tester can ignore it.
+3. **`transitions` do not drive the CHECK constraint.** `c.enum` still generates
+   `CHECK (status IN (…))`. A transition rule cannot be expressed as a column CHECK without
+   a trigger, and comb does not generate triggers.
+4. **`softDelete` is orthogonal.** A soft-deleted row stays in its declared state. The
+   tombstone is a different fact; folding it into `terminal` would make that field mean two
+   things.

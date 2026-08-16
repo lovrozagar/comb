@@ -21,7 +21,18 @@ export function createProject(): Project {
 export function createProjectFromTablesDir(tablesPath: string): Project {
 	const project = createProject()
 	const srcDir = path.dirname(tablesPath)
-	project.addSourceFilesAtPaths(`${srcDir}/**/*.ts`)
+	/* Only the consumer's own sources. A tables file at a project root would
+	   otherwise sweep node_modules and analyze every dependency's tables —
+	   including comb's own — reporting findings against code the consumer
+	   neither wrote nor can change. */
+	project.addSourceFilesAtPaths([
+		`${srcDir}/**/*.ts`,
+		`!${srcDir}/**/node_modules/**`,
+		`!${srcDir}/**/dist/**`,
+		`!${srcDir}/**/build/**`,
+		`!${srcDir}/**/coverage/**`,
+		`!${srcDir}/**/.wrangler/**`,
+	])
 	return project
 }
 
@@ -63,8 +74,9 @@ export function extractEnumFromType(raw: string): string | null {
 	const typeMatch = raw.match(typePattern)
 	if (typeMatch && typeMatch[1] !== undefined) return typeMatch[1]
 
-	/* Check for c.enum("name", ENUM_NAME) pattern */
-	const enumHelperPattern = /c\.enum\(\s*["'][^"']+["']\s*,\s*(\w+)\s*\)/
+	/* Check for c.enum("name", ENUM_NAME) — the identifier may be followed by a
+	   third-argument state machine, so do not require the closing paren. */
+	const enumHelperPattern = /c\.enum\(\s*["'][^"']+["']\s*,\s*(\w+)/
 	const enumMatch = raw.match(enumHelperPattern)
 	if (enumMatch && enumMatch[1] !== undefined) return enumMatch[1]
 
@@ -179,6 +191,10 @@ export function buildIdentifierValueMap(importedIds: Map<string, string>, cwd: s
  * Type arg format: c.text<{ min: 5, max: 254 }>("name")
  */
 export function extractConstraints(raw: string): Record<string, unknown> {
+	/* c.enum's third argument is a state machine, not per-value constraints.
+	   Reading it here would flatten `terminal` / `transitions` into this map. */
+	if (/c\.enum\s*\(/.test(raw)) return {}
+
 	/* Try parameter-based constraints first (new format) */
 	const paramContent = extractBalancedBraces(raw, /c\.\w+\([^{]*\{/)
 	if (paramContent !== null) {
@@ -198,6 +214,75 @@ export function extractConstraints(raw: string): Record<string, unknown> {
  * Extract content between balanced braces after a pattern match
  * Handles nested braces in regex literals like /\d{7,14}/
  */
+
+/** A state machine as written in source, before validation. */
+export type ParsedStates = {
+	initial: string | null
+	terminal: string[] | null
+	transitions: Record<string, string[]> | null
+}
+
+/** Values of a bracketed string-literal list: `["a", "b"]` -> ["a", "b"]. */
+function parseStringList(text: string): string[] {
+	return [...text.matchAll(/["'`]([^"'`]*)["'`]/g)].map((m) => m[1] ?? "")
+}
+
+/**
+ * Read the state machine from `c.enum("name", VALUES, { … })`.
+ *
+ * Deliberately not routed through extractConstraints: that reads the first
+ * brace group after the call, which for an enum is this object, and it would
+ * flatten `terminal` and `transitions` into per-value constraints. The shape
+ * here is small and closed, so each key is read on its own terms.
+ */
+export function extractStates(raw: string): ParsedStates | null {
+	/* Name, then values as a literal array or a const reference, then the object. */
+	const content = extractBalancedBraces(raw, /c\.enum\(\s*["'`][^"'`]*["'`]\s*,\s*(?:\[[^\]]*\]|[\w.]+)\s*,\s*\{/)
+	if (content === null) return null
+
+	const initialMatch = content.match(/\binitial\s*:\s*["'`]([^"'`]*)["'`]/)
+	const terminalMatch = content.match(/\bterminal\s*:\s*\[([^\]]*)\]/)
+
+	let transitions: Record<string, string[]> | null = null
+	const transitionsBody = extractBalancedBraces(content, /\btransitions\s*:\s*\{/)
+	if (transitionsBody !== null) {
+		transitions = {}
+		for (const entry of transitionsBody.matchAll(/["'`]?([\w-]+)["'`]?\s*:\s*\[([^\]]*)\]/g)) {
+			const from = entry[1]
+			if (from !== undefined) transitions[from] = parseStringList(entry[2] ?? "")
+		}
+	}
+
+	if (initialMatch === null && terminalMatch === null && transitions === null) return null
+
+	return {
+		initial: initialMatch?.[1] ?? null,
+		terminal: terminalMatch ? parseStringList(terminalMatch[1] ?? "") : null,
+		transitions,
+	}
+}
+
+/**
+ * Extract inline enum values from `c.enum("name", ["a", "b"])`.
+ *
+ * Returns null for a const reference (`c.enum("name", MY_CONST)`). An optional
+ * third-argument state machine does not hide the list — the values are what
+ * the machine is about.
+ */
+export function extractEnumValues(raw: string): string[] | null {
+	const match = raw.match(/c\.enum\(\s*["'][^"']+["']\s*,\s*\[([^\]]+)\]/)
+	if (!match || match[1] === undefined) return null
+
+	const values: string[] = []
+	for (const item of match[1].split(",")) {
+		const trimmed = item.trim()
+		const unquoted = trimmed.replace(/^["']|["']$/g, "")
+		if (unquoted) values.push(unquoted)
+	}
+
+	return values.length > 0 ? values : null
+}
+
 function extractBalancedBraces(raw: string, startPattern: RegExp): string | null {
 	const match = startPattern.exec(raw)
 	if (!match) return null

@@ -52,6 +52,7 @@
 		"./sqlite/d1/session": "./src/sqlite/d1/session.ts",
 		"./sqlite/d1/sharding": "./src/sqlite/d1/sharding/index.ts",
 		"./sqlite/patterns": "./src/sqlite/patterns.ts",
+		"./states": "./src/states.ts",
 		"./types": "./src/types.ts"
 	},
 	"publishConfig": {

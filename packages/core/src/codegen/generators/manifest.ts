@@ -38,6 +38,14 @@ type ManifestColumn = {
 	immutable: boolean
 	/** Absent from read bodies */
 	private: boolean
+	/**
+	 * State machine declared on this column, or null.
+	 *
+	 * Unlike the published stamp, the manifest carries `transitions` too: it is a
+	 * local artifact for tools that operate on the model, not a document handed
+	 * to a black-box tester. See docs/state-machines.md §5.
+	 */
+	states: { initial: string | null; terminal: string[]; transitions: Record<string, string[]> | null } | null
 }
 
 type ManifestRelation = {
@@ -90,6 +98,13 @@ function toColumn(field: FieldMeta, entityMeta: ReturnType<typeof deriveEntityMe
 		pattern: constraints.pattern,
 		primaryKey: field.isPrimaryKey,
 		private: constraints.private,
+		states: field.states
+			? {
+					initial: field.states.initial,
+					terminal: field.states.terminal ?? [],
+					transitions: field.states.transitions,
+				}
+			: null,
 	}
 }
 

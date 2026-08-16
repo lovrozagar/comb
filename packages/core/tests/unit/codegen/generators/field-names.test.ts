@@ -26,6 +26,7 @@ function field(name: string): FieldMeta {
 		drizzleHelper: "text",
 		enumName: null,
 		enumValues: null,
+		states: null,
 		foreignKey: null,
 		isNotNull: false,
 		isPrimaryKey: name === "id",

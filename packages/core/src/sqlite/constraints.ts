@@ -83,3 +83,19 @@ export type JsonConstraints = BaseConstraints & {
  * Closed record - only these properties allowed
  */
 export type TimestampConstraints = BaseConstraints
+
+/**
+ * State machine declared alongside an enum column's values.
+ *
+ * Type-level only, like every other constraint here — the analyzer reads it
+ * out of the source. Hold the same object as a const and pass it to both
+ * `c.enum` and `assertTransition`. See docs/state-machines.md.
+ */
+export type EnumStates<TState extends string = string> = {
+	/** The value a row starts at */
+	initial?: TState
+	/** Values from which no transition is legal */
+	terminal?: readonly TState[]
+	/** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
+	transitions?: Partial<Record<TState, readonly TState[]>>
+}

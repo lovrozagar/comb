@@ -13,7 +13,7 @@ const c = {
 	id: (_p: string) => text("id").primaryKey(),
 	text: (n: string, _o?: { max?: number; min?: number; pattern?: string; private?: boolean; nomutate?: boolean }) => text(n),
 	integer: (n: string, _o?: { min?: number; max?: number }) => integer(n, { mode: "number" }),
-	enum: (n: string, _v: readonly string[]) => text(n),
+	enum: (n: string, _v: readonly string[], _s?: object) => text(n),
 	ref: (n: string, _o?: { tenant?: boolean }) => text(n),
 	createdAt: (n: string) => integer(n, { mode: "number" }).notNull(),
 	updatedAt: (n: string) => integer(n, { mode: "number" }).notNull(),
@@ -146,6 +146,29 @@ describe("entity manifest", () => {
 	it("reports the declared tenant column", () => {
 		expect(entity("post").tenantColumn).toBe("org_id")
 		expect(entity("author").tenantColumn).toBeNull()
+	})
+
+	it("carries the full machine on the declaring column, including transitions", () => {
+		const post = entity(
+			"job",
+			`
+export const job = createTable("job", {
+	id: c.id("job"),
+	status: c.enum("status", ["queued", "done"], {
+		initial: "queued",
+		terminal: ["done"],
+		transitions: { queued: ["done"] },
+	}),
+})
+`,
+		)
+		const status = post.columns.find((c) => c.name === "status")!
+		expect(status.states).toEqual({
+			initial: "queued",
+			terminal: ["done"],
+			transitions: { queued: ["done"] },
+		})
+		expect(post.columns.find((c) => c.name === "id")!.states).toBeNull()
 	})
 
 	it("lists relations with their referential actions", () => {

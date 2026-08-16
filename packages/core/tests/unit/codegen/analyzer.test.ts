@@ -209,6 +209,28 @@ export const user = createTable("user", {
 		expect(roleField?.enumName).toBe("ROLES")
 	})
 
+	it("extracts a state machine declared as c.enum's third argument", () => {
+		const fp = writeTablesFile(`
+import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
+const c = {
+	id: () => text("id").primaryKey(),
+	enum: (name: string, values: readonly string[], _s?: object) => text(name),
+}
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", ["queued", "sent"], { initial: "queued", terminal: ["sent"] }),
+})
+`)
+		const result = analyze(fp)
+		const status = result.tables[0]!.fields.find((f) => f.name === "status")
+		expect(status?.enumValues).toEqual(["queued", "sent"])
+		expect(status?.states).toEqual({
+			initial: "queued",
+			terminal: ["sent"],
+			transitions: null,
+		})
+	})
+
 	it("extracts field constraints", () => {
 		const fp = writeTablesFile(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"

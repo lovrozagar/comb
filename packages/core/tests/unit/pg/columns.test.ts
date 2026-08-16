@@ -60,6 +60,13 @@ describe("pg columns", () => {
 		expect(cols.role).toHaveProperty("dataType", "string")
 	})
 
+	it("c.enum accepts a third-argument state machine without changing the column", () => {
+		const table = pgTable("job", {
+			status: c.enum("status", ["queued", "done"] as const, { terminal: ["done"] }),
+		})
+		expect(getTableColumns(table).status).toHaveProperty("dataType", "string")
+	})
+
 	it("c.timestamp returns integer column", () => {
 		expect(cols.ts).toHaveProperty("dataType", expect.stringContaining("number"))
 	})
