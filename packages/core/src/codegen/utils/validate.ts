@@ -60,6 +60,7 @@ export function validateTables(tablesPath: string): ValidationResult {
 			if (!schemaObj) continue
 
 			let hasPrimaryKey = false
+			const tenantColumns: string[] = []
 			let primaryKeyProperty: string | null = null
 			let hasCompositePrimaryKey = false
 			const fieldNames = new Set<string>()
@@ -84,6 +85,11 @@ export function validateTables(tablesPath: string): ValidationResult {
 				if (/\.primaryKey\(/.test(raw) || /c\.id\(/.test(raw)) {
 					hasPrimaryKey = true
 					primaryKeyProperty = key
+				}
+
+				/* Declared tenant scope */
+				if (/\btenant\s*:\s*true\b/.test(raw)) {
+					tenantColumns.push(key)
 				}
 
 				/* FK references */
@@ -121,6 +127,16 @@ export function validateTables(tablesPath: string): ValidationResult {
 
 			if (!hasPrimaryKey) {
 				warnings.push(`${varName}: no primary key detected`)
+			}
+
+			/* A table has one tenant boundary or none. Two declarations have no safe
+			   resolution — picking either would publish a boundary nobody chose — so
+			   the fact is dropped and reported rather than guessed at. */
+			if (tenantColumns.length > 1) {
+				errors.push(
+					`${varName}: ${tenantColumns.length} columns declare { tenant: true } (${tenantColumns.join(", ")}). ` +
+						`A table scopes to at most one tenant column.`,
+				)
 			}
 
 			/* Keyset pagination resolves its tiebreak column by the property name

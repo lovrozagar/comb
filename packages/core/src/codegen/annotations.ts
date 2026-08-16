@@ -19,6 +19,7 @@ export type FieldConstraints = {
 	password: boolean
 	pattern: string | null
 	private: boolean
+	tenant: boolean
 	trim: boolean
 	uppercase: boolean
 	url: boolean
@@ -62,6 +63,7 @@ export function parseFieldConstraints(raw: string, fieldName?: string): FieldCon
 		password: constraints["password"] === true,
 		pattern: typeof constraints["pattern"] === "string" ? constraints["pattern"] : null,
 		private: constraints["private"] === true || fieldName?.startsWith("_") || false,
+		tenant: constraints["tenant"] === true,
 		trim: constraints["trim"] === true,
 		uppercase: constraints["uppercase"] === true,
 		url: constraints["url"] === true,

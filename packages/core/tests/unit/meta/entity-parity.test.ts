@@ -21,7 +21,7 @@ const c = {
 	id: (_p: string) => text("id").primaryKey(),
 	serialId: () => integer("id").primaryKey({ autoIncrement: true }),
 	text: (name: string, _o?: { max?: number; nomutate?: boolean; private?: boolean }) => text(name),
-	ref: (name: string) => text(name),
+	ref: (name: string, _o?: { tenant?: boolean }) => text(name),
 	createdAt: (name: string) => integer(name, { mode: "number" }).notNull(),
 	updatedAt: (name: string) => integer(name, { mode: "number" }).notNull(),
 	deletedAt: (name: string) => integer(name, { mode: "number" }),
@@ -230,5 +230,109 @@ export const post_tag = createTable("post_tag", {
 }, (t) => [primaryKey({ columns: [t.post_id, t.tag_id] })])
 `)
 		expect(result.errors).toEqual([])
+	})
+})
+
+describe("tenantColumn is declared, never inferred", () => {
+	let tmpDir: string
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-tenant-"))
+	})
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { force: true, recursive: true })
+	})
+
+	function metaFor(body: string) {
+		const fp = path.join(tmpDir, "db.test.tables.ts")
+		fs.writeFileSync(fp, PRELUDE + body)
+		const analysis = analyze(fp)
+		return deriveEntityMeta(analysis.tables.find((t) => t.sqlName === "post")!)
+	}
+
+	it("reports the column a table declares", () => {
+		expect(
+			metaFor(`
+export const post = createTable("post", {
+	id: c.id("pst"),
+	org_id: c.ref("org_id", { tenant: true }),
+	title: c.text("title"),
+})
+`)?.tenantColumn,
+		).toBe("org_id")
+	})
+
+	it("stays null for a foreign key that merely looks tenant-ish", () => {
+		/* org_id is a plain FK here. Guessing from the name would reproduce a
+		   consumer's own fallback heuristic and dress it up as a declaration. */
+		expect(
+			metaFor(`
+export const org = createTable("org", { id: c.id("org") })
+export const post = createTable("post", {
+	id: c.id("pst"),
+	org_id: c.ref("org_id").references(() => org.id),
+})
+`)?.tenantColumn,
+		).toBeNull()
+	})
+
+	it("stays null when nothing is declared", () => {
+		expect(metaFor(`export const post = createTable("post", { id: c.id("pst") })`)?.tenantColumn).toBeNull()
+	})
+
+	it("drops the fact rather than choosing when two columns declare it", () => {
+		expect(
+			metaFor(`
+export const post = createTable("post", {
+	id: c.id("pst"),
+	org_id: c.ref("org_id", { tenant: true }),
+	workspace_id: c.ref("workspace_id", { tenant: true }),
+})
+`)?.tenantColumn,
+		).toBeNull()
+	})
+
+	it("is rejected by validateTables when declared twice", () => {
+		const fp = path.join(tmpDir, "db.test.tables.ts")
+		fs.writeFileSync(
+			fp,
+			PRELUDE +
+				`
+export const post = createTable("post", {
+	id: c.id("pst"),
+	org_id: c.ref("org_id", { tenant: true }),
+	workspace_id: c.ref("workspace_id", { tenant: true }),
+})
+`,
+		)
+		const result = validateTables(fp)
+		expect(result.errors.join("\n")).toMatch(/2 columns declare \{ tenant: true \}/)
+		expect(result.errors.join("\n")).toContain("org_id, workspace_id")
+	})
+
+	it("accepts a single declaration without complaint", () => {
+		const fp = path.join(tmpDir, "db.test.tables.ts")
+		fs.writeFileSync(
+			fp,
+			PRELUDE +
+				`export const post = createTable("post", { id: c.id("pst"), org_id: c.ref("org_id", { tenant: true }) })`,
+		)
+		expect(validateTables(fp).errors).toEqual([])
+	})
+
+	it("reaches the generated read schema", () => {
+		const fp = path.join(tmpDir, "db.test.tables.ts")
+		fs.writeFileSync(
+			fp,
+			PRELUDE +
+				`export const post = createTable("post", { id: c.id("pst"), org_id: c.ref("org_id", { tenant: true }), title: c.text("title") })`,
+		)
+		const analysis = analyze(fp)
+		const outDir = path.join(tmpDir, "dtos")
+		generateDtos(analysis, fp, { output: outDir }, tmpDir)
+
+		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
+		expect(generated).toContain(`tenantColumn: "org_id"`)
 	})
 })

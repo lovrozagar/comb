@@ -15,6 +15,7 @@ type FieldConstraintsMeta = {
 	password: boolean
 	pattern: string | null
 	private: boolean
+	tenant: boolean
 	trim: boolean
 	uppercase: boolean
 	url: boolean

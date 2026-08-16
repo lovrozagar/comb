@@ -9,6 +9,15 @@ type BaseConstraints = {
 	autogenerate?: boolean
 	/** Field cannot be mutated after creation */
 	nomutate?: boolean
+	/**
+	 * This column scopes rows to a tenant.
+	 *
+	 * Declared, never inferred: comb can see that a column is a foreign key but
+	 * not that the table it points at is the tenant, and a wrong tenant boundary
+	 * is worse than a missing one. Saying so here makes it a hand-reviewed fact.
+	 * At most one column per table may carry it.
+	 */
+	tenant?: boolean
 }
 
 /* String transformation constraints */

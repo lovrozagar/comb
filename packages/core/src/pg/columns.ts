@@ -5,6 +5,9 @@
  */
 import { sql } from "drizzle-orm"
 import { boolean, doublePrecision, integer, jsonb, serial, text } from "drizzle-orm/pg-core"
+/* Constraint types are dialect-agnostic; they live under sqlite/ because that is
+   the published export path and moving them would be a breaking change. */
+import type { TextConstraints } from "../sqlite/constraints.ts"
 
 const timestampDefaults = {
 	now: () => sql`(extract(epoch from now()) * 1000)::integer`,
@@ -36,7 +39,7 @@ export const c = {
 	real: (name: string) => doublePrecision(name),
 
 	/* Foreign key reference - use with .references() */
-	ref: (name: string) => text(name),
+	ref: (name: string, _constraints?: TextConstraints) => text(name),
 
 	/* Auto-increment integer primary key */
 	serialId: () => serial("id").primaryKey(),

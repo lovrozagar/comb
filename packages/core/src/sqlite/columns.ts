@@ -42,7 +42,7 @@ export const c = {
 	real: (name: string, _constraints?: IntegerConstraints) => real(name),
 
 	/* Foreign key reference - use with .references() */
-	ref: (name: string) => text(name),
+	ref: (name: string, _constraints?: TextConstraints) => text(name),
 
 	/* Auto-increment integer primary key */
 	serialId: () => integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),

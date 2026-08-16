@@ -38,6 +38,25 @@ function timestampNames(table: TableMeta): { createdAt: string; deletedAt: strin
 }
 
 /**
+ * The column a table declares as its tenant scope, or null.
+ *
+ * Only an explicit `{ tenant: true }` counts. comb can see that a column is a
+ * foreign key but not that the table it references is the tenant; inferring it
+ * from a name would reproduce a consumer's own fallback heuristic one layer
+ * earlier and dress a guess up as a declaration. A wrong tenant boundary makes
+ * a consumer confident about the wrong thing, which is worse than saying
+ * nothing. See docs/meta-contract.md §6.3.
+ *
+ * More than one declaration is a mistake with no safe resolution, so it yields
+ * null rather than a coin flip; validateTables reports it.
+ */
+function tenantColumnOf(table: TableMeta): string | null {
+	const declared = table.fields.filter((f) => f.constraints.tenant)
+	if (declared.length !== 1) return null
+	return declared[0]!.name
+}
+
+/**
  * Build entity facts, or null when the table has no single identity to publish.
  *
  * A composite primary key has no one identifier, and picking a column would be
@@ -72,9 +91,7 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 		kind: "entity",
 		name: table.sqlName,
 		softDelete: table.timestamps.deletedAt ? timestampNames(table).deletedAt : null,
-		/* comb sees foreign keys but cannot know which table is the tenant —
-		   that is the routing layer's fact. See docs §6.2. */
-		tenantColumn: null,
+		tenantColumn: tenantColumnOf(table),
 	}
 }
 

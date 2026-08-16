@@ -196,6 +196,15 @@ Mitigation, in order of preference:
 2. `carryCombMeta(from, to)` — re-stamps `to` with whatever `from` carried, exported for exactly
    this case.
 
+**Decision: merge, last write wins, reader validates.** Not throw — comb has no hook to throw
+from. `.meta()` is Zod's API, called on a schema comb has already returned; intercepting it would
+mean wrapping the schema in something that is no longer a plain Zod type, which costs every
+consumer more than the case is worth. Not clobber either: silently discarding a user's
+`description` to protect a key of ours would be the same disrespect in the other direction.
+
+So the reserved key behaves like any other metadata key, and the safety lives in the reader — a
+malformed or unrecognised `x-comb` is refused with a diagnostic (§4.2), never partially trusted.
+
 A user who deliberately writes their own `x-comb` is taken at their word. It is a reserved key
 under an `x-` prefix carrying a documented version field; overwriting it is a considered act, not
 an accident, and comb's reader will validate the shape and refuse it if malformed.
@@ -252,15 +261,44 @@ deriveEntityMeta(meta, updateFields)
 `TableMeta`, with its limitation stated at the definition. This is the same lesson as §7, from the
 other direction: a fact restated in a second place is a fact that will drift.
 
-### 6.3 `tenantColumn` is `null` from the analyzer
+### 6.3 `tenantColumn` is declared, never inferred
 
-comb sees a foreign key to some table; it does not know that table is the tenant. The routing
-layer knows, because the tenancy boundary is a path parameter. Guessing from a name pattern would
-reproduce oat's own fallback heuristic one layer earlier and add no information.
+This is the highest-value field in the contract. Downstream, a missing tenant declaration is why
+oat reports a cross-tenant read as `AMBIGUITY` rather than `SECURITY` — the strongest check in the
+suite is advisory for want of one fact.
 
-comb exposes the _shape_ — foreign keys are already in `TableMeta.fields[].foreignKey` — and
-leaves the designation to honey, where the path parameter is in scope. `tenantColumn` stays in
-the type as `null` so that a later comb release can fill it without a `v` bump.
+comb **can** know it, but only if the table says so:
+
+```ts
+export const post = sqliteTable("post", {
+	id: c.id("pst"),
+	org_id: c.ref("org_id", { tenant: true }).references(() => org.id),
+	title: c.text("title"),
+})
+```
+
+**Why not infer it.** comb sees that `org_id` is a foreign key. It does not see that `org` is the
+tenant rather than an ordinary parent — a `post` belongs to an `author` and to an `org` by the
+identical mechanism. Every available signal is a name: match `org|organization|tenant|workspace|
+account|project`, and hope. That is precisely oat's own documented fallback, so inferring here
+would not add information — it would move the same guess one layer earlier and relabel it a
+declaration, which is strictly worse. A consumer treats an explicit `x-tenant` as authoritative and
+stops applying its own heuristic; a wrong value therefore makes it confident about the wrong
+boundary. Missing is recoverable, wrong is not.
+
+`{ tenant: true }` is a different kind of fact: someone wrote it, a reviewer read it, and it sits
+in the same file as the column. That is the provenance the whole contract depends on (§1).
+
+**Two declarations yield null**, and `validateTables` rejects the table. A table scopes to one
+tenant or none; with two there is no safe resolution, and publishing either would be a coin flip
+presented as a fact.
+
+**Until an app adopts the annotation, `tenantColumn` is `null` and honey should fill it.** That
+composes correctly without further coordination: comb's stamp is schema-derived (rank 1), a route
+or middleware contribution in honey is route meta (rank 2), and route meta wins. So an app can
+migrate column by column, and the two sources never fight. honey also holds a fact comb never will —
+which _path parameter_ carries the tenant — so `x-tenant` staying honey's to emit is right even
+once comb can name the column.
 
 ### 6.4 Composite primary keys
 
@@ -389,6 +427,29 @@ other query check now probes only declared columns.
 `internal_note` is absent from every list because `private: true` already removed it from the
 read DTO — the stamp is derived from the same field set, so it cannot disagree.
 
+## 8.1 Two descriptors, one operation — an open consumer-side issue
+
+A list operation carries both descriptors: the entity one rides the output schema, the query one
+rides the search schema. Both use the single reserved key, by design.
+
+honey resolves a schema entry by walking its `from` list and stopping at the **first source that
+carries the key** (`meta-spec.ts:443-450` at `cd7eb5c`). With the default order — `output`,
+`input.json`, `input.search`, … — the entity descriptor is found first and the query descriptor is
+never read. No error is raised; `x-query` is simply absent.
+
+**This is not comb's to fix by splitting the key.** Two keys would trade one silent drop for a
+permanent second collision surface, a second version field, and a second policy entry, and honey
+would still stop at the first hit for any future third descriptor. The single-key design holds; the
+resolution is that a schema entry should collect from **every** source in `from`, not the first,
+and invoke its `expand` per hit — which the discriminated `kind` already makes unambiguous.
+
+Until then an app can work around it with two policy entries narrowed by `from`, if honey allows
+the same source key twice; comb's side needs no change either way.
+
+`tests/e2e/stamp-to-document.test.ts` pins comb's half: both stamps present, correct, and each
+resolvable on its own schema, with the drop reproduced against a transcription of honey's own
+search so the fix has a concrete case to satisfy.
+
 ## 9. Tests, and why they are shaped this way
 
 `tests/unit/meta/` holds three files:
@@ -404,6 +465,14 @@ prove two literals are equal. `query-parity` feeds `filter=<field>.eq.x` for eve
 `filterable` field and requires the schema to accept it, then feeds an unpublished field and
 requires rejection. `entity-parity` reads the generated update schema back off disk and checks
 `immutable` against it **in both directions**, so neither list can quietly grow past the other.
+
+The e2e file executes the generated DTO rather than string-matching it, so it covers the
+`@lovrozagar/comb/meta` import the generator emits, and asserts placement for the three shapes that
+actually occur: a bare item (root, depth 0), a bare array (under `items`, depth 1, still reachable
+by honey's `search: "root"`), and a pagination envelope `{ articles: [Article], count, hasMore,
+nextCursor }` (depth 2 — invisible to `"root"`, found by `"deep"`, well inside its limit of 6).
+Ambiguity and dedup are pinned too: two _different_ entities at one depth is an error in honey, the
+_same_ entity twice is not.
 
 That shape has already paid twice: it caught the foreign-key omission in §6.2, and it caught
 `selectable` publishing relation names that the parser rejects in the bare form (`select=author`

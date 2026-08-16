@@ -18,6 +18,7 @@ function field(name: string): FieldMeta {
 			password: false,
 			pattern: null,
 			private: false,
+			tenant: false,
 			trim: false,
 			uppercase: false,
 			url: false,
