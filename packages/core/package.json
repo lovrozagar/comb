@@ -1,6 +1,6 @@
 {
 	"name": "@lovrozagar/comb",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Database framework for Cloudflare D1, PostgreSQL, and SQLite. Schema builders, error handling, D1 sessions, sharding, codegen, migrations.",
 	"keywords": [
 		"cloudflare-d1",
