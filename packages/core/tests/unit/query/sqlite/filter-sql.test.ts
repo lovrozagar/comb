@@ -1,4 +1,7 @@
+import type { SQL } from "drizzle-orm"
+import { SQLiteDialect } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
+import { parseFilter } from "../../../../src/query/filter.ts"
 import { buildConditionSQL, buildFilterSQL } from "../../../../src/query/sqlite/filter-sql.ts"
 import type { FilterCondition, FilterGroup } from "../../../../src/query/types.ts"
 
@@ -52,8 +55,22 @@ describe("buildConditionSQL", () => {
 	})
 
 	it("builds like condition", () => {
-		const condition: FilterCondition = { field: "name", operator: "like", value: "%test%" }
+		const condition: FilterCondition = { field: "name", operator: "like", value: "*test*" }
 		expect(buildConditionSQL(condition, config)).toBeTruthy()
+	})
+
+	it("escapes a literal % so name.like.% is not match-all", () => {
+		const dialect = new (SQLiteDialect as unknown as new () => {
+			sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
+		})()
+		const ast = parseFilter("name.like.%")
+		const condition = ast?.root.conditions[0]
+		expect(condition?.value).toBe("%")
+		const built = buildConditionSQL(condition as FilterCondition, config)
+		expect(built).toBeTruthy()
+		const { params, sql } = dialect.sqlToQuery(built as SQL)
+		expect(params).toEqual(["\\%"])
+		expect(sql.toLowerCase()).toContain("escape")
 	})
 
 	it("builds ilike condition", () => {

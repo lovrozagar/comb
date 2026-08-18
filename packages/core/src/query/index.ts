@@ -42,6 +42,7 @@ export {
 	parseOrder,
 	validateFilter,
 } from "./filter.ts"
+export { likePattern } from "./like.ts"
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts"
 
 /* Zod schema builders */

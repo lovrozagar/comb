@@ -7,6 +7,7 @@
 import type { SQL } from "drizzle-orm"
 import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
+import { parseFilter } from "../../../../src/query/filter.ts"
 import { conditionToSQL, filterToSQL, sortToOrderBy } from "../../../../src/query/sqlite/executor.ts"
 import type { FilterAST, FilterCondition, ListQueryCapabilities } from "../../../../src/query/types.ts"
 
@@ -56,7 +57,6 @@ describe("conditionToSQL", () => {
 		["gte", 5, ">= ?"],
 		["lt", 5, "< ?"],
 		["lte", 5, "<= ?"],
-		["like", "%intro%", "like ?"],
 	]
 
 	for (const [operator, value, fragment] of cases) {
@@ -67,6 +67,13 @@ describe("conditionToSQL", () => {
 		})
 	}
 
+	it("expands * after escaping LIKE specials and binds ESCAPE", () => {
+		const { params, sql } = compile(conditionToSQL(cond("title", "like", "*intro*"), post.title))
+		expect(sql.toLowerCase()).toContain("like ?")
+		expect(sql.toLowerCase()).toContain("escape")
+		expect(params).toEqual(["%intro%"])
+	})
+
 	it("lowers in/nin to bound lists", () => {
 		const inSql = compile(conditionToSQL(cond("status", "in", ["draft", "sent"]), post.status))
 		expect(inSql.params).toEqual(["draft", "sent"])
@@ -76,10 +83,21 @@ describe("conditionToSQL", () => {
 		expect(ninSql.sql.toLowerCase()).toContain("not in")
 	})
 
-	it("lowers ilike to a case-folded comparison on both sides", () => {
-		const { params, sql } = compile(conditionToSQL(cond("title", "ilike", "%Intro%"), post.title))
-		expect(sql.toLowerCase()).toContain("lower(")
+	it("lowers ilike to LIKE … ESCAPE with a case-insensitive collation", () => {
+		const { params, sql } = compile(conditionToSQL(cond("title", "ilike", "*Intro*"), post.title))
+		expect(sql.toLowerCase()).toContain("like ?")
+		expect(sql.toLowerCase()).toContain("escape")
+		expect(sql.toLowerCase()).toContain("nocase")
 		expect(params).toEqual(["%Intro%"])
+	})
+
+	it("does not treat name.like.% as a match-all wildcard", () => {
+		const parsed = parseFilter("name.like.%")
+		expect(parsed?.root.conditions[0]?.value).toBe("%")
+		const { params, sql } = compile(conditionToSQL(parsed!.root.conditions[0]!, post.title))
+		expect(params).toEqual(["\\%"])
+		expect(sql.toLowerCase()).toContain("escape")
+		expect(params[0]).not.toBe("%")
 	})
 
 	it("lowers is.null and is.notnull to null checks with no bindings", () => {

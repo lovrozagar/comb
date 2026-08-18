@@ -12,7 +12,6 @@ import {
 	inArray,
 	isNotNull,
 	isNull,
-	like,
 	lt,
 	lte,
 	ne,
@@ -25,6 +24,7 @@ import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 
 import { parseCursorForQuery } from "../cursor.ts"
 import { parseFilter, parseOrder } from "../filter.ts"
+import { likePattern } from "../like.ts"
 import type {
 	ComputedFilterResolver,
 	ComputedSortResolver,
@@ -105,9 +105,9 @@ function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL |
 		case "nin":
 			return notInArray(column, value as unknown[])
 		case "like":
-			return like(column, value as string)
+			return sql`${column} LIKE ${likePattern(String(value))} ESCAPE '\\'`
 		case "ilike":
-			return sql`LOWER(${column}) LIKE LOWER(${value})`
+			return sql`${column} LIKE ${likePattern(String(value))} ESCAPE '\\' COLLATE NOCASE`
 		case "is":
 			if (value === null) {
 				return isNull(column)

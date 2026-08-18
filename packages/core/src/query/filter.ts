@@ -276,9 +276,7 @@ class FilterParser {
 	}
 
 	private parseScalarValue(value: string): string {
-		if (value.includes("*")) {
-			return value.replace(/\*/g, "%")
-		}
+		/* Keep `*` — SQL like/ilike expand it after escaping literal `%` `_`. */
 		return value
 	}
 

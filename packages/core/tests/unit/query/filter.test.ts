@@ -77,9 +77,9 @@ describe("parseFilter", () => {
 		expect(ast?.root.conditions[0]?.field).toBe("@totalPrice")
 	})
 
-	it("converts * wildcards to % for like", () => {
+	it("keeps * wildcards in the AST for like", () => {
 		const ast = parseFilter("title.like.*summer*")
-		expect(ast?.root.conditions[0]?.value).toBe("%summer%")
+		expect(ast?.root.conditions[0]?.value).toBe("*summer*")
 	})
 
 	it("handles all operators", () => {

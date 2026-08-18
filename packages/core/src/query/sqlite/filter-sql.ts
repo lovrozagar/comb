@@ -4,6 +4,7 @@
  */
 import { sql } from "drizzle-orm"
 
+import { likePattern } from "../like.ts"
 import type { FilterCondition, FilterGroup } from "../types.ts"
 
 type FilterSQLConfig = {
@@ -79,9 +80,9 @@ function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig):
 			return sql`${column} NOT IN (${sql.join(placeholders, sql`, `)})`
 		}
 		case "like":
-			return sql`${column} LIKE ${condition.value}`
+			return sql`${column} LIKE ${likePattern(String(condition.value))} ESCAPE '\\'`
 		case "ilike":
-			return sql`${column} LIKE ${condition.value} COLLATE NOCASE`
+			return sql`${column} LIKE ${likePattern(String(condition.value))} ESCAPE '\\' COLLATE NOCASE`
 		case "is":
 			if (condition.value === null) {
 				return sql`${column} IS NULL`

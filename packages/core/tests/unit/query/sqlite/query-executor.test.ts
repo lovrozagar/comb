@@ -55,6 +55,13 @@ describe("QueryExecutor.build — where clause", () => {
 		expect(compile(result.where!).params).toEqual(["draft"])
 	})
 
+	it("lowers title.like.% to an escaped literal rather than match-all", () => {
+		const result = build({ filter: "title.like.%" })
+		const { params, sql } = compile(result.where!)
+		expect(params).toEqual(["\\%"])
+		expect(sql.toLowerCase()).toContain("escape")
+	})
+
 	it("ands the cursor predicate onto an existing filter", () => {
 		const cursor = encodeCursor({ c: 5, d: "desc", i: "p9" })
 		const result = build({ cursor, filter: "status.eq.draft", order: "views.desc" })
