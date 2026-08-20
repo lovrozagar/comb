@@ -650,7 +650,8 @@ import { readCombEntityMeta } from "@lovrozagar/comb/meta"
 
 readCombEntityMeta(z.toJSONSchema(postDtoReadSchema))
 // { v: 1, kind: "entity", name: "post", identity: "id",
-//   generated: [...], immutable: [...], softDelete: "deleted_at", tenantColumn: null }
+//   generated: [...], immutable: [...], softDelete: "deleted_at",
+//   tenantColumn: null, uniqueIndexes: [{ columns: ["title"], name: "idx_post_title" }] }
 ```
 
 Two producers stamp automatically: the DTO generator puts `CombEntityMeta` on each read schema,

@@ -114,6 +114,7 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 		softDelete: table.timestamps.deletedAt ? timestampNames(table).deletedAt : null,
 		states: statesOf(table),
 		tenantColumn: tenantColumnOf(table),
+		uniqueIndexes: table.uniqueIndexes,
 	}
 }
 

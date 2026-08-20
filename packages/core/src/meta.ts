@@ -5,6 +5,7 @@
  * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
  * names is the consumer's job. See docs/meta-contract.md.
  */
+import type { UniqueIndexMeta } from "./codegen/analyzer-types.ts"
 
 /** Reserved key. One collision surface, one version field. */
 const COMB_META_KEY = "x-comb"
@@ -47,6 +48,11 @@ type CombEntityMeta = {
 	 * See docs/state-machines.md §5.
 	 */
 	states: CombStatesMeta | null
+	/**
+	 * Unique indexes declared with `uniqueIndex()`, in the order the analyzer
+	 * extracted them. Empty when none. Never inferred from PKs or column names.
+	 */
+	uniqueIndexes: UniqueIndexMeta[]
 }
 
 /** The published subset of a column state machine — describes a lifecycle, not how to drive it. */
@@ -178,9 +184,12 @@ function readEntity(raw: Record<string, unknown>, v: number, diagnose: (m: strin
 	const states = readStates(raw["states"])
 	if (states === "invalid") return diagnose("entity payload has a malformed `states`")
 
+	const uniqueIndexes = readUniqueIndexes(raw["uniqueIndexes"])
+	if (uniqueIndexes === "invalid") return diagnose("entity payload has a malformed `uniqueIndexes`")
+
 	/* Unknown fields are dropped, not rejected — that is what makes additive
 	   growth free for a producer newer than this reader. */
-	return { generated, identity, immutable, kind: "entity", name, softDelete, states, tenantColumn, v }
+	return { generated, identity, immutable, kind: "entity", name, softDelete, states, tenantColumn, uniqueIndexes, v }
 }
 
 /**
@@ -201,6 +210,26 @@ function readStates(raw: unknown): CombStatesMeta | null | "invalid" {
 	if (initial !== null && initial !== undefined && typeof initial !== "string") return "invalid"
 
 	return { column, initial: initial ?? null, terminal, values }
+}
+
+/**
+ * `uniqueIndexes` arrived in a later comb than the contract's v1, so a payload
+ * without it is normal and reads as [] — absence is not an error, only a
+ * malformed value is.
+ */
+function readUniqueIndexes(raw: unknown): UniqueIndexMeta[] | "invalid" {
+	if (raw === undefined) return []
+	if (!Array.isArray(raw)) return "invalid"
+
+	const indexes: UniqueIndexMeta[] = []
+	for (const item of raw) {
+		if (!isRecord(item)) return "invalid"
+		const columns = item["columns"]
+		const name = item["name"]
+		if (!isStringArray(columns) || columns.length === 0 || typeof name !== "string") return "invalid"
+		indexes.push({ columns, name })
+	}
+	return indexes
 }
 
 function readQuery(raw: Record<string, unknown>, v: number, diagnose: (m: string) => null): CombQueryMeta | null {
@@ -292,6 +321,7 @@ export {
 	type CombQueryMeta,
 	type CombQueryMetaInput,
 	type CombStatesMeta,
+	type UniqueIndexMeta,
 	readCombEntityMeta,
 	readCombMeta,
 	readCombQueryMeta,

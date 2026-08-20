@@ -20,6 +20,7 @@ const entityInput: CombEntityMetaInput = {
 	softDelete: "deleted_at",
 	states: null,
 	tenantColumn: null,
+	uniqueIndexes: [],
 }
 
 describe("combMeta", () => {
@@ -157,6 +158,64 @@ describe("versioning", () => {
 			),
 		).toBeNull()
 		expect(messages.join(" ")).toContain("malformed `states`")
+	})
+
+	it("treats a missing uniqueIndexes field as [] — it arrived after v1 shipped", () => {
+		const { uniqueIndexes: _dropped, ...legacy } = entityInput
+		const meta = readCombEntityMeta({ [COMB_META_KEY]: { ...legacy, v: 1 } })
+		expect(meta?.uniqueIndexes).toEqual([])
+	})
+
+	it("reads a well-formed uniqueIndexes payload and drops unknown keys on each index", () => {
+		const uniqueIndexes = [
+			{ columns: ["email"], name: "idx_user_email" },
+			{ columns: ["org_id", "slug"], extra: true, name: "idx_user_org_slug" },
+		]
+		const meta = readCombEntityMeta({
+			[COMB_META_KEY]: { ...entityInput, uniqueIndexes, v: 1 },
+		})
+		expect(meta?.uniqueIndexes).toEqual([
+			{ columns: ["email"], name: "idx_user_email" },
+			{ columns: ["org_id", "slug"], name: "idx_user_org_slug" },
+		])
+		expect(meta?.uniqueIndexes[1]).not.toHaveProperty("extra")
+	})
+
+	it("refuses a malformed uniqueIndexes payload rather than guessing", () => {
+		const cases: Array<[string, unknown]> = [
+			["null", null],
+			["a non-array", "nope"],
+			["empty columns", [{ columns: [], name: "idx" }]],
+			["non-string name", [{ columns: ["email"], name: 1 }]],
+			["a non-object item", ["nope"]],
+		]
+		for (const [label, uniqueIndexes] of cases) {
+			const messages: string[] = []
+			expect(
+				readCombMeta(
+					{ [COMB_META_KEY]: { ...entityInput, uniqueIndexes, v: 1 } },
+					{ onDiagnostic: (m) => messages.push(m) },
+				),
+				label,
+			).toBeNull()
+			expect(messages.join(" "), label).toContain("malformed `uniqueIndexes`")
+		}
+	})
+})
+
+describe("uniqueIndexes round-trip through JSON Schema", () => {
+	it("preserves names, column order, and index order for two indexes", () => {
+		const uniqueIndexes = [
+			{ columns: ["email"], name: "idx_user_email" },
+			{ columns: ["org_id", "slug"], name: "idx_user_org_slug" },
+		]
+		const schema = z.object({ id: z.string() }).meta(combMeta({ ...entityInput, uniqueIndexes }))
+		expect(readCombEntityMeta(z.toJSONSchema(schema))?.uniqueIndexes).toEqual(uniqueIndexes)
+	})
+
+	it("reads zero indexes as []", () => {
+		const schema = z.object({ id: z.string() }).meta(combMeta({ ...entityInput, uniqueIndexes: [] }))
+		expect(readCombEntityMeta(z.toJSONSchema(schema))?.uniqueIndexes).toEqual([])
 	})
 })
 

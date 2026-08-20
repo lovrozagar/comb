@@ -1029,6 +1029,13 @@ function renderStates(states: CombEntityMetaInput["states"]): string {
 	].join("\n")
 }
 
+/** Serialize `deriveEntityMeta`'s uniqueIndexes; do not rebuild the list here. */
+function renderUniqueIndexes(indexes: CombEntityMetaInput["uniqueIndexes"]): string {
+	if (indexes.length === 0) return "[]"
+	const list = (values: string[]) => `[${values.map((v) => JSON.stringify(v)).join(", ")}]`
+	return `[${indexes.map((idx) => `{ columns: ${list(idx.columns)}, name: ${JSON.stringify(idx.name)} }`).join(", ")}]`
+}
+
 function renderCombMeta(meta: CombEntityMetaInput): string {
 	const list = (values: string[]) => `[${values.map((v) => JSON.stringify(v)).join(", ")}]`
 	const nullable = (value: string | null) => (value === null ? "null" : JSON.stringify(value))
@@ -1042,6 +1049,7 @@ function renderCombMeta(meta: CombEntityMetaInput): string {
 		`\tsoftDelete: ${nullable(meta.softDelete)},`,
 		`\tstates: ${renderStates(meta.states)},`,
 		`\ttenantColumn: ${nullable(meta.tenantColumn)},`,
+		`\tuniqueIndexes: ${renderUniqueIndexes(meta.uniqueIndexes)},`,
 		"}",
 	].join("\n")
 }

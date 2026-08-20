@@ -16,8 +16,9 @@ schema + query truth ──► maps facts to tags ────────► te
 comb publishes **facts about tables and queries**. honey decides **which documents those
 facts appear in**, and under what tag names. oat consumes the resulting document.
 
-comb's payload therefore uses comb's own vocabulary — `generated`, `immutable`, `softDelete` —
-never oat's tag names (`x-generated`, `x-immutable`, `x-soft-delete`). Encoding the tag names
+comb's payload therefore uses comb's own vocabulary — `generated`, `immutable`, `softDelete`,
+`uniqueIndexes` — never oat's tag names (`x-generated`, `x-immutable`, `x-soft-delete`, `x-unique`).
+Encoding the tag names
 here would weld three projects into one: oat could not rename a tag, and honey could not target
 a different tester, without a comb release. The mapping lives in exactly one place, honey's
 policy, and that is what lets any of the three be replaced.
@@ -53,6 +54,7 @@ One reserved key, `x-comb`, carrying a flat discriminated union.
 		"softDelete": "deleted_at",
 		"states": null,
 		"tenantColumn": null,
+		"uniqueIndexes": [{ "columns": ["title"], "name": "idx_post_title" }],
 	},
 }
 ```
@@ -100,6 +102,7 @@ const postReadSchema = z.object({/* … */}).meta(
 		softDelete: "deleted_at",
 		states: null,
 		tenantColumn: null,
+		uniqueIndexes: [{ columns: ["title"], name: "idx_post_title" }],
 	}),
 )
 ```
@@ -391,7 +394,9 @@ export const postReadSchema = z
 			generated: ["id", "created_at", "updated_at", "deleted_at"],
 			immutable: [],
 			softDelete: "deleted_at",
+			states: null,
 			tenantColumn: null,
+			uniqueIndexes: [],
 		}),
 	)
 ```
@@ -411,6 +416,8 @@ export const postReadSchema = z
           "x-immutable": f.immutable.length ? f.immutable : undefined,
           "x-soft-delete": f.softDelete ?? undefined,
           "x-tenant": f.tenantColumn ?? undefined,
+          // Tag names are the consumer's. comb publishes uniqueIndexes, not x-unique.
+          "x-unique": f.uniqueIndexes.length ? f.uniqueIndexes : undefined,
         }
         if (f?.kind === "query") return {
           "x-query": {
@@ -427,6 +434,9 @@ export const postReadSchema = z
   },
 })
 ```
+
+Tag names in this snippet (`x-entity`, `x-unique`, …) are the consumer's. comb publishes
+`uniqueIndexes` in comb's vocabulary; honey chooses the document tag they become.
 
 Note `searchable` is spread conditionally: `null` must become an **absent** key, not
 `searchable: null`, so oat falls back to its own narrowing rather than reading an empty list as
@@ -487,8 +497,9 @@ learn the shape of the database.
 `comb codegen -g manifest` writes `db.<name>.manifest.gen.json` alongside the generated entities:
 per entity, its identity and id prefix, every column with the helper that declared it and its
 declared bounds, enum values, relations with their referential actions, unique indexes, check
-constraints, and the same `softDelete` / `tenantColumn` / `states` / generated / immutable facts the stamp
-carries. The manifest also keeps `transitions` on the declaring column, which the stamp does not.
+constraints, and the same `softDelete` / `tenantColumn` / `states` / generated / immutable /
+`uniqueIndexes` facts the stamp carries. The manifest also keeps `transitions` on the declaring
+column, which the stamp does not.
 
 It is a **projection**, not a second derivation. Every entity-level fact comes from
 `deriveEntityMeta`, the function the schema stamp uses, so the manifest cannot claim something the

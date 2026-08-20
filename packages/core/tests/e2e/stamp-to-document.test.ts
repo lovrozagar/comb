@@ -12,6 +12,7 @@ import path from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import * as z from "zod"
 import { analyze } from "../../src/codegen/analyzer.ts"
+import type { UniqueIndexMeta } from "../../src/codegen/analyzer-types.ts"
 import { generateDtos } from "../../src/codegen/generators/dtos.ts"
 import { COMB_META_KEY, readCombEntityMeta, readCombQueryMeta } from "../../src/meta.ts"
 import { createListQuerySchema } from "../../src/query/schema.ts"
@@ -22,7 +23,7 @@ import { depthOfKey, readRootKey, searchSchemaKey } from "./honey-search.ts"
 const WORK_DIR = path.resolve(import.meta.dirname, ".tmp-stamp-e2e")
 
 const TABLES = `
-import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
+import { sqliteTable as createTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core"
 const c = {
 	id: (_p: string) => text("id").primaryKey(),
 	text: (n: string, _o?: { max?: number; nomutate?: boolean }) => text(n),
@@ -40,12 +41,15 @@ export const article = createTable("article", {
 	created_at: c.createdAt("created_at"),
 	updated_at: c.updatedAt("updated_at"),
 	deleted_at: c.deletedAt("deleted_at"),
-})
+}, (t) => [
+	uniqueIndex("idx_article_slug").on(t.slug),
+])
 `
 
 type Generated = { articleDtoReadSchema: z.ZodObject }
 
 let generated: Generated
+let articleUniqueIndexes: UniqueIndexMeta[]
 
 beforeAll(async () => {
 	fs.rmSync(WORK_DIR, { force: true, recursive: true })
@@ -54,6 +58,7 @@ beforeAll(async () => {
 	fs.writeFileSync(tablesPath, TABLES)
 
 	const analysis = analyze(tablesPath)
+	articleUniqueIndexes = analysis.tables.find((t) => t.sqlName === "article")!.uniqueIndexes
 	generateDtos(analysis, tablesPath, { output: path.join(WORK_DIR, "dtos") }, WORK_DIR)
 
 	generated = (await import(path.join(WORK_DIR, "dtos", "article", "index.gen.ts"))) as Generated
@@ -74,6 +79,7 @@ const EXPECTED_ENTITY = {
 	softDelete: "deleted_at",
 	states: null,
 	tenantColumn: null,
+	uniqueIndexes: [{ columns: ["slug"], name: "idx_article_slug" }],
 	v: 1,
 }
 
@@ -102,6 +108,15 @@ describe("entity stamp — bare item schema", () => {
 			const json = z.toJSONSchema(generated.articleDtoReadSchema, { io }) as Record<string, unknown>
 			expect(readCombEntityMeta(json)).toEqual(EXPECTED_ENTITY)
 		}
+	})
+
+	it("uniqueIndexes matches the fixture table's analyzer indexes and is non-empty", () => {
+		const json = z.toJSONSchema(generated.articleDtoReadSchema)
+		const meta = readCombEntityMeta(json)
+		expect(articleUniqueIndexes.length).toBeGreaterThan(0)
+		expect(meta?.uniqueIndexes.length).toBeGreaterThan(0)
+		expect(meta?.uniqueIndexes).toEqual(articleUniqueIndexes)
+		expect(meta?.uniqueIndexes).toEqual(EXPECTED_ENTITY.uniqueIndexes)
 	})
 })
 

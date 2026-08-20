@@ -143,6 +143,21 @@ describe("entity manifest", () => {
 		expect(immutable.sort()).toEqual([...meta.immutable].sort())
 	})
 
+	it("agrees with the schema stamp on unique indexes both ways", () => {
+		const analysis = analyzed()
+		const table = analysis.tables.find((t) => t.sqlName === "post")!
+		const meta = deriveEntityMeta(table)!
+		const post = entity("post")
+
+		expect(post.uniqueIndexes).toEqual(meta.uniqueIndexes)
+		for (const idx of meta.uniqueIndexes) {
+			expect(post.uniqueIndexes, `manifest omitted stamp index ${idx.name}`).toContainEqual(idx)
+		}
+		for (const idx of post.uniqueIndexes) {
+			expect(meta.uniqueIndexes, `manifest invented index ${idx.name}`).toContainEqual(idx)
+		}
+	})
+
 	it("reports the declared tenant column", () => {
 		expect(entity("post").tenantColumn).toBe("org_id")
 		expect(entity("author").tenantColumn).toBeNull()

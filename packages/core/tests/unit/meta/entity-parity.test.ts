@@ -16,7 +16,7 @@ import { generateDtos } from "../../../src/codegen/generators/dtos.ts"
 import { validateTables } from "../../../src/codegen/utils/validate.ts"
 
 const PRELUDE = `
-import { sqliteTable as createTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core"
+import { sqliteTable as createTable, text, integer, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core"
 const c = {
 	id: (_p: string) => text("id").primaryKey(),
 	serialId: () => integer("id").primaryKey({ autoIncrement: true }),
@@ -409,5 +409,82 @@ export const delivery = createTable("delivery", {
 		expect(generated).toContain(`terminal: ["sent"]`)
 		expect(generated).toContain(`values: ["queued", "sending", "sent"]`)
 		expect(generated).not.toMatch(/transitions/)
+	})
+})
+
+describe("uniqueIndexes is copied from the analyzer, never inferred", () => {
+	let tmpDir: string
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-unique-meta-"))
+	})
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { force: true, recursive: true })
+	})
+
+	function analyzeSource(source: string) {
+		const fp = path.join(tmpDir, "db.test.tables.ts")
+		fs.writeFileSync(fp, PRELUDE + source)
+		return { analysis: analyze(fp), tablesPath: fp }
+	}
+
+	const twoIndexes = `
+export const post = createTable("post", {
+	id: c.id("pst"),
+	email: c.text("email"),
+	org_id: c.ref("org_id"),
+	slug: c.text("slug"),
+}, (t) => [
+	uniqueIndex("idx_post_email").on(t.email),
+	uniqueIndex("idx_post_org_slug").on(t.org_id, t.slug),
+])
+`
+
+	it("equals the analyzer's uniqueIndexes in both directions", () => {
+		const { analysis } = analyzeSource(twoIndexes)
+		const table = analysis.tables[0]!
+		const meta = deriveEntityMeta(table)!
+
+		expect(meta.uniqueIndexes).toEqual(table.uniqueIndexes)
+		for (const idx of table.uniqueIndexes) {
+			expect(meta.uniqueIndexes, `stamp omitted analyzer index ${idx.name}`).toContainEqual(idx)
+		}
+		for (const idx of meta.uniqueIndexes) {
+			expect(table.uniqueIndexes, `stamp invented index ${idx.name}`).toContainEqual(idx)
+		}
+	})
+
+	it("is [] when the table declares none — not inferred from a PK or column name", () => {
+		const { analysis } = analyzeSource(`
+export const post = createTable("post", {
+	id: c.id("pst"),
+	email: c.text("email"),
+	slug: c.text("slug"),
+})
+`)
+		const table = analysis.tables[0]!
+		expect(table.uniqueIndexes).toEqual([])
+		expect(deriveEntityMeta(table)?.uniqueIndexes).toEqual([])
+	})
+
+	it("reaches the generated read schema from deriveEntityMeta; create/update stay unstamped", () => {
+		const { analysis, tablesPath } = analyzeSource(twoIndexes)
+		const outDir = path.join(tmpDir, "dtos")
+		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
+
+		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
+		const table = analysis.tables[0]!
+		const meta = deriveEntityMeta(table)!
+		const list = (values: string[]) => `[${values.map((v) => JSON.stringify(v)).join(", ")}]`
+		const rendered = `[${meta.uniqueIndexes.map((idx) => `{ columns: ${list(idx.columns)}, name: ${JSON.stringify(idx.name)} }`).join(", ")}]`
+
+		expect(generated).toMatch(/postDtoReadSchema = z\.object\(\{[\s\S]*?\}\)\.meta\(combMeta\(\{/)
+		expect(generated).toContain(`uniqueIndexes: ${rendered}`)
+		expect(meta.uniqueIndexes).toEqual(table.uniqueIndexes)
+
+		expect(generated.match(/combMeta\(\{/g)).toHaveLength(1)
+		expect(generated).not.toMatch(/postDtoCreateSchema[\s\S]*?\.meta\(combMeta/)
+		expect(generated).not.toMatch(/postDtoUpdateSchema[\s\S]*?\.meta\(combMeta/)
 	})
 })
