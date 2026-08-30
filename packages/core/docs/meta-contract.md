@@ -92,7 +92,7 @@ ordinary discriminated union: `if (m.kind === "entity")` narrows, with no extra 
 ```ts
 import { combMeta } from "@lovrozagar/comb/meta"
 
-const postReadSchema = z.object({/* … */}).meta(
+const postReadSchema = z.compile(z.object({/* … */})).meta(
 	combMeta({
 		kind: "entity",
 		name: "post",

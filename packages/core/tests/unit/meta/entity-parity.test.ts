@@ -114,7 +114,7 @@ export const post_tag = createTable("post_tag", {
 		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
 
 		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
-		const updateBlock = generated.match(/postDtoUpdateSchema = z\.object\(\{([\s\S]*?)\n\}\)/)?.[1] ?? ""
+		const updateBlock = generated.match(/postDtoUpdateSchema = z\.compile\(z\.object\(\{([\s\S]*?)\n\}\)\)/)?.[1] ?? ""
 		const inUpdate = new Set([...updateBlock.matchAll(/^\t(\w+):/gm)].map((m) => m[1]!))
 
 		const table = analysis.tables[0]!
@@ -143,7 +143,7 @@ export const post_tag = createTable("post_tag", {
 		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
 		expect(generated).toContain(`import { combMeta } from "@lovrozagar/comb/meta"`)
 		expect(generated.match(/combMeta\(\{/g)).toHaveLength(1)
-		expect(generated).toMatch(/postDtoReadSchema = z\.object\(\{[\s\S]*?\}\)\.meta\(combMeta\(\{/)
+		expect(generated).toMatch(/postDtoReadSchema = z\.compile\(z\.object\(\{[\s\S]*?\}\)\)\.meta\(combMeta\(\{/)
 	})
 
 	it("emits no stamp and no import when no table has a single identity", () => {
@@ -479,7 +479,7 @@ export const post = createTable("post", {
 		const list = (values: string[]) => `[${values.map((v) => JSON.stringify(v)).join(", ")}]`
 		const rendered = `[${meta.uniqueIndexes.map((idx) => `{ columns: ${list(idx.columns)}, name: ${JSON.stringify(idx.name)} }`).join(", ")}]`
 
-		expect(generated).toMatch(/postDtoReadSchema = z\.object\(\{[\s\S]*?\}\)\.meta\(combMeta\(\{/)
+		expect(generated).toMatch(/postDtoReadSchema = z\.compile\(z\.object\(\{[\s\S]*?\}\)\)\.meta\(combMeta\(\{/)
 		expect(generated).toContain(`uniqueIndexes: ${rendered}`)
 		expect(meta.uniqueIndexes).toEqual(table.uniqueIndexes)
 

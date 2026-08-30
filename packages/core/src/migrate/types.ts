@@ -34,48 +34,62 @@ export type ConnectionProvider = {
    PROVIDER CONFIGS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const tursoProviderConfigSchema = z.object({
-	apiToken: z.string().min(1),
-	group: z.string().min(1),
-	org: z.string().min(1),
-	type: z.literal("turso"),
-})
+export const tursoProviderConfigSchema = z.compile(
+	z.object({
+		apiToken: z.string().min(1),
+		group: z.string().min(1),
+		org: z.string().min(1),
+		type: z.literal("turso"),
+	}),
+)
 
-export const libsqlProviderConfigSchema = z.object({
-	authToken: z.string().optional(),
-	type: z.literal("libsql"),
-	url: z.string().min(1),
-})
+export const libsqlProviderConfigSchema = z.compile(
+	z.object({
+		authToken: z.string().optional(),
+		type: z.literal("libsql"),
+		url: z.string().min(1),
+	}),
+)
 
-export const bunSqliteProviderConfigSchema = z.object({
-	path: z.string().min(1),
-	type: z.literal("bun-sqlite"),
-})
+export const bunSqliteProviderConfigSchema = z.compile(
+	z.object({
+		path: z.string().min(1),
+		type: z.literal("bun-sqlite"),
+	}),
+)
 
-export const postgresProviderConfigSchema = z.object({
-	connectionString: z.string().min(1),
-	type: z.literal("postgres"),
-})
+export const postgresProviderConfigSchema = z.compile(
+	z.object({
+		connectionString: z.string().min(1),
+		type: z.literal("postgres"),
+	}),
+)
 
-export const neonProviderConfigSchema = z.object({
-	connectionString: z.string().min(1),
-	type: z.literal("neon"),
-})
+export const neonProviderConfigSchema = z.compile(
+	z.object({
+		connectionString: z.string().min(1),
+		type: z.literal("neon"),
+	}),
+)
 
-export const d1ProviderConfigSchema = z.object({
-	databaseId: z.string().min(1),
-	databaseName: z.string().min(1),
-	type: z.literal("d1"),
-})
+export const d1ProviderConfigSchema = z.compile(
+	z.object({
+		databaseId: z.string().min(1),
+		databaseName: z.string().min(1),
+		type: z.literal("d1"),
+	}),
+)
 
-export const providerConfigSchema = z.discriminatedUnion("type", [
-	tursoProviderConfigSchema,
-	libsqlProviderConfigSchema,
-	bunSqliteProviderConfigSchema,
-	postgresProviderConfigSchema,
-	neonProviderConfigSchema,
-	d1ProviderConfigSchema,
-])
+export const providerConfigSchema = z.compile(
+	z.discriminatedUnion("type", [
+		tursoProviderConfigSchema,
+		libsqlProviderConfigSchema,
+		bunSqliteProviderConfigSchema,
+		postgresProviderConfigSchema,
+		neonProviderConfigSchema,
+		d1ProviderConfigSchema,
+	]),
+)
 
 export type TursoProviderConfig = z.infer<typeof tursoProviderConfigSchema>
 export type LibsqlProviderConfig = z.infer<typeof libsqlProviderConfigSchema>
@@ -89,10 +103,12 @@ export type ProviderConfig = z.infer<typeof providerConfigSchema>
    ENVIRONMENT CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const environmentConfigSchema = z.object({
-	name: z.string().min(1),
-	provider: providerConfigSchema.optional(),
-})
+export const environmentConfigSchema = z.compile(
+	z.object({
+		name: z.string().min(1),
+		provider: providerConfigSchema.optional(),
+	}),
+)
 
 export type EnvironmentConfig = z.infer<typeof environmentConfigSchema> & {
 	provider?: ProviderConfig | undefined
@@ -102,12 +118,14 @@ export type EnvironmentConfig = z.infer<typeof environmentConfigSchema> & {
    DATABASE CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const databaseConfigSchema = z.object({
-	drizzleConfigPath: z.string().optional(),
-	environments: z.record(z.string(), environmentConfigSchema).optional(),
-	migrationsDir: z.string().min(1),
-	provider: providerConfigSchema.optional(),
-})
+export const databaseConfigSchema = z.compile(
+	z.object({
+		drizzleConfigPath: z.string().optional(),
+		environments: z.record(z.string(), environmentConfigSchema).optional(),
+		migrationsDir: z.string().min(1),
+		provider: providerConfigSchema.optional(),
+	}),
+)
 
 export type DatabaseConfig = z.infer<typeof databaseConfigSchema> & {
 	name?: string | undefined
@@ -128,18 +146,20 @@ export type ResolvedDatabaseConfig = {
    MULTI-TENANT CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const multiTenantConfigSchema = z.object({
-	circuitBreaker: z
-		.object({
-			failureThreshold: z.number().min(0).max(1).default(0.1),
-			minSampleSize: z.number().int().min(1).default(50),
-		})
-		.default(() => ({ failureThreshold: 0.1, minSampleSize: 50 })),
-	concurrency: z.number().int().min(1).max(200).default(50),
-	enabled: z.literal(true),
-	rootDatabase: z.string().min(1),
-	tenantQuery: z.string().min(1),
-})
+export const multiTenantConfigSchema = z.compile(
+	z.object({
+		circuitBreaker: z
+			.object({
+				failureThreshold: z.number().min(0).max(1).default(0.1),
+				minSampleSize: z.number().int().min(1).default(50),
+			})
+			.default(() => ({ failureThreshold: 0.1, minSampleSize: 50 })),
+		concurrency: z.number().int().min(1).max(200).default(50),
+		enabled: z.literal(true),
+		rootDatabase: z.string().min(1),
+		tenantQuery: z.string().min(1),
+	}),
+)
 
 export type MultiTenantConfig = z.infer<typeof multiTenantConfigSchema>
 

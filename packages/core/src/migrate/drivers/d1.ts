@@ -8,10 +8,12 @@ import * as z from "zod"
 import type { Connection, ConnectionProvider, D1ProviderConfig, QueryResult, ResolvedDatabaseConfig } from "../types.ts"
 
 /* wrangler JSON output schema for query results */
-const wranglerResultSchema = z.array(
-	z.object({
-		results: z.array(z.record(z.string(), z.unknown())).default([]),
-	}),
+const wranglerResultSchema = z.compile(
+	z.array(
+		z.object({
+			results: z.array(z.record(z.string(), z.unknown())).default([]),
+		}),
+	),
 )
 
 async function runWrangler(args: string[]): Promise<string> {

@@ -18,11 +18,13 @@ import type {
    TURSO API SCHEMAS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const tursoDbInfoSchema = z.object({
-	database: z.object({ Hostname: z.string().min(1) }),
-})
+const tursoDbInfoSchema = z.compile(
+	z.object({
+		database: z.object({ Hostname: z.string().min(1) }),
+	}),
+)
 
-const tursoAuthTokenSchema = z.object({ jwt: z.string().min(1) })
+const tursoAuthTokenSchema = z.compile(z.object({ jwt: z.string().min(1) }))
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TURSO CREDENTIALS

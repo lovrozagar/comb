@@ -44,13 +44,15 @@ const PAGINATION_DEFAULTS = {
 } as const
 
 /** Pagination response meta schema for list endpoints */
-const paginationResponseSchema = z.object({
-	count: z.number().int().min(0),
-	hasMore: z.boolean(),
-	limit: z.number().int().min(1),
-	nextCursor: z.string().nullable(),
-	page: z.number().int().min(1).nullable(),
-})
+const paginationResponseSchema = z.compile(
+	z.object({
+		count: z.number().int().min(0),
+		hasMore: z.boolean(),
+		limit: z.number().int().min(1),
+		nextCursor: z.string().nullable(),
+		page: z.number().int().min(1).nullable(),
+	}),
+)
 
 type FieldsConfig = {
 	relations?: readonly string[]
@@ -205,7 +207,7 @@ const baseRetrieveSchema = z.object(baseRetrieveShape)
 function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<string, never>>(config: RetrieveQueryConfig<T>) {
 	const { extend: extendFields, fields: fieldsConfig } = config
 
-	const schema = extendFields ? z.object({ ...baseRetrieveShape, ...extendFields }) : baseRetrieveSchema
+	const schema = z.compile(extendFields ? z.object({ ...baseRetrieveShape, ...extendFields }) : baseRetrieveSchema)
 
 	type ExtendedOutput = RetrieveQueryOutput & {
 		[K in keyof T]: z.infer<T[K]>
@@ -327,9 +329,11 @@ function createListQuerySchema<
 	   that parsedFields can never honor. */
 	const selectShape = fieldsConfig ? { select: selectQueryField } : {}
 
-	const schema = extendFields
-		? z.object({ ...baseListQueryShape, ...selectShape, limit: limitSchema, ...extendFields })
-		: z.object({ ...baseListQueryShape, ...selectShape, limit: limitSchema })
+	const schema = z.compile(
+		extendFields
+			? z.object({ ...baseListQueryShape, ...selectShape, limit: limitSchema, ...extendFields })
+			: z.object({ ...baseListQueryShape, ...selectShape, limit: limitSchema }),
+	)
 
 	type ExtendedOutput = ListQueryOutput<TSortField> & {
 		[K in keyof T]: z.infer<T[K]>
@@ -370,7 +374,7 @@ function createListQuerySchema<
 		...outputBaseShape,
 		...outputExtensions,
 	}
-	const outputSchema = z.object(outputShape)
+	const outputSchema = z.compile(z.object(outputShape))
 
 	const piped = schema.transform((data, ctx): ExtendedOutput => {
 		let filterAst: FilterAST | null = null

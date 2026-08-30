@@ -21,67 +21,77 @@ import type {
    CONFIG SCHEMA
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const providerInputSchema = z.discriminatedUnion("type", [
-	z.object({
-		apiToken: z.string().min(1),
-		group: z.string().min(1).default("default"),
-		org: z.string().min(1),
-		type: z.literal("turso"),
-	}),
-	z.object({
-		authToken: z.string().optional(),
-		type: z.literal("libsql"),
-		url: z.string().min(1),
-	}),
-	z.object({
-		path: z.string().min(1),
-		type: z.literal("bun-sqlite"),
-	}),
-	z.object({
-		connectionString: z.string().min(1),
-		type: z.literal("postgres"),
-	}),
-	z.object({
-		connectionString: z.string().min(1),
-		type: z.literal("neon"),
-	}),
-	z.object({
-		databaseId: z.string().min(1),
-		databaseName: z.string().min(1),
-		type: z.literal("d1"),
-	}),
-])
+const providerInputSchema = z.compile(
+	z.discriminatedUnion("type", [
+		z.object({
+			apiToken: z.string().min(1),
+			group: z.string().min(1).default("default"),
+			org: z.string().min(1),
+			type: z.literal("turso"),
+		}),
+		z.object({
+			authToken: z.string().optional(),
+			type: z.literal("libsql"),
+			url: z.string().min(1),
+		}),
+		z.object({
+			path: z.string().min(1),
+			type: z.literal("bun-sqlite"),
+		}),
+		z.object({
+			connectionString: z.string().min(1),
+			type: z.literal("postgres"),
+		}),
+		z.object({
+			connectionString: z.string().min(1),
+			type: z.literal("neon"),
+		}),
+		z.object({
+			databaseId: z.string().min(1),
+			databaseName: z.string().min(1),
+			type: z.literal("d1"),
+		}),
+	]),
+)
 
-const environmentConfigInputSchema = z.object({
-	name: z.string().min(1),
-	provider: providerInputSchema.optional(),
-})
+const environmentConfigInputSchema = z.compile(
+	z.object({
+		name: z.string().min(1),
+		provider: providerInputSchema.optional(),
+	}),
+)
 
-const databaseConfigInputSchema = z.object({
-	drizzleConfigPath: z.string().optional(),
-	environments: z.record(z.string(), environmentConfigInputSchema).optional(),
-	migrationsDir: z.string().min(1),
-	name: z.string().min(1).optional(),
-	provider: providerInputSchema.optional(),
-})
+const databaseConfigInputSchema = z.compile(
+	z.object({
+		drizzleConfigPath: z.string().optional(),
+		environments: z.record(z.string(), environmentConfigInputSchema).optional(),
+		migrationsDir: z.string().min(1),
+		name: z.string().min(1).optional(),
+		provider: providerInputSchema.optional(),
+	}),
+)
 
-const multiTenantConfigInputSchema = z.object({
-	circuitBreaker: z
-		.object({
-			failureThreshold: z.number().min(0).max(1).default(0.1),
-			minSampleSize: z.number().int().min(1).default(50),
-		})
-		.optional(),
-	concurrency: z.number().int().min(1).max(200).default(50),
-	enabled: z.literal(true),
-	rootDatabase: z.string().min(1),
-	tenantQuery: z.string().min(1),
-})
+const multiTenantConfigInputSchema = z.compile(
+	z.object({
+		circuitBreaker: z
+			.object({
+				failureThreshold: z.number().min(0).max(1).default(0.1),
+				minSampleSize: z.number().int().min(1).default(50),
+			})
+			.optional(),
+		concurrency: z.number().int().min(1).max(200).default(50),
+		enabled: z.literal(true),
+		rootDatabase: z.string().min(1),
+		tenantQuery: z.string().min(1),
+	}),
+)
 
-const configInputSchema = z.object({
-	databases: z.record(z.string(), databaseConfigInputSchema),
-	multiTenant: multiTenantConfigInputSchema.optional(),
-})
+const configInputSchema = z.compile(
+	z.object({
+		databases: z.record(z.string(), databaseConfigInputSchema),
+		multiTenant: multiTenantConfigInputSchema.optional(),
+	}),
+)
 
 export type CombMigrateConfig = z.infer<typeof configInputSchema>
 

@@ -1243,7 +1243,7 @@ function generateEntityFile(
 			? typeFields.filter((f) => !timestampFieldsToFilter.includes(f.key))
 			: typeFields
 
-		lines.push(`export const ${schemaName} = z.object({`)
+		lines.push(`export const ${schemaName} = z.compile(z.object({`)
 
 		if (spreadName) {
 			lines.push(`\t...${spreadName},`)
@@ -1267,9 +1267,9 @@ function generateEntityFile(
 		/* Entity facts ride on the read schema — the one a response is validated
 		   against — so a consumer reads them off the same object. docs/meta-contract.md */
 		if (type === "read" && combMeta) {
-			lines.push(`}).meta(combMeta(${renderCombMeta(combMeta)}))`)
+			lines.push(`})).meta(combMeta(${renderCombMeta(combMeta)}))`)
 		} else {
-			lines.push("})")
+			lines.push("}))")
 		}
 		lines.push("")
 	}
