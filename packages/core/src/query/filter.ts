@@ -386,6 +386,30 @@ function validateCondition(
 	}
 }
 
+function coerceFilterValue(fieldType: FieldType, value: unknown): unknown {
+	if (value === null) return null
+	if (Array.isArray(value)) return value.map((item) => coerceFilterValue(fieldType, item))
+	switch (fieldType) {
+		case "date":
+		case "number": {
+			if (typeof value === "number") return value
+			if (typeof value === "string" && value.trim() !== "") {
+				const n = Number(value)
+				if (Number.isFinite(n)) return n
+			}
+			return value
+		}
+		case "boolean": {
+			if (typeof value === "boolean") return value
+			if (value === "true") return true
+			if (value === "false") return false
+			return value
+		}
+		default:
+			return value
+	}
+}
+
 function createFilterRefinement(allowedFields: Record<string, FieldType>) {
 	return [
 		(value: string | undefined) => {
@@ -468,6 +492,7 @@ function parseOrder(input: string | null | undefined): SortField[] {
 }
 
 export {
+	coerceFilterValue,
 	createFilterRefinement,
 	FILTER_OPERATORS,
 	OPERATORS_BY_TYPE,

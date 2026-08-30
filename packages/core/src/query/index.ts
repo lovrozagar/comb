@@ -35,6 +35,7 @@ export {
 /* The grammar itself — so neither honey nor oat has to guess how a probe value
    is written. COMB_FILTER_GRAMMAR is the identifier oat calls `grammar`. */
 export {
+	coerceFilterValue,
 	FILTER_OPERATORS,
 	type FilterValidationResult,
 	OPERATORS_BY_TYPE,

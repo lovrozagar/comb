@@ -23,11 +23,12 @@ import {
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 
 import { parseCursorForQuery } from "../cursor.ts"
-import { parseFilter, parseOrder } from "../filter.ts"
+import { coerceFilterValue, parseFilter, parseOrder } from "../filter.ts"
 import { likePattern } from "../like.ts"
 import type {
 	ComputedFilterResolver,
 	ComputedSortResolver,
+	FieldType,
 	FilterAST,
 	FilterCondition,
 	FilterGroup,
@@ -165,8 +166,22 @@ function relationFilterToSQL(
 	)`
 }
 
+function fieldTypeOf(field: string, config: FilterToSQLConfig): FieldType | undefined {
+	return (
+		config.capabilities.filterFields[field] ??
+		config.capabilities.computedFilterFields[field] ??
+		config.capabilities.relationFilterFields[field]
+	)
+}
+
+function typedCondition(condition: FilterCondition, config: FilterToSQLConfig): FilterCondition {
+	const fieldType = fieldTypeOf(condition.field, config)
+	if (!fieldType) return condition
+	return { ...condition, value: coerceFilterValue(fieldType, condition.value) }
+}
+
 function resolveCondition(condition: FilterCondition, config: FilterToSQLConfig): SQL | null {
-	const { field, operator, value } = condition
+	const { field, operator, value } = typedCondition(condition, config)
 
 	if (field.startsWith(COMPUTED_PREFIX)) {
 		const resolver = config.computedFilters?.[field]
@@ -181,14 +196,14 @@ function resolveCondition(condition: FilterCondition, config: FilterToSQLConfig)
 		const relationName = field.substring(0, dotIndex)
 		const relationConfig = config.relations?.[relationName]
 		if (relationConfig) {
-			return relationFilterToSQL(condition, relationConfig, config.mainTable)
+			return relationFilterToSQL({ field, operator, value }, relationConfig, config.mainTable)
 		}
 	}
 
 	const columns = getTableColumns(config.mainTable)
 	const column = columns[field]
 	if (column) {
-		return conditionToSQL(condition, column)
+		return conditionToSQL({ field, operator, value }, column)
 	}
 
 	return null

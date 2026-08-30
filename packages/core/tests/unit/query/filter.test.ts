@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+	coerceFilterValue,
 	FILTER_OPERATORS,
 	OPERATORS_BY_TYPE,
 	parseFilter,
@@ -408,5 +409,29 @@ describe("parseFilter — termination", () => {
 	it("still parses a well-formed filter unchanged", () => {
 		expect(parseFilter("status.eq.draft")?.root.conditions).toHaveLength(1)
 		expect(parseFilter("or(a.eq.1,b.eq.2)")?.root.subgroups).toHaveLength(1)
+	})
+})
+
+describe("coerceFilterValue", () => {
+	it("coerces number and date strings to finite numbers", () => {
+		expect(coerceFilterValue("number", "10")).toBe(10)
+		expect(coerceFilterValue("date", "1711468800000")).toBe(1711468800000)
+		expect(coerceFilterValue("number", 7)).toBe(7)
+		expect(coerceFilterValue("number", ["1", "10", "2"])).toEqual([1, 10, 2])
+	})
+
+	it("coerces boolean tokens", () => {
+		expect(coerceFilterValue("boolean", "true")).toBe(true)
+		expect(coerceFilterValue("boolean", "false")).toBe(false)
+		expect(coerceFilterValue("boolean", true)).toBe(true)
+	})
+
+	it("leaves strings, null, and non-numeric junk alone", () => {
+		expect(coerceFilterValue("string", "10")).toBe("10")
+		expect(coerceFilterValue("enum", "draft")).toBe("draft")
+		expect(coerceFilterValue("number", null)).toBeNull()
+		expect(coerceFilterValue("number", "nope")).toBe("nope")
+		expect(coerceFilterValue("number", "")).toBe("")
+		expect(coerceFilterValue("boolean", "yes")).toBe("yes")
 	})
 })

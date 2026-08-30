@@ -55,6 +55,21 @@ describe("QueryExecutor.build — where clause", () => {
 		expect(compile(result.where!).params).toEqual(["draft"])
 	})
 
+	it("binds a numeric comparison as a number, not text", () => {
+		const result = build({ filter: "views.gt.10" })
+		expect(compile(result.where!).params).toEqual([10])
+	})
+
+	it("binds a date comparison as a number", () => {
+		const result = build({ filter: "createdAt.gt.1000" })
+		expect(compile(result.where!).params).toEqual([1000])
+	})
+
+	it("binds in-list numbers as numbers", () => {
+		const result = build({ filter: "views.in.(1,10,2)" })
+		expect(compile(result.where!).params).toEqual([1, 10, 2])
+	})
+
 	it("lowers title.like.% to an escaped literal rather than match-all", () => {
 		const result = build({ filter: "title.like.%" })
 		const { params, sql } = compile(result.where!)

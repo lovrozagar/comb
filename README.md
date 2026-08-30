@@ -572,6 +572,8 @@ const result = buildListQuery({
 const rows = await applyListQuery(db.select().from(post).$dynamic(), result)
 ```
 
+The parser keeps filter values as strings. At SQL generation, declared `number` and `date` fields bind as numbers and `boolean` as booleans, so SQLite does not compare integer columns as TEXT (`10` is greater than `9`).
+
 `buildListQuery()` returns `{ where, orderBy, limit, offset, search, meta }` — it builds clauses, it does not execute. `applyListQuery()` is the convenience that chains them onto a Drizzle query; skip it if you need to interleave joins. `meta.type` tells you whether cursor or offset pagination won (cursor takes precedence), and `limit` is deliberately `parsed.limit + 1` in cursor mode so you can detect a next page.
 
 `buildDerivedListQuery()` handles queries over a subquery or CTE, where sort columns come from a `sortColumns` map rather than the table. Underneath, `filterToSQL()`, `conditionToSQL()`, and `sortToOrderBy()` are exported for advanced use, along with `buildCursorSQL()` for keyset predicates and the JSON helpers `jsonCol()`, `jsonColAs()`, `jsonBool()`, `jsonNullable()`, and `buildScalarJsonParts()` for assembling a JSON row in SQL.
