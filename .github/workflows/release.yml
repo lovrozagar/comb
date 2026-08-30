@@ -142,14 +142,26 @@ jobs:
           npm publish --access public --provenance
           pub=$?
           set -e
-          if [ "$pub" -eq 0 ]; then
-            exit 0
+          if [ "$pub" -ne 0 ]; then
+            if npm view "${name}@${tag}" version >/dev/null 2>&1; then
+              echo "publish raced; ${name}@${tag} is now on npm — continuing to tarball check"
+            else
+              exit "$pub"
+            fi
           fi
-          if npm view "${name}@${tag}" version >/dev/null 2>&1; then
-            echo "publish raced; ${name}@${tag} is now on npm — treating as success"
-            exit 0
-          fi
-          exit "$pub"
+
+          # Metadata can land minutes before the tarball is downloadable.
+          tarball="https://registry.npmjs.org/${name}/-/${name##*/}-${tag}.tgz"
+          for i in $(seq 1 30); do
+            if curl -fsSIL "$tarball" >/dev/null 2>&1; then
+              echo "npm tarball for ${name}@${tag} is downloadable"
+              exit 0
+            fi
+            echo "waiting for npm tarball (${i}/30)…"
+            sleep 10
+          done
+          echo "npm has ${name}@${tag} metadata but tarball stayed 404 for 5m"
+          exit 1
 
   gh-pkg:
     name: GitHub Packages
