@@ -80,13 +80,16 @@ jobs:
           name="${{ env.PACKAGE_NAME }}"
           encoded="$(node -p 'encodeURIComponent(process.argv[1])' "$name")"
 
-          if npm view "${name}@${tag}" version >/dev/null 2>&1; then
-            echo "npm already has ${name}@${tag} — skipping"
-            exit 0
-          fi
+          # Metadata can exist without a downloadable tarball (broken publish).
+          # Only skip when the tarball itself is fetchable.
           if curl -fsSIL "https://registry.npmjs.org/${name}/-/${name##*/}-${tag}.tgz" >/dev/null 2>&1; then
             echo "npm tarball for ${name}@${tag} already exists — skipping"
             exit 0
+          fi
+          if npm view "${name}@${tag}" version >/dev/null 2>&1; then
+            echo "npm has ${name}@${tag} metadata but no tarball — refusing to re-publish the same version"
+            echo "Bump the package version and tag a new release."
+            exit 1
           fi
 
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
