@@ -106,12 +106,44 @@ describe("defaultOrder matches what the parser applies", () => {
 	})
 })
 
-describe("searchable is null, not an empty list", () => {
-	it("reports 'not knowable here' rather than 'nothing is searchable'", () => {
-		/* `q` is resolved at buildListQuery, a different call site. Publishing []
-		   would tell a consumer to skip search entirely. See docs §6.1. */
-		expect(meta().searchable).toBeNull()
-		expect(schema.safeParse({ q: "anything" }).success).toBe(true)
+describe("searchable matches whether the parser takes q", () => {
+	it("publishes [] and rejects q when no search is declared", () => {
+		expect(meta().searchable).toEqual([])
+		expect(schema.safeParse({ q: "anything" }).success).toBe(false)
+	})
+
+	it("publishes the declared fields and accepts q when search is declared", () => {
+		const searchable = createListQuerySchema({ search: ["title"], sort: ["created_at"] })
+		const published = readCombQueryMeta(z.toJSONSchema(searchable, { io: "input", unrepresentable: "any" }))
+		expect(published?.searchable).toEqual(["title"])
+		expect(searchable.safeParse({ q: "anything" }).success).toBe(true)
+	})
+})
+
+describe("caps match the parser", () => {
+	it("accepts exactly maxFilterConditions conditions", () => {
+		const max = meta().maxFilterConditions ?? 0
+		const at = Array.from({ length: max }, (_, i) => `title.neq.t${i}`).join(",")
+		expect(schema.safeParse({ filter: at }).success).toBe(true)
+		expect(schema.safeParse({ filter: `${at},title.neq.over` }).success).toBe(false)
+	})
+
+	it("accepts exactly maxSortKeys keys", () => {
+		const max = meta().maxSortKeys ?? 0
+		const keys = ["created_at.asc", "title.asc", "created_at.desc", "title.desc"]
+		expect(max).toBeLessThan(keys.length)
+		expect(schema.safeParse({ order: keys.slice(0, max).join(",") }).success).toBe(true)
+		expect(schema.safeParse({ order: keys.slice(0, max + 1).join(",") }).success).toBe(false)
+	})
+
+	it("every filterFields operator is accepted for its field", () => {
+		for (const { field, ops } of meta().filterFields ?? []) {
+			for (const op of ops) {
+				const value = op === "in" || op === "nin" ? "(x)" : op === "is" ? "null" : "x"
+				const result = schema.safeParse({ filter: `${field}.${op}.${value}` })
+				expect(result.success, `published ${field}.${op} but rejected`).toBe(true)
+			}
+		}
 	})
 })
 

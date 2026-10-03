@@ -215,11 +215,20 @@ describe("query stamp — search parameters", () => {
 
 	const EXPECTED_QUERY = {
 		defaultOrder: "created_at.desc",
+		filterFields: [
+			{ field: "created_at", ops: ["eq", "ne", "neq", "gt", "gte", "lt", "lte", "is"], type: "date" },
+			{ field: "title", ops: ["eq", "ne", "neq", "like", "ilike", "in", "nin", "is"], type: "string" },
+		],
 		filterable: ["created_at", "title"],
 		grammar: "postgrest",
 		kind: "query",
+		maxFilterConditions: 20,
+		maxFilterDepth: 3,
+		maxInValues: 100,
 		maxLimit: 100,
-		searchable: null,
+		maxSortKeys: 3,
+		nulls: ["first", "last"],
+		searchable: [],
 		selectable: ["id", "title", "created_at"],
 		sortable: ["created_at", "title"],
 		stableTiebreak: "id",
@@ -237,9 +246,9 @@ describe("query stamp — search parameters", () => {
 		expect(depthOfKey(json, COMB_META_KEY)).toBe(0)
 	})
 
-	it("keeps searchable null rather than an empty list, so a consumer can omit the key", () => {
+	it("publishes searchable as an explicit empty list when the endpoint takes no q", () => {
 		const json = z.toJSONSchema(listQuery, { io: "input", unrepresentable: "any" }) as Record<string, unknown>
-		expect(readCombQueryMeta(json)?.searchable).toBeNull()
+		expect(readCombQueryMeta(json)?.searchable).toEqual([])
 	})
 })
 

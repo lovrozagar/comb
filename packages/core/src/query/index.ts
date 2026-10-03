@@ -9,12 +9,16 @@
 export {
 	createCursor,
 	CURSOR_TIEBREAK_COLUMN,
+	cursorProblem,
 	decodeCursor,
+	DEFAULT_SORT,
+	effectiveNulls,
 	encodeCursor,
 	getPrimarySortDirection,
-	parseCursorForQuery,
+	readCursor,
+	sortSignature,
 } from "./cursor.ts"
-export type { CursorInfo, CursorPayload, PaginationMeta, PaginationOptions, PaginationQueryInput } from "./cursor.ts"
+export type { CursorPayload, DecodedCursor, PaginationMeta, PaginationOptions, PaginationQueryInput } from "./cursor.ts"
 
 /* Drizzle relational helpers */
 export { type DrizzleListOptions, drizzle } from "./drizzle.ts"
@@ -36,14 +40,16 @@ export {
    is written. COMB_FILTER_GRAMMAR is the identifier oat calls `grammar`. */
 export {
 	coerceFilterValue,
+	FILTER_LIMITS,
 	FILTER_OPERATORS,
+	type FilterLimits,
 	type FilterValidationResult,
 	OPERATORS_BY_TYPE,
 	parseFilter,
 	parseOrder,
 	validateFilter,
 } from "./filter.ts"
-export { likePattern } from "./like.ts"
+export { globPattern, likePattern } from "./like.ts"
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts"
 
 /* Zod schema builders */
@@ -52,7 +58,9 @@ export {
 	createRetrieveQuerySchema,
 	defineListQuery,
 	type FieldsConfig,
+	LIST_QUERY_LIMITS,
 	type ListQueryConfig,
+	type ListQueryLimits,
 	type ListQueryDefinition,
 	type ListQueryOutput,
 	type ListQuerySchemaConfig,
@@ -67,18 +75,15 @@ export {
 export {
 	CURSOR_DESCRIPTION,
 	CURSOR_EXAMPLES,
-	FILTER_DESCRIPTION,
-	FILTER_EXAMPLES,
+	filterParamMeta,
 	LANG_DESCRIPTION,
 	LANG_EXAMPLES,
 	LIMIT_DESCRIPTION,
 	LIMIT_EXAMPLES,
-	ORDER_DESCRIPTION,
-	ORDER_EXAMPLES,
+	orderParamMeta,
 	PAGE_DESCRIPTION,
 	PAGE_EXAMPLES,
-	Q_DESCRIPTION,
-	Q_EXAMPLES,
+	searchParamMeta,
 	SELECT_DESCRIPTION,
 	SELECT_EXAMPLES,
 } from "./descriptions.ts"
@@ -97,7 +102,6 @@ export type {
 	FilterGroup,
 	FilterOperator,
 	ListQueryCapabilities,
-	ListQueryInput,
 	ParsedFields,
 	SortDirection,
 	SortField,

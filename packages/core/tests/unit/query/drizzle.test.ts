@@ -187,7 +187,11 @@ describe("drizzle.paginate", () => {
 
 		expect(resultItems).toEqual([{ name: "C" }, { name: "B" }])
 		expect(pagination.hasMore).toBe(true)
-		expect(decodeCursor(pagination.nextCursor)).toEqual({ c: "2024-01-02", i: "b" })
+		expect(decodeCursor(pagination.nextCursor)).toEqual({
+			id: "b",
+			sort: "createdAt.desc.nullsfirst",
+			values: ["2024-01-02"],
+		})
 	})
 
 	it("detects hasMore when items exceed limit", () => {
@@ -244,7 +248,7 @@ describe("drizzle.paginate", () => {
 		expect(pagination.nextCursor).toBeTruthy()
 
 		const decoded = decodeCursor(pagination.nextCursor)
-		expect(decoded).toEqual({ c: "2024-01-02", i: "b" })
+		expect(decoded).toEqual({ id: "b", sort: "createdAt.desc.nullsfirst", values: ["2024-01-02"] })
 	})
 
 	it("returns page=null when cursor is present in query", () => {

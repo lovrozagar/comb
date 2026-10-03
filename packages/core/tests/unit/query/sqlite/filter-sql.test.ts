@@ -40,9 +40,14 @@ describe("buildConditionSQL", () => {
 		expect(buildConditionSQL(condition, config)).toBeTruthy()
 	})
 
-	it("returns null for in with empty array", () => {
-		const condition: FilterCondition = { field: "role", operator: "in", value: [] }
-		expect(buildConditionSQL(condition, config)).toBeNull()
+	it("matches nothing for in with an empty array, everything for nin", () => {
+		const dialect = new (SQLiteDialect as unknown as new () => {
+			sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
+		})()
+		const empty = (operator: "in" | "nin") =>
+			dialect.sqlToQuery(buildConditionSQL({ field: "role", operator, value: [] }, config) as SQL).sql
+		expect(empty("in")).toBe("0")
+		expect(empty("nin")).toBe("1")
 	})
 
 	it("builds nin condition", () => {
@@ -59,7 +64,7 @@ describe("buildConditionSQL", () => {
 		expect(buildConditionSQL(condition, config)).toBeTruthy()
 	})
 
-	it("escapes a literal % so name.like.% is not match-all", () => {
+	it("lowers name.like.% to GLOB, where % is literal", () => {
 		const dialect = new (SQLiteDialect as unknown as new () => {
 			sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
 		})()
@@ -69,8 +74,8 @@ describe("buildConditionSQL", () => {
 		const built = buildConditionSQL(condition as FilterCondition, config)
 		expect(built).toBeTruthy()
 		const { params, sql } = dialect.sqlToQuery(built as SQL)
-		expect(params).toEqual(["\\%"])
-		expect(sql.toLowerCase()).toContain("escape")
+		expect(params).toEqual(["%"])
+		expect(sql.toLowerCase()).toContain("glob")
 	})
 
 	it("builds ilike condition", () => {

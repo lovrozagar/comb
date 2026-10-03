@@ -487,7 +487,9 @@ status.in.(draft,sent)  list values
 
 Operators: `eq`, `ne`/`neq`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`, `like`, `ilike`, `is`, `contains`.
 
-`validateFilter()` parses and checks in one step, against declared field types, and rejects operators a type does not support — `string` allows `like`, `boolean` allows only `eq`, `ne`, and `is`, and so on. Unknown fields are rejected rather than silently dropped, so a typo returns a 400 instead of the whole table.
+`like` is case-sensitive and `ilike` ignores ASCII case. In both, `*` is the wildcard and every other character is literal: `like` lowers to SQLite `GLOB` (with `?` and `[` made literal), `ilike` to `LIKE … ESCAPE` (with `%` and `_` escaped). SQLite folds only ASCII case, so `ilike` does not match `Ž` against `ž`; search a pre-normalized column with `q` for that. An empty `in.()` matches nothing and an empty `nin.()` matches everything — neither widens to the whole table.
+
+`validateFilter()` parses and checks in one step, against declared field types, and rejects operators a type does not support — `string` allows `like`, `boolean` allows only `eq`, `ne`, and `is`, and so on. Unknown fields are rejected rather than silently dropped, so a typo returns a 400 instead of the whole table. Unbalanced parentheses, an unclosed `in.(` list and trailing input are syntax errors. Each expression is bounded by `FILTER_LIMITS` — 20 conditions, 3 nested groups, 100 `in`/`nin` values — overridable per call with a third `limits` argument.
 
 ```ts
 import { validateFilter } from "@lovrozagar/comb/query"
@@ -511,6 +513,8 @@ const ast = result?.ast
 
 `parseOrder()` accepts `field.asc`, `field.desc`, and null placement (`field.desc.nullslast`), producing `SortField[]`. Computed sorts use the same `@` prefix and are resolved through a `ComputedSortResolver`.
 
+Null placement follows PostgreSQL: nulls sort last ascending and first descending, and an explicit `.nullsfirst` / `.nullslast` always wins. Every SQL builder emits the placement explicitly, so SQLite's opposite default never leaks through. `createListQuerySchema` caps one `order` at 3 keys (`limits.maxSortKeys`).
+
 ### Sparse fieldsets
 
 `parseSelect()` implements PostgREST `select`, including relation selection:
@@ -525,35 +529,39 @@ select=id,title,author(display_name)
 
 ### Pagination and cursors
 
-Two modes share one input shape. Offset pagination takes `page` and `limit`; cursor pagination takes `cursor` and `limit`. `encodeCursor()` and `decodeCursor()` round-trip an opaque cursor holding the sort key and id; `parseCursorForQuery()` turns it into a keyset predicate, and `getPrimarySortDirection()` picks the comparison direction. Responses carry `PaginationMeta`.
+Two modes share one input shape. Offset pagination takes `page` and `limit`; cursor pagination takes `cursor` and `limit`. Responses carry `PaginationMeta`.
+
+A cursor holds the value of **every** sort key, the tiebreak id, and the signature of the sort it was minted under (`sortSignature()`), as URL-safe base64 of UTF-8 JSON. `createCursor(row, parsedSort)` mints one; `drizzle.paginate` does it for you. The keyset predicate compares all keys lexicographically, each with its own direction and null placement, so a multi-key or nullable order pages without skipping or repeating rows. A cursor presented under a different order, or one that does not decode, is a 400: the schema reports it on `cursor`, and `readCursor()` throws `CombError` (`invalid_cursor`) for callers that skip the schema.
 
 ```ts
-import { PAGINATION_DEFAULTS, createCursor, decodeCursor } from "@lovrozagar/comb/query"
+import { createCursor, decodeCursor, readCursor, sortSignature } from "@lovrozagar/comb/query"
 ```
 
 ### Zod schemas
 
-`defineListQuery()` declares what an endpoint permits, returning `{ capabilities, schema }` — a `ListQueryCapabilities` to validate against and the Zod schema to parse the raw query string with:
+`createListQuerySchema()` declares what an endpoint permits and returns the Zod schema that parses the raw query string into what `buildListQuery()` takes:
 
 ```ts
-import { defineListQuery } from "@lovrozagar/comb/query"
+import { createListQuerySchema } from "@lovrozagar/comb/query"
 
-const postQuery = defineListQuery({
+const postQuery = createListQuerySchema({
 	filter: { created_at: "date", minute_read: "number", status: "enum", title: "string" },
 	sort: ["created_at", "title"],
-	search: ["title"],
-	relationFilter: { "author.display_name": "string" },
-	computedFilter: { popular: "boolean" },
-	computedSort: ["popularity"],
+	search: ["title"], // publishes and accepts `q`
+	fields: { scalars: ["id", "title", "created_at"] }, // publishes and accepts `select`
+	lang: true, // publishes and accepts `lang`
 	pagination: { defaultLimit: 20, maxLimit: 100 },
+	limits: { maxConditions: 20, maxDepth: 3, maxInValues: 100, maxSortKeys: 3 },
 })
 
-const parsed = postQuery.schema.parse(request.query)
+const parsed = postQuery.parse(request.query)
 ```
 
-Anything not listed is rejected: a field absent from `filter` cannot be filtered on, a field absent from `sort` cannot be sorted by, and `limit` is clamped to `maxLimit`. `computedFilter` and `computedSort` declare the `@`-prefixed virtual fields your resolvers will handle.
+The object is strict and each optional parameter exists only when the endpoint honors it: `filter` needs at least one filter field, `q` needs `search`, `select` needs `fields`, `lang` needs `lang: true`. Anything else is a 400 — a parameter the handler would ignore can no longer answer with the unfiltered list. Declaring `search` obliges the handler to pass a resolver: `buildListQuery()` throws `search_not_wired` on a `q` it has no resolver for.
 
-`createListQuerySchema()` and `createRetrieveQuerySchema()` are the lower-level builders, and `listQueryBaseSchema` / `paginationResponseSchema` are exported for composing your own. Every parameter ships an OpenAPI description and examples (`FILTER_DESCRIPTION`, `ORDER_EXAMPLES`, `SELECT_DESCRIPTION`, …) so a generated spec documents the grammar without you restating it.
+The `filter`, `order` and `q` descriptions, examples and the `order` pattern are generated per endpoint from the same config (`filterParamMeta()`, `orderParamMeta()`, `searchParamMeta()`), so a spec lists the real fields, types, operators and limits even after a publisher strips `x-*`. The schema also carries the `x-comb` query facts — `filterFields` with operators, `sortable`, `nulls`, `searchable`, `selectable`, and the limits — see `packages/core/docs/meta-contract.md`.
+
+`createRetrieveQuerySchema()` is the single-resource counterpart (`select`, `lang`). `defineListQuery()` returns a bare `ListQueryCapabilities` descriptor and a permissive base schema for callers that validate elsewhere. `listQueryBaseSchema` / `paginationResponseSchema` are exported for composing your own.
 
 ### SQLite SQL generation
 
@@ -562,7 +570,7 @@ import { applyListQuery, buildListQuery, likeSearch } from "@lovrozagar/comb/que
 import { isNull } from "drizzle-orm"
 
 const result = buildListQuery({
-	parsed, // the parsed query from defineListQuery
+	parsed, // postQuery.parse(request.query)
 	table: post,
 	baseWhere: isNull(post.deleted_at), // ANDed in — soft deletes, tenant scoping, access rules
 	search: likeSearch(post.title),
@@ -576,7 +584,7 @@ The parser keeps filter values as strings. At SQL generation, declared `number` 
 
 `buildListQuery()` returns `{ where, orderBy, limit, offset, search, meta }` — it builds clauses, it does not execute. `applyListQuery()` is the convenience that chains them onto a Drizzle query; skip it if you need to interleave joins. `meta.type` tells you whether cursor or offset pagination won (cursor takes precedence), and `limit` is deliberately `parsed.limit + 1` in cursor mode so you can detect a next page.
 
-`buildDerivedListQuery()` handles queries over a subquery or CTE, where sort columns come from a `sortColumns` map rather than the table. Underneath, `filterToSQL()`, `conditionToSQL()`, and `sortToOrderBy()` are exported for advanced use, along with `buildCursorSQL()` for keyset predicates and the JSON helpers `jsonCol()`, `jsonColAs()`, `jsonBool()`, `jsonNullable()`, and `buildScalarJsonParts()` for assembling a JSON row in SQL.
+`buildDerivedListQuery()` handles queries over a subquery or CTE, where sort columns come from a `sortColumns` map rather than the table. Underneath, `filterToSQL()`, `conditionToSQL()`, and `sortToOrderBy()` are exported for advanced use, along with `orderSQL()` / `orderByKeys()` / `keysetSQL()` — the one ordering and keyset implementation every builder shares — `patternToSQL()` for `like` / `ilike`, and the JSON helpers `jsonCol()`, `jsonColAs()`, `jsonBool()`, `jsonNullable()`, and `buildScalarJsonParts()` for assembling a JSON row in SQL.
 
 Search comes in two flavours. `likeSearch(column)` is the portable fallback — it targets a pre-normalized `_search` column, strips diacritics, lowercases, escapes LIKE specials, and ANDs each whitespace-separated term. `buildFtsMatch()`, `buildFtsWhere()`, and `buildFtsHighlight()` target the FTS5 tables the `fts` generator created, and `buildFtsWhereWithSpellfix()` adds spellfix1 fuzzy matching where the extension is available. `sanitizeFtsTerm()` escapes user input before it reaches the FTS5 query parser — always route user text through it.
 

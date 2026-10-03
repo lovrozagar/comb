@@ -1,10 +1,11 @@
-import { and, asc, desc, eq, getTableColumns, gt, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm"
+import { and, getTableColumns, sql, type SQL, type SQLWrapper } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
-import { CURSOR_TIEBREAK_COLUMN, parseCursorForQuery } from "../cursor.ts"
+import { CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT, readCursor } from "../cursor.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
+import { keysetSQL, orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
 import type { LikeSearchResolver } from "./search.ts"
 import type { RelationConfig } from "./types.ts"
 
@@ -17,7 +18,7 @@ type ListQueryParsed = {
 	filterAst?: FilterAST | null | unknown
 	limit: number
 	page?: number | null
-	parsedSort: Array<{ direction: "asc" | "desc"; field: string }>
+	parsedSort: SortField[]
 	q?: string | null
 	[key: string]: unknown
 }
@@ -39,7 +40,7 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 	filterWhere?: SQL | null
 	idColumn: SQLWrapper
 	parsed: ListQueryParsed & {
-		parsedSort: Array<{ direction: "asc" | "desc"; field: TSortField }>
+		parsedSort: SortField<TSortField>[]
 	}
 	searchWhere?: SQL | null
 	sortColumns: Record<TSortField, SQLWrapper>
@@ -59,43 +60,6 @@ type ListQueryAppliable<TQuery> = {
 	offset: (offset: number) => TQuery
 	orderBy: (...orderBy: SQL[]) => TQuery
 	where: (where: SQL) => TQuery
-}
-
-function buildOrderBy(
-	table: SQLiteTable,
-	parsedSort: SortField[],
-	computedSorts?: Record<string, ComputedSortResolver>,
-): SQL[] {
-	const columns = getTableColumns(table)
-	const orderBy: SQL[] = []
-
-	if (parsedSort.length > 0) {
-		for (const { direction, field } of parsedSort) {
-			if (field.startsWith("@")) {
-				const resolver = computedSorts?.[field]
-				if (resolver) orderBy.push(resolver(direction))
-				continue
-			}
-			const col = columns[field]
-			if (col) {
-				orderBy.push(direction === "asc" ? asc(col) : desc(col))
-			}
-		}
-	} else {
-		const createdAt = columns["created_at"]
-		if (createdAt) {
-			orderBy.push(desc(createdAt))
-		}
-	}
-
-	/* id tiebreaker for stable sort */
-	const idCol = columns[CURSOR_TIEBREAK_COLUMN]
-	if (idCol && orderBy.length > 0) {
-		const primaryDir = parsedSort[0]?.direction ?? "desc"
-		orderBy.push(primaryDir === "desc" ? desc(idCol) : asc(idCol))
-	}
-
-	return orderBy
 }
 
 function isFilterAST(v: unknown): v is FilterAST {
@@ -132,27 +96,76 @@ function buildFilterWhere(
 	})
 }
 
-function buildCursorWhere(
-	cursor: string | undefined,
-	table: SQLiteTable,
-	primarySortField: string,
-	primarySortDirection: "asc" | "desc",
-): SQL | null {
-	if (!cursor) return null
+function combineWhere(...clauses: (SQL | null | undefined)[]): SQL | undefined {
+	const valid = clauses.filter((c): c is SQL => c !== null && c !== undefined)
+	if (valid.length === 0) return undefined
+	if (valid.length === 1) return valid[0]
+	return and(...valid)
+}
 
-	const parsed = parseCursorForQuery(cursor, primarySortDirection)
-	if (!parsed) return null
+function resolveBaseWhere(baseWhere: BuildListQueryOpts<SQLiteTable>["baseWhere"]): SQL | undefined {
+	return typeof baseWhere === "function" ? baseWhere(sql) : baseWhere
+}
 
-	const columns = getTableColumns(table)
-	const sortCol = columns[primarySortField] as SQLiteColumn | undefined
-	const idCol = columns[CURSOR_TIEBREAK_COLUMN] as SQLiteColumn | undefined
+type Keyset = {
+	/** Present only when every key is a real column a predicate can compare. */
+	keys: SortKey[] | null
+	orderBy: SQL[]
+}
 
-	/* A cursor was supplied and decoded, so the caller is asking for keyset
-	   pagination. Without a tiebreak column there is no predicate to add, and
-	   returning null here would quietly re-serve the first page — rows duplicate
-	   across pages and rows are skipped, with nothing to notice. Refuse loudly
-	   instead: this is a schema mistake, not a runtime condition. */
-	if (!idCol) {
+/**
+ * Shared tail of both builders: cursor predicate, pagination mode, result shape.
+ * `keys` null means the order includes something keyset cannot express.
+ */
+function finish(
+	parsed: ListQueryParsed,
+	sort: readonly SortField[],
+	keyset: Keyset,
+	tiebreak: SortKey | null,
+	where: Array<SQL | null | undefined>,
+): ListQueryResult {
+	const search = parsed.q?.trim() || null
+
+	if (parsed.cursor) {
+		if (!keyset.keys || !tiebreak) {
+			throw new CombError({
+				cause: "Cursor pagination needs every sort key to be a column; use page instead",
+				errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
+				status: "bad_request",
+			})
+		}
+		const cursor = readCursor(parsed.cursor, sort)
+		const after = keysetSQL(keyset.keys, cursor.values, tiebreak, cursor.id)
+		return {
+			limit: parsed.limit + 1,
+			meta: { limit: parsed.limit, page: 1, type: "cursor" },
+			offset: 0,
+			orderBy: keyset.orderBy,
+			search,
+			where: combineWhere(...where, after),
+		}
+	}
+
+	const page = parsed.page ?? 1
+	return {
+		limit: parsed.limit + 1,
+		meta: { limit: parsed.limit, page, type: "offset" },
+		offset: (page - 1) * parsed.limit,
+		orderBy: keyset.orderBy,
+		search,
+		where: combineWhere(...where),
+	}
+}
+
+function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable>): ListQueryResult {
+	const { parsed, table } = opts
+	const columns = getTableColumns(table) as Record<string, SQLiteColumn>
+	const sort = parsed.parsedSort.length > 0 ? parsed.parsedSort : DEFAULT_SORT.filter(({ field }) => columns[field])
+
+	const idColumn = columns[CURSOR_TIEBREAK_COLUMN]
+	if (parsed.cursor && !idColumn) {
+		/* Without a tiebreak column there is no predicate to add, and ignoring the
+		   cursor would quietly re-serve the first page. This is a schema mistake. */
 		throw new CombError({
 			cause: `Table has no "${CURSOR_TIEBREAK_COLUMN}" property to break ties on`,
 			errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
@@ -160,161 +173,67 @@ function buildCursorWhere(
 		})
 	}
 
-	/* An unknown sort field is the query layer's business, not ours — it has
-	   already been validated, and a cursor over a field this table lacks simply
-	   has no predicate to express. */
-	if (!sortCol) return null
-
-	if (parsed.direction === "desc") {
-		return or(lt(sortCol, parsed.sortValue), and(eq(sortCol, parsed.sortValue), lt(idCol, parsed.idValue))) ?? null
-	}
-	return or(gt(sortCol, parsed.sortValue), and(eq(sortCol, parsed.sortValue), gt(idCol, parsed.idValue))) ?? null
-}
-
-function buildDerivedOrderBy<TSortField extends string>(
-	sortColumns: Record<TSortField, SQLWrapper>,
-	idColumn: SQLWrapper,
-	parsedSort: Array<{ direction: "asc" | "desc"; field: TSortField }>,
-): SQL[] {
+	const primaryDirection = sort[0]?.direction ?? "desc"
+	const tiebreak: SortKey | null = idColumn ? { column: idColumn, direction: primaryDirection } : null
+	const keys: SortKey[] = []
 	const orderBy: SQL[] = []
-
-	if (parsedSort.length > 0) {
-		for (const { direction, field } of parsedSort) {
-			const col = sortColumns[field]
-			if (col) {
-				/* NULLS LAST/FIRST ensures consistent ordering when column contains NULLs */
-				orderBy.push(direction === "asc" ? sql`${col} ASC NULLS LAST` : sql`${col} DESC NULLS FIRST`)
-			}
+	let keysetable = tiebreak !== null
+	for (const { direction, field, nulls } of sort) {
+		if (field.startsWith("@")) {
+			const resolver = opts.computedSorts?.[field]
+			if (resolver) orderBy.push(resolver(direction))
+			keysetable = false
+			continue
 		}
-	}
-
-	const primaryDir = parsedSort[0]?.direction ?? "desc"
-	orderBy.push(primaryDir === "desc" ? desc(idColumn) : asc(idColumn))
-
-	return orderBy
-}
-
-function buildDerivedCursorWhere(
-	cursor: string | undefined,
-	sortColumn: SQLWrapper,
-	idColumn: SQLWrapper,
-	primarySortDirection: "asc" | "desc",
-): SQL | null {
-	if (!cursor) return null
-
-	const parsed = parseCursorForQuery(cursor, primarySortDirection)
-	if (!parsed) return null
-
-	const { idValue, sortValue } = parsed
-
-	if (parsed.direction === "desc") {
-		if (sortValue === null) {
-			/*
-			 * DESC NULLS FIRST: NULLs appear first. A null cursor means we're
-			 * already in the NULL zone — only advance within it, or jump to non-NULLs.
-			 */
-			return sql`(${sortColumn} IS NULL AND ${idColumn} < ${idValue}) OR ${sortColumn} IS NOT NULL`
+		const column = columns[field]
+		if (!column) {
+			keysetable = false
+			continue
 		}
-		return sql`(${sortColumn} < ${sortValue} OR (${sortColumn} = ${sortValue} AND ${idColumn} < ${idValue}))`
+		const key = { column, direction, nulls }
+		keys.push(key)
+		orderBy.push(orderSQL(key))
+	}
+	if (tiebreak) orderBy.push(orderSQL(tiebreak))
+
+	const q = parsed.q?.trim()
+	if (q && !opts.search) {
+		/* The schema accepted `q`, so the endpoint promised search. Dropping it
+		   would answer every query with the unfiltered list. */
+		throw new CombError({
+			cause: "Request carries q but buildListQuery got no search resolver",
+			errorKey: combErrorKeys.SEARCH_NOT_WIRED,
+			status: "internal_server_error",
+		})
 	}
 
-	if (sortValue === null) {
-		/*
-		 * ASC NULLS LAST: NULLs appear last. A null cursor means we're in the
-		 * NULL zone at the end — only advance within it.
-		 */
-		return sql`(${sortColumn} IS NULL AND ${idColumn} > ${idValue})`
-	}
-	return sql`(${sortColumn} > ${sortValue} OR (${sortColumn} = ${sortValue} AND ${idColumn} > ${idValue}) OR ${sortColumn} IS NULL)`
-}
-
-function combineWhere(...clauses: (SQL | null | undefined)[]): SQL | undefined {
-	const valid = clauses.filter((c): c is SQL => c !== null && c !== undefined)
-	if (valid.length === 0) return undefined
-	if (valid.length === 1) return valid[0]
-	return and(...valid) ?? undefined
-}
-
-function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable>): ListQueryResult {
-	const { parsed, table } = opts
-	const baseWhere = typeof opts.baseWhere === "function" ? opts.baseWhere(sql) : opts.baseWhere
-	const orderBy = buildOrderBy(table, parsed.parsedSort, opts.computedSorts)
-	const filterWhere = buildFilterWhere(parsed.filterAst, table, opts)
-	const searchWhere = opts.search ? opts.search(parsed.q ?? "") : null
-
-	const primarySortField = parsed.parsedSort[0]?.field ?? "created_at"
-	const primarySortDirection = parsed.parsedSort[0]?.direction ?? "desc"
-
-	/* Cursor pagination takes precedence */
-	if (parsed.cursor) {
-		const cursorWhere = buildCursorWhere(parsed.cursor, table, primarySortField, primarySortDirection)
-		const where = combineWhere(baseWhere, filterWhere, cursorWhere, searchWhere)
-
-		return {
-			limit: parsed.limit + 1,
-			meta: { limit: parsed.limit, page: 1, type: "cursor" },
-			offset: 0,
-			orderBy,
-			search: parsed.q?.trim() ?? null,
-			where,
-		}
-	}
-
-	/* Page-based pagination */
-	const page = parsed.page ?? 1
-	const offset = (page - 1) * parsed.limit
-	const where = combineWhere(baseWhere, filterWhere, searchWhere)
-
-	return {
-		limit: parsed.limit + 1,
-		meta: { limit: parsed.limit, page, type: "offset" },
-		offset,
-		orderBy,
-		search: parsed.q?.trim() ?? null,
-		where,
-	}
+	return finish(parsed, sort, { keys: keysetable ? keys : null, orderBy }, tiebreak, [
+		resolveBaseWhere(opts.baseWhere),
+		buildFilterWhere(parsed.filterAst, table, opts),
+		q && opts.search ? opts.search(q) : null,
+	])
 }
 
 function buildDerivedListQuery<TSortField extends string>(
 	opts: BuildDerivedListQueryOpts<TSortField>,
 ): ListQueryResult {
-	const baseWhere = typeof opts.baseWhere === "function" ? opts.baseWhere(sql) : opts.baseWhere
-	const orderBy = buildDerivedOrderBy(opts.sortColumns, opts.idColumn, opts.parsed.parsedSort)
-	const primarySortField = opts.parsed.parsedSort[0]?.field
-	const primarySortColumn = primarySortField ? opts.sortColumns[primarySortField] : undefined
-	const primarySortDirection = opts.parsed.parsedSort[0]?.direction ?? "desc"
-
-	if (opts.parsed.cursor && primarySortColumn) {
-		const cursorWhere = buildDerivedCursorWhere(
-			opts.parsed.cursor,
-			primarySortColumn,
-			opts.idColumn,
-			primarySortDirection,
-		)
-		const where = combineWhere(baseWhere, opts.filterWhere, cursorWhere, opts.searchWhere)
-
-		return {
-			limit: opts.parsed.limit + 1,
-			meta: { limit: opts.parsed.limit, page: 1, type: "cursor" },
-			offset: 0,
-			orderBy,
-			search: opts.parsed.q?.trim() ?? null,
-			where,
-		}
+	const sort = opts.parsed.parsedSort
+	const keys: SortKey[] = []
+	let keysetable = true
+	for (const { direction, field, nulls } of sort) {
+		const column = opts.sortColumns[field]
+		if (column) keys.push({ column, direction, nulls })
+		else keysetable = false
 	}
 
-	const page = opts.parsed.page ?? 1
-	const offset = (page - 1) * opts.parsed.limit
-	const where = combineWhere(baseWhere, opts.filterWhere, opts.searchWhere)
+	const tiebreak: SortKey = { column: opts.idColumn, direction: sort[0]?.direction ?? "desc" }
+	const orderBy = orderByKeys(keys, tiebreak)
 
-	return {
-		limit: opts.parsed.limit + 1,
-		meta: { limit: opts.parsed.limit, page, type: "offset" },
-		offset,
-		orderBy,
-		search: opts.parsed.q?.trim() ?? null,
-		where,
-	}
+	return finish(opts.parsed, sort, { keys: keysetable ? keys : null, orderBy }, tiebreak, [
+		resolveBaseWhere(opts.baseWhere),
+		opts.filterWhere,
+		opts.searchWhere,
+	])
 }
 
 function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult) {

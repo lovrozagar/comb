@@ -1,6 +1,7 @@
 import { type SQL, sql } from "drizzle-orm"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
+import { CombError } from "../../../../src/error.ts"
 import { createCursor } from "../../../../src/query/cursor.ts"
 import { buildListQuery } from "../../../../src/query/sqlite/build-list-query.ts"
 import { likeSearch } from "../../../../src/query/sqlite/search.ts"
@@ -169,7 +170,7 @@ describe("buildListQuery", () => {
 	})
 
 	it("uses cursor pagination with offset=0 and cursor where clause", () => {
-		const cursor = createCursor({ created_at: 1000, id: "org_123" }, "created_at")
+		const cursor = createCursor({ created_at: 1000, id: "org_123" }, [{ direction: "desc", field: "created_at" }])
 		const result = buildListQuery({
 			parsed: {
 				cursor,
@@ -203,10 +204,33 @@ describe("buildListQuery", () => {
 				q: "  hello world  ",
 				sortOrderBy: {},
 			},
+			search: likeSearch(organization._search),
 			table: organization,
 		})
 
 		expect(result.search).toBe("hello world")
+	})
+
+	it("refuses a q it has no search resolver for, rather than ignoring it", () => {
+		expect(() =>
+			buildListQuery({
+				parsed: { cursor: undefined, filterAst: null, limit: 20, page: 1, parsedSort: [], q: "hello" },
+				table: organization,
+			}),
+		).toThrow(CombError)
+	})
+
+	it("rejects a cursor minted under a different order with a 400", () => {
+		const cursor = createCursor({ created_at: 1000, id: "org_123" }, [{ direction: "desc", field: "created_at" }])
+		try {
+			buildListQuery({
+				parsed: { cursor, filterAst: null, limit: 20, parsedSort: [{ direction: "asc", field: "created_at" }] },
+				table: organization,
+			})
+			expect.unreachable()
+		} catch (error) {
+			expect((error as CombError).status).toBe(400)
+		}
 	})
 
 	it("supports computed sorts via @ prefix", () => {
@@ -340,7 +364,7 @@ describe("buildListQuery", () => {
 	})
 
 	it("search works with cursor pagination", () => {
-		const cursor = createCursor({ created_at: 1000, id: "org_123" }, "created_at")
+		const cursor = createCursor({ created_at: 1000, id: "org_123" }, [{ direction: "desc", field: "created_at" }])
 		const result = buildListQuery({
 			parsed: {
 				cursor,

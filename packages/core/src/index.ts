@@ -12,6 +12,7 @@ export {
 	type CombMetaInput,
 	type CombMetaKind,
 	type CombMetaStamp,
+	type CombFilterField,
 	type CombQueryMeta,
 	type CombQueryMetaInput,
 	readCombEntityMeta,

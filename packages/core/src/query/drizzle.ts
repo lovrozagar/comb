@@ -4,7 +4,7 @@
  */
 import { sql } from "drizzle-orm"
 
-import { createCursor } from "./cursor.ts"
+import { createCursor, CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT } from "./cursor.ts"
 import { filterBySelect } from "./fields.ts"
 import type { FilterAST, ParsedFields, SortField } from "./types.ts"
 
@@ -105,13 +105,13 @@ function drizzlePaginationResult<T extends { id?: string }>(
 	const hasMore = items.length > query.limit
 	const sliced = hasMore ? items.slice(0, query.limit) : items
 
+	/* Mint from the fat row and the same effective sort buildListQuery ordered
+	   by, so the cursor's signature matches the next request's. */
 	let nextCursor: string | null = null
-	if (hasMore && sliced.length > 0) {
-		const lastItem = sliced[sliced.length - 1]
-		if (lastItem?.id) {
-			const sortField = query.parsedSort[0]?.field ?? "createdAt"
-			nextCursor = createCursor(lastItem as { id: string }, sortField)
-		}
+	const lastItem = sliced.at(-1)
+	if (hasMore && lastItem?.[CURSOR_TIEBREAK_COLUMN]) {
+		const sort = query.parsedSort.length > 0 ? query.parsedSort : DEFAULT_SORT.filter(({ field }) => field in lastItem)
+		nextCursor = createCursor(lastItem as Record<string, unknown>, sort)
 	}
 
 	const pagination = {

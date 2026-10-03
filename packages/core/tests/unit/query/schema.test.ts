@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
+import { createCursor } from "../../../src/query/cursor.ts"
 import {
 	createListQuerySchema,
 	createRetrieveQuerySchema,
@@ -24,12 +25,8 @@ describe("createListQuerySchema", () => {
 		}
 	})
 
-	it("ignores a select param when fields is omitted", () => {
-		const result = schema.safeParse({ select: "id" })
-		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.parsedFields).toBeNull()
-		}
+	it("rejects a select param when fields is omitted", () => {
+		expect(schema.safeParse({ select: "id" }).success).toBe(false)
 	})
 
 	it("validates sort fields", () => {
@@ -51,12 +48,17 @@ describe("createListQuerySchema", () => {
 	})
 
 	it("accepts cursor + page together and lets cursor take precedence", () => {
-		const result = schema.safeParse({ cursor: "abc", page: 2 })
+		const cursor = createCursor({ createdAt: 1, id: "abc" }, [{ direction: "desc", field: "createdAt" }])
+		const result = schema.safeParse({ cursor, page: 2 })
 		expect(result.success).toBe(true)
 		if (result.success) {
-			expect(result.data.cursor).toBe("abc")
+			expect(result.data.cursor).toBe(cursor)
 			expect(result.data.page).toBe(2)
 		}
+	})
+
+	it("rejects a cursor that does not decode", () => {
+		expect(schema.safeParse({ cursor: "abc" }).success).toBe(false)
 	})
 
 	it("respects custom pagination limits", () => {
@@ -100,8 +102,9 @@ describe("createListQuerySchema", () => {
 		}
 	})
 
-	it("passes through q param", () => {
-		const result = schema.safeParse({ q: "search term" })
+	it("passes through q param when search is declared", () => {
+		const searchable = createListQuerySchema({ search: ["name"], sort: ["createdAt"] as const })
+		const result = searchable.safeParse({ q: "search term" })
 		expect(result.success).toBe(true)
 		if (result.success) {
 			expect(result.data.q).toBe("search term")
@@ -253,10 +256,7 @@ describe("createListQuerySchema → JSON Schema", () => {
 		expect(jsonSchema.type).toBe("object")
 		const props = jsonSchema.properties as Record<string, unknown>
 		expect(props).toBeDefined()
-		for (const key of ["cursor", "filter", "limit", "order", "page", "q"]) {
-			expect(Object.keys(props)).toContain(key)
-		}
-		expect(Object.keys(props)).not.toContain("select")
+		expect(Object.keys(props).sort()).toEqual(["cursor", "limit", "order", "page"])
 	})
 
 	it("omits select from the input schema when fields is not set", () => {
@@ -276,8 +276,8 @@ describe("createListQuerySchema → JSON Schema", () => {
 		expect(Object.keys(props)).toContain("select")
 	})
 
-	it("z.toJSONSchema with io:input includes lang property (lang is in base shape)", () => {
-		const schema = createListQuerySchema({ sort: ["createdAt"] as const })
+	it("z.toJSONSchema with io:input includes lang property when lang is declared", () => {
+		const schema = createListQuerySchema({ lang: true, sort: ["createdAt"] as const })
 		const jsonSchema = z.toJSONSchema(schema, { io: "input" }) as Record<string, unknown>
 		expect(jsonSchema.type).toBe("object")
 		const props = jsonSchema.properties as Record<string, unknown>
@@ -296,11 +296,14 @@ describe("createListQuerySchema → JSON Schema", () => {
 	it("emits description + examples for every list query param under io:input", () => {
 		const schema = createListQuerySchema({
 			fields: { scalars: ["id", "name"] },
+			filter: { name: "string" },
+			lang: true,
+			search: ["name"],
 			sort: ["createdAt"] as const,
 		})
 		const jsonSchema = z.toJSONSchema(schema, { io: "input" }) as Record<string, unknown>
 		const props = jsonSchema.properties as Record<string, Record<string, unknown>>
-		for (const key of ["cursor", "filter", "limit", "page", "q", "order", "select"] as const) {
+		for (const key of ["cursor", "filter", "lang", "limit", "page", "q", "order", "select"] as const) {
 			const entry = props[key]
 			expect(entry, `props.${key} must exist`).toBeDefined()
 			expect(typeof entry?.description, `props.${key}.description must be string`).toBe("string")
@@ -361,5 +364,94 @@ describe("defineListQuery", () => {
 		})
 		expect(capabilities.pagination.defaultLimit).toBe(50)
 		expect(capabilities.pagination.maxLimit).toBe(200)
+	})
+})
+
+describe("createListQuerySchema — advertises only what it honors", () => {
+	const props = (schema: z.ZodType) =>
+		(z.toJSONSchema(schema, { io: "input" }) as { properties: Record<string, Record<string, unknown>> }).properties
+
+	it("rejects unknown query keys", () => {
+		const schema = createListQuerySchema({ sort: ["created_at"] })
+		expect(schema.safeParse({ name: "eq.x" }).success).toBe(false)
+	})
+
+	it("omits filter when no filter fields are declared", () => {
+		const schema = createListQuerySchema({ sort: ["created_at"] })
+		expect(props(schema)).not.toHaveProperty("filter")
+		expect(schema.safeParse({ filter: "name.eq.x" }).success).toBe(false)
+	})
+
+	it("omits q unless search is declared", () => {
+		expect(props(createListQuerySchema({ sort: ["created_at"] }))).not.toHaveProperty("q")
+		expect(props(createListQuerySchema({ search: ["name"], sort: ["created_at"] }))).toHaveProperty("q")
+	})
+
+	it("omits lang unless lang is declared", () => {
+		expect(props(createListQuerySchema({ sort: ["created_at"] }))).not.toHaveProperty("lang")
+		expect(props(createListQuerySchema({ lang: true, sort: ["created_at"] }))).toHaveProperty("lang")
+	})
+
+	it("describes filter and order with the declared fields only", () => {
+		const schema = createListQuerySchema({
+			filter: { created_at: "number", name: "string" },
+			sort: ["created_at", "name"],
+		})
+		const { filter, order } = props(schema)
+		expect(String(filter?.["description"])).toContain("name (string:")
+		expect(String(filter?.["description"])).toContain("created_at (number:")
+		expect(String(order?.["description"])).toContain("created_at, name")
+		const examples = JSON.stringify([filter?.["examples"], order?.["examples"]])
+		expect(examples).not.toContain("createdAt")
+		expect(examples).not.toContain("status")
+		expect(examples).toContain("name")
+		expect(new RegExp(String(order?.["pattern"])).test("name.asc,created_at.desc.nullslast")).toBe(true)
+		expect(new RegExp(String(order?.["pattern"])).test("slug.asc")).toBe(false)
+	})
+
+	it("every generated example parses under the schema", () => {
+		const schema = createListQuerySchema({
+			filter: { active: "boolean", created_at: "date", name: "string", role: "enum", size: "number" },
+			search: ["name"],
+			sort: ["created_at", "name"],
+		})
+		const { filter, order } = props(schema)
+		const filterExamples = (filter?.["examples"] ?? []) as string[]
+		const orderExamples = (order?.["examples"] ?? []) as string[]
+		expect(filterExamples.length).toBeGreaterThan(0)
+		expect(orderExamples.length).toBeGreaterThan(0)
+		for (const example of filterExamples) {
+			expect(schema.safeParse({ filter: example }).success).toBe(true)
+		}
+		for (const example of orderExamples) {
+			expect(schema.safeParse({ order: example }).success).toBe(true)
+		}
+	})
+
+	it("stamps query facts a consumer can map to structured capabilities", () => {
+		const schema = createListQuerySchema({
+			fields: { scalars: ["id", "name"] },
+			filter: { created_at: "number", name: "string" },
+			search: ["name"],
+			sort: ["created_at", "name"],
+		})
+		const json = z.toJSONSchema(schema, { io: "input" }) as Record<string, Record<string, unknown>>
+		const facts = json["x-comb"] as Record<string, unknown>
+		expect(facts["searchable"]).toEqual(["name"])
+		expect(facts["filterFields"]).toEqual([
+			{ field: "created_at", ops: ["eq", "ne", "neq", "gt", "gte", "lt", "lte", "in", "nin", "is"], type: "number" },
+			{ field: "name", ops: ["eq", "ne", "neq", "like", "ilike", "in", "nin", "is"], type: "string" },
+		])
+		expect(facts["nulls"]).toEqual(["first", "last"])
+		expect(facts["maxFilterConditions"]).toBe(20)
+		expect(facts["maxFilterDepth"]).toBe(3)
+		expect(facts["maxInValues"]).toBe(100)
+		expect(facts["maxSortKeys"]).toBe(3)
+	})
+
+	it("rejects more sort keys than the limit", () => {
+		const schema = createListQuerySchema({ sort: ["a", "b", "c", "d"] })
+		expect(schema.safeParse({ order: "a.asc,b.asc,c.asc" }).success).toBe(true)
+		expect(schema.safeParse({ order: "a.asc,b.asc,c.asc,d.asc" }).success).toBe(false)
 	})
 })

@@ -435,3 +435,54 @@ describe("coerceFilterValue", () => {
 		expect(coerceFilterValue("boolean", "yes")).toBe("yes")
 	})
 })
+
+describe("parseFilter — structural strictness", () => {
+	it("rejects an or( group that is never closed", () => {
+		expect(parseFilter("or(name.eq.a")).toBeNull()
+		expect(parseFilter("and(name.eq.a,or(b.eq.c)")).toBeNull()
+	})
+
+	it("rejects a stray closing paren", () => {
+		expect(parseFilter("name.eq.a)")).toBeNull()
+		expect(parseFilter("or(name.eq.a))")).toBeNull()
+	})
+
+	it("rejects an in list that is never closed", () => {
+		expect(parseFilter("name.in.(a,b")).toBeNull()
+	})
+
+	it("still accepts well-formed nesting", () => {
+		expect(parseFilter("or(a.eq.1,and(b.eq.2,c.eq.3))")).not.toBeNull()
+	})
+})
+
+describe("validateFilter — limits", () => {
+	const fields = { a: "number", name: "string" } as const
+
+	it("rejects more than 20 conditions by default", () => {
+		const twenty = Array.from({ length: 20 }, (_, i) => `a.neq.${i}`).join(",")
+		expect(validateFilter(twenty, fields)?.valid).toBe(true)
+		const result = validateFilter(`${twenty},a.neq.99`, fields)
+		expect(result?.valid).toBe(false)
+		if (result && !result.valid) expect(result.errors.join(";")).toContain("max 20")
+	})
+
+	it("rejects nesting deeper than 3 groups by default", () => {
+		expect(validateFilter("or(and(or(a.eq.1,a.eq.2),a.eq.3),a.eq.4)", fields)?.valid).toBe(true)
+		const result = validateFilter("or(and(or(and(a.eq.1,a.eq.2),a.eq.3),a.eq.4),a.eq.5)", fields)
+		expect(result?.valid).toBe(false)
+		if (result && !result.valid) expect(result.errors.join(";")).toContain("max 3")
+	})
+
+	it("rejects in lists over 100 values by default", () => {
+		const values = Array.from({ length: 101 }, (_, i) => i).join(",")
+		const result = validateFilter(`a.in.(${values})`, fields)
+		expect(result?.valid).toBe(false)
+		if (result && !result.valid) expect(result.errors.join(";")).toContain("max 100")
+	})
+
+	it("accepts custom limits", () => {
+		const result = validateFilter("a.eq.1,a.eq.2", fields, { maxConditions: 1 })
+		expect(result?.valid).toBe(false)
+	})
+})

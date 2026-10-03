@@ -176,7 +176,7 @@ The mirror case is safe and needs no ceremony: an **older** payload read by a ne
 just missing fields. Every field a later version adds is therefore optional at the reader, and
 `null` is used — not absence — wherever "known to be nothing" must be distinguished from
 "this producer did not say". `softDelete: null` means _no tombstone column_;
-`searchable: null` means _comb does not know at this layer_ (§6.1).
+`searchable: null` means _the producer does not know_ (§6.1); `createListQuerySchema` always knows, so it publishes a list.
 
 ## 5. Collision rules
 
@@ -218,22 +218,24 @@ an accident, and comb's reader will validate the shape and refuse it if malforme
 
 Being explicit about the gaps is the point; a fact comb guesses at is worse than one it omits.
 
-### 6.1 `searchable` is `null`, deliberately
+### 6.1 `searchable` is declared, and enforced at both ends
 
-`createListQuerySchema`'s config is `{ sort, filter, fields, pagination }`. There is **no
-`search` key**. The `q` parameter is accepted unconditionally by the schema and is resolved much
-later, at `buildListQuery({ search: likeSearch(col) })` — a different call site, often a different
-file.
+`createListQuerySchema({ search })` declares the fields `q` searches. Without `search` the schema
+does not accept `q` at all and publishes `searchable: []`; with it, the schema accepts `q` and
+publishes the list. The declaration is load-bearing at the other end too: `buildListQuery()`
+throws `search_not_wired` when a request carries `q` and the handler passed no `search`
+resolver, so a schema that promises search cannot silently answer with the unfiltered list.
 
-So the layer that owns the stamp does not know which columns are searchable. Adding a
-`search: string[]` to the config purely so the stamp could carry it would produce a declaration
-nothing validates against — the exact self-confirming failure this contract exists to avoid, one
-layer up. `searchable` is therefore `null` from `createListQuerySchema`, and populated only from
-`defineListQuery`, whose `ListQuerySchemaConfig` **does** carry `search` and builds
-`capabilities.searchFields` from it.
+`null` stays valid on the wire for producers that genuinely cannot know; comb's own schema
+builder no longer emits it.
 
-Making it load-bearing at the schema layer — having `createListQuerySchema` reject `q` when no
-column is searchable — is the right fix and is tracked as future work, not smuggled in here.
+### 6.7 Query facts added within v1
+
+`filterFields` (`{ field, type, ops }[]`), `nulls`, `maxFilterConditions`, `maxFilterDepth`,
+`maxInValues` and `maxSortKeys` were added after v1 shipped. They are optional in the type and
+validated when present, so a v1 reader built before them ignores them — which is why adding them
+did not bump `v`. Each value is computed from the config that parses the request, and
+`tests/unit/meta/query-parity.test.ts` drives the parser to prove it.
 
 ### 6.6 `select=` is advertised only when it can be honored
 

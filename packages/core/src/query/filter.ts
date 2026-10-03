@@ -65,6 +65,8 @@ class FilterParser {
 
 	parse(): FilterAST {
 		const root = this.parseGroup("and")
+		/* A stray ")" stops the top-level group early; anything left is unparsed. */
+		if (this.pos < this.input.length) this.malformed = true
 		return { root }
 	}
 
@@ -243,6 +245,8 @@ class FilterParser {
 
 			if (this.peek() === ")") {
 				this.pos++
+			} else {
+				this.malformed = true
 			}
 
 			return values
@@ -288,9 +292,12 @@ class FilterParser {
 		return this.input[this.pos] || ""
 	}
 
+	/** A group that is never closed leaves the input unbalanced — reject it. */
 	private expect(char: string): void {
 		if (this.peek() === char) {
 			this.pos++
+		} else {
+			this.malformed = true
 		}
 	}
 
@@ -321,9 +328,50 @@ function parseFilter(input: string | null | undefined): FilterAST | null {
 
 type FilterValidationResult = { ast: FilterAST; valid: true } | { errors: string[]; valid: false }
 
+/** Bounds on one filter expression. Each condition is a predicate SQLite evaluates per row. */
+type FilterLimits = {
+	maxConditions: number
+	/** Nested or()/and() groups below the top level */
+	maxDepth: number
+	maxInValues: number
+}
+
+const FILTER_LIMITS: FilterLimits = { maxConditions: 20, maxDepth: 3, maxInValues: 100 }
+
+function filterShape(group: FilterGroup, depth = 0): { conditions: number; depth: number } {
+	let conditions = group.conditions.length
+	let deepest = depth
+	for (const subgroup of group.subgroups) {
+		const inner = filterShape(subgroup, depth + 1)
+		conditions += inner.conditions
+		deepest = Math.max(deepest, inner.depth)
+	}
+	return { conditions, depth: deepest }
+}
+
+function checkLimits(group: FilterGroup, limits: FilterLimits, errors: string[]): void {
+	const shape = filterShape(group)
+	if (shape.conditions > limits.maxConditions) {
+		errors.push(`Too many filter conditions: ${shape.conditions} (max ${limits.maxConditions})`)
+	}
+	if (shape.depth > limits.maxDepth) {
+		errors.push(`Filter nesting too deep: ${shape.depth} (max ${limits.maxDepth})`)
+	}
+	const visit = (node: FilterGroup) => {
+		for (const { field, value } of node.conditions) {
+			if (Array.isArray(value) && value.length > limits.maxInValues) {
+				errors.push(`in/nin list too large for '${field}': ${value.length} (max ${limits.maxInValues})`)
+			}
+		}
+		node.subgroups.forEach(visit)
+	}
+	visit(group)
+}
+
 function validateFilter(
 	filterString: string | null | undefined,
 	allowedFields: Record<string, FieldType>,
+	limits?: Partial<FilterLimits>,
 ): FilterValidationResult | null {
 	if (!filterString || filterString.trim() === "") {
 		return null
@@ -337,6 +385,7 @@ function validateFilter(
 	const errors: string[] = []
 	const allowedSet = new Set(Object.keys(allowedFields))
 
+	checkLimits(ast.root, { ...FILTER_LIMITS, ...limits }, errors)
 	validateGroup(ast.root, allowedSet, allowedFields, errors)
 
 	if (errors.length > 0) {
@@ -494,10 +543,12 @@ function parseOrder(input: string | null | undefined): SortField[] {
 export {
 	coerceFilterValue,
 	createFilterRefinement,
+	FILTER_LIMITS,
 	FILTER_OPERATORS,
 	OPERATORS_BY_TYPE,
 	parseFilter,
 	parseOrder,
 	validateFilter,
+	type FilterLimits,
 	type FilterValidationResult,
 }

@@ -67,11 +67,10 @@ describe("conditionToSQL", () => {
 		})
 	}
 
-	it("expands * after escaping LIKE specials and binds ESCAPE", () => {
-		const { params, sql } = compile(conditionToSQL(cond("title", "like", "*intro*"), post.title))
-		expect(sql.toLowerCase()).toContain("like ?")
-		expect(sql.toLowerCase()).toContain("escape")
-		expect(params).toEqual(["%intro%"])
+	it("lowers like to case-sensitive GLOB, keeping * as the wildcard", () => {
+		const { params, sql } = compile(conditionToSQL(cond("title", "like", "*intro?*"), post.title))
+		expect(sql.toLowerCase()).toContain("glob ?")
+		expect(params).toEqual(["*intro[?]*"])
 	})
 
 	it("lowers in/nin to bound lists", () => {
@@ -83,21 +82,19 @@ describe("conditionToSQL", () => {
 		expect(ninSql.sql.toLowerCase()).toContain("not in")
 	})
 
-	it("lowers ilike to LIKE … ESCAPE with a case-insensitive collation", () => {
+	it("lowers ilike to LIKE … ESCAPE (SQLite LIKE ignores ASCII case)", () => {
 		const { params, sql } = compile(conditionToSQL(cond("title", "ilike", "*Intro*"), post.title))
 		expect(sql.toLowerCase()).toContain("like ?")
 		expect(sql.toLowerCase()).toContain("escape")
-		expect(sql.toLowerCase()).toContain("nocase")
 		expect(params).toEqual(["%Intro%"])
 	})
 
-	it("does not treat name.like.% as a match-all wildcard", () => {
-		const parsed = parseFilter("name.like.%")
+	it("does not treat name.ilike.% as a match-all wildcard", () => {
+		const parsed = parseFilter("name.ilike.%")
 		expect(parsed?.root.conditions[0]?.value).toBe("%")
 		const { params, sql } = compile(conditionToSQL(parsed!.root.conditions[0]!, post.title))
 		expect(params).toEqual(["\\%"])
 		expect(sql.toLowerCase()).toContain("escape")
-		expect(params[0]).not.toBe("%")
 	})
 
 	it("lowers is.null and is.notnull to null checks with no bindings", () => {

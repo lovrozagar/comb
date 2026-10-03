@@ -71,15 +71,6 @@ type ListQueryCapabilities = {
 	sortFields: Set<string>
 }
 
-type ListQueryInput = {
-	cursor?: string | null
-	filter?: string | null
-	limit?: number | null
-	order?: string | null
-	page?: number | null
-	q?: string | null
-}
-
 export type {
 	ComputedFilterResolver,
 	ComputedSortResolver,
@@ -90,7 +81,6 @@ export type {
 	FilterGroup,
 	FilterOperator,
 	ListQueryCapabilities,
-	ListQueryInput,
 	ParsedFields,
 	SortDirection,
 	SortField,

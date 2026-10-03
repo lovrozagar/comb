@@ -4,8 +4,8 @@
  */
 import { sql } from "drizzle-orm"
 
-import { likePattern } from "../like.ts"
 import type { FilterCondition, FilterGroup } from "../types.ts"
+import { patternToSQL } from "./pattern.ts"
 
 type FilterSQLConfig = {
 	/** Column map: API field name -> SQL column name */
@@ -66,23 +66,23 @@ function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig):
 		case "lte":
 			return sql`${column} <= ${condition.value}`
 		case "in": {
+			/* PostgREST: an empty in-list matches nothing — never widen to every row */
 			if (!Array.isArray(condition.value) || condition.value.length === 0) {
-				return null
+				return sql`0`
 			}
 			const placeholders = condition.value.map((v) => sql`${v}`)
 			return sql`${column} IN (${sql.join(placeholders, sql`, `)})`
 		}
 		case "nin": {
 			if (!Array.isArray(condition.value) || condition.value.length === 0) {
-				return null
+				return sql`1`
 			}
 			const placeholders = condition.value.map((v) => sql`${v}`)
 			return sql`${column} NOT IN (${sql.join(placeholders, sql`, `)})`
 		}
 		case "like":
-			return sql`${column} LIKE ${likePattern(String(condition.value))} ESCAPE '\\'`
 		case "ilike":
-			return sql`${column} LIKE ${likePattern(String(condition.value))} ESCAPE '\\' COLLATE NOCASE`
+			return patternToSQL(column, condition.operator, condition.value)
 		case "is":
 			if (condition.value === null) {
 				return sql`${column} IS NULL`

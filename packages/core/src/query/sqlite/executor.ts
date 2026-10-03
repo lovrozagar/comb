@@ -3,8 +3,6 @@
  */
 import {
 	and,
-	asc,
-	desc,
 	eq,
 	getTableColumns,
 	gt,
@@ -22,9 +20,7 @@ import {
 } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 
-import { parseCursorForQuery } from "../cursor.ts"
-import { coerceFilterValue, parseFilter, parseOrder } from "../filter.ts"
-import { likePattern } from "../like.ts"
+import { coerceFilterValue } from "../filter.ts"
 import type {
 	ComputedFilterResolver,
 	ComputedSortResolver,
@@ -33,11 +29,11 @@ import type {
 	FilterCondition,
 	FilterGroup,
 	ListQueryCapabilities,
-	ListQueryInput,
-	SortDirection,
 	SortField,
 } from "../types.ts"
-import type { QueryExecutorConfig, QueryExecutorResult, RelationConfig } from "./types.ts"
+import { orderSQL } from "./keyset.ts"
+import { patternToSQL } from "./pattern.ts"
+import type { RelationConfig } from "./types.ts"
 
 const COMPUTED_PREFIX = "@"
 
@@ -50,7 +46,7 @@ type SortToSQLConfig = {
 function sortToOrderBy(sortFields: SortField[], config: SortToSQLConfig): SQL[] {
 	const orderBy: SQL[] = []
 
-	for (const { direction, field } of sortFields) {
+	for (const { direction, field, nulls } of sortFields) {
 		if (field.startsWith(COMPUTED_PREFIX)) {
 			const resolver = config.computedSorts?.[field]
 			if (resolver) {
@@ -69,19 +65,10 @@ function sortToOrderBy(sortFields: SortField[], config: SortToSQLConfig): SQL[] 
 			continue
 		}
 
-		orderBy.push(direction === "asc" ? asc(column) : desc(column))
+		orderBy.push(orderSQL({ column, direction, nulls }))
 	}
 
 	return orderBy
-}
-
-function getDefaultSort(config: SortToSQLConfig): SQL[] {
-	const columns = getTableColumns(config.table)
-	const createdAtColumn = columns["createdAt"]
-	if (createdAtColumn) {
-		return [desc(createdAtColumn)]
-	}
-	return []
 }
 
 function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL | null {
@@ -106,9 +93,8 @@ function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL |
 		case "nin":
 			return notInArray(column, value as unknown[])
 		case "like":
-			return sql`${column} LIKE ${likePattern(String(value))} ESCAPE '\\'`
 		case "ilike":
-			return sql`${column} LIKE ${likePattern(String(value))} ESCAPE '\\' COLLATE NOCASE`
+			return patternToSQL(column, operator, value)
 		case "is":
 			if (value === null) {
 				return isNull(column)
@@ -247,182 +233,4 @@ function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | nu
 	return groupToSQL(ast.root, config)
 }
 
-/**
- * Build query execution result from validated input.
- *
- * Orchestrates:
- * - Filter parsing and SQL generation
- * - Sort parsing and orderBy generation
- * - Cursor or offset pagination
- * - Computed filter/sort resolution
- */
-class QueryExecutor {
-	static build<TTable extends SQLiteTable>(config: QueryExecutorConfig<TTable>): QueryExecutorResult {
-		const { capabilities, input, table } = config
-
-		const whereClause = QueryExecutor.buildWhere(config)
-		const { orderBy, primarySortDirection, primarySortField } = QueryExecutor.buildOrderBy(config)
-		const { cursor, limit, meta, offset } = QueryExecutor.buildPagination(
-			input,
-			capabilities,
-			primarySortField,
-			primarySortDirection,
-			table,
-		)
-
-		const cursorWhere = QueryExecutor.buildCursorWhere(cursor)
-		let finalWhere: SQL | null = whereClause
-		if (cursorWhere) {
-			finalWhere = whereClause ? (and(whereClause, cursorWhere) ?? null) : cursorWhere
-		}
-
-		return {
-			cursor,
-			limit,
-			meta,
-			offset,
-			orderBy,
-			search: input.q?.trim() || null,
-			where: finalWhere,
-		}
-	}
-
-	private static buildWhere<TTable extends SQLiteTable>(config: QueryExecutorConfig<TTable>): SQL | null {
-		const { capabilities, computedFilters, input, relations, table } = config
-
-		if (!input.filter) {
-			return null
-		}
-
-		const ast = parseFilter(input.filter)
-		if (!ast) {
-			return null
-		}
-
-		return filterToSQL(ast, {
-			capabilities,
-			computedFilters,
-			mainTable: table,
-			relations,
-		})
-	}
-
-	private static buildOrderBy<TTable extends SQLiteTable>(
-		config: QueryExecutorConfig<TTable>,
-	): {
-		orderBy: SQL[]
-		primarySortDirection: SortDirection
-		primarySortField: string
-	} {
-		const { capabilities, computedSorts, input, table } = config
-
-		const sortFields = parseOrder(input.order)
-
-		let orderBy: SQL[]
-		let primarySortField = "createdAt"
-		let primarySortDirection: SortDirection = "desc"
-
-		if (sortFields.length > 0) {
-			orderBy = sortToOrderBy(sortFields, {
-				capabilities,
-				computedSorts,
-				table,
-			})
-			const first = sortFields[0]
-			if (first) {
-				primarySortField = first.field
-				primarySortDirection = first.direction
-			}
-		} else {
-			orderBy = getDefaultSort({ capabilities, table })
-		}
-
-		const columns = getTableColumns(table)
-		const idColumn = columns["id"]
-		if (idColumn && orderBy.length > 0) {
-			orderBy.push(primarySortDirection === "desc" ? desc(idColumn) : asc(idColumn))
-		}
-
-		return { orderBy, primarySortDirection, primarySortField }
-	}
-
-	private static buildPagination<TTable extends SQLiteTable>(
-		input: ListQueryInput,
-		capabilities: ListQueryCapabilities,
-		primarySortField: string,
-		primarySortDirection: SortDirection,
-		table: TTable,
-	): {
-		cursor: QueryExecutorResult["cursor"]
-		limit: number
-		meta: QueryExecutorResult["meta"]
-		offset: number
-	} {
-		const { defaultLimit, maxLimit } = capabilities.pagination
-
-		let limit = input.limit ?? defaultLimit
-		limit = Math.max(1, Math.min(limit, maxLimit))
-
-		const columns = getTableColumns(table)
-		const idColumn = columns["id"]
-
-		if (input.cursor && idColumn) {
-			const cursorInfo = parseCursorForQuery(input.cursor, primarySortDirection)
-
-			if (cursorInfo) {
-				const sortColumn = primarySortField.startsWith("@") ? null : columns[primarySortField]
-
-				return {
-					cursor: sortColumn
-						? {
-								direction: primarySortDirection,
-								idColumn,
-								idValue: cursorInfo.idValue,
-								sortColumn,
-								sortValue: cursorInfo.sortValue,
-							}
-						: null,
-					limit: limit + 1,
-					meta: {
-						limit,
-						page: 1,
-						type: "cursor",
-					},
-					offset: 0,
-				}
-			}
-		}
-
-		const page = Math.max(1, input.page ?? 1)
-		const offset = (page - 1) * limit
-
-		return {
-			cursor: null,
-			limit: limit + 1,
-			meta: {
-				limit,
-				page,
-				type: "offset",
-			},
-			offset,
-		}
-	}
-
-	private static buildCursorWhere(cursor: QueryExecutorResult["cursor"]): SQL | null {
-		if (!cursor) {
-			return null
-		}
-
-		const { direction, idColumn, idValue, sortColumn, sortValue } = cursor
-
-		if (direction === "desc") {
-			const andClause = and(eq(sortColumn, sortValue), lt(idColumn, idValue))
-			return or(lt(sortColumn, sortValue), andClause) ?? null
-		}
-
-		const andClause = and(eq(sortColumn, sortValue), gt(idColumn, idValue))
-		return or(gt(sortColumn, sortValue), andClause) ?? null
-	}
-}
-
-export { conditionToSQL, filterToSQL, QueryExecutor, sortToOrderBy }
+export { conditionToSQL, filterToSQL, sortToOrderBy }

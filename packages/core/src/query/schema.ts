@@ -6,27 +6,24 @@ import * as z from "zod"
 
 import { COMB_FILTER_GRAMMAR, combMeta } from "../meta.ts"
 import { EMPTY_ARR, EMPTY_OBJ } from "../types.ts"
-import { CURSOR_TIEBREAK_COLUMN } from "./cursor.ts"
-import { parseSelect } from "./fields.ts"
-import { parseOrder, validateFilter } from "./filter.ts"
+import { CURSOR_TIEBREAK_COLUMN, cursorProblem } from "./cursor.ts"
 import {
 	CURSOR_DESCRIPTION,
 	CURSOR_EXAMPLES,
-	FILTER_DESCRIPTION,
-	FILTER_EXAMPLES,
+	filterParamMeta,
 	LANG_DESCRIPTION,
 	LANG_EXAMPLES,
 	LIMIT_DESCRIPTION,
 	LIMIT_EXAMPLES,
-	ORDER_DESCRIPTION,
-	ORDER_EXAMPLES,
+	orderParamMeta,
 	PAGE_DESCRIPTION,
 	PAGE_EXAMPLES,
-	Q_DESCRIPTION,
-	Q_EXAMPLES,
+	searchParamMeta,
 	SELECT_DESCRIPTION,
 	SELECT_EXAMPLES,
 } from "./descriptions.ts"
+import { parseSelect } from "./fields.ts"
+import { FILTER_LIMITS, type FilterLimits, OPERATORS_BY_TYPE, parseOrder, validateFilter } from "./filter.ts"
 import type {
 	FieldSelection,
 	FieldType,
@@ -64,13 +61,28 @@ type OutputStableShape<T extends z.ZodRawShape = z.ZodRawShape> = {
 	[K in keyof T]: z.ZodType<z.infer<T[K]>, z.infer<T[K]>>
 }
 
+/** Request bounds. Filter limits plus how many sort keys one `order` may name. */
+type ListQueryLimits = FilterLimits & { maxSortKeys: number }
+
+const LIST_QUERY_LIMITS: ListQueryLimits = { ...FILTER_LIMITS, maxSortKeys: 3 }
+
 type ListQueryConfig<
 	T extends OutputStableShape<T> = Record<string, never>,
 	TSortFields extends readonly string[] = readonly string[],
 > = {
 	extend?: T
 	fields?: FieldsConfig
+	/** Fields `filter` may name. Omitted or empty: the endpoint takes no `filter`. */
 	filter?: Record<string, FieldType>
+	/** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
+	lang?: true
+	limits?: Partial<ListQueryLimits>
+	/**
+	 * Fields `q` searches, as published. Omitted: the endpoint takes no `q`.
+	 * Declaring it obliges the handler to pass a search resolver to buildListQuery,
+	 * which refuses a `q` it cannot apply.
+	 */
+	search?: readonly string[]
 	pagination?: {
 		defaultLimit?: number
 		maxLimit?: number
@@ -235,27 +247,16 @@ const baseListQueryShape = {
 		description: CURSOR_DESCRIPTION,
 		examples: CURSOR_EXAMPLES,
 	}),
-	filter: z.string().optional().meta({
-		description: FILTER_DESCRIPTION,
-		examples: FILTER_EXAMPLES,
-	}),
-	lang: z.string().min(2).max(10).optional().meta({
-		description: LANG_DESCRIPTION,
-		examples: LANG_EXAMPLES,
-	}),
-	order: z.string().optional().meta({
-		description: ORDER_DESCRIPTION,
-		examples: ORDER_EXAMPLES,
-	}),
 	page: z.coerce.number().int().min(1).optional().meta({
 		description: PAGE_DESCRIPTION,
 		examples: PAGE_EXAMPLES,
 	}),
-	q: z.string().max(200).optional().meta({
-		description: Q_DESCRIPTION,
-		examples: Q_EXAMPLES,
-	}),
 }
+
+const langQueryField = z.string().min(2).max(10).optional().meta({
+	description: LANG_DESCRIPTION,
+	examples: LANG_EXAMPLES,
+})
 
 const fieldSelectionSchema: z.ZodType<FieldSelection, FieldSelection> = z.lazy(() =>
 	z.object({
@@ -308,9 +309,13 @@ function createListQuerySchema<
 		extend: extendFields,
 		fields: fieldsConfig,
 		filter: filterConfig = EMPTY_OBJ,
+		lang: langEnabled,
 		pagination = EMPTY_OBJ,
+		search: searchConfig,
 		sort: sortConfig,
 	} = config
+	const limits: ListQueryLimits = { ...LIST_QUERY_LIMITS, ...config.limits }
+	const filterable = Object.keys(filterConfig).length > 0
 
 	const defaultLimit = pagination.defaultLimit ?? PAGINATION_DEFAULTS.defaultLimit
 	const maxLimit = pagination.maxLimit ?? PAGINATION_DEFAULTS.maxLimit
@@ -325,14 +330,29 @@ function createListQuerySchema<
 				examples: LIMIT_EXAMPLES,
 			})
 
-	/* Advertised only when `fields` is set — otherwise oat sees a param
-	   that parsedFields can never honor. */
-	const selectShape = fieldsConfig ? { select: selectQueryField } : {}
+	/* Each optional param is advertised only when the endpoint honors it — a
+	   param the handler ignores answers every value with the unfiltered list.
+	   The object is strict, so a param that is not advertised is a 400. */
+	const orderMeta = orderParamMeta(sortConfig, limits.maxSortKeys)
+	const optionalShape = {
+		order: z.string().optional().meta(orderMeta),
+		...(filterable
+			? {
+					filter: z
+						.string()
+						.optional()
+						.meta(filterParamMeta(filterConfig, (type) => OPERATORS_BY_TYPE[type], limits)),
+				}
+			: {}),
+		...(searchConfig ? { q: z.string().max(200).optional().meta(searchParamMeta(searchConfig)) } : {}),
+		...(langEnabled ? { lang: langQueryField } : {}),
+		...(fieldsConfig ? { select: selectQueryField } : {}),
+	}
 
 	const schema = z.compile(
 		extendFields
-			? z.object({ ...baseListQueryShape, ...selectShape, limit: limitSchema, ...extendFields })
-			: z.object({ ...baseListQueryShape, ...selectShape, limit: limitSchema }),
+			? z.strictObject({ ...baseListQueryShape, ...optionalShape, limit: limitSchema, ...extendFields })
+			: z.strictObject({ ...baseListQueryShape, ...optionalShape, limit: limitSchema }),
 	)
 
 	type ExtendedOutput = ListQueryOutput<TSortField> & {
@@ -377,9 +397,11 @@ function createListQuerySchema<
 	const outputSchema = z.compile(z.object(outputShape))
 
 	const piped = schema.transform((data, ctx): ExtendedOutput => {
+		/* Optional params exist on `data` only when advertised above. */
+		const optional = data as { filter?: string; lang?: string; q?: string }
 		let filterAst: FilterAST | null = null
-		if (data.filter) {
-			const filterResult = validateFilter(data.filter, filterConfig)
+		if (optional.filter) {
+			const filterResult = validateFilter(optional.filter, filterConfig, limits)
 			if (filterResult && !filterResult.valid) {
 				ctx.addIssue({
 					code: "custom",
@@ -393,6 +415,13 @@ function createListQuerySchema<
 
 		const rawSort = parseOrder(data.order)
 		const parsedSort: Array<SortField<TSortField>> = []
+		if (rawSort.length > limits.maxSortKeys) {
+			ctx.addIssue({
+				code: "custom",
+				message: `Too many sort keys: ${rawSort.length} (max ${limits.maxSortKeys})`,
+				path: ["order"],
+			})
+		}
 
 		for (const { direction, field, nulls } of rawSort) {
 			if (!sortSet.has(field)) {
@@ -409,6 +438,11 @@ function createListQuerySchema<
 			if (defaultField) {
 				parsedSort.push({ direction: "desc", field: defaultField })
 			}
+		}
+
+		if (data.cursor) {
+			const problem = cursorProblem(data.cursor, parsedSort)
+			if (problem) ctx.addIssue({ code: "custom", message: problem, path: ["cursor"] })
 		}
 
 		const sortOrderBy = {} as Record<TSortField, SortDirection>
@@ -430,12 +464,12 @@ function createListQuerySchema<
 		const output = {
 			cursor: data.cursor,
 			filterAst,
-			lang: data.lang,
+			lang: optional.lang,
 			limit: data.limit,
 			page: data.page,
 			parsedFields,
 			parsedSort,
-			q: data.q,
+			q: optional.q,
 			sortOrderBy,
 			...extendedValues,
 		}
@@ -462,13 +496,23 @@ function createListQuerySchema<
 	const stamped = withPipe.meta(
 		combMeta({
 			defaultOrder: buildDefaultOrder(sortConfig),
+			filterFields: Object.entries(filterConfig as Record<string, FieldType>).map(([field, type]) => ({
+				field,
+				ops: [...OPERATORS_BY_TYPE[type]],
+				type,
+			})),
 			filterable: Object.keys(filterConfig),
 			grammar: COMB_FILTER_GRAMMAR,
 			kind: "query",
+			maxFilterConditions: limits.maxConditions,
+			maxFilterDepth: limits.maxDepth,
+			maxInValues: limits.maxInValues,
 			maxLimit,
-			/* Not knowable here: `q` is resolved at buildListQuery, a different
-			   call site. Declaring it would be unvalidated. See docs §6.1. */
-			searchable: null,
+			maxSortKeys: limits.maxSortKeys,
+			nulls: ["first", "last"],
+			/* Declared, and enforced at buildListQuery: a `q` with no resolver
+			   throws there instead of being ignored. See docs §6.1. */
+			searchable: searchConfig ? [...searchConfig] : [],
 			selectable: selectableFrom(fieldsConfig),
 			sortable: [...sortConfig],
 			stableTiebreak: CURSOR_TIEBREAK_COLUMN,
@@ -550,7 +594,9 @@ export {
 	PAGINATION_DEFAULTS,
 	paginationResponseSchema,
 	type FieldsConfig,
+	LIST_QUERY_LIMITS,
 	type ListQueryConfig,
+	type ListQueryLimits,
 	type ListQueryDefinition,
 	type ListQueryOutput,
 	type ListQuerySchemaConfig,

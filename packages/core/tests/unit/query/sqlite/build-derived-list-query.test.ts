@@ -6,7 +6,9 @@
 import { type SQL, sql as drizzleSql } from "drizzle-orm"
 import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
-import { encodeCursor } from "../../../../src/query/cursor.ts"
+import { CombError } from "../../../../src/error.ts"
+import { createCursor } from "../../../../src/query/cursor.ts"
+import type { SortField } from "../../../../src/query/types.ts"
 import { buildDerivedListQuery } from "../../../../src/query/sqlite/build-list-query.ts"
 
 const derived = sqliteTable("derived", {
@@ -52,7 +54,7 @@ describe("buildDerivedListQuery — pagination mode", () => {
 	})
 
 	it("switches to cursor mode when a cursor resolves against the sort column", () => {
-		const cursor = encodeCursor({ c: 1700000000000, d: "desc", i: "d_9" })
+		const cursor = createCursor({ id: "d_9", published_at: 1700000000000 }, parsed().parsedSort)
 		const result = buildDerivedListQuery({ ...base, parsed: parsed({ cursor }) })
 
 		expect(result.meta.type).toBe("cursor")
@@ -60,13 +62,10 @@ describe("buildDerivedListQuery — pagination mode", () => {
 		expect(result.offset).toBe(0)
 	})
 
-	it("falls back to offset when the sort field has no supplied column", () => {
-		const cursor = encodeCursor({ c: 1, d: "desc", i: "d_9" })
-		const result = buildDerivedListQuery({
-			...base,
-			parsed: parsed({ cursor, parsedSort: [{ direction: "desc", field: "unmapped" }] }),
-		})
-		expect(result.meta.type).toBe("offset")
+	it("refuses a cursor when a sort field has no supplied column", () => {
+		const sort: SortField[] = [{ direction: "desc", field: "unmapped" }]
+		const cursor = createCursor({ id: "d_9", unmapped: 1 }, sort)
+		expect(() => buildDerivedListQuery({ ...base, parsed: parsed({ cursor, parsedSort: sort }) })).toThrow(CombError)
 	})
 
 	it("trims the search term and reports null when it is empty", () => {
@@ -107,7 +106,8 @@ describe("buildDerivedListQuery — ordering", () => {
 })
 
 describe("buildDerivedListQuery — cursor predicates across NULLs", () => {
-	const cursorFor = (value: unknown, direction: "asc" | "desc") => encodeCursor({ c: value, d: direction, i: "d_9" })
+	const cursorFor = (value: unknown, direction: "asc" | "desc") =>
+		createCursor({ id: "d_9", published_at: value }, [{ direction, field: "published_at" }])
 
 	it("descending, non-null: walks strictly backwards with an id tiebreak", () => {
 		const result = buildDerivedListQuery({
@@ -148,13 +148,9 @@ describe("buildDerivedListQuery — cursor predicates across NULLs", () => {
 		expect(sql.toLowerCase()).toContain("is null")
 	})
 
-	it("ignores a cursor encoded for the opposite direction", () => {
-		const result = buildDerivedListQuery({
-			...base,
-			/* encoded asc, queried desc — stale, so no cursor predicate */
-			parsed: parsed({ cursor: cursorFor(5, "asc") }),
-		})
-		expect(result.where).toBeUndefined()
+	it("rejects a cursor encoded for the opposite direction", () => {
+		/* encoded asc, queried desc — re-serving page one would duplicate rows */
+		expect(() => buildDerivedListQuery({ ...base, parsed: parsed({ cursor: cursorFor(5, "asc") }) })).toThrow(CombError)
 	})
 })
 

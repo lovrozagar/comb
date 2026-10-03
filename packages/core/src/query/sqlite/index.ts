@@ -19,8 +19,9 @@ export { conditionToSQL, filterToSQL, sortToOrderBy } from "./executor.ts"
 /* Raw SQL filter builders */
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts"
 
-/* Cursor pagination */
-export { buildCursorSQL, type CursorSQLConfig } from "./pagination.ts"
+/* Ordering, keyset pagination, pattern operators */
+export { keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts"
+export { patternToSQL } from "./pattern.ts"
 
 /* FTS5 search */
 export {
@@ -47,4 +48,4 @@ export {
 } from "./sql.ts"
 
 /* Types */
-export type { QueryExecutorConfig, QueryExecutorResult, RelationConfig } from "./types.ts"
+export type { RelationConfig } from "./types.ts"

@@ -63,12 +63,31 @@ type CombStatesMeta = {
 	terminal: string[]
 }
 
-/** Facts about a list query, derived from the config that parses the request. */
+/** One filterable field with the operators its type accepts. */
+type CombFilterField = {
+	field: string
+	type: string
+	ops: string[]
+}
+
+/**
+ * Facts about a list query, derived from the config that parses the request.
+ * Fields marked optional were added after v1 shipped; a v1 reader built before
+ * them ignores them, which is why adding them did not bump `v`.
+ */
 type CombQueryMeta = {
 	v: number
 	kind: "query"
 	filterable: string[]
+	/** `filterable` with types and operators */
+	filterFields?: CombFilterField[]
 	sortable: string[]
+	/** Null placements every sortable field accepts */
+	nulls?: Array<"first" | "last">
+	maxFilterConditions?: number
+	maxFilterDepth?: number
+	maxInValues?: number
+	maxSortKeys?: number
 	/** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */
 	searchable: string[] | null
 	selectable: string[]
@@ -257,6 +276,40 @@ function readQuery(raw: Record<string, unknown>, v: number, diagnose: (m: string
 		return diagnose("query payload needs string `defaultOrder`, `stableTiebreak`, `grammar`")
 	}
 
+	const optional: Partial<CombQueryMeta> = {}
+
+	const filterFields = raw["filterFields"]
+	if (filterFields !== undefined) {
+		const valid =
+			Array.isArray(filterFields) &&
+			filterFields.every(
+				(entry) =>
+					isRecord(entry) &&
+					typeof entry["field"] === "string" &&
+					typeof entry["type"] === "string" &&
+					isStringArray(entry["ops"]),
+			)
+		if (!valid) return diagnose("query payload `filterFields` needs {field, type, ops: string[]}[]")
+		optional.filterFields = filterFields as CombFilterField[]
+	}
+
+	const nulls = raw["nulls"]
+	if (nulls !== undefined) {
+		if (!isStringArray(nulls) || !nulls.every((n) => n === "first" || n === "last")) {
+			return diagnose('query payload `nulls` needs ("first" | "last")[]')
+		}
+		optional.nulls = nulls as Array<"first" | "last">
+	}
+
+	for (const key of ["maxFilterConditions", "maxFilterDepth", "maxInValues", "maxSortKeys"] as const) {
+		const value = raw[key]
+		if (value === undefined) continue
+		if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+			return diagnose(`query payload \`${key}\` needs a non-negative integer`)
+		}
+		optional[key] = value
+	}
+
 	return {
 		defaultOrder,
 		filterable,
@@ -268,6 +321,7 @@ function readQuery(raw: Record<string, unknown>, v: number, diagnose: (m: string
 		sortable,
 		stableTiebreak,
 		v,
+		...optional,
 	}
 }
 
@@ -318,6 +372,7 @@ export {
 	type CombMetaInput,
 	type CombMetaKind,
 	type CombMetaStamp,
+	type CombFilterField,
 	type CombQueryMeta,
 	type CombQueryMetaInput,
 	type CombStatesMeta,
