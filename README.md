@@ -604,7 +604,7 @@ import { openD1Session } from "@lovrozagar/comb/sqlite/d1/session"
 import { drizzle } from "drizzle-orm/d1"
 
 const { client, session } = openD1Session(env.DB, bookmarkFromCookie)
-const db = drizzle(client, { relations, schema })
+const db = drizzle(client, { relations })
 ```
 
 Reads go to the nearest replica while a bookmark guarantees the client never sees state older than its own last write. Without a bookmark it opens `first-unconstrained`. If `withSession` is missing — miniflare, older runtimes — it returns the raw handle and `session: undefined`, so the same code path works locally.
