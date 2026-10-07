@@ -16,6 +16,7 @@ describe("d1ErrorHandler", () => {
 			"D1_ERROR: too many requests",
 			"D1_ERROR: memory limit exceeded",
 			"D1_ERROR: cpu time limit reached",
+			"D1_ERROR: internal error; reference = psmr61b2k7q9xv3n0d8e4f1a",
 		]
 		for (const msg of patterns) {
 			try {

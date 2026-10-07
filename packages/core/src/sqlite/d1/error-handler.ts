@@ -12,6 +12,8 @@ const D1_TRANSIENT_PATTERNS = [
 	"cpu time limit",
 	"storage operation timeout",
 	"starting up",
+	/* Platform-side failure with a support reference; D1 already retried reads. */
+	"internal error",
 ] as const
 
 function isTransientD1Error(message: string): boolean {
