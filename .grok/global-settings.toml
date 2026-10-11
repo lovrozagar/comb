@@ -1,0 +1,33 @@
+# NOT auto-loaded by Grok. Merge these tables into ~/.grok/config.toml via:
+#   npm run sync:globals        # dry-run
+#   npm run sync:globals:apply  # write machine-wide (~/.grok; all Grok sessions on this host)
+# Project .grok/config.toml only loads MCP, plugins, and permission rules.
+#
+# [features] two_pass_compaction is not live until copied to ~/.grok/config.toml.
+# Project .grok/config.toml cannot set [features]. Do not add a SessionStart hook.
+# grok models (2026-08-26): grok-4.6, grok-4.5 (default). grok-build-0.1 not listed — grunt stays grok-4.5.
+# Orchestrator effort: agent frontmatter has no reasoning_effort key (unknown fields ignored).
+# Use `/effort low` or set reasoning_effort in ~/.grok/config.toml. Do not put effort strings in tools:.
+
+[agent]
+name = "orchestrator"
+# SSOT: .grok/agents/orchestrator.md (discovered).
+
+[subagents.toggle]
+explore = false
+plan = false
+general-purpose = false
+
+[subagents.models]
+explore = "grok-4.5"
+grunt = "grok-4.5"
+
+[compat.claude]
+agents = false
+
+[memory]
+enabled = false
+
+# Must be copied to ~/.grok/config.toml. Project .grok/config.toml cannot set [features].
+[features]
+two_pass_compaction = true

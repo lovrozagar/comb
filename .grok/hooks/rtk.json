@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/rtk-grok.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

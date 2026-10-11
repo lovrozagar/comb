@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "spawn_subagent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$GROK_WORKSPACE_ROOT/.grok/hooks/orchestrate-parent.js\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

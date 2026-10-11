@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "hooks": {
+    // Claude / Codex / Antigravity only (generate -t omits grokcli for hooks).
+    // Grok spawn/fat SSOT is hand-placed .grok/hooks/orchestrate-parent.js + orchestrate-parent.json.
+    "preToolUse": [
+      {
+        "matcher": "spawn_subagent|Task|Agent|spawn_agent",
+        "type": "command",
+        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/scripts/scrub-spawn-prompt.mjs\"",
+        "timeout": 5
+      },
+      {
+        // Fat Read/Grep/Glob/Bash + Write/Edit scratch rewrite (never deny writes).
+        "matcher": "Read|read_file|Grep|grep|Glob|list_dir|Bash|run_terminal_command|Write|Edit|write|search_replace",
+        "type": "command",
+        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/scripts/gate-fat-tools.mjs\"",
+        "timeout": 5
+      },
+      {
+        // Persist rewrite + fat-gate for session writes/reads. Grok json stays no-matcher (Read included).
+        "matcher": "Write|Edit|write|search_replace|Bash|run_terminal_command|Skill|skill|replace_file_content|run_command|Read|read_file|Grep|grep|Glob|list_dir",
+        "type": "command",
+        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+        "timeout": 5
+      }
+    ],
+    "sessionStart": [
+      {
+        // Code-only folder map as additionalContext (hooks-union keeps it first).
+        "type": "command",
+        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/scripts/session-map.mjs\"",
+        "timeout": 5
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "type": "command",
+        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+        "timeout": 5
+      }
+    ],
+    "stop": [
+      {
+        "type": "command",
+        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+        "timeout": 30
+      }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "command": "node \"${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.grok/hooks/orchestrate-parent.js\"",
+        "timeout": 30
+      }
+    ]
+  }
+}

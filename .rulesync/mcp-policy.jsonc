@@ -1,0 +1,13 @@
+// MCP deny-default SSOT. Named allow is empty this pass; do not add cloudflare/docker.
+{
+  "default": "deny",
+  "allow": [],
+  "plugins": {
+    "denyDefault": true
+  },
+  "servers": {},
+  "agents": {
+    "orchestrator": { "inherit": false },
+    "grunt": { "inherit": false }
+  }
+}

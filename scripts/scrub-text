@@ -1,0 +1,58 @@
+#!/usr/bin/env node
+
+import fs from "node:fs";
+import {
+  parseArgs,
+  autoMd,
+  scrubText,
+  helpText,
+  decodeUtf8,
+} from "./scrub-text-lib.mjs";
+
+function readInputs(files) {
+  if (!files.length) {
+    try {
+      return decodeUtf8(fs.readFileSync(0), "stdin");
+    } catch (e) {
+      process.stderr.write(`scrub-text: ${e.message}\n`);
+      process.exit(1);
+    }
+  }
+  const chunks = [];
+  for (const f of files) {
+    try {
+      chunks.push(decodeUtf8(fs.readFileSync(f), f));
+    } catch (e) {
+      process.stderr.write(`scrub-text: ${e.message}\n`);
+      process.exit(1);
+    }
+  }
+  return chunks.join("\n");
+}
+
+function emit(text) {
+  if (!text) return;
+  process.stdout.write(text);
+  if (!text.endsWith("\n")) process.stdout.write("\n");
+}
+
+export function main(argv) {
+  const args = parseArgs(argv);
+  if (args.unknown.length && !args.help) {
+    process.stderr.write(
+      "usage: scrub-text [--help] [--intent] [--md] [--no-md] [FILE ...]\n" +
+        `scrub-text: error: unrecognized arguments: ${args.unknown.join(" ")}\n`,
+    );
+    process.exit(2);
+  }
+  if (args.help) {
+    process.stdout.write(helpText());
+    return 0;
+  }
+  const md = autoMd(args.files, args.md, args.noMd);
+  const raw = readInputs(args.files);
+  emit(scrubText(raw, { md, intent: args.intent }));
+  return 0;
+}
+
+process.exit(main(process.argv.slice(2)));

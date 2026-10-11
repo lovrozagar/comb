@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "skipKeyPattern": "^(secrets?|api[_-]?key|access[_-]?token|tokens?|passwords?|authorization|mcp(servers)?|hooks)$",
+  "hosts": [
+    {
+      "id": "grok",
+      "mode": "merge",
+      "format": "toml",
+      "payload": ".grok/global-settings.toml",
+      "dest": ".grok/config.toml"
+    },
+    {
+      "id": "claude",
+      "mode": "noop",
+      "scope": "project-only",
+      "format": "json",
+      "payload": ".rulesync/global-settings/claude.json",
+      "dest": null
+    },
+    {
+      "id": "codex",
+      "mode": "noop",
+      "scope": "project-only",
+      "format": "toml",
+      "payload": ".rulesync/global-settings/codex.toml",
+      "dest": null
+    },
+    {
+      "id": "antigravity",
+      "mode": "noop",
+      "scope": "project-only",
+      "format": "json",
+      "payload": ".rulesync/global-settings/antigravity.json",
+      "dest": null
+    }
+  ]
+}
