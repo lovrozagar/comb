@@ -6,7 +6,7 @@
 | --- | --- | --- | --- | --- | --- |
 | ask | grunt | Session flag. Finish one step, recap, then ask before the next. |  |  |  |
 | auto | grunt | Session flag. Default. Work the task through. Ask on blockers instead of monkey-patching. |  |  |  |
-| browser | grunt | Browse via node scripts/browser.mjs (Lightpanda). App e2e uses Playwright. |  |  |  |
+| browser | grunt | Browse via node .rulesync/scripts/browser.mjs (Lightpanda). App e2e uses Playwright. |  |  |  |
 | commit | grunt | Inspect the diff and commit with a Conventional Commits subject line. Use for /commit, "commit this", "commit these cha… |  |  |  |
 | commit-and-push | grunt | Alias of commit-push (1-release stub). Use for /commit-and-push, "commit and push", "commit this and push". Must push.… |  |  |  |
 | commit-push | grunt | Commit with a Conventional Commits subject, then push. Use for /commit-push, "commit and push", "commit this and push".… |  |  |  |
@@ -15,7 +15,7 @@
 | explain | grunt | Longer human recap this reply only. |  |  |  |
 | handoff | grunt | Write a session handoff under .tmp/grunt/handoffs/. Continue with /pickup. |  |  |  |
 | implement-plan | grunt | Execute remaining leaves in a .tmp/grunt/plans checklist. Skip [x]. |  |  |  |
-| jev | grunt | Yes/no or named-option decision on text already saved. Run node scripts/jev.mjs --available first. On yes, one decision… |  |  |  |
+| jev | grunt | Yes/no or named-option decision on text already saved. Run node .rulesync/scripts/jev.mjs --available first. On yes, on… |  |  |  |
 | pickup | grunt | Continue a handoff under .tmp/grunt/handoffs/. |  |  |  |
 | su | grunt | Short status update: done, next, and blockers or on-track ETA. |  |  |  |
 | tmp | grunt | Dump a one-off convo artifact under .tmp/grunt/. |  |  |  |

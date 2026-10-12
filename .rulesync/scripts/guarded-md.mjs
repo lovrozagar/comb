@@ -26,6 +26,10 @@ function trimTrailingNewlines(text) {
   return String(text).replace(/(?:\r?\n)+$/, "");
 }
 
+function trimLeadingBlankLines(text) {
+  return String(text).replace(/^(?:[ \t]*\r?\n)+/, "");
+}
+
 function normEq(a, b) {
   return (
     trimTrailingNewlines(String(a).replace(/\r\n/g, "\n")) ===
@@ -55,7 +59,7 @@ function unwrapStackedMarkers(text) {
   const lines = String(text).split(/\r?\n/);
   let start = 0;
   let end = lines.length;
-  while (start < end && BEGIN_LINE_RE.test(lines[start])) start++;
+  while (start < end && (BEGIN_LINE_RE.test(lines[start]) || !lines[start].trim())) start++;
   while (end > start && lines[end - 1] === "") end--;
   while (end > start && END_LINE_RE.test(lines[end - 1])) {
     end--;
@@ -87,13 +91,15 @@ function userRemainderIsBlank(user) {
   return String(user).replace(/\r\n/g, "\n").replace(/\n/g, "") === "";
 }
 
+/** Blank lines around each sentinel: the markdown formatter fixed point (prettier, remark, mdformat). */
 export function composeGuardedMarkdown(gruntBody, userRemainder, nl = "\n") {
   const raw = extractGruntBody(gruntBody) ?? gruntBody;
-  const body = toNewline(trimTrailingNewlines(raw), nl);
-  const block = `${SENTINEL_BEGIN}${nl}${body}${nl}${SENTINEL_END}${nl}`;
+  const body = toNewline(trimTrailingNewlines(trimLeadingBlankLines(raw)), nl);
+  const inner = body ? `${nl}${body}${nl}${nl}` : nl;
+  const block = `${SENTINEL_BEGIN}${nl}${inner}${SENTINEL_END}${nl}`;
   const user = extractUserMarkdown(userRemainder == null ? "" : String(userRemainder));
   if (!user || userRemainderIsBlank(user)) return block;
-  return block + toNewline(user, nl);
+  return `${block}${nl}${toNewline(trimLeadingBlankLines(user), nl)}`;
 }
 
 export function mergeGuardedContent(existingText, gruntBody) {

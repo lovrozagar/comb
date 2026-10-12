@@ -13,14 +13,14 @@
  * validate+sim. Path deny from consumer `.rulesync/permissions.json`.
  * Gemini: SessionStart + AfterTool only; check-behind / path deny stay caveats.
  *
- *   node scripts/hooks-union.mjs           apply then check
- *   node scripts/hooks-union.mjs --check   keep-list only
+ *   node .rulesync/scripts/hooks-union.mjs           apply then check
+ *   node .rulesync/scripts/hooks-union.mjs --check   keep-list only
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 export const PULL = "node scripts/daily-pull-check.mjs";
 export const RTK = "node scripts/rtk-check.mjs";
@@ -29,11 +29,11 @@ export const BEHIND = "node scripts/check-behind.mjs --hook";
 export const VALIDATE = "node scripts/validate.mjs --hook";
 export const SIM = "node scripts/sim.mjs --hook";
 export const SCRUB =
-  'node "${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/scripts/scrub-spawn-prompt.mjs"';
+  'node "${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/scrub-spawn-prompt.mjs"';
 export const GATE_FAT =
-  'node "${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/scripts/gate-fat-tools.mjs"';
+  'node "${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/gate-fat-tools.mjs"';
 export const MAP =
-  'node "${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/scripts/session-map.mjs"';
+  'node "${GROK_WORKSPACE_ROOT:-${CLAUDE_PROJECT_DIR:-.}}/.rulesync/scripts/session-map.mjs"';
 const MAP_NEEDLE = "session-map.mjs";
 
 export const AUTORUN_NEEDLES = [
@@ -83,8 +83,13 @@ function resolveRoot(opts) {
   return process.cwd();
 }
 
+/** Consumer-owned extras live in the consumer's root `scripts/`. */
 function hasScript(root, name) {
   return fs.existsSync(path.join(root, "scripts", name));
+}
+
+function hasGruntScript(root, name) {
+  return fs.existsSync(path.join(root, ".rulesync", "scripts", name));
 }
 
 function withoutWritePath(arr) {
@@ -179,13 +184,13 @@ function desiredPre(root) {
 }
 
 function mapNeedles(root) {
-  return hasScript(root, MAP_NEEDLE) ? [MAP_NEEDLE] : [];
+  return hasGruntScript(root, MAP_NEEDLE) ? [MAP_NEEDLE] : [];
 }
 
 /** `map: false` for hosts rulesync emits no sessionStart for (Antigravity). */
 function desiredSession(root, { map = true } = {}) {
   const hooks = [];
-  if (map && hasScript(root, MAP_NEEDLE)) hooks.push(hookCmd(MAP, 5));
+  if (map && hasGruntScript(root, MAP_NEEDLE)) hooks.push(hookCmd(MAP, 5));
   if (hasScript(root, "daily-pull-check.mjs")) hooks.push(hookCmd(PULL));
   if (hasScript(root, "rtk-check.mjs")) hooks.push(hookCmd(RTK));
   if (hasScript(root, "daily-fleet-check.mjs")) hooks.push(hookCmd(FLEET));

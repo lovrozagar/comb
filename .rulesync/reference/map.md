@@ -13,7 +13,7 @@ Cheap outline. Not a file dump.
 - `.rulesync/reference/hooks.md` — hook policy
 - `.rulesync/reference/map.md` — this file
 - `.rulesync/reference/output.md` — default voice
-- `.rulesync/reference/scope.md` — size gate; research → suggest → wait → `/write-plan` → `/implement-plan`
+- `.rulesync/reference/scope.md` — size gate; plan by default: research → `/write-plan` → approval → `/implement-plan`
 - `.rulesync/reference/law.md` — domain law (stub; protocol stays cascade/overview)
 - Generated catalogs: `.rulesync/reference/INDEX.md` — aggregate catalog composed from slices (law.md, skills-map.md, refs-map.md). Maps/law = slices for deep dive. INDEX always. Not if-maps-else
 
@@ -29,35 +29,35 @@ Cheap outline. Not a file dump.
 - Init/upgrade prune (cumulative): retired skills `parent` `solo` `cascade`; agents `implementer` `thinker` (host files + `.grok/roles/{name}.toml` + `.gemini/agents/{name}/`); scripts `telemetry.mjs` `grunt-config.mjs`; `.grok/parent.md`; `.grok/skills/shared`; `.rulesync/grunt.config.jsonc` plus local overlay and example; reserved skill dirs this package no longer ships
 - `.grok/hooks/rtk.json` — RTK
 - `.grok/skills/` — generated from `.rulesync/skills/`; do not hand-edit
-- `.grok/global-settings.toml` — merged into `~/.grok/config.toml` by `scripts/sync-global-settings.mjs` (not auto-loaded; project config cannot set `[features]`)
+- `.grok/global-settings.toml` — merged into `~/.grok/config.toml` by `.rulesync/scripts/sync-global-settings.mjs` (not auto-loaded; project config cannot set `[features]`)
 - `.rulesync/global-settings/` — host manifest and reserved noop payloads
 - `.rulesync/mcp-policy.jsonc` — MCP deny-default SSOT (`default: deny`, `allow: []`)
 - `.rulesync/skills/{ask,auto,browser,clasp,commit,commit-and-push,commit-push,commit-push-deploy,commit-push-release,explain,google-workspace,handoff,implement-plan,listen,pickup,speak,tmp,write-plan}/` — skill SSOT; `rulesync -f skills` emits host mirrors byte-equal
 
 ## Scripts
-- `scripts/pipeline.mjs` — inner generate/check/watch chain (rulesync + emit-* + hooks-union / check-globals). Called by `guarded-roots`; not a public npm script (`rulesync:generate` `rulesync:check` `rulesync:watch` only)
-- `scripts/guarded-md.mjs` — sentinel merge for `AGENTS.md` `CLAUDE.md` `GEMINI.md`; copied into consumers
-- `scripts/guarded-roots.mjs` — snapshot/remerge `AGENTS.md` `CLAUDE.md` `GEMINI.md` around pipeline; check interiors wrapper
-- `scripts/check-globals.mjs` — `$HOME/.grok/config.toml` `[agent].name==orchestrator` + `[features].two_pass_compaction==true`
-- `scripts/gate-fat-tools.mjs`
-- `scripts/scrub-spawn-prompt.mjs`
-- `scripts/grunt-job.mjs` — flags `--job` `--query` `--path` `--glob` (repeatable) `--cwd`; regex in `--query` OK; never `cd &&`; unknown flags / exec shell-meta → FALLBACK
-- `scripts/parse-need.mjs`
-- `scripts/persist-handoff.mjs` — `.tmp/grunt/handoffs/{serial}-{slug}-{stamp}.md`
-- `scripts/persist-tmp.mjs` — `.tmp/grunt/{serial}-{slug}-{stamp}.{ext}` root files
-- `scripts/persist-plan.mjs`
-- `scripts/persist-implementation.mjs` — `.tmp/grunt/implementations/{serial}-{slug}-{stamp}.md`
-- `scripts/sync-global-settings.mjs`
-- `scripts/purge-global-mcps.mjs`
-- `scripts/emit-mcp-policy.mjs`
-- `scripts/emit-gemini.mjs`
-- `scripts/emit-agent-shell-tools.mjs`
-- `scripts/browser.mjs` — session browser rail
-- `scripts/google-workspace.mjs` — Sheets Docs Slides Calendar Gmail Drive
-- `scripts/speak.mjs` — TTS
-- `scripts/listen.mjs` — STT
-- `scripts/setup.mjs` — handheld speak / listen / google-workspace / browser (`~/.grunt/`)
-- `scripts/doctor.mjs` — unified prereqs; optional google-workspace (`oauth` `tokens` `adc` `clasprc`), speak, clasp, ffmpeg, whisper-cli
+- `.rulesync/scripts/pipeline.mjs` — inner generate/check/watch chain (rulesync + emit-* + hooks-union / check-globals). Called by `guarded-roots`; not a public npm script (`rulesync:generate` `rulesync:check` `rulesync:watch` only)
+- `.rulesync/scripts/guarded-md.mjs` — sentinel merge for `AGENTS.md` `CLAUDE.md` `GEMINI.md`; copied into consumers
+- `.rulesync/scripts/guarded-roots.mjs` — snapshot/remerge `AGENTS.md` `CLAUDE.md` `GEMINI.md` around pipeline; check interiors wrapper
+- `.rulesync/scripts/check-globals.mjs` — `$HOME/.grok/config.toml` `[agent].name==orchestrator` + `[features].two_pass_compaction==true`
+- `.rulesync/scripts/gate-fat-tools.mjs`
+- `.rulesync/scripts/scrub-spawn-prompt.mjs`
+- `.rulesync/scripts/grunt-job.mjs` — flags `--job` `--query` `--path` `--glob` (repeatable) `--cwd`; regex in `--query` OK; never `cd &&`; unknown flags / exec shell-meta → FALLBACK
+- `.rulesync/scripts/parse-need.mjs`
+- `.rulesync/scripts/persist-handoff.mjs` — `.tmp/grunt/handoffs/{serial}-{slug}-{stamp}.md`
+- `.rulesync/scripts/persist-tmp.mjs` — `.tmp/grunt/{serial}-{slug}-{stamp}.{ext}` root files
+- `.rulesync/scripts/persist-plan.mjs`
+- `.rulesync/scripts/persist-implementation.mjs` — `.tmp/grunt/implementations/{serial}-{slug}-{stamp}.md`
+- `.rulesync/scripts/sync-global-settings.mjs`
+- `.rulesync/scripts/purge-global-mcps.mjs`
+- `.rulesync/scripts/emit-mcp-policy.mjs`
+- `.rulesync/scripts/emit-gemini.mjs`
+- `.rulesync/scripts/emit-agent-shell-tools.mjs`
+- `.rulesync/scripts/browser.mjs` — session browser rail
+- `.rulesync/scripts/google-workspace.mjs` — Sheets Docs Slides Calendar Gmail Drive
+- `.rulesync/scripts/speak.mjs` — TTS
+- `.rulesync/scripts/listen.mjs` — STT
+- `.rulesync/scripts/setup.mjs` — handheld speak / listen / google-workspace / browser (`~/.grunt/`)
+- `.rulesync/scripts/doctor.mjs` — unified prereqs; optional google-workspace (`oauth` `tokens` `adc` `clasprc`), speak, clasp, ffmpeg, whisper-cli
 
 ## Tmp
 - `.tmp/grunt/plans/` — persist-plan; format SSOT = `.rulesync/reference/plan-format.md`

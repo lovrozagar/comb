@@ -10,7 +10,7 @@ Reserved (do not reuse in consumer custom skills): `ask` `auto` `browser` `clasp
 
 Override: same name → one SSOT path (`.rulesync/skills/<name>/`). Re-init / `grunt upgrade` force-refresh overwrites grunt-owned names; consumer extras kept. Maps `origin` badge ≠ content picker.
 
-Upgrade copies the current package trees and product scripts, then deletes cumulative retired grunt-owned names (skills `parent` `solo` `cascade`; agents `implementer` `thinker`; scripts `telemetry.mjs` `grunt-config.mjs`; paths `.grok/parent.md` `.grok/skills/shared` `.rulesync/grunt.config.jsonc` `.rulesync/grunt.config.local.jsonc` `.rulesync/grunt.config.local.jsonc.example`) and any reserved skill dir this package no longer ships. `fs.cpSync` does not remove dest extras; prune is what drops them. Consumer skills/refs/scripts not on those lists stay. Extra `##` headings in shared reference docs (e.g. `law.md`) are kept. `grunt:*` package scripts that differ from a known grunt default stay; `grunt:test:e2e` is added only when a vitest e2e config exists. Check steps omitted from dest `scripts/pipeline.mjs` seed `.rulesync/grunt.pipeline.jsonc`. doctor/listen/speak call `scripts/lib/env.mjs` `loadEnv` when that file exists.
+Upgrade copies the current package trees and product scripts (to `.rulesync/scripts/`), then deletes cumulative retired grunt-owned names (skills `parent` `solo` `cascade`; agents `implementer` `thinker`; scripts `telemetry.mjs` `grunt-config.mjs`; paths `.grok/parent.md` `.grok/skills/shared` `.rulesync/grunt.config.jsonc` `.rulesync/grunt.config.local.jsonc` `.rulesync/grunt.config.local.jsonc.example`) and any reserved skill dir this package no longer ships. `fs.cpSync` does not remove dest extras; prune is what drops them. Consumer skills/refs/scripts not on those lists stay. Extra `##` headings in shared reference docs (e.g. `law.md`) are kept. `grunt:*` package scripts that differ from a known grunt default stay; `grunt:test:e2e` is added only when a vitest e2e config exists. When a pre-0.11 root `scripts/` holds `guarded-roots.mjs` or `gate-fat-tools.mjs`, upgrade deletes the grunt product names there, removes the dir if that empties it, and rewrites `scripts/<grunt name>` refs in package scripts and `.rulesync/grunt.pipeline.jsonc`; consumer files and refs stay. Check steps omitted from the dest pipeline (`.rulesync/scripts/pipeline.mjs`, or the legacy root copy) seed `.rulesync/grunt.pipeline.jsonc`. doctor/listen/speak call the consumer's root `scripts/lib/env.mjs` `loadEnv` when that file exists.
 
 # Skills
 
@@ -18,7 +18,7 @@ Upgrade copies the current package trees and product scripts, then deletes cumul
 | --- | --- | --- | --- | --- | --- |
 | ask | grunt | Session flag. Finish one step, recap, then ask before the next. |  |  |  |
 | auto | grunt | Session flag. Default. Work the task through. Ask on blockers instead of monkey-patching. |  |  |  |
-| browser | grunt | Browse via node scripts/browser.mjs (Lightpanda). App e2e uses Playwright. |  |  |  |
+| browser | grunt | Browse via node .rulesync/scripts/browser.mjs (Lightpanda). App e2e uses Playwright. |  |  |  |
 | commit | grunt | Inspect the diff and commit with a Conventional Commits subject line. Use for /commit, "commit this", "commit these cha… |  |  |  |
 | commit-and-push | grunt | Alias of commit-push (1-release stub). Use for /commit-and-push, "commit and push", "commit this and push". Must push.… |  |  |  |
 | commit-push | grunt | Commit with a Conventional Commits subject, then push. Use for /commit-push, "commit and push", "commit this and push".… |  |  |  |
@@ -27,7 +27,7 @@ Upgrade copies the current package trees and product scripts, then deletes cumul
 | explain | grunt | Longer human recap this reply only. |  |  |  |
 | handoff | grunt | Write a session handoff under .tmp/grunt/handoffs/. Continue with /pickup. |  |  |  |
 | implement-plan | grunt | Execute remaining leaves in a .tmp/grunt/plans checklist. Skip [x]. |  |  |  |
-| jev | grunt | Yes/no or named-option decision on text already saved. Run node scripts/jev.mjs --available first. On yes, one decision… |  |  |  |
+| jev | grunt | Yes/no or named-option decision on text already saved. Run node .rulesync/scripts/jev.mjs --available first. On yes, on… |  |  |  |
 | pickup | grunt | Continue a handoff under .tmp/grunt/handoffs/. |  |  |  |
 | su | grunt | Short status update: done, next, and blockers or on-track ETA. |  |  |  |
 | tmp | grunt | Dump a one-off convo artifact under .tmp/grunt/. |  |  |  |
@@ -38,8 +38,8 @@ Upgrade copies the current package trees and product scripts, then deletes cumul
 | path | title | tags | summary |
 | --- | --- | --- | --- |
 | .rulesync/reference/browser.md | Browser | browser | Zero-config in-tree session rail. Not MCP. Not env. Not raw Playwright. Lightpanda first; swap to Chromium when blocked. |
-| .rulesync/reference/cascade.md | Protocol | cascade | The session agent has tools. Fat Read/Grep/Bash dumps are rewritten to `scripts/grunt-job.mjs` (squeez + stash). Isolat… |
-| .rulesync/reference/hooks.md | Hooks | hooks | SessionStart carries only the folder map: Claude / Codex run `../../scripts/session-map.mjs`, which injects the code-on… |
+| .rulesync/reference/cascade.md | Protocol | cascade | The session agent has tools. Fat Read/Grep/Bash dumps are rewritten to `.rulesync/scripts/grunt-job.mjs` (squeez + stas… |
+| .rulesync/reference/hooks.md | Hooks | hooks | SessionStart carries only the folder map: Claude / Codex run `../../.rulesync/scripts/session-map.mjs`, which injects t… |
 | .rulesync/reference/implementation-format.md | Implementation format (SSOT) |  | Local session journal for `/implement-plan`. Not a plan, handoff, or git commit. |
 | .rulesync/reference/jev.md | Jev | jev | Closed external decision. The source text is already saved. The question is a yes/no or a named choice. One call. Not o… |
 | .rulesync/reference/law.md | Law |  | Protocol stays overview; domain fills this. |
@@ -47,5 +47,5 @@ Upgrade copies the current package trees and product scripts, then deletes cumul
 | .rulesync/reference/output.md | Output | output | en-US unless asked. Concise complete sentences with natural grammar. Skip filler and fluff. Examples are a class. |
 | .rulesync/reference/plan-format.md | Plan format (SSOT) |  | Local session checklist. Not a design doc, PR stack, or DAG. |
 | .rulesync/reference/rtk.md | RTK | rtk | Shell stdout compression. PreToolUse: Bash → `rtk <cmd>`. Not Read/Grep/Glob/prompts/images. |
-| .rulesync/reference/scope.md | Scope | scope | Default: do the work. Escalate only when it is not a straight shot. This file is the size-gate SSOT. |
+| .rulesync/reference/scope.md | Scope | scope | Plan by default. A straight shot is the exception. The plan caps the result, so its depth scales with the work. This fi… |
 | .rulesync/reference/setup.md | Setup | setup | Handheld machine setup for optional integrations. Any OS. Secrets stay in `~/.grunt/` (Windows `%USERPROFILE%\.grunt`).… |

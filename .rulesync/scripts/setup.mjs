@@ -427,7 +427,7 @@ export async function setupSpeak({
     throw new Error(
       interactive
         ? "need an ElevenLabs or OpenAI key"
-        : "need --elevenlabs-key or --openai-key (or TTY: node scripts/setup.mjs speak)",
+        : "need --elevenlabs-key or --openai-key (or TTY: node .rulesync/scripts/setup.mjs speak)",
     );
   }
 
@@ -502,7 +502,7 @@ export async function setupListen({
       openaiKey = str(await io.password({ message: "OpenAI API key (fallback STT)" }));
     } else {
       throw new Error(
-        "need whisper-cli or --openai-key (or TTY: node scripts/setup.mjs listen)",
+        "need whisper-cli or --openai-key (or TTY: node .rulesync/scripts/setup.mjs listen)",
       );
     }
   }
@@ -611,7 +611,7 @@ export async function setupGoogleWorkspace({
       installOAuthJson({ src: credsFlag, dest });
     } else if (!fs.existsSync(dest)) {
       throw new Error(
-        `need --creds PATH (or TTY: node scripts/setup.mjs google-workspace)`,
+        `need --creds PATH (or TTY: node .rulesync/scripts/setup.mjs google-workspace)`,
       );
     }
 
@@ -678,7 +678,7 @@ export async function setupJev({
     throw new Error(
       interactive
         ? "need a TypeSafe API key"
-        : "need --api-key (or TTY: node scripts/setup.mjs jev)",
+        : "need --api-key (or TTY: node .rulesync/scripts/setup.mjs jev)",
     );
   }
   const dest = writeSecretJson(path.join(home, ".grunt", "jev.json"), { apiKey });

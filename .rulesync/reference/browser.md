@@ -7,7 +7,7 @@ tags: [browser]
 Zero-config in-tree session rail. Not MCP. Not env. Not raw Playwright. Lightpanda first; swap to Chromium when blocked.
 
 ```
-node scripts/browser.mjs nav|snap|click|fill|scroll|wait|hover|select|shot|pdf|stop|doctor|ensure
+node .rulesync/scripts/browser.mjs nav|snap|click|fill|scroll|wait|hover|select|shot|pdf|stop|doctor|ensure
 ```
 
 Default engine: **Lightpanda** (`lightpanda` on PATH). Chromium when a rule below requires it. Never report "can't browse" while Chromium is available.
@@ -27,14 +27,14 @@ Default engine: **Lightpanda** (`lightpanda` on PATH). Chromium when a rule belo
 | `shot` | screenshot (Chromium paint) |
 | `pdf` | PDF (Chromium paint) |
 | `stop` | reap engine pid; clear session; idempotent |
-| `doctor` | unified prereq doctor (`scripts/doctor.mjs`); alias `ensure` |
+| `doctor` | unified prereq doctor (`.rulesync/scripts/doctor.mjs`); alias `ensure` |
 | `ensure` | alias of `doctor` |
 
 Session + profile + artifacts: `.tmp/grunt/browser/` only.
 
 ## Install
 
-Run `grunt doctor` / `node scripts/doctor.mjs`. Handheld engine hints (no keys): `node scripts/setup.mjs browser`. Doctor/setup is enough. Do not read a README unless those are missing; then https://github.com/lovrozagar/grunt#prerequisites (not the consumer README).
+Run `grunt doctor` / `node .rulesync/scripts/doctor.mjs`. Handheld engine hints (no keys): `node .rulesync/scripts/setup.mjs browser`. Doctor/setup is enough. Do not read a README unless those are missing; then https://github.com/lovrozagar/grunt#prerequisites (not the consumer README).
 
 ## Engine
 
@@ -63,4 +63,4 @@ No user env. Never `GRUNT_BROWSER*`. Never `LIGHTPANDA_CDP_URL`.
 
 ## RTK
 
-`playwright` on the RTK command list is the **test-runner family only**. Browser rail is `lightpanda` + `scripts/browser.mjs`.
+`playwright` on the RTK command list is the **test-runner family only**. Browser rail is `lightpanda` + `.rulesync/scripts/browser.mjs`.

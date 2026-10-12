@@ -24,4 +24,4 @@ Flags: `-v`/`-vv`/`-vvv` · `--ultra-compact` · `--skip-env` · `-h` · `-V`
 Unknown cmds passthrough. `rtk run` unfiltered.
 
 **playwright:** test-runner family only — not the browser rail.
-**lightpanda:** browser-rail CDP via `scripts/browser.mjs` (not MCP, not env).
+**lightpanda:** browser-rail CDP via `.rulesync/scripts/browser.mjs` (not MCP, not env).

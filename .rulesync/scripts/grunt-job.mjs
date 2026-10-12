@@ -485,8 +485,10 @@ export function runSearch(query, { cwd, path: searchPath, glob } = {}) {
   }
   const globs = Array.isArray(glob) ? glob.filter(Boolean) : glob ? [String(glob)] : [];
   const relStart = path.relative(root, start) || ".";
+  // --hidden: grunt code (.rulesync/scripts) and rulesync SSOT live in dot dirs; .gitignore still applies.
   const rgArgs = [
     "-n",
+    "--hidden",
     "--max-count",
     String(MAX_HITS),
     "--max-filesize",

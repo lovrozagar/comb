@@ -9,7 +9,7 @@ Closed external decision. The source text is already saved. The question is a ye
 ## Availability
 
 ```
-node scripts/jev.mjs --available
+node .rulesync/scripts/jev.mjs --available
 ```
 
 Prints `yes` or `no` and exits 0. No request. No setup line.
@@ -18,14 +18,14 @@ Prints `yes` or `no` and exits 0. No request. No setup line.
 
 `yes`: continue below.
 
-A key is `TYPESAFE_API_KEY` or `apiKey` in `~/.grunt/jev.json` (mode 0600). Env wins. Setup, when a person asks for it: `node scripts/setup.mjs jev`. Spec: `.rulesync/reference/setup.md`.
+A key is `TYPESAFE_API_KEY` or `apiKey` in `~/.grunt/jev.json` (mode 0600). Env wins. Setup, when a person asks for it: `node .rulesync/scripts/setup.mjs jev`. Spec: `.rulesync/reference/setup.md`.
 
 ## Decision
 
 Write `.tmp/grunt/jev/<slug>-state.txt` (plain text or a JSON object) and `.tmp/grunt/jev/<slug>-questions.json` (the System One questions map). Put every label for that study in the one map. At most 8 questions. State at most 64000 characters.
 
 ```
-node scripts/jev.mjs --state .tmp/grunt/jev/<slug>-state.txt --questions .tmp/grunt/jev/<slug>-questions.json
+node .rulesync/scripts/jev.mjs --state .tmp/grunt/jev/<slug>-state.txt --questions .tmp/grunt/jev/<slug>-questions.json
 ```
 
 Yes/no:

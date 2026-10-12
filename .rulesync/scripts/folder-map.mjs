@@ -9,7 +9,7 @@
  * Depth is uniform per package: the deepest level that fits the size limit;
  * deeper folders end in `…`.
  *
- *   node scripts/folder-map.mjs [dir]
+ *   node .rulesync/scripts/folder-map.mjs [dir]
  */
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -32,6 +32,8 @@ export const DEFAULTS = Object.freeze({
 });
 
 export const CONFIG_REL = ".rulesync/grunt.map.jsonc";
+/** Grunt's product scripts run in every repo; map them despite the dot segment. */
+const DOT_CODE_DIRS = [".rulesync/scripts"];
 const MANIFESTS = ["package.json", "go.mod", "Cargo.toml", "pyproject.toml"];
 
 /** DEFAULTS merged with known keys from CONFIG_REL; bad file → defaults + warn. */
@@ -133,7 +135,9 @@ export function buildTree(root, files, opts = {}) {
     const segs = dir.split("/");
     if (!forced) {
       if (!code.test(f)) continue;
-      if (segs.some((s) => s.startsWith(".") || skip.has(s))) continue;
+      const under = DOT_CODE_DIRS.find((d) => dir === d || dir.startsWith(`${d}/`));
+      const checked = under ? segs.slice(under.split("/").length) : segs;
+      if (checked.some((s) => s.startsWith(".") || skip.has(s))) continue;
     }
     let node = top;
     for (const s of segs) {
@@ -254,7 +258,7 @@ export function folderMap({ root, dir = "", ...opts } = {}) {
   return { text, rows: lines.length, tokens: tokens(text), depth };
 }
 
-/** Text for `grunt map [dir]` / `node scripts/folder-map.mjs [dir]` run from `cwd`. */
+/** Text for `grunt map [dir]` / `node .rulesync/scripts/folder-map.mjs [dir]` run from `cwd`. */
 export function mapCommand(cwd, dir = "") {
   const out = folderMap({ root: cwd, dir });
   if (!out) return "grunt map: not a git repository\n";

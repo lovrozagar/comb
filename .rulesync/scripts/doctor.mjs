@@ -469,9 +469,9 @@ export function runDoctor({
   return { code: missingRequired.length || missingMaps.length ? 1 : 0, stdout, stderr: "" };
 }
 
-/** Load dest `scripts/lib/env.mjs` `loadEnv` when that file exists next to this script. */
+/** Load the consumer's root `scripts/lib/env.mjs` `loadEnv` when it exists (this script is `.rulesync/scripts/doctor.mjs`). */
 export async function loadOptionalConsumerEnv(baseHref = import.meta.url) {
-  const file = fileURLToPath(new URL("./lib/env.mjs", baseHref));
+  const file = fileURLToPath(new URL("../../scripts/lib/env.mjs", baseHref));
   if (!fs.existsSync(file)) return false;
   const { loadEnv } = await import(pathToFileURL(file).href);
   if (typeof loadEnv === "function") loadEnv();

@@ -13,7 +13,7 @@ import { folderMap } from "./folder-map.mjs";
 /** First line of the injected map; `depth` = levels per package, null when nothing was cut. */
 export function header(depth) {
   const scope = depth == null ? "complete" : `${depth} levels per package`;
-  return `Folder map (code folders, ${scope}; \`…\` = deeper, run \`node scripts/folder-map.mjs <dir>\`):`;
+  return `Folder map (code folders, ${scope}; \`…\` = deeper, run \`node .rulesync/scripts/folder-map.mjs <dir>\`):`;
 }
 /** Claude Code caps each hook's additionalContext at 10,000 chars; above it, only a 2KB preview stays inline. */
 export const HOOK_CONTEXT_CHARS = 10000;

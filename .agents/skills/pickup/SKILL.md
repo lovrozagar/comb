@@ -18,7 +18,7 @@ Load a handoff and continue in this session. Not a mode. Not `/handoff`. Inverse
 
 ## Resolve
 
-Read `.tmp/grunt/handoffs/`. Use `node scripts/grunt-job.mjs --job search|exec` when the listing is fat.
+Read `.tmp/grunt/handoffs/`. Use `node .rulesync/scripts/grunt-job.mjs --job search|exec` when the listing is fat.
 
 Order:
 

@@ -15,9 +15,9 @@ export const TIMEOUT_MS = 10_000;
 export const MAX_RETRY_WAIT_MS = 2_000;
 export const LOCK_STALE_MS = 10_000;
 
-const USAGE = "usage: node scripts/jev.mjs --available | --state FILE --questions FILE\n";
+const USAGE = "usage: node .rulesync/scripts/jev.mjs --available | --state FILE --questions FILE\n";
 const MISSING_KEY =
-  "missing TYPESAFE_API_KEY or ~/.grunt/jev.json. setup: node scripts/setup.mjs jev\n";
+  "missing TYPESAFE_API_KEY or ~/.grunt/jev.json. setup: node .rulesync/scripts/setup.mjs jev\n";
 
 export function jevJsonPath(home) {
   return path.join(home, ".grunt", "jev.json");

@@ -348,7 +348,7 @@ export function quoteQuery(q) {
 }
 
 export function gruntJobCommand(workspaceRoot, args) {
-  const script = path.join(workspaceRoot, "scripts", "grunt-job.mjs");
+  const script = path.join(workspaceRoot, ".rulesync", "scripts", "grunt-job.mjs");
   return `node ${script} ${args}`;
 }
 
@@ -498,12 +498,12 @@ function gruntJobRest(command, workspaceRoot) {
   const abs = path.isAbsolute(scriptArg)
     ? path.resolve(scriptArg)
     : path.resolve(workspaceRoot, scriptArg);
-  const expected = path.resolve(workspaceRoot, "scripts", "grunt-job.mjs");
+  const expected = path.resolve(workspaceRoot, ".rulesync", "scripts", "grunt-job.mjs");
   if (abs !== expected) return null;
   return parts.slice(i + 1);
 }
 
-/** True when argv targets workspace scripts/grunt-job.mjs (flags may be messy). */
+/** True when argv targets workspace .rulesync/scripts/grunt-job.mjs (flags may be messy). */
 export function isWorkspaceGruntJobScript(command, workspaceRoot) {
   return gruntJobRest(command, workspaceRoot) != null;
 }

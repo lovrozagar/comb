@@ -33,9 +33,9 @@ TMP_EXT: md
 <artifact only>
 ```
 
-`TMP_EXT` optional. Write any root filename under `.tmp/grunt/` (not `plans|handoffs|implementations|browser|orchestrator-logs`). Grok `orchestrate-parent.js` runs `scripts/persist-tmp.mjs`: serial/slug/ext from `TMP_*`, strips those lines, no YAML frontmatter, rewrites path + content. Write outside that root or missing `TMP_NAME:` is denied.
+`TMP_EXT` optional. Write any root filename under `.tmp/grunt/` (not `plans|handoffs|implementations|browser|orchestrator-logs`). Grok `orchestrate-parent.js` runs `.rulesync/scripts/persist-tmp.mjs`: serial/slug/ext from `TMP_*`, strips those lines, no YAML frontmatter, rewrites path + content. Write outside that root or missing `TMP_NAME:` is denied.
 
-Host without that hook: name the file per **Path** yourself, or pipe the body to `node scripts/persist-tmp.mjs --workspace {repo}` and use its `path`.
+Host without that hook: name the file per **Path** yourself, or pipe the body to `node .rulesync/scripts/persist-tmp.mjs --workspace {repo}` and use its `path`.
 
 Never rewrite an existing dump; new serial. Artifact file content after hook = artifact only (no TMP_* lines no YAML frontmatter).
 

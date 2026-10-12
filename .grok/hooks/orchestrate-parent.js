@@ -9,20 +9,20 @@ import {
   MAX_PROMPT_CHARS,
   rewriteSpawnToolInput,
   spawnCapReason,
-} from "../../scripts/scrub-spawn-prompt.mjs";
+} from "../../.rulesync/scripts/scrub-spawn-prompt.mjs";
 import {
   denyResponse,
   fatHookOutput,
   processFatTools,
   rewriteGruntScratchPath,
-} from "../../scripts/gate-fat-tools.mjs";
-import { persistPlan } from "../../scripts/persist-plan.mjs";
-import { persistHandoff } from "../../scripts/persist-handoff.mjs";
-import { persistImplementation, isFullImplementationBody, validateImplementation } from "../../scripts/persist-implementation.mjs";
-import { persistTmp } from "../../scripts/persist-tmp.mjs";
-import { parseNeed } from "../../scripts/parse-need.mjs";
-import { resolveJobCwd, runJob } from "../../scripts/grunt-job.mjs";
-import { otherLines, recordHook } from "../../scripts/board.mjs";
+} from "../../.rulesync/scripts/gate-fat-tools.mjs";
+import { persistPlan } from "../../.rulesync/scripts/persist-plan.mjs";
+import { persistHandoff } from "../../.rulesync/scripts/persist-handoff.mjs";
+import { persistImplementation, isFullImplementationBody, validateImplementation } from "../../.rulesync/scripts/persist-implementation.mjs";
+import { persistTmp } from "../../.rulesync/scripts/persist-tmp.mjs";
+import { parseNeed } from "../../.rulesync/scripts/parse-need.mjs";
+import { resolveJobCwd, runJob } from "../../.rulesync/scripts/grunt-job.mjs";
+import { otherLines, recordHook } from "../../.rulesync/scripts/board.mjs";
 
 export const ORCHESTRATOR_LOGS_DIR = ".tmp/grunt/orchestrator-logs";
 /** One-release dual-read; drop next release. */

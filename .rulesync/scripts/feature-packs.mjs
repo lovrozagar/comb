@@ -107,7 +107,7 @@ export function unselectedPackRels(selected) {
     if (on.has(pack.name)) continue;
     for (const dir of SKILL_DIRS) rels.push(`${dir}/${pack.skill}`);
     if (pack.ref) rels.push(`.rulesync/reference/${pack.ref}`);
-    if (pack.script) rels.push(`scripts/${pack.script}`);
+    if (pack.script) rels.push(`.rulesync/scripts/${pack.script}`);
   }
   return rels;
 }
