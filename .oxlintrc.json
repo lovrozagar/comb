@@ -12,7 +12,13 @@
 		"**/.cache/**",
 		"**/_gen/**",
 		"**/*.gen.ts",
-		"**/drizzle/**"
+		"**/drizzle/**",
+		".agents/**",
+		".claude/**",
+		".codex/**",
+		".gemini/**",
+		".grok/**",
+		".rulesync/**"
 	],
 	"categories": {
 		"correctness": "error",
