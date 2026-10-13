@@ -2,8 +2,12 @@ import { CombError } from "../../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../../types.ts"
 import { handleConstraintViolation } from "../constraint-handler.ts"
 
+/* Retryable per developers.cloudflare.com/d1/observability/debug-d1/, plus D1's overload and limit resets. */
 const D1_TRANSIENT_PATTERNS = [
 	"network connection lost",
+	"replica disconnected from primary",
+	"transient issue on remote node",
+	"client disconnected",
 	"reset",
 	"startup failure",
 	"overloaded",

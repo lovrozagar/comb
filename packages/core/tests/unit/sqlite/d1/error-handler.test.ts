@@ -16,6 +16,10 @@ describe("d1ErrorHandler", () => {
 			"D1_ERROR: too many requests",
 			"D1_ERROR: memory limit exceeded",
 			"D1_ERROR: cpu time limit reached",
+			/* Cloudflare documents these as retryable (developers.cloudflare.com/d1/observability/debug-d1/) */
+			"D1_ERROR: Replica disconnected from primary.",
+			"D1_ERROR: Cannot resolve D1 DB due to transient issue on remote node.",
+			"D1_ERROR: Can't read from request stream because client disconnected.",
 		]
 		for (const msg of patterns) {
 			try {
