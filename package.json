@@ -46,24 +46,33 @@
 		"grunt:sync:globals:check": "node .rulesync/scripts/check-globals.mjs",
 		"lint": "oxlint",
 		"lint:fix": "oxlint --fix",
-		"prepare": "git config --get core.hooksPath >/dev/null || git config core.hooksPath .githooks || true",
+		"prepare": "lefthook install --reset-hooks-path",
 		"test": "bun run --filter @lovrozagar/comb test",
 		"test:all": "bun run --filter @lovrozagar/comb test:all",
 		"test:bun": "bun run --filter @lovrozagar/comb test:bun",
 		"test:coverage": "bun run --filter @lovrozagar/comb test:coverage",
 		"test:watch": "bun run --filter @lovrozagar/comb test:watch",
 		"typecheck": "bun run --filter @lovrozagar/comb type:check",
-		"typecheck:strict": "bun run --filter @lovrozagar/comb type:check:strict"
+		"typecheck:strict": "bun run --filter @lovrozagar/comb type:check:strict",
+		"verify": "bun scripts/verify.ts"
 	},
 	"devDependencies": {
 		"@clack/prompts": "^0.11.0",
-		"@commitlint/cli": "21.2.2",
-		"@commitlint/config-conventional": "21.2.2",
+		"@commitlint/cli": "21.2.3",
+		"@commitlint/config-conventional": "21.2.3",
 		"@lovrozagar/grunt": "0.11.0",
-		"oxfmt": "^0.63.0",
-		"oxlint": "^1.78.0",
+		"lefthook": "2.2.2",
+		"oxfmt": "0.73.0",
+		"oxlint": "1.88.0",
 		"rulesync": "16.17.0",
 		"smol-toml": "^1.8.0"
 	},
-	"packageManager": "bun@1.3.11"
+	"packageManager": "bun@1.3.11",
+	"standards": {
+		"repo": "comb",
+		"gates": [
+			"typecheck:strict",
+			"test:bun"
+		]
+	}
 }

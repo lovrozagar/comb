@@ -1,0 +1,4 @@
+# This repo's hooks: the shared ones from lefthook.base.yml (managed by ~/Development/standards) plus this repo's own
+# jobs below. Edit this file by hand.
+extends:
+  - lefthook.base.yml

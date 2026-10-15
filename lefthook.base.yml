@@ -1,0 +1,46 @@
+# Managed by ~/Development/standards (files/lefthook.base.yml). Edit it there, then run `bun sync.ts`.
+# Shared hooks. Each repo's own lefthook.yml extends this file and adds its jobs.
+#
+# pre-commit: fixers first, the formatter last so it has the final word (oxlint autofixes emit their own style),
+# `stage_fixed` restages what they changed; then the same checks CI runs, on the staged files, and the type check.
+# pre-push: fmt and lint over the whole tree (catches commits made without hooks), the standards drift check, and the
+# verify stamp on every pushed commit.
+min_version: 2.2.2
+pre-commit:
+  piped: true
+  skip:
+    - merge
+    - rebase
+  jobs:
+    - name: lint-fix
+      glob: "*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
+      run: bunx oxlint --fix --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+    - name: fmt-fix
+      run: bunx oxfmt --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+    - name: fmt-check
+      run: bunx oxfmt --check --no-error-on-unmatched-pattern {staged_files}
+    - name: lint
+      glob: "*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
+      run: bunx oxlint --no-error-on-unmatched-pattern {staged_files}
+    - name: typecheck
+      run: bun run typecheck
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: bunx commitlint --edit {1}
+
+pre-push:
+  piped: true
+  jobs:
+    - name: fmt-check
+      run: bun run fmt:check
+    - name: lint
+      run: bun run lint
+    - name: standards
+      run: bun scripts/standards-check.ts
+    - name: verified
+      run: bun scripts/pre-push.ts {1}
+      use_stdin: true
