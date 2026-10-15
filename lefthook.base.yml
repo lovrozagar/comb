@@ -6,6 +6,8 @@
 # pre-push: fmt and lint over the whole tree (catches commits made without hooks), the standards drift check, and the
 # verify stamp on every pushed commit.
 min_version: 2.2.2
+# `**/` matches any depth, the repo root included.
+glob_matcher: doublestar
 pre-commit:
   piped: true
   skip:
@@ -13,7 +15,7 @@ pre-commit:
     - rebase
   jobs:
     - name: lint-fix
-      glob: "*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
+      glob: "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
       run: bunx oxlint --fix --no-error-on-unmatched-pattern {staged_files}
       stage_fixed: true
     - name: fmt-fix
@@ -22,7 +24,7 @@ pre-commit:
     - name: fmt-check
       run: bunx oxfmt --check --no-error-on-unmatched-pattern {staged_files}
     - name: lint
-      glob: "*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
+      glob: "**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
       run: bunx oxlint --no-error-on-unmatched-pattern {staged_files}
     - name: typecheck
       run: bun run typecheck
