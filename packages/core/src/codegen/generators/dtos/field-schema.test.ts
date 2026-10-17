@@ -147,4 +147,18 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		expect(schema("r", 'c.real("r").notNull()', "read")).toBe("z.number().meta(_m.real)")
 		expect(schema("x", 'blob("x")', "read")).toBe("z.unknown().nullable()")
 	})
+
+	it("carries every declared numeric bound (REVIEW 3.2)", () => {
+		expect(schema("t", 'c.integer("t", { min: -40, max: 60 }).notNull()', "read")).toMatch(
+			/^z\.number\(\)\.int\(\)\.min\(-40\)\.max\(60\)/,
+		)
+		expect(schema("c", 'c.integer("c", { max: 9 }).notNull()', "read")).toMatch(
+			/^z\.number\(\)\.int\(\)\.nonnegative\(\)\.max\(9\)/,
+		)
+		expect(schema("l", 'c.real("l", { min: -90.5, max: 90.5 }).notNull()', "read")).toMatch(
+			/^z\.number\(\)\.min\(-90\.5\)\.max\(90\.5\)/,
+		)
+		expect(schema("d", 'c.real("d", { min: -0.25 }).notNull()', "read")).toMatch(/^z\.number\(\)\.min\(-0\.25\)\.meta/)
+		expect(schema("r", 'c.real("r", { max: 1.5 }).notNull()', "read")).toMatch(/^z\.number\(\)\.max\(1\.5\)\.meta/)
+	})
 })

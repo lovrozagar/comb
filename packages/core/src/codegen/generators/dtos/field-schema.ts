@@ -94,12 +94,15 @@ function textBase(build: Build): Built {
 
 function numberBase({ annotations, field }: Build): Built {
 	if (/c\.(createdAt|updatedAt|deletedAt|timestamp)[<(]/.test(field.raw)) return "timestampSchema"
+	const { max, min } = annotations
 	if (/c\.(integer|serialId)[<(]/.test(field.raw)) {
-		const floor = annotations.min === null ? ".nonnegative()" : `.min(${annotations.min})`
-		return `z.number().int()${floor}.max(Number.MAX_SAFE_INTEGER)`
+		/* an unbounded integer is a non-negative count up to what a JS number holds exactly */
+		const floor = min === null ? ".nonnegative()" : `.min(${min})`
+		return `z.number().int()${floor}.max(${max ?? "Number.MAX_SAFE_INTEGER"})`
 	}
 	if (/c\.boolean[<(]/.test(field.raw)) return "z.boolean()"
-	return /c\.real[<(]/.test(field.raw) ? "z.number()" : undefined
+	if (!/c\.real[<(]/.test(field.raw)) return undefined
+	return `z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`
 }
 
 const BUILDERS = [enumBase, jsonBase, foreignKeyBase, textBase, numberBase]

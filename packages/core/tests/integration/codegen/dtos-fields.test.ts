@@ -98,3 +98,29 @@ describe("timestamp-named columns of another type (M-M8)", () => {
 		expect(read.safeParse({ created_at: "2026-01-01T00:00:00Z", id: "evt_1" }).success).toBe(true)
 	})
 })
+
+describe("numeric bounds (REVIEW 3.2)", () => {
+	const tables = `export const reading = sqliteTable("reading", {
+	id: c.id("rdg"),
+	temp: c.integer("temp", { min: -40, max: 60 }),
+	floor: c.integer("floor", { min: -3 }),
+	cap: c.integer("cap", { max: 9 }),
+	lat: c.real("lat", { min: -90.5, max: 90.5 }),
+	depth: c.real("depth", { min: -0.25 }),
+	ratio: c.real("ratio", { max: 1.5 }),
+})`
+
+	it("reach the schema for integers and reals: negative, fractional, min only, max only, both", async () => {
+		const reading = (await generatedDtos("bounds", tables)).reading as GeneratedEntity
+		const shape = (reading.readingDtoCreateSchema as z.ZodObject).shape as Record<string, z.ZodType>
+		const accepts = (column: string, value: number) => shape[column]?.safeParse(value).success
+		const verdicts = (column: string, values: number[]) => values.map((value) => accepts(column, value))
+
+		expect(verdicts("temp", [-41, -40, 60, 61])).toEqual([false, true, true, false])
+		expect(verdicts("floor", [-4, -3, 1_000_000])).toEqual([false, true, true])
+		expect(verdicts("cap", [-1, 0, 9, 10])).toEqual([false, true, true, false])
+		expect(verdicts("lat", [-90.6, -90.5, 90.5, 90.6])).toEqual([false, true, true, false])
+		expect(verdicts("depth", [-0.26, -0.25, 1e9])).toEqual([false, true, true])
+		expect(verdicts("ratio", [-1e9, 1.5, 1.51])).toEqual([true, true, false])
+	})
+})
