@@ -79,3 +79,12 @@ describe("readSqliteError: text and cycles", () => {
 		expect(readSqliteError(a)).toBeNull()
 	})
 })
+
+describe("readSqliteError: a bare SQLITE_CONSTRAINT code", () => {
+	it("is refined from SQLite's wording, and kept when the wording names no kind", () => {
+		expect(readSqliteError(bun("SQLITE_CONSTRAINT", "UNIQUE constraint failed: a.b"))?.code).toBe(
+			"SQLITE_CONSTRAINT_UNIQUE",
+		)
+		expect(readSqliteError(bun("SQLITE_CONSTRAINT", "constraint failed"))?.code).toBe("SQLITE_CONSTRAINT")
+	})
+})

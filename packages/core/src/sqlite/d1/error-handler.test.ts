@@ -85,3 +85,14 @@ describe("d1ErrorHandler: values embedded in D1 messages", () => {
 		expect(thrown(new Error(message))).toMatchObject({ errorKey: "database_io_error", status: 500 })
 	})
 })
+
+describe("d1ErrorHandler: a D1 message without its extended code", () => {
+	it("still maps the constraint", () => {
+		const error = new Error("D1_ERROR: UNIQUE constraint failed: user.email_address: SQLITE_CONSTRAINT")
+		expect(thrown(error)).toMatchObject({
+			column: "email_address",
+			errorKey: "unique_constraint_violation",
+			status: 409,
+		})
+	})
+})

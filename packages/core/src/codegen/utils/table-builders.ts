@@ -5,7 +5,8 @@
 import type { SourceFile } from "ts-morph"
 
 const DRIZZLE_CORE = /^drizzle-orm\/(?:sqlite|pg)-core$/
-const DRIZZLE_BUILDERS = new Set(["sqliteTable", "pgTable"])
+// lookup-table: drizzle-orm table builder export names
+const DRIZZLE_BUILDERS = /* @__PURE__ */ new Set(["sqliteTable", "pgTable"])
 
 /** The local names that declare a table in `file`. */
 export function tableBuilders(file: SourceFile): Set<string> {

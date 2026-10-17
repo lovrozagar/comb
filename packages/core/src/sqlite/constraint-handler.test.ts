@@ -224,3 +224,35 @@ describe("handleConstraintViolation given 0.4.x's flattened message", () => {
 		expect(() => handleConstraintViolation(d1, maps)).toThrow(expect.objectContaining({ errorKey: "invalid_status" }))
 	})
 })
+
+describe("constraint errors that carry only the base SQLITE_CONSTRAINT code", () => {
+	const maps: ConstraintMap[] = [
+		{
+			user: {
+				check: { user_age_check: { cause: "Age", errorKey: "user_age_invalid" } },
+				unique: {
+					email_address: { cause: "Email", errorKey: "user_email_taken" },
+					handle_name: { cause: "Handle", errorKey: "user_handle_taken" },
+				},
+			},
+		},
+	]
+
+	it.each([
+		["D1_ERROR: UNIQUE constraint failed: user.email_address: SQLITE_CONSTRAINT", "user_email_taken"],
+		["UNIQUE constraint failed: user.handle_name: SQLITE_CONSTRAINT", "user_handle_taken"],
+		["D1_ERROR: CHECK constraint failed: user_age_check: SQLITE_CONSTRAINT", "user_age_invalid"],
+		["D1_ERROR: NOT NULL constraint failed: user.name: SQLITE_CONSTRAINT", "required_field_missing"],
+		["D1_ERROR: FOREIGN KEY constraint failed: SQLITE_CONSTRAINT", "foreign_key_violation"],
+	])("infers the kind from the wording: %s", (message, errorKey) => {
+		expect(() => handleConstraintViolation(message, maps)).toThrow(expect.objectContaining({ errorKey }))
+		expect(() => handleConstraintViolation(new Error(message), maps)).toThrow(expect.objectContaining({ errorKey }))
+	})
+
+	it("does so for a driver error with code SQLITE_CONSTRAINT and no extended code", () => {
+		const error = engine("SQLITE_CONSTRAINT", "UNIQUE constraint failed: user.email_address")
+		expect(() => handleConstraintViolation(error, maps)).toThrow(
+			expect.objectContaining({ errorKey: "user_email_taken" }),
+		)
+	})
+})

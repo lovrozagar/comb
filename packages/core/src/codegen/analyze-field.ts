@@ -1,0 +1,99 @@
+/**
+ * One column of a table definition, read from its initializer's text: the helper, the SQL name,
+ * keys, references, enum values, states and annotations every generator needs.
+ */
+import type { FieldMeta, ForeignKeyRef } from "./analyzer-types.ts"
+import { parseFieldConstraints } from "./annotations.ts"
+import { extractEnumFromType, extractEnumValues, extractLength, extractStates } from "./utils/ts-morph.ts"
+
+/**
+ * Extract Drizzle helper name from raw initializer text.
+ * e.g. "c.text(...)" -> "text", "c.createdAt(...)" -> "createdAt"
+ */
+function extractDrizzleHelper(raw: string): string {
+	const match = raw.match(/c\.(\w+)[<(]/)
+	return match?.[1] ?? "unknown"
+}
+
+/**
+ * Extract JSON schema name from c.json("columnName", schemaName) call
+ */
+function extractJsonSchemaFromCall(raw: string): string | null {
+	const match = raw.match(/c\.json(?:<[^>]+>)?\("[\w_]+",\s*(\w+)(?:,\s*\{[^}]*\})?\)/)
+	return match?.[1] ?? null
+}
+
+/**
+ * Extract FK reference info from .references(() => table.column, { onDelete: "cascade" })
+ */
+function extractForeignKey(raw: string, fieldName: string): ForeignKeyRef | null {
+	const refMatch = raw.match(/\.references\(\s*\(\)\s*=>\s*(\w+)\.(\w+)(?:,\s*\{([^}]*)\})?\)/)
+	if (!refMatch || refMatch[1] === undefined || refMatch[2] === undefined) return null
+
+	const optionsStr = refMatch[3] ?? ""
+	/* Drizzle's referential actions include multi-word forms — "set null",
+	   "set default", "no action" — so \w+ would silently drop three of five. */
+	const onDeleteMatch = optionsStr.match(/onDelete:\s*["']([^"']+)["']/)
+	const onUpdateMatch = optionsStr.match(/onUpdate:\s*["']([^"']+)["']/)
+
+	return {
+		column: fieldName,
+		onDelete: onDeleteMatch?.[1],
+		onUpdate: onUpdateMatch?.[1],
+		refColumn: refMatch[2],
+		refTable: refMatch[1],
+	}
+}
+
+/* c.id(prefix) and c.serialId() always make the column "id"; their argument is no column name */
+const ID_HELPERS = /^\s*c\.(?:id|serialId)\s*\(/
+
+/** The SQL column name a column call declares: its first string argument, else the property name. */
+function sqlNameOf(key: string, raw: string): string {
+	if (ID_HELPERS.test(raw)) return "id"
+	const named = /^\s*(?:c\.)?\w+\s*(?:<[^(]*>)?\(\s*(["'`])([^"'`]+)\1/.exec(raw)
+	return named?.[2] ?? key
+}
+
+/** Parse a single field from a property assignment node. */
+export function parseField(key: string, raw: string): FieldMeta {
+	const constraints = parseFieldConstraints(raw, key)
+	const isPrimaryKey = /\.primaryKey\(/.test(raw) || ID_HELPERS.test(raw)
+	const isNotNull = /\.notNull\(\)/.test(raw) || isPrimaryKey
+	const drizzleHelper = extractDrizzleHelper(raw)
+	const enumName = extractEnumFromType(raw)
+	const enumValues = extractEnumValues(raw)
+	const states = extractStates(raw)
+	const jsonSchemaName = extractJsonSchemaFromCall(raw)
+	const foreignKey = extractForeignKey(raw, key)
+	const length = extractLength(raw)
+
+	/* Also detect FK from c.ref helper */
+	let fk = foreignKey
+	if (!fk && /c\.ref[<(]/.test(raw)) {
+		const refHelperMatch = raw.match(/c\.ref[<(].*?\.references\(\s*\(\)\s*=>\s*(\w+)\.(\w+)/)
+		if (refHelperMatch && refHelperMatch[1] !== undefined && refHelperMatch[2] !== undefined) {
+			fk = {
+				column: key,
+				refColumn: refHelperMatch[2],
+				refTable: refHelperMatch[1],
+			}
+		}
+	}
+
+	return {
+		constraints,
+		drizzleHelper,
+		enumName,
+		enumValues,
+		states,
+		foreignKey: fk,
+		isNotNull,
+		isPrimaryKey,
+		jsonSchemaName,
+		length,
+		name: key,
+		raw,
+		sqlName: sqlNameOf(key, raw),
+	}
+}

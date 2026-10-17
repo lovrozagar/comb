@@ -27,24 +27,32 @@ function field(error: Error, name: string): unknown {
 
 const sqliteCode = (value: unknown): value is string => typeof value === "string" && value.startsWith("SQLITE_")
 
-/** The code and message one error in the chain carries, or null. */
-function readOne(error: Error): { code: string; message: string } | null {
-	const extended = field(error, "extendedCode")
-	if (sqliteCode(extended)) return { code: extended, message: error.message.replace(LIBSQL_PREFIX, "") }
-	const code = field(error, "code")
-	if (sqliteCode(code)) return { code, message: error.message }
-	const d1 = D1_MESSAGE.exec(error.message)
-	if (d1 === null) return null
-	return { code: d1[3] ?? (d1[2] as string), message: d1[1] as string }
-}
-
-/* a bare engine message, as callers before 0.5.0 passed it, names its kind in its first words */
+/* SQLite names a constraint's kind in the message's first words; a bare message (as callers
+ * before 0.5.0 passed it) or a bare SQLITE_CONSTRAINT code is classified by them */
 const STEMS: Array<[RegExp, string]> = [
 	[/^UNIQUE constraint failed/i, "SQLITE_CONSTRAINT_UNIQUE"],
 	[/^CHECK constraint failed/i, "SQLITE_CONSTRAINT_CHECK"],
 	[/^NOT NULL constraint failed/i, "SQLITE_CONSTRAINT_NOTNULL"],
 	[/^FOREIGN KEY constraint failed/i, "SQLITE_CONSTRAINT_FOREIGNKEY"],
 ]
+
+/** The extended code for `code`: a bare SQLITE_CONSTRAINT is refined from the wording, when it can be. */
+function refine(code: string, message: string): { code: string; message: string } {
+	if (code !== "SQLITE_CONSTRAINT") return { code, message }
+	const stem = STEMS.find(([pattern]) => pattern.test(message))
+	return { code: stem === undefined ? code : stem[1], message }
+}
+
+/** The code and message one error in the chain carries, or null. */
+function readOne(error: Error): { code: string; message: string } | null {
+	const extended = field(error, "extendedCode")
+	if (sqliteCode(extended)) return refine(extended, error.message.replace(LIBSQL_PREFIX, ""))
+	const code = field(error, "code")
+	if (sqliteCode(code)) return refine(code, error.message)
+	const d1 = D1_MESSAGE.exec(error.message)
+	if (d1 === null) return null
+	return refine(d1[3] ?? (d1[2] as string), d1[1] as string)
+}
 
 function readLine(line: string): SqliteErrorRead | null {
 	const d1 = readOne(new Error(line))
