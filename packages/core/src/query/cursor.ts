@@ -29,16 +29,22 @@ const DEFAULT_SORT: readonly SortField[] = [{ direction: "desc", field: "created
  * the exact sort that produced it.
  */
 type CursorPayload = {
-	i: string
+	i: CursorId
 	s: string
 	v: unknown[]
 }
 
+/** The tiebreak id as the row held it: a number stays a number, so it compares as one */
+type CursorId = number | string
+
 type DecodedCursor = {
-	id: string
+	id: CursorId
 	sort: string
-	values: unknown[]
+	values: CursorValue[]
 }
+
+/** What a sort key can hold and SQLite can compare */
+type CursorValue = boolean | Date | number | string | null
 
 type PaginationQueryInput = {
 	cursor?: string
@@ -53,7 +59,8 @@ type PaginationOptions = {
 }
 
 type PaginationMeta = {
-	count: number
+	/** Rows the filter matches across all pages; null when the response cannot know */
+	count: number | null
 	hasMore: boolean
 	limit: number
 	nextCursor: string | null
@@ -79,11 +86,15 @@ function encodeValue(value: unknown): unknown {
 	return value instanceof Date ? { [DATE_TAG]: value.getTime() } : (value ?? null)
 }
 
-function decodeValue(value: unknown): unknown {
-	if (typeof value === "object" && value !== null && DATE_TAG in value) {
-		return new Date((value as Record<string, number>)[DATE_TAG] as number)
-	}
-	return value
+const isId = (value: unknown): value is CursorId =>
+	typeof value === "string" || (typeof value === "number" && Number.isFinite(value))
+
+/** A sort value from the wire, or undefined when it is not one a cursor can carry */
+function decodeValue(value: unknown): CursorValue | undefined {
+	if (value === null || typeof value === "boolean" || isId(value)) return value
+	if (typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1) return undefined
+	const time = (value as Record<string, unknown>)[DATE_TAG]
+	return typeof time === "number" && Number.isFinite(time) ? new Date(time) : undefined
 }
 
 function toBase64Url(text: string): string {
@@ -108,10 +119,14 @@ function decodeCursor(cursor: string | null | undefined): DecodedCursor | null {
 	try {
 		const parsed = JSON.parse(fromBase64Url(cursor)) as unknown
 		if (typeof parsed !== "object" || parsed === null) return null
-		const { i, s, v } = parsed as Partial<CursorPayload>
-		if (typeof i !== "string" || typeof s !== "string" || !Array.isArray(v)) return null
-		return { id: i, sort: s, values: v.map(decodeValue) }
+		const { i, s, v } = parsed as Partial<Record<keyof CursorPayload, unknown>>
+		if (!isId(i) || typeof s !== "string" || !Array.isArray(v)) return null
+		const values = v.map(decodeValue)
+		/* a value SQLite cannot compare would reach the driver and fail there with a 500 */
+		if (values.includes(undefined)) return null
+		return { id: i, sort: s, values: values as CursorValue[] }
 	} catch {
+		// reason: text that is not base64url JSON is not a cursor; callers answer with invalid_cursor
 		return null
 	}
 }
@@ -124,7 +139,7 @@ function createCursor(
 ): string {
 	const idField = opts?.idField ?? CURSOR_TIEBREAK_COLUMN
 	return encodeCursor({
-		i: String(record[idField]),
+		i: record[idField] as CursorId,
 		s: sortSignature(parsedSort),
 		v: parsedSort.map(({ field }) => record[field]),
 	})
@@ -173,7 +188,9 @@ export {
 	getPrimarySortDirection,
 	readCursor,
 	sortSignature,
+	type CursorId,
 	type CursorPayload,
+	type CursorValue,
 	type DecodedCursor,
 	type PaginationMeta,
 	type PaginationOptions,

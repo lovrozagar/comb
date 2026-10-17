@@ -533,6 +533,9 @@ The e2e file executes the generated DTO rather than string-matching it, so it co
 actually occur: a bare item (root, depth 0), a bare array (under `items`, depth 1, still reachable
 by honey's `search: "root"`), and a pagination envelope `{ articles: [Article], count, hasMore,
 nextCursor }` (depth 2 — invisible to `"root"`, found by `"deep"`, well inside its limit of 6).
+In that envelope `count` is the rows the filter matches across all pages, or `null` when the
+response cannot know it: cursor pages, and offset pages past the end (`paginationResponseSchema`
+types it `number | null`).
 Ambiguity and dedup are pinned too: two _different_ entities at one depth is an error in honey, the
 _same_ entity twice is not.
 

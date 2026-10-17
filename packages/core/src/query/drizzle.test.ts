@@ -5,8 +5,9 @@ import { parseSelect } from "./fields.ts"
 import type { FilterAST } from "./types.ts"
 
 describe("drizzle.countExtra", () => {
-	it("returns object with _total sql field", () => {
-		const result = drizzle.countExtra()
+	it("selects the window count for an offset request and nothing for a cursor one", () => {
+		expect(drizzle.countExtra({ cursor: "abc" })).toEqual({})
+		const result = drizzle.countExtra({})
 		expect(result._total).toBeDefined()
 	})
 })

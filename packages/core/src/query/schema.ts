@@ -43,7 +43,8 @@ const PAGINATION_DEFAULTS = {
 /** Pagination response meta schema for list endpoints */
 const paginationResponseSchema = z.compile(
 	z.object({
-		count: z.number().int().min(0),
+		/* rows the filter matches across all pages; null when the response cannot know (cursor pages) */
+		count: z.number().int().min(0).nullable(),
 		hasMore: z.boolean(),
 		limit: z.number().int().min(1),
 		nextCursor: z.string().nullable(),
