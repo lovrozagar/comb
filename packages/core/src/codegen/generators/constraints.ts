@@ -51,7 +51,7 @@ export function generateConstraints(tables: TableMeta[], dbName: string, config:
 		if (fkFields.length > 0) {
 			tableEntry.foreignKey = {}
 			for (const field of fkFields) {
-				tableEntry.foreignKey[field.name] = {
+				tableEntry.foreignKey[field.sqlName] = {
 					cause: "Referenced record does not exist",
 					errorKey: `${tableName}_${field.name}_reference_not_found`,
 					statusKey: "conflict",
@@ -64,7 +64,7 @@ export function generateConstraints(tables: TableMeta[], dbName: string, config:
 		if (uniqueColumnFields.length > 0) {
 			if (!tableEntry.unique) tableEntry.unique = {}
 			for (const field of uniqueColumnFields) {
-				tableEntry.unique[field.name] = {
+				tableEntry.unique[field.sqlName] = {
 					cause: `A record with this ${field.name} value already exists`,
 					errorKey: `${tableName}_${field.name}_duplicate`,
 					statusKey: "conflict",
@@ -76,7 +76,9 @@ export function generateConstraints(tables: TableMeta[], dbName: string, config:
 		for (const idx of table.uniqueIndexes) {
 			if (!tableEntry.unique) tableEntry.unique = {}
 			for (const col of idx.columns) {
-				tableEntry.unique[col] = {
+				/* the engine reports the column's SQL name; the error key keeps the property name */
+				const sqlName = table.fields.find((f) => f.name === col)?.sqlName ?? col
+				tableEntry.unique[sqlName] = {
 					cause: `A record with this ${col} value already exists`,
 					errorKey: `${tableName}_${col}_duplicate`,
 					statusKey: "conflict",

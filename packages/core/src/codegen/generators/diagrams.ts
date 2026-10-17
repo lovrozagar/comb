@@ -67,7 +67,7 @@ function transformTables(metas: TableMeta[]): { relations: Relation[]; tables: T
 
 		for (const field of meta.fields) {
 			const col: Column = {
-				name: field.name,
+				name: field.sqlName,
 				nullable: !field.isNotNull,
 				primaryKey: field.isPrimaryKey,
 				type: drizzleHelperToSqlType(field.drizzleHelper),
@@ -81,7 +81,7 @@ function transformTables(metas: TableMeta[]): { relations: Relation[]; tables: T
 					table: field.foreignKey.refTable,
 				}
 				relations.push({
-					from: `${meta.sqlName}.${field.name}`,
+					from: `${meta.sqlName}.${field.sqlName}`,
 					onDelete: field.foreignKey.onDelete,
 					onUpdate: field.foreignKey.onUpdate,
 					to: `${field.foreignKey.refTable}.${field.foreignKey.refColumn}`,

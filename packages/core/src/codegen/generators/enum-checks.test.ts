@@ -24,6 +24,7 @@ function makeField(overrides: Partial<FieldMeta> & { name: string }): FieldMeta 
 			url: false,
 		},
 		drizzleHelper: "text",
+		sqlName: overrides.sqlName ?? overrides.name,
 		enumName: null,
 		enumValues: null,
 		states: null,

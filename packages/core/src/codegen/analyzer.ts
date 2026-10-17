@@ -26,9 +26,9 @@ import {
 	extractStates,
 	getTableName,
 	getTablesImportPath,
-	isTableDefinition,
 	setIdentifierValueMap,
 } from "./utils/ts-morph.ts"
+import { isTableDefinition, tableBuilders } from "./utils/table-builders.ts"
 
 /**
  * Extract Drizzle helper name from raw initializer text.
@@ -69,10 +69,20 @@ function extractForeignKey(raw: string, fieldName: string): ForeignKeyRef | null
 	}
 }
 
+/* c.id(prefix) and c.serialId() always make the column "id"; their argument is no column name */
+const ID_HELPERS = /^\s*c\.(?:id|serialId)\s*\(/
+
+/** The SQL column name a column call declares: its first string argument, else the property name. */
+function sqlNameOf(key: string, raw: string): string {
+	if (ID_HELPERS.test(raw)) return "id"
+	const named = /^\s*(?:c\.)?\w+\s*(?:<[^(]*>)?\(\s*(["'`])([^"'`]+)\1/.exec(raw)
+	return named?.[2] ?? key
+}
+
 /** Parse a single field from a property assignment node. */
 function parseField(key: string, raw: string): FieldMeta {
 	const constraints = parseFieldConstraints(raw, key)
-	const isPrimaryKey = /\.primaryKey\(/.test(raw) || /c\.id\(/.test(raw)
+	const isPrimaryKey = /\.primaryKey\(/.test(raw) || ID_HELPERS.test(raw)
 	const isNotNull = /\.notNull\(\)/.test(raw) || isPrimaryKey
 	const drizzleHelper = extractDrizzleHelper(raw)
 	const enumName = extractEnumFromType(raw)
@@ -108,6 +118,7 @@ function parseField(key: string, raw: string): FieldMeta {
 		length,
 		name: key,
 		raw,
+		sqlName: sqlNameOf(key, raw),
 	}
 }
 
@@ -211,6 +222,7 @@ function analyze(tablesPath: string, cwd?: string): AnalysisResult {
 
 	/* Main pass: extract all table metadata */
 	for (const file of project.getSourceFiles()) {
+		const builders = tableBuilders(file)
 		for (const stmt of file.getVariableStatements()) {
 			const declaration = stmt.getDeclarations()[0]
 			if (!declaration || declaration.getKind() !== SyntaxKind.VariableDeclaration) continue
@@ -218,7 +230,7 @@ function analyze(tablesPath: string, cwd?: string): AnalysisResult {
 			const initializer = declaration.getInitializer()
 			if (!initializer) continue
 			const initText = initializer.getText()
-			if (!isTableDefinition(initText)) continue
+			if (!isTableDefinition(initText, builders)) continue
 
 			const varName = declaration.getName()
 			const sqlName = getTableName(varName, initializer)

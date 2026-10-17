@@ -5,13 +5,8 @@
  */
 import { SyntaxKind } from "ts-morph"
 import { CURSOR_TIEBREAK_COLUMN } from "../../query/cursor.ts"
-import {
-	createProjectFromTablesDir,
-	extractEnumValues,
-	extractStates,
-	getTableName,
-	isTableDefinition,
-} from "./ts-morph.ts"
+import { createProjectFromTablesDir, extractEnumValues, extractStates, getTableName } from "./ts-morph.ts"
+import { isTableDefinition, tableBuilders } from "./table-builders.ts"
 
 type ValidationResult = {
 	errors: string[]
@@ -32,6 +27,7 @@ export function validateTables(tablesPath: string): ValidationResult {
 	const fkTargets: { column: string; refTable: string; sourceTable: string }[] = []
 
 	for (const file of project.getSourceFiles()) {
+		const builders = tableBuilders(file)
 		for (const stmt of file.getVariableStatements()) {
 			const declaration = stmt.getDeclarations()[0]
 			if (!declaration || declaration.getKind() !== SyntaxKind.VariableDeclaration) continue
@@ -39,7 +35,7 @@ export function validateTables(tablesPath: string): ValidationResult {
 			const initializer = declaration.getInitializer()
 			if (!initializer) continue
 			const initText = initializer.getText()
-			if (!isTableDefinition(initText)) continue
+			if (!isTableDefinition(initText, builders)) continue
 
 			const varName = declaration.getName()
 			const tableName = getTableName(varName, initializer)
@@ -89,7 +85,7 @@ export function validateTables(tablesPath: string): ValidationResult {
 				fieldNames.add(key)
 
 				/* Primary key detection */
-				if (/\.primaryKey\(/.test(raw) || /c\.id\(/.test(raw)) {
+				if (/\.primaryKey\(/.test(raw) || /^\s*c\.(?:id|serialId)\s*\(/.test(raw)) {
 					hasPrimaryKey = true
 					primaryKeyProperty = key
 				}

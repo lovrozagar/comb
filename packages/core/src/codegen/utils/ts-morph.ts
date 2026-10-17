@@ -109,11 +109,6 @@ export function extractLength(raw: string): number | null {
 	return null
 }
 
-/** Check if text starts with a table definition function */
-export function isTableDefinition(text: string): boolean {
-	return text.startsWith("createTable")
-}
-
 /** Get actual table name from table definition call */
 export function getTableName(variableName: string, initializer: Node): string {
 	const callExpr = initializer.asKind(SyntaxKind.CallExpression)

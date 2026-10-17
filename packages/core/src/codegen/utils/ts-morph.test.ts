@@ -9,7 +9,6 @@ import {
 	extractLength,
 	extractStates,
 	getTablesImportPath,
-	isTableDefinition,
 	setIdentifierValueMap,
 } from "./ts-morph.ts"
 
@@ -137,16 +136,6 @@ describe("extractLength", () => {
 	})
 })
 
-describe("isTableDefinition", () => {
-	it("returns true for createTable call", () => {
-		expect(isTableDefinition('createTable("user", { ... })')).toBe(true)
-	})
-
-	it("returns false for other expressions", () => {
-		expect(isTableDefinition("someFunction()")).toBe(false)
-	})
-})
-
 describe("extractJsonSchemaImports", () => {
 	it("extracts z.infer<typeof schema> patterns", () => {
 		const raw = "z.infer<typeof mySchema> & z.infer<typeof otherSchema>"
@@ -203,14 +192,6 @@ describe("getTablesImportPath", () => {
 	it("drops the extension and makes the path relative to the same directory", () => {
 		expect(getTablesImportPath("/a/b/db.core.tables.ts")).toBe("./db.core.tables")
 		expect(getTablesImportPath("db.core.tables.gen.ts")).toBe("./db.core.tables.gen")
-	})
-})
-
-describe("isTableDefinition", () => {
-	it("recognises only the createTable form", () => {
-		expect(isTableDefinition('createTable("post", {})')).toBe(true)
-		expect(isTableDefinition('sqliteTable("post", {})')).toBe(false)
-		expect(isTableDefinition("")).toBe(false)
 	})
 })
 

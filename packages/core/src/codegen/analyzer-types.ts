@@ -60,6 +60,8 @@ type FieldMeta = {
 	length: number | null
 	/** Field name as defined in the table schema object */
 	name: string
+	/** The column's SQL name: what the engine reports in errors and what DDL and triggers name */
+	sqlName: string
 	/** Full raw text of the initializer expression */
 	raw: string
 }

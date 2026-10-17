@@ -34,6 +34,7 @@ function field(name: string): FieldMeta {
 		length: null,
 		name,
 		raw: `c.text("${name}")`,
+		sqlName: name,
 	}
 }
 

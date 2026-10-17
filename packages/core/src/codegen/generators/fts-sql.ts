@@ -5,7 +5,7 @@
  * - codegen generator (writes .gen.sql reference files)
  * - migrate diff (appends to migration files)
  */
-import type { TableMeta } from "../analyzer-types.ts"
+import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 
 type FtsTableConfig = {
 	columns: string[]
@@ -13,6 +13,11 @@ type FtsTableConfig = {
 }
 
 const DEFAULT_TOKENIZER = "unicode61 remove_diacritics 2"
+
+/** The field a configured FTS column names, by property or by SQL name. */
+function fieldOf(table: TableMeta, column: string): FieldMeta | undefined {
+	return table.fields.find((f) => f.name === column) ?? table.fields.find((f) => f.sqlName === column)
+}
 
 /** Validate FTS config against analyzed tables, throw on errors, warn on non-text columns */
 function validateFtsConfig(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>): void {
@@ -24,11 +29,10 @@ function validateFtsConfig(tables: TableMeta[], ftsConfig: Record<string, FtsTab
 			throw new Error(`FTS config error: table "${tableName}" not found in analyzed schema`)
 		}
 
-		const fieldNames = new Set(table.fields.map((f) => f.name))
 		const seen = new Set<string>()
 
 		for (const col of config.columns) {
-			if (!fieldNames.has(col)) {
+			if (fieldOf(table, col) === undefined) {
 				throw new Error(`FTS config error: column "${col}" not found in table "${tableName}"`)
 			}
 			if (seen.has(col)) {
@@ -36,7 +40,7 @@ function validateFtsConfig(tables: TableMeta[], ftsConfig: Record<string, FtsTab
 			}
 			seen.add(col)
 
-			const field = table.fields.find((f) => f.name === col)
+			const field = fieldOf(table, col)
 			if (field && field.drizzleHelper !== "text" && field.drizzleHelper !== "createdAt") {
 				const helper = field.drizzleHelper
 				if (helper === "integer" || helper === "boolean" || helper === "timestamp" || helper === "serialId") {
@@ -71,8 +75,11 @@ function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableC
 
 	const lines: string[] = []
 
+	const tableMap = new Map(tables.map((t) => [t.sqlName, t]))
 	for (const [tableName, config] of entries) {
-		const columns = dedup(config.columns)
+		const table = tableMap.get(tableName) as TableMeta
+		/* triggers run in SQL, so they name the SQL columns */
+		const columns = dedup(config.columns.map((col) => (fieldOf(table, col) as FieldMeta).sqlName))
 		const tokenizer = config.tokenizer ?? DEFAULT_TOKENIZER
 		const ftsTable = `${tableName}_fts`
 		const colList = columns.join(", ")
