@@ -2,12 +2,32 @@ import { defineConfig } from "vitest/config"
 
 export default defineConfig({
 	test: {
-		include: ["tests/**/*.test.ts", "lint/**/*.test.ts"],
-		/* tests/bun holds the bun:sqlite / bun:test suites — `bun run test:bun`. */
-		exclude: ["tests/bun/**", "node_modules/**"],
+		projects: [
+			{
+				test: {
+					name: "unit",
+					include: [
+						"src/**/*.test.ts",
+						"lint/**/*.test.ts",
+						"tests/structure/**/*.test.ts",
+						/* transitional: the suites still under tests/unit until they move beside their source */
+						"tests/unit/**/*.test.ts",
+						"tests/e2e/**/*.test.ts",
+					],
+				},
+			},
+			{
+				test: {
+					name: "integration",
+					include: ["tests/integration/**/*.test.ts"],
+					testTimeout: 60_000,
+					hookTimeout: 60_000,
+				},
+			},
+		],
 		coverage: {
 			include: ["src/**", "lint/**"],
-			exclude: ["**/*.test.ts"],
+			exclude: ["**/*.test.ts", "**/__fixtures__/**", "**/index.ts"],
 			provider: "v8",
 			reporter: ["text", "json-summary"],
 			/*
