@@ -154,3 +154,13 @@ describe("pgErrorHandler: resources and everything else", () => {
 		expect(thrown(source)?.source).toBe(source)
 	})
 })
+
+describe("pgErrorHandler: retryable transaction failures", () => {
+	it.each(["40001", "40P01", "57014"])("maps %s to a retryable 503", (code) => {
+		expect(thrown(nodePg({ code }))).toMatchObject({
+			cause: "The database could not finish the transaction. Please retry.",
+			errorKey: "database_unavailable",
+			status: 503,
+		})
+	})
+})

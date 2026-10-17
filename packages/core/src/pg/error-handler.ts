@@ -157,8 +157,19 @@ const EXHAUSTED: Fallback = {
 	status: "internal_server_error",
 }
 
+/* a serialization failure and a deadlock mean "retry the transaction" by Postgres' own
+ * guidance; a statement timeout is the same call under load */
+const RETRY: Fallback = {
+	cause: "The database could not finish the transaction. Please retry.",
+	errorKey: combErrorKeys.DATABASE_UNAVAILABLE,
+	status: "service_unavailable",
+}
+
 /* resource and availability SQLSTATEs, which a retry or a bigger plan can fix */
 const RESOURCE: Record<string, Fallback> = {
+	"40001": RETRY,
+	"40P01": RETRY,
+	"57014": RETRY,
 	"08001": UNAVAILABLE,
 	"08003": UNAVAILABLE,
 	"08004": UNAVAILABLE,

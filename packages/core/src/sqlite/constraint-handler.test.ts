@@ -208,3 +208,19 @@ describe("constraintError: a CHECK name two tables share", () => {
 		})
 	})
 })
+
+describe("handleConstraintViolation given 0.4.x's flattened message", () => {
+	it("classifies the engine line, wherever it sits in the text", () => {
+		const maps: ConstraintMap[] = [
+			{ user: { check: { user_status_enum: { cause: "Invalid status", errorKey: "invalid_status" } } } },
+		]
+		const flattened =
+			'Failed query: insert into "user" (id) values (?)\nparams: u1\nCHECK constraint failed: user_status_enum'
+		expect(() => handleConstraintViolation(flattened, maps)).toThrow(
+			expect.objectContaining({ errorKey: "invalid_status" }),
+		)
+		const d1 =
+			'Failed query: insert into "user" (id) values (?)\nparams: u1\nD1_ERROR: CHECK constraint failed: user_status_enum: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)\nCHECK constraint failed: user_status_enum: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)'
+		expect(() => handleConstraintViolation(d1, maps)).toThrow(expect.objectContaining({ errorKey: "invalid_status" }))
+	})
+})

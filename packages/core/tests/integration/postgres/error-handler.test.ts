@@ -122,3 +122,53 @@ describePg("pgErrorHandler on a real server", () => {
 		})
 	}
 })
+
+const caught = (error: unknown) => {
+	try {
+		pgErrorHandler(error, [])
+	} catch (thrown) {
+		return thrown
+	}
+	return "not handled"
+}
+
+describePg("pgErrorHandler on a real server: retryable failures", () => {
+	const sessions = usePg()
+
+	it("maps a statement timeout (57014) to 503", async () => {
+		const failure = await sessions
+			.sql()
+			.begin(async (tx) => {
+				await tx`SET LOCAL statement_timeout = 1`
+				await tx`SELECT pg_sleep(1)`
+			})
+			.then(
+				() => null,
+				(error: unknown) => error,
+			)
+		expect(failure).toMatchObject({ code: "57014" })
+		expect(caught(failure)).toMatchObject({ errorKey: "database_unavailable", status: 503 })
+	})
+
+	it("maps a deadlock (40P01) to 503", async () => {
+		/* two sessions take the same two advisory locks in opposite order; no table needed */
+		const a = sessions.pg()
+		const b = sessions.sql()
+		await a.query("BEGIN")
+		await b`BEGIN`
+		try {
+			await a.query("SELECT pg_advisory_xact_lock(7701)")
+			await b`SELECT pg_advisory_xact_lock(7702)`
+			const results = await Promise.allSettled([
+				a.query("SELECT pg_advisory_xact_lock(7702)"),
+				b`SELECT pg_advisory_xact_lock(7701)`,
+			])
+			const failure = results.find((result) => result.status === "rejected")
+			const reason = (failure as PromiseRejectedResult | undefined)?.reason as unknown
+			expect(reason).toMatchObject({ code: "40P01" })
+			expect(caught(reason)).toMatchObject({ errorKey: "database_unavailable", status: 503 })
+		} finally {
+			await Promise.allSettled([a.query("ROLLBACK"), b`ROLLBACK`])
+		}
+	})
+})

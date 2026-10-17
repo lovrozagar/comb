@@ -46,13 +46,25 @@ const STEMS: Array<[RegExp, string]> = [
 	[/^FOREIGN KEY constraint failed/i, "SQLITE_CONSTRAINT_FOREIGNKEY"],
 ]
 
-/** An engine message given as text (D1, libsql or bare SQLite wording), or null. */
-export function readSqliteMessage(text: string): SqliteErrorRead | null {
-	const d1 = readOne(new Error(text))
+function readLine(line: string): SqliteErrorRead | null {
+	const d1 = readOne(new Error(line))
 	if (d1 !== null) return { ...d1, query: undefined }
-	const message = text.replace(LIBSQL_PREFIX, "")
+	const message = line.replace(LIBSQL_PREFIX, "")
 	const stem = STEMS.find(([pattern]) => pattern.test(message))
 	return stem === undefined ? null : { code: stem[1], message, query: undefined }
+}
+
+/**
+ * An engine message given as text (D1, libsql or bare SQLite wording), or null. Text with
+ * several lines, such as 0.4.x's flattened cause chain, is read from its last line up: the
+ * engine's words come after the wrapper's SQL and params.
+ */
+export function readSqliteMessage(text: string): SqliteErrorRead | null {
+	for (const line of text.split("\n").toReversed()) {
+		const read = readLine(line.trim())
+		if (read !== null) return read
+	}
+	return null
 }
 
 /** The SQLite engine error inside `error` (or the engine message `error` is), or null when there is none. */
