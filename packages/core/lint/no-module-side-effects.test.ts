@@ -41,7 +41,7 @@ describe("comb/no-module-side-effects", () => {
 })
 
 describe("comb/no-module-side-effects: scope", () => {
-	it("allows declarations, literals, functions and types", () => {
+	it("allows declarations, literals, functions and types, and the bin shim that exists to run", () => {
 		const fixture = {
 			"packages/core/src/a.ts": [
 				'"use strict"',
@@ -58,6 +58,7 @@ describe("comb/no-module-side-effects: scope", () => {
 				"",
 			].join("\n"),
 			"packages/core/src/a.test.ts": "register()\n",
+			"packages/core/src/bin.ts": "process.exitCode = await runCli(process.argv.slice(2), io)\n",
 			"packages/core/tests/integration/x.test.ts": "await run()\n",
 			"scripts/verify.ts": "await run()\n",
 		}

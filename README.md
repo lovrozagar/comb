@@ -695,7 +695,7 @@ ULIDs use Crockford base32 with a 10-character timestamp and 16 characters of ra
 | -------------------------------------------- | --------------------------------------------------------------------------- |
 | `@lovrozagar/comb`                           | `CombError`, `generateId`, `generateUlid`, `LruCache`, error keys and types |
 | `@lovrozagar/comb/types`                     | `StatusKey`, `ConstraintMap`, `DatabaseErrorHandler`, …                     |
-| `@lovrozagar/comb/cli`                       | CLI entry point                                                             |
+| `@lovrozagar/comb/cli`                       | `runCli(argv, io)`: run the CLI in process and get its exit code            |
 | `@lovrozagar/comb/codegen`                   | `analyze`, `validateTables`, `parseFieldConstraints`, analysis types        |
 | `@lovrozagar/comb/codegen/analyze`           | the analyzer alone                                                          |
 | `@lovrozagar/comb/codegen/generators`        | every `generate*` function                                                  |
@@ -725,7 +725,8 @@ comb/
 │   │   ├── pg/             PostgreSQL columns and error handling
 │   │   ├── query/          DB-agnostic query layer + SQLite lowering
 │   │   ├── sqlite/         SQLite columns, constraints, D1
-│   │   ├── cli.ts
+│   │   ├── bin.ts          the `comb` executable (a shim over runCli)
+│   │   ├── cli.ts          runCli(argv, io)
 │   │   └── index.ts
 │   └── tests/
 │       ├── unit/           vitest

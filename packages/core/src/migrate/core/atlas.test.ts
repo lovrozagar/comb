@@ -34,6 +34,29 @@ const fileArg = (args: readonly string[], flag: string) => {
 	return value.replace(/^file:\/\//, "")
 }
 
+const diffWith = (result: RunResult) =>
+	generateSchemaDiff({ dialect: "sqlite", fromSchema: "", run: fakeRun(result), toSchema: "" })
+
+/** A fresh migrations directory per test, removed after it. */
+function useMigrationsDir(): () => string {
+	let dir = ""
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "comb-atlas-migrate-"))
+	})
+	afterEach(() => {
+		rmSync(dir, { force: true, recursive: true })
+	})
+	return () => dir
+}
+
+const migrateOptions = (dir: string, run: Run) => ({
+	dialect: "sqlite" as const,
+	migrationName: "add_b",
+	migrationsDir: dir,
+	run,
+	targetSchema: "T",
+})
+
 describe("atlas availability", () => {
 	it("checkAtlasInstalled is true when `atlas version` exits 0", () => {
 		const run = fakeRun(ok("atlas version v1.3.0"))
@@ -80,12 +103,10 @@ describe("generateSchemaDiff", () => {
 
 	it("reports synced schemas", () => {
 		const synced = { diff: null, synced: true }
-		const diff = (result: RunResult) =>
-			generateSchemaDiff({ dialect: "sqlite", fromSchema: "", run: fakeRun(result), toSchema: "" })
-		expect(diff(ok("Schemas are synced, no changes to be made.\n"))).toEqual(synced)
-		expect(diff(ok(""))).toEqual(synced)
-		expect(diff(ok("-- (empty)"))).toEqual(synced)
-		expect(diff(fail("Schemas are synced"))).toEqual(synced)
+		expect(diffWith(ok("Schemas are synced, no changes to be made.\n"))).toEqual(synced)
+		expect(diffWith(ok(""))).toEqual(synced)
+		expect(diffWith(ok("-- (empty)"))).toEqual(synced)
+		expect(diffWith(fail("Schemas are synced"))).toEqual(synced)
 	})
 
 	it("throws atlas's stderr when the diff fails", () => {
@@ -97,25 +118,11 @@ describe("generateSchemaDiff", () => {
 })
 
 describe("generateIncrementalMigration", () => {
-	let dir: string
-
-	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "comb-atlas-migrate-"))
-	})
-
-	afterEach(() => {
-		rmSync(dir, { force: true, recursive: true })
-	})
-
-	const options = (run: Run) => ({
-		dialect: "sqlite" as const,
-		migrationName: "add_b",
-		migrationsDir: dir,
-		run,
-		targetSchema: "T",
-	})
+	const migrationsDir = useMigrationsDir()
+	const options = (run: Run) => migrateOptions(migrationsDir(), run)
 
 	it("hashes a directory without atlas.sum, then writes the new migration with the SQLite transforms", () => {
+		const dir = migrationsDir()
 		const run = fakeRun(ok(), (call) => {
 			expect(readFileSync(fileArg(call.args, "--to"), "utf8")).toBe("T")
 			writeFileSync(
@@ -137,6 +144,7 @@ describe("generateIncrementalMigration", () => {
 	})
 
 	it("skips the hash when atlas.sum exists and reports synced when nothing new appears", () => {
+		const dir = migrationsDir()
 		writeFileSync(join(dir, "atlas.sum"), "h1:x")
 		const run = fakeRun(ok("The migration directory is synced with the desired state, no changes to be made"))
 		expect(generateIncrementalMigration(options(run))).toEqual({ files: [], synced: true })
@@ -144,12 +152,19 @@ describe("generateIncrementalMigration", () => {
 	})
 
 	it("reports synced when atlas says so on stderr", () => {
+		const dir = migrationsDir()
 		writeFileSync(join(dir, "atlas.sum"), "h1:x")
 		const run = fakeRun({ code: 0, stderr: "no changes to be made", stdout: "" })
 		expect(generateIncrementalMigration(options(run))).toEqual({ files: [], synced: true })
 	})
+})
+
+describe("generateIncrementalMigration: failures", () => {
+	const migrationsDir = useMigrationsDir()
+	const options = (run: Run) => migrateOptions(migrationsDir(), run)
 
 	it("throws when the hash or the diff fails", () => {
+		const dir = migrationsDir()
 		expect(() => generateIncrementalMigration(options(fakeRun(fail("hash broke"))))).toThrow(
 			"atlas migrate hash failed: hash broke",
 		)

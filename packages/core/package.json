@@ -25,7 +25,7 @@
 		"directory": "packages/core"
 	},
 	"bin": {
-		"comb": "./src/cli.ts"
+		"comb": "./src/bin.ts"
 	},
 	"files": [
 		"docs",

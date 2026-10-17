@@ -71,7 +71,7 @@ export type SchemaDiffOptions = {
 	fromSchema: string
 	toSchema: string
 	/** The process runner; tests pass a fake. */
-	run?: Run
+	run?: Run | undefined
 }
 
 export type SchemaDiffResult = {
@@ -142,7 +142,7 @@ export type MigrateDiffOptions = {
 	migrationsDir: string
 	targetSchema: string
 	/** The process runner; tests pass a fake. */
-	run?: Run
+	run?: Run | undefined
 }
 
 export type MigrateDiffResult = {
@@ -237,7 +237,7 @@ export type DrizzleExportOptions = {
 	cwd: string
 	dialect: Dialect
 	/** The process runner; tests pass a fake. */
-	run?: Run
+	run?: Run | undefined
 }
 
 export function exportDrizzleSchema(options: DrizzleExportOptions): string {

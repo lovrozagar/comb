@@ -33,6 +33,17 @@ describe("run", () => {
 		expect(result.stderr).toBe("comb-no-such-binary: command not found")
 	})
 
+	it("reports output past the buffer limit as its own failure, not as an unrunnable command", () => {
+		const result = run("node", ["-e", "process.stdout.write('x'.repeat(1025))"], { maxBuffer: 1024 })
+		expect(result).toEqual({ code: 1, stderr: "node: output exceeded 1024 bytes", stdout: "" })
+	})
+
+	it("keeps output up to the default limit well past spawnSync's 1 MiB", () => {
+		const result = run("node", ["-e", "process.stdout.write('x'.repeat(2 * 1024 * 1024))"])
+		expect(result.code).toBe(0)
+		expect(result.stdout).toHaveLength(2 * 1024 * 1024)
+	})
+
 	it("reports a process killed by a signal as 128 + the signal number", () => {
 		const result = run("node", ["-e", "process.kill(process.pid, 'SIGTERM')"])
 		expect(result.code).toBe(143)

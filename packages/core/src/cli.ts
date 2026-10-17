@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 /**
  * Comb CLI — database codegen + migration toolkit
  *
@@ -11,6 +10,7 @@
  */
 import fs from "node:fs"
 import path from "node:path"
+import type { Run } from "./migrate/core/process.ts"
 
 const HELP = `
 comb — database codegen + migration toolkit
@@ -29,6 +29,25 @@ OPTIONS:
   --yes, -y                      Auto-confirm destructive changes
   --help                         Show this help
 `
+
+/** Where the CLI reads its working directory, writes its output, and starts processes. */
+export type CliIo = {
+	cwd: string
+	out(line: string): void
+	err(line: string): void
+	run?: Run | undefined
+}
+
+/** A failure the CLI reports as its message and exit code instead of a stack trace. */
+export class CliError extends Error {
+	readonly exitCode: number
+
+	constructor(message: string, exitCode = 1) {
+		super(message)
+		this.name = "CliError"
+		this.exitCode = exitCode
+	}
+}
 
 type OrmDriver = "bun-sqlite" | "d1" | "libsql" | "neon" | "node-postgres" | "postgres-js" | "turso"
 
@@ -64,8 +83,8 @@ async function loadCombConfig(cwd: string): Promise<CodegenConfig> {
 	throw new Error("No comb.config.ts found. Create one or use --tables <path> for direct mode.")
 }
 
-async function cmdCodegen(args: string[]): Promise<void> {
-	const cwd = process.cwd()
+async function cmdCodegen(args: readonly string[], io: CliIo): Promise<void> {
+	const { cwd } = io
 
 	/* Parse args */
 	let dbName: string | undefined
@@ -87,10 +106,9 @@ async function cmdCodegen(args: string[]): Promise<void> {
 	if (tablesPath) {
 		const resolvedTables = path.resolve(cwd, tablesPath)
 		if (!fs.existsSync(resolvedTables)) {
-			console.error(`Tables file not found: ${resolvedTables}`)
-			process.exit(1)
+			throw new CliError(`Tables file not found: ${resolvedTables}`)
 		}
-		await runCodegenDirect(resolvedTables, cwd, generator)
+		await runCodegenDirect(resolvedTables, io, generator)
 		return
 	}
 
@@ -101,37 +119,36 @@ async function cmdCodegen(args: string[]): Promise<void> {
 	for (const name of dbNames) {
 		const dbConfig = config.databases[name]
 		if (!dbConfig) {
-			console.error(`Database "${name}" not found in config. Available: ${Object.keys(config.databases).join(", ")}`)
-			process.exit(1)
+			throw new CliError(
+				`Database "${name}" not found in config. Available: ${Object.keys(config.databases).join(", ")}`,
+			)
 		}
 
 		const resolvedTables = path.resolve(cwd, dbConfig.tables)
 		if (!fs.existsSync(resolvedTables)) {
-			console.error(`Tables file not found: ${resolvedTables}`)
-			process.exit(1)
+			throw new CliError(`Tables file not found: ${resolvedTables}`)
 		}
 
-		console.log(`\nCodegen: ${name}`)
-		await runCodegenForDb(name, dbConfig, resolvedTables, cwd, generator)
+		io.out(`\nCodegen: ${name}`)
+		await runCodegenForDb(name, dbConfig, resolvedTables, io, generator)
 	}
 }
 
-async function runCodegenDirect(tablesPath: string, cwd: string, generator?: string): Promise<void> {
+async function runCodegenDirect(tablesPath: string, io: CliIo, generator?: string): Promise<void> {
+	const { cwd } = io
 	const { analyze } = await import("./codegen/analyzer.ts")
 	const { validateTables } = await import("./codegen/utils/validate.ts")
 
 	/* Validate */
 	const validation = validateTables(tablesPath)
 	if (validation.errors.length > 0) {
-		console.error("Validation errors:")
-		for (const e of validation.errors) console.error(`  ${e}`)
-		process.exit(1)
+		throw new CliError(["Validation errors:", ...validation.errors.map((e) => `  ${e}`)].join("\n"))
 	}
-	for (const w of validation.warnings) console.warn(`  warn: ${w}`)
+	for (const w of validation.warnings) io.err(`  warn: ${w}`)
 
 	/* Analyze */
 	const analysis = analyze(tablesPath, cwd)
-	console.log(`Analyzed ${analysis.tables.length} tables (${analysis.dbName})`)
+	io.out(`Analyzed ${analysis.tables.length} tables (${analysis.dbName})`)
 
 	const shouldRun = (g: string) => !generator || generator === g
 
@@ -224,22 +241,21 @@ async function runCodegenForDb(
 	dbName: string,
 	dbConfig: NonNullable<CodegenConfig["databases"][string]>,
 	tablesPath: string,
-	cwd: string,
+	io: CliIo,
 	generator?: string,
 ): Promise<void> {
+	const { cwd } = io
 	const { analyze } = await import("./codegen/analyzer.ts")
 	const { validateTables } = await import("./codegen/utils/validate.ts")
 
 	const validation = validateTables(tablesPath)
 	if (validation.errors.length > 0) {
-		console.error("Validation errors:")
-		for (const e of validation.errors) console.error(`  ${e}`)
-		process.exit(1)
+		throw new CliError(["Validation errors:", ...validation.errors.map((e) => `  ${e}`)].join("\n"))
 	}
-	for (const w of validation.warnings) console.warn(`  warn: ${w}`)
+	for (const w of validation.warnings) io.err(`  warn: ${w}`)
 
 	const analysis = analyze(tablesPath, cwd)
-	console.log(`  ${analysis.tables.length} tables`)
+	io.out(`  ${analysis.tables.length} tables`)
 
 	const generators = new Set(
 		dbConfig.generators ?? [
@@ -410,7 +426,8 @@ async function runCodegenForDb(
 	}
 }
 
-function cmdMigrateInit(cwd: string): void {
+function cmdMigrateInit(io: CliIo): void {
+	const { cwd } = io
 	const dialect = "sqlite"
 
 	const drizzleConfigPath = path.join(cwd, "drizzle.config.ts")
@@ -419,7 +436,7 @@ function cmdMigrateInit(cwd: string): void {
 			drizzleConfigPath,
 			`import { defineConfig } from "drizzle-kit"\n\nexport default defineConfig({\n\tdialect: "${dialect}",\n\tout: "./atlas-migrations",\n\tschema: "./src/**/*.tables.ts",\n})\n`,
 		)
-		console.log("Created: drizzle.config.ts")
+		io.out("Created: drizzle.config.ts")
 	}
 
 	const atlasHclPath = path.join(cwd, "atlas.hcl")
@@ -428,21 +445,21 @@ function cmdMigrateInit(cwd: string): void {
 			atlasHclPath,
 			`variable "db_url" {\n  type = string\n}\n\ndata "external_schema" "drizzle" {\n  program = [\n    "bun",\n    "drizzle-kit",\n    "export"\n  ]\n}\n\nenv "local" {\n  src = data.external_schema.drizzle.url\n  url = var.db_url\n  dev = "${dialect}://file?mode=memory"\n\n  migration {\n    dir = "file://atlas-migrations"\n  }\n\n  diff {\n    skip {\n      drop_schema = true\n      drop_table  = true\n    }\n  }\n}\n`,
 		)
-		console.log("Created: atlas.hcl")
+		io.out("Created: atlas.hcl")
 	}
 
 	const migrationsDir = path.join(cwd, "atlas-migrations")
 	if (!fs.existsSync(migrationsDir)) {
 		fs.mkdirSync(migrationsDir, { recursive: true })
-		console.log("Created: atlas-migrations/")
+		io.out("Created: atlas-migrations/")
 	}
 }
 
-async function cmdMigrate(args: string[]): Promise<void> {
+async function cmdMigrate(args: readonly string[], io: CliIo): Promise<void> {
 	const command = args[0]
 
 	if (!command || command === "help" || command === "--help") {
-		console.log(`
+		io.out(`
 comb migrate — database migration toolkit
 
 COMMANDS:
@@ -459,10 +476,10 @@ OPTIONS:
 		return
 	}
 
-	const cwd = process.cwd()
+	const { cwd } = io
 
 	if (command === "init") {
-		await cmdMigrateInit(cwd)
+		cmdMigrateInit(io)
 		return
 	}
 
@@ -470,12 +487,11 @@ OPTIONS:
 		const { checkAtlasInstalled, exportDrizzleSchema, generateIncrementalMigration } =
 			await import("./migrate/core/atlas.ts")
 
-		if (!checkAtlasInstalled()) {
-			console.error("Atlas not found. Install: https://atlasgo.io/getting-started")
-			process.exit(1)
+		if (!checkAtlasInstalled(io.run)) {
+			throw new CliError("Atlas not found. Install: https://atlasgo.io/getting-started")
 		}
 
-		let targetSchema = exportDrizzleSchema({ cwd, dialect: "sqlite" })
+		let targetSchema = exportDrizzleSchema({ cwd, dialect: "sqlite", run: io.run })
 
 		/* Append FTS SQL if config has fts — treated as part of the target schema */
 		try {
@@ -503,15 +519,16 @@ OPTIONS:
 			dialect: "sqlite",
 			migrationName,
 			migrationsDir,
+			run: io.run,
 			targetSchema,
 		})
 
 		if (synced) {
-			console.log("Schema is already in sync — no migration needed")
+			io.out("Schema is already in sync — no migration needed")
 			return
 		}
 
-		for (const f of files) console.log(`Generated: ${f}`)
+		for (const f of files) io.out(`Generated: ${f}`)
 		return
 	}
 
@@ -521,8 +538,7 @@ OPTIONS:
 		   via __drizzle_migrations on the target DB. */
 		const dbName = args[1]
 		if (!dbName || dbName.startsWith("-")) {
-			console.error("Usage: comb migrate apply <d1-database-name> [--dir <path>] [--file <path>]")
-			process.exit(1)
+			throw new CliError("Usage: comb migrate apply <d1-database-name> [--dir <path>] [--file <path>]")
 		}
 
 		let migrationsDirArg: string | undefined
@@ -535,15 +551,14 @@ OPTIONS:
 
 		const migrationsDir = path.resolve(cwd, migrationsDirArg ?? "atlas-migrations")
 		if (!fs.existsSync(migrationsDir)) {
-			console.error(`Migrations dir not found: ${migrationsDir}`)
-			process.exit(1)
+			throw new CliError(`Migrations dir not found: ${migrationsDir}`)
 		}
 
 		const { createD1Provider } = await import("./migrate/drivers/d1.ts")
 		const { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } = await import("./migrate/core/apply.ts")
 		const { generateMigrationHash } = await import("./migrate/core/parse.ts")
 
-		const provider = createD1Provider({ databaseId: dbName, databaseName: dbName, type: "d1" })
+		const provider = createD1Provider({ databaseId: dbName, databaseName: dbName, type: "d1" }, io.run)
 		const conn = await provider.connect({
 			migrationsDir,
 			name: dbName,
@@ -567,17 +582,17 @@ OPTIONS:
 				const sql = fs.readFileSync(file, "utf-8")
 				const hash = generateMigrationHash(sql)
 				if (await checkMigrationHash(conn, hash)) {
-					console.log(`Skip (already applied): ${path.basename(file)}`)
+					io.out(`Skip (already applied): ${path.basename(file)}`)
 					skipped++
 					continue
 				}
-				console.log(`Apply: ${path.basename(file)}`)
+				io.out(`Apply: ${path.basename(file)}`)
 				await conn.batch([{ sql }])
 				await recordMigrationHash(conn, hash)
 				applied++
 			}
 
-			console.log(`\nDone: ${applied} applied, ${skipped} skipped`)
+			io.out(`\nDone: ${applied} applied, ${skipped} skipped`)
 		} finally {
 			await conn.close()
 		}
@@ -590,8 +605,7 @@ OPTIONS:
 		   its SQL. Use this once per prod DB whose schema was set up out-of-band. */
 		const dbName = args[1]
 		if (!dbName || dbName.startsWith("-")) {
-			console.error("Usage: comb migrate baseline <d1-database-name> [--dir <path>]")
-			process.exit(1)
+			throw new CliError("Usage: comb migrate baseline <d1-database-name> [--dir <path>]")
 		}
 
 		let migrationsDirArg: string | undefined
@@ -602,15 +616,14 @@ OPTIONS:
 
 		const migrationsDir = path.resolve(cwd, migrationsDirArg ?? "atlas-migrations")
 		if (!fs.existsSync(migrationsDir)) {
-			console.error(`Migrations dir not found: ${migrationsDir}`)
-			process.exit(1)
+			throw new CliError(`Migrations dir not found: ${migrationsDir}`)
 		}
 
 		const { createD1Provider } = await import("./migrate/drivers/d1.ts")
 		const { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } = await import("./migrate/core/apply.ts")
 		const { generateMigrationHash } = await import("./migrate/core/parse.ts")
 
-		const provider = createD1Provider({ databaseId: dbName, databaseName: dbName, type: "d1" })
+		const provider = createD1Provider({ databaseId: dbName, databaseName: dbName, type: "d1" }, io.run)
 		const conn = await provider.connect({
 			migrationsDir,
 			name: dbName,
@@ -635,45 +648,47 @@ OPTIONS:
 					continue
 				}
 				await recordMigrationHash(conn, hash)
-				console.log(`Marked applied: ${name}`)
+				io.out(`Marked applied: ${name}`)
 				marked++
 			}
 
-			console.log(`\nBaseline done: ${marked} marked, ${already} already tracked`)
+			io.out(`\nBaseline done: ${marked} marked, ${already} already tracked`)
 		} finally {
 			await conn.close()
 		}
 		return
 	}
 
-	console.error(`Unknown migrate command: ${command}`)
-	process.exit(1)
+	throw new CliError(`Unknown migrate command: ${command}`)
 }
 
-async function main(): Promise<void> {
-	const args = process.argv.slice(2)
+/** Runs the comb CLI on `argv` (the arguments after the script) and returns its exit code. */
+export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
+	try {
+		await dispatch(argv, io)
+		return 0
+	} catch (error) {
+		io.err(error instanceof Error ? error.message : String(error))
+		return error instanceof CliError ? error.exitCode : 1
+	}
+}
+
+async function dispatch(args: readonly string[], io: CliIo): Promise<void> {
 	const command = args[0]
 
 	if (!command || command === "--help" || command === "help") {
-		console.log(HELP)
+		io.out(HELP)
 		return
 	}
 
 	switch (command) {
 		case "codegen":
-			await cmdCodegen(args.slice(1))
+			await cmdCodegen(args.slice(1), io)
 			break
 		case "migrate":
-			await cmdMigrate(args.slice(1))
+			await cmdMigrate(args.slice(1), io)
 			break
 		default:
-			console.error(`Unknown command: ${command}`)
-			console.log(HELP)
-			process.exit(1)
+			throw new CliError(`Unknown command: ${command}\n${HELP}`)
 	}
 }
-
-main().catch((e) => {
-	console.error(e instanceof Error ? e.message : e)
-	process.exit(1)
-})

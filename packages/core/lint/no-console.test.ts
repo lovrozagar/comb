@@ -3,7 +3,7 @@ import plugin from "./index.js"
 import { oxlintReports, reportsOf } from "./rule-harness.ts"
 
 const rule = plugin.rules["no-console"]
-const MESSAGE = "console belongs to src/log.ts and src/cli/output.ts; write through the injected sink"
+const MESSAGE = "console belongs to src/log.ts, src/cli/output.ts and src/bin.ts; write through the injected sink"
 
 describe("comb/no-console", () => {
 	it("rejects console in core source", () => {
@@ -19,9 +19,10 @@ describe("comb/no-console", () => {
 		])
 	})
 
-	it("allows the two sinks, tests, and code outside src", () => {
+	it("allows the two sinks, the bin shim, tests, and code outside src", () => {
 		const fixture = {
 			"packages/core/src/log.ts": 'export const log = () => console.info("x")\n',
+			"packages/core/src/bin.ts": "process.exitCode = await runCli(argv, { err: (l) => console.error(l) })\n",
 			"packages/core/src/cli/output.ts": 'export const out = () => console.log("x")\n',
 			"packages/core/src/query/filter.test.ts": 'console.log("x")\n',
 			"packages/core/tests/integration/d1/smoke.test.ts": 'console.log("x")\n',

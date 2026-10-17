@@ -62,7 +62,9 @@ describe("createD1Provider: execute", () => {
 		await conn.execute("SELECT 1")
 		expect(run.calls[0]?.args).toEqual(["d1", "execute", "core-local", "--local", "--json", "--command=SELECT 1"])
 	})
+})
 
+describe("createD1Provider: parameters and output", () => {
 	it("inlines every supported parameter type as a SQL literal", async () => {
 		const run = fakeRun(() => json([{ results: [] }]))
 		const conn = await connect(run)

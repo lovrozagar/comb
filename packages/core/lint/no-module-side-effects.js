@@ -68,7 +68,9 @@ function check(context, statement) {
 
 export const rule = {
 	create(context) {
-		if (srcPath(context.filename) === null) return {}
+		const path = srcPath(context.filename)
+		/* the executable exists to run: bin.ts is the one module whose import is the side effect */
+		if (path === null || path === "bin.ts") return {}
 		return {
 			Program(program) {
 				for (const statement of program.body) check(context, statement)
