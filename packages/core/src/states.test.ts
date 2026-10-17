@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { CombError } from "./error.ts"
-import { assertTransition, canTransition, isState, isTerminal, nextStates, type StateMachine } from "./states.ts"
+import {
+	assertTransition,
+	canTransition,
+	defineStateMachine,
+	isState,
+	isTerminal,
+	nextStates,
+	type StateMachine,
+} from "./states.ts"
 import { combErrorKeys } from "./types.ts"
 
 const delivery = {
@@ -158,5 +166,25 @@ describe("nextStates (M-L2)", () => {
 	it("lists only declared targets", () => {
 		const machine = { transitions: { a: ["b", "zzz"] }, values: ["a", "b"] } as StateMachine
 		expect(nextStates(machine, "a")).toEqual(["b"])
+	})
+})
+
+describe("defineStateMachine (M5)", () => {
+	it("infers the states from values, so a misspelled name fails to compile", () => {
+		const machine = defineStateMachine({
+			terminal: ["sent"],
+			transitions: { queued: ["sent"] },
+			values: ["queued", "sent"],
+		})
+		expect(canTransition(machine, "queued", "sent")).toBe(true)
+
+		// @ts-expect-error a transitions key that is not a declared value
+		defineStateMachine({ transitions: { queud: ["sent"] }, values: ["queued", "sent"] })
+		// @ts-expect-error a transitions target that is not a declared value
+		defineStateMachine({ transitions: { queued: ["snet"] }, values: ["queued", "sent"] })
+		// @ts-expect-error a terminal name that is not a declared value
+		defineStateMachine({ terminal: ["dotypo"], values: ["queued", "sent"] })
+		// @ts-expect-error an initial name that is not a declared value
+		defineStateMachine({ initial: "queud", values: ["queued", "sent"] })
 	})
 })

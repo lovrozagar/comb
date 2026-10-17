@@ -28,6 +28,22 @@ type StateMachine<TState extends string = string> = {
 	transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined
 }
 
+/**
+ * Declare a machine with its states inferred from `values` alone.
+ *
+ * `{ … } as const satisfies StateMachine` checks every name against `string`, so a misspelled
+ * `transitions` key or target compiles and the rule it meant silently disappears. Here every other
+ * field may only name a declared value, and a typo is a type error.
+ */
+function defineStateMachine<const TState extends string>(machine: {
+	values: readonly TState[]
+	initial?: NoInfer<TState> | undefined
+	terminal?: readonly NoInfer<TState>[] | undefined
+	transitions?: Readonly<Partial<Record<NoInfer<TState>, readonly NoInfer<TState>[]>>> | undefined
+}): StateMachine<TState> {
+	return machine
+}
+
 /** Whether a value is one the machine declares. */
 function isState<T extends string>(machine: StateMachine<T>, value: unknown): value is T {
 	return typeof value === "string" && (machine.values as readonly string[]).includes(value)
@@ -101,4 +117,4 @@ function nextStates<T extends string>(machine: StateMachine<T>, from: T): readon
 	return moves.filter((to) => isState(machine, to))
 }
 
-export { assertTransition, canTransition, isState, isTerminal, nextStates, type StateMachine }
+export { assertTransition, canTransition, defineStateMachine, isState, isTerminal, nextStates, type StateMachine }

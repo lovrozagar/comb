@@ -95,6 +95,17 @@ export const t = sqliteTable("t", { status: c.enum("status", deliveryStates.valu
 		})
 	})
 
+	it("reads a machine declared through defineStateMachine, values and states both", () => {
+		const source = `const deliveryStates = defineStateMachine({
+	values: ["queued", "sending", "sent"],
+	initial: "queued",
+	terminal: ["sent"],
+	transitions: { queued: ["sending"], sending: ["sent"] },
+})
+export const t = sqliteTable("t", { status: c.enum("status", deliveryStates.values, deliveryStates) })`
+		expect(readStatus(source)).toEqual({ machine: PARSED, reference: null, values: ["queued", "sending", "sent"] })
+	})
+
 	it("reads no machine from an object that names none of its keys", () => {
 		expect(
 			readStatus(`export const t = sqliteTable("t", { status: c.enum("status", ["a"], { other: 1 }) })`)?.machine,

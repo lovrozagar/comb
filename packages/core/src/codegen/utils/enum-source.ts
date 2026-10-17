@@ -1,7 +1,8 @@
 /**
  * An enum column's values and state machine, read from the AST the way TypeScript sees them:
  * an inline list (with `as const`, across lines), a const in the same file, a const imported
- * from a file in the project, a machine's `.values`, and a machine passed by reference.
+ * from a file in the project, a machine's `.values`, and a machine passed by reference or declared
+ * through `defineStateMachine`.
  */
 import { type CallExpression, type Node, type ObjectLiteralExpression, SyntaxKind } from "ts-morph"
 import type { StateMachineMeta } from "../analyzer-types.ts"
@@ -23,6 +24,9 @@ const WRAPPERS = /* @__PURE__ */ new Set([
 ])
 
 const MAX_HOPS = 8
+
+/** `defineStateMachine(m)` from `@lovrozagar/comb/states` returns `m`: the analyzer reads through it */
+const IDENTITY_CALL = "defineStateMachine"
 
 function unwrap(node: Node): Node {
 	let current = node
@@ -46,6 +50,8 @@ export function resolve(node: Node | undefined, hops = 0): Node | undefined {
 		const owner = resolve(bare.getExpression(), hops + 1)?.asKind(SyntaxKind.ObjectLiteralExpression)
 		return resolve(propertyValue(owner, bare.getName()), hops + 1)
 	}
+	const call = bare.asKind(SyntaxKind.CallExpression)
+	if (call?.getExpression().getText() === IDENTITY_CALL) return resolve(call.getArguments()[0], hops + 1)
 	return bare
 }
 

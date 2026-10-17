@@ -77,10 +77,15 @@ Hold the machine as a const and pass the same object to `c.enum` and to the guar
 `c.enum`'s third argument is type-erased, like every other constraint; the const is
 what survives at runtime.
 
-```ts
-import { assertTransition, canTransition, type StateMachine } from "@lovrozagar/comb/states"
+Declare it with `defineStateMachine`. It infers the states from `values` alone, so a misspelled
+`initial`, `terminal`, `transitions` key or target is a type error. `{ … } as const satisfies
+StateMachine` checks those names against `string` only: a typo compiles, and the rule it meant
+silently disappears until codegen runs `validateTables`.
 
-const deliveryStates = {
+```ts
+import { assertTransition, canTransition, defineStateMachine } from "@lovrozagar/comb/states"
+
+const deliveryStates = defineStateMachine({
 	values: ["queued", "sending", "sent", "partial", "failed", "cancelled"],
 	initial: "queued",
 	terminal: ["sent", "partial", "failed", "cancelled"],
@@ -88,7 +93,7 @@ const deliveryStates = {
 		queued: ["sending", "cancelled"],
 		sending: ["sent", "partial", "failed"],
 	},
-} as const satisfies StateMachine
+})
 
 status: c.enum("status", deliveryStates.values, deliveryStates)
 
