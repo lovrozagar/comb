@@ -655,9 +655,11 @@ export default {
 }
 ```
 
-Resolution is three tiers: a per-isolate LRU with stale-while-revalidate, then KV, then the core D1 `shard_map` table (exported as a ready-to-use Drizzle table). Allocation is fill-then-next — an org lands on the lowest-numbered shard under `maxOrgsPerShard`. Revalidation of a stale LRU entry is handed to `ctx.waitUntil()`, so it never sits in the request's critical path. `invalidate()` clears both caches after a manual remap.
+Resolution is three tiers: a per-isolate LRU with stale-while-revalidate, then KV, then the core D1 `shard_map` table (exported as a ready-to-use Drizzle table). A new org lands on the shard with the most headroom under `maxOrgsPerShard`; when every shard is full, allocation throws. The write is an upsert on `org_id` followed by a read of the row that won, so two isolates racing on an org's first request agree on one mapping, and a soft-deleted org (`deleted_at` set) is revived onto a shard rather than failing on the primary key. Revalidation of a stale LRU entry is handed to `ctx.waitUntil()`, so it never sits in the request's critical path, and concurrent requests that see the same stale entry share one revalidation.
 
-Tunables: `lruMaxSize` (1000), `lruTtlMs` (5 min), `lruHardTtlMs` (15 min), `kvTtlSeconds` (60), `maxOrgsPerShard` (500). Pass `log` for a structured hook on every hit, miss, and allocation.
+`invalidate(orgId, kv)` clears this isolate's LRU entry and the KV entry after a manual remap. Other isolates keep serving their LRU copy until it goes stale (`lruTtlMs`, 5 min), then revalidate from KV or the core table; an entry is never served past `lruHardTtlMs` (15 min). So a remap converges everywhere within `lruTtlMs` plus one revalidation: keep both shards readable for that long.
+
+Tunables: `lruMaxSize` (1000), `lruTtlMs` (5 min), `lruHardTtlMs` (15 min), `kvTtlSeconds` (60), `maxOrgsPerShard` (500). Pass `log(event, data)` for a structured hook: `shard-router.hit` (`{ orgId, tier: "lru" | "kv" | "d1" }`, plus `stale` on an LRU hit), `shard-router.miss` (`{ orgId }`), `shard-router.allocate` (`{ orgId, shardId }`) and `shard-router.revalidate.error` (`{ orgId, error }`).
 
 ## Meta contract
 

@@ -1,4 +1,5 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types"
+import { Miniflare } from "miniflare"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ShardRouter } from "./router.ts"
 import type { ShardMapping } from "./types.ts"
@@ -44,6 +45,9 @@ function mockKV(data: Record<string, unknown> = {}): KVNamespace {
 	} as unknown as KVNamespace
 }
 
+/* every waitUntil promise, so a test's background writes finish before its Miniflare is disposed */
+const outstanding: Promise<unknown>[] = []
+
 function mockWaitUntil(): {
 	calls: Promise<unknown>[]
 	ctx: { waitUntil: (p: Promise<unknown>) => void }
@@ -51,7 +55,12 @@ function mockWaitUntil(): {
 	const calls: Promise<unknown>[] = []
 	return {
 		calls,
-		ctx: { waitUntil: (p: Promise<unknown>) => calls.push(p) },
+		ctx: {
+			waitUntil: (p: Promise<unknown>) => {
+				outstanding.push(p)
+				calls.push(p)
+			},
+		},
 	}
 }
 
@@ -181,50 +190,44 @@ describe("ShardRouter", () => {
 	})
 })
 
-describe("ShardRouter — allocation", () => {
-	/* The shard-count query comes back through D1's raw() form — positional
-	   arrays of [count, shard_id] — which drizzle maps onto the select aliases. */
-	function mockCountsD1(counts: Array<[number, number]>): D1Database {
-		const stmt = {
-			all: vi.fn().mockResolvedValue({ results: [] }),
-			bind: vi.fn().mockReturnThis(),
-			first: vi.fn().mockResolvedValue(null),
-			raw: vi.fn().mockResolvedValue(counts),
-			run: vi.fn().mockResolvedValue({ meta: {}, results: [], success: true }),
-		}
-		const session = {
-			batch: vi.fn(),
-			dump: vi.fn(),
-			exec: vi.fn(),
-			getBookmark: vi.fn().mockReturnValue("bk-test"),
-			prepare: vi.fn().mockReturnValue(stmt),
-			withSession: vi.fn(),
-		}
-		return {
-			batch: vi.fn(),
-			dump: vi.fn(),
-			exec: vi.fn(),
-			prepare: vi.fn().mockReturnValue(stmt),
-			withSession: vi.fn().mockReturnValue(session),
-		} as unknown as D1Database
-	}
+/* Allocation is SQL the core database runs (count, upsert, read-back), so it runs on D1 itself. */
+const SHARD_MAP_DDL =
+	"CREATE TABLE shard_map (created_at integer NOT NULL DEFAULT (unixepoch() * 1000), deleted_at integer, driver text NOT NULL DEFAULT 'd1', org_id text PRIMARY KEY, shard_id integer NOT NULL, target text NOT NULL, updated_at integer NOT NULL DEFAULT (unixepoch() * 1000))"
 
-	const deps = (counts: Array<[number, number]> = []) => ({
-		coreDb: mockCountsD1(counts),
-		kv: mockKV(),
+const WORKER = "export default { fetch() { return new Response(null, { status: 204 }) } }"
+
+describe("ShardRouter — allocation", () => {
+	let mf: Miniflare | undefined
+	afterEach(async () => {
+		await Promise.allSettled(outstanding.splice(0))
+		await mf?.dispose()
+		mf = undefined
 	})
+
+	/** A core D1 holding `orgs` per shard ([count, shard]), and a KV namespace */
+	async function deps(counts: Array<[number, number]> = []) {
+		mf = new Miniflare({ d1Databases: ["CORE"], kvNamespaces: ["KV"], modules: true, script: WORKER })
+		const coreDb = (await mf.getD1Database("CORE")) as unknown as D1Database
+		const kv = (await mf.getKVNamespace("KV")) as unknown as KVNamespace
+		await coreDb.exec(SHARD_MAP_DDL)
+		for (const [count, shard] of counts) {
+			for (let i = 0; i < count; i++) {
+				await coreDb
+					.prepare("INSERT INTO shard_map (org_id, shard_id, target) VALUES (?, ?, ?)")
+					.bind(`seed-${shard}-${i}`, shard, String(shard))
+					.run()
+			}
+		}
+		return { coreDb, kv }
+	}
 
 	it("places the first org on shard 0 when every shard is empty", async () => {
 		const router = new ShardRouter({ maxOrgsPerShard: 10, totalShards: 4 })
 		const { ctx } = mockWaitUntil()
 
-		const mapping = await router.allocate("org-1", deps(), ctx)
+		const mapping = await router.allocate("org-1", await deps(), ctx)
 
-		expect(mapping.shardId).toBe(0)
-		expect(mapping.target).toBe("0")
-		expect(mapping.orgId).toBe("org-1")
-		expect(mapping.driver).toBe("d1")
-		expect(mapping.deletedAt).toBeNull()
+		expect(mapping).toMatchObject({ deletedAt: null, driver: "d1", orgId: "org-1", shardId: 0, target: "0" })
 	})
 
 	it("fills the shard with the most headroom, not simply the next one", async () => {
@@ -234,7 +237,7 @@ describe("ShardRouter — allocation", () => {
 		/* shard 1 is emptiest */
 		const mapping = await router.allocate(
 			"org-2",
-			deps([
+			await deps([
 				[9, 0],
 				[2, 1],
 				[8, 2],
@@ -248,65 +251,153 @@ describe("ShardRouter — allocation", () => {
 	it("refuses to over-fill rather than silently exceeding the cap", async () => {
 		const router = new ShardRouter({ maxOrgsPerShard: 2, totalShards: 2 })
 		const { ctx } = mockWaitUntil()
+		const full = await deps([
+			[2, 0],
+			[2, 1],
+		])
 
-		await expect(
-			router.allocate(
-				"org-3",
-				deps([
-					[2, 0],
-					[2, 1],
-				]),
-				ctx,
-			),
-		).rejects.toThrow(/All shards full/)
+		await expect(router.allocate("org-3", full, ctx)).rejects.toThrow(/All shards full/)
 	})
 
-	it("carries the write bookmark so a following read is not stale", async () => {
-		const router = new ShardRouter({ totalShards: 2 })
+	it("returns the mapping a racing router already wrote, not its own pick", async () => {
 		const { ctx } = mockWaitUntil()
+		const d = await deps()
+		await d.coreDb.prepare("INSERT INTO shard_map (org_id, shard_id, target) VALUES ('org-4', 1, '1')").run()
 
-		const mapping = await router.allocate("org-4", deps(), ctx)
-		expect(mapping.d1Bookmark).toBe("bk-test")
+		const mapping = await new ShardRouter({ totalShards: 2 }).allocate("org-4", d, ctx)
+		expect(mapping).toMatchObject({ shardId: 1, target: "1" })
 	})
 
 	it("primes both cache tiers, deferring the KV write off the request path", async () => {
 		const router = new ShardRouter({ totalShards: 2 })
 		const { calls, ctx } = mockWaitUntil()
-		const d = deps()
+		const d = await deps()
 
-		await router.allocate("org-5", d, ctx)
+		const mapping = await router.allocate("org-5", d, ctx)
 
 		/* KV write is handed to waitUntil, not awaited inline */
 		expect(calls.length).toBeGreaterThan(0)
 		await Promise.all(calls)
-		expect(d.kv.put).toHaveBeenCalled()
-
-		/* the LRU now answers without touching KV again */
-		const putCount = (d.kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls.length
+		expect(await d.kv.get("shard:org-5", "json")).toEqual(mapping)
+		/* the LRU now answers without a new cache write */
 		await router.resolve("org-5", d, ctx)
-		expect((d.kv.put as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(putCount)
+		expect(calls).toHaveLength(1)
 	})
 
-	it("resolveOrAllocate allocates only when nothing is mapped", async () => {
+	it("resolveOrAllocate allocates only when nothing is mapped, and invalidate drops both tiers", async () => {
 		const router = new ShardRouter({ totalShards: 2 })
-		const { ctx } = mockWaitUntil()
+		const { calls, ctx } = mockWaitUntil()
+		const d = await deps()
 
-		const first = await router.resolveOrAllocate("org-6", deps(), ctx)
-		expect(first.orgId).toBe("org-6")
-
-		/* second call is served from the LRU, so no new allocation */
-		const second = await router.resolveOrAllocate("org-6", deps(), ctx)
+		const first = await router.resolveOrAllocate("org-6", d, ctx)
+		const second = await router.resolveOrAllocate("org-6", d, ctx)
 		expect(second).toEqual(first)
+
+		await Promise.all(calls)
+		await router.invalidate("org-6", d.kv)
+		expect(await d.kv.get("shard:org-6")).toBeNull()
+	})
+})
+
+describe("ShardRouter — the core database tier and revalidation", () => {
+	let mf: Miniflare | undefined
+	afterEach(async () => {
+		await Promise.allSettled(outstanding.splice(0))
+		await mf?.dispose()
+		mf = undefined
 	})
 
-	it("invalidate drops the org from both tiers", async () => {
-		const router = new ShardRouter({ totalShards: 2 })
-		const { ctx } = mockWaitUntil()
-		const d = deps()
+	async function seeded() {
+		mf = new Miniflare({ d1Databases: ["CORE"], kvNamespaces: ["KV"], modules: true, script: WORKER })
+		const coreDb = (await mf.getD1Database("CORE")) as unknown as D1Database
+		const kv = (await mf.getKVNamespace("KV")) as unknown as KVNamespace
+		await coreDb.exec(SHARD_MAP_DDL)
+		await coreDb.prepare("INSERT INTO shard_map (org_id, shard_id, target) VALUES ('org-d1', 1, '1')").run()
+		return { coreDb, kv }
+	}
 
-		await router.allocate("org-7", d, ctx)
-		await router.invalidate("org-7", d.kv)
+	it("resolves from the core database when both caches miss, and reports the tier", async () => {
+		const events: string[] = []
+		const router = new ShardRouter({
+			log: (event, data) => events.push(`${event}:${String(data["tier"])}`),
+			totalShards: 2,
+		})
+		const { calls, ctx } = mockWaitUntil()
+		const d = await seeded()
 
-		expect(d.kv.delete).toHaveBeenCalledWith("shard:org-7")
+		expect(await router.resolve("org-d1", d, ctx)).toMatchObject({ shardId: 1, target: "1" })
+		expect(events).toEqual(["shard-router.hit:d1"])
+		await Promise.all(calls)
+		expect(await d.kv.get("shard:org-d1", "json")).toMatchObject({ shardId: 1 })
+	})
+
+	it("revalidates a stale entry from the core database once, however many requests see it", async () => {
+		const router = new ShardRouter({ lruTtlMs: 1, totalShards: 2 })
+		const { calls, ctx } = mockWaitUntil()
+		const d = await seeded()
+		await router.resolve("org-d1", d, ctx)
+		await Promise.all(calls.splice(0))
+		await d.kv.delete("shard:org-d1")
+		await new Promise((resolve) => setTimeout(resolve, 5))
+
+		await Promise.all([router.resolve("org-d1", d, ctx), router.resolve("org-d1", d, ctx)])
+		expect(calls).toHaveLength(1)
+		await Promise.all(calls)
+		expect(await d.kv.get("shard:org-d1", "json")).toMatchObject({ shardId: 1 })
+	})
+
+	it("logs a revalidation that fails instead of throwing it into waitUntil", async () => {
+		const events: string[] = []
+		const router = new ShardRouter({ log: (event) => events.push(event), lruTtlMs: 1, totalShards: 2 })
+		const { calls, ctx } = mockWaitUntil()
+		const d = await seeded()
+		await router.resolve("org-d1", d, ctx)
+		await Promise.all(calls.splice(0))
+		await new Promise((resolve) => setTimeout(resolve, 5))
+
+		const down = { get: () => Promise.reject(new Error("kv down")) } as unknown as KVNamespace
+		await router.resolve("org-d1", { ...d, kv: down }, ctx)
+		await Promise.all(calls)
+		expect(events.at(-1)).toBe("shard-router.revalidate.error")
+	})
+
+	it("carries the session bookmark on what it allocates and what it reads, none when D1 has none", async () => {
+		const d = await seeded()
+		/* Miniflare's D1 has no withSession; a session over it reports a bookmark the way D1 does */
+		const sessioned = (bookmark: string | null) => {
+			const session = {
+				batch: (statements: Parameters<D1Database["batch"]>[0]) => d.coreDb.batch(statements),
+				getBookmark: () => bookmark,
+				prepare: (query: string) => d.coreDb.prepare(query),
+			}
+			return { ...session, withSession: () => session } as unknown as D1Database
+		}
+		const { calls, ctx } = mockWaitUntil()
+
+		const marked = { coreDb: sessioned("bk-test"), kv: d.kv }
+		expect((await new ShardRouter({ totalShards: 2 }).resolve("org-d1", marked, ctx))?.d1Bookmark).toBe("bk-test")
+		expect((await new ShardRouter({ totalShards: 2 }).allocate("org-new", marked, ctx)).d1Bookmark).toBe("bk-test")
+		/* the first half cached org-d1 in KV; drop it so the next resolve reads the database again */
+		await Promise.all(calls.splice(0))
+		await d.kv.delete("shard:org-d1")
+		const blank = { coreDb: sessioned(null), kv: d.kv }
+		expect((await new ShardRouter({ totalShards: 2 }).resolve("org-d1", blank, ctx))?.d1Bookmark).toBeUndefined()
+		expect((await new ShardRouter({ totalShards: 2 }).allocate("org-next", blank, ctx)).d1Bookmark).toBeUndefined()
+		await Promise.all(calls)
+	})
+
+	it("leaves the cache alone when revalidation finds the org gone", async () => {
+		const router = new ShardRouter({ lruTtlMs: 1, totalShards: 2 })
+		const { calls, ctx } = mockWaitUntil()
+		const d = await seeded()
+		await router.resolve("org-d1", d, ctx)
+		await Promise.all(calls.splice(0))
+		await d.kv.delete("shard:org-d1")
+		await d.coreDb.prepare("UPDATE shard_map SET deleted_at = 1").run()
+		await new Promise((resolve) => setTimeout(resolve, 5))
+
+		await router.resolve("org-d1", d, ctx)
+		await Promise.all(calls)
+		expect(await d.kv.get("shard:org-d1")).toBeNull()
 	})
 })

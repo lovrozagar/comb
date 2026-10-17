@@ -1,5 +1,5 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types"
-import { and, eq, isNull, sql } from "drizzle-orm"
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { LruCache } from "../../../lru.ts"
 import { openD1Session } from "../session.ts"
@@ -8,6 +8,9 @@ import type { ShardDbHandle, ShardMapping, ShardResolverDeps } from "./types.ts"
 
 /** Structural type so both `@cloudflare/workers-types` and `cloudflare:workers` satisfy it */
 type WaitUntilCtx = { waitUntil: (promise: Promise<unknown>) => void }
+
+/** Where a resolved mapping is cached: the KV namespace, written off the request path */
+type CacheTargets = { executionCtx: WaitUntilCtx; kv: KVNamespace }
 
 /** Pluggable logger — defaults to no-op */
 type LogFn = (event: string, data: Record<string, unknown>) => void
@@ -34,13 +37,15 @@ const DEFAULTS = {
  * Shard router — resolves org -> D1 database handle.
  *
  * Instantiate once per isolate (module-level) so the LRU cache persists.
- * 3-tier lookup: LRU -> KV -> Core D1, with fill-then-next allocation.
+ * 3-tier lookup: LRU -> KV -> Core D1; a new org goes to the shard with the most headroom.
  */
 class ShardRouter {
 	private readonly kvTtlSeconds: number
 	private readonly log: LogFn
 	private readonly lru: LruCache<string, ShardMapping>
 	private readonly maxOrgsPerShard: number
+	/** Revalidations running now, by org, so concurrent stale hits share one */
+	private readonly revalidating = new Map<string, Promise<void>>()
 	private readonly totalShards: number
 
 	constructor(config: ShardRouterConfig) {
@@ -74,39 +79,35 @@ class ShardRouter {
 		/* L1: per-isolate LRU with SWR */
 		const lruResult = this.lru.getWithMeta(orgId)
 		if (lruResult) {
-			if (lruResult.stale) {
-				executionCtx.waitUntil(this.revalidateShard(orgId, deps))
-			}
+			this.log("shard-router.hit", { orgId, stale: lruResult.stale, tier: "lru" })
+			if (lruResult.stale) this.revalidateOnce(orgId, deps, executionCtx)
 			return lruResult.value
 		}
 
 		/* L2: KV */
 		const kvValue = await deps.kv.get<ShardMapping>(this.kvKey(orgId), "json")
 		if (kvValue) {
+			this.log("shard-router.hit", { orgId, tier: "kv" })
 			this.lru.set(orgId, kvValue)
 			return kvValue
 		}
 
 		/* L3: Core D1 — session reads from nearest replica */
-		const { client, session } = openD1Session(deps.coreDb, undefined)
-		const db = drizzle(client)
-		const row = await db
-			.select()
-			.from(shardMap)
-			.where(and(eq(shardMap.org_id, orgId), isNull(shardMap.deleted_at)))
-			.get()
-		if (!row) return undefined
-
-		const mapping = this.rowToMapping(row)
-		mapping.d1Bookmark = session?.getBookmark() ?? undefined
-		this.populateCaches(orgId, mapping, deps.kv, executionCtx)
+		const mapping = await this.readMapping(orgId, deps)
+		if (!mapping) {
+			this.log("shard-router.miss", { orgId })
+			return undefined
+		}
+		this.log("shard-router.hit", { orgId, tier: "d1" })
+		this.populateCaches(orgId, mapping, { executionCtx, kv: deps.kv })
 		return mapping
 	}
 
 	/**
-	 * Allocate shard for a new org using fill-then-next strategy.
-	 * Picks the D1 shard with most headroom.
-	 * Uses primary-first session — writes always hit primary, bookmark stored for subsequent reads.
+	 * Allocate a shard for an org: the D1 shard with the most headroom. The write is an upsert
+	 * keyed on the org, so a soft-deleted row is revived and a router that loses a race reads back
+	 * the mapping the winner wrote instead of failing on the primary key. Writes go to the
+	 * primary; the bookmark is kept for the reads that follow.
 	 */
 	async allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
 		const { client, session } = openD1Session(deps.coreDb, "first-primary")
@@ -122,29 +123,23 @@ class ShardRouter {
 			.groupBy(shardMap.shard_id)
 			.all()
 
-		const bestShard = this.pickBestShard(counts)
+		const shardId = this.pickBestShard(counts)
+		const target = String(shardId)
+		await db
+			.insert(shardMap)
+			.values({ driver: "d1", org_id: orgId, shard_id: shardId, target })
+			.onConflictDoUpdate({
+				set: { deleted_at: null, shard_id: shardId, target, updated_at: Date.now() },
+				setWhere: isNotNull(shardMap.deleted_at),
+				target: shardMap.org_id,
+			})
 
-		const target = String(bestShard)
-		await db.insert(shardMap).values({
-			driver: "d1",
-			org_id: orgId,
-			shard_id: bestShard,
-			target,
-		})
-
-		const now = Date.now()
-		const mapping: ShardMapping = {
-			createdAt: now,
-			d1Bookmark: session?.getBookmark() ?? undefined,
-			deletedAt: null,
-			driver: "d1",
-			orgId,
-			shardId: bestShard,
-			target,
-			updatedAt: now,
-		}
-
-		this.populateCaches(orgId, mapping, deps.kv, executionCtx)
+		/* the row that won: this router's, or a racer's that got there first */
+		const winner = await db.select().from(shardMap).where(eq(shardMap.org_id, orgId)).get()
+		const mapping = this.rowToMapping(winner as typeof shardMap.$inferSelect)
+		mapping.d1Bookmark = session?.getBookmark() ?? undefined
+		this.log("shard-router.allocate", { orgId, shardId: mapping.shardId })
+		this.populateCaches(orgId, mapping, { executionCtx, kv: deps.kv })
 		return mapping
 	}
 
@@ -198,13 +193,35 @@ class ShardRouter {
 		return bestShard
 	}
 
-	private populateCaches(orgId: string, mapping: ShardMapping, kv: KVNamespace, executionCtx: WaitUntilCtx): void {
+	private populateCaches(orgId: string, mapping: ShardMapping, { executionCtx, kv }: CacheTargets): void {
 		this.lru.set(orgId, mapping)
 		executionCtx.waitUntil(
 			kv.put(this.kvKey(orgId), JSON.stringify(mapping), {
 				expirationTtl: this.kvTtlSeconds,
 			}),
 		)
+	}
+
+	/** The live mapping in the core database, read from the nearest replica; undefined when none */
+	private async readMapping(orgId: string, deps: ShardResolverDeps): Promise<ShardMapping | undefined> {
+		const { client, session } = openD1Session(deps.coreDb, undefined)
+		const row = await drizzle(client)
+			.select()
+			.from(shardMap)
+			.where(and(eq(shardMap.org_id, orgId), isNull(shardMap.deleted_at)))
+			.get()
+		if (!row) return undefined
+		const mapping = this.rowToMapping(row)
+		mapping.d1Bookmark = session?.getBookmark() ?? undefined
+		return mapping
+	}
+
+	/** One background revalidation per org at a time, however many requests see it stale */
+	private revalidateOnce(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): void {
+		if (this.revalidating.has(orgId)) return
+		const running = this.revalidateShard(orgId, deps).finally(() => this.revalidating.delete(orgId))
+		this.revalidating.set(orgId, running)
+		executionCtx.waitUntil(running)
 	}
 
 	/** Background SWR revalidation — refreshes LRU from KV or Core D1 */
@@ -215,22 +232,10 @@ class ShardRouter {
 				this.lru.set(orgId, kvValue)
 				return
 			}
-
-			const { client, session } = openD1Session(deps.coreDb, undefined)
-			const db = drizzle(client)
-			const row = await db
-				.select()
-				.from(shardMap)
-				.where(and(eq(shardMap.org_id, orgId), isNull(shardMap.deleted_at)))
-				.get()
-			if (row) {
-				const mapping = this.rowToMapping(row)
-				mapping.d1Bookmark = session?.getBookmark() ?? undefined
-				this.lru.set(orgId, mapping)
-				await deps.kv.put(this.kvKey(orgId), JSON.stringify(mapping), {
-					expirationTtl: this.kvTtlSeconds,
-				})
-			}
+			const mapping = await this.readMapping(orgId, deps)
+			if (!mapping) return
+			this.lru.set(orgId, mapping)
+			await deps.kv.put(this.kvKey(orgId), JSON.stringify(mapping), { expirationTtl: this.kvTtlSeconds })
 		} catch (e) {
 			this.log("shard-router.revalidate.error", { error: e, orgId })
 		}
