@@ -84,10 +84,10 @@ Peer dependencies:
 
 | Package          | Range          | Required                                                                             |
 | ---------------- | -------------- | ------------------------------------------------------------------------------------ |
-| `drizzle-orm`    | `>=1.0.0-rc.1` | yes — the relational API (`defineRelations`) is v1-only                              |
-| `zod`            | `>=4.5.0`      | only for `c.json()` schemas and the query-layer Zod builders (`z.compile` / Zod 4.5) |
-| `ts-morph`       | `>=25.0.0`     | only for codegen                                                                     |
-| `@libsql/client` | `>=0.15.0`     | only for the libsql/Turso migration providers                                        |
+| `drizzle-orm`    | `>=1.0.0-rc.4` | yes — the relational API (`defineRelations`) is v1-only                              |
+| `zod`            | `>=4.5.4`      | only for `c.json()` schemas and the query-layer Zod builders (`z.compile` / Zod 4.5) |
+| `ts-morph`       | `>=28.0.0`     | only for codegen                                                                     |
+| `@libsql/client` | `>=0.17.4`     | only for the libsql/Turso migration providers                                        |
 
 The migration toolkit also shells out to [Atlas](https://atlasgo.io) and `drizzle-kit`; both are runtime requirements of `comb migrate diff`, not install-time dependencies.
 
