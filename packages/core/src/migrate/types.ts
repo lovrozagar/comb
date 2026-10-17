@@ -76,6 +76,8 @@ export const d1ProviderConfigSchema = z.compile(
 	z.object({
 		databaseId: z.string().min(1),
 		databaseName: z.string().min(1),
+		/** Target the local dev database (`wrangler --local`) instead of the remote one. */
+		local: z.boolean().optional(),
 		type: z.literal("d1"),
 	}),
 )

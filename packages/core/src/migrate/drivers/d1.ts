@@ -2,9 +2,11 @@
  * Cloudflare D1 driver — shells out to `wrangler d1 execute`
  * since D1 has no HTTP API for external access.
  */
-import { tmpdir } from "os"
-import { join } from "path"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import * as z from "zod"
+import { type Run, run } from "../core/process.ts"
 import type { Connection, ConnectionProvider, D1ProviderConfig, QueryResult, ResolvedDatabaseConfig } from "../types.ts"
 
 /* wrangler JSON output schema for query results */
@@ -16,15 +18,10 @@ const wranglerResultSchema = z.compile(
 	),
 )
 
-async function runWrangler(args: string[]): Promise<string> {
-	const proc = Bun.spawn(["wrangler", ...args], {
-		stderr: "pipe",
-		stdout: "pipe",
-	})
-	const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-	const exitCode = await proc.exited
-	if (exitCode !== 0) {
-		throw new Error(`wrangler failed (exit ${exitCode}): ${stderr.trim() || stdout.trim()}`)
+function runWrangler(exec: Run, args: string[]): string {
+	const { code, stderr, stdout } = exec("wrangler", args)
+	if (code !== 0) {
+		throw new Error(`wrangler failed (exit ${code}): ${stderr.trim() || stdout.trim()}`)
 	}
 	return stdout
 }
@@ -56,17 +53,17 @@ function formatLiteral(value: unknown): string {
 	throw new Error(`Unsupported SQL literal: ${typeof value}`)
 }
 
-function createD1Connection(databaseName: string): Connection {
+function createD1Connection(databaseName: string, target: "--local" | "--remote", exec: Run): Connection {
 	return {
 		async batch(statements: Array<{ sql: string }>): Promise<void> {
 			const sql = statements.map((s) => s.sql).join(";\n")
-			const tmpFile = join(tmpdir(), `d1-batch-${Date.now()}.sql`)
-			await Bun.write(tmpFile, sql)
+			const dir = mkdtempSync(join(tmpdir(), "comb-d1-batch-"))
+			const tmpFile = join(dir, "batch.sql")
 			try {
-				await runWrangler(["d1", "execute", databaseName, "--remote", `--file=${tmpFile}`])
+				writeFileSync(tmpFile, sql)
+				runWrangler(exec, ["d1", "execute", databaseName, target, `--file=${tmpFile}`])
 			} finally {
-				const { unlink } = await import("fs/promises")
-				await unlink(tmpFile).catch(() => {})
+				rmSync(dir, { force: true, recursive: true })
 			}
 		},
 
@@ -77,7 +74,7 @@ function createD1Connection(databaseName: string): Connection {
 
 		async execute(sql: string, params?: unknown[]): Promise<QueryResult> {
 			const finalSql = params && params.length > 0 ? inlineParams(sql, params) : sql
-			const stdout = await runWrangler(["d1", "execute", databaseName, "--remote", "--json", `--command=${finalSql}`])
+			const stdout = runWrangler(exec, ["d1", "execute", databaseName, target, "--json", `--command=${finalSql}`])
 			const parsed = wranglerResultSchema.safeParse(JSON.parse(stdout) as unknown)
 			if (!parsed.success) {
 				return { columns: [], rows: [] }
@@ -96,11 +93,12 @@ function createD1Connection(databaseName: string): Connection {
 	}
 }
 
-export function createD1Provider(_config: D1ProviderConfig): ConnectionProvider {
+export function createD1Provider(config: D1ProviderConfig, exec: Run = run): ConnectionProvider {
+	const target = config.local === true ? "--local" : "--remote"
 	return {
 		connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
 			/* Use resolved env name (e.g. csvme-core-local) so each env targets its own D1 db */
-			return Promise.resolve(createD1Connection(dbConfig.name))
+			return Promise.resolve(createD1Connection(dbConfig.name, target, exec))
 		},
 		dialect: "sqlite",
 	}

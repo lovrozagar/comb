@@ -1,10 +1,10 @@
 /**
  * Atlas CLI integration for schema diffing
  */
-import { execSync, spawnSync } from "child_process"
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "fs"
 import { join } from "path"
 import type { Dialect } from "../types.ts"
+import { type Run, run } from "./process.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    SQLITE MIGRATION POST-PROCESSOR
@@ -37,23 +37,14 @@ export function applySqliteMigrationTransforms(sql: string): string {
    ATLAS AVAILABILITY CHECK
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export function checkAtlasInstalled(): boolean {
-	try {
-		execSync("atlas version", { encoding: "utf-8", stdio: "pipe" })
-		return true
-	} catch {
-		return false
-	}
+export function checkAtlasInstalled(exec: Run = run): boolean {
+	return exec("atlas", ["version"]).code === 0
 }
 
-export function getAtlasVersion(): string | null {
-	try {
-		const output = execSync("atlas version", { encoding: "utf-8", stdio: "pipe" })
-		const match = output.match(/v[\d.]+/)
-		return match?.[0] ?? null
-	} catch {
-		return null
-	}
+export function getAtlasVersion(exec: Run = run): string | null {
+	const result = exec("atlas", ["version"])
+	if (result.code !== 0) return null
+	return result.stdout.match(/v[\d.]+/)?.[0] ?? null
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -79,6 +70,8 @@ export type SchemaDiffOptions = {
 	dialect: Dialect
 	fromSchema: string
 	toSchema: string
+	/** The process runner; tests pass a fake. */
+	run?: Run
 }
 
 export type SchemaDiffResult = {
@@ -87,7 +80,7 @@ export type SchemaDiffResult = {
 }
 
 export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult {
-	const { dialect, fromSchema, toSchema } = options
+	const { dialect, fromSchema, toSchema, run: exec = run } = options
 
 	const tmpDir = `/tmp/db-migration-diff-${Date.now()}`
 	mkdirSync(tmpDir, { recursive: true })
@@ -99,14 +92,19 @@ export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult
 		writeFileSync(fromFile, fromSchema)
 		writeFileSync(toFile, toSchema)
 
-		const result = spawnSync(
-			"atlas",
-			["schema", "diff", "--from", `file://${fromFile}`, "--to", `file://${toFile}`, "--dev-url", getDevUrl(dialect)],
-			{ encoding: "utf-8" },
-		)
+		const result = exec("atlas", [
+			"schema",
+			"diff",
+			"--from",
+			`file://${fromFile}`,
+			"--to",
+			`file://${toFile}`,
+			"--dev-url",
+			getDevUrl(dialect),
+		])
 
-		if (result.status !== 0) {
-			if (result.stderr?.includes("Schemas are synced")) {
+		if (result.code !== 0) {
+			if (result.stderr.includes("Schemas are synced")) {
 				return { diff: null, synced: true }
 			}
 			throw new Error(`Atlas diff failed: ${result.stderr}`)
@@ -143,6 +141,8 @@ export type MigrateDiffOptions = {
 	migrationName: string
 	migrationsDir: string
 	targetSchema: string
+	/** The process runner; tests pass a fake. */
+	run?: Run
 }
 
 export type MigrateDiffResult = {
@@ -151,7 +151,7 @@ export type MigrateDiffResult = {
 }
 
 export function generateIncrementalMigration(options: MigrateDiffOptions): MigrateDiffResult {
-	const { dialect, migrationName, migrationsDir, targetSchema } = options
+	const { dialect, migrationName, migrationsDir, targetSchema, run: exec = run } = options
 
 	if (!existsSync(migrationsDir)) {
 		mkdirSync(migrationsDir, { recursive: true })
@@ -160,10 +160,8 @@ export function generateIncrementalMigration(options: MigrateDiffOptions): Migra
 	const sumFile = join(migrationsDir, "atlas.sum")
 	if (!existsSync(sumFile)) {
 		/* Bootstrap atlas.sum so `atlas migrate diff` can replay history. */
-		const hashResult = spawnSync("atlas", ["migrate", "hash", "--dir", `file://${migrationsDir}`], {
-			encoding: "utf-8",
-		})
-		if (hashResult.status !== 0) {
+		const hashResult = exec("atlas", ["migrate", "hash", "--dir", `file://${migrationsDir}`])
+		if (hashResult.code !== 0) {
 			throw new Error(`atlas migrate hash failed: ${hashResult.stderr}`)
 		}
 	}
@@ -176,26 +174,22 @@ export function generateIncrementalMigration(options: MigrateDiffOptions): Migra
 		writeFileSync(toFile, targetSchema)
 
 		const beforeFiles = new Set(readdirSync(migrationsDir))
-		const result = spawnSync(
-			"atlas",
-			[
-				"migrate",
-				"diff",
-				migrationName,
-				"--dir",
-				`file://${migrationsDir}`,
-				"--to",
-				`file://${toFile}`,
-				"--dev-url",
-				getDevUrl(dialect),
-				"--format",
-				"{{ sql . }}",
-			],
-			{ encoding: "utf-8" },
-		)
+		const result = exec("atlas", [
+			"migrate",
+			"diff",
+			migrationName,
+			"--dir",
+			`file://${migrationsDir}`,
+			"--to",
+			`file://${toFile}`,
+			"--dev-url",
+			getDevUrl(dialect),
+			"--format",
+			"{{ sql . }}",
+		])
 
-		const stderr = result.stderr ?? ""
-		const stdout = (result.stdout ?? "").trim()
+		const stderr = result.stderr
+		const stdout = result.stdout.trim()
 
 		/* Atlas reports "synced" / "no changes" via stderr and exits 0 — not
 		   via a nonzero exit code. Detect both. */
@@ -203,7 +197,7 @@ export function generateIncrementalMigration(options: MigrateDiffOptions): Migra
 			return { files: [], synced: true }
 		}
 
-		if (result.status !== 0) {
+		if (result.code !== 0) {
 			throw new Error(`atlas migrate diff failed: ${stderr || stdout}`)
 		}
 
@@ -242,17 +236,16 @@ export function generateIncrementalMigration(options: MigrateDiffOptions): Migra
 export type DrizzleExportOptions = {
 	cwd: string
 	dialect: Dialect
+	/** The process runner; tests pass a fake. */
+	run?: Run
 }
 
 export function exportDrizzleSchema(options: DrizzleExportOptions): string {
-	const { cwd, dialect } = options
+	const { cwd, dialect, run: exec = run } = options
 
-	const result = spawnSync("bun", ["drizzle-kit", "export"], {
-		cwd,
-		encoding: "utf-8",
-	})
+	const result = exec("bun", ["drizzle-kit", "export"], { cwd })
 
-	if (result.status !== 0) {
+	if (result.code !== 0) {
 		throw new Error(`drizzle-kit export failed: ${result.stderr}`)
 	}
 

@@ -180,7 +180,7 @@ External tools the migration commands shell out to, none of them install-time de
 | `migrate diff`                      | [Atlas](https://atlasgo.io) on `PATH`, plus `drizzle-kit` |
 | `migrate apply`, `migrate baseline` | `wrangler`, authenticated against the target account      |
 
-The D1 provider drives `wrangler d1 execute --remote` through `Bun.spawn`, so `createD1Provider()` is Bun-only. The libsql, Turso, `bun:sqlite`, Neon, and Postgres providers have no such constraint.
+The D1 provider drives `wrangler d1 execute` as a child process, against the remote database by default; set `local: true` in its provider config to target the local dev database (`--local`).
 
 ### `comb codegen`
 
