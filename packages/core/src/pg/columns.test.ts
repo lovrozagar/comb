@@ -77,6 +77,12 @@ describe("pg columns", () => {
 		expect(cols.createdAt).toHaveProperty("hasDefault", true)
 	})
 
+	it("stores every timestamp as bigint epoch milliseconds, and stamps updatedAt on update (plan 3.10)", () => {
+		for (const column of [cols.createdAt, cols.updatedAt]) expect(column.getSQLType()).toBe("bigint")
+		const before = Date.now()
+		expect(cols.updatedAt.onUpdateFn?.()).toBeGreaterThanOrEqual(before)
+	})
+
 	it("c.updatedAt returns notNull integer with default", () => {
 		expect(cols.updatedAt).toHaveProperty("dataType", expect.stringContaining("number"))
 		expect(cols.updatedAt).toHaveProperty("notNull", true)
