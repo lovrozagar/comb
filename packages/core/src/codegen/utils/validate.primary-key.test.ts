@@ -65,7 +65,9 @@ describe("validateTables: keys, tenants and tables it cannot read", () => {
 		const composite = validate(
 			`export const m = sqliteTable("m", { a: c.text("a"), b: c.text("b") }, (t) => [primaryKey({ columns: [t.a, t.b] })])`,
 		)
-		expect(composite.warnings).toEqual([])
+		expect(composite.warnings).toEqual([
+			"m: composite primary key, so no entity stamp is published (docs/meta-contract.md §6.4)",
+		])
 	})
 
 	it("rejects two tenant columns on one table", () => {
@@ -91,5 +93,23 @@ export const t = sqliteTable("t", { id: c.id("ttt"), prefs: c.json("prefs", hidd
 			`export const t = sqliteTable("a", { id: c.id("aaa") })\nexport const t = sqliteTable("b", { id: c.id("bbb") })`,
 		)
 		expect(result.errors).toContain('Duplicate table variable name: "t"')
+	})
+})
+
+describe("validateTables: composite keys (D2)", () => {
+	it("warns that a table with a composite primary key publishes no entity stamp", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-composite-"))
+		try {
+			const file = path.join(dir, "db.test.tables.ts")
+			fs.writeFileSync(
+				file,
+				`import { sqliteTable } from "drizzle-orm/sqlite-core"\nimport { c } from "@lovrozagar/comb/sqlite/columns"\nexport const m = sqliteTable("m", { a: c.text("a"), b: c.text("b") }, (t) => [primaryKey({ columns: [t.a, t.b] })])`,
+			)
+			expect(validateTables(file).warnings).toEqual([
+				"m: composite primary key, so no entity stamp is published (docs/meta-contract.md §6.4)",
+			])
+		} finally {
+			fs.rmSync(dir, { force: true, recursive: true })
+		}
 	})
 })

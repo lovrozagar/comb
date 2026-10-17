@@ -4,15 +4,10 @@
  */
 import { type Node, type ObjectLiteralExpression, SyntaxKind, type VariableDeclaration } from "ts-morph"
 import { parseField } from "./analyze-field.ts"
-import type {
-	CheckConstraintMeta,
-	FieldMeta,
-	ImportsMeta,
-	TableMeta,
-	TimestampsMeta,
-	UniqueIndexMeta,
-} from "./analyzer-types.ts"
-import { readEnum } from "./utils/enum-source.ts"
+import { readTableOptions } from "./analyze-options.ts"
+import type { FieldMeta, ImportsMeta, TableMeta, TimestampsMeta } from "./analyzer-types.ts"
+import { readEnum, resolve } from "./utils/enum-source.ts"
+import { textWithoutComments } from "./utils/node-text.ts"
 import { type ImportRef, importRefs, type JsonSchemaSource, readJsonSchema } from "./utils/schema-source.ts"
 import { getTableName } from "./utils/ts-morph.ts"
 
@@ -41,60 +36,6 @@ function detectTimestamps(fields: FieldMeta[]): TimestampsMeta {
 	return found
 }
 
-/**
- * Parse table options (3rd arg arrow function) for composite PK, unique indexes, check constraints
- */
-function parseTableOptions(
-	optionsText: string,
-	paramName: string,
-): {
-	checkConstraints: CheckConstraintMeta[]
-	hasCompositePrimaryKey: boolean
-	uniqueIndexes: UniqueIndexMeta[]
-} {
-	const hasCompositePrimaryKey = /primaryKey\s*\(\s*\{/.test(optionsText)
-	const uniqueIndexes: UniqueIndexMeta[] = []
-	const checkConstraints: CheckConstraintMeta[] = []
-
-	/* Extract uniqueIndex calls: uniqueIndex("name").on(t.col1, t.col2) */
-	const uniquePattern = /uniqueIndex\s*\(\s*["']([^"']+)["']\s*\)[\s\S]*?\.on\s*\(([^)]+)\)/g
-	for (const match of optionsText.matchAll(uniquePattern)) {
-		const name = match[1]
-		const onClause = match[2]
-		if (name === undefined || onClause === undefined) continue
-
-		const columnPattern = new RegExp(`${paramName}\\.(\\w+)`, "g")
-		const columns = [...onClause.matchAll(columnPattern)].map((m) => m[1]).filter((c): c is string => c !== undefined)
-
-		if (columns.length > 0) {
-			uniqueIndexes.push({ columns, name })
-		}
-	}
-
-	/* Extract check constraints: check("name", sql`expr`) */
-	const checkPattern = /check\s*\(\s*["']([^"']+)["']\s*,\s*sql`([^`]+)`\s*[,)]/gs
-	for (const match of optionsText.matchAll(checkPattern)) {
-		const name = match[1]
-		const expression = match[2]
-		if (name !== undefined && expression !== undefined) {
-			checkConstraints.push({ expression: expression.replace(/\s+/g, " ").trim(), name })
-		}
-	}
-
-	return { checkConstraints, hasCompositePrimaryKey, uniqueIndexes }
-}
-
-type TableOptions = ReturnType<typeof parseTableOptions>
-
-const NO_OPTIONS: TableOptions = { checkConstraints: [], hasCompositePrimaryKey: false, uniqueIndexes: [] }
-
-/** The options a table's third argument, `(t) => [...]`, declares. */
-function optionsOf(arg: import("ts-morph").Node | undefined): TableOptions {
-	const arrow = arg?.asKind(SyntaxKind.ArrowFunction)
-	if (arrow === undefined) return NO_OPTIONS
-	return parseTableOptions(arrow.getBody().getText(), arrow.getParameters()[0]?.getName() ?? "t")
-}
-
 /* `.$type<z.infer<typeof schema>>()` types a column by a schema the DTO validates with */
 const INFERRED = /\.\$type<\s*z\.infer<\s*typeof\s+(\w+)\s*>\s*>/
 
@@ -114,7 +55,8 @@ function recordImports(refs: ImportRef[], enumReference: string | null, imports:
 
 /** One field, with what only the AST knows: enum values and states, schema and imports. */
 function fieldOf(key: string, value: Node, imports: ImportsMeta): FieldMeta {
-	const raw = value.getText()
+	/* a comment in the chain is a note, not code: `// TODO: .notNull()` declares nothing */
+	const raw = textWithoutComments(value)
 	const enumSource = readEnum(value)
 	const enumReference = enumSource === null ? null : enumSource.reference
 	const json = readJsonSchema(value)
@@ -130,13 +72,22 @@ function fieldOf(key: string, value: Node, imports: ImportsMeta): FieldMeta {
 	}
 }
 
-/** Every field of a table's column object; records the enum and schema names they import. */
-function fieldsOf(columns: ObjectLiteralExpression, imports: ImportsMeta): FieldMeta[] {
+/** A property's name as written: `"display-name"` is display-name. */
+function keyOf(name: Node): string {
+	return name.asKind(SyntaxKind.StringLiteral)?.getLiteralValue() ?? name.getText()
+}
+
+/** Every field of a table's column object, through spreads of shared column consts; records the names they import. */
+function fieldsOf(columns: ObjectLiteralExpression, imports: ImportsMeta, depth = 0): FieldMeta[] {
 	const fields: FieldMeta[] = []
 	for (const property of columns.getProperties()) {
+		const spread = property.asKind(SyntaxKind.SpreadAssignment)
+		const shared = resolve(spread?.getExpression())?.asKind(SyntaxKind.ObjectLiteralExpression)
+		if (shared !== undefined && depth < 4) fields.push(...fieldsOf(shared, imports, depth + 1))
 		const assignment = property.asKind(SyntaxKind.PropertyAssignment)
 		const value = assignment?.getInitializer()
-		if (assignment !== undefined && value !== undefined) fields.push(fieldOf(assignment.getName(), value, imports))
+		if (assignment !== undefined && value !== undefined)
+			fields.push(fieldOf(keyOf(assignment.getNameNode()), value, imports))
 	}
 	return fields
 }
@@ -151,7 +102,7 @@ export function parseTable(declaration: VariableDeclaration, imports: ImportsMet
 	const fields = fieldsOf(columns, imports)
 	const idPrefix = fields.map((f) => /c\.id\(["'](\w+)["']\)/.exec(f.raw)?.[1]).find((p) => p !== undefined) ?? null
 	return {
-		...optionsOf(args[2]),
+		...readTableOptions(args[2]),
 		fields,
 		idPrefix,
 		sqlName: getTableName(varName, initializer),

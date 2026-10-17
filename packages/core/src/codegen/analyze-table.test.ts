@@ -84,3 +84,46 @@ describe("parseTable: timestamps (M-M8)", () => {
 		expect(table?.timestamps).toEqual({ createdAt: false, deletedAt: false, style: "snake_case", updatedAt: true })
 	})
 })
+
+describe("parseTable: definitions the raw text misread (M-M7)", () => {
+	it("ignores what a comment inside a column chain says", () => {
+		const { table } = tableOf(`export const t = sqliteTable("t", {
+	id: c.id("ttt"),
+	title: c.text("title") // TODO: .notNull()
+		.default("x"),
+	body: c.text("body") /* .primaryKey() */,
+})`)
+		expect(table?.fields.map((f) => [f.name, f.isNotNull, f.isPrimaryKey])).toEqual([
+			["id", true, true],
+			["title", false, false],
+			["body", false, false],
+		])
+	})
+
+	it("reads the columns a spread of a shared const adds", () => {
+		const { table } = tableOf(`const timestamps = {
+	created_at: c.createdAt("created_at"),
+	deleted_at: c.deletedAt("deleted_at"),
+}
+export const t = sqliteTable("t", { id: c.id("ttt"), ...timestamps, title: c.text("title") })`)
+		expect(table?.fields.map((f) => f.name)).toEqual(["id", "created_at", "deleted_at", "title"])
+		expect(table?.timestamps).toMatchObject({ createdAt: true, deletedAt: true })
+	})
+
+	it("names a quoted key by its value, not its quotes", () => {
+		const { table } = tableOf(
+			`export const t = sqliteTable("t", { id: c.id("ttt"), "display-name": c.text("display_name") })`,
+		)
+		expect(table?.fields.map((f) => f.name)).toEqual(["id", "display-name"])
+	})
+
+	it("publishes only plain column uniqueness, not expression or partial unique indexes", () => {
+		const { table } =
+			tableOf(`export const t = sqliteTable("t", { id: c.id("ttt"), email: c.text("email"), slug: c.text("slug"), org: c.text("org") }, (t) => [
+	uniqueIndex("t_email_lower").on(sql\`lower(\${t.email})\`),
+	uniqueIndex("t_slug_live").on(t.slug).where(sql\`deleted_at is null\`),
+	uniqueIndex("t_org_slug").on(t.org, t.slug),
+])`)
+		expect(table?.uniqueIndexes).toEqual([{ columns: ["org", "slug"], name: "t_org_slug" }])
+	})
+})

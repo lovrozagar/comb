@@ -16,7 +16,6 @@ const SRC = join(import.meta.dirname, "../../src")
 
 const KNOWN_MISSING = [
 	"codegen/generators/fts-sql.ts",
-	"meta.ts",
 	"migrate/types.ts",
 	"query/descriptions.ts",
 	"query/sqlite/keyset.ts",

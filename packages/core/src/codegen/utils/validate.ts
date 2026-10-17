@@ -87,8 +87,11 @@ function checkFields(table: TableMeta, report: ValidationResult): void {
 
 function checkPrimaryKey(table: TableMeta, report: ValidationResult): void {
 	const key = table.fields.find((f) => f.isPrimaryKey)
-	if (key === undefined && !table.hasCompositePrimaryKey)
-		report.warnings.push(`${table.varName}: no primary key detected`)
+	if (table.hasCompositePrimaryKey) {
+		report.warnings.push(
+			`${table.varName}: composite primary key, so no entity stamp is published (docs/meta-contract.md §6.4)`,
+		)
+	} else if (key === undefined) report.warnings.push(`${table.varName}: no primary key detected`)
 	/* Keyset pagination resolves its tiebreak column by the property name CURSOR_TIEBREAK_COLUMN.
 	   A warning, not an error: join, config and lookup tables are never listed, and for those the
 	   property name is a free choice codegen has no business blocking. buildListQuery throws when

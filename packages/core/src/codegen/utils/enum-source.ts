@@ -38,7 +38,7 @@ function definitionOf(node: Node): Node | undefined {
 }
 
 /** The expression `node` stands for, through consts and property accesses. */
-function resolve(node: Node | undefined, hops = 0): Node | undefined {
+export function resolve(node: Node | undefined, hops = 0): Node | undefined {
 	if (node === undefined || hops > MAX_HOPS) return undefined
 	const bare = unwrap(node)
 	if (bare.isKind(SyntaxKind.Identifier)) return resolve(definitionOf(bare), hops + 1)
