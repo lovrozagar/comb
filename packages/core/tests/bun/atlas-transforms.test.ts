@@ -14,7 +14,7 @@ import { applySqliteMigrationTransforms } from "../../src/migrate/core/atlas.ts"
 /* An Atlas-shaped drift migration: table rebuilds (create `new_*`, copy rows,
    drop, rename), an ADD COLUMN, fresh tables, and indexes. Already stored
    post-transform, so it opens with the `defer_foreign_keys` prelude. */
-const DRIFT_FIXTURE_PATH = path.resolve(import.meta.dirname, "../fixtures/atlas-drift.sql")
+const DRIFT_FIXTURE_PATH = path.resolve(import.meta.dirname, "../../src/migrate/__fixtures__/atlas-drift.sql")
 
 describe("applySqliteMigrationTransforms", () => {
 	it("swaps foreign_keys off pair for defer_foreign_keys prelude", () => {

@@ -6,14 +6,7 @@ export default defineConfig({
 			{
 				test: {
 					name: "unit",
-					include: [
-						"src/**/*.test.ts",
-						"lint/**/*.test.ts",
-						"tests/structure/**/*.test.ts",
-						/* transitional: the suites still under tests/unit until they move beside their source */
-						"tests/unit/**/*.test.ts",
-						"tests/e2e/**/*.test.ts",
-					],
+					include: ["src/**/*.test.ts", "lint/**/*.test.ts", "tests/structure/**/*.test.ts"],
 				},
 			},
 			{

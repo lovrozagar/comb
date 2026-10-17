@@ -29,7 +29,9 @@
 	},
 	"files": [
 		"docs",
-		"src"
+		"src",
+		"!src/**/*.test.ts",
+		"!src/**/__fixtures__/**"
 	],
 	"type": "module",
 	"sideEffects": false,

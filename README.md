@@ -725,13 +725,15 @@ comb/
 │   │   ├── pg/             PostgreSQL columns and error handling
 │   │   ├── query/          DB-agnostic query layer + SQLite lowering
 │   │   ├── sqlite/         SQLite columns, constraints, D1
+│   │   │                   (unit tests sit beside each file as <name>.test.ts)
 │   │   ├── bin.ts          the `comb` executable (a shim over runCli)
 │   │   ├── cli.ts          runCli(argv, io)
 │   │   └── index.ts
+│   ├── lint/           the comb oxlint plugin, each rule beside its test
 │   └── tests/
-│       ├── unit/           vitest
-│       ├── bun/            bun:test — needs bun:sqlite
-│       └── fixtures/
+│       ├── integration/    vitest on real engines and cross-module contracts
+│       ├── structure/      layout and boundary invariants
+│       └── bun/            bun:test — needs bun:sqlite
 ├── .githooks/commit-msg    Conventional Commits gate
 └── .github/workflows/      ci + release
 ```

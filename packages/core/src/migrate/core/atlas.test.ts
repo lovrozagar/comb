@@ -1,11 +1,12 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
 	checkAtlasInstalled,
 	exportDrizzleSchema,
 	generateIncrementalMigration,
+	generateMigrationFile,
 	generateSchemaDiff,
 	getAtlasVersion,
 } from "./atlas.ts"
@@ -196,5 +197,64 @@ describe("exportDrizzleSchema", () => {
 		expect(() => exportDrizzleSchema({ cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config")) })).toThrow(
 			"drizzle-kit export failed: no config",
 		)
+	})
+})
+
+describe("generateMigrationFile", () => {
+	let tmpDir: string
+
+	beforeEach(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "comb-atlas-test-"))
+	})
+
+	afterEach(() => {
+		rmSync(tmpDir, { force: true, recursive: true })
+	})
+
+	it("creates migration file with diff content", () => {
+		const filepath = generateMigrationFile({
+			diff: "CREATE TABLE users (id TEXT PRIMARY KEY);",
+			migrationName: "init",
+			migrationsDir: tmpDir,
+		})
+
+		expect(existsSync(filepath)).toBe(true)
+		const content = readFileSync(filepath, "utf-8")
+		expect(content).toContain("CREATE TABLE users")
+		expect(content).toContain("Migration: init")
+	})
+
+	it("includes description when provided", () => {
+		const filepath = generateMigrationFile({
+			description: "Initial schema",
+			diff: "CREATE TABLE users (id TEXT);",
+			migrationName: "init",
+			migrationsDir: tmpDir,
+		})
+
+		const content = readFileSync(filepath, "utf-8")
+		expect(content).toContain("Initial schema")
+	})
+
+	it("creates migrations dir if missing", () => {
+		const nestedDir = join(tmpDir, "nested", "migrations")
+		const filepath = generateMigrationFile({
+			diff: "SELECT 1;",
+			migrationName: "test",
+			migrationsDir: nestedDir,
+		})
+
+		expect(existsSync(filepath)).toBe(true)
+	})
+
+	it("generates timestamped filename", () => {
+		const filepath = generateMigrationFile({
+			diff: "SELECT 1;",
+			migrationName: "add_users",
+			migrationsDir: tmpDir,
+		})
+
+		const filename = basename(filepath)
+		expect(filename).toMatch(/^\d{8}_add_users\.sql$/)
 	})
 })

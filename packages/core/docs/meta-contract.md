@@ -235,7 +235,7 @@ builder no longer emits it.
 `maxInValues` and `maxSortKeys` were added after v1 shipped. They are optional in the type and
 validated when present, so a v1 reader built before them ignores them — which is why adding them
 did not bump `v`. Each value is computed from the config that parses the request, and
-`tests/unit/meta/query-parity.test.ts` drives the parser to prove it.
+`tests/integration/meta/query-parity.test.ts` drives the parser to prove it.
 
 ### 6.6 `select=` is advertised only when it can be honored
 
@@ -486,7 +486,7 @@ and invoke its `expand` per hit — which the discriminated `kind` already makes
 Until then an app can work around it with two policy entries narrowed by `from`, if honey allows
 the same source key twice; comb's side needs no change either way.
 
-`tests/e2e/stamp-to-document.test.ts` pins comb's half: both stamps present, correct, and each
+`tests/integration/meta/stamp-to-document.test.ts` pins comb's half: both stamps present, correct, and each
 resolvable on its own schema, with the drop reproduced against a transcription of honey's own
 search so the fix has a concrete case to satisfy.
 
@@ -517,7 +517,7 @@ in a pull request, which is the only shape that work may take.
 
 ## 9. Tests, and why they are shaped this way
 
-`tests/unit/meta/` holds three files:
+`tests/integration/meta/` holds three files:
 
 | File                    | Asserts                                                                                             |
 | ----------------------- | --------------------------------------------------------------------------------------------------- |
