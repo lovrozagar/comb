@@ -5,7 +5,7 @@
  */
 import type { FieldMeta, ForeignKeyRef } from "./analyzer-types.ts"
 import { parseFieldConstraints } from "./annotations.ts"
-import { extractLength } from "./utils/ts-morph.ts"
+import { extractLength, type IdentifierValues } from "./utils/constraint-text.ts"
 
 /**
  * Extract Drizzle helper name from raw initializer text.
@@ -20,7 +20,7 @@ function extractDrizzleHelper(raw: string): string {
  * Extract FK reference info from .references(() => table.column, { onDelete: "cascade" })
  */
 function extractForeignKey(raw: string, fieldName: string): ForeignKeyRef | null {
-	const refMatch = raw.match(/\.references\(\s*\(\)\s*=>\s*(\w+)\.(\w+)(?:,\s*\{([^}]*)\})?\)/)
+	const refMatch = raw.match(/\.references\(\s*\(\)\s*(?::\s*[\w.]+\s*)?=>\s*(\w+)\.(\w+)(?:,\s*\{([^}]*)\})?\)/)
 	if (!refMatch || refMatch[1] === undefined || refMatch[2] === undefined) return null
 
 	const optionsStr = refMatch[3] ?? ""
@@ -49,10 +49,11 @@ function sqlNameOf(key: string, raw: string): string {
 }
 
 /** Parse a single field from a property assignment node. */
-export function parseField(key: string, raw: string): FieldMeta {
-	const constraints = parseFieldConstraints(raw, key)
+export function parseField(key: string, raw: string, identifiers?: IdentifierValues): FieldMeta {
+	const constraints = parseFieldConstraints(raw, key, identifiers)
 	const isPrimaryKey = /\.primaryKey\(/.test(raw) || ID_HELPERS.test(raw)
-	const isNotNull = /\.notNull\(\)/.test(raw) || isPrimaryKey
+	/* c.createdAt and c.updatedAt call .notNull() inside the helper, where the text cannot see it */
+	const isNotNull = /\.notNull\(\)/.test(raw) || isPrimaryKey || /^\s*c\.(?:createdAt|updatedAt)\s*\(/.test(raw)
 	const drizzleHelper = extractDrizzleHelper(raw)
 	const foreignKey = extractForeignKey(raw, key)
 	const length = extractLength(raw)
@@ -60,7 +61,7 @@ export function parseField(key: string, raw: string): FieldMeta {
 	/* Also detect FK from c.ref helper */
 	let fk = foreignKey
 	if (!fk && /c\.ref[<(]/.test(raw)) {
-		const refHelperMatch = raw.match(/c\.ref[<(].*?\.references\(\s*\(\)\s*=>\s*(\w+)\.(\w+)/)
+		const refHelperMatch = raw.match(/c\.ref[<(].*?\.references\(\s*\(\)\s*(?::\s*[\w.]+\s*)?=>\s*(\w+)\.(\w+)/)
 		if (refHelperMatch && refHelperMatch[1] !== undefined && refHelperMatch[2] !== undefined) {
 			fk = {
 				column: key,

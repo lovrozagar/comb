@@ -4,10 +4,10 @@
  * from a file in the project, a machine's `.values`, and a machine passed by reference.
  */
 import { type CallExpression, type Node, type ObjectLiteralExpression, SyntaxKind } from "ts-morph"
-import type { ParsedStates } from "./ts-morph.ts"
+import type { StateMachineMeta } from "../analyzer-types.ts"
 
 export type EnumSource = {
-	machine: ParsedStates | null
+	machine: StateMachineMeta | null
 	/** the identifier the values come from, when they could not be read */
 	reference: string | null
 	values: string[] | null
@@ -88,7 +88,7 @@ function transitionsOf(node: Node | undefined): Record<string, string[]> | null 
 	return transitions
 }
 
-function machineOf(node: Node | undefined): ParsedStates | null {
+function machineOf(node: Node | undefined): StateMachineMeta | null {
 	const object = resolve(node)?.asKind(SyntaxKind.ObjectLiteralExpression)
 	if (object === undefined) return null
 	const keys = new Set(object.getProperties().map(keyOf))

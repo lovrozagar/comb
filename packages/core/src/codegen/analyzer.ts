@@ -8,17 +8,17 @@ import type { Project } from "ts-morph"
 import { parseTable } from "./analyze-table.ts"
 import type { AnalysisResult, ImportsMeta, TableMeta } from "./analyzer-types.ts"
 import { isTableDefinition, tableBuilders } from "./utils/table-builders.ts"
-import {
-	buildIdentifierValueMap,
-	createProjectFromTablesDir,
-	extractDbName,
-	getTablesImportPath,
-	setIdentifierValueMap,
-} from "./utils/ts-morph.ts"
+import { buildIdentifierValueMap } from "./utils/constraint-text.ts"
+import { createProjectFromTablesDir, extractDbName, getTablesImportPath } from "./utils/ts-morph.ts"
 
 /** Every named import across the project, by local name, with the module it comes from. */
 function collectImports(project: Project): ImportsMeta {
-	const imports: ImportsMeta = { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() }
+	const imports: ImportsMeta = {
+		enumImports: new Map(),
+		identifierValues: new Map(),
+		identifiers: new Map(),
+		jsonSchemaImports: new Set(),
+	}
 	for (const file of project.getSourceFiles()) {
 		for (const declaration of file.getImportDeclarations()) {
 			const moduleSpecifier = declaration.getModuleSpecifierValue()
@@ -52,7 +52,7 @@ function analyze(tablesPath: string, cwd?: string): AnalysisResult {
 	const project = createProjectFromTablesDir(tablesPath)
 	const imports = collectImports(project)
 	/* Resolve imported identifier values for constraint pattern resolution */
-	if (cwd) setIdentifierValueMap(buildIdentifierValueMap(imports.identifiers, cwd))
+	if (cwd) imports.identifierValues = buildIdentifierValueMap(imports.identifiers, cwd)
 	return {
 		dbName: extractDbName(tablesPath),
 		imports,

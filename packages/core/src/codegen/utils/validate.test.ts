@@ -290,9 +290,20 @@ export const delivery = createTable("delivery", {
 		expect(result.warnings.join("\n")).toContain('"stuck" has no outgoing transitions')
 	})
 
-	it("warns when the value list is a const reference it cannot read", () => {
+	it("reads a local const value list and validates the machine against it", () => {
 		const result = validate(`
 const STATUSES = ["queued", "sent"] as const
+export const delivery = createTable("delivery", {
+	id: c.id(),
+	status: c.enum("status", STATUSES, { terminal: ["sent", "gone"] }),
+})
+`)
+		expect(result.errors).toEqual(['delivery.status: terminal names "gone", which is not a declared value'])
+	})
+
+	it("warns when the value list is a reference it cannot read", () => {
+		const result = validate(`
+import { STATUSES } from "@app/shared"
 export const delivery = createTable("delivery", {
 	id: c.id(),
 	status: c.enum("status", STATUSES, { terminal: ["sent"] }),

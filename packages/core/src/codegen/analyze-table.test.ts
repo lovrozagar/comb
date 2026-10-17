@@ -11,7 +11,7 @@ function tableOf(source: string, imports: ImportsMeta = emptyImports()) {
 }
 
 function emptyImports(): ImportsMeta {
-	return { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() }
+	return { enumImports: new Map(), identifierValues: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() }
 }
 
 describe("parseTable", () => {
@@ -70,5 +70,17 @@ export const u = sqliteTable("u", { role: c.enum("role", roles), prefs: c.json("
 		expect(tableOf('export const t = sqliteTable("t")').table).toBeNull()
 		expect(tableOf('export const t = sqliteTable("t", columns)').table).toBeNull()
 		expect(tableOf("export const t = 1").table).toBeNull()
+	})
+})
+
+describe("parseTable: timestamps (M-M8)", () => {
+	it("counts a timestamp column only when it holds epoch milliseconds, not by its name alone", () => {
+		const { table } = tableOf(`export const e = sqliteTable("e", {
+	id: c.id("evt"),
+	created_at: c.text("created_at").notNull(),
+	updated_at: c.integer("updated_at").notNull(),
+	deleted_at: c.json("deleted_at", s),
+})`)
+		expect(table?.timestamps).toEqual({ createdAt: false, deletedAt: false, style: "snake_case", updatedAt: true })
 	})
 })

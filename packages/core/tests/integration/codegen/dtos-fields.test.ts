@@ -90,3 +90,11 @@ export const d = sqliteTable("d", { id: c.id("ddd"), priority: c.enum("priority"
 		}
 	})
 })
+
+describe("timestamp-named columns of another type (M-M8)", () => {
+	it("validate a text created_at as text", async () => {
+		const tables = `export const event = sqliteTable("event", { id: c.id("evt"), created_at: c.text("created_at").notNull() })`
+		const read = (await generatedDtos("text-timestamps", tables)).event?.eventDtoReadSchema as z.ZodObject
+		expect(read.safeParse({ created_at: "2026-01-01T00:00:00Z", id: "evt_1" }).success).toBe(true)
+	})
+})

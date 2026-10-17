@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest"
 import {
-	buildIdentifierValueMap,
-	extractConstraints,
+	createProject,
+	createProjectFromTablesDir,
 	extractDbName,
-	extractEnumFromType,
-	extractEnumValues,
-	extractJsonSchemaImports,
-	extractLength,
-	extractStates,
+	getTableName,
 	getTablesImportPath,
-	setIdentifierValueMap,
 } from "./ts-morph.ts"
 
 describe("extractDbName", () => {
@@ -39,135 +34,6 @@ describe("getTablesImportPath", () => {
 		expect(getTablesImportPath("/a/b/my.db.shard.tables.gen.ts")).toBe("./my.db.shard.tables.gen")
 	})
 })
-
-describe("extractEnumFromType", () => {
-	it("extracts from .$type<(typeof ENUM)[number]> pattern", () => {
-		expect(extractEnumFromType('text("role").$type<(typeof ROLES)[number]>()')).toBe("ROLES")
-	})
-
-	it("extracts from c.enum() pattern", () => {
-		expect(extractEnumFromType('c.enum("status", STATUS_ENUM)')).toBe("STATUS_ENUM")
-	})
-
-	it("still sees the const name when a state machine follows", () => {
-		expect(extractEnumFromType('c.enum("status", STATUS_ENUM, { terminal: ["done"] })')).toBe("STATUS_ENUM")
-	})
-
-	it("returns null for no enum", () => {
-		expect(extractEnumFromType('c.text("name")')).toBeNull()
-	})
-})
-
-describe("extractEnumValues", () => {
-	it("reads an inline list", () => {
-		expect(extractEnumValues('c.enum("status", ["draft", "sent"])')).toEqual(["draft", "sent"])
-	})
-
-	it("still reads the list when a state machine is the third argument", () => {
-		expect(extractEnumValues('c.enum("status", ["draft", "sent"], { terminal: ["sent"] })')).toEqual(["draft", "sent"])
-	})
-
-	it("returns null for a const reference", () => {
-		expect(extractEnumValues('c.enum("status", STATUS_ENUM)')).toBeNull()
-		expect(extractEnumValues('c.enum("status", STATUS_ENUM, { terminal: ["done"] })')).toBeNull()
-	})
-
-	it("returns null for a non-enum column", () => {
-		expect(extractEnumValues('c.text("name")')).toBeNull()
-	})
-})
-
-describe("extractStates", () => {
-	it("reads a full machine off the third argument", () => {
-		expect(
-			extractStates(
-				'c.enum("status", ["queued", "sending", "sent"], { initial: "queued", terminal: ["sent"], transitions: { queued: ["sending"], sending: ["sent"] } })',
-			),
-		).toEqual({
-			initial: "queued",
-			terminal: ["sent"],
-			transitions: { queued: ["sending"], sending: ["sent"] },
-		})
-	})
-
-	it("accepts the cheap half — terminal only", () => {
-		expect(extractStates('c.enum("status", ["a", "b"], { terminal: ["b"] })')).toEqual({
-			initial: null,
-			terminal: ["b"],
-			transitions: null,
-		})
-	})
-
-	it("reads a machine next to a const value list", () => {
-		expect(extractStates('c.enum("status", STATUSES, { terminal: ["done"] })')).toEqual({
-			initial: null,
-			terminal: ["done"],
-			transitions: null,
-		})
-	})
-
-	it("returns null when there is no third argument, or the object is empty", () => {
-		expect(extractStates('c.enum("status", ["a", "b"])')).toBeNull()
-		expect(extractStates('c.enum("status", ["a"], {})')).toBeNull()
-	})
-
-	it("ignores a non-enum column whose braces look similar", () => {
-		expect(extractStates('c.text("name", { max: 10, min: 1 })')).toBeNull()
-	})
-})
-
-describe("extractConstraints does not swallow a state machine", () => {
-	it("returns an empty map for c.enum, even when a third argument is present", () => {
-		expect(extractConstraints('c.enum("status", ["a", "b"], { terminal: ["b"], private: true })')).toEqual({})
-	})
-})
-
-describe("extractLength", () => {
-	it("extracts from max constraint", () => {
-		expect(extractLength('c.text("name", { max: 100 })')).toBe(100)
-	})
-
-	it("extracts from positional parameter", () => {
-		expect(extractLength('c.text("name", 50)')).toBe(50)
-	})
-
-	it("returns null when no length", () => {
-		expect(extractLength('c.text("name")')).toBeNull()
-	})
-})
-
-describe("extractJsonSchemaImports", () => {
-	it("extracts z.infer<typeof schema> patterns", () => {
-		const raw = "z.infer<typeof mySchema> & z.infer<typeof otherSchema>"
-		expect(extractJsonSchemaImports(raw)).toEqual(["mySchema", "otherSchema"])
-	})
-
-	it("returns empty for no matches", () => {
-		expect(extractJsonSchemaImports('c.text("name")')).toEqual([])
-	})
-})
-
-describe("extractConstraints", () => {
-	it("extracts parameter-based constraints", () => {
-		const result = extractConstraints('c.text("email", { min: 5, max: 254, email: true })')
-		expect(result).toEqual({ email: true, max: 254, min: 5 })
-	})
-
-	it("returns empty for no constraints", () => {
-		expect(extractConstraints('c.text("name")')).toEqual({})
-	})
-
-	it("handles boolean false values", () => {
-		const result = extractConstraints('c.text("name", { trim: false })')
-		expect(result).toEqual({ trim: false })
-	})
-
-	it("handles string values", () => {
-		const result = extractConstraints('c.text("phone", { pattern: "/^\\\\+[0-9]+$/" })')
-		expect(result.pattern).toBeDefined()
-	})
-})
-
 describe("extractDbName — naming conventions", () => {
 	const cases: Array<[string, string]> = [
 		["/x/app.db-core.tables.ts", "core"],
@@ -195,80 +61,35 @@ describe("getTablesImportPath", () => {
 	})
 })
 
-describe("extractJsonSchemaImports", () => {
-	it("collects every z.infer reference in order", () => {
-		expect(extractJsonSchemaImports("z.infer<typeof settingsSchema>")).toEqual(["settingsSchema"])
-		expect(extractJsonSchemaImports("a: z.infer<typeof aSchema>, b: z.infer<typeof bSchema>")).toEqual([
-			"aSchema",
-			"bSchema",
-		])
+describe("project helpers", () => {
+	it("reads a tables file's directory, without dependencies or build output", async () => {
+		const fs = await import("node:fs")
+		const os = await import("node:os")
+		const path = await import("node:path")
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-project-"))
+		try {
+			for (const file of ["db.x.tables.ts", "shared/enums.ts", "node_modules/pkg/index.ts", "dist/out.ts"]) {
+				fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true })
+				fs.writeFileSync(path.join(dir, file), "export const x = 1\n")
+			}
+			const names = createProjectFromTablesDir(path.join(dir, "db.x.tables.ts"))
+				.getSourceFiles()
+				.map((f) => path.relative(dir, f.getFilePath()))
+				.sort()
+			expect(names).toEqual(["db.x.tables.ts", "shared/enums.ts"])
+		} finally {
+			fs.rmSync(dir, { force: true, recursive: true })
+		}
 	})
 
-	it("returns nothing when there is no reference", () => {
-		expect(extractJsonSchemaImports("z.string()")).toEqual([])
-		expect(extractJsonSchemaImports("")).toEqual([])
-	})
-})
-
-describe("buildIdentifierValueMap", () => {
-	it("skips a module that cannot be resolved rather than throwing", () => {
-		const map = buildIdentifierValueMap(new Map([["patterns", "./definitely-not-here"]]), process.cwd())
-		expect(map.size).toBe(0)
-	})
-
-	it("returns an empty map for no imports", () => {
-		expect(buildIdentifierValueMap(new Map(), process.cwd()).size).toBe(0)
-	})
-})
-
-describe("extractConstraints — value forms", () => {
-	it("reads the type-argument form as well as the parameter form", () => {
-		expect(extractConstraints('c.text<{ max: 10 }>("name")')).toEqual({ max: 10 })
-		expect(extractConstraints('c.text("name", { max: 10 })')).toEqual({ max: 10 })
-	})
-
-	it("returns nothing when there is no constraint object", () => {
-		expect(extractConstraints('c.text("name")')).toEqual({})
-		expect(extractConstraints("not a column at all")).toEqual({})
-	})
-
-	it("parses booleans, integers and both quote styles", () => {
-		expect(extractConstraints(`c.text("n", { trim: true, private: false, max: 42, a: "x", b: 'y' })`)).toEqual({
-			a: "x",
-			b: "y",
-			max: 42,
-			private: false,
-			trim: true,
-		})
-	})
-
-	it("keeps a regex literal intact despite its braces and commas", () => {
-		const result = extractConstraints(String.raw`c.text("n", { pattern: /^\+[1-9]\d{7,14}$/, max: 16 })`)
-		expect(result["max"]).toBe(16)
-		expect(String(result["pattern"])).toContain("7,14")
-	})
-
-	it("un-escapes doubled backslashes in a quoted pattern", () => {
-		const result = extractConstraints(String.raw`c.text("n", { pattern: "/^\\d+$/" })`)
-		expect(result["pattern"]).toBe(String.raw`/^\d+$/`)
-	})
-
-	it("ignores a fragment with no colon", () => {
-		expect(extractConstraints('c.text("n", { justAKey })')).toEqual({})
-	})
-
-	it("resolves a dotted identifier through the value map", () => {
-		setIdentifierValueMap(new Map([["patterns.LOCALE", "/^[a-z]{2}$/"]]))
-		expect(extractConstraints('c.text("n", { pattern: patterns.LOCALE })')["pattern"]).toBe("/^[a-z]{2}$/")
-		setIdentifierValueMap(new Map())
-	})
-
-	it("passes an unresolved identifier through verbatim", () => {
-		setIdentifierValueMap(new Map())
-		expect(extractConstraints('c.text("n", { pattern: patterns.UNKNOWN })')["pattern"]).toBe("patterns.UNKNOWN")
-	})
-
-	it("returns nothing for an unbalanced constraint object", () => {
-		expect(extractConstraints('c.text("n", { max: 10')).toEqual({})
+	it("names a table by its first argument, or its variable when it has none", () => {
+		const file = createProject().createSourceFile(
+			"x.ts",
+			'const a = sqliteTable("posts", {})\nconst b = sqliteTable()\nconst c = 1',
+		)
+		const init = (name: string) => file.getVariableDeclarationOrThrow(name).getInitializerOrThrow()
+		expect(getTableName("a", init("a"))).toBe("posts")
+		expect(getTableName("b", init("b"))).toBe("b")
+		expect(getTableName("c", init("c"))).toBe("c")
 	})
 })

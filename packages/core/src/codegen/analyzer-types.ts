@@ -128,6 +128,8 @@ type ImportsMeta = {
 	identifiers: Map<string, string>
 	/** JSON schema names referenced by c.json() */
 	jsonSchemaImports: Set<string>
+	/** `"identifier.PROPERTY"` → the string an imported constant holds, for constraint references */
+	identifierValues: Map<string, string>
 }
 
 /** Full analysis result */

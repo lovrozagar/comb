@@ -346,21 +346,18 @@ See `docs/state-machines.md`.
 without it, page-walk checks report phantom gaps and duplicates.
 
 comb's SQLite cursor builder resolves it as `getTableColumns(table)["id"]` — the **JavaScript
-property name**, hardcoded — and `buildCursorWhere` returns `null` when that lookup misses:
+property name** `CURSOR_TIEBREAK_COLUMN`, not the SQL column. It once returned `null` when that
+lookup missed, which added no cursor predicate: the query returned the first page again, and rows
+silently duplicated and went missing across pages.
 
-```ts
-const idCol = columns["id"] as SQLiteColumn | undefined
-if (!sortCol || !idCol) return null
-```
+`buildListQuery` now throws a `CombError` when it is asked to cursor-page a table with no `id`
+property, so the failure is loud at the one place it can be exact. `stableTiebreak` is published as
+`"id"`, matching what the builder does.
 
-A `null` here is not an error. It means no cursor predicate is added, so the query returns the
-first page again — **rows silently duplicate and rows are silently skipped across pages**. Any
-table whose primary key is declared under a different property name (`{ pk: c.id("usr") }`) has
-broken cursor pagination today, with no diagnostic.
-
-So `stableTiebreak` is published as `"id"`, matching what the builder actually does, and
-`validateTables()` now fails when a table's primary-key property is not named `id`. Publishing
-the fact forced the invariant to be stated, which is the argument for doing this at all.
+`validateTables()` **warns** when a table's primary-key property is not named `id`; it does not
+fail. Join, config and lookup tables are never listed, and for those the property name is a free
+choice that codegen has no business blocking; a composite key is exempt. Publishing the fact forced
+the invariant to be stated, which is the argument for doing this at all.
 
 ## 8. Worked example, end to end
 

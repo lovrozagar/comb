@@ -5,7 +5,7 @@
  * Example: c.text("name", { min: 5, max: 254, email: true })
  */
 import type { CommentRange, Node } from "ts-morph"
-import { extractConstraints } from "./utils/ts-morph.ts"
+import { extractConstraints, type IdentifierValues } from "./utils/constraint-text.ts"
 
 /** Field constraints extracted from type arguments */
 export type FieldConstraints = {
@@ -41,8 +41,12 @@ export function getCommentText(node: Node): string {
  * Extracts constraints from c.method("name", { ... }) pattern.
  * For timestamp fields (createdAt, updatedAt, deletedAt), autogenerate defaults to true.
  */
-export function parseFieldConstraints(raw: string, fieldName?: string): FieldConstraints {
-	const constraints = extractConstraints(raw)
+export function parseFieldConstraints(
+	raw: string,
+	fieldName?: string,
+	identifiers?: IdentifierValues,
+): FieldConstraints {
+	const constraints = extractConstraints(raw, identifiers)
 
 	/* Check if this is a timestamp field */
 	const isTimestampField =

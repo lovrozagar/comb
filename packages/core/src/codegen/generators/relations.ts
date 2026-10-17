@@ -51,7 +51,8 @@ function deriveManyName(sourceTable: string): string {
 }
 
 type OneRelation = { column: string; name: string; refColumn: string; refTable: string }
-type ManyRelation = { name: string; sourceColumn: string; sourceTable: string }
+/** `targetColumn` is the referenced column on this table, which the many side joins from. */
+type ManyRelation = { name: string; sourceColumn: string; sourceTable: string; targetColumn: string }
 
 /** Build the relations graph and generate code from analyzed tables */
 export function generateRelations(tables: TableMeta[], tablesPath: string, config: RelationsConfig, cwd: string): void {
@@ -101,6 +102,7 @@ export function generateRelations(tables: TableMeta[], tablesPath: string, confi
 						name: manyName,
 						sourceColumn: fk.column,
 						sourceTable: table.varName,
+						targetColumn: fk.refColumn,
 					})
 				}
 			}
@@ -167,9 +169,9 @@ export function generateRelations(tables: TableMeta[], tablesPath: string, confi
 				lines.push(`\t\t\tto: r.${refTable}.${refColumn},`)
 				lines.push("\t\t}),")
 			} else {
-				const { name, sourceColumn, sourceTable } = entry.rel
+				const { name, sourceColumn, sourceTable, targetColumn } = entry.rel
 				lines.push(`\t\t${name}: r.many.${sourceTable}({`)
-				lines.push(`\t\t\tfrom: r.${tableName}.id,`)
+				lines.push(`\t\t\tfrom: r.${tableName}.${targetColumn},`)
 				lines.push(`\t\t\tto: r.${sourceTable}.${sourceColumn},`)
 				lines.push("\t\t}),")
 			}

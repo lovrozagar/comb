@@ -16,29 +16,29 @@ import { readEnum } from "./utils/enum-source.ts"
 import { type ImportRef, importRefs, type JsonSchemaSource, readJsonSchema } from "./utils/schema-source.ts"
 import { getTableName } from "./utils/ts-morph.ts"
 
-/** Detect timestamp fields and style from field list */
+/** The timestamp columns a table has, and their casing */
+// lookup-table: timestamp column names under either casing
+const TIMESTAMP_KEYS: Record<string, keyof Omit<TimestampsMeta, "style">> = {
+	createdAt: "createdAt",
+	created_at: "createdAt",
+	deletedAt: "deletedAt",
+	deleted_at: "deletedAt",
+	updatedAt: "updatedAt",
+	updated_at: "updatedAt",
+}
+
+/* the shared timestamp schemas are epoch milliseconds; a text or JSON column under the name is not one */
+const EPOCH_HELPERS = /^\s*(?:c\.(?:createdAt|updatedAt|deletedAt|timestamp|integer)|integer)\s*\(/
+
 function detectTimestamps(fields: FieldMeta[]): TimestampsMeta {
-	let createdAt = false
-	let updatedAt = false
-	let deletedAt = false
-	let style: "camelCase" | "snake_case" = "camelCase"
-
-	for (const f of fields) {
-		if (f.name === "createdAt" || f.name === "created_at") {
-			createdAt = true
-			if (f.name === "created_at") style = "snake_case"
-		}
-		if (f.name === "updatedAt" || f.name === "updated_at") {
-			updatedAt = true
-			if (f.name === "updated_at") style = "snake_case"
-		}
-		if (f.name === "deletedAt" || f.name === "deleted_at") {
-			deletedAt = true
-			if (f.name === "deleted_at") style = "snake_case"
-		}
+	const found: TimestampsMeta = { createdAt: false, deletedAt: false, style: "camelCase", updatedAt: false }
+	for (const field of fields) {
+		const key = Object.hasOwn(TIMESTAMP_KEYS, field.name) ? TIMESTAMP_KEYS[field.name] : undefined
+		if (key === undefined || !EPOCH_HELPERS.test(field.raw)) continue
+		found[key] = true
+		if (field.name.includes("_")) found.style = "snake_case"
 	}
-
-	return { createdAt, deletedAt, style, updatedAt }
+	return found
 }
 
 /**
@@ -121,7 +121,7 @@ function fieldOf(key: string, value: Node, imports: ImportsMeta): FieldMeta {
 	const schemaImports = importRefs(importedNames(enumReference, json, raw), value.getSourceFile())
 	recordImports(schemaImports, enumReference, imports)
 	return {
-		...parseField(key, raw),
+		...parseField(key, raw, imports.identifierValues),
 		enumName: enumReference,
 		enumValues: enumSource?.values ?? null,
 		jsonSchemaName: json?.expression ?? null,

@@ -37,3 +37,28 @@ describe("parseField", () => {
 		expect(parseField("x", 'c.text("x")').foreignKey).toBeNull()
 	})
 })
+
+describe("parseField: self-references (M-M3)", () => {
+	it("reads a reference whose arrow carries a return type, as drizzle requires for a self-reference", () => {
+		const raw = 'text("parent_id").references((): AnySQLiteColumn => folder.id, { onDelete: "cascade" })'
+		expect(parseField("parent_id", raw).foreignKey).toEqual({
+			column: "parent_id",
+			onDelete: "cascade",
+			onUpdate: undefined,
+			refColumn: "id",
+			refTable: "folder",
+		})
+		expect(parseField("p", 'c.ref("p").references((): AnyPgColumn => folder.id)').foreignKey).toMatchObject({
+			refColumn: "id",
+			refTable: "folder",
+		})
+	})
+})
+
+describe("parseField: nullability the helpers declare (M-M9)", () => {
+	it("knows c.createdAt and c.updatedAt are not null and c.deletedAt is", () => {
+		expect(parseField("created_at", 'c.createdAt("created_at")').isNotNull).toBe(true)
+		expect(parseField("updatedAt", 'c.updatedAt("updatedAt")').isNotNull).toBe(true)
+		expect(parseField("deleted_at", 'c.deletedAt("deleted_at")').isNotNull).toBe(false)
+	})
+})

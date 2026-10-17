@@ -4,7 +4,12 @@ import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { generateFieldSchema } from "./field-schema.ts"
 
-const imports = (): ImportsMeta => ({ enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() })
+const imports = (): ImportsMeta => ({
+	enumImports: new Map(),
+	identifierValues: new Map(),
+	identifiers: new Map(),
+	jsonSchemaImports: new Set(),
+})
 
 function schema(name: string, raw: string, type: SchemaType, overrides: Partial<FieldMeta> = {}) {
 	return generateFieldSchema({ ...parseField(name, raw), ...overrides }, type, imports())
