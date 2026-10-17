@@ -7,10 +7,14 @@
 import { SQL } from "bun"
 import { Database } from "bun:sqlite"
 import { describe, expect, it } from "bun:test"
+import { sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/bun-sqlite"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import type { CombError } from "../../src/error.ts"
 import { createListQuerySchema } from "../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
+import { sqliteErrorHandler } from "../../src/sqlite/constraint-handler.ts"
+import type { ConstraintMap } from "../../src/types.ts"
 
 const item = sqliteTable("item", {
 	amount: integer("amount"),
@@ -54,6 +58,48 @@ describe("bun:sqlite runs comb's list queries like libsql does", () => {
 
 	it("orders nulls last ascending by default", () => {
 		expect(vendors({ order: "amount.asc" })).toEqual(["abc", "acme", "ACME", "a?c"])
+	})
+})
+
+describe("bun:sqlite constraint errors map like libsql's", () => {
+	const MAPS: ConstraintMap[] = [
+		{
+			member: {
+				check: { member_seats_check: { cause: "Seats must be positive", errorKey: "member_seats_invalid" } },
+				foreignKey: { org_id: { cause: "No such org", errorKey: "member_org_missing" } },
+				primaryKey: { cause: "Member exists", errorKey: "member_id_taken" },
+				unique: { email: { cause: "Email in use", errorKey: "member_email_taken" } },
+			},
+		},
+	]
+
+	function errorKeyOf(statement: string): string {
+		const sqlite = new Database(":memory:")
+		sqlite.run("PRAGMA foreign_keys = ON")
+		sqlite.run("CREATE TABLE org (id TEXT PRIMARY KEY)")
+		sqlite.run(
+			"CREATE TABLE member (id TEXT PRIMARY KEY, email TEXT UNIQUE, org_id TEXT REFERENCES org(id), seats INTEGER, CONSTRAINT member_status_check CHECK (id <> ''), CONSTRAINT member_seats_check CHECK (seats > 0))",
+		)
+		sqlite.run("INSERT INTO member (id, email) VALUES ('m1', 'a@x')")
+		try {
+			drizzle({ client: sqlite }).run(sql.raw(statement))
+		} catch (error) {
+			try {
+				sqliteErrorHandler(error, MAPS)
+			} catch (thrown) {
+				return (thrown as CombError).errorKey
+			}
+		}
+		return "not handled"
+	}
+
+	it.each([
+		["INSERT INTO member (id, email) VALUES ('m2', 'a@x')", "member_email_taken"],
+		["INSERT INTO member (id) VALUES ('m1')", "member_id_taken"],
+		["INSERT INTO member (id, seats) VALUES ('m3', -1)", "member_seats_invalid"],
+		["INSERT INTO member (id, org_id) VALUES ('m4', 'nope')", "member_org_missing"],
+	])("%s → %s", (statement, errorKey) => {
+		expect(errorKeyOf(statement)).toBe(errorKey)
 	})
 })
 

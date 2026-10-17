@@ -68,3 +68,17 @@ describe("CombError", () => {
 		}
 	})
 })
+
+describe("CombError source", () => {
+	it("keeps the original error for logs without serializing it", () => {
+		const source = new Error("UNIQUE constraint failed: user.email; params: secret@x")
+		const err = new CombError({ cause: "Email in use", errorKey: "user_email_taken", source, status: "conflict" })
+		expect(err.source).toBe(source)
+		expect(Object.keys(err)).not.toContain("source")
+		expect(JSON.stringify(err)).not.toContain("secret")
+	})
+
+	it("is undefined when not given", () => {
+		expect(new CombError({ errorKey: "x", status: "conflict" }).source).toBeUndefined()
+	})
+})

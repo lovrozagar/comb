@@ -1,0 +1,104 @@
+/**
+ * D1 errors from workerd (Miniflare), through drizzle, as a Worker sees them. D1 reports the
+ * SQLite result code at the end of its message; a platform failure carries none.
+ */
+import { sql } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/d1"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { CombError } from "../../../src/error.ts"
+import { d1ErrorHandler } from "../../../src/sqlite/d1/error-handler.ts"
+import type { ConstraintMap } from "../../../src/types.ts"
+import { type D1Harness, d1Memory } from "../support/d1.ts"
+
+const DDL = [
+	"CREATE TABLE org (id TEXT PRIMARY KEY)",
+	`CREATE TABLE member (
+		id TEXT PRIMARY KEY,
+		email TEXT UNIQUE,
+		org_id TEXT REFERENCES org(id),
+		role TEXT NOT NULL DEFAULT 'user',
+		seats INTEGER,
+		CONSTRAINT member_id_check CHECK (id <> ''),
+		CONSTRAINT member_seats_check CHECK (seats > 0)
+	)`,
+	"INSERT INTO org VALUES ('o1')",
+	"INSERT INTO member (id, email) VALUES ('m1', 'reset@x')",
+]
+
+const MAPS: ConstraintMap[] = [
+	{
+		member: {
+			check: { member_seats_check: { cause: "Seats must be positive", errorKey: "member_seats_invalid" } },
+			foreignKey: { org_id: { cause: "No such org", errorKey: "member_org_missing" } },
+			primaryKey: { cause: "Member exists", errorKey: "member_id_taken" },
+			unique: { email: { cause: "Email in use", errorKey: "member_email_taken" } },
+		},
+	},
+]
+
+/** What d1ErrorHandler throws for what `run` raises; undefined when it throws nothing. */
+async function handled(run: () => Promise<unknown>): Promise<CombError | undefined> {
+	const failure = await run().then(
+		() => new Error("the statement did not fail"),
+		(error: unknown) => error,
+	)
+	try {
+		d1ErrorHandler(failure, MAPS)
+	} catch (thrown) {
+		return thrown as CombError
+	}
+	return undefined
+}
+
+describe("d1ErrorHandler on Miniflare through drizzle", () => {
+	let harness: D1Harness
+
+	beforeEach(async () => {
+		harness = await d1Memory()
+		for (const statement of DDL) await harness.CORE.prepare(statement).run()
+	})
+
+	afterEach(() => harness.dispose())
+
+	const db = () => drizzle(harness.CORE)
+	const run = (statement: string) => () => db().run(sql.raw(statement))
+
+	it.each([
+		["INSERT INTO member (id, email) VALUES ('m2', 'reset@x')", "member_email_taken", 409],
+		["INSERT INTO member (id) VALUES ('m1')", "member_id_taken", 409],
+		["INSERT INTO member (id, seats) VALUES ('m3', -1)", "member_seats_invalid", 400],
+		["INSERT INTO member (id, org_id) VALUES ('m4', 'nope')", "member_org_missing", 409],
+		["INSERT INTO member (id, role) VALUES ('m5', NULL)", "required_field_missing", 400],
+	])("maps the constraint in %s", async (statement, errorKey, status) => {
+		const error = await handled(run(statement))
+		expect(error).toBeInstanceOf(CombError)
+		expect(error).toMatchObject({ errorKey, status, table: "member" })
+	})
+
+	it("reports a bad query as a 500, even when its text or params mention a transient word", async () => {
+		const missing = await handled(run("SELECT reset_at FROM member"))
+		expect(missing).toMatchObject({ errorKey: "database_io_error", status: 500 })
+		const params = await handled(() => db().run(sql`SELECT ${"reset connection"} FROM nowhere`))
+		expect(params).toMatchObject({ errorKey: "database_io_error", status: 500 })
+	})
+
+	it("reports too many bound variables as a 500", async () => {
+		const values = Array.from({ length: 101 }, (_, i) => i)
+		const many = await handled(() =>
+			harness.CORE.prepare(`SELECT ${values.map(() => "?").join(", ")}`)
+				.bind(...values)
+				.all(),
+		)
+		expect(many).toMatchObject({ errorKey: "database_io_error", status: 500 })
+	})
+
+	it("keeps SQL text and bound values out of the client-facing error and on source", async () => {
+		const unique = await handled(() => db().run(sql`INSERT INTO member (id, email) VALUES (${"m9"}, ${"reset@x"})`))
+		const missing = await handled(() => db().run(sql`SELECT reset_at FROM member WHERE id = ${"secret-id"}`))
+		for (const error of [unique, missing]) {
+			const visible = `${String(error?.cause)} ${JSON.stringify(error)}`
+			expect(visible).not.toMatch(/reset@x|secret-id|SELECT|INSERT/i)
+			expect(error?.source).toBeInstanceOf(Error)
+		}
+	})
+})

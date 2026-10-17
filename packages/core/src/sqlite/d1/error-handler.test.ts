@@ -1,88 +1,75 @@
 import { describe, expect, it } from "vitest"
-import type { CombError } from "../../error.ts"
+import { CombError } from "../../error.ts"
 import { d1ErrorHandler } from "./error-handler.ts"
 
+/* D1 shapes as workerd produces them; the real-engine cases live in tests/integration/d1 */
+const d1 = (message: string) => {
+	const inner = new Error(message)
+	return new Error(`D1_ERROR: ${message}`, { cause: inner })
+}
+const wrapped = (cause: unknown, query: string) =>
+	Object.assign(new Error(`Failed query: ${query}\nparams: reset`, { cause }), { name: "DrizzleQueryError", query })
+
+function thrown(error: unknown): CombError | undefined {
+	try {
+		d1ErrorHandler(error, [])
+	} catch (caught) {
+		return caught as CombError
+	}
+	return undefined
+}
+
 describe("d1ErrorHandler", () => {
-	it("ignores non-Error objects", () => {
-		expect(() => d1ErrorHandler("not an error", [])).not.toThrow()
-		expect(() => d1ErrorHandler(null, [])).not.toThrow()
-		expect(() => d1ErrorHandler(42, [])).not.toThrow()
+	it("maps constraint violations through the shared SQLite handler", () => {
+		const unique = d1("UNIQUE constraint failed: member.email: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)")
+		expect(thrown(unique)).toMatchObject({ column: "email", errorKey: "unique_constraint_violation", status: 409 })
 	})
 
-	it("throws service_unavailable for transient D1 errors", () => {
-		const patterns = [
-			"D1_ERROR: network connection lost",
-			"D1_ERROR: overloaded",
-			"D1_ERROR: too many requests",
-			"D1_ERROR: memory limit exceeded",
-			"D1_ERROR: cpu time limit reached",
-			"D1_ERROR: internal error; reference = psmr61b2k7q9xv3n0d8e4f1a",
-			/* Cloudflare documents these as retryable (developers.cloudflare.com/d1/observability/debug-d1/) */
-			"D1_ERROR: Replica disconnected from primary.",
-			"D1_ERROR: Cannot resolve D1 DB due to transient issue on remote node.",
-			"D1_ERROR: Can't read from request stream because client disconnected.",
-		]
-		for (const msg of patterns) {
-			try {
-				d1ErrorHandler(new Error(msg), [])
-				expect.unreachable(`should throw for: ${msg}`)
-			} catch (e) {
-				const err = e as CombError
-				expect(err.statusKey).toBe("service_unavailable")
-				expect(err.errorKey).toBe("database_unavailable")
-			}
-		}
+	it("reports query errors as 500 and a full database as 422", () => {
+		expect(thrown(d1("no such table: member: SQLITE_ERROR"))).toMatchObject({
+			errorKey: "database_io_error",
+			status: 500,
+		})
+		expect(thrown(d1("database or disk is full: SQLITE_FULL"))).toMatchObject({
+			errorKey: "tier_database_limit_reached",
+			status: 422,
+		})
 	})
 
-	it("throws unprocessable_entity for storage limit errors", () => {
-		try {
-			d1ErrorHandler(new Error("D1_ERROR: size limit exceeded"), [])
-			expect.unreachable("should throw")
-		} catch (e) {
-			const err = e as CombError
-			expect(err.statusKey).toBe("unprocessable_entity")
-			expect(err.errorKey).toBe("tier_database_limit_reached")
-		}
+	it.each([
+		["D1_ERROR: Network connection lost.", "database_unavailable", 503],
+		[
+			"D1_ERROR: D1 DB storage operation exceeded timeout which caused object to be reset.",
+			"database_unavailable",
+			503,
+		],
+		["D1_ERROR: Exceeded maximum DB size limit", "tier_database_limit_reached", 422],
+		["D1_EXEC_ERROR: Error in line 1: near x", "database_io_error", 500],
+		["D1_TYPE_ERROR: Type 'object' not supported", "database_io_error", 500],
+		["D1_COLUMN_NOTFOUND: Column not found", "database_io_error", 500],
+	])("classifies the platform message %s", (message, errorKey, status) => {
+		expect(thrown(wrapped(new Error(message), "SELECT 1"))).toMatchObject({ errorKey, status })
 	})
 
-	it("throws internal_server_error for other D1_ERROR", () => {
-		try {
-			d1ErrorHandler(new Error("D1_ERROR: unknown failure"), [])
-			expect.unreachable("should throw")
-		} catch (e) {
-			const err = e as CombError
-			expect(err.statusKey).toBe("internal_server_error")
-			expect(err.errorKey).toBe("database_io_error")
-		}
+	it("never reads the wrapper's SQL or params for platform words", () => {
+		const quiet = wrapped(new Error("something else"), 'select "reset" from "D1_ERROR"')
+		expect(thrown(quiet)).toBeUndefined()
 	})
 
-	it("throws internal_server_error for execution errors", () => {
-		const codes = ["D1_EXEC_ERROR", "D1_TYPE_ERROR", "D1_COLUMN_NOTFOUND"]
-		for (const code of codes) {
-			try {
-				d1ErrorHandler(new Error(`${code}: bad query`), [])
-				expect.unreachable(`should throw for: ${code}`)
-			} catch (e) {
-				const err = e as CombError
-				expect(err.statusKey).toBe("internal_server_error")
-				expect(err.errorKey).toBe("database_io_error")
-			}
-		}
+	it("gives the client a safe cause and keeps the original on source", () => {
+		const source = wrapped(new Error("D1_ERROR: Network connection lost."), "SELECT secret")
+		const error = thrown(source)
+		expect(error?.cause).toBe("The database is temporarily unavailable. Please retry.")
+		expect(error?.source).toBe(source)
 	})
 
-	it("delegates constraint violations to constraint handler", () => {
-		try {
-			d1ErrorHandler(new Error("UNIQUE constraint failed: user.email"), [])
-			expect.unreachable("should throw")
-		} catch (e) {
-			const err = e as CombError
-			expect(err.errorKey).toBe("unique_constraint_violation")
-			expect(err.table).toBe("user")
-			expect(err.column).toBe("email")
-		}
+	it("leaves anything else alone", () => {
+		expect(thrown(new Error("boom"))).toBeUndefined()
+		expect(thrown("D1_ERROR: x")).toBeUndefined()
+		expect(thrown(null)).toBeUndefined()
 	})
 
-	it("passes through non-matching errors", () => {
-		expect(() => d1ErrorHandler(new Error("something else entirely"), [])).not.toThrow()
+	it("throws CombError instances", () => {
+		expect(thrown(new Error("D1_ERROR: overloaded"))).toBeInstanceOf(CombError)
 	})
 })

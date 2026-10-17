@@ -1,174 +1,155 @@
 import { describe, expect, it } from "vitest"
 import { CombError } from "../error.ts"
-import { extractTableColumn, handleConstraintViolation } from "./constraint-handler.ts"
 import type { ConstraintMap } from "../types.ts"
+import { constraintError, handleConstraintViolation, sqliteErrorHandler } from "./constraint-handler.ts"
 
-describe("extractTableColumn", () => {
-	it("extracts table and column from UNIQUE constraint message", () => {
-		const result = extractTableColumn("UNIQUE constraint failed: store.slug")
-		expect(result).toEqual({ column: "slug", table: "store" })
+/* bun:sqlite's shape: the extended code on `code`; the real-engine cases live in tests/integration/sqlite */
+const engine = (code: string, message: string) => Object.assign(new Error(message), { code })
+const wrapped = (cause: unknown, query: string) =>
+	Object.assign(new Error(`Failed query: ${query}`, { cause }), { name: "DrizzleQueryError", query })
+
+const MAPS: ConstraintMap[] = [
+	{
+		store: {
+			check: { store_price_check: { cause: "Price must be positive", errorKey: "store_price_invalid" } },
+			foreignKey: { owner_id: { cause: "No such owner", errorKey: "store_owner_missing", statusKey: "bad_request" } },
+			primaryKey: { cause: "Store exists", errorKey: "store_id_taken" },
+			unique: { slug: { cause: "Slug taken", errorKey: "store_slug_taken" } },
+		},
+		legacy: { unique: { id: { cause: "Legacy id taken", errorKey: "legacy_id_taken" } } },
+		multi: { foreignKey: { a_id: { cause: "a", errorKey: "a" }, b_id: { cause: "b", errorKey: "b" } } },
+	},
+]
+
+function thrown(error: unknown, maps = MAPS): CombError {
+	const mapped = constraintError(error, maps)
+	if (mapped === null) throw new Error("not mapped")
+	return mapped
+}
+
+describe("constraintError: unique and primary key", () => {
+	it("maps a unique column and falls back to the generic key", () => {
+		expect(thrown(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: store.slug"))).toMatchObject({
+			cause: "Slug taken",
+			column: "slug",
+			errorKey: "store_slug_taken",
+			status: 409,
+			table: "store",
+		})
+		expect(thrown(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: store.name"))).toMatchObject({
+			cause: "Duplicate value for store.name",
+			errorKey: "unique_constraint_violation",
+		})
+		expect(thrown(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed"))).toMatchObject({
+			cause: "Duplicate value detected",
+			column: undefined,
+			table: undefined,
+		})
 	})
 
-	it("extracts from FOREIGN KEY message", () => {
-		const result = extractTableColumn("FOREIGN KEY constraint failed: order.user_id")
-		expect(result).toEqual({ column: "user_id", table: "order" })
+	it("maps the primary key, a legacy unique entry for the key column, or the generic key", () => {
+		expect(thrown(engine("SQLITE_CONSTRAINT_PRIMARYKEY", "UNIQUE constraint failed: store.id"))).toMatchObject({
+			errorKey: "store_id_taken",
+			status: 409,
+		})
+		expect(thrown(engine("SQLITE_CONSTRAINT_PRIMARYKEY", "UNIQUE constraint failed: legacy.id"))).toMatchObject({
+			errorKey: "legacy_id_taken",
+		})
+		expect(thrown(engine("SQLITE_CONSTRAINT_PRIMARYKEY", "UNIQUE constraint failed: other.id"))).toMatchObject({
+			errorKey: "primary_key_violation",
+			table: "other",
+		})
 	})
 
-	it("returns nulls for unrecognized format", () => {
-		const result = extractTableColumn("some other error")
-		expect(result).toEqual({ column: null, table: null })
+	it("ignores inherited names in maps and tables", () => {
+		expect(thrown(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: store.constructor"))).toMatchObject({
+			errorKey: "unique_constraint_violation",
+		})
+		expect(thrown(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: toString.slug"))).toMatchObject({
+			errorKey: "unique_constraint_violation",
+		})
 	})
 })
 
-describe("handleConstraintViolation", () => {
-	const constraintMap: ConstraintMap = {
-		user: {
-			primaryKey: {
-				cause: "User already exists",
-				errorKey: "user_pk_duplicate",
-			},
-			unique: {
-				email: {
-					cause: "Email already taken",
-					errorKey: "user_email_unique",
-					statusKey: "conflict",
-				},
-			},
-		},
-	}
-
-	it("does nothing for non-constraint messages", () => {
-		expect(() => handleConstraintViolation("some random error", [constraintMap])).not.toThrow()
+describe("constraintError: check, not null, foreign key", () => {
+	it("maps a CHECK by name across tables, else the generic key", () => {
+		expect(thrown(engine("SQLITE_CONSTRAINT_CHECK", "CHECK constraint failed: store_price_check"))).toMatchObject({
+			errorKey: "store_price_invalid",
+			status: 400,
+			table: "store",
+		})
+		expect(thrown(engine("SQLITE_CONSTRAINT_CHECK", "CHECK constraint failed: price > 0"))).toMatchObject({
+			errorKey: "check_constraint_violation",
+			table: undefined,
+		})
 	})
 
-	it("throws CombError for mapped unique constraint", () => {
-		try {
-			handleConstraintViolation("UNIQUE constraint failed: user.email", [constraintMap])
-			expect.unreachable("should have thrown")
-		} catch (e) {
-			expect(e).toBeInstanceOf(CombError)
-			const err = e as CombError
-			expect(err.errorKey).toBe("user_email_unique")
-			expect(err.statusKey).toBe("conflict")
-			expect(err.table).toBe("user")
-			expect(err.column).toBe("email")
-		}
+	it("reports NOT NULL with its column, or without one", () => {
+		expect(thrown(engine("SQLITE_CONSTRAINT_NOTNULL", "NOT NULL constraint failed: store.name"))).toMatchObject({
+			cause: "Required field missing: name",
+			column: "name",
+			errorKey: "required_field_missing",
+			table: "store",
+		})
+		expect(thrown(engine("SQLITE_CONSTRAINT_NOTNULL", "NOT NULL constraint failed"))).toMatchObject({
+			cause: "Required field missing",
+		})
 	})
 
-	it("throws CombError for mapped primary key constraint", () => {
-		try {
-			handleConstraintViolation("PRIMARY KEY constraint failed: user.id", [constraintMap])
-			expect.unreachable("should have thrown")
-		} catch (e) {
-			expect(e).toBeInstanceOf(CombError)
-			const err = e as CombError
-			expect(err.errorKey).toBe("user_pk_duplicate")
-			expect(err.table).toBe("user")
-		}
-	})
-
-	it("throws fallback CombError for unmapped unique constraint", () => {
-		try {
-			handleConstraintViolation("UNIQUE constraint failed: post.slug", [constraintMap])
-			expect.unreachable("should have thrown")
-		} catch (e) {
-			expect(e).toBeInstanceOf(CombError)
-			const err = e as CombError
-			expect(err.errorKey).toBe("unique_constraint_violation")
-			expect(err.status).toBe(409)
-			expect(err.table).toBe("post")
-			expect(err.column).toBe("slug")
-		}
-	})
-
-	it("throws fallback for unmapped foreign key", () => {
-		try {
-			handleConstraintViolation("FOREIGN KEY constraint failed: order.user_id", [constraintMap])
-			expect.unreachable("should have thrown")
-		} catch (e) {
-			expect(e).toBeInstanceOf(CombError)
-			const err = e as CombError
-			expect(err.errorKey).toBe("foreign_key_violation")
-		}
-	})
-
-	it("throws fallback for not null violation", () => {
-		try {
-			handleConstraintViolation("NOT NULL constraint failed: user.name", [constraintMap])
-			expect.unreachable("should have thrown")
-		} catch (e) {
-			expect(e).toBeInstanceOf(CombError)
-			const err = e as CombError
-			expect(err.errorKey).toBe("required_field_missing")
-			expect(err.status).toBe(400)
-		}
-	})
-
-	it("throws fallback for check constraint", () => {
-		try {
-			handleConstraintViolation("CHECK constraint failed: user.age", [constraintMap])
-			expect.unreachable("should have thrown")
-		} catch (e) {
-			expect(e).toBeInstanceOf(CombError)
-			const err = e as CombError
-			expect(err.errorKey).toBe("check_constraint_violation")
-			expect(err.status).toBe(400)
-		}
+	it("finds the foreign key's table from the statement and its column when the table has one", () => {
+		const fk = (query: string) =>
+			thrown(wrapped(engine("SQLITE_CONSTRAINT_FOREIGNKEY", "FOREIGN KEY constraint failed"), query))
+		expect(fk('insert into "store" ("id", "owner_id") values (?, ?)')).toMatchObject({
+			column: "owner_id",
+			errorKey: "store_owner_missing",
+			status: 400,
+			table: "store",
+		})
+		expect(fk('update "store" set "owner_id" = ?')).toMatchObject({ errorKey: "store_owner_missing" })
+		expect(fk('delete from "store" where "id" = ?')).toMatchObject({ errorKey: "store_owner_missing" })
+		expect(fk('insert into "legacy" ("id") values (?)')).toMatchObject({ errorKey: "foreign_key_violation" })
+		expect(fk('insert into "multi" ("a_id") values (?)')).toMatchObject({
+			column: undefined,
+			errorKey: "foreign_key_violation",
+			table: "multi",
+		})
+		expect(thrown(engine("SQLITE_CONSTRAINT_FOREIGNKEY", "FOREIGN KEY constraint failed"))).toMatchObject({
+			errorKey: "foreign_key_violation",
+			table: undefined,
+		})
 	})
 })
 
-describe("handleConstraintViolation — remaining constraint classes", () => {
-	const map: ConstraintMap = {
-		post: {
-			check: { post_status_check: { cause: "status", errorKey: "post_status_invalid" } },
-			foreignKey: { author_id: { cause: "author", errorKey: "post_author_missing" } },
-			primaryKey: { cause: "id", errorKey: "post_id_taken" },
-		},
-		tagged: {
-			foreignKey: {
-				a_id: { cause: "a", errorKey: "a_missing" },
-				b_id: { cause: "b", errorKey: "b_missing" },
-			},
-		},
-	}
-
-	const thrown = (fn: () => void): CombError => {
-		try {
-			fn()
-		} catch (e) {
-			return e as CombError
+describe("handleConstraintViolation and sqliteErrorHandler", () => {
+	it("throw the mapped error, and leave non-constraint errors alone", () => {
+		const unique = engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: store.slug")
+		expect(() => handleConstraintViolation(unique, MAPS)).toThrow(CombError)
+		expect(() => sqliteErrorHandler(unique, MAPS)).toThrow(CombError)
+		for (const other of [
+			engine("SQLITE_CONSTRAINT_TRIGGER", "x"),
+			engine("SQLITE_ERROR", "no such column: x"),
+			new Error("x"),
+			"x",
+		]) {
+			expect(() => handleConstraintViolation(other, MAPS)).not.toThrow()
+			expect(() => sqliteErrorHandler(other, MAPS)).not.toThrow()
 		}
-		throw new Error("expected a CombError")
-	}
-
-	it("resolves a single-column foreign key even though SQLite names no column", () => {
-		/* SQLite says only "FOREIGN KEY constraint failed" — with one FK on the
-		   table the mapping is unambiguous, so it is safe to use. */
-		const err = thrown(() => handleConstraintViolation("FOREIGN KEY constraint failed: post.author_id", [map]))
-		expect(err.errorKey).toBe("post_author_missing")
-		expect(err.column).toBe("author_id")
+		expect(constraintError(new Error("x"), MAPS)).toBeNull()
 	})
 
-	it("declines to guess when the table has more than one foreign key", () => {
-		const err = thrown(() => handleConstraintViolation("FOREIGN KEY constraint failed: tagged", [map]))
-		/* falls through to the generic key rather than picking one at random */
-		expect(err.errorKey).toBe("foreign_key_violation")
+	it("keeps the original error on source", () => {
+		const unique = engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: store.slug")
+		expect(thrown(unique).source).toBe(unique)
 	})
 
-	it("maps a primary key violation", () => {
-		const err = thrown(() => handleConstraintViolation("PRIMARY KEY constraint failed: post.id", [map]))
-		expect(err.errorKey).toBe("post_id_taken")
-		expect(err.table).toBe("post")
-	})
-
-	it("maps a check violation, defaulting to bad_request", () => {
-		const err = thrown(() => handleConstraintViolation("CHECK constraint failed: post.status", [map]))
-		expect(err.errorKey).toBe("post_status_invalid")
-		expect(err.status).toBe(400)
-	})
-
-	it("degrades to the generic key when the table is not in the map", () => {
-		const err = thrown(() => handleConstraintViolation("PRIMARY KEY constraint failed: other.id", [map]))
-		expect(err.errorKey).toBe("primary_key_violation")
+	it.each([
+		["SQLITE_BUSY", "database_unavailable", 503],
+		["SQLITE_BUSY_SNAPSHOT", "database_unavailable", 503],
+		["SQLITE_LOCKED", "database_unavailable", 503],
+		["SQLITE_FULL", "tier_database_limit_reached", 422],
+		["SQLITE_READONLY", "database_readonly", 503],
+	])("sqliteErrorHandler maps the resource code %s", (code, errorKey, status) => {
+		expect(() => sqliteErrorHandler(engine(code, "x"), [])).toThrow(expect.objectContaining({ errorKey, status }))
+		expect(() => handleConstraintViolation(engine(code, "x"), [])).not.toThrow()
 	})
 })
