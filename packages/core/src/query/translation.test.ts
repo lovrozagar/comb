@@ -96,19 +96,25 @@ describe("resolveTranslation", () => {
 		expect(result?.name).toBe("Hallo")
 	})
 
-	it("merges values from requested + fallback", () => {
+	it("keeps a missing field missing rather than filling it from another language", () => {
 		const partial = [
 			{ languageCode: "en", name: "Hello", title: "World" },
 			{ languageCode: "de", name: "Hallo", title: undefined },
 		]
-		const result = resolveTranslation({
-			defaultLang: "en",
-			fields: null,
-			lang: "de",
-			translations: partial,
-		})
-		/* title falls back to en */
-		expect(result?.name).toBe("Hallo")
-		expect(result?.title).toBe("World")
+		const result = resolveTranslation({ defaultLang: "en", fields: null, lang: "de", translations: partial })
+		expect(result).toEqual({ languageCode: "de", name: "Hallo", title: undefined })
+	})
+})
+
+describe("resolveTranslation — the language it reports (Q-L5)", () => {
+	const en = { body: "English body", languageCode: "en", title: "Hello" }
+
+	it("labels fallback content with the language it is in, not the one requested", () => {
+		expect(resolveTranslation({ defaultLang: "en", fields: null, lang: "fr", translations: [en] })).toEqual(en)
+	})
+
+	it("returns one row's fields, never a mix of languages under one label", () => {
+		const de = { body: null, languageCode: "de", title: "Hallo" }
+		expect(resolveTranslation({ defaultLang: "en", fields: null, lang: "de", translations: [en, de] })).toEqual(de)
 	})
 })

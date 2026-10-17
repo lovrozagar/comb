@@ -1,6 +1,6 @@
 /**
  * Multi-language translation resolution — zero deps.
- * Picks best translation from array by language code with fallback chain.
+ * Picks one translation row by language code: the requested one, else the default, else the first.
  */
 
 type TranslationResolverInput<T extends Record<string, unknown>> = {
@@ -24,25 +24,11 @@ function resolveTranslation<T extends Record<string, unknown>>(input: Translatio
 	const requested = translations.find((t) => String(t[languageCodeKey]).toLowerCase() === langLower)
 	const fallback = translations.find((t) => String(t[languageCodeKey]).toLowerCase() === defaultLangLower)
 
-	const primary = requested ?? fallback ?? translations[0]
-	if (!primary) return null
-
-	const include = (field: string) => fields === null || fields.includes(field)
-
-	const result: Record<string, unknown> = {}
-
-	for (const key of Object.keys(primary)) {
-		if (!include(key)) continue
-
-		if (key === languageCodeKey) {
-			result[key] = lang
-		} else {
-			const value = requested?.[key] ?? fallback?.[key] ?? primary[key]
-			result[key] = value
-		}
-	}
-
-	return result as Partial<T>
+	/* one row, under its own language code: mixing rows would label one language's text as another's */
+	/* the list is non-empty, checked above */
+	const primary = requested ?? fallback ?? (translations[0] as T)
+	const keys = Object.keys(primary).filter((key) => fields === null || fields.includes(key))
+	return Object.fromEntries(keys.map((key) => [key, primary[key]])) as Partial<T>
 }
 
 export { resolveTranslation, type TranslationResolverInput }

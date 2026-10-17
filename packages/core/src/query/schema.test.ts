@@ -477,3 +477,26 @@ describe("select with an embed that has no name", () => {
 		expect(schema.safeParse({ select: "id,(x)" }).success).toBe(false)
 	})
 })
+
+/** A valid title filter exactly `length` characters long */
+const ofLength = (length: number) => `title.eq.${"x".repeat(length - "title.eq.".length)}`
+
+describe("filter length (Q-L6)", () => {
+	const schema = createListQuerySchema({ filter: { title: "string" }, sort: ["title"] })
+
+	it("accepts a filter up to 2048 characters and refuses a longer one before parsing it", () => {
+		expect(schema.safeParse({ filter: ofLength(2048) }).success).toBe(true)
+		const result = schema.safeParse({ filter: ofLength(2049) })
+		expect(result.success).toBe(false)
+		expect(JSON.stringify(result.error?.issues).length).toBeLessThan(2000)
+	})
+
+	it("takes another cap through limits", () => {
+		const tight = createListQuerySchema({
+			filter: { title: "string" },
+			limits: { maxFilterLength: 20 },
+			sort: ["title"],
+		})
+		expect(tight.safeParse({ filter: ofLength(21) }).success).toBe(false)
+	})
+})

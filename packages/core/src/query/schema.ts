@@ -63,9 +63,10 @@ type OutputStableShape<T extends z.ZodRawShape = z.ZodRawShape> = {
 }
 
 /** Request bounds. Filter limits plus how many sort keys one `order` may name. */
-type ListQueryLimits = FilterLimits & { maxSortKeys: number }
+/** Bounds on one list request; `maxFilterLength` is checked before the filter is parsed */
+type ListQueryLimits = FilterLimits & { maxFilterLength: number; maxSortKeys: number }
 
-const LIST_QUERY_LIMITS: ListQueryLimits = { ...FILTER_LIMITS, maxSortKeys: 3 }
+const LIST_QUERY_LIMITS: ListQueryLimits = { ...FILTER_LIMITS, maxFilterLength: 2048, maxSortKeys: 3 }
 
 type ListQueryConfig<
 	T extends OutputStableShape<T> = Record<string, never>,
@@ -346,6 +347,7 @@ function createListQuerySchema<
 			? {
 					filter: z
 						.string()
+						.max(limits.maxFilterLength)
 						.optional()
 						.meta(filterParamMeta(filterConfig, (type) => OPERATORS_BY_TYPE[type], limits)),
 				}
