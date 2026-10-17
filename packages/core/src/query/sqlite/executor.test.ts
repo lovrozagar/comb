@@ -8,6 +8,7 @@ import type { SQL } from "drizzle-orm"
 import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { parseFilter } from "../filter.ts"
+import { CombError } from "../../error.ts"
 import { conditionToSQL, filterToSQL, sortToOrderBy } from "./executor.ts"
 import type { FilterAST, FilterCondition, ListQueryCapabilities } from "../types.ts"
 
@@ -107,6 +108,11 @@ describe("conditionToSQL", () => {
 		expect(notNull.params).toEqual([])
 	})
 
+	it("lowers is.true and is.false on a boolean to an equality", () => {
+		expect(compile(conditionToSQL(cond("status", "is", true), post.status)).params).toEqual([true])
+		expect(compile(conditionToSQL(cond("status", "is", false), post.status)).params).toEqual([false])
+	})
+
 	it("returns null for an is value it does not recognise", () => {
 		expect(conditionToSQL(cond("status", "is", "maybe"), post.status)).toBeNull()
 	})
@@ -124,14 +130,18 @@ describe("conditionToSQL", () => {
 })
 
 describe("filterToSQL", () => {
-	const config = { capabilities: capabilities(), mainTable: post }
+	const config = { mainTable: post }
 
 	it("returns null for a null AST", () => {
 		expect(filterToSQL(null, config)).toBeNull()
 	})
 
-	it("returns null when nothing in the group resolved", () => {
-		expect(filterToSQL(ast([cond("nope", "eq", 1)]), config)).toBeNull()
+	it("throws for a field it cannot resolve rather than dropping it (Q-H3)", () => {
+		expect(() => filterToSQL(ast([cond("nope", "eq", 1)]), config)).toThrow(CombError)
+	})
+
+	it("returns null for a group with no conditions", () => {
+		expect(filterToSQL(ast([]), config)).toBeNull()
 	})
 
 	it("passes a single condition through without wrapping it", () => {
@@ -152,18 +162,17 @@ describe("filterToSQL", () => {
 		expect(compile(built).sql.toLowerCase()).toContain(" or ")
 	})
 
-	it("drops a field the capabilities do not allow, keeping the rest", () => {
-		const built = filterToSQL(ast([cond("status", "eq", "draft"), cond("secret", "eq", "x")]), config)
-		const { params } = compile(built)
-		expect(params).toEqual(["draft"])
+	it("throws when one condition of several cannot be resolved, instead of keeping the rest", () => {
+		expect(() => filterToSQL(ast([cond("status", "eq", "draft"), cond("secret", "eq", "x")]), config)).toThrow(
+			CombError,
+		)
 	})
 
-	it("drops a declared field that has no column on the table", () => {
-		const built = filterToSQL(ast([cond("ghost", "eq", 1)]), {
-			capabilities: capabilities({ filterFields: { ghost: "string" } }),
-			mainTable: post,
-		})
-		expect(built).toBeNull()
+	it("does not resolve a field through the prototype chain (Q-L3)", () => {
+		expect(() => filterToSQL(ast([cond("toString", "is", null)]), config)).toThrow(CombError)
+		expect(() => filterToSQL(ast([cond("@constructor", "eq", 1)]), { computedFilters: {}, mainTable: post })).toThrow(
+			CombError,
+		)
 	})
 
 	it("recurses into subgroups", () => {
@@ -184,19 +193,20 @@ describe("filterToSQL", () => {
 
 	it("routes a computed field to its resolver", () => {
 		const built = filterToSQL(ast([cond("@popular", "eq", true)]), {
-			capabilities: capabilities({ computedFilterFields: { "@popular": "boolean" } }),
 			computedFilters: { "@popular": () => post.view_count.getSQL() },
 			mainTable: post,
 		})
 		expect(built).not.toBeNull()
 	})
 
-	it("drops a computed field with no resolver rather than guessing", () => {
-		const built = filterToSQL(ast([cond("@popular", "eq", true)]), {
-			capabilities: capabilities({ computedFilterFields: { "@popular": "boolean" } }),
-			mainTable: post,
-		})
-		expect(built).toBeNull()
+	it("throws for a computed field with no resolver, or one that declines the operator", () => {
+		expect(() => filterToSQL(ast([cond("@popular", "eq", true)]), config)).toThrow(CombError)
+		expect(() =>
+			filterToSQL(ast([cond("@popular", "eq", true)]), {
+				computedFilters: { "@popular": () => null },
+				mainTable: post,
+			}),
+		).toThrow(CombError)
 	})
 })
 
@@ -228,6 +238,23 @@ describe("sortToOrderBy", () => {
 		expect(compile(built[1]!).sql).toContain("created_at")
 	})
 
+	it("drops a permitted field that is not a column, including a prototype name (Q-L3)", () => {
+		const permitted = {
+			capabilities: capabilities({ sortFields: new Set(["ghost", "constructor", "toString"]) }),
+			table: post,
+		}
+		expect(
+			sortToOrderBy(
+				[
+					{ direction: "asc", field: "ghost" },
+					{ direction: "asc", field: "constructor" },
+					{ direction: "desc", field: "toString" },
+				],
+				permitted,
+			),
+		).toEqual([])
+	})
+
 	it("drops a field the capabilities do not permit", () => {
 		expect(sortToOrderBy([{ direction: "asc", field: "view_count" }], config)).toEqual([])
 	})
@@ -257,11 +284,7 @@ describe("filterToSQL — relation filters", () => {
 		tags: { target: tag, targetKey: "id", through: postTag, throughKey: "post_id" },
 	}
 
-	const config = {
-		capabilities: capabilities({ relationFilterFields: { "tags.slug": "string" } }),
-		mainTable: post,
-		relations,
-	}
+	const config = { mainTable: post, relations }
 
 	it("lowers a relation filter to an EXISTS subquery over the join table", () => {
 		const built = filterToSQL(ast([cond("tags.slug", "eq", "release")]), config)
@@ -287,20 +310,20 @@ describe("filterToSQL — relation filters", () => {
 		expect(params).toEqual(["draft", "release"])
 	})
 
-	it("drops a relation the config does not declare", () => {
-		expect(filterToSQL(ast([cond("authors.name", "eq", "x")]), config)).toBeNull()
+	it("throws for a relation the config does not declare", () => {
+		expect(() => filterToSQL(ast([cond("authors.name", "eq", "x")]), config)).toThrow(CombError)
 	})
 
-	it("drops a field the related table does not have", () => {
-		expect(filterToSQL(ast([cond("tags.nonexistent", "eq", "x")]), config)).toBeNull()
+	it("throws for a field the related table does not have", () => {
+		expect(() => filterToSQL(ast([cond("tags.nonexistent", "eq", "x")]), config)).toThrow(CombError)
 	})
 
-	it("drops a relation filter whose operator does not lower", () => {
-		expect(filterToSQL(ast([cond("tags.slug", "regex", ".*")]), config)).toBeNull()
+	it("throws for a relation filter whose operator does not lower", () => {
+		expect(() => filterToSQL(ast([cond("tags.slug", "regex", ".*")]), config)).toThrow(CombError)
 	})
 
-	it("treats a bare relation name with no field as unresolvable", () => {
-		expect(filterToSQL(ast([cond("tags.", "eq", "x")]), config)).toBeNull()
+	it("throws for a bare relation name with no field", () => {
+		expect(() => filterToSQL(ast([cond("tags.", "eq", "x")]), config)).toThrow(CombError)
 	})
 
 	it("supports list operators across the relation", () => {

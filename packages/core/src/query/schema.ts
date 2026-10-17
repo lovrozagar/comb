@@ -274,7 +274,7 @@ const filterGroupSchema: z.ZodType<FilterGroup, FilterGroup> = z.lazy(() =>
 		conditions: z.array(
 			z.object({
 				field: z.string(),
-				operator: z.enum(["contains", "eq", "gt", "gte", "ilike", "in", "is", "like", "lt", "lte", "ne", "neq", "nin"]),
+				operator: z.enum(["eq", "gt", "gte", "ilike", "in", "is", "like", "lt", "lte", "ne", "neq", "nin"]),
 				value: z.unknown(),
 			}),
 		),

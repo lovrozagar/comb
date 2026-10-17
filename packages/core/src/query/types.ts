@@ -13,20 +13,7 @@ type ParsedFields = {
 	root: FieldSelection
 }
 
-type FilterOperator =
-	| "eq"
-	| "ne"
-	| "neq"
-	| "gt"
-	| "gte"
-	| "lt"
-	| "lte"
-	| "in"
-	| "nin"
-	| "like"
-	| "ilike"
-	| "is"
-	| "contains"
+type FilterOperator = "eq" | "ne" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "nin" | "like" | "ilike" | "is"
 
 type FieldType = "string" | "number" | "boolean" | "date" | "enum"
 

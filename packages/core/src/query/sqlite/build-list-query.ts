@@ -73,23 +73,7 @@ function buildFilterWhere(
 ): SQL | null {
 	if (!filterAst || !isFilterAST(filterAst)) return null
 
-	/* Build permissive capabilities from table columns — schema already validated */
-	const columns = getTableColumns(table)
-	const filterFields: Record<string, "string"> = {}
-	for (const key of Object.keys(columns)) {
-		filterFields[key] = "string"
-	}
-
 	return filterToSQL(filterAst, {
-		capabilities: {
-			computedFilterFields: {},
-			computedSortFields: new Set(),
-			filterFields,
-			pagination: { defaultLimit: 20, maxLimit: 100 },
-			relationFilterFields: {},
-			searchFields: new Set(),
-			sortFields: new Set(),
-		},
 		computedFilters: opts.computedFilters,
 		mainTable: table,
 		relations: opts.relations,

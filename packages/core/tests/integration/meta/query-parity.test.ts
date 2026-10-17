@@ -21,6 +21,15 @@ const schema = createListQuerySchema({
 	sort: ["created_at", "title"],
 })
 
+/** A value a client reading the published type would send for it */
+const SAMPLE: Record<string, string> = { boolean: "true", date: "1700000000000", enum: "x", number: "7", string: "x" }
+
+function sampleFor(field: string): string {
+	const type = meta().filterFields?.find((entry) => entry.field === field)?.type
+	if (type === undefined || !Object.hasOwn(SAMPLE, type)) throw new Error(`no published type for ${field}`)
+	return SAMPLE[type] as string
+}
+
 function meta() {
 	const published = readCombQueryMeta(z.toJSONSchema(schema, { io: "input", unrepresentable: "any" }))
 	if (!published) throw new Error("createListQuerySchema did not stamp query meta")
@@ -39,7 +48,7 @@ describe("published query meta is present on both io views", () => {
 describe("filterable matches the parser", () => {
 	it("accepts every declared filterable field", () => {
 		for (const field of meta().filterable) {
-			const result = schema.safeParse({ filter: `${field}.eq.x` })
+			const result = schema.safeParse({ filter: `${field}.eq.${sampleFor(field)}` })
 			expect(result.success, `declared filterable but rejected: ${field}`).toBe(true)
 		}
 	})
@@ -139,7 +148,8 @@ describe("caps match the parser", () => {
 	it("every filterFields operator is accepted for its field", () => {
 		for (const { field, ops } of meta().filterFields ?? []) {
 			for (const op of ops) {
-				const value = op === "in" || op === "nin" ? "(x)" : op === "is" ? "null" : "x"
+				const sample = sampleFor(field)
+				const value = op === "in" || op === "nin" ? `(${sample})` : op === "is" ? "null" : sample
 				const result = schema.safeParse({ filter: `${field}.${op}.${value}` })
 				expect(result.success, `published ${field}.${op} but rejected`).toBe(true)
 			}

@@ -28,6 +28,7 @@ export const combErrorKeys = {
 	DATABASE_IO_ERROR: "database_io_error",
 	DATABASE_READONLY: "database_readonly",
 	DATABASE_UNAVAILABLE: "database_unavailable",
+	FILTER_NOT_WIRED: "filter_not_wired",
 	FOREIGN_KEY_VIOLATION: "foreign_key_violation",
 	INVALID_CURSOR: "invalid_cursor",
 	INVALID_STATE_TRANSITION: "invalid_state_transition",
