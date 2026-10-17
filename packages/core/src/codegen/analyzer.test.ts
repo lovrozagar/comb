@@ -4,23 +4,67 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "./analyzer.ts"
 
-describe("analyzer", () => {
-	let tmpDir: string
+let tmpDir: string
 
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-analyzer-"))
+beforeEach(() => {
+	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-analyzer-"))
+})
+
+afterEach(() => {
+	fs.rmSync(tmpDir, { force: true, recursive: true })
+})
+
+function writeTablesFile(content: string, filename = "db.test.tables.ts"): string {
+	const fp = path.join(tmpDir, filename)
+	fs.writeFileSync(fp, content)
+	return fp
+}
+
+describe("analyzer: which tables it reads", () => {
+	it("skips a table whose columns are not an object literal it can read", () => {
+		const fp = writeTablesFile(`
+import { sqliteTable, text } from "drizzle-orm/sqlite-core"
+const columns = { id: text("id").primaryKey() }
+export const opaque = sqliteTable("opaque", columns)
+export const post = sqliteTable("post", { id: text("id").primaryKey() })
+`)
+		expect(analyze(fp).tables.map((t) => t.varName)).toEqual(["post"])
 	})
 
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
+	it("resolves imported constants for constraint references when given the project directory", () => {
+		fs.writeFileSync(path.join(tmpDir, "patterns.js"), 'module.exports = { PATTERNS: { SLUG: "^[a-z]+$" } }\n')
+		const fp = writeTablesFile(`
+import { sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { PATTERNS } from "./patterns"
+export const post = sqliteTable("post", { id: text("id").primaryKey(), slug: text("slug") })
+`)
+		expect(analyze(fp, tmpDir).imports.identifierValues.get("PATTERNS.SLUG")).toBe("^[a-z]+$")
 	})
 
-	function writeTablesFile(content: string, filename = "db.test.tables.ts"): string {
-		const fp = path.join(tmpDir, filename)
-		fs.writeFileSync(fp, content)
-		return fp
-	}
+	it("sorts tables alphabetically by varName", () => {
+		const fp = writeTablesFile(`
+import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
 
+const c = {
+	id: () => text("id").primaryKey(),
+}
+
+export const zebra = createTable("zebra", { id: c.id() })
+export const alpha = createTable("alpha", { id: c.id() })
+export const middle = createTable("middle", { id: c.id() })
+`)
+		const result = analyze(fp)
+		expect(result.tables.map((t) => t.varName)).toEqual(["alpha", "middle", "zebra"])
+	})
+
+	it("extracts dbName from various file patterns", () => {
+		expect(analyze(writeTablesFile("", "db.core.tables.ts")).dbName).toBe("core")
+		expect(analyze(writeTablesFile("", "csvme.db.shard.tables.gen.ts")).dbName).toBe("shard")
+		expect(analyze(writeTablesFile("", "tables.ts")).dbName).toBe("db")
+	})
+})
+
+describe("analyzer: columns", () => {
 	it("extracts basic table with fields", () => {
 		const fp = writeTablesFile(`
 import { sql } from "drizzle-orm"
@@ -59,7 +103,62 @@ export const user = createTable("user", {
 		expect(nameField?.drizzleHelper).toBe("text")
 		expect(nameField?.isPrimaryKey).toBe(false)
 	})
+})
 
+describe("analyzer: references and field constraints", () => {
+	it("extracts FK references", () => {
+		const fp = writeTablesFile(`
+import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
+
+const c = {
+	id: () => text("id").primaryKey(),
+	ref: (name: string) => text(name),
+}
+
+export const user = createTable("user", {
+	id: c.id(),
+})
+
+export const post = createTable("post", {
+	id: c.id(),
+	author_id: c.ref("author_id").references(() => user.id, { onDelete: "cascade" }).notNull(),
+})
+`)
+		const result = analyze(fp)
+		const postTable = result.tables.find((t) => t.varName === "post")
+		const fkField = postTable?.fields.find((f) => f.name === "author_id")
+		expect(fkField?.foreignKey).toEqual({
+			column: "author_id",
+			onDelete: "cascade",
+			refColumn: "id",
+			refTable: "user",
+		})
+	})
+
+	it("extracts field constraints", () => {
+		const fp = writeTablesFile(`
+import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
+
+const c = {
+	id: () => text("id").primaryKey(),
+	text: (name: string, constraints?: { min?: number, max?: number, email?: boolean }) => text(name),
+}
+
+export const user = createTable("user", {
+	id: c.id(),
+	email: c.text("email", { min: 5, max: 254, email: true }),
+})
+`)
+		const result = analyze(fp)
+		const emailField = result.tables[0].fields.find((f) => f.name === "email")
+		expect(emailField?.constraints.min).toBe(5)
+		expect(emailField?.constraints.max).toBe(254)
+		expect(emailField?.constraints.email).toBe(true)
+		expect(emailField?.length).toBe(254)
+	})
+})
+
+describe("analyzer: timestamps and unique indexes", () => {
 	it("detects timestamp fields and style", () => {
 		const fp = writeTablesFile(`
 import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
@@ -112,7 +211,9 @@ export const user = createTable("user", {
 			name: "idx_user_email",
 		})
 	})
+})
 
+describe("analyzer: checks and enums", () => {
 	it("extracts check constraints", () => {
 		const fp = writeTablesFile(`
 import { sql } from "drizzle-orm"
@@ -137,57 +238,6 @@ export const product = createTable("product", {
 		expect(table.checkConstraints[0].expression).toBe("price > 0")
 	})
 
-	it("extracts FK references", () => {
-		const fp = writeTablesFile(`
-import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-
-const c = {
-	id: () => text("id").primaryKey(),
-	ref: (name: string) => text(name),
-}
-
-export const user = createTable("user", {
-	id: c.id(),
-})
-
-export const post = createTable("post", {
-	id: c.id(),
-	author_id: c.ref("author_id").references(() => user.id, { onDelete: "cascade" }).notNull(),
-})
-`)
-		const result = analyze(fp)
-		const postTable = result.tables.find((t) => t.varName === "post")
-		const fkField = postTable?.fields.find((f) => f.name === "author_id")
-		expect(fkField?.foreignKey).toEqual({
-			column: "author_id",
-			onDelete: "cascade",
-			refColumn: "id",
-			refTable: "user",
-		})
-	})
-
-	it("sorts tables alphabetically by varName", () => {
-		const fp = writeTablesFile(`
-import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-
-const c = {
-	id: () => text("id").primaryKey(),
-}
-
-export const zebra = createTable("zebra", { id: c.id() })
-export const alpha = createTable("alpha", { id: c.id() })
-export const middle = createTable("middle", { id: c.id() })
-`)
-		const result = analyze(fp)
-		expect(result.tables.map((t) => t.varName)).toEqual(["alpha", "middle", "zebra"])
-	})
-
-	it("extracts dbName from various file patterns", () => {
-		expect(analyze(writeTablesFile("", "db.core.tables.ts")).dbName).toBe("core")
-		expect(analyze(writeTablesFile("", "csvme.db.shard.tables.gen.ts")).dbName).toBe("shard")
-		expect(analyze(writeTablesFile("", "tables.ts")).dbName).toBe("db")
-	})
-
 	it("reads the values of an enum held in a local const", () => {
 		const fp = writeTablesFile(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
@@ -208,7 +258,9 @@ export const user = createTable("user", {
 		const roleField = result.tables[0].fields.find((f) => f.name === "role")
 		expect(roleField).toMatchObject({ enumName: null, enumValues: ["admin", "user"] })
 	})
+})
 
+describe("analyzer: state machines", () => {
 	it("extracts a state machine declared as c.enum's third argument", () => {
 		const fp = writeTablesFile(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
@@ -230,59 +282,27 @@ export const delivery = createTable("delivery", {
 			transitions: null,
 		})
 	})
-
-	it("extracts field constraints", () => {
-		const fp = writeTablesFile(`
-import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-
-const c = {
-	id: () => text("id").primaryKey(),
-	text: (name: string, constraints?: { min?: number, max?: number, email?: boolean }) => text(name),
-}
-
-export const user = createTable("user", {
-	id: c.id(),
-	email: c.text("email", { min: 5, max: 254, email: true }),
-})
-`)
-		const result = analyze(fp)
-		const emailField = result.tables[0].fields.find((f) => f.name === "email")
-		expect(emailField?.constraints.min).toBe(5)
-		expect(emailField?.constraints.max).toBe(254)
-		expect(emailField?.constraints.email).toBe(true)
-		expect(emailField?.length).toBe(254)
-	})
 })
 
-describe("analyze — referential actions", () => {
-	let tmpDir: string
-
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-analyzer-fk-"))
-	})
-
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
-
-	function fkFor(options: string) {
-		const fp = path.join(tmpDir, "db.test.tables.ts")
-		fs.writeFileSync(
-			fp,
-			`
+function fkFor(options: string) {
+	const fp = path.join(tmpDir, "db.test.tables.ts")
+	fs.writeFileSync(
+		fp,
+		`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
 const c = { id: () => text("id").primaryKey(), ref: (n: string) => text(n) }
 export const author = createTable("author", { id: c.id() })
 export const post = createTable("post", {
-	id: c.id(),
-	author_id: c.ref("author_id").references(() => author.id${options}),
+id: c.id(),
+author_id: c.ref("author_id").references(() => author.id${options}),
 })
 `,
-		)
-		const analysis = analyze(fp)
-		return analysis.tables.find((t) => t.sqlName === "post")?.fields.find((f) => f.name === "author_id")?.foreignKey
-	}
+	)
+	const analysis = analyze(fp)
+	return analysis.tables.find((t) => t.sqlName === "post")?.fields.find((f) => f.name === "author_id")?.foreignKey
+}
 
+describe("analyze — referential actions", () => {
 	it("records the referenced table and column", () => {
 		expect(fkFor("")).toMatchObject({ column: "author_id", refColumn: "id", refTable: "author" })
 	})

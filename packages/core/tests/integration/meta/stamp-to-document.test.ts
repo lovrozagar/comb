@@ -17,6 +17,7 @@ import { generateDtos } from "../../../src/codegen/generators/dtos/index.ts"
 import { COMB_META_KEY, readCombEntityMeta, readCombQueryMeta } from "../../../src/meta.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { depthOfKey, readRootKey, searchSchemaKey } from "./honey-search.ts"
+import { testContext } from "../../../src/codegen/generators/__fixtures__/context.ts"
 
 /* Generated inside the package so the emitted `@lovrozagar/comb/meta` import
    resolves through the workspace. `.tmp-*` is gitignored. */
@@ -59,10 +60,9 @@ beforeAll(async () => {
 
 	const analysis = analyze(tablesPath)
 	articleUniqueIndexes = analysis.tables.find((t) => t.sqlName === "article")!.uniqueIndexes
-	generateDtos(
-		{ analysis: analysis, cwd: WORK_DIR, log: () => undefined, tablesPath: tablesPath },
-		{ output: path.join(WORK_DIR, "dtos") },
-	)
+	generateDtos(testContext(analysis, { cwd: WORK_DIR, tablesPath: tablesPath }), {
+		output: path.join(WORK_DIR, "dtos"),
+	})
 
 	generated = (await import(path.join(WORK_DIR, "dtos", "article", "index.gen.ts"))) as Generated
 })
@@ -136,16 +136,17 @@ describe("entity stamp — bare array output", () => {
 	})
 })
 
-describe("entity stamp — pagination envelope", () => {
-	/* The shape a comb-backed list endpoint actually returns. */
-	const envelope = () =>
-		z.object({
-			articles: z.array(generated.articleDtoReadSchema),
-			count: z.number().int(),
-			hasMore: z.boolean(),
-			nextCursor: z.string().nullable(),
-		})
+/* The shape a comb-backed list endpoint actually returns. */
+function envelope() {
+	return z.object({
+		articles: z.array(generated.articleDtoReadSchema),
+		count: z.number().int(),
+		hasMore: z.boolean(),
+		nextCursor: z.string().nullable(),
+	})
+}
 
+describe("entity stamp — pagination envelope", () => {
 	it("sits at properties.articles.items, and nowhere shallower", () => {
 		const json = z.toJSONSchema(envelope()) as Record<string, unknown>
 		const props = json["properties"] as Record<string, Record<string, unknown>>
@@ -166,7 +167,9 @@ describe("entity stamp — pagination envelope", () => {
 		expect(depthOfKey(json, COMB_META_KEY)).toBe(2)
 		expect(searchSchemaKey(json, COMB_META_KEY)).toEqual({ found: true, value: EXPECTED_ENTITY })
 	})
+})
 
+describe("entity stamp — pagination envelope, searched around", () => {
 	it("is not confused by sidecar keys at the same depth", () => {
 		const json = z.toJSONSchema(envelope()) as Record<string, unknown>
 		const props = json["properties"] as Record<string, unknown>

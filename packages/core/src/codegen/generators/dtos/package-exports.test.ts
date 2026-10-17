@@ -2,7 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import type { AnalysisResult } from "../../analyzer-types.ts"
+import { testContext } from "../__fixtures__/context.ts"
 import { updatePackageJson } from "./package-exports.ts"
 
 describe("updatePackageJson", () => {
@@ -19,13 +19,9 @@ describe("updatePackageJson", () => {
 	function run(exports: unknown, filePrefix?: string): Record<string, unknown> {
 		const file = path.join(dir, "package.json")
 		fs.writeFileSync(file, JSON.stringify({ exports, name: "app" }))
-		const ctx = {
-			analysis: {} as AnalysisResult,
-			cwd: dir,
-			log: (line: string) => lines.push(line),
-			tablesPath: path.join(dir, "src/db.blog.tables.ts"),
-		}
+		const ctx = testContext([], { cwd: dir, tablesPath: path.join(dir, "src/db.blog.tables.ts") })
 		updatePackageJson(file, { config: { filePrefix, output: "src/dtos" }, ctx, entities: ["post", "blogAuthor"] })
+		lines = ctx.logged
 		return (JSON.parse(fs.readFileSync(file, "utf8")) as { exports: Record<string, unknown> }).exports
 	}
 

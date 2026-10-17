@@ -7,9 +7,10 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../../analyzer.ts"
 import { generateDtos } from "./generate.ts"
+import { type TestContext, testContext } from "../__fixtures__/context.ts"
 
 const PRELUDE = `
 import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
@@ -20,39 +21,60 @@ const c = {
 }
 `
 
-describe("generateDtos — $type handling", () => {
-	let tmpDir: string
+let tmpDir: string
 
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-dtos-types-"))
-	})
+beforeEach(() => {
+	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-dtos-types-"))
+})
 
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
+afterEach(() => {
+	fs.rmSync(tmpDir, { force: true, recursive: true })
+})
 
-	function generateFor(tsType: string, extra = ""): string {
-		const fp = path.join(tmpDir, "db.test.tables.ts")
-		fs.writeFileSync(
-			fp,
-			`${PRELUDE}${extra}
+function generateFor(tsType: string, extra = ""): string {
+	const fp = path.join(tmpDir, "db.test.tables.ts")
+	fs.writeFileSync(
+		fp,
+		`${PRELUDE}${extra}
 export const doc = createTable("doc", {
 	id: c.id(),
 	data: c.text("data").$type<${tsType}>(),
 })
 `,
-		)
-		const analysis = analyze(fp)
-		const outDir = path.join(tmpDir, "dtos")
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: fp }, { output: outDir })
-		/* Repeated schemas are hoisted into the shared module, so a column's zod
-		   may live in either file. */
-		return [
-			fs.readFileSync(path.join(outDir, "doc", "index.gen.ts"), "utf-8"),
-			fs.readFileSync(path.join(outDir, "_shared", "index.gen.ts"), "utf-8"),
-		].join("\n")
-	}
+	)
+	const analysis = analyze(fp)
+	const outDir = path.join(tmpDir, "dtos")
+	generateDtos(testContext(analysis, { cwd: tmpDir, tablesPath: fp }), { output: outDir })
+	/* Repeated schemas are hoisted into the shared module, so a column's zod
+	   may live in either file. */
+	return [
+		fs.readFileSync(path.join(outDir, "doc", "index.gen.ts"), "utf-8"),
+		fs.readFileSync(path.join(outDir, "_shared", "index.gen.ts"), "utf-8"),
+	].join("\n")
+}
 
+function generate(opts: { filePrefix?: string; updatePackageJson?: boolean } = {}): TestContext {
+	const fp = path.join(tmpDir, "db.test.tables.ts")
+	fs.writeFileSync(
+		fp,
+		`${PRELUDE}
+export const post = createTable("post", { id: c.id(), title: c.text("title") })
+export const author = createTable("author", { id: c.id(), name: c.text("name") })
+`,
+	)
+	const ctx = testContext(analyze(fp), { cwd: tmpDir, tablesPath: fp })
+	generateDtos(ctx, { output: path.join(tmpDir, "dtos"), ...opts })
+	return ctx
+}
+
+function exportsOf(): Record<string, string> {
+	const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir, "package.json"), "utf-8")) as {
+		exports: Record<string, string>
+	}
+	return pkg.exports
+}
+
+describe("generateDtos — $type handling", () => {
 	it("uses a named schema referenced through z.infer", () => {
 		const content = generateFor("z.infer<typeof settingsSchema>")
 		expect(content).toContain("settingsSchema")
@@ -84,50 +106,12 @@ export const doc = createTable("doc", { id: c.id(), data: c.text("data") })
 		)
 		const analysis = analyze(fp)
 		expect(() =>
-			generateDtos(
-				{ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: fp },
-				{ output: path.join(tmpDir, "dtos") },
-			),
+			generateDtos(testContext(analysis, { cwd: tmpDir, tablesPath: fp }), { output: path.join(tmpDir, "dtos") }),
 		).not.toThrow()
 	})
 })
 
 describe("generateDtos — package.json exports", () => {
-	let tmpDir: string
-
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-dtos-pkg-"))
-	})
-
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
-
-	function generate(opts: { filePrefix?: string; updatePackageJson?: boolean } = {}): string[] {
-		const lines: string[] = []
-		const fp = path.join(tmpDir, "db.test.tables.ts")
-		fs.writeFileSync(
-			fp,
-			`${PRELUDE}
-export const post = createTable("post", { id: c.id(), title: c.text("title") })
-export const author = createTable("author", { id: c.id(), name: c.text("name") })
-`,
-		)
-		const analysis = analyze(fp)
-		generateDtos(
-			{ analysis, cwd: tmpDir, log: (line) => lines.push(line), tablesPath: fp },
-			{ output: path.join(tmpDir, "dtos"), ...opts },
-		)
-		return lines
-	}
-
-	function exportsOf(): Record<string, string> {
-		const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir, "package.json"), "utf-8")) as {
-			exports: Record<string, string>
-		}
-		return pkg.exports
-	}
-
 	it("leaves package.json untouched unless asked", () => {
 		fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ exports: { ".": "./x.ts" }, name: "app" }))
 		generate()
@@ -135,8 +119,8 @@ export const author = createTable("author", { id: c.id(), name: c.text("name") }
 	})
 
 	it("warns rather than throwing when there is no package.json", () => {
-		const lines = generate({ updatePackageJson: true })
-		expect(lines.some((line) => line.includes("package.json not found"))).toBe(true)
+		const { warned } = generate({ updatePackageJson: true })
+		expect(warned.some((line) => line.includes("package.json not found"))).toBe(true)
 	})
 
 	it("registers one export per entity plus the shared module", () => {

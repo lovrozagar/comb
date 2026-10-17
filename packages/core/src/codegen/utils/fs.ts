@@ -65,7 +65,7 @@ export function writeGenFile(filePath: string, body: string, generator: string):
 
 	if (fs.existsSync(filePath)) {
 		const existing = fs.readFileSync(filePath, "utf-8")
-		const firstLine = existing.split("\n")[0] ?? ""
+		const firstLine = existing.split("\n", 1).join("")
 		/* a file without the header is someone's own code that happens to sit at the output path */
 		if (existing !== "" && !firstLine.includes("@generated")) {
 			throw new Error(`refusing to overwrite ${filePath}: it has no @generated header, so comb did not write it`)
@@ -81,20 +81,26 @@ export function writeGenFile(filePath: string, body: string, generator: string):
 	return true
 }
 
-/** The `_generated` marker of the JSON file at `filePath`, or undefined when there is none. */
-function readGeneratedMarker(filePath: string): unknown {
-	if (!fs.existsSync(filePath)) return undefined
+/**
+ * The `_generated` marker of the JSON file at `filePath`: undefined when there is no file to keep
+ * (missing or empty), null when the file is someone else's (not JSON, or JSON without the key).
+ */
+function readGeneratedMarker(filePath: string): string | null | undefined {
+	const text = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : ""
+	if (text === "") return undefined
 	try {
-		return (JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, unknown>)["_generated"]
+		const marker = (JSON.parse(text) as Record<string, unknown> | null)?.["_generated"]
+		return typeof marker === "string" ? marker : null
 	} catch {
-		// reason: a file that is not JSON carries no marker; the caller rewrites it
-		return undefined
+		// reason: text that is not JSON is not a file comb wrote; the caller refuses it
+		return null
 	}
 }
 
 /**
  * Write a generated JSON file with a `_generated` metadata key.
- * Skips the write when the existing file's checksum matches.
+ * Skips the write when the existing file's checksum matches, and refuses to overwrite a file
+ * that carries no `_generated` key.
  * Returns true if the file was written, false if skipped.
  */
 export function writeGenJsonFile(filePath: string, data: unknown, generator: string): boolean {
@@ -102,7 +108,12 @@ export function writeGenJsonFile(filePath: string, data: unknown, generator: str
 	const hash = contentHash(json)
 	const marker = `${generator} checksum:${hash}`
 
-	if (readGeneratedMarker(filePath) === marker) return false
+	const existing = readGeneratedMarker(filePath)
+	/* like writeGenFile: a file without the marker is someone's own data at the output path */
+	if (existing === null) {
+		throw new Error(`refusing to overwrite ${filePath}: it has no _generated key, so comb did not write it`)
+	}
+	if (existing === marker) return false
 
 	const output = { _generated: marker, ...(data as Record<string, unknown>) }
 	const dir = path.dirname(filePath)

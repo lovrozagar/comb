@@ -9,6 +9,7 @@ import path from "node:path"
 import { deriveEntityMeta } from "../entity-meta.ts"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { writeGenJsonFile } from "../utils/fs.ts"
+import type { GeneratorContext } from "./context-types.ts"
 
 /**
  * Manifest format version.
@@ -150,18 +151,20 @@ function toEntity(table: TableMeta): ManifestEntity {
 function buildManifest(tables: TableMeta[], dbName: string): Manifest {
 	return {
 		database: dbName,
-		entities: tables.map(toEntity).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+		entities: tables.map(toEntity).sort((a, b) => Number(a.name > b.name) - Number(a.name < b.name)),
 		v: MANIFEST_VERSION,
 	}
 }
 
 /** Write the manifest alongside the generated entities. */
-function generateManifest(tables: TableMeta[], dbName: string, config: ManifestConfig, cwd: string): void {
+function generateManifest(ctx: GeneratorContext, config: ManifestConfig): void {
+	const { dbName, tables } = ctx.analysis
+	const { cwd } = ctx
 	const outputPath = path.resolve(cwd, config.output)
 	const manifest = buildManifest(tables, dbName)
 
 	writeGenJsonFile(outputPath, manifest, "comb")
-	console.log(`  manifest: ${outputPath} (${manifest.entities.length} entities)`)
+	ctx.log(`  manifest: ${outputPath} (${manifest.entities.length} entities)`)
 }
 
 export {

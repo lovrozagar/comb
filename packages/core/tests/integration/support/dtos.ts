@@ -8,6 +8,7 @@ import path from "node:path"
 import type * as z from "zod"
 import { analyze } from "../../../src/codegen/analyzer.ts"
 import { generateDtos } from "../../../src/codegen/generators/dtos/index.ts"
+import { testContext } from "../../../src/codegen/generators/__fixtures__/context.ts"
 
 const ROOT = path.resolve(import.meta.dirname, "../codegen/.tmp-dtos")
 
@@ -37,7 +38,7 @@ export async function generatedDtos(
 	const tablesPath = path.join(dir, "db.x.tables.ts")
 	fs.writeFileSync(tablesPath, `${HEAD}${tables}\n`)
 	const output = path.join(dir, options.output ?? "dtos")
-	generateDtos({ analysis: analyze(tablesPath, dir), cwd: dir, log: () => undefined, tablesPath }, { output })
+	generateDtos(testContext(analyze(tablesPath, dir), { cwd: dir, tablesPath }), { output })
 	const entities: Record<string, GeneratedEntity> = {}
 	for (const entry of fs.readdirSync(output)) {
 		if (entry === "_shared") continue

@@ -17,6 +17,7 @@
 import path from "node:path"
 import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile } from "../utils/fs.ts"
+import type { GeneratorContext } from "./context-types.ts"
 
 type EnumChecksConfig = {
 	output: string
@@ -60,7 +61,9 @@ function escapeValue(val: string): string {
 		.replace(/\r/g, "\\r")
 }
 
-export function generateEnumChecks(tables: TableMeta[], dbName: string, config: EnumChecksConfig, cwd: string): void {
+export function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConfig): void {
+	const { dbName, tables } = ctx.analysis
+	const { cwd } = ctx
 	const outputPath = path.resolve(cwd, config.output)
 
 	const tablesWithEnums: Array<{ enumFields: EnumField[]; table: TableMeta }> = []
@@ -73,7 +76,7 @@ export function generateEnumChecks(tables: TableMeta[], dbName: string, config: 
 	}
 
 	if (tablesWithEnums.length === 0) {
-		console.log(`No enum fields found in ${dbName} — skipping enum-checks generation`)
+		ctx.log(`No enum fields found in ${dbName} — skipping enum-checks generation`)
 		return
 	}
 
@@ -106,6 +109,6 @@ export function generateEnumChecks(tables: TableMeta[], dbName: string, config: 
 		totalEnums += enumFields.length
 	}
 
-	console.log(`Generated enum checks for ${dbName} at: ${outputPath}`)
-	console.log(`Tables: ${tablesWithEnums.length}, Enum columns: ${totalEnums}`)
+	ctx.log(`Generated enum checks for ${dbName} at: ${outputPath}`)
+	ctx.log(`Tables: ${tablesWithEnums.length}, Enum columns: ${totalEnums}`)
 }

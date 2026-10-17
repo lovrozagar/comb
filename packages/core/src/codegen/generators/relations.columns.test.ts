@@ -4,6 +4,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
 import { generateRelations } from "./relations.ts"
+import { testContext } from "./__fixtures__/context.ts"
 
 describe("generateRelations: the columns a relation joins on", () => {
 	let dir: string
@@ -21,7 +22,7 @@ describe("generateRelations: the columns a relation joins on", () => {
 			`import { sqliteTable, text, type AnySQLiteColumn } from "drizzle-orm/sqlite-core"\n${tables}`,
 		)
 		const output = path.join(dir, "relations.gen.ts")
-		generateRelations(analyze(file).tables, file, { output }, dir)
+		generateRelations(testContext(analyze(file), { cwd: dir, tablesPath: file }), { output })
 		return fs.readFileSync(output, "utf8")
 	}
 

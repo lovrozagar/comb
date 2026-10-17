@@ -11,6 +11,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import type { Run } from "./migrate/core/process.ts"
+import type { GeneratorContext } from "./codegen/generators/context-types.ts"
 
 const HELP = `
 comb — database codegen + migration toolkit
@@ -49,7 +50,7 @@ export class CliError extends Error {
 	}
 }
 
-type OrmDriver = "bun-sqlite" | "d1" | "libsql" | "neon" | "node-postgres" | "postgres-js" | "turso"
+type OrmDriver = "bun-sqlite" | "d1" | "libsql" | "neon" | "turso"
 
 type FtsTableConfig = {
 	columns: string[]
@@ -153,87 +154,54 @@ async function runCodegenDirect(tablesPath: string, io: CliIo, generator?: strin
 	const shouldRun = (g: string) => !generator || generator === g
 
 	const tablesDir = path.dirname(tablesPath)
+	const ctx: GeneratorContext = { analysis, cwd: tablesDir, log: io.out, tablesPath, warn: io.err }
 
 	if (shouldRun("constraints")) {
 		const { generateConstraints } = await import("./codegen/generators/constraints.ts")
-		generateConstraints(
-			analysis.tables,
-			analysis.dbName,
-			{ output: path.join(tablesDir, `db.${analysis.dbName}.constraints.gen.ts`) },
-			tablesDir,
-		)
+		generateConstraints(ctx, { output: path.join(tablesDir, `db.${analysis.dbName}.constraints.gen.ts`) })
 	}
 
 	if (shouldRun("rows")) {
 		const { generateRows } = await import("./codegen/generators/rows.ts")
-		generateRows(
-			analysis.tables,
-			tablesPath,
-			{ output: path.join(tablesDir, `db.${analysis.dbName}.rows.gen.ts`) },
-			tablesDir,
-		)
+		generateRows(ctx, { output: path.join(tablesDir, `db.${analysis.dbName}.rows.gen.ts`) })
 	}
 
 	if (shouldRun("relations")) {
 		const { generateRelations } = await import("./codegen/generators/relations.ts")
-		generateRelations(
-			analysis.tables,
-			tablesPath,
-			{ output: path.join(tablesDir, `db.${analysis.dbName}.relations.gen.ts`) },
-			tablesDir,
-		)
+		generateRelations(ctx, { output: path.join(tablesDir, `db.${analysis.dbName}.relations.gen.ts`) })
 	}
 
 	if (shouldRun("diagrams")) {
 		const { generateDiagrams } = await import("./codegen/generators/diagrams.ts")
-		generateDiagrams(
-			{ dbName: analysis.dbName, tables: analysis.tables },
-			{ output: path.join(tablesDir, "diagrams") },
-			tablesDir,
-		)
+		generateDiagrams(ctx, { output: path.join(tablesDir, "diagrams") })
 	}
 
 	if (shouldRun("columns")) {
 		const { generateColumns } = await import("./codegen/generators/columns.ts")
-		generateColumns(analysis.tables, tablesPath, { output: tablesDir }, tablesDir)
+		generateColumns(ctx, { output: tablesDir })
 	}
 
 	if (shouldRun("dtos")) {
 		const { generateDtos } = await import("./codegen/generators/dtos/index.ts")
-		generateDtos({ analysis, cwd: tablesDir, log: io.out, tablesPath }, { output: path.join(tablesDir, "dtos") })
+		generateDtos(ctx, { output: path.join(tablesDir, "dtos") })
 	}
 
 	if (shouldRun("entities")) {
 		const { generateEntities } = await import("./codegen/generators/entities.ts")
-		generateEntities(
-			analysis.tables,
-			analysis.dbName,
-			{
-				output: path.join(tablesDir, `db.${analysis.dbName}.entities.gen.ts`),
-				updatePackageJson: true,
-			},
-			tablesDir,
-		)
+		generateEntities(ctx, {
+			output: path.join(tablesDir, `db.${analysis.dbName}.entities.gen.ts`),
+			updatePackageJson: true,
+		})
 	}
 
 	if (shouldRun("manifest")) {
 		const { generateManifest } = await import("./codegen/generators/manifest.ts")
-		generateManifest(
-			analysis.tables,
-			analysis.dbName,
-			{ output: path.join(tablesDir, `db.${analysis.dbName}.manifest.gen.json`) },
-			tablesDir,
-		)
+		generateManifest(ctx, { output: path.join(tablesDir, `db.${analysis.dbName}.manifest.gen.json`) })
 	}
 
 	if (shouldRun("enum-checks")) {
 		const { generateEnumChecks } = await import("./codegen/generators/enum-checks.ts")
-		generateEnumChecks(
-			analysis.tables,
-			analysis.dbName,
-			{ output: path.join(tablesDir, `db.${analysis.dbName}.enum-checks.gen.ts`) },
-			tablesDir,
-		)
+		generateEnumChecks(ctx, { output: path.join(tablesDir, `db.${analysis.dbName}.enum-checks.gen.ts`) })
 	}
 }
 
@@ -278,149 +246,90 @@ async function runCodegenForDb(
 	const output = dbConfig.output ?? {}
 	const tablesDir = path.dirname(tablesPath)
 	const fp = dbConfig.filePrefix ?? `db.${dbName}`
+	const ctx: GeneratorContext = { analysis, cwd, log: io.out, tablesPath, warn: io.err }
 
 	if (shouldRun("constraints")) {
 		const { generateConstraints } = await import("./codegen/generators/constraints.ts")
-		generateConstraints(
-			analysis.tables,
-			analysis.dbName,
-			{ output: output["constraints"] ?? path.join(tablesDir, `${fp}.constraints.gen.ts`) },
-			cwd,
-		)
+		generateConstraints(ctx, { output: output["constraints"] ?? path.join(tablesDir, `${fp}.constraints.gen.ts`) })
 	}
 
 	if (shouldRun("rows")) {
 		const { generateRows } = await import("./codegen/generators/rows.ts")
-		generateRows(
-			analysis.tables,
-			tablesPath,
-			{ output: output["rows"] ?? path.join(tablesDir, `${fp}.rows.gen.ts`) },
-			cwd,
-		)
+		generateRows(ctx, { output: output["rows"] ?? path.join(tablesDir, `${fp}.rows.gen.ts`) })
 	}
 
 	if (shouldRun("relations")) {
 		const { generateRelations } = await import("./codegen/generators/relations.ts")
-		generateRelations(
-			analysis.tables,
-			tablesPath,
-			{ output: output["relations"] ?? path.join(tablesDir, `${fp}.relations.gen.ts`) },
-			cwd,
-		)
+		generateRelations(ctx, { output: output["relations"] ?? path.join(tablesDir, `${fp}.relations.gen.ts`) })
 	}
 
 	if (shouldRun("diagrams")) {
 		const { generateDiagrams } = await import("./codegen/generators/diagrams.ts")
-		generateDiagrams(
-			{ dbName: analysis.dbName, tables: analysis.tables },
-			{ output: output["diagrams"] ?? path.join(tablesDir, "diagrams") },
-			cwd,
-		)
+		generateDiagrams(ctx, { output: output["diagrams"] ?? path.join(tablesDir, "diagrams") })
 	}
 
 	if (shouldRun("columns")) {
 		const { generateColumns } = await import("./codegen/generators/columns.ts")
-		generateColumns(
-			analysis.tables,
-			tablesPath,
-			{ filePrefix: dbConfig.filePrefix, output: output["columns"] ?? tablesDir, updatePackageJson: true },
-			cwd,
-		)
+		generateColumns(ctx, {
+			filePrefix: dbConfig.filePrefix,
+			output: output["columns"] ?? tablesDir,
+			updatePackageJson: true,
+		})
 	}
 
 	if (shouldRun("dtos")) {
 		const { generateDtos } = await import("./codegen/generators/dtos/index.ts")
-		generateDtos(
-			{ analysis, cwd, log: io.out, tablesPath },
-			{
-				filePrefix: dbConfig.filePrefix,
-				output: output["dtos"] ?? path.join(tablesDir, "dtos"),
-				updatePackageJson: true,
-			},
-		)
+		generateDtos(ctx, {
+			filePrefix: dbConfig.filePrefix,
+			output: output["dtos"] ?? path.join(tablesDir, "dtos"),
+			updatePackageJson: true,
+		})
 	}
 
 	if (shouldRun("entities")) {
 		const { generateEntities } = await import("./codegen/generators/entities.ts")
-		generateEntities(
-			analysis.tables,
-			analysis.dbName,
-			{
-				output: output["entities"] ?? path.join(tablesDir, `${fp}.entities.gen.ts`),
-				updatePackageJson: true,
-			},
-			cwd,
-		)
+		generateEntities(ctx, {
+			output: output["entities"] ?? path.join(tablesDir, `${fp}.entities.gen.ts`),
+			updatePackageJson: true,
+		})
 	}
 
 	if (shouldRun("manifest")) {
 		const { generateManifest } = await import("./codegen/generators/manifest.ts")
-		generateManifest(
-			analysis.tables,
-			analysis.dbName,
-			{ output: output["manifest"] ?? path.join(tablesDir, `${fp}.manifest.gen.json`) },
-			cwd,
-		)
+		generateManifest(ctx, { output: output["manifest"] ?? path.join(tablesDir, `${fp}.manifest.gen.json`) })
 	}
 
 	if (shouldRun("field-names")) {
 		const { generateFieldNames } = await import("./codegen/generators/field-names.ts")
-		generateFieldNames(
-			analysis.tables,
-			analysis.dbName,
-			{
-				output: output["field-names"] ?? path.join(tablesDir, `${fp}.field-names.gen.ts`),
-				updatePackageJson: true,
-			},
-			cwd,
-		)
+		generateFieldNames(ctx, {
+			output: output["field-names"] ?? path.join(tablesDir, `${fp}.field-names.gen.ts`),
+			updatePackageJson: true,
+		})
 	}
 
 	if (shouldRun("orm") && dbConfig.dialect && dbConfig.driver) {
 		const { generateOrm } = await import("./codegen/generators/orm.ts")
-		generateOrm(
-			tablesPath,
-			{
-				dialect: dbConfig.dialect,
-				driver: dbConfig.driver,
-				filePrefix: dbConfig.filePrefix,
-				output: output["orm"] ?? path.join(tablesDir, `${fp}.orm.gen.ts`),
-			},
-			cwd,
-		)
+		generateOrm(ctx, {
+			dialect: dbConfig.dialect,
+			driver: dbConfig.driver,
+			filePrefix: dbConfig.filePrefix,
+			output: output["orm"] ?? path.join(tablesDir, `${fp}.orm.gen.ts`),
+		})
 	}
 
 	if (shouldRun("enum-checks")) {
 		const { generateEnumChecks } = await import("./codegen/generators/enum-checks.ts")
-		generateEnumChecks(
-			analysis.tables,
-			analysis.dbName,
-			{
-				output: output["enum-checks"] ?? path.join(tablesDir, `${fp}.enum-checks.gen.ts`),
-			},
-			cwd,
-		)
+		generateEnumChecks(ctx, { output: output["enum-checks"] ?? path.join(tablesDir, `${fp}.enum-checks.gen.ts`) })
 	}
 
 	if (shouldRun("translations")) {
-		const constraintsPath = output["constraints"] ?? path.join(tablesDir, `${fp}.constraints.gen.ts`)
-		if (fs.existsSync(path.resolve(cwd, constraintsPath))) {
-			const { generateTranslations } = await import("./codegen/generators/translations.ts")
-			generateTranslations(path.resolve(cwd, constraintsPath), { baseDir: tablesDir }, cwd)
-		}
+		const { generateTranslations } = await import("./codegen/generators/translations.ts")
+		generateTranslations(ctx, { baseDir: tablesDir, filePrefix: fp })
 	}
 
 	if (shouldRun("fts") && dbConfig.fts && Object.keys(dbConfig.fts).length > 0) {
 		const { generateFts } = await import("./codegen/generators/fts.ts")
-		generateFts(
-			analysis.tables,
-			dbName,
-			{
-				fts: dbConfig.fts,
-				output: output["fts"] ?? tablesDir,
-			},
-			cwd,
-		)
+		generateFts(ctx, { filePrefix: fp, fts: dbConfig.fts, output: output["fts"] ?? tablesDir })
 	}
 }
 
@@ -501,7 +410,7 @@ OPTIONS:
 				const { generateFtsSql } = await import("./codegen/generators/fts-sql.ts")
 				const resolvedTables = path.resolve(cwd, dbConfig.tables)
 				const analysis = analyze(resolvedTables, cwd)
-				const ftsSql = generateFtsSql(analysis.tables, dbConfig.fts)
+				const ftsSql = generateFtsSql(analysis.tables, dbConfig.fts, io.err)
 				if (ftsSql) {
 					targetSchema = `${targetSchema}\n\n/* — FTS5 virtual tables — */\n\n${ftsSql}`
 				}

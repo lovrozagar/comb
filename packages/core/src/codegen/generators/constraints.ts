@@ -4,9 +4,10 @@
  * Generates constraint maps from analyzed table metadata for database error handling.
  */
 import path from "node:path"
-import type { TableMeta } from "../analyzer-types.ts"
 import { toScreamingSnakeCase } from "../utils/case.ts"
+import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile } from "../utils/fs.ts"
+import type { GeneratorContext } from "./context-types.ts"
 
 type Constraint = {
 	cause: string
@@ -27,184 +28,166 @@ type ConstraintsConfig = {
 	output: string
 }
 
-/** Generate constraint map from analyzed tables */
-export function generateConstraints(tables: TableMeta[], dbName: string, config: ConstraintsConfig, cwd: string): void {
-	const outputPath = path.resolve(cwd, config.output)
-	const constraintMap: ConstraintMap = {}
+const conflict = (cause: string, errorKey: string): Constraint => ({ cause, errorKey, statusKey: "conflict" })
 
+/** The column-level and index-level unique constraints, keyed by the column's SQL name */
+function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
+	const unique: Record<string, Constraint> = {}
+	for (const field of table.fields.filter((f) => /\.unique\(\)/.test(f.raw))) {
+		unique[field.sqlName] = conflict(
+			`A record with this ${field.name} value already exists`,
+			`${table.sqlName}_${field.name}_duplicate`,
+		)
+	}
+	for (const col of table.uniqueIndexes.flatMap((idx) => idx.columns)) {
+		/* the engine reports the column's SQL name; the error key keeps the property name */
+		const sqlName = table.fields.find((f) => f.name === col)?.sqlName ?? col
+		unique[sqlName] = conflict(`A record with this ${col} value already exists`, `${table.sqlName}_${col}_duplicate`)
+	}
+	return Object.keys(unique).length > 0 ? unique : undefined
+}
+
+/** The cause and status a CHECK reports, read from its name's convention */
+function checkVerdict(name: string, expression: string): Omit<Constraint, "errorKey"> {
+	if (name.endsWith("_enum")) return { cause: "Invalid enum value", statusKey: "bad_request" }
+	if (name.includes("_size")) {
+		const bytes = expression.match(/<=\s*(\d+)/)?.[1]
+		if (bytes === undefined) return { cause: "Check constraint violated", statusKey: "conflict" }
+		return {
+			cause: `Exceeds maximum size of ${Math.round(Number.parseInt(bytes, 10) / 1024)}KB`,
+			statusKey: "bad_request",
+		}
+	}
+	if (name.includes("expiry") || name.includes("valid")) {
+		return { cause: "Invalid date/time constraint", statusKey: "bad_request" }
+	}
+	if (name.includes("integrity")) return { cause: "Data integrity constraint violated", statusKey: "conflict" }
+	return { cause: "Check constraint violated", statusKey: "conflict" }
+}
+
+function constraintsOf(table: TableMeta): TableConstraints {
+	const entry: TableConstraints = {}
+	if (table.fields.some((f) => f.isPrimaryKey) || table.hasCompositePrimaryKey) {
+		entry.primaryKey = conflict("Record with this ID already exists", `${table.sqlName}_id_duplicate`)
+	}
+	const fkFields = table.fields.filter((f) => f.foreignKey !== null)
+	if (fkFields.length > 0) {
+		entry.foreignKey = Object.fromEntries(
+			fkFields.map((field) => [
+				field.sqlName,
+				conflict("Referenced record does not exist", `${table.sqlName}_${field.name}_reference_not_found`),
+			]),
+		)
+	}
+	const unique = uniqueOf(table)
+	if (unique) entry.unique = unique
+	if (table.checkConstraints.length > 0) {
+		entry.check = Object.fromEntries(
+			table.checkConstraints.map((chk) => [
+				chk.name,
+				{ ...checkVerdict(chk.name, chk.expression), errorKey: `${table.sqlName}_${chk.name}_failed` },
+			]),
+		)
+	}
+	return entry
+}
+
+/** The constraint map of every table that has a constraint, keyed by SQL table name */
+export function buildConstraintMap(tables: readonly TableMeta[]): ConstraintMap {
+	const map: ConstraintMap = {}
 	for (const table of tables) {
-		const tableName = table.sqlName
-		const tableEntry: TableConstraints = {}
-
-		/* Primary key constraints */
-		const hasPK = table.fields.some((f) => f.isPrimaryKey) || table.hasCompositePrimaryKey
-		if (hasPK) {
-			tableEntry.primaryKey = {
-				cause: "Record with this ID already exists",
-				errorKey: `${tableName}_id_duplicate`,
-				statusKey: "conflict",
-			}
-		}
-
-		/* Foreign key constraints */
-		const fkFields = table.fields.filter((f) => f.foreignKey !== null)
-		if (fkFields.length > 0) {
-			tableEntry.foreignKey = {}
-			for (const field of fkFields) {
-				tableEntry.foreignKey[field.sqlName] = {
-					cause: "Referenced record does not exist",
-					errorKey: `${tableName}_${field.name}_reference_not_found`,
-					statusKey: "conflict",
-				}
-			}
-		}
-
-		/* Unique constraints from column .unique() */
-		const uniqueColumnFields = table.fields.filter((f) => /\.unique\(\)/.test(f.raw))
-		if (uniqueColumnFields.length > 0) {
-			if (!tableEntry.unique) tableEntry.unique = {}
-			for (const field of uniqueColumnFields) {
-				tableEntry.unique[field.sqlName] = {
-					cause: `A record with this ${field.name} value already exists`,
-					errorKey: `${tableName}_${field.name}_duplicate`,
-					statusKey: "conflict",
-				}
-			}
-		}
-
-		/* Unique indexes from table options */
-		for (const idx of table.uniqueIndexes) {
-			if (!tableEntry.unique) tableEntry.unique = {}
-			for (const col of idx.columns) {
-				/* the engine reports the column's SQL name; the error key keeps the property name */
-				const sqlName = table.fields.find((f) => f.name === col)?.sqlName ?? col
-				tableEntry.unique[sqlName] = {
-					cause: `A record with this ${col} value already exists`,
-					errorKey: `${tableName}_${col}_duplicate`,
-					statusKey: "conflict",
-				}
-			}
-		}
-
-		/* Check constraints from table options */
-		for (const chk of table.checkConstraints) {
-			if (!tableEntry.check) tableEntry.check = {}
-
-			let cause = "Check constraint violated"
-			let statusKey = "conflict"
-
-			if (chk.name.endsWith("_enum")) {
-				cause = "Invalid enum value"
-				statusKey = "bad_request"
-			} else if (chk.name.includes("_size")) {
-				const byteLimitMatch = chk.expression.match(/<=\s*(\d+)/)
-				if (byteLimitMatch && byteLimitMatch[1] !== undefined) {
-					const bytes = Number.parseInt(byteLimitMatch[1], 10)
-					const kb = Math.round(bytes / 1024)
-					cause = `Exceeds maximum size of ${kb}KB`
-					statusKey = "bad_request"
-				}
-			} else if (chk.name.includes("expiry") || chk.name.includes("valid")) {
-				cause = "Invalid date/time constraint"
-				statusKey = "bad_request"
-			} else if (chk.name.includes("integrity")) {
-				cause = "Data integrity constraint violated"
-			}
-
-			tableEntry.check[chk.name] = {
-				cause,
-				errorKey: `${tableName}_${chk.name}_failed`,
-				statusKey,
-			}
-		}
-
-		if (Object.keys(tableEntry).length > 0) {
-			constraintMap[tableName] = tableEntry
-		}
+		const entry = constraintsOf(table)
+		if (Object.keys(entry).length > 0) map[table.sqlName] = entry
 	}
+	return map
+}
 
-	/* Generate output */
-	const outputContent = generateConstraintMapCode(constraintMap, dbName)
-	writeGenFile(outputPath, outputContent, "comb")
+/** Every constraint in the map, flattened */
+export function constraintsIn(map: ConstraintMap): Constraint[] {
+	return Object.values(map).flatMap(({ check, foreignKey, primaryKey, unique }) => [
+		...(primaryKey ? [primaryKey] : []),
+		...[check, foreignKey, unique].flatMap((group) => Object.values(group ?? {})),
+	])
+}
 
-	/* Count total constraints */
-	let totalConstraints = 0
-	for (const table of Object.values(constraintMap)) {
-		if (table.primaryKey) totalConstraints++
-		if (table.foreignKey) totalConstraints += Object.keys(table.foreignKey).length
-		if (table.unique) totalConstraints += Object.keys(table.unique).length
-		if (table.check) totalConstraints += Object.keys(table.check).length
+function countConstraints(map: ConstraintMap): number {
+	let total = 0
+	for (const { check, foreignKey, primaryKey, unique } of Object.values(map)) {
+		if (primaryKey) total++
+		for (const group of [check, foreignKey, unique]) total += Object.keys(group ?? {}).length
 	}
+	return total
+}
 
-	console.log(`Generated constraint map for ${dbName} database at: ${outputPath}`)
-	console.log(`Tables: ${Object.keys(constraintMap).length}, Total constraints: ${totalConstraints}`)
+/** Generate constraint map from analyzed tables */
+export function generateConstraints(ctx: GeneratorContext, config: ConstraintsConfig): void {
+	const { dbName, tables } = ctx.analysis
+	const outputPath = path.resolve(ctx.cwd, config.output)
+	const constraintMap = buildConstraintMap(tables)
+
+	writeGenFile(outputPath, generateConstraintMapCode(constraintMap, dbName), "comb")
+
+	ctx.log(`Generated constraint map for ${dbName} database at: ${outputPath}`)
+	ctx.log(`Tables: ${Object.keys(constraintMap).length}, Total constraints: ${countConstraints(constraintMap)}`)
+}
+
+/** Entries in the order a plain `.sort()` puts their keys */
+const byKey = ([a]: [string, unknown], [b]: [string, unknown]): number => (a < b ? -1 : 1)
+
+const GROUP_LABELS: Record<string, string> = {
+	check: "check constraints",
+	foreignKey: "foreign key constraints",
+	unique: "unique constraints",
+}
+
+/** The lines of one `{ errorKey, cause, statusKey }` object at `indent` */
+function constraintLines(constraint: Constraint, indent: string): string[] {
+	return [
+		`${indent}errorKey: "${constraint.errorKey}",`,
+		`${indent}cause: "${constraint.cause}",`,
+		`${indent}statusKey: "${constraint.statusKey}",`,
+	]
+}
+
+/** Entries joined the way the generated map writes them: a comma after every closing brace but the last */
+function joined(blocks: string[][]): string[] {
+	return blocks.flatMap((block, i) => (i < blocks.length - 1 ? [...block.slice(0, -1), `${block.at(-1)},`] : block))
+}
+
+function groupLines(type: string, group: Constraint | Record<string, Constraint>): string[] {
+	if (type === "primaryKey") {
+		return [
+			"\t\t/* primary key constraint */",
+			"\t\tprimaryKey: {",
+			...constraintLines(group as Constraint, "\t\t\t"),
+			"\t\t}",
+		]
+	}
+	const columns = Object.entries(group as Record<string, Constraint>).sort(byKey)
+	const blocks = columns.map(([column, constraint]) => [
+		`\t\t\t${column}: {`,
+		...constraintLines(constraint, "\t\t\t\t"),
+		"\t\t\t}",
+	])
+	return [`\t\t/* ${GROUP_LABELS[type]} */`, `\t\t${type}: {`, ...joined(blocks), "\t\t}"]
 }
 
 /** Generate TypeScript constraint map code */
 function generateConstraintMapCode(map: ConstraintMap, dbName: string): string {
-	const lines: string[] = []
-	const constName = `${toScreamingSnakeCase(dbName)}_DB_CONSTRAINT_MAP`
-
-	lines.push(`export const ${constName} = {`)
-
-	const tableNames = Object.keys(map).sort()
-	for (let tableIndex = 0; tableIndex < tableNames.length; tableIndex++) {
-		const tableName = tableNames[tableIndex]
-		if (tableName === undefined) continue
-		const tableConstraints = map[tableName]
-		if (!tableConstraints) continue
-
-		lines.push(`\t/* ${tableName} table constraints */`)
-		lines.push(`\t${tableName}: {`)
-
-		const constraintTypes = Object.keys(tableConstraints).sort()
-		for (let typeIndex = 0; typeIndex < constraintTypes.length; typeIndex++) {
-			const type = constraintTypes[typeIndex]
-			if (type === undefined) continue
-			const constraints = tableConstraints[type as keyof TableConstraints]
-
-			if (type === "primaryKey" && constraints && typeof constraints === "object" && "errorKey" in constraints) {
-				lines.push("\t\t/* primary key constraint */")
-				lines.push("\t\tprimaryKey: {")
-				lines.push(`\t\t\terrorKey: "${constraints.errorKey}",`)
-				lines.push(`\t\t\tcause: "${constraints.cause}",`)
-				lines.push(`\t\t\tstatusKey: "${constraints.statusKey}",`)
-				lines.push(`\t\t}${typeIndex < constraintTypes.length - 1 ? "," : ""}`)
-			} else if (constraints && typeof constraints === "object") {
-				let constraintLabel = "constraints"
-				if (type === "foreignKey") {
-					constraintLabel = "foreign key constraints"
-				} else if (type === "unique") {
-					constraintLabel = "unique constraints"
-				} else if (type === "check") {
-					constraintLabel = "check constraints"
-				}
-
-				lines.push(`\t\t/* ${constraintLabel} */`)
-				lines.push(`\t\t${type}: {`)
-
-				const columns = Object.keys(constraints).sort()
-				for (let colIndex = 0; colIndex < columns.length; colIndex++) {
-					const column = columns[colIndex]
-					if (column === undefined) continue
-					const constraint = (constraints as Record<string, Constraint>)[column]
-					if (!constraint) continue
-					lines.push(`\t\t\t${column}: {`)
-					lines.push(`\t\t\t\terrorKey: "${constraint.errorKey}",`)
-					lines.push(`\t\t\t\tcause: "${constraint.cause}",`)
-					lines.push(`\t\t\t\tstatusKey: "${constraint.statusKey}",`)
-					lines.push(`\t\t\t}${colIndex < columns.length - 1 ? "," : ""}`)
-				}
-
-				lines.push(`\t\t}${typeIndex < constraintTypes.length - 1 ? "," : ""}`)
-			}
-		}
-
-		lines.push(`\t}${tableIndex < tableNames.length - 1 ? "," : ""}`)
-	}
-
-	lines.push("} as const")
-	lines.push("")
-
-	return lines.join("\n")
+	const tables = Object.entries(map).sort(byKey)
+	const blocks = tables.map(([tableName, constraints]) => {
+		const groups = Object.entries(constraints).sort(byKey)
+		return [
+			`\t/* ${tableName} table constraints */`,
+			`\t${tableName}: {`,
+			...joined(groups.map(([type, group]) => groupLines(type, group as Constraint | Record<string, Constraint>))),
+			"\t}",
+		]
+	})
+	return [
+		`export const ${toScreamingSnakeCase(dbName)}_DB_CONSTRAINT_MAP = {`,
+		...joined(blocks),
+		"} as const",
+		"",
+	].join("\n")
 }

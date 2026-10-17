@@ -10,6 +10,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile, writeGenJsonFile } from "../utils/fs.ts"
+import type { GeneratorContext } from "./context-types.ts"
 
 interface Column {
 	name: string
@@ -138,92 +139,80 @@ function generateRelationsJSON(tables: Table[], relations: Relation[]): Record<s
 	}
 }
 
-const COMMON_COLS = new Set([
-	"id",
-	"created_at",
-	"updated_at",
-	"deleted_at",
-	"metadata",
-	"createdAt",
-	"updatedAt",
-	"deletedAt",
-])
+/** Columns nearly every table carries, left out of the compact summary */
+function isCommonColumn(name: string): boolean {
+	return ["id", "created_at", "updated_at", "deleted_at", "metadata", "createdAt", "updatedAt", "deletedAt"].includes(
+		name,
+	)
+}
 
-function generateCompactAI(tables: Table[], relations: Relation[]): string {
-	const lines: string[] = []
-	lines.push(`# ${tables.length} tables, ${relations.length} FKs`)
-	lines.push("# [c]=cascade [r]=restrict [n]=set null")
-	lines.push("# Columns exclude: id, createdAt, updatedAt, deletedAt, metadata")
-	lines.push("")
-
-	const tableIndex = new Map<string, number>()
-	for (let i = 0; i < tables.length; i++) {
-		const tbl = tables[i]
-		if (tbl) tableIndex.set(tbl.name, i + 1)
+/** The summary's shorthand for a delete rule; rules without one print nothing */
+function deleteSuffix(onDelete: string | undefined): string {
+	switch (onDelete) {
+		case "cascade":
+			return "[c]"
+		case "restrict":
+			return "[r]"
+		case "set null":
+			return "[n]"
+		default:
+			return ""
 	}
+}
 
-	lines.push("## Tables & Columns")
-	for (let i = 0; i < tables.length; i++) {
-		const t = tables[i]
-		if (!t) continue
-		const cols = t.columns.filter((c) => !COMMON_COLS.has(c.name)).map((c) => c.name)
-		const idx = i + 1
-		if (cols.length > 0) {
-			lines.push(`${idx}. ${t.name}: ${cols.join(", ")}`)
-		} else {
-			lines.push(`${idx}. ${t.name}: (only common cols)`)
+function summaryTableLines(tables: Table[]): string[] {
+	return tables.map((t, i) => {
+		const cols = t.columns.filter((c) => !isCommonColumn(c.name)).map((c) => c.name)
+		return `${i + 1}. ${t.name}: ${cols.length > 0 ? cols.join(", ") : "(only common cols)"}`
+	})
+}
+
+/** One line per referenced table, by 1-based table number (0 when outside the file), most referenced first */
+function summaryRefLines(tables: Table[]): string[] {
+	const tableIndex = new Map(tables.map((t, i) => [t.name, i + 1]))
+	const byTarget = new Map<number, string[]>()
+	for (const [i, table] of tables.entries()) {
+		for (const { name, reference } of table.columns) {
+			if (!reference) continue
+			const targetIdx = tableIndex.get(reference.table) ?? 0
+			byTarget.set(targetIdx, [
+				...(byTarget.get(targetIdx) ?? []),
+				`${i + 1}.${name}${deleteSuffix(reference.onDelete)}`,
+			])
 		}
 	}
-	lines.push("")
+	return [...byTarget]
+		.sort(([a], [b]) => a - b)
+		.sort(([, a], [, b]) => b.length - a.length)
+		.map(([targetIdx, refs]) => `${targetIdx} <- ${refs.join(", ")}`)
+}
 
-	const delSuffix = (d?: string): string => {
-		if (!d) return ""
-		if (d === "cascade") return "[c]"
-		if (d === "restrict") return "[r]"
-		if (d === "set null") return "[n]"
-		return ""
-	}
-
-	lines.push("## FK refs (target <- source.col)")
-	const byTargetIdx: Record<number, string[]> = {}
-	for (const r of relations) {
-		const targetTable = r.to.split(".")[0] ?? ""
-		const sourceTable = r.from.split(".")[0] ?? ""
-		const sourceCol = r.from.split(".")[1] ?? ""
-		const targetIdx = tableIndex.get(targetTable) ?? 0
-		const sourceIdx = tableIndex.get(sourceTable) ?? 0
-		if (!byTargetIdx[targetIdx]) byTargetIdx[targetIdx] = []
-		byTargetIdx[targetIdx]?.push(`${sourceIdx}.${sourceCol}${delSuffix(r.onDelete)}`)
-	}
-
-	const sortedTargets = Object.keys(byTargetIdx)
-		.map(Number)
-		.sort((a, b) => (byTargetIdx[b]?.length ?? 0) - (byTargetIdx[a]?.length ?? 0))
-	for (const targetIdx of sortedTargets) {
-		const refs = byTargetIdx[targetIdx]
-		if (refs) lines.push(`${targetIdx} <- ${refs.join(", ")}`)
-	}
-
-	return lines.join("\n")
+function generateCompactAI(tables: Table[], relations: Relation[]): string {
+	return [
+		`# ${tables.length} tables, ${relations.length} FKs`,
+		"# [c]=cascade [r]=restrict [n]=set null",
+		"# Columns exclude: id, createdAt, updatedAt, deletedAt, metadata",
+		"",
+		"## Tables & Columns",
+		...summaryTableLines(tables),
+		"",
+		"## FK refs (target <- source.col)",
+		...summaryRefLines(tables),
+	].join("\n")
 }
 
 type DiagramsConfig = {
 	output: string
 }
 
-export function generateDiagrams(
-	analysisResult: { dbName: string; tables: TableMeta[] },
-	config: DiagramsConfig,
-	cwd: string,
-): void {
+export function generateDiagrams(ctx: GeneratorContext, config: DiagramsConfig): void {
+	const { cwd } = ctx
 	const outputDir = path.resolve(cwd, config.output)
-	const { dbName } = analysisResult
+	const { dbName } = ctx.analysis
 
-	const { relations, tables } = transformTables(analysisResult.tables)
+	const { relations, tables } = transformTables(ctx.analysis.tables)
 
-	if (!fs.existsSync(outputDir)) {
-		fs.mkdirSync(outputDir, { recursive: true })
-	}
+	fs.mkdirSync(outputDir, { recursive: true })
 
 	/* Generate DDL for ChartDB */
 	const ddl = generateDDL(tables, dbName)
@@ -240,5 +229,5 @@ export function generateDiagrams(
 	const compactPath = path.join(outputDir, `${dbName}-ai.gen.txt`)
 	writeGenFile(compactPath, compact, "comb")
 
-	console.log(`Generated diagrams: ${tables.length} tables, ${relations.length} relations`)
+	ctx.log(`Generated diagrams: ${tables.length} tables, ${relations.length} relations`)
 }

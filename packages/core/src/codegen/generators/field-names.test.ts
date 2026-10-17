@@ -4,6 +4,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { generateFieldNames } from "./field-names.ts"
+import { testContext } from "./__fixtures__/context.ts"
 
 function field(name: string): FieldMeta {
 	return {
@@ -52,35 +53,37 @@ function table(sqlName: string, fieldNames: string[]): TableMeta {
 	}
 }
 
-describe("generateFieldNames", () => {
-	let tmpDir: string
-
+/** A fresh temp directory per test, removed after it. */
+function useTmpDir(prefix: string): () => string {
+	let dir = ""
 	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-field-names-"))
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
 	})
+	afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
+	return () => dir
+}
 
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
+type GenerateOptions = { dbName?: string; updatePackageJson?: boolean }
 
-	function generate(tables: TableMeta[], dbName = "core", updatePackageJson = false): string {
-		const output = path.join(tmpDir, "field-names.gen.ts")
-		generateFieldNames(tables, dbName, { output, updatePackageJson }, tmpDir)
-		return fs.existsSync(output) ? fs.readFileSync(output, "utf-8") : ""
-	}
+function generateIn(
+	dir: string,
+	tables: TableMeta[],
+	{ dbName = "core", updatePackageJson = false }: GenerateOptions = {},
+): string {
+	const output = path.join(dir, "field-names.gen.ts")
+	generateFieldNames(testContext(tables, { cwd: dir, dbName }), { output, updatePackageJson })
+	return fs.existsSync(output) ? fs.readFileSync(output, "utf-8") : ""
+}
+
+describe("generateFieldNames — names and labels", () => {
+	const tmpDir = useTmpDir("comb-field-names-")
+	const generate = (tables: TableMeta[], options?: GenerateOptions) => generateIn(tmpDir(), tables, options)
 
 	it("emits a const and type named from the database", () => {
-		const content = generate([table("post", ["id", "title"])], "core")
+		const content = generate([table("post", ["id", "title"])])
 		expect(content).toContain("const CORE_DB_FIELD_NAMES = {")
 		expect(content).toContain("type CoreDbFieldName = keyof typeof CORE_DB_FIELD_NAMES")
 		expect(content).toContain("export { CORE_DB_FIELD_NAMES, type CoreDbFieldName }")
-	})
-
-	it("leaves out a column marked { private: true }, not only an underscore name (M-L6)", () => {
-		const secret = { ...field("passwordHash"), constraints: { ...field("passwordHash").constraints, private: true } }
-		const content = generate([{ ...table("user", ["id", "email"]), fields: [field("id"), field("email"), secret] }])
-		expect(content).toContain("email")
-		expect(content).not.toContain("passwordHash")
 	})
 
 	it("carries the generated header", () => {
@@ -110,6 +113,18 @@ describe("generateFieldNames", () => {
 		/* an unaltered label needs no note */
 		expect(content).toMatch(/title: "Title",\s*$/m)
 	})
+})
+
+describe("generateFieldNames — which fields are listed", () => {
+	const tmpDir = useTmpDir("comb-field-names-")
+	const generate = (tables: TableMeta[], options?: GenerateOptions) => generateIn(tmpDir(), tables, options)
+
+	it("leaves out a column marked { private: true } (M-L6)", () => {
+		const secret = { ...field("passwordHash"), constraints: { ...field("passwordHash").constraints, private: true } }
+		const content = generate([{ ...table("user", ["id", "email"]), fields: [field("id"), field("email"), secret] }])
+		expect(content).toContain("email")
+		expect(content).not.toContain("passwordHash")
+	})
 
 	it("deduplicates a field name shared across tables", () => {
 		const content = generate([table("post", ["id", "title"]), table("page", ["id", "title"])])
@@ -119,31 +134,31 @@ describe("generateFieldNames", () => {
 
 	it("sorts entries so regeneration is stable regardless of table order", () => {
 		const forward = generate([table("post", ["zebra", "apple"])])
-		fs.rmSync(path.join(tmpDir, "field-names.gen.ts"))
+		fs.rmSync(path.join(tmpDir(), "field-names.gen.ts"))
 		const reversed = generate([table("post", ["apple", "zebra"])])
 		expect(reversed).toBe(forward)
 		expect(forward.indexOf("apple:")).toBeLessThan(forward.indexOf("zebra:"))
 	})
 
-	it("skips underscore-prefixed internal fields", () => {
-		const content = generate([table("post", ["_search", "title"])])
-		expect(content).not.toContain("_search:")
-		expect(content).toContain("title:")
-	})
-
-	it("writes nothing when every field is skipped", () => {
-		expect(generate([table("post", ["_search"])])).toBe("")
+	it("writes nothing when every field is private", () => {
+		const hidden = { ...field("_search"), constraints: { ...field("_search").constraints, private: true } }
+		expect(generate([{ ...table("post", []), fields: [hidden] }])).toBe("")
 	})
 
 	it("writes nothing when there are no tables", () => {
 		expect(generate([])).toBe("")
 	})
+})
+
+describe("generateFieldNames — package.json exports", () => {
+	const tmpDir = useTmpDir("comb-field-names-")
+	const generate = (tables: TableMeta[], options?: GenerateOptions) => generateIn(tmpDir(), tables, options)
 
 	it("registers a ./field-names export when asked", () => {
-		fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ exports: {}, name: "app" }))
-		generate([table("post", ["id"])], "core", true)
+		fs.writeFileSync(path.join(tmpDir(), "package.json"), JSON.stringify({ exports: {}, name: "app" }))
+		generate([table("post", ["id"])], { updatePackageJson: true })
 
-		const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir, "package.json"), "utf-8")) as {
+		const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir(), "package.json"), "utf-8")) as {
 			exports: Record<string, string>
 		}
 		expect(pkg.exports["./field-names"]).toBe("./field-names.gen.ts")
@@ -151,22 +166,27 @@ describe("generateFieldNames", () => {
 
 	it("preserves unrelated exports and replaces its own on a rerun", () => {
 		fs.writeFileSync(
-			path.join(tmpDir, "package.json"),
+			path.join(tmpDir(), "package.json"),
 			JSON.stringify({ exports: { ".": "./index.ts", "./field-names": "./stale.ts" }, name: "app" }),
 		)
-		generate([table("post", ["id"])], "core", true)
+		generate([table("post", ["id"])], { updatePackageJson: true })
 
-		const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir, "package.json"), "utf-8")) as {
+		const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir(), "package.json"), "utf-8")) as {
 			exports: Record<string, string>
 		}
 		expect(pkg.exports["."]).toBe("./index.ts")
 		expect(pkg.exports["./field-names"]).toBe("./field-names.gen.ts")
 	})
 
+	it("writes the file and leaves package.json alone when none is found above the output", () => {
+		expect(generate([table("post", ["id"])], { updatePackageJson: true })).toContain("FIELD_NAMES")
+		expect(fs.readdirSync(tmpDir())).toEqual(["field-names.gen.ts"])
+	})
+
 	it("keeps a single-target exports as the . export (S-13)", () => {
-		fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ exports: "./index.ts", name: "app" }))
-		generate([table("post", ["id"])], "core", true)
-		const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir, "package.json"), "utf-8")) as {
+		fs.writeFileSync(path.join(tmpDir(), "package.json"), JSON.stringify({ exports: "./index.ts", name: "app" }))
+		generate([table("post", ["id"])], { updatePackageJson: true })
+		const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir(), "package.json"), "utf-8")) as {
 			exports: Record<string, string>
 		}
 		expect(pkg.exports["."]).toBe("./index.ts")

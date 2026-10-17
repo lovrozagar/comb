@@ -4,16 +4,16 @@
  * Generates per-entity into two separate directories:
  *   - rqb-cols: `{ field: true }` for RQB column selection + Zod .pick()
  *   - sql-cols: `{ field: table.field }` for .returning() and raw SQL
- * Both auto-exclude `_private` fields (underscore prefix).
+ * Both leave out fields marked `{ private: true }`.
  *
  * Also generates table-names map: `t.entity_name` for raw SQL.
  */
 import fs from "node:fs"
 import path from "node:path"
-import type { TableMeta } from "../analyzer-types.ts"
 import { snakeToCamel } from "../utils/case.ts"
 import { ensureDir, writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
 import { type ExportTarget, readExports } from "../utils/package-json.ts"
+import type { GeneratorContext } from "./context-types.ts"
 
 type ColumnsConfig = {
 	filePrefix?: string | undefined
@@ -27,19 +27,34 @@ type TableEntry = {
 	varName: string
 }
 
+/** A generated file's name: `<prefix>.<stem>.gen.ts` under a prefix, else the directory's `index.gen.ts` */
+function genFileName(filePrefix: string | undefined, stem: string): string {
+	return filePrefix ? `${filePrefix}.${stem}.gen.ts` : "index.gen.ts"
+}
+
+/** Where one run writes: the output directory and the tables file the sql-cols import */
+type ColumnsOutput = { absoluteOutputDir: string; filePrefix?: string | undefined; tablesFile: string }
+
+/** Write one table's rqb-cols and sql-cols files */
+function writeEntityCols(table: TableEntry, out: ColumnsOutput): void {
+	const rqbEntityDir = path.join(out.absoluteOutputDir, "rqb-cols", table.varName)
+	const sqlEntityDir = path.join(out.absoluteOutputDir, "sql-cols", table.varName)
+	ensureDir(rqbEntityDir)
+	ensureDir(sqlEntityDir)
+	const sqlRelTablesPath = `${path.relative(sqlEntityDir, path.dirname(out.tablesFile))}/${path.basename(out.tablesFile, ".ts")}`
+	const fileName = genFileName(out.filePrefix, table.varName)
+	writeGenFile(path.join(rqbEntityDir, fileName), generateRqbColsFile(table), "comb")
+	writeGenFile(path.join(sqlEntityDir, fileName), generateSqlColsFile(table, sqlRelTablesPath), "comb")
+}
+
 /** Generate column refs and table names from analyzed tables */
-export function generateColumns(tables: TableMeta[], tablesPath: string, config: ColumnsConfig, cwd: string): void {
-	const absoluteOutputDir = path.resolve(cwd, config.output)
-	const rqbColsDir = path.join(absoluteOutputDir, "rqb-cols")
-	const sqlColsDir = path.join(absoluteOutputDir, "sql-cols")
-	const tableNamesDir = path.join(absoluteOutputDir, "table-names")
-
-	ensureDir(rqbColsDir)
-	ensureDir(sqlColsDir)
-	ensureDir(tableNamesDir)
-
-	/* Transform TableMeta[] to internal TableEntry[] */
-	const entries: TableEntry[] = tables.map((t) => ({
+export function generateColumns(ctx: GeneratorContext, config: ColumnsConfig): void {
+	const out: ColumnsOutput = {
+		absoluteOutputDir: path.resolve(ctx.cwd, config.output),
+		filePrefix: config.filePrefix,
+		tablesFile: path.resolve(ctx.cwd, ctx.tablesPath),
+	}
+	const entries: TableEntry[] = ctx.analysis.tables.map((t) => ({
 		fields: t.fields
 			.filter((f) => !f.constraints.private)
 			.map((f) => f.name)
@@ -48,47 +63,15 @@ export function generateColumns(tables: TableMeta[], tablesPath: string, config:
 		varName: t.varName,
 	}))
 
-	/* Resolve relative import path from entity dirs to tables file */
-	const tablesFileBaseName = path.basename(tablesPath, ".ts")
-	const tablesFileDir = path.dirname(path.resolve(cwd, tablesPath))
+	for (const dir of ["rqb-cols", "sql-cols", "table-names"]) ensureDir(path.join(out.absoluteOutputDir, dir))
+	for (const table of entries) writeEntityCols(table, out)
+	const tableNamesFile = path.join(out.absoluteOutputDir, "table-names", genFileName(config.filePrefix, "table-names"))
+	writeGenFile(tableNamesFile, generateTableNamesFile(entries), "comb")
 
-	/* Generate rqb-cols and sql-cols per entity */
-	for (const table of entries) {
-		const rqbEntityDir = path.join(rqbColsDir, table.varName)
-		const sqlEntityDir = path.join(sqlColsDir, table.varName)
-		ensureDir(rqbEntityDir)
-		ensureDir(sqlEntityDir)
+	const packageJsonPath = path.join(ctx.cwd, "package.json")
+	if (config.updatePackageJson && fs.existsSync(packageJsonPath)) updatePackageJson(packageJsonPath, entries, out)
 
-		const sqlRelTablesPath = `${path.relative(sqlEntityDir, tablesFileDir)}/${tablesFileBaseName}`
-
-		const rqbContent = generateRqbColsFile(table)
-		const sqlContent = generateSqlColsFile(table, sqlRelTablesPath)
-
-		const rqbFileName = config.filePrefix ? `${config.filePrefix}.${table.varName}.gen.ts` : "index.gen.ts"
-		const sqlFileName = config.filePrefix ? `${config.filePrefix}.${table.varName}.gen.ts` : "index.gen.ts"
-
-		const rqbFilePath = path.join(rqbEntityDir, rqbFileName)
-		const sqlFilePath = path.join(sqlEntityDir, sqlFileName)
-
-		writeGenFile(rqbFilePath, rqbContent, "comb")
-		writeGenFile(sqlFilePath, sqlContent, "comb")
-	}
-
-	/* Generate table-names */
-	const tableNamesContent = generateTableNamesFile(entries)
-	const tableNamesFileName = config.filePrefix ? `${config.filePrefix}.table-names.gen.ts` : "index.gen.ts"
-	const tableNamesFilePath = path.join(tableNamesDir, tableNamesFileName)
-	writeGenFile(tableNamesFilePath, tableNamesContent, "comb")
-
-	/* Update package.json if requested */
-	if (config.updatePackageJson) {
-		const packageJsonPath = path.join(cwd, "package.json")
-		if (fs.existsSync(packageJsonPath)) {
-			updatePackageJson(packageJsonPath, entries, config.output, cwd, config.filePrefix)
-		}
-	}
-
-	console.log(`Generated column refs for ${entries.length} tables`)
+	ctx.log(`Generated column refs for ${entries.length} tables`)
 }
 
 /* RQB column selection — { field: true } for db.query.* columns */
@@ -145,18 +128,17 @@ function generateTableNamesFile(tables: TableEntry[]): string {
 	return lines.join("\n")
 }
 
+const GENERATED_EXPORT = /^\.\/(?:table-cols|rqb-cols|sql-cols)\/|^\.\/table-names$/
+
 function updatePackageJson(
 	packageJsonPath: string,
 	tables: TableEntry[],
-	outputDir: string,
-	cwd: string,
-	filePrefix?: string | undefined,
+	{ absoluteOutputDir, filePrefix }: ColumnsOutput,
 ): void {
 	const content = fs.readFileSync(packageJsonPath, "utf-8")
 	const pkg = JSON.parse(content) as Record<string, unknown>
 
 	const packageDir = path.dirname(packageJsonPath)
-	const absoluteOutputDir = path.resolve(cwd, outputDir)
 	const relativeOutputDir = `./${path.relative(packageDir, absoluteOutputDir)}`
 
 	const existingExports = readExports(pkg)
@@ -164,25 +146,18 @@ function updatePackageJson(
 
 	/* Preserve non-generated exports */
 	for (const [key, value] of Object.entries(existingExports)) {
-		if (
-			!key.startsWith("./table-cols/") &&
-			!key.startsWith("./rqb-cols/") &&
-			!key.startsWith("./sql-cols/") &&
-			key !== "./table-names"
-		) {
-			newExports[key] = value
-		}
+		if (!GENERATED_EXPORT.test(key)) newExports[key] = value
 	}
 
 	/* Add rqb-cols and sql-cols per entity */
 	for (const table of tables) {
-		const colFileName = filePrefix ? `${filePrefix}.${table.varName}.gen.ts` : "index.gen.ts"
+		const colFileName = genFileName(filePrefix, table.varName)
 		newExports[`./rqb-cols/${table.varName}`] = `${relativeOutputDir}/rqb-cols/${table.varName}/${colFileName}`
 		newExports[`./sql-cols/${table.varName}`] = `${relativeOutputDir}/sql-cols/${table.varName}/${colFileName}`
 	}
 
 	/* Add table-names */
-	const tableNamesFileName = filePrefix ? `${filePrefix}.table-names.gen.ts` : "index.gen.ts"
+	const tableNamesFileName = genFileName(filePrefix, "table-names")
 	newExports["./table-names"] = `${relativeOutputDir}/table-names/${tableNamesFileName}`
 
 	pkg["exports"] = newExports

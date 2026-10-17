@@ -92,7 +92,9 @@ describe("generateEntityFile", () => {
 			'\tsoftDelete: "deleted_at",\n\tstates: null,\n\ttenantColumn: null,\n\tuniqueIndexes: [],',
 		)
 	})
+})
 
+describe("generateEntityFile: shared module imports", () => {
 	it("spreads the shared timestamps into read, readPartial and create, never update", () => {
 		const fields = [
 			field("title", "read", "z.string()"),

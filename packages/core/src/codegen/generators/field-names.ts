@@ -5,12 +5,11 @@
  * Collects unique field names across all tables, converts snake_case
  * to labels, and strips common suffixes (_json, _id).
  */
-import fs from "node:fs"
 import path from "node:path"
-import type { TableMeta } from "../analyzer-types.ts"
 import { toScreamingSnakeCase } from "../utils/case.ts"
-import { writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
-import { type ExportTarget, readExports } from "../utils/package-json.ts"
+import { writeGenFile } from "../utils/fs.ts"
+import { findNearestPackageJson, setPackageExport } from "../utils/package-json.ts"
+import type { GeneratorContext } from "./context-types.ts"
 
 type FieldNamesConfig = {
 	output: string
@@ -25,27 +24,27 @@ function fieldToLabel(name: string): string {
 	if (cleaned.endsWith("_id") && cleaned !== "id") {
 		cleaned = cleaned.slice(0, -3)
 	}
-	/* capitalize first word, lowercase rest */
-	const words = cleaned.split("_")
-	const first = words[0]
-	if (first === undefined) return name
-	return [first.charAt(0).toUpperCase() + first.slice(1), ...words.slice(1)].join(" ")
+	/* capitalize the first word, keep the rest, separate words with spaces */
+	return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).replaceAll("_", " ")
 }
 
-function generateFieldNames(tables: TableMeta[], dbName: string, config: FieldNamesConfig, cwd: string): void {
+function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): void {
+	const { dbName, tables } = ctx.analysis
+	const { cwd } = ctx
 	const outputPath = path.resolve(cwd, config.output)
 
 	/* collect unique non-private field names */
 	const fieldSet = new Set<string>()
 	for (const table of tables) {
 		for (const field of table.fields) {
-			if (field.name.startsWith("_") || field.constraints.private) continue
+			/* the analyzer marks `_`-prefixed names private too */
+			if (field.constraints.private) continue
 			fieldSet.add(field.name)
 		}
 	}
 
 	if (fieldSet.size === 0) {
-		console.log("  field-names: no fields found — skipped")
+		ctx.log("  field-names: no fields found — skipped")
 		return
 	}
 
@@ -83,44 +82,12 @@ function generateFieldNames(tables: TableMeta[], dbName: string, config: FieldNa
 	if (config.updatePackageJson) {
 		const packageJsonPath = findNearestPackageJson(path.dirname(outputPath))
 		if (packageJsonPath) {
-			updatePackageJson(packageJsonPath, outputPath)
+			setPackageExport(packageJsonPath, "./field-names", outputPath)
 		}
 	}
 
-	console.log(`  field-names: ${outputPath} (${entries.length} fields)`)
+	ctx.log(`  field-names: ${outputPath} (${entries.length} fields)`)
 }
 
 /** Walk up from dir to find nearest package.json */
-function findNearestPackageJson(dir: string): string | null {
-	let current = dir
-	while (current !== path.dirname(current)) {
-		const candidate = path.join(current, "package.json")
-		if (fs.existsSync(candidate)) return candidate
-		current = path.dirname(current)
-	}
-	return null
-}
-
-function updatePackageJson(packageJsonPath: string, outputPath: string): void {
-	const content = fs.readFileSync(packageJsonPath, "utf-8")
-	const pkg = JSON.parse(content) as Record<string, unknown>
-
-	const packageDir = path.dirname(packageJsonPath)
-	const relativePath = `./${path.relative(packageDir, outputPath)}`
-
-	const existingExports = readExports(pkg)
-	const newExports: Record<string, ExportTarget> = {}
-
-	for (const [key, value] of Object.entries(existingExports)) {
-		if (key !== "./field-names") {
-			newExports[key] = value
-		}
-	}
-
-	newExports["./field-names"] = relativePath
-
-	pkg["exports"] = newExports
-	writeJsonAtomic(packageJsonPath, pkg)
-}
-
 export { generateFieldNames }

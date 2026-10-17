@@ -4,7 +4,6 @@
  * Extracts constraints from type arguments:
  * Example: c.text("name", { min: 5, max: 254, email: true })
  */
-import type { CommentRange, Node } from "ts-morph"
 import { extractConstraints, type IdentifierValues } from "./utils/constraint-text.ts"
 
 /** Field constraints extracted from type arguments */
@@ -23,17 +22,6 @@ export type FieldConstraints = {
 	trim: boolean
 	uppercase: boolean
 	url: boolean
-}
-
-/** Get comment text from a node's leading comments */
-export function getCommentText(node: Node): string {
-	const leadingComments = node.getLeadingCommentRanges()
-	if (!leadingComments || leadingComments.length === 0) return ""
-
-	const sourceFile = node.getSourceFile()
-	return leadingComments
-		.map((range: CommentRange) => sourceFile.getFullText().substring(range.getPos(), range.getEnd()))
-		.join("\n")
 }
 
 /**

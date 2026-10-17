@@ -4,25 +4,35 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../../analyzer.ts"
 import { generateDtos } from "./generate.ts"
+import { testContext } from "../__fixtures__/context.ts"
 
-describe("generateDtos", () => {
-	let tmpDir: string
+let tmpDir: string
 
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-dtos-"))
-	})
+beforeEach(() => {
+	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-dtos-"))
+})
 
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
+afterEach(() => {
+	fs.rmSync(tmpDir, { force: true, recursive: true })
+})
 
-	function writeTablesAndAnalyze(content: string): ReturnType<typeof analyze> {
-		const fp = path.join(tmpDir, "db.test.tables.ts")
-		fs.writeFileSync(fp, content)
-		return analyze(fp)
-	}
+/** Write `schema` as the tables file, generate DTOs from it, and return the dtos directory. */
+function generate(schema: string): string {
+	const tablesPath = path.join(tmpDir, "db.test.tables.ts")
+	fs.writeFileSync(tablesPath, schema)
+	const dtosDir = path.join(tmpDir, "dtos")
+	generateDtos(testContext(analyze(tablesPath), { cwd: tmpDir, tablesPath }), { output: dtosDir })
+	return dtosDir
+}
 
-	const basicSchema = `
+/** A generated entity file and the shared file, read from `dtosDir`. */
+function read(dtosDir: string, entity: string): { all: string; entity: string; shared: string } {
+	const entityContent = fs.readFileSync(path.join(dtosDir, entity, "index.gen.ts"), "utf-8")
+	const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
+	return { all: entityContent + shared, entity: entityContent, shared }
+}
+
+const basicSchema = `
 import { sqliteTable as createTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core"
 const c = {
 	id: () => text("id").primaryKey(),
@@ -47,12 +57,11 @@ export const user = createTable("user", {
 ])
 `
 
-	it("generates per-entity DTO files + shared file", () => {
-		const analysis = writeTablesAndAnalyze(basicSchema)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
+const readUser = () => read(generate(basicSchema), "user")
 
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
+describe("generateDtos — files and schemas", () => {
+	it("generates per-entity DTO files + shared file", () => {
+		const dtosDir = generate(basicSchema)
 
 		/* Shared file */
 		const sharedPath = path.join(dtosDir, "_shared", "index.gen.ts")
@@ -66,13 +75,7 @@ export const user = createTable("user", {
 	})
 
 	it("generates read, readPartial, create, update schemas", () => {
-		const analysis = writeTablesAndAnalyze(basicSchema)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
-
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
-
-		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
+		const { entity: content } = readUser()
 		expect(content).toContain("userDtoReadSchema")
 		expect(content).toContain("userDtoReadPartialSchema")
 		expect(content).toContain("userDtoCreateSchema")
@@ -80,80 +83,56 @@ export const user = createTable("user", {
 	})
 
 	it("applies email validation with transforms on create/update", () => {
-		const analysis = writeTablesAndAnalyze(basicSchema)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
-
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
-
 		/* Schemas may be in entity or shared file (deduped) */
-		const entity = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
-		const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
-		const all = entity + shared
+		const { all } = readUser()
 		expect(all).toContain("z.email()")
 		expect(all).toContain(".trim()")
 		expect(all).toContain(".toLowerCase()")
 	})
 
 	it("applies max constraint to text fields", () => {
-		const analysis = writeTablesAndAnalyze(basicSchema)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
-
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
-
-		const entity = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
-		const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
-		const all = entity + shared
-		expect(all).toContain(".max(100)")
-	})
-
-	it("generates timestamp spreads in shared file", () => {
-		const analysis = writeTablesAndAnalyze(basicSchema)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
-
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
-
-		const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
-		expect(shared).toContain("timestampsCreatedUpdatedDeletedReadSnakeCase")
-		expect(shared).toContain("timestampsCreatedUpdatedDeletedCreateSnakeCase")
-	})
-
-	it("uses timestamp spreads in entity files", () => {
-		const analysis = writeTablesAndAnalyze(basicSchema)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
-
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
-
-		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
-		expect(content).toContain("...timestampsCreatedUpdatedDeletedReadSnakeCase")
-		/* Should NOT have individual timestamp fields since they're spread */
-		expect(content).not.toMatch(/\tcreated_at: timestampSchema/)
+		expect(readUser().all).toContain(".max(100)")
 	})
 
 	it("generates TypeScript type exports", () => {
-		const analysis = writeTablesAndAnalyze(basicSchema)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
-
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
-
-		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
+		const { entity: content } = readUser()
 		expect(content).toContain("export type UserDtoRead =")
 		expect(content).toContain("export type UserDtoCreate =")
 		expect(content).toContain("export type UserDtoUpdate =")
 	})
 
+	it("handles multiple tables", () => {
+		const dtosDir = generate(`
+import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
+const c = {
+	id: () => text("id").primaryKey(),
+	text: (name: string) => text(name),
+}
+export const user = createTable("user", { id: c.id(), name: c.text("name") })
+export const post = createTable("post", { id: c.id(), title: c.text("title") })
+`)
+
+		expect(fs.existsSync(path.join(dtosDir, "user", "index.gen.ts"))).toBe(true)
+		expect(fs.existsSync(path.join(dtosDir, "post", "index.gen.ts"))).toBe(true)
+	})
+})
+
+describe("generateDtos — timestamps and optionality", () => {
+	it("generates timestamp spreads in shared file", () => {
+		const { shared } = readUser()
+		expect(shared).toContain("timestampsCreatedUpdatedDeletedReadSnakeCase")
+		expect(shared).toContain("timestampsCreatedUpdatedDeletedCreateSnakeCase")
+	})
+
+	it("uses timestamp spreads in entity files", () => {
+		const { entity: content } = readUser()
+		expect(content).toContain("...timestampsCreatedUpdatedDeletedReadSnakeCase")
+		/* Should NOT have individual timestamp fields since they're spread */
+		expect(content).not.toMatch(/\tcreated_at: timestampSchema/)
+	})
+
 	it("makes id and nullable fields optional in create schema", () => {
-		const analysis = writeTablesAndAnalyze(basicSchema)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
-
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
-
-		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
+		const { entity: content } = readUser()
 		/* id should be optional in create */
 		const createMatch = content.match(/userDtoCreateSchema[\s\S]*?^\}\)/m)
 		expect(createMatch).toBeTruthy()
@@ -163,26 +142,23 @@ export const user = createTable("user", {
 	})
 
 	it("makes all fields optional in update schema", () => {
-		const analysis = writeTablesAndAnalyze(basicSchema)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
-
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
-
-		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
+		const { entity: content, shared } = readUser()
 		const updateMatch = content.match(/userDtoUpdateSchema[\s\S]*?^\}\)/m)
 		expect(updateMatch).toBeTruthy()
 		const updateBlock = updateMatch?.[0] ?? ""
-		/* Every field in update should have .optional() */
-		const fieldLines = updateBlock.split("\n").filter((l) => l.includes(":") && !l.includes("..."))
-		for (const line of fieldLines) {
-			if (line.includes("z.")) {
-				expect(line).toContain(".optional()")
-			}
-		}
+		/* Every field in update is optional, inline or through the shared constant it names */
+		const optionalShared = new Set([...shared.matchAll(/^export const (_z\d+) = .*\.optional\(\)/gm)].map((m) => m[1]))
+		const fieldLines = updateBlock.split("\n").filter((l) => /^\t\w+: /.test(l))
+		expect(fieldLines.length).toBeGreaterThan(0)
+		const notOptional = fieldLines.filter((line) => {
+			const ref = /^\t\w+: (_z\d+),$/.exec(line)?.[1]
+			return !line.includes(".optional()") && !(ref !== undefined && optionalShared.has(ref))
+		})
+		expect(notOptional).toEqual([])
 	})
+})
 
-	const metaSchema = `
+const metaSchema = `
 import { sqliteTable as createTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core"
 const c = {
 	id: (prefix: string) => text("id").primaryKey(),
@@ -209,108 +185,68 @@ export const item = createTable("item", {
 })
 `
 
-	describe("meta examples", () => {
-		function generateAndRead(schema: string): { all: string; entity: string; shared: string } {
-			const analysis = writeTablesAndAnalyze(schema)
-			const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-			const dtosDir = path.join(tmpDir, "dtos")
-			generateDtos(
-				{ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath },
-				{ output: dtosDir },
-			)
-			const entityDir = path.join(dtosDir, "item")
-			const entity = fs.readFileSync(path.join(entityDir, "index.gen.ts"), "utf-8")
-			const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
-			return { all: entity + shared, entity, shared }
-		}
+const readItem = () => read(generate(metaSchema), "item")
 
-		it("emits shared meta object in shared file", () => {
-			const { shared } = generateAndRead(metaSchema)
-			expect(shared).toContain("export const _m = {")
-			expect(shared).toContain('email: { examples: ["user@example.com"] }')
-			expect(shared).toContain('string: { examples: ["string"] }')
-			expect(shared).toContain("boolean: { examples: [true] }")
-			expect(shared).toContain("timestamp: { examples: [1711468800000] }")
-		})
-
-		it("includes email example in output", () => {
-			const { all } = generateAndRead(metaSchema)
-			expect(all).toContain(".meta(_m.email)")
-		})
-
-		it("includes url example in output", () => {
-			const { all } = generateAndRead(metaSchema)
-			expect(all).toContain(".meta(_m.url)")
-		})
-
-		it("adds prefixed ULID example on id fields (inline)", () => {
-			const { entity } = generateAndRead(metaSchema)
-			expect(entity).toMatch(/\.meta\(\{ examples: \["itm_\w+"\] \}\)/)
-		})
-
-		it("includes boolean example in output", () => {
-			const { all } = generateAndRead(metaSchema)
-			expect(all).toContain(".meta(_m.boolean)")
-		})
-
-		it("includes first enum value as example", () => {
-			const { all } = generateAndRead(metaSchema)
-			expect(all).toContain('.meta({ examples: ["admin"] })')
-		})
-
-		it("includes integer midpoint example", () => {
-			const { all } = generateAndRead(metaSchema)
-			expect(all).toContain(".meta({ examples: [500] })")
-		})
-
-		it("includes real example in output", () => {
-			const { all } = generateAndRead(metaSchema)
-			expect(all).toContain(".meta(_m.real)")
-		})
-
-		it("adds exact-length string example", () => {
-			const { all } = generateAndRead(metaSchema)
-			expect(all).toMatch(/\.meta\(\{ examples: \["\w{6}"\] \}\)/)
-		})
-
-		it("includes generic string example in output", () => {
-			const { all } = generateAndRead(metaSchema)
-			expect(all).toContain(".meta(_m.string)")
-		})
-
-		it("uses shared _m.timestamp in timestampSchema", () => {
-			const { shared } = generateAndRead(metaSchema)
-			expect(shared).toContain(".meta(_m.timestamp)")
-		})
-
-		it("imports _m from shared", () => {
-			const { entity } = generateAndRead(metaSchema)
-			expect(entity).toContain("_m")
-			expect(entity).toMatch(/import \{.*_m.*\} from "\.\.\/_shared\/index\.gen"/)
-		})
+describe("generateDtos — meta examples: shared", () => {
+	it("emits shared meta object in shared file", () => {
+		const { shared } = readItem()
+		expect(shared).toContain("export const _m = {")
+		expect(shared).toContain('email: { examples: ["user@example.com"] }')
+		expect(shared).toContain('string: { examples: ["string"] }')
+		expect(shared).toContain("boolean: { examples: [true] }")
+		expect(shared).toContain("timestamp: { examples: [1711468800000] }")
 	})
 
-	it("handles multiple tables", () => {
-		const analysis = writeTablesAndAnalyze(`
-import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	text: (name: string) => text(name),
-}
-export const user = createTable("user", { id: c.id(), name: c.text("name") })
-export const post = createTable("post", { id: c.id(), title: c.text("title") })
-`)
-		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-		const dtosDir = path.join(tmpDir, "dtos")
-
-		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
-
-		expect(fs.existsSync(path.join(dtosDir, "user", "index.gen.ts"))).toBe(true)
-		expect(fs.existsSync(path.join(dtosDir, "post", "index.gen.ts"))).toBe(true)
+	it("uses shared _m.timestamp in timestampSchema", () => {
+		expect(readItem().shared).toContain(".meta(_m.timestamp)")
 	})
 
-	describe("auto-dedup shared schemas", () => {
-		const dedupSchema = `
+	it("imports _m from shared", () => {
+		const { entity } = readItem()
+		expect(entity).toContain("_m")
+		expect(entity).toMatch(/import \{.*_m.*\} from "\.\.\/_shared\/index\.gen"/)
+	})
+})
+
+describe("generateDtos — meta examples: per field", () => {
+	it("includes email example in output", () => {
+		expect(readItem().all).toContain(".meta(_m.email)")
+	})
+
+	it("includes url example in output", () => {
+		expect(readItem().all).toContain(".meta(_m.url)")
+	})
+
+	it("adds prefixed ULID example on id fields (inline)", () => {
+		expect(readItem().entity).toMatch(/\.meta\(\{ examples: \["itm_\w+"\] \}\)/)
+	})
+
+	it("includes boolean example in output", () => {
+		expect(readItem().all).toContain(".meta(_m.boolean)")
+	})
+
+	it("includes first enum value as example", () => {
+		expect(readItem().all).toContain('.meta({ examples: ["admin"] })')
+	})
+
+	it("includes integer midpoint example", () => {
+		expect(readItem().all).toContain(".meta({ examples: [500] })")
+	})
+
+	it("includes real example in output", () => {
+		expect(readItem().all).toContain(".meta(_m.real)")
+	})
+
+	it("adds exact-length string example", () => {
+		expect(readItem().all).toMatch(/\.meta\(\{ examples: \["\w{6}"\] \}\)/)
+	})
+
+	it("includes generic string example in output", () => {
+		expect(readItem().all).toContain(".meta(_m.string)")
+	})
+})
+
+const dedupSchema = `
 import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
 const c = {
 	id: (prefix: string) => text("id").primaryKey(),
@@ -342,48 +278,42 @@ export const gamma = createTable("gamma", {
 })
 `
 
-		function generateDedup() {
-			const analysis = writeTablesAndAnalyze(dedupSchema)
-			const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-			const dtosDir = path.join(tmpDir, "dtos")
-			generateDtos(
-				{ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath },
-				{ output: dtosDir },
-			)
-			return {
-				alpha: fs.readFileSync(path.join(dtosDir, "alpha", "index.gen.ts"), "utf-8"),
-				beta: fs.readFileSync(path.join(dtosDir, "beta", "index.gen.ts"), "utf-8"),
-				shared: fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8"),
-			}
-		}
+function generateDedup(): { alpha: string; beta: string; shared: string } {
+	const dtosDir = generate(dedupSchema)
+	return {
+		alpha: fs.readFileSync(path.join(dtosDir, "alpha", "index.gen.ts"), "utf-8"),
+		beta: fs.readFileSync(path.join(dtosDir, "beta", "index.gen.ts"), "utf-8"),
+		shared: fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8"),
+	}
+}
 
-		it("emits _z* constants in shared file for repeated schemas", () => {
-			const { shared } = generateDedup()
-			/* FK ref _str.min(1).max(48) — base type aliased */
-			expect(shared).toMatch(/export const _z\d+ = _str\.min\(1\)\.max\(48\)/)
-		})
+describe("generateDtos — auto-dedup shared schemas", () => {
+	it("emits _z* constants in shared file for repeated schemas", () => {
+		const { shared } = generateDedup()
+		/* FK ref _str.min(1).max(48) — base type aliased */
+		expect(shared).toMatch(/export const _z\d+ = _str\.min\(1\)\.max\(48\)/)
+	})
 
-		it("entity files reference _z* instead of inline schemas", () => {
-			const { alpha } = generateDedup()
-			/* owner_id (FK ref) should use _z* ref, not inline z.string().min(1).max(48) */
-			expect(alpha).toMatch(/owner_id: _z\d+/)
-		})
+	it("entity files reference _z* instead of inline schemas", () => {
+		const { alpha } = generateDedup()
+		/* owner_id (FK ref) should use _z* ref, not inline z.string().min(1).max(48) */
+		expect(alpha).toMatch(/owner_id: _z\d+/)
+	})
 
-		it("entity files import _z* constants from shared", () => {
-			const { alpha } = generateDedup()
-			expect(alpha).toMatch(/import \{.*_z\d+.*\} from "\.\.\/_shared\/index\.gen"/)
-		})
+	it("entity files import _z* constants from shared", () => {
+		const { alpha } = generateDedup()
+		expect(alpha).toMatch(/import \{.*_z\d+.*\} from "\.\.\/_shared\/index\.gen"/)
+	})
 
-		it("does not dedup schemas with unique per-table values", () => {
-			const { shared } = generateDedup()
-			/* ID schemas with unique prefixes stay inline in entity files */
-			expect(shared).not.toContain("alp_")
-			expect(shared).not.toContain("bet_")
-		})
+	it("does not dedup schemas with unique per-table values", () => {
+		const { shared } = generateDedup()
+		/* ID schemas with unique prefixes stay inline in entity files */
+		expect(shared).not.toContain("alp_")
+		expect(shared).not.toContain("bet_")
+	})
 
-		it("adds usage count comment to shared constants", () => {
-			const { shared } = generateDedup()
-			expect(shared).toMatch(/export const _z\d+ = .+ \/\* \d+x \*\//)
-		})
+	it("adds usage count comment to shared constants", () => {
+		const { shared } = generateDedup()
+		expect(shared).toMatch(/export const _z\d+ = .+ \/\* \d+x \*\//)
 	})
 })

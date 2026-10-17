@@ -16,6 +16,7 @@ import type { CombError } from "../../../src/error.ts"
 import { sqliteErrorHandler } from "../../../src/sqlite/constraint-handler.ts"
 import type { ConstraintMap } from "../../../src/types.ts"
 import { libsqlMemory } from "../support/libsql.ts"
+import { testContext } from "../../../src/codegen/generators/__fixtures__/context.ts"
 
 const TABLES = `
 import { sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
@@ -59,7 +60,7 @@ beforeAll(async () => {
 	fs.writeFileSync(tables, TABLES)
 	analysis = analyze(tables)
 	const output = path.join(dir, "constraints.gen.ts")
-	generateConstraints(analysis.tables, "app", { output }, dir)
+	generateConstraints(testContext(analysis, { cwd: dir }), { output })
 	map = ((await import(output)) as Record<string, ConstraintMap>).APP_DB_CONSTRAINT_MAP as ConstraintMap
 })
 
@@ -106,7 +107,7 @@ describe("generated constraint map on libsql", () => {
 
 describe("generated FTS SQL on libsql", () => {
 	it("indexes rows through triggers that name the SQL columns", async () => {
-		const fts = generateFtsSql(analysis.tables, { member: { columns: ["displayName", "bodyText"] } })
+		const fts = generateFtsSql(analysis.tables, { member: { columns: ["displayName", "bodyText"] } }, () => undefined)
 		const { client, close } = libsqlMemory()
 		try {
 			await client.executeMultiple(DDL.replace(/INSERT INTO member[^;]*;/, ""))

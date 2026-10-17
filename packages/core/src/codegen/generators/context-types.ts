@@ -9,4 +9,6 @@ export type GeneratorContext = {
 	log: (line: string) => void
 	/** the analyzed tables file */
 	tablesPath: string
+	/** a line the person running codegen should act on */
+	warn: (line: string) => void
 }

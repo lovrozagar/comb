@@ -3,6 +3,7 @@ import path from "node:path"
 import { Project, ts } from "ts-morph"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { generateOrm } from "./orm.ts"
+import { testContext } from "./__fixtures__/context.ts"
 
 /* Generated clients must compile against the drizzle-orm comb ships with — a
    string assertion can't catch a config key drizzle dropped. The scratch dir
@@ -38,11 +39,11 @@ describe("generateOrm — compiles against installed drizzle-orm", () => {
 			fs.mkdirSync(dir)
 			fs.writeFileSync(path.join(dir, "db.core.tables.ts"), TABLES)
 			fs.writeFileSync(path.join(dir, "db.core.relations.gen.ts"), RELATIONS)
-			generateOrm(
-				path.join(dir, "db.core.tables.ts"),
-				{ dialect: "sqlite", driver, output: path.join(dir, "orm.gen.ts") },
-				dir,
-			)
+			generateOrm(testContext([], { cwd: dir, tablesPath: path.join(dir, "db.core.tables.ts") }), {
+				dialect: "sqlite",
+				driver,
+				output: path.join(dir, "orm.gen.ts"),
+			})
 			diagnosticsByDriver.set(driver, [])
 		}
 

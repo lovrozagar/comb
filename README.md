@@ -358,7 +358,7 @@ export default {
 	databases: {
 		core: {
 			dialect: "sqlite", // "sqlite" | "postgres"
-			driver: "d1", // bun-sqlite | d1 | libsql | neon | node-postgres | postgres-js | turso
+			driver: "d1", // bun-sqlite | d1 | libsql | turso (sqlite) · neon (postgres)
 			tables: "./src/db/core.tables.ts",
 			filePrefix: "db.core", // generated file name prefix
 			generators: ["dtos", "orm"], // omit to run all

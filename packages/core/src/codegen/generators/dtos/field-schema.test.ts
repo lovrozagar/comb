@@ -11,8 +11,13 @@ const imports = (): ImportsMeta => ({
 	jsonSchemaImports: new Set(),
 })
 
-function schema(name: string, raw: string, type: SchemaType, overrides: Partial<FieldMeta> = {}) {
-	return generateFieldSchema({ ...parseField(name, raw), ...overrides }, type, imports())
+function schema(name: string, raw: string, type: SchemaType) {
+	return generateFieldSchema(parseField(name, raw), type, imports())
+}
+
+/** A parsed field with what the analyzer would have filled in from elsewhere in the file */
+function fieldOf(name: string, raw: string, overrides: Partial<FieldMeta>): FieldMeta {
+	return { ...parseField(name, raw), ...overrides }
 }
 
 describe("generateFieldSchema: what each schema type includes", () => {
@@ -60,22 +65,32 @@ describe("generateFieldSchema: optionality", () => {
 
 describe("generateFieldSchema: kinds", () => {
 	it("writes an enum from its values or its imported name, and refuses one it cannot read", () => {
-		expect(schema("s", 'c.enum("s", ["a", "b"]).notNull()', "read", { enumValues: ["a", "b"] })).toBe(
-			'z.enum(["a","b"]).meta({ examples: ["a"] })',
-		)
-		expect(schema("s", 'c.enum("s", ROLES).notNull()', "read", { enumName: "ROLES" })).toBe(
-			"z.enum(ROLES).meta(_m.string)",
-		)
+		expect(
+			generateFieldSchema(
+				fieldOf("s", 'c.enum("s", ["a", "b"]).notNull()', { enumValues: ["a", "b"] }),
+				"read",
+				imports(),
+			),
+		).toBe('z.enum(["a","b"]).meta({ examples: ["a"] })')
+		expect(
+			generateFieldSchema(fieldOf("s", 'c.enum("s", ROLES).notNull()', { enumName: "ROLES" }), "read", imports()),
+		).toBe("z.enum(ROLES).meta(_m.string)")
 		expect(() => schema("s", 'c.enum("s", [a, b])', "read")).toThrow(
 			'c.enum column "s": its values are not string literals',
 		)
 	})
 
 	it("validates JSON with its schema and caps its size on writes", () => {
-		expect(schema("p", 'c.json("p", prefs)', "read", { jsonSchemaName: "prefs" })).toBe("prefs.nullable()")
-		expect(schema("p", 'c.json("p", prefs, { maxBytes: 100 })', "create", { jsonSchemaName: "prefs" })).toContain(
-			"JSON.stringify(val).length <= 100",
-		)
+		expect(
+			generateFieldSchema(fieldOf("p", 'c.json("p", prefs)', { jsonSchemaName: "prefs" }), "read", imports()),
+		).toBe("prefs.nullable()")
+		expect(
+			generateFieldSchema(
+				fieldOf("p", 'c.json("p", prefs, { maxBytes: 100 })', { jsonSchemaName: "prefs" }),
+				"create",
+				imports(),
+			),
+		).toContain("JSON.stringify(val).length <= 100")
 		expect(() => schema("p", 'c.json("p")', "read")).toThrow("c.json() must have schema as second parameter")
 	})
 
@@ -86,9 +101,13 @@ describe("generateFieldSchema: kinds", () => {
 		expect(schema("e", 'c.text("e", { email: true, min: 3, max: 50 }).notNull()', "create")).toBe(
 			"z.email().trim().toLowerCase().min(3).max(50).meta(_m.email)",
 		)
-		expect(schema("e", 'c.text("e", { email: true }, 80).notNull()', "read", { length: 80 })).toBe(
-			"z.email().max(80).meta(_m.email)",
-		)
+		expect(
+			generateFieldSchema(
+				fieldOf("e", 'c.text("e", { email: true }, 80).notNull()', { length: 80 }),
+				"read",
+				imports(),
+			),
+		).toBe("z.email().max(80).meta(_m.email)")
 		expect(schema("u", 'c.text("u", { url: true }).notNull()', "create")).toBe(
 			'z.url().refine((v) => /^https:\\/\\//.test(v), { message: "Must be an HTTPS URL" }).meta(_m.url)',
 		)
@@ -98,11 +117,13 @@ describe("generateFieldSchema: kinds", () => {
 		expect(schema("n", 'c.text("n", { uppercase: true, pattern: /^[A-Z]+$/ }).notNull()', "create")).toBe(
 			"z.string().toUpperCase().min(1).regex(/^[A-Z]+$/).meta(_m.string)",
 		)
-		expect(schema("n", 'c.text("n", { min: 2 }, 10).notNull()', "read", { length: 10 })).toBe(
-			"z.string().min(2).max(10).meta(_m.string)",
-		)
+		expect(
+			generateFieldSchema(fieldOf("n", 'c.text("n", { min: 2 }, 10).notNull()', { length: 10 }), "read", imports()),
+		).toBe("z.string().min(2).max(10).meta(_m.string)")
 	})
+})
 
+describe("generateFieldSchema: ids, typed text and numbers", () => {
 	it("bounds an id-like text column, and uses a typed schema when the column names one", () => {
 		expect(schema("id", 'c.id("usr")', "read")).toContain(".min(1).max(48)")
 		expect(schema("orgId", 'c.text("orgId").notNull()', "create")).toBe(

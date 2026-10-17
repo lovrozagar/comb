@@ -20,10 +20,15 @@ function extractDrizzleHelper(raw: string): string {
  * Extract FK reference info from .references(() => table.column, { onDelete: "cascade" })
  */
 function extractForeignKey(raw: string, fieldName: string): ForeignKeyRef | null {
-	const refMatch = raw.match(/\.references\(\s*\(\)\s*(?::\s*[\w.]+\s*)?=>\s*(\w+)\.(\w+)(?:,\s*\{([^}]*)\})?\)/)
-	if (!refMatch || refMatch[1] === undefined || refMatch[2] === undefined) return null
+	/* the options may be an inline object (whose actions are read) or anything else (which is not) */
+	const refMatch =
+		/\.references\(\s*\(\)\s*(?::\s*[\w.]+\s*)?=>\s*(?<refTable>\w+)\.(?<refColumn>\w+)(?:,\s*\{(?<options>[^}]*)\})?/.exec(
+			raw,
+		)
+	const ref = refMatch?.groups as { options?: string; refColumn: string; refTable: string } | undefined
+	if (ref === undefined) return null
 
-	const optionsStr = refMatch[3] ?? ""
+	const optionsStr = ref.options ?? ""
 	/* Drizzle's referential actions include multi-word forms — "set null",
 	   "set default", "no action" — so \w+ would silently drop three of five. */
 	const onDeleteMatch = optionsStr.match(/onDelete:\s*["']([^"']+)["']/)
@@ -33,8 +38,8 @@ function extractForeignKey(raw: string, fieldName: string): ForeignKeyRef | null
 		column: fieldName,
 		onDelete: onDeleteMatch?.[1],
 		onUpdate: onUpdateMatch?.[1],
-		refColumn: refMatch[2],
-		refTable: refMatch[1],
+		refColumn: ref.refColumn,
+		refTable: ref.refTable,
 	}
 }
 
@@ -55,21 +60,8 @@ export function parseField(key: string, raw: string, identifiers?: IdentifierVal
 	/* c.createdAt and c.updatedAt call .notNull() inside the helper, where the text cannot see it */
 	const isNotNull = /\.notNull\(\)/.test(raw) || isPrimaryKey || /^\s*c\.(?:createdAt|updatedAt)\s*\(/.test(raw)
 	const drizzleHelper = extractDrizzleHelper(raw)
-	const foreignKey = extractForeignKey(raw, key)
+	const fk = extractForeignKey(raw, key)
 	const length = extractLength(raw)
-
-	/* Also detect FK from c.ref helper */
-	let fk = foreignKey
-	if (!fk && /c\.ref[<(]/.test(raw)) {
-		const refHelperMatch = raw.match(/c\.ref[<(].*?\.references\(\s*\(\)\s*(?::\s*[\w.]+\s*)?=>\s*(\w+)\.(\w+)/)
-		if (refHelperMatch && refHelperMatch[1] !== undefined && refHelperMatch[2] !== undefined) {
-			fk = {
-				column: key,
-				refColumn: refHelperMatch[2],
-				refTable: refHelperMatch[1],
-			}
-		}
-	}
 
 	return {
 		constraints,

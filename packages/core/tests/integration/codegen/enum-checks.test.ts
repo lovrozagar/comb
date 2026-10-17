@@ -11,6 +11,7 @@ import type { FieldMeta, TableMeta } from "../../../src/codegen/analyzer-types.t
 import { parseField } from "../../../src/codegen/analyze-field.ts"
 import { generateEnumChecks } from "../../../src/codegen/generators/enum-checks.ts"
 import { libsqlMemory } from "../support/libsql.ts"
+import { testContext } from "../../../src/codegen/generators/__fixtures__/context.ts"
 
 const DIR = path.resolve(import.meta.dirname, `.tmp-dtos/enum-checks-${process.pid}`)
 afterAll(() => fs.rmSync(DIR, { force: true, recursive: true }))
@@ -35,7 +36,7 @@ describe("generateEnumChecks", () => {
 			varName: "item",
 		}
 		const output = path.join(DIR, "enum-checks.gen.ts")
-		generateEnumChecks([table], "x", { output }, DIR)
+		generateEnumChecks(testContext([table], { cwd: DIR, dbName: "x" }), { output })
 		const generated = (await import(output)) as Record<string, (t: Record<string, unknown>) => Array<{ value: SQL }>>
 		const columns = sqliteTable("item", { id: text("id").primaryKey(), status: text("status") })
 		const checks = Object.values(generated).find((v) => typeof v === "function")?.(columns as never) ?? []

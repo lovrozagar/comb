@@ -4,9 +4,9 @@
  * Generates TypeScript types using Drizzle's $inferSelect and $inferInsert
  */
 import path from "node:path"
-import type { TableMeta } from "../analyzer-types.ts"
 import { snakeToPascal } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
+import type { GeneratorContext } from "./context-types.ts"
 
 type RowsConfig = {
 	output: string
@@ -15,12 +15,14 @@ type RowsConfig = {
 /**
  * Generate row types from analyzed tables
  */
-export function generateRows(tables: TableMeta[], tablesPath: string, config: RowsConfig, cwd: string): void {
+export function generateRows(ctx: GeneratorContext, config: RowsConfig): void {
+	const { tables } = ctx.analysis
+	const { cwd, tablesPath } = ctx
 	const outputPath = path.resolve(cwd, config.output)
 
 	if (tables.length === 0) {
-		console.error("Error: No tables found in input file")
-		process.exit(1)
+		ctx.warn("rows: no tables found — skipped")
+		return
 	}
 
 	const outputLines: string[] = []
@@ -54,6 +56,6 @@ export function generateRows(tables: TableMeta[], tablesPath: string, config: Ro
 
 	writeGenFile(outputPath, outputLines.join("\n"), "comb")
 
-	console.log(`Generated rows at: ${outputPath}`)
-	console.log(`Tables: ${tables.length}`)
+	ctx.log(`Generated rows at: ${outputPath}`)
+	ctx.log(`Tables: ${tables.length}`)
 }

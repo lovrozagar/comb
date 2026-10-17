@@ -35,6 +35,15 @@ describe("parseField", () => {
 			refTable: "owner",
 		})
 		expect(parseField("x", 'c.text("x")').foreignKey).toBeNull()
+		expect(parseField("org_id", 'c.ref("org_id")').foreignKey).toBeNull()
+		/* options held in a variable: the target is still read, the actions are not visible */
+		expect(parseField("org_id", 'text("org_id").references(() => org.id, refOptions)').foreignKey).toEqual({
+			column: "org_id",
+			onDelete: undefined,
+			onUpdate: undefined,
+			refColumn: "id",
+			refTable: "org",
+		})
 	})
 })
 

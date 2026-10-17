@@ -5,23 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
 import { generateConstraints } from "./constraints.ts"
 import { generateTranslations } from "./translations.ts"
+import { type TestContext, testContext } from "./__fixtures__/context.ts"
 
-describe("generateTranslations", () => {
-	let tmpDir: string
-
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-translations-"))
-	})
-
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
-
-	function setupConstraints(): string {
-		const tablesFile = path.join(tmpDir, "db.test.tables.ts")
-		fs.writeFileSync(
-			tablesFile,
-			`
+const TABLES = `
 import { sqliteTable as createTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 const c = {
 	id: () => text("id").primaryKey(),
@@ -38,48 +24,82 @@ export const post = createTable("post", {
 	id: c.id(),
 	user_id: c.ref("user_id").references(() => user.id).notNull(),
 })
-`,
-		)
-		const analysis = analyze(tablesFile)
+`
+
+let tmpDir: string
+
+beforeEach(() => {
+	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-translations-"))
+})
+
+afterEach(() => {
+	fs.rmSync(tmpDir, { force: true, recursive: true })
+})
+
+/** Translations from a tables file holding `body`, under the file prefix the CLI uses */
+function fromTables(body = TABLES): TestContext {
+	const tablesFile = path.join(tmpDir, "db.test.tables.ts")
+	fs.writeFileSync(tablesFile, body)
+	const ctx = testContext(analyze(tablesFile), { cwd: tmpDir })
+	generateTranslations(ctx, { baseDir: tmpDir, filePrefix: "db.test" })
+	return ctx
+}
+
+const read = (...parts: string[]) => fs.readFileSync(path.join(tmpDir, ...parts), "utf-8")
+const english = (prefix: string) => read("translations", "error-keys", `${prefix}.error-keys.en.gen.ts`)
+
+const HEAD = `import { sql } from "drizzle-orm"
+import { check, sqliteTable as createTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
+`
+
+describe("generateTranslations", () => {
+	it("writes the error keys file and an en-US translation for every key the constraint map declares", () => {
+		const ctx = fromTables()
+
+		const keys = read("db.test.error-keys.gen.ts")
+		expect(keys).toContain("TEST_DB_ERROR_KEYS")
+		expect(keys).toContain("type TestDbErrorKey")
+		const en = english("db.test")
+		expect(en).toContain('import type { TEST_DB_ERROR_KEYS } from "../../db.test.error-keys.gen"')
+		expect(en).toContain("TEST_DB_ERROR_KEYS_EN")
+		expect(en).toContain('user_email_duplicate: "A record with this email already exists"')
+		expect(en).toContain('user_id_duplicate: "Record with this ID already exists"')
+		expect(en).toContain('post_user_id_reference_not_found: "Referenced record does not exist"')
+		expect(ctx.logged).toEqual(["Generated error translations for test database", "Error keys: 4"])
+	})
+
+	it("declares exactly the keys the constraints generator writes", () => {
+		fromTables()
 		const constraintsPath = path.join(tmpDir, "db.test.constraints.gen.ts")
-		generateConstraints(analysis.tables, "test", { output: constraintsPath }, tmpDir)
-		return constraintsPath
-	}
-
-	it("generates error keys file from constraints", () => {
-		const constraintsPath = setupConstraints()
-		generateTranslations(constraintsPath, { baseDir: tmpDir }, tmpDir)
-
-		const errorsFile = path.join(tmpDir, "db.test.error-keys.gen.ts")
-		expect(fs.existsSync(errorsFile)).toBe(true)
-
-		const content = fs.readFileSync(errorsFile, "utf-8")
-		expect(content).toContain("TEST_DB_ERROR_KEYS")
-		expect(content).toContain("type TestDbErrorKey")
+		generateConstraints(testContext(analyze(path.join(tmpDir, "db.test.tables.ts")), { cwd: tmpDir }), {
+			output: constraintsPath,
+		})
+		const inMap = [...read("db.test.constraints.gen.ts").matchAll(/errorKey: "([^"]+)"/g)].map((m) => m[1]).sort()
+		const inKeys = [...read("db.test.error-keys.gen.ts").matchAll(/^\t(\w+): /gm)].map((m) => m[1])
+		expect(inKeys).toEqual(inMap)
 	})
 
-	it("generates EN translation file", () => {
-		const constraintsPath = setupConstraints()
-		generateTranslations(constraintsPath, { baseDir: tmpDir }, tmpDir)
-
-		const translationFile = path.join(tmpDir, "translations", "error-keys", "db.test.error-keys.en.gen.ts")
-		expect(fs.existsSync(translationFile)).toBe(true)
-
-		const content = fs.readFileSync(translationFile, "utf-8")
-		expect(content).toContain("TEST_DB_ERROR_KEYS_EN")
-		expect(content).toContain("already exists")
+	it("names a multi-word unique column in full, as its constraint's cause does", () => {
+		fromTables(`${HEAD}export const doc = createTable("doc", { id: text("id").primaryKey(), created_by: text("created_by") }, (t) => [
+	uniqueIndex("doc_created_by_unique").on(t.created_by),
+])
+`)
+		expect(english("db.test")).toContain('doc_created_by_duplicate: "A record with this created by already exists"')
 	})
 
-	it("derives human-readable messages from error keys", () => {
-		const constraintsPath = setupConstraints()
-		generateTranslations(constraintsPath, { baseDir: tmpDir }, tmpDir)
+	it("falls back to a generic message for keys with no convention, and quotes keys that are not identifiers", () => {
+		fromTables(`${HEAD}export const auditLog = createTable("audit-log", { body: text("body") }, () => [
+	check("body_size", sql\`length(body) <= 2048\`),
+])
+`)
+		const en = english("db.test")
+		expect(en).toContain('"audit-log_body_size_failed": "An error occurred. Please try again."')
+		expect(read("db.test.error-keys.gen.ts")).toContain('"audit-log_body_size_failed": "audit-log_body_size_failed"')
+	})
 
-		const translationFile = path.join(tmpDir, "translations", "error-keys", "db.test.error-keys.en.gen.ts")
-		const content = fs.readFileSync(translationFile, "utf-8")
-
-		/* _duplicate keys -> "A record with this X already exists" */
-		expect(content).toContain("already exists")
-		/* _reference_not_found keys -> "Referenced record does not exist" */
-		expect(content).toContain("Referenced record does not exist")
+	it("warns and writes nothing when no constraint declares an error key", () => {
+		const ctx = fromTables(`${HEAD}export const note = createTable("note", { body: text("body") })\n`)
+		expect(ctx.warned).toEqual(["Warning: no constraint declares an error key; translations skipped"])
+		expect(fs.existsSync(path.join(tmpDir, "db.test.error-keys.gen.ts"))).toBe(false)
 	})
 })

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
 import { deriveEntityMeta } from "../entity-meta.ts"
 import { buildManifest, generateManifest, MANIFEST_VERSION } from "./manifest.ts"
+import { testContext } from "./__fixtures__/context.ts"
 
 const PRELUDE = `
 import { sqliteTable as createTable, text, integer, uniqueIndex, check, primaryKey } from "drizzle-orm/sqlite-core"
@@ -44,29 +45,34 @@ export const post_tag = createTable("post_tag", {
 }, (t) => [primaryKey({ columns: [t.post_id, t.tag_id] })])
 `
 
-describe("entity manifest", () => {
-	let tmpDir: string
-
+/** A fresh temp directory per test, removed after it. */
+function useTmpDir(prefix: string): () => string {
+	let dir = ""
 	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-manifest-"))
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
 	})
+	afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
+	return () => dir
+}
 
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
-
-	function analyzed(source = SCHEMA) {
-		const fp = path.join(tmpDir, "db.test.tables.ts")
+/** A temp directory per test, and readers that analyze a schema written into it. */
+function manifestFixture() {
+	const tmpDir = useTmpDir("comb-manifest-")
+	const analyzed = (source = SCHEMA) => {
+		const fp = path.join(tmpDir(), "db.test.tables.ts")
 		fs.writeFileSync(fp, PRELUDE + source)
 		return analyze(fp)
 	}
-
 	const manifestOf = (source = SCHEMA) => {
 		const analysis = analyzed(source)
 		return buildManifest(analysis.tables, analysis.dbName)
 	}
-
 	const entity = (name: string, source = SCHEMA) => manifestOf(source).entities.find((e) => e.name === name)!
+	return { analyzed, entity, manifestOf, tmpDir }
+}
+
+describe("entity manifest — entities and identity", () => {
+	const { analyzed, entity, manifestOf } = manifestFixture()
 
 	it("carries a version and the database name", () => {
 		const manifest = manifestOf()
@@ -78,6 +84,12 @@ describe("entity manifest", () => {
 		const names = manifestOf().entities.map((e) => e.name)
 		expect(names).toEqual([...names].sort())
 		expect(names).toEqual(["author", "org", "post", "post_tag"])
+	})
+
+	it("keeps declaration order between entities sharing a name", () => {
+		const [first] = analyzed().tables
+		const names = buildManifest([first!, { ...first!, varName: "twin" }], "test").entities.map((e) => e.varName)
+		expect(names).toEqual([first!.varName, "twin"])
 	})
 
 	it("names the identity and the id prefix", () => {
@@ -92,6 +104,10 @@ describe("entity manifest", () => {
 		expect(join.compositePrimaryKey).toBe(true)
 		expect(join.identity).toBeNull()
 	})
+})
+
+describe("entity manifest — columns", () => {
+	const { entity } = manifestFixture()
 
 	it("lists every column with the helper that declared it", () => {
 		const post = entity("post")
@@ -127,6 +143,15 @@ describe("entity manifest", () => {
 		expect(byName["title"]!.private).toBe(false)
 	})
 
+	it("reports the declared tenant column", () => {
+		expect(entity("post").tenantColumn).toBe("org_id")
+		expect(entity("author").tenantColumn).toBeNull()
+	})
+})
+
+describe("entity manifest — agreement with the schema stamp", () => {
+	const { analyzed, entity } = manifestFixture()
+
 	it("agrees with the schema stamp on generated, immutable, softDelete and tenantColumn", () => {
 		/* The manifest is a projection of the same derivation, not a second one. */
 		const analysis = analyzed()
@@ -157,11 +182,10 @@ describe("entity manifest", () => {
 			expect(meta.uniqueIndexes, `manifest invented index ${idx.name}`).toContainEqual(idx)
 		}
 	})
+})
 
-	it("reports the declared tenant column", () => {
-		expect(entity("post").tenantColumn).toBe("org_id")
-		expect(entity("author").tenantColumn).toBeNull()
-	})
+describe("entity manifest — machines and relations", () => {
+	const { entity } = manifestFixture()
 
 	it("carries the full machine on the declaring column, including transitions", () => {
 		const post = entity(
@@ -186,6 +210,26 @@ export const job = createTable("job", {
 		expect(post.columns.find((c) => c.name === "id")!.states).toBeNull()
 	})
 
+	it("reports a machine without terminal states as an empty terminal list", () => {
+		const job = entity(
+			"job",
+			`export const job = createTable("job", { id: c.id("job"), status: c.enum("status", ["a", "b"], { initial: "a" }) })`,
+		)
+		expect(job.columns.find((c) => c.name === "status")!.states).toEqual({
+			initial: "a",
+			terminal: [],
+			transitions: null,
+		})
+	})
+
+	it("reports a reference without referential actions as null actions", () => {
+		const source = `export const org = createTable("org", { id: c.id("org") })
+export const team = createTable("team", { id: c.id("tem"), org_id: c.ref("org_id").references(() => org.id) })`
+		expect(entity("team", source).relations).toEqual([
+			{ column: "org_id", onDelete: null, onUpdate: null, refColumn: "id", table: "org" },
+		])
+	})
+
 	it("lists relations with their referential actions", () => {
 		const relations = entity("post").relations
 		expect(relations).toEqual([
@@ -193,6 +237,10 @@ export const job = createTable("job", {
 			{ column: "author_id", onDelete: "set null", onUpdate: null, refColumn: "id", table: "author" },
 		])
 	})
+})
+
+describe("entity manifest — constraints and JSON", () => {
+	const { entity, manifestOf } = manifestFixture()
 
 	it("carries unique indexes and check constraints", () => {
 		const post = entity("post")
@@ -204,40 +252,41 @@ export const job = createTable("job", {
 		const manifest = manifestOf()
 		expect(JSON.parse(JSON.stringify(manifest))).toEqual(manifest)
 	})
+})
 
-	describe("written output", () => {
-		const outPath = () => path.join(tmpDir, "db.test.manifest.gen.json")
+describe("entity manifest — written output", () => {
+	const { analyzed, tmpDir } = manifestFixture()
+	const outPath = () => path.join(tmpDir(), "db.test.manifest.gen.json")
 
-		function write(source = SCHEMA) {
-			const analysis = analyzed(source)
-			generateManifest(analysis.tables, analysis.dbName, { output: outPath() }, tmpDir)
-			return JSON.parse(fs.readFileSync(outPath(), "utf-8")) as Record<string, unknown>
-		}
+	function write(source = SCHEMA) {
+		const analysis = analyzed(source)
+		generateManifest(testContext(analysis, { cwd: tmpDir() }), { output: outPath() })
+		return JSON.parse(fs.readFileSync(outPath(), "utf-8")) as Record<string, unknown>
+	}
 
-		it("writes valid JSON with a checksum header field", () => {
-			const written = write()
-			expect(typeof written["_generated"]).toBe("string")
-			expect(written["_generated"]).toContain("comb checksum:")
-			expect(written["v"]).toBe(MANIFEST_VERSION)
-		})
+	it("writes valid JSON with a checksum header field", () => {
+		const written = write()
+		expect(typeof written["_generated"]).toBe("string")
+		expect(written["_generated"]).toContain("comb checksum:")
+		expect(written["v"]).toBe(MANIFEST_VERSION)
+	})
 
-		it("is readable without parsing TypeScript", () => {
-			const written = write() as unknown as { entities: { name: string }[] }
-			expect(written.entities.map((e) => e.name)).toContain("post")
-		})
+	it("is readable without parsing TypeScript", () => {
+		const written = write() as unknown as { entities: { name: string }[] }
+		expect(written.entities.map((e) => e.name)).toContain("post")
+	})
 
-		it("regenerates byte-identically for an unchanged schema", () => {
-			write()
-			const first = fs.readFileSync(outPath(), "utf-8")
-			write()
-			expect(fs.readFileSync(outPath(), "utf-8")).toBe(first)
-		})
+	it("regenerates byte-identically for an unchanged schema", () => {
+		write()
+		const first = fs.readFileSync(outPath(), "utf-8")
+		write()
+		expect(fs.readFileSync(outPath(), "utf-8")).toBe(first)
+	})
 
-		it("changes when the schema changes", () => {
-			write()
-			const before = fs.readFileSync(outPath(), "utf-8")
-			write(`${SCHEMA}\nexport const tag = createTable("tag", { id: c.id("tag") })`)
-			expect(fs.readFileSync(outPath(), "utf-8")).not.toBe(before)
-		})
+	it("changes when the schema changes", () => {
+		write()
+		const before = fs.readFileSync(outPath(), "utf-8")
+		write(`${SCHEMA}\nexport const tag = createTable("tag", { id: c.id("tag") })`)
+		expect(fs.readFileSync(outPath(), "utf-8")).not.toBe(before)
 	})
 })

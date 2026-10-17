@@ -19,37 +19,41 @@ function fieldOf(table: TableMeta, column: string): FieldMeta | undefined {
 	return table.fields.find((f) => f.name === column) ?? table.fields.find((f) => f.sqlName === column)
 }
 
-/** Validate FTS config against analyzed tables, throw on errors, warn on non-text columns */
-function validateFtsConfig(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>): void {
-	const tableMap = new Map(tables.map((t) => [t.sqlName, t]))
+// lookup-table: the helpers whose values FTS5 indexes as their text form
+const COERCED_HELPERS = /* @__PURE__ */ new Set(["boolean", "integer", "serialId", "timestamp"])
 
+/** Throw on a column the table lacks; warn on a repeat or a column FTS coerces to text. */
+function validateColumns(table: TableMeta, config: FtsTableConfig, warn: (line: string) => void): void {
+	const tableName = table.sqlName
+	const seen = new Set<string>()
+	for (const col of config.columns) {
+		const field = fieldOf(table, col)
+		if (field === undefined) {
+			throw new Error(`FTS config error: column "${col}" not found in table "${tableName}"`)
+		}
+		if (seen.has(col)) warn(`  fts warning: duplicate column "${col}" in table "${tableName}" — skipped`)
+		seen.add(col)
+		if (COERCED_HELPERS.has(field.drizzleHelper)) {
+			warn(
+				`  fts warning: column "${col}" in table "${tableName}" is type ${field.drizzleHelper}, will be coerced to text for FTS indexing`,
+			)
+		}
+	}
+}
+
+/** Validate FTS config against analyzed tables, throw on errors, warn on non-text columns */
+function validateFtsConfig(
+	tables: TableMeta[],
+	ftsConfig: Record<string, FtsTableConfig>,
+	warn: (line: string) => void,
+): void {
+	const tableMap = new Map(tables.map((t) => [t.sqlName, t]))
 	for (const [tableName, config] of Object.entries(ftsConfig)) {
 		const table = tableMap.get(tableName)
 		if (!table) {
 			throw new Error(`FTS config error: table "${tableName}" not found in analyzed schema`)
 		}
-
-		const seen = new Set<string>()
-
-		for (const col of config.columns) {
-			if (fieldOf(table, col) === undefined) {
-				throw new Error(`FTS config error: column "${col}" not found in table "${tableName}"`)
-			}
-			if (seen.has(col)) {
-				console.warn(`  fts warning: duplicate column "${col}" in table "${tableName}" — skipped`)
-			}
-			seen.add(col)
-
-			const field = fieldOf(table, col)
-			if (field && field.drizzleHelper !== "text" && field.drizzleHelper !== "createdAt") {
-				const helper = field.drizzleHelper
-				if (helper === "integer" || helper === "boolean" || helper === "timestamp" || helper === "serialId") {
-					console.warn(
-						`  fts warning: column "${col}" in table "${tableName}" is type ${helper}, will be coerced to text for FTS indexing`,
-					)
-				}
-			}
-		}
+		validateColumns(table, config, warn)
 	}
 }
 
@@ -67,11 +71,15 @@ function dedup(columns: string[]): string[] {
 }
 
 /** Generate FTS5 SQL for all configured tables. Returns empty string if nothing to generate. */
-function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>): string {
+function generateFtsSql(
+	tables: TableMeta[],
+	ftsConfig: Record<string, FtsTableConfig>,
+	warn: (line: string) => void,
+): string {
 	const entries = Object.entries(ftsConfig)
 	if (entries.length === 0) return ""
 
-	validateFtsConfig(tables, ftsConfig)
+	validateFtsConfig(tables, ftsConfig, warn)
 
 	const lines: string[] = []
 
@@ -124,5 +132,5 @@ function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableC
 	return lines.join("\n")
 }
 
-export { generateFtsSql }
+export { dedup, generateFtsSql }
 export type { FtsTableConfig }

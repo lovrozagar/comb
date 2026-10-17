@@ -1,9 +1,10 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { generateEnumChecks } from "./enum-checks.ts"
+import { testContext } from "./__fixtures__/context.ts"
 
 function makeField(overrides: Partial<FieldMeta> & { name: string }): FieldMeta {
 	return {
@@ -51,33 +52,40 @@ function makeTable(overrides: Partial<TableMeta> & { sqlName: string; varName: s
 	}
 }
 
-describe("generateEnumChecks", () => {
-	let tmpDir: string
+/** A table named `name` (SQL and variable) holding `fields`. */
+function enumTable(name: string, fields: FieldMeta[]): TableMeta {
+	return makeTable({ fields, sqlName: name, varName: name })
+}
 
+/** A fresh temp directory per test, removed after it. */
+function useTmpDir(prefix: string): () => string {
+	let dir = ""
 	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-enum-checks-"))
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
 	})
+	afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
+	return () => dir
+}
 
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
+/** Run the generator in `dir`; the file it wrote (null when it wrote none) and what it logged. */
+function generateIn(dir: string, tables: TableMeta[]): { content: string | null; logged: string[] } {
+	const output = path.join(dir, "enum-checks.gen.ts")
+	const ctx = testContext(tables, { cwd: dir, dbName: "core" })
+	generateEnumChecks(ctx, { output })
+	return { content: fs.existsSync(output) ? fs.readFileSync(output, "utf-8") : null, logged: ctx.logged }
+}
+
+describe("generateEnumChecks — the generated checks", () => {
+	const tmpDir = useTmpDir("comb-gen-enum-checks-")
+	const generate = (tables: TableMeta[]) => generateIn(tmpDir(), tables).content ?? ""
 
 	it("generates check functions for tables with enum fields", () => {
-		const tables: TableMeta[] = [
-			makeTable({
-				fields: [
-					makeField({ isPrimaryKey: true, name: "id" }),
-					makeField({ enumValues: ["admin", "user", "guest"], name: "role" }),
-				],
-				sqlName: "users",
-				varName: "users",
-			}),
-		]
-		const output = path.join(tmpDir, "enum-checks.gen.ts")
-
-		generateEnumChecks(tables, "core", { output }, tmpDir)
-
-		const content = fs.readFileSync(output, "utf-8")
+		const content = generate([
+			enumTable("users", [
+				makeField({ isPrimaryKey: true, name: "id" }),
+				makeField({ enumValues: ["admin", "user", "guest"], name: "role" }),
+			]),
+		])
 		expect(content).toContain("usersEnumChecks")
 		expect(content).toContain("users_role_enum")
 		expect(content).toContain("'admin', 'user', 'guest'")
@@ -85,39 +93,13 @@ describe("generateEnumChecks", () => {
 		expect(content).toContain('import { sql } from "drizzle-orm"')
 	})
 
-	it("skips tables with no enum fields", () => {
-		const tables: TableMeta[] = [
-			makeTable({
-				fields: [makeField({ isPrimaryKey: true, name: "id" }), makeField({ name: "name" })],
-				sqlName: "users",
-				varName: "users",
-			}),
-		]
-		const output = path.join(tmpDir, "enum-checks.gen.ts")
-
-		const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {})
-		generateEnumChecks(tables, "core", { output }, tmpDir)
-		consoleSpy.mockRestore()
-
-		expect(fs.existsSync(output)).toBe(false)
-	})
-
 	it("handles multiple enum fields per table", () => {
-		const tables: TableMeta[] = [
-			makeTable({
-				fields: [
-					makeField({ enumValues: ["admin", "user"], name: "role" }),
-					makeField({ enumValues: ["active", "inactive"], name: "status" }),
-				],
-				sqlName: "users",
-				varName: "users",
-			}),
-		]
-		const output = path.join(tmpDir, "enum-checks.gen.ts")
-
-		generateEnumChecks(tables, "core", { output }, tmpDir)
-
-		const content = fs.readFileSync(output, "utf-8")
+		const content = generate([
+			enumTable("users", [
+				makeField({ enumValues: ["admin", "user"], name: "role" }),
+				makeField({ enumValues: ["active", "inactive"], name: "status" }),
+			]),
+		])
 		expect(content).toContain("users_role_enum")
 		expect(content).toContain("users_status_enum")
 		expect(content).toContain("'admin', 'user'")
@@ -125,111 +107,55 @@ describe("generateEnumChecks", () => {
 	})
 
 	it("handles multiple tables", () => {
-		const tables: TableMeta[] = [
-			makeTable({
-				fields: [makeField({ enumValues: ["admin", "user"], name: "role" })],
-				sqlName: "users",
-				varName: "users",
-			}),
-			makeTable({
-				fields: [makeField({ enumValues: ["draft", "published"], name: "status" })],
-				sqlName: "posts",
-				varName: "posts",
-			}),
-		]
-		const output = path.join(tmpDir, "enum-checks.gen.ts")
-
-		generateEnumChecks(tables, "core", { output }, tmpDir)
-
-		const content = fs.readFileSync(output, "utf-8")
+		const content = generate([
+			enumTable("users", [makeField({ enumValues: ["admin", "user"], name: "role" })]),
+			enumTable("posts", [makeField({ enumValues: ["draft", "published"], name: "status" })]),
+		])
 		expect(content).toContain("usersEnumChecks")
 		expect(content).toContain("postsEnumChecks")
 	})
 
 	it("escapes single quotes in enum values", () => {
-		const tables: TableMeta[] = [
-			makeTable({
-				fields: [makeField({ enumValues: ["it's", "won't"], name: "label" })],
-				sqlName: "items",
-				varName: "items",
-			}),
-		]
-		const output = path.join(tmpDir, "enum-checks.gen.ts")
-
-		generateEnumChecks(tables, "core", { output }, tmpDir)
-
-		const content = fs.readFileSync(output, "utf-8")
+		const content = generate([enumTable("items", [makeField({ enumValues: ["it's", "won't"], name: "label" })])])
 		expect(content).toContain("it''s")
 		expect(content).toContain("won''t")
 	})
 
 	it("converts snake_case varName to camelCase for function name", () => {
-		const tables: TableMeta[] = [
-			makeTable({
-				fields: [makeField({ enumValues: ["a", "b"], name: "type" })],
-				sqlName: "user_accounts",
-				varName: "user_accounts",
-			}),
-		]
-		const output = path.join(tmpDir, "enum-checks.gen.ts")
-
-		generateEnumChecks(tables, "core", { output }, tmpDir)
-
-		const content = fs.readFileSync(output, "utf-8")
+		const content = generate([enumTable("user_accounts", [makeField({ enumValues: ["a", "b"], name: "type" })])])
 		expect(content).toContain("userAccountsEnumChecks")
 	})
 
+	it("includes auto-generated header comment", () => {
+		const content = generate([enumTable("t", [makeField({ enumValues: ["x"], name: "t" })])])
+		expect(content).toContain("@generated by comb")
+		expect(content).toContain("do not edit")
+	})
+})
+
+describe("generateEnumChecks — fields without values", () => {
+	const tmpDir = useTmpDir("comb-gen-enum-checks-")
+
+	it("skips tables with no enum fields, and says so", () => {
+		const { content, logged } = generateIn(tmpDir(), [
+			enumTable("users", [makeField({ isPrimaryKey: true, name: "id" }), makeField({ name: "name" })]),
+		])
+		expect(content).toBeNull()
+		expect(logged).toEqual(["No enum fields found in core — skipping enum-checks generation"])
+	})
+
 	it("ignores fields with null enumValues", () => {
-		const tables: TableMeta[] = [
-			makeTable({
-				fields: [
-					makeField({ enumName: "MyEnum", enumValues: null, name: "role" }),
-					makeField({ enumValues: ["a"], name: "status" }),
-				],
-				sqlName: "users",
-				varName: "users",
-			}),
-		]
-		const output = path.join(tmpDir, "enum-checks.gen.ts")
-
-		generateEnumChecks(tables, "core", { output }, tmpDir)
-
-		const content = fs.readFileSync(output, "utf-8")
+		const { content } = generateIn(tmpDir(), [
+			enumTable("users", [
+				makeField({ enumName: "MyEnum", enumValues: null, name: "role" }),
+				makeField({ enumValues: ["a"], name: "status" }),
+			]),
+		])
 		expect(content).not.toContain("users_role_enum")
 		expect(content).toContain("users_status_enum")
 	})
 
 	it("ignores fields with empty enumValues array", () => {
-		const tables: TableMeta[] = [
-			makeTable({
-				fields: [makeField({ enumValues: [], name: "role" })],
-				sqlName: "users",
-				varName: "users",
-			}),
-		]
-		const output = path.join(tmpDir, "enum-checks.gen.ts")
-
-		const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {})
-		generateEnumChecks(tables, "core", { output }, tmpDir)
-		consoleSpy.mockRestore()
-
-		expect(fs.existsSync(output)).toBe(false)
-	})
-
-	it("includes auto-generated header comment", () => {
-		const tables: TableMeta[] = [
-			makeTable({
-				fields: [makeField({ enumValues: ["x"], name: "t" })],
-				sqlName: "t",
-				varName: "t",
-			}),
-		]
-		const output = path.join(tmpDir, "enum-checks.gen.ts")
-
-		generateEnumChecks(tables, "core", { output }, tmpDir)
-
-		const content = fs.readFileSync(output, "utf-8")
-		expect(content).toContain("@generated by comb")
-		expect(content).toContain("do not edit")
+		expect(generateIn(tmpDir(), [enumTable("users", [makeField({ enumValues: [], name: "role" })])]).content).toBeNull()
 	})
 })

@@ -6,10 +6,11 @@
 import path from "node:path"
 import { writeGenFile } from "../utils/fs.ts"
 import { extractDbName, getTablesImportPath } from "../utils/ts-morph.ts"
+import type { GeneratorContext } from "./context-types.ts"
 
 type OrmDialect = "sqlite" | "postgres"
-type SqliteDriver = "d1" | "turso" | "libsql" | "bun-sqlite" | "better-sqlite3"
-type PostgresDriver = "neon" | "node-postgres" | "postgres-js"
+type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso"
+type PostgresDriver = "neon"
 
 type OrmConfig = {
 	dialect: OrmDialect
@@ -19,234 +20,206 @@ type OrmConfig = {
 	relationsOutput?: string
 }
 
-function generateTursoOrm(dbName: string, tablesImport: string, relationsImport: string): string {
-	const pascalName = dbName.charAt(0).toUpperCase() + dbName.slice(1)
-	const schemaImport = `${dbName}DbSchema`
-	const lines: string[] = []
+/** The names every client file is built from */
+type OrmNames = { dbName: string; pascal: string; relationsImport: string; schemaImport: string; tablesImport: string }
 
-	lines.push(`import type { Client as HttpClient } from "@libsql/client/http"`)
-	lines.push(`import { drizzle as drizzleHttp } from "drizzle-orm/libsql/http"`)
-	lines.push(`import { drizzle as drizzleWeb } from "drizzle-orm/libsql/web"`)
-	lines.push(`import { relations } from "${relationsImport}"`)
-	lines.push(`import type * as ${schemaImport} from "${tablesImport}"`)
-	lines.push("")
-	lines.push(`const $clientType = () => drizzleWeb({ connection: { url: "" }, relations })`)
-	lines.push("")
-	lines.push(`const ${dbName}DbIsolateCache = new Map<string, ReturnType<typeof $clientType>>()`)
-	lines.push("")
-	lines.push(`function create${pascalName}Db(options: { authToken: string; transport?: HttpClient; url: string }) {`)
-	lines.push("	const cacheKey = options.transport ? `do:${options.url}` : `http:${options.url}:${options.authToken}`")
-	lines.push(`	const cached = ${dbName}DbIsolateCache.get(cacheKey)`)
-	lines.push("	if (cached) return cached")
-	lines.push("")
-	lines.push("	const client = options.transport")
-	lines.push(`		? drizzleHttp({ client: options.transport, relations })`)
-	lines.push(`		: drizzleHttp({ connection: { authToken: options.authToken, url: options.url }, relations })`)
-	lines.push("")
-	lines.push(`	${dbName}DbIsolateCache.set(cacheKey, client)`)
-	lines.push("	return client")
-	lines.push("}")
-	lines.push("")
-	lines.push(`function create${pascalName}DbHttp(url: string, authToken: string) {`)
-	lines.push(`	return create${pascalName}Db({ authToken, url })`)
-	lines.push("}")
-	lines.push("")
-	lines.push(`function create${pascalName}DbWeb(url: string, authToken: string) {`)
-	lines.push("	const cacheKey = `web:${url}:${authToken}`")
-	lines.push(`	const cached = ${dbName}DbIsolateCache.get(cacheKey)`)
-	lines.push("	if (cached) return cached")
-	lines.push("")
-	lines.push("	const client = drizzleWeb({")
-	lines.push("		connection: { authToken, url },")
-	lines.push("		relations,")
-	lines.push("	})")
-	lines.push("")
-	lines.push(`	${dbName}DbIsolateCache.set(cacheKey, client)`)
-	lines.push("	return client")
-	lines.push("}")
-	lines.push("")
-	lines.push(`type ${pascalName}Db = ReturnType<typeof create${pascalName}Db>`)
-	lines.push(`type ${pascalName}DbHttp = ReturnType<typeof create${pascalName}DbHttp>`)
-	lines.push(`type ${pascalName}DbWeb = ReturnType<typeof create${pascalName}DbWeb>`)
-	lines.push(`type ${pascalName}Schema = typeof ${schemaImport}`)
-	lines.push("")
-	lines.push("export {")
-	lines.push(`	create${pascalName}Db,`)
-	lines.push(`	create${pascalName}DbHttp,`)
-	lines.push(`	create${pascalName}DbWeb,`)
-	lines.push(`	type ${pascalName}Db,`)
-	lines.push(`	type ${pascalName}DbHttp,`)
-	lines.push(`	type ${pascalName}DbWeb,`)
-	lines.push(`	type ${pascalName}Schema,`)
-	lines.push("}")
-	lines.push("")
-
-	return lines.join("\n")
+/** The relations and schema imports every client file ends its import block with */
+function schemaImports(n: OrmNames): string[] {
+	return [
+		`import { relations } from "${n.relationsImport}"`,
+		`import type * as ${n.schemaImport} from "${n.tablesImport}"`,
+	]
 }
 
-function generateLibsqlOrm(dbName: string, tablesImport: string, relationsImport: string): string {
-	const pascalName = dbName.charAt(0).toUpperCase() + dbName.slice(1)
-	const schemaImport = `${dbName}DbSchema`
-	const lines: string[] = []
-
-	lines.push(`import { createClient } from "@libsql/client"`)
-	lines.push(`import { drizzle } from "drizzle-orm/libsql"`)
-	lines.push(`import { relations } from "${relationsImport}"`)
-	lines.push(`import type * as ${schemaImport} from "${tablesImport}"`)
-	lines.push("")
-	lines.push(`function create${pascalName}Db(url: string) {`)
-	lines.push("	const client = createClient({ url })")
-	lines.push(`	return drizzle({ client, relations })`)
-	lines.push("}")
-	lines.push("")
-	lines.push(`type ${pascalName}Db = ReturnType<typeof create${pascalName}Db>`)
-	lines.push(`type ${pascalName}Schema = typeof ${schemaImport}`)
-	lines.push("")
-	lines.push(`export { create${pascalName}Db, type ${pascalName}Db, type ${pascalName}Schema }`)
-	lines.push("")
-
-	return lines.join("\n")
+/** The type aliases and export block for the factories named `create<Pascal><kind>` */
+function exportBlock(n: OrmNames, kinds: string[]): string[] {
+	return [
+		...kinds.map((kind) => `type ${n.pascal}${kind} = ReturnType<typeof create${n.pascal}${kind}>`),
+		`type ${n.pascal}Schema = typeof ${n.schemaImport}`,
+		"",
+		"export {",
+		...kinds.map((kind) => `	create${n.pascal}${kind},`),
+		...kinds.map((kind) => `	type ${n.pascal}${kind},`),
+		`	type ${n.pascal}Schema,`,
+		"}",
+		"",
+	]
 }
 
-function generateBunSqliteOrm(dbName: string, tablesImport: string, relationsImport: string): string {
-	const pascalName = dbName.charAt(0).toUpperCase() + dbName.slice(1)
-	const schemaImport = `${dbName}DbSchema`
-	const lines: string[] = []
-
-	lines.push(`import { Database } from "bun:sqlite"`)
-	lines.push(`import { drizzle } from "drizzle-orm/bun-sqlite"`)
-	lines.push(`import { relations } from "${relationsImport}"`)
-	lines.push(`import type * as ${schemaImport} from "${tablesImport}"`)
-	lines.push("")
-	lines.push(`function create${pascalName}Db(path: string) {`)
-	lines.push("	const sqlite = new Database(path)")
-	lines.push(`	return drizzle({ client: sqlite, relations })`)
-	lines.push("}")
-	lines.push("")
-	lines.push(`type ${pascalName}Db = ReturnType<typeof create${pascalName}Db>`)
-	lines.push(`type ${pascalName}Schema = typeof ${schemaImport}`)
-	lines.push("")
-	lines.push(`export { create${pascalName}Db, type ${pascalName}Db, type ${pascalName}Schema }`)
-	lines.push("")
-
-	return lines.join("\n")
+/** A file exporting one `create<Pascal>Db` factory: driver imports, the factory, then its types */
+function singleClientFile(n: OrmNames, driverImports: string[], factory: string[]): string {
+	return [
+		...driverImports,
+		...schemaImports(n),
+		"",
+		...factory,
+		"",
+		`type ${n.pascal}Db = ReturnType<typeof create${n.pascal}Db>`,
+		`type ${n.pascal}Schema = typeof ${n.schemaImport}`,
+		"",
+		`export { create${n.pascal}Db, type ${n.pascal}Db, type ${n.pascal}Schema }`,
+		"",
+	].join("\n")
 }
 
-function generateD1Orm(dbName: string, tablesImport: string, relationsImport: string): string {
-	const pascalName = dbName.charAt(0).toUpperCase() + dbName.slice(1)
-	const schemaImport = `${dbName}DbSchema`
-	const lines: string[] = []
-
-	lines.push(`import type { AnyD1Database } from "drizzle-orm/d1"`)
-	lines.push(`import { drizzle } from "drizzle-orm/d1"`)
-	lines.push(`import { relations } from "${relationsImport}"`)
-	lines.push(`import type * as ${schemaImport} from "${tablesImport}"`)
-	lines.push("")
-	lines.push(`function create${pascalName}Db(d1: AnyD1Database) {`)
-	lines.push(`	return drizzle(d1, { relations })`)
-	lines.push("}")
-	lines.push("")
-	lines.push(`type ${pascalName}Db = ReturnType<typeof create${pascalName}Db>`)
-	lines.push(`type ${pascalName}Schema = typeof ${schemaImport}`)
-	lines.push("")
-	lines.push(`export { create${pascalName}Db, type ${pascalName}Db, type ${pascalName}Schema }`)
-	lines.push("")
-
-	return lines.join("\n")
+/** The rest of a cached factory: return the client cached under `cacheKey`, or build and cache one */
+function cachedBody(n: OrmNames, cacheKey: string, build: string[]): string[] {
+	return [
+		`	const cached = ${n.dbName}DbIsolateCache.get(${cacheKey})`,
+		"	if (cached) return cached",
+		"",
+		...build,
+		"",
+		`	${n.dbName}DbIsolateCache.set(${cacheKey}, client)`,
+		"	return client",
+		"}",
+	]
 }
 
-function generateNeonOrm(dbName: string, tablesImport: string, relationsImport: string): string {
-	const pascalName = dbName.charAt(0).toUpperCase() + dbName.slice(1)
-	const schemaImport = `${dbName}DbSchema`
-	const lines: string[] = []
+function tursoFactories(n: OrmNames): string[] {
+	return [
+		`function create${n.pascal}Db(options: { authToken: string; transport?: HttpClient; url: string }) {`,
+		"	const cacheKey = options.transport ? `do:${options.url}` : `http:${options.url}:${options.authToken}`",
+		...cachedBody(n, "cacheKey", [
+			"	const client = options.transport",
+			`		? drizzleHttp({ client: options.transport, relations })`,
+			`		: drizzleHttp({ connection: { authToken: options.authToken, url: options.url }, relations })`,
+		]),
+		"",
+		`function create${n.pascal}DbHttp(url: string, authToken: string) {`,
+		`	return create${n.pascal}Db({ authToken, url })`,
+		"}",
+		"",
+		`function create${n.pascal}DbWeb(url: string, authToken: string) {`,
+		"	const cacheKey = `web:${url}:${authToken}`",
+		...cachedBody(n, "cacheKey", [
+			"	const client = drizzleWeb({",
+			"		connection: { authToken, url },",
+			"		relations,",
+			"	})",
+		]),
+	]
+}
 
-	lines.push(`import { neon } from "@neondatabase/serverless"`)
-	lines.push(`import { drizzle as drizzleHttp } from "drizzle-orm/neon-http"`)
-	lines.push(`import { Pool } from "@neondatabase/serverless"`)
-	lines.push(`import { drizzle as drizzleServerless } from "drizzle-orm/neon-serverless"`)
-	lines.push(`import { relations } from "${relationsImport}"`)
-	lines.push(`import type * as ${schemaImport} from "${tablesImport}"`)
-	lines.push("")
-	lines.push(`const ${dbName}DbIsolateCache = new Map<string, ReturnType<typeof create${pascalName}DbHttp>>()`)
-	lines.push("")
-	lines.push(`function create${pascalName}DbHttp(connectionString: string) {`)
-	lines.push(`	const cached = ${dbName}DbIsolateCache.get(connectionString)`)
-	lines.push("	if (cached) return cached")
-	lines.push("")
-	lines.push("	const sql = neon(connectionString)")
-	lines.push(`	const client = drizzleHttp({ client: sql, relations })`)
-	lines.push("")
-	lines.push(`	${dbName}DbIsolateCache.set(connectionString, client)`)
-	lines.push("	return client")
-	lines.push("}")
-	lines.push("")
-	lines.push(`function create${pascalName}DbPool(connectionString: string) {`)
-	lines.push("	const pool = new Pool({ connectionString })")
-	lines.push(`	return drizzleServerless({ client: pool, relations })`)
-	lines.push("}")
-	lines.push("")
-	lines.push(`type ${pascalName}DbHttp = ReturnType<typeof create${pascalName}DbHttp>`)
-	lines.push(`type ${pascalName}DbPool = ReturnType<typeof create${pascalName}DbPool>`)
-	lines.push(`type ${pascalName}Schema = typeof ${schemaImport}`)
-	lines.push("")
-	lines.push("export {")
-	lines.push(`	create${pascalName}DbHttp,`)
-	lines.push(`	create${pascalName}DbPool,`)
-	lines.push(`	type ${pascalName}DbHttp,`)
-	lines.push(`	type ${pascalName}DbPool,`)
-	lines.push(`	type ${pascalName}Schema,`)
-	lines.push("}")
-	lines.push("")
+function generateTursoOrm(n: OrmNames): string {
+	return [
+		`import type { Client as HttpClient } from "@libsql/client/http"`,
+		`import { drizzle as drizzleHttp } from "drizzle-orm/libsql/http"`,
+		`import { drizzle as drizzleWeb } from "drizzle-orm/libsql/web"`,
+		...schemaImports(n),
+		"",
+		`const $clientType = () => drizzleWeb({ connection: { url: "" }, relations })`,
+		"",
+		`const ${n.dbName}DbIsolateCache = new Map<string, ReturnType<typeof $clientType>>()`,
+		"",
+		...tursoFactories(n),
+		"",
+		...exportBlock(n, ["Db", "DbHttp", "DbWeb"]),
+	].join("\n")
+}
 
-	return lines.join("\n")
+function generateLibsqlOrm(n: OrmNames): string {
+	return singleClientFile(
+		n,
+		[`import { createClient } from "@libsql/client"`, `import { drizzle } from "drizzle-orm/libsql"`],
+		[
+			`function create${n.pascal}Db(url: string) {`,
+			"	const client = createClient({ url })",
+			`	return drizzle({ client, relations })`,
+			"}",
+		],
+	)
+}
+
+function generateBunSqliteOrm(n: OrmNames): string {
+	return singleClientFile(
+		n,
+		[`import { Database } from "bun:sqlite"`, `import { drizzle } from "drizzle-orm/bun-sqlite"`],
+		[
+			`function create${n.pascal}Db(path: string) {`,
+			"	const sqlite = new Database(path)",
+			`	return drizzle({ client: sqlite, relations })`,
+			"}",
+		],
+	)
+}
+
+function generateD1Orm(n: OrmNames): string {
+	return singleClientFile(
+		n,
+		[`import type { AnyD1Database } from "drizzle-orm/d1"`, `import { drizzle } from "drizzle-orm/d1"`],
+		[`function create${n.pascal}Db(d1: AnyD1Database) {`, `	return drizzle(d1, { relations })`, "}"],
+	)
+}
+
+function generateNeonOrm(n: OrmNames): string {
+	return [
+		`import { neon } from "@neondatabase/serverless"`,
+		`import { drizzle as drizzleHttp } from "drizzle-orm/neon-http"`,
+		`import { Pool } from "@neondatabase/serverless"`,
+		`import { drizzle as drizzleServerless } from "drizzle-orm/neon-serverless"`,
+		...schemaImports(n),
+		"",
+		`const ${n.dbName}DbIsolateCache = new Map<string, ReturnType<typeof create${n.pascal}DbHttp>>()`,
+		"",
+		`function create${n.pascal}DbHttp(connectionString: string) {`,
+		...cachedBody(n, "connectionString", [
+			"	const sql = neon(connectionString)",
+			`	const client = drizzleHttp({ client: sql, relations })`,
+		]),
+		"",
+		`function create${n.pascal}DbPool(connectionString: string) {`,
+		"	const pool = new Pool({ connectionString })",
+		`	return drizzleServerless({ client: pool, relations })`,
+		"}",
+		"",
+		...exportBlock(n, ["DbHttp", "DbPool"]),
+	].join("\n")
+}
+
+/** The renderer for a dialect and driver; an unsupported pair is refused by name */
+function rendererFor({ dialect, driver }: OrmConfig): (n: OrmNames) => string {
+	if (dialect === "sqlite") {
+		switch (driver) {
+			case "d1":
+				return generateD1Orm
+			case "turso":
+				return generateTursoOrm
+			case "libsql":
+				return generateLibsqlOrm
+			case "bun-sqlite":
+				return generateBunSqliteOrm
+			default:
+				throw new Error(`Unsupported SQLite driver: ${driver}`)
+		}
+	}
+	if (dialect === "postgres") {
+		if (driver === "neon") return generateNeonOrm
+		throw new Error(`Unsupported Postgres driver: ${driver}`)
+	}
+	throw new Error(`Unsupported dialect: ${String(dialect)}`)
+}
+
+/** Where relations come from: the configured relations file, the prefixed name, or the tables file's sibling */
+function relationsImportOf(config: OrmConfig, tablesImport: string): string {
+	if (config.relationsOutput) return `./${path.basename(config.relationsOutput, ".ts")}`
+	if (config.filePrefix) return `./${config.filePrefix}.relations.gen`
+	return tablesImport.replace(/\.tables(\.gen)?$/, ".relations.gen")
 }
 
 /** Generate ORM client file based on config */
-export function generateOrm(tablesFilePath: string, config: OrmConfig, cwd: string): void {
-	const dbName = extractDbName(tablesFilePath)
-	const tablesImport = getTablesImportPath(tablesFilePath)
-
-	let relationsImport: string
-	if (config.relationsOutput) {
-		relationsImport = `./${path.basename(config.relationsOutput, ".ts")}`
-	} else if (config.filePrefix) {
-		relationsImport = `./${config.filePrefix}.relations.gen`
-	} else {
-		relationsImport = tablesImport.replace(/\.tables(\.gen)?$/, ".relations.gen")
+export function generateOrm(ctx: GeneratorContext, config: OrmConfig): void {
+	const render = rendererFor(config)
+	const dbName = extractDbName(ctx.tablesPath)
+	const tablesImport = getTablesImportPath(ctx.tablesPath)
+	const names: OrmNames = {
+		dbName,
+		pascal: dbName.charAt(0).toUpperCase() + dbName.slice(1),
+		relationsImport: relationsImportOf(config, tablesImport),
+		schemaImport: `${dbName}DbSchema`,
+		tablesImport,
 	}
-	const outputPath = path.resolve(cwd, config.output)
-
-	let content: string
-
-	if (config.dialect === "sqlite") {
-		switch (config.driver) {
-			case "d1":
-				content = generateD1Orm(dbName, tablesImport, relationsImport)
-				break
-			case "turso":
-				content = generateTursoOrm(dbName, tablesImport, relationsImport)
-				break
-			case "libsql":
-				content = generateLibsqlOrm(dbName, tablesImport, relationsImport)
-				break
-			case "bun-sqlite":
-				content = generateBunSqliteOrm(dbName, tablesImport, relationsImport)
-				break
-			default:
-				throw new Error(`Unsupported SQLite driver: ${config.driver}`)
-		}
-	} else if (config.dialect === "postgres") {
-		switch (config.driver) {
-			case "neon":
-				content = generateNeonOrm(dbName, tablesImport, relationsImport)
-				break
-			default:
-				throw new Error(`Unsupported Postgres driver: ${config.driver}`)
-		}
-	} else {
-		throw new Error(`Unsupported dialect: ${config.dialect}`)
-	}
-
-	writeGenFile(outputPath, content, "comb")
-	console.log(`Generated ORM client: ${outputPath}`)
+	const outputPath = path.resolve(ctx.cwd, config.output)
+	writeGenFile(outputPath, render(names), "comb")
+	ctx.log(`Generated ORM client: ${outputPath}`)
 }

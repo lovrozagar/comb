@@ -6,32 +6,36 @@
  * - db.{dbName}.fts.gen.ts   — type-safe FTS table metadata map
  */
 import path from "node:path"
-import type { TableMeta } from "../analyzer-types.ts"
 import { toScreamingSnakeCase } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
-import { generateFtsSql, type FtsTableConfig } from "./fts-sql.ts"
+import { dedup, generateFtsSql, type FtsTableConfig } from "./fts-sql.ts"
+import type { GeneratorContext } from "./context-types.ts"
 
 type FtsGeneratorConfig = {
+	/** file name stem; defaults to `db.<dbName>` */
+	filePrefix?: string | undefined
 	fts: Record<string, FtsTableConfig>
 	output: string
 }
 
-function generateFts(tables: TableMeta[], dbName: string, config: FtsGeneratorConfig, cwd: string): void {
+function generateFts(ctx: GeneratorContext, config: FtsGeneratorConfig): void {
+	const { dbName, tables } = ctx.analysis
+	const { cwd } = ctx
+	const filePrefix = config.filePrefix ?? `db.${dbName}`
 	const entries = Object.entries(config.fts)
 	if (entries.length === 0) {
-		console.log("  fts: no fts config — skipped")
+		ctx.log("  fts: no fts config — skipped")
 		return
 	}
 
 	const outputDir = path.resolve(cwd, config.output)
 
 	/* SQL file */
-	const sql = generateFtsSql(tables, config.fts)
-	if (!sql) return
+	const sql = generateFtsSql(tables, config.fts, ctx.warn)
 
-	const sqlPath = path.join(outputDir, `db.${dbName}.fts.gen.sql`)
+	const sqlPath = path.join(outputDir, `${filePrefix}.fts.gen.sql`)
 	writeGenFile(sqlPath, sql, "comb")
-	console.log(`  fts: ${sqlPath} (${entries.length} table${entries.length > 1 ? "s" : ""})`)
+	ctx.log(`  fts: ${sqlPath} (${entries.length} table${entries.length > 1 ? "s" : ""})`)
 
 	/* TypeScript file */
 	const constName = `${toScreamingSnakeCase(dbName)}_DB_FTS`
@@ -40,15 +44,7 @@ function generateFts(tables: TableMeta[], dbName: string, config: FtsGeneratorCo
 	tsLines.push(`const ${constName} = {`)
 
 	for (const [tableName, tableConfig] of entries) {
-		/* Deduplicate columns preserving order */
-		const seen = new Set<string>()
-		const columns: string[] = []
-		for (const col of tableConfig.columns) {
-			if (!seen.has(col)) {
-				seen.add(col)
-				columns.push(col)
-			}
-		}
+		const columns = dedup(tableConfig.columns)
 
 		tsLines.push(`\t${tableName}: {`)
 		tsLines.push(`\t\tcolumns: [${columns.map((c) => `"${c}"`).join(", ")}] as const,`)
@@ -62,9 +58,9 @@ function generateFts(tables: TableMeta[], dbName: string, config: FtsGeneratorCo
 	tsLines.push(`export { ${constName} }`)
 	tsLines.push("")
 
-	const tsPath = path.join(outputDir, `db.${dbName}.fts.gen.ts`)
+	const tsPath = path.join(outputDir, `${filePrefix}.fts.gen.ts`)
 	writeGenFile(tsPath, tsLines.join("\n"), "comb")
-	console.log(`  fts: ${tsPath}`)
+	ctx.log(`  fts: ${tsPath}`)
 }
 
 export { generateFts }

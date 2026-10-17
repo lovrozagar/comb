@@ -105,7 +105,7 @@ export function generateDtos(ctx: GeneratorContext, config: DtosConfig): void {
 		if (fs.existsSync(packageJsonPath)) {
 			updatePackageJson(packageJsonPath, { config, ctx, entities: tables.map((t) => t.name) })
 		} else {
-			ctx.log(`package.json not found at ${packageJsonPath}`)
+			ctx.warn(`package.json not found at ${packageJsonPath}`)
 		}
 	}
 	ctx.log(`\nGenerated ${tables.length} entity DTOs`)
