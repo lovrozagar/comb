@@ -27,6 +27,11 @@ describe("extractConstraints", () => {
 		expect(result).toEqual({ email: true, max: 254, min: 5 })
 	})
 
+	it("reads negative, decimal and underscore-separated number literals as numbers", () => {
+		expect(extractConstraints('c.integer("delta", { min: -5, max: 1_000 })')).toEqual({ max: 1000, min: -5 })
+		expect(extractConstraints('c.real("ratio", { min: -0.5, max: 2.25 })')).toEqual({ max: 2.25, min: -0.5 })
+	})
+
 	it("returns empty for no constraints", () => {
 		expect(extractConstraints('c.text("name")')).toEqual({})
 	})

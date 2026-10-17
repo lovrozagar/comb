@@ -126,8 +126,9 @@ function parseConstraintObject(content: string, identifiers: IdentifierValues): 
 			result[key] = true
 		} else if (value === "false") {
 			result[key] = false
-		} else if (/^\d+$/.test(value)) {
-			result[key] = parseInt(value, 10)
+		} else if (/^-?\d[\d_]*(?:\.\d[\d_]*)?$/.test(value)) {
+			/* a decimal literal as TS writes it: sign, separators, fraction */
+			result[key] = Number(value.replaceAll("_", ""))
 		} else if (value.startsWith('"') && value.endsWith('"')) {
 			/* Un-escape TS string escapes so raw patterns like "\\d" become "\d" */
 			result[key] = value.slice(1, -1).replace(/\\\\/g, "\\")
