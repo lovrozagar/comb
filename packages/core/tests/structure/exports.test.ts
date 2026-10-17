@@ -78,3 +78,27 @@ describe("package exports", () => {
 		expect(drift).toEqual([])
 	})
 })
+
+describe("public entry points", () => {
+	/* internals and CLI plumbing a consumer has no use for; `drizzle` would shadow drizzle-orm's */
+	const INTERNAL = [
+		"EMPTY_OBJ",
+		"EMPTY_ARR",
+		"sleep",
+		"confirmDrops",
+		"printMigrationSummary",
+		"aggregateErrors",
+		"drizzle",
+	]
+
+	it("export none of comb's internals", async () => {
+		const { exports } = manifest()
+		const leaked: string[] = []
+		for (const [subpath, target] of Object.entries(exports)) {
+			if (!target.endsWith(".ts") || subpath === "./cli") continue
+			const mod = (await import(join(CORE, target))) as Record<string, unknown>
+			for (const name of INTERNAL) if (Object.hasOwn(mod, name)) leaked.push(`${subpath}: ${name}`)
+		}
+		expect(leaked).toEqual([])
+	}, 60_000)
+})

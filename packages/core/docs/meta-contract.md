@@ -243,7 +243,7 @@ did not bump `v`. Each value is computed from the config that parses the request
 The query stays fat (sort keys, id, `_total`, join keys). The response gets thin.
 `createListQuerySchema({ fields })` is what puts `select` on the wire and `selectable` on
 `x-comb`. Without `fields`, both are absent — so a contract tester cannot report "accepted but
-ignored". `drizzle.paginate` / `drizzle.project` is what honors `parsedFields`, as the last
+ignored". `queryHelpers.paginate` / `queryHelpers.project` is what honors `parsedFields`, as the last
 mutation of item shape. Do not apply `select=` in the HTTP framework: the output schema is the
 full entity, and a runtime subset would fail a consumer that validates the body as that schema.
 

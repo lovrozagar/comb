@@ -7,11 +7,6 @@ export type StatusKey =
 	| "service_unavailable"
 	| "unprocessable_entity"
 
-// oxlint-disable-next-line typescript/no-explicit-any
-export const EMPTY_OBJ = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.create(null)) as Record<string, any>
-// oxlint-disable-next-line typescript/no-explicit-any
-export const EMPTY_ARR = /* @__PURE__ */ Object.freeze([]) as readonly any[]
-
 export const statusKeyToCode: Record<StatusKey, number> = {
 	bad_request: 400,
 	conflict: 409,

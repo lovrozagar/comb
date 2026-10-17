@@ -4,7 +4,7 @@
  */
 import * as z from "zod"
 
-import { EMPTY_ARR, EMPTY_OBJ } from "../types.ts"
+import { EMPTY_ARR, EMPTY_OBJ } from "../empty.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
 import type { ListQuerySchemaConfig } from "./schema-types.ts"
 import type { ListQueryCapabilities } from "./types.ts"

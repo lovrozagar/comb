@@ -37,15 +37,9 @@ export {
 	splitSqlStatements,
 } from "./core/parse.ts"
 export {
-	aggregateErrors,
 	checkCircuitBreaker,
-	confirmDrops,
-	type ConfirmDrops,
-	dropsQuestion,
 	createCircuitBreaker,
-	printMigrationSummary,
 	type RetryOptions,
-	sleep,
 	updateCircuitBreaker,
 	withRetry,
 } from "./core/utils.ts"

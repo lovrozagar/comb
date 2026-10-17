@@ -21,7 +21,7 @@ export {
 export type { CursorPayload, DecodedCursor, PaginationMeta, PaginationOptions, PaginationQueryInput } from "./cursor.ts"
 
 /* Drizzle relational helpers */
-export { type DrizzleListOptions, drizzle } from "./drizzle.ts"
+export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts"
 
 /* Sparse fieldset parser (PostgREST select) */
 export {

@@ -3,7 +3,7 @@
  * that parses the request, so the published facts cannot drift from behavior (docs §6).
  */
 import { COMB_FILTER_GRAMMAR, combMeta } from "../meta.ts"
-import { EMPTY_OBJ } from "../types.ts"
+import { EMPTY_OBJ } from "../empty.ts"
 import { CURSOR_TIEBREAK_COLUMN } from "./cursor.ts"
 import { OPERATORS_BY_TYPE } from "./filter.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"

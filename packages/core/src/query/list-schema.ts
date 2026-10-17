@@ -4,7 +4,7 @@
  */
 import * as z from "zod"
 
-import { EMPTY_OBJ } from "../types.ts"
+import { EMPTY_OBJ } from "../empty.ts"
 import { filterParamMeta, orderParamMeta, searchParamMeta } from "./descriptions.ts"
 import { OPERATORS_BY_TYPE } from "./filter.ts"
 import { listQueryStamp } from "./list-meta.ts"

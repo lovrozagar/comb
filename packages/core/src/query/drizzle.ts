@@ -186,7 +186,8 @@ function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields:
 	return applySelect(row, parsedFields)
 }
 
-const drizzle = {
+/** List-query helpers for drizzle queries: count, options, pagination, projection */
+const queryHelpers = {
 	countExtra,
 	filterValue: extractFilterValue,
 	filterValues: extractFilterValues,
@@ -195,4 +196,4 @@ const drizzle = {
 	project: drizzleProject,
 }
 
-export { drizzle, type DrizzleListOptions }
+export { type DrizzleListOptions, queryHelpers }

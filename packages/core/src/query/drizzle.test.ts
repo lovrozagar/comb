@@ -3,7 +3,7 @@ import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { CombError } from "../error.ts"
 import { createCursor, decodeCursor } from "./cursor.ts"
-import { drizzle } from "./drizzle.ts"
+import { queryHelpers } from "./drizzle.ts"
 import { parseSelect } from "./fields.ts"
 import type { FilterAST, SortField } from "./types.ts"
 
@@ -12,15 +12,15 @@ const dialect = new (SQLiteDialect as unknown as new () => {
 	sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
 })()
 
-describe("drizzle.countExtra", () => {
+describe("queryHelpers.countExtra", () => {
 	it("selects the window count for an offset request and nothing for a cursor one", () => {
-		expect(drizzle.countExtra({ cursor: "abc" })).toEqual({})
-		const result = drizzle.countExtra({})
+		expect(queryHelpers.countExtra({ cursor: "abc" })).toEqual({})
+		const result = queryHelpers.countExtra({})
 		expect(result._total).toBeDefined()
 	})
 })
 
-describe("drizzle.filterValue", () => {
+describe("queryHelpers.filterValue", () => {
 	const ast: FilterAST = {
 		root: {
 			conditions: [
@@ -33,23 +33,23 @@ describe("drizzle.filterValue", () => {
 	}
 
 	it("extracts single filter value by field name", () => {
-		expect(drizzle.filterValue(ast, "status")).toBe("active")
+		expect(queryHelpers.filterValue(ast, "status")).toBe("active")
 	})
 
 	it("returns undefined for missing field", () => {
-		expect(drizzle.filterValue(ast, "unknown")).toBeUndefined()
+		expect(queryHelpers.filterValue(ast, "unknown")).toBeUndefined()
 	})
 
 	it("returns undefined for null ast", () => {
-		expect(drizzle.filterValue(null, "status")).toBeUndefined()
+		expect(queryHelpers.filterValue(null, "status")).toBeUndefined()
 	})
 
 	it("extracts array value", () => {
-		expect(drizzle.filterValue(ast, "role")).toEqual(["admin", "user"])
+		expect(queryHelpers.filterValue(ast, "role")).toEqual(["admin", "user"])
 	})
 })
 
-describe("drizzle.filterValues", () => {
+describe("queryHelpers.filterValues", () => {
 	const ast: FilterAST = {
 		root: {
 			conditions: [
@@ -62,17 +62,17 @@ describe("drizzle.filterValues", () => {
 	}
 
 	it("extracts multiple values at once", () => {
-		const result = drizzle.filterValues(ast, ["status", "role"])
+		const result = queryHelpers.filterValues(ast, ["status", "role"])
 		expect(result).toEqual({ role: "admin", status: "active" })
 	})
 
 	it("returns partial result for missing fields", () => {
-		const result = drizzle.filterValues(ast, ["status", "missing"])
+		const result = queryHelpers.filterValues(ast, ["status", "missing"])
 		expect(result).toEqual({ status: "active" })
 	})
 
 	it("returns empty for null ast", () => {
-		expect(drizzle.filterValues(null, ["status"])).toEqual({})
+		expect(queryHelpers.filterValues(null, ["status"])).toEqual({})
 	})
 })
 
@@ -81,20 +81,20 @@ const sortedBy = (field: string, direction: "asc" | "desc" = "desc") => ({
 	sortOrderBy: { [field]: direction },
 })
 
-describe("drizzle.listOptions", () => {
+describe("queryHelpers.listOptions", () => {
 	it("returns limit + 1, and the offset of the page", () => {
-		expect(drizzle.listOptions({ limit: 20, ...sortedBy("created_at") })).toMatchObject({ limit: 21, offset: 0 })
-		expect(drizzle.listOptions({ limit: 20, page: 3, ...sortedBy("created_at") }).offset).toBe(40)
+		expect(queryHelpers.listOptions({ limit: 20, ...sortedBy("created_at") })).toMatchObject({ limit: 21, offset: 0 })
+		expect(queryHelpers.listOptions({ limit: 20, page: 3, ...sortedBy("created_at") }).offset).toBe(40)
 	})
 
 	it("passes sortOrderBy through and has no where without a cursor", () => {
-		const options = drizzle.listOptions({ limit: 10, ...sortedBy("name", "asc") })
+		const options = queryHelpers.listOptions({ limit: 10, ...sortedBy("name", "asc") })
 		expect(options.sortOrderBy).toEqual({ name: "asc" })
 		expect(options.where).toBeUndefined()
 	})
 
 	it("orders by the sort keys then the id, with explicit null placement", () => {
-		const options = drizzle.listOptions({ limit: 10, ...sortedBy("created_at") })
+		const options = queryHelpers.listOptions({ limit: 10, ...sortedBy("created_at") })
 		const { sql: text } = dialect.sqlToQuery(sql.join(options.orderBy(getTableColumns(post)), sql`, `))
 		expect(text).toBe('"post"."created_at" DESC NULLS FIRST, "post"."id" DESC NULLS FIRST')
 	})
@@ -102,14 +102,14 @@ describe("drizzle.listOptions", () => {
 	it("gives a cursor request offset 0 and the keyset predicate", () => {
 		const sort = sortedBy("created_at")
 		const cursor = createCursor({ created_at: 7, id: 3 }, sort.parsedSort as SortField[])
-		const options = drizzle.listOptions({ cursor, limit: 10, ...sort })
+		const options = queryHelpers.listOptions({ cursor, limit: 10, ...sort })
 		expect(options.offset).toBe(0)
 		const where = options.where?.RAW(getTableColumns(post))
 		expect(where && dialect.sqlToQuery(where).params).toEqual([7, 7, 3])
 	})
 
 	it("orders by the id alone when there is no sort", () => {
-		const options = drizzle.listOptions({ limit: 10, parsedSort: [], sortOrderBy: {} })
+		const options = queryHelpers.listOptions({ limit: 10, parsedSort: [], sortOrderBy: {} })
 		expect(dialect.sqlToQuery(sql.join(options.orderBy(getTableColumns(post)), sql`, `)).sql).toBe(
 			'"post"."id" DESC NULLS FIRST',
 		)
@@ -117,16 +117,16 @@ describe("drizzle.listOptions", () => {
 
 	it("refuses a cursor minted under another order, and a sort field the table lacks", () => {
 		const cursor = createCursor({ id: 1, name: "a" }, [{ direction: "asc", field: "name" }])
-		expect(() => drizzle.listOptions({ cursor, limit: 10, ...sortedBy("created_at") })).toThrow(CombError)
-		const options = drizzle.listOptions({ limit: 10, ...sortedBy("ghost") })
+		expect(() => queryHelpers.listOptions({ cursor, limit: 10, ...sortedBy("created_at") })).toThrow(CombError)
+		const options = queryHelpers.listOptions({ limit: 10, ...sortedBy("ghost") })
 		expect(() => options.orderBy(getTableColumns(post))).toThrow(CombError)
-		expect(() => drizzle.listOptions({ limit: 10, ...sortedBy("constructor") }).orderBy(getTableColumns(post))).toThrow(
-			CombError,
-		)
+		expect(() =>
+			queryHelpers.listOptions({ limit: 10, ...sortedBy("constructor") }).orderBy(getTableColumns(post)),
+		).toThrow(CombError)
 	})
 })
 
-describe("drizzle.paginate", () => {
+describe("queryHelpers.paginate", () => {
 	const defaultQuery = {
 		limit: 5,
 		parsedSort: [{ direction: "desc" as const, field: "createdAt" }],
@@ -137,7 +137,7 @@ describe("drizzle.paginate", () => {
 			{ _total: 2, id: "1" },
 			{ _total: 2, id: "2" },
 		]
-		const [resultItems, pagination] = drizzle.paginate(items, { ...defaultQuery, limit: 5 })
+		const [resultItems, pagination] = queryHelpers.paginate(items, { ...defaultQuery, limit: 5 })
 
 		expect(pagination.count).toBe(2)
 		expect(pagination.hasMore).toBe(false)
@@ -151,7 +151,7 @@ describe("drizzle.paginate", () => {
 			{ _total: 2, id: "1", name: "a" },
 			{ _total: 2, id: "2", name: "b" },
 		]
-		const [resultItems, pagination] = drizzle.paginate(items, { ...defaultQuery, limit: 5 })
+		const [resultItems, pagination] = queryHelpers.paginate(items, { ...defaultQuery, limit: 5 })
 
 		expect(pagination.count).toBe(2)
 		expect(resultItems).toEqual([
@@ -169,7 +169,7 @@ describe("drizzle.paginate", () => {
 			{ _total: 10, email: "c@d.com", id: "2", name: "b" },
 			{ _total: 10, email: "e@f.com", id: "3", name: "c" },
 		]
-		const [resultItems, pagination] = drizzle.paginate(items, {
+		const [resultItems, pagination] = queryHelpers.paginate(items, {
 			...defaultQuery,
 			limit: 2,
 			parsedFields: parseSelect("id"),
@@ -182,7 +182,7 @@ describe("drizzle.paginate", () => {
 
 	it("returns the full public row when parsedFields is null", () => {
 		const items = [{ _total: 1, id: "1", name: "a" }]
-		const [resultItems] = drizzle.paginate(items, { ...defaultQuery, limit: 10, parsedFields: null })
+		const [resultItems] = queryHelpers.paginate(items, { ...defaultQuery, limit: 10, parsedFields: null })
 
 		expect(resultItems).toEqual([{ id: "1", name: "a" }])
 	})
@@ -193,7 +193,7 @@ describe("drizzle.paginate", () => {
 			{ _total: 3, createdAt: "2024-01-02", id: "b", name: "B" },
 			{ _total: 3, createdAt: "2024-01-01", id: "a", name: "A" },
 		]
-		const [resultItems, pagination] = drizzle.paginate(items, {
+		const [resultItems, pagination] = queryHelpers.paginate(items, {
 			limit: 2,
 			parsedFields: parseSelect("name"),
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
@@ -214,7 +214,7 @@ describe("drizzle.paginate", () => {
 			{ _total: 10, id: "2" },
 			{ _total: 10, id: "3" },
 		]
-		const [resultItems, pagination] = drizzle.paginate(items, { ...defaultQuery, limit: 2 })
+		const [resultItems, pagination] = queryHelpers.paginate(items, { ...defaultQuery, limit: 2 })
 
 		expect(pagination.hasMore).toBe(true)
 		expect(resultItems).toHaveLength(2)
@@ -222,13 +222,13 @@ describe("drizzle.paginate", () => {
 
 	it("uses _total from first item", () => {
 		const items = [{ _total: 42, id: "1" }]
-		const [, pagination] = drizzle.paginate(items, { ...defaultQuery, limit: 10 })
+		const [, pagination] = queryHelpers.paginate(items, { ...defaultQuery, limit: 10 })
 
 		expect(pagination.count).toBe(42)
 	})
 
 	it("returns 0 count for empty results", () => {
-		const [resultItems, pagination] = drizzle.paginate([], { ...defaultQuery, limit: 10 })
+		const [resultItems, pagination] = queryHelpers.paginate([], { ...defaultQuery, limit: 10 })
 
 		expect(pagination.count).toBe(0)
 		expect(pagination.hasMore).toBe(false)
@@ -237,13 +237,13 @@ describe("drizzle.paginate", () => {
 
 	it("respects page parameter", () => {
 		const items = [{ _total: 100, id: "1" }]
-		const [, pagination] = drizzle.paginate(items, { ...defaultQuery, limit: 10, page: 3 })
+		const [, pagination] = queryHelpers.paginate(items, { ...defaultQuery, limit: 10, page: 3 })
 
 		expect(pagination.page).toBe(3)
 	})
 
 	it("defaults page to 1", () => {
-		const [, pagination] = drizzle.paginate([], { ...defaultQuery, limit: 10 })
+		const [, pagination] = queryHelpers.paginate([], { ...defaultQuery, limit: 10 })
 		expect(pagination.page).toBe(1)
 	})
 
@@ -253,7 +253,7 @@ describe("drizzle.paginate", () => {
 			{ _total: 50, createdAt: "2024-01-02", id: "b" },
 			{ _total: 50, createdAt: "2024-01-01", id: "a" },
 		]
-		const [, pagination] = drizzle.paginate(items, {
+		const [, pagination] = queryHelpers.paginate(items, {
 			limit: 2,
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
 		})
@@ -267,7 +267,7 @@ describe("drizzle.paginate", () => {
 
 	it("returns page=null when cursor is present in query", () => {
 		const items = [{ _total: 5, id: "1" }]
-		const [, pagination] = drizzle.paginate(items, {
+		const [, pagination] = queryHelpers.paginate(items, {
 			cursor: "some-cursor",
 			limit: 10,
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
@@ -282,7 +282,7 @@ describe("drizzle.paginate", () => {
 			{ _total: 50, createdAt: "2024-02-01", id: "y" },
 			{ _total: 50, createdAt: "2024-01-01", id: "z" },
 		]
-		const [, pagination] = drizzle.paginate(items, {
+		const [, pagination] = queryHelpers.paginate(items, {
 			limit: 2,
 			page: 1,
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
@@ -299,7 +299,7 @@ describe("drizzle.paginate", () => {
 			{ _total: 10, name: "b" },
 			{ _total: 10, name: "c" },
 		]
-		const [, pagination] = drizzle.paginate(items, {
+		const [, pagination] = queryHelpers.paginate(items, {
 			limit: 2,
 			parsedSort: [{ direction: "desc", field: "name" }],
 		})
@@ -309,7 +309,7 @@ describe("drizzle.paginate", () => {
 	})
 
 	it("returns nextCursor null and hasMore false for empty results", () => {
-		const [, pagination] = drizzle.paginate([], {
+		const [, pagination] = queryHelpers.paginate([], {
 			limit: 10,
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
 		})
@@ -319,32 +319,34 @@ describe("drizzle.paginate", () => {
 	})
 })
 
-describe("drizzle.project", () => {
+describe("queryHelpers.project", () => {
 	it("strips _total and keeps the rest when parsedFields is null", () => {
-		expect(drizzle.project({ _total: 9, id: "1", name: "n" }, null)).toEqual({ id: "1", name: "n" })
+		expect(queryHelpers.project({ _total: 9, id: "1", name: "n" }, null)).toEqual({ id: "1", name: "n" })
 	})
 
 	it("projects a single row through parsedFields", () => {
-		expect(drizzle.project({ _total: 9, email: "a@b.com", id: "1", name: "n" }, parseSelect("id"))).toEqual({
+		expect(queryHelpers.project({ _total: 9, email: "a@b.com", id: "1", name: "n" }, parseSelect("id"))).toEqual({
 			id: "1",
 		})
 	})
 
 	it("is a no-op on a row that already lacks _total when parsedFields is null", () => {
-		expect(drizzle.project({ id: "1", name: "n" }, null)).toEqual({ id: "1", name: "n" })
+		expect(queryHelpers.project({ id: "1", name: "n" }, null)).toEqual({ id: "1", name: "n" })
 	})
 
 	it("drops _total even under a wildcard select", () => {
-		expect(drizzle.project({ _total: 3, id: "1", name: "n" }, parseSelect("*"))).toEqual({ id: "1", name: "n" })
+		expect(queryHelpers.project({ _total: 3, id: "1", name: "n" }, parseSelect("*"))).toEqual({ id: "1", name: "n" })
 	})
 })
 
-describe("drizzle.paginate — count and the default sort", () => {
+describe("queryHelpers.paginate — count and the default sort", () => {
 	it("reports null past the end, 0 for an empty first page, and null without countExtra", () => {
-		expect(drizzle.paginate([], { limit: 2, page: 3, parsedSort: [] })[1].count).toBeNull()
-		expect(drizzle.paginate([], { limit: 2, page: 1, parsedSort: [] })[1].count).toBe(0)
-		expect(drizzle.paginate([{ id: "a" }], { limit: 2, parsedSort: [] })[1].count).toBeNull()
-		expect(drizzle.paginate([{ _total: 4, id: "a" }], { cursor: "c", limit: 2, parsedSort: [] })[1].count).toBeNull()
+		expect(queryHelpers.paginate([], { limit: 2, page: 3, parsedSort: [] })[1].count).toBeNull()
+		expect(queryHelpers.paginate([], { limit: 2, page: 1, parsedSort: [] })[1].count).toBe(0)
+		expect(queryHelpers.paginate([{ id: "a" }], { limit: 2, parsedSort: [] })[1].count).toBeNull()
+		expect(
+			queryHelpers.paginate([{ _total: 4, id: "a" }], { cursor: "c", limit: 2, parsedSort: [] })[1].count,
+		).toBeNull()
 	})
 
 	it("mints the next cursor under the default sort when the request named none", () => {
@@ -352,7 +354,7 @@ describe("drizzle.paginate — count and the default sort", () => {
 			{ created_at: 2, id: "b" },
 			{ created_at: 1, id: "a" },
 		]
-		const next = drizzle.paginate(rows, { limit: 1, parsedSort: [] })[1].nextCursor
+		const next = queryHelpers.paginate(rows, { limit: 1, parsedSort: [] })[1].nextCursor
 		expect(decodeCursor(next)?.sort).toBe("created_at.desc.nullsfirst")
 	})
 })

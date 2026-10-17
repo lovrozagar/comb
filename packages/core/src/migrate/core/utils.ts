@@ -2,7 +2,7 @@
  * Utility functions for migrations
  */
 import type { CircuitBreakerState, MigrationResult } from "../types.ts"
-import { EMPTY_OBJ } from "../../types.ts"
+import { EMPTY_OBJ } from "../../empty.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    SLEEP

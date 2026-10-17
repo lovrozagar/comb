@@ -8,7 +8,7 @@ import type { LibSQLDatabase } from "drizzle-orm/libsql"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
 import { createCursor, decodeCursor } from "../../../src/query/cursor.ts"
-import { drizzle } from "../../../src/query/drizzle.ts"
+import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import type { SortField } from "../../../src/query/types.ts"
@@ -70,7 +70,7 @@ async function listTable(db: LibSQLDatabase, query: Record<string, string>) {
 	const parsed = schema.parse(query)
 	const built = buildListQuery({ parsed, table: item })
 	const rows = await applyListQuery(db.select().from(item).$dynamic(), built)
-	const [items, pagination] = drizzle.paginate(rows, parsed)
+	const [items, pagination] = queryHelpers.paginate(rows, parsed)
 	return { items: items.map(label), nextCursor: pagination.nextCursor }
 }
 

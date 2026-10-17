@@ -31,9 +31,14 @@ function diagnostics(source: string): string[] {
 		.map((d) => ts.flattenDiagnosticMessageText(d.compilerObject.messageText, "\n"))
 }
 
+/* a compile test builds a TypeScript program; under a full parallel run that takes seconds */
+const COMPILE_TIMEOUT_MS = 60_000
+
 describe("the README list flow under exactOptionalPropertyTypes (A-Med)", () => {
-	it("hands the schema's output to buildListQuery as is", () => {
-		const source = `import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+	it(
+		"hands the schema's output to buildListQuery as is",
+		() => {
+			const source = `import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { createListQuerySchema } from "./schema.ts"
 import { buildListQuery } from "./sqlite/build-list-query.ts"
 const post = sqliteTable("post", { created_at: integer("created_at").notNull(), id: text("id").primaryKey(), title: text("title") })
@@ -41,6 +46,8 @@ const schema = createListQuerySchema({ filter: { title: "string" }, search: ["ti
 const parsed = schema.parse({})
 export const query = buildListQuery({ parsed, table: post })
 `
-		expect(diagnostics(source)).toEqual([])
-	})
+			expect(diagnostics(source)).toEqual([])
+		},
+		COMPILE_TIMEOUT_MS,
+	)
 })

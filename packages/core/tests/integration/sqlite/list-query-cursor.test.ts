@@ -10,7 +10,7 @@ import { integer, sqliteTable } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
 import { CombError } from "../../../src/error.ts"
 import { createCursor, encodeCursor, sortSignature } from "../../../src/query/cursor.ts"
-import { drizzle } from "../../../src/query/drizzle.ts"
+import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import type { SortField } from "../../../src/query/types.ts"
@@ -125,7 +125,7 @@ describe("paginate mints a cursor for every last row, whatever its id (Q-M6)", (
 				{ created_at: 2, id },
 				{ created_at: 1, id: "next" },
 			]
-			const [, pagination] = drizzle.paginate(rows, { limit: 1, parsedSort: SORT })
+			const [, pagination] = queryHelpers.paginate(rows, { limit: 1, parsedSort: SORT })
 			expect(pagination.hasMore).toBe(true)
 			expect(pagination.nextCursor).not.toBeNull()
 		}
@@ -142,12 +142,12 @@ describe("pagination.count (Q-M5)", () => {
 		const parsed = schema.parse({ limit: "2", order: "created_at.desc", ...params })
 		const built = buildListQuery({ parsed, table: post })
 		const query = db
-			.select({ created_at: post.created_at, id: post.id, ...drizzle.countExtra(parsed) })
+			.select({ created_at: post.created_at, id: post.id, ...queryHelpers.countExtra(parsed) })
 			.from(post)
 			.$dynamic()
 		const statement = applyListQuery(query, built)
 		const rows = await statement
-		const [, pagination] = drizzle.paginate(rows, parsed)
+		const [, pagination] = queryHelpers.paginate(rows, parsed)
 		return { pagination, sql: statement.toSQL().sql.toLowerCase() }
 	}
 
@@ -170,12 +170,12 @@ describe("pagination.count (Q-M5)", () => {
 	})
 
 	it("is null when the query did not select the count", () => {
-		const [, pagination] = drizzle.paginate([{ id: 1 }], { limit: 2, parsedSort: SORT })
+		const [, pagination] = queryHelpers.paginate([{ id: 1 }], { limit: 2, parsedSort: SORT })
 		expect(pagination.count).toBeNull()
 	})
 })
 
-describe("drizzle.listOptions pages the relational API by cursor (Q-L4)", () => {
+describe("queryHelpers.listOptions pages the relational API by cursor (Q-L4)", () => {
 	const post = sqliteTable("post", { created_at: integer("created_at").notNull(), id: integer("id").primaryKey() })
 	const schema = createListQuerySchema({ sort: ["created_at"] })
 
@@ -189,14 +189,14 @@ describe("drizzle.listOptions pages the relational API by cursor (Q-L4)", () => 
 		let cursor: string | null = null
 		for (let guard = 0; guard < 6 && (pages.length === 0 || cursor); guard++) {
 			const parsed = schema.parse({ limit, order: "created_at.desc", ...(cursor ? { cursor } : {}) })
-			const options = drizzle.listOptions(parsed)
+			const options = queryHelpers.listOptions(parsed)
 			const rows = await db.query.post.findMany({
 				limit: options.limit,
 				offset: options.offset,
 				orderBy: options.orderBy,
 				...(options.where ? { where: options.where } : {}),
 			})
-			const [items, pagination] = drizzle.paginate(rows, parsed)
+			const [items, pagination] = queryHelpers.paginate(rows, parsed)
 			pages.push(items.map((row) => row.id))
 			cursor = pagination.nextCursor
 		}
@@ -213,6 +213,6 @@ describe("drizzle.listOptions pages the relational API by cursor (Q-L4)", () => 
 			...schema.parse({ order: "created_at.desc" }),
 			cursor: encodeCursor({ i: 1, s: "id.asc.nullslast", v: [1] }),
 		}
-		expect(() => drizzle.listOptions(parsed)).toThrow(CombError)
+		expect(() => queryHelpers.listOptions(parsed)).toThrow(CombError)
 	})
 })
