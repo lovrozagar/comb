@@ -74,7 +74,7 @@
 				"comb/no-module-state": "warn",
 				"comb/no-silent-catch": "warn",
 				"comb/no-v8-ignore": "error",
-				"comb/raw-sql-allowlist": "warn"
+				"comb/raw-sql-allowlist": "error"
 			}
 		},
 		{

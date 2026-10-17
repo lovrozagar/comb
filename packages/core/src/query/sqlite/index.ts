@@ -30,6 +30,7 @@ export {
 	buildFtsWhere,
 	buildFtsWhereWithSpellfix,
 	type SpellfixDb,
+	type SpellfixSearch,
 	sanitizeFtsTerm,
 } from "./search.ts"
 

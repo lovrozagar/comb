@@ -23,49 +23,27 @@ const item = sqliteTable("item", {
 
 describe("likeSearch", () => {
 	const search = likeSearch(item._search)
+	const bound = (q: string) => {
+		const built = search(q)
+		return built && compile(built)
+	}
 
-	it("returns null for empty string", () => {
+	it("returns null for empty or whitespace-only input", () => {
 		expect(search("")).toBeNull()
-	})
-
-	it("returns null for whitespace-only input", () => {
 		expect(search("   ")).toBeNull()
 	})
 
-	it("returns SQL for valid input", () => {
-		const result = search("hello")
-		expect(result).toBeTruthy()
+	it("binds one contains pattern per term, ANDed, against the escape character", () => {
+		expect(bound("  hello  ")).toEqual({ params: ["%hello%"], sql: `"item"."_search" LIKE ? ESCAPE '\\'` })
+		expect(bound("a b")?.sql).toBe(`"item"."_search" LIKE ? ESCAPE '\\' AND "item"."_search" LIKE ? ESCAPE '\\'`)
 	})
 
-	it("normalizes diacritics", () => {
-		const result = search("José")
-		expect(result).toBeTruthy()
-		/* normalized: "jose" — diacritics stripped, lowercased */
+	it("folds diacritics and case the way the _search column stores them", () => {
+		expect(bound("José HELLO")?.params).toEqual(["%jose%", "%hello%"])
 	})
 
-	it("lowercases input", () => {
-		const result = search("HELLO")
-		expect(result).toBeTruthy()
-	})
-
-	it("escapes LIKE special: %", () => {
-		const result = search("100%")
-		expect(result).toBeTruthy()
-	})
-
-	it("escapes LIKE special: _", () => {
-		const result = search("foo_bar")
-		expect(result).toBeTruthy()
-	})
-
-	it("escapes LIKE special: backslash", () => {
-		const result = search("path\\file")
-		expect(result).toBeTruthy()
-	})
-
-	it("trims leading/trailing whitespace", () => {
-		const result = search("  hello  ")
-		expect(result).toBeTruthy()
+	it("escapes the LIKE specials so they match themselves", () => {
+		expect(bound("100% foo_bar path\\file")?.params).toEqual(["%100\\%%", "%foo\\_bar%", "%path\\\\file%"])
 	})
 })
 
@@ -76,8 +54,8 @@ describe("sanitizeFtsTerm", () => {
 		expect(sanitizeFtsTerm("col:on")).toBe("colon")
 	})
 
-	it("escapes double quotes", () => {
-		expect(sanitizeFtsTerm('say"hi')).toBe('say""hi')
+	it("keeps double quotes for the phrase builder to escape", () => {
+		expect(sanitizeFtsTerm('say"hi')).toBe('say"hi')
 	})
 
 	it("returns empty for boolean keywords", () => {
@@ -100,18 +78,14 @@ describe("buildFtsMatch", () => {
 		expect(buildFtsMatch("fts_table", "  ")).toBeNull()
 	})
 
-	it("returns SQL for valid query", () => {
-		const result = buildFtsMatch("fts_table", "hello")
-		expect(result).toBeTruthy()
+	it("binds every term as a quoted prefix phrase on the quoted table (S-3)", () => {
+		const { params, sql } = compile(buildFtsMatch("fts_table", 'hello say"hi') as SQL)
+		expect(sql).toBe('"fts_table" MATCH ?')
+		expect(params).toEqual(['"hello"* AND "say""hi"*'])
 	})
 
 	it("returns null when all terms are boolean keywords", () => {
 		expect(buildFtsMatch("fts_table", "AND OR NOT")).toBeNull()
-	})
-
-	it("handles multi-word queries", () => {
-		const result = buildFtsMatch("fts_table", "hello world")
-		expect(result).toBeTruthy()
 	})
 })
 
@@ -121,24 +95,18 @@ describe("buildFtsWhere", () => {
 		expect(buildFtsWhere("fts_table", "id", "")).toBeNull()
 	})
 
-	it("returns SQL for valid query", () => {
-		const result = buildFtsWhere("fts_table", "id", "search term")
-		expect(result).toBeTruthy()
+	it("selects the matching ids through the FTS table, the query bound", () => {
+		const { params, sql } = compile(buildFtsWhere("fts_table", "id", "search term") as SQL)
+		expect(sql).toBe('"id" IN (SELECT "id" FROM "fts_table" WHERE "fts_table" MATCH ?)')
+		expect(params).toEqual(['"search"* AND "term"*'])
 	})
 })
 
 describe("buildFtsHighlight", () => {
-	it("builds a highlight() call around the requested column index", () => {
-		const built = buildFtsHighlight("item_fts", 1, "<mark>", "</mark>")
-		expect(compile(built).sql).toBe("highlight(item_fts, 1, '<mark>', '</mark>')")
-	})
-
-	it("escapes single quotes in the tags so they cannot close the literal", () => {
-		const built = buildFtsHighlight("item_fts", 0, "<b class='hit'>", "</b>")
-		const { sql } = compile(built)
-		expect(sql).toContain("'<b class=''hit''>'")
-		/* the literal must still be balanced */
-		expect(sql.split("'").length % 2).toBe(1)
+	it("builds a highlight() call with the column index and tags bound", () => {
+		const { params, sql } = compile(buildFtsHighlight("item_fts", 1, "<b class='hit'>", "</b>"))
+		expect(sql).toBe('highlight("item_fts", ?, ?, ?)')
+		expect(params).toEqual([1, "<b class='hit'>", "</b>"])
 	})
 })
 
@@ -146,19 +114,29 @@ describe("buildFtsWhereWithSpellfix", () => {
 	const spellfixDb = (rows: Array<{ word: string }>) => ({ all: async () => rows })
 
 	it("returns null for empty or whitespace-only input", async () => {
-		expect(await buildFtsWhereWithSpellfix(spellfixDb([]), "f", "s", "id", null)).toBeNull()
-		expect(await buildFtsWhereWithSpellfix(spellfixDb([]), "f", "s", "id", "   ")).toBeNull()
+		expect(
+			await buildFtsWhereWithSpellfix(spellfixDb([]), { ftsTable: "f", idColumn: "id", spellfixTable: "s" }, null),
+		).toBeNull()
+		expect(
+			await buildFtsWhereWithSpellfix(spellfixDb([]), { ftsTable: "f", idColumn: "id", spellfixTable: "s" }, "   "),
+		).toBeNull()
 	})
 
 	it("returns null when every term sanitises away", async () => {
-		expect(await buildFtsWhereWithSpellfix(spellfixDb([]), "f", "s", "id", "AND OR")).toBeNull()
+		expect(
+			await buildFtsWhereWithSpellfix(spellfixDb([]), { ftsTable: "f", idColumn: "id", spellfixTable: "s" }, "AND OR"),
+		).toBeNull()
 	})
 
 	it("ORs the corrections in alongside the original term", async () => {
-		const built = await buildFtsWhereWithSpellfix(spellfixDb([{ word: "hello" }]), "item_fts", "sp", "id", "helo")
+		const built = await buildFtsWhereWithSpellfix(
+			spellfixDb([{ word: "hello" }]),
+			{ ftsTable: "item_fts", idColumn: "id", spellfixTable: "sp" },
+			"helo",
+		)
 		const { params } = compile(built!)
-		expect(String(params[0])).toContain('"helo*"')
-		expect(String(params[0])).toContain('"hello*"')
+		expect(String(params[0])).toContain('"helo"*')
+		expect(String(params[0])).toContain('"hello"*')
 		expect(String(params[0])).toContain(" OR ")
 	})
 
@@ -170,14 +148,18 @@ describe("buildFtsWhereWithSpellfix", () => {
 				return []
 			},
 		}
-		await buildFtsWhereWithSpellfix(db, "item_fts", "sp", "id", "ab")
+		await buildFtsWhereWithSpellfix(db, { ftsTable: "item_fts", idColumn: "id", spellfixTable: "sp" }, "ab")
 		expect(called).toBe(0)
 	})
 
 	it("drops a correction identical to the term, case-insensitively", async () => {
-		const built = await buildFtsWhereWithSpellfix(spellfixDb([{ word: "hello" }]), "item_fts", "sp", "id", "Hello")
+		const built = await buildFtsWhereWithSpellfix(
+			spellfixDb([{ word: "hello" }]),
+			{ ftsTable: "item_fts", idColumn: "id", spellfixTable: "sp" },
+			"Hello",
+		)
 		const { params } = compile(built!)
-		expect(String(params[0])).toBe('"hello*"')
+		expect(String(params[0])).toBe('"hello"*')
 	})
 
 	it("degrades to the plain term when the spellfix table is missing", async () => {
@@ -186,15 +168,30 @@ describe("buildFtsWhereWithSpellfix", () => {
 				throw new Error("no such table: spellfix")
 			},
 		}
-		const built = await buildFtsWhereWithSpellfix(db, "item_fts", "sp", "id", "hello")
+		const built = await buildFtsWhereWithSpellfix(
+			db,
+			{ ftsTable: "item_fts", idColumn: "id", spellfixTable: "sp" },
+			"hello",
+		)
 		expect(built).not.toBeNull()
-		expect(String(compile(built!).params[0])).toBe('"hello*"')
+		expect(String(compile(built!).params[0])).toBe('"hello"*')
+	})
+
+	it("binds the term to spellfix as typed, with no escaping a bound value does not need (S-4)", async () => {
+		const seen: unknown[][] = []
+		const db = { all: async (query: SQL) => (seen.push(compile(query).params), []) }
+		await buildFtsWhereWithSpellfix(db, { ftsTable: "item_fts", idColumn: "id", spellfixTable: "sp" }, "o'reilly")
+		expect(seen).toEqual([["o'reilly*", "o'reilly", 300, 3]])
 	})
 
 	it("binds the MATCH query rather than inlining it", async () => {
-		const built = await buildFtsWhereWithSpellfix(spellfixDb([]), "item_fts", "sp", "id", "hello")
+		const built = await buildFtsWhereWithSpellfix(
+			spellfixDb([]),
+			{ ftsTable: "item_fts", idColumn: "id", spellfixTable: "sp" },
+			"hello",
+		)
 		const { params, sql } = compile(built!)
 		expect(sql).not.toContain("hello")
-		expect(params).toContain('"hello*"')
+		expect(params).toContain('"hello"*')
 	})
 })
