@@ -8,9 +8,9 @@ export type StatusKey =
 	| "unprocessable_entity"
 
 // oxlint-disable-next-line typescript/no-explicit-any
-export const EMPTY_OBJ = Object.freeze(Object.create(null)) as Record<string, any>
+export const EMPTY_OBJ = /* @__PURE__ */ Object.freeze(Object.create(null)) as Record<string, any>
 // oxlint-disable-next-line typescript/no-explicit-any
-export const EMPTY_ARR = Object.freeze([]) as readonly any[]
+export const EMPTY_ARR = /* @__PURE__ */ Object.freeze([]) as readonly any[]
 
 export const statusKeyToCode: Record<StatusKey, number> = {
 	bad_request: 400,
