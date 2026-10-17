@@ -25,12 +25,18 @@ type StateMachine<TState extends string = string> = {
 	/** Values from which no transition is legal */
 	terminal?: readonly TState[] | undefined
 	/** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
-	transitions?: Readonly<Record<string, readonly TState[]>> | undefined
+	transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined
 }
 
 /** Whether a value is one the machine declares. */
 function isState<T extends string>(machine: StateMachine<T>, value: unknown): value is T {
 	return typeof value === "string" && (machine.values as readonly string[]).includes(value)
+}
+
+/** The moves a machine declares out of `from`; undefined when it declares none (an inherited name is none). */
+function movesFrom<T extends string>(machine: StateMachine<T>, from: T): readonly T[] | undefined {
+	const transitions = machine.transitions
+	return transitions !== undefined && Object.hasOwn(transitions, from) ? transitions[from] : undefined
 }
 
 /** Whether no transition may leave this state. */
@@ -52,7 +58,7 @@ function canTransition<T extends string>(machine: StateMachine<T>, from: T, to: 
 	if (from === to) return true
 	if (isTerminal(machine, from)) return false
 
-	const allowed = machine.transitions?.[from]
+	const allowed = movesFrom(machine, from)
 	if (allowed === undefined) return true
 	return allowed.includes(to)
 }
@@ -91,7 +97,8 @@ function assertTransition<T extends string>(machine: StateMachine<T>, from: T, t
 /** States reachable in one move, empty for a terminal or unknown state. */
 function nextStates<T extends string>(machine: StateMachine<T>, from: T): readonly T[] {
 	if (!isState(machine, from) || isTerminal(machine, from)) return []
-	return machine.transitions?.[from] ?? machine.values.filter((v) => v !== from)
+	const moves = movesFrom(machine, from) ?? machine.values.filter((v) => v !== from)
+	return moves.filter((to) => isState(machine, to))
 }
 
 export { assertTransition, canTransition, isState, isTerminal, nextStates, type StateMachine }

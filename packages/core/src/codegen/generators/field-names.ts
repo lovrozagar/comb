@@ -39,7 +39,7 @@ function generateFieldNames(tables: TableMeta[], dbName: string, config: FieldNa
 	const fieldSet = new Set<string>()
 	for (const table of tables) {
 		for (const field of table.fields) {
-			if (field.name.startsWith("_")) continue
+			if (field.name.startsWith("_") || field.constraints.private) continue
 			fieldSet.add(field.name)
 		}
 	}

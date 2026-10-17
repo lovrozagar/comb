@@ -131,3 +131,32 @@ describe("assertTransition", () => {
 		}
 	})
 })
+
+describe("state names that are also Object.prototype members (M-L1)", () => {
+	const machine: StateMachine = {
+		terminal: ["done"],
+		transitions: { open: ["done"] },
+		values: ["open", "constructor", "toString", "done"],
+	}
+
+	it("treat them as ordinary states", () => {
+		expect(canTransition(machine, "constructor", "done")).toBe(true)
+		expect(canTransition(machine, "toString", "open")).toBe(true)
+		expect(() => assertTransition(machine, "constructor", "done")).not.toThrow()
+		expect(nextStates(machine, "constructor")).toEqual(["open", "toString", "done"])
+	})
+
+	it("reject them when the machine does not declare them", () => {
+		const plain: StateMachine = { transitions: { a: ["b"] }, values: ["a", "b"] }
+		expect(canTransition(plain, "constructor" as never, "a")).toBe(false)
+		expect(() => assertTransition(plain, "constructor" as never, "a")).toThrow(CombError)
+		expect(nextStates(plain, "valueOf" as never)).toEqual([])
+	})
+})
+
+describe("nextStates (M-L2)", () => {
+	it("lists only declared targets", () => {
+		const machine = { transitions: { a: ["b", "zzz"] }, values: ["a", "b"] } as StateMachine
+		expect(nextStates(machine, "a")).toEqual(["b"])
+	})
+})

@@ -20,7 +20,6 @@ const KNOWN_MISSING = [
 	"query/descriptions.ts",
 	"query/sqlite/keyset.ts",
 	"query/sqlite/pattern.ts",
-	"sqlite/constraints.ts",
 	"types.ts",
 ]
 

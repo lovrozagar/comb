@@ -93,9 +93,9 @@ export type TimestampConstraints = BaseConstraints
  */
 export type EnumStates<TState extends string = string> = {
 	/** The value a row starts at */
-	initial?: TState
+	initial?: TState | undefined
 	/** Values from which no transition is legal */
-	terminal?: readonly TState[]
+	terminal?: readonly TState[] | undefined
 	/** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
-	transitions?: Partial<Record<TState, readonly TState[]>>
+	transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined
 }
