@@ -256,7 +256,18 @@ describe("ShardRouter — allocation", () => {
 			[2, 1],
 		])
 
-		await expect(router.allocate("org-3", full, ctx)).rejects.toThrow(/All shards full/)
+		await expect(router.allocate("org-3", full, ctx)).rejects.toMatchObject({ errorKey: "shards_full", status: 503 })
+	})
+
+	it("revives a soft-deleted org on its own shard, past the cap", async () => {
+		const { ctx } = mockWaitUntil()
+		const d = await deps([[2, 0]])
+		await d.coreDb
+			.prepare("INSERT INTO shard_map (org_id, shard_id, target, deleted_at) VALUES ('org-r', 0, '0', 1)")
+			.run()
+
+		const mapping = await new ShardRouter({ maxOrgsPerShard: 2, totalShards: 2 }).allocate("org-r", d, ctx)
+		expect(mapping).toMatchObject({ deletedAt: null, shardId: 0 })
 	})
 
 	it("returns the mapping a racing router already wrote, not its own pick", async () => {

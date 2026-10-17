@@ -32,10 +32,11 @@ export const combErrorKeys = {
 	FOREIGN_KEY_VIOLATION: "foreign_key_violation",
 	INVALID_CURSOR: "invalid_cursor",
 	INVALID_STATE_TRANSITION: "invalid_state_transition",
-	SEARCH_NOT_WIRED: "search_not_wired",
-	SORT_NOT_WIRED: "sort_not_wired",
 	PRIMARY_KEY_VIOLATION: "primary_key_violation",
 	REQUIRED_FIELD_MISSING: "required_field_missing",
+	SEARCH_NOT_WIRED: "search_not_wired",
+	SHARDS_FULL: "shards_full",
+	SORT_NOT_WIRED: "sort_not_wired",
 	STORAGE_LIMIT_REACHED: "tier_database_limit_reached",
 	UNIQUE_CONSTRAINT_VIOLATION: "unique_constraint_violation",
 } as const

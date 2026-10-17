@@ -70,6 +70,36 @@ describe("allocation (S-1, S-2)", () => {
 	})
 })
 
+describe("revival and capacity (REVIEW 3.4)", () => {
+	it("revives a soft-deleted org on the shard its data is on, even when another has more headroom", async () => {
+		const { ctx, deps, harness: h, settle } = await world()
+		const events: Event[] = []
+		const two = (log: Event[] = []) => router(log, { maxOrgsPerShard: 2, totalShards: 2 })
+		const first = await two().resolveOrAllocate("org_old", deps, ctx)
+		expect(first.shardId).toBe(0)
+		await h.CORE.prepare("UPDATE shard_map SET deleted_at = 1 WHERE org_id = 'org_old'").run()
+		/* shard 0 now fills up, so shard 1 has the most headroom */
+		await h.CORE.prepare("INSERT INTO shard_map (org_id, shard_id, target) VALUES ('a', 0, '0'), ('b', 0, '0')").run()
+		await settle()
+		await deps.kv.delete("shard:org_old")
+
+		const revived = await two(events).resolveOrAllocate("org_old", deps, ctx)
+		expect(revived).toMatchObject({ deletedAt: null, shardId: 0, target: "0" })
+		expect(events.at(-1)).toEqual(["shard-router.allocate", { orgId: "org_old", revived: true, shardId: 0 }])
+	})
+
+	it("refuses a new org with shards_full (503) when every shard is at the cap", async () => {
+		const { ctx, deps, harness: h } = await world()
+		await h.CORE.prepare("INSERT INTO shard_map (org_id, shard_id, target) VALUES ('a', 0, '0'), ('b', 1, '1')").run()
+		const full = router([], { maxOrgsPerShard: 1, totalShards: 2 })
+		await expect(full.resolveOrAllocate("org_new", deps, ctx)).rejects.toMatchObject({
+			cause: "No shard has capacity for a new organization.",
+			errorKey: "shards_full",
+			status: 503,
+		})
+	})
+})
+
 describe("stale cache hits (SWR)", () => {
 	it("starts one revalidation however many requests see the stale entry", async () => {
 		const { ctx, deps, settle } = await world()

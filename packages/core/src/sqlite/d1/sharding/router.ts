@@ -1,7 +1,9 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types"
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm"
+import { and, eq, isNull, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
+import { CombError } from "../../../error.ts"
 import { LruCache } from "../../../lru.ts"
+import { combErrorKeys } from "../../../types.ts"
 import { openD1Session } from "../session.ts"
 import { shardMap } from "./shard-map.ts"
 import type { ShardDbHandle, ShardMapping, ShardResolverDeps } from "./types.ts"
@@ -104,41 +106,34 @@ class ShardRouter {
 	}
 
 	/**
-	 * Allocate a shard for an org: the D1 shard with the most headroom. The write is an upsert
-	 * keyed on the org, so a soft-deleted row is revived and a router that loses a race reads back
-	 * the mapping the winner wrote instead of failing on the primary key. Writes go to the
-	 * primary; the bookmark is kept for the reads that follow.
+	 * Allocate a shard for an org. A soft-deleted org is revived on the shard it had, where its
+	 * data is, even past the cap: moving it would leave its rows behind. A new org goes to the D1
+	 * shard with the most headroom; its insert does nothing when a racing router got there first,
+	 * and the row read back afterwards is the winner's. Writes go to the primary; the bookmark is
+	 * kept for the reads that follow.
 	 */
 	async allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
 		const { client, session } = openD1Session(deps.coreDb, "first-primary")
 		const db = drizzle(client)
+		const byOrg = eq(shardMap.org_id, orgId)
 
-		const counts = await db
-			.select({
-				count: sql<number>`count(*)`.as("count"),
-				shardId: shardMap.shard_id,
-			})
-			.from(shardMap)
-			.where(and(eq(shardMap.driver, "d1"), isNull(shardMap.deleted_at)))
-			.groupBy(shardMap.shard_id)
-			.all()
+		const existing = await db.select().from(shardMap).where(byOrg).get()
+		const revived = existing !== undefined && existing.deleted_at !== null
+		if (revived) {
+			await db.update(shardMap).set({ deleted_at: null, updated_at: Date.now() }).where(byOrg)
+		} else if (existing === undefined) {
+			const shardId = await this.pickShard(db)
+			await db
+				.insert(shardMap)
+				.values({ driver: "d1", org_id: orgId, shard_id: shardId, target: String(shardId) })
+				.onConflictDoNothing({ target: shardMap.org_id })
+		}
 
-		const shardId = this.pickBestShard(counts)
-		const target = String(shardId)
-		await db
-			.insert(shardMap)
-			.values({ driver: "d1", org_id: orgId, shard_id: shardId, target })
-			.onConflictDoUpdate({
-				set: { deleted_at: null, shard_id: shardId, target, updated_at: Date.now() },
-				setWhere: isNotNull(shardMap.deleted_at),
-				target: shardMap.org_id,
-			})
-
-		/* the row that won: this router's, or a racer's that got there first */
-		const winner = await db.select().from(shardMap).where(eq(shardMap.org_id, orgId)).get()
+		/* the row that stands now: revived, this router's, or a racer's that got there first */
+		const winner = await db.select().from(shardMap).where(byOrg).get()
 		const mapping = this.rowToMapping(winner as typeof shardMap.$inferSelect)
 		mapping.d1Bookmark = session?.getBookmark() ?? undefined
-		this.log("shard-router.allocate", { orgId, shardId: mapping.shardId })
+		this.log("shard-router.allocate", { orgId, shardId: mapping.shardId, ...(revived ? { revived: true } : {}) })
 		this.populateCaches(orgId, mapping, { executionCtx, kv: deps.kv })
 		return mapping
 	}
@@ -167,30 +162,33 @@ class ShardRouter {
 		return `shard:${orgId}`
 	}
 
-	/**
-	 * Scan all shards, return the one with most remaining capacity.
-	 * Throws when every shard is full.
-	 */
-	private pickBestShard(counts: Array<{ count: number; shardId: number }>): number {
-		const usage = new Map<number, number>()
-		for (const row of counts) {
-			usage.set(row.shardId, row.count)
-		}
-
-		let bestShard = -1
-		let bestHeadroom = -1
-		for (let i = 0; i < this.totalShards; i++) {
-			const headroom = this.maxOrgsPerShard - (usage.get(i) ?? 0)
+	/** The D1 shard with the most remaining capacity; shards_full (503) when none has any */
+	private async pickShard(db: ReturnType<typeof drizzle>): Promise<number> {
+		const counts = await db
+			.select({ count: sql<number>`count(*)`.as("count"), shardId: shardMap.shard_id })
+			.from(shardMap)
+			.where(and(eq(shardMap.driver, "d1"), isNull(shardMap.deleted_at)))
+			.groupBy(shardMap.shard_id)
+			.all()
+		const usage = new Map(counts.map((row) => [row.shardId, row.count]))
+		let best = -1
+		let bestHeadroom = 0
+		for (let shard = 0; shard < this.totalShards; shard++) {
+			const headroom = this.maxOrgsPerShard - (usage.get(shard) ?? 0)
 			if (headroom > bestHeadroom) {
 				bestHeadroom = headroom
-				bestShard = i
+				best = shard
 			}
 		}
-
-		if (bestShard === -1 || bestHeadroom <= 0) {
-			throw new Error("All shards full — provision a new D1 database")
+		if (best === -1) {
+			/* an operator capacity problem, not the client's: provision another D1 database */
+			throw new CombError({
+				cause: "No shard has capacity for a new organization.",
+				errorKey: combErrorKeys.SHARDS_FULL,
+				status: "service_unavailable",
+			})
 		}
-		return bestShard
+		return best
 	}
 
 	private populateCaches(orgId: string, mapping: ShardMapping, { executionCtx, kv }: CacheTargets): void {
