@@ -14,12 +14,14 @@ import type { RelationConfig } from "./types.ts"
  * Intentionally loose to work with any codegen or manual construction.
  */
 type ListQueryParsed = {
-	cursor?: string | null
+	/* `| undefined` on each optional field: the list schema's output carries them as undefined, which
+	   exactOptionalPropertyTypes otherwise refuses */
+	cursor?: string | null | undefined
 	filterAst?: FilterAST | null | unknown
 	limit: number
-	page?: number | null
+	page?: number | null | undefined
 	parsedSort: SortField[]
-	q?: string | null
+	q?: string | null | undefined
 	[key: string]: unknown
 }
 

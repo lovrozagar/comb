@@ -1,4 +1,12 @@
 export { analyze } from "./analyzer.ts"
+export {
+	type CodegenConfig,
+	type DatabaseCodegen,
+	defineCodegenConfig,
+	type FtsTableConfig,
+	GENERATORS,
+	type GeneratorName,
+} from "./config.ts"
 export type {
 	AnalysisResult,
 	CheckConstraintMeta,

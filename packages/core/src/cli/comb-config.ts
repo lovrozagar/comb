@@ -1,27 +1,10 @@
 /** comb.config.ts: the databases codegen and migrate diff read their tables and FTS from. */
 import fs from "node:fs"
 import path from "node:path"
-import type { generateOrm } from "../codegen/generators/orm.ts"
+import type { CodegenConfig, DatabaseCodegen } from "../codegen/config.ts"
 import { CliError, type CliIo } from "./output.ts"
 
-type OrmConfig = Parameters<typeof generateOrm>[1]
-
-type FtsTableConfig = {
-	columns: string[]
-	tokenizer?: string
-}
-
-export type DatabaseCodegen = {
-	dialect?: OrmConfig["dialect"]
-	driver?: OrmConfig["driver"]
-	filePrefix?: string
-	fts?: Record<string, FtsTableConfig>
-	generators?: string[]
-	output?: Record<string, string>
-	tables: string
-}
-
-export type CodegenConfig = { databases: Record<string, DatabaseCodegen> }
+export type { CodegenConfig, DatabaseCodegen }
 
 /** The project's comb.config.ts (or .js), or undefined when it has none */
 export async function findCombConfig(cwd: string): Promise<CodegenConfig | undefined> {

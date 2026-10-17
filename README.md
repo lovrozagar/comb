@@ -136,7 +136,9 @@ Point a config at the file:
 
 ```ts
 /* comb.config.ts */
-export default {
+import { defineCodegenConfig } from "@lovrozagar/comb/codegen"
+
+export default defineCodegenConfig({
 	databases: {
 		core: {
 			dialect: "sqlite",
@@ -145,7 +147,7 @@ export default {
 			output: { default: "./src/db/_gen" },
 		},
 	},
-}
+})
 ```
 
 Generate:
@@ -363,7 +365,9 @@ A `CombError`'s `cause` is safe to show a client. The original error, which can 
 
 ```ts
 /* comb.config.ts */
-export default {
+import { defineCodegenConfig } from "@lovrozagar/comb/codegen"
+
+export default defineCodegenConfig({
 	databases: {
 		core: {
 			dialect: "sqlite", // "sqlite" | "postgres"
@@ -371,14 +375,16 @@ export default {
 			tables: "./src/db/core.tables.ts",
 			filePrefix: "db.core", // generated file name prefix
 			generators: ["dtos", "orm"], // omit to run all
-			output: { default: "./src/db/_gen" },
+			output: { default: "./src/db/_gen" }, // per generator too: { dtos: "./src/dtos" }
 			fts: {
 				post_translation: { columns: ["title", "body"], tokenizer: "porter unicode61" },
 			},
 		},
 	},
-}
+})
 ```
+
+`defineCodegenConfig` types the file, so a mistyped generator, `output` key or driver fails to compile. `output.default` is the directory every generator writes to unless the config names its own output; without it, files go beside the tables file.
 
 ### Generators
 

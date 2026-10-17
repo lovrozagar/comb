@@ -47,6 +47,10 @@ describe("package exports", () => {
 		expect(targets.filter((target) => !packed.includes(target))).toEqual([])
 	})
 
+	it("exports package.json, which tooling reads and node refuses unless it is exported", () => {
+		expect(manifest().exports["./package.json"]).toBe("./package.json")
+	})
+
 	it("the bin is a bun script", () => {
 		const bin = strip(manifest().bin.comb ?? "")
 		expect(readFileSync(join(CORE, bin), "utf8").split("\n")[0]).toBe("#!/usr/bin/env bun")

@@ -8,25 +8,9 @@ import type { GeneratorContext } from "../codegen/generators/context-types.ts"
 import { parseArgs } from "./args.ts"
 import { type DatabaseCodegen, databaseIn, loadCombConfig, tablesFile } from "./comb-config.ts"
 import { CliError, type CliIo } from "./output.ts"
+import { GENERATORS, type GeneratorName } from "../codegen/config.ts"
 
-/** Every generator, in the order codegen runs them */
-export const GENERATORS = [
-	"constraints",
-	"rows",
-	"relations",
-	"diagrams",
-	"columns",
-	"dtos",
-	"entities",
-	"manifest",
-	"field-names",
-	"orm",
-	"enum-checks",
-	"translations",
-	"fts",
-] as const
-
-type Generator = (typeof GENERATORS)[number]
+type Generator = GeneratorName
 
 /** What direct mode runs: no config means no package exports, ORM driver, translations or FTS */
 const DIRECT: readonly Generator[] = [
@@ -47,20 +31,21 @@ type Plan = {
 	db: DatabaseCodegen
 	/** Config mode: generated subpaths are added to package.json and filePrefix reaches the files */
 	exports: boolean
+	/** Where generated files go unless a generator has its own output: output.default, else the tables' directory */
+	outDir: string
 	/** The stem of every generated file name */
 	prefix: string
-	tablesDir: string
 }
 
 /** Where `generator` writes: the config's override, else `fallback` */
 const out = (plan: Plan, generator: Generator, fallback: string) => plan.db.output?.[generator] ?? fallback
-const beside = (plan: Plan, suffix: string) => path.join(plan.tablesDir, `${plan.prefix}.${suffix}`)
+const beside = (plan: Plan, suffix: string) => path.join(plan.outDir, `${plan.prefix}.${suffix}`)
 
 // lookup-table: each generator's call, so a plan runs as one loop
 const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 	columns: async (plan) => {
 		const { generateColumns } = await import("../codegen/generators/columns.ts")
-		const output = out(plan, "columns", plan.tablesDir)
+		const output = out(plan, "columns", plan.outDir)
 		generateColumns(
 			plan.ctx,
 			plan.exports ? { filePrefix: plan.db.filePrefix, output, updatePackageJson: true } : { output },
@@ -72,11 +57,11 @@ const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 	},
 	diagrams: async (plan) => {
 		const { generateDiagrams } = await import("../codegen/generators/diagrams.ts")
-		generateDiagrams(plan.ctx, { output: out(plan, "diagrams", path.join(plan.tablesDir, "diagrams")) })
+		generateDiagrams(plan.ctx, { output: out(plan, "diagrams", path.join(plan.outDir, "diagrams")) })
 	},
 	dtos: async (plan) => {
 		const { generateDtos } = await import("../codegen/generators/dtos/index.ts")
-		const output = out(plan, "dtos", path.join(plan.tablesDir, "dtos"))
+		const output = out(plan, "dtos", path.join(plan.outDir, "dtos"))
 		generateDtos(
 			plan.ctx,
 			plan.exports ? { filePrefix: plan.db.filePrefix, output, updatePackageJson: true } : { output },
@@ -102,7 +87,7 @@ const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 		const { fts } = plan.db
 		if (!fts || Object.keys(fts).length === 0) return
 		const { generateFts } = await import("../codegen/generators/fts.ts")
-		generateFts(plan.ctx, { filePrefix: plan.prefix, fts, output: out(plan, "fts", plan.tablesDir) })
+		generateFts(plan.ctx, { filePrefix: plan.prefix, fts, output: out(plan, "fts", plan.outDir) })
 	},
 	manifest: async (plan) => {
 		const { generateManifest } = await import("../codegen/generators/manifest.ts")
@@ -124,7 +109,7 @@ const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 	},
 	translations: async (plan) => {
 		const { generateTranslations } = await import("../codegen/generators/translations.ts")
-		generateTranslations(plan.ctx, { baseDir: plan.tablesDir, filePrefix: plan.prefix })
+		generateTranslations(plan.ctx, { baseDir: plan.outDir, filePrefix: plan.prefix })
 	},
 }
 
@@ -168,8 +153,9 @@ async function generate(database: Database, only: string | undefined, io: CliIo)
 		},
 		db: database.db,
 		exports: !database.direct,
+		outDir:
+			database.db.output?.["default"] === undefined ? tablesDir : path.resolve(io.cwd, database.db.output["default"]),
 		prefix: database.direct ? `db.${analysis.dbName}` : (database.db.filePrefix ?? `db.${database.name}`),
-		tablesDir,
 	}
 	for (const generator of GENERATORS) {
 		if (database.generators.includes(generator) && (only === undefined || only === generator))

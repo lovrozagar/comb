@@ -2,7 +2,7 @@ import { existsSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeIo, projects, writeTables } from "./__fixtures__/io.ts"
-import { GENERATORS } from "./codegen.ts"
+import { GENERATORS } from "../codegen/config.ts"
 import { runCli } from "./run.ts"
 
 const temp = projects()
@@ -42,6 +42,31 @@ describe("comb codegen: config mode", () => {
 		expect(files).toEqual(
 			expect.arrayContaining(["dtos", "diagrams", "rqb-cols", "sql-cols", "table-names", "translations"]),
 		)
+	})
+
+	it("writes under output.default, as the README shows, with a generator's own key still first", async () => {
+		const dir = project()
+		writeTables(dir)
+		config(dir, {
+			dialect: "sqlite",
+			driver: "d1",
+			fts: { post: { columns: ["title"] } },
+			output: { default: "./gen", rows: "./elsewhere/rows.gen.ts" },
+		})
+		expect(await runCli(["codegen"], makeIo(dir))).toBe(0)
+		expect(readdirSync(dir).filter((file) => file.includes(".gen."))).toEqual([])
+		const gen = readdirSync(join(dir, "gen"))
+		for (const file of [
+			"db.core.constraints.gen.ts",
+			"db.core.orm.gen.ts",
+			"db.core.fts.gen.sql",
+			"dtos",
+			"diagrams",
+			"translations",
+		]) {
+			expect(gen, file).toContain(file)
+		}
+		expect(existsSync(join(dir, "elsewhere", "rows.gen.ts"))).toBe(true)
 	})
 
 	it("honors the config's generators, output overrides, and -g for one generator", async () => {
