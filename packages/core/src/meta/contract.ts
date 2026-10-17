@@ -86,7 +86,11 @@ type CombQueryMeta = {
 	nulls?: Array<"first" | "last">
 	maxFilterConditions?: number
 	maxFilterDepth?: number
+	/** Values one filter binds in all, every in/nin member counted */
+	maxFilterValues?: number
 	maxInValues?: number
+	/** Whitespace-separated words one `q` may hold */
+	maxSearchTerms?: number
 	maxSortKeys?: number
 	/** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */
 	searchable: string[] | null

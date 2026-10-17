@@ -150,11 +150,27 @@ function readUniqueIndexes(raw: unknown): UniqueIndexMeta[] | "invalid" {
 type Diagnose = (m: string) => null
 type QueryRequired = Omit<
 	CombQueryMeta,
-	"filterFields" | "kind" | "maxFilterConditions" | "maxFilterDepth" | "maxInValues" | "maxSortKeys" | "nulls" | "v"
+	| "filterFields"
+	| "kind"
+	| "maxFilterConditions"
+	| "maxFilterDepth"
+	| "maxFilterValues"
+	| "maxInValues"
+	| "maxSearchTerms"
+	| "maxSortKeys"
+	| "nulls"
+	| "v"
 >
 type QueryOptional = Pick<
 	CombQueryMeta,
-	"filterFields" | "maxFilterConditions" | "maxFilterDepth" | "maxInValues" | "maxSortKeys" | "nulls"
+	| "filterFields"
+	| "maxFilterConditions"
+	| "maxFilterDepth"
+	| "maxFilterValues"
+	| "maxInValues"
+	| "maxSearchTerms"
+	| "maxSortKeys"
+	| "nulls"
 >
 
 const isPositiveInt = (value: unknown): value is number =>
@@ -203,7 +219,14 @@ function readQueryOptional(raw: Record<string, unknown>, diagnose: Diagnose): Qu
 		}
 		optional.nulls = nulls as Array<"first" | "last">
 	}
-	for (const key of ["maxFilterConditions", "maxFilterDepth", "maxInValues", "maxSortKeys"] as const) {
+	for (const key of [
+		"maxFilterConditions",
+		"maxFilterDepth",
+		"maxFilterValues",
+		"maxInValues",
+		"maxSearchTerms",
+		"maxSortKeys",
+	] as const) {
 		const value = raw[key]
 		if (value === undefined) continue
 		if (!isCount(value)) return diagnose(`query payload \`${key}\` needs a non-negative integer`)

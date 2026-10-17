@@ -440,7 +440,9 @@ describe("createListQuerySchema — advertises only what it honors", () => {
 		expect(facts["nulls"]).toEqual(["first", "last"])
 		expect(facts["maxFilterConditions"]).toBe(20)
 		expect(facts["maxFilterDepth"]).toBe(3)
-		expect(facts["maxInValues"]).toBe(100)
+		expect(facts["maxInValues"]).toBe(50)
+		expect(facts["maxFilterValues"]).toBe(60)
+		expect(facts["maxSearchTerms"]).toBe(8)
 		expect(facts["maxSortKeys"]).toBe(3)
 	})
 

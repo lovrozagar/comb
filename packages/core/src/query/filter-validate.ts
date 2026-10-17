@@ -22,9 +22,15 @@ type FilterLimits = {
 	/** Nested or()/and() groups below the top level */
 	maxDepth: number
 	maxInValues: number
+	/** Values the whole filter binds, every in/nin member counted: D1 binds at most 100 per statement */
+	maxValues: number
 }
 
-const FILTER_LIMITS: FilterLimits = { maxConditions: 20, maxDepth: 3, maxInValues: 100 }
+const FILTER_LIMITS: FilterLimits = { maxConditions: 20, maxDepth: 3, maxInValues: 50, maxValues: 60 }
+
+/** The parameters one condition binds */
+const boundBy = ({ operator, value }: FilterCondition) =>
+	Array.isArray(value) ? value.length : operator === "is" && typeof value !== "boolean" ? 0 : 1
 
 /** A value typed as its field declares, or why it cannot be */
 type Typed = { value: unknown } | { error: string }
@@ -92,17 +98,19 @@ function checkCondition(condition: FilterCondition, check: Check): FilterConditi
 }
 
 /** The group with every condition checked and typed, and how many conditions and levels it holds */
-function checkGroup(
-	group: FilterGroup,
-	check: Check,
-	depth: number,
-): { group: FilterGroup; conditions: number; depth: number } {
+type Shape = { conditions: number; depth: number; group: FilterGroup; values: number }
+
+function checkGroup(group: FilterGroup, check: Check, depth: number): Shape {
 	const subgroups = group.subgroups.map((subgroup) => checkGroup(subgroup, check, depth + 1))
+	/* counted on the typed conditions: is.true binds its boolean, is.null nothing */
+	const conditions = group.conditions.map((condition) => checkCondition(condition, check))
+	const values = conditions.reduce((total, condition) => total + boundBy(condition), 0)
 	return {
 		conditions: subgroups.reduce((total, sub) => total + sub.conditions, group.conditions.length),
 		depth: Math.max(depth, ...subgroups.map((sub) => sub.depth)),
+		values: subgroups.reduce((total, sub) => total + sub.values, values),
 		group: {
-			conditions: group.conditions.map((condition) => checkCondition(condition, check)),
+			conditions,
 			logic: group.logic,
 			subgroups: subgroups.map((sub) => sub.group),
 		},
@@ -126,6 +134,9 @@ function validateFilter(
 	const shape = checkGroup(ast.root, check, 0)
 	if (shape.conditions > check.limits.maxConditions) {
 		check.errors.push(`Too many filter conditions: ${shape.conditions} (max ${check.limits.maxConditions})`)
+	}
+	if (shape.values > check.limits.maxValues) {
+		check.errors.push(`Filter binds too many values: ${shape.values} (max ${check.limits.maxValues})`)
 	}
 	if (shape.depth > check.limits.maxDepth) {
 		check.errors.push(`Filter nesting too deep: ${shape.depth} (max ${check.limits.maxDepth})`)

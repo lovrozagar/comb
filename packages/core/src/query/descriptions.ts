@@ -58,7 +58,7 @@ function filterParamMeta(
 		`Fields: ${fieldList}.`,
 		"`like` is case-sensitive and `ilike` ignores ASCII case; `*` is the wildcard.",
 		"`in`/`nin` take `(a,b)`; `is` takes `null` or `notnull`.",
-		`At most ${limits.maxConditions} conditions, ${limits.maxDepth} nested groups, ${limits.maxInValues} in/nin values.`,
+		`At most ${limits.maxConditions} conditions, ${limits.maxDepth} nested groups, ${limits.maxInValues} in/nin values per list, ${limits.maxValues} values in all.`,
 	].join(" ")
 
 	const samples = entries.map(([field, type]) => sampleCondition(field, type))
@@ -88,9 +88,9 @@ function orderParamMeta(sort: readonly string[], maxSortKeys: number): ParamMeta
 	}
 }
 
-function searchParamMeta(search: readonly string[]): ParamMeta {
+function searchParamMeta(search: readonly string[], maxTerms: number): ParamMeta {
 	return {
-		description: `Free-text search over: ${search.join(", ")}. Whitespace-separated terms must all match.`,
+		description: `Free-text search over: ${search.join(", ")}. Whitespace-separated terms must all match; at most ${maxTerms} terms.`,
 		examples: ["acme", "acme corp"],
 	}
 }

@@ -64,9 +64,19 @@ type OutputStableShape<T extends z.ZodRawShape = z.ZodRawShape> = {
 
 /** Request bounds. Filter limits plus how many sort keys one `order` may name. */
 /** Bounds on one list request; `maxFilterLength` is checked before the filter is parsed */
-type ListQueryLimits = FilterLimits & { maxFilterLength: number; maxSortKeys: number }
+type ListQueryLimits = FilterLimits & { maxFilterLength: number; maxSearchTerms: number; maxSortKeys: number }
 
-const LIST_QUERY_LIMITS: ListQueryLimits = { ...FILTER_LIMITS, maxFilterLength: 2048, maxSortKeys: 3 }
+/*
+ * D1 binds at most 100 parameters per statement. The worst accepted request binds the filter's
+ * maxValues (60), one per search word (8), the three-key keyset predicate (10) and limit and
+ * offset (2): 80, which leaves 20 for the handler's own baseWhere.
+ */
+const LIST_QUERY_LIMITS: ListQueryLimits = {
+	...FILTER_LIMITS,
+	maxFilterLength: 2048,
+	maxSearchTerms: 8,
+	maxSortKeys: 3,
+}
 
 type ListQueryConfig<
 	T extends OutputStableShape<T> = Record<string, never>,
@@ -352,7 +362,18 @@ function createListQuerySchema<
 						.meta(filterParamMeta(filterConfig, (type) => OPERATORS_BY_TYPE[type], limits)),
 				}
 			: {}),
-		...(searchConfig ? { q: z.string().max(200).optional().meta(searchParamMeta(searchConfig)) } : {}),
+		...(searchConfig
+			? {
+					q: z
+						.string()
+						.max(200)
+						.refine((q) => q.split(/\s+/u).filter(Boolean).length <= limits.maxSearchTerms, {
+							message: `At most ${limits.maxSearchTerms} search terms`,
+						})
+						.optional()
+						.meta(searchParamMeta(searchConfig, limits.maxSearchTerms)),
+				}
+			: {}),
 		...(langEnabled ? { lang: langQueryField } : {}),
 		...(fieldsConfig ? { select: selectQueryField } : {}),
 	}
@@ -514,8 +535,10 @@ function createListQuerySchema<
 			kind: "query",
 			maxFilterConditions: limits.maxConditions,
 			maxFilterDepth: limits.maxDepth,
+			maxFilterValues: limits.maxValues,
 			maxInValues: limits.maxInValues,
 			maxLimit,
+			maxSearchTerms: limits.maxSearchTerms,
 			maxSortKeys: limits.maxSortKeys,
 			nulls: ["first", "last"],
 			/* Declared, and enforced at buildListQuery: a `q` with no resolver

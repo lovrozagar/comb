@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { OPERATORS_BY_TYPE, validateFilter } from "./filter-validate.ts"
 
+/** `a.in.(0,…,n-1)` */
+const list = (n: number) => `a.in.(${Array.from({ length: n }, (_, i) => i).join(",")})`
+
 describe("validateFilter", () => {
 	it("returns null for empty filter", () => {
 		expect(validateFilter("", {})).toBeNull()
@@ -85,11 +88,23 @@ describe("validateFilter — limits", () => {
 		if (result && !result.valid) expect(result.errors.join(";")).toContain("max 3")
 	})
 
-	it("rejects in lists over 100 values by default", () => {
-		const values = Array.from({ length: 101 }, (_, i) => i).join(",")
-		const result = validateFilter(`a.in.(${values})`, fields)
-		expect(result?.valid).toBe(false)
-		if (result && !result.valid) expect(result.errors.join(";")).toContain("max 100")
+	it("rejects in lists over 50 values, and filters binding over 60 values in all, by default (S-11)", () => {
+		expect(validateFilter(list(50), fields)?.valid).toBe(true)
+		expect(validateFilter(list(51), fields)).toEqual({
+			errors: ["in/nin list too large for 'a': 51 (max 50)"],
+			valid: false,
+		})
+		expect(validateFilter(`${list(50)},${list(10)}`, fields)?.valid).toBe(true)
+		expect(validateFilter(`${list(50)},${list(11)}`, fields)).toEqual({
+			errors: ["Filter binds too many values: 61 (max 60)"],
+			valid: false,
+		})
+	})
+
+	it("counts is.null as binding nothing and is.true as binding one value", () => {
+		const nulls = Array.from({ length: 20 }, () => "a.is.null").join(",")
+		expect(validateFilter(nulls, fields, { maxValues: 0 })?.valid).toBe(true)
+		expect(validateFilter("b.is.true", { b: "boolean" }, { maxValues: 0 })?.valid).toBe(false)
 	})
 
 	it("accepts custom limits", () => {
