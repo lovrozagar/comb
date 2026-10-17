@@ -12,7 +12,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../../../src/codegen/analyzer.ts"
 import { deriveEntityMeta } from "../../../src/codegen/entity-meta.ts"
-import { generateDtos } from "../../../src/codegen/generators/dtos.ts"
+import { generateDtos } from "../../../src/codegen/generators/dtos/index.ts"
 import { validateTables } from "../../../src/codegen/utils/validate.ts"
 
 const PRELUDE = `
@@ -111,7 +111,7 @@ export const post_tag = createTable("post_tag", {
 	it("declares immutable exactly as the fields absent from the update DTO", () => {
 		const { analysis, tablesPath } = analyzeSource(fullTable)
 		const outDir = path.join(tmpDir, "dtos")
-		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: outDir })
 
 		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
 		const updateBlock = generated.match(/postDtoUpdateSchema = z\.compile\(z\.object\(\{([\s\S]*?)\n\}\)\)/)?.[1] ?? ""
@@ -138,7 +138,7 @@ export const post_tag = createTable("post_tag", {
 	it("stamps the read schema and only the read schema", () => {
 		const { analysis, tablesPath } = analyzeSource(fullTable)
 		const outDir = path.join(tmpDir, "dtos")
-		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: outDir })
 
 		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
 		expect(generated).toContain(`import { combMeta } from "@lovrozagar/comb/meta"`)
@@ -154,7 +154,7 @@ export const post_tag = createTable("post_tag", {
 }, (t) => [primaryKey({ columns: [t.post_id, t.tag_id] })])
 `)
 		const outDir = path.join(tmpDir, "dtos")
-		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: outDir })
 
 		const generated = fs.readFileSync(path.join(outDir, "post_tag", "index.gen.ts"), "utf-8")
 		expect(generated).not.toContain("combMeta")
@@ -163,7 +163,10 @@ export const post_tag = createTable("post_tag", {
 	it("honours a custom importFrom, as the entities generator does", () => {
 		const { analysis, tablesPath } = analyzeSource(fullTable)
 		const outDir = path.join(tmpDir, "dtos")
-		generateDtos(analysis, tablesPath, { importFrom: "@acme/db", output: outDir }, tmpDir)
+		generateDtos(
+			{ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath },
+			{ importFrom: "@acme/db", output: outDir },
+		)
 
 		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
 		expect(generated).toContain(`import { combMeta } from "@acme/db/meta"`)
@@ -173,9 +176,9 @@ export const post_tag = createTable("post_tag", {
 		const { analysis, tablesPath } = analyzeSource(fullTable)
 		const outDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: outDir })
 		const first = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
-		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: outDir })
 		const second = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
 
 		expect(second).toBe(first)
@@ -332,7 +335,7 @@ export const post = createTable("post", {
 		)
 		const analysis = analyze(fp)
 		const outDir = path.join(tmpDir, "dtos")
-		generateDtos(analysis, fp, { output: outDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: fp }, { output: outDir })
 
 		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
 		expect(generated).toContain(`tenantColumn: "org_id"`)
@@ -401,7 +404,7 @@ export const delivery = createTable("delivery", {
 	it("reaches the generated read schema without the graph", () => {
 		const { analysis, tablesPath } = analyzeSource(machine)
 		const outDir = path.join(tmpDir, "dtos")
-		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: outDir })
 
 		const generated = fs.readFileSync(path.join(outDir, "delivery", "index.gen.ts"), "utf-8")
 		expect(generated).toContain(`column: "status"`)
@@ -471,7 +474,7 @@ export const post = createTable("post", {
 	it("reaches the generated read schema from deriveEntityMeta; create/update stay unstamped", () => {
 		const { analysis, tablesPath } = analyzeSource(twoIndexes)
 		const outDir = path.join(tmpDir, "dtos")
-		generateDtos(analysis, tablesPath, { output: outDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: outDir })
 
 		const generated = fs.readFileSync(path.join(outDir, "post", "index.gen.ts"), "utf-8")
 		const table = analysis.tables[0]!

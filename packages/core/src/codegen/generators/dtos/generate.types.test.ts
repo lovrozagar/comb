@@ -8,8 +8,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { analyze } from "../analyzer.ts"
-import { generateDtos } from "./dtos.ts"
+import { analyze } from "../../analyzer.ts"
+import { generateDtos } from "./generate.ts"
 
 const PRELUDE = `
 import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
@@ -44,7 +44,7 @@ export const doc = createTable("doc", {
 		)
 		const analysis = analyze(fp)
 		const outDir = path.join(tmpDir, "dtos")
-		generateDtos(analysis, fp, { output: outDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: fp }, { output: outDir })
 		/* Repeated schemas are hoisted into the shared module, so a column's zod
 		   may live in either file. */
 		return [
@@ -83,7 +83,12 @@ export const doc = createTable("doc", { id: c.id(), data: c.text("data") })
 `,
 		)
 		const analysis = analyze(fp)
-		expect(() => generateDtos(analysis, fp, { output: path.join(tmpDir, "dtos") }, tmpDir)).not.toThrow()
+		expect(() =>
+			generateDtos(
+				{ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: fp },
+				{ output: path.join(tmpDir, "dtos") },
+			),
+		).not.toThrow()
 	})
 })
 
@@ -98,7 +103,8 @@ describe("generateDtos — package.json exports", () => {
 		fs.rmSync(tmpDir, { force: true, recursive: true })
 	})
 
-	function generate(opts: { filePrefix?: string; updatePackageJson?: boolean } = {}) {
+	function generate(opts: { filePrefix?: string; updatePackageJson?: boolean } = {}): string[] {
+		const lines: string[] = []
 		const fp = path.join(tmpDir, "db.test.tables.ts")
 		fs.writeFileSync(
 			fp,
@@ -108,7 +114,11 @@ export const author = createTable("author", { id: c.id(), name: c.text("name") }
 `,
 		)
 		const analysis = analyze(fp)
-		generateDtos(analysis, fp, { output: path.join(tmpDir, "dtos"), ...opts }, tmpDir)
+		generateDtos(
+			{ analysis, cwd: tmpDir, log: (line) => lines.push(line), tablesPath: fp },
+			{ output: path.join(tmpDir, "dtos"), ...opts },
+		)
+		return lines
 	}
 
 	function exportsOf(): Record<string, string> {
@@ -125,10 +135,8 @@ export const author = createTable("author", { id: c.id(), name: c.text("name") }
 	})
 
 	it("warns rather than throwing when there is no package.json", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-		expect(() => generate({ updatePackageJson: true })).not.toThrow()
-		expect(warn).toHaveBeenCalledWith(expect.stringContaining("package.json not found"))
-		warn.mockRestore()
+		const lines = generate({ updatePackageJson: true })
+		expect(lines.some((line) => line.includes("package.json not found"))).toBe(true)
 	})
 
 	it("registers one export per entity plus the shared module", () => {

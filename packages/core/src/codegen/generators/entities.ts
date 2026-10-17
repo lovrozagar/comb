@@ -8,6 +8,7 @@ import fs from "node:fs"
 import path from "node:path"
 import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
+import { type ExportTarget, readExports } from "../utils/package-json.ts"
 
 type EntitiesConfig = {
 	importFrom?: string | undefined
@@ -79,12 +80,12 @@ function updatePackageJson(packageJsonPath: string, outputPath: string): void {
 	const packageDir = path.dirname(packageJsonPath)
 	const relativePath = `./${path.relative(packageDir, outputPath)}`
 
-	const existingExports = (pkg["exports"] ?? {}) as Record<string, string>
-	const newExports: Record<string, string> = {}
+	const existingExports = readExports(pkg)
+	const newExports: Record<string, ExportTarget> = {}
 
 	for (const [key, value] of Object.entries(existingExports)) {
 		if (key !== "./entities") {
-			newExports[key] = value as string
+			newExports[key] = value
 		}
 	}
 

@@ -15,7 +15,6 @@ import { describe, expect, it } from "vitest"
 const SRC = join(import.meta.dirname, "../../src")
 
 const KNOWN_MISSING = [
-	"codegen/entity-meta.ts",
 	"codegen/generators/fts-sql.ts",
 	"meta.ts",
 	"migrate/types.ts",

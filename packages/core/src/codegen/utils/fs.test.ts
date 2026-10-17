@@ -140,3 +140,32 @@ describe("codegen/utils/fs", () => {
 		})
 	})
 })
+
+describe("writeGenFile: files it did not write (S-13)", () => {
+	it("refuses to overwrite a file without the @generated header, and leaves it as it was", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-fs-guard-"))
+		try {
+			const file = path.join(dir, "constraints.gen.ts")
+			fs.writeFileSync(file, "// hand-written\nexport const keep = 1\n")
+			expect(() => writeGenFile(file, "export const x = 1\n", "comb")).toThrow(
+				`refusing to overwrite ${file}: it has no @generated header, so comb did not write it`,
+			)
+			expect(fs.readFileSync(file, "utf8")).toBe("// hand-written\nexport const keep = 1\n")
+		} finally {
+			fs.rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
+	it("overwrites a file it generated before, and an empty one", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-fs-guard-"))
+		try {
+			const file = path.join(dir, "a.gen.ts")
+			writeGenFile(file, "export const x = 1\n", "comb")
+			expect(writeGenFile(file, "export const x = 2\n", "comb")).toBe(true)
+			fs.writeFileSync(path.join(dir, "empty.gen.ts"), "")
+			expect(writeGenFile(path.join(dir, "empty.gen.ts"), "export const y = 1\n", "comb")).toBe(true)
+		} finally {
+			fs.rmSync(dir, { force: true, recursive: true })
+		}
+	})
+})

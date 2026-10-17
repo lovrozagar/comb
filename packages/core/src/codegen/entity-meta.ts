@@ -52,7 +52,7 @@ function timestampNames(table: TableMeta): { createdAt: string; deletedAt: strin
  */
 function tenantColumnOf(table: TableMeta): string | null {
 	const declared = table.fields.filter((f) => f.constraints.tenant)
-	if (declared.length !== 1) return null
+	if (declared.length !== 1 || declared[0]!.constraints.private) return null
 	return declared[0]!.name
 }
 
@@ -66,7 +66,7 @@ function tenantColumnOf(table: TableMeta): string | null {
  * See docs/state-machines.md §5.
  */
 function statesOf(table: TableMeta): CombEntityMetaInput["states"] {
-	const field = table.fields.find((f) => f.states !== null && f.enumValues !== null)
+	const field = table.fields.find((f) => f.states !== null && f.enumValues !== null && !f.constraints.private)
 	if (!field?.states || !field.enumValues) return null
 
 	return {
@@ -76,6 +76,11 @@ function statesOf(table: TableMeta): CombEntityMetaInput["states"] {
 		values: field.enumValues,
 	}
 }
+
+/* something other than the caller fills the key: comb (c.id's prefix), the database
+ * (c.serialId, autoIncrement) or a default; a natural key the caller supplies is not generated */
+// lookup-table: the key forms the caller does not fill
+const KEY_FILLED = /^\s*c\.(?:id|serialId)\s*\(|autoIncrement\s*:\s*true|\.(?:default|\$defaultFn|\$default)\s*\(/
 
 /**
  * Build entity facts, or null when the table has no single identity to publish.
@@ -92,18 +97,18 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 
 	/* `autogenerate` already defaults to true on the timestamp factories, so
 	   the parsed constraints cover both the explicit and the implied cases. */
-	const generated = table.fields.filter((f) => f.constraints.autogenerate).map((f) => f.name)
-
-	/* An id carrying a c.id() prefix is assigned by comb, an auto-increment id
-	   by the database. Neither is expressible as a field constraint. */
-	if (!generated.includes(primaryKey.name)) generated.unshift(primaryKey.name)
+	/* a private column is absent from every published list (docs/meta-contract.md §8) */
+	const published = table.fields.filter((f) => !f.constraints.private)
+	const generated = published.filter((f) => f.constraints.autogenerate).map((f) => f.name)
+	if (KEY_FILLED.test(primaryKey.raw) && !generated.includes(primaryKey.name)) generated.unshift(primaryKey.name)
 
 	/* Prefer the field set the generator actually emitted: whatever is missing
 	   from the update body is, by construction, immutable. Falling back to the
 	   predicate is for callers who have no generator output to hand. */
 	const immutable = updateFields
-		? table.fields.filter((f) => !updateFields.has(f.name)).map((f) => f.name)
-		: table.fields.filter(isExcludedFromUpdate).map((f) => f.name)
+		? published.filter((f) => !updateFields.has(f.name)).map((f) => f.name)
+		: published.filter(isExcludedFromUpdate).map((f) => f.name)
+	const hidden = new Set(table.fields.filter((f) => f.constraints.private).map((f) => f.name))
 
 	return {
 		generated,
@@ -114,7 +119,7 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 		softDelete: table.timestamps.deletedAt ? timestampNames(table).deletedAt : null,
 		states: statesOf(table),
 		tenantColumn: tenantColumnOf(table),
-		uniqueIndexes: table.uniqueIndexes,
+		uniqueIndexes: table.uniqueIndexes.filter((index) => !index.columns.some((column) => hidden.has(column))),
 	}
 }
 

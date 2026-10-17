@@ -34,6 +34,7 @@ function field(name: string): FieldMeta {
 		length: null,
 		name,
 		raw: `c.text("${name}")`,
+		schemaImports: [],
 		sqlName: name,
 	}
 }
@@ -153,5 +154,14 @@ describe("generateFieldNames", () => {
 		}
 		expect(pkg.exports["."]).toBe("./index.ts")
 		expect(pkg.exports["./field-names"]).toBe("./field-names.gen.ts")
+	})
+
+	it("keeps a single-target exports as the . export (S-13)", () => {
+		fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ exports: "./index.ts", name: "app" }))
+		generate([table("post", ["id"])], "core", true)
+		const pkg = JSON.parse(fs.readFileSync(path.join(tmpDir, "package.json"), "utf-8")) as {
+			exports: Record<string, string>
+		}
+		expect(pkg.exports["."]).toBe("./index.ts")
 	})
 })

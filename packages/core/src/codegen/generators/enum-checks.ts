@@ -46,8 +46,18 @@ function toCamelCase(s: string): string {
 	return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
 }
 
+/**
+ * A value as an SQL string literal's body, written inside a TS template literal: the SQL quote is
+ * doubled, then everything a template treats specially (backslash, backtick, `${`, line breaks).
+ */
 function escapeValue(val: string): string {
-	return val.replace(/'/g, "''")
+	return val
+		.replace(/'/g, "''")
+		.replace(/\\/g, "\\\\")
+		.replace(/`/g, "\\`")
+		.replace(/\$\{/g, "\\${")
+		.replace(/\n/g, "\\n")
+		.replace(/\r/g, "\\r")
 }
 
 export function generateEnumChecks(tables: TableMeta[], dbName: string, config: EnumChecksConfig, cwd: string): void {
@@ -80,7 +90,8 @@ export function generateEnumChecks(tables: TableMeta[], dbName: string, config: 
 		for (const ef of enumFields) {
 			const inList = ef.values.map((v) => `'${escapeValue(v)}'`).join(", ")
 			const checkName = `${table.sqlName}_${ef.fieldName}_enum`
-			lines.push(`\t\tcheck("${checkName}", sql\`\${table.${ef.fieldName}} IN (${inList})\`),`)
+			/* bracket access keeps the generated file valid under noPropertyAccessFromIndexSignature */
+			lines.push(`\t\tcheck("${checkName}", sql\`\${table[${JSON.stringify(ef.fieldName)}]} IN (${inList})\`),`)
 		}
 
 		lines.push("\t]")

@@ -28,6 +28,18 @@ type StateMachineMeta = {
 	transitions: Record<string, string[]> | null
 }
 
+/** A name a generated file must import, with the module the tables file gets it from. */
+type ImportRef = {
+	/** the module specifier as the tables file writes it */
+	from: string
+	/** the exported name (`*` for a namespace import, `default` for a default import) */
+	imported: string
+	/** the local name the tables file uses */
+	name: string
+	/** the module's file when it is in the project; null for a package */
+	path: string | null
+}
+
 /** Foreign key reference from this field to another table */
 type ForeignKeyRef = {
 	column: string
@@ -54,8 +66,10 @@ type FieldMeta = {
 	isNotNull: boolean
 	/** Whether .primaryKey() or c.id("prefix") */
 	isPrimaryKey: boolean
-	/** JSON schema name if c.json("name", schemaName) */
+	/** the schema expression of c.json(name, schema), as written */
 	jsonSchemaName: string | null
+	/** the names the field's generated schema uses and must import (schemas, unreadable enum consts) */
+	schemaImports: ImportRef[]
 	/** Length from positional arg or constraints */
 	length: number | null
 	/** Field name as defined in the table schema object */
@@ -127,6 +141,7 @@ type AnalysisResult = {
 }
 
 export type {
+	ImportRef,
 	AnalysisResult,
 	CheckConstraintMeta,
 	FieldConstraintsMeta,

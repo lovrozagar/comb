@@ -5,7 +5,7 @@ import { createProject } from "./utils/ts-morph.ts"
 
 function tableOf(source: string, imports: ImportsMeta = emptyImports()) {
 	const file = createProject().createSourceFile("db.x.tables.ts", source)
-	const declaration = file.getVariableStatements()[0]?.getDeclarations()[0]
+	const declaration = file.getVariableStatements().at(-1)?.getDeclarations()[0]
 	if (declaration === undefined) throw new Error("no declaration")
 	return { imports, table: parseTable(declaration, imports) }
 }
@@ -49,14 +49,21 @@ describe("parseTable", () => {
 	})
 
 	it("records the enum and JSON schema identifiers its fields use", () => {
-		const imports = emptyImports()
-		imports.identifiers.set("roles", "./enums")
-		const result = tableOf(
-			`export const u = sqliteTable("u", { role: c.enum("role", roles), prefs: c.json("prefs", prefsSchema) })`,
-			imports,
-		)
-		expect([...result.imports.enumImports]).toEqual([["roles", "./enums"]])
+		const result = tableOf(`import { roles } from "@app/enums"
+import { prefsSchema } from "./schemas"
+export const u = sqliteTable("u", { role: c.enum("role", roles), prefs: c.json("prefs", prefsSchema.optional()) })`)
+		expect([...result.imports.enumImports]).toEqual([["roles", "@app/enums"]])
 		expect([...result.imports.jsonSchemaImports]).toEqual(["prefsSchema"])
+		const [role, prefs] = result.table?.fields ?? []
+		expect(role).toMatchObject({
+			enumName: "roles",
+			enumValues: null,
+			schemaImports: [{ from: "@app/enums", name: "roles" }],
+		})
+		expect(prefs).toMatchObject({
+			jsonSchemaName: "prefsSchema.optional()",
+			schemaImports: [{ from: "./schemas", name: "prefsSchema" }],
+		})
 	})
 
 	it("is null when the call carries no column object", () => {

@@ -199,8 +199,8 @@ async function runCodegenDirect(tablesPath: string, io: CliIo, generator?: strin
 	}
 
 	if (shouldRun("dtos")) {
-		const { generateDtos } = await import("./codegen/generators/dtos.ts")
-		generateDtos(analysis, tablesPath, { output: path.join(tablesDir, "dtos") }, tablesDir)
+		const { generateDtos } = await import("./codegen/generators/dtos/index.ts")
+		generateDtos({ analysis, cwd: tablesDir, log: io.out, tablesPath }, { output: path.join(tablesDir, "dtos") })
 	}
 
 	if (shouldRun("entities")) {
@@ -329,16 +329,14 @@ async function runCodegenForDb(
 	}
 
 	if (shouldRun("dtos")) {
-		const { generateDtos } = await import("./codegen/generators/dtos.ts")
+		const { generateDtos } = await import("./codegen/generators/dtos/index.ts")
 		generateDtos(
-			analysis,
-			tablesPath,
+			{ analysis, cwd, log: io.out, tablesPath },
 			{
 				filePrefix: dbConfig.filePrefix,
 				output: output["dtos"] ?? path.join(tablesDir, "dtos"),
 				updatePackageJson: true,
 			},
-			cwd,
 		)
 	}
 

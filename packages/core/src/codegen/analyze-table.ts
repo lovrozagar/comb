@@ -2,7 +2,7 @@
  * One table definition: its fields, its options (composite key, unique indexes, CHECKs) and the
  * facts derived from them.
  */
-import { type ObjectLiteralExpression, SyntaxKind, type VariableDeclaration } from "ts-morph"
+import { type Node, type ObjectLiteralExpression, SyntaxKind, type VariableDeclaration } from "ts-morph"
 import { parseField } from "./analyze-field.ts"
 import type {
 	CheckConstraintMeta,
@@ -12,6 +12,8 @@ import type {
 	TimestampsMeta,
 	UniqueIndexMeta,
 } from "./analyzer-types.ts"
+import { readEnum } from "./utils/enum-source.ts"
+import { type ImportRef, importRefs, type JsonSchemaSource, readJsonSchema } from "./utils/schema-source.ts"
 import { getTableName } from "./utils/ts-morph.ts"
 
 /** Detect timestamp fields and style from field list */
@@ -93,18 +95,48 @@ function optionsOf(arg: import("ts-morph").Node | undefined): TableOptions {
 	return parseTableOptions(arrow.getBody().getText(), arrow.getParameters()[0]?.getName() ?? "t")
 }
 
-/** Every field of a table's column object; records the enum and JSON schema imports they use. */
+/* `.$type<z.infer<typeof schema>>()` types a column by a schema the DTO validates with */
+const INFERRED = /\.\$type<\s*z\.infer<\s*typeof\s+(\w+)\s*>\s*>/
+
+/** The names a field's generated schema uses: an unreadable enum const, a JSON schema's free names, an inferred type's schema. */
+function importedNames(enumReference: string | null, json: JsonSchemaSource | null, raw: string): string[] {
+	const names = [enumReference, ...(json === null ? [] : json.names), INFERRED.exec(raw)?.[1]]
+	return [...new Set(names.filter((name) => typeof name === "string"))]
+}
+
+/* the shared-schema pass must not hoist anything that names an import */
+function recordImports(refs: ImportRef[], enumReference: string | null, imports: ImportsMeta): void {
+	for (const ref of refs) {
+		if (ref.name === enumReference) imports.enumImports.set(ref.name, ref.from)
+		else imports.jsonSchemaImports.add(ref.name)
+	}
+}
+
+/** One field, with what only the AST knows: enum values and states, schema and imports. */
+function fieldOf(key: string, value: Node, imports: ImportsMeta): FieldMeta {
+	const raw = value.getText()
+	const enumSource = readEnum(value)
+	const enumReference = enumSource === null ? null : enumSource.reference
+	const json = readJsonSchema(value)
+	const schemaImports = importRefs(importedNames(enumReference, json, raw), value.getSourceFile())
+	recordImports(schemaImports, enumReference, imports)
+	return {
+		...parseField(key, raw),
+		enumName: enumReference,
+		enumValues: enumSource?.values ?? null,
+		jsonSchemaName: json?.expression ?? null,
+		schemaImports,
+		states: enumSource?.machine ?? null,
+	}
+}
+
+/** Every field of a table's column object; records the enum and schema names they import. */
 function fieldsOf(columns: ObjectLiteralExpression, imports: ImportsMeta): FieldMeta[] {
 	const fields: FieldMeta[] = []
 	for (const property of columns.getProperties()) {
 		const assignment = property.asKind(SyntaxKind.PropertyAssignment)
 		const value = assignment?.getInitializer()
-		if (assignment === undefined || value === undefined) continue
-		const field = parseField(assignment.getName(), value.getText())
-		fields.push(field)
-		const enumModule = field.enumName === null ? undefined : imports.identifiers.get(field.enumName)
-		if (field.enumName !== null && enumModule !== undefined) imports.enumImports.set(field.enumName, enumModule)
-		if (field.jsonSchemaName) imports.jsonSchemaImports.add(field.jsonSchemaName)
+		if (assignment !== undefined && value !== undefined) fields.push(fieldOf(assignment.getName(), value, imports))
 	}
 	return fields
 }

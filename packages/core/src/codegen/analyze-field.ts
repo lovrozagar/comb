@@ -1,10 +1,11 @@
 /**
  * One column of a table definition, read from its initializer's text: the helper, the SQL name,
- * keys, references, enum values, states and annotations every generator needs.
+ * keys, references and annotations every generator needs. Enum values and states need the AST
+ * and are read by analyze-table.
  */
 import type { FieldMeta, ForeignKeyRef } from "./analyzer-types.ts"
 import { parseFieldConstraints } from "./annotations.ts"
-import { extractEnumFromType, extractEnumValues, extractLength, extractStates } from "./utils/ts-morph.ts"
+import { extractLength } from "./utils/ts-morph.ts"
 
 /**
  * Extract Drizzle helper name from raw initializer text.
@@ -13,14 +14,6 @@ import { extractEnumFromType, extractEnumValues, extractLength, extractStates } 
 function extractDrizzleHelper(raw: string): string {
 	const match = raw.match(/c\.(\w+)[<(]/)
 	return match?.[1] ?? "unknown"
-}
-
-/**
- * Extract JSON schema name from c.json("columnName", schemaName) call
- */
-function extractJsonSchemaFromCall(raw: string): string | null {
-	const match = raw.match(/c\.json(?:<[^>]+>)?\("[\w_]+",\s*(\w+)(?:,\s*\{[^}]*\})?\)/)
-	return match?.[1] ?? null
 }
 
 /**
@@ -61,10 +54,6 @@ export function parseField(key: string, raw: string): FieldMeta {
 	const isPrimaryKey = /\.primaryKey\(/.test(raw) || ID_HELPERS.test(raw)
 	const isNotNull = /\.notNull\(\)/.test(raw) || isPrimaryKey
 	const drizzleHelper = extractDrizzleHelper(raw)
-	const enumName = extractEnumFromType(raw)
-	const enumValues = extractEnumValues(raw)
-	const states = extractStates(raw)
-	const jsonSchemaName = extractJsonSchemaFromCall(raw)
 	const foreignKey = extractForeignKey(raw, key)
 	const length = extractLength(raw)
 
@@ -84,16 +73,19 @@ export function parseField(key: string, raw: string): FieldMeta {
 	return {
 		constraints,
 		drizzleHelper,
-		enumName,
-		enumValues,
-		states,
+		/* read from the AST by the table pass, which can follow consts and imports */
+		enumName: null,
+		enumValues: null,
+		states: null,
 		foreignKey: fk,
 		isNotNull,
 		isPrimaryKey,
-		jsonSchemaName,
+		/* read from the AST by the table pass */
+		jsonSchemaName: null,
 		length,
 		name: key,
 		raw,
+		schemaImports: [],
 		sqlName: sqlNameOf(key, raw),
 	}
 }

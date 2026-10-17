@@ -170,3 +170,24 @@ export const post = createTable("post", { id: c.id(), title: c.text("title") })
 		expect(exports["./table-names"]).toContain("app.db-test.table-names.gen.ts")
 	})
 })
+
+describe("generateColumns — a package whose exports is a single target (S-13)", () => {
+	it("keeps that target as the . export", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-columns-s13-"))
+		try {
+			const fp = path.join(dir, "db.test.tables.ts")
+			fs.writeFileSync(
+				fp,
+				`import { sqliteTable, text } from "drizzle-orm/sqlite-core"\nexport const post = sqliteTable("post", { id: text("id").primaryKey() })\n`,
+			)
+			fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ exports: "./index.ts", name: "app" }))
+			generateColumns(analyze(fp).tables, fp, { output: path.join(dir, "cols"), updatePackageJson: true }, dir)
+			const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf-8")) as {
+				exports: Record<string, string>
+			}
+			expect(pkg.exports["."]).toBe("./index.ts")
+		} finally {
+			fs.rmSync(dir, { force: true, recursive: true })
+		}
+	})
+})

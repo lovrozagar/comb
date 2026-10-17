@@ -188,7 +188,7 @@ export const middle = createTable("middle", { id: c.id() })
 		expect(analyze(writeTablesFile("", "tables.ts")).dbName).toBe("db")
 	})
 
-	it("extracts enum names", () => {
+	it("reads the values of an enum held in a local const", () => {
 		const fp = writeTablesFile(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
 
@@ -206,7 +206,7 @@ export const user = createTable("user", {
 `)
 		const result = analyze(fp)
 		const roleField = result.tables[0].fields.find((f) => f.name === "role")
-		expect(roleField?.enumName).toBe("ROLES")
+		expect(roleField).toMatchObject({ enumName: null, enumValues: ["admin", "user"] })
 	})
 
 	it("extracts a state machine declared as c.enum's third argument", () => {

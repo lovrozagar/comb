@@ -145,3 +145,24 @@ describe("generateEntities", () => {
 		expect(exports["./entities"]).toBe("./db.test.entities.gen.ts")
 	})
 })
+
+describe("generateEntities — a package whose exports is a single target (S-13)", () => {
+	it("keeps that target as the . export", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-entities-s13-"))
+		try {
+			fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ exports: "./index.ts", name: "app" }))
+			generateEntities(
+				[makeTable("user", "usr")],
+				"test",
+				{ output: path.join(dir, "e.gen.ts"), updatePackageJson: true },
+				dir,
+			)
+			const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf-8")) as {
+				exports: Record<string, string>
+			}
+			expect(pkg.exports["."]).toBe("./index.ts")
+		} finally {
+			fs.rmSync(dir, { force: true, recursive: true })
+		}
+	})
+})

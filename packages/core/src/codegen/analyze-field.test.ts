@@ -36,9 +36,4 @@ describe("parseField", () => {
 		})
 		expect(parseField("x", 'c.text("x")').foreignKey).toBeNull()
 	})
-
-	it("reads the JSON schema a c.json column names", () => {
-		expect(parseField("settings", 'c.json("settings", settingsSchema)').jsonSchemaName).toBe("settingsSchema")
-		expect(parseField("settings", 'c.text("settings")').jsonSchemaName).toBeNull()
-	})
 })

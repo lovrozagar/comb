@@ -51,7 +51,8 @@ function extractChecksum(line: string): string | null {
 
 /**
  * Write a generated file with a checksum header.
- * Skips the write when the existing file's checksum matches (idempotent).
+ * Skips the write when the existing file's checksum matches (idempotent), and refuses to
+ * overwrite a file that carries no @generated header.
  * Returns true if the file was written, false if skipped.
  */
 export function writeGenFile(filePath: string, body: string, generator: string): boolean {
@@ -62,12 +63,14 @@ export function writeGenFile(filePath: string, body: string, generator: string):
 	const header = buildHeader(hash, generator, ext)
 	const fullContent = `${header}\n${normalized}`
 
-	try {
+	if (fs.existsSync(filePath)) {
 		const existing = fs.readFileSync(filePath, "utf-8")
 		const firstLine = existing.split("\n")[0] ?? ""
+		/* a file without the header is someone's own code that happens to sit at the output path */
+		if (existing !== "" && !firstLine.includes("@generated")) {
+			throw new Error(`refusing to overwrite ${filePath}: it has no @generated header, so comb did not write it`)
+		}
 		if (extractChecksum(firstLine) === hash) return false
-	} catch {
-		/* file does not exist — proceed to write */
 	}
 
 	const dir = path.dirname(filePath)
@@ -76,6 +79,17 @@ export function writeGenFile(filePath: string, body: string, generator: string):
 	fs.writeFileSync(tmpPath, fullContent)
 	fs.renameSync(tmpPath, filePath)
 	return true
+}
+
+/** The `_generated` marker of the JSON file at `filePath`, or undefined when there is none. */
+function readGeneratedMarker(filePath: string): unknown {
+	if (!fs.existsSync(filePath)) return undefined
+	try {
+		return (JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, unknown>)["_generated"]
+	} catch {
+		// reason: a file that is not JSON carries no marker; the caller rewrites it
+		return undefined
+	}
 }
 
 /**
@@ -88,13 +102,7 @@ export function writeGenJsonFile(filePath: string, data: unknown, generator: str
 	const hash = contentHash(json)
 	const marker = `${generator} checksum:${hash}`
 
-	try {
-		const existing = fs.readFileSync(filePath, "utf-8")
-		const parsed = JSON.parse(existing) as Record<string, unknown>
-		if (parsed["_generated"] === marker) return false
-	} catch {
-		/* file does not exist or is invalid JSON — proceed to write */
-	}
+	if (readGeneratedMarker(filePath) === marker) return false
 
 	const output = { _generated: marker, ...(data as Record<string, unknown>) }
 	const dir = path.dirname(filePath)

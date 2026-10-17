@@ -13,6 +13,7 @@ import path from "node:path"
 import type { TableMeta } from "../analyzer-types.ts"
 import { snakeToCamel } from "../utils/case.ts"
 import { ensureDir, writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
+import { type ExportTarget, readExports } from "../utils/package-json.ts"
 
 type ColumnsConfig = {
 	filePrefix?: string | undefined
@@ -158,8 +159,8 @@ function updatePackageJson(
 	const absoluteOutputDir = path.resolve(cwd, outputDir)
 	const relativeOutputDir = `./${path.relative(packageDir, absoluteOutputDir)}`
 
-	const existingExports = (pkg["exports"] ?? {}) as Record<string, string>
-	const newExports: Record<string, string> = {}
+	const existingExports = readExports(pkg)
+	const newExports: Record<string, ExportTarget> = {}
 
 	/* Preserve non-generated exports */
 	for (const [key, value] of Object.entries(existingExports)) {
@@ -169,7 +170,7 @@ function updatePackageJson(
 			!key.startsWith("./sql-cols/") &&
 			key !== "./table-names"
 		) {
-			newExports[key] = value as string
+			newExports[key] = value
 		}
 	}
 

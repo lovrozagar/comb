@@ -2,8 +2,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { analyze } from "../analyzer.ts"
-import { generateDtos } from "./dtos.ts"
+import { analyze } from "../../analyzer.ts"
+import { generateDtos } from "./generate.ts"
 
 describe("generateDtos", () => {
 	let tmpDir: string
@@ -52,7 +52,7 @@ export const user = createTable("user", {
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		/* Shared file */
 		const sharedPath = path.join(dtosDir, "_shared", "index.gen.ts")
@@ -70,7 +70,7 @@ export const user = createTable("user", {
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
 		expect(content).toContain("userDtoReadSchema")
@@ -84,7 +84,7 @@ export const user = createTable("user", {
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		/* Schemas may be in entity or shared file (deduped) */
 		const entity = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
@@ -100,7 +100,7 @@ export const user = createTable("user", {
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		const entity = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
 		const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
@@ -113,7 +113,7 @@ export const user = createTable("user", {
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
 		expect(shared).toContain("timestampsCreatedUpdatedDeletedReadSnakeCase")
@@ -125,7 +125,7 @@ export const user = createTable("user", {
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
 		expect(content).toContain("...timestampsCreatedUpdatedDeletedReadSnakeCase")
@@ -138,7 +138,7 @@ export const user = createTable("user", {
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
 		expect(content).toContain("export type UserDtoRead =")
@@ -151,7 +151,7 @@ export const user = createTable("user", {
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
 		/* id should be optional in create */
@@ -167,7 +167,7 @@ export const user = createTable("user", {
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		const content = fs.readFileSync(path.join(dtosDir, "user", "index.gen.ts"), "utf-8")
 		const updateMatch = content.match(/userDtoUpdateSchema[\s\S]*?^\}\)/m)
@@ -214,7 +214,10 @@ export const item = createTable("item", {
 			const analysis = writeTablesAndAnalyze(schema)
 			const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 			const dtosDir = path.join(tmpDir, "dtos")
-			generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+			generateDtos(
+				{ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath },
+				{ output: dtosDir },
+			)
 			const entityDir = path.join(dtosDir, "item")
 			const entity = fs.readFileSync(path.join(entityDir, "index.gen.ts"), "utf-8")
 			const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
@@ -300,7 +303,7 @@ export const post = createTable("post", { id: c.id(), title: c.text("title") })
 		const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 		const dtosDir = path.join(tmpDir, "dtos")
 
-		generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+		generateDtos({ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath }, { output: dtosDir })
 
 		expect(fs.existsSync(path.join(dtosDir, "user", "index.gen.ts"))).toBe(true)
 		expect(fs.existsSync(path.join(dtosDir, "post", "index.gen.ts"))).toBe(true)
@@ -343,7 +346,10 @@ export const gamma = createTable("gamma", {
 			const analysis = writeTablesAndAnalyze(dedupSchema)
 			const tablesPath = path.join(tmpDir, "db.test.tables.ts")
 			const dtosDir = path.join(tmpDir, "dtos")
-			generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
+			generateDtos(
+				{ analysis: analysis, cwd: tmpDir, log: () => undefined, tablesPath: tablesPath },
+				{ output: dtosDir },
+			)
 			return {
 				alpha: fs.readFileSync(path.join(dtosDir, "alpha", "index.gen.ts"), "utf-8"),
 				beta: fs.readFileSync(path.join(dtosDir, "beta", "index.gen.ts"), "utf-8"),
@@ -378,111 +384,6 @@ export const gamma = createTable("gamma", {
 		it("adds usage count comment to shared constants", () => {
 			const { shared } = generateDedup()
 			expect(shared).toMatch(/export const _z\d+ = .+ \/\* \d+x \*\//)
-		})
-	})
-
-	describe("relative enum imports", () => {
-		function writeEnumAndTables() {
-			/* Write enum file alongside tables */
-			const enumContent = `export const STATUS_ENUM = ["active", "inactive", "archived"] as const\n`
-			fs.writeFileSync(path.join(tmpDir, "enums.ts"), enumContent)
-
-			const tablesContent = `
-import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
-import { STATUS_ENUM } from "./enums"
-const c = {
-	id: (prefix: string) => text("id").primaryKey(),
-	text: (name: string, opts?: any) => text(name),
-	enum: (name: string, values: readonly string[]) => text(name),
-	createdAt: (name: string) => integer(name, { mode: "number" }).notNull(),
-}
-export const item = createTable("item", {
-	id: c.id("itm"),
-	status: c.enum("status", STATUS_ENUM).notNull(),
-	label: c.text("label", { max: 100 }),
-	created_at: c.createdAt("created_at"),
-})
-`
-			const fp = path.join(tmpDir, "db.test.tables.ts")
-			fs.writeFileSync(fp, tablesContent)
-			return analyze(fp)
-		}
-
-		it("preserves relative import path in generated DTO", () => {
-			const analysis = writeEnumAndTables()
-			const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-			const dtosDir = path.join(tmpDir, "dtos")
-			generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
-
-			const entity = fs.readFileSync(path.join(dtosDir, "item", "index.gen.ts"), "utf-8")
-			/* Import should use relative path from the original import */
-			expect(entity).toContain('import { STATUS_ENUM } from "./enums"')
-		})
-
-		it("enum schemas stay inline (not shared) due to external identifier", () => {
-			const analysis = writeEnumAndTables()
-			const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-			const dtosDir = path.join(tmpDir, "dtos")
-			generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
-
-			const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
-			/* Shared file must NOT contain the enum ref */
-			expect(shared).not.toContain("STATUS_ENUM")
-		})
-
-		it("uses intra-entity local const for repeated enum", () => {
-			const analysis = writeEnumAndTables()
-			const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-			const dtosDir = path.join(tmpDir, "dtos")
-			generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
-
-			const entity = fs.readFileSync(path.join(dtosDir, "item", "index.gen.ts"), "utf-8")
-			/* Enum appears 4x (read, readPartial, create, update) → should get local _l* const */
-			expect(entity).toMatch(/const _l\d+ = z\.enum\(STATUS_ENUM\)/)
-		})
-
-		it("works with lowercase enum const names", () => {
-			/* Write enum file with camelCase name */
-			fs.writeFileSync(path.join(tmpDir, "enums.ts"), `export const statusValues = ["active", "inactive"] as const\n`)
-			const tablesContent = `
-import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
-import { statusValues } from "./enums"
-const c = {
-	id: (prefix: string) => text("id").primaryKey(),
-	enum: (name: string, values: readonly string[]) => text(name),
-	createdAt: (name: string) => integer(name, { mode: "number" }).notNull(),
-}
-export const thing = createTable("thing", {
-	id: c.id("tng"),
-	status: c.enum("status", statusValues).notNull(),
-	created_at: c.createdAt("created_at"),
-})
-`
-			const fp = path.join(tmpDir, "db.test.tables.ts")
-			fs.writeFileSync(fp, tablesContent)
-			const analysis = analyze(fp)
-			const dtosDir = path.join(tmpDir, "dtos")
-			generateDtos(analysis, fp, { output: dtosDir }, tmpDir)
-
-			const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
-			const entity = fs.readFileSync(path.join(dtosDir, "thing", "index.gen.ts"), "utf-8")
-			/* Lowercase enum must NOT leak into shared file */
-			expect(shared).not.toContain("statusValues")
-			/* Entity must import and use it */
-			expect(entity).toContain('import { statusValues } from "./enums"')
-			expect(entity).toContain("z.enum(statusValues)")
-		})
-
-		it("generates correct z.enum() with imported const", () => {
-			const analysis = writeEnumAndTables()
-			const tablesPath = path.join(tmpDir, "db.test.tables.ts")
-			const dtosDir = path.join(tmpDir, "dtos")
-			generateDtos(analysis, tablesPath, { output: dtosDir }, tmpDir)
-
-			const entity = fs.readFileSync(path.join(dtosDir, "item", "index.gen.ts"), "utf-8")
-			const shared = fs.readFileSync(path.join(dtosDir, "_shared", "index.gen.ts"), "utf-8")
-			const all = entity + shared
-			expect(all).toContain("z.enum(STATUS_ENUM)")
 		})
 	})
 })

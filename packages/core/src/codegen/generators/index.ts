@@ -12,7 +12,7 @@ export {
 	MANIFEST_VERSION,
 } from "./manifest.ts"
 export { generateDiagrams } from "./diagrams.ts"
-export { generateDtos } from "./dtos.ts"
+export { generateDtos } from "./dtos/index.ts"
 export { generateEntities } from "./entities.ts"
 export { generateEnumChecks } from "./enum-checks.ts"
 export { generateFieldNames } from "./field-names.ts"

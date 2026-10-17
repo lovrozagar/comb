@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import * as z from "zod"
 import { analyze } from "../../../src/codegen/analyzer.ts"
 import type { UniqueIndexMeta } from "../../../src/codegen/analyzer-types.ts"
-import { generateDtos } from "../../../src/codegen/generators/dtos.ts"
+import { generateDtos } from "../../../src/codegen/generators/dtos/index.ts"
 import { COMB_META_KEY, readCombEntityMeta, readCombQueryMeta } from "../../../src/meta.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { depthOfKey, readRootKey, searchSchemaKey } from "./honey-search.ts"
@@ -59,7 +59,10 @@ beforeAll(async () => {
 
 	const analysis = analyze(tablesPath)
 	articleUniqueIndexes = analysis.tables.find((t) => t.sqlName === "article")!.uniqueIndexes
-	generateDtos(analysis, tablesPath, { output: path.join(WORK_DIR, "dtos") }, WORK_DIR)
+	generateDtos(
+		{ analysis: analysis, cwd: WORK_DIR, log: () => undefined, tablesPath: tablesPath },
+		{ output: path.join(WORK_DIR, "dtos") },
+	)
 
 	generated = (await import(path.join(WORK_DIR, "dtos", "article", "index.gen.ts"))) as Generated
 })

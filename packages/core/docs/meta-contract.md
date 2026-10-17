@@ -112,10 +112,10 @@ stamps `v` itself; callers never write the version.
 
 Two call sites inside comb produce it automatically:
 
-| Producer                                      | Stamps                                  | Source of truth               |
-| --------------------------------------------- | --------------------------------------- | ----------------------------- |
-| `generateDtos` (`codegen/generators/dtos.ts`) | `CombEntityMeta` on the **read** schema | `TableMeta` from the analyzer |
-| `createListQuerySchema` (`query/schema.ts`)   | `CombQueryMeta` on the returned schema  | its own `config` argument     |
+| Producer                                               | Stamps                                  | Source of truth               |
+| ------------------------------------------------------ | --------------------------------------- | ----------------------------- |
+| `generateDtos` (`codegen/generators/dtos/generate.ts`) | `CombEntityMeta` on the **read** schema | `TableMeta` from the analyzer |
+| `createListQuerySchema` (`query/schema.ts`)            | `CombQueryMeta` on the returned schema  | its own `config` argument     |
 
 ### 3.1 Stamp the schema you return, not the one you build from
 
