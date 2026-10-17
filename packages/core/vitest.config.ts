@@ -2,11 +2,12 @@ import { defineConfig } from "vitest/config"
 
 export default defineConfig({
 	test: {
-		include: ["tests/**/*.test.ts"],
+		include: ["tests/**/*.test.ts", "lint/**/*.test.ts"],
 		/* tests/bun holds the bun:sqlite / bun:test suites — `bun run test:bun`. */
 		exclude: ["tests/bun/**", "node_modules/**"],
 		coverage: {
-			include: ["src/**"],
+			include: ["src/**", "lint/**"],
+			exclude: ["**/*.test.ts"],
 			provider: "v8",
 			reporter: ["text", "json-summary"],
 			/*

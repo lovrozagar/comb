@@ -80,6 +80,7 @@
 		"@vitest/coverage-v8": "catalog:",
 		"bun-types": "catalog:",
 		"drizzle-orm": "catalog:",
+		"oxc-parser": "catalog:",
 		"ts-morph": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:",
