@@ -418,6 +418,34 @@ describe("buildListQuery — a table without an id column", () => {
 	})
 })
 
+describe("buildListQuery — cursor values of the wrong type (S-M6)", () => {
+	const event = sqliteTable("event", {
+		active: integer("active", { mode: "boolean" }),
+		id: text("id").primaryKey(),
+		seen_at: integer("seen_at", { mode: "timestamp_ms" }),
+	})
+	const run = (field: string, row: Record<string, unknown>) => {
+		const parsedSort = [{ direction: "desc" as const, field }]
+		const cursor = createCursor({ id: "evt_1", ...row }, parsedSort)
+		return () => buildListQuery({ parsed: { cursor, filterAst: null, limit: 5, parsedSort }, table: event })
+	}
+
+	it.each([
+		["a string on a timestamp column", "seen_at", { seen_at: "2024" }],
+		["a number on a timestamp column", "seen_at", { seen_at: 1 }],
+		["a string on a boolean column", "active", { active: "yes" }],
+		["a number as the id", "seen_at", { id: 7, seen_at: new Date(1) }],
+	])("answers %s with a 400 invalid_cursor", (_case, field, row) => {
+		expect(run(field, row)).toThrow(expect.objectContaining({ errorKey: "invalid_cursor", status: 400 }))
+	})
+
+	it("accepts the values a real row encodes, nulls included", () => {
+		expect(run("seen_at", { seen_at: new Date(1) })).not.toThrow()
+		expect(run("seen_at", { seen_at: null })).not.toThrow()
+		expect(run("active", { active: false })).not.toThrow()
+	})
+})
+
 describe("buildListQuery — no sort and no created_at to default to", () => {
 	it("orders by the id alone, descending", () => {
 		const note = sqliteTable("note", { id: text("id").primaryKey() })

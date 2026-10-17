@@ -5,6 +5,7 @@ import { combErrorKeys } from "../../types.ts"
 import { CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT, readCursor } from "../cursor.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
+import { assertCursorFits } from "./cursor-fit.ts"
 import { keysetSQL, orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
 import type { LikeSearchResolver } from "./search.ts"
 import type { RelationConfig } from "./types.ts"
@@ -124,6 +125,7 @@ function finish({ keyset, parsed, sort, tiebreak, where }: Finish): ListQueryRes
 			})
 		}
 		const cursor = readCursor(parsed.cursor, sort)
+		assertCursorFits([...keyset.keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
 		const after = keysetSQL(keyset.keys, cursor.values, tiebreak, cursor.id)
 		return {
 			limit: parsed.limit + 1,
