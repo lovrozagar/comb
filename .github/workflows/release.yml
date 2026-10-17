@@ -78,7 +78,8 @@ jobs:
     name: npmjs.com
     needs: test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # the tarball wait alone may take 15 minutes (.github/scripts/npm-tarball-wait.sh)
+    timeout-minutes: 25
     permissions:
       contents: read
       id-token: write
@@ -116,9 +117,9 @@ jobs:
             exit 0
           fi
           if npm view "${name}@${tag}" version >/dev/null 2>&1; then
-            echo "npm has ${name}@${tag} metadata but no tarball — refusing to re-publish the same version"
-            echo "Bump the package version and tag a new release."
-            exit 1
+            # an earlier run published it; its tarball may still be on its way through the CDN
+            echo "npm has ${name}@${tag} metadata; waiting for its tarball instead of re-publishing"
+            exec "${GITHUB_WORKSPACE}/.github/scripts/npm-tarball-wait.sh" "$name" "$tag"
           fi
 
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
@@ -180,17 +181,7 @@ jobs:
           fi
 
           # Metadata can land minutes before the tarball is downloadable.
-          tarball="https://registry.npmjs.org/${name}/-/${name##*/}-${tag}.tgz"
-          for i in $(seq 1 30); do
-            if curl -fsSIL "$tarball" >/dev/null 2>&1; then
-              echo "npm tarball for ${name}@${tag} is downloadable"
-              exit 0
-            fi
-            echo "waiting for npm tarball (${i}/30)…"
-            sleep 10
-          done
-          echo "npm has ${name}@${tag} metadata but tarball stayed 404 for 5m"
-          exit 1
+          "${GITHUB_WORKSPACE}/.github/scripts/npm-tarball-wait.sh" "$name" "$tag"
 
   gh-pkg:
     name: GitHub Packages
