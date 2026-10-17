@@ -11,18 +11,24 @@ const DECLARED = new Set([...Object.keys(manifest.dependencies ?? {}), ...Object
 
 const SHARED_ROOTS = new Set(["error.ts", "types.ts", "lru.ts", "id.ts", "states.ts"])
 
+/* runtime code lands in a consumer bundle (Workers, Vite); the tooling (ts-morph, node:fs,
+ * child_process) must never come along with it */
+const RUNTIME = new Set(["query", "sqlite", "pg", "error", "types", "lru", "id", "states", "meta"])
+const TOOLING = new Set(["codegen", "migrate", "cli", "bin"])
+
 /* [from feature, to feature]: imports that would couple a feature to one it must ship without */
 const FORBIDDEN = [
 	["pg", "sqlite"],
+	["sqlite", "pg"],
 	["migrate", "query"],
-	["query", "codegen"],
+	["query", "migrate"],
 ]
 
-/* the one spawner and the bin shim are the only Bun-hosted code */
-const BUN_FILES = new Set(["migrate/core/process.ts", "bin.ts"])
+/* the one spawner, the bun:sqlite driver and the bin shim are the only Bun-hosted code */
+const BUN_FILES = new Set(["migrate/core/process.ts", "migrate/drivers/bun-sqlite.ts", "bin.ts"])
 
 const MESSAGES = {
-	bun: "the Bun global belongs to src/migrate/core/process.ts and src/bin.ts",
+	bun: "Bun APIs (the Bun global, bun: modules) belong to src/migrate/core/process.ts, src/migrate/drivers/bun-sqlite.ts and src/bin.ts",
 	escape: "an import stays inside packages/core/src",
 	nodePrefix: "import node builtins with the node: prefix",
 	shared: "shared roots (error, types, lru, id, states) import only each other",
@@ -46,18 +52,31 @@ function packageName(spec) {
 	return spec.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]
 }
 
-function relativeProblem(rel, spec) {
-	const target = resolveRel(rel, spec)
-	if (target === null) return MESSAGES.escape
-	if (SHARED_ROOTS.has(rel)) return SHARED_ROOTS.has(target) ? null : MESSAGES.shared
-	const [from, to] = [featureOf(rel), featureOf(target)]
-	const arrow = FORBIDDEN.find(([f, t]) => f === from && t === to)
-	return arrow === undefined ? null : `${from} must not import ${to}`
+/* a type-only import is erased before it runs, so it couples no runtime code */
+function typeOnly(node) {
+	if (node.importKind === "type" || node.exportKind === "type") return true
+	const specifiers = node.specifiers ?? []
+	return specifiers.length > 0 && specifiers.every((s) => s.importKind === "type" || s.exportKind === "type")
 }
 
-function problemOf(rel, spec) {
-	if (spec.startsWith(".")) return relativeProblem(rel, spec)
-	if (spec.startsWith("node:") || spec.startsWith("bun:")) return null
+function arrowProblem(rel, target) {
+	if (SHARED_ROOTS.has(rel)) return SHARED_ROOTS.has(target) ? null : MESSAGES.shared
+	const [from, to] = [featureOf(rel), featureOf(target)]
+	const toTooling = RUNTIME.has(from) && TOOLING.has(to)
+	const forbidden = toTooling || FORBIDDEN.some(([f, t]) => f === from && t === to)
+	return forbidden ? `${from} must not import ${to}` : null
+}
+
+function relativeProblem(rel, spec, node) {
+	const target = resolveRel(rel, spec)
+	if (target === null) return MESSAGES.escape
+	return typeOnly(node) ? null : arrowProblem(rel, target)
+}
+
+function problemOf(rel, spec, node) {
+	if (spec.startsWith(".")) return relativeProblem(rel, spec, node)
+	if (spec.startsWith("bun:")) return BUN_FILES.has(rel) ? null : MESSAGES.bun
+	if (spec.startsWith("node:")) return null
 	if (NODE_BUILTINS.has(spec.split("/")[0])) return MESSAGES.nodePrefix
 	const name = packageName(spec)
 	if (DECLARED.has(name)) return null
@@ -71,7 +90,7 @@ export const rule = {
 		const checkSource = (node) => {
 			const spec = node.source?.type === "Literal" ? node.source.value : null
 			if (typeof spec !== "string") return
-			const problem = problemOf(rel, spec)
+			const problem = problemOf(rel, spec, node)
 			if (problem !== null) context.report({ message: problem, node })
 		}
 		const checkBun = (node, identifier) => {

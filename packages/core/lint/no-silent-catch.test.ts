@@ -13,6 +13,9 @@ describe("comb/no-silent-catch", () => {
 		["a swallow that returns a fallback", "export function f() {\n\ttry { return a() } catch { return null }\n}"],
 		["a swallow that only names the error", "try { a() } catch (e) { void e }"],
 		["a reason with nothing after it", "try { a() } catch {\n\t// reason:\n}"],
+		["a rethrow on one path only", "try { a() } catch (e) {\n\tif (retry) throw e\n}"],
+		["a report on one branch only", "try { a() } catch (e) {\n\tif (x) log.warn(e)\n\telse return null\n}"],
+		["a throw inside a nested callback", "try { a() } catch (e) {\n\tqueue.push(() => {\n\t\tthrow e\n\t})\n}"],
 		["a swallowing promise", "p.catch(() => undefined)"],
 		["a promise handed a bare function", "p.catch(ignore)"],
 	])("rejects %s", (_name, body) => {
@@ -21,6 +24,13 @@ describe("comb/no-silent-catch", () => {
 
 	it.each([
 		["a rethrow", "try { a() } catch (e) { throw e }"],
+		[
+			"a guarded fallback, then a rethrow",
+			"try { a() } catch (e) {\n\tif (isNotFound(e)) return undefined\n\tthrow e\n}",
+		],
+		["both branches accounted", "try { a() } catch (e) {\n\tif (x) throw e\n\telse report(e)\n}"],
+		["a report then a fallback", "try { a() } catch (e) {\n\tlog.warn(e)\n\treturn null\n}"],
+		["an optional reporter", "p.catch((e) => this.options?.report?.(e))"],
 		["a conversion it throws", "try { a() } catch (e) { throw new CombError({ cause: e }) }"],
 		["a conversion it returns", "export function f() {\n\ttry { return a() } catch (e) { return toResult(e) }\n}"],
 		["a call to a reporter", "try { a() } catch (e) { log.warn({ err: e }) }"],

@@ -7,7 +7,7 @@ const MESSAGE = "a catch rethrows, returns or throws the converted error, calls 
 
 const REPORTER = /^(?:report\w*|onError|log|warn|error|fatal)$/
 const REASON = /^reason:\s*\S/
-const FUNCTIONS = new Set(["ArrowFunctionExpression", "FunctionDeclaration", "FunctionExpression"])
+const FUNCTIONS = new Set(["ArrowFunctionExpression", "FunctionExpression"])
 
 function mentions(node, name) {
 	if (node === null || node === undefined || name === null) return false
@@ -21,12 +21,44 @@ function calleeName(callee) {
 	return ""
 }
 
-/** True when `node` (not descending into nested functions) hands on or reports the error `name`. */
-function accounts(node, name) {
-	if (node.type === "ThrowStatement") return true
-	if (node.type === "ReturnStatement") return mentions(node.argument, name)
-	if (node.type === "CallExpression" && REPORTER.test(calleeName(node.callee))) return true
-	return children(node).some((child) => !FUNCTIONS.has(child.type) && accounts(child, name))
+const WRAPPERS = new Set(["AwaitExpression", "ChainExpression", "ParenthesizedExpression"])
+
+function unwrap(node) {
+	let current = node
+	while (current !== null && current !== undefined && WRAPPERS.has(current.type)) current = current.expression
+	return current
+}
+
+function isReport(node) {
+	const call = unwrap(node)
+	return call?.type === "CallExpression" && REPORTER.test(calleeName(call.callee))
+}
+
+/** True when every path through `statement` hands on or reports the error `name`. */
+function statementAccounts(statement, name) {
+	switch (statement.type) {
+		case "ThrowStatement":
+			return true
+		case "ReturnStatement":
+			return mentions(statement.argument, name) || isReport(statement.argument)
+		case "ExpressionStatement":
+			return isReport(statement.expression)
+		case "BlockStatement":
+			return blockAccounts(statement, name)
+		case "IfStatement":
+			return (
+				statement.alternate !== null &&
+				[statement.consequent, statement.alternate].every((s) => statementAccounts(s, name))
+			)
+		default:
+			return false
+	}
+}
+
+/* a block accounts once one of its statements does on every path: code after it never runs
+ * without the error handed on, and an early guarded return before it is a deliberate answer */
+function blockAccounts(block, name) {
+	return block.body.some((statement) => statementAccounts(statement, name))
 }
 
 function hasReason(context, node) {
@@ -45,8 +77,8 @@ const paramName = (param) => (param?.type === "Identifier" ? param.name : null)
 function handled(handler) {
 	if (!FUNCTIONS.has(handler?.type)) return false
 	const name = paramName(handler.params[0])
-	if (handler.body.type !== "BlockStatement") return mentions(handler.body, name) || accounts(handler.body, name)
-	return accounts(handler.body, name)
+	if (handler.body.type !== "BlockStatement") return mentions(handler.body, name) || isReport(handler.body)
+	return blockAccounts(handler.body, name)
 }
 
 export const rule = {
@@ -56,7 +88,7 @@ export const rule = {
 			if (!ok && !hasReason(context, node)) context.report({ message: MESSAGE, node })
 		}
 		return {
-			CatchClause: (node) => check(node, accounts(node.body, paramName(node.param))),
+			CatchClause: (node) => check(node, blockAccounts(node.body, paramName(node.param))),
 			CallExpression(node) {
 				if (calleeName(node.callee) !== "catch" || node.callee.type !== "MemberExpression") return
 				check(node, handled(node.arguments[0]))
