@@ -76,8 +76,11 @@ function formatLiteral(value: unknown): string {
 
 function createD1Connection(databaseName: string, target: "--local" | "--remote", exec: Run): Connection {
 	return {
-		async batch(statements: Array<{ sql: string }>): Promise<void> {
-			const sql = statements.map((s) => terminated(s.sql)).join("\n")
+		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
+			/* --file binds no parameters, so they are inlined as literals */
+			const sql = statements
+				.map(({ params, sql: text }) => terminated(params && params.length > 0 ? inlineParams(text, params) : text))
+				.join("\n")
 			const dir = mkdtempSync(join(tmpdir(), "comb-d1-batch-"))
 			const tmpFile = join(dir, "batch.sql")
 			try {

@@ -157,30 +157,34 @@ bunx comb codegen core
 comb — database codegen + migration toolkit
 
 COMMANDS:
-  codegen [db] [-g gen]          Run codegen (uses comb.config.ts)
-  codegen --tables <path>        Direct mode (analyze + generate)
-  migrate diff <db> [name]       Schema diff -> migration SQL
-  migrate apply <db> <file>      Apply migration to database
-  migrate init                   Generate drizzle.config.ts + atlas.hcl
+  codegen [db...]           Run codegen for the databases in comb.config.ts (all, or those named)
+  codegen --tables <path>   Direct mode: analyze one tables file and generate beside it
+  migrate init              Create drizzle.config.ts, atlas.hcl and atlas-migrations/
+  migrate diff <db> [name]  Diff the schema and write the next migration
+  migrate apply <db>        Apply pending migrations: confirm drops, apply and record each at once
+  migrate baseline <db>     Record every migration as applied without running it
 
 OPTIONS:
-  -g, --generator <name>         Run specific generator only
-  -e, --env <name>               Environment (local|dev|prod)
-  --tables <path>                Tables file path (direct mode)
-  --yes, -y                      Auto-confirm destructive changes
-  --help                         Show this help
+  -g, --generator <name>  Run one generator only [codegen]
+  --tables <path>         Analyze this tables file directly, no comb.config.ts [codegen]
+  -e, --env <name>        Environment from comb.migrate.config.ts [migrate apply, migrate baseline]
+  --dir <path>            Migrations directory (default: the config's, else ./atlas-migrations) [migrate apply, migrate baseline]
+  --file <path>           Apply this one migration file [migrate apply]
+  -y, --yes               Apply destructive changes without asking [migrate apply]
+  --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline]
+  --help                  Show this help
 ```
 
 The binary requires Bun — the shebang is `#!/usr/bin/env bun`, and `comb migrate diff` invokes `bun drizzle-kit export`.
 
 External tools the migration commands shell out to, none of them install-time dependencies:
 
-| Command                             | Needs                                                     |
-| ----------------------------------- | --------------------------------------------------------- |
-| `migrate diff`                      | [Atlas](https://atlasgo.io) on `PATH`, plus `drizzle-kit` |
-| `migrate apply`, `migrate baseline` | `wrangler`, authenticated against the target account      |
+| Command                             | Needs                                                                                                          |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `migrate diff`                      | [Atlas](https://atlasgo.io) on `PATH`, plus `drizzle-kit`                                                      |
+| `migrate apply`, `migrate baseline` | the configured provider's client; for D1, `wrangler` (authenticated against the account for a remote database) |
 
-The D1 provider drives `wrangler d1 execute` as a child process, against the remote database by default; set `local: true` in its provider config to target the local dev database (`--local`).
+The D1 provider drives `wrangler d1 execute` as a child process, against the remote database by default; set `local: true` in its provider config, or pass `--local` without a migrate config, to target the local dev database.
 
 ### `comb codegen`
 
@@ -458,16 +462,18 @@ FTS5 tables stay out of what Atlas sees, because its dev SQLite has no fts5 modu
 
 A migration's hash is its SQL with comments and layout normalized away, never the text inside a literal. Files recorded under the pre-0.5.0 hash, which stripped `--` even inside literals, still count as applied (`migrationHashes()`, `checkMigrationHash()`).
 
-`apply` then, per migration:
+`apply <db>` takes its database from `comb.migrate.config.ts` when the project has one: `-e/--env` picks the environment, whose provider (any of them, D1 included) supplies the connection, and `migrationsDir` is read relative to the config file. Without a migrate config, `<db>` is a D1 database name, remote by default and local with `--local`. Then, per migration file in name order (or the one `--file` names):
 
 1. Ensures `__drizzle_migrations` exists.
-2. Skips the file if its hash is already recorded.
-3. Classifies it — `parseMigration()` and `classifyMigration()` split the statements and flag destructive ones. `extractDropStatements()` feeds the `confirmDrops()` prompt, which `--yes` bypasses.
-4. Makes it idempotent (`makeIdempotent()` adds `IF NOT EXISTS` / `IF EXISTS` where it is safe to).
-5. Creates backup tables for destructive steps, applies, verifies, and records the hash.
-6. Cleans up backups on success.
+2. Skips the file if its hash, current or pre-0.5.0, is already recorded.
+3. Classifies it: `parseMigration()`, `classifyMigration()` and `extractDropStatements()` find what it drops or loses. A destructive file runs only with `--yes`, or after a yes on the terminal (`confirmDrops()` with the CLI's prompt); with neither, `apply` stops before running it.
+4. Applies its statements (`CREATE INDEX` and `DROP INDEX` made `IF [NOT] EXISTS`) and the insert of its hash as one batch, which every provider runs all-or-nothing (D1 as one `wrangler d1 execute --file`). A file is applied and recorded, or neither. A transient failure (rate limit, reset connection) retries the whole batch through `withRetry()`.
 
-Failures go through `withRetry()` and a circuit breaker (`createCircuitBreaker`, `checkCircuitBreaker`, `updateCircuitBreaker`) so a flaky D1 endpoint does not leave a migration half-applied across a batch.
+`baseline <db>` records every file as applied without running it, for a database whose schema was set up out of band.
+
+In your own runner, `confirmDrops(drops, target, { autoConfirm, confirm })` asks through the `confirm` function you pass (it is no when there is none) and writes nothing itself; `dropsQuestion()` is the question it asks, and `printMigrationSummary(results, out)` writes the summary through `out`.
+
+Backup tables (`createBackupTables()`), schema verification (`verifySchema()`, `applyMigration()`) and the circuit breaker (`createCircuitBreaker()` and its checks) are library APIs for your own runners, such as a multi-tenant fan-out; the CLI does not use them, because one atomic batch per file already leaves nothing half-applied.
 
 ### SQLite transforms
 
@@ -746,7 +752,7 @@ comb/
 │   │   ├── sqlite/         SQLite columns, constraints, D1
 │   │   │                   (unit tests sit beside each file as <name>.test.ts)
 │   │   ├── bin.ts          the `comb` executable (a shim over runCli)
-│   │   ├── cli.ts          runCli(argv, io)
+│   │   ├── cli/            runCli(argv, io): argument parsing, codegen, migrate
 │   │   └── index.ts
 │   ├── lint/           the comb oxlint plugin, each rule beside its test
 │   └── tests/

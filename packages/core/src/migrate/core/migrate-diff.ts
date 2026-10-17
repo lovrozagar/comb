@@ -58,8 +58,7 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 		const before = new Set(readdirSync(dir))
 		const args = ["migrate", "diff", name, "--dir", `file://${dir}`, "--to", `file://${target}`]
 		const result = atlas.exec("atlas", [...args, "--dev-url", devUrl(atlas.dialect), "--format", "{{ sql . }}"])
-		/* Atlas reports "no changes" on stderr and exits 0 */
-		if (result.stderr.includes("no changes to be made")) return []
+		/* in sync, Atlas exits 0, says so on stdout and writes no file: the empty list below */
 		if (result.code !== 0) throw new Error(`atlas migrate diff failed: ${result.stderr || result.stdout.trim()}`)
 		return readdirSync(dir).filter((file) => !before.has(file) && file !== "atlas.sum")
 	} finally {

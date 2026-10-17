@@ -37,7 +37,7 @@
 	"sideEffects": false,
 	"exports": {
 		".": "./src/index.ts",
-		"./cli": "./src/cli.ts",
+		"./cli": "./src/cli/index.ts",
 		"./codegen": "./src/codegen/index.ts",
 		"./codegen/generators": "./src/codegen/generators/index.ts",
 		"./meta": "./src/meta.ts",
@@ -90,6 +90,7 @@
 		"ts-morph": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:",
+		"wrangler": "catalog:",
 		"zod": "catalog:"
 	},
 	"peerDependencies": {

@@ -84,9 +84,6 @@ describe("generateSchemaDiff", () => {
 	it("reports synced schemas", () => {
 		const synced = { diff: null, synced: true }
 		expect(diffWith(ok("Schemas are synced, no changes to be made.\n"))).toEqual(synced)
-		expect(diffWith(ok(""))).toEqual(synced)
-		expect(diffWith(ok("-- (empty)"))).toEqual(synced)
-		expect(diffWith(fail("Schemas are synced"))).toEqual(synced)
 	})
 
 	it("throws atlas's stderr when the diff fails", () => {

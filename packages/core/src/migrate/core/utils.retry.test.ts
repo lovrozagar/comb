@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest"
 import {
 	aggregateErrors,
 	checkCircuitBreaker,
+	confirmDrops,
 	createCircuitBreaker,
+	dropsQuestion,
 	printMigrationSummary,
 	sleep,
 	updateCircuitBreaker,
@@ -95,6 +97,36 @@ describe("withRetry", () => {
 			),
 		).rejects.toThrow()
 		expect(delays.every((d) => d <= 5)).toBe(true)
+	})
+
+	it("backs off from one second, doubling, capped at thirty seconds by default", async () => {
+		vi.useFakeTimers()
+		vi.spyOn(Math, "random").mockReturnValue(0)
+		try {
+			const delays: number[] = []
+			const fn = vi.fn(async () => {
+				throw new Error("429 too many")
+			})
+			const done = withRetry(fn, { maxRetries: 6, onRetry: (_a, _e, delay) => delays.push(delay) }).catch(
+				(e: Error) => e,
+			)
+			await vi.runAllTimersAsync()
+			expect(await done).toBeInstanceOf(Error)
+			expect(delays).toEqual([1000, 2000, 4000, 8000, 16000, 30000])
+		} finally {
+			vi.restoreAllMocks()
+			vi.useRealTimers()
+		}
+	})
+
+	it("still calls fn once when maxRetries is zero or less, and throws its own error", async () => {
+		for (const maxRetries of [0, -1]) {
+			const fn = vi.fn(async () => {
+				throw new Error("fetch failed")
+			})
+			await expect(withRetry(fn, { ...fast, maxRetries })).rejects.toThrow("fetch failed")
+			expect(fn).toHaveBeenCalledTimes(1)
+		}
 	})
 
 	it("wraps a non-Error throw so the caller always sees an Error", async () => {
@@ -196,11 +228,7 @@ describe("aggregateErrors", () => {
 describe("printMigrationSummary", () => {
 	function capture(results: MigrationResult[]): string {
 		const lines: string[] = []
-		const spy = vi.spyOn(console, "log").mockImplementation((...args) => {
-			lines.push(args.join(" "))
-		})
-		printMigrationSummary(results)
-		spy.mockRestore()
+		printMigrationSummary(results, (line) => lines.push(line))
 		return lines.join("\n")
 	}
 
@@ -229,5 +257,22 @@ describe("printMigrationSummary", () => {
 		const out = capture([result("success", "a")])
 		expect(out).toContain("1 applied")
 		expect(out).not.toContain("failed")
+	})
+})
+
+describe("confirmDrops", () => {
+	it("allows a migration that drops nothing, and one with autoConfirm, without asking", async () => {
+		const confirm = vi.fn(async () => false)
+		expect(await confirmDrops([], "core", { autoConfirm: false, confirm })).toBe(true)
+		expect(await confirmDrops(["DROP TABLE post"], "core", { autoConfirm: true, confirm })).toBe(true)
+		expect(confirm).not.toHaveBeenCalled()
+	})
+
+	it("asks the question naming the drops and the target, and refuses when nobody can be asked", async () => {
+		const confirm = vi.fn(async () => true)
+		expect(await confirmDrops(["DROP TABLE post"], "core (prod)", { autoConfirm: false, confirm })).toBe(true)
+		expect(confirm).toHaveBeenCalledWith(dropsQuestion(["DROP TABLE post"], "core (prod)"))
+		expect(dropsQuestion(["DROP TABLE post"], "core (prod)")).toContain("1. DROP TABLE post")
+		expect(await confirmDrops(["DROP TABLE post"], "core", { autoConfirm: false })).toBe(false)
 	})
 })

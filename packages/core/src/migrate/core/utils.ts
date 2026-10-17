@@ -23,41 +23,36 @@ export type RetryOptions = {
 	onRetry?: (attempt: number, error: Error, delay: number) => void
 }
 
-export async function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = EMPTY_OBJ): Promise<T> {
-	const maxRetries = options.maxRetries ?? 3
-	const baseDelay = options.baseDelay ?? 1000
-	const maxDelay = options.maxDelay ?? 30000
+const TRANSIENT = ["429", "rate limit", "ECONNRESET", "ETIMEDOUT", "fetch failed"]
 
-	for (let attempt = 0; attempt <= maxRetries; attempt++) {
-		try {
-			return await fn()
-		} catch (err) {
-			const error = err instanceof Error ? err : new Error(String(err))
-			const isRetryable =
-				error.message.includes("429") ||
-				error.message.includes("rate limit") ||
-				error.message.includes("ECONNRESET") ||
-				error.message.includes("ETIMEDOUT") ||
-				error.message.includes("fetch failed")
+const isTransient = (error: Error) => TRANSIENT.some((mark) => error.message.includes(mark))
 
-			if (!isRetryable || attempt >= maxRetries) {
-				throw error
-			}
+/** Call `fn`, again after a backoff while it fails transiently, `maxRetries` times at most */
+export function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = EMPTY_OBJ): Promise<T> {
+	return attempt(fn, options, 0)
+}
 
-			/* Exponential backoff with jitter */
-			const exponentialDelay = baseDelay * Math.pow(2, attempt)
-			const jitter = Math.random() * 1000
-			const delay = Math.min(exponentialDelay + jitter, maxDelay)
-
-			if (options.onRetry) {
-				options.onRetry(attempt + 1, error, delay)
-			}
-
-			await sleep(delay)
-		}
+/* Each attempt ends in the result, or in what its failure leads to */
+async function attempt<T>(fn: () => Promise<T>, options: RetryOptions, done: number): Promise<T> {
+	try {
+		return await fn()
+	} catch (err) {
+		return retryAfter(err, { done, fn, options })
 	}
+}
 
-	throw new Error("Max retries exceeded")
+type Retry<T> = { done: number; fn: () => Promise<T>; options: RetryOptions }
+
+/** The next attempt after a transient failure, or the failure itself once retrying is over */
+async function retryAfter<T>(err: unknown, { done, fn, options }: Retry<T>): Promise<T> {
+	const error = err instanceof Error ? err : new Error(String(err))
+	if (!isTransient(error) || done >= (options.maxRetries ?? 3)) throw error
+	/* exponential backoff with jitter */
+	const backoff = (options.baseDelay ?? 1000) * 2 ** done + Math.random() * 1000
+	const delay = Math.min(backoff, options.maxDelay ?? 30000)
+	options.onRetry?.(done + 1, error, delay)
+	await sleep(delay)
+	return attempt(fn, options, done + 1)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -131,7 +126,8 @@ export function aggregateErrors(errors: Array<{ database: string; error: string 
    MIGRATION SUMMARY
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export function printMigrationSummary(results: MigrationResult[]): void {
+/** Write the counts of applied, skipped and failed migrations to `out`, then each failure */
+export function printMigrationSummary(results: MigrationResult[], out: (line: string) => void): void {
 	const success = results.filter((r) => r.status === "success" || r.status === "repaired")
 	const skipped = results.filter((r) => r.status === "already_applied" || r.status === "skipped")
 	const failed = results.filter((r) => r.status === "failed")
@@ -141,42 +137,36 @@ export function printMigrationSummary(results: MigrationResult[]): void {
 	if (skipped.length > 0) parts.push(`${skipped.length} skipped`)
 	if (failed.length > 0) parts.push(`${failed.length} failed`)
 
-	console.log(`\n${parts.join(", ")}`)
-
-	for (const r of failed) {
-		console.log(`  ✗ ${r.database}: ${r.error}`)
-	}
+	out(`\n${parts.join(", ")}`)
+	for (const r of failed) out(`  ✗ ${r.database}: ${r.error}`)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   CONFIRMATION PROMPT
+   CONFIRMATION
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export async function confirmDrops(drops: string[], target: string, autoConfirm: boolean): Promise<boolean> {
-	if (drops.length === 0) return true
+/** The question a destructive migration asks before it runs: what it destroys, and where */
+export function dropsQuestion(drops: readonly string[], target: string): string {
+	return [
+		"Destructive changes detected:",
+		...drops.map((drop, i) => `  ${i + 1}. ${drop}`),
+		`This affects: ${target}`,
+		"Apply?",
+	].join("\n")
+}
 
-	console.log("\n⚠️  DESTRUCTIVE CHANGES DETECTED\n")
-	console.log("The following will be dropped:")
-	drops.forEach((drop, i) => {
-		console.log(`  ${i + 1}. ${drop}`)
-	})
-	console.log(`\nThis affects: ${target}`)
+export type ConfirmDrops = {
+	/** --yes: apply without asking */
+	autoConfirm: boolean
+	/** How to ask the person running the migration; absent when nobody can be asked */
+	confirm?: ((question: string) => Promise<boolean>) | undefined
+}
 
-	if (autoConfirm) {
-		console.log("\n✅ Auto-confirmed (--yes flag)\n")
-		return true
-	}
-
-	process.stdout.write("\nApply? (y/N): ")
-	const answer = await new Promise<string>((resolve) => {
-		process.stdin.once("data", (data) => resolve(data.toString().trim().toLowerCase()))
-	})
-
-	if (answer !== "y" && answer !== "yes") {
-		console.log("\n❌ Aborted\n")
-		return false
-	}
-
-	console.log()
-	return true
+/**
+ * Whether a migration that drops `drops` may run on `target`: yes when it drops nothing or
+ * autoConfirm is set, otherwise the answer to `dropsQuestion`, and no when nobody can be asked.
+ */
+export async function confirmDrops(drops: readonly string[], target: string, options: ConfirmDrops): Promise<boolean> {
+	if (drops.length === 0 || options.autoConfirm) return true
+	return options.confirm ? options.confirm(dropsQuestion(drops, target)) : false
 }

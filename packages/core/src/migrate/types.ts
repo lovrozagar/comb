@@ -1,7 +1,6 @@
 /**
- * Core types for db-migration package
+ * Core types for db-migration package. Declarations only: config.ts validates the config.
  */
-import * as z from "zod"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    DIALECT
@@ -31,109 +30,48 @@ export type ConnectionProvider = {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   PROVIDER CONFIGS
+   PROVIDER CONFIGS — the shapes config.ts validates and resolves to
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const tursoProviderConfigSchema = z.compile(
-	z.object({
-		apiToken: z.string().min(1),
-		group: z.string().min(1),
-		org: z.string().min(1),
-		type: z.literal("turso"),
-	}),
-)
+export type TursoProviderConfig = { apiToken: string; group: string; org: string; type: "turso" }
 
-export const libsqlProviderConfigSchema = z.compile(
-	z.object({
-		authToken: z.string().optional(),
-		type: z.literal("libsql"),
-		url: z.string().min(1),
-	}),
-)
+export type LibsqlProviderConfig = { authToken?: string | undefined; type: "libsql"; url: string }
 
-export const bunSqliteProviderConfigSchema = z.compile(
-	z.object({
-		path: z.string().min(1),
-		type: z.literal("bun-sqlite"),
-	}),
-)
+export type BunSqliteProviderConfig = { path: string; type: "bun-sqlite" }
 
-export const postgresProviderConfigSchema = z.compile(
-	z.object({
-		connectionString: z.string().min(1),
-		type: z.literal("postgres"),
-	}),
-)
+export type PostgresProviderConfig = { connectionString: string; type: "postgres" }
 
-export const neonProviderConfigSchema = z.compile(
-	z.object({
-		connectionString: z.string().min(1),
-		type: z.literal("neon"),
-	}),
-)
+export type NeonProviderConfig = { connectionString: string; type: "neon" }
 
-export const d1ProviderConfigSchema = z.compile(
-	z.object({
-		databaseId: z.string().min(1),
-		databaseName: z.string().min(1),
-		/** Target the local dev database (`wrangler --local`) instead of the remote one. */
-		local: z.boolean().optional(),
-		type: z.literal("d1"),
-	}),
-)
-
-export const providerConfigSchema = z.compile(
-	z.discriminatedUnion("type", [
-		tursoProviderConfigSchema,
-		libsqlProviderConfigSchema,
-		bunSqliteProviderConfigSchema,
-		postgresProviderConfigSchema,
-		neonProviderConfigSchema,
-		d1ProviderConfigSchema,
-	]),
-)
-
-export type TursoProviderConfig = z.infer<typeof tursoProviderConfigSchema>
-export type LibsqlProviderConfig = z.infer<typeof libsqlProviderConfigSchema>
-export type BunSqliteProviderConfig = z.infer<typeof bunSqliteProviderConfigSchema>
-export type PostgresProviderConfig = z.infer<typeof postgresProviderConfigSchema>
-export type NeonProviderConfig = z.infer<typeof neonProviderConfigSchema>
-export type D1ProviderConfig = z.infer<typeof d1ProviderConfigSchema>
-export type ProviderConfig = z.infer<typeof providerConfigSchema>
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ENVIRONMENT CONFIG
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-export const environmentConfigSchema = z.compile(
-	z.object({
-		name: z.string().min(1),
-		provider: providerConfigSchema.optional(),
-	}),
-)
-
-export type EnvironmentConfig = z.infer<typeof environmentConfigSchema> & {
-	provider?: ProviderConfig | undefined
+export type D1ProviderConfig = {
+	databaseId: string
+	databaseName: string
+	/** Target the local dev database (`wrangler --local`) instead of the remote one. */
+	local?: boolean | undefined
+	type: "d1"
 }
 
+export type ProviderConfig =
+	| BunSqliteProviderConfig
+	| D1ProviderConfig
+	| LibsqlProviderConfig
+	| NeonProviderConfig
+	| PostgresProviderConfig
+	| TursoProviderConfig
+
 /* ═══════════════════════════════════════════════════════════════════════════
-   DATABASE CONFIG
+   ENVIRONMENT AND DATABASE CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const databaseConfigSchema = z.compile(
-	z.object({
-		drizzleConfigPath: z.string().optional(),
-		environments: z.record(z.string(), environmentConfigSchema).optional(),
-		migrationsDir: z.string().min(1),
-		provider: providerConfigSchema.optional(),
-	}),
-)
+export type EnvironmentConfig = { name: string; provider?: ProviderConfig | undefined }
 
-export type DatabaseConfig = z.infer<typeof databaseConfigSchema> & {
+export type DatabaseConfig = {
+	drizzleConfigPath?: string | undefined
+	environments?: Record<string, EnvironmentConfig> | undefined
+	migrationsDir: string
 	name?: string | undefined
 	promotionOrder?: string[]
 	provider?: ProviderConfig | undefined
-	environments?: Record<string, EnvironmentConfig> | undefined
 }
 
 /* Resolved database config for a specific environment */
@@ -148,22 +86,13 @@ export type ResolvedDatabaseConfig = {
    MULTI-TENANT CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const multiTenantConfigSchema = z.compile(
-	z.object({
-		circuitBreaker: z
-			.object({
-				failureThreshold: z.number().min(0).max(1).default(0.1),
-				minSampleSize: z.number().int().min(1).default(50),
-			})
-			.default(() => ({ failureThreshold: 0.1, minSampleSize: 50 })),
-		concurrency: z.number().int().min(1).max(200).default(50),
-		enabled: z.literal(true),
-		rootDatabase: z.string().min(1),
-		tenantQuery: z.string().min(1),
-	}),
-)
-
-export type MultiTenantConfig = z.infer<typeof multiTenantConfigSchema>
+export type MultiTenantConfig = {
+	circuitBreaker: { failureThreshold: number; minSampleSize: number }
+	concurrency: number
+	enabled: true
+	rootDatabase: string
+	tenantQuery: string
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MIGRATION CONFIG

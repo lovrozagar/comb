@@ -40,6 +40,8 @@ export {
 	aggregateErrors,
 	checkCircuitBreaker,
 	confirmDrops,
+	type ConfirmDrops,
+	dropsQuestion,
 	createCircuitBreaker,
 	printMigrationSummary,
 	type RetryOptions,

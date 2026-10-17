@@ -65,20 +65,10 @@ export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult
 			devUrl(dialect),
 		])
 
-		if (result.code !== 0) {
-			if (result.stderr.includes("Schemas are synced")) {
-				return { diff: null, synced: true }
-			}
-			throw new Error(`Atlas diff failed: ${result.stderr}`)
-		}
-
+		if (result.code !== 0) throw new Error(`Atlas diff failed: ${result.stderr}`)
+		/* in sync, Atlas exits 0 and says so on stdout (probed on v1.3.0) */
 		const diff = result.stdout.trim()
-
-		if (!diff || diff === "-- (empty)" || diff.includes("Schemas are synced")) {
-			return { diff: null, synced: true }
-		}
-
-		return { diff, synced: false }
+		return diff.includes("Schemas are synced") ? { diff: null, synced: true } : { diff, synced: false }
 	} finally {
 		rmSync(tmpDir, { force: true, recursive: true })
 	}

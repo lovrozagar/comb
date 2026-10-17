@@ -2,9 +2,10 @@
  * Standalone configuration for @lovrozagar/comb migrations.
  * No ProjectConfig dependency — accepts a direct CombMigrateConfig object.
  */
-import { existsSync } from "fs"
-import { resolve } from "path"
+import { existsSync } from "node:fs"
+import { dirname, resolve } from "node:path"
 import * as z from "zod"
+import type { Run } from "./core/process.ts"
 import { createD1Provider } from "./drivers/d1.ts"
 import { createNeonProvider, createPostgresProvider } from "./drivers/postgres.ts"
 import { createBunSqliteProvider, createLibsqlProvider, createTursoProvider } from "./drivers/sqlite.ts"
@@ -21,7 +22,8 @@ import type {
    CONFIG SCHEMA
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const providerInputSchema = z.compile(
+/* Built on use: defineConfig runs once per process, and module scope stays free of work */
+const providerInputSchema = () =>
 	z.discriminatedUnion("type", [
 		z.object({
 			apiToken: z.string().min(1),
@@ -49,29 +51,27 @@ const providerInputSchema = z.compile(
 		z.object({
 			databaseId: z.string().min(1),
 			databaseName: z.string().min(1),
+			local: z.boolean().optional(),
 			type: z.literal("d1"),
 		}),
-	]),
-)
+	])
 
-const environmentConfigInputSchema = z.compile(
+const environmentConfigInputSchema = () =>
 	z.object({
 		name: z.string().min(1),
-		provider: providerInputSchema.optional(),
-	}),
-)
+		provider: providerInputSchema().optional(),
+	})
 
-const databaseConfigInputSchema = z.compile(
+const databaseConfigInputSchema = () =>
 	z.object({
 		drizzleConfigPath: z.string().optional(),
-		environments: z.record(z.string(), environmentConfigInputSchema).optional(),
+		environments: z.record(z.string(), environmentConfigInputSchema()).optional(),
 		migrationsDir: z.string().min(1),
 		name: z.string().min(1).optional(),
-		provider: providerInputSchema.optional(),
-	}),
-)
+		provider: providerInputSchema().optional(),
+	})
 
-const multiTenantConfigInputSchema = z.compile(
+const multiTenantConfigInputSchema = () =>
 	z.object({
 		circuitBreaker: z
 			.object({
@@ -83,24 +83,22 @@ const multiTenantConfigInputSchema = z.compile(
 		enabled: z.literal(true),
 		rootDatabase: z.string().min(1),
 		tenantQuery: z.string().min(1),
-	}),
-)
+	})
 
-const configInputSchema = z.compile(
+const configInputSchema = () =>
 	z.object({
-		databases: z.record(z.string(), databaseConfigInputSchema),
-		multiTenant: multiTenantConfigInputSchema.optional(),
-	}),
-)
+		databases: z.record(z.string(), databaseConfigInputSchema()),
+		multiTenant: multiTenantConfigInputSchema().optional(),
+	})
 
-export type CombMigrateConfig = z.infer<typeof configInputSchema>
+export type CombMigrateConfig = z.infer<ReturnType<typeof configInputSchema>>
 
 /* ═══════════════════════════════════════════════════════════════════════════
    RESOLVE PROVIDER CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
 function resolveProviderConfig(
-	input: NonNullable<z.infer<typeof databaseConfigInputSchema>["provider"]>,
+	input: NonNullable<z.infer<ReturnType<typeof databaseConfigInputSchema>>["provider"]>,
 ): ProviderConfig {
 	switch (input.type) {
 		case "turso":
@@ -114,7 +112,7 @@ function resolveProviderConfig(
 		case "neon":
 			return { connectionString: input.connectionString, type: "neon" }
 		case "d1":
-			return { databaseId: input.databaseId, databaseName: input.databaseName, type: "d1" }
+			return { databaseId: input.databaseId, databaseName: input.databaseName, local: input.local, type: "d1" }
 	}
 }
 
@@ -122,7 +120,10 @@ function resolveProviderConfig(
    CREATE PROVIDER
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export function createProvider(config: ProviderConfig): ConnectionProvider {
+/** What a provider that shells out (D1 drives wrangler) runs processes with; tests pass a fake */
+export type ProviderDeps = { run?: Run | undefined }
+
+export function createProvider(config: ProviderConfig, deps: ProviderDeps = {}): ConnectionProvider {
 	switch (config.type) {
 		case "turso":
 			return createTursoProvider(config)
@@ -135,7 +136,7 @@ export function createProvider(config: ProviderConfig): ConnectionProvider {
 		case "neon":
 			return createNeonProvider(config)
 		case "d1":
-			return createD1Provider(config)
+			return createD1Provider(config, deps.run)
 	}
 }
 
@@ -147,7 +148,8 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
 	/* New format: environments defined */
 	if (dbConfig.environments) {
 		if (!envName) {
-			throw new Error("Database config has environments but no --env flag provided. Use: --env local|dev|prod")
+			const available = Object.keys(dbConfig.environments).join(", ")
+			throw new Error(`Database config has environments; pass -e/--env with one of: ${available}`)
 		}
 
 		const envConfig = dbConfig.environments[envName]
@@ -191,7 +193,7 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
    ═══════════════════════════════════════════════════════════════════════════ */
 
 export function defineConfig(input: CombMigrateConfig): MigrationConfig {
-	const parsed = configInputSchema.parse(input)
+	const parsed = configInputSchema().parse(input)
 
 	const databases: Record<string, DatabaseConfig> = {}
 	for (const [key, dbInput] of Object.entries(parsed.databases)) {
@@ -247,6 +249,8 @@ export function defineConfig(input: CombMigrateConfig): MigrationConfig {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const CONFIG_FILE_NAMES = [
+	"comb.migrate.config.ts",
+	"comb.migrate.config.js",
 	"db-migration.config.ts",
 	"db-migration.config.js",
 	"migration.config.ts",
@@ -258,33 +262,22 @@ export type LoadedConfig = {
 	configDir: string
 }
 
-export async function loadConfig(configPath?: string): Promise<LoadedConfig> {
-	let resolvedPath: string | undefined
+/** The migrate config file in `cwd`, by the names comb looks for in order; undefined when there is none */
+export function findConfigFile(cwd: string): string | undefined {
+	return CONFIG_FILE_NAMES.map((name) => resolve(cwd, name)).find((candidate) => existsSync(candidate))
+}
 
-	if (configPath) {
-		resolvedPath = resolve(process.cwd(), configPath)
-		if (!existsSync(resolvedPath)) {
-			throw new Error(`Config file not found: ${resolvedPath}`)
-		}
-	} else {
-		for (const name of CONFIG_FILE_NAMES) {
-			const candidate = resolve(process.cwd(), name)
-			if (existsSync(candidate)) {
-				resolvedPath = candidate
-				break
-			}
-		}
-	}
-
-	if (!resolvedPath) {
+/** Load the migrate config at `configPath`, or the first one `findConfigFile` sees in `cwd` */
+export async function loadConfig(configPath?: string, cwd: string = process.cwd()): Promise<LoadedConfig> {
+	const resolvedPath = configPath === undefined ? findConfigFile(cwd) : resolve(cwd, configPath)
+	if (resolvedPath === undefined) {
 		throw new Error(`No config file found. Create one of: ${CONFIG_FILE_NAMES.join(", ")}`)
 	}
+	if (!existsSync(resolvedPath)) throw new Error(`Config file not found: ${resolvedPath}`)
 
-	const configDir = resolve(resolvedPath, "..")
-	const module = await import(resolvedPath)
+	const module = (await import(resolvedPath)) as { default?: unknown }
 	const rawConfig = module.default ?? module
-
-	const config = typeof rawConfig === "function" ? rawConfig() : (rawConfig as MigrationConfig)
-
-	return { config, configDir }
+	const config =
+		typeof rawConfig === "function" ? (rawConfig as () => MigrationConfig)() : (rawConfig as MigrationConfig)
+	return { config, configDir: dirname(resolvedPath) }
 }

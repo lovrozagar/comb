@@ -8,6 +8,9 @@ import { Project, SyntaxKind } from "ts-morph"
 /** Create a ts-morph project optimized for code generation */
 export function createProject(): Project {
 	return new Project({
+		/* codegen resolves only the consumer's own declarations; loading TypeScript's lib files on
+		   the first type-checker use cost about a second per project and nothing read them */
+		compilerOptions: { noLib: true },
 		skipAddingFilesFromTsConfig: true,
 		skipFileDependencyResolution: true,
 	})

@@ -109,7 +109,7 @@ describe("generateIncrementalMigration", () => {
 
 	it("skips the hash when atlas.sum exists and reports synced when nothing new appears", () => {
 		seed("CREATE TABLE a (x);")
-		const run = fakeAtlas(() => ({ code: 0, stderr: NO_CHANGES, stdout: "" }))
+		const run = fakeAtlas(() => ({ code: 0, stderr: "", stdout: NO_CHANGES }))
 		expect(generateIncrementalMigration(options(run))).toEqual({ files: [], synced: true })
 		/* the integrity check and the replayed copy are hashed; the directory itself is not */
 		expect(run.calls.filter((call) => call[1] === "hash")).toHaveLength(2)
@@ -147,7 +147,7 @@ describe("generateIncrementalMigration — FTS kept out of what atlas sees (S-12
 		const run = fakeAtlas(({ history, target }) => {
 			expect(Object.values(history).join("")).not.toMatch(/fts5|items_fts/)
 			expect(target).toBe("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);")
-			return { code: 0, stderr: NO_CHANGES, stdout: "" }
+			return { code: 0, stderr: "", stdout: NO_CHANGES }
 		})
 		const result = generateIncrementalMigration(
 			options(run, { ftsSql: FTS, targetSchema: "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);" }),
@@ -157,7 +157,7 @@ describe("generateIncrementalMigration — FTS kept out of what atlas sees (S-12
 
 	it("writes a timestamped migration holding only the FTS delta when atlas has no changes", () => {
 		seed("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);")
-		const run = fakeAtlas(() => ({ code: 0, stderr: NO_CHANGES, stdout: "" }))
+		const run = fakeAtlas(() => ({ code: 0, stderr: "", stdout: NO_CHANGES }))
 		const { files, synced } = generateIncrementalMigration(options(run, { ftsSql: FTS }))
 		expect(synced).toBe(false)
 		expect(files).toHaveLength(1)

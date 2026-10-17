@@ -153,6 +153,21 @@ describe("createD1Provider: SQL it hands wrangler (S-13)", () => {
 		}
 	})
 
+	it("inlines a batch statement's parameters into the file, since --file binds none", async () => {
+		let file = ""
+		const run = fakeRun((call) => {
+			const arg = call.args.find((a) => a.startsWith("--file="))
+			if (arg) file = readFileSync(arg.slice("--file=".length), "utf8")
+			return json([])
+		})
+		const conn = await connect(run)
+		await conn.batch([
+			{ sql: "CREATE TABLE t (h TEXT, at INTEGER)" },
+			{ params: ["it's", 7], sql: "INSERT INTO t VALUES (?, ?)" },
+		])
+		expect(file).toBe("CREATE TABLE t (h TEXT, at INTEGER)\n;\nINSERT INTO t VALUES ('it''s', 7)\n;")
+	})
+
 	it("inlines parameters only for placeholders in code, never a ? inside a literal or comment", async () => {
 		const run = fakeRun(() => json([{ results: [] }]))
 		const conn = await connect(run)

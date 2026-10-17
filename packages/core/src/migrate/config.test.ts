@@ -1,118 +1,242 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { type CombMigrateConfig, defineConfig, resolveDatabaseConfig } from "./config.ts"
+import {
+	type CombMigrateConfig,
+	createProvider,
+	defineConfig,
+	findConfigFile,
+	loadConfig,
+	resolveDatabaseConfig,
+} from "./config.ts"
 
-describe("migrate/config", () => {
-	describe("defineConfig", () => {
-		it("parses valid config with environments", () => {
-			const input: CombMigrateConfig = {
-				databases: {
-					core: {
-						environments: {
-							dev: { name: "myapp-core-dev" },
-							local: { name: "myapp-core-local" },
-						},
-						migrationsDir: "./atlas-migrations",
-						provider: {
-							databaseId: "abc123",
-							databaseName: "myapp-core",
-							type: "d1",
-						},
+describe("migrate/config: defineConfig", () => {
+	it("parses valid config with environments", () => {
+		const input: CombMigrateConfig = {
+			databases: {
+				core: {
+					environments: {
+						dev: { name: "myapp-core-dev" },
+						local: { name: "myapp-core-local" },
+					},
+					migrationsDir: "./atlas-migrations",
+					provider: {
+						databaseId: "abc123",
+						databaseName: "myapp-core",
+						type: "d1",
 					},
 				},
-			}
-			const config = defineConfig(input)
-			expect(config.databases.core).toBeDefined()
-			expect(config.databases.core.environments).toBeDefined()
-		})
-
-		it("parses config with legacy name+provider format", () => {
-			const input: CombMigrateConfig = {
-				databases: {
-					core: {
-						migrationsDir: "./migrations",
-						name: "mydb",
-						provider: {
-							path: "./local.db",
-							type: "bun-sqlite",
-						},
-					},
-				},
-			}
-			const config = defineConfig(input)
-			expect(config.databases.core).toBeDefined()
-			expect(config.databases.core.name).toBe("mydb")
-		})
+			},
+		}
+		const config = defineConfig(input)
+		expect(config.databases.core).toBeDefined()
+		expect(config.databases.core.environments).toBeDefined()
 	})
 
-	describe("resolveDatabaseConfig", () => {
-		it("resolves environment-specific config", () => {
-			const config = defineConfig({
-				databases: {
-					core: {
-						environments: {
-							dev: {
-								name: "myapp-dev",
-								provider: { databaseId: "dev123", databaseName: "dev-db", type: "d1" },
-							},
-							local: { name: "myapp-local" },
-						},
-						migrationsDir: "./migrations",
-						provider: { databaseId: "main123", databaseName: "main-db", type: "d1" },
+	it("parses config with legacy name+provider format", () => {
+		const input: CombMigrateConfig = {
+			databases: {
+				core: {
+					migrationsDir: "./migrations",
+					name: "mydb",
+					provider: {
+						path: "./local.db",
+						type: "bun-sqlite",
 					},
 				},
-			})
+			},
+		}
+		const config = defineConfig(input)
+		expect(config.databases.core).toBeDefined()
+		expect(config.databases.core.name).toBe("mydb")
+	})
+})
 
-			const resolved = resolveDatabaseConfig(config.databases.core, "dev")
-			expect(resolved.name).toBe("myapp-dev")
-			expect(resolved.provider.type).toBe("d1")
-		})
-
-		it("falls back to database-level provider when env has none", () => {
-			const config = defineConfig({
-				databases: {
-					core: {
-						environments: {
-							local: { name: "local-db" },
+describe("migrate/config: resolveDatabaseConfig", () => {
+	it("resolves environment-specific config", () => {
+		const config = defineConfig({
+			databases: {
+				core: {
+					environments: {
+						dev: {
+							name: "myapp-dev",
+							provider: { databaseId: "dev123", databaseName: "dev-db", type: "d1" },
 						},
-						migrationsDir: "./migrations",
-						provider: { databaseId: "base123", databaseName: "base-db", type: "d1" },
+						local: { name: "myapp-local" },
 					},
+					migrationsDir: "./migrations",
+					provider: { databaseId: "main123", databaseName: "main-db", type: "d1" },
 				},
-			})
-
-			const resolved = resolveDatabaseConfig(config.databases.core, "local")
-			expect(resolved.name).toBe("local-db")
-			expect(resolved.provider.type).toBe("d1")
+			},
 		})
 
-		it("throws when env required but not provided", () => {
-			const config = defineConfig({
-				databases: {
-					core: {
-						environments: {
-							local: { name: "local-db" },
-						},
-						migrationsDir: "./migrations",
-					},
-				},
-			})
+		const resolved = resolveDatabaseConfig(config.databases.core, "dev")
+		expect(resolved.name).toBe("myapp-dev")
+		expect(resolved.provider.type).toBe("d1")
+	})
 
-			expect(() => resolveDatabaseConfig(config.databases.core)).toThrow("--env")
+	it("falls back to database-level provider when env has none", () => {
+		const config = defineConfig({
+			databases: {
+				core: {
+					environments: {
+						local: { name: "local-db" },
+					},
+					migrationsDir: "./migrations",
+					provider: { databaseId: "base123", databaseName: "base-db", type: "d1" },
+				},
+			},
 		})
 
-		it("throws for unknown environment", () => {
-			const config = defineConfig({
-				databases: {
-					core: {
-						environments: {
-							local: { name: "local-db" },
-						},
-						migrationsDir: "./migrations",
-					},
-				},
-			})
+		const resolved = resolveDatabaseConfig(config.databases.core, "local")
+		expect(resolved.name).toBe("local-db")
+		expect(resolved.provider.type).toBe("d1")
+	})
+})
 
-			expect(() => resolveDatabaseConfig(config.databases.core, "staging")).toThrow('Environment "staging" not found')
+describe("migrate/config: resolveDatabaseConfig refusals", () => {
+	it("throws when env required but not provided", () => {
+		const config = defineConfig({
+			databases: {
+				core: {
+					environments: {
+						local: { name: "local-db" },
+					},
+					migrationsDir: "./migrations",
+				},
+			},
 		})
+
+		expect(() => resolveDatabaseConfig(config.databases.core)).toThrow("--env")
+	})
+
+	it("throws for unknown environment", () => {
+		const config = defineConfig({
+			databases: {
+				core: {
+					environments: {
+						local: { name: "local-db" },
+					},
+					migrationsDir: "./migrations",
+				},
+			},
+		})
+
+		expect(() => resolveDatabaseConfig(config.databases.core, "staging")).toThrow('Environment "staging" not found')
+	})
+})
+
+const PROVIDERS = [
+	{ apiToken: "t", group: "g", org: "o", type: "turso" },
+	{ authToken: "a", type: "libsql", url: "file:x.db" },
+	{ path: "x.db", type: "bun-sqlite" },
+	{ connectionString: "postgres://x", type: "postgres" },
+	{ connectionString: "postgres://y", type: "neon" },
+	{ databaseId: "id", databaseName: "core", local: true, type: "d1" },
+] as const
+
+describe("resolveDatabaseConfig and createProvider — every provider", () => {
+	it.each(PROVIDERS)("resolves and creates $type with its dialect", (provider) => {
+		const resolved = resolveDatabaseConfig({ migrationsDir: "m", name: "core", provider })
+		expect(resolved).toEqual({ drizzleConfigPath: undefined, migrationsDir: "m", name: "core", provider })
+		const dialect = provider.type === "postgres" || provider.type === "neon" ? "postgres" : "sqlite"
+		expect(createProvider(resolved.provider, { run: () => ({ code: 0, stderr: "", stdout: "[]" }) }).dialect).toBe(
+			dialect,
+		)
+	})
+
+	it("refuses an environment with no provider anywhere, and a legacy config missing name or provider", () => {
+		expect(() => resolveDatabaseConfig({ environments: { dev: { name: "d" } }, migrationsDir: "m" }, "dev")).toThrow(
+			'No provider config for environment "dev"',
+		)
+		expect(() => resolveDatabaseConfig({ migrationsDir: "m", provider: PROVIDERS[2] })).toThrow(
+			"either 'name' field or 'environments'",
+		)
+		expect(() => resolveDatabaseConfig({ migrationsDir: "m", name: "core" })).toThrow("must have 'provider'")
+	})
+
+	it("names the environments when none is given", () => {
+		const db = {
+			environments: { local: { name: "l" }, staging: { name: "s" } },
+			migrationsDir: "m",
+			provider: PROVIDERS[2],
+		}
+		expect(() => resolveDatabaseConfig(db)).toThrow("pass -e/--env with one of: local, staging")
+	})
+})
+
+describe("defineConfig — the rest of the input", () => {
+	it("refuses a legacy database without both name and provider", () => {
+		expect(() => defineConfig({ databases: { core: { migrationsDir: "m", name: "core" } } })).toThrow(
+			'Database "core": legacy format requires both',
+		)
+	})
+
+	it("fills in the multi-tenant circuit breaker defaults", () => {
+		const config = defineConfig({
+			databases: {},
+			multiTenant: { concurrency: 5, enabled: true, rootDatabase: "root", tenantQuery: "SELECT 1" },
+		})
+		expect(config.multiTenant).toEqual({
+			circuitBreaker: { failureThreshold: 0.1, minSampleSize: 50 },
+			concurrency: 5,
+			enabled: true,
+			rootDatabase: "root",
+			tenantQuery: "SELECT 1",
+		})
+		expect(defineConfig({ databases: {} }).multiTenant).toBeUndefined()
+	})
+})
+
+const project = () => mkdtempSync(join(tmpdir(), "comb-migrate-config-"))
+
+describe("findConfigFile and loadConfig", () => {
+	it("finds comb.migrate.config.ts first, and nothing in a project without one", () => {
+		const dir = project()
+		try {
+			expect(findConfigFile(dir)).toBeUndefined()
+			writeFileSync(join(dir, "migration.config.ts"), "export default {}\n")
+			writeFileSync(join(dir, "comb.migrate.config.ts"), "export default {}\n")
+			expect(findConfigFile(dir)).toBe(join(dir, "comb.migrate.config.ts"))
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
+	it("loads a default object, a default function, or the module itself, relative to cwd", async () => {
+		const dir = project()
+		try {
+			writeFileSync(join(dir, "a.config.ts"), "export default { databases: { a: {} } }\n")
+			writeFileSync(join(dir, "b.config.ts"), "export default () => ({ databases: { b: {} } })\n")
+			writeFileSync(join(dir, "c.config.ts"), "export const databases = { c: {} }\n")
+			for (const [file, key] of [
+				["a.config.ts", "a"],
+				["b.config.ts", "b"],
+				["c.config.ts", "c"],
+			] as const) {
+				const loaded = await loadConfig(file, dir)
+				expect(Object.keys(loaded.config.databases)).toEqual([key])
+				expect(loaded.configDir).toBe(dir)
+			}
+			writeFileSync(join(dir, "comb.migrate.config.ts"), "export default { databases: { found: {} } }\n")
+			expect(Object.keys((await loadConfig(undefined, dir)).config.databases)).toEqual(["found"])
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
+	it("says what is missing: the named file, or any config at all", async () => {
+		const dir = project()
+		try {
+			await expect(loadConfig("nope.config.ts", dir)).rejects.toThrow(
+				`Config file not found: ${join(dir, "nope.config.ts")}`,
+			)
+			await expect(loadConfig(undefined, dir)).rejects.toThrow(
+				"No config file found. Create one of: comb.migrate.config.ts",
+			)
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
 	})
 })
