@@ -132,3 +132,32 @@ describe("getPrimarySortDirection", () => {
 		expect(getPrimarySortDirection([])).toBe("desc")
 	})
 })
+
+describe("decodeCursor — what a cursor may carry (Q-M3, Q-H4)", () => {
+	const wire = (payload: unknown) =>
+		btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+	const payload = (v: unknown[], i: unknown = 1) => ({ i, s: "created_at.desc.nullsfirst", v })
+
+	it("keeps a numeric id a number and decodes a tagged date", () => {
+		expect(decodeCursor(wire(payload([{ $date: 5 }], 7)))).toEqual({
+			id: 7,
+			sort: "created_at.desc.nullsfirst",
+			values: [new Date(5)],
+		})
+	})
+
+	it.each([
+		["a non-object payload", 5],
+		["a boolean id", payload([1], true)],
+		["an object value", payload([{ x: 1 }])],
+		["a date tag beside another key", payload([{ $date: 1, x: 2 }])],
+		["a date tag that is not a number", payload([{ $date: "nope" }])],
+		["an array value", payload([[1]])],
+	])("is null for %s", (_label, body) => {
+		expect(decodeCursor(wire(body))).toBeNull()
+	})
+
+	it("readCursor throws invalid_cursor for one that does not decode", () => {
+		expect(() => readCursor("%%%", [{ direction: "desc", field: "created_at" }])).toThrow(CombError)
+	})
+})

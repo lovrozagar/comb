@@ -3,7 +3,8 @@
  * column affinity still compares as a number, and a cursor is refused unless every value in it
  * is one SQLite can compare.
  */
-import { sql } from "drizzle-orm"
+import { defineRelations, sql } from "drizzle-orm"
+import { drizzle as drizzleClient } from "drizzle-orm/libsql"
 import type { LibSQLDatabase } from "drizzle-orm/libsql"
 import { integer, sqliteTable } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
@@ -171,5 +172,47 @@ describe("pagination.count (Q-M5)", () => {
 	it("is null when the query did not select the count", () => {
 		const [, pagination] = drizzle.paginate([{ id: 1 }], { limit: 2, parsedSort: SORT })
 		expect(pagination.count).toBeNull()
+	})
+})
+
+describe("drizzle.listOptions pages the relational API by cursor (Q-L4)", () => {
+	const post = sqliteTable("post", { created_at: integer("created_at").notNull(), id: integer("id").primaryKey() })
+	const schema = createListQuerySchema({ sort: ["created_at"] })
+
+	async function walk(limit: string): Promise<number[][]> {
+		const harness = libsqlMemory()
+		open.push(harness)
+		const db = drizzleClient({ client: harness.client, relations: defineRelations({ post }, () => ({})) })
+		await harness.client.execute("CREATE TABLE post (id INTEGER PRIMARY KEY, created_at INTEGER NOT NULL)")
+		await harness.client.execute("INSERT INTO post VALUES (1, 7), (2, 7), (3, 9), (4, 7), (5, 9)")
+		const pages: number[][] = []
+		let cursor: string | null = null
+		for (let guard = 0; guard < 6 && (pages.length === 0 || cursor); guard++) {
+			const parsed = schema.parse({ limit, order: "created_at.desc", ...(cursor ? { cursor } : {}) })
+			const options = drizzle.listOptions(parsed)
+			const rows = await db.query.post.findMany({
+				limit: options.limit,
+				offset: options.offset,
+				orderBy: options.orderBy,
+				...(options.where ? { where: options.where } : {}),
+			})
+			const [items, pagination] = drizzle.paginate(rows, parsed)
+			pages.push(items.map((row) => row.id))
+			cursor = pagination.nextCursor
+		}
+		return pages
+	}
+
+	it("walks every row once, in sort order with the id breaking ties", async () => {
+		expect(await walk("2")).toEqual([[5, 3], [4, 2], [1]])
+	})
+
+	it("refuses a cursor minted under another order", () => {
+		/* a caller that skips the schema: listOptions checks the cursor itself */
+		const parsed = {
+			...schema.parse({ order: "created_at.desc" }),
+			cursor: encodeCursor({ i: 1, s: "id.asc.nullslast", v: [1] }),
+		}
+		expect(() => drizzle.listOptions(parsed)).toThrow(CombError)
 	})
 })

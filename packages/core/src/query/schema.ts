@@ -179,7 +179,12 @@ function validateSelectWithConfig(
 
 		if (selection === null) continue
 
-		const allowedFields = relationFieldSets[relationName]
+		/* the config declares a relation's fields, never relations below it, so none is selectable */
+		for (const nested of Object.keys(selection.relations)) {
+			ctx.addIssue({ code: "custom", message: `Unknown ${relationName} relation: ${nested}`, path: ["select"] })
+		}
+
+		const allowedFields = Object.hasOwn(relationFieldSets, relationName) ? relationFieldSets[relationName] : undefined
 
 		/* expand nested wildcard to all allowed fields */
 		if (selection.scalars.includes("*") && allowedFields) {

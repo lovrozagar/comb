@@ -1,8 +1,16 @@
+import { getTableColumns, type SQL, sql } from "drizzle-orm"
+import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
-import { decodeCursor } from "./cursor.ts"
+import { CombError } from "../error.ts"
+import { createCursor, decodeCursor } from "./cursor.ts"
 import { drizzle } from "./drizzle.ts"
 import { parseSelect } from "./fields.ts"
-import type { FilterAST } from "./types.ts"
+import type { FilterAST, SortField } from "./types.ts"
+
+const post = sqliteTable("post", { created_at: integer("created_at"), id: integer("id").primaryKey() })
+const dialect = new (SQLiteDialect as unknown as new () => {
+	sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
+})()
 
 describe("drizzle.countExtra", () => {
 	it("selects the window count for an offset request and nothing for a cursor one", () => {
@@ -68,48 +76,53 @@ describe("drizzle.filterValues", () => {
 	})
 })
 
+const sortedBy = (field: string, direction: "asc" | "desc" = "desc") => ({
+	parsedSort: [{ direction, field }],
+	sortOrderBy: { [field]: direction },
+})
+
 describe("drizzle.listOptions", () => {
-	it("returns limit + 1", () => {
-		const result = drizzle.listOptions({
-			limit: 20,
-			sortOrderBy: { createdAt: "desc" },
-		})
-		expect(result.limit).toBe(21)
+	it("returns limit + 1, and the offset of the page", () => {
+		expect(drizzle.listOptions({ limit: 20, ...sortedBy("created_at") })).toMatchObject({ limit: 21, offset: 0 })
+		expect(drizzle.listOptions({ limit: 20, page: 3, ...sortedBy("created_at") }).offset).toBe(40)
 	})
 
-	it("returns offset 0 when cursor present", () => {
-		const result = drizzle.listOptions({
-			cursor: "some-cursor",
-			limit: 20,
-			sortOrderBy: { createdAt: "desc" },
-		})
-		expect(result.offset).toBe(0)
+	it("passes sortOrderBy through and has no where without a cursor", () => {
+		const options = drizzle.listOptions({ limit: 10, ...sortedBy("name", "asc") })
+		expect(options.sortOrderBy).toEqual({ name: "asc" })
+		expect(options.where).toBeUndefined()
 	})
 
-	it("returns offset = (page - 1) * limit for page-based", () => {
-		const result = drizzle.listOptions({
-			limit: 20,
-			page: 3,
-			sortOrderBy: { createdAt: "desc" },
-		})
-		expect(result.offset).toBe(40)
+	it("orders by the sort keys then the id, with explicit null placement", () => {
+		const options = drizzle.listOptions({ limit: 10, ...sortedBy("created_at") })
+		const { sql: text } = dialect.sqlToQuery(sql.join(options.orderBy(getTableColumns(post)), sql`, `))
+		expect(text).toBe('"post"."created_at" DESC NULLS FIRST, "post"."id" DESC NULLS FIRST')
 	})
 
-	it("defaults page to 1 when no cursor or page", () => {
-		const result = drizzle.listOptions({
-			limit: 10,
-			sortOrderBy: { name: "asc" },
-		})
-		expect(result.offset).toBe(0)
+	it("gives a cursor request offset 0 and the keyset predicate", () => {
+		const sort = sortedBy("created_at")
+		const cursor = createCursor({ created_at: 7, id: 3 }, sort.parsedSort as SortField[])
+		const options = drizzle.listOptions({ cursor, limit: 10, ...sort })
+		expect(options.offset).toBe(0)
+		const where = options.where?.RAW(getTableColumns(post))
+		expect(where && dialect.sqlToQuery(where).params).toEqual([7, 7, 3])
 	})
 
-	it("passes through sortOrderBy", () => {
-		const sortOrderBy = { createdAt: "desc" as const, name: "asc" as const }
-		const result = drizzle.listOptions({
-			limit: 10,
-			sortOrderBy,
-		})
-		expect(result.sortOrderBy).toEqual(sortOrderBy)
+	it("orders by the id alone when there is no sort", () => {
+		const options = drizzle.listOptions({ limit: 10, parsedSort: [], sortOrderBy: {} })
+		expect(dialect.sqlToQuery(sql.join(options.orderBy(getTableColumns(post)), sql`, `)).sql).toBe(
+			'"post"."id" DESC NULLS FIRST',
+		)
+	})
+
+	it("refuses a cursor minted under another order, and a sort field the table lacks", () => {
+		const cursor = createCursor({ id: 1, name: "a" }, [{ direction: "asc", field: "name" }])
+		expect(() => drizzle.listOptions({ cursor, limit: 10, ...sortedBy("created_at") })).toThrow(CombError)
+		const options = drizzle.listOptions({ limit: 10, ...sortedBy("ghost") })
+		expect(() => options.orderBy(getTableColumns(post))).toThrow(CombError)
+		expect(() => drizzle.listOptions({ limit: 10, ...sortedBy("constructor") }).orderBy(getTableColumns(post))).toThrow(
+			CombError,
+		)
 	})
 })
 
@@ -323,5 +336,23 @@ describe("drizzle.project", () => {
 
 	it("drops _total even under a wildcard select", () => {
 		expect(drizzle.project({ _total: 3, id: "1", name: "n" }, parseSelect("*"))).toEqual({ id: "1", name: "n" })
+	})
+})
+
+describe("drizzle.paginate — count and the default sort", () => {
+	it("reports null past the end, 0 for an empty first page, and null without countExtra", () => {
+		expect(drizzle.paginate([], { limit: 2, page: 3, parsedSort: [] })[1].count).toBeNull()
+		expect(drizzle.paginate([], { limit: 2, page: 1, parsedSort: [] })[1].count).toBe(0)
+		expect(drizzle.paginate([{ id: "a" }], { limit: 2, parsedSort: [] })[1].count).toBeNull()
+		expect(drizzle.paginate([{ _total: 4, id: "a" }], { cursor: "c", limit: 2, parsedSort: [] })[1].count).toBeNull()
+	})
+
+	it("mints the next cursor under the default sort when the request named none", () => {
+		const rows = [
+			{ created_at: 2, id: "b" },
+			{ created_at: 1, id: "a" },
+		]
+		const next = drizzle.paginate(rows, { limit: 1, parsedSort: [] })[1].nextCursor
+		expect(decodeCursor(next)?.sort).toBe("created_at.desc.nullsfirst")
 	})
 })

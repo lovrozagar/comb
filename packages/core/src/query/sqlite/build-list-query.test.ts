@@ -1,10 +1,14 @@
 import { type SQL, sql } from "drizzle-orm"
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { CombError } from "../../error.ts"
 import { createCursor } from "../cursor.ts"
-import { buildListQuery } from "./build-list-query.ts"
+import { applyListQuery, buildListQuery } from "./build-list-query.ts"
 import { likeSearch } from "./search.ts"
+
+const dialect = new (SQLiteDialect as unknown as new () => {
+	sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
+})()
 
 const organization = sqliteTable("organization", {
 	_search: text("_search").notNull(),
@@ -381,5 +385,63 @@ describe("buildListQuery", () => {
 		expect(result.offset).toBe(0)
 		expect(result.meta.type).toBe("cursor")
 		expect(result.where).toBeTruthy()
+	})
+})
+
+describe("buildListQuery — sort fields it cannot order by (Q-L3)", () => {
+	const parsedWith = (field: string) => ({
+		filterAst: null,
+		limit: 10,
+		parsedSort: [{ direction: "asc" as const, field }],
+	})
+
+	it.each(["ghost", "constructor", "toString"])("throws for %s, which is not a column of the table", (field) => {
+		expect(() => buildListQuery({ parsed: parsedWith(field), table: organization })).toThrow(CombError)
+	})
+
+	it("throws for a computed sort with no resolver, or one that is not its own entry", () => {
+		expect(() => buildListQuery({ parsed: parsedWith("@relevance"), table: organization })).toThrow(CombError)
+		expect(() =>
+			buildListQuery({ computedSorts: {}, parsed: parsedWith("@constructor"), table: organization }),
+		).toThrow(CombError)
+	})
+})
+
+describe("buildListQuery — a table without an id column", () => {
+	const tag = sqliteTable("tag", { name: text("name").notNull() })
+	const parsed = { filterAst: null, limit: 5, parsedSort: [{ direction: "asc" as const, field: "name" }] }
+
+	it("orders without a tiebreak, and refuses a cursor it could not honor", () => {
+		expect(buildListQuery({ parsed, table: tag }).orderBy).toHaveLength(1)
+		const cursor = createCursor({ id: "x", name: "a" }, parsed.parsedSort)
+		expect(() => buildListQuery({ parsed: { ...parsed, cursor }, table: tag })).toThrow(CombError)
+	})
+})
+
+describe("buildListQuery — no sort and no created_at to default to", () => {
+	it("orders by the id alone, descending", () => {
+		const note = sqliteTable("note", { id: text("id").primaryKey() })
+		const { orderBy } = buildListQuery({ parsed: { filterAst: null, limit: 5, parsedSort: [] }, table: note })
+		expect(orderBy.map((part) => dialect.sqlToQuery(part).sql)).toEqual(['"note"."id" DESC NULLS FIRST'])
+	})
+})
+
+describe("applyListQuery", () => {
+	it("applies where, order, limit and offset, and skips where when there is none", () => {
+		const calls: string[] = []
+		const query = {
+			limit: (n: number) => (calls.push(`limit ${n}`), query),
+			offset: (n: number) => (calls.push(`offset ${n}`), query),
+			orderBy: (...order: SQL[]) => (calls.push(`orderBy ${order.length}`), query),
+			where: () => (calls.push("where"), query),
+		}
+		const built = buildListQuery({
+			parsed: { filterAst: null, limit: 2, page: 2, parsedSort: [] },
+			table: organization,
+		})
+		applyListQuery(query, built)
+		expect(calls).toEqual(["orderBy 2", "limit 3", "offset 2"])
+		applyListQuery(query, { ...built, where: sql`1` })
+		expect(calls.at(3)).toBe("where")
 	})
 })

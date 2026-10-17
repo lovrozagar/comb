@@ -32,6 +32,7 @@ function parseSelect(selectStr: string | undefined): ParsedFields | null {
 	}
 
 	const root = parseSelectList(selectStr, 0, selectStr.length)
+	if (root === null) return null
 
 	/* Return null only when input was purely separators (no name tokens attempted).
 	 * "author()" has a name token but skips the empty relation — root is empty but
@@ -45,50 +46,55 @@ function parseSelect(selectStr: string | undefined): ParsedFields | null {
 	return { root }
 }
 
-function parseSelectList(str: string, start: number, end: number): FieldSelection {
-	const selection: FieldSelection = {
-		relations: {},
-		scalars: [],
-	}
+const SEPARATORS = /[ ,\t)]/
+const NAME_END = /[,()]/
 
-	let i = start
+type Span = { end: number; str: string }
+
+/** The first index at or after `from`, before `span.end`, where `test` matches; else `span.end` */
+function scan(span: Span, from: number, test: (char: string) => boolean): number {
+	let i = from
+	while (i < span.end && !test(span.str[i] as string)) i++
+	return i
+}
+
+/**
+ * Add the embed `name(...)` opening at `open` to `selection`; returns where parsing resumes, or
+ * null when the embed's contents are malformed. Empty parens select nothing and add nothing.
+ */
+function addEmbed(
+	selection: FieldSelection,
+	name: string,
+	at: { end: number; open: number; str: string },
+): number | null {
+	const close = findMatchingParen(at.str, at.open, at.end)
+	const nested = parseSelectList(at.str, at.open + 1, close)
+	if (nested === null) return null
+	if (nested.scalars.length > 0 || Object.keys(nested.relations).length > 0)
+		mergeRelation(selection.relations, name, nested)
+	return close < at.end ? close + 1 : at.end
+}
+
+/** The selection between `start` and `end`, or null when an embed has no name before its `(` */
+function parseSelectList(str: string, start: number, end: number): FieldSelection | null {
+	const selection: FieldSelection = { relations: {}, scalars: [] }
+	const span = { end, str }
+	let i = scan(span, start, (char) => !SEPARATORS.test(char))
 	while (i < end) {
-		/* skip separators + whitespace */
-		while (i < end && (str[i] === " " || str[i] === "," || str[i] === "\t" || str[i] === ")")) {
-			i++
-		}
-		if (i >= end) break
-
-		/* consume name up to next structural char */
-		const nameStart = i
-		while (i < end && str[i] !== "," && str[i] !== "(" && str[i] !== ")") {
-			i++
-		}
-		const name = str.slice(nameStart, i).trim()
-
-		if (!name) {
-			continue
-		}
-
-		if (i < end && str[i] === "(") {
-			/* relation embed */
-			const parenStart = i + 1
-			const parenEnd = findMatchingParen(str, i, end)
-			const nested = parseSelectList(str, parenStart, parenEnd)
-			if (nested.scalars.length === 0 && Object.keys(nested.relations).length === 0) {
-				/* empty parens — skip the relation entirely; nothing selected */
-			} else {
-				mergeRelation(selection.relations, name, nested)
-			}
-			i = parenEnd < end ? parenEnd + 1 : end
+		const nameEnd = scan(span, i, (char) => NAME_END.test(char))
+		const name = str.slice(i, nameEnd).trim()
+		/* separators were skipped, so an empty name means "(" with nothing before it */
+		if (!name) return null
+		if (str[nameEnd] === "(" && nameEnd < end) {
+			const next = addEmbed(selection, name, { end, open: nameEnd, str })
+			if (next === null) return null
+			i = next
 		} else {
-			/* scalar */
-			if (!selection.scalars.includes(name)) {
-				selection.scalars.push(name)
-			}
+			if (!selection.scalars.includes(name)) selection.scalars.push(name)
+			i = nameEnd
 		}
+		i = scan(span, i, (char) => !SEPARATORS.test(char))
 	}
-
 	return selection
 }
 
@@ -103,19 +109,28 @@ function findMatchingParen(str: string, openPos: number, end: number): number {
 	return depth === 0 ? i - 1 : end
 }
 
+/**
+ * Set `record[key]` as an own property. Plain assignment of `__proto__` would replace the
+ * prototype instead, and a request names keys freely.
+ */
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+	Object.defineProperty(record, key, { configurable: true, enumerable: true, value, writable: true })
+}
+
 function mergeRelation(relations: Record<string, FieldSelection | null>, name: string, value: FieldSelection): void {
-	const existing = relations[name]
+	const existing = Object.hasOwn(relations, name) ? relations[name] : undefined
 
 	if (!existing) {
-		relations[name] = value
+		setOwn(relations, name, value)
 	} else {
 		for (const s of value.scalars) {
 			if (!existing.scalars.includes(s)) {
 				existing.scalars.push(s)
 			}
 		}
-		for (const [k, v] of Object.entries(value.relations)) {
-			if (v !== null) mergeRelation(existing.relations, k, v)
+		/* parseSelectList stores a selection for every embed, never null */
+		for (const [k, v] of Object.entries(value.relations) as Array<[string, FieldSelection]>) {
+			mergeRelation(existing.relations, k, v)
 		}
 	}
 }
@@ -135,7 +150,7 @@ function buildColumns<T extends Record<string, true>>(
 
 	const columns: Partial<T> = {}
 	for (const scalar of requestedScalars) {
-		if (scalar in availableColumns) {
+		if (Object.hasOwn(availableColumns, scalar)) {
 			columns[scalar as keyof T] = true as T[keyof T]
 		}
 	}
@@ -203,41 +218,41 @@ function filterBySelection(data: Record<string, unknown>, selection: FieldSelect
 	if (hasWildcard) {
 		for (const key of Object.keys(data)) {
 			/* skip keys that are explicitly selected as nested relations — handled below */
-			if (!Object.hasOwn(selection.relations, key)) result[key] = data[key]
+			if (!Object.hasOwn(selection.relations, key)) setOwn(result, key, data[key])
 		}
 	} else {
 		for (const scalar of selection.scalars) {
-			if (scalar in data) {
-				result[scalar] = data[scalar]
-			}
+			if (Object.hasOwn(data, scalar)) setOwn(result, scalar, data[scalar])
 		}
 	}
 
 	for (const [relationName, nestedSelection] of Object.entries(selection.relations)) {
-		if (!(relationName in data)) continue
+		if (!Object.hasOwn(data, relationName)) continue
 
 		const relationData = data[relationName]
 
 		if (relationData === null || relationData === undefined) {
-			result[relationName] = relationData
+			setOwn(result, relationName, relationData)
 			continue
 		}
 
 		if (nestedSelection === null || nestedSelection.scalars.includes("*")) {
 			/* wildcard at this level — pass through untouched */
-			result[relationName] = relationData
+			setOwn(result, relationName, relationData)
 			continue
 		}
 
 		if (Array.isArray(relationData)) {
-			result[relationName] = relationData.map((item) => {
-				if (typeof item !== "object" || item === null) return item
-				return filterBySelection(item as Record<string, unknown>, nestedSelection)
-			})
+			const items = relationData.map((item: unknown) =>
+				typeof item === "object" && item !== null
+					? filterBySelection(item as Record<string, unknown>, nestedSelection)
+					: item,
+			)
+			setOwn(result, relationName, items)
 		} else if (typeof relationData === "object") {
-			result[relationName] = filterBySelection(relationData as Record<string, unknown>, nestedSelection)
+			setOwn(result, relationName, filterBySelection(relationData as Record<string, unknown>, nestedSelection))
 		} else {
-			result[relationName] = relationData
+			setOwn(result, relationName, relationData)
 		}
 	}
 

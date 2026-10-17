@@ -97,17 +97,20 @@ type Keyset = {
 	orderBy: SQL[]
 }
 
+type Finish = {
+	keyset: Keyset
+	parsed: ListQueryParsed
+	sort: readonly SortField[]
+	/** null when the table has no tiebreak column, so no cursor can be honored */
+	tiebreak: SortKey | null
+	where: Array<SQL | null | undefined>
+}
+
 /**
  * Shared tail of both builders: cursor predicate, pagination mode, result shape.
  * `keys` null means the order includes something keyset cannot express.
  */
-function finish(
-	parsed: ListQueryParsed,
-	sort: readonly SortField[],
-	keyset: Keyset,
-	tiebreak: SortKey | null,
-	where: Array<SQL | null | undefined>,
-): ListQueryResult {
+function finish({ keyset, parsed, sort, tiebreak, where }: Finish): ListQueryResult {
 	const search = parsed.q?.trim() || null
 
 	if (parsed.cursor) {
@@ -141,12 +144,65 @@ function finish(
 	}
 }
 
+/** `record[key]` when it is the record's own entry, never one inherited from Object.prototype */
+const own = <T>(record: Record<string, T> | undefined, key: string): T | undefined =>
+	record !== undefined && Object.hasOwn(record, key) ? record[key] : undefined
+
+/** A sort the schema accepted but this table cannot run is a wiring mistake, not a reason to reorder */
+function sortNotWired(field: string, missing: string): CombError {
+	return new CombError({
+		cause: `Sort on '${field}' has no ${missing} to run it`,
+		errorKey: combErrorKeys.SORT_NOT_WIRED,
+		status: "internal_server_error",
+	})
+}
+
+/** The ORDER BY of `sort` and its keyset keys; keys are null once a computed sort is in the order */
+function planSort(
+	sort: readonly SortField[],
+	columns: Record<string, SQLiteColumn>,
+	computedSorts: Record<string, ComputedSortResolver> | undefined,
+): Keyset {
+	const keys: SortKey[] = []
+	const orderBy: SQL[] = []
+	let keysetable = true
+	for (const { direction, field, nulls } of sort) {
+		if (field.startsWith("@")) {
+			const resolver = own(computedSorts, field)
+			if (!resolver) throw sortNotWired(field, "resolver")
+			orderBy.push(resolver(direction))
+			keysetable = false
+			continue
+		}
+		const column = own(columns, field)
+		if (!column) throw sortNotWired(field, "column")
+		const key = { column, direction, nulls }
+		keys.push(key)
+		orderBy.push(orderSQL(key))
+	}
+	return { keys: keysetable ? keys : null, orderBy }
+}
+
+/** The search predicate; a `q` the schema accepted with no resolver to run it is a wiring mistake */
+function searchWhere(q: string | undefined, search: LikeSearchResolver | undefined): SQL | null {
+	if (!q) return null
+	if (search) return search(q)
+	/* The schema accepted `q`, so the endpoint promised search. Dropping it
+	   would answer every query with the unfiltered list. */
+	throw new CombError({
+		cause: "Request carries q but buildListQuery got no search resolver",
+		errorKey: combErrorKeys.SEARCH_NOT_WIRED,
+		status: "internal_server_error",
+	})
+}
+
 function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable>): ListQueryResult {
 	const { parsed, table } = opts
 	const columns = getTableColumns(table) as Record<string, SQLiteColumn>
-	const sort = parsed.parsedSort.length > 0 ? parsed.parsedSort : DEFAULT_SORT.filter(({ field }) => columns[field])
+	const sort =
+		parsed.parsedSort.length > 0 ? parsed.parsedSort : DEFAULT_SORT.filter(({ field }) => own(columns, field))
 
-	const idColumn = columns[CURSOR_TIEBREAK_COLUMN]
+	const idColumn = own(columns, CURSOR_TIEBREAK_COLUMN)
 	if (parsed.cursor && !idColumn) {
 		/* Without a tiebreak column there is no predicate to add, and ignoring the
 		   cursor would quietly re-serve the first page. This is a schema mistake. */
@@ -157,45 +213,24 @@ function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTa
 		})
 	}
 
-	const primaryDirection = sort[0]?.direction ?? "desc"
-	const tiebreak: SortKey | null = idColumn ? { column: idColumn, direction: primaryDirection } : null
-	const keys: SortKey[] = []
-	const orderBy: SQL[] = []
-	let keysetable = tiebreak !== null
-	for (const { direction, field, nulls } of sort) {
-		if (field.startsWith("@")) {
-			const resolver = opts.computedSorts?.[field]
-			if (resolver) orderBy.push(resolver(direction))
-			keysetable = false
-			continue
-		}
-		const column = columns[field]
-		if (!column) {
-			keysetable = false
-			continue
-		}
-		const key = { column, direction, nulls }
-		keys.push(key)
-		orderBy.push(orderSQL(key))
-	}
-	if (tiebreak) orderBy.push(orderSQL(tiebreak))
-
-	const q = parsed.q?.trim()
-	if (q && !opts.search) {
-		/* The schema accepted `q`, so the endpoint promised search. Dropping it
-		   would answer every query with the unfiltered list. */
-		throw new CombError({
-			cause: "Request carries q but buildListQuery got no search resolver",
-			errorKey: combErrorKeys.SEARCH_NOT_WIRED,
-			status: "internal_server_error",
-		})
+	const tiebreak: SortKey | null = idColumn ? { column: idColumn, direction: sort[0]?.direction ?? "desc" } : null
+	const planned = planSort(sort, columns, opts.computedSorts)
+	const keyset: Keyset = {
+		keys: tiebreak ? planned.keys : null,
+		orderBy: tiebreak ? [...planned.orderBy, orderSQL(tiebreak)] : planned.orderBy,
 	}
 
-	return finish(parsed, sort, { keys: keysetable ? keys : null, orderBy }, tiebreak, [
-		resolveBaseWhere(opts.baseWhere),
-		buildFilterWhere(parsed.filterAst, table, opts),
-		q && opts.search ? opts.search(q) : null,
-	])
+	return finish({
+		keyset,
+		parsed,
+		sort,
+		tiebreak,
+		where: [
+			resolveBaseWhere(opts.baseWhere),
+			buildFilterWhere(parsed.filterAst, table, opts),
+			searchWhere(parsed.q?.trim(), opts.search),
+		],
+	})
 }
 
 function buildDerivedListQuery<TSortField extends string>(
@@ -213,11 +248,13 @@ function buildDerivedListQuery<TSortField extends string>(
 	const tiebreak: SortKey = { column: opts.idColumn, direction: sort[0]?.direction ?? "desc" }
 	const orderBy = orderByKeys(keys, tiebreak)
 
-	return finish(opts.parsed, sort, { keys: keysetable ? keys : null, orderBy }, tiebreak, [
-		resolveBaseWhere(opts.baseWhere),
-		opts.filterWhere,
-		opts.searchWhere,
-	])
+	return finish({
+		keyset: { keys: keysetable ? keys : null, orderBy },
+		parsed: opts.parsed,
+		sort,
+		tiebreak,
+		where: [resolveBaseWhere(opts.baseWhere), opts.filterWhere, opts.searchWhere],
+	})
 }
 
 function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult) {

@@ -450,3 +450,30 @@ describe("createListQuerySchema — advertises only what it honors", () => {
 		expect(schema.safeParse({ order: "a.asc,b.asc,c.asc,d.asc" }).success).toBe(false)
 	})
 })
+
+describe("select names that are Object.prototype members (Q-M2)", () => {
+	const list = createListQuerySchema({
+		fields: { relationFields: { author: ["name"] }, relations: ["author"], scalars: ["id"] },
+		sort: ["id"],
+	})
+	const retrieve = createRetrieveQuerySchema({ fields: { relations: ["author"], scalars: ["id"] } })
+
+	it.each([
+		"__proto__(id)",
+		"constructor(id)",
+		"toString(name)",
+		"author(__proto__(x))",
+		"author(secret(x))",
+		"valueOf",
+	])("%s is an issue, not a thrown TypeError", (select) => {
+		expect(list.safeParse({ select }).success).toBe(false)
+		expect(retrieve.safeParse({ select }).success).toBe(false)
+	})
+})
+
+describe("select with an embed that has no name", () => {
+	it("is a 400 and returns", () => {
+		const schema = createListQuerySchema({ fields: { scalars: ["id"] }, sort: ["id"] })
+		expect(schema.safeParse({ select: "id,(x)" }).success).toBe(false)
+	})
+})

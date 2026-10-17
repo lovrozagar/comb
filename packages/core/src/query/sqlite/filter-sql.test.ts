@@ -1,9 +1,15 @@
 import type { SQL } from "drizzle-orm"
 import { SQLiteDialect } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
+import { CombError } from "../../error.ts"
 import { parseFilter } from "../filter.ts"
 import { buildConditionSQL, buildFilterSQL } from "./filter-sql.ts"
 import type { FilterCondition, FilterGroup } from "../types.ts"
+
+const dialect = new (SQLiteDialect as unknown as new () => {
+	sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
+})()
+const compile = (built: SQL) => dialect.sqlToQuery(built)
 
 const config = {
 	columnMap: { name: "name", role: "role", status: "status" },
@@ -41,13 +47,12 @@ describe("buildConditionSQL", () => {
 	})
 
 	it("matches nothing for in with an empty array, everything for nin", () => {
-		const dialect = new (SQLiteDialect as unknown as new () => {
-			sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
-		})()
-		const empty = (operator: "in" | "nin") =>
-			dialect.sqlToQuery(buildConditionSQL({ field: "role", operator, value: [] }, config) as SQL).sql
-		expect(empty("in")).toBe("0")
-		expect(empty("nin")).toBe("1")
+		for (const [operator, text] of [
+			["in", "0"],
+			["nin", "1"],
+		] as const) {
+			expect(compile(buildConditionSQL({ field: "role", operator, value: [] }, config) as SQL).sql).toBe(text)
+		}
 	})
 
 	it("builds nin condition", () => {
@@ -65,9 +70,6 @@ describe("buildConditionSQL", () => {
 	})
 
 	it("lowers name.like.% to GLOB, where % is literal", () => {
-		const dialect = new (SQLiteDialect as unknown as new () => {
-			sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
-		})()
 		const ast = parseFilter("name.like.%")
 		const condition = ast?.root.conditions[0]
 		expect(condition?.value).toBe("%")
@@ -147,7 +149,7 @@ describe("buildFilterSQL", () => {
 		expect(buildFilterSQL(group, config)).toBeTruthy()
 	})
 
-	it("skips conditions with unknown fields", () => {
+	it("throws when one condition of several has an unknown field, instead of keeping the rest", () => {
 		const group: FilterGroup = {
 			conditions: [
 				{ field: "unknown", operator: "eq", value: "x" },
@@ -156,6 +158,49 @@ describe("buildFilterSQL", () => {
 			logic: "and",
 			subgroups: [],
 		}
-		expect(buildFilterSQL(group, config)).toBeTruthy()
+		expect(() => buildFilterSQL(group, config)).toThrow(CombError)
+	})
+})
+
+/** A group of one condition */
+const one = (field: string, operator = "eq", value: unknown = "x"): FilterGroup => ({
+	conditions: [{ field, operator, value } as FilterCondition],
+	logic: "and",
+	subgroups: [],
+})
+
+describe("buildFilterSQL — fields it cannot map (Q-L3, Q-H3)", () => {
+	it("does not map a field through the prototype chain", () => {
+		expect(buildConditionSQL({ field: "toString", operator: "eq", value: 1 }, config)).toBeNull()
+		expect(buildConditionSQL({ field: "constructor", operator: "is", value: null }, config)).toBeNull()
+		expect(
+			buildConditionSQL({ field: "status", operator: "regex", value: ".*" } as unknown as FilterCondition, config),
+		).toBeNull()
+	})
+
+	it("throws filter_not_wired for a condition it cannot express, instead of dropping it", () => {
+		expect(() => buildFilterSQL(one("unknown"), config)).toThrow(CombError)
+		expect(() => buildFilterSQL(one("toString"), config)).toThrow(CombError)
+		expect(() => buildFilterSQL(one("status", "is", "maybe"), config)).toThrow(CombError)
+	})
+
+	it("skips an empty subgroup and keeps the rest", () => {
+		const group: FilterGroup = { ...one("status"), subgroups: [{ conditions: [], logic: "or", subgroups: [] }] }
+		expect(compile(buildFilterSQL(group, config) as SQL).params).toEqual(["x"])
+	})
+
+	it("lowers is.true and is.false to an equality", () => {
+		const built = buildConditionSQL({ field: "status", operator: "is", value: true }, config)
+		expect(built && compile(built).params).toEqual([true])
+	})
+})
+
+describe("buildConditionSQL — identifiers (plan 3.9)", () => {
+	it("quotes the alias and the column, so neither is read as SQL", () => {
+		const built = buildConditionSQL(
+			{ field: "name", operator: "eq", value: "x" },
+			{ columnMap: { name: 'na"me; --' }, tableAlias: "u" },
+		)
+		expect(built && compile(built).sql).toBe('"u"."na""me; --" = ?')
 	})
 })

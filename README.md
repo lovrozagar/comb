@@ -528,7 +528,7 @@ Null placement follows PostgreSQL: nulls sort last ascending and first descendin
 select=id,title,author(display_name)
 ```
 
-`createListQuerySchema({ fields })` is what puts `select` on the wire and `selectable` on `x-comb`. Without `fields`, the param is omitted. The query stays fat (sort / id / `_total` / merge keys); the response gets thin. `drizzle.paginate` and `drizzle.project` honor `parsedFields` as the last mutation of item shape. Do not apply `select=` in the HTTP framework.
+`createListQuerySchema({ fields })` is what puts `select` on the wire and `selectable` on `x-comb`. A relation's selectable fields are its declared `relationFields`; a relation nested inside one is not selectable, and `select=author(posts(id))` is a 400. Without `fields`, the param is omitted. The query stays fat (sort / id / `_total` / merge keys); the response gets thin. `drizzle.paginate` and `drizzle.project` honor `parsedFields` as the last mutation of item shape. Do not apply `select=` in the HTTP framework.
 
 `getEntityColumns()`, `buildColumns()`, `buildRelationColumns()`, `getRelationSelection()`, `hasRelation()`, `hasScalarsRequested()`, and `filterBySelect()` turn the parsed selection into what Drizzle's `columns` and `with` options expect. `filterBySelect` stays exported for odd call sites; `drizzle.project` is the one-row wrapper.
 
@@ -537,6 +537,8 @@ select=id,title,author(display_name)
 Two modes share one input shape. Offset pagination takes `page` and `limit`; cursor pagination takes `cursor` and `limit`. Responses carry `PaginationMeta`.
 
 A cursor holds the value of **every** sort key, the tiebreak id, and the signature of the sort it was minted under (`sortSignature()`), as URL-safe base64 of UTF-8 JSON. `createCursor(row, parsedSort)` mints one; `drizzle.paginate` does it for you. The keyset predicate compares all keys lexicographically, each with its own direction and null placement, so a multi-key or nullable order pages without skipping or repeating rows. A cursor presented under a different order, or one that does not decode, is a 400: the schema reports it on `cursor`, and `readCursor()` throws `CombError` (`invalid_cursor`) for callers that skip the schema.
+
+For drizzle's relational API, `drizzle.listOptions(query)` returns `limit`, `offset`, an `orderBy` callback (the sort, its null placement and the id tiebreak) and, on a cursor request, a `where: { RAW }` keyset predicate to AND with your own: `db.query.post.findMany({ limit, offset, orderBy, where })`. A cursor minted under another order is `invalid_cursor`.
 
 `pagination.count` is the number of rows the filter matches across all pages, or `null` when the response cannot know it. Select `drizzle.countExtra(query)` beside your columns and pass the rows to `drizzle.paginate`: an offset page reports the total (`0` for an empty first page), and a page past the end, or any query without the extra, reports `null`. A cursor page reports `null` too, and `countExtra` selects nothing for it: a `count(*) over()` window would make the database read every remaining row on each page, which is the cost keyset pagination exists to avoid (and on D1, rows read are billed). The tiebreak id keeps its JSON type in the cursor, so a numeric id compares as a number even when it is an expression with no column affinity. Every value a cursor carries must be a string, number, boolean, `null` or date; anything else is `invalid_cursor`.
 
@@ -587,7 +589,7 @@ const result = buildListQuery({
 const rows = await applyListQuery(db.select().from(post).$dynamic(), result)
 ```
 
-`parseFilter()` keeps filter values as strings; `validateFilter()` and the list query schema type them, so declared `number` and `date` fields bind as numbers and `boolean` as booleans, and a computed resolver receives the declared type. `buildListQuery()` and `filterToSQL()` expect that validated AST. A condition they cannot run, a computed field without a resolver, a resolver that returns `null`, a relation field with no `relations` entry, throws `filter_not_wired` (500) rather than being dropped, which would answer with more rows than the filter asked for.
+`parseFilter()` keeps filter values as strings; `validateFilter()` and the list query schema type them, so declared `number` and `date` fields bind as numbers and `boolean` as booleans, and a computed resolver receives the declared type. `buildListQuery()` and `filterToSQL()` expect that validated AST. A condition they cannot run, a computed field without a resolver, a resolver that returns `null`, a relation field with no `relations` entry, throws `filter_not_wired` (500) rather than being dropped, which would answer with more rows than the filter asked for. A sort field the table has no column for, or a computed sort without a resolver, throws `sort_not_wired` (500) the same way.
 
 `buildListQuery()` returns `{ where, orderBy, limit, offset, search, meta }` — it builds clauses, it does not execute. `applyListQuery()` is the convenience that chains them onto a Drizzle query; skip it if you need to interleave joins. `meta.type` tells you whether cursor or offset pagination won (cursor takes precedence), and `limit` is deliberately `parsed.limit + 1` in cursor mode so you can detect a next page.
 

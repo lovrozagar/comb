@@ -9,6 +9,7 @@ import {
 	hasScalarsRequested,
 	parseSelect,
 } from "./fields.ts"
+import type { ParsedFields } from "./types.ts"
 
 describe("parseSelect", () => {
 	/* Empty + null handling (4) */
@@ -423,5 +424,36 @@ describe("hasRelation", () => {
 
 	it("returns false for an empty-parens relation that was skipped", () => {
 		expect(hasRelation(parseSelect("author()"), "author")).toBe(false)
+	})
+})
+
+describe("select names that are Object.prototype members (Q-M2)", () => {
+	it("parses them as own relations and scalars, never touching the prototype", () => {
+		const parsed = parseSelect("__proto__(id),constructor(id),toString(name),author(__proto__(x))")
+		expect(Object.keys(parsed?.root.relations ?? {})).toEqual(["__proto__", "constructor", "toString", "author"])
+		expect(Object.getPrototypeOf(parsed?.root.relations)).toBe(Object.prototype)
+		expect(Object.hasOwn(parsed?.root.relations.author?.relations ?? {}, "__proto__")).toBe(true)
+	})
+
+	it("does not take a column or a row field from the prototype chain", () => {
+		expect(buildColumns(["toString", "id"], { id: true })).toEqual({ id: true })
+		expect(filterBySelect({ id: 1 }, parseSelect("id,constructor,toString") as ParsedFields)).toEqual({ id: 1 })
+	})
+})
+
+describe("parseSelect — empty names", () => {
+	it("skips an empty entry between commas", () => {
+		expect(parseSelect("id,,name")?.root.scalars).toEqual(["id", "name"])
+	})
+
+	it("builds no columns when none requested is available, and says no scalar is requested", () => {
+		expect(buildColumns(["ghost"], { id: true })).toBeUndefined()
+		expect(hasScalarsRequested(parseSelect("ghost"), ["id"])).toBe(false)
+	})
+
+	it("refuses an embed with no name, which used to loop forever", () => {
+		expect(parseSelect("(x)")).toBeNull()
+		expect(parseSelect("id,(x)")).toBeNull()
+		expect(parseSelect("author((x))")).toBeNull()
 	})
 })

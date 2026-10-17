@@ -151,25 +151,20 @@ function createCursor(
  */
 function cursorProblem(cursor: string, parsedSort: readonly SortField[]): string | null {
 	const decoded = decodeCursor(cursor)
-	if (!decoded) return "Invalid cursor"
-	if (decoded.sort !== sortSignature(parsedSort) || decoded.values.length !== parsedSort.length) {
-		return "Cursor was issued for a different order"
-	}
-	return null
+	return decoded ? signatureProblem(decoded, parsedSort) : "Invalid cursor"
+}
+
+function signatureProblem(decoded: DecodedCursor, parsedSort: readonly SortField[]): string | null {
+	const matches = decoded.sort === sortSignature(parsedSort) && decoded.values.length === parsedSort.length
+	return matches ? null : "Cursor was issued for a different order"
 }
 
 /** Decode a cursor for this sort, or throw a 400 CombError. */
 function readCursor(cursor: string, parsedSort: readonly SortField[]): DecodedCursor {
-	const problem = cursorProblem(cursor, parsedSort)
 	const decoded = decodeCursor(cursor)
-	if (problem || !decoded) {
-		throw new CombError({
-			cause: problem ?? "Invalid cursor",
-			errorKey: combErrorKeys.INVALID_CURSOR,
-			status: "bad_request",
-		})
-	}
-	return decoded
+	const problem = decoded ? signatureProblem(decoded, parsedSort) : "Invalid cursor"
+	if (problem) throw new CombError({ cause: problem, errorKey: combErrorKeys.INVALID_CURSOR, status: "bad_request" })
+	return decoded as DecodedCursor
 }
 
 /** Get primary sort direction from parsed sort array, defaults to "desc" */

@@ -2,16 +2,28 @@
  * Drizzle relational query helpers — thin abstraction for using
  * query-helpers with drizzle's relational query API.
  */
-import { type SQL, sql } from "drizzle-orm"
+import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 
-import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT } from "./cursor.ts"
+import { CombError } from "../error.ts"
+import { combErrorKeys } from "../types.ts"
+
+import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT, readCursor } from "./cursor.ts"
 import { filterBySelect } from "./fields.ts"
+import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import type { FilterAST, ParsedFields, SortField } from "./types.ts"
+
+/** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
+type RelationalTable = object
 
 type DrizzleListOptions = {
 	limit: number
 	offset: number
+	/** The sort, its null placement and the id tiebreak, for `findMany({ orderBy })` */
+	orderBy: (table: RelationalTable) => SQL[]
+	/** @deprecated by orderBy, which also breaks ties and places nulls */
 	sortOrderBy: Record<string, "asc" | "desc">
+	/** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
+	where?: { RAW: (table: RelationalTable) => SQL }
 }
 
 /**
@@ -72,18 +84,44 @@ function extractFilterValues<T extends Record<string, unknown>>(
 	return result
 }
 
-/** Compute limit/offset/sortOrderBy from schema output — hides limit+1 internally */
+/** The sort keys and tiebreak against the queried table; a sort field it lacks is a wiring mistake */
+function keysOn(table: RelationalTable, sort: readonly SortField[]): { keys: SortKey[]; tiebreak: SortKey } {
+	const column = (field: string): SQLWrapper => {
+		if (Object.hasOwn(table, field)) return (table as Record<string, SQLWrapper>)[field] as SQLWrapper
+		throw new CombError({
+			cause: `Sort field '${field}' is not a column of the queried table`,
+			errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
+			status: "internal_server_error",
+		})
+	}
+	const keys = sort.map(({ direction, field, nulls }) => ({ column: column(field), direction, nulls }))
+	return { keys, tiebreak: { column: column(CURSOR_TIEBREAK_COLUMN), direction: sort[0]?.direction ?? "desc" } }
+}
+
+/**
+ * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
+ * list query schema's output. The limit is one over the page so `paginate` can tell there is more.
+ */
 function drizzleListOptions(query: {
-	cursor?: string
+	cursor?: string | undefined
 	limit: number
-	page?: number
+	page?: number | undefined
+	parsedSort: SortField[]
 	sortOrderBy: Record<string, "asc" | "desc">
 }): DrizzleListOptions {
-	return {
-		limit: query.limit + 1,
-		offset: query.cursor ? 0 : ((query.page ?? 1) - 1) * query.limit,
-		sortOrderBy: query.sortOrderBy,
+	const sort = query.parsedSort
+	const orderBy = (table: RelationalTable) => {
+		const { keys, tiebreak } = keysOn(table, sort)
+		return orderByKeys(keys, tiebreak)
 	}
+	const base = { limit: query.limit + 1, orderBy, sortOrderBy: query.sortOrderBy }
+	if (!query.cursor) return { ...base, offset: ((query.page ?? 1) - 1) * query.limit }
+	const cursor = readCursor(query.cursor, sort)
+	const where = (table: RelationalTable) => {
+		const { keys, tiebreak } = keysOn(table, sort)
+		return keysetSQL(keys, cursor.values, tiebreak, cursor.id)
+	}
+	return { ...base, offset: 0, where: { RAW: where } }
 }
 
 type DrizzleListResult<T> = T & { _total?: number }
