@@ -10,12 +10,12 @@ describe("comb/no-console", () => {
 		const fixture = {
 			"packages/core/src/cli.ts": 'console.log("x")\n',
 			"packages/core/src/migrate/core/utils.ts": 'export const f = () => console["warn"]("x")\n',
-			"packages/core/src/codegen/generators/dtos.ts": "export const out = console.error\n",
+			"packages/core/src/codegen/generators/dtos/generate.ts": "export const out = console.error\n",
 		}
 		expect(reportsOf(rule, fixture)).toEqual([
 			{ file: "packages/core/src/cli.ts", message: MESSAGE },
 			{ file: "packages/core/src/migrate/core/utils.ts", message: MESSAGE },
-			{ file: "packages/core/src/codegen/generators/dtos.ts", message: MESSAGE },
+			{ file: "packages/core/src/codegen/generators/dtos/generate.ts", message: MESSAGE },
 		])
 	})
 

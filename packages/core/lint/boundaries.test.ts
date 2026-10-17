@@ -67,7 +67,7 @@ describe("comb/boundaries: allowed imports", () => {
 			"packages/core/src/query/sqlite/keyset.ts": 'import { effectiveNulls } from "../cursor.ts"\n',
 			"packages/core/src/sqlite/d1/error-handler.ts":
 				'import { handleConstraintViolation } from "../constraint-handler.ts"\nimport { CombError } from "../../error.ts"\n',
-			"packages/core/src/codegen/generators/dtos.ts": 'import { readMeta } from "../../meta.ts"\n',
+			"packages/core/src/codegen/generators/dtos/generate.ts": 'import { readMeta } from "../../../meta.ts"\n',
 			"packages/core/src/codegen/utils/validate.ts": 'import { CURSOR_TIEBREAK_COLUMN } from "../../query/cursor.ts"\n',
 			"packages/core/src/cli.ts": 'import { loadConfig } from "./migrate/config.ts"\n',
 			"packages/core/src/sqlite/d1/sharding/router.ts":
