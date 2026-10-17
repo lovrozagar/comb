@@ -8,7 +8,7 @@ export type StatusKey =
 	| "unprocessable_entity"
 
 // oxlint-disable-next-line typescript/no-explicit-any
-export const EMPTY_OBJ = /* @__PURE__ */ Object.freeze(Object.create(null)) as Record<string, any>
+export const EMPTY_OBJ = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.create(null)) as Record<string, any>
 // oxlint-disable-next-line typescript/no-explicit-any
 export const EMPTY_ARR = /* @__PURE__ */ Object.freeze([]) as readonly any[]
 
