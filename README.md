@@ -67,27 +67,30 @@ Every layer is usable on its own. Nothing here requires an HTTP framework.
 ## Install
 
 ```bash
-bun add @lovrozagar/comb drizzle-orm
+bun add @lovrozagar/comb drizzle-orm zod
 ```
 
 ```bash
-npm install @lovrozagar/comb drizzle-orm
+npm install @lovrozagar/comb drizzle-orm zod
 ```
 
 ```bash
-pnpm add @lovrozagar/comb drizzle-orm
+pnpm add @lovrozagar/comb drizzle-orm zod
 ```
 
 Comb ships TypeScript source, not a build. Your bundler or runtime compiles it. Bun, Vite, Wrangler, and `tsx` all handle this out of the box.
 
 Peer dependencies:
 
-| Package          | Range          | Required                                                                             |
-| ---------------- | -------------- | ------------------------------------------------------------------------------------ |
-| `drizzle-orm`    | `>=1.0.0-rc.4` | yes — the relational API (`defineRelations`) is v1-only                              |
-| `zod`            | `>=4.5.4`      | only for `c.json()` schemas and the query-layer Zod builders (`z.compile` / Zod 4.5) |
-| `ts-morph`       | `>=28.0.0`     | only for codegen                                                                     |
-| `@libsql/client` | `>=0.17.4`     | only for the libsql/Turso migration providers                                        |
+| Package                     | Range               | Required                                                        |
+| --------------------------- | ------------------- | --------------------------------------------------------------- |
+| `drizzle-orm`               | `>=1.0.0-rc.4 <2`   | yes — the relational API (`defineRelations`) is v1-only         |
+| `zod`                       | `>=4.5.4 <5`        | yes — every schema module builds on it (`z.compile` is Zod 4.5) |
+| `ts-morph`                  | `>=28.0.0 <29`      | only for codegen                                                |
+| `@libsql/client`            | `>=0.17.4 <0.18`    | only for the libsql/Turso migration providers                   |
+| `@cloudflare/workers-types` | `>=5.20260815.1 <6` | only for the D1 modules' types (`sqlite/d1/*`)                  |
+
+Each range stops before the next breaking release, so an install never pairs comb with a major it was not tested against.
 
 The migration toolkit also shells out to [Atlas](https://atlasgo.io) and `drizzle-kit`; both are runtime requirements of `comb migrate diff`, not install-time dependencies.
 

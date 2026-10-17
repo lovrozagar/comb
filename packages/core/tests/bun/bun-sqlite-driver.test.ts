@@ -1,3 +1,4 @@
+/// <reference types="bun-types" />
 /**
  * The bun:sqlite migration driver on bun:sqlite itself. Its sibling test under vitest runs the
  * same driver on Node's SQLite with bun's Database methods added; this file proves bun's own.

@@ -94,19 +94,20 @@
 		"zod": "catalog:"
 	},
 	"peerDependencies": {
-		"@libsql/client": ">=0.17.4",
-		"drizzle-orm": ">=1.0.0-rc.4",
-		"ts-morph": ">=28.0.0",
-		"zod": ">=4.5.4"
+		"@cloudflare/workers-types": ">=5.20260815.1 <6",
+		"@libsql/client": ">=0.17.4 <0.18",
+		"drizzle-orm": ">=1.0.0-rc.4 <2",
+		"ts-morph": ">=28.0.0 <29",
+		"zod": ">=4.5.4 <5"
 	},
 	"peerDependenciesMeta": {
+		"@cloudflare/workers-types": {
+			"optional": true
+		},
 		"@libsql/client": {
 			"optional": true
 		},
 		"ts-morph": {
-			"optional": true
-		},
-		"zod": {
 			"optional": true
 		}
 	}

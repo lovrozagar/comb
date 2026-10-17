@@ -1,9 +1,10 @@
-/// <reference types="bun-types" />
 /**
  * The bun:sqlite migration driver. Bun's APIs live in this file alone (comb/boundaries), and
  * bun:sqlite is imported on connect, so the module loads under Node too.
  */
 import type { BunSqliteProviderConfig, Connection, ConnectionProvider, QueryResult } from "../types.ts"
+
+const BUN_SQLITE = "bun:sqlite"
 
 type SqliteParam = string | number | bigint | boolean | null | Uint8Array
 
@@ -41,8 +42,9 @@ function bunSqliteConnection(db: BunDatabase): Connection {
 export function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider {
 	return {
 		async connect(): Promise<Connection> {
-			const { Database } = await import("bun:sqlite")
-			return bunSqliteConnection(new Database(config.path) as unknown as BunDatabase)
+			/* a specifier TypeScript does not resolve: a Node consumer compiles this without bun-types */
+			const { Database } = (await import(BUN_SQLITE)) as { Database: new (path: string) => BunDatabase }
+			return bunSqliteConnection(new Database(config.path))
 		},
 		dialect: "sqlite",
 	}

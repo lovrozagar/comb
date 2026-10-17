@@ -111,14 +111,14 @@ describe("comb/boundaries: packages", () => {
 	it("requires every package import, type-only included, to be a dependency or peer", () => {
 		const fixture = {
 			"packages/core/src/sqlite/d1/session.ts":
-				'import type { D1Database } from "@cloudflare/workers-types"\nimport { sql } from "drizzle-orm"\nimport { sqliteTable } from "drizzle-orm/sqlite-core"\n',
+				'import type { D1Database } from "@cloudflare/workers-types"\nimport type { Miniflare } from "miniflare"\nimport { sql } from "drizzle-orm"\nimport { sqliteTable } from "drizzle-orm/sqlite-core"\n',
 			"packages/core/src/codegen/utils/ts-morph.ts":
 				'import { Project } from "ts-morph"\nimport pluralize from "pluralize"\n',
 			"packages/core/src/migrate/drivers/sqlite.ts": 'import { createClient } from "@libsql/client/http"\n',
 			"packages/core/src/migrate/types.ts": 'import { z } from "zod"\nimport { x } from "vitest"\n',
 		}
 		expect(reportsOf(rule, fixture)).toEqual([
-			{ file: "packages/core/src/sqlite/d1/session.ts", message: UNDECLARED("@cloudflare/workers-types") },
+			{ file: "packages/core/src/sqlite/d1/session.ts", message: UNDECLARED("miniflare") },
 			{ file: "packages/core/src/migrate/types.ts", message: UNDECLARED("vitest") },
 		])
 	})

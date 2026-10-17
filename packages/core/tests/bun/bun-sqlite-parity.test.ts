@@ -1,3 +1,4 @@
+/// <reference types="bun-types" />
 /**
  * Driver parity on Bun's own engines. The query semantics run on libsql under vitest
  * (tests/integration/sqlite); this file proves the same SQL behaves the same on bun:sqlite,
