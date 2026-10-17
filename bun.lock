@@ -23,6 +23,7 @@
         "comb": "./src/bin.ts",
       },
       "dependencies": {
+        "@types/pluralize": "0.0.33",
         "pluralize": "8.0.0",
       },
       "devDependencies": {
@@ -31,7 +32,6 @@
         "@total-typescript/ts-reset": "catalog:",
         "@types/node": "catalog:",
         "@types/pg": "catalog:",
-        "@types/pluralize": "catalog:",
         "@vitest/coverage-v8": "catalog:",
         "bun-types": "catalog:",
         "drizzle-orm": "catalog:",
