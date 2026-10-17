@@ -56,11 +56,33 @@ jobs:
     name: test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: comb
+          POSTGRES_PASSWORD: comb
+          POSTGRES_USER: comb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U comb -d comb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # The Postgres suites are required here; tests/integration/support/pg.ts fails the run when it is unset.
+      COMB_TEST_PG_URL: postgres://comb:comb@localhost:5432/comb
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      # vitest runs on Node; Miniflare's workerd and the pg drivers are exercised there
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          package-manager-cache: false
       - run: bun install --frozen-lockfile
       - run: bun run test:coverage
       - run: bun run test:bun
