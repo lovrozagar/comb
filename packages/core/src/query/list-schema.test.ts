@@ -417,3 +417,17 @@ describe("filter length (Q-L6)", () => {
 		expect(tight.safeParse({ filter: ofLength(21) }).success).toBe(false)
 	})
 })
+
+describe("cursor and order length (S-L1)", () => {
+	const capped = createListQuerySchema({ sort: ["created_at", "title"] })
+
+	it("refuses a cursor over 4096 characters and an order over 200, valid as they otherwise are", () => {
+		const sort = [{ direction: "asc" as const, field: "title" }]
+		const long = createCursor({ id: "p1", title: "t".repeat(5000) }, sort)
+		const short = createCursor({ id: "p1", title: "t" }, sort)
+		expect(capped.safeParse({ cursor: short, order: "title.asc" }).success).toBe(true)
+		expect(capped.safeParse({ cursor: long, order: "title.asc" }).success).toBe(false)
+		expect(capped.safeParse({ order: `title.asc${" ".repeat(200)}` }).success).toBe(false)
+		expect(capped.safeParse({ order: "created_at.desc.nullslast,title.asc" }).success).toBe(true)
+	})
+})

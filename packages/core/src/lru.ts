@@ -9,6 +9,23 @@ type LruMeta<V> = { stale: boolean; value: V }
  * When hardTtlMs is set, getWithMeta() returns stale entries between soft and hard expiry
  * so callers can serve stale data while revalidating in the background.
  */
+const isPositive = (value: number | undefined) => value === undefined || (Number.isFinite(value) && value > 0)
+
+/**
+ * A size that bounds the cache, and TTLs that expire: NaN or 0 would make it unbounded or
+ * never-expiring, and a hard TTL under the soft one would have get() and getWithMeta() disagree.
+ */
+function checkOptions({ hardTtlMs, maxSize, ttlMs }: { hardTtlMs?: number; maxSize: number; ttlMs?: number }): void {
+	if (!Number.isInteger(maxSize) || maxSize < 1) {
+		throw new RangeError(`LruCache maxSize must be a positive integer, got ${maxSize}`)
+	}
+	if (!isPositive(ttlMs) || !isPositive(hardTtlMs))
+		throw new RangeError("LruCache ttlMs and hardTtlMs must be positive")
+	if (ttlMs !== undefined && hardTtlMs !== undefined && hardTtlMs < ttlMs) {
+		throw new RangeError(`LruCache hardTtlMs (${hardTtlMs}) must not be shorter than ttlMs (${ttlMs})`)
+	}
+}
+
 class LruCache<K, V> {
 	private cache: Map<K, LruEntry<V>>
 	private readonly hardTtlMs: number | undefined
@@ -21,6 +38,7 @@ class LruCache<K, V> {
 	 * @param hardTtlMs - Hard TTL: entry fully evicted after this (used by getWithMeta())
 	 */
 	constructor(options: { hardTtlMs?: number; maxSize: number; ttlMs?: number }) {
+		checkOptions(options)
 		this.maxSize = options.maxSize
 		this.ttlMs = options.ttlMs
 		this.hardTtlMs = options.hardTtlMs
@@ -95,10 +113,8 @@ class LruCache<K, V> {
 
 		/* evict oldest entry if at max size */
 		if (this.cache.size >= this.maxSize) {
-			const firstKey = this.cache.keys().next().value
-			if (firstKey !== undefined) {
-				this.cache.delete(firstKey)
-			}
+			/* a full cache holds at least one entry, so there is a first key */
+			this.cache.delete(this.cache.keys().next().value as K)
 		}
 
 		const effectiveSoftTtl = ttlMs ?? this.ttlMs

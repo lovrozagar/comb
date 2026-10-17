@@ -21,7 +21,6 @@ function paginationResponse() {
 /** Pagination response meta schema for list endpoints */
 const paginationResponseSchema = /* @__PURE__ */ paginationResponse()
 
-export { defineListQuery, listQueryBaseSchema, type ListQueryDefinition } from "./define-list-query.ts"
 export { createListQuerySchema } from "./list-schema.ts"
 export { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS } from "./schema-limits.ts"
@@ -30,7 +29,6 @@ export type {
 	ListQueryConfig,
 	ListQueryLimits,
 	ListQueryOutput,
-	ListQuerySchemaConfig,
 	RetrieveQueryConfig,
 	RetrieveQueryOutput,
 } from "./schema-types.ts"

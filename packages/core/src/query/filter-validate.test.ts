@@ -152,3 +152,14 @@ describe("validateFilter — values typed as their field declares (Q-M4, Q-H2)",
 		expect(conditions("__proto__.eq.x")).toEqual(["Unknown filter field: __proto__"])
 	})
 })
+
+describe("validateFilter — in and nin take a list (S-M2)", () => {
+	it("refuses a bare value instead of passing a scalar the driver rejects", () => {
+		expect(validateFilter("a.in.5", { a: "number" })).toEqual({
+			errors: ["Invalid value for 'a': in and nin take a list, as in.(a,b)"],
+			valid: false,
+		})
+		expect(validateFilter("a.nin.x", { a: "string" })?.valid).toBe(false)
+		expect(validateFilter("a.in.(5)", { a: "number" })?.valid).toBe(true)
+	})
+})

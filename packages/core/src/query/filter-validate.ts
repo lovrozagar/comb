@@ -65,6 +65,8 @@ function typedIs(type: FieldType, raw: unknown): Typed {
 
 function typedValue(type: FieldType, { operator, value }: FilterCondition): Typed {
 	if (operator === "is") return typedIs(type, value)
+	const lists = operator === "in" || operator === "nin"
+	if (lists && !Array.isArray(value)) return { error: "in and nin take a list, as in.(a,b)" }
 	if (!Array.isArray(value)) return typedScalar(type, String(value))
 	const items = value.map((item) => typedScalar(type, String(item)))
 	const failed = items.find((item) => "error" in item)

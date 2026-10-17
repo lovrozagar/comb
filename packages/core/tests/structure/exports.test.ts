@@ -89,6 +89,9 @@ describe("public entry points", () => {
 		"printMigrationSummary",
 		"aggregateErrors",
 		"drizzle",
+		/* they handed back unvalidated requests: a filter or sort oracle on every column (S-M8) */
+		"defineListQuery",
+		"listQueryBaseSchema",
 	]
 
 	it("export none of comb's internals", async () => {

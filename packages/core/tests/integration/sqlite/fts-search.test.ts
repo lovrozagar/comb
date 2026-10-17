@@ -64,3 +64,10 @@ describe("user text reaches FTS5 as words, never as syntax", () => {
 		expect(await found(query)).toEqual(expected)
 	})
 })
+
+describe("control characters in user text (S-M9)", () => {
+	it("searches past a NUL or other control character instead of failing in FTS5's parser", async () => {
+		expect(await found("post\u0000gres")).toEqual(["postgres tips"])
+		expect(await found("\u0001post")).toEqual(["post", "postgres tips", "posture"])
+	})
+})

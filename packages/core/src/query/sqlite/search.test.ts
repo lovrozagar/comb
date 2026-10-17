@@ -104,7 +104,7 @@ describe("buildFtsWhere", () => {
 
 describe("buildFtsHighlight", () => {
 	it("builds a highlight() call with the column index and tags bound", () => {
-		const { params, sql } = compile(buildFtsHighlight("item_fts", 1, "<b class='hit'>", "</b>"))
+		const { params, sql } = compile(buildFtsHighlight("item_fts", 1, { end: "</b>", start: "<b class='hit'>" }))
 		expect(sql).toBe('highlight("item_fts", ?, ?, ?)')
 		expect(params).toEqual([1, "<b class='hit'>", "</b>"])
 	})

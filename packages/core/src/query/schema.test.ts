@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import { defineListQuery, listQueryBaseSchema } from "./define-list-query.ts"
 import { createListQuerySchema } from "./list-schema.ts"
 import { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 import * as schema from "./schema.ts"
@@ -24,9 +23,7 @@ describe("schema.ts", () => {
 		expect(schema).toMatchObject({
 			createListQuerySchema,
 			createRetrieveQuerySchema,
-			defineListQuery,
 			LIST_QUERY_LIMITS,
-			listQueryBaseSchema,
 			PAGINATION_DEFAULTS,
 		})
 	})

@@ -28,7 +28,8 @@ const langQueryField = /* @__PURE__ */ z.string().min(2).max(10).optional().meta
 })
 
 const baseListQueryShape = {
-	cursor: /* @__PURE__ */ z.string().optional().meta({
+	/* a cursor carries its sort values, so it is as long as they are; past this it is not one comb minted for a list */
+	cursor: /* @__PURE__ */ z.string().max(4096).optional().meta({
 		description: CURSOR_DESCRIPTION,
 		examples: CURSOR_EXAMPLES,
 	}),

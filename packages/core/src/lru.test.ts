@@ -109,3 +109,44 @@ describe("LruCache", () => {
 		expect(cache.get("a")).toBeUndefined()
 	})
 })
+
+describe("LruCache options (S-L4)", () => {
+	it.each([
+		["a maxSize that is not a positive integer", { maxSize: Number.NaN }],
+		["a zero maxSize", { maxSize: 0 }],
+		["a fractional maxSize", { maxSize: 1.5 }],
+		["a ttlMs of zero, which would never expire", { maxSize: 10, ttlMs: 0 }],
+		["a negative hardTtlMs", { hardTtlMs: -1, maxSize: 10 }],
+		["a hardTtlMs shorter than ttlMs", { hardTtlMs: 10, maxSize: 10, ttlMs: 100 }],
+	])("refuses %s", (_label, options) => {
+		expect(() => new LruCache(options)).toThrow(RangeError)
+	})
+
+	it("takes a bounded size with a soft TTL under its hard one", () => {
+		expect(() => new LruCache({ hardTtlMs: 100, maxSize: 10, ttlMs: 10 })).not.toThrow()
+	})
+})
+
+describe("LruCache — between the soft and the hard TTL", () => {
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("hides a stale entry from get and has, and keeps it for getWithMeta", () => {
+		vi.useFakeTimers()
+		const cache = new LruCache<string, number>({ hardTtlMs: 1000, maxSize: 2, ttlMs: 100 })
+		cache.set("a", 1)
+		vi.advanceTimersByTime(500)
+		expect(cache.get("a")).toBeUndefined()
+		expect(cache.has("a")).toBe(false)
+		expect(cache.getWithMeta("a")).toEqual({ stale: true, value: 1 })
+	})
+})
+
+describe("LruCache — keys it never held", () => {
+	it("answers getWithMeta and has with nothing", () => {
+		const cache = new LruCache<string, number>({ maxSize: 2 })
+		expect(cache.getWithMeta("missing")).toBeUndefined()
+		expect(cache.has("missing")).toBe(false)
+	})
+})

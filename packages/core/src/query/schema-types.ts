@@ -65,22 +65,11 @@ type RetrieveQueryOutput = {
 	parsedFields: ParsedFields | null
 }
 
-type ListQuerySchemaConfig = {
-	computedFilter?: Record<string, FieldType>
-	computedSort?: readonly string[]
-	filter?: Record<string, FieldType>
-	pagination?: PaginationConfig
-	relationFilter?: Record<string, FieldType>
-	search?: readonly string[]
-	sort?: readonly string[]
-}
-
 export type {
 	FieldsConfig,
 	ListQueryConfig,
 	ListQueryLimits,
 	ListQueryOutput,
-	ListQuerySchemaConfig,
 	OutputStableShape,
 	PaginationConfig,
 	RetrieveQueryConfig,

@@ -7,7 +7,9 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { quoteIdent } from "./identifier.ts"
 
-const FTS_SYNTAX = /[*^:(){}[\]]/g
+/* FTS5 syntax, and control characters: a NUL ends the C string FTS5 parses, mid-phrase */
+// oxlint-disable-next-line no-control-regex -- matching control characters is the point
+const FTS_SYNTAX = /[*^:(){}[\]\u0000-\u001f\u007f]/g
 
 // lookup-table: FTS5's boolean operators, which a bare search term must never become
 const OPERATORS = /* @__PURE__ */ new Set(["AND", "NOT", "OR"])
@@ -58,8 +60,8 @@ function buildFtsWhere(ftsTableName: string, idColumn: string, query: string | n
 }
 
 /** `highlight()` of one FTS column, its marker tags bound */
-function buildFtsHighlight(ftsTableName: string, columnIndex: number, startTag: string, endTag: string): SQL {
-	return sql`highlight(${ident(ftsTableName)}, ${columnIndex}, ${startTag}, ${endTag})`
+function buildFtsHighlight(ftsTableName: string, columnIndex: number, tags: { end: string; start: string }): SQL {
+	return sql`highlight(${ident(ftsTableName)}, ${columnIndex}, ${tags.start}, ${tags.end})`
 }
 
 type SpellfixRow = { word: string }

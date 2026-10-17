@@ -49,7 +49,7 @@ function optionalShapeFor(config: AdvertisedConfig, limits: ListQueryLimits) {
 			.optional()
 			.meta(searchParamMeta(terms, limits.maxSearchTerms))
 	return {
-		order: z.string().optional().meta(orderParamMeta(config.sort, limits.maxSortKeys)),
+		order: z.string().max(200).optional().meta(orderParamMeta(config.sort, limits.maxSortKeys)),
 		...(Object.keys(filterConfig).length > 0 ? { filter } : {}),
 		...(search ? { q: q(search) } : {}),
 		...(config.lang ? { lang: langQueryField } : {}),
