@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -102,6 +102,30 @@ describe("runCli: migrate", () => {
 		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
 		expect(io.errors).toEqual(["Atlas not found. Install: https://atlasgo.io/getting-started"])
 		expect(calls).toEqual([["atlas", "version"]])
+	})
+
+	it("fails migrate diff when the config's FTS cannot be read, instead of diffing without it (S-12)", async () => {
+		const { runCli } = await import("./cli.ts")
+		writeFileSync(
+			join(dir, "comb.config.ts"),
+			'export default { databases: { core: { fts: { post: { columns: ["title"] } }, tables: "./missing.tables.ts" } } }\n',
+		)
+		const run: Run = (cmd, args) =>
+			cmd === "bun" && args[0] === "drizzle-kit"
+				? { code: 0, stderr: "", stdout: "CREATE TABLE post (title TEXT);" }
+				: { code: 0, stderr: "", stdout: "" }
+		const io = makeIo(dir, run)
+		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
+		expect(io.errors.join("\n")).toMatch(/missing\.tables\.ts/)
+	})
+
+	it("refuses migrate diff for a database the config does not declare", async () => {
+		const { runCli } = await import("./cli.ts")
+		writeFileSync(join(dir, "comb.config.ts"), 'export default { databases: { core: { tables: "./t.ts" } } }\n')
+		const run: Run = () => ({ code: 0, stderr: "", stdout: "" })
+		const io = makeIo(dir, run)
+		expect(await runCli(["migrate", "diff", "nope"], io)).toBe(1)
+		expect(io.errors.join("\n")).toContain('comb.config.ts declares no database "nope"')
 	})
 
 	it("prints apply usage when the database name is missing, and a missing dir", async () => {

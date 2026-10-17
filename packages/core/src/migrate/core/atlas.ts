@@ -1,37 +1,15 @@
 /**
  * Atlas CLI integration for schema diffing
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "fs"
-import { join } from "path"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { Dialect } from "../types.ts"
+import { devUrl } from "./atlas-env.ts"
 import { type Run, run } from "./process.ts"
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   SQLITE MIGRATION POST-PROCESSOR
-
-   Atlas emits SQLite table-rewrite diffs wrapped in
-   `PRAGMA foreign_keys = off;` / `PRAGMA foreign_keys = on;`. That pattern
-   fails on fresh DBs when a CREATE references a table created LATER in the
-   same diff. Swap for `PRAGMA defer_foreign_keys = on;` (standard SQLite,
-   libsql, D1) — FK enforcement deferred to commit; every table exists by then.
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-/** Idempotent. Input without the pragma pair passes through unchanged. */
-export function applySqliteMigrationTransforms(sql: string): string {
-	/* Opening: optional "-- Disable ..." comment + PRAGMA foreign_keys = off; */
-	let out = sql.replace(
-		/(?:^|\n)(?:[ \t]*-- Disable the enforcement of foreign-keys constraints[ \t]*\n)?[ \t]*PRAGMA[ \t]+foreign_keys[ \t]*=[ \t]*off[ \t]*;[ \t]*\n?/i,
-		(match) => `${match.startsWith("\n") ? "\n" : ""}PRAGMA defer_foreign_keys = on;\n`,
-	)
-
-	/* Closing: optional "-- Enable back ..." comment + PRAGMA foreign_keys = on; */
-	out = out.replace(
-		/(?:[ \t]*-- Enable back the enforcement of foreign-keys constraints[ \t]*\n)?[ \t]*PRAGMA[ \t]+foreign_keys[ \t]*=[ \t]*on[ \t]*;[ \t]*\n?/i,
-		"",
-	)
-
-	return out
-}
+export { applySqliteMigrationTransforms } from "./atlas-env.ts"
+export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiffResult } from "./migrate-diff.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ATLAS AVAILABILITY CHECK
@@ -45,21 +23,6 @@ export function getAtlasVersion(exec: Run = run): string | null {
 	const result = exec("atlas", ["version"])
 	if (result.code !== 0) return null
 	return result.stdout.match(/v[\d.]+/)?.[0] ?? null
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   DEV URL FOR DIALECT
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-function getDevUrl(dialect: Dialect): string {
-	switch (dialect) {
-		case "sqlite":
-			return "sqlite://file?mode=memory"
-		case "postgres":
-			return "postgres://localhost:5432/dev?sslmode=disable"
-		default:
-			throw new Error(`Unsupported dialect: ${dialect}`)
-	}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -82,8 +45,7 @@ export type SchemaDiffResult = {
 export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult {
 	const { dialect, fromSchema, toSchema, run: exec = run } = options
 
-	const tmpDir = `/tmp/db-migration-diff-${Date.now()}`
-	mkdirSync(tmpDir, { recursive: true })
+	const tmpDir = mkdtempSync(join(tmpdir(), "comb-schema-diff-"))
 
 	const fromFile = join(tmpDir, "from.sql")
 	const toFile = join(tmpDir, "to.sql")
@@ -100,7 +62,7 @@ export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult
 			"--to",
 			`file://${toFile}`,
 			"--dev-url",
-			getDevUrl(dialect),
+			devUrl(dialect),
 		])
 
 		if (result.code !== 0) {
@@ -118,114 +80,7 @@ export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult
 
 		return { diff, synced: false }
 	} finally {
-		/* Cleanup temp files */
-		try {
-			unlinkSync(fromFile)
-			unlinkSync(toFile)
-		} catch {}
-	}
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   INCREMENTAL MIGRATE DIFF
-
-   Uses `atlas migrate diff` which replays the existing migrations directory to
-   an ephemeral dev database, then diffs the result against the target schema
-   and emits only the delta. This is the correct way to produce incremental
-   migrations — the `atlas schema diff` path (generateSchemaDiff above) is only
-   useful when you have no migration history to replay from.
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-export type MigrateDiffOptions = {
-	dialect: Dialect
-	migrationName: string
-	migrationsDir: string
-	targetSchema: string
-	/** The process runner; tests pass a fake. */
-	run?: Run | undefined
-}
-
-export type MigrateDiffResult = {
-	files: string[]
-	synced: boolean
-}
-
-export function generateIncrementalMigration(options: MigrateDiffOptions): MigrateDiffResult {
-	const { dialect, migrationName, migrationsDir, targetSchema, run: exec = run } = options
-
-	if (!existsSync(migrationsDir)) {
-		mkdirSync(migrationsDir, { recursive: true })
-	}
-
-	const sumFile = join(migrationsDir, "atlas.sum")
-	if (!existsSync(sumFile)) {
-		/* Bootstrap atlas.sum so `atlas migrate diff` can replay history. */
-		const hashResult = exec("atlas", ["migrate", "hash", "--dir", `file://${migrationsDir}`])
-		if (hashResult.code !== 0) {
-			throw new Error(`atlas migrate hash failed: ${hashResult.stderr}`)
-		}
-	}
-
-	const tmpDir = `/tmp/db-migrate-diff-${Date.now()}`
-	mkdirSync(tmpDir, { recursive: true })
-	const toFile = join(tmpDir, "schema.sql")
-
-	try {
-		writeFileSync(toFile, targetSchema)
-
-		const beforeFiles = new Set(readdirSync(migrationsDir))
-		const result = exec("atlas", [
-			"migrate",
-			"diff",
-			migrationName,
-			"--dir",
-			`file://${migrationsDir}`,
-			"--to",
-			`file://${toFile}`,
-			"--dev-url",
-			getDevUrl(dialect),
-			"--format",
-			"{{ sql . }}",
-		])
-
-		const stderr = result.stderr
-		const stdout = result.stdout.trim()
-
-		/* Atlas reports "synced" / "no changes" via stderr and exits 0 — not
-		   via a nonzero exit code. Detect both. */
-		if (stderr.includes("no changes to be made") || stderr.includes("synced")) {
-			return { files: [], synced: true }
-		}
-
-		if (result.code !== 0) {
-			throw new Error(`atlas migrate diff failed: ${stderr || stdout}`)
-		}
-
-		const afterFiles = readdirSync(migrationsDir)
-		const newFiles = afterFiles
-			.filter((f: string) => !beforeFiles.has(f) && f !== "atlas.sum")
-			.map((f: string) => join(migrationsDir, f))
-
-		if (newFiles.length === 0) {
-			return { files: [], synced: true }
-		}
-
-		/* Apply SQLite post-processors to newly generated files. */
-		if (dialect === "sqlite") {
-			for (const f of newFiles) {
-				const content = readFileSync(f, "utf-8")
-				const transformed = applySqliteMigrationTransforms(content)
-				if (transformed !== content) {
-					writeFileSync(f, transformed)
-				}
-			}
-		}
-
-		return { files: newFiles, synced: false }
-	} finally {
-		try {
-			unlinkSync(toFile)
-		} catch {}
+		rmSync(tmpDir, { force: true, recursive: true })
 	}
 }
 

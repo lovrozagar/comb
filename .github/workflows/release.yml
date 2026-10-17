@@ -64,6 +64,9 @@ jobs:
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run typecheck:strict
+      # The Atlas suites are required here; tests/integration/support/atlas.ts fails the run without it.
+      - name: install atlas v1.3.0
+        run: curl -sSf https://atlasgo.sh | ATLAS_VERSION=v1.3.0 CI=true sh
       - run: bun run test:coverage
       - run: bun run test:bun
 

@@ -1,273 +1,161 @@
 /**
  * SQL parsing utilities for migrations
  */
-import { createHash } from "crypto"
+import { createHash } from "node:crypto"
+import { normalizeSql, segments, splitSqlStatements } from "./sql-scan.ts"
 import type { ExtractedSchema, MigrationClassification, MigrationSafety, ParsedMigration } from "../types.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SQL STATEMENT SPLITTING
+   SQL STATEMENT SPLITTING — see sql-scan.ts
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export function splitSqlStatements(sql: string): string[] {
-	const statements: string[] = []
-	let current = ""
-	let inString = false
-	let stringChar = ""
-	let inComment = false
-	let commentType: "line" | "block" | null = null
-
-	for (let i = 0; i < sql.length; i++) {
-		const char = sql[i]
-		const nextChar = sql[i + 1]
-
-		/* Handle comments */
-		if (!inString && !inComment) {
-			if (char === "-" && nextChar === "-") {
-				inComment = true
-				commentType = "line"
-				current += char
-				continue
-			}
-			if (char === "/" && nextChar === "*") {
-				inComment = true
-				commentType = "block"
-				current += char
-				continue
-			}
-		}
-
-		if (inComment) {
-			current += char
-			if (commentType === "line" && char === "\n") {
-				inComment = false
-				commentType = null
-			} else if (commentType === "block" && char === "*" && nextChar === "/") {
-				current += nextChar
-				i++
-				inComment = false
-				commentType = null
-			}
-			continue
-		}
-
-		/* Handle strings */
-		if (!inString && (char === "'" || char === '"')) {
-			inString = true
-			stringChar = char
-			current += char
-			continue
-		}
-
-		if (inString) {
-			current += char
-			if (char === stringChar) {
-				/* Check for escaped quote */
-				if (nextChar === stringChar) {
-					current += nextChar
-					i++
-					continue
-				}
-				inString = false
-			}
-			continue
-		}
-
-		/* Statement separator */
-		if (char === ";") {
-			const trimmed = current.trim()
-			if (trimmed.length > 0) {
-				statements.push(trimmed)
-			}
-			current = ""
-			continue
-		}
-
-		current += char
-	}
-
-	/* Don't forget last statement */
-	const trimmed = current.trim()
-	if (trimmed.length > 0) {
-		statements.push(trimmed)
-	}
-
-	return statements
-}
+export { splitSqlStatements }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MIGRATION HASH
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** The hash a migration is recorded under: its SQL with comments and layout normalized away */
 export function generateMigrationHash(sql: string): string {
-	/* Normalize: remove comments, collapse whitespace */
+	return createHash("sha256").update(normalizeSql(sql)).digest("hex")
+}
+
+/**
+ * The hash comb before 0.5.0 recorded. Its regexes stripped `--` and `/* *\/` inside string
+ * literals and kept a final comment with no newline, so the same file can hash differently now;
+ * a migration recorded under this hash is still applied.
+ */
+export function legacyMigrationHash(sql: string): string {
 	const normalized = sql
 		.replace(/--[^\n]*\n/g, "\n")
 		.replace(/\/\*[\s\S]*?\*\//g, "")
 		.replace(/\s+/g, " ")
 		.trim()
-
 	return createHash("sha256").update(normalized).digest("hex")
+}
+
+/** Every hash `sql` may be recorded under, current first */
+export function migrationHashes(sql: string): string[] {
+	const current = generateMigrationHash(sql)
+	const legacy = legacyMigrationHash(sql)
+	return legacy === current ? [current] : [current, legacy]
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    SCHEMA EXTRACTION
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export function extractSchema(sql: string): ExtractedSchema {
-	const tables = new Map<string, string[]>()
-	const indexes: string[] = []
-	const droppedTables: string[] = []
+const CONSTRAINT_WORDS = /^(?:CONSTRAINT|PRIMARY|FOREIGN|UNIQUE|CHECK)/i
 
-	const statements = splitSqlStatements(sql)
-
-	for (const stmt of statements) {
-		/* CREATE TABLE */
-		const createTableMatch = stmt.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?\s*\(/i)
-		if (createTableMatch?.[1]) {
-			const tableName = createTableMatch[1]
-			/* Find outermost parenthesized body, handling nested parens like DEFAULT (unixepoch() * 1000) */
-			const openIdx = stmt.indexOf("(")
-			if (openIdx !== -1) {
-				let depth = 1
-				let closeIdx = openIdx + 1
-				for (; closeIdx < stmt.length && depth > 0; closeIdx++) {
-					if (stmt[closeIdx] === "(") depth++
-					else if (stmt[closeIdx] === ")") depth--
-				}
-				const body = stmt.substring(openIdx + 1, closeIdx - 1)
-				/* Split on commas not inside parentheses */
-				const columnDefs: string[] = []
-				let segDepth = 0
-				let segStart = 0
-				for (let ci = 0; ci < body.length; ci++) {
-					if (body[ci] === "(") segDepth++
-					else if (body[ci] === ")") segDepth--
-					else if (body[ci] === "," && segDepth === 0) {
-						columnDefs.push(body.substring(segStart, ci).trim())
-						segStart = ci + 1
-					}
-				}
-				columnDefs.push(body.substring(segStart).trim())
-				const columnNames = columnDefs
-					.map((def) => {
-						const match = def.match(/^["'`]?(\w+)["'`]?\s+/i)
-						return match?.[1]
-					})
-					.filter(
-						(name): name is string =>
-							!!name &&
-							!name.toUpperCase().startsWith("CONSTRAINT") &&
-							!name.toUpperCase().startsWith("PRIMARY") &&
-							!name.toUpperCase().startsWith("FOREIGN") &&
-							!name.toUpperCase().startsWith("UNIQUE") &&
-							!name.toUpperCase().startsWith("CHECK"),
-					)
-				tables.set(tableName, columnNames)
-			} else {
-				tables.set(tableName, [])
-			}
-		}
-
-		/* CREATE INDEX */
-		const createIndexMatch = stmt.match(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i)
-		if (createIndexMatch?.[1]) {
-			indexes.push(createIndexMatch[1])
-		}
-
-		/* DROP TABLE */
-		const dropTableMatch = stmt.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i)
-		if (dropTableMatch?.[1]) {
-			droppedTables.push(dropTableMatch[1])
-			tables.delete(dropTableMatch[1])
-		}
-
-		/* ALTER TABLE ... RENAME TO ... (Atlas temp table pattern) */
-		const renameMatch = stmt.match(/ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+RENAME\s+TO\s+["'`]?(\w+)["'`]?/i)
-		if (renameMatch?.[1] && renameMatch?.[2]) {
-			const oldName = renameMatch[1]
-			const newName = renameMatch[2]
-			const columns = tables.get(oldName)
-			if (columns) {
-				tables.delete(oldName)
-				tables.set(newName, columns)
-			}
+/** The column definitions of a CREATE TABLE body: its top-level comma-separated parts */
+function bodyParts(stmt: string): string[] {
+	const open = stmt.indexOf("(")
+	const parts: string[] = []
+	let depth = 0
+	let start = open + 1
+	for (let i = open + 1; i < stmt.length; i++) {
+		const char = stmt[i]
+		if (char === "(") depth++
+		else if (char === ")" && depth === 0) return [...parts, stmt.slice(start, i).trim()]
+		else if (char === ")") depth--
+		else if (char === "," && depth === 0) {
+			parts.push(stmt.slice(start, i).trim())
+			start = i + 1
 		}
 	}
+	return [...parts, stmt.slice(start).trim()]
+}
 
-	return { droppedTables, indexes, tables }
+/** The column names a CREATE TABLE declares, table constraints left out */
+function columnNames(stmt: string): string[] {
+	return bodyParts(stmt)
+		.map((def) => /^["'`]?(\w+)["'`]?\s+/.exec(def)?.[1])
+		.filter((name): name is string => name !== undefined && !CONSTRAINT_WORDS.test(name))
+}
+
+type SchemaSoFar = { droppedTables: string[]; indexes: string[]; tables: Map<string, string[]> }
+
+const CREATE_TABLE = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?\s*\(/i
+const CREATE_INDEX = /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i
+const DROP_TABLE = /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i
+/* Atlas's table rebuild: create `new_t`, copy rows, drop `t`, rename `new_t` to `t` */
+const RENAME_TABLE = /ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+RENAME\s+TO\s+["'`]?(\w+)["'`]?/i
+
+/** What one statement does to the schema being followed */
+function follow(schema: SchemaSoFar, stmt: string): void {
+	const created = CREATE_TABLE.exec(stmt)?.[1]
+	if (created !== undefined) schema.tables.set(created, columnNames(stmt))
+	const index = CREATE_INDEX.exec(stmt)?.[1]
+	if (index !== undefined) schema.indexes.push(index)
+	const dropped = DROP_TABLE.exec(stmt)?.[1]
+	if (dropped !== undefined) {
+		schema.droppedTables.push(dropped)
+		schema.tables.delete(dropped)
+	}
+	const [, from, to] = RENAME_TABLE.exec(stmt) ?? []
+	const columns = from === undefined ? undefined : schema.tables.get(from)
+	if (columns !== undefined && to !== undefined) {
+		schema.tables.delete(from as string)
+		schema.tables.set(to, columns)
+	}
+}
+
+/** The tables (with columns), indexes and dropped tables a migration leaves */
+export function extractSchema(sql: string): ExtractedSchema {
+	const schema: SchemaSoFar = { droppedTables: [], indexes: [], tables: new Map() }
+	for (const stmt of splitSqlStatements(sql)) follow(schema, stmt)
+	return schema
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   DROP STATEMENT EXTRACTION
+   DROP STATEMENT EXTRACTION AND CLASSIFICATION — on code, never on literal text
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** A statement's code, literals and comments blanked out, whitespace collapsed */
+const codeOf = (stmt: string) =>
+	segments(stmt)
+		.map((segment) => (segment.kind === "code" ? segment.text : " "))
+		.join("")
+		.replace(/\s+/g, " ")
+		.trim()
+
+const DROPS_TABLE = /^DROP TABLE (?:IF EXISTS )?["'`]?(\w+)/i
+const DROPS_COLUMN = /^ALTER TABLE ["'`]?(\w+)["'`]? DROP (?:COLUMN )?["'`]?(\w+)/i
+const DROPS_INDEX = /^DROP INDEX (?:IF EXISTS )?["'`]?(\w+)/i
+
+/** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 export function extractDropStatements(sql: string): string[] {
 	const drops: string[] = []
-	const statements = splitSqlStatements(sql)
-
-	for (const stmt of statements) {
-		const upper = stmt.toUpperCase()
-
-		if (upper.includes("DROP TABLE")) {
-			const match = stmt.match(/DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i)
-			if (match?.[1]) {
-				drops.push(`DROP TABLE ${match[1]}`)
-			}
-		}
-
-		if (upper.includes("DROP COLUMN")) {
-			const match = stmt.match(/ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+DROP\s+COLUMN\s+["'`]?(\w+)["'`]?/i)
-			if (match?.[1] && match?.[2]) {
-				drops.push(`DROP COLUMN ${match[1]}.${match[2]}`)
-			}
-		}
-
-		if (upper.includes("DROP INDEX")) {
-			const match = stmt.match(/DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i)
-			if (match?.[1]) {
-				drops.push(`DROP INDEX ${match[1]}`)
-			}
-		}
+	for (const stmt of splitSqlStatements(sql)) {
+		const code = codeOf(stmt)
+		const table = DROPS_TABLE.exec(code)?.[1]
+		const [, from, column] = DROPS_COLUMN.exec(code) ?? []
+		const index = DROPS_INDEX.exec(code)?.[1]
+		if (table !== undefined) drops.push(`DROP TABLE ${table}`)
+		if (from !== undefined && column !== undefined) drops.push(`DROP COLUMN ${from}.${column}`)
+		if (index !== undefined) drops.push(`DROP INDEX ${index}`)
 	}
-
 	return drops
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   MIGRATION CLASSIFICATION
-   ═══════════════════════════════════════════════════════════════════════════ */
+/** Whether a statement's code loses data or fails on a populated table */
+function isUnsafe(code: string): boolean {
+	if (DROPS_TABLE.test(code) || DROPS_COLUMN.test(code) || /^TRUNCATE\b/i.test(code)) return true
+	/* a NOT NULL column with no default cannot be added to a table that has rows */
+	return /^ALTER TABLE\b/i.test(code) && /\bNOT NULL\b/i.test(code) && !/\bDEFAULT\b/i.test(code)
+}
 
+const preview = (stmt: string) => stmt.slice(0, 80) + (stmt.length > 80 ? "..." : "")
+
+/**
+ * unsafe: a statement drops a table or column, truncates, or adds a NOT NULL column without a
+ * default; cautious: it drops something else (an index, a trigger, a view); safe otherwise.
+ */
 export function classifyMigration(sql: string): MigrationClassification {
 	const statements = splitSqlStatements(sql)
-	const unsafeStatements: string[] = []
-
-	for (const stmt of statements) {
-		const upper = stmt.toUpperCase()
-
-		/* Unsafe: DROP TABLE, DROP COLUMN, TRUNCATE */
-		if (upper.includes("DROP TABLE") && !upper.includes("IF EXISTS")) {
-			unsafeStatements.push(stmt.slice(0, 80) + (stmt.length > 80 ? "..." : ""))
-		}
-		if (upper.includes("DROP COLUMN")) {
-			unsafeStatements.push(stmt.slice(0, 80) + (stmt.length > 80 ? "..." : ""))
-		}
-		if (upper.includes("TRUNCATE")) {
-			unsafeStatements.push(stmt.slice(0, 80) + (stmt.length > 80 ? "..." : ""))
-		}
-
-		/* Unsafe: Removing NOT NULL without default */
-		if (upper.includes("ALTER") && upper.includes("NOT NULL") && !upper.includes("DEFAULT")) {
-			unsafeStatements.push(stmt.slice(0, 80) + (stmt.length > 80 ? "..." : ""))
-		}
-	}
-
-	let safety: MigrationSafety = "safe"
-	if (unsafeStatements.length > 0) {
-		safety = "unsafe"
-	} else if (sql.toUpperCase().includes("DROP")) {
-		safety = "cautious"
-	}
-
+	const unsafeStatements = statements.filter((stmt) => isUnsafe(codeOf(stmt))).map(preview)
+	const drops = statements.some((stmt) => /^DROP\b/i.test(codeOf(stmt)))
+	const safety: MigrationSafety = unsafeStatements.length > 0 ? "unsafe" : drops ? "cautious" : "safe"
 	return { safety, unsafeStatements }
 }
 

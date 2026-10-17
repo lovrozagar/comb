@@ -72,16 +72,39 @@ type CodegenConfig = {
 	>
 }
 
-async function loadCombConfig(cwd: string): Promise<CodegenConfig> {
-	const candidates = ["comb.config.ts", "comb.config.js"]
-	for (const name of candidates) {
+/** The project's comb.config.ts (or .js), or undefined when it has none */
+async function findCombConfig(cwd: string): Promise<CodegenConfig | undefined> {
+	for (const name of ["comb.config.ts", "comb.config.js"]) {
 		const fp = path.resolve(cwd, name)
 		if (fs.existsSync(fp)) {
 			const mod = (await import(fp)) as { default?: CodegenConfig }
 			return mod.default ?? (mod as unknown as CodegenConfig)
 		}
 	}
+	return undefined
+}
+
+async function loadCombConfig(cwd: string): Promise<CodegenConfig> {
+	const config = await findCombConfig(cwd)
+	if (config) return config
 	throw new Error("No comb.config.ts found. Create one or use --tables <path> for direct mode.")
+}
+
+/**
+ * The FTS5 DDL a database's config declares, for the migration diff to keep apart from what Atlas
+ * sees. No config, or a database without fts, has none; any other failure is the caller's to see.
+ */
+async function configuredFtsSql(cwd: string, dbName: string | undefined, io: CliIo): Promise<string | undefined> {
+	const config = await findCombConfig(cwd)
+	if (!config || dbName === undefined) return undefined
+	if (!Object.hasOwn(config.databases, dbName)) throw new CliError(`comb.config.ts declares no database "${dbName}"`)
+	const dbConfig = config.databases[dbName] as NonNullable<CodegenConfig["databases"][string]>
+	if (!dbConfig.fts || Object.keys(dbConfig.fts).length === 0) return undefined
+	const resolvedTables = path.resolve(cwd, dbConfig.tables)
+	if (!fs.existsSync(resolvedTables)) throw new CliError(`Tables file not found: ${resolvedTables}`)
+	const { analyze } = await import("./codegen/analyzer.ts")
+	const { generateFtsSql } = await import("./codegen/generators/fts-sql.ts")
+	return generateFtsSql(analyze(resolvedTables, cwd).tables, dbConfig.fts, io.err) || undefined
 }
 
 async function cmdCodegen(args: readonly string[], io: CliIo): Promise<void> {
@@ -398,32 +421,15 @@ OPTIONS:
 			throw new CliError("Atlas not found. Install: https://atlasgo.io/getting-started")
 		}
 
-		let targetSchema = exportDrizzleSchema({ cwd, dialect: "sqlite", run: io.run })
-
-		/* Append FTS SQL if config has fts — treated as part of the target schema */
-		try {
-			const config = await loadCombConfig(cwd)
-			const dbName = args[1]
-			const dbConfig = dbName ? config.databases[dbName] : undefined
-			if (dbConfig?.fts && Object.keys(dbConfig.fts).length > 0) {
-				const { analyze } = await import("./codegen/analyzer.ts")
-				const { generateFtsSql } = await import("./codegen/generators/fts-sql.ts")
-				const resolvedTables = path.resolve(cwd, dbConfig.tables)
-				const analysis = analyze(resolvedTables, cwd)
-				const ftsSql = generateFtsSql(analysis.tables, dbConfig.fts, io.err)
-				if (ftsSql) {
-					targetSchema = `${targetSchema}\n\n/* — FTS5 virtual tables — */\n\n${ftsSql}`
-				}
-			}
-		} catch {
-			/* No comb config or no fts — proceed without FTS */
-		}
+		const ftsSql = await configuredFtsSql(cwd, args[1], io)
+		const targetSchema = exportDrizzleSchema({ cwd, dialect: "sqlite", run: io.run })
 
 		const migrationName = args[2] ?? `migration_${Date.now()}`
 		const migrationsDir = path.resolve(cwd, "atlas-migrations")
 
 		const { files, synced } = generateIncrementalMigration({
 			dialect: "sqlite",
+			ftsSql,
 			migrationName,
 			migrationsDir,
 			run: io.run,

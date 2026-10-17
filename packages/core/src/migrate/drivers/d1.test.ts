@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs"
+import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { describe, expect, it } from "vitest"
 import type { Run, RunOptions, RunResult } from "../core/process.ts"
 import type { D1ProviderConfig, ResolvedDatabaseConfig } from "../types.ts"
@@ -79,11 +80,10 @@ describe("createD1Provider: parameters and output", () => {
 		await expect(conn.execute("? ?", [1])).rejects.toThrow("Not enough params for SQL placeholders")
 	})
 
-	it("returns no rows for empty or unrecognized output", async () => {
+	it("returns no rows for empty output", async () => {
 		const empty = { columns: [], rows: [] }
 		expect(await (await connect(fakeRun(() => json([{ results: [] }])))).execute("x")).toEqual(empty)
 		expect(await (await connect(fakeRun(() => json([])))).execute("x")).toEqual(empty)
-		expect(await (await connect(fakeRun(() => json({ nope: 1 })))).execute("x")).toEqual(empty)
 	})
 
 	it("throws wrangler's stderr, or stdout when stderr is empty, on a nonzero exit", async () => {
@@ -105,7 +105,7 @@ describe("createD1Provider: batch and close", () => {
 		})
 		const conn = await connect(run, { ...CONFIG, local: true })
 		await conn.batch([{ sql: "CREATE TABLE a (x)" }, { sql: "CREATE TABLE b (y)" }])
-		expect(body).toBe("CREATE TABLE a (x);\nCREATE TABLE b (y)")
+		expect(body).toBe("CREATE TABLE a (x)\n;\nCREATE TABLE b (y)\n;")
 		expect(run.calls[0]?.args.slice(0, 4)).toEqual(["d1", "execute", "core-local", "--local"])
 		expect(existsSync(file)).toBe(false)
 	})
@@ -126,5 +126,45 @@ describe("createD1Provider: batch and close", () => {
 		const run = fakeRun(() => json([]))
 		await (await connect(run)).close()
 		expect(run.calls).toEqual([])
+	})
+})
+
+describe("createD1Provider: SQL it hands wrangler (S-13)", () => {
+	it("terminates every batch statement so a trailing comment cannot swallow the next one", async () => {
+		let file = ""
+		const run = fakeRun((call) => {
+			const arg = call.args.find((a) => a.startsWith("--file="))
+			if (arg) file = readFileSync(arg.slice("--file=".length), "utf8")
+			return json([])
+		})
+		const conn = await connect(run)
+		await conn.batch([
+			{ sql: "CREATE TABLE a (x) -- the first" },
+			{ sql: "CREATE TABLE b (y) /* and the second" },
+			{ sql: "CREATE TABLE c (z)" },
+		])
+		const db = libsqlConnection()
+		try {
+			await db.client.executeMultiple(file)
+			const { rows } = await db.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+			expect(rows.map((row) => row[0])).toEqual(["a", "b", "c"])
+		} finally {
+			await db.close()
+		}
+	})
+
+	it("inlines parameters only for placeholders in code, never a ? inside a literal or comment", async () => {
+		const run = fakeRun(() => json([{ results: [] }]))
+		const conn = await connect(run)
+		await conn.execute("SELECT '?' AS q, ? AS v -- why?\n, ? AS w", [5, "it's"])
+		const command = run.calls[0]?.args.find((a) => a.startsWith("--command="))
+		expect(command).toBe("--command=SELECT '?' AS q, 5 AS v -- why?\n, 'it''s' AS w")
+	})
+
+	it("throws when wrangler's output is not the JSON it documents, instead of returning no rows", async () => {
+		for (const stdout of ["not json", JSON.stringify({ results: [] })]) {
+			const conn = await connect(fakeRun(() => ({ code: 0, stderr: "", stdout })))
+			await expect(conn.execute("SELECT 1")).rejects.toThrow(/wrangler/)
+		}
 	})
 })

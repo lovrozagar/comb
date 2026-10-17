@@ -17,8 +17,14 @@ export async function ensureMigrationsTable(conn: Connection): Promise<void> {
   `)
 }
 
-export async function checkMigrationHash(conn: Connection, hash: string): Promise<boolean> {
-	const result = await conn.execute("SELECT hash FROM __drizzle_migrations WHERE hash = ?", [hash])
+/**
+ * Whether a migration is recorded under any of `hashes`; pass `migrationHashes(sql)` so a file
+ * recorded under the pre-0.5.0 hash still counts as applied.
+ */
+export async function checkMigrationHash(conn: Connection, hashes: string | readonly string[]): Promise<boolean> {
+	const list = typeof hashes === "string" ? [hashes] : [...hashes]
+	const marks = list.map(() => "?").join(", ")
+	const result = await conn.execute(`SELECT hash FROM __drizzle_migrations WHERE hash IN (${marks})`, list)
 	return result.rows.length > 0
 }
 
@@ -30,60 +36,47 @@ export async function recordMigrationHash(conn: Connection, hash: string): Promi
    SCHEMA VERIFICATION
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** The columns `table` lacks, or null when the table itself is missing */
+async function missingColumns(conn: Connection, table: string, expected: readonly string[]): Promise<string[] | null> {
+	const tableCheck = await conn.execute(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, [table])
+	if (tableCheck.rows.length === 0) return null
+	if (expected.length === 0) return []
+	const colResult = await conn.execute(`PRAGMA table_info("${table.replaceAll('"', '""')}")`)
+	const actual = new Set(colResult.rows.map((r) => r[1] as string))
+	return expected.filter((column) => !actual.has(column))
+}
+
+async function missingIndexes(conn: Connection, expected: readonly string[]): Promise<string[]> {
+	if (expected.length === 0) return []
+	const placeholders = expected.map(() => "?").join(",")
+	const result = await conn.execute(`SELECT name FROM sqlite_master WHERE type='index' AND name IN (${placeholders})`, [
+		...expected,
+	])
+	const found = new Set(result.rows.map((r) => r[0] as string))
+	return expected.filter((index) => !found.has(index))
+}
+
+/**
+ * Whether the database holds the tables, columns and indexes a migration creates. A database
+ * error is thrown, not reported as a mismatch: a mismatch makes the caller apply the migration.
+ */
 export async function verifySchema(
 	conn: Connection,
 	expected: ExtractedSchema,
 ): Promise<{ ok: boolean; found: number; errors: string[] }> {
 	const errors: string[] = []
 	let found = 0
-
-	/* Verify tables + columns */
 	for (const [tableName, expectedColumns] of Array.from(expected.tables)) {
-		try {
-			const tableCheck = await conn.execute(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, [
-				tableName,
-			])
-
-			if (tableCheck.rows.length === 0) {
-				errors.push(`Missing table: ${tableName}`)
-				continue
-			}
-
-			found++
-
-			if (expectedColumns.length > 0) {
-				const colResult = await conn.execute(`PRAGMA table_info(${tableName})`)
-				const actualColumns = new Set(colResult.rows.map((r) => r[1] as string))
-				const missingCols = expectedColumns.filter((c) => !actualColumns.has(c))
-
-				if (missingCols.length > 0) {
-					errors.push(`${tableName} missing columns: ${missingCols.join(", ")}`)
-				}
-			}
-		} catch (err) {
-			errors.push(`Verify error: ${err instanceof Error ? err.message : String(err)}`)
+		const missing = await missingColumns(conn, tableName, expectedColumns)
+		if (missing === null) {
+			errors.push(`Missing table: ${tableName}`)
+			continue
 		}
+		found++
+		if (missing.length > 0) errors.push(`${tableName} missing columns: ${missing.join(", ")}`)
 	}
-
-	/* Verify indexes */
-	if (expected.indexes.length > 0) {
-		try {
-			const placeholders = expected.indexes.map(() => "?").join(",")
-			const indexResult = await conn.execute(
-				`SELECT name FROM sqlite_master WHERE type='index' AND name IN (${placeholders})`,
-				expected.indexes,
-			)
-			const foundIndexes = new Set(indexResult.rows.map((r) => r[0] as string))
-			const missingIndexes = expected.indexes.filter((i) => !foundIndexes.has(i))
-
-			if (missingIndexes.length > 0) {
-				errors.push(`Missing indexes: ${missingIndexes.join(", ")}`)
-			}
-		} catch (err) {
-			errors.push(`Index verify error: ${err instanceof Error ? err.message : String(err)}`)
-		}
-	}
-
+	const indexes = await missingIndexes(conn, expected.indexes)
+	if (indexes.length > 0) errors.push(`Missing indexes: ${indexes.join(", ")}`)
 	return { errors, found, ok: errors.length === 0 }
 }
 
@@ -171,23 +164,14 @@ export async function createBackupTables(
 	return { backupSql, restoreSql }
 }
 
+/** Drop the backup tables older than `olderThanMs`; returns how many it dropped */
 export async function cleanupBackupTables(conn: Connection, olderThanMs: number = 86400000): Promise<number> {
 	const cutoff = Date.now() - olderThanMs
-
-	const result = await conn.execute(`SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '_backup_%'`)
-
-	let cleaned = 0
-	for (const row of result.rows) {
-		const name = row[0] as string
-		const match = name.match(/_backup_.+_(\d+)$/)
-		if (match?.[1]) {
-			const timestamp = parseInt(match[1], 10)
-			if (timestamp < cutoff) {
-				await conn.execute(`DROP TABLE IF EXISTS ${name}`)
-				cleaned++
-			}
-		}
-	}
-
-	return cleaned
+	/* GLOB, because LIKE reads `_` as any character */
+	const result = await conn.execute(`SELECT name FROM sqlite_master WHERE type='table' AND name GLOB '_backup_*'`)
+	const stale = result.rows
+		.map((row) => row[0] as string)
+		.filter((name) => Number(/_(\d+)$/.exec(name)?.[1] ?? Number.POSITIVE_INFINITY) < cutoff)
+	for (const name of stale) await conn.execute(`DROP TABLE IF EXISTS "${name.replaceAll('"', '""')}"`)
+	return stale.length
 }

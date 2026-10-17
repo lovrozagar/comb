@@ -1,11 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
 	checkAtlasInstalled,
 	exportDrizzleSchema,
-	generateIncrementalMigration,
 	generateMigrationFile,
 	generateSchemaDiff,
 	getAtlasVersion,
@@ -37,26 +36,6 @@ const fileArg = (args: readonly string[], flag: string) => {
 
 const diffWith = (result: RunResult) =>
 	generateSchemaDiff({ dialect: "sqlite", fromSchema: "", run: fakeRun(result), toSchema: "" })
-
-/** A fresh migrations directory per test, removed after it. */
-function useMigrationsDir(): () => string {
-	let dir = ""
-	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "comb-atlas-migrate-"))
-	})
-	afterEach(() => {
-		rmSync(dir, { force: true, recursive: true })
-	})
-	return () => dir
-}
-
-const migrateOptions = (dir: string, run: Run) => ({
-	dialect: "sqlite" as const,
-	migrationName: "add_b",
-	migrationsDir: dir,
-	run,
-	targetSchema: "T",
-})
 
 describe("atlas availability", () => {
 	it("checkAtlasInstalled is true when `atlas version` exits 0", () => {
@@ -114,67 +93,6 @@ describe("generateSchemaDiff", () => {
 		const run = fakeRun(fail('Error: near "CREATE": syntax error'))
 		expect(() => generateSchemaDiff({ dialect: "sqlite", fromSchema: "", run, toSchema: "x" })).toThrow(
 			'Atlas diff failed: Error: near "CREATE": syntax error',
-		)
-	})
-})
-
-describe("generateIncrementalMigration", () => {
-	const migrationsDir = useMigrationsDir()
-	const options = (run: Run) => migrateOptions(migrationsDir(), run)
-
-	it("hashes a directory without atlas.sum, then writes the new migration with the SQLite transforms", () => {
-		const dir = migrationsDir()
-		const run = fakeRun(ok(), (call) => {
-			expect(readFileSync(fileArg(call.args, "--to"), "utf8")).toBe("T")
-			writeFileSync(
-				join(dir, "20261017_add_b.sql"),
-				"PRAGMA foreign_keys = off;\nCREATE TABLE b (x);\nPRAGMA foreign_keys = on;\n",
-			)
-			return ok()
-		})
-		const result = generateIncrementalMigration(options(run))
-		expect(result).toEqual({ files: [join(dir, "20261017_add_b.sql")], synced: false })
-		expect(readFileSync(join(dir, "20261017_add_b.sql"), "utf8")).toBe(
-			"PRAGMA defer_foreign_keys = on;\nCREATE TABLE b (x);\n",
-		)
-		expect(run.calls.map((c) => c.args.slice(0, 2))).toEqual([
-			["migrate", "hash"],
-			["migrate", "diff"],
-		])
-		expect(run.calls[1]?.args).toContain("--dev-url")
-	})
-
-	it("skips the hash when atlas.sum exists and reports synced when nothing new appears", () => {
-		const dir = migrationsDir()
-		writeFileSync(join(dir, "atlas.sum"), "h1:x")
-		const run = fakeRun(ok("The migration directory is synced with the desired state, no changes to be made"))
-		expect(generateIncrementalMigration(options(run))).toEqual({ files: [], synced: true })
-		expect(run.calls).toHaveLength(1)
-	})
-
-	it("reports synced when atlas says so on stderr", () => {
-		const dir = migrationsDir()
-		writeFileSync(join(dir, "atlas.sum"), "h1:x")
-		const run = fakeRun({ code: 0, stderr: "no changes to be made", stdout: "" })
-		expect(generateIncrementalMigration(options(run))).toEqual({ files: [], synced: true })
-	})
-})
-
-describe("generateIncrementalMigration: failures", () => {
-	const migrationsDir = useMigrationsDir()
-	const options = (run: Run) => migrateOptions(migrationsDir(), run)
-
-	it("throws when the hash or the diff fails", () => {
-		const dir = migrationsDir()
-		expect(() => generateIncrementalMigration(options(fakeRun(fail("hash broke"))))).toThrow(
-			"atlas migrate hash failed: hash broke",
-		)
-		writeFileSync(join(dir, "atlas.sum"), "h1:x")
-		expect(() => generateIncrementalMigration(options(fakeRun(fail("diff broke"))))).toThrow(
-			"atlas migrate diff failed: diff broke",
-		)
-		expect(() => generateIncrementalMigration(options(fakeRun({ code: 1, stderr: "", stdout: "out" })))).toThrow(
-			"atlas migrate diff failed: out",
 		)
 	})
 })

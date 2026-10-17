@@ -7,6 +7,8 @@ import {
 	makeIdempotent,
 	parseMigration,
 	splitSqlStatements,
+	legacyMigrationHash,
+	migrationHashes,
 } from "./parse.ts"
 
 describe("splitSqlStatements", () => {
@@ -120,9 +122,9 @@ describe("classifyMigration", () => {
 		expect(result.safety).toBe("safe")
 	})
 
-	it("classifies cautious migrations (DROP with IF EXISTS)", () => {
-		const result = classifyMigration("DROP TABLE IF EXISTS old;")
-		expect(result.safety).toBe("cautious")
+	it("classifies cautious migrations: a drop that loses no rows", () => {
+		expect(classifyMigration("DROP INDEX IF EXISTS idx_old;").safety).toBe("cautious")
+		expect(classifyMigration("DROP TRIGGER t_ai;").safety).toBe("cautious")
 	})
 
 	it("classifies unsafe migrations (DROP without IF EXISTS)", () => {
@@ -224,8 +226,8 @@ describe("classifyMigration", () => {
 		expect(result.unsafeStatements).toHaveLength(1)
 	})
 
-	it("calls a guarded DROP TABLE merely cautious", () => {
-		expect(classifyMigration("DROP TABLE IF EXISTS post;").safety).toBe("cautious")
+	it("calls a guarded DROP TABLE unsafe: IF EXISTS guards the statement, not the rows", () => {
+		expect(classifyMigration("DROP TABLE IF EXISTS post;").safety).toBe("unsafe")
 	})
 
 	it("calls DROP COLUMN and TRUNCATE unsafe", () => {
@@ -283,5 +285,94 @@ describe("parseMigration", () => {
 	it("hashes the same SQL to the same value and different SQL differently", () => {
 		expect(parseMigration("SELECT 1;", "a.sql").hash).toBe(parseMigration("SELECT 1;", "b.sql").hash)
 		expect(parseMigration("SELECT 1;", "a.sql").hash).not.toBe(parseMigration("SELECT 2;", "a.sql").hash)
+	})
+})
+
+describe("splitSqlStatements — what a statement is (S-12, S-13)", () => {
+	it("keeps a trigger whole, its body's statements and a CASE … END included", () => {
+		const sql = `CREATE TABLE t (a TEXT);
+CREATE TRIGGER t_ai AFTER INSERT ON t BEGIN
+	INSERT INTO log(v) VALUES (CASE WHEN new.a IS NULL THEN 'none' ELSE new.a END);
+	DELETE FROM log WHERE v = 'x;y';
+END;
+CREATE INDEX i ON t(a);`
+		expect(splitSqlStatements(sql).map((statement) => statement.split(/\s+/).slice(0, 2).join(" "))).toEqual([
+			"CREATE TABLE",
+			"CREATE TRIGGER",
+			"CREATE INDEX",
+		])
+	})
+
+	it("does not split on a ; inside a backtick, bracket or double-quoted name", () => {
+		expect(splitSqlStatements('CREATE TABLE `a;b` (x);CREATE TABLE [c;d] (y);CREATE TABLE "e;f" (z)')).toHaveLength(3)
+	})
+
+	it("ends a statement whose last line is a comment holding a ;", () => {
+		expect(splitSqlStatements("SELECT 1; -- note; more\nSELECT 2")).toEqual(["SELECT 1", "-- note; more\nSELECT 2"])
+	})
+})
+
+describe("generateMigrationHash — normalization (S-13)", () => {
+	it("keeps -- and /* */ inside a string literal: they are data, not comments", () => {
+		expect(generateMigrationHash("INSERT INTO t VALUES ('a -- b')")).not.toBe(
+			generateMigrationHash("INSERT INTO t VALUES ('a ')"),
+		)
+		expect(generateMigrationHash("INSERT INTO t VALUES ('/* x */')")).not.toBe(
+			generateMigrationHash("INSERT INTO t VALUES ('')"),
+		)
+	})
+
+	it("ignores comments, a final comment with no newline included, and whitespace outside literals", () => {
+		const plain = generateMigrationHash("CREATE TABLE t (a TEXT);")
+		expect(generateMigrationHash("-- head\nCREATE   TABLE t\n(a TEXT); -- tail")).toBe(plain)
+		expect(generateMigrationHash("CREATE TABLE t /* inline */ (a TEXT);\n")).toBe(plain)
+	})
+
+	it("keeps whitespace inside a literal", () => {
+		expect(generateMigrationHash("SELECT 'a  b'")).not.toBe(generateMigrationHash("SELECT 'a b'"))
+	})
+})
+
+describe("extractSchema — a body that never closes", () => {
+	it("reads columns past parentheses nested in defaults and checks, leaving constraints out", () => {
+		const sql =
+			"CREATE TABLE t (a INTEGER DEFAULT (unixepoch() * 1000), b TEXT, CHECK (b IN ('x', 'y')), PRIMARY KEY (a))"
+		expect(extractSchema(sql).tables.get("t")).toEqual(["a", "b"])
+	})
+
+	it("still reads the columns it declares", () => {
+		expect(extractSchema("CREATE TABLE t (a TEXT, b INTEGER").tables.get("t")).toEqual(["a", "b"])
+	})
+})
+
+describe("classifyMigration and extractDropStatements — read the code, not the data (A-H4)", () => {
+	it("is not fooled by DROP TABLE or IF EXISTS inside a string literal", () => {
+		expect(classifyMigration("INSERT INTO log (msg) VALUES ('DROP TABLE users')").safety).toBe("safe")
+		expect(extractDropStatements("INSERT INTO log (msg) VALUES ('DROP TABLE users')")).toEqual([])
+		expect(classifyMigration("DROP TABLE users; INSERT INTO log VALUES ('IF EXISTS')").safety).toBe("unsafe")
+	})
+
+	it("treats DROP TABLE IF EXISTS as the data loss it is", () => {
+		expect(classifyMigration("DROP TABLE IF EXISTS users").safety).toBe("unsafe")
+		expect(extractDropStatements("DROP TABLE IF EXISTS users")).toEqual(["DROP TABLE users"])
+	})
+
+	it("sees SQLite's short ALTER TABLE … DROP form as a dropped column", () => {
+		expect(extractDropStatements("ALTER TABLE t DROP c")).toEqual(["DROP COLUMN t.c"])
+		expect(classifyMigration("ALTER TABLE t DROP c").safety).toBe("unsafe")
+	})
+})
+
+describe("migrationHashes — the hashes a file may be recorded under", () => {
+	it("is the current hash alone when the pre-0.5.0 one agrees, and both when they differ", () => {
+		expect(migrationHashes("CREATE TABLE t (a TEXT);")).toEqual([generateMigrationHash("CREATE TABLE t (a TEXT);")])
+		/* the legacy regex cuts from -- to the newline, inside the literal too */
+		const sql = "INSERT INTO t VALUES ('a -- b\nc')"
+		expect(legacyMigrationHash(sql)).not.toBe(generateMigrationHash(sql))
+		expect(migrationHashes(sql)).toEqual([generateMigrationHash(sql), legacyMigrationHash(sql)])
+	})
+
+	it("keeps the legacy normalization, whose regexes cut -- inside literals", () => {
+		expect(legacyMigrationHash("SELECT 'a -- b'\nSELECT 1")).toBe(legacyMigrationHash("SELECT 'a \nSELECT 1"))
 	})
 })

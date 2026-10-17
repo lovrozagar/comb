@@ -1,11 +1,10 @@
-/// <reference types="bun-types" />
 /**
- * SQLite driver implementations (Turso, libsql, bun:sqlite)
+ * SQLite driver implementations (Turso, libsql), and SQLite schema introspection. The bun:sqlite
+ * driver lives in bun-sqlite.ts, the one file Bun's APIs may appear in.
  */
 import type { Client, InValue } from "@libsql/client"
 import * as z from "zod"
 import type {
-	BunSqliteProviderConfig,
 	Connection,
 	ConnectionProvider,
 	LibsqlProviderConfig,
@@ -14,78 +13,87 @@ import type {
 	TursoProviderConfig,
 } from "../types.ts"
 
+export { createBunSqliteProvider } from "./bun-sqlite.ts"
+
 /* ═══════════════════════════════════════════════════════════════════════════
    TURSO API SCHEMAS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const tursoDbInfoSchema = z.compile(
-	z.object({
-		database: z.object({ Hostname: z.string().min(1) }),
-	}),
-)
+/* built on use: a migration command parses each Turso response once */
+const tursoDbInfoSchema = () => z.object({ database: z.object({ Hostname: z.string().min(1) }) })
 
-const tursoAuthTokenSchema = z.compile(z.object({ jwt: z.string().min(1) }))
+const tursoAuthTokenSchema = () => z.object({ jwt: z.string().min(1) })
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TURSO CREDENTIALS
    ═══════════════════════════════════════════════════════════════════════════ */
 
-async function createTursoDatabase(org: string, dbName: string, apiToken: string, group: string): Promise<void> {
-	console.log(`\n⚠ Database "${dbName}" not found — creating new database`)
-	console.log(`  org: ${org}  group: ${group}`)
-	const res = await fetch(`https://api.turso.tech/v1/organizations/${org}/databases`, {
-		body: JSON.stringify({ group, name: dbName }),
-		headers: {
-			Authorization: `Bearer ${apiToken}`,
-			"Content-Type": "application/json",
-		},
-		method: "POST",
-	})
-	if (!res.ok) {
-		const body = (await res.json().catch(() => ({}))) as Record<string, unknown>
-		const msg = typeof body["error"] === "string" ? body["error"] : `HTTP ${res.status}`
-		throw new Error(`Failed to create Turso database "${org}/${dbName}": ${msg}`)
-	}
-	console.log(`  ✓ Created "${dbName}"\n`)
+/** How the Turso calls reach the API and report progress: injectable, quiet by default */
+export type TursoDeps = {
+	fetch?: typeof fetch
+	/** A progress line, such as the database being created; no output when omitted */
+	log?: (line: string) => void
 }
 
+export type TursoCredentialsRequest = TursoDeps & {
+	apiToken: string
+	dbName: string
+	/** The placement group a database created on demand joins (default "default") */
+	group?: string | undefined
+	org: string
+}
+
+/** Turso's error message from a failed response, or the HTTP status when its body has none */
+async function failure(res: Response): Promise<string> {
+	const text = await res.text()
+	try {
+		const body = JSON.parse(text) as Record<string, unknown> | null
+		if (typeof body?.["error"] === "string") return body["error"]
+	} catch {
+		// reason: an error body that is not JSON carries no message; the status still says what failed
+	}
+	return `HTTP ${res.status}`
+}
+
+async function createTursoDatabase(
+	request: TursoCredentialsRequest & { fetch: typeof fetch; group: string },
+): Promise<void> {
+	const { apiToken, dbName, group, org } = request
+	const log = request.log ?? (() => undefined)
+	log(`Database "${dbName}" not found — creating it in org ${org}, group ${group}`)
+	const res = await request.fetch(`https://api.turso.tech/v1/organizations/${org}/databases`, {
+		body: JSON.stringify({ group, name: dbName }),
+		headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
+		method: "POST",
+	})
+	if (!res.ok) throw new Error(`Failed to create Turso database "${org}/${dbName}": ${await failure(res)}`)
+	log(`Created "${dbName}"`)
+}
+
+/** The libsql URL and a one-hour token for a Turso database, creating the database when it is missing */
 export async function getTursoCredentials(
-	org: string,
-	dbName: string,
-	apiToken: string,
-	group = "default",
+	request: TursoCredentialsRequest,
 ): Promise<{ url: string; authToken: string }> {
+	const { apiToken, dbName, org } = request
+	const call = request.fetch ?? fetch
 	const baseUrl = `https://api.turso.tech/v1/organizations/${org}/databases/${dbName}`
 	const headers = { Authorization: `Bearer ${apiToken}` }
 
-	let dbRes = await fetch(baseUrl, { headers })
-
-	/* Auto-create database if it doesn't exist */
+	let dbRes = await call(baseUrl, { headers })
 	if (dbRes.status === 404) {
-		await createTursoDatabase(org, dbName, apiToken, group)
-		dbRes = await fetch(baseUrl, { headers })
+		await createTursoDatabase({ ...request, fetch: call, group: request.group ?? "default" })
+		dbRes = await call(baseUrl, { headers })
 	}
+	if (!dbRes.ok) throw new Error(`Turso API error for "${org}/${dbName}": ${await failure(dbRes)}`)
+	const dbInfo = tursoDbInfoSchema().parse(await dbRes.json())
 
-	if (!dbRes.ok) {
-		const body = (await dbRes.json().catch(() => ({}))) as Record<string, unknown>
-		const msg = typeof body["error"] === "string" ? body["error"] : `HTTP ${dbRes.status}`
-		throw new Error(`Turso API error for "${org}/${dbName}": ${msg}`)
-	}
-
-	const dbInfo = tursoDbInfoSchema.parse(await dbRes.json())
-
-	const tokenRes = await fetch(`${baseUrl}/auth/tokens`, {
+	const tokenRes = await call(`${baseUrl}/auth/tokens`, {
 		body: JSON.stringify({ expiration: "1h" }),
 		headers: { ...headers, "Content-Type": "application/json" },
 		method: "POST",
 	})
-	if (!tokenRes.ok) {
-		const body = (await tokenRes.json().catch(() => ({}))) as Record<string, unknown>
-		const msg = typeof body["error"] === "string" ? body["error"] : `HTTP ${tokenRes.status}`
-		throw new Error(`Turso auth token error for "${org}/${dbName}": ${msg}`)
-	}
-
-	const tokenData = tursoAuthTokenSchema.parse(await tokenRes.json())
+	if (!tokenRes.ok) throw new Error(`Turso auth token error for "${org}/${dbName}": ${await failure(tokenRes)}`)
+	const tokenData = tursoAuthTokenSchema().parse(await tokenRes.json())
 
 	return { authToken: tokenData.jwt, url: `libsql://${dbInfo.database.Hostname}` }
 }
@@ -126,10 +134,11 @@ function createLibsqlConnection(client: Client): Connection {
    TURSO PROVIDER
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export function createTursoProvider(config: TursoProviderConfig): ConnectionProvider {
+export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps = {}): ConnectionProvider {
 	return {
 		async connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
-			const creds = await getTursoCredentials(config.org, dbConfig.name, config.apiToken, config.group)
+			const { apiToken, group, org } = config
+			const creds = await getTursoCredentials({ ...deps, apiToken, dbName: dbConfig.name, group, org })
 			const { createClient } = await import("@libsql/client")
 			const client = createClient({ authToken: creds.authToken, url: creds.url })
 			return createLibsqlConnection(client)
@@ -144,7 +153,7 @@ export function createTursoProvider(config: TursoProviderConfig): ConnectionProv
 
 export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider {
 	return {
-		async connect(_dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
+		async connect(): Promise<Connection> {
 			const { createClient } = await import("@libsql/client")
 			/* `Config` from @libsql/client does not admit an explicit undefined, so omit
 			   the key rather than pass one. */
@@ -159,109 +168,73 @@ export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionPr
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   BUN:SQLITE PROVIDER
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-export function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider {
-	return {
-		async connect(_dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
-			/* Dynamic import to avoid bundling bun:sqlite in non-bun environments */
-			const bunSqlite = await import("bun:sqlite")
-			const db = new bunSqlite.Database(config.path)
-
-			type SqliteParam = string | number | bigint | boolean | null | Uint8Array
-
-			return {
-				batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
-					db.transaction(() => {
-						for (const stmt of statements) {
-							const args = stmt.params as SqliteParam[] | undefined
-							if (args && args.length > 0) {
-								db.run(stmt.sql, args)
-							} else {
-								db.run(stmt.sql)
-							}
-						}
-					})()
-					return Promise.resolve()
-				},
-
-				close(): Promise<void> {
-					db.close()
-					return Promise.resolve()
-				},
-				dialect: "sqlite",
-
-				execute(sql: string, params?: unknown[]): Promise<QueryResult> {
-					const stmt = db.prepare(sql)
-					const args = (params ?? []) as SqliteParam[]
-					const rows =
-						args.length > 0
-							? (stmt.all(...args) as Record<string, unknown>[])
-							: (stmt.all() as Record<string, unknown>[])
-					const firstRow = rows[0]
-					const columns = firstRow ? Object.keys(firstRow) : []
-					return Promise.resolve({
-						columns,
-						rows: rows.map((row) => columns.map((col) => row[col])),
-					})
-				},
-			}
-		},
-		dialect: "sqlite",
-	}
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
    SQLITE SCHEMA INTROSPECTION
    ═══════════════════════════════════════════════════════════════════════════ */
 
+type MasterRow = { name: string; sql: string; type: string }
+
+/* SQLite's own objects and Litestream's; GLOB, because LIKE reads `_` as any character */
+const OWN_OBJECTS = "name NOT GLOB 'sqlite_*' AND name NOT GLOB '_litestream_*' AND name != '__drizzle_migrations'"
+
+/* only SQLite's own autoindexes, filtered above, have no sql */
+const DEFINED = "sql IS NOT NULL"
+
+// lookup-table: the shadow tables each search module creates beside its virtual table
+const SHADOWS: Readonly<Record<string, readonly string[]>> = {
+	fts5: ["config", "content", "data", "docsize", "idx"],
+	spellfix1: ["vocab"],
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * Whether a row belongs to an FTS5 or spellfix1 index: the virtual table, its shadow tables, or a
+ * trigger that writes into it. Matched by what the objects are, never by a name's suffix.
+ */
+function searchIndexObjects(rows: readonly MasterRow[]): (row: MasterRow) => boolean {
+	const owned = new Set<string>()
+	const virtual: string[] = []
+	for (const row of rows) {
+		const module = /\bUSING\s+(fts5|spellfix1)\b/i.exec(row.sql)?.[1]?.toLowerCase()
+		if (row.type !== "table" || module === undefined) continue
+		virtual.push(row.name)
+		owned.add(row.name)
+		for (const shadow of SHADOWS[module] as readonly string[]) owned.add(`${row.name}_${shadow}`)
+	}
+	const writesInto = (sql: string) =>
+		virtual.some((name) => new RegExp(`\\bINTO\\s+[\x60"\\[]?${escapeRegExp(name)}\\b`, "i").test(sql))
+	return (row) => owned.has(row.name) || (row.type === "trigger" && writesInto(row.sql))
+}
+
+/** The schema objects comb manages: everything but SQLite's own, Litestream's and search indexes */
+async function managedObjects(conn: Connection): Promise<MasterRow[]> {
+	const result = await conn.execute(`SELECT type, name, sql FROM sqlite_master WHERE ${OWN_OBJECTS} AND ${DEFINED}`)
+	const rows = result.rows.map(([type, name, sql]) => ({
+		name: name as string,
+		sql: sql as string,
+		type: type as string,
+	}))
+	const searchIndex = searchIndexObjects(rows)
+	return rows.filter((row) => !searchIndex(row))
+}
+
 export async function introspectSqliteSchema(conn: Connection): Promise<string> {
-	const result = await conn.execute(`
-    SELECT type, sql FROM sqlite_master
-    WHERE type IN ('table', 'index', 'trigger')
-      AND sql IS NOT NULL
-      AND name NOT LIKE 'sqlite_%'
-      AND name NOT LIKE '_litestream_%'
-      AND name != '__drizzle_migrations'
-      AND sql NOT LIKE '%USING fts5%'
-      AND sql NOT LIKE '%USING spellfix1%'
-      AND name NOT LIKE '%Fts'
-      AND name NOT LIKE '%Fts_%'
-      AND name NOT LIKE '%Spellfix'
-      AND name NOT LIKE '%Spellfix_%'
-  `)
-
 	const typeOrder: Record<string, number> = { index: 2, table: 1, trigger: 3 }
-	const sorted = result.rows
-		.map((row) => ({ sql: row[1] as string, type: row[0] as string }))
-		.filter((r) => r.sql)
-		.sort((a, b) => (typeOrder[a.type] ?? 99) - (typeOrder[b.type] ?? 99))
-
-	return `${sorted.map((r) => r.sql).join(";\n\n")};`
+	const sorted = (await managedObjects(conn))
+		.filter((row) => row.sql && Object.hasOwn(typeOrder, row.type))
+		.sort((a, b) => (typeOrder[a.type] as number) - (typeOrder[b.type] as number))
+	return `${sorted.map((row) => row.sql).join(";\n\n")};`
 }
 
 export async function getSqliteTables(conn: Connection): Promise<string[]> {
-	const result = await conn.execute(`
-    SELECT name FROM sqlite_master
-    WHERE type = 'table'
-      AND name NOT LIKE 'sqlite_%'
-      AND name NOT LIKE '_litestream_%'
-      AND name != '__drizzle_migrations'
-  `)
-	return result.rows.map((row) => row[0] as string)
+	return (await managedObjects(conn)).filter((row) => row.type === "table").map((row) => row.name)
 }
 
 export async function getSqliteColumns(conn: Connection, table: string): Promise<string[]> {
-	const result = await conn.execute(`PRAGMA table_info(${table})`)
+	const result = await conn.execute(`PRAGMA table_info("${table.replaceAll('"', '""')}")`)
 	return result.rows.map((row) => row[1] as string)
 }
 
 export async function getSqliteIndexes(conn: Connection): Promise<string[]> {
-	const result = await conn.execute(`
-    SELECT name FROM sqlite_master
-    WHERE type = 'index'
-      AND name NOT LIKE 'sqlite_%'
-  `)
-	return result.rows.map((row) => row[0] as string)
+	return (await managedObjects(conn)).filter((row) => row.type === "index").map((row) => row.name)
 }

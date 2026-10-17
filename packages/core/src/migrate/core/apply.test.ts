@@ -9,6 +9,8 @@ import {
 	verifySchema,
 } from "./apply.ts"
 import type { Connection, ExtractedSchema, ParsedMigration, QueryResult } from "../types.ts"
+import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
+import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
 
 function mockConnection(overrides: Partial<Connection> = {}): Connection {
 	return {
@@ -295,14 +297,6 @@ describe("applyMigration — resolution paths", () => {
 })
 
 describe("verifySchema — error handling", () => {
-	it("reports a probe that threw rather than propagating it", async () => {
-		const conn = mockConnection({ execute: vi.fn(() => Promise.reject(new Error("connection lost"))) })
-		const result = await verifySchema(conn, makeSchema(new Map([["post", ["id"]]])))
-
-		expect(result.ok).toBe(false)
-		expect(result.errors.join(" ")).toContain("connection lost")
-	})
-
 	it("names only the columns a table is actually missing", async () => {
 		const conn = mockConnection({
 			execute: vi.fn((sql: string): Promise<QueryResult> => {
@@ -322,5 +316,67 @@ describe("verifySchema — error handling", () => {
 
 		expect(result.errors.join(" ")).toContain("Missing table: post")
 		expect(result.found).toBe(0)
+	})
+})
+
+describe("checkMigrationHash — hashes recorded before 0.5.0 (S-13)", () => {
+	it("finds a migration recorded under its legacy hash, so it is not applied again", async () => {
+		const sql = "INSERT INTO t VALUES ('a -- b');\n-- applied before 0.5.0"
+		const conn = libsqlConnection()
+		try {
+			await ensureMigrationsTable(conn)
+			await recordMigrationHash(conn, legacyMigrationHash(sql))
+			expect(generateMigrationHash(sql)).not.toBe(legacyMigrationHash(sql))
+			expect(await checkMigrationHash(conn, migrationHashes(sql))).toBe(true)
+			expect(await checkMigrationHash(conn, generateMigrationHash(sql))).toBe(false)
+		} finally {
+			await conn.close()
+		}
+	})
+})
+
+describe("verifySchema — when the database fails", () => {
+	it("throws the failure instead of reading it as a schema that needs applying", async () => {
+		const conn = mockConnection({ execute: vi.fn(() => Promise.reject(new Error("database is locked"))) })
+		await expect(verifySchema(conn, makeSchema(new Map([["post", ["id"]]]), ["idx_post"]))).rejects.toThrow(
+			"database is locked",
+		)
+	})
+})
+
+describe("cleanupBackupTables — on SQLite", () => {
+	it("drops only backup tables older than the cutoff, and nothing a LIKE pattern would have caught", async () => {
+		const conn = libsqlConnection()
+		try {
+			const now = Date.now()
+			await conn.client.executeMultiple(
+				`CREATE TABLE "_backup_post_1" (x); CREATE TABLE "_backup_post_${now}" (x); CREATE TABLE "_backup_nostamp" (x); CREATE TABLE "xbackup_post_1" (x);`,
+			)
+			expect(await cleanupBackupTables(conn, 1000)).toBe(1)
+			const { rows } = await conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+			expect(rows.map((row) => row[0])).toEqual(["_backup_nostamp", `_backup_post_${now}`, "xbackup_post_1"])
+		} finally {
+			await conn.close()
+		}
+	})
+})
+
+describe("verifySchema — on SQLite", () => {
+	it("finds the tables, columns and indexes a migration created, and names what is missing", async () => {
+		const conn = libsqlConnection()
+		try {
+			await conn.client.executeMultiple(
+				'CREATE TABLE "post" (id TEXT, title TEXT); CREATE INDEX idx_post_title ON post(title);',
+			)
+			const present = await verifySchema(conn, makeSchema(new Map([["post", ["id", "title"]]]), ["idx_post_title"]))
+			expect(present).toEqual({ errors: [], found: 1, ok: true })
+			const absent = await verifySchema(
+				conn,
+				makeSchema(new Map([["post", ["id", "body"]]]), ["idx_post_title", "idx_gone"]),
+			)
+			expect(absent.errors).toEqual(["post missing columns: body", "Missing indexes: idx_gone"])
+		} finally {
+			await conn.close()
+		}
 	})
 })

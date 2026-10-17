@@ -13,3 +13,5 @@ export function libsqlMemory(): LibsqlHarness {
 	const client = createClient({ url: ":memory:" })
 	return { client, close: () => client.close(), db: drizzle({ client }) }
 }
+
+export { libsqlConnection } from "../../../src/migrate/__fixtures__/libsql-connection.ts"
