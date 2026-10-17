@@ -326,12 +326,12 @@ export const authorConstraints: ConstraintMap = {
 
 ### Handlers
 
-Three handlers, one signature — `(error: unknown, constraintMaps: ConstraintMap[]) => void`. Each inspects a driver's native error, finds the matching entry, and throws a `CombError`. If nothing matches, they return and let the original error propagate.
+Three handlers, one signature — `(error: unknown, constraintMaps: ConstraintMap[]) => void`. Each walks the error's `cause` chain past wrappers such as drizzle's `DrizzleQueryError`, reads the engine's own code, finds the matching map entry, and throws a `CombError`. If nothing matches, they return and let the original error propagate.
 
 ```ts
 import { d1ErrorHandler } from "@lovrozagar/comb/sqlite/d1/error-handler"
 import { pgErrorHandler } from "@lovrozagar/comb/pg/error-handler"
-import { handleConstraintViolation } from "@lovrozagar/comb/sqlite/constraint-handler"
+import { sqliteErrorHandler } from "@lovrozagar/comb/sqlite/constraint-handler"
 
 try {
 	await db.insert(author).values(input)
@@ -341,9 +341,12 @@ try {
 }
 ```
 
-- `d1ErrorHandler` — flattens D1's nested `cause` chain and additionally recognises transient D1 failures (network, storage-limit, read-only), mapping them to `service_unavailable` so a retry layer can act on them.
-- `pgErrorHandler` — reads PostgreSQL `SQLSTATE` codes and pulls the column out of the error `detail`.
-- `handleConstraintViolation` — the generic SQLite path, driven by message parsing; use it for libsql, Turso, and `bun:sqlite`.
+- `sqliteErrorHandler` — libsql, Turso and `bun:sqlite`. Classifies by SQLite's extended result code: the primary key by `SQLITE_CONSTRAINT_PRIMARYKEY`, a CHECK by its constraint name (in the statement's table first), a composite unique by its first column, NOT NULL with its column. It also maps `SQLITE_FULL` (422) and `SQLITE_BUSY` / `SQLITE_LOCKED` / `SQLITE_READONLY` (503).
+- `d1ErrorHandler` — Cloudflare D1. Constraint violations go through the same SQLite mapping. Other errors with an SQLite code are query errors (500); a D1 platform failure without one is transient (503) or a storage limit (422).
+- `pgErrorHandler` — PostgreSQL on node-postgres, postgres.js and Bun.SQL. Classifies by SQLSTATE (read from `code`, or Bun.SQL's `errno`) and reads `table`/`table_name`, `constraint`/`constraint_name` and `column`/`column_name` alike. The primary key is a 23505 on `<table>_pkey`.
+- `handleConstraintViolation` — the constraint half of `sqliteErrorHandler`. It also accepts an engine message given as text.
+
+A `CombError`'s `cause` is safe to show a client. The original error, which can hold the SQL and its bound values, is on `source`, which is never serialized; log it, don't return it.
 
 ## Codegen
 
@@ -706,7 +709,7 @@ ULIDs use Crockford base32 with a 10-character timestamp and 16 characters of ra
 | `@lovrozagar/comb/sqlite/columns`            | `c` for SQLite                                                              |
 | `@lovrozagar/comb/sqlite/constraints`        | constraint types                                                            |
 | `@lovrozagar/comb/sqlite/patterns`           | shared regex patterns                                                       |
-| `@lovrozagar/comb/sqlite/constraint-handler` | generic SQLite error mapping                                                |
+| `@lovrozagar/comb/sqlite/constraint-handler` | `sqliteErrorHandler`, `handleConstraintViolation`                           |
 | `@lovrozagar/comb/sqlite/d1/session`         | `openD1Session`                                                             |
 | `@lovrozagar/comb/sqlite/d1/bookmark`        | `BookmarkTracker`                                                           |
 | `@lovrozagar/comb/sqlite/d1/error-handler`   | `d1ErrorHandler`                                                            |

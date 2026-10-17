@@ -51,6 +51,8 @@ function platformMessage(error: Error): string | null {
 }
 
 function platformOutcome(message: string): Outcome {
+	/* D1_TYPE_ERROR, D1_EXEC_ERROR and D1_COLUMN_NOTFOUND quote the query or a bound value: always a query error */
+	if (!/\bD1_ERROR\b/.test(message)) return QUERY_FAILED
 	const lower = message.toLowerCase()
 	if (D1_TRANSIENT_PATTERNS.some((pattern) => lower.includes(pattern))) {
 		return {

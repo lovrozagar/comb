@@ -44,6 +44,8 @@ describe("d1ErrorHandler", () => {
 			503,
 		],
 		["D1_ERROR: Exceeded maximum DB size limit", "tier_database_limit_reached", 422],
+		["D1_ERROR: Account storage limit reached", "tier_database_limit_reached", 422],
+		["D1_ERROR: An unknown failure", "database_io_error", 500],
 		["D1_EXEC_ERROR: Error in line 1: near x", "database_io_error", 500],
 		["D1_TYPE_ERROR: Type 'object' not supported", "database_io_error", 500],
 		["D1_COLUMN_NOTFOUND: Column not found", "database_io_error", 500],
@@ -71,5 +73,15 @@ describe("d1ErrorHandler", () => {
 
 	it("throws CombError instances", () => {
 		expect(thrown(new Error("D1_ERROR: overloaded"))).toBeInstanceOf(CombError)
+	})
+})
+
+describe("d1ErrorHandler: values embedded in D1 messages", () => {
+	it.each([
+		"D1_TYPE_ERROR: Type 'object' not supported for value 'please reset my password'",
+		"D1_EXEC_ERROR: Error in line 1: near 'internal error': syntax error",
+		"D1_COLUMN_NOTFOUND: Column 'reset' not found",
+	])("never makes %s retryable", (message) => {
+		expect(thrown(new Error(message))).toMatchObject({ errorKey: "database_io_error", status: 500 })
 	})
 })

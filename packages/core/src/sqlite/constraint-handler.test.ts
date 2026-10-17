@@ -153,3 +153,58 @@ describe("handleConstraintViolation and sqliteErrorHandler", () => {
 		expect(() => handleConstraintViolation(engine(code, "x"), [])).not.toThrow()
 	})
 })
+
+describe("handleConstraintViolation given a message string", () => {
+	it.each([
+		["UNIQUE constraint failed: store.slug", "store_slug_taken"],
+		["SQLITE_CONSTRAINT: UNIQUE constraint failed: store.slug", "store_slug_taken"],
+		[
+			"D1_ERROR: UNIQUE constraint failed: store.slug: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)",
+			"store_slug_taken",
+		],
+		[
+			"D1_ERROR: UNIQUE constraint failed: store.id: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_PRIMARYKEY)",
+			"store_id_taken",
+		],
+		["CHECK constraint failed: store_price_check", "store_price_invalid"],
+		["NOT NULL constraint failed: store.name", "required_field_missing"],
+		["FOREIGN KEY constraint failed", "foreign_key_violation"],
+	])("classifies %s", (message, errorKey) => {
+		expect(() => handleConstraintViolation(message, MAPS)).toThrow(expect.objectContaining({ errorKey }))
+	})
+
+	it("leaves a message that is no constraint violation alone", () => {
+		expect(() => handleConstraintViolation("no such column: x", MAPS)).not.toThrow()
+		expect(() => handleConstraintViolation("", MAPS)).not.toThrow()
+	})
+})
+
+const failing = (query: string) =>
+	wrapped(engine("SQLITE_CONSTRAINT_CHECK", "CHECK constraint failed: status_check"), query)
+
+describe("constraintError: a CHECK name two tables share", () => {
+	const shared: ConstraintMap[] = [
+		{
+			invoice: { check: { status_check: { cause: "Invoice status", errorKey: "invoice_status_invalid" } } },
+			order: { check: { status_check: { cause: "Order status", errorKey: "order_status_invalid" } } },
+		},
+	]
+
+	it("resolves the statement's table first", () => {
+		expect(constraintError(failing('insert into "order" ("status") values (?)'), shared)).toMatchObject({
+			errorKey: "order_status_invalid",
+			table: "order",
+		})
+		expect(constraintError(failing('update "invoice" set "status" = ?'), shared)).toMatchObject({
+			errorKey: "invoice_status_invalid",
+		})
+	})
+
+	it("searches every table only when the statement's table is unknown", () => {
+		expect(
+			constraintError(engine("SQLITE_CONSTRAINT_CHECK", "CHECK constraint failed: status_check"), shared),
+		).toMatchObject({
+			errorKey: "invoice_status_invalid",
+		})
+	})
+})

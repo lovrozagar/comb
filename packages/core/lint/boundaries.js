@@ -13,7 +13,7 @@ const SHARED_ROOTS = new Set(["error.ts", "types.ts", "lru.ts", "id.ts", "states
 
 /* runtime code lands in a consumer bundle (Workers, Vite); the tooling (ts-morph, node:fs,
  * child_process) must never come along with it */
-const RUNTIME = new Set(["query", "sqlite", "pg", "error", "types", "lru", "id", "states", "meta"])
+const RUNTIME = new Set(["query", "sqlite", "pg", "error", "types", "lru", "id", "states", "meta", "constraint-map"])
 const TOOLING = new Set(["codegen", "migrate", "cli", "bin"])
 
 /* [from feature, to feature]: imports that would couple a feature to one it must ship without */

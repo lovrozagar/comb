@@ -36,12 +36,14 @@ describe("comb/boundaries: feature arrows", () => {
 			"packages/core/src/pg/error-handler.ts": 'import { runCli } from "../cli.ts"\n',
 			"packages/core/src/meta.ts": 'import { loadConfig } from "./migrate/config.ts"\n',
 			"packages/core/src/error.ts": 'import { x } from "./bin.ts"\n',
+			"packages/core/src/constraint-map.ts": 'import { analyze } from "./codegen/analyzer.ts"\n',
 		}
 		expect(reportsOf(rule, fixture)).toEqual([
 			{ file: "packages/core/src/sqlite/d1/session.ts", message: ARROW("sqlite", "codegen") },
 			{ file: "packages/core/src/pg/error-handler.ts", message: ARROW("pg", "cli") },
 			{ file: "packages/core/src/meta.ts", message: ARROW("meta", "migrate") },
 			{ file: "packages/core/src/error.ts", message: SHARED },
+			{ file: "packages/core/src/constraint-map.ts", message: ARROW("constraint-map", "codegen") },
 		])
 	})
 })

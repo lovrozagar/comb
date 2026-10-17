@@ -53,8 +53,23 @@ describe("readSqliteError", () => {
 		expect(readSqliteError(new Error("D1_ERROR: Network connection lost."))).toBeNull()
 		expect(readSqliteError(Object.assign(new Error("x"), { code: "23505" }))).toBeNull()
 		expect(readSqliteError(drizzle(new Error("reset")))).toBeNull()
-		expect(readSqliteError("UNIQUE constraint failed: a.b")).toBeNull()
+		expect(readSqliteError("no such column: x")).toBeNull()
 		expect(readSqliteError(null)).toBeNull()
+	})
+})
+
+describe("readSqliteError: text and cycles", () => {
+	it("reads an engine message given as text", () => {
+		expect(readSqliteError("UNIQUE constraint failed: a.b")).toEqual({
+			code: "SQLITE_CONSTRAINT_UNIQUE",
+			message: "UNIQUE constraint failed: a.b",
+			query: undefined,
+		})
+		expect(readSqliteError("SQLITE_CONSTRAINT: NOT NULL constraint failed: a.b")?.code).toBe(
+			"SQLITE_CONSTRAINT_NOTNULL",
+		)
+		const d1 = "D1_ERROR: CHECK constraint failed: c: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)"
+		expect(readSqliteError(d1)?.code).toBe("SQLITE_CONSTRAINT_CHECK")
 	})
 
 	it("stops on a cause cycle", () => {

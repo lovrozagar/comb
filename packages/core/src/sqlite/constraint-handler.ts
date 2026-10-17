@@ -3,11 +3,11 @@
  * Shared by the libsql, bun:sqlite and D1 handlers: the engine is the same, only the way the
  * driver carries the code differs, and `readSqliteError` absorbs that.
  */
+import { type Fallback, type Found, findCheck, lookup, own, toCombError } from "../constraint-map.ts"
 import { CombError } from "../error.ts"
-import { type ConstraintMap, type ConstraintMapEntry, combErrorKeys, type StatusKey } from "../types.ts"
+import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { readSqliteError, type SqliteErrorRead } from "./read-error.ts"
 
-type Table = NonNullable<ConstraintMap[string]>
 type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown }
 
 /** `UNIQUE constraint failed: member.first, member.last` → member, [first, last] */
@@ -20,34 +20,11 @@ function failedColumns(message: string): { columns: string[]; table: string | un
 	return { columns: pairs.map((pair) => pair[2] as string), table: pairs[0]?.[1] }
 }
 
-/** The first map entry `pick` finds for `table`. */
-function lookup(maps: ConstraintMap[], table: string | undefined, pick: (t: Table) => ConstraintMapEntry | undefined) {
-	if (table === undefined) return undefined
-	for (const map of maps) {
-		const entry = Object.hasOwn(map, table) ? pick(map[table] as Table) : undefined
-		if (entry !== undefined) return entry
-	}
-	return undefined
-}
+/* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded */
+const STATEMENT_TABLE = /^\s*(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from)\s+["`[]?(\w+)/i
+const statementTable = (query: string | undefined) => STATEMENT_TABLE.exec(query ?? "")?.[1]
 
-const own = <T>(record: Record<string, T> | undefined, key: string | undefined): T | undefined =>
-	record !== undefined && key !== undefined && Object.hasOwn(record, key) ? record[key] : undefined
-
-type Fallback = { cause: string; errorKey: string; status: StatusKey }
-
-/** What a handler found: the map entry, if any, the generic error otherwise, and where. */
-type Found = {
-	column?: string | undefined
-	entry: ConstraintMapEntry | undefined
-	fallback: Fallback
-	table?: string | undefined
-}
-
-function toError(v: Violation, { column, entry, fallback, table }: Found): CombError {
-	if (entry === undefined) return new CombError({ ...fallback, column, source: v.source, table })
-	const status = entry.statusKey ?? (fallback.status === "bad_request" ? "bad_request" : "conflict")
-	return new CombError({ cause: entry.cause, column, errorKey: entry.errorKey, source: v.source, status, table })
-}
+const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
 function unique(v: Violation): CombError {
 	const { columns, table } = failedColumns(v.read.message)
@@ -77,13 +54,12 @@ function check(v: Violation): CombError {
 		errorKey: combErrorKeys.CHECK_CONSTRAINT_VIOLATION,
 		status: "bad_request",
 	} as const
-	for (const map of v.maps) {
-		for (const [table, t] of Object.entries(map)) {
-			const entry = own(t.check, name)
-			if (entry !== undefined) return toError(v, { entry, fallback, table })
-		}
-	}
-	return toError(v, { entry: undefined, fallback })
+	/* CHECK names are only unique per table: look in the statement's table before any other */
+	const table = statementTable(v.read.query)
+	if (table !== undefined)
+		return toError(v, { entry: lookup(v.maps, table, (t) => own(t.check, name)), fallback, table })
+	const found = findCheck(v.maps, name)
+	return toError(v, { entry: found?.entry, fallback, table: found?.table })
 }
 
 function notNull(v: Violation): CombError {
@@ -102,9 +78,7 @@ function notNull(v: Violation): CombError {
 /* SQLite's FOREIGN KEY message names neither table nor column; the statement's target table
  * does, and a table with one foreign key leaves no doubt about the column */
 function foreignKey(v: Violation): CombError {
-	const table = /^\s*(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from)\s+["`[]?(\w+)/i.exec(
-		v.read.query ?? "",
-	)?.[1]
+	const table = statementTable(v.read.query)
 	let column: string | undefined
 	const entry = lookup(v.maps, table, (t) => {
 		const keys = Object.keys(t.foreignKey ?? {})
@@ -134,7 +108,10 @@ function constraintError(error: unknown, maps: ConstraintMap[]): CombError | nul
 	return read === null || handler === undefined ? null : handler({ maps, read, source: error })
 }
 
-/** Throws the mapped CombError when `error` is an SQLite constraint violation; otherwise returns. */
+/**
+ * Throws the mapped CombError when `error` is an SQLite constraint violation; otherwise returns.
+ * `error` is the thrown error, wrapper and all, or an engine message given as text.
+ */
 function handleConstraintViolation(error: unknown, maps: ConstraintMap[]): void {
 	const mapped = constraintError(error, maps)
 	if (mapped !== null) throw mapped

@@ -8,9 +8,11 @@ import { SQL } from "bun"
 import { Database } from "bun:sqlite"
 import { describe, expect, it } from "bun:test"
 import { sql } from "drizzle-orm"
+import { drizzle as bunSqlDrizzle } from "drizzle-orm/bun-sql"
 import { drizzle } from "drizzle-orm/bun-sqlite"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import type { CombError } from "../../src/error.ts"
+import { pgErrorHandler } from "../../src/pg/error-handler.ts"
 import { createListQuerySchema } from "../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
 import { sqliteErrorHandler } from "../../src/sqlite/constraint-handler.ts"
@@ -123,6 +125,54 @@ describe("Bun.SQL error shape", () => {
 			expect(failure).toMatchObject({ constraint: "u_email_key", errno: "23505", table: "u" })
 		} finally {
 			await client.close()
+		}
+	})
+})
+
+describe("pgErrorHandler on Bun.SQL, raw and through drizzle", () => {
+	if (PG_URL === undefined || PG_URL === "") {
+		it.skip("needs COMB_TEST_PG_URL (unset: skipped)", () => undefined)
+		return
+	}
+
+	const MAPS: ConstraintMap[] = [
+		{
+			member: {
+				primaryKey: { cause: "Member exists", errorKey: "member_id_taken" },
+				unique: { email: { cause: "Email in use", errorKey: "member_email_taken" } },
+			},
+		},
+	]
+
+	async function errorOf(statement: string, viaDrizzle: boolean): Promise<CombError | undefined> {
+		const client = new SQL({ max: 1, url: PG_URL })
+		try {
+			await client.unsafe(
+				"CREATE TEMP TABLE member (id text PRIMARY KEY, email text CONSTRAINT member_email_key UNIQUE, role text NOT NULL DEFAULT 'u'); INSERT INTO member (id, email) VALUES ('m1', 'a@x')",
+			)
+			const run = viaDrizzle ? bunSqlDrizzle({ client }).execute(sql.raw(statement)) : client.unsafe(statement)
+			const failure = await run.then(
+				() => null,
+				(error: unknown) => error,
+			)
+			pgErrorHandler(failure, MAPS)
+		} catch (thrown) {
+			return thrown as CombError
+		} finally {
+			await client.close()
+		}
+		return undefined
+	}
+
+	it.each([
+		["INSERT INTO member (id, email) VALUES ('m2', 'a@x')", "member_email_taken", "email"],
+		["INSERT INTO member (id) VALUES ('m1')", "member_id_taken", undefined],
+		["INSERT INTO member (id, role) VALUES ('m3', NULL)", "required_field_missing", "role"],
+	])("%s → %s", async (statement, errorKey, column) => {
+		for (const viaDrizzle of [false, true]) {
+			const error = await errorOf(statement, viaDrizzle)
+			expect(error).toMatchObject({ errorKey, table: "member" })
+			expect(error?.column).toBe(column)
 		}
 	})
 })
