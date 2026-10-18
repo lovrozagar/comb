@@ -58,6 +58,8 @@ type ListQueryOutput<TSortField extends string = string> = {
 	parsedSort: Array<SortField<TSortField>>
 	q: string | undefined
 	sortOrderBy: Partial<Record<TSortField, SortDirection>>
+	/** Always true: the filter and the order were checked against the endpoint's fields (query/trusted.ts) */
+	validated: true
 }
 
 type RetrieveQueryOutput = {

@@ -10,6 +10,7 @@ import { combErrorKeys } from "../types.ts"
 import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT, readCursor } from "./cursor.ts"
 import { filterBySelect } from "./fields.ts"
 import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
+import { assertSchemaParsed } from "./trusted.ts"
 import type { FilterAST, ParsedFields, SortField } from "./types.ts"
 import type { paginationResponseSchema } from "./schema.ts"
 import type * as z from "zod"
@@ -122,7 +123,9 @@ function drizzleListOptions(query: {
 	page?: number | undefined
 	parsedSort: SortField[]
 	sortOrderBy: Record<string, "asc" | "desc">
+	validated?: true | undefined
 }): DrizzleListOptions {
+	assertSchemaParsed(query)
 	const sort = query.parsedSort
 	const orderBy = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
@@ -167,6 +170,7 @@ function drizzlePaginationResult<T extends { id?: CursorId }>(
 		page?: number
 		parsedFields?: ParsedFields | null | undefined
 		parsedSort: SortField[]
+		validated?: true | undefined
 	},
 ): readonly [T[], PaginationMeta] {
 	const hasMore = items.length > query.limit

@@ -44,6 +44,23 @@ async function thrown(run: () => unknown): Promise<unknown> {
 }
 
 describe("list queries", () => {
+	it("refuse a filter or an order no schema checked, which would reach any column (S-M8)", () => {
+		const secret = {
+			root: {
+				conditions: [{ field: "secret", operator: "like" as const, value: "a*" }],
+				logic: "and" as const,
+				subgroups: [],
+			},
+		}
+		expect(() => buildListQuery({ parsed: { filterAst: secret, limit: 5, parsedSort: [] }, table: event })).toThrow(
+			expect.objectContaining({ errorKey: "filter_not_wired" }),
+		)
+		const bySecret = [{ direction: "asc" as const, field: "secret" }]
+		expect(() => buildListQuery({ parsed: { filterAst: null, limit: 5, parsedSort: bySecret }, table: event })).toThrow(
+			expect.objectContaining({ errorKey: "sort_not_wired" }),
+		)
+	})
+
 	it("refuse a filter on a field nothing resolves, rather than list every row (filter-fail-closed)", () => {
 		const filterAst = {
 			root: {
@@ -52,17 +69,17 @@ describe("list queries", () => {
 				subgroups: [],
 			},
 		}
-		expect(() => buildListQuery({ parsed: { filterAst, limit: 5, parsedSort: [] }, table: event })).toThrow(
-			expect.objectContaining({ errorKey: "filter_not_wired" }),
-		)
+		expect(() =>
+			buildListQuery({ parsed: { filterAst, limit: 5, parsedSort: [], validated: true }, table: event }),
+		).toThrow(expect.objectContaining({ errorKey: "filter_not_wired" }))
 	})
 
 	it("refuse a forged cursor whose value is not its column's type (cursor-value-type)", () => {
 		const parsedSort = [{ direction: "desc" as const, field: "seen_at" }]
 		const cursor = createCursor({ id: "e1", seen_at: "2024" }, parsedSort)
-		expect(() => buildListQuery({ parsed: { cursor, filterAst: null, limit: 5, parsedSort }, table: event })).toThrow(
-			expect.objectContaining({ errorKey: "invalid_cursor", status: 400 }),
-		)
+		expect(() =>
+			buildListQuery({ parsed: { cursor, filterAst: null, limit: 5, parsedSort, validated: true }, table: event }),
+		).toThrow(expect.objectContaining({ errorKey: "invalid_cursor", status: 400 }))
 	})
 })
 

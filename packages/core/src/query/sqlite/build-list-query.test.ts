@@ -29,6 +29,7 @@ const offsetPage: ListParsed = {
 	page: 1,
 	parsedFields: null,
 	parsedSort: [],
+	validated: true as const,
 	q: undefined,
 	sortOrderBy: {},
 }
@@ -49,6 +50,7 @@ const customSort = (dir: string): SQL => sql`custom_column ${sql.raw(dir)}`
 const parsedWith = (field: string) => ({
 	filterAst: null,
 	limit: 10,
+	validated: true as const,
 	parsedSort: [{ direction: "asc" as const, field }],
 })
 
@@ -76,6 +78,7 @@ describe("buildListQuery — pagination", () => {
 				...offsetPage,
 				cursor,
 				page: undefined,
+				validated: true as const,
 				parsedSort: [{ direction: "desc", field: "created_at" }],
 				sortOrderBy: { created_at: "desc" },
 			},
@@ -126,6 +129,7 @@ describe("buildListQuery — sort", () => {
 		const result = buildListQuery({
 			parsed: {
 				...offsetPage,
+				validated: true as const,
 				parsedSort: [{ direction: "desc", field: "created_at" }],
 				sortOrderBy: { created_at: "desc" },
 			},
@@ -139,7 +143,13 @@ describe("buildListQuery — sort", () => {
 		const cursor = createCursor({ created_at: 1000, id: "org_123" }, [{ direction: "desc", field: "created_at" }])
 		expect(() =>
 			buildListQuery({
-				parsed: { cursor, filterAst: null, limit: 20, parsedSort: [{ direction: "asc", field: "created_at" }] },
+				parsed: {
+					cursor,
+					filterAst: null,
+					limit: 20,
+					validated: true as const,
+					parsedSort: [{ direction: "asc", field: "created_at" }],
+				},
 				table: organization,
 			}),
 		).toThrow(expect.objectContaining({ status: 400 }))
@@ -148,7 +158,7 @@ describe("buildListQuery — sort", () => {
 	it("supports computed sorts via @ prefix", () => {
 		const result = buildListQuery({
 			computedSorts: { "@relevance": customSort },
-			parsed: { ...offsetPage, parsedSort: [{ direction: "desc", field: "@relevance" }] },
+			parsed: { ...offsetPage, validated: true as const, parsedSort: [{ direction: "desc", field: "@relevance" }] },
 			table: organization,
 		})
 
@@ -271,6 +281,7 @@ describe("buildListQuery — the search option without a q, and with a cursor", 
 				filterAst: null,
 				limit: 20,
 				page: undefined,
+				validated: true as const,
 				parsedSort: [{ direction: "desc", field: "created_at" }],
 				q: "search term",
 			},
@@ -299,7 +310,12 @@ describe("buildListQuery — sort fields it cannot order by (Q-L3)", () => {
 
 describe("buildListQuery — a table without an id column", () => {
 	const tag = sqliteTable("tag", { name: text("name").notNull() })
-	const parsed = { filterAst: null, limit: 5, parsedSort: [{ direction: "asc" as const, field: "name" }] }
+	const parsed = {
+		filterAst: null,
+		limit: 5,
+		validated: true as const,
+		parsedSort: [{ direction: "asc" as const, field: "name" }],
+	}
 
 	it("orders without a tiebreak, and refuses a cursor it could not honor", () => {
 		expect(buildListQuery({ parsed, table: tag }).orderBy).toHaveLength(1)
@@ -317,7 +333,8 @@ describe("buildListQuery — cursor values of the wrong type (S-M6)", () => {
 	const run = (field: string, row: Record<string, unknown>) => {
 		const parsedSort = [{ direction: "desc" as const, field }]
 		const cursor = createCursor({ id: "evt_1", ...row }, parsedSort)
-		return () => buildListQuery({ parsed: { cursor, filterAst: null, limit: 5, parsedSort }, table: event })
+		return () =>
+			buildListQuery({ parsed: { cursor, filterAst: null, limit: 5, parsedSort, validated: true }, table: event })
 	}
 
 	it.each([

@@ -70,6 +70,12 @@ export const GUARDS: readonly Guard[] = [
 		module: "src/query/sqlite/executor.ts",
 	},
 	{
+		catches: "a hand-built filter or order, which no schema checked, reaching any column",
+		disable: () => ({ assertSchemaParsed: () => undefined }),
+		id: "schema-parsed",
+		module: "src/query/trusted.ts",
+	},
+	{
 		catches: "a cursor value of the wrong type bound into the keyset predicate",
 		disable: () => ({ assertCursorFits: () => undefined }),
 		id: "cursor-value-type",

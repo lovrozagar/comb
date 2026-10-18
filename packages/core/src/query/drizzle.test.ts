@@ -92,6 +92,7 @@ describe("queryHelpers.filterValues", () => {
 })
 
 const sortedBy = (field: string, direction: "asc" | "desc" = "desc") => ({
+	validated: true as const,
 	parsedSort: [{ direction, field }],
 	sortOrderBy: { [field]: direction },
 })
@@ -144,6 +145,7 @@ describe("queryHelpers.listOptions", () => {
 /** The list query the paginate tests start from: five rows, newest first. */
 const defaultQuery = {
 	limit: 5,
+	validated: true as const,
 	parsedSort: [{ direction: "desc" as const, field: "createdAt" }],
 }
 
@@ -214,6 +216,7 @@ describe("queryHelpers.paginate — next cursor and hasMore", () => {
 		const [resultItems, pagination] = queryHelpers.paginate(items, {
 			limit: 2,
 			parsedFields: parseSelect("name"),
+			validated: true as const,
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
 		})
 
@@ -277,6 +280,7 @@ describe("queryHelpers.paginate — nextCursor and cursor paging", () => {
 		]
 		const [, pagination] = queryHelpers.paginate(items, {
 			limit: 2,
+			validated: true as const,
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
 		})
 
@@ -292,6 +296,7 @@ describe("queryHelpers.paginate — nextCursor and cursor paging", () => {
 		const [, pagination] = queryHelpers.paginate(items, {
 			cursor: "some-cursor",
 			limit: 10,
+			validated: true as const,
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
 		})
 
@@ -309,6 +314,7 @@ describe("queryHelpers.paginate — nextCursor edge cases", () => {
 		const [, pagination] = queryHelpers.paginate(items, {
 			limit: 2,
 			page: 1,
+			validated: true as const,
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
 		})
 
@@ -325,6 +331,7 @@ describe("queryHelpers.paginate — nextCursor edge cases", () => {
 		]
 		const [, pagination] = queryHelpers.paginate(items, {
 			limit: 2,
+			validated: true as const,
 			parsedSort: [{ direction: "desc", field: "name" }],
 		})
 
@@ -335,6 +342,7 @@ describe("queryHelpers.paginate — nextCursor edge cases", () => {
 	it("returns nextCursor null and hasMore false for empty results", () => {
 		const [, pagination] = queryHelpers.paginate([], {
 			limit: 10,
+			validated: true as const,
 			parsedSort: [{ direction: "desc", field: "createdAt" }],
 		})
 

@@ -5,6 +5,7 @@ import { combErrorKeys } from "../../types.ts"
 import { CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT, readCursor } from "../cursor.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
+import { assertSchemaParsed } from "../trusted.ts"
 import { assertCursorFits } from "./cursor-fit.ts"
 import { keysetSQL, orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
 import type { LikeSearchResolver } from "./search.ts"
@@ -23,6 +24,8 @@ type ListQueryParsed = {
 	page?: number | null | undefined
 	parsedSort: SortField[]
 	q?: string | null | undefined
+	/** The list schema sets it; a filter or an order without it is refused (query/trusted.ts) */
+	validated?: true | undefined
 	[key: string]: unknown
 }
 
@@ -202,6 +205,7 @@ function searchWhere(q: string | undefined, search: LikeSearchResolver | undefin
 
 function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable>): ListQueryResult {
 	const { parsed, table } = opts
+	assertSchemaParsed(parsed)
 	const columns = getTableColumns(table) as Record<string, SQLiteColumn>
 	const sort =
 		parsed.parsedSort.length > 0 ? parsed.parsedSort : DEFAULT_SORT.filter(({ field }) => own(columns, field))

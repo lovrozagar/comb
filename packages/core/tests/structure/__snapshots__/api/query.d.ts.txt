@@ -154,6 +154,7 @@ declare function drizzleListOptions(query: {
     page?: number | undefined;
     parsedSort: SortField[];
     sortOrderBy: Record<string, "asc" | "desc">;
+    validated?: true | undefined;
 }): DrizzleListOptions;
 type DrizzleListResult<T> = T & {
     _total?: number;
@@ -167,6 +168,7 @@ declare function drizzlePaginationResult<T extends {
     page?: number;
     parsedFields?: ParsedFields | null | undefined;
     parsedSort: SortField[];
+    validated?: true | undefined;
 }): readonly [T[], PaginationMeta];
 declare function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
 /** List-query helpers for drizzle queries: count, options, pagination, projection */
@@ -695,6 +697,8 @@ type ListQueryOutput<TSortField extends string = string> = {
     parsedSort: Array<SortField<TSortField>>;
     q: string | undefined;
     sortOrderBy: Partial<Record<TSortField, SortDirection>>;
+    /** Always true: the filter and the order were checked against the endpoint's fields (query/trusted.ts) */
+    validated: true;
 };
 type RetrieveQueryOutput = {
     lang: string | undefined;

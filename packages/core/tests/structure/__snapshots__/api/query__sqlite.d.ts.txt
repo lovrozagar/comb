@@ -29,6 +29,8 @@ type ListQueryParsed = {
     page?: number | null | undefined;
     parsedSort: SortField[];
     q?: string | null | undefined;
+    /** The list schema sets it; a filter or an order without it is refused (query/trusted.ts) */
+    validated?: true | undefined;
     [key: string]: unknown;
 };
 type BuildListQueryOpts<TTable extends SQLiteTable> = {
