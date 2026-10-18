@@ -70,7 +70,13 @@ export type PostgresProviderConfig = {
 }
 
 /** A Postgres provider with comb's defaults filled in */
-export type ResolvedPostgresProviderConfig = Required<PostgresProviderConfig>
+export type ResolvedPostgresProviderConfig = {
+	devUrl: string
+	lockTimeout: string
+	schema: string
+	type: "postgres"
+	url: string
+}
 
 export type ProviderConfig = ConnectionProviderConfig | PostgresProviderConfig
 

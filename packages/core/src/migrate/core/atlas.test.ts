@@ -75,10 +75,15 @@ describe("generateSchemaDiff", () => {
 		expect(existsSync(fileArg(call?.args ?? [], "--from"))).toBe(false)
 	})
 
-	it("uses the Postgres dev database for postgres", () => {
+	it("diffs Postgres in the target's scoped dev database, passed in the environment", () => {
 		const run = fakeRun(ok("Schemas are synced, no changes to be made."))
-		generateSchemaDiff({ dialect: "postgres", fromSchema: "", run, toSchema: "" })
-		expect(run.calls[0]?.args.at(-1)).toBe("postgres://localhost:5432/dev?sslmode=disable")
+		const target = { devUrl: "postgres://localhost/dev", lockTimeout: "5s", schema: "app", url: "" }
+		generateSchemaDiff({ dialect: "postgres", fromSchema: "", run, target, toSchema: "" })
+		expect(run.calls[0]?.args).toContain("--config")
+		expect(run.calls[0]?.options?.env).toEqual({ COMB_ATLAS_DEV_URL: "postgres://localhost/dev?search_path=app" })
+		expect(() => generateSchemaDiff({ dialect: "postgres", fromSchema: "", run, toSchema: "" })).toThrow(
+			"a Postgres diff needs a target (devUrl and schema)",
+		)
 	})
 
 	it("reports synced schemas", () => {
@@ -112,6 +117,41 @@ describe("exportDrizzleSchema", () => {
 		expect(() => exportDrizzleSchema({ cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config")) })).toThrow(
 			"drizzle-kit export failed: no config",
 		)
+	})
+})
+
+/** drizzle-kit's Postgres export of `stdout`, scoped to `schema` */
+const pg = (stdout: string, schema?: string) =>
+	exportDrizzleSchema({ cwd: "/w", dialect: "postgres", run: fakeRun(ok(stdout)), schema })
+
+describe("exportDrizzleSchema on Postgres", () => {
+	it("passes the database's drizzle config to drizzle-kit", () => {
+		const run = fakeRun(ok(""))
+		exportDrizzleSchema({ configPath: "/w/drizzle.pg.ts", cwd: "/w", dialect: "postgres", run })
+		expect(run.calls[0]?.args).toEqual(["drizzle-kit", "export", "--config", "/w/drizzle.pg.ts"])
+	})
+
+	it("drops the CREATE SCHEMA of the schema comb migrates, which Atlas's scoped run already has", () => {
+		expect(pg('CREATE SCHEMA "app";\nCREATE TABLE "app"."post" ("id" integer);\n', "app")).toBe(
+			'CREATE TABLE "app"."post" ("id" integer);\n',
+		)
+	})
+
+	it("refuses an object in another schema, naming it", () => {
+		expect(() => pg('CREATE SCHEMA "auth";\nCREATE TABLE "auth"."users" ("id" integer);\n')).toThrow(
+			'the drizzle schema creates objects outside schema "public" (CREATE SCHEMA "auth"); comb migrates one schema per database',
+		)
+		expect(() => pg('CREATE SEQUENCE "public"."counter" START WITH 1;\n', "app")).toThrow(
+			'outside schema "app" (CREATE SEQUENCE "public"."counter" START WITH 1)',
+		)
+		expect(pg('CREATE SEQUENCE "public"."counter" START WITH 1;\nCREATE TABLE "post" ("id" integer);\n')).toContain(
+			"counter",
+		)
+		expect(() => pg('CREATE TABLE "post" ("u" uuid REFERENCES "auth"."users"("id"));\n')).toThrow(
+			'outside schema "public"',
+		)
+		const view = `CREATE VIEW "published" AS (select "id" from "post" where "post"."status" = 'published');\n`
+		expect(pg(view)).toBe(view)
 	})
 })
 

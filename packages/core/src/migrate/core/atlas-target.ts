@@ -64,37 +64,57 @@ function hostWarnings(url: URL): string[] {
 	return warnings
 }
 
-/** What is wrong with a target before Atlas runs: errors refuse it, warnings are printed */
-function pgUrlProblems(target: PgTarget): { errors: string[]; warnings: string[] } {
-	const errors: string[] = []
-	const url = target.url.trim() === "" ? undefined : parseUrl(target.url, ["postgres:", "postgresql:"])
-	const dev = target.devUrl.trim() === "" ? undefined : parseUrl(target.devUrl, ["postgres:", "postgresql:", "docker:"])
-	if (target.url.trim() === "") errors.push("url is empty")
-	else if (url === undefined) errors.push(`url is not a postgres:// URL; ${ENCODE_HINT}`)
-	if (target.devUrl.trim() === "") errors.push("devUrl is empty")
-	else if (dev === undefined) errors.push(`devUrl is not a postgres:// or docker:// URL; ${ENCODE_HINT}`)
-	if (url !== undefined && dev !== undefined && url.href === dev.href) {
+/** One URL field checked: the parsed URL, or the error that names the field (never its value) */
+function checkUrl(field: "devUrl" | "url", raw: string, schemes: readonly string[]): { error?: string; url?: URL } {
+	if (raw.trim() === "") return { error: `${field} is empty` }
+	const url = parseUrl(raw, schemes)
+	const accepted = schemes.includes("docker:") ? "a postgres:// or docker://" : "a postgres://"
+	return url === undefined ? { error: `${field} is not ${accepted} URL; ${ENCODE_HINT}` } : { url }
+}
+
+/** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */
+function pgUrlProblems(
+	target: PgTarget,
+	needs: AtlasNeeds = { dev: true, url: true },
+): { errors: string[]; warnings: string[] } {
+	const url = needs.url ? checkUrl("url", target.url, ["postgres:", "postgresql:"]) : {}
+	const dev = needs.dev ? checkUrl("devUrl", target.devUrl, ["postgres:", "postgresql:", "docker:"]) : {}
+	const errors = [url.error, dev.error].filter((error): error is string => error !== undefined)
+	if (url.url !== undefined && url.url.href === dev.url?.href) {
 		errors.push("url and devUrl are the same database; Atlas empties the dev database, so give it its own")
 	}
 	if (!/^[A-Za-z_][\w$]*$/.test(target.schema)) errors.push('schema must be a plain name such as "public"')
 	if (!/^(?:0|\d+(?:ms|s|min))$/.test(target.lockTimeout))
 		errors.push("lockTimeout must look like 5s, 1500ms, 1min or 0")
-	return { errors, warnings: url === undefined ? [] : hostWarnings(url) }
+	return { errors, warnings: url.url === undefined ? [] : hostWarnings(url.url) }
 }
 
-/** The URLs Atlas gets: both scoped to the schema, the target's lock wait bounded unless it sets one */
-function atlasUrls(target: PgTarget): { devUrl: string; url: string } {
-	const url = new URL(target.url)
-	const dev = new URL(target.devUrl)
-	for (const each of [url, dev])
-		if (!each.searchParams.has("search_path")) each.searchParams.set("search_path", target.schema)
+/** `raw` scoped to `schema` unless it names a search_path itself */
+function scoped(raw: string, schema: string): URL {
+	const url = new URL(raw)
+	if (!url.searchParams.has("search_path")) url.searchParams.set("search_path", schema)
+	return url
+}
+
+/** The target URL Atlas gets: scoped to the schema, its lock wait bounded unless the URL sets one */
+function atlasTargetUrl(target: PgTarget): string {
+	const url = scoped(target.url, target.schema)
 	const options = url.searchParams.get("options") ?? ""
 	const bounded = url.searchParams.has("lock_timeout") || options.includes("lock_timeout")
 	if (target.lockTimeout !== "0" && !bounded) {
 		url.searchParams.set("options", `${options === "" ? "" : `${options} `}-c lock_timeout=${target.lockTimeout}`)
 	}
-	return { devUrl: dev.href, url: url.href }
+	return url.href
 }
+
+/** The dev URL Atlas gets: scoped to the schema like the target, since a scoped target needs a scoped dev database */
+const atlasDevUrl = (target: PgTarget): string => scoped(target.devUrl, target.schema).href
+
+/** Both URLs as Atlas gets them */
+const atlasUrls = (target: PgTarget): { devUrl: string; url: string } => ({
+	devUrl: atlasDevUrl(target),
+	url: atlasTargetUrl(target),
+})
 
 /** `raw` with its password and every secret-looking query value masked; unparseable, masked whole */
 function redactUrl(raw: string): string {
@@ -136,9 +156,17 @@ function scrubAtlasOutput(text: string, urls: readonly string[]): string {
 
 /** Atlas's failure in comb's terms where comb knows the fix; otherwise as Atlas said it */
 function explainAtlasFailure(stderr: string): string {
-	return /Error: docker:|Cannot connect to the Docker daemon/i.test(stderr)
-		? "Atlas needs Docker for the default devUrl (docker://postgres/17/dev); set devUrl to an empty Postgres database instead"
-		: stderr
+	if (/Error: docker:|Cannot connect to the Docker daemon/i.test(stderr)) {
+		return "Atlas needs Docker for the default devUrl (docker://postgres/17/dev); set devUrl to an empty Postgres database instead"
+	}
+	const [, value, type] = /dropping value "([^"]*)" from enum "([^"]*)" is not supported/.exec(stderr) ?? []
+	if (value !== undefined) {
+		return `Atlas cannot drop the value "${value}" of enum "${type}": write that migration by hand (a new type without it, the columns moved to it, the old type dropped), then run migrate diff again`
+	}
+	const refused = /(\w[\w ]*?) (?:is|are) available to logged-in users only/.exec(stderr)?.[1]
+	return refused === undefined
+		? stderr
+		: `Atlas OSS does not diff ${refused.replace(/^Error: /, "")}: take them out of the drizzle schema and write their migration by hand, or use Atlas Pro`
 }
 
 /** A string HCL reads back as `value`: JSON-escaped, with interpolation markers doubled */
@@ -164,18 +192,17 @@ function atlasConfig(needs: AtlasNeeds): string {
  * afterwards however `body` ends. A target with errors is refused before anything is written.
  */
 function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T {
-	const { errors } = pgUrlProblems(target)
+	const { errors } = pgUrlProblems(target, needs)
 	if (errors.length > 0) throw new Error(errors.join("; "))
-	const urls = atlasUrls(target)
 	const dir = mkdtempSync(join(tmpdir(), "comb-atlas-"))
 	const remove = () => rmSync(dir, { force: true, recursive: true })
 	let pending = false
 	try {
 		writeFileSync(join(dir, "atlas.hcl"), atlasConfig(needs), { mode: 0o600 })
 		const env: Record<string, string> = {}
-		if (needs.url) env["COMB_ATLAS_URL"] = urls.url
-		if (needs.dev) env["COMB_ATLAS_DEV_URL"] = urls.devUrl
-		const secrets = [target.url, target.devUrl, urls.url, urls.devUrl]
+		if (needs.url) env["COMB_ATLAS_URL"] = atlasTargetUrl(target)
+		if (needs.dev) env["COMB_ATLAS_DEV_URL"] = atlasDevUrl(target)
+		const secrets = [target.url, target.devUrl, ...Object.values(env)].filter((url) => url !== "")
 		const args = ["--config", `file://${join(dir, "atlas.hcl")}`, "--env", "comb"]
 		const out = body({ args, dir, env, scrub: (text) => scrubAtlasOutput(text, secrets) })
 		if (out instanceof Promise) {

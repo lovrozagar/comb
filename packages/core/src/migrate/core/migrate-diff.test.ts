@@ -26,7 +26,7 @@ function sumOf(dir: string): string {
 
 type DiffCall = { dir: string; history: Record<string, string>; name: string; target: string }
 
-type FakeAtlas = Run & { calls: string[][] }
+type FakeAtlas = Run & { calls: string[][]; envs: Array<Readonly<Record<string, string | undefined>> | undefined> }
 
 /**
  * A model of the atlas CLI: `migrate hash` writes the dir's atlas.sum, `migrate diff` hands the
@@ -35,8 +35,10 @@ type FakeAtlas = Run & { calls: string[][] }
  */
 function fakeAtlas(onDiff: (call: DiffCall) => RunResult = () => ok(), hashResult?: () => RunResult): FakeAtlas {
 	const calls: string[][] = []
-	const fake = (_cmd: string, args: readonly string[]) => {
+	const envs: FakeAtlas["envs"] = []
+	const fake: Run = (_cmd, args, runOptions) => {
 		calls.push([...args])
+		envs.push(runOptions?.env)
 		const dir = dirOf(args, "--dir")
 		if (args[1] === "hash") {
 			const result = hashResult?.() ?? ok()
@@ -50,7 +52,7 @@ function fakeAtlas(onDiff: (call: DiffCall) => RunResult = () => ok(), hashResul
 		)
 		return onDiff({ dir, history, name: args[2] as string, target: readFileSync(dirOf(args, "--to"), "utf8") })
 	}
-	return Object.assign(fake, { calls })
+	return Object.assign(fake, { calls, envs })
 }
 
 let dir = ""
@@ -181,22 +183,133 @@ describe("generateIncrementalMigration — FTS kept out of what atlas sees (S-12
 	})
 })
 
+/** A Postgres target whose dev database has a password to keep out of argv and errors */
+const target = {
+	devUrl: "postgres://dev:pw@localhost/dev?sslmode=disable",
+	lockTimeout: "5s",
+	schema: "public",
+	url: "",
+}
+
 describe("generateIncrementalMigration — postgres", () => {
-	it("diffs the directory itself and reports what atlas added, or synced", () => {
-		const added = fakeAtlas(({ dir: target }) => {
-			writeFileSync(join(target, "20261017_add_b.sql"), "CREATE TABLE b (x int);\n")
+	it("diffs through Atlas with the dev database in its environment, scoped to the schema, never in argv", () => {
+		const added = fakeAtlas(({ dir: replayed }) => {
+			writeFileSync(join(replayed, "20261017_add_b.sql"), "CREATE TABLE b (x int);\n")
 			return ok()
 		})
-		expect(generateIncrementalMigration(options(added, { dialect: "postgres" }))).toEqual({
+		expect(generateIncrementalMigration(options(added, { dialect: "postgres", target }))).toEqual({
 			files: [join(dir, "20261017_add_b.sql")],
 			synced: false,
 		})
-		expect(added.calls[1]).toContain("postgres://localhost:5432/dev?sslmode=disable")
-		expect(generateIncrementalMigration(options(fakeAtlas(), { dialect: "postgres", migrationName: "again" }))).toEqual(
-			{
-				files: [],
-				synced: true,
-			},
+		const diff = added.calls.findIndex((call) => call[1] === "diff")
+		expect(added.calls[diff]?.join(" ")).not.toContain("pw")
+		expect(added.calls[diff]).toContain("--config")
+		expect(added.envs[diff]?.["COMB_ATLAS_DEV_URL"]).toBe(
+			"postgres://dev:pw@localhost/dev?sslmode=disable&search_path=public",
+		)
+		expect(
+			generateIncrementalMigration(options(fakeAtlas(), { dialect: "postgres", migrationName: "again", target })),
+		).toEqual({
+			files: [],
+			synced: true,
+		})
+	})
+})
+
+describe("generateIncrementalMigration — postgres objects Atlas refuses", () => {
+	it("replays the history without the objects Atlas refuses, keeping its directives, and wraps Atlas's file", () => {
+		seed(
+			'-- atlas:txmode none\nCREATE TABLE "post" ("title" text);\nCREATE VIEW "v" AS (select "title" from "post");\nCREATE INDEX CONCURRENTLY "i" ON "post" ("title");\n',
+		)
+		const seen: DiffCall[] = []
+		const atlas = fakeAtlas((call) => {
+			seen.push(call)
+			writeFileSync(
+				join(call.dir, "20261018000000_retype.sql"),
+				'ALTER TABLE "post" ALTER COLUMN "title" TYPE varchar(50);\n',
+			)
+			return ok()
+		})
+		const schema = 'CREATE TABLE "post" ("title" varchar(50));\nCREATE VIEW "v" AS (select "title" from "post");\n'
+		const { files } = generateIncrementalMigration(
+			options(atlas, { dialect: "postgres", target, targetSchema: schema }),
+		)
+		expect(seen[0]?.history["20260101000000_init.sql"]).toBe(
+			'-- atlas:txmode none\nCREATE TABLE "post" ("title" text);\n\nCREATE INDEX CONCURRENTLY "i" ON "post" ("title");\n',
+		)
+		expect(seen[0]?.target).toBe('CREATE TABLE "post" ("title" varchar(50));\n')
+		expect(readFileSync(files[0] as string, "utf8")).toBe(
+			'DROP VIEW IF EXISTS "v";\n\nALTER TABLE "post" ALTER COLUMN "title" TYPE varchar(50);\n\nCREATE VIEW "v" AS (select "title" from "post");\n',
+		)
+		expect(readFileSync(join(dir, "atlas.sum"), "utf8")).toBe(sumOf(dir))
+	})
+
+	it("writes comb's part alone when only a comb-owned object changed", () => {
+		seed('CREATE TABLE "post" ("title" text);\nCREATE VIEW "v" AS (select 1);\n')
+		const schema = 'CREATE TABLE "post" ("title" text);\nCREATE VIEW "v" AS (select 2);\n'
+		const { files, synced } = generateIncrementalMigration(
+			options(fakeAtlas(), { dialect: "postgres", target, targetSchema: schema }),
+		)
+		expect(synced).toBe(false)
+		expect(files[0]).toMatch(/\d{14}_add_b\.sql$/)
+		expect(readFileSync(files[0] as string, "utf8")).toBe(
+			'DROP VIEW IF EXISTS "v";\n\nCREATE VIEW "v" AS (select 2);\n',
+		)
+	})
+})
+
+describe("generateIncrementalMigration — postgres enums and failures", () => {
+	it("writes the enum values Atlas adds into a file of their own before the one that uses them", () => {
+		seed("CREATE TYPE \"status\" AS ENUM ('draft');\n")
+		const atlas = fakeAtlas((call) => {
+			writeFileSync(
+				join(call.dir, "20261018000000_archive.sql"),
+				'ALTER TYPE "status" ADD VALUE \'archived\';\nALTER TABLE "post" ADD COLUMN "s" "status" DEFAULT \'archived\';\n',
+			)
+			return ok()
+		})
+		const { files } = generateIncrementalMigration(options(atlas, { dialect: "postgres", target, targetSchema: "T" }))
+		expect(files).toEqual([
+			join(dir, "20261018000000_archive_enum_values.sql"),
+			join(dir, "20261018000001_archive.sql"),
+		])
+		expect(readFileSync(files[0] as string, "utf8")).toBe("ALTER TYPE \"status\" ADD VALUE 'archived';\n")
+		expect(readdirSync(dir).sort()).toEqual([
+			"20260101000000_init.sql",
+			"20261018000000_archive_enum_values.sql",
+			"20261018000001_archive.sql",
+			"atlas.sum",
+		])
+	})
+
+	it("copies every further file Atlas adds", () => {
+		const atlas = fakeAtlas((call) => {
+			writeFileSync(join(call.dir, "20261018000000_a.sql"), 'CREATE TABLE "a" ("x" int);\n')
+			writeFileSync(join(call.dir, "20261018000001_b.sql"), 'CREATE TABLE "b" ("x" int);\n')
+			return ok()
+		})
+		const { files } = generateIncrementalMigration(options(atlas, { dialect: "postgres", target }))
+		expect(files).toEqual([join(dir, "20261018000000_a.sql"), join(dir, "20261018000001_b.sql")])
+		expect(readFileSync(files[1] as string, "utf8")).toBe('CREATE TABLE "b" ("x" int);\n')
+	})
+
+	it("explains Atlas's refusal to drop an enum value", () => {
+		const refusing = fakeAtlas(() => fail('Error: dropping value "b" from enum "mood" is not supported'))
+		expect(() => generateIncrementalMigration(options(refusing, { dialect: "postgres", target }))).toThrow(
+			'atlas migrate diff failed: Atlas cannot drop the value "b" of enum "mood"',
+		)
+	})
+
+	it("needs the database's target on postgres", () => {
+		expect(() => generateIncrementalMigration(options(fakeAtlas(), { dialect: "postgres" }))).toThrow(
+			"a Postgres diff needs the database's target (devUrl and schema)",
+		)
+	})
+
+	it("scrubs the dev database's password from Atlas's failure", () => {
+		const failing = fakeAtlas(() => fail("dial postgres://dev:pw@localhost/dev: refused"))
+		expect(() => generateIncrementalMigration(options(failing, { dialect: "postgres", target }))).toThrow(
+			"atlas migrate diff failed: dial postgres://dev:***@localhost/dev: refused",
 		)
 	})
 })

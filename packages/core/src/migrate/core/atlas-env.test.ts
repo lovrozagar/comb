@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { applySqliteMigrationTransforms, devUrl } from "./atlas-env.ts"
+import { applySqliteMigrationTransforms, SQLITE_DEV_URL } from "./atlas-env.ts"
 
-describe("devUrl", () => {
-	it("names the ephemeral database atlas replays on, per dialect", () => {
-		expect(devUrl("sqlite")).toBe("sqlite://file?mode=memory")
-		expect(devUrl("postgres")).toBe("postgres://localhost:5432/dev?sslmode=disable")
+describe("SQLITE_DEV_URL", () => {
+	it("names the in-memory database atlas replays SQLite on", () => {
+		expect(SQLITE_DEV_URL).toBe("sqlite://file?mode=memory")
 	})
 })
 

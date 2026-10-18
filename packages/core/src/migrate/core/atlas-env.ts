@@ -1,8 +1,7 @@
 /**
- * What every Atlas run shares: the dev database it replays on, and the SQLite pragma rewrite
+ * What every SQLite Atlas run shares: the dev database it replays on, and the pragma rewrite
  * applied to what it writes.
  */
-import type { Dialect } from "../types.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    SQLITE MIGRATION POST-PROCESSOR
@@ -31,11 +30,5 @@ export function applySqliteMigrationTransforms(sql: string): string {
 	return out
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   DEV URL FOR DIALECT
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-/** The ephemeral database Atlas replays migrations on */
-export function devUrl(dialect: Dialect): string {
-	return dialect === "sqlite" ? "sqlite://file?mode=memory" : "postgres://localhost:5432/dev?sslmode=disable"
-}
+/** The ephemeral database Atlas replays SQLite migrations on; Postgres names its own (atlas-target.ts) */
+export const SQLITE_DEV_URL = "sqlite://file?mode=memory"

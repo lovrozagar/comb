@@ -67,6 +67,7 @@ export declare function cleanupBackupTables(conn: Connection, olderThanMs?: numb
 
 // migrate/core/atlas.d.ts
 import type { Dialect } from "../types.ts";
+import { type PgTarget } from "./atlas-target.ts";
 import { type Run } from "./process.ts";
 export { applySqliteMigrationTransforms } from "./atlas-env.ts";
 export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiffResult } from "./migrate-diff.ts";
@@ -78,6 +79,8 @@ export type SchemaDiffOptions = {
     toSchema: string;
     /** The process runner; tests pass a fake. */
     run?: Run | undefined;
+    /** Postgres: the dev database and schema Atlas diffs in */
+    target?: PgTarget | undefined;
 };
 export type SchemaDiffResult = {
     diff: string | null;
@@ -85,10 +88,14 @@ export type SchemaDiffResult = {
 };
 export declare function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult;
 export type DrizzleExportOptions = {
+    /** The drizzle config to export, when it is not drizzle-kit's default in cwd */
+    configPath?: string | undefined;
     cwd: string;
     dialect: Dialect;
     /** The process runner; tests pass a fake. */
     run?: Run | undefined;
+    /** Postgres: the one schema the database's migrations own; default `public` */
+    schema?: string | undefined;
 };
 export declare function exportDrizzleSchema(options: DrizzleExportOptions): string;
 export type GenerateMigrationOptions = {
@@ -226,7 +233,13 @@ export type PostgresProviderConfig = {
     url: string;
 };
 /** A Postgres provider with comb's defaults filled in */
-export type ResolvedPostgresProviderConfig = Required<PostgresProviderConfig>;
+export type ResolvedPostgresProviderConfig = {
+    devUrl: string;
+    lockTimeout: string;
+    schema: string;
+    type: "postgres";
+    url: string;
+};
 export type ProviderConfig = ConnectionProviderConfig | PostgresProviderConfig;
 export type EnvironmentConfig = {
     name: string;
@@ -320,19 +333,63 @@ export type Run = (cmd: string, args: readonly string[], options?: RunOptions) =
 /** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
 export declare const run: Run;
 
+// migrate/core/atlas-target.d.ts
+/** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
+type PgTarget = {
+    devUrl: string;
+    lockTimeout: string;
+    schema: string;
+    url: string;
+};
+/** What an Atlas call reads from its config: the target, the dev database, the migrations dir */
+type AtlasNeeds = {
+    dev?: boolean | undefined;
+    dir?: string | undefined;
+    url?: boolean | undefined;
+};
+/** The flags and environment an Atlas call runs with, its scratch directory, and the scrubber for its output */
+type AtlasEnv = {
+    args: readonly string[];
+    dir: string;
+    env: Readonly<Record<string, string>>;
+    scrub(text: string): string;
+};
+/** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */
+declare function pgUrlProblems(target: PgTarget, needs?: AtlasNeeds): {
+    errors: string[];
+    warnings: string[];
+};
+/** Both URLs as Atlas gets them */
+declare const atlasUrls: (target: PgTarget) => {
+    devUrl: string;
+    url: string;
+};
+/** `raw` with its password and every secret-looking query value masked; unparseable, masked whole */
+declare function redactUrl(raw: string): string;
+/** `text` with every secret of `urls` masked, and any other URL's password or secret query value too */
+declare function scrubAtlasOutput(text: string, urls: readonly string[]): string;
+/** Atlas's failure in comb's terms where comb knows the fix; otherwise as Atlas said it */
+declare function explainAtlasFailure(stderr: string): string;
+/**
+ * Run `body` with an Atlas config for `target` and `needs` in a fresh 0700 directory, removed
+ * afterwards however `body` ends. A target with errors is refused before anything is written.
+ */
+declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
+export { type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, pgUrlProblems, type PgTarget, redactUrl, scrubAtlasOutput, withAtlasEnv, };
+
 // migrate/core/atlas-env.d.ts
 /**
- * What every Atlas run shares: the dev database it replays on, and the SQLite pragma rewrite
+ * What every SQLite Atlas run shares: the dev database it replays on, and the pragma rewrite
  * applied to what it writes.
  */
-import type { Dialect } from "../types.ts";
 /** Idempotent. Input without the pragma pair passes through unchanged. */
 export declare function applySqliteMigrationTransforms(sql: string): string;
-/** The ephemeral database Atlas replays migrations on */
-export declare function devUrl(dialect: Dialect): string;
+/** The ephemeral database Atlas replays SQLite migrations on; Postgres names its own (atlas-target.ts) */
+export declare const SQLITE_DEV_URL = "sqlite://file?mode=memory";
 
 // migrate/core/migrate-diff.d.ts
 import type { Dialect } from "../types.ts";
+import { type PgTarget } from "./atlas-target.ts";
 import { type Run } from "./process.ts";
 export type MigrateDiffOptions = {
     dialect: Dialect;
@@ -343,6 +400,8 @@ export type MigrateDiffOptions = {
     targetSchema: string;
     /** The process runner; tests pass a fake. */
     run?: Run | undefined;
+    /** Postgres: the database's dev database and schema Atlas diffs in */
+    target?: PgTarget | undefined;
 };
 export type MigrateDiffResult = {
     files: string[];
