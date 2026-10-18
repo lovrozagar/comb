@@ -26,20 +26,17 @@ export default defineConfig({
 			provider: "v8",
 			reporter: ["text", "json-summary"],
 			/*
-			 * A ratchet, not a target. These are the numbers the suite reaches
-			 * today; they exist so coverage cannot quietly slide backwards when
-			 * code is added without tests. Raise them when you raise coverage —
-			 * never lower them to make a build pass.
-			 *
-			 * The floor is global until every file reaches 100%. Shell-outs to
-			 * atlas, wrangler and drizzle-kit go through migrate/core/process.ts,
-			 * so the code around them is tested with a fake runner.
+			 * Every file at 100%, each on its own. The exclusions above are the only exemptions;
+			 * packages/core/docs/testing.md says why each holds. Shell-outs to atlas, wrangler and
+			 * drizzle-kit go through migrate/core/process.ts, so the code around them is tested
+			 * with a fake runner and the real tools run in the integration suites.
 			 */
 			thresholds: {
-				branches: 81,
-				functions: 91,
-				lines: 90,
-				statements: 89,
+				perFile: true,
+				branches: 100,
+				functions: 100,
+				lines: 100,
+				statements: 100,
 			},
 		},
 	},

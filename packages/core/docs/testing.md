@@ -39,7 +39,9 @@ Postgres runs on a real server rather than an emulator because the error handler
 
 ## Coverage
 
-`bun run test:coverage` runs both vitest projects and reports one table over `src/**` and `lint/**`. The thresholds in `vitest.config.ts` are a ratchet: raise them with coverage, never lower them.
+`bun run test:coverage` runs both vitest projects and reports one table over `src/**` and `lint/**`. Every file must reach 100% lines, branches, functions and statements on its own (`perFile` in `vitest.config.ts`); the patterns below are the only exemptions. No `v8`, `c8` or `istanbul` ignore comment is allowed (`comb/no-v8-ignore`).
+
+`migrate/drivers/bun-sqlite.ts` imports `bun:sqlite`, so `bun run test:bun` measures it: `packages/core/bunfig.toml` turns coverage on for `tests/bun`, leaves out every other file those suites load (vitest measures them), and fails below 100%.
 
 Left out of the report, and why:
 

@@ -46,17 +46,19 @@ From the repo root. CI runs `fmt:check` in place of `fmt`, and covers `test` via
     bun run typecheck    # tsc --noEmit
     bun run typecheck:strict  # + the flags a consumer might set
     bun run test         # vitest
-    bun run test:coverage     # vitest + the coverage ratchet CI enforces
+    bun run test:coverage     # vitest at 100% per file, as CI enforces
     bun run test:bun     # bun test — the bun:sqlite replay suite
 
 `typecheck:strict` exists because comb ships TypeScript source, so a consumer's
 strict flags apply to it. Must stay at zero — see
 `packages/core/docs/meta-contract.md` §10.
 
-`test:coverage` enforces a floor in `packages/core/vitest.config.ts`. It's a
-ratchet: raise it with coverage, never lower it to make a build pass. The floor
-is global because `cli.ts` and the migrate drivers shell out to wrangler, atlas
-and drizzle-kit — pure exported code sits near 94%.
+`test:coverage` holds every file at 100% on its own (`perFile` in
+`packages/core/vitest.config.ts`); the exemptions and why are in
+`packages/core/docs/testing.md`. Never lower a threshold or add an ignore comment
+to make a build pass. Shell-outs to wrangler, atlas and drizzle-kit go through
+`migrate/core/process.ts`, so the code around them is tested with a fake runner.
 
 `test:bun` is separate because `packages/core/tests/bun/` imports `bun:sqlite`
-and `bun:test`, which vitest can't load. `bun run test:all` runs both.
+and `bun:test`, which vitest can't load; it holds `migrate/drivers/bun-sqlite.ts`
+at 100% (`packages/core/bunfig.toml`). `bun run test:all` runs both.
