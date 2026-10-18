@@ -1,0 +1,244 @@
+// sqlite/d1/sharding/index.d.ts
+export { ShardRouter, type ShardRouterConfig } from "./router.ts";
+export { shardMap } from "./shard-map.ts";
+export type { ShardDbHandle, ShardDriver, ShardMapping, ShardResolverDeps } from "./types.ts";
+
+// sqlite/d1/sharding/router.d.ts
+import type { KVNamespace } from "@cloudflare/workers-types";
+import type { ShardDbHandle, ShardMapping, ShardResolverDeps } from "./types.ts";
+/** Structural type so both `@cloudflare/workers-types` and `cloudflare:workers` satisfy it */
+type WaitUntilCtx = {
+    waitUntil: (promise: Promise<unknown>) => void;
+};
+/** Pluggable logger — defaults to no-op */
+type LogFn = (event: string, data: Record<string, unknown>) => void;
+interface ShardRouterConfig {
+    kvTtlSeconds?: number;
+    log?: LogFn;
+    lruHardTtlMs?: number;
+    lruMaxSize?: number;
+    lruTtlMs?: number;
+    maxOrgsPerShard?: number;
+    totalShards: number;
+}
+/**
+ * Shard router — resolves org -> D1 database handle.
+ *
+ * Instantiate once per isolate (module-level) so the LRU cache persists.
+ * 3-tier lookup: LRU -> KV -> Core D1; a new org goes to the shard with the most headroom.
+ */
+declare class ShardRouter {
+    private readonly kvTtlSeconds;
+    private readonly log;
+    private readonly lru;
+    private readonly maxOrgsPerShard;
+    /** Revalidations running now, by org, so concurrent stale hits share one */
+    private readonly revalidating;
+    private readonly totalShards;
+    constructor(config: ShardRouterConfig);
+    /**
+     * Resolve existing mapping, or allocate a new shard if org is unknown.
+     * This is the primary entry point for middleware.
+     */
+    resolveOrAllocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping>;
+    /**
+     * Resolve shard mapping via LRU (SWR) -> KV -> Core D1.
+     * Returns undefined if org has no mapping.
+     * Uses D1 Sessions API — reads hit nearest replica via bookmark from KV cache.
+     */
+    resolve(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping | undefined>;
+    /**
+     * Allocate a shard for an org. A soft-deleted org is revived on the shard it had, where its
+     * data is, even past the cap: moving it would leave its rows behind. A new org goes to the D1
+     * shard with the most headroom; its insert does nothing when a racing router got there first,
+     * and the row read back afterwards is the winner's. Writes go to the primary; the bookmark is
+     * kept for the reads that follow.
+     */
+    allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping>;
+    /**
+     * Resolve a shard mapping to a concrete D1 database handle.
+     * Reads `SHARD_DB_{target}` binding from env.
+     */
+    getHandle(mapping: ShardMapping, env: Record<string, unknown>): ShardDbHandle;
+    /** Invalidate both cache tiers. Use after whale graduation or reassignment. */
+    invalidate(orgId: string, kv: KVNamespace): Promise<void>;
+    private kvKey;
+    /** The D1 shard with the most remaining capacity; shards_full (503) when none has any */
+    private pickShard;
+    private populateCaches;
+    /** The live mapping in the core database, read from the nearest replica; undefined when none */
+    private readMapping;
+    /** One background revalidation per org at a time, however many requests see it stale */
+    private revalidateOnce;
+    /** Background SWR revalidation — refreshes LRU from KV or Core D1 */
+    private revalidateShard;
+    private rowToMapping;
+}
+export { ShardRouter, type ShardRouterConfig };
+
+// sqlite/d1/sharding/shard-map.d.ts
+import { type BuildColumns, type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
+import { type SQLiteTableWithColumns } from "drizzle-orm/sqlite-core";
+import { c, type SqliteColumns } from "../../columns.ts";
+/** Each column's builder, from the `c` factory that makes it */
+type ShardMapColumns = {
+    created_at: ReturnType<SqliteColumns["createdAt"]>;
+    deleted_at: ReturnType<SqliteColumns["deletedAt"]>;
+    driver: HasDefault<NotNull<ReturnType<typeof c.enum<readonly ["d1"]>>>>;
+    org_id: IsPrimaryKey<ReturnType<SqliteColumns["text"]>>;
+    shard_id: NotNull<ReturnType<SqliteColumns["integer"]>>;
+    target: NotNull<ReturnType<SqliteColumns["text"]>>;
+    updated_at: ReturnType<SqliteColumns["updatedAt"]>;
+};
+type ShardMapTable = SQLiteTableWithColumns<{
+    name: "shard_map";
+    schema: undefined;
+    columns: BuildColumns<"shard_map", ShardMapColumns, "sqlite">;
+    dialect: "sqlite";
+}>;
+export declare const shardMap: ShardMapTable;
+export {};
+
+// sqlite/d1/sharding/types.d.ts
+import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
+type ShardDriver = "d1";
+type ShardMapping = {
+    createdAt: number;
+    d1Bookmark?: string | undefined;
+    deletedAt: number | null;
+    driver: ShardDriver;
+    orgId: string;
+    shardId: number;
+    target: string;
+    updatedAt: number;
+};
+type ShardDbHandle = {
+    driver: "d1";
+    handle: D1Database;
+};
+type ShardResolverDeps = {
+    coreDb: D1Database;
+    kv: KVNamespace;
+};
+export type { ShardDbHandle, ShardDriver, ShardMapping, ShardResolverDeps };
+
+// sqlite/columns.d.ts
+/**
+ * Unified column factories for SQLite
+ *
+ * Provides dialect-agnostic column definitions that can be swapped with PostgreSQL
+ */
+import { type $Type, type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
+import { type SQLiteBooleanBuilder, type SQLiteIntegerBuilder, type SQLiteRealBuilder, type SQLiteTextBuilder, type SQLiteTextJsonBuilder } from "drizzle-orm/sqlite-core";
+import type * as z from "zod";
+import type { EnumStates, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "./constraints.ts";
+type Text = SQLiteTextBuilder<[string, ...string[]]>;
+type CreatedAtName = "createdAt" | "created_at";
+type DeletedAtName = "deletedAt" | "deleted_at";
+type UpdatedAtName = "updatedAt" | "updated_at";
+/** What each `c` factory returns: drizzle's own builder types, spelled out for isolated declarations */
+export type SqliteColumns = {
+    boolean: (name: string) => SQLiteBooleanBuilder;
+    createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => HasDefault<NotNull<SQLiteIntegerBuilder>>;
+    deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
+    enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) => $Type<Text, T[number]>;
+    id: (_prefix: string) => IsPrimaryKey<Text>;
+    integer: (name: string, _constraints?: IntegerConstraints) => SQLiteIntegerBuilder;
+    json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) => $Type<SQLiteTextJsonBuilder, z.infer<TSchema>>;
+    real: (name: string, _constraints?: IntegerConstraints) => SQLiteRealBuilder;
+    ref: (name: string, _constraints?: TextConstraints) => Text;
+    serialId: () => IsPrimaryKey<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
+    text: (name: string, _constraints?: TextConstraints) => Text;
+    timestamp: (name: string, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
+    updatedAt: (name: UpdatedAtName, _constraints?: TimestampConstraints) => HasDefault<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
+};
+export declare const c: SqliteColumns;
+export {};
+
+// sqlite/constraints.d.ts
+/**
+ * Type-safe column constraint definitions
+ * These exist only in the type system and are completely erased at runtime
+ */
+type BaseConstraints = {
+    /** Field is auto-generated, optional in create, excluded from update */
+    autogenerate?: boolean;
+    /** Field cannot be mutated after creation */
+    nomutate?: boolean;
+    /**
+     * This column scopes rows to a tenant.
+     *
+     * Declared, never inferred: comb can see that a column is a foreign key but
+     * not that the table it points at is the tenant, and a wrong tenant boundary
+     * is worse than a missing one. Saying so here makes it a hand-reviewed fact.
+     * At most one column per table may carry it.
+     */
+    tenant?: boolean;
+};
+type StringTransformConstraints = {
+    /** Apply lowercase transformation */
+    lowercase?: boolean;
+    /** Trim whitespace */
+    trim?: boolean;
+    /** Apply uppercase transformation */
+    uppercase?: boolean;
+};
+type NumericRangeConstraints = {
+    /** Maximum value */
+    max?: number;
+    /** Minimum value */
+    min?: number;
+};
+type StringValidationConstraints = {
+    /** Email validation */
+    email?: boolean;
+    /** Image URI validation (accepts https URLs and data:image/ URIs) */
+    imageUri?: boolean;
+    /** Human/entity name validation (letters, marks, numbers, spaces, punctuation) */
+    name?: boolean;
+    /** Password validation (min 8, max 72, printable ASCII) */
+    password?: boolean;
+    /** Regex pattern validation */
+    pattern?: string;
+    /** URL validation */
+    url?: boolean;
+};
+/**
+ * Text column constraints
+ * Closed record - only these properties allowed
+ */
+export type TextConstraints = BaseConstraints & StringTransformConstraints & NumericRangeConstraints & StringValidationConstraints;
+/**
+ * Integer/numeric column constraints
+ * Closed record - only these properties allowed
+ */
+export type IntegerConstraints = BaseConstraints & NumericRangeConstraints;
+/**
+ * JSON column constraints
+ * Closed record - only these properties allowed
+ */
+export type JsonConstraints = BaseConstraints & {
+    /** Maximum JSON stringified byte length */
+    maxBytes?: number;
+};
+/**
+ * Timestamp column constraints
+ * Closed record - only these properties allowed
+ */
+export type TimestampConstraints = BaseConstraints;
+/**
+ * State machine declared alongside an enum column's values.
+ *
+ * Type-level only, like every other constraint here — the analyzer reads it
+ * out of the source. Hold the same object as a const and pass it to both
+ * `c.enum` and `assertTransition`. See docs/state-machines.md.
+ */
+export type EnumStates<TState extends string = string> = {
+    /** The value a row starts at */
+    initial?: TState | undefined;
+    /** Values from which no transition is legal */
+    terminal?: readonly TState[] | undefined;
+    /** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
+    transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined;
+};
+export {};

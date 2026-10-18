@@ -1,0 +1,329 @@
+// query/sqlite/index.d.ts
+/**
+ * @lovrozagar/comb/query/sqlite — SQLite-specific SQL generation.
+ */
+export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryParsed, type ListQueryResult, } from "./build-list-query.ts";
+export { conditionToSQL, filterToSQL, sortToOrderBy } from "./executor.ts";
+export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts";
+export { keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts";
+export { patternToSQL } from "./pattern.ts";
+export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, type SpellfixDb, type SpellfixSearch, sanitizeFtsTerm, } from "./search.ts";
+export { likeSearch, type LikeSearchResolver } from "./search.ts";
+export { buildScalarJsonParts, jsonBool, jsonCol, jsonColAs, jsonNullable, type ScalarColDef, SQL_SORT_DIR, } from "./sql.ts";
+export type { RelationConfig } from "./types.ts";
+
+// query/sqlite/build-list-query.d.ts
+import { type SQL, type SQLWrapper } from "drizzle-orm";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts";
+import type { LikeSearchResolver } from "./search.ts";
+import type { RelationConfig } from "./types.ts";
+/**
+ * Parsed list query input — matches createListQuerySchema output.
+ * Intentionally loose to work with any codegen or manual construction.
+ */
+type ListQueryParsed = {
+    cursor?: string | null | undefined;
+    filterAst?: FilterAST | null | unknown;
+    limit: number;
+    page?: number | null | undefined;
+    parsedSort: SortField[];
+    q?: string | null | undefined;
+    [key: string]: unknown;
+};
+type BuildListQueryOpts<TTable extends SQLiteTable> = {
+    /** Additional WHERE clause ANDed with filter/cursor — for joins, access filters, soft deletes */
+    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
+    computedFilters?: Record<string, ComputedFilterResolver>;
+    computedSorts?: Record<string, ComputedSortResolver>;
+    parsed: ListQueryParsed;
+    relations?: Record<string, RelationConfig>;
+    /** LIKE-based search resolver — use `likeSearch(column)` factory */
+    search?: LikeSearchResolver;
+    table: TTable;
+};
+type BuildDerivedListQueryOpts<TSortField extends string = string> = {
+    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
+    filterWhere?: SQL | null;
+    idColumn: SQLWrapper;
+    parsed: ListQueryParsed & {
+        parsedSort: SortField<TSortField>[];
+    };
+    searchWhere?: SQL | null;
+    sortColumns: Record<TSortField, SQLWrapper>;
+};
+type ListQueryResult = {
+    limit: number;
+    meta: {
+        limit: number;
+        page: number;
+        type: "cursor" | "offset";
+    };
+    offset: number;
+    orderBy: SQL[];
+    search: string | null;
+    where: SQL | undefined;
+};
+type ListQueryAppliable<TQuery> = {
+    limit: (limit: number) => TQuery;
+    offset: (offset: number) => TQuery;
+    orderBy: (...orderBy: SQL[]) => TQuery;
+    where: (where: SQL) => TQuery;
+};
+declare function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable>): ListQueryResult;
+declare function buildDerivedListQuery<TSortField extends string>(opts: BuildDerivedListQueryOpts<TSortField>): ListQueryResult;
+declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult): TQuery;
+export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryParsed, type ListQueryResult, };
+
+// query/sqlite/executor.d.ts
+/**
+ * SQLite query executor — Drizzle-native filter/sort/pagination orchestrator.
+ */
+import { type SQL } from "drizzle-orm";
+import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
+import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, FilterCondition, ListQueryCapabilities, SortField } from "../types.ts";
+import type { RelationConfig } from "./types.ts";
+type SortToSQLConfig = {
+    capabilities: ListQueryCapabilities;
+    computedSorts?: Record<string, ComputedSortResolver> | undefined;
+    table: SQLiteTable;
+};
+declare function sortToOrderBy(sortFields: SortField[], config: SortToSQLConfig): SQL[];
+/** One condition on one column; null when the operator or value is not one this column can take */
+declare function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL | null;
+/**
+ * What a validated filter lowers against. Values arrive typed by `validateFilter` (or the list
+ * query schema), so they bind as the field declares.
+ */
+type FilterToSQLConfig = {
+    computedFilters?: Record<string, ComputedFilterResolver> | undefined;
+    mainTable: SQLiteTable;
+    relations?: Record<string, RelationConfig> | undefined;
+};
+declare function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | null;
+export { conditionToSQL, filterToSQL, sortToOrderBy, type FilterToSQLConfig };
+
+// query/sqlite/filter-sql.d.ts
+/**
+ * Raw SQL filter builders — table-alias-based SQL generation from FilterAST.
+ * Used when building raw SQL queries (not Drizzle relational).
+ */
+import { type SQL } from "drizzle-orm";
+import type { FilterCondition, FilterGroup } from "../types.ts";
+type FilterSQLConfig = {
+    /** Column map: API field name -> SQL column name */
+    columnMap: Record<string, string>;
+    /** Table alias used in query (e.g. "pc" for productCollection) */
+    tableAlias: string;
+};
+/**
+ * Build SQL fragment from filter AST group.
+ * Recursively processes conditions and subgroups with AND/OR logic.
+ */
+declare function buildFilterSQL(group: FilterGroup, config: FilterSQLConfig): SQL | null;
+/** One condition as SQL on its mapped column; null when the field is unmapped or the value unusable */
+declare function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig): SQL | null;
+export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig };
+
+// query/sqlite/keyset.d.ts
+/**
+ * Ordering and keyset predicates — one implementation for every SQLite builder.
+ *
+ * ORDER BY and the cursor predicate must agree on direction AND null placement
+ * for every key, or pagination skips and repeats rows. Both are derived here
+ * from the same `SortKey[]`, so they cannot disagree.
+ */
+import { type SQL, type SQLWrapper } from "drizzle-orm";
+import type { SortDirection, SortNulls } from "../types.ts";
+type SortKey = {
+    column: SQLWrapper;
+    direction: SortDirection;
+    nulls?: SortNulls | undefined;
+};
+type Tiebreak = {
+    column: SQLWrapper;
+    direction: SortDirection;
+};
+/** `col ASC NULLS LAST` — explicit placement so SQLite's default never leaks in. */
+declare function orderSQL(key: SortKey): SQL;
+/** ORDER BY for the keys followed by the tiebreak, which makes the order total. */
+declare function orderByKeys(keys: readonly SortKey[], tiebreak: Tiebreak): SQL[];
+/**
+ * Lexicographic "after this row" over every key plus the tiebreak:
+ *
+ *   (k1 after) OR (k1 = v1 AND k2 after) OR … OR (k1 = v1 AND … AND id after)
+ *
+ * Expanded rather than a row-value comparison because each key carries its own
+ * direction and null placement.
+ */
+/** Where a cursor points: the sort keys and the row's values for them, then the tiebreak and its id */
+type KeysetPosition = {
+    id: unknown;
+    keys: readonly SortKey[];
+    tiebreak: Tiebreak;
+    values: readonly unknown[];
+};
+declare function keysetSQL({ id, keys, tiebreak, values }: KeysetPosition): SQL;
+export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak };
+
+// query/sqlite/pattern.d.ts
+/**
+ * The one lowering of `like` / `ilike` for SQLite. Every filter path calls this,
+ * so the two operators cannot drift apart between builders.
+ */
+import { type SQL, type SQLWrapper } from "drizzle-orm";
+/** `like` → GLOB (case-sensitive). `ilike` → LIKE (ASCII case-insensitive). */
+declare function patternToSQL(column: SQLWrapper, operator: "like" | "ilike", value: unknown): SQL;
+export { patternToSQL };
+
+// query/sqlite/search.d.ts
+/**
+ * FTS5 + spellfix search helpers for SQLite. User text is bound, never spliced: each term becomes
+ * a quoted prefix phrase (`"term"*`), and identifiers go through quoteIdent.
+ */
+import { type SQL } from "drizzle-orm";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+/**
+ * A search term with FTS5 syntax characters removed, or "" when nothing is left or it is a bare
+ * boolean operator. Quotes stay: the phrase builder escapes them where it quotes the term.
+ */
+declare function sanitizeFtsTerm(term: string): string;
+/** `<fts table> MATCH ?`, every term required; null when the query has no usable term */
+declare function buildFtsMatch(ftsTableName: string, query: string | null): SQL | null;
+/** The rows whose FTS entry matches every term; null when the query has no usable term */
+declare function buildFtsWhere(ftsTableName: string, idColumn: string, query: string | null): SQL | null;
+/** `highlight()` of one FTS column, its marker tags bound */
+declare function buildFtsHighlight(ftsTableName: string, columnIndex: number, tags: {
+    end: string;
+    start: string;
+}): SQL;
+type SpellfixRow = {
+    word: string;
+};
+type SpellfixDb = {
+    all: (query: SQL) => Promise<Array<SpellfixRow>>;
+};
+type SpellfixSearch = {
+    ftsTable: string;
+    idColumn: string;
+    /** editdist3 bound below which a word counts as a correction (default 300) */
+    maxEditDistance?: number;
+    /** corrections taken per term (default 3) */
+    maxCorrections?: number;
+    spellfixTable: string;
+};
+/**
+ * Like buildFtsWhere, with each term of three or more characters widened by its spellfix1
+ * corrections; any variant of any term matches.
+ */
+declare function buildFtsWhereWithSpellfix(db: SpellfixDb, search: SpellfixSearch, query: string | null): Promise<SQL | null>;
+/**
+ * Resolver that converts a raw search string into a LIKE WHERE clause.
+ * Returns null when input is empty — callers can skip the clause entirely.
+ */
+type LikeSearchResolver = (q: string) => SQL | null;
+/**
+ * Factory for LIKE-based search on a pre-normalized `_search` column.
+ * Strips diacritics, lowercases, escapes LIKE specials (`%`, `_`, `\`).
+ * Multi-word queries split on unicode whitespace — each term ANDed separately.
+ */
+declare function likeSearch(column: SQLiteColumn): LikeSearchResolver;
+export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, likeSearch, type LikeSearchResolver, sanitizeFtsTerm, type SpellfixDb, type SpellfixSearch, };
+
+// query/sqlite/sql.d.ts
+/**
+ * SQLite JSON column helpers for raw SQL query building.
+ */
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+/** JSON column with same API name as DB column */
+declare function jsonCol(col: SQLiteColumn, alias: string): string;
+/** JSON column with different API name than DB column */
+declare function jsonColAs(apiName: string, col: SQLiteColumn, alias: string): string;
+/** JSON boolean column (SQLite stores as 0/1) */
+declare function jsonBool(col: SQLiteColumn, alias: string): string;
+/** JSON nullable column with json() wrapper */
+declare function jsonNullable(col: SQLiteColumn, alias: string): string;
+/** Column definition for buildScalarJsonParts */
+type ScalarColDef = {
+    always?: boolean;
+    api: string;
+    col: SQLiteColumn;
+    type?: "bool" | "json";
+};
+/** Build JSON parts from column definitions */
+declare function buildScalarJsonParts(defs: ScalarColDef[], opts: {
+    alias: string;
+    cols: Record<string, boolean> | null;
+    includeAll: boolean;
+}): string[];
+declare const SQL_SORT_DIR: {
+    readonly asc: "ASC";
+    readonly desc: "DESC";
+};
+export { buildScalarJsonParts, jsonBool, jsonCol, jsonColAs, jsonNullable, type ScalarColDef, SQL_SORT_DIR };
+
+// query/sqlite/types.d.ts
+/**
+ * SQLite-specific query types.
+ */
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+type RelationConfig = {
+    target: SQLiteTable;
+    targetKey: string;
+    through: SQLiteTable;
+    throughKey: string;
+};
+export type { RelationConfig };
+
+// query/types.d.ts
+/**
+ * Query helper types — DB-agnostic.
+ * Shared by parsers, validators, and DB-specific SQL generators.
+ */
+import type { SQL } from "drizzle-orm";
+type FieldSelection = {
+    relations: Record<string, FieldSelection | null>;
+    scalars: string[];
+};
+type ParsedFields = {
+    root: FieldSelection;
+};
+type FilterOperator = "eq" | "ne" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "nin" | "like" | "ilike" | "is"
+/** Parsed for callers that validate and run it themselves (JSON-array membership); comb's own validator and SQL take none */
+ | "contains";
+type FieldType = "string" | "number" | "boolean" | "date" | "enum";
+type FilterCondition = {
+    field: string;
+    operator: FilterOperator;
+    value: unknown;
+};
+type FilterGroup = {
+    conditions: FilterCondition[];
+    logic: "and" | "or";
+    subgroups: FilterGroup[];
+};
+type FilterAST = {
+    root: FilterGroup;
+};
+type SortDirection = "asc" | "desc";
+type SortNulls = "first" | "last";
+type SortField<T extends string = string> = {
+    direction: SortDirection;
+    field: T;
+    nulls?: SortNulls | undefined;
+};
+type ComputedFilterResolver = (operator: FilterOperator, value: unknown) => SQL | null;
+type ComputedSortResolver = (direction: SortDirection) => SQL;
+type ListQueryCapabilities = {
+    computedFilterFields: Record<string, FieldType>;
+    computedSortFields: Set<string>;
+    filterFields: Record<string, FieldType>;
+    pagination: {
+        defaultLimit: number;
+        maxLimit: number;
+    };
+    relationFilterFields: Record<string, FieldType>;
+    searchFields: Set<string>;
+    sortFields: Set<string>;
+};
+export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ParsedFields, SortDirection, SortField, SortNulls, };

@@ -1,0 +1,63 @@
+// states.d.ts
+/**
+ * A declared machine over a column's values.
+ *
+ * Every field beyond `values` is optional and independently useful: declaring
+ * only `terminal` already says which states are final, which is the cheap half
+ * most schemas want; `transitions` is what earns the runtime guard.
+ */
+type StateMachine<TState extends string = string> = {
+    /** Every legal value, in declaration order */
+    values: readonly TState[];
+    /** The value a row starts at, when there is exactly one */
+    initial?: TState | undefined;
+    /** Values from which no transition is legal */
+    terminal?: readonly TState[] | undefined;
+    /** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
+    transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined;
+    /** The column the machine governs, named in `assertTransition`'s error; `status` when omitted */
+    column?: string | undefined;
+};
+/**
+ * Declare a machine with its states inferred from `values` alone.
+ *
+ * `{ … } as const satisfies StateMachine` checks every name against `string`, so a misspelled
+ * `transitions` key or target compiles and the rule it meant silently disappears. Here every other
+ * field may only name a declared value, and a typo is a type error.
+ */
+declare function defineStateMachine<const TState extends string>(machine: {
+    values: readonly TState[];
+    initial?: NoInfer<TState> | undefined;
+    terminal?: readonly NoInfer<TState>[] | undefined;
+    transitions?: Readonly<Partial<Record<NoInfer<TState>, readonly NoInfer<TState>[]>>> | undefined;
+    column?: string | undefined;
+}): StateMachine<TState>;
+/** Whether a value is one the machine declares. */
+declare function isState<T extends string>(machine: StateMachine<T>, value: unknown): value is T;
+/** Whether no transition may leave this state. */
+declare function isTerminal<T extends string>(machine: StateMachine<T>, state: T): boolean;
+/**
+ * Whether `from → to` is legal.
+ *
+ * A machine that declares no `transitions` constrains nothing except that a
+ * terminal state cannot be left — which is the cheap half doing useful work on
+ * its own. A state absent from a declared `transitions` map is likewise
+ * unconstrained: that is how a schema declares only the part it knows.
+ */
+declare function canTransition<T extends string>(machine: StateMachine<T>, from: T, to: T): boolean;
+/**
+ * Throw unless `from → to` is legal.
+ *
+ * Raises `CombError` with `invalid_state_transition` at 422, the same shape
+ * every other comb-detected violation takes, so an HTTP layer needs no special
+ * case for it.
+ *
+ * Deliberately explicit rather than an ORM hook: comb does not own the write
+ * path, and a backfill or a correction may legitimately need to move a row in a
+ * way the product rules forbid. A rule you cannot see at the call site and
+ * cannot opt out of is worse than one you must remember to call.
+ */
+declare function assertTransition<T extends string>(machine: StateMachine<T>, from: T, to: T): void;
+/** States reachable in one move, empty for a terminal or unknown state. */
+declare function nextStates<T extends string>(machine: StateMachine<T>, from: T): readonly T[];
+export { assertTransition, canTransition, defineStateMachine, isState, isTerminal, nextStates, type StateMachine };

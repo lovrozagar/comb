@@ -1,0 +1,416 @@
+// migrate/index.d.ts
+export { type CombMigrateConfig, createProvider, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
+export { applyMigration, checkMigrationHash, cleanupBackupTables, createBackupTables, ensureMigrationsTable, recordMigrationHash, verifySchema, } from "./core/apply.ts";
+export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, type GenerateMigrationOptions, generateMigrationFile, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
+export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, makeIdempotent, parseMigration, splitSqlStatements, } from "./core/parse.ts";
+export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCircuitBreaker, withRetry, } from "./core/utils.ts";
+export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createNeonProvider, createPostgresProvider, createTursoProvider, getPostgresColumns, getPostgresIndexes, getPostgresTables, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectPostgresSchema, introspectSqliteSchema, } from "./drivers/index.ts";
+export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, MultiTenantConfig, NeonProviderConfig, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, TursoProviderConfig, } from "./types.ts";
+
+// migrate/config.d.ts
+import type { Run } from "./core/process.ts";
+import type { ConnectionProvider, DatabaseConfig, MigrationConfig, MultiTenantConfig, ProviderConfig, ResolvedDatabaseConfig } from "./types.ts";
+/** What comb.migrate.config.ts declares: the migration config before multi-tenant defaults fill in */
+export type CombMigrateConfig = {
+    databases: Record<string, DatabaseConfig>;
+    multiTenant?: (Omit<MultiTenantConfig, "circuitBreaker"> & {
+        circuitBreaker?: MultiTenantConfig["circuitBreaker"] | undefined;
+    }) | undefined;
+};
+/** What a provider that shells out (D1 drives wrangler) runs processes with; tests pass a fake */
+export type ProviderDeps = {
+    run?: Run | undefined;
+};
+export declare function createProvider(config: ProviderConfig, deps?: ProviderDeps): ConnectionProvider;
+export declare function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string): ResolvedDatabaseConfig;
+export declare function defineConfig(input: CombMigrateConfig): MigrationConfig;
+export type LoadedConfig = {
+    config: MigrationConfig;
+    configDir: string;
+};
+/** The migrate config file in `cwd`, by the names comb looks for in order; undefined when there is none */
+export declare function findConfigFile(cwd: string): string | undefined;
+/** Load the migrate config at `configPath`, or the first one `findConfigFile` sees in `cwd` */
+export declare function loadConfig(configPath?: string, cwd?: string): Promise<LoadedConfig>;
+
+// migrate/core/apply.d.ts
+/**
+ * Core migration application logic
+ */
+import type { Connection, ExtractedSchema, MigrationResult, ParsedMigration } from "../types.ts";
+export declare function ensureMigrationsTable(conn: Connection): Promise<void>;
+/**
+ * Whether a migration is recorded under any of `hashes`; pass `migrationHashes(sql)` so a file
+ * recorded under the pre-0.5.0 hash still counts as applied.
+ */
+export declare function checkMigrationHash(conn: Connection, hashes: string | readonly string[]): Promise<boolean>;
+export declare function recordMigrationHash(conn: Connection, hash: string): Promise<void>;
+/**
+ * Whether the database holds the tables, columns and indexes a migration creates. A database
+ * error is thrown, not reported as a mismatch: a mismatch makes the caller apply the migration.
+ */
+export declare function verifySchema(conn: Connection, expected: ExtractedSchema): Promise<{
+    ok: boolean;
+    found: number;
+    errors: string[];
+}>;
+export declare function applyMigration(conn: Connection, dbName: string, migration: ParsedMigration): Promise<MigrationResult>;
+export declare function createBackupTables(conn: Connection, tablesToBackup: string[]): Promise<{
+    backupSql: string[];
+    restoreSql: string[];
+}>;
+/** Drop the backup tables older than `olderThanMs`; returns how many it dropped */
+export declare function cleanupBackupTables(conn: Connection, olderThanMs?: number): Promise<number>;
+
+// migrate/core/atlas.d.ts
+import type { Dialect } from "../types.ts";
+import { type Run } from "./process.ts";
+export { applySqliteMigrationTransforms } from "./atlas-env.ts";
+export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiffResult } from "./migrate-diff.ts";
+export declare function checkAtlasInstalled(exec?: Run): boolean;
+export declare function getAtlasVersion(exec?: Run): string | null;
+export type SchemaDiffOptions = {
+    dialect: Dialect;
+    fromSchema: string;
+    toSchema: string;
+    /** The process runner; tests pass a fake. */
+    run?: Run | undefined;
+};
+export type SchemaDiffResult = {
+    diff: string | null;
+    synced: boolean;
+};
+export declare function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult;
+export type DrizzleExportOptions = {
+    cwd: string;
+    dialect: Dialect;
+    /** The process runner; tests pass a fake. */
+    run?: Run | undefined;
+};
+export declare function exportDrizzleSchema(options: DrizzleExportOptions): string;
+export type GenerateMigrationOptions = {
+    migrationsDir: string;
+    migrationName: string;
+    diff: string;
+    description?: string;
+};
+export declare function generateMigrationFile(options: GenerateMigrationOptions): string;
+
+// migrate/core/parse.d.ts
+import { splitSqlStatements } from "./sql-scan.ts";
+import type { ExtractedSchema, MigrationClassification, ParsedMigration } from "../types.ts";
+export { splitSqlStatements };
+/** The hash a migration is recorded under: its SQL with comments and layout normalized away */
+export declare function generateMigrationHash(sql: string): string;
+/**
+ * The hash comb before 0.5.0 recorded. Its regexes stripped `--` and `/* *\/` inside string
+ * literals and kept a final comment with no newline, so the same file can hash differently now;
+ * a migration recorded under this hash is still applied.
+ */
+export declare function legacyMigrationHash(sql: string): string;
+/** Every hash `sql` may be recorded under, current first */
+export declare function migrationHashes(sql: string): string[];
+/** The tables (with columns), indexes and dropped tables a migration leaves */
+export declare function extractSchema(sql: string): ExtractedSchema;
+/** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
+export declare function extractDropStatements(sql: string): string[];
+/**
+ * unsafe: a statement drops a table or column, truncates, or adds a NOT NULL column without a
+ * default; cautious: it drops something else (an index, a trigger, a view); safe otherwise.
+ */
+export declare function classifyMigration(sql: string): MigrationClassification;
+export declare function makeIdempotent(statements: string[]): string[];
+export declare function parseMigration(sql: string, filename: string): ParsedMigration;
+
+// migrate/core/utils.d.ts
+/**
+ * Utility functions for migrations
+ */
+import type { CircuitBreakerState, MigrationResult } from "../types.ts";
+export declare function sleep(ms: number): Promise<void>;
+export type RetryOptions = {
+    maxRetries?: number;
+    baseDelay?: number;
+    maxDelay?: number;
+    onRetry?: (attempt: number, error: Error, delay: number) => void;
+};
+/** Call `fn`, again after a backoff while it fails transiently, `maxRetries` times at most */
+export declare function withRetry<T>(fn: () => Promise<T>, options?: RetryOptions): Promise<T>;
+export declare function createCircuitBreaker(): CircuitBreakerState;
+export declare function updateCircuitBreaker(state: CircuitBreakerState, success: boolean): CircuitBreakerState;
+export declare function checkCircuitBreaker(state: CircuitBreakerState, options?: {
+    failureThreshold?: number;
+    minSampleSize?: number;
+}): CircuitBreakerState;
+export declare function aggregateErrors(errors: Array<{
+    database: string;
+    error: string;
+}>): string;
+/** Write the counts of applied, skipped and failed migrations to `out`, then each failure */
+export declare function printMigrationSummary(results: MigrationResult[], out: (line: string) => void): void;
+/** The question a destructive migration asks before it runs: what it destroys, and where */
+export declare function dropsQuestion(drops: readonly string[], target: string): string;
+export type ConfirmDrops = {
+    /** --yes: apply without asking */
+    autoConfirm: boolean;
+    /** How to ask the person running the migration; absent when nobody can be asked */
+    confirm?: ((question: string) => Promise<boolean>) | undefined;
+};
+/**
+ * Whether a migration that drops `drops` may run on `target`: yes when it drops nothing or
+ * autoConfirm is set, otherwise the answer to `dropsQuestion`, and no when nobody can be asked.
+ */
+export declare function confirmDrops(drops: readonly string[], target: string, options: ConfirmDrops): Promise<boolean>;
+
+// migrate/drivers/index.d.ts
+export { createD1Provider } from "./d1.ts";
+export { createNeonProvider, createPostgresProvider, getPostgresColumns, getPostgresIndexes, getPostgresTables, introspectPostgresSchema, } from "./postgres.ts";
+export { createBunSqliteProvider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./sqlite.ts";
+
+// migrate/types.d.ts
+/**
+ * Core types for db-migration package. Declarations only: config.ts validates the config.
+ */
+export type Dialect = "sqlite" | "postgres";
+export type QueryResult = {
+    columns: string[];
+    rows: unknown[][];
+};
+export type Connection = {
+    dialect: Dialect;
+    execute(sql: string, params?: unknown[]): Promise<QueryResult>;
+    batch(statements: Array<{
+        sql: string;
+        params?: unknown[];
+    }>): Promise<void>;
+    close(): Promise<void>;
+};
+export type ConnectionProvider = {
+    dialect: Dialect;
+    connect(config: ResolvedDatabaseConfig): Promise<Connection>;
+};
+export type TursoProviderConfig = {
+    apiToken: string;
+    group: string;
+    org: string;
+    type: "turso";
+};
+export type LibsqlProviderConfig = {
+    authToken?: string | undefined;
+    type: "libsql";
+    url: string;
+};
+export type BunSqliteProviderConfig = {
+    path: string;
+    type: "bun-sqlite";
+};
+export type PostgresProviderConfig = {
+    connectionString: string;
+    type: "postgres";
+};
+export type NeonProviderConfig = {
+    connectionString: string;
+    type: "neon";
+};
+export type D1ProviderConfig = {
+    databaseId: string;
+    databaseName: string;
+    /** Target the local dev database (`wrangler --local`) instead of the remote one. */
+    local?: boolean | undefined;
+    type: "d1";
+};
+export type ProviderConfig = BunSqliteProviderConfig | D1ProviderConfig | LibsqlProviderConfig | NeonProviderConfig | PostgresProviderConfig | TursoProviderConfig;
+export type EnvironmentConfig = {
+    name: string;
+    provider?: ProviderConfig | undefined;
+};
+export type DatabaseConfig = {
+    drizzleConfigPath?: string | undefined;
+    environments?: Record<string, EnvironmentConfig> | undefined;
+    migrationsDir: string;
+    name?: string | undefined;
+    promotionOrder?: string[];
+    provider?: ProviderConfig | undefined;
+};
+export type ResolvedDatabaseConfig = {
+    name: string;
+    migrationsDir: string;
+    drizzleConfigPath?: string | undefined;
+    provider: ProviderConfig;
+};
+export type MultiTenantConfig = {
+    circuitBreaker: {
+        failureThreshold: number;
+        minSampleSize: number;
+    };
+    concurrency: number;
+    enabled: true;
+    rootDatabase: string;
+    tenantQuery: string;
+};
+export type MigrationConfig = {
+    databases: Record<string, DatabaseConfig>;
+    multiTenant?: MultiTenantConfig | undefined;
+};
+export type ResolvedMigrationConfig = {
+    databases: Record<string, ResolvedDatabaseConfig>;
+    multiTenant?: MultiTenantConfig | undefined;
+};
+export type MigrationStatus = "success" | "already_applied" | "repaired" | "failed" | "skipped";
+export type MigrationResult = {
+    database: string;
+    status: MigrationStatus;
+    tablesVerified?: number;
+    error?: string;
+};
+export type ExtractedSchema = {
+    tables: Map<string, string[]>;
+    indexes: string[];
+    droppedTables: string[];
+};
+export type MigrationSafety = "safe" | "cautious" | "unsafe";
+export type MigrationClassification = {
+    safety: MigrationSafety;
+    unsafeStatements: string[];
+};
+export type ParsedMigration = {
+    sql: string;
+    hash: string;
+    filename: string;
+    statements: string[];
+    drops: string[];
+    expected: ExtractedSchema;
+    classification: MigrationClassification;
+};
+export type CircuitBreakerState = {
+    totalProcessed: number;
+    failures: number;
+    tripped: boolean;
+    tripReason?: string;
+};
+
+// migrate/core/process.d.ts
+export type RunResult = {
+    code: number;
+    stdout: string;
+    stderr: string;
+};
+export type RunOptions = {
+    cwd?: string | undefined;
+    input?: string | undefined;
+    /** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
+    maxBuffer?: number | undefined;
+};
+export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
+/** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
+export declare const run: Run;
+
+// migrate/core/atlas-env.d.ts
+/**
+ * What every Atlas run shares: the dev database it replays on, and the SQLite pragma rewrite
+ * applied to what it writes.
+ */
+import type { Dialect } from "../types.ts";
+/** Idempotent. Input without the pragma pair passes through unchanged. */
+export declare function applySqliteMigrationTransforms(sql: string): string;
+/** The ephemeral database Atlas replays migrations on */
+export declare function devUrl(dialect: Dialect): string;
+
+// migrate/core/migrate-diff.d.ts
+import type { Dialect } from "../types.ts";
+import { type Run } from "./process.ts";
+export type MigrateDiffOptions = {
+    dialect: Dialect;
+    /** SQLite: the target's FTS5 DDL, kept apart from `targetSchema` because Atlas cannot load it */
+    ftsSql?: string | undefined;
+    migrationName: string;
+    migrationsDir: string;
+    targetSchema: string;
+    /** The process runner; tests pass a fake. */
+    run?: Run | undefined;
+};
+export type MigrateDiffResult = {
+    files: string[];
+    synced: boolean;
+};
+export declare function generateIncrementalMigration(options: MigrateDiffOptions): MigrateDiffResult;
+
+// migrate/core/sql-scan.d.ts
+/**
+ * A quote-aware reading of SQL text: code, string or identifier literals, and comments. Every
+ * migration step that splits, hashes or terminates SQL reads it through here, so `;`, `--` and
+ * `/*` inside a literal are always data.
+ */
+type Segment = {
+    kind: "code" | "comment" | "literal";
+    text: string;
+};
+/** `sql` as consecutive segments that concatenate back to it */
+declare function segments(sql: string): Segment[];
+/**
+ * The statements of `sql`, without their terminating `;`. A `;` ends a statement only in code:
+ * never inside a literal or a comment, nor inside a trigger's BEGIN … END. A stretch that holds
+ * only comments is not a statement.
+ */
+declare function splitSqlStatements(sql: string): string[];
+/**
+ * `sql` with comments dropped and whitespace collapsed outside literals, literals verbatim: two
+ * migrations that differ only in layout or comments normalize alike, two that differ in data never.
+ */
+declare function normalizeSql(sql: string): string;
+export { normalizeSql, segments, splitSqlStatements, type Segment };
+
+// migrate/drivers/d1.d.ts
+import { type Run } from "../core/process.ts";
+import type { ConnectionProvider, D1ProviderConfig } from "../types.ts";
+export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): ConnectionProvider;
+
+// migrate/drivers/postgres.d.ts
+/**
+ * PostgreSQL driver implementations (Neon, Supabase, plain pg)
+ *
+ * TODO: Implement when needed. Interface is defined, implementation pending.
+ */
+import type { Connection, ConnectionProvider, NeonProviderConfig, PostgresProviderConfig } from "../types.ts";
+export declare function createPostgresProvider(_config: PostgresProviderConfig): ConnectionProvider;
+export declare function createNeonProvider(_config: NeonProviderConfig): ConnectionProvider;
+export declare function introspectPostgresSchema(_conn: Connection): Promise<string>;
+export declare function getPostgresTables(conn: Connection): Promise<string[]>;
+export declare function getPostgresColumns(conn: Connection, table: string): Promise<string[]>;
+export declare function getPostgresIndexes(conn: Connection): Promise<string[]>;
+
+// migrate/drivers/sqlite.d.ts
+import type { Connection, ConnectionProvider, LibsqlProviderConfig, TursoProviderConfig } from "../types.ts";
+export { createBunSqliteProvider } from "./bun-sqlite.ts";
+/** How the Turso calls reach the API and report progress: injectable, quiet by default */
+export type TursoDeps = {
+    fetch?: typeof fetch;
+    /** A progress line, such as the database being created; no output when omitted */
+    log?: (line: string) => void;
+};
+export type TursoCredentialsRequest = TursoDeps & {
+    apiToken: string;
+    dbName: string;
+    /** The placement group a database created on demand joins (default "default") */
+    group?: string | undefined;
+    org: string;
+};
+/** The libsql URL and a one-hour token for a Turso database, creating the database when it is missing */
+export declare function getTursoCredentials(request: TursoCredentialsRequest): Promise<{
+    url: string;
+    authToken: string;
+}>;
+export declare function createTursoProvider(config: TursoProviderConfig, deps?: TursoDeps): ConnectionProvider;
+export declare function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider;
+export declare function introspectSqliteSchema(conn: Connection): Promise<string>;
+export declare function getSqliteTables(conn: Connection): Promise<string[]>;
+export declare function getSqliteColumns(conn: Connection, table: string): Promise<string[]>;
+export declare function getSqliteIndexes(conn: Connection): Promise<string[]>;
+
+// migrate/drivers/bun-sqlite.d.ts
+/**
+ * The bun:sqlite migration driver. Bun's APIs live in this file alone (comb/boundaries), and
+ * bun:sqlite is imported on connect, so the module loads under Node too.
+ */
+import type { BunSqliteProviderConfig, ConnectionProvider } from "../types.ts";
+export declare function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider;

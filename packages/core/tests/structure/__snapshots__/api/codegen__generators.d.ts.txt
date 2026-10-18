@@ -1,0 +1,634 @@
+// codegen/generators/index.d.ts
+export { generateColumns } from "./columns.ts";
+export { generateConstraints } from "./constraints.ts";
+export { generateFts } from "./fts.ts";
+export { generateFtsSql } from "./fts-sql.ts";
+export { buildManifest, generateManifest, type Manifest, type ManifestColumn, type ManifestEntity, type ManifestRelation, MANIFEST_VERSION, } from "./manifest.ts";
+export { generateDiagrams } from "./diagrams.ts";
+export { generateDtos } from "./dtos/index.ts";
+export { generateEntities } from "./entities.ts";
+export { generateEnumChecks } from "./enum-checks.ts";
+export { generateFieldNames } from "./field-names.ts";
+export { generateOrm } from "./orm.ts";
+export { generateRelations } from "./relations.ts";
+export { generateRows } from "./rows.ts";
+export { generateTranslations } from "./translations.ts";
+
+// codegen/generators/columns.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+type ColumnsConfig = {
+    filePrefix?: string | undefined;
+    output: string;
+    updatePackageJson?: boolean;
+};
+/** Generate column refs and table names from analyzed tables */
+export declare function generateColumns(ctx: GeneratorContext, config: ColumnsConfig): void;
+export {};
+
+// codegen/generators/constraints.d.ts
+import type { TableMeta } from "../analyzer-types.ts";
+import type { GeneratorContext } from "./context-types.ts";
+type Constraint = {
+    cause: string;
+    errorKey: string;
+    statusKey: string;
+};
+type TableConstraints = {
+    check?: Record<string, Constraint>;
+    foreignKey?: Record<string, Constraint>;
+    primaryKey?: Constraint;
+    unique?: Record<string, Constraint>;
+};
+type ConstraintMap = Record<string, TableConstraints>;
+type ConstraintsConfig = {
+    output: string;
+};
+/** The constraint map of every table that has a constraint, keyed by SQL table name */
+export declare function buildConstraintMap(tables: readonly TableMeta[]): ConstraintMap;
+/** Every constraint in the map, flattened */
+export declare function constraintsIn(map: ConstraintMap): Constraint[];
+/** Generate constraint map from analyzed tables */
+export declare function generateConstraints(ctx: GeneratorContext, config: ConstraintsConfig): void;
+export {};
+
+// codegen/generators/fts.d.ts
+import { type FtsTableConfig } from "./fts-sql.ts";
+import type { GeneratorContext } from "./context-types.ts";
+type FtsGeneratorConfig = {
+    /** file name stem; defaults to `db.<dbName>` */
+    filePrefix?: string | undefined;
+    fts: Record<string, FtsTableConfig>;
+    output: string;
+};
+declare function generateFts(ctx: GeneratorContext, config: FtsGeneratorConfig): void;
+export { generateFts };
+
+// codegen/generators/fts-sql.d.ts
+/**
+ * FTS5 SQL generator — pure function that produces CREATE VIRTUAL TABLE + trigger DDL.
+ *
+ * Shared between:
+ * - codegen generator (writes .gen.sql reference files)
+ * - migrate diff (appends to migration files)
+ */
+import type { TableMeta } from "../analyzer-types.ts";
+type FtsTableConfig = {
+    columns: string[];
+    tokenizer?: string;
+};
+/** Deduplicate columns preserving order */
+declare function dedup(columns: string[]): string[];
+/** Generate FTS5 SQL for all configured tables. Returns empty string if nothing to generate. */
+declare function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
+export { dedup, generateFtsSql };
+export type { FtsTableConfig };
+
+// codegen/generators/manifest.d.ts
+import type { TableMeta } from "../analyzer-types.ts";
+import type { GeneratorContext } from "./context-types.ts";
+/**
+ * Manifest format version.
+ *
+ * Same discipline as the meta contract: bumped only when a field is removed or
+ * changes meaning. Adding a field never bumps it, so a reader that ignores what
+ * it does not recognise keeps working across comb releases.
+ */
+declare const MANIFEST_VERSION = 1;
+type ManifestColumn = {
+    name: string;
+    /** The `c.*` helper that declared it — text, integer, enum, json, ref, … */
+    kind: string;
+    notNull: boolean;
+    primaryKey: boolean;
+    /** Declared values for an enum column, or null when not an enum or the list is a const reference */
+    enumValues: string[] | null;
+    /** Length or numeric bound where one was declared */
+    max: number | null;
+    min: number | null;
+    /** Regex source where one was declared */
+    pattern: string | null;
+    /** Server-assigned; absent from create bodies */
+    generated: boolean;
+    /** Absent from update bodies */
+    immutable: boolean;
+    /** Absent from read bodies */
+    private: boolean;
+    /**
+     * State machine declared on this column, or null.
+     *
+     * Unlike the published stamp, the manifest carries `transitions` too: it is a
+     * local artifact for tools that operate on the model, not a document handed
+     * to a black-box tester. See docs/state-machines.md §5.
+     */
+    states: {
+        initial: string | null;
+        terminal: string[];
+        transitions: Record<string, string[]> | null;
+    } | null;
+};
+type ManifestRelation = {
+    column: string;
+    table: string;
+    refColumn: string;
+    onDelete: string | null;
+    onUpdate: string | null;
+};
+type ManifestEntity = {
+    name: string;
+    /** Variable the table was declared under, for locating it in source */
+    varName: string;
+    /** Prefix passed to c.id(), or null for an auto-increment or absent prefix */
+    idPrefix: string | null;
+    /** Null when the table has a composite primary key — see meta-contract §6.4 */
+    identity: string | null;
+    softDelete: string | null;
+    tenantColumn: string | null;
+    compositePrimaryKey: boolean;
+    columns: ManifestColumn[];
+    relations: ManifestRelation[];
+    uniqueIndexes: {
+        name: string;
+        columns: string[];
+    }[];
+    checkConstraints: {
+        name: string;
+        expression: string;
+    }[];
+};
+type Manifest = {
+    v: number;
+    database: string;
+    entities: ManifestEntity[];
+};
+type ManifestConfig = {
+    filePrefix?: string | undefined;
+    output: string;
+};
+/**
+ * Build the manifest without writing it — useful to a caller assembling its own
+ * artifact, and the unit under test.
+ *
+ * Entities are sorted by SQL name so regenerating an unchanged schema produces
+ * an identical file regardless of declaration order.
+ */
+declare function buildManifest(tables: TableMeta[], dbName: string): Manifest;
+/** Write the manifest alongside the generated entities. */
+declare function generateManifest(ctx: GeneratorContext, config: ManifestConfig): void;
+export { buildManifest, generateManifest, type Manifest, type ManifestColumn, type ManifestConfig, type ManifestEntity, type ManifestRelation, MANIFEST_VERSION, };
+
+// codegen/generators/diagrams.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+type DiagramsConfig = {
+    output: string;
+};
+export declare function generateDiagrams(ctx: GeneratorContext, config: DiagramsConfig): void;
+export {};
+
+// codegen/generators/dtos/index.d.ts
+export { generateDtos } from "./generate.ts";
+export type { DtosConfig } from "./dto-types.ts";
+
+// codegen/generators/entities.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+type EntitiesConfig = {
+    importFrom?: string | undefined;
+    output: string;
+    updatePackageJson?: boolean;
+};
+declare function generateEntities(ctx: GeneratorContext, config: EntitiesConfig): void;
+/** Walk up from dir to find nearest package.json */
+export { generateEntities };
+
+// codegen/generators/enum-checks.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+type EnumChecksConfig = {
+    output: string;
+};
+export declare function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConfig): void;
+export {};
+
+// codegen/generators/field-names.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+type FieldNamesConfig = {
+    output: string;
+    updatePackageJson?: boolean;
+};
+declare function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): void;
+/** Walk up from dir to find nearest package.json */
+export { generateFieldNames };
+
+// codegen/generators/orm.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+type OrmDialect = "sqlite" | "postgres";
+type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso";
+type PostgresDriver = "neon";
+type OrmConfig = {
+    dialect: OrmDialect;
+    driver: SqliteDriver | PostgresDriver;
+    filePrefix?: string | undefined;
+    output: string;
+    relationsOutput?: string;
+};
+/** Generate ORM client file based on config */
+export declare function generateOrm(ctx: GeneratorContext, config: OrmConfig): void;
+export {};
+
+// codegen/generators/relations.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+type RelationsConfig = {
+    output: string;
+};
+/** Build the relations graph and generate code from analyzed tables */
+export declare function generateRelations(ctx: GeneratorContext, config: RelationsConfig): void;
+export {};
+
+// codegen/generators/rows.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+type RowsConfig = {
+    output: string;
+};
+/**
+ * Generate row types from analyzed tables
+ */
+export declare function generateRows(ctx: GeneratorContext, config: RowsConfig): void;
+export {};
+
+// codegen/generators/translations.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+type TranslationsConfig = {
+    baseDir: string;
+    /** file name stem, the one the constraints file uses */
+    filePrefix: string;
+};
+/** Generate the error keys and their en-US messages from the analyzed tables */
+export declare function generateTranslations(ctx: GeneratorContext, config: TranslationsConfig): void;
+export {};
+
+// codegen/generators/context-types.d.ts
+/** What every generator works from: the analysis, where it runs, and where its progress lines go. */
+import type { AnalysisResult } from "../analyzer-types.ts";
+export type GeneratorContext = {
+    analysis: AnalysisResult;
+    /** the directory relative output paths resolve against */
+    cwd: string;
+    /** a progress line for the person running codegen */
+    log: (line: string) => void;
+    /** the analyzed tables file */
+    tablesPath: string;
+    /** a line the person running codegen should act on */
+    warn: (line: string) => void;
+};
+
+// codegen/analyzer-types.d.ts
+/**
+ * TableMeta — serializable intermediate format produced by TableAnalyzer.
+ * No ts-morph or Drizzle dependencies. All generators consume this.
+ */
+/** Constraint annotations parsed from field type arguments */
+type FieldConstraintsMeta = {
+    autogenerate: boolean;
+    email: boolean;
+    lowercase: boolean;
+    max: number | null;
+    maxBytes: number | null;
+    min: number | null;
+    nomutate: boolean;
+    password: boolean;
+    pattern: string | null;
+    private: boolean;
+    tenant: boolean;
+    trim: boolean;
+    uppercase: boolean;
+    url: boolean;
+};
+/** State machine declared on an enum column */
+type StateMachineMeta = {
+    initial: string | null;
+    terminal: string[] | null;
+    transitions: Record<string, string[]> | null;
+};
+/** A name a generated file must import, with the module the tables file gets it from. */
+type ImportRef = {
+    /** the module specifier as the tables file writes it */
+    from: string;
+    /** the exported name (`*` for a namespace import, `default` for a default import) */
+    imported: string;
+    /** the local name the tables file uses */
+    name: string;
+    /** the module's file when it is in the project; null for a package */
+    path: string | null;
+};
+/** Foreign key reference from this field to another table */
+type ForeignKeyRef = {
+    column: string;
+    onDelete?: string | undefined;
+    onUpdate?: string | undefined;
+    refColumn: string;
+    refTable: string;
+};
+/** A single column/field in a table */
+type FieldMeta = {
+    constraints: FieldConstraintsMeta;
+    /** Drizzle helper: "text", "integer", "boolean", "timestamp", "createdAt", etc. */
+    drizzleHelper: string;
+    /** Enum constant name if .$type<(typeof X)[number]> or c.enum("name", X) */
+    enumName: string | null;
+    /** Inline enum values if c.enum("name", ["a", "b"]), null if const ref */
+    enumValues: string[] | null;
+    /** State machine declared as c.enum's third argument, null when absent */
+    states: StateMachineMeta | null;
+    /** FK reference if .references(() => table.column) */
+    foreignKey: ForeignKeyRef | null;
+    /** Whether .notNull() is present */
+    isNotNull: boolean;
+    /** Whether .primaryKey() or c.id("prefix") */
+    isPrimaryKey: boolean;
+    /** the schema expression of c.json(name, schema), as written */
+    jsonSchemaName: string | null;
+    /** the names the field's generated schema uses and must import (schemas, unreadable enum consts) */
+    schemaImports: ImportRef[];
+    /** Length from positional arg or constraints */
+    length: number | null;
+    /** Field name as defined in the table schema object */
+    name: string;
+    /** The column's SQL name: what the engine reports in errors and what DDL and triggers name */
+    sqlName: string;
+    /** Full raw text of the initializer expression */
+    raw: string;
+};
+/** Unique index from table options (3rd arg arrow function) */
+type UniqueIndexMeta = {
+    columns: string[];
+    name: string;
+};
+/** Check constraint from table options */
+type CheckConstraintMeta = {
+    expression: string;
+    name: string;
+};
+/** Timestamp tracking for a table */
+type TimestampsMeta = {
+    createdAt: boolean;
+    deletedAt: boolean;
+    style: "camelCase" | "snake_case";
+    updatedAt: boolean;
+};
+/** Complete metadata for a single table */
+type TableMeta = {
+    /** Check constraints from table options */
+    checkConstraints: CheckConstraintMeta[];
+    /** All fields in the table */
+    fields: FieldMeta[];
+    /** Whether composite PK exists in table options */
+    hasCompositePrimaryKey: boolean;
+    /** Entity ID prefix from c.id("prefix"), null if c.serialId() or missing */
+    idPrefix: string | null;
+    /** SQL table name (first arg to createTable) */
+    sqlName: string;
+    /** Detected timestamp fields and style */
+    timestamps: TimestampsMeta;
+    /** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, never published as uniqueness */
+    partialUniqueIndexes: UniqueIndexMeta[];
+    /** Unique indexes from table options */
+    uniqueIndexes: UniqueIndexMeta[];
+    /** Variable name (export const X = createTable...) */
+    varName: string;
+};
+/** Imports discovered during analysis */
+type ImportsMeta = {
+    /** Enum constant name -> module path */
+    enumImports: Map<string, string>;
+    /** All imported identifiers -> module path */
+    identifiers: Map<string, string>;
+    /** JSON schema names referenced by c.json() */
+    jsonSchemaImports: Set<string>;
+    /** `"identifier.PROPERTY"` → the string an imported constant holds, for constraint references */
+    identifierValues: Map<string, string>;
+};
+/** Full analysis result */
+type AnalysisResult = {
+    /** Database name derived from tables file path */
+    dbName: string;
+    imports: ImportsMeta;
+    tables: TableMeta[];
+    /** Relative import path for the tables file */
+    tablesImportPath: string;
+};
+export type { ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };
+
+// codegen/generators/dtos/generate.d.ts
+import type { GeneratorContext } from "../context-types.ts";
+import type { DtosConfig } from "./dto-types.ts";
+/**
+ * Generate DTO schemas from analyzed tables
+ */
+export declare function generateDtos(ctx: GeneratorContext, config: DtosConfig): void;
+
+// codegen/generators/dtos/dto-types.d.ts
+/** Types the DTO generator's modules share. */
+import type { CombEntityMetaInput } from "../../../meta.ts";
+export type SchemaType = "read" | "readPartial" | "create" | "update";
+export type FieldInfo = {
+    key: string;
+    type: SchemaType;
+    zodType: string;
+};
+export type TableInfo = {
+    /** Entity facts stamped on the read schema; null when there is no single identity */
+    combMeta: CombEntityMetaInput | null;
+    fields: FieldInfo[];
+    hasTimestamps: {
+        createdAt: boolean;
+        deletedAt: boolean;
+        updatedAt: boolean;
+    };
+    name: string;
+    needsSharedMeta: boolean;
+    timestampStyle: "camelCase" | "snake_case";
+};
+export type DtosConfig = {
+    filePrefix?: string | undefined;
+    /** Package the generated meta stamp imports from. Matches EntitiesConfig. */
+    importFrom?: string | undefined;
+    output: string;
+    updatePackageJson?: boolean;
+};
+/** Emitted code for a shared schema constant */
+export type SharedSchema = {
+    code: string;
+    count: number;
+    name: string;
+};
+
+// meta.d.ts
+/**
+ * The comb meta contract — facts about tables and queries, stamped onto Zod
+ * schemas so they survive the trip to JSON Schema and into an OpenAPI document.
+ *
+ * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
+ * names is the consumer's job. See docs/meta-contract.md.
+ */
+import { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta } from "./meta/contract.ts";
+import { readCombEntityMeta, readCombMeta, readCombQueryMeta } from "./meta/read.ts";
+/**
+ * Build the stamp for a Zod `.meta()` call.
+ *
+ * Stamp the schema you RETURN, not the one you build from — a transform/pipe
+ * does not forward the base's metadata to the output view. See docs §3.1.
+ */
+declare function combMeta(meta: CombEntityMetaInput): CombMetaStamp<CombEntityMeta>;
+declare function combMeta(meta: CombQueryMetaInput): CombMetaStamp<CombQueryMeta>;
+/** Minimal shape of a Zod schema, so this module needs no zod import. */
+type MetaCarrier<T> = {
+    meta: (m: Record<string, unknown>) => T;
+};
+/**
+ * Re-stamp `to` with the facts `from` carries.
+ *
+ * `.extend()` drops registry metadata silently (docs §5), so a consumer who
+ * extends a generated read schema loses the entity facts with no diagnostic.
+ * This is the recovery path.
+ */
+declare function carryCombMeta<T>(from: unknown, to: MetaCarrier<T>): T | null;
+export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, readCombEntityMeta, readCombMeta, readCombQueryMeta, };
+
+// meta/contract.d.ts
+/**
+ * The comb meta contract — facts about tables and queries, stamped onto Zod
+ * schemas so they survive the trip to JSON Schema and into an OpenAPI document.
+ *
+ * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
+ * names is the consumer's job. See docs/meta-contract.md.
+ */
+import type { UniqueIndexMeta } from "../codegen/analyzer-types.ts";
+/** Reserved key. One collision surface, one version field. */
+declare const COMB_META_KEY = "x-comb";
+/**
+ * Contract version. Bumped ONLY on a breaking change — a field removed, or a
+ * field whose meaning changed. Adding a field never bumps it, which is what
+ * lets comb and its consumers ship independently.
+ */
+declare const COMB_META_VERSION = 1;
+type CombMetaKind = "entity" | "query";
+/** Filter grammar comb's parser implements — `field.op.value`. */
+declare const COMB_FILTER_GRAMMAR = "postgrest";
+type CombFilterGrammar = typeof COMB_FILTER_GRAMMAR;
+/** Facts about an entity, derived from its table definition. */
+type CombEntityMeta = {
+    v: number;
+    kind: "entity";
+    /** Entity name — the SQL table name */
+    name: string;
+    /** Primary key / stable identifier column */
+    identity: string;
+    /** Server-assigned: omitted from create bodies, expected in responses */
+    generated: string[];
+    /** Must reject or ignore a mutation */
+    immutable: string[];
+    /** Tombstone column, or null when the entity is hard-deleted */
+    softDelete: string | null;
+    /** Column scoping rows to a tenant, or null when comb cannot know (see docs §6.3) */
+    tenantColumn: string | null;
+    /**
+     * Lifecycle of the entity's state column, or null when none is declared.
+     *
+     * `transitions` is deliberately absent: it is a write-side rule, and
+     * publishing the graph would invite a consumer to drive state by walking it.
+     * See docs/state-machines.md §5.
+     */
+    states: CombStatesMeta | null;
+    /**
+     * Unique indexes declared with `uniqueIndex()`, in the order the analyzer
+     * extracted them. Empty when none. Never inferred from PKs or column names.
+     */
+    uniqueIndexes: UniqueIndexMeta[];
+};
+/** The published subset of a column state machine — describes a lifecycle, not how to drive it. */
+type CombStatesMeta = {
+    column: string;
+    values: string[];
+    initial: string | null;
+    terminal: string[];
+};
+/** One filterable field with the operators its type accepts. */
+type CombFilterField = {
+    field: string;
+    type: string;
+    ops: string[];
+};
+/**
+ * Facts about a list query, derived from the config that parses the request.
+ * Fields marked optional were added after v1 shipped; a v1 reader built before
+ * them ignores them, which is why adding them did not bump `v`.
+ */
+type CombQueryMeta = {
+    v: number;
+    kind: "query";
+    filterable: string[];
+    /** `filterable` with types and operators */
+    filterFields?: CombFilterField[];
+    sortable: string[];
+    /** Null placements every sortable field accepts */
+    nulls?: Array<"first" | "last">;
+    maxFilterConditions?: number;
+    maxFilterDepth?: number;
+    /** Values one filter binds in all, every in/nin member counted */
+    maxFilterValues?: number;
+    maxInValues?: number;
+    /** Whitespace-separated words one `q` may hold */
+    maxSearchTerms?: number;
+    maxSortKeys?: number;
+    /** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */
+    searchable: string[] | null;
+    selectable: string[];
+    maxLimit: number;
+    /** e.g. "created_at.desc" — the order applied when the request names none */
+    defaultOrder: string;
+    /** Tiebreak column for keyset pagination */
+    stableTiebreak: string;
+    grammar: CombFilterGrammar;
+};
+type CombMeta = CombEntityMeta | CombQueryMeta;
+/** Payload accepted by combMeta() — the version is stamped for you. */
+type CombEntityMetaInput = Omit<CombEntityMeta, "v">;
+type CombQueryMetaInput = Omit<CombQueryMeta, "v">;
+type CombMetaInput = CombEntityMetaInput | CombQueryMetaInput;
+/** The object combMeta() produces, ready for `.meta()`. */
+type CombMetaStamp<T extends CombMeta = CombMeta> = {
+    [COMB_META_KEY]: T;
+};
+export { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, };
+
+// meta/read.d.ts
+/**
+ * Reading comb's facts off a JSON Schema. Returns null, never throws: a refused or malformed
+ * payload degrades to "no facts", never to a confident wrong answer. See docs/meta-contract.md §4.
+ */
+import { type CombEntityMeta, type CombMeta, type CombQueryMeta } from "./contract.ts";
+type ReadOptions = {
+    /**
+     * Highest contract version this reader understands. A payload newer than
+     * this is refused rather than partially read — see docs §4.2.
+     * Defaults to the version of the comb build doing the reading.
+     */
+    maxVersion?: number;
+    /** Called instead of throwing when a payload is refused or malformed. */
+    onDiagnostic?: (message: string) => void;
+};
+declare function isRecord(value: unknown): value is Record<string, unknown>;
+/**
+ * Read comb's facts off the ROOT of a JSON Schema.
+ *
+ * Does not unwrap `items` for array schemas — the consumer that already
+ * resolves which schema to read owns that step, so the two cannot disagree.
+ *
+ * Returns null, never throws: a refused or malformed payload must degrade to
+ * "no facts" (which downstream handles as a visible coverage gap), not to a
+ * confident wrong answer.
+ */
+declare function readCombMeta(jsonSchema: unknown, options?: ReadOptions): CombMeta | null;
+/** Narrowing convenience — null when absent, refused, or the other kind. */
+declare function readCombEntityMeta(jsonSchema: unknown, options?: ReadOptions): CombEntityMeta | null;
+/** Narrowing convenience — null when absent, refused, or the other kind. */
+declare function readCombQueryMeta(jsonSchema: unknown, options?: ReadOptions): CombQueryMeta | null;
+export { isRecord, type ReadOptions, readCombEntityMeta, readCombMeta, readCombQueryMeta };

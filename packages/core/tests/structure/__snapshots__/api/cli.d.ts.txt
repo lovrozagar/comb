@@ -1,0 +1,53 @@
+// cli/index.d.ts
+/** @lovrozagar/comb/cli: run the comb CLI in process. */
+export { CliError, type CliIo, processIo } from "./output.ts";
+export { help, runCli } from "./run.ts";
+
+// cli/output.d.ts
+import type { Run } from "../migrate/core/process.ts";
+/** Where the CLI reads its working directory, writes its output, asks, and starts processes. */
+export type CliIo = {
+    cwd: string;
+    out(line: string): void;
+    err(line: string): void;
+    run?: Run | undefined;
+    /** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
+    confirm?: ((question: string) => Promise<boolean>) | undefined;
+};
+/** A failure the CLI reports as its message and exit code instead of a stack trace. */
+export declare class CliError extends Error {
+    readonly exitCode: number;
+    constructor(message: string, exitCode?: number);
+}
+type Terminal = {
+    input: NodeJS.ReadableStream & {
+        isTTY?: boolean | undefined;
+    };
+    output: NodeJS.WritableStream;
+};
+/** The IO the comb binary runs with: the console, and questions on the terminal when there is one */
+export declare function processIo(terminal?: Terminal): CliIo;
+export {};
+
+// cli/run.d.ts
+import { type CliIo } from "./output.ts";
+/** The help, from the declarations the commands parse with */
+export declare const help: () => string;
+/** Runs the comb CLI on `argv` (the arguments after the script) and returns its exit code. */
+export declare function runCli(argv: readonly string[], io: CliIo): Promise<number>;
+
+// migrate/core/process.d.ts
+export type RunResult = {
+    code: number;
+    stdout: string;
+    stderr: string;
+};
+export type RunOptions = {
+    cwd?: string | undefined;
+    input?: string | undefined;
+    /** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
+    maxBuffer?: number | undefined;
+};
+export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
+/** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
+export declare const run: Run;

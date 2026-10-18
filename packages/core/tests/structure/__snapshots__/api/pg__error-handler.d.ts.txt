@@ -1,0 +1,61 @@
+// pg/error-handler.d.ts
+import { type ConstraintMap } from "../types.ts";
+export type PgErrorRead = {
+    code: string;
+    column: string | undefined;
+    constraint: string | undefined;
+    /** the columns in `detail`'s `Key (a, b)=(…)` */
+    keyColumns: string[];
+    table: string | undefined;
+};
+/** The Postgres server error inside `error`, or null when there is none. */
+export declare function readPgError(error: unknown): PgErrorRead | null;
+/**
+ * Handle PostgreSQL errors: constraint violations through the app's maps, resource and
+ * availability errors to their generic keys. Anything else is left for the caller.
+ */
+declare function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void;
+export { pgErrorHandler };
+
+// types.d.ts
+/** Database-relevant HTTP status keys */
+export type StatusKey = "bad_request" | "conflict" | "forbidden" | "internal_server_error" | "service_unavailable" | "unprocessable_entity";
+export declare const statusKeyToCode: Record<StatusKey, number>;
+/** Database-related error key constants */
+export declare const combErrorKeys: {
+    readonly CHECK_CONSTRAINT_VIOLATION: "check_constraint_violation";
+    readonly CURSOR_PAGINATION_UNSUPPORTED: "cursor_pagination_unsupported";
+    readonly DATABASE_IO_ERROR: "database_io_error";
+    readonly DATABASE_READONLY: "database_readonly";
+    readonly DATABASE_UNAVAILABLE: "database_unavailable";
+    readonly FILTER_NOT_WIRED: "filter_not_wired";
+    readonly FOREIGN_KEY_VIOLATION: "foreign_key_violation";
+    readonly INVALID_CURSOR: "invalid_cursor";
+    readonly INVALID_STATE_TRANSITION: "invalid_state_transition";
+    readonly PRIMARY_KEY_VIOLATION: "primary_key_violation";
+    readonly REQUIRED_FIELD_MISSING: "required_field_missing";
+    readonly SEARCH_NOT_WIRED: "search_not_wired";
+    readonly SHARDS_FULL: "shards_full";
+    readonly SORT_NOT_WIRED: "sort_not_wired";
+    readonly STORAGE_LIMIT_REACHED: "tier_database_limit_reached";
+    readonly UNIQUE_CONSTRAINT_VIOLATION: "unique_constraint_violation";
+};
+/** Lowercase error key values from combErrorKeys */
+export type CombErrorKey = (typeof combErrorKeys)[keyof typeof combErrorKeys];
+/** Constraint map entry for mapping DB constraint violations to domain errors */
+export type ConstraintMapEntry = {
+    cause: string;
+    errorKey: string;
+    statusKey?: "bad_request" | "conflict" | "forbidden";
+};
+/** Per-table constraint violation mappings */
+export type ConstraintMap = {
+    [table: string]: {
+        check?: Record<string, ConstraintMapEntry>;
+        foreignKey?: Record<string, ConstraintMapEntry>;
+        primaryKey?: ConstraintMapEntry;
+        unique?: Record<string, ConstraintMapEntry>;
+    };
+};
+/** Function signature for database error handlers */
+export type DatabaseErrorHandler = (error: unknown, constraintMaps: ConstraintMap[]) => void;

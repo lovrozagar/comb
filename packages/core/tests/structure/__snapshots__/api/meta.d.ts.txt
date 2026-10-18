@@ -1,0 +1,309 @@
+// meta.d.ts
+/**
+ * The comb meta contract — facts about tables and queries, stamped onto Zod
+ * schemas so they survive the trip to JSON Schema and into an OpenAPI document.
+ *
+ * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
+ * names is the consumer's job. See docs/meta-contract.md.
+ */
+import { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta } from "./meta/contract.ts";
+import { readCombEntityMeta, readCombMeta, readCombQueryMeta } from "./meta/read.ts";
+/**
+ * Build the stamp for a Zod `.meta()` call.
+ *
+ * Stamp the schema you RETURN, not the one you build from — a transform/pipe
+ * does not forward the base's metadata to the output view. See docs §3.1.
+ */
+declare function combMeta(meta: CombEntityMetaInput): CombMetaStamp<CombEntityMeta>;
+declare function combMeta(meta: CombQueryMetaInput): CombMetaStamp<CombQueryMeta>;
+/** Minimal shape of a Zod schema, so this module needs no zod import. */
+type MetaCarrier<T> = {
+    meta: (m: Record<string, unknown>) => T;
+};
+/**
+ * Re-stamp `to` with the facts `from` carries.
+ *
+ * `.extend()` drops registry metadata silently (docs §5), so a consumer who
+ * extends a generated read schema loses the entity facts with no diagnostic.
+ * This is the recovery path.
+ */
+declare function carryCombMeta<T>(from: unknown, to: MetaCarrier<T>): T | null;
+export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, readCombEntityMeta, readCombMeta, readCombQueryMeta, };
+
+// meta/contract.d.ts
+/**
+ * The comb meta contract — facts about tables and queries, stamped onto Zod
+ * schemas so they survive the trip to JSON Schema and into an OpenAPI document.
+ *
+ * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
+ * names is the consumer's job. See docs/meta-contract.md.
+ */
+import type { UniqueIndexMeta } from "../codegen/analyzer-types.ts";
+/** Reserved key. One collision surface, one version field. */
+declare const COMB_META_KEY = "x-comb";
+/**
+ * Contract version. Bumped ONLY on a breaking change — a field removed, or a
+ * field whose meaning changed. Adding a field never bumps it, which is what
+ * lets comb and its consumers ship independently.
+ */
+declare const COMB_META_VERSION = 1;
+type CombMetaKind = "entity" | "query";
+/** Filter grammar comb's parser implements — `field.op.value`. */
+declare const COMB_FILTER_GRAMMAR = "postgrest";
+type CombFilterGrammar = typeof COMB_FILTER_GRAMMAR;
+/** Facts about an entity, derived from its table definition. */
+type CombEntityMeta = {
+    v: number;
+    kind: "entity";
+    /** Entity name — the SQL table name */
+    name: string;
+    /** Primary key / stable identifier column */
+    identity: string;
+    /** Server-assigned: omitted from create bodies, expected in responses */
+    generated: string[];
+    /** Must reject or ignore a mutation */
+    immutable: string[];
+    /** Tombstone column, or null when the entity is hard-deleted */
+    softDelete: string | null;
+    /** Column scoping rows to a tenant, or null when comb cannot know (see docs §6.3) */
+    tenantColumn: string | null;
+    /**
+     * Lifecycle of the entity's state column, or null when none is declared.
+     *
+     * `transitions` is deliberately absent: it is a write-side rule, and
+     * publishing the graph would invite a consumer to drive state by walking it.
+     * See docs/state-machines.md §5.
+     */
+    states: CombStatesMeta | null;
+    /**
+     * Unique indexes declared with `uniqueIndex()`, in the order the analyzer
+     * extracted them. Empty when none. Never inferred from PKs or column names.
+     */
+    uniqueIndexes: UniqueIndexMeta[];
+};
+/** The published subset of a column state machine — describes a lifecycle, not how to drive it. */
+type CombStatesMeta = {
+    column: string;
+    values: string[];
+    initial: string | null;
+    terminal: string[];
+};
+/** One filterable field with the operators its type accepts. */
+type CombFilterField = {
+    field: string;
+    type: string;
+    ops: string[];
+};
+/**
+ * Facts about a list query, derived from the config that parses the request.
+ * Fields marked optional were added after v1 shipped; a v1 reader built before
+ * them ignores them, which is why adding them did not bump `v`.
+ */
+type CombQueryMeta = {
+    v: number;
+    kind: "query";
+    filterable: string[];
+    /** `filterable` with types and operators */
+    filterFields?: CombFilterField[];
+    sortable: string[];
+    /** Null placements every sortable field accepts */
+    nulls?: Array<"first" | "last">;
+    maxFilterConditions?: number;
+    maxFilterDepth?: number;
+    /** Values one filter binds in all, every in/nin member counted */
+    maxFilterValues?: number;
+    maxInValues?: number;
+    /** Whitespace-separated words one `q` may hold */
+    maxSearchTerms?: number;
+    maxSortKeys?: number;
+    /** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */
+    searchable: string[] | null;
+    selectable: string[];
+    maxLimit: number;
+    /** e.g. "created_at.desc" — the order applied when the request names none */
+    defaultOrder: string;
+    /** Tiebreak column for keyset pagination */
+    stableTiebreak: string;
+    grammar: CombFilterGrammar;
+};
+type CombMeta = CombEntityMeta | CombQueryMeta;
+/** Payload accepted by combMeta() — the version is stamped for you. */
+type CombEntityMetaInput = Omit<CombEntityMeta, "v">;
+type CombQueryMetaInput = Omit<CombQueryMeta, "v">;
+type CombMetaInput = CombEntityMetaInput | CombQueryMetaInput;
+/** The object combMeta() produces, ready for `.meta()`. */
+type CombMetaStamp<T extends CombMeta = CombMeta> = {
+    [COMB_META_KEY]: T;
+};
+export { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, };
+
+// meta/read.d.ts
+/**
+ * Reading comb's facts off a JSON Schema. Returns null, never throws: a refused or malformed
+ * payload degrades to "no facts", never to a confident wrong answer. See docs/meta-contract.md §4.
+ */
+import { type CombEntityMeta, type CombMeta, type CombQueryMeta } from "./contract.ts";
+type ReadOptions = {
+    /**
+     * Highest contract version this reader understands. A payload newer than
+     * this is refused rather than partially read — see docs §4.2.
+     * Defaults to the version of the comb build doing the reading.
+     */
+    maxVersion?: number;
+    /** Called instead of throwing when a payload is refused or malformed. */
+    onDiagnostic?: (message: string) => void;
+};
+declare function isRecord(value: unknown): value is Record<string, unknown>;
+/**
+ * Read comb's facts off the ROOT of a JSON Schema.
+ *
+ * Does not unwrap `items` for array schemas — the consumer that already
+ * resolves which schema to read owns that step, so the two cannot disagree.
+ *
+ * Returns null, never throws: a refused or malformed payload must degrade to
+ * "no facts" (which downstream handles as a visible coverage gap), not to a
+ * confident wrong answer.
+ */
+declare function readCombMeta(jsonSchema: unknown, options?: ReadOptions): CombMeta | null;
+/** Narrowing convenience — null when absent, refused, or the other kind. */
+declare function readCombEntityMeta(jsonSchema: unknown, options?: ReadOptions): CombEntityMeta | null;
+/** Narrowing convenience — null when absent, refused, or the other kind. */
+declare function readCombQueryMeta(jsonSchema: unknown, options?: ReadOptions): CombQueryMeta | null;
+export { isRecord, type ReadOptions, readCombEntityMeta, readCombMeta, readCombQueryMeta };
+
+// codegen/analyzer-types.d.ts
+/**
+ * TableMeta — serializable intermediate format produced by TableAnalyzer.
+ * No ts-morph or Drizzle dependencies. All generators consume this.
+ */
+/** Constraint annotations parsed from field type arguments */
+type FieldConstraintsMeta = {
+    autogenerate: boolean;
+    email: boolean;
+    lowercase: boolean;
+    max: number | null;
+    maxBytes: number | null;
+    min: number | null;
+    nomutate: boolean;
+    password: boolean;
+    pattern: string | null;
+    private: boolean;
+    tenant: boolean;
+    trim: boolean;
+    uppercase: boolean;
+    url: boolean;
+};
+/** State machine declared on an enum column */
+type StateMachineMeta = {
+    initial: string | null;
+    terminal: string[] | null;
+    transitions: Record<string, string[]> | null;
+};
+/** A name a generated file must import, with the module the tables file gets it from. */
+type ImportRef = {
+    /** the module specifier as the tables file writes it */
+    from: string;
+    /** the exported name (`*` for a namespace import, `default` for a default import) */
+    imported: string;
+    /** the local name the tables file uses */
+    name: string;
+    /** the module's file when it is in the project; null for a package */
+    path: string | null;
+};
+/** Foreign key reference from this field to another table */
+type ForeignKeyRef = {
+    column: string;
+    onDelete?: string | undefined;
+    onUpdate?: string | undefined;
+    refColumn: string;
+    refTable: string;
+};
+/** A single column/field in a table */
+type FieldMeta = {
+    constraints: FieldConstraintsMeta;
+    /** Drizzle helper: "text", "integer", "boolean", "timestamp", "createdAt", etc. */
+    drizzleHelper: string;
+    /** Enum constant name if .$type<(typeof X)[number]> or c.enum("name", X) */
+    enumName: string | null;
+    /** Inline enum values if c.enum("name", ["a", "b"]), null if const ref */
+    enumValues: string[] | null;
+    /** State machine declared as c.enum's third argument, null when absent */
+    states: StateMachineMeta | null;
+    /** FK reference if .references(() => table.column) */
+    foreignKey: ForeignKeyRef | null;
+    /** Whether .notNull() is present */
+    isNotNull: boolean;
+    /** Whether .primaryKey() or c.id("prefix") */
+    isPrimaryKey: boolean;
+    /** the schema expression of c.json(name, schema), as written */
+    jsonSchemaName: string | null;
+    /** the names the field's generated schema uses and must import (schemas, unreadable enum consts) */
+    schemaImports: ImportRef[];
+    /** Length from positional arg or constraints */
+    length: number | null;
+    /** Field name as defined in the table schema object */
+    name: string;
+    /** The column's SQL name: what the engine reports in errors and what DDL and triggers name */
+    sqlName: string;
+    /** Full raw text of the initializer expression */
+    raw: string;
+};
+/** Unique index from table options (3rd arg arrow function) */
+type UniqueIndexMeta = {
+    columns: string[];
+    name: string;
+};
+/** Check constraint from table options */
+type CheckConstraintMeta = {
+    expression: string;
+    name: string;
+};
+/** Timestamp tracking for a table */
+type TimestampsMeta = {
+    createdAt: boolean;
+    deletedAt: boolean;
+    style: "camelCase" | "snake_case";
+    updatedAt: boolean;
+};
+/** Complete metadata for a single table */
+type TableMeta = {
+    /** Check constraints from table options */
+    checkConstraints: CheckConstraintMeta[];
+    /** All fields in the table */
+    fields: FieldMeta[];
+    /** Whether composite PK exists in table options */
+    hasCompositePrimaryKey: boolean;
+    /** Entity ID prefix from c.id("prefix"), null if c.serialId() or missing */
+    idPrefix: string | null;
+    /** SQL table name (first arg to createTable) */
+    sqlName: string;
+    /** Detected timestamp fields and style */
+    timestamps: TimestampsMeta;
+    /** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, never published as uniqueness */
+    partialUniqueIndexes: UniqueIndexMeta[];
+    /** Unique indexes from table options */
+    uniqueIndexes: UniqueIndexMeta[];
+    /** Variable name (export const X = createTable...) */
+    varName: string;
+};
+/** Imports discovered during analysis */
+type ImportsMeta = {
+    /** Enum constant name -> module path */
+    enumImports: Map<string, string>;
+    /** All imported identifiers -> module path */
+    identifiers: Map<string, string>;
+    /** JSON schema names referenced by c.json() */
+    jsonSchemaImports: Set<string>;
+    /** `"identifier.PROPERTY"` → the string an imported constant holds, for constraint references */
+    identifierValues: Map<string, string>;
+};
+/** Full analysis result */
+type AnalysisResult = {
+    /** Database name derived from tables file path */
+    dbName: string;
+    imports: ImportsMeta;
+    tables: TableMeta[];
+    /** Relative import path for the tables file */
+    tablesImportPath: string;
+};
+export type { ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };

@@ -1,0 +1,885 @@
+// query/index.d.ts
+/**
+ * @lovrozagar/comb/query — DB-agnostic query helpers.
+ *
+ * Parsers, validators, Zod schemas, and pagination utilities.
+ * For SQLite-specific SQL generation, use @lovrozagar/comb/query/sqlite.
+ */
+export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, DEFAULT_SORT, effectiveNulls, encodeCursor, getPrimarySortDirection, readCursor, sortSignature, } from "./cursor.ts";
+export type { CursorPayload, DecodedCursor, PaginationMeta, PaginationOptions, PaginationQueryInput } from "./cursor.ts";
+export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
+export { buildColumns, buildRelationColumns, filterBySelect, getEntityColumns, getRelationSelection, hasRelation, hasScalarsRequested, parseSelect, } from "./fields.ts";
+export { FILTER_LIMITS, FILTER_OPERATORS, type FilterLimits, type FilterValidationResult, OPERATORS_BY_TYPE, parseFilter, parseOrder, validateFilter, } from "./filter.ts";
+export { globPattern, likePattern } from "./like.ts";
+export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts";
+export { createListQuerySchema, createRetrieveQuerySchema, type FieldsConfig, LIST_QUERY_LIMITS, type ListQueryConfig, type ListQueryLimits, type ListQueryOutput, PAGINATION_DEFAULTS, paginationResponseSchema, type RetrieveQueryConfig, type RetrieveQueryOutput, } from "./schema.ts";
+export { CURSOR_DESCRIPTION, CURSOR_EXAMPLES, filterParamMeta, LANG_DESCRIPTION, LANG_EXAMPLES, LIMIT_DESCRIPTION, LIMIT_EXAMPLES, orderParamMeta, PAGE_DESCRIPTION, PAGE_EXAMPLES, searchParamMeta, SELECT_DESCRIPTION, SELECT_EXAMPLES, } from "./descriptions.ts";
+export { resolveTranslation, type TranslationResolverInput } from "./translation.ts";
+export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ParsedFields, SortDirection, SortField, SortNulls, } from "./types.ts";
+
+// query/cursor.d.ts
+import type { SortDirection, SortField, SortNulls } from "./types.ts";
+/**
+ * Column keyset pagination breaks ties on.
+ *
+ * This is the single source of truth for the tiebreak: the SQL builders resolve
+ * the column by this name, and `createListQuerySchema` publishes it as
+ * `stableTiebreak`. Keeping one constant is what stops the published fact from
+ * drifting away from the query that is actually run.
+ *
+ * A table whose primary-key property is named something else has no cursor
+ * predicate applied at all — rows then duplicate and skip across pages — so
+ * `validateTables()` rejects that shape rather than letting it fail silently.
+ */
+declare const CURSOR_TIEBREAK_COLUMN = "id";
+/** Sort applied when a request names none and the caller supplied no default. */
+declare const DEFAULT_SORT: readonly SortField[];
+/**
+ * Wire payload. `s` is the sort signature the cursor was minted under, `v` one
+ * value per sort key in order, `i` the tiebreak id. A cursor is only valid for
+ * the exact sort that produced it.
+ */
+type CursorPayload = {
+    i: CursorId;
+    s: string;
+    v: unknown[];
+};
+/** The tiebreak id as the row held it: a number stays a number, so it compares as one */
+type CursorId = number | string;
+type DecodedCursor = {
+    id: CursorId;
+    sort: string;
+    values: CursorValue[];
+};
+/** What a sort key can hold and SQLite can compare */
+type CursorValue = boolean | Date | number | string | null;
+type PaginationQueryInput = {
+    cursor?: string;
+    limit: number;
+    page?: number;
+    parsedSort: SortField[];
+};
+type PaginationOptions = {
+    limit: number;
+    offset: number;
+};
+type PaginationMeta = {
+    /** Rows the filter matches across all pages; null when the response cannot know */
+    count: number | null;
+    hasMore: boolean;
+    limit: number;
+    nextCursor: string | null;
+    page: number | null;
+};
+/** PostgreSQL semantics: nulls sort last ascending and first descending. */
+declare function effectiveNulls(direction: SortDirection, nulls?: SortNulls): SortNulls;
+/** Canonical form of a sort — what a cursor is bound to. */
+declare function sortSignature(parsedSort: readonly SortField[]): string;
+declare function encodeCursor(payload: CursorPayload): string;
+/** null when the string is not a cursor this version minted. */
+declare function decodeCursor(cursor: string | null | undefined): DecodedCursor | null;
+/** Mint the cursor for the row after which the next page starts. */
+declare function createCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], opts?: {
+    idField?: string;
+}): string;
+/**
+ * Why a cursor cannot be used under this sort, or null when it can.
+ * Shared by the schema (400 at validation) and the SQL builders (CombError).
+ */
+declare function cursorProblem(cursor: string, parsedSort: readonly SortField[]): string | null;
+/** Decode a cursor for this sort, or throw a 400 CombError. */
+declare function readCursor(cursor: string, parsedSort: readonly SortField[]): DecodedCursor;
+/** Get primary sort direction from parsed sort array, defaults to "desc" */
+declare function getPrimarySortDirection(parsedSort: readonly SortField[]): SortDirection;
+export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, DEFAULT_SORT, effectiveNulls, encodeCursor, getPrimarySortDirection, readCursor, sortSignature, type CursorId, type CursorPayload, type CursorValue, type DecodedCursor, type PaginationMeta, type PaginationOptions, type PaginationQueryInput, };
+
+// query/drizzle.d.ts
+/**
+ * Drizzle relational query helpers — thin abstraction for using
+ * query-helpers with drizzle's relational query API.
+ */
+import { type SQL } from "drizzle-orm";
+import { type CursorId } from "./cursor.ts";
+import type { FilterAST, ParsedFields, SortField } from "./types.ts";
+import type { paginationResponseSchema } from "./schema.ts";
+import type * as z from "zod";
+/** The pagination meta paginate returns: the list response's own schema */
+type PaginationMeta = z.output<typeof paginationResponseSchema>;
+/** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
+type RelationalTable = object;
+type DrizzleListOptions = {
+    limit: number;
+    offset: number;
+    /** The sort, its null placement and the id tiebreak, for `findMany({ orderBy })` */
+    orderBy: (table: RelationalTable) => SQL[];
+    /** @deprecated by orderBy, which also breaks ties and places nulls */
+    sortOrderBy: Record<string, "asc" | "desc">;
+    /** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
+    where?: {
+        RAW: (table: RelationalTable) => SQL;
+    };
+};
+/**
+ * The parsed request, or the `ListQueryResult` built from it: what a service or a repository holds.
+ * Closed on purpose: a bare `{ cursor? }` took any object, so a wrong argument compiled and counted.
+ */
+type CountQuery = {
+    cursor?: string | null | undefined;
+    limit: number;
+    parsedSort: readonly SortField[];
+} | {
+    meta: {
+        type: "cursor" | "offset";
+    };
+};
+/**
+ * The `select` extra that counts every row the filter matches, for `paginate` to report. An
+ * offset request gets it; a cursor request gets none, because the window would make the
+ * database read every remaining row on each page, which is what keyset pagination avoids.
+ */
+declare function countExtra(query: CountQuery): {
+    _total?: SQL.Aliased<number>;
+};
+/** Extract a single filter value from FilterAST */
+declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
+/** Extract multiple filter values from FilterAST */
+declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
+/**
+ * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
+ * list query schema's output. The limit is one over the page so `paginate` can tell there is more.
+ */
+declare function drizzleListOptions(query: {
+    cursor?: string | undefined;
+    limit: number;
+    page?: number | undefined;
+    parsedSort: SortField[];
+    sortOrderBy: Record<string, "asc" | "desc">;
+}): DrizzleListOptions;
+type DrizzleListResult<T> = T & {
+    _total?: number;
+};
+/** Create pagination result from drizzle query results with _total extra */
+declare function drizzlePaginationResult<T extends {
+    id?: CursorId;
+}>(items: DrizzleListResult<T>[], query: {
+    cursor?: string;
+    limit: number;
+    page?: number;
+    parsedFields?: ParsedFields | null | undefined;
+    parsedSort: SortField[];
+}): readonly [T[], PaginationMeta];
+declare function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
+/** List-query helpers for drizzle queries: count, options, pagination, projection */
+declare const queryHelpers: {
+    countExtra: typeof countExtra;
+    filterValue: typeof extractFilterValue;
+    filterValues: typeof extractFilterValues;
+    listOptions: typeof drizzleListOptions;
+    paginate: typeof drizzlePaginationResult;
+    project: typeof drizzleProject;
+};
+export { type DrizzleListOptions, queryHelpers };
+
+// query/fields.d.ts
+/**
+ * PostgREST-style sparse fieldset parser.
+ *
+ * Grammar:
+ *   select      := entry ("," entry)*
+ *   entry       := name ( "(" select ")" )?
+ *   name        := /[^,()]+/ (trimmed)
+ *
+ * Rules:
+ * - A name followed by "(" is a relation; the parens contain its own select expression.
+ * - Without trailing "(" the name is a scalar.
+ * - "*" is a valid scalar token at any level; downstream validators expand it.
+ * - "@" prefix marks a computed field (anyrow extension). It is a literal scalar unless
+ *   followed by "(" (no current use case defines a computed relation).
+ *
+ * Examples:
+ *   "id,name"                 → scalars [id, name]
+ *   "*"                       → scalars [*]
+ *   "author(*)"               → relation author with scalars [*]
+ *   "id,author(id,name)"      → scalars [id], relation author with [id, name]
+ *   "author(posts(title))"    → relation author containing relation posts with scalars [title]
+ *   "id,@totalPrice"          → scalars [id, @totalPrice]
+ *
+ * Clean break from legacy "~" prefix + "." dot-path nesting — those characters are
+ * now literal and downstream validators will reject them as unknown field names.
+ */
+import type { FieldSelection, ParsedFields } from "./types.ts";
+declare function parseSelect(selectStr: string | undefined): ParsedFields | null;
+declare function hasRelation(fields: ParsedFields | null, name: string): boolean;
+declare function buildColumns<T extends Record<string, true>>(requestedScalars: string[], availableColumns: T): Partial<T> | undefined;
+declare function getRelationSelection(fields: ParsedFields | null, relationName: string): FieldSelection | null | undefined;
+declare function buildRelationColumns<T extends Record<string, true>>(nestedSelection: FieldSelection | null, availableColumns: T): Partial<T> | undefined;
+declare function hasScalarsRequested(fields: ParsedFields | null, availableScalars: string[]): boolean;
+declare function getEntityColumns<T extends Record<string, true>>(fields: ParsedFields | null, availableColumns: T): Partial<T> | undefined;
+declare function filterBySelect<T extends Record<string, unknown>>(data: T, fields: ParsedFields): Partial<T>;
+export { buildColumns, buildRelationColumns, filterBySelect, getEntityColumns, getRelationSelection, hasRelation, hasScalarsRequested, parseSelect, };
+
+// query/filter.d.ts
+/**
+ * PostgREST-style filters and sort orders: parse and validate. DB-agnostic: no SQL, only
+ * the AST and its checks. The grammar lives in filter-parse.ts, the checks in filter-validate.ts.
+ */
+import { FILTER_OPERATORS, parseFilter } from "./filter-parse.ts";
+import { FILTER_LIMITS, OPERATORS_BY_TYPE, type FilterLimits, type FilterValidationResult, validateFilter } from "./filter-validate.ts";
+import type { SortField } from "./types.ts";
+/**
+ * Parse PostgREST-style `order` string into SortField array.
+ *
+ * Grammar:
+ *   order  := entry ("," entry)*
+ *   entry  := field ("." direction)? ("." nulls)?
+ *   field  := any string not containing "." at the direction/nulls boundary
+ *            (dotted relation paths OK: "author.name.asc")
+ *   direction := "asc" | "desc"        (default "asc" when omitted)
+ *   nulls     := "nullsfirst" | "nullslast"
+ *
+ * Examples:
+ *   "name"                         → [{ field: "name", direction: "asc" }]
+ *   "name.desc"                    → [{ field: "name", direction: "desc" }]
+ *   "name.asc.nullslast"           → [{ field: "name", direction: "asc", nulls: "last" }]
+ *   "col1.desc,col2.asc.nullsfirst"
+ *     → [{field:"col1",direction:"desc"}, {field:"col2",direction:"asc",nulls:"first"}]
+ *
+ * Malformed entries are dropped silently — downstream schema validator
+ * rejects unknown fields, which catches most mistakes.
+ */
+declare function parseOrder(input: string | null | undefined): SortField[];
+export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseOrder, validateFilter, type FilterLimits, type FilterValidationResult, };
+
+// query/like.d.ts
+/**
+ * PostgREST like/ilike: `*` is the wildcard, every other character is literal.
+ *
+ * `ilike` lowers to SQL LIKE (ASCII case-insensitive in SQLite), so LIKE's own
+ * specials `%` and `_` are escaped before `*` expands to `%`.
+ */
+declare function likePattern(value: string): string;
+/**
+ * `like` lowers to SQLite GLOB, which is case-sensitive. GLOB has no escape
+ * character: `?` and `[` are made literal by wrapping them in a one-character
+ * class, and `*` stays the wildcard.
+ */
+declare function globPattern(value: string): string;
+export { globPattern, likePattern };
+
+// meta.d.ts
+/**
+ * The comb meta contract — facts about tables and queries, stamped onto Zod
+ * schemas so they survive the trip to JSON Schema and into an OpenAPI document.
+ *
+ * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
+ * names is the consumer's job. See docs/meta-contract.md.
+ */
+import { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta } from "./meta/contract.ts";
+import { readCombEntityMeta, readCombMeta, readCombQueryMeta } from "./meta/read.ts";
+/**
+ * Build the stamp for a Zod `.meta()` call.
+ *
+ * Stamp the schema you RETURN, not the one you build from — a transform/pipe
+ * does not forward the base's metadata to the output view. See docs §3.1.
+ */
+declare function combMeta(meta: CombEntityMetaInput): CombMetaStamp<CombEntityMeta>;
+declare function combMeta(meta: CombQueryMetaInput): CombMetaStamp<CombQueryMeta>;
+/** Minimal shape of a Zod schema, so this module needs no zod import. */
+type MetaCarrier<T> = {
+    meta: (m: Record<string, unknown>) => T;
+};
+/**
+ * Re-stamp `to` with the facts `from` carries.
+ *
+ * `.extend()` drops registry metadata silently (docs §5), so a consumer who
+ * extends a generated read schema loses the entity facts with no diagnostic.
+ * This is the recovery path.
+ */
+declare function carryCombMeta<T>(from: unknown, to: MetaCarrier<T>): T | null;
+export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, readCombEntityMeta, readCombMeta, readCombQueryMeta, };
+
+// query/schema.d.ts
+/**
+ * Zod schema builders for list/retrieve query validation, and the response meta schema.
+ * Combines filter, sort, fields, and pagination into validated schemas.
+ */
+import * as z from "zod";
+type PaginationResponseSchema = z.ZodObject<{
+    count: z.ZodNullable<z.ZodNumber>;
+    hasMore: z.ZodBoolean;
+    limit: z.ZodNumber;
+    nextCursor: z.ZodNullable<z.ZodString>;
+    page: z.ZodNullable<z.ZodNumber>;
+}, z.core.$strip>;
+/** Pagination response meta schema for list endpoints */
+declare const paginationResponseSchema: PaginationResponseSchema;
+export { createListQuerySchema } from "./list-schema.ts";
+export { createRetrieveQuerySchema } from "./retrieve-schema.ts";
+export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS } from "./schema-limits.ts";
+export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, RetrieveQueryConfig, RetrieveQueryOutput, } from "./schema-types.ts";
+export { paginationResponseSchema };
+
+// query/descriptions.d.ts
+/**
+ * OpenAPI descriptions + examples for list/retrieve query parameters.
+ *
+ * Attached through Zod `.meta({ ... })` so they flow through
+ * z.toJSONSchema({ io: "input" }) into OpenAPI parameters[].schema. Parameters
+ * whose rules differ per endpoint (filter, order, q) are generated from the
+ * same config that validates the request, so the text cannot drift from what
+ * the parser accepts — and stays when a publisher strips `x-*` extensions.
+ */
+import type { FilterLimits } from "./filter.ts";
+import type { FieldType, FilterOperator } from "./types.ts";
+declare const CURSOR_DESCRIPTION = "Opaque cursor for forward pagination. Pass the nextCursor from the previous response with the same order. Takes precedence over page when both are sent.";
+declare const CURSOR_EXAMPLES: string[];
+declare const LIMIT_DESCRIPTION = "Maximum number of items per page. Defaults to 20, capped by the endpoint's maxLimit.";
+declare const LIMIT_EXAMPLES: number[];
+declare const PAGE_DESCRIPTION = "1-based page number for offset pagination. Ignored when cursor is present.";
+declare const PAGE_EXAMPLES: number[];
+declare const LANG_DESCRIPTION = "BCP-47 language tag selecting localized text fields (falls back to default locale when absent).";
+declare const LANG_EXAMPLES: string[];
+declare const SELECT_DESCRIPTION = "PostgREST-style sparse fieldset. Scalars comma-separated; relations embedded as name(fields); wildcard * selects all scalars. Docs: https://docs.postgrest.org/en/stable/references/api/resource_embedding.html";
+declare const SELECT_EXAMPLES: string[];
+type ParamMeta = {
+    description: string;
+    examples: string[];
+};
+declare function filterParamMeta(fields: Record<string, FieldType>, operatorsFor: (type: FieldType) => readonly FilterOperator[], limits: FilterLimits): ParamMeta;
+declare function orderParamMeta(sort: readonly string[], maxSortKeys: number): ParamMeta & {
+    pattern: string;
+};
+declare function searchParamMeta(search: readonly string[], maxTerms: number): ParamMeta;
+export { CURSOR_DESCRIPTION, CURSOR_EXAMPLES, filterParamMeta, LANG_DESCRIPTION, LANG_EXAMPLES, LIMIT_DESCRIPTION, LIMIT_EXAMPLES, orderParamMeta, PAGE_DESCRIPTION, PAGE_EXAMPLES, searchParamMeta, SELECT_DESCRIPTION, SELECT_EXAMPLES, };
+
+// query/translation.d.ts
+/**
+ * Multi-language translation resolution — zero deps.
+ * Picks one translation row by language code: the requested one, else the default, else the first.
+ */
+type TranslationResolverInput<T extends Record<string, unknown>> = {
+    defaultLang: string;
+    fields: string[] | null;
+    lang: string;
+    languageCodeKey?: string;
+    translations: T[];
+};
+declare function resolveTranslation<T extends Record<string, unknown>>(input: TranslationResolverInput<T>): Partial<T> | null;
+export { resolveTranslation, type TranslationResolverInput };
+
+// query/types.d.ts
+/**
+ * Query helper types — DB-agnostic.
+ * Shared by parsers, validators, and DB-specific SQL generators.
+ */
+import type { SQL } from "drizzle-orm";
+type FieldSelection = {
+    relations: Record<string, FieldSelection | null>;
+    scalars: string[];
+};
+type ParsedFields = {
+    root: FieldSelection;
+};
+type FilterOperator = "eq" | "ne" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "nin" | "like" | "ilike" | "is"
+/** Parsed for callers that validate and run it themselves (JSON-array membership); comb's own validator and SQL take none */
+ | "contains";
+type FieldType = "string" | "number" | "boolean" | "date" | "enum";
+type FilterCondition = {
+    field: string;
+    operator: FilterOperator;
+    value: unknown;
+};
+type FilterGroup = {
+    conditions: FilterCondition[];
+    logic: "and" | "or";
+    subgroups: FilterGroup[];
+};
+type FilterAST = {
+    root: FilterGroup;
+};
+type SortDirection = "asc" | "desc";
+type SortNulls = "first" | "last";
+type SortField<T extends string = string> = {
+    direction: SortDirection;
+    field: T;
+    nulls?: SortNulls | undefined;
+};
+type ComputedFilterResolver = (operator: FilterOperator, value: unknown) => SQL | null;
+type ComputedSortResolver = (direction: SortDirection) => SQL;
+type ListQueryCapabilities = {
+    computedFilterFields: Record<string, FieldType>;
+    computedSortFields: Set<string>;
+    filterFields: Record<string, FieldType>;
+    pagination: {
+        defaultLimit: number;
+        maxLimit: number;
+    };
+    relationFilterFields: Record<string, FieldType>;
+    searchFields: Set<string>;
+    sortFields: Set<string>;
+};
+export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ParsedFields, SortDirection, SortField, SortNulls, };
+
+// query/filter-parse.d.ts
+/**
+ * The PostgREST-style filter grammar: a filter string to its AST. Values stay as the request
+ * wrote them; `validateFilter` checks them against the declared field types.
+ *
+ * - `field.op.value`: one condition; `,` joins conditions with AND
+ * - `or(...)`, `and(...)`: groups, nestable
+ * - `in.(a,b)`, `nin.(a,b)`: lists
+ * - `"..."`: a quoted value may hold `,` `(` `)` and `.`; `\"` and `\\` escape inside it
+ * - `@name`: a computed field
+ */
+import type { FilterAST, FilterOperator } from "./types.ts";
+declare const FILTER_OPERATORS: readonly [FilterOperator, ...FilterOperator[]];
+/**
+ * The AST of a filter string, or null when there is none or any part of it cannot be read: a
+ * filter the parser does not fully understand is refused, never reduced to "no filter", which
+ * would widen the result to the whole table on a typo.
+ */
+declare function parseFilter(input: string | null | undefined): FilterAST | null;
+export { FILTER_OPERATORS, parseFilter };
+
+// query/filter-validate.d.ts
+import type { FieldType, FilterAST, FilterOperator } from "./types.ts";
+declare const OPERATORS_BY_TYPE: Record<FieldType, readonly FilterOperator[]>;
+type FilterValidationResult = {
+    ast: FilterAST;
+    valid: true;
+} | {
+    errors: string[];
+    valid: false;
+};
+/** Bounds on one filter expression. Each condition is a predicate SQLite evaluates per row. */
+type FilterLimits = {
+    maxConditions: number;
+    /** Nested or()/and() groups below the top level */
+    maxDepth: number;
+    maxInValues: number;
+    /** Values the whole filter binds, every in/nin member counted: D1 binds at most 100 per statement */
+    maxValues: number;
+};
+declare const FILTER_LIMITS: FilterLimits;
+/**
+ * Parse `filterString` and check it against `allowedFields`: known fields, operators their type
+ * allows, values of their type, within `limits`. Null when there is no filter.
+ */
+declare function validateFilter(filterString: string | null | undefined, allowedFields: Record<string, FieldType>, limits?: Partial<FilterLimits>): FilterValidationResult | null;
+export { FILTER_LIMITS, OPERATORS_BY_TYPE, validateFilter, type FilterLimits, type FilterValidationResult };
+
+// meta/contract.d.ts
+/**
+ * The comb meta contract — facts about tables and queries, stamped onto Zod
+ * schemas so they survive the trip to JSON Schema and into an OpenAPI document.
+ *
+ * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
+ * names is the consumer's job. See docs/meta-contract.md.
+ */
+import type { UniqueIndexMeta } from "../codegen/analyzer-types.ts";
+/** Reserved key. One collision surface, one version field. */
+declare const COMB_META_KEY = "x-comb";
+/**
+ * Contract version. Bumped ONLY on a breaking change — a field removed, or a
+ * field whose meaning changed. Adding a field never bumps it, which is what
+ * lets comb and its consumers ship independently.
+ */
+declare const COMB_META_VERSION = 1;
+type CombMetaKind = "entity" | "query";
+/** Filter grammar comb's parser implements — `field.op.value`. */
+declare const COMB_FILTER_GRAMMAR = "postgrest";
+type CombFilterGrammar = typeof COMB_FILTER_GRAMMAR;
+/** Facts about an entity, derived from its table definition. */
+type CombEntityMeta = {
+    v: number;
+    kind: "entity";
+    /** Entity name — the SQL table name */
+    name: string;
+    /** Primary key / stable identifier column */
+    identity: string;
+    /** Server-assigned: omitted from create bodies, expected in responses */
+    generated: string[];
+    /** Must reject or ignore a mutation */
+    immutable: string[];
+    /** Tombstone column, or null when the entity is hard-deleted */
+    softDelete: string | null;
+    /** Column scoping rows to a tenant, or null when comb cannot know (see docs §6.3) */
+    tenantColumn: string | null;
+    /**
+     * Lifecycle of the entity's state column, or null when none is declared.
+     *
+     * `transitions` is deliberately absent: it is a write-side rule, and
+     * publishing the graph would invite a consumer to drive state by walking it.
+     * See docs/state-machines.md §5.
+     */
+    states: CombStatesMeta | null;
+    /**
+     * Unique indexes declared with `uniqueIndex()`, in the order the analyzer
+     * extracted them. Empty when none. Never inferred from PKs or column names.
+     */
+    uniqueIndexes: UniqueIndexMeta[];
+};
+/** The published subset of a column state machine — describes a lifecycle, not how to drive it. */
+type CombStatesMeta = {
+    column: string;
+    values: string[];
+    initial: string | null;
+    terminal: string[];
+};
+/** One filterable field with the operators its type accepts. */
+type CombFilterField = {
+    field: string;
+    type: string;
+    ops: string[];
+};
+/**
+ * Facts about a list query, derived from the config that parses the request.
+ * Fields marked optional were added after v1 shipped; a v1 reader built before
+ * them ignores them, which is why adding them did not bump `v`.
+ */
+type CombQueryMeta = {
+    v: number;
+    kind: "query";
+    filterable: string[];
+    /** `filterable` with types and operators */
+    filterFields?: CombFilterField[];
+    sortable: string[];
+    /** Null placements every sortable field accepts */
+    nulls?: Array<"first" | "last">;
+    maxFilterConditions?: number;
+    maxFilterDepth?: number;
+    /** Values one filter binds in all, every in/nin member counted */
+    maxFilterValues?: number;
+    maxInValues?: number;
+    /** Whitespace-separated words one `q` may hold */
+    maxSearchTerms?: number;
+    maxSortKeys?: number;
+    /** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */
+    searchable: string[] | null;
+    selectable: string[];
+    maxLimit: number;
+    /** e.g. "created_at.desc" — the order applied when the request names none */
+    defaultOrder: string;
+    /** Tiebreak column for keyset pagination */
+    stableTiebreak: string;
+    grammar: CombFilterGrammar;
+};
+type CombMeta = CombEntityMeta | CombQueryMeta;
+/** Payload accepted by combMeta() — the version is stamped for you. */
+type CombEntityMetaInput = Omit<CombEntityMeta, "v">;
+type CombQueryMetaInput = Omit<CombQueryMeta, "v">;
+type CombMetaInput = CombEntityMetaInput | CombQueryMetaInput;
+/** The object combMeta() produces, ready for `.meta()`. */
+type CombMetaStamp<T extends CombMeta = CombMeta> = {
+    [COMB_META_KEY]: T;
+};
+export { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, };
+
+// meta/read.d.ts
+/**
+ * Reading comb's facts off a JSON Schema. Returns null, never throws: a refused or malformed
+ * payload degrades to "no facts", never to a confident wrong answer. See docs/meta-contract.md §4.
+ */
+import { type CombEntityMeta, type CombMeta, type CombQueryMeta } from "./contract.ts";
+type ReadOptions = {
+    /**
+     * Highest contract version this reader understands. A payload newer than
+     * this is refused rather than partially read — see docs §4.2.
+     * Defaults to the version of the comb build doing the reading.
+     */
+    maxVersion?: number;
+    /** Called instead of throwing when a payload is refused or malformed. */
+    onDiagnostic?: (message: string) => void;
+};
+declare function isRecord(value: unknown): value is Record<string, unknown>;
+/**
+ * Read comb's facts off the ROOT of a JSON Schema.
+ *
+ * Does not unwrap `items` for array schemas — the consumer that already
+ * resolves which schema to read owns that step, so the two cannot disagree.
+ *
+ * Returns null, never throws: a refused or malformed payload must degrade to
+ * "no facts" (which downstream handles as a visible coverage gap), not to a
+ * confident wrong answer.
+ */
+declare function readCombMeta(jsonSchema: unknown, options?: ReadOptions): CombMeta | null;
+/** Narrowing convenience — null when absent, refused, or the other kind. */
+declare function readCombEntityMeta(jsonSchema: unknown, options?: ReadOptions): CombEntityMeta | null;
+/** Narrowing convenience — null when absent, refused, or the other kind. */
+declare function readCombQueryMeta(jsonSchema: unknown, options?: ReadOptions): CombQueryMeta | null;
+export { isRecord, type ReadOptions, readCombEntityMeta, readCombMeta, readCombQueryMeta };
+
+// query/list-schema.d.ts
+/**
+ * The list query schema: validates `filter`, `order`, `cursor`, `page`, `limit` and the optional
+ * params an endpoint declares, and returns them parsed, stamped with the facts it enforces.
+ */
+import * as z from "zod";
+import { baseListQueryShape } from "./schema-params.ts";
+import type { ListQueryConfig, ListQueryOutput, OutputStableShape } from "./schema-types.ts";
+/** The optional params beside cursor, page and limit; each key exists only when advertised */
+type OptionalShape = {
+    order: z.ZodOptional<z.ZodString>;
+    filter?: z.ZodOptional<z.ZodString>;
+    q?: z.ZodOptional<z.ZodString>;
+    lang?: z.ZodOptional<z.ZodString>;
+    select?: z.ZodOptional<z.ZodString>;
+};
+type ListQueryShape = typeof baseListQueryShape & OptionalShape & {
+    limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+};
+type ListQueryInput = z.ZodObject<ListQueryShape, z.core.$strict>;
+/** What createListQuerySchema returns: the strict request object piped into its parsed output */
+type ListQuerySchema<T extends OutputStableShape<T>, TSortField extends string> = z.ZodPipe<ListQueryInput, z.ZodTransform<Awaited<ListQueryOutput<TSortField> & {
+    [K in keyof T]: z.infer<T[K]>;
+}>, z.output<ListQueryInput>>>;
+declare function createListQuerySchema<T extends OutputStableShape<T> = Record<string, never>, const TSortFields extends readonly string[] = readonly string[]>(config: ListQueryConfig<T, TSortFields>): ListQuerySchema<T, TSortFields[number]>;
+export { createListQuerySchema, type ListQuerySchema };
+
+// query/retrieve-schema.d.ts
+/** The single-resource query schema: `select` and `lang`, plus any extension fields. */
+import * as z from "zod";
+import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts";
+type RetrieveShape = {
+    lang: z.ZodOptional<z.ZodString>;
+    select: z.ZodOptional<z.ZodString>;
+};
+type RetrieveInput = z.ZodObject<RetrieveShape, z.core.$strip>;
+/** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
+type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveInput, z.ZodTransform<Awaited<RetrieveQueryOutput & {
+    [K in keyof T]: z.infer<T[K]>;
+}>, z.output<RetrieveInput>>>;
+declare function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<string, never>>(config: RetrieveQueryConfig<T>): RetrieveQuerySchema<T>;
+export { createRetrieveQuerySchema, type RetrieveQuerySchema };
+
+// query/schema-limits.d.ts
+import type { ListQueryLimits } from "./schema-types.ts";
+declare const PAGINATION_DEFAULTS: {
+    readonly defaultLimit: 20;
+    readonly maxLimit: 100;
+};
+declare const LIST_QUERY_LIMITS: ListQueryLimits;
+export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS };
+
+// query/schema-types.d.ts
+/** The configs and outputs of the list and retrieve query schemas. Declaration-only. */
+import type * as z from "zod";
+import type { FilterLimits } from "./filter.ts";
+import type { FieldType, FilterAST, ParsedFields, SortDirection, SortField } from "./types.ts";
+type FieldsConfig = {
+    relations?: readonly string[];
+    relationFields?: Record<string, readonly string[]>;
+    scalars: readonly string[];
+};
+type OutputStableShape<T extends z.ZodRawShape = z.ZodRawShape> = {
+    [K in keyof T]: z.ZodType<z.infer<T[K]>, z.infer<T[K]>>;
+};
+/** Bounds on one list request; `maxFilterLength` is checked before the filter is parsed */
+type ListQueryLimits = FilterLimits & {
+    maxFilterLength: number;
+    maxSearchTerms: number;
+    maxSortKeys: number;
+};
+type PaginationConfig = {
+    defaultLimit?: number;
+    maxLimit?: number;
+};
+type ListQueryConfig<T extends OutputStableShape<T> = Record<string, never>, TSortFields extends readonly string[] = readonly string[]> = {
+    extend?: T;
+    fields?: FieldsConfig;
+    /** Fields `filter` may name. Omitted or empty: the endpoint takes no `filter`. */
+    filter?: Record<string, FieldType>;
+    /** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
+    lang?: true;
+    limits?: Partial<ListQueryLimits>;
+    /**
+     * Fields `q` searches, as published. Omitted: the endpoint takes no `q`.
+     * Declaring it obliges the handler to pass a search resolver to buildListQuery,
+     * which refuses a `q` it cannot apply.
+     */
+    search?: readonly string[];
+    pagination?: PaginationConfig;
+    sort: TSortFields;
+};
+type RetrieveQueryConfig<T extends z.ZodRawShape = z.ZodRawShape> = {
+    extend?: T;
+    fields: FieldsConfig;
+};
+type ListQueryOutput<TSortField extends string = string> = {
+    cursor: string | undefined;
+    filterAst: FilterAST | null;
+    lang: string | undefined;
+    limit: number;
+    page: number | undefined;
+    parsedFields: ParsedFields | null;
+    parsedSort: Array<SortField<TSortField>>;
+    q: string | undefined;
+    sortOrderBy: Partial<Record<TSortField, SortDirection>>;
+};
+type RetrieveQueryOutput = {
+    lang: string | undefined;
+    parsedFields: ParsedFields | null;
+};
+export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, OutputStableShape, PaginationConfig, RetrieveQueryConfig, RetrieveQueryOutput, };
+
+// codegen/analyzer-types.d.ts
+/**
+ * TableMeta — serializable intermediate format produced by TableAnalyzer.
+ * No ts-morph or Drizzle dependencies. All generators consume this.
+ */
+/** Constraint annotations parsed from field type arguments */
+type FieldConstraintsMeta = {
+    autogenerate: boolean;
+    email: boolean;
+    lowercase: boolean;
+    max: number | null;
+    maxBytes: number | null;
+    min: number | null;
+    nomutate: boolean;
+    password: boolean;
+    pattern: string | null;
+    private: boolean;
+    tenant: boolean;
+    trim: boolean;
+    uppercase: boolean;
+    url: boolean;
+};
+/** State machine declared on an enum column */
+type StateMachineMeta = {
+    initial: string | null;
+    terminal: string[] | null;
+    transitions: Record<string, string[]> | null;
+};
+/** A name a generated file must import, with the module the tables file gets it from. */
+type ImportRef = {
+    /** the module specifier as the tables file writes it */
+    from: string;
+    /** the exported name (`*` for a namespace import, `default` for a default import) */
+    imported: string;
+    /** the local name the tables file uses */
+    name: string;
+    /** the module's file when it is in the project; null for a package */
+    path: string | null;
+};
+/** Foreign key reference from this field to another table */
+type ForeignKeyRef = {
+    column: string;
+    onDelete?: string | undefined;
+    onUpdate?: string | undefined;
+    refColumn: string;
+    refTable: string;
+};
+/** A single column/field in a table */
+type FieldMeta = {
+    constraints: FieldConstraintsMeta;
+    /** Drizzle helper: "text", "integer", "boolean", "timestamp", "createdAt", etc. */
+    drizzleHelper: string;
+    /** Enum constant name if .$type<(typeof X)[number]> or c.enum("name", X) */
+    enumName: string | null;
+    /** Inline enum values if c.enum("name", ["a", "b"]), null if const ref */
+    enumValues: string[] | null;
+    /** State machine declared as c.enum's third argument, null when absent */
+    states: StateMachineMeta | null;
+    /** FK reference if .references(() => table.column) */
+    foreignKey: ForeignKeyRef | null;
+    /** Whether .notNull() is present */
+    isNotNull: boolean;
+    /** Whether .primaryKey() or c.id("prefix") */
+    isPrimaryKey: boolean;
+    /** the schema expression of c.json(name, schema), as written */
+    jsonSchemaName: string | null;
+    /** the names the field's generated schema uses and must import (schemas, unreadable enum consts) */
+    schemaImports: ImportRef[];
+    /** Length from positional arg or constraints */
+    length: number | null;
+    /** Field name as defined in the table schema object */
+    name: string;
+    /** The column's SQL name: what the engine reports in errors and what DDL and triggers name */
+    sqlName: string;
+    /** Full raw text of the initializer expression */
+    raw: string;
+};
+/** Unique index from table options (3rd arg arrow function) */
+type UniqueIndexMeta = {
+    columns: string[];
+    name: string;
+};
+/** Check constraint from table options */
+type CheckConstraintMeta = {
+    expression: string;
+    name: string;
+};
+/** Timestamp tracking for a table */
+type TimestampsMeta = {
+    createdAt: boolean;
+    deletedAt: boolean;
+    style: "camelCase" | "snake_case";
+    updatedAt: boolean;
+};
+/** Complete metadata for a single table */
+type TableMeta = {
+    /** Check constraints from table options */
+    checkConstraints: CheckConstraintMeta[];
+    /** All fields in the table */
+    fields: FieldMeta[];
+    /** Whether composite PK exists in table options */
+    hasCompositePrimaryKey: boolean;
+    /** Entity ID prefix from c.id("prefix"), null if c.serialId() or missing */
+    idPrefix: string | null;
+    /** SQL table name (first arg to createTable) */
+    sqlName: string;
+    /** Detected timestamp fields and style */
+    timestamps: TimestampsMeta;
+    /** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, never published as uniqueness */
+    partialUniqueIndexes: UniqueIndexMeta[];
+    /** Unique indexes from table options */
+    uniqueIndexes: UniqueIndexMeta[];
+    /** Variable name (export const X = createTable...) */
+    varName: string;
+};
+/** Imports discovered during analysis */
+type ImportsMeta = {
+    /** Enum constant name -> module path */
+    enumImports: Map<string, string>;
+    /** All imported identifiers -> module path */
+    identifiers: Map<string, string>;
+    /** JSON schema names referenced by c.json() */
+    jsonSchemaImports: Set<string>;
+    /** `"identifier.PROPERTY"` → the string an imported constant holds, for constraint references */
+    identifierValues: Map<string, string>;
+};
+/** Full analysis result */
+type AnalysisResult = {
+    /** Database name derived from tables file path */
+    dbName: string;
+    imports: ImportsMeta;
+    tables: TableMeta[];
+    /** Relative import path for the tables file */
+    tablesImportPath: string;
+};
+export type { ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };
+
+// query/schema-params.d.ts
+/** The zod pieces the list and retrieve query schemas share: request params and parsed outputs. */
+import * as z from "zod";
+import type { PaginationConfig } from "./schema-types.ts";
+import type { FilterAST, ParsedFields } from "./types.ts";
+declare const selectQueryField: z.ZodOptional<z.ZodString>;
+declare const langQueryField: z.ZodOptional<z.ZodString>;
+declare const baseListQueryShape: {
+    cursor: z.ZodOptional<z.ZodString>;
+    page: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+};
+declare const parsedFieldsSchema: z.ZodType<ParsedFields, ParsedFields>;
+declare const filterAstSchema: z.ZodType<FilterAST, FilterAST>;
+declare const sortDirectionEnum: z.ZodEnum<{
+    asc: "asc";
+    desc: "desc";
+}>;
+/** The `limit` param for this pagination; the shared default instance when it is the default */
+declare function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+/** The values of `extendFields`' keys in `data`; `{}` without extensions */
+declare function pickExtended<T extends Record<string, z.ZodType>>(extendFields: T | undefined, data: Record<string, unknown>): {
+    [K in keyof T]: z.infer<T[K]>;
+};
+export { baseListQueryShape, filterAstSchema, langQueryField, limitSchemaFor, parsedFieldsSchema, pickExtended, selectQueryField, sortDirectionEnum, };
