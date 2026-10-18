@@ -28,7 +28,7 @@ class BookmarkTracker {
 					bookmarks.push({ bookmark, tag })
 				}
 			} catch {
-				/* session may not have committed — skip */
+				// reason: a session that never committed has no bookmark to hand on; the others still do
 			}
 		}
 		return bookmarks

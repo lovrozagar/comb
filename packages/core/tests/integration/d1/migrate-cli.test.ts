@@ -77,3 +77,33 @@ describe("migrate apply on D1, --local (S-13, plan 5.4)", () => {
 		expect(check.outputs.join("\n")).toContain("Apply: 20260101000000_bad.sql")
 	}, 120_000)
 })
+
+describe("migrate baseline on D1, --local", () => {
+	it("records every migration as applied without running it, so apply then skips it", async () => {
+		const dir = project({ "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" })
+		const baseline = io(dir, wrangler(dir))
+		expect(await runCli(["migrate", "baseline", "core", "--local"], baseline)).toBe(0)
+		expect(baseline.outputs.join("\n")).toContain("Marked applied: 20260101000000_init.sql")
+
+		const apply = io(dir, wrangler(dir))
+		expect(await runCli(["migrate", "apply", "core", "--local"], apply)).toBe(0)
+		expect(apply.outputs.join("\n")).toContain("Skip (already applied): 20260101000000_init.sql")
+
+		/* the SQL itself never ran: the table it creates is absent */
+		const tables = run(
+			process.execPath,
+			[
+				WRANGLER,
+				"d1",
+				"execute",
+				"core",
+				"--local",
+				"--json",
+				"--command=SELECT name FROM sqlite_master WHERE type = 'table'",
+			],
+			{ cwd: dir },
+		)
+		expect(tables.stdout).not.toContain('"post"')
+		expect(tables.stdout).toContain("__drizzle_migrations")
+	}, 120_000)
+})
