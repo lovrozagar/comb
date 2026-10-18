@@ -33,18 +33,18 @@ packages/core/
 
 `bun run verify` runs each gate in order, stops at the first failure, and stamps the commit when all pass; it refuses a dirty tree. pre-push refuses any commit without a stamp.
 
-| Gate               | Runs                                                                        | In CI                          |
-| ------------------ | --------------------------------------------------------------------------- | ------------------------------ |
-| `fmt:check`        | oxfmt over the tree                                                         | `check`                        |
-| `lint`             | oxlint with the comb plugin, every rule at `error`                          | `check`                        |
-| `typecheck`        | `tsc --noEmit` over `src`, `tests` and `lint`, the type tests included      | `check`                        |
-| `test`             | vitest projects `unit` and `integration`                                    | `test`, as `test:coverage`     |
-| `typecheck:strict` | `tsc -p tsconfig.strict.json` over `src` with every flag a consumer may set | `check`                        |
-| `test:bun`         | `bun test tests/bun`, with its own coverage gate                            | `test`                         |
-| `test:e2e`         | `vitest.e2e.config.ts`: needs `atlas` and `wrangler` on `PATH`              | `e2e`                          |
-| `test:consumers`   | `vitest.consumers.config.ts`: needs the npm registry                        | `consumers`, Node 22.12 and 24 |
+| Gate               | Runs                                                                                                | In CI                          |
+| ------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `fmt:check`        | oxfmt over the tree                                                                                 | `check`                        |
+| `lint`             | oxlint with the comb plugin, every rule at `error`                                                  | `check`                        |
+| `typecheck`        | `tsc --noEmit` over `src`, `tests` and `lint`, the type tests included                              | `check`                        |
+| `test`             | vitest projects `unit` and `integration`                                                            | `test`, as `test:coverage`     |
+| `typecheck:strict` | `tsc -p tsconfig.strict.json` over `src` with every flag a consumer may set                         | `check`                        |
+| `test:bun`         | `bun test tests/bun`, with its own coverage gate                                                    | `test`                         |
+| `test:e2e`         | `vitest.e2e.config.ts`: needs `atlas` and `wrangler` on `PATH`, and `COMB_TEST_PG_URL` for Postgres | `e2e`, with a Postgres service |
+| `test:consumers`   | `vitest.consumers.config.ts`: needs the npm registry                                                | `consumers`, Node 22.12 and 24 |
 
-The e2e suites (`sqlite`, `d1`, `fts`) run the real binary under bun against a scratch app: `migrate diff` through real Atlas and drizzle-kit, `migrate apply` to libsql and to D1 through `wrangler --local`, and `codegen`. The consumer cells pack comb, install the tarball into a fresh project twice (required peers only, then every peer, each at comb's peer range), import every subpath under bun and `tsx`, bundle with Vite and wrangler, and compile every subpath with `tsc` in a `bundler` and a `nodenext` project.
+The e2e suites (`sqlite`, `d1`, `fts`, `postgres`) run the real binary under bun against a scratch app: `migrate diff` through real Atlas and drizzle-kit, `migrate apply` to libsql, to D1 through `wrangler --local`, and to Postgres through Atlas, `migrate status`, and `codegen`. `postgres.e2e.test.ts` makes its target and dev databases on `COMB_TEST_PG_URL` and drops them; it skips without the URL locally and fails without it in CI. The consumer cells pack comb, install the tarball into a fresh project twice (required peers only, then every peer, each at comb's peer range), import every subpath under bun and `tsx`, bundle with Vite and wrangler, and compile every subpath with `tsc` in a `bundler` and a `nodenext` project.
 
 ## Mutation harness
 
@@ -59,16 +59,19 @@ A new guard gets a `GUARDS` entry and a case in the security suite in the same c
 
 ## Harnesses
 
-| Harness                  | File                                  | Engine                                                                                                  |
-| ------------------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `libsqlMemory()`         | `tests/integration/support/libsql.ts` | in-process SQLite on `@libsql/client` `:memory:`, with drizzle                                          |
-| `d1Memory()`             | `tests/integration/support/d1.ts`     | Miniflare (workerd): D1 bound as `CORE`, KV bound as `KV`; call `dispose()`                             |
-| `describePg` / `usePg()` | `tests/integration/support/pg.ts`     | a real Postgres server through node-postgres and postgres.js; fresh sessions per test, TEMP tables only |
+| Harness                  | File                                  | Engine                                                                                                                                                |
+| ------------------------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `libsqlMemory()`         | `tests/integration/support/libsql.ts` | in-process SQLite on `@libsql/client` `:memory:`, with drizzle                                                                                        |
+| `d1Memory()`             | `tests/integration/support/d1.ts`     | Miniflare (workerd): D1 bound as `CORE`, KV bound as `KV`; call `dispose()`                                                                           |
+| `describePg` / `usePg()` | `tests/integration/support/pg.ts`     | a real Postgres server through node-postgres and postgres.js; fresh sessions per test, TEMP tables only                                               |
+| `withScratchDb(run)`     | `tests/integration/support/pg.ts`     | a whole database made for `run` on that server and dropped after it (`WITH (FORCE)`), for Atlas, which needs a clean database rather than TEMP tables |
 
-| Variable           | Effect                                                                                                                                                                                                                                               |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `COMB_TEST_PG_URL` | The Postgres server for the Postgres suites and the Bun.SQL parity case. Unset locally: those suites skip and the run prints why. Unset with `CI` set: the run fails, because CI requires them. Example: `postgres://lovro@127.0.0.1:5432/postgres`. |
-| `COMB_MUTANT`      | The guard id the security suite disables (see [Mutation harness](#mutation-harness)). Unset or empty: every guard stays in place.                                                                                                                    |
+| Variable           | Effect                                                                                                                                                                                                                                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `COMB_TEST_PG_URL` | The Postgres server for the Postgres suites and the Bun.SQL parity case. Unset locally: those suites skip and the run prints why. Unset with `CI` set: the run fails, because CI requires them. Example: `postgres://lovro@127.0.0.1:5432/postgres?sslmode=disable`; Atlas reads it through lib/pq, which wants TLS unless told otherwise. |
+| `COMB_MUTANT`      | The guard id the security suite disables (see [Mutation harness](#mutation-harness)). Unset or empty: every guard stays in place.                                                                                                                                                                                                          |
+
+The Postgres migrate suites run the real Atlas against scratch databases: `atlas-classify.test.ts` classifies Atlas's own output for each kind of change in both URL scopes, `migrate-diff.test.ts` diffs, applies each result to a scratch target and diffs again (views, policies, an extension type on a persistent dev database, enums, a non-public schema, and `docker://postgres/17/dev` where `docker info` succeeds), and `migrate-apply.test.ts` applies, baselines and reports through `applyWithAtlas`, held locks and lock timeouts included.
 
 Postgres runs on a real server rather than an emulator because the error handler reads driver error shapes (`code`, `constraint` vs `constraint_name`, Bun.SQL's `errno`), which only real drivers produce.
 

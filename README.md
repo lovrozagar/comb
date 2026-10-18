@@ -30,6 +30,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Migrations](#migrations)
   - [Config and providers](#config-and-providers)
   - [Diff and apply](#diff-and-apply)
+  - [Postgres](#postgres)
   - [SQLite transforms](#sqlite-transforms)
 - [Query layer](#query-layer)
   - [Filter grammar](#filter-grammar)
@@ -48,6 +49,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.7.0](#upgrading-to-070)
 - [Upgrading to 0.6.1](#upgrading-to-061)
 - [Upgrading to 0.6.0](#upgrading-to-060)
 - [Upgrading to 0.5.0](#upgrading-to-050)
@@ -227,22 +229,12 @@ Config mode reads `comb.config.ts` (or `.js`) from the working directory. Direct
 
 ### `comb migrate`
 
-```
-comb migrate — database migration toolkit
+| Dialect                          | `diff` writes the next migration with                                                       | `apply` and `baseline` run through                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| SQLite, libsql, Turso, D1        | Atlas on an in-memory SQLite, plus comb's FTS5 part                                         | comb: each file and its hash in one batch, recorded in `__drizzle_migrations`                        |
+| Postgres (plain, Neon, Supabase) | Atlas on the dev database, plus comb's part for what Atlas OSS refuses (views, policies, …) | Atlas, after comb snapshots, classifies and approves each file; recorded in `atlas_schema_revisions` |
 
-COMMANDS:
-  init                              Generate drizzle.config.ts + atlas.hcl
-  diff <db> [name]                  Generate incremental migration from schema diff
-  apply <d1-name> [--dir <path>]    Apply pending migrations to a D1 database
-  apply <d1-name> --file <path>     Apply a single migration file (still hash-tracked)
-  baseline <d1-name> [--dir <path>] Record migrations as applied WITHOUT running their SQL
-
-OPTIONS:
-  --dir <path>                      Migrations directory (default: ./atlas-migrations)
-  --file <path>                     Single migration file to apply
-```
-
-`init` scaffolds `drizzle.config.ts`, `atlas.hcl`, and `atlas-migrations/`. `baseline` is the escape hatch for adopting Comb on a database that already has the schema: it fills `__drizzle_migrations` with the hashes without executing anything.
+`init` scaffolds `drizzle.config.ts`, `atlas.hcl` and `atlas-migrations/`; `init --dialect postgres` adds a `comb.migrate.config.ts` whose URL comes from `DATABASE_URL`, and no file holds a credential. `baseline` is the escape hatch for adopting Comb on a database that already has the schema: it records every migration as applied without running any. `status` lists a Postgres database's applied and pending migrations.
 
 ## Columns
 
@@ -482,6 +474,35 @@ export default defineConfig({
 
 The config is Zod-validated, so a typo fails at load rather than at apply. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`org`, `apiToken`, `group`), `d1` (`databaseId`, `databaseName`), `postgres` (`url`, with `devUrl`, `schema` and `lockTimeout` defaulting to `docker://postgres/17/dev`, `public` and `5s`). There is no `neon` type: a Neon or Supabase database is a `postgres` URL. `environments` overrides the provider per `-e` flag, and every environment of a database has its dialect. `migrationsDir` and `drizzleConfigPath` are read relative to the config file, by `diff` as by `apply`.
 
+A Postgres database is a URL, with the dev database Atlas replays migrations on beside it:
+
+```ts
+/* comb.migrate.config.ts */
+import { defineConfig } from "@lovrozagar/comb/migrate"
+
+export default defineConfig({
+	databases: {
+		analytics: {
+			migrationsDir: "./pg-migrations",
+			drizzleConfigPath: "./drizzle.pg.ts",
+			provider: {
+				type: "postgres",
+				/* direct, not pooled, and verified: Neon's host without -pooler, Supabase's direct or session port 5432 */
+				url: process.env["DATABASE_URL"] ?? "",
+				devUrl: process.env["ATLAS_DEV_URL"] ?? "docker://postgres/17/dev",
+				schema: "public",
+				lockTimeout: "5s",
+			},
+		},
+	},
+})
+```
+
+- `url` reaches comb's Atlas runs only through their environment, never the command line, and comb checks it first: an unescaped `#`, `/`, `?` or `@` in the password is refused by field name, and every line of Atlas output comb relays is scrubbed of passwords and secret query values. `PG*` variables in your shell (`PGSSLMODE`, `PGPASSWORD`) are ignored, so the config is the only connection. comb warns when a remote host has no `sslmode=verify-full` or `require`, and on a Neon `-pooler` host or Supabase's port 6543: a transaction pooler drops the session lock Atlas holds.
+- `devUrl` is an empty database Atlas may wipe; it must not be `url`. The default, `docker://postgres/17/dev`, needs Docker; match its major version to your server.
+- `schema` is the one schema comb migrates. Both URLs are scoped to it (`search_path`), and Atlas keeps its history in `atlas_schema_revisions`, outside it. An object the drizzle schema puts in another schema, a Supabase `auth.users` reference included, is an error. A schema other than `public` must exist on both databases, and your app's `search_path` must match.
+- `lockTimeout` bounds how long a statement waits for a lock (`0` for no bound), so an `ALTER` behind a long reader fails instead of queueing every later query. comb sets no `statement_timeout`; add one to the URL's `options` if you want it.
+
 `loadConfig()`, `resolveDatabaseConfig()`, and `createProvider()` turn that into a `ConnectionProvider`. Each provider exposes the same `Connection` interface, and the SQLite introspection reads it: `introspectSqliteSchema`, `getSqliteTables`, `getSqliteColumns`, `getSqliteIndexes`.
 
 A `multiTenant` block fans a migration out across every tenant database returned by `tenantQuery` against `rootDatabase`, bounded by `concurrency` and guarded by the `circuitBreaker` thresholds (`failureThreshold`, `minSampleSize`).
@@ -500,7 +521,7 @@ FTS5 tables stay out of what Atlas sees, because its dev SQLite has no fts5 modu
 
 A migration's hash is its SQL with comments and layout normalized away, never the text inside a literal. Files recorded under the pre-0.5.0 hash, which stripped `--` even inside literals, still count as applied (`migrationHashes()`, `checkMigrationHash()`).
 
-`apply <db>` takes its database from `comb.migrate.config.ts` when the project has one: `-e/--env` picks the environment, whose provider (any of them, D1 included) supplies the connection, and `migrationsDir` is read relative to the config file. Without a migrate config, `<db>` is a D1 database name, remote by default and local with `--local`. Then, per migration file in name order (or the one `--file` names):
+`apply <db>` takes its database from `comb.migrate.config.ts` when the project has one: `-e/--env` picks the environment, whose provider supplies the connection, and `migrationsDir` is read relative to the config file. Without a migrate config, `<db>` is a D1 database name, remote by default and local with `--local`. A Postgres database goes through Atlas ([Postgres](#postgres)); on SQLite, libsql, Turso and D1 comb applies, per migration file in name order (or the one `--file` names):
 
 1. Ensures `__drizzle_migrations` exists.
 2. Skips the file if its hash, current or pre-0.5.0, is already recorded.
@@ -516,6 +537,22 @@ A migration's hash is its SQL with comments and layout normalized away, never th
 `baseline <db>` records every file as applied without running it, for a database whose schema was set up out of band.
 
 Backup tables (`createBackupTables()`), schema verification (`verifySchema()`, `applyMigration()`) and the circuit breaker (`createCircuitBreaker()` and its checks) are library APIs for your own runners, such as a multi-tenant fan-out; the CLI does not use them, because one atomic batch per file already leaves nothing half-applied.
+
+### Postgres
+
+`diff` exports the drizzle schema with the database's `drizzleConfigPath` and hands Atlas the rest, on the dev database, scoped to `schema`. Atlas OSS refuses views, materialized views, policies, sequences, roles and extensions, so comb keeps them out of what Atlas replays and diffs and writes their part of the migration itself, around Atlas's statements:
+
+- first, new extensions (`CREATE EXTENSION IF NOT EXISTS`), roles and sequences, since a table may use them, and a changed sequence `ALTER SEQUENCE`d in place, never dropped (that would restart it);
+- then the drops of every changed or removed view and policy, and of each one over a table Atlas alters, since Postgres refuses to retype a column a view or policy reads; a view over a dropped view goes first;
+- after Atlas's statements, those views and policies created again from the schema, and removed sequences dropped.
+
+Roles and extensions are never dropped: they outlive one schema. A column of an extension's type (`citext`, `vector`, PostGIS) needs a persistent `devUrl` database where you created the extension, plus a migration of your own with `CREATE EXTENSION IF NOT EXISTS …` for the target; `docker://` starts empty, so it cannot load such a type.
+
+An enum value Atlas adds goes into a file of its own a version earlier, since Postgres refuses to use a value added in the same transaction (55P04). Atlas cannot drop an enum value; comb says how to write that migration by hand. `CREATE INDEX CONCURRENTLY` needs its own file starting with `-- atlas:txmode none` and a blank line: Atlas honors a directive only with that blank line, and otherwise runs the file in one transaction, where the index fails. Every file comb writes keeps Atlas's directives first that way.
+
+`apply` works on a private copy of the migrations directory, checked against `atlas.sum`, so what Atlas runs is exactly what comb read. It asks Atlas for its status and stops at any error, and at a file older than the latest applied one, which Atlas would skip without a word; a file Atlas ran halfway outside a transaction resumes only if unchanged, since Atlas resumes it by statement count. A dry run comes next, so a database that has objects but no history is told to `baseline` before anyone is asked. Each pending file is then classified and approved as on SQLite (unsafe: a yes on a terminal or `-- comb:allow-unsafe: <reason>`; cautious: `--yes` too), with lock warnings for statements that block a table: a non-concurrent index on an existing table, a volatile default, a scanning constraint without `NOT VALID`, a retype. Atlas then applies each file in its own transaction and records it; a failed file is named with its statement, and the files before it stay applied. Atlas holds a lock while it applies, so two applies never run at once. `--file` and `--local` do not apply to Postgres.
+
+`baseline <db>` records every file up to the directory's latest as applied without running any, and refuses a database that already records migrations. `status <db>` lists applied and pending files and warns of an applied file edited since, which Atlas never runs again. Atlas prints every statement it runs, so keep secrets out of data migrations; take a snapshot (a PITR point, a Neon branch) before an unsafe apply, and prefer expand-and-contract to renames and drops in one deploy.
 
 ### SQLite transforms
 
@@ -876,6 +913,17 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 `tests/bun/` is separate because it imports `bun:sqlite` and `bun:test`, which vitest cannot load. It replays a full Atlas-shaped drift migration against an in-memory database to prove the SQLite transforms survive a real commit with foreign keys enforced.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
+
+## Upgrading to 0.7.0
+
+0.7.0 migrates Postgres: `comb migrate init --dialect postgres`, `diff`, `apply`, `baseline` and the new `status` work on a `postgres` provider through Atlas ([Postgres](#postgres)). SQLite, libsql, Turso and D1 work as before. What changes for code that uses the API:
+
+- `ProviderConfig` is `ConnectionProviderConfig | PostgresProviderConfig`, and `createProvider()` takes a `ConnectionProviderConfig`: narrow on `type !== "postgres"` before you call it. `ResolvedDatabaseConfig.provider` carries the Postgres provider with its defaults filled in (`ResolvedPostgresProviderConfig`, `DEFAULT_PG_DEV_URL`).
+- `generateSchemaDiff()` and `generateIncrementalMigration()` take a `target` (`devUrl`, `schema`, `lockTimeout`) on Postgres and refuse to run without one; the hard-coded `postgres://localhost:5432/dev` is gone.
+- `exportDrizzleSchema()` takes `configPath` and, on Postgres, `schema`: it drops that schema's `CREATE SCHEMA` and refuses an object in another one.
+- `migrate diff` reads `comb.migrate.config.ts` for the database's directory and drizzle config; it wrote to `./atlas-migrations` whatever the config said.
+
+A database you migrated with `drizzle-kit migrate` under 0.6.0 moves over in three steps: point `migrationsDir` at a new, empty directory; run `comb migrate diff <db> baseline`, which writes the whole current schema as one migration; then `comb migrate baseline <db>` records it as applied without running it. From there, `diff` and `apply` take over; drizzle-kit's own history table is no longer read.
 
 ## Upgrading to 0.6.1
 
