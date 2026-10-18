@@ -50,7 +50,9 @@ describe("CombError", () => {
 		expect(err).toBeInstanceOf(Error)
 		expect(err).toBeInstanceOf(CombError)
 	})
+})
 
+describe("CombError status", () => {
 	it("maps all status keys correctly", () => {
 		const cases: Array<[string, number]> = [
 			["bad_request", 400],

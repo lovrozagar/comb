@@ -110,9 +110,10 @@ describe("buildFtsHighlight", () => {
 	})
 })
 
-describe("buildFtsWhereWithSpellfix", () => {
-	const spellfixDb = (rows: Array<{ word: string }>) => ({ all: async () => rows })
+/** A spellfix database stub that answers every lookup with the given rows */
+const spellfixDb = (rows: Array<{ word: string }>) => ({ all: async () => rows })
 
+describe("buildFtsWhereWithSpellfix", () => {
 	it("returns null for empty or whitespace-only input", async () => {
 		expect(
 			await buildFtsWhereWithSpellfix(spellfixDb([]), { ftsTable: "f", idColumn: "id", spellfixTable: "s" }, null),
@@ -151,7 +152,9 @@ describe("buildFtsWhereWithSpellfix", () => {
 		await buildFtsWhereWithSpellfix(db, { ftsTable: "item_fts", idColumn: "id", spellfixTable: "sp" }, "ab")
 		expect(called).toBe(0)
 	})
+})
 
+describe("buildFtsWhereWithSpellfix — corrections, fallback and binding", () => {
 	it("drops a correction identical to the term, case-insensitively", async () => {
 		const built = await buildFtsWhereWithSpellfix(
 			spellfixDb([{ word: "hello" }]),

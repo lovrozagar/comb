@@ -70,7 +70,9 @@ describe("sqlite columns", () => {
 		})
 		expect(getTableColumns(table).status).toHaveProperty("dataType", "string")
 	})
+})
 
+describe("sqlite timestamp columns", () => {
 	it("c.timestamp returns integer column", () => {
 		expect(cols.ts).toHaveProperty("dataType", expect.stringContaining("number"))
 	})

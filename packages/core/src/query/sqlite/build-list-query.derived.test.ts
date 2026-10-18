@@ -105,10 +105,11 @@ describe("buildDerivedListQuery — ordering", () => {
 	})
 })
 
-describe("buildDerivedListQuery — cursor predicates across NULLs", () => {
-	const cursorFor = (value: unknown, direction: "asc" | "desc") =>
-		createCursor({ id: "d_9", published_at: value }, [{ direction, field: "published_at" }])
+/** A cursor positioned at row d_9 with the given published_at, sorted in one direction */
+const cursorFor = (value: unknown, direction: "asc" | "desc") =>
+	createCursor({ id: "d_9", published_at: value }, [{ direction, field: "published_at" }])
 
+describe("buildDerivedListQuery — cursor predicates across NULLs", () => {
 	it("descending, non-null: walks strictly backwards with an id tiebreak", () => {
 		const result = buildDerivedListQuery({
 			...base,

@@ -40,6 +40,30 @@ describe("LruCache", () => {
 		expect(cache.get("b")).toBeUndefined()
 	})
 
+	it("delete removes entry", () => {
+		const cache = new LruCache<string, number>({ maxSize: 10 })
+		cache.set("a", 1)
+		expect(cache.delete("a")).toBe(true)
+		expect(cache.get("a")).toBeUndefined()
+	})
+
+	it("clear empties cache", () => {
+		const cache = new LruCache<string, number>({ maxSize: 10 })
+		cache.set("a", 1)
+		cache.set("b", 2)
+		cache.clear()
+		expect(cache.size).toBe(0)
+	})
+})
+
+describe("LruCache TTL", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
 	it("expires entries after soft TTL", () => {
 		const cache = new LruCache<string, number>({ maxSize: 10, ttlMs: 1000 })
 		cache.set("a", 1)
@@ -78,20 +102,14 @@ describe("LruCache", () => {
 		expect(cache.get("a")).toBeUndefined()
 		expect(cache.size).toBe(0)
 	})
+})
 
-	it("delete removes entry", () => {
-		const cache = new LruCache<string, number>({ maxSize: 10 })
-		cache.set("a", 1)
-		expect(cache.delete("a")).toBe(true)
-		expect(cache.get("a")).toBeUndefined()
+describe("LruCache TTL — has and per-key overrides", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
 	})
-
-	it("clear empties cache", () => {
-		const cache = new LruCache<string, number>({ maxSize: 10 })
-		cache.set("a", 1)
-		cache.set("b", 2)
-		cache.clear()
-		expect(cache.size).toBe(0)
+	afterEach(() => {
+		vi.useRealTimers()
 	})
 
 	it("has returns false for expired entries", () => {

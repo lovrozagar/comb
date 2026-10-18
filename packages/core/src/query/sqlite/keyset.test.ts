@@ -49,7 +49,9 @@ describe("keysetSQL", () => {
 		expect(after.sql).toBe('(("post"."score" > ?) or ((("post"."score" = ?) and ("post"."id" < ?))))')
 		expect(after.params).toEqual([3, 3, "p_5"])
 	})
+})
 
+describe("keysetSQL — null placement", () => {
 	it("reads rows after a null: non-null values follow only when nulls sort first", () => {
 		const first = compile(
 			keysetSQL({

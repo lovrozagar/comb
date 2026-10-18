@@ -67,6 +67,12 @@ describe("pg columns", () => {
 		expect(getTableColumns(table).status).toHaveProperty("dataType", "string")
 	})
 
+	it("c.json returns jsonb column", () => {
+		expect(cols.data).toHaveProperty("dataType", expect.stringContaining("json"))
+	})
+})
+
+describe("pg timestamp columns", () => {
 	it("c.timestamp returns integer column", () => {
 		expect(cols.ts).toHaveProperty("dataType", expect.stringContaining("number"))
 	})
@@ -92,9 +98,5 @@ describe("pg columns", () => {
 	it("c.deletedAt returns nullable integer", () => {
 		expect(cols.deletedAt).toHaveProperty("dataType", expect.stringContaining("number"))
 		expect(cols.deletedAt).toHaveProperty("notNull", false)
-	})
-
-	it("c.json returns jsonb column", () => {
-		expect(cols.data).toHaveProperty("dataType", expect.stringContaining("json"))
 	})
 })

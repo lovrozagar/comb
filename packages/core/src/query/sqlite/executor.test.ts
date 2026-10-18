@@ -97,7 +97,9 @@ describe("conditionToSQL", () => {
 		expect(params).toEqual(["\\%"])
 		expect(sql.toLowerCase()).toContain("escape")
 	})
+})
 
+describe("conditionToSQL — null checks and rejections", () => {
 	it("lowers is.null and is.notnull to null checks with no bindings", () => {
 		const isNull = compile(conditionToSQL(cond("status", "is", null), post.status))
 		expect(isNull.sql.toLowerCase()).toContain("is null")
@@ -167,6 +169,10 @@ describe("filterToSQL", () => {
 			CombError,
 		)
 	})
+})
+
+describe("filterToSQL — prototype names, subgroups and computed fields", () => {
+	const config = { mainTable: post }
 
 	it("does not resolve a field through the prototype chain (Q-L3)", () => {
 		expect(() => filterToSQL(ast([cond("toString", "is", null)]), config)).toThrow(CombError)
@@ -245,6 +251,10 @@ describe("sortToOrderBy", () => {
 		expect(compile(built[0]!).sql).toContain("title")
 		expect(compile(built[1]!).sql).toContain("created_at")
 	})
+})
+
+describe("sortToOrderBy — dropped and computed fields", () => {
+	const config = { capabilities: capabilities(), table: post }
 
 	it("drops a permitted field that is not a column, including a prototype name (Q-L3)", () => {
 		const permitted = {

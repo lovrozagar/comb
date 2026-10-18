@@ -18,22 +18,43 @@ const organization = sqliteTable("organization", {
 	status: text("status").notNull(),
 })
 
-describe("buildListQuery", () => {
+type ListParsed = Parameters<typeof buildListQuery>[0]["parsed"]
+
+/** The offset-paginated first page every field spelled out, for tests to override */
+const offsetPage: ListParsed = {
+	cursor: undefined,
+	filterAst: null,
+	lang: undefined,
+	limit: 20,
+	page: 1,
+	parsedFields: null,
+	parsedSort: [],
+	q: undefined,
+	sortOrderBy: {},
+}
+
+/** A filter of one condition, status eq active */
+const activeFilter: ListParsed["filterAst"] = {
+	root: {
+		conditions: [{ field: "status", operator: "eq", value: "active" }],
+		logic: "and",
+		subgroups: [],
+	},
+}
+
+/** A computed sort that orders by a raw column in the given direction */
+const customSort = (dir: string): SQL => sql`custom_column ${sql.raw(dir)}`
+
+/** A parsed list request sorted ascending by one field */
+const parsedWith = (field: string) => ({
+	filterAst: null,
+	limit: 10,
+	parsedSort: [{ direction: "asc" as const, field }],
+})
+
+describe("buildListQuery — pagination", () => {
 	it("returns limit+1 and page-based offset", () => {
-		const result = buildListQuery({
-			parsed: {
-				cursor: undefined,
-				filterAst: null,
-				lang: undefined,
-				limit: 20,
-				page: 3,
-				parsedFields: null,
-				parsedSort: [],
-				q: undefined,
-				sortOrderBy: {},
-			},
-			table: organization,
-		})
+		const result = buildListQuery({ parsed: { ...offsetPage, page: 3 }, table: organization })
 
 		expect(result.limit).toBe(21)
 		expect(result.offset).toBe(40)
@@ -41,150 +62,21 @@ describe("buildListQuery", () => {
 	})
 
 	it("defaults to page 1 when page is undefined", () => {
-		const result = buildListQuery({
-			parsed: {
-				cursor: undefined,
-				filterAst: null,
-				lang: undefined,
-				limit: 10,
-				page: undefined,
-				parsedFields: null,
-				parsedSort: [],
-				q: undefined,
-				sortOrderBy: {},
-			},
-			table: organization,
-		})
+		const result = buildListQuery({ parsed: { ...offsetPage, limit: 10, page: undefined }, table: organization })
 
 		expect(result.limit).toBe(11)
 		expect(result.offset).toBe(0)
 		expect(result.meta).toEqual({ limit: 10, page: 1, type: "offset" })
 	})
 
-	it("converts parsedSort to orderBy SQL with id tiebreaker", () => {
-		const result = buildListQuery({
-			parsed: {
-				cursor: undefined,
-				filterAst: null,
-				lang: undefined,
-				limit: 20,
-				page: 1,
-				parsedFields: null,
-				parsedSort: [{ direction: "desc", field: "created_at" }],
-				q: undefined,
-				sortOrderBy: { created_at: "desc" },
-			},
-			table: organization,
-		})
-
-		expect(result.orderBy).toHaveLength(2)
-	})
-
-	it("converts filterAst to where SQL", () => {
-		const result = buildListQuery({
-			parsed: {
-				cursor: undefined,
-				filterAst: {
-					root: {
-						conditions: [{ field: "status", operator: "eq", value: "active" }],
-						logic: "and",
-						subgroups: [],
-					},
-				},
-				lang: undefined,
-				limit: 20,
-				page: 1,
-				parsedFields: null,
-				parsedSort: [],
-				q: undefined,
-				sortOrderBy: {},
-			},
-			table: organization,
-		})
-
-		expect(result.where).not.toBeNull()
-	})
-
-	it("returns null where when filterAst is null", () => {
-		const result = buildListQuery({
-			parsed: {
-				cursor: undefined,
-				filterAst: null,
-				lang: undefined,
-				limit: 20,
-				page: 1,
-				parsedFields: null,
-				parsedSort: [],
-				q: undefined,
-				sortOrderBy: {},
-			},
-			table: organization,
-		})
-
-		expect(result.where).toBeUndefined()
-	})
-
-	it("combines baseWhere with filter where", () => {
-		const baseWhere = sql`user_id = 'abc'`
-		const result = buildListQuery({
-			baseWhere,
-			parsed: {
-				cursor: undefined,
-				filterAst: {
-					root: {
-						conditions: [{ field: "status", operator: "eq", value: "active" }],
-						logic: "and",
-						subgroups: [],
-					},
-				},
-				lang: undefined,
-				limit: 20,
-				page: 1,
-				parsedFields: null,
-				parsedSort: [],
-				q: undefined,
-				sortOrderBy: {},
-			},
-			table: organization,
-		})
-
-		expect(result.where).not.toBeNull()
-		/* both baseWhere and filter should be present in combined where */
-	})
-
-	it("returns baseWhere as-is when no filter", () => {
-		const baseWhere = sql`user_id = 'abc'`
-		const result = buildListQuery({
-			baseWhere,
-			parsed: {
-				cursor: undefined,
-				filterAst: null,
-				lang: undefined,
-				limit: 20,
-				page: 1,
-				parsedFields: null,
-				parsedSort: [],
-				q: undefined,
-				sortOrderBy: {},
-			},
-			table: organization,
-		})
-
-		expect(result.where).toBe(baseWhere)
-	})
-
 	it("uses cursor pagination with offset=0 and cursor where clause", () => {
 		const cursor = createCursor({ created_at: 1000, id: "org_123" }, [{ direction: "desc", field: "created_at" }])
 		const result = buildListQuery({
 			parsed: {
+				...offsetPage,
 				cursor,
-				filterAst: null,
-				lang: undefined,
-				limit: 20,
 				page: undefined,
-				parsedFields: null,
 				parsedSort: [{ direction: "desc", field: "created_at" }],
-				q: undefined,
 				sortOrderBy: { created_at: "desc" },
 			},
 			table: organization,
@@ -194,20 +86,86 @@ describe("buildListQuery", () => {
 		expect(result.meta.type).toBe("cursor")
 		expect(result.where).not.toBeNull()
 	})
+})
 
-	it("passes through search query trimmed", () => {
+describe("buildListQuery — where", () => {
+	it("converts filterAst to where SQL", () => {
+		const result = buildListQuery({ parsed: { ...offsetPage, filterAst: activeFilter }, table: organization })
+
+		expect(result.where).not.toBeNull()
+	})
+
+	it("returns null where when filterAst is null", () => {
+		const result = buildListQuery({ parsed: offsetPage, table: organization })
+
+		expect(result.where).toBeUndefined()
+	})
+
+	it("combines baseWhere with filter where", () => {
+		const baseWhere = sql`user_id = 'abc'`
+		const result = buildListQuery({
+			baseWhere,
+			parsed: { ...offsetPage, filterAst: activeFilter },
+			table: organization,
+		})
+
+		expect(result.where).not.toBeNull()
+		/* both baseWhere and filter should be present in combined where */
+	})
+
+	it("returns baseWhere as-is when no filter", () => {
+		const baseWhere = sql`user_id = 'abc'`
+		const result = buildListQuery({ baseWhere, parsed: offsetPage, table: organization })
+
+		expect(result.where).toBe(baseWhere)
+	})
+})
+
+describe("buildListQuery — sort", () => {
+	it("converts parsedSort to orderBy SQL with id tiebreaker", () => {
 		const result = buildListQuery({
 			parsed: {
-				cursor: undefined,
-				filterAst: null,
-				lang: undefined,
-				limit: 20,
-				page: 1,
-				parsedFields: null,
-				parsedSort: [],
-				q: "  hello world  ",
-				sortOrderBy: {},
+				...offsetPage,
+				parsedSort: [{ direction: "desc", field: "created_at" }],
+				sortOrderBy: { created_at: "desc" },
 			},
+			table: organization,
+		})
+
+		expect(result.orderBy).toHaveLength(2)
+	})
+
+	it("rejects a cursor minted under a different order with a 400", () => {
+		const cursor = createCursor({ created_at: 1000, id: "org_123" }, [{ direction: "desc", field: "created_at" }])
+		expect(() =>
+			buildListQuery({
+				parsed: { cursor, filterAst: null, limit: 20, parsedSort: [{ direction: "asc", field: "created_at" }] },
+				table: organization,
+			}),
+		).toThrow(expect.objectContaining({ status: 400 }))
+	})
+
+	it("supports computed sorts via @ prefix", () => {
+		const result = buildListQuery({
+			computedSorts: { "@relevance": customSort },
+			parsed: { ...offsetPage, parsedSort: [{ direction: "desc", field: "@relevance" }] },
+			table: organization,
+		})
+
+		expect(result.orderBy.length).toBeGreaterThanOrEqual(1)
+	})
+
+	it("uses default desc(created_at) sort when parsedSort is empty", () => {
+		const result = buildListQuery({ parsed: offsetPage, table: organization })
+
+		expect(result.orderBy.length).toBeGreaterThan(0)
+	})
+})
+
+describe("buildListQuery — search", () => {
+	it("passes through search query trimmed", () => {
+		const result = buildListQuery({
+			parsed: { ...offsetPage, q: "  hello world  " },
 			search: likeSearch(organization._search),
 			table: organization,
 		})
@@ -224,78 +182,14 @@ describe("buildListQuery", () => {
 		).toThrow(CombError)
 	})
 
-	it("rejects a cursor minted under a different order with a 400", () => {
-		const cursor = createCursor({ created_at: 1000, id: "org_123" }, [{ direction: "desc", field: "created_at" }])
-		try {
-			buildListQuery({
-				parsed: { cursor, filterAst: null, limit: 20, parsedSort: [{ direction: "asc", field: "created_at" }] },
-				table: organization,
-			})
-			expect.unreachable()
-		} catch (error) {
-			expect((error as CombError).status).toBe(400)
-		}
-	})
-
-	it("supports computed sorts via @ prefix", () => {
-		const customSort = (dir: string): SQL => sql`custom_column ${sql.raw(dir)}`
-		const result = buildListQuery({
-			computedSorts: { "@relevance": customSort },
-			parsed: {
-				cursor: undefined,
-				filterAst: null,
-				lang: undefined,
-				limit: 20,
-				page: 1,
-				parsedFields: null,
-				parsedSort: [{ direction: "desc", field: "@relevance" }],
-				q: undefined,
-				sortOrderBy: {},
-			},
-			table: organization,
-		})
-
-		expect(result.orderBy.length).toBeGreaterThanOrEqual(1)
-	})
-
 	it("returns null search when q is undefined", () => {
-		const result = buildListQuery({
-			parsed: {
-				cursor: undefined,
-				filterAst: null,
-				lang: undefined,
-				limit: 20,
-				page: 1,
-				parsedFields: null,
-				parsedSort: [],
-				q: undefined,
-				sortOrderBy: {},
-			},
-			table: organization,
-		})
+		const result = buildListQuery({ parsed: offsetPage, table: organization })
 
 		expect(result.search).toBeNull()
 	})
+})
 
-	it("uses default desc(created_at) sort when parsedSort is empty", () => {
-		const result = buildListQuery({
-			parsed: {
-				cursor: undefined,
-				filterAst: null,
-				lang: undefined,
-				limit: 20,
-				page: 1,
-				parsedFields: null,
-				parsedSort: [],
-				q: undefined,
-				sortOrderBy: {},
-			},
-			table: organization,
-		})
-
-		expect(result.orderBy.length).toBeGreaterThan(0)
-	})
-
+describe("buildListQuery — the search option", () => {
 	it("search option produces WHERE when q is present", () => {
 		const result = buildListQuery({
 			parsed: {
@@ -332,7 +226,9 @@ describe("buildListQuery", () => {
 		expect(result.where).toBeTruthy()
 		expect(result.where).not.toBe(baseWhere)
 	})
+})
 
+describe("buildListQuery — the search option without a q, and with a cursor", () => {
 	it("search option adds no WHERE when q is empty", () => {
 		const result = buildListQuery({
 			parsed: {
@@ -389,12 +285,6 @@ describe("buildListQuery", () => {
 })
 
 describe("buildListQuery — sort fields it cannot order by (Q-L3)", () => {
-	const parsedWith = (field: string) => ({
-		filterAst: null,
-		limit: 10,
-		parsedSort: [{ direction: "asc" as const, field }],
-	})
-
 	it.each(["ghost", "constructor", "toString"])("throws for %s, which is not a column of the table", (field) => {
 		expect(() => buildListQuery({ parsed: parsedWith(field), table: organization })).toThrow(CombError)
 	})

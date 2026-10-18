@@ -63,7 +63,9 @@ describe("buildConditionSQL", () => {
 		}
 		expect(buildConditionSQL(condition, config)).toBeTruthy()
 	})
+})
 
+describe("buildConditionSQL — patterns and null checks", () => {
 	it("builds like condition", () => {
 		const condition: FilterCondition = { field: "name", operator: "like", value: "*test*" }
 		expect(buildConditionSQL(condition, config)).toBeTruthy()
