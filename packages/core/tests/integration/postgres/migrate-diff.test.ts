@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { PgTarget } from "../../../src/migrate/core/atlas-target.ts"
 import { exportDrizzleSchema } from "../../../src/migrate/core/atlas.ts"
 import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-diff.ts"
-import { describeAtlas } from "../support/atlas.ts"
+import { DOCKER_VAR, describeAtlas, dockerDevWanted } from "../support/atlas.ts"
 import { describePg, withScratchDb } from "../support/pg.ts"
 
 let dir = ""
@@ -193,7 +193,24 @@ describe("migrate diff on Postgres: the drizzle export", () => {
 	}, 60_000)
 })
 
-const docker = spawnSync("docker", ["info"], { stdio: "ignore" }).status === 0
+const docker = dockerDevWanted()
+
+/** Probes for whether docker runs */
+const yes = () => true
+const no = () => false
+
+describe("dockerDevWanted", () => {
+	it("runs the docker:// case locally only when COMB_TEST_DOCKER=1, since its containers disturb other sessions", () => {
+		expect(dockerDevWanted({}, yes)).toBe(false)
+		expect(dockerDevWanted({ [DOCKER_VAR]: "1" }, yes)).toBe(true)
+		expect(dockerDevWanted({ [DOCKER_VAR]: "1" }, no)).toBe(false)
+	})
+
+	it("runs it in CI, where Docker must work", () => {
+		expect(dockerDevWanted({ CI: "true" }, yes)).toBe(true)
+		expect(() => dockerDevWanted({ CI: "true" }, no)).toThrow("docker must run in CI")
+	})
+})
 
 describePg("migrate diff on Postgres: the default dev database", () => {
 	describeAtlas("with Atlas v1.3.0", () => {
