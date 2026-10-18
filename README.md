@@ -48,6 +48,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.6.0](#upgrading-to-060)
 - [Upgrading to 0.5.0](#upgrading-to-050)
 - [Releases](#releases)
 - [License](#license)
@@ -625,7 +626,7 @@ The object is strict and each optional parameter exists only when the endpoint h
 
 The `filter`, `order` and `q` descriptions, examples and the `order` pattern are generated per endpoint from the same config (`filterParamMeta()`, `orderParamMeta()`, `searchParamMeta()`), so a spec lists the real fields, types, operators and limits even after a publisher strips `x-*`. The schema also carries the `x-comb` query facts — `filterFields` with operators, `sortable`, `nulls`, `searchable`, `selectable`, and the limits — see `packages/core/docs/meta-contract.md`.
 
-`createRetrieveQuerySchema()` is the single-resource counterpart (`select`, `lang`). `paginationResponseSchema` is exported for the response envelope. A list request is validated by `createListQuerySchema()` alone: `buildListQuery()` trusts the fields and values it is given, so an unvalidated filter or sort would let a client probe any column.
+`createRetrieveQuerySchema()` is the single-resource counterpart (`select`, `lang`). `paginationResponseSchema` is exported for the response envelope. A list request is validated by `createListQuerySchema()` alone, and `buildListQuery()` refuses a filter or sort that did not come through it (see [SQLite SQL generation](#sqlite-sql-generation)).
 
 ### SQLite SQL generation
 
@@ -866,6 +867,25 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 `tests/bun/` is separate because it imports `bun:sqlite` and `bun:test`, which vitest cannot load. It replays a full Atlas-shaped drift migration against an in-memory database to prove the SQLite transforms survive a real commit with foreign keys enforced.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
+
+## Upgrading to 0.6.0
+
+0.6.0 closes the 0.5 review's findings. Four changes break callers:
+
+- **State machines.** `assertTransition(machine, from, to)` takes three arguments. Name the column on the machine (`defineStateMachine({ column: "status", … })`) instead of passing it fourth.
+- **Trusted list input.** `buildListQuery()` and `queryHelpers.listOptions()` refuse a `filterAst` or `parsedSort` without `validated: true` (`filter_not_wired` / `sort_not_wired`, 500). `createListQuerySchema()`'s output carries the flag, and it survives a framework that hands handlers the schema's output, as honey's `c.input.search` does. Code that builds a parsed query by hand, after checking the filter against its own fields, sets `validated: true` itself.
+- **Postgres migrations.** The `postgres` and `neon` migrate providers are refused at load, and `createPostgresProvider`, `createNeonProvider`, `introspectPostgresSchema`, `getPostgresTables`, `getPostgresColumns`, `getPostgresIndexes`, `PostgresProviderConfig` and `NeonProviderConfig` are removed: they only ever threw. Run Postgres migrations with `drizzle-kit migrate`. The Postgres runtime modules are unchanged.
+- **Keyset SQL.** `keysetSQL({ id, keys, tiebreak, values })` takes one `KeysetPosition` object instead of four arguments.
+
+Fixes that change what a caller sees:
+
+- **Error classification.** SQLite, D1 and Postgres errors are read from the innermost error out, so a wrapper whose message or bound params look like a constraint, storage-limit or SQLSTATE error no longer decides the class. A failed query is no longer reported as a constraint violation because a parameter says so.
+- **Query layer.** A `select` nested deeper than eight levels is a 400 with the new key `invalid_select`, and parsing is linear in its length. A `(` in an unquoted filter value is a malformed filter, as a `)` already was; quote the value to match one.
+- **D1.** `BookmarkTracker.track()` takes the `session` `openD1Session()` returns, `undefined` included, and tracks nothing for `undefined`. `ShardRouter` takes any KV with the three calls it makes (`ShardKv`), so a Worker's global `KVNamespace` fits.
+- **Codegen.** Config mode names a database as the config does (`core`, not `db` for `src/db/core.tables.ts`), which renames its generated maps and diagrams. Generated subpaths are never written into a `package.json` above the project root. Temporary files of atomic writes are named with `randomUUID`.
+- **Meta.** The manifest no longer lists unique indexes over private columns, matching the stamp.
+
+New: `createUlidFactory()` for ULIDs that strictly increase, even through a clock that steps back. `KeysetPosition` is exported from `@lovrozagar/comb/query/sqlite`. The package's declared types are checked under `isolatedDeclarations` and every strict flag a consumer may set.
 
 ## Upgrading to 0.5.0
 
