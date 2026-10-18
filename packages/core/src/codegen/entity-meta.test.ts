@@ -12,6 +12,7 @@ function table(columns: Record<string, string>, overrides: Partial<TableMeta> = 
 		idPrefix: null,
 		sqlName: "item",
 		timestamps: { createdAt: false, deletedAt: false, style: "snake_case", updatedAt: false },
+		partialUniqueIndexes: [],
 		uniqueIndexes: [],
 		varName: "item",
 		...overrides,

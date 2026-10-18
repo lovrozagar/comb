@@ -1,7 +1,8 @@
 /**
  * A table's third argument, `(t) => [...]`: its composite primary key, its unique indexes and its
  * CHECK constraints, read from the AST. A unique index is published as column uniqueness only when
- * it is one: every key a plain column, no `.where()`.
+ * it is one: every key a plain column, no `.where()`. A partial one (`.where()`) is kept apart: it
+ * is no column uniqueness, but SQLite reports its violation by column, so the constraint map needs it.
  */
 import { type CallExpression, type Node, SyntaxKind } from "ts-morph"
 import type { CheckConstraintMeta, UniqueIndexMeta } from "./analyzer-types.ts"
@@ -9,6 +10,8 @@ import type { CheckConstraintMeta, UniqueIndexMeta } from "./analyzer-types.ts"
 export type TableOptions = {
 	checkConstraints: CheckConstraintMeta[]
 	hasCompositePrimaryKey: boolean
+	/** `.where()` unique indexes on plain columns */
+	partialUniqueIndexes: UniqueIndexMeta[]
 	uniqueIndexes: UniqueIndexMeta[]
 }
 
@@ -39,12 +42,13 @@ function plainColumns(on: CallExpression, param: string): string[] | null {
 	return columns.length > 0 && columns.every((c) => c !== null) ? (columns as string[]) : null
 }
 
-function uniqueIndexOf(chain: CallExpression[], param: string): UniqueIndexMeta | null {
+/** A unique index on plain columns, and whether a `.where()` makes it partial */
+function uniqueIndexOf(chain: CallExpression[], param: string): (UniqueIndexMeta & { partial: boolean }) | null {
 	const name = stringArg(headCall(chain, "uniqueIndex"))
 	const on = methodCall(chain, "on")
-	if (name === undefined || on === undefined || methodCall(chain, "where") !== undefined) return null
+	if (name === undefined || on === undefined) return null
 	const columns = plainColumns(on, param)
-	return columns === null ? null : { columns, name }
+	return columns === null ? null : { columns, name, partial: methodCall(chain, "where") !== undefined }
 }
 
 function checkOf(chain: CallExpression[]): CheckConstraintMeta | null {
@@ -64,19 +68,27 @@ function optionExpressions(body: Node): Node[] {
 	return (object?.getProperties() ?? []).flatMap((p) => p.asKind(SyntaxKind.PropertyAssignment)?.getInitializer() ?? [])
 }
 
-const NO_OPTIONS: TableOptions = { checkConstraints: [], hasCompositePrimaryKey: false, uniqueIndexes: [] }
+const noOptions = (): TableOptions => ({
+	checkConstraints: [],
+	hasCompositePrimaryKey: false,
+	partialUniqueIndexes: [],
+	uniqueIndexes: [],
+})
 
 /** The options a table's third argument declares. */
 export function readTableOptions(arg: Node | undefined): TableOptions {
 	const arrow = arg?.asKind(SyntaxKind.ArrowFunction)
-	if (arrow === undefined) return NO_OPTIONS
+	if (arrow === undefined) return noOptions()
 	const param = arrow.getParameters()[0]?.getName() ?? "t"
-	const options: TableOptions = { checkConstraints: [], hasCompositePrimaryKey: false, uniqueIndexes: [] }
+	const options = noOptions()
 	for (const expression of optionExpressions(arrow.getBody())) {
 		const chain = chainOf(expression)
 		if (headCall(chain, "primaryKey") !== undefined) options.hasCompositePrimaryKey = true
 		const unique = uniqueIndexOf(chain, param)
-		if (unique !== null) options.uniqueIndexes.push(unique)
+		if (unique !== null) {
+			const { partial, ...index } = unique
+			;(partial ? options.partialUniqueIndexes : options.uniqueIndexes).push(index)
+		}
 		const check = checkOf(chain)
 		if (check !== null) options.checkConstraints.push(check)
 	}

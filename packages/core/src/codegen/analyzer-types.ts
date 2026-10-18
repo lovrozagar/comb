@@ -114,6 +114,8 @@ type TableMeta = {
 	sqlName: string
 	/** Detected timestamp fields and style */
 	timestamps: TimestampsMeta
+	/** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, never published as uniqueness */
+	partialUniqueIndexes: UniqueIndexMeta[]
 	/** Unique indexes from table options */
 	uniqueIndexes: UniqueIndexMeta[]
 	/** Variable name (export const X = createTable...) */

@@ -124,6 +124,14 @@ describe("generateConstraints — unique indexes", () => {
 		expect(content).toContain(`handle_name: {\n\t\t\t\terrorKey: "user_handle_duplicate",`)
 	})
 
+	it("maps a partial unique index: SQLite reports its violation by column like any other (canary)", () => {
+		const { content } =
+			generate(`export const user = createTable("user", { id: c.id(), email: c.text("email") }, (t) => [
+	uniqueIndex("idx_user_email_unique").on(t.email).where(sql\`deleted_at IS NULL\`),
+])`)
+		expect(content).toContain(`email: {\n\t\t\t\terrorKey: "user_email_duplicate",`)
+	})
+
 	it("keeps the index's own column name when no field declares it", () => {
 		const { content } = generate(`export const user = createTable("user", { id: c.id() }, (t) => [
 	uniqueIndex("user_ghost_idx").on(t.ghost),

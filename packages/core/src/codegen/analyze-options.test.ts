@@ -23,6 +23,7 @@ describe("readTableOptions", () => {
 		).toEqual({
 			checkConstraints: [{ expression: "n > 0", name: "t_n_pos" }],
 			hasCompositePrimaryKey: true,
+			partialUniqueIndexes: [],
 			uniqueIndexes: [{ columns: ["a", "b"], name: "t_a_b" }],
 		})
 	})
@@ -33,11 +34,12 @@ describe("readTableOptions", () => {
 		).toEqual({
 			checkConstraints: [],
 			hasCompositePrimaryKey: false,
+			partialUniqueIndexes: [],
 			uniqueIndexes: [{ columns: ["u"], name: "t_u" }],
 		})
 	})
 
-	it("leaves out unique indexes that are not plain column uniqueness, and malformed calls", () => {
+	it("keeps a partial unique index apart and leaves out expression indexes and malformed calls", () => {
 		const options = optionsOf(`const t = sqliteTable("t", {}, (t) => [
 	uniqueIndex("lower_email").on(sql\`lower(\${t.email})\`),
 	uniqueIndex("live_slug").on(t.slug).where(sql\`deleted_at is null\`),
@@ -48,13 +50,19 @@ describe("readTableOptions", () => {
 	check("no_sql", "n > 0"),
 	check(name, sql\`n > 0\`),
 ])`)
-		expect(options).toEqual({ checkConstraints: [], hasCompositePrimaryKey: false, uniqueIndexes: [] })
+		expect(options).toEqual({
+			checkConstraints: [],
+			hasCompositePrimaryKey: false,
+			partialUniqueIndexes: [{ columns: ["slug"], name: "live_slug" }],
+			uniqueIndexes: [],
+		})
 	})
 
 	it("is empty without an arrow function or an option list", () => {
 		expect(optionsOf(`const t = sqliteTable("t", {})`)).toEqual({
 			checkConstraints: [],
 			hasCompositePrimaryKey: false,
+			partialUniqueIndexes: [],
 			uniqueIndexes: [],
 		})
 		expect(optionsOf(`const t = sqliteTable("t", {}, () => buildOptions())`).uniqueIndexes).toEqual([])

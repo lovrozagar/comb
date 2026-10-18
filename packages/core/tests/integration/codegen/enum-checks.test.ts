@@ -32,6 +32,7 @@ describe("generateEnumChecks", () => {
 			idPrefix: "itm",
 			sqlName: "item",
 			timestamps: { createdAt: false, deletedAt: false, style: "snake_case", updatedAt: false },
+			partialUniqueIndexes: [],
 			uniqueIndexes: [],
 			varName: "item",
 		}

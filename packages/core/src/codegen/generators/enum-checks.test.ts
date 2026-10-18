@@ -47,6 +47,7 @@ function makeTable(overrides: Partial<TableMeta> & { sqlName: string; varName: s
 		hasCompositePrimaryKey: false,
 		idPrefix: null,
 		timestamps: { createdAt: false, deletedAt: false, style: "camelCase", updatedAt: false },
+		partialUniqueIndexes: [],
 		uniqueIndexes: [],
 		...overrides,
 	}

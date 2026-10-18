@@ -39,7 +39,8 @@ function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 			`${table.sqlName}_${field.name}_duplicate`,
 		)
 	}
-	for (const col of table.uniqueIndexes.flatMap((idx) => idx.columns)) {
+	/* a partial index fails with the same "UNIQUE constraint failed: <table>.<column>" as a full one */
+	for (const col of [...table.uniqueIndexes, ...table.partialUniqueIndexes].flatMap((idx) => idx.columns)) {
 		/* the engine reports the column's SQL name; the error key keeps the property name */
 		const sqlName = table.fields.find((f) => f.name === col)?.sqlName ?? col
 		unique[sqlName] = conflict(`A record with this ${col} value already exists`, `${table.sqlName}_${col}_duplicate`)

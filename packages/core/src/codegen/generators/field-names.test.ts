@@ -48,6 +48,7 @@ function table(sqlName: string, fieldNames: string[]): TableMeta {
 		idPrefix: null,
 		sqlName,
 		timestamps: { createdAt: false, deletedAt: false, style: "snake_case", updatedAt: false },
+		partialUniqueIndexes: [],
 		uniqueIndexes: [],
 		varName: sqlName,
 	}

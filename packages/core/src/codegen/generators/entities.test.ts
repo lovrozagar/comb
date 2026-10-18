@@ -14,6 +14,7 @@ function makeTable(varName: string, idPrefix: string | null): TableMeta {
 		idPrefix,
 		sqlName: varName,
 		timestamps: { createdAt: false, deletedAt: false, style: "camelCase", updatedAt: false },
+		partialUniqueIndexes: [],
 		uniqueIndexes: [],
 		varName,
 	}
