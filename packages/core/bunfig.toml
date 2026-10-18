@@ -1,0 +1,20 @@
+# bun test runs tests/bun, the suites vitest cannot load (bun:sqlite, bun:test). Its coverage
+# gates the one file only Bun can run, drivers/bun-sqlite.ts, at 100%; vitest measures the
+# rest, so everything else these suites happen to load is left out here.
+[test]
+coverage = true
+coverageSkipTestFiles = true
+coverageThreshold = { lines = 1.0, functions = 1.0 }
+coveragePathIgnorePatterns = [
+	"tests/**",
+	"src/*.ts",
+	"src/meta/**",
+	"src/pg/**",
+	"src/query/**",
+	"src/sqlite/**",
+	"src/migrate/core/**",
+	"src/migrate/drivers/sqlite.ts",
+	"src/migrate/drivers/d1.ts",
+	"src/migrate/drivers/postgres.ts",
+	"src/migrate/drivers/index.ts",
+]
