@@ -1,4 +1,4 @@
-import type { D1Database, KVNamespace } from "@cloudflare/workers-types"
+import type { D1Database } from "@cloudflare/workers-types"
 type ShardDriver = "d1"
 
 type ShardMapping = {
@@ -14,9 +14,19 @@ type ShardMapping = {
 
 type ShardDbHandle = { driver: "d1"; handle: D1Database }
 
-type ShardResolverDeps = {
-	coreDb: D1Database
-	kv: KVNamespace
+/**
+ * The KV the router caches mappings in: the three calls it makes. Structural, so a Worker's global
+ * `KVNamespace` and the one `@cloudflare/workers-types` exports both fit; the two are distinct types.
+ */
+type ShardKv = {
+	delete(key: string): Promise<void>
+	get(key: string, type: "json"): Promise<unknown>
+	put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>
 }
 
-export type { ShardDbHandle, ShardDriver, ShardMapping, ShardResolverDeps }
+type ShardResolverDeps = {
+	coreDb: D1Database
+	kv: ShardKv
+}
+
+export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardResolverDeps }

@@ -1,11 +1,10 @@
 // sqlite/d1/sharding/index.d.ts
 export { ShardRouter, type ShardRouterConfig } from "./router.ts";
 export { shardMap } from "./shard-map.ts";
-export type { ShardDbHandle, ShardDriver, ShardMapping, ShardResolverDeps } from "./types.ts";
+export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardResolverDeps } from "./types.ts";
 
 // sqlite/d1/sharding/router.d.ts
-import type { KVNamespace } from "@cloudflare/workers-types";
-import type { ShardDbHandle, ShardMapping, ShardResolverDeps } from "./types.ts";
+import type { ShardDbHandle, ShardKv, ShardMapping, ShardResolverDeps } from "./types.ts";
 /** Structural type so both `@cloudflare/workers-types` and `cloudflare:workers` satisfy it */
 type WaitUntilCtx = {
     waitUntil: (promise: Promise<unknown>) => void;
@@ -61,7 +60,7 @@ declare class ShardRouter {
      */
     getHandle(mapping: ShardMapping, env: Record<string, unknown>): ShardDbHandle;
     /** Invalidate both cache tiers. Use after whale graduation or reassignment. */
-    invalidate(orgId: string, kv: KVNamespace): Promise<void>;
+    invalidate(orgId: string, kv: ShardKv): Promise<void>;
     private kvKey;
     /** The D1 shard with the most remaining capacity; shards_full (503) when none has any */
     private pickShard;
@@ -100,7 +99,7 @@ export declare const shardMap: ShardMapTable;
 export {};
 
 // sqlite/d1/sharding/types.d.ts
-import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
+import type { D1Database } from "@cloudflare/workers-types";
 type ShardDriver = "d1";
 type ShardMapping = {
     createdAt: number;
@@ -116,11 +115,22 @@ type ShardDbHandle = {
     driver: "d1";
     handle: D1Database;
 };
+/**
+ * The KV the router caches mappings in: the three calls it makes. Structural, so a Worker's global
+ * `KVNamespace` and the one `@cloudflare/workers-types` exports both fit; the two are distinct types.
+ */
+type ShardKv = {
+    delete(key: string): Promise<void>;
+    get(key: string, type: "json"): Promise<unknown>;
+    put(key: string, value: string, options?: {
+        expirationTtl?: number;
+    }): Promise<void>;
+};
 type ShardResolverDeps = {
     coreDb: D1Database;
-    kv: KVNamespace;
+    kv: ShardKv;
 };
-export type { ShardDbHandle, ShardDriver, ShardMapping, ShardResolverDeps };
+export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardResolverDeps };
 
 // sqlite/columns.d.ts
 /**

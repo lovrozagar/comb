@@ -1,4 +1,4 @@
-import type { D1Database, KVNamespace } from "@cloudflare/workers-types"
+import type { D1Database } from "@cloudflare/workers-types"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { CombError } from "../../../error.ts"
@@ -6,13 +6,13 @@ import { LruCache } from "../../../lru.ts"
 import { combErrorKeys } from "../../../types.ts"
 import { openD1Session } from "../session.ts"
 import { shardMap } from "./shard-map.ts"
-import type { ShardDbHandle, ShardMapping, ShardResolverDeps } from "./types.ts"
+import type { ShardDbHandle, ShardKv, ShardMapping, ShardResolverDeps } from "./types.ts"
 
 /** Structural type so both `@cloudflare/workers-types` and `cloudflare:workers` satisfy it */
 type WaitUntilCtx = { waitUntil: (promise: Promise<unknown>) => void }
 
 /** Where a resolved mapping is cached: the KV namespace, written off the request path */
-type CacheTargets = { executionCtx: WaitUntilCtx; kv: KVNamespace }
+type CacheTargets = { executionCtx: WaitUntilCtx; kv: ShardKv }
 
 /** Pluggable logger — defaults to no-op */
 type LogFn = (event: string, data: Record<string, unknown>) => void
@@ -87,7 +87,7 @@ class ShardRouter {
 		}
 
 		/* L2: KV */
-		const kvValue = await deps.kv.get<ShardMapping>(this.kvKey(orgId), "json")
+		const kvValue = (await deps.kv.get(this.kvKey(orgId), "json")) as ShardMapping | null
 		if (kvValue) {
 			this.log("shard-router.hit", { orgId, tier: "kv" })
 			this.lru.set(orgId, kvValue)
@@ -151,7 +151,7 @@ class ShardRouter {
 	}
 
 	/** Invalidate both cache tiers. Use after whale graduation or reassignment. */
-	async invalidate(orgId: string, kv: KVNamespace): Promise<void> {
+	async invalidate(orgId: string, kv: ShardKv): Promise<void> {
 		this.lru.delete(orgId)
 		await kv.delete(this.kvKey(orgId))
 	}
@@ -225,7 +225,7 @@ class ShardRouter {
 	/** Background SWR revalidation — refreshes LRU from KV or Core D1 */
 	private async revalidateShard(orgId: string, deps: ShardResolverDeps): Promise<void> {
 		try {
-			const kvValue = await deps.kv.get<ShardMapping>(this.kvKey(orgId), "json")
+			const kvValue = (await deps.kv.get(this.kvKey(orgId), "json")) as ShardMapping | null
 			if (kvValue) {
 				this.lru.set(orgId, kvValue)
 				return
