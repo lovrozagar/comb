@@ -6,6 +6,7 @@
  * Every test gets its own sessions, and every table a test makes is TEMP, so tests never see
  * each other's tables and nothing outlives the session.
  */
+import { randomUUID } from "node:crypto"
 import pg from "pg"
 import postgres from "postgres"
 import { afterEach, beforeEach, describe } from "vitest"
@@ -55,4 +56,27 @@ export function usePg(): PgSessions {
 		sql = undefined
 	})
 	return { pg: () => need(client), sql: () => need(sql) }
+}
+
+/**
+ * A database made for `run` on the server and dropped after it, for tools such as Atlas that
+ * need a whole clean database rather than TEMP tables. `run` gets its URL.
+ */
+export async function withScratchDb<T>(run: (url: string) => Promise<T> | T): Promise<T> {
+	const server = new URL(pgUrl() as string)
+	const name = `comb_scratch_${randomUUID().replaceAll("-", "")}`
+	const admin = new pg.Client({ connectionString: server.href })
+	await admin.connect()
+	try {
+		await admin.query(`CREATE DATABASE ${name}`)
+		const url = new URL(server.href)
+		url.pathname = `/${name}`
+		try {
+			return await run(url.href)
+		} finally {
+			await admin.query(`DROP DATABASE ${name} WITH (FORCE)`)
+		}
+	} finally {
+		await admin.end()
+	}
 }

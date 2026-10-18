@@ -2,8 +2,9 @@
  * SQL parsing utilities for migrations
  */
 import { createHash } from "node:crypto"
-import { normalizeSql, segments, splitSqlStatements } from "./sql-scan.ts"
-import type { ExtractedSchema, MigrationClassification, MigrationSafety, ParsedMigration } from "../types.ts"
+import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts"
+import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
+import type { ExtractedSchema, ParsedMigration } from "../types.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    SQL STATEMENT SPLITTING — see sql-scan.ts
@@ -81,6 +82,27 @@ const DROP_TABLE = /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i
 /* Atlas's table rebuild: create `new_t`, copy rows, drop `t`, rename `new_t` to `t` */
 const RENAME_TABLE = /ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+RENAME\s+TO\s+["'`]?(\w+)["'`]?/i
 
+const ADDS_OR_DROPS = /^\s*ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+(ADD|DROP)\s+(?:COLUMN\s+)?["'`]?(\w+)/i
+const RENAMES_COLUMN =
+	/^\s*ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+RENAME\s+(?:COLUMN\s+)?["'`]?(\w+)["'`]?\s+TO\s+["'`]?(\w+)/i
+
+/** What an ALTER TABLE ADD, DROP or RENAME COLUMN does to a followed table's columns */
+function followColumns(schema: SchemaSoFar, stmt: string): void {
+	const [, table, verb, column] = ADDS_OR_DROPS.exec(stmt) ?? []
+	const columns = table === undefined ? undefined : schema.tables.get(table)
+	if (columns !== undefined && !/^(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK)$/i.test(column as string)) {
+		const kept = columns.filter((name) => name !== column)
+		schema.tables.set(table as string, verb?.toUpperCase() === "ADD" ? [...kept, column as string] : kept)
+	}
+	const [, renamedIn, from, to] = RENAMES_COLUMN.exec(stmt) ?? []
+	const before = renamedIn === undefined ? undefined : schema.tables.get(renamedIn)
+	if (before !== undefined)
+		schema.tables.set(
+			renamedIn as string,
+			before.map((name) => (name === from ? (to as string) : name)),
+		)
+}
+
 /** What one statement does to the schema being followed */
 function follow(schema: SchemaSoFar, stmt: string): void {
 	const created = CREATE_TABLE.exec(stmt)?.[1]
@@ -92,6 +114,7 @@ function follow(schema: SchemaSoFar, stmt: string): void {
 		schema.droppedTables.push(dropped)
 		schema.tables.delete(dropped)
 	}
+	followColumns(schema, stmt)
 	const [, from, to] = RENAME_TABLE.exec(stmt) ?? []
 	const columns = from === undefined ? undefined : schema.tables.get(from)
 	if (columns !== undefined && to !== undefined) {
@@ -108,56 +131,10 @@ export function extractSchema(sql: string): ExtractedSchema {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   DROP STATEMENT EXTRACTION AND CLASSIFICATION — on code, never on literal text
+   DROP STATEMENT EXTRACTION AND CLASSIFICATION — see classify.ts
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/** A statement's code with its identifiers, strings and comments blanked out, whitespace collapsed */
-const codeOf = (stmt: string) =>
-	segments(stmt)
-		.map((segment) => (segment.kind === "code" || segment.kind === "identifier" ? segment.text : " "))
-		.join("")
-		.replace(/\s+/g, " ")
-		.trim()
-
-const DROPS_TABLE = /^DROP TABLE (?:IF EXISTS )?["'`]?(\w+)/i
-const DROPS_COLUMN = /^ALTER TABLE ["'`]?(\w+)["'`]? DROP (?:COLUMN )?["'`]?(\w+)/i
-const DROPS_INDEX = /^DROP INDEX (?:IF EXISTS )?["'`]?(\w+)/i
-
-/** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
-export function extractDropStatements(sql: string): string[] {
-	const drops: string[] = []
-	for (const stmt of splitSqlStatements(sql)) {
-		const code = codeOf(stmt)
-		const table = DROPS_TABLE.exec(code)?.[1]
-		const [, from, column] = DROPS_COLUMN.exec(code) ?? []
-		const index = DROPS_INDEX.exec(code)?.[1]
-		if (table !== undefined) drops.push(`DROP TABLE ${table}`)
-		if (from !== undefined && column !== undefined) drops.push(`DROP COLUMN ${from}.${column}`)
-		if (index !== undefined) drops.push(`DROP INDEX ${index}`)
-	}
-	return drops
-}
-
-/** Whether a statement's code loses data or fails on a populated table */
-function isUnsafe(code: string): boolean {
-	if (DROPS_TABLE.test(code) || DROPS_COLUMN.test(code) || /^TRUNCATE\b/i.test(code)) return true
-	/* a NOT NULL column with no default cannot be added to a table that has rows */
-	return /^ALTER TABLE\b/i.test(code) && /\bNOT NULL\b/i.test(code) && !/\bDEFAULT\b/i.test(code)
-}
-
-const preview = (stmt: string) => stmt.slice(0, 80) + (stmt.length > 80 ? "..." : "")
-
-/**
- * unsafe: a statement drops a table or column, truncates, or adds a NOT NULL column without a
- * default; cautious: it drops something else (an index, a trigger, a view); safe otherwise.
- */
-export function classifyMigration(sql: string): MigrationClassification {
-	const statements = splitSqlStatements(sql)
-	const unsafeStatements = statements.filter((stmt) => isUnsafe(codeOf(stmt))).map(preview)
-	const drops = statements.some((stmt) => /^DROP\b/i.test(codeOf(stmt)))
-	const safety: MigrationSafety = unsafeStatements.length > 0 ? "unsafe" : drops ? "cautious" : "safe"
-	return { safety, unsafeStatements }
-}
+export { classifyMigration, extractDropStatements }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MAKE IDEMPOTENT
@@ -185,12 +162,13 @@ export function makeIdempotent(statements: string[]): string[] {
    PARSE MIGRATION
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export function parseMigration(sql: string, filename: string): ParsedMigration {
+/** A migration file, classified against `options.before`, the schema the earlier files leave */
+export function parseMigration(sql: string, filename: string, options: ClassifyOptions = {}): ParsedMigration {
 	const hash = generateMigrationHash(sql)
 	const expected = extractSchema(sql)
 	const statements = makeIdempotent(splitSqlStatements(sql))
-	const drops = extractDropStatements(sql)
-	const classification = classifyMigration(sql)
+	const drops = extractDropStatements(sql, options)
+	const classification = classifyMigration(sql, options)
 
 	return {
 		classification,

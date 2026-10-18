@@ -114,7 +114,7 @@ describe("verifySchema", () => {
 
 describe("applyMigration", () => {
 	const migration: ParsedMigration = {
-		classification: { safety: "safe", unsafeStatements: [] },
+		classification: { cautiousStatements: [], lockWarnings: [], safety: "safe", unsafeStatements: [] },
 		drops: [],
 		expected: makeSchema(new Map([["users", []]])),
 		filename: "001_init.sql",
@@ -213,7 +213,7 @@ describe("cleanupBackupTables", () => {
 /** A one-statement migration creating `post (id)`, with `over` merged on top. */
 const migration = (over: Partial<ParsedMigration> = {}): ParsedMigration =>
 	({
-		classification: { safety: "safe", unsafeStatements: [] },
+		classification: { cautiousStatements: [], lockWarnings: [], safety: "safe", unsafeStatements: [] },
 		drops: [],
 		expected: makeSchema(new Map([["post", ["id"]]])),
 		filename: "0001.sql",

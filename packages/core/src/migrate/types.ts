@@ -125,7 +125,12 @@ export type MigrationSafety = "safe" | "cautious" | "unsafe"
 
 export type MigrationClassification = {
 	safety: MigrationSafety
+	/** statements that lose data or break deployed code by name */
 	unsafeStatements: string[]
+	/** statements that drop or change something no row holds, or a file that is not one transaction */
+	cautiousStatements: string[]
+	/** Postgres statements that block a table while they run, with what to do instead */
+	lockWarnings: string[]
 }
 
 export type ParsedMigration = {

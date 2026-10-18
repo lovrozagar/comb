@@ -1,0 +1,78 @@
+/**
+ * The code of a statement as the destructive-change gate reads it: identifiers kept, strings and
+ * comments blanked, a `DO` body read as the code it runs. Names come back unquoted, and a list or
+ * an action list splits only at its top-level commas.
+ */
+import type { Dialect } from "../types.ts"
+import { segments } from "./sql-scan.ts"
+
+/** One name part: double-quoted, backtick or bracket quoted, or bare */
+const IDENT: string = `(?:"(?:[^"]|"")*"|\`[^\`]*\`|\\[[^\\]]*\\]|[A-Za-z_\\u0080-\\uffff][\\w$\\u0080-\\uffff]*)`
+/** A possibly schema-qualified name */
+const QNAME: string = `${IDENT}(?:\\s*\\.\\s*${IDENT})*`
+// per-process-constant: a pattern composed from the name grammar, compiled once
+const PARTS = /* @__PURE__ */ new RegExp(IDENT, "g")
+const DOLLAR_TAG = /^\$[^$]*\$/
+
+/** One name part without its quotes, a doubled `""` read as one `"` */
+function unquotePart(part: string): string {
+	const open = part[0]
+	if (open === '"') return part.slice(1, -1).replaceAll('""', '"')
+	return open === "`" || open === "[" ? part.slice(1, -1) : part
+}
+
+/** A written name, quoted or not, as its parts joined with `.` */
+const unquote = (name: string): string => [...name.matchAll(PARTS)].map((match) => unquotePart(match[0])).join(".")
+
+/** The last part of a name: the table of `"public"."post"` is `post` */
+const lastPart = (name: string): string => unquote(name).split(".").at(-1) as string
+
+/** A dollar-quoted body without its tags */
+function bodyText(text: string): string {
+	const tag = DOLLAR_TAG.exec(text)?.[0] as string
+	return text.endsWith(tag) && text.length >= 2 * tag.length
+		? text.slice(tag.length, -tag.length)
+		: text.slice(tag.length)
+}
+
+/** A statement's code: identifiers kept, a DO body unwrapped, strings and comments one space, whitespace collapsed */
+function codeOf(stmt: string, dialect: Dialect): string {
+	return segments(stmt, dialect)
+		.map(({ kind, text }) => {
+			if (kind === "code" || kind === "identifier") return text
+			return kind === "body" ? ` ${bodyText(text)} ` : " "
+		})
+		.join("")
+		.replace(/\s+/g, " ")
+		.trim()
+}
+
+/** `code` split at the commas outside parentheses, each part trimmed */
+function splitTopLevel(code: string): string[] {
+	const parts: string[] = []
+	let depth = 0
+	let start = 0
+	for (let i = 0; i < code.length; i++) {
+		if (code[i] === "(") depth++
+		else if (code[i] === ")") depth--
+		else if (code[i] === "," && depth === 0) {
+			parts.push(code.slice(start, i).trim())
+			start = i + 1
+		}
+	}
+	return [...parts, code.slice(start).trim()].filter((part) => part !== "")
+}
+
+/** `code` with every parenthesized group blanked, so a word left in it is top-level */
+function topLevel(code: string): string {
+	let out = ""
+	let depth = 0
+	for (const char of code) {
+		if (char === "(") depth++
+		out += depth === 0 ? char : " "
+		if (char === ")") depth--
+	}
+	return out
+}
+
+export { codeOf, IDENT, lastPart, QNAME, splitTopLevel, topLevel, unquote }

@@ -102,6 +102,19 @@ CREATE UNIQUE INDEX idx_email_unique ON user (email);
 		expect(schema.indexes).toContain("idx_email")
 		expect(schema.indexes).toContain("idx_email_unique")
 	})
+	it("follows ALTER TABLE ADD, DROP and RENAME COLUMN on a known table", () => {
+		const schema = extractSchema(`
+CREATE TABLE post (id TEXT PRIMARY KEY, title TEXT, body TEXT);
+ALTER TABLE post ADD COLUMN locale TEXT;
+ALTER TABLE \`post\` DROP COLUMN \`body\`;
+ALTER TABLE post RENAME COLUMN title TO heading;
+ALTER TABLE post DROP CONSTRAINT post_check;
+ALTER TABLE post RENAME TO post;
+ALTER TABLE gone ADD COLUMN x TEXT;
+`)
+		expect(schema.tables.get("post")).toEqual(["id", "heading", "locale"])
+		expect(schema.tables.has("gone")).toBe(false)
+	})
 })
 
 describe("extractDropStatements", () => {

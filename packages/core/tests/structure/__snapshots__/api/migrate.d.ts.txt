@@ -97,8 +97,9 @@ export type GenerateMigrationOptions = {
 export declare function generateMigrationFile(options: GenerateMigrationOptions): string;
 
 // migrate/core/parse.d.ts
+import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts";
 import { splitSqlStatements } from "./sql-scan.ts";
-import type { ExtractedSchema, MigrationClassification, ParsedMigration } from "../types.ts";
+import type { ExtractedSchema, ParsedMigration } from "../types.ts";
 export { splitSqlStatements };
 /** The hash a migration is recorded under: its SQL with comments and layout normalized away */
 export declare function generateMigrationHash(sql: string): string;
@@ -112,15 +113,10 @@ export declare function legacyMigrationHash(sql: string): string;
 export declare function migrationHashes(sql: string): string[];
 /** The tables (with columns), indexes and dropped tables a migration leaves */
 export declare function extractSchema(sql: string): ExtractedSchema;
-/** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
-export declare function extractDropStatements(sql: string): string[];
-/**
- * unsafe: a statement drops a table or column, truncates, or adds a NOT NULL column without a
- * default; cautious: it drops something else (an index, a trigger, a view); safe otherwise.
- */
-export declare function classifyMigration(sql: string): MigrationClassification;
+export { classifyMigration, extractDropStatements };
 export declare function makeIdempotent(statements: string[]): string[];
-export declare function parseMigration(sql: string, filename: string): ParsedMigration;
+/** A migration file, classified against `options.before`, the schema the earlier files leave */
+export declare function parseMigration(sql: string, filename: string, options?: ClassifyOptions): ParsedMigration;
 
 // migrate/core/utils.d.ts
 /**
@@ -262,7 +258,12 @@ export type ExtractedSchema = {
 export type MigrationSafety = "safe" | "cautious" | "unsafe";
 export type MigrationClassification = {
     safety: MigrationSafety;
+    /** statements that lose data or break deployed code by name */
     unsafeStatements: string[];
+    /** statements that drop or change something no row holds, or a file that is not one transaction */
+    cautiousStatements: string[];
+    /** Postgres statements that block a table while they run, with what to do instead */
+    lockWarnings: string[];
 };
 export type ParsedMigration = {
     sql: string;
@@ -325,6 +326,30 @@ export type MigrateDiffResult = {
     synced: boolean;
 };
 export declare function generateIncrementalMigration(options: MigrateDiffOptions): MigrateDiffResult;
+
+// migrate/core/classify.d.ts
+/**
+ * The destructive-change gate. Each statement's code (sql-code.ts) is read per action, so a drop
+ * after an `ADD` in one `ALTER TABLE` counts, and a name may be quoted or schema-qualified.
+ *
+ * unsafe: loses data or breaks deployed code by name (table, column, schema, type, sequence,
+ * role drops; CASCADE; retypes; SET NOT NULL; a NOT NULL column without a default; renames;
+ * TRUNCATE; DELETE or UPDATE without a top-level WHERE). cautious: drops nothing a row holds
+ * (indexes, constraints, views, policies, triggers, functions, defaults), a filtered write, a
+ * grant, or a file Atlas runs outside a transaction. A lock warning names a statement that
+ * blocks a Postgres table while it runs. A `DO` body runs, so its statements are read too.
+ */
+import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
+type ClassifyOptions = {
+    /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
+    before?: ExtractedSchema | undefined;
+    dialect?: Dialect | undefined;
+};
+/** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
+declare function extractDropStatements(sql: string, options?: ClassifyOptions): string[];
+/** How destructive a migration is, which statements make it so, and which block a Postgres table */
+declare function classifyMigration(sql: string, options?: ClassifyOptions): MigrationClassification;
+export { classifyMigration, type ClassifyOptions, extractDropStatements };
 
 // migrate/core/sql-scan.d.ts
 /**
