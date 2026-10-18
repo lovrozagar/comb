@@ -328,25 +328,33 @@ export declare function generateIncrementalMigration(options: MigrateDiffOptions
 
 // migrate/core/sql-scan.d.ts
 /**
- * A quote-aware reading of SQL text: code, string or identifier literals, and comments. Every
- * migration step that splits, hashes or terminates SQL reads it through here, so `;`, `--` and
- * `/*` inside a literal are always data.
+ * A quote-aware reading of SQL text: code, strings, identifiers and comments. Every migration
+ * step that splits, hashes, terminates or classifies SQL reads it through here, so `;`, `--` and
+ * `/*` inside a string or identifier are always data. The dialect decides the lexer: SQLite quotes
+ * identifiers with `"`, backticks or brackets and has flat comments; Postgres quotes them with `"`
+ * only, nests comments, escapes with backslashes in `E'…'`, and dollar-quotes `$tag$…$tag$`.
+ */
+import type { Dialect } from "../types.ts";
+/**
+ * `body` is a dollar-quoted `DO` body: it runs during the migration, so it is code to classify,
+ * yet one statement to split, while a function body (`literal`) is only defined.
  */
 type Segment = {
-    kind: "code" | "comment" | "literal";
+    kind: "body" | "code" | "comment" | "identifier" | "literal";
     text: string;
 };
-/** `sql` as consecutive segments that concatenate back to it */
-declare function segments(sql: string): Segment[];
+/** `sql` as consecutive segments that concatenate back to it, read as `dialect` reads it */
+declare function segments(sql: string, dialect?: Dialect): Segment[];
 /**
  * The statements of `sql`, without their terminating `;`. A `;` ends a statement only in code:
  * never inside a literal or a comment, nor inside a trigger's BEGIN … END. A stretch that holds
  * only comments is not a statement.
  */
-declare function splitSqlStatements(sql: string): string[];
+declare function splitSqlStatements(sql: string, dialect?: Dialect): string[];
 /**
- * `sql` with comments dropped and whitespace collapsed outside literals, literals verbatim: two
- * migrations that differ only in layout or comments normalize alike, two that differ in data never.
+ * `sql` with comments dropped and whitespace collapsed outside strings and identifiers, those
+ * verbatim: two migrations that differ only in layout or comments normalize alike, two that differ
+ * in data or names never. A migration's hash is taken over this form.
  */
 declare function normalizeSql(sql: string): string;
 export { normalizeSql, segments, splitSqlStatements, type Segment };

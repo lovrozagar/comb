@@ -1,58 +1,118 @@
 /**
- * A quote-aware reading of SQL text: code, string or identifier literals, and comments. Every
- * migration step that splits, hashes or terminates SQL reads it through here, so `;`, `--` and
- * `/*` inside a literal are always data.
+ * A quote-aware reading of SQL text: code, strings, identifiers and comments. Every migration
+ * step that splits, hashes, terminates or classifies SQL reads it through here, so `;`, `--` and
+ * `/*` inside a string or identifier are always data. The dialect decides the lexer: SQLite quotes
+ * identifiers with `"`, backticks or brackets and has flat comments; Postgres quotes them with `"`
+ * only, nests comments, escapes with backslashes in `E'…'`, and dollar-quotes `$tag$…$tag$`.
  */
+import type { Dialect } from "../types.ts"
 
-type Segment = { kind: "code" | "comment" | "literal"; text: string }
+/**
+ * `body` is a dollar-quoted `DO` body: it runs during the migration, so it is code to classify,
+ * yet one statement to split, while a function body (`literal`) is only defined.
+ */
+type Segment = { kind: "body" | "code" | "comment" | "identifier" | "literal"; text: string }
 
-/** Opening quote → closing quote: strings, double-quoted, backtick and bracket identifiers */
-const QUOTES: Readonly<Record<string, string>> = { '"': '"', "'": "'", "[": "]", "`": "`" }
+/** Opening quote → closing quote, by dialect */
+const QUOTES: Readonly<Record<Dialect, Readonly<Record<string, string>>>> = {
+	postgres: { '"': '"', "'": "'" },
+	sqlite: { '"': '"', "'": "'", "[": "]", "`": "`" },
+}
 
-const opensSpecial = (sql: string, at: number) =>
-	Object.hasOwn(QUOTES, sql[at] as string) || sql.startsWith("--", at) || sql.startsWith("/*", at)
+/** A dollar-quote tag at the start of the text: `$$` or `$name$`, a name never starting with a digit */
+const DOLLAR_TAG = /^\$(?:[A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)?\$/
+/** A character an identifier continues with, so a `$` or an `E` after it starts nothing */
+const IDENT_CHAR = /[\w$\u0080-\uffff]/
+const DO_STATEMENT = /^\s*DO\b/i
 
-/** The end of the literal opening at `at`: a doubled closing quote is an escaped one, except in [ ] */
-function literalEnd(sql: string, at: number): number {
-	const close = QUOTES[sql[at] as string] as string
+type Lexer = { dialect: Dialect; sql: string }
+
+/** Whether the text at `at` opens a backslash-escaped Postgres string: `E'` or `e'`, not part of a word */
+const isEscapeString = ({ dialect, sql }: Lexer, at: number) =>
+	dialect === "postgres" && /[Ee]/.test(sql[at - 1] ?? "") && !IDENT_CHAR.test(sql[at - 2] ?? "")
+
+/** The end of the string or identifier opening at `at`: a doubled closing quote is an escaped one, except in [ ] */
+function quotedEnd(lexer: Lexer, at: number): number {
+	const { sql } = lexer
+	const close = QUOTES[lexer.dialect][sql[at] as string] as string
+	const backslash = close === "'" && isEscapeString(lexer, at)
 	let i = at + 1
 	while (i < sql.length) {
-		if (sql[i] === close && close !== "]" && sql[i + 1] === close) i += 2
+		if (backslash && sql[i] === "\\") i += 2
+		else if (sql[i] === close && close !== "]" && sql[i + 1] === close) i += 2
 		else if (sql[i] === close) return i + 1
 		else i++
 	}
 	return sql.length
 }
 
-function commentEnd(sql: string, at: number): number {
+/** The end of the comment at `at`; Postgres block comments nest */
+function commentEnd({ dialect, sql }: Lexer, at: number): number {
 	if (sql.startsWith("--", at)) {
 		const newline = sql.indexOf("\n", at)
 		return newline === -1 ? sql.length : newline
 	}
-	const close = sql.indexOf("*/", at + 2)
-	return close === -1 ? sql.length : close + 2
+	let depth = 1
+	let i = at + 2
+	while (i < sql.length) {
+		if (sql.startsWith("*/", i)) {
+			depth--
+			i += 2
+			if (depth === 0) return i
+		} else if (dialect === "postgres" && sql.startsWith("/*", i)) {
+			depth++
+			i += 2
+		} else i++
+	}
+	return sql.length
 }
 
-/** `sql` as consecutive segments that concatenate back to it */
-function segments(sql: string): Segment[] {
+/** The dollar-quote tag opening at `at`, or undefined: never inside an identifier or at `$1` */
+function dollarTag({ dialect, sql }: Lexer, at: number): string | undefined {
+	if (dialect !== "postgres" || sql[at] !== "$" || IDENT_CHAR.test(sql[at - 1] ?? "")) return undefined
+	return DOLLAR_TAG.exec(sql.slice(at))?.[0]
+}
+
+/** The segment starting at `at`, given the code of the statement read so far */
+function segmentAt(lexer: Lexer, at: number, statement: string): Segment {
+	const { sql } = lexer
+	const tag = dollarTag(lexer, at)
+	if (tag !== undefined) {
+		const close = sql.indexOf(tag, at + tag.length)
+		const end = close === -1 ? sql.length : close + tag.length
+		return { kind: DO_STATEMENT.test(statement) ? "body" : "literal", text: sql.slice(at, end) }
+	}
+	const quote = QUOTES[lexer.dialect][sql[at] as string]
+	if (quote !== undefined) {
+		const kind = sql[at] === "'" ? "literal" : "identifier"
+		return { kind, text: sql.slice(at, quotedEnd(lexer, at)) }
+	}
+	if (sql.startsWith("--", at) || sql.startsWith("/*", at)) {
+		return { kind: "comment", text: sql.slice(at, commentEnd(lexer, at)) }
+	}
+	let end = at + 1
+	while (end < sql.length && !opensSpecial(lexer, end)) end++
+	return { kind: "code", text: sql.slice(at, end) }
+}
+
+const opensSpecial = (lexer: Lexer, at: number) =>
+	Object.hasOwn(QUOTES[lexer.dialect], lexer.sql[at] as string) ||
+	lexer.sql.startsWith("--", at) ||
+	lexer.sql.startsWith("/*", at) ||
+	dollarTag(lexer, at) !== undefined
+
+/** `sql` as consecutive segments that concatenate back to it, read as `dialect` reads it */
+function segments(sql: string, dialect: Dialect = "sqlite"): Segment[] {
+	const lexer: Lexer = { dialect, sql }
 	const out: Segment[] = []
+	/* the code since the last top-level ;, which tells a DO body from a function body */
+	let statement = ""
 	let i = 0
 	while (i < sql.length) {
-		let end: number
-		let kind: Segment["kind"]
-		if (Object.hasOwn(QUOTES, sql[i] as string)) {
-			end = literalEnd(sql, i)
-			kind = "literal"
-		} else if (sql.startsWith("--", i) || sql.startsWith("/*", i)) {
-			end = commentEnd(sql, i)
-			kind = "comment"
-		} else {
-			end = i + 1
-			while (end < sql.length && !opensSpecial(sql, end)) end++
-			kind = "code"
-		}
-		out.push({ kind, text: sql.slice(i, end) })
-		i = end
+		const segment = segmentAt(lexer, i, statement)
+		if (segment.kind === "code") statement = (statement + segment.text).split(";").at(-1) as string
+		out.push(segment)
+		i += segment.text.length
 	}
 	return out
 }
@@ -97,10 +157,10 @@ function finish(reading: Reading): string {
  * never inside a literal or a comment, nor inside a trigger's BEGIN … END. A stretch that holds
  * only comments is not a statement.
  */
-function splitSqlStatements(sql: string): string[] {
+function splitSqlStatements(sql: string, dialect: Dialect = "sqlite"): string[] {
 	const reading: Reading = { code: "", depth: 0, text: "" }
 	const statements: string[] = []
-	for (const segment of segments(sql)) {
+	for (const segment of segments(sql, dialect)) {
 		if (segment.kind === "code") statements.push(...readCode(reading, segment.text))
 		else reading.text += segment.text
 	}
@@ -109,14 +169,15 @@ function splitSqlStatements(sql: string): string[] {
 }
 
 /**
- * `sql` with comments dropped and whitespace collapsed outside literals, literals verbatim: two
- * migrations that differ only in layout or comments normalize alike, two that differ in data never.
+ * `sql` with comments dropped and whitespace collapsed outside strings and identifiers, those
+ * verbatim: two migrations that differ only in layout or comments normalize alike, two that differ
+ * in data or names never. A migration's hash is taken over this form.
  */
 function normalizeSql(sql: string): string {
 	let out = ""
 	for (const segment of segments(sql)) {
 		const text =
-			segment.kind === "literal" ? segment.text : segment.kind === "comment" ? " " : segment.text.replace(/\s+/g, " ")
+			segment.kind === "comment" ? " " : segment.kind === "code" ? segment.text.replace(/\s+/g, " ") : segment.text
 		out += out.endsWith(" ") && text.startsWith(" ") ? text.slice(1) : text
 	}
 	return out.trim()

@@ -111,10 +111,10 @@ export function extractSchema(sql: string): ExtractedSchema {
    DROP STATEMENT EXTRACTION AND CLASSIFICATION — on code, never on literal text
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/** A statement's code, literals and comments blanked out, whitespace collapsed */
+/** A statement's code with its identifiers, strings and comments blanked out, whitespace collapsed */
 const codeOf = (stmt: string) =>
 	segments(stmt)
-		.map((segment) => (segment.kind === "code" ? segment.text : " "))
+		.map((segment) => (segment.kind === "code" || segment.kind === "identifier" ? segment.text : " "))
 		.join("")
 		.replace(/\s+/g, " ")
 		.trim()

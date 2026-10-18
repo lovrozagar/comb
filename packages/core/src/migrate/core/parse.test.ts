@@ -132,6 +132,12 @@ describe("classifyMigration", () => {
 		expect(result.safety).toBe("unsafe")
 		expect(result.unsafeStatements.length).toBeGreaterThan(0)
 	})
+	it.each(["ALTER TABLE `post` DROP COLUMN `title`;", 'ALTER TABLE "post" DROP COLUMN "title";', 'DROP TABLE "post";'])(
+		"sees a drop through quoted identifiers: %s",
+		(sql) => {
+			expect(classifyMigration(sql).safety).toBe("unsafe")
+		},
+	)
 })
 
 describe("makeIdempotent", () => {
