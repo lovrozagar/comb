@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
+import { FILTER_OPERATORS } from "./filter-parse.ts"
 import {
 	baseListQueryShape,
 	filterAstSchema,
@@ -58,11 +59,13 @@ describe("the shared params and outputs", () => {
 			},
 		}
 		expect(filterAstSchema.parse(ast)).toEqual(ast)
-		expect(
+		const withOperator = (operator: string) =>
 			filterAstSchema.safeParse({
-				root: { conditions: [{ field: "a", operator: "contains" }], logic: "and", subgroups: [] },
-			}).success,
-		).toBe(false)
+				root: { conditions: [{ field: "a", operator, value: 1 }], logic: "and", subgroups: [] },
+			}).success
+		/* the schema is the FilterAST type, every parsed operator included, so a generator that reads it agrees */
+		expect(FILTER_OPERATORS.map(withOperator)).toEqual(FILTER_OPERATORS.map(() => true))
+		expect(withOperator("between")).toBe(false)
 		expect(sortDirectionEnum.options).toEqual(["asc", "desc"])
 	})
 })

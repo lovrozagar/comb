@@ -13,6 +13,7 @@ import {
 	SELECT_DESCRIPTION,
 	SELECT_EXAMPLES,
 } from "./descriptions.ts"
+import { FILTER_OPERATORS } from "./filter-parse.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
 import type { PaginationConfig } from "./schema-types.ts"
 import type { FieldSelection, FilterAST, FilterGroup, ParsedFields } from "./types.ts"
@@ -55,7 +56,7 @@ const filterGroupSchema: z.ZodType<FilterGroup, FilterGroup> = /* @__PURE__ */ z
 		conditions: z.array(
 			z.object({
 				field: z.string(),
-				operator: z.enum(["eq", "gt", "gte", "ilike", "in", "is", "like", "lt", "lte", "ne", "neq", "nin"]),
+				operator: z.enum(FILTER_OPERATORS),
 				value: z.unknown(),
 			}),
 		),

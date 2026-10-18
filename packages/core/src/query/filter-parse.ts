@@ -10,7 +10,8 @@
  */
 import type { FilterAST, FilterCondition, FilterGroup, FilterOperator } from "./types.ts"
 
-const FILTER_OPERATORS: readonly FilterOperator[] = [
+/* A tuple, so the list query schema builds its operator enum from it; `satisfies` holds it to FilterOperator */
+const FILTER_OPERATORS = [
 	"eq",
 	"ne",
 	"neq",
@@ -24,7 +25,7 @@ const FILTER_OPERATORS: readonly FilterOperator[] = [
 	"ilike",
 	"is",
 	"contains",
-] as const
+] as const satisfies readonly FilterOperator[]
 
 /** An operator and the `.` after it; longest first, so `neq.` is not read as `ne` then `q.` */
 const OPERATOR_PATTERN = /^(contains|ilike|like|neq|gte|lte|nin|eq|ne|gt|lt|in|is)\./
