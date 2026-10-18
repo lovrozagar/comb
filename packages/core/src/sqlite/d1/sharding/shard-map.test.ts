@@ -1,5 +1,6 @@
 import { getTableColumns, getTableName } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
+import { getTableConfig } from "drizzle-orm/sqlite-core"
 import { shardMap } from "./shard-map.ts"
 
 describe("shardMap table definition", () => {
@@ -37,5 +38,14 @@ describe("shardMap table definition", () => {
 	it("driver defaults to d1", () => {
 		const cols = getTableColumns(shardMap)
 		expect(cols.driver).toHaveProperty("hasDefault", true)
+	})
+})
+
+describe("shardMap indexes", () => {
+	it("indexes the shard id, and the driver of live rows only", () => {
+		const { indexes } = getTableConfig(shardMap)
+		expect(indexes.map((index) => index.config.name)).toEqual(["idx_shard_map_shard_id", "idx_shard_map_driver"])
+		expect(indexes[0]?.config.where).toBeUndefined()
+		expect(indexes[1]?.config.where).toBeDefined()
 	})
 })

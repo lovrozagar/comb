@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
@@ -31,6 +31,19 @@ describe("run", () => {
 		expect(result.code).toBe(127)
 		expect(result.stdout).toBe("")
 		expect(result.stderr).toBe("comb-no-such-binary: command not found")
+	})
+
+	it("reports a file the OS refuses to execute as exit 126 with the reason", () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-process-"))
+		try {
+			const script = join(dir, "not-executable")
+			writeFileSync(script, "#!/bin/sh\necho hi\n", { mode: 0o644 })
+			const result = run(script, [])
+			expect(result.code).toBe(126)
+			expect(result.stderr).toContain(`${script}: `)
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
 	})
 
 	it("reports output past the buffer limit as its own failure, not as an unrunnable command", () => {
