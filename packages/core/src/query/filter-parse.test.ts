@@ -3,6 +3,13 @@ import { FILTER_OPERATORS, parseFilter } from "./filter-parse.ts"
 
 const value = (input: string) => parseFilter(input)?.root.conditions[0]?.value
 
+/** A well-formed single-condition filter for `op`, with the value shape that operator takes. */
+function sampleFor(op: string): string {
+	if (op === "in" || op === "nin") return `f.${op}.(a,b)`
+	if (op === "is") return `f.${op}.null`
+	return `f.${op}.val`
+}
+
 describe("parseFilter", () => {
 	it("returns null for empty input", () => {
 		expect(parseFilter(null)).toBeNull()
@@ -40,7 +47,9 @@ describe("parseFilter", () => {
 		expect(ast?.root.subgroups).toHaveLength(1)
 		expect(ast?.root.subgroups[0]?.logic).toBe("and")
 	})
+})
 
+describe("parseFilter — operators and fields", () => {
 	it("parses in operator with list values", () => {
 		const ast = parseFilter("status.in.(active,pending,draft)")
 		expect(ast?.root.conditions[0]?.operator).toBe("in")
@@ -80,16 +89,7 @@ describe("parseFilter", () => {
 
 	it("handles all operators", () => {
 		for (const op of FILTER_OPERATORS) {
-			if (op === "in" || op === "nin") {
-				const ast = parseFilter(`f.${op}.(a,b)`)
-				expect(ast?.root.conditions[0]?.operator).toBe(op)
-			} else if (op === "is") {
-				const ast = parseFilter(`f.${op}.null`)
-				expect(ast?.root.conditions[0]?.operator).toBe(op)
-			} else {
-				const ast = parseFilter(`f.${op}.val`)
-				expect(ast?.root.conditions[0]?.operator).toBe(op)
-			}
+			expect(parseFilter(sampleFor(op))?.root.conditions[0]?.operator).toBe(op)
 		}
 	})
 })

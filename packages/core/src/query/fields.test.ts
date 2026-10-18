@@ -11,7 +11,7 @@ import {
 } from "./fields.ts"
 import type { ParsedFields } from "./types.ts"
 
-describe("parseSelect", () => {
+describe("parseSelect — empty input, scalars and wildcards", () => {
 	/* Empty + null handling (4) */
 
 	it("returns null for undefined", () => {
@@ -60,7 +60,9 @@ describe("parseSelect", () => {
 		const result = parseSelect("*,name")
 		expect(result?.root.scalars).toEqual(["*", "name"])
 	})
+})
 
+describe("parseSelect — relations", () => {
 	/* Single relation, explicit fields (3) */
 
 	it("parses relation with one field", () => {
@@ -93,7 +95,9 @@ describe("parseSelect", () => {
 		const result = parseSelect("author()")
 		expect(result?.root.relations).toEqual({})
 	})
+})
 
+describe("parseSelect — nested relations and wildcards", () => {
 	/* Nested relations (3) */
 
 	it("parses two-level nested relation", () => {
@@ -124,7 +128,9 @@ describe("parseSelect", () => {
 		expect(result?.root.scalars).toEqual(["id"])
 		expect(result?.root.relations["author"]?.relations["posts"]?.scalars).toEqual(["*"])
 	})
+})
 
+describe("parseSelect — computed fields, whitespace and negative cases", () => {
 	/* Computed fields (@ prefix) (3) */
 
 	it("parses @ computed field at top level", () => {
@@ -155,7 +161,9 @@ describe("parseSelect", () => {
 		const result = parseSelect(",id,,name,")
 		expect(result?.root.scalars).toEqual(["id", "name"])
 	})
+})
 
+describe("parseSelect — negative and malformed input", () => {
 	/* Negative cases — clean break from old grammar (4) */
 
 	it("treats ~ prefix as literal character, NOT relation", () => {
@@ -240,10 +248,9 @@ describe("buildRelationColumns", () => {
 	it("builds columns from nested selection", () => {
 		const fields = parseSelect("author(id,name)")
 		const selection = fields?.root.relations["author"]
-		if (selection) {
-			const result = buildRelationColumns(selection, { email: true, id: true, name: true })
-			expect(result).toEqual({ id: true, name: true })
-		}
+		if (!selection) throw new Error("expected an author selection")
+		const result = buildRelationColumns(selection, { email: true, id: true, name: true })
+		expect(result).toEqual({ id: true, name: true })
 	})
 })
 
@@ -380,7 +387,9 @@ describe("filterBySelect — nested shapes", () => {
 		const out = filterBySelect({ id: "1", tags: ["raw", null] }, parsed)
 		expect(out["tags"]).toEqual(["raw", null])
 	})
+})
 
+describe("filterBySelect — absent and pass-through relations", () => {
 	it("preserves null and undefined relations verbatim", () => {
 		const parsed = parseSelect("id,author(name)")!
 		expect(filterBySelect({ author: null, id: "1" }, parsed)["author"]).toBeNull()

@@ -31,7 +31,9 @@ describe("parseOrder", () => {
 	it("parses field.desc", () => {
 		expect(parseOrder("createdAt.desc")).toEqual([{ direction: "desc", field: "createdAt" }])
 	})
+})
 
+describe("parseOrder — null ordering", () => {
 	/* null ordering */
 	it("parses field.nullsfirst (asc default)", () => {
 		expect(parseOrder("name.nullsfirst")).toEqual([{ direction: "asc", field: "name", nulls: "first" }])
@@ -56,7 +58,9 @@ describe("parseOrder", () => {
 	it("parses field.desc.nullslast", () => {
 		expect(parseOrder("createdAt.desc.nullslast")).toEqual([{ direction: "desc", field: "createdAt", nulls: "last" }])
 	})
+})
 
+describe("parseOrder — multiple and computed fields", () => {
 	/* multi-field */
 	it("parses comma-separated fields", () => {
 		expect(parseOrder("col1.desc,col2.asc")).toEqual([
@@ -93,7 +97,9 @@ describe("parseOrder", () => {
 	it("computed field with nulls suffix", () => {
 		expect(parseOrder("@score.desc.nullslast")).toEqual([{ direction: "desc", field: "@score", nulls: "last" }])
 	})
+})
 
+describe("parseOrder — edge cases and field names", () => {
 	/* edge cases / malformed input */
 	it("rejects JSON:API '-' prefix (no longer supported)", () => {
 		/* '-' is not a known suffix token — parser emits literal field name */

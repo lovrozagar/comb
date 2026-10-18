@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 
+/** Returns a safeParse result's data; fails the test with the issues when the parse failed. */
+function dataOf<T>(result: { success: true; data: T } | { success: false; error: { message: string } }): T {
+	if (!result.success) throw new Error(`expected a successful parse: ${result.error.message}`)
+	return result.data
+}
+
 describe("createRetrieveQuerySchema", () => {
 	const schema = createRetrieveQuerySchema({
 		fields: {
@@ -13,10 +19,9 @@ describe("createRetrieveQuerySchema", () => {
 	it("parses valid input", () => {
 		const result = schema.safeParse({ lang: "en", select: "id,name" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.lang).toBe("en")
-			expect(result.data.parsedFields?.root.scalars).toEqual(["id", "name"])
-		}
+		const data = dataOf(result)
+		expect(data.lang).toBe("en")
+		expect(data.parsedFields?.root.scalars).toEqual(["id", "name"])
 	})
 
 	it("rejects unknown fields", () => {
@@ -32,9 +37,8 @@ describe("createRetrieveQuerySchema", () => {
 	it("returns null parsedFields when no select param", () => {
 		const result = schema.safeParse({})
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.parsedFields).toBeNull()
-		}
+		const data = dataOf(result)
+		expect(data.parsedFields).toBeNull()
 	})
 })
 

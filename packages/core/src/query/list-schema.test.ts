@@ -5,59 +5,70 @@ import { createListQuerySchema } from "./list-schema.ts"
 import { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
 
-describe("createListQuerySchema", () => {
-	const schema = createListQuerySchema({
-		filter: { status: "enum", type: "string" },
-		sort: ["createdAt", "name"] as const,
-	})
+/** Returns a safeParse result's data; fails the test with the issues when the parse failed. */
+function dataOf<T>(result: { success: true; data: T } | { success: false; error: { message: string } }): T {
+	if (!result.success) throw new Error(`expected a successful parse: ${result.error.message}`)
+	return result.data
+}
 
+/** The input JSON Schema properties of a query schema. */
+function inputProps(schema: z.ZodType) {
+	return (z.toJSONSchema(schema, { io: "input" }) as { properties: Record<string, Record<string, unknown>> }).properties
+}
+
+/** A list schema with an enum filter and two sort fields, shared by the parse tests. */
+const listSchema = createListQuerySchema({
+	filter: { status: "enum", type: "string" },
+	sort: ["createdAt", "name"] as const,
+})
+
+describe("createListQuerySchema — defaults and validation", () => {
 	it("parses valid input with defaults", () => {
-		const result = schema.safeParse({})
+		const result = listSchema.safeParse({})
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.limit).toBe(PAGINATION_DEFAULTS.defaultLimit)
-			expect(result.data.parsedSort).toHaveLength(1)
-			expect(result.data.parsedSort[0]?.field).toBe("createdAt")
-			expect(result.data.parsedFields).toBeNull()
-		}
+		const data = dataOf(result)
+		expect(data.limit).toBe(PAGINATION_DEFAULTS.defaultLimit)
+		expect(data.parsedSort).toHaveLength(1)
+		expect(data.parsedSort[0]?.field).toBe("createdAt")
+		expect(data.parsedFields).toBeNull()
 	})
 
 	it("rejects a select param when fields is omitted", () => {
-		expect(schema.safeParse({ select: "id" }).success).toBe(false)
+		expect(listSchema.safeParse({ select: "id" }).success).toBe(false)
 	})
 
 	it("validates sort fields", () => {
-		const result = schema.safeParse({ order: "unknown.desc" })
+		const result = listSchema.safeParse({ order: "unknown.desc" })
 		expect(result.success).toBe(false)
 	})
 
 	it("validates filter", () => {
-		const result = schema.safeParse({ filter: "status.eq.active" })
+		const result = listSchema.safeParse({ filter: "status.eq.active" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.filterAst).toBeTruthy()
-		}
+		const data = dataOf(result)
+		expect(data.filterAst).toBeTruthy()
 	})
 
 	it("rejects unknown filter fields", () => {
-		const result = schema.safeParse({ filter: "bad.eq.x" })
+		const result = listSchema.safeParse({ filter: "bad.eq.x" })
 		expect(result.success).toBe(false)
 	})
 
 	it("accepts cursor + page together and lets cursor take precedence", () => {
 		const cursor = createCursor({ createdAt: 1, id: "abc" }, [{ direction: "desc", field: "createdAt" }])
-		const result = schema.safeParse({ cursor, page: 2 })
+		const result = listSchema.safeParse({ cursor, page: 2 })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.cursor).toBe(cursor)
-			expect(result.data.page).toBe(2)
-		}
+		const data = dataOf(result)
+		expect(data.cursor).toBe(cursor)
+		expect(data.page).toBe(2)
 	})
 
 	it("rejects a cursor that does not decode", () => {
-		expect(schema.safeParse({ cursor: "abc" }).success).toBe(false)
+		expect(listSchema.safeParse({ cursor: "abc" }).success).toBe(false)
 	})
+})
 
+describe("createListQuerySchema — pagination, extend and search", () => {
 	it("respects custom pagination limits", () => {
 		const customSchema = createListQuerySchema({
 			pagination: { defaultLimit: 5, maxLimit: 10 },
@@ -65,9 +76,8 @@ describe("createListQuerySchema", () => {
 		})
 		const result = customSchema.safeParse({})
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.limit).toBe(5)
-		}
+		const data = dataOf(result)
+		expect(data.limit).toBe(5)
 	})
 
 	it("clamps limit to max", () => {
@@ -80,11 +90,10 @@ describe("createListQuerySchema", () => {
 	})
 
 	it("builds sortOrderBy object", () => {
-		const result = schema.safeParse({ order: "name.desc" })
+		const result = listSchema.safeParse({ order: "name.desc" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.sortOrderBy).toEqual({ name: "desc" })
-		}
+		const data = dataOf(result)
+		expect(data.sortOrderBy).toEqual({ name: "desc" })
 	})
 
 	it("supports extend with extra fields", () => {
@@ -94,99 +103,98 @@ describe("createListQuerySchema", () => {
 		})
 		const result = extended.safeParse({ tag: "featured" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.tag).toBe("featured")
-		}
+		const data = dataOf(result)
+		expect(data.tag).toBe("featured")
 	})
 
 	it("passes through q param when search is declared", () => {
 		const searchable = createListQuerySchema({ search: ["name"], sort: ["createdAt"] as const })
 		const result = searchable.safeParse({ q: "search term" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.q).toBe("search term")
-		}
+		const data = dataOf(result)
+		expect(data.q).toBe("search term")
 	})
+})
 
+describe("createListQuerySchema — order", () => {
 	it("defaults unprefixed order field to asc", () => {
-		const result = schema.safeParse({ order: "name" })
+		const result = listSchema.safeParse({ order: "name" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.parsedSort[0]?.direction).toBe("asc")
-			expect(result.data.sortOrderBy).toEqual({ name: "asc" })
-		}
+		const data = dataOf(result)
+		expect(data.parsedSort[0]?.direction).toBe("asc")
+		expect(data.sortOrderBy).toEqual({ name: "asc" })
 	})
 
 	it("treats field.desc as desc", () => {
-		const result = schema.safeParse({ order: "name.desc" })
+		const result = listSchema.safeParse({ order: "name.desc" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.parsedSort[0]?.direction).toBe("desc")
-		}
+		const data = dataOf(result)
+		expect(data.parsedSort[0]?.direction).toBe("desc")
 	})
 
 	it("defaults to first config field with desc when no order param", () => {
-		const result = schema.safeParse({})
+		const result = listSchema.safeParse({})
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.parsedSort).toHaveLength(1)
-			expect(result.data.parsedSort[0]?.field).toBe("createdAt")
-			expect(result.data.parsedSort[0]?.direction).toBe("desc")
-		}
+		const data = dataOf(result)
+		expect(data.parsedSort).toHaveLength(1)
+		expect(data.parsedSort[0]?.field).toBe("createdAt")
+		expect(data.parsedSort[0]?.direction).toBe("desc")
 	})
+})
 
+describe("createListQuerySchema — parsed output", () => {
 	it("keeps nullable and undefined output keys in the parsed result", () => {
-		const result = schema.safeParse({})
+		const result = listSchema.safeParse({})
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data).toHaveProperty("cursor", undefined)
-			expect(result.data).toHaveProperty("lang", undefined)
-			expect(result.data).toHaveProperty("page", undefined)
-			expect(result.data).toHaveProperty("q", undefined)
-			expect(result.data).toHaveProperty("filterAst", null)
-			expect(result.data).toHaveProperty("parsedFields", null)
-		}
+		const data = dataOf(result)
+		expect(data).toHaveProperty("cursor", undefined)
+		expect(data).toHaveProperty("lang", undefined)
+		expect(data).toHaveProperty("page", undefined)
+		expect(data).toHaveProperty("q", undefined)
+		expect(data).toHaveProperty("filterAst", null)
+		expect(data).toHaveProperty("parsedFields", null)
 	})
+})
 
+describe("createListQuerySchema — order lists and nulls", () => {
 	it("parses multiple order entries in order", () => {
-		const result = schema.safeParse({ order: "createdAt.desc,name" })
+		const result = listSchema.safeParse({ order: "createdAt.desc,name" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.parsedSort).toEqual([
-				{ direction: "desc", field: "createdAt" },
-				{ direction: "asc", field: "name" },
-			])
-			expect(result.data.sortOrderBy).toEqual({
-				createdAt: "desc",
-				name: "asc",
-			})
-		}
+		const data = dataOf(result)
+		expect(data.parsedSort).toEqual([
+			{ direction: "desc", field: "createdAt" },
+			{ direction: "asc", field: "name" },
+		])
+		expect(data.sortOrderBy).toEqual({
+			createdAt: "desc",
+			name: "asc",
+		})
 	})
 
 	it("parses order with .nullsfirst suffix", () => {
-		const result = schema.safeParse({ order: "name.asc.nullsfirst" })
+		const result = listSchema.safeParse({ order: "name.asc.nullsfirst" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.parsedSort[0]).toEqual({
-				direction: "asc",
-				field: "name",
-				nulls: "first",
-			})
-		}
+		const data = dataOf(result)
+		expect(data.parsedSort[0]).toEqual({
+			direction: "asc",
+			field: "name",
+			nulls: "first",
+		})
 	})
 
 	it("parses order with .desc.nullslast suffix", () => {
-		const result = schema.safeParse({ order: "createdAt.desc.nullslast" })
+		const result = listSchema.safeParse({ order: "createdAt.desc.nullslast" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.parsedSort[0]).toEqual({
-				direction: "desc",
-				field: "createdAt",
-				nulls: "last",
-			})
-		}
+		const data = dataOf(result)
+		expect(data.parsedSort[0]).toEqual({
+			direction: "desc",
+			field: "createdAt",
+			nulls: "last",
+		})
 	})
+})
 
+describe("createListQuerySchema — parsed fields", () => {
 	it("populates parsedFields as data when fields is set", () => {
 		const withFields = createListQuerySchema({
 			fields: {
@@ -198,15 +206,14 @@ describe("createListQuerySchema", () => {
 		})
 		const result = withFields.safeParse({ select: "id,author(name)" })
 		expect(result.success).toBe(true)
-		if (result.success) {
-			expect(result.data.parsedFields).toEqual({
-				root: {
-					relations: { author: { relations: {}, scalars: ["name"] } },
-					scalars: ["id"],
-				},
-			})
-			expect(result.data.parsedFields).not.toHaveProperty("hasRelation")
-		}
+		const data = dataOf(result)
+		expect(data.parsedFields).toEqual({
+			root: {
+				relations: { author: { relations: {}, scalars: ["name"] } },
+				scalars: ["id"],
+			},
+		})
+		expect(data.parsedFields).not.toHaveProperty("hasRelation")
 	})
 })
 
@@ -244,7 +251,9 @@ describe("createListQuerySchema → JSON Schema", () => {
 		const props = jsonSchema.properties as Record<string, unknown>
 		expect(Object.keys(props)).toContain("lang")
 	})
+})
 
+describe("createListQuerySchema → JSON Schema descriptions", () => {
 	it("z.toJSONSchema with default options succeeds because pipe output is a real object tree", () => {
 		const schema = createListQuerySchema({ sort: ["createdAt"] as const })
 		const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>
@@ -305,9 +314,6 @@ describe("createListQuerySchema → JSON Schema", () => {
 })
 
 describe("createListQuerySchema — advertises only what it honors", () => {
-	const props = (schema: z.ZodType) =>
-		(z.toJSONSchema(schema, { io: "input" }) as { properties: Record<string, Record<string, unknown>> }).properties
-
 	it("rejects unknown query keys", () => {
 		const schema = createListQuerySchema({ sort: ["created_at"] })
 		expect(schema.safeParse({ name: "eq.x" }).success).toBe(false)
@@ -315,26 +321,28 @@ describe("createListQuerySchema — advertises only what it honors", () => {
 
 	it("omits filter when no filter fields are declared", () => {
 		const schema = createListQuerySchema({ sort: ["created_at"] })
-		expect(props(schema)).not.toHaveProperty("filter")
+		expect(inputProps(schema)).not.toHaveProperty("filter")
 		expect(schema.safeParse({ filter: "name.eq.x" }).success).toBe(false)
 	})
 
 	it("omits q unless search is declared", () => {
-		expect(props(createListQuerySchema({ sort: ["created_at"] }))).not.toHaveProperty("q")
-		expect(props(createListQuerySchema({ search: ["name"], sort: ["created_at"] }))).toHaveProperty("q")
+		expect(inputProps(createListQuerySchema({ sort: ["created_at"] }))).not.toHaveProperty("q")
+		expect(inputProps(createListQuerySchema({ search: ["name"], sort: ["created_at"] }))).toHaveProperty("q")
 	})
 
 	it("omits lang unless lang is declared", () => {
-		expect(props(createListQuerySchema({ sort: ["created_at"] }))).not.toHaveProperty("lang")
-		expect(props(createListQuerySchema({ lang: true, sort: ["created_at"] }))).toHaveProperty("lang")
+		expect(inputProps(createListQuerySchema({ sort: ["created_at"] }))).not.toHaveProperty("lang")
+		expect(inputProps(createListQuerySchema({ lang: true, sort: ["created_at"] }))).toHaveProperty("lang")
 	})
+})
 
+describe("createListQuerySchema — advertised descriptions", () => {
 	it("describes filter and order with the declared fields only", () => {
 		const schema = createListQuerySchema({
 			filter: { created_at: "number", name: "string" },
 			sort: ["created_at", "name"],
 		})
-		const { filter, order } = props(schema)
+		const { filter, order } = inputProps(schema)
 		expect(String(filter?.["description"])).toContain("name (string:")
 		expect(String(filter?.["description"])).toContain("created_at (number:")
 		expect(String(order?.["description"])).toContain("created_at, name")
@@ -345,14 +353,16 @@ describe("createListQuerySchema — advertises only what it honors", () => {
 		expect(new RegExp(String(order?.["pattern"])).test("name.asc,created_at.desc.nullslast")).toBe(true)
 		expect(new RegExp(String(order?.["pattern"])).test("slug.asc")).toBe(false)
 	})
+})
 
+describe("createListQuerySchema — generated examples and facts", () => {
 	it("every generated example parses under the schema", () => {
 		const schema = createListQuerySchema({
 			filter: { active: "boolean", created_at: "date", name: "string", role: "enum", size: "number" },
 			search: ["name"],
 			sort: ["created_at", "name"],
 		})
-		const { filter, order } = props(schema)
+		const { filter, order } = inputProps(schema)
 		const filterExamples = (filter?.["examples"] ?? []) as string[]
 		const orderExamples = (order?.["examples"] ?? []) as string[]
 		expect(filterExamples.length).toBeGreaterThan(0)

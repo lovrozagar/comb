@@ -4,6 +4,12 @@ import { OPERATORS_BY_TYPE, validateFilter } from "./filter-validate.ts"
 /** `a.in.(0,…,n-1)` */
 const list = (n: number) => `a.in.(${Array.from({ length: n }, (_, i) => i).join(",")})`
 
+/** The errors of an invalid result; fails the test when the filter was absent or valid. */
+function errorsOf(result: ReturnType<typeof validateFilter>): string[] {
+	if (!result || result.valid) throw new Error(`expected an invalid result, got ${JSON.stringify(result)}`)
+	return result.errors
+}
+
 describe("validateFilter", () => {
 	it("returns null for empty filter", () => {
 		expect(validateFilter("", {})).toBeNull()
@@ -18,9 +24,7 @@ describe("validateFilter", () => {
 	it("rejects unknown fields", () => {
 		const result = validateFilter("unknown.eq.x", { status: "enum" })
 		expect(result?.valid).toBe(false)
-		if (result && !result.valid) {
-			expect(result.errors[0]).toContain("Unknown filter field")
-		}
+		expect(errorsOf(result)[0]).toContain("Unknown filter field")
 	})
 
 	it("rejects invalid operators for field type", () => {
@@ -49,19 +53,19 @@ describe("validateFilter — diagnostics", () => {
 	it("reports invalid syntax rather than throwing", () => {
 		const result = validateFilter("status", { status: "enum" })
 		expect(result?.valid).toBe(false)
-		if (result && !result.valid) expect(result.errors[0]).toContain("Invalid filter syntax")
+		expect(errorsOf(result)[0]).toContain("Invalid filter syntax")
 	})
 
 	it("reports a field absent from the allowed set", () => {
 		const result = validateFilter("secret.eq.x", { status: "enum" })
 		expect(result?.valid).toBe(false)
-		if (result && !result.valid) expect(result.errors.join(" ")).toContain("Unknown filter field")
+		expect(errorsOf(result).join(" ")).toContain("Unknown filter field")
 	})
 
 	it("reports an operator the field's type does not support", () => {
 		const result = validateFilter("active.like.x", { active: "boolean" })
 		expect(result?.valid).toBe(false)
-		if (result && !result.valid) expect(result.errors.join(" ")).toContain("Invalid operator")
+		expect(errorsOf(result).join(" ")).toContain("Invalid operator")
 	})
 
 	it("rejects contains on every field type: comb runs no contains, its callers do", () => {
@@ -85,14 +89,14 @@ describe("validateFilter — limits", () => {
 		expect(validateFilter(twenty, fields)?.valid).toBe(true)
 		const result = validateFilter(`${twenty},a.neq.99`, fields)
 		expect(result?.valid).toBe(false)
-		if (result && !result.valid) expect(result.errors.join(";")).toContain("max 20")
+		expect(errorsOf(result).join(";")).toContain("max 20")
 	})
 
 	it("rejects nesting deeper than 3 groups by default", () => {
 		expect(validateFilter("or(and(or(a.eq.1,a.eq.2),a.eq.3),a.eq.4)", fields)?.valid).toBe(true)
 		const result = validateFilter("or(and(or(and(a.eq.1,a.eq.2),a.eq.3),a.eq.4),a.eq.5)", fields)
 		expect(result?.valid).toBe(false)
-		if (result && !result.valid) expect(result.errors.join(";")).toContain("max 3")
+		expect(errorsOf(result).join(";")).toContain("max 3")
 	})
 
 	it("rejects in lists over 50 values, and filters binding over 60 values in all, by default (S-11)", () => {

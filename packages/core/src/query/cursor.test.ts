@@ -14,6 +14,26 @@ import type { SortField } from "./types.ts"
 
 const BY_CREATED: SortField[] = [{ direction: "desc", field: "created_at" }]
 
+/** Runs `fn` and returns what it threw; fails the test if it returns normally. */
+function thrown(fn: () => unknown): unknown {
+	try {
+		fn()
+	} catch (error) {
+		return error
+	}
+	throw new Error("expected the call to throw")
+}
+
+/** Encodes any payload the way the cursor wire format does (base64url, unpadded). */
+function wire(body: unknown): string {
+	return btoa(JSON.stringify(body)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+}
+
+/** Builds a cursor payload under the created_at.desc signature. */
+function payload(v: unknown[], i: unknown = 1) {
+	return { i, s: "created_at.desc.nullsfirst", v }
+}
+
 describe("cursor encode/decode", () => {
 	it("roundtrips every value with its sort signature and id", () => {
 		const encoded = encodeCursor({ i: "usr_abc123", s: "created_at.desc.nullsfirst", v: ["2024-01-01", 42, null] })
@@ -113,13 +133,9 @@ describe("cursorProblem / readCursor", () => {
 
 	it("rejects garbage with a 400", () => {
 		expect(cursorProblem("garbage", BY_CREATED)).toBe("Invalid cursor")
-		try {
-			readCursor("garbage", BY_CREATED)
-			expect.unreachable()
-		} catch (error) {
-			expect((error as CombError).status).toBe(400)
-			expect((error as CombError).errorKey).toBe("invalid_cursor")
-		}
+		const error = thrown(() => readCursor("garbage", BY_CREATED))
+		expect(error).toBeInstanceOf(CombError)
+		expect(error).toMatchObject({ errorKey: "invalid_cursor", status: 400 })
 	})
 })
 
@@ -134,10 +150,6 @@ describe("getPrimarySortDirection", () => {
 })
 
 describe("decodeCursor — what a cursor may carry (Q-M3, Q-H4)", () => {
-	const wire = (payload: unknown) =>
-		btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
-	const payload = (v: unknown[], i: unknown = 1) => ({ i, s: "created_at.desc.nullsfirst", v })
-
 	it("keeps a numeric id a number and decodes a tagged date", () => {
 		expect(decodeCursor(wire(payload([{ $date: 5 }], 7)))).toEqual({
 			id: 7,

@@ -141,12 +141,13 @@ describe("queryHelpers.listOptions", () => {
 	})
 })
 
-describe("queryHelpers.paginate", () => {
-	const defaultQuery = {
-		limit: 5,
-		parsedSort: [{ direction: "desc" as const, field: "createdAt" }],
-	}
+/** The list query the paginate tests start from: five rows, newest first. */
+const defaultQuery = {
+	limit: 5,
+	parsedSort: [{ direction: "desc" as const, field: "createdAt" }],
+}
 
+describe("queryHelpers.paginate — items and projection", () => {
 	it("returns paginated result with hasMore=false", () => {
 		const items = [
 			{ _total: 2, id: "1" },
@@ -201,7 +202,9 @@ describe("queryHelpers.paginate", () => {
 
 		expect(resultItems).toEqual([{ id: "1", name: "a" }])
 	})
+})
 
+describe("queryHelpers.paginate — next cursor and hasMore", () => {
 	it("encodes nextCursor from the pre-project last row", () => {
 		const items = [
 			{ _total: 3, createdAt: "2024-01-03", id: "c", name: "C" },
@@ -234,7 +237,9 @@ describe("queryHelpers.paginate", () => {
 		expect(pagination.hasMore).toBe(true)
 		expect(resultItems).toHaveLength(2)
 	})
+})
 
+describe("queryHelpers.paginate — count and page", () => {
 	it("uses _total from first item", () => {
 		const items = [{ _total: 42, id: "1" }]
 		const [, pagination] = queryHelpers.paginate(items, { ...defaultQuery, limit: 10 })
@@ -261,7 +266,9 @@ describe("queryHelpers.paginate", () => {
 		const [, pagination] = queryHelpers.paginate([], { ...defaultQuery, limit: 10 })
 		expect(pagination.page).toBe(1)
 	})
+})
 
+describe("queryHelpers.paginate — nextCursor and cursor paging", () => {
 	it("populates nextCursor when hasMore and items have id", () => {
 		const items = [
 			{ _total: 50, createdAt: "2024-01-03", id: "c" },
@@ -290,7 +297,9 @@ describe("queryHelpers.paginate", () => {
 
 		expect(pagination.page).toBeNull()
 	})
+})
 
+describe("queryHelpers.paginate — nextCursor edge cases", () => {
 	it("builds nextCursor even for page-only when hasMore", () => {
 		const items = [
 			{ _total: 50, createdAt: "2024-03-01", id: "x" },

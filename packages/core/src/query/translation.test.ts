@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { resolveTranslation } from "./translation.ts"
 
-describe("resolveTranslation", () => {
-	const translations = [
-		{ languageCode: "en", name: "Hello", title: "World" },
-		{ languageCode: "de", name: "Hallo", title: "Welt" },
-		{ languageCode: "fr", name: "Bonjour", title: "Monde" },
-	]
+/** Three complete translations shared by the lookup and shaping tests. */
+const translations = [
+	{ languageCode: "en", name: "Hello", title: "World" },
+	{ languageCode: "de", name: "Hallo", title: "Welt" },
+	{ languageCode: "fr", name: "Bonjour", title: "Monde" },
+]
 
+describe("resolveTranslation — language lookup and fallback", () => {
 	it("returns exact language match", () => {
 		const result = resolveTranslation({
 			defaultLang: "en",
@@ -49,7 +50,9 @@ describe("resolveTranslation", () => {
 			}),
 		).toBeNull()
 	})
+})
 
+describe("resolveTranslation — fields, case and keys", () => {
 	it("filters by fields when provided", () => {
 		const result = resolveTranslation({
 			defaultLang: "en",
