@@ -189,6 +189,7 @@ describe("classifyMigration on Atlas's SQLite table rebuild", () => {
 		const sql = rebuild("`id`, `n`")
 		expect(lite(sql, before).safety).toBe("unsafe")
 		expect(extractDropStatements(sql, { before, dialect: "sqlite" })).toEqual(["DROP COLUMN post.title"])
+		expect(lite(sql, before).unsafeStatements).toEqual(["DROP TABLE `post` (rebuilds post without title)"])
 	})
 
 	it("calls a rebuild of a table with no earlier definition unsafe", () => {

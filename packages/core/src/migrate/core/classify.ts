@@ -86,7 +86,11 @@ function rebuildFinding(code: string, ctx: FileContext): Finding | undefined {
 	if (earlier === undefined) return { level: "unsafe", note: `rebuilds ${name}, whose earlier columns are unknown` }
 	const lost = earlier.filter((column) => !rebuild.columns.includes(column))
 	if (lost.length === 0) return { level: "cautious" }
-	return { drops: lost.map((column) => `DROP COLUMN ${name}.${column}`), level: "unsafe" }
+	return {
+		drops: lost.map((column) => `DROP COLUMN ${name}.${column}`),
+		level: "unsafe",
+		note: `rebuilds ${name} without ${lost.join(", ")}`,
+	}
 }
 
 /** A CREATE INDEX that blocks writes to a table this file did not create */
