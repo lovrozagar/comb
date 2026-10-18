@@ -18,6 +18,12 @@ describe("queryHelpers.countExtra", () => {
 		const result = queryHelpers.countExtra({})
 		expect(result._total).toBeDefined()
 	})
+
+	it("reads a built ListQueryResult, the query a repository holds, by its pagination mode", () => {
+		const built = (type: "cursor" | "offset") => ({ limit: 21, meta: { limit: 20, page: 1, type }, offset: 0 })
+		expect(queryHelpers.countExtra(built("cursor"))).toEqual({})
+		expect(queryHelpers.countExtra(built("offset"))._total).toBeDefined()
+	})
 })
 
 describe("queryHelpers.filterValue", () => {

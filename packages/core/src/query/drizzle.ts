@@ -26,13 +26,17 @@ type DrizzleListOptions = {
 	where?: { RAW: (table: RelationalTable) => SQL }
 }
 
+/** The parsed request, or the `ListQueryResult` built from it: what a service or a repository holds */
+type CountQuery = { cursor?: string | null | undefined } | { meta: { type: "cursor" | "offset" } }
+
 /**
  * The `select` extra that counts every row the filter matches, for `paginate` to report. An
  * offset request gets it; a cursor request gets none, because the window would make the
  * database read every remaining row on each page, which is what keyset pagination avoids.
  */
-function countExtra(query: { cursor?: string | null | undefined }): { _total?: SQL.Aliased<number> } {
-	return query.cursor ? {} : { _total: sql<number>`cast(count(*) over() as integer)`.as("_total") }
+function countExtra(query: CountQuery): { _total?: SQL.Aliased<number> } {
+	const cursor = "meta" in query ? query.meta.type === "cursor" : Boolean(query.cursor)
+	return cursor ? {} : { _total: sql<number>`cast(count(*) over() as integer)`.as("_total") }
 }
 
 /**
