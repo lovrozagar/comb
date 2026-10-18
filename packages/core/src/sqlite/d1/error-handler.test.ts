@@ -96,3 +96,14 @@ describe("d1ErrorHandler: a D1 message without its extended code", () => {
 		})
 	})
 })
+
+describe("d1ErrorHandler on a wrapper whose message reads like D1", () => {
+	it("classifies by the platform error under it, never the wrapper's words", () => {
+		/* no SQLite code anywhere, so the platform message decides: the wrapper's words must not */
+		const platform = new Error("D1_ERROR: Network connection lost.")
+		const appWrapper = new Error("D1_ERROR: storage limit reached for request quota", { cause: platform })
+		expect(() => d1ErrorHandler(appWrapper, [])).toThrow(
+			expect.objectContaining({ errorKey: "database_unavailable", status: 503 }),
+		)
+	})
+})

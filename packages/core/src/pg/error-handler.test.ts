@@ -164,3 +164,11 @@ describe("pgErrorHandler: retryable transaction failures", () => {
 		})
 	})
 })
+
+describe("readPgError on a wrapper that carries its own code", () => {
+	it("reads the driver error under it: the server's error is the deepest", () => {
+		const driver = nodePg({ code: "23505", constraint: "store_slug_key", table: "store" })
+		const appWrapper = Object.assign(new Error("request failed: 57014"), { cause: driver, code: "57014" })
+		expect(readPgError(appWrapper)).toMatchObject({ code: "23505", constraint: "store_slug_key" })
+	})
+})

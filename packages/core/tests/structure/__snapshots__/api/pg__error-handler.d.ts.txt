@@ -8,7 +8,10 @@ export type PgErrorRead = {
     keyColumns: string[];
     table: string | undefined;
 };
-/** The Postgres server error inside `error`, or null when there is none. */
+/**
+ * The Postgres server error inside `error`, or null when there is none. The chain is read innermost
+ * first: the driver's error is the deepest, and a wrapper's own `code` never wins over it.
+ */
 export declare function readPgError(error: unknown): PgErrorRead | null;
 /**
  * Handle PostgreSQL errors: constraint violations through the app's maps, resource and

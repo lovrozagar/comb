@@ -50,22 +50,27 @@ function keyColumns(detail: string | undefined): string[] {
 	return list === undefined ? [] : list.split(",").map((column) => column.trim().replace(/^"|"$/g, ""))
 }
 
-/** The Postgres server error inside `error`, or null when there is none. */
+/**
+ * The Postgres server error inside `error`, or null when there is none. The chain is read innermost
+ * first: the driver's error is the deepest, and a wrapper's own `code` never wins over it.
+ */
 export function readPgError(error: unknown): PgErrorRead | null {
-	let current: unknown = error
-	for (let depth = 0; depth < 8 && typeof current === "object" && current !== null; depth++) {
+	const chain: DriverError[] = []
+	for (let current: unknown = error; chain.length < 8 && typeof current === "object" && current !== null;) {
 		const f = fields(current)
-		const code = sqlstate(f)
-		if (code !== undefined) {
-			return {
-				code,
-				column: text(f.column) ?? text(f.column_name),
-				constraint: text(f.constraint) ?? text(f.constraint_name),
-				keyColumns: keyColumns(text(f.detail)),
-				table: text(f.table) ?? text(f.table_name),
-			}
-		}
+		chain.push(f)
 		current = f.cause
+	}
+	for (const f of chain.toReversed()) {
+		const code = sqlstate(f)
+		if (code === undefined) continue
+		return {
+			code,
+			column: text(f.column) ?? text(f.column_name),
+			constraint: text(f.constraint) ?? text(f.constraint_name),
+			keyColumns: keyColumns(text(f.detail)),
+			table: text(f.table) ?? text(f.table_name),
+		}
 	}
 	return null
 }

@@ -39,15 +39,19 @@ const STORAGE_FULL: Outcome = {
 	status: "unprocessable_entity",
 }
 
-/** The D1 platform message in the chain, skipping wrappers that carry the SQL (drizzle's `query`). */
+/**
+ * The D1 platform message in the chain, read innermost first: the platform's error is the deepest,
+ * and a wrapper's message (drizzle's carries the SQL and its params) never decides the outcome.
+ */
 function platformMessage(error: Error): string | null {
-	let current: unknown = error
-	for (let depth = 0; depth < 8 && current instanceof Error; depth++) {
-		const isWrapper = typeof (current as { query?: unknown }).query === "string"
-		if (!isWrapper && D1_PREFIX.test(current.message)) return current.message
-		current = current.cause
+	const chain: Error[] = []
+	for (let current: unknown = error; chain.length < 8 && current instanceof Error; current = current.cause) {
+		chain.push(current)
 	}
-	return null
+	const platform = chain
+		.toReversed()
+		.find((link) => typeof (link as { query?: unknown }).query !== "string" && D1_PREFIX.test(link.message))
+	return platform?.message ?? null
 }
 
 function platformOutcome(message: string): Outcome {
