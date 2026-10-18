@@ -57,7 +57,15 @@ function after(key: SortKey, value: unknown): SQL | null {
  * Expanded rather than a row-value comparison because each key carries its own
  * direction and null placement.
  */
-function keysetSQL(keys: readonly SortKey[], values: readonly unknown[], tiebreak: Tiebreak, id: unknown): SQL {
+/** Where a cursor points: the sort keys and the row's values for them, then the tiebreak and its id */
+type KeysetPosition = {
+	id: unknown
+	keys: readonly SortKey[]
+	tiebreak: Tiebreak
+	values: readonly unknown[]
+}
+
+function keysetSQL({ id, keys, tiebreak, values }: KeysetPosition): SQL {
 	const branches: SQL[] = []
 	const prefix: SQL[] = []
 
@@ -74,4 +82,4 @@ function keysetSQL(keys: readonly SortKey[], values: readonly unknown[], tiebrea
 	return branches.length === 1 ? (branches[0] as SQL) : (or(...branches) as SQL)
 }
 
-export { keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak }
+export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak }

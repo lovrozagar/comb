@@ -128,7 +128,7 @@ function drizzleListOptions(query: {
 	const cursor = readCursor(query.cursor, sort)
 	const where = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
-		return keysetSQL(keys, cursor.values, tiebreak, cursor.id)
+		return keysetSQL({ id: cursor.id, keys, tiebreak, values: cursor.values })
 	}
 	return { ...base, offset: 0, where: { RAW: where } }
 }

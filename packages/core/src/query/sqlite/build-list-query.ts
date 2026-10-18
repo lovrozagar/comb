@@ -126,7 +126,7 @@ function finish({ keyset, parsed, sort, tiebreak, where }: Finish): ListQueryRes
 		}
 		const cursor = readCursor(parsed.cursor, sort)
 		assertCursorFits([...keyset.keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
-		const after = keysetSQL(keyset.keys, cursor.values, tiebreak, cursor.id)
+		const after = keysetSQL({ id: cursor.id, keys: keyset.keys, tiebreak, values: cursor.values })
 		return {
 			limit: parsed.limit + 1,
 			meta: { limit: parsed.limit, page: 1, type: "cursor" },

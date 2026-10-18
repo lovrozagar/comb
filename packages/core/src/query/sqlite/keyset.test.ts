@@ -28,22 +28,46 @@ describe("orderSQL and orderByKeys", () => {
 
 describe("keysetSQL", () => {
 	it("is the tiebreak alone when the order has no other key, in either direction", () => {
-		expect(compile(keysetSQL([], [], tiebreak, "p_5"))).toEqual({ params: ["p_5"], sql: '"post"."id" < ?' })
-		expect(compile(keysetSQL([], [], { ...tiebreak, direction: "asc" }, "p_5")).sql).toBe('"post"."id" > ?')
+		expect(compile(keysetSQL({ id: "p_5", keys: [], tiebreak, values: [] }))).toEqual({
+			params: ["p_5"],
+			sql: '"post"."id" < ?',
+		})
+		expect(
+			compile(keysetSQL({ id: "p_5", keys: [], tiebreak: { ...tiebreak, direction: "asc" }, values: [] })).sql,
+		).toBe('"post"."id" > ?')
 	})
 
 	it("expands one branch per key, each after the equal prefix", () => {
-		const after = compile(keysetSQL([{ column: post.score, direction: "asc", nulls: "first" }], [3], tiebreak, "p_5"))
+		const after = compile(
+			keysetSQL({
+				id: "p_5",
+				keys: [{ column: post.score, direction: "asc", nulls: "first" }],
+				tiebreak,
+				values: [3],
+			}),
+		)
 		expect(after.sql).toBe('(("post"."score" > ?) or ((("post"."score" = ?) and ("post"."id" < ?))))')
 		expect(after.params).toEqual([3, 3, "p_5"])
 	})
 
 	it("reads rows after a null: non-null values follow only when nulls sort first", () => {
 		const first = compile(
-			keysetSQL([{ column: post.score, direction: "asc", nulls: "first" }], [null], tiebreak, "p_5"),
+			keysetSQL({
+				id: "p_5",
+				keys: [{ column: post.score, direction: "asc", nulls: "first" }],
+				tiebreak,
+				values: [null],
+			}),
 		)
 		expect(first.sql).toBe('((("post"."score" is not null)) or (((("post"."score" is null)) and ("post"."id" < ?))))')
-		const last = compile(keysetSQL([{ column: post.score, direction: "asc", nulls: "last" }], [null], tiebreak, "p_5"))
+		const last = compile(
+			keysetSQL({
+				id: "p_5",
+				keys: [{ column: post.score, direction: "asc", nulls: "last" }],
+				tiebreak,
+				values: [null],
+			}),
+		)
 		expect(last.sql).toMatch(/^\(+"post"\."score" is null\)+ and \("post"\."id" < \?\)\)$/)
 	})
 
@@ -52,13 +76,20 @@ describe("keysetSQL", () => {
 			{ column: post.title, direction: "asc" as const, nulls: "first" as const },
 			{ column: post.score, direction: "asc" as const, nulls: "first" as const },
 		]
-		const after = compile(keysetSQL(keys, ["a", 3], tiebreak, "p_5"))
+		const after = compile(keysetSQL({ id: "p_5", keys, tiebreak, values: ["a", 3] }))
 		expect(after.params).toEqual(["a", "a", 3, "a", 3, "p_5"])
 		expect(after.sql.match(/ or /g)).toHaveLength(2)
 	})
 
 	it("lets nulls follow a value when they sort last", () => {
-		const after = compile(keysetSQL([{ column: post.score, direction: "desc", nulls: "last" }], [3], tiebreak, "p_5"))
+		const after = compile(
+			keysetSQL({
+				id: "p_5",
+				keys: [{ column: post.score, direction: "desc", nulls: "last" }],
+				tiebreak,
+				values: [3],
+			}),
+		)
 		expect(after.sql).toBe(
 			'(((("post"."score" < ?) or (("post"."score" is null)))) or ((("post"."score" = ?) and ("post"."id" < ?))))',
 		)
