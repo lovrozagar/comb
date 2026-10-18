@@ -1,6 +1,7 @@
 /** `comb migrate`: init, diff, apply, baseline and status. */
 import fs from "node:fs"
 import path from "node:path"
+import { atlasConfig } from "../migrate/core/atlas-target.ts"
 import { parseArgs } from "./args.ts"
 import { configuredFtsSql } from "./comb-config.ts"
 import { migrateApply } from "./migrate-apply.ts"
@@ -46,13 +47,53 @@ env "local" {
 }
 `
 
-/** Write each starter file that does not exist yet */
+const PG_DRIZZLE_CONFIG = `import { defineConfig } from "drizzle-kit"
+
+/* drizzle-kit export reads no database, so this config holds no credentials */
+export default defineConfig({
+	dialect: "postgresql",
+	out: "./atlas-migrations",
+	schema: "./src/**/*.tables.ts",
+})
+`
+
+const PG_MIGRATE_CONFIG = `import { defineConfig } from "@lovrozagar/comb/migrate"
+
+export default defineConfig({
+	databases: {
+		core: {
+			drizzleConfigPath: "./drizzle.config.ts",
+			migrationsDir: "./atlas-migrations",
+			name: "core",
+			provider: {
+				type: "postgres",
+				/* a direct, non-pooled URL with sslmode=verify-full, from the environment, never written here */
+				url: process.env["DATABASE_URL"] ?? "",
+			},
+		},
+	},
+})
+`
+
+/** The starter files of each dialect, in the order they are written */
+function starterFiles(dialect: string): ReadonlyArray<readonly [string, string]> {
+	if (dialect === "sqlite")
+		return [
+			["drizzle.config.ts", DRIZZLE_CONFIG],
+			["atlas.hcl", ATLAS_HCL],
+		]
+	if (dialect !== "postgres") throw new CliError(`Unknown --dialect "${dialect}": use sqlite or postgres`)
+	return [
+		["drizzle.config.ts", PG_DRIZZLE_CONFIG],
+		["comb.migrate.config.ts", PG_MIGRATE_CONFIG],
+		["atlas.hcl", atlasConfig({ dev: true, dir: "atlas-migrations", url: true })],
+	]
+}
+
+/** Write each starter file of the dialect --dialect names that does not exist yet */
 function migrateInit(argv: readonly string[], io: CliIo): void {
-	parseArgs(argv, "migrate init")
-	for (const [name, content] of [
-		["drizzle.config.ts", DRIZZLE_CONFIG],
-		["atlas.hcl", ATLAS_HCL],
-	] as const) {
+	const dialect = parseArgs(argv, "migrate init").options["dialect"]
+	for (const [name, content] of starterFiles(typeof dialect === "string" ? dialect : "sqlite")) {
 		const file = path.join(io.cwd, name)
 		if (fs.existsSync(file)) continue
 		fs.writeFileSync(file, content)

@@ -370,12 +370,14 @@ declare function redactUrl(raw: string): string;
 declare function scrubAtlasOutput(text: string, urls: readonly string[]): string;
 /** Atlas's failure in comb's terms where comb knows the fix; otherwise as Atlas said it */
 declare function explainAtlasFailure(stderr: string): string;
+/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to one schema; migrate init writes it too */
+declare function atlasConfig(needs: AtlasNeeds): string;
 /**
  * Run `body` with an Atlas config for `target` and `needs` in a fresh 0700 directory, removed
  * afterwards however `body` ends. A target with errors is refused before anything is written.
  */
 declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
-export { type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, pgUrlProblems, type PgTarget, redactUrl, scrubAtlasOutput, withAtlasEnv, };
+export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, pgUrlProblems, type PgTarget, redactUrl, scrubAtlasOutput, withAtlasEnv, };
 
 // migrate/core/atlas-env.d.ts
 /**

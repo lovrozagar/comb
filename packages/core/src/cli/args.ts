@@ -43,6 +43,12 @@ export const OPTIONS: readonly OptionSpec[] = [
 		long: "--dir",
 		value: "path",
 	},
+	{
+		commands: ["migrate init"],
+		description: "The project's dialect: sqlite (default) or postgres",
+		long: "--dialect",
+		value: "name",
+	},
 	{ commands: ["migrate apply"], description: "Apply this one migration file", long: "--file", value: "path" },
 	{
 		commands: ["migrate apply"],

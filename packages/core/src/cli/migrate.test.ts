@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { Run } from "../migrate/core/process.ts"
 import { makeIo, ok, projects, writeTables } from "./__fixtures__/io.ts"
+import { atlasConfig } from "../migrate/core/atlas-target.ts"
 import { help, runCli } from "./run.ts"
 
 const temp = projects()
@@ -73,7 +74,9 @@ describe("comb migrate", () => {
 		expect(await runCli(["migrate", "nope"], io)).toBe(1)
 		expect(io.errors).toEqual(["Unknown migrate command: nope"])
 	})
+})
 
+describe("comb migrate init", () => {
 	it("creates the migrate init files in cwd", async () => {
 		const dir = project()
 		const io = makeIo(dir)
@@ -83,6 +86,38 @@ describe("comb migrate", () => {
 		const again = makeIo(dir)
 		expect(await runCli(["migrate", "init"], again)).toBe(0)
 		expect(again.outputs).toEqual([])
+	})
+
+	it("creates a Postgres project with --dialect postgres: no credential in any file, Atlas's config the one comb runs", async () => {
+		const dir = project()
+		const io = makeIo(dir)
+		expect(await runCli(["migrate", "init", "--dialect", "postgres"], io)).toBe(0)
+		expect(io.outputs).toEqual([
+			"Created: drizzle.config.ts",
+			"Created: comb.migrate.config.ts",
+			"Created: atlas.hcl",
+			"Created: atlas-migrations/",
+		])
+		const read = (name: string) => readFileSync(join(dir, name), "utf8")
+		expect(read("drizzle.config.ts")).toContain('dialect: "postgresql"')
+		expect(read("drizzle.config.ts")).not.toContain("dbCredentials")
+		expect(read("comb.migrate.config.ts")).toContain('type: "postgres"')
+		expect(read("comb.migrate.config.ts")).toContain('url: process.env["DATABASE_URL"] ?? ""')
+		expect(read("atlas.hcl")).toBe(atlasConfig({ dev: true, dir: "atlas-migrations", url: true }))
+		for (const name of ["drizzle.config.ts", "comb.migrate.config.ts", "atlas.hcl"])
+			expect(read(name)).not.toMatch(/:\/\/[^\s"]*:[^\s"]*@/)
+	})
+
+	it("keeps the files a project has, and refuses a dialect it does not know", async () => {
+		const dir = project()
+		writeFileSync(join(dir, "comb.migrate.config.ts"), "export default {}\n")
+		const io = makeIo(dir)
+		expect(await runCli(["migrate", "init", "--dialect", "postgres"], io)).toBe(0)
+		expect(io.outputs).not.toContain("Created: comb.migrate.config.ts")
+		expect(readFileSync(join(dir, "comb.migrate.config.ts"), "utf8")).toBe("export default {}\n")
+		const unknown = makeIo(dir)
+		expect(await runCli(["migrate", "init", "--dialect", "mysql"], unknown)).toBe(1)
+		expect(unknown.errors).toEqual(['Unknown --dialect "mysql": use sqlite or postgres'])
 	})
 })
 

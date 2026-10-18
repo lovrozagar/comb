@@ -189,6 +189,7 @@ OPTIONS:
   --tables <path>         Analyze this tables file directly, no comb.config.ts [codegen]
   -e, --env <name>        Environment from comb.migrate.config.ts [migrate apply, migrate baseline, migrate status]
   --dir <path>            Migrations directory (default: the config's, else ./atlas-migrations) [migrate apply, migrate baseline, migrate status]
+  --dialect <name>        The project's dialect: sqlite (default) or postgres [migrate init]
   --file <path>           Apply this one migration file [migrate apply]
   -y, --yes               Approve cautious changes without asking (not unsafe ones) [migrate apply]
   --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline]
