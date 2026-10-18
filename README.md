@@ -102,7 +102,8 @@ Define a table with Comb's column factories instead of Drizzle's raw ones.
 ```ts
 /* src/db/core.tables.ts */
 import { sqliteTable, index } from "drizzle-orm/sqlite-core"
-import { c, patterns } from "@lovrozagar/comb/sqlite/columns"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+import { patterns } from "@lovrozagar/comb/sqlite/patterns"
 import * as z from "zod"
 
 export const author = sqliteTable(
@@ -280,6 +281,8 @@ The constraint object is shared by both dialects. `@lovrozagar/comb/sqlite/const
 `@lovrozagar/comb/sqlite/patterns` ships regexes as source-level strings so the codegen parser can copy them verbatim into `.regex()` calls:
 
 ```ts
+import { patterns } from "@lovrozagar/comb/sqlite/patterns"
+
 patterns.COUNTRY_ALPHA2 // "/^[A-Z]{2}$/"
 patterns.E164_PHONE // "/^\\+[1-9]\\d{7,14}$/"
 patterns.IANA_TIMEZONE // "/^[A-Za-z_/]+$/"
@@ -289,6 +292,10 @@ patterns.LOCALE // "/^[a-z]{2}(-[A-Z]{2})?$/"
 ## Errors
 
 ### `CombError`
+
+<!-- ts-context
+declare const original: unknown
+-->
 
 ```ts
 import { CombError, combErrorKeys } from "@lovrozagar/comb"
@@ -339,6 +346,13 @@ export const authorConstraints: ConstraintMap = {
 ### Handlers
 
 Three handlers, one signature — `(error: unknown, constraintMaps: ConstraintMap[]) => void`. Each walks the error's `cause` chain past wrappers such as drizzle's `DrizzleQueryError`, reads the engine's own code, finds the matching map entry, and throws a `CombError`. If nothing matches, they return and let the original error propagate.
+
+<!-- ts-context
+declare const db: { insert(table: unknown): { values(row: unknown): Promise<unknown> } }
+declare const author: unknown
+declare const input: unknown
+declare const authorConstraints: import("@lovrozagar/comb/types").ConstraintMap
+-->
 
 ```ts
 import { d1ErrorHandler } from "@lovrozagar/comb/sqlite/d1/error-handler"
@@ -487,6 +501,10 @@ Backup tables (`createBackupTables()`), schema verification (`verifySchema()`, `
 
 Atlas wraps SQLite table rebuilds in `PRAGMA foreign_keys = off;` … `PRAGMA foreign_keys = on;`. That pragma is a no-op inside a transaction, which is exactly where D1 runs it — so the rebuild proceeds with FK enforcement still live and fails. `applySqliteMigrationTransforms()` rewrites the pair into a single `PRAGMA defer_foreign_keys = on;` prelude, which defers enforcement to commit time and is transaction-safe. It is idempotent and leaves every `CREATE`, `ALTER`, and `INDEX` statement byte-identical.
 
+<!-- ts-context
+declare const atlasSql: string
+-->
+
 ```ts
 import { applySqliteMigrationTransforms } from "@lovrozagar/comb/migrate"
 
@@ -519,6 +537,7 @@ A value that holds `,`, `(`, `)` or `.` is written in double quotes, PostgREST s
 `validateFilter()` parses and checks in one step, against declared field types, and rejects operators a type does not support — `string` allows `like`, `boolean` allows only `eq`, `ne`, and `is`, and so on — and values that are not of the field's type: a `number` takes a decimal number, a `date` epoch milliseconds, a `boolean` `true` or `false`. A valid result carries each value typed as its field declares. Unknown fields are rejected rather than silently dropped, so a typo returns a 400 instead of the whole table. Unbalanced parentheses, an unclosed `in.(` list and trailing input are syntax errors. Each expression is bounded by `FILTER_LIMITS` — 20 conditions, 3 nested groups, 50 `in`/`nin` values per list and 60 bound values in all — overridable per call with a third `limits` argument. The defaults keep every request the list schema accepts within D1's 100 bound parameters per statement: 60 filter values, 8 search words (`maxSearchTerms`, one `LIKE` each), 10 for a three-key cursor and 2 for limit and offset make 80, which leaves 20 for your `baseWhere`. Raise a limit only on a database without that cap, or with a `baseWhere` that binds less. `createListQuerySchema` also caps the `filter` string at 2048 characters before parsing it (`limits.maxFilterLength`), as it caps `q` at 200, `select` at 500, `order` at 200 and `cursor` at 4096. `in` and `nin` take a list: `id.in.5` is a 400, not a driver error.
 
 ```ts
+import { CombError } from "@lovrozagar/comb"
 import { validateFilter } from "@lovrozagar/comb/query"
 
 const result = validateFilter("status.eq.published,or(minute_read.lt.5,title.like.intro)", {
@@ -529,7 +548,7 @@ const result = validateFilter("status.eq.published,or(minute_read.lt.5,title.lik
 
 /* null when the filter string is empty */
 if (result && !result.valid) {
-	throw new CombError({ errorKey: result.errors[0]!, status: "bad_request" })
+	throw new CombError({ cause: result.errors.join("; "), errorKey: "invalid_filter", status: "bad_request" })
 }
 const ast = result?.ast
 ```
@@ -572,6 +591,10 @@ import { createCursor, decodeCursor, readCursor, sortSignature } from "@lovrozag
 
 `createListQuerySchema()` declares what an endpoint permits and returns the Zod schema that parses the raw query string into what `buildListQuery()` takes:
 
+<!-- ts-context
+declare const request: { query: Record<string, string> }
+-->
+
 ```ts
 import { createListQuerySchema } from "@lovrozagar/comb/query"
 
@@ -596,9 +619,16 @@ The `filter`, `order` and `q` descriptions, examples and the `order` pattern are
 
 ### SQLite SQL generation
 
+<!-- ts-context
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+declare const db: import("drizzle-orm/libsql").LibSQLDatabase
+declare const parsed: import("@lovrozagar/comb/query").ListQueryOutput
+const post = sqliteTable("post", { created_at: integer("created_at"), deleted_at: integer("deleted_at"), id: text("id").primaryKey(), title: text("title") })
+-->
+
 ```ts
 import { applyListQuery, buildListQuery, likeSearch } from "@lovrozagar/comb/query/sqlite"
-import { isNull } from "drizzle-orm"
+import { isNull, sql } from "drizzle-orm"
 
 const result = buildListQuery({
 	parsed, // postQuery.parse(request.query)
@@ -623,6 +653,10 @@ Search comes in two flavours. `likeSearch(column)` is the portable fallback — 
 
 `resolveTranslation()` picks one row out of an array of translation rows: the requested `lang`, else `defaultLang`, else the first available. It returns that row's fields under that row's own language code, so fallback content is never labeled as the requested language, and a field the row lacks stays empty rather than being filled from another language. `fields` narrows the returned keys (`null` keeps all), and `languageCodeKey` names the discriminator column (default `languageCode`). It is pure and dependency-free, so it runs equally well over rows Drizzle already loaded via `with`.
 
+<!-- ts-context
+declare const post: { post_translation: Array<{ body: string; languageCode: string; title: string }> }
+-->
+
 ```ts
 import { resolveTranslation } from "@lovrozagar/comb/query"
 
@@ -638,6 +672,13 @@ const localized = resolveTranslation({
 
 ### Sessions
 
+<!-- ts-context
+import { defineRelations } from "drizzle-orm"
+declare const env: { DB: D1Database }
+declare const bookmarkFromCookie: string | undefined
+const relations = defineRelations({})
+-->
+
 ```ts
 import { openD1Session } from "@lovrozagar/comb/sqlite/d1/session"
 import { drizzle } from "drizzle-orm/d1"
@@ -649,6 +690,11 @@ const db = drizzle(client, { relations })
 Reads go to the nearest replica while a bookmark guarantees the client never sees state older than its own last write. Without a bookmark it opens `first-unconstrained`. If `withSession` is missing — miniflare, older runtimes — it returns the raw handle and `session: undefined`, so the same code path works locally.
 
 ### Bookmarks
+
+<!-- ts-context
+declare const session: D1DatabaseSession
+declare function setCookie(name: string, value: string): void
+-->
 
 ```ts
 import { BookmarkTracker } from "@lovrozagar/comb/sqlite/d1/bookmark"
@@ -663,6 +709,11 @@ for (const { tag, bookmark } of tracker.getBookmarks()) setCookie(tag, bookmark)
 
 ### Sharding
 
+<!-- ts-context
+type Env = { CORE_DB: D1Database; SHARDS: KVNamespace }
+declare const orgId: string
+-->
+
 ```ts
 import { ShardRouter, shardMap } from "@lovrozagar/comb/sqlite/d1/sharding"
 
@@ -670,7 +721,7 @@ import { ShardRouter, shardMap } from "@lovrozagar/comb/sqlite/d1/sharding"
 const router = new ShardRouter({ totalShards: 16, maxOrgsPerShard: 500 })
 
 export default {
-	async fetch(request, env, ctx) {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const mapping = await router.resolveOrAllocate(orgId, { coreDb: env.CORE_DB, kv: env.SHARDS }, ctx)
 		// …
 	},
@@ -688,8 +739,13 @@ Tunables: `lruMaxSize` (1000), `lruTtlMs` (5 min), `lruHardTtlMs` (15 min), `kvT
 comb stamps facts about your tables and queries onto the schemas it generates, so a document
 generator downstream can publish them without re-deriving anything.
 
+<!-- ts-context
+declare const postDtoReadSchema: import("zod").ZodType
+-->
+
 ```ts
 import { readCombEntityMeta } from "@lovrozagar/comb/meta"
+import * as z from "zod"
 
 readCombEntityMeta(z.toJSONSchema(postDtoReadSchema))
 // { v: 1, kind: "entity", name: "post", identity: "id",
