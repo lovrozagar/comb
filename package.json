@@ -57,7 +57,9 @@
 		"test": "bun run --filter @lovrozagar/comb test",
 		"test:all": "bun run --filter @lovrozagar/comb test:all",
 		"test:bun": "bun run --filter @lovrozagar/comb test:bun",
+		"test:consumers": "bun run --filter @lovrozagar/comb test:consumers",
 		"test:coverage": "bun run --filter @lovrozagar/comb test:coverage",
+		"test:e2e": "bun run --filter @lovrozagar/comb test:e2e",
 		"test:watch": "bun run --filter @lovrozagar/comb test:watch",
 		"typecheck": "bun run --filter @lovrozagar/comb type:check",
 		"typecheck:strict": "bun run --filter @lovrozagar/comb type:check:strict",
@@ -79,7 +81,9 @@
 		"repo": "comb",
 		"gates": [
 			"typecheck:strict",
-			"test:bun"
+			"test:bun",
+			"test:e2e",
+			"test:consumers"
 		]
 	}
 }
