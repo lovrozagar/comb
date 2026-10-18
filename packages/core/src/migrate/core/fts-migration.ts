@@ -75,7 +75,8 @@ function separate(sql: string, groups: Set<string>, state: FtsState = new Map())
 }
 
 /** Statements joined back into a migration file's text */
-const asSql = (statements: readonly string[]) => (statements.length === 0 ? "" : `${statements.join(";\n\n")};\n`)
+const asSql = (statements: readonly string[]): string =>
+	statements.length === 0 ? "" : `${statements.join(";\n\n")};\n`
 
 /** The content table of each FTS group in `state` */
 function contentTables(state: FtsState): Map<string, string> {

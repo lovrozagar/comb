@@ -4,7 +4,26 @@
  * Provides dialect-agnostic column definitions that can be swapped with SQLite
  */
 import { sql } from "drizzle-orm"
-import { bigint, boolean, doublePrecision, integer, jsonb, serial, text } from "drizzle-orm/pg-core"
+import {
+	bigint,
+	boolean,
+	doublePrecision,
+	integer,
+	jsonb,
+	type PgBigInt53Builder,
+	type PgBooleanBuilder,
+	type PgDoublePrecisionBuilder,
+	type PgIntegerBuilder,
+	type PgJsonbBuilder,
+	type PgSerialBuilder,
+	type PgTextBuilder,
+	serial,
+	type Set$Type,
+	type SetHasDefault,
+	type SetIsPrimaryKey,
+	type SetNotNull,
+	text,
+} from "drizzle-orm/pg-core"
 /* Constraint types are dialect-agnostic; they live under sqlite/ because that is
    the published export path and moving them would be a breaking change. */
 import type { EnumStates, TextConstraints } from "../sqlite/constraints.ts"
@@ -17,7 +36,30 @@ const timestampDefaults = {
 	now: () => sql`(extract(epoch from now()) * 1000)::bigint`,
 }
 
-export const c = {
+type Text = PgTextBuilder<[string, ...string[]]>
+
+/** What each `c` factory returns: drizzle's own builder types, spelled out for isolated declarations */
+type PgColumns = {
+	boolean: (name: string) => PgBooleanBuilder
+	createdAt: (name: "createdAt" | "created_at") => SetHasDefault<SetNotNull<PgBigInt53Builder>>
+	deletedAt: (name: "deletedAt" | "deleted_at") => PgBigInt53Builder
+	enum: <T extends readonly string[]>(
+		name: string,
+		_values: T,
+		_states?: EnumStates<T[number]>,
+	) => Set$Type<Text, T[number]>
+	id: (_prefix: string) => SetIsPrimaryKey<Text>
+	integer: (name: string) => PgIntegerBuilder
+	json: <T>(name: string) => Set$Type<PgJsonbBuilder, T>
+	real: (name: string) => PgDoublePrecisionBuilder
+	ref: (name: string, _constraints?: TextConstraints) => Text
+	serialId: () => SetIsPrimaryKey<PgSerialBuilder>
+	text: (name: string, _length?: number) => Text
+	timestamp: (name: string) => PgBigInt53Builder
+	updatedAt: (name: "updatedAt" | "updated_at") => SetHasDefault<SetHasDefault<SetNotNull<PgBigInt53Builder>>>
+}
+
+export const c: PgColumns = {
 	/* Native boolean */
 	boolean: (name: string) => boolean(name),
 

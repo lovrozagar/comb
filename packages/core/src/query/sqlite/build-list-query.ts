@@ -261,7 +261,7 @@ function buildDerivedListQuery<TSortField extends string>(
 	})
 }
 
-function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult) {
+function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult): TQuery {
 	const withWhere: TQuery = q.where ? query.where(q.where) : query
 
 	return withWhere

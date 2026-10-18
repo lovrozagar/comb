@@ -4,8 +4,17 @@
  * Provides dialect-agnostic column definitions that can be swapped with PostgreSQL
  */
 
-import { sql } from "drizzle-orm"
-import { integer, real, text } from "drizzle-orm/sqlite-core"
+import { type $Type, type HasDefault, type IsPrimaryKey, type NotNull, sql } from "drizzle-orm"
+import {
+	integer,
+	real,
+	type SQLiteBooleanBuilder,
+	type SQLiteIntegerBuilder,
+	type SQLiteRealBuilder,
+	type SQLiteTextBuilder,
+	type SQLiteTextJsonBuilder,
+	text,
+} from "drizzle-orm/sqlite-core"
 import type * as z from "zod"
 import type {
 	EnumStates,
@@ -19,7 +28,40 @@ const timestampDefaults = {
 	now: () => sql`(unixepoch() * 1000)`,
 }
 
-export const c = {
+type Text = SQLiteTextBuilder<[string, ...string[]]>
+type CreatedAtName = "createdAt" | "created_at"
+type DeletedAtName = "deletedAt" | "deleted_at"
+type UpdatedAtName = "updatedAt" | "updated_at"
+
+/** What each `c` factory returns: drizzle's own builder types, spelled out for isolated declarations */
+export type SqliteColumns = {
+	boolean: (name: string) => SQLiteBooleanBuilder
+	createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => HasDefault<NotNull<SQLiteIntegerBuilder>>
+	deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder
+	enum: <T extends readonly string[]>(
+		name: string,
+		_values: T,
+		_states?: EnumStates<T[number]>,
+	) => $Type<Text, T[number]>
+	id: (_prefix: string) => IsPrimaryKey<Text>
+	integer: (name: string, _constraints?: IntegerConstraints) => SQLiteIntegerBuilder
+	json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(
+		name: string,
+		_schema: TSchema,
+		_constraints?: JsonConstraints,
+	) => $Type<SQLiteTextJsonBuilder, z.infer<TSchema>>
+	real: (name: string, _constraints?: IntegerConstraints) => SQLiteRealBuilder
+	ref: (name: string, _constraints?: TextConstraints) => Text
+	serialId: () => IsPrimaryKey<HasDefault<NotNull<SQLiteIntegerBuilder>>>
+	text: (name: string, _constraints?: TextConstraints) => Text
+	timestamp: (name: string, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder
+	updatedAt: (
+		name: UpdatedAtName,
+		_constraints?: TimestampConstraints,
+	) => HasDefault<HasDefault<NotNull<SQLiteIntegerBuilder>>>
+}
+
+export const c: SqliteColumns = {
 	/* Boolean as integer */
 	boolean: (name: string) => integer(name, { mode: "boolean" }),
 

@@ -55,7 +55,7 @@ function buildScalarJsonParts(
 	return parts
 }
 
-const SQL_SORT_DIR = {
+const SQL_SORT_DIR: { readonly asc: "ASC"; readonly desc: "DESC" } = {
 	asc: "ASC",
 	desc: "DESC",
 } as const satisfies Record<SortDirection, string>

@@ -2,7 +2,7 @@
  * The query facts a list query schema publishes on `x-comb`. Every value comes from the config
  * that parses the request, so the published facts cannot drift from behavior (docs §6).
  */
-import { COMB_FILTER_GRAMMAR, combMeta } from "../meta.ts"
+import { COMB_FILTER_GRAMMAR, type CombMetaStamp, type CombQueryMeta, combMeta } from "../meta.ts"
 import { EMPTY_OBJ } from "../empty.ts"
 import { CURSOR_TIEBREAK_COLUMN } from "./cursor.ts"
 import { OPERATORS_BY_TYPE } from "./filter.ts"
@@ -34,7 +34,7 @@ function selectableFrom(fieldsConfig: FieldsConfig | undefined): string[] {
 }
 
 /** The `x-comb` stamp of a list query schema built from `config` under `limits` */
-function listQueryStamp(config: PublishedConfig, limits: ListQueryLimits) {
+function listQueryStamp(config: PublishedConfig, limits: ListQueryLimits): CombMetaStamp<CombQueryMeta> {
 	const filterConfig: Record<string, FieldType> = config.filter ?? EMPTY_OBJ
 	return combMeta({
 		defaultOrder: buildDefaultOrder(config.sort),

@@ -11,6 +11,11 @@ import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT, read
 import { filterBySelect } from "./fields.ts"
 import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import type { FilterAST, ParsedFields, SortField } from "./types.ts"
+import type { paginationResponseSchema } from "./schema.ts"
+import type * as z from "zod"
+
+/** The pagination meta paginate returns: the list response's own schema */
+type PaginationMeta = z.output<typeof paginationResponseSchema>
 
 /** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
 type RelationalTable = object
@@ -163,7 +168,7 @@ function drizzlePaginationResult<T extends { id?: CursorId }>(
 		parsedFields?: ParsedFields | null | undefined
 		parsedSort: SortField[]
 	},
-) {
+): readonly [T[], PaginationMeta] {
 	const hasMore = items.length > query.limit
 	const sliced = hasMore ? items.slice(0, query.limit) : items
 
@@ -177,7 +182,7 @@ function drizzlePaginationResult<T extends { id?: CursorId }>(
 		nextCursor = createCursor(lastItem as Record<string, unknown>, sort)
 	}
 
-	const pagination = {
+	const pagination: PaginationMeta = {
 		count: countOf(items, query),
 		hasMore,
 		limit: query.limit,
@@ -196,7 +201,14 @@ function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields:
 }
 
 /** List-query helpers for drizzle queries: count, options, pagination, projection */
-const queryHelpers = {
+const queryHelpers: {
+	countExtra: typeof countExtra
+	filterValue: typeof extractFilterValue
+	filterValues: typeof extractFilterValues
+	listOptions: typeof drizzleListOptions
+	paginate: typeof drizzlePaginationResult
+	project: typeof drizzleProject
+} = {
 	countExtra,
 	filterValue: extractFilterValue,
 	filterValues: extractFilterValues,

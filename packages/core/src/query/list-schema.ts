@@ -26,12 +26,30 @@ import type { FieldType } from "./types.ts"
 
 type AdvertisedConfig = Pick<ListQueryConfig, "fields" | "filter" | "lang" | "search" | "sort">
 
+/** The optional params beside cursor, page and limit; each key exists only when advertised */
+type OptionalShape = {
+	order: z.ZodOptional<z.ZodString>
+	filter?: z.ZodOptional<z.ZodString>
+	q?: z.ZodOptional<z.ZodString>
+	lang?: z.ZodOptional<z.ZodString>
+	select?: z.ZodOptional<z.ZodString>
+}
+
+type ListQueryShape = typeof baseListQueryShape & OptionalShape & { limit: z.ZodDefault<z.ZodCoercedNumber<unknown>> }
+type ListQueryInput = z.ZodObject<ListQueryShape, z.core.$strict>
+
+/** What createListQuerySchema returns: the strict request object piped into its parsed output */
+type ListQuerySchema<T extends OutputStableShape<T>, TSortField extends string> = z.ZodPipe<
+	ListQueryInput,
+	z.ZodTransform<Awaited<ListQueryOutput<TSortField> & { [K in keyof T]: z.infer<T[K]> }>, z.output<ListQueryInput>>
+>
+
 /**
  * The params advertised beside cursor, page and limit. Each optional param exists only when the
  * endpoint honors it — a param the handler ignores answers every value with the unfiltered
  * list — and the object is strict, so a param that is not advertised is a 400.
  */
-function optionalShapeFor(config: AdvertisedConfig, limits: ListQueryLimits) {
+function optionalShapeFor(config: AdvertisedConfig, limits: ListQueryLimits): OptionalShape {
 	const filterConfig: Record<string, FieldType> = config.filter ?? EMPTY_OBJ
 	const search = config.search
 	const filter = z
@@ -81,7 +99,7 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 function createListQuerySchema<
 	T extends OutputStableShape<T> = Record<string, never>,
 	const TSortFields extends readonly string[] = readonly string[],
->(config: ListQueryConfig<T, TSortFields>) {
+>(config: ListQueryConfig<T, TSortFields>): ListQuerySchema<T, TSortFields[number]> {
 	type TSortField = TSortFields[number]
 	type ExtendedOutput = ListQueryOutput<TSortField> & { [K in keyof T]: z.infer<T[K]> }
 	const { extend: extendFields, fields: fieldsConfig, filter: filterConfig = EMPTY_OBJ, sort: sortConfig } = config
@@ -123,7 +141,7 @@ function createListQuerySchema<
 
 	/* Stamp the schema we RETURN. Metadata on `schema` or `piped` survives the
 	   input view but is lost on the output view — see docs/meta-contract.md §3.1. */
-	return withPipe.meta(listQueryStamp(config, limits)) as typeof piped
+	return withPipe.meta(listQueryStamp(config, limits)) as {} as ListQuerySchema<T, TSortField>
 }
 
-export { createListQuerySchema }
+export { createListQuerySchema, type ListQuerySchema }

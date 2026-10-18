@@ -85,13 +85,22 @@ const multiTenantConfigInputSchema = () =>
 		tenantQuery: z.string().min(1),
 	})
 
-const configInputSchema = () =>
+/** What comb.migrate.config.ts declares: the migration config before multi-tenant defaults fill in */
+export type CombMigrateConfig = {
+	databases: Record<string, DatabaseConfig>
+	multiTenant?:
+		| (Omit<MultiTenantConfig, "circuitBreaker"> & {
+				circuitBreaker?: MultiTenantConfig["circuitBreaker"] | undefined
+		  })
+		| undefined
+}
+
+/* typed with the declared config, so the schema cannot drift from it */
+const configInputSchema = (): z.ZodType<CombMigrateConfig> =>
 	z.object({
 		databases: z.record(z.string(), databaseConfigInputSchema()),
 		multiTenant: multiTenantConfigInputSchema().optional(),
 	})
-
-export type CombMigrateConfig = z.infer<ReturnType<typeof configInputSchema>>
 
 /* ═══════════════════════════════════════════════════════════════════════════
    RESOLVE PROVIDER CONFIG

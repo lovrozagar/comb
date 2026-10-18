@@ -1,12 +1,30 @@
-import { sql } from "drizzle-orm"
-import { sqliteTable as createTable, index } from "drizzle-orm/sqlite-core"
-import { c } from "../../columns.ts"
+import { type BuildColumns, type HasDefault, type IsPrimaryKey, type NotNull, sql } from "drizzle-orm"
+import { sqliteTable as createTable, index, type SQLiteTableWithColumns } from "drizzle-orm/sqlite-core"
+import { c, type SqliteColumns } from "../../columns.ts"
 import type { ShardDriver } from "./types.ts"
 
-const SHARD_DRIVERS = ["d1"] as const satisfies readonly ShardDriver[]
+const SHARD_DRIVERS: readonly ["d1"] = ["d1"] as const satisfies readonly ShardDriver[]
+
+/** Each column's builder, from the `c` factory that makes it */
+type ShardMapColumns = {
+	created_at: ReturnType<SqliteColumns["createdAt"]>
+	deleted_at: ReturnType<SqliteColumns["deletedAt"]>
+	driver: HasDefault<NotNull<ReturnType<typeof c.enum<readonly ["d1"]>>>>
+	org_id: IsPrimaryKey<ReturnType<SqliteColumns["text"]>>
+	shard_id: NotNull<ReturnType<SqliteColumns["integer"]>>
+	target: NotNull<ReturnType<SqliteColumns["text"]>>
+	updated_at: ReturnType<SqliteColumns["updatedAt"]>
+}
+
+type ShardMapTable = SQLiteTableWithColumns<{
+	name: "shard_map"
+	schema: undefined
+	columns: BuildColumns<"shard_map", ShardMapColumns, "sqlite">
+	dialect: "sqlite"
+}>
 
 /* the table is built in a function so module scope runs one call, marked pure */
-function defineShardMap() {
+function defineShardMap(): ShardMapTable {
 	return createTable(
 		"shard_map",
 		{
@@ -27,4 +45,4 @@ function defineShardMap() {
 	)
 }
 
-export const shardMap = /* @__PURE__ */ defineShardMap()
+export const shardMap: ShardMapTable = /* @__PURE__ */ defineShardMap()

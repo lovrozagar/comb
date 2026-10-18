@@ -12,21 +12,21 @@ import type { FieldType, FilterOperator } from "./types.ts"
 
 const CURSOR_DESCRIPTION =
 	"Opaque cursor for forward pagination. Pass the nextCursor from the previous response with the same order. Takes precedence over page when both are sent."
-const CURSOR_EXAMPLES = ["eyJpIjoiMDFIIiwicyI6IiIsInYiOltdfQ"]
+const CURSOR_EXAMPLES: string[] = ["eyJpIjoiMDFIIiwicyI6IiIsInYiOltdfQ"]
 
 const LIMIT_DESCRIPTION = "Maximum number of items per page. Defaults to 20, capped by the endpoint's maxLimit."
-const LIMIT_EXAMPLES = [20, 50]
+const LIMIT_EXAMPLES: number[] = [20, 50]
 
 const PAGE_DESCRIPTION = "1-based page number for offset pagination. Ignored when cursor is present."
-const PAGE_EXAMPLES = [1, 2]
+const PAGE_EXAMPLES: number[] = [1, 2]
 
 const LANG_DESCRIPTION =
 	"BCP-47 language tag selecting localized text fields (falls back to default locale when absent)."
-const LANG_EXAMPLES = ["en", "de", "fr"]
+const LANG_EXAMPLES: string[] = ["en", "de", "fr"]
 
 const SELECT_DESCRIPTION =
 	"PostgREST-style sparse fieldset. Scalars comma-separated; relations embedded as name(fields); wildcard * selects all scalars. Docs: https://docs.postgrest.org/en/stable/references/api/resource_embedding.html"
-const SELECT_EXAMPLES = ["id,name,email", "id,author(name)", "id,author(name,posts(title))", "*"]
+const SELECT_EXAMPLES: string[] = ["id,name,email", "id,author(name)", "id,author(name,posts(title))", "*"]
 
 type ParamMeta = { description: string; examples: string[] }
 

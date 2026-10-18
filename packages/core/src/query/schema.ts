@@ -4,8 +4,19 @@
  */
 import * as z from "zod"
 
+type PaginationResponseSchema = z.ZodObject<
+	{
+		count: z.ZodNullable<z.ZodNumber>
+		hasMore: z.ZodBoolean
+		limit: z.ZodNumber
+		nextCursor: z.ZodNullable<z.ZodString>
+		page: z.ZodNullable<z.ZodNumber>
+	},
+	z.core.$strip
+>
+
 /** The pagination meta a list response carries */
-function paginationResponse() {
+function paginationResponse(): PaginationResponseSchema {
 	return z.compile(
 		z.object({
 			/* rows the filter matches across all pages; null when the response cannot know (cursor pages) */
@@ -19,7 +30,7 @@ function paginationResponse() {
 }
 
 /** Pagination response meta schema for list endpoints */
-const paginationResponseSchema = /* @__PURE__ */ paginationResponse()
+const paginationResponseSchema: PaginationResponseSchema = /* @__PURE__ */ paginationResponse()
 
 export { createListQuerySchema } from "./list-schema.ts"
 export { createRetrieveQuerySchema } from "./retrieve-schema.ts"
