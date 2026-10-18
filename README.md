@@ -694,7 +694,7 @@ Reads go to the nearest replica while a bookmark guarantees the client never see
 ### Bookmarks
 
 <!-- ts-context
-declare const session: D1DatabaseSession
+declare const session: D1DatabaseSession | undefined
 declare function setCookie(name: string, value: string): void
 -->
 
@@ -707,7 +707,7 @@ tracker.track(session, "core")
 for (const { tag, bookmark } of tracker.getBookmarks()) setCookie(tag, bookmark)
 ```
 
-`getBookmarks()` skips sessions that never committed rather than throwing, so it is safe to call unconditionally at the end of a request.
+`track` takes `openD1Session`'s `session` as it comes: on a runtime without sessions it is `undefined`, and `track` does nothing. `getBookmarks()` skips sessions that never committed rather than throwing, so it is safe to call unconditionally at the end of a request.
 
 ### Sharding
 

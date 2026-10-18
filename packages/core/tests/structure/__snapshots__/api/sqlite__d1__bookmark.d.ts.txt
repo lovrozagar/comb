@@ -11,8 +11,11 @@ type TaggedBookmark = {
  */
 declare class BookmarkTracker {
     private sessions;
-    /** Register a session to be tracked for bookmark extraction */
-    track(session: D1DatabaseSession, tag: string): void;
+    /**
+     * Register a session to be tracked for bookmark extraction. Takes openD1Session's `session` as
+     * it comes: undefined on a runtime without sessions, which has no bookmark to track.
+     */
+    track(session: D1DatabaseSession | undefined, tag: string): void;
     /**
      * Extract bookmarks from all tracked sessions.
      * Call after the response is ready — bookmarks reflect the session's last write.

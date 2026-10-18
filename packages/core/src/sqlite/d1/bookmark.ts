@@ -9,9 +9,12 @@ type TaggedBookmark = { bookmark: string; tag: string }
 class BookmarkTracker {
 	private sessions: Array<{ session: D1DatabaseSession; tag: string }> = []
 
-	/** Register a session to be tracked for bookmark extraction */
-	track(session: D1DatabaseSession, tag: string): void {
-		this.sessions.push({ session, tag })
+	/**
+	 * Register a session to be tracked for bookmark extraction. Takes openD1Session's `session` as
+	 * it comes: undefined on a runtime without sessions, which has no bookmark to track.
+	 */
+	track(session: D1DatabaseSession | undefined, tag: string): void {
+		if (session !== undefined) this.sessions.push({ session, tag })
 	}
 
 	/**

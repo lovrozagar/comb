@@ -50,3 +50,11 @@ describe("BookmarkTracker", () => {
 		expect(bookmarks).toEqual([{ bookmark: "bk-shard", tag: "shard" }])
 	})
 })
+
+describe("BookmarkTracker with no session", () => {
+	it("tracks what openD1Session returns on a runtime without sessions: nothing, without failing", () => {
+		const tracker = new BookmarkTracker()
+		tracker.track(undefined, "core")
+		expect(tracker.getBookmarks()).toEqual([])
+	})
+})
