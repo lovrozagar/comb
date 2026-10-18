@@ -10,6 +10,7 @@ import { createD1Provider } from "./drivers/d1.ts"
 import { createBunSqliteProvider, createLibsqlProvider, createTursoProvider } from "./drivers/sqlite.ts"
 import type {
 	ConnectionProvider,
+	ConnectionProviderConfig,
 	DatabaseConfig,
 	MigrationConfig,
 	MultiTenantConfig,
@@ -21,8 +22,11 @@ import type {
    CONFIG SCHEMA
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const POSTGRES_UNSUPPORTED =
-	"comb migrate applies to SQLite, libsql, Turso and D1; run Postgres migrations with drizzle-kit migrate"
+/** The empty database Atlas replays Postgres migrations on when a provider names none */
+export const DEFAULT_PG_DEV_URL = "docker://postgres/17/dev"
+
+const NEON_IS_POSTGRES =
+	"Neon and Supabase are postgres URLs: use the postgres provider type with the direct connection URL"
 
 /* Built on use: defineConfig runs once per process, and module scope stays free of work */
 const providerInputSchema = () =>
@@ -42,9 +46,16 @@ const providerInputSchema = () =>
 			path: z.string().min(1),
 			type: z.literal("bun-sqlite"),
 		}),
-		/* Postgres is a dialect comb's runtime serves, not one comb migrate applies to: refuse it at load */
-		z.object({ type: z.enum(["postgres", "neon"]) }).transform((_, ctx) => {
-			ctx.addIssue({ code: "custom", message: POSTGRES_UNSUPPORTED })
+		z.object({
+			devUrl: z.string().min(1).optional(),
+			lockTimeout: z.string().min(1).optional(),
+			schema: z.string().min(1).optional(),
+			type: z.literal("postgres"),
+			url: z.string().min(1),
+		}),
+		/* there is no neon type: a Neon or Supabase database is a postgres URL */
+		z.object({ type: z.literal("neon") }).transform((_, ctx) => {
+			ctx.addIssue({ code: "custom", message: NEON_IS_POSTGRES })
 			return z.NEVER
 		}),
 		z.object({
@@ -105,10 +116,16 @@ const configInputSchema = (): z.ZodType<CombMigrateConfig> =>
    RESOLVE PROVIDER CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-function resolveProviderConfig(
-	input: NonNullable<z.infer<ReturnType<typeof databaseConfigInputSchema>>["provider"]>,
-): ProviderConfig {
+function resolveProviderConfig(input: ProviderConfig): ResolvedDatabaseConfig["provider"] {
 	switch (input.type) {
+		case "postgres":
+			return {
+				devUrl: input.devUrl ?? DEFAULT_PG_DEV_URL,
+				lockTimeout: input.lockTimeout ?? "5s",
+				schema: input.schema ?? "public",
+				type: "postgres",
+				url: input.url,
+			}
 		case "turso":
 			return { apiToken: input.apiToken, group: input.group, org: input.org, type: "turso" }
 		case "libsql":
@@ -127,7 +144,8 @@ function resolveProviderConfig(
 /** What a provider that shells out (D1 drives wrangler) runs processes with; tests pass a fake */
 export type ProviderDeps = { run?: Run | undefined }
 
-export function createProvider(config: ProviderConfig, deps: ProviderDeps = {}): ConnectionProvider {
+/** The connection for a provider comb applies through itself; Postgres goes through Atlas instead */
+export function createProvider(config: ConnectionProviderConfig, deps: ProviderDeps = {}): ConnectionProvider {
 	switch (config.type) {
 		case "turso":
 			return createTursoProvider(config)
@@ -137,6 +155,8 @@ export function createProvider(config: ProviderConfig, deps: ProviderDeps = {}):
 			return createBunSqliteProvider(config)
 		case "d1":
 			return createD1Provider(config, deps.run)
+		default:
+			throw new Error("Atlas applies Postgres migrations; comb opens no connection to postgres")
 	}
 }
 
@@ -201,10 +221,7 @@ export function defineConfig(input: CombMigrateConfig): MigrationConfig {
 		if (dbInput.environments) {
 			const environments: Record<string, { name: string; provider?: ProviderConfig | undefined }> = {}
 			for (const [envKey, envInput] of Object.entries(dbInput.environments)) {
-				environments[envKey] = {
-					name: envInput.name,
-					provider: envInput.provider,
-				}
+				environments[envKey] = { name: envInput.name, provider: envInput.provider }
 			}
 
 			databases[key] = {

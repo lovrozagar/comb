@@ -478,7 +478,7 @@ export default defineConfig({
 })
 ```
 
-The config is Zod-validated, so a typo fails at load rather than at apply. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`org`, `apiToken`, `group`), `d1` (`databaseId`, `databaseName`). `environments` overrides the provider per `-e` flag. comb migrate applies to SQLite, libsql, Turso and D1; a `postgres` or `neon` provider is refused at load, and Postgres migrations run with `drizzle-kit migrate`. Postgres is served at runtime (`@lovrozagar/comb/pg/columns`, `@lovrozagar/comb/pg/error-handler`).
+The config is Zod-validated, so a typo fails at load rather than at apply. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`org`, `apiToken`, `group`), `d1` (`databaseId`, `databaseName`), `postgres` (`url`, with `devUrl`, `schema` and `lockTimeout` defaulting to `docker://postgres/17/dev`, `public` and `5s`). There is no `neon` type: a Neon or Supabase database is a `postgres` URL. `environments` overrides the provider per `-e` flag, and every environment of a database has its dialect. `migrationsDir` and `drizzleConfigPath` are read relative to the config file, by `diff` as by `apply`.
 
 `loadConfig()`, `resolveDatabaseConfig()`, and `createProvider()` turn that into a `ConnectionProvider`. Each provider exposes the same `Connection` interface, and the SQLite introspection reads it: `introspectSqliteSchema`, `getSqliteTables`, `getSqliteColumns`, `getSqliteIndexes`.
 

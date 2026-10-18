@@ -1,6 +1,7 @@
 export {
 	type CombMigrateConfig,
 	createProvider,
+	DEFAULT_PG_DEV_URL,
 	defineConfig,
 	type LoadedConfig,
 	loadConfig,
@@ -59,6 +60,7 @@ export type {
 	CircuitBreakerState,
 	Connection,
 	ConnectionProvider,
+	ConnectionProviderConfig,
 	D1ProviderConfig,
 	DatabaseConfig,
 	Dialect,
@@ -72,9 +74,11 @@ export type {
 	MigrationStatus,
 	MultiTenantConfig,
 	ParsedMigration,
+	PostgresProviderConfig,
 	ProviderConfig,
 	QueryResult,
 	ResolvedDatabaseConfig,
 	ResolvedMigrationConfig,
+	ResolvedPostgresProviderConfig,
 	TursoProviderConfig,
 } from "./types.ts"

@@ -4,6 +4,7 @@ import path from "node:path"
 import { parseArgs } from "./args.ts"
 import { configuredFtsSql } from "./comb-config.ts"
 import { migrateApply } from "./migrate-apply.ts"
+import { resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliIo } from "./output.ts"
 
 const DRIZZLE_CONFIG = `import { defineConfig } from "drizzle-kit"
@@ -70,12 +71,15 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const { checkAtlasInstalled, exportDrizzleSchema, generateIncrementalMigration } =
 		await import("../migrate/core/atlas.ts")
 	if (!checkAtlasInstalled(io.run)) throw new CliError("Atlas not found. Install: https://atlasgo.io/getting-started")
+	const target = db === undefined ? undefined : await resolveMigrateTarget({ cwd: io.cwd, db, mode: "diff" })
+	if (target?.dialect === "postgres")
+		throw new CliError(`${target.label} is a Postgres database, which migrate diff does not read yet`)
 	const ftsSql = await configuredFtsSql(io.cwd, db, io)
 	const { files, synced } = generateIncrementalMigration({
 		dialect: "sqlite",
 		ftsSql,
 		migrationName: name ?? `migration_${Date.now()}`,
-		migrationsDir: path.resolve(io.cwd, "atlas-migrations"),
+		migrationsDir: target?.migrationsDir ?? path.resolve(io.cwd, "atlas-migrations"),
 		run: io.run,
 		targetSchema: exportDrizzleSchema({ cwd: io.cwd, dialect: "sqlite", run: io.run }),
 	})

@@ -150,3 +150,34 @@ describe("comb migrate diff: the config it reads", () => {
 		expect(io.errors.join("\n")).toContain('comb.config.ts declares no database "nope"')
 	})
 })
+
+describe("comb migrate diff: through comb.migrate.config.ts", () => {
+	it("writes into the database's configured migrations directory, relative to the config", async () => {
+		const dir = project()
+		mkdirSync(join(dir, "db", "m"), { recursive: true })
+		writeFileSync(
+			join(dir, "comb.migrate.config.ts"),
+			'export default { databases: { core: { migrationsDir: "db/m", name: "core", provider: { type: "libsql", url: "file:core.db" } } } }\n',
+		)
+		const run = fakeAtlas((replayed) =>
+			writeFileSync(join(replayed, "1_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n"),
+		)
+		const io = makeIo(dir, run)
+		expect(await runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
+		expect(io.outputs).toEqual([`Generated: ${join(dir, "db", "m", "1_init.sql")}`])
+	})
+
+	it("refuses a Postgres database for now", async () => {
+		const dir = project()
+		writeFileSync(
+			join(dir, "comb.migrate.config.ts"),
+			'export default { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "postgres", url: "postgres://localhost/app" } } } }\n',
+		)
+		const io = makeIo(
+			dir,
+			fakeAtlas(() => undefined),
+		)
+		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
+		expect(io.errors).toEqual(["core (core) is a Postgres database, which migrate diff does not read yet"])
+	})
+})

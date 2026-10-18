@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import {
 	type CombMigrateConfig,
 	createProvider,
+	DEFAULT_PG_DEV_URL,
 	defineConfig,
 	findConfigFile,
 	loadConfig,
@@ -138,9 +139,7 @@ describe("resolveDatabaseConfig and createProvider — every provider", () => {
 	it.each(PROVIDERS)("resolves and creates $type with its dialect", (provider) => {
 		const resolved = resolveDatabaseConfig({ migrationsDir: "m", name: "core", provider })
 		expect(resolved).toEqual({ drizzleConfigPath: undefined, migrationsDir: "m", name: "core", provider })
-		expect(createProvider(resolved.provider, { run: () => ({ code: 0, stderr: "", stdout: "[]" }) }).dialect).toBe(
-			"sqlite",
-		)
+		expect(createProvider(provider, { run: () => ({ code: 0, stderr: "", stdout: "[]" }) }).dialect).toBe("sqlite")
 	})
 
 	it("refuses an environment with no provider anywhere, and a legacy config missing name or provider", () => {
@@ -163,12 +162,83 @@ describe("resolveDatabaseConfig and createProvider — every provider", () => {
 	})
 })
 
-describe("defineConfig — a Postgres provider", () => {
-	it.each(["postgres", "neon"])("refuses %s at load, naming what applies Postgres migrations instead", (type) => {
-		const config = {
-			databases: { core: { migrationsDir: "m", name: "core", provider: { connectionString: "postgres://x", type } } },
-		}
-		expect(() => defineConfig(config as never)).toThrow(/comb migrate applies to SQLite.*drizzle-kit migrate/s)
+const PG_URL = "postgres://app@db.example.com/app?sslmode=verify-full"
+
+describe("defineConfig and resolveDatabaseConfig — a Postgres provider", () => {
+	it("resolves a postgres provider with comb's defaults for what it leaves out", () => {
+		const config = defineConfig({
+			databases: { core: { migrationsDir: "m", name: "core", provider: { type: "postgres", url: PG_URL } } },
+		})
+		expect(resolveDatabaseConfig(config.databases["core"] as never).provider).toEqual({
+			devUrl: DEFAULT_PG_DEV_URL,
+			lockTimeout: "5s",
+			schema: "public",
+			type: "postgres",
+			url: PG_URL,
+		})
+		expect(DEFAULT_PG_DEV_URL).toBe("docker://postgres/17/dev")
+	})
+
+	it("keeps what each environment sets, and takes the database-level provider for the rest", () => {
+		const provider = {
+			devUrl: "postgres://localhost/dev",
+			lockTimeout: "2s",
+			schema: "app",
+			type: "postgres",
+			url: PG_URL,
+		} as const
+		const config = defineConfig({
+			databases: {
+				core: {
+					environments: {
+						prod: { name: "core-prod", provider: { ...provider, url: "postgres://app@prod.example.com/app" } },
+						staging: { name: "core-staging" },
+					},
+					migrationsDir: "m",
+					provider,
+				},
+			},
+		})
+		const db = config.databases["core"] as never
+		expect(resolveDatabaseConfig(db, "staging").provider).toEqual(provider)
+		expect(resolveDatabaseConfig(db, "prod").provider).toMatchObject({
+			schema: "app",
+			url: "postgres://app@prod.example.com/app",
+		})
+	})
+})
+
+describe("defineConfig and createProvider — Postgres refusals and neighbors", () => {
+	it("refuses neon, which is a postgres URL, and a postgres provider without a url", () => {
+		const neon = { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "neon", url: PG_URL } } } }
+		expect(() => defineConfig(neon as never)).toThrow(
+			"Neon and Supabase are postgres URLs: use the postgres provider type",
+		)
+		const bare = { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "postgres" } } } }
+		expect(() => defineConfig(bare as never)).toThrow()
+	})
+
+	it("holds a SQLite and a Postgres database side by side", () => {
+		const config = defineConfig({
+			databases: {
+				analytics: { migrationsDir: "pg", name: "analytics", provider: { type: "postgres", url: PG_URL } },
+				core: { migrationsDir: "m", name: "core", provider: { type: "libsql", url: "file:core.db" } },
+			},
+		})
+		expect(resolveDatabaseConfig(config.databases["analytics"] as never).provider.type).toBe("postgres")
+		expect(resolveDatabaseConfig(config.databases["core"] as never).provider.type).toBe("libsql")
+	})
+
+	it("creates no connection provider for Postgres, which Atlas applies", () => {
+		const resolved = resolveDatabaseConfig({
+			migrationsDir: "m",
+			name: "a",
+			provider: { type: "postgres", url: PG_URL },
+		})
+		// @ts-expect-error createProvider takes the providers comb connects to itself
+		expect(() => createProvider(resolved.provider)).toThrow(
+			"Atlas applies Postgres migrations; comb opens no connection to postgres",
+		)
 	})
 })
 

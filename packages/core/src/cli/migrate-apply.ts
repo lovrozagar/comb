@@ -14,6 +14,7 @@ import { extractSchema, migrationHashes, parseMigration } from "../migrate/core/
 import { withRetry } from "../migrate/core/utils.ts"
 import type { Connection, ExtractedSchema } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
+import { resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliIo } from "./output.ts"
 
 type Mode = "apply" | "baseline"
@@ -27,20 +28,28 @@ type Request = { args: ParsedArgs; db: string; io: CliIo; mode: Mode }
 const option = (args: ParsedArgs, name: string) => args.options[name] as string | undefined
 
 /** The database comb.migrate.config.ts declares as `db`, in the environment -e names */
-async function configuredTarget(configFile: string, { args, db, io }: Request): Promise<Target> {
-	const { createProvider, loadConfig, resolveDatabaseConfig } = await import("../migrate/config.ts")
+async function configuredTarget({ args, db, io, mode }: Request): Promise<Target | undefined> {
+	const target = await resolveMigrateTarget({
+		cwd: io.cwd,
+		db,
+		dir: option(args, "dir"),
+		env: option(args, "env"),
+		mode: "apply",
+	})
+	if (target === undefined) return undefined
 	if (args.options["local"])
 		throw new CliError("--local applies without comb.migrate.config.ts; set local: true on its d1 provider")
-	const { config, configDir } = await loadConfig(configFile, io.cwd)
-	if (!Object.hasOwn(config.databases, db)) {
-		throw new CliError(
-			`${path.basename(configFile)} declares no database "${db}". Available: ${Object.keys(config.databases).join(", ")}`,
-		)
-	}
-	const resolved = resolveDatabaseConfig(config.databases[db] as (typeof config.databases)[string], option(args, "env"))
-	const migrationsDir = requireDir(path.resolve(configDir, option(args, "dir") ?? resolved.migrationsDir), args)
-	const conn = await createProvider(resolved.provider, { run: io.run }).connect({ ...resolved, migrationsDir })
-	return { conn, migrationsDir, name: `${db} (${resolved.name})` }
+	if (target.provider.type === "postgres")
+		throw new CliError(`${target.label} is a Postgres database, which migrate ${mode} does not apply yet`)
+	const { createProvider } = await import("../migrate/config.ts")
+	const migrationsDir = requireDir(target.migrationsDir, args)
+	const conn = await createProvider(target.provider, { run: io.run }).connect({
+		drizzleConfigPath: target.drizzleConfigPath,
+		migrationsDir,
+		name: target.name,
+		provider: target.provider,
+	})
+	return { conn, migrationsDir, name: target.label }
 }
 
 /** `dir`, checked before any connection opens; --file needs no directory */
@@ -61,9 +70,7 @@ async function d1Target({ args, db, io }: Request): Promise<Target> {
 }
 
 async function openTarget(request: Request): Promise<Target> {
-	const { findConfigFile } = await import("../migrate/config.ts")
-	const configFile = findConfigFile(request.io.cwd)
-	return configFile ? configuredTarget(configFile, request) : d1Target(request)
+	return (await configuredTarget(request)) ?? d1Target(request)
 }
 
 /** The migration files to run: --file alone, else every .sql file in the directory, in name order */

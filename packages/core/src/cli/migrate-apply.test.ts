@@ -76,6 +76,18 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 		expect(await tables(url)).toEqual(["__drizzle_migrations", "a", "lone"])
 	})
 
+	it("refuses a Postgres database for now", async () => {
+		const dir = project()
+		mkdirSync(join(dir, "m"))
+		writeFileSync(
+			join(dir, "comb.migrate.config.ts"),
+			'export default { databases: { core: { migrationsDir: "./m", name: "core", provider: { type: "postgres", url: "postgres://localhost/app" } } } }\n',
+		)
+		const io = makeIo(dir)
+		expect(await runCli(["migrate", "apply", "core"], io)).toBe(1)
+		expect(io.errors).toEqual(["core (core) is a Postgres database, which migrate apply does not apply yet"])
+	})
+
 	it("refuses a database the config does not declare, and --local", async () => {
 		const { dir } = configured({})
 		const unknown = makeIo(dir)
@@ -215,6 +227,21 @@ describe("migrate apply: the D1 database named on the command line", () => {
 				/CREATE TABLE post \(id TEXT\)\n;\nINSERT INTO __drizzle_migrations \(hash, created_at\) VALUES \('[0-9a-f]{64}', \d+\)\n;/,
 			)
 		}
+	})
+
+	it("names the configured database to wrangler as its environment calls it", async () => {
+		const dir = project()
+		mkdirSync(join(dir, "m"))
+		writeFileSync(join(dir, "m", "1_init.sql"), "CREATE TABLE post (id TEXT);")
+		writeFileSync(
+			join(dir, "comb.migrate.config.ts"),
+			'export default { databases: { core: { environments: { dev: { name: "core-dev" } }, migrationsDir: "./m", provider: { databaseId: "id", databaseName: "core-dev", type: "d1" } } } }\n',
+		)
+		const run = wrangler()
+		const io = makeIo(dir, run)
+		expect(await runCli(["migrate", "apply", "core", "-e", "dev"], io)).toBe(0)
+		expect(run.calls.every((call) => call[3] === "core-dev")).toBe(true)
+		expect(io.outputs).toContain("Apply: 1_init.sql")
 	})
 
 	it("refuses -e without a migrate config to define environments", async () => {

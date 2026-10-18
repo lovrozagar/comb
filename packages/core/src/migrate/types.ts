@@ -47,7 +47,32 @@ export type D1ProviderConfig = {
 	type: "d1"
 }
 
-export type ProviderConfig = BunSqliteProviderConfig | D1ProviderConfig | LibsqlProviderConfig | TursoProviderConfig
+/** The providers comb opens a connection to and applies migrations through itself */
+export type ConnectionProviderConfig =
+	| BunSqliteProviderConfig
+	| D1ProviderConfig
+	| LibsqlProviderConfig
+	| TursoProviderConfig
+
+/**
+ * A Postgres database, which Atlas diffs and applies: plain Postgres, Neon or Supabase, by URL.
+ * Use a direct, non-pooled URL with `sslmode=verify-full` (or `require`).
+ */
+export type PostgresProviderConfig = {
+	/** an empty database Atlas replays migrations on; default `docker://postgres/17/dev` */
+	devUrl?: string | undefined
+	/** how long a statement waits for a lock before the migration fails, as `5s`, `1500ms` or `0` for no bound; default `5s` */
+	lockTimeout?: string | undefined
+	/** the one schema comb migrates; default `public` */
+	schema?: string | undefined
+	type: "postgres"
+	url: string
+}
+
+/** A Postgres provider with comb's defaults filled in */
+export type ResolvedPostgresProviderConfig = Required<PostgresProviderConfig>
+
+export type ProviderConfig = ConnectionProviderConfig | PostgresProviderConfig
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ENVIRONMENT AND DATABASE CONFIG
@@ -69,7 +94,7 @@ export type ResolvedDatabaseConfig = {
 	name: string
 	migrationsDir: string
 	drizzleConfigPath?: string | undefined
-	provider: ProviderConfig
+	provider: ConnectionProviderConfig | ResolvedPostgresProviderConfig
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

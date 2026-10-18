@@ -1,15 +1,17 @@
 // migrate/index.d.ts
-export { type CombMigrateConfig, createProvider, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
+export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
 export { applyMigration, checkMigrationHash, cleanupBackupTables, createBackupTables, ensureMigrationsTable, recordMigrationHash, verifySchema, } from "./core/apply.ts";
 export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, type GenerateMigrationOptions, generateMigrationFile, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
 export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, makeIdempotent, parseMigration, splitSqlStatements, } from "./core/parse.ts";
 export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCircuitBreaker, withRetry, } from "./core/utils.ts";
 export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./drivers/index.ts";
-export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, MultiTenantConfig, ParsedMigration, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, TursoProviderConfig, } from "./types.ts";
+export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, MultiTenantConfig, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
 
 // migrate/config.d.ts
 import type { Run } from "./core/process.ts";
-import type { ConnectionProvider, DatabaseConfig, MigrationConfig, MultiTenantConfig, ProviderConfig, ResolvedDatabaseConfig } from "./types.ts";
+import type { ConnectionProvider, ConnectionProviderConfig, DatabaseConfig, MigrationConfig, MultiTenantConfig, ResolvedDatabaseConfig } from "./types.ts";
+/** The empty database Atlas replays Postgres migrations on when a provider names none */
+export declare const DEFAULT_PG_DEV_URL = "docker://postgres/17/dev";
 /** What comb.migrate.config.ts declares: the migration config before multi-tenant defaults fill in */
 export type CombMigrateConfig = {
     databases: Record<string, DatabaseConfig>;
@@ -21,7 +23,8 @@ export type CombMigrateConfig = {
 export type ProviderDeps = {
     run?: Run | undefined;
 };
-export declare function createProvider(config: ProviderConfig, deps?: ProviderDeps): ConnectionProvider;
+/** The connection for a provider comb applies through itself; Postgres goes through Atlas instead */
+export declare function createProvider(config: ConnectionProviderConfig, deps?: ProviderDeps): ConnectionProvider;
 export declare function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string): ResolvedDatabaseConfig;
 export declare function defineConfig(input: CombMigrateConfig): MigrationConfig;
 export type LoadedConfig = {
@@ -206,7 +209,25 @@ export type D1ProviderConfig = {
     local?: boolean | undefined;
     type: "d1";
 };
-export type ProviderConfig = BunSqliteProviderConfig | D1ProviderConfig | LibsqlProviderConfig | TursoProviderConfig;
+/** The providers comb opens a connection to and applies migrations through itself */
+export type ConnectionProviderConfig = BunSqliteProviderConfig | D1ProviderConfig | LibsqlProviderConfig | TursoProviderConfig;
+/**
+ * A Postgres database, which Atlas diffs and applies: plain Postgres, Neon or Supabase, by URL.
+ * Use a direct, non-pooled URL with `sslmode=verify-full` (or `require`).
+ */
+export type PostgresProviderConfig = {
+    /** an empty database Atlas replays migrations on; default `docker://postgres/17/dev` */
+    devUrl?: string | undefined;
+    /** how long a statement waits for a lock before the migration fails, as `5s`, `1500ms` or `0` for no bound; default `5s` */
+    lockTimeout?: string | undefined;
+    /** the one schema comb migrates; default `public` */
+    schema?: string | undefined;
+    type: "postgres";
+    url: string;
+};
+/** A Postgres provider with comb's defaults filled in */
+export type ResolvedPostgresProviderConfig = Required<PostgresProviderConfig>;
+export type ProviderConfig = ConnectionProviderConfig | PostgresProviderConfig;
 export type EnvironmentConfig = {
     name: string;
     provider?: ProviderConfig | undefined;
@@ -223,7 +244,7 @@ export type ResolvedDatabaseConfig = {
     name: string;
     migrationsDir: string;
     drizzleConfigPath?: string | undefined;
-    provider: ProviderConfig;
+    provider: ConnectionProviderConfig | ResolvedPostgresProviderConfig;
 };
 export type MultiTenantConfig = {
     circuitBreaker: {
