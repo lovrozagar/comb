@@ -39,10 +39,6 @@ export type LibsqlProviderConfig = { authToken?: string | undefined; type: "libs
 
 export type BunSqliteProviderConfig = { path: string; type: "bun-sqlite" }
 
-export type PostgresProviderConfig = { connectionString: string; type: "postgres" }
-
-export type NeonProviderConfig = { connectionString: string; type: "neon" }
-
 export type D1ProviderConfig = {
 	databaseId: string
 	databaseName: string
@@ -51,13 +47,7 @@ export type D1ProviderConfig = {
 	type: "d1"
 }
 
-export type ProviderConfig =
-	| BunSqliteProviderConfig
-	| D1ProviderConfig
-	| LibsqlProviderConfig
-	| NeonProviderConfig
-	| PostgresProviderConfig
-	| TursoProviderConfig
+export type ProviderConfig = BunSqliteProviderConfig | D1ProviderConfig | LibsqlProviderConfig | TursoProviderConfig
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ENVIRONMENT AND DATABASE CONFIG

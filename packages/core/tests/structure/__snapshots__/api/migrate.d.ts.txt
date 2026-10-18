@@ -4,8 +4,8 @@ export { applyMigration, checkMigrationHash, cleanupBackupTables, createBackupTa
 export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, type GenerateMigrationOptions, generateMigrationFile, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
 export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, makeIdempotent, parseMigration, splitSqlStatements, } from "./core/parse.ts";
 export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCircuitBreaker, withRetry, } from "./core/utils.ts";
-export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createNeonProvider, createPostgresProvider, createTursoProvider, getPostgresColumns, getPostgresIndexes, getPostgresTables, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectPostgresSchema, introspectSqliteSchema, } from "./drivers/index.ts";
-export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, MultiTenantConfig, NeonProviderConfig, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, TursoProviderConfig, } from "./types.ts";
+export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./drivers/index.ts";
+export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, MultiTenantConfig, ParsedMigration, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, TursoProviderConfig, } from "./types.ts";
 
 // migrate/config.d.ts
 import type { Run } from "./core/process.ts";
@@ -164,7 +164,6 @@ export declare function confirmDrops(drops: readonly string[], target: string, o
 
 // migrate/drivers/index.d.ts
 export { createD1Provider } from "./d1.ts";
-export { createNeonProvider, createPostgresProvider, getPostgresColumns, getPostgresIndexes, getPostgresTables, introspectPostgresSchema, } from "./postgres.ts";
 export { createBunSqliteProvider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./sqlite.ts";
 
 // migrate/types.d.ts
@@ -204,14 +203,6 @@ export type BunSqliteProviderConfig = {
     path: string;
     type: "bun-sqlite";
 };
-export type PostgresProviderConfig = {
-    connectionString: string;
-    type: "postgres";
-};
-export type NeonProviderConfig = {
-    connectionString: string;
-    type: "neon";
-};
 export type D1ProviderConfig = {
     databaseId: string;
     databaseName: string;
@@ -219,7 +210,7 @@ export type D1ProviderConfig = {
     local?: boolean | undefined;
     type: "d1";
 };
-export type ProviderConfig = BunSqliteProviderConfig | D1ProviderConfig | LibsqlProviderConfig | NeonProviderConfig | PostgresProviderConfig | TursoProviderConfig;
+export type ProviderConfig = BunSqliteProviderConfig | D1ProviderConfig | LibsqlProviderConfig | TursoProviderConfig;
 export type EnvironmentConfig = {
     name: string;
     provider?: ProviderConfig | undefined;
@@ -364,20 +355,6 @@ export { normalizeSql, segments, splitSqlStatements, type Segment };
 import { type Run } from "../core/process.ts";
 import type { ConnectionProvider, D1ProviderConfig } from "../types.ts";
 export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): ConnectionProvider;
-
-// migrate/drivers/postgres.d.ts
-/**
- * PostgreSQL driver implementations (Neon, Supabase, plain pg)
- *
- * TODO: Implement when needed. Interface is defined, implementation pending.
- */
-import type { Connection, ConnectionProvider, NeonProviderConfig, PostgresProviderConfig } from "../types.ts";
-export declare function createPostgresProvider(_config: PostgresProviderConfig): ConnectionProvider;
-export declare function createNeonProvider(_config: NeonProviderConfig): ConnectionProvider;
-export declare function introspectPostgresSchema(_conn: Connection): Promise<string>;
-export declare function getPostgresTables(conn: Connection): Promise<string[]>;
-export declare function getPostgresColumns(conn: Connection, table: string): Promise<string[]>;
-export declare function getPostgresIndexes(conn: Connection): Promise<string[]>;
 
 // migrate/drivers/sqlite.d.ts
 import type { Connection, ConnectionProvider, LibsqlProviderConfig, TursoProviderConfig } from "../types.ts";

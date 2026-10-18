@@ -466,9 +466,9 @@ export default defineConfig({
 })
 ```
 
-The config is Zod-validated, so a typo fails at load rather than at apply. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`org`, `apiToken`, `group`), `d1` (`databaseId`, `databaseName`), `postgres` and `neon` (`connectionString`). `environments` overrides the provider per `-e` flag.
+The config is Zod-validated, so a typo fails at load rather than at apply. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`org`, `apiToken`, `group`), `d1` (`databaseId`, `databaseName`). `environments` overrides the provider per `-e` flag. comb migrate applies to SQLite, libsql, Turso and D1; a `postgres` or `neon` provider is refused at load, and Postgres migrations run with `drizzle-kit migrate`. Postgres is served at runtime (`@lovrozagar/comb/pg/columns`, `@lovrozagar/comb/pg/error-handler`).
 
-`loadConfig()`, `resolveDatabaseConfig()`, and `createProvider()` turn that into a `ConnectionProvider`. Each provider exposes the same `Connection` interface plus introspection (`introspectSqliteSchema`, `introspectPostgresSchema`, `getSqliteTables`, `getPostgresIndexes`, …).
+`loadConfig()`, `resolveDatabaseConfig()`, and `createProvider()` turn that into a `ConnectionProvider`. Each provider exposes the same `Connection` interface, and the SQLite introspection reads it: `introspectSqliteSchema`, `getSqliteTables`, `getSqliteColumns`, `getSqliteIndexes`.
 
 A `multiTenant` block fans a migration out across every tenant database returned by `tenantQuery` against `rootDatabase`, bounded by `concurrency` and guarded by the `circuitBreaker` thresholds (`failureThreshold`, `minSampleSize`).
 

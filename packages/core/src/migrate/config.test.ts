@@ -131,8 +131,6 @@ const PROVIDERS = [
 	{ apiToken: "t", group: "g", org: "o", type: "turso" },
 	{ authToken: "a", type: "libsql", url: "file:x.db" },
 	{ path: "x.db", type: "bun-sqlite" },
-	{ connectionString: "postgres://x", type: "postgres" },
-	{ connectionString: "postgres://y", type: "neon" },
 	{ databaseId: "id", databaseName: "core", local: true, type: "d1" },
 ] as const
 
@@ -140,9 +138,8 @@ describe("resolveDatabaseConfig and createProvider — every provider", () => {
 	it.each(PROVIDERS)("resolves and creates $type with its dialect", (provider) => {
 		const resolved = resolveDatabaseConfig({ migrationsDir: "m", name: "core", provider })
 		expect(resolved).toEqual({ drizzleConfigPath: undefined, migrationsDir: "m", name: "core", provider })
-		const dialect = provider.type === "postgres" || provider.type === "neon" ? "postgres" : "sqlite"
 		expect(createProvider(resolved.provider, { run: () => ({ code: 0, stderr: "", stdout: "[]" }) }).dialect).toBe(
-			dialect,
+			"sqlite",
 		)
 	})
 
@@ -163,6 +160,15 @@ describe("resolveDatabaseConfig and createProvider — every provider", () => {
 			provider: PROVIDERS[2],
 		}
 		expect(() => resolveDatabaseConfig(db)).toThrow("pass -e/--env with one of: local, staging")
+	})
+})
+
+describe("defineConfig — a Postgres provider", () => {
+	it.each(["postgres", "neon"])("refuses %s at load, naming what applies Postgres migrations instead", (type) => {
+		const config = {
+			databases: { core: { migrationsDir: "m", name: "core", provider: { connectionString: "postgres://x", type } } },
+		}
+		expect(() => defineConfig(config as never)).toThrow(/comb migrate applies to SQLite.*drizzle-kit migrate/s)
 	})
 })
 

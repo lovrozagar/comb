@@ -7,7 +7,6 @@ import { dirname, resolve } from "node:path"
 import * as z from "zod"
 import type { Run } from "./core/process.ts"
 import { createD1Provider } from "./drivers/d1.ts"
-import { createNeonProvider, createPostgresProvider } from "./drivers/postgres.ts"
 import { createBunSqliteProvider, createLibsqlProvider, createTursoProvider } from "./drivers/sqlite.ts"
 import type {
 	ConnectionProvider,
@@ -21,6 +20,9 @@ import type {
 /* ═══════════════════════════════════════════════════════════════════════════
    CONFIG SCHEMA
    ═══════════════════════════════════════════════════════════════════════════ */
+
+const POSTGRES_UNSUPPORTED =
+	"comb migrate applies to SQLite, libsql, Turso and D1; run Postgres migrations with drizzle-kit migrate"
 
 /* Built on use: defineConfig runs once per process, and module scope stays free of work */
 const providerInputSchema = () =>
@@ -40,13 +42,10 @@ const providerInputSchema = () =>
 			path: z.string().min(1),
 			type: z.literal("bun-sqlite"),
 		}),
-		z.object({
-			connectionString: z.string().min(1),
-			type: z.literal("postgres"),
-		}),
-		z.object({
-			connectionString: z.string().min(1),
-			type: z.literal("neon"),
+		/* Postgres is a dialect comb's runtime serves, not one comb migrate applies to: refuse it at load */
+		z.object({ type: z.enum(["postgres", "neon"]) }).transform((_, ctx) => {
+			ctx.addIssue({ code: "custom", message: POSTGRES_UNSUPPORTED })
+			return z.NEVER
 		}),
 		z.object({
 			databaseId: z.string().min(1),
@@ -116,10 +115,6 @@ function resolveProviderConfig(
 			return { authToken: input.authToken, type: "libsql", url: input.url }
 		case "bun-sqlite":
 			return { path: input.path, type: "bun-sqlite" }
-		case "postgres":
-			return { connectionString: input.connectionString, type: "postgres" }
-		case "neon":
-			return { connectionString: input.connectionString, type: "neon" }
 		case "d1":
 			return { databaseId: input.databaseId, databaseName: input.databaseName, local: input.local, type: "d1" }
 	}
@@ -140,10 +135,6 @@ export function createProvider(config: ProviderConfig, deps: ProviderDeps = {}):
 			return createLibsqlProvider(config)
 		case "bun-sqlite":
 			return createBunSqliteProvider(config)
-		case "postgres":
-			return createPostgresProvider(config)
-		case "neon":
-			return createNeonProvider(config)
 		case "d1":
 			return createD1Provider(config, deps.run)
 	}
