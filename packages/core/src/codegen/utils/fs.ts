@@ -12,6 +12,10 @@ export function ensureDir(dirPath: string): void {
 	}
 }
 
+/* a UUID rather than random bytes as hex: a consumer build that also loads the Workers types sees
+ * the bytes as a plain Uint8Array, whose toString takes no encoding */
+const tmpPathFor = (filePath: string): string => `${filePath}.${crypto.randomUUID()}.tmp`
+
 /**
  * Atomically write and parse JSON (tmp + rename).
  * Preserves non-generated keys when merging.
@@ -19,7 +23,7 @@ export function ensureDir(dirPath: string): void {
 export function writeJsonAtomic(filePath: string, data: unknown): void {
 	const dir = path.dirname(filePath)
 	ensureDir(dir)
-	const tmpPath = `${filePath}.${crypto.randomBytes(4).toString("hex")}.tmp`
+	const tmpPath = tmpPathFor(filePath)
 	fs.writeFileSync(tmpPath, `${JSON.stringify(data, null, "\t")}\n`)
 	fs.renameSync(tmpPath, filePath)
 }
@@ -75,7 +79,7 @@ export function writeGenFile(filePath: string, body: string, generator: string):
 
 	const dir = path.dirname(filePath)
 	ensureDir(dir)
-	const tmpPath = `${filePath}.${crypto.randomBytes(4).toString("hex")}.tmp`
+	const tmpPath = tmpPathFor(filePath)
 	fs.writeFileSync(tmpPath, fullContent)
 	fs.renameSync(tmpPath, filePath)
 	return true
@@ -118,7 +122,7 @@ export function writeGenJsonFile(filePath: string, data: unknown, generator: str
 	const output = { _generated: marker, ...(data as Record<string, unknown>) }
 	const dir = path.dirname(filePath)
 	ensureDir(dir)
-	const tmpPath = `${filePath}.${crypto.randomBytes(4).toString("hex")}.tmp`
+	const tmpPath = tmpPathFor(filePath)
 	fs.writeFileSync(tmpPath, `${JSON.stringify(output, null, 2)}\n`)
 	fs.renameSync(tmpPath, filePath)
 	return true
