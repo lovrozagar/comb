@@ -7,7 +7,7 @@ import { srcPath } from "./scope.js"
  * Node and workerd all accept, and the features keep the arrows that let each dialect ship alone. */
 
 const NODE_BUILTINS = new Set(builtinModules)
-const DECLARED = new Set([...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.peerDependencies ?? {})])
+const DECLARED = new Set([...Object.keys(manifest.dependencies), ...Object.keys(manifest.peerDependencies)])
 
 const SHARED_ROOTS = new Set(["error.ts", "types.ts", "lru.ts", "id.ts", "states.ts"])
 

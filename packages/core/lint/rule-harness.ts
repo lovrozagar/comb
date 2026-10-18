@@ -115,7 +115,7 @@ export function oxlintReports(name: string, fixture: Fixture): Report[] {
 		const out = JSON.parse(proc.stdout) as { diagnostics: Array<{ filename: string; message: string }> }
 		return out.diagnostics
 			.map((d) => ({ file: d.filename.slice(dir.length + 1), message: d.message }))
-			.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0))
+			.sort((a, b) => a.file.localeCompare(b.file))
 	} finally {
 		rmSync(dir, { force: true, recursive: true })
 	}

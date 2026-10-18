@@ -14,8 +14,8 @@ function isFixedText(node) {
 	return false
 }
 
+/* `node` is the one argument: the caller has already refused any other count */
 function isSafe(node) {
-	if (node === undefined) return false
 	if (node.type === "CallExpression") return node.callee.type === "Identifier" && node.callee.name === "quoteIdent"
 	return isFixedText(node)
 }
