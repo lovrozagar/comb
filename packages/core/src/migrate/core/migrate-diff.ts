@@ -20,6 +20,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
+import { freshVersion, hashDir, sqlFiles, verifySum } from "./atlas-dir.ts"
 import { applySqliteMigrationTransforms, SQLITE_DEV_URL } from "./atlas-env.ts"
 import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { asSql, type FtsState, ftsDelta, separate } from "./fts-migration.ts"
@@ -46,11 +47,6 @@ export type MigrateDiffResult = {
 }
 
 type Atlas = { dialect: Dialect; exec: Run; target?: PgTarget | undefined }
-
-function hash(atlas: Atlas, dir: string): void {
-	const result = atlas.exec("atlas", ["migrate", "hash", "--dir", `file://${dir}`])
-	if (result.code !== 0) throw new Error(`atlas migrate hash failed: ${result.stderr}`)
-}
 
 /** A migration to diff: its name and the schema it should reach */
 type Target = { name: string; schema: string }
@@ -79,43 +75,19 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 	}
 }
 
-const migrationFiles = (dir: string) =>
-	readdirSync(dir)
-		.filter((file) => file.endsWith(".sql"))
-		.sort()
-
-/**
- * Refuse a history whose atlas.sum does not match its files: Atlas checks this itself, but here it
- * only ever sees a fresh copy, so comb hashes an untouched copy and compares.
- */
-function checkIntegrity(atlas: Atlas, dir: string): void {
-	const check = mkdtempSync(join(tmpdir(), "comb-migrate-sum-"))
-	try {
-		for (const file of migrationFiles(dir)) copyFileSync(join(dir, file), join(check, file))
-		hash(atlas, check)
-		if (readFileSync(join(check, "atlas.sum"), "utf8") !== readFileSync(join(dir, "atlas.sum"), "utf8")) {
-			throw new Error(
-				`${dir}/atlas.sum does not match its migrations; if a migration was edited on purpose, run atlas migrate hash`,
-			)
-		}
-	} finally {
-		rmSync(check, { force: true, recursive: true })
-	}
-}
-
 /** The plain-only diff on a stripped copy of the history, and the FTS delta comb adds to it */
 function diffWithFts(atlas: Atlas, options: MigrateDiffOptions): MigrateDiffResult {
-	checkIntegrity(atlas, options.migrationsDir)
+	verifySum(atlas.exec, options.migrationsDir)
 	const groups = new Set<string>()
 	const copy = mkdtempSync(join(tmpdir(), "comb-migrate-history-"))
 	try {
 		let history: FtsState = new Map()
-		for (const file of migrationFiles(options.migrationsDir)) {
+		for (const file of sqlFiles(options.migrationsDir)) {
 			const separated = separate(readFileSync(join(options.migrationsDir, file), "utf8"), groups, history)
 			history = separated.state
 			writeFileSync(join(copy, file), asSql(separated.plain))
 		}
-		hash(atlas, copy)
+		hashDir(atlas.exec, copy)
 		const target = separate(options.ftsSql ?? "", groups)
 		const added = atlasDiff(atlas, copy, { name: options.migrationName, schema: options.targetSchema })
 		const plainDiff = added.map((file) => readFileSync(join(copy, file), "utf8")).join("\n")
@@ -138,12 +110,12 @@ type Finish = {
 function finish({ added, atlas, copy, fts, options, plainDiff }: Finish): MigrateDiffResult {
 	const { migrationName, migrationsDir } = options
 	if (added.length === 0 && fts === "") return { files: [], synced: true }
-	const name = added[0] ?? `${timestamp()}_${migrationName}.sql`
+	const name = added[0] ?? `${freshVersion(migrationsDir)}_${migrationName}.sql`
 	const file = join(migrationsDir, name)
 	/* only the SQLite path writes migrations itself, so the SQLite pragma rewrite always applies */
 	writeFileSync(file, applySqliteMigrationTransforms(`${plainDiff}${plainDiff && fts ? "\n" : ""}${fts}`))
 	for (const extra of added.slice(1)) copyFileSync(join(copy, extra), join(migrationsDir, extra))
-	hash(atlas, migrationsDir)
+	hashDir(atlas.exec, migrationsDir)
 	return { files: [file, ...added.slice(1).map((extra) => join(migrationsDir, extra))], synced: false }
 }
 
@@ -154,37 +126,34 @@ function finish({ added, atlas, copy, fts, options, plainDiff }: Finish): Migrat
  */
 function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): MigrateDiffResult {
 	const { migrationName, migrationsDir } = options
-	checkIntegrity(atlas, migrationsDir)
+	verifySum(atlas.exec, migrationsDir)
 	const copy = mkdtempSync(join(tmpdir(), "comb-migrate-history-"))
 	try {
 		const history: PgObjects = new Map()
-		for (const file of migrationFiles(migrationsDir)) {
+		for (const file of sqlFiles(migrationsDir)) {
 			const sql = readFileSync(join(migrationsDir, file), "utf8")
 			const head = atlasDirectives(sql)
 			writeFileSync(join(copy, file), head + asSql(separatePgObjects(sql.slice(head.length), history).plain))
 		}
-		hash(atlas, copy)
+		hashDir(atlas.exec, copy)
 		const target = separatePgObjects(options.targetSchema)
 		const added = atlasDiff(atlas, copy, { name: migrationName, schema: asSql(target.plain) })
 		const atlasFiles = added.map((file) => readFileSync(join(copy, file), "utf8"))
 		const delta = pgDelta({ atlasSql: atlasFiles.join("\n"), from: history, to: target })
 		if (added.length === 0 && delta.before.length === 0 && delta.after.length === 0) return { files: [], synced: true }
 		const written = splitEnumValues(
-			added[0] ?? `${timestamp()}_${migrationName}.sql`,
+			added[0] ?? `${freshVersion(migrationsDir)}_${migrationName}.sql`,
 			wrapAtlasFile(atlasFiles[0] ?? "", delta),
 		)
 		for (const [name, sql] of written) writeFileSync(join(migrationsDir, name), sql)
 		for (const extra of added.slice(1)) copyFileSync(join(copy, extra), join(migrationsDir, extra))
-		hash(atlas, migrationsDir)
+		hashDir(atlas.exec, migrationsDir)
 		const names = [...written.map(([name]) => name), ...added.slice(1)]
 		return { files: names.map((file) => join(migrationsDir, file)), synced: false }
 	} finally {
 		rmSync(copy, { force: true, recursive: true })
 	}
 }
-
-/** Atlas's migration file stamp: UTC YYYYMMDDHHMMSS */
-const timestamp = () => new Date().toISOString().replace(/\D/g, "").slice(0, 14)
 
 export function generateIncrementalMigration(options: MigrateDiffOptions): MigrateDiffResult {
 	const { dialect, migrationsDir, run: exec = run, target } = options
@@ -193,6 +162,6 @@ export function generateIncrementalMigration(options: MigrateDiffOptions): Migra
 	}
 	const atlas: Atlas = { dialect, exec, target: dialect === "postgres" ? target : undefined }
 	if (!existsSync(migrationsDir)) mkdirSync(migrationsDir, { recursive: true })
-	if (!existsSync(join(migrationsDir, "atlas.sum"))) hash(atlas, migrationsDir)
+	if (!existsSync(join(migrationsDir, "atlas.sum"))) hashDir(atlas.exec, migrationsDir)
 	return dialect === "sqlite" ? diffWithFts(atlas, options) : diffPostgres(atlas, options)
 }

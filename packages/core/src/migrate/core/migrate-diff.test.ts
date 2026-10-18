@@ -292,12 +292,24 @@ describe("generateIncrementalMigration — postgres enums and failures", () => {
 		expect(files).toEqual([join(dir, "20261018000000_a.sql"), join(dir, "20261018000001_b.sql")])
 		expect(readFileSync(files[1] as string, "utf8")).toBe('CREATE TABLE "b" ("x" int);\n')
 	})
+})
 
+describe("generateIncrementalMigration — postgres refusals", () => {
 	it("explains Atlas's refusal to drop an enum value", () => {
 		const refusing = fakeAtlas(() => fail('Error: dropping value "b" from enum "mood" is not supported'))
 		expect(() => generateIncrementalMigration(options(refusing, { dialect: "postgres", target }))).toThrow(
 			'atlas migrate diff failed: Atlas cannot drop the value "b" of enum "mood"',
 		)
+	})
+
+	it("names a file it writes itself after the directory's latest version, even one in the future", () => {
+		writeFileSync(join(dir, "29991231235959_ahead.sql"), 'CREATE VIEW "v" AS (select 1);\n')
+		writeFileSync(join(dir, "atlas.sum"), sumOf(dir))
+		const schema = 'CREATE VIEW "v" AS (select 2);\n'
+		const { files } = generateIncrementalMigration(
+			options(fakeAtlas(), { dialect: "postgres", target, targetSchema: schema }),
+		)
+		expect(files).toEqual([join(dir, "30000101000000_add_b.sql")])
 	})
 
 	it("needs the database's target on postgres", () => {

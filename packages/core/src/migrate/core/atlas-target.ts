@@ -159,6 +159,16 @@ function explainAtlasFailure(stderr: string): string {
 	if (/Error: docker:|Cannot connect to the Docker daemon/i.test(stderr)) {
 		return "Atlas needs Docker for the default devUrl (docker://postgres/17/dev); set devUrl to an empty Postgres database instead"
 	}
+	if (/lock is held by other session/.test(stderr)) {
+		return "another migrate apply is running on this database; run it again once that one finishes"
+	}
+	if (/connected database is not clean/.test(stderr)) {
+		return "the database has objects but no migration history; if its schema matches the migrations, record them with comb migrate baseline"
+	}
+	const late = /migration file (\S+) was added out of order/.exec(stderr)?.[1]
+	if (late !== undefined) {
+		return `${late} is older than a migration already applied; rename it to a newer version and run atlas migrate hash`
+	}
 	const [, value, type] = /dropping value "([^"]*)" from enum "([^"]*)" is not supported/.exec(stderr) ?? []
 	if (value !== undefined) {
 		return `Atlas cannot drop the value "${value}" of enum "${type}": write that migration by hand (a new type without it, the columns moved to it, the old type dropped), then run migrate diff again`

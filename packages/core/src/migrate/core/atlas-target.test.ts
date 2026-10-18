@@ -132,6 +132,12 @@ describe("explainAtlasFailure", () => {
 		expect(explainAtlasFailure("Error: pq: relation missing")).toBe("Error: pq: relation missing")
 	})
 
+	it("says another migration is running when Atlas cannot take its lock", () => {
+		expect(explainAtlasFailure("Error: acquiring database lock: sql/schema: lock is held by other session")).toBe(
+			"another migrate apply is running on this database; run it again once that one finishes",
+		)
+	})
+
 	it("says how to drop an enum value by hand, and what to do with an object Atlas OSS refuses", () => {
 		expect(explainAtlasFailure('Error: dropping value "b" from enum "mood" is not supported')).toBe(
 			'Atlas cannot drop the value "b" of enum "mood": write that migration by hand (a new type without it, the columns moved to it, the old type dropped), then run migrate diff again',

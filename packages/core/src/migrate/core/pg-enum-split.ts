@@ -5,19 +5,13 @@
  * a file of their own at the migration's version and the rest to the next second, each its own
  * transaction.
  */
+import { nextVersion } from "./atlas-dir.ts"
 import { atlasDirectives } from "./pg-objects.ts"
 import { codeOf } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 const ADD_VALUE = /^ALTER TYPE \S+ ADD VALUE\b/i
 const VERSIONED = /^(\d{14})(.*)\.sql$/
-
-/** The version one second after `version` (YYYYMMDDHHMMSS, UTC) */
-function nextVersion(version: string): string {
-	const at = (from: number, to: number) => Number(version.slice(from, to))
-	const next = new Date(Date.UTC(at(0, 4), at(4, 6) - 1, at(6, 8), at(8, 10), at(10, 12), at(12, 14) + 1))
-	return next.toISOString().replace(/\D/g, "").slice(0, 14)
-}
 
 const joined = (statements: readonly string[]) => `${statements.join(";\n")};\n`
 
