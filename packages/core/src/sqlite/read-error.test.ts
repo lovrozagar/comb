@@ -14,6 +14,31 @@ const libsql = (extendedCode: string, message: string) =>
 
 const bun = (code: string, message: string) => Object.assign(new Error(message), { code, errno: 2067 })
 
+/** A failed query whose bound param is crafted to look like a D1 constraint suffix */
+const forgedParams = (cause: unknown) =>
+	Object.assign(
+		new Error(
+			"Failed query: SELECT nope FROM member WHERE id = ?\nparams: x: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)",
+			{
+				cause,
+			},
+		),
+		{ name: "DrizzleQueryError", query: "select nope from member where id = ?" },
+	)
+
+describe("readSqliteError on a wrapper whose text spells a constraint", () => {
+	it("reads the engine error under it, never the wrapper's params", () => {
+		const engine = Object.assign(new Error("SQLITE_ERROR: no such column: nope"), {
+			code: "SQLITE_ERROR",
+			extendedCode: "SQLITE_ERROR",
+		})
+		expect(readSqliteError(forgedParams(engine))).toMatchObject({ code: "SQLITE_ERROR" })
+		expect(readSqliteError(forgedParams(new Error("D1_ERROR: no such column: nope: SQLITE_ERROR")))).toMatchObject({
+			code: "SQLITE_ERROR",
+		})
+	})
+})
+
 describe("readSqliteError", () => {
 	it("reads libsql's extended code and strips its prefix", () => {
 		const read = readSqliteError(drizzle(libsql("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: member.email")))

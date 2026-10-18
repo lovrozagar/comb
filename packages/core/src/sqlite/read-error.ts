@@ -75,17 +75,29 @@ export function readSqliteMessage(text: string): SqliteErrorRead | null {
 	return null
 }
 
-/** The SQLite engine error inside `error` (or the engine message `error` is), or null when there is none. */
+/** `error` and the errors under it on `.cause`, outermost first */
+function chainOf(error: unknown): Error[] {
+	const chain: Error[] = []
+	for (let current = error; chain.length < MAX_DEPTH && current instanceof Error; current = current.cause) {
+		chain.push(current)
+	}
+	return chain
+}
+
+/**
+ * The SQLite engine error inside `error` (or the engine message `error` is), or null when there is none.
+ * The chain is read innermost first: the engine's error is the deepest, and a wrapper's message
+ * ends with the bound params, which a request controls and may shape like an engine message.
+ */
 export function readSqliteError(error: unknown): SqliteErrorRead | null {
 	if (typeof error === "string") return readSqliteMessage(error)
-	let query: string | undefined
-	let current: unknown = error
-	for (let depth = 0; depth < MAX_DEPTH && current instanceof Error; depth++) {
-		const recorded = field(current, "query")
-		if (query === undefined && typeof recorded === "string") query = recorded
-		const read = readOne(current)
+	const chain = chainOf(error)
+	const query = chain.map((link) => field(link, "query")).find((recorded) => typeof recorded === "string") as
+		| string
+		| undefined
+	for (const link of chain.toReversed()) {
+		const read = readOne(link)
 		if (read !== null) return { ...read, query }
-		current = current.cause
 	}
 	return null
 }
