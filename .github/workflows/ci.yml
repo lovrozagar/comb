@@ -99,6 +99,23 @@ jobs:
     name: e2e
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: comb
+          POSTGRES_PASSWORD: comb
+          POSTGRES_USER: comb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U comb -d comb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # postgres.e2e.test.ts is required here: tests/integration/support/pg.ts fails the run when it is unset.
+      COMB_TEST_PG_URL: postgres://comb:comb@localhost:5432/comb?sslmode=disable
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

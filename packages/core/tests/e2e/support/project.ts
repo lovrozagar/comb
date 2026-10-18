@@ -35,8 +35,8 @@ const result = (run: ReturnType<typeof spawnSync>): Run => ({
 	stdout: String(run.stdout),
 })
 
-/** A fresh app holding `files`, removed after the file's tests */
-export function app(files: Record<string, string>): App {
+/** A fresh app holding `files`, removed after the file's tests; `env` is set over the runner's for `comb` */
+export function app(files: Record<string, string>, env: Readonly<Record<string, string>> = {}): App {
 	const dir = mkdtempSync(join(CORE, ".e2e-"))
 	made.push(dir)
 	const write = (more: Record<string, string>) => {
@@ -47,7 +47,8 @@ export function app(files: Record<string, string>): App {
 	}
 	write({ "package.json": JSON.stringify({ name: "e2e-app", private: true, type: "module" }), ...files })
 	return {
-		comb: (...args) => result(spawnSync("bun", [BIN, ...args], { cwd: dir, encoding: "utf8" })),
+		comb: (...args) =>
+			result(spawnSync("bun", [BIN, ...args], { cwd: dir, encoding: "utf8", env: { ...process.env, ...env } })),
 		dir,
 		wrangler: (...args) => result(spawnSync(process.execPath, [WRANGLER, ...args], { cwd: dir, encoding: "utf8" })),
 		write,
