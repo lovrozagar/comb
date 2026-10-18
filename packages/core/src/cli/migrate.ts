@@ -65,23 +65,35 @@ function migrateInit(argv: readonly string[], io: CliIo): void {
 	}
 }
 
-/** The next migration for `db`: Atlas's diff of the exported schema, plus comb's FTS delta */
+/**
+ * The next migration for `db`: Atlas's diff of the exported schema, plus what comb writes itself
+ * (FTS5 on SQLite, the objects Atlas OSS refuses on Postgres). With comb.migrate.config.ts the
+ * database's dialect, directory and drizzle config come from it; without, it is SQLite in
+ * ./atlas-migrations.
+ */
 async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const [db, name] = parseArgs(argv, "migrate diff").positionals
 	const { checkAtlasInstalled, exportDrizzleSchema, generateIncrementalMigration } =
 		await import("../migrate/core/atlas.ts")
 	if (!checkAtlasInstalled(io.run)) throw new CliError("Atlas not found. Install: https://atlasgo.io/getting-started")
 	const target = db === undefined ? undefined : await resolveMigrateTarget({ cwd: io.cwd, db, mode: "diff" })
-	if (target?.dialect === "postgres")
-		throw new CliError(`${target.label} is a Postgres database, which migrate diff does not read yet`)
-	const ftsSql = await configuredFtsSql(io.cwd, db, io)
+	const pg = target?.provider.type === "postgres" ? target.provider : undefined
+	const dialect = pg === undefined ? "sqlite" : "postgres"
+	const exported = {
+		configPath: target?.drizzleConfigPath,
+		cwd: io.cwd,
+		dialect,
+		run: io.run,
+		schema: pg?.schema,
+	} as const
 	const { files, synced } = generateIncrementalMigration({
-		dialect: "sqlite",
-		ftsSql,
+		dialect,
+		ftsSql: pg === undefined ? await configuredFtsSql(io.cwd, db, io) : undefined,
 		migrationName: name ?? `migration_${Date.now()}`,
 		migrationsDir: target?.migrationsDir ?? path.resolve(io.cwd, "atlas-migrations"),
 		run: io.run,
-		targetSchema: exportDrizzleSchema({ cwd: io.cwd, dialect: "sqlite", run: io.run }),
+		target: pg,
+		targetSchema: exportDrizzleSchema(exported),
 	})
 	if (synced) io.out("Schema is already in sync — no migration needed")
 	for (const file of files) io.out(`Generated: ${file}`)

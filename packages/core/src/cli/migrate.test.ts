@@ -167,17 +167,29 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "db", "m", "1_init.sql")}`])
 	})
 
-	it("refuses a Postgres database for now", async () => {
+	it("diffs a Postgres database with its drizzle config, scoped to its schema, its dev URL in the environment", async () => {
 		const dir = project()
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
-			'export default { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "postgres", url: "postgres://localhost/app" } } } }\n',
+			'export default { databases: { core: { drizzleConfigPath: "drizzle.pg.ts", migrationsDir: "pg", name: "core", provider: { devUrl: "postgres://dev:pw@localhost/dev", schema: "app", type: "postgres", url: "postgres://localhost/app" } } } }\n',
 		)
-		const io = makeIo(
-			dir,
-			fakeAtlas(() => undefined),
+		const envs: Array<Readonly<Record<string, string | undefined>> | undefined> = []
+		const atlas = fakeAtlas((replayed) =>
+			writeFileSync(join(replayed, "1_init.sql"), 'CREATE TABLE "post" ("id" integer);\n'),
 		)
-		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
-		expect(io.errors).toEqual(["core (core) is a Postgres database, which migrate diff does not read yet"])
+		const run: Run = (cmd, args, options) => (envs.push(options?.env), atlas(cmd, args, options))
+		const io = makeIo(dir, run)
+		expect(await runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
+		expect(io.outputs).toEqual([`Generated: ${join(dir, "pg", "1_init.sql")}`])
+		expect(atlas.calls.find((call) => call[0] === "bun")).toEqual([
+			"bun",
+			"drizzle-kit",
+			"export",
+			"--config",
+			join(dir, "drizzle.pg.ts"),
+		])
+		const diffAt = atlas.calls.findIndex((call) => call[2] === "diff")
+		expect(atlas.calls[diffAt]?.join(" ")).not.toContain("pw")
+		expect(envs[diffAt]?.["COMB_ATLAS_DEV_URL"]).toBe("postgres://dev:pw@localhost/dev?search_path=app")
 	})
 })
