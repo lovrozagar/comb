@@ -94,3 +94,28 @@ jobs:
           echo "$RUNNER_TEMP/atlas" >> "$GITHUB_PATH"
       - run: bun run test:coverage
       - run: bun run test:bun
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      # vitest runs on Node; the apps run the comb binary under bun, as users do
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: bun install --frozen-lockfile
+      # migrate diff runs the real Atlas
+      - name: install atlas v1.3.0
+        run: |
+          mkdir -p "$RUNNER_TEMP/atlas"
+          curl -sSfL -o "$RUNNER_TEMP/atlas/atlas" https://release.ariga.io/atlas/atlas-linux-amd64-v1.3.0
+          echo "cfc773e5b4e845bc01d680390c174648938a7f88bf30e5a2c83ae85217c21587  $RUNNER_TEMP/atlas/atlas" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/atlas/atlas"
+          echo "$RUNNER_TEMP/atlas" >> "$GITHUB_PATH"
+      - run: bun run --filter @lovrozagar/comb test:e2e
