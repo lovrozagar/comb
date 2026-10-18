@@ -120,12 +120,17 @@ class FilterParser {
 		return values
 	}
 
-	/** A quoted value as written between its quotes, or a bare one up to `,` or `)`, trimmed */
+	/**
+	 * A quoted value as written between its quotes, or a bare one up to `,` or `)`, trimmed. `(` is
+	 * reserved as `)` is: inside a bare value it marks the input malformed; quote the value to hold it.
+	 */
 	private readValue(): string {
 		if (this.peek() === '"') return this.readQuoted()
 		const start = this.pos
 		while (this.pos < this.input.length && this.peek() !== "," && this.peek() !== ")") this.pos++
-		return this.input.slice(start, this.pos).trim()
+		const value = this.input.slice(start, this.pos).trim()
+		if (value.includes("(")) this.malformed = true
+		return value
 	}
 
 	private readQuoted(): string {

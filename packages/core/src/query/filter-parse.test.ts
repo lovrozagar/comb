@@ -258,3 +258,15 @@ describe("parseFilter — quoted values and whitespace (Q-L1, Q-L2)", () => {
 		expect(parseFilter('title.eq."open')).toBeNull()
 	})
 })
+
+describe("parseFilter — reserved characters in a bare value", () => {
+	it("refuses a ( outside quotes, alone or inside a word, as it refuses a stray )", () => {
+		expect(parseFilter("title.eq.(")).toBeNull()
+		expect(parseFilter("title.eq.a(b")).toBeNull()
+		expect(parseFilter("title.eq.Hello (world)")).toBeNull()
+	})
+
+	it("takes it quoted", () => {
+		expect(parseFilter('title.eq."("')?.root.conditions[0]?.value).toBe("(")
+	})
+})
