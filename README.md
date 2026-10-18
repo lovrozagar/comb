@@ -79,7 +79,17 @@ npm install @lovrozagar/comb drizzle-orm zod
 pnpm add @lovrozagar/comb drizzle-orm zod
 ```
 
-Comb ships TypeScript source, not a build. Your bundler or runtime compiles it. Bun, Vite, Wrangler, and `tsx` all handle this out of the box.
+Comb ships TypeScript source, not a build. Your bundler or runtime compiles it.
+
+| Runtime or tool | Supported | How                                                                                                                                  |
+| --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Bun             | yes       | runs the source directly                                                                                                             |
+| `tsx`           | yes       | runs the source on Node                                                                                                              |
+| Vite            | yes       | bundles it; set `ssr.noExternal` for an SSR or Worker build                                                                          |
+| Wrangler        | yes       | bundles it into the Worker                                                                                                           |
+| plain Node      | no        | type stripping refuses TypeScript in dependencies (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`); run it through `tsx` or a bundler |
+
+The consumer suite (`bun run test:consumers`) checks each supported row in CI: it installs the packed tarball, imports every subpath under Bun and `tsx`, builds with Vite and Wrangler, and compiles every subpath with `tsc` under strict flags in a `bundler` and a `nodenext` project.
 
 Peer dependencies:
 
@@ -788,28 +798,28 @@ ULIDs use Crockford base32 with a 10-character timestamp and 16 characters of ra
 
 ## Package exports
 
-| Specifier                                    | Contents                                                                                         |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `@lovrozagar/comb`                           | `CombError`, `createUlidFactory`, `generateId`, `generateUlid`, `LruCache`, error keys and types |
-| `@lovrozagar/comb/types`                     | `StatusKey`, `ConstraintMap`, `DatabaseErrorHandler`, …                                          |
-| `@lovrozagar/comb/cli`                       | `runCli(argv, io)`: run the CLI in process and get its exit code                                 |
-| `@lovrozagar/comb/codegen`                   | `analyze`, `validateTables`, `parseFieldConstraints`, analysis types                             |
-| `@lovrozagar/comb/codegen/analyze`           | the analyzer alone                                                                               |
-| `@lovrozagar/comb/codegen/generators`        | every `generate*` function                                                                       |
-| `@lovrozagar/comb/migrate`                   | config, providers, apply, parse, Atlas helpers                                                   |
-| `@lovrozagar/comb/migrate/drivers`           | provider factories and introspection                                                             |
-| `@lovrozagar/comb/query`                     | filter, order, select, cursors, Zod builders                                                     |
-| `@lovrozagar/comb/query/sqlite`              | SQL generation, FTS5, JSON helpers                                                               |
-| `@lovrozagar/comb/sqlite/columns`            | `c` for SQLite                                                                                   |
-| `@lovrozagar/comb/sqlite/constraints`        | constraint types                                                                                 |
-| `@lovrozagar/comb/sqlite/patterns`           | shared regex patterns                                                                            |
-| `@lovrozagar/comb/sqlite/constraint-handler` | `sqliteErrorHandler`, `handleConstraintViolation`                                                |
-| `@lovrozagar/comb/sqlite/d1/session`         | `openD1Session`                                                                                  |
-| `@lovrozagar/comb/sqlite/d1/bookmark`        | `BookmarkTracker`                                                                                |
-| `@lovrozagar/comb/sqlite/d1/error-handler`   | `d1ErrorHandler`                                                                                 |
-| `@lovrozagar/comb/sqlite/d1/sharding`        | `ShardRouter`, `shardMap`                                                                        |
-| `@lovrozagar/comb/pg/columns`                | `c` for PostgreSQL                                                                               |
-| `@lovrozagar/comb/pg/error-handler`          | `pgErrorHandler`                                                                                 |
+| Specifier                                    | Contents                                                                                           |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `@lovrozagar/comb`                           | `CombError`, `createUlidFactory`, `generateId`, `generateUlid`, `LruCache`, error keys and types   |
+| `@lovrozagar/comb/types`                     | `StatusKey`, `ConstraintMap`, `DatabaseErrorHandler`, …                                            |
+| `@lovrozagar/comb/cli`                       | `runCli(argv, io)`: run the CLI in process and get its exit code                                   |
+| `@lovrozagar/comb/codegen`                   | `analyze`, `validateTables`, `parseFieldConstraints`, analysis types                               |
+| `@lovrozagar/comb/codegen/generators`        | every `generate*` function                                                                         |
+| `@lovrozagar/comb/meta`                      | `combMeta`, `readCombMeta`, `readCombEntityMeta`, `readCombQueryMeta`, `carryCombMeta`, meta types |
+| `@lovrozagar/comb/migrate`                   | config, providers, apply, parse, Atlas helpers                                                     |
+| `@lovrozagar/comb/query`                     | filter, order, select, cursors, Zod builders                                                       |
+| `@lovrozagar/comb/query/sqlite`              | SQL generation, FTS5, JSON helpers                                                                 |
+| `@lovrozagar/comb/sqlite/columns`            | `c` for SQLite                                                                                     |
+| `@lovrozagar/comb/sqlite/constraints`        | constraint types                                                                                   |
+| `@lovrozagar/comb/sqlite/patterns`           | shared regex patterns                                                                              |
+| `@lovrozagar/comb/sqlite/constraint-handler` | `sqliteErrorHandler`, `handleConstraintViolation`                                                  |
+| `@lovrozagar/comb/sqlite/d1/session`         | `openD1Session`                                                                                    |
+| `@lovrozagar/comb/sqlite/d1/bookmark`        | `BookmarkTracker`                                                                                  |
+| `@lovrozagar/comb/sqlite/d1/error-handler`   | `d1ErrorHandler`                                                                                   |
+| `@lovrozagar/comb/sqlite/d1/sharding`        | `ShardRouter`, `shardMap`                                                                          |
+| `@lovrozagar/comb/states`                    | `defineStateMachine`, `canTransition`, `assertTransition`, `nextStates`, `isState`, `isTerminal`   |
+| `@lovrozagar/comb/pg/columns`                | `c` for PostgreSQL                                                                                 |
+| `@lovrozagar/comb/pg/error-handler`          | `pgErrorHandler`                                                                                   |
 
 ## Repository layout
 

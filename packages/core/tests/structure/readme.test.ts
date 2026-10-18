@@ -73,6 +73,18 @@ const slug = (heading: string) =>
 		.replace(/[^\w\- ]/g, "")
 		.replaceAll(" ", "-")
 
+describe("README package exports table", () => {
+	it("lists every export subpath, and no other", () => {
+		const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { exports: Record<string, string> }
+		const subpaths = Object.keys(manifest.exports)
+			.filter((key) => key !== "./package.json")
+			.map((key) => (key === "." ? "@lovrozagar/comb" : `@lovrozagar/comb/${key.slice(2)}`))
+		const section = README.slice(README.indexOf("## Package exports"), README.indexOf("## Repository layout"))
+		const listed = [...section.matchAll(/^\| `(@lovrozagar\/comb[^`]*)`/gm)].map((match) => match[1])
+		expect(listed.toSorted()).toEqual(subpaths.toSorted())
+	})
+})
+
 describe("README links", () => {
 	const links = [...README.matchAll(/\]\(([^)\s]+)\)/g)].map((match) => match[1] as string)
 	const anchors = new Set([...README.matchAll(/^#{1,6} (.+)$/gm)].map((match) => slug(match[1] as string)))
