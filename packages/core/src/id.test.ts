@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { generateId, generateUlid } from "./id.ts"
+import { createUlidFactory, generateId, generateUlid } from "./id.ts"
 
 describe("generateUlid", () => {
 	it("returns 26-character string", () => {
@@ -48,5 +48,64 @@ describe("generateId", () => {
 			ids.add(generateId("test"))
 		}
 		expect(ids.size).toBe(100)
+	})
+})
+
+/** A factory on a clock the test moves */
+function onClock(start: number) {
+	const clock = { now: start }
+	return { clock, factory: createUlidFactory({ now: () => clock.now }) }
+}
+
+describe("createUlidFactory (S-L3)", () => {
+	it("is strictly increasing within one millisecond", () => {
+		const { factory } = onClock(1_700_000_000_000)
+		const ids = Array.from({ length: 1000 }, () => factory.ulid())
+		expect(ids.every((id, i) => i === 0 || id > (ids[i - 1] as string))).toBe(true)
+		expect(new Set(ids.map((id) => id.slice(0, 10))).size).toBe(1)
+	})
+
+	it("keeps increasing when the clock steps back, on the last time it issued", () => {
+		const { clock, factory } = onClock(1_700_000_000_000)
+		const before = factory.ulid()
+		clock.now -= 1000
+		const after = factory.ulid()
+		expect(after > before).toBe(true)
+		expect(after.slice(0, 10)).toBe(before.slice(0, 10))
+	})
+
+	it("starts a fresh random part when the clock moves on", () => {
+		const { clock, factory } = onClock(1_700_000_000_000)
+		const before = factory.ulid()
+		clock.now += 1
+		const after = factory.ulid()
+		expect(after.slice(0, 10) > before.slice(0, 10)).toBe(true)
+	})
+
+	it("moves to the next millisecond rather than wrap a full random part", () => {
+		const { factory } = onClock(1_700_000_000_000)
+		const random = new Uint8Array(16).fill(31)
+		const full = createUlidFactory({ now: () => 1_700_000_000_000, random: (bytes) => bytes.set(random) })
+		const first = full.ulid()
+		expect(first.slice(10)).toBe("zzzzzzzzzzzzzzzz")
+		const next = full.ulid()
+		expect(next > first).toBe(true)
+		expect(next.slice(0, 10) > first.slice(0, 10)).toBe(true)
+		expect(factory.ulid()).toHaveLength(26)
+	})
+
+	it("runs on the real clock and Web Crypto by default", () => {
+		const factory = createUlidFactory()
+		const [a, b] = [factory.ulid(), factory.ulid()]
+		expect(a).toMatch(/^[0-9a-hjkmnp-tv-z]{26}$/)
+		expect(b > a).toBe(true)
+	})
+
+	it("issues prefixed ids the same way, and checks the prefix", () => {
+		const { factory } = onClock(1_700_000_000_000)
+		const [a, b] = [factory.id("usr"), factory.id("usr")]
+		expect(a).toMatch(/^usr_[0-9a-hjkmnp-tv-z]{26}$/)
+		expect((b as string) > (a as string)).toBe(true)
+		expect(() => factory.id("Bad")).toThrow("Invalid entity prefix")
 	})
 })

@@ -19,7 +19,7 @@ export {
 	readCombMeta,
 	readCombQueryMeta,
 } from "./meta.ts"
-export { generateId, generateUlid } from "./id.ts"
+export { createUlidFactory, generateId, generateUlid, type UlidFactoryOptions } from "./id.ts"
 export { LruCache, type LruMeta } from "./lru.ts"
 export {
 	type CombErrorKey,

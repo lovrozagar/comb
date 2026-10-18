@@ -25,7 +25,10 @@ const WRAPPERS = new Set(["AwaitExpression", "ChainExpression", "ParenthesizedEx
 
 function unwrap(node) {
 	let current = node
-	while (current !== null && current !== undefined && WRAPPERS.has(current.type)) current = current.expression
+	/* an await holds its operand in `argument`; the other wrappers in `expression` */
+	while (current !== null && current !== undefined && WRAPPERS.has(current.type)) {
+		current = current.type === "AwaitExpression" ? current.argument : current.expression
+	}
 	return current
 }
 

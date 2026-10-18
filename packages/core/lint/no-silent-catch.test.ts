@@ -18,12 +18,15 @@ describe("comb/no-silent-catch", () => {
 		["a throw inside a nested callback", "try { a() } catch (e) {\n\tqueue.push(() => {\n\t\tthrow e\n\t})\n}"],
 		["a swallowing promise", "p.catch(() => undefined)"],
 		["a promise handed a bare function", "p.catch(ignore)"],
+		["a call through a computed name, which names no reporter", "try { a() } catch (e) { handlers[0](e) }"],
+		["a loop, which may run no time", "try { a() } catch (e) {\n\tfor (const h of hs) h.report(e)\n}"],
 	])("rejects %s", (_name, body) => {
 		expect(reportsOf(rule, file(body))).toEqual([{ file: "packages/core/src/migrate/core/atlas.ts", message: MESSAGE }])
 	})
 
 	it.each([
 		["a rethrow", "try { a() } catch (e) { throw e }"],
+		["a rethrow inside a nested block", "try { a() } catch (e) {\n\t{\n\t\tthrow e\n\t}\n}"],
 		[
 			"a guarded fallback, then a rethrow",
 			"try { a() } catch (e) {\n\tif (isNotFound(e)) return undefined\n\tthrow e\n}",
@@ -34,6 +37,8 @@ describe("comb/no-silent-catch", () => {
 		["a conversion it throws", "try { a() } catch (e) { throw new CombError({ cause: e }) }"],
 		["a conversion it returns", "export function f() {\n\ttry { return a() } catch (e) { return toResult(e) }\n}"],
 		["a call to a reporter", "try { a() } catch (e) { log.warn({ err: e }) }"],
+		["an optional-call reporter", "try { a() } catch (e) { log?.warn(e) }"],
+		["an awaited reporter", "export async function f() {\n\ttry { await a() } catch (e) { await report(e) }\n}"],
 		["a call to an injected log", 'try { a() } catch (e) { this.log("router.revalidate.error", { error: e }) }'],
 		["a reason", "try { a() } catch {\n\t// reason: the file may not exist yet; the caller creates it\n}"],
 		["a promise catch that reports", "p.catch((e) => report(e))"],
