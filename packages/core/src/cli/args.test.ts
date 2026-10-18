@@ -35,6 +35,8 @@ describe("optionsHelp", () => {
 		expect(lines.find((line) => line.includes("--local"))).toMatch(
 			/^ {2}--local +.*\[migrate apply, migrate baseline\]$/,
 		)
+		expect(lines.find((line) => line.includes("--env"))).toMatch(/\[migrate apply, migrate baseline, migrate status\]$/)
+		expect(lines.find((line) => line.includes("--dir"))).toMatch(/\[migrate apply, migrate baseline, migrate status\]$/)
 		expect(lines.at(-1)).toMatch(/^ {2}--help +Show this help$/)
 	})
 })

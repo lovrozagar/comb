@@ -182,12 +182,13 @@ COMMANDS:
   migrate diff <db> [name]  Diff the schema and write the next migration
   migrate apply <db>        Apply pending migrations: approve drops, apply and record each at once
   migrate baseline <db>     Record every migration as applied without running it
+  migrate status <db>       Show a Postgres database's applied and pending migrations
 
 OPTIONS:
   -g, --generator <name>  Run one generator only [codegen]
   --tables <path>         Analyze this tables file directly, no comb.config.ts [codegen]
-  -e, --env <name>        Environment from comb.migrate.config.ts [migrate apply, migrate baseline]
-  --dir <path>            Migrations directory (default: the config's, else ./atlas-migrations) [migrate apply, migrate baseline]
+  -e, --env <name>        Environment from comb.migrate.config.ts [migrate apply, migrate baseline, migrate status]
+  --dir <path>            Migrations directory (default: the config's, else ./atlas-migrations) [migrate apply, migrate baseline, migrate status]
   --file <path>           Apply this one migration file [migrate apply]
   -y, --yes               Approve cautious changes without asking (not unsafe ones) [migrate apply]
   --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline]

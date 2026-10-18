@@ -38,6 +38,9 @@ async function tables(url: string): Promise<string[]> {
 describe("migrate apply: arguments", () => {
 	it("prints apply usage when the database name is missing, and a missing dir", async () => {
 		const dir = project()
+		const bare = makeIo(project())
+		expect(await runCli(["migrate", "status", "core"], bare)).toBe(1)
+		expect(bare.errors[0]).toMatch(/core is sqlite$/)
 		const usage = makeIo(dir)
 		expect(await runCli(["migrate", "apply"], usage)).toBe(1)
 		expect(usage.errors).toEqual([
@@ -74,18 +77,6 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 		expect(await runCli(["migrate", "apply", "core", "--file", "lone.sql"], makeIo(dir))).toBe(0)
 		expect(await runCli(["migrate", "apply", "core", "--dir", "other"], makeIo(dir))).toBe(0)
 		expect(await tables(url)).toEqual(["__drizzle_migrations", "a", "lone"])
-	})
-
-	it("refuses a Postgres database for now", async () => {
-		const dir = project()
-		mkdirSync(join(dir, "m"))
-		writeFileSync(
-			join(dir, "comb.migrate.config.ts"),
-			'export default { databases: { core: { migrationsDir: "./m", name: "core", provider: { type: "postgres", url: "postgres://localhost/app" } } } }\n',
-		)
-		const io = makeIo(dir)
-		expect(await runCli(["migrate", "apply", "core"], io)).toBe(1)
-		expect(io.errors).toEqual(["core (core) is a Postgres database, which migrate apply does not apply yet"])
 	})
 
 	it("refuses a database the config does not declare, and --local", async () => {
@@ -248,5 +239,22 @@ describe("migrate apply: the D1 database named on the command line", () => {
 		const io = makeIo(project(), wrangler())
 		expect(await runCli(["migrate", "apply", "core", "-e", "prod"], io)).toBe(1)
 		expect(io.errors).toEqual(["-e/--env needs comb.migrate.config.ts to define environments"])
+	})
+})
+
+describe("migrate status: not a Postgres database", () => {
+	it("is for Postgres databases, and has its own usage", async () => {
+		const { dir } = configured({})
+		const io = makeIo(dir)
+		expect(await runCli(["migrate", "status", "core"], io)).toBe(1)
+		expect(io.errors).toEqual([
+			"migrate status reads the history Atlas records, which only Postgres databases have; core (core-dev) is sqlite",
+		])
+		const bare = makeIo(project())
+		expect(await runCli(["migrate", "status", "core"], bare)).toBe(1)
+		expect(bare.errors[0]).toMatch(/core is sqlite$/)
+		const usage = makeIo(dir)
+		expect(await runCli(["migrate", "status"], usage)).toBe(1)
+		expect(usage.errors).toEqual(["Usage: comb migrate status <database> [-e <env>] [--dir <path>]"])
 	})
 })

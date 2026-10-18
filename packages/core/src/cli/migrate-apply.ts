@@ -12,12 +12,12 @@ import { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "
 import { approveMigration } from "../migrate/core/approval.ts"
 import { extractSchema, migrationHashes, parseMigration } from "../migrate/core/parse.ts"
 import { withRetry } from "../migrate/core/utils.ts"
-import type { Connection, ExtractedSchema } from "../migrate/types.ts"
+import type { Connection, ConnectionProviderConfig, ExtractedSchema } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
-import { resolveMigrateTarget } from "./migrate-target.ts"
+import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliIo } from "./output.ts"
 
-type Mode = "apply" | "baseline"
+type Mode = "apply" | "baseline" | "status"
 
 /** An open database to migrate: its connection, its migrations, and how to name it */
 type Target = { conn: Connection; migrationsDir: string; name: string }
@@ -27,20 +27,13 @@ type Request = { args: ParsedArgs; db: string; io: CliIo; mode: Mode }
 
 const option = (args: ParsedArgs, name: string) => args.options[name] as string | undefined
 
-/** The database comb.migrate.config.ts declares as `db`, in the environment -e names */
-async function configuredTarget({ args, db, io, mode }: Request): Promise<Target | undefined> {
-	const target = await resolveMigrateTarget({
-		cwd: io.cwd,
-		db,
-		dir: option(args, "dir"),
-		env: option(args, "env"),
-		mode: "apply",
-	})
-	if (target === undefined) return undefined
+/** The SQLite, libsql, Turso or D1 database comb.migrate.config.ts resolved, opened */
+async function configuredTarget(
+	{ args, io }: Request,
+	target: MigrateTarget & { provider: ConnectionProviderConfig },
+): Promise<Target> {
 	if (args.options["local"])
 		throw new CliError("--local applies without comb.migrate.config.ts; set local: true on its d1 provider")
-	if (target.provider.type === "postgres")
-		throw new CliError(`${target.label} is a Postgres database, which migrate ${mode} does not apply yet`)
 	const { createProvider } = await import("../migrate/config.ts")
 	const migrationsDir = requireDir(target.migrationsDir, args)
 	const conn = await createProvider(target.provider, { run: io.run }).connect({
@@ -67,10 +60,6 @@ async function d1Target({ args, db, io }: Request): Promise<Target> {
 	const migrationsDir = requireDir(path.resolve(io.cwd, option(args, "dir") ?? "atlas-migrations"), args)
 	const conn = await createD1Provider(provider, io.run).connect({ migrationsDir, name: db, provider })
 	return { conn, migrationsDir, name: db }
-}
-
-async function openTarget(request: Request): Promise<Target> {
-	return (await configuredTarget(request)) ?? d1Target(request)
 }
 
 /** The migration files to run: --file alone, else every .sql file in the directory, in name order */
@@ -139,16 +128,33 @@ async function runFiles(
 	return { done, skipped: files.length - done }
 }
 
+/** A mode's usage line: apply takes --file and --yes, status none of the SQLite options */
+function usage(mode: Mode): string {
+	const sqlite = mode === "status" ? "" : `${mode === "apply" ? " [--file <path>] [--yes]" : ""} [--local]`
+	return `Usage: comb migrate ${mode} <database> [-e <env>] [--dir <path>]${sqlite}`
+}
+
 export async function migrateApply(mode: Mode, argv: readonly string[], io: CliIo): Promise<void> {
 	const args = parseArgs(argv, `migrate ${mode}`)
 	const [db] = args.positionals
-	if (db === undefined || args.positionals.length > 1) {
+	if (db === undefined || args.positionals.length > 1) throw new CliError(usage(mode))
+	const request: Request = { args, db, io, mode }
+	const dir = option(args, "dir")
+	const resolved = await resolveMigrateTarget({ cwd: io.cwd, db, dir, env: option(args, "env"), mode: "apply" })
+	if (resolved?.provider.type === "postgres") {
+		const { migratePostgres } = await import("./migrate-atlas.ts")
+		await migratePostgres(mode, { ...resolved, provider: resolved.provider }, { args, io })
+		return
+	}
+	if (mode === "status") {
 		throw new CliError(
-			`Usage: comb migrate ${mode} <database> [-e <env>] [--dir <path>]${mode === "apply" ? " [--file <path>] [--yes]" : ""} [--local]`,
+			`migrate status reads the history Atlas records, which only Postgres databases have; ${resolved?.label ?? db} is sqlite`,
 		)
 	}
-	const request: Request = { args, db, io, mode }
-	const target = await openTarget(request)
+	const target =
+		resolved === undefined
+			? await d1Target(request)
+			: await configuredTarget(request, { ...resolved, provider: resolved.provider })
 	try {
 		const files = migrationFiles(target, args, io)
 		await ensureMigrationsTable(target.conn)

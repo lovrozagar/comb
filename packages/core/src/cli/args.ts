@@ -4,7 +4,13 @@
  */
 import { CliError } from "./output.ts"
 
-export type Command = "codegen" | "migrate apply" | "migrate baseline" | "migrate diff" | "migrate init"
+export type Command =
+	| "codegen"
+	| "migrate apply"
+	| "migrate baseline"
+	| "migrate diff"
+	| "migrate init"
+	| "migrate status"
 
 export type OptionSpec = {
 	/** The commands that take it */
@@ -25,14 +31,14 @@ export const OPTIONS: readonly OptionSpec[] = [
 		value: "path",
 	},
 	{
-		commands: ["migrate apply", "migrate baseline"],
+		commands: ["migrate apply", "migrate baseline", "migrate status"],
 		description: "Environment from comb.migrate.config.ts",
 		long: "--env",
 		short: "-e",
 		value: "name",
 	},
 	{
-		commands: ["migrate apply", "migrate baseline"],
+		commands: ["migrate apply", "migrate baseline", "migrate status"],
 		description: "Migrations directory (default: the config's, else ./atlas-migrations)",
 		long: "--dir",
 		value: "path",

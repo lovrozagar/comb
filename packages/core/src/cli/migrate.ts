@@ -1,4 +1,4 @@
-/** `comb migrate`: init, diff, apply and baseline. */
+/** `comb migrate`: init, diff, apply, baseline and status. */
 import fs from "node:fs"
 import path from "node:path"
 import { parseArgs } from "./args.ts"
@@ -115,6 +115,7 @@ export async function cmdMigrate(argv: readonly string[], io: CliIo, help: strin
 			return
 		case "apply":
 		case "baseline":
+		case "status":
 			await migrateApply(command, rest, io)
 			return
 		default:
