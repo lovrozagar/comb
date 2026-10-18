@@ -44,6 +44,8 @@ export type RunResult = {
 };
 export type RunOptions = {
     cwd?: string | undefined;
+    /** Variables set over the parent's environment for the child; an undefined value removes one. */
+    env?: Readonly<Record<string, string | undefined>> | undefined;
     input?: string | undefined;
     /** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
     maxBuffer?: number | undefined;

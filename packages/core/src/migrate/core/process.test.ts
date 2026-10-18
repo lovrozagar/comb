@@ -1,7 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { run } from "./process.ts"
 
 describe("run", () => {
@@ -60,5 +60,29 @@ describe("run", () => {
 	it("reports a process killed by a signal as 128 + the signal number", () => {
 		const result = run("node", ["-e", "process.kill(process.pid, 'SIGTERM')"])
 		expect(result.code).toBe(143)
+	})
+})
+
+/** What a child sees of its environment: COMB_A, whether PATH is there, and its PG* names */
+const ENV_OF =
+	"process.stdout.write(JSON.stringify({ a: process.env.COMB_A, path: typeof process.env.PATH, pg: Object.keys(process.env).filter((k) => k.startsWith('PG')) }))"
+type Seen = { a?: string; path: string; pg: string[] }
+const envOf = (env?: Record<string, string | undefined>) =>
+	JSON.parse(run("node", ["-e", ENV_OF], { env }).stdout) as Seen
+
+describe("run: the child's environment", () => {
+	afterEach(() => vi.unstubAllEnvs())
+
+	it("drops every PG* variable, so a config's connection is the only one a child uses", () => {
+		vi.stubEnv("PGSSLMODE", "disable")
+		vi.stubEnv("PGPASSWORD", "inherited")
+		expect(envOf()).toEqual({ path: "string", pg: [] })
+	})
+
+	it("adds env over the rest, and an undefined value removes one", () => {
+		vi.stubEnv("COMB_A", "parent")
+		expect(envOf({ COMB_A: "child" }).a).toBe("child")
+		expect(envOf({ COMB_A: undefined }).a).toBeUndefined()
+		expect(envOf({ PGHOST: "set-on-purpose" }).pg).toEqual(["PGHOST"])
 	})
 })
