@@ -210,46 +210,47 @@ describe("cleanupBackupTables", () => {
 	})
 })
 
-describe("applyMigration — resolution paths", () => {
-	const migration = (over: Partial<ParsedMigration> = {}): ParsedMigration =>
-		({
-			classification: { safety: "safe", unsafeStatements: [] },
-			drops: [],
-			expected: makeSchema(new Map([["post", ["id"]]])),
-			filename: "0001.sql",
-			hash: "abc123",
-			sql: "CREATE TABLE post (id TEXT);",
-			statements: ["CREATE TABLE post (id TEXT)"],
-			...over,
-		}) as ParsedMigration
+/** A one-statement migration creating `post (id)`, with `over` merged on top. */
+const migration = (over: Partial<ParsedMigration> = {}): ParsedMigration =>
+	({
+		classification: { safety: "safe", unsafeStatements: [] },
+		drops: [],
+		expected: makeSchema(new Map([["post", ["id"]]])),
+		filename: "0001.sql",
+		hash: "abc123",
+		sql: "CREATE TABLE post (id TEXT);",
+		statements: ["CREATE TABLE post (id TEXT)"],
+		...over,
+	}) as ParsedMigration
 
-	/**
-	 * Routes each query the real code issues:
-	 *  - the hash lookup against __drizzle_migrations
-	 *  - the table probe against sqlite_master
-	 *  - PRAGMA table_info, whose rows are read positionally as r[1]
-	 */
-	function routedConnection(opts: { hashRecorded: boolean; tableExists: boolean | (() => boolean) }): Connection {
-		const exists = () => (typeof opts.tableExists === "function" ? opts.tableExists() : opts.tableExists)
-		return mockConnection({
-			execute: vi.fn((sql: string): Promise<QueryResult> => {
-				if (sql.includes("__drizzle_migrations")) {
-					if (sql.toUpperCase().startsWith("SELECT")) {
-						return Promise.resolve({ columns: [], rows: opts.hashRecorded ? [["abc123"]] : [] })
-					}
-					return Promise.resolve({ columns: [], rows: [] })
-				}
-				if (sql.includes("sqlite_master")) {
-					return Promise.resolve({ columns: ["name"], rows: exists() ? [["post"]] : [] })
-				}
-				if (sql.startsWith("PRAGMA table_info")) {
-					return Promise.resolve({ columns: [], rows: [[0, "id", "TEXT"]] })
+/**
+ * Routes each query the real code issues:
+ *  - the hash lookup against __drizzle_migrations
+ *  - the table probe against sqlite_master
+ *  - PRAGMA table_info, whose rows are read positionally as r[1]
+ */
+function routedConnection(opts: { hashRecorded: boolean; tableExists: boolean | (() => boolean) }): Connection {
+	const exists = () => (typeof opts.tableExists === "function" ? opts.tableExists() : opts.tableExists)
+	return mockConnection({
+		execute: vi.fn((sql: string): Promise<QueryResult> => {
+			if (sql.includes("__drizzle_migrations")) {
+				if (sql.toUpperCase().startsWith("SELECT")) {
+					return Promise.resolve({ columns: [], rows: opts.hashRecorded ? [["abc123"]] : [] })
 				}
 				return Promise.resolve({ columns: [], rows: [] })
-			}),
-		})
-	}
+			}
+			if (sql.includes("sqlite_master")) {
+				return Promise.resolve({ columns: ["name"], rows: exists() ? [["post"]] : [] })
+			}
+			if (sql.startsWith("PRAGMA table_info")) {
+				return Promise.resolve({ columns: [], rows: [[0, "id", "TEXT"]] })
+			}
+			return Promise.resolve({ columns: [], rows: [] })
+		}),
+	})
+}
 
+describe("applyMigration — resolution paths", () => {
 	it("records the hash without re-running SQL when the schema is already correct", async () => {
 		const conn = routedConnection({ hashRecorded: false, tableExists: true })
 		const result = await applyMigration(conn, "core", migration())

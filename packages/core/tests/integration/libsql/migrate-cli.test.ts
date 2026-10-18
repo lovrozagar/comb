@@ -81,7 +81,9 @@ describe("migrate apply through comb.migrate.config.ts (A-H4)", () => {
 			expect(run.errors.join("\n")).toMatch(/local, staging/)
 		}
 	})
+})
 
+describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and legacy migrations", () => {
 	it("refuses a destructive migration without --yes or a confirmation, and applies nothing", async () => {
 		const { dir, url } = project({
 			"20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);",

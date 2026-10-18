@@ -57,7 +57,9 @@ describe("withRetry", () => {
 		).rejects.toThrow("syntax error")
 		expect(calls).toBe(1)
 	})
+})
 
+describe("withRetry: retry limits", () => {
 	it("gives up after maxRetries and rethrows the last error", async () => {
 		let calls = 0
 		await expect(
@@ -85,7 +87,9 @@ describe("withRetry", () => {
 		).rejects.toThrow()
 		expect(seen).toEqual([1, 2])
 	})
+})
 
+describe("withRetry: backoff delays", () => {
 	it("caps the backoff delay at maxDelay", async () => {
 		const delays: number[] = []
 		await expect(
@@ -118,7 +122,9 @@ describe("withRetry", () => {
 			vi.useRealTimers()
 		}
 	})
+})
 
+describe("withRetry: edge cases", () => {
 	it("still calls fn once when maxRetries is zero or less, and throws its own error", async () => {
 		for (const maxRetries of [0, -1]) {
 			const fn = vi.fn(async () => {
@@ -225,23 +231,25 @@ describe("aggregateErrors", () => {
 	})
 })
 
+/** Prints the summary for `results` and returns its lines joined. */
+function capture(results: MigrationResult[]): string {
+	const lines: string[] = []
+	printMigrationSummary(results, (line) => lines.push(line))
+	return lines.join("\n")
+}
+
+/** Builds a minimal MigrationResult for the summary. */
+const migrationResult = (status: MigrationResult["status"], database: string, error?: string) =>
+	({ database, error, status }) as MigrationResult
+
 describe("printMigrationSummary", () => {
-	function capture(results: MigrationResult[]): string {
-		const lines: string[] = []
-		printMigrationSummary(results, (line) => lines.push(line))
-		return lines.join("\n")
-	}
-
-	const result = (status: MigrationResult["status"], database: string, error?: string) =>
-		({ database, error, status }) as MigrationResult
-
 	it("counts applied, skipped and failed separately", () => {
 		const out = capture([
-			result("success", "a"),
-			result("repaired", "b"),
-			result("already_applied", "c"),
-			result("skipped", "d"),
-			result("failed", "e", "boom"),
+			migrationResult("success", "a"),
+			migrationResult("repaired", "b"),
+			migrationResult("already_applied", "c"),
+			migrationResult("skipped", "d"),
+			migrationResult("failed", "e", "boom"),
 		])
 		expect(out).toContain("2 applied")
 		expect(out).toContain("2 skipped")
@@ -249,12 +257,12 @@ describe("printMigrationSummary", () => {
 	})
 
 	it("names every failure with its error", () => {
-		const out = capture([result("failed", "core", "no such table")])
+		const out = capture([migrationResult("failed", "core", "no such table")])
 		expect(out).toContain("core: no such table")
 	})
 
 	it("omits a category with nothing in it", () => {
-		const out = capture([result("success", "a")])
+		const out = capture([migrationResult("success", "a")])
 		expect(out).toContain("1 applied")
 		expect(out).not.toContain("failed")
 	})

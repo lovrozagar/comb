@@ -4,23 +4,48 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { validateTables } from "./validate.ts"
 
+let tmpDir: string
+
+beforeEach(() => {
+	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-"))
+})
+
+afterEach(() => {
+	fs.rmSync(tmpDir, { force: true, recursive: true })
+})
+
+/** Writes `content` as the tables file in the temp dir and returns its path. */
+function writeTables(content: string): string {
+	const fp = path.join(tmpDir, "db.test.tables.ts")
+	fs.writeFileSync(fp, content)
+	return fp
+}
+
+const STRUCTURE_PRELUDE = `
+import { sqliteTable as createTable, text, uniqueIndex, check } from "drizzle-orm/sqlite-core"
+import { sql } from "drizzle-orm"
+const c = { id: () => text("id").primaryKey(), text: (n: string) => text(n), ref: (n: string) => text(n) }
+`
+
+/** Validates `body` under the structural-check prelude. */
+function validateStructure(body: string) {
+	return validateTables(writeTables(STRUCTURE_PRELUDE + body))
+}
+
+const MACHINE_PRELUDE = `
+import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
+const c = {
+	id: () => text("id").primaryKey(),
+	enum: (n: string, _v: readonly string[], _s?: object) => text(n),
+}
+`
+
+/** Validates `body` under the state-machine prelude. */
+function validateMachine(body: string) {
+	return validateTables(writeTables(MACHINE_PRELUDE + body))
+}
+
 describe("validateTables", () => {
-	let tmpDir: string
-
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-"))
-	})
-
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
-
-	function writeTables(content: string): string {
-		const fp = path.join(tmpDir, "db.test.tables.ts")
-		fs.writeFileSync(fp, content)
-		return fp
-	}
-
 	it("returns no errors for valid schema", () => {
 		const fp = writeTables(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
@@ -51,7 +76,9 @@ export const user2 = createTable("user", { id: c.id() })
 		const result = validateTables(fp)
 		expect(result.errors.some((e) => e.includes("Duplicate SQL table name"))).toBe(true)
 	})
+})
 
+describe("validateTables: foreign keys", () => {
 	it("errors on FK referencing non-existent table", () => {
 		const fp = writeTables(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
@@ -87,30 +114,8 @@ export const post = createTable("post", {
 })
 
 describe("validateTables — structural checks", () => {
-	let tmpDir: string
-
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-more-"))
-	})
-
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
-
-	const PRELUDE = `
-import { sqliteTable as createTable, text, uniqueIndex, check } from "drizzle-orm/sqlite-core"
-import { sql } from "drizzle-orm"
-const c = { id: () => text("id").primaryKey(), text: (n: string) => text(n), ref: (n: string) => text(n) }
-`
-
-	function validate(body: string) {
-		const fp = path.join(tmpDir, "db.test.tables.ts")
-		fs.writeFileSync(fp, PRELUDE + body)
-		return validateTables(fp)
-	}
-
 	it("rejects two tables sharing one SQL name", () => {
-		const result = validate(`
+		const result = validateStructure(`
 export const a = createTable("post", { id: c.id() })
 export const b = createTable("post", { id: c.id() })
 `)
@@ -118,36 +123,38 @@ export const b = createTable("post", { id: c.id() })
 	})
 
 	it("rejects a duplicated field within a table", () => {
-		const result = validate(`
+		const result = validateStructure(`
 export const post = createTable("post", { id: c.id(), title: c.text("title"), title: c.text("title") })
 `)
 		expect(result.errors.join("\n")).toContain('duplicate field "title"')
 	})
 
 	it("rejects a foreign key pointing at a table that is not defined", () => {
-		const result = validate(`
+		const result = validateStructure(`
 export const post = createTable("post", { id: c.id(), author_id: c.ref("author_id").references(() => author.id) })
 `)
 		expect(result.errors.join("\n")).toContain('FK references "author"')
 	})
 
 	it("accepts a foreign key whose target is defined", () => {
-		const result = validate(`
+		const result = validateStructure(`
 export const author = createTable("author", { id: c.id() })
 export const post = createTable("post", { id: c.id(), author_id: c.ref("author_id").references(() => author.id) })
 `)
 		expect(result.errors).toEqual([])
 	})
+})
 
+describe("validateTables — structural checks: warnings and skipped statements", () => {
 	it("warns about a table with no primary key", () => {
-		const result = validate(`
+		const result = validateStructure(`
 export const note = createTable("note", { body: c.text("body") })
 `)
 		expect(result.warnings.join("\n")).toContain("no primary key detected")
 	})
 
 	it("warns about a repeated constraint name", () => {
-		const result = validate(`
+		const result = validateStructure(`
 export const post = createTable("post", { id: c.id(), a: c.text("a"), b: c.text("b") }, (t) => [
 	uniqueIndex("idx_dup").on(t.a),
 	uniqueIndex("idx_dup").on(t.b),
@@ -157,7 +164,7 @@ export const post = createTable("post", { id: c.id(), a: c.text("a"), b: c.text(
 	})
 
 	it("ignores variable statements that are not table definitions", () => {
-		const result = validate(`
+		const result = validateStructure(`
 export const notATable = { id: "x" }
 export const alsoNot = someOtherCall("post", {})
 export const post = createTable("post", { id: c.id() })
@@ -166,14 +173,14 @@ export const post = createTable("post", { id: c.id() })
 	})
 
 	it("ignores a table call with too few arguments to inspect", () => {
-		const result = validate(`
+		const result = validateStructure(`
 export const post = createTable("post")
 `)
 		expect(result.errors).toEqual([])
 	})
 
 	it("accepts a composite primary key declared in the options", () => {
-		const result = validate(`
+		const result = validateStructure(`
 import { primaryKey } from "drizzle-orm/sqlite-core"
 export const post_tag = createTable("post_tag", { post_id: c.ref("post_id"), tag_id: c.ref("tag_id") }, (t) => [
 	primaryKey({ columns: [t.post_id, t.tag_id] }),
@@ -185,32 +192,8 @@ export const post_tag = createTable("post_tag", { post_id: c.ref("post_id"), tag
 })
 
 describe("validateTables — state machines", () => {
-	let tmpDir: string
-
-	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-states-"))
-	})
-
-	afterEach(() => {
-		fs.rmSync(tmpDir, { force: true, recursive: true })
-	})
-
-	const PRELUDE = `
-import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	enum: (n: string, _v: readonly string[], _s?: object) => text(n),
-}
-`
-
-	function validate(body: string) {
-		const fp = path.join(tmpDir, "db.test.tables.ts")
-		fs.writeFileSync(fp, PRELUDE + body)
-		return validateTables(fp)
-	}
-
 	it("accepts a well-formed machine", () => {
-		const result = validate(`
+		const result = validateMachine(`
 export const delivery = createTable("delivery", {
 	id: c.id(),
 	status: c.enum("status", ["queued", "sending", "sent"], {
@@ -224,7 +207,7 @@ export const delivery = createTable("delivery", {
 	})
 
 	it("rejects a name that is not a declared value", () => {
-		const result = validate(`
+		const result = validateMachine(`
 export const delivery = createTable("delivery", {
 	id: c.id(),
 	status: c.enum("status", ["queued", "sent"], { initial: "draft", terminal: ["done"] }),
@@ -235,7 +218,7 @@ export const delivery = createTable("delivery", {
 	})
 
 	it("rejects a terminal state that also has outgoing transitions", () => {
-		const result = validate(`
+		const result = validateMachine(`
 export const delivery = createTable("delivery", {
 	id: c.id(),
 	status: c.enum("status", ["queued", "sent"], {
@@ -246,9 +229,11 @@ export const delivery = createTable("delivery", {
 `)
 		expect(result.errors.join("\n")).toContain("listed as terminal but also has outgoing transitions")
 	})
+})
 
+describe("validateTables — state machines: transition maps", () => {
 	it("rejects a dead state when transitions are declared in full", () => {
-		const result = validate(`
+		const result = validateMachine(`
 export const delivery = createTable("delivery", {
 	id: c.id(),
 	status: c.enum("status", ["queued", "sending", "sent", "orphaned"], {
@@ -262,7 +247,7 @@ export const delivery = createTable("delivery", {
 	})
 
 	it("does not reject an unnamed state when the transitions map is partial", () => {
-		const result = validate(`
+		const result = validateMachine(`
 export const delivery = createTable("delivery", {
 	id: c.id(),
 	status: c.enum("status", ["queued", "sending", "sent"], {
@@ -277,7 +262,7 @@ export const delivery = createTable("delivery", {
 	it("warns when a partial map names a non-terminal with no outgoing edges", () => {
 		/* `review` is a non-terminal the map does not name, so this is partial
 		   rather than "declared in full" — dead-state checking stays off. */
-		const result = validate(`
+		const result = validateMachine(`
 export const delivery = createTable("delivery", {
 	id: c.id(),
 	status: c.enum("status", ["queued", "stuck", "review", "sent"], {
@@ -289,9 +274,11 @@ export const delivery = createTable("delivery", {
 		expect(result.errors).toEqual([])
 		expect(result.warnings.join("\n")).toContain('"stuck" has no outgoing transitions')
 	})
+})
 
+describe("validateTables — state machines: value lists and columns", () => {
 	it("reads a local const value list and validates the machine against it", () => {
-		const result = validate(`
+		const result = validateMachine(`
 const STATUSES = ["queued", "sent"] as const
 export const delivery = createTable("delivery", {
 	id: c.id(),
@@ -302,7 +289,7 @@ export const delivery = createTable("delivery", {
 	})
 
 	it("warns when the value list is a reference it cannot read", () => {
-		const result = validate(`
+		const result = validateMachine(`
 import { STATUSES } from "@app/shared"
 export const delivery = createTable("delivery", {
 	id: c.id(),
@@ -314,7 +301,7 @@ export const delivery = createTable("delivery", {
 	})
 
 	it("warns when two columns declare a machine", () => {
-		const result = validate(`
+		const result = validateMachine(`
 export const delivery = createTable("delivery", {
 	id: c.id(),
 	status: c.enum("status", ["a", "b"], { terminal: ["b"] }),

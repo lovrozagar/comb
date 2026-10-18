@@ -68,7 +68,9 @@ describe("comb codegen: config mode", () => {
 		}
 		expect(existsSync(join(dir, "elsewhere", "rows.gen.ts"))).toBe(true)
 	})
+})
 
+describe("comb codegen: config mode generator selection", () => {
 	it("honors the config's generators, output overrides, and -g for one generator", async () => {
 		const dir = project()
 		writeTables(dir)
@@ -83,7 +85,9 @@ describe("comb codegen: config mode", () => {
 		expect(await runCli(["codegen", "-g", "manifest"], makeIo(one))).toBe(0)
 		expect(readdirSync(one).sort()).toEqual(["comb.config.ts", "db.core.manifest.gen.json", "db.core.tables.ts"])
 	})
+})
 
+describe("comb codegen: config mode errors", () => {
 	it("reports a missing comb.config.ts in config mode", async () => {
 		const io = makeIo(project())
 		expect(await runCli(["codegen"], io)).toBe(1)

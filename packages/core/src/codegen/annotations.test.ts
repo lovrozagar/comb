@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { parseFieldConstraints } from "./annotations.ts"
 
-describe("parseFieldConstraints", () => {
+describe("parseFieldConstraints: validation constraints", () => {
 	it("extracts min/max from parameter constraints", () => {
 		const result = parseFieldConstraints('c.text("email", { min: 5, max: 254 })')
 		expect(result.min).toBe(5)
@@ -29,7 +29,9 @@ describe("parseFieldConstraints", () => {
 		const result = parseFieldConstraints('c.text("phone", { pattern: "/^\\\\+[1-9]/" })')
 		expect(result.pattern).toBe("/^\\+[1-9]/")
 	})
+})
 
+describe("parseFieldConstraints: write behavior", () => {
 	it("extracts autogenerate", () => {
 		const result = parseFieldConstraints('c.text("token", { autogenerate: true })')
 		expect(result.autogenerate).toBe(true)
@@ -59,7 +61,9 @@ describe("parseFieldConstraints", () => {
 		const result = parseFieldConstraints('c.text("_internal")', "_internal")
 		expect(result.private).toBe(true)
 	})
+})
 
+describe("parseFieldConstraints: size and defaults", () => {
 	it("extracts maxBytes", () => {
 		const result = parseFieldConstraints('c.json("data", schema, { maxBytes: 1024 })')
 		expect(result.maxBytes).toBe(1024)

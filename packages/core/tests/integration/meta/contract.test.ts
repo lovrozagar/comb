@@ -119,7 +119,9 @@ describe("versioning", () => {
 		const hard = readCombEntityMeta({ [COMB_META_KEY]: { ...entityInput, softDelete: null, v: 1 } })
 		expect(hard?.softDelete).toBeNull()
 	})
+})
 
+describe("versioning: states", () => {
 	it("treats a missing states field as null — it arrived after v1 shipped", () => {
 		const { states: _dropped, ...legacy } = entityInput
 		const meta = readCombEntityMeta({ [COMB_META_KEY]: { ...legacy, v: 1 } })
@@ -159,7 +161,9 @@ describe("versioning", () => {
 		).toBeNull()
 		expect(messages.join(" ")).toContain("malformed `states`")
 	})
+})
 
+describe("versioning: uniqueIndexes", () => {
 	it("treats a missing uniqueIndexes field as [] — it arrived after v1 shipped", () => {
 		const { uniqueIndexes: _dropped, ...legacy } = entityInput
 		const meta = readCombEntityMeta({ [COMB_META_KEY]: { ...legacy, v: 1 } })

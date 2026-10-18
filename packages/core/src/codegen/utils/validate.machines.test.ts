@@ -4,24 +4,25 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { validateTables } from "./validate.ts"
 
+let dir: string
+
+beforeEach(() => {
+	dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-machines-"))
+})
+
+afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
+
+/** Writes `source` under the sqlite and columns imports into a fresh tables file and validates it. */
+function validate(source: string) {
+	const file = path.join(dir, "db.test.tables.ts")
+	fs.writeFileSync(
+		file,
+		`import { sqliteTable } from "drizzle-orm/sqlite-core"\nimport { c } from "@lovrozagar/comb/sqlite/columns"\n${source}`,
+	)
+	return validateTables(file)
+}
+
 describe("validateTables: state machines in every form the docs allow (M-M5, M-M7)", () => {
-	let dir: string
-
-	beforeEach(() => {
-		dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-machines-"))
-	})
-
-	afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
-
-	function validate(source: string) {
-		const file = path.join(dir, "db.test.tables.ts")
-		fs.writeFileSync(
-			file,
-			`import { sqliteTable } from "drizzle-orm/sqlite-core"\nimport { c } from "@lovrozagar/comb/sqlite/columns"\n${source}`,
-		)
-		return validateTables(file)
-	}
-
 	it("catches a typo in a machine whose values are as const", () => {
 		const result = validate(`export const t = sqliteTable("t", {
 	id: c.id("ttt"),
@@ -62,7 +63,9 @@ export const t = sqliteTable("t", { id: c.id("ttt"), status: c.enum("status", de
 		)
 		expect(result.errors).toEqual(['a.id2: FK references "missing" which is not defined in tables file'])
 	})
+})
 
+describe("validateTables: state machines without a full map, and dead ends", () => {
 	it("checks a machine without a terminal list or an initial state", () => {
 		const onlyInitial = validate(
 			`export const t = sqliteTable("t", { id: c.id("ttt"), status: c.enum("status", ["a", "b"], { initial: "zz" }) })`,

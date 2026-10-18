@@ -42,6 +42,10 @@ function wrangler(dir: string, fail: (args: readonly string[]) => boolean = () =
 	}
 }
 
+/** Matches a wrangler call that records a migration hash in its own --command, apart from the migration */
+const recordsApart = (args: readonly string[]) =>
+	args.some((a) => a.startsWith("--command=") && a.includes("INSERT INTO __drizzle_migrations"))
+
 function io(dir: string, exec: Run) {
 	const out: string[] = []
 	const err: string[] = []
@@ -58,8 +62,6 @@ function io(dir: string, exec: Run) {
 describe("migrate apply on D1, --local (S-13, plan 5.4)", () => {
 	it("applies and records a migration in one wrangler run, so a failed separate record cannot re-apply it", async () => {
 		const dir = project({ "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" })
-		const recordsApart = (args: readonly string[]) =>
-			args.some((a) => a.startsWith("--command=") && a.includes("INSERT INTO __drizzle_migrations"))
 		const first = io(dir, wrangler(dir, recordsApart))
 		expect(await runCli(["migrate", "apply", "core", "--local"], first)).toBe(0)
 		const again = io(dir, wrangler(dir))
