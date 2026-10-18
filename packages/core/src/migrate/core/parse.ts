@@ -123,9 +123,13 @@ function follow(schema: SchemaSoFar, stmt: string): void {
 	}
 }
 
-/** The tables (with columns), indexes and dropped tables a migration leaves */
-export function extractSchema(sql: string): ExtractedSchema {
-	const schema: SchemaSoFar = { droppedTables: [], indexes: [], tables: new Map() }
+/** The tables (with columns), indexes and dropped tables a migration leaves, after `from` when given */
+export function extractSchema(sql: string, from?: ExtractedSchema): ExtractedSchema {
+	const schema: SchemaSoFar = {
+		droppedTables: [...(from?.droppedTables ?? [])],
+		indexes: [...(from?.indexes ?? [])],
+		tables: new Map(from?.tables),
+	}
 	for (const stmt of splitSqlStatements(sql)) follow(schema, stmt)
 	return schema
 }

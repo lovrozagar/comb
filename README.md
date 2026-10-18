@@ -48,6 +48,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.6.1](#upgrading-to-061)
 - [Upgrading to 0.6.0](#upgrading-to-060)
 - [Upgrading to 0.5.0](#upgrading-to-050)
 - [Releases](#releases)
@@ -179,7 +180,7 @@ COMMANDS:
   codegen --tables <path>   Direct mode: analyze one tables file and generate beside it
   migrate init              Create drizzle.config.ts, atlas.hcl and atlas-migrations/
   migrate diff <db> [name]  Diff the schema and write the next migration
-  migrate apply <db>        Apply pending migrations: confirm drops, apply and record each at once
+  migrate apply <db>        Apply pending migrations: approve drops, apply and record each at once
   migrate baseline <db>     Record every migration as applied without running it
 
 OPTIONS:
@@ -188,7 +189,7 @@ OPTIONS:
   -e, --env <name>        Environment from comb.migrate.config.ts [migrate apply, migrate baseline]
   --dir <path>            Migrations directory (default: the config's, else ./atlas-migrations) [migrate apply, migrate baseline]
   --file <path>           Apply this one migration file [migrate apply]
-  -y, --yes               Apply destructive changes without asking [migrate apply]
+  -y, --yes               Approve cautious changes without asking (not unsafe ones) [migrate apply]
   --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline]
   --help                  Show this help
 ```
@@ -501,7 +502,13 @@ A migration's hash is its SQL with comments and layout normalized away, never th
 
 1. Ensures `__drizzle_migrations` exists.
 2. Skips the file if its hash, current or pre-0.5.0, is already recorded.
-3. Classifies it: `parseMigration()`, `classifyMigration()` and `extractDropStatements()` find what it drops or loses. A destructive file runs only with `--yes`, or after a yes on the terminal; with neither, `apply` stops before running it.
+3. Classifies it against the schema the earlier files leave: `parseMigration()`, `classifyMigration()` and `extractDropStatements()` read each statement, and each action of an `ALTER TABLE`, through quoted and schema-qualified names, and rate the file:
+   - **unsafe** loses data or breaks deployed code by name: dropping a table, column, schema, type, sequence or role, `CASCADE`, changing a column's type, `SET NOT NULL`, adding a `NOT NULL` column without a default, renames, `TRUNCATE`, and `DELETE` or `UPDATE` without a `WHERE`. An unsafe file runs only after a yes on a terminal, or when the file approves itself with a line of its own, `-- comb:allow-unsafe: <reason>`, which goes through review with the file. `--yes` does not cover it, so a pipeline that always passes `--yes` cannot drop data unreviewed.
+   - **cautious** drops nothing a row holds: indexes, constraints, defaults, views, triggers, functions, a filtered write, a grant. It runs with `--yes` or a yes on a terminal.
+   - **safe** runs without asking.
+
+   Without a terminal or an approval, `apply` stops before running the file. A SQLite table rebuild (Atlas copies the rows into `new_t`, drops `t` and renames `new_t`) is cautious when it copies every column the earlier files gave `t`, and unsafe when it leaves one out, which is how Atlas drops a SQLite column.
+
 4. Applies its statements (`CREATE INDEX` and `DROP INDEX` made `IF [NOT] EXISTS`) and the insert of its hash as one batch, which every provider runs all-or-nothing (D1 as one `wrangler d1 execute --file`). A file is applied and recorded, or neither. A transient failure (rate limit, reset connection) retries the whole batch through `withRetry()`.
 
 `baseline <db>` records every file as applied without running it, for a database whose schema was set up out of band.
@@ -867,6 +874,14 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 `tests/bun/` is separate because it imports `bun:sqlite` and `bun:test`, which vitest cannot load. It replays a full Atlas-shaped drift migration against an in-memory database to prove the SQLite transforms survive a real commit with foreign keys enforced.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
+
+## Upgrading to 0.6.1
+
+0.6.1 fixes the destructive-change gate of `comb migrate apply`, which let most drops through: a quoted or schema-qualified name (Atlas quotes every name it emits), a drop after another action in one `ALTER TABLE`, and a column Atlas drops on SQLite by rebuilding the table all classified safe. Every statement and every `ALTER TABLE` action is read now ([Diff and apply](#diff-and-apply)), so files that ran without a prompt may now stop:
+
+- **`--yes` approves cautious files only.** An unsafe file needs a yes on a terminal, or a line `-- comb:allow-unsafe: <reason>` in the file. In CI, add the line to each unsafe migration you mean to run; comments do not change a migration's hash, so files already applied stay applied.
+- **More is unsafe:** column retypes, renames, `CASCADE`, schema, type, sequence and role drops, and `DELETE` or `UPDATE` without a `WHERE`. `DROP NOT NULL` is safe now, and dropping a default or constraint is cautious.
+- `classifyMigration()` and `extractDropStatements()` take `{ dialect, before }`: the dialect the file is read in (unnamed, both readings count and the stricter wins), and the schema the earlier files leave (`extractSchema(sql, from)` continues one). `MigrationClassification` adds `cautiousStatements` and `lockWarnings`. `segments()` and `splitSqlStatements()` take a dialect; a quoted identifier is now an `identifier` segment, and a Postgres `DO` body a `body` one.
 
 ## Upgrading to 0.6.0
 

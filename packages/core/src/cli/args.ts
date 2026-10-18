@@ -38,7 +38,12 @@ export const OPTIONS: readonly OptionSpec[] = [
 		value: "path",
 	},
 	{ commands: ["migrate apply"], description: "Apply this one migration file", long: "--file", value: "path" },
-	{ commands: ["migrate apply"], description: "Apply destructive changes without asking", long: "--yes", short: "-y" },
+	{
+		commands: ["migrate apply"],
+		description: "Approve cautious changes without asking (not unsafe ones)",
+		long: "--yes",
+		short: "-y",
+	},
 	{
 		commands: ["migrate apply", "migrate baseline"],
 		description: "Without a migrate config: the local D1 (wrangler --local)",

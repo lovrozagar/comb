@@ -12,7 +12,7 @@ const COMMANDS: ReadonlyArray<[string, string]> = [
 	["codegen --tables <path>", "Direct mode: analyze one tables file and generate beside it"],
 	["migrate init", "Create drizzle.config.ts, atlas.hcl and atlas-migrations/"],
 	["migrate diff <db> [name]", "Diff the schema and write the next migration"],
-	["migrate apply <db>", "Apply pending migrations: confirm drops, apply and record each at once"],
+	["migrate apply <db>", "Apply pending migrations: approve drops, apply and record each at once"],
 	["migrate baseline <db>", "Record every migration as applied without running it"],
 ]
 

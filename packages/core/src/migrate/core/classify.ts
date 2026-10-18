@@ -12,11 +12,12 @@
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { codeOf, lastPart, QNAME, splitTopLevel, topLevel, unquote } from "./sql-code.ts"
-import { splitSqlStatements } from "./sql-scan.ts"
+import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 
 type ClassifyOptions = {
 	/** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
 	before?: ExtractedSchema | undefined
+	/** how the file is read; unnamed, it is read both ways and the stricter finding counts */
 	dialect?: Dialect | undefined
 }
 
@@ -54,7 +55,11 @@ const RENAME_TABLE = /* @__PURE__ */ new RegExp(`^ALTER TABLE (${QNAME}) RENAME 
 const LOCKING = /^(?:REINDEX (?!.*\bCONCURRENTLY\b)|VACUUM FULL\b|CLUSTER\b)/i
 const TXMODE_NONE = /^\s*--\s*atlas:txmode\s+none\b/im
 
-const preview = (stmt: string) => stmt.slice(0, 80) + (stmt.length > 80 ? "..." : "")
+/** A statement as a person reads it in a prompt: comments and layout gone, cut at 80 characters */
+function preview(stmt: string): string {
+	const text = normalizeSql(stmt)
+	return text.slice(0, 80) + (text.length > 80 ? "..." : "")
+}
 
 /** The drops a DROP TABLE or DROP INDEX names, one per listed name */
 function dropNames(code: string): string[] {
@@ -151,7 +156,7 @@ function rebuildsOf(codes: readonly string[]): Rebuilds {
 
 type Read = { code: string; findings: Finding[]; stmt: string }
 
-function readFile(sql: string, { before, dialect = "sqlite" }: ClassifyOptions): Read[] {
+function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dialect): Read[] {
 	const statements = splitSqlStatements(sql, dialect)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
 	const rebuilds: Rebuilds = dialect === "sqlite" ? rebuildsOf(codes) : new Map()
@@ -169,6 +174,12 @@ function readFile(sql: string, { before, dialect = "sqlite" }: ClassifyOptions):
 	}))
 }
 
+/** The file as its dialect reads it; with none named, as both read it, so the stricter reading counts */
+const readings = (sql: string, { before, dialect }: ClassifyOptions): Read[] =>
+	dialect === undefined
+		? [...readFile(sql, before, "sqlite"), ...readFile(sql, before, "postgres")]
+		: readFile(sql, before, dialect)
+
 const entries = (reads: readonly Read[], level: Finding["level"]) =>
 	reads.flatMap(({ findings, stmt }) =>
 		findings
@@ -178,12 +189,12 @@ const entries = (reads: readonly Read[], level: Finding["level"]) =>
 
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 function extractDropStatements(sql: string, options: ClassifyOptions = {}): string[] {
-	return readFile(sql, options).flatMap(({ findings }) => findings.flatMap((f) => f.drops ?? []))
+	return [...new Set(readings(sql, options).flatMap(({ findings }) => findings.flatMap((f) => f.drops ?? [])))]
 }
 
 /** How destructive a migration is, which statements make it so, and which block a Postgres table */
 function classifyMigration(sql: string, options: ClassifyOptions = {}): MigrationClassification {
-	const reads = readFile(sql, options)
+	const reads = readings(sql, options)
 	const unsafeStatements = [...new Set(entries(reads, "unsafe"))]
 	const cautiousStatements = [...new Set(entries(reads, "cautious"))]
 	if (TXMODE_NONE.test(sql)) cautiousStatements.push("-- atlas:txmode none: the file is not applied in one transaction")

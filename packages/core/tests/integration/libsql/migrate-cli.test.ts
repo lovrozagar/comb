@@ -103,12 +103,24 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
 	})
 
-	it("applies a destructive migration with --yes and asks nothing", async () => {
-		const { dir, url } = project({ "1_init.sql": "CREATE TABLE post (id TEXT);", "2_drop.sql": "DROP TABLE post;" })
-		const run = io(dir, async () => {
-			throw new Error("--yes must not ask")
+	it("applies a cautious migration with --yes without asking, and asks about an unsafe one unless the file approves it", async () => {
+		const { dir, url } = project({
+			"1_init.sql": "CREATE TABLE post (id TEXT);\nCREATE INDEX idx_post ON post (id);",
+			"2_index.sql": "DROP INDEX idx_post;",
+			"3_drop.sql": "DROP TABLE post;",
 		})
-		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], run)).toBe(0)
+		const asked: string[] = []
+		const declined = io(dir, async (question) => (asked.push(question), false))
+		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], declined)).toBe(1)
+		expect(asked).toHaveLength(1)
+		expect(asked[0]).toContain("DROP TABLE post")
+		expect(declined.errors.join("\n")).toContain("3_drop.sql is unsafe")
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "post"])
+		fs.writeFileSync(
+			path.join(dir, "atlas-migrations", "3_drop.sql"),
+			"-- comb:allow-unsafe: post is retired\nDROP TABLE post;",
+		)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], io(dir))).toBe(0)
 		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
 	})
 

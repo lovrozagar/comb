@@ -76,26 +76,6 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 		expect(await tables(url)).toEqual(["__drizzle_migrations", "a", "lone"])
 	})
 
-	it("asks before a destructive migration, and refuses it when nobody can be asked or the answer is no", async () => {
-		const { dir, url } = configured({ "1_init.sql": "CREATE TABLE post (id TEXT);", "2_drop.sql": "DROP TABLE post;" })
-		const refused = makeIo(dir)
-		expect(await runCli(["migrate", "apply", "core"], refused)).toBe(1)
-		expect(refused.errors).toEqual([
-			"2_drop.sql is destructive (DROP TABLE post); pass --yes or confirm it on a terminal",
-		])
-		const asked: string[] = []
-		expect(
-			await runCli(
-				["migrate", "apply", "core"],
-				makeIo(dir, undefined, async (q) => (asked.push(q), false)),
-			),
-		).toBe(1)
-		expect(asked[0]).toContain("This affects: core (core-dev)")
-		expect(await tables(url)).toEqual(["__drizzle_migrations", "post"])
-		expect(await runCli(["migrate", "apply", "core", "--yes"], makeIo(dir))).toBe(0)
-		expect(await tables(url)).toEqual(["__drizzle_migrations"])
-	})
-
 	it("refuses a database the config does not declare, and --local", async () => {
 		const { dir } = configured({})
 		const unknown = makeIo(dir)
@@ -104,6 +84,91 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 		const local = makeIo(dir)
 		expect(await runCli(["migrate", "apply", "core", "--local"], local)).toBe(1)
 		expect(local.errors[0]).toContain("--local applies without comb.migrate.config.ts")
+	})
+})
+
+/** A SQLite table rebuild of post, as Atlas writes it, copying `copied` */
+const rebuild = (copied: string) =>
+	`CREATE TABLE new_post (id TEXT, title TEXT);\nINSERT INTO new_post (${copied}) SELECT ${copied} FROM post;\nDROP TABLE post;\nALTER TABLE new_post RENAME TO post;`
+
+const UNSAFE_REFUSAL = (file: string, what: string) =>
+	`${file} is unsafe (${what}); confirm it on a terminal, or approve it in the file with a line "-- comb:allow-unsafe: <reason>"`
+
+describe("migrate apply: approving an unsafe migration", () => {
+	const DROP = { "1_init.sql": "CREATE TABLE post (id TEXT);", "2_drop.sql": "DROP TABLE post;" }
+
+	it("refuses it with --yes and with nobody to ask, and asks on a terminal", async () => {
+		const { dir, url } = configured(DROP)
+		const refused = makeIo(dir)
+		expect(await runCli(["migrate", "apply", "core", "--yes"], refused)).toBe(1)
+		expect(refused.errors).toEqual([UNSAFE_REFUSAL("2_drop.sql", "DROP TABLE post")])
+		const asked: string[] = []
+		const no = makeIo(dir, undefined, async (q) => (asked.push(q), false))
+		expect(await runCli(["migrate", "apply", "core", "--yes"], no)).toBe(1)
+		expect(asked[0]).toContain("This affects: core (core-dev)")
+		expect(await tables(url)).toEqual(["__drizzle_migrations", "post"])
+		expect(
+			await runCli(
+				["migrate", "apply", "core"],
+				makeIo(dir, undefined, async () => true),
+			),
+		).toBe(0)
+		expect(await tables(url)).toEqual(["__drizzle_migrations"])
+	})
+
+	it("runs it without asking when the file approves it with a reason, and says so", async () => {
+		const { dir, url } = configured({
+			...DROP,
+			"2_drop.sql": "-- comb:allow-unsafe: post moved to the archive db\nDROP TABLE post;",
+		})
+		const io = makeIo(dir)
+		expect(await runCli(["migrate", "apply", "core"], io)).toBe(0)
+		expect(io.outputs).toContain("Approved in 2_drop.sql: post moved to the archive db")
+		expect(await tables(url)).toEqual(["__drizzle_migrations"])
+	})
+
+	it("takes no approval without a reason", async () => {
+		const { dir } = configured({ ...DROP, "2_drop.sql": "-- comb:allow-unsafe:\nDROP TABLE post;" })
+		const io = makeIo(dir)
+		expect(await runCli(["migrate", "apply", "core"], io)).toBe(1)
+		expect(io.errors).toEqual([UNSAFE_REFUSAL("2_drop.sql", "DROP TABLE post")])
+	})
+
+	it("reads a table rebuild against the earlier files: a column it leaves out is unsafe", async () => {
+		const init = "CREATE TABLE post (id TEXT, title TEXT, body TEXT);"
+		const lossy = configured({ "1_init.sql": init, "2_rebuild.sql": rebuild("id, title") })
+		const io = makeIo(lossy.dir)
+		expect(await runCli(["migrate", "apply", "core", "--yes"], io)).toBe(1)
+		expect(io.errors[0]).toContain("2_rebuild.sql is unsafe (DROP COLUMN post.body;")
+		const kept = configured({
+			"1_init.sql": "CREATE TABLE post (id TEXT, title TEXT);",
+			"2_rebuild.sql": rebuild("id, title"),
+		})
+		expect(await runCli(["migrate", "apply", "core", "--yes"], makeIo(kept.dir))).toBe(0)
+	})
+})
+
+describe("migrate apply: approving a cautious migration", () => {
+	const INDEX = {
+		"1_init.sql": "CREATE TABLE post (id TEXT);\nCREATE INDEX idx_post ON post (id);",
+		"2_drop.sql": "DROP INDEX idx_post;",
+	}
+
+	it("refuses it with nobody to ask, and runs it with --yes or a yes on a terminal", async () => {
+		const { dir } = configured(INDEX)
+		const refused = makeIo(dir)
+		expect(await runCli(["migrate", "apply", "core"], refused)).toBe(1)
+		expect(refused.errors).toEqual([
+			"2_drop.sql is cautious (DROP INDEX idx_post); pass --yes or confirm it on a terminal",
+		])
+		expect(await runCli(["migrate", "apply", "core", "--yes"], makeIo(dir))).toBe(0)
+		const again = configured(INDEX)
+		expect(
+			await runCli(
+				["migrate", "apply", "core"],
+				makeIo(again.dir, undefined, async () => true),
+			),
+		).toBe(0)
 	})
 })
 

@@ -111,8 +111,8 @@ export declare function generateMigrationHash(sql: string): string;
 export declare function legacyMigrationHash(sql: string): string;
 /** Every hash `sql` may be recorded under, current first */
 export declare function migrationHashes(sql: string): string[];
-/** The tables (with columns), indexes and dropped tables a migration leaves */
-export declare function extractSchema(sql: string): ExtractedSchema;
+/** The tables (with columns), indexes and dropped tables a migration leaves, after `from` when given */
+export declare function extractSchema(sql: string, from?: ExtractedSchema): ExtractedSchema;
 export { classifyMigration, extractDropStatements };
 export declare function makeIdempotent(statements: string[]): string[];
 /** A migration file, classified against `options.before`, the schema the earlier files leave */
@@ -343,6 +343,7 @@ import type { Dialect, ExtractedSchema, MigrationClassification } from "../types
 type ClassifyOptions = {
     /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
     before?: ExtractedSchema | undefined;
+    /** how the file is read; unnamed, it is read both ways and the stricter finding counts */
     dialect?: Dialect | undefined;
 };
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */

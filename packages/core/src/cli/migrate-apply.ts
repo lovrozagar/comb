@@ -1,15 +1,18 @@
 /**
  * `comb migrate apply` and `baseline`. The database comes from comb.migrate.config.ts (its
  * environment from -e) when the project has one, else it is the D1 database named on the command
- * line. Each migration not yet recorded is classified, confirmed when it drops something, and
- * applied in one batch with the record of its hash, so it is applied and recorded or neither.
+ * line. Each migration not yet recorded is classified against the schema the earlier files leave,
+ * approved as its safety needs (unsafe: a yes on a terminal or `-- comb:allow-unsafe: <reason>` in
+ * the file; cautious: --yes too), and applied in one batch with the record of its hash, so it is
+ * applied and recorded or neither.
  */
 import fs from "node:fs"
 import path from "node:path"
 import { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "../migrate/core/apply.ts"
-import { migrationHashes, parseMigration } from "../migrate/core/parse.ts"
-import { confirmDrops, withRetry } from "../migrate/core/utils.ts"
-import type { Connection } from "../migrate/types.ts"
+import { approveMigration } from "../migrate/core/approval.ts"
+import { extractSchema, migrationHashes, parseMigration } from "../migrate/core/parse.ts"
+import { withRetry } from "../migrate/core/utils.ts"
+import type { Connection, ExtractedSchema } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
 import { CliError, type CliIo } from "./output.ts"
 
@@ -74,21 +77,25 @@ function migrationFiles(target: Target, args: ParsedArgs, io: CliIo): string[] {
 		.map((file) => path.join(target.migrationsDir, file))
 }
 
+/** A migration file to apply, with the schema the files before it leave */
+type Pending = { before: ExtractedSchema; file: string }
+
 const RECORD = "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
 
-/** Apply one migration: confirmed when it drops something, then its statements and record in one batch */
-async function applyFile(file: string, target: Target, { args, io }: Request): Promise<void> {
-	const migration = parseMigration(fs.readFileSync(file, "utf8"), path.basename(file))
-	const destructive = [...new Set([...migration.drops, ...migration.classification.unsafeStatements])]
-	const allowed = await confirmDrops(destructive, target.name, {
-		autoConfirm: args.options["yes"] === true,
+/**
+ * Apply one migration, classified against `before`, the schema the earlier files leave: approved
+ * as its safety needs (approval.ts), then its statements and record in one batch
+ */
+async function applyFile({ before, file }: Pending, target: Target, request: Request): Promise<void> {
+	const { args, io } = request
+	const migration = parseMigration(fs.readFileSync(file, "utf8"), path.basename(file), { before, dialect: "sqlite" })
+	const approval = await approveMigration(migration, {
 		confirm: io.confirm,
+		target: target.name,
+		yes: args.options["yes"] === true,
 	})
-	if (!allowed) {
-		throw new CliError(
-			`${migration.filename} is destructive (${destructive.join("; ")}); pass --yes or confirm it on a terminal`,
-		)
-	}
+	if (!approval.ok) throw new CliError(approval.message)
+	if (approval.approvedBy !== undefined) io.out(`Approved in ${migration.filename}: ${approval.approvedBy}`)
 	io.out(`Apply: ${migration.filename}`)
 	const statements = [
 		...migration.statements.map((sql) => ({ sql })),
@@ -105,13 +112,17 @@ async function runFiles(
 ): Promise<{ done: number; skipped: number }> {
 	const { io, mode } = request
 	let done = 0
+	/* the schema every earlier file leaves, applied now or before, which a file is read against */
+	let schema = extractSchema("")
 	for (const file of files) {
 		const sql = fs.readFileSync(file, "utf8")
+		const before = schema
+		schema = extractSchema(sql, before)
 		if (await checkMigrationHash(target.conn, migrationHashes(sql))) {
 			if (mode === "apply") io.out(`Skip (already applied): ${path.basename(file)}`)
 			continue
 		}
-		if (mode === "apply") await applyFile(file, target, request)
+		if (mode === "apply") await applyFile({ before, file }, target, request)
 		else {
 			await recordMigrationHash(target.conn, migrationHashes(sql)[0] as string)
 			io.out(`Marked applied: ${path.basename(file)}`)

@@ -117,6 +117,22 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 	})
 })
 
+describe("classifyMigration with no dialect named", () => {
+	it("reads the file both ways and keeps the stricter, so Postgres SQL never gets SQLite's reading", () => {
+		expect(classifyMigration("SELECT E'\\''; DROP TABLE post; -- ';").safety).toBe("unsafe")
+		expect(classifyMigration("DO $$ BEGIN DROP TABLE post; END $$;").safety).toBe("unsafe")
+		expect(extractDropStatements("DO $$ BEGIN DROP TABLE post; END $$;")).toEqual(["DROP TABLE post"])
+		expect(classifyMigration("SELECT E'\\''; DROP TABLE post; -- ';", { dialect: "sqlite" }).safety).toBe("safe")
+	})
+
+	it("keeps each finding once when both readings agree", () => {
+		const both = classifyMigration("DROP TABLE post; CREATE INDEX i ON t (a);")
+		expect(both.unsafeStatements).toEqual(["DROP TABLE post"])
+		expect(both.lockWarnings).toHaveLength(1)
+		expect(extractDropStatements("DROP TABLE post")).toEqual(["DROP TABLE post"])
+	})
+})
+
 describe("extractDropStatements", () => {
 	it.each([
 		['DROP TABLE a, "public"."post"', ["DROP TABLE a", "DROP TABLE public.post"]],
