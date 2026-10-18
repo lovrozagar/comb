@@ -77,3 +77,15 @@ describe("validateSelectWithConfig", () => {
 		])
 	})
 })
+
+describe("select nested past the parser's depth bound (S-L2)", () => {
+	it("is a 400 issue on select, not a thrown error", () => {
+		const schema = createRetrieveQuerySchema({ fields: { relations: ["a"], scalars: ["id"] } })
+		const select = `${"a(".repeat(30)}id${")".repeat(30)}`
+		const result = schema.safeParse({ select })
+		expect(result.success).toBe(false)
+		expect(result.error?.issues).toEqual([
+			expect.objectContaining({ message: expect.stringContaining("deeper than 8 levels"), path: ["select"] }),
+		])
+	})
+})

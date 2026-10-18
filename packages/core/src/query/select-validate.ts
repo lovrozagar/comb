@@ -4,7 +4,7 @@
  */
 import type * as z from "zod"
 
-import { parseSelect } from "./fields.ts"
+import { readSelect, TOO_DEEP } from "./fields.ts"
 import type { FieldsConfig } from "./schema-types.ts"
 import type { FieldSelection, ParsedFields } from "./types.ts"
 
@@ -42,7 +42,11 @@ function validateSelectWithConfig(
 	if (!selectString || selectString.trim() === "") return null
 	const report: Report = (message) => ctx.addIssue({ code: "custom", message, path: ["select"] })
 
-	const parsed = parseSelect(selectString)
+	const parsed = readSelect(selectString)
+	if (parsed === "too_deep") {
+		report(TOO_DEEP)
+		return null
+	}
 	if (!parsed) {
 		report("Invalid select syntax")
 		return null

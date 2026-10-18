@@ -24,15 +24,23 @@
  * Clean break from legacy "~" prefix + "." dot-path nesting — those characters are
  * now literal and downstream validators will reject them as unknown field names.
  */
+import { CombError } from "../error.ts"
+import { combErrorKeys } from "../types.ts"
 import type { FieldSelection, ParsedFields } from "./types.ts"
 
-function parseSelect(selectStr: string | undefined): ParsedFields | null {
+/** Relations nested deeper than this are refused: each level is a join, and the parse recurses per level */
+const MAX_SELECT_DEPTH: number = 8
+const TOO_DEEP: string = `select nests relations deeper than ${MAX_SELECT_DEPTH} levels`
+
+/** The parsed selection; null when empty or malformed; "too_deep" past MAX_SELECT_DEPTH */
+function readSelect(selectStr: string | undefined): ParsedFields | null | "too_deep" {
 	if (!selectStr || selectStr.trim() === "") {
 		return null
 	}
 
-	const root = parseSelectList(selectStr, 0, selectStr.length)
-	if (root === null) return null
+	const text: Text = { closes: matchParens(selectStr), str: selectStr }
+	const root = parseSelectList(text, { end: selectStr.length, start: 0 }, 0)
+	if (root === null || root === "too_deep") return root
 
 	/* Return null only when input was purely separators (no name tokens attempted).
 	 * "author()" has a name token but skips the empty relation — root is empty but
@@ -46,10 +54,32 @@ function parseSelect(selectStr: string | undefined): ParsedFields | null {
 	return { root }
 }
 
+/** The parsed selection, or null when empty or malformed; nesting past MAX_SELECT_DEPTH is a 400 */
+function parseSelect(selectStr: string | undefined): ParsedFields | null {
+	const read = readSelect(selectStr)
+	if (read !== "too_deep") return read
+	throw new CombError({ cause: TOO_DEEP, errorKey: combErrorKeys.INVALID_SELECT, status: "bad_request" })
+}
+
 const SEPARATORS = /[ ,\t)]/
 const NAME_END = /[,()]/
 
 type Span = { end: number; str: string }
+/** The input and, for each `(`, the index of its matching `)` (the input's length when unclosed) */
+type Text = { closes: Map<number, number>; str: string }
+type Range = { end: number; start: number }
+
+/** Every `(` matched to its `)` in one pass: the parse then never rescans a span to find a close */
+function matchParens(str: string): Map<number, number> {
+	const closes = new Map<number, number>()
+	const open: number[] = []
+	for (let i = 0; i < str.length; i++) {
+		if (str[i] === "(") open.push(i)
+		else if (str[i] === ")" && open.length > 0) closes.set(open.pop() as number, i)
+	}
+	for (const at of open) closes.set(at, str.length)
+	return closes
+}
 
 /** The first index at or after `from`, before `span.end`, where `test` matches; else `span.end` */
 function scan(span: Span, from: number, test: (char: string) => boolean): number {
@@ -65,29 +95,30 @@ function scan(span: Span, from: number, test: (char: string) => boolean): number
 function addEmbed(
 	selection: FieldSelection,
 	name: string,
-	at: { end: number; open: number; str: string },
-): number | null {
-	const close = findMatchingParen(at.str, at.open, at.end)
-	const nested = parseSelectList(at.str, at.open + 1, close)
-	if (nested === null) return null
+	at: { depth: number; open: number; range: Range; text: Text },
+): number | null | "too_deep" {
+	const close = Math.min(at.text.closes.get(at.open) as number, at.range.end)
+	const nested = parseSelectList(at.text, { end: close, start: at.open + 1 }, at.depth + 1)
+	if (nested === null || nested === "too_deep") return nested
 	if (nested.scalars.length > 0 || Object.keys(nested.relations).length > 0)
 		mergeRelation(selection.relations, name, nested)
-	return close < at.end ? close + 1 : at.end
+	return close < at.range.end ? close + 1 : at.range.end
 }
 
-/** The selection between `start` and `end`, or null when an embed has no name before its `(` */
-function parseSelectList(str: string, start: number, end: number): FieldSelection | null {
+/** The selection within `range` at `depth`, or null when an embed has no name before its `(` */
+function parseSelectList(text: Text, range: Range, depth: number): FieldSelection | null | "too_deep" {
+	if (depth > MAX_SELECT_DEPTH) return "too_deep"
 	const selection: FieldSelection = { relations: {}, scalars: [] }
-	const span = { end, str }
-	let i = scan(span, start, (char) => !SEPARATORS.test(char))
-	while (i < end) {
+	const span = { end: range.end, str: text.str }
+	let i = scan(span, range.start, (char) => !SEPARATORS.test(char))
+	while (i < range.end) {
 		const nameEnd = scan(span, i, (char) => NAME_END.test(char))
-		const name = str.slice(i, nameEnd).trim()
+		const name = text.str.slice(i, nameEnd).trim()
 		/* separators were skipped, so an empty name means "(" with nothing before it */
 		if (!name) return null
-		if (str[nameEnd] === "(" && nameEnd < end) {
-			const next = addEmbed(selection, name, { end, open: nameEnd, str })
-			if (next === null) return null
+		if (text.str[nameEnd] === "(" && nameEnd < range.end) {
+			const next = addEmbed(selection, name, { depth, open: nameEnd, range, text })
+			if (next === null || next === "too_deep") return next
 			i = next
 		} else {
 			if (!selection.scalars.includes(name)) selection.scalars.push(name)
@@ -96,17 +127,6 @@ function parseSelectList(str: string, start: number, end: number): FieldSelectio
 		i = scan(span, i, (char) => !SEPARATORS.test(char))
 	}
 	return selection
-}
-
-function findMatchingParen(str: string, openPos: number, end: number): number {
-	let depth = 1
-	let i = openPos + 1
-	while (i < end && depth > 0) {
-		if (str[i] === "(") depth++
-		else if (str[i] === ")") depth--
-		i++
-	}
-	return depth === 0 ? i - 1 : end
 }
 
 /**
@@ -267,5 +287,8 @@ export {
 	getRelationSelection,
 	hasRelation,
 	hasScalarsRequested,
+	MAX_SELECT_DEPTH,
 	parseSelect,
+	readSelect,
+	TOO_DEEP,
 }

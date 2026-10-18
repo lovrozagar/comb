@@ -160,6 +160,7 @@ export declare const combErrorKeys: {
     readonly FILTER_NOT_WIRED: "filter_not_wired";
     readonly FOREIGN_KEY_VIOLATION: "foreign_key_violation";
     readonly INVALID_CURSOR: "invalid_cursor";
+    readonly INVALID_SELECT: "invalid_select";
     readonly INVALID_STATE_TRANSITION: "invalid_state_transition";
     readonly PRIMARY_KEY_VIOLATION: "primary_key_violation";
     readonly REQUIRED_FIELD_MISSING: "required_field_missing";

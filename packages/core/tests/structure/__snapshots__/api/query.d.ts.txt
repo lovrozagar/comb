@@ -181,33 +181,13 @@ declare const queryHelpers: {
 export { type DrizzleListOptions, queryHelpers };
 
 // query/fields.d.ts
-/**
- * PostgREST-style sparse fieldset parser.
- *
- * Grammar:
- *   select      := entry ("," entry)*
- *   entry       := name ( "(" select ")" )?
- *   name        := /[^,()]+/ (trimmed)
- *
- * Rules:
- * - A name followed by "(" is a relation; the parens contain its own select expression.
- * - Without trailing "(" the name is a scalar.
- * - "*" is a valid scalar token at any level; downstream validators expand it.
- * - "@" prefix marks a computed field (anyrow extension). It is a literal scalar unless
- *   followed by "(" (no current use case defines a computed relation).
- *
- * Examples:
- *   "id,name"                 → scalars [id, name]
- *   "*"                       → scalars [*]
- *   "author(*)"               → relation author with scalars [*]
- *   "id,author(id,name)"      → scalars [id], relation author with [id, name]
- *   "author(posts(title))"    → relation author containing relation posts with scalars [title]
- *   "id,@totalPrice"          → scalars [id, @totalPrice]
- *
- * Clean break from legacy "~" prefix + "." dot-path nesting — those characters are
- * now literal and downstream validators will reject them as unknown field names.
- */
 import type { FieldSelection, ParsedFields } from "./types.ts";
+/** Relations nested deeper than this are refused: each level is a join, and the parse recurses per level */
+declare const MAX_SELECT_DEPTH: number;
+declare const TOO_DEEP: string;
+/** The parsed selection; null when empty or malformed; "too_deep" past MAX_SELECT_DEPTH */
+declare function readSelect(selectStr: string | undefined): ParsedFields | null | "too_deep";
+/** The parsed selection, or null when empty or malformed; nesting past MAX_SELECT_DEPTH is a 400 */
 declare function parseSelect(selectStr: string | undefined): ParsedFields | null;
 declare function hasRelation(fields: ParsedFields | null, name: string): boolean;
 declare function buildColumns<T extends Record<string, true>>(requestedScalars: string[], availableColumns: T): Partial<T> | undefined;
@@ -216,7 +196,7 @@ declare function buildRelationColumns<T extends Record<string, true>>(nestedSele
 declare function hasScalarsRequested(fields: ParsedFields | null, availableScalars: string[]): boolean;
 declare function getEntityColumns<T extends Record<string, true>>(fields: ParsedFields | null, availableColumns: T): Partial<T> | undefined;
 declare function filterBySelect<T extends Record<string, unknown>>(data: T, fields: ParsedFields): Partial<T>;
-export { buildColumns, buildRelationColumns, filterBySelect, getEntityColumns, getRelationSelection, hasRelation, hasScalarsRequested, parseSelect, };
+export { buildColumns, buildRelationColumns, filterBySelect, getEntityColumns, getRelationSelection, hasRelation, hasScalarsRequested, MAX_SELECT_DEPTH, parseSelect, readSelect, TOO_DEEP, };
 
 // query/filter.d.ts
 /**

@@ -26,6 +26,7 @@ export const combErrorKeys = {
 	FILTER_NOT_WIRED: "filter_not_wired",
 	FOREIGN_KEY_VIOLATION: "foreign_key_violation",
 	INVALID_CURSOR: "invalid_cursor",
+	INVALID_SELECT: "invalid_select",
 	INVALID_STATE_TRANSITION: "invalid_state_transition",
 	PRIMARY_KEY_VIOLATION: "primary_key_violation",
 	REQUIRED_FIELD_MISSING: "required_field_missing",

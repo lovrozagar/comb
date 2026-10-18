@@ -7,6 +7,7 @@ import {
 	getRelationSelection,
 	hasRelation,
 	hasScalarsRequested,
+	MAX_SELECT_DEPTH,
 	parseSelect,
 } from "./fields.ts"
 import type { ParsedFields } from "./types.ts"
@@ -464,5 +465,30 @@ describe("parseSelect — empty names", () => {
 		expect(parseSelect("(x)")).toBeNull()
 		expect(parseSelect("id,(x)")).toBeNull()
 		expect(parseSelect("author((x))")).toBeNull()
+	})
+})
+
+/** `a(a(…(id)…))`, `levels` relations deep */
+const nested = (levels: number) => `${"a(".repeat(levels)}id${")".repeat(levels)}`
+
+describe("parseSelect — nesting bounds (S-L2)", () => {
+	it("parses up to MAX_SELECT_DEPTH levels of relations", () => {
+		let selection = parseSelect(nested(MAX_SELECT_DEPTH))?.root
+		for (let level = 0; level < MAX_SELECT_DEPTH; level++) selection = selection?.relations["a"] ?? undefined
+		expect(selection?.scalars).toEqual(["id"])
+	})
+
+	it("refuses one level more with a 400, rather than recursing on", () => {
+		expect(() => parseSelect(nested(MAX_SELECT_DEPTH + 1))).toThrow(
+			expect.objectContaining({ errorKey: "invalid_select", status: 400 }),
+		)
+	})
+
+	it("answers deep and long input in linear time, never overflowing the stack", () => {
+		const started = performance.now()
+		expect(() => parseSelect(nested(100_000))).toThrow(expect.objectContaining({ errorKey: "invalid_select" }))
+		const flat = Array.from({ length: 20_000 }, (_, i) => `r${i}(id)`).join(",")
+		expect(Object.keys(parseSelect(flat)?.root.relations ?? {})).toHaveLength(20_000)
+		expect(performance.now() - started).toBeLessThan(1000)
 	})
 })
