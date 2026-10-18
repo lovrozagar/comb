@@ -35,6 +35,16 @@ describe("findNearestPackageJson and setPackageExport", () => {
 		expect(findNearestPackageJson(nested)).toBe(path.join(dir, "package.json"))
 	})
 
+	it("stops at the project root: a package above it is not the project's to rewrite", () => {
+		fs.writeFileSync(path.join(dir, "package.json"), "{}")
+		const project = path.join(dir, "project")
+		const nested = path.join(project, "src", "gen")
+		fs.mkdirSync(nested, { recursive: true })
+		expect(findNearestPackageJson(nested, project)).toBeNull()
+		fs.writeFileSync(path.join(project, "package.json"), "{}")
+		expect(findNearestPackageJson(nested, project)).toBe(path.join(project, "package.json"))
+	})
+
 	it("points the subpath at the file relative to the package, last, keeping the other exports", () => {
 		const file = path.join(dir, "package.json")
 		fs.writeFileSync(file, JSON.stringify({ exports: { "./entities": "./old.ts", "./x": "./x.ts" }, name: "app" }))

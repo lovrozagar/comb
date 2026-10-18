@@ -20,11 +20,16 @@ export function readExports(pkg: Record<string, unknown>): Record<string, Export
 	return { ...(exports as Record<string, ExportTarget>) }
 }
 
-/** The package.json in `dir` or the closest directory above it; null when there is none. */
-export function findNearestPackageJson(dir: string): string | null {
-	for (let current = dir; current !== path.dirname(current); current = path.dirname(current)) {
+/**
+ * The package.json in `dir` or the closest directory above it, up to `root` when given; null when
+ * there is none. Codegen passes the project root, so it never rewrites a package above the project.
+ */
+export function findNearestPackageJson(dir: string, root?: string): string | null {
+	const stop = root === undefined ? undefined : path.resolve(root)
+	for (let current = path.resolve(dir); current !== path.dirname(current); current = path.dirname(current)) {
 		const candidate = path.join(current, "package.json")
 		if (fs.existsSync(candidate)) return candidate
+		if (current === stop) return null
 	}
 	return null
 }

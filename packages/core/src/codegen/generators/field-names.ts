@@ -80,7 +80,7 @@ function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): vo
 	writeGenFile(outputPath, lines.join("\n"), "comb")
 
 	if (config.updatePackageJson) {
-		const packageJsonPath = findNearestPackageJson(path.dirname(outputPath))
+		const packageJsonPath = findNearestPackageJson(path.dirname(outputPath), ctx.cwd)
 		if (packageJsonPath) {
 			setPackageExport(packageJsonPath, "./field-names", outputPath)
 		}
