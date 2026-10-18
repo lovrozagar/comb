@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeIo, projects, writeTables } from "./__fixtures__/io.ts"
@@ -67,6 +67,18 @@ describe("comb codegen: config mode", () => {
 			expect(gen, file).toContain(file)
 		}
 		expect(existsSync(join(dir, "elsewhere", "rows.gen.ts"))).toBe(true)
+	})
+})
+
+describe("comb codegen: config mode names", () => {
+	it("names the database as the config does, whatever its tables file is called", async () => {
+		const dir = project()
+		writeTables(dir, "schema.tables.ts")
+		config(dir, { dialect: "sqlite", driver: "d1", tables: "./schema.tables.ts" })
+		expect(await runCli(["codegen"], makeIo(dir))).toBe(0)
+		const constraints = readFileSync(join(dir, "db.core.constraints.gen.ts"), "utf8")
+		expect(constraints).toContain("export const CORE_DB_CONSTRAINT_MAP")
+		expect(readdirSync(join(dir, "diagrams"))).toContain("core-schema.gen.sql")
 	})
 })
 

@@ -136,7 +136,9 @@ async function analyzed(tablesPath: string, io: CliIo) {
 
 /** Validate, analyze and run `database`'s generators (all, or `only`) */
 async function generate(database: Database, only: string | undefined, io: CliIo): Promise<void> {
-	const analysis = await analyzed(database.tablesPath, io)
+	const analyzedTables = await analyzed(database.tablesPath, io)
+	/* in config mode the database is the one the config names, whatever its tables file is called */
+	const analysis = database.direct ? analyzedTables : { ...analyzedTables, dbName: database.name }
 	io.out(
 		database.direct
 			? `Analyzed ${analysis.tables.length} tables (${analysis.dbName})`

@@ -18,6 +18,8 @@ describe("extractDbName", () => {
 
 	it("returns 'db' for plain tables.ts", () => {
 		expect(extractDbName("/path/tables.ts")).toBe("db")
+		/* the README's layout: src/db/core.tables.ts */
+		expect(extractDbName("/path/src/db/core.tables.ts")).toBe("core")
 	})
 
 	it("extracts from nested path", () => {

@@ -53,6 +53,9 @@ export function extractDbName(filePath: string): string {
 	/* legacy pattern: db.core.tables.ts -> core */
 	const legacyMatch = fileName.match(/^db\.(\w+)\.tables/)
 	if (legacyMatch?.[1] !== undefined) return legacyMatch[1]
+	/* plain pattern, the README's layout: core.tables.ts -> core */
+	const plainMatch = fileName.match(/^(\w+)\.tables\./)
+	if (plainMatch?.[1] !== undefined) return plainMatch[1]
 	return "db"
 }
 
