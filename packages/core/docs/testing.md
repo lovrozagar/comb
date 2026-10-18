@@ -1,6 +1,6 @@
 # Testing
 
-How comb's tests are laid out, what each gate checks, what the coverage report leaves out and why, and the lint baseline the size rules start from.
+How comb's tests are laid out, what each gate checks, what the coverage report leaves out and why, and the lint rules, all at error.
 
 ## Layout
 
@@ -67,24 +67,8 @@ One `oxlint` run from the repo root reads `.oxlintrc.json`. Its override for `pa
 
 Each rule has a test beside it that runs the rule in process (`reportsOf`) and through the real oxlint binary (`oxlintReports`), both from `lint/rule-harness.ts`. The harness writes fixtures to `os.tmpdir()` and refuses a tmpdir inside a git checkout, because oxlint applies that checkout's `.gitignore` and would lint nothing.
 
-### Baseline
+### Severity
 
-A rule with hits in the tree is `warn` until the hits are gone, then `error`. Counts on 2026-10-17, after the foundation work (source files / test files):
+Every rule above, the size rules (`complexity` 15, `max-depth` 4, `max-lines` 300 and 500 for tests, `max-lines-per-function` 60, `max-params` 3), `unicorn/consistent-function-scoping` and the `vitest` rules (`expect-expect`, `no-conditional-expect`, `no-disabled-tests`, `no-focused-tests`) are `error` over `src`, `lint` and `tests`, with no hits in the tree. A new rule starts at `warn` only while its hits are being fixed, and moves to `error` in the change that clears the last one.
 
-| Rule                                                            | Source | Tests | Severity |
-| --------------------------------------------------------------- | -----: | ----: | -------- |
-| `complexity` (15)                                               |     28 |     0 | warn     |
-| `max-depth` (4)                                                 |     23 |     0 | warn     |
-| `max-lines` (300, 500 for tests)                                |      8 |     0 | warn     |
-| `max-lines-per-function` (60)                                   |     26 |    63 | warn     |
-| `max-params` (3)                                                |     27 |     0 | warn     |
-| `unicorn/consistent-function-scoping`                           |      6 |    16 | warn     |
-| `vitest/no-conditional-expect`                                  |      0 |   113 | warn     |
-| `comb/boundaries`                                               |     10 |     0 | warn     |
-| `comb/no-console`                                               |     43 |     0 | warn     |
-| `comb/no-module-side-effects`                                   |     36 |     0 | warn     |
-| `comb/no-module-state`                                          |      2 |     0 | warn     |
-| `comb/no-silent-catch`                                          |     17 |     0 | warn     |
-| `comb/raw-sql-allowlist`                                        |      8 |     0 | warn     |
-| `comb/no-v8-ignore`                                             |      0 |     0 | error    |
-| `vitest/expect-expect`, `no-disabled-tests`, `no-focused-tests` |      0 |     0 | error    |
+On 2026-10-17, after the foundation work, the same rules had 426 hits (source / tests): complexity 28/0, max-depth 23/0, max-lines 8/0, max-lines-per-function 26/63, max-params 27/0, consistent-function-scoping 6/16, no-conditional-expect 0/113, boundaries 10/0, no-console 43/0, no-module-side-effects 36/0, no-module-state 2/0, no-silent-catch 17/0, raw-sql-allowlist 8/0.

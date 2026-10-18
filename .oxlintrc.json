@@ -55,24 +55,24 @@
 			],
 			"plugins": ["typescript", "unicorn", "oxc", "vitest"],
 			"rules": {
-				"complexity": ["warn", 15],
-				"max-depth": ["warn", 4],
-				"max-lines": ["warn", 300],
-				"max-lines-per-function": ["warn", 60],
-				"max-params": ["warn", 3],
-				"unicorn/consistent-function-scoping": "warn",
+				"complexity": ["error", 15],
+				"max-depth": ["error", 4],
+				"max-lines": ["error", 300],
+				"max-lines-per-function": ["error", 60],
+				"max-params": ["error", 3],
+				"unicorn/consistent-function-scoping": "error",
 				"vitest/expect-expect": [
 					"error",
 					{ "assertFunctionNames": ["expect", "expectTypeOf", "assert", "assertType"] }
 				],
-				"vitest/no-conditional-expect": "warn",
+				"vitest/no-conditional-expect": "error",
 				"vitest/no-disabled-tests": "error",
 				"vitest/no-focused-tests": "error",
-				"comb/boundaries": "warn",
-				"comb/no-console": "warn",
-				"comb/no-module-side-effects": "warn",
-				"comb/no-module-state": "warn",
-				"comb/no-silent-catch": "warn",
+				"comb/boundaries": "error",
+				"comb/no-console": "error",
+				"comb/no-module-side-effects": "error",
+				"comb/no-module-state": "error",
+				"comb/no-silent-catch": "error",
 				"comb/no-v8-ignore": "error",
 				"comb/raw-sql-allowlist": "error"
 			}
@@ -80,7 +80,7 @@
 		{
 			"files": ["**/*.test.ts"],
 			"rules": {
-				"max-lines": ["warn", 500]
+				"max-lines": ["error", 500]
 			}
 		}
 	]
