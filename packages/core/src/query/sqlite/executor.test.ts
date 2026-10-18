@@ -136,12 +136,6 @@ describe("filterToSQL", () => {
 		expect(filterToSQL(null, config)).toBeNull()
 	})
 
-	it("fails closed on contains, which comb parses but does not run", () => {
-		expect(() => filterToSQL(ast([cond("title", "contains", "x")]), config)).toThrow(
-			expect.objectContaining({ errorKey: "filter_not_wired" }),
-		)
-	})
-
 	it("throws for a field it cannot resolve rather than dropping it (Q-H3)", () => {
 		expect(() => filterToSQL(ast([cond("nope", "eq", 1)]), config)).toThrow(CombError)
 	})
@@ -213,6 +207,14 @@ describe("filterToSQL", () => {
 				mainTable: post,
 			}),
 		).toThrow(CombError)
+	})
+})
+
+describe("filterToSQL — contains", () => {
+	it("fails closed on contains, which comb parses but does not run", () => {
+		expect(() => filterToSQL(ast([cond("title", "contains", "x")]), { mainTable: post })).toThrow(
+			expect.objectContaining({ errorKey: "filter_not_wired" }),
+		)
 	})
 })
 

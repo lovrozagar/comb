@@ -12,6 +12,9 @@ const dialect = new (SQLiteDialect as unknown as new () => {
 	sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
 })()
 
+/** The pagination part of a built ListQueryResult */
+const built = (type: "cursor" | "offset") => ({ limit: 21, meta: { limit: 20, page: 1, type }, offset: 0 })
+
 describe("queryHelpers.countExtra", () => {
 	it("selects the window count for an offset request and nothing for a cursor one", () => {
 		expect(queryHelpers.countExtra({ cursor: "abc", limit: 20, parsedSort: [] })).toEqual({})
@@ -27,7 +30,6 @@ describe("queryHelpers.countExtra", () => {
 	})
 
 	it("reads a built ListQueryResult, the query a repository holds, by its pagination mode", () => {
-		const built = (type: "cursor" | "offset") => ({ limit: 21, meta: { limit: 20, page: 1, type }, offset: 0 })
 		expect(queryHelpers.countExtra(built("cursor"))).toEqual({})
 		expect(queryHelpers.countExtra(built("offset"))._total).toBeDefined()
 	})

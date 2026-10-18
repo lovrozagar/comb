@@ -12,6 +12,11 @@ import {
 	sortDirectionEnum,
 } from "./schema-params.ts"
 
+/** Whether the filter AST schema takes a condition with this operator */
+const withOperator = (operator: string) =>
+	filterAstSchema.safeParse({ root: { conditions: [{ field: "a", operator, value: 1 }], logic: "and", subgroups: [] } })
+		.success
+
 describe("limitSchemaFor", () => {
 	it("shares one schema for the default pagination and builds one for any other", () => {
 		expect(limitSchemaFor(undefined)).toBe(limitSchemaFor({ defaultLimit: 20, maxLimit: 100 }))
@@ -59,10 +64,6 @@ describe("the shared params and outputs", () => {
 			},
 		}
 		expect(filterAstSchema.parse(ast)).toEqual(ast)
-		const withOperator = (operator: string) =>
-			filterAstSchema.safeParse({
-				root: { conditions: [{ field: "a", operator, value: 1 }], logic: "and", subgroups: [] },
-			}).success
 		/* the schema is the FilterAST type, every parsed operator included, so a generator that reads it agrees */
 		expect(FILTER_OPERATORS.map(withOperator)).toEqual(FILTER_OPERATORS.map(() => true))
 		expect(withOperator("between")).toBe(false)
