@@ -26,8 +26,13 @@ type DrizzleListOptions = {
 	where?: { RAW: (table: RelationalTable) => SQL }
 }
 
-/** The parsed request, or the `ListQueryResult` built from it: what a service or a repository holds */
-type CountQuery = { cursor?: string | null | undefined } | { meta: { type: "cursor" | "offset" } }
+/**
+ * The parsed request, or the `ListQueryResult` built from it: what a service or a repository holds.
+ * Closed on purpose: a bare `{ cursor? }` took any object, so a wrong argument compiled and counted.
+ */
+type CountQuery =
+	| { cursor?: string | null | undefined; limit: number; parsedSort: readonly SortField[] }
+	| { meta: { type: "cursor" | "offset" } }
 
 /**
  * The `select` extra that counts every row the filter matches, for `paginate` to report. An

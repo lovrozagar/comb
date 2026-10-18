@@ -14,9 +14,16 @@ const dialect = new (SQLiteDialect as unknown as new () => {
 
 describe("queryHelpers.countExtra", () => {
 	it("selects the window count for an offset request and nothing for a cursor one", () => {
-		expect(queryHelpers.countExtra({ cursor: "abc" })).toEqual({})
-		const result = queryHelpers.countExtra({})
+		expect(queryHelpers.countExtra({ cursor: "abc", limit: 20, parsedSort: [] })).toEqual({})
+		const result = queryHelpers.countExtra({ cursor: undefined, limit: 20, parsedSort: [] })
 		expect(result._total).toBeDefined()
+	})
+
+	it("takes only a parsed request or a built query: any other object is a type error", () => {
+		// @ts-expect-error an empty object is neither
+		expect(queryHelpers.countExtra({})._total).toBeDefined()
+		// @ts-expect-error an unrelated object is neither
+		expect(queryHelpers.countExtra({ foo: 1 })._total).toBeDefined()
 	})
 
 	it("reads a built ListQueryResult, the query a repository holds, by its pagination mode", () => {
