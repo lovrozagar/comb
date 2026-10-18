@@ -14,14 +14,48 @@ packages/core/
   tests/integration/               vitest project "integration", 60 s timeouts, real engines
     support/                       the harnesses below
     sqlite/ libsql/ d1/ postgres/ meta/
-  tests/structure/                 layout and boundary invariants (project "unit")
+    security/                      the adversarial suite, one hostile input per guard
+  tests/structure/                 layout, boundary, API and README invariants (project "unit")
+  tests/types/*.typetest.ts        type-level tests; `typecheck` compiles them, nothing runs them
   tests/bun/                       bun:test only: bun:sqlite and Bun.SQL parity (`bun run test:bun`)
+  tests/e2e/*.e2e.test.ts          the comb binary on scratch apps (`bun run test:e2e`)
+  tests/consumers/                 the packed tarball in fresh projects (`bun run test:consumers`)
 ```
 
 - Every source file has `<name>.test.ts` beside it. `tests/structure/sibling-test.test.ts` enforces that; its `KNOWN_MISSING` list may only shrink.
 - `index.ts`, `types.ts` and `*-types.ts` are exempt only while their AST holds imports, re-exports and type declarations alone. With runtime code they need a test like any other file. `bin.ts` is exempt because it only runs as a process.
 - Fixtures live in a `__fixtures__/` directory beside the code that reads them. `package.json` `files` excludes `src/**/*.test.ts` and `src/**/__fixtures__/**`, and `tests/structure/exports.test.ts` checks the packed tarball.
 - Shell-outs go through `src/migrate/core/process.ts` (`Run`); code around them is unit-tested with a fake runner. `tests/structure/process-boundary.test.ts` keeps that module the only one that starts a process.
+- `tests/structure/api.test.ts` snapshots the emitted `.d.ts` closure of every export subpath under `__snapshots__/api/`. A change to an exported signature or its JSDoc fails it; rerun it with `-u` and review the snapshot diff as the API change it is.
+- `tests/structure/readme.test.ts` compiles every ` ```ts ` block of the README under strict consumer flags, resolves its links and anchors, and holds the "Package exports" table to the manifest. A `<!-- ts-context … -->` comment right above a block declares the names the snippet assumes.
+
+## Gates
+
+`bun run verify` runs each gate in order, stops at the first failure, and stamps the commit when all pass; it refuses a dirty tree. pre-push refuses any commit without a stamp.
+
+| Gate               | Runs                                                                        | In CI                          |
+| ------------------ | --------------------------------------------------------------------------- | ------------------------------ |
+| `fmt:check`        | oxfmt over the tree                                                         | `check`                        |
+| `lint`             | oxlint with the comb plugin, every rule at `error`                          | `check`                        |
+| `typecheck`        | `tsc --noEmit` over `src`, `tests` and `lint`, the type tests included      | `check`                        |
+| `test`             | vitest projects `unit` and `integration`                                    | `test`, as `test:coverage`     |
+| `typecheck:strict` | `tsc -p tsconfig.strict.json` over `src` with every flag a consumer may set | `check`                        |
+| `test:bun`         | `bun test tests/bun`, with its own coverage gate                            | `test`                         |
+| `test:e2e`         | `vitest.e2e.config.ts`: needs `atlas` and `wrangler` on `PATH`              | `e2e`                          |
+| `test:consumers`   | `vitest.consumers.config.ts`: needs the npm registry                        | `consumers`, Node 22.12 and 24 |
+
+The e2e suites (`sqlite`, `d1`, `fts`) run the real binary under bun against a scratch app: `migrate diff` through real Atlas and drizzle-kit, `migrate apply` to libsql and to D1 through `wrangler --local`, and `codegen`. The consumer cells pack comb, install the tarball into a fresh project twice (required peers only, then every peer, each at comb's peer range), import every subpath under bun and `tsx`, bundle with Vite and wrangler, and compile every subpath with `tsc` in a `bundler` and a `nodenext` project.
+
+## Mutation harness
+
+A guard is load-bearing only if a test goes red without it. `tests/structure/mutation-harness.ts` registers each guard (`GUARDS`: an id, its module, what the suite must catch, and a `disable` built from the module's real exports). `tests/integration/security/guards.test.ts` reads `COMB_MUTANT`, mocks that guard's module with the guard off, and imports the code under test after the mock.
+
+`tests/structure/mutation-harness.test.ts`, in the `test` gate, runs the security suite once with every guard in place, which must pass, and once per guard disabled, which must fail. By hand:
+
+    bun packages/core/tests/structure/mutation-harness.ts                     # every guard; prints killed or SURVIVED
+    COMB_MUTANT=raw-sql-quoting bunx vitest run tests/integration/security    # one mutant, from packages/core
+
+A new guard gets a `GUARDS` entry and a case in the security suite in the same change; an unknown `COMB_MUTANT` throws, so a typo never runs the plain suite.
 
 ## Harnesses
 
@@ -34,6 +68,7 @@ packages/core/
 | Variable           | Effect                                                                                                                                                                                                                                               |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `COMB_TEST_PG_URL` | The Postgres server for the Postgres suites and the Bun.SQL parity case. Unset locally: those suites skip and the run prints why. Unset with `CI` set: the run fails, because CI requires them. Example: `postgres://lovro@127.0.0.1:5432/postgres`. |
+| `COMB_MUTANT`      | The guard id the security suite disables (see [Mutation harness](#mutation-harness)). Unset or empty: every guard stays in place.                                                                                                                    |
 
 Postgres runs on a real server rather than an emulator because the error handler reads driver error shapes (`code`, `constraint` vs `constraint_name`, Bun.SQL's `errno`), which only real drivers produce.
 
