@@ -198,8 +198,9 @@ fully described one call earlier.
 Mitigation, in order of preference:
 
 1. Stamp after extending: `base.extend({ … }).meta(combMeta({ … }))`.
-2. `carryCombMeta(from, to)` — re-stamps `to` with whatever `from` carried, exported for exactly
-   this case.
+2. `carryCombMeta(from, to)` — re-stamps `to` with whatever `from` carries, exported for exactly
+   this case. `from` is the stamped Zod schema or its JSON Schema. It returns `null`, and stamps
+   nothing, when `from` carries no readable `x-comb`.
 
 **Decision: merge, last write wins, reader validates.** Not throw — comb has no hook to throw
 from. `.meta()` is Zod's API, called on a schema comb has already returned; intercepting it would
@@ -266,17 +267,22 @@ told a consumer that `project_id` and `author_id` are freely mutable — the fie
 attack tries first. The `patch.immutable-field-rejected` check would have run, passed, and covered
 nothing.
 
-The fix is not a longer predicate. `deriveEntityMeta` now takes the field set the generator
-**actually emitted** and treats whatever is missing as immutable, so the two cannot diverge again:
+The fix is not only a longer predicate. `deriveEntityMeta` takes the field set the generator
+**actually emitted** and treats whatever is missing as immutable, so the stamp describes the
+update body that exists:
 
 ```ts
 const updateFields = new Set(fields.filter((f) => f.type === "update").map((f) => f.key))
 deriveEntityMeta(meta, updateFields)
 ```
 
-`isExcludedFromUpdate` survives as the documented approximation for callers holding only a
-`TableMeta`, with its limitation stated at the definition. This is the same lesson as §7, from the
-other direction: a fact restated in a second place is a fact that will drift.
+The generator still decides which columns enter the update body with `isExcludedFromUpdate`, which
+now names foreign keys, and `generateFieldSchema` drops foreign keys on its own as well. Today the
+two rules agree, so the emitted set and the predicate give the same list. The emitted set is what
+keeps the stamp right if a later rule lands in `generateFieldSchema` only. A caller with no
+generator output gets the predicate: `deriveEntityMeta(table)` falls back to it, and the manifest
+calls it that way (§8.2). This is the same lesson as §7, from the other direction: a fact restated
+in a second place is a fact that will drift.
 
 ### 6.3 `tenantColumn` is declared, never inferred
 
@@ -325,9 +331,10 @@ once comb can name the column.
 ### 6.4 Composite primary keys
 
 `identity` is a single column. `TableMeta.hasCompositePrimaryKey` exists, and for such a table
-there is no single identity to publish. comb omits the entity stamp entirely rather than picking
-one column, and warns. A composite-key entity is not addressable by a single-id item route, so
-the downstream checks were not going to apply regardless.
+there is no single identity to publish. `generateDtos` omits the entity stamp entirely rather than
+picking one column, and `validateTables` warns that it does. The manifest lists the table with
+`identity: null` and `compositePrimaryKey: true`. A composite-key entity is not addressable by a
+single-id item route, so the downstream checks were not going to apply regardless.
 
 ### 6.5 `states` describes a lifecycle, not how to drive it
 
@@ -379,20 +386,30 @@ export const post = sqliteTable("post", {
 **2 — generated DTO, stamped by `generateDtos`**
 
 ```ts
-export const postReadSchema = z
-	.object({
-		id: z.string().meta({ examples: ["pst_01jqx…"] }),
-		status: z.enum(["draft", "published"]),
-		title: z.string().max(200),
-		...timestampsCreatedUpdatedDeletedRead,
-	})
+export const postDtoReadSchema = z
+	.compile(
+		z.object({
+			...timestampsCreatedUpdatedDeletedReadSnakeCase,
+			id: z
+				.string()
+				.min(1)
+				.max(48)
+				.meta({ examples: ["pst_01h5a3g8k9m2n4p6q8r0t2v4x6"] }),
+			status: z.enum(["draft", "published"]).meta({ examples: ["draft"] }),
+			title: z
+				.string()
+				.max(200)
+				.meta({ examples: ["string"] })
+				.nullable(),
+		}),
+	)
 	.meta(
 		combMeta({
+			generated: ["id", "created_at", "updated_at", "deleted_at"],
+			identity: "id",
+			immutable: ["id", "created_at", "updated_at", "deleted_at"],
 			kind: "entity",
 			name: "post",
-			identity: "id",
-			generated: ["id", "created_at", "updated_at", "deleted_at"],
-			immutable: [],
 			softDelete: "deleted_at",
 			states: null,
 			tenantColumn: null,
@@ -400,6 +417,11 @@ export const postReadSchema = z
 		}),
 	)
 ```
+
+The generator hoists repeated expressions into `_shared` (`_str`, `_z4`, …); they are written
+inline here. `title` is nullable because the column is not `.notNull()`. Every generated column is
+also immutable: the update body has no key, no timestamps and no `deleted_at`. The create body takes
+`status` as optional, because the column has a database default.
 
 **3 — what honey reads**, via one `schema` policy entry:
 
@@ -447,6 +469,7 @@ Note `searchable` is spread conditionally: `null` must become an **absent** key,
 ```yaml
 x-entity: { name: post, identity: id }
 x-generated: [id, created_at, updated_at, deleted_at]
+x-immutable: [id, created_at, updated_at, deleted_at]
 x-soft-delete: deleted_at
 x-query:
   filterable: [status, title, created_at]
@@ -462,8 +485,11 @@ Unlocked: `spec.declared-filterable-is-filterable`, `spec.declared-sortable-is-s
 `spec.declared-selectable-is-selectable`, `softdelete.absent-from-default-list`. Sharpened: every
 other query check now probes only declared columns.
 
-`internal_note` is absent from every list because `private: true` already removed it from the
-read DTO — the stamp is derived from the same field set, so it cannot disagree.
+`internal_note` is in neither the read DTO nor any published list. `private: true`, or a name
+that starts with `_`, removes a column of any kind from the read and read-partial DTOs, and
+`deriveEntityMeta` leaves private columns out of `generated`, `immutable`, `states`, `tenantColumn`
+and `uniqueIndexes`, so a private name never reaches the document. Private is a read-side rule:
+the create and update bodies still accept `internal_note`.
 
 ## 8.1 Two descriptors, one operation — an open consumer-side issue
 
@@ -494,16 +520,22 @@ The stamp travels on a Zod schema, which is the right channel for honey and wron
 else — a Go service, a migration audit, a dashboard, anything that will not run TypeScript to
 learn the shape of the database.
 
-`comb codegen -g manifest` writes `db.<name>.manifest.gen.json` alongside the generated entities:
-per entity, its identity and id prefix, every column with the helper that declared it and its
-declared bounds, enum values, relations with their referential actions, unique indexes, check
-constraints, and the same `softDelete` / `tenantColumn` / `states` / generated / immutable /
-`uniqueIndexes` facts the stamp carries. The manifest also keeps `transitions` on the declaring
-column, which the stamp does not.
+`comb codegen -g manifest` writes `db.<name>.manifest.gen.json` alongside the generated entities.
+Per entity it carries the identity, id prefix, `softDelete`, `tenantColumn`, relations with their
+referential actions, unique indexes and check constraints. Per column it carries the helper that
+declared it, its declared bounds and enum values, and `generated`, `immutable` and `private`
+flags. Every column that declares a state machine carries it, `transitions` included. The stamp
+publishes the first such column and leaves `transitions` out. Private columns are listed and
+flagged rather than omitted.
 
-It is a **projection**, not a second derivation. Every entity-level fact comes from
-`deriveEntityMeta`, the function the schema stamp uses, so the manifest cannot claim something the
-document does not — the rule §6.2 was written to enforce, applied to a second output. A test
+It is a **projection**, not a second derivation. `identity`, `softDelete`, `tenantColumn` and the
+per-column `generated` and `immutable` flags come from `deriveEntityMeta`, the function the schema
+stamp uses, and `uniqueIndexes` from `publishedUniqueIndexes`, the filter it applies, so the manifest cannot claim a fact the document contradicts —
+the rule §6.2 was written to enforce, applied to a second output. Because the stamp publishes
+nothing about a private column, a private column's `generated` and `immutable` flags are `false`,
+and a unique index over one is left out of both. The manifest has no generator output to hand, so
+its `immutable` flags come from `isExcludedFromUpdate` (§6.2). A table with a composite key has no
+stamp; its flags fall back to the column's own `autogenerate` and `nomutate` annotations. A test
 asserts the two agree field by field.
 
 Entities are sorted by name and the file carries a checksum header, so regenerating an unchanged

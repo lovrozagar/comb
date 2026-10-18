@@ -3,10 +3,10 @@
  *
  * Everything here is a projection of `TableMeta` and `deriveEntityMeta`, never a
  * second derivation: the manifest and the schema stamp state the same facts, so
- * a change to one moves the other. See docs/meta-contract.md §11.
+ * a change to one moves the other. See docs/meta-contract.md §8.2.
  */
 import path from "node:path"
-import { deriveEntityMeta } from "../entity-meta.ts"
+import { deriveEntityMeta, publishedUniqueIndexes } from "../entity-meta.ts"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -136,7 +136,7 @@ function toEntity(table: TableMeta): ManifestEntity {
 		relations,
 		softDelete: meta?.softDelete ?? null,
 		tenantColumn: meta?.tenantColumn ?? null,
-		uniqueIndexes: table.uniqueIndexes.map((u) => ({ columns: u.columns, name: u.name })),
+		uniqueIndexes: publishedUniqueIndexes(table).map((u) => ({ columns: u.columns, name: u.name })),
 		varName: table.varName,
 	}
 }

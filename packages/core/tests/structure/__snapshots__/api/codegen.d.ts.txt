@@ -229,23 +229,29 @@ import type { FieldMeta, TableMeta } from "./analyzer-types.ts";
 /**
  * Whether a field is absent from the generated update body.
  *
- * This is the *approximation*, for callers holding only a `TableMeta`. The DTO
- * generator passes the field set it actually emitted instead — see
- * `deriveEntityMeta`'s second argument — because a predicate restating the
- * generator's rules is exactly the second declaration this contract exists to
- * avoid. It has already drifted once: foreign keys are dropped from update
- * bodies deep inside `generateFieldSchema`, which no rule up here mentioned.
+ * The DTO generator skips these fields when it builds the update body, and
+ * `deriveEntityMeta` falls back to it when called without generator output, as
+ * the manifest calls it. The schema stamp reads the field set the generator
+ * actually emitted instead, so a rule `generateFieldSchema` adds on its own
+ * still reaches `immutable`. That has happened once: foreign keys are dropped
+ * from update bodies inside `generateFieldSchema`, which this predicate did not
+ * mention at the time.
  */
 declare function isExcludedFromUpdate(field: FieldMeta): boolean;
+/**
+ * The unique indexes a table publishes: every one but those over a private column, whose name
+ * would otherwise reach the document. The stamp and the manifest both read this.
+ */
+declare function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"];
 /**
  * Build entity facts, or null when the table has no single identity to publish.
  *
  * A composite primary key has no one identifier, and picking a column would be
  * a guess — the downstream item-route checks do not apply to such an entity
- * anyway. Omitting is the honest outcome; see docs §6.3.
+ * anyway. Omitting is the honest outcome; see docs §6.4.
  */
 declare function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>): CombEntityMetaInput | null;
-export { deriveEntityMeta, isExcludedFromUpdate };
+export { deriveEntityMeta, isExcludedFromUpdate, publishedUniqueIndexes };
 
 // codegen/utils/validate.d.ts
 type ValidationResult = {

@@ -11,12 +11,13 @@ import type { FieldMeta, TableMeta } from "./analyzer-types.ts"
 /**
  * Whether a field is absent from the generated update body.
  *
- * This is the *approximation*, for callers holding only a `TableMeta`. The DTO
- * generator passes the field set it actually emitted instead — see
- * `deriveEntityMeta`'s second argument — because a predicate restating the
- * generator's rules is exactly the second declaration this contract exists to
- * avoid. It has already drifted once: foreign keys are dropped from update
- * bodies deep inside `generateFieldSchema`, which no rule up here mentioned.
+ * The DTO generator skips these fields when it builds the update body, and
+ * `deriveEntityMeta` falls back to it when called without generator output, as
+ * the manifest calls it. The schema stamp reads the field set the generator
+ * actually emitted instead, so a rule `generateFieldSchema` adds on its own
+ * still reaches `immutable`. That has happened once: foreign keys are dropped
+ * from update bodies inside `generateFieldSchema`, which this predicate did not
+ * mention at the time.
  */
 function isExcludedFromUpdate(field: FieldMeta): boolean {
 	return (
@@ -77,6 +78,15 @@ function statesOf(table: TableMeta): CombEntityMetaInput["states"] {
 	}
 }
 
+/**
+ * The unique indexes a table publishes: every one but those over a private column, whose name
+ * would otherwise reach the document. The stamp and the manifest both read this.
+ */
+function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"] {
+	const hidden = new Set(table.fields.filter((f) => f.constraints.private).map((f) => f.name))
+	return table.uniqueIndexes.filter((index) => !index.columns.some((column) => hidden.has(column)))
+}
+
 /* something other than the caller fills the key: comb (c.id's prefix), the database
  * (c.serialId, autoIncrement) or a default; a natural key the caller supplies is not generated */
 // lookup-table: the key forms the caller does not fill
@@ -87,7 +97,7 @@ const KEY_FILLED = /^\s*c\.(?:id|serialId)\s*\(|autoIncrement\s*:\s*true|\.(?:de
  *
  * A composite primary key has no one identifier, and picking a column would be
  * a guess — the downstream item-route checks do not apply to such an entity
- * anyway. Omitting is the honest outcome; see docs §6.3.
+ * anyway. Omitting is the honest outcome; see docs §6.4.
  */
 function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>): CombEntityMetaInput | null {
 	if (table.hasCompositePrimaryKey) return null
@@ -108,7 +118,6 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 	const immutable = updateFields
 		? published.filter((f) => !updateFields.has(f.name)).map((f) => f.name)
 		: published.filter(isExcludedFromUpdate).map((f) => f.name)
-	const hidden = new Set(table.fields.filter((f) => f.constraints.private).map((f) => f.name))
 
 	return {
 		generated,
@@ -119,8 +128,8 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 		softDelete: table.timestamps.deletedAt ? timestampNames(table).deletedAt : null,
 		states: statesOf(table),
 		tenantColumn: tenantColumnOf(table),
-		uniqueIndexes: table.uniqueIndexes.filter((index) => !index.columns.some((column) => hidden.has(column))),
+		uniqueIndexes: publishedUniqueIndexes(table),
 	}
 }
 
-export { deriveEntityMeta, isExcludedFromUpdate }
+export { deriveEntityMeta, isExcludedFromUpdate, publishedUniqueIndexes }

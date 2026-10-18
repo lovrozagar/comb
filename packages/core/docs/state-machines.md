@@ -65,11 +65,19 @@ would be describing, so they belong adjacent.
 - a `transitions` entry whose key is listed in `terminal` — a contradiction, not a preference
 - a state that is neither `initial` nor reachable through any transition, when `transitions` is
   declared in full — dead states are almost always a rename that missed a spot
+- a non-terminal state whose `transitions` entry is `[]`, when `transitions` is declared in full —
+  a state with no way out is terminal, so it belongs in `terminal`
+
+`transitions` is declared in full when it has an entry for every non-terminal value. The same
+checks run whichever way the machine is written: inline, `as const`, a const in the tables file
+or imported from another project file, or through `defineStateMachine` (§4).
 
 It warns, and does not reject, on:
 
 - a non-terminal state with no outgoing transitions, when `transitions` is partial. That is how an
   app declares the cheap half, so it must stay legal.
+- a machine on a column whose values are a reference comb cannot read, such as a const from a
+  package outside the project. The machine is not checked and not published.
 
 ## 4. Runtime
 

@@ -182,6 +182,18 @@ describe("entity manifest — agreement with the schema stamp", () => {
 			expect(meta.uniqueIndexes, `manifest invented index ${idx.name}`).toContainEqual(idx)
 		}
 	})
+
+	it("leaves out a unique index over a private column, as the stamp does", () => {
+		const source = SCHEMA.replace(
+			`uniqueIndex("idx_post_title").on(t.title),`,
+			`uniqueIndex("idx_post_title").on(t.title),\n\tuniqueIndex("idx_post_secret").on(t.secret),`,
+		)
+		const table = analyzed(source).tables.find((t) => t.sqlName === "post")!
+		expect(table.uniqueIndexes.map((u) => u.name)).toContain("idx_post_secret")
+
+		expect(entity("post", source).uniqueIndexes).toEqual(deriveEntityMeta(table)!.uniqueIndexes)
+		expect(entity("post", source).uniqueIndexes.map((u) => u.name)).toEqual(["idx_post_title"])
+	})
 })
 
 describe("entity manifest — machines and relations", () => {
