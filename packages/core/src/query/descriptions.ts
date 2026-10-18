@@ -57,7 +57,7 @@ function filterParamMeta(
 		"Filter expression `field.op.value`; `,` joins conditions with AND; group with `or(...)` and `and(...)`.",
 		`Fields: ${fieldList}.`,
 		"`like` is case-sensitive and `ilike` ignores ASCII case; `*` is the wildcard.",
-		"`in`/`nin` take `(a,b)`; `is` takes `null` or `notnull`.",
+		"`in`/`nin` take `(a,b)`; `is` takes `null` or `notnull`, and `true` or `false` on a boolean.",
 		`At most ${limits.maxConditions} conditions, ${limits.maxDepth} nested groups, ${limits.maxInValues} in/nin values per list, ${limits.maxValues} values in all.`,
 	].join(" ")
 

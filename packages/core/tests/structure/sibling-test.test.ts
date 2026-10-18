@@ -14,13 +14,7 @@ import { describe, expect, it } from "vitest"
 
 const SRC = join(import.meta.dirname, "../../src")
 
-const KNOWN_MISSING = [
-	"codegen/generators/fts-sql.ts",
-	"query/descriptions.ts",
-	"query/sqlite/keyset.ts",
-	"query/sqlite/pattern.ts",
-	"types.ts",
-]
+const KNOWN_MISSING = ["codegen/generators/fts-sql.ts", "query/sqlite/keyset.ts", "query/sqlite/pattern.ts", "types.ts"]
 
 const NO_TEST = new Set(["bin.ts"])
 
