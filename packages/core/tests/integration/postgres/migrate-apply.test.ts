@@ -193,6 +193,7 @@ describePg("migrate baseline and status on Postgres", () => {
 					"20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n',
 					"20260102000000_b.sql": "SELECT 1;\n",
 				})
+				await expect(applyWithAtlas(command(url))).rejects.toThrow("record them with comb migrate baseline")
 				const baseline = command(url)
 				expect(baselineWithAtlas(baseline)).toEqual(["20260101000000_a.sql", "20260102000000_b.sql"])
 				expect(await revisions(url)).toEqual(["20260101000000", "20260102000000"])

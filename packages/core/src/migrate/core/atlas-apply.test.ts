@@ -273,6 +273,13 @@ describe("baselineWithAtlas", () => {
 		)
 	})
 
+	it("records a database whose status Atlas refuses as not clean, which is what baseline is for", () => {
+		const notClean = fail('Error: sql/migrate: connected database is not clean: found table "post" in schema "public".')
+		const atlas = fakeAtlas({ status: notClean })
+		expect(baselineWithAtlas(options(atlas))).toEqual(["1_a.sql", "2_b.sql"])
+		expect(atlas.calls.some((call) => call.args[1] === "set")).toBe(true)
+	})
+
 	it("says what Atlas could not set", () => {
 		const atlas = fakeAtlas({ status: status({}) })
 		const failing: Run = (cmd, args, more) => (args[1] === "set" ? fail("Error: boom") : atlas(cmd, args, more))

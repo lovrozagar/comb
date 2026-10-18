@@ -80,9 +80,17 @@ function json<T>(text: string, command: string): T {
 	}
 }
 
-/** Atlas's status for the snapshot `copy` */
-function atlasStatus(options: AtlasCommand, copy: string): AtlasStatus {
+const NO_HISTORY: AtlasStatus = { applied: [], available: [], current: "", error: "", pending: [], status: "PENDING" }
+
+/**
+ * Atlas's status for the snapshot `copy`. With `allowNotClean`, a database that has objects but no
+ * history reads as having none recorded: Atlas refuses its status once a refused apply left an
+ * empty history table, and that database is the one baseline is for.
+ */
+function atlasStatus(options: AtlasCommand, copy: string, allowNotClean = false): AtlasStatus {
 	const ran = atlas(options, copy, ["status", "--format", STATUS_FORMAT])
+	if (ran.code !== 0 && allowNotClean && ran.stderr === explainAtlasFailure("connected database is not clean"))
+		return NO_HISTORY
 	if (ran.code !== 0) throw new Error(`atlas migrate status: ${ran.stderr}`)
 	return json<AtlasStatus>(ran.stdout, "status")
 }
@@ -188,7 +196,7 @@ const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
  */
 function baselineWithAtlas(options: AtlasCommand): string[] {
 	return onSnapshot(options, (copy) => {
-		const status = atlasStatus(options, copy)
+		const status = atlasStatus(options, copy, true)
 		if (status.applied.length > 0) {
 			throw new Error(
 				`the database already records ${migrations(status.applied.length)} (up to ${status.current}); baseline marks a database that has none`,
