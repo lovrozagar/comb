@@ -26,6 +26,8 @@ type StateMachine<TState extends string = string> = {
 	terminal?: readonly TState[] | undefined
 	/** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
 	transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined
+	/** The column the machine governs, named in `assertTransition`'s error; `status` when omitted */
+	column?: string | undefined
 }
 
 /**
@@ -40,6 +42,7 @@ function defineStateMachine<const TState extends string>(machine: {
 	initial?: NoInfer<TState> | undefined
 	terminal?: readonly NoInfer<TState>[] | undefined
 	transitions?: Readonly<Partial<Record<NoInfer<TState>, readonly NoInfer<TState>[]>>> | undefined
+	column?: string | undefined
 }): StateMachine<TState> {
 	return machine
 }
@@ -91,8 +94,9 @@ function canTransition<T extends string>(machine: StateMachine<T>, from: T, to: 
  * way the product rules forbid. A rule you cannot see at the call site and
  * cannot opt out of is worse than one you must remember to call.
  */
-function assertTransition<T extends string>(machine: StateMachine<T>, from: T, to: T, column = "status"): void {
+function assertTransition<T extends string>(machine: StateMachine<T>, from: T, to: T): void {
 	if (canTransition(machine, from, to)) return
+	const column = machine.column ?? "status"
 
 	const reason = !isState(machine, to)
 		? `"${String(to)}" is not a declared state`

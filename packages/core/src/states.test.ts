@@ -96,47 +96,56 @@ describe("nextStates", () => {
 	})
 })
 
+/** The CombError `run` throws; fails the test when it throws nothing or something else */
+function combErrorOf(run: () => void): CombError {
+	try {
+		run()
+	} catch (error) {
+		if (error instanceof CombError) return error
+		throw error
+	}
+	throw new Error("expected a CombError, nothing was thrown")
+}
+
 describe("assertTransition", () => {
 	it("is silent on a legal move", () => {
 		expect(() => assertTransition(delivery, "queued", "sending")).not.toThrow()
 		expect(() => assertTransition(delivery, "sent", "sent")).not.toThrow()
 	})
 
-	it("raises CombError 422 with invalid_state_transition", () => {
-		expect(() => assertTransition(delivery, "sent", "queued")).toThrow(CombError)
-		try {
-			assertTransition(delivery, "sent", "queued", "status")
-			expect.unreachable()
-		} catch (error) {
-			expect(error).toBeInstanceOf(CombError)
-			const err = error as CombError
-			expect(err.errorKey).toBe(combErrorKeys.INVALID_STATE_TRANSITION)
-			expect(err.status).toBe(422)
-			expect(err.statusKey).toBe("unprocessable_entity")
-			expect(err.column).toBe("status")
-			expect(err.cause).toContain("terminal")
-		}
+	it("raises CombError 422 with invalid_state_transition, on the status column by default", () => {
+		const err = combErrorOf(() => assertTransition(delivery, "sent", "queued"))
+		expect(err.errorKey).toBe(combErrorKeys.INVALID_STATE_TRANSITION)
+		expect(err.status).toBe(422)
+		expect(err.statusKey).toBe("unprocessable_entity")
+		expect(err.column).toBe("status")
+		expect(err.cause).toBe('status: "sent" is terminal')
+	})
+
+	it("names the column the machine declares", () => {
+		const phase = defineStateMachine({ column: "phase", terminal: ["done"], values: ["open", "done"] })
+		const err = combErrorOf(() => assertTransition(phase, "done", "open"))
+		expect(err.column).toBe("phase")
+		expect(err.cause).toBe('phase: "done" is terminal')
 	})
 
 	it("names an unknown target, an unknown source, and a missing edge", () => {
-		try {
-			assertTransition(delivery, "queued", "done")
-			expect.unreachable()
-		} catch (error) {
-			expect((error as CombError).cause).toContain("not a declared state")
-		}
-		try {
-			assertTransition(delivery, "done", "queued")
-			expect.unreachable()
-		} catch (error) {
-			expect((error as CombError).cause).toContain("not a declared state")
-		}
-		try {
-			assertTransition(delivery, "queued", "sent")
-			expect.unreachable()
-		} catch (error) {
-			expect((error as CombError).cause).toContain("does not lead")
-		}
+		expect(combErrorOf(() => assertTransition(delivery, "queued", "done" as never)).cause).toContain(
+			"not a declared state",
+		)
+		expect(combErrorOf(() => assertTransition(delivery, "done" as never, "queued")).cause).toContain(
+			"not a declared state",
+		)
+		expect(combErrorOf(() => assertTransition(delivery, "queued", "sent")).cause).toContain("does not lead")
+	})
+
+	it("passes on an error that is not its own", () => {
+		expect(() =>
+			combErrorOf(() => {
+				throw new TypeError("x")
+			}),
+		).toThrow(TypeError)
+		expect(() => combErrorOf(() => undefined)).toThrow("nothing was thrown")
 	})
 })
 

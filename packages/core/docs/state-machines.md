@@ -104,7 +104,9 @@ assertTransition(deliveryStates, current, next) // throws CombError, 422
 ```
 
 Failure raises `CombError` with `status: "unprocessable_entity"` and
-`invalid_state_transition`, matching how every other comb-detected violation surfaces.
+`invalid_state_transition`, matching how every other comb-detected violation surfaces. The error
+names the column the machine declares as `column` (`defineStateMachine({ column: "phase", … })`),
+or `status` when it declares none.
 
 Deliberately **not** an automatic hook on update. comb does not own the write path — a caller may
 be doing a bulk correction, a backfill, or a migration where the transition rules do not apply. An
