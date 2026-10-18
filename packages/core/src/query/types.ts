@@ -13,7 +13,21 @@ type ParsedFields = {
 	root: FieldSelection
 }
 
-type FilterOperator = "eq" | "ne" | "neq" | "gt" | "gte" | "lt" | "lte" | "in" | "nin" | "like" | "ilike" | "is"
+type FilterOperator =
+	| "eq"
+	| "ne"
+	| "neq"
+	| "gt"
+	| "gte"
+	| "lt"
+	| "lte"
+	| "in"
+	| "nin"
+	| "like"
+	| "ilike"
+	| "is"
+	/** Parsed for callers that validate and run it themselves (JSON-array membership); comb's own validator and SQL take none */
+	| "contains"
 
 type FieldType = "string" | "number" | "boolean" | "date" | "enum"
 

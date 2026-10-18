@@ -240,9 +240,13 @@ describe("parseFilter — quoted values and whitespace (Q-L1, Q-L2)", () => {
 		}
 	})
 
-	it("has no contains operator, which no field type could take (Q-L7)", () => {
-		expect(FILTER_OPERATORS).not.toContain("contains")
-		expect(parseFilter("tags.contains.x")).toBeNull()
+	it("parses contains, for callers that validate and run it themselves (canary: anyrow row filters)", () => {
+		expect(FILTER_OPERATORS).toContain("contains")
+		expect(parseFilter("tags.contains.red")?.root.conditions[0]).toEqual({
+			field: "tags",
+			operator: "contains",
+			value: "red",
+		})
 	})
 
 	it("keeps an empty quoted list member and drops an empty bare one", () => {

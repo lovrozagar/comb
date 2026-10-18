@@ -510,7 +510,7 @@ status.in.(draft,sent)  list values
 @computed.eq.1          computed field (resolved by your resolver)
 ```
 
-Operators: `eq`, `ne`/`neq`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`, `like`, `ilike`, `is`. `is` takes `null` and `notnull` (any case) on every field, and `true` and `false` on a `boolean` one.
+Operators: `eq`, `ne`/`neq`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`, `like`, `ilike`, `is`. `parseFilter` also reads `contains` for a caller that validates and runs it itself (JSON-array membership, say); no declared field type takes it. `is` takes `null` and `notnull` (any case) on every field, and `true` and `false` on a `boolean` one.
 
 A value that holds `,`, `(`, `)` or `.` is written in double quotes, PostgREST style: `title.eq."Hello, world"`, `title.in.("a,b",c)`; inside quotes `\"` and `\\` escape. Whitespace around a bare value is trimmed.
 
@@ -822,7 +822,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun
 
 - Filter values are typed as declared: booleans bind as booleans (`published.eq.false` used to return the published rows), numbers and epoch-millisecond dates as numbers. A value that does not fit its type is a 400, and so is `is` with anything but null or notnull (or true or false on a boolean).
 - A condition or sort the handler cannot run throws `filter_not_wired` or `sort_not_wired` instead of being dropped.
-- `filterToSQL` takes `{ computedFilters, mainTable, relations }` and a validated AST; `coerceFilterValue`, `createFilterRefinement`, `defineListQuery`, `listQueryBaseSchema`, `ListQuerySchemaConfig` and the `contains` operator are removed.
+- `filterToSQL` takes `{ computedFilters, mainTable, relations }` and a validated AST; `coerceFilterValue`, `createFilterRefinement`, `defineListQuery`, `listQueryBaseSchema`, and `ListQuerySchemaConfig` are removed. `contains` is still parsed, for a caller that validates and runs it, but no declared field type takes it: `validateFilter` rejects it and `filterToSQL` answers it with `filter_not_wired`.
 - `pagination.count` is `number | null`; `countExtra(query)` takes the parsed query and selects no window count for a cursor request. Cursor ids keep their JSON type.
 - Limits: `maxInValues` 50 (was 100), 60 bound values per filter, 8 search words, and length caps on `filter` (2048), `order` (200) and `cursor` (4096), so every accepted request fits D1's 100 bound parameters.
 - `select` refuses a relation nested inside a relation and an embed with no name.

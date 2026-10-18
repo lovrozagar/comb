@@ -23,10 +23,11 @@ const FILTER_OPERATORS: readonly FilterOperator[] = [
 	"like",
 	"ilike",
 	"is",
+	"contains",
 ] as const
 
 /** An operator and the `.` after it; longest first, so `neq.` is not read as `ne` then `q.` */
-const OPERATOR_PATTERN = /^(ilike|like|neq|gte|lte|nin|eq|ne|gt|lt|in|is)\./
+const OPERATOR_PATTERN = /^(contains|ilike|like|neq|gte|lte|nin|eq|ne|gt|lt|in|is)\./
 
 class FilterParser {
 	private pos = 0

@@ -64,6 +64,13 @@ describe("validateFilter — diagnostics", () => {
 		if (result && !result.valid) expect(result.errors.join(" ")).toContain("Invalid operator")
 	})
 
+	it("rejects contains on every field type: comb runs no contains, its callers do", () => {
+		for (const type of ["boolean", "date", "enum", "number", "string"] as const) {
+			const result = validateFilter("tags.contains.red", { tags: type })
+			expect(result?.valid).toBe(false)
+		}
+	})
+
 	it("returns null for an absent filter rather than an empty result", () => {
 		expect(validateFilter(null, { status: "enum" })).toBeNull()
 		expect(validateFilter("   ", { status: "enum" })).toBeNull()
