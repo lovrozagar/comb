@@ -26,6 +26,8 @@ describe("splitEnumValues", () => {
 		expect(values?.[1].startsWith("-- atlas")).toBe(false)
 		expect(rest?.[0]).toBe("20270101000000_x.sql")
 		expect(rest?.[1].startsWith("-- atlas:txmode none\n\n-- Modify")).toBe(true)
+		const tight = splitEnumValues("20261231235959_x.sql", `-- atlas:txmode none\n${ATLAS}`)[1]
+		expect(tight?.[1].startsWith("-- atlas:txmode none\n\n-- Modify")).toBe(true)
 	})
 
 	it("leaves a file alone that only adds values, or adds none", () => {

@@ -11,6 +11,9 @@ import { afterEach, beforeEach, expect, it } from "vitest"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas, baselineWithAtlas, statusWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
+import { generateMigrationFile } from "../../../src/migrate/core/atlas.ts"
+import { splitEnumValues } from "../../../src/migrate/core/pg-enum-split.ts"
+import { wrapAtlasFile } from "../../../src/migrate/core/pg-objects.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { describeAtlas } from "../support/atlas.ts"
@@ -211,6 +214,48 @@ describePg("migrate baseline and status on Postgres", () => {
 				expect(status.out.at(-1)).toBe(
 					"Changed after it was applied: 20260101000000_a.sql; Atlas will not run it again, so the database may not match it",
 				)
+			})
+		}, 60_000)
+	})
+})
+
+/** --yes: a txmode none file is cautious */
+const approveWithYes = (m: ParsedMigration) => approveMigration(m, { target: "core", yes: true })
+
+/* each writer, given a file whose directive has no blank line after it, as a person may write one */
+const TIGHT = '-- atlas:txmode none\nCREATE INDEX CONCURRENTLY "a_x" ON "a" ("x");\n'
+
+describePg("migrate apply on Postgres: files comb rewrites keep their directives", () => {
+	describeAtlas("with Atlas v1.3.0", () => {
+		it("applies each rewritten txmode none file statement by statement, so CREATE INDEX CONCURRENTLY runs", async () => {
+			await withScratchDb(async (url) => {
+				migrations({
+					"20260101000000_a.sql":
+						'CREATE TYPE "s" AS ENUM (\'a\');\nCREATE TABLE "a" ("x" integer, "y" integer, "z" integer, "s" "s");\n',
+				})
+				await applyWithAtlas(command(url, { approve: approveWithYes }))
+				writeFileSync(
+					join(dir, "20260102000000_wrapped.sql"),
+					wrapAtlasFile(TIGHT, { after: [], before: ["SELECT 1"] }),
+				)
+				const split = splitEnumValues(
+					"20260103000000_enum.sql",
+					`-- atlas:txmode none\nALTER TYPE "s" ADD VALUE 'b';\nCREATE INDEX CONCURRENTLY "a_y" ON "a" ("y");\n`,
+				)
+				for (const [name, sql] of split) writeFileSync(join(dir, name), sql)
+				generateMigrationFile({
+					diff: TIGHT.replaceAll("a_x", "a_z").replace('("x")', '("z")'),
+					migrationName: "generated",
+					migrationsDir: dir,
+				})
+				migrations({})
+				const applied = await applyWithAtlas(command(url, { approve: approveWithYes }))
+				expect(applied).toHaveLength(4)
+				const indexes = await query<{ indexname: string }>(
+					url,
+					"SELECT indexname FROM pg_indexes WHERE tablename = 'a' ORDER BY 1",
+				)
+				expect(indexes.map((i) => i.indexname)).toEqual(["a_x", "a_y", "a_z"])
 			})
 		}, 60_000)
 	})

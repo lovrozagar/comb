@@ -213,3 +213,22 @@ describe("generateMigrationFile", () => {
 		expect(filename).toMatch(/^\d{8}_add_users\.sql$/)
 	})
 })
+
+describe("generateMigrationFile and Atlas's directives", () => {
+	let dirForDirectives = ""
+	beforeEach(() => {
+		dirForDirectives = mkdtempSync(join(tmpdir(), "comb-migration-file-"))
+	})
+	afterEach(() => rmSync(dirForDirectives, { force: true, recursive: true }))
+
+	it("keeps Atlas's directives first, a blank line after them, above its own header", () => {
+		const file = generateMigrationFile({
+			diff: "-- atlas:txmode none\nCREATE INDEX CONCURRENTLY i ON t (a);\n",
+			migrationName: "idx",
+			migrationsDir: dirForDirectives,
+		})
+		const text = readFileSync(file, "utf8")
+		expect(text.startsWith("-- atlas:txmode none\n\n-- Migration: idx\n")).toBe(true)
+		expect(text.endsWith("\nCREATE INDEX CONCURRENTLY i ON t (a);\n")).toBe(true)
+	})
+})

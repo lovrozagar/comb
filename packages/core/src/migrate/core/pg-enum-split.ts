@@ -6,7 +6,7 @@
  * transaction.
  */
 import { nextVersion } from "./atlas-dir.ts"
-import { atlasDirectives } from "./pg-objects.ts"
+import { atlasDirectives, withDirectivesFirst } from "./pg-objects.ts"
 import { codeOf } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
@@ -25,7 +25,7 @@ function splitEnumValues(name: string, file: string): Array<[string, string]> {
 	if (version === undefined || values.length === 0 || rest.length === 0) return [[name, file]]
 	return [
 		[`${version}${suffix}_enum_values.sql`, joined(values)],
-		[`${nextVersion(version)}${suffix}.sql`, head + joined(rest)],
+		[`${nextVersion(version)}${suffix}.sql`, withDirectivesFirst(head, joined(rest))],
 	]
 }
 

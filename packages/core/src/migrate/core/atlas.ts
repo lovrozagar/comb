@@ -8,6 +8,7 @@ import type { Dialect } from "../types.ts"
 import { SQLITE_DEV_URL } from "./atlas-env.ts"
 import { type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { type Run, run } from "./process.ts"
+import { atlasDirectives, withDirectivesFirst } from "./pg-objects.ts"
 import { codeOf, IDENT, QNAME, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
@@ -189,7 +190,9 @@ ${description ? `-- ${description}` : ""}
 
 `
 
-	writeFileSync(filepath, header + diff)
+	/* Atlas reads directives only at the top of a file, so they go above comb's header */
+	const directives = atlasDirectives(diff)
+	writeFileSync(filepath, withDirectivesFirst(directives, header + diff.slice(directives.length)))
 
 	return filepath
 }

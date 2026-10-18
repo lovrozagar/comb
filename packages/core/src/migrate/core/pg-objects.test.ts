@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { pgDelta, separatePgObjects, wrapAtlasFile } from "./pg-objects.ts"
+import { pgDelta, separatePgObjects, withDirectivesFirst, wrapAtlasFile } from "./pg-objects.ts"
 
 /* drizzle-kit 1.0.0-rc.4's export of a table with a policy, a view, a materialized view, a sequence and a role */
 const EXPORT = `CREATE TYPE "status" AS ENUM('draft', 'published');
@@ -129,5 +129,24 @@ describe("wrapAtlasFile", () => {
 	it("leaves a file alone when comb adds nothing, and writes comb's part alone when Atlas wrote nothing", () => {
 		expect(wrapAtlasFile("SELECT 1;\n", { after: [], before: [] })).toBe("SELECT 1;\n")
 		expect(wrapAtlasFile("", { after: ["SELECT 2"], before: ["SELECT 1"] })).toBe("SELECT 1;\n\nSELECT 2;\n")
+	})
+})
+
+describe("withDirectivesFirst", () => {
+	it("puts the directive lines first with one blank line after them, which Atlas needs to honor them", () => {
+		expect(withDirectivesFirst("-- atlas:txmode none\n", "CREATE INDEX CONCURRENTLY i ON t (a);\n")).toBe(
+			"-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY i ON t (a);\n",
+		)
+		expect(withDirectivesFirst("-- atlas:txmode none\n\n\n", "\n\nSELECT 1;\n")).toBe(
+			"-- atlas:txmode none\n\nSELECT 1;\n",
+		)
+		expect(withDirectivesFirst("", "SELECT 1;\n")).toBe("SELECT 1;\n")
+	})
+
+	it("gives a rewritten file whose directive had no blank line after it the blank line", () => {
+		const file = '-- atlas:txmode none\nCREATE INDEX CONCURRENTLY "i" ON "post" ("x");\n'
+		expect(wrapAtlasFile(file, { after: [], before: ["SELECT 1"] })).toBe(
+			'-- atlas:txmode none\n\nSELECT 1;\n\nCREATE INDEX CONCURRENTLY "i" ON "post" ("x");\n',
+		)
 	})
 })

@@ -211,13 +211,31 @@ function pgDelta({ atlasSql, from, to }: { atlasSql: string; from: PgObjects; to
 /** A migration file's leading `atlas:` directive lines, with the blank lines after them */
 const atlasDirectives = (file: string): string => /^(?:--[ \t]*atlas:[^\n]*\n)+\n*/.exec(file)?.[0] ?? ""
 
+/**
+ * `body` under the directive lines of `head`, with exactly one blank line between: Atlas honors a
+ * file directive such as `-- atlas:txmode none` only when a blank line follows it, and otherwise
+ * runs the file in one transaction without a word
+ */
+function withDirectivesFirst(head: string, body: string): string {
+	const directives = head.replace(/\n+$/, "")
+	return directives === "" ? body : `${directives}\n\n${body.replace(/^\n+/, "")}`
+}
+
 /** Atlas's migration file with comb's statements around its own, under its leading `atlas:` directives */
 function wrapAtlasFile(file: string, { after, before }: Delta): string {
 	if (after.length === 0 && before.length === 0) return file
 	const head = atlasDirectives(file)
 	/* asSql writes nothing for no statements, so an empty side adds no blank line */
 	const parts = [asSql(before), file.slice(head.length), asSql(after)]
-	return head + parts.filter((part) => part !== "").join("\n")
+	return withDirectivesFirst(head, parts.filter((part) => part !== "").join("\n"))
 }
 
-export { atlasDirectives, type PgObject, type PgObjects, pgDelta, separatePgObjects, wrapAtlasFile }
+export {
+	atlasDirectives,
+	type PgObject,
+	type PgObjects,
+	pgDelta,
+	separatePgObjects,
+	withDirectivesFirst,
+	wrapAtlasFile,
+}
