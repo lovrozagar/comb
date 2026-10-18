@@ -172,3 +172,45 @@ describePg("pgErrorHandler on a real server: retryable failures", () => {
 		}
 	})
 })
+
+describePg("pgErrorHandler on a real server: a server that refuses or ends the session", () => {
+	const sessions = usePg()
+
+	it("maps a write in a read-only transaction (25006) to 503 database_readonly", async () => {
+		/* refused before anything is created: the suite never leaves a table behind */
+		const failure = await sessions
+			.sql()
+			.begin("READ ONLY", async (tx) => {
+				await tx`CREATE TABLE comb_read_only_probe (id int)`
+			})
+			.then(
+				() => null,
+				(error: unknown) => error,
+			)
+		expect(failure).toMatchObject({ code: "25006" })
+		expect(caught(failure)).toMatchObject({ errorKey: "database_readonly", status: 503 })
+	})
+
+	it("maps a backend the server terminates (57P01) to 503 database_readonly", async () => {
+		/* node-postgres reads the server's error before the socket closes; postgres.js reports only the close */
+		const victim = sessions.pg()
+		victim.on("error", () => undefined)
+		const { rows } = await victim.query<{ pid: number }>("SELECT pg_backend_pid() AS pid")
+		const pid = rows[0]?.pid
+		const sleeping = victim.query("SELECT pg_sleep(5)").then(
+			() => null,
+			(error: unknown) => error,
+		)
+		/* wait until the sleep is running on that backend, then end it from another session */
+		const admin = sessions.sql()
+		for (let tries = 0; tries < 50; tries++) {
+			const [activity] = await admin`SELECT state FROM pg_stat_activity WHERE pid = ${pid as number}`
+			if (activity?.["state"] === "active") break
+			await new Promise((resolve) => setTimeout(resolve, 20))
+		}
+		await admin`SELECT pg_terminate_backend(${pid as number})`
+		const failure = await sleeping
+		expect(failure).toMatchObject({ code: "57P01" })
+		expect(caught(failure)).toMatchObject({ errorKey: "database_readonly", status: 503 })
+	})
+})
