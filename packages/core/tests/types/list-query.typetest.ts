@@ -7,6 +7,7 @@ import * as z from "zod"
 import { createListQuerySchema, createRetrieveQuerySchema } from "../../src/query/schema.ts"
 import type { FilterAST, ParsedFields, SortField } from "../../src/query/types.ts"
 import { buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
+import { keysetSQL, type KeysetPosition } from "../../src/query/sqlite/index.ts"
 import { queryHelpers } from "../../src/query/drizzle.ts"
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
 
@@ -53,3 +54,6 @@ queryHelpers.countExtra({ unrelated: true })
    the parsed view; the config refuses it */
 // @ts-expect-error extensions keep one type through parsing
 createListQuerySchema({ extend: { archived: z.coerce.boolean().optional() }, sort: ["created_at"] })
+
+/* keysetSQL's one argument has a name a consumer can import from the subpath that exports keysetSQL */
+expectTypeOf(keysetSQL).parameter(0).toEqualTypeOf<KeysetPosition>()

@@ -20,7 +20,7 @@ export { conditionToSQL, filterToSQL, sortToOrderBy } from "./executor.ts"
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts"
 
 /* Ordering, keyset pagination, pattern operators */
-export { keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts"
+export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts"
 export { patternToSQL } from "./pattern.ts"
 
 /* FTS5 search */

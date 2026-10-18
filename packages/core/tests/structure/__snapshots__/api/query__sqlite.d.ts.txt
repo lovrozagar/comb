@@ -5,7 +5,7 @@
 export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryParsed, type ListQueryResult, } from "./build-list-query.ts";
 export { conditionToSQL, filterToSQL, sortToOrderBy } from "./executor.ts";
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts";
-export { keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts";
+export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts";
 export { patternToSQL } from "./pattern.ts";
 export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, type SpellfixDb, type SpellfixSearch, sanitizeFtsTerm, } from "./search.ts";
 export { likeSearch, type LikeSearchResolver } from "./search.ts";
