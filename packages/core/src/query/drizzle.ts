@@ -7,7 +7,8 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
-import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT, readCursor } from "./cursor.ts"
+import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, readCursor } from "./cursor.ts"
+import { assertCursorFits } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
 import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import { assertSchemaParsed } from "./trusted.ts"
@@ -136,6 +137,8 @@ function drizzleListOptions(query: {
 	const cursor = readCursor(query.cursor, sort)
 	const where = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
+		/* the cursor is client input: each value must be what its column holds, or it is a 400 */
+		assertCursorFits([...keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
 		return keysetSQL({ id: cursor.id, keys, tiebreak, values: cursor.values })
 	}
 	return { ...base, offset: 0, where: { RAW: where } }
@@ -182,8 +185,7 @@ function drizzlePaginationResult<T extends { id?: CursorId }>(
 	const lastItem = sliced.at(-1)
 	/* any id the row holds, 0 and "" included, can carry the next page */
 	if (hasMore && lastItem !== undefined && Object.hasOwn(lastItem, CURSOR_TIEBREAK_COLUMN)) {
-		const sort = query.parsedSort.length > 0 ? query.parsedSort : DEFAULT_SORT.filter(({ field }) => field in lastItem)
-		nextCursor = createCursor(lastItem as Record<string, unknown>, sort)
+		nextCursor = createCursor(lastItem as Record<string, unknown>, query.parsedSort)
 	}
 
 	const pagination: PaginationMeta = {

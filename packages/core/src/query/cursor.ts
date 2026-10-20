@@ -20,9 +20,6 @@ import type { SortDirection, SortField, SortNulls } from "./types.ts"
  */
 const CURSOR_TIEBREAK_COLUMN = "id"
 
-/** Sort applied when a request names none and the caller supplied no default. */
-const DEFAULT_SORT: readonly SortField[] = [{ direction: "desc", field: "created_at" }]
-
 /**
  * Wire payload. `s` is the sort signature the cursor was minted under, `v` one
  * value per sort key in order, `i` the tiebreak id. A cursor is only valid for
@@ -177,7 +174,6 @@ export {
 	CURSOR_TIEBREAK_COLUMN,
 	cursorProblem,
 	decodeCursor,
-	DEFAULT_SORT,
 	effectiveNulls,
 	encodeCursor,
 	getPrimarySortDirection,

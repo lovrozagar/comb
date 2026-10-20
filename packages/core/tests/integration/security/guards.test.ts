@@ -90,9 +90,11 @@ describe("raw SQL identifiers (raw-sql-quoting)", () => {
 			const name = 'notes"_fts'
 			await client.execute(`CREATE TABLE notes (id TEXT PRIMARY KEY)`)
 			await client.execute(`INSERT INTO notes VALUES ('n1')`)
-			await client.execute(`CREATE VIRTUAL TABLE "notes""_fts" USING fts5(body, id UNINDEXED)`)
-			await client.execute(`INSERT INTO "notes""_fts" (body, id) VALUES ('hello world', 'n1')`)
-			const where = buildFtsWhere(name, "id", "hello")
+			await client.execute(`CREATE VIRTUAL TABLE "notes""_fts" USING fts5(body)`)
+			await client.execute(
+				`INSERT INTO "notes""_fts" (rowid, body) VALUES ((SELECT rowid FROM notes WHERE id = 'n1'), 'hello world')`,
+			)
+			const where = buildFtsWhere({ ftsTable: name, table: sqliteTable("notes", { id: text("id") }) }, "hello")
 			const rows = await db.all(sql`SELECT id FROM notes WHERE ${where}`)
 			expect(rows).toEqual([{ id: "n1" }])
 		} finally {

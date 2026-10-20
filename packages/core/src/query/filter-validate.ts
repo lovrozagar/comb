@@ -42,7 +42,10 @@ const EPOCH_MS = /^-?\d+$/
 function typedScalar(type: FieldType, raw: string): Typed {
 	switch (type) {
 		case "number":
-			return NUMBER.test(raw) ? { value: Number(raw) } : { error: `expects a number, got '${raw}'` }
+			/* 1e999 matches the grammar and reads as Infinity, which no column holds */
+			return NUMBER.test(raw) && Number.isFinite(Number(raw))
+				? { value: Number(raw) }
+				: { error: `expects a number, got '${raw}'` }
 		case "date":
 			return EPOCH_MS.test(raw) ? { value: Number(raw) } : { error: `expects epoch milliseconds, got '${raw}'` }
 		case "boolean":

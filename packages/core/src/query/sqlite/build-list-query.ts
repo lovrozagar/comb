@@ -2,7 +2,7 @@ import { and, getTableColumns, sql, type SQL, type SQLWrapper } from "drizzle-or
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
-import { CURSOR_TIEBREAK_COLUMN, DEFAULT_SORT, readCursor } from "../cursor.ts"
+import { CURSOR_TIEBREAK_COLUMN, readCursor } from "../cursor.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
 import { assertSchemaParsed } from "../trusted.ts"
@@ -207,8 +207,8 @@ function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTa
 	const { parsed, table } = opts
 	assertSchemaParsed(parsed)
 	const columns = getTableColumns(table) as Record<string, SQLiteColumn>
-	const sort =
-		parsed.parsedSort.length > 0 ? parsed.parsedSort : DEFAULT_SORT.filter(({ field }) => own(columns, field))
+	/* the schema decided the order: an empty sort orders by the tiebreak alone, as listOptions and paginate do */
+	const sort = parsed.parsedSort
 
 	const idColumn = own(columns, CURSOR_TIEBREAK_COLUMN)
 	if (parsed.cursor && !idColumn) {
@@ -245,19 +245,18 @@ function buildDerivedListQuery<TSortField extends string>(
 	opts: BuildDerivedListQueryOpts<TSortField>,
 ): ListQueryResult {
 	const sort = opts.parsed.parsedSort
-	const keys: SortKey[] = []
-	let keysetable = true
-	for (const { direction, field, nulls } of sort) {
-		const column = opts.sortColumns[field]
-		if (column) keys.push({ column, direction, nulls })
-		else keysetable = false
-	}
+	/* a sort the schema accepted must order the rows: one with no column is a wiring mistake */
+	const keys: SortKey[] = sort.map(({ direction, field, nulls }) => {
+		const column = own(opts.sortColumns, field)
+		if (!column) throw sortNotWired(field, "column")
+		return { column, direction, nulls }
+	})
 
 	const tiebreak: SortKey = { column: opts.idColumn, direction: sort[0]?.direction ?? "desc" }
 	const orderBy = orderByKeys(keys, tiebreak)
 
 	return finish({
-		keyset: { keys: keysetable ? keys : null, orderBy },
+		keyset: { keys, orderBy },
 		parsed: opts.parsed,
 		sort,
 		tiebreak,

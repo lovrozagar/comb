@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { createClient } from "@libsql/client"
 import { sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
+import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { beforeAll, describe, expect, it } from "vitest"
 import { buildFtsWhere } from "../../src/query/sqlite/search.ts"
 import { app, BLOG, ok, type App } from "./support/project.ts"
@@ -54,7 +55,7 @@ describe("comb with FTS5, from config to a search", () => {
 		const db = drizzle({ client })
 		try {
 			await client.execute("INSERT INTO post (id, title) VALUES ('pst_1', 'Postgres tuning'), ('pst_2', 'Gardening')")
-			const where = buildFtsWhere("post_fts", "rowid", "postg")
+			const where = buildFtsWhere({ ftsTable: "post_fts", table: sqliteTable("post", { id: text("id") }) }, "postg")
 			const rows = await db.all<{ id: string }>(sql`SELECT id FROM post WHERE ${where}`)
 			expect(rows).toEqual([{ id: "pst_1" }])
 		} finally {

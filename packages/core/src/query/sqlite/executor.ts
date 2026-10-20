@@ -22,16 +22,7 @@ import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
-import type {
-	ComputedFilterResolver,
-	ComputedSortResolver,
-	FilterAST,
-	FilterCondition,
-	FilterGroup,
-	ListQueryCapabilities,
-	SortField,
-} from "../types.ts"
-import { orderSQL } from "./keyset.ts"
+import type { ComputedFilterResolver, FilterAST, FilterCondition, FilterGroup } from "../types.ts"
 import { patternToSQL } from "./pattern.ts"
 import type { RelationConfig } from "./types.ts"
 
@@ -41,37 +32,6 @@ const COMPUTED_PREFIX = "@"
 const own = <T>(record: Record<string, T> | undefined, key: string): T | undefined =>
 	record !== undefined && Object.hasOwn(record, key) ? record[key] : undefined
 
-type SortToSQLConfig = {
-	capabilities: ListQueryCapabilities
-	computedSorts?: Record<string, ComputedSortResolver> | undefined
-	table: SQLiteTable
-}
-
-function sortToOrderBy(sortFields: SortField[], config: SortToSQLConfig): SQL[] {
-	const orderBy: SQL[] = []
-
-	for (const { direction, field, nulls } of sortFields) {
-		if (field.startsWith(COMPUTED_PREFIX)) {
-			const resolver = own(config.computedSorts, field)
-			if (resolver) {
-				orderBy.push(resolver(direction))
-			}
-			continue
-		}
-
-		if (!config.capabilities.sortFields.has(field)) {
-			continue
-		}
-
-		const column = own(getTableColumns(config.table) as Record<string, SQLiteColumn>, field)
-		if (!column) continue
-
-		orderBy.push(orderSQL({ column, direction, nulls }))
-	}
-
-	return orderBy
-}
-
 /** `is`: null and notnull on any column, true and false on a boolean one (as validateFilter types them) */
 function isToSQL(column: SQLiteColumn, value: unknown): SQL | null {
 	if (value === null) return isNull(column)
@@ -79,9 +39,25 @@ function isToSQL(column: SQLiteColumn, value: unknown): SQL | null {
 	return typeof value === "boolean" ? eq(column, value) : null
 }
 
+/**
+ * A validated value as `column` binds it: a date field's epoch milliseconds become a Date on a
+ * date column, so drizzle writes them in the unit the column stores (seconds or milliseconds)
+ */
+function boundValue(column: SQLiteColumn, value: unknown): unknown {
+	/* a date field takes no list operator, so its value is one number */
+	return column.dataType === "object date" && typeof value === "number" ? new Date(value) : value
+}
+
+/** Whether `value` is a number (or holds one) meant for a text column, which SQLite would compare as text */
+const numberOnText = (column: SQLiteColumn, value: unknown): boolean =>
+	column.dataType.startsWith("string") &&
+	(typeof value === "number" || (Array.isArray(value) && value.some((member) => typeof member === "number")))
+
 /** One condition on one column; null when the operator or value is not one this column can take */
 function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL | null {
-	const { operator, value } = condition
+	if (numberOnText(column, condition.value)) return null
+	const { operator } = condition
+	const value = boundValue(column, condition.value)
 
 	switch (operator) {
 		case "eq":
@@ -134,20 +110,22 @@ function relationFilterToSQL(
 
 	const mainColumns = getTableColumns(mainTable)
 	const throughColumns = getTableColumns(relationConfig.through)
-
-	const mainIdColumn = mainColumns["id"]
-	const throughColumn = throughColumns[relationConfig.throughKey]
-	const targetIdColumn = targetColumns[relationConfig.targetKey]
-	const throughTargetKeyAlt = `${relationConfig.targetKey.replace("Id", "")}Id`
-	const throughTargetColumn = throughColumns[throughTargetKeyAlt] || throughColumns[relationConfig.targetKey]
+	/* the main table's key: the one named, else its single primary key */
+	const primary = Object.keys(mainColumns).filter((key) => (mainColumns[key] as SQLiteColumn).primary)
+	const sourceKey = relationConfig.sourceKey ?? (primary.length === 1 ? primary[0] : undefined)
+	const sourceColumn = sourceKey === undefined ? undefined : own(mainColumns, sourceKey)
+	const throughSourceColumn = own(throughColumns, relationConfig.throughSourceKey)
+	const throughTargetColumn = own(throughColumns, relationConfig.throughTargetKey)
+	const targetKeyColumn = own(targetColumns, relationConfig.targetKey)
+	if (!sourceColumn || !throughSourceColumn || !throughTargetColumn || !targetKeyColumn) return null
 
 	const targetCondition = conditionToSQL({ field: targetFieldName, operator, value }, targetColumn)
 	if (!targetCondition) return null
 
 	return sql`EXISTS (
 		SELECT 1 FROM ${relationConfig.through}
-		INNER JOIN ${relationConfig.target} ON ${targetIdColumn} = ${throughTargetColumn}
-		WHERE ${throughColumn} = ${mainIdColumn}
+		INNER JOIN ${relationConfig.target} ON ${targetKeyColumn} = ${throughTargetColumn}
+		WHERE ${throughSourceColumn} = ${sourceColumn}
 		AND ${targetCondition}
 	)`
 }
@@ -192,4 +170,4 @@ function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | nu
 	return ast ? groupToSQL(ast.root, config) : null
 }
 
-export { conditionToSQL, filterToSQL, sortToOrderBy, type FilterToSQLConfig }
+export { conditionToSQL, filterToSQL, type FilterToSQLConfig }

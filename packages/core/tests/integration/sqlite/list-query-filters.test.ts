@@ -142,3 +142,81 @@ describe("values that do not fit the declared type are refused (Q-M4)", () => {
 		expect(refused("title.eq.")).toBe(false)
 	})
 })
+
+/* post → post_tag → tag, the join table with an id of its own, so a guessed key would join the wrong column */
+const tag = sqliteTable("tag", { id: integer("id").primaryKey(), slug: text("slug") })
+const postTag = sqliteTable("post_tag", {
+	id: integer("id").primaryKey(),
+	post_id: integer("post_id"),
+	tag_id: integer("tag_id"),
+})
+const tagged = createListQuerySchema({ filter: { "tags.slug": "string" }, sort: ["id"] })
+
+/** The ids `filter` selects through the tags relation, ascending */
+async function taggedIds(filter: string, relation: Record<string, unknown>): Promise<number[]> {
+	const db = await seeded()
+	const harness = open.at(-1) as LibsqlHarness
+	await harness.client.executeMultiple(`CREATE TABLE tag (id INTEGER PRIMARY KEY, slug TEXT);
+CREATE TABLE post_tag (id INTEGER PRIMARY KEY, post_id INTEGER, tag_id INTEGER);
+INSERT INTO tag VALUES (10, 'release'), (20, 'draft');
+INSERT INTO post_tag VALUES (1, 3, 10), (2, 5, 10), (3, 1, 20);`)
+	const parsed = tagged.parse({ filter, limit: "100", order: "id.asc" })
+	const relations = { tags: relation as never }
+	const query = buildListQuery({ parsed, relations, table: post })
+	const rows = await applyListQuery(db.select({ id: post.id }).from(post).$dynamic(), query)
+	return rows.map((row) => row.id)
+}
+
+describe("relation filters run against the join table's own keys (B1)", () => {
+	const relation = {
+		target: tag,
+		targetKey: "id",
+		through: postTag,
+		throughSourceKey: "post_id",
+		throughTargetKey: "tag_id",
+	}
+
+	it("selects the rows whose related row matches", async () => {
+		expect(await taggedIds("tags.slug.eq.release", relation)).toEqual([3, 5])
+		expect(await taggedIds("tags.slug.eq.draft", relation)).toEqual([1])
+	})
+
+	it("refuses a relation whose key names no column, instead of joining a guess", async () => {
+		const wrong = { ...relation, throughTargetKey: "tagId" }
+		await expect(taggedIds("tags.slug.eq.release", wrong)).rejects.toMatchObject({ errorKey: "filter_not_wired" })
+	})
+})
+
+/* a seconds column (mode: "timestamp"), a milliseconds one, and an ISO date kept as text */
+const event = sqliteTable("event", {
+	at_ms: integer("at_ms", { mode: "timestamp_ms" }),
+	at_s: integer("at_s", { mode: "timestamp" }),
+	day: text("day"),
+	id: integer("id").primaryKey(),
+})
+const events = createListQuerySchema({ filter: { at_ms: "date", at_s: "date", day: "date" }, sort: ["id"] })
+
+/** The ids `filter` selects from events at 1 s, 5 s and 9 s */
+async function eventIds(filter: string): Promise<number[]> {
+	const harness = libsqlMemory()
+	open.push(harness)
+	await harness.client
+		.executeMultiple(`CREATE TABLE event (id INTEGER PRIMARY KEY, at_s INTEGER, at_ms INTEGER, day TEXT);
+INSERT INTO event VALUES (1, 1, 1000, '1970-01-01'), (2, 5, 5000, '1970-01-01'), (3, 9, 9000, '1970-01-01');`)
+	const parsed = events.parse({ filter, limit: "100", order: "id.asc" })
+	const query = buildListQuery({ parsed, table: event })
+	const rows = await applyListQuery(harness.db.select({ id: event.id }).from(event).$dynamic(), query)
+	return rows.map((row) => row.id)
+}
+
+describe("date filters bind in the unit their column stores (B4)", () => {
+	it("compares epoch milliseconds with a seconds column and a milliseconds one alike", async () => {
+		expect(await eventIds("at_s.gt.2000")).toEqual([2, 3])
+		expect(await eventIds("at_ms.gt.2000")).toEqual([2, 3])
+		expect(await eventIds("at_s.lte.5000")).toEqual([1, 2])
+	})
+
+	it("refuses a date filter wired to a text column, which would compare text with a number", async () => {
+		await expect(eventIds("day.gt.2000")).rejects.toMatchObject({ errorKey: "filter_not_wired" })
+	})
+})

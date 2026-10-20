@@ -174,3 +174,11 @@ describe("validateFilter — in and nin take a list (S-M2)", () => {
 		expect(validateFilter("a.in.(5)", { a: "number" })?.valid).toBe(true)
 	})
 })
+
+describe("validateFilter — numbers that are not finite (Q-N1)", () => {
+	it("refuses a number too large to hold, which JavaScript reads as Infinity", () => {
+		expect(validateFilter("n.gt.1e999", { n: "number" })?.valid).toBe(false)
+		expect(validateFilter("n.gt.-1e999", { n: "number" })?.valid).toBe(false)
+		expect(validateFilter("n.gt.1e308", { n: "number" })?.valid).toBe(true)
+	})
+})

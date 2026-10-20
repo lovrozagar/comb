@@ -3,7 +3,7 @@
  * a quoted prefix phrase (`"term"*`), and identifiers go through quoteIdent.
  */
 import { type SQL, sql } from "drizzle-orm"
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core"
+import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 
 import { quoteIdent } from "./identifier.ts"
 
@@ -46,17 +46,25 @@ function buildFtsMatch(ftsTableName: string, query: string | null): SQL | null {
 	return terms.length === 0 ? null : sql`${ident(ftsTableName)} MATCH ${matchQuery(terms, "AND")}`
 }
 
-/** `<id> IN (SELECT <id> FROM <fts table> WHERE … MATCH ?)` over a single-name id column */
-function inMatches(ftsTableName: string, idColumn: string, query: string): SQL {
-	const id = ident(idColumn)
-	const table = ident(ftsTableName)
-	return sql`${id} IN (SELECT ${id} FROM ${table} WHERE ${table} MATCH ${query})`
+/**
+ * A table and the FTS5 table that indexes it by rowid (external content, `content_rowid` its
+ * rowid or its integer key)
+ */
+type FtsSource = { ftsTable: string; table: SQLiteTable }
+
+/**
+ * `<table>.rowid IN (SELECT rowid FROM <fts> WHERE <fts> MATCH ?)`: the rowid qualified by its
+ * table, so a join cannot make it ambiguous and a text id column never stands in for it
+ */
+function inMatches({ ftsTable, table }: FtsSource, query: string): SQL {
+	const fts = ident(ftsTable)
+	return sql`${table}.rowid IN (SELECT rowid FROM ${fts} WHERE ${fts} MATCH ${query})`
 }
 
-/** The rows whose FTS entry matches every term; null when the query has no usable term */
-function buildFtsWhere(ftsTableName: string, idColumn: string, query: string | null): SQL | null {
+/** The rows of `source.table` whose FTS entry matches every term; null when the query has no usable term */
+function buildFtsWhere(source: FtsSource, query: string | null): SQL | null {
 	const terms = ftsTerms(query)
-	return terms.length === 0 ? null : inMatches(ftsTableName, idColumn, matchQuery(terms, "AND"))
+	return terms.length === 0 ? null : inMatches(source, matchQuery(terms, "AND"))
 }
 
 /** `highlight()` of one FTS column, its marker tags bound */
@@ -70,9 +78,7 @@ type SpellfixDb = {
 	all: (query: SQL) => Promise<Array<SpellfixRow>>
 }
 
-type SpellfixSearch = {
-	ftsTable: string
-	idColumn: string
+type SpellfixSearch = FtsSource & {
 	/** editdist3 bound below which a word counts as a correction (default 300) */
 	maxEditDistance?: number
 	/** corrections taken per term (default 3) */
@@ -111,7 +117,7 @@ async function buildFtsWhereWithSpellfix(
 		if (term.length >= 3) variants.push(...(await corrections(db, term, search)))
 	}
 	const unique = [...new Set(variants.map((variant) => variant.toLowerCase()))]
-	return inMatches(search.ftsTable, search.idColumn, matchQuery(unique, "OR"))
+	return inMatches(search, matchQuery(unique, "OR"))
 }
 
 /**

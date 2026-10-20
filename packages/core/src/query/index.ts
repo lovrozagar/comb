@@ -11,7 +11,6 @@ export {
 	CURSOR_TIEBREAK_COLUMN,
 	cursorProblem,
 	decodeCursor,
-	DEFAULT_SORT,
 	effectiveNulls,
 	encodeCursor,
 	getPrimarySortDirection,

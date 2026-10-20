@@ -165,10 +165,22 @@ describe("buildListQuery — sort", () => {
 		expect(result.orderBy.length).toBeGreaterThanOrEqual(1)
 	})
 
-	it("uses default desc(created_at) sort when parsedSort is empty", () => {
+	it("orders by the id tiebreak alone when parsedSort is empty", () => {
 		const result = buildListQuery({ parsed: offsetPage, table: organization })
+		expect(result.orderBy.map((part) => dialect.sqlToQuery(part).sql)).toEqual(['"organization"."id" DESC NULLS FIRST'])
+	})
 
-		expect(result.orderBy.length).toBeGreaterThan(0)
+	it("refuses a cursor under a computed sort, which keyset cannot express", () => {
+		const cursor = createCursor({ id: "o1" }, [{ direction: "desc", field: "@relevance" }])
+		const parsed = {
+			...offsetPage,
+			cursor,
+			validated: true as const,
+			parsedSort: [{ direction: "desc" as const, field: "@relevance" }],
+		}
+		expect(() => buildListQuery({ computedSorts: { "@relevance": customSort }, parsed, table: organization })).toThrow(
+			expect.objectContaining({ errorKey: "cursor_pagination_unsupported" }),
+		)
 	})
 })
 
@@ -375,7 +387,8 @@ describe("applyListQuery", () => {
 			table: organization,
 		})
 		applyListQuery(query, built)
-		expect(calls).toEqual(["orderBy 2", "limit 3", "offset 2"])
+		/* an empty sort orders by the tiebreak id alone */
+		expect(calls).toEqual(["orderBy 1", "limit 3", "offset 2"])
 		applyListQuery(query, { ...built, where: sql`1` })
 		expect(calls.at(3)).toBe("where")
 	})

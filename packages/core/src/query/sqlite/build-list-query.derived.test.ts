@@ -96,12 +96,15 @@ describe("buildDerivedListQuery — ordering", () => {
 		expect(compile(result.orderBy[0]!).sql.toLowerCase()).toContain("desc")
 	})
 
-	it("ignores a sort field with no supplied column but keeps the id tiebreak", () => {
-		const result = buildDerivedListQuery({
-			...base,
-			parsed: parsed({ parsedSort: [{ direction: "asc", field: "ghost" }] }),
-		})
-		expect(result.orderBy).toHaveLength(1)
+	it("throws sort_not_wired for a sort field with no supplied column, own or inherited, as buildListQuery does", () => {
+		const ghost = parsed({ parsedSort: [{ direction: "asc", field: "ghost" }] })
+		expect(() => buildDerivedListQuery({ ...base, parsed: ghost })).toThrow(
+			expect.objectContaining({ errorKey: "sort_not_wired" }),
+		)
+		const inherited = Object.create({ ghost: base.idColumn }) as typeof base.sortColumns
+		expect(() => buildDerivedListQuery({ ...base, parsed: ghost, sortColumns: inherited })).toThrow(
+			expect.objectContaining({ errorKey: "sort_not_wired" }),
+		)
 	})
 })
 

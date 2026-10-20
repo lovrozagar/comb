@@ -270,3 +270,12 @@ describe("parseFilter — reserved characters in a bare value", () => {
 		expect(parseFilter('title.eq."("')?.root.conditions[0]?.value).toBe("(")
 	})
 })
+
+describe("parseFilter — a quoted list member (Q-N2)", () => {
+	it("is malformed when anything but a comma or the closing parenthesis follows it", () => {
+		expect(parseFilter('tag.in.("a"b)')).toBeNull()
+		expect(parseFilter('tag.in.("a" "b")')).toBeNull()
+		expect(parseFilter('tag.in.("a", "b")')?.root.conditions[0]?.value).toEqual(["a", "b"])
+		expect(parseFilter('tag.in.("a" )')?.root.conditions[0]?.value).toEqual(["a"])
+	})
+})

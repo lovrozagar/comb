@@ -114,6 +114,11 @@ class FilterParser {
 			const quoted = this.peek() === '"'
 			const value = this.readValue()
 			if (quoted || value !== "") values.push(value)
+			/* a quoted member ends at its quote: only a comma or the list's end may follow */
+			if (quoted && this.skipWhitespace() < this.input.length && this.peek() !== "," && this.peek() !== ")") {
+				this.malformed = true
+				return values
+			}
 			if (this.peek() === ",") this.pos++
 		}
 		this.expect(")")

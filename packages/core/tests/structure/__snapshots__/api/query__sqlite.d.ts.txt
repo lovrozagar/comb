@@ -3,13 +3,13 @@
  * @lovrozagar/comb/query/sqlite — SQLite-specific SQL generation.
  */
 export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryParsed, type ListQueryResult, } from "./build-list-query.ts";
-export { conditionToSQL, filterToSQL, sortToOrderBy } from "./executor.ts";
+export { conditionToSQL, filterToSQL } from "./executor.ts";
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts";
 export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts";
 export { patternToSQL } from "./pattern.ts";
 export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, type SpellfixDb, type SpellfixSearch, sanitizeFtsTerm, } from "./search.ts";
 export { likeSearch, type LikeSearchResolver } from "./search.ts";
-export { buildScalarJsonParts, jsonBool, jsonCol, jsonColAs, jsonNullable, type ScalarColDef, SQL_SORT_DIR, } from "./sql.ts";
+export { SQL_SORT_DIR } from "./sql.ts";
 export type { RelationConfig } from "./types.ts";
 
 // query/sqlite/build-list-query.d.ts
@@ -83,14 +83,8 @@ export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerive
  */
 import { type SQL } from "drizzle-orm";
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
-import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, FilterCondition, ListQueryCapabilities, SortField } from "../types.ts";
+import type { ComputedFilterResolver, FilterAST, FilterCondition } from "../types.ts";
 import type { RelationConfig } from "./types.ts";
-type SortToSQLConfig = {
-    capabilities: ListQueryCapabilities;
-    computedSorts?: Record<string, ComputedSortResolver> | undefined;
-    table: SQLiteTable;
-};
-declare function sortToOrderBy(sortFields: SortField[], config: SortToSQLConfig): SQL[];
 /** One condition on one column; null when the operator or value is not one this column can take */
 declare function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL | null;
 /**
@@ -103,7 +97,7 @@ type FilterToSQLConfig = {
     relations?: Record<string, RelationConfig> | undefined;
 };
 declare function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | null;
-export { conditionToSQL, filterToSQL, sortToOrderBy, type FilterToSQLConfig };
+export { conditionToSQL, filterToSQL, type FilterToSQLConfig };
 
 // query/sqlite/filter-sql.d.ts
 /**
@@ -184,7 +178,7 @@ export { patternToSQL };
  * a quoted prefix phrase (`"term"*`), and identifiers go through quoteIdent.
  */
 import { type SQL } from "drizzle-orm";
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
 /**
  * A search term with FTS5 syntax characters removed, or "" when nothing is left or it is a bare
  * boolean operator. Quotes stay: the phrase builder escapes them where it quotes the term.
@@ -192,8 +186,16 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 declare function sanitizeFtsTerm(term: string): string;
 /** `<fts table> MATCH ?`, every term required; null when the query has no usable term */
 declare function buildFtsMatch(ftsTableName: string, query: string | null): SQL | null;
-/** The rows whose FTS entry matches every term; null when the query has no usable term */
-declare function buildFtsWhere(ftsTableName: string, idColumn: string, query: string | null): SQL | null;
+/**
+ * A table and the FTS5 table that indexes it by rowid (external content, `content_rowid` its
+ * rowid or its integer key)
+ */
+type FtsSource = {
+    ftsTable: string;
+    table: SQLiteTable;
+};
+/** The rows of `source.table` whose FTS entry matches every term; null when the query has no usable term */
+declare function buildFtsWhere(source: FtsSource, query: string | null): SQL | null;
 /** `highlight()` of one FTS column, its marker tags bound */
 declare function buildFtsHighlight(ftsTableName: string, columnIndex: number, tags: {
     end: string;
@@ -205,9 +207,7 @@ type SpellfixRow = {
 type SpellfixDb = {
     all: (query: SQL) => Promise<Array<SpellfixRow>>;
 };
-type SpellfixSearch = {
-    ftsTable: string;
-    idColumn: string;
+type SpellfixSearch = FtsSource & {
     /** editdist3 bound below which a word counts as a correction (default 300) */
     maxEditDistance?: number;
     /** corrections taken per term (default 3) */
@@ -233,47 +233,29 @@ declare function likeSearch(column: SQLiteColumn): LikeSearchResolver;
 export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, likeSearch, type LikeSearchResolver, sanitizeFtsTerm, type SpellfixDb, type SpellfixSearch, };
 
 // query/sqlite/sql.d.ts
-/**
- * SQLite JSON column helpers for raw SQL query building.
- */
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
-/** JSON column with same API name as DB column */
-declare function jsonCol(col: SQLiteColumn, alias: string): string;
-/** JSON column with different API name than DB column */
-declare function jsonColAs(apiName: string, col: SQLiteColumn, alias: string): string;
-/** JSON boolean column (SQLite stores as 0/1) */
-declare function jsonBool(col: SQLiteColumn, alias: string): string;
-/** JSON nullable column with json() wrapper */
-declare function jsonNullable(col: SQLiteColumn, alias: string): string;
-/** Column definition for buildScalarJsonParts */
-type ScalarColDef = {
-    always?: boolean;
-    api: string;
-    col: SQLiteColumn;
-    type?: "bool" | "json";
-};
-/** Build JSON parts from column definitions */
-declare function buildScalarJsonParts(defs: ScalarColDef[], opts: {
-    alias: string;
-    cols: Record<string, boolean> | null;
-    includeAll: boolean;
-}): string[];
 declare const SQL_SORT_DIR: {
     readonly asc: "ASC";
     readonly desc: "DESC";
 };
-export { buildScalarJsonParts, jsonBool, jsonCol, jsonColAs, jsonNullable, type ScalarColDef, SQL_SORT_DIR };
+export { SQL_SORT_DIR };
 
 // query/sqlite/types.d.ts
 /**
  * SQLite-specific query types.
  */
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+/**
+ * A many-to-many relation a filter reaches through a join table: `through.throughSourceKey`
+ * references the main table's `sourceKey` (its primary key unless named), and
+ * `through.throughTargetKey` references `target.targetKey`. Every key is a column's property name.
+ */
 type RelationConfig = {
+    sourceKey?: string | undefined;
     target: SQLiteTable;
     targetKey: string;
     through: SQLiteTable;
-    throughKey: string;
+    throughSourceKey: string;
+    throughTargetKey: string;
 };
 export type { RelationConfig };
 

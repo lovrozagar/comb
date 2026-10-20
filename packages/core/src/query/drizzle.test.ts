@@ -2,7 +2,9 @@ import { getTableColumns, type SQL, sql } from "drizzle-orm"
 import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { CombError } from "../error.ts"
-import { createCursor, decodeCursor } from "./cursor.ts"
+import { createCursor, decodeCursor, encodeCursor, sortSignature } from "./cursor.ts"
+import { createListQuerySchema } from "./schema.ts"
+import { buildListQuery } from "./sqlite/build-list-query.ts"
 import { queryHelpers } from "./drizzle.ts"
 import { parseSelect } from "./fields.ts"
 import type { FilterAST, SortField } from "./types.ts"
@@ -381,12 +383,53 @@ describe("queryHelpers.paginate — count and the default sort", () => {
 		).toBeNull()
 	})
 
-	it("mints the next cursor under the default sort when the request named none", () => {
+	it("mints the next cursor under the tiebreak alone when the sort is empty, as listOptions orders", () => {
 		const rows = [
 			{ created_at: 2, id: "b" },
 			{ created_at: 1, id: "a" },
 		]
 		const next = queryHelpers.paginate(rows, { limit: 1, parsedSort: [] })[1].nextCursor
-		expect(decodeCursor(next)?.sort).toBe("created_at.desc.nullsfirst")
+		expect(decodeCursor(next)?.sort).toBe("")
+	})
+})
+
+describe("queryHelpers.listOptions — a cursor and an empty sort (B2, B3)", () => {
+	const item = sqliteTable("item", {
+		id: integer("id").primaryKey(),
+		seen_at: integer("seen_at", { mode: "timestamp_ms" }),
+	})
+
+	it("answers a forged cursor with a 400, as buildListQuery does, not a TypeError", () => {
+		const schema = createListQuerySchema({ sort: ["seen_at"] })
+		const signature = sortSignature([{ direction: "desc", field: "seen_at" }])
+		for (const forged of [
+			encodeCursor({ i: 2, s: signature, v: ["not-a-date"] }),
+			encodeCursor({ i: "two", s: signature, v: [new Date(0).toISOString()] }),
+		]) {
+			const parsed = schema.parse({ cursor: forged, order: "seen_at.desc" })
+			const where = queryHelpers.listOptions(parsed).where?.RAW as (table: unknown) => SQL
+			expect(() => where(item)).toThrow(expect.objectContaining({ errorKey: "invalid_cursor", status: 400 }))
+		}
+	})
+
+	it("pages a schema with an empty sort by the tiebreak alone, the same in listOptions and buildListQuery", () => {
+		const schema = createListQuerySchema({ sort: [] })
+		const parsed = schema.parse({ limit: "2" })
+		/* post has a created_at, which the old default sorted by in one place and not the other */
+		const ordered = queryHelpers
+			.listOptions(parsed)
+			.orderBy(post)
+			.map((by) => dialect.sqlToQuery(by).sql)
+		const query = buildListQuery({ parsed, table: post })
+		expect(ordered).toEqual(query.orderBy.map((by) => dialect.sqlToQuery(by as SQL).sql))
+		const rows = [
+			{ created_at: 30, id: 3 },
+			{ created_at: 20, id: 2 },
+			{ created_at: 10, id: 1 },
+		]
+		const next = queryHelpers.paginate(rows, parsed)[1].nextCursor as string
+		const page = schema.safeParse({ cursor: next, limit: "2" })
+		expect(page.success).toBe(true)
+		expect(() => queryHelpers.listOptions(page.data as typeof parsed)).not.toThrow()
 	})
 })

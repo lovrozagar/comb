@@ -1,5 +1,5 @@
 /**
- * conditionToSQL / filterToSQL / sortToOrderBy — the lowering of a parsed,
+ * conditionToSQL / filterToSQL — the lowering of a parsed,
  * user-supplied filter into SQL. Public API, and the surface where a filter
  * value could reach the query text, so the bindings are asserted, not just the
  * shape.
@@ -9,8 +9,8 @@ import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-co
 import { describe, expect, it } from "vitest"
 import { parseFilter } from "../filter.ts"
 import { CombError } from "../../error.ts"
-import { conditionToSQL, filterToSQL, sortToOrderBy } from "./executor.ts"
-import type { FilterAST, FilterCondition, ListQueryCapabilities } from "../types.ts"
+import { conditionToSQL, filterToSQL } from "./executor.ts"
+import type { FilterAST, FilterCondition } from "../types.ts"
 
 const post = sqliteTable("post", {
 	created_at: integer("created_at"),
@@ -29,19 +29,6 @@ const compile = (built: SQL | null) => {
 	return dialect.sqlToQuery(built)
 }
 
-function capabilities(overrides: Partial<ListQueryCapabilities> = {}): ListQueryCapabilities {
-	return {
-		computedFilterFields: {},
-		computedSortFields: new Set(),
-		filterFields: { created_at: "date", status: "enum", title: "string", view_count: "number" },
-		pagination: { defaultLimit: 20, maxLimit: 100 },
-		relationFilterFields: {},
-		searchFields: new Set(["title"]),
-		sortFields: new Set(["created_at", "title"]),
-		...overrides,
-	}
-}
-
 const cond = (field: string, operator: string, value: unknown): FilterCondition =>
 	({ field, operator, value }) as FilterCondition
 
@@ -54,10 +41,10 @@ describe("conditionToSQL", () => {
 		["eq", "draft", "= ?"],
 		["ne", "draft", "<> ?"],
 		["neq", "draft", "<> ?"],
-		["gt", 5, "> ?"],
-		["gte", 5, ">= ?"],
-		["lt", 5, "< ?"],
-		["lte", 5, "<= ?"],
+		["gt", "m", "> ?"],
+		["gte", "m", ">= ?"],
+		["lt", "m", "< ?"],
+		["lte", "m", "<= ?"],
 	]
 
 	for (const [operator, value, fragment] of cases) {
@@ -224,94 +211,41 @@ describe("filterToSQL — contains", () => {
 	})
 })
 
-describe("sortToOrderBy", () => {
-	const config = { capabilities: capabilities(), table: post }
-
-	it("returns nothing for no sort fields", () => {
-		expect(sortToOrderBy([], config)).toEqual([])
-	})
-
-	it("orders by a permitted field in both directions", () => {
-		const asc = sortToOrderBy([{ direction: "asc", field: "created_at" }], config)
-		expect(compile(asc[0]!).sql.toLowerCase()).toContain("asc")
-
-		const desc = sortToOrderBy([{ direction: "desc", field: "created_at" }], config)
-		expect(compile(desc[0]!).sql.toLowerCase()).toContain("desc")
-	})
-
-	it("preserves the order the fields were given in", () => {
-		const built = sortToOrderBy(
-			[
-				{ direction: "asc", field: "title" },
-				{ direction: "desc", field: "created_at" },
-			],
-			config,
-		)
-		expect(built).toHaveLength(2)
-		expect(compile(built[0]!).sql).toContain("title")
-		expect(compile(built[1]!).sql).toContain("created_at")
-	})
-})
-
-describe("sortToOrderBy — dropped and computed fields", () => {
-	const config = { capabilities: capabilities(), table: post }
-
-	it("drops a permitted field that is not a column, including a prototype name (Q-L3)", () => {
-		const permitted = {
-			capabilities: capabilities({ sortFields: new Set(["ghost", "constructor", "toString"]) }),
-			table: post,
-		}
-		expect(
-			sortToOrderBy(
-				[
-					{ direction: "asc", field: "ghost" },
-					{ direction: "asc", field: "constructor" },
-					{ direction: "desc", field: "toString" },
-				],
-				permitted,
-			),
-		).toEqual([])
-	})
-
-	it("drops a field the capabilities do not permit", () => {
-		expect(sortToOrderBy([{ direction: "asc", field: "view_count" }], config)).toEqual([])
-	})
-
-	it("routes a computed sort to its resolver and drops it when absent", () => {
-		const withResolver = sortToOrderBy([{ direction: "asc", field: "@popularity" }], {
-			capabilities: capabilities({ computedSortFields: new Set(["@popularity"]) }),
-			computedSorts: { "@popularity": () => post.view_count.getSQL() },
-			table: post,
-		})
-		expect(withResolver).toHaveLength(1)
-
-		const without = sortToOrderBy([{ direction: "asc", field: "@popularity" }], {
-			capabilities: capabilities({ computedSortFields: new Set(["@popularity"]) }),
-			table: post,
-		})
-		expect(without).toEqual([])
-	})
-})
-
 describe("filterToSQL — relation filters", () => {
 	/* post -> post_tag -> tag: filtering a post by a property of a tag it carries */
 	const tag = sqliteTable("tag", { id: text("id").primaryKey(), slug: text("slug") })
 	const postTag = sqliteTable("post_tag", { post_id: text("post_id"), tag_id: text("tag_id") })
 
 	const relations = {
-		tags: { target: tag, targetKey: "id", through: postTag, throughKey: "post_id" },
+		tags: { target: tag, targetKey: "id", through: postTag, throughSourceKey: "post_id", throughTargetKey: "tag_id" },
 	}
 
 	const config = { mainTable: post, relations }
 
-	it("lowers a relation filter to an EXISTS subquery over the join table", () => {
+	it("lowers a relation filter to an EXISTS subquery joining on the keys it names", () => {
 		const built = filterToSQL(ast([cond("tags.slug", "eq", "release")]), config)
 		const { params, sql } = compile(built)
-
-		expect(sql.toLowerCase()).toContain("exists")
-		expect(sql).toContain("post_tag")
-		expect(sql).toContain("tag")
+		expect(sql.replace(/\s+/g, " ")).toBe(
+			'EXISTS ( SELECT 1 FROM "post_tag" INNER JOIN "tag" ON "tag"."id" = "post_tag"."tag_id" WHERE "post_tag"."post_id" = "post"."id" AND "tag"."slug" = ? )',
+		)
 		expect(params).toEqual(["release"])
+	})
+})
+
+describe("filterToSQL — relation filters: keys and refusals", () => {
+	const tag = sqliteTable("tag", { id: text("id").primaryKey(), slug: text("slug") })
+	const postTag = sqliteTable("post_tag", { post_id: text("post_id"), tag_id: text("tag_id") })
+	const relations = {
+		tags: { target: tag, targetKey: "id", through: postTag, throughSourceKey: "post_id", throughTargetKey: "tag_id" },
+	}
+	const config = { mainTable: post, relations }
+
+	it("joins on the main table's named key, and refuses a main table without one", () => {
+		const bySlug = { tags: { ...relations.tags, sourceKey: "status" } }
+		const { sql } = compile(filterToSQL(ast([cond("tags.slug", "eq", "x")]), { mainTable: post, relations: bySlug }))
+		expect(sql).toContain('"post_tag"."post_id" = "post"."status"')
+		const keyless = sqliteTable("keyless", { a: text("a"), b: text("b") })
+		expect(() => filterToSQL(ast([cond("tags.slug", "eq", "x")]), { mainTable: keyless, relations })).toThrow(CombError)
 	})
 
 	it("binds the relation filter value rather than inlining it", () => {
@@ -349,5 +283,19 @@ describe("filterToSQL — relation filters", () => {
 		const { params, sql } = compile(built)
 		expect(sql.toLowerCase()).toContain("in (?, ?)")
 		expect(params).toEqual(["a", "b"])
+	})
+})
+
+describe("conditionToSQL — values and the column's type (B4)", () => {
+	const typed = sqliteTable("typed", { at: integer("at", { mode: "timestamp" }), name: text("name") })
+
+	it("binds a date field's milliseconds as a Date on a date column, which drizzle writes in seconds here", () => {
+		expect(compile(conditionToSQL(cond("at", "gt", 2000), typed.at)).params).toEqual([2])
+	})
+
+	it("refuses a number, or a list holding one, against a text column", () => {
+		expect(conditionToSQL(cond("name", "gt", 5), typed.name)).toBeNull()
+		expect(conditionToSQL(cond("name", "in", ["a", 1]), typed.name)).toBeNull()
+		expect(conditionToSQL(cond("name", "in", ["a", "b"]), typed.name)).not.toBeNull()
 	})
 })

@@ -5,7 +5,7 @@
  * Parsers, validators, Zod schemas, and pagination utilities.
  * For SQLite-specific SQL generation, use @lovrozagar/comb/query/sqlite.
  */
-export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, DEFAULT_SORT, effectiveNulls, encodeCursor, getPrimarySortDirection, readCursor, sortSignature, } from "./cursor.ts";
+export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, getPrimarySortDirection, readCursor, sortSignature, } from "./cursor.ts";
 export type { CursorPayload, DecodedCursor, PaginationMeta, PaginationOptions, PaginationQueryInput } from "./cursor.ts";
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
 export { buildColumns, buildRelationColumns, filterBySelect, getEntityColumns, getRelationSelection, hasRelation, hasScalarsRequested, parseSelect, } from "./fields.ts";
@@ -32,8 +32,6 @@ import type { SortDirection, SortField, SortNulls } from "./types.ts";
  * `validateTables()` rejects that shape rather than letting it fail silently.
  */
 declare const CURSOR_TIEBREAK_COLUMN = "id";
-/** Sort applied when a request names none and the caller supplied no default. */
-declare const DEFAULT_SORT: readonly SortField[];
 /**
  * Wire payload. `s` is the sort signature the cursor was minted under, `v` one
  * value per sort key in order, `i` the tiebreak id. A cursor is only valid for
@@ -91,7 +89,7 @@ declare function cursorProblem(cursor: string, parsedSort: readonly SortField[])
 declare function readCursor(cursor: string, parsedSort: readonly SortField[]): DecodedCursor;
 /** Get primary sort direction from parsed sort array, defaults to "desc" */
 declare function getPrimarySortDirection(parsedSort: readonly SortField[]): SortDirection;
-export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, DEFAULT_SORT, effectiveNulls, encodeCursor, getPrimarySortDirection, readCursor, sortSignature, type CursorId, type CursorPayload, type CursorValue, type DecodedCursor, type PaginationMeta, type PaginationOptions, type PaginationQueryInput, };
+export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, getPrimarySortDirection, readCursor, sortSignature, type CursorId, type CursorPayload, type CursorValue, type DecodedCursor, type PaginationMeta, type PaginationOptions, type PaginationQueryInput, };
 
 // query/drizzle.d.ts
 /**
