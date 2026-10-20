@@ -28,8 +28,11 @@ type FtsState = Map<string, FtsObject>
 
 /** The FTS table a trigger writes into, among `groups`; undefined when it writes into none */
 function writesInto(sql: string, groups: ReadonlySet<string>): string | undefined {
-	return [...groups].find((group) => new RegExp(String.raw`\bINTO ${group}\b`, "i").test(sql))
+	return [...groups].find((group) => new RegExp(String.raw`\bINTO [\`"[]?${group}(?![\w$])`, "i").test(sql))
 }
+
+/** `sql` with every quoted plain name bare, so DDL that differs only in quoting compares equal */
+const bare = (sql: string | undefined) => sql?.replace(/[`"[](\w+)[`"\]]/g, "$1")
 
 type Classified = { fts: false } | { fts: true; apply: (state: FtsState) => void }
 
@@ -95,7 +98,7 @@ function changedGroups(from: FtsState, to: FtsState): Set<string> {
 		const before = from.get(name)
 		const after = to.get(name)
 		/* the name came from one of the two maps, so one of them holds it */
-		if (before?.sql !== after?.sql) changed.add((before ?? (after as FtsObject)).group)
+		if (bare(before?.sql) !== bare(after?.sql)) changed.add((before ?? (after as FtsObject)).group)
 	}
 	return changed
 }
@@ -137,7 +140,7 @@ function ftsDelta({ from, plainDiff, to, toStatements }: FtsDelta): string {
 		.filter(([, object]) => affected.has(object.group))
 		/* triggers before the table they write into */
 		.sort(([, a], [, b]) => dropRank(a) - dropRank(b))
-		.map(([name, object]) => `DROP ${object.kind === "table" ? "TABLE" : "TRIGGER"} IF EXISTS ${name}`)
+		.map(([name, object]) => `DROP ${object.kind === "table" ? "TABLE" : "TRIGGER"} IF EXISTS "${name}"`)
 	const creates = toStatements.filter((statement) => {
 		const sql = normalizeSql(statement)
 		const name = CREATE_FTS_BARE.exec(sql)?.[1] ?? CREATE_TRIGGER.exec(sql)?.[1]
@@ -146,7 +149,7 @@ function ftsDelta({ from, plainDiff, to, toStatements }: FtsDelta): string {
 	})
 	const rebuilds = [...affected]
 		.filter((group) => to.get(group)?.kind === "table")
-		.map((group) => `INSERT INTO ${group}(${group}) VALUES ('rebuild')`)
+		.map((group) => `INSERT INTO "${group}"("${group}") VALUES ('rebuild')`)
 	return asSql([...drops, ...creates, ...rebuilds])
 }
 

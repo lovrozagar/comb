@@ -57,6 +57,12 @@ function validateFtsConfig(
 	}
 }
 
+/** An SQL identifier, double-quoted: a table or column may be named by a keyword (`order`, `group`) */
+const ident = (name: string) => `"${name.replaceAll('"', '""')}"`
+
+/** An SQL string literal */
+const literal = (text: string) => `'${text.replaceAll("'", "''")}'`
+
 /** Deduplicate columns preserving order */
 function dedup(columns: string[]): string[] {
 	const seen = new Set<string>()
@@ -68,6 +74,52 @@ function dedup(columns: string[]): string[] {
 		}
 	}
 	return result
+}
+
+/** One table's fts5 virtual table and the three triggers that keep it in step with the table */
+function groupLines(tableName: string, columns: string[], tokenizer: string): string[] {
+	const lines: string[] = []
+	const ftsTable = ident(`${tableName}_fts`)
+	const source = ident(tableName)
+	const colList = columns.map(ident).join(", ")
+	const trigger = (suffix: string) => ident(`${tableName}_fts_${suffix}`)
+
+	/* Virtual table */
+	lines.push(`CREATE VIRTUAL TABLE IF NOT EXISTS ${ftsTable} USING fts5(`)
+	lines.push(`\t${colList},`)
+	lines.push(`\tcontent=${literal(tableName)},`)
+	lines.push(`\tcontent_rowid='rowid',`)
+	lines.push(`\ttokenize=${literal(tokenizer)}`)
+	lines.push(`);`)
+	lines.push(``)
+
+	/* Column refs for triggers */
+	const newCols = columns.map((c) => `new.${ident(c)}`).join(", ")
+	const oldCols = columns.map((c) => `old.${ident(c)}`).join(", ")
+
+	/* AFTER INSERT */
+	lines.push(`CREATE TRIGGER IF NOT EXISTS ${trigger("ai")} AFTER INSERT ON ${source} BEGIN`)
+	lines.push(`\tINSERT INTO ${ftsTable}(rowid, ${colList})`)
+	lines.push(`\tVALUES (new.rowid, ${newCols});`)
+	lines.push(`END;`)
+	lines.push(``)
+
+	/* AFTER DELETE */
+	lines.push(`CREATE TRIGGER IF NOT EXISTS ${trigger("ad")} AFTER DELETE ON ${source} BEGIN`)
+	lines.push(`\tINSERT INTO ${ftsTable}(${ftsTable}, rowid, ${colList})`)
+	lines.push(`\tVALUES ('delete', old.rowid, ${oldCols});`)
+	lines.push(`END;`)
+	lines.push(``)
+
+	/* AFTER UPDATE */
+	lines.push(`CREATE TRIGGER IF NOT EXISTS ${trigger("au")} AFTER UPDATE ON ${source} BEGIN`)
+	lines.push(`\tINSERT INTO ${ftsTable}(${ftsTable}, rowid, ${colList})`)
+	lines.push(`\tVALUES ('delete', old.rowid, ${oldCols});`)
+	lines.push(`\tINSERT INTO ${ftsTable}(rowid, ${colList})`)
+	lines.push(`\tVALUES (new.rowid, ${newCols});`)
+	lines.push(`END;`)
+	lines.push(``)
+	return lines
 }
 
 /** Generate FTS5 SQL for all configured tables. Returns empty string if nothing to generate. */
@@ -82,51 +134,12 @@ function generateFtsSql(
 	validateFtsConfig(tables, ftsConfig, warn)
 
 	const lines: string[] = []
-
 	const tableMap = new Map(tables.map((t) => [t.sqlName, t]))
 	for (const [tableName, config] of entries) {
 		const table = tableMap.get(tableName) as TableMeta
 		/* triggers run in SQL, so they name the SQL columns */
 		const columns = dedup(config.columns.map((col) => (fieldOf(table, col) as FieldMeta).sqlName))
-		const tokenizer = config.tokenizer ?? DEFAULT_TOKENIZER
-		const ftsTable = `${tableName}_fts`
-		const colList = columns.join(", ")
-
-		/* Virtual table */
-		lines.push(`CREATE VIRTUAL TABLE IF NOT EXISTS ${ftsTable} USING fts5(`)
-		lines.push(`\t${colList},`)
-		lines.push(`\tcontent='${tableName}',`)
-		lines.push(`\tcontent_rowid='rowid',`)
-		lines.push(`\ttokenize='${tokenizer}'`)
-		lines.push(`);`)
-		lines.push(``)
-
-		/* Column refs for triggers */
-		const newCols = columns.map((c) => `new.${c}`).join(", ")
-		const oldCols = columns.map((c) => `old.${c}`).join(", ")
-
-		/* AFTER INSERT */
-		lines.push(`CREATE TRIGGER IF NOT EXISTS ${ftsTable}_ai AFTER INSERT ON ${tableName} BEGIN`)
-		lines.push(`\tINSERT INTO ${ftsTable}(rowid, ${colList})`)
-		lines.push(`\tVALUES (new.rowid, ${newCols});`)
-		lines.push(`END;`)
-		lines.push(``)
-
-		/* AFTER DELETE */
-		lines.push(`CREATE TRIGGER IF NOT EXISTS ${ftsTable}_ad AFTER DELETE ON ${tableName} BEGIN`)
-		lines.push(`\tINSERT INTO ${ftsTable}(${ftsTable}, rowid, ${colList})`)
-		lines.push(`\tVALUES ('delete', old.rowid, ${oldCols});`)
-		lines.push(`END;`)
-		lines.push(``)
-
-		/* AFTER UPDATE */
-		lines.push(`CREATE TRIGGER IF NOT EXISTS ${ftsTable}_au AFTER UPDATE ON ${tableName} BEGIN`)
-		lines.push(`\tINSERT INTO ${ftsTable}(${ftsTable}, rowid, ${colList})`)
-		lines.push(`\tVALUES ('delete', old.rowid, ${oldCols});`)
-		lines.push(`\tINSERT INTO ${ftsTable}(rowid, ${colList})`)
-		lines.push(`\tVALUES (new.rowid, ${newCols});`)
-		lines.push(`END;`)
-		lines.push(``)
+		lines.push(...groupLines(tableName, columns, config.tokenizer ?? DEFAULT_TOKENIZER))
 	}
 
 	return lines.join("\n")

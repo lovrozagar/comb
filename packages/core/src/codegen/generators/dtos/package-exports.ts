@@ -3,14 +3,13 @@ import fs from "node:fs"
 import path from "node:path"
 import { camelToKebab } from "../../utils/case.ts"
 import { writeJsonAtomic } from "../../utils/fs.ts"
-import { type ExportTarget, readExports } from "../../utils/package-json.ts"
-import { extractDbName } from "../../utils/ts-morph.ts"
+import { exportKey, type ExportTarget, ownsKey, readExports } from "../../utils/package-json.ts"
 import type { GeneratorContext } from "../context-types.ts"
 import type { DtosConfig } from "./dto-types.ts"
 
 export type PackageExportsInput = { config: DtosConfig; ctx: GeneratorContext; entities: string[] }
 
-/* the subpaths this generator owns and rewrites on every run */
+/* the subpaths this generator writes for a database, before any namespace */
 const owned = (key: string) => key.startsWith("./dtos/") || key === "./tables" || key === "./relations"
 
 const relativeTo = (from: string, to: string) => `./${path.relative(from, to)}`
@@ -28,10 +27,12 @@ function generatedExports(packageDir: string, { config, ctx, entities }: Package
 			`${outputDir}/${kebabName}/${prefix ? `${prefix}.${kebabName}.gen.ts` : "index.gen.ts"}`
 	}
 	const tablesPath = path.resolve(ctx.cwd, ctx.tablesPath)
-	const relations = `${prefix ?? `db.${extractDbName(ctx.tablesPath)}`}.relations.gen.ts`
-	exports["./relations"] = relativeTo(packageDir, path.join(path.dirname(tablesPath), relations))
+	/* the relations file where the relations generator writes it */
+	const relations =
+		config.relationsOutput ?? path.join(path.dirname(tablesPath), `db.${ctx.analysis.dbName}.relations.gen.ts`)
+	exports["./relations"] = relativeTo(packageDir, path.resolve(ctx.cwd, relations))
 	exports["./tables"] = relativeTo(packageDir, tablesPath)
-	return exports
+	return Object.fromEntries(Object.entries(exports).map(([key, value]) => [exportKey(ctx.exportNamespace, key), value]))
 }
 
 /**
@@ -42,7 +43,10 @@ export function updatePackageJson(packageJsonPath: string, input: PackageExports
 	const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as Record<string, unknown>
 	const existing = readExports(pkg)
 	const root: Record<string, ExportTarget> = existing["."] === undefined ? {} : { ".": existing["."] }
-	const kept = Object.fromEntries(Object.entries(existing).filter(([key]) => key !== "." && !owned(key)))
+	const namespace = input.ctx.exportNamespace
+	const kept = Object.fromEntries(
+		Object.entries(existing).filter(([key]) => key !== "." && !ownsKey(namespace, key, owned)),
+	)
 	pkg["exports"] = { ...root, ...generatedExports(path.dirname(packageJsonPath), input), ...kept }
 	writeJsonAtomic(packageJsonPath, pkg)
 	input.ctx.log(`Updated package.json exports with ${input.entities.length} entities`)

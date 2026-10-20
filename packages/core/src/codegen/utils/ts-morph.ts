@@ -2,7 +2,7 @@
  * Shared ts-morph helpers
  */
 import path from "node:path"
-import type { Node } from "ts-morph"
+import type { Node, SourceFile } from "ts-morph"
 import { Project, SyntaxKind } from "ts-morph"
 
 /** Create a ts-morph project optimized for code generation */
@@ -20,6 +20,27 @@ export function createProject(): Project {
  * Create a ts-morph project and add all .ts files from the tables file directory.
  * This follows re-exports from preset files.
  */
+/**
+ * The files whose tables belong to the database of `tablesPath`: the tables file and every file
+ * it re-exports from (`export * from`, `export { x } from`), followed through re-exports. The
+ * project loads the whole directory to resolve names, and other databases' tables files, or a
+ * test's fixture tables, live there too.
+ */
+export function tableSourceFiles(project: Project, tablesPath: string): SourceFile[] {
+	const first = project.getSourceFile(path.resolve(tablesPath))
+	const out: SourceFile[] = []
+	const queue = first === undefined ? [] : [first]
+	for (let file = queue.shift(); file !== undefined; file = queue.shift()) {
+		if (out.includes(file)) continue
+		out.push(file)
+		for (const declaration of file.getExportDeclarations()) {
+			const target = declaration.getModuleSpecifierSourceFile()
+			if (target !== undefined) queue.push(target)
+		}
+	}
+	return out
+}
+
 export function createProjectFromTablesDir(tablesPath: string): Project {
 	const project = createProject()
 	const srcDir = path.dirname(tablesPath)
@@ -63,6 +84,12 @@ export function extractDbName(filePath: string): string {
  * Get the import path for the tables file (without extension), relative to same directory.
  * e.g. test.db.core.tables.gen.ts -> ./test.db.core.tables.gen
  */
+/** The module specifier `fromFile` imports `target` by: relative, `./` or `../` first, no `.ts` */
+export function importPathFrom(fromFile: string, target: string): string {
+	const relative = path.relative(path.dirname(fromFile), target).replace(/\.ts$/, "").split(path.sep).join("/")
+	return relative.startsWith(".") ? relative : `./${relative}`
+}
+
 export function getTablesImportPath(tablesPath: string): string {
 	const basename = path.basename(tablesPath, ".ts")
 	return `./${basename}`

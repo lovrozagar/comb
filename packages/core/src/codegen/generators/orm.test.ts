@@ -24,7 +24,7 @@ afterEach(() => {
 function generate(config: Config, dbName = "core"): { content: string; logged: string[] } {
 	const tablesPath = path.join(tmpDir, `db.${dbName}.tables.ts`)
 	fs.writeFileSync(tablesPath, "")
-	const ctx = testContext([], { cwd: tmpDir, tablesPath })
+	const ctx = testContext([], { cwd: tmpDir, dbName, tablesPath })
 	generateOrm(ctx, { ...config, output: "orm.gen.ts" } as Parameters<typeof generateOrm>[1])
 	return { content: fs.readFileSync(path.join(tmpDir, "orm.gen.ts"), "utf-8"), logged: ctx.logged }
 }
@@ -107,7 +107,7 @@ describe("generateOrm — where relations are imported from", () => {
 			filePrefix: "app.db-core",
 			relationsOutput: "./src/custom.relations.gen.ts",
 		})
-		expect(content).toContain('import { relations } from "./custom.relations.gen"')
+		expect(content).toContain('import { relations } from "./src/custom.relations.gen"')
 	})
 })
 

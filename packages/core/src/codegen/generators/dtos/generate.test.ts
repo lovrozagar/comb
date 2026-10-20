@@ -100,6 +100,21 @@ describe("generateDtos — files and schemas", () => {
 		expect(content).toContain("export type UserDtoCreate =")
 		expect(content).toContain("export type UserDtoUpdate =")
 	})
+})
+
+describe("generateDtos — keys and tables", () => {
+	it("quotes a property key that is not an identifier (D6)", () => {
+		const { entity } = read(
+			generate(`
+import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
+const c = { id: () => text("id").primaryKey(), text: (name: string) => text(name) }
+export const member = createTable("member", { id: c.id(), "display-name": c.text("display_name") })
+`),
+			"member",
+		)
+		expect(entity).toContain(`\t"display-name": `)
+		expect(entity).not.toMatch(/^\tdisplay-name:/m)
+	})
 
 	it("handles multiple tables", () => {
 		const dtosDir = generate(`
@@ -131,14 +146,13 @@ describe("generateDtos — timestamps and optionality", () => {
 		expect(content).not.toMatch(/\tcreated_at: timestampSchema/)
 	})
 
-	it("makes id and nullable fields optional in create schema", () => {
+	it("leaves the generated id out of the create schema, and makes nullable fields optional (D9)", () => {
 		const { entity: content } = readUser()
-		/* id should be optional in create */
 		const createMatch = content.match(/userDtoCreateSchema[\s\S]*?^\}\)/m)
 		expect(createMatch).toBeTruthy()
 		const createBlock = createMatch?.[0] ?? ""
-		expect(createBlock).toContain("id:")
-		expect(createBlock).toContain(".optional()")
+		expect(createBlock).not.toMatch(/^\tid:/m)
+		expect(createBlock).toContain("name: _")
 	})
 
 	it("makes all fields optional in update schema", () => {
@@ -146,12 +160,15 @@ describe("generateDtos — timestamps and optionality", () => {
 		const updateMatch = content.match(/userDtoUpdateSchema[\s\S]*?^\}\)/m)
 		expect(updateMatch).toBeTruthy()
 		const updateBlock = updateMatch?.[0] ?? ""
-		/* Every field in update is optional, inline or through the shared constant it names */
-		const optionalShared = new Set([...shared.matchAll(/^export const (_z\d+) = .*\.optional\(\)/gm)].map((m) => m[1]))
+		/* Every field in update is optional, inline or through the shared or local constant it names */
+		const constants = `${shared}\n${content}`
+		const optionalShared = new Set(
+			[...constants.matchAll(/^(?:export )?const (_\w+) = .*\.optional\(\)/gm)].map((m) => m[1]),
+		)
 		const fieldLines = updateBlock.split("\n").filter((l) => /^\t\w+: /.test(l))
 		expect(fieldLines.length).toBeGreaterThan(0)
 		const notOptional = fieldLines.filter((line) => {
-			const ref = /^\t\w+: (_z\d+),$/.exec(line)?.[1]
+			const ref = /^\t\w+: (_\w+),$/.exec(line)?.[1]
 			return !line.includes(".optional()") && !(ref !== undefined && optionalShared.has(ref))
 		})
 		expect(notOptional).toEqual([])

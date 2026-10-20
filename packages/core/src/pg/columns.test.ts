@@ -1,6 +1,7 @@
 import { getTableColumns } from "drizzle-orm"
 import { pgTable } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "vitest"
+import * as z from "zod"
 import { c } from "./columns.ts"
 
 /* Build test tables — getTableColumns gives runtime Column objects with dataType */
@@ -8,7 +9,7 @@ const entityTable = pgTable("entity", {
 	active: c.boolean("active"),
 	age: c.integer("age"),
 	createdAt: c.createdAt("created_at"),
-	data: c.json("data"),
+	data: c.json("data", z.object({ n: z.number() })),
 	deletedAt: c.deletedAt("deleted_at"),
 	id: c.id("usr"),
 	name: c.text("name"),

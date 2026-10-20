@@ -5,10 +5,12 @@
 
 /* Base constraints shared across column types */
 type BaseConstraints = {
-	/** Field is auto-generated, optional in create, excluded from update */
+	/** Field is filled by comb or the database: generated create and update DTOs leave it out */
 	autogenerate?: boolean
 	/** Field cannot be mutated after creation */
 	nomutate?: boolean
+	/** Field is never read back: generated read DTOs, the meta stamp and the manifest leave it out */
+	private?: boolean
 	/**
 	 * This column scopes rows to a tenant.
 	 *

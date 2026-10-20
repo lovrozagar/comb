@@ -22,6 +22,7 @@ import { c as pg } from "../../src/pg/columns.ts"
 import { c } from "../../src/sqlite/columns.ts"
 
 const settings = z.object({ theme: z.enum(["light", "dark"]) })
+const payload = z.object({ n: z.number() })
 const STATUS = ["draft", "sent"] as const
 const now = sql`0`
 
@@ -71,7 +72,7 @@ const pgViaComb = pgTable("t", {
 	id: pg.id("tst"),
 	n: pg.integer("n"),
 	owner_id: pg.ref("owner_id"),
-	payload: pg.json<{ n: number }>("payload"),
+	payload: pg.json("payload", payload),
 	score: pg.real("score"),
 	seen_at: pg.timestamp("seen_at"),
 	status: pg.enum("status", STATUS),
@@ -102,3 +103,28 @@ const pgSerialViaComb = pgTable("s", { id: pg.serialId() })
 const pgSerialViaDrizzle = pgTable("s", { id: serial("id").primaryKey() })
 expectTypeOf<typeof pgSerialViaComb.$inferSelect>().toEqualTypeOf<typeof pgSerialViaDrizzle.$inferSelect>()
 expectTypeOf<typeof pgSerialViaComb.$inferInsert>().toEqualTypeOf<typeof pgSerialViaDrizzle.$inferInsert>()
+
+/* One tables file compiles under either dialect by swapping the import (D8, E-S4): every factory
+   takes the same arguments, constraints included. */
+type ParamsOf<T, K extends keyof T> = T[K] extends (...args: infer P) => unknown ? P : never
+type Factories = keyof typeof c
+expectTypeOf<{ [K in Factories]: ParamsOf<typeof pg, K> }>().toEqualTypeOf<{
+	[K in Factories]: ParamsOf<typeof c, K>
+}>()
+
+const sqliteAccount = sqliteTable("account", {
+	balance: c.integer("balance", { min: 0 }),
+	email: c.text("email", { email: true, max: 254 }),
+	id: c.id("acc"),
+	password_hash: c.text("password_hash", { private: true }),
+	settings: c.json("settings", settings, { maxBytes: 1024 }),
+})
+const pgAccount = pgTable("account", {
+	balance: pg.integer("balance", { min: 0 }),
+	email: pg.text("email", { email: true, max: 254 }),
+	id: pg.id("acc"),
+	password_hash: pg.text("password_hash", { private: true }),
+	settings: pg.json("settings", settings, { maxBytes: 1024 }),
+})
+expectTypeOf<typeof pgAccount.$inferSelect>().toEqualTypeOf<typeof sqliteAccount.$inferSelect>()
+expectTypeOf<typeof pgAccount.$inferInsert>().toEqualTypeOf<typeof sqliteAccount.$inferInsert>()

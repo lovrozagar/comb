@@ -23,5 +23,11 @@ export function toScreamingSnakeCase(str: string): string {
 	return str.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase()
 }
 
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
+
 /** A key as an object property: bare when it is an identifier, quoted otherwise */
-export const propertyName = (key: string): string => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key))
+export const propertyName = (key: string): string => (IDENTIFIER.test(key) ? key : JSON.stringify(key))
+
+/** `object`'s `key` as an expression: `object.key` for an identifier, `object["key"]` otherwise */
+export const propertyAccess = (object: string, key: string): string =>
+	IDENTIFIER.test(key) ? `${object}.${key}` : `${object}[${JSON.stringify(key)}]`

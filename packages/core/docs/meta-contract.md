@@ -420,7 +420,8 @@ export const postDtoReadSchema = z
 
 The generator hoists repeated expressions into `_shared` (`_str`, `_z4`, …); they are written
 inline here. `title` is nullable because the column is not `.notNull()`. Every generated column is
-also immutable: the update body has no key, no timestamps and no `deleted_at`. The create body takes
+also immutable: the update body has no key, no timestamps and no `deleted_at`. The create body
+leaves out every generated column too, so a client chooses no id and backdates no row, and takes
 `status` as optional, because the column has a database default.
 
 **3 — what honey reads**, via one `schema` policy entry:

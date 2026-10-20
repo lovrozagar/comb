@@ -2,7 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { findNearestPackageJson, readExports, setPackageExport } from "./package-json.ts"
+import { exportKey, findNearestPackageJson, ownsKey, readExports, setPackageExport } from "./package-json.ts"
 
 describe("readExports", () => {
 	it("reads the subpath map whichever form package.json writes it in", () => {
@@ -48,12 +48,35 @@ describe("findNearestPackageJson and setPackageExport", () => {
 	it("points the subpath at the file relative to the package, last, keeping the other exports", () => {
 		const file = path.join(dir, "package.json")
 		fs.writeFileSync(file, JSON.stringify({ exports: { "./entities": "./old.ts", "./x": "./x.ts" }, name: "app" }))
-		setPackageExport(file, "./entities", path.join(dir, "src", "e.gen.ts"))
+		setPackageExport(file, { subpath: "./entities" }, path.join(dir, "src", "e.gen.ts"))
 		const pkg = JSON.parse(fs.readFileSync(file, "utf8")) as { exports: Record<string, string>; name: string }
 		expect(Object.entries(pkg.exports)).toEqual([
 			["./x", "./x.ts"],
 			["./entities", "./src/e.gen.ts"],
 		])
 		expect(pkg.name).toBe("app")
+	})
+
+	it("writes under the database's namespace, dropping the unnamespaced key, and leaves another namespace alone", () => {
+		const file = path.join(dir, "package.json")
+		const before = { "./audit/entities": "./a.ts", "./entities": "./old.ts" }
+		fs.writeFileSync(file, JSON.stringify({ exports: before }))
+		setPackageExport(file, { namespace: "core", subpath: "./entities" }, path.join(dir, "c.gen.ts"))
+		const pkg = JSON.parse(fs.readFileSync(file, "utf8")) as { exports: Record<string, string> }
+		expect(pkg.exports).toEqual({ "./audit/entities": "./a.ts", "./core/entities": "./c.gen.ts" })
+	})
+})
+
+const dtos = (key: string) => key.startsWith("./dtos/")
+
+describe("exportKey and ownsKey", () => {
+	it("namespace a subpath, and own a database's keys in either form, never another database's", () => {
+		expect(exportKey(undefined, "./dtos/x")).toBe("./dtos/x")
+		expect(exportKey("core", "./dtos/x")).toBe("./core/dtos/x")
+		expect(ownsKey("core", "./core/dtos/x", dtos)).toBe(true)
+		expect(ownsKey("core", "./dtos/x", dtos)).toBe(true)
+		expect(ownsKey("core", "./audit/dtos/x", dtos)).toBe(false)
+		expect(ownsKey(undefined, "./audit/dtos/x", dtos)).toBe(false)
+		expect(ownsKey("core", "./core/tables", dtos)).toBe(false)
 	})
 })

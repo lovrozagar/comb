@@ -10,9 +10,9 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import { snakeToCamel } from "../utils/case.ts"
+import { propertyAccess, propertyName, snakeToCamel } from "../utils/case.ts"
 import { ensureDir, writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
-import { type ExportTarget, readExports } from "../utils/package-json.ts"
+import { exportKey, type ExportTarget, ownsKey, readExports } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
 type ColumnsConfig = {
@@ -69,7 +69,8 @@ export function generateColumns(ctx: GeneratorContext, config: ColumnsConfig): v
 	writeGenFile(tableNamesFile, generateTableNamesFile(entries), "comb")
 
 	const packageJsonPath = path.join(ctx.cwd, "package.json")
-	if (config.updatePackageJson && fs.existsSync(packageJsonPath)) updatePackageJson(packageJsonPath, entries, out)
+	if (config.updatePackageJson && fs.existsSync(packageJsonPath))
+		updatePackageJson(packageJsonPath, entries, { ...out, namespace: ctx.exportNamespace })
 
 	ctx.log(`Generated column refs for ${entries.length} tables`)
 }
@@ -83,7 +84,7 @@ function generateRqbColsFile(table: TableEntry): string {
 	]
 
 	for (const field of table.fields) {
-		lines.push(`\t${field}: true,`)
+		lines.push(`\t${propertyName(field)}: true,`)
 	}
 
 	lines.push("} as const")
@@ -103,7 +104,7 @@ function generateSqlColsFile(table: TableEntry, relativeTablesPath: string): str
 	]
 
 	for (const field of table.fields) {
-		lines.push(`\t${field}: ${table.varName}.${field},`)
+		lines.push(`\t${propertyName(field)}: ${propertyAccess(table.varName, field)},`)
 	}
 
 	lines.push("}")
@@ -133,7 +134,7 @@ const GENERATED_EXPORT = /^\.\/(?:table-cols|rqb-cols|sql-cols)\/|^\.\/table-nam
 function updatePackageJson(
 	packageJsonPath: string,
 	tables: TableEntry[],
-	{ absoluteOutputDir, filePrefix }: ColumnsOutput,
+	{ absoluteOutputDir, filePrefix, namespace }: ColumnsOutput & { namespace: string | undefined },
 ): void {
 	const content = fs.readFileSync(packageJsonPath, "utf-8")
 	const pkg = JSON.parse(content) as Record<string, unknown>
@@ -144,21 +145,23 @@ function updatePackageJson(
 	const existingExports = readExports(pkg)
 	const newExports: Record<string, ExportTarget> = {}
 
-	/* Preserve non-generated exports */
+	/* Preserve every export but this database's generated ones */
 	for (const [key, value] of Object.entries(existingExports)) {
-		if (!GENERATED_EXPORT.test(key)) newExports[key] = value
+		if (!ownsKey(namespace, key, (bare) => GENERATED_EXPORT.test(bare))) newExports[key] = value
 	}
 
 	/* Add rqb-cols and sql-cols per entity */
 	for (const table of tables) {
 		const colFileName = genFileName(filePrefix, table.varName)
-		newExports[`./rqb-cols/${table.varName}`] = `${relativeOutputDir}/rqb-cols/${table.varName}/${colFileName}`
-		newExports[`./sql-cols/${table.varName}`] = `${relativeOutputDir}/sql-cols/${table.varName}/${colFileName}`
+		newExports[exportKey(namespace, `./rqb-cols/${table.varName}`)] =
+			`${relativeOutputDir}/rqb-cols/${table.varName}/${colFileName}`
+		newExports[exportKey(namespace, `./sql-cols/${table.varName}`)] =
+			`${relativeOutputDir}/sql-cols/${table.varName}/${colFileName}`
 	}
 
 	/* Add table-names */
 	const tableNamesFileName = genFileName(filePrefix, "table-names")
-	newExports["./table-names"] = `${relativeOutputDir}/table-names/${tableNamesFileName}`
+	newExports[exportKey(namespace, "./table-names")] = `${relativeOutputDir}/table-names/${tableNamesFileName}`
 
 	pkg["exports"] = newExports
 

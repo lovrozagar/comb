@@ -80,8 +80,8 @@ describe("generateFtsSql — the virtual table", () => {
 			article_translation: { columns: ["title", "excerpt", "content", "keywords"] },
 		})
 
-		expect(sql).toContain("CREATE VIRTUAL TABLE IF NOT EXISTS article_translation_fts USING fts5(")
-		expect(sql).toContain("\ttitle, excerpt, content, keywords,")
+		expect(sql).toContain('CREATE VIRTUAL TABLE IF NOT EXISTS "article_translation_fts" USING fts5(')
+		expect(sql).toContain('\t"title", "excerpt", "content", "keywords",')
 		expect(sql).toContain("\tcontent='article_translation',")
 		expect(sql).toContain("\tcontent_rowid='rowid',")
 	})
@@ -107,7 +107,7 @@ describe("generateFtsSql — the virtual table", () => {
 			article_translation: { columns: ["keywords", "content", "title"] },
 		})
 
-		expect(sql).toContain("\tkeywords, content, title,")
+		expect(sql).toContain('\t"keywords", "content", "title",')
 	})
 
 	it("generates for multiple tables", () => {
@@ -141,9 +141,15 @@ describe("generateFtsSql — triggers", () => {
 			article_translation: { columns: ["title", "content"] },
 		})
 
-		expect(sql).toContain("CREATE TRIGGER IF NOT EXISTS article_translation_fts_ai AFTER INSERT ON article_translation")
-		expect(sql).toContain("CREATE TRIGGER IF NOT EXISTS article_translation_fts_ad AFTER DELETE ON article_translation")
-		expect(sql).toContain("CREATE TRIGGER IF NOT EXISTS article_translation_fts_au AFTER UPDATE ON article_translation")
+		expect(sql).toContain(
+			'CREATE TRIGGER IF NOT EXISTS "article_translation_fts_ai" AFTER INSERT ON "article_translation"',
+		)
+		expect(sql).toContain(
+			'CREATE TRIGGER IF NOT EXISTS "article_translation_fts_ad" AFTER DELETE ON "article_translation"',
+		)
+		expect(sql).toContain(
+			'CREATE TRIGGER IF NOT EXISTS "article_translation_fts_au" AFTER UPDATE ON "article_translation"',
+		)
 	})
 
 	it("insert trigger uses new.rowid and new.columns", () => {
@@ -151,8 +157,8 @@ describe("generateFtsSql — triggers", () => {
 			article_translation: { columns: ["title", "content"] },
 		})
 
-		expect(sql).toContain("INSERT INTO article_translation_fts(rowid, title, content)")
-		expect(sql).toContain("VALUES (new.rowid, new.title, new.content);")
+		expect(sql).toContain('INSERT INTO "article_translation_fts"(rowid, "title", "content")')
+		expect(sql).toContain('VALUES (new.rowid, new."title", new."content");')
 	})
 
 	it("delete trigger uses 'delete' command with old.columns", () => {
@@ -160,8 +166,8 @@ describe("generateFtsSql — triggers", () => {
 			article_translation: { columns: ["title", "content"] },
 		})
 
-		expect(sql).toContain("INSERT INTO article_translation_fts(article_translation_fts, rowid, title, content)")
-		expect(sql).toContain("VALUES ('delete', old.rowid, old.title, old.content);")
+		expect(sql).toContain('INSERT INTO "article_translation_fts"("article_translation_fts", rowid, "title", "content")')
+		expect(sql).toContain(`VALUES ('delete', old.rowid, old."title", old."content");`)
 	})
 
 	it("update trigger deletes old then inserts new", () => {
@@ -170,11 +176,11 @@ describe("generateFtsSql — triggers", () => {
 		})
 
 		const lines = sql.split("\n")
-		const updateTriggerStart = lines.findIndex((l) => l.includes("article_translation_fts_au AFTER UPDATE"))
+		const updateTriggerStart = lines.findIndex((l) => l.includes('"article_translation_fts_au" AFTER UPDATE'))
 		const triggerBody = lines.slice(updateTriggerStart, updateTriggerStart + 10).join("\n")
 
-		expect(triggerBody).toContain("VALUES ('delete', old.rowid, old.title);")
-		expect(triggerBody).toContain("VALUES (new.rowid, new.title);")
+		expect(triggerBody).toContain(`VALUES ('delete', old.rowid, old."title");`)
+		expect(triggerBody).toContain('VALUES (new.rowid, new."title");')
 	})
 })
 
@@ -199,8 +205,8 @@ describe("generateFtsSql — validation", () => {
 		const warned: string[] = []
 		const sql = ftsSql(tables, { article_translation: { columns: ["content", "title", "content"] } }, warned)
 
-		expect(sql).toContain("\tcontent, title,")
-		expect(sql).not.toContain("content, title, content,")
+		expect(sql).toContain('\t"content", "title",')
+		expect(sql).not.toContain('"content", "title", "content",')
 		expect(warned).toEqual(['  fts warning: duplicate column "content" in table "article_translation" — skipped'])
 	})
 

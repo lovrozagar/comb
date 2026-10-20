@@ -39,7 +39,7 @@ describe("generateOrm — compiles against installed drizzle-orm", () => {
 			fs.mkdirSync(dir)
 			fs.writeFileSync(path.join(dir, "db.core.tables.ts"), TABLES)
 			fs.writeFileSync(path.join(dir, "db.core.relations.gen.ts"), RELATIONS)
-			generateOrm(testContext([], { cwd: dir, tablesPath: path.join(dir, "db.core.tables.ts") }), {
+			generateOrm(testContext([], { cwd: dir, dbName: "core", tablesPath: path.join(dir, "db.core.tables.ts") }), {
 				dialect: "sqlite",
 				driver,
 				output: path.join(dir, "orm.gen.ts"),

@@ -9,7 +9,7 @@ import { parseTable } from "./analyze-table.ts"
 import type { AnalysisResult, ImportsMeta, TableMeta } from "./analyzer-types.ts"
 import { isTableDefinition, tableBuilders } from "./utils/table-builders.ts"
 import { buildIdentifierValueMap } from "./utils/constraint-text.ts"
-import { createProjectFromTablesDir, extractDbName, getTablesImportPath } from "./utils/ts-morph.ts"
+import { createProjectFromTablesDir, extractDbName, getTablesImportPath, tableSourceFiles } from "./utils/ts-morph.ts"
 
 /** Every named import across the project, by local name, with the module it comes from. */
 function collectImports(project: Project): ImportsMeta {
@@ -28,10 +28,10 @@ function collectImports(project: Project): ImportsMeta {
 	return imports
 }
 
-/** Every table the project's files declare. */
-function collectTables(project: Project, imports: ImportsMeta): TableMeta[] {
+/** Every table the tables file declares, itself or through a file it re-exports. */
+function collectTables(project: Project, tablesPath: string, imports: ImportsMeta): TableMeta[] {
 	const tables: TableMeta[] = []
-	for (const file of project.getSourceFiles()) {
+	for (const file of tableSourceFiles(project, tablesPath)) {
 		const builders = tableBuilders(file)
 		for (const statement of file.getVariableStatements()) {
 			const declaration = statement.getDeclarations()[0]
@@ -56,7 +56,7 @@ function analyze(tablesPath: string, cwd?: string): AnalysisResult {
 	return {
 		dbName: extractDbName(tablesPath),
 		imports,
-		tables: collectTables(project, imports),
+		tables: collectTables(project, tablesPath, imports),
 		tablesImportPath: getTablesImportPath(tablesPath),
 	}
 }

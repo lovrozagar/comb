@@ -96,8 +96,8 @@ describeAtlas("atlas migrate diff with FTS5 tables (S-12)", () => {
 		})
 		expect(result.synced).toBe(false)
 		const sql = fs.readFileSync(result.files[0] as string, "utf8")
-		expect(sql).toMatch(/DROP TABLE IF EXISTS items_fts/)
-		expect(sql).toMatch(/INSERT INTO items_fts\(items_fts\) VALUES \('rebuild'\)/)
+		expect(sql).toMatch(/DROP TABLE IF EXISTS "items_fts"/)
+		expect(sql).toMatch(/INSERT INTO "items_fts"\("items_fts"\) VALUES \('rebuild'\)/)
 		expect(await search(dir, "light")).toEqual(["2"])
 	})
 

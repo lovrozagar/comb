@@ -5,7 +5,7 @@
  */
 import path from "node:path"
 import { writeGenFile } from "../utils/fs.ts"
-import { extractDbName, getTablesImportPath } from "../utils/ts-morph.ts"
+import { importPathFrom } from "../utils/ts-morph.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
 type OrmDialect = "sqlite" | "postgres"
@@ -200,26 +200,26 @@ function rendererFor({ dialect, driver }: OrmConfig): (n: OrmNames) => string {
 	throw new Error(`Unsupported dialect: ${String(dialect)}`)
 }
 
-/** Where relations come from: the configured relations file, the prefixed name, or the tables file's sibling */
-function relationsImportOf(config: OrmConfig, tablesImport: string): string {
-	if (config.relationsOutput) return `./${path.basename(config.relationsOutput, ".ts")}`
-	if (config.filePrefix) return `./${config.filePrefix}.relations.gen`
-	return tablesImport.replace(/\.tables(\.gen)?$/, ".relations.gen")
+/** Where relations come from: the configured relations file, else the prefixed name beside the client */
+function relationsFileOf(config: OrmConfig, outputPath: string, dbName: string): string {
+	if (config.relationsOutput) return config.relationsOutput
+	return path.join(path.dirname(outputPath), `${config.filePrefix ?? `db.${dbName}`}.relations.gen.ts`)
 }
 
 /** Generate ORM client file based on config */
 export function generateOrm(ctx: GeneratorContext, config: OrmConfig): void {
 	const render = rendererFor(config)
-	const dbName = extractDbName(ctx.tablesPath)
-	const tablesImport = getTablesImportPath(ctx.tablesPath)
+	const { dbName } = ctx.analysis
+	const outputPath = path.resolve(ctx.cwd, config.output)
+	/* each import runs from where the client is written */
+	const tablesImport = importPathFrom(outputPath, path.resolve(ctx.cwd, ctx.tablesPath))
 	const names: OrmNames = {
 		dbName,
 		pascal: dbName.charAt(0).toUpperCase() + dbName.slice(1),
-		relationsImport: relationsImportOf(config, tablesImport),
+		relationsImport: importPathFrom(outputPath, path.resolve(ctx.cwd, relationsFileOf(config, outputPath, dbName))),
 		schemaImport: `${dbName}DbSchema`,
 		tablesImport,
 	}
-	const outputPath = path.resolve(ctx.cwd, config.output)
 	writeGenFile(outputPath, render(names), "comb")
 	ctx.log(`Generated ORM client: ${outputPath}`)
 }

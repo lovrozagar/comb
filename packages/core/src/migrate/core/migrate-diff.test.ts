@@ -166,7 +166,7 @@ describe("generateIncrementalMigration — FTS kept out of what atlas sees (S-12
 		expect(files[0]).toMatch(/\/\d{14}_add_b\.sql$/)
 		const sql = readFileSync(files[0] as string, "utf8")
 		expect(sql).toMatch(/^CREATE VIRTUAL TABLE IF NOT EXISTS items_fts/)
-		expect(sql).toMatch(/INSERT INTO items_fts\(items_fts\) VALUES \('rebuild'\);\n$/)
+		expect(sql).toMatch(/INSERT INTO "items_fts"\("items_fts"\) VALUES \('rebuild'\);\n$/)
 		expect(readFileSync(join(dir, "atlas.sum"), "utf8")).toBe(sumOf(dir))
 	})
 

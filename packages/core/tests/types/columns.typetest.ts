@@ -10,6 +10,7 @@ import { c as pg } from "../../src/pg/columns.ts"
 import { c } from "../../src/sqlite/columns.ts"
 
 const settings = z.object({ theme: z.enum(["light", "dark"]) })
+const payload = z.object({ n: z.number() })
 
 const post = sqliteTable("post", {
 	active: c.boolean("active"),
@@ -37,7 +38,7 @@ expectTypeOf<NewPost>().toHaveProperty("created_at").toEqualTypeOf<number | unde
 const row = pgTable("row", {
 	created_at: pg.createdAt("created_at"),
 	id: pg.serialId(),
-	payload: pg.json<{ n: number }>("payload"),
+	payload: pg.json("payload", payload),
 	status: pg.enum("status", ["a", "b"] as const),
 })
 type Row = typeof row.$inferSelect

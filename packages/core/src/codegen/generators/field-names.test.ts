@@ -108,6 +108,11 @@ describe("generateFieldNames — names and labels", () => {
 		expect(content).toContain('id: "Id"')
 	})
 
+	it("quotes a key that is not an identifier (D6)", () => {
+		const content = generate([table("member", ["display-name", "id"])])
+		expect(content).toContain(`\t"display-name": "Display-name",`)
+	})
+
 	it("marks entries whose label was altered by suffix stripping", () => {
 		const content = generate([table("post", ["author_id", "title"])])
 		expect(content).toContain("/* was author_id */")

@@ -5,6 +5,8 @@
  * Builds defineRelations graph from TableMeta FK data.
  */
 import path from "node:path"
+import { propertyAccess } from "../utils/case.ts"
+import { importPathFrom } from "../utils/ts-morph.ts"
 import pluralize from "pluralize"
 import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile } from "../utils/fs.ts"
@@ -20,30 +22,17 @@ function toCamelCase(s: string): string {
 }
 
 /**
- * Derive r.one relation name from FK column and referenced table.
- *
- * Pattern: if column is exactly `{refTable}_id`, name = camelCase(refTable).
- * If column is `{prefix}_{refTable}_id`, name = camelCase(prefix).
- * Otherwise fall back to stripping `_id` suffix and camelCasing.
+ * The r.one name of a foreign key, read from its SQL column: `customer_id` or `customerId` gives
+ * `customer`, `invited_by_user_id` toward `user` gives `invitedBy`. `Id` is stripped only at a word
+ * boundary, so `rapid` stays `rapid`. A name one of the table's columns holds gets `Relation`
+ * appended, since a relation and a column of one name collide in drizzle.
  */
-function deriveOneName(column: string, refTable: string): string {
-	const withoutId = column.replace(/_id$/, "")
-
-	/* exact match: customer_id -> customer */
-	if (withoutId === refTable) {
-		return toCamelCase(refTable)
-	}
-
-	/* prefix match: invited_by_user_id with refTable=user -> invitedBy */
-	if (withoutId.endsWith(`_${refTable}`)) {
-		const prefix = withoutId.slice(0, -(refTable.length + 1))
-		if (prefix.length > 0) {
-			return toCamelCase(prefix)
-		}
-	}
-
-	/* fallback: just camelCase the column without _id */
-	return toCamelCase(withoutId)
+function deriveOneName(sqlColumn: string, refTable: string, columns: ReadonlySet<string>): string {
+	const base = toCamelCase(sqlColumn.replace(/_id$/, "").replace(/([a-z0-9])Id$/, "$1"))
+	const ref = `${refTable.charAt(0).toUpperCase()}${refTable.slice(1)}`
+	/* invitedByUser toward user: the prefix names the role */
+	const name = base !== refTable && base.endsWith(ref) && base.length > ref.length ? base.slice(0, -ref.length) : base
+	return columns.has(name) ? `${name}Relation` : name
 }
 
 /** Derive r.many relation name: camelCase + pluralize the source table */
@@ -68,11 +57,12 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
 function buildGraph(tables: TableMeta[]): Graph {
 	const graph: Graph = { manys: new Map(), ones: new Map() }
 	for (const table of tables) {
-		for (const { foreignKey: fk } of table.fields) {
+		const columns = new Set(table.fields.map((field) => field.name))
+		for (const { foreignKey: fk, sqlName } of table.fields) {
 			if (!fk) continue
 			const one = {
 				column: fk.column,
-				name: deriveOneName(fk.column, fk.refTable),
+				name: deriveOneName(sqlName, fk.refTable, columns),
 				refColumn: fk.refColumn,
 				refTable: fk.refTable,
 			}
@@ -108,16 +98,16 @@ function entryLines(tableName: string, entry: RelationEntry): string[] {
 		const { column, name, refColumn, refTable } = entry.rel
 		return [
 			`\t\t${name}: r.one.${refTable}({`,
-			`\t\t\tfrom: r.${tableName}.${column},`,
-			`\t\t\tto: r.${refTable}.${refColumn},`,
+			`\t\t\tfrom: ${propertyAccess(`r.${tableName}`, column)},`,
+			`\t\t\tto: ${propertyAccess(`r.${refTable}`, refColumn)},`,
 			"\t\t}),",
 		]
 	}
 	const { name, sourceColumn, sourceTable, targetColumn } = entry.rel
 	return [
 		`\t\t${name}: r.many.${sourceTable}({`,
-		`\t\t\tfrom: r.${tableName}.${targetColumn},`,
-		`\t\t\tto: r.${sourceTable}.${sourceColumn},`,
+		`\t\t\tfrom: ${propertyAccess(`r.${tableName}`, targetColumn)},`,
+		`\t\t\tto: ${propertyAccess(`r.${sourceTable}`, sourceColumn)},`,
 		"\t\t}),",
 	]
 }
@@ -142,10 +132,11 @@ export function generateRelations(ctx: GeneratorContext, config: RelationsConfig
 	const graph = buildGraph(tables)
 	const sortedTableNames = [...new Set(tables.map((t) => t.varName))].sort()
 
-	/* the tables import follows the actual file name (handles both .gen.ts and .ts) */
+	/* the tables import runs from where the relations file is written to the tables file */
+	const tablesImport = importPathFrom(outputPath, path.resolve(ctx.cwd, ctx.tablesPath))
 	const lines = [
 		`import { defineRelations } from "drizzle-orm"`,
-		`import * as schema from "./${path.basename(ctx.tablesPath, ".ts")}"`,
+		`import * as schema from "${tablesImport}"`,
 		"",
 		"export const relations = defineRelations(schema, (r) => ({",
 		...sortedTableNames.flatMap((tableName) => tableLines(tableName, graph)),

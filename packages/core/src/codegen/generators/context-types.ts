@@ -7,6 +7,11 @@ export type GeneratorContext = {
 	cwd: string
 	/** a progress line for the person running codegen */
 	log: (line: string) => void
+	/**
+	 * The database's namespace in its package.json exports (`./<namespace>/…`), set when one
+	 * package exports several databases; undefined when it exports this one alone
+	 */
+	exportNamespace?: string | undefined
 	/** the analyzed tables file */
 	tablesPath: string
 	/** a line the person running codegen should act on */

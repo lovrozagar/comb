@@ -93,6 +93,14 @@ function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"] {
 const KEY_FILLED = /^\s*c\.(?:id|serialId)\s*\(|autoIncrement\s*:\s*true|\.(?:default|\$defaultFn|\$default)\s*\(/
 
 /**
+ * Whether comb or the database fills `field`: an `autogenerate` column, or a key that c.id,
+ * c.serialId, autoIncrement or a default fills
+ */
+function isGenerated(field: FieldMeta): boolean {
+	return field.constraints.autogenerate || (field.isPrimaryKey && KEY_FILLED.test(field.raw))
+}
+
+/**
  * Build entity facts, or null when the table has no single identity to publish.
  *
  * A composite primary key has no one identifier, and picking a column would be
@@ -110,7 +118,7 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 	/* a private column is absent from every published list (docs/meta-contract.md §8) */
 	const published = table.fields.filter((f) => !f.constraints.private)
 	const generated = published.filter((f) => f.constraints.autogenerate).map((f) => f.name)
-	if (KEY_FILLED.test(primaryKey.raw) && !generated.includes(primaryKey.name)) generated.unshift(primaryKey.name)
+	if (isGenerated(primaryKey) && !generated.includes(primaryKey.name)) generated.unshift(primaryKey.name)
 
 	/* Prefer the field set the generator actually emitted: whatever is missing
 	   from the update body is, by construction, immutable. Falling back to the
@@ -132,4 +140,4 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 	}
 }
 
-export { deriveEntityMeta, isExcludedFromUpdate, publishedUniqueIndexes }
+export { deriveEntityMeta, isExcludedFromUpdate, isGenerated, publishedUniqueIndexes }

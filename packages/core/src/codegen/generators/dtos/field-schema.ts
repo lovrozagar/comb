@@ -1,6 +1,7 @@
 /** The Zod expression one column gets in each of the read, readPartial, create and update DTOs. */
 import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { FieldConstraints } from "../../annotations.ts"
+import { isGenerated } from "../../entity-meta.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { generateExampleMeta } from "./example-meta.ts"
 
@@ -32,13 +33,19 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 	if (!field.jsonSchemaName) throw new Error(`c.json() must have schema as second parameter: ${field.raw}`)
 	if (annotations.maxBytes === null || !isMutative(schemaType)) return field.jsonSchemaName
 	const limit = annotations.maxBytes
-	return `${field.jsonSchemaName}.refine((val) => !val || JSON.stringify(val).length <= ${limit}, { message: "JSON exceeds ${limit} characters when serialized" })`
+	return `${field.jsonSchemaName}.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
 }
 
-/* a reference is set once, at creation, so it has no place in an update body */
+// lookup-table: the column builders whose values are numbers, comb's and drizzle's
+const NUMERIC =
+	/^\s*(?:c\.)?(?:integer|serialId|serial|bigserial|smallint|bigint|int|real|doublePrecision|numeric)\s*[<(]/
+
+/* a reference is set once, at creation, so it has no place in an update body; a numeric one
+ * takes the number rules, the rest the id string */
 function foreignKeyBase({ field, schemaType }: Build): Built {
 	if (field.foreignKey === null && !/c\.ref[<(]/.test(field.raw)) return undefined
-	return schemaType === "update" ? null : "z.string().min(1).max(48)"
+	if (schemaType === "update") return null
+	return NUMERIC.test(field.raw) ? undefined : "z.string().min(1).max(48)"
 }
 
 function stringKind(annotations: FieldConstraints, mutative: boolean): string {
@@ -92,12 +99,13 @@ function textBase(build: Build): Built {
 	return stringKind(annotations, mutative) + transforms(annotations, mutative) + textBounds(build)
 }
 
-function numberBase({ annotations, field }: Build): Built {
+function numberBase({ annotations, field, schemaType }: Build): Built {
 	if (/c\.(createdAt|updatedAt|deletedAt|timestamp)[<(]/.test(field.raw)) return "timestampSchema"
 	const { max, min } = annotations
 	if (/c\.(integer|serialId)[<(]/.test(field.raw)) {
-		/* an unbounded integer is a non-negative count up to what a JS number holds exactly */
-		const floor = min === null ? ".nonnegative()" : `.min(${min})`
+		/* an unbounded integer written is a non-negative count; one read is whatever the column holds,
+		 * and either stays within what a JS number holds exactly */
+		const floor = min !== null ? `.min(${min})` : isMutative(schemaType) ? ".nonnegative()" : ""
 		return `z.number().int()${floor}.max(${max ?? "Number.MAX_SAFE_INTEGER"})`
 	}
 	if (/c\.boolean[<(]/.test(field.raw)) return "z.boolean()"
@@ -137,10 +145,12 @@ function finish(field: FieldMeta, schemaType: SchemaType, base: string): string 
 
 /**
  * The Zod expression for `field` in a `schemaType` DTO, or null when the column has no place in
- * it: a private column is never read back, a reference is never updated.
+ * it: a private column is never read back, a reference is never updated, and what comb or the
+ * database generates is never written.
  */
 export function generateFieldSchema(field: FieldMeta, schemaType: SchemaType, imports: ImportsMeta): string | null {
 	if (field.constraints.private && isRead(schemaType)) return null
+	if (isMutative(schemaType) && isGenerated(field)) return null
 	const build: Build = { annotations: field.constraints, field, imports, schemaType }
 	for (const builder of BUILDERS) {
 		const base = builder(build)

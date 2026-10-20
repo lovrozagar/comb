@@ -63,7 +63,7 @@ describe("configuredFtsSql", () => {
 			'export default { databases: { core: { tables: "./db.core.tables.ts", fts: { post: { columns: ["title"] } } } } }\n',
 		)
 		expect(await configuredFtsSql(dir, "core", makeIo(dir))).toMatch(
-			/CREATE VIRTUAL TABLE IF NOT EXISTS post_fts USING fts5/,
+			/CREATE VIRTUAL TABLE IF NOT EXISTS "post_fts" USING fts5/,
 		)
 	})
 })

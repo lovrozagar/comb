@@ -9,7 +9,7 @@ import { CURSOR_TIEBREAK_COLUMN } from "../../query/cursor.ts"
 import { parseTable } from "../analyze-table.ts"
 import type { FieldMeta, ImportsMeta, TableMeta } from "../analyzer-types.ts"
 import { isTableDefinition, tableBuilders } from "./table-builders.ts"
-import { createProjectFromTablesDir } from "./ts-morph.ts"
+import { createProjectFromTablesDir, tableSourceFiles } from "./ts-morph.ts"
 
 type ValidationResult = {
 	errors: string[]
@@ -40,10 +40,10 @@ function declaredTable(declaration: VariableDeclaration, report: ValidationResul
 	}
 }
 
-/** Every table the project declares. */
+/** Every table the tables file declares, itself or through a file it re-exports. */
 function declaredTables(tablesPath: string, report: ValidationResult): Declared[] {
 	const declared: Declared[] = []
-	for (const file of createProjectFromTablesDir(tablesPath).getSourceFiles()) {
+	for (const file of tableSourceFiles(createProjectFromTablesDir(tablesPath), tablesPath)) {
 		const builders = tableBuilders(file)
 		for (const statement of file.getVariableStatements()) {
 			const declaration = statement.getDeclarations()[0]

@@ -1,22 +1,30 @@
 // pg/columns.d.ts
 import { type PgBigInt53Builder, type PgBooleanBuilder, type PgDoublePrecisionBuilder, type PgIntegerBuilder, type PgJsonbBuilder, type PgSerialBuilder, type PgTextBuilder, type Set$Type, type SetHasDefault, type SetIsPrimaryKey, type SetNotNull } from "drizzle-orm/pg-core";
-import type { EnumStates, TextConstraints } from "../sqlite/constraints.ts";
+import type { EnumStates, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "../sqlite/constraints.ts";
+import type * as z from "zod";
 type Text = PgTextBuilder<[string, ...string[]]>;
-/** What each `c` factory returns: drizzle's own builder types, spelled out for isolated declarations */
+type CreatedAtName = "createdAt" | "created_at";
+type DeletedAtName = "deletedAt" | "deleted_at";
+type UpdatedAtName = "updatedAt" | "updated_at";
+/**
+ * What each `c` factory returns: drizzle's own builder types, spelled out for isolated
+ * declarations. The parameters are SQLite's, so one tables file compiles under either dialect;
+ * the constraints are read by codegen and erased at runtime.
+ */
 type PgColumns = {
     boolean: (name: string) => PgBooleanBuilder;
-    createdAt: (name: "createdAt" | "created_at") => SetHasDefault<SetNotNull<PgBigInt53Builder>>;
-    deletedAt: (name: "deletedAt" | "deleted_at") => PgBigInt53Builder;
+    createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => SetHasDefault<SetNotNull<PgBigInt53Builder>>;
+    deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => PgBigInt53Builder;
     enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) => Set$Type<Text, T[number]>;
     id: (_prefix: string) => SetIsPrimaryKey<Text>;
-    integer: (name: string) => PgIntegerBuilder;
-    json: <T>(name: string) => Set$Type<PgJsonbBuilder, T>;
-    real: (name: string) => PgDoublePrecisionBuilder;
+    integer: (name: string, _constraints?: IntegerConstraints) => PgIntegerBuilder;
+    json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) => Set$Type<PgJsonbBuilder, z.infer<TSchema>>;
+    real: (name: string, _constraints?: IntegerConstraints) => PgDoublePrecisionBuilder;
     ref: (name: string, _constraints?: TextConstraints) => Text;
     serialId: () => SetIsPrimaryKey<PgSerialBuilder>;
-    text: (name: string, _length?: number) => Text;
-    timestamp: (name: string) => PgBigInt53Builder;
-    updatedAt: (name: "updatedAt" | "updated_at") => SetHasDefault<SetHasDefault<SetNotNull<PgBigInt53Builder>>>;
+    text: (name: string, _constraints?: TextConstraints) => Text;
+    timestamp: (name: string, _constraints?: TimestampConstraints) => PgBigInt53Builder;
+    updatedAt: (name: UpdatedAtName, _constraints?: TimestampConstraints) => SetHasDefault<SetHasDefault<SetNotNull<PgBigInt53Builder>>>;
 };
 export declare const c: PgColumns;
 export {};
@@ -27,10 +35,12 @@ export {};
  * These exist only in the type system and are completely erased at runtime
  */
 type BaseConstraints = {
-    /** Field is auto-generated, optional in create, excluded from update */
+    /** Field is filled by comb or the database: generated create and update DTOs leave it out */
     autogenerate?: boolean;
     /** Field cannot be mutated after creation */
     nomutate?: boolean;
+    /** Field is never read back: generated read DTOs, the meta stamp and the manifest leave it out */
+    private?: boolean;
     /**
      * This column scopes rows to a tenant.
      *

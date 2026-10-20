@@ -2,7 +2,7 @@
 import path from "node:path"
 import type { CombEntityMetaInput } from "../../../meta.ts"
 import type { ImportRef } from "../../analyzer-types.ts"
-import { snakeToCamel, snakeToPascal } from "../../utils/case.ts"
+import { propertyName, snakeToCamel, snakeToPascal } from "../../utils/case.ts"
 import type { FieldInfo, SchemaType, SharedSchema, TableInfo } from "./dto-types.ts"
 import { BASE_TYPE_ALIASES, rewriteWithShared } from "./shared-schemas.ts"
 import { comboFields, comboOf, type TimestampCombo, timestampNames } from "./timestamps.ts"
@@ -152,7 +152,7 @@ type Emit = { locals: Map<string, string>; shared: Map<string, SharedSchema>; sp
 
 function fieldLine(field: FieldInfo, { locals, shared }: Emit): string {
 	const value = locals.get(field.zodType) ?? shared.get(field.zodType)?.name ?? rewriteWithShared(field.zodType, shared)
-	return `\t${field.key}: ${value},`
+	return `\t${propertyName(field.key)}: ${value},`
 }
 
 function schemaLines(type: SchemaType, emit: Emit): string[] {

@@ -76,9 +76,17 @@ const UNREACHABLE: Record<string, string> = {
 	"57P03": "cannot-connect-now only answers new connections during startup or recovery",
 }
 
+/** Each factory's declared parameter count */
+const arity = (c: Record<string, (...args: never[]) => unknown>) =>
+	Object.fromEntries(Object.entries(c).map(([key, factory]) => [key, factory.length]))
+
 describe("dialect parity", () => {
 	it("gives both dialects the same c factories", () => {
 		expect(Object.keys(pg).sort()).toEqual(Object.keys(sqlite).sort())
+	})
+
+	it("gives each factory the same parameters on both dialects (E-S4; types in column-parity.typetest.ts)", () => {
+		expect(arity(pg)).toEqual(arity(sqlite))
 	})
 
 	it("handles the same constraint kinds, but for the listed asymmetry", () => {

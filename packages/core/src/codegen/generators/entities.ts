@@ -56,7 +56,7 @@ function generateEntities(ctx: GeneratorContext, config: EntitiesConfig): void {
 	if (config.updatePackageJson) {
 		const packageJsonPath = findNearestPackageJson(path.dirname(outputPath), ctx.cwd)
 		if (packageJsonPath) {
-			setPackageExport(packageJsonPath, "./entities", outputPath)
+			setPackageExport(packageJsonPath, { namespace: ctx.exportNamespace, subpath: "./entities" }, outputPath)
 		}
 	}
 

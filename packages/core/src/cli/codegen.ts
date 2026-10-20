@@ -6,7 +6,7 @@
 import path from "node:path"
 import type { GeneratorContext } from "../codegen/generators/context-types.ts"
 import { parseArgs } from "./args.ts"
-import { type DatabaseCodegen, databaseIn, loadCombConfig, tablesFile } from "./comb-config.ts"
+import { type CodegenConfig, type DatabaseCodegen, databaseIn, loadCombConfig, tablesFile } from "./comb-config.ts"
 import { CliError, type CliIo } from "./output.ts"
 import { GENERATORS, type GeneratorName } from "../codegen/config.ts"
 
@@ -46,10 +46,7 @@ const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 	columns: async (plan) => {
 		const { generateColumns } = await import("../codegen/generators/columns.ts")
 		const output = out(plan, "columns", plan.outDir)
-		generateColumns(
-			plan.ctx,
-			plan.exports ? { filePrefix: plan.db.filePrefix, output, updatePackageJson: true } : { output },
-		)
+		generateColumns(plan.ctx, plan.exports ? { filePrefix: plan.prefix, output, updatePackageJson: true } : { output })
 	},
 	constraints: async (plan) => {
 		const { generateConstraints } = await import("../codegen/generators/constraints.ts")
@@ -62,16 +59,17 @@ const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 	dtos: async (plan) => {
 		const { generateDtos } = await import("../codegen/generators/dtos/index.ts")
 		const output = out(plan, "dtos", path.join(plan.outDir, "dtos"))
+		const relationsOutput = out(plan, "relations", beside(plan, "relations.gen.ts"))
 		generateDtos(
 			plan.ctx,
-			plan.exports ? { filePrefix: plan.db.filePrefix, output, updatePackageJson: true } : { output },
+			plan.exports ? { filePrefix: plan.prefix, output, relationsOutput, updatePackageJson: true } : { output },
 		)
 	},
 	entities: async (plan) => {
 		const { generateEntities } = await import("../codegen/generators/entities.ts")
 		generateEntities(plan.ctx, {
 			output: out(plan, "entities", beside(plan, "entities.gen.ts")),
-			updatePackageJson: true,
+			updatePackageJson: plan.exports,
 		})
 	},
 	"enum-checks": async (plan) => {
@@ -81,7 +79,7 @@ const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 	"field-names": async (plan) => {
 		const { generateFieldNames } = await import("../codegen/generators/field-names.ts")
 		const output = out(plan, "field-names", beside(plan, "field-names.gen.ts"))
-		generateFieldNames(plan.ctx, { output, updatePackageJson: true })
+		generateFieldNames(plan.ctx, { output, updatePackageJson: plan.exports })
 	},
 	fts: async (plan) => {
 		const { fts } = plan.db
@@ -97,7 +95,14 @@ const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 		const { dialect, driver, filePrefix } = plan.db
 		if (!dialect || !driver) return
 		const { generateOrm } = await import("../codegen/generators/orm.ts")
-		generateOrm(plan.ctx, { dialect, driver, filePrefix, output: out(plan, "orm", beside(plan, "orm.gen.ts")) })
+		const relationsOutput = path.resolve(plan.ctx.cwd, out(plan, "relations", beside(plan, "relations.gen.ts")))
+		generateOrm(plan.ctx, {
+			dialect,
+			driver,
+			filePrefix,
+			output: out(plan, "orm", beside(plan, "orm.gen.ts")),
+			relationsOutput,
+		})
 	},
 	relations: async (plan) => {
 		const { generateRelations } = await import("../codegen/generators/relations.ts")
@@ -118,6 +123,8 @@ type Database = {
 	db: DatabaseCodegen
 	/** Direct mode: no config, files beside the tables file under the analyzed name */
 	direct: boolean
+	/** Its namespace in package.json exports, when the package exports another database too */
+	exportNamespace: string | undefined
 	generators: readonly string[]
 	name: string
 	tablesPath: string
@@ -132,6 +139,27 @@ async function analyzed(tablesPath: string, io: CliIo) {
 	}
 	for (const warning of validation.warnings) io.err(`  warn: ${warning}`)
 	return analyze(tablesPath, io.cwd)
+}
+
+/** Where a database's files go unless a generator has its own output: output.default, else the tables' directory */
+const outDirOf = (db: DatabaseCodegen, tablesPath: string, cwd: string) =>
+	db.output?.["default"] === undefined ? path.dirname(tablesPath) : path.resolve(cwd, db.output["default"])
+
+/**
+ * Each database's namespace in package.json exports: its name when its package.json exports
+ * another of the config's databases too, so neither overwrites the other's subpaths; none when a
+ * package exports one database alone. Every database the config declares counts, whichever run.
+ */
+async function exportNamespaces(config: CodegenConfig, cwd: string): Promise<Map<string, string>> {
+	const { findNearestPackageJson } = await import("../codegen/utils/package-json.ts")
+	const byPackage = new Map<string, string[]>()
+	for (const [name, db] of Object.entries(config.databases)) {
+		const pkg = findNearestPackageJson(outDirOf(db, path.resolve(cwd, db.tables), cwd), cwd) ?? ""
+		byPackage.set(pkg, [...(byPackage.get(pkg) ?? []), name])
+	}
+	const namespaces = new Map<string, string>()
+	for (const names of byPackage.values()) if (names.length > 1) for (const name of names) namespaces.set(name, name)
+	return namespaces
 }
 
 /** Validate, analyze and run `database`'s generators (all, or `only`) */
@@ -149,14 +177,14 @@ async function generate(database: Database, only: string | undefined, io: CliIo)
 		ctx: {
 			analysis,
 			cwd: database.direct ? tablesDir : io.cwd,
+			exportNamespace: database.exportNamespace,
 			log: io.out,
 			tablesPath: database.tablesPath,
 			warn: io.err,
 		},
 		db: database.db,
 		exports: !database.direct,
-		outDir:
-			database.db.output?.["default"] === undefined ? tablesDir : path.resolve(io.cwd, database.db.output["default"]),
+		outDir: outDirOf(database.db, database.tablesPath, io.cwd),
 		prefix: database.direct ? `db.${analysis.dbName}` : (database.db.filePrefix ?? `db.${database.name}`),
 	}
 	for (const generator of GENERATORS) {
@@ -169,20 +197,20 @@ async function generate(database: Database, only: string | undefined, io: CliIo)
 async function databases(positionals: readonly string[], tables: string | undefined, io: CliIo): Promise<Database[]> {
 	if (tables !== undefined) {
 		const tablesPath = tablesFile(io.cwd, tables)
-		return [{ db: { tables }, direct: true, generators: DIRECT, name: "", tablesPath }]
+		return [{ db: { tables }, direct: true, exportNamespace: undefined, generators: DIRECT, name: "", tablesPath }]
 	}
 	const config = await loadCombConfig(io.cwd)
 	const names = positionals.length > 0 ? positionals : Object.keys(config.databases)
-	return names.map((name) => {
-		const db = databaseIn(config, name)
-		return {
-			db,
-			direct: false,
-			generators: db.generators ?? GENERATORS,
-			name,
-			tablesPath: tablesFile(io.cwd, db.tables),
-		}
-	})
+	const picked = names.map((name) => [name, databaseIn(config, name)] as const)
+	const namespaces = await exportNamespaces(config, io.cwd)
+	return picked.map(([name, db]) => ({
+		db,
+		direct: false,
+		exportNamespace: namespaces.get(name),
+		generators: db.generators ?? GENERATORS,
+		name,
+		tablesPath: tablesFile(io.cwd, db.tables),
+	}))
 }
 
 export async function cmdCodegen(argv: readonly string[], io: CliIo): Promise<void> {

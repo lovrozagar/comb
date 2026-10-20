@@ -63,25 +63,37 @@ describe("ftsDelta", () => {
 		expect(delta(both, both, "ALTER TABLE other ADD COLUMN x INTEGER;")).toBe("")
 	})
 
+	it("reads quoted DDL as the same group, so quoting a history's bare names rewrites nothing (D7)", () => {
+		const quoted = asSql([
+			`CREATE VIRTUAL TABLE IF NOT EXISTS "items_fts" USING fts5("name", content='items', content_rowid='rowid')`,
+			`CREATE TRIGGER IF NOT EXISTS "items_fts_ai" AFTER INSERT ON "items" BEGIN INSERT INTO "items_fts"(rowid, "name") VALUES (new.rowid, new."name"); END`,
+		])
+		expect(separate(quoted, new Set()).plain).toEqual([])
+		expect(delta(asSql([TABLE, TRIGGER]), quoted)).toBe("")
+		expect(delta(asSql([TABLE, TRIGGER]), quoted, "DROP TABLE items;")).toContain(
+			`INSERT INTO "items_fts"("items_fts") VALUES ('rebuild')`,
+		)
+	})
+
 	it("rewrites only the group that changed: triggers dropped before the table, then created and rebuilt", () => {
 		const changed = both.replace("fts5(body, content='notes')", "fts5(body, title, content='notes')")
 		expect(delta(both, changed)).toBe(
 			asSql([
-				"DROP TRIGGER IF EXISTS notes_fts_ai",
-				"DROP TABLE IF EXISTS notes_fts",
+				'DROP TRIGGER IF EXISTS "notes_fts_ai"',
+				'DROP TABLE IF EXISTS "notes_fts"',
 				"CREATE VIRTUAL TABLE notes_fts USING fts5(body, title, content='notes')",
 				NOTES_TRIGGER,
-				"INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')",
+				`INSERT INTO "notes_fts"("notes_fts") VALUES ('rebuild')`,
 			]),
 		)
 	})
 
 	it("adds a new group, and only drops a removed one", () => {
 		expect(delta(asSql([TABLE, TRIGGER]), both)).toBe(
-			asSql([NOTES, NOTES_TRIGGER, "INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')"]),
+			asSql([NOTES, NOTES_TRIGGER, `INSERT INTO "notes_fts"("notes_fts") VALUES ('rebuild')`]),
 		)
 		expect(delta(both, asSql([TABLE, TRIGGER]))).toBe(
-			asSql(["DROP TRIGGER IF EXISTS notes_fts_ai", "DROP TABLE IF EXISTS notes_fts"]),
+			asSql(['DROP TRIGGER IF EXISTS "notes_fts_ai"', 'DROP TABLE IF EXISTS "notes_fts"']),
 		)
 	})
 })
@@ -94,8 +106,8 @@ describe("ftsDelta — rewrites, ordering and what the target leaves", () => {
 		["a rebuilt copy renamed onto it", "ALTER TABLE `new_items` RENAME TO `items`;"],
 	])("recreates a group whose content table the diff rewrites through %s", (_label, plainDiff) => {
 		const rewritten = delta(both, both, plainDiff)
-		expect(rewritten).toContain("DROP TRIGGER IF EXISTS items_fts_ai")
-		expect(rewritten).toContain("INSERT INTO items_fts(items_fts) VALUES ('rebuild')")
+		expect(rewritten).toContain('DROP TRIGGER IF EXISTS "items_fts_ai"')
+		expect(rewritten).toContain(`INSERT INTO "items_fts"("items_fts") VALUES ('rebuild')`)
 		expect(rewritten).not.toContain("notes_fts")
 	})
 
@@ -105,9 +117,9 @@ describe("ftsDelta — rewrites, ordering and what the target leaves", () => {
 			.split("\n")
 			.filter((line) => line.startsWith("DROP"))
 		expect(drops).toEqual([
-			"DROP TRIGGER IF EXISTS items_fts_ai;",
-			"DROP TRIGGER IF EXISTS items_fts_ad;",
-			"DROP TABLE IF EXISTS items_fts;",
+			'DROP TRIGGER IF EXISTS "items_fts_ai";',
+			'DROP TRIGGER IF EXISTS "items_fts_ad";',
+			'DROP TABLE IF EXISTS "items_fts";',
 		])
 	})
 
@@ -123,13 +135,13 @@ describe("ftsDelta — rewrites, ordering and what the target leaves", () => {
 			"INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')",
 			"DROP TRIGGER notes_fts_ai",
 		])
-		expect(delta("", target)).toBe(asSql([NOTES, "INSERT INTO notes_fts(notes_fts) VALUES ('rebuild')"]))
+		expect(delta("", target)).toBe(asSql([NOTES, `INSERT INTO "notes_fts"("notes_fts") VALUES ('rebuild')`]))
 	})
 
 	it("reads a state passed in directly", () => {
 		const from: FtsState = new Map([["items_fts", { group: "items_fts", kind: "table", sql: "x" }]])
 		expect(ftsDelta({ from, plainDiff: "", to: new Map(), toStatements: [] })).toBe(
-			asSql(["DROP TABLE IF EXISTS items_fts"]),
+			asSql(['DROP TABLE IF EXISTS "items_fts"']),
 		)
 	})
 })

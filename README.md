@@ -273,19 +273,19 @@ Timestamps are integer milliseconds, not SQLite's `TEXT` dates — comparisons, 
 
 The constraint object is shared by both dialects. `@lovrozagar/comb/sqlite/constraints` types them:
 
-| Key                              | Applies to          | Effect                                                         |
-| -------------------------------- | ------------------- | -------------------------------------------------------------- |
-| `min` / `max`                    | text, integer, real | length or numeric bounds                                       |
-| `maxBytes`                       | text                | byte-length bound                                              |
-| `pattern`                        | text                | regex, as a source-level string                                |
-| `email` / `url`                  | text                | format validators                                              |
-| `trim`, `lowercase`, `uppercase` | text                | transforms applied in generated schemas                        |
-| `password`                       | text                | marks the field for hashing-aware DTOs                         |
-| `private`                        | any                 | omitted from generated read DTOs                               |
-| `nomutate`                       | any                 | omitted from generated create/update DTOs                      |
-| `autogenerate`                   | any                 | server-assigned; defaults to `true` on the timestamp factories |
+| Key                              | Applies to          | Effect                                                                                          |
+| -------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------- |
+| `min` / `max`                    | text, integer, real | length or numeric bounds                                                                        |
+| `maxBytes`                       | json                | UTF-8 byte bound on the serialized value, on writes                                             |
+| `pattern`                        | text                | regex, as a source-level string                                                                 |
+| `email` / `url`                  | text                | format validators                                                                               |
+| `trim`, `lowercase`, `uppercase` | text                | transforms applied in generated schemas                                                         |
+| `password`                       | text                | marks the field for hashing-aware DTOs                                                          |
+| `private`                        | any                 | omitted from generated read DTOs                                                                |
+| `nomutate`                       | any                 | omitted from generated create/update DTOs                                                       |
+| `autogenerate`                   | any                 | server-assigned, omitted from create/update DTOs; defaults to `true` on the timestamp factories |
 
-`private` and `nomutate` are the two that change generated output the most: a `password` column marked `private` never appears in a row DTO, and a `created_at` marked `autogenerate` never appears in a create DTO.
+`private` and `nomutate` are the two that change generated output the most: a `password` column marked `private` never appears in a row DTO, and a `created_at` marked `autogenerate` never appears in a create DTO. A key comb or the database fills (`c.id`, `c.serialId`, an `autoIncrement` or defaulted key) is left out of create and update too, while a natural key the caller supplies stays. An integer without `min` takes no negative value on create or update; a read DTO accepts whatever the column holds.
 
 ### Patterns
 

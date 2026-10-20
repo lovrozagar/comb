@@ -105,6 +105,15 @@ describe("codegen/utils/fs: writeGenFile rewrites", () => {
 		expect(fs.readFileSync(fp, "utf-8")).toContain("const a = 2")
 	})
 
+	it("restores a hand edit below the header, whose checksum still matches (G-S1)", () => {
+		const fp = path.join(tmpDir, "edited.ts")
+		writeGenFile(fp, "export const x = 1", "comb")
+		fs.writeFileSync(fp, fs.readFileSync(fp, "utf-8").replace("x = 1", "x = 2"))
+		expect(writeGenFile(fp, "export const x = 1", "comb")).toBe(true)
+		expect(fs.readFileSync(fp, "utf-8")).toContain("export const x = 1")
+		expect(writeGenFile(fp, "export const x = 1", "comb")).toBe(false)
+	})
+
 	it("creates parent directories if missing", () => {
 		const fp = path.join(tmpDir, "deep", "nested", "out.gen.ts")
 		writeGenFile(fp, "export {}\n", "comb")
@@ -127,6 +136,15 @@ describe("codegen/utils/fs: writeGenJsonFile", () => {
 		writeGenJsonFile(fp, { a: 1 }, "comb")
 		const wrote = writeGenJsonFile(fp, { a: 1 }, "comb")
 		expect(wrote).toBe(false)
+	})
+
+	it("restores a hand edit to a file whose marker still matches (G-S1)", () => {
+		const fp = path.join(tmpDir, "edited.json")
+		writeGenJsonFile(fp, { a: 1 }, "comb")
+		fs.writeFileSync(fp, fs.readFileSync(fp, "utf-8").replace('"a": 1', '"a": 2'))
+		expect(writeGenJsonFile(fp, { a: 1 }, "comb")).toBe(true)
+		expect((JSON.parse(fs.readFileSync(fp, "utf-8")) as { a: number }).a).toBe(1)
+		expect(writeGenJsonFile(fp, { a: 1 }, "comb")).toBe(false)
 	})
 
 	it("rewrites when data changes", () => {

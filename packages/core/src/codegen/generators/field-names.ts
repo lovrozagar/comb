@@ -6,7 +6,7 @@
  * to labels, and strips common suffixes (_json, _id).
  */
 import path from "node:path"
-import { toScreamingSnakeCase } from "../utils/case.ts"
+import { propertyName, toScreamingSnakeCase } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { findNearestPackageJson, setPackageExport } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -64,9 +64,9 @@ function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): vo
 		/* add comment when label differs from raw due to suffix stripping */
 		const stripped = rawName !== label.toLowerCase().replaceAll(" ", "_")
 		if (stripped) {
-			lines.push(`\t${rawName}: "${label}", /* was ${rawName} */`)
+			lines.push(`\t${propertyName(rawName)}: ${JSON.stringify(label)}, /* was ${rawName.replaceAll("*/", "* /")} */`)
 		} else {
-			lines.push(`\t${rawName}: "${label}",`)
+			lines.push(`\t${propertyName(rawName)}: ${JSON.stringify(label)},`)
 		}
 	}
 
@@ -82,7 +82,7 @@ function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): vo
 	if (config.updatePackageJson) {
 		const packageJsonPath = findNearestPackageJson(path.dirname(outputPath), ctx.cwd)
 		if (packageJsonPath) {
-			setPackageExport(packageJsonPath, "./field-names", outputPath)
+			setPackageExport(packageJsonPath, { namespace: ctx.exportNamespace, subpath: "./field-names" }, outputPath)
 		}
 	}
 

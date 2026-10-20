@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { camelToKebab, propertyName, snakeToCamel, snakeToPascal, toScreamingSnakeCase } from "./case.ts"
+import {
+	camelToKebab,
+	propertyAccess,
+	propertyName,
+	snakeToCamel,
+	snakeToPascal,
+	toScreamingSnakeCase,
+} from "./case.ts"
 
 describe("snakeToCamel", () => {
 	it("converts basic snake_case", () => {
@@ -48,5 +55,12 @@ describe("propertyName", () => {
 		expect(propertyName("org_id")).toBe("org_id")
 		expect(propertyName("org_id,email")).toBe('"org_id,email"')
 		expect(propertyName("display-name")).toBe('"display-name"')
+	})
+})
+
+describe("propertyAccess", () => {
+	it("reads an identifier key with a dot and any other key with brackets", () => {
+		expect(propertyAccess("t", "org_id")).toBe("t.org_id")
+		expect(propertyAccess("t", "display-name")).toBe('t["display-name"]')
 	})
 })

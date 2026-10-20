@@ -59,6 +59,12 @@ describe("generateColumns", () => {
 		expect(logged).toEqual(["Generated column refs for 1 tables"])
 	})
 
+	it("quotes and indexes a field key that is not an identifier (D6)", () => {
+		generate(`export const member = createTable("member", { id: c.id(), "display-name": c.text("display_name") })`)
+		expect(read("rqb-cols", "member", "index.gen.ts")).toContain(`\t"display-name": true,`)
+		expect(read("sql-cols", "member", "index.gen.ts")).toContain(`\t"display-name": member["display-name"],`)
+	})
+
 	it("excludes private fields from column refs", () => {
 		generate(
 			`export const user = createTable("user", { id: c.id(), _secret: c.text("_secret", { private: true }), name: c.text("name") })`,

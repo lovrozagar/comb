@@ -34,6 +34,16 @@ describe("generateFieldSchema: what each schema type includes", () => {
 		expect(schema("_hidden", 'c.boolean("_hidden")', "read")).toBeNull()
 	})
 
+	it("gives an integer reference an integer schema, and a text one the id string (D5)", () => {
+		const fk = { column: "teamId", refColumn: "id", refTable: "team" }
+		const team = fieldOf("teamId", 'c.integer("team_id").notNull().references(() => team.id)', { foreignKey: fk })
+		expect(generateFieldSchema(team, "create", imports())).toMatch(/^z\.number\(\)\.int\(\)\.nonnegative\(\)/)
+		expect(generateFieldSchema(team, "read", imports())).toMatch(/^z\.number\(\)\.int\(\)/)
+		expect(generateFieldSchema(team, "update", imports())).toBeNull()
+		const owner = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.id)', { foreignKey: fk })
+		expect(generateFieldSchema(owner, "create", imports())).toBe("z.string().min(1).max(48)")
+	})
+
 	it("leaves a reference out of the update body", () => {
 		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBeNull()
 		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe("z.string().min(1).max(48).nullable().optional()")
@@ -57,9 +67,22 @@ describe("generateFieldSchema: optionality", () => {
 		expect(schema("on", 'c.boolean("on").notNull().default(true)', "create")).toBe(
 			"z.boolean().meta(_m.boolean).optional()",
 		)
-		expect(schema("id", 'c.id("usr")', "create")).toMatch(/\.optional\(\)$/)
-		expect(schema("created_at", 'c.createdAt("created_at")', "create")).toMatch(/\.optional\(\)$/)
-		expect(schema("code", 'c.text("code", { autogenerate: true }).notNull()', "create")).toMatch(/\.optional\(\)$/)
+	})
+
+	it("leaves what comb or the database generates out of create and update (D9)", () => {
+		const id = fieldOf("id", 'c.id("usr")', { isPrimaryKey: true })
+		const serial = fieldOf("id", "c.serialId()", { isPrimaryKey: true })
+		for (const type of ["create", "update"] as const) {
+			expect(generateFieldSchema(id, type, imports())).toBeNull()
+			expect(generateFieldSchema(serial, type, imports())).toBeNull()
+			expect(schema("created_at", 'c.createdAt("created_at")', type)).toBeNull()
+			expect(schema("code", 'c.text("code", { autogenerate: true }).notNull()', type)).toBeNull()
+		}
+		expect(generateFieldSchema(id, "read", imports())).not.toBeNull()
+		expect(schema("created_at", 'c.createdAt("created_at")', "read")).toBe("timestampSchema")
+		/* a natural key the caller supplies stays in create */
+		const natural = fieldOf("code", 'c.text("code").primaryKey()', { isPrimaryKey: true })
+		expect(generateFieldSchema(natural, "create", imports())).not.toBeNull()
 	})
 })
 
@@ -90,7 +113,7 @@ describe("generateFieldSchema: kinds", () => {
 				"create",
 				imports(),
 			),
-		).toContain("JSON.stringify(val).length <= 100")
+		).toContain("new TextEncoder().encode(JSON.stringify(val)).length <= 100")
 		expect(() => schema("p", 'c.json("p")', "read")).toThrow("c.json() must have schema as second parameter")
 	})
 
@@ -136,12 +159,14 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 
 	it("writes numbers, timestamps and booleans", () => {
 		expect(schema("n", 'c.integer("n").notNull()', "read")).toBe(
-			"z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).meta(_m.integer)",
+			"z.number().int().max(Number.MAX_SAFE_INTEGER).meta(_m.integer)",
 		)
+		/* the non-negative floor guards writes; a read takes whatever the column holds (G-S2) */
+		expect(schema("n", 'c.integer("n").notNull()', "readPartial")).toMatch(/^z\.number\(\)\.int\(\)\.max\(/)
+		expect(schema("n", 'c.integer("n").notNull()', "create")).toMatch(/^z\.number\(\)\.int\(\)\.nonnegative\(\)/)
+		expect(schema("n", 'c.integer("n").notNull()', "update")).toMatch(/^z\.number\(\)\.int\(\)\.nonnegative\(\)/)
 		expect(schema("n", 'c.integer("n", { min: 5 }).notNull()', "read")).toContain("z.number().int().min(5)")
-		expect(schema("n", "c.serialId()", "read")).toBe(
-			"z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).meta(_m.serialId)",
-		)
+		expect(schema("n", "c.serialId()", "read")).toBe("z.number().int().max(Number.MAX_SAFE_INTEGER).meta(_m.serialId)")
 		expect(schema("at", 'c.timestamp("at").notNull()', "read")).toBe("timestampSchema")
 		expect(schema("b", 'c.boolean("b").notNull()', "read")).toBe("z.boolean().meta(_m.boolean)")
 		expect(schema("r", 'c.real("r").notNull()', "read")).toBe("z.number().meta(_m.real)")
@@ -152,7 +177,7 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		expect(schema("t", 'c.integer("t", { min: -40, max: 60 }).notNull()', "read")).toMatch(
 			/^z\.number\(\)\.int\(\)\.min\(-40\)\.max\(60\)/,
 		)
-		expect(schema("c", 'c.integer("c", { max: 9 }).notNull()', "read")).toMatch(
+		expect(schema("c", 'c.integer("c", { max: 9 }).notNull()', "create")).toMatch(
 			/^z\.number\(\)\.int\(\)\.nonnegative\(\)\.max\(9\)/,
 		)
 		expect(schema("l", 'c.real("l", { min: -90.5, max: 90.5 }).notNull()', "read")).toMatch(

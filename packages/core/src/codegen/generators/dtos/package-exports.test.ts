@@ -19,7 +19,7 @@ describe("updatePackageJson", () => {
 	function run(exports: unknown, filePrefix?: string): Record<string, unknown> {
 		const file = path.join(dir, "package.json")
 		fs.writeFileSync(file, JSON.stringify({ exports, name: "app" }))
-		const ctx = testContext([], { cwd: dir, tablesPath: path.join(dir, "src/db.blog.tables.ts") })
+		const ctx = testContext([], { cwd: dir, dbName: "blog", tablesPath: path.join(dir, "src/db.blog.tables.ts") })
 		updatePackageJson(file, { config: { filePrefix, output: "src/dtos" }, ctx, entities: ["post", "blogAuthor"] })
 		lines = ctx.logged
 		return (JSON.parse(fs.readFileSync(file, "utf8")) as { exports: Record<string, unknown> }).exports

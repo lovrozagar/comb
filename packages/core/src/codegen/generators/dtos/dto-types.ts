@@ -28,6 +28,8 @@ export type DtosConfig = {
 	/** Package the generated meta stamp imports from. Matches EntitiesConfig. */
 	importFrom?: string | undefined
 	output: string
+	/** where the relations generator writes, which the `./relations` export points at */
+	relationsOutput?: string | undefined
 	updatePackageJson?: boolean
 }
 

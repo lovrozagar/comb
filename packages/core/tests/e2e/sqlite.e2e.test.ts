@@ -46,7 +46,7 @@ describe("comb on SQLite, from tables to a served list", () => {
 
 	it("serves a filtered, sorted page through the generated DTOs and maps a duplicate to its key", async () => {
 		type Dtos = { postDtoCreateSchema: z.ZodType; postDtoReadSchema: z.ZodType }
-		const dtos = (await import(join(blog.dir, "src/db/_gen/dtos/post/index.gen.ts"))) as Dtos
+		const dtos = (await import(join(blog.dir, "src/db/_gen/dtos/post/db.core.post.gen.ts"))) as Dtos
 		const { post } = (await import(
 			join(blog.dir, "src/db/core.tables.ts")
 		)) as typeof import("./support/blog-tables.ts")
