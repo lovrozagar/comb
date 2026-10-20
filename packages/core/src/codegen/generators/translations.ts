@@ -3,7 +3,7 @@
  * messages, built from the same analysis as the constraints file, so the two always agree.
  */
 import path from "node:path"
-import { toScreamingSnakeCase } from "../utils/case.ts"
+import { propertyName, toScreamingSnakeCase } from "../utils/case.ts"
 import { ensureDir, writeGenFile } from "../utils/fs.ts"
 import { buildConstraintMap, constraintsIn } from "./constraints.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -61,9 +61,6 @@ export function generateTranslations(ctx: GeneratorContext, config: Translations
 	ctx.log(`Generated error translations for ${dbName} database`)
 	ctx.log(`Error keys: ${errorKeys.length}`)
 }
-
-/** A key as an object property: bare when it is an identifier, quoted otherwise */
-const propertyName = (key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key))
 
 type TranslationFile = { dbName: string; errorKeys: ErrorKey[]; filePrefix: string }
 

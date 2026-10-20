@@ -117,7 +117,11 @@ class LruCache<K, V> {
 			this.cache.delete(this.cache.keys().next().value as K)
 		}
 
-		const effectiveSoftTtl = ttlMs ?? this.ttlMs
+		if (!isPositive(ttlMs)) throw new RangeError(`LruCache ttlMs must be positive, got ${ttlMs}`)
+		/* a soft TTL past the hard one would let get serve what getWithMeta has already evicted */
+		const requested = ttlMs ?? this.ttlMs
+		const effectiveSoftTtl =
+			requested !== undefined && this.hardTtlMs !== undefined ? Math.min(requested, this.hardTtlMs) : requested
 		const now = Date.now()
 		const softExpiry = effectiveSoftTtl ? now + effectiveSoftTtl : Number.POSITIVE_INFINITY
 		const hardExpiry = this.hardTtlMs ? now + this.hardTtlMs : softExpiry

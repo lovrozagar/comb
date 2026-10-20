@@ -45,7 +45,14 @@ function thrown(error: unknown, maps = MAPS): CombError | undefined {
 
 describe("readPgError", () => {
 	it("reads every driver's field names, through wrappers", () => {
-		const expected = { code: "23505", column: "c", constraint: "k", keyColumns: ["a", "b"], table: "t" }
+		const expected = {
+			code: "23505",
+			column: "c",
+			constraint: "k",
+			keyColumns: ["a", "b"],
+			referenced: false,
+			table: "t",
+		}
 		const detail = 'Key (a, "b")=(1, 2) already exists.'
 		expect(readPgError(wrapped(nodePg({ code: "23505", column: "c", constraint: "k", detail, table: "t" })))).toEqual(
 			expected,
@@ -140,9 +147,14 @@ describe("pgErrorHandler: resources and everything else", () => {
 		["53200", "database_io_error", 500],
 		["08006", "database_unavailable", 503],
 		["08001", "database_unavailable", 503],
-		["57P01", "database_readonly", 503],
+		["57P01", "database_unavailable", 503],
 		["25006", "database_readonly", 503],
 		["57P03", "database_unavailable", 503],
+		["53300", "database_unavailable", 503],
+		["53400", "database_unavailable", 503],
+		["55P03", "database_unavailable", 503],
+		["57P05", "database_unavailable", 503],
+		["25P03", "database_unavailable", 503],
 	])("maps %s", (code, errorKey, status) => {
 		expect(thrown(nodePg({ code }))).toMatchObject({ errorKey, status })
 	})
@@ -170,5 +182,26 @@ describe("readPgError on a wrapper that carries its own code", () => {
 		const driver = nodePg({ code: "23505", constraint: "store_slug_key", table: "store" })
 		const appWrapper = Object.assign(new Error("request failed: 57014"), { cause: driver, code: "57014" })
 		expect(readPgError(appWrapper)).toMatchObject({ code: "23505", constraint: "store_slug_key" })
+	})
+})
+
+describe("pgErrorHandler: which side of a foreign key failed, and long table names", () => {
+	it("says a row is still referenced when the detail says so, naming no column", () => {
+		const error = nodePg({ code: "23503", detail: 'Key (id)=(10) is still referenced from table "c".', table: "c" })
+		const maps = [{ c: { foreignKey: { id: { cause: "No such parent", errorKey: "c_parent_missing" } } } }]
+		const caught = thrown(error, maps)
+		expect(caught).toMatchObject({
+			cause: "The record is still referenced by other records",
+			errorKey: "foreign_key_violation",
+		})
+		expect(caught?.column).toBeUndefined()
+	})
+
+	it("finds the primary key of a table whose name Postgres cut, at a character boundary", () => {
+		/* 57 ASCII bytes and a 2-byte é: 59 bytes, so the cut drops the é rather than half of it */
+		const table = `${"t".repeat(57)}é`
+		const maps = [{ [table]: { primaryKey: { cause: "Exists", errorKey: "long_taken" } } }]
+		const error = nodePg({ code: "23505", constraint: `${"t".repeat(57)}_pkey`, table })
+		expect(thrown(error, maps)).toMatchObject({ errorKey: "long_taken" })
 	})
 })

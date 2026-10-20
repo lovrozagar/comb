@@ -132,6 +132,18 @@ describe("generateConstraints — unique indexes", () => {
 		expect(content).toContain(`email: {\n\t\t\t\terrorKey: "user_email_duplicate",`)
 	})
 
+	it("keys a composite unique index by its SQL columns together, with a cause naming the combination (C3)", () => {
+		const { content } = generate(`export const member = createTable("member", {
+	id: c.id(),
+	orgId: c.text("org_id"),
+	email: c.text("email"),
+}, (t) => [uniqueIndex("member_org_email").on(t.orgId, t.email)])`)
+		expect(content).toContain(
+			`"org_id,email": {\n\t\t\t\terrorKey: "member_orgId_email_duplicate",\n\t\t\t\tcause: "A record with this orgId and email combination already exists",`,
+		)
+		expect(content).not.toContain("org_id: {")
+	})
+
 	it("keeps the index's own column name when no field declares it", () => {
 		const { content } = generate(`export const user = createTable("user", { id: c.id() }, (t) => [
 	uniqueIndex("user_ghost_idx").on(t.ghost),

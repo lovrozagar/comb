@@ -28,9 +28,13 @@ const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
 function unique(v: Violation): CombError {
 	const { columns, table } = failedColumns(v.read.message)
-	const column = columns[0]
-	const entry = lookup(v.maps, table, (t) => own(t.unique, column))
-	const cause = column === undefined ? "Duplicate value detected" : `Duplicate value for ${table}.${column}`
+	/* a composite unique is keyed by its columns together; one column alone would blame half the pair */
+	const column = columns.length === 1 ? columns[0] : undefined
+	const entry = lookup(v.maps, table, (t) => own(t.unique, columns.join(",")))
+	const cause =
+		columns.length === 0
+			? "Duplicate value detected"
+			: `Duplicate value for ${columns.map((c) => `${table}.${c}`).join(", ")}`
 	const fallback = { cause, errorKey: combErrorKeys.UNIQUE_CONSTRAINT_VIOLATION, status: "conflict" } as const
 	return toError(v, { column, entry, fallback, table })
 }
@@ -75,10 +79,23 @@ function notNull(v: Violation): CombError {
 	})
 }
 
+/* the generic causes of a foreign key violation, by which side of the key the statement touched */
+const STILL_REFERENCED = "The record is still referenced by other records"
+const MISSING_OR_REFERENCED = "Referenced record does not exist or is still in use"
+
 /* SQLite's FOREIGN KEY message names neither table nor column; the statement's target table
- * does, and a table with one foreign key leaves no doubt about the column */
+ * does, and a table with one foreign key leaves no doubt about the column. A DELETE can only
+ * fail on the other side, a row that references the deleted one, so no key of its own is blamed. */
 function foreignKey(v: Violation): CombError {
 	const table = statementTable(v.read.query)
+	if (/^\s*delete\b/i.test(v.read.query ?? "")) {
+		const fallback = {
+			cause: STILL_REFERENCED,
+			errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
+			status: "conflict",
+		} as const
+		return toError(v, { entry: undefined, fallback, table })
+	}
 	let column: string | undefined
 	const entry = lookup(v.maps, table, (t) => {
 		const keys = Object.keys(t.foreignKey ?? {})
@@ -86,7 +103,7 @@ function foreignKey(v: Violation): CombError {
 		return own(t.foreignKey, column)
 	})
 	const fallback = {
-		cause: "Referenced record does not exist or is still in use",
+		cause: MISSING_OR_REFERENCED,
 		errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
 		status: "conflict",
 	} as const

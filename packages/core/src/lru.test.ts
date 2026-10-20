@@ -168,3 +168,26 @@ describe("LruCache — keys it never held", () => {
 		expect(cache.has("missing")).toBe(false)
 	})
 })
+
+describe("LruCache — a per-key TTL (E-S3)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("refuses a TTL that never expires, as the options do", () => {
+		const cache = new LruCache<string, number>({ hardTtlMs: 5000, maxSize: 10, ttlMs: 1000 })
+		expect(() => cache.set("zero", 1, 0)).toThrow(RangeError)
+		expect(() => cache.set("nan", 1, Number.NaN)).toThrow(RangeError)
+	})
+
+	it("clamps a TTL past the hard TTL to it, so get and getWithMeta agree", () => {
+		const cache = new LruCache<string, number>({ hardTtlMs: 5000, maxSize: 10, ttlMs: 1000 })
+		cache.set("long", 3, 60_000)
+		vi.advanceTimersByTime(6000)
+		expect(cache.get("long")).toBeUndefined()
+		expect(cache.getWithMeta("long")).toBeUndefined()
+	})
+})

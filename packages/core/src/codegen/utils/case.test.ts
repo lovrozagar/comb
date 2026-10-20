@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { camelToKebab, snakeToCamel, snakeToPascal, toScreamingSnakeCase } from "./case.ts"
+import { camelToKebab, propertyName, snakeToCamel, snakeToPascal, toScreamingSnakeCase } from "./case.ts"
 
 describe("snakeToCamel", () => {
 	it("converts basic snake_case", () => {
@@ -40,5 +40,13 @@ describe("toScreamingSnakeCase", () => {
 	})
 	it("converts snake_case to SCREAMING_SNAKE", () => {
 		expect(toScreamingSnakeCase("user_name")).toBe("USER_NAME")
+	})
+})
+
+describe("propertyName", () => {
+	it("leaves an identifier bare and quotes any other key", () => {
+		expect(propertyName("org_id")).toBe("org_id")
+		expect(propertyName("org_id,email")).toBe('"org_id,email"')
+		expect(propertyName("display-name")).toBe('"display-name"')
 	})
 })

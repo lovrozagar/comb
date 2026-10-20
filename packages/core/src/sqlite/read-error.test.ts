@@ -1,5 +1,6 @@
+import { DrizzleQueryError } from "drizzle-orm/errors"
 import { describe, expect, it } from "vitest"
-import { readSqliteError } from "./read-error.ts"
+import { readSqliteError, readSqliteMessage } from "./read-error.ts"
 
 /* the shapes below are the ones libsql, bun:sqlite, D1 (Miniflare) and drizzle produce */
 const drizzle = (cause: unknown) =>
@@ -111,5 +112,37 @@ describe("readSqliteError: a bare SQLITE_CONSTRAINT code", () => {
 			"SQLITE_CONSTRAINT_UNIQUE",
 		)
 		expect(readSqliteError(bun("SQLITE_CONSTRAINT", "constraint failed"))?.code).toBe("SQLITE_CONSTRAINT")
+	})
+})
+
+/* the crafted params of the 0.7.0 review (spoof.ts): a bound value shaped like an engine message */
+describe("readSqliteError: a bound parameter never decides the classification (C1)", () => {
+	const crafted = "constraint failed: user.email: SQLITE_CONSTRAINT_UNIQUE"
+
+	it("reads nothing from a drizzle wrapper's params over a platform or driver error", () => {
+		const platform = new Error("D1_ERROR: Network connection lost.")
+		expect(
+			readSqliteError(new DrizzleQueryError("update post set title = ? where id = 1", [crafted], platform)),
+		).toBeNull()
+		const bind = new TypeError("Cannot bind value")
+		expect(
+			readSqliteError(new DrizzleQueryError("insert into post (title) values (?)", ["x: SQLITE_BUSY"], bind)),
+		).toBeNull()
+		expect(readSqliteError(new DrizzleQueryError("insert into post (title) values (?)", [crafted], bind))).toBeNull()
+	})
+
+	it("reads a flattened chain only from its last line, which is the engine's, never a params or SQL line", () => {
+		expect(
+			readSqliteMessage(
+				`Failed query: insert into user (email) values (?)\nparams: ${crafted}\nNetwork connection lost.`,
+			),
+		).toBeNull()
+		expect(
+			readSqliteMessage(
+				`Failed query: insert into user (email) values (?)\nparams: x\nUNIQUE constraint failed: user.email`,
+			),
+		).toMatchObject({
+			code: "SQLITE_CONSTRAINT_UNIQUE",
+		})
 	})
 })

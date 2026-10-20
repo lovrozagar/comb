@@ -4,7 +4,7 @@
  * Generates constraint maps from analyzed table metadata for database error handling.
  */
 import path from "node:path"
-import { toScreamingSnakeCase } from "../utils/case.ts"
+import { propertyName, toScreamingSnakeCase } from "../utils/case.ts"
 import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -30,7 +30,10 @@ type ConstraintsConfig = {
 
 const conflict = (cause: string, errorKey: string): Constraint => ({ cause, errorKey, statusKey: "conflict" })
 
-/** The column-level and index-level unique constraints, keyed by the column's SQL name */
+/**
+ * The column-level and index-level unique constraints, keyed by the column's SQL name; a
+ * composite index by its SQL columns together (`org_id,email`), as the engine reports the pair
+ */
 function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 	const unique: Record<string, Constraint> = {}
 	for (const field of table.fields.filter((f) => /\.unique\(\)/.test(f.raw))) {
@@ -40,10 +43,14 @@ function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 		)
 	}
 	/* a partial index fails with the same "UNIQUE constraint failed: <table>.<column>" as a full one */
-	for (const col of [...table.uniqueIndexes, ...table.partialUniqueIndexes].flatMap((idx) => idx.columns)) {
-		/* the engine reports the column's SQL name; the error key keeps the property name */
-		const sqlName = table.fields.find((f) => f.name === col)?.sqlName ?? col
-		unique[sqlName] = conflict(`A record with this ${col} value already exists`, `${table.sqlName}_${col}_duplicate`)
+	for (const { columns } of [...table.uniqueIndexes, ...table.partialUniqueIndexes]) {
+		/* the engine reports the columns' SQL names; the error key keeps the property names */
+		const sqlNames = columns.map((col) => table.fields.find((f) => f.name === col)?.sqlName ?? col)
+		const cause =
+			columns.length === 1
+				? `A record with this ${columns[0]} value already exists`
+				: `A record with this ${columns.join(" and ")} combination already exists`
+		unique[sqlNames.join(",")] = conflict(cause, `${table.sqlName}_${columns.join("_")}_duplicate`)
 	}
 	return Object.keys(unique).length > 0 ? unique : undefined
 }
@@ -166,7 +173,7 @@ function groupLines(type: string, group: Constraint | Record<string, Constraint>
 	}
 	const columns = Object.entries(group as Record<string, Constraint>).sort(byKey)
 	const blocks = columns.map(([column, constraint]) => [
-		`\t\t\t${column}: {`,
+		`\t\t\t${propertyName(column)}: {`,
 		...constraintLines(constraint, "\t\t\t\t"),
 		"\t\t\t}",
 	])
@@ -180,7 +187,7 @@ function generateConstraintMapCode(map: ConstraintMap, dbName: string): string {
 		const groups = Object.entries(constraints).sort(byKey)
 		return [
 			`\t/* ${tableName} table constraints */`,
-			`\t${tableName}: {`,
+			`\t${propertyName(tableName)}: {`,
 			...joined(groups.map(([type, group]) => groupLines(type, group as Constraint | Record<string, Constraint>))),
 			"\t}",
 		]

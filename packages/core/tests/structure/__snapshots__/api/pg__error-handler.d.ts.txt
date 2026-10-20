@@ -6,6 +6,8 @@ export type PgErrorRead = {
     constraint: string | undefined;
     /** the columns in `detail`'s `Key (a, b)=(…)` */
     keyColumns: string[];
+    /** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
+    referenced: boolean;
     table: string | undefined;
 };
 /**

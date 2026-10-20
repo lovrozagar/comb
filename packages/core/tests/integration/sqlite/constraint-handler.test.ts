@@ -27,6 +27,13 @@ const DDL = [
 	)`,
 	"INSERT INTO org VALUES ('o1')",
 	"INSERT INTO member (id, email, first, last, org_id) VALUES ('m1', 'a@x', 'Ada', 'L', 'o1')",
+	/* a parent with a foreign key of its own, still referenced by a child (fkdelete.ts) */
+	"CREATE TABLE author (id TEXT PRIMARY KEY)",
+	"CREATE TABLE post (id TEXT PRIMARY KEY, author_id TEXT REFERENCES author(id))",
+	"CREATE TABLE comment (id TEXT PRIMARY KEY, post_id TEXT REFERENCES post(id))",
+	"INSERT INTO author VALUES ('a1')",
+	"INSERT INTO post VALUES ('p1', 'a1')",
+	"INSERT INTO comment VALUES ('c1', 'p1')",
 ]
 
 const MAPS: ConstraintMap[] = [
@@ -40,9 +47,10 @@ const MAPS: ConstraintMap[] = [
 			primaryKey: { cause: "Member exists", errorKey: "member_id_taken" },
 			unique: {
 				email: { cause: "Email in use", errorKey: "member_email_taken" },
-				first: { cause: "Name in use", errorKey: "member_name_taken" },
+				"first,last": { cause: "Name in use", errorKey: "member_name_taken" },
 			},
 		},
+		post: { foreignKey: { author_id: { cause: "No such author", errorKey: "post_author_missing" } } },
 	},
 ]
 
@@ -91,9 +99,9 @@ const MAPPED = [
 		sql: "INSERT INTO member (id) VALUES ('m1')",
 	},
 	{
-		column: "first",
+		column: undefined,
 		errorKey: "member_name_taken",
-		name: "a composite unique, by its first column",
+		name: "a composite unique, by its columns together",
 		status: 409,
 		sql: "INSERT INTO member (id, first, last) VALUES ('m3', 'Ada', 'L')",
 	},
@@ -168,5 +176,31 @@ describe("sqliteErrorHandler on libsql through drizzle: unmapped", () => {
 		expect(await classify(db(), "SELECT reset_at FROM member")).toBe("not handled")
 		expect(() => sqliteErrorHandler(new Error("boom"), MAPS)).not.toThrow()
 		expect(() => sqliteErrorHandler("text", MAPS)).not.toThrow()
+	})
+})
+
+describe("sqliteErrorHandler on libsql: a delete of a row others still reference (C2)", () => {
+	const db = useMemberDb()
+
+	it("says the row is still referenced, and blames no foreign key of the deleted table", async () => {
+		const thrown = await classify(db(), "DELETE FROM post WHERE id = 'p1'")
+		expect(thrown).toMatchObject({
+			cause: "The record is still referenced by other records",
+			errorKey: "foreign_key_violation",
+			status: 409,
+			table: "post",
+		})
+		expect((thrown as CombError).column).toBeUndefined()
+	})
+
+	it("reports a composite unique that no map names as the pair, never as its first column", async () => {
+		const unmapped = [{ member: { unique: { first: { cause: "First in use", errorKey: "member_first_taken" } } } }]
+		const thrown = await classify(db(), "INSERT INTO member (id, first, last) VALUES ('m9', 'Ada', 'L')", {
+			maps: unmapped,
+		})
+		expect(thrown).toMatchObject({
+			cause: "Duplicate value for member.first, member.last",
+			errorKey: "unique_constraint_violation",
+		})
 	})
 })

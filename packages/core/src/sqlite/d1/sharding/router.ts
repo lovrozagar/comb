@@ -48,6 +48,12 @@ class ShardRouter {
 	private readonly maxOrgsPerShard: number
 	/** Revalidations running now, by org, so concurrent stale hits share one */
 	private readonly revalidating = new Map<string, Promise<void>>()
+	/**
+	 * How many times each org was invalidated in this isolate: a read that began before an
+	 * invalidate holds the mapping from before it and must not write it back. The guard is per
+	 * isolate; another isolate's in-flight read can still repopulate KV, for at most kvTtlSeconds.
+	 */
+	private readonly generations = new Map<string, number>()
 	private readonly totalShards: number
 
 	constructor(config: ShardRouterConfig) {
@@ -75,7 +81,7 @@ class ShardRouter {
 	/**
 	 * Resolve shard mapping via LRU (SWR) -> KV -> Core D1.
 	 * Returns undefined if org has no mapping.
-	 * Uses D1 Sessions API — reads hit nearest replica via bookmark from KV cache.
+	 * The core read opens a D1 session with no bookmark, so it goes to the nearest replica.
 	 */
 	async resolve(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping | undefined> {
 		/* L1: per-isolate LRU with SWR */
@@ -87,10 +93,11 @@ class ShardRouter {
 		}
 
 		/* L2: KV */
+		const generation = this.generationOf(orgId)
 		const kvValue = (await deps.kv.get(this.kvKey(orgId), "json")) as ShardMapping | null
 		if (kvValue) {
 			this.log("shard-router.hit", { orgId, tier: "kv" })
-			this.lru.set(orgId, kvValue)
+			if (this.generationOf(orgId) === generation) this.lru.set(orgId, kvValue)
 			return kvValue
 		}
 
@@ -101,7 +108,7 @@ class ShardRouter {
 			return undefined
 		}
 		this.log("shard-router.hit", { orgId, tier: "d1" })
-		this.populateCaches(orgId, mapping, { executionCtx, kv: deps.kv })
+		if (this.generationOf(orgId) === generation) this.populateCaches(orgId, mapping, { executionCtx, kv: deps.kv })
 		return mapping
 	}
 
@@ -152,11 +159,16 @@ class ShardRouter {
 
 	/** Invalidate both cache tiers. Use after whale graduation or reassignment. */
 	async invalidate(orgId: string, kv: ShardKv): Promise<void> {
+		this.generations.set(orgId, this.generationOf(orgId) + 1)
 		this.lru.delete(orgId)
 		await kv.delete(this.kvKey(orgId))
 	}
 
 	/* -- Private -- */
+
+	private generationOf(orgId: string): number {
+		return this.generations.get(orgId) ?? 0
+	}
 
 	private kvKey(orgId: string): string {
 		return `shard:${orgId}`
@@ -224,14 +236,16 @@ class ShardRouter {
 
 	/** Background SWR revalidation — refreshes LRU from KV or Core D1 */
 	private async revalidateShard(orgId: string, deps: ShardResolverDeps): Promise<void> {
+		const generation = this.generationOf(orgId)
+		const current = () => this.generationOf(orgId) === generation
 		try {
 			const kvValue = (await deps.kv.get(this.kvKey(orgId), "json")) as ShardMapping | null
 			if (kvValue) {
-				this.lru.set(orgId, kvValue)
+				if (current()) this.lru.set(orgId, kvValue)
 				return
 			}
 			const mapping = await this.readMapping(orgId, deps)
-			if (!mapping) return
+			if (!mapping || !current()) return
 			this.lru.set(orgId, mapping)
 			await deps.kv.put(this.kvKey(orgId), JSON.stringify(mapping), { expirationTtl: this.kvTtlSeconds })
 		} catch (e) {

@@ -349,6 +349,23 @@ describe("ShardRouter — the core database tier", () => {
 		expect(await d.kv.get("shard:org-d1", "json")).toMatchObject({ shardId: 1 })
 	})
 
+	it("caches nothing it read from the core database when the org was invalidated during the read", async () => {
+		const router = new ShardRouter({ totalShards: 2 })
+		const { calls, ctx } = mockWaitUntil()
+		const d = await seeded()
+		const kv = {
+			...d.kv,
+			delete: (key: string) => d.kv.delete(key),
+			get: async (key: string) => {
+				await router.invalidate("org-d1", d.kv)
+				return d.kv.get(key, "json")
+			},
+		} as unknown as typeof d.kv
+		expect(await router.resolve("org-d1", { coreDb: d.coreDb, kv }, ctx)).toMatchObject({ shardId: 1 })
+		await Promise.all(calls)
+		expect(await d.kv.get("shard:org-d1", "json")).toBeNull()
+	})
+
 	it("carries the session bookmark on what it allocates and what it reads, none when D1 has none", async () => {
 		const d = await seeded()
 		/* Miniflare's D1 has no withSession; a session over it reports a bookmark the way D1 does */
@@ -421,5 +438,46 @@ describe("ShardRouter — revalidation from the core database", () => {
 		await router.resolve("org-d1", d, ctx)
 		await Promise.all(calls)
 		expect(await d.kv.get("shard:org-d1")).toBeNull()
+	})
+})
+
+/** A KV whose next get waits until `release` hands it the old mapping */
+function slowKv() {
+	const pending: Array<(value: unknown) => void> = []
+	const kv = mockKV()
+	vi.mocked(kv.get).mockImplementationOnce((() => new Promise((resolve) => pending.push(resolve))) as never)
+	return { kv, release: (value: unknown) => pending.shift()?.(value) }
+}
+
+describe("ShardRouter — an invalidate while a read is in flight (E-N2)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("drops a revalidation's write when the org was invalidated meanwhile", async () => {
+		const router = new ShardRouter({ lruHardTtlMs: 10_000, lruTtlMs: 1_000, totalShards: 4 })
+		const { calls, ctx } = mockWaitUntil()
+		await router.resolve("org-1", { coreDb: mockD1(), kv: mockKV({ "shard:org-1": kvMapping }) }, ctx)
+		vi.advanceTimersByTime(1_500)
+		const { kv, release } = slowKv()
+		await router.resolve("org-1", { coreDb: mockD1(), kv }, ctx)
+		await router.invalidate("org-1", kv)
+		release(kvMapping)
+		await Promise.all(calls)
+		expect(await router.resolve("org-1", { coreDb: mockD1([]), kv: mockKV() }, ctx)).toBeUndefined()
+	})
+
+	it("drops a resolve's cache write when the org was invalidated during its KV read", async () => {
+		const router = new ShardRouter({ totalShards: 4 })
+		const { ctx } = mockWaitUntil()
+		const { kv, release } = slowKv()
+		const resolving = router.resolve("org-1", { coreDb: mockD1(), kv }, ctx)
+		await router.invalidate("org-1", kv)
+		release(kvMapping)
+		expect(await resolving).toEqual(kvMapping)
+		expect(await router.resolve("org-1", { coreDb: mockD1([]), kv: mockKV() }, ctx)).toBeUndefined()
 	})
 })

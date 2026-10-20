@@ -106,7 +106,13 @@ describe("constraintError: check, not null, foreign key", () => {
 			table: "store",
 		})
 		expect(fk('update "store" set "owner_id" = ?')).toMatchObject({ errorKey: "store_owner_missing" })
-		expect(fk('delete from "store" where "id" = ?')).toMatchObject({ errorKey: "store_owner_missing" })
+		/* a delete fails on a row that still references the deleted one, never on the store's own key */
+		expect(fk('delete from "store" where "id" = ?')).toMatchObject({
+			cause: "The record is still referenced by other records",
+			column: undefined,
+			errorKey: "foreign_key_violation",
+			table: "store",
+		})
 		expect(fk('insert into "legacy" ("id") values (?)')).toMatchObject({ errorKey: "foreign_key_violation" })
 		expect(fk('insert into "multi" ("a_id") values (?)')).toMatchObject({
 			column: undefined,

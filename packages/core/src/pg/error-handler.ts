@@ -14,6 +14,8 @@ export type PgErrorRead = {
 	constraint: string | undefined
 	/** the columns in `detail`'s `Key (a, b)=(…)` */
 	keyColumns: string[]
+	/** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
+	referenced: boolean
 	table: string | undefined
 }
 
@@ -69,6 +71,7 @@ export function readPgError(error: unknown): PgErrorRead | null {
 			column: text(f.column) ?? text(f.column_name),
 			constraint: text(f.constraint) ?? text(f.constraint_name),
 			keyColumns: keyColumns(text(f.detail)),
+			referenced: / is still referenced from table /.test(text(f.detail) ?? ""),
 			table: text(f.table) ?? text(f.table_name),
 		}
 	}
@@ -79,13 +82,29 @@ type Violation = { maps: ConstraintMap[]; read: PgErrorRead; source: unknown }
 
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
+/** `name` cut to at most `bytes` UTF-8 bytes, never inside a character */
+function truncateUtf8(name: string, bytes: number): string {
+	let out = ""
+	let used = 0
+	for (const char of name) {
+		used += new TextEncoder().encode(char).length
+		if (used > bytes) break
+		out += char
+	}
+	return out
+}
+
+/* Postgres names a primary key `<table>_pkey`, the table cut so the whole fits its 63-byte identifiers */
+const pkeyOf = (table: string) => `${truncateUtf8(table, 58)}_pkey`
+
 function unique(v: Violation): CombError {
 	const { constraint, keyColumns: columns, table } = v.read
-	if (constraint !== undefined && table !== undefined && constraint === `${table}_pkey`) return primaryKey(v)
-	const column = columns[0]
-	const entry = lookup(v.maps, table, (t) => own(t.unique, column) ?? own(t.unique, constraint))
-	const where = column === undefined ? undefined : table === undefined ? column : `${table}.${column}`
-	const cause = where === undefined ? "Duplicate value detected" : `Duplicate value for ${where}`
+	if (constraint !== undefined && table !== undefined && constraint === pkeyOf(table)) return primaryKey(v)
+	/* a composite unique is keyed by its columns together; one column alone would blame half the pair */
+	const column = columns.length === 1 ? columns[0] : undefined
+	const entry = lookup(v.maps, table, (t) => own(t.unique, columns.join(",")) ?? own(t.unique, constraint))
+	const named = columns.map((c) => (table === undefined ? c : `${table}.${c}`)).join(", ")
+	const cause = named === "" ? "Duplicate value detected" : `Duplicate value for ${named}`
 	const fallback = { cause, errorKey: combErrorKeys.UNIQUE_CONSTRAINT_VIOLATION, status: "conflict" } as const
 	return toError(v, { column, entry, fallback, table })
 }
@@ -103,7 +122,16 @@ function primaryKey(v: Violation): CombError {
 }
 
 function foreignKey(v: Violation): CombError {
-	const { constraint, keyColumns: columns, table } = v.read
+	const { constraint, keyColumns: columns, referenced, table } = v.read
+	/* the key named is the parent's, on a child's constraint: nothing in the map describes it */
+	if (referenced) {
+		const fallback = {
+			cause: "The record is still referenced by other records",
+			errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
+			status: "conflict",
+		} as const
+		return toError(v, { entry: undefined, fallback, table })
+	}
 	const column = columns[0]
 	const entry = lookup(v.maps, table, (t) => own(t.foreignKey, column) ?? own(t.foreignKey, constraint))
 	const fallback = {
@@ -187,9 +215,16 @@ const RESOURCE: Record<string, Fallback> = {
 		status: "unprocessable_entity",
 	},
 	"53200": EXHAUSTED,
-	"57P01": READONLY,
+	/* too many connections, and a server out of them: what a pooler or a serverless plan hits first */
+	"53300": UNAVAILABLE,
+	"53400": UNAVAILABLE,
+	"55P03": RETRY,
+	/* a terminated backend, a shutdown, an idle session or transaction the server ended */
+	"57P01": UNAVAILABLE,
 	"57P02": UNAVAILABLE,
 	"57P03": UNAVAILABLE,
+	"57P05": UNAVAILABLE,
+	"25P03": UNAVAILABLE,
 }
 
 /**

@@ -33,6 +33,12 @@ declare class ShardRouter {
     private readonly maxOrgsPerShard;
     /** Revalidations running now, by org, so concurrent stale hits share one */
     private readonly revalidating;
+    /**
+     * How many times each org was invalidated in this isolate: a read that began before an
+     * invalidate holds the mapping from before it and must not write it back. The guard is per
+     * isolate; another isolate's in-flight read can still repopulate KV, for at most kvTtlSeconds.
+     */
+    private readonly generations;
     private readonly totalShards;
     constructor(config: ShardRouterConfig);
     /**
@@ -43,7 +49,7 @@ declare class ShardRouter {
     /**
      * Resolve shard mapping via LRU (SWR) -> KV -> Core D1.
      * Returns undefined if org has no mapping.
-     * Uses D1 Sessions API — reads hit nearest replica via bookmark from KV cache.
+     * The core read opens a D1 session with no bookmark, so it goes to the nearest replica.
      */
     resolve(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping | undefined>;
     /**
@@ -61,6 +67,7 @@ declare class ShardRouter {
     getHandle(mapping: ShardMapping, env: Record<string, unknown>): ShardDbHandle;
     /** Invalidate both cache tiers. Use after whale graduation or reassignment. */
     invalidate(orgId: string, kv: ShardKv): Promise<void>;
+    private generationOf;
     private kvKey;
     /** The D1 shard with the most remaining capacity; shards_full (503) when none has any */
     private pickShard;

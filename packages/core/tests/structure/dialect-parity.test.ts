@@ -71,6 +71,7 @@ const UNREACHABLE: Record<string, string> = {
 	"53000": "insufficient resources needs an exhausted server",
 	"53100": "disk full needs a full volume",
 	"53200": "out of memory needs an exhausted server",
+	"53400": "a configuration limit, such as max_locks_per_transaction, needs the server reconfigured to a tiny one",
 	"57P02": "a crash shutdown takes the server down",
 	"57P03": "cannot-connect-now only answers new connections during startup or recovery",
 }

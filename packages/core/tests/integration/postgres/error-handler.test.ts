@@ -6,11 +6,15 @@
 import { sql } from "drizzle-orm"
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres"
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js"
+import pg from "pg"
 import { expect, it } from "vitest"
 import { CombError } from "../../../src/error.ts"
 import { pgErrorHandler } from "../../../src/pg/error-handler.ts"
 import type { ConstraintMap } from "../../../src/types.ts"
-import { describePg, type PgSessions, usePg } from "../support/pg.ts"
+import { describePg, type PgSessions, pgUrl, usePg } from "../support/pg.ts"
+
+/* 60 characters: Postgres cuts the name of its primary key to fit 63 bytes */
+const LONG = "a_table_whose_name_runs_long_enough_that_its_pkey_is_cut_xyz"
 
 const DDL = `
 	CREATE TEMP TABLE org (id text PRIMARY KEY);
@@ -27,6 +31,8 @@ const DDL = `
 	);
 	INSERT INTO org VALUES ('o1');
 	INSERT INTO member (id, email, first, last, org_id) VALUES ('m1', 'a@x', 'Ada', 'L', 'o1');
+	CREATE TEMP TABLE ${LONG} (id text PRIMARY KEY);
+	INSERT INTO ${LONG} VALUES ('l1');
 `
 
 const MAPS: ConstraintMap[] = [
@@ -40,9 +46,10 @@ const MAPS: ConstraintMap[] = [
 			primaryKey: { cause: "Member exists", errorKey: "member_id_taken" },
 			unique: {
 				email: { cause: "Email in use", errorKey: "member_email_taken" },
-				first: { cause: "Name in use", errorKey: "member_name_taken" },
+				"first,last": { cause: "Name in use", errorKey: "member_name_taken" },
 			},
 		},
+		[LONG]: { primaryKey: { cause: "Long row exists", errorKey: "long_id_taken" } },
 	},
 ]
 
@@ -55,9 +62,9 @@ const CASES = [
 	},
 	{ column: undefined, errorKey: "member_id_taken", name: "primary key", sql: "INSERT INTO member (id) VALUES ('m1')" },
 	{
-		column: "first",
+		column: undefined,
 		errorKey: "member_name_taken",
-		name: "composite unique",
+		name: "composite unique, by its columns together",
 		sql: "INSERT INTO member (id, first, last) VALUES ('m3', 'Ada', 'L')",
 	},
 	{
@@ -115,6 +122,20 @@ describePg("pgErrorHandler on a real server", () => {
 			expect(thrown).toMatchObject({ errorKey, table: "member" })
 			expect((thrown as CombError).column).toBe(column)
 			expect((thrown as CombError).source).toBeInstanceOf(Error)
+		})
+
+		it(`${driver}: says a row is still referenced when a delete fails on a child's key`, async () => {
+			const thrown = await handled(sessions, runner, "DELETE FROM org WHERE id = 'o1'")
+			expect(thrown).toMatchObject({
+				cause: "The record is still referenced by other records",
+				errorKey: "foreign_key_violation",
+			})
+			expect((thrown as CombError).column).toBeUndefined()
+		})
+
+		it(`${driver}: finds the primary key of a table whose name Postgres cut`, async () => {
+			const thrown = await handled(sessions, runner, `INSERT INTO ${LONG} VALUES ('l1')`)
+			expect(thrown).toMatchObject({ errorKey: "long_id_taken", table: LONG })
 		})
 
 		it(`${driver}: leaves a non-constraint error alone`, async () => {
@@ -191,7 +212,7 @@ describePg("pgErrorHandler on a real server: a server that refuses or ends the s
 		expect(caught(failure)).toMatchObject({ errorKey: "database_readonly", status: 503 })
 	})
 
-	it("maps a backend the server terminates (57P01) to 503 database_readonly", async () => {
+	it("maps a backend the server terminates (57P01) to 503 database_unavailable, as no maintenance is under way", async () => {
 		/* node-postgres reads the server's error before the socket closes; postgres.js reports only the close */
 		const victim = sessions.pg()
 		victim.on("error", () => undefined)
@@ -211,6 +232,78 @@ describePg("pgErrorHandler on a real server: a server that refuses or ends the s
 		await admin`SELECT pg_terminate_backend(${pid as number})`
 		const failure = await sleeping
 		expect(failure).toMatchObject({ code: "57P01" })
-		expect(caught(failure)).toMatchObject({ errorKey: "database_readonly", status: 503 })
+		expect(caught(failure)).toMatchObject({ errorKey: "database_unavailable", status: 503 })
+	})
+})
+
+describePg("pgErrorHandler on a real server: a busy server", () => {
+	const sessions = usePg()
+
+	it("maps a lock it gave up waiting for (55P03) to 503, a retry", async () => {
+		const a = sessions.pg()
+		const b = sessions.sql()
+		await a.query("BEGIN")
+		try {
+			await a.query("SELECT pg_advisory_xact_lock(7710)")
+			const failure = await b
+				.begin(async (tx) => {
+					await tx`SET LOCAL lock_timeout = '50ms'`
+					await tx`SELECT pg_advisory_xact_lock(7710)`
+				})
+				.then(
+					() => null,
+					(error: unknown) => error,
+				)
+			expect(failure).toMatchObject({ code: "55P03" })
+			expect(caught(failure)).toMatchObject({ errorKey: "database_unavailable", status: 503 })
+		} finally {
+			await a.query("ROLLBACK")
+		}
+	})
+
+	it("maps too many connections for a role (53300) to 503", async () => {
+		const role = `comb_nolimit_${Math.random().toString(36).slice(2, 8)}`
+		const admin = sessions.pg()
+		await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD 'x' CONNECTION LIMIT 0`)
+		try {
+			const url = new URL(pgUrl() as string)
+			url.username = role
+			url.password = "x"
+			const client = new pg.Client({ connectionString: url.href })
+			const failure = await client.connect().then(
+				() => null,
+				(error: unknown) => error,
+			)
+			await client.end().catch(() => undefined)
+			expect(failure).toMatchObject({ code: "53300" })
+			expect(caught(failure)).toMatchObject({ errorKey: "database_unavailable", status: 503 })
+		} finally {
+			await admin.query(`DROP ROLE ${role}`)
+		}
+	})
+})
+
+describePg("pgErrorHandler on a real server: a session the server ends for idling", () => {
+	const sessions = usePg()
+
+	/** The error the server sends `victim` when it ends the session after `setting` passes */
+	async function endedFor(setting: string, inTransaction: boolean): Promise<unknown> {
+		const victim = sessions.pg()
+		const ended = new Promise<unknown>((resolve) => victim.on("error", resolve))
+		if (inTransaction) await victim.query("BEGIN")
+		await victim.query(`SET ${inTransaction ? "LOCAL " : ""}${setting} = '100ms'`)
+		return ended
+	}
+
+	it("maps an idle session the server ended (57P05) to 503", async () => {
+		const failure = await endedFor("idle_session_timeout", false)
+		expect(failure).toMatchObject({ code: "57P05" })
+		expect(caught(failure)).toMatchObject({ errorKey: "database_unavailable", status: 503 })
+	})
+
+	it("maps an idle transaction the server ended (25P03) to 503", async () => {
+		const failure = await endedFor("idle_in_transaction_session_timeout", true)
+		expect(failure).toMatchObject({ code: "25P03" })
+		expect(caught(failure)).toMatchObject({ errorKey: "database_unavailable", status: 503 })
 	})
 })

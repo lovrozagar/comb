@@ -22,3 +22,6 @@ export function camelToKebab(str: string): string {
 export function toScreamingSnakeCase(str: string): string {
 	return str.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase()
 }
+
+/** A key as an object property: bare when it is an identifier, quoted otherwise */
+export const propertyName = (key: string): string => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : JSON.stringify(key))
