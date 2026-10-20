@@ -5,6 +5,7 @@ import {
 	extractDbName,
 	getTableName,
 	getTablesImportPath,
+	importPathFrom,
 	tableSourceFiles,
 } from "./ts-morph.ts"
 
@@ -98,14 +99,24 @@ describe("project helpers", () => {
 })
 
 describe("tableSourceFiles", () => {
-	it("follows re-exports from the tables file once each, cycles included, and leaves the rest of the folder", () => {
+	it("follows re-exports from the tables file once each, cycles included, past local exports and packages, and leaves the rest of the folder", () => {
 		const project = createProject()
-		project.createSourceFile("/p/db.x.tables.ts", 'export * from "./a"\nexport { b } from "./b"\nexport const t = 1')
+		project.createSourceFile(
+			"/p/db.x.tables.ts",
+			'export * from "./a"\nexport { b } from "./b"\nexport * from "drizzle-orm"\nconst t = 1\nexport { t }',
+		)
 		project.createSourceFile("/p/a.ts", 'export * from "./db.x.tables"\nexport const a = 1')
 		project.createSourceFile("/p/b.ts", "export const b = 1")
 		project.createSourceFile("/p/db.y.tables.ts", "export const y = 1")
 		const names = tableSourceFiles(project, "/p/db.x.tables.ts").map((f) => f.getBaseName())
 		expect(names).toEqual(["db.x.tables.ts", "a.ts", "b.ts"])
 		expect(tableSourceFiles(project, "/p/missing.ts")).toEqual([])
+	})
+})
+
+describe("importPathFrom", () => {
+	it("imports a sibling with ./, a file elsewhere with ../, never with .ts", () => {
+		expect(importPathFrom("/p/src/gen/orm.gen.ts", "/p/src/gen/db.relations.gen.ts")).toBe("./db.relations.gen")
+		expect(importPathFrom("/p/src/gen/orm.gen.ts", "/p/src/db/db.core.tables.ts")).toBe("../db/db.core.tables")
 	})
 })

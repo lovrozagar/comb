@@ -80,16 +80,16 @@ export function extractDbName(filePath: string): string {
 	return "db"
 }
 
-/**
- * Get the import path for the tables file (without extension), relative to same directory.
- * e.g. test.db.core.tables.gen.ts -> ./test.db.core.tables.gen
- */
 /** The module specifier `fromFile` imports `target` by: relative, `./` or `../` first, no `.ts` */
 export function importPathFrom(fromFile: string, target: string): string {
 	const relative = path.relative(path.dirname(fromFile), target).replace(/\.ts$/, "").split(path.sep).join("/")
 	return relative.startsWith(".") ? relative : `./${relative}`
 }
 
+/**
+ * Get the import path for the tables file (without extension), relative to same directory.
+ * e.g. test.db.core.tables.gen.ts -> ./test.db.core.tables.gen
+ */
 export function getTablesImportPath(tablesPath: string): string {
 	const basename = path.basename(tablesPath, ".ts")
 	return `./${basename}`
