@@ -12,6 +12,8 @@ import path from "node:path"
 import { afterEach, expect, it } from "vitest"
 import { runCli } from "../../../src/cli/index.ts"
 import { migrationHashes } from "../../../src/migrate/core/parse.ts"
+import { guardRebuilds } from "../../../src/migrate/core/rebuild-guard.ts"
+import { extractSchema } from "../../../src/migrate/core/schema.ts"
 import { run, type Run } from "../../../src/migrate/core/process.ts"
 import { describeAtlas } from "../support/atlas.ts"
 
@@ -98,7 +100,9 @@ describeAtlas("comb migrate on D1 through wrangler, --local", () => {
 		expect(await runCli(["migrate", "apply", "core", "--local"], fixed), fixed.errors.join("\n")).toBe(0)
 		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_bad.sql"])
 	}, 120_000)
+})
 
+describeAtlas("comb migrate on D1 through wrangler, --local: history and the live schema", () => {
 	it("copies comb 0.7's record into d1_migrations with baseline, so apply runs only what was never applied", async () => {
 		const dir = project(INIT)
 		const hash = migrationHashes(INIT["20260101000000_init.sql"])[0] as string
@@ -116,5 +120,27 @@ describeAtlas("comb migrate on D1 through wrangler, --local", () => {
 			"20260101000000_init.sql",
 			"20260102000000_tag.sql",
 		])
+	}, 120_000)
+
+	it("refuses a guarded rebuild a table no migration made would cascade from, before wrangler runs, and keeps its rows", async () => {
+		const init =
+			"CREATE TABLE `u` (`id` integer PRIMARY KEY);\nCREATE TABLE `post` (`id` integer PRIMARY KEY, `u` integer REFERENCES `u`(`id`) ON DELETE CASCADE);"
+		const dir = project({ "20260101000000_init.sql": init })
+		expect(await runCli(["migrate", "apply", "core", "--local"], io(dir))).toBe(0)
+		const outside =
+			"CREATE TABLE extra (u integer REFERENCES u(id) ON DELETE CASCADE); INSERT INTO u VALUES (1); INSERT INTO extra VALUES (1)"
+		expect(wrangler(dir)("wrangler", ["d1", "execute", "core", "--local", `--command=${outside}`]).code).toBe(0)
+		const rebuild = guardRebuilds(
+			"CREATE TABLE `new_u` (`id` integer NOT NULL, PRIMARY KEY (`id`));\nINSERT INTO `new_u` (`id`) SELECT `id` FROM `u`;\nDROP TABLE `u`;\nALTER TABLE `new_u` RENAME TO `u`;\n",
+			extractSchema(init),
+		)
+		write(dir, { "20260102000000_rebuild.sql": rebuild })
+		const refused = io(dir)
+		expect(await runCli(["migrate", "apply", "core", "--local", "--yes"], refused)).toBe(1)
+		expect(refused.errors[0]).toContain(
+			"rebuilds u, which the database's table extra references although no migration made it do so",
+		)
+		expect(column(dir, "SELECT count(*) FROM extra")).toEqual([1])
+		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
 	}, 120_000)
 })

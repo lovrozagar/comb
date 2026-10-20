@@ -14,8 +14,8 @@ import type { Connection, ConnectionProvider, D1ProviderConfig, QueryResult, Res
 const wranglerResultSchema = () =>
 	z.array(z.object({ results: z.array(z.record(z.string(), z.unknown())).default([]) }))
 
-/** The rows of `wrangler d1 execute --json`; output of any other shape is an error, never "no rows" */
-function readResults(stdout: string): Array<Record<string, unknown>> {
+/** Each statement's rows from `wrangler d1 execute --json`; output of any other shape is an error, never "no rows" */
+function readAllResults(stdout: string): Array<Array<Record<string, unknown>>> {
 	let json: unknown
 	try {
 		json = JSON.parse(stdout)
@@ -24,7 +24,16 @@ function readResults(stdout: string): Array<Record<string, unknown>> {
 	}
 	const parsed = wranglerResultSchema().safeParse(json)
 	if (!parsed.success) throw new Error(`wrangler printed JSON comb cannot read: ${stdout.trim().slice(0, 200)}`)
-	return parsed.data[0]?.results ?? []
+	return parsed.data.map((result) => result.results)
+}
+
+/** The first statement's rows of `wrangler d1 execute --json` */
+const readResults = (stdout: string): Array<Record<string, unknown>> => readAllResults(stdout)[0] ?? []
+
+/** Rows as a QueryResult: wrangler names the columns on every row, and an empty result has none */
+function asQueryResult(results: Array<Record<string, unknown>>): QueryResult {
+	const columns = Object.keys(results[0] ?? {})
+	return { columns, rows: results.map((row) => columns.map((col) => row[col])) }
 }
 
 function runWrangler(exec: Run, args: string[]): string {
@@ -108,13 +117,13 @@ function createD1Connection(databaseName: string, flags: readonly string[], exec
 		async execute(sql: string, params?: unknown[]): Promise<QueryResult> {
 			const finalSql = params && params.length > 0 ? inlineParams(sql, params) : sql
 			const stdout = runWrangler(exec, ["d1", "execute", databaseName, ...flags, "--json", `--command=${finalSql}`])
-			const results = readResults(stdout)
-			/* wrangler names the columns on every row; an empty result has none */
-			const columns = Object.keys(results[0] ?? {})
-			return {
-				columns,
-				rows: results.map((row) => columns.map((col) => row[col])),
-			}
+			return asQueryResult(readResults(stdout))
+		},
+
+		async executeEach(statements: readonly string[]): Promise<QueryResult[]> {
+			const command = statements.join(";\n")
+			const stdout = runWrangler(exec, ["d1", "execute", databaseName, ...flags, "--json", `--command=${command}`])
+			return readAllResults(stdout).map(asQueryResult)
 		},
 	}
 }

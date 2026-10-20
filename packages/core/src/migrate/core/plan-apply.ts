@@ -6,9 +6,10 @@
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import type { ExtractedSchema, ParsedMigration } from "../types.ts"
+import type { Connection, ExtractedSchema, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { verifySum } from "./atlas-dir.ts"
+import { refuseUnseenReach } from "./live-guard.ts"
 import { parseMigration } from "./parse.ts"
 import type { Run } from "./process.ts"
 import { extractSchema } from "./schema.ts"
@@ -28,6 +29,8 @@ type PlanOptions = {
 	print(line: string): void
 	/** false for one file applied on its own, which no atlas.sum or order covers */
 	whole?: boolean | undefined
+	/** the database, whose own foreign keys and triggers a guarded rebuild is checked against */
+	conn?: Connection | undefined
 }
 
 /** The leading number of a migration file name: `20260101000000_x.sql` is 20260101000000 */
@@ -76,6 +79,7 @@ async function planApply(options: PlanOptions): Promise<Pending[]> {
 		if (approval.approvedBy !== undefined) print(`Approved in ${name}: ${approval.approvedBy}`)
 		pending.push({ before, migration, name, sql })
 	}
+	if (options.conn !== undefined) await refuseUnseenReach(options.conn, pending)
 	return pending
 }
 

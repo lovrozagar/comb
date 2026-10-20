@@ -37,7 +37,8 @@ describe("alterTableFindings", () => {
 		expect(levels("ALTER TABLE `new_post` RENAME TO `gone`", lite)).toEqual(["unsafe"])
 	})
 
-	it("calls an unknown action safe", () => {
-		expect(levels("ALTER TABLE post OWNER TO r")).toEqual([])
+	it("calls an unknown action safe, and a new owner cautious, as an owner bypasses row level security", () => {
+		expect(levels("ALTER TABLE post SET (fillfactor = 70)")).toEqual([])
+		expect(levels("ALTER TABLE post OWNER TO r")).toEqual(["cautious"])
 	})
 })

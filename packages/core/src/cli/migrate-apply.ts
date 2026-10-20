@@ -107,6 +107,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	const pending = await planApply({
 		applied: (_, sql) => migrationHashes(sql).some((hash) => recorded.has(hash)),
 		approve: (migration) => approveMigration(migration, { confirm: io.confirm, target: target.name, yes }),
+		conn: target.conn,
 		dir,
 		exec: io.run ?? runProcess,
 		files,

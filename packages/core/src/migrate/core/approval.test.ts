@@ -79,3 +79,18 @@ describe("approveMigration", () => {
 		})
 	})
 })
+
+describe("approveMigration: what the refusal names", () => {
+	it("names each statement once, a drop it already shows included", async () => {
+		const { parseMigration } = await import("./parse.ts")
+		const migration = parseMigration("DROP TABLE `vote`;\nALTER TABLE post DROP COLUMN body;", "1_x.sql", {
+			dialect: "sqlite",
+		})
+		const approval = await approveMigration(migration, { target: "core", yes: false })
+		expect(approval).toEqual({
+			message:
+				'1_x.sql is unsafe (DROP COLUMN post.body; DROP TABLE `vote`; ALTER TABLE post DROP COLUMN body); confirm it on a terminal, or approve it in the file with a line "-- comb:allow-unsafe: <reason>"',
+			ok: false,
+		})
+	})
+})

@@ -261,3 +261,12 @@ describe("classifyMigration on Atlas's SQLite table rebuild", () => {
 		},
 	)
 })
+
+describe("classifyMigration: each statement once", () => {
+	it("lists a statement only at its strictest level", () => {
+		expect(pg("DROP FUNCTION f CASCADE")).toMatchObject({
+			cautiousStatements: [],
+			unsafeStatements: ["DROP FUNCTION f CASCADE"],
+		})
+	})
+})

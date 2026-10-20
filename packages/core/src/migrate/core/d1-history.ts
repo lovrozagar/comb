@@ -143,6 +143,7 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	const pending = await planApply({
 		applied: (name) => applied.has(name),
 		approve: options.approve,
+		conn: target.conn,
 		dir: target.migrationsDir,
 		exec: target.exec,
 		files,

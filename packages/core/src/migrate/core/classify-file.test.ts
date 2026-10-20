@@ -36,3 +36,14 @@ INSERT INTO post_fts(post_fts) VALUES ('rebuild');`
 		)
 	})
 })
+
+describe("classifyMigration on a SQLite pragma", () => {
+	it.each([
+		["PRAGMA writable_schema = 1;", "unsafe"],
+		["PRAGMA ignore_check_constraints = on;", "cautious"],
+		["PRAGMA foreign_keys = off;", "cautious"],
+		["PRAGMA defer_foreign_keys = on;", "safe"],
+	])("rates %j %s, as only defer_foreign_keys is a pragma comb writes", (sql, safety) => {
+		expect(lite(sql).safety).toBe(safety)
+	})
+})

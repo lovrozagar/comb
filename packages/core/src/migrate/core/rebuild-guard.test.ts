@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { classifyMigration } from "./classify.ts"
 import { guardRebuilds } from "./rebuild-guard.ts"
 import { extractSchema } from "./schema.ts"
@@ -71,7 +72,7 @@ const classify = (sql: string) => classifyMigration(sql, { before: BEFORE, diale
 describe("classifyMigration on a rebuild of a referenced table", () => {
 	it("calls comb's guarded rebuild cautious, and the same rebuild unguarded unsafe, naming what it reaches", () => {
 		expect(classify(guardRebuilds(REBUILD, BEFORE, FTS))).toMatchObject({
-			cautiousStatements: ["DROP TABLE `u`"],
+			cautiousStatements: ["DROP TABLE `u` (rebuilds u; comb keeps the rows of post, tag)"],
 			safety: "cautious",
 		})
 		expect(classify(REBUILD).unsafeStatements).toEqual([
@@ -89,5 +90,49 @@ describe("classifyMigration on a rebuild of a referenced table", () => {
 		expect(classify(short).safety).toBe("unsafe")
 		const cut = guardRebuilds(REBUILD, BEFORE, FTS).split("ALTER TABLE `new_u` RENAME TO `u`;")[0]
 		expect(classify(`${cut}ALTER TABLE \`new_u\` RENAME TO \`u\`;`).safety).toBe("unsafe")
+	})
+})
+
+/** Atlas's rebuild of `table` into a copy with `columns`, copying its id */
+const rebuild = (table: string, columns: string) =>
+	`CREATE TABLE \`new_${table}\` (${columns});\nINSERT INTO \`new_${table}\` (\`id\`) SELECT \`id\` FROM \`${table}\`;\nDROP TABLE \`${table}\`;\nALTER TABLE \`new_${table}\` RENAME TO \`${table}\`;\n`
+
+describe("guardRebuilds: the order it empties and refills", () => {
+	/* u ← p, u ← c, and c → p ON DELETE RESTRICT: c must go before p, whatever order the keys were declared in */
+	const before = extractSchema(`CREATE TABLE \`u\` (\`id\` integer PRIMARY KEY);
+CREATE TABLE \`p\` (\`id\` integer PRIMARY KEY, \`u\` integer REFERENCES \`u\`(\`id\`));
+CREATE TABLE \`c\` (\`id\` integer PRIMARY KEY, \`u\` integer REFERENCES \`u\`(\`id\`), \`p\` integer REFERENCES \`p\`(\`id\`) ON DELETE RESTRICT);`)
+
+	it("empties each child before its parent, and refills each parent before its child", () => {
+		const sql = guardRebuilds(
+			rebuild(
+				"p",
+				"`id` integer NOT NULL, `u` integer NULL, PRIMARY KEY (`id`), CONSTRAINT `0` FOREIGN KEY (`u`) REFERENCES `u` (`id`)",
+			) + rebuild("u", "`id` integer NOT NULL, PRIMARY KEY (`id`)"),
+			before,
+		)
+		const block = sql.slice(sql.indexOf("CREATE TABLE `new_u`"))
+		expect(block.indexOf("DELETE FROM `c`")).toBeLessThan(block.indexOf("DELETE FROM `p`"))
+		expect(block.indexOf("INSERT INTO `p`")).toBeLessThan(block.indexOf("INSERT INTO `c`"))
+	})
+
+	it("keeps every row on libsql with foreign keys on and no defer_foreign_keys", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple(
+			"CREATE TABLE `u` (`id` integer PRIMARY KEY); CREATE TABLE `p` (`id` integer PRIMARY KEY, `u` integer REFERENCES `u`(`id`)); CREATE TABLE `c` (`id` integer PRIMARY KEY, `u` integer REFERENCES `u`(`id`), `p` integer REFERENCES `p`(`id`) ON DELETE RESTRICT); INSERT INTO u VALUES (1); INSERT INTO p VALUES (10, 1); INSERT INTO c VALUES (100, 1, 10);",
+		)
+		const sql = guardRebuilds(
+			rebuild(
+				"p",
+				"`id` integer NOT NULL, `u` integer NULL, PRIMARY KEY (`id`), CONSTRAINT `0` FOREIGN KEY (`u`) REFERENCES `u` (`id`)",
+			) + rebuild("u", "`id` integer NOT NULL, PRIMARY KEY (`id`)"),
+			before,
+		)
+		await conn.client.executeMultiple(`BEGIN;\n${sql}\nCOMMIT;`)
+		const rows = await conn.client.execute(
+			"SELECT (SELECT count(*) FROM u) AS u, (SELECT count(*) FROM p) AS p, (SELECT count(*) FROM c) AS c",
+		)
+		expect({ ...rows.rows[0] }).toEqual({ c: 1, p: 1, u: 1 })
+		await conn.close()
 	})
 })

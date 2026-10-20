@@ -77,7 +77,7 @@ describe("migrate apply and baseline: a Postgres database, through Atlas", () =>
 		const dir = postgresProject({ "1_drop.sql": 'DROP TABLE "post";\n' })
 		const io = makeIo(dir, pgAtlas(["1_drop.sql"]))
 		expect(await runCli(["migrate", "apply", "core", "--yes"], io)).toBe(1)
-		expect(io.errors[0]).toContain('1_drop.sql is unsafe (DROP TABLE post; DROP TABLE "post")')
+		expect(io.errors[0]).toContain('1_drop.sql is unsafe (DROP TABLE "post");')
 	})
 })
 

@@ -65,6 +65,29 @@ describe("createD1Provider: execute", () => {
 	})
 })
 
+describe("createD1Provider: several reads at once", () => {
+	it("runs them in one wrangler command, with its config and env, and returns each one's rows", async () => {
+		const run = fakeRun(() => json([{ results: [{ table: "u" }] }, { results: [] }]))
+		const conn = await connect(run, { ...CONFIG, wranglerConfig: "/w/wrangler.toml", wranglerEnv: "prod" })
+		expect(await conn.executeEach?.(["PRAGMA foreign_key_list(a)", "PRAGMA foreign_key_list(b)"])).toEqual([
+			{ columns: ["table"], rows: [["u"]] },
+			{ columns: [], rows: [] },
+		])
+		expect(run.calls[0]?.args).toEqual([
+			"d1",
+			"execute",
+			"core-local",
+			"--remote",
+			"--config",
+			"/w/wrangler.toml",
+			"--env",
+			"prod",
+			"--json",
+			"--command=PRAGMA foreign_key_list(a);\nPRAGMA foreign_key_list(b)",
+		])
+	})
+})
+
 describe("createD1Provider: parameters and output", () => {
 	it("inlines every supported parameter type as a SQL literal", async () => {
 		const run = fakeRun(() => json([{ results: [] }]))

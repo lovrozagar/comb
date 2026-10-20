@@ -50,7 +50,11 @@ async function approveMigration(migration: Reviewed, options: ApprovalOptions): 
 	const approvedBy = unsafe ? inFileApproval(migration.sql, options.dialect) : undefined
 	if (approvedBy !== undefined) return { approvedBy, ok: true }
 	if (!unsafe && options.yes) return { ok: true }
-	const listed = [...new Set([...migration.drops, ...(unsafe ? c.unsafeStatements : c.cautiousStatements)])]
+	const statements = unsafe ? c.unsafeStatements : c.cautiousStatements
+	/* a drop a listed statement already shows, quotes aside, is not named twice */
+	const shown = statements.map((stmt) => stmt.replace(/["`]/g, ""))
+	const drops = migration.drops.filter((drop) => !shown.some((stmt) => stmt.includes(drop)))
+	const listed = [...new Set([...drops, ...statements])]
 	if (options.confirm !== undefined && (await options.confirm(dropsQuestion(listed, options.target))))
 		return { ok: true }
 	const how = unsafe

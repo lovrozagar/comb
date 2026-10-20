@@ -10,8 +10,8 @@
  * foreign-key path to `T` over any ON DELETE action, Atlas's `new_T` included when it references
  * `T` (a self-reference points at the original). Between Atlas's copy and its drop, comb saves
  * each closure table into `_comb_keep_<t>` (rowid kept, generated columns left out), saves `T`'s
- * sqlite_sequence value, and empties the closure, children first. After the rename it refills
- * the closure, parents first, restores the sequence, and drops the keep tables. The rows, rowids,
+ * sqlite_sequence value, and empties the closure, each table after the tables that reference it.
+ * After the rename it refills the closure in the opposite order, parents first, restores the sequence, and drops the keep tables. The rows, rowids,
  * keys and sequences end as they were, at twice the closure's writes.
  *
  * A trigger on a reached table fires on both the emptying and the refill. That nets out only for
@@ -85,6 +85,24 @@ function reached(table: string, schema: ExtractedSchema): string[] {
 	return out
 }
 
+/**
+ * The closure in the order to empty it: each table after every table of the closure that
+ * references it, so no RESTRICT or NO ACTION key stops a delete; in a cycle, which has no such
+ * order, the breadth-first order reversed
+ */
+function childrenFirst(closure: readonly string[], schema: ExtractedSchema): string[] {
+	const members = new Set(closure)
+	const childrenOf = (table: string) =>
+		schema.foreignKeys.filter((key) => key.parent === table && key.table !== table && members.has(key.table))
+	const left = closure.toReversed()
+	const out: string[] = []
+	while (left.length > 0) {
+		const ready = left.findIndex((table) => childrenOf(table).every((key) => out.includes(key.table)))
+		out.push(...left.splice(Math.max(ready, 0), 1))
+	}
+	return out
+}
+
 /** The columns an INSERT may write: every column but the generated ones */
 function stored(table: string, schema: ExtractedSchema): string[] {
 	const generated = schema.tableInfo.get(table)?.generatedColumns ?? []
@@ -115,13 +133,14 @@ function guardOf({ table, temp }: Rebuild, schema: ExtractedSchema): Guard | und
 		return `INSERT INTO ${quote(t === temp ? table : t)} (${into}) SELECT ${from} FROM ${keep(t)}`
 	}
 	const name = literal(table)
+	const emptying = childrenFirst(closure, schema)
 	const before = [
 		...closure.map(save),
 		...(sequence ? [`CREATE TABLE ${keep(table)} AS SELECT seq FROM sqlite_sequence WHERE name = ${name}`] : []),
-		...closure.toReversed().map((t) => `DELETE FROM ${quote(t)}`),
+		...emptying.map((t) => `DELETE FROM ${quote(t)}`),
 	]
 	const after = [
-		...[...closure.filter((t) => t === temp), ...closure.filter((t) => t !== temp)].map(refill),
+		...[...closure.filter((t) => t === temp), ...emptying.toReversed().filter((t) => t !== temp)].map(refill),
 		...(sequence
 			? [
 					`UPDATE sqlite_sequence SET seq = max(seq, coalesce((SELECT seq FROM ${keep(table)}), 0)) WHERE name = ${name}`,
@@ -189,15 +208,17 @@ function guardRebuilds(sql: string, before: ExtractedSchema | undefined, fts?: F
 }
 
 /**
- * The statements of a file that are the guards comb wrote, each exactly as comb writes it, and
- * the rebuilt tables of referenced rebuilds left unguarded, with the tables their drop reaches
+ * The statements of a file that are the guards comb wrote, each exactly as comb writes it, the
+ * tables each guarded rebuild keeps the rows of, and the rebuilt tables of referenced rebuilds
+ * left unguarded, with the tables their drop reaches
  */
 function readGuards(
 	statements: readonly string[],
 	codes: readonly string[],
 	before: ExtractedSchema | undefined,
-): { guarded: Set<number>; unguarded: Map<string, string[]> } {
+): { guarded: Set<number>; kept: Map<string, string[]>; unguarded: Map<string, string[]> } {
 	const guarded = new Set<number>()
+	const keeps = new Map<string, string[]>()
 	const unguarded = new Map<string, string[]>()
 	const same = (at: number, expected: readonly string[]) =>
 		expected.every((stmt, k) => normalizeSql(statements[at + k] ?? "") === normalizeSql(stmt))
@@ -215,10 +236,26 @@ function readGuards(
 			unguarded.set(rebuild.table, reached(rebuild.table, schema))
 			continue
 		}
+		keeps.set(
+			rebuild.table,
+			reached(rebuild.table, schema).filter((t) => t !== rebuild.temp),
+		)
 		for (let i = start; i < rebuild.drop; i++) guarded.add(i)
 		for (let i = 1; i <= guard.after.length; i++) guarded.add(rebuild.rename + i)
 	}
-	return { guarded, unguarded }
+	return { guarded, kept: keeps, unguarded }
 }
 
-export { guardRebuilds, readGuards }
+/** Each referenced table a file rebuilds, with the tables its drop reaches by the history */
+function guardedClosures(
+	sql: string,
+	before: ExtractedSchema,
+): Array<{ closure: string[]; table: string; temp: string }> {
+	const statements = splitSqlStatements(sql)
+	return locateRebuilds(statements.map((stmt) => codeOf(stmt, "sqlite"))).flatMap((rebuild) => {
+		const closure = reached(rebuild.table, schemaAt(statements, rebuild, before))
+		return closure.length === 0 ? [] : [{ closure, table: rebuild.table, temp: rebuild.temp }]
+	})
+}
+
+export { guardedClosures, guardRebuilds, readGuards }

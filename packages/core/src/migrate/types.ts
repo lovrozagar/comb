@@ -22,6 +22,11 @@ export type Connection = {
 	execute(sql: string, params?: unknown[]): Promise<QueryResult>
 	batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void>
 	close(): Promise<void>
+	/**
+	 * Several reads in one round trip, a result each; a driver whose every call is costly (D1 runs
+	 * wrangler) has it
+	 */
+	executeEach?(statements: readonly string[]): Promise<QueryResult[]>
 }
 
 export type ConnectionProvider = {

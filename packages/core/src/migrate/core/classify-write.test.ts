@@ -57,3 +57,28 @@ describe("classifyMigration on a write that hid", () => {
 		expect(pg("DELETE FROM users WHERE true RETURNING id").safety).toBe("unsafe")
 	})
 })
+
+/* the bypasses of the G1 review (byp.ts, byp2.ts): a write that runs at apply time while rated lower */
+describe("classifyMigration on a write the G1 review found rated low", () => {
+	it.each([
+		["PREPARE s AS DELETE FROM t; EXECUTE s;", "unsafe", "an EXECUTE of a statement the file prepares"],
+		["PREPARE s (int) AS UPDATE t SET x = 1 WHERE id = $1; EXECUTE s(1);", "cautious", "a filtered prepared write"],
+		["EXECUTE stmt;", "cautious", "an EXECUTE of a statement comb cannot read"],
+		["PREPARE s AS SELECT 1;", "safe", "a PREPARE alone"],
+		["SELECT setval('s', 1);", "cautious", "setval"],
+		["SELECT pg_catalog.setval('s', 1, false);", "cautious", "a qualified setval"],
+		["CREATE RULE r AS ON INSERT TO t DO INSTEAD DELETE FROM t;", "unsafe", "an unfiltered rule action"],
+		[
+			"CREATE OR REPLACE RULE r AS ON UPDATE TO t DO ALSO UPDATE t SET x = 1 WHERE id = old.id;",
+			"cautious",
+			"a filtered rule action",
+		],
+		["CREATE RULE r AS ON INSERT TO t DO INSTEAD NOTHING;", "safe", "a rule that does nothing"],
+		["ALTER TABLE t OWNER TO nobody;", "cautious", "a new owner, who bypasses row level security"],
+		["REASSIGN OWNED BY a TO b;", "cautious", "reassigned ownership"],
+		["COPY t FROM PROGRAM 'x';", "cautious", "a COPY into a table"],
+		["COPY t TO STDOUT;", "safe", "a COPY out of a table"],
+	])("rates %j %s (%s)", (sql, safety) => {
+		expect(pg(sql).safety).toBe(safety)
+	})
+})

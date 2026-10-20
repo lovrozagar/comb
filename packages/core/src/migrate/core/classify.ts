@@ -15,6 +15,7 @@
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
+import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { writeFindings } from "./classify-write.ts"
 import { readGuards } from "./rebuild-guard.ts"
 import { codeOf, doBody, executedSql, lastPart, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
@@ -37,8 +38,12 @@ type FileContext = {
 	rebuilds: Rebuilds
 	/** rebuilt tables others reference whose rebuild comb did not guard, with the tables their drop reaches */
 	unguarded: Map<string, string[]>
+	/** rebuilt tables comb guarded, with the tables whose rows the guard keeps */
+	kept: Map<string, string[]>
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
 	reindexed: Set<string>
+	/** the statements the file prepares, by name, with the code each runs */
+	prepared: Map<string, string>
 }
 
 /** A SQLite rebuild of `table`: the temporary table it is copied into, and the columns copied */
@@ -113,7 +118,10 @@ function rebuildFinding(code: string, ctx: FileContext): Finding | undefined {
 		}
 	}
 	const lost = earlier.filter((column) => !rebuild.columns.includes(column))
-	if (lost.length === 0) return { level: "cautious" }
+	const kept = ctx.kept.get(name)
+	if (lost.length === 0 && kept !== undefined)
+		return { level: "cautious", note: `rebuilds ${name}; comb keeps the rows of ${kept.join(", ")}` }
+	if (lost.length === 0) return { level: "cautious", note: `rebuilds ${name}, copying every column` }
 	return {
 		drops: lost.map((column) => `DROP COLUMN ${name}.${column}`),
 		level: "unsafe",
@@ -147,7 +155,7 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 		findings.push({ drops: dropNames(code), level: "unsafe" })
 	else if (CAUTIOUS.test(code)) findings.push({ drops: dropNames(code), level: "cautious" })
 	if (/\bCASCADE\b/i.test(code.replace(/\bON (?:DELETE|UPDATE) CASCADE\b/gi, ""))) findings.push({ level: "unsafe" })
-	findings.push(...writeFindings(code))
+	findings.push(...writeFindings(code), ...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, body, ctx)))
 	const call = callFinding(code, ctx)
 	if (call !== undefined) findings.push(call)
 	if (ctx.dialect === "postgres") {
@@ -228,9 +236,20 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 	const guards =
 		dialect === "sqlite"
 			? readGuards(statements, codes, before)
-			: { guarded: new Set<number>(), unguarded: new Map<string, string[]>() }
+			: { guarded: new Set<number>(), kept: new Map<string, string[]>(), unguarded: new Map<string, string[]>() }
 	const reindexed = dialect === "sqlite" ? reindexedOf(statements) : new Set<string>()
-	const ctx: FileContext = { before, created, dialect, functions, rebuilds, reindexed, unguarded: guards.unguarded }
+	const prepared = preparedOf(codes)
+	const ctx: FileContext = {
+		before,
+		created,
+		dialect,
+		functions,
+		prepared,
+		rebuilds,
+		reindexed,
+		kept: guards.kept,
+		unguarded: guards.unguarded,
+	}
 	return statements.map((stmt, i) => ({
 		code: codes[i] as string,
 		dialect,
@@ -263,7 +282,8 @@ function classifyMigration(sql: string, options: ClassifyOptions = {}): Migratio
 	const reads = readings(sql, options)
 	for (const read of reads) refuseUnrunnable(read, sql)
 	const unsafeStatements = [...new Set(entries(reads, "unsafe"))]
-	const cautiousStatements = [...new Set(entries(reads, "cautious"))]
+	/* a statement is listed once, at the strictest level a finding gives it */
+	const cautiousStatements = [...new Set(entries(reads, "cautious"))].filter((stmt) => !unsafeStatements.includes(stmt))
 	if (TXMODE_NONE.test(sql)) cautiousStatements.push("-- atlas:txmode none: the file is not applied in one transaction")
 	const safety = unsafeStatements.length > 0 ? "unsafe" : cautiousStatements.length > 0 ? "cautious" : "safe"
 	return { cautiousStatements, lockWarnings: [...new Set(entries(reads, "lock"))], safety, unsafeStatements }
