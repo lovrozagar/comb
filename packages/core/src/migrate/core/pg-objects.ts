@@ -8,10 +8,12 @@
  * sequences altered in place (dropping one would restart it), and the drops of every changed or
  * removed policy and view, and of each one over a table Atlas alters (Postgres refuses to retype a
  * column a view or policy reads), dependents first. After them: those views and policies created
- * again from the target, in its order, and removed sequences dropped. Roles and extensions are
- * only ever added: they outlive any one schema.
+ * again from the target, in its order, removed sequences dropped, and each table's row level
+ * security brought to the target's (Atlas OSS drops those statements without a word, so a policy
+ * would never be enforced). Roles and extensions are only ever added: they outlive any one schema.
  */
 import { asSql } from "./fts-migration.ts"
+import { atlasTables, followRls, type Rls, rlsDelta, type Statement } from "./pg-tables.ts"
 import { codeOf, IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 
@@ -30,8 +32,15 @@ type PgObject = {
 	sql: string
 }
 
-/** The objects a sequence of migrations leaves, by `${kind} ${key}`, in the order they were made */
-type PgObjects = Map<string, PgObject>
+/** What a sequence of migrations leaves of what comb owns */
+type PgObjects = {
+	/** the objects, by `${kind} ${key}`, in the order they were made */
+	objects: Map<string, PgObject>
+	/** each table's row level security, by its unquoted name */
+	rls: Map<string, Rls>
+}
+
+const emptyPgObjects = (): PgObjects => ({ objects: new Map(), rls: new Map() })
 
 type Separated = { objects: PgObject[]; plain: string[]; state: PgObjects }
 
@@ -53,12 +62,13 @@ const DROP_OBJECTS = /* @__PURE__ */ new RegExp(
 )
 // per-process-constant: see above
 const DROP_POLICY = /* @__PURE__ */ new RegExp(`^DROP POLICY (?:IF EXISTS )?(${IDENT}) ON (${QNAME})`, "i")
-// per-process-constant: the tables an Atlas statement changes, composed once
-const ALTERS_TABLE = /* @__PURE__ */ new RegExp(
-	`^(?:ALTER TABLE (?:IF EXISTS )?(?:ONLY )?(${QNAME})|DROP TABLE (?:IF EXISTS )?(${QNAME}(?:\\s*,\\s*${QNAME})*))`,
+// per-process-constant: a drop of tables, composed once
+const DROP_TABLE = /* @__PURE__ */ new RegExp(`^DROP TABLE (?:IF EXISTS )?(${QNAME}(?:\\s*,\\s*${QNAME})*)`, "i")
+// per-process-constant: a rename of a table, composed once
+const RENAME_TABLE = /* @__PURE__ */ new RegExp(
+	`^ALTER TABLE (?:IF EXISTS )?(?:ONLY )?(${QNAME}) RENAME TO (${QNAME})$`,
 	"i",
 )
-
 const stateKey = (kind: PgObjectKind, key: string) => `${kind} ${key}`
 
 /** The object a CREATE statement defines, if it defines one comb owns */
@@ -75,34 +85,67 @@ function defined(code: string, sql: string): PgObject | undefined {
 	return { key: lastPart(name), kind: kind.toLowerCase() as PgObjectKind, name, sql }
 }
 
+/** What a drop or a rename of tables, which still reaches Atlas, does to their policies and row level security */
+function followTables(code: string, { objects, rls }: PgObjects): void {
+	const [, dropped] = DROP_TABLE.exec(code) ?? []
+	for (const name of dropped === undefined ? [] : splitTopLevel(dropped)) {
+		const table = lastPart(name)
+		rls.delete(table)
+		for (const [key, object] of objects) {
+			if (object.kind === "policy" && lastPart(object.on as string) === table) objects.delete(key)
+		}
+	}
+	const [, from, to] = RENAME_TABLE.exec(code) ?? []
+	if (from === undefined || to === undefined) return
+	const [old, next] = [lastPart(from), lastPart(to)]
+	const secured = rls.get(old)
+	rls.delete(old)
+	if (secured !== undefined) rls.set(next, { ...secured, name: to })
+	const moving = [...objects].filter(([, object]) => object.kind === "policy" && lastPart(object.on as string) === old)
+	for (const [key, object] of moving) {
+		objects.delete(key)
+		const sql = object.sql.replace(CREATE_POLICY, (_, policy: string) => `CREATE POLICY ${policy} ON ${to}`)
+		const moved = { ...object, key: `${lastPart(object.name)} on ${next}`, on: to, sql }
+		objects.set(stateKey("policy", moved.key), moved)
+	}
+}
+
 /** What one statement does to `state`: true when it is about an object comb owns */
-function follow(code: string, sql: string, state: PgObjects): boolean {
+function follow(statement: Statement, state: PgObjects, source: string): boolean {
+	const { code, sql } = statement
+	const { objects } = state
 	const made = defined(code, sql)
 	if (made !== undefined) {
-		state.set(stateKey(made.kind, made.key), made)
+		objects.set(stateKey(made.kind, made.key), made)
 		return true
 	}
+	if (followRls(statement, state.rls, source)) return true
 	const [, sequence, clauses] = ALTER_SEQUENCE.exec(code) ?? []
-	const known = sequence === undefined ? undefined : state.get(stateKey("sequence", lastPart(sequence)))
+	const known = sequence === undefined ? undefined : objects.get(stateKey("sequence", lastPart(sequence)))
 	if (known !== undefined) {
-		state.set(stateKey("sequence", known.key), { ...known, sql: `CREATE SEQUENCE ${known.name} ${clauses}` })
+		objects.set(stateKey("sequence", known.key), { ...known, sql: `CREATE SEQUENCE ${known.name} ${clauses}` })
 		return true
 	}
 	const [, kind, names] = DROP_OBJECTS.exec(code) ?? []
 	if (kind !== undefined && names !== undefined) {
-		for (const name of splitTopLevel(names)) state.delete(stateKey(kind.toLowerCase() as PgObjectKind, lastPart(name)))
+		for (const name of splitTopLevel(names))
+			objects.delete(stateKey(kind.toLowerCase() as PgObjectKind, lastPart(name)))
 		return true
 	}
 	const [, policy, on] = DROP_POLICY.exec(code) ?? []
 	if (policy !== undefined && on !== undefined) {
-		state.delete(stateKey("policy", `${lastPart(policy)} on ${lastPart(on)}`))
+		objects.delete(stateKey("policy", `${lastPart(policy)} on ${lastPart(on)}`))
 		return true
 	}
+	followTables(code, state)
 	return /^REFRESH MATERIALIZED VIEW\b/i.test(code)
 }
 
-/** `sql`'s statements split into those Atlas may see and the comb-owned objects, continuing from `state` */
-function separatePgObjects(sql: string, state: PgObjects = new Map()): Separated {
+/**
+ * `sql`'s statements split into those Atlas may see and the comb-owned objects, continuing from
+ * `state`; `source` names `sql` in a refusal
+ */
+function separatePgObjects(sql: string, state: PgObjects = emptyPgObjects(), source = "the target schema"): Separated {
 	const objects: PgObject[] = []
 	const plain: string[] = []
 	for (const statement of splitSqlStatements(sql, "postgres")) {
@@ -110,7 +153,7 @@ function separatePgObjects(sql: string, state: PgObjects = new Map()): Separated
 		const code = codeOf(text, "postgres")
 		const made = defined(code, text)
 		if (made !== undefined) objects.push(made)
-		if (!follow(code, text, state)) plain.push(text)
+		if (!follow({ code, sql: text }, state, source)) plain.push(text)
 	}
 	return { objects, plain, state }
 }
@@ -122,24 +165,12 @@ function reads(view: PgObject, name: string): boolean {
 	return new RegExp(`(?:^|[^\\w$"])"?${escaped}"?(?=[^\\w$"]|$)`).test(body)
 }
 
-/** The tables Atlas's statements alter or drop */
-function alteredTables(atlasSql: string): Set<string> {
-	const tables = new Set<string>()
-	for (const statement of splitSqlStatements(atlasSql, "postgres")) {
-		const [, altered, dropped] = ALTERS_TABLE.exec(codeOf(statement, "postgres")) ?? []
-		for (const name of [altered, ...(dropped === undefined ? [] : splitTopLevel(dropped))]) {
-			if (name !== undefined) tables.add(lastPart(name))
-		}
-	}
-	return tables
-}
-
 const isView = (object: PgObject) => object.kind === "view" || object.kind === "materialized view"
 const same = (a: PgObject | undefined, b: PgObject | undefined) =>
 	a !== undefined && b !== undefined && normalizeSql(a.sql) === normalizeSql(b.sql)
 
 /** The views and policies of `from` comb must drop: changed, removed, or over what Atlas or comb changes */
-function affected(from: PgObjects, to: PgObjects, tables: ReadonlySet<string>): Set<string> {
+function affected(from: Map<string, PgObject>, to: Map<string, PgObject>, tables: ReadonlySet<string>): Set<string> {
 	const out = new Set<string>()
 	for (const [key, object] of from) {
 		if ((isView(object) || object.kind === "policy") && !same(object, to.get(key))) out.add(key)
@@ -176,7 +207,7 @@ function addOf(object: PgObject, before: PgObject | undefined): string {
 }
 
 /** Whether `object` of the target needs a statement before Atlas's: new, or a sequence that changed */
-function needsAdding(object: PgObject, from: PgObjects): boolean {
+function needsAdding(object: PgObject, from: Map<string, PgObject>): boolean {
 	const before = from.get(stateKey(object.kind, object.key))
 	if (object.kind === "sequence") return !same(object, before)
 	return (object.kind === "extension" || object.kind === "role") && before === undefined
@@ -185,8 +216,10 @@ function needsAdding(object: PgObject, from: PgObjects): boolean {
 type Delta = { after: string[]; before: string[] }
 
 /** The statements comb writes around Atlas's: `before` and `after` them */
-function pgDelta({ atlasSql, from, to }: { atlasSql: string; from: PgObjects; to: Separated }): Delta {
-	const dropped = affected(from, to.state, alteredTables(atlasSql))
+function pgDelta({ atlasSql, from: state, to }: { atlasSql: string; from: PgObjects; to: Separated }): Delta {
+	const from = state.objects
+	const tables = atlasTables(atlasSql)
+	const dropped = affected(from, to.state.objects, tables.altered)
 	const before = [
 		...to.objects.filter((o) => needsAdding(o, from)).map((o) => addOf(o, from.get(stateKey(o.kind, o.key)))),
 		...[...from].filter(([key, o]) => dropped.has(key) && o.kind === "policy").map(([, o]) => dropOf(o)),
@@ -203,7 +236,10 @@ function pgDelta({ atlasSql, from, to }: { atlasSql: string; from: PgObjects; to
 	const after = [
 		...created.filter(isView).map((o) => o.sql),
 		...created.filter((o) => o.kind === "policy").map((o) => o.sql),
-		...[...from.values()].filter((o) => o.kind === "sequence" && !to.state.has(stateKey(o.kind, o.key))).map(dropOf),
+		...[...from.values()]
+			.filter((o) => o.kind === "sequence" && !to.state.objects.has(stateKey(o.kind, o.key)))
+			.map(dropOf),
+		...rlsDelta(state.rls, to.state.rls, tables),
 	]
 	return { after, before }
 }
@@ -232,6 +268,7 @@ function wrapAtlasFile(file: string, { after, before }: Delta): string {
 
 export {
 	atlasDirectives,
+	emptyPgObjects,
 	type PgObject,
 	type PgObjects,
 	pgDelta,

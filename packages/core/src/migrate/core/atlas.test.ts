@@ -71,7 +71,7 @@ describe("generateSchemaDiff", () => {
 		const [call] = run.calls
 		expect(call?.cmd).toBe("atlas")
 		expect(call?.args.slice(0, 2)).toEqual(["schema", "diff"])
-		expect(call?.args.at(-1)).toBe("sqlite://file?mode=memory")
+		expect(call?.args.at(-1)).toMatch(/^sqlite:\/\/comb-[0-9a-f-]{36}\?mode=memory$/)
 		expect(existsSync(fileArg(call?.args ?? [], "--from"))).toBe(false)
 	})
 

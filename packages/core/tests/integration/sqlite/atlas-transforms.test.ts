@@ -2,7 +2,9 @@ import fs from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { applySqliteMigrationTransforms } from "../../../src/migrate/core/atlas.ts"
+import { describeAtlas } from "../support/atlas.ts"
 import { libsqlMemory } from "../support/libsql.ts"
+import { BASE, type Engine, FTS, history, REBUILD_U, runScenario, SOUND } from "../support/rebuild-guard.ts"
 
 /* An Atlas-shaped drift migration: table rebuilds (create `new_*`, copy rows,
    drop, rename), an ADD COLUMN, fresh tables, and indexes. Already stored
@@ -172,5 +174,66 @@ describe("applySqliteMigrationTransforms on a real SQLite", () => {
 		} finally {
 			close()
 		}
+	})
+})
+
+/** libsql in memory: foreign keys on, as @libsql/client sets them; a file applies in one transaction */
+function libsqlEngine(): Engine & { close(): void } {
+	const { client, close } = libsqlMemory()
+	return {
+		apply: async (sql) => void (await client.executeMultiple(`BEGIN;\n${sql}\nCOMMIT;`)),
+		close,
+		rows: async (sql) => (await client.execute(sql)).rows.map((row) => ({ ...row })),
+		run: async (sql) => void (await client.executeMultiple(sql)),
+	}
+}
+
+describeAtlas("the guard around Atlas's rebuild of a referenced table, on libsql", () => {
+	it("keeps every row, key, rowid, sequence and index entry through a rebuild of the parent, then of parent and child", async () => {
+		const engine = libsqlEngine()
+		const h = history()
+		try {
+			expect(await engine.rows("PRAGMA foreign_keys")).toEqual([{ foreign_keys: 1 }])
+			const { both, parent } = await runScenario(engine, h)
+			for (const outcome of [parent, both]) {
+				expect(outcome.after).toEqual(outcome.before)
+				expect(outcome.sound).toEqual(SOUND)
+				expect(outcome.safety).toBe("cautious")
+			}
+		} finally {
+			engine.close()
+			h.dispose()
+		}
+	}, 60_000)
+
+	it.each([
+		[
+			"an AFTER DELETE trigger on a table the drop reaches",
+			"CREATE TRIGGER `comment_gone` AFTER DELETE ON `comment` BEGIN SELECT 1; END;\n",
+			"comment_gone",
+		],
+		[
+			"a trigger on the rebuilt table itself",
+			"CREATE TRIGGER `u_seen` AFTER UPDATE ON `u` BEGIN SELECT 1; END;\n",
+			"u_seen",
+		],
+		["a table named with the guard's prefix", "CREATE TABLE `_comb_keep_x` (`id` integer);\n", "_comb_keep_x"],
+	])(
+		"refuses to write the rebuild for %s, naming it",
+		(_, sql, name) => {
+			const h = history()
+			try {
+				h.diff(BASE, "init")
+				h.add("20990101000000_extra.sql", sql)
+				expect(() => h.diff(`${REBUILD_U}${sql.startsWith("CREATE TABLE") ? sql : ""}`, "rebuild")).toThrow(name)
+			} finally {
+				h.dispose()
+			}
+		},
+		60_000,
+	)
+
+	it("needs the FTS DDL it guards", () => {
+		expect(FTS).toContain("post_fts")
 	})
 })

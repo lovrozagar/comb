@@ -66,66 +66,6 @@ describe("generateMigrationHash", () => {
 	})
 })
 
-describe("extractSchema", () => {
-	it("extracts tables and columns from CREATE TABLE", () => {
-		const schema = extractSchema(`
-CREATE TABLE user (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT
-);
-`)
-		expect(schema.tables.get("user")).toEqual(["id", "name", "email"])
-	})
-
-	it("handles multiple tables", () => {
-		const schema = extractSchema(`
-CREATE TABLE user (id TEXT PRIMARY KEY);
-CREATE TABLE post (id TEXT PRIMARY KEY, title TEXT);
-`)
-		expect(schema.tables.has("user")).toBe(true)
-		expect(schema.tables.has("post")).toBe(true)
-		expect(schema.tables.get("post")).toContain("title")
-	})
-
-	it("tracks dropped tables", () => {
-		const schema = extractSchema("DROP TABLE IF EXISTS old_table;")
-		expect(schema.droppedTables).toContain("old_table")
-	})
-
-	it("extracts indexes", () => {
-		const schema = extractSchema(`
-CREATE TABLE user (id TEXT PRIMARY KEY, email TEXT);
-CREATE INDEX idx_email ON user (email);
-CREATE UNIQUE INDEX idx_email_unique ON user (email);
-`)
-		expect(schema.indexes).toContain("idx_email")
-		expect(schema.indexes).toContain("idx_email_unique")
-	})
-	it("continues from an earlier schema without changing it", () => {
-		const first = extractSchema("CREATE TABLE post (id TEXT); CREATE INDEX i ON post (id); DROP TABLE gone;")
-		const next = extractSchema("ALTER TABLE post ADD COLUMN title TEXT;", first)
-		expect(next.tables.get("post")).toEqual(["id", "title"])
-		expect(next.indexes).toEqual(["i"])
-		expect(next.droppedTables).toEqual(["gone"])
-		expect(first.tables.get("post")).toEqual(["id"])
-	})
-
-	it("follows ALTER TABLE ADD, DROP and RENAME COLUMN on a known table", () => {
-		const schema = extractSchema(`
-CREATE TABLE post (id TEXT PRIMARY KEY, title TEXT, body TEXT);
-ALTER TABLE post ADD COLUMN locale TEXT;
-ALTER TABLE \`post\` DROP COLUMN \`body\`;
-ALTER TABLE post RENAME COLUMN title TO heading;
-ALTER TABLE post DROP CONSTRAINT post_check;
-ALTER TABLE post RENAME TO post;
-ALTER TABLE gone ADD COLUMN x TEXT;
-`)
-		expect(schema.tables.get("post")).toEqual(["id", "heading", "locale"])
-		expect(schema.tables.has("gone")).toBe(false)
-	})
-})
-
 describe("extractDropStatements", () => {
 	it("finds DROP TABLE statements (normalized without IF EXISTS)", () => {
 		const drops = extractDropStatements("DROP TABLE old_table; DROP TABLE IF EXISTS another;")

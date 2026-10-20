@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { applySqliteMigrationTransforms, SQLITE_DEV_URL } from "./atlas-env.ts"
+import { applySqliteMigrationTransforms, sqliteDevUrl } from "./atlas-env.ts"
 
-describe("SQLITE_DEV_URL", () => {
-	it("names the in-memory database atlas replays SQLite on", () => {
-		expect(SQLITE_DEV_URL).toBe("sqlite://file?mode=memory")
+describe("sqliteDevUrl", () => {
+	it("names an in-memory database of its own for each Atlas run, as Atlas locks per dev URL across the host", () => {
+		const [first, second] = [sqliteDevUrl(), sqliteDevUrl()]
+		expect(first).toMatch(/^sqlite:\/\/comb-[0-9a-f-]{36}\?mode=memory$/)
+		expect(second).not.toBe(first)
 	})
 })
 

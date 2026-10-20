@@ -12,7 +12,7 @@ import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles, sumHashes } from "./atlas-dir.ts"
 import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
-import { parseMigration } from "./parse.ts"
+import { extractSchema, parseMigration } from "./parse.ts"
 import { type Run, type RunResult, run } from "./process.ts"
 
 /** A migration file as Atlas lists it */
@@ -127,10 +127,19 @@ function checkHistory(status: AtlasStatus, copy: string): string | undefined {
 	return where
 }
 
-/** Each pending file read from the snapshot, classified as Postgres, approved, its lock warnings shown */
+/**
+ * Each pending file read from the snapshot, classified as Postgres against the schema the files
+ * before it leave, approved, its lock warnings shown
+ */
 async function approvePending(options: ApplyOptions, copy: string, pending: readonly AtlasFile[]): Promise<void> {
-	for (const { Name } of pending) {
-		const migration = parseMigration(readFileSync(join(copy, Name), "utf8"), Name, { dialect: "postgres" })
+	const waiting = new Set(pending.map((file) => file.Name))
+	let schema = extractSchema("", undefined, "postgres")
+	for (const Name of sqlFiles(copy)) {
+		const sql = readFileSync(join(copy, Name), "utf8")
+		const before = schema
+		schema = extractSchema(sql, before, "postgres")
+		if (!waiting.has(Name)) continue
+		const migration = parseMigration(sql, Name, { before, dialect: "postgres" })
 		for (const warning of migration.classification.lockWarnings) options.print(`Lock warning in ${Name}: ${warning}`)
 		const approval = await options.approve(migration)
 		if (!approval.ok) throw new Error(approval.message)

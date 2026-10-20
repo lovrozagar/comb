@@ -137,6 +137,27 @@ describe("applyWithAtlas", () => {
 	})
 })
 
+describe("applyWithAtlas: what it classifies against", () => {
+	it("classifies each pending file against the schema the files before it leave, a function they create included", async () => {
+		writeFileSync(join(dir, "1_a.sql"), "CREATE FUNCTION purge() RETURNS void LANGUAGE sql AS $$ DELETE FROM a $$;\n")
+		writeFileSync(join(dir, "2_b.sql"), "SELECT purge();\n")
+		const safety: string[] = []
+		const later = status({
+			applied: [revision("1")],
+			available: [file("1_a.sql"), file("2_b.sql")],
+			current: "1",
+			pending: [file("2_b.sql")],
+			status: "PENDING",
+		})
+		const approve = async (migration: ParsedMigration) => (
+			safety.push(migration.classification.safety),
+			{ ok: true as const }
+		)
+		await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: later }), { approve }))
+		expect(safety).toEqual(["cautious"])
+	})
+})
+
 describe("applyWithAtlas: what it prints", () => {
 	it("prints each pending file's lock warnings before it applies", async () => {
 		writeFileSync(join(dir, "1_a.sql"), 'CREATE INDEX "i" ON "post" ("id");\n')

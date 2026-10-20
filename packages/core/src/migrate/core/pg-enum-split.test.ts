@@ -21,6 +21,14 @@ describe("splitEnumValues", () => {
 		])
 	})
 
+	it("moves an ADD VALUE of a quoted type name holding a space", () => {
+		const [values] = splitEnumValues(
+			"20261018000000_add.sql",
+			`ALTER TYPE "order status" ADD VALUE 'x';\nALTER TABLE "post" ADD COLUMN "s" "order status" DEFAULT 'x';\n`,
+		)
+		expect(values).toEqual(["20261018000000_add_enum_values.sql", `ALTER TYPE "order status" ADD VALUE 'x';\n`])
+	})
+
 	it("keeps the directives on the file that runs Atlas's other statements", () => {
 		const [values, rest] = splitEnumValues("20261231235959_x.sql", `-- atlas:txmode none\n\n${ATLAS}`)
 		expect(values?.[1].startsWith("-- atlas")).toBe(false)

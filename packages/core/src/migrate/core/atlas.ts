@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
-import { SQLITE_DEV_URL } from "./atlas-env.ts"
+import { sqliteDevUrl } from "./atlas-env.ts"
 import { type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { type Run, run } from "./process.ts"
 import { atlasDirectives, withDirectivesFirst } from "./pg-objects.ts"
@@ -65,7 +65,7 @@ export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult
 		const args = ["schema", "diff", "--from", `file://${fromFile}`, "--to", `file://${toFile}`]
 		const result =
 			target === undefined || dialect === "sqlite"
-				? exec("atlas", [...args, "--dev-url", SQLITE_DEV_URL])
+				? exec("atlas", [...args, "--dev-url", sqliteDevUrl()])
 				: withAtlasEnv(target, { dev: true }, (env) => {
 						const ran = exec("atlas", [...args, ...env.args], { env: env.env })
 						return { ...ran, stderr: env.scrub(ran.stderr) }

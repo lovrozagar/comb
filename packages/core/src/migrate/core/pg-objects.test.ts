@@ -25,7 +25,6 @@ describe("separatePgObjects", () => {
 		expect(plain.map((stmt) => stmt.split("\n")[0])).toEqual([
 			`CREATE TYPE "status" AS ENUM('draft', 'published')`,
 			'CREATE TABLE "post" (',
-			'ALTER TABLE "post" ENABLE ROW LEVEL SECURITY',
 		])
 		expect(objects.map((o) => `${o.kind} ${o.key}`)).toEqual([
 			"sequence counter",
@@ -48,14 +47,29 @@ DROP MATERIALIZED VIEW "titles", "gone";
 ALTER SEQUENCE "other_seq" RESTART;`,
 			history,
 		)
-		expect([...next.state.keys()]).toEqual(["sequence counter", "role reader", "extension citext"])
-		expect(next.state.get("sequence counter")?.sql).toBe('CREATE SEQUENCE "public"."counter" INCREMENT BY 5')
+		expect([...next.state.objects.keys()]).toEqual(["sequence counter", "role reader", "extension citext"])
+		expect(next.state.objects.get("sequence counter")?.sql).toBe('CREATE SEQUENCE "public"."counter" INCREMENT BY 5')
 		expect(next.plain).toEqual(['ALTER SEQUENCE "other_seq" RESTART'])
 	})
 
 	it("reads a CREATE OR REPLACE VIEW as the view's definition", () => {
 		const { state } = separatePgObjects('CREATE OR REPLACE VIEW "v" AS (select 1)')
-		expect(state.get("view v")?.name).toBe('"v"')
+		expect(state.objects.get("view v")?.name).toBe('"v"')
+	})
+
+	it("follows a dropped table, clearing its flags and policies, and a renamed one, moving them", () => {
+		const history = target().state
+		separatePgObjects('ALTER TABLE "post" RENAME TO "article";', history)
+		expect([...history.rls]).toEqual([["article", { enabled: true, forced: false, name: '"article"' }]])
+		expect(history.objects.get("policy post_owner on article")).toMatchObject({
+			on: '"article"',
+			sql: 'CREATE POLICY "post_owner" ON "article" AS PERMISSIVE FOR SELECT TO "reader" USING ("post"."owner" = current_user)',
+		})
+		separatePgObjects('ALTER TABLE "other" RENAME TO "else";', history)
+		const { plain } = separatePgObjects('DROP TABLE IF EXISTS "x", "article" CASCADE;', history)
+		expect(plain).toEqual(['DROP TABLE IF EXISTS "x", "article" CASCADE'])
+		expect(history.rls.size).toBe(0)
+		expect([...history.objects.keys()].some((key) => key.startsWith("policy"))).toBe(false)
 	})
 })
 
@@ -107,7 +121,7 @@ CREATE VIEW "published" AS (select "id", "title", "status", "owner" from "post" 
 			'DROP POLICY IF EXISTS "post_owner" ON "post"',
 			'DROP MATERIALIZED VIEW IF EXISTS "titles"',
 		])
-		expect(after).toEqual([])
+		expect(after).toEqual(['ALTER TABLE "post" DISABLE ROW LEVEL SECURITY'])
 	})
 
 	it("drops a table's policies before Atlas drops the table, and does not recreate them", () => {

@@ -63,7 +63,7 @@ Comb sits on top of [Drizzle ORM](https://orm.drizzle.team). Drizzle stays the q
 - **One column vocabulary across dialects.** `c.timestamp()`, `c.json()`, `c.id()` mean the same thing whether the table compiles to SQLite or PostgreSQL, so a table file can move between the two.
 - **Constraint violations as domain errors.** A unique-index failure from D1, libsql, or Postgres becomes a single `CombError` with an `errorKey`, an HTTP status, and the offending table and column.
 - **Codegen from the table files.** A ts-morph analyzer reads your Drizzle tables plus Comb's constraint annotations and emits DTOs, Zod schemas, relations, FTS5 tables, column name maps, ER diagrams, and a typed ORM client.
-- **Migrations with a safety rail.** Atlas produces the diff; Comb classifies it, makes it idempotent, hashes it, records it, and rewrites SQLite's `foreign_keys` pragma dance into a transaction-safe `defer_foreign_keys` prelude.
+- **Migrations with a safety rail.** Atlas produces the diff; Comb classifies it, makes it idempotent, hashes it, records it, rewrites SQLite's `foreign_keys` pragma dance into a `defer_foreign_keys` prelude, and guards a rebuild of a table other tables reference so its drop deletes none of their rows.
 - **A list-query layer.** A PostgREST-style `filter`, `order`, `select` grammar parsed into an AST, validated against declared field types, and lowered to SQLite SQL with cursor pagination and FTS5 search.
 - **D1 at scale.** The Sessions API for read-after-write consistency, bookmark tracking, and an org-to-shard router with a three-tier LRU → KV → core-D1 lookup.
 
@@ -530,7 +530,7 @@ A migration's hash is its SQL with comments and layout normalized away, never th
    - **cautious** drops nothing a row holds: indexes, constraints, defaults, views, triggers, functions, a filtered write, a grant. It runs with `--yes` or a yes on a terminal.
    - **safe** runs without asking.
 
-   Without a terminal or an approval, `apply` stops before running the file. A SQLite table rebuild (Atlas copies the rows into `new_t`, drops `t` and renames `new_t`) is cautious when it copies every column the earlier files gave `t`, and unsafe when it leaves one out, which is how Atlas drops a SQLite column.
+   Without a terminal or an approval, `apply` stops before running the file. A SQLite table rebuild (Atlas copies the rows into `new_t`, drops `t` and renames `new_t`) is cautious when it copies every column the earlier files gave `t`, and unsafe when it leaves one out, which is how Atlas drops a SQLite column. A rebuild of a table other tables reference is unsafe unless it carries comb's guard exactly as `comb migrate diff` wrote it (see below); an edit inside the guard makes it unsafe again.
 
 4. Applies its statements (`CREATE INDEX` and `DROP INDEX` made `IF [NOT] EXISTS`) and the insert of its hash as one batch, which every provider runs all-or-nothing (D1 as one `wrangler d1 execute --file`). A file is applied and recorded, or neither. A transient failure (rate limit, reset connection) retries the whole batch through `withRetry()`.
 
@@ -556,7 +556,9 @@ An enum value Atlas adds goes into a file of its own a version earlier, since Po
 
 ### SQLite transforms
 
-Atlas wraps SQLite table rebuilds in `PRAGMA foreign_keys = off;` … `PRAGMA foreign_keys = on;`. That pragma is a no-op inside a transaction, which is exactly where D1 runs it — so the rebuild proceeds with FK enforcement still live and fails. `applySqliteMigrationTransforms()` rewrites the pair into a single `PRAGMA defer_foreign_keys = on;` prelude, which defers enforcement to commit time and is transaction-safe. It is idempotent and leaves every `CREATE`, `ALTER`, and `INDEX` statement byte-identical.
+Atlas wraps SQLite table rebuilds in `PRAGMA foreign_keys = off;` … `PRAGMA foreign_keys = on;`. That pragma is a no-op inside a transaction, which is exactly where D1 runs it — so the rebuild proceeds with FK enforcement still live and fails. `applySqliteMigrationTransforms()` rewrites the pair into a single `PRAGMA defer_foreign_keys = on;` prelude, which defers the checks to commit time. It is idempotent and leaves every `CREATE`, `ALTER`, and `INDEX` statement byte-identical.
+
+The pragma defers checks, never `ON DELETE` actions. With foreign keys on (always on D1, and by default in `@libsql/client`), Atlas's `DROP TABLE t` first deletes every row of `t`: `CASCADE` and `SET NULL` change the tables that reference it, `RESTRICT` fails, and `NO ACTION` fails at commit, since the rows return under the renamed copy. So `comb migrate diff` guards each rebuild of a referenced table. Between Atlas's copy and its drop it saves every table with a foreign-key path to `t` (Atlas's `new_t` too when it references `t`) into a `_comb_keep_<table>` table, saves `t`'s `sqlite_sequence` value, and empties those tables, children first. After the rename it refills them, parents first, with their rowids, restores the sequence, and drops the keep tables. The guard doubles the writes to those tables, which counts against D1's 30-second limit per query on a large table; a 1M-row closure takes under a second on local SQLite. The diff refuses, naming the object, when a table it would empty has a trigger other than an FTS one (the trigger would fire on both the emptying and the refill), when a table already uses the `_comb_keep_` prefix, or when the history does not show a reached table's columns.
 
 <!-- ts-context
 declare const atlasSql: string

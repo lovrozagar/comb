@@ -35,12 +35,15 @@ function bodyText(text: string): string {
 		: text.slice(tag.length)
 }
 
-/** A statement's code: identifiers kept, a DO body unwrapped, strings and comments one space, whitespace collapsed */
+/**
+ * A statement's code: identifiers kept, a DO body read as code itself, strings and comments one
+ * space, whitespace collapsed
+ */
 function codeOf(stmt: string, dialect: Dialect): string {
 	return segments(stmt, dialect)
 		.map(({ kind, text }) => {
 			if (kind === "code" || kind === "identifier") return text
-			return kind === "body" ? ` ${bodyText(text)} ` : " "
+			return kind === "body" ? ` ${codeOf(bodyText(text), dialect)} ` : " "
 		})
 		.join("")
 		.replace(/\s+/g, " ")
@@ -75,4 +78,24 @@ function topLevel(code: string): string {
 	return out
 }
 
-export { codeOf, IDENT, lastPart, QNAME, splitTopLevel, topLevel, unquote }
+/** A string or dollar-quoted literal's text: `'it''s'` is `it's` */
+const literalText = (text: string): string =>
+	text.startsWith("'") ? text.slice(1, -1).replaceAll("''", "'") : bodyText(text)
+
+/** The SQL a DO statement runs: its dollar-quoted or single-quoted body */
+function doBody(stmt: string): string {
+	const body = segments(stmt, "postgres").find(({ kind }) => kind === "body" || kind === "literal")
+	return body === undefined ? "" : literalText(body.text)
+}
+
+/** The SQL each `EXECUTE '<literal>'` (or `EXECUTE $tag$…$tag$`) of a DO body runs */
+function executedSql(body: string): string[] {
+	const parts = segments(body, "postgres")
+	return parts.flatMap((part, i) => {
+		const next = parts[i + 1]
+		const literal = part.kind === "code" && /\bEXECUTE\s*$/i.test(part.text) && next?.kind === "literal"
+		return literal ? [literalText(next.text)] : []
+	})
+}
+
+export { bodyText, codeOf, doBody, executedSql, IDENT, lastPart, QNAME, splitTopLevel, topLevel, unquote }

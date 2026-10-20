@@ -7,10 +7,11 @@
  */
 import { nextVersion } from "./atlas-dir.ts"
 import { atlasDirectives, withDirectivesFirst } from "./pg-objects.ts"
-import { codeOf } from "./sql-code.ts"
+import { codeOf, QNAME } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
-const ADD_VALUE = /^ALTER TYPE \S+ ADD VALUE\b/i
+// per-process-constant: a pattern composed from the name grammar, compiled once
+const ADD_VALUE = /* @__PURE__ */ new RegExp(`^ALTER TYPE (?:IF EXISTS )?${QNAME} ADD VALUE\\b`, "i")
 const VERSIONED = /^(\d{14})(.*)\.sql$/
 
 const joined = (statements: readonly string[]) => `${statements.join(";\n")};\n`

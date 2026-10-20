@@ -1,0 +1,153 @@
+import { describe, expect, it } from "vitest"
+import { extractSchema } from "./schema.ts"
+
+/* Atlas v1.3.0's SQLite rebuild of a parent with a self-reference, and drizzle-kit's own export forms */
+const HISTORY = `CREATE TABLE \`u\` (\`id\` integer PRIMARY KEY AUTOINCREMENT, \`boss\` integer REFERENCES \`u\`(\`id\`));
+CREATE TABLE \`post\` (
+\`id\` integer PRIMARY KEY AUTOINCREMENT,
+\`author\` integer NOT NULL,
+\`slug\` text GENERATED ALWAYS AS (lower(\`title\`)) VIRTUAL,
+\`title\` text,
+\`n\` integer AS (\`id\` + 1) STORED,
+CONSTRAINT \`post_author_fk\` FOREIGN KEY (\`author\`) REFERENCES \`u\`(\`id\`) ON UPDATE no action ON DELETE cascade
+);
+CREATE TABLE "tag" ("post" integer, "name" text, PRIMARY KEY ("post", "name"), FOREIGN KEY ("post") REFERENCES "post" ON DELETE SET NULL) WITHOUT ROWID;
+ALTER TABLE \`tag\` ADD COLUMN \`by\` integer REFERENCES \`u\`(\`id\`) ON DELETE RESTRICT;
+CREATE TRIGGER IF NOT EXISTS \`post_ai\` AFTER INSERT ON \`post\` BEGIN SELECT 1; END;
+CREATE TRIGGER "gone_t" AFTER INSERT ON "post" BEGIN SELECT 1; END;
+DROP TRIGGER "gone_t";`
+
+describe("extractSchema: foreign keys, triggers, functions and table shapes", () => {
+	it("reads each foreign key, inline, table-level and added, with its ON DELETE action", () => {
+		expect(extractSchema(HISTORY).foreignKeys).toEqual([
+			{ columns: ["boss"], onDelete: "NO ACTION", parent: "u", parentColumns: ["id"], table: "u" },
+			{ columns: ["author"], onDelete: "CASCADE", parent: "u", parentColumns: ["id"], table: "post" },
+			{ columns: ["post"], onDelete: "SET NULL", parent: "post", parentColumns: [], table: "tag" },
+			{ columns: ["by"], onDelete: "RESTRICT", parent: "u", parentColumns: ["id"], table: "tag" },
+		])
+	})
+
+	it("reads each table's primary key, rowid, AUTOINCREMENT and generated columns, and the triggers left", () => {
+		const schema = extractSchema(HISTORY)
+		expect(Object.fromEntries(schema.tableInfo)).toEqual({
+			post: { autoincrement: true, generatedColumns: ["slug", "n"], primaryKey: ["id"], withoutRowid: false },
+			tag: { autoincrement: false, generatedColumns: [], primaryKey: ["post", "name"], withoutRowid: true },
+			u: { autoincrement: true, generatedColumns: [], primaryKey: ["id"], withoutRowid: false },
+		})
+		expect(schema.triggers).toEqual([{ name: "post_ai", table: "post" }])
+	})
+})
+
+describe("extractSchema: what a rebuild, a drop and a rename do to keys and shapes", () => {
+	it("follows Atlas's rebuild: the copy's keys replace the table's, its self-reference kept on the name", () => {
+		const rebuilt = extractSchema(
+			`CREATE TABLE \`new_u\` (\`id\` integer NOT NULL, \`boss\` integer NULL, PRIMARY KEY (\`id\`), CONSTRAINT \`0\` FOREIGN KEY (\`boss\`) REFERENCES \`u\` (\`id\`) ON UPDATE NO ACTION ON DELETE NO ACTION);
+INSERT INTO \`new_u\` (\`id\`, \`boss\`) SELECT \`id\`, \`boss\` FROM \`u\`;
+DROP TABLE \`u\`;
+ALTER TABLE \`new_u\` RENAME TO \`u\`;`,
+			extractSchema(HISTORY),
+		)
+		expect(rebuilt.foreignKeys.filter((fk) => fk.table === "u")).toEqual([
+			{ columns: ["boss"], onDelete: "NO ACTION", parent: "u", parentColumns: ["id"], table: "u" },
+		])
+		expect(rebuilt.tableInfo.get("u")).toEqual({
+			autoincrement: false,
+			generatedColumns: [],
+			primaryKey: ["id"],
+			withoutRowid: false,
+		})
+		expect(rebuilt.tableInfo.has("new_u")).toBe(false)
+	})
+
+	it("drops a dropped table's keys, triggers and shape, and renames them with the table", () => {
+		const after = extractSchema('DROP TABLE "tag";\nALTER TABLE "post" RENAME TO "article";', extractSchema(HISTORY))
+		expect(after.foreignKeys.map((fk) => `${fk.table}->${fk.parent}`)).toEqual(["u->u", "article->u"])
+		expect(after.triggers).toEqual([{ name: "post_ai", table: "article" }])
+		expect([...after.tableInfo.keys()]).toEqual(["u", "article"])
+	})
+
+	it("reads an inline reference without columns as the parent's key, a bare column, and an added generated one", () => {
+		const schema = extractSchema(
+			"CREATE TABLE c (p integer REFERENCES p, bare, g integer);\nALTER TABLE c ADD COLUMN h integer AS (g + 1);\nALTER TABLE c ADD COLUMN plain text;\nALTER TABLE unseen ADD COLUMN x integer AS (1);",
+		)
+		expect(schema.foreignKeys).toEqual([
+			{ columns: ["p"], onDelete: "NO ACTION", parent: "p", parentColumns: [], table: "c" },
+		])
+		expect(schema.tables.get("c")).toEqual(["p", "bare", "g", "h", "plain"])
+		expect(schema.tableInfo.get("c")?.generatedColumns).toEqual(["h"])
+		expect(schema.tableInfo.has("unseen")).toBe(false)
+		expect(extractSchema("CREATE TABLE e ();").tableInfo.get("e")?.primaryKey).toEqual([])
+	})
+
+	it("reads the functions and procedures a Postgres file creates, and forgets a dropped one", () => {
+		const schema = extractSchema(
+			`CREATE OR REPLACE FUNCTION "public"."purge"() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM a; END $$;
+CREATE PROCEDURE p() LANGUAGE sql AS $$ SELECT 1; $$;
+CREATE FUNCTION gone() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;
+DROP FUNCTION IF EXISTS gone();`,
+			undefined,
+			"postgres",
+		)
+		expect(schema.functions).toEqual(["purge", "p"])
+	})
+})
+
+describe("extractSchema", () => {
+	it("extracts tables and columns from CREATE TABLE", () => {
+		const schema = extractSchema(`
+CREATE TABLE user (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT
+);
+`)
+		expect(schema.tables.get("user")).toEqual(["id", "name", "email"])
+	})
+
+	it("handles multiple tables", () => {
+		const schema = extractSchema(`
+CREATE TABLE user (id TEXT PRIMARY KEY);
+CREATE TABLE post (id TEXT PRIMARY KEY, title TEXT);
+`)
+		expect(schema.tables.has("user")).toBe(true)
+		expect(schema.tables.has("post")).toBe(true)
+		expect(schema.tables.get("post")).toContain("title")
+	})
+
+	it("tracks dropped tables", () => {
+		const schema = extractSchema("DROP TABLE IF EXISTS old_table;")
+		expect(schema.droppedTables).toContain("old_table")
+	})
+
+	it("extracts indexes", () => {
+		const schema = extractSchema(`
+CREATE TABLE user (id TEXT PRIMARY KEY, email TEXT);
+CREATE INDEX idx_email ON user (email);
+CREATE UNIQUE INDEX idx_email_unique ON user (email);
+`)
+		expect(schema.indexes).toContain("idx_email")
+		expect(schema.indexes).toContain("idx_email_unique")
+	})
+	it("continues from an earlier schema without changing it", () => {
+		const first = extractSchema("CREATE TABLE post (id TEXT); CREATE INDEX i ON post (id); DROP TABLE gone;")
+		const next = extractSchema("ALTER TABLE post ADD COLUMN title TEXT;", first)
+		expect(next.tables.get("post")).toEqual(["id", "title"])
+		expect(next.indexes).toEqual(["i"])
+		expect(next.droppedTables).toEqual(["gone"])
+		expect(first.tables.get("post")).toEqual(["id"])
+	})
+
+	it("follows ALTER TABLE ADD, DROP and RENAME COLUMN on a known table", () => {
+		const schema = extractSchema(`
+CREATE TABLE post (id TEXT PRIMARY KEY, title TEXT, body TEXT);
+ALTER TABLE post ADD COLUMN locale TEXT;
+ALTER TABLE \`post\` DROP COLUMN \`body\`;
+ALTER TABLE post RENAME COLUMN title TO heading;
+ALTER TABLE post DROP CONSTRAINT post_check;
+ALTER TABLE post RENAME TO post;
+ALTER TABLE gone ADD COLUMN x TEXT;
+`)
+		expect(schema.tables.get("post")).toEqual(["id", "heading", "locale"])
+		expect(schema.tables.has("gone")).toBe(false)
+	})
+})

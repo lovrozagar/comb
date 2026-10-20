@@ -6,8 +6,12 @@ const pg = (sql: string) => classifyMigration(sql, { dialect: "postgres" })
 const lite = (sql: string, before?: ExtractedSchema) => classifyMigration(sql, { before, dialect: "sqlite" })
 const schemaWith = (table: string, columns: string[]): ExtractedSchema => ({
 	droppedTables: [],
+	foreignKeys: [],
+	functions: [],
 	indexes: [],
+	tableInfo: new Map(),
 	tables: new Map([[table, columns]]),
+	triggers: [],
 })
 
 /* Atlas v1.3.0's own output for each change on Postgres 17 (plan6-security.md §1) */
@@ -70,6 +74,7 @@ describe("classifyMigration on hand-written Postgres that loses data", () => {
 		"DO $$ BEGIN DROP TABLE post; END $$",
 		"DO $d$ BEGIN IF true THEN TRUNCATE post; END IF; END $d$",
 		"SELECT E'\\''; DROP TABLE \"post\"; -- ';",
+		"DO $$ BEGIN EXECUTE 'DROP TABLE post'; END $$",
 	])("calls %j unsafe", (sql) => {
 		expect(pg(sql).safety).toBe("unsafe")
 	})
@@ -85,7 +90,6 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 		"DELETE FROM post WHERE id IN (SELECT id FROM gone)",
 		"UPDATE post SET a = 1 WHERE id = 2",
 		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET a = s.a",
-		"DO $$ BEGIN EXECUTE 'DROP TABLE post'; END $$",
 		"CREATE OR REPLACE VIEW v AS SELECT 1",
 		"CREATE OR REPLACE FUNCTION f() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql",
 		"GRANT SELECT ON post TO r",
@@ -97,7 +101,8 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 		"ALTER TABLE post DISABLE TRIGGER ALL",
 		"ALTER TABLE post SET UNLOGGED",
 		"ALTER TABLE post ALTER COLUMN id DROP IDENTITY",
-		"-- atlas:txmode none\nCREATE INDEX CONCURRENTLY i ON post (a);",
+		"-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY i ON post (a);",
+		"DO $$ BEGIN EXECUTE format('DROP TABLE %I', 'post'); END $$",
 	])("calls %j cautious", (sql) => {
 		expect(pg(sql).safety).toBe("cautious")
 	})
@@ -111,9 +116,62 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 		"CREATE TABLE child (id int REFERENCES parent (id) ON DELETE CASCADE)",
 		"ALTER TABLE post ADD CONSTRAINT fk FOREIGN KEY (a) REFERENCES b (id) ON DELETE CASCADE NOT VALID",
 		"SELECT 'DROP TABLE post'",
-		"CREATE INDEX CONCURRENTLY i ON post (a)",
 	])("calls %j safe", (sql) => {
 		expect(pg(sql).safety).toBe("safe")
+	})
+})
+
+/* the drop-gate bypasses of the 0.7.0 review (classify-probe.ts), each with the rating it must get */
+describe("classifyMigration on SQL that hid a destructive change", () => {
+	it.each([
+		["DO $$\nBEGIN\n  -- purge old rows\n  DELETE FROM users;\nEND\n$$;", "a line comment in a DO body"],
+		["DO $$ BEGIN /* x */ DELETE FROM users; END $$;", "a block comment in a DO body"],
+		["DO $$ BEGIN UPDATE users SET note = 'WHERE'; END $$;", "a DO body string holding WHERE"],
+		["ALTER VIEW IF EXISTS active_users RENAME TO live_users;", "a view rename with IF EXISTS"],
+		["ALTER MATERIALIZED VIEW IF EXISTS mv RENAME TO mv2;", "a materialized view rename with IF EXISTS"],
+		['ALTER TYPE "order status" RENAME TO order_state;', "a rename of a quoted name with a space"],
+		["EXPLAIN ANALYZE DELETE FROM users;", "EXPLAIN ANALYZE"],
+		["EXPLAIN (ANALYZE, BUFFERS) UPDATE users SET a = 1;", "EXPLAIN with options"],
+		["DO $$ BEGIN EXECUTE 'DELETE FROM users'; END $$;", "EXECUTE of a literal"],
+		["DO $$ BEGIN EXECUTE 'UPDATE users SET note = ''WHERE'''; END $$;", "EXECUTE of a literal with a doubled quote"],
+		["DO $$ BEGIN EXECUTE $q$TRUNCATE post$q$; END $$;", "EXECUTE of a dollar literal"],
+		["DO 'BEGIN DELETE FROM users; END';", "a single-quoted DO body"],
+		["DO LANGUAGE plpgsql 'BEGIN EXECUTE ''TRUNCATE post''; END';", "an EXECUTE in a single-quoted DO body"],
+	])("calls %j unsafe (%s)", (sql) => {
+		expect(pg(sql).safety).toBe("unsafe")
+	})
+
+	it.each([
+		["ALTER SEQUENCE IF EXISTS s RESTART;", "a sequence restart with IF EXISTS"],
+		[
+			"CREATE FUNCTION purge() RETURNS void LANGUAGE sql AS $$ DELETE FROM users $$;\nSELECT purge();",
+			"a call of a function the file creates",
+		],
+		['CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nPERFORM "p"();', "a PERFORM"],
+		["ALTER TABLE post NO FORCE ROW LEVEL SECURITY", "NO FORCE ROW LEVEL SECURITY"],
+		[
+			"CREATE RULE r AS ON DELETE TO post DO INSTEAD (UPDATE post SET gone = true WHERE id = old.id)",
+			"a rule's filtered write",
+		],
+	])("calls %j cautious (%s)", (sql) => {
+		expect(pg(sql).safety).toBe("cautious")
+	})
+
+	it("calls a function an earlier file created cautious", () => {
+		const before = { ...schemaWith("users", ["id"]), functions: ["purge"] }
+		expect(classifyMigration("SELECT purge();", { before, dialect: "postgres" }).safety).toBe("cautious")
+		expect(pg("SELECT purge();").safety).toBe("safe")
+	})
+
+	it.each(["REPLACE INTO t VALUES (1)", "INSERT OR REPLACE INTO t VALUES (1)"])(
+		"calls %j cautious on SQLite",
+		(sql) => {
+			expect(lite(sql).safety).toBe("cautious")
+		},
+	)
+
+	it("reads a DO with no body as running nothing", () => {
+		expect(pg("DO").safety).toBe("safe")
 	})
 })
 
@@ -151,7 +209,7 @@ describe("lock warnings on Postgres", () => {
 		["CREATE INDEX i ON post (a)", 1],
 		["CREATE UNIQUE INDEX i ON public.post (a)", 1],
 		["CREATE TABLE t (a int);\nCREATE INDEX i ON t (a);", 0],
-		["CREATE INDEX CONCURRENTLY i ON post (a)", 0],
+		["-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY i ON post (a)", 0],
 		["REINDEX TABLE post", 1],
 		["ALTER TABLE post ADD COLUMN at timestamptz DEFAULT clock_timestamp()", 1],
 		["ALTER TABLE post ADD COLUMN id2 uuid NOT NULL DEFAULT gen_random_uuid()", 1],
@@ -159,7 +217,7 @@ describe("lock warnings on Postgres", () => {
 		["ALTER TABLE post ADD CONSTRAINT fk FOREIGN KEY (a) REFERENCES b (id)", 1],
 		["ALTER TABLE post ADD CONSTRAINT c CHECK (a > 0) NOT VALID", 0],
 		["ALTER TABLE post ALTER COLUMN a TYPE bigint", 1],
-		["VACUUM FULL post", 1],
+		["-- atlas:txmode none\n\nVACUUM FULL post", 1],
 	])("warns %j %i time(s)", (sql, count) => {
 		expect(pg(sql).lockWarnings).toHaveLength(count)
 	})

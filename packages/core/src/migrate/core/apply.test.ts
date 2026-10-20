@@ -27,7 +27,7 @@ function makeSchema(
 	indexes: string[] = [],
 	droppedTables: string[] = [],
 ): ExtractedSchema {
-	return { droppedTables, indexes, tables }
+	return { droppedTables, foreignKeys: [], functions: [], indexes, tableInfo: new Map(), tables, triggers: [] }
 }
 
 describe("ensureMigrationsTable", () => {

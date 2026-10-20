@@ -3,8 +3,9 @@
  */
 import { createHash } from "node:crypto"
 import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts"
+import { extractSchema } from "./schema.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
-import type { ExtractedSchema, ParsedMigration } from "../types.ts"
+import type { ParsedMigration } from "../types.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    SQL STATEMENT SPLITTING — see sql-scan.ts
@@ -43,96 +44,10 @@ export function migrationHashes(sql: string): string[] {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SCHEMA EXTRACTION
+   SCHEMA EXTRACTION — see schema.ts
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const CONSTRAINT_WORDS = /^(?:CONSTRAINT|PRIMARY|FOREIGN|UNIQUE|CHECK)/i
-
-/** The column definitions of a CREATE TABLE body: its top-level comma-separated parts */
-function bodyParts(stmt: string): string[] {
-	const open = stmt.indexOf("(")
-	const parts: string[] = []
-	let depth = 0
-	let start = open + 1
-	for (let i = open + 1; i < stmt.length; i++) {
-		const char = stmt[i]
-		if (char === "(") depth++
-		else if (char === ")" && depth === 0) return [...parts, stmt.slice(start, i).trim()]
-		else if (char === ")") depth--
-		else if (char === "," && depth === 0) {
-			parts.push(stmt.slice(start, i).trim())
-			start = i + 1
-		}
-	}
-	return [...parts, stmt.slice(start).trim()]
-}
-
-/** The column names a CREATE TABLE declares, table constraints left out */
-function columnNames(stmt: string): string[] {
-	return bodyParts(stmt)
-		.map((def) => /^["'`]?(\w+)["'`]?\s+/.exec(def)?.[1])
-		.filter((name): name is string => name !== undefined && !CONSTRAINT_WORDS.test(name))
-}
-
-type SchemaSoFar = { droppedTables: string[]; indexes: string[]; tables: Map<string, string[]> }
-
-const CREATE_TABLE = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?\s*\(/i
-const CREATE_INDEX = /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i
-const DROP_TABLE = /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i
-/* Atlas's table rebuild: create `new_t`, copy rows, drop `t`, rename `new_t` to `t` */
-const RENAME_TABLE = /ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+RENAME\s+TO\s+["'`]?(\w+)["'`]?/i
-
-const ADDS_OR_DROPS = /^\s*ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+(ADD|DROP)\s+(?:COLUMN\s+)?["'`]?(\w+)/i
-const RENAMES_COLUMN =
-	/^\s*ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+RENAME\s+(?:COLUMN\s+)?["'`]?(\w+)["'`]?\s+TO\s+["'`]?(\w+)/i
-
-/** What an ALTER TABLE ADD, DROP or RENAME COLUMN does to a followed table's columns */
-function followColumns(schema: SchemaSoFar, stmt: string): void {
-	const [, table, verb, column] = ADDS_OR_DROPS.exec(stmt) ?? []
-	const columns = table === undefined ? undefined : schema.tables.get(table)
-	if (columns !== undefined && !/^(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK)$/i.test(column as string)) {
-		const kept = columns.filter((name) => name !== column)
-		schema.tables.set(table as string, verb?.toUpperCase() === "ADD" ? [...kept, column as string] : kept)
-	}
-	const [, renamedIn, from, to] = RENAMES_COLUMN.exec(stmt) ?? []
-	const before = renamedIn === undefined ? undefined : schema.tables.get(renamedIn)
-	if (before !== undefined)
-		schema.tables.set(
-			renamedIn as string,
-			before.map((name) => (name === from ? (to as string) : name)),
-		)
-}
-
-/** What one statement does to the schema being followed */
-function follow(schema: SchemaSoFar, stmt: string): void {
-	const created = CREATE_TABLE.exec(stmt)?.[1]
-	if (created !== undefined) schema.tables.set(created, columnNames(stmt))
-	const index = CREATE_INDEX.exec(stmt)?.[1]
-	if (index !== undefined) schema.indexes.push(index)
-	const dropped = DROP_TABLE.exec(stmt)?.[1]
-	if (dropped !== undefined) {
-		schema.droppedTables.push(dropped)
-		schema.tables.delete(dropped)
-	}
-	followColumns(schema, stmt)
-	const [, from, to] = RENAME_TABLE.exec(stmt) ?? []
-	const columns = from === undefined ? undefined : schema.tables.get(from)
-	if (columns !== undefined && to !== undefined) {
-		schema.tables.delete(from as string)
-		schema.tables.set(to, columns)
-	}
-}
-
-/** The tables (with columns), indexes and dropped tables a migration leaves, after `from` when given */
-export function extractSchema(sql: string, from?: ExtractedSchema): ExtractedSchema {
-	const schema: SchemaSoFar = {
-		droppedTables: [...(from?.droppedTables ?? [])],
-		indexes: [...(from?.indexes ?? [])],
-		tables: new Map(from?.tables),
-	}
-	for (const stmt of splitSqlStatements(sql)) follow(schema, stmt)
-	return schema
-}
+export { extractSchema }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    DROP STATEMENT EXTRACTION AND CLASSIFICATION — see classify.ts

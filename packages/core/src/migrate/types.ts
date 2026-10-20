@@ -146,10 +146,36 @@ export type MigrationResult = {
    PARSED MIGRATION
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/** A foreign key as a migration declares it; an empty `parentColumns` is the parent's primary key */
+export type ForeignKey = {
+	table: string
+	columns: string[]
+	parent: string
+	parentColumns: string[]
+	onDelete: "CASCADE" | "NO ACTION" | "RESTRICT" | "SET DEFAULT" | "SET NULL"
+}
+
+/** What a table rebuild must know of a table to save and restore its rows */
+export type TableInfo = {
+	primaryKey: string[]
+	/** a WITHOUT ROWID table, whose rows are saved by primary key */
+	withoutRowid: boolean
+	/** columns no INSERT may write */
+	generatedColumns: string[]
+	/** SQLite keeps its next id in sqlite_sequence */
+	autoincrement: boolean
+}
+
 export type ExtractedSchema = {
 	tables: Map<string, string[]>
 	indexes: string[]
 	droppedTables: string[]
+	foreignKeys: ForeignKey[]
+	/** each trigger left, by its table */
+	triggers: Array<{ name: string; table: string }>
+	/** the functions and procedures left, unquoted */
+	functions: string[]
+	tableInfo: Map<string, TableInfo>
 }
 
 export type MigrationSafety = "safe" | "cautious" | "unsafe"

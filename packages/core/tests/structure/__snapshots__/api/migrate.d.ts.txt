@@ -108,8 +108,9 @@ export declare function generateMigrationFile(options: GenerateMigrationOptions)
 
 // migrate/core/parse.d.ts
 import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts";
+import { extractSchema } from "./schema.ts";
 import { splitSqlStatements } from "./sql-scan.ts";
-import type { ExtractedSchema, ParsedMigration } from "../types.ts";
+import type { ParsedMigration } from "../types.ts";
 export { splitSqlStatements };
 /** The hash a migration is recorded under: its SQL with comments and layout normalized away */
 export declare function generateMigrationHash(sql: string): string;
@@ -121,8 +122,7 @@ export declare function generateMigrationHash(sql: string): string;
 export declare function legacyMigrationHash(sql: string): string;
 /** Every hash `sql` may be recorded under, current first */
 export declare function migrationHashes(sql: string): string[];
-/** The tables (with columns), indexes and dropped tables a migration leaves, after `from` when given */
-export declare function extractSchema(sql: string, from?: ExtractedSchema): ExtractedSchema;
+export { extractSchema };
 export { classifyMigration, extractDropStatements };
 export declare function makeIdempotent(statements: string[]): string[];
 /** A migration file, classified against `options.before`, the schema the earlier files leave */
@@ -284,10 +284,37 @@ export type MigrationResult = {
     tablesVerified?: number;
     error?: string;
 };
+/** A foreign key as a migration declares it; an empty `parentColumns` is the parent's primary key */
+export type ForeignKey = {
+    table: string;
+    columns: string[];
+    parent: string;
+    parentColumns: string[];
+    onDelete: "CASCADE" | "NO ACTION" | "RESTRICT" | "SET DEFAULT" | "SET NULL";
+};
+/** What a table rebuild must know of a table to save and restore its rows */
+export type TableInfo = {
+    primaryKey: string[];
+    /** a WITHOUT ROWID table, whose rows are saved by primary key */
+    withoutRowid: boolean;
+    /** columns no INSERT may write */
+    generatedColumns: string[];
+    /** SQLite keeps its next id in sqlite_sequence */
+    autoincrement: boolean;
+};
 export type ExtractedSchema = {
     tables: Map<string, string[]>;
     indexes: string[];
     droppedTables: string[];
+    foreignKeys: ForeignKey[];
+    /** each trigger left, by its table */
+    triggers: Array<{
+        name: string;
+        table: string;
+    }>;
+    /** the functions and procedures left, unquoted */
+    functions: string[];
+    tableInfo: Map<string, TableInfo>;
 };
 export type MigrationSafety = "safe" | "cautious" | "unsafe";
 export type MigrationClassification = {
@@ -380,14 +407,20 @@ declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atl
 export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, pgUrlProblems, type PgTarget, redactUrl, scrubAtlasOutput, withAtlasEnv, };
 
 // migrate/core/atlas-env.d.ts
+import type { ExtractedSchema } from "../types.ts";
+import type { FtsState } from "./fts-migration.ts";
 /**
- * What every SQLite Atlas run shares: the dev database it replays on, and the pragma rewrite
- * applied to what it writes.
+ * Idempotent. Input without the pragma pair passes through unchanged. With `before`, the schema
+ * the earlier migrations leave, each rebuild of a referenced table is guarded, and FTS triggers in
+ * `fts` are the ones the guard may fire; a rebuild it cannot guard is refused.
  */
-/** Idempotent. Input without the pragma pair passes through unchanged. */
-export declare function applySqliteMigrationTransforms(sql: string): string;
-/** The ephemeral database Atlas replays SQLite migrations on; Postgres names its own (atlas-target.ts) */
-export declare const SQLITE_DEV_URL = "sqlite://file?mode=memory";
+export declare function applySqliteMigrationTransforms(sql: string, before?: ExtractedSchema, fts?: FtsState): string;
+/**
+ * The ephemeral database Atlas replays SQLite migrations on; Postgres names its own
+ * (atlas-target.ts). Atlas takes a lock across the host named after the dev URL, so each run
+ * gets a database name of its own, or two diffs at once fail with "lock … already taken".
+ */
+export declare const sqliteDevUrl: () => string;
 
 // migrate/core/migrate-diff.d.ts
 import type { Dialect } from "../types.ts";
@@ -418,10 +451,13 @@ export declare function generateIncrementalMigration(options: MigrateDiffOptions
  *
  * unsafe: loses data or breaks deployed code by name (table, column, schema, type, sequence,
  * role drops; CASCADE; retypes; SET NOT NULL; a NOT NULL column without a default; renames;
- * TRUNCATE; DELETE or UPDATE without a top-level WHERE). cautious: drops nothing a row holds
- * (indexes, constraints, views, policies, triggers, functions, defaults), a filtered write, a
- * grant, or a file Atlas runs outside a transaction. A lock warning names a statement that
- * blocks a Postgres table while it runs. A `DO` body runs, so its statements are read too.
+ * TRUNCATE; DELETE or UPDATE without a top-level WHERE, or with one that is always true, at any
+ * depth: in a CTE, a subquery or a rule). cautious: drops nothing a row holds (indexes,
+ * constraints, views, policies, triggers, functions, defaults), a filtered write, a grant, a call
+ * of a function a migration created, a SQLite REPLACE, or a file Atlas runs outside a transaction.
+ * A lock warning names a statement that blocks a Postgres table while it runs. A `DO` body runs,
+ * so its statements are read too, and so is the literal SQL it EXECUTEs. A statement Postgres
+ * refuses inside a transaction is refused outright unless its file runs outside one.
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
 type ClassifyOptions = {
@@ -435,6 +471,15 @@ declare function extractDropStatements(sql: string, options?: ClassifyOptions): 
 /** How destructive a migration is, which statements make it so, and which block a Postgres table */
 declare function classifyMigration(sql: string, options?: ClassifyOptions): MigrationClassification;
 export { classifyMigration, type ClassifyOptions, extractDropStatements };
+
+// migrate/core/schema.d.ts
+import type { Dialect, ExtractedSchema } from "../types.ts";
+/**
+ * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
+ * migration leaves, after `from` when given, read as `dialect` reads it
+ */
+declare function extractSchema(sql: string, from?: ExtractedSchema, dialect?: Dialect): ExtractedSchema;
+export { extractSchema };
 
 // migrate/core/sql-scan.d.ts
 /**
@@ -501,6 +546,41 @@ export declare function introspectSqliteSchema(conn: Connection): Promise<string
 export declare function getSqliteTables(conn: Connection): Promise<string[]>;
 export declare function getSqliteColumns(conn: Connection, table: string): Promise<string[]>;
 export declare function getSqliteIndexes(conn: Connection): Promise<string[]>;
+
+// migrate/core/fts-migration.d.ts
+/** One FTS object as a migration leaves it: its normalized DDL and the group it belongs to */
+type FtsObject = {
+    group: string;
+    kind: "table" | "trigger";
+    sql: string;
+};
+/** The FTS objects a sequence of migrations leaves, by name */
+type FtsState = Map<string, FtsObject>;
+type Separated = {
+    fts: string[];
+    plain: string[];
+    state: FtsState;
+};
+/**
+ * `sql`'s statements split into those Atlas may see and the FTS state they leave, continuing
+ * from `state` with the FTS tables `groups` already names.
+ */
+declare function separate(sql: string, groups: Set<string>, state?: FtsState): Separated;
+/** Statements joined back into a migration file's text */
+declare const asSql: (statements: readonly string[]) => string;
+type FtsDelta = {
+    /** The FTS state the migration history leaves */
+    from: FtsState;
+    /** The plain SQL Atlas generated for this migration, to see which tables it rewrites */
+    plainDiff: string;
+    /** The FTS state the target declares */
+    to: FtsState;
+    /** The target's FTS statements as written, in order (`separate(...).fts`) */
+    toStatements: readonly string[];
+};
+/** The FTS statements a migration needs after its plain part; "" when it needs none */
+declare function ftsDelta({ from, plainDiff, to, toStatements }: FtsDelta): string;
+export { asSql, ftsDelta, separate, type FtsState };
 
 // migrate/drivers/bun-sqlite.d.ts
 /**

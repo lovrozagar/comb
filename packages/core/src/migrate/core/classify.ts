@@ -4,15 +4,21 @@
  *
  * unsafe: loses data or breaks deployed code by name (table, column, schema, type, sequence,
  * role drops; CASCADE; retypes; SET NOT NULL; a NOT NULL column without a default; renames;
- * TRUNCATE; DELETE or UPDATE without a top-level WHERE). cautious: drops nothing a row holds
- * (indexes, constraints, views, policies, triggers, functions, defaults), a filtered write, a
- * grant, or a file Atlas runs outside a transaction. A lock warning names a statement that
- * blocks a Postgres table while it runs. A `DO` body runs, so its statements are read too.
+ * TRUNCATE; DELETE or UPDATE without a top-level WHERE, or with one that is always true, at any
+ * depth: in a CTE, a subquery or a rule). cautious: drops nothing a row holds (indexes,
+ * constraints, views, policies, triggers, functions, defaults), a filtered write, a grant, a call
+ * of a function a migration created, a SQLite REPLACE, or a file Atlas runs outside a transaction.
+ * A lock warning names a statement that blocks a Postgres table while it runs. A `DO` body runs,
+ * so its statements are read too, and so is the literal SQL it EXECUTEs. A statement Postgres
+ * refuses inside a transaction is refused outright unless its file runs outside one.
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
-import { codeOf, lastPart, QNAME, splitTopLevel, topLevel, unquote } from "./sql-code.ts"
-import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
+import { preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
+import { writeFindings } from "./classify-write.ts"
+import { readGuards } from "./rebuild-guard.ts"
+import { codeOf, doBody, executedSql, lastPart, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
+import { splitSqlStatements } from "./sql-scan.ts"
 
 type ClassifyOptions = {
 	/** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
@@ -22,7 +28,18 @@ type ClassifyOptions = {
 }
 
 /** What the statements of one file show, read once before the rules run */
-type FileContext = { before: ExtractedSchema | undefined; created: Set<string>; dialect: Dialect; rebuilds: Rebuilds }
+type FileContext = {
+	before: ExtractedSchema | undefined
+	created: Set<string>
+	dialect: Dialect
+	/** the functions and procedures this file or an earlier one creates, unquoted */
+	functions: Set<string>
+	rebuilds: Rebuilds
+	/** rebuilt tables others reference whose rebuild comb did not guard, with the tables their drop reaches */
+	unguarded: Map<string, string[]>
+	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
+	reindexed: Set<string>
+}
 
 /** A SQLite rebuild of `table`: the temporary table it is copied into, and the columns copied */
 type Rebuilds = Map<string, { columns: string[]; temp: string }>
@@ -34,10 +51,21 @@ const DROP_LIST = /* @__PURE__ */ new RegExp(
 	`^DROP (TABLE|INDEX) (?:CONCURRENTLY )?(?:IF EXISTS )?(${QNAME}(?:\\s*,\\s*${QNAME})*)`,
 	"i",
 )
-const VOLATILE_WRITE = /^(?:WITH\b.*?\b)?(DELETE|UPDATE)\b(.*)$/i
-const CAUTIOUS =
-	/^(?:DROP|GRANT|REVOKE|CALL|CREATE OR REPLACE|ALTER SEQUENCE \S+ RESTART|ALTER (?:INDEX|POLICY|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE)\b.*\bRENAME)\b/i
-const RENAMES_NAMED = /^ALTER (?:TYPE|SCHEMA|VIEW|MATERIALIZED VIEW) \S+ (?:RENAME|SET SCHEMA|DROP ATTRIBUTE)\b/i
+// per-process-constant: a pattern composed from the name grammar, compiled once
+const CAUTIOUS = /* @__PURE__ */ new RegExp(
+	`^(?:DROP|GRANT|REVOKE|CALL|CREATE OR REPLACE|REPLACE|INSERT OR REPLACE|ALTER SEQUENCE (?:IF EXISTS )?${QNAME} RESTART|ALTER (?:INDEX|POLICY|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE)\\b.*\\bRENAME)\\b`,
+	"i",
+)
+// per-process-constant: a pattern composed from the name grammar, compiled once
+const RENAMES_NAMED = /* @__PURE__ */ new RegExp(
+	`^ALTER (?:TYPE|SCHEMA|VIEW|MATERIALIZED VIEW) (?:IF EXISTS )?${QNAME} (?:RENAME|SET SCHEMA|DROP ATTRIBUTE)\\b`,
+	"i",
+)
+// per-process-constant: a pattern composed from the name grammar, compiled once
+const CREATE_FUNCTION = /* @__PURE__ */ new RegExp(`^CREATE (?:OR REPLACE )?(?:FUNCTION|PROCEDURE) (${QNAME})`, "i")
+// per-process-constant: a pattern composed from the name grammar, compiled once
+const CALLED = /* @__PURE__ */ new RegExp(`(${QNAME})\\s*\\(`, "g")
+const EXPLAIN = /^EXPLAIN (?:\([^)]*\) )?(?:(?:ANALYZE|ANALYSE|VERBOSE) )*/i
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const INDEX_ON = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:UNIQUE )?INDEX (?!CONCURRENTLY)(?:IF NOT EXISTS )?(?:${QNAME} )?ON (?:ONLY )?(${QNAME})`,
@@ -55,12 +83,6 @@ const RENAME_TABLE = /* @__PURE__ */ new RegExp(`^ALTER TABLE (${QNAME}) RENAME 
 const LOCKING = /^(?:REINDEX (?!.*\bCONCURRENTLY\b)|VACUUM FULL\b|CLUSTER\b)/i
 const TXMODE_NONE = /^\s*--\s*atlas:txmode\s+none\b/im
 
-/** A statement as a person reads it in a prompt: comments and layout gone, cut at 80 characters */
-function preview(stmt: string): string {
-	const text = normalizeSql(stmt)
-	return text.slice(0, 80) + (text.length > 80 ? "..." : "")
-}
-
 /** The drops a DROP TABLE or DROP INDEX names, one per listed name */
 function dropNames(code: string): string[] {
 	const [, kind, list] = DROP_LIST.exec(code) ?? []
@@ -68,12 +90,11 @@ function dropNames(code: string): string[] {
 	return splitTopLevel(list).map((name) => `DROP ${kind.toUpperCase()} ${unquote(name)}`)
 }
 
-/** A DELETE, UPDATE or MERGE: unsafe without a top-level WHERE (or with a MERGE delete), else cautious */
-function writeFinding(code: string): Finding | undefined {
-	if (/^MERGE\b/i.test(code)) return { level: /\bTHEN DELETE\b/i.test(code) ? "unsafe" : "cautious" }
-	const write = VOLATILE_WRITE.exec(topLevel(code))
-	if (write === undefined || write === null) return undefined
-	return { level: /\bWHERE\b/i.test(write[2] as string) ? "cautious" : "unsafe" }
+/** A top-level SELECT or PERFORM that calls a function a migration created: it runs code comb did not read */
+function callFinding(code: string, ctx: FileContext): Finding | undefined {
+	if (!/^(?:SELECT|PERFORM)\b/i.test(code)) return undefined
+	const calls = [...code.matchAll(CALLED)].some((match) => ctx.functions.has(lastPart(match[1] as string)))
+	return calls ? { level: "cautious", note: "calls a function a migration created" } : undefined
 }
 
 /** A SQLite drop that is a table rebuild: lossless when it copies every column the table had */
@@ -84,6 +105,13 @@ function rebuildFinding(code: string, ctx: FileContext): Finding | undefined {
 	const name = lastPart(table)
 	const earlier = ctx.before?.tables.get(name)
 	if (earlier === undefined) return { level: "unsafe", note: `rebuilds ${name}, whose earlier columns are unknown` }
+	const reached = ctx.unguarded.get(name)
+	if (reached !== undefined) {
+		return {
+			level: "unsafe",
+			note: `rebuilds ${name} unguarded: its drop deletes or orphans the rows of ${reached.join(", ")}; let comb migrate diff write it`,
+		}
+	}
 	const lost = earlier.filter((column) => !rebuild.columns.includes(column))
 	if (lost.length === 0) return { level: "cautious" }
 	return {
@@ -107,13 +135,21 @@ function indexWarning(code: string, ctx: FileContext): Finding | undefined {
 function statementFindings(code: string, ctx: FileContext): Finding[] {
 	const rebuild = rebuildFinding(code, ctx)
 	if (rebuild !== undefined) return [rebuild]
+	const dropped = DROP_LIST.exec(code)
+	if (
+		dropped?.[1]?.toUpperCase() === "TABLE" &&
+		splitTopLevel(dropped[2] as string).every((t) => ctx.reindexed.has(lastPart(t)))
+	) {
+		return [{ level: "cautious", note: "an FTS index comb rebuilds from its content table" }]
+	}
 	const findings: Finding[] = []
 	if (UNSAFE_DROP.test(code) || /^TRUNCATE\b/i.test(code) || RENAMES_NAMED.test(code))
 		findings.push({ drops: dropNames(code), level: "unsafe" })
 	else if (CAUTIOUS.test(code)) findings.push({ drops: dropNames(code), level: "cautious" })
 	if (/\bCASCADE\b/i.test(code.replace(/\bON (?:DELETE|UPDATE) CASCADE\b/gi, ""))) findings.push({ level: "unsafe" })
-	const write = writeFinding(code)
-	if (write !== undefined) findings.push(write)
+	findings.push(...writeFindings(code))
+	const call = callFinding(code, ctx)
+	if (call !== undefined) findings.push(call)
 	if (ctx.dialect === "postgres") {
 		const index = indexWarning(code, ctx)
 		if (index !== undefined) findings.push(index)
@@ -122,21 +158,33 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 	return findings
 }
 
-/** The findings of one statement; a DO body's statements are read as the code they run */
-function findingsOf(code: string, ctx: FileContext): Finding[] {
-	if (/^DO\b/i.test(code)) return doFindings(code, ctx)
+/**
+ * The findings of one statement, given its code and its text; a DO body's statements are read as
+ * the code they run, and an EXPLAIN as the statement it explains (ANALYZE runs it)
+ */
+function findingsOf(code: string, stmt: string, ctx: FileContext): Finding[] {
+	if (/^DO\b/i.test(code)) return doFindings(stmt, ctx)
+	if (EXPLAIN.test(code)) return findingsOf(code.replace(EXPLAIN, ""), stmt, ctx)
 	const table = /^ALTER TABLE\b/i.test(code) ? alterTableFindings(code, ctx) : undefined
 	return table ?? statementFindings(code, ctx)
 }
 
-/** A DO block: each statement of its body, control words stripped; EXECUTE runs SQL comb cannot read */
-function doFindings(code: string, ctx: FileContext): Finding[] {
-	const body = code.replace(/^DO (?:LANGUAGE \S+ )?/i, "")
-	const statements = splitSqlStatements(body, "postgres").map((stmt) =>
-		stmt.replace(/^(?:(?:BEGIN|ELSE|LOOP|THEN|DECLARE)\s+|(?:IF|ELSIF|WHEN)\b.*?\bTHEN\s+)*/i, ""),
-	)
-	const findings = statements.flatMap((stmt) => findingsOf(stmt, ctx))
-	if (/\bEXECUTE\b/i.test(body)) findings.push({ level: "cautious" })
+/**
+ * A DO block: each statement of its body, control words stripped, and the literal SQL it
+ * EXECUTEs; any other EXECUTE runs SQL comb cannot read
+ */
+function doFindings(stmt: string, ctx: FileContext): Finding[] {
+	const body = doBody(stmt)
+	const read = (sql: string) =>
+		splitSqlStatements(sql, "postgres").flatMap((part) => {
+			const code = codeOf(part, "postgres").replace(
+				/^(?:(?:BEGIN|ELSE|LOOP|THEN|DECLARE)\s+|(?:IF|ELSIF|WHEN)\b.*?\bTHEN\s+)*/i,
+				"",
+			)
+			return findingsOf(code, part, ctx)
+		})
+	const findings = [...read(body), ...executedSql(body).flatMap(read)]
+	if (/\bEXECUTE\b/i.test(codeOf(body, "postgres"))) findings.push({ level: "cautious" })
 	return findings
 }
 
@@ -158,7 +206,7 @@ function rebuildsOf(codes: readonly string[]): Rebuilds {
 	return rebuilds
 }
 
-type Read = { code: string; findings: Finding[]; stmt: string }
+type Read = ReadStatement & { findings: Finding[] }
 
 function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dialect): Read[] {
 	const statements = splitSqlStatements(sql, dialect)
@@ -170,10 +218,24 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 			return table === undefined ? [] : [lastPart(table)]
 		}),
 	)
-	const ctx: FileContext = { before, created, dialect, rebuilds }
+	const functions = new Set([
+		...(before?.functions ?? []),
+		...codes.flatMap((code) => {
+			const name = CREATE_FUNCTION.exec(code)?.[1]
+			return name === undefined ? [] : [lastPart(name)]
+		}),
+	])
+	const guards =
+		dialect === "sqlite"
+			? readGuards(statements, codes, before)
+			: { guarded: new Set<number>(), unguarded: new Map<string, string[]>() }
+	const reindexed = dialect === "sqlite" ? reindexedOf(statements) : new Set<string>()
+	const ctx: FileContext = { before, created, dialect, functions, rebuilds, reindexed, unguarded: guards.unguarded }
 	return statements.map((stmt, i) => ({
 		code: codes[i] as string,
-		findings: findingsOf(codes[i] as string, ctx),
+		dialect,
+		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
+		findings: guards.guarded.has(i) ? [] : findingsOf(codes[i] as string, stmt, ctx),
 		stmt,
 	}))
 }
@@ -199,6 +261,7 @@ function extractDropStatements(sql: string, options: ClassifyOptions = {}): stri
 /** How destructive a migration is, which statements make it so, and which block a Postgres table */
 function classifyMigration(sql: string, options: ClassifyOptions = {}): MigrationClassification {
 	const reads = readings(sql, options)
+	for (const read of reads) refuseUnrunnable(read, sql)
 	const unsafeStatements = [...new Set(entries(reads, "unsafe"))]
 	const cautiousStatements = [...new Set(entries(reads, "cautious"))]
 	if (TXMODE_NONE.test(sql)) cautiousStatements.push("-- atlas:txmode none: the file is not applied in one transaction")

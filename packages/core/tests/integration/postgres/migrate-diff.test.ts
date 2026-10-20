@@ -33,16 +33,22 @@ const diff = (dev: PgTarget, schema: string, name = "step") =>
 		targetSchema: schema,
 	})
 
-/** Each migration file run on `url` in name order, one transaction each */
+/** The files each target database has had applied */
+const applied = new Map<string, Set<string>>()
+
+/** Each migration file not yet run on `url` run in name order, one transaction each */
 async function applyAll(url: string, searchPath = "public"): Promise<void> {
+	const done = applied.get(url) ?? new Set<string>()
+	applied.set(url, done)
 	const client = new pg.Client({ connectionString: url })
 	await client.connect()
 	try {
 		await client.query(`SET search_path TO ${searchPath}`)
 		for (const file of readdirSync(dir)
-			.filter((f) => f.endsWith(".sql"))
+			.filter((f) => f.endsWith(".sql") && !done.has(f))
 			.sort()) {
 			await client.query(`BEGIN;\n${readFileSync(join(dir, file), "utf8")}\nCOMMIT;`)
+			done.add(file)
 		}
 	} finally {
 		await client.end()
@@ -57,6 +63,19 @@ async function query<T>(url: string, sql: string): Promise<T[]> {
 	} finally {
 		await client.end()
 	}
+}
+
+/** Each public table's row level security flags, by name */
+const rlsOf = (url: string) =>
+	query<{ enabled: boolean; forced: boolean; table: string }>(
+		url,
+		"SELECT relname AS table, relrowsecurity AS enabled, relforcerowsecurity AS forced FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' ORDER BY relname",
+	)
+
+/** A hand-written migration `name` added to the history, with atlas.sum rehashed */
+function handWritten(name: string, sql: string): void {
+	writeFileSync(join(dir, name), sql)
+	spawnSync("atlas", ["migrate", "hash", "--dir", `file://${dir}`])
 }
 
 /** A scratch dev database and a scratch target for `run` */
@@ -117,8 +136,105 @@ describePg("migrate diff on Postgres: tables, views and policies", () => {
 				expect(await query(url, "SELECT polname, pg_get_expr(polqual, polrelid) AS qual FROM pg_policy")).toEqual([
 					{ polname: "own", qual: "(id > 0)" },
 				])
+				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "post" }])
+				expect(diff(dev, rls + policy('"post"."id" > 0'), "applied").synced).toBe(true)
 			})
 		}, 60_000)
+	})
+})
+
+describePg("migrate diff on Postgres: row level security", () => {
+	describeAtlas("with Atlas v1.3.0", () => {
+		it("enables row level security without a policy, and forces it", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				const dev = target(devUrl)
+				const enabled = `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n`
+				diff(dev, enabled)
+				expect(diff(dev, enabled, "again").synced).toBe(true)
+				const forced = `${enabled}ALTER TABLE "post" FORCE ROW LEVEL SECURITY;\n`
+				const [force] = diff(dev, forced, "force").files
+				expect(readFileSync(force as string, "utf8")).toBe('ALTER TABLE "post" FORCE ROW LEVEL SECURITY;\n')
+				expect(diff(dev, forced, "forced").synced).toBe(true)
+				await applyAll(url)
+				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: true, table: "post" }])
+				const [off] = diff(dev, POST, "off").files
+				expect(readFileSync(off as string, "utf8")).toBe(
+					'ALTER TABLE "post" DISABLE ROW LEVEL SECURITY;\n\nALTER TABLE "post" NO FORCE ROW LEVEL SECURITY;\n',
+				)
+				await applyAll(url)
+				expect(await rlsOf(url)).toEqual([{ enabled: false, forced: false, table: "post" }])
+				expect(diff(dev, POST, "plain").synced).toBe(true)
+			})
+		}, 90_000)
+
+		it("drops a table with row level security, then creates it again with its policy", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				const dev = target(devUrl)
+				const team = 'CREATE TABLE "team" ("id" integer PRIMARY KEY);\n'
+				const secured = `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`
+				diff(dev, team + secured)
+				const [dropped] = diff(dev, team, "drop").files
+				expect(readFileSync(dropped as string, "utf8")).not.toMatch(/ROW LEVEL SECURITY/)
+				expect(diff(dev, team, "gone").synced).toBe(true)
+				diff(dev, team + secured, "back")
+				expect(diff(dev, team + secured, "again").synced).toBe(true)
+				await applyAll(url)
+				expect(await rlsOf(url)).toEqual([
+					{ enabled: true, forced: false, table: "post" },
+					{ enabled: false, forced: false, table: "team" },
+				])
+				expect(await query(url, "SELECT polname FROM pg_policy")).toEqual([{ polname: "own" }])
+			})
+		}, 90_000)
+	})
+})
+
+describePg("migrate diff on Postgres: row level security across renames and drops", () => {
+	describeAtlas("with Atlas v1.3.0", () => {
+		it("secures the table a rename creates, as Atlas writes a rename as a create and a drop", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				const dev = target(devUrl)
+				diff(dev, `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`)
+				const article = `${POST.replace('"post"', '"article"')}ALTER TABLE "article" ENABLE ROW LEVEL SECURITY;\n${policy("true").replace('"post"', '"article"')}`
+				const [renamed] = diff(dev, article, "rename").files
+				expect(readFileSync(renamed as string, "utf8")).toMatch(/ALTER TABLE "article" ENABLE ROW LEVEL SECURITY;/)
+				expect(diff(dev, article, "again").synced).toBe(true)
+				await applyAll(url)
+				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "article" }])
+				expect(await query(url, "SELECT polname, polrelid::regclass::text AS rel FROM pg_policy")).toEqual([
+					{ polname: "own", rel: "article" },
+				])
+			})
+		}, 90_000)
+
+		it("follows a hand-written rename of a secured table in the history", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				const dev = target(devUrl)
+				diff(dev, `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`)
+				handWritten(
+					"20990101000000_rename.sql",
+					'ALTER TABLE "post" RENAME TO "article";\nALTER TABLE "article" RENAME CONSTRAINT "post_pkey" TO "article_pkey";\n',
+				)
+				const article = `${POST.replace('"post"', '"article"')}ALTER TABLE "article" ENABLE ROW LEVEL SECURITY;\n${policy("true").replace('"post"', '"article"')}`
+				expect(diff(dev, article, "after").synced).toBe(true)
+				await applyAll(url)
+				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "article" }])
+			})
+		}, 90_000)
+
+		it("creates a policy again after a hand-written drop of its table", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				const dev = target(devUrl)
+				const secured = `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`
+				diff(dev, secured)
+				handWritten("20990101000000_drop.sql", 'DROP TABLE "post";\n')
+				diff(dev, secured, "back")
+				expect(diff(dev, secured, "again").synced).toBe(true)
+				await applyAll(url)
+				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "post" }])
+				expect(await query(url, "SELECT polname FROM pg_policy")).toEqual([{ polname: "own" }])
+			})
+		}, 90_000)
 	})
 })
 
