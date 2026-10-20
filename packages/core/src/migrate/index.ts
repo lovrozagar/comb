@@ -13,8 +13,6 @@ export {
 	checkAtlasInstalled,
 	type DrizzleExportOptions,
 	exportDrizzleSchema,
-	type GenerateMigrationOptions,
-	generateMigrationFile,
 	generateSchemaDiff,
 	getAtlasVersion,
 	type SchemaDiffOptions,

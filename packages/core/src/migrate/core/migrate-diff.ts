@@ -26,7 +26,7 @@ import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target
 import { asSql, type FtsState, ftsDelta, separate } from "./fts-migration.ts"
 import { splitEnumValues } from "./pg-enum-split.ts"
 import { extractSchema } from "./schema.ts"
-import { atlasDirectives, emptyPgObjects, pgDelta, separatePgObjects, wrapAtlasFile } from "./pg-objects.ts"
+import { atlasDirectives, devPrelude, emptyPgObjects, pgDelta, separatePgObjects, wrapAtlasFile } from "./pg-objects.ts"
 import { type Run, run } from "./process.ts"
 
 export type MigrateDiffOptions = {
@@ -139,14 +139,18 @@ function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): MigrateDiffRes
 	const copy = mkdtempSync(join(tmpdir(), "comb-migrate-history-"))
 	try {
 		const history = emptyPgObjects()
-		for (const file of sqlFiles(migrationsDir)) {
+		const plain = sqlFiles(migrationsDir).map((file) => {
 			const sql = readFileSync(join(migrationsDir, file), "utf8")
 			const head = atlasDirectives(sql)
-			writeFileSync(join(copy, file), head + asSql(separatePgObjects(sql.slice(head.length), history, file).plain))
-		}
-		hashDir(atlas.exec, copy)
+			return { body: asSql(separatePgObjects(sql.slice(head.length), history, file).plain), file, head }
+		})
 		const target = separatePgObjects(options.targetSchema)
-		const added = atlasDiff(atlas, copy, { name: migrationName, schema: asSql(target.plain) })
+		/* the dev database gets the sequences and extensions a table may need first, in the copy's first file and the target */
+		const prelude = devPrelude(history, target.state)
+		for (const [i, { body, file, head }] of plain.entries())
+			writeFileSync(join(copy, file), head + (i === 0 ? prelude : "") + body)
+		hashDir(atlas.exec, copy)
+		const added = atlasDiff(atlas, copy, { name: migrationName, schema: prelude + asSql(target.plain) })
 		const atlasFiles = added.map((file) => readFileSync(join(copy, file), "utf8"))
 		const delta = pgDelta({ atlasSql: atlasFiles.join("\n"), from: history, to: target })
 		if (added.length === 0 && delta.before.length === 0 && delta.after.length === 0) return { files: [], synced: true }

@@ -4,15 +4,22 @@
  * it keeps FTS5 out on SQLite (fts-migration.ts): they are taken out of the history Atlas replays
  * and of the target, and comb writes their part of each migration around Atlas's statements.
  *
- * Before Atlas's statements: new extensions, roles and sequences (a table may use them), changed
- * sequences altered in place (dropping one would restart it), and the drops of every changed or
- * removed policy and view, and of each one over a table Atlas alters (Postgres refuses to retype a
- * column a view or policy reads), dependents first. After them: those views and policies created
- * again from the target, in its order, removed sequences dropped, and each table's row level
- * security brought to the target's (Atlas OSS drops those statements without a word, so a policy
- * would never be enforced). Roles and extensions are only ever added: they outlive any one schema.
+ * A table may still need them where Atlas works: a default may call a sequence's nextval, a column
+ * may have an extension's type. So the history and target Atlas loads start with a DO block that
+ * creates each sequence and extension on the dev database if it is missing (Atlas runs a DO block,
+ * and its OSS inspection reads neither); they stay there, unused by anything Atlas compares.
+ *
+ * Before Atlas's statements: new extensions, roles (each created only if the cluster lacks it) and
+ * sequences, changed sequences altered in place (dropping one would restart it), and the drops of
+ * every changed or removed policy and view, and of each one over a table Atlas alters (Postgres
+ * refuses to retype a column a view or policy reads), dependents first. After them: those views
+ * and policies created again from the target, in its order, what was said about them again
+ * (pg-extras.ts), removed sequences dropped, and each table's row level security brought to the
+ * target's (pg-tables.ts). Roles and extensions are only ever added: they outlive any one schema.
  */
 import { asSql } from "./fts-migration.ts"
+import { affected, isView, same } from "./pg-dependents.ts"
+import { extrasAfter, followExtra } from "./pg-extras.ts"
 import { atlasTables, followRls, type Rls, rlsDelta, type Statement } from "./pg-tables.ts"
 import { codeOf, IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
@@ -30,6 +37,8 @@ type PgObject = {
 	on?: string | undefined
 	/** the statement that defines it, as written */
 	sql: string
+	/** what later statements said about it: comments, grants, indexes (pg-extras.ts) */
+	extras: string[]
 }
 
 /** What a sequence of migrations leaves of what comb owns */
@@ -71,18 +80,28 @@ const RENAME_TABLE = /* @__PURE__ */ new RegExp(
 )
 const stateKey = (kind: PgObjectKind, key: string) => `${kind} ${key}`
 
-/** The object a CREATE statement defines, if it defines one comb owns */
+/* comb's guard around a role it creates: the cluster may hold it already */
+const ROLE_GUARD =
+	/^DO \$comb\$ BEGIN IF NOT EXISTS \(SELECT FROM pg_roles WHERE rolname = '(?:[^']|'')*'\) THEN (CREATE ROLE .*); END IF; END \$comb\$$/is
+
+/** `CREATE ROLE`, run only when the cluster has no role of that name: roles outlive any one database */
+const roleIfMissing = (role: PgObject): string =>
+	`DO $comb$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${role.key.replaceAll("'", "''")}') THEN ${role.sql}; END IF; END $comb$`
+
+/** The object a CREATE statement defines, if it defines one comb owns; a role read through comb's guard too */
 function defined(code: string, sql: string): PgObject | undefined {
+	const guarded = ROLE_GUARD.exec(normalizeSql(sql))?.[1]
+	if (guarded !== undefined) return defined(codeOf(guarded, "postgres"), guarded)
 	const [, materialized, view] = CREATE_VIEW.exec(code) ?? []
 	if (view !== undefined)
-		return { key: lastPart(view), kind: materialized ? "materialized view" : "view", name: view, sql }
+		return { extras: [], key: lastPart(view), kind: materialized ? "materialized view" : "view", name: view, sql }
 	const [, policy, on] = CREATE_POLICY.exec(code) ?? []
 	if (policy !== undefined && on !== undefined) {
-		return { key: `${lastPart(policy)} on ${lastPart(on)}`, kind: "policy", name: policy, on, sql }
+		return { extras: [], key: `${lastPart(policy)} on ${lastPart(on)}`, kind: "policy", name: policy, on, sql }
 	}
 	const [, kind, name] = CREATE_NAMED.exec(code) ?? []
 	if (kind === undefined || name === undefined) return undefined
-	return { key: lastPart(name), kind: kind.toLowerCase() as PgObjectKind, name, sql }
+	return { extras: [], key: lastPart(name), kind: kind.toLowerCase() as PgObjectKind, name, sql }
 }
 
 /** What a drop or a rename of tables, which still reaches Atlas, does to their policies and row level security */
@@ -110,13 +129,29 @@ function followTables(code: string, { objects, rls }: PgObjects): void {
 	}
 }
 
+/** A drop of objects comb owns, taken off `objects`: true when the statement is one */
+function followDrops(code: string, objects: Map<string, PgObject>): boolean {
+	const [, kind, names] = DROP_OBJECTS.exec(code) ?? []
+	if (kind !== undefined && names !== undefined) {
+		for (const name of splitTopLevel(names))
+			objects.delete(stateKey(kind.toLowerCase() as PgObjectKind, lastPart(name)))
+		return true
+	}
+	const [, policy, on] = DROP_POLICY.exec(code) ?? []
+	if (policy === undefined || on === undefined) return false
+	objects.delete(stateKey("policy", `${lastPart(policy)} on ${lastPart(on)}`))
+	return true
+}
+
 /** What one statement does to `state`: true when it is about an object comb owns */
 function follow(statement: Statement, state: PgObjects, source: string): boolean {
 	const { code, sql } = statement
 	const { objects } = state
 	const made = defined(code, sql)
 	if (made !== undefined) {
-		objects.set(stateKey(made.kind, made.key), made)
+		/* CREATE OR REPLACE keeps what was said about the object; a drop already removed it */
+		const extras = objects.get(stateKey(made.kind, made.key))?.extras ?? []
+		objects.set(stateKey(made.kind, made.key), { ...made, extras })
 		return true
 	}
 	if (followRls(statement, state.rls, source)) return true
@@ -126,17 +161,7 @@ function follow(statement: Statement, state: PgObjects, source: string): boolean
 		objects.set(stateKey("sequence", known.key), { ...known, sql: `CREATE SEQUENCE ${known.name} ${clauses}` })
 		return true
 	}
-	const [, kind, names] = DROP_OBJECTS.exec(code) ?? []
-	if (kind !== undefined && names !== undefined) {
-		for (const name of splitTopLevel(names))
-			objects.delete(stateKey(kind.toLowerCase() as PgObjectKind, lastPart(name)))
-		return true
-	}
-	const [, policy, on] = DROP_POLICY.exec(code) ?? []
-	if (policy !== undefined && on !== undefined) {
-		objects.delete(stateKey("policy", `${lastPart(policy)} on ${lastPart(on)}`))
-		return true
-	}
+	if (followDrops(code, objects) || followExtra(statement, objects, source)) return true
 	followTables(code, state)
 	return /^REFRESH MATERIALIZED VIEW\b/i.test(code)
 }
@@ -158,42 +183,6 @@ function separatePgObjects(sql: string, state: PgObjects = emptyPgObjects(), sou
 	return { objects, plain, state }
 }
 
-/** Whether a view's definition reads the relation `name` */
-function reads(view: PgObject, name: string): boolean {
-	const body = codeOf(view.sql, "postgres").split(/ AS /i).slice(1).join(" AS ")
-	const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-	return new RegExp(`(?:^|[^\\w$"])"?${escaped}"?(?=[^\\w$"]|$)`).test(body)
-}
-
-const isView = (object: PgObject) => object.kind === "view" || object.kind === "materialized view"
-const same = (a: PgObject | undefined, b: PgObject | undefined) =>
-	a !== undefined && b !== undefined && normalizeSql(a.sql) === normalizeSql(b.sql)
-
-/** The views and policies of `from` comb must drop: changed, removed, or over what Atlas or comb changes */
-function affected(from: Map<string, PgObject>, to: Map<string, PgObject>, tables: ReadonlySet<string>): Set<string> {
-	const out = new Set<string>()
-	for (const [key, object] of from) {
-		if ((isView(object) || object.kind === "policy") && !same(object, to.get(key))) out.add(key)
-		if (object.kind === "policy" && tables.has(lastPart(object.on as string))) out.add(key)
-		if (isView(object) && [...tables].some((table) => reads(object, table))) out.add(key)
-	}
-	/* a view over a view comb drops goes too, until no more join */
-	let grew = true
-	while (grew) {
-		grew = false
-		for (const [key, object] of from) {
-			const over = [...out].some(
-				(other) => isView(from.get(other) as PgObject) && reads(object, (from.get(other) as PgObject).key),
-			)
-			if (isView(object) && !out.has(key) && over) {
-				out.add(key)
-				grew = true
-			}
-		}
-	}
-	return out
-}
-
 const dropOf = (object: PgObject): string =>
 	object.kind === "policy"
 		? `DROP POLICY IF EXISTS ${object.name} ON ${object.on}`
@@ -201,6 +190,7 @@ const dropOf = (object: PgObject): string =>
 
 /** A target statement that adds `object`: an extension only if missing, a changed sequence altered in place */
 function addOf(object: PgObject, before: PgObject | undefined): string {
+	if (object.kind === "role") return roleIfMissing(object)
 	if (object.kind === "extension")
 		return object.sql.replace(/^CREATE EXTENSION (?!IF NOT EXISTS )/i, "CREATE EXTENSION IF NOT EXISTS ")
 	return before === undefined ? object.sql : object.sql.replace(/^CREATE SEQUENCE/i, "ALTER SEQUENCE")
@@ -233,15 +223,36 @@ function pgDelta({ atlasSql, from: state, to }: { atlasSql: string; from: PgObje
 		return (isView(o) || o.kind === "policy") && (dropped.has(key) || !from.has(key))
 	}
 	const created = to.objects.filter(recreate)
+	const again = new Set([...to.state.objects.keys()].filter((key) => dropped.has(key) || !from.has(key)))
+	const sameDefinition = (key: string) => same(from.get(key), to.state.objects.get(key))
 	const after = [
 		...created.filter(isView).map((o) => o.sql),
 		...created.filter((o) => o.kind === "policy").map((o) => o.sql),
+		...extrasAfter({ from, to: to.state.objects }, again, sameDefinition),
 		...[...from.values()]
 			.filter((o) => o.kind === "sequence" && !to.state.objects.has(stateKey(o.kind, o.key)))
 			.map(dropOf),
 		...rlsDelta(state.rls, to.state.rls, tables),
 	]
 	return { after, before }
+}
+
+/**
+ * The DO block that gives the dev database each sequence and extension the given states hold, so
+ * a default calling nextval or a column of an extension's type loads there; "" when they hold none
+ */
+function devPrelude(...states: PgObjects[]): string {
+	const made = new Map<string, string>()
+	for (const kind of ["extension", "sequence"] as const) {
+		for (const { objects } of states) {
+			for (const object of objects.values()) {
+				if (object.kind !== kind) continue
+				const sql = kind === "extension" ? addOf(object, undefined) : `CREATE SEQUENCE IF NOT EXISTS ${object.name}`
+				made.set(stateKey(kind, object.key), sql)
+			}
+		}
+	}
+	return made.size === 0 ? "" : `DO $comb$ BEGIN ${[...made.values()].join("; ")}; END $comb$;\n`
 }
 
 /** A migration file's leading `atlas:` directive lines, with the blank lines after them */
@@ -268,6 +279,7 @@ function wrapAtlasFile(file: string, { after, before }: Delta): string {
 
 export {
 	atlasDirectives,
+	devPrelude,
 	emptyPgObjects,
 	type PgObject,
 	type PgObjects,

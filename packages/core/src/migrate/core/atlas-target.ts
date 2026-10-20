@@ -132,15 +132,18 @@ function redactUrl(raw: string): string {
 	return url.href.replaceAll(encodeURIComponent(REDACTED), REDACTED)
 }
 
-/** The secret strings a URL holds, raw and percent-decoded */
+/** `text` percent-decoded, or as it is when it holds a `%` that starts no escape */
+const decoded = (text: string): string => (/%(?![0-9a-f]{2})/i.test(text) ? text : decodeURIComponent(text))
+
+/**
+ * The secret strings a URL holds, as written and as Atlas may print them: the password is kept
+ * percent-encoded by the URL, a query value comes back already decoded
+ */
 function secretsOf(raw: string): string[] {
 	const url = URL.canParse(raw) ? new URL(raw) : undefined
 	if (url === undefined) return [raw]
-	const values = [
-		url.password,
-		...[...url.searchParams].filter(([key]) => SECRET_KEY.test(key)).map(([, value]) => value),
-	]
-	const secrets = values.flatMap((value) => [value, decodeURIComponent(value), encodeURIComponent(value)])
+	const query = [...url.searchParams].filter(([key]) => SECRET_KEY.test(key)).map(([, value]) => value)
+	const secrets = [url.password, decoded(url.password), ...query.flatMap((value) => [value, encodeURIComponent(value)])]
 	return [raw, ...secrets].filter((secret) => secret !== "")
 }
 

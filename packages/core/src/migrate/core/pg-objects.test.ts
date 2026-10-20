@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { pgDelta, separatePgObjects, withDirectivesFirst, wrapAtlasFile } from "./pg-objects.ts"
+import { devPrelude, pgDelta, separatePgObjects, withDirectivesFirst, wrapAtlasFile } from "./pg-objects.ts"
 
 /* drizzle-kit 1.0.0-rc.4's export of a table with a policy, a view, a materialized view, a sequence and a role */
 const EXPORT = `CREATE TYPE "status" AS ENUM('draft', 'published');
@@ -115,7 +115,7 @@ CREATE VIEW "published" AS (select "id", "title", "status", "owner" from "post" 
 		const { after, before } = delta("", next)
 		expect(before).toEqual([
 			"CREATE EXTENSION IF NOT EXISTS citext",
-			'CREATE ROLE "writer"',
+			"DO $comb$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'writer') THEN CREATE ROLE \"writer\"; END IF; END $comb$",
 			'ALTER SEQUENCE "public"."counter" INCREMENT BY 3 START WITH 10',
 			'CREATE SEQUENCE "fresh" START WITH 1',
 			'DROP POLICY IF EXISTS "post_owner" ON "post"',
@@ -162,5 +162,38 @@ describe("withDirectivesFirst", () => {
 		expect(wrapAtlasFile(file, { after: [], before: ["SELECT 1"] })).toBe(
 			'-- atlas:txmode none\n\nSELECT 1;\n\nCREATE INDEX CONCURRENTLY "i" ON "post" ("x");\n',
 		)
+	})
+})
+
+describe("devPrelude", () => {
+	it("creates each extension, then each sequence, the states hold, once and only where missing", () => {
+		const history = separatePgObjects('CREATE EXTENSION citext;\nCREATE SEQUENCE "public"."n" START WITH 5;').state
+		const next = separatePgObjects('CREATE SEQUENCE "public"."n" START WITH 9;\nCREATE SEQUENCE "m";').state
+		expect(devPrelude(history, next)).toBe(
+			'DO $comb$ BEGIN CREATE EXTENSION IF NOT EXISTS citext; CREATE SEQUENCE IF NOT EXISTS "public"."n"; CREATE SEQUENCE IF NOT EXISTS "m"; END $comb$;\n',
+		)
+		expect(devPrelude(separatePgObjects('CREATE VIEW "v" AS (select 1)').state)).toBe("")
+	})
+})
+
+describe("roles and policies over other tables", () => {
+	it("reads comb's guarded CREATE ROLE back as the role it creates", () => {
+		const guarded = pgDelta({ atlasSql: "", from: target().state, to: separatePgObjects('CREATE ROLE "w" WITH LOGIN') })
+			.before[0] as string
+		const { objects, state } = separatePgObjects(`${guarded};`)
+		expect(objects.map((o) => o.sql)).toEqual(['CREATE ROLE "w" WITH LOGIN'])
+		expect(state.objects.get("role w")?.sql).toBe('CREATE ROLE "w" WITH LOGIN')
+	})
+
+	it("drops a policy whose USING reads a table Atlas alters, and not one that reads none", () => {
+		const team =
+			'CREATE POLICY "p" ON "post" USING (team_id IN (SELECT id FROM team));\nCREATE POLICY "q" ON "post" FOR INSERT TO public;'
+		const history = separatePgObjects(team).state
+		const delta = pgDelta({
+			atlasSql: 'ALTER TABLE "team" ALTER COLUMN "id" TYPE bigint;',
+			from: history,
+			to: separatePgObjects(team),
+		})
+		expect(delta.before).toEqual(['DROP POLICY IF EXISTS "p" ON "post"'])
 	})
 })

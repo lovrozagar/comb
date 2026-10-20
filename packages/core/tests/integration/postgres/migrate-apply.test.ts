@@ -11,7 +11,6 @@ import { afterEach, beforeEach, expect, it } from "vitest"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas, baselineWithAtlas, statusWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
-import { generateMigrationFile } from "../../../src/migrate/core/atlas.ts"
 import { splitEnumValues } from "../../../src/migrate/core/pg-enum-split.ts"
 import { wrapAtlasFile } from "../../../src/migrate/core/pg-objects.ts"
 import { run } from "../../../src/migrate/core/process.ts"
@@ -267,19 +266,14 @@ describePg("migrate apply on Postgres: files comb rewrites keep their directives
 					`-- atlas:txmode none\nALTER TYPE "s" ADD VALUE 'b';\nCREATE INDEX CONCURRENTLY "a_y" ON "a" ("y");\n`,
 				)
 				for (const [name, sql] of split) writeFileSync(join(dir, name), sql)
-				generateMigrationFile({
-					diff: TIGHT.replaceAll("a_x", "a_z").replace('("x")', '("z")'),
-					migrationName: "generated",
-					migrationsDir: dir,
-				})
 				migrations({})
 				const applied = await applyWithAtlas(command(url, { approve: approveWithYes }))
-				expect(applied).toHaveLength(4)
+				expect(applied).toHaveLength(3)
 				const indexes = await query<{ indexname: string }>(
 					url,
 					"SELECT indexname FROM pg_indexes WHERE tablename = 'a' ORDER BY 1",
 				)
-				expect(indexes.map((i) => i.indexname)).toEqual(["a_x", "a_y", "a_z"])
+				expect(indexes.map((i) => i.indexname)).toEqual(["a_x", "a_y"])
 			})
 		}, 60_000)
 	})

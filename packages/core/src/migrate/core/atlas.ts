@@ -1,14 +1,13 @@
 /**
  * Atlas CLI integration for schema diffing
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
 import { normalizeSqliteExport, sqliteDevUrl } from "./atlas-env.ts"
 import { type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { type Run, run } from "./process.ts"
-import { atlasDirectives, withDirectivesFirst } from "./pg-objects.ts"
 import { codeOf, IDENT, QNAME, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
@@ -160,41 +159,4 @@ export function exportDrizzleSchema(options: DrizzleExportOptions): string {
 	}
 
 	return dialect === "postgres" ? scopeExport(sql, options.schema ?? "public") : sql
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   GENERATE MIGRATION FILE
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-export type GenerateMigrationOptions = {
-	migrationsDir: string
-	migrationName: string
-	diff: string
-	description?: string
-}
-
-export function generateMigrationFile(options: GenerateMigrationOptions): string {
-	const { migrationsDir, migrationName, diff, description } = options
-
-	if (!existsSync(migrationsDir)) {
-		mkdirSync(migrationsDir, { recursive: true })
-	}
-
-	const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, "")
-	const filename = `${timestamp}_${migrationName}.sql`
-	const filepath = join(migrationsDir, filename)
-
-	const header = `-- Migration: ${migrationName}
--- Generated: ${new Date().toISOString()}
-${description ? `-- ${description}` : ""}
---
--- Review this migration carefully before applying!
-
-`
-
-	/* Atlas reads directives only at the top of a file, so they go above comb's header */
-	const directives = atlasDirectives(diff)
-	writeFileSync(filepath, withDirectivesFirst(directives, header + diff.slice(directives.length)))
-
-	return filepath
 }

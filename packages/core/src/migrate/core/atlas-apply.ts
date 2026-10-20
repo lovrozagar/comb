@@ -94,7 +94,7 @@ function atlasStatus(options: AtlasCommand, copy: string, allowNotClean = false)
 	const ran = atlas(options, copy, ["status", "--format", STATUS_FORMAT])
 	if (ran.code !== 0 && allowNotClean && ran.stderr === explainAtlasFailure("connected database is not clean"))
 		return NO_HISTORY
-	if (ran.code !== 0) throw new Error(`atlas migrate status: ${ran.stderr}`)
+	if (ran.code !== 0) throw new Error(`atlas migrate status: ${ran.stderr || `exit ${ran.code}: ${ran.stdout}`}`)
 	return json<AtlasStatus>(ran.stdout, "status")
 }
 

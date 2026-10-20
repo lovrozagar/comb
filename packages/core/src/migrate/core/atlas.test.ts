@@ -1,14 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { basename, join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import {
-	checkAtlasInstalled,
-	exportDrizzleSchema,
-	generateMigrationFile,
-	generateSchemaDiff,
-	getAtlasVersion,
-} from "./atlas.ts"
+import { existsSync, readFileSync } from "node:fs"
+import { describe, expect, it } from "vitest"
+import { checkAtlasInstalled, exportDrizzleSchema, generateSchemaDiff, getAtlasVersion } from "./atlas.ts"
 import type { Run, RunOptions, RunResult } from "./process.ts"
 
 type Call = { cmd: string; args: readonly string[]; options: RunOptions | undefined }
@@ -159,83 +151,5 @@ describe("exportDrizzleSchema on Postgres", () => {
 		)
 		const view = `CREATE VIEW "published" AS (select "id" from "post" where "post"."status" = 'published');\n`
 		expect(pg(view)).toBe(view)
-	})
-})
-
-describe("generateMigrationFile", () => {
-	let tmpDir: string
-
-	beforeEach(() => {
-		tmpDir = mkdtempSync(join(tmpdir(), "comb-atlas-test-"))
-	})
-
-	afterEach(() => {
-		rmSync(tmpDir, { force: true, recursive: true })
-	})
-
-	it("creates migration file with diff content", () => {
-		const filepath = generateMigrationFile({
-			diff: "CREATE TABLE users (id TEXT PRIMARY KEY);",
-			migrationName: "init",
-			migrationsDir: tmpDir,
-		})
-
-		expect(existsSync(filepath)).toBe(true)
-		const content = readFileSync(filepath, "utf-8")
-		expect(content).toContain("CREATE TABLE users")
-		expect(content).toContain("Migration: init")
-	})
-
-	it("includes description when provided", () => {
-		const filepath = generateMigrationFile({
-			description: "Initial schema",
-			diff: "CREATE TABLE users (id TEXT);",
-			migrationName: "init",
-			migrationsDir: tmpDir,
-		})
-
-		const content = readFileSync(filepath, "utf-8")
-		expect(content).toContain("Initial schema")
-	})
-
-	it("creates migrations dir if missing", () => {
-		const nestedDir = join(tmpDir, "nested", "migrations")
-		const filepath = generateMigrationFile({
-			diff: "SELECT 1;",
-			migrationName: "test",
-			migrationsDir: nestedDir,
-		})
-
-		expect(existsSync(filepath)).toBe(true)
-	})
-
-	it("generates timestamped filename", () => {
-		const filepath = generateMigrationFile({
-			diff: "SELECT 1;",
-			migrationName: "add_users",
-			migrationsDir: tmpDir,
-		})
-
-		const filename = basename(filepath)
-		expect(filename).toMatch(/^\d{8}_add_users\.sql$/)
-	})
-})
-
-describe("generateMigrationFile and Atlas's directives", () => {
-	let dirForDirectives = ""
-	beforeEach(() => {
-		dirForDirectives = mkdtempSync(join(tmpdir(), "comb-migration-file-"))
-	})
-	afterEach(() => rmSync(dirForDirectives, { force: true, recursive: true }))
-
-	it("keeps Atlas's directives first, a blank line after them, above its own header", () => {
-		const file = generateMigrationFile({
-			diff: "-- atlas:txmode none\nCREATE INDEX CONCURRENTLY i ON t (a);\n",
-			migrationName: "idx",
-			migrationsDir: dirForDirectives,
-		})
-		const text = readFileSync(file, "utf8")
-		expect(text.startsWith("-- atlas:txmode none\n\n-- Migration: idx\n")).toBe(true)
-		expect(text.endsWith("\nCREATE INDEX CONCURRENTLY i ON t (a);\n")).toBe(true)
 	})
 })

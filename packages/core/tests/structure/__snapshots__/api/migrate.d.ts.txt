@@ -1,7 +1,7 @@
 // migrate/index.d.ts
 export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
 export { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./core/apply.ts";
-export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, type GenerateMigrationOptions, generateMigrationFile, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
+export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
 export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, makeIdempotent, parseMigration, splitSqlStatements, } from "./core/parse.ts";
 export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCircuitBreaker, withRetry, } from "./core/utils.ts";
 export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./drivers/index.ts";
@@ -82,13 +82,6 @@ export type DrizzleExportOptions = {
     schema?: string | undefined;
 };
 export declare function exportDrizzleSchema(options: DrizzleExportOptions): string;
-export type GenerateMigrationOptions = {
-    migrationsDir: string;
-    migrationName: string;
-    diff: string;
-    description?: string;
-};
-export declare function generateMigrationFile(options: GenerateMigrationOptions): string;
 
 // migrate/core/parse.d.ts
 import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts";

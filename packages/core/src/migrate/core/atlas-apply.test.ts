@@ -241,6 +241,8 @@ describe("applyWithAtlas: Atlas failing", () => {
 		await expect(applyWithAtlas(options(fakeAtlas({ status: fail("Error: no route") })))).rejects.toThrow(
 			"atlas migrate status: Error: no route",
 		)
+		const silent = fakeAtlas({ status: { code: 137, stderr: "", stdout: "partial" } })
+		await expect(applyWithAtlas(options(silent))).rejects.toThrow("atlas migrate status: exit 137: partial")
 	})
 
 	it("says so when Atlas answers with something comb cannot read, without echoing it", async () => {

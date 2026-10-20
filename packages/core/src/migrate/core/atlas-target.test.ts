@@ -148,6 +148,23 @@ describe("explainAtlasFailure", () => {
 	})
 })
 
+describe("a secret holding a percent sign", () => {
+	const url = "postgres://app@db.example.com/app?sslmode=require&sslpassword=50%25off"
+	const percent: PgTarget = { devUrl: "postgres://localhost/dev", lockTimeout: "5s", schema: "public", url }
+
+	it("is masked in Atlas's output, in the query and in userinfo, without throwing", () => {
+		expect(scrubAtlasOutput("failed with sslpassword 50%off and 50%25off", [url])).toBe(
+			"failed with sslpassword *** and ***",
+		)
+		const odd = "postgres://app:a%zz@db.example.com/app?sslmode=require"
+		expect(scrubAtlasOutput("auth a%zz failed", [odd])).toBe("auth *** failed")
+	})
+
+	it("runs Atlas with the URL in its environment", () => {
+		expect(withAtlasEnv(percent, { url: true }, (env) => env.env["COMB_ATLAS_URL"])).toContain("sslpassword=50%25off")
+	})
+})
+
 describe("withAtlasEnv", () => {
 	it("hands Atlas the URLs through env and a config that reads them, never through argv", () => {
 		const seen = withAtlasEnv(target(), { dev: true, dir: "/m/core", url: true }, (atlas) => {

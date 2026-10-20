@@ -4,6 +4,7 @@
  * applies it), and diffs again to see the history and the target agree.
  */
 import { spawnSync } from "node:child_process"
+import { randomUUID } from "node:crypto"
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -336,6 +337,151 @@ describePg("migrate diff on Postgres: the default dev database", () => {
 				expect(diff(target("docker://postgres/17/dev"), POST).files).toHaveLength(1)
 			},
 			180_000,
+		)
+	})
+})
+
+/** Drop `role` and what it owns in this database, if the run got as far as creating it */
+const dropRole = (role: string) =>
+	`DO $$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = '${role}') THEN DROP OWNED BY "${role}"; DROP ROLE "${role}"; END IF; END $$`
+
+/** A role name of this run's own, since roles are cluster-wide */
+const roleName = () => `comb_app_${randomUUID().slice(0, 8)}`
+
+/* drizzle-kit 1.0.0-rc.4's real export of a pgSequence a column default uses, with a role, a view and a policy */
+const exportWithSequence = (
+	role: string,
+) => `CREATE SEQUENCE "public"."order_no" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1;
+CREATE ROLE "${role}";
+CREATE TABLE "post" (
+	"id" integer PRIMARY KEY,
+	"owner" text,
+	"no" bigint DEFAULT nextval('order_no')
+);
+
+ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;
+CREATE VIEW "titles" AS (select "id" from "post");
+CREATE POLICY "own" ON "post" AS PERMISSIVE FOR SELECT TO "${role}" USING (owner = current_user);
+`
+
+describePg("migrate diff on Postgres: sequences a default uses", () => {
+	describeAtlas("with Atlas v1.3.0", () => {
+		it("diffs drizzle-kit's export of a sequence a column default uses, applies it, and finds it synced", async () => {
+			const role = roleName()
+			await withDevAndTarget(async (devUrl, url) => {
+				const dev = target(devUrl)
+				try {
+					diff(dev, exportWithSequence(role))
+					await applyAll(url)
+					expect(diff(dev, exportWithSequence(role), "again").synced).toBe(true)
+					await query(url, "INSERT INTO post (id) VALUES (1)")
+					expect(await query(url, "SELECT no FROM post")).toEqual([{ no: "1" }])
+				} finally {
+					await query(url, dropRole(role))
+				}
+			})
+		}, 90_000)
+
+		it("diffs a hand-written sequence default and a column added beside it", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				const dev = target(devUrl)
+				const orders = `CREATE SEQUENCE "order_no";\nCREATE TABLE "orders" ("id" integer PRIMARY KEY, "no" bigint DEFAULT nextval('order_no') NOT NULL);\n`
+				diff(dev, orders)
+				const [added] = diff(dev, orders.replace("NOT NULL)", 'NOT NULL, "note" text)'), "note").files
+				expect(readFileSync(added as string, "utf8")).toContain('ADD COLUMN "note" text')
+				await applyAll(url)
+				expect(diff(dev, orders.replace("NOT NULL)", 'NOT NULL, "note" text)'), "again").synced).toBe(true)
+			})
+		}, 90_000)
+	})
+})
+
+/** post with a policy that reads team, whose id is `idType` */
+const teamPolicy = (idType: string) =>
+	`CREATE TABLE "team" ("id" ${idType} PRIMARY KEY);\nCREATE TABLE "post" ("id" integer PRIMARY KEY, "team_id" integer);\nALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\nCREATE POLICY "p" ON "post" USING (team_id IN (SELECT id FROM team));\n`
+
+describePg("migrate diff on Postgres: a policy over another table, and a role another database made", () => {
+	describeAtlas("with Atlas v1.3.0", () => {
+		it("drops and recreates a policy that reads a table Atlas retypes, so the file applies", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				const dev = target(devUrl)
+				diff(dev, teamPolicy("integer"))
+				const [retyped] = diff(dev, teamPolicy("bigint"), "retype").files
+				expect(readFileSync(retyped as string, "utf8")).toMatch(
+					/^DROP POLICY IF EXISTS "p" ON "post";[\s\S]*bigint[\s\S]*CREATE POLICY "p"/,
+				)
+				await applyAll(url)
+				expect(diff(dev, teamPolicy("bigint"), "again").synced).toBe(true)
+			})
+		}, 90_000)
+
+		it("creates a role only where it is missing, as roles are the cluster's, and reads that statement back", async () => {
+			const role = roleName()
+			await withDevAndTarget(async (devUrl, url) => {
+				await query(url, `CREATE ROLE "${role}"`)
+				try {
+					const dev = target(devUrl)
+					const schema = `CREATE ROLE "${role}";\n${POST}`
+					diff(dev, schema)
+					await applyAll(url)
+					expect(diff(dev, schema, "again").synced).toBe(true)
+				} finally {
+					await query(url, `DROP ROLE IF EXISTS "${role}"`)
+				}
+			})
+		}, 90_000)
+	})
+})
+
+describePg("migrate diff on Postgres: hand-written statements about comb's objects", () => {
+	describeAtlas("with Atlas v1.3.0", () => {
+		const VIEW = 'CREATE VIEW "v" AS (select "id" from "post");\n'
+		const MATVIEW = 'CREATE MATERIALIZED VIEW "mv" AS (select "id" from "post");\n'
+		const POLICY = policy("true")
+		it.each([
+			{
+				check: "SELECT obj_description('v'::regclass) AS d",
+				expected: [{ d: "x" }],
+				name: "COMMENT ON VIEW",
+				object: VIEW,
+				statement: `COMMENT ON VIEW "v" IS 'x';\n`,
+			},
+			{
+				check: "SELECT has_table_privilege('public', 'v', 'SELECT') AS d",
+				expected: [{ d: true }],
+				name: "GRANT on a view",
+				object: VIEW,
+				statement: 'GRANT SELECT ON "v" TO PUBLIC;\n',
+			},
+			{
+				check: "SELECT pg_get_expr(polqual, polrelid) AS d FROM pg_policy",
+				expected: [{ d: "(id > 0)" }],
+				name: "ALTER POLICY",
+				object: POLICY,
+				statement: 'ALTER POLICY "own" ON "post" USING (id > 0);\n',
+			},
+			{
+				check: "SELECT indexname AS d FROM pg_indexes WHERE tablename = 'mv'",
+				expected: [{ d: "mv_id" }],
+				name: "CREATE INDEX on a materialized view",
+				object: MATVIEW,
+				statement: 'CREATE INDEX "mv_id" ON "mv" ("id");\n',
+			},
+		])(
+			"keeps $name through a later diff that recreates its object",
+			async ({ check, expected, object, statement }) => {
+				await withDevAndTarget(async (devUrl, url) => {
+					const dev = target(devUrl)
+					diff(dev, POST + object)
+					handWritten("20990101000000_extra.sql", statement)
+					const widened = POST.replace("NOT NULL)", 'NOT NULL, "body" text)') + object
+					diff(dev, widened, "widen")
+					await applyAll(url)
+					expect(await query(url, check)).toEqual(expected)
+					expect(diff(dev, widened, "again").synced).toBe(true)
+				})
+			},
+			90_000,
 		)
 	})
 })
