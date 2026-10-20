@@ -6,7 +6,7 @@
  * object, and writes it again after the object is created again. Any other statement that names
  * an object comb owns is refused, since comb could not keep it.
  */
-import { IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
+import { codeOf, IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
 
 /** An object comb owns, as far as its statements go: its kind and key, and what was said about it */
 type Owned = { extras: string[]; key: string; kind: string; name: string }
@@ -104,7 +104,7 @@ function dropsKeptIndex(code: string, owners: Owners): boolean {
 	const dropped = new Set(splitTopLevel(names).map(lastPart))
 	let found = false
 	for (const owner of owners.values()) {
-		const kept = owner.extras.filter((sql) => !dropped.has(lastPart(INDEX.exec(sql)?.[1] ?? "")))
+		const kept = owner.extras.filter((sql) => !dropped.has(lastPart(INDEX.exec(codeOf(sql, "postgres"))?.[1] ?? "")))
 		found ||= kept.length < owner.extras.length
 		owner.extras = kept
 	}

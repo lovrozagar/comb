@@ -60,6 +60,11 @@ describe("statements about other objects, and dropped indexes", () => {
 		expect(history.state.objects.get("materialized view mv")?.extras).toEqual([])
 	})
 
+	it("forgets a kept index written after a comment once it is dropped", () => {
+		const { history } = after('-- the (mv) lookup\nCREATE INDEX "mv_id" ON "mv" ("id");\nDROP INDEX "mv_id";')
+		expect(history.state.objects.get("materialized view mv")?.extras).toEqual([])
+	})
+
 	it("leaves to Atlas what names no object comb owns, and keeps other things said when an index goes", () => {
 		const unowned = [
 			`COMMENT ON VIEW "other" IS 'x'`,

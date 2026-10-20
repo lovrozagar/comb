@@ -29,40 +29,14 @@ function bodyParts(stmt: string): string[] {
 }
 
 /** The column names a CREATE TABLE declares, table constraints left out */
-function columnNames(stmt: string): string[] {
-	return bodyParts(stmt)
-		.map((def) => /^["'`]?(\w+)["'`]?(?:\s|$)/.exec(def)?.[1])
+function columnNames(code: string): string[] {
+	return bodyParts(code)
+		.map((def) => COLUMN.exec(def)?.[1])
 		.filter((name): name is string => name !== undefined && !CONSTRAINT_WORDS.test(name))
+		.map(lastPart)
 }
 
 type SchemaSoFar = ExtractedSchema
-
-const CREATE_TABLE = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?\s*\(/i
-const CREATE_INDEX = /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i
-const DROP_TABLE = /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["'`]?(\w+)["'`]?/i
-/* Atlas's table rebuild: create `new_t`, copy rows, drop `t`, rename `new_t` to `t` */
-const RENAME_TABLE = /ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+RENAME\s+TO\s+["'`]?(\w+)["'`]?/i
-
-const ADDS_OR_DROPS = /^\s*ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+(ADD|DROP)\s+(?:COLUMN\s+)?["'`]?(\w+)/i
-const RENAMES_COLUMN =
-	/^\s*ALTER\s+TABLE\s+["'`]?(\w+)["'`]?\s+RENAME\s+(?:COLUMN\s+)?["'`]?(\w+)["'`]?\s+TO\s+["'`]?(\w+)/i
-
-/** What an ALTER TABLE ADD, DROP or RENAME COLUMN does to a followed table's columns */
-function followColumns(schema: SchemaSoFar, stmt: string): void {
-	const [, table, verb, column] = ADDS_OR_DROPS.exec(stmt) ?? []
-	const columns = table === undefined ? undefined : schema.tables.get(table)
-	if (columns !== undefined && !/^(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK)$/i.test(column as string)) {
-		const kept = columns.filter((name) => name !== column)
-		schema.tables.set(table as string, verb?.toUpperCase() === "ADD" ? [...kept, column as string] : kept)
-	}
-	const [, renamedIn, from, to] = RENAMES_COLUMN.exec(stmt) ?? []
-	const before = renamedIn === undefined ? undefined : schema.tables.get(renamedIn)
-	if (before !== undefined)
-		schema.tables.set(
-			renamedIn as string,
-			before.map((name) => (name === from ? (to as string) : name)),
-		)
-}
 
 // per-process-constant: patterns composed from the name grammar, compiled once
 const TABLE_DEFINITION = /* @__PURE__ */ new RegExp(
@@ -82,6 +56,15 @@ const TABLE_PK = /* @__PURE__ */ new RegExp(`^(?:CONSTRAINT ${IDENT} )?PRIMARY K
 const COLUMN = /* @__PURE__ */ new RegExp(`^(${IDENT})(?: (.*))?$`, "i")
 // per-process-constant: see above
 const ADD_COLUMN = /* @__PURE__ */ new RegExp(`^ALTER TABLE (${QNAME}) ADD (?:COLUMN )?(${IDENT} .*)$`, "i")
+// per-process-constant: see above
+const CREATE_INDEX = /* @__PURE__ */ new RegExp(`^CREATE (?:UNIQUE )?INDEX (?:IF NOT EXISTS )?(${QNAME})`, "i")
+// per-process-constant: see above
+const ADDS_OR_DROPS = /* @__PURE__ */ new RegExp(`^ALTER TABLE (${QNAME}) (ADD|DROP) (?:COLUMN )?(${IDENT})`, "i")
+// per-process-constant: see above
+const RENAMES_COLUMN = /* @__PURE__ */ new RegExp(
+	`^ALTER TABLE (${QNAME}) RENAME (?:COLUMN )?(${IDENT}) TO (${IDENT})`,
+	"i",
+)
 // per-process-constant: see above
 const DROPS_TABLES = /* @__PURE__ */ new RegExp(`^DROP TABLE (?:IF EXISTS )?(${QNAME}(?: ?, ?${QNAME})*)`, "i")
 // per-process-constant: see above
@@ -111,6 +94,27 @@ function columnKey(table: string, column: string, definition: string): ForeignKe
 	if (parent === undefined) return undefined
 	const onDelete = onDeleteOf(rest as string)
 	return { columns: [column], onDelete, parent: lastPart(parent), parentColumns: names(parentColumns ?? ""), table }
+}
+
+/** What an ALTER TABLE ADD, DROP or RENAME COLUMN does to a followed table's columns */
+function followColumns(schema: SchemaSoFar, code: string): void {
+	const [, altered, verb, added] = ADDS_OR_DROPS.exec(code) ?? []
+	const table = altered === undefined ? undefined : lastPart(altered)
+	const columns = table === undefined ? undefined : schema.tables.get(table)
+	const column = added === undefined ? "" : lastPart(added)
+	if (columns !== undefined && !CONSTRAINT_WORDS.test(column)) {
+		const kept = columns.filter((name) => name !== column)
+		schema.tables.set(table as string, verb?.toUpperCase() === "ADD" ? [...kept, column] : kept)
+	}
+	const [, renamedIn, from, to] = RENAMES_COLUMN.exec(code) ?? []
+	const inTable = renamedIn === undefined ? undefined : lastPart(renamedIn)
+	const before = inTable === undefined ? undefined : schema.tables.get(inTable)
+	if (before === undefined) return
+	const [was, now] = [lastPart(from as string), lastPart(to as string)]
+	schema.tables.set(
+		inTable as string,
+		before.map((name) => (name === was ? now : name)),
+	)
 }
 
 /** What a CREATE TABLE's code declares: its keys and its shape */
@@ -154,6 +158,7 @@ function followTableShape(schema: SchemaSoFar, code: string): void {
 	if (created !== undefined) {
 		const table = lastPart(created)
 		const { info, keys } = tableDefinition(code, table)
+		schema.tables.set(table, columnNames(code))
 		schema.foreignKeys = [...schema.foreignKeys.filter((fk) => fk.table !== table), ...keys]
 		schema.tableInfo.set(table, info)
 	}
@@ -172,6 +177,8 @@ function followTableShape(schema: SchemaSoFar, code: string): void {
 function followTableLife(schema: SchemaSoFar, code: string): void {
 	const dropped = DROPS_TABLES.exec(code)?.[1]
 	for (const table of dropped === undefined ? [] : names(dropped)) {
+		schema.droppedTables.push(table)
+		schema.tables.delete(table)
 		schema.foreignKeys = schema.foreignKeys.filter((fk) => fk.table !== table)
 		schema.triggers = schema.triggers.filter((trigger) => trigger.table !== table)
 		schema.tableInfo.delete(table)
@@ -197,34 +204,26 @@ function renameShapes(schema: SchemaSoFar, from: string, to: string): void {
 	const renamed = (name: string) => (name === from ? to : name)
 	schema.foreignKeys = schema.foreignKeys.map((fk) => ({ ...fk, parent: renamed(fk.parent), table: renamed(fk.table) }))
 	schema.triggers = schema.triggers.map((trigger) => ({ ...trigger, table: renamed(trigger.table) }))
+	const columns = schema.tables.get(from)
+	if (columns !== undefined) {
+		schema.tables.delete(from)
+		schema.tables.set(to, columns)
+	}
 	const info = schema.tableInfo.get(from)
 	if (info === undefined) return
 	schema.tableInfo.delete(from)
 	schema.tableInfo.set(to, info)
 }
 
-/** What one statement does to the schema being followed */
+/** What one statement does to the schema being followed, read from its code: a comment or a string names nothing */
 function follow(schema: SchemaSoFar, stmt: string, dialect: Dialect): void {
 	const code = codeOf(stmt, dialect)
 	followTableShape(schema, code)
 	followTableLife(schema, code)
 	followRoutines(schema, code)
-	const created = CREATE_TABLE.exec(stmt)?.[1]
-	if (created !== undefined) schema.tables.set(created, columnNames(stmt))
-	const index = CREATE_INDEX.exec(stmt)?.[1]
-	if (index !== undefined) schema.indexes.push(index)
-	const dropped = DROP_TABLE.exec(stmt)?.[1]
-	if (dropped !== undefined) {
-		schema.droppedTables.push(dropped)
-		schema.tables.delete(dropped)
-	}
-	followColumns(schema, stmt)
-	const [, from, to] = RENAME_TABLE.exec(stmt) ?? []
-	const columns = from === undefined ? undefined : schema.tables.get(from)
-	if (columns !== undefined && to !== undefined) {
-		schema.tables.delete(from as string)
-		schema.tables.set(to, columns)
-	}
+	followColumns(schema, code)
+	const index = CREATE_INDEX.exec(code)?.[1]
+	if (index !== undefined) schema.indexes.push(lastPart(index))
 }
 
 /** The schema before any migration */

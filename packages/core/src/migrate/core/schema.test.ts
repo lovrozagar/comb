@@ -151,3 +151,57 @@ ALTER TABLE gone ADD COLUMN x TEXT;
 		expect(schema.tables.has("gone")).toBe(false)
 	})
 })
+
+describe("extractSchema: comments and strings around a statement", () => {
+	it("reads a table's columns past a leading comment and a string that hold parentheses", () => {
+		const schema = extractSchema(`-- Hand-written (see 20261003181500): additive only.
+CREATE TABLE \`device\` (\`id\` text NOT NULL, \`label\` text DEFAULT '(none', \`user_id\` text NOT NULL, PRIMARY KEY (\`id\`));
+/* (an index) */ CREATE INDEX \`idx_device_user\` ON \`device\` (\`user_id\`);
+-- (drop) note
+ALTER TABLE \`device\` ADD COLUMN \`os\` text;`)
+		expect(schema.tables.get("device")).toEqual(["id", "label", "user_id", "os"])
+		expect(schema.indexes).toEqual(["idx_device_user"])
+	})
+})
+
+describe("extractSchema: no comment or string steers what a statement does", () => {
+	const base = "CREATE TABLE `t` (`id` text PRIMARY KEY, `a` text);\nCREATE TABLE `x` (`id` text);\n"
+	const after = (sql: string) => extractSchema(`${base}${sql}`)
+
+	it("drops no table a comment or a string names", () => {
+		const schema = after("-- was: DROP TABLE x\nUPDATE `t` SET `a` = 'DROP TABLE x';")
+		expect([...schema.tables.keys()]).toEqual(["t", "x"])
+		expect(schema.droppedTables).toEqual([])
+	})
+
+	it("renames no table a comment or a string names", () => {
+		const schema = after("/* ALTER TABLE t RENAME TO y */ UPDATE `t` SET `a` = 'ALTER TABLE x RENAME TO z';")
+		expect([...schema.tables.keys()]).toEqual(["t", "x"])
+	})
+
+	it("adds, drops and renames no column a comment or a string names", () => {
+		const schema = after(`-- ALTER TABLE t ADD COLUMN ghost text
+-- ALTER TABLE t DROP COLUMN a
+/* ALTER TABLE t RENAME COLUMN a TO b */ UPDATE \`t\` SET \`a\` = 'ALTER TABLE t DROP COLUMN id';
+/* a comment first */ ALTER TABLE \`t\` ADD COLUMN \`n\` text DEFAULT 'ALTER TABLE t DROP COLUMN a';`)
+		expect(schema.tables.get("t")).toEqual(["id", "a", "n"])
+	})
+
+	it("creates no table or index a comment or a string names", () => {
+		const schema = after(`-- CREATE TABLE ghost (g text)
+/* CREATE INDEX ghost_idx ON t (a) */ UPDATE \`t\` SET \`a\` = 'CREATE TABLE y (z text)';`)
+		expect([...schema.tables.keys()]).toEqual(["t", "x"])
+		expect(schema.indexes).toEqual([])
+	})
+
+	it("still follows the statements themselves, quoted or schema-qualified", () => {
+		const schema = after(`ALTER TABLE "t" ADD COLUMN "b" text;
+ALTER TABLE main.t RENAME COLUMN a TO c;
+CREATE INDEX "t_b" ON "t" ("b");
+DROP TABLE \`x\`;
+ALTER TABLE t RENAME TO u;`)
+		expect(Object.fromEntries(schema.tables)).toEqual({ u: ["id", "c", "b"] })
+		expect(schema.indexes).toEqual(["t_b"])
+		expect(schema.droppedTables).toEqual(["x"])
+	})
+})
