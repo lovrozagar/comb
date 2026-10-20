@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -21,12 +21,17 @@ const revision = (version: string, more: Record<string, unknown> = {}) => ({
 	...more,
 })
 
-type Answers = { apply?: RunResult; dryRun?: RunResult; status?: RunResult }
-type Fake = Run & { calls: Array<{ args: string[]; env: Readonly<Record<string, string | undefined>> | undefined }> }
+type Answers = { apply?: RunResult; dryRun?: RunResult; schemaDiff?: RunResult; status?: RunResult }
+type Fake = Run & {
+	calls: Array<{ args: string[]; env: Readonly<Record<string, string | undefined>> | undefined }>
+	/** each file of the history a schema diff replayed */
+	replayed: string[]
+}
 
 /** Atlas: hash writes a sum of name lengths, status and apply answer as told */
 function fakeAtlas(answers: Answers): Fake {
 	const calls: Fake["calls"] = []
+	const replayed: string[] = []
 	const run: Run = (_cmd, args, runOptions) => {
 		calls.push({ args: [...args], env: runOptions?.env })
 		if (args[1] === "hash") {
@@ -40,9 +45,14 @@ function fakeAtlas(answers: Answers): Fake {
 			return ok()
 		}
 		if (args[1] === "status") return answers.status ?? ok("{}")
+		if (args[0] === "schema") {
+			const to = (args[args.indexOf("--to") + 1] as string).replace("file://", "")
+			replayed.push(...sqlFiles(to).map((name) => readFileSync(join(to, name), "utf8")))
+			return answers.schemaDiff ?? ok("Schemas are synced, no changes to be made.\n")
+		}
 		return args.includes("--dry-run") ? (answers.dryRun ?? ok("{}")) : (answers.apply ?? ok("{}"))
 	}
-	return Object.assign(run, { calls })
+	return Object.assign(run, { calls, replayed })
 }
 
 const status = (body: Record<string, unknown>) =>
@@ -281,6 +291,34 @@ describe("baselineWithAtlas", () => {
 		expect(run.out).toEqual(["Marked applied: 1_a.sql", "Marked applied: 2_b.sql"])
 	})
 
+	it("compares the database with the history replayed without comb's objects but its sequences", () => {
+		writeFileSync(
+			join(dir, "1_a.sql"),
+			'CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\nCREATE VIEW "v" AS (select 1);\nCREATE ROLE "r";\n',
+		)
+		const atlas = fakeAtlas({ status: status({}) })
+		baselineWithAtlas(options(atlas))
+		expect(atlas.replayed[0]).toBe('CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\n')
+		const diff = atlas.calls.find((call) => call.args[0] === "schema")
+		expect(diff?.args.slice(0, 4)).toEqual(["schema", "diff", "--from", "env://url"])
+		expect(diff?.env?.["COMB_ATLAS_DEV_URL"]).toBe(`${TARGET.devUrl}?search_path=public`)
+	})
+
+	it("records nothing when the database's tables differ from the history's, naming the difference", () => {
+		const atlas = fakeAtlas({
+			schemaDiff: ok('-- Modify "a" table\nALTER TABLE "a" ADD COLUMN "x" int;\n'),
+			status: status({}),
+		})
+		expect(() => baselineWithAtlas(options(atlas))).toThrow(
+			'the database\'s tables are not the ones the migrations leave, so baseline records nothing; the difference:\n-- Modify "a" table\nALTER TABLE "a" ADD COLUMN "x" int;',
+		)
+		expect(atlas.calls.some((call) => call.args[1] === "set")).toBe(false)
+		const broken = fakeAtlas({ schemaDiff: fail("Error: dev database unreachable"), status: status({}) })
+		expect(() => baselineWithAtlas(options(broken))).toThrow("atlas schema diff: Error: dev database unreachable")
+	})
+})
+
+describe("baselineWithAtlas: what it refuses", () => {
 	it("refuses a database that already records migrations, and a directory with none", () => {
 		const recorded = status({ applied: [revision("1")], current: "1" })
 		expect(() => baselineWithAtlas(options(fakeAtlas({ status: recorded })))).toThrow(

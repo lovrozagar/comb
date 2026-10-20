@@ -38,9 +38,18 @@ function childEnv(env: RunOptions["env"]): NodeJS.ProcessEnv {
 	return out
 }
 
+/* the packages comb runs that a project installs (optional peers), with the range comb is tested against */
+const PEERS: Readonly<Record<string, string>> = { "drizzle-kit": ">=1.0.0-rc.4 <2", wrangler: ">=4.147.0 <5" }
+
+/** What to do when the package `name` cannot start, for a package comb knows; "" otherwise */
+const installHint = (name: string): string =>
+	Object.hasOwn(PEERS, name)
+		? `; run comb through a package script, so node_modules/.bin is on PATH, or install ${name} (${PEERS[name]})`
+		: ""
+
 /** How a process the OS could not run (or had to stop) is reported: POSIX shell codes where they exist. */
 function startFailure(cmd: string, error: NodeJS.ErrnoException, maxBuffer: number): RunResult {
-	if (error.code === "ENOENT") return { code: 127, stderr: `${cmd}: command not found`, stdout: "" }
+	if (error.code === "ENOENT") return { code: 127, stderr: `${cmd}: command not found${installHint(cmd)}`, stdout: "" }
 	if (error.code === "ENOBUFS") return { code: 1, stderr: `${cmd}: output exceeded ${maxBuffer} bytes`, stdout: "" }
 	return { code: 126, stderr: `${cmd}: ${error.message}`, stdout: "" }
 }
@@ -52,5 +61,8 @@ export const run: Run = (cmd, args, options = {}) => {
 	const result = spawnSync(cmd, args, { cwd: options.cwd, encoding: "utf8", env, input: options.input, maxBuffer })
 	if (result.error !== undefined) return startFailure(cmd, result.error as NodeJS.ErrnoException, maxBuffer)
 	const signal = result.signal === null ? 0 : 128 + constants.signals[result.signal]
-	return { code: result.status ?? signal, stderr: result.stderr, stdout: result.stdout }
+	/* `bun <package>` with the package missing says only that the script is not found */
+	const missing = cmd === "bun" && result.stderr.includes(`Script not found "${args[0]}"`)
+	const stderr = missing ? `${result.stderr.trimEnd()}${installHint(args[0] as string)}` : result.stderr
+	return { code: result.status ?? signal, stderr, stdout: result.stdout }
 }

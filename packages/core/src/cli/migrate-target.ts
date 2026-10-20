@@ -30,6 +30,8 @@ type MigrateTarget = {
 	/** the database's name in its environment, which a provider connects to */
 	name: string
 	provider: ResolvedDatabaseConfig["provider"]
+	/** the folder of comb.migrate.config.ts, where a D1 database's wrangler config is looked for */
+	configDir: string
 }
 
 const dialectOf = (type: string): Dialect => (type === "postgres" ? "postgres" : "sqlite")
@@ -84,7 +86,11 @@ async function resolveMigrateTarget(request: TargetRequest): Promise<MigrateTarg
 		label: `${request.db} (${resolved.name})`,
 		migrationsDir: path.resolve(configDir, request.dir ?? resolved.migrationsDir),
 		name: resolved.name,
-		provider: resolved.provider,
+		provider:
+			resolved.provider.type === "d1" && resolved.provider.wranglerConfig !== undefined
+				? { ...resolved.provider, wranglerConfig: path.resolve(configDir, resolved.provider.wranglerConfig) }
+				: resolved.provider,
+		configDir,
 	}
 }
 

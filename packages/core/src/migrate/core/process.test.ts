@@ -32,6 +32,21 @@ describe("run", () => {
 		expect(result.stdout).toBe("")
 		expect(result.stderr).toBe("comb-no-such-binary: command not found")
 	})
+})
+
+describe("run: a process that cannot start", () => {
+	it("names the package to install when wrangler or drizzle-kit cannot start", () => {
+		const hint = "run comb through a package script, so node_modules/.bin is on PATH, or install"
+		const wrangler = run("wrangler", ["--version"], { env: { PATH: "/nonexistent" } })
+		expect(wrangler).toEqual({
+			code: 127,
+			stderr: `wrangler: command not found; ${hint} wrangler (>=4.147.0 <5)`,
+			stdout: "",
+		})
+		const kit = run("bun", ["drizzle-kit", "export"], { cwd: tmpdir() })
+		expect(kit.code).toBe(1)
+		expect(kit.stderr).toContain(`${hint} drizzle-kit (>=1.0.0-rc.4 <2)`)
+	})
 
 	it("reports a file the OS refuses to execute as exit 126 with the reason", () => {
 		const dir = mkdtempSync(join(tmpdir(), "comb-process-"))

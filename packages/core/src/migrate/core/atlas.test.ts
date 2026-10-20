@@ -110,6 +110,13 @@ describe("exportDrizzleSchema", () => {
 		expect(run.calls).toEqual([{ args: ["drizzle-kit", "export"], cmd: "bun", options: { cwd: "/work" } }])
 	})
 
+	it("gives each SQLite primary key column drizzle-kit leaves nullable its NOT NULL", () => {
+		const run = fakeRun(ok("CREATE TABLE `a` (\n\t`id` text PRIMARY KEY\n);\n"))
+		expect(exportDrizzleSchema({ cwd: "/w", dialect: "sqlite", run })).toBe(
+			"CREATE TABLE `a` (\n\t`id` text NOT NULL PRIMARY KEY\n);\n",
+		)
+	})
+
 	it("returns Postgres output as is and throws stderr on failure", () => {
 		expect(exportDrizzleSchema({ cwd: "/w", dialect: "postgres", run: fakeRun(ok("PRAGMA x;\nDEFAULT true")) })).toBe(
 			"PRAGMA x;\nDEFAULT true",

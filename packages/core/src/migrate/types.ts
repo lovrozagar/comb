@@ -45,6 +45,10 @@ export type D1ProviderConfig = {
 	/** Target the local dev database (`wrangler --local`) instead of the remote one. */
 	local?: boolean | undefined
 	type: "d1"
+	/** The wrangler config that binds the database, relative to comb.migrate.config.ts; default: the one in its folder */
+	wranglerConfig?: string | undefined
+	/** The wrangler environment (`--env`) the binding is read from and every wrangler command runs in */
+	wranglerEnv?: string | undefined
 }
 
 /** The providers comb opens a connection to and applies migrations through itself */

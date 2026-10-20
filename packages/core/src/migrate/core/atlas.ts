@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
-import { sqliteDevUrl } from "./atlas-env.ts"
+import { normalizeSqliteExport, sqliteDevUrl } from "./atlas-env.ts"
 import { type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { type Run, run } from "./process.ts"
 import { atlasDirectives, withDirectivesFirst } from "./pg-objects.ts"
@@ -147,14 +147,16 @@ export function exportDrizzleSchema(options: DrizzleExportOptions): string {
 
 	let sql = result.stdout
 
-	/* Normalize for SQLite */
+	/* Normalize for SQLite: no pragmas, integer booleans, and a primary key that cannot hold NULL */
 	if (dialect === "sqlite") {
-		sql = sql
-			.split("\n")
-			.filter((line) => !line.trim().startsWith("PRAGMA"))
-			.join("\n")
-			.replace(/DEFAULT true/g, "DEFAULT 1")
-			.replace(/DEFAULT false/g, "DEFAULT 0")
+		sql = normalizeSqliteExport(
+			sql
+				.split("\n")
+				.filter((line) => !line.trim().startsWith("PRAGMA"))
+				.join("\n")
+				.replace(/DEFAULT true/g, "DEFAULT 1")
+				.replace(/DEFAULT false/g, "DEFAULT 0"),
+		)
 	}
 
 	return dialect === "postgres" ? scopeExport(sql, options.schema ?? "public") : sql

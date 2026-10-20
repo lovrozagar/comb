@@ -33,6 +33,7 @@ describe("resolveMigrateTarget", () => {
 			core: { drizzleConfigPath: "drizzle.pg.ts", migrationsDir: "db/pg", name: "core", provider: PG },
 		})
 		expect(await resolveMigrateTarget({ cwd, db: "core", mode: "diff" })).toEqual({
+			configDir: cwd,
 			database: "core",
 			dialect: "postgres",
 			drizzleConfigPath: join(cwd, "drizzle.pg.ts"),

@@ -15,6 +15,10 @@ export type CliIo = {
 	confirm?: ((question: string) => Promise<boolean>) | undefined
 }
 
+/** What `comb migrate check` reports once every pending migration is approved */
+export const checkPassed = (names: readonly string[]): string =>
+	`\nCheck passed: ${names.length} pending${names.length > 0 ? `: ${names.join(", ")}` : ""}`
+
 /** A failure the CLI reports as its message and exit code instead of a stack trace. */
 export class CliError extends Error {
 	readonly exitCode: number

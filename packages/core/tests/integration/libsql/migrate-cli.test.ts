@@ -4,12 +4,14 @@
  * --yes or a confirmation, and each file is applied and recorded together or not at all.
  */
 import { createClient } from "@libsql/client"
+import { spawnSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { runCli } from "../../../src/cli/index.ts"
 import { legacyMigrationHash } from "../../../src/migrate/core/parse.ts"
+import { describeAtlas } from "../support/atlas.ts"
 
 const dirs: string[] = []
 afterEach(() => {
@@ -22,6 +24,7 @@ function project(migrations: Record<string, string>) {
 	dirs.push(dir)
 	fs.mkdirSync(path.join(dir, "atlas-migrations"))
 	for (const [name, sql] of Object.entries(migrations)) fs.writeFileSync(path.join(dir, "atlas-migrations", name), sql)
+	spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
 	const url = (file: string) => `file:${path.join(dir, file)}`
 	fs.writeFileSync(
 		path.join(dir, "comb.migrate.config.ts"),
@@ -89,12 +92,13 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 			"20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);",
 			"20260102000000_drop.sql": "DROP TABLE post;",
 		})
+		/* every pending file is approved before any applies, so a refusal leaves even the first unapplied */
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(1)
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "post"])
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
 
 		const declined = io(dir, async () => false)
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], declined)).toBe(1)
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "post"])
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
 
 		const asked: string[] = []
 		const accepted = io(dir, async (question) => (asked.push(question), true))
@@ -115,11 +119,12 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 		expect(asked).toHaveLength(1)
 		expect(asked[0]).toContain("DROP TABLE post")
 		expect(declined.errors.join("\n")).toContain("3_drop.sql is unsafe")
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "post"])
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
 		fs.writeFileSync(
 			path.join(dir, "atlas-migrations", "3_drop.sql"),
 			"-- comb:allow-unsafe: post is retired\nDROP TABLE post;",
 		)
+		spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
 		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], io(dir))).toBe(0)
 		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
 	})
@@ -127,8 +132,9 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 	it("skips a file recorded under its pre-0.5.0 hash", async () => {
 		const sql = "INSERT INTO t VALUES ('a -- b\nc');"
 		const { dir, url } = project({ "1_t.sql": "CREATE TABLE t (v TEXT);", "2_row.sql": sql })
-		expect(await runCli(["migrate", "baseline", "core", "-e", "local"], io(dir))).toBe(0)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
 		const client = createClient({ url: url("local.db") })
+		await client.execute("DELETE FROM t")
 		await client.execute("DELETE FROM __drizzle_migrations WHERE id = 2")
 		await client.execute({
 			args: [legacyMigrationHash(sql), Date.now()],
@@ -141,13 +147,40 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 	})
 })
 
-describe("migrate baseline", () => {
-	it("records every migration as applied without running its SQL", async () => {
-		const { dir, url } = project({ "1_init.sql": "CREATE TABLE post (id TEXT);" })
+/* a table with an FTS5 index over it, as comb's fts generator writes one */
+const WITH_FTS = {
+	"1_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY, title TEXT);",
+	"2_fts.sql":
+		"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post');\nCREATE TRIGGER post_fts_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.rowid, new.title); END;",
+}
+
+describeAtlas("migrate baseline", () => {
+	it("records each migration once the database's schema is the one they leave, FTS index and all", async () => {
+		const { dir, url } = project(WITH_FTS)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
+		const client = createClient({ url: url("local.db") })
+		await client.execute("DELETE FROM __drizzle_migrations")
+		client.close()
 		const run = io(dir)
-		expect(await runCli(["migrate", "baseline", "core", "-e", "local"], run)).toBe(0)
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
-		expect(run.outputs.join("\n")).toContain("Marked applied: 1_init.sql")
+		expect(await runCli(["migrate", "baseline", "core", "-e", "local"], run), run.errors.join("\n")).toBe(0)
+		expect(run.outputs).toEqual([
+			"Marked applied: 1_init.sql",
+			"Marked applied: 2_fts.sql",
+			"\nBaseline done: 2 marked, 0 already tracked",
+		])
+	})
+
+	it("records nothing on a database whose schema is not the one the migrations leave, and says how", async () => {
+		const { dir, url } = project(WITH_FTS)
+		const client = createClient({ url: url("local.db") })
+		await client.execute("CREATE TABLE post (id TEXT PRIMARY KEY)")
+		client.close()
+		const run = io(dir)
+		expect(await runCli(["migrate", "baseline", "core", "-e", "local"], run)).toBe(1)
+		expect(run.errors[0]).toContain("'s schema is not the one its migrations leave, so baseline records nothing")
+		expect(run.errors[0]).toContain("ADD COLUMN `title` text NULL")
+		expect(run.errors[0]).toContain("-- FTS table post_fts: only in the migrations")
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "post"])
 	})
 })
 

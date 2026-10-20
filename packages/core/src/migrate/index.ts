@@ -7,15 +7,7 @@ export {
 	loadConfig,
 	resolveDatabaseConfig,
 } from "./config.ts"
-export {
-	applyMigration,
-	checkMigrationHash,
-	cleanupBackupTables,
-	createBackupTables,
-	ensureMigrationsTable,
-	recordMigrationHash,
-	verifySchema,
-} from "./core/apply.ts"
+export { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./core/apply.ts"
 export {
 	applySqliteMigrationTransforms,
 	checkAtlasInstalled,

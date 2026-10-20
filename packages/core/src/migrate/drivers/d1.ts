@@ -74,7 +74,16 @@ function formatLiteral(value: unknown): string {
 	throw new Error(`Unsupported SQL literal: ${typeof value}`)
 }
 
-function createD1Connection(databaseName: string, target: "--local" | "--remote", exec: Run): Connection {
+/** What every wrangler command on the database takes: --local or --remote, then its config and environment */
+function wranglerFlags(config: D1ProviderConfig): string[] {
+	return [
+		config.local === true ? "--local" : "--remote",
+		...(config.wranglerConfig === undefined ? [] : ["--config", config.wranglerConfig]),
+		...(config.wranglerEnv === undefined ? [] : ["--env", config.wranglerEnv]),
+	]
+}
+
+function createD1Connection(databaseName: string, flags: readonly string[], exec: Run): Connection {
 	return {
 		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
 			/* --file binds no parameters, so they are inlined as literals */
@@ -85,7 +94,7 @@ function createD1Connection(databaseName: string, target: "--local" | "--remote"
 			const tmpFile = join(dir, "batch.sql")
 			try {
 				writeFileSync(tmpFile, sql)
-				runWrangler(exec, ["d1", "execute", databaseName, target, `--file=${tmpFile}`])
+				runWrangler(exec, ["d1", "execute", databaseName, ...flags, `--file=${tmpFile}`])
 			} finally {
 				rmSync(dir, { force: true, recursive: true })
 			}
@@ -98,7 +107,7 @@ function createD1Connection(databaseName: string, target: "--local" | "--remote"
 
 		async execute(sql: string, params?: unknown[]): Promise<QueryResult> {
 			const finalSql = params && params.length > 0 ? inlineParams(sql, params) : sql
-			const stdout = runWrangler(exec, ["d1", "execute", databaseName, target, "--json", `--command=${finalSql}`])
+			const stdout = runWrangler(exec, ["d1", "execute", databaseName, ...flags, "--json", `--command=${finalSql}`])
 			const results = readResults(stdout)
 			/* wrangler names the columns on every row; an empty result has none */
 			const columns = Object.keys(results[0] ?? {})
@@ -110,12 +119,13 @@ function createD1Connection(databaseName: string, target: "--local" | "--remote"
 	}
 }
 
+export { wranglerFlags }
+
 export function createD1Provider(config: D1ProviderConfig, exec: Run = run): ConnectionProvider {
-	const target = config.local === true ? "--local" : "--remote"
 	return {
 		connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
 			/* Use resolved env name (e.g. csvme-core-local) so each env targets its own D1 db */
-			return Promise.resolve(createD1Connection(dbConfig.name, target, exec))
+			return Promise.resolve(createD1Connection(dbConfig.name, wranglerFlags(config), exec))
 		},
 		dialect: "sqlite",
 	}

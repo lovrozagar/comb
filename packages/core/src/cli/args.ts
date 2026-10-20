@@ -8,6 +8,7 @@ export type Command =
 	| "codegen"
 	| "migrate apply"
 	| "migrate baseline"
+	| "migrate check"
 	| "migrate diff"
 	| "migrate init"
 	| "migrate status"
@@ -31,14 +32,14 @@ export const OPTIONS: readonly OptionSpec[] = [
 		value: "path",
 	},
 	{
-		commands: ["migrate apply", "migrate baseline", "migrate status"],
+		commands: ["migrate apply", "migrate baseline", "migrate check", "migrate status"],
 		description: "Environment from comb.migrate.config.ts",
 		long: "--env",
 		short: "-e",
 		value: "name",
 	},
 	{
-		commands: ["migrate apply", "migrate baseline", "migrate status"],
+		commands: ["migrate apply", "migrate baseline", "migrate check", "migrate status"],
 		description: "Migrations directory (default: the config's, else ./atlas-migrations)",
 		long: "--dir",
 		value: "path",
@@ -49,15 +50,20 @@ export const OPTIONS: readonly OptionSpec[] = [
 		long: "--dialect",
 		value: "name",
 	},
+	{
+		commands: ["migrate diff"],
+		description: "Write nothing: exit 1 printing the migration a diff would write, 0 in sync",
+		long: "--dry-run",
+	},
 	{ commands: ["migrate apply"], description: "Apply this one migration file", long: "--file", value: "path" },
 	{
-		commands: ["migrate apply"],
+		commands: ["migrate apply", "migrate check"],
 		description: "Approve cautious changes without asking (not unsafe ones)",
 		long: "--yes",
 		short: "-y",
 	},
 	{
-		commands: ["migrate apply", "migrate baseline"],
+		commands: ["migrate apply", "migrate baseline", "migrate check", "migrate status"],
 		description: "Without a migrate config: the local D1 (wrangler --local)",
 		long: "--local",
 	},

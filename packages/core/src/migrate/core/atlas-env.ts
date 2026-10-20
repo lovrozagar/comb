@@ -41,6 +41,61 @@ export function applySqliteMigrationTransforms(sql: string, before?: ExtractedSc
 	return guardRebuilds(out, before, fts)
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   SQLITE EXPORT NORMALIZATION
+
+   drizzle-kit 1.0.0-rc.4 exports a SQLite primary key without NOT NULL
+   (`text("id").primaryKey()` is `` `id` text PRIMARY KEY ``, `.notNull()`
+   changes nothing), and SQLite lets every key but a rowid alias hold NULL.
+   Atlas reads such a column as nullable, so a history that says NOT NULL
+   would be rebuilt on every diff. comb gives each such column its NOT NULL.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* a column line of an export: `\t`name` type…`, its name doubled-backtick escaped */
+const COLUMN_LINE = /^\t`((?:[^`]|``)+)` ([a-z]+)\b/i
+/* a table-level primary key line: `\t[CONSTRAINT `n` ]PRIMARY KEY(`a`, `b`)` */
+const TABLE_KEY = /^\t(?:CONSTRAINT `(?:[^`]|``)+` )?PRIMARY KEY ?\(([^)]*)\)/i
+
+/** The table body lines that need NOT NULL for a table-level primary key, given the body's lines */
+function keyColumns(lines: readonly string[]): Set<string> {
+	const listed = lines.flatMap((line) => {
+		const list = TABLE_KEY.exec(line)?.[1]
+		return list === undefined
+			? []
+			: [list.split(",").map((part) => part.trim().replace(/^`|`$/g, "").replaceAll("``", "`"))]
+	})
+	const columns = new Set<string>()
+	for (const key of listed) {
+		const lone = key.length === 1 ? lines.find((line) => COLUMN_LINE.exec(line)?.[1] === key[0]) : undefined
+		/* a lone integer key is the rowid alias, which never holds NULL */
+		if (lone !== undefined && /^integer$/i.test(COLUMN_LINE.exec(lone)?.[2] as string)) continue
+		for (const column of key) columns.add(column)
+	}
+	return columns
+}
+
+/** One CREATE TABLE of an export with NOT NULL on each column of its table-level primary key */
+function withKeyNotNull(table: string): string {
+	const lines = table.split("\n")
+	const columns = keyColumns(lines)
+	return lines
+		.map((line) => {
+			const name = COLUMN_LINE.exec(line)?.[1]
+			if (name === undefined || !columns.has(name) || /\bNOT NULL\b/i.test(line)) return line
+			return line.replace(/(,?)$/, " NOT NULL$1")
+		})
+		.join("\n")
+}
+
+/** drizzle-kit's SQLite export with NOT NULL on every primary key column but a rowid alias; idempotent */
+export function normalizeSqliteExport(sql: string): string {
+	const inline = sql.replace(
+		/^(\t`(?:[^`]|``)+` (?!integer\b)[a-z]+(?:\([^)]*\))?) PRIMARY KEY\b(?![^\n]*\bNOT NULL\b)/gim,
+		"$1 NOT NULL PRIMARY KEY",
+	)
+	return inline.replace(/^CREATE TABLE [^\n]*\(\n[\s\S]*?\n\);/gm, withKeyNotNull)
+}
+
 /**
  * The ephemeral database Atlas replays SQLite migrations on; Postgres names its own
  * (atlas-target.ts). Atlas takes a lock across the host named after the dev URL, so each run

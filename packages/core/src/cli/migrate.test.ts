@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { Run } from "../migrate/core/process.ts"
+import { fakeAtlas as hashingAtlas, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, ok, projects, writeTables } from "./__fixtures__/io.ts"
 import { atlasConfig } from "../migrate/core/atlas-target.ts"
 import { help, runCli } from "./run.ts"
@@ -61,10 +62,11 @@ describe("comb migrate", () => {
 			join(dir, "comb.migrate.config.ts"),
 			`export default { databases: { core: { migrationsDir: "./m", name: "core", provider: { type: "libsql", url: ${JSON.stringify(`file:${join(dir, "core.db")}`)} } } } }\n`,
 		)
-		const io = makeIo(dir)
+		writeSum(join(dir, "m"))
+		const io = makeIo(dir, hashingAtlas())
 		expect(await runCli(["migrate", "baseline", "core"], io)).toBe(0)
 		expect(io.outputs).toEqual(["\nBaseline done: 0 marked, 0 already tracked"])
-		const applied = makeIo(dir)
+		const applied = makeIo(dir, hashingAtlas())
 		expect(await runCli(["migrate", "apply", "core"], applied)).toBe(0)
 		expect(applied.outputs).toEqual(["\nDone: 0 applied, 0 skipped"])
 	})
@@ -143,6 +145,42 @@ describe("comb migrate diff", () => {
 		expect(await runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "atlas-migrations", "20260101000000_init.sql")}`])
 		expect(run.calls.find((call) => call[2] === "diff")?.[3]).toBe("init")
+	})
+})
+
+describe("comb migrate diff --dry-run", () => {
+	it("writes nothing: exit 0 in sync, exit 1 printing the SQL a diff would write", async () => {
+		const dir = project()
+		const run = fakeAtlas((replayed) =>
+			writeFileSync(join(replayed, "20260101000000_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n"),
+		)
+		const drift = makeIo(dir, run)
+		expect(await runCli(["migrate", "diff", "core", "--dry-run"], drift)).toBe(1)
+		expect(drift.outputs).toEqual(["-- 20260101000000_init.sql", "CREATE TABLE post (id TEXT PRIMARY KEY);\n"])
+		expect(drift.errors).toEqual([
+			"core has drifted from its migrations: comb migrate diff core would write the SQL above",
+		])
+		expect(readdirSync(dir)).toEqual([])
+		mkdirSync(join(dir, "atlas-migrations"))
+		writeFileSync(join(dir, "atlas-migrations", "1_init.sql"), "SELECT 1;\n")
+		const synced = makeIo(
+			dir,
+			fakeAtlas(() => undefined),
+		)
+		expect(await runCli(["migrate", "diff", "core", "--dry-run"], synced)).toBe(0)
+		expect(synced.outputs).toEqual(["Schema is already in sync — no migration needed"])
+		expect(readdirSync(join(dir, "atlas-migrations"))).toEqual(["1_init.sql"])
+	})
+
+	it("with --dry-run and no database named, diffs an empty copy when there is no migrations directory", async () => {
+		const dir = project()
+		const run = fakeAtlas((replayed) => writeFileSync(join(replayed, "20260101000000_x.sql"), "SELECT 1;\n"))
+		const io = makeIo(dir, run)
+		expect(await runCli(["migrate", "diff", "--dry-run"], io)).toBe(1)
+		expect(io.errors).toEqual([
+			"the schema has drifted from the migrations: comb migrate diff would write the SQL above",
+		])
+		expect(readdirSync(dir)).toEqual([])
 	})
 
 	it("says when the schema is already in sync", async () => {

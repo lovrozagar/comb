@@ -12,6 +12,7 @@ import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles, sumHashes } from "./atlas-dir.ts"
 import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { refuseDrift } from "./baseline-compare.ts"
 import { extractSchema, parseMigration } from "./parse.ts"
 import { type Run, type RunResult, run } from "./process.ts"
 
@@ -58,6 +59,8 @@ type AtlasCommand = {
 type ApplyOptions = AtlasCommand & {
 	/** whether a classified migration may run: approval.ts's rule, asking a person when it must */
 	approve(migration: ParsedMigration): Promise<Approval>
+	/** only check: stop once every pending file is approved, applying nothing */
+	checkOnly?: boolean | undefined
 }
 
 /** `atlas migrate <args>` on the snapshot `copy` against the target, its output scrubbed */
@@ -164,7 +167,7 @@ function applied(ran: RunResult): string[] {
 	return report.applied.map((file) => file.Name)
 }
 
-/** Apply the pending migrations of `options.dir` through Atlas; returns the files applied */
+/** Apply the pending migrations of `options.dir` through Atlas; returns the files applied, or only checked */
 async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 	const copy = snapshotDir(options.exec ?? run, options.dir)
 	try {
@@ -178,6 +181,7 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		const dry = atlas(options, copy, ["apply", "--dry-run", "--format", APPLY_FORMAT])
 		if (dry.code !== 0) throw new Error(dry.stderr)
 		await approvePending(options, copy, status.pending)
+		if (options.checkOnly === true) return status.pending.map((file) => file.Name)
 		const files = applied(atlas(options, copy, ["apply", "--format", APPLY_FORMAT]))
 		for (const name of files) options.print(`Apply: ${name}`)
 		return files
@@ -201,7 +205,8 @@ const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
 /**
  * Record every migration of the directory as applied without running any (`atlas migrate set` to
  * the latest file's version), for a database whose schema was set up some other way. Refused when
- * the database already records migrations. Returns the files marked.
+ * the database already records migrations, and when its tables are not the ones the migrations
+ * leave. Returns the files marked.
  */
 function baselineWithAtlas(options: AtlasCommand): string[] {
 	return onSnapshot(options, (copy) => {
@@ -214,6 +219,7 @@ function baselineWithAtlas(options: AtlasCommand): string[] {
 		const files = sqlFiles(copy)
 		const latest = files.at(-1)?.split("_")[0]
 		if (latest === undefined) throw new Error("there are no migrations to record")
+		refuseDrift({ exec: options.exec ?? run, target: options.target }, copy)
 		const set = atlas(options, copy, ["set", latest])
 		if (set.code !== 0) throw new Error(`atlas migrate set: ${set.stderr}`)
 		for (const name of files) options.print(`Marked applied: ${name}`)

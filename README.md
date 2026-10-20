@@ -104,10 +104,12 @@ Peer dependencies:
 | `ts-morph`                  | `>=28.0.0 <29`      | only for codegen                                                |
 | `@libsql/client`            | `>=0.17.4 <0.18`    | only for the libsql/Turso migration providers                   |
 | `@cloudflare/workers-types` | `>=5.20260815.1 <6` | only for the D1 modules' types (`sqlite/d1/*`)                  |
+| `drizzle-kit`               | `>=1.0.0-rc.4 <2`   | only for `comb migrate diff`, which runs `drizzle-kit export`   |
+| `wrangler`                  | `>=4.147.0 <5`      | only to migrate a D1 database, which wrangler applies           |
 
 Each range stops before the next breaking release, so an install never pairs comb with a major it was not tested against.
 
-The migration toolkit also shells out to [Atlas](https://atlasgo.io) and `drizzle-kit`; both are runtime requirements of `comb migrate diff`, not install-time dependencies.
+The migration toolkit also shells out to [Atlas](https://atlasgo.io), which no package ships: `comb migrate diff`, `check`, `apply` and `baseline` need it on `PATH`. When `drizzle-kit` or `wrangler` cannot start, comb names the package and says to run comb through a package script (so `node_modules/.bin` is on `PATH`) or install it.
 
 ## First schema
 
@@ -182,19 +184,21 @@ COMMANDS:
   codegen --tables <path>   Direct mode: analyze one tables file and generate beside it
   migrate init              Create drizzle.config.ts, atlas.hcl and atlas-migrations/
   migrate diff <db> [name]  Diff the schema and write the next migration
+  migrate check <db>        Check and approve the pending migrations, applying nothing
   migrate apply <db>        Apply pending migrations: approve drops, apply and record each at once
-  migrate baseline <db>     Record every migration as applied without running it
-  migrate status <db>       Show a Postgres database's applied and pending migrations
+  migrate baseline <db>     Record the migrations a database already reflects as applied
+  migrate status <db>       Show a Postgres or D1 database's applied and pending migrations
 
 OPTIONS:
   -g, --generator <name>  Run one generator only [codegen]
   --tables <path>         Analyze this tables file directly, no comb.config.ts [codegen]
-  -e, --env <name>        Environment from comb.migrate.config.ts [migrate apply, migrate baseline, migrate status]
-  --dir <path>            Migrations directory (default: the config's, else ./atlas-migrations) [migrate apply, migrate baseline, migrate status]
+  -e, --env <name>        Environment from comb.migrate.config.ts [migrate apply, migrate baseline, migrate check, migrate status]
+  --dir <path>            Migrations directory (default: the config's, else ./atlas-migrations) [migrate apply, migrate baseline, migrate check, migrate status]
   --dialect <name>        The project's dialect: sqlite (default) or postgres [migrate init]
+  --dry-run               Write nothing: exit 1 printing the migration a diff would write, 0 in sync [migrate diff]
   --file <path>           Apply this one migration file [migrate apply]
-  -y, --yes               Approve cautious changes without asking (not unsafe ones) [migrate apply]
-  --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline]
+  -y, --yes               Approve cautious changes without asking (not unsafe ones) [migrate apply, migrate check]
+  --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline, migrate check, migrate status]
   --help                  Show this help
 ```
 
@@ -202,12 +206,12 @@ The binary requires Bun — the shebang is `#!/usr/bin/env bun`, and `comb migra
 
 External tools the migration commands shell out to, none of them install-time dependencies:
 
-| Command                             | Needs                                                                                                          |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `migrate diff`                      | [Atlas](https://atlasgo.io) on `PATH`, plus `drizzle-kit`                                                      |
-| `migrate apply`, `migrate baseline` | the configured provider's client; for D1, `wrangler` (authenticated against the account for a remote database) |
+| Command                                              | Needs                                                                                                                              |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `migrate diff`                                       | [Atlas](https://atlasgo.io) on `PATH`, plus `drizzle-kit`                                                                          |
+| `migrate check`, `migrate apply`, `migrate baseline` | Atlas on `PATH` and the configured provider's client; for D1, `wrangler` (authenticated against the account for a remote database) |
 
-The D1 provider drives `wrangler d1 execute` as a child process, against the remote database by default; set `local: true` in its provider config, or pass `--local` without a migrate config, to target the local dev database.
+The D1 provider drives `wrangler d1 execute` and `wrangler d1 migrations apply` as child processes, against the remote database by default; set `local: true` in its provider config, or pass `--local` without a migrate config, to target the local dev database. `wranglerConfig` (relative to `comb.migrate.config.ts`; default: the wrangler config beside it) and `wranglerEnv` name the wrangler config that binds the database and its environment, and comb passes them as `--config` and `--env` to every wrangler command.
 
 ### `comb codegen`
 
@@ -229,12 +233,13 @@ Config mode reads `comb.config.ts` (or `.js`) from the working directory. Direct
 
 ### `comb migrate`
 
-| Dialect                          | `diff` writes the next migration with                                                       | `apply` and `baseline` run through                                                                   |
-| -------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| SQLite, libsql, Turso, D1        | Atlas on an in-memory SQLite, plus comb's FTS5 part                                         | comb: each file and its hash in one batch, recorded in `__drizzle_migrations`                        |
-| Postgres (plain, Neon, Supabase) | Atlas on the dev database, plus comb's part for what Atlas OSS refuses (views, policies, …) | Atlas, after comb snapshots, classifies and approves each file; recorded in `atlas_schema_revisions` |
+| Dialect                          | `diff` writes the next migration with                                                       | `apply` and `baseline` run through                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| SQLite, libsql, Turso            | Atlas on an in-memory SQLite, plus comb's FTS5 part                                         | comb: each file and its hash in one batch, recorded in `__drizzle_migrations`                         |
+| D1                               | Atlas on an in-memory SQLite, plus comb's FTS5 part                                         | comb checks, then `wrangler d1 migrations apply` applies and records in the binding's `d1_migrations` |
+| Postgres (plain, Neon, Supabase) | Atlas on the dev database, plus comb's part for what Atlas OSS refuses (views, policies, …) | Atlas, after comb snapshots, classifies and approves each file; recorded in `atlas_schema_revisions`  |
 
-`init` scaffolds `drizzle.config.ts`, `atlas.hcl` and `atlas-migrations/`; `init --dialect postgres` adds a `comb.migrate.config.ts` whose URL comes from `DATABASE_URL`, and no file holds a credential. `baseline` is the escape hatch for adopting Comb on a database that already has the schema: it records every migration as applied without running any. `status` lists a Postgres database's applied and pending migrations.
+`init` scaffolds `drizzle.config.ts`, `atlas.hcl` and `atlas-migrations/`; `init --dialect postgres` adds a `comb.migrate.config.ts` whose URL comes from `DATABASE_URL`, and no file holds a credential. `check` runs the check every apply runs first and applies nothing; it reads the database's history, so it needs the database. `baseline` adopts a database that already has the schema: it records the migrations as applied without running any, but only once the database's schema is the one they leave (on D1, only the files comb 0.7's `__drizzle_migrations` records). `status` lists a Postgres or D1 database's applied and pending migrations. `diff --dry-run` writes nothing: it exits 0 when the schema is in sync, and 1 printing the migration a diff would write.
 
 ## Columns
 
@@ -521,22 +526,24 @@ FTS5 tables stay out of what Atlas sees, because its dev SQLite has no fts5 modu
 
 A migration's hash is its SQL with comments and layout normalized away, never the text inside a literal. Files recorded under the pre-0.5.0 hash, which stripped `--` even inside literals, still count as applied (`migrationHashes()`, `checkMigrationHash()`).
 
-`apply <db>` takes its database from `comb.migrate.config.ts` when the project has one: `-e/--env` picks the environment, whose provider supplies the connection, and `migrationsDir` is read relative to the config file. Without a migrate config, `<db>` is a D1 database name, remote by default and local with `--local`. A Postgres database goes through Atlas ([Postgres](#postgres)); on SQLite, libsql, Turso and D1 comb applies, per migration file in name order (or the one `--file` names):
+`apply <db>` takes its database from `comb.migrate.config.ts` when the project has one: `-e/--env` picks the environment, whose provider supplies the connection, and `migrationsDir` is read relative to the config file. Without a migrate config, `<db>` is a D1 binding in the working folder's wrangler config, remote by default and local with `--local`. A Postgres database goes through Atlas ([Postgres](#postgres)). On every SQLite database, apply first checks, and applies nothing unless every pending file passes:
 
-1. Ensures `__drizzle_migrations` exists.
-2. Skips the file if its hash, current or pre-0.5.0, is already recorded.
-3. Classifies it against the schema the earlier files leave: `parseMigration()`, `classifyMigration()` and `extractDropStatements()` read each statement, and each action of an `ALTER TABLE`, through quoted and schema-qualified names, and rate the file:
+1. The directory matches its `atlas.sum`.
+2. A file is pending unless the history records it: its hash, current or pre-0.5.0, in `__drizzle_migrations`, or on D1 its name in the binding's `migrations_table` (`d1_migrations`). A pending file that sorts before an applied one is refused, since it would run after files written later.
+3. Each pending file is classified against the schema the earlier files leave: `parseMigration()`, `classifyMigration()` and `extractDropStatements()` read each statement, and each action of an `ALTER TABLE`, through quoted and schema-qualified names, and rate the file:
    - **unsafe** loses data or breaks deployed code by name: dropping a table, column, schema, type, sequence or role, `CASCADE`, changing a column's type, `SET NOT NULL`, adding a `NOT NULL` column without a default, renames, `TRUNCATE`, and `DELETE` or `UPDATE` without a `WHERE`. An unsafe file runs only after a yes on a terminal, or when the file approves itself with a line of its own, `-- comb:allow-unsafe: <reason>`, which goes through review with the file. `--yes` does not cover it, so a pipeline that always passes `--yes` cannot drop data unreviewed.
    - **cautious** drops nothing a row holds: indexes, constraints, defaults, views, triggers, functions, a filtered write, a grant. It runs with `--yes` or a yes on a terminal.
    - **safe** runs without asking.
 
    Without a terminal or an approval, `apply` stops before running the file. A SQLite table rebuild (Atlas copies the rows into `new_t`, drops `t` and renames `new_t`) is cautious when it copies every column the earlier files gave `t`, and unsafe when it leaves one out, which is how Atlas drops a SQLite column. A rebuild of a table other tables reference is unsafe unless it carries comb's guard exactly as `comb migrate diff` wrote it (see below); an edit inside the guard makes it unsafe again.
 
-4. Applies its statements (`CREATE INDEX` and `DROP INDEX` made `IF [NOT] EXISTS`) and the insert of its hash as one batch, which every provider runs all-or-nothing (D1 as one `wrangler d1 execute --file`). A file is applied and recorded, or neither. A transient failure (rate limit, reset connection) retries the whole batch through `withRetry()`.
+4. On SQLite, libsql and Turso, comb applies each file's statements (`CREATE INDEX` and `DROP INDEX` made `IF [NOT] EXISTS`) and the insert of its hash as one batch, which every provider runs all-or-nothing. A file is applied and recorded, or neither. A transient failure (rate limit, reset connection) retries the whole batch through `withRetry()`. `--file` applies one file on its own, which no sum or order covers.
 
-`baseline <db>` records every file as applied without running it, for a database whose schema was set up out of band.
+On D1, wrangler applies. comb reads the binding from the wrangler config with wrangler's own reader, refuses when its `migrations_dir` is not comb's `migrationsDir` or its `migrations_pattern` takes anything but that directory's `.sql` files, orders the files as wrangler does (by leading number, then name, so 8- and 14-digit prefixes mix), checks exactly the files wrangler will apply, and runs `wrangler d1 migrations apply` with stdin closed. wrangler runs each file and its `d1_migrations` row as one batch locally and one query remotely, and takes no backup, so bookmark a production database (Time Travel) before an apply. comb then reads the table back and fails unless it holds exactly the files it checked; a declined prompt or a failed file leaves its row out. `--file` does not apply to D1. A database comb 0.7 migrated records its files in `__drizzle_migrations`; apply refuses it until `comb migrate baseline <db>` copies that record into `d1_migrations` once.
 
-Backup tables (`createBackupTables()`), schema verification (`verifySchema()`, `applyMigration()`) and the circuit breaker (`createCircuitBreaker()` and its checks) are library APIs for your own runners, such as a multi-tenant fan-out; the CLI does not use them, because one atomic batch per file already leaves nothing half-applied.
+`baseline <db>` records the files as applied without running them, for a database whose schema was set up out of band, after Atlas compares the database's schema with the one the history leaves; any difference is printed and nothing is recorded. On SQLite comb reads the schema from the database itself and compares FTS5 tables by name, since Atlas's dev SQLite has no fts5 module. On D1 it copies only what `__drizzle_migrations` records.
+
+The circuit breaker (`createCircuitBreaker()` and its checks) is a library API for your own runners, such as a multi-tenant fan-out; the CLI does not use it, because one atomic batch per file already leaves nothing half-applied.
 
 ### Postgres
 
@@ -552,7 +559,7 @@ An enum value Atlas adds goes into a file of its own a version earlier, since Po
 
 `apply` works on a private copy of the migrations directory, checked against `atlas.sum`, so what Atlas runs is exactly what comb read. It asks Atlas for its status and stops at any error, and at a file older than the latest applied one, which Atlas would skip without a word; a file Atlas ran halfway outside a transaction resumes only if unchanged, since Atlas resumes it by statement count. A dry run comes next, so a database that has objects but no history is told to `baseline` before anyone is asked. Each pending file is then classified and approved as on SQLite (unsafe: a yes on a terminal or `-- comb:allow-unsafe: <reason>`; cautious: `--yes` too), with lock warnings for statements that block a table: a non-concurrent index on an existing table, a volatile default, a scanning constraint without `NOT VALID`, a retype. Atlas then applies each file in its own transaction and records it; a failed file is named with its statement, and the files before it stay applied. Atlas holds a lock while it applies, so two applies never run at once. `--file` and `--local` do not apply to Postgres.
 
-`baseline <db>` records every file up to the directory's latest as applied without running any, and refuses a database that already records migrations. `status <db>` lists applied and pending files and warns of an applied file edited since, which Atlas never runs again. Atlas prints every statement it runs, so keep secrets out of data migrations; take a snapshot (a PITR point, a Neon branch) before an unsafe apply, and prefer expand-and-contract to renames and drops in one deploy.
+`baseline <db>` records every file up to the directory's latest as applied without running any, and refuses a database that already records migrations, and one whose tables are not the ones the history leaves on the dev database (Atlas OSS inspects no view, policy or sequence, so those are not compared). `status <db>` lists applied and pending files and warns of an applied file edited since, which Atlas never runs again. Atlas prints every statement it runs, so keep secrets out of data migrations; take a snapshot (a PITR point, a Neon branch) before an unsafe apply, and prefer expand-and-contract to renames and drops in one deploy.
 
 ### SQLite transforms
 

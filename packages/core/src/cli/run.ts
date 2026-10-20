@@ -12,9 +12,10 @@ const COMMANDS: ReadonlyArray<[string, string]> = [
 	["codegen --tables <path>", "Direct mode: analyze one tables file and generate beside it"],
 	["migrate init", "Create drizzle.config.ts, atlas.hcl and atlas-migrations/"],
 	["migrate diff <db> [name]", "Diff the schema and write the next migration"],
+	["migrate check <db>", "Check and approve the pending migrations, applying nothing"],
 	["migrate apply <db>", "Apply pending migrations: approve drops, apply and record each at once"],
-	["migrate baseline <db>", "Record every migration as applied without running it"],
-	["migrate status <db>", "Show a Postgres database's applied and pending migrations"],
+	["migrate baseline <db>", "Record the migrations a database already reflects as applied"],
+	["migrate status <db>", "Show a Postgres or D1 database's applied and pending migrations"],
 ]
 
 /** The help, from the declarations the commands parse with */

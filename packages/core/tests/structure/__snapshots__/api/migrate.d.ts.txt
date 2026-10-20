@@ -1,6 +1,6 @@
 // migrate/index.d.ts
 export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
-export { applyMigration, checkMigrationHash, cleanupBackupTables, createBackupTables, ensureMigrationsTable, recordMigrationHash, verifySchema, } from "./core/apply.ts";
+export { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./core/apply.ts";
 export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, type GenerateMigrationOptions, generateMigrationFile, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
 export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, makeIdempotent, parseMigration, splitSqlStatements, } from "./core/parse.ts";
 export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCircuitBreaker, withRetry, } from "./core/utils.ts";
@@ -38,9 +38,9 @@ export declare function loadConfig(configPath?: string, cwd?: string): Promise<L
 
 // migrate/core/apply.d.ts
 /**
- * Core migration application logic
+ * comb's own migration record on SQLite: the `__drizzle_migrations` table and the hashes in it
  */
-import type { Connection, ExtractedSchema, MigrationResult, ParsedMigration } from "../types.ts";
+import type { Connection } from "../types.ts";
 export declare function ensureMigrationsTable(conn: Connection): Promise<void>;
 /**
  * Whether a migration is recorded under any of `hashes`; pass `migrationHashes(sql)` so a file
@@ -48,22 +48,6 @@ export declare function ensureMigrationsTable(conn: Connection): Promise<void>;
  */
 export declare function checkMigrationHash(conn: Connection, hashes: string | readonly string[]): Promise<boolean>;
 export declare function recordMigrationHash(conn: Connection, hash: string): Promise<void>;
-/**
- * Whether the database holds the tables, columns and indexes a migration creates. A database
- * error is thrown, not reported as a mismatch: a mismatch makes the caller apply the migration.
- */
-export declare function verifySchema(conn: Connection, expected: ExtractedSchema): Promise<{
-    ok: boolean;
-    found: number;
-    errors: string[];
-}>;
-export declare function applyMigration(conn: Connection, dbName: string, migration: ParsedMigration): Promise<MigrationResult>;
-export declare function createBackupTables(conn: Connection, tablesToBackup: string[]): Promise<{
-    backupSql: string[];
-    restoreSql: string[];
-}>;
-/** Drop the backup tables older than `olderThanMs`; returns how many it dropped */
-export declare function cleanupBackupTables(conn: Connection, olderThanMs?: number): Promise<number>;
 
 // migrate/core/atlas.d.ts
 import type { Dialect } from "../types.ts";
@@ -215,6 +199,10 @@ export type D1ProviderConfig = {
     /** Target the local dev database (`wrangler --local`) instead of the remote one. */
     local?: boolean | undefined;
     type: "d1";
+    /** The wrangler config that binds the database, relative to comb.migrate.config.ts; default: the one in its folder */
+    wranglerConfig?: string | undefined;
+    /** The wrangler environment (`--env`) the binding is read from and every wrangler command runs in */
+    wranglerEnv?: string | undefined;
 };
 /** The providers comb opens a connection to and applies migrations through itself */
 export type ConnectionProviderConfig = BunSqliteProviderConfig | D1ProviderConfig | LibsqlProviderConfig | TursoProviderConfig;
@@ -415,6 +403,8 @@ import type { FtsState } from "./fts-migration.ts";
  * `fts` are the ones the guard may fire; a rebuild it cannot guard is refused.
  */
 export declare function applySqliteMigrationTransforms(sql: string, before?: ExtractedSchema, fts?: FtsState): string;
+/** drizzle-kit's SQLite export with NOT NULL on every primary key column but a rowid alias; idempotent */
+export declare function normalizeSqliteExport(sql: string): string;
 /**
  * The ephemeral database Atlas replays SQLite migrations on; Postgres names its own
  * (atlas-target.ts). Atlas takes a lock across the host named after the dev URL, so each run
@@ -517,6 +507,9 @@ export { normalizeSql, segments, splitSqlStatements, type Segment };
 // migrate/drivers/d1.d.ts
 import { type Run } from "../core/process.ts";
 import type { ConnectionProvider, D1ProviderConfig } from "../types.ts";
+/** What every wrangler command on the database takes: --local or --remote, then its config and environment */
+declare function wranglerFlags(config: D1ProviderConfig): string[];
+export { wranglerFlags };
 export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): ConnectionProvider;
 
 // migrate/drivers/sqlite.d.ts

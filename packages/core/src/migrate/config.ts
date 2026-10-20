@@ -63,6 +63,8 @@ const providerInputSchema = () =>
 			databaseName: z.string().min(1),
 			local: z.boolean().optional(),
 			type: z.literal("d1"),
+			wranglerConfig: z.string().min(1).optional(),
+			wranglerEnv: z.string().min(1).optional(),
 		}),
 	])
 
@@ -126,14 +128,12 @@ function resolveProviderConfig(input: ProviderConfig): ResolvedDatabaseConfig["p
 				type: "postgres",
 				url: input.url,
 			}
+		/* every other provider resolves to itself */
 		case "turso":
-			return { apiToken: input.apiToken, group: input.group, org: input.org, type: "turso" }
 		case "libsql":
-			return { authToken: input.authToken, type: "libsql", url: input.url }
 		case "bun-sqlite":
-			return { path: input.path, type: "bun-sqlite" }
 		case "d1":
-			return { databaseId: input.databaseId, databaseName: input.databaseName, local: input.local, type: "d1" }
+			return { ...input }
 	}
 }
 

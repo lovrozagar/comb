@@ -58,6 +58,22 @@ describe("package.json peers", () => {
 		expect(untyped.filter((name) => !Object.hasOwn(dependencies, `@types/${name}`))).toEqual([])
 	})
 
+	it("declare as optional peers the packages the sources spawn, Atlas aside, which no package ships", () => {
+		const spawned = new Set(
+			sources(join(ROOT, "src")).flatMap((file) =>
+				[...readFileSync(file, "utf8").matchAll(/\b(?:exec|run)\(\s*"([\w-]+)"\s*,\s*\[\s*(?:"([\w-]+)")?/g)].map(
+					(match) => (match[1] === "bun" ? (match[2] as string) : (match[1] as string)),
+				),
+			),
+		)
+		spawned.delete("atlas")
+		expect([...spawned].sort()).toEqual(["drizzle-kit", "wrangler"])
+		for (const name of spawned) {
+			expect(peers[name], name).toBeDefined()
+			expect(optional.has(name), name).toBe(true)
+		}
+	})
+
 	it("pin published dependencies to versions, never a workspace catalog an install cannot resolve", () => {
 		expect(Object.entries(pkg.dependencies ?? {}).filter(([, range]) => range.startsWith("catalog:"))).toEqual([])
 	})

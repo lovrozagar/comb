@@ -25,6 +25,7 @@ function pgAtlas(pending: string[]): Run & { calls: string[][]; envs: unknown[] 
 			writeFileSync(join(dir, "atlas.sum"), `h1:x=\n${names.map((f) => `${f} h1:${f.length}=`).join("\n")}\n`)
 			return ok()
 		}
+		if (args[0] === "schema") return ok("Schemas are synced, no changes to be made.\n")
 		const files = pending.map((Name) => ({ Description: "", Name, Version: Name.split("_")[0] }))
 		if (args[1] === "status")
 			return ok(
@@ -63,13 +64,24 @@ describe("migrate apply and baseline: a Postgres database, through Atlas", () =>
 		expect(atlas.calls.map((call) => call.join(" ")).join("\n")).not.toContain("pw@")
 	})
 
+	it("checks and approves the pending files with check, applying none", async () => {
+		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
+		const atlas = pgAtlas(["1_init.sql"])
+		const io = makeIo(dir, atlas)
+		expect(await runCli(["migrate", "check", "core"], io)).toBe(0)
+		expect(io.outputs).toEqual(["\nCheck passed: 1 pending: 1_init.sql"])
+		expect(atlas.calls.some((call) => call[1] === "apply" && !call.includes("--dry-run"))).toBe(false)
+	})
+
 	it("asks before an unsafe file, and takes no --yes for it", async () => {
 		const dir = postgresProject({ "1_drop.sql": 'DROP TABLE "post";\n' })
 		const io = makeIo(dir, pgAtlas(["1_drop.sql"]))
 		expect(await runCli(["migrate", "apply", "core", "--yes"], io)).toBe(1)
 		expect(io.errors[0]).toContain('1_drop.sql is unsafe (DROP TABLE post; DROP TABLE "post")')
 	})
+})
 
+describe("migrate baseline and its refusals: a Postgres database, through Atlas", () => {
 	it("records every file with baseline, running none", async () => {
 		const dir = postgresProject({ "1_init.sql": "SELECT 1;\n", "2_more.sql": "SELECT 2;\n" })
 		const atlas = pgAtlas([])

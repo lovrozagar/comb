@@ -14,6 +14,8 @@ export type CliIo = {
     /** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
     confirm?: ((question: string) => Promise<boolean>) | undefined;
 };
+/** What `comb migrate check` reports once every pending migration is approved */
+export declare const checkPassed: (names: readonly string[]) => string;
 /** A failure the CLI reports as its message and exit code instead of a stack trace. */
 export declare class CliError extends Error {
     readonly exitCode: number;

@@ -34,14 +34,24 @@ function migrations(files: Record<string, string>): void {
 /** The options applyWithAtlas takes for the database at `url`, collecting what it prints */
 function command(
 	url: string,
-	more: { approve?: (m: ParsedMigration) => ReturnType<typeof approveMigration>; lockTimeout?: string } = {},
+	more: {
+		approve?: (m: ParsedMigration) => ReturnType<typeof approveMigration>
+		devUrl?: string
+		lockTimeout?: string
+	} = {},
 ) {
 	const out: string[] = []
-	const target = { devUrl: "docker://postgres/17/dev", lockTimeout: more.lockTimeout ?? "5s", schema: "public", url }
+	/* apply and status never use the dev database, and no test here may start a container; baseline's compare gets a scratch one */
+	const devUrl = more.devUrl ?? "postgres://comb-no-dev.invalid/dev"
+	const target = { devUrl, lockTimeout: more.lockTimeout ?? "5s", schema: "public", url }
 	const approve = more.approve ?? ((m: ParsedMigration) => approveMigration(m, { target: "core", yes: false }))
 	/* no exec: applyWithAtlas runs the real atlas by default */
 	return { approve, dir, out, print: (line: string) => out.push(line), target }
 }
+
+/** A scratch dev database and a scratch target for `run` */
+const withDevAndTarget = (body: (dev: string, url: string) => Promise<void>) =>
+	withScratchDb((dev) => withScratchDb((url) => body(dev, url)))
 
 async function query<T>(url: string, sql: string): Promise<T[]> {
 	const client = new pg.Client({ connectionString: url })
@@ -187,21 +197,34 @@ describePg("migrate apply on Postgres: locks", () => {
 describePg("migrate baseline and status on Postgres", () => {
 	describeAtlas("with Atlas v1.3.0", () => {
 		it("records the history of a database set up by hand, runs none of it, and then has nothing to apply", async () => {
-			await withScratchDb(async (url) => {
+			await withDevAndTarget(async (devUrl, url) => {
 				await query(url, 'CREATE TABLE "a" ("id" integer)')
 				migrations({
 					"20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n',
 					"20260102000000_b.sql": "SELECT 1;\n",
 				})
 				await expect(applyWithAtlas(command(url))).rejects.toThrow("record them with comb migrate baseline")
-				const baseline = command(url)
+				const baseline = command(url, { devUrl })
 				expect(baselineWithAtlas(baseline)).toEqual(["20260101000000_a.sql", "20260102000000_b.sql"])
 				expect(await revisions(url)).toEqual(["20260101000000", "20260102000000"])
 				expect(await applyWithAtlas(command(url))).toEqual([])
-				expect(() => baselineWithAtlas(command(url))).toThrow("the database already records 2 migrations")
+				expect(() => baselineWithAtlas(command(url, { devUrl }))).toThrow("the database already records 2 migrations")
 				const status = command(url)
 				statusWithAtlas(status)
 				expect(status.out).toEqual(["Applied: 2 (up to 20260102000000)", "Pending: none"])
+			})
+		}, 60_000)
+
+		it("records nothing on a database whose tables are not the ones the migrations leave", async () => {
+			await withDevAndTarget(async (devUrl, url) => {
+				await query(url, 'CREATE TABLE "a" ("id" integer, "extra" text)')
+				migrations({
+					"20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\nCREATE VIEW "v" AS (select 1 as x);\n',
+				})
+				expect(() => baselineWithAtlas(command(url, { devUrl }))).toThrow(
+					/^the database's tables are not the ones the migrations leave, so baseline records nothing; the difference:\n[\s\S]*DROP COLUMN "extra"/,
+				)
+				expect(await query(url, "SELECT 1 FROM pg_namespace WHERE nspname = 'atlas_schema_revisions'")).toEqual([])
 			})
 		}, 60_000)
 

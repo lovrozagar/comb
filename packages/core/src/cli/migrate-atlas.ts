@@ -10,13 +10,13 @@ import { pgUrlProblems } from "../migrate/core/atlas-target.ts"
 import type { ResolvedPostgresProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
-import { CliError, type CliIo } from "./output.ts"
+import { checkPassed, CliError, type CliIo } from "./output.ts"
 
 type PostgresTarget = MigrateTarget & { provider: ResolvedPostgresProviderConfig }
 
 /** Run `mode` on the Postgres database `target` through Atlas */
 export async function migratePostgres(
-	mode: "apply" | "baseline" | "status",
+	mode: "apply" | "baseline" | "check" | "status",
 	target: PostgresTarget,
 	{ args, io }: { args: ParsedArgs; io: CliIo },
 ): Promise<void> {
@@ -38,6 +38,7 @@ export async function migratePostgres(
 	const yes = args.options["yes"] === true
 	const approve = (migration: Parameters<typeof approveMigration>[0]) =>
 		approveMigration(migration, { confirm: io.confirm, dialect: "postgres", target: target.label, yes })
-	const applied = await applyWithAtlas({ ...options, approve })
-	if (applied.length > 0) io.out(`\nDone: ${applied.length} applied`)
+	const applied = await applyWithAtlas({ ...options, approve, checkOnly: mode === "check" })
+	if (mode === "check") io.out(checkPassed(applied))
+	else if (applied.length > 0) io.out(`\nDone: ${applied.length} applied`)
 }

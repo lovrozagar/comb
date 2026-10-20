@@ -33,10 +33,11 @@ describe("optionsHelp", () => {
 			/^ {2}-g, --generator <name> +Run one generator only \[codegen\]$/,
 		)
 		expect(lines.find((line) => line.includes("--local"))).toMatch(
-			/^ {2}--local +.*\[migrate apply, migrate baseline\]$/,
+			/^ {2}--local +.*\[migrate apply, migrate baseline, migrate check, migrate status\]$/,
 		)
-		expect(lines.find((line) => line.includes("--env"))).toMatch(/\[migrate apply, migrate baseline, migrate status\]$/)
-		expect(lines.find((line) => line.includes("--dir"))).toMatch(/\[migrate apply, migrate baseline, migrate status\]$/)
+		const migrating = /\[migrate apply, migrate baseline, migrate check, migrate status\]$/
+		expect(lines.find((line) => line.includes("--env"))).toMatch(migrating)
+		expect(lines.find((line) => line.includes("--dir"))).toMatch(migrating)
 		expect(lines.at(-1)).toMatch(/^ {2}--help +Show this help$/)
 	})
 })
