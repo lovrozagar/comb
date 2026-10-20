@@ -167,6 +167,12 @@ describe("LruCache — keys it never held", () => {
 		expect(cache.getWithMeta("missing")).toBeUndefined()
 		expect(cache.has("missing")).toBe(false)
 	})
+
+	it("serves a fresh entry through getWithMeta from a cache with no TTL at all", () => {
+		const cache = new LruCache<string, number>({ maxSize: 2 })
+		cache.set("a", 1)
+		expect(cache.getWithMeta("a")).toEqual({ stale: false, value: 1 })
+	})
 })
 
 describe("LruCache — a per-key TTL (E-S3)", () => {

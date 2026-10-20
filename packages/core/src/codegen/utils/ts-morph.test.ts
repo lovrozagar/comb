@@ -5,6 +5,7 @@ import {
 	extractDbName,
 	getTableName,
 	getTablesImportPath,
+	tableSourceFiles,
 } from "./ts-morph.ts"
 
 describe("extractDbName", () => {
@@ -93,5 +94,18 @@ describe("project helpers", () => {
 		expect(getTableName("a", init("a"))).toBe("posts")
 		expect(getTableName("b", init("b"))).toBe("b")
 		expect(getTableName("c", init("c"))).toBe("c")
+	})
+})
+
+describe("tableSourceFiles", () => {
+	it("follows re-exports from the tables file once each, cycles included, and leaves the rest of the folder", () => {
+		const project = createProject()
+		project.createSourceFile("/p/db.x.tables.ts", 'export * from "./a"\nexport { b } from "./b"\nexport const t = 1')
+		project.createSourceFile("/p/a.ts", 'export * from "./db.x.tables"\nexport const a = 1')
+		project.createSourceFile("/p/b.ts", "export const b = 1")
+		project.createSourceFile("/p/db.y.tables.ts", "export const y = 1")
+		const names = tableSourceFiles(project, "/p/db.x.tables.ts").map((f) => f.getBaseName())
+		expect(names).toEqual(["db.x.tables.ts", "a.ts", "b.ts"])
+		expect(tableSourceFiles(project, "/p/missing.ts")).toEqual([])
 	})
 })
