@@ -60,7 +60,9 @@ jobs:
       - name: dry-run the release publish
         run: |
           packed="$(.github/scripts/pack-for-publish.sh packages/core)"
-          npm publish "$packed" --dry-run --ignore-scripts
+          # npm refuses even a dry run of a version it has, so the candidate goes as a prerelease no one installs
+          (cd "$packed" && npm pkg set version="$(npm pkg get version | tr -d '"')-dry-run")
+          npm publish "$packed" --dry-run --ignore-scripts --tag dry-run
 
   test:
     name: test

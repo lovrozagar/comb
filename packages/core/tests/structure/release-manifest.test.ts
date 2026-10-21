@@ -44,12 +44,23 @@ const flagsOf = (line: string) =>
 		.split(/\s+/)
 		.slice(3)
 		.filter((flag) => flag !== "--provenance" && flag !== "--dry-run")
+		.filter((flag, i, all) => flag !== "--tag" && all[i - 1] !== "--tag")
 
-/** A dry run of a publish line on `dir`, npm logged out on every machine as on CI */
+/**
+ * A dry run of a publish line on `dir`, npm logged out on every machine as on CI. npm refuses even
+ * a dry run of a version it has, so the candidate goes as a prerelease of it, as CI's dry run does.
+ */
 function dryRun(dir: string, line: string): { status: number | null; stderr: string; warnings: string[] } {
 	const userconfig = join(dirname(dir), "empty.npmrc")
 	writeFileSync(userconfig, "")
-	const run = spawnSync("npm", ["publish", dir, "--dry-run", ...flagsOf(line)], {
+	const manifest = manifestOf(dir)
+	if (!String(manifest["version"]).endsWith("-dry-run")) {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({ ...manifest, version: `${String(manifest["version"])}-dry-run` }),
+		)
+	}
+	const run = spawnSync("npm", ["publish", dir, "--dry-run", "--tag", "dry-run", ...flagsOf(line)], {
 		cwd: dir,
 		encoding: "utf8",
 		env: { ...process.env, NPM_CONFIG_USERCONFIG: userconfig },
@@ -88,7 +99,8 @@ describe("the published package (P2)", () => {
 		expect(CI).toMatch(/packed="\$\(\.github\/scripts\/pack-for-publish\.sh packages\/core\)"/)
 		expect(PUBLISHES).toHaveLength(3)
 		for (const line of PUBLISHES) expect(line).toMatch(/ --ignore-scripts\b/)
-		expect(CI).toMatch(/^\s*npm publish "\$packed" --dry-run --ignore-scripts$/m)
+		expect(CI).toMatch(/^\s*npm publish "\$packed" --dry-run --ignore-scripts --tag dry-run$/m)
+		expect(CI).toContain(`npm pkg set version="$(npm pkg get version | tr -d '"')-dry-run"`)
 	})
 
 	it("is published, and dry-run published, by one npm: each publishing job installs npm@latest first", () => {
