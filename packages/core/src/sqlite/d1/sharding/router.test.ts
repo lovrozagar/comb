@@ -425,8 +425,8 @@ describe("ShardRouter — revalidation from the core database", () => {
 		expect(events.at(-1)).toBe("shard-router.revalidate.error")
 	})
 
-	it("leaves the cache alone when revalidation finds the org gone", async () => {
-		const router = new ShardRouter({ lruTtlMs: 1, totalShards: 2 })
+	it("stops routing an org once revalidation finds it soft-deleted, before the hard TTL (Q-S1)", async () => {
+		const router = new ShardRouter({ lruHardTtlMs: 60_000, lruTtlMs: 1, totalShards: 2 })
 		const { calls, ctx } = mockWaitUntil()
 		const d = await seeded()
 		await router.resolve("org-d1", d, ctx)
@@ -435,8 +435,10 @@ describe("ShardRouter — revalidation from the core database", () => {
 		await d.coreDb.prepare("UPDATE shard_map SET deleted_at = 1").run()
 		await new Promise((resolve) => setTimeout(resolve, 5))
 
-		await router.resolve("org-d1", d, ctx)
-		await Promise.all(calls)
+		/* the stale entry still answers once, and its revalidation finds no live row */
+		expect(await router.resolve("org-d1", d, ctx)).toMatchObject({ shardId: 1 })
+		await Promise.all(calls.splice(0))
+		expect(await router.resolve("org-d1", d, ctx)).toBeUndefined()
 		expect(await d.kv.get("shard:org-d1")).toBeNull()
 	})
 })
@@ -468,6 +470,19 @@ describe("ShardRouter — an invalidate while a read is in flight (E-N2)", () =>
 		release(kvMapping)
 		await Promise.all(calls)
 		expect(await router.resolve("org-1", { coreDb: mockD1([]), kv: mockKV() }, ctx)).toBeUndefined()
+	})
+
+	it("drops a revalidation's core read when the org was invalidated during it, evicting nothing", async () => {
+		const router = new ShardRouter({ lruHardTtlMs: 10_000, lruTtlMs: 1_000, totalShards: 4 })
+		const { calls, ctx } = mockWaitUntil()
+		await router.resolve("org-1", { coreDb: mockD1(), kv: mockKV({ "shard:org-1": kvMapping }) }, ctx)
+		vi.advanceTimersByTime(1_500)
+		const { kv, release } = slowKv()
+		await router.resolve("org-1", { coreDb: mockD1([]), kv }, ctx)
+		release(null)
+		await router.invalidate("org-1", kv)
+		await Promise.all(calls)
+		expect(kv.delete).toHaveBeenCalledTimes(1)
 	})
 
 	it("drops a resolve's cache write when the org was invalidated during its KV read", async () => {

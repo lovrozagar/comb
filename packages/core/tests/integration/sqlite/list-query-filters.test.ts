@@ -143,6 +143,38 @@ describe("values that do not fit the declared type are refused (Q-M4)", () => {
 	})
 })
 
+describe("an empty group is the identity of its logic (Q-D1)", () => {
+	it("matches nothing for an empty or() and everything for an empty and(), alone and nested", async () => {
+		expect(await ids("or()")).toEqual([])
+		expect(await ids("and(published.eq.true,or())")).toEqual([])
+		expect(await ids("or(published.eq.false,or())")).toEqual([2, 4, 6])
+		expect(await ids("and()")).toEqual([1, 2, 3, 4, 5, 6])
+		expect(await ids("or(published.eq.false,and())")).toEqual([1, 2, 3, 4, 5, 6])
+		expect(await ids("and(published.eq.true,and())")).toEqual([1, 3, 5])
+	})
+})
+
+describe("a number or date the request cannot carry exactly is a 400 (Q-D2, Q-D3)", () => {
+	it.each([
+		"minute_read.eq.9007199254740993",
+		"minute_read.in.(1,-9007199254740992)",
+		"minute_read.gt.1e400",
+		"created_at.gt.100000000000000000000",
+		"created_at.lt.-8640000000000001",
+	])("%s is a 400", (filter) => {
+		expect(refused(filter)).toBe(true)
+	})
+
+	it.each([
+		"minute_read.eq.9007199254740991",
+		"minute_read.lt.-9007199254740991",
+		"minute_read.gt.1.5e300",
+		"created_at.lt.8640000000000000",
+	])("%s is accepted", (filter) => {
+		expect(refused(filter)).toBe(false)
+	})
+})
+
 /* post → post_tag → tag, the join table with an id of its own, so a guessed key would join the wrong column */
 const tag = sqliteTable("tag", { id: integer("id").primaryKey(), slug: text("slug") })
 const postTag = sqliteTable("post_tag", {
@@ -218,5 +250,38 @@ describe("date filters bind in the unit their column stores (B4)", () => {
 
 	it("refuses a date filter wired to a text column, which would compare text with a number", async () => {
 		await expect(eventIds("day.gt.2000")).rejects.toMatchObject({ errorKey: "filter_not_wired" })
+	})
+})
+
+/* item ← link → item: a relation back to the main table itself */
+const item = sqliteTable("item", { id: integer("id").primaryKey(), name: text("name").notNull() })
+const link = sqliteTable("link", { from_id: integer("from_id").notNull(), to_id: integer("to_id").notNull() })
+const linked = createListQuerySchema({ filter: { name: "string", "related.name": "string" }, sort: ["id"] })
+
+describe("a relation back to the main table reads the outer row's key (Q-D8)", () => {
+	it("finds the items linked to beta, and none for an item nothing links", async () => {
+		const harness = libsqlMemory()
+		open.push(harness)
+		await harness.client.executeMultiple(`CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE link (from_id INTEGER NOT NULL, to_id INTEGER NOT NULL);
+INSERT INTO item VALUES (1, 'alpha'), (2, 'beta'), (3, 'gamma');
+INSERT INTO link VALUES (1, 2), (3, 1);`)
+		const related = {
+			target: item,
+			targetKey: "id",
+			through: link,
+			throughSourceKey: "from_id",
+			throughTargetKey: "to_id",
+		}
+		const names = async (filter: string) => {
+			const parsed = linked.parse({ filter, limit: "100", order: "id.asc" })
+			const query = buildListQuery({ parsed, relations: { related }, table: item })
+			return (await applyListQuery(harness.db.select({ name: item.name }).from(item).$dynamic(), query)).map(
+				(r) => r.name,
+			)
+		}
+		expect(await names("related.name.eq.beta")).toEqual(["alpha"])
+		expect(await names("related.name.eq.alpha")).toEqual(["gamma"])
+		expect(await names("and(name.eq.alpha,related.name.eq.gamma)")).toEqual([])
 	})
 })

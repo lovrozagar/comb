@@ -121,7 +121,8 @@ describe("dialect parity", () => {
 
 	it("maps D1's storage limit only in the unit suite: Miniflare refuses max_page_count (SQLITE_AUTH)", () => {
 		const d1 = read("src/sqlite/d1/error-handler.ts")
-		expect(d1).toContain('code === "SQLITE_FULL"')
+		/* D1 reads SQLITE_FULL through the shared SQLite resource table */
+		expect(d1).toContain("resourceOutcome(code)")
 		expect(read("src/sqlite/d1/error-handler.test.ts")).toContain("SQLITE_FULL")
 	})
 })

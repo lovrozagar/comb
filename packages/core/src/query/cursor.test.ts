@@ -6,7 +6,6 @@ import {
 	decodeCursor,
 	effectiveNulls,
 	encodeCursor,
-	getPrimarySortDirection,
 	readCursor,
 	sortSignature,
 } from "./cursor.ts"
@@ -33,6 +32,9 @@ function wire(body: unknown): string {
 function payload(v: unknown[], i: unknown = 1) {
 	return { i, s: "created_at.desc.nullsfirst", v }
 }
+
+/** A cursor whose one sort value is the date `time` */
+const forged = (time: number) => btoa(JSON.stringify({ i: "id1", s: "", v: [{ $date: time }] }))
 
 describe("cursor encode/decode", () => {
 	it("roundtrips every value with its sort signature and id", () => {
@@ -68,6 +70,12 @@ describe("cursor encode/decode", () => {
 
 	it("returns null for garbage", () => {
 		expect(decodeCursor("not-valid-json!!")).toBeNull()
+	})
+
+	it("returns null for a date no JS Date holds (Q-D4)", () => {
+		expect(decodeCursor(forged(1e300))).toBeNull()
+		expect(decodeCursor(forged(-8.64e15 - 1))).toBeNull()
+		expect(decodeCursor(forged(8.64e15))?.values).toEqual([new Date(8.64e15)])
 	})
 
 	it("returns null for the v1 shape { c, i }", () => {
@@ -136,16 +144,6 @@ describe("cursorProblem / readCursor", () => {
 		const error = thrown(() => readCursor("garbage", BY_CREATED))
 		expect(error).toBeInstanceOf(CombError)
 		expect(error).toMatchObject({ errorKey: "invalid_cursor", status: 400 })
-	})
-})
-
-describe("getPrimarySortDirection", () => {
-	it("returns first sort direction", () => {
-		expect(getPrimarySortDirection([{ direction: "asc", field: "name" }])).toBe("asc")
-	})
-
-	it("defaults to desc for empty array", () => {
-		expect(getPrimarySortDirection([])).toBe("desc")
 	})
 })
 

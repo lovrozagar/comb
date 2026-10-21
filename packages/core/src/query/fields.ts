@@ -32,15 +32,16 @@ import type { FieldSelection, ParsedFields } from "./types.ts"
 const MAX_SELECT_DEPTH: number = 8
 const TOO_DEEP: string = `select nests relations deeper than ${MAX_SELECT_DEPTH} levels`
 
-/** The parsed selection; null when empty or malformed; "too_deep" past MAX_SELECT_DEPTH */
-function readSelect(selectStr: string | undefined): ParsedFields | null | "too_deep" {
+/** The parsed selection; null when empty; "malformed" when it does not parse; "too_deep" past MAX_SELECT_DEPTH */
+function readSelect(selectStr: string | undefined): ParsedFields | null | "malformed" | "too_deep" {
 	if (!selectStr || selectStr.trim() === "") {
 		return null
 	}
 
 	const text: Text = { closes: matchParens(selectStr), str: selectStr }
 	const root = parseSelectList(text, { end: selectStr.length, start: 0 }, 0)
-	if (root === null || root === "too_deep") return root
+	if (root === null) return "malformed"
+	if (root === "too_deep") return root
 
 	/* Return null only when input was purely separators (no name tokens attempted).
 	 * "author()" has a name token but skips the empty relation — root is empty but
@@ -54,11 +55,16 @@ function readSelect(selectStr: string | undefined): ParsedFields | null | "too_d
 	return { root }
 }
 
-/** The parsed selection, or null when empty or malformed; nesting past MAX_SELECT_DEPTH is a 400 */
+/**
+ * The parsed selection, or null when empty. A select that does not parse, or nests past
+ * MAX_SELECT_DEPTH, is a 400: null means "no selection", which projects every column, so a
+ * malformed one must never read as it.
+ */
 function parseSelect(selectStr: string | undefined): ParsedFields | null {
 	const read = readSelect(selectStr)
-	if (read !== "too_deep") return read
-	throw new CombError({ cause: TOO_DEEP, errorKey: combErrorKeys.INVALID_SELECT, status: "bad_request" })
+	if (read !== "too_deep" && read !== "malformed") return read
+	const cause = read === "too_deep" ? TOO_DEEP : "select is malformed"
+	throw new CombError({ cause, errorKey: combErrorKeys.INVALID_SELECT, status: "bad_request" })
 }
 
 const SEPARATORS = /[ ,\t)]/
@@ -155,77 +161,6 @@ function mergeRelation(relations: Record<string, FieldSelection | null>, name: s
 	}
 }
 
-function hasRelation(fields: ParsedFields | null, name: string): boolean {
-	if (!fields) return false
-	return Object.hasOwn(fields.root.relations, name)
-}
-
-function buildColumns<T extends Record<string, true>>(
-	requestedScalars: string[],
-	availableColumns: T,
-): Partial<T> | undefined {
-	if (requestedScalars.length === 0) {
-		return undefined
-	}
-
-	const columns: Partial<T> = {}
-	for (const scalar of requestedScalars) {
-		if (Object.hasOwn(availableColumns, scalar)) {
-			columns[scalar as keyof T] = true as T[keyof T]
-		}
-	}
-
-	return Object.keys(columns).length > 0 ? columns : undefined
-}
-
-function getRelationSelection(fields: ParsedFields | null, relationName: string): FieldSelection | null | undefined {
-	if (!fields) {
-		return null
-	}
-
-	if (!Object.hasOwn(fields.root.relations, relationName)) {
-		return undefined
-	}
-
-	return fields.root.relations[relationName]
-}
-
-function buildRelationColumns<T extends Record<string, true>>(
-	nestedSelection: FieldSelection | null,
-	availableColumns: T,
-): Partial<T> | undefined {
-	if (nestedSelection === null) {
-		return undefined
-	}
-
-	return buildColumns(nestedSelection.scalars, availableColumns)
-}
-
-function hasScalarsRequested(fields: ParsedFields | null, availableScalars: string[]): boolean {
-	if (!fields) {
-		return true
-	}
-
-	for (const scalar of fields.root.scalars) {
-		if (availableScalars.includes(scalar)) {
-			return true
-		}
-	}
-
-	return false
-}
-
-function getEntityColumns<T extends Record<string, true>>(
-	fields: ParsedFields | null,
-	availableColumns: T,
-): Partial<T> | undefined {
-	if (!fields) {
-		return undefined
-	}
-
-	return buildColumns(fields.root.scalars, availableColumns)
-}
-
 function filterBySelect<T extends Record<string, unknown>>(data: T, fields: ParsedFields): Partial<T> {
 	return filterBySelection(data, fields.root) as Partial<T>
 }
@@ -279,16 +214,4 @@ function filterBySelection(data: Record<string, unknown>, selection: FieldSelect
 	return result
 }
 
-export {
-	buildColumns,
-	buildRelationColumns,
-	filterBySelect,
-	getEntityColumns,
-	getRelationSelection,
-	hasRelation,
-	hasScalarsRequested,
-	MAX_SELECT_DEPTH,
-	parseSelect,
-	readSelect,
-	TOO_DEEP,
-}
+export { filterBySelect, MAX_SELECT_DEPTH, parseSelect, readSelect, TOO_DEEP }

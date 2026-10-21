@@ -40,10 +40,16 @@ const matchQuery = (terms: readonly string[], joiner: "AND" | "OR") => terms.map
 
 const ident = (name: string) => sql.raw(quoteIdent(name))
 
-/** `<fts table> MATCH ?`, every term required; null when the query has no usable term */
+/**
+ * What a query with no usable term searches for: nothing when it asked for nothing (null, so the
+ * list is not searched), and no row when it asked for something only FTS syntax spells
+ */
+const termless = (query: string | null): SQL | null => (query === null || query.trim() === "" ? null : sql`0`)
+
+/** `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS syntax spells */
 function buildFtsMatch(ftsTableName: string, query: string | null): SQL | null {
 	const terms = ftsTerms(query)
-	return terms.length === 0 ? null : sql`${ident(ftsTableName)} MATCH ${matchQuery(terms, "AND")}`
+	return terms.length === 0 ? termless(query) : sql`${ident(ftsTableName)} MATCH ${matchQuery(terms, "AND")}`
 }
 
 /**
@@ -61,10 +67,13 @@ function inMatches({ ftsTable, table }: FtsSource, query: string): SQL {
 	return sql`${table}.rowid IN (SELECT rowid FROM ${fts} WHERE ${fts} MATCH ${query})`
 }
 
-/** The rows of `source.table` whose FTS entry matches every term; null when the query has no usable term */
+/**
+ * The rows of `source.table` whose FTS entry matches every term; null for an empty query, no row
+ * for one only FTS syntax spells
+ */
 function buildFtsWhere(source: FtsSource, query: string | null): SQL | null {
 	const terms = ftsTerms(query)
-	return terms.length === 0 ? null : inMatches(source, matchQuery(terms, "AND"))
+	return terms.length === 0 ? termless(query) : inMatches(source, matchQuery(terms, "AND"))
 }
 
 /** `highlight()` of one FTS column, its marker tags bound */
@@ -102,7 +111,7 @@ async function corrections(db: SpellfixDb, term: string, search: SpellfixSearch)
 
 /**
  * Like buildFtsWhere, with each term of three or more characters widened by its spellfix1
- * corrections; any variant of any term matches.
+ * corrections: every term is required, each matched by itself or any of its corrections.
  */
 async function buildFtsWhereWithSpellfix(
 	db: SpellfixDb,
@@ -110,14 +119,14 @@ async function buildFtsWhereWithSpellfix(
 	query: string | null,
 ): Promise<SQL | null> {
 	const terms = ftsTerms(query)
-	if (terms.length === 0) return null
-	const variants: string[] = []
+	if (terms.length === 0) return termless(query)
+	const groups: string[] = []
 	for (const term of terms) {
-		variants.push(term)
-		if (term.length >= 3) variants.push(...(await corrections(db, term, search)))
+		const found = term.length >= 3 ? await corrections(db, term, search) : []
+		const variants = [...new Set([term, ...found].map((variant) => variant.toLowerCase()))]
+		groups.push(variants.length === 1 ? matchQuery(variants, "OR") : `(${matchQuery(variants, "OR")})`)
 	}
-	const unique = [...new Set(variants.map((variant) => variant.toLowerCase()))]
-	return inMatches(search, matchQuery(unique, "OR"))
+	return inMatches(search, groups.join(" AND "))
 }
 
 /**

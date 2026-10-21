@@ -43,18 +43,6 @@ type DecodedCursor = {
 /** What a sort key can hold and SQLite can compare */
 type CursorValue = boolean | Date | number | string | null
 
-type PaginationQueryInput = {
-	cursor?: string
-	limit: number
-	page?: number
-	parsedSort: SortField[]
-}
-
-type PaginationOptions = {
-	limit: number
-	offset: number
-}
-
 type PaginationMeta = {
 	/** Rows the filter matches across all pages; null when the response cannot know */
 	count: number | null
@@ -91,7 +79,9 @@ function decodeValue(value: unknown): CursorValue | undefined {
 	if (value === null || typeof value === "boolean" || isId(value)) return value
 	if (typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1) return undefined
 	const time = (value as Record<string, unknown>)[DATE_TAG]
-	return typeof time === "number" && Number.isFinite(time) ? new Date(time) : undefined
+	/* a forged time a Date cannot hold reads as Invalid Date, which no driver binds */
+	const date = typeof time === "number" ? new Date(time) : undefined
+	return date !== undefined && !Number.isNaN(date.getTime()) ? date : undefined
 }
 
 function toBase64Url(text: string): string {
@@ -164,11 +154,6 @@ function readCursor(cursor: string, parsedSort: readonly SortField[]): DecodedCu
 	return decoded as DecodedCursor
 }
 
-/** Get primary sort direction from parsed sort array, defaults to "desc" */
-function getPrimarySortDirection(parsedSort: readonly SortField[]): SortDirection {
-	return parsedSort[0]?.direction ?? "desc"
-}
-
 export {
 	createCursor,
 	CURSOR_TIEBREAK_COLUMN,
@@ -176,7 +161,6 @@ export {
 	decodeCursor,
 	effectiveNulls,
 	encodeCursor,
-	getPrimarySortDirection,
 	readCursor,
 	sortSignature,
 	type CursorId,
@@ -184,6 +168,4 @@ export {
 	type CursorValue,
 	type DecodedCursor,
 	type PaginationMeta,
-	type PaginationOptions,
-	type PaginationQueryInput,
 }

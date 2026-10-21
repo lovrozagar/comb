@@ -71,7 +71,8 @@ export function readPgError(error: unknown): PgErrorRead | null {
 			column: text(f.column) ?? text(f.column_name),
 			constraint: text(f.constraint) ?? text(f.constraint_name),
 			keyColumns: keyColumns(text(f.detail)),
-			referenced: / is still referenced from table /.test(text(f.detail) ?? ""),
+			/* anchored on the tail Postgres writes after the key values, which a value can spell */
+			referenced: /\) is still referenced from table "(?:[^"]|"")+"\.$/.test(text(f.detail) ?? ""),
 			table: text(f.table) ?? text(f.table_name),
 		}
 	}
@@ -227,15 +228,36 @@ const RESOURCE: Record<string, Fallback> = {
 	"25P03": UNAVAILABLE,
 }
 
+/*
+ * a value the column cannot hold: a number out of its range, text that is no number, a date that
+ * does not parse or is out of range; what a request can send, so a 400. The rest of class 22
+ * (a division by zero, say) comes from the server's own SQL and stays the caller's.
+ */
+// lookup-table: the four SQLSTATEs above, read only
+const INVALID_VALUE = /* @__PURE__ */ new Set(["22003", "22P02", "22007", "22008"])
+
+/** A value the column cannot hold, named by its column when the server says which; never echoed */
+const invalidValue = ({ column, table }: PgErrorRead, source: unknown) =>
+	new CombError({
+		cause: column === undefined ? "Invalid value" : `Invalid value for ${column}`,
+		column,
+		errorKey: combErrorKeys.INVALID_VALUE,
+		source,
+		status: "bad_request",
+		table,
+	})
+
 /**
- * Handle PostgreSQL errors: constraint violations through the app's maps, resource and
- * availability errors to their generic keys. Anything else is left for the caller.
+ * Handle PostgreSQL errors: constraint violations through the app's maps, a value the column
+ * cannot hold to a 400, resource and availability errors to their generic keys. Anything else
+ * is left for the caller.
  */
 function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
 	const read = readPgError(error)
 	if (read === null) return
 	const handler = own(CONSTRAINTS, read.code)
 	if (handler !== undefined) throw handler({ maps: constraintMaps, read, source: error })
+	if (INVALID_VALUE.has(read.code)) throw invalidValue(read, error)
 	const resource = own(RESOURCE, read.code)
 	if (resource !== undefined) throw new CombError({ ...resource, source: error })
 }

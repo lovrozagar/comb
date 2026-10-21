@@ -1,6 +1,6 @@
 import { CombError } from "../../error.ts"
 import { type ConstraintMap, combErrorKeys, type StatusKey } from "../../types.ts"
-import { constraintError } from "../constraint-handler.ts"
+import { constraintError, resourceOutcome } from "../constraint-handler.ts"
 import { readSqliteError } from "../read-error.ts"
 
 /* Retryable per developers.cloudflare.com/d1/observability/debug-d1/, plus D1's overload and
@@ -69,9 +69,9 @@ function platformOutcome(message: string): Outcome {
 	return QUERY_FAILED
 }
 
-/** The outcome for an engine error that is not a constraint violation. */
+/** The outcome for an engine error that is not a constraint violation: the shared resource table's, else a query error */
 function engineOutcome(code: string): Outcome {
-	return code === "SQLITE_FULL" ? STORAGE_FULL : QUERY_FAILED
+	return resourceOutcome(code) ?? QUERY_FAILED
 }
 
 /**

@@ -16,8 +16,9 @@ export type PgErrorRead = {
  */
 export declare function readPgError(error: unknown): PgErrorRead | null;
 /**
- * Handle PostgreSQL errors: constraint violations through the app's maps, resource and
- * availability errors to their generic keys. Anything else is left for the caller.
+ * Handle PostgreSQL errors: constraint violations through the app's maps, a value the column
+ * cannot hold to a 400, resource and availability errors to their generic keys. Anything else
+ * is left for the caller.
  */
 declare function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void;
 export { pgErrorHandler };
@@ -38,6 +39,7 @@ export declare const combErrorKeys: {
     readonly INVALID_CURSOR: "invalid_cursor";
     readonly INVALID_SELECT: "invalid_select";
     readonly INVALID_STATE_TRANSITION: "invalid_state_transition";
+    readonly INVALID_VALUE: "invalid_value";
     readonly PRIMARY_KEY_VIOLATION: "primary_key_violation";
     readonly REQUIRED_FIELD_MISSING: "required_field_missing";
     readonly SEARCH_NOT_WIRED: "search_not_wired";

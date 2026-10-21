@@ -185,9 +185,9 @@ describe("queryHelpers.paginate — items and projection", () => {
 
 	it("projects items through parsedFields after the slice", () => {
 		const items = [
-			{ _total: 10, email: "a@b.com", id: "1", name: "a" },
-			{ _total: 10, email: "c@d.com", id: "2", name: "b" },
-			{ _total: 10, email: "e@f.com", id: "3", name: "c" },
+			{ _total: 10, createdAt: "3", email: "a@b.com", id: "1", name: "a" },
+			{ _total: 10, createdAt: "2", email: "c@d.com", id: "2", name: "b" },
+			{ _total: 10, createdAt: "1", email: "e@f.com", id: "3", name: "c" },
 		]
 		const [resultItems, pagination] = queryHelpers.paginate(items, {
 			...defaultQuery,
@@ -207,6 +207,10 @@ describe("queryHelpers.paginate — items and projection", () => {
 		expect(resultItems).toEqual([{ id: "1", name: "a" }])
 	})
 })
+
+/** A one-row page of `rows` under the default query, to call later */
+const onePage = (rows: Array<Record<string, unknown>>) => () =>
+	queryHelpers.paginate(rows, { ...defaultQuery, limit: 1 })
 
 describe("queryHelpers.paginate — next cursor and hasMore", () => {
 	it("encodes nextCursor from the pre-project last row", () => {
@@ -233,14 +237,28 @@ describe("queryHelpers.paginate — next cursor and hasMore", () => {
 
 	it("detects hasMore when items exceed limit", () => {
 		const items = [
-			{ _total: 10, id: "1" },
-			{ _total: 10, id: "2" },
-			{ _total: 10, id: "3" },
+			{ _total: 10, createdAt: "3", id: "1" },
+			{ _total: 10, createdAt: "2", id: "2" },
+			{ _total: 10, createdAt: "1", id: "3" },
 		]
 		const [resultItems, pagination] = queryHelpers.paginate(items, { ...defaultQuery, limit: 2 })
 
 		expect(pagination.hasMore).toBe(true)
 		expect(resultItems).toHaveLength(2)
+	})
+
+	it("refuses to mint a cursor from rows without a sort key or the id, a wiring mistake (Q-D7)", () => {
+		expect(onePage([{ id: "1" }, { id: "2" }])).toThrow(
+			expect.objectContaining({
+				cause: "paginate mints the next cursor from each row's createdAt; select them",
+				errorKey: "sort_not_wired",
+				status: 500,
+			}),
+		)
+		expect(onePage([{ createdAt: "2" }, { createdAt: "1" }])).toThrow(
+			expect.objectContaining({ cause: "paginate mints the next cursor from each row's id; select them" }),
+		)
+		expect(onePage([{ createdAt: "1", id: "1" }])).not.toThrow()
 	})
 })
 
@@ -323,22 +341,6 @@ describe("queryHelpers.paginate — nextCursor edge cases", () => {
 		expect(pagination.hasMore).toBe(true)
 		expect(pagination.page).toBe(1)
 		expect(pagination.nextCursor).toBeTruthy()
-	})
-
-	it("keeps nextCursor null when items lack id", () => {
-		const items = [
-			{ _total: 10, name: "a" },
-			{ _total: 10, name: "b" },
-			{ _total: 10, name: "c" },
-		]
-		const [, pagination] = queryHelpers.paginate(items, {
-			limit: 2,
-			validated: true as const,
-			parsedSort: [{ direction: "desc", field: "name" }],
-		})
-
-		expect(pagination.hasMore).toBe(true)
-		expect(pagination.nextCursor).toBeNull()
 	})
 
 	it("returns nextCursor null and hasMore false for empty results", () => {

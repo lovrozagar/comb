@@ -28,6 +28,7 @@ export const combErrorKeys = {
 	INVALID_CURSOR: "invalid_cursor",
 	INVALID_SELECT: "invalid_select",
 	INVALID_STATE_TRANSITION: "invalid_state_transition",
+	INVALID_VALUE: "invalid_value",
 	PRIMARY_KEY_VIOLATION: "primary_key_violation",
 	REQUIRED_FIELD_MISSING: "required_field_missing",
 	SEARCH_NOT_WIRED: "search_not_wired",

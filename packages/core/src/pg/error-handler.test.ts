@@ -197,11 +197,37 @@ describe("pgErrorHandler: which side of a foreign key failed, and long table nam
 		expect(caught?.column).toBeUndefined()
 	})
 
+	it("reads a missing parent as such when the child's key value spells the referenced phrase (Q-D6)", () => {
+		const error = nodePg({
+			code: "23503",
+			detail: 'Key (pcode)=(x is still referenced from table "ch".) is not present in table "parent".',
+			table: "ch",
+		})
+		const maps = [{ ch: { foreignKey: { pcode: { cause: "Parent code is unknown", errorKey: "ch_pcode_missing" } } } }]
+		expect(thrown(error, maps)).toMatchObject({ column: "pcode", errorKey: "ch_pcode_missing" })
+	})
+
 	it("finds the primary key of a table whose name Postgres cut, at a character boundary", () => {
 		/* 57 ASCII bytes and a 2-byte é: 59 bytes, so the cut drops the é rather than half of it */
 		const table = `${"t".repeat(57)}é`
 		const maps = [{ [table]: { primaryKey: { cause: "Exists", errorKey: "long_taken" } } }]
 		const error = nodePg({ code: "23505", constraint: `${"t".repeat(57)}_pkey`, table })
 		expect(thrown(error, maps)).toMatchObject({ errorKey: "long_taken" })
+	})
+})
+
+describe("pgErrorHandler: a value the column cannot hold (Q-D11)", () => {
+	it.each(["22003", "22P02", "22007", "22008"])("maps %s to a 400 that names the column, never the value", (code) => {
+		expect(thrown(nodePg({ code, column: "n", message: 'value "99999999999" is out of range' }))).toMatchObject({
+			cause: "Invalid value for n",
+			column: "n",
+			errorKey: "invalid_value",
+			status: 400,
+		})
+		expect(thrown(nodePg({ code }))).toMatchObject({ cause: "Invalid value", errorKey: "invalid_value" })
+	})
+
+	it("leaves division by zero, which the server's own SQL makes, alone", () => {
+		expect(thrown(nodePg({ code: "22012" }))).toBeUndefined()
 	})
 })

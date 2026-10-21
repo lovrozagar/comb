@@ -138,8 +138,21 @@ describePg("pgErrorHandler on a real server", () => {
 			expect(thrown).toMatchObject({ errorKey: "long_id_taken", table: LONG })
 		})
 
+		it.each([
+			["99999999999 into an int4", "SELECT 99999999999::int4"],
+			["a word as an integer", "SELECT 'x'::int"],
+			["a word as a date", "SELECT 'nope'::date"],
+			["a day past the month's end", "SELECT '2024-02-30'::date"],
+		])(`${driver}: maps %s to a 400 invalid_value (Q-D11)`, async (_, statement) => {
+			expect(await handled(sessions, runner, statement)).toMatchObject({ errorKey: "invalid_value", status: 400 })
+		})
+
 		it(`${driver}: leaves a non-constraint error alone`, async () => {
 			expect(await handled(sessions, runner, "SELECT reset_at FROM member")).toBe("not handled")
+		})
+
+		it(`${driver}: leaves a division by zero, the server's own SQL, alone`, async () => {
+			expect(await handled(sessions, runner, "SELECT 1 / 0")).toBe("not handled")
 		})
 	}
 })

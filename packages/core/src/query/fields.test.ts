@@ -1,15 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-	buildColumns,
-	buildRelationColumns,
-	filterBySelect,
-	getEntityColumns,
-	getRelationSelection,
-	hasRelation,
-	hasScalarsRequested,
-	MAX_SELECT_DEPTH,
-	parseSelect,
-} from "./fields.ts"
+import { filterBySelect, MAX_SELECT_DEPTH, parseSelect } from "./fields.ts"
 import type { ParsedFields } from "./types.ts"
 
 describe("parseSelect — empty input, scalars and wildcards", () => {
@@ -208,83 +198,6 @@ describe("parseSelect — negative and malformed input", () => {
 	})
 })
 
-describe("buildColumns", () => {
-	it("builds column map from requested scalars", () => {
-		const result = buildColumns(["id", "name"], { email: true, id: true, name: true })
-		expect(result).toEqual({ id: true, name: true })
-	})
-
-	it("returns undefined for empty scalars", () => {
-		expect(buildColumns([], { id: true })).toBeUndefined()
-	})
-
-	it("ignores unknown scalars", () => {
-		const result = buildColumns(["id", "unknown"], { id: true })
-		expect(result).toEqual({ id: true })
-	})
-})
-
-describe("getRelationSelection", () => {
-	it("returns null when fields is null (include all)", () => {
-		expect(getRelationSelection(null, "author")).toBeNull()
-	})
-
-	it("returns undefined when relation not requested", () => {
-		const fields = parseSelect("id,name")
-		expect(getRelationSelection(fields, "author")).toBeUndefined()
-	})
-
-	it("returns selection for requested relation", () => {
-		const fields = parseSelect("author(id,name)")
-		const selection = getRelationSelection(fields, "author")
-		expect(selection?.scalars).toEqual(["id", "name"])
-	})
-})
-
-describe("buildRelationColumns", () => {
-	it("returns undefined when selection is null (all fields)", () => {
-		expect(buildRelationColumns(null, { id: true })).toBeUndefined()
-	})
-
-	it("builds columns from nested selection", () => {
-		const fields = parseSelect("author(id,name)")
-		const selection = fields?.root.relations["author"]
-		if (!selection) throw new Error("expected an author selection")
-		const result = buildRelationColumns(selection, { email: true, id: true, name: true })
-		expect(result).toEqual({ id: true, name: true })
-	})
-})
-
-describe("hasScalarsRequested", () => {
-	it("returns true when fields is null", () => {
-		expect(hasScalarsRequested(null, ["id"])).toBe(true)
-	})
-
-	it("returns true when scalar overlap", () => {
-		const fields = parseSelect("id,name")
-		expect(hasScalarsRequested(fields, ["id", "email"])).toBe(true)
-	})
-
-	it("returns false when no overlap", () => {
-		const fields = parseSelect("author(*)")
-		expect(hasScalarsRequested(fields, ["id"])).toBe(false)
-	})
-})
-
-describe("getEntityColumns", () => {
-	it("returns undefined when fields is null", () => {
-		expect(getEntityColumns(null, { id: true })).toBeUndefined()
-	})
-
-	it("builds columns from root scalars", () => {
-		const fields = parseSelect("id,name")
-		expect(getEntityColumns(fields, { email: true, id: true, name: true })).toEqual({
-			id: true,
-			name: true,
-		})
-	})
-})
-
 describe("filterBySelect", () => {
 	it("filters data by scalar fields", () => {
 		const fields = parseSelect("id,name")
@@ -419,24 +332,6 @@ describe("filterBySelect — absent and pass-through relations", () => {
 	})
 })
 
-describe("hasRelation", () => {
-	it("returns false when fields is null", () => {
-		expect(hasRelation(null, "author")).toBe(false)
-	})
-
-	it("returns true when the relation was selected", () => {
-		expect(hasRelation(parseSelect("author(name)"), "author")).toBe(true)
-	})
-
-	it("returns false when the name is a scalar, not a relation", () => {
-		expect(hasRelation(parseSelect("id,author"), "author")).toBe(false)
-	})
-
-	it("returns false for an empty-parens relation that was skipped", () => {
-		expect(hasRelation(parseSelect("author()"), "author")).toBe(false)
-	})
-})
-
 describe("select names that are Object.prototype members (Q-M2)", () => {
 	it("parses them as own relations and scalars, never touching the prototype", () => {
 		const parsed = parseSelect("__proto__(id),constructor(id),toString(name),author(__proto__(x))")
@@ -445,8 +340,7 @@ describe("select names that are Object.prototype members (Q-M2)", () => {
 		expect(Object.hasOwn(parsed?.root.relations.author?.relations ?? {}, "__proto__")).toBe(true)
 	})
 
-	it("does not take a column or a row field from the prototype chain", () => {
-		expect(buildColumns(["toString", "id"], { id: true })).toEqual({ id: true })
+	it("does not take a row field from the prototype chain", () => {
 		expect(filterBySelect({ id: 1 }, parseSelect("id,constructor,toString") as ParsedFields)).toEqual({ id: 1 })
 	})
 })
@@ -456,15 +350,12 @@ describe("parseSelect — empty names", () => {
 		expect(parseSelect("id,,name")?.root.scalars).toEqual(["id", "name"])
 	})
 
-	it("builds no columns when none requested is available, and says no scalar is requested", () => {
-		expect(buildColumns(["ghost"], { id: true })).toBeUndefined()
-		expect(hasScalarsRequested(parseSelect("ghost"), ["id"])).toBe(false)
-	})
-
-	it("refuses an embed with no name, which used to loop forever", () => {
-		expect(parseSelect("(x)")).toBeNull()
-		expect(parseSelect("id,(x)")).toBeNull()
-		expect(parseSelect("author((x))")).toBeNull()
+	it("refuses an embed with no name, which used to loop forever, as a 400, never as no selection (Q-D10)", () => {
+		for (const select of ["(x)", "id,(x)", "author((x))", "id,(", "(", "id,(name)"]) {
+			expect(() => parseSelect(select)).toThrow(
+				expect.objectContaining({ cause: "select is malformed", errorKey: "invalid_select", status: 400 }),
+			)
+		}
 	})
 })
 

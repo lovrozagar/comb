@@ -164,6 +164,25 @@ function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: Pa
 	return filterBySelect(publicRow, parsedFields) as T
 }
 
+/**
+ * The next cursor, minted from the last row of the page. A row without a sort key or the id
+ * would mint a cursor that repeats or ends the list, so that is a wiring mistake: select them.
+ * Any id the row holds, 0 and "" included, carries the next page.
+ */
+function mintFrom(row: object, parsedSort: SortField[]): string {
+	const missing = [...parsedSort.map(({ field }) => field), CURSOR_TIEBREAK_COLUMN].filter(
+		(key) => !Object.hasOwn(row, key),
+	)
+	if (missing.length > 0) {
+		throw new CombError({
+			cause: `paginate mints the next cursor from each row's ${missing.join(", ")}; select them`,
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
+	return createCursor(row as Record<string, unknown>, parsedSort)
+}
+
 /** Create pagination result from drizzle query results with _total extra */
 function drizzlePaginationResult<T extends { id?: CursorId }>(
 	items: DrizzleListResult<T>[],
@@ -181,12 +200,8 @@ function drizzlePaginationResult<T extends { id?: CursorId }>(
 
 	/* Mint from the fat row and the same effective sort buildListQuery ordered
 	   by, so the cursor's signature matches the next request's. */
-	let nextCursor: string | null = null
 	const lastItem = sliced.at(-1)
-	/* any id the row holds, 0 and "" included, can carry the next page */
-	if (hasMore && lastItem !== undefined && Object.hasOwn(lastItem, CURSOR_TIEBREAK_COLUMN)) {
-		nextCursor = createCursor(lastItem as Record<string, unknown>, query.parsedSort)
-	}
+	const nextCursor = hasMore && lastItem !== undefined ? mintFrom(lastItem, query.parsedSort) : null
 
 	const pagination: PaginationMeta = {
 		count: countOf(items, query),

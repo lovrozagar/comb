@@ -84,8 +84,8 @@ describe("buildFtsMatch", () => {
 		expect(params).toEqual(['"hello"* AND "say""hi"*'])
 	})
 
-	it("returns null when all terms are boolean keywords", () => {
-		expect(buildFtsMatch("fts_table", "AND OR NOT")).toBeNull()
+	it("matches nothing when every term sanitizes away (Q-S3)", () => {
+		for (const q of ["AND OR NOT", "*", "::"]) expect(compile(buildFtsMatch("fts_table", q) as SQL).sql).toBe("0")
 	})
 })
 
@@ -93,6 +93,10 @@ describe("buildFtsWhere", () => {
 	it("returns null for empty query", () => {
 		expect(buildFtsWhere({ ftsTable: "fts_table", table: item }, null)).toBeNull()
 		expect(buildFtsWhere({ ftsTable: "fts_table", table: item }, "")).toBeNull()
+	})
+
+	it("matches nothing when every term sanitizes away (Q-S3)", () => {
+		expect(compile(buildFtsWhere({ ftsTable: "fts_table", table: item }, "AND OR") as SQL).sql).toBe("0")
 	})
 
 	it("selects the matching rows by the table's own rowid through the FTS table, the query bound", () => {
@@ -123,10 +127,22 @@ describe("buildFtsWhereWithSpellfix", () => {
 		).toBeNull()
 	})
 
-	it("returns null when every term sanitises away", async () => {
-		expect(
-			await buildFtsWhereWithSpellfix(spellfixDb([]), { ftsTable: "f", table: item, spellfixTable: "s" }, "AND OR"),
-		).toBeNull()
+	it("matches nothing when every term sanitizes away (Q-S3)", async () => {
+		const built = await buildFtsWhereWithSpellfix(
+			spellfixDb([]),
+			{ ftsTable: "f", table: item, spellfixTable: "s" },
+			"AND OR",
+		)
+		expect(compile(built as SQL).sql).toBe("0")
+	})
+
+	it("requires every term, each matched by itself or one of its corrections (Q-D5)", async () => {
+		const built = await buildFtsWhereWithSpellfix(
+			spellfixDb([{ word: "rad" }, { word: "RED" }]),
+			{ ftsTable: "item_fts", table: item, spellfixTable: "sp" },
+			"red shoes",
+		)
+		expect(compile(built as SQL).params).toEqual(['("red"* OR "rad"*) AND ("shoes"* OR "rad"* OR "red"*)'])
 	})
 
 	it("ORs the corrections in alongside the original term", async () => {

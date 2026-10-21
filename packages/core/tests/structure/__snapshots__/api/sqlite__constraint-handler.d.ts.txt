@@ -1,4 +1,10 @@
 // sqlite/constraint-handler.d.ts
+/**
+ * SQLite constraint violations mapped to CombErrors, one handler per extended result code.
+ * Shared by the libsql, bun:sqlite and D1 handlers: the engine is the same, only the way the
+ * driver carries the code differs, and `readSqliteError` absorbs that.
+ */
+import { type Fallback } from "../constraint-map.ts";
 import { CombError } from "../error.ts";
 import { type ConstraintMap } from "../types.ts";
 /** The CombError for an SQLite constraint violation inside `error`, or null when it is not one. */
@@ -8,12 +14,48 @@ declare function constraintError(error: unknown, maps: ConstraintMap[]): CombErr
  * `error` is the thrown error, wrapper and all, or an engine message given as text.
  */
 declare function handleConstraintViolation(error: unknown, maps: ConstraintMap[]): void;
+/** The outcome of an engine resource code, its extended form read as its primary; undefined for any other */
+declare const resourceOutcome: (code: string | undefined) => Fallback | undefined;
 /**
  * The error handler for libsql, Turso and bun:sqlite: throws a CombError for constraint
  * violations and resource errors; any other error is left for the caller.
  */
 declare function sqliteErrorHandler(error: unknown, maps: ConstraintMap[]): void;
-export { constraintError, handleConstraintViolation, sqliteErrorHandler };
+export { constraintError, handleConstraintViolation, resourceOutcome, sqliteErrorHandler };
+
+// constraint-map.d.ts
+/**
+ * Looking a constraint violation up in the app's ConstraintMaps, shared by the SQLite and the
+ * Postgres handlers: each dialect finds the table, column or constraint name its own way, and
+ * both turn what they found into the same CombError.
+ */
+import { CombError } from "./error.ts";
+import type { ConstraintMap, ConstraintMapEntry, StatusKey } from "./types.ts";
+export type TableMap = NonNullable<ConstraintMap[string]>;
+/** The generic error for a kind of violation, used when no map entry matches. */
+export type Fallback = {
+    cause: string;
+    errorKey: string;
+    status: StatusKey;
+};
+/** What a handler found: the map entry, if any, the generic error otherwise, and where. */
+export type Found = {
+    column?: string | undefined;
+    entry: ConstraintMapEntry | undefined;
+    fallback: Fallback;
+    table?: string | undefined;
+};
+/** `record[key]` when `key` is the record's own (never an inherited name such as `constructor`). */
+export declare const own: <T>(record: Record<string, T> | undefined, key: string | undefined) => T | undefined;
+/** The first entry `pick` finds for `table` across `maps`. */
+export declare function lookup(maps: ConstraintMap[], table: string | undefined, pick: (t: TableMap) => ConstraintMapEntry | undefined): ConstraintMapEntry | undefined;
+/** The CHECK entry named `name` in any table, with that table. */
+export declare function findCheck(maps: ConstraintMap[], name: string | undefined): {
+    entry: ConstraintMapEntry;
+    table: string;
+} | undefined;
+/** The CombError for what a handler found; `source` is the original error, kept for logs. */
+export declare function toCombError({ column, entry, fallback, table }: Found, source: unknown): CombError;
 
 // error.d.ts
 import type { StatusKey } from "./types.ts";
@@ -53,6 +95,7 @@ export declare const combErrorKeys: {
     readonly INVALID_CURSOR: "invalid_cursor";
     readonly INVALID_SELECT: "invalid_select";
     readonly INVALID_STATE_TRANSITION: "invalid_state_transition";
+    readonly INVALID_VALUE: "invalid_value";
     readonly PRIMARY_KEY_VIOLATION: "primary_key_violation";
     readonly REQUIRED_FIELD_MISSING: "required_field_missing";
     readonly SEARCH_NOT_WIRED: "search_not_wired";

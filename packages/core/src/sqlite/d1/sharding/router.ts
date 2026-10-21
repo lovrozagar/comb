@@ -245,7 +245,13 @@ class ShardRouter {
 				return
 			}
 			const mapping = await this.readMapping(orgId, deps)
-			if (!mapping || !current()) return
+			if (!current()) return
+			if (!mapping) {
+				/* the core database has no live row: the org is gone, so the stale entry stops routing it now */
+				this.lru.delete(orgId)
+				await deps.kv.delete(this.kvKey(orgId))
+				return
+			}
 			this.lru.set(orgId, mapping)
 			await deps.kv.put(this.kvKey(orgId), JSON.stringify(mapping), { expirationTtl: this.kvTtlSeconds })
 		} catch (e) {

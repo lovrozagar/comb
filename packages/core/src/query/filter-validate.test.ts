@@ -156,6 +156,12 @@ describe("validateFilter — values typed as their field declares (Q-M4, Q-H2)",
 			"Invalid value for 'on': is takes null, notnull, true or false, got 'maybe'",
 		])
 		expect(conditions("s.is.true")).toEqual(["Invalid value for 's': is takes null or notnull, got 'true'"])
+		expect(conditions("n.eq.9007199254740992")).toEqual([
+			"Invalid value for 'n': expects an integer within ±9007199254740991, got '9007199254740992'",
+		])
+		expect(conditions("at.gt.8640000000000001")).toEqual([
+			"Invalid value for 'at': expects epoch milliseconds within ±8640000000000000, got '8640000000000001'",
+		])
 	})
 
 	it("does not take a field from the prototype chain (Q-M2)", () => {

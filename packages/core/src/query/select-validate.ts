@@ -20,14 +20,16 @@ function checkScalars(scalars: readonly string[], allowed: ReadonlySet<string>, 
 	}
 }
 
-/** One selected relation: no relation below it, and only its declared fields when it declares any */
+/**
+ * One selected relation: no relation below it, and only its declared fields. A relation that
+ * declares none selects none, so an undeclared field the handler happens to load never shows.
+ */
 function checkRelation(selection: FieldSelection, { fieldsConfig, name }: Relation, report: Report): void {
 	/* the config declares a relation's fields, never relations below it, so none is selectable */
 	for (const nested of Object.keys(selection.relations)) report(`Unknown ${name} relation: ${nested}`)
 
 	const relationFields = fieldsConfig.relationFields ?? {}
-	if (!Object.hasOwn(relationFields, name)) return
-	const allowed = new Set(relationFields[name])
+	const allowed = new Set(Object.hasOwn(relationFields, name) ? relationFields[name] : [])
 	/* expand nested wildcard to all allowed fields */
 	if (selection.scalars.includes("*")) selection.scalars = [...allowed]
 	checkScalars(selection.scalars, allowed, (field) => report(`Unknown ${name} field: ${field}`))
@@ -47,7 +49,7 @@ function validateSelectWithConfig(
 		report(TOO_DEEP)
 		return null
 	}
-	if (!parsed) {
+	if (parsed === null || parsed === "malformed") {
 		report("Invalid select syntax")
 		return null
 	}

@@ -82,7 +82,7 @@ export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerive
  * SQLite query executor — Drizzle-native filter/sort/pagination orchestrator.
  */
 import { type SQL } from "drizzle-orm";
-import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
+import { type SQLiteColumn, type SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { ComputedFilterResolver, FilterAST, FilterCondition } from "../types.ts";
 import type { RelationConfig } from "./types.ts";
 /** One condition on one column; null when the operator or value is not one this column can take */
@@ -113,10 +113,10 @@ type FilterSQLConfig = {
     tableAlias: string;
 };
 /**
- * Build SQL fragment from filter AST group.
- * Recursively processes conditions and subgroups with AND/OR logic.
+ * A filter group as SQL, its conditions and subgroups joined by its logic; an empty group is the
+ * identity of its logic: or() matches nothing, and() everything
  */
-declare function buildFilterSQL(group: FilterGroup, config: FilterSQLConfig): SQL | null;
+declare function buildFilterSQL(group: FilterGroup, config: FilterSQLConfig): SQL;
 /** One condition as SQL on its mapped column; null when the field is unmapped or the value unusable */
 declare function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig): SQL | null;
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig };
@@ -184,7 +184,7 @@ import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
  * boolean operator. Quotes stay: the phrase builder escapes them where it quotes the term.
  */
 declare function sanitizeFtsTerm(term: string): string;
-/** `<fts table> MATCH ?`, every term required; null when the query has no usable term */
+/** `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS syntax spells */
 declare function buildFtsMatch(ftsTableName: string, query: string | null): SQL | null;
 /**
  * A table and the FTS5 table that indexes it by rowid (external content, `content_rowid` its
@@ -194,7 +194,10 @@ type FtsSource = {
     ftsTable: string;
     table: SQLiteTable;
 };
-/** The rows of `source.table` whose FTS entry matches every term; null when the query has no usable term */
+/**
+ * The rows of `source.table` whose FTS entry matches every term; null for an empty query, no row
+ * for one only FTS syntax spells
+ */
 declare function buildFtsWhere(source: FtsSource, query: string | null): SQL | null;
 /** `highlight()` of one FTS column, its marker tags bound */
 declare function buildFtsHighlight(ftsTableName: string, columnIndex: number, tags: {
@@ -216,7 +219,7 @@ type SpellfixSearch = FtsSource & {
 };
 /**
  * Like buildFtsWhere, with each term of three or more characters widened by its spellfix1
- * corrections; any variant of any term matches.
+ * corrections: every term is required, each matched by itself or any of its corrections.
  */
 declare function buildFtsWhereWithSpellfix(db: SpellfixDb, search: SpellfixSearch, query: string | null): Promise<SQL | null>;
 /**

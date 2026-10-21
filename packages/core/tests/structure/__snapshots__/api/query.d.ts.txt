@@ -5,10 +5,10 @@
  * Parsers, validators, Zod schemas, and pagination utilities.
  * For SQLite-specific SQL generation, use @lovrozagar/comb/query/sqlite.
  */
-export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, getPrimarySortDirection, readCursor, sortSignature, } from "./cursor.ts";
-export type { CursorPayload, DecodedCursor, PaginationMeta, PaginationOptions, PaginationQueryInput } from "./cursor.ts";
+export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, readCursor, sortSignature, } from "./cursor.ts";
+export type { CursorPayload, DecodedCursor, PaginationMeta } from "./cursor.ts";
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
-export { buildColumns, buildRelationColumns, filterBySelect, getEntityColumns, getRelationSelection, hasRelation, hasScalarsRequested, parseSelect, } from "./fields.ts";
+export { filterBySelect, parseSelect } from "./fields.ts";
 export { FILTER_LIMITS, FILTER_OPERATORS, type FilterLimits, type FilterValidationResult, OPERATORS_BY_TYPE, parseFilter, parseOrder, validateFilter, } from "./filter.ts";
 export { globPattern, likePattern } from "./like.ts";
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts";
@@ -51,16 +51,6 @@ type DecodedCursor = {
 };
 /** What a sort key can hold and SQLite can compare */
 type CursorValue = boolean | Date | number | string | null;
-type PaginationQueryInput = {
-    cursor?: string;
-    limit: number;
-    page?: number;
-    parsedSort: SortField[];
-};
-type PaginationOptions = {
-    limit: number;
-    offset: number;
-};
 type PaginationMeta = {
     /** Rows the filter matches across all pages; null when the response cannot know */
     count: number | null;
@@ -87,9 +77,7 @@ declare function createCursor(record: Record<string, unknown>, parsedSort: reado
 declare function cursorProblem(cursor: string, parsedSort: readonly SortField[]): string | null;
 /** Decode a cursor for this sort, or throw a 400 CombError. */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[]): DecodedCursor;
-/** Get primary sort direction from parsed sort array, defaults to "desc" */
-declare function getPrimarySortDirection(parsedSort: readonly SortField[]): SortDirection;
-export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, getPrimarySortDirection, readCursor, sortSignature, type CursorId, type CursorPayload, type CursorValue, type DecodedCursor, type PaginationMeta, type PaginationOptions, type PaginationQueryInput, };
+export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, readCursor, sortSignature, type CursorId, type CursorPayload, type CursorValue, type DecodedCursor, type PaginationMeta, };
 
 // query/drizzle.d.ts
 /**
@@ -181,22 +169,20 @@ declare const queryHelpers: {
 export { type DrizzleListOptions, queryHelpers };
 
 // query/fields.d.ts
-import type { FieldSelection, ParsedFields } from "./types.ts";
+import type { ParsedFields } from "./types.ts";
 /** Relations nested deeper than this are refused: each level is a join, and the parse recurses per level */
 declare const MAX_SELECT_DEPTH: number;
 declare const TOO_DEEP: string;
-/** The parsed selection; null when empty or malformed; "too_deep" past MAX_SELECT_DEPTH */
-declare function readSelect(selectStr: string | undefined): ParsedFields | null | "too_deep";
-/** The parsed selection, or null when empty or malformed; nesting past MAX_SELECT_DEPTH is a 400 */
+/** The parsed selection; null when empty; "malformed" when it does not parse; "too_deep" past MAX_SELECT_DEPTH */
+declare function readSelect(selectStr: string | undefined): ParsedFields | null | "malformed" | "too_deep";
+/**
+ * The parsed selection, or null when empty. A select that does not parse, or nests past
+ * MAX_SELECT_DEPTH, is a 400: null means "no selection", which projects every column, so a
+ * malformed one must never read as it.
+ */
 declare function parseSelect(selectStr: string | undefined): ParsedFields | null;
-declare function hasRelation(fields: ParsedFields | null, name: string): boolean;
-declare function buildColumns<T extends Record<string, true>>(requestedScalars: string[], availableColumns: T): Partial<T> | undefined;
-declare function getRelationSelection(fields: ParsedFields | null, relationName: string): FieldSelection | null | undefined;
-declare function buildRelationColumns<T extends Record<string, true>>(nestedSelection: FieldSelection | null, availableColumns: T): Partial<T> | undefined;
-declare function hasScalarsRequested(fields: ParsedFields | null, availableScalars: string[]): boolean;
-declare function getEntityColumns<T extends Record<string, true>>(fields: ParsedFields | null, availableColumns: T): Partial<T> | undefined;
 declare function filterBySelect<T extends Record<string, unknown>>(data: T, fields: ParsedFields): Partial<T>;
-export { buildColumns, buildRelationColumns, filterBySelect, getEntityColumns, getRelationSelection, hasRelation, hasScalarsRequested, MAX_SELECT_DEPTH, parseSelect, readSelect, TOO_DEEP, };
+export { filterBySelect, MAX_SELECT_DEPTH, parseSelect, readSelect, TOO_DEEP };
 
 // query/filter.d.ts
 /**

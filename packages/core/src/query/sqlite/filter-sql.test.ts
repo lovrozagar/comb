@@ -128,11 +128,6 @@ describe("buildFilterSQL", () => {
 		expect(buildFilterSQL(group, config)).toBeTruthy()
 	})
 
-	it("returns null for empty group", () => {
-		const group: FilterGroup = { conditions: [], logic: "and", subgroups: [] }
-		expect(buildFilterSQL(group, config)).toBeNull()
-	})
-
 	it("handles nested subgroups", () => {
 		const group: FilterGroup = {
 			conditions: [{ field: "status", operator: "eq", value: "active" }],
@@ -204,5 +199,15 @@ describe("buildConditionSQL — identifiers (plan 3.9)", () => {
 			{ columnMap: { name: 'na"me; --' }, tableAlias: "u" },
 		)
 		expect(built && compile(built).sql).toBe('"u"."na""me; --" = ?')
+	})
+})
+
+/** A group with nothing in it */
+const empty = (logic: "and" | "or"): FilterGroup => ({ conditions: [], logic, subgroups: [] })
+
+describe("buildFilterSQL on an empty group (Q-D1)", () => {
+	it("reads it as the identity of its logic: and() everything, or() nothing", () => {
+		expect(dialect.sqlToQuery(buildFilterSQL(empty("and"), config)).sql).toBe("1")
+		expect(dialect.sqlToQuery(buildFilterSQL({ ...empty("and"), subgroups: [empty("or")] }, config)).sql).toBe("(0)")
 	})
 })

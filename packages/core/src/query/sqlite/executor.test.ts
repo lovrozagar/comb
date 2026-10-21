@@ -129,8 +129,10 @@ describe("filterToSQL", () => {
 		expect(() => filterToSQL(ast([cond("nope", "eq", 1)]), config)).toThrow(CombError)
 	})
 
-	it("returns null for a group with no conditions", () => {
-		expect(filterToSQL(ast([]), config)).toBeNull()
+	it("reads a group with no conditions as the identity of its logic", () => {
+		expect(compile(filterToSQL(ast([]), config)).sql).toBe("1")
+		expect(compile(filterToSQL({ root: { conditions: [], logic: "or", subgroups: [] } }, config)).sql).toBe("0")
+		expect(filterToSQL(null, config)).toBeNull()
 	})
 
 	it("passes a single condition through without wrapping it", () => {
@@ -226,7 +228,7 @@ describe("filterToSQL — relation filters", () => {
 		const built = filterToSQL(ast([cond("tags.slug", "eq", "release")]), config)
 		const { params, sql } = compile(built)
 		expect(sql.replace(/\s+/g, " ")).toBe(
-			'EXISTS ( SELECT 1 FROM "post_tag" INNER JOIN "tag" ON "tag"."id" = "post_tag"."tag_id" WHERE "post_tag"."post_id" = "post"."id" AND "tag"."slug" = ? )',
+			'EXISTS ( SELECT 1 FROM "post_tag" AS "comb_rel_through" INNER JOIN "tag" AS "comb_rel_target" ON "comb_rel_target"."id" = "comb_rel_through"."tag_id" WHERE "comb_rel_through"."post_id" = "post"."id" AND "comb_rel_target"."slug" = ? )',
 		)
 		expect(params).toEqual(["release"])
 	})
@@ -243,7 +245,7 @@ describe("filterToSQL — relation filters: keys and refusals", () => {
 	it("joins on the main table's named key, and refuses a main table without one", () => {
 		const bySlug = { tags: { ...relations.tags, sourceKey: "status" } }
 		const { sql } = compile(filterToSQL(ast([cond("tags.slug", "eq", "x")]), { mainTable: post, relations: bySlug }))
-		expect(sql).toContain('"post_tag"."post_id" = "post"."status"')
+		expect(sql).toContain('"comb_rel_through"."post_id" = "post"."status"')
 		const keyless = sqliteTable("keyless", { a: text("a"), b: text("b") })
 		expect(() => filterToSQL(ast([cond("tags.slug", "eq", "x")]), { mainTable: keyless, relations })).toThrow(CombError)
 	})

@@ -19,24 +19,15 @@ type FilterSQLConfig = {
 }
 
 /**
- * Build SQL fragment from filter AST group.
- * Recursively processes conditions and subgroups with AND/OR logic.
+ * A filter group as SQL, its conditions and subgroups joined by its logic; an empty group is the
+ * identity of its logic: or() matches nothing, and() everything
  */
-function buildFilterSQL(group: FilterGroup, config: FilterSQLConfig): SQL | null {
-	const parts: SQL[] = []
-
-	for (const condition of group.conditions) parts.push(requireConditionSQL(condition, config))
-
-	for (const subgroup of group.subgroups) {
-		const subgroupSQL = buildFilterSQL(subgroup, config)
-		if (subgroupSQL) {
-			parts.push(sql`(${subgroupSQL})`)
-		}
-	}
-
-	if (parts.length === 0) {
-		return null
-	}
+function buildFilterSQL(group: FilterGroup, config: FilterSQLConfig): SQL {
+	const parts = [
+		...group.conditions.map((condition) => requireConditionSQL(condition, config)),
+		...group.subgroups.map((subgroup) => sql`(${buildFilterSQL(subgroup, config)})`),
+	]
+	if (parts.length === 0) return group.logic === "or" ? sql`0` : sql`1`
 
 	const joinSQL = group.logic === "or" ? sql` OR ` : sql` AND `
 	return sql.join(parts, joinSQL)

@@ -161,15 +161,18 @@ const RESOURCE: Record<string, Fallback> = {
 	},
 }
 
+/** The outcome of an engine resource code, its extended form read as its primary; undefined for any other */
+const resourceOutcome = (code: string | undefined): Fallback | undefined =>
+	own(RESOURCE, code?.replace(/^(SQLITE_[A-Z]+)_.*$/, "$1"))
+
 /**
  * The error handler for libsql, Turso and bun:sqlite: throws a CombError for constraint
  * violations and resource errors; any other error is left for the caller.
  */
 function sqliteErrorHandler(error: unknown, maps: ConstraintMap[]): void {
 	handleConstraintViolation(error, maps)
-	const read = readSqliteError(error)
-	const resource = own(RESOURCE, read?.code.replace(/^(SQLITE_[A-Z]+)_.*$/, "$1"))
+	const resource = resourceOutcome(readSqliteError(error)?.code)
 	if (resource !== undefined) throw new CombError({ ...resource, source: error })
 }
 
-export { constraintError, handleConstraintViolation, sqliteErrorHandler }
+export { constraintError, handleConstraintViolation, resourceOutcome, sqliteErrorHandler }

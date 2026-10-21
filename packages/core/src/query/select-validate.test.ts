@@ -73,8 +73,16 @@ describe("validateSelectWithConfig", () => {
 			"Unknown field: nope",
 			"Unknown author relation: books",
 			"Unknown author field: age",
+			"Unknown tags field: anything",
 			"Unknown relation: posts",
 		])
+	})
+
+	it("lets a relation that declares no fields select none: its wildcard expands to nothing (Q-S2)", () => {
+		expect(run("id,tags(password_hash)").issues).toEqual(["Unknown tags field: password_hash"])
+		const { issues, parsed } = run("id,tags(*)")
+		expect(issues).toEqual([])
+		expect(parsed?.root.relations["tags"]?.scalars).toEqual([])
 	})
 })
 

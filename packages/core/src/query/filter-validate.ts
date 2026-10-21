@@ -36,18 +36,37 @@ const boundBy = ({ operator, value }: FilterCondition) =>
 type Typed = { value: unknown } | { error: string }
 
 const NUMBER = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/
-const EPOCH_MS = /^-?\d+$/
+const INTEGER = /^-?\d+$/
+/* the widest instant a JS Date holds, in epoch milliseconds either way */
+const MAX_EPOCH_MS = 8.64e15
+
+/**
+ * A number field's value: finite (1e999 reads as Infinity, which no column holds), and an
+ * integer within ±(2^53 − 1), past which a double binds a neighbouring value
+ */
+function typedNumber(raw: string): Typed {
+	if (!NUMBER.test(raw) || !Number.isFinite(Number(raw))) return { error: `expects a number, got '${raw}'` }
+	if (INTEGER.test(raw) && !Number.isSafeInteger(Number(raw))) {
+		return { error: `expects an integer within ±${Number.MAX_SAFE_INTEGER}, got '${raw}'` }
+	}
+	return { value: Number(raw) }
+}
+
+/** A date field's value: epoch milliseconds a JS Date holds */
+function typedDate(raw: string): Typed {
+	if (!INTEGER.test(raw)) return { error: `expects epoch milliseconds, got '${raw}'` }
+	if (Math.abs(Number(raw)) > MAX_EPOCH_MS)
+		return { error: `expects epoch milliseconds within ±${MAX_EPOCH_MS}, got '${raw}'` }
+	return { value: Number(raw) }
+}
 
 /** One scalar of a `type` field, as the request wrote it */
 function typedScalar(type: FieldType, raw: string): Typed {
 	switch (type) {
 		case "number":
-			/* 1e999 matches the grammar and reads as Infinity, which no column holds */
-			return NUMBER.test(raw) && Number.isFinite(Number(raw))
-				? { value: Number(raw) }
-				: { error: `expects a number, got '${raw}'` }
+			return typedNumber(raw)
 		case "date":
-			return EPOCH_MS.test(raw) ? { value: Number(raw) } : { error: `expects epoch milliseconds, got '${raw}'` }
+			return typedDate(raw)
 		case "boolean":
 			return raw === "true" || raw === "false"
 				? { value: raw === "true" }

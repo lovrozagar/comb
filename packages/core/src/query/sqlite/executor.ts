@@ -5,6 +5,7 @@ import {
 	and,
 	eq,
 	getTableColumns,
+	getTableName,
 	gt,
 	gte,
 	inArray,
@@ -18,8 +19,9 @@ import {
 	type SQL,
 	sql,
 } from "drizzle-orm"
-import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
+import { alias, type SQLiteColumn, type SQLiteTable } from "drizzle-orm/sqlite-core"
 
+import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
 import type { ComputedFilterResolver, FilterAST, FilterCondition, FilterGroup } from "../types.ts"
@@ -27,10 +29,6 @@ import { patternToSQL } from "./pattern.ts"
 import type { RelationConfig } from "./types.ts"
 
 const COMPUTED_PREFIX = "@"
-
-/** `record[key]` when it is the record's own entry, never one inherited from Object.prototype */
-const own = <T>(record: Record<string, T> | undefined, key: string): T | undefined =>
-	record !== undefined && Object.hasOwn(record, key) ? record[key] : undefined
 
 /** `is`: null and notnull on any column, true and false on a boolean one (as validateFilter types them) */
 function isToSQL(column: SQLiteColumn, value: unknown): SQL | null {
@@ -97,6 +95,19 @@ type FilterToSQLConfig = {
 	relations?: Record<string, RelationConfig> | undefined
 }
 
+/**
+ * `table` under `name`: its columns qualified by the alias, and the `<table> AS <name>` the
+ * EXISTS reads it through, so no table of the subquery shadows the outer row
+ */
+function aliasedColumns(table: SQLiteTable, name: string): { columns: Record<string, SQLiteColumn>; from: SQL } {
+	const aliased = alias(table, name) as unknown as Record<string, SQLiteColumn>
+	const columns = Object.fromEntries(Object.keys(getTableColumns(table)).map((key) => [key, aliased[key]]))
+	return {
+		columns: columns as Record<string, SQLiteColumn>,
+		from: sql`${sql.identifier(getTableName(table))} AS ${sql.identifier(name)}`,
+	}
+}
+
 function relationFilterToSQL(
 	condition: FilterCondition,
 	relationConfig: RelationConfig,
@@ -104,12 +115,15 @@ function relationFilterToSQL(
 ): SQL | null {
 	const { field, operator, value } = condition
 	const targetFieldName = field.slice(field.lastIndexOf(".") + 1)
-	const targetColumns = getTableColumns(relationConfig.target)
+	/* aliased, as a relation back to the main table would otherwise read its own key for the outer row's */
+	const target = aliasedColumns(relationConfig.target, "comb_rel_target")
+	const through = aliasedColumns(relationConfig.through, "comb_rel_through")
+	const targetColumns = target.columns
 	const targetColumn = own(targetColumns, targetFieldName)
 	if (!targetColumn) return null
 
 	const mainColumns = getTableColumns(mainTable)
-	const throughColumns = getTableColumns(relationConfig.through)
+	const throughColumns = through.columns
 	/* the main table's key: the one named, else its single primary key */
 	const primary = Object.keys(mainColumns).filter((key) => (mainColumns[key] as SQLiteColumn).primary)
 	const sourceKey = relationConfig.sourceKey ?? (primary.length === 1 ? primary[0] : undefined)
@@ -123,8 +137,8 @@ function relationFilterToSQL(
 	if (!targetCondition) return null
 
 	return sql`EXISTS (
-		SELECT 1 FROM ${relationConfig.through}
-		INNER JOIN ${relationConfig.target} ON ${targetKeyColumn} = ${throughTargetColumn}
+		SELECT 1 FROM ${through.from}
+		INNER JOIN ${target.from} ON ${targetKeyColumn} = ${throughTargetColumn}
 		WHERE ${throughSourceColumn} = ${sourceColumn}
 		AND ${targetCondition}
 	)`
@@ -156,12 +170,14 @@ function resolveCondition(condition: FilterCondition, config: FilterToSQLConfig)
 	})
 }
 
-function groupToSQL(group: FilterGroup, config: FilterToSQLConfig): SQL | null {
+/** A group as SQL; an empty one is the identity of its logic: or() matches nothing, and() everything */
+function groupToSQL(group: FilterGroup, config: FilterToSQLConfig): SQL {
 	const conditions = [
 		...group.conditions.map((condition) => resolveCondition(condition, config)),
-		...group.subgroups.map((subgroup) => groupToSQL(subgroup, config)).filter((part): part is SQL => part !== null),
+		...group.subgroups.map((subgroup) => groupToSQL(subgroup, config)),
 	]
-	if (conditions.length <= 1) return conditions[0] ?? null
+	if (conditions.length === 0) return group.logic === "or" ? sql`0` : sql`1`
+	if (conditions.length === 1) return conditions[0] as SQL
 	/* and() and or() return undefined only for an empty list, and this one holds two or more */
 	return (group.logic === "and" ? and(...conditions) : or(...conditions)) as SQL
 }

@@ -107,3 +107,13 @@ describe("d1ErrorHandler on a wrapper whose message reads like D1", () => {
 		)
 	})
 })
+
+describe("d1ErrorHandler on the engine's resource codes (Q-D9)", () => {
+	it.each([
+		["database is locked: SQLITE_BUSY", "database_unavailable"],
+		["database table is locked: SQLITE_LOCKED", "database_unavailable"],
+		["attempt to write a readonly database: SQLITE_READONLY", "database_readonly"],
+	])("maps %j to 503 %s, as the shared SQLite handler does", (message, errorKey) => {
+		expect(thrown(d1(message))).toMatchObject({ errorKey, status: 503 })
+	})
+})

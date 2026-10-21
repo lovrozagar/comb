@@ -13,26 +13,16 @@ export {
 	decodeCursor,
 	effectiveNulls,
 	encodeCursor,
-	getPrimarySortDirection,
 	readCursor,
 	sortSignature,
 } from "./cursor.ts"
-export type { CursorPayload, DecodedCursor, PaginationMeta, PaginationOptions, PaginationQueryInput } from "./cursor.ts"
+export type { CursorPayload, DecodedCursor, PaginationMeta } from "./cursor.ts"
 
 /* Drizzle relational helpers */
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts"
 
 /* Sparse fieldset parser (PostgREST select) */
-export {
-	buildColumns,
-	buildRelationColumns,
-	filterBySelect,
-	getEntityColumns,
-	getRelationSelection,
-	hasRelation,
-	hasScalarsRequested,
-	parseSelect,
-} from "./fields.ts"
+export { filterBySelect, parseSelect } from "./fields.ts"
 
 /* Filter parser + validator + order parser */
 /* The grammar itself — so neither honey nor oat has to guess how a probe value

@@ -1,5 +1,6 @@
 import { and, getTableColumns, sql, type SQL, type SQLWrapper } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
+import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
 import { CURSOR_TIEBREAK_COLUMN, readCursor } from "../cursor.ts"
@@ -150,10 +151,6 @@ function finish({ keyset, parsed, sort, tiebreak, where }: Finish): ListQueryRes
 		where: combineWhere(...where),
 	}
 }
-
-/** `record[key]` when it is the record's own entry, never one inherited from Object.prototype */
-const own = <T>(record: Record<string, T> | undefined, key: string): T | undefined =>
-	record !== undefined && Object.hasOwn(record, key) ? record[key] : undefined
 
 /** A sort the schema accepted but this table cannot run is a wiring mistake, not a reason to reorder */
 function sortNotWired(field: string, missing: string): CombError {
