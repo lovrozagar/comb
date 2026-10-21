@@ -6,7 +6,7 @@
  * generated text. See docs/meta-contract.md.
  */
 import type { CombEntityMetaInput } from "../meta.ts"
-import type { FieldMeta, TableMeta } from "./analyzer-types.ts"
+import type { FieldMeta, TableMeta, UniqueIndexMeta } from "./analyzer-types.ts"
 
 /**
  * Whether a field is absent from the generated update body.
@@ -75,9 +75,17 @@ function statesOf(table: TableMeta): CombEntityMetaInput["states"] {
  * The unique indexes a table publishes: every one but those over a private column, whose name
  * would otherwise reach the document. The stamp and the manifest both read this.
  */
+/** A column's own `.unique()` as an index: under the name it gives, else drizzle's `<table>_<column>_unique` */
+const columnUnique = (table: TableMeta, field: FieldMeta): UniqueIndexMeta | null => {
+	const unique = /\.unique\(\s*(?:(["'`])((?:(?!\1).)*)\1)?\s*\)/.exec(field.raw)
+	if (unique === null) return null
+	return { columns: [field.name], name: unique[2] ?? `${table.sqlName}_${field.sqlName}_unique` }
+}
+
 function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"] {
 	const hidden = new Set(table.fields.filter((f) => f.constraints.private).map((f) => f.name))
-	return table.uniqueIndexes.filter((index) => !index.columns.some((column) => hidden.has(column)))
+	const columns = table.fields.flatMap((field) => columnUnique(table, field) ?? [])
+	return [...table.uniqueIndexes, ...columns].filter((index) => !index.columns.some((column) => hidden.has(column)))
 }
 
 /* something other than the caller fills the key: comb (c.id's prefix), the database

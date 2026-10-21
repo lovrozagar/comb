@@ -8,7 +8,8 @@
 import path from "node:path"
 import { dbIdentifiers, propertyName, stringLiteral } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
-import { dedup, ftsReferenceSql, type FtsTableConfig } from "./fts-sql.ts"
+import { ftsColumns, ftsReferenceSql, type FtsTableConfig } from "./fts-sql.ts"
+import type { TableMeta } from "../analyzer-types.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
 type FtsGeneratorConfig = {
@@ -44,7 +45,8 @@ function generateFts(ctx: GeneratorContext, config: FtsGeneratorConfig): void {
 	tsLines.push(`const ${constName} = {`)
 
 	for (const [tableName, tableConfig] of entries) {
-		const columns = dedup(tableConfig.columns)
+		/* the SQL columns, as the FTS table has them (validated by ftsReferenceSql above) */
+		const columns = ftsColumns(tables.find((table) => table.sqlName === tableName) as TableMeta, tableConfig.columns)
 
 		tsLines.push(`\t${propertyName(tableName)}: {`)
 		tsLines.push(`\t\tcolumns: [${columns.map((c) => stringLiteral(c)).join(", ")}] as const,`)

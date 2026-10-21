@@ -84,8 +84,9 @@ describe("commentText", () => {
 })
 
 describe("sqlIdentifier", () => {
-	it("leaves a plain identifier bare and double-quotes any other name, its quotes doubled", () => {
-		expect(sqlIdentifier("user_id")).toBe("user_id")
+	it("double-quotes every name, a keyword or a plain identifier included, its quotes doubled (F10)", () => {
+		expect(sqlIdentifier("user_id")).toBe('"user_id"')
+		expect(sqlIdentifier("order")).toBe('"order"')
 		expect(sqlIdentifier('quo"ted')).toBe('"quo""ted"')
 		expect(sqlIdentifier("price$")).toBe('"price$"')
 	})

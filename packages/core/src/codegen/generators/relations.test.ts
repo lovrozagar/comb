@@ -107,3 +107,13 @@ describe("generateRelations without a relation (F10)", () => {
 		expect(content).not.toContain("(r)")
 	})
 })
+
+describe("generateRelations — a key to a table outside the file", () => {
+	it("writes the one side, and no many side for a table the file does not declare", () => {
+		const { content } = generate(`import { account } from "./elsewhere"
+export const post = createTable("post", { id: c.id(), accountId: c.ref("account_id").references(() => account.id) })`)
+		/* the many side has no table of the file to live on; the one side does */
+		expect(content).toContain("account: r.one.account(")
+		expect(content).not.toContain("r.many.post(")
+	})
+})

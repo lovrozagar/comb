@@ -138,7 +138,7 @@ function generateFtsSql(
 	for (const [tableName, config] of entries) {
 		const table = tableMap.get(tableName) as TableMeta
 		/* triggers run in SQL, so they name the SQL columns */
-		const columns = dedup(config.columns.map((col) => (fieldOf(table, col) as FieldMeta).sqlName))
+		const columns = ftsColumns(table, config.columns)
 		lines.push(...groupLines(tableName, columns, config.tokenizer ?? DEFAULT_TOKENIZER))
 	}
 
@@ -169,5 +169,9 @@ function ftsReferenceSql(
 	return [...drops, "", create, ...rebuilds, ""].join("\n")
 }
 
-export { dedup, ftsReferenceSql, generateFtsSql }
+/** The SQL columns of an FTS index configured on `table` as `columns`, each once */
+const ftsColumns = (table: TableMeta, columns: readonly string[]): string[] =>
+	dedup(columns.map((col) => (fieldOf(table, col) as FieldMeta).sqlName))
+
+export { dedup, ftsColumns, ftsReferenceSql, generateFtsSql }
 export type { FtsTableConfig }

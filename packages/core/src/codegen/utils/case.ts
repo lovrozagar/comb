@@ -58,8 +58,5 @@ export const stringLiteral = (text: string): string => JSON.stringify(text)
 /** A name as text inside a generated block comment, which a `*\/` in it would close */
 export const commentText = (text: string): string => text.replaceAll("*/", "* /")
 
-const SQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
-
-/** A name in generated SQL text: bare when it is a plain identifier, double-quoted otherwise */
-export const sqlIdentifier = (name: string): string =>
-	SQL_IDENTIFIER.test(name) ? name : `"${name.replaceAll('"', '""')}"`
+/** A name in generated SQL text, always double-quoted: a plain identifier may still be a keyword (`order`, `group`) */
+export const sqlIdentifier = (name: string): string => `"${name.replaceAll('"', '""')}"`

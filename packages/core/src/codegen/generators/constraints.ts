@@ -36,7 +36,7 @@ const conflict = (cause: string, errorKey: string): Constraint => ({ cause, erro
  */
 function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 	const unique: Record<string, Constraint> = {}
-	for (const field of table.fields.filter((f) => /\.unique\(\)/.test(f.raw))) {
+	for (const field of table.fields.filter((f) => /\.unique\(/.test(f.raw))) {
 		unique[field.sqlName] = conflict(
 			`A record with this ${field.name} value already exists`,
 			`${table.sqlName}_${field.name}_duplicate`,

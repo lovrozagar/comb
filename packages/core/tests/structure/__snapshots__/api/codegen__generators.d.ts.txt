@@ -87,7 +87,9 @@ declare function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, F
  * a changed index this way itself.
  */
 declare function ftsReferenceSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
-export { dedup, ftsReferenceSql, generateFtsSql };
+/** The SQL columns of an FTS index configured on `table` as `columns`, each once */
+declare const ftsColumns: (table: TableMeta, columns: readonly string[]) => string[];
+export { dedup, ftsColumns, ftsReferenceSql, generateFtsSql };
 export type { FtsTableConfig };
 
 // codegen/generators/manifest.d.ts

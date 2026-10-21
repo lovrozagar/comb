@@ -55,10 +55,11 @@ export const post = createTable("post", {
 	author_id: c.ref("author_id").references(() => user.id, { onDelete: "cascade" }).notNull(),
 })
 `)
-		expect(ddl).toContain("CREATE TABLE user")
-		expect(ddl).toContain("CREATE TABLE post")
-		expect(ddl).toContain("name TEXT NOT NULL")
-		expect(ddl).toContain("REFERENCES user(id) ON DELETE CASCADE")
+		/* every identifier quoted, so a keyword such as order or group stays a name (F10) */
+		expect(ddl).toContain('CREATE TABLE "user"')
+		expect(ddl).toContain('CREATE TABLE "post"')
+		expect(ddl).toContain('"name" TEXT NOT NULL')
+		expect(ddl).toContain('REFERENCES "user"("id") ON DELETE CASCADE')
 		expect(json).toMatchObject({ relationCount: 1, tableCount: 2 })
 		expect(summary).toContain("# 2 tables, 1 FKs")
 		expect(logged).toEqual(["Generated diagrams: 2 tables, 1 relations"])
@@ -76,12 +77,12 @@ export const mixed = createTable("mixed", {
 })
 `)
 		for (const def of [
-			"id TEXT PRIMARY KEY",
-			"name TEXT",
-			"count INTEGER",
-			"active INTEGER",
-			"score REAL",
-			"data BLOB",
+			'"id" TEXT PRIMARY KEY',
+			'"name" TEXT',
+			'"count" INTEGER',
+			'"active" INTEGER',
+			'"score" REAL',
+			'"data" BLOB',
 		]) {
 			expect(ddl).toContain(def)
 		}
@@ -109,7 +110,7 @@ export const post = createTable("post", { id: c.id(), author_id: c.ref("author_i
 `)
 		expect(json.tableCount).toBe(2)
 		expect(ddl).not.toContain("nothing")
-		expect(ddl).toContain("author_id TEXT REFERENCES author(id)\n")
+		expect(ddl).toContain('"author_id" TEXT REFERENCES "author"("id")\n')
 	})
 
 	it("writes into an output directory that already exists", () => {

@@ -42,9 +42,9 @@ function plainColumns(on: CallExpression, param: string): string[] | null {
 	return columns.length > 0 && columns.every((c) => c !== null) ? (columns as string[]) : null
 }
 
-/** A unique index on plain columns, and whether a `.where()` makes it partial */
+/** A unique index, or drizzle's unique() constraint, on plain columns, and whether a `.where()` makes it partial */
 function uniqueIndexOf(chain: CallExpression[], param: string): (UniqueIndexMeta & { partial: boolean }) | null {
-	const name = stringArg(headCall(chain, "uniqueIndex"))
+	const name = stringArg(headCall(chain, "uniqueIndex") ?? headCall(chain, "unique"))
 	const on = methodCall(chain, "on")
 	if (name === undefined || on === undefined) return null
 	const columns = plainColumns(on, param)

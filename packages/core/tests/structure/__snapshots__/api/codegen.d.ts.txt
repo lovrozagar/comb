@@ -237,10 +237,6 @@ import type { FieldMeta, TableMeta } from "./analyzer-types.ts";
  * mention at the time.
  */
 declare function isExcludedFromUpdate(field: FieldMeta): boolean;
-/**
- * The unique indexes a table publishes: every one but those over a private column, whose name
- * would otherwise reach the document. The stamp and the manifest both read this.
- */
 declare function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"];
 /**
  * Whether comb or the database fills `field`: an `autogenerate` column, or a key that c.id,
@@ -293,7 +289,9 @@ declare function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, F
  * a changed index this way itself.
  */
 declare function ftsReferenceSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
-export { dedup, ftsReferenceSql, generateFtsSql };
+/** The SQL columns of an FTS index configured on `table` as `columns`, each once */
+declare const ftsColumns: (table: TableMeta, columns: readonly string[]) => string[];
+export { dedup, ftsColumns, ftsReferenceSql, generateFtsSql };
 export type { FtsTableConfig };
 
 // codegen/generators/orm.d.ts

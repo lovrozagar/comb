@@ -62,6 +62,13 @@ function drizzleHelperToSqlType(helper: string): string {
 function transformTables(metas: TableMeta[]): { relations: Relation[]; tables: Table[] } {
 	const tables: Table[] = []
 	const relations: Relation[] = []
+	/* a key names its target by variable and property; SQL and the JSON name it by table and column */
+	const byVar = new Map(metas.map((meta) => [meta.varName, meta]))
+	const target = (refTable: string, refColumn: string) => {
+		const table = byVar.get(refTable)
+		const column = table?.fields.find((field) => field.name === refColumn)?.sqlName ?? refColumn
+		return { column, table: table?.sqlName ?? refTable }
+	}
 
 	for (const meta of metas) {
 		const columns: Column[] = []
@@ -75,17 +82,18 @@ function transformTables(metas: TableMeta[]): { relations: Relation[]; tables: T
 			}
 
 			if (field.foreignKey) {
+				const to = target(field.foreignKey.refTable, field.foreignKey.refColumn)
 				col.reference = {
-					column: field.foreignKey.refColumn,
+					column: to.column,
 					onDelete: field.foreignKey.onDelete,
 					onUpdate: field.foreignKey.onUpdate,
-					table: field.foreignKey.refTable,
+					table: to.table,
 				}
 				relations.push({
 					from: `${meta.sqlName}.${field.sqlName}`,
 					onDelete: field.foreignKey.onDelete,
 					onUpdate: field.foreignKey.onUpdate,
-					to: `${field.foreignKey.refTable}.${field.foreignKey.refColumn}`,
+					to: `${to.table}.${to.column}`,
 				})
 			}
 

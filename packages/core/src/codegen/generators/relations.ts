@@ -76,7 +76,15 @@ function buildGraph(tables: TableMeta[]): Graph {
 			push(graph.manys, fk.refTable, many)
 		}
 	}
-	for (const manys of graph.manys.values()) disambiguate(manys)
+	for (const [target, manys] of graph.manys) {
+		disambiguate(manys)
+		/* a many name its table already uses, for a column or a one relation, takes the suffix the one side takes (F7) */
+		const taken = new Set([
+			...(tables.find((table) => table.varName === target)?.fields.map((field) => field.name) ?? []),
+			...(graph.ones.get(target) ?? []).map((one) => one.name),
+		])
+		for (const many of manys) if (taken.has(many.name)) many.name = `${many.name}Relation`
+	}
 	return graph
 }
 

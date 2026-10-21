@@ -8,7 +8,7 @@ import { SyntaxKind, type VariableDeclaration } from "ts-morph"
 import { CURSOR_TIEBREAK_COLUMN } from "../../query/cursor.ts"
 import { parseTable } from "../analyze-table.ts"
 import type { FieldMeta, ImportsMeta, TableMeta } from "../analyzer-types.ts"
-import { snakeToPascal } from "./case.ts"
+import { camelToKebab, snakeToPascal } from "./case.ts"
 import { isTableDefinition, tableBuilders } from "./table-builders.ts"
 import { createProjectFromTablesDir, tableSourceFiles } from "./ts-morph.ts"
 
@@ -57,13 +57,29 @@ function declaredTables(tablesPath: string, report: ValidationResult): Declared[
 	return declared
 }
 
+/**
+ * A table's generated path segments, its DTO directory (`camelToKebab`) and its rqb-cols and sql-cols
+ * directories (its var name, which a case-insensitive file system folds): two tables on one segment
+ * would replace each other's files, so both are named
+ */
+function checkPaths(varName: string, paths: Map<string, string>, report: ValidationResult): void {
+	for (const segment of new Set([camelToKebab(varName).toLowerCase(), varName.toLowerCase()])) {
+		const taken = paths.get(segment)
+		if (taken !== undefined && taken !== varName)
+			report.errors.push(`Tables ${taken} and ${varName} both generate the path "${segment}"; rename one`)
+		paths.set(segment, taken ?? varName)
+	}
+}
+
 function checkNames(declared: Declared[], report: ValidationResult): void {
 	const sqlNames = new Set<string>()
 	const varNames = new Set<string>()
 	/* the generated type names (post_tag and postTag both make PostTag) and the id prefixes, by the table that took them */
 	const typeNames = new Map<string, string>()
 	const prefixes = new Map<string, string>()
+	const paths = new Map<string, string>()
 	for (const { table } of declared) {
+		checkPaths(table.varName, paths, report)
 		if (sqlNames.has(table.sqlName))
 			report.errors.push(`Duplicate SQL table name: "${table.sqlName}" (var: ${table.varName})`)
 		if (varNames.has(table.varName)) report.errors.push(`Duplicate table variable name: "${table.varName}"`)

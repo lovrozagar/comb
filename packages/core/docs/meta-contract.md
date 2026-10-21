@@ -489,7 +489,9 @@ other query check now probes only declared columns.
 `internal_note` is in neither the read DTO nor any published list. `private: true`, or a name
 that starts with `_`, removes a column of any kind from the read and read-partial DTOs, and
 `deriveEntityMeta` leaves private columns out of `generated`, `immutable`, `states`, `tenantColumn`
-and `uniqueIndexes`, so a private name never reaches the document. Private is a read-side rule:
+and `uniqueIndexes`, so a private name never reaches the document. `uniqueIndexes` holds every
+uniqueness the table declares: a `uniqueIndex()`, drizzle's `unique().on()` constraint, and a
+column's own `.unique()` (under the name it gives, else drizzle's `<table>_<column>_unique`). Private is a read-side rule:
 the create and update bodies still accept `internal_note`.
 
 ## 8.1 Two descriptors, one operation — an open consumer-side issue
