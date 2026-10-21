@@ -244,7 +244,7 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 		const dir = project()
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
-			'export default { databases: { core: { drizzleConfigPath: "drizzle.pg.ts", migrationsDir: "pg", name: "core", provider: { devUrl: "postgres://dev:pw@localhost/dev", schema: "app", type: "postgres", url: "postgres://localhost/app" } } } }\n',
+			'export default { databases: { core: { drizzleConfigPath: "drizzle.pg.ts", migrationsDir: "pg", name: "core", provider: { devUrl: "postgres://dev:Dev-Secret-0451@localhost/dev", schema: "app", type: "postgres", url: "postgres://localhost/app" } } } }\n',
 		)
 		const envs: Array<Readonly<Record<string, string | undefined>> | undefined> = []
 		const atlas = fakeAtlas((replayed) =>
@@ -262,7 +262,7 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 			join(dir, "drizzle.pg.ts"),
 		])
 		const diffAt = atlas.calls.findIndex((call) => call[2] === "diff")
-		expect(atlas.calls[diffAt]?.join(" ")).not.toContain("pw")
-		expect(envs[diffAt]?.["COMB_ATLAS_DEV_URL"]).toBe("postgres://dev:pw@localhost/dev?search_path=app")
+		expect(atlas.calls[diffAt]?.join(" ")).not.toContain("Dev-Secret-0451")
+		expect(envs[diffAt]?.["COMB_ATLAS_DEV_URL"]).toBe("postgres://dev:Dev-Secret-0451@localhost/dev?search_path=app")
 	})
 })

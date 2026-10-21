@@ -202,7 +202,8 @@ describe("generateIncrementalMigration — FTS kept out of what atlas sees (S-12
 
 /** A Postgres target whose dev database has a password to keep out of argv and errors */
 const target = {
-	devUrl: "postgres://dev:pw@localhost/dev?sslmode=disable",
+	/* a password no temporary path can hold by chance */
+	devUrl: "postgres://dev:Dev-Secret-0451@localhost/dev?sslmode=disable",
 	lockTimeout: "5s",
 	schema: "public",
 	url: "",
@@ -219,10 +220,11 @@ describe("generateIncrementalMigration — postgres", () => {
 			synced: false,
 		})
 		const diff = added.calls.findIndex((call) => call[1] === "diff")
-		expect(added.calls[diff]?.join(" ")).not.toContain("pw")
+		expect(added.calls[diff]?.join(" ")).not.toContain("Dev-Secret-0451")
+		expect(added.calls[diff]?.join(" ")).not.toContain("postgres://")
 		expect(added.calls[diff]).toContain("--config")
 		expect(added.envs[diff]?.["COMB_ATLAS_DEV_URL"]).toBe(
-			"postgres://dev:pw@localhost/dev?sslmode=disable&search_path=public",
+			"postgres://dev:Dev-Secret-0451@localhost/dev?sslmode=disable&search_path=public",
 		)
 		expect(
 			generateIncrementalMigration(options(fakeAtlas(), { dialect: "postgres", migrationName: "again", target })),
