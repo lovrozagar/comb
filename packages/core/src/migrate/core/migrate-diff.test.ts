@@ -143,6 +143,23 @@ describe("generateIncrementalMigration", () => {
 	})
 })
 
+describe("generateIncrementalMigration — the names of what atlas adds", () => {
+	it("numbers what atlas adds after the history, when atlas stamps it in the same second or behind (two diffs in one second, a clock behind a teammate's)", () => {
+		seed("CREATE TABLE a (x);")
+		writeFileSync(join(dir, "20261021073441_step.sql"), "CREATE TABLE s (x);\n")
+		writeFileSync(join(dir, "atlas.sum"), sumOf(dir))
+		const run = fakeAtlas(({ dir: replayed }) => {
+			writeFileSync(join(replayed, "20261021073441_body.sql"), "ALTER TABLE s ADD COLUMN y;\n")
+			writeFileSync(join(replayed, "20261021073400_more.sql"), "CREATE TABLE m (x);\n")
+			return ok()
+		})
+		const { files } = generateIncrementalMigration(options(run))
+		expect(files).toEqual([join(dir, "20261021073442_more.sql"), join(dir, "20261021073443_body.sql")])
+		expect(readFileSync(join(dir, "20261021073443_body.sql"), "utf8")).toBe("ALTER TABLE s ADD COLUMN y;\n")
+		expect(existsSync(join(dir, "20261021073441_body.sql"))).toBe(false)
+	})
+})
+
 describe("generateIncrementalMigration — FTS kept out of what atlas sees (S-12)", () => {
 	it("replays a history with its FTS statements stripped, and diffs a target without them", () => {
 		seed(`CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);\n${FTS}`)

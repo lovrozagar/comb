@@ -935,6 +935,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun
 - **Rebuilds are guarded.** A SQLite table rebuild that cascades to other tables keeps their rows (comb copies and restores them) and rates the file unsafe. The first 0.8 diff of a history comb 0.7 wrote from a raw drizzle-kit rc.4 export rebuilds its text-primary-key tables once, since comb now adds the `NOT NULL` the export left out.
 - **More is gated.** `PREPARE`/`EXECUTE`, `setval`, rule actions, `COPY FROM`, `REASSIGN OWNED` and writable pragmas are unsafe or cautious, `OWNER TO` is cautious, and `CREATE INDEX CONCURRENTLY` or `VACUUM` outside `-- atlas:txmode none` is refused.
 - `migrate diff --dry-run` prints the migration without writing it, and `migrate check` runs the apply checks alone.
+- A file `diff` writes always sorts after the history: one Atlas stamps in the same second as, or before, the latest file (two diffs in one second, a teammate's clock ahead) is renumbered a second past it.
 - Removed: `applyMigration`, `verifySchema`, `createBackupTables`, `cleanupBackupTables`, `generateMigrationFile` and `GenerateMigrationOptions`. `applySqliteMigrationTransforms(sql, before?, fts?)` takes the schema the earlier files leave and the FTS state.
 
 **Queries**

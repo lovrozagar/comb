@@ -14,13 +14,14 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
-import { freshVersion, hashDir, sqlFiles, verifySum } from "./atlas-dir.ts"
+import { freshVersion, hashDir, nextVersion, sqlFiles, verifySum } from "./atlas-dir.ts"
 import { applySqliteMigrationTransforms, sqliteDevUrl } from "./atlas-env.ts"
 import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { asSql, type FtsState, ftsDelta, separate } from "./fts-migration.ts"
@@ -52,6 +53,30 @@ type Atlas = { dialect: Dialect; exec: Run; target?: PgTarget | undefined }
 /** A migration to diff: its name and the schema it should reach */
 type Target = { name: string; schema: string }
 
+const VERSION = /^(\d{14})(_.*)$/
+
+/**
+ * `added`, renamed in `dir` so each version comes after the history's latest and the one before it:
+ * Atlas stamps a file with the current second, so a second diff in one second, or a history a
+ * teammate's clock stamped ahead, would otherwise sort it among or before files already there
+ */
+function afterHistory(dir: string, history: readonly string[], added: readonly string[]): string[] {
+	let last = history
+		.map((file) => VERSION.exec(file)?.[1])
+		.filter((version) => version !== undefined)
+		.sort()
+		.at(-1)
+	return added.map((file) => {
+		const [, version, rest] = VERSION.exec(file) ?? []
+		if (version === undefined) return file
+		const next = last !== undefined && version <= last ? nextVersion(last) : version
+		last = next
+		if (next === version) return file
+		renameSync(join(dir, file), join(dir, `${next}${rest}`))
+		return `${next}${rest}`
+	})
+}
+
 /** The files `atlas migrate diff` adds to `dir` for the target; none when it is in sync */
 function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[] {
 	const work = mkdtempSync(join(tmpdir(), "comb-migrate-diff-"))
@@ -70,7 +95,11 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 					})
 		/* in sync, Atlas exits 0, says so on stdout and writes no file: the empty list below */
 		if (result.code !== 0) throw new Error(`atlas migrate diff failed: ${result.stderr || result.stdout.trim()}`)
-		return readdirSync(dir).filter((file) => !before.has(file) && file !== "atlas.sum")
+		/* sorted: readdir order is the filesystem's (APFS returns no fixed order), and the first file carries the migration */
+		const added = readdirSync(dir)
+			.filter((file) => !before.has(file) && file !== "atlas.sum")
+			.sort()
+		return afterHistory(dir, [...before], added)
 	} finally {
 		rmSync(work, { force: true, recursive: true })
 	}
