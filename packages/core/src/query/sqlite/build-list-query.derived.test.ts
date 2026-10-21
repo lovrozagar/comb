@@ -65,7 +65,7 @@ describe("buildDerivedListQuery — pagination mode", () => {
 	it("refuses a cursor when a sort field has no supplied column", () => {
 		const sort: SortField[] = [{ direction: "desc", field: "unmapped" }]
 		const cursor = createCursor({ id: "d_9", unmapped: 1 }, sort)
-		expect(() => buildDerivedListQuery({ ...base, parsed: parsed({ cursor, parsedSort: sort }) })).toThrow(CombError)
+		expect(() => buildDerivedListQuery({ ...base, parsed: { cursor, limit: 20, parsedSort: sort } })).toThrow(CombError)
 	})
 
 	it("trims the search term and reports null when it is empty", () => {
@@ -187,5 +187,26 @@ describe("buildDerivedListQuery — clause combination", () => {
 			parsed: parsed(),
 		})
 		expect(result.where).toBeDefined()
+	})
+})
+
+describe("buildDerivedListQuery — a sort key declared as time (Q4)", () => {
+	const latest = compileSql("max(published_at)")
+	const sort: Array<SortField<"latest">> = [{ direction: "desc", field: "latest" }]
+	const timed = { idColumn: derived.id, sortColumns: { latest: { sql: latest, type: "date" as const } } }
+
+	it("takes the Date a row minted and binds it as epoch milliseconds", () => {
+		const cursor = createCursor({ id: "d_9", latest: new Date(1700000000000) }, sort)
+		const built = buildDerivedListQuery({ ...timed, parsed: { cursor, limit: 20, parsedSort: sort } })
+		const { params, sql } = compile(built.where as SQL)
+		expect(sql).toContain("max(published_at)")
+		expect(params).toContain(1700000000000)
+	})
+
+	it("refuses a number where the key declared a Date", () => {
+		const cursor = createCursor({ id: "d_9", latest: 1700000000000 }, sort)
+		expect(() => buildDerivedListQuery({ ...timed, parsed: { cursor, limit: 20, parsedSort: sort } })).toThrow(
+			expect.objectContaining({ errorKey: "invalid_cursor" }),
+		)
 	})
 })

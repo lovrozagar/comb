@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import { createCursor } from "./cursor.ts"
+import { createCursor, MAX_CURSOR_LENGTH } from "./cursor.ts"
 import { createListQuerySchema } from "./list-schema.ts"
 import { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
@@ -431,9 +431,9 @@ describe("filter length (Q-L6)", () => {
 describe("cursor and order length (S-L1)", () => {
 	const capped = createListQuerySchema({ sort: ["created_at", "title"] })
 
-	it("refuses a cursor over 4096 characters and an order over 200, valid as they otherwise are", () => {
+	it("refuses a cursor over MAX_CURSOR_LENGTH characters and an order over 200, valid as they otherwise are", () => {
 		const sort = [{ direction: "asc" as const, field: "title" }]
-		const long = createCursor({ id: "p1", title: "t".repeat(5000) }, sort)
+		const long = createCursor({ id: "p1", title: "t".repeat(MAX_CURSOR_LENGTH) }, sort)
 		const short = createCursor({ id: "p1", title: "t" }, sort)
 		expect(capped.safeParse({ cursor: short, order: "title.asc" }).success).toBe(true)
 		expect(capped.safeParse({ cursor: long, order: "title.asc" }).success).toBe(false)

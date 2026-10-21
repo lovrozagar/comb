@@ -52,7 +52,11 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
         parsedSort: SortField<TSortField>[];
     };
     searchWhere?: SQL | null;
-    sortColumns: Record<TSortField, SQLWrapper>;
+    /** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
+    sortColumns: Record<TSortField, SQLWrapper | {
+        sql: SQLWrapper;
+        type: "date";
+    }>;
 };
 type ListQueryResult = {
     limit: number;

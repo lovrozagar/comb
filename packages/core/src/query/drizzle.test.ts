@@ -435,3 +435,24 @@ describe("queryHelpers.listOptions — a cursor and an empty sort (B2, B3)", () 
 		expect(() => queryHelpers.listOptions(page.data as typeof parsed)).not.toThrow()
 	})
 })
+
+describe("queryHelpers.paginate and the cursor length (Q6)", () => {
+	const schema = createListQuerySchema({ sort: ["title", "id"] })
+
+	it("throws on page 1 when the next cursor would pass what the list takes, and takes any it mints", () => {
+		const query = schema.parse({ limit: "1", order: "title.asc" })
+		const long = { id: "a", title: "字".repeat(2100) }
+		expect(() => queryHelpers.paginate([long, { id: "b", title: "x" }], query)).toThrow(
+			expect.objectContaining({ errorKey: "sort_not_wired" }),
+		)
+		const [, meta] = queryHelpers.paginate(
+			[
+				{ id: "a", title: "字".repeat(1050) },
+				{ id: "b", title: "x" },
+			],
+			query,
+		)
+		expect(meta.nextCursor?.length).toBeGreaterThan(4096)
+		expect(schema.safeParse({ cursor: meta.nextCursor, limit: "1", order: "title.asc" }).success).toBe(true)
+	})
+})

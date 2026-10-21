@@ -7,7 +7,7 @@ import { CURSOR_TIEBREAK_COLUMN, readCursor } from "../cursor.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
 import { assertSchemaParsed } from "../trusted.ts"
-import { assertCursorFits } from "./cursor-fit.ts"
+import { assertCursorFits, boundForKeys, DateKey } from "./cursor-fit.ts"
 import { keysetSQL, orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
 import type { LikeSearchResolver } from "./search.ts"
 import type { RelationConfig } from "./types.ts"
@@ -50,7 +50,8 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 		parsedSort: SortField<TSortField>[]
 	}
 	searchWhere?: SQL | null
-	sortColumns: Record<TSortField, SQLWrapper>
+	/** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
+	sortColumns: Record<TSortField, SQLWrapper | { sql: SQLWrapper; type: "date" }>
 }
 
 type ListQueryResult = {
@@ -130,7 +131,11 @@ function finish({ keyset, parsed, sort, tiebreak, where }: Finish): ListQueryRes
 		}
 		const cursor = readCursor(parsed.cursor, sort)
 		assertCursorFits([...keyset.keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
-		const after = keysetSQL({ id: cursor.id, keys: keyset.keys, tiebreak, values: cursor.values })
+		const values = boundForKeys(
+			keyset.keys.map(({ column }) => column),
+			cursor.values,
+		)
+		const after = keysetSQL({ id: cursor.id, keys: keyset.keys, tiebreak, values })
 		return {
 			limit: parsed.limit + 1,
 			meta: { limit: parsed.limit, page: 1, type: "cursor" },
@@ -246,7 +251,7 @@ function buildDerivedListQuery<TSortField extends string>(
 	const keys: SortKey[] = sort.map(({ direction, field, nulls }) => {
 		const column = own(opts.sortColumns, field)
 		if (!column) throw sortNotWired(field, "column")
-		return { column, direction, nulls }
+		return { column: "type" in column ? new DateKey(column.sql) : column, direction, nulls }
 	})
 
 	const tiebreak: SortKey = { column: opts.idColumn, direction: sort[0]?.direction ?? "desc" }

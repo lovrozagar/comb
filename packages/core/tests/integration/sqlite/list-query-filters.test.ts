@@ -159,20 +159,19 @@ describe("a number or date the request cannot carry exactly is a 400 (Q-D2, Q-D3
 		"minute_read.eq.9007199254740993",
 		"minute_read.in.(1,-9007199254740992)",
 		"minute_read.gt.1e400",
+		"minute_read.gt.1.5e300",
 		"created_at.gt.100000000000000000000",
 		"created_at.lt.-8640000000000001",
 	])("%s is a 400", (filter) => {
 		expect(refused(filter)).toBe(true)
 	})
 
-	it.each([
-		"minute_read.eq.9007199254740991",
-		"minute_read.lt.-9007199254740991",
-		"minute_read.gt.1.5e300",
-		"created_at.lt.8640000000000000",
-	])("%s is accepted", (filter) => {
-		expect(refused(filter)).toBe(false)
-	})
+	it.each(["minute_read.eq.9007199254740991", "minute_read.lt.-9007199254740991", "created_at.lt.8640000000000000"])(
+		"%s is accepted",
+		(filter) => {
+			expect(refused(filter)).toBe(false)
+		},
+	)
 })
 
 /* post → post_tag → tag, the join table with an id of its own, so a guessed key would join the wrong column */

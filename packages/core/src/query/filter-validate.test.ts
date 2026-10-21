@@ -157,11 +157,24 @@ describe("validateFilter — values typed as their field declares (Q-M4, Q-H2)",
 		])
 		expect(conditions("s.is.true")).toEqual(["Invalid value for 's': is takes null or notnull, got 'true'"])
 		expect(conditions("n.eq.9007199254740992")).toEqual([
-			"Invalid value for 'n': expects an integer within ±9007199254740991, got '9007199254740992'",
+			"Invalid value for 'n': expects a number within ±9007199254740991, got '9007199254740992'",
 		])
 		expect(conditions("at.gt.8640000000000001")).toEqual([
 			"Invalid value for 'at': expects epoch milliseconds within ±8640000000000000, got '8640000000000001'",
 		])
+	})
+
+	it("reads the number a value spells, whatever its notation: one past ±(2^53 − 1) is refused (Q1)", () => {
+		for (const raw of ["9007199254740993.0", "9.007199254740993e15", "-9007199254740993.00"]) {
+			expect(conditions(`n.eq.${raw}`)).toEqual([
+				`Invalid value for 'n': expects a number within ±9007199254740991, got '${raw}'`,
+			])
+		}
+		expect(conditions("n.in.(1,9007199254740993.0)")).toEqual([
+			"Invalid value for 'n': expects a number within ±9007199254740991, got '9007199254740993.0'",
+		])
+		expect(conditions("n.eq.9007199254740991.0")).toEqual([9007199254740991])
+		expect(conditions("n.eq.1.5e3")).toEqual([1500])
 	})
 
 	it("does not take a field from the prototype chain (Q-M2)", () => {
@@ -185,6 +198,8 @@ describe("validateFilter — numbers that are not finite (Q-N1)", () => {
 	it("refuses a number too large to hold, which JavaScript reads as Infinity", () => {
 		expect(validateFilter("n.gt.1e999", { n: "number" })?.valid).toBe(false)
 		expect(validateFilter("n.gt.-1e999", { n: "number" })?.valid).toBe(false)
-		expect(validateFilter("n.gt.1e308", { n: "number" })?.valid).toBe(true)
+		/* a finite number past ±(2^53 − 1) binds a neighbour too (Q1) */
+		expect(validateFilter("n.gt.1e308", { n: "number" })?.valid).toBe(false)
+		expect(validateFilter("n.gt.1e15", { n: "number" })?.valid).toBe(true)
 	})
 })

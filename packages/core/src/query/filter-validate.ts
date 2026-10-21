@@ -41,15 +41,17 @@ const INTEGER = /^-?\d+$/
 const MAX_EPOCH_MS = 8.64e15
 
 /**
- * A number field's value: finite (1e999 reads as Infinity, which no column holds), and an
- * integer within ±(2^53 − 1), past which a double binds a neighbouring value
+ * A number field's value: finite (1e999 reads as Infinity, which no column holds), and within
+ * ±(2^53 − 1), past which a double binds a neighbouring value. The value is read, not its
+ * spelling: `9007199254740993.0` and `9.007199254740993e15` are the same unsafe integer.
  */
 function typedNumber(raw: string): Typed {
-	if (!NUMBER.test(raw) || !Number.isFinite(Number(raw))) return { error: `expects a number, got '${raw}'` }
-	if (INTEGER.test(raw) && !Number.isSafeInteger(Number(raw))) {
-		return { error: `expects an integer within ±${Number.MAX_SAFE_INTEGER}, got '${raw}'` }
+	const value = Number(raw)
+	if (!NUMBER.test(raw) || !Number.isFinite(value)) return { error: `expects a number, got '${raw}'` }
+	if (Math.abs(value) > Number.MAX_SAFE_INTEGER) {
+		return { error: `expects a number within ±${Number.MAX_SAFE_INTEGER}, got '${raw}'` }
 	}
-	return { value: Number(raw) }
+	return { value }
 }
 
 /** A date field's value: epoch milliseconds a JS Date holds */

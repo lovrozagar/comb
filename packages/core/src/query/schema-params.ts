@@ -1,5 +1,6 @@
 /** The zod pieces the list and retrieve query schemas share: request params and parsed outputs. */
 import * as z from "zod"
+import { MAX_CURSOR_LENGTH } from "./cursor.ts"
 
 import {
 	CURSOR_DESCRIPTION,
@@ -30,7 +31,7 @@ const langQueryField: z.ZodOptional<z.ZodString> = /* @__PURE__ */ z.string().mi
 
 const baseListQueryShape: { cursor: z.ZodOptional<z.ZodString>; page: z.ZodOptional<z.ZodCoercedNumber<unknown>> } = {
 	/* a cursor carries its sort values, so it is as long as they are; past this it is not one comb minted for a list */
-	cursor: /* @__PURE__ */ z.string().max(4096).optional().meta({
+	cursor: /* @__PURE__ */ z.string().max(MAX_CURSOR_LENGTH).optional().meta({
 		description: CURSOR_DESCRIPTION,
 		examples: CURSOR_EXAMPLES,
 	}),

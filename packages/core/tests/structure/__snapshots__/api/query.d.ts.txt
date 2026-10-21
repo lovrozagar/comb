@@ -33,6 +33,11 @@ import type { SortDirection, SortField, SortNulls } from "./types.ts";
  */
 declare const CURSOR_TIEBREAK_COLUMN = "id";
 /**
+ * The longest cursor a list takes, and so the longest comb mints: it fits a URL. A cursor carries
+ * its sort values, so a long text key could mint one past it, which the next page would refuse.
+ */
+declare const MAX_CURSOR_LENGTH = 8192;
+/**
  * Wire payload. `s` is the sort signature the cursor was minted under, `v` one
  * value per sort key in order, `i` the tiebreak id. A cursor is only valid for
  * the exact sort that produced it.
@@ -42,15 +47,15 @@ type CursorPayload = {
     s: string;
     v: unknown[];
 };
-/** The tiebreak id as the row held it: a number stays a number, so it compares as one */
-type CursorId = number | string;
+/** The tiebreak id as the row held it: a number stays a number, a bigint a bigint, so it compares as one */
+type CursorId = bigint | number | string;
 type DecodedCursor = {
     id: CursorId;
     sort: string;
     values: CursorValue[];
 };
-/** What a sort key can hold and SQLite can compare */
-type CursorValue = boolean | Date | number | string | null;
+/** What a sort key can hold and its database can compare */
+type CursorValue = bigint | boolean | Date | number | string | null;
 type PaginationMeta = {
     /** Rows the filter matches across all pages; null when the response cannot know */
     count: number | null;
@@ -77,7 +82,7 @@ declare function createCursor(record: Record<string, unknown>, parsedSort: reado
 declare function cursorProblem(cursor: string, parsedSort: readonly SortField[]): string | null;
 /** Decode a cursor for this sort, or throw a 400 CombError. */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[]): DecodedCursor;
-export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, readCursor, sortSignature, type CursorId, type CursorPayload, type CursorValue, type DecodedCursor, type PaginationMeta, };
+export { createCursor, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, readCursor, sortSignature, type CursorId, type CursorPayload, type CursorValue, type DecodedCursor, type PaginationMeta, };
 
 // query/drizzle.d.ts
 /**

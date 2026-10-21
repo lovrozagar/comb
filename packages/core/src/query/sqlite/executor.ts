@@ -46,6 +46,43 @@ function boundValue(column: SQLiteColumn, value: unknown): unknown {
 	return column.dataType === "object date" && typeof value === "number" ? new Date(value) : value
 }
 
+/** Whether a date column stores whole seconds: drizzle's integer `timestamp` mode, which binds `floor(ms / 1000)` */
+const inSeconds = (column: SQLiteColumn): boolean =>
+	column.dataType === "object date" && (column as { mode?: unknown }).mode === "timestamp"
+
+/** The operators a date field takes with one number, which a seconds column rounds */
+// lookup-table: the comparison operators secondsCondition rounds
+const SECONDS_OPERATORS = /* @__PURE__ */ new Set(["eq", "gt", "gte", "lt", "lte", "ne", "neq"] as const)
+type SecondsOperator = typeof SECONDS_OPERATORS extends Set<infer T> ? T : never
+const isSecondsOperator = (operator: string): operator is SecondsOperator =>
+	SECONDS_OPERATORS.has(operator as SecondsOperator)
+
+/**
+ * A seconds column's condition on epoch milliseconds, each bound rounded the way that keeps it
+ * exact: gt and lte on the second at or below, gte and lt on the second at or above; eq and ne on
+ * a value between two seconds match no row and every row that has one
+ */
+function secondsCondition(column: SQLiteColumn, operator: SecondsOperator, ms: number): SQL {
+	const below = new Date(Math.floor(ms / 1000) * 1000)
+	const above = new Date(Math.ceil(ms / 1000) * 1000)
+	const whole = ms % 1000 === 0
+	switch (operator) {
+		case "gt":
+			return gt(column, below)
+		case "lte":
+			return lte(column, below)
+		case "gte":
+			return gte(column, above)
+		case "lt":
+			return lt(column, above)
+		case "eq":
+			return whole ? eq(column, below) : sql`0`
+		case "ne":
+		case "neq":
+			return whole ? ne(column, below) : isNotNull(column)
+	}
+}
+
 /** Whether `value` is a number (or holds one) meant for a text column, which SQLite would compare as text */
 const numberOnText = (column: SQLiteColumn, value: unknown): boolean =>
 	column.dataType.startsWith("string") &&
@@ -55,8 +92,15 @@ const numberOnText = (column: SQLiteColumn, value: unknown): boolean =>
 function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL | null {
 	if (numberOnText(column, condition.value)) return null
 	const { operator } = condition
-	const value = boundValue(column, condition.value)
+	const seconds =
+		inSeconds(column) && isSecondsOperator(operator) && typeof condition.value === "number"
+			? secondsCondition(column, operator, condition.value)
+			: undefined
+	return seconds ?? operatorSQL(column, operator, boundValue(column, condition.value))
+}
 
+/** `operator` on `column` with a value already bound as the column takes it; null for an operator it does not know */
+function operatorSQL(column: SQLiteColumn, operator: string, value: unknown): SQL | null {
 	switch (operator) {
 		case "eq":
 			return eq(column, value)
