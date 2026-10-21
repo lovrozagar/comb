@@ -87,6 +87,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      # the package is published as bun packs it, every catalog: version resolved
+      - run: bun install --frozen-lockfile
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
@@ -168,8 +173,9 @@ jobs:
             exit 1
           fi
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "${HOME}/.npmrc"
+          packed="$("${GITHUB_WORKSPACE}/.github/scripts/pack-for-publish.sh" .)"
           set +e
-          npm publish --access public --provenance
+          npm publish "$packed" --access public --provenance
           pub=$?
           set -e
           if [ "$pub" -ne 0 ]; then
@@ -195,6 +201,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
@@ -214,8 +224,9 @@ jobs:
             echo "GitHub Packages already has ${name}@${tag} — skipping"
             exit 0
           fi
+          packed="$("${GITHUB_WORKSPACE}/.github/scripts/pack-for-publish.sh" .)"
           set +e
-          npm publish --access public
+          npm publish "$packed" --access public
           pub=$?
           set -e
           if [ "$pub" -eq 0 ]; then
