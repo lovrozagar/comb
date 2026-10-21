@@ -221,3 +221,26 @@ CREATE TABLE \`bare\` (\`id\` text PRIMARY KEY, \`c1\` text) WITHOUT ROWID;`)
 		expect(guardRebuilds(wideRebuild("gone", 1), before)).toBe(wideRebuild("gone", 1))
 	})
 })
+
+describe("a rebuild in a file that opts out of its transaction", () => {
+	const txmodeNone = `-- atlas:txmode none\n${REBUILD}`
+
+	it("is refused by the guard: defer_foreign_keys and the refill need the file's transaction", () => {
+		expect(() => guardRebuilds(txmodeNone, BEFORE, FTS)).toThrow(
+			"a rebuild needs the file's transaction, which -- atlas:txmode none gives up: the file rebuilds u",
+		)
+		expect(guardRebuilds(txmodeNone, undefined)).toBe(txmodeNone)
+	})
+
+	it("rates unsafe, guarded or not, on SQLite, and leaves Postgres txmode files cautious", () => {
+		const guarded = `-- atlas:txmode none\n${guardRebuilds(REBUILD, BEFORE, FTS)}`
+		expect(classify(guarded).unsafeStatements).toEqual([
+			"DROP TABLE `u` (rebuilds u: a rebuild needs the file's transaction, which -- atlas:txmode none gives up)",
+		])
+		expect(classify(txmodeNone).safety).toBe("unsafe")
+		expect(
+			classifyMigration("-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY i ON post (a);", { dialect: "postgres" })
+				.safety,
+		).toBe("cautious")
+	})
+})

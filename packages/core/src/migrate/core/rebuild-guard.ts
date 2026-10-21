@@ -29,7 +29,7 @@
 import type { ExtractedSchema } from "../types.ts"
 import type { FtsState } from "./fts-migration.ts"
 import { extractSchema } from "./schema.ts"
-import { readCopy } from "./rebuild-copy.ts"
+import { NO_TRANSACTION, readCopy, TXMODE_NONE } from "./rebuild-copy.ts"
 import { kept, quote, type Rebuild, renumberedBy, rowidCopy } from "./rebuild-rowids.ts"
 import { codeOf, lastPart, QNAME } from "./sql-code.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
@@ -188,6 +188,9 @@ function guardRebuilds(sql: string, before: ExtractedSchema | undefined, fts?: F
 	const statements = splitSqlStatements(sql)
 	const codes = statements.map((stmt) => codeOf(stmt, "sqlite"))
 	const rebuilds = before === undefined ? [] : locateRebuilds(statements, codes)
+	if (rebuilds.length > 0 && TXMODE_NONE.test(sql)) {
+		throw new Error(`${NO_TRANSACTION}: the file rebuilds ${rebuilds.map(({ table }) => table).join(", ")}`)
+	}
 	/* by statement index: what goes before a rebuild's drop, after its rename, and in place of its copy */
 	const ahead = new Map<number, string[]>()
 	const behind = new Map<number, string[]>()

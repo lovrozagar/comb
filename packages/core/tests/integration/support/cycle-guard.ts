@@ -20,7 +20,7 @@ UPDATE a SET b_id = id;
 `
 
 /* a rebuild of the parent as Atlas writes it, without the foreign-key pragmas */
-const REBUILD = `CREATE TABLE new_parent (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT '');
+export const CYCLE_REBUILD = `CREATE TABLE new_parent (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT '');
 INSERT INTO new_parent (id, name) SELECT id, name FROM parent;
 DROP TABLE parent;
 ALTER TABLE new_parent RENAME TO parent;
@@ -37,6 +37,6 @@ export async function runCycleScenario(engine: Engine): Promise<Record<string, u
 	await engine.apply(CYCLE_BASE)
 	await engine.run(SEED)
 	const before = await snapshot(engine)
-	await engine.apply(guardRebuilds(REBUILD, extractSchema(CYCLE_BASE)))
+	await engine.apply(guardRebuilds(CYCLE_REBUILD, extractSchema(CYCLE_BASE)))
 	return { after: await snapshot(engine), before, foreignKeyCheck: await engine.rows("PRAGMA foreign_key_check") }
 }

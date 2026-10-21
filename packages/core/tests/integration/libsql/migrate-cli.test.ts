@@ -11,7 +11,10 @@ import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { runCli } from "../../../src/cli/index.ts"
 import { legacyMigrationHash } from "../../../src/migrate/core/parse.ts"
+import { guardRebuilds } from "../../../src/migrate/core/rebuild-guard.ts"
+import { extractSchema } from "../../../src/migrate/core/schema.ts"
 import { describeAtlas } from "../support/atlas.ts"
+import { CYCLE_BASE, CYCLE_REBUILD } from "../support/cycle-guard.ts"
 
 const dirs: string[] = []
 afterEach(() => {
@@ -194,4 +197,28 @@ describe("migrate options", () => {
 		expect(await runCli(["migrate", "apply", "core", "-e"], bare)).toBe(1)
 		expect(bare.errors.join("\n")).toContain("-e needs a value")
 	})
+})
+
+describeAtlas("migrate apply refuses a rebuild outside the file's transaction", () => {
+	it("refuses a guarded rebuild in an atlas:txmode none file even with --yes, and keeps every row", async () => {
+		const { dir, url } = project({ "20260101000000_init.sql": CYCLE_BASE })
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
+		const client = createClient({ url: url("local.db") })
+		await client.executeMultiple(
+			"INSERT INTO parent VALUES (1, 'p'); INSERT INTO a VALUES (1, 1, NULL, 'a'); INSERT INTO b VALUES (1, 1, 'b'); UPDATE a SET b_id = 1;",
+		)
+		const guarded = guardRebuilds(CYCLE_REBUILD, extractSchema(CYCLE_BASE))
+		fs.writeFileSync(
+			path.join(dir, "atlas-migrations", "20260102000000_rebuild.sql"),
+			`-- atlas:txmode none\n${guarded}`,
+		)
+		spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
+		const run = io(dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], run)).toBe(1)
+		expect(run.errors.join("\n")).toContain("a rebuild needs the file's transaction")
+		const count = async (table: string) =>
+			Number((await client.execute(`SELECT count(*) AS n FROM ${table}`)).rows[0]?.n)
+		expect([await count("parent"), await count("a"), await count("b")]).toEqual([1, 1, 1])
+		client.close()
+	}, 60_000)
 })

@@ -8,6 +8,10 @@
 import { IDENT, lastPart, QNAME, topLevel } from "./sql-code.ts"
 import { normalizeSql, segments } from "./sql-scan.ts"
 
+/* Atlas's directive to run a file outside a transaction, where the guard's deferred keys and refill fail */
+const TXMODE_NONE: RegExp = /^\s*--\s*atlas:txmode\s+none\b/im
+const NO_TRANSACTION: string = "a rebuild needs the file's transaction, which -- atlas:txmode none gives up"
+
 /** A rebuild's copy: the table it fills, the table it reads, its target columns, and what may lose data */
 type Copy = { columns: string[]; from: string; into: string; problem: string | undefined }
 
@@ -188,4 +192,4 @@ function rebuildsOf(statements: readonly string[], codes: readonly string[]): Re
 	return rebuilds
 }
 
-export { type Copy, readCopy, type Rebuilds, rebuildsOf }
+export { type Copy, NO_TRANSACTION, readCopy, type Rebuilds, rebuildsOf, TXMODE_NONE }

@@ -17,7 +17,7 @@ import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart, writeFindings } from "./classify-write.ts"
-import { type Rebuilds, rebuildsOf } from "./rebuild-copy.ts"
+import { NO_TRANSACTION, type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
 import { noGuards, readGuards } from "./rebuild-guard.ts"
 import { codeOf, doBody, executedSql, lastPart, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
@@ -31,6 +31,8 @@ type ClassifyOptions = {
 
 /** What the statements of one file show, read once before the rules run */
 type FileContext = {
+	/** a SQLite file Atlas runs outside a transaction, as `-- atlas:txmode none` asks */
+	txmodeNone: boolean
 	/** the columns the file has added so far and nothing has written since: a backfill may fill them */
 	fresh: Fresh
 	before: ExtractedSchema | undefined
@@ -84,7 +86,6 @@ const CREATE_TABLE = /* @__PURE__ */ new RegExp(
 	"i",
 )
 const LOCKING = /^(?:REINDEX (?!.*\bCONCURRENTLY\b)|VACUUM FULL\b|CLUSTER\b)/i
-const TXMODE_NONE = /^\s*--\s*atlas:txmode\s+none\b/im
 
 /** The drops a DROP TABLE or DROP INDEX names, one per listed name */
 function dropNames(code: string): string[] {
@@ -106,6 +107,7 @@ function rebuildFinding(code: string, ctx: FileContext): Finding | undefined {
 	const rebuild = table === undefined ? undefined : ctx.rebuilds.get(lastPart(table))
 	if (table === undefined || rebuild === undefined) return undefined
 	const name = lastPart(table)
+	if (ctx.txmodeNone) return { level: "unsafe", note: `rebuilds ${name}: ${NO_TRANSACTION}` }
 	const earlier = ctx.before?.tables.get(name)
 	if (earlier === undefined) return { level: "unsafe", note: `rebuilds ${name}, whose earlier columns are unknown` }
 	const reached = ctx.unguarded.get(name)
@@ -227,6 +229,7 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		dialect,
 		functions,
 		fresh: freshStart(),
+		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
 		prepared,
 		rebuilds,
 		reindexed,
