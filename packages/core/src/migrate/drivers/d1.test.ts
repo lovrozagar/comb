@@ -19,7 +19,7 @@ function fakeRun(answer: (call: Call) => RunResult): Run & { calls: Call[] } {
 
 const json = (value: unknown): RunResult => ({ code: 0, stderr: "", stdout: JSON.stringify(value) })
 
-const CONFIG: D1ProviderConfig = { databaseId: "id", databaseName: "core", type: "d1" }
+const CONFIG: D1ProviderConfig = { databaseName: "core", type: "d1" }
 const DB: ResolvedDatabaseConfig = { migrationsDir: "m", name: "core-local", provider: CONFIG }
 
 async function connect(run: Run, config: D1ProviderConfig = CONFIG) {

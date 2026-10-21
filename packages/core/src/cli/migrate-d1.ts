@@ -20,7 +20,7 @@ import { createD1Provider, wranglerFlags } from "../migrate/drivers/d1.ts"
 import type { D1ProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
-import { checkPassed, CliError, type CliIo } from "./output.ts"
+import { checkPassed, CliError, type CliIo, type MigrateOutcome } from "./output.ts"
 
 type D1Mode = "apply" | "baseline" | "check" | "status"
 
@@ -59,14 +59,14 @@ function d1Config(request: D1Request, resolved: MigrateTarget | undefined): { co
 	const wranglerConfig = findWranglerConfig(io.cwd)
 	if (wranglerConfig === undefined) throw new CliError(`no wrangler config in ${io.cwd} binds the D1 database ${db}`)
 	const local = args.options["local"] === true
-	const config: D1ProviderConfig = { databaseId: db, databaseName: db, local, type: "d1", wranglerConfig }
+	const config: D1ProviderConfig = { databaseName: db, local, type: "d1", wranglerConfig }
 	return { config, dir: path.resolve(io.cwd, (args.options["dir"] as string | undefined) ?? "atlas-migrations") }
 }
 
 /** Run `request.mode` on the D1 database `resolved` names, or `request.db` when the project has no migrate config */
 export { wranglerReader }
 
-export async function migrateD1(request: D1Request, resolved: MigrateTarget | undefined): Promise<void> {
+export async function migrateD1(request: D1Request, resolved: MigrateTarget | undefined): Promise<MigrateOutcome> {
 	const { args, io, mode } = request
 	if (args.options["file"] !== undefined)
 		throw new CliError("--file does not apply to a D1 database: wrangler applies its migrations directory")
@@ -90,12 +90,16 @@ export async function migrateD1(request: D1Request, resolved: MigrateTarget | un
 	if (mode === "status") return statusD1(target, read, io.out)
 	if (mode === "baseline") {
 		io.out(`\nBaseline done: ${(await baselineD1(target, read, io.out)).length} marked`)
-		return
+		return { applied: [], pending: [] }
 	}
 	const yes = args.options["yes"] === true
 	const approve = (migration: Parameters<typeof approveMigration>[0]) =>
 		approveMigration(migration, { confirm: io.confirm, target: label, yes })
 	const names = await applyD1(target, { approve, checkOnly: mode === "check", print: io.out, read })
-	if (mode === "check") io.out(checkPassed(names))
-	else io.out(names.length === 0 ? "No migrations to apply" : `\nDone: ${names.length} applied`)
+	if (mode === "check") {
+		io.out(checkPassed(names))
+		return { applied: [], pending: names }
+	}
+	io.out(names.length === 0 ? "No migrations to apply" : `\nDone: ${names.length} applied`)
+	return { applied: names, pending: [] }
 }

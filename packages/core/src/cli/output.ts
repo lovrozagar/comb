@@ -16,6 +16,9 @@ export type CliIo = {
 }
 
 /** What `comb migrate check` reports once every pending migration is approved */
+/** What a migrate apply, check or status found: the files it applied, or found applied, and those pending */
+export type MigrateOutcome = { applied: string[]; pending: string[] }
+
 export const checkPassed = (names: readonly string[]): string =>
 	`\nCheck passed: ${names.length} pending${names.length > 0 ? `: ${names.join(", ")}` : ""}`
 

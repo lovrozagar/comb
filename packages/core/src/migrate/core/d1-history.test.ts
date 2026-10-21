@@ -33,7 +33,7 @@ async function target(binding: Record<string, string>) {
 	writeFileSync(join(migrations, "1_init.sql"), "CREATE TABLE post (id TEXT);")
 	writeSum(migrations)
 	const run = fakeD1({ dir: migrations })
-	const config = { databaseId: "x", databaseName: "core", local: true, type: "d1" as const }
+	const config = { databaseName: "core", local: true, type: "d1" as const }
 	const conn = await createD1Provider(config, run).connect({
 		migrationsDir: migrations,
 		name: "core",

@@ -67,6 +67,11 @@ export const OPTIONS: readonly OptionSpec[] = [
 		description: "Without a migrate config: the local D1 (wrangler --local)",
 		long: "--local",
 	},
+	{
+		commands: ["migrate apply", "migrate check", "migrate status"],
+		description: "Print one JSON object (database, applied, pending, refused) as the only stdout",
+		long: "--json",
+	},
 ]
 
 export type ParsedArgs = {

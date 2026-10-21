@@ -10,7 +10,7 @@ export type { CursorPayload, DecodedCursor, PaginationMeta } from "./cursor.ts";
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
 export { filterBySelect, parseSelect } from "./fields.ts";
 export { FILTER_LIMITS, FILTER_OPERATORS, type FilterLimits, type FilterValidationResult, OPERATORS_BY_TYPE, parseFilter, parseOrder, validateFilter, } from "./filter.ts";
-export { globPattern, likePattern } from "./like.ts";
+export { escapeLike, globPattern, likePattern } from "./like.ts";
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts";
 export { createListQuerySchema, createRetrieveQuerySchema, type FieldsConfig, LIST_QUERY_LIMITS, type ListQueryConfig, type ListQueryLimits, type ListQueryOutput, PAGINATION_DEFAULTS, paginationResponseSchema, type RetrieveQueryConfig, type RetrieveQueryOutput, } from "./schema.ts";
 export { CURSOR_DESCRIPTION, CURSOR_EXAMPLES, filterParamMeta, LANG_DESCRIPTION, LANG_EXAMPLES, LIMIT_DESCRIPTION, LIMIT_EXAMPLES, orderParamMeta, PAGE_DESCRIPTION, PAGE_EXAMPLES, searchParamMeta, SELECT_DESCRIPTION, SELECT_EXAMPLES, } from "./descriptions.ts";
@@ -230,7 +230,12 @@ declare function likePattern(value: string): string;
  * class, and `*` stays the wildcard.
  */
 declare function globPattern(value: string): string;
-export { globPattern, likePattern };
+/**
+ * `text` as a literal inside a LIKE pattern written with `ESCAPE '\\'`: the escape character and
+ * LIKE's own specials `%` and `_` each escaped, so `%${escapeLike(term)}%` finds `term` as written
+ */
+declare function escapeLike(text: string): string;
+export { escapeLike, globPattern, likePattern };
 
 // meta.d.ts
 /**

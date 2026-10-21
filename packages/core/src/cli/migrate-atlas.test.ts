@@ -129,3 +129,18 @@ describe("migrate status", () => {
 		expect(io.outputs).toEqual(["Applied: 0", "Pending: 1_init.sql"])
 	})
 })
+
+describe("migrate apply, check and status --json on Postgres (C5)", () => {
+	it("prints one JSON object as the only stdout, for each mode", async () => {
+		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
+		const run = async (mode: string) => {
+			const io = makeIo(dir, pgAtlas(["1_init.sql"]))
+			expect(await runCli(["migrate", mode, "core", "--json"], io)).toBe(0)
+			expect(io.outputs).toHaveLength(1)
+			return JSON.parse(io.outputs[0] as string) as unknown
+		}
+		expect(await run("status")).toEqual({ applied: [], database: "core", pending: ["1_init.sql"], refused: [] })
+		expect(await run("check")).toEqual({ applied: [], database: "core", pending: ["1_init.sql"], refused: [] })
+		expect(await run("apply")).toEqual({ applied: ["1_init.sql"], database: "core", pending: [], refused: [] })
+	})
+})

@@ -199,6 +199,7 @@ OPTIONS:
   --file <path>           Apply this one migration file [migrate apply]
   -y, --yes               Approve cautious changes without asking (not unsafe ones) [migrate apply, migrate check]
   --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline, migrate check, migrate status]
+  --json                  Print one JSON object (database, applied, pending, refused) as the only stdout [migrate apply, migrate check, migrate status]
   --help                  Show this help
 ```
 
@@ -469,7 +470,7 @@ export default defineConfig({
 			environments: {
 				prod: {
 					name: "prod",
-					provider: { type: "d1", databaseId: process.env.CF_D1_ID!, databaseName: "core" },
+					provider: { type: "d1", databaseName: "core" },
 				},
 			},
 		},
@@ -477,7 +478,7 @@ export default defineConfig({
 })
 ```
 
-The config is Zod-validated, so a typo fails at load rather than at apply. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`org`, `apiToken`, `group`), `d1` (`databaseId`, `databaseName`), `postgres` (`url`, with `devUrl`, `schema` and `lockTimeout` defaulting to `docker://postgres/17/dev`, `public` and `5s`). There is no `neon` type: a Neon or Supabase database is a `postgres` URL. `environments` overrides the provider per `-e` flag, and every environment of a database has its dialect. `migrationsDir` and `drizzleConfigPath` are read relative to the config file, by `diff` as by `apply`.
+The config is Zod-validated, so a typo fails at load rather than at apply. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`org`, `apiToken`, `group`), `d1` (`databaseName`, the wrangler config's `database_name` or binding; wrangler finds the database through its config), `postgres` (`url`, with `devUrl`, `schema` and `lockTimeout` defaulting to `docker://postgres/17/dev`, `public` and `5s`). There is no `neon` type: a Neon or Supabase database is a `postgres` URL. `environments` overrides the provider per `-e` flag, and every environment of a database has its dialect. `migrationsDir` and `drizzleConfigPath` are read relative to the config file, by `diff` as by `apply`.
 
 A Postgres database is a URL, with the dev database Atlas replays migrations on beside it:
 
@@ -737,6 +738,10 @@ const localized = resolveTranslation({
 ```
 
 ## Cloudflare D1
+
+### Loading a `wrangler d1 export`
+
+An export, from `wrangler d1 export <db> --remote --output dump.sql`, lists its tables by name and each table's rows after its own `CREATE TABLE`. So a child's rows can come before its parent's table, and the file does not load as written into a database with foreign keys on. To load it, into a local copy or a restore, reorder it: `PRAGMA defer_foreign_keys = on` first, then every `CREATE TABLE`, then the rest (rows, indexes, triggers). `splitSqlStatements` from `@lovrozagar/comb/migrate` splits the file quote-aware. An export blocks the database's requests while it runs, so take a production export off-peak, and take a Time Travel bookmark with it.
 
 ### Sessions
 

@@ -45,7 +45,6 @@ export type LibsqlProviderConfig = { authToken?: string | undefined; type: "libs
 export type BunSqliteProviderConfig = { path: string; type: "bun-sqlite" }
 
 export type D1ProviderConfig = {
-	databaseId: string
 	databaseName: string
 	/** Target the local dev database (`wrangler --local`) instead of the remote one. */
 	local?: boolean | undefined

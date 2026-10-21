@@ -10,7 +10,7 @@ import { pgUrlProblems } from "../migrate/core/atlas-target.ts"
 import type { ResolvedPostgresProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
-import { checkPassed, CliError, type CliIo } from "./output.ts"
+import { checkPassed, CliError, type CliIo, type MigrateOutcome } from "./output.ts"
 
 type PostgresTarget = MigrateTarget & { provider: ResolvedPostgresProviderConfig }
 
@@ -19,7 +19,7 @@ export async function migratePostgres(
 	mode: "apply" | "baseline" | "check" | "status",
 	target: PostgresTarget,
 	{ args, io }: { args: ParsedArgs; io: CliIo },
-): Promise<void> {
+): Promise<MigrateOutcome> {
 	for (const flag of ["file", "local"]) {
 		if (args.options[flag] !== undefined)
 			throw new CliError(`--${flag} does not apply to a Postgres database: Atlas applies its migrations directory`)
@@ -29,16 +29,17 @@ export async function migratePostgres(
 	const options = { dir: target.migrationsDir, exec: io.run, print: io.out, target: target.provider }
 	if (mode === "baseline") {
 		io.out(`\nBaseline done: ${baselineWithAtlas(options).length} marked`)
-		return
+		return { applied: [], pending: [] }
 	}
-	if (mode === "status") {
-		statusWithAtlas(options)
-		return
-	}
+	if (mode === "status") return statusWithAtlas(options)
 	const yes = args.options["yes"] === true
 	const approve = (migration: Parameters<typeof approveMigration>[0]) =>
 		approveMigration(migration, { confirm: io.confirm, dialect: "postgres", target: target.label, yes })
 	const applied = await applyWithAtlas({ ...options, approve, checkOnly: mode === "check" })
-	if (mode === "check") io.out(checkPassed(applied))
-	else if (applied.length > 0) io.out(`\nDone: ${applied.length} applied`)
+	if (mode === "check") {
+		io.out(checkPassed(applied))
+		return { applied: [], pending: applied }
+	}
+	if (applied.length > 0) io.out(`\nDone: ${applied.length} applied`)
+	return { applied, pending: [] }
 }

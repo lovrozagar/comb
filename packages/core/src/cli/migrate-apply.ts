@@ -22,7 +22,7 @@ import { withRetry } from "../migrate/core/utils.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
 import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
-import { checkPassed, CliError, type CliIo } from "./output.ts"
+import { checkPassed, CliError, type CliIo, type MigrateOutcome } from "./output.ts"
 
 type Mode = "apply" | "baseline" | "check" | "status"
 
@@ -96,13 +96,16 @@ async function baseline(target: Target, { files, recorded }: History, io: CliIo)
 }
 
 /** `request.mode` on a SQLite database whose history is comb's own `__drizzle_migrations` */
-async function migrateSqlite({ args, io, mode }: Request, target: Target): Promise<void> {
+async function migrateSqlite({ args, io, mode }: Request, target: Target): Promise<MigrateOutcome> {
 	await ensureMigrationsTable(target.conn)
 	const recorded = await recordedHashes(target.conn)
 	const single = option(args, "file")
 	const dir = single === undefined ? target.migrationsDir : path.dirname(path.resolve(io.cwd, single))
 	const files = single === undefined ? sqlFiles(dir) : [path.basename(single)]
-	if (mode === "baseline") return baseline(target, { files, recorded }, io)
+	if (mode === "baseline") {
+		await baseline(target, { files, recorded }, io)
+		return { applied: [], pending: [] }
+	}
 	const yes = args.options["yes"] === true
 	const pending = await planApply({
 		applied: (_, sql) => migrationHashes(sql).some((hash) => recorded.has(hash)),
@@ -117,11 +120,12 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	const names = pending.map(({ name }) => name)
 	if (mode === "check") {
 		io.out(checkPassed(names))
-		return
+		return { applied: [], pending: names }
 	}
 	for (const name of files.filter((file) => !names.includes(file))) io.out(`Skip (already applied): ${name}`)
 	for (const each of pending) await applyPending(each, target, io)
 	io.out(`\nDone: ${names.length} applied, ${files.length - names.length} skipped`)
+	return { applied: names, pending: [] }
 }
 
 /** A mode's usage line: apply takes --file and --yes, check --yes, and every mode but status --local */
@@ -135,11 +139,33 @@ function usage(mode: Mode): string {
 	return `Usage: comb migrate ${mode} <database> [-e <env>] [--dir <path>]${flags[mode]}`
 }
 
+/**
+ * `migrate apply|baseline|check|status`. With --json the human lines go to stderr and stdout is
+ * one JSON object: the database, the files applied (or found applied) and pending, and what was
+ * refused; a refusal still exits 1.
+ */
 export async function migrateApply(mode: Mode, argv: readonly string[], io: CliIo): Promise<void> {
 	const args = parseArgs(argv, `migrate ${mode}`)
 	const [db] = args.positionals
 	if (db === undefined || args.positionals.length > 1) throw new CliError(usage(mode))
-	const request: Request = { args, db, io, mode }
+	if (args.options["json"] !== true) {
+		await runMode({ args, db, io, mode })
+		return
+	}
+	const report = (outcome: MigrateOutcome, refused: string[]) =>
+		io.out(JSON.stringify({ applied: outcome.applied, database: db, pending: outcome.pending, refused }))
+	try {
+		report(await runMode({ args, db, io: { ...io, out: io.err }, mode }), [])
+	} catch (error) {
+		/* the CLI throws Errors: a refusal, a config it cannot load, a command that failed */
+		report({ applied: [], pending: [] }, [(error as Error).message])
+		throw error
+	}
+}
+
+/** `request.mode` on the database `request.db` resolves to, on its engine */
+async function runMode(request: Request): Promise<MigrateOutcome> {
+	const { args, db, io, mode } = request
 	const resolved = await resolveMigrateTarget({
 		cwd: io.cwd,
 		db,
@@ -149,13 +175,11 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliI
 	})
 	if (resolved?.provider.type === "postgres") {
 		const { migratePostgres } = await import("./migrate-atlas.ts")
-		await migratePostgres(mode, { ...resolved, provider: resolved.provider }, { args, io })
-		return
+		return migratePostgres(mode, { ...resolved, provider: resolved.provider }, { args, io })
 	}
 	if (resolved === undefined || resolved.provider.type === "d1") {
 		const { migrateD1 } = await import("./migrate-d1.ts")
-		await migrateD1(request, resolved)
-		return
+		return migrateD1(request, resolved)
 	}
 	if (mode === "status") {
 		throw new CliError(
@@ -164,7 +188,7 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliI
 	}
 	const target = await configuredTarget(request, { ...resolved, provider: resolved.provider })
 	try {
-		await migrateSqlite(request, target)
+		return await migrateSqlite(request, target)
 	} finally {
 		await target.conn.close()
 	}

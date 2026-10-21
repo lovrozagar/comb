@@ -210,12 +210,19 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
 	return copied
 }
 
-/** Print what wrangler's table records as applied, and what is pending, in wrangler's order */
-async function statusD1(target: D1Target, read: ReadConfig, print: (line: string) => void): Promise<void> {
-	const { applied } = await history(read, target, false)
+/** Print what wrangler's table records as applied, and what is pending, in wrangler's order; returns both */
+async function statusD1(
+	target: D1Target,
+	read: ReadConfig,
+	print: (line: string) => void,
+): Promise<{ applied: string[]; pending: string[] }> {
+	const recorded = (await history(read, target, false)).applied
 	const files = filesOf(target.migrationsDir).map(({ name }) => name)
-	print(`Applied: ${files.filter((name) => applied.has(name)).join(", ") || "none"}`)
-	print(`Pending: ${files.filter((name) => !applied.has(name)).join(", ") || "none"}`)
+	const applied = files.filter((name) => recorded.has(name))
+	const pending = files.filter((name) => !recorded.has(name))
+	print(`Applied: ${applied.join(", ") || "none"}`)
+	print(`Pending: ${pending.join(", ") || "none"}`)
+	return { applied, pending }
 }
 
 export { applyD1, baselineD1, type D1Target, findWranglerConfig, type ReadConfig, statusD1, type WranglerConfig }

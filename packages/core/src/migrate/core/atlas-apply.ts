@@ -228,8 +228,9 @@ function baselineWithAtlas(options: AtlasCommand): string[] {
 }
 
 /** Print what is applied and pending, where a file stopped halfway, and each applied file that changed since */
-function statusWithAtlas(options: AtlasCommand): void {
-	onSnapshot(options, (copy) => {
+/** Print what Atlas records as applied and what is pending; returns both, by file name */
+function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: string[] } {
+	return onSnapshot(options, (copy) => {
 		const status = atlasStatus(options, copy)
 		const halfway = checkHistory(status, copy)
 		options.print(`Applied: ${status.applied.length}${status.applied.length > 0 ? ` (up to ${status.current})` : ""}`)
@@ -243,6 +244,10 @@ function statusWithAtlas(options: AtlasCommand): void {
 					`Changed after it was applied: ${name}; Atlas will not run it again, so the database may not match it`,
 				)
 			}
+		}
+		return {
+			applied: status.applied.map((revision) => fileOf(copy, revision.version)),
+			pending: status.pending.map((file) => file.Name),
 		}
 	})
 }

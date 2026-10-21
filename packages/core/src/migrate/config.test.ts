@@ -23,7 +23,6 @@ describe("migrate/config: defineConfig", () => {
 					},
 					migrationsDir: "./atlas-migrations",
 					provider: {
-						databaseId: "abc123",
 						databaseName: "myapp-core",
 						type: "d1",
 					},
@@ -62,12 +61,12 @@ describe("migrate/config: resolveDatabaseConfig", () => {
 					environments: {
 						dev: {
 							name: "myapp-dev",
-							provider: { databaseId: "dev123", databaseName: "dev-db", type: "d1" },
+							provider: { databaseName: "dev-db", type: "d1" },
 						},
 						local: { name: "myapp-local" },
 					},
 					migrationsDir: "./migrations",
-					provider: { databaseId: "main123", databaseName: "main-db", type: "d1" },
+					provider: { databaseName: "main-db", type: "d1" },
 				},
 			},
 		})
@@ -85,7 +84,7 @@ describe("migrate/config: resolveDatabaseConfig", () => {
 						local: { name: "local-db" },
 					},
 					migrationsDir: "./migrations",
-					provider: { databaseId: "base123", databaseName: "base-db", type: "d1" },
+					provider: { databaseName: "base-db", type: "d1" },
 				},
 			},
 		})
@@ -132,7 +131,7 @@ const PROVIDERS = [
 	{ apiToken: "t", group: "g", org: "o", type: "turso" },
 	{ authToken: "a", type: "libsql", url: "file:x.db" },
 	{ path: "x.db", type: "bun-sqlite" },
-	{ databaseId: "id", databaseName: "core", local: true, type: "d1" },
+	{ databaseName: "core", local: true, type: "d1" },
 ] as const
 
 describe("resolveDatabaseConfig and createProvider — every provider", () => {

@@ -5,6 +5,7 @@
 import { type SQL, sql } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 
+import { escapeLike } from "../like.ts"
 import { quoteIdent } from "./identifier.ts"
 
 /* FTS5 syntax, and control characters: a NUL ends the C string FTS5 parses, mid-phrase */
@@ -148,8 +149,7 @@ function likeSearch(column: SQLiteColumn): LikeSearchResolver {
 			.split(/\s+/u)
 			.filter((term) => term.length > 0)
 			.map((term) => {
-				const normalized = term.normalize("NFD").replace(DIACRITICS, "").toLowerCase()
-				return normalized.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")
+				return escapeLike(term.normalize("NFD").replace(DIACRITICS, "").toLowerCase())
 			})
 		const clauses = terms.map((term) => sql`${column} LIKE ${`%${term}%`} ESCAPE '\\'`)
 		return clauses.length === 0 ? null : sql.join(clauses, sql` AND `)

@@ -5,7 +5,7 @@
  * specials `%` and `_` are escaped before `*` expands to `%`.
  */
 function likePattern(value: string): string {
-	return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_").replace(/\*/g, "%")
+	return escapeLike(value).replace(/\*/g, "%")
 }
 
 /**
@@ -17,4 +17,12 @@ function globPattern(value: string): string {
 	return value.replace(/\[/g, "[[]").replace(/\?/g, "[?]")
 }
 
-export { globPattern, likePattern }
+/**
+ * `text` as a literal inside a LIKE pattern written with `ESCAPE '\\'`: the escape character and
+ * LIKE's own specials `%` and `_` each escaped, so `%${escapeLike(term)}%` finds `term` as written
+ */
+function escapeLike(text: string): string {
+	return text.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")
+}
+
+export { escapeLike, globPattern, likePattern }

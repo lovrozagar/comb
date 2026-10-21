@@ -8,17 +8,10 @@ export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, create
 export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, MultiTenantConfig, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
 
 // migrate/config.d.ts
+import { type CombMigrateConfig, DEFAULT_PG_DEV_URL } from "./config-schema.ts";
 import type { Run } from "./core/process.ts";
-import type { ConnectionProvider, ConnectionProviderConfig, DatabaseConfig, MigrationConfig, MultiTenantConfig, ResolvedDatabaseConfig } from "./types.ts";
-/** The empty database Atlas replays Postgres migrations on when a provider names none */
-export declare const DEFAULT_PG_DEV_URL = "docker://postgres/17/dev";
-/** What comb.migrate.config.ts declares: the migration config before multi-tenant defaults fill in */
-export type CombMigrateConfig = {
-    databases: Record<string, DatabaseConfig>;
-    multiTenant?: (Omit<MultiTenantConfig, "circuitBreaker"> & {
-        circuitBreaker?: MultiTenantConfig["circuitBreaker"] | undefined;
-    }) | undefined;
-};
+import type { ConnectionProvider, ConnectionProviderConfig, DatabaseConfig, MigrationConfig, ResolvedDatabaseConfig } from "./types.ts";
+export { type CombMigrateConfig, DEFAULT_PG_DEV_URL };
 /** What a provider that shells out (D1 drives wrangler) runs processes with; tests pass a fake */
 export type ProviderDeps = {
     run?: Run | undefined;
@@ -181,7 +174,6 @@ export type BunSqliteProviderConfig = {
     type: "bun-sqlite";
 };
 export type D1ProviderConfig = {
-    databaseId: string;
     databaseName: string;
     /** Target the local dev database (`wrangler --local`) instead of the remote one. */
     local?: boolean | undefined;
@@ -318,6 +310,24 @@ export type CircuitBreakerState = {
     tripped: boolean;
     tripReason?: string;
 };
+
+// migrate/config-schema.d.ts
+/**
+ * The Zod schema comb.migrate.config.ts is validated against: a typo fails at load, not at apply.
+ */
+import * as z from "zod";
+import type { DatabaseConfig, MultiTenantConfig } from "./types.ts";
+/** The empty database Atlas replays Postgres migrations on when a provider names none */
+declare const DEFAULT_PG_DEV_URL = "docker://postgres/17/dev";
+/** What comb.migrate.config.ts declares: the migration config before multi-tenant defaults fill in */
+type CombMigrateConfig = {
+    databases: Record<string, DatabaseConfig>;
+    multiTenant?: (Omit<MultiTenantConfig, "circuitBreaker"> & {
+        circuitBreaker?: MultiTenantConfig["circuitBreaker"] | undefined;
+    }) | undefined;
+};
+declare const configInputSchema: () => z.ZodType<CombMigrateConfig>;
+export { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL };
 
 // migrate/core/process.d.ts
 export type RunResult = {

@@ -222,3 +222,20 @@ describeAtlas("migrate apply refuses a rebuild outside the file's transaction", 
 		client.close()
 	}, 60_000)
 })
+
+describe("migrate apply and check --json on libsql (C5)", () => {
+	it("prints one JSON object as the only stdout, the human lines on stderr", async () => {
+		const { dir } = project({ "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" })
+		const check = io(dir)
+		expect(await runCli(["migrate", "check", "core", "-e", "local", "--json"], check)).toBe(0)
+		expect(check.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
+			{ applied: [], database: "core", pending: ["20260101000000_init.sql"], refused: [] },
+		])
+		const apply = io(dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--json"], apply)).toBe(0)
+		expect(apply.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
+			{ applied: ["20260101000000_init.sql"], database: "core", pending: [], refused: [] },
+		])
+		expect(apply.errors).toContain("Apply: 20260101000000_init.sql")
+	})
+})

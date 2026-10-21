@@ -253,8 +253,8 @@ function split(): { db: string; root: string } {
 	writeFileSync(
 		join(root, "db", "comb.migrate.config.ts"),
 		`export default { databases: { core: { migrationsDir: "./atlas-migrations", environments: {
-prod: { name: "core-prod", provider: { type: "d1", databaseId: "x", databaseName: "core-prod", wranglerConfig: "../worker/wrangler.toml", wranglerEnv: "prod" } },
-staging: { name: "core-staging", provider: { type: "d1", databaseId: "x", databaseName: "core-staging", wranglerConfig: "../worker/wrangler.toml", wranglerEnv: "staging" } },
+prod: { name: "core-prod", provider: { type: "d1", databaseName: "core-prod", wranglerConfig: "../worker/wrangler.toml", wranglerEnv: "prod" } },
+staging: { name: "core-staging", provider: { type: "d1", databaseName: "core-staging", wranglerConfig: "../worker/wrangler.toml", wranglerEnv: "staging" } },
 } } } }\n`,
 	)
 	return { db: join(root, "db"), root }
@@ -302,7 +302,7 @@ describe("migrate apply on D1 through comb.migrate.config.ts: the database's nam
 		writeFileSync(
 			join(db, "comb.migrate.config.ts"),
 			`export default { databases: { core: { migrationsDir: "./atlas-migrations", environments: {
-prod: { name: "prod", provider: { type: "d1", databaseId: "x", databaseName: "CORE_DB", wranglerConfig: "../worker/wrangler.toml", wranglerEnv: "prod" } },
+prod: { name: "prod", provider: { type: "d1", databaseName: "CORE_DB", wranglerConfig: "../worker/wrangler.toml", wranglerEnv: "prod" } },
 } } } }\n`,
 		)
 		const d1 = fakeD1({ dir: join(db, "atlas-migrations"), table: "schema_history" })
@@ -319,7 +319,7 @@ describe("migrate apply on D1 through comb.migrate.config.ts: its wrangler confi
 		const dir = worker(INIT)
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
-			'export default { databases: { core: { migrationsDir: "./atlas-migrations", name: "core", provider: { type: "d1", databaseId: "x", databaseName: "core", local: true } } } }\n',
+			'export default { databases: { core: { migrationsDir: "./atlas-migrations", name: "core", provider: { type: "d1", databaseName: "core", local: true } } } }\n',
 		)
 		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
 		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, d1))).toBe(0)
@@ -327,12 +327,44 @@ describe("migrate apply on D1 through comb.migrate.config.ts: its wrangler confi
 		const bare = temp.make()
 		writeFileSync(
 			join(bare, "comb.migrate.config.ts"),
-			`export default { databases: { core: { migrationsDir: "./m", name: "core", provider: { type: "d1", databaseId: "x", databaseName: "core" } } } }\n`,
+			`export default { databases: { core: { migrationsDir: "./m", name: "core", provider: { type: "d1", databaseName: "core" } } } }\n`,
 		)
 		const io = makeIo(bare, fakeD1({ dir: bare }))
 		expect(await runCli(["migrate", "apply", "core"], io)).toBe(1)
 		expect(io.errors).toEqual([
 			"no wrangler config next to comb.migrate.config.ts; set wranglerConfig on core's d1 provider",
 		])
+	})
+})
+
+/** The one JSON object a --json run printed as its stdout */
+function json(io: { outputs: string[] }): Record<string, unknown> {
+	expect(io.outputs).toHaveLength(1)
+	return JSON.parse(io.outputs[0] as string) as Record<string, unknown>
+}
+
+describe("migrate apply, check and status --json on D1 (C5)", () => {
+	it("prints one JSON object as the only stdout, the human lines on stderr", async () => {
+		const dir = worker(INIT)
+		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
+		const status = makeIo(dir, d1)
+		expect(await runCli(["migrate", "status", "core", "--local", "--json"], status)).toBe(0)
+		expect(json(status)).toEqual({ applied: [], database: "core", pending: ["20260101000000_init.sql"], refused: [] })
+		const check = makeIo(dir, d1)
+		expect(await runCli(["migrate", "check", "core", "--local", "--json"], check)).toBe(0)
+		expect(json(check)).toEqual({ applied: [], database: "core", pending: ["20260101000000_init.sql"], refused: [] })
+		const apply = makeIo(dir, d1)
+		expect(await runCli(["migrate", "apply", "core", "--local", "--json"], apply)).toBe(0)
+		expect(json(apply)).toEqual({ applied: ["20260101000000_init.sql"], database: "core", pending: [], refused: [] })
+		expect(apply.errors).toContain("Apply: 20260101000000_init.sql")
+	})
+
+	it("reports a refused file in the object, and exits 1", async () => {
+		const dir = worker({ ...INIT, "20260102000000_drop.sql": "DROP TABLE post;" })
+		const io = makeIo(dir, fakeD1({ dir: join(dir, "atlas-migrations") }))
+		expect(await runCli(["migrate", "apply", "core", "--local", "--json"], io)).toBe(1)
+		const out = json(io)
+		expect(out).toMatchObject({ applied: [], database: "core", pending: [] })
+		expect((out["refused"] as string[])[0]).toMatch(/^20260102000000_drop\.sql is unsafe/)
 	})
 })
