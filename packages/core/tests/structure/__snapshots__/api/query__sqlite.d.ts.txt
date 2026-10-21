@@ -38,6 +38,8 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
     baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
     computedFilters?: Record<string, ComputedFilterResolver>;
     computedSorts?: Record<string, ComputedSortResolver>;
+    /** the app's secret a cursor's tag is verified under, of at least 32 UTF-8 bytes */
+    cursorSecret: string;
     parsed: ListQueryParsed;
     relations?: Record<string, RelationConfig>;
     /** LIKE-based search resolver — use `likeSearch(column)` factory */
@@ -46,6 +48,8 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
 };
 type BuildDerivedListQueryOpts<TSortField extends string = string> = {
     baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
+    /** the app's secret a cursor's tag is verified under, of at least 32 UTF-8 bytes */
+    cursorSecret: string;
     filterWhere?: SQL | null;
     idColumn: SQLWrapper;
     parsed: ListQueryParsed & {

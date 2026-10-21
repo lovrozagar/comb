@@ -30,6 +30,7 @@ export declare const statusKeyToCode: Record<StatusKey, number>;
 /** Database-related error key constants */
 export declare const combErrorKeys: {
     readonly CHECK_CONSTRAINT_VIOLATION: "check_constraint_violation";
+    readonly CURSOR_NOT_WIRED: "cursor_not_wired";
     readonly CURSOR_PAGINATION_UNSUPPORTED: "cursor_pagination_unsupported";
     readonly DATABASE_IO_ERROR: "database_io_error";
     readonly DATABASE_READONLY: "database_readonly";

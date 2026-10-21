@@ -12,6 +12,7 @@ import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { likeSearch } from "../../../src/query/sqlite/search.ts"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
+import { SIGNED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 const post = sqliteTable("post", {
 	_search: text("_search").notNull(),
@@ -64,10 +65,15 @@ describe("the worst-case accepted list request runs on D1 (S-11)", () => {
 		)
 		const order = "created_at.desc,minute_read.asc,title.asc"
 		const sort = schema.parse({ order }).parsedSort
-		const cursor = createCursor({ created_at: 1, id: 1, minute_read: 1, title: "t" }, sort)
+		const cursor = createCursor({ created_at: 1, id: 1, minute_read: 1, title: "t" }, sort, SIGNED)
 		const result = schema.safeParse({ cursor, filter: largestFilter(), order, q: longestSearch() })
 		expect(result.success).toBe(true)
-		const query = buildListQuery({ parsed: result.data as never, search: likeSearch(post._search), table: post })
+		const query = buildListQuery({
+			...SIGNED,
+			parsed: result.data as never,
+			search: likeSearch(post._search),
+			table: post,
+		})
 		const db = drizzle(harness.CORE)
 		await expect(applyListQuery(db.select().from(post).$dynamic(), query)).resolves.toEqual([])
 	})

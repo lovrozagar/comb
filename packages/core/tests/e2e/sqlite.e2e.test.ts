@@ -14,6 +14,7 @@ import { applyListQuery, buildListQuery } from "../../src/query/sqlite/build-lis
 import { sqliteErrorHandler } from "../../src/sqlite/constraint-handler.ts"
 import type { ConstraintMap } from "../../src/types.ts"
 import { app, BLOG, ok, type App } from "./support/project.ts"
+import { SIGNED } from "../../src/query/__fixtures__/cursor-secret.ts"
 
 const MIGRATE_CONFIG = `import { defineConfig } from "@lovrozagar/comb/migrate"
 
@@ -69,8 +70,11 @@ describe("comb on SQLite, from tables to a served list", () => {
 
 			const schema = createListQuerySchema({ filter: { minute_read: "number", status: "enum" }, sort: ["title"] })
 			const parsed = schema.parse({ filter: "status.eq.published", limit: "1", order: "title.asc" })
-			const rows = await applyListQuery(db.select().from(post).$dynamic(), buildListQuery({ parsed, table: post }))
-			const [items, pagination] = queryHelpers.paginate(rows, parsed)
+			const rows = await applyListQuery(
+				db.select().from(post).$dynamic(),
+				buildListQuery({ ...SIGNED, parsed, table: post }),
+			)
+			const [items, pagination] = queryHelpers.paginate(rows, parsed, SIGNED)
 			expect(items.map((row) => row.title)).toEqual(["Alpha 2"])
 			expect(pagination).toMatchObject({ hasMore: true, limit: 1 })
 			for (const row of rows) expect(dtos.postDtoReadSchema.safeParse(row).success).toBe(true)

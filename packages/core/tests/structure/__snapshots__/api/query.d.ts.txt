@@ -5,8 +5,9 @@
  * Parsers, validators, Zod schemas, and pagination utilities.
  * For SQLite-specific SQL generation, use @lovrozagar/comb/query/sqlite.
  */
-export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, readCursor, sortSignature, } from "./cursor.ts";
+export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, effectiveNulls, MAX_CURSOR_LENGTH, readCursor, sortSignature, } from "./cursor.ts";
 export type { CursorPayload, DecodedCursor, PaginationMeta } from "./cursor.ts";
+export { MIN_CURSOR_SECRET_BYTES } from "./cursor-sign.ts";
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
 export { filterBySelect, parseSelect } from "./fields.ts";
 export { FILTER_LIMITS, FILTER_OPERATORS, type FilterLimits, type FilterValidationResult, OPERATORS_BY_TYPE, parseFilter, parseOrder, validateFilter, } from "./filter.ts";
@@ -68,21 +69,36 @@ type PaginationMeta = {
 declare function effectiveNulls(direction: SortDirection, nulls?: SortNulls): SortNulls;
 /** Canonical form of a sort — what a cursor is bound to. */
 declare function sortSignature(parsedSort: readonly SortField[]): string;
-declare function encodeCursor(payload: CursorPayload): string;
-/** null when the string is not a cursor this version minted. */
-declare function decodeCursor(cursor: string | null | undefined): DecodedCursor | null;
+/** A signed cursor for `payload` */
+declare function encodeCursor(payload: CursorPayload, secret: string): string;
 /** Mint the cursor for the row after which the next page starts. */
-declare function createCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], opts?: {
+declare function createCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], opts: {
+    cursorSecret: string;
     idField?: string;
 }): string;
 /**
- * Why a cursor cannot be used under this sort, or null when it can.
- * Shared by the schema (400 at validation) and the SQL builders (CombError).
+ * Why a cursor cannot be used under this sort, or null when its shape can: the list schema's
+ * check, a 400 at validation. Its tag is verified by readCursor, which holds the secret.
  */
 declare function cursorProblem(cursor: string, parsedSort: readonly SortField[]): string | null;
-/** Decode a cursor for this sort, or throw a 400 CombError. */
-declare function readCursor(cursor: string, parsedSort: readonly SortField[]): DecodedCursor;
-export { createCursor, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, decodeCursor, effectiveNulls, encodeCursor, readCursor, sortSignature, type CursorId, type CursorPayload, type CursorValue, type DecodedCursor, type PaginationMeta, };
+/** The cursor `secret` signed, decoded; null when its tag is not that secret's or it is no cursor */
+declare function verifiedCursor(cursor: string, secret: string): DecodedCursor | null;
+/** Verify a cursor's tag under `secret` and decode it for this sort, or throw a 400 CombError. */
+declare function readCursor(cursor: string, parsedSort: readonly SortField[], secret: string): DecodedCursor;
+export { createCursor, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, readCursor, sortSignature, type CursorId, type CursorPayload, type CursorValue, type DecodedCursor, type PaginationMeta, verifiedCursor, };
+
+// query/cursor-sign.d.ts
+/** The shortest secret a cursor is signed with, in UTF-8 bytes: SHA-256's output length */
+declare const MIN_CURSOR_SECRET_BYTES = 32;
+/** HMAC-SHA256 of `data` under `key` */
+declare const macOf: (key: Uint8Array, data: Uint8Array) => Uint8Array;
+/** Throw the 500 keyOf throws when `secret` cannot sign a cursor */
+declare function assertCursorSecret(secret: string): void;
+/** The base64url tag of `payload` under `secret` */
+declare function signPayload(payload: string, secret: string): string;
+/** Whether `tag` is `payload`'s under `secret`, compared in constant time over the whole tag */
+declare function verifyTag(payload: string, tag: string, secret: string): boolean;
+export { assertCursorSecret, macOf, MIN_CURSOR_SECRET_BYTES, signPayload, verifyTag };
 
 // query/drizzle.d.ts
 /**
@@ -135,9 +151,14 @@ declare function countExtra(query: CountQuery): {
 declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
 /** Extract multiple filter values from FilterAST */
 declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
+/** What signs and verifies the cursors of a list: the app's secret, of at least 32 UTF-8 bytes */
+type CursorOptions = {
+    cursorSecret: string;
+};
 /**
  * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
- * list query schema's output. The limit is one over the page so `paginate` can tell there is more.
+ * list query schema's output, the cursor's tag verified under `cursorSecret`. The limit is one
+ * over the page so `paginate` can tell there is more.
  */
 declare function drizzleListOptions(query: {
     cursor?: string | undefined;
@@ -146,11 +167,11 @@ declare function drizzleListOptions(query: {
     parsedSort: SortField[];
     sortOrderBy: Record<string, "asc" | "desc">;
     validated?: true | undefined;
-}): DrizzleListOptions;
+}, { cursorSecret }: CursorOptions): DrizzleListOptions;
 type DrizzleListResult<T> = T & {
     _total?: number;
 };
-/** Create pagination result from drizzle query results with _total extra */
+/** Create pagination result from drizzle query results with _total extra, the next cursor signed under `cursorSecret` */
 declare function drizzlePaginationResult<T extends {
     id?: CursorId;
 }>(items: DrizzleListResult<T>[], query: {
@@ -160,7 +181,7 @@ declare function drizzlePaginationResult<T extends {
     parsedFields?: ParsedFields | null | undefined;
     parsedSort: SortField[];
     validated?: true | undefined;
-}): readonly [T[], PaginationMeta];
+}, { cursorSecret }: CursorOptions): readonly [T[], PaginationMeta];
 declare function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
 /** List-query helpers for drizzle queries: count, options, pagination, projection */
 declare const queryHelpers: {
@@ -171,7 +192,7 @@ declare const queryHelpers: {
     paginate: typeof drizzlePaginationResult;
     project: typeof drizzleProject;
 };
-export { type DrizzleListOptions, queryHelpers };
+export { type CursorOptions, type DrizzleListOptions, queryHelpers };
 
 // query/fields.d.ts
 import type { ParsedFields } from "./types.ts";

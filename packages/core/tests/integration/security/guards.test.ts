@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { guardModule, guardNamed } from "../../structure/mutation-harness.ts"
 import { d1Memory, type D1Harness } from "../support/d1.ts"
 import { libsqlMemory } from "../support/libsql.ts"
+import { SIGNED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 const mutant = guardNamed(process.env["COMB_MUTANT"])
 if (mutant !== undefined) {
@@ -52,13 +53,13 @@ describe("list queries", () => {
 				subgroups: [],
 			},
 		}
-		expect(() => buildListQuery({ parsed: { filterAst: secret, limit: 5, parsedSort: [] }, table: event })).toThrow(
-			expect.objectContaining({ errorKey: "filter_not_wired" }),
-		)
+		expect(() =>
+			buildListQuery({ ...SIGNED, parsed: { filterAst: secret, limit: 5, parsedSort: [] }, table: event }),
+		).toThrow(expect.objectContaining({ errorKey: "filter_not_wired" }))
 		const bySecret = [{ direction: "asc" as const, field: "secret" }]
-		expect(() => buildListQuery({ parsed: { filterAst: null, limit: 5, parsedSort: bySecret }, table: event })).toThrow(
-			expect.objectContaining({ errorKey: "sort_not_wired" }),
-		)
+		expect(() =>
+			buildListQuery({ ...SIGNED, parsed: { filterAst: null, limit: 5, parsedSort: bySecret }, table: event }),
+		).toThrow(expect.objectContaining({ errorKey: "sort_not_wired" }))
 	})
 
 	it("refuse a filter on a field nothing resolves, rather than list every row (filter-fail-closed)", () => {
@@ -70,16 +71,46 @@ describe("list queries", () => {
 			},
 		}
 		expect(() =>
-			buildListQuery({ parsed: { filterAst, limit: 5, parsedSort: [], validated: true }, table: event }),
+			buildListQuery({ ...SIGNED, parsed: { filterAst, limit: 5, parsedSort: [], validated: true }, table: event }),
 		).toThrow(expect.objectContaining({ errorKey: "filter_not_wired" }))
 	})
 
 	it("refuse a forged cursor whose value is not its column's type (cursor-value-type)", () => {
 		const parsedSort = [{ direction: "desc" as const, field: "seen_at" }]
-		const cursor = createCursor({ id: "e1", seen_at: "2024" }, parsedSort)
+		const cursor = createCursor({ id: "e1", seen_at: "2024" }, parsedSort, SIGNED)
 		expect(() =>
-			buildListQuery({ parsed: { cursor, filterAst: null, limit: 5, parsedSort, validated: true }, table: event }),
+			buildListQuery({
+				...SIGNED,
+				parsed: { cursor, filterAst: null, limit: 5, parsedSort, validated: true },
+				table: event,
+			}),
 		).toThrow(expect.objectContaining({ errorKey: "invalid_cursor", status: 400 }))
+	})
+})
+
+describe("cursors a client writes itself (cursor-tag)", () => {
+	const staff = sqliteTable("staff", { id: text("id").primaryKey(), name: text("name"), salary: integer("salary") })
+
+	it("refuse a cursor whose guessed salary would list who earns more, on a sort the client cannot select", async () => {
+		const { client, close, db } = libsqlMemory()
+		try {
+			await client.execute("CREATE TABLE staff (id TEXT PRIMARY KEY, name TEXT, salary INTEGER)")
+			await client.execute("INSERT INTO staff VALUES ('s1', 'ann', 73519), ('s2', 'bob', 50000)")
+			const parsedSort = [{ direction: "asc" as const, field: "salary" }]
+			const guess = { i: "", s: "salary.asc.nullslast", v: [73518] }
+			const body = btoa(JSON.stringify(guess)).replace(/=+$/, "")
+			const run = async () => {
+				const built = buildListQuery({
+					...SIGNED,
+					parsed: { cursor: `${body}.${"A".repeat(43)}`, filterAst: null, limit: 5, parsedSort, validated: true },
+					table: staff,
+				})
+				return db.select({ id: staff.id }).from(staff).where(built.where).all()
+			}
+			expect(await thrown(run)).toMatchObject({ errorKey: "invalid_cursor", status: 400 })
+		} finally {
+			close()
+		}
 	})
 })
 

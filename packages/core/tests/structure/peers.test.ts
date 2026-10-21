@@ -4,7 +4,7 @@
  * need is optional; and every peer range stops before the next major, so an install never pairs
  * comb with a breaking release it was not tested against. A runtime dependency ships its types too.
  */
-import { readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
@@ -22,6 +22,18 @@ const optional = new Set(
 		.filter(([, m]) => m.optional)
 		.map(([name]) => name),
 )
+
+/**
+ * The installed manifest of `name`, found along Node's resolution paths: a package whose exports
+ * leave out `./package.json` (@noble/hashes) cannot be required for it
+ */
+function manifestOf(name: string): { types?: string; typings?: string } {
+	const found = (require.resolve.paths(name) ?? [])
+		.map((dir) => join(dir, name, "package.json"))
+		.find((path) => existsSync(path))
+	if (found === undefined) throw new Error(`${name} is not installed`)
+	return JSON.parse(readFileSync(found, "utf8")) as { types?: string; typings?: string }
+}
 
 function sources(dir: string): string[] {
 	return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -51,7 +63,7 @@ describe("package.json peers", () => {
 		const dependencies = pkg.dependencies ?? {}
 		/* pluralize ships no types; the guard proves at least one dependency is checked */
 		const untyped = Object.keys(dependencies).filter((name) => {
-			const manifest = require(`${name}/package.json`) as { types?: string; typings?: string }
+			const manifest = manifestOf(name)
 			return !name.startsWith("@types/") && manifest.types === undefined && manifest.typings === undefined
 		})
 		expect(untyped.length).toBeGreaterThan(0)

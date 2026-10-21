@@ -4,6 +4,7 @@ import { createCursor, MAX_CURSOR_LENGTH } from "./cursor.ts"
 import { createListQuerySchema } from "./list-schema.ts"
 import { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
+import { SIGNED } from "./__fixtures__/cursor-secret.ts"
 
 /** Returns a safeParse result's data; fails the test with the issues when the parse failed. */
 function dataOf<T>(result: { success: true; data: T } | { success: false; error: { message: string } }): T {
@@ -55,7 +56,7 @@ describe("createListQuerySchema — defaults and validation", () => {
 	})
 
 	it("accepts cursor + page together and lets cursor take precedence", () => {
-		const cursor = createCursor({ createdAt: 1, id: "abc" }, [{ direction: "desc", field: "createdAt" }])
+		const cursor = createCursor({ createdAt: 1, id: "abc" }, [{ direction: "desc", field: "createdAt" }], SIGNED)
 		const result = listSchema.safeParse({ cursor, page: 2 })
 		expect(result.success).toBe(true)
 		const data = dataOf(result)
@@ -433,11 +434,32 @@ describe("cursor and order length (S-L1)", () => {
 
 	it("refuses a cursor over MAX_CURSOR_LENGTH characters and an order over 200, valid as they otherwise are", () => {
 		const sort = [{ direction: "asc" as const, field: "title" }]
-		const long = createCursor({ id: "p1", title: "t".repeat(MAX_CURSOR_LENGTH) }, sort)
-		const short = createCursor({ id: "p1", title: "t" }, sort)
+		const long = createCursor({ id: "p1", title: "t".repeat(MAX_CURSOR_LENGTH) }, sort, SIGNED)
+		const short = createCursor({ id: "p1", title: "t" }, sort, SIGNED)
 		expect(capped.safeParse({ cursor: short, order: "title.asc" }).success).toBe(true)
 		expect(capped.safeParse({ cursor: long, order: "title.asc" }).success).toBe(false)
 		expect(capped.safeParse({ order: `title.asc${" ".repeat(200)}` }).success).toBe(false)
 		expect(capped.safeParse({ order: "created_at.desc.nullslast,title.asc" }).success).toBe(true)
+	})
+})
+
+describe("the parsed cursor (Q7)", () => {
+	it("is the raw string the client sent, beside nothing decoded from it", () => {
+		const schema = createListQuerySchema({ sort: ["title"] })
+		const cursor = createCursor({ id: "p1", title: "t" }, [{ direction: "asc", field: "title" }], SIGNED)
+		const parsed = schema.parse({ cursor, order: "title.asc" })
+		expect(parsed.cursor).toBe(cursor)
+		expect(Object.keys(parsed).sort()).toEqual([
+			"cursor",
+			"filterAst",
+			"lang",
+			"limit",
+			"page",
+			"parsedFields",
+			"parsedSort",
+			"q",
+			"sortOrderBy",
+			"validated",
+		])
 	})
 })

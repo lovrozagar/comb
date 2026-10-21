@@ -74,6 +74,7 @@
 		"type:check:strict": "tsc --noEmit -p tsconfig.strict.json"
 	},
 	"dependencies": {
+		"@noble/hashes": "2.4.0",
 		"@types/pluralize": "0.0.33",
 		"pluralize": "8.0.0"
 	},

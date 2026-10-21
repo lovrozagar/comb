@@ -325,7 +325,7 @@ throw new CombError({
 
 `status` is a `StatusKey`, not a number — `bad_request`, `conflict`, `forbidden`, `unprocessable_entity`, `internal_server_error`, `service_unavailable`. The numeric `.status` is derived from it, so an HTTP layer can read `.status` and a log layer can read `.statusKey`.
 
-Built-in keys (`combErrorKeys`): `CHECK_CONSTRAINT_VIOLATION`, `CURSOR_PAGINATION_UNSUPPORTED`, `DATABASE_IO_ERROR`, `DATABASE_READONLY`, `DATABASE_UNAVAILABLE`, `EXCLUSION_CONSTRAINT_VIOLATION`, `FILTER_NOT_WIRED`, `FOREIGN_KEY_VIOLATION`, `INVALID_CURSOR`, `INVALID_SELECT`, `INVALID_STATE_TRANSITION`, `INVALID_VALUE`, `PRIMARY_KEY_VIOLATION`, `REQUIRED_FIELD_MISSING`, `SEARCH_NOT_WIRED`, `SHARDS_FULL`, `SORT_NOT_WIRED`, `STORAGE_LIMIT_REACHED`, `UNIQUE_CONSTRAINT_VIOLATION`, `VALUE_TOO_LARGE`.
+Built-in keys (`combErrorKeys`): `CHECK_CONSTRAINT_VIOLATION`, `CURSOR_NOT_WIRED`, `CURSOR_PAGINATION_UNSUPPORTED`, `DATABASE_IO_ERROR`, `DATABASE_READONLY`, `DATABASE_UNAVAILABLE`, `EXCLUSION_CONSTRAINT_VIOLATION`, `FILTER_NOT_WIRED`, `FOREIGN_KEY_VIOLATION`, `INVALID_CURSOR`, `INVALID_SELECT`, `INVALID_STATE_TRANSITION`, `INVALID_VALUE`, `PRIMARY_KEY_VIOLATION`, `REQUIRED_FIELD_MISSING`, `SEARCH_NOT_WIRED`, `SHARDS_FULL`, `SORT_NOT_WIRED`, `STORAGE_LIMIT_REACHED`, `UNIQUE_CONSTRAINT_VIOLATION`, `VALUE_TOO_LARGE`.
 
 `SHARDS_FULL` (503) means no shard has room for a new organization: provision another D1 database.
 
@@ -648,14 +648,16 @@ select=id,title,author(display_name)
 
 Two modes share one input shape. Offset pagination takes `page` and `limit`; cursor pagination takes `cursor` and `limit`. Responses carry `PaginationMeta`.
 
-A cursor holds the value of **every** sort key, the tiebreak id, and the signature of the sort it was minted under (`sortSignature()`), as URL-safe base64 of UTF-8 JSON. `createCursor(row, parsedSort)` mints one; `queryHelpers.paginate` does it for you. The keyset predicate compares all keys lexicographically, each with its own direction and null placement, so a multi-key or nullable order pages without skipping or repeating rows. A cursor presented under a different order, or one that does not decode, is a 400: the schema reports it on `cursor`, and `readCursor()` throws `CombError` (`invalid_cursor`) for callers that skip the schema.
+A cursor holds the value of **every** sort key, the tiebreak id, and the signature of the sort it was minted under (`sortSignature()`), as URL-safe base64 of UTF-8 JSON, then a `.` and an HMAC-SHA256 tag over those bytes. The tag is what stops a client from writing its own cursor: an unsigned one would let it put any value in a sort key and learn, request by request, the value of a column it can sort by but not select or filter. `createCursor(row, parsedSort, { cursorSecret })` mints one; `queryHelpers.paginate` does it for you. The keyset predicate compares all keys lexicographically, each with its own direction and null placement, so a multi-key or nullable order pages without skipping or repeating rows. A cursor presented under a different order, or one that does not decode, is a 400: the schema reports it on `cursor`, and `readCursor(cursor, parsedSort, cursorSecret)` throws `CombError` (`invalid_cursor`) for callers that skip the schema.
 
-For drizzle's relational API, `queryHelpers.listOptions(query)` returns `limit`, `offset`, an `orderBy` callback (the sort, its null placement and the id tiebreak) and, on a cursor request, a `where: { RAW }` keyset predicate to AND with your own: `db.query.post.findMany({ limit, offset, orderBy, where })`. A cursor minted under another order is `invalid_cursor`.
+The secret is the app's, at least `MIN_CURSOR_SECRET_BYTES` (32) bytes of UTF-8. Give every worker the same `CURSOR_SECRET` through its env, and pass it where the handler runs: `queryHelpers.paginate(rows, query, { cursorSecret })` signs, and `queryHelpers.listOptions(query, { cursorSecret })`, `buildListQuery({ cursorSecret, … })` and `readCursor` verify. The parameter is required, and a shorter secret is a 500 (`cursor_not_wired`) on the first page. A cursor whose tag another secret made, or none, is `invalid_cursor`, so rotating the secret ends the lists in flight with a 400. The list schema takes no secret: schema modules load where no env exists (a gateway's route codegen), so it checks a cursor's shape and its sort, and only the verifying calls read its values.
+
+For drizzle's relational API, `queryHelpers.listOptions(query, { cursorSecret })` returns `limit`, `offset`, an `orderBy` callback (the sort, its null placement and the id tiebreak) and, on a cursor request, a `where: { RAW }` keyset predicate to AND with your own: `db.query.post.findMany({ limit, offset, orderBy, where })`. A cursor minted under another order is `invalid_cursor`.
 
 `pagination.count` is the number of rows the filter matches across all pages, or `null` when the response cannot know it. Select `queryHelpers.countExtra(query)` beside your columns (the parsed query, or the `ListQueryResult` built from it) and pass the rows to `queryHelpers.paginate`: an offset page reports the total (`0` for an empty first page), and a page past the end, or any query without the extra, reports `null`. A cursor page reports `null` too, and `countExtra` selects nothing for it: a `count(*) over()` window would make the database read every remaining row on each page, which is the cost keyset pagination exists to avoid (and on D1, rows read are billed). The tiebreak id keeps its JSON type in the cursor, so a numeric id compares as a number even when it is an expression with no column affinity. Every value a cursor carries must be a string, number, boolean, `null` or date; anything else is `invalid_cursor`.
 
 ```ts
-import { createCursor, decodeCursor, readCursor, sortSignature } from "@lovrozagar/comb/query"
+import { createCursor, MIN_CURSOR_SECRET_BYTES, readCursor, sortSignature } from "@lovrozagar/comb/query"
 ```
 
 ### Zod schemas
@@ -694,6 +696,7 @@ The `filter`, `order` and `q` descriptions, examples and the `order` pattern are
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 declare const db: import("drizzle-orm/libsql").LibSQLDatabase
 declare const parsed: import("@lovrozagar/comb/query").ListQueryOutput
+declare const env: { CURSOR_SECRET: string }
 const post = sqliteTable("post", { created_at: integer("created_at"), deleted_at: integer("deleted_at"), id: text("id").primaryKey(), title: text("title") })
 -->
 
@@ -702,6 +705,7 @@ import { applyListQuery, buildListQuery, likeSearch } from "@lovrozagar/comb/que
 import { isNull, sql } from "drizzle-orm"
 
 const result = buildListQuery({
+	cursorSecret: env.CURSOR_SECRET, // verifies a cursor's tag
 	parsed, // postQuery.parse(request.query)
 	table: post,
 	baseWhere: isNull(post.deleted_at), // ANDed in — soft deletes, tenant scoping, access rules

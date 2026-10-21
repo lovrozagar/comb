@@ -10,13 +10,13 @@ export {
 	createCursor,
 	CURSOR_TIEBREAK_COLUMN,
 	cursorProblem,
-	decodeCursor,
 	effectiveNulls,
-	encodeCursor,
+	MAX_CURSOR_LENGTH,
 	readCursor,
 	sortSignature,
 } from "./cursor.ts"
 export type { CursorPayload, DecodedCursor, PaginationMeta } from "./cursor.ts"
+export { MIN_CURSOR_SECRET_BYTES } from "./cursor-sign.ts"
 
 /* Drizzle relational helpers */
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts"

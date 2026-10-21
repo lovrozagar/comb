@@ -10,6 +10,7 @@ import { expect, it } from "vitest"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { describePg, usePg } from "../support/pg.ts"
+import { SIGNED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 const item = pgTable("item", {
 	created: timestamp("created", { precision: 6 }).notNull(),
@@ -36,17 +37,21 @@ describePg("keyset pagination on a microsecond timestamp (Q2)", () => {
 			const seen: string[] = []
 			let cursor: string | undefined
 			for (let page = 0; page < 8; page++) {
-				const options = queryHelpers.listOptions({ ...query, cursor })
+				const options = queryHelpers.listOptions({ ...query, cursor }, SIGNED)
 				const rows = await db.query.item.findMany({
 					limit: options.limit,
 					offset: options.offset,
 					orderBy: options.orderBy,
 					where: options.where,
 				} as never)
-				const [items, meta] = queryHelpers.paginate(rows as Array<{ created: Date; id: number; name: string }>, {
-					...query,
-					cursor,
-				})
+				const [items, meta] = queryHelpers.paginate(
+					rows as Array<{ created: Date; id: number; name: string }>,
+					{
+						...query,
+						cursor,
+					},
+					SIGNED,
+				)
 				seen.push(...items.map((row) => row.name))
 				if (!meta.hasMore || meta.nextCursor === null) break
 				cursor = meta.nextCursor
@@ -75,14 +80,18 @@ describePg("keyset pagination on a bigint id (Q5)", () => {
 		const seen: bigint[] = []
 		let cursor: string | undefined
 		for (let page = 0; page < 5; page++) {
-			const options = queryHelpers.listOptions({ ...query, cursor })
+			const options = queryHelpers.listOptions({ ...query, cursor }, SIGNED)
 			const rows = await db.query.big.findMany({
 				limit: options.limit,
 				offset: options.offset,
 				orderBy: options.orderBy,
 				where: options.where,
 			} as never)
-			const [items, meta] = queryHelpers.paginate(rows as Array<{ id: bigint; name: string }>, { ...query, cursor })
+			const [items, meta] = queryHelpers.paginate(
+				rows as Array<{ id: bigint; name: string }>,
+				{ ...query, cursor },
+				SIGNED,
+			)
 			seen.push(...items.map((row) => row.id))
 			if (!meta.hasMore || meta.nextCursor === null) break
 			cursor = meta.nextCursor

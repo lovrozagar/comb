@@ -14,9 +14,9 @@ const schema = createListQuerySchema({ sort: ["title"] })
 const router = new ShardRouter({ totalShards: 2 })
 
 export default {
-	async fetch(request: Request, env: { DB: D1Database }): Promise<Response> {
+	async fetch(request: Request, env: { CURSOR_SECRET: string; DB: D1Database }): Promise<Response> {
 		const parsed = schema.parse(Object.fromEntries(new URL(request.url).searchParams))
-		const query = buildListQuery({ parsed, table: post })
+		const query = buildListQuery({ cursorSecret: env.CURSOR_SECRET, parsed, table: post })
 		const { client } = openD1Session(env.DB)
 		try {
 			return Response.json({ limit: query.limit, ok: typeof client, router: typeof router })

@@ -82,6 +82,12 @@ export const GUARDS: readonly Guard[] = [
 		module: "src/query/sqlite/cursor-fit.ts",
 	},
 	{
+		catches: "a cursor the client wrote itself, whose sort value probes a column it cannot select",
+		disable: () => ({ verifyTag: () => true }),
+		id: "cursor-tag",
+		module: "src/query/cursor-sign.ts",
+	},
+	{
 		catches: "an identifier holding a double quote spliced into raw SQL unescaped",
 		disable: () => ({ quoteIdent: (name: string) => `"${name}"` }),
 		id: "raw-sql-quoting",

@@ -3,6 +3,7 @@ import * as z from "zod"
 import { createCursor } from "./cursor.ts"
 import { FILTER_LIMITS } from "./filter.ts"
 import { checkCursor, filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
+import { SIGNED } from "./__fixtures__/cursor-secret.ts"
 
 type Issue = { message: string; path: PropertyKey[] }
 
@@ -66,8 +67,8 @@ describe("checkCursor", () => {
 	it("accepts no cursor and one minted under this sort, and reports one minted under another", () => {
 		const { ctx, issues } = recorder()
 		checkCursor(undefined, sort, ctx)
-		checkCursor(createCursor({ created_at: 1, id: 1 }, sort), sort, ctx)
-		checkCursor(createCursor({ id: 1, title: "a" }, [{ direction: "asc", field: "title" }]), sort, ctx)
+		checkCursor(createCursor({ created_at: 1, id: 1 }, sort, SIGNED), sort, ctx)
+		checkCursor(createCursor({ id: 1, title: "a" }, [{ direction: "asc", field: "title" }], SIGNED), sort, ctx)
 		expect(issues).toEqual([{ message: "Cursor was issued for a different order", path: ["cursor"] }])
 	})
 })

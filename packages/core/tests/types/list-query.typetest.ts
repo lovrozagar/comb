@@ -5,11 +5,13 @@
 import { expectTypeOf } from "vitest"
 import * as z from "zod"
 import { createListQuerySchema, createRetrieveQuerySchema } from "../../src/query/schema.ts"
+import type { ListQueryOutput } from "../../src/query/schema-types.ts"
 import type { FilterAST, ParsedFields, SortField } from "../../src/query/types.ts"
 import { buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
 import { keysetSQL, type KeysetPosition } from "../../src/query/sqlite/index.ts"
 import { queryHelpers } from "../../src/query/drizzle.ts"
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
+import { SIGNED } from "../../src/query/__fixtures__/cursor-secret.ts"
 
 const listSchema = createListQuerySchema({
 	extend: { archived: z.enum(["yes", "no"]).optional() },
@@ -44,7 +46,7 @@ const post = sqliteTable("post", {
 	title: text("title"),
 })
 declare const parsed: ListOutput
-const built = buildListQuery({ parsed, table: post })
+const built = buildListQuery({ ...SIGNED, parsed, table: post })
 expectTypeOf(queryHelpers.countExtra(built)).toEqualTypeOf<ReturnType<typeof queryHelpers.countExtra>>()
 expectTypeOf(queryHelpers.countExtra(parsed)).toEqualTypeOf<ReturnType<typeof queryHelpers.countExtra>>()
 // @ts-expect-error countExtra takes a parsed request or a built query, nothing else
@@ -57,3 +59,12 @@ createListQuerySchema({ extend: { archived: z.coerce.boolean().optional() }, sor
 
 /* keysetSQL's one argument has a name a consumer can import from the subpath that exports keysetSQL */
 expectTypeOf(keysetSQL).parameter(0).toEqualTypeOf<KeysetPosition>()
+
+/* Q7: the parsed query hands on the cursor as the raw string the client sent, and nothing decoded
+   from it; only a verifying call (readCursor, listOptions, buildListQuery) reaches its values */
+expectTypeOf<keyof ListQueryOutput<"created_at">>().toEqualTypeOf<
+	"cursor" | "filterAst" | "lang" | "limit" | "page" | "parsedFields" | "parsedSort" | "q" | "sortOrderBy" | "validated"
+>()
+expectTypeOf<z.output<ReturnType<typeof createListQuerySchema<Record<string, never>, ["created_at"]>>>>().toMatchTypeOf<
+	ListQueryOutput<"created_at">
+>()
