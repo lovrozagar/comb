@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { classifyMigration } from "./classify.ts"
 import { writeFindings } from "./classify-write.ts"
+import { extractSchema } from "./schema.ts"
 
 const pg = (sql: string) => classifyMigration(sql, { dialect: "postgres" })
 
@@ -69,7 +70,7 @@ describe("classifyMigration on a write the G1 review found rated low", () => {
 			"unsafe",
 			"a filtered rule action",
 		],
-		["CREATE RULE r AS ON INSERT TO t DO INSTEAD NOTHING;", "safe", "a rule that does nothing"],
+		["CREATE RULE r AS ON INSERT TO t DO INSTEAD NOTHING;", "unsafe", "a rule that discards every insert (M9)"],
 		["ALTER TABLE t OWNER TO nobody;", "cautious", "a new owner, who bypasses row level security"],
 		["REASSIGN OWNED BY a TO b;", "cautious", "reassigned ownership"],
 		["COPY t FROM PROGRAM 'x';", "cautious", "a COPY into a table"],
@@ -134,5 +135,53 @@ describe("classifyMigration: a DELETE, and an UPDATE of existing values, may des
 		).toBe("cautious")
 		expect(lite(`${created}DELETE FROM fresh WHERE id = 1;`).safety).toBe("unsafe")
 		expect(lite(`UPDATE fresh SET a = 'y';\n${created}`).safety).toBe("unsafe")
+	})
+})
+
+/* the fresh-table and fresh-column bypasses of the 0.9.1 review (M3, M4): a name that only looks new */
+describe("classifyMigration on a backfill of something that held data", () => {
+	const users = "CREATE TABLE users (id integer PRIMARY KEY, email text);"
+	const before = (dialect: "postgres" | "sqlite") => extractSchema(users, undefined, dialect)
+	const rate = (sql: string, dialect: "postgres" | "sqlite") =>
+		classifyMigration(sql, { before: before(dialect), dialect }).safety
+
+	it("rates an UPDATE after CREATE TABLE IF NOT EXISTS of an existing table unsafe, on either dialect", () => {
+		for (const dialect of ["sqlite", "postgres"] as const) {
+			expect(
+				rate(
+					"CREATE TABLE IF NOT EXISTS users (id integer PRIMARY KEY, email text);\nUPDATE users SET email = NULL;",
+					dialect,
+				),
+			).toBe("unsafe")
+			expect(
+				rate("CREATE TABLE Users (id integer PRIMARY KEY, email text);\nUPDATE users SET email = NULL;", dialect),
+			).toBe("unsafe")
+		}
+	})
+
+	it("rates an UPDATE of a column added IF NOT EXISTS, or one the table had, unsafe", () => {
+		expect(
+			rate("ALTER TABLE users ADD COLUMN IF NOT EXISTS email text;\nUPDATE users SET email = NULL;", "postgres"),
+		).toBe("unsafe")
+		expect(rate("ALTER TABLE users ADD COLUMN email text;\nUPDATE users SET email = NULL;", "postgres")).toBe("unsafe")
+		expect(rate("ALTER TABLE users ADD COLUMN tier text;\nUPDATE users SET tier = 'free';", "postgres")).toBe(
+			"cautious",
+		)
+	})
+
+	it("matches a schema-qualified table whole: another schema's table makes no unqualified one fresh", () => {
+		expect(rate("CREATE TABLE other_schema.users (id int);\nUPDATE users SET email = NULL;", "postgres")).toBe("unsafe")
+		expect(pg("CREATE TABLE other_schema.audit (id int, n int);\nUPDATE audit SET n = 0;").safety).toBe("unsafe")
+		expect(pg("CREATE TABLE other_schema.audit (id int, n int);\nUPDATE Other_Schema.audit SET n = 0;").safety).toBe(
+			"cautious",
+		)
+	})
+
+	it("rates a write to a rebuild's copy before the rename unsafe, whatever the copy kept", () => {
+		const rebuild =
+			"CREATE TABLE new_users (id integer PRIMARY KEY, email text);\nINSERT INTO new_users (id, email) SELECT id, email FROM users;\nUPDATE new_users SET email = NULL;\nDROP TABLE users;\nALTER TABLE new_users RENAME TO users;"
+		const read = classifyMigration(rebuild, { before: before("sqlite"), dialect: "sqlite" })
+		expect(read.safety).toBe("unsafe")
+		expect(read.unsafeStatements.join("\n")).toContain("its copy is changed before the rename")
 	})
 })

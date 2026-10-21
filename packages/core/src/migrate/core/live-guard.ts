@@ -7,9 +7,14 @@
  */
 import type { Connection } from "../types.ts"
 import type { Pending } from "./plan-apply.ts"
-import { guardedClosures } from "./rebuild-guard.ts"
+import type { ExtractedSchema } from "../types.ts"
+import { locateRebuilds, reached, schemaAt } from "./rebuild-guard.ts"
+import { codeOf } from "./sql-code.ts"
+import { splitSqlStatements } from "./sql-scan.ts"
 
-const pairs = (rows: unknown[][]): Array<[string, string]> => rows.map((row) => [String(row[0]), String(row[1])])
+/* SQLite matches a table or trigger name without regard to case, and the catalog keeps each as written */
+const folded = (name: unknown): string => String(name).toLowerCase()
+const pairs = (rows: unknown[][]): Array<[string, string]> => rows.map((row) => [folded(row[0]), folded(row[1])])
 
 /* D1 refuses pragma_foreign_key_list as a table but runs PRAGMA foreign_key_list, so a driver that
    reads in batches is asked table by table, this many tables a round trip */
@@ -33,7 +38,7 @@ async function liveKeys(conn: Connection): Promise<Array<[string, string]>> {
 		const results = await executeEach(chunk.map((table) => `PRAGMA foreign_key_list("${table.replaceAll('"', '""')}")`))
 		for (const [i, result] of results.entries()) {
 			const parent = result.columns.indexOf("table")
-			for (const row of result.rows) keys.push([chunk[i] as string, String(row[parent])])
+			for (const row of result.rows) keys.push([folded(chunk[i]), folded(row[parent])])
 		}
 	}
 	return keys
@@ -62,14 +67,30 @@ function liveReach(table: string, keys: ReadonlyArray<[string, string]>): Set<st
 	return seen
 }
 
+/** Each table a file rebuilds, with the tables its drop reaches by the history (none for an unreferenced one) */
+function rebuildClosures(
+	sql: string,
+	before: ExtractedSchema,
+): Array<{ closure: string[]; table: string; temp: string }> {
+	const statements = splitSqlStatements(sql)
+	return locateRebuilds(
+		statements,
+		statements.map((stmt) => codeOf(stmt, "sqlite")),
+	).map((rebuild) => ({
+		closure: reached(rebuild.table, schemaAt(statements, rebuild, before)),
+		table: rebuild.table,
+		temp: rebuild.temp,
+	}))
+}
+
 /**
- * Refuses a pending guarded rebuild the live database reaches beyond its history: a table that
- * references the rebuilt one outside the guard's closure, or a trigger the history does not know
- * on a table the guard empties
+ * Refuses a pending rebuild the live database reaches beyond its history: a table that references
+ * the rebuilt one outside the guard's closure (empty when the history shows none, and no guard is
+ * written), or a trigger the history does not know on a table the guard empties
  */
 async function refuseUnseenReach(conn: Connection, pending: readonly Pending[]): Promise<void> {
 	const rebuilds = pending.flatMap(({ before, name, sql }) =>
-		guardedClosures(sql, before).map((rebuild) => ({ ...rebuild, before, name })),
+		rebuildClosures(sql, before).map((rebuild) => ({ ...rebuild, before, name })),
 	)
 	if (rebuilds.length === 0) return
 	const live = await liveSchema(conn)
@@ -82,7 +103,9 @@ async function refuseUnseenReach(conn: Connection, pending: readonly Pending[]):
 			)
 		}
 		const known = new Set(before.triggers.map((trigger) => trigger.name))
-		const trigger = live.triggers.find(([trig, on]) => kept.has(on) && !known.has(trig))
+		/* an unguarded rebuild empties no table: its drop takes its own triggers, and fires none */
+		const trigger =
+			closure.length === 0 ? undefined : live.triggers.find(([trig, on]) => kept.has(on) && !known.has(trig))
 		if (trigger !== undefined) {
 			throw new Error(
 				`${name} rebuilds ${table}, and the database's trigger ${trigger[0]} on ${trigger[1]}, which no migration made, would fire as comb keeps its rows; drop it first`,

@@ -31,7 +31,7 @@ import type { FtsState } from "./fts-migration.ts"
 import { extractSchema } from "./schema.ts"
 import { NO_TRANSACTION, readCopy, TXMODE_NONE } from "./rebuild-copy.ts"
 import { kept, quote, type Rebuild, renumberedBy, rowidCopy } from "./rebuild-rowids.ts"
-import { codeOf, lastPart, QNAME } from "./sql-code.ts"
+import { codeOf, nameKey, QNAME } from "./sql-code.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 
 const KEEP = "_comb_keep_"
@@ -55,13 +55,19 @@ function locateRebuilds(statements: readonly string[], codes: readonly string[])
 		const read = /^INSERT INTO\b/i.test(code) ? readCopy(statements[i] as string, () => "") : undefined
 		if (read !== undefined) copies.set(read.into, { copy: i, table: read.from })
 		const dropped = DROP.exec(code)?.[1]
-		const open = [...copies.values()].find((c) => c.table === lastPart(dropped ?? "") && c.drop === undefined)
+		const open = [...copies.values()].find((c) => c.table === nameKey(dropped ?? "", "sqlite") && c.drop === undefined)
 		if (dropped !== undefined && open !== undefined) open.drop = i
 		const [, temp, to] = RENAME.exec(code) ?? []
-		const copy = temp === undefined ? undefined : copies.get(lastPart(temp))
-		if (copy?.drop !== undefined && copy.table === lastPart(to as string)) {
-			out.push({ copy: copy.copy, drop: copy.drop, rename: i, table: copy.table, temp: lastPart(temp as string) })
-			copies.delete(lastPart(temp as string))
+		const copy = temp === undefined ? undefined : copies.get(nameKey(temp, "sqlite"))
+		if (copy?.drop !== undefined && copy.table === nameKey(to as string, "sqlite")) {
+			out.push({
+				copy: copy.copy,
+				drop: copy.drop,
+				rename: i,
+				table: copy.table,
+				temp: nameKey(temp as string, "sqlite"),
+			})
+			copies.delete(nameKey(temp as string, "sqlite"))
 		}
 	}
 	return out
@@ -280,19 +286,4 @@ function readGuards(
 	return out
 }
 
-/** Each referenced table a file rebuilds, with the tables its drop reaches by the history */
-function guardedClosures(
-	sql: string,
-	before: ExtractedSchema,
-): Array<{ closure: string[]; table: string; temp: string }> {
-	const statements = splitSqlStatements(sql)
-	return locateRebuilds(
-		statements,
-		statements.map((stmt) => codeOf(stmt, "sqlite")),
-	).flatMap((rebuild) => {
-		const closure = reached(rebuild.table, schemaAt(statements, rebuild, before))
-		return closure.length === 0 ? [] : [{ closure, table: rebuild.table, temp: rebuild.temp }]
-	})
-}
-
-export { guardedClosures, guardRebuilds, noGuards, readGuards }
+export { guardRebuilds, locateRebuilds, noGuards, reached, readGuards, schemaAt }

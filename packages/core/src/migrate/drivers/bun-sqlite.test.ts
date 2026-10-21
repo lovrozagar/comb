@@ -5,7 +5,10 @@
  * runs the same driver on bun:sqlite itself.
  */
 import { describe, expect, it, vi } from "vitest"
-import { createBunSqliteProvider } from "./bun-sqlite.ts"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { createBunSqliteProvider, openBunMemory } from "./bun-sqlite.ts"
 
 vi.mock("bun:sqlite", async () => {
 	const { DatabaseSync } = await import("node:sqlite")
@@ -57,5 +60,37 @@ describe("createBunSqliteProvider", () => {
 		).rejects.toThrow()
 		expect((await conn.execute("SELECT count(*) AS n FROM t")).rows).toEqual([[0]])
 		await conn.close()
+	})
+})
+
+describe("createBunSqliteProvider read-only, and the proof run's memory database, under the Node stand-in", () => {
+	it("refuses a missing file read-only, opens an existing one, and opens memory without it", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-bun-vitest-"))
+		try {
+			const path = join(dir, "core.db")
+			const provider = createBunSqliteProvider({ path, type: "bun-sqlite" })
+			await expect(provider.connect({ ...DB, readonly: true })).rejects.toThrow("does not exist")
+			await (await provider.connect(DB)).close()
+			const reader = await provider.connect({ ...DB, readonly: true })
+			expect((await reader.execute("SELECT 1 AS one")).rows).toEqual([[1]])
+			await reader.close()
+			const memory = await createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" }).connect({
+				...DB,
+				readonly: true,
+			})
+			await memory.close()
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
+	it("gives the proof run a memory database that runs statements and reads rows", async () => {
+		const db = await openBunMemory()
+		db.exec("CREATE TABLE t (a TEXT)")
+		db.run("INSERT INTO t VALUES (?)", ["007"])
+		db.run("INSERT INTO t VALUES ('x')")
+		expect(db.all("SELECT a FROM t WHERE a = ?", ["007"])).toEqual([{ a: "007" }])
+		expect(db.all("SELECT count(*) AS n FROM t")).toEqual([{ n: 2 }])
+		db.close()
 	})
 })

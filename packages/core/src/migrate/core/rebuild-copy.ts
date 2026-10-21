@@ -5,7 +5,7 @@
  * NULL, over the whole table. Anything else, a filter, a join, a substituted or renamed value, may
  * lose data, and the reading names what does.
  */
-import { IDENT, lastPart, QNAME, topLevel } from "./sql-code.ts"
+import { IDENT, lastPart, nameKey, QNAME, topLevel } from "./sql-code.ts"
 import { normalizeSql, segments } from "./sql-scan.ts"
 
 /* Atlas's directive to run a file outside a transaction, where the guard's deferred keys and refill fail */
@@ -156,40 +156,72 @@ function readCopy(stmt: string, createOf: (table: string) => string): Copy | und
 	}
 	const [targets, list] = [part(2), part(3)]
 	const columns = topLevelItems(targets.text, targets.mask).map(lastPart)
-	const into = lastPart(part(1).text)
+	const into = nameKey(part(1).text, "sqlite")
 	const problem =
 		clauseProblem(mask, list.mask, part(5).mask.trim()) ??
 		itemProblem(list.text, list.mask, { columns, create: createOf(into) })
-	return { columns, from: lastPart(part(4).text), into, problem }
+	return { columns, from: nameKey(part(4).text, "sqlite"), into, problem }
 }
 
 /** A SQLite rebuild of `table`: the temporary table it is copied into, and the columns copied */
-type Rebuilds = Map<string, { columns: string[]; problem: string | undefined; temp: string }>
+/** Each rebuilt table: the columns its copy writes, what is wrong with the copy, the copy, and the copy's CREATE TABLE */
+type Rebuilds = Map<string, { columns: string[]; definition: string; problem: string | undefined; temp: string }>
 
 // per-process-constant: a CREATE TABLE's table, composed once
 const CREATE = /* @__PURE__ */ new RegExp(`^CREATE (?:TEMP |TEMPORARY )?TABLE (?:IF NOT EXISTS )?(${QNAME})`, "i")
 // per-process-constant: a rename of one table to another, composed once
 const RENAME = /* @__PURE__ */ new RegExp(`^ALTER TABLE (${QNAME}) RENAME TO (${QNAME})$`, "i")
+// per-process-constant: the table a write changes, composed once
+const WRITES = /* @__PURE__ */ new RegExp(
+	`^(?:WITH\\b.*?\\b)?(?:UPDATE (?:OR \\w+ )?|DELETE FROM |(?:INSERT|REPLACE) (?:OR \\w+ )?INTO )(${QNAME})`,
+	"i",
+)
 
-/** The rebuilds a file makes: a copy into a temporary table renamed to the table it copied */
-function rebuildsOf(statements: readonly string[], codes: readonly string[]): Rebuilds {
+/**
+ * The rebuilds a file makes: a copy into a temporary table renamed to the table it copied. A write
+ * to the copy between the copy and the rename changes what lands, whatever the copy kept; the
+ * statements of comb's own guard, at `guarded`, are no such write.
+ */
+function rebuildsOf(
+	statements: readonly string[],
+	codes: readonly string[],
+	guarded: ReadonlySet<number> = new Set(),
+): Rebuilds {
 	const created = new Map<string, string>()
 	const copies = new Map<string, Copy>()
 	const rebuilds: Rebuilds = new Map()
 	for (const [i, code] of codes.entries()) {
+		/* comb's own guard empties and refills a copy it keeps, as written; it changes nothing */
+		const written = guarded.has(i) ? undefined : WRITES.exec(code)?.[1]
+		const changed = written === undefined ? undefined : copies.get(nameKey(written, "sqlite"))
+		if (changed !== undefined) changed.problem = "its copy is changed before the rename"
 		const table = CREATE.exec(code)?.[1]
-		if (table !== undefined) created.set(lastPart(table), statements[i] as string)
+		if (table !== undefined) created.set(nameKey(table, "sqlite"), statements[i] as string)
 		const copy = /^INSERT INTO\b/i.test(code)
 			? readCopy(statements[i] as string, (into) => created.get(into) ?? "")
 			: undefined
 		if (copy !== undefined) copies.set(copy.into, copy)
-		const [, temp, to] = RENAME.exec(code) ?? []
-		const done = temp === undefined ? undefined : copies.get(lastPart(temp))
-		if (to !== undefined && done !== undefined && done.from === lastPart(to)) {
-			rebuilds.set(done.from, { columns: done.columns, problem: done.problem, temp: lastPart(temp as string) })
+		const done = renamedCopy(code, copies)
+		if (done !== undefined) {
+			rebuilds.set(done.copy.from, {
+				columns: done.copy.columns,
+				/* a copy reads only into a table the file created, so its CREATE is known */
+				definition: created.get(done.temp) as string,
+				problem: done.copy.problem,
+				temp: done.temp,
+			})
 		}
 	}
 	return rebuilds
+}
+
+/** The copy a rename of its temporary table onto the table it read completes, if `code` is one */
+function renamedCopy(code: string, copies: ReadonlyMap<string, Copy>): { copy: Copy; temp: string } | undefined {
+	const [, temp, to] = RENAME.exec(code) ?? []
+	if (temp === undefined || to === undefined) return undefined
+	const key = nameKey(temp, "sqlite")
+	const copy = copies.get(key)
+	return copy !== undefined && copy.from === nameKey(to, "sqlite") ? { copy, temp: key } : undefined
 }
 
 export { type Copy, NO_TRANSACTION, readCopy, type Rebuilds, rebuildsOf, TXMODE_NONE }

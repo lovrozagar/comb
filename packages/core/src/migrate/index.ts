@@ -23,7 +23,6 @@ export {
 	extractDropStatements,
 	extractSchema,
 	generateMigrationHash,
-	makeIdempotent,
 	parseMigration,
 	splitSqlStatements,
 } from "./core/parse.ts"

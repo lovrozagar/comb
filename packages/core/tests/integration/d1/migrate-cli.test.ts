@@ -137,8 +137,9 @@ describeAtlas("comb migrate on D1 through wrangler, --local: history and the liv
 		write(dir, { "20260102000000_rebuild.sql": rebuild })
 		const refused = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "--local", "--yes"], refused)).toBe(1)
-		expect(refused.errors[0]).toContain(
-			"rebuilds u, which the database's table extra references although no migration made it do so",
+		/* the proof run on the database's own schema sees the cascade first; the live guard would refuse it too */
+		expect(refused.errors[0]).toMatch(
+			/^20260102000000_rebuild\.sql is unsafe \(proof run: loses \d+ of extra's \d+ rows/,
 		)
 		expect(column(dir, "SELECT count(*) FROM extra")).toEqual([1])
 		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])

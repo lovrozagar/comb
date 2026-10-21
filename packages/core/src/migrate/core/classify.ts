@@ -15,11 +15,13 @@
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
+import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
+import { callFindings, type Routines, routinesOf } from "./classify-routine.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart, writeFindings } from "./classify-write.ts"
-import { NO_TRANSACTION, type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
+import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
 import { noGuards, readGuards } from "./rebuild-guard.ts"
-import { codeOf, doBody, executedSql, lastPart, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
+import { codeOf, doBody, executedSql, nameKey, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 type ClassifyOptions = {
@@ -30,23 +32,14 @@ type ClassifyOptions = {
 }
 
 /** What the statements of one file show, read once before the rules run */
-type FileContext = {
-	/** a SQLite file Atlas runs outside a transaction, as `-- atlas:txmode none` asks */
-	txmodeNone: boolean
+type FileContext = RebuildContext & {
 	/** the columns the file has added so far and nothing has written since: a backfill may fill them */
 	fresh: Fresh
-	before: ExtractedSchema | undefined
 	created: Set<string>
-	dialect: Dialect
-	/** the functions and procedures this file or an earlier one creates, unquoted */
-	functions: Set<string>
-	rebuilds: Rebuilds
-	/** rebuilt tables others reference whose rebuild comb did not guard, with the tables their drop reaches */
-	unguarded: Map<string, string[]>
-	/** rebuilt tables comb guarded, with the tables whose rows the guard keeps */
-	kept: Map<string, string[]>
-	/** each rebuilt table's notes of the tables it leaves under new rowids */
-	renumbered: Map<string, string[]>
+	/** the functions and procedures an earlier file created, whose bodies this file does not hold */
+	earlierRoutines: Set<string>
+	/** the routines this file creates, each with what a call of it runs */
+	routines: Routines
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
 	reindexed: Set<string>
 	/** the statements the file prepares, by name, with the code each runs */
@@ -70,10 +63,6 @@ const RENAMES_NAMED = /* @__PURE__ */ new RegExp(
 	`^ALTER (?:TYPE|SCHEMA|VIEW|MATERIALIZED VIEW) (?:IF EXISTS )?${QNAME} (?:RENAME|SET SCHEMA|DROP ATTRIBUTE)\\b`,
 	"i",
 )
-// per-process-constant: a pattern composed from the name grammar, compiled once
-const CREATE_FUNCTION = /* @__PURE__ */ new RegExp(`^CREATE (?:OR REPLACE )?(?:FUNCTION|PROCEDURE) (${QNAME})`, "i")
-// per-process-constant: a pattern composed from the name grammar, compiled once
-const CALLED = /* @__PURE__ */ new RegExp(`(${QNAME})\\s*\\(`, "g")
 const EXPLAIN = /^EXPLAIN (?:\([^)]*\) )?(?:(?:ANALYZE|ANALYSE|VERBOSE) )*/i
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const INDEX_ON = /* @__PURE__ */ new RegExp(
@@ -94,47 +83,10 @@ function dropNames(code: string): string[] {
 	return splitTopLevel(list).map((name) => `DROP ${kind.toUpperCase()} ${unquote(name)}`)
 }
 
-/** A top-level SELECT or PERFORM that calls a function a migration created: it runs code comb did not read */
-function callFinding(code: string, ctx: FileContext): Finding | undefined {
-	if (!/^(?:SELECT|PERFORM)\b/i.test(code)) return undefined
-	const calls = [...code.matchAll(CALLED)].some((match) => ctx.functions.has(lastPart(match[1] as string)))
-	return calls ? { level: "cautious", note: "calls a function a migration created" } : undefined
-}
-
-/** A SQLite drop that is a table rebuild: lossless when it copies every column the table had */
-function rebuildFinding(code: string, ctx: FileContext): Finding | undefined {
-	const table = DROP_LIST.exec(code)?.[2]
-	const rebuild = table === undefined ? undefined : ctx.rebuilds.get(lastPart(table))
-	if (table === undefined || rebuild === undefined) return undefined
-	const name = lastPart(table)
-	if (ctx.txmodeNone) return { level: "unsafe", note: `rebuilds ${name}: ${NO_TRANSACTION}` }
-	const earlier = ctx.before?.tables.get(name)
-	if (earlier === undefined) return { level: "unsafe", note: `rebuilds ${name}, whose earlier columns are unknown` }
-	const reached = ctx.unguarded.get(name)
-	if (reached !== undefined) {
-		return {
-			level: "unsafe",
-			note: `rebuilds ${name} unguarded: its drop deletes or orphans the rows of ${reached.join(", ")}; let comb migrate diff write it`,
-		}
-	}
-	if (rebuild.problem !== undefined) return { level: "unsafe", note: `rebuilds ${name}: ${rebuild.problem}` }
-	const lost = earlier.filter((column) => !rebuild.columns.includes(column))
-	const kept = ctx.kept.get(name)
-	const renumbered = (ctx.renumbered.get(name) ?? []).map((note) => `; ${note}`).join("")
-	if (lost.length === 0 && kept !== undefined)
-		return { level: "cautious", note: `rebuilds ${name}; comb keeps the rows of ${kept.join(", ")}${renumbered}` }
-	if (lost.length === 0) return { level: "cautious", note: `rebuilds ${name}, copying every column${renumbered}` }
-	return {
-		drops: lost.map((column) => `DROP COLUMN ${name}.${column}`),
-		level: "unsafe",
-		note: `rebuilds ${name} without ${lost.join(", ")}`,
-	}
-}
-
 /** A CREATE INDEX that blocks writes to a table this file did not create */
 function indexWarning(code: string, ctx: FileContext): Finding | undefined {
 	const table = INDEX_ON.exec(code)?.[1]
-	if (table === undefined || ctx.created.has(lastPart(table))) return undefined
+	if (table === undefined || ctx.created.has(nameKey(table, ctx.dialect))) return undefined
 	return {
 		level: "lock",
 		note: `blocks writes to ${unquote(table)} while it builds; use CREATE INDEX CONCURRENTLY in its own -- atlas:txmode none file`,
@@ -143,12 +95,16 @@ function indexWarning(code: string, ctx: FileContext): Finding | undefined {
 
 /** The findings of one statement's code that are not ALTER TABLE actions */
 function statementFindings(code: string, ctx: FileContext): Finding[] {
-	const rebuild = rebuildFinding(code, ctx)
+	const rebuild = rebuildFinding(DROP_LIST.exec(code)?.[2], ctx)
 	if (rebuild !== undefined) return [rebuild]
 	const dropped = DROP_LIST.exec(code)
 	if (
 		dropped?.[1]?.toUpperCase() === "TABLE" &&
-		splitTopLevel(dropped[2] as string).every((t) => ctx.reindexed.has(lastPart(t)))
+		splitTopLevel(dropped[2] as string).every((t) => {
+			const key = nameKey(t, ctx.dialect)
+			/* only a table whose text lives elsewhere is an index: a stored-content FTS5 table holds the only copy */
+			return ctx.reindexed.has(key) && ctx.before?.externalFts.includes(key) === true
+		})
 	) {
 		return [{ level: "cautious", note: "an FTS index comb rebuilds from its content table" }]
 	}
@@ -161,8 +117,7 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 		...writeFindings(code, ctx.fresh),
 		...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, body, ctx)),
 	)
-	const call = callFinding(code, ctx)
-	if (call !== undefined) findings.push(call)
+	findings.push(...callFindings(code, { dialect: ctx.dialect, earlier: ctx.earlierRoutines, routines: ctx.routines }))
 	if (ctx.dialect === "postgres") {
 		const index = indexWarning(code, ctx)
 		if (index !== undefined) findings.push(index)
@@ -187,7 +142,11 @@ function findingsOf(code: string, stmt: string, ctx: FileContext): Finding[] {
  * EXECUTEs; any other EXECUTE runs SQL comb cannot read
  */
 function doFindings(stmt: string, ctx: FileContext): Finding[] {
-	const body = doBody(stmt)
+	return bodyFindings(doBody(stmt), ctx)
+}
+
+/** A Postgres body's findings: each of its statements, control words stripped, and the literal SQL it EXECUTEs */
+function bodyFindings(body: string, ctx: FileContext): Finding[] {
 	const read = (sql: string) =>
 		splitSqlStatements(sql, "postgres").flatMap((part) => {
 			const code = codeOf(part, "postgres").replace(
@@ -206,29 +165,23 @@ type Read = ReadStatement & { findings: Finding[] }
 function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dialect): Read[] {
 	const statements = splitSqlStatements(sql, dialect)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
-	const rebuilds: Rebuilds = dialect === "sqlite" ? rebuildsOf(statements, codes) : new Map()
 	const created = new Set(
 		codes.flatMap((code) => {
 			const table = CREATE_TABLE.exec(code)?.[1]
-			return table === undefined ? [] : [lastPart(table)]
+			return table === undefined ? [] : [nameKey(table, dialect)]
 		}),
 	)
-	const functions = new Set([
-		...(before?.functions ?? []),
-		...codes.flatMap((code) => {
-			const name = CREATE_FUNCTION.exec(code)?.[1]
-			return name === undefined ? [] : [lastPart(name)]
-		}),
-	])
 	const guards = dialect === "sqlite" ? readGuards(statements, codes, before) : noGuards()
+	const rebuilds: Rebuilds = dialect === "sqlite" ? rebuildsOf(statements, codes, guards.guarded) : new Map()
 	const reindexed = dialect === "sqlite" ? reindexedOf(statements) : new Set<string>()
 	const prepared = preparedOf(codes)
 	const ctx: FileContext = {
 		before,
 		created,
 		dialect,
-		functions,
-		fresh: freshStart(),
+		earlierRoutines: new Set(before?.functions ?? []),
+		routines: new Map(),
+		fresh: freshStart(before, dialect),
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
 		prepared,
 		rebuilds,
@@ -237,6 +190,10 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		renumbered: guards.renumbered,
 		unguarded: guards.unguarded,
 	}
+	/* a routine's body runs when it is called, after the file's backfills: nothing in it is fresh */
+	ctx.routines = routinesOf({ codes, dialect, statements }, (body) =>
+		bodyFindings(body, { ...ctx, fresh: freshStart(before, dialect) }),
+	)
 	return statements.map((stmt, i) => {
 		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
 		const findings = guards.guarded.has(i) ? [] : findingsOf(codes[i] as string, stmt, ctx)

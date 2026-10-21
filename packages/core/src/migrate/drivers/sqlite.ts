@@ -2,6 +2,7 @@
  * SQLite driver implementations (Turso, libsql), and SQLite schema introspection. The bun:sqlite
  * driver lives in bun-sqlite.ts, the one file Bun's APIs may appear in.
  */
+import { existsSync } from "node:fs"
 import type { Client, InValue } from "@libsql/client"
 import * as z from "zod"
 import type {
@@ -153,7 +154,11 @@ export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps
 
 export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider {
 	return {
-		async connect(): Promise<Connection> {
+		async connect(dbConfig?: ResolvedDatabaseConfig): Promise<Connection> {
+			/* libsql has no read-only mode for a file, and creates a missing one on connect */
+			const file = /^file:(?:\/\/)?([^?]*)/.exec(config.url)?.[1]
+			if (dbConfig?.readonly === true && file !== undefined && file !== ":memory:" && !existsSync(file))
+				throw new Error(`${file} does not exist; check and status open a database read-only, and create none`)
 			const { createClient } = await import("@libsql/client")
 			/* `Config` from @libsql/client does not admit an explicit undefined, so omit
 			   the key rather than pass one. */

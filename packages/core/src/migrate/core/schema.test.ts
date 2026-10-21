@@ -31,20 +31,35 @@ describe("extractSchema: foreign keys, triggers, functions and table shapes", ()
 		const schema = extractSchema(HISTORY)
 		expect(Object.fromEntries(schema.tableInfo)).toEqual({
 			post: {
+				affinity: { author: "INTEGER", id: "INTEGER", n: "INTEGER", slug: "TEXT", title: "TEXT" },
 				autoincrement: true,
+				conflicts: [],
 				generatedColumns: ["slug", "n"],
 				primaryKey: ["id"],
 				rowidAlias: true,
+				strict: false,
 				withoutRowid: false,
 			},
 			tag: {
+				affinity: { by: "INTEGER", name: "TEXT", post: "INTEGER" },
 				autoincrement: false,
+				conflicts: [],
 				generatedColumns: [],
 				primaryKey: ["post", "name"],
 				rowidAlias: false,
+				strict: false,
 				withoutRowid: true,
 			},
-			u: { autoincrement: true, generatedColumns: [], primaryKey: ["id"], rowidAlias: true, withoutRowid: false },
+			u: {
+				affinity: { boss: "INTEGER", id: "INTEGER" },
+				autoincrement: true,
+				conflicts: [],
+				generatedColumns: [],
+				primaryKey: ["id"],
+				rowidAlias: true,
+				strict: false,
+				withoutRowid: false,
+			},
 		})
 		expect(schema.triggers).toEqual([{ name: "post_ai", table: "post" }])
 	})
@@ -63,10 +78,13 @@ ALTER TABLE \`new_u\` RENAME TO \`u\`;`,
 			{ columns: ["boss"], onDelete: "NO ACTION", parent: "u", parentColumns: ["id"], table: "u" },
 		])
 		expect(rebuilt.tableInfo.get("u")).toEqual({
+			affinity: { boss: "INTEGER", id: "INTEGER" },
 			autoincrement: false,
+			conflicts: [],
 			generatedColumns: [],
 			primaryKey: ["id"],
 			rowidAlias: true,
+			strict: false,
 			withoutRowid: false,
 		})
 		expect(rebuilt.tableInfo.has("new_u")).toBe(false)

@@ -58,6 +58,15 @@ DROP TABLE \`_comb_keep_tag\`;
 		)
 	})
 
+	it("reaches a child whose key and trigger name the table in another case, as SQLite matches names (M7)", () => {
+		const mixed = extractSchema(`CREATE TABLE \`Users\` (\`id\` integer PRIMARY KEY, \`name\` text);
+CREATE TABLE \`post\` (\`id\` integer PRIMARY KEY, \`author\` integer REFERENCES \`USERS\`(\`id\`) ON DELETE CASCADE, \`title\` text);`)
+		const rebuild = REBUILD.replaceAll("`u`", "`users`").replaceAll("new_u", "new_users")
+		expect(guardRebuilds(rebuild, mixed)).toContain("CREATE TABLE `_comb_keep_post` AS SELECT")
+		const triggered = extractSchema("CREATE TRIGGER audit AFTER DELETE ON POST BEGIN SELECT 1; END;", mixed)
+		expect(() => guardRebuilds(rebuild, triggered)).toThrow("which fires its trigger audit")
+	})
+
 	it("refuses a reached table whose columns the migrations do not show", () => {
 		const partial = { ...BEFORE, tableInfo: new Map([...BEFORE.tableInfo].filter(([table]) => table !== "tag")) }
 		expect(() => guardRebuilds(REBUILD, partial, FTS)).toThrow(

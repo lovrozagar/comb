@@ -52,6 +52,13 @@ function io(dir: string, confirm?: (question: string) => Promise<boolean>) {
 	}
 }
 
+/** The database at `url` made, holding one table, `keep`: not an empty target */
+async function keep(url: string): Promise<void> {
+	const client = createClient({ url })
+	await client.execute("CREATE TABLE keep (x)")
+	client.close()
+}
+
 async function tables(url: string): Promise<string[]> {
 	const client = createClient({ url })
 	try {
@@ -95,19 +102,20 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 			"20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);",
 			"20260102000000_drop.sql": "DROP TABLE post;",
 		})
+		await keep(url("local.db"))
 		/* every pending file is approved before any applies, so a refusal leaves even the first unapplied */
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(1)
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "keep"])
 
 		const declined = io(dir, async () => false)
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], declined)).toBe(1)
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "keep"])
 
 		const asked: string[] = []
 		const accepted = io(dir, async (question) => (asked.push(question), true))
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], accepted)).toBe(0)
 		expect(asked.join("\n")).toContain("DROP TABLE post")
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "keep"])
 	})
 
 	it("applies a cautious migration with --yes without asking, and asks about an unsafe one unless the file approves it", async () => {
@@ -116,22 +124,25 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 			"2_index.sql": "DROP INDEX idx_post;",
 			"3_drop.sql": "DROP TABLE post;",
 		})
+		await keep(url("local.db"))
 		const asked: string[] = []
 		const declined = io(dir, async (question) => (asked.push(question), false))
 		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], declined)).toBe(1)
 		expect(asked).toHaveLength(1)
 		expect(asked[0]).toContain("DROP TABLE post")
 		expect(declined.errors.join("\n")).toContain("3_drop.sql is unsafe")
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "keep"])
 		fs.writeFileSync(
 			path.join(dir, "atlas-migrations", "3_drop.sql"),
 			"-- comb:allow-unsafe: post is retired\nDROP TABLE post;",
 		)
 		spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
 		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], io(dir))).toBe(0)
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations"])
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "keep"])
 	})
+})
 
+describe("migrate apply through comb.migrate.config.ts (A-H4): files recorded by an earlier comb", () => {
 	it("skips a file recorded under its pre-0.5.0 hash", async () => {
 		const sql = "INSERT INTO t VALUES ('a -- b\nc');"
 		const { dir, url } = project({ "1_t.sql": "CREATE TABLE t (v TEXT);", "2_row.sql": sql })
@@ -223,9 +234,52 @@ describeAtlas("migrate apply refuses a rebuild outside the file's transaction", 
 	}, 60_000)
 })
 
+describe("migrate apply runs each file as written (M12)", () => {
+	it("applies an index as the file writes it: a different index of that name fails the apply (M12)", async () => {
+		const { dir, url } = project({
+			"20260101000000_init.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);",
+			"20260102000000_idx.sql": "CREATE UNIQUE INDEX idx_email ON users (email);",
+		})
+		expect(
+			await runCli(
+				["migrate", "apply", "core", "-e", "local", "--file", "atlas-migrations/20260101000000_init.sql"],
+				io(dir),
+			),
+		).toBe(0)
+		const client = createClient({ url: url("local.db") })
+		await client.execute("CREATE INDEX idx_email ON users (id)")
+		const apply = io(dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], apply)).toBe(1)
+		expect(apply.errors.join("\n")).toMatch(/idx_email already exists/)
+		client.close()
+	})
+})
+
+describe("migrate apply on an empty target (C3)", () => {
+	it("applies a history with an unsafe file to an empty target without the gate, saying so; a target with a table still refuses (C3)", async () => {
+		const history = {
+			"20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);",
+			"20260102000000_drop.sql": "DROP TABLE post;\nCREATE TABLE note (id TEXT PRIMARY KEY);",
+		}
+		const fresh = project(history)
+		const run = io(fresh.dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], run)).toBe(0)
+		expect(run.outputs[0]).toBe(
+			"Empty target: no tables and no applied history, so nothing can be lost; 2 files apply without the unsafe gate",
+		)
+		expect(await tables(fresh.url("local.db"))).toEqual(["__drizzle_migrations", "note"])
+		const used = project(history)
+		await keep(used.url("local.db"))
+		const refused = io(used.dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], refused)).toBe(1)
+		expect(refused.errors.join("\n")).toContain("20260102000000_drop.sql is unsafe")
+	})
+})
+
 describe("migrate apply and check --json on libsql (C5)", () => {
 	it("prints one JSON object as the only stdout, the human lines on stderr", async () => {
-		const { dir } = project({ "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" })
+		const { dir, url } = project({ "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" })
+		createClient({ url: url("local.db") }).close()
 		const check = io(dir)
 		expect(await runCli(["migrate", "check", "core", "-e", "local", "--json"], check)).toBe(0)
 		expect(check.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
@@ -237,6 +291,19 @@ describe("migrate apply and check --json on libsql (C5)", () => {
 			{ applied: ["20260101000000_init.sql"], database: "core", pending: [], refused: [] },
 		])
 		expect(apply.errors).toContain("Apply: 20260101000000_init.sql")
+	})
+
+	it("reports the pending files with a refusal, the refused one among them (M16)", async () => {
+		const { dir, url } = project({
+			"20260101000000_init.sql": "CREATE TABLE users (id TEXT PRIMARY KEY);",
+			"20260102000000_drop.sql": "DROP TABLE users;",
+		})
+		await keep(url("local.db"))
+		const check = io(dir)
+		expect(await runCli(["migrate", "check", "core", "-e", "local", "--yes", "--json"], check)).toBe(1)
+		const [report] = check.outputs.map((line) => JSON.parse(line) as { pending: string[]; refused: string[] })
+		expect(report?.pending).toEqual(["20260101000000_init.sql", "20260102000000_drop.sql"])
+		expect(report?.refused[0]).toMatch(/^20260102000000_drop\.sql is unsafe/)
 	})
 
 	it("reports a config that throws a string as that string in refused", async () => {

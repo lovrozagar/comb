@@ -1,5 +1,5 @@
 import { createClient } from "@libsql/client"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { CliIo } from "./output.ts"
@@ -40,6 +40,13 @@ async function tables(url: string): Promise<string[]> {
 	}
 }
 
+/** The database at `url` made, holding one table, `keep`, as an existing database would */
+async function keepOnly(url: string): Promise<void> {
+	const client = createClient({ url })
+	await client.execute("CREATE TABLE keep (x)")
+	client.close()
+}
+
 describe("migrate apply: arguments", () => {
 	it("prints apply usage when the database name is missing, and a missing dir", async () => {
 		const dir = project()
@@ -68,7 +75,12 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 		const { dir, url } = configured({ "1_init.sql": "CREATE TABLE post (id TEXT);" })
 		const first = io(dir)
 		expect(await runCli(["migrate", "apply", "core"], first)).toBe(0)
-		expect(first.outputs).toEqual(["Apply: 1_init.sql", "\nDone: 1 applied, 0 skipped"])
+		/* a database with no tables and no history holds nothing to lose (C3) */
+		expect(first.outputs).toEqual([
+			"Empty target: no tables and no applied history, so nothing can be lost; 1 file apply without the unsafe gate",
+			"Apply: 1_init.sql",
+			"\nDone: 1 applied, 0 skipped",
+		])
 		expect(await tables(url)).toEqual(["__drizzle_migrations", "post"])
 		const again = io(dir)
 		expect(await runCli(["migrate", "apply", "core"], again)).toBe(0)
@@ -109,22 +121,25 @@ describe("migrate apply: approving an unsafe migration", () => {
 
 	it("refuses it with --yes and with nobody to ask, and asks on a terminal", async () => {
 		const { dir, url } = configured(DROP)
+		await keepOnly(url)
 		const refused = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "--yes"], refused)).toBe(1)
-		expect(refused.errors).toEqual([UNSAFE_REFUSAL("2_drop.sql", "DROP TABLE post")])
+		expect(refused.errors).toEqual([
+			UNSAFE_REFUSAL("2_drop.sql", "DROP TABLE post; proof run: loses every row of post"),
+		])
 		const asked: string[] = []
 		const no = io(dir, async (q) => (asked.push(q), false))
 		expect(await runCli(["migrate", "apply", "core", "--yes"], no)).toBe(1)
 		expect(asked[0]).toContain("This affects: core (core-dev)")
 		/* every pending file is approved before any applies, so the refusal left 1_init.sql unapplied too */
-		expect(await tables(url)).toEqual(["__drizzle_migrations"])
+		expect(await tables(url)).toEqual(["__drizzle_migrations", "keep"])
 		expect(
 			await runCli(
 				["migrate", "apply", "core"],
 				io(dir, async () => true),
 			),
 		).toBe(0)
-		expect(await tables(url)).toEqual(["__drizzle_migrations"])
+		expect(await tables(url)).toEqual(["__drizzle_migrations", "keep"])
 	})
 
 	it("runs it without asking when the file approves it with a reason, and says so", async () => {
@@ -132,22 +147,25 @@ describe("migrate apply: approving an unsafe migration", () => {
 			...DROP,
 			"2_drop.sql": "-- comb:allow-unsafe: post moved to the archive db\nDROP TABLE post;",
 		})
+		await keepOnly(url)
 		const run = io(dir)
 		expect(await runCli(["migrate", "apply", "core"], run)).toBe(0)
 		expect(run.outputs).toContain("Approved in 2_drop.sql: post moved to the archive db")
-		expect(await tables(url)).toEqual(["__drizzle_migrations"])
+		expect(await tables(url)).toEqual(["__drizzle_migrations", "keep"])
 	})
 
 	it("takes no approval without a reason", async () => {
-		const { dir } = configured({ ...DROP, "2_drop.sql": "-- comb:allow-unsafe:\nDROP TABLE post;" })
+		const { dir, url } = configured({ ...DROP, "2_drop.sql": "-- comb:allow-unsafe:\nDROP TABLE post;" })
+		await keepOnly(url)
 		const run = io(dir)
 		expect(await runCli(["migrate", "apply", "core"], run)).toBe(1)
-		expect(run.errors).toEqual([UNSAFE_REFUSAL("2_drop.sql", "DROP TABLE post")])
+		expect(run.errors).toEqual([UNSAFE_REFUSAL("2_drop.sql", "DROP TABLE post; proof run: loses every row of post")])
 	})
 
 	it("reads a table rebuild against the earlier files: a column it leaves out is unsafe", async () => {
 		const init = "CREATE TABLE post (id TEXT, title TEXT, body TEXT);"
 		const lossy = configured({ "1_init.sql": init, "2_rebuild.sql": rebuild("id, title") })
+		await keepOnly(lossy.url)
 		const run = io(lossy.dir)
 		expect(await runCli(["migrate", "apply", "core", "--yes"], run)).toBe(1)
 		expect(run.errors[0]).toContain("2_rebuild.sql is unsafe (DROP COLUMN post.body;")
@@ -166,7 +184,8 @@ describe("migrate apply: approving a cautious migration", () => {
 	}
 
 	it("refuses it with nobody to ask, and runs it with --yes or a yes on a terminal", async () => {
-		const { dir } = configured(INDEX)
+		const { dir, url } = configured(INDEX)
+		await keepOnly(url)
 		const refused = io(dir)
 		expect(await runCli(["migrate", "apply", "core"], refused)).toBe(1)
 		expect(refused.errors).toEqual([
@@ -174,6 +193,7 @@ describe("migrate apply: approving a cautious migration", () => {
 		])
 		expect(await runCli(["migrate", "apply", "core", "--yes"], io(dir))).toBe(0)
 		const again = configured(INDEX)
+		await keepOnly(again.url)
 		expect(
 			await runCli(
 				["migrate", "apply", "core"],
@@ -186,15 +206,27 @@ describe("migrate apply: approving a cautious migration", () => {
 describe("migrate check", () => {
 	it("checks and approves what is pending, applying nothing, and refuses what apply would refuse", async () => {
 		const { dir, url } = configured({ "1_init.sql": "CREATE TABLE post (id TEXT);" })
+		await keepOnly(url)
 		const check = io(dir)
 		expect(await runCli(["migrate", "check", "core"], check)).toBe(0)
 		expect(check.outputs).toEqual(["\nCheck passed: 1 pending: 1_init.sql"])
-		expect(await tables(url)).toEqual(["__drizzle_migrations"])
+		/* check reads the history, and creates no table to read it from (M10) */
+		expect(await tables(url)).toEqual(["keep"])
 		writeFileSync(join(dir, "m", "2_drop.sql"), "DROP TABLE post;")
 		writeSum(join(dir, "m"))
 		const refused = io(dir)
 		expect(await runCli(["migrate", "check", "core", "--yes"], refused)).toBe(1)
 		expect(refused.errors[0]).toMatch(/^2_drop\.sql is unsafe/)
+	})
+
+	it("refuses a database file that does not exist, and creates none (M10)", async () => {
+		const { dir } = configured({ "1_init.sql": "CREATE TABLE post (id TEXT);" })
+		const check = io(dir)
+		expect(await runCli(["migrate", "check", "core"], check)).toBe(1)
+		expect(check.errors[0]).toMatch(
+			/core\.db does not exist; check and status open a database read-only, and create none$/,
+		)
+		expect(existsSync(join(dir, "core.db"))).toBe(false)
 	})
 
 	it("refuses a directory whose atlas.sum does not match, and a pending file that sorts before an applied one", async () => {
@@ -241,14 +273,24 @@ describe("migrate baseline", () => {
 	})
 })
 
-describe("migrate status: comb's own history", () => {
-	it("is for databases whose history Atlas or wrangler keeps, and has its own usage", async () => {
-		const { dir } = configured({})
-		const status = io(dir)
-		expect(await runCli(["migrate", "status", "core"], status)).toBe(1)
-		expect(status.errors).toEqual([
-			"migrate status reads the history Atlas or wrangler records, which Postgres and D1 databases have; core (core-dev) keeps comb's own",
+describe("migrate status: comb's own history (M17)", () => {
+	it("lists the files the database records and the ones pending, reading only, and has its own usage", async () => {
+		const { dir, url } = configured({ "1_a.sql": "CREATE TABLE a (x);", "2_b.sql": "CREATE TABLE b (x);" })
+		await keepOnly(url)
+		const before = io(dir)
+		expect(await runCli(["migrate", "status", "core"], before)).toBe(0)
+		expect(before.outputs).toEqual(["Applied: none", "Pending: 1_a.sql, 2_b.sql"])
+		expect(await tables(url)).toEqual(["keep"])
+		expect(await runCli(["migrate", "apply", "core", "--file", "m/1_a.sql"], io(dir))).toBe(0)
+		const after = io(dir)
+		expect(await runCli(["migrate", "status", "core", "--json"], after)).toBe(0)
+		expect(after.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
+			{ applied: ["1_a.sql"], database: "core", pending: ["2_b.sql"], refused: [] },
 		])
+		expect(await runCli(["migrate", "apply", "core"], io(dir))).toBe(0)
+		const done = io(dir)
+		expect(await runCli(["migrate", "status", "core"], done)).toBe(0)
+		expect(done.outputs).toEqual(["Applied: 1_a.sql, 2_b.sql", "Pending: none"])
 		const usage = io(dir)
 		expect(await runCli(["migrate", "status"], usage)).toBe(1)
 		expect(usage.errors).toEqual(["Usage: comb migrate status <database> [-e <env>] [--dir <path>]"])

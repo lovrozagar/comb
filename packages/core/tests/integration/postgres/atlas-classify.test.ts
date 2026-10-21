@@ -51,7 +51,12 @@ describePg("the destructive-change gate on Atlas's Postgres output", () => {
 			const from = `file://${join(dir, "base.sql")}`
 			const args = ["schema", "diff", "--from", from, "--to", `file://${join(dir, "to.sql")}`, "--dev-url", dev]
 			const run = spawnSync("atlas", args, { encoding: "utf8" })
-			expect(run.stderr).toBe("")
+			/* an empty diff with an empty stderr once showed here; its exit says whether Atlas finished */
+			expect({ signal: run.signal, status: run.status, stderr: run.stderr }).toEqual({
+				signal: null,
+				status: 0,
+				stderr: "",
+			})
 			return run.stdout
 		}
 

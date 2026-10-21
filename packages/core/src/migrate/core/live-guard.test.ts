@@ -68,6 +68,45 @@ describe("refuseUnseenReach on libsql", () => {
 	})
 })
 
+describe("refuseUnseenReach on a rebuild the history leaves unguarded, and across name case (M6, M7)", () => {
+	const lone = "CREATE TABLE `u` (`id` integer PRIMARY KEY);"
+	const loneBefore = extractSchema(lone)
+	const unguarded =
+		"CREATE TABLE `new_u` (`id` integer NOT NULL, PRIMARY KEY (`id`));\nINSERT INTO `new_u` (`id`) SELECT `id` FROM `u`;\nDROP TABLE `u`;\nALTER TABLE `new_u` RENAME TO `u`;\n"
+	const lonePending: Pending[] = [
+		{
+			before: loneBefore,
+			migration: parseMigration(unguarded, "2_rebuild.sql", { before: loneBefore }),
+			name: "2_rebuild.sql",
+			sql: unguarded,
+		},
+	]
+
+	it("refuses a table no migration made that references a rebuilt table the history shows unreferenced", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple(
+			`${lone}\nCREATE TABLE \`sessions\` (\`u\` integer REFERENCES \`u\`(\`id\`) ON DELETE CASCADE);`,
+		)
+		await expect(refuseUnseenReach(conn, lonePending)).rejects.toThrow(
+			"2_rebuild.sql rebuilds u, which the database's table sessions references although no migration made it do so",
+		)
+		await conn.close()
+	})
+
+	it("lets an unguarded rebuild through when nothing live reaches it, and its own triggers go with its drop", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple(`${lone}\nCREATE TRIGGER \`u_ai\` AFTER INSERT ON \`u\` BEGIN SELECT 1; END;`)
+		await expect(refuseUnseenReach(conn, lonePending)).resolves.toBeUndefined()
+		await conn.close()
+	})
+
+	it("sees a live table whose key names the rebuilt table in another case", async () => {
+		const conn = await database("CREATE TABLE `audit` (`u` integer REFERENCES `U`(`id`) ON DELETE CASCADE);")
+		await expect(refuseUnseenReach(conn, pending(REBUILD))).rejects.toThrow("the database's table audit references")
+		await conn.close()
+	})
+})
+
 describe("refuseUnseenReach through a driver that reads in batches, as D1's does", () => {
 	it("reads each table's keys by PRAGMA, skipping D1's own tables, and finds the same reach", async () => {
 		const conn = await database(

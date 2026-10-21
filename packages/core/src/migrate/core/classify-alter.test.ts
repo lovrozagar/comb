@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { alterTableFindings } from "./classify-alter.ts"
+import { classifyMigration } from "./classify.ts"
 
 const pg = { dialect: "postgres", rebuilds: new Map<string, { temp: string }>() } as const
 const levels = (code: string, ctx: Parameters<typeof alterTableFindings>[1] = pg) =>
@@ -40,5 +41,21 @@ describe("alterTableFindings", () => {
 	it("calls an unknown action safe, and a new owner cautious, as an owner bypasses row level security", () => {
 		expect(levels("ALTER TABLE post SET (fillfactor = 70)")).toEqual([])
 		expect(levels("ALTER TABLE post OWNER TO r")).toEqual(["cautious"])
+	})
+})
+
+describe("classifyMigration on row level security (M15)", () => {
+	it.each([
+		"ALTER TABLE post ENABLE ROW LEVEL SECURITY",
+		"ALTER TABLE post FORCE ROW LEVEL SECURITY",
+		"ALTER TABLE post NO FORCE ROW LEVEL SECURITY",
+		"ALTER TABLE post DISABLE ROW LEVEL SECURITY",
+		"CREATE POLICY p ON post AS RESTRICTIVE USING (false)",
+	])("rates %j cautious: what the deployed code reads changes", (sql) => {
+		expect(classifyMigration(sql, { dialect: "postgres" }).safety).toBe("cautious")
+	})
+
+	it("leaves a permissive policy safe", () => {
+		expect(classifyMigration("CREATE POLICY p ON post USING (true)", { dialect: "postgres" }).safety).toBe("safe")
 	})
 })

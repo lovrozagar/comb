@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest"
 import type { ExtractedSchema } from "../types.ts"
 import { classifyMigration, extractDropStatements } from "./classify.ts"
+import { extractSchema } from "./schema.ts"
 
 const pg = (sql: string) => classifyMigration(sql, { dialect: "postgres" })
 const lite = (sql: string, before?: ExtractedSchema) => classifyMigration(sql, { before, dialect: "sqlite" })
 const schemaWith = (table: string, columns: string[]): ExtractedSchema => ({
 	droppedTables: [],
+	externalFts: [],
 	foreignKeys: [],
 	functions: [],
 	indexes: [],
@@ -140,11 +142,6 @@ describe("classifyMigration on SQL that hid a destructive change", () => {
 
 	it.each([
 		["ALTER SEQUENCE IF EXISTS s RESTART;", "a sequence restart with IF EXISTS"],
-		[
-			"CREATE FUNCTION purge() RETURNS void LANGUAGE sql AS $$ DELETE FROM users $$;\nSELECT purge();",
-			"a call of a function the file creates",
-		],
-		['CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nPERFORM "p"();', "a PERFORM"],
 		["ALTER TABLE post NO FORCE ROW LEVEL SECURITY", "NO FORCE ROW LEVEL SECURITY"],
 	])("calls %j cautious (%s)", (sql) => {
 		expect(pg(sql).safety).toBe("cautious")
@@ -354,5 +351,88 @@ describe("classifyMigration: each statement once", () => {
 			cautiousStatements: [],
 			unsafeStatements: ["DROP FUNCTION f CASCADE"],
 		})
+	})
+})
+
+describe("classifyMigration on a SQLite trigger that writes (M1)", () => {
+	it("rates a trigger that deletes or nulls rows unsafe, as every later insert runs it", () => {
+		for (const body of ["DELETE FROM users", "UPDATE users SET email = NULL"]) {
+			const sql = `DROP TRIGGER IF EXISTS wipe;\nCREATE TRIGGER wipe AFTER INSERT ON users BEGIN ${body}; END;\nINSERT INTO users (email) VALUES ('x');`
+			expect(classifyMigration(sql, { dialect: "sqlite" }).safety).toBe("unsafe")
+		}
+	})
+})
+
+describe("classifyMigration on a call of a routine the file creates (M2)", () => {
+	const wipe = "CREATE FUNCTION wipe() RETURNS int AS $$ BEGIN DELETE FROM users; RETURN 1; END $$ LANGUAGE plpgsql;\n"
+
+	it.each([
+		["SELECT wipe();", "a SELECT"],
+		["INSERT INTO log (n) VALUES (wipe());", "an INSERT's values"],
+		["CREATE TABLE snap AS SELECT wipe() AS n;", "a CREATE TABLE AS"],
+		["CREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();", "a trigger"],
+	])("rates %j unsafe when the routine's body deletes rows (%s)", (call) => {
+		expect(pg(`${wipe}${call}`).safety).toBe("unsafe")
+		expect(pg(wipe).safety).toBe("safe")
+	})
+
+	it("rates a call by the body: harmless safe, a quoted SQL body that nulls unsafe, another language cautious", () => {
+		expect(pg('CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nCALL "p"();').safety).toBe("cautious")
+		expect(pg('CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nPERFORM "p"();').safety).toBe("safe")
+		expect(
+			pg("CREATE FUNCTION n() RETURNS int LANGUAGE sql AS 'UPDATE users SET email = NULL RETURNING 1';\nSELECT n();")
+				.safety,
+		).toBe("unsafe")
+		expect(pg("CREATE FUNCTION py() RETURNS int LANGUAGE plpython3u AS $$ return 1 $$;\nSELECT py();").safety).toBe(
+			"cautious",
+		)
+	})
+})
+
+/** Atlas's rebuild of t into a new table of `columns`, copying id, code and note */
+const rebuildTo = (columns: string, tail = "") =>
+	`CREATE TABLE new_t (${columns})${tail};\nINSERT INTO new_t (id, code, note) SELECT id, code, note FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;`
+
+/** Atlas's rebuild of g, copying id and a, into a new table whose up is `up` */
+const generatedCopy = (up: string) =>
+	`CREATE TABLE new_g (id INTEGER PRIMARY KEY, a TEXT, up ${up});\nINSERT INTO new_g (id, a) SELECT id, a FROM g;\nDROP TABLE g;\nALTER TABLE new_g RENAME TO g;`
+
+describe("classifyMigration on a SQLite rebuild whose new table changes what lands (M5, M13)", () => {
+	const before = extractSchema("CREATE TABLE t (id INTEGER PRIMARY KEY, code TEXT, note varchar(20));")
+	const rate = (sql: string) => lite(sql, before)
+
+	it.each([
+		["id INTEGER PRIMARY KEY, code INTEGER, note text", "", "changes code's affinity from TEXT to INTEGER"],
+		["id INTEGER PRIMARY KEY, code TEXT UNIQUE ON CONFLICT IGNORE, note text", "", "adds ON CONFLICT code: IGNORE"],
+		["id INTEGER PRIMARY KEY, code TEXT NOT NULL ON CONFLICT IGNORE, note text", "", "adds ON CONFLICT code: IGNORE"],
+		[
+			"id INTEGER PRIMARY KEY, code TEXT NOT NULL ON CONFLICT REPLACE DEFAULT 'gone', note text",
+			"",
+			"adds ON CONFLICT code: REPLACE",
+		],
+		[
+			"id INTEGER PRIMARY KEY, code TEXT, note text, UNIQUE (code, note) ON CONFLICT REPLACE",
+			"",
+			"adds ON CONFLICT code,note: REPLACE",
+		],
+		["id INTEGER PRIMARY KEY, code TEXT, note TEXT", " STRICT", "makes the table STRICT"],
+	])("rates a rebuild to (%s)%s unsafe: %s", (columns, tail, note) => {
+		const read = rate(rebuildTo(columns, tail))
+		expect(read.safety).toBe("unsafe")
+		expect(read.unsafeStatements.join("\n")).toContain(note)
+	})
+
+	it("keeps a rebuild that keeps each affinity cautious: varchar to text, integer to INT", () => {
+		expect(rate(rebuildTo("id INT PRIMARY KEY, code text NOT NULL DEFAULT '', note TEXT")).safety).toBe("cautious")
+	})
+
+	it("leaves out a generated column the new table still generates, and counts one it no longer does (M13)", () => {
+		const generated = extractSchema(
+			"CREATE TABLE g (id INTEGER PRIMARY KEY, a TEXT, up TEXT GENERATED ALWAYS AS (upper(a)) VIRTUAL);",
+		)
+		expect(lite(generatedCopy("TEXT GENERATED ALWAYS AS (upper(a)) VIRTUAL"), generated).safety).toBe("cautious")
+		const plain = lite(generatedCopy("TEXT"), generated)
+		expect(plain.safety).toBe("unsafe")
+		expect(plain.unsafeStatements.join("\n")).toContain("rebuilds g without up")
 	})
 })

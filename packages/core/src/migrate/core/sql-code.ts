@@ -27,6 +27,25 @@ const unquote = (name: string): string => [...name.matchAll(PARTS)].map((match) 
 /** The last part of a name: the table of `"public"."post"` is `post` */
 const lastPart = (name: string): string => unquote(name).split(".").at(-1) as string
 
+/**
+ * The name a table, trigger or routine is matched by: its last part as `dialect` resolves it.
+ * SQLite matches every identifier without regard to ASCII case, quoted or not; Postgres folds an
+ * unquoted name to lower case and keeps a quoted one exact.
+ */
+function nameKey(name: string, dialect: Dialect): string {
+	return partKey([...name.matchAll(PARTS)].at(-1)?.[0] ?? name, dialect)
+}
+
+/** One name part as `dialect` resolves it (see nameKey) */
+function partKey(part: string, dialect: Dialect): string {
+	const bare = unquotePart(part)
+	return dialect === "sqlite" || bare === part ? bare.toLowerCase() : bare
+}
+
+/** A whole name, schema included when written, each part as `dialect` resolves it: `Public."Post"` is `public.Post` */
+const qualifiedKey = (name: string, dialect: Dialect): string =>
+	[...name.matchAll(PARTS)].map((match) => partKey(match[0], dialect)).join(".")
+
 /** A dollar-quoted body without its tags */
 function bodyText(text: string): string {
 	const tag = DOLLAR_TAG.exec(text)?.[0] as string
@@ -98,4 +117,17 @@ function executedSql(body: string): string[] {
 	})
 }
 
-export { bodyText, codeOf, doBody, executedSql, IDENT, lastPart, QNAME, splitTopLevel, topLevel, unquote }
+export {
+	bodyText,
+	codeOf,
+	doBody,
+	executedSql,
+	IDENT,
+	lastPart,
+	nameKey,
+	QNAME,
+	qualifiedKey,
+	splitTopLevel,
+	topLevel,
+	unquote,
+}

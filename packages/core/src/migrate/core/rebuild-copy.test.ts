@@ -55,6 +55,22 @@ describe("rebuildsOf", () => {
 				statements,
 				statements.map((stmt) => codeOf(stmt, "sqlite")),
 			),
-		).toEqual(new Map([["t", { columns: ["id"], problem: "its copy has WHERE", temp: "new_t" }]]))
+		).toEqual(new Map([["t", { columns: ["id"], definition: CREATE, problem: "its copy has WHERE", temp: "new_t" }]]))
+	})
+})
+
+describe("rebuildsOf on a rename that completes no copy", () => {
+	it("reads a copy renamed onto a table other than the one it read as no rebuild", () => {
+		const statements = [
+			CREATE,
+			"INSERT INTO `new_t` (`id`) SELECT `id` FROM `t`",
+			"ALTER TABLE `new_t` RENAME TO `other`",
+		]
+		expect(
+			rebuildsOf(
+				statements,
+				statements.map((stmt) => codeOf(stmt, "sqlite")),
+			),
+		).toEqual(new Map())
 	})
 })

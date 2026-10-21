@@ -2,7 +2,7 @@
 export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
 export { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./core/apply.ts";
 export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
-export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, makeIdempotent, parseMigration, splitSqlStatements, } from "./core/parse.ts";
+export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, parseMigration, splitSqlStatements, } from "./core/parse.ts";
 export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCircuitBreaker, withRetry, } from "./core/utils.ts";
 export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./drivers/index.ts";
 export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, MultiTenantConfig, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
@@ -94,8 +94,10 @@ export declare function legacyMigrationHash(sql: string): string;
 export declare function migrationHashes(sql: string): string[];
 export { extractSchema };
 export { classifyMigration, extractDropStatements };
-export declare function makeIdempotent(statements: string[]): string[];
-/** A migration file, classified against `options.before`, the schema the earlier files leave */
+/**
+ * A migration file, classified against `options.before`, the schema the earlier files leave; its
+ * statements are applied as written, as wrangler and Atlas apply them
+ */
 export declare function parseMigration(sql: string, filename: string, options?: ClassifyOptions): ParsedMigration;
 
 // migrate/core/utils.d.ts
@@ -224,6 +226,8 @@ export type ResolvedDatabaseConfig = {
     name: string;
     migrationsDir: string;
     drizzleConfigPath?: string | undefined;
+    /** open it read-only, as check and status do: a missing database file is an error, not a new database */
+    readonly?: boolean | undefined;
     provider: ConnectionProviderConfig | ResolvedPostgresProviderConfig;
 };
 export type MultiTenantConfig = {
@@ -270,6 +274,12 @@ export type TableInfo = {
     generatedColumns: string[];
     /** SQLite keeps its next id in sqlite_sequence */
     autoincrement: boolean;
+    /** each column's type affinity by SQLite's rules: INTEGER, TEXT, BLOB, REAL or NUMERIC */
+    affinity: Record<string, string>;
+    /** each ON CONFLICT resolution other than ABORT the table declares, as `<column or key>: <resolution>` */
+    conflicts: string[];
+    /** a STRICT table, which refuses a value of another type */
+    strict: boolean;
 };
 export type ExtractedSchema = {
     tables: Map<string, string[]>;
@@ -281,6 +291,8 @@ export type ExtractedSchema = {
         name: string;
         table: string;
     }>;
+    /** the FTS5 tables whose text lives elsewhere (`content='src'`, or contentless `content=''`): a drop of one loses nothing */
+    externalFts: string[];
     /** the functions and procedures left, unquoted */
     functions: string[];
     tableInfo: Map<string, TableInfo>;
@@ -575,9 +587,27 @@ declare function ftsDelta({ from, plainDiff, to, toStatements }: FtsDelta): stri
 export { asSql, ftsDelta, separate, type FtsState };
 
 // migrate/drivers/bun-sqlite.d.ts
-/**
- * The bun:sqlite migration driver. Bun's APIs live in this file alone (comb/boundaries), and
- * bun:sqlite is imported on connect, so the module loads under Node too.
- */
+import type { MemoryDb } from "./memory.ts";
 import type { BunSqliteProviderConfig, ConnectionProvider } from "../types.ts";
 export declare function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider;
+/** A private in-memory bun:sqlite database, for the proof run (memory.ts) */
+declare function openBunMemory(): Promise<MemoryDb>;
+export { openBunMemory };
+
+// migrate/drivers/memory.d.ts
+/**
+ * A private in-memory SQLite database, for the proof run (migrate/core/proof-run.ts): bun:sqlite
+ * under Bun, node:sqlite under Node. Nothing in it reaches a target database.
+ */
+/** What the proof run does with an in-memory database */
+export type MemoryDb = {
+    /** each row a statement returns, by column */
+    all(sql: string, params?: readonly unknown[]): Array<Record<string, unknown>>;
+    close(): void;
+    /** run statements, several at once */
+    exec(sql: string): void;
+    /** run one statement with parameters */
+    run(sql: string, params?: readonly unknown[]): void;
+};
+/** A new in-memory database on the runtime comb runs on */
+export declare function openMemory(): Promise<MemoryDb>;

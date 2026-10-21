@@ -129,6 +129,25 @@ describePg("migrate apply on Postgres", () => {
 	})
 })
 
+describePg("migrate check on Postgres reads only (M11)", () => {
+	describeAtlas("with Atlas v1.3.0", () => {
+		it("checks a database with no history without creating Atlas's revisions schema on it", async () => {
+			await withScratchDb(async (url) => {
+				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
+				const schemas = () =>
+					query<{ nspname: string }>(
+						url,
+						"SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema' ORDER BY 1",
+					)
+				const before = await schemas()
+				expect(await applyWithAtlas({ ...command(url), checkOnly: true })).toEqual(["20260101000000_init.sql"])
+				expect(await schemas()).toEqual(before)
+				expect(await tables(url)).toEqual([])
+			})
+		}, 60_000)
+	})
+})
+
 describePg("migrate apply on Postgres: history it refuses", () => {
 	describeAtlas("with Atlas v1.3.0", () => {
 		it("refuses a file added before one already applied", async () => {

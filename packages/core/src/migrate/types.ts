@@ -108,6 +108,8 @@ export type ResolvedDatabaseConfig = {
 	name: string
 	migrationsDir: string
 	drizzleConfigPath?: string | undefined
+	/** open it read-only, as check and status do: a missing database file is an error, not a new database */
+	readonly?: boolean | undefined
 	provider: ConnectionProviderConfig | ResolvedPostgresProviderConfig
 }
 
@@ -174,6 +176,12 @@ export type TableInfo = {
 	generatedColumns: string[]
 	/** SQLite keeps its next id in sqlite_sequence */
 	autoincrement: boolean
+	/** each column's type affinity by SQLite's rules: INTEGER, TEXT, BLOB, REAL or NUMERIC */
+	affinity: Record<string, string>
+	/** each ON CONFLICT resolution other than ABORT the table declares, as `<column or key>: <resolution>` */
+	conflicts: string[]
+	/** a STRICT table, which refuses a value of another type */
+	strict: boolean
 }
 
 export type ExtractedSchema = {
@@ -183,6 +191,8 @@ export type ExtractedSchema = {
 	foreignKeys: ForeignKey[]
 	/** each trigger left, by its table */
 	triggers: Array<{ name: string; table: string }>
+	/** the FTS5 tables whose text lives elsewhere (`content='src'`, or contentless `content=''`): a drop of one loses nothing */
+	externalFts: string[]
 	/** the functions and procedures left, unquoted */
 	functions: string[]
 	tableInfo: Map<string, TableInfo>

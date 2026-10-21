@@ -30,8 +30,9 @@ const ADD_SCANNING_CONSTRAINT = /* @__PURE__ */ new RegExp(
 )
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const RENAME_TO = /* @__PURE__ */ new RegExp(`^RENAME TO (${QNAME})$`, "i")
+/* enabling or forcing row level security hides every row no policy grants the deployed code */
 const CAUTIOUS_ACTION =
-	/^(?:DROP CONSTRAINT|RENAME CONSTRAINT|DISABLE (?:ROW LEVEL SECURITY|TRIGGER)|NO FORCE ROW LEVEL SECURITY|SET UNLOGGED|DETACH PARTITION|OWNER TO)\b/i
+	/^(?:DROP CONSTRAINT|RENAME CONSTRAINT|DISABLE (?:ROW LEVEL SECURITY|TRIGGER)|(?:ENABLE|NO FORCE|FORCE) ROW LEVEL SECURITY|SET UNLOGGED|DETACH PARTITION|OWNER TO)\b/i
 /* a default these compute per row rewrites the whole table when the column is added */
 const VOLATILE_DEFAULT =
 	/\bDEFAULT\b.*\b(?:clock_timestamp|random|gen_random_uuid|uuid_generate_v1|uuid_generate_v1mc|uuid_generate_v4|timeofday|nextval)\s*\(/i

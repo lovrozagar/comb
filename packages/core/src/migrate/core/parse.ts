@@ -56,36 +56,17 @@ export { extractSchema }
 export { classifyMigration, extractDropStatements }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   MAKE IDEMPOTENT
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-export function makeIdempotent(statements: string[]): string[] {
-	return statements.map((stmt) => {
-		const trimmed = stmt.trim()
-
-		/* CREATE INDEX → CREATE INDEX IF NOT EXISTS */
-		if (/^CREATE\s+(UNIQUE\s+)?INDEX\s+(?!IF\s+NOT\s+EXISTS)/i.test(trimmed)) {
-			return trimmed.replace(/^(CREATE\s+)(UNIQUE\s+)?(INDEX\s+)/i, "$1$2$3IF NOT EXISTS ")
-		}
-
-		/* DROP INDEX → DROP INDEX IF EXISTS */
-		if (/^DROP\s+INDEX\s+(?!IF\s+EXISTS)/i.test(trimmed)) {
-			return trimmed.replace(/^(DROP\s+INDEX\s+)/i, "$1IF EXISTS ")
-		}
-
-		return stmt
-	})
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
    PARSE MIGRATION
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/** A migration file, classified against `options.before`, the schema the earlier files leave */
+/**
+ * A migration file, classified against `options.before`, the schema the earlier files leave; its
+ * statements are applied as written, as wrangler and Atlas apply them
+ */
 export function parseMigration(sql: string, filename: string, options: ClassifyOptions = {}): ParsedMigration {
 	const hash = generateMigrationHash(sql)
 	const expected = extractSchema(sql)
-	const statements = makeIdempotent(splitSqlStatements(sql))
+	const statements = splitSqlStatements(sql)
 	const drops = extractDropStatements(sql, options)
 	const classification = classifyMigration(sql, options)
 

@@ -13,6 +13,7 @@ coveragePathIgnorePatterns = [
 	"src/query/**",
 	"src/sqlite/**",
 	"src/migrate/core/**",
+	"src/migrate/drivers/memory.ts",
 	"src/migrate/drivers/sqlite.ts",
 	"src/migrate/drivers/d1.ts",
 	"src/migrate/drivers/postgres.ts",

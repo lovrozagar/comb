@@ -15,6 +15,7 @@ import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target
 import { refuseDrift } from "./baseline-compare.ts"
 import { extractSchema, parseMigration } from "./parse.ts"
 import { type Run, type RunResult, run } from "./process.ts"
+import { Refused } from "./refused.ts"
 
 /** A migration file as Atlas lists it */
 type AtlasFile = { Description: string; Name: string; Version: string }
@@ -145,7 +146,7 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 		const migration = parseMigration(sql, Name, { before, dialect: "postgres" })
 		for (const warning of migration.classification.lockWarnings) options.print(`Lock warning in ${Name}: ${warning}`)
 		const approval = await options.approve(migration)
-		if (!approval.ok) throw new Error(approval.message)
+		if (!approval.ok) throw new Refused(approval.message, [...waiting])
 		if (approval.approvedBy !== undefined) options.print(`Approved in ${Name}: ${approval.approvedBy}`)
 	}
 }
@@ -178,8 +179,12 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 			options.print("No migrations to apply")
 			return []
 		}
-		const dry = atlas(options, copy, ["apply", "--dry-run", "--format", APPLY_FORMAT])
-		if (dry.code !== 0) throw new Error(dry.stderr)
+		/* Atlas's dry run creates its revisions schema on a database with none, so a check of a
+		   database with nothing applied skips it: a check writes nothing */
+		if (options.checkOnly !== true || status.applied.length > 0) {
+			const dry = atlas(options, copy, ["apply", "--dry-run", "--format", APPLY_FORMAT])
+			if (dry.code !== 0) throw new Error(dry.stderr)
+		}
 		await approvePending(options, copy, status.pending)
 		if (options.checkOnly === true) return status.pending.map((file) => file.Name)
 		const files = applied(atlas(options, copy, ["apply", "--format", APPLY_FORMAT]))

@@ -4,7 +4,6 @@ import {
 	extractDropStatements,
 	extractSchema,
 	generateMigrationHash,
-	makeIdempotent,
 	parseMigration,
 	splitSqlStatements,
 	legacyMigrationHash,
@@ -100,23 +99,6 @@ describe("classifyMigration", () => {
 			expect(classifyMigration(sql).safety).toBe("unsafe")
 		},
 	)
-})
-
-describe("makeIdempotent", () => {
-	it("adds IF NOT EXISTS to CREATE INDEX", () => {
-		const result = makeIdempotent(["CREATE INDEX idx_foo ON bar (baz)"])
-		expect(result[0]).toContain("IF NOT EXISTS")
-	})
-
-	it("adds IF EXISTS to DROP INDEX", () => {
-		const result = makeIdempotent(["DROP INDEX idx_foo"])
-		expect(result[0]).toContain("IF EXISTS")
-	})
-
-	it("does not modify already idempotent statements", () => {
-		const result = makeIdempotent(["CREATE INDEX IF NOT EXISTS idx_foo ON bar (baz)"])
-		expect(result[0]).toBe("CREATE INDEX IF NOT EXISTS idx_foo ON bar (baz)")
-	})
 })
 
 describe("splitSqlStatements — string literals", () => {
@@ -215,29 +197,18 @@ describe("classifyMigration", () => {
 	})
 })
 
-describe("makeIdempotent", () => {
-	it("guards CREATE INDEX, including the unique form", () => {
-		expect(makeIdempotent(["CREATE INDEX i ON t (c)"])[0]).toBe("CREATE INDEX IF NOT EXISTS i ON t (c)")
-		expect(makeIdempotent(["CREATE UNIQUE INDEX i ON t (c)"])[0]).toBe("CREATE UNIQUE INDEX IF NOT EXISTS i ON t (c)")
-	})
-
-	it("guards DROP INDEX", () => {
-		expect(makeIdempotent(["DROP INDEX i"])[0]).toBe("DROP INDEX IF EXISTS i")
-	})
-
-	it("leaves an already-guarded statement untouched", () => {
-		expect(makeIdempotent(["CREATE INDEX IF NOT EXISTS i ON t (c)"])[0]).toBe("CREATE INDEX IF NOT EXISTS i ON t (c)")
-		expect(makeIdempotent(["DROP INDEX IF EXISTS i"])[0]).toBe("DROP INDEX IF EXISTS i")
-	})
-
-	it("leaves statements it does not guard exactly as they were", () => {
-		const original = "CREATE TABLE post (id TEXT)"
-		expect(makeIdempotent([original])[0]).toBe(original)
+describe("parseMigration's statements (M12)", () => {
+	it("keeps every statement as the file writes it, an index's CREATE and DROP included", () => {
+		const sql = "CREATE UNIQUE INDEX idx_email ON users (email);\nDROP INDEX idx_old;"
+		expect(parseMigration(sql, "1_idx.sql").statements).toEqual([
+			"CREATE UNIQUE INDEX idx_email ON users (email)",
+			"DROP INDEX idx_old",
+		])
 	})
 })
 
 describe("parseMigration", () => {
-	it("assembles hash, schema, guarded statements, drops and classification", () => {
+	it("assembles hash, schema, statements as written, drops and classification", () => {
 		const sql = "CREATE TABLE post (id TEXT);\nDROP TABLE old;\nCREATE INDEX i ON post (id);"
 		const parsed = parseMigration(sql, "0001_init.sql")
 
@@ -246,7 +217,7 @@ describe("parseMigration", () => {
 		expect(parsed.hash).toMatch(/^[\da-f]+$/)
 		expect(parsed.drops).toContain("DROP TABLE old")
 		expect(parsed.classification.safety).toBe("unsafe")
-		expect(parsed.statements.some((s) => s.includes("IF NOT EXISTS"))).toBe(true)
+		expect(parsed.statements).toEqual(["CREATE TABLE post (id TEXT)", "DROP TABLE old", "CREATE INDEX i ON post (id)"])
 		expect(parsed.expected.tables.has("post")).toBe(true)
 	})
 

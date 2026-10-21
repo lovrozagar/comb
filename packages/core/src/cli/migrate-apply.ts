@@ -22,6 +22,7 @@ import { withRetry } from "../migrate/core/utils.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
 import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
+import { Refused } from "../migrate/core/refused.ts"
 import { checkPassed, CliError, type CliIo, type MigrateOutcome } from "./output.ts"
 
 type Mode = "apply" | "baseline" | "check" | "status"
@@ -34,9 +35,9 @@ type Request = { args: ParsedArgs; db: string; io: CliIo; mode: Mode }
 
 const option = (args: ParsedArgs, name: string) => args.options[name] as string | undefined
 
-/** The SQLite, libsql or Turso database comb.migrate.config.ts resolved, opened */
+/** The SQLite, libsql or Turso database comb.migrate.config.ts resolved, opened; read-only for check and status */
 async function configuredTarget(
-	{ args, io }: Request,
+	{ args, io, mode }: Request,
 	target: MigrateTarget & { provider: ConnectionProviderConfig },
 ): Promise<Target> {
 	if (args.options["local"]) throw new CliError("--local is for a D1 database; set local: true on its d1 provider")
@@ -48,6 +49,7 @@ async function configuredTarget(
 		migrationsDir: target.migrationsDir,
 		name: target.name,
 		provider: target.provider,
+		readonly: mode === "check" || mode === "status",
 	})
 	return { conn, migrationsDir: target.migrationsDir, name: target.label }
 }
@@ -64,10 +66,18 @@ async function applyPending({ migration }: Pending, target: Target, io: CliIo): 
 	await withRetry(() => target.conn.batch(statements))
 }
 
-/** The hashes `__drizzle_migrations` records */
+/** The hashes `__drizzle_migrations` records: none when it is missing, which only a write would create */
 async function recordedHashes(conn: Connection): Promise<Set<string>> {
+	const table = await conn.execute(
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'",
+	)
+	if (table.rows.length === 0) return new Set()
 	return new Set((await conn.execute("SELECT hash FROM __drizzle_migrations")).rows.map((row) => String(row[0])))
 }
+
+/** Whether `name`, a file of `dir`, is recorded under one of its hashes */
+const recordedIn = (dir: string, recorded: ReadonlySet<string>) => (name: string) =>
+	migrationHashes(fs.readFileSync(path.join(dir, name), "utf8")).some((hash) => recorded.has(hash))
 
 /**
  * Record each file not yet recorded, once the database's schema is the one the files leave: comb
@@ -95,9 +105,12 @@ async function baseline(target: Target, { files, recorded }: History, io: CliIo)
 	io.out(`\nBaseline done: ${marked} marked, ${files.length - marked} already tracked`)
 }
 
-/** `request.mode` on a SQLite database whose history is comb's own `__drizzle_migrations` */
+/**
+ * `request.mode` on a SQLite database whose history is comb's own `__drizzle_migrations`; check and
+ * status only read it, and create neither it nor the database
+ */
 async function migrateSqlite({ args, io, mode }: Request, target: Target): Promise<MigrateOutcome> {
-	await ensureMigrationsTable(target.conn)
+	if (mode === "apply" || mode === "baseline") await ensureMigrationsTable(target.conn)
 	const recorded = await recordedHashes(target.conn)
 	const single = option(args, "file")
 	const dir = single === undefined ? target.migrationsDir : path.dirname(path.resolve(io.cwd, single))
@@ -105,6 +118,14 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	if (mode === "baseline") {
 		await baseline(target, { files, recorded }, io)
 		return { applied: [], pending: [] }
+	}
+	const isRecorded = recordedIn(dir, recorded)
+	if (mode === "status") {
+		const unapplied = files.filter((name) => !isRecorded(name))
+		const applied = files.filter(isRecorded)
+		io.out(`Applied: ${applied.join(", ") || "none"}`)
+		io.out(`Pending: ${unapplied.join(", ") || "none"}`)
+		return { applied, pending: unapplied }
 	}
 	const yes = args.options["yes"] === true
 	const pending = await planApply({
@@ -158,7 +179,8 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliI
 		report(await runMode({ args, db, io: { ...io, out: io.err }, mode }), [])
 	} catch (error) {
 		/* a refusal or a failed command is an Error; a user's config can throw anything */
-		report({ applied: [], pending: [] }, [error instanceof Error ? error.message : String(error)])
+		const pending = error instanceof Refused ? error.pending : []
+		report({ applied: [], pending }, [error instanceof Error ? error.message : String(error)])
 		throw error
 	}
 }
@@ -180,11 +202,6 @@ async function runMode(request: Request): Promise<MigrateOutcome> {
 	if (resolved === undefined || resolved.provider.type === "d1") {
 		const { migrateD1 } = await import("./migrate-d1.ts")
 		return migrateD1(request, resolved)
-	}
-	if (mode === "status") {
-		throw new CliError(
-			`migrate status reads the history Atlas or wrangler records, which Postgres and D1 databases have; ${resolved.label} keeps comb's own`,
-		)
 	}
 	const target = await configuredTarget(request, { ...resolved, provider: resolved.provider })
 	try {

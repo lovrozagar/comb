@@ -42,7 +42,11 @@ describe("migrate apply on D1 without a migrate config", () => {
 		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
 		const io = makeIo(dir, d1)
 		expect(await runCli(["migrate", "apply", "core", "--local"], io)).toBe(0)
-		expect(io.outputs).toEqual(["Apply: 20260101000000_init.sql", "\nDone: 1 applied"])
+		expect(io.outputs).toEqual([
+			"Empty target: no tables and no applied history, so nothing can be lost; 1 file apply without the unsafe gate",
+			"Apply: 20260101000000_init.sql",
+			"\nDone: 1 applied",
+		])
 		expect(recorded(d1)).toEqual(["20260101000000_init.sql"])
 		const apply = d1.calls.find((call) => call[2] === "migrations") as string[]
 		expect(apply).toEqual([
@@ -71,12 +75,14 @@ describe("migrate apply on D1 without a migrate config", () => {
 	it("refuses an unsafe pending file before wrangler runs, and checks without applying", async () => {
 		const dir = worker({ ...INIT, "20260102000000_drop.sql": "DROP TABLE post;" })
 		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
+		d1.db.exec("CREATE TABLE keep (x)")
 		const io = makeIo(dir, d1)
 		expect(await runCli(["migrate", "apply", "core", "--local"], io)).toBe(1)
 		expect(io.errors[0]).toMatch(/^20260102000000_drop\.sql is unsafe/)
 		expect(d1.calls.some((call) => call[2] === "migrations")).toBe(false)
 		const safe = worker(INIT)
 		const checked = fakeD1({ dir: join(safe, "atlas-migrations") })
+		checked.db.exec("CREATE TABLE keep (x)")
 		const check = makeIo(safe, checked)
 		expect(await runCli(["migrate", "check", "core", "--local"], check)).toBe(0)
 		expect(check.outputs).toEqual(["\nCheck passed: 1 pending: 20260101000000_init.sql"])
@@ -361,10 +367,17 @@ describe("migrate apply, check and status --json on D1 (C5)", () => {
 
 	it("reports a refused file in the object, and exits 1", async () => {
 		const dir = worker({ ...INIT, "20260102000000_drop.sql": "DROP TABLE post;" })
-		const io = makeIo(dir, fakeD1({ dir: join(dir, "atlas-migrations") }))
+		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
+		d1.db.exec("CREATE TABLE keep (x)")
+		const io = makeIo(dir, d1)
 		expect(await runCli(["migrate", "apply", "core", "--local", "--json"], io)).toBe(1)
 		const out = json(io)
-		expect(out).toMatchObject({ applied: [], database: "core", pending: [] })
+		/* a refusal names every file that was pending (M16) */
+		expect(out).toMatchObject({
+			applied: [],
+			database: "core",
+			pending: ["20260101000000_init.sql", "20260102000000_drop.sql"],
+		})
 		expect((out["refused"] as string[])[0]).toMatch(/^20260102000000_drop\.sql is unsafe/)
 	})
 })

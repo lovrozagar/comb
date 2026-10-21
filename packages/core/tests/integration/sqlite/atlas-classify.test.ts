@@ -33,7 +33,8 @@ const CASES: readonly Case[] = [
 		safety: "unsafe",
 		to: BASE.replace(" body text,", " content text,"),
 	},
-	{ drops: [], name: "retype a column (a rebuild)", safety: "cautious", to: BASE.replace("n integer", "n text") },
+	/* INTEGER to TEXT affinity: a stored 7 lands as '7' (M5) */
+	{ drops: [], name: "retype a column (a rebuild)", safety: "unsafe", to: BASE.replace("n integer", "n text") },
 	{
 		drops: [],
 		name: "drop NOT NULL (a rebuild)",

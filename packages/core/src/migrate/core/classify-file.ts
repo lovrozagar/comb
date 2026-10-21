@@ -5,7 +5,7 @@
  */
 import type { Dialect } from "../types.ts"
 import { atlasDirectives } from "./pg-objects.ts"
-import { lastPart, QNAME } from "./sql-code.ts"
+import { nameKey, QNAME } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
 /* Postgres runs these only outside a transaction block */
@@ -38,10 +38,14 @@ function reindexedOf(statements: readonly string[]): Set<string> {
 	for (const stmt of statements) {
 		const sql = normalizeSql(stmt)
 		const [, table, args] = FTS_TABLE.exec(sql) ?? []
-		if (table !== undefined && /\bcontent ?= ?'[^']+'/i.test(args as string)) created.add(lastPart(table))
+		if (table !== undefined && /\bcontent ?= ?'[^']+'/i.test(args as string)) created.add(nameKey(table, "sqlite"))
 		const [, into, command] = FTS_COMMAND.exec(sql) ?? []
-		if (into !== undefined && lastPart(into) === lastPart(command as string) && created.has(lastPart(into))) {
-			out.add(lastPart(into))
+		if (
+			into !== undefined &&
+			nameKey(into, "sqlite") === nameKey(command as string, "sqlite") &&
+			created.has(nameKey(into, "sqlite"))
+		) {
+			out.add(nameKey(into, "sqlite"))
 		}
 	}
 	return out
