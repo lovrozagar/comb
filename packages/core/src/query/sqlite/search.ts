@@ -140,18 +140,39 @@ type LikeSearchResolver = (q: string) => SQL | null
 /* the Latin combining marks NFKD splits off a letter: é is e + U+0301 */
 const DIACRITICS = /[\u0300-\u036f]/g
 
+/* the Latin letters NFKD leaves whole, each with the ASCII a reader types for it (ẞ, Æ, … lowercase to these first) */
+const LATIN_FOLD: Readonly<Record<string, string>> = {
+	ð: "d",
+	ß: "ss",
+	æ: "ae",
+	ø: "o",
+	þ: "th",
+	đ: "d",
+	ħ: "h",
+	ı: "i",
+	ĸ: "k",
+	ł: "l",
+	ŋ: "n",
+	œ: "oe",
+	ŧ: "t",
+}
+const LATIN_LETTERS = /[ðßæøþđħıĸłŋœŧ]/g
+
 /**
- * The text a `_search` column stores for `parts`, and what likeSearch folds each term to: compatibility
- * forms folded (ＦＩＬＥ, ﬁ), Latin diacritics removed, lowercased, the present parts joined by a
- * space. Write the column with it, so the reader and the writer are one function.
+ * The text a `_search` column stores for `parts`, and what likeSearch folds each term to: the
+ * present parts joined by a space, compatibility forms folded (ＦＩＬＥ, ﬁ), lowercased, Latin
+ * diacritics removed, and the Latin letters with no decomposition spelled in ASCII (ß ss, æ ae,
+ * œ oe, ø o, ł l, đ and ð d, þ th, ı i, ĸ k, ŋ n, ŧ t, ħ h). Other scripts stay as they are.
+ * Write the column with it, so the reader and the writer are one function.
  */
 function searchText(...parts: Array<string | null | undefined>): string {
 	return parts
 		.filter((part): part is string => typeof part === "string" && part !== "")
 		.join(" ")
 		.normalize("NFKD")
-		.replace(DIACRITICS, "")
 		.toLowerCase()
+		.replace(DIACRITICS, "")
+		.replace(LATIN_LETTERS, (letter) => LATIN_FOLD[letter] as string)
 }
 
 /**

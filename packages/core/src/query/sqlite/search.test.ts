@@ -55,6 +55,13 @@ describe("searchText: the _search column's writer, which likeSearch reads with (
 		expect(searchText()).toBe("")
 	})
 
+	it("folds the Latin letters NFKD leaves whole to their ASCII spelling, and keeps other scripts", () => {
+		expect(searchText("Straße ẞ Æon Œuvre Øre Łódź Đurđevac Ðór Þing ıi ĸ ŋ ŧ ħ")).toBe(
+			"strasse ss aeon oeuvre ore lodz durdevac dor thing ii k n t h",
+		)
+		expect(searchText("日本語 Ελλάδα Москва")).toBe("日本語 ελλαδα москва")
+	})
+
 	it("is what likeSearch applies to each term, so a row written by it is found by any spelling", () => {
 		const written = searchText("Crème Brûlée")
 		for (const q of ["brûlée", "BRULEE", "Crème"]) {

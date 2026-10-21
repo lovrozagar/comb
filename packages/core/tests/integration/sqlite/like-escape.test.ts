@@ -78,6 +78,17 @@ describe("likeSearch over a _search column searchText wrote (Q14)", () => {
 			for (const q of ["Évaluation", "evaluation", "EVALUATION risques"])
 				expect(await titles(q)).toEqual(["Évaluation des risques"])
 			for (const q of ["brûlée", "brulee", "CRÈME"]) expect(await titles(q)).toEqual(["Crème brûlée"])
+			for (const [title, ascii] of [
+				["Straße", "strasse"],
+				["Łódź", "lodz"],
+				["Œuvre", "oeuvre"],
+				["Ørsted", "orsted"],
+				["Þingvellir", "thingvellir"],
+			]) {
+				await harness.client.execute({ args: [title, searchText(title)], sql: "INSERT INTO post VALUES (?, ?)" })
+				expect(await titles(ascii as string)).toEqual([title])
+				expect(await titles(title as string)).toEqual([title])
+			}
 		} finally {
 			harness.close()
 		}

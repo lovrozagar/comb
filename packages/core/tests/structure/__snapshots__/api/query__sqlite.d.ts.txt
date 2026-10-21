@@ -237,9 +237,11 @@ declare function buildFtsWhereWithSpellfix(db: SpellfixDb, search: SpellfixSearc
  */
 type LikeSearchResolver = (q: string) => SQL | null;
 /**
- * The text a `_search` column stores for `parts`, and what likeSearch folds each term to: compatibility
- * forms folded (ＦＩＬＥ, ﬁ), Latin diacritics removed, lowercased, the present parts joined by a
- * space. Write the column with it, so the reader and the writer are one function.
+ * The text a `_search` column stores for `parts`, and what likeSearch folds each term to: the
+ * present parts joined by a space, compatibility forms folded (ＦＩＬＥ, ﬁ), lowercased, Latin
+ * diacritics removed, and the Latin letters with no decomposition spelled in ASCII (ß ss, æ ae,
+ * œ oe, ø o, ł l, đ and ð d, þ th, ı i, ĸ k, ŋ n, ŧ t, ħ h). Other scripts stay as they are.
+ * Write the column with it, so the reader and the writer are one function.
  */
 declare function searchText(...parts: Array<string | null | undefined>): string;
 /**
