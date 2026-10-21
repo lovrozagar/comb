@@ -5,7 +5,9 @@
 import * as z from "zod"
 import { afterAll, describe, expect, it } from "vitest"
 import { readCombEntityMeta } from "../../../src/meta.ts"
-import { cleanGeneratedDtos, type GeneratedEntity, generatedDtos } from "../support/dtos.ts"
+import fs from "node:fs"
+import path from "node:path"
+import { cleanGeneratedDtos, type GeneratedEntity, generatedDir, generatedDtos } from "../support/dtos.ts"
 
 afterAll(() => cleanGeneratedDtos())
 
@@ -122,5 +124,74 @@ describe("numeric bounds (REVIEW 3.2)", () => {
 		expect(verdicts("lat", [-90.6, -90.5, 90.5, 90.6])).toEqual([false, true, true, false])
 		expect(verdicts("depth", [-0.26, -0.25, 1e9])).toEqual([false, true, true])
 		expect(verdicts("ratio", [-1e9, 1.5, 1.51])).toEqual([true, true, false])
+	})
+})
+
+describe("what the 0.8.0 codegen review found in the generated DTOs (F4, F5, F6, F17)", () => {
+	it("fails on a column spread it cannot read, naming the file and line, rather than dropping its columns (F4)", async () => {
+		const tables = `const auditCols = () => ({ note: c.text("note") })
+const sharedCols = { ...auditCols() }
+export const memo = sqliteTable("memo", { id: c.id("mem"), ...sharedCols })`
+		await expect(generatedDtos("spread", tables)).rejects.toThrow(
+			/db\.x\.tables\.ts:4: comb cannot read the columns of \.\.\.auditCols\(\)/,
+		)
+	})
+
+	it("names each timestamp as the table declares it, never by a table-wide style (F5)", async () => {
+		const tables = `export const post = sqliteTable("post", {
+	id: c.id("pst"),
+	title: c.text("title").notNull(),
+	created_at: c.createdAt("created_at"),
+	updatedAt: c.updatedAt("updated_at"),
+})`
+		const post = (await generatedDtos("timestamps", tables)).post as GeneratedEntity
+		expect(keys(post.postDtoReadSchema)).toEqual(["created_at", "id", "title", "updatedAt"])
+		expect(post.postDtoReadSchema?.safeParse({ created_at: 1, id: "pst_1", title: "t", updatedAt: 2 }).success).toBe(
+			true,
+		)
+		expect(keys(post.postDtoCreateSchema)).toEqual(["title"])
+	})
+
+	it("points softDelete at the column's property name, as every other key of the meta does (F6)", async () => {
+		const tables = `export const account = sqliteTable("account", {
+	id: c.id("acc"),
+	created_at: c.createdAt("created_at"),
+	deletedAt: c.deletedAt("deleted_at"),
+})`
+		const account = (await generatedDtos("soft-delete", tables)).account as GeneratedEntity
+		expect(readCombEntityMeta(z.toJSONSchema(account.accountDtoReadSchema as z.ZodObject))?.softDelete).toBe(
+			"deletedAt",
+		)
+	})
+})
+
+describe("the _shared file of the generated DTOs (F17)", () => {
+	it("emits only what a generated DTO imports, and what those need", async () => {
+		const tables = `export const post = sqliteTable("post", {
+	id: c.id("pst"),
+	title: c.text("title").notNull(),
+	createdAt: c.createdAt("created_at"),
+	updatedAt: c.updatedAt("updated_at"),
+})`
+		await generatedDtos("shared", tables)
+		const dtos = path.join(generatedDir("shared"), "dtos")
+		const shared = fs.readFileSync(path.join(dtos, "_shared", "index.gen.ts"), "utf8")
+		const exported = [...shared.matchAll(/^export const (\w+)/gm)].map((match) => match[1] as string)
+		const entity = fs.readFileSync(path.join(dtos, "post", "index.gen.ts"), "utf8")
+		const imported = new Set(
+			(/import \{([^}]*)\} from "\.\.\/_shared/.exec(entity)?.[1] ?? "").split(",").map((n) => n.trim()),
+		)
+		/* an export no DTO imports is there only for an export a DTO does import */
+		const unused = exported.filter(
+			(name) =>
+				!imported.has(name) &&
+				!shared.includes(`${name}.`) &&
+				!new RegExp(`\\b${name}\\b[^\\n]*$`).test(shared.split(`export const ${name}`)[1] ?? ""),
+		)
+		expect(exported.filter((name) => /^validateTimestamps|Refinements/.test(name))).toEqual([])
+		expect(exported).not.toContain("timestampNullableSchema")
+		expect(unused.filter((name) => !shared.slice(shared.indexOf(`export const ${name}`) + 1).includes(name))).toEqual(
+			[],
+		)
 	})
 })

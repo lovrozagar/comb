@@ -54,7 +54,7 @@ export function generateRows(ctx: GeneratorContext, config: RowsConfig): void {
 	outputLines.push(`export type RowTableName = ${tableNameUnion}`)
 	outputLines.push("")
 
-	writeGenFile(outputPath, outputLines.join("\n"), "comb")
+	writeGenFile(outputPath, outputLines.join("\n"), { generator: "comb", staged: ctx.staged })
 
 	ctx.log(`Generated rows at: ${outputPath}`)
 	ctx.log(`Tables: ${tables.length}`)

@@ -86,3 +86,22 @@ describe("parseFieldConstraints: size and defaults", () => {
 		expect(result.maxBytes).toBeNull()
 	})
 })
+
+describe("parseFieldConstraints: every key the column types allow, and no other (F3)", () => {
+	it("reads name and imageUri", () => {
+		expect(parseFieldConstraints('c.text("n", { name: true })')).toMatchObject({ imageUri: false, name: true })
+		expect(parseFieldConstraints('c.text("a", { imageUri: true })')).toMatchObject({ imageUri: true, name: false })
+	})
+
+	it("fails on a key it does not handle, naming it, rather than ignoring it", () => {
+		expect(() => parseFieldConstraints('c.text("n", { nmae: true })')).toThrow(
+			'c.text("n", { nmae: true }): comb reads no constraint named nmae',
+		)
+	})
+
+	it("reads the column's own object argument, never one a later call takes", () => {
+		expect(parseFieldConstraints('c.json("m", schema).default({ max: 5 })').max).toBeNull()
+		expect(parseFieldConstraints('c.json("m", schema, { maxBytes: 9 }).default({ a: 1 })').maxBytes).toBe(9)
+		expect(parseFieldConstraints('c.text("e", { email: true }, 80)').email).toBe(true)
+	})
+})

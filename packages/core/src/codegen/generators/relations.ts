@@ -134,16 +134,20 @@ export function generateRelations(ctx: GeneratorContext, config: RelationsConfig
 
 	/* the tables import runs from where the relations file is written to the tables file */
 	const tablesImport = importPathFrom(outputPath, path.resolve(ctx.cwd, ctx.tablesPath))
+	const body = sortedTableNames.flatMap((tableName) => tableLines(tableName, graph))
+	/* with no relation, no r: an unused parameter fails the noUnusedParameters a consumer may set */
+	const define =
+		body.length === 0
+			? ["export const relations = defineRelations(schema, () => ({}))"]
+			: ["export const relations = defineRelations(schema, (r) => ({", ...body, "}))"]
 	const lines = [
 		`import { defineRelations } from "drizzle-orm"`,
 		`import * as schema from "${tablesImport}"`,
 		"",
-		"export const relations = defineRelations(schema, (r) => ({",
-		...sortedTableNames.flatMap((tableName) => tableLines(tableName, graph)),
-		"}))",
+		...define,
 		"",
 	]
-	writeGenFile(outputPath, lines.join("\n"), "comb")
+	writeGenFile(outputPath, lines.join("\n"), { generator: "comb", staged: ctx.staged })
 
 	ctx.log(`Generated relations: ${outputPath}`)
 	ctx.log(`Tables: ${sortedTableNames.length}, r.one: ${count(graph.ones)}, r.many: ${count(graph.manys)}`)

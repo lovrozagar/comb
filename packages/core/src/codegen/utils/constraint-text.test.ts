@@ -150,3 +150,10 @@ describe("constraint-text: slashes and separators", () => {
 		expect(extractConstraints('c.text("n", { min: 1,, max: 2 })')).toEqual({ max: 2, min: 1 })
 	})
 })
+
+describe("extractConstraints from a type argument", () => {
+	it("reads nested braces, and nothing from an unbalanced one", () => {
+		expect(extractConstraints('c.text<{ min: 5, shape: { a: 1 } }>("n")')).toMatchObject({ min: 5 })
+		expect(extractConstraints('c.text<{ min: 5 ("n")')).toEqual({})
+	})
+})

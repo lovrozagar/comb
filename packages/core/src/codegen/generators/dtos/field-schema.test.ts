@@ -12,7 +12,7 @@ const imports = (): ImportsMeta => ({
 })
 
 function schema(name: string, raw: string, type: SchemaType) {
-	return generateFieldSchema(parseField(name, raw), type, imports())
+	return generateFieldSchema(parseField(name, raw), type, { imports: imports() })
 }
 
 /** A parsed field with what the analyzer would have filled in from elsewhere in the file */
@@ -37,11 +37,13 @@ describe("generateFieldSchema: what each schema type includes", () => {
 	it("gives an integer reference an integer schema, and a text one the id string (D5)", () => {
 		const fk = { column: "teamId", refColumn: "id", refTable: "team" }
 		const team = fieldOf("teamId", 'c.integer("team_id").notNull().references(() => team.id)', { foreignKey: fk })
-		expect(generateFieldSchema(team, "create", imports())).toMatch(/^z\.number\(\)\.int\(\)\.nonnegative\(\)/)
-		expect(generateFieldSchema(team, "read", imports())).toMatch(/^z\.number\(\)\.int\(\)/)
-		expect(generateFieldSchema(team, "update", imports())).toBeNull()
+		expect(generateFieldSchema(team, "create", { imports: imports() })).toMatch(
+			/^z\.number\(\)\.int\(\)\.nonnegative\(\)/,
+		)
+		expect(generateFieldSchema(team, "read", { imports: imports() })).toMatch(/^z\.number\(\)\.int\(\)/)
+		expect(generateFieldSchema(team, "update", { imports: imports() })).toBeNull()
 		const owner = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.id)', { foreignKey: fk })
-		expect(generateFieldSchema(owner, "create", imports())).toBe("z.string().min(1).max(48)")
+		expect(generateFieldSchema(owner, "create", { imports: imports() })).toBe("z.string().min(1).max(48)")
 	})
 
 	it("leaves a reference out of the update body", () => {
@@ -51,11 +53,11 @@ describe("generateFieldSchema: what each schema type includes", () => {
 })
 
 describe("generateFieldSchema: optionality", () => {
-	it("requires what is not null on read and create, and nothing on update", () => {
+	it("requires what is not null on read and create, and takes no empty one on update", () => {
 		expect(schema("title", 'c.text("title").notNull()', "read")).toBe("z.string().meta(_m.string)")
 		expect(schema("title", 'c.text("title").notNull()', "readPartial")).toBe("z.string().meta(_m.string).optional()")
 		expect(schema("title", 'c.text("title").notNull()', "create")).toBe("z.string().min(1).meta(_m.string)")
-		expect(schema("title", 'c.text("title").notNull()', "update")).toBe("z.string().meta(_m.string).optional()")
+		expect(schema("title", 'c.text("title").notNull()', "update")).toBe("z.string().min(1).meta(_m.string).optional()")
 		expect(schema("title", 'c.text("title")', "read")).toBe("z.string().meta(_m.string).nullable()")
 	})
 
@@ -73,45 +75,49 @@ describe("generateFieldSchema: optionality", () => {
 		const id = fieldOf("id", 'c.id("usr")', { isPrimaryKey: true })
 		const serial = fieldOf("id", "c.serialId()", { isPrimaryKey: true })
 		for (const type of ["create", "update"] as const) {
-			expect(generateFieldSchema(id, type, imports())).toBeNull()
-			expect(generateFieldSchema(serial, type, imports())).toBeNull()
+			expect(generateFieldSchema(id, type, { imports: imports() })).toBeNull()
+			expect(generateFieldSchema(serial, type, { imports: imports() })).toBeNull()
 			expect(schema("created_at", 'c.createdAt("created_at")', type)).toBeNull()
 			expect(schema("code", 'c.text("code", { autogenerate: true }).notNull()', type)).toBeNull()
 		}
-		expect(generateFieldSchema(id, "read", imports())).not.toBeNull()
+		expect(generateFieldSchema(id, "read", { imports: imports() })).not.toBeNull()
 		expect(schema("created_at", 'c.createdAt("created_at")', "read")).toBe("timestampSchema")
 		/* a natural key the caller supplies stays in create */
 		const natural = fieldOf("code", 'c.text("code").primaryKey()', { isPrimaryKey: true })
-		expect(generateFieldSchema(natural, "create", imports())).not.toBeNull()
+		expect(generateFieldSchema(natural, "create", { imports: imports() })).not.toBeNull()
 	})
 })
 
 describe("generateFieldSchema: kinds", () => {
 	it("writes an enum from its values or its imported name, and refuses one it cannot read", () => {
 		expect(
-			generateFieldSchema(
-				fieldOf("s", 'c.enum("s", ["a", "b"]).notNull()', { enumValues: ["a", "b"] }),
-				"read",
-				imports(),
-			),
+			generateFieldSchema(fieldOf("s", 'c.enum("s", ["a", "b"]).notNull()', { enumValues: ["a", "b"] }), "read", {
+				imports: imports(),
+			}),
 		).toBe('z.enum(["a","b"]).meta({ examples: ["a"] })')
 		expect(
-			generateFieldSchema(fieldOf("s", 'c.enum("s", ROLES).notNull()', { enumName: "ROLES" }), "read", imports()),
+			generateFieldSchema(fieldOf("s", 'c.enum("s", ROLES).notNull()', { enumName: "ROLES" }), "read", {
+				imports: imports(),
+			}),
 		).toBe("z.enum(ROLES).meta(_m.string)")
 		expect(() => schema("s", 'c.enum("s", [a, b])', "read")).toThrow(
 			'c.enum column "s": its values are not string literals',
 		)
 	})
+})
 
+describe("generateFieldSchema: JSON", () => {
 	it("validates JSON with its schema and caps its size on writes", () => {
 		expect(
-			generateFieldSchema(fieldOf("p", 'c.json("p", prefs)', { jsonSchemaName: "prefs" }), "read", imports()),
+			generateFieldSchema(fieldOf("p", 'c.json("p", prefs)', { jsonSchemaName: "prefs" }), "read", {
+				imports: imports(),
+			}),
 		).toBe("prefs.nullable()")
 		expect(
 			generateFieldSchema(
 				fieldOf("p", 'c.json("p", prefs, { maxBytes: 100 })', { jsonSchemaName: "prefs" }),
 				"create",
-				imports(),
+				{ imports: imports() },
 			),
 		).toContain("new TextEncoder().encode(JSON.stringify(val)).length <= 100")
 		expect(() => schema("p", 'c.json("p")', "read")).toThrow("c.json() must have schema as second parameter")
@@ -122,26 +128,26 @@ describe("generateFieldSchema: kinds", () => {
 			"z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)",
 		)
 		expect(schema("e", 'c.text("e", { email: true, min: 3, max: 50 }).notNull()', "create")).toBe(
-			"z.email().trim().toLowerCase().min(3).max(50).meta(_m.email)",
+			"z.string().trim().toLowerCase().pipe(z.email().min(3).max(50)).meta(_m.email)",
 		)
 		expect(
-			generateFieldSchema(
-				fieldOf("e", 'c.text("e", { email: true }, 80).notNull()', { length: 80 }),
-				"read",
-				imports(),
-			),
+			generateFieldSchema(fieldOf("e", 'c.text("e", { email: true }, 80).notNull()', { length: 80 }), "read", {
+				imports: imports(),
+			}),
 		).toBe("z.email().max(80).meta(_m.email)")
 		expect(schema("u", 'c.text("u", { url: true }).notNull()', "create")).toBe(
 			'z.url().refine((v) => /^https:\\/\\//.test(v), { message: "Must be an HTTPS URL" }).meta(_m.url)',
 		)
 		expect(schema("n", 'c.text("n", { trim: true, lowercase: true, max: 20 }).notNull()', "update")).toBe(
-			"z.string().trim().toLowerCase().max(20).meta(_m.string).optional()",
+			"z.string().trim().toLowerCase().min(1).max(20).meta(_m.string).optional()",
 		)
 		expect(schema("n", 'c.text("n", { uppercase: true, pattern: /^[A-Z]+$/ }).notNull()', "create")).toBe(
 			"z.string().toUpperCase().min(1).regex(/^[A-Z]+$/).meta(_m.string)",
 		)
 		expect(
-			generateFieldSchema(fieldOf("n", 'c.text("n", { min: 2 }, 10).notNull()', { length: 10 }), "read", imports()),
+			generateFieldSchema(fieldOf("n", 'c.text("n", { min: 2 }, 10).notNull()', { length: 10 }), "read", {
+				imports: imports(),
+			}),
 		).toBe("z.string().min(2).max(10).meta(_m.string)")
 	})
 })
@@ -152,7 +158,9 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		expect(schema("orgId", 'c.text("orgId").notNull()', "create")).toBe(
 			"z.string().regex(/^\\S{1,48}$/).meta(_m.string)",
 		)
-		const typed = generateFieldSchema(parseField("p", 'c.text("p").$type<z.infer<typeof prefs>>()'), "read", imports())
+		const typed = generateFieldSchema(parseField("p", 'c.text("p").$type<z.infer<typeof prefs>>()'), "read", {
+			imports: imports(),
+		})
 		expect(typed).toBe("prefs.nullable()")
 		expect(schema("p", 'c.text("p").$type<string>()', "read")).toBe("z.string().meta(_m.string).nullable()")
 	})
@@ -185,5 +193,61 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		)
 		expect(schema("d", 'c.real("d", { min: -0.25 }).notNull()', "read")).toMatch(/^z\.number\(\)\.min\(-0\.25\)\.meta/)
 		expect(schema("r", 'c.real("r", { max: 1.5 }).notNull()', "read")).toMatch(/^z\.number\(\)\.max\(1\.5\)\.meta/)
+	})
+})
+
+describe("generateFieldSchema: what the 0.8.0 codegen review found (F1, F2, F15, F16)", () => {
+	it("reads a stored password hash as a plain string, and checks the password rules only on writes (F1)", () => {
+		expect(schema("pw", 'c.text("pw", { password: true }).notNull()', "read")).toBe("z.string()")
+		expect(schema("pw", 'c.text("pw", { password: true }).notNull()', "update")).toBe(
+			"z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/).optional()",
+		)
+	})
+
+	it("refuses an empty string for a required text column on update as on create (F2)", () => {
+		expect(schema("name", 'c.text("name").notNull()', "update")).toBe("z.string().min(1).meta(_m.string).optional()")
+		expect(schema("name", 'c.text("name").notNull()', "read")).toBe("z.string().meta(_m.string)")
+	})
+
+	it("normalizes an email before validating it, on create and update (F15)", () => {
+		expect(schema("e", 'c.text("e", { email: true }).notNull()', "update")).toBe(
+			"z.string().trim().toLowerCase().pipe(z.email()).meta(_m.email).optional()",
+		)
+	})
+
+	it("keeps an id-like column's declared bounds, adding the id defaults only where it declares none (F16)", () => {
+		expect(schema("externalId", 'c.text("external_id", { min: 10 })', "create")).toBe(
+			"z.string().min(10).meta(_m.string).nullable().optional()",
+		)
+		expect(schema("externalId", 'c.text("external_id", { max: 60 })', "read")).toBe(
+			"z.string().max(60).meta(_m.string).nullable()",
+		)
+	})
+})
+
+describe("generateFieldSchema: name and imageUri (F3)", () => {
+	it("checks a name's characters and an image URI's scheme on writes, and reads either as a string", () => {
+		expect(schema("n", 'c.text("n", { name: true }).notNull()', "create")).toBe(
+			'z.string().min(1).regex(/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" }).meta(_m.string)',
+		)
+		expect(schema("a", 'c.text("a", { imageUri: true })', "update")).toBe(
+			'z.string().refine((v) => /^(?:https:\\/\\/|data:image\\/)/.test(v), { message: "Must be an HTTPS URL or a data:image/ URI" }).meta(_m.string).nullable().optional()',
+		)
+		expect(schema("a", 'c.text("a", { imageUri: true })', "read")).toBe("z.string().meta(_m.string).nullable()")
+	})
+})
+
+describe("generateFieldSchema on Postgres (F8)", () => {
+	it("bounds c.integer to int4, which Postgres stores it in", () => {
+		const field = parseField("age", 'c.integer("age").notNull()')
+		expect(generateFieldSchema(field, "create", { dialect: "postgres", imports: imports() })).toBe(
+			"z.number().int().nonnegative().max(2147483647).meta(_m.integer)",
+		)
+		expect(generateFieldSchema(field, "read", { dialect: "postgres", imports: imports() })).toBe(
+			"z.number().int().min(-2147483648).max(2147483647).meta(_m.integer)",
+		)
+		expect(generateFieldSchema(field, "create", { imports: imports() })).toBe(
+			"z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).meta(_m.integer)",
+		)
 	})
 })

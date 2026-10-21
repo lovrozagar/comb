@@ -31,13 +31,6 @@ function isExcludedFromUpdate(field: FieldMeta): boolean {
 	)
 }
 
-/** Timestamp columns, under whichever casing the table declared. */
-function timestampNames(table: TableMeta): { createdAt: string; deletedAt: string; updatedAt: string } {
-	return table.timestamps.style === "snake_case"
-		? { createdAt: "created_at", deletedAt: "deleted_at", updatedAt: "updated_at" }
-		: { createdAt: "createdAt", deletedAt: "deletedAt", updatedAt: "updatedAt" }
-}
-
 /**
  * The column a table declares as its tenant scope, or null.
  *
@@ -133,7 +126,7 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 		immutable,
 		kind: "entity",
 		name: table.sqlName,
-		softDelete: table.timestamps.deletedAt ? timestampNames(table).deletedAt : null,
+		softDelete: table.timestamps.names.deletedAt,
 		states: statesOf(table),
 		tenantColumn: tenantColumnOf(table),
 		uniqueIndexes: publishedUniqueIndexes(table),

@@ -8,7 +8,7 @@
 import path from "node:path"
 import { toScreamingSnakeCase } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
-import { dedup, generateFtsSql, type FtsTableConfig } from "./fts-sql.ts"
+import { dedup, ftsReferenceSql, type FtsTableConfig } from "./fts-sql.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
 type FtsGeneratorConfig = {
@@ -31,10 +31,10 @@ function generateFts(ctx: GeneratorContext, config: FtsGeneratorConfig): void {
 	const outputDir = path.resolve(cwd, config.output)
 
 	/* SQL file */
-	const sql = generateFtsSql(tables, config.fts, ctx.warn)
+	const sql = ftsReferenceSql(tables, config.fts, ctx.warn)
 
 	const sqlPath = path.join(outputDir, `${filePrefix}.fts.gen.sql`)
-	writeGenFile(sqlPath, sql, "comb")
+	writeGenFile(sqlPath, sql, { generator: "comb", staged: ctx.staged })
 	ctx.log(`  fts: ${sqlPath} (${entries.length} table${entries.length > 1 ? "s" : ""})`)
 
 	/* TypeScript file */
@@ -59,7 +59,7 @@ function generateFts(ctx: GeneratorContext, config: FtsGeneratorConfig): void {
 	tsLines.push("")
 
 	const tsPath = path.join(outputDir, `${filePrefix}.fts.gen.ts`)
-	writeGenFile(tsPath, tsLines.join("\n"), "comb")
+	writeGenFile(tsPath, tsLines.join("\n"), { generator: "comb", staged: ctx.staged })
 	ctx.log(`  fts: ${tsPath}`)
 }
 

@@ -20,7 +20,7 @@ export type TableInfo = {
 	}
 	name: string
 	needsSharedMeta: boolean
-	timestampStyle: "camelCase" | "snake_case"
+	timestampStyle: "camelCase" | "mixed" | "snake_case"
 }
 
 export type DtosConfig = {

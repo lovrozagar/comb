@@ -51,12 +51,16 @@ function generateEntities(ctx: GeneratorContext, config: EntitiesConfig): void {
 	lines.push("export { entityPrefixes, generateEntityId, generateUlid, type EntityName }")
 	lines.push("")
 
-	writeGenFile(outputPath, lines.join("\n"), "comb")
+	writeGenFile(outputPath, lines.join("\n"), { generator: "comb", staged: ctx.staged })
 
 	if (config.updatePackageJson) {
 		const packageJsonPath = findNearestPackageJson(path.dirname(outputPath), ctx.cwd)
 		if (packageJsonPath) {
-			setPackageExport(packageJsonPath, { namespace: ctx.exportNamespace, subpath: "./entities" }, outputPath)
+			setPackageExport(
+				packageJsonPath,
+				{ namespace: ctx.exportNamespace, staged: ctx.staged, subpath: "./entities" },
+				outputPath,
+			)
 		}
 	}
 

@@ -8,6 +8,7 @@ import { SyntaxKind, type VariableDeclaration } from "ts-morph"
 import { CURSOR_TIEBREAK_COLUMN } from "../../query/cursor.ts"
 import { parseTable } from "../analyze-table.ts"
 import type { FieldMeta, ImportsMeta, TableMeta } from "../analyzer-types.ts"
+import { snakeToPascal } from "./case.ts"
 import { isTableDefinition, tableBuilders } from "./table-builders.ts"
 import { createProjectFromTablesDir, tableSourceFiles } from "./ts-morph.ts"
 
@@ -59,12 +60,26 @@ function declaredTables(tablesPath: string, report: ValidationResult): Declared[
 function checkNames(declared: Declared[], report: ValidationResult): void {
 	const sqlNames = new Set<string>()
 	const varNames = new Set<string>()
+	/* the generated type names (post_tag and postTag both make PostTag) and the id prefixes, by the table that took them */
+	const typeNames = new Map<string, string>()
+	const prefixes = new Map<string, string>()
 	for (const { table } of declared) {
 		if (sqlNames.has(table.sqlName))
 			report.errors.push(`Duplicate SQL table name: "${table.sqlName}" (var: ${table.varName})`)
 		if (varNames.has(table.varName)) report.errors.push(`Duplicate table variable name: "${table.varName}"`)
 		sqlNames.add(table.sqlName)
 		varNames.add(table.varName)
+		const typeName = snakeToPascal(table.varName)
+		const typed = typeNames.get(typeName)
+		if (typed !== undefined && typed !== table.varName)
+			report.errors.push(`Tables ${typed} and ${table.varName} both generate the type name "${typeName}"`)
+		typeNames.set(typeName, typed ?? table.varName)
+		const prefixed = table.idPrefix === null ? undefined : prefixes.get(table.idPrefix)
+		if (prefixed !== undefined)
+			report.errors.push(
+				`Tables ${prefixed} and ${table.varName} share the id prefix "${table.idPrefix}"; ids of one would pass for the other`,
+			)
+		if (table.idPrefix !== null) prefixes.set(table.idPrefix, prefixed ?? table.varName)
 	}
 }
 

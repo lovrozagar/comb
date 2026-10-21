@@ -81,7 +81,7 @@ export function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConf
 	}
 
 	const lines: string[] = []
-	lines.push(`import { check } from "drizzle-orm/sqlite-core"`)
+	lines.push(`import { check } from "drizzle-orm/${ctx.dialect === "postgres" ? "pg" : "sqlite"}-core"`)
 	lines.push(`import { sql } from "drizzle-orm"`)
 	lines.push("")
 
@@ -102,7 +102,7 @@ export function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConf
 		lines.push("")
 	}
 
-	writeGenFile(outputPath, lines.join("\n"), "comb")
+	writeGenFile(outputPath, lines.join("\n"), { generator: "comb", staged: ctx.staged })
 
 	let totalEnums = 0
 	for (const { enumFields } of tablesWithEnums) {

@@ -313,3 +313,26 @@ export const delivery = createTable("delivery", {
 		expect(result.warnings.join("\n")).toContain("status, phase")
 	})
 })
+
+describe("validateTables: names two tables may not share (F13, F14)", () => {
+	const prelude = `import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
+const c = { id: (_prefix: string) => text("id").primaryKey() }
+`
+	it("refuses two tables whose names make one generated type name, naming both (F13)", () => {
+		const result = validateTables(
+			writeTables(`${prelude}export const post_tag = createTable("post_tag", { id: c.id("pt") })
+export const postTag = createTable("post_tags", { id: c.id("pts") })`),
+		)
+		expect(result.errors).toContain('Tables post_tag and postTag both generate the type name "PostTag"')
+	})
+
+	it("refuses two tables that share an id prefix, naming both (F14)", () => {
+		const result = validateTables(
+			writeTables(`${prelude}export const team = createTable("team", { id: c.id("id_x") })
+export const user = createTable("user", { id: c.id("id_x") })`),
+		)
+		expect(result.errors).toContain(
+			'Tables team and user share the id prefix "id_x"; ids of one would pass for the other',
+		)
+	})
+})

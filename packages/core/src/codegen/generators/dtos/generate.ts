@@ -8,10 +8,10 @@ import path from "node:path"
 import type { ImportRef, TableMeta } from "../../analyzer-types.ts"
 import { deriveEntityMeta, isExcludedFromUpdate } from "../../entity-meta.ts"
 import { camelToKebab } from "../../utils/case.ts"
-import { ensureDir, writeGenFile } from "../../utils/fs.ts"
+import { writeGenFile } from "../../utils/fs.ts"
 import type { GeneratorContext } from "../context-types.ts"
 import type { DtosConfig, FieldInfo, SchemaType, SharedSchema, TableInfo } from "./dto-types.ts"
-import { generateEntityFile } from "./entity-file.ts"
+import { generateEntityFile, sharedImportsOf } from "./entity-file.ts"
 import { generateExampleMeta } from "./example-meta.ts"
 import { generateFieldSchema } from "./field-schema.ts"
 import { updatePackageJson } from "./package-exports.ts"
@@ -28,7 +28,7 @@ function fieldInfosOf(meta: TableMeta, ctx: GeneratorContext): FieldInfo[] {
 			if (type === "create" && field.constraints.nomutate) continue
 			/* Shared with the published `immutable` list so the two cannot disagree */
 			if (type === "update" && isExcludedFromUpdate(field)) continue
-			const zodType = generateFieldSchema(field, type, ctx.analysis.imports)
+			const zodType = generateFieldSchema(field, type, { dialect: ctx.dialect, imports: ctx.analysis.imports })
 			if (zodType !== null) fields.push({ key: field.name, type, zodType })
 		}
 	}
@@ -64,10 +64,10 @@ type Written = { outputDir: string; sharedSchemas: Map<string, SharedSchema>; ta
 
 function writeShared(written: Written, config: DtosConfig, ctx: GeneratorContext): void {
 	const sharedDir = path.join(written.outputDir, "_shared")
-	ensureDir(sharedDir)
-	const content = generateSharedFile(collectUsedTimestampCombos(written.tables), written.sharedSchemas)
+	const imported = new Set(written.tables.flatMap((table) => sharedImportsOf(table, written.sharedSchemas)))
+	const content = generateSharedFile(collectUsedTimestampCombos(written.tables), written.sharedSchemas, imported)
 	const file = path.join(sharedDir, config.filePrefix ? `${config.filePrefix}._shared.gen.ts` : "index.gen.ts")
-	writeGenFile(file, content, "comb")
+	writeGenFile(file, content, { generator: "comb", staged: ctx.staged })
 	ctx.log(`Generated: ${path.relative(ctx.cwd, file)}`)
 }
 
@@ -76,7 +76,6 @@ function writeEntities(written: Written, config: DtosConfig, ctx: GeneratorConte
 	for (const table of written.tables) {
 		const kebabName = camelToKebab(table.name)
 		const entityDir = path.join(written.outputDir, kebabName)
-		ensureDir(entityDir)
 		const content = generateEntityFile(table, {
 			entityDir,
 			filePrefix: config.filePrefix,
@@ -85,7 +84,7 @@ function writeEntities(written: Written, config: DtosConfig, ctx: GeneratorConte
 			sharedSchemas: written.sharedSchemas,
 		})
 		const file = path.join(entityDir, config.filePrefix ? `${config.filePrefix}.${kebabName}.gen.ts` : "index.gen.ts")
-		writeGenFile(file, content, "comb")
+		writeGenFile(file, content, { generator: "comb", staged: ctx.staged })
 		ctx.log(`Generated: ${path.relative(ctx.cwd, file)}`)
 	}
 }

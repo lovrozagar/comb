@@ -11,7 +11,13 @@ function table(columns: Record<string, string>, overrides: Partial<TableMeta> = 
 		hasCompositePrimaryKey: false,
 		idPrefix: null,
 		sqlName: "item",
-		timestamps: { createdAt: false, deletedAt: false, style: "snake_case", updatedAt: false },
+		timestamps: {
+			createdAt: false,
+			deletedAt: false,
+			names: { createdAt: null, deletedAt: null, updatedAt: null },
+			style: "snake_case",
+			updatedAt: false,
+		},
 		partialUniqueIndexes: [],
 		uniqueIndexes: [],
 		varName: "item",
@@ -81,7 +87,15 @@ describe("deriveEntityMeta: identity", () => {
 				deleted_at: 'c.deletedAt("deleted_at")',
 				status: "x",
 			},
-			{ timestamps: { createdAt: false, deletedAt: true, style: "snake_case", updatedAt: false } },
+			{
+				timestamps: {
+					createdAt: false,
+					deletedAt: true,
+					names: { createdAt: null, deletedAt: "deleted_at", updatedAt: null },
+					style: "snake_case",
+					updatedAt: false,
+				},
+			},
 		)
 		const status = t.fields.find((f) => f.name === "status") as FieldMeta
 		Object.assign(status, { enumValues: ["a", "b"], states: { initial: "a", terminal: null, transitions: null } })
@@ -94,7 +108,15 @@ describe("deriveEntityMeta: identity", () => {
 		})
 		const camel = table(
 			{ id: 'c.id("itm")' },
-			{ timestamps: { createdAt: false, deletedAt: true, style: "camelCase", updatedAt: false } },
+			{
+				timestamps: {
+					createdAt: false,
+					deletedAt: true,
+					names: { createdAt: null, deletedAt: "deletedAt", updatedAt: null },
+					style: "camelCase",
+					updatedAt: false,
+				},
+			},
 		)
 		expect(deriveEntityMeta(camel)?.softDelete).toBe("deletedAt")
 	})

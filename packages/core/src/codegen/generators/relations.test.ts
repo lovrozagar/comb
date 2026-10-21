@@ -99,3 +99,11 @@ describe("generateRelations — relation names", () => {
 		expect(content).toContain("transfersBySenderUser: r.many.transfer")
 	})
 })
+
+describe("generateRelations without a relation (F10)", () => {
+	it("takes no r it would not use, which noUnusedParameters refuses", () => {
+		const { content } = generate("")
+		expect(content).toContain("export const relations = defineRelations(schema, () => ({}))")
+		expect(content).not.toContain("(r)")
+	})
+})

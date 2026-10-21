@@ -3,8 +3,10 @@
  * database comb.config.ts declares; direct mode (--tables) is one database with the direct set
  * of generators, written beside the tables file.
  */
+import fs from "node:fs"
 import path from "node:path"
 import type { GeneratorContext } from "../codegen/generators/context-types.ts"
+import { commitStaged, isGeneratedContent, type Staged, writeGenJsonFile } from "../codegen/utils/fs.ts"
 import { parseArgs } from "./args.ts"
 import { type CodegenConfig, type DatabaseCodegen, databaseIn, loadCombConfig, tablesFile } from "./comb-config.ts"
 import { CliError, type CliIo } from "./output.ts"
@@ -162,6 +164,52 @@ async function exportNamespaces(config: CodegenConfig, cwd: string): Promise<Map
 	return namespaces
 }
 
+/* the files a database's last codegen run wrote, at its output root under its file prefix (databases may share
+ * a root), so the next run deletes what it no longer writes */
+const runManifest = (root: string, prefix: string): string => path.join(root, `.${prefix}.codegen.json`)
+
+/** The generated files the last run recorded, relative to the output root; none before a first run */
+function lastRun(manifestPath: string): string[] {
+	if (!fs.existsSync(manifestPath)) return []
+	return (JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { files: string[] }).files
+}
+
+/** Remove `dir` and its parents while they are empty, up to `root` */
+function pruneEmpty(dir: string, root: string): void {
+	for (let at = dir; at.startsWith(root) && at !== root && fs.readdirSync(at).length === 0; at = path.dirname(at))
+		fs.rmdirSync(at)
+}
+
+/**
+ * Write everything the run staged, once every generator has run, then delete each file the last
+ * run wrote and this one did not, as long as comb wrote it: a removed table's files, or a
+ * generator's that writes nothing now. A file without comb's header is never touched. A run of
+ * some generators (-g) only adds to the record: it cannot tell the others' files stale.
+ */
+function commitRun(
+	staged: Staged,
+	{ partial, prefix, root }: { partial: boolean; prefix: string; root: string },
+): void {
+	const manifestPath = runManifest(root, prefix)
+	const before = lastRun(manifestPath)
+	const written = [...staged]
+		.filter(([, content]) => isGeneratedContent(content))
+		.map(([file]) => path.relative(root, file))
+	const now = [...new Set([...written, ...(partial ? before : [])])].sort()
+	writeGenJsonFile(manifestPath, { files: now }, { generator: "comb", staged })
+	commitStaged(staged)
+	for (const stale of before.filter((file) => !now.includes(file))) {
+		const file = path.resolve(root, stale)
+		if (!fs.existsSync(file) || !isGeneratedContent(fs.readFileSync(file, "utf8"))) continue
+		fs.unlinkSync(file)
+		pruneEmpty(path.dirname(file), root)
+	}
+}
+
+/** The engine a tables file builds for when the config names none: Postgres when it takes comb's pg columns */
+const dialectOfTables = (tablesPath: string): "postgres" | "sqlite" =>
+	/["']@lovrozagar\/comb\/pg\/columns["']/.test(fs.readFileSync(tablesPath, "utf8")) ? "postgres" : "sqlite"
+
 /** Validate, analyze and run `database`'s generators (all, or `only`) */
 async function generate(database: Database, only: string | undefined, io: CliIo): Promise<void> {
 	const analyzedTables = await analyzed(database.tablesPath, io)
@@ -177,8 +225,10 @@ async function generate(database: Database, only: string | undefined, io: CliIo)
 		ctx: {
 			analysis,
 			cwd: database.direct ? tablesDir : io.cwd,
+			dialect: database.db.dialect ?? dialectOfTables(database.tablesPath),
 			exportNamespace: database.exportNamespace,
 			log: io.out,
+			staged: new Map(),
 			tablesPath: database.tablesPath,
 			warn: io.err,
 		},
@@ -191,6 +241,7 @@ async function generate(database: Database, only: string | undefined, io: CliIo)
 		if (database.generators.includes(generator) && (only === undefined || only === generator))
 			await STEPS[generator](plan)
 	}
+	commitRun(plan.ctx.staged as Staged, { partial: only !== undefined, prefix: plan.prefix, root: plan.outDir })
 }
 
 /** The databases a codegen run covers: the one --tables names, or those comb.config.ts declares */

@@ -66,7 +66,7 @@ function propertyValue(object: ObjectLiteralExpression | undefined, key: string)
 	return property?.asKind(SyntaxKind.PropertyAssignment)?.getInitializer()
 }
 
-function stringOf(node: Node | undefined): string | null {
+export function stringOf(node: Node | undefined): string | null {
 	const value = resolve(node)
 	if (value?.isKind(SyntaxKind.StringLiteral) || value?.isKind(SyntaxKind.NoSubstitutionTemplateLiteral)) {
 		return value.getLiteralValue()

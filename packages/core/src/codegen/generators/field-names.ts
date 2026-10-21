@@ -77,16 +77,19 @@ function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): vo
 	lines.push(`export { ${constName}, type ${typeName} }`)
 	lines.push("")
 
-	writeGenFile(outputPath, lines.join("\n"), "comb")
+	writeGenFile(outputPath, lines.join("\n"), { generator: "comb", staged: ctx.staged })
 
-	if (config.updatePackageJson) {
-		const packageJsonPath = findNearestPackageJson(path.dirname(outputPath), ctx.cwd)
-		if (packageJsonPath) {
-			setPackageExport(packageJsonPath, { namespace: ctx.exportNamespace, subpath: "./field-names" }, outputPath)
-		}
-	}
+	if (config.updatePackageJson) exportFieldNames(ctx, outputPath)
 
 	ctx.log(`  field-names: ${outputPath} (${entries.length} fields)`)
+}
+
+/** The package.json nearest the field-names file exports it as ./field-names */
+function exportFieldNames(ctx: GeneratorContext, outputPath: string): void {
+	const packageJsonPath = findNearestPackageJson(path.dirname(outputPath), ctx.cwd)
+	if (!packageJsonPath) return
+	const subpath = { namespace: ctx.exportNamespace, staged: ctx.staged, subpath: "./field-names" }
+	setPackageExport(packageJsonPath, subpath, outputPath)
 }
 
 /** Walk up from dir to find nearest package.json */

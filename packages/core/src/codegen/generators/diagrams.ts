@@ -6,7 +6,6 @@
  * - JSON relations for AI consumption
  * - Compact summary for AI context
  */
-import * as fs from "node:fs"
 import * as path from "node:path"
 import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile, writeGenJsonFile } from "../utils/fs.ts"
@@ -212,22 +211,20 @@ export function generateDiagrams(ctx: GeneratorContext, config: DiagramsConfig):
 
 	const { relations, tables } = transformTables(ctx.analysis.tables)
 
-	fs.mkdirSync(outputDir, { recursive: true })
-
 	/* Generate DDL for ChartDB */
 	const ddl = generateDDL(tables, dbName)
 	const ddlPath = path.join(outputDir, `${dbName}-schema.gen.sql`)
-	writeGenFile(ddlPath, ddl, "comb")
+	writeGenFile(ddlPath, ddl, { generator: "comb", staged: ctx.staged })
 
 	/* Generate relations JSON */
 	const jsonData = generateRelationsJSON(tables, relations)
 	const jsonPath = path.join(outputDir, `${dbName}-relations.gen.json`)
-	writeGenJsonFile(jsonPath, jsonData, "comb")
+	writeGenJsonFile(jsonPath, jsonData, { generator: "comb", staged: ctx.staged })
 
 	/* Generate compact AI summary */
 	const compact = generateCompactAI(tables, relations)
 	const compactPath = path.join(outputDir, `${dbName}-ai.gen.txt`)
-	writeGenFile(compactPath, compact, "comb")
+	writeGenFile(compactPath, compact, { generator: "comb", staged: ctx.staged })
 
 	ctx.log(`Generated diagrams: ${tables.length} tables, ${relations.length} relations`)
 }

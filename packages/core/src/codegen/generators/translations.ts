@@ -4,7 +4,7 @@
  */
 import path from "node:path"
 import { propertyName, toScreamingSnakeCase } from "../utils/case.ts"
-import { ensureDir, writeGenFile } from "../utils/fs.ts"
+import { writeGenFile } from "../utils/fs.ts"
 import { buildConstraintMap, constraintsIn } from "./constraints.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
@@ -52,14 +52,15 @@ export function generateTranslations(ctx: GeneratorContext, config: Translations
 	}
 
 	const translationsDir = path.join(baseDir, "translations", "error-keys")
-	ensureDir(translationsDir)
 	const file: TranslationFile = { dbName, errorKeys, filePrefix: config.filePrefix }
-	writeGenFile(path.join(baseDir, `${config.filePrefix}.error-keys.gen.ts`), generateErrorKeysFile(file), "comb")
-	writeGenFile(
-		path.join(translationsDir, `${config.filePrefix}.error-keys.en.gen.ts`),
-		generateEnglishFile(file),
-		"comb",
-	)
+	writeGenFile(path.join(baseDir, `${config.filePrefix}.error-keys.gen.ts`), generateErrorKeysFile(file), {
+		generator: "comb",
+		staged: ctx.staged,
+	})
+	writeGenFile(path.join(translationsDir, `${config.filePrefix}.error-keys.en.gen.ts`), generateEnglishFile(file), {
+		generator: "comb",
+		staged: ctx.staged,
+	})
 
 	ctx.log(`Generated error translations for ${dbName} database`)
 	ctx.log(`Error keys: ${errorKeys.length}`)

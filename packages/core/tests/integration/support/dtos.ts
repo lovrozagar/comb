@@ -25,13 +25,16 @@ export type GenerateOptions = {
 	output?: string
 }
 
+/** The directory `generatedDtos(name, …)` writes its tables file and its `dtos` output in */
+export const generatedDir = (name: string): string => path.join(ROOT, `${name}-${process.pid}`)
+
 /** The generated module of every entity, by its kebab-case directory name. */
 export async function generatedDtos(
 	name: string,
 	tables: string,
 	options: GenerateOptions = {},
 ): Promise<Record<string, GeneratedEntity>> {
-	const dir = path.join(ROOT, `${name}-${process.pid}`)
+	const dir = generatedDir(name)
 	fs.rmSync(dir, { force: true, recursive: true })
 	fs.mkdirSync(dir, { recursive: true })
 	for (const [file, source] of Object.entries(options.files ?? {})) fs.writeFileSync(path.join(dir, file), source)

@@ -145,5 +145,29 @@ function generateFtsSql(
 	return lines.join("\n")
 }
 
-export { dedup, generateFtsSql }
+/**
+ * The FTS SQL a person applies by hand: each configured index's triggers and table dropped, made
+ * again, and rebuilt from its content table, so applying it after a column change replaces the
+ * old index rather than leaving it in place. `comb migrate diff` takes generateFtsSql, and writes
+ * a changed index this way itself.
+ */
+function ftsReferenceSql(
+	tables: TableMeta[],
+	ftsConfig: Record<string, FtsTableConfig>,
+	warn: (line: string) => void,
+): string {
+	const create = generateFtsSql(tables, ftsConfig, warn)
+	if (create === "") return ""
+	const names = Object.keys(ftsConfig)
+	const drops = names.flatMap((name) => [
+		...["ai", "ad", "au"].map((suffix) => `DROP TRIGGER IF EXISTS ${ident(`${name}_fts_${suffix}`)};`),
+		`DROP TABLE IF EXISTS ${ident(`${name}_fts`)};`,
+	])
+	const rebuilds = names.map(
+		(name) => `INSERT INTO ${ident(`${name}_fts`)}(${ident(`${name}_fts`)}) VALUES ('rebuild');`,
+	)
+	return [...drops, "", create, ...rebuilds, ""].join("\n")
+}
+
+export { dedup, ftsReferenceSql, generateFtsSql }
 export type { FtsTableConfig }

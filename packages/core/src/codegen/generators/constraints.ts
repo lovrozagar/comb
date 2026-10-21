@@ -133,7 +133,7 @@ export function generateConstraints(ctx: GeneratorContext, config: ConstraintsCo
 	const outputPath = path.resolve(ctx.cwd, config.output)
 	const constraintMap = buildConstraintMap(tables)
 
-	writeGenFile(outputPath, generateConstraintMapCode(constraintMap, dbName), "comb")
+	writeGenFile(outputPath, generateConstraintMapCode(constraintMap, dbName), { generator: "comb", staged: ctx.staged })
 
 	ctx.log(`Generated constraint map for ${dbName} database at: ${outputPath}`)
 	ctx.log(`Tables: ${Object.keys(constraintMap).length}, Total constraints: ${countConstraints(constraintMap)}`)

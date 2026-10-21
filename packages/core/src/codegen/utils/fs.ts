@@ -17,15 +17,48 @@ export function ensureDir(dirPath: string): void {
 const tmpPathFor = (filePath: string): string => `${filePath}.${crypto.randomUUID()}.tmp`
 
 /**
- * Atomically write and parse JSON (tmp + rename).
- * Preserves non-generated keys when merging.
+ * The files a codegen run writes, by path, held until every generator has run: one that fails
+ * then leaves the output as it was (see commitStaged)
  */
-export function writeJsonAtomic(filePath: string, data: unknown): void {
-	const dir = path.dirname(filePath)
-	ensureDir(dir)
+export type Staged = Map<string, string>
+
+/** `filePath` written atomically (tmp + rename), or staged when a run stages its writes */
+function put(filePath: string, content: string, staged: Staged | undefined): void {
+	if (staged !== undefined) {
+		staged.set(filePath, content)
+		return
+	}
+	ensureDir(path.dirname(filePath))
 	const tmpPath = tmpPathFor(filePath)
-	fs.writeFileSync(tmpPath, `${JSON.stringify(data, null, "\t")}\n`)
+	fs.writeFileSync(tmpPath, content)
 	fs.renameSync(tmpPath, filePath)
+}
+
+/** A file's content as the run sees it: what it staged, else what is on disk */
+export function readStaged(filePath: string, staged: Staged | undefined): string {
+	return staged?.get(filePath) ?? fs.readFileSync(filePath, "utf-8")
+}
+
+/**
+ * Write every staged file: each to a temporary file first, then all renamed into place, so the
+ * output changes only once every file is written. A file already as staged is left alone.
+ */
+export function commitStaged(staged: Staged): void {
+	const changed = [...staged].filter(
+		([file, content]) => !fs.existsSync(file) || fs.readFileSync(file, "utf-8") !== content,
+	)
+	const written = changed.map(([file, content]) => {
+		ensureDir(path.dirname(file))
+		const tmpPath = tmpPathFor(file)
+		fs.writeFileSync(tmpPath, content)
+		return [tmpPath, file] as const
+	})
+	for (const [tmpPath, file] of written) fs.renameSync(tmpPath, file)
+}
+
+/** Atomically write JSON (tmp + rename), or stage it; a package.json comb updates keeps its other keys */
+export function writeJsonAtomic(filePath: string, data: unknown, staged?: Staged): void {
+	put(filePath, `${JSON.stringify(data, null, "\t")}\n`, staged)
 }
 
 /** Check if a file exists */
@@ -55,7 +88,10 @@ function buildHeader(hash: string, generator: string, ext: string): string {
  * @generated header.
  * Returns true if the file was written, false if skipped.
  */
-export function writeGenFile(filePath: string, body: string, generator: string): boolean {
+/** How a generated file is written: the generator its header names, and the run's staging, if any */
+export type GenWrite = { generator: string; staged?: Staged | undefined }
+
+export function writeGenFile(filePath: string, body: string, { generator, staged }: GenWrite): boolean {
 	const normalized = body.replace(/\n*$/, "\n")
 	const hash = contentHash(normalized)
 
@@ -70,14 +106,11 @@ export function writeGenFile(filePath: string, body: string, generator: string):
 		if (existing !== "" && !firstLine.includes("@generated")) {
 			throw new Error(`refusing to overwrite ${filePath}: it has no @generated header, so comb did not write it`)
 		}
-		if (existing === fullContent) return false
+		/* a staging run records every file it produces, unchanged ones too: they are not stale */
+		if (existing === fullContent && staged === undefined) return false
 	}
 
-	const dir = path.dirname(filePath)
-	ensureDir(dir)
-	const tmpPath = tmpPathFor(filePath)
-	fs.writeFileSync(tmpPath, fullContent)
-	fs.renameSync(tmpPath, filePath)
+	put(filePath, fullContent, staged)
 	return true
 }
 
@@ -97,7 +130,7 @@ function hasGeneratedMarker(text: string): boolean {
  * overwrite a file that carries no `_generated` key.
  * Returns true if the file was written, false if skipped.
  */
-export function writeGenJsonFile(filePath: string, data: unknown, generator: string): boolean {
+export function writeGenJsonFile(filePath: string, data: unknown, { generator, staged }: GenWrite): boolean {
 	const marker = `${generator} checksum:${contentHash(JSON.stringify(data, null, 2))}`
 	const content = `${JSON.stringify({ _generated: marker, ...(data as Record<string, unknown>) }, null, 2)}\n`
 
@@ -106,11 +139,13 @@ export function writeGenJsonFile(filePath: string, data: unknown, generator: str
 	if (existing !== "" && !hasGeneratedMarker(existing)) {
 		throw new Error(`refusing to overwrite ${filePath}: it has no _generated key, so comb did not write it`)
 	}
-	if (existing === content) return false
+	if (existing === content && staged === undefined) return false
 
-	ensureDir(path.dirname(filePath))
-	const tmpPath = tmpPathFor(filePath)
-	fs.writeFileSync(tmpPath, content)
-	fs.renameSync(tmpPath, filePath)
+	put(filePath, content, staged)
 	return true
+}
+
+/** Whether `text` is a file comb wrote: an @generated header, or a JSON _generated key */
+export function isGeneratedContent(text: string): boolean {
+	return text.split("\n", 1).join("").includes("@generated by comb") || hasGeneratedMarker(text)
 }

@@ -11,7 +11,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { propertyAccess, propertyName, snakeToCamel } from "../utils/case.ts"
-import { ensureDir, writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
+import { readStaged, type Staged, writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
 import { exportKey, type ExportTarget, ownsKey, readExports } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
@@ -36,15 +36,16 @@ function genFileName(filePrefix: string | undefined, stem: string): string {
 type ColumnsOutput = { absoluteOutputDir: string; filePrefix?: string | undefined; tablesFile: string }
 
 /** Write one table's rqb-cols and sql-cols files */
-function writeEntityCols(table: TableEntry, out: ColumnsOutput): void {
+function writeEntityCols(table: TableEntry, out: ColumnsOutput, staged: Staged | undefined): void {
 	const rqbEntityDir = path.join(out.absoluteOutputDir, "rqb-cols", table.varName)
 	const sqlEntityDir = path.join(out.absoluteOutputDir, "sql-cols", table.varName)
-	ensureDir(rqbEntityDir)
-	ensureDir(sqlEntityDir)
 	const sqlRelTablesPath = `${path.relative(sqlEntityDir, path.dirname(out.tablesFile))}/${path.basename(out.tablesFile, ".ts")}`
 	const fileName = genFileName(out.filePrefix, table.varName)
-	writeGenFile(path.join(rqbEntityDir, fileName), generateRqbColsFile(table), "comb")
-	writeGenFile(path.join(sqlEntityDir, fileName), generateSqlColsFile(table, sqlRelTablesPath), "comb")
+	writeGenFile(path.join(rqbEntityDir, fileName), generateRqbColsFile(table), { generator: "comb", staged })
+	writeGenFile(path.join(sqlEntityDir, fileName), generateSqlColsFile(table, sqlRelTablesPath), {
+		generator: "comb",
+		staged,
+	})
 }
 
 /** Generate column refs and table names from analyzed tables */
@@ -63,14 +64,13 @@ export function generateColumns(ctx: GeneratorContext, config: ColumnsConfig): v
 		varName: t.varName,
 	}))
 
-	for (const dir of ["rqb-cols", "sql-cols", "table-names"]) ensureDir(path.join(out.absoluteOutputDir, dir))
-	for (const table of entries) writeEntityCols(table, out)
+	for (const table of entries) writeEntityCols(table, out, ctx.staged)
 	const tableNamesFile = path.join(out.absoluteOutputDir, "table-names", genFileName(config.filePrefix, "table-names"))
-	writeGenFile(tableNamesFile, generateTableNamesFile(entries), "comb")
+	writeGenFile(tableNamesFile, generateTableNamesFile(entries), { generator: "comb", staged: ctx.staged })
 
 	const packageJsonPath = path.join(ctx.cwd, "package.json")
 	if (config.updatePackageJson && fs.existsSync(packageJsonPath))
-		updatePackageJson(packageJsonPath, entries, { ...out, namespace: ctx.exportNamespace })
+		updatePackageJson(packageJsonPath, entries, { ...out, namespace: ctx.exportNamespace, staged: ctx.staged })
 
 	ctx.log(`Generated column refs for ${entries.length} tables`)
 }
@@ -134,9 +134,14 @@ const GENERATED_EXPORT = /^\.\/(?:table-cols|rqb-cols|sql-cols)\/|^\.\/table-nam
 function updatePackageJson(
 	packageJsonPath: string,
 	tables: TableEntry[],
-	{ absoluteOutputDir, filePrefix, namespace }: ColumnsOutput & { namespace: string | undefined },
+	{
+		absoluteOutputDir,
+		filePrefix,
+		namespace,
+		staged,
+	}: ColumnsOutput & { namespace: string | undefined; staged: Staged | undefined },
 ): void {
-	const content = fs.readFileSync(packageJsonPath, "utf-8")
+	const content = readStaged(packageJsonPath, staged)
 	const pkg = JSON.parse(content) as Record<string, unknown>
 
 	const packageDir = path.dirname(packageJsonPath)
@@ -165,5 +170,5 @@ function updatePackageJson(
 
 	pkg["exports"] = newExports
 
-	writeJsonAtomic(packageJsonPath, pkg)
+	writeJsonAtomic(packageJsonPath, pkg, staged)
 }

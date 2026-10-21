@@ -50,7 +50,7 @@ export function extractConstraints(raw: string, identifiers: IdentifierValues = 
 	if (/c\.enum\s*\(/.test(raw)) return {}
 
 	/* Try parameter-based constraints first (new format) */
-	const paramContent = extractBalancedBraces(raw, /c\.\w+\([^{]*\{/)
+	const paramContent = objectArgument(raw)
 	if (paramContent !== null) {
 		return parseConstraintObject(paramContent, identifiers)
 	}
@@ -107,6 +107,29 @@ function extractBalancedBraces(raw: string, startPattern: RegExp): string | null
 		return false
 	})
 	return end < 0 ? null : raw.substring(start, end)
+}
+
+/**
+ * The body of the first top-level object literal among the column helper's own arguments: never
+ * an object a later call takes, as in `c.json("m", schema).default({ … })`
+ */
+function objectArgument(raw: string): string | null {
+	const call = /c\.\w+\(/.exec(raw)
+	if (call === null) return null
+	let depth = 0
+	let open = -1
+	let body: string | null = null
+	scanCode(raw, call.index + call[0].length, (at, ch) => {
+		if ("([{".includes(ch)) {
+			if (depth === 0 && ch === "{" && open < 0) open = at
+			depth++
+		} else if (")]}".includes(ch)) {
+			depth--
+			if (depth === 0 && at > open && open >= 0) body = raw.substring(open + 1, at)
+		}
+		return depth >= 0 && body === null
+	})
+	return body
 }
 
 /** Parse constraint object literal string into record */

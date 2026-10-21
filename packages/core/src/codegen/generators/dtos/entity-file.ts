@@ -102,8 +102,8 @@ export function schemaImportLines(refs: ImportRef[], entityDir: string): string[
 type Spread = { combo: TimestampCombo | null; keys: Set<string>; suffix: string }
 
 function spreadOf(table: TableInfo): Spread {
-	const combo = comboOf(table.hasTimestamps)
-	const names = timestampNames(table.timestampStyle)
+	const combo = comboOf(table)
+	const names = timestampNames(table.timestampStyle === "snake_case" ? "snake_case" : "camelCase")
 	const keys = new Set(combo === null ? [] : comboFields(combo, names).map((f) => f.name))
 	return { combo, keys, suffix: names.suffix }
 }
@@ -195,6 +195,10 @@ function importLines(table: TableInfo, spread: Spread, options: EntityFileOption
 	}
 	return [...lines, ""]
 }
+
+/** Every name `table`'s generated file takes from `_shared` */
+export const sharedImportsOf = (table: TableInfo, shared: Map<string, SharedSchema>): string[] =>
+	sharedImports(table, spreadOf(table), shared)
 
 /**
  * Generate entity file content

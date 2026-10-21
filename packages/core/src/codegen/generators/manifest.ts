@@ -163,7 +163,7 @@ function generateManifest(ctx: GeneratorContext, config: ManifestConfig): void {
 	const outputPath = path.resolve(cwd, config.output)
 	const manifest = buildManifest(tables, dbName)
 
-	writeGenJsonFile(outputPath, manifest, "comb")
+	writeGenJsonFile(outputPath, manifest, { generator: "comb", staged: ctx.staged })
 	ctx.log(`  manifest: ${outputPath} (${manifest.entities.length} entities)`)
 }
 

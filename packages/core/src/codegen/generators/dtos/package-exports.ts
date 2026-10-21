@@ -1,8 +1,7 @@
 /** Optional: point the consumer package.json's `exports` at the generated DTOs, tables and relations. */
-import fs from "node:fs"
 import path from "node:path"
 import { camelToKebab } from "../../utils/case.ts"
-import { writeJsonAtomic } from "../../utils/fs.ts"
+import { readStaged, writeJsonAtomic } from "../../utils/fs.ts"
 import { exportKey, type ExportTarget, ownsKey, readExports } from "../../utils/package-json.ts"
 import type { GeneratorContext } from "../context-types.ts"
 import type { DtosConfig } from "./dto-types.ts"
@@ -40,7 +39,7 @@ function generatedExports(packageDir: string, { config, ctx, entities }: Package
  * subpath the package declares.
  */
 export function updatePackageJson(packageJsonPath: string, input: PackageExportsInput): void {
-	const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as Record<string, unknown>
+	const pkg = JSON.parse(readStaged(packageJsonPath, input.ctx.staged)) as Record<string, unknown>
 	const existing = readExports(pkg)
 	const root: Record<string, ExportTarget> = existing["."] === undefined ? {} : { ".": existing["."] }
 	const namespace = input.ctx.exportNamespace
@@ -48,6 +47,6 @@ export function updatePackageJson(packageJsonPath: string, input: PackageExports
 		Object.entries(existing).filter(([key]) => key !== "." && !ownsKey(namespace, key, owned)),
 	)
 	pkg["exports"] = { ...root, ...generatedExports(path.dirname(packageJsonPath), input), ...kept }
-	writeJsonAtomic(packageJsonPath, pkg)
+	writeJsonAtomic(packageJsonPath, pkg, input.ctx.staged)
 	input.ctx.log(`Updated package.json exports with ${input.entities.length} entities`)
 }

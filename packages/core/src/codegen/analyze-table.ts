@@ -2,18 +2,24 @@
  * One table definition: its fields, its options (composite key, unique indexes, CHECKs) and the
  * facts derived from them.
  */
-import { type Node, type ObjectLiteralExpression, SyntaxKind, type VariableDeclaration } from "ts-morph"
+import {
+	type CallExpression,
+	type Node,
+	type ObjectLiteralExpression,
+	SyntaxKind,
+	type VariableDeclaration,
+} from "ts-morph"
 import { parseField } from "./analyze-field.ts"
 import { readTableOptions } from "./analyze-options.ts"
 import type { FieldMeta, ImportsMeta, TableMeta, TimestampsMeta } from "./analyzer-types.ts"
 import { readEnum, resolve } from "./utils/enum-source.ts"
 import { textWithoutComments } from "./utils/node-text.ts"
 import { type ImportRef, importRefs, type JsonSchemaSource, readJsonSchema } from "./utils/schema-source.ts"
-import { getTableName } from "./utils/ts-morph.ts"
+import { getTableName, sqlNameArg } from "./utils/ts-morph.ts"
 
 /** The timestamp columns a table has, and their casing */
 // lookup-table: timestamp column names under either casing
-const TIMESTAMP_KEYS: Record<string, keyof Omit<TimestampsMeta, "style">> = {
+const TIMESTAMP_KEYS: Record<string, "createdAt" | "deletedAt" | "updatedAt"> = {
 	createdAt: "createdAt",
 	created_at: "createdAt",
 	deletedAt: "deletedAt",
@@ -25,15 +31,23 @@ const TIMESTAMP_KEYS: Record<string, keyof Omit<TimestampsMeta, "style">> = {
 /* the shared timestamp schemas are epoch milliseconds; a text or JSON column under the name is not one */
 const EPOCH_HELPERS = /^\s*(?:c\.(?:createdAt|updatedAt|deletedAt|timestamp|integer)|integer)\s*\(/
 
+/** The timestamp columns a table declares, each under its own name, and the casing they share */
 function detectTimestamps(fields: FieldMeta[]): TimestampsMeta {
-	const found: TimestampsMeta = { createdAt: false, deletedAt: false, style: "camelCase", updatedAt: false }
+	const names: TimestampsMeta["names"] = { createdAt: null, deletedAt: null, updatedAt: null }
 	for (const field of fields) {
 		const key = Object.hasOwn(TIMESTAMP_KEYS, field.name) ? TIMESTAMP_KEYS[field.name] : undefined
-		if (key === undefined || !EPOCH_HELPERS.test(field.raw)) continue
-		found[key] = true
-		if (field.name.includes("_")) found.style = "snake_case"
+		if (key !== undefined && EPOCH_HELPERS.test(field.raw)) names[key] = field.name
 	}
-	return found
+	const declared = Object.values(names).filter((name) => name !== null)
+	const snake = declared.filter((name) => name.includes("_")).length
+	const style = snake === 0 ? "camelCase" : snake === declared.length ? "snake_case" : "mixed"
+	return {
+		createdAt: names.createdAt !== null,
+		deletedAt: names.deletedAt !== null,
+		names,
+		style,
+		updatedAt: names.updatedAt !== null,
+	}
 }
 
 /* `.$type<z.infer<typeof schema>>()` types a column by a schema the DTO validates with */
@@ -53,6 +67,28 @@ function recordImports(refs: ImportRef[], enumReference: string | null, imports:
 	}
 }
 
+/** The column helper call a field's chain starts from: `c.ref(OWNER)` in `c.ref(OWNER).notNull()` */
+function rootCall(value: Node): Node | undefined {
+	let node: Node | undefined = value
+	while (node !== undefined) {
+		const call: CallExpression | undefined = node.asKind(SyntaxKind.CallExpression)
+		if (call !== undefined && /^(?:c\.)?\w+$/.test(call.getExpression().getText())) return call
+		const next: Node = call === undefined ? node : call.getExpression()
+		node = next.asKind(SyntaxKind.PropertyAccessExpression)?.getExpression()
+	}
+	return undefined
+}
+
+/**
+ * The SQL name a field's column call declares, read on the AST so a const holding it counts; the
+ * text's reading when the call names none (no argument, a config object, or c.id's prefix)
+ */
+function astSqlName(value: Node, parsed: string): string {
+	const first = rootCall(value)?.asKind(SyntaxKind.CallExpression)?.getArguments()[0]
+	const named = first !== undefined && !first.isKind(SyntaxKind.ObjectLiteralExpression) && parsed !== "id"
+	return named ? sqlNameArg(first) : parsed
+}
+
 /** One field, with what only the AST knows: enum values and states, schema and imports. */
 function fieldOf(key: string, value: Node, imports: ImportsMeta): FieldMeta {
 	/* a comment in the chain is a note, not code: `// TODO: .notNull()` declares nothing */
@@ -62,8 +98,10 @@ function fieldOf(key: string, value: Node, imports: ImportsMeta): FieldMeta {
 	const json = readJsonSchema(value)
 	const schemaImports = importRefs(importedNames(enumReference, json, raw), value.getSourceFile())
 	recordImports(schemaImports, enumReference, imports)
+	const parsed = parseField(key, raw, imports.identifierValues)
 	return {
-		...parseField(key, raw, imports.identifierValues),
+		...parsed,
+		sqlName: astSqlName(value, parsed.sqlName),
 		enumName: enumReference,
 		enumValues: enumSource?.values ?? null,
 		jsonSchemaName: json?.expression ?? null,
@@ -77,17 +115,34 @@ function keyOf(name: Node): string {
 	return name.asKind(SyntaxKind.StringLiteral)?.getLiteralValue() ?? name.getText()
 }
 
-/** Every field of a table's column object, through spreads of shared column consts; records the names they import. */
+/** `node`'s place, as `file:line`, for an error that points at the source */
+const placeOf = (node: Node): string => `${node.getSourceFile().getFilePath()}:${node.getStartLineNumber()}`
+
+/* shared column consts spread into shared column consts, at most this deep */
+const MAX_SPREAD_DEPTH = 4
+
+/**
+ * Every field of a table's column object, through spreads of shared column consts; records the
+ * names they import. A property comb cannot read is an error at its place, never a column the
+ * DTOs silently lack.
+ */
 function fieldsOf(columns: ObjectLiteralExpression, imports: ImportsMeta, depth = 0): FieldMeta[] {
 	const fields: FieldMeta[] = []
 	for (const property of columns.getProperties()) {
 		const spread = property.asKind(SyntaxKind.SpreadAssignment)
-		const shared = resolve(spread?.getExpression())?.asKind(SyntaxKind.ObjectLiteralExpression)
-		if (shared !== undefined && depth < 4) fields.push(...fieldsOf(shared, imports, depth + 1))
 		const assignment = property.asKind(SyntaxKind.PropertyAssignment)
 		const value = assignment?.getInitializer()
-		if (assignment !== undefined && value !== undefined)
+		if (assignment !== undefined && value !== undefined) {
 			fields.push(fieldOf(keyOf(assignment.getNameNode()), value, imports))
+			continue
+		}
+		const shared = resolve(spread?.getExpression())?.asKind(SyntaxKind.ObjectLiteralExpression)
+		if (shared === undefined || depth >= MAX_SPREAD_DEPTH) {
+			throw new Error(
+				`${placeOf(property)}: comb cannot read the columns of ${property.getText()}; spread a const object literal, at most ${MAX_SPREAD_DEPTH} deep`,
+			)
+		}
+		fields.push(...fieldsOf(shared, imports, depth + 1))
 	}
 	return fields
 }

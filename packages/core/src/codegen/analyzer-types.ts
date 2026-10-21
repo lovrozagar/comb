@@ -7,10 +7,14 @@
 type FieldConstraintsMeta = {
 	autogenerate: boolean
 	email: boolean
+	/** an https URL or a data:image/ URI */
+	imageUri: boolean
 	lowercase: boolean
 	max: number | null
 	maxBytes: number | null
 	min: number | null
+	/** a name: letters, marks, numbers, spaces and punctuation */
+	name: boolean
 	nomutate: boolean
 	password: boolean
 	pattern: string | null
@@ -96,7 +100,10 @@ type CheckConstraintMeta = {
 type TimestampsMeta = {
 	createdAt: boolean
 	deletedAt: boolean
-	style: "camelCase" | "snake_case"
+	/** each timestamp column's property name as the table declares it; null when it has none */
+	names: { createdAt: string | null; deletedAt: string | null; updatedAt: string | null }
+	/** the casing every timestamp shares; mixed when they differ, which no shared spread fits */
+	style: "camelCase" | "mixed" | "snake_case"
 	updatedAt: boolean
 }
 

@@ -4,25 +4,31 @@
  * Extracts constraints from type arguments:
  * Example: c.text("name", { min: 5, max: 254, email: true })
  */
+import type { FieldConstraintsMeta } from "./analyzer-types.ts"
 import { extractConstraints, type IdentifierValues } from "./utils/constraint-text.ts"
 
 /** Field constraints extracted from type arguments */
-export type FieldConstraints = {
-	autogenerate: boolean
-	email: boolean
-	lowercase: boolean
-	max: number | null
-	maxBytes: number | null
-	min: number | null
-	nomutate: boolean
-	password: boolean
-	pattern: string | null
-	private: boolean
-	tenant: boolean
-	trim: boolean
-	uppercase: boolean
-	url: boolean
-}
+export type FieldConstraints = FieldConstraintsMeta
+
+// lookup-table: every constraint key the column types allow (src/sqlite/constraints.ts); a state machine is c.enum's own
+const KNOWN = /* @__PURE__ */ new Set([
+	"autogenerate",
+	"email",
+	"imageUri",
+	"lowercase",
+	"max",
+	"maxBytes",
+	"min",
+	"name",
+	"nomutate",
+	"password",
+	"pattern",
+	"private",
+	"tenant",
+	"trim",
+	"uppercase",
+	"url",
+])
 
 /**
  * Parse field constraints from type arguments.
@@ -35,6 +41,8 @@ export function parseFieldConstraints(
 	identifiers?: IdentifierValues,
 ): FieldConstraints {
 	const constraints = extractConstraints(raw, identifiers)
+	const unknown = Object.keys(constraints).find((key) => !KNOWN.has(key))
+	if (unknown !== undefined) throw new Error(`${raw}: comb reads no constraint named ${unknown}`)
 
 	/* Check if this is a timestamp field */
 	const isTimestampField =
@@ -47,10 +55,12 @@ export function parseFieldConstraints(
 	return {
 		autogenerate,
 		email: constraints["email"] === true,
+		imageUri: constraints["imageUri"] === true,
 		lowercase: constraints["lowercase"] === true,
 		max: typeof constraints["max"] === "number" ? constraints["max"] : null,
 		maxBytes: typeof constraints["maxBytes"] === "number" ? constraints["maxBytes"] : null,
 		min: typeof constraints["min"] === "number" ? constraints["min"] : null,
+		name: constraints["name"] === true,
 		nomutate: constraints["nomutate"] === true,
 		password: constraints["password"] === true,
 		pattern: typeof constraints["pattern"] === "string" ? constraints["pattern"] : null,

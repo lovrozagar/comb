@@ -5,7 +5,16 @@ import { isGenerated } from "../../entity-meta.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { generateExampleMeta } from "./example-meta.ts"
 
-type Build = { annotations: FieldConstraints; field: FieldMeta; imports: ImportsMeta; schemaType: SchemaType }
+type Build = {
+	annotations: FieldConstraints
+	dialect: "postgres" | "sqlite"
+	field: FieldMeta
+	imports: ImportsMeta
+	schemaType: SchemaType
+}
+
+/* Postgres stores c.integer in int4 */
+const INT4 = { max: 2147483647, min: -2147483648 }
 
 /** A builder's answer: the Zod base, `null` to leave the column out, `undefined` when it is not its kind. */
 type Built = string | null | undefined
@@ -48,9 +57,10 @@ function foreignKeyBase({ field, schemaType }: Build): Built {
 	return NUMERIC.test(field.raw) ? undefined : "z.string().min(1).max(48)"
 }
 
+/* a password's rules bound what a person types; what is read back is its stored hash */
 function stringKind(annotations: FieldConstraints, mutative: boolean): string {
-	if (annotations.password) return "z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)"
-	if (annotations.email) return mutative ? "z.email().trim().toLowerCase()" : "z.email()"
+	if (annotations.password) return mutative ? "z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)" : "z.string()"
+	if (annotations.email) return "z.email()"
 	return annotations.url ? "z.url()" : "z.string()"
 }
 
@@ -71,10 +81,22 @@ function emailBounds(annotations: FieldConstraints, field: FieldMeta): string {
 	return (annotations.min === null ? "" : `.min(${annotations.min})`) + maxOf(annotations, field)
 }
 
-/* a required text column takes no empty string on create */
+/* a required text column takes no empty string on create or update */
 function minOf(annotations: FieldConstraints, field: FieldMeta, schemaType: SchemaType): string {
 	if (annotations.min !== null) return `.min(${annotations.min})`
-	return field.isNotNull && schemaType === "create" && !annotations.url ? ".min(1)" : ""
+	return field.isNotNull && isMutative(schemaType) && !annotations.url ? ".min(1)" : ""
+}
+
+/** The checks a name or an image URI takes on a write; what is read back is whatever the column holds */
+function kindChecks(annotations: FieldConstraints, mutative: boolean): string {
+	if (!mutative) return ""
+	const name = annotations.name
+		? '.regex(/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" })'
+		: ""
+	const image = annotations.imageUri
+		? '.refine((v) => /^(?:https:\\/\\/|data:image\\/)/.test(v), { message: "Must be an HTTPS URL or a data:image/ URI" })'
+		: ""
+	return name + image
 }
 
 function textBounds({ annotations, field, schemaType }: Build): string {
@@ -82,12 +104,14 @@ function textBounds({ annotations, field, schemaType }: Build): string {
 	if (annotations.email) return emailBounds(annotations, field)
 	const mutative = isMutative(schemaType)
 	const isIdField = field.name === "id" || field.name.endsWith("Id") || field.name.endsWith("_id")
-	if (isIdField && !field.length) return mutative ? ".regex(/^\\S{1,48}$/)" : ".min(1).max(48)"
+	/* an id-like column gets the id bounds only when it declares none of its own */
+	const declares = field.length !== null || annotations.min !== null || annotations.max !== null
+	if (isIdField && !declares) return mutative ? ".regex(/^\\S{1,48}$/)" : ".min(1).max(48)"
 	const min = minOf(annotations, field, schemaType)
 	const pattern = annotations.pattern !== null && mutative ? `.regex(${annotations.pattern})` : ""
 	const https =
 		annotations.url && mutative ? `.refine((v) => /^https:\\/\\//.test(v), { message: "Must be an HTTPS URL" })` : ""
-	return min + maxOf(annotations, field) + pattern + https
+	return min + maxOf(annotations, field) + pattern + https + kindChecks(annotations, mutative)
 }
 
 function textBase(build: Build): Built {
@@ -96,17 +120,21 @@ function textBase(build: Build): Built {
 	const typed = field.raw.includes(".$type<") ? typedSchema(field.raw, imports.jsonSchemaImports) : null
 	if (typed !== null) return typed
 	const mutative = isMutative(schemaType)
+	/* an email is normalized first, then validated: z.email() would refuse the padded input */
+	if (annotations.email && mutative) return `z.string().trim().toLowerCase().pipe(z.email()${textBounds(build)})`
 	return stringKind(annotations, mutative) + transforms(annotations, mutative) + textBounds(build)
 }
 
-function numberBase({ annotations, field, schemaType }: Build): Built {
+function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 	if (/c\.(createdAt|updatedAt|deletedAt|timestamp)[<(]/.test(field.raw)) return "timestampSchema"
 	const { max, min } = annotations
 	if (/c\.(integer|serialId)[<(]/.test(field.raw)) {
 		/* an unbounded integer written is a non-negative count; one read is whatever the column holds,
-		 * and either stays within what a JS number holds exactly */
-		const floor = min !== null ? `.min(${min})` : isMutative(schemaType) ? ".nonnegative()" : ""
-		return `z.number().int()${floor}.max(${max ?? "Number.MAX_SAFE_INTEGER"})`
+		 * and either stays within what the column holds: int4 on Postgres, a JS number's exact range on SQLite */
+		const int4 = dialect === "postgres"
+		const readFloor = int4 ? `.min(${INT4.min})` : ""
+		const floor = min !== null ? `.min(${min})` : isMutative(schemaType) ? ".nonnegative()" : readFloor
+		return `z.number().int()${floor}.max(${max ?? (int4 ? INT4.max : "Number.MAX_SAFE_INTEGER")})`
 	}
 	if (/c\.boolean[<(]/.test(field.raw)) return "z.boolean()"
 	if (!/c\.real[<(]/.test(field.raw)) return undefined
@@ -148,10 +176,14 @@ function finish(field: FieldMeta, schemaType: SchemaType, base: string): string 
  * it: a private column is never read back, a reference is never updated, and what comb or the
  * database generates is never written.
  */
-export function generateFieldSchema(field: FieldMeta, schemaType: SchemaType, imports: ImportsMeta): string | null {
+export function generateFieldSchema(
+	field: FieldMeta,
+	schemaType: SchemaType,
+	{ dialect = "sqlite", imports }: { dialect?: "postgres" | "sqlite" | undefined; imports: ImportsMeta },
+): string | null {
 	if (field.constraints.private && isRead(schemaType)) return null
 	if (isMutative(schemaType) && isGenerated(field)) return null
-	const build: Build = { annotations: field.constraints, field, imports, schemaType }
+	const build: Build = { annotations: field.constraints, dialect, field, imports, schemaType }
 	for (const builder of BUILDERS) {
 		const base = builder(build)
 		if (base === null) return null

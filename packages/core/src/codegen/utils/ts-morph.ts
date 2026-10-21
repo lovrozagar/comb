@@ -4,6 +4,7 @@
 import path from "node:path"
 import type { Node, SourceFile } from "ts-morph"
 import { Project, SyntaxKind } from "ts-morph"
+import { stringOf } from "./enum-source.ts"
 
 /** Create a ts-morph project optimized for code generation */
 export function createProject(): Project {
@@ -95,15 +96,20 @@ export function getTablesImportPath(tablesPath: string): string {
 	return `./${basename}`
 }
 
-/** Get actual table name from table definition call */
-export function getTableName(variableName: string, initializer: Node): string {
-	const callExpr = initializer.asKind(SyntaxKind.CallExpression)
-	if (!callExpr) return variableName
+/**
+ * The SQL name an argument spells: a string literal, or a const that holds one. Anything else is
+ * an error at the argument: a name comb guessed would key every generated map on the wrong one.
+ */
+export function sqlNameArg(arg: Node): string {
+	const name = stringOf(arg)
+	if (name !== null) return name
+	throw new Error(
+		`${arg.getSourceFile().getFilePath()}:${arg.getStartLineNumber()}: comb cannot read the SQL name ${arg.getText()}; write it as a string, or a const that holds one`,
+	)
+}
 
-	const args = callExpr.getArguments()
-	const firstArg = args[0]
-	if (firstArg) {
-		return firstArg.getText().replace(/['"]/g, "")
-	}
-	return variableName
+/** The table name a table definition call declares: its first argument, else its variable's name */
+export function getTableName(variableName: string, initializer: Node): string {
+	const first = initializer.asKind(SyntaxKind.CallExpression)?.getArguments()[0]
+	return first === undefined ? variableName : sqlNameArg(first)
 }

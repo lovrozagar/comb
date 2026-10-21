@@ -56,10 +56,14 @@ export declare function defineCodegenConfig(config: CodegenConfig): CodegenConfi
 type FieldConstraintsMeta = {
     autogenerate: boolean;
     email: boolean;
+    /** an https URL or a data:image/ URI */
+    imageUri: boolean;
     lowercase: boolean;
     max: number | null;
     maxBytes: number | null;
     min: number | null;
+    /** a name: letters, marks, numbers, spaces and punctuation */
+    name: boolean;
     nomutate: boolean;
     password: boolean;
     pattern: string | null;
@@ -138,7 +142,14 @@ type CheckConstraintMeta = {
 type TimestampsMeta = {
     createdAt: boolean;
     deletedAt: boolean;
-    style: "camelCase" | "snake_case";
+    /** each timestamp column's property name as the table declares it; null when it has none */
+    names: {
+        createdAt: string | null;
+        deletedAt: string | null;
+        updatedAt: string | null;
+    };
+    /** the casing every timestamp shares; mixed when they differ, which no shared spread fits */
+    style: "camelCase" | "mixed" | "snake_case";
     updatedAt: boolean;
 };
 /** Complete metadata for a single table */
@@ -191,24 +202,10 @@ export type { ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMe
  * Extracts constraints from type arguments:
  * Example: c.text("name", { min: 5, max: 254, email: true })
  */
+import type { FieldConstraintsMeta } from "./analyzer-types.ts";
 import { type IdentifierValues } from "./utils/constraint-text.ts";
 /** Field constraints extracted from type arguments */
-export type FieldConstraints = {
-    autogenerate: boolean;
-    email: boolean;
-    lowercase: boolean;
-    max: number | null;
-    maxBytes: number | null;
-    min: number | null;
-    nomutate: boolean;
-    password: boolean;
-    pattern: string | null;
-    private: boolean;
-    tenant: boolean;
-    trim: boolean;
-    uppercase: boolean;
-    url: boolean;
-};
+export type FieldConstraints = FieldConstraintsMeta;
 /**
  * Parse field constraints from type arguments.
  * Extracts constraints from c.method("name", { ... }) pattern.
@@ -287,7 +284,14 @@ type FtsTableConfig = {
 declare function dedup(columns: string[]): string[];
 /** Generate FTS5 SQL for all configured tables. Returns empty string if nothing to generate. */
 declare function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
-export { dedup, generateFtsSql };
+/**
+ * The FTS SQL a person applies by hand: each configured index's triggers and table dropped, made
+ * again, and rebuilt from its content table, so applying it after a column change replaces the
+ * old index rather than leaving it in place. `comb migrate diff` takes generateFtsSql, and writes
+ * a changed index this way itself.
+ */
+declare function ftsReferenceSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
+export { dedup, ftsReferenceSql, generateFtsSql };
 export type { FtsTableConfig };
 
 // codegen/generators/orm.d.ts
@@ -365,6 +369,8 @@ export type GeneratorContext = {
     analysis: AnalysisResult;
     /** the directory relative output paths resolve against */
     cwd: string;
+    /** the database's engine: what a column type holds, and which drizzle core a file imports from */
+    dialect: "postgres" | "sqlite";
     /** a progress line for the person running codegen */
     log: (line: string) => void;
     /**
@@ -372,6 +378,8 @@ export type GeneratorContext = {
      * package exports several databases; undefined when it exports this one alone
      */
     exportNamespace?: string | undefined;
+    /** where a codegen run holds its writes, by path, until every generator has run; none writes at once */
+    staged?: Map<string, string> | undefined;
     /** the analyzed tables file */
     tablesPath: string;
     /** a line the person running codegen should act on */

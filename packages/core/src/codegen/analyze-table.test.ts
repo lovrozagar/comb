@@ -21,18 +21,26 @@ describe("parseTable", () => {
 	created_at: c.createdAt("created_at"),
 	updatedAt: c.updatedAt("updatedAt"),
 	deleted_at: c.deletedAt("deleted_at"),
-	...shared,
 })`)
 		expect(table).toMatchObject({
 			hasCompositePrimaryKey: false,
 			idPrefix: "pst",
 			sqlName: "posts",
-			timestamps: { createdAt: true, deletedAt: true, style: "snake_case", updatedAt: true },
+			timestamps: {
+				createdAt: true,
+				deletedAt: true,
+				names: { createdAt: "created_at", deletedAt: "deleted_at", updatedAt: "updatedAt" },
+				style: "mixed",
+				updatedAt: true,
+			},
+
 			varName: "post",
 		})
 		expect(table?.fields.map((f) => f.name)).toEqual(["id", "created_at", "updatedAt", "deleted_at"])
 	})
+})
 
+describe("parseTable: options", () => {
 	it("reads composite keys, unique indexes and CHECKs from the options", () => {
 		const { table } = tableOf(`export const m = sqliteTable("m", { a: c.text("a"), b: c.text("b") }, (x) => [
 	primaryKey({ columns: [x.a, x.b] }),
@@ -43,7 +51,13 @@ describe("parseTable", () => {
 			checkConstraints: [{ expression: "length(a) > 0", name: "m_a_check" }],
 			hasCompositePrimaryKey: true,
 			idPrefix: null,
-			timestamps: { createdAt: false, deletedAt: false, style: "camelCase", updatedAt: false },
+			timestamps: {
+				createdAt: false,
+				deletedAt: false,
+				names: { createdAt: null, deletedAt: null, updatedAt: null },
+				style: "camelCase",
+				updatedAt: false,
+			},
 			uniqueIndexes: [{ columns: ["a", "b"], name: "m_a_idx" }],
 		})
 	})
@@ -81,7 +95,13 @@ describe("parseTable: timestamps (M-M8)", () => {
 	updated_at: c.integer("updated_at").notNull(),
 	deleted_at: c.json("deleted_at", s),
 })`)
-		expect(table?.timestamps).toEqual({ createdAt: false, deletedAt: false, style: "snake_case", updatedAt: true })
+		expect(table?.timestamps).toEqual({
+			createdAt: false,
+			deletedAt: false,
+			names: { createdAt: null, deletedAt: null, updatedAt: "updated_at" },
+			style: "snake_case",
+			updatedAt: true,
+		})
 	})
 })
 
@@ -125,5 +145,35 @@ export const t = sqliteTable("t", { id: c.id("ttt"), ...timestamps, title: c.tex
 	uniqueIndex("t_org_slug").on(t.org, t.slug),
 ])`)
 		expect(table?.uniqueIndexes).toEqual([{ columns: ["org", "slug"], name: "t_org_slug" }])
+	})
+})
+
+describe("parseTable: SQL names written as consts or quoted (F7)", () => {
+	it("reads a table and a column name from the const that holds it, and a quote inside a name as itself", () => {
+		const { table } = tableOf(`const ORDERS = "orders"
+const OWNER = "owner_id"
+export const order = sqliteTable(ORDERS, { id: c.id("ord"), ownerId: c.ref(OWNER).notNull() })`)
+		expect(table?.sqlName).toBe("orders")
+		expect(table?.fields.find((f) => f.name === "ownerId")?.sqlName).toBe("owner_id")
+		expect(tableOf(`export const quoted = sqliteTable('quo"ted', { id: c.id("qt") })`).table?.sqlName).toBe('quo"ted')
+	})
+
+	it("fails on a table or column name it cannot read, naming where", () => {
+		expect(() => tableOf(`export const t = sqliteTable(nameOf(), { id: c.id("ttt") })`)).toThrow(
+			/:1: comb cannot read the SQL name nameOf\(\)/,
+		)
+		expect(() => tableOf(`export const t = sqliteTable("t", { id: c.id("ttt"), n: c.text(nameOf()) })`)).toThrow(
+			/:1: comb cannot read the SQL name nameOf\(\)/,
+		)
+	})
+})
+
+describe("parseTable: a column given by a const", () => {
+	it("reads its SQL name from the text when its value is no column call", () => {
+		const { table } = tableOf(
+			`const note = c.text("note_text")
+export const t = sqliteTable("t", { id: c.id("ttt"), note })`.replace("note })", "note: note })"),
+		)
+		expect(table?.fields.find((f) => f.name === "note")?.sqlName).toBe("note")
 	})
 })

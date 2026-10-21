@@ -4,7 +4,7 @@ import { SHARED_META_KEYS, SHARED_META_VALUES, SHARED_SCHEMAS } from "./example-
 import { BASE_TYPE_ALIASES, rewriteBaseTypes } from "./shared-schemas.ts"
 
 export type TimestampCombo = "Created" | "CreatedUpdated" | "CreatedUpdatedDeleted"
-export type TimestampStyle = TableInfo["timestampStyle"]
+export type TimestampStyle = Exclude<TableInfo["timestampStyle"], "mixed">
 type UsedTimestampCombos = { camelCase: Set<TimestampCombo>; snakeCase: Set<TimestampCombo> }
 
 /** A table's timestamp column names, under its casing, and the suffix its shared spreads carry. */
@@ -16,9 +16,15 @@ export function timestampNames(style: TimestampStyle): TimestampNames {
 		: { created: "createdAt", deleted: "deletedAt", suffix: "", updated: "updatedAt" }
 }
 
-/** The shared spread a table's timestamps use; a table without `created` has none. */
-export function comboOf(has: TableInfo["hasTimestamps"]): TimestampCombo | null {
-	if (!has.createdAt) return null
+/**
+ * The shared spread a table's timestamps use; none for a table without `created`, or one whose
+ * timestamps mix casings, as a spread names every column under one
+ */
+export function comboOf({
+	hasTimestamps: has,
+	timestampStyle,
+}: Pick<TableInfo, "hasTimestamps" | "timestampStyle">): TimestampCombo | null {
+	if (!has.createdAt || timestampStyle === "mixed") return null
 	if (has.updatedAt && has.deletedAt) return "CreatedUpdatedDeleted"
 	return has.updatedAt ? "CreatedUpdated" : "Created"
 }
@@ -38,47 +44,10 @@ export function comboFields(combo: TimestampCombo, names: TimestampNames): { nam
 export function collectUsedTimestampCombos(tables: TableInfo[]): UsedTimestampCombos {
 	const result: UsedTimestampCombos = { camelCase: new Set(), snakeCase: new Set() }
 	for (const table of tables) {
-		const combo = comboOf(table.hasTimestamps)
+		const combo = comboOf(table)
 		if (combo !== null) (table.timestampStyle === "snake_case" ? result.snakeCase : result.camelCase).add(combo)
 	}
 	return result
-}
-
-function validators(hasUpdated: boolean, hasDeleted: boolean, n: TimestampNames): string[] {
-	const lines: string[] = []
-	const { created: c, deleted: d, suffix, updated: u } = n
-	if (hasUpdated) {
-		lines.push(`export const validateTimestampsUpdatedAfterCreated${suffix} = (data: any) => data.${u} >= data.${c}`)
-		lines.push(
-			`export const validateTimestampsUpdatedAfterCreatedOptional${suffix} = (data: any) => !data.${u} || !data.${c} || data.${u} >= data.${c}`,
-		)
-	}
-	if (hasDeleted) {
-		lines.push(
-			`export const validateTimestampsDeletedAfterCreated${suffix} = (data: any) => data.${d} === null || data.${d} >= data.${c}`,
-		)
-		lines.push(
-			`export const validateTimestampsDeletedAfterCreatedOptional${suffix} = (data: any) => !data.${d} || !data.${c} || data.${d} >= data.${c}`,
-		)
-	}
-	return lines
-}
-
-/* emitted only for a combo with updatedAt, which every combo with deletedAt also has */
-function refinements(constName: string, deleted: boolean, n: TimestampNames): string[] {
-	const entry = (key: string, column: string) => [
-		`\t${key}: {`,
-		`\t\tmessage: "${column} cannot be before ${n.created}",`,
-		`\t\tpath: ["${column}"]`,
-		"\t},",
-	]
-	return [
-		`export const ${constName}${n.suffix} = {`,
-		...(deleted ? entry("deletedAfterCreated", n.deleted) : []),
-		...entry("updatedAfterCreated", n.updated),
-		"}",
-		"",
-	]
 }
 
 /** The read, readPartial and create spreads of one combo, using shared `_z*` timestamp schemas when they exist. */
@@ -104,21 +73,43 @@ function timestampVariants(
 	style: TimestampStyle,
 	shared: Map<string, SharedSchema>,
 ): string[] {
-	const n = timestampNames(style)
-	const flags = {
-		deleted: combos.has("CreatedUpdatedDeleted"),
-		updated: combos.has("CreatedUpdated") || combos.has("CreatedUpdatedDeleted"),
+	return [...combos].flatMap((combo) => spreads(combo, timestampNames(style), shared))
+}
+
+/** A top-level export of the shared file: its name, and its lines with the comment above it */
+type Block = { lines: string[]; name: string | null }
+
+/** The shared file's lines, as blocks: each export with the comment and blank lines above it */
+function blocksOf(lines: readonly string[]): Block[] {
+	const blocks: Block[] = []
+	let pending: string[] = []
+	for (const line of lines) {
+		const name = /^export const (\w+)/.exec(line)?.[1]
+		const continues = /^[\t }]/.test(line) && blocks.length > 0 && pending.length === 0
+		if (line.startsWith("import ")) blocks.push({ lines: [line], name: null })
+		else if (name !== undefined) blocks.push({ lines: [...pending, line], name })
+		else if (continues) blocks.at(-1)?.lines.push(line)
+		else pending.push(line)
+		if (name !== undefined || continues) pending = []
 	}
-	const lines = validators(flags.updated, flags.deleted, n)
-	if (flags.updated) {
-		lines.push(
-			"",
-			...refinements("timestampsReadRefinements", flags.deleted, n),
-			...refinements("timestampsOptionalRefinements", flags.deleted, n),
-		)
+	return [...blocks, { lines: pending, name: null }]
+}
+
+/** The blocks a generated DTO imports, and every block those name, in file order */
+function keepImported(lines: readonly string[], imported: ReadonlySet<string>): string[] {
+	const blocks = blocksOf(lines)
+	const named = new Map(blocks.flatMap((block) => (block.name === null ? [] : [[block.name, block]])))
+	const kept = new Set<string>()
+	const visit = (name: string) => {
+		const block = named.get(name)
+		if (block === undefined || kept.has(name)) return
+		kept.add(name)
+		const code = block.lines.join("\n")
+		for (const other of named.keys())
+			if (other !== name && new RegExp(`\\b${other.replace("$", "\\$")}\\b`).test(code)) visit(other)
 	}
-	for (const combo of combos) lines.push(...spreads(combo, n, shared))
-	return lines
+	for (const name of imported) visit(name)
+	return blocks.filter((block) => block.name === null || kept.has(block.name)).flatMap((block) => block.lines)
 }
 
 function header(): string[] {
@@ -145,9 +136,14 @@ function header(): string[] {
 }
 
 /**
- * Generate shared _shared/index.gen.ts content — only emits combos actually used
+ * The shared `_shared/index.gen.ts` content: the combos tables use, the deduped schemas, and of
+ * those only what a generated DTO imports, with everything that names
  */
-export function generateSharedFile(used: UsedTimestampCombos, sharedSchemas: Map<string, SharedSchema>): string {
+export function generateSharedFile(
+	used: UsedTimestampCombos,
+	sharedSchemas: Map<string, SharedSchema>,
+	imported: ReadonlySet<string>,
+): string {
 	const lines = header()
 	/* Auto-deduped shared schema constants — must be before timestamp spreads that reference them */
 	if (sharedSchemas.size > 0) {
@@ -159,5 +155,5 @@ export function generateSharedFile(used: UsedTimestampCombos, sharedSchemas: Map
 	}
 	if (used.camelCase.size > 0) lines.push(...timestampVariants(used.camelCase, "camelCase", sharedSchemas))
 	if (used.snakeCase.size > 0) lines.push(...timestampVariants(used.snakeCase, "snake_case", sharedSchemas))
-	return lines.join("\n")
+	return keepImported(lines, imported).join("\n")
 }

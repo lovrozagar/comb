@@ -220,6 +220,6 @@ export function generateOrm(ctx: GeneratorContext, config: OrmConfig): void {
 		schemaImport: `${dbName}DbSchema`,
 		tablesImport,
 	}
-	writeGenFile(outputPath, render(names), "comb")
+	writeGenFile(outputPath, render(names), { generator: "comb", staged: ctx.staged })
 	ctx.log(`Generated ORM client: ${outputPath}`)
 }

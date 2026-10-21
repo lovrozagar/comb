@@ -4,7 +4,7 @@ import type { GeneratorContext } from "../context-types.ts"
 
 type TestContext = GeneratorContext & { logged: string[]; warned: string[] }
 
-type ContextOptions = { cwd: string; dbName?: string; tablesPath?: string }
+type ContextOptions = { cwd: string; dbName?: string; dialect?: GeneratorContext["dialect"]; tablesPath?: string }
 
 function emptyImports(): AnalysisResult["imports"] {
 	return { enumImports: new Map(), identifiers: new Map(), identifierValues: new Map(), jsonSchemaImports: new Set() }
@@ -13,7 +13,7 @@ function emptyImports(): AnalysisResult["imports"] {
 /** Build from an analyzer result, or from hand-made tables under `dbName` (default "test"). */
 function testContext(
 	source: AnalysisResult | TableMeta[],
-	{ cwd, dbName = "test", tablesPath = "" }: ContextOptions,
+	{ cwd, dbName = "test", dialect = "sqlite", tablesPath = "" }: ContextOptions,
 ): TestContext {
 	const analysis = Array.isArray(source)
 		? { dbName, imports: emptyImports(), tables: source, tablesImportPath: "" }
@@ -23,6 +23,7 @@ function testContext(
 	return {
 		analysis,
 		cwd,
+		dialect,
 		log: (line) => logged.push(line),
 		logged,
 		tablesPath,

@@ -1,7 +1,7 @@
 /** Reading a consumer package.json's `exports` before a generator adds its subpaths. */
 import fs from "node:fs"
 import path from "node:path"
-import { writeJsonAtomic } from "./fs.ts"
+import { readStaged, type Staged, writeJsonAtomic } from "./fs.ts"
 
 /** A subpath's target: a path, a condition map, or a fallback list. */
 export type ExportTarget = unknown
@@ -55,15 +55,15 @@ export function ownsKey(namespace: string | undefined, key: string, own: (bare: 
  */
 export function setPackageExport(
 	packageJsonPath: string,
-	{ namespace, subpath }: { namespace?: string | undefined; subpath: string },
+	{ namespace, staged, subpath }: { namespace?: string | undefined; staged?: Staged | undefined; subpath: string },
 	file: string,
 ): void {
-	const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as Record<string, unknown>
+	const pkg = JSON.parse(readStaged(packageJsonPath, staged)) as Record<string, unknown>
 	const exports = readExports(pkg)
 	delete exports[subpath]
 	subpath = exportKey(namespace, subpath)
 	delete exports[subpath]
 	exports[subpath] = `./${path.relative(path.dirname(packageJsonPath), file)}`
 	pkg["exports"] = exports
-	writeJsonAtomic(packageJsonPath, pkg)
+	writeJsonAtomic(packageJsonPath, pkg, staged)
 }

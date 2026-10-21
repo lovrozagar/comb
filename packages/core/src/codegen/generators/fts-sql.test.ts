@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it } from "vitest"
 import { parseField } from "../analyze-field.ts"
 import type { TableMeta } from "../analyzer-types.ts"
-import { dedup, generateFtsSql } from "./fts-sql.ts"
+import { dedup, ftsReferenceSql, generateFtsSql } from "./fts-sql.ts"
 
 const post: TableMeta = {
 	checkConstraints: [],
@@ -16,7 +16,13 @@ const post: TableMeta = {
 	idPrefix: "pst",
 	partialUniqueIndexes: [],
 	sqlName: "post",
-	timestamps: { createdAt: false, deletedAt: false, style: "snake_case", updatedAt: false },
+	timestamps: {
+		createdAt: false,
+		deletedAt: false,
+		names: { createdAt: null, deletedAt: null, updatedAt: null },
+		style: "snake_case",
+		updatedAt: false,
+	},
 	uniqueIndexes: [],
 	varName: "post",
 }
@@ -100,5 +106,11 @@ describe("generateFtsSql: names SQL reserves (D7)", () => {
 		expect(sql).toContain(`CREATE VIRTUAL TABLE IF NOT EXISTS "o'x_fts"`)
 		expect(sql).toContain("content='o''x',")
 		expect(sql).toContain('ON "o\'x" BEGIN')
+	})
+})
+
+describe("ftsReferenceSql", () => {
+	it("writes nothing without an FTS config", () => {
+		expect(ftsReferenceSql([], {}, () => undefined)).toBe("")
 	})
 })

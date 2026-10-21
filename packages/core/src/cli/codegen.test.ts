@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeIo, projects, writeTables } from "./__fixtures__/io.ts"
@@ -89,13 +89,24 @@ describe("comb codegen: config mode generator selection", () => {
 		config(dir, { generators: ["rows", "manifest", "orm", "fts"], output: { rows: "./out/rows.gen.ts" } })
 		expect(await runCli(["codegen", "core"], makeIo(dir))).toBe(0)
 		/* orm without a dialect and driver, and fts without a config, write nothing */
-		expect(readdirSync(dir).sort()).toEqual(["comb.config.ts", "db.core.manifest.gen.json", "db.core.tables.ts", "out"])
+		expect(readdirSync(dir).sort()).toEqual([
+			".db.core.codegen.json",
+			"comb.config.ts",
+			"db.core.manifest.gen.json",
+			"db.core.tables.ts",
+			"out",
+		])
 		expect(existsSync(join(dir, "out", "rows.gen.ts"))).toBe(true)
 		const one = project()
 		writeTables(one)
 		config(one, {})
 		expect(await runCli(["codegen", "-g", "manifest"], makeIo(one))).toBe(0)
-		expect(readdirSync(one).sort()).toEqual(["comb.config.ts", "db.core.manifest.gen.json", "db.core.tables.ts"])
+		expect(readdirSync(one).sort()).toEqual([
+			".db.core.codegen.json",
+			"comb.config.ts",
+			"db.core.manifest.gen.json",
+			"db.core.tables.ts",
+		])
 	})
 })
 
@@ -169,5 +180,70 @@ describe("comb codegen: arguments", () => {
 			expect(await runCli(argv, io)).toBe(1)
 			expect(io.errors.join("\n")).toContain(message)
 		}
+	})
+})
+
+const HEAD = `import { sqliteTable } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+`
+const POST = `export const post = sqliteTable("post", { id: c.id("pst"), title: c.text("title").notNull() })\n`
+const INVOICE = `export const invoice = sqliteTable("invoice", { id: c.id("inv"), total: c.integer("total") })\n`
+
+/** Every file under `dir`, relative to it, sorted */
+function filesUnder(dir: string, base = dir): string[] {
+	return readdirSync(dir, { withFileTypes: true })
+		.flatMap((entry) =>
+			entry.isDirectory() ? filesUnder(join(dir, entry.name), base) : [join(dir, entry.name).slice(base.length + 1)],
+		)
+		.sort()
+}
+
+describe("comb codegen: what a run leaves on disk (F12, F19)", () => {
+	it("writes nothing when a table fails, so the output is the last good run's or none (F19)", async () => {
+		const dir = project()
+		config(dir, { output: { default: "./gen" } })
+		writeFileSync(
+			join(dir, "db.core.tables.ts"),
+			`${HEAD}${POST}export const bad = sqliteTable("bad", { id: c.id("bad"), s: c.enum("s", valuesOf()) })\n`,
+		)
+		const io = makeIo(dir)
+		expect(await runCli(["codegen"], io)).toBe(1)
+		expect(existsSync(join(dir, "gen"))).toBe(false)
+		expect(filesUnder(dir).filter((file) => file.endsWith(".tmp"))).toEqual([])
+	})
+
+	it("deletes the files of a table that is gone, and of a generator that writes nothing now, but no file it did not write (F12)", async () => {
+		const dir = project()
+		config(dir, { output: { default: "./gen" } })
+		writeFileSync(join(dir, "db.core.tables.ts"), `${HEAD}${POST}${INVOICE}`)
+		expect(await runCli(["codegen"], makeIo(dir))).toBe(0)
+		expect(filesUnder(join(dir, "gen")).some((file) => file.includes("invoice"))).toBe(true)
+		writeFileSync(join(dir, "gen", "dtos", "keep.ts"), "export const mine = 1\n")
+		/* a stale file someone removed already, and one someone made their own, are left as they are */
+		const [removed, owned] = filesUnder(join(dir, "gen")).filter((file) => file.includes("invoice")) as [string, string]
+		rmSync(join(dir, "gen", removed))
+		writeFileSync(join(dir, "gen", owned), "export const mine = 2\n")
+		writeFileSync(join(dir, "db.core.tables.ts"), `${HEAD}${POST}`)
+		expect(await runCli(["codegen"], makeIo(dir))).toBe(0)
+		const after = filesUnder(join(dir, "gen"))
+		expect(after.filter((file) => file.includes("invoice"))).toEqual([owned])
+		expect(after).toContain("dtos/keep.ts")
+		expect(readFileSync(join(dir, "gen", "db.core.rows.gen.ts"), "utf8")).not.toContain("invoice")
+		/* a run of one generator deletes nothing another wrote */
+		expect(await runCli(["codegen", "-g", "rows"], makeIo(dir))).toBe(0)
+		expect(filesUnder(join(dir, "gen"))).toEqual(after)
+	})
+})
+
+describe("comb codegen: the dialect of a tables file", () => {
+	it("reads Postgres from comb's pg columns when the config names no dialect", async () => {
+		const dir = project()
+		config(dir, { generators: ["enum-checks"] })
+		writeFileSync(
+			join(dir, "db.core.tables.ts"),
+			`import { pgTable } from "drizzle-orm/pg-core"\nimport { c } from "@lovrozagar/comb/pg/columns"\nexport const post = pgTable("post", { id: c.id("pst"), s: c.enum("s", ["a", "b"]) })\n`,
+		)
+		expect(await runCli(["codegen"], makeIo(dir))).toBe(0)
+		expect(readFileSync(join(dir, "db.core.enum-checks.gen.ts"), "utf8")).toContain('from "drizzle-orm/pg-core"')
 	})
 })
