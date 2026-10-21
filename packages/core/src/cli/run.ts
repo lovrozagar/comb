@@ -10,7 +10,7 @@ import { CliError, type CliIo } from "./output.ts"
 const COMMANDS: ReadonlyArray<[string, string]> = [
 	["codegen [db...]", "Run codegen for the databases in comb.config.ts (all, or those named)"],
 	["codegen --tables <path>", "Direct mode: analyze one tables file and generate beside it"],
-	["migrate init", "Create drizzle.config.ts, atlas.hcl and atlas-migrations/"],
+	["migrate init", "Create drizzle.config.ts and atlas-migrations/"],
 	["migrate diff <db> [name]", "Diff the schema and write the next migration"],
 	["migrate check <db>", "Check and approve the pending migrations, applying nothing"],
 	["migrate apply <db>", "Apply pending migrations: approve drops, apply and record each at once"],

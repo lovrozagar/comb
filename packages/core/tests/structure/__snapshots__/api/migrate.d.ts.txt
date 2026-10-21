@@ -396,7 +396,7 @@ declare function redactUrl(raw: string): string;
 declare function scrubAtlasOutput(text: string, urls: readonly string[]): string;
 /** Atlas's failure in comb's terms where comb knows the fix; otherwise as Atlas said it */
 declare function explainAtlasFailure(stderr: string): string;
-/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to one schema; migrate init writes it too */
+/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to one schema */
 declare function atlasConfig(needs: AtlasNeeds): string;
 /**
  * Run `body` with an Atlas config for `target` and `needs` in a fresh 0700 directory, removed

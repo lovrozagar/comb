@@ -189,7 +189,7 @@ const hclString = (value: string) =>
 		.replaceAll("${", () => "$${")
 		.replaceAll("%{", () => "%%{")
 
-/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to one schema; migrate init writes it too */
+/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to one schema */
 function atlasConfig(needs: AtlasNeeds): string {
 	const lines = ['env "comb" {']
 	if (needs.url) lines.push('  url = getenv("COMB_ATLAS_URL")')

@@ -1,10 +1,9 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { Run } from "../migrate/core/process.ts"
 import { fakeAtlas as hashingAtlas, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, ok, projects, writeTables } from "./__fixtures__/io.ts"
-import { atlasConfig } from "../migrate/core/atlas-target.ts"
 import { help, runCli } from "./run.ts"
 
 const temp = projects()
@@ -83,21 +82,21 @@ describe("comb migrate init", () => {
 		const dir = project()
 		const io = makeIo(dir)
 		expect(await runCli(["migrate", "init"], io)).toBe(0)
-		expect(io.outputs).toEqual(["Created: drizzle.config.ts", "Created: atlas.hcl", "Created: atlas-migrations/"])
-		expect(readFileSync(join(dir, "atlas.hcl"), "utf8")).toContain('dev = "sqlite://file?mode=memory"')
+		/* no atlas.hcl: comb runs Atlas with a config of its own, so a scaffolded one would promise a guard nothing reads (C11) */
+		expect(io.outputs).toEqual(["Created: drizzle.config.ts", "Created: atlas-migrations/"])
+		expect(existsSync(join(dir, "atlas.hcl"))).toBe(false)
 		const again = makeIo(dir)
 		expect(await runCli(["migrate", "init"], again)).toBe(0)
 		expect(again.outputs).toEqual([])
 	})
 
-	it("creates a Postgres project with --dialect postgres: no credential in any file, Atlas's config the one comb runs", async () => {
+	it("creates a Postgres project with --dialect postgres: no credential in any file, and no atlas.hcl", async () => {
 		const dir = project()
 		const io = makeIo(dir)
 		expect(await runCli(["migrate", "init", "--dialect", "postgres"], io)).toBe(0)
 		expect(io.outputs).toEqual([
 			"Created: drizzle.config.ts",
 			"Created: comb.migrate.config.ts",
-			"Created: atlas.hcl",
 			"Created: atlas-migrations/",
 		])
 		const read = (name: string) => readFileSync(join(dir, name), "utf8")
@@ -105,8 +104,8 @@ describe("comb migrate init", () => {
 		expect(read("drizzle.config.ts")).not.toContain("dbCredentials")
 		expect(read("comb.migrate.config.ts")).toContain('type: "postgres"')
 		expect(read("comb.migrate.config.ts")).toContain('url: process.env["DATABASE_URL"] ?? ""')
-		expect(read("atlas.hcl")).toBe(atlasConfig({ dev: true, dir: "atlas-migrations", url: true }))
-		for (const name of ["drizzle.config.ts", "comb.migrate.config.ts", "atlas.hcl"])
+		expect(existsSync(join(dir, "atlas.hcl"))).toBe(false)
+		for (const name of ["drizzle.config.ts", "comb.migrate.config.ts"])
 			expect(read(name)).not.toMatch(/:\/\/[^\s"]*:[^\s"]*@/)
 	})
 

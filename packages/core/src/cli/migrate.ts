@@ -2,7 +2,6 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { atlasConfig } from "../migrate/core/atlas-target.ts"
 import { parseArgs } from "./args.ts"
 import { configuredFtsSql } from "./comb-config.ts"
 import { migrateApply } from "./migrate-apply.ts"
@@ -16,36 +15,6 @@ export default defineConfig({
 	out: "./atlas-migrations",
 	schema: "./src/**/*.tables.ts",
 })
-`
-
-const ATLAS_HCL = `variable "db_url" {
-  type = string
-}
-
-data "external_schema" "drizzle" {
-  program = [
-    "bun",
-    "drizzle-kit",
-    "export"
-  ]
-}
-
-env "local" {
-  src = data.external_schema.drizzle.url
-  url = var.db_url
-  dev = "sqlite://file?mode=memory"
-
-  migration {
-    dir = "file://atlas-migrations"
-  }
-
-  diff {
-    skip {
-      drop_schema = true
-      drop_table  = true
-    }
-  }
-}
 `
 
 const PG_DRIZZLE_CONFIG = `import { defineConfig } from "drizzle-kit"
@@ -76,18 +45,16 @@ export default defineConfig({
 })
 `
 
-/** The starter files of each dialect, in the order they are written */
+/**
+ * The starter files of each dialect, in the order they are written. No atlas.hcl: comb runs Atlas
+ * with a config of its own, so a project's would hold a guard no comb command reads (C11)
+ */
 function starterFiles(dialect: string): ReadonlyArray<readonly [string, string]> {
-	if (dialect === "sqlite")
-		return [
-			["drizzle.config.ts", DRIZZLE_CONFIG],
-			["atlas.hcl", ATLAS_HCL],
-		]
+	if (dialect === "sqlite") return [["drizzle.config.ts", DRIZZLE_CONFIG]]
 	if (dialect !== "postgres") throw new CliError(`Unknown --dialect "${dialect}": use sqlite or postgres`)
 	return [
 		["drizzle.config.ts", PG_DRIZZLE_CONFIG],
 		["comb.migrate.config.ts", PG_MIGRATE_CONFIG],
-		["atlas.hcl", atlasConfig({ dev: true, dir: "atlas-migrations", url: true })],
 	]
 }
 
