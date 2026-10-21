@@ -204,3 +204,35 @@ describe("sqliteErrorHandler on libsql: a delete of a row others still reference
 		})
 	})
 })
+
+describe("sqliteErrorHandler on libsql: an expression index and a STRICT column (Q9, Q10)", () => {
+	const db = useMemberDb()
+	const maps: ConstraintMap[] = [
+		{ account: { unique: { u_email_lower: { cause: "Email taken", errorKey: "email_taken" } } } },
+	]
+	const setup = [
+		"CREATE TABLE account (id TEXT PRIMARY KEY, email TEXT)",
+		"CREATE UNIQUE INDEX u_email_lower ON account (lower(email))",
+		"INSERT INTO account VALUES ('a1', 'a@b.c')",
+		"CREATE TABLE s (id TEXT PRIMARY KEY, n INTEGER) STRICT",
+	]
+
+	it("maps a unique expression index by name, as Postgres maps the constraint", async () => {
+		for (const statement of setup) await db().client.execute(statement)
+		expect(await classify(db(), "INSERT INTO account VALUES ('a2', 'A@B.C')", { maps })).toMatchObject({
+			errorKey: "email_taken",
+			status: 409,
+			table: "account",
+		})
+	})
+
+	it("answers text in a STRICT INTEGER column with the 400 Postgres gives", async () => {
+		for (const statement of setup) await db().client.execute(statement)
+		expect(await classify(db(), "INSERT INTO s VALUES ('x', 'abc')", { maps })).toMatchObject({
+			column: "n",
+			errorKey: "invalid_value",
+			status: 400,
+			table: "s",
+		})
+	})
+})

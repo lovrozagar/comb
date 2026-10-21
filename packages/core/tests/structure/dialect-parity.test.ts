@@ -39,10 +39,13 @@ const SQLITE_CONSTRAINTS = tableOf("src/sqlite/constraint-handler.ts", "CONSTRAI
 const PG_CONSTRAINTS = tableOf("src/pg/error-handler.ts", "CONSTRAINTS")
 const PG_RESOURCE = tableOf("src/pg/error-handler.ts", "RESOURCE")
 
-/* where the engines differ, and why */
+/* where the engines differ, and why: the kinds only SQLite's handler has, and those only Postgres' has */
 const ASYMMETRY = {
-	primaryKey:
-		"SQLite reports a primary key violation under its own code; Postgres reports 23505 on <table>_pkey, which unique maps",
+	pg: { exclusion: "SQLite has no EXCLUDE constraint" },
+	sqlite: {
+		primaryKey:
+			"SQLite reports a primary key violation under its own code; Postgres reports 23505 on <table>_pkey, which unique maps",
+	},
 } as const
 
 /* the integration suites that run each engine for real */
@@ -55,6 +58,7 @@ const SUITES = {
 /* the error key each constraint handler throws in the suites' shared fixture map */
 const FIXTURE_KEY: Record<string, string> = {
 	check: "member_seats_invalid",
+	exclusion: "room_booked",
 	foreignKey: "member_org_missing",
 	notNull: "required_field_missing",
 	primaryKey: "member_id_taken",
@@ -94,8 +98,8 @@ describe("dialect parity", () => {
 		const pgKinds = new Set(Object.values(PG_CONSTRAINTS))
 		const onlySqlite = [...sqliteKinds].filter((kind) => !pgKinds.has(kind))
 		const onlyPg = [...pgKinds].filter((kind) => !sqliteKinds.has(kind))
-		expect(onlySqlite).toEqual(Object.keys(ASYMMETRY))
-		expect(onlyPg).toEqual([])
+		expect(onlySqlite).toEqual(Object.keys(ASYMMETRY.sqlite))
+		expect(onlyPg).toEqual(Object.keys(ASYMMETRY.pg))
 	})
 
 	it("exercises every constraint kind on SQLite, D1 and Postgres", () => {
@@ -103,7 +107,9 @@ describe("dialect parity", () => {
 		for (const kind of kinds) {
 			const key = FIXTURE_KEY[kind]
 			expect(key, `no fixture key for ${kind}`).toBeDefined()
-			for (const [suite, text] of Object.entries(SUITES)) {
+			/* a kind one engine lacks is asserted only on the engine that has it */
+			const suites = kind in ASYMMETRY.pg ? { pg: SUITES.pg } : SUITES
+			for (const [suite, text] of Object.entries(suites)) {
 				expect(text.includes(`"${key}"`), `${suite} never asserts ${kind} (${key})`).toBe(true)
 			}
 		}

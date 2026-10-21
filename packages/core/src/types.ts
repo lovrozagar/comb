@@ -23,6 +23,7 @@ export const combErrorKeys = {
 	DATABASE_IO_ERROR: "database_io_error",
 	DATABASE_READONLY: "database_readonly",
 	DATABASE_UNAVAILABLE: "database_unavailable",
+	EXCLUSION_CONSTRAINT_VIOLATION: "exclusion_constraint_violation",
 	FILTER_NOT_WIRED: "filter_not_wired",
 	FOREIGN_KEY_VIOLATION: "foreign_key_violation",
 	INVALID_CURSOR: "invalid_cursor",
@@ -36,6 +37,7 @@ export const combErrorKeys = {
 	SORT_NOT_WIRED: "sort_not_wired",
 	STORAGE_LIMIT_REACHED: "tier_database_limit_reached",
 	UNIQUE_CONSTRAINT_VIOLATION: "unique_constraint_violation",
+	VALUE_TOO_LARGE: "value_too_large",
 } as const
 
 /** Lowercase error key values from combErrorKeys */
@@ -52,6 +54,8 @@ export type ConstraintMapEntry = {
 export type ConstraintMap = {
 	[table: string]: {
 		check?: Record<string, ConstraintMapEntry>
+		/** Postgres EXCLUDE constraints, by name */
+		exclusion?: Record<string, ConstraintMapEntry>
 		foreignKey?: Record<string, ConstraintMapEntry>
 		primaryKey?: ConstraintMapEntry
 		unique?: Record<string, ConstraintMapEntry>

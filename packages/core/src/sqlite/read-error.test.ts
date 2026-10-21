@@ -113,6 +113,20 @@ describe("readSqliteError: a bare SQLITE_CONSTRAINT code", () => {
 		)
 		expect(readSqliteError(bun("SQLITE_CONSTRAINT", "constraint failed"))?.code).toBe("SQLITE_CONSTRAINT")
 	})
+
+	it("reads a STRICT type mismatch from its wording, as libsql names no extended code for it (Q10)", () => {
+		const unknownExtended = Object.assign(
+			new Error("SQLITE_CONSTRAINT: cannot store TEXT value in INTEGER column s.n"),
+			{
+				code: "SQLITE_CONSTRAINT",
+				extendedCode: "UNKNOWN_SQLITE_ERROR_3091",
+			},
+		)
+		expect(readSqliteError(unknownExtended)).toMatchObject({
+			code: "SQLITE_CONSTRAINT_DATATYPE",
+			message: "cannot store TEXT value in INTEGER column s.n",
+		})
+	})
 })
 
 /* the crafted params of the 0.7.0 review (spoof.ts): a bound value shaped like an engine message */

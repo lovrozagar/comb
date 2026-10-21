@@ -320,3 +320,54 @@ describePg("pgErrorHandler on a real server: a session the server ends for idlin
 		expect(caught(failure)).toMatchObject({ errorKey: "database_unavailable", status: 503 })
 	})
 })
+
+describePg("pgErrorHandler on a real server: values a request can send (Q8)", () => {
+	const sessions = usePg()
+	const MAPS_Q8: ConstraintMap[] = [
+		{ booking: { exclusion: { booking_no_overlap: { cause: "Room booked", errorKey: "room_booked" } } } },
+	]
+
+	/** What pgErrorHandler throws for the failure of `statement`, after `ddl` */
+	async function failure(ddl: string, statement: string, params: unknown[] = []): Promise<unknown> {
+		const client = sessions.pg()
+		await client.query(ddl)
+		const error = await client.query(statement, params).then(
+			() => new Error("the statement did not fail"),
+			(caughtError: unknown) => caughtError,
+		)
+		try {
+			pgErrorHandler(error, MAPS_Q8)
+		} catch (thrown) {
+			return thrown
+		}
+		return "not handled"
+	}
+
+	it.each([
+		["a string past varchar(8)", "CREATE TEMP TABLE v (s varchar(8))", "123456789"],
+		["a NUL byte in text", "CREATE TEMP TABLE v (s text)", "a\u0000b"],
+	])("maps %s, bound as a request sends it, to a 400 invalid_value", async (_, ddl, value) => {
+		expect(await failure(ddl, "INSERT INTO v VALUES ($1)", [value])).toMatchObject({
+			errorKey: "invalid_value",
+			status: 400,
+		})
+	})
+
+	it("maps a value too large for its unique index's row to a 400 value_too_large", async () => {
+		expect(
+			await failure(
+				"CREATE TEMP TABLE v (s text UNIQUE)",
+				"INSERT INTO v SELECT string_agg(md5(random()::text), '') FROM generate_series(1, 400)",
+			),
+		).toMatchObject({ errorKey: "value_too_large", status: 400 })
+	})
+
+	it("maps an overlapping row under an EXCLUDE constraint through the map", async () => {
+		expect(
+			await failure(
+				"CREATE TEMP TABLE booking (during tsrange, CONSTRAINT booking_no_overlap EXCLUDE USING gist (during WITH &&)); INSERT INTO booking VALUES ('[2026-01-01 10:00, 2026-01-01 12:00)')",
+				"INSERT INTO booking VALUES ('[2026-01-01 11:00, 2026-01-01 13:00)')",
+			),
+		).toMatchObject({ errorKey: "room_booked", status: 409, table: "booking" })
+	})
+})

@@ -34,6 +34,8 @@ const STEMS: Array<[RegExp, string]> = [
 	[/^CHECK constraint failed/i, "SQLITE_CONSTRAINT_CHECK"],
 	[/^NOT NULL constraint failed/i, "SQLITE_CONSTRAINT_NOTNULL"],
 	[/^FOREIGN KEY constraint failed/i, "SQLITE_CONSTRAINT_FOREIGNKEY"],
+	/* a STRICT column given another type, which libsql reports as UNKNOWN_SQLITE_ERROR_3091 */
+	[/^cannot store \w+ value in \w+ column /i, "SQLITE_CONSTRAINT_DATATYPE"],
 ]
 
 /** The extended code for `code`: a bare SQLITE_CONSTRAINT is refined from the wording, when it can be. */
@@ -48,7 +50,7 @@ function readOne(error: Error): { code: string; message: string } | null {
 	const extended = field(error, "extendedCode")
 	if (sqliteCode(extended)) return refine(extended, error.message.replace(LIBSQL_PREFIX, ""))
 	const code = field(error, "code")
-	if (sqliteCode(code)) return refine(code, error.message)
+	if (sqliteCode(code)) return refine(code, error.message.replace(LIBSQL_PREFIX, ""))
 	const d1 = D1_MESSAGE.exec(error.message)
 	if (d1 === null) return null
 	return refine(d1[3] ?? (d1[2] as string), d1[1] as string)

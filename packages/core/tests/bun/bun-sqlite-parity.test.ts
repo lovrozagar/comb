@@ -177,3 +177,37 @@ describe("pgErrorHandler on Bun.SQL, raw and through drizzle", () => {
 		}
 	})
 })
+
+describe("bun:sqlite maps an expression index and a STRICT mismatch as libsql does (Q9, Q10)", () => {
+	const maps: ConstraintMap[] = [
+		{ account: { unique: { u_email_lower: { cause: "Email taken", errorKey: "email_taken" } } } },
+	]
+
+	/** What sqliteErrorHandler throws for `statement` on a database with an expression index and a STRICT table */
+	function handled(statement: string): unknown {
+		const sqlite = new Database(":memory:")
+		sqlite.run("CREATE TABLE account (id TEXT PRIMARY KEY, email TEXT)")
+		sqlite.run("CREATE UNIQUE INDEX u_email_lower ON account (lower(email))")
+		sqlite.run("INSERT INTO account VALUES ('a1', 'a@b.c')")
+		sqlite.run("CREATE TABLE s (id TEXT PRIMARY KEY, n INTEGER) STRICT")
+		try {
+			drizzle({ client: sqlite }).run(sql.raw(statement))
+		} catch (error) {
+			try {
+				sqliteErrorHandler(error, maps)
+			} catch (thrown) {
+				return thrown
+			}
+		}
+		return "not handled"
+	}
+
+	it("finds the index by name and answers the mismatch with a 400", () => {
+		expect(handled("INSERT INTO account VALUES ('a2', 'A@B.C')")).toMatchObject({ errorKey: "email_taken" })
+		expect(handled("INSERT INTO s VALUES ('x', 'abc')")).toMatchObject({
+			column: "n",
+			errorKey: "invalid_value",
+			status: 400,
+		})
+	})
+})

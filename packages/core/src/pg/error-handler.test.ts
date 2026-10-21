@@ -231,3 +231,36 @@ describe("pgErrorHandler: a value the column cannot hold (Q-D11)", () => {
 		expect(thrown(nodePg({ code: "22012" }))).toBeUndefined()
 	})
 })
+
+/** An EXCLUDE violation on booking, of `constraint` */
+const overlap = (constraint: string) => nodePg({ code: "23P01", constraint, table: "booking" })
+
+describe("pgErrorHandler: more values a request can send (Q8)", () => {
+	it.each(["22001", "22021", "22P05"])("maps %s, a value the column cannot hold, to invalid_value", (code) => {
+		expect(thrown(nodePg({ code, column: "name" }))).toMatchObject({ errorKey: "invalid_value", status: 400 })
+	})
+
+	it("maps 54000, a value too large for an index row, to value_too_large", () => {
+		expect(thrown(nodePg({ code: "54000" }))).toMatchObject({
+			cause: "Value too large",
+			errorKey: "value_too_large",
+			status: 400,
+		})
+	})
+
+	it("maps 23P01 through the map's exclusion entries, else to a 409", () => {
+		const maps: ConstraintMap[] = [
+			{ booking: { exclusion: { booking_no_overlap: { cause: "Room booked", errorKey: "room_booked" } } } },
+		]
+		expect(thrown(overlap("booking_no_overlap"), maps)).toMatchObject({
+			cause: "Room booked",
+			errorKey: "room_booked",
+			status: 409,
+			table: "booking",
+		})
+		expect(thrown(overlap("other"), maps)).toMatchObject({
+			errorKey: "exclusion_constraint_violation",
+			status: 409,
+		})
+	})
+})

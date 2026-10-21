@@ -4,9 +4,10 @@
  * name its fields differently, and `readPgError` reads all three.
  * https://www.postgresql.org/docs/current/errcodes-appendix.html
  */
-import { type Fallback, type Found, findCheck, lookup, own, toCombError } from "../constraint-map.ts"
+import { type Fallback, type Found, findNamed, lookup, own, toCombError } from "../constraint-map.ts"
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
+import { valueError } from "../value-error.ts"
 
 export type PgErrorRead = {
 	code: string
@@ -152,7 +153,7 @@ function check(v: Violation): CombError {
 	} as const
 	if (table !== undefined)
 		return toError(v, { entry: lookup(v.maps, table, (t) => own(t.check, constraint)), fallback, table })
-	const found = findCheck(v.maps, constraint)
+	const found = findNamed(v.maps, "check", constraint)
 	return toError(v, { entry: found?.entry, fallback, table: found?.table })
 }
 
@@ -168,11 +169,23 @@ function notNull(v: Violation): CombError {
 	})
 }
 
+/** An EXCLUDE constraint's violation, an overlapping row: the map's entry by name, else a 409 */
+function exclusion(v: Violation): CombError {
+	const { constraint, table } = v.read
+	const fallback = {
+		cause: "The record conflicts with an existing one",
+		errorKey: combErrorKeys.EXCLUSION_CONSTRAINT_VIOLATION,
+		status: "conflict",
+	} as const
+	return toError(v, { entry: lookup(v.maps, table, (t) => own(t.exclusion, constraint)), fallback, table })
+}
+
 const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
 	"23502": notNull,
 	"23503": foreignKey,
 	"23505": unique,
 	"23514": check,
+	"23P01": exclusion,
 }
 
 const UNAVAILABLE: Fallback = {
@@ -228,28 +241,9 @@ const RESOURCE: Record<string, Fallback> = {
 	"25P03": UNAVAILABLE,
 }
 
-/*
- * a value the column cannot hold: a number out of its range, text that is no number, a date that
- * does not parse or is out of range; what a request can send, so a 400. The rest of class 22
- * (a division by zero, say) comes from the server's own SQL and stays the caller's.
- */
-// lookup-table: the four SQLSTATEs above, read only
-const INVALID_VALUE = /* @__PURE__ */ new Set(["22003", "22P02", "22007", "22008"])
-
-/** A value the column cannot hold, named by its column when the server says which; never echoed */
-const invalidValue = ({ column, table }: PgErrorRead, source: unknown) =>
-	new CombError({
-		cause: column === undefined ? "Invalid value" : `Invalid value for ${column}`,
-		column,
-		errorKey: combErrorKeys.INVALID_VALUE,
-		source,
-		status: "bad_request",
-		table,
-	})
-
 /**
  * Handle PostgreSQL errors: constraint violations through the app's maps, a value the column
- * cannot hold to a 400, resource and availability errors to their generic keys. Anything else
+ * cannot hold to a 400 (value-error.ts), resource and availability errors to their generic keys. Anything else
  * is left for the caller.
  */
 function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
@@ -257,7 +251,8 @@ function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
 	if (read === null) return
 	const handler = own(CONSTRAINTS, read.code)
 	if (handler !== undefined) throw handler({ maps: constraintMaps, read, source: error })
-	if (INVALID_VALUE.has(read.code)) throw invalidValue(read, error)
+	const value = valueError(read.code, read, error)
+	if (value !== undefined) throw value
 	const resource = own(RESOURCE, read.code)
 	if (resource !== undefined) throw new CombError({ ...resource, source: error })
 }

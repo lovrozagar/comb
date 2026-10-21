@@ -7,7 +7,10 @@
 import { type Fallback } from "../constraint-map.ts";
 import { CombError } from "../error.ts";
 import { type ConstraintMap } from "../types.ts";
-/** The CombError for an SQLite constraint violation inside `error`, or null when it is not one. */
+/**
+ * The CombError for an SQLite constraint violation inside `error`, or for a value its column
+ * cannot hold (value-error.ts); null when it is neither.
+ */
 declare function constraintError(error: unknown, maps: ConstraintMap[]): CombError | null;
 /**
  * Throws the mapped CombError when `error` is an SQLite constraint violation; otherwise returns.
@@ -49,8 +52,8 @@ export type Found = {
 export declare const own: <T>(record: Record<string, T> | undefined, key: string | undefined) => T | undefined;
 /** The first entry `pick` finds for `table` across `maps`. */
 export declare function lookup(maps: ConstraintMap[], table: string | undefined, pick: (t: TableMap) => ConstraintMapEntry | undefined): ConstraintMapEntry | undefined;
-/** The CHECK entry named `name` in any table, with that table. */
-export declare function findCheck(maps: ConstraintMap[], name: string | undefined): {
+/** The `kind` entry named `name` (a CHECK, or a unique index) in any table, with that table. */
+export declare function findNamed(maps: ConstraintMap[], kind: "check" | "unique", name: string | undefined): {
     entry: ConstraintMapEntry;
     table: string;
 } | undefined;
@@ -90,6 +93,7 @@ export declare const combErrorKeys: {
     readonly DATABASE_IO_ERROR: "database_io_error";
     readonly DATABASE_READONLY: "database_readonly";
     readonly DATABASE_UNAVAILABLE: "database_unavailable";
+    readonly EXCLUSION_CONSTRAINT_VIOLATION: "exclusion_constraint_violation";
     readonly FILTER_NOT_WIRED: "filter_not_wired";
     readonly FOREIGN_KEY_VIOLATION: "foreign_key_violation";
     readonly INVALID_CURSOR: "invalid_cursor";
@@ -103,6 +107,7 @@ export declare const combErrorKeys: {
     readonly SORT_NOT_WIRED: "sort_not_wired";
     readonly STORAGE_LIMIT_REACHED: "tier_database_limit_reached";
     readonly UNIQUE_CONSTRAINT_VIOLATION: "unique_constraint_violation";
+    readonly VALUE_TOO_LARGE: "value_too_large";
 };
 /** Lowercase error key values from combErrorKeys */
 export type CombErrorKey = (typeof combErrorKeys)[keyof typeof combErrorKeys];
@@ -116,6 +121,8 @@ export type ConstraintMapEntry = {
 export type ConstraintMap = {
     [table: string]: {
         check?: Record<string, ConstraintMapEntry>;
+        /** Postgres EXCLUDE constraints, by name */
+        exclusion?: Record<string, ConstraintMapEntry>;
         foreignKey?: Record<string, ConstraintMapEntry>;
         primaryKey?: ConstraintMapEntry;
         unique?: Record<string, ConstraintMapEntry>;

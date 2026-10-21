@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findCheck, lookup, own, toCombError } from "./constraint-map.ts"
+import { findNamed, lookup, own, toCombError } from "./constraint-map.ts"
 import type { ConstraintMap } from "./types.ts"
 
 const MAPS: ConstraintMap[] = [
@@ -30,11 +30,11 @@ describe("lookup", () => {
 	})
 })
 
-describe("findCheck", () => {
+describe("findNamed", () => {
 	it("finds a CHECK by name in any table", () => {
-		expect(findCheck(MAPS, "b_n_check")).toMatchObject({ entry: { errorKey: "b_n_invalid" }, table: "b" })
-		expect(findCheck(MAPS, "nope")).toBeUndefined()
-		expect(findCheck(MAPS, undefined)).toBeUndefined()
+		expect(findNamed(MAPS, "check", "b_n_check")).toMatchObject({ entry: { errorKey: "b_n_invalid" }, table: "b" })
+		expect(findNamed(MAPS, "check", "nope")).toBeUndefined()
+		expect(findNamed(MAPS, "unique", undefined)).toBeUndefined()
 	})
 })
 

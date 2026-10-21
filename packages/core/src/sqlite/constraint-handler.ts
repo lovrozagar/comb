@@ -3,13 +3,17 @@
  * Shared by the libsql, bun:sqlite and D1 handlers: the engine is the same, only the way the
  * driver carries the code differs, and `readSqliteError` absorbs that.
  */
-import { type Fallback, type Found, findCheck, lookup, own, toCombError } from "../constraint-map.ts"
+import { type Fallback, type Found, findNamed, lookup, own, toCombError } from "../constraint-map.ts"
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
+import { valueError } from "../value-error.ts"
 import { readSqliteError, type SqliteErrorRead } from "./read-error.ts"
 import { statementHead } from "./statement-head.ts"
 
 type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown }
+
+/** The index a UNIQUE violation names instead of columns, when it is on an expression: `index 'u_email_lower'` */
+const failedIndex = (message: string): string | undefined => /constraint failed: index '([^']+)'$/i.exec(message)?.[1]
 
 /** `UNIQUE constraint failed: member.first, member.last` → member, [first, last] */
 function failedColumns(message: string): { columns: string[]; table: string | undefined } {
@@ -29,7 +33,23 @@ const statementTable = (query: string | undefined) => STATEMENT_TABLE.exec(state
 
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
+/** A unique index on an expression, by name: in the statement's table first, as a CHECK, then in any */
+function uniqueIndex(v: Violation, index: string): CombError {
+	const fallback = {
+		cause: "Duplicate value detected",
+		errorKey: combErrorKeys.UNIQUE_CONSTRAINT_VIOLATION,
+		status: "conflict",
+	} as const
+	const table = statementTable(v.read.query)
+	const entry = lookup(v.maps, table, (t) => own(t.unique, index))
+	if (entry !== undefined) return toError(v, { entry, fallback, table })
+	const found = findNamed(v.maps, "unique", index)
+	return toError(v, { entry: found?.entry, fallback, table: found?.table })
+}
+
 function unique(v: Violation): CombError {
+	const index = failedIndex(v.read.message)
+	if (index !== undefined) return uniqueIndex(v, index)
 	const { columns, table } = failedColumns(v.read.message)
 	/* a composite unique is keyed by its columns together; one column alone would blame half the pair */
 	const column = columns.length === 1 ? columns[0] : undefined
@@ -65,7 +85,7 @@ function check(v: Violation): CombError {
 	const table = statementTable(v.read.query)
 	if (table !== undefined)
 		return toError(v, { entry: lookup(v.maps, table, (t) => own(t.check, name)), fallback, table })
-	const found = findCheck(v.maps, name)
+	const found = findNamed(v.maps, "check", name)
 	return toError(v, { entry: found?.entry, fallback, table: found?.table })
 }
 
@@ -121,11 +141,22 @@ const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
 	SQLITE_CONSTRAINT_UNIQUE: unique,
 }
 
-/** The CombError for an SQLite constraint violation inside `error`, or null when it is not one. */
+/** A STRICT mismatch's `cannot store TEXT value in INTEGER column s.n` → s, n */
+const mismatchAt = (message: string) => {
+	const at = /\bcolumn (\w+)\.(\w+)$/.exec(message)
+	return { column: at?.[2], table: at?.[1] }
+}
+
+/**
+ * The CombError for an SQLite constraint violation inside `error`, or for a value its column
+ * cannot hold (value-error.ts); null when it is neither.
+ */
 function constraintError(error: unknown, maps: ConstraintMap[]): CombError | null {
 	const read = readSqliteError(error)
-	const handler = read === null ? undefined : own(CONSTRAINTS, read.code)
-	return read === null || handler === undefined ? null : handler({ maps, read, source: error })
+	if (read === null) return null
+	const handler = own(CONSTRAINTS, read.code)
+	if (handler !== undefined) return handler({ maps, read, source: error })
+	return valueError(read.code, mismatchAt(read.message), error) ?? null
 }
 
 /**

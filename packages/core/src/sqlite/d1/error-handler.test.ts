@@ -117,3 +117,17 @@ describe("d1ErrorHandler on the engine's resource codes (Q-D9)", () => {
 		expect(thrown(d1(message))).toMatchObject({ errorKey, status: 503 })
 	})
 })
+
+describe("d1ErrorHandler on a value the column cannot hold (Q10)", () => {
+	it("answers a value over D1's limit and a STRICT type mismatch with a 400, as Postgres does", () => {
+		expect(thrown(d1("string or blob too big: SQLITE_TOOBIG"))).toMatchObject({
+			errorKey: "value_too_large",
+			status: 400,
+		})
+		expect(
+			thrown(
+				d1("cannot store TEXT value in INTEGER column s.n: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_DATATYPE)"),
+			),
+		).toMatchObject({ column: "n", errorKey: "invalid_value", status: 400 })
+	})
+})

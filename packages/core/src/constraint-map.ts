@@ -37,14 +37,15 @@ export function lookup(
 	return undefined
 }
 
-/** The CHECK entry named `name` in any table, with that table. */
-export function findCheck(
+/** The `kind` entry named `name` (a CHECK, or a unique index) in any table, with that table. */
+export function findNamed(
 	maps: ConstraintMap[],
+	kind: "check" | "unique",
 	name: string | undefined,
 ): { entry: ConstraintMapEntry; table: string } | undefined {
 	for (const map of maps) {
 		for (const [table, t] of Object.entries(map)) {
-			const entry = own(t.check, name)
+			const entry = own(t[kind], name)
 			if (entry !== undefined) return { entry, table }
 		}
 	}

@@ -281,3 +281,49 @@ describe("constraint errors that carry only the base SQLITE_CONSTRAINT code", ()
 		)
 	})
 })
+
+/** A UNIQUE violation of the expression index `name`, which SQLite names instead of columns */
+const index = (name: string) => engine("SQLITE_CONSTRAINT_UNIQUE", `UNIQUE constraint failed: index '${name}'`)
+
+describe("constraintError: a unique index on an expression (Q9)", () => {
+	const maps: ConstraintMap[] = [
+		{
+			account: { unique: { u_email_lower: { cause: "Email taken", errorKey: "email_taken" } } },
+			other: { unique: { u_handle: { cause: "Handle taken", errorKey: "handle_taken" } } },
+		},
+	]
+
+	it("finds the index by name in the statement's table, then in any table, as Postgres finds the constraint", () => {
+		expect(thrown(wrapped(index("u_email_lower"), 'insert into "account" ("email") values (?)'), maps)).toMatchObject({
+			cause: "Email taken",
+			errorKey: "email_taken",
+			status: 409,
+			table: "account",
+		})
+		expect(thrown(index("u_handle"), maps)).toMatchObject({ errorKey: "handle_taken", table: "other" })
+		expect(thrown(index("u_unknown"), maps)).toMatchObject({
+			cause: "Duplicate value detected",
+			errorKey: "unique_constraint_violation",
+			table: undefined,
+		})
+	})
+})
+
+describe("constraintError: a value the column cannot hold (Q10)", () => {
+	it("answers a STRICT type mismatch with the 400 Postgres gives, naming the column, never the value", () => {
+		expect(
+			thrown(engine("SQLITE_CONSTRAINT_DATATYPE", "cannot store TEXT value in INTEGER column s.n"), []),
+		).toMatchObject({ cause: "Invalid value for n", column: "n", errorKey: "invalid_value", status: 400, table: "s" })
+		expect(thrown(engine("SQLITE_MISMATCH", "datatype mismatch"), [])).toMatchObject({
+			cause: "Invalid value",
+			errorKey: "invalid_value",
+			status: 400,
+		})
+	})
+
+	it("answers a value too big for the engine with value_too_large", () => {
+		expect(() => sqliteErrorHandler(engine("SQLITE_TOOBIG", "string or blob too big"), [])).toThrow(
+			expect.objectContaining({ cause: "Value too large", errorKey: "value_too_large", status: 400 }),
+		)
+	})
+})
