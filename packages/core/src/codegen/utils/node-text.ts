@@ -2,6 +2,9 @@
 import type { Node } from "ts-morph"
 
 /** `node`'s text without any comment inside it. */
+/** Where `node` is, as `<file>:<line>`, for an error that points at the source */
+export const placeOf = (node: Node): string => `${node.getSourceFile().getFilePath()}:${node.getStartLineNumber()}`
+
 export function textWithoutComments(node: Node): string {
 	const start = node.getStart()
 	const text = node.getText()

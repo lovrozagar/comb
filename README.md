@@ -355,7 +355,7 @@ export const authorConstraints: ConstraintMap = {
 }
 ```
 
-`comb codegen -g constraints` writes this file from your table definitions, so the constraint names always match what the migration actually created. A unique index on an expression, such as `lower(email)`, is keyed by its index name under `unique` on every dialect. On Postgres, an `exclusion` record maps an `EXCLUDE` constraint by name; without an entry its violation is a 409 `exclusion_constraint_violation`.
+`comb codegen -g constraints` writes this file from your table definitions, so the constraint names always match what the migration actually created. A CHECK enters the map from ``check("name", sql`…`)`` or `check("name", sql.raw("…"))`; a `check()` codegen cannot read, such as one named by a variable or built from a variable, fails the run with its file and line rather than be left out. A unique index on an expression, such as `lower(email)`, is keyed by its index name under `unique` on every dialect. On Postgres, an `exclusion` record maps an `EXCLUDE` constraint by name; without an entry its violation is a 409 `exclusion_constraint_violation`.
 
 ### Handlers
 

@@ -13,7 +13,7 @@ import { parseField } from "./analyze-field.ts"
 import { readTableOptions } from "./analyze-options.ts"
 import type { FieldMeta, ImportsMeta, TableMeta, TimestampsMeta } from "./analyzer-types.ts"
 import { readEnum, resolve } from "./utils/enum-source.ts"
-import { textWithoutComments } from "./utils/node-text.ts"
+import { placeOf, textWithoutComments } from "./utils/node-text.ts"
 import { type ImportRef, importRefs, type JsonSchemaSource, readJsonSchema } from "./utils/schema-source.ts"
 import { getTableName, sqlNameArg } from "./utils/ts-morph.ts"
 
@@ -116,8 +116,6 @@ function keyOf(name: Node): string {
 }
 
 /** `node`'s place, as `file:line`, for an error that points at the source */
-const placeOf = (node: Node): string => `${node.getSourceFile().getFilePath()}:${node.getStartLineNumber()}`
-
 /* shared column consts spread into shared column consts, at most this deep */
 const MAX_SPREAD_DEPTH = 4
 

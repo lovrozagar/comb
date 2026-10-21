@@ -6,6 +6,7 @@
  */
 import { type CallExpression, type Node, SyntaxKind } from "ts-morph"
 import type { CheckConstraintMeta, UniqueIndexMeta } from "./analyzer-types.ts"
+import { placeOf } from "./utils/node-text.ts"
 
 export type TableOptions = {
 	checkConstraints: CheckConstraintMeta[]
@@ -51,12 +52,34 @@ function uniqueIndexOf(chain: CallExpression[], param: string): (UniqueIndexMeta
 	return columns === null ? null : { columns, name, partial: methodCall(chain, "where") !== undefined }
 }
 
+/** A CHECK's SQL: a sql`…` template, or sql.raw() of literal text, as every consumer writes it (C4) */
+function checkText(arg: Node | undefined): string | undefined {
+	const template = arg?.asKind(SyntaxKind.TaggedTemplateExpression)
+	if (template !== undefined)
+		return template.getTag().getText() === "sql" ? template.getTemplate().getText().slice(1, -1) : undefined
+	const raw = arg?.asKind(SyntaxKind.CallExpression)
+	if (raw?.getExpression().getText() !== "sql.raw") return undefined
+	const text = raw.getArguments()[0]
+	return (
+		text?.asKind(SyntaxKind.StringLiteral)?.getLiteralValue() ??
+		text?.asKind(SyntaxKind.NoSubstitutionTemplateLiteral)?.getLiteralValue()
+	)
+}
+
+/**
+ * A CHECK, by its name and its SQL; a check() it cannot read fails codegen, naming its place,
+ * rather than leave the constraint map without it
+ */
 function checkOf(chain: CallExpression[]): CheckConstraintMeta | null {
 	const call = headCall(chain, "check")
+	if (call === undefined) return null
 	const name = stringArg(call)
-	const template = call?.getArguments()[1]?.asKind(SyntaxKind.TaggedTemplateExpression)?.getTemplate()
-	if (name === undefined || template === undefined) return null
-	return { expression: template.getText().slice(1, -1).replace(/\s+/g, " ").trim(), name }
+	const text = checkText(call.getArguments()[1])
+	if (name === undefined || text === undefined)
+		throw new Error(
+			`${placeOf(call)}: comb cannot read ${call.getText()}; name it with a string literal and write its SQL as sql\`…\` or sql.raw("…")`,
+		)
+	return { expression: text.replace(/\s+/g, " ").trim(), name }
 }
 
 /** The option expressions: the elements of the returned array, or the values of an object. */
