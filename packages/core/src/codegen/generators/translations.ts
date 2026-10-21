@@ -3,7 +3,7 @@
  * messages, built from the same analysis as the constraints file, so the two always agree.
  */
 import path from "node:path"
-import { propertyName, toScreamingSnakeCase } from "../utils/case.ts"
+import { propertyName, stringLiteral, toScreamingSnakeCase } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { buildConstraintMap, constraintsIn } from "./constraints.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -76,7 +76,7 @@ function generateErrorKeysFile({ dbName, errorKeys }: TranslationFile): string {
 	const typeName = `${dbName.charAt(0).toUpperCase() + dbName.slice(1)}DbErrorKey`
 	return [
 		`const ${constName} = {`,
-		errorKeys.map(({ key }) => `\t${propertyName(key)}: "${key}"`).join(",\n"),
+		errorKeys.map(({ key }) => `\t${propertyName(key)}: ${stringLiteral(key)}`).join(",\n"),
 		"} as const",
 		"",
 		`type ${typeName} = keyof typeof ${constName}`,
@@ -94,7 +94,7 @@ function generateEnglishFile({ dbName, errorKeys, filePrefix }: TranslationFile)
 		`import type { ${constName} } from "../../${filePrefix}.error-keys.gen"`,
 		"",
 		`const ${exportName}: Record<keyof typeof ${constName}, string> = {`,
-		errorKeys.map((entry) => `\t${propertyName(entry.key)}: "${englishMessage(entry)}"`).join(",\n"),
+		errorKeys.map((entry) => `\t${propertyName(entry.key)}: ${stringLiteral(englishMessage(entry))}`).join(",\n"),
 		"} as const",
 		"",
 		`export { ${exportName} }`,

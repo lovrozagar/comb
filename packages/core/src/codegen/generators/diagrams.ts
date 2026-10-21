@@ -8,6 +8,7 @@
  */
 import * as path from "node:path"
 import type { TableMeta } from "../analyzer-types.ts"
+import { sqlIdentifier } from "../utils/case.ts"
 import { writeGenFile, writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
@@ -106,15 +107,15 @@ function generateDDL(tables: Table[], dbName: string): string {
 	lines.push("")
 
 	for (const table of tables) {
-		lines.push(`CREATE TABLE ${table.name} (`)
+		lines.push(`CREATE TABLE ${sqlIdentifier(table.name)} (`)
 
 		const colDefs: string[] = []
 		for (const col of table.columns) {
-			let def = `  ${col.name} ${col.type}`
+			let def = `  ${sqlIdentifier(col.name)} ${col.type}`
 			if (col.primaryKey) def += " PRIMARY KEY"
 			if (!col.nullable && !col.primaryKey) def += " NOT NULL"
 			if (col.reference) {
-				def += ` REFERENCES ${col.reference.table}(${col.reference.column})`
+				def += ` REFERENCES ${sqlIdentifier(col.reference.table)}(${sqlIdentifier(col.reference.column)})`
 				if (col.reference.onDelete) def += ` ON DELETE ${col.reference.onDelete.toUpperCase()}`
 				if (col.reference.onUpdate) def += ` ON UPDATE ${col.reference.onUpdate.toUpperCase()}`
 			}

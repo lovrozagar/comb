@@ -44,7 +44,7 @@ const read = (dir: string, file: string) => fs.readFileSync(path.join(dir, file)
 const exportsOf = (dir: string) =>
 	(JSON.parse(read(dir, "package.json")) as { exports: Record<string, string> }).exports
 
-/** tsc over every generated file of the project: its imports must resolve */
+/** tsc over every generated file of the project under the strict flags a consumer may set: its imports must resolve */
 function typecheck(dir: string): string {
 	const generated = fs
 		.readdirSync(dir, { recursive: true, withFileTypes: true })
@@ -55,12 +55,20 @@ function typecheck(dir: string): string {
 		JSON.stringify({
 			compilerOptions: {
 				allowImportingTsExtensions: true,
+				exactOptionalPropertyTypes: true,
 				module: "preserve",
 				moduleResolution: "bundler",
 				noEmit: true,
+				noFallthroughCasesInSwitch: true,
+				noImplicitReturns: true,
+				noPropertyAccessFromIndexSignature: true,
+				noUncheckedIndexedAccess: true,
+				noUnusedLocals: true,
+				noUnusedParameters: true,
 				skipLibCheck: true,
 				strict: true,
 				target: "esnext",
+				verbatimModuleSyntax: true,
 			},
 			files: generated,
 		}),
@@ -137,4 +145,38 @@ describe("comb codegen: a database named apart from its tables file (D3)", () =>
 		},
 		180_000,
 	)
+})
+
+/** A table name that breaks any string literal, block comment or SQL identifier written around it unescaped */
+const HOSTILE = 'quo"ted */ \\ end'
+
+describe("comb codegen: SQL names that are not plain identifiers", () => {
+	it("writes every name it reads into valid TypeScript, comments and string literals alike", async () => {
+		const dir = project({
+			"comb.config.ts": `export default { databases: { core: { tables: "./src/db/db.core.tables.ts", fts: { ${JSON.stringify(HOSTILE)}: { columns: ["label"] } } } } }\n`,
+			"src/db/db.core.tables.ts": `import { sqliteTable, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+export const account = sqliteTable("account", { id: c.id("acc") })
+export const quoted = sqliteTable(${JSON.stringify(HOSTILE)}, {
+	id: c.id("qt"),
+	label: c.text('la"bel').notNull(),
+	kind: c.enum("kind", ["a", "b"]).notNull(),
+	ownerId: c.ref('own"er').notNull().references(() => account.id, { onDelete: "cascade" }),
+}, (t) => [uniqueIndex("idx_label").on(t.label)])
+`,
+		})
+		await codegen(dir)
+		expect(typecheck(dir)).toBe("")
+		const names = await import(path.join(dir, "src/db/table-names/db.core.table-names.gen.ts"))
+		expect(names.t.quoted).toBe(HOSTILE)
+	}, 180_000)
+
+	it("writes a _shared file that typechecks when the database has no tables", async () => {
+		const dir = project({
+			"comb.config.ts": `export default { databases: { core: { tables: "./src/db/db.core.tables.ts" } } }\n`,
+			"src/db/db.core.tables.ts": "export {}\n",
+		})
+		await codegen(dir)
+		expect(typecheck(dir)).toBe("")
+	}, 180_000)
 })

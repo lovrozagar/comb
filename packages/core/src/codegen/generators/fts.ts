@@ -6,7 +6,7 @@
  * - db.{dbName}.fts.gen.ts   — type-safe FTS table metadata map
  */
 import path from "node:path"
-import { toScreamingSnakeCase } from "../utils/case.ts"
+import { propertyName, stringLiteral, toScreamingSnakeCase } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { dedup, ftsReferenceSql, type FtsTableConfig } from "./fts-sql.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -46,10 +46,10 @@ function generateFts(ctx: GeneratorContext, config: FtsGeneratorConfig): void {
 	for (const [tableName, tableConfig] of entries) {
 		const columns = dedup(tableConfig.columns)
 
-		tsLines.push(`\t${tableName}: {`)
-		tsLines.push(`\t\tcolumns: [${columns.map((c) => `"${c}"`).join(", ")}] as const,`)
-		tsLines.push(`\t\tftsTable: "${tableName}_fts",`)
-		tsLines.push(`\t\tsourceTable: "${tableName}",`)
+		tsLines.push(`\t${propertyName(tableName)}: {`)
+		tsLines.push(`\t\tcolumns: [${columns.map((c) => stringLiteral(c)).join(", ")}] as const,`)
+		tsLines.push(`\t\tftsTable: ${stringLiteral(`${tableName}_fts`)},`)
+		tsLines.push(`\t\tsourceTable: ${stringLiteral(tableName)},`)
 		tsLines.push(`\t},`)
 	}
 

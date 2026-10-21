@@ -4,7 +4,7 @@
  * Generates constraint maps from analyzed table metadata for database error handling.
  */
 import path from "node:path"
-import { propertyName, toScreamingSnakeCase } from "../utils/case.ts"
+import { commentText, propertyName, stringLiteral, toScreamingSnakeCase } from "../utils/case.ts"
 import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -151,9 +151,9 @@ const GROUP_LABELS: Record<string, string> = {
 /** The lines of one `{ errorKey, cause, statusKey }` object at `indent` */
 function constraintLines(constraint: Constraint, indent: string): string[] {
 	return [
-		`${indent}errorKey: "${constraint.errorKey}",`,
-		`${indent}cause: "${constraint.cause}",`,
-		`${indent}statusKey: "${constraint.statusKey}",`,
+		`${indent}errorKey: ${stringLiteral(constraint.errorKey)},`,
+		`${indent}cause: ${stringLiteral(constraint.cause)},`,
+		`${indent}statusKey: ${stringLiteral(constraint.statusKey)},`,
 	]
 }
 
@@ -186,7 +186,7 @@ function generateConstraintMapCode(map: ConstraintMap, dbName: string): string {
 	const blocks = tables.map(([tableName, constraints]) => {
 		const groups = Object.entries(constraints).sort(byKey)
 		return [
-			`\t/* ${tableName} table constraints */`,
+			`\t/* ${commentText(tableName)} table constraints */`,
 			`\t${propertyName(tableName)}: {`,
 			...joined(groups.map(([type, group]) => groupLines(type, group as Constraint | Record<string, Constraint>))),
 			"\t}",

@@ -65,7 +65,14 @@ describe("generateSharedFile", () => {
 		expect(file).not.toContain("export const _str")
 		expect(file).not.toContain("timestampNullableSchema")
 		expect(file).not.toContain("Auto-deduped")
-		expect(generateSharedFile(none, new Map(), new Set()).trim()).toBe('import * as z from "zod"')
+		expect(file).toContain('import * as z from "zod"')
+	})
+
+	it("imports zod only when what it keeps uses it, and is an empty module when it keeps nothing (F12)", () => {
+		expect(generateSharedFile(none, new Map(), new Set()).trim()).toBe("export {}")
+		const meta = generateSharedFile(none, new Map(), new Set(["_m"]))
+		expect(meta).toContain("export const _m = {")
+		expect(meta).not.toContain("zod")
 	})
 
 	it("emits the shared constants with their use counts before the spreads that name them", () => {

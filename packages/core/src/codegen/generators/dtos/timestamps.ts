@@ -112,9 +112,11 @@ function keepImported(lines: readonly string[], imported: ReadonlySet<string>): 
 	return blocks.filter((block) => block.name === null || kept.has(block.name)).flatMap((block) => block.lines)
 }
 
+const ZOD_IMPORT = `import * as z from "zod"`
+
 function header(): string[] {
 	return [
-		`import * as z from "zod"`,
+		ZOD_IMPORT,
 		"",
 		...BASE_TYPE_ALIASES.map(([expr, alias]) => `export const ${alias} = ${expr}`),
 		"",
@@ -155,5 +157,12 @@ export function generateSharedFile(
 	}
 	if (used.camelCase.size > 0) lines.push(...timestampVariants(used.camelCase, "camelCase", sharedSchemas))
 	if (used.snakeCase.size > 0) lines.push(...timestampVariants(used.snakeCase, "snake_case", sharedSchemas))
-	return keepImported(lines, imported).join("\n")
+	return withoutUnusedZod(keepImported(lines, imported)).join("\n")
+}
+
+/** The lines without the zod import when nothing kept uses it, and an empty module when nothing is kept at all */
+function withoutUnusedZod(lines: readonly string[]): readonly string[] {
+	if (lines.some((line) => line !== ZOD_IMPORT && /\bz\./.test(line))) return lines
+	const rest = lines.filter((line) => line !== ZOD_IMPORT)
+	return rest.some((line) => line.trim() !== "") ? rest : ["export {}", ""]
 }

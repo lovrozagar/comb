@@ -16,6 +16,7 @@
  */
 import path from "node:path"
 import type { TableMeta } from "../analyzer-types.ts"
+import { stringLiteral } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
@@ -94,7 +95,9 @@ export function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConf
 			const inList = ef.values.map((v) => `'${escapeValue(v)}'`).join(", ")
 			const checkName = `${table.sqlName}_${ef.fieldName}_enum`
 			/* bracket access keeps the generated file valid under noPropertyAccessFromIndexSignature */
-			lines.push(`\t\tcheck("${checkName}", sql\`\${table[${JSON.stringify(ef.fieldName)}]} IN (${inList})\`),`)
+			lines.push(
+				`\t\tcheck(${stringLiteral(checkName)}, sql\`\${table[${JSON.stringify(ef.fieldName)}]} IN (${inList})\`),`,
+			)
 		}
 
 		lines.push("\t]")

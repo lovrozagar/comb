@@ -5,7 +5,7 @@
  * Builds defineRelations graph from TableMeta FK data.
  */
 import path from "node:path"
-import { propertyAccess } from "../utils/case.ts"
+import { propertyAccess, propertyName } from "../utils/case.ts"
 import { importPathFrom } from "../utils/ts-morph.ts"
 import pluralize from "pluralize"
 import type { TableMeta } from "../analyzer-types.ts"
@@ -97,7 +97,7 @@ function entryLines(tableName: string, entry: RelationEntry): string[] {
 	if (entry.kind === "one") {
 		const { column, name, refColumn, refTable } = entry.rel
 		return [
-			`\t\t${name}: r.one.${refTable}({`,
+			`\t\t${propertyName(name)}: r.one.${refTable}({`,
 			`\t\t\tfrom: ${propertyAccess(`r.${tableName}`, column)},`,
 			`\t\t\tto: ${propertyAccess(`r.${refTable}`, refColumn)},`,
 			"\t\t}),",
@@ -105,7 +105,7 @@ function entryLines(tableName: string, entry: RelationEntry): string[] {
 	}
 	const { name, sourceColumn, sourceTable, targetColumn } = entry.rel
 	return [
-		`\t\t${name}: r.many.${sourceTable}({`,
+		`\t\t${propertyName(name)}: r.many.${sourceTable}({`,
 		`\t\t\tfrom: ${propertyAccess(`r.${tableName}`, targetColumn)},`,
 		`\t\t\tto: ${propertyAccess(`r.${sourceTable}`, sourceColumn)},`,
 		"\t\t}),",

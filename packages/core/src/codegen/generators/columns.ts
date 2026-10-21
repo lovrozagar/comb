@@ -10,7 +10,7 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import { propertyAccess, propertyName, snakeToCamel } from "../utils/case.ts"
+import { propertyAccess, propertyName, snakeToCamel, stringLiteral } from "../utils/case.ts"
 import { readStaged, type Staged, writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
 import { exportKey, type ExportTarget, ownsKey, readExports } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -120,7 +120,7 @@ function generateTableNamesFile(tables: TableEntry[]): string {
 	]
 
 	for (const table of tables) {
-		lines.push(`\t${table.varName}: "${table.sqlName}",`)
+		lines.push(`\t${table.varName}: ${stringLiteral(table.sqlName)},`)
 	}
 
 	lines.push("} as const")

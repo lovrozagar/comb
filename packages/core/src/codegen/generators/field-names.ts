@@ -6,7 +6,7 @@
  * to labels, and strips common suffixes (_json, _id).
  */
 import path from "node:path"
-import { propertyName, toScreamingSnakeCase } from "../utils/case.ts"
+import { commentText, propertyName, toScreamingSnakeCase } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { findNearestPackageJson, setPackageExport } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -64,7 +64,7 @@ function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): vo
 		/* add comment when label differs from raw due to suffix stripping */
 		const stripped = rawName !== label.toLowerCase().replaceAll(" ", "_")
 		if (stripped) {
-			lines.push(`\t${propertyName(rawName)}: ${JSON.stringify(label)}, /* was ${rawName.replaceAll("*/", "* /")} */`)
+			lines.push(`\t${propertyName(rawName)}: ${JSON.stringify(label)}, /* was ${commentText(rawName)} */`)
 		} else {
 			lines.push(`\t${propertyName(rawName)}: ${JSON.stringify(label)},`)
 		}
