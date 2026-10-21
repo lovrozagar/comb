@@ -7,7 +7,7 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
-import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
+import { createCursor, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
 import { assertCursorSecret } from "./cursor-sign.ts"
 import { assertCursorFits } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
@@ -207,8 +207,8 @@ function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: Pa
  * would mint a cursor that repeats or ends the list, so that is a wiring mistake: select them.
  * Any id the row holds, 0 and "" included, carries the next page.
  */
-function mintFrom(row: object, parsedSort: SortField[], cursorSecret: string): string {
-	const missing = [...parsedSort.map(({ field }) => field), CURSOR_TIEBREAK_COLUMN].filter(
+function mintFrom(row: object, parsedSort: SortField[], { cursorSecret, idField }: PaginateOptions): string {
+	const missing = [...parsedSort.map(({ field }) => field), idField ?? CURSOR_TIEBREAK_COLUMN].filter(
 		(key) => !Object.hasOwn(row, key),
 	)
 	if (missing.length > 0) {
@@ -218,7 +218,7 @@ function mintFrom(row: object, parsedSort: SortField[], cursorSecret: string): s
 			status: "internal_server_error",
 		})
 	}
-	const cursor = createCursor(row as Record<string, unknown>, parsedSort, { cursorSecret })
+	const cursor = createCursor(row as Record<string, unknown>, parsedSort, { cursorSecret, idField })
 	/* a cursor the list would refuse ends the list on page 2; say so on page 1, where it is a wiring mistake */
 	if (cursor.length > MAX_CURSOR_LENGTH) {
 		throw new CombError({
@@ -230,8 +230,14 @@ function mintFrom(row: object, parsedSort: SortField[], cursorSecret: string): s
 	return cursor
 }
 
-/** Create pagination result from drizzle query results with _total extra, the next cursor signed under `cursorSecret` */
-function drizzlePaginationResult<T extends { id?: CursorId }>(
+/** paginate's options: the cursor secret, and the field a row's tiebreak id is in (default `id`) */
+type PaginateOptions = CursorOptions & { idField?: string | undefined }
+
+/**
+ * Create pagination result from drizzle query results with _total extra, the next cursor signed
+ * under `cursorSecret` and keyed by `idField`, as buildDerivedListQuery's idColumn keys the page
+ */
+function drizzlePaginationResult<T extends object>(
 	items: DrizzleListResult<T>[],
 	query: {
 		cursor?: string
@@ -241,16 +247,16 @@ function drizzlePaginationResult<T extends { id?: CursorId }>(
 		parsedSort: SortField[]
 		validated?: true | undefined
 	},
-	{ cursorSecret }: CursorOptions,
+	options: PaginateOptions,
 ): readonly [T[], PaginationMeta] {
-	assertCursorSecret(cursorSecret)
+	assertCursorSecret(options.cursorSecret)
 	const hasMore = items.length > query.limit
 	const sliced = hasMore ? items.slice(0, query.limit) : items
 
 	/* Mint from the fat row and the same effective sort buildListQuery ordered
 	   by, so the cursor's signature matches the next request's. */
 	const lastItem = sliced.at(-1)
-	const nextCursor = hasMore && lastItem !== undefined ? mintFrom(lastItem, query.parsedSort, cursorSecret) : null
+	const nextCursor = hasMore && lastItem !== undefined ? mintFrom(lastItem, query.parsedSort, options) : null
 
 	const pagination: PaginationMeta = {
 		count: countOf(items, query),
@@ -287,4 +293,4 @@ const queryHelpers: {
 	project: drizzleProject,
 }
 
-export { type CursorOptions, type DrizzleListOptions, queryHelpers }
+export { type CursorOptions, type DrizzleListOptions, type PaginateOptions, queryHelpers }

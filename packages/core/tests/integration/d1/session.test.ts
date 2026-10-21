@@ -24,7 +24,7 @@ describe("openD1Session on Miniflare", () => {
 		const bookmark = first.session?.getBookmark()
 		expect(typeof bookmark).toBe("string")
 
-		const later = openD1Session(d1.CORE, bookmark ?? undefined)
+		const later = openD1Session(d1.CORE, { bookmark: bookmark ?? undefined })
 		const row = await later.client.prepare("SELECT body FROM note WHERE id = ?").bind("n1").first<{ body: string }>()
 		expect(row?.body).toBe("hello")
 	})

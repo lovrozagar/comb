@@ -159,7 +159,7 @@ function decodePayload(payload: string): DecodedCursor | null {
 function createCursor(
 	record: Record<string, unknown>,
 	parsedSort: readonly SortField[],
-	opts: { cursorSecret: string; idField?: string },
+	opts: { cursorSecret: string; idField?: string | undefined },
 ): string {
 	const idField = opts.idField ?? CURSOR_TIEBREAK_COLUMN
 	return encodeCursor(

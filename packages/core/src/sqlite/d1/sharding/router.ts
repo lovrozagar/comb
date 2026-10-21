@@ -120,7 +120,7 @@ class ShardRouter {
 	 * kept for the reads that follow.
 	 */
 	async allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
-		const { client, session } = openD1Session(deps.coreDb, "first-primary")
+		const { client, session } = openD1Session(deps.coreDb)
 		const db = drizzle(client)
 		const byOrg = eq(shardMap.org_id, orgId)
 
@@ -214,7 +214,8 @@ class ShardRouter {
 
 	/** The live mapping in the core database, read from the nearest replica; undefined when none */
 	private async readMapping(orgId: string, deps: ShardResolverDeps): Promise<ShardMapping | undefined> {
-		const { client, session } = openD1Session(deps.coreDb, undefined)
+		/* a lagging replica that misses a fresh mapping sends the request to allocate, which reads the primary */
+		const { client, session } = openD1Session(deps.coreDb, { constraint: "first-unconstrained" })
 		const row = await drizzle(client)
 			.select()
 			.from(shardMap)

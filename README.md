@@ -652,7 +652,7 @@ Two modes share one input shape. Offset pagination takes `page` and `limit`; cur
 
 A cursor holds the value of **every** sort key, the tiebreak id, and the signature of the sort it was minted under (`sortSignature()`), as URL-safe base64 of UTF-8 JSON, then a `.` and an HMAC-SHA256 tag over those bytes. The tag is what stops a client from writing its own cursor: an unsigned one would let it put any value in a sort key and learn, request by request, the value of a column it can sort by but not select or filter. `createCursor(row, parsedSort, { cursorSecret })` mints one; `queryHelpers.paginate` does it for you. The keyset predicate compares all keys lexicographically, each with its own direction and null placement, so a multi-key or nullable order pages without skipping or repeating rows. A cursor presented under a different order, or one that does not decode, is a 400: the schema reports it on `cursor`, and `readCursor(cursor, parsedSort, cursorSecret)` throws `CombError` (`invalid_cursor`) for callers that skip the schema.
 
-The secret is the app's, at least `MIN_CURSOR_SECRET_BYTES` (32) bytes of UTF-8. Give every worker the same `CURSOR_SECRET` through its env, and pass it where the handler runs: `queryHelpers.paginate(rows, query, { cursorSecret })` signs, and `queryHelpers.listOptions(query, { cursorSecret })`, `buildListQuery({ cursorSecret, … })` and `readCursor` verify. The parameter is required, and a shorter secret is a 500 (`cursor_not_wired`) on the first page. A cursor whose tag another secret made, or none, is `invalid_cursor`, so rotating the secret ends the lists in flight with a 400. The list schema takes no secret: schema modules load where no env exists (a gateway's route codegen), so it checks a cursor's shape and its sort, and only the verifying calls read its values.
+The secret is the app's, at least `MIN_CURSOR_SECRET_BYTES` (32) bytes of UTF-8. Give every worker the same `CURSOR_SECRET` through its env, and pass it where the handler runs: `queryHelpers.paginate(rows, query, { cursorSecret })` signs, and `queryHelpers.listOptions(query, { cursorSecret })`, `buildListQuery({ cursorSecret, … })` and `readCursor` verify. The parameter is required, and a shorter secret is a 500 (`cursor_not_wired`) on the first page. A list whose rows key their tiebreak under another field, as `buildDerivedListQuery({ idColumn })` pages them, passes it to both ends: `createCursor(row, sort, { cursorSecret, idField: "_id" })` and `queryHelpers.paginate(rows, query, { cursorSecret, idField: "_id" })`. A cursor whose tag another secret made, or none, is `invalid_cursor`, so rotating the secret ends the lists in flight with a 400. The list schema takes no secret: schema modules load where no env exists (a gateway's route codegen), so it checks a cursor's shape and its sort, and only the verifying calls read its values.
 
 For drizzle's relational API, `queryHelpers.listOptions(query, { cursorSecret })` returns `limit`, `offset`, an `orderBy` callback (the sort, its null placement and the id tiebreak) and, on a cursor request, a `where: { RAW }` keyset predicate to AND with your own: `db.query.post.findMany({ limit, offset, orderBy, where })`. A cursor minted under another order is `invalid_cursor`.
 
@@ -768,11 +768,11 @@ const relations = defineRelations({})
 import { openD1Session } from "@lovrozagar/comb/sqlite/d1/session"
 import { drizzle } from "drizzle-orm/d1"
 
-const { client, session } = openD1Session(env.DB, bookmarkFromCookie)
+const { client, session } = openD1Session(env.DB, { bookmark: bookmarkFromCookie })
 const db = drizzle(client, { relations })
 ```
 
-Reads go to the nearest replica while a bookmark guarantees the client never sees state older than its own last write. Without a bookmark it opens `first-unconstrained`. If `withSession` is missing — miniflare, older runtimes — it returns the raw handle and `session: undefined`, so the same code path works locally.
+A bookmark guarantees the client never sees state older than its own last write. Without one the session opens on the primary (`first-primary`), so a read sees every write before it; pass `{ constraint: "first-unconstrained" }` for a read that may lag, such as a public page, to read from the nearest replica. An empty bookmark counts as none. If `withSession` is missing — miniflare, older runtimes — it returns the raw handle and `session: undefined`, so the same code path works locally.
 
 ### Bookmarks
 

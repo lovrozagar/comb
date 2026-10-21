@@ -74,7 +74,7 @@ declare function encodeCursor(payload: CursorPayload, secret: string): string;
 /** Mint the cursor for the row after which the next page starts. */
 declare function createCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], opts: {
     cursorSecret: string;
-    idField?: string;
+    idField?: string | undefined;
 }): string;
 /**
  * Why a cursor cannot be used under this sort, or null when its shape can: the list schema's
@@ -106,7 +106,6 @@ export { assertCursorSecret, macOf, MIN_CURSOR_SECRET_BYTES, signPayload, verify
  * query-helpers with drizzle's relational query API.
  */
 import { type SQL } from "drizzle-orm";
-import { type CursorId } from "./cursor.ts";
 import type { FilterAST, ParsedFields, SortField } from "./types.ts";
 import type { paginationResponseSchema } from "./schema.ts";
 import type * as z from "zod";
@@ -171,17 +170,22 @@ declare function drizzleListOptions(query: {
 type DrizzleListResult<T> = T & {
     _total?: number;
 };
-/** Create pagination result from drizzle query results with _total extra, the next cursor signed under `cursorSecret` */
-declare function drizzlePaginationResult<T extends {
-    id?: CursorId;
-}>(items: DrizzleListResult<T>[], query: {
+/** paginate's options: the cursor secret, and the field a row's tiebreak id is in (default `id`) */
+type PaginateOptions = CursorOptions & {
+    idField?: string | undefined;
+};
+/**
+ * Create pagination result from drizzle query results with _total extra, the next cursor signed
+ * under `cursorSecret` and keyed by `idField`, as buildDerivedListQuery's idColumn keys the page
+ */
+declare function drizzlePaginationResult<T extends object>(items: DrizzleListResult<T>[], query: {
     cursor?: string;
     limit: number;
     page?: number;
     parsedFields?: ParsedFields | null | undefined;
     parsedSort: SortField[];
     validated?: true | undefined;
-}, { cursorSecret }: CursorOptions): readonly [T[], PaginationMeta];
+}, options: PaginateOptions): readonly [T[], PaginationMeta];
 declare function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
 /** List-query helpers for drizzle queries: count, options, pagination, projection */
 declare const queryHelpers: {
@@ -192,7 +196,7 @@ declare const queryHelpers: {
     paginate: typeof drizzlePaginationResult;
     project: typeof drizzleProject;
 };
-export { type CursorOptions, type DrizzleListOptions, queryHelpers };
+export { type CursorOptions, type DrizzleListOptions, type PaginateOptions, queryHelpers };
 
 // query/fields.d.ts
 import type { ParsedFields } from "./types.ts";
