@@ -332,7 +332,7 @@ declare const CURSOR_DESCRIPTION = "Opaque cursor for forward pagination. Pass t
 declare const CURSOR_EXAMPLES: string[];
 declare const LIMIT_DESCRIPTION = "Maximum number of items per page. Defaults to 20, capped by the endpoint's maxLimit.";
 declare const LIMIT_EXAMPLES: number[];
-declare const PAGE_DESCRIPTION = "1-based page number for offset pagination. Ignored when cursor is present.";
+declare const PAGE_DESCRIPTION = "1-based page number for offset pagination, up to the endpoint's maxPage (x-comb); page further by cursor. Ignored when cursor is present.";
 declare const PAGE_EXAMPLES: number[];
 declare const LANG_DESCRIPTION = "BCP-47 language tag selecting localized text fields (falls back to default locale when absent).";
 declare const LANG_EXAMPLES: string[];
@@ -555,6 +555,8 @@ type CombQueryMeta = {
     searchable: string[] | null;
     selectable: string[];
     maxLimit: number;
+    /** The last page offset pagination serves; past it, a client pages by cursor */
+    maxPage?: number;
     /** e.g. "created_at.desc" — the order applied when the request names none */
     defaultOrder: string;
     /** Tiebreak column for keyset pagination */
@@ -624,6 +626,7 @@ type OptionalShape = {
 };
 type ListQueryShape = typeof baseListQueryShape & OptionalShape & {
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+    page: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
 };
 type ListQueryInput = z.ZodObject<ListQueryShape, z.core.$strict>;
 /** What createListQuerySchema returns: the strict request object piped into its parsed output */
@@ -634,14 +637,18 @@ declare function createListQuerySchema<T extends OutputStableShape<T> = Record<s
 export { createListQuerySchema, type ListQuerySchema };
 
 // query/retrieve-schema.d.ts
-/** The single-resource query schema: `select` and `lang`, plus any extension fields. */
+/**
+ * The single-resource query schema: `select`, `lang` when the endpoint declares it, and any
+ * extension fields. The object is strict, as the list schema is: a param the endpoint does not
+ * honor is a 400, not a 200 that ignores it.
+ */
 import * as z from "zod";
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts";
 type RetrieveShape = {
-    lang: z.ZodOptional<z.ZodString>;
+    lang?: z.ZodOptional<z.ZodString>;
     select: z.ZodOptional<z.ZodString>;
 };
-type RetrieveInput = z.ZodObject<RetrieveShape, z.core.$strip>;
+type RetrieveInput = z.ZodObject<RetrieveShape, z.core.$strict>;
 /** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
 type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveInput, z.ZodTransform<Awaited<RetrieveQueryOutput & {
     [K in keyof T]: z.infer<T[K]>;
@@ -654,6 +661,7 @@ import type { ListQueryLimits } from "./schema-types.ts";
 declare const PAGINATION_DEFAULTS: {
     readonly defaultLimit: 20;
     readonly maxLimit: 100;
+    readonly maxPage: 10000;
 };
 declare const LIST_QUERY_LIMITS: ListQueryLimits;
 export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS };
@@ -680,9 +688,16 @@ type ListQueryLimits = FilterLimits & {
 type PaginationConfig = {
     defaultLimit?: number;
     maxLimit?: number;
+    /** The last page offset pagination serves; past it, a client pages by cursor. Default 10 000. */
+    maxPage?: number;
 };
+type ReservedListKey = "cursor" | "filter" | "filterAst" | "lang" | "limit" | "order" | "page" | "parsedFields" | "parsedSort" | "q" | "select" | "sortOrderBy" | "validated";
+type ReservedRetrieveKey = "lang" | "parsedFields" | "select";
 type ListQueryConfig<T extends OutputStableShape<T> = Record<string, never>, TSortFields extends readonly string[] = readonly string[]> = {
-    extend?: T;
+    /** Extra params, validated and returned as they are; a name the schema owns is refused */
+    extend?: T & {
+        [K in ReservedListKey]?: never;
+    };
     fields?: FieldsConfig;
     /** Fields `filter` may name. Omitted or empty: the endpoint takes no `filter`. */
     filter?: Record<string, FieldType>;
@@ -699,8 +714,13 @@ type ListQueryConfig<T extends OutputStableShape<T> = Record<string, never>, TSo
     sort: TSortFields;
 };
 type RetrieveQueryConfig<T extends z.ZodRawShape = z.ZodRawShape> = {
-    extend?: T;
+    /** Extra params, validated and returned as they are; a name the schema owns is refused */
+    extend?: T & {
+        [K in ReservedRetrieveKey]?: never;
+    };
     fields: FieldsConfig;
+    /** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
+    lang?: true;
 };
 type ListQueryOutput<TSortField extends string = string> = {
     cursor: string | undefined;
@@ -878,7 +898,6 @@ declare const selectQueryField: z.ZodOptional<z.ZodString>;
 declare const langQueryField: z.ZodOptional<z.ZodString>;
 declare const baseListQueryShape: {
     cursor: z.ZodOptional<z.ZodString>;
-    page: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
 };
 declare const parsedFieldsSchema: z.ZodType<ParsedFields, ParsedFields>;
 declare const filterAstSchema: z.ZodType<FilterAST, FilterAST>;
@@ -888,8 +907,15 @@ declare const sortDirectionEnum: z.ZodEnum<{
 }>;
 /** The `limit` param for this pagination; the shared default instance when it is the default */
 declare function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+/**
+ * The `page` param for this pagination; the shared default instance when it is the default. A
+ * maxPage whose last offset passes 2^53 - 1 is refused: SQLite fails on an OFFSET past int64.
+ */
+declare function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+/** Throw when `extendFields` names a key of `reserved`, which the schema owns */
+declare function assertNotReserved(builder: string, extendFields: Record<string, unknown> | undefined, reserved: readonly string[]): void;
 /** The values of `extendFields`' keys in `data`; `{}` without extensions */
 declare function pickExtended<T extends Record<string, z.ZodType>>(extendFields: T | undefined, data: Record<string, unknown>): {
     [K in keyof T]: z.infer<T[K]>;
 };
-export { baseListQueryShape, filterAstSchema, langQueryField, limitSchemaFor, parsedFieldsSchema, pickExtended, selectQueryField, sortDirectionEnum, };
+export { assertNotReserved, baseListQueryShape, filterAstSchema, langQueryField, limitSchemaFor, pageSchemaFor, parsedFieldsSchema, pickExtended, selectQueryField, sortDirectionEnum, };

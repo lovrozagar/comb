@@ -156,6 +156,7 @@ type QueryRequired = Omit<
 	| "maxFilterDepth"
 	| "maxFilterValues"
 	| "maxInValues"
+	| "maxPage"
 	| "maxSearchTerms"
 	| "maxSortKeys"
 	| "nulls"
@@ -168,6 +169,7 @@ type QueryOptional = Pick<
 	| "maxFilterDepth"
 	| "maxFilterValues"
 	| "maxInValues"
+	| "maxPage"
 	| "maxSearchTerms"
 	| "maxSortKeys"
 	| "nulls"
@@ -231,6 +233,11 @@ function readQueryOptional(raw: Record<string, unknown>, diagnose: Diagnose): Qu
 		if (value === undefined) continue
 		if (!isCount(value)) return diagnose(`query payload \`${key}\` needs a non-negative integer`)
 		optional[key] = value
+	}
+	const { maxPage } = raw
+	if (maxPage !== undefined) {
+		if (!isPositiveInt(maxPage)) return diagnose("query payload `maxPage` needs a positive integer")
+		optional.maxPage = maxPage
 	}
 	return optional
 }

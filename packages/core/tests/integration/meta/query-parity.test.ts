@@ -105,6 +105,15 @@ describe("maxLimit matches the parser", () => {
 	})
 })
 
+describe("maxPage matches the parser (Q13)", () => {
+	it("accepts the published last page and rejects the one after it", () => {
+		const { maxPage } = meta()
+		expect(maxPage).toBeDefined()
+		expect(schema.safeParse({ page: maxPage }).success).toBe(true)
+		expect(schema.safeParse({ page: (maxPage ?? 0) + 1 }).success).toBe(false)
+	})
+})
+
 describe("defaultOrder matches what the parser applies", () => {
 	it("names the sort actually used when the request specifies none", () => {
 		const parsed = schema.parse({})

@@ -14,7 +14,9 @@ import {
 	baseListQueryShape,
 	filterAstSchema,
 	langQueryField,
+	assertNotReserved,
 	limitSchemaFor,
+	pageSchemaFor,
 	parsedFieldsSchema,
 	pickExtended,
 	selectQueryField,
@@ -35,7 +37,29 @@ type OptionalShape = {
 	select?: z.ZodOptional<z.ZodString>
 }
 
-type ListQueryShape = typeof baseListQueryShape & OptionalShape & { limit: z.ZodDefault<z.ZodCoercedNumber<unknown>> }
+type ListQueryShape = typeof baseListQueryShape &
+	OptionalShape & {
+		limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>
+		page: z.ZodOptional<z.ZodCoercedNumber<unknown>>
+	}
+
+/* the params and output keys the schema owns; ReservedListKey in schema-types.ts is their type */
+// lookup-table: the names an extension may not take
+const RESERVED = /* @__PURE__ */ Object.freeze([
+	"cursor",
+	"filter",
+	"filterAst",
+	"lang",
+	"limit",
+	"order",
+	"page",
+	"parsedFields",
+	"parsedSort",
+	"q",
+	"select",
+	"sortOrderBy",
+	"validated",
+])
 type ListQueryInput = z.ZodObject<ListQueryShape, z.core.$strict>
 
 /** What createListQuerySchema returns: the strict request object piped into its parsed output */
@@ -106,11 +130,13 @@ function createListQuerySchema<
 	const { extend: extendFields, fields: fieldsConfig, filter: filterConfig = EMPTY_OBJ, sort: sortConfig } = config
 	const limits: ListQueryLimits = { ...LIST_QUERY_LIMITS, ...config.limits }
 	const extensions = extendFields as Record<string, z.ZodType> | undefined
+	assertNotReserved("createListQuerySchema", extensions, RESERVED)
 
 	const shape = {
 		...baseListQueryShape,
 		...optionalShapeFor(config, limits),
 		limit: limitSchemaFor(config.pagination),
+		page: pageSchemaFor(config.pagination),
 	}
 	const schema = z.compile(extendFields ? z.strictObject({ ...shape, ...extendFields }) : z.strictObject(shape))
 	const outputSchema = outputSchemaFor(sortConfig, extensions)

@@ -14,6 +14,7 @@ describe("createRetrieveQuerySchema", () => {
 			relations: ["author"],
 			scalars: ["id", "name", "email"],
 		},
+		lang: true,
 	})
 
 	it("parses valid input", () => {
@@ -46,6 +47,29 @@ describe("createRetrieveQuerySchema — extension fields", () => {
 	it("validates and returns the extended params beside lang and parsedFields", () => {
 		const schema = createRetrieveQuerySchema({ extend: { include: z.enum(["stats"]) }, fields: { scalars: ["id"] } })
 		expect(schema.parse({ include: "stats" })).toEqual({ include: "stats", lang: undefined, parsedFields: null })
+		expect(schema.safeParse({ include: "stats", other: "x" }).success).toBe(false)
 		expect(schema.safeParse({ include: "other" }).success).toBe(false)
+	})
+})
+
+describe("createRetrieveQuerySchema — a param the endpoint does not honor (Q15)", () => {
+	const schema = createRetrieveQuerySchema({ fields: { scalars: ["id"] } })
+
+	it("refuses it, as the list schema does, rather than answer as if it were not sent", () => {
+		expect(schema.safeParse({ filter: "owner_id.eq.42" }).success).toBe(false)
+		expect(schema.safeParse({ select: "id" }).success).toBe(true)
+	})
+
+	it("takes lang only when the config says lang: true", () => {
+		expect(schema.safeParse({ lang: "en" }).success).toBe(false)
+		const localized = createRetrieveQuerySchema({ fields: { scalars: ["id"] }, lang: true })
+		expect(localized.parse({ lang: "en" }).lang).toBe("en")
+	})
+
+	it("refuses an extension named like its params or outputs", () => {
+		for (const key of ["lang", "parsedFields", "select"])
+			expect(() => createRetrieveQuerySchema({ extend: { [key]: z.any() }, fields: { scalars: ["id"] } })).toThrow(
+				TypeError,
+			)
 	})
 })

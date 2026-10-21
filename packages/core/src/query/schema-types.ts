@@ -20,13 +20,35 @@ type ListQueryLimits = FilterLimits & { maxFilterLength: number; maxSearchTerms:
 type PaginationConfig = {
 	defaultLimit?: number
 	maxLimit?: number
+	/** The last page offset pagination serves; past it, a client pages by cursor. Default 10 000. */
+	maxPage?: number
 }
+
+/* the params and output keys a list query schema owns: an extension under one would replace a checked value */
+type ReservedListKey =
+	| "cursor"
+	| "filter"
+	| "filterAst"
+	| "lang"
+	| "limit"
+	| "order"
+	| "page"
+	| "parsedFields"
+	| "parsedSort"
+	| "q"
+	| "select"
+	| "sortOrderBy"
+	| "validated"
+
+/* the same for a retrieve query schema */
+type ReservedRetrieveKey = "lang" | "parsedFields" | "select"
 
 type ListQueryConfig<
 	T extends OutputStableShape<T> = Record<string, never>,
 	TSortFields extends readonly string[] = readonly string[],
 > = {
-	extend?: T
+	/** Extra params, validated and returned as they are; a name the schema owns is refused */
+	extend?: T & { [K in ReservedListKey]?: never }
 	fields?: FieldsConfig
 	/** Fields `filter` may name. Omitted or empty: the endpoint takes no `filter`. */
 	filter?: Record<string, FieldType>
@@ -44,8 +66,11 @@ type ListQueryConfig<
 }
 
 type RetrieveQueryConfig<T extends z.ZodRawShape = z.ZodRawShape> = {
-	extend?: T
+	/** Extra params, validated and returned as they are; a name the schema owns is refused */
+	extend?: T & { [K in ReservedRetrieveKey]?: never }
 	fields: FieldsConfig
+	/** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
+	lang?: true
 }
 
 type ListQueryOutput<TSortField extends string = string> = {

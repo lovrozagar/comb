@@ -17,7 +17,7 @@ const doc = sqliteTable("doc", { title: text("title").notNull() })
 
 const TITLES = ["post", "postgres tips", "posture", "o'reilly books", 'say "hi" twice', "unrelated"]
 
-async function indexed() {
+async function indexed(titles: readonly string[] = TITLES) {
 	const harness = libsqlMemory()
 	open.push(harness)
 	await harness.client.executeMultiple(`
@@ -25,13 +25,13 @@ CREATE TABLE doc (title TEXT NOT NULL);
 CREATE VIRTUAL TABLE doc_fts USING fts5(title, content='doc', content_rowid='rowid', tokenize='unicode61 remove_diacritics 2');
 CREATE TRIGGER doc_fts_ai AFTER INSERT ON doc BEGIN INSERT INTO doc_fts(rowid, title) VALUES (new.rowid, new.title); END;
 `)
-	for (const title of TITLES) await harness.client.execute({ args: [title], sql: "INSERT INTO doc (title) VALUES (?)" })
+	for (const title of titles) await harness.client.execute({ args: [title], sql: "INSERT INTO doc (title) VALUES (?)" })
 	return harness.db
 }
 
 /** The titles a search finds, through buildFtsWhere on the source table */
-async function found(query: string): Promise<string[]> {
-	const db = await indexed()
+async function found(query: string, titles: readonly string[] = TITLES): Promise<string[]> {
+	const db = await indexed(titles)
 	const where = buildFtsWhere({ ftsTable: "doc_fts", table: doc }, query)
 	if (!where) return []
 	const rows = await db.all<{ title: string }>(sql`SELECT title FROM doc WHERE ${where} ORDER BY rowid`)
@@ -65,6 +65,23 @@ describe("user text reaches FTS5 as words, never as syntax", () => {
 		["post*", ["post", "postgres tips", "posture"]],
 	])("%s", async (query, expected) => {
 		expect(await found(query)).toEqual(expected)
+	})
+})
+
+describe("every word and character of a term is searched, inside its quotes (Q11)", () => {
+	const PAGES = ["page not found", "page found", "or", "error:timeout", "f(x) notation", "c++ tips"]
+
+	it.each([
+		["not found", ["page not found"]],
+		["or", ["or"]],
+		["error:timeout", ["error:timeout"]],
+		["f(x)", ["f(x) notation"]],
+		["c++", ["c++ tips"]],
+		/* a term of no letter or digit has no token to match, so it is skipped rather than empty the search */
+		["page ***", ["page not found", "page found"]],
+		["*** ::", []],
+	])("%s", async (query, expected) => {
+		expect(await found(query, PAGES)).toEqual(expected)
 	})
 })
 

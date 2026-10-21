@@ -183,13 +183,14 @@ export { patternToSQL };
 // query/sqlite/search.d.ts
 /**
  * FTS5 + spellfix search helpers for SQLite. User text is bound, never spliced: each term becomes
- * a quoted prefix phrase (`"term"*`), and identifiers go through quoteIdent.
+ * a quoted prefix phrase (`"term"*`), in which FTS5 reads no syntax, and identifiers go through quoteIdent.
  */
 import { type SQL } from "drizzle-orm";
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
 /**
- * A search term with FTS5 syntax characters removed, or "" when nothing is left or it is a bare
- * boolean operator. Quotes stay: the phrase builder escapes them where it quotes the term.
+ * A search term as its quoted phrase searches it: every word and character kept, as FTS5 reads
+ * none of them as syntax inside the quotes, control characters removed. "" when no letter or digit
+ * is left, as no token matches it. Quotes stay: the phrase builder escapes them where it quotes the term.
  */
 declare function sanitizeFtsTerm(term: string): string;
 /** `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS syntax spells */

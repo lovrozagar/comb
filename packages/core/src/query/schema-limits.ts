@@ -2,9 +2,11 @@
 import { FILTER_LIMITS } from "./filter.ts"
 import type { ListQueryLimits } from "./schema-types.ts"
 
+/* past maxPage, offset pagination makes the database skip more rows than a list should; cursors page on */
 const PAGINATION_DEFAULTS = {
 	defaultLimit: 20,
 	maxLimit: 100,
+	maxPage: 10_000,
 } as const
 
 /*

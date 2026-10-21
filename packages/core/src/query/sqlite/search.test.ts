@@ -48,26 +48,29 @@ describe("likeSearch", () => {
 })
 
 describe("sanitizeFtsTerm", () => {
-	it("strips FTS special characters", () => {
-		expect(sanitizeFtsTerm("test*")).toBe("test")
-		expect(sanitizeFtsTerm("he(llo)")).toBe("hello")
-		expect(sanitizeFtsTerm("col:on")).toBe("colon")
+	it("keeps FTS5 syntax characters, which its quoted phrase reads as text (Q11)", () => {
+		expect(sanitizeFtsTerm("test*")).toBe("test*")
+		expect(sanitizeFtsTerm("f(x)")).toBe("f(x)")
+		expect(sanitizeFtsTerm("error:timeout")).toBe("error:timeout")
 	})
 
 	it("keeps double quotes for the phrase builder to escape", () => {
 		expect(sanitizeFtsTerm('say"hi')).toBe('say"hi')
 	})
 
-	it("returns empty for boolean keywords", () => {
-		expect(sanitizeFtsTerm("AND")).toBe("")
-		expect(sanitizeFtsTerm("OR")).toBe("")
-		expect(sanitizeFtsTerm("NOT")).toBe("")
-		expect(sanitizeFtsTerm("and")).toBe("")
+	it("keeps the words AND, OR and NOT, which a quoted phrase searches as words (Q11)", () => {
+		for (const word of ["AND", "or", "Not"]) expect(sanitizeFtsTerm(word)).toBe(word)
+	})
+
+	it("drops control characters, and a term left with no letter or digit, which no token matches", () => {
+		expect(sanitizeFtsTerm("post\u0000gres\u007f")).toBe("postgres")
+		for (const term of ["***", "::", "-", "\u0001"]) expect(sanitizeFtsTerm(term)).toBe("")
 	})
 
 	it("preserves normal terms", () => {
 		expect(sanitizeFtsTerm("hello")).toBe("hello")
 		expect(sanitizeFtsTerm("café")).toBe("café")
+		expect(sanitizeFtsTerm("東京")).toBe("東京")
 	})
 })
 
@@ -85,7 +88,7 @@ describe("buildFtsMatch", () => {
 	})
 
 	it("matches nothing when every term sanitizes away (Q-S3)", () => {
-		for (const q of ["AND OR NOT", "*", "::"]) expect(compile(buildFtsMatch("fts_table", q) as SQL).sql).toBe("0")
+		for (const q of ["*", "::", "*** -"]) expect(compile(buildFtsMatch("fts_table", q) as SQL).sql).toBe("0")
 	})
 })
 
@@ -96,7 +99,7 @@ describe("buildFtsWhere", () => {
 	})
 
 	it("matches nothing when every term sanitizes away (Q-S3)", () => {
-		expect(compile(buildFtsWhere({ ftsTable: "fts_table", table: item }, "AND OR") as SQL).sql).toBe("0")
+		expect(compile(buildFtsWhere({ ftsTable: "fts_table", table: item }, "** ::") as SQL).sql).toBe("0")
 	})
 
 	it("selects the matching rows by the table's own rowid through the FTS table, the query bound", () => {
@@ -131,7 +134,7 @@ describe("buildFtsWhereWithSpellfix", () => {
 		const built = await buildFtsWhereWithSpellfix(
 			spellfixDb([]),
 			{ ftsTable: "f", table: item, spellfixTable: "s" },
-			"AND OR",
+			"** ::",
 		)
 		expect(compile(built as SQL).sql).toBe("0")
 	})

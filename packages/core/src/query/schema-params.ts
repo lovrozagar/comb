@@ -29,15 +29,11 @@ const langQueryField: z.ZodOptional<z.ZodString> = /* @__PURE__ */ z.string().mi
 	examples: LANG_EXAMPLES,
 })
 
-const baseListQueryShape: { cursor: z.ZodOptional<z.ZodString>; page: z.ZodOptional<z.ZodCoercedNumber<unknown>> } = {
+const baseListQueryShape: { cursor: z.ZodOptional<z.ZodString> } = {
 	/* a cursor carries its sort values, so it is as long as they are; past this it is not one comb minted for a list */
 	cursor: /* @__PURE__ */ z.string().max(MAX_CURSOR_LENGTH).optional().meta({
 		description: CURSOR_DESCRIPTION,
 		examples: CURSOR_EXAMPLES,
-	}),
-	page: /* @__PURE__ */ z.coerce.number().int().min(1).optional().meta({
-		description: PAGE_DESCRIPTION,
-		examples: PAGE_EXAMPLES,
 	}),
 }
 
@@ -90,6 +86,41 @@ function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<
 	return isDefault ? defaultLimitSchema : limitSchema(defaultLimit, maxLimit)
 }
 
+/** The `page` param: coerced, from 1 to maxPage */
+function pageSchema(maxPage: number): z.ZodOptional<z.ZodCoercedNumber<unknown>> {
+	return z.coerce.number().int().min(1).max(maxPage).optional().meta({
+		description: PAGE_DESCRIPTION,
+		examples: PAGE_EXAMPLES,
+	})
+}
+
+const defaultPageSchema = /* @__PURE__ */ pageSchema(PAGINATION_DEFAULTS.maxPage)
+
+/**
+ * The `page` param for this pagination; the shared default instance when it is the default. A
+ * maxPage whose last offset passes 2^53 - 1 is refused: SQLite fails on an OFFSET past int64.
+ */
+function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<z.ZodCoercedNumber<unknown>> {
+	const maxPage = pagination?.maxPage ?? PAGINATION_DEFAULTS.maxPage
+	const maxLimit = pagination?.maxLimit ?? PAGINATION_DEFAULTS.maxLimit
+	if (!Number.isSafeInteger(maxPage) || maxPage < 1 || (maxPage - 1) * maxLimit > Number.MAX_SAFE_INTEGER) {
+		throw new TypeError(
+			`createListQuerySchema: pagination.maxPage must be a positive integer whose last offset, (maxPage - 1) * maxLimit, is at most 2^53 - 1; got ${maxPage}`,
+		)
+	}
+	return maxPage === PAGINATION_DEFAULTS.maxPage ? defaultPageSchema : pageSchema(maxPage)
+}
+
+/** Throw when `extendFields` names a key of `reserved`, which the schema owns */
+function assertNotReserved(
+	builder: string,
+	extendFields: Record<string, unknown> | undefined,
+	reserved: readonly string[],
+): void {
+	const taken = Object.keys(extendFields ?? {}).find((key) => reserved.includes(key))
+	if (taken !== undefined) throw new TypeError(`${builder}: extend.${taken} is reserved; name the extension otherwise`)
+}
+
 /** The values of `extendFields`' keys in `data`; `{}` without extensions */
 function pickExtended<T extends Record<string, z.ZodType>>(
 	extendFields: T | undefined,
@@ -100,10 +131,12 @@ function pickExtended<T extends Record<string, z.ZodType>>(
 }
 
 export {
+	assertNotReserved,
 	baseListQueryShape,
 	filterAstSchema,
 	langQueryField,
 	limitSchemaFor,
+	pageSchemaFor,
 	parsedFieldsSchema,
 	pickExtended,
 	selectQueryField,

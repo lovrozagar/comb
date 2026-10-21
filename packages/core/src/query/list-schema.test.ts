@@ -291,7 +291,7 @@ describe("createListQuerySchema → JSON Schema descriptions", () => {
 	})
 
 	it("emits description + examples for retrieve query params", () => {
-		const schema = createRetrieveQuerySchema({ fields: { scalars: ["id", "name"] } })
+		const schema = createRetrieveQuerySchema({ fields: { scalars: ["id", "name"] }, lang: true })
 		const jsonSchema = z.toJSONSchema(schema, { io: "input" }) as Record<string, unknown>
 		const props = jsonSchema.properties as Record<string, Record<string, unknown>>
 		for (const key of ["select", "lang"] as const) {

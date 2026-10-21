@@ -6,6 +6,7 @@ import {
 	filterAstSchema,
 	langQueryField,
 	limitSchemaFor,
+	pageSchemaFor,
 	parsedFieldsSchema,
 	pickExtended,
 	selectQueryField,
@@ -47,10 +48,11 @@ describe("the shared params and outputs", () => {
 		expect(langQueryField.parse("en")).toBe("en")
 	})
 
-	it("coerce page to an integer of at least 1 and take a cursor string", () => {
-		const shape = z.object(baseListQueryShape)
+	it("coerce page to an integer from 1 to maxPage and take a cursor string", () => {
+		const shape = z.object({ ...baseListQueryShape, page: pageSchemaFor(undefined) })
 		expect(shape.parse({ cursor: "c", page: "2" })).toEqual({ cursor: "c", page: 2 })
 		expect(shape.safeParse({ page: "0" }).success).toBe(false)
+		expect(pageSchemaFor({ maxPage: 10_000 })).toBe(pageSchemaFor(undefined))
 	})
 
 	it("describe the parsed selection, filter AST and sort direction", () => {

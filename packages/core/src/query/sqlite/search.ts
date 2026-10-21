@@ -1,6 +1,6 @@
 /**
  * FTS5 + spellfix search helpers for SQLite. User text is bound, never spliced: each term becomes
- * a quoted prefix phrase (`"term"*`), and identifiers go through quoteIdent.
+ * a quoted prefix phrase (`"term"*`), in which FTS5 reads no syntax, and identifiers go through quoteIdent.
  */
 import { type SQL, sql } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
@@ -8,20 +8,21 @@ import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { escapeLike } from "../like.ts"
 import { quoteIdent } from "./identifier.ts"
 
-/* FTS5 syntax, and control characters: a NUL ends the C string FTS5 parses, mid-phrase */
+/* control characters: a NUL ends the C string FTS5 parses, mid-phrase */
 // oxlint-disable-next-line no-control-regex -- matching control characters is the point
-const FTS_SYNTAX = /[*^:(){}[\]\u0000-\u001f\u007f]/g
+const CONTROL = /[\u0000-\u001f\u007f]/g
 
-// lookup-table: FTS5's boolean operators, which a bare search term must never become
-const OPERATORS = /* @__PURE__ */ new Set(["AND", "NOT", "OR"])
+/* a token unicode61 indexes: a term with none of these matches no row, and would empty the search */
+const TOKEN = /[\p{L}\p{N}]/u
 
 /**
- * A search term with FTS5 syntax characters removed, or "" when nothing is left or it is a bare
- * boolean operator. Quotes stay: the phrase builder escapes them where it quotes the term.
+ * A search term as its quoted phrase searches it: every word and character kept, as FTS5 reads
+ * none of them as syntax inside the quotes, control characters removed. "" when no letter or digit
+ * is left, as no token matches it. Quotes stay: the phrase builder escapes them where it quotes the term.
  */
 function sanitizeFtsTerm(term: string): string {
-	const sanitized = term.replace(FTS_SYNTAX, "").trim()
-	return OPERATORS.has(sanitized.toUpperCase()) ? "" : sanitized
+	const sanitized = term.replace(CONTROL, "").trim()
+	return TOKEN.test(sanitized) ? sanitized : ""
 }
 
 /** The usable terms of a search string */

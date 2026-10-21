@@ -233,8 +233,8 @@ builder no longer emits it.
 ### 6.7 Query facts added within v1
 
 `filterFields` (`{ field, type, ops }[]`), `nulls`, `maxFilterConditions`, `maxFilterDepth`,
-`maxFilterValues` (bound values in all), `maxInValues`, `maxSearchTerms` and `maxSortKeys` were
-added after v1 shipped. They are optional in the type and
+`maxFilterValues` (bound values in all), `maxInValues`, `maxPage` (the last page offset pagination
+serves), `maxSearchTerms` and `maxSortKeys` were added after v1 shipped. They are optional in the type and
 validated when present, so a v1 reader built before them ignores them — which is why adding them
 did not bump `v`. Each value is computed from the config that parses the request, and
 `tests/integration/meta/query-parity.test.ts` drives the parser to prove it.

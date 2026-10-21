@@ -7,7 +7,7 @@ const keyset = (keys: number) => (keys * (keys + 1)) / 2 + keys + 1
 
 describe("schema-limits", () => {
 	it("pages 20 rows by default and at most 100", () => {
-		expect(PAGINATION_DEFAULTS).toEqual({ defaultLimit: 20, maxLimit: 100 })
+		expect(PAGINATION_DEFAULTS).toEqual({ defaultLimit: 20, maxLimit: 100, maxPage: 10_000 })
 	})
 
 	it("bounds a list request by the filter limits plus length, search words and sort keys", () => {

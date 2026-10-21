@@ -96,6 +96,8 @@ type CombQueryMeta = {
 	searchable: string[] | null
 	selectable: string[]
 	maxLimit: number
+	/** The last page offset pagination serves; past it, a client pages by cursor */
+	maxPage?: number
 	/** e.g. "created_at.desc" — the order applied when the request names none */
 	defaultOrder: string
 	/** Tiebreak column for keyset pagination */

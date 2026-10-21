@@ -233,6 +233,7 @@ describe("query stamp — search parameters", () => {
 		maxFilterValues: 60,
 		maxInValues: 50,
 		maxLimit: 100,
+		maxPage: 10_000,
 		maxSearchTerms: 8,
 		maxSortKeys: 3,
 		nulls: ["first", "last"],

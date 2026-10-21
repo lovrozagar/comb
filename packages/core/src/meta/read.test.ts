@@ -119,6 +119,7 @@ describe("readCombMeta: query payloads", () => {
 			{ ...QUERY, maxInValues: -1 },
 			"query payload `maxInValues` needs a non-negative integer",
 		],
+		["a zero maxPage", { ...QUERY, maxPage: 0 }, "query payload `maxPage` needs a positive integer"],
 	])("refuses %s", (_name, payload, message) => {
 		expect(read({ ...payload, v: 1 })).toEqual({ meta: null, said: [`${COMB_META_KEY}: ${message}`] })
 	})
@@ -132,5 +133,6 @@ describe("readCombMeta: query payloads", () => {
 			v: 1,
 		}
 		expect(read(payload).meta).toMatchObject({ filterFields: payload.filterFields, maxSortKeys: 3, nulls: ["last"] })
+		expect(read({ ...payload, maxPage: 50 }).meta).toMatchObject({ maxPage: 50 })
 	})
 })
