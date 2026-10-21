@@ -51,6 +51,16 @@ jobs:
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run typecheck:strict
+      # the release's publish path on every push, with the release's npm, so it is red on main before a tag ever runs it
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: npm install -g npm@latest
+      - name: dry-run the release publish
+        run: |
+          packed="$(.github/scripts/pack-for-publish.sh packages/core)"
+          npm publish "$packed" --dry-run --ignore-scripts
 
   test:
     name: test

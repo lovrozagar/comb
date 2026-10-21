@@ -173,9 +173,10 @@ jobs:
             exit 1
           fi
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "${HOME}/.npmrc"
+          # bun pm pack ran the package's prepack; npm must not rerun it in the packed directory
           packed="$("${GITHUB_WORKSPACE}/.github/scripts/pack-for-publish.sh" .)"
           set +e
-          npm publish "$packed" --access public --provenance
+          npm publish "$packed" --access public --provenance --ignore-scripts
           pub=$?
           set -e
           if [ "$pub" -ne 0 ]; then
@@ -211,6 +212,8 @@ jobs:
           registry-url: https://npm.pkg.github.com
           scope: "@lovrozagar"
           package-manager-cache: false
+      # the npm the npmjs job publishes with, so both registries get one manifest
+      - run: npm install -g npm@latest
       - name: Publish to GitHub Packages
         working-directory: ${{ env.PACKAGE_DIR }}
         env:
@@ -224,9 +227,10 @@ jobs:
             echo "GitHub Packages already has ${name}@${tag} — skipping"
             exit 0
           fi
+          # bun pm pack ran the package's prepack; npm must not rerun it in the packed directory
           packed="$("${GITHUB_WORKSPACE}/.github/scripts/pack-for-publish.sh" .)"
           set +e
-          npm publish "$packed" --access public
+          npm publish "$packed" --access public --ignore-scripts
           pub=$?
           set -e
           if [ "$pub" -eq 0 ]; then
