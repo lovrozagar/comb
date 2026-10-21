@@ -1,3 +1,4 @@
+/* an expiry is a time, or Infinity for an entry that never expires: `now > Infinity` is never true */
 type LruEntry<V> = { hardExpiry: number; softExpiry: number; value: V }
 
 type LruMeta<V> = { stale: boolean; value: V }
@@ -57,8 +58,8 @@ class LruCache<K, V> {
 			return undefined
 		}
 
-		if (Number.isFinite(entry.softExpiry) && Date.now() > entry.softExpiry) {
-			if (Number.isFinite(entry.hardExpiry) && Date.now() > entry.hardExpiry) {
+		if (Date.now() > entry.softExpiry) {
+			if (Date.now() > entry.hardExpiry) {
 				this.cache.delete(key)
 			}
 			return undefined
@@ -89,7 +90,7 @@ class LruCache<K, V> {
 		const now = Date.now()
 
 		/* Hard eviction check */
-		if (Number.isFinite(entry.hardExpiry) && now > entry.hardExpiry) {
+		if (now > entry.hardExpiry) {
 			this.cache.delete(key)
 			return undefined
 		}
@@ -98,7 +99,7 @@ class LruCache<K, V> {
 		this.cache.delete(key)
 		this.cache.set(key, entry)
 
-		const stale = Number.isFinite(entry.softExpiry) && now > entry.softExpiry
+		const stale = now > entry.softExpiry
 		return { stale, value: entry.value }
 	}
 
@@ -152,8 +153,8 @@ class LruCache<K, V> {
 			return false
 		}
 
-		if (Number.isFinite(entry.softExpiry) && Date.now() > entry.softExpiry) {
-			if (Number.isFinite(entry.hardExpiry) && Date.now() > entry.hardExpiry) {
+		if (Date.now() > entry.softExpiry) {
+			if (Date.now() > entry.hardExpiry) {
 				this.cache.delete(key)
 			}
 			return false
