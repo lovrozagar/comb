@@ -37,24 +37,32 @@ function enumBase({ field }: Build): Built {
 	throw new Error(`c.enum column "${field.name}": its values are not string literals comb can read: ${field.raw}`)
 }
 
-function jsonBase({ annotations, field, schemaType }: Build): Built {
+/* jsonb refuses U+0000 anywhere in a value: with every escaped backslash taken out of its JSON, a \u0000 left is one */
+const JSON_NUL_CHECK =
+	'.refine((val) => !JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "").includes("\\\\u0000"), { message: "Must not contain U+0000" })'
+
+function jsonBase({ annotations, dialect, field, schemaType }: Build): Built {
 	if (!/c\.json[<(]/.test(field.raw)) return undefined
 	if (!field.jsonSchemaName) throw new Error(`c.json() must have schema as second parameter: ${field.raw}`)
-	if (annotations.maxBytes === null || !isMutative(schemaType)) return field.jsonSchemaName
+	if (!isMutative(schemaType)) return field.jsonSchemaName
+	const nul = dialect === "postgres" ? JSON_NUL_CHECK : ""
+	if (annotations.maxBytes === null) return `${field.jsonSchemaName}${nul}`
 	const limit = annotations.maxBytes
-	return `${field.jsonSchemaName}.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
+	return `${field.jsonSchemaName}.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })${nul}`
 }
 
 // lookup-table: the column builders whose values are numbers, comb's and drizzle's
 const NUMERIC =
 	/^\s*(?:c\.)?(?:integer|serialId|serial|bigserial|smallint|bigint|int|real|doublePrecision|numeric)\s*[<(]/
 
-/* a reference is set once, at creation, so it has no place in an update body; a numeric one
- * takes the number rules, the rest the id string */
+/* a reference is set once, at creation, so it has no place in an update body. A numeric one takes
+ * the number rules and a c.text one its own text rules, its declared bounds included; a c.ref,
+ * which points at a c.id key, the id string */
 function foreignKeyBase({ field, schemaType }: Build): Built {
 	if (field.foreignKey === null && !/c\.ref[<(]/.test(field.raw)) return undefined
 	if (schemaType === "update") return null
-	return NUMERIC.test(field.raw) ? undefined : "z.string().min(1).max(48)"
+	if (NUMERIC.test(field.raw) || /c\.(text|id)[<(]/.test(field.raw)) return undefined
+	return "z.string().min(1).max(48)"
 }
 
 /* a password's rules bound what a person types; what is read back is its stored hash */
@@ -88,18 +96,18 @@ function minOf(annotations: FieldConstraints, field: FieldMeta, schemaType: Sche
 }
 
 /** The checks a name or an image URI takes on a write; what is read back is whatever the column holds */
-function kindChecks(annotations: FieldConstraints, mutative: boolean): string {
-	if (!mutative) return ""
+function kindChecks(annotations: FieldConstraints): string {
 	const name = annotations.name
 		? '.regex(/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" })'
 		: ""
+	/* a regex, not a refine: JSON Schema publishes it as the pattern, so a client sees the rule */
 	const image = annotations.imageUri
-		? '.refine((v) => /^(?:https:\\/\\/|data:image\\/)/.test(v), { message: "Must be an HTTPS URL or a data:image/ URI" })'
+		? '.regex(/^(?:https:\\/\\/|data:image\\/)/, { message: "Must be an HTTPS URL or a data:image/ URI" })'
 		: ""
 	return name + image
 }
 
-function textBounds({ annotations, field, schemaType }: Build): string {
+function textBounds({ annotations, dialect, field, schemaType }: Build): string {
 	if (annotations.password) return ""
 	if (annotations.email) return emailBounds(annotations, field)
 	const mutative = isMutative(schemaType)
@@ -108,10 +116,18 @@ function textBounds({ annotations, field, schemaType }: Build): string {
 	const declares = field.length !== null || annotations.min !== null || annotations.max !== null
 	if (isIdField && !declares) return mutative ? ".regex(/^\\S{1,48}$/)" : ".min(1).max(48)"
 	const min = minOf(annotations, field, schemaType)
-	const pattern = annotations.pattern !== null && mutative ? `.regex(${annotations.pattern})` : ""
-	const https =
-		annotations.url && mutative ? `.refine((v) => /^https:\\/\\//.test(v), { message: "Must be an HTTPS URL" })` : ""
-	return min + maxOf(annotations, field) + pattern + https + kindChecks(annotations, mutative)
+	return min + maxOf(annotations, field) + (mutative ? writeChecks(annotations, dialect) : "")
+}
+
+/**
+ * The checks only a written value takes: its pattern, https, a name's characters, an image URI's
+ * scheme, and on Postgres no U+0000, which its text refuses (22021): a 400 here, not a 500 there
+ */
+function writeChecks(annotations: FieldConstraints, dialect: Build["dialect"]): string {
+	const pattern = annotations.pattern === null ? "" : `.regex(${annotations.pattern})`
+	const https = annotations.url ? `.regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" })` : ""
+	const nul = dialect === "postgres" ? '.regex(/^[^\\u0000]*$/, { message: "Must not contain U+0000" })' : ""
+	return pattern + https + kindChecks(annotations) + nul
 }
 
 function textBase(build: Build): Built {
@@ -126,16 +142,15 @@ function textBase(build: Build): Built {
 	return stringKind(annotations, mutative) + transforms(annotations, mutative) + textBounds(build)
 }
 
-function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
+function numberBase({ annotations, dialect, field }: Build): Built {
 	if (/c\.(createdAt|updatedAt|deletedAt|timestamp)[<(]/.test(field.raw)) return "timestampSchema"
 	const { max, min } = annotations
 	if (/c\.(integer|serialId)[<(]/.test(field.raw)) {
-		/* an unbounded integer written is a non-negative count; one read is whatever the column holds,
-		 * and either stays within what the column holds: int4 on Postgres, a JS number's exact range on SQLite */
-		const int4 = dialect === "postgres"
-		const readFloor = int4 ? `.min(${INT4.min})` : ""
-		const floor = min !== null ? `.min(${min})` : isMutative(schemaType) ? ".nonnegative()" : readFloor
-		return `z.number().int()${floor}.max(${max ?? (int4 ? INT4.max : "Number.MAX_SAFE_INTEGER")})`
+		/* written and read alike, so a value read back can be sent back: the declared bounds, clamped to
+		 * what the column holds (int4 on Postgres, a JS number's exact range on SQLite) */
+		if (dialect === "postgres")
+			return `z.number().int().min(${Math.max(min ?? INT4.min, INT4.min)}).max(${Math.min(max ?? INT4.max, INT4.max)})`
+		return `z.number().int().min(${min ?? "Number.MIN_SAFE_INTEGER"}).max(${max ?? "Number.MAX_SAFE_INTEGER"})`
 	}
 	if (/c\.boolean[<(]/.test(field.raw)) return "z.boolean()"
 	if (!/c\.real[<(]/.test(field.raw)) return undefined
@@ -144,31 +159,26 @@ function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 
 const BUILDERS = [enumBase, jsonBase, foreignKeyBase, textBase, numberBase]
 
-// lookup-table: the timestamp column names, under either casing
-const TIMESTAMP_NAMES = /* @__PURE__ */ new Set([
-	"createdAt",
-	"updatedAt",
-	"deletedAt",
-	"created_at",
-	"updated_at",
-	"deleted_at",
-])
-
 /* the database fills a column with a default when a create body leaves it out */
 const hasDefault = (raw: string) => /\.(?:default|\$defaultFn|\$default)\s*\(/.test(raw)
 
-function optionalOnCreate(field: FieldMeta, required: boolean): boolean {
-	if (!required || field.name === "id" || TIMESTAMP_NAMES.has(field.name)) return true
-	return field.constraints.autogenerate || hasDefault(field.raw)
+/* SQLite fills an INTEGER PRIMARY KEY, the rowid's alias, when a create body leaves it out */
+const isRowid = (field: FieldMeta, dialect: Build["dialect"]) =>
+	dialect === "sqlite" && field.isPrimaryKey && /^\s*(?:c\.)?integer\s*\(/.test(field.raw)
+
+/* by what fills the column, never by its name: a natural key named id is the caller's to give (F6) */
+function optionalOnCreate(field: FieldMeta, required: boolean, dialect: Build["dialect"]): boolean {
+	if (!required) return true
+	return field.constraints.autogenerate || hasDefault(field.raw) || isRowid(field, dialect)
 }
 
 /** `base` with its OpenAPI example, nullability and the schema type's optionality. */
-function finish(field: FieldMeta, schemaType: SchemaType, base: string): string {
+function finish({ dialect, field, schemaType }: Build, base: string): string {
 	const example = generateExampleMeta(field)
 	const required = field.isPrimaryKey || field.isNotNull
 	const zodType = `${base}${example?.code ?? ""}${required ? "" : ".nullable()"}`
 	if (schemaType === "read") return zodType
-	if (schemaType === "create" && !optionalOnCreate(field, required)) return zodType
+	if (schemaType === "create" && !optionalOnCreate(field, required, dialect)) return zodType
 	return `${zodType}.optional()`
 }
 
@@ -188,7 +198,7 @@ export function generateFieldSchema(
 	for (const builder of BUILDERS) {
 		const base = builder(build)
 		if (base === null) return null
-		if (base !== undefined) return finish(field, schemaType, base)
+		if (base !== undefined) return finish(build, base)
 	}
-	return finish(field, schemaType, "z.unknown()")
+	return finish(build, "z.unknown()")
 }

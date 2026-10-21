@@ -50,7 +50,10 @@ export function collectUsedTimestampCombos(tables: TableInfo[]): UsedTimestampCo
 	return result
 }
 
-/** The read, readPartial and create spreads of one combo, using shared `_z*` timestamp schemas when they exist. */
+/**
+ * The read and readPartial spreads of one combo, using shared `_z*` timestamp schemas when they
+ * exist. A create body takes no timestamp: the column factories fill them, so a client backdates no row.
+ */
 function spreads(combo: TimestampCombo, n: TimestampNames, shared: Map<string, SharedSchema>): string[] {
 	const resolve = (zodType: string): string => shared.get(zodType)?.name ?? zodType
 	const plain = { read: resolve("timestampSchema"), wrapped: resolve("timestampSchema.optional()") }
@@ -65,7 +68,7 @@ function spreads(combo: TimestampCombo, n: TimestampNames, shared: Map<string, S
 		"}",
 		"",
 	]
-	return [...block("Read", "read"), ...block("ReadPartial", "wrapped"), ...block("Create", "wrapped")]
+	return [...block("Read", "read"), ...block("ReadPartial", "wrapped")]
 }
 
 function timestampVariants(

@@ -95,7 +95,7 @@ describe("generateEntityFile", () => {
 })
 
 describe("generateEntityFile: shared module imports", () => {
-	it("spreads the shared timestamps into read, readPartial and create, never update", () => {
+	it("spreads the shared timestamps into read and readPartial, never a create or update body (F4)", () => {
 		const fields = [
 			field("title", "read", "z.string()"),
 			field("created_at", "read", "timestampSchema"),
@@ -110,7 +110,7 @@ describe("generateEntityFile: shared module imports", () => {
 			"blogPostDtoUpdateSchema = z.compile(z.object({\n\tcreated_at: timestampSchema.optional(),",
 		)
 		expect(output).toContain(
-			'import { _str, timestampSchema, timestampsCreatedUpdatedCreateSnakeCase, timestampsCreatedUpdatedReadPartialSnakeCase, timestampsCreatedUpdatedReadSnakeCase } from "../_shared/db.blog._shared.gen"',
+			'import { _str, timestampSchema, timestampsCreatedUpdatedReadPartialSnakeCase, timestampsCreatedUpdatedReadSnakeCase } from "../_shared/db.blog._shared.gen"',
 		)
 	})
 

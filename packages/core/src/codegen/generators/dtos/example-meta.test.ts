@@ -46,11 +46,14 @@ describe("generateExampleMeta", () => {
 		expect(code('c.text("f", { min: 4, max: 4 })')).toBe('.meta({ examples: ["a1b2"] })')
 	})
 
-	it("takes a bounded number's midpoint, unless it is the shared example", () => {
+	it("takes the shared example when its bounds accept it, else their midpoint or the bound it misses (F18)", () => {
 		expect(code('c.integer("f", { min: 0, max: 10 })')).toBe(".meta({ examples: [5] })")
 		expect(code('c.integer("f", { min: 0, max: 84 })')).toBe(".meta(_m.integer)")
 		expect(code('c.integer("f")')).toBe(".meta(_m.integer)")
-		expect(code('c.real("f", { min: 0, max: 3 })')).toBe(".meta({ examples: [1.5] })")
+		expect(code('c.integer("f", { min: 100 })')).toBe(".meta({ examples: [100] })")
+		expect(code('c.integer("f", { max: 7 })')).toBe(".meta({ examples: [7] })")
+		expect(code('c.real("f", { min: 1, max: 3 })')).toBe(".meta({ examples: [2] })")
+		expect(code('c.real("f", { min: 0, max: 3 })')).toBe(".meta(_m.real)")
 		expect(code('c.real("f", { min: 0, max: 1 })')).toBe(".meta(_m.real)")
 		expect(code('c.real("f")')).toBe(".meta(_m.real)")
 	})

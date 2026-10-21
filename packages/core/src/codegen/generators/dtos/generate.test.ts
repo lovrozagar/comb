@@ -136,7 +136,8 @@ describe("generateDtos — timestamps and optionality", () => {
 	it("generates timestamp spreads in shared file", () => {
 		const { shared } = readUser()
 		expect(shared).toContain("timestampsCreatedUpdatedDeletedReadSnakeCase")
-		expect(shared).toContain("timestampsCreatedUpdatedDeletedCreateSnakeCase")
+		/* a create body takes no timestamp (F4) */
+		expect(shared).not.toContain("timestampsCreatedUpdatedDeletedCreateSnakeCase")
 	})
 
 	it("uses timestamp spreads in entity files", () => {
@@ -192,10 +193,10 @@ export const item = createTable("item", {
 	email: c.text("email", { min: 5, max: 254, email: true }).notNull(),
 	website: c.text("website", { url: true, max: 2048 }),
 	role: c.enum("role", ["admin", "member", "viewer"]).notNull(),
-	score: c.integer("score", { min: 0, max: 1000 }),
+	score: c.integer("score", { min: 100, max: 1000 }),
 	rating: c.real("rating"),
 	active: c.boolean("active").notNull(),
-	code: c.text("code", { min: 6, max: 6 }),
+	code: c.text("code", { min: 8, max: 8 }),
 	label: c.text("label", { max: 50 }),
 	created_at: c.createdAt("created_at"),
 	updated_at: c.updatedAt("updated_at"),
@@ -247,7 +248,7 @@ describe("generateDtos — meta examples: per field", () => {
 	})
 
 	it("includes integer midpoint example", () => {
-		expect(readItem().all).toContain(".meta({ examples: [500] })")
+		expect(readItem().all).toContain(".meta({ examples: [550] })")
 	})
 
 	it("includes real example in output", () => {
@@ -255,7 +256,7 @@ describe("generateDtos — meta examples: per field", () => {
 	})
 
 	it("adds exact-length string example", () => {
-		expect(readItem().all).toMatch(/\.meta\(\{ examples: \["\w{6}"\] \}\)/)
+		expect(readItem().all).toContain('.meta({ examples: ["a1b2c3d4"] })')
 	})
 
 	it("includes generic string example in output", () => {

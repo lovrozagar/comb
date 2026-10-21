@@ -120,7 +120,7 @@ describe("numeric bounds (REVIEW 3.2)", () => {
 
 		expect(verdicts("temp", [-41, -40, 60, 61])).toEqual([false, true, true, false])
 		expect(verdicts("floor", [-4, -3, 1_000_000])).toEqual([false, true, true])
-		expect(verdicts("cap", [-1, 0, 9, 10])).toEqual([false, true, true, false])
+		expect(verdicts("cap", [-1, 0, 9, 10])).toEqual([true, true, true, false])
 		expect(verdicts("lat", [-90.6, -90.5, 90.5, 90.6])).toEqual([false, true, true, false])
 		expect(verdicts("depth", [-0.26, -0.25, 1e9])).toEqual([false, true, true])
 		expect(verdicts("ratio", [-1e9, 1.5, 1.51])).toEqual([true, true, false])

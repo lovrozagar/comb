@@ -17,7 +17,8 @@ const SUFFIX: Record<SchemaType, string> = {
 const SCHEMA_TYPES: SchemaType[] = ["read", "readPartial", "create", "update"]
 
 /* the update body has no timestamp spread: timestamps are not written by a caller */
-const SPREAD: Partial<Record<SchemaType, string>> = { create: "Create", read: "Read", readPartial: "ReadPartial" }
+/* the schema types a timestamp spread fills: what is read back; a create or update body takes none (F4) */
+const SPREAD: Partial<Record<SchemaType, string>> = { read: "Read", readPartial: "ReadPartial" }
 
 export type EntityFileOptions = {
 	/** the directory the entity file is written to; schema imports are relative to it */
@@ -121,7 +122,7 @@ const ownFields = (table: TableInfo, spread: Spread) =>
 function sharedImports(table: TableInfo, spread: Spread, shared: Map<string, SharedSchema>): string[] {
 	const names = table.needsSharedMeta ? ["_m"] : []
 	if (spread.combo !== null)
-		names.push(...["Create", "Read", "ReadPartial"].map((v) => `timestamps${spread.combo}${v}${spread.suffix}`))
+		names.push(...["Read", "ReadPartial"].map((v) => `timestamps${spread.combo}${v}${spread.suffix}`))
 	for (const field of ownFields(table, spread)) {
 		const sharedName = shared.get(field.zodType)?.name
 		if (sharedName !== undefined) {

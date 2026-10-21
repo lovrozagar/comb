@@ -83,7 +83,7 @@ describe("generateSharedFile", () => {
 		const file = generateSharedFile(
 			{ camelCase: new Set(["CreatedUpdatedDeleted"]), snakeCase: new Set(["Created"]) },
 			shared,
-			new Set(["_z0", "timestampsCreatedUpdatedDeletedRead", "timestampsCreatedCreateSnakeCase"]),
+			new Set(["_z0", "timestampsCreatedUpdatedDeletedRead", "timestampsCreatedReadPartialSnakeCase"]),
 		)
 		expect(file).toContain("export const _z0 = _str.max(9) /* 3x */")
 		expect(file).toContain("export const _z1 = timestampSchema.nullable()\n")
@@ -91,9 +91,10 @@ describe("generateSharedFile", () => {
 			"export const timestampsCreatedUpdatedDeletedRead = {\n\tcreatedAt: timestampSchema,\n\tdeletedAt: _z1,",
 		)
 		expect(file).toContain(
-			"export const timestampsCreatedCreateSnakeCase = {\n\tcreated_at: timestampSchema.optional(),\n}",
+			"export const timestampsCreatedReadPartialSnakeCase = {\n\tcreated_at: timestampSchema.optional(),\n}",
 		)
-		expect(file).not.toContain("timestampsCreatedUpdatedDeletedCreate =")
+		/* a create body takes no timestamp (F4) */
+		expect(file).not.toMatch(/timestamps(?:Created|CreatedUpdated|CreatedUpdatedDeleted)Create(?:SnakeCase)? =/)
 		expect(file).not.toMatch(/validateTimestamps|Refinements/)
 		expect(file.indexOf("_z0 =")).toBeLessThan(file.indexOf("timestampsCreatedUpdatedDeletedRead"))
 	})

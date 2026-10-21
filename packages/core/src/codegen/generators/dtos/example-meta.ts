@@ -58,17 +58,37 @@ const inline = (example: string): ExampleResult => ({
 
 /* sensitive or structured values get no example: the schema says enough, the value would leak */
 function hasNoExample({ constraints, foreignKey, raw }: FieldMeta): boolean {
-	if (constraints.private || constraints.password || foreignKey !== null) return true
+	/* a pattern decides what the value looks like, which no generic example can know */
+	if (constraints.private || constraints.password || constraints.pattern !== null || foreignKey !== null) return true
 	if (/\.\$type<\s*z\.infer\b/.test(raw)) return true
 	return /c\.(ref|json|createdAt|updatedAt|deletedAt|timestamp)[<(]/.test(raw)
 }
 
-/** A bounded number's midpoint, unless it is the shared example anyway. */
+/* the shared examples' own values, which a bound may refuse */
+const SHARED_NUMBER = { integer: 42, real: 0.5 }
+
+/**
+ * A number its bounds accept: the shared example when it fits, else the midpoint of two bounds,
+ * or the one bound it misses
+ */
 function midpoint(field: FieldMeta, key: "integer" | "real"): ExampleResult {
 	const { max, min } = field.constraints
-	if (min === null || max === null) return shared(key)
-	const mid = key === "integer" ? Math.floor((min + max) / 2) : (min + max) / 2
-	return mid === (key === "integer" ? 42 : 0.5) ? shared(key) : inline(String(mid))
+	const fits = (value: number) => (min === null || value >= min) && (max === null || value <= max)
+	if (fits(SHARED_NUMBER[key])) return shared(key)
+	if (min !== null && max !== null)
+		return inline(String(key === "integer" ? Math.floor((min + max) / 2) : (min + max) / 2))
+	return inline(String(min ?? max))
+}
+
+/** `length` characters of the alphanumeric cycle, repeated as far as it takes */
+const cycleOf = (length: number) =>
+	ALPHANUMERIC_CYCLE.repeat(Math.ceil(length / ALPHANUMERIC_CYCLE.length)).slice(0, length)
+
+/** A text example its length bounds accept: the shared "string" when it fits, else the cycle at the length they allow */
+function textExample({ constraints: { max, min } }: FieldMeta): ExampleResult {
+	const word = "string".length
+	if ((min === null || min <= word) && (max === null || max >= word)) return shared("string")
+	return inline(JSON.stringify(cycleOf(max !== null && max < word ? max : (min as number))))
 }
 
 type Rule = (field: FieldMeta) => ExampleResult | undefined
@@ -90,10 +110,7 @@ const RULES: Rule[] = [
 			: /c\.real[<(]/.test(field.raw)
 				? midpoint(field, "real")
 				: undefined,
-	/* exact-length text is unique per field */
-	({ constraints: { max, min } }) =>
-		min !== null && min === max ? inline(JSON.stringify(ALPHANUMERIC_CYCLE.slice(0, min))) : undefined,
-	({ raw }) => (/c\.(text|id|enum)[<(]/.test(raw) ? shared("string") : undefined),
+	(field) => (/c\.(text|id|enum)[<(]/.test(field.raw) ? textExample(field) : undefined),
 ]
 
 /**

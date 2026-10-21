@@ -12,13 +12,20 @@ import { testContext } from "../../../src/codegen/generators/__fixtures__/contex
 
 const ROOT = path.resolve(import.meta.dirname, "../codegen/.tmp-dtos")
 
-const HEAD = `import { sqliteTable } from "drizzle-orm/sqlite-core"
+const HEAD = {
+	postgres: `import { pgTable } from "drizzle-orm/pg-core"
+import { c } from "@lovrozagar/comb/pg/columns"
+`,
+	sqlite: `import { sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
-`
+`,
+}
 
 export type GeneratedEntity = Record<string, z.ZodObject>
 
 export type GenerateOptions = {
+	/** the dialect the tables are written in and the DTOs generated for (default sqlite) */
+	dialect?: "postgres" | "sqlite"
 	/** further files beside the tables file, by name */
 	files?: Record<string, string>
 	/** the DTO output directory, relative to the tables file's directory */
@@ -39,9 +46,10 @@ export async function generatedDtos(
 	fs.mkdirSync(dir, { recursive: true })
 	for (const [file, source] of Object.entries(options.files ?? {})) fs.writeFileSync(path.join(dir, file), source)
 	const tablesPath = path.join(dir, "db.x.tables.ts")
-	fs.writeFileSync(tablesPath, `${HEAD}${tables}\n`)
+	const dialect = options.dialect ?? "sqlite"
+	fs.writeFileSync(tablesPath, `${HEAD[dialect]}${tables}\n`)
 	const output = path.join(dir, options.output ?? "dtos")
-	generateDtos(testContext(analyze(tablesPath, dir), { cwd: dir, tablesPath }), { output })
+	generateDtos(testContext(analyze(tablesPath, dir), { cwd: dir, dialect, tablesPath }), { output })
 	const entities: Record<string, GeneratedEntity> = {}
 	for (const entry of fs.readdirSync(output)) {
 		if (entry === "_shared") continue
