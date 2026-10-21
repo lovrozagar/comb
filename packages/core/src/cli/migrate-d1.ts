@@ -72,7 +72,8 @@ export async function migrateD1(request: D1Request, resolved: MigrateTarget | un
 		throw new CliError("--file does not apply to a D1 database: wrangler applies its migrations directory")
 	const { config, dir } = d1Config(request, resolved)
 	if (!fs.existsSync(dir)) throw new CliError(`Migrations dir not found: ${dir}`)
-	const name = resolved?.name ?? request.db
+	/* wrangler takes the binding or the database_name: the provider's databaseName, whatever the environment is called */
+	const name = config.databaseName
 	const exec = io.run ?? runProcess
 	const conn = await createD1Provider(config, exec).connect({ migrationsDir: dir, name, provider: config })
 	const target: D1Target = {

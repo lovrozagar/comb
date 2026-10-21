@@ -211,7 +211,7 @@ External tools the migration commands shell out to, none of them install-time de
 | `migrate diff`                                       | [Atlas](https://atlasgo.io) on `PATH`, plus `drizzle-kit`                                                                          |
 | `migrate check`, `migrate apply`, `migrate baseline` | Atlas on `PATH` and the configured provider's client; for D1, `wrangler` (authenticated against the account for a remote database) |
 
-The D1 provider drives `wrangler d1 execute` and `wrangler d1 migrations apply` as child processes, against the remote database by default; set `local: true` in its provider config, or pass `--local` without a migrate config, to target the local dev database. `wranglerConfig` (relative to `comb.migrate.config.ts`; default: the wrangler config beside it) and `wranglerEnv` name the wrangler config that binds the database and its environment, and comb passes them as `--config` and `--env` to every wrangler command.
+The D1 provider drives `wrangler d1 execute` and `wrangler d1 migrations apply` as child processes, against the remote database by default; set `local: true` in its provider config, or pass `--local` without a migrate config, to target the local dev database. `wranglerConfig` (relative to `comb.migrate.config.ts`; default: the wrangler config beside it) and `wranglerEnv` name the wrangler config that binds the database and its environment, and comb passes them as `--config` and `--env` to every wrangler command. Wrangler is given the provider's `databaseName`, a binding or a `database_name` of that config, whatever the environment is called; a binding is the safer choice, since a bare name can reach an unrelated D1 that shares it.
 
 ### `comb codegen`
 

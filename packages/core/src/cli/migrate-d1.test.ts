@@ -295,6 +295,24 @@ describe("migrate apply on D1 through comb.migrate.config.ts", () => {
 	})
 })
 
+describe("migrate apply on D1 through comb.migrate.config.ts: the database's name", () => {
+	it("names the database to wrangler by its provider's databaseName, not the environment's name", async () => {
+		const { db, root } = split()
+		writeFileSync(
+			join(db, "comb.migrate.config.ts"),
+			`export default { databases: { core: { migrationsDir: "./atlas-migrations", environments: {
+prod: { name: "prod", provider: { type: "d1", databaseId: "x", databaseName: "CORE_DB", wranglerConfig: "../worker/wrangler.toml", wranglerEnv: "prod" } },
+} } } }\n`,
+		)
+		const d1 = fakeD1({ dir: join(db, "atlas-migrations"), table: "schema_history" })
+		const io = makeIo(db, d1)
+		expect(await runCli(["migrate", "apply", "core", "-e", "prod"], io), io.errors.join("\n")).toBe(0)
+		const apply = d1.calls.find((call) => call[2] === "migrations")
+		expect(apply?.slice(0, 5)).toEqual(["wrangler", "d1", "migrations", "apply", "CORE_DB"])
+		expect(join(root, "worker", "wrangler.toml")).toBe(apply?.[7])
+	})
+})
+
 describe("migrate apply on D1 through comb.migrate.config.ts: its wrangler config", () => {
 	it("takes the wrangler config beside comb.migrate.config.ts when none is set, and refuses when there is none", async () => {
 		const dir = worker(INIT)
