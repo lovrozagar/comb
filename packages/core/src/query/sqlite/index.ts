@@ -32,6 +32,7 @@ export {
 	type SpellfixDb,
 	type SpellfixSearch,
 	sanitizeFtsTerm,
+	searchText,
 } from "./search.ts"
 
 /* LIKE search */

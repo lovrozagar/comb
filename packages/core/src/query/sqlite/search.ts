@@ -137,21 +137,34 @@ async function buildFtsWhereWithSpellfix(
  */
 type LikeSearchResolver = (q: string) => SQL | null
 
+/* the Latin combining marks NFKD splits off a letter: é is e + U+0301 */
 const DIACRITICS = /[\u0300-\u036f]/g
 
 /**
- * Factory for LIKE-based search on a pre-normalized `_search` column.
- * Strips diacritics, lowercases, escapes LIKE specials (`%`, `_`, `\`).
- * Multi-word queries split on unicode whitespace — each term ANDed separately.
+ * The text a `_search` column stores for `parts`, and what likeSearch folds each term to: compatibility
+ * forms folded (ＦＩＬＥ, ﬁ), Latin diacritics removed, lowercased, the present parts joined by a
+ * space. Write the column with it, so the reader and the writer are one function.
  */
-function likeSearch(column: SQLiteColumn): LikeSearchResolver {
+function searchText(...parts: Array<string | null | undefined>): string {
+	return parts
+		.filter((part): part is string => typeof part === "string" && part !== "")
+		.join(" ")
+		.normalize("NFKD")
+		.replace(DIACRITICS, "")
+		.toLowerCase()
+}
+
+/**
+ * Factory for LIKE-based search on a `_search` column that searchText wrote, or any SQL expression
+ * that holds such text. Each whitespace-separated term is folded by searchText, its LIKE specials
+ * (`%`, `_`, `\`) escaped, and every term is required.
+ */
+function likeSearch(column: SQLiteColumn | SQL): LikeSearchResolver {
 	return (q) => {
 		const terms = q
 			.split(/\s+/u)
 			.filter((term) => term.length > 0)
-			.map((term) => {
-				return escapeLike(term.normalize("NFD").replace(DIACRITICS, "").toLowerCase())
-			})
+			.map((term) => escapeLike(searchText(term)))
 		const clauses = terms.map((term) => sql`${column} LIKE ${`%${term}%`} ESCAPE '\\'`)
 		return clauses.length === 0 ? null : sql.join(clauses, sql` AND `)
 	}
@@ -165,6 +178,7 @@ export {
 	likeSearch,
 	type LikeSearchResolver,
 	sanitizeFtsTerm,
+	searchText,
 	type SpellfixDb,
 	type SpellfixSearch,
 }

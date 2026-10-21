@@ -1,4 +1,4 @@
-import type { SQL } from "drizzle-orm"
+import { type SQL, sql as drizzleSql } from "drizzle-orm"
 import { SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import {
@@ -8,6 +8,7 @@ import {
 	buildFtsWhereWithSpellfix,
 	likeSearch,
 	sanitizeFtsTerm,
+	searchText,
 } from "./search.ts"
 
 const dialect = new (SQLiteDialect as unknown as new () => {
@@ -44,6 +45,29 @@ describe("likeSearch", () => {
 
 	it("escapes the LIKE specials so they match themselves", () => {
 		expect(bound("100% foo_bar path\\file")?.params).toEqual(["%100\\%%", "%foo\\_bar%", "%path\\\\file%"])
+	})
+})
+
+describe("searchText: the _search column's writer, which likeSearch reads with (Q14)", () => {
+	it("folds case, diacritics and compatibility forms, and joins the parts it is given", () => {
+		expect(searchText("Évaluation", null, "Crème Brûlée", undefined)).toBe("evaluation creme brulee")
+		expect(searchText("ＦＩＬＥ ﬁx")).toBe("file fix")
+		expect(searchText()).toBe("")
+	})
+
+	it("is what likeSearch applies to each term, so a row written by it is found by any spelling", () => {
+		const written = searchText("Crème Brûlée")
+		for (const q of ["brûlée", "BRULEE", "Crème"]) {
+			const term = (compile(likeSearch(item._search)(q) as SQL).params[0] as string).slice(1, -1)
+			expect(written).toContain(term)
+		}
+	})
+})
+
+describe("likeSearch on a raw expression (C7)", () => {
+	it("takes an SQL expression as well as a column", () => {
+		const built = likeSearch(drizzleSql.raw('"_search"'))("hi")
+		expect(compile(built as SQL)).toEqual({ params: ["%hi%"], sql: `"_search" LIKE ? ESCAPE '\\'` })
 	})
 })
 
