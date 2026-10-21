@@ -138,8 +138,11 @@ type ImportsMeta = {
 	/** JSON schema names referenced by c.json() */
 	jsonSchemaImports: Set<string>
 	/** `"identifier.PROPERTY"` → the string an imported constant holds, for constraint references */
-	identifierValues: Map<string, string>
+	identifierValues: Map<string, ConstantValue>
 }
+
+/** What a constraint constant can hold, read from its source (codegen/utils/constant-value.ts) */
+type ConstantValue = boolean | number | string
 
 /** Full analysis result */
 type AnalysisResult = {
@@ -154,6 +157,7 @@ type AnalysisResult = {
 }
 
 export type {
+	ConstantValue,
 	ImportRef,
 	AnalysisResult,
 	CheckConstraintMeta,

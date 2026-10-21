@@ -31,16 +31,6 @@ export const post = sqliteTable("post", { id: text("id").primaryKey() })
 		expect(analyze(fp).tables.map((t) => t.varName)).toEqual(["post"])
 	})
 
-	it("resolves imported constants for constraint references when given the project directory", () => {
-		fs.writeFileSync(path.join(tmpDir, "patterns.js"), 'module.exports = { PATTERNS: { SLUG: "^[a-z]+$" } }\n')
-		const fp = writeTablesFile(`
-import { sqliteTable, text } from "drizzle-orm/sqlite-core"
-import { PATTERNS } from "./patterns"
-export const post = sqliteTable("post", { id: text("id").primaryKey(), slug: text("slug") })
-`)
-		expect(analyze(fp, tmpDir).imports.identifierValues.get("PATTERNS.SLUG")).toBe("^[a-z]+$")
-	})
-
 	it("sorts tables alphabetically by varName", () => {
 		const fp = writeTablesFile(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
@@ -61,6 +51,36 @@ export const middle = createTable("middle", { id: c.id() })
 		expect(analyze(writeTablesFile("", "db.core.tables.ts")).dbName).toBe("core")
 		expect(analyze(writeTablesFile("", "csvme.db.shard.tables.gen.ts")).dbName).toBe("shard")
 		expect(analyze(writeTablesFile("", "tables.ts")).dbName).toBe("db")
+	})
+})
+
+describe("analyzer: the constants a constraint names", () => {
+	it("resolves imported constants for constraint references when given the project directory", () => {
+		fs.writeFileSync(path.join(tmpDir, "patterns.ts"), 'export const PATTERNS = { SLUG: "^[a-z]+$" } as const\n')
+		const fp = writeTablesFile(`
+import { sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { PATTERNS } from "./patterns"
+const c = { text: (name: string, _constraints: object) => text(name) }
+export const post = sqliteTable("post", { id: text("id").primaryKey(), slug: c.text("slug", { pattern: PATTERNS.SLUG }) })
+`)
+		expect(analyze(fp).imports.identifierValues.get("PATTERNS.SLUG")).toBe("^[a-z]+$")
+	})
+
+	it("loads only the modules a table names a constant of, never another file's imports or its own unused ones", () => {
+		const marker = path.join(tmpDir, "loaded.txt")
+		const effect = `require("node:fs").appendFileSync(${JSON.stringify(marker)}, "x"); module.exports = { V: { A: "a" } }\n`
+		fs.writeFileSync(path.join(tmpDir, "effect.js"), effect)
+		fs.writeFileSync(path.join(tmpDir, "other.js"), effect)
+		/* a generated file beside the tables, as a second codegen run finds it */
+		fs.writeFileSync(path.join(tmpDir, "db.test.rows.gen.ts"), 'import { V } from "./other"\nexport const v = V\n')
+		const fp = writeTablesFile(`
+import { sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { V } from "./effect"
+import { users } from "./other"
+export const post = sqliteTable("post", { id: text("id").primaryKey(), owner: text("owner").references(() => users.id), a: V.A ? text("a") : text("b") })
+`)
+		expect(analyze(fp).imports.identifierValues.size).toBe(0)
+		expect(fs.existsSync(marker)).toBe(false)
 	})
 })
 

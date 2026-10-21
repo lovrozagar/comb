@@ -49,7 +49,7 @@ export async function generatedDtos(
 	const dialect = options.dialect ?? "sqlite"
 	fs.writeFileSync(tablesPath, `${HEAD[dialect]}${tables}\n`)
 	const output = path.join(dir, options.output ?? "dtos")
-	generateDtos(testContext(analyze(tablesPath, dir), { cwd: dir, dialect, tablesPath }), { output })
+	generateDtos(testContext(analyze(tablesPath), { cwd: dir, dialect, tablesPath }), { output })
 	const entities: Record<string, GeneratedEntity> = {}
 	for (const entry of fs.readdirSync(output)) {
 		if (entry === "_shared") continue

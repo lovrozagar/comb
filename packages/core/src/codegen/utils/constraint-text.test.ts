@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildIdentifierValueMap, extractConstraints, extractLength } from "./constraint-text.ts"
+import { extractConstraints, extractLength } from "./constraint-text.ts"
 
 describe("extractConstraints does not swallow a state machine", () => {
 	it("returns an empty map for c.enum, even when a third argument is present", () => {
@@ -44,17 +44,6 @@ describe("extractConstraints", () => {
 	it("handles string values", () => {
 		const result = extractConstraints('c.text("phone", { pattern: "/^\\\\+[0-9]+$/" })')
 		expect(result.pattern).toBeDefined()
-	})
-})
-
-describe("buildIdentifierValueMap", () => {
-	it("skips a module that cannot be resolved rather than throwing", () => {
-		const map = buildIdentifierValueMap(new Map([["patterns", "./definitely-not-here"]]), process.cwd())
-		expect(map.size).toBe(0)
-	})
-
-	it("returns an empty map for no imports", () => {
-		expect(buildIdentifierValueMap(new Map(), process.cwd()).size).toBe(0)
 	})
 })
 
@@ -111,29 +100,6 @@ describe("extractConstraints — value forms", () => {
 })
 
 describe("constraint-text: the remaining forms", () => {
-	it("reads the string constants a module the consumer can load exports", async () => {
-		const fs = await import("node:fs")
-		const os = await import("node:os")
-		const path = await import("node:path")
-		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-values-"))
-		try {
-			fs.writeFileSync(
-				path.join(dir, "patterns.cjs"),
-				'module.exports = { patterns: { LOCALE: "^[a-z]{2}$", COUNT: 3 }, flag: true }',
-			)
-			const values = buildIdentifierValueMap(
-				new Map([
-					["patterns", "./patterns.cjs"],
-					["flag", "./patterns.cjs"],
-				]),
-				dir,
-			)
-			expect([...values]).toEqual([["patterns.LOCALE", "^[a-z]{2}$"]])
-		} finally {
-			fs.rmSync(dir, { force: true, recursive: true })
-		}
-	})
-
 	it("keeps nested braces inside a constraint object, and reads a length property", () => {
 		expect(extractConstraints('c.text("n", { pattern: "^a{2}$", max: 5 })')).toEqual({ max: 5, pattern: "^a{2}$" })
 		expect(extractConstraints('c.json("n", schema, { shape: { a: 1 }, maxBytes: 9 })')).toMatchObject({ maxBytes: 9 })

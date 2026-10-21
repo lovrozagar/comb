@@ -150,7 +150,7 @@ export const post = sqliteTable("post", {
 })
 ```
 
-The second argument to each factory is a **constraint object**. At runtime most of it is inert — `c.text("title", { max: 200 })` just becomes `text("title", { length: 200 })`. Its real job is to be read back out of the source by the codegen analyzer, which turns `{ min: 2, max: 64, trim: true }` into a Zod schema, a CHECK constraint, and an OpenAPI description. Constraints live next to the column, once.
+The second argument to each factory is a **constraint object**. At runtime most of it is inert — `c.text("title", { max: 200 })` just becomes `text("title", { length: 200 })`. Its real job is to be read back out of the source by the codegen analyzer, which turns `{ min: 2, max: 64, trim: true }` into a Zod schema, a CHECK constraint, and an OpenAPI description. Constraints live next to the column, once. A constraint value may name a constant, such as `pattern: patterns.E164_PHONE` or `max: NAME_MAX`. Codegen reads it from source and never runs a module: it follows the name through consts, imports and re-exports to a literal (a string, number, boolean, regex literal, `new RegExp` of literals, or an object of those, through `as const` and `satisfies`). A value only running could produce, such as a call or a `let`, fails codegen with its file, line and expression.
 
 Point a config at the file:
 

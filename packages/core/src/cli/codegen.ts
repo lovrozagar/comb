@@ -142,7 +142,7 @@ async function analyzed(tablesPath: string, io: CliIo) {
 		throw new CliError(["Validation errors:", ...validation.errors.map((e) => `  ${e}`)].join("\n"))
 	}
 	for (const warning of validation.warnings) io.err(`  warn: ${warning}`)
-	return analyze(tablesPath, io.cwd)
+	return analyze(tablesPath)
 }
 
 /** Where a database's files go unless a generator has its own output: output.default, else the tables' directory */

@@ -7,8 +7,8 @@
 import type { Project } from "ts-morph"
 import { parseTable } from "./analyze-table.ts"
 import type { AnalysisResult, ImportsMeta, TableMeta } from "./analyzer-types.ts"
+import { constraintConstants } from "./utils/constant-value.ts"
 import { builderDialects, calleeOf, isTableDefinition, tableBuilders } from "./utils/table-builders.ts"
-import { buildIdentifierValueMap } from "./utils/constraint-text.ts"
 import { createProjectFromTablesDir, extractDbName, getTablesImportPath, tableSourceFiles } from "./utils/ts-morph.ts"
 
 /** Every named import across the project, by local name, with the module it comes from. */
@@ -64,11 +64,11 @@ function collectTables(
  * Analyze a tables file and produce the full AnalysisResult.
  * Single-pass ts-morph traversal — all generators consume this output.
  */
-function analyze(tablesPath: string, cwd?: string): AnalysisResult {
+function analyze(tablesPath: string): AnalysisResult {
 	const project = createProjectFromTablesDir(tablesPath)
 	const imports = collectImports(project)
-	/* Resolve imported identifier values for constraint pattern resolution */
-	if (cwd) imports.identifierValues = buildIdentifierValueMap(imports.identifiers, cwd)
+	/* the constants the constraints name, read from source: codegen runs no user module */
+	imports.identifierValues = constraintConstants(project, tablesPath)
 	return {
 		dbName: extractDbName(tablesPath),
 		imports,

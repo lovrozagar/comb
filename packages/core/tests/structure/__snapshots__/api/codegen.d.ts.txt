@@ -12,7 +12,7 @@ import type { AnalysisResult, TableMeta } from "./analyzer-types.ts";
  * Analyze a tables file and produce the full AnalysisResult.
  * Single-pass ts-morph traversal — all generators consume this output.
  */
-declare function analyze(tablesPath: string, cwd?: string): AnalysisResult;
+declare function analyze(tablesPath: string): AnalysisResult;
 export { analyze };
 export type { AnalysisResult, TableMeta };
 
@@ -182,8 +182,10 @@ type ImportsMeta = {
     /** JSON schema names referenced by c.json() */
     jsonSchemaImports: Set<string>;
     /** `"identifier.PROPERTY"` → the string an imported constant holds, for constraint references */
-    identifierValues: Map<string, string>;
+    identifierValues: Map<string, ConstantValue>;
 };
+/** What a constraint constant can hold, read from its source (codegen/utils/constant-value.ts) */
+type ConstantValue = boolean | number | string;
 /** Full analysis result */
 type AnalysisResult = {
     /** Database name derived from tables file path */
@@ -195,7 +197,7 @@ type AnalysisResult = {
     /** Relative import path for the tables file */
     tablesImportPath: string;
 };
-export type { ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };
+export type { ConstantValue, ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };
 
 // codegen/annotations.d.ts
 /**
@@ -311,13 +313,14 @@ export declare function generateOrm(ctx: GeneratorContext, config: OrmConfig): v
 export {};
 
 // codegen/utils/constraint-text.d.ts
-/** `"identifier.PROPERTY"` → the string an imported constant holds, e.g. `patterns.E164_PHONE`. */
-export type IdentifierValues = ReadonlyMap<string, string>;
 /**
- * Build an identifier value map by requiring imported modules and extracting
- * their exported object properties. Resolves workspace package paths from `cwd`.
+ * A column helper's constraint object, read from its text: `c.text("name", { min: 5, max: 254 })`
+ * or `c.text<{ min: 5 }>("name")`. References to imported constants resolve through the values the
+ * caller passes, so two codegen runs never share state.
  */
-export declare function buildIdentifierValueMap(importedIds: Map<string, string>, cwd: string): Map<string, string>;
+import type { ConstantValue } from "../analyzer-types.ts";
+/** A constraint's constant reference, as written (`patterns.E164_PHONE`), → the value its const holds */
+export type IdentifierValues = ReadonlyMap<string, ConstantValue>;
 /**
  * Extract constraint object from column function parameter or type argument
  * Parameter format: c.text("name", { min: 5, max: 254 })

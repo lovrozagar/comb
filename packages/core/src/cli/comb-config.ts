@@ -58,5 +58,5 @@ export async function configuredFtsSql(
 	const resolvedTables = tablesFile(cwd, db.tables)
 	const { analyze } = await import("../codegen/analyzer.ts")
 	const { generateFtsSql } = await import("../codegen/generators/fts-sql.ts")
-	return generateFtsSql(analyze(resolvedTables, cwd).tables, db.fts, io.err)
+	return generateFtsSql(analyze(resolvedTables).tables, db.fts, io.err)
 }

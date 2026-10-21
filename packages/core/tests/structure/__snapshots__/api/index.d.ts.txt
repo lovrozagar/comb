@@ -475,8 +475,10 @@ type ImportsMeta = {
     /** JSON schema names referenced by c.json() */
     jsonSchemaImports: Set<string>;
     /** `"identifier.PROPERTY"` → the string an imported constant holds, for constraint references */
-    identifierValues: Map<string, string>;
+    identifierValues: Map<string, ConstantValue>;
 };
+/** What a constraint constant can hold, read from its source (codegen/utils/constant-value.ts) */
+type ConstantValue = boolean | number | string;
 /** Full analysis result */
 type AnalysisResult = {
     /** Database name derived from tables file path */
@@ -488,4 +490,4 @@ type AnalysisResult = {
     /** Relative import path for the tables file */
     tablesImportPath: string;
 };
-export type { ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };
+export type { ConstantValue, ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };

@@ -1,0 +1,198 @@
+/**
+ * Constraint constants read from source, never run: a module with side effects, or one that throws,
+ * still gives up its literals, and a value only running could produce fails codegen where it stands.
+ */
+import fs from "node:fs"
+import path from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
+import { analyze } from "../analyzer.ts"
+
+const CORE = path.join(import.meta.dirname, "../../..")
+
+const made: string[] = []
+afterEach(() => {
+	for (const dir of made.splice(0)) fs.rmSync(dir, { force: true, recursive: true })
+})
+
+/** A directory inside the package (so `@lovrozagar/comb/*` resolves as a consumer's would) holding `files` */
+function dirWith(files: Record<string, string>): string {
+	const dir = fs.mkdtempSync(path.join(CORE, ".tmp-constants-"))
+	made.push(dir)
+	for (const [name, text] of Object.entries(files)) {
+		fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
+		fs.writeFileSync(path.join(dir, name), text)
+	}
+	return dir
+}
+
+const HEAD = `import { sqliteTable } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+`
+
+/** The constants analyze reads for a tables file of `columns` (after HEAD and `imports`) */
+function constants(files: Record<string, string>, imports: string, columns: string) {
+	const dir = dirWith({
+		...files,
+		"db.x.tables.ts": `${HEAD}${imports}\nexport const t = sqliteTable("t", { id: c.id("t"), ${columns} })\n`,
+	})
+	return Object.fromEntries(analyze(path.join(dir, "db.x.tables.ts")).imports.identifierValues)
+}
+
+describe("constraint constants, read statically", () => {
+	it("reads a literal from a module whose top level throws and imports comb, and never runs it", () => {
+		const marker = path.join(CORE, `.tmp-constants-ran-${process.pid}`)
+		made.push(marker)
+		const values = constants(
+			{
+				"limits.ts": `import { CombError } from "@lovrozagar/comb"
+import { appendFileSync } from "node:fs"
+appendFileSync(${JSON.stringify(marker)}, "ran")
+export const LIMITS = { NAME: 80, ENABLED: true } as const
+throw new CombError({ errorKey: "x", status: "bad_request" })
+`,
+			},
+			'import { LIMITS } from "./limits.ts"',
+			'name: c.text("name", { max: LIMITS.NAME, trim: LIMITS.ENABLED })',
+		)
+		expect(values).toEqual({ "LIMITS.ENABLED": true, "LIMITS.NAME": 80 })
+		expect(fs.existsSync(marker)).toBe(false)
+	})
+
+	it("reads comb's own pattern constant through its package export", () => {
+		const values = constants(
+			{},
+			'import { patterns } from "@lovrozagar/comb/sqlite/patterns"',
+			'phone: c.text("phone", { pattern: patterns.E164_PHONE })',
+		)
+		expect(values).toEqual({ "patterns.E164_PHONE": "/^\\+[1-9]\\d{7,14}$/" })
+	})
+
+	it("follows a re-export chain, an alias, `export *`, `as const`, `satisfies` and a const referencing a const", () => {
+		const values = constants(
+			{
+				"base.ts": 'export const SLUG = "^[a-z-]+$"\nexport const MAX = 40 satisfies number\n',
+				"index.ts": 'export * from "./other.ts"\nexport { RULES as R } from "./rules.ts"\n',
+				"other.ts": "export const NOTHING = 1\n",
+				"rules.ts":
+					'import { SLUG, MAX } from "./base.ts"\nconst LOCAL = { SLUG, LONG: MAX } as const\nexport const RULES = LOCAL\n',
+			},
+			'import { R } from "./index.ts"',
+			'slug: c.text("slug", { pattern: R.SLUG, max: R.LONG })',
+		)
+		expect(values).toEqual({ "R.LONG": 40, "R.SLUG": "^[a-z-]+$" })
+	})
+
+	it("reads a regex literal, new RegExp with literal arguments, a negative number and a bare const", () => {
+		const values = constants(
+			{},
+			'const CODE = /^[A-Z]{3}$/i\nconst PATH = new RegExp("^a/b$", "u")\nconst LOW = -5\nconst OFF = false',
+			'code: c.text("code", { pattern: CODE }), path: c.text("path", { pattern: PATH }), n: c.integer("n", { min: LOW }), t: c.text("tt", { trim: OFF })',
+		)
+		expect(values).toEqual({ CODE: "/^[A-Z]{3}$/i", LOW: -5, OFF: false, PATH: "/^a\\/b$/u" })
+	})
+})
+
+describe("constraint constants that only running could produce", () => {
+	it.each([
+		{
+			constraint: "max: MAX",
+			imports: "const MAX = Math.max(1, 2)",
+			name: "a computed initializer",
+			why: /Math\.max\(1, 2\) is computed/,
+		},
+		{ constraint: "max: MAX", imports: "let MAX = 3", name: "a let", why: /MAX is not a const/ },
+		{
+			constraint: "max: MAX",
+			imports: "const MAX: number = undefined!",
+			name: "a const with nothing it can read",
+			why: /undefined is not a const/,
+		},
+		{
+			constraint: "max: RULES.MAX",
+			imports: "const RULES = makeRules()",
+			name: "a property of a call",
+			why: /makeRules\(\) is not an object literal/,
+		},
+		{
+			constraint: "max: RULES.MAX",
+			imports: "const RULES = { MIN: 1 }",
+			name: "a missing property",
+			why: /has no plain property MAX/,
+		},
+		{
+			constraint: "max: NOWHERE",
+			imports: "",
+			name: "a name bound nowhere",
+			why: /NOWHERE is not a const of its file or an import of one/,
+		},
+		{
+			constraint: "max: R.MAX",
+			imports: 'import { R } from "./missing.ts"',
+			name: "a module that does not resolve",
+			why: /"\.\/missing\.ts" does not resolve/,
+		},
+	])("fails codegen on $name, naming the file, the line and the expression", ({ constraint, imports, why }) => {
+		const dir = dirWith({
+			"db.x.tables.ts": `${HEAD}${imports}\nexport const t = sqliteTable("t", {\n\tid: c.id("t"),\n\tn: c.integer("n", { ${constraint} }),\n})\n`,
+		})
+		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(
+			/db\.x\.tables\.ts:\d+: comb cannot read the constant/,
+		)
+		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(why)
+	})
+})
+
+describe("constraint constants across exports, and RegExp and declarations it cannot read", () => {
+	it("reads a same-file aliased export, skips an export that misses before a `export *` that holds the name, and reads one constant once", () => {
+		const values = constants(
+			{
+				"index.ts":
+					'export { OTHER } from "./other.ts"\nexport * from "./rules.ts"\nconst LOCAL = { MAX: 9 } as const\nexport { LOCAL as L }\n',
+				"other.ts": "export const OTHER = 1\n",
+				"rules.ts": "export const RULES = { MIN: 2 } as const\n",
+			},
+			'import { L, RULES } from "./index.ts"',
+			'a: c.integer("a", { max: L.MAX, min: RULES.MIN }), b: c.integer("b", { max: L.MAX, ...SPREAD })',
+		)
+		expect(values).toEqual({ "L.MAX": 9, "RULES.MIN": 2 })
+	})
+
+	it.each([
+		{
+			declaration: "const CODE = new RegExp()",
+			name: "new RegExp without arguments",
+			why: /new RegExp\(\) is computed/,
+		},
+		{ declaration: 'const CODE = new RegExp("a", FLAGS)', name: "new RegExp with computed flags", why: /is computed/ },
+		{
+			declaration: "declare const CODE: string",
+			name: "a const without an initializer",
+			why: /CODE has no initializer/,
+		},
+		{
+			declaration: 'import { CODE } from "./barrel.ts"',
+			name: "an `export *` of a module that does not resolve",
+			why: /"\.\/missing\.ts" does not resolve/,
+		},
+	])("fails codegen on $name", ({ declaration, why }) => {
+		const dir = dirWith({
+			"barrel.ts": 'export * from "./inner.ts"\n',
+			/* an `export *` target that itself names a module that does not resolve: the failure is kept, not read as a miss */
+			"inner.ts": 'export * from "./missing.ts"\n',
+			"db.x.tables.ts": `${HEAD}${declaration}\nexport const t = sqliteTable("t", { id: c.id("t"), code: c.text("code", { pattern: CODE }) })\n`,
+		})
+		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(why)
+	})
+
+	it("fails on a module that ships only declarations, and on a reference cycle", () => {
+		const declared = dirWith({
+			"db.x.tables.ts": `${HEAD}import { R } from "./types.ts"\nexport const t = sqliteTable("t", { id: c.id("t"), n: c.integer("n", { max: R.MAX }) })\n`,
+			"types.d.ts": "export declare const R: { MAX: number }\n",
+		})
+		expect(() => analyze(path.join(declared, "db.x.tables.ts"))).toThrow(/ships only declarations/)
+		const cycle = dirWith({
+			"db.x.tables.ts": `${HEAD}const A = B\nconst B = A\nexport const t = sqliteTable("t", { id: c.id("t"), n: c.integer("n", { max: A }) })\n`,
+		})
+		expect(() => analyze(path.join(cycle, "db.x.tables.ts"))).toThrow(/more than 8 references/)
+	})
+})

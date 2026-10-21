@@ -3,41 +3,13 @@
  * or `c.text<{ min: 5 }>("name")`. References to imported constants resolve through the values the
  * caller passes, so two codegen runs never share state.
  */
-import { createRequire } from "node:module"
-import path from "node:path"
+import type { ConstantValue } from "../analyzer-types.ts"
 
-/** `"identifier.PROPERTY"` → the string an imported constant holds, e.g. `patterns.E164_PHONE`. */
-export type IdentifierValues = ReadonlyMap<string, string>
+/** A constraint's constant reference, as written (`patterns.E164_PHONE`), → the value its const holds */
+export type IdentifierValues = ReadonlyMap<string, ConstantValue>
 
 // lookup-table: the empty value map callers without imports pass
 const NO_VALUES: IdentifierValues = /* @__PURE__ */ new Map()
-
-/**
- * Build an identifier value map by requiring imported modules and extracting
- * their exported object properties. Resolves workspace package paths from `cwd`.
- */
-export function buildIdentifierValueMap(importedIds: Map<string, string>, cwd: string): Map<string, string> {
-	const map = new Map<string, string>()
-	const _require = createRequire(`${path.resolve(cwd)}/`)
-
-	for (const [identifier, modulePath] of importedIds) {
-		try {
-			const mod = _require(modulePath) as Record<string, unknown>
-			const obj = mod[identifier]
-			if (typeof obj !== "object" || obj === null) continue
-
-			for (const [key, value] of Object.entries(obj)) {
-				if (typeof value === "string") {
-					map.set(`${identifier}.${key}`, value)
-				}
-			}
-		} catch {
-			// reason: a module the consumer's context cannot load has no values to offer; its references stay as written
-		}
-	}
-
-	return map
-}
 
 /**
  * Extract constraint object from column function parameter or type argument
