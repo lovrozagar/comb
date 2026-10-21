@@ -80,7 +80,8 @@ describe("migrate apply on D1 without a migrate config", () => {
 		const check = makeIo(safe, checked)
 		expect(await runCli(["migrate", "check", "core", "--local"], check)).toBe(0)
 		expect(check.outputs).toEqual(["\nCheck passed: 1 pending: 20260101000000_init.sql"])
-		expect(recorded(checked)).toEqual([])
+		/* a check never writes: no migrations table appears */
+		expect(checked.db.prepare("SELECT name FROM sqlite_master WHERE name = 'd1_migrations'").all()).toEqual([])
 	})
 })
 

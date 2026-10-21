@@ -133,17 +133,6 @@ export declare function aggregateErrors(errors: Array<{
 export declare function printMigrationSummary(results: MigrationResult[], out: (line: string) => void): void;
 /** The question a destructive migration asks before it runs: what it destroys, and where */
 export declare function dropsQuestion(drops: readonly string[], target: string): string;
-export type ConfirmDrops = {
-    /** --yes: apply without asking */
-    autoConfirm: boolean;
-    /** How to ask the person running the migration; absent when nobody can be asked */
-    confirm?: ((question: string) => Promise<boolean>) | undefined;
-};
-/**
- * Whether a migration that drops `drops` may run on `target`: yes when it drops nothing or
- * autoConfirm is set, otherwise the answer to `dropsQuestion`, and no when nobody can be asked.
- */
-export declare function confirmDrops(drops: readonly string[], target: string, options: ConfirmDrops): Promise<boolean>;
 
 // migrate/drivers/index.d.ts
 export { createD1Provider } from "./d1.ts";
@@ -283,6 +272,8 @@ export type TableInfo = {
     primaryKey: string[];
     /** a WITHOUT ROWID table, whose rows are saved by primary key */
     withoutRowid: boolean;
+    /** its primary key is the rowid: a lone INTEGER column, so writing the key writes the rowid */
+    rowidAlias: boolean;
     /** columns no INSERT may write */
     generatedColumns: string[];
     /** SQLite keeps its next id in sqlite_sequence */

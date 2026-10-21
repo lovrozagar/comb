@@ -16,8 +16,9 @@ import type { Dialect, ExtractedSchema, MigrationClassification } from "../types
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
-import { writeFindings } from "./classify-write.ts"
-import { readGuards } from "./rebuild-guard.ts"
+import { followAdds, type Fresh, freshStart, writeFindings } from "./classify-write.ts"
+import { type Rebuilds, rebuildsOf } from "./rebuild-copy.ts"
+import { noGuards, readGuards } from "./rebuild-guard.ts"
 import { codeOf, doBody, executedSql, lastPart, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
@@ -30,6 +31,8 @@ type ClassifyOptions = {
 
 /** What the statements of one file show, read once before the rules run */
 type FileContext = {
+	/** the columns the file has added so far and nothing has written since: a backfill may fill them */
+	fresh: Fresh
 	before: ExtractedSchema | undefined
 	created: Set<string>
 	dialect: Dialect
@@ -40,14 +43,13 @@ type FileContext = {
 	unguarded: Map<string, string[]>
 	/** rebuilt tables comb guarded, with the tables whose rows the guard keeps */
 	kept: Map<string, string[]>
+	/** each rebuilt table's notes of the tables it leaves under new rowids */
+	renumbered: Map<string, string[]>
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
 	reindexed: Set<string>
 	/** the statements the file prepares, by name, with the code each runs */
 	prepared: Map<string, string>
 }
-
-/** A SQLite rebuild of `table`: the temporary table it is copied into, and the columns copied */
-type Rebuilds = Map<string, { columns: string[]; temp: string }>
 
 const UNSAFE_DROP =
 	/^DROP (?:TABLE|SCHEMA|SEQUENCE|MATERIALIZED VIEW|EXTENSION|DOMAIN|DATABASE|TYPE|ROLE|USER|GROUP|OWNED|FOREIGN TABLE)\b/i
@@ -81,10 +83,6 @@ const CREATE_TABLE = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:(?:TEMP|TEMPORARY|UNLOGGED) )?TABLE (?:IF NOT EXISTS )?(${QNAME})`,
 	"i",
 )
-// per-process-constant: a pattern composed from the name grammar, compiled once
-const COPY_INTO = /* @__PURE__ */ new RegExp(`^INSERT INTO (${QNAME}) \\(([^)]*)\\) SELECT\\b.* FROM (${QNAME})`, "i")
-// per-process-constant: a pattern composed from the name grammar, compiled once
-const RENAME_TABLE = /* @__PURE__ */ new RegExp(`^ALTER TABLE (${QNAME}) RENAME TO (${QNAME})$`, "i")
 const LOCKING = /^(?:REINDEX (?!.*\bCONCURRENTLY\b)|VACUUM FULL\b|CLUSTER\b)/i
 const TXMODE_NONE = /^\s*--\s*atlas:txmode\s+none\b/im
 
@@ -117,11 +115,13 @@ function rebuildFinding(code: string, ctx: FileContext): Finding | undefined {
 			note: `rebuilds ${name} unguarded: its drop deletes or orphans the rows of ${reached.join(", ")}; let comb migrate diff write it`,
 		}
 	}
+	if (rebuild.problem !== undefined) return { level: "unsafe", note: `rebuilds ${name}: ${rebuild.problem}` }
 	const lost = earlier.filter((column) => !rebuild.columns.includes(column))
 	const kept = ctx.kept.get(name)
+	const renumbered = (ctx.renumbered.get(name) ?? []).map((note) => `; ${note}`).join("")
 	if (lost.length === 0 && kept !== undefined)
-		return { level: "cautious", note: `rebuilds ${name}; comb keeps the rows of ${kept.join(", ")}` }
-	if (lost.length === 0) return { level: "cautious", note: `rebuilds ${name}, copying every column` }
+		return { level: "cautious", note: `rebuilds ${name}; comb keeps the rows of ${kept.join(", ")}${renumbered}` }
+	if (lost.length === 0) return { level: "cautious", note: `rebuilds ${name}, copying every column${renumbered}` }
 	return {
 		drops: lost.map((column) => `DROP COLUMN ${name}.${column}`),
 		level: "unsafe",
@@ -155,7 +155,10 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 		findings.push({ drops: dropNames(code), level: "unsafe" })
 	else if (CAUTIOUS.test(code)) findings.push({ drops: dropNames(code), level: "cautious" })
 	if (/\bCASCADE\b/i.test(code.replace(/\bON (?:DELETE|UPDATE) CASCADE\b/gi, ""))) findings.push({ level: "unsafe" })
-	findings.push(...writeFindings(code), ...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, body, ctx)))
+	findings.push(
+		...writeFindings(code, ctx.fresh),
+		...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, body, ctx)),
+	)
 	const call = callFinding(code, ctx)
 	if (call !== undefined) findings.push(call)
 	if (ctx.dialect === "postgres") {
@@ -196,30 +199,12 @@ function doFindings(stmt: string, ctx: FileContext): Finding[] {
 	return findings
 }
 
-/** The rebuilds a file makes: a copy into a temporary table renamed to the table it copied */
-function rebuildsOf(codes: readonly string[]): Rebuilds {
-	const copies = new Map<string, { columns: string[]; from: string }>()
-	const rebuilds: Rebuilds = new Map()
-	for (const code of codes) {
-		const [, into, columns, from] = COPY_INTO.exec(code) ?? []
-		if (into !== undefined && columns !== undefined && from !== undefined) {
-			copies.set(lastPart(into), { columns: splitTopLevel(columns).map(lastPart), from: lastPart(from) })
-		}
-		const [, temp, to] = RENAME_TABLE.exec(code) ?? []
-		const copy = temp === undefined ? undefined : copies.get(lastPart(temp))
-		if (to !== undefined && copy !== undefined && copy.from === lastPart(to)) {
-			rebuilds.set(copy.from, { columns: copy.columns, temp: lastPart(temp as string) })
-		}
-	}
-	return rebuilds
-}
-
 type Read = ReadStatement & { findings: Finding[] }
 
 function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dialect): Read[] {
 	const statements = splitSqlStatements(sql, dialect)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
-	const rebuilds: Rebuilds = dialect === "sqlite" ? rebuildsOf(codes) : new Map()
+	const rebuilds: Rebuilds = dialect === "sqlite" ? rebuildsOf(statements, codes) : new Map()
 	const created = new Set(
 		codes.flatMap((code) => {
 			const table = CREATE_TABLE.exec(code)?.[1]
@@ -233,10 +218,7 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 			return name === undefined ? [] : [lastPart(name)]
 		}),
 	])
-	const guards =
-		dialect === "sqlite"
-			? readGuards(statements, codes, before)
-			: { guarded: new Set<number>(), kept: new Map<string, string[]>(), unguarded: new Map<string, string[]>() }
+	const guards = dialect === "sqlite" ? readGuards(statements, codes, before) : noGuards()
 	const reindexed = dialect === "sqlite" ? reindexedOf(statements) : new Set<string>()
 	const prepared = preparedOf(codes)
 	const ctx: FileContext = {
@@ -244,19 +226,20 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		created,
 		dialect,
 		functions,
+		fresh: freshStart(),
 		prepared,
 		rebuilds,
 		reindexed,
 		kept: guards.kept,
+		renumbered: guards.renumbered,
 		unguarded: guards.unguarded,
 	}
-	return statements.map((stmt, i) => ({
-		code: codes[i] as string,
-		dialect,
+	return statements.map((stmt, i) => {
 		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
-		findings: guards.guarded.has(i) ? [] : findingsOf(codes[i] as string, stmt, ctx),
-		stmt,
-	}))
+		const findings = guards.guarded.has(i) ? [] : findingsOf(codes[i] as string, stmt, ctx)
+		followAdds(codes[i] as string, ctx.fresh)
+		return { code: codes[i] as string, dialect, findings, stmt }
+	})
 }
 
 /** The file as its dialect reads it; with none named, as both read it, so the stricter reading counts */

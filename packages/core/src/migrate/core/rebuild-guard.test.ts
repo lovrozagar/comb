@@ -25,13 +25,14 @@ describe("guardRebuilds", () => {
 		expect(guardRebuilds(REBUILD, BEFORE, FTS)).toBe(`PRAGMA defer_foreign_keys = on;
 CREATE TABLE \`new_u\` (\`id\` integer NOT NULL, \`name\` text NOT NULL DEFAULT '', PRIMARY KEY (\`id\`));
 INSERT INTO \`new_u\` (\`id\`, \`name\`) SELECT \`id\`, IFNULL(\`name\`, '') AS \`name\` FROM \`u\`;
-CREATE TABLE \`_comb_keep_post\` AS SELECT rowid AS \`_comb_rowid\`, \`id\`, \`author\`, \`title\` FROM \`post\`;
+PRAGMA defer_foreign_keys = on;
+CREATE TABLE \`_comb_keep_post\` AS SELECT \`id\`, \`author\`, \`title\` FROM \`post\`;
 CREATE TABLE \`_comb_keep_tag\` AS SELECT \`post\`, \`name\` FROM \`tag\`;
 DELETE FROM \`tag\`;
 DELETE FROM \`post\`;
 DROP TABLE \`u\`;
 ALTER TABLE \`new_u\` RENAME TO \`u\`;
-INSERT INTO \`post\` (rowid, \`id\`, \`author\`, \`title\`) SELECT \`_comb_rowid\`, \`id\`, \`author\`, \`title\` FROM \`_comb_keep_post\`;
+INSERT INTO \`post\` (\`id\`, \`author\`, \`title\`) SELECT \`id\`, \`author\`, \`title\` FROM \`_comb_keep_post\`;
 INSERT INTO \`tag\` (\`post\`, \`name\`) SELECT \`post\`, \`name\` FROM \`_comb_keep_tag\`;
 DROP TABLE \`_comb_keep_post\`;
 DROP TABLE \`_comb_keep_tag\`;
@@ -78,6 +79,21 @@ describe("classifyMigration on a rebuild of a referenced table", () => {
 		expect(classify(REBUILD).unsafeStatements).toEqual([
 			"DROP TABLE `u` (rebuilds u unguarded: its drop deletes or orphans the rows of post, tag; let comb migrate diff write it)",
 		])
+	})
+
+	it("still calls a guard comb 0.8 wrote cautious: a rowid alias kept apart as `_comb_rowid`", () => {
+		const legacy = guardRebuilds(REBUILD, BEFORE, FTS)
+			.replace("PRAGMA defer_foreign_keys = on;\nCREATE TABLE `_comb_keep_post`", "CREATE TABLE `_comb_keep_post`")
+			.replace("AS SELECT `id`, `author`", "AS SELECT rowid AS `_comb_rowid`, `id`, `author`")
+			.replace(
+				"INSERT INTO `post` (`id`, `author`, `title`) SELECT `id`",
+				"INSERT INTO `post` (rowid, `id`, `author`, `title`) SELECT `_comb_rowid`, `id`",
+			)
+		expect(legacy).toContain("rowid AS `_comb_rowid`")
+		expect(classify(legacy)).toMatchObject({
+			cautiousStatements: ["DROP TABLE `u` (rebuilds u; comb keeps the rows of post, tag)"],
+			safety: "cautious",
+		})
 	})
 
 	it("calls a guard edited by hand unsafe, as it no longer keeps every row", () => {
@@ -134,5 +150,74 @@ CREATE TABLE \`c\` (\`id\` integer PRIMARY KEY, \`u\` integer REFERENCES \`u\`(\
 		)
 		expect({ ...rows.rows[0] }).toEqual({ c: 1, p: 1, u: 1 })
 		await conn.close()
+	})
+})
+
+/** `n` text columns after a text key, `c1` on */
+const columns = (n: number): string => Array.from({ length: n }, (_, i) => `\`c${i + 1}\` text`).join(", ")
+
+/** Atlas's rebuild of a text-keyed `table` with `n` more columns: `c1` gains NOT NULL */
+const wideRebuild = (table: string, n: number, extra = ""): string => {
+	const list = ["`id`", ...Array.from({ length: n }, (_, i) => `\`c${i + 1}\``)].join(", ")
+	return `CREATE TABLE \`new_${table}\` (\`id\` text NOT NULL, ${columns(n).replace("`c1` text", "`c1` text NOT NULL DEFAULT ''")}${extra}, PRIMARY KEY (\`id\`));
+INSERT INTO \`new_${table}\` (${list}) SELECT ${list} FROM \`${table}\`;
+DROP TABLE \`${table}\`;
+ALTER TABLE \`new_${table}\` RENAME TO \`${table}\`;
+`
+}
+
+describe("guardRebuilds: rowids", () => {
+	/* t, text-keyed; k99 and k100 reference it with 99 and 100 stored columns (k99's generated one not counted); w99 and w100 stand alone */
+	const before = extractSchema(`CREATE TABLE \`t\` (\`id\` text PRIMARY KEY, \`c1\` text);
+CREATE TABLE \`k99\` (\`id\` text PRIMARY KEY, \`t\` text REFERENCES \`t\`(\`id\`) ON DELETE CASCADE, ${columns(97)}, \`g\` integer AS (1) VIRTUAL);
+CREATE TABLE \`k100\` (\`id\` text PRIMARY KEY, \`t\` text REFERENCES \`t\`(\`id\`) ON DELETE CASCADE, ${columns(98)});
+CREATE TABLE \`w99\` (\`id\` text PRIMARY KEY, ${columns(98)});
+CREATE TABLE \`w100\` (\`id\` text PRIMARY KEY, ${columns(99)});
+CREATE TABLE \`bare\` (\`id\` text PRIMARY KEY, \`c1\` text) WITHOUT ROWID;`)
+	const classifyOn = (sql: string) => classifyMigration(sql, { before, dialect: "sqlite" })
+
+	it("carries a text-keyed table's rowid through Atlas's copy, and its children's beside at most 99 columns", () => {
+		const sql = guardRebuilds(wideRebuild("t", 1), before)
+		expect(sql).toContain("INSERT INTO `new_t` (rowid, `id`, `c1`) SELECT rowid, `id`, `c1` FROM `t`;")
+		expect(sql).toContain("CREATE TABLE `_comb_keep_k99` AS SELECT rowid AS `_comb_rowid`, `id`, `t`, `c1`")
+		expect(sql).toContain("INSERT INTO `k99` (rowid, `id`, `t`, `c1`")
+		expect(sql).toContain("CREATE TABLE `_comb_keep_k100` AS SELECT `id`, `t`, `c1`")
+		expect(sql).toContain("INSERT INTO `k100` (`id`, `t`, `c1`")
+		expect(classifyOn(sql).cautiousStatements).toEqual([
+			"DROP TABLE `t` (rebuilds t; comb keeps the rows of k99, k100; k100 gets new rowids (100 columns, no INTEGER PRIMARY KEY))",
+		])
+	})
+
+	it("carries the rowid through a copy under Atlas's comments, its IFNULL and CAST untouched", () => {
+		const commented = wideRebuild("t", 1)
+			.replace(
+				"INSERT INTO",
+				'-- Copy rows from old table "t" to new temporary table "new_t"\n/* and a block */ INSERT INTO',
+			)
+			.replace("SELECT `id`, `c1` FROM", "SELECT CAST(`id` AS text) AS `id`, IFNULL(`c1`, '') AS `c1` FROM")
+		expect(guardRebuilds(commented, before)).toContain(
+			'-- Copy rows from old table "t" to new temporary table "new_t"\n/* and a block */ INSERT INTO `new_t` (rowid, `id`, `c1`) SELECT rowid, CAST(`id` AS text) AS `id`, IFNULL(`c1`, \'\') AS `c1` FROM `t`;',
+		)
+	})
+
+	it("carries the rowid of a table nothing references beside 99 columns, not 100, and says which gets new rowids", () => {
+		const narrow = guardRebuilds(wideRebuild("w99", 98), before)
+		expect(narrow).toMatch(/^INSERT INTO `new_w99` \(rowid, `id`, `c1`, .*\) SELECT rowid, `id`, `c1`, /m)
+		expect(classifyOn(narrow).cautiousStatements).toEqual(["DROP TABLE `w99` (rebuilds w99, copying every column)"])
+		const wide = wideRebuild("w100", 99)
+		expect(guardRebuilds(wide, before)).toBe(wide)
+		expect(classifyOn(wide).cautiousStatements).toEqual([
+			"DROP TABLE `w100` (rebuilds w100, copying every column; w100 gets new rowids (100 columns, no INTEGER PRIMARY KEY))",
+		])
+	})
+
+	it("leaves a copy alone when the table or its copy has no rowid of its own, or the copy's key is the rowid", () => {
+		const fromBare = wideRebuild("bare", 1)
+		expect(guardRebuilds(fromBare, before)).toBe(fromBare)
+		const intoBare = wideRebuild("w99", 98).replace("PRIMARY KEY (`id`));", "PRIMARY KEY (`id`)) WITHOUT ROWID;")
+		expect(guardRebuilds(intoBare, before)).toBe(intoBare)
+		const intoAlias = wideRebuild("w99", 98).replace("`id` text NOT NULL", "`id` integer NOT NULL")
+		expect(guardRebuilds(intoAlias, before)).toBe(intoAlias)
+		expect(guardRebuilds(wideRebuild("gone", 1), before)).toBe(wideRebuild("gone", 1))
 	})
 })

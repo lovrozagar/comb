@@ -30,9 +30,21 @@ describe("extractSchema: foreign keys, triggers, functions and table shapes", ()
 	it("reads each table's primary key, rowid, AUTOINCREMENT and generated columns, and the triggers left", () => {
 		const schema = extractSchema(HISTORY)
 		expect(Object.fromEntries(schema.tableInfo)).toEqual({
-			post: { autoincrement: true, generatedColumns: ["slug", "n"], primaryKey: ["id"], withoutRowid: false },
-			tag: { autoincrement: false, generatedColumns: [], primaryKey: ["post", "name"], withoutRowid: true },
-			u: { autoincrement: true, generatedColumns: [], primaryKey: ["id"], withoutRowid: false },
+			post: {
+				autoincrement: true,
+				generatedColumns: ["slug", "n"],
+				primaryKey: ["id"],
+				rowidAlias: true,
+				withoutRowid: false,
+			},
+			tag: {
+				autoincrement: false,
+				generatedColumns: [],
+				primaryKey: ["post", "name"],
+				rowidAlias: false,
+				withoutRowid: true,
+			},
+			u: { autoincrement: true, generatedColumns: [], primaryKey: ["id"], rowidAlias: true, withoutRowid: false },
 		})
 		expect(schema.triggers).toEqual([{ name: "post_ai", table: "post" }])
 	})
@@ -54,6 +66,7 @@ ALTER TABLE \`new_u\` RENAME TO \`u\`;`,
 			autoincrement: false,
 			generatedColumns: [],
 			primaryKey: ["id"],
+			rowidAlias: true,
 			withoutRowid: false,
 		})
 		expect(rebuilt.tableInfo.has("new_u")).toBe(false)
@@ -89,6 +102,30 @@ DROP FUNCTION IF EXISTS gone();`,
 			"postgres",
 		)
 		expect(schema.functions).toEqual(["purge", "p"])
+	})
+})
+
+/** Whether table t of `sql` is keyed by its rowid */
+const alias = (sql: string) => extractSchema(sql).tableInfo.get("t")?.rowidAlias
+
+describe("extractSchema: rowid aliases", () => {
+	it("reads a rowid alias: a lone INTEGER key, inline or table-level, but no DESC inline key, other type, composite or WITHOUT ROWID", () => {
+		expect(alias("CREATE TABLE t (id integer PRIMARY KEY, x text);")).toBe(true)
+		expect(alias("CREATE TABLE t (`id` INTEGER NOT NULL, `x` text, PRIMARY KEY (`id`));")).toBe(true)
+		expect(alias("CREATE TABLE t (id integer, PRIMARY KEY (id DESC));")).toBe(true)
+		expect(
+			extractSchema("CREATE TABLE t (a text, b text, PRIMARY KEY (a COLLATE nocase ASC, `b` DESC));").tableInfo.get("t")
+				?.primaryKey,
+		).toEqual(["a", "b"])
+		expect(alias("CREATE TABLE t (id integer PRIMARY KEY DESC);")).toBe(false)
+		expect(alias("CREATE TABLE t (id int PRIMARY KEY);")).toBe(false)
+		expect(alias("CREATE TABLE t (id integer unsigned PRIMARY KEY);")).toBe(false)
+		expect(alias("CREATE TABLE t (id text PRIMARY KEY);")).toBe(false)
+		expect(alias("CREATE TABLE t (id, PRIMARY KEY (id));")).toBe(false)
+		expect(alias("CREATE TABLE t (a integer, b integer, PRIMARY KEY (a, b));")).toBe(false)
+		expect(alias("CREATE TABLE t (id integer PRIMARY KEY) WITHOUT ROWID;")).toBe(false)
+		expect(alias("CREATE TABLE t (x text);")).toBe(false)
+		expect(alias("CREATE TABLE t (a integer, PRIMARY KEY (b));")).toBe(false)
 	})
 })
 

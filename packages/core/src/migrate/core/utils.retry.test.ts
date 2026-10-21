@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest"
 import {
 	aggregateErrors,
 	checkCircuitBreaker,
-	confirmDrops,
 	createCircuitBreaker,
 	dropsQuestion,
 	printMigrationSummary,
@@ -268,19 +267,9 @@ describe("printMigrationSummary", () => {
 	})
 })
 
-describe("confirmDrops", () => {
-	it("allows a migration that drops nothing, and one with autoConfirm, without asking", async () => {
-		const confirm = vi.fn(async () => false)
-		expect(await confirmDrops([], "core", { autoConfirm: false, confirm })).toBe(true)
-		expect(await confirmDrops(["DROP TABLE post"], "core", { autoConfirm: true, confirm })).toBe(true)
-		expect(confirm).not.toHaveBeenCalled()
-	})
-
-	it("asks the question naming the drops and the target, and refuses when nobody can be asked", async () => {
-		const confirm = vi.fn(async () => true)
-		expect(await confirmDrops(["DROP TABLE post"], "core (prod)", { autoConfirm: false, confirm })).toBe(true)
-		expect(confirm).toHaveBeenCalledWith(dropsQuestion(["DROP TABLE post"], "core (prod)"))
+describe("dropsQuestion", () => {
+	it("names the drops and the target", () => {
 		expect(dropsQuestion(["DROP TABLE post"], "core (prod)")).toContain("1. DROP TABLE post")
-		expect(await confirmDrops(["DROP TABLE post"], "core", { autoConfirm: false })).toBe(false)
+		expect(dropsQuestion(["DROP TABLE post"], "core (prod)")).toContain("This affects: core (prod)")
 	})
 })

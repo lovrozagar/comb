@@ -12,6 +12,8 @@ import { createClient } from "@libsql/client"
 import { expect, it } from "vitest"
 import { describeAtlas } from "../support/atlas.ts"
 import { type Engine, history, runScenario, SOUND } from "../support/rebuild-guard.ts"
+import { runCycleScenario } from "../support/cycle-guard.ts"
+import { ROWID_NOTES, runRowidScenario } from "../support/rowid-guard.ts"
 
 const WRANGLER = path.join(
 	path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json")),
@@ -60,6 +62,20 @@ function d1Engine(dir: string): Engine {
 	}
 }
 
+/** D1 through wrangler, each applied SQL written as the next file of the project's migrations */
+function d1FileEngine(dir: string): Engine {
+	const engine = d1Engine(dir)
+	let files = 0
+	return {
+		...engine,
+		apply: async (sql) => {
+			files += 1
+			fs.writeFileSync(path.join(dir, "migrations", `${String(files).padStart(4, "0")}_step.sql`), sql)
+			await engine.apply(sql)
+		},
+	}
+}
+
 describeAtlas("the guard around Atlas's rebuild of a referenced table, on D1 through wrangler", () => {
 	it("keeps every row, key, rowid, sequence and index entry through a rebuild of the parent, then of parent and child", async () => {
 		const dir = project()
@@ -70,6 +86,35 @@ describeAtlas("the guard around Atlas's rebuild of a referenced table, on D1 thr
 				expect(outcome.sound).toEqual(SOUND)
 				expect(outcome.safety).toBe("cautious")
 			}
+		} finally {
+			fs.rmSync(dir, { force: true, recursive: true })
+		}
+	}, 180_000)
+
+	it("keeps every rowid of a text-keyed table and its children through a rebuild, but a 100-column table's without a rowid key, naming it", async () => {
+		const dir = project()
+		const engine = d1Engine(dir)
+		const h = history(path.join(dir, "migrations"), "")
+		try {
+			const { t, w100 } = await runRowidScenario(engine, h)
+			for (const outcome of [t, w100]) {
+				expect(outcome.sound).toEqual(SOUND)
+				expect(outcome.after).toEqual(outcome.before)
+			}
+			expect(t.notes).toEqual(ROWID_NOTES.t)
+			expect(w100.notes).toEqual(ROWID_NOTES.w100)
+		} finally {
+			fs.rmSync(dir, { force: true, recursive: true })
+		}
+	}, 180_000)
+
+	it("keeps the rows of a reference cycle the rebuilt table reaches, the file deferring no key (R1)", async () => {
+		const dir = project()
+		const engine = d1FileEngine(dir)
+		try {
+			const { after, before, foreignKeyCheck } = await runCycleScenario(engine)
+			expect(after).toEqual(before)
+			expect(foreignKeyCheck).toEqual([])
 		} finally {
 			fs.rmSync(dir, { force: true, recursive: true })
 		}

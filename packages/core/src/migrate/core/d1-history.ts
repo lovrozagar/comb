@@ -83,11 +83,22 @@ async function column(conn: Connection, sql: string): Promise<string[]> {
 	return (await conn.execute(sql)).rows.map((row) => String(row[0]))
 }
 
-/** The migrations table, created as wrangler creates it when missing, and the names it records */
-async function appliedNames(conn: Connection, table: string): Promise<Set<string>> {
-	await conn.execute(
-		`CREATE TABLE IF NOT EXISTS ${quoteName(table)} (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)`,
-	)
+/**
+ * The names the migrations table records. With `create` (apply and baseline) the table is made
+ * as wrangler makes it when missing; without (status and check, which never write), a missing
+ * table records nothing.
+ */
+async function appliedNames(conn: Connection, table: string, create: boolean): Promise<Set<string>> {
+	if (create) {
+		await conn.execute(
+			`CREATE TABLE IF NOT EXISTS ${quoteName(table)} (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)`,
+		)
+	} else if (
+		(await column(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${literal(table)}`)).length ===
+		0
+	) {
+		return new Set()
+	}
 	return new Set(await column(conn, `SELECT name FROM ${quoteName(table)} ORDER BY id`))
 }
 
@@ -114,10 +125,17 @@ function recordedByDrizzle(
 		.map(({ name }) => name)
 }
 
-/** The history: the migrations table's names, refused while `__drizzle_migrations` records a file it does not */
-async function history(read: ReadConfig, target: D1Target): Promise<{ applied: Set<string>; table: string }> {
+/**
+ * The history: the migrations table's names, refused while `__drizzle_migrations` records a file
+ * it does not; `create` makes a missing table, as only apply may
+ */
+async function history(
+	read: ReadConfig,
+	target: D1Target,
+	create: boolean,
+): Promise<{ applied: Set<string>; table: string }> {
 	const table = resolveBinding(read, target)
-	const applied = await appliedNames(target.conn, table)
+	const applied = await appliedNames(target.conn, table, create)
 	const hashes = await drizzleHashes(target.conn)
 	const copied = hashes === undefined ? [] : recordedByDrizzle(filesOf(target.migrationsDir), hashes, applied)
 	if (copied.length > 0) {
@@ -138,7 +156,7 @@ type D1Apply = {
 
 /** Check the pending migrations and, unless only checking, apply them through wrangler; returns them */
 async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
-	const { applied, table } = await history(options.read, target)
+	const { applied, table } = await history(options.read, target, options.checkOnly !== true)
 	const files = filesOf(target.migrationsDir).map(({ name }) => name)
 	const pending = await planApply({
 		applied: (name) => applied.has(name),
@@ -154,7 +172,7 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	for (const name of names) options.print(`Apply: ${name}`)
 	const ran = target.exec("wrangler", ["d1", "migrations", "apply", target.name, ...target.flags], { input: "" })
 	if (ran.code !== 0) throw new Error(`wrangler d1 migrations apply failed: ${`${ran.stderr}${ran.stdout}`.trim()}`)
-	const after = await appliedNames(target.conn, table)
+	const after = await appliedNames(target.conn, table, true)
 	const added = [...after].filter((name) => !applied.has(name))
 	if (added.length !== names.length || names.some((name) => !after.has(name))) {
 		throw new Error(
@@ -171,7 +189,7 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
  */
 async function baselineD1(target: D1Target, read: ReadConfig, print: (line: string) => void): Promise<string[]> {
 	const table = resolveBinding(read, target)
-	const applied = await appliedNames(target.conn, table)
+	const applied = await appliedNames(target.conn, table, true)
 	const hashes = await drizzleHashes(target.conn)
 	if (hashes === undefined) {
 		throw new Error(
@@ -194,7 +212,7 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
 
 /** Print what wrangler's table records as applied, and what is pending, in wrangler's order */
 async function statusD1(target: D1Target, read: ReadConfig, print: (line: string) => void): Promise<void> {
-	const { applied } = await history(read, target)
+	const { applied } = await history(read, target, false)
 	const files = filesOf(target.migrationsDir).map(({ name }) => name)
 	print(`Applied: ${files.filter((name) => applied.has(name)).join(", ") || "none"}`)
 	print(`Pending: ${files.filter((name) => !applied.has(name)).join(", ") || "none"}`)

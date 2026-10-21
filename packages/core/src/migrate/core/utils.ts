@@ -154,19 +154,3 @@ export function dropsQuestion(drops: readonly string[], target: string): string 
 		"Apply?",
 	].join("\n")
 }
-
-export type ConfirmDrops = {
-	/** --yes: apply without asking */
-	autoConfirm: boolean
-	/** How to ask the person running the migration; absent when nobody can be asked */
-	confirm?: ((question: string) => Promise<boolean>) | undefined
-}
-
-/**
- * Whether a migration that drops `drops` may run on `target`: yes when it drops nothing or
- * autoConfirm is set, otherwise the answer to `dropsQuestion`, and no when nobody can be asked.
- */
-export async function confirmDrops(drops: readonly string[], target: string, options: ConfirmDrops): Promise<boolean> {
-	if (drops.length === 0 || options.autoConfirm) return true
-	return options.confirm ? options.confirm(dropsQuestion(drops, target)) : false
-}

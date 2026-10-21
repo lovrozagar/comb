@@ -5,6 +5,8 @@ import { applySqliteMigrationTransforms } from "../../../src/migrate/core/atlas.
 import { describeAtlas } from "../support/atlas.ts"
 import { libsqlMemory } from "../support/libsql.ts"
 import { BASE, type Engine, FTS, history, REBUILD_U, runScenario, SOUND } from "../support/rebuild-guard.ts"
+import { runCycleScenario } from "../support/cycle-guard.ts"
+import { ROWID_NOTES, runRowidScenario } from "../support/rowid-guard.ts"
 
 /* An Atlas-shaped drift migration: table rebuilds (create `new_*`, copy rows,
    drop, rename), an ADD COLUMN, fresh tables, and indexes. Already stored
@@ -236,4 +238,34 @@ describeAtlas("the guard around Atlas's rebuild of a referenced table, on libsql
 	it("needs the FTS DDL it guards", () => {
 		expect(FTS).toContain("post_fts")
 	})
+})
+
+describeAtlas("the rowids through Atlas's rebuild, on libsql", () => {
+	it("keeps every rowid of a text-keyed table and its children through a rebuild, but a 100-column table's without a rowid key, naming it", async () => {
+		const engine = libsqlEngine()
+		const h = history(undefined, "")
+		try {
+			const { t, w100 } = await runRowidScenario(engine, h)
+			for (const outcome of [t, w100]) {
+				expect(outcome.sound).toEqual(SOUND)
+				expect(outcome.after).toEqual(outcome.before)
+			}
+			expect(t.notes).toEqual(ROWID_NOTES.t)
+			expect(w100.notes).toEqual(ROWID_NOTES.w100)
+		} finally {
+			engine.close()
+			h.dispose()
+		}
+	}, 60_000)
+
+	it("keeps the rows of a reference cycle the rebuilt table reaches, the file deferring no key (R1)", async () => {
+		const engine = libsqlEngine()
+		try {
+			const { after, before, foreignKeyCheck } = await runCycleScenario(engine)
+			expect(after).toEqual(before)
+			expect(foreignKeyCheck).toEqual([])
+		} finally {
+			engine.close()
+		}
+	}, 60_000)
 })

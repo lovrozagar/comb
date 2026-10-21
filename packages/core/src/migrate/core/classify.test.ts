@@ -86,10 +86,7 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 		"DROP POLICY p ON post",
 		"DROP TRIGGER t ON post",
 		"DROP FUNCTION f()",
-		"DELETE FROM post WHERE id = 1",
-		"DELETE FROM post WHERE id IN (SELECT id FROM gone)",
-		"UPDATE post SET a = 1 WHERE id = 2",
-		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET a = s.a",
+		"MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)",
 		"CREATE OR REPLACE VIEW v AS SELECT 1",
 		"CREATE OR REPLACE FUNCTION f() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql",
 		"GRANT SELECT ON post TO r",
@@ -149,10 +146,6 @@ describe("classifyMigration on SQL that hid a destructive change", () => {
 		],
 		['CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nPERFORM "p"();', "a PERFORM"],
 		["ALTER TABLE post NO FORCE ROW LEVEL SECURITY", "NO FORCE ROW LEVEL SECURITY"],
-		[
-			"CREATE RULE r AS ON DELETE TO post DO INSTEAD (UPDATE post SET gone = true WHERE id = old.id)",
-			"a rule's filtered write",
-		],
 	])("calls %j cautious (%s)", (sql) => {
 		expect(pg(sql).safety).toBe("cautious")
 	})
@@ -163,10 +156,20 @@ describe("classifyMigration on SQL that hid a destructive change", () => {
 		expect(pg("SELECT purge();").safety).toBe("safe")
 	})
 
+	it.each([
+		"DELETE FROM post WHERE id = 1",
+		"DELETE FROM post WHERE id IN (SELECT id FROM gone)",
+		"UPDATE post SET a = 1 WHERE id = 2",
+		"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET a = s.a",
+		"CREATE RULE r AS ON DELETE TO post DO INSTEAD (UPDATE post SET gone = true WHERE id = old.id)",
+	])("calls %j, which may destroy existing values, unsafe", (sql) => {
+		expect(pg(sql).safety).toBe("unsafe")
+	})
+
 	it.each(["REPLACE INTO t VALUES (1)", "INSERT OR REPLACE INTO t VALUES (1)"])(
-		"calls %j cautious on SQLite",
+		"calls %j, which deletes the row it replaces, unsafe on SQLite",
 		(sql) => {
-			expect(lite(sql).safety).toBe("cautious")
+			expect(lite(sql).safety).toBe("unsafe")
 		},
 	)
 
@@ -260,6 +263,89 @@ describe("classifyMigration on Atlas's SQLite table rebuild", () => {
 			expect(lite(sql).safety).toBe("unsafe")
 		},
 	)
+})
+
+/* Atlas v1.3.0's rebuild of post into a copy with defaults, its SELECT list and what follows its FROM given */
+const copyRebuild = (
+	select: string,
+	rest = "",
+	targets = "`id`, `title`, `n`",
+) => `CREATE TABLE \`new_post\` (\`id\` text NULL, \`title\` text NOT NULL DEFAULT '', \`n\` integer NOT NULL DEFAULT (unixepoch() * 1000), PRIMARY KEY (\`id\`));
+INSERT INTO \`new_post\` (${targets}) SELECT ${select} FROM \`post\`${rest};
+DROP TABLE \`post\`;
+ALTER TABLE \`new_post\` RENAME TO \`post\`;`
+
+describe("classifyMigration on the copy of a rebuild", () => {
+	const before = schemaWith("post", ["id", "title", "n"])
+	const reasons = (sql: string) => lite(sql, before).unsafeStatements
+
+	it.each([
+		[
+			"Atlas's IFNULL with each column's new default",
+			"`id`, IFNULL(`title`, '') AS `title`, IFNULL(`n`, (unixepoch() * 1000)) AS `n`",
+		],
+		["a CAST of the same column", "`id`, CAST(`title` AS text) AS `title`, `n`"],
+		["bare columns, quoted or not", 'id, `title`, "n"'],
+	])("calls a copy through %s cautious", (_, select) => {
+		expect(lite(copyRebuild(select), before)).toMatchObject({
+			cautiousStatements: ["DROP TABLE `post` (rebuilds post, copying every column)"],
+			safety: "cautious",
+		})
+	})
+
+	it("calls a copy that carries rowid into rowid cautious", () => {
+		expect(lite(copyRebuild("rowid, `id`, `title`, `n`", "", "rowid, `id`, `title`, `n`"), before).safety).toBe(
+			"cautious",
+		)
+	})
+
+	it.each([
+		[" WHERE `n` > 1", "WHERE"],
+		[" JOIN `u` ON 1", "JOIN"],
+		[" LEFT JOIN `u` ON 1", "LEFT JOIN"],
+		[" LIMIT 1", "LIMIT"],
+		[" GROUP BY `id`", "GROUP BY"],
+		[" ORDER BY `id`", "ORDER BY"],
+		[", `u`", "a second table"],
+		[" UNION SELECT `id`, `title`, `n` FROM `post`", "UNION"],
+	])("calls a copy followed by %j unsafe, naming the clause", (rest, clause) => {
+		expect(reasons(copyRebuild("`id`, `title`, `n`", rest))).toEqual([
+			`DROP TABLE \`post\` (rebuilds post: its copy has ${clause})`,
+		])
+	})
+
+	it.each([
+		["`id`, NULL, `n`", "title from NULL"],
+		["`id`, 'x' AS `title`, `n`", "title from 'x' AS `title`"],
+		["`id`, `old` AS `title`, `n`", "title from `old` AS `title`"],
+		["`id`, IFNULL(`title`, 'zz') AS `title`, `n`", "title from IFNULL(`title`, 'zz') AS `title`"],
+		["`id`, IFNULL(`n`, '') AS `title`, `n`", "title from IFNULL(`n`, '') AS `title`"],
+		["`id`, `title` AS `n`, `n`", "title from `title` AS `n`"],
+		["`id`, CAST(`n` AS text) AS `title`, `n`", "title from CAST(`n` AS text) AS `title`"],
+		["`id`, `title`, IFNULL(`n`, 0) AS `n`", "n from IFNULL(`n`, 0) AS `n`"],
+	])("calls a copy of %j unsafe, naming the column and what fills it", (select, fills) => {
+		expect(reasons(copyRebuild(select))).toEqual([`DROP TABLE \`post\` (rebuilds post: its copy fills ${fills})`])
+	})
+})
+
+describe("classifyMigration on a copy that is no plain copy", () => {
+	const before = schemaWith("post", ["id", "title", "n"])
+	const reasons = (sql: string) => lite(sql, before).unsafeStatements
+
+	it("reads a drop ahead of its copy as no guarded rebuild, its copy still read", () => {
+		const early = copyRebuild("`id`, `title`, `n`").replace("DROP TABLE `post`;\n", "")
+		const sql = early.replace("CREATE TABLE", "DROP TABLE `post`;\nCREATE TABLE")
+		expect(lite(sql, before).cautiousStatements).toEqual(["DROP TABLE `post` (rebuilds post, copying every column)"])
+	})
+
+	it("calls a copy with a subquery or the wrong number of values unsafe", () => {
+		expect(reasons(copyRebuild("`id`, (SELECT 1) AS `title`, `n`"))).toEqual([
+			"DROP TABLE `post` (rebuilds post: its copy has a subquery)",
+		])
+		expect(reasons(copyRebuild("`id`, `title`"))).toEqual([
+			"DROP TABLE `post` (rebuilds post: its copy has 2 values for 3 columns)",
+		])
+	})
 })
 
 describe("classifyMigration: each statement once", () => {

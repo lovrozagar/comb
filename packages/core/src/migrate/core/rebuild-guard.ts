@@ -9,10 +9,19 @@
  * So comb takes the reached rows out of the way first. The closure is every table with a
  * foreign-key path to `T` over any ON DELETE action, Atlas's `new_T` included when it references
  * `T` (a self-reference points at the original). Between Atlas's copy and its drop, comb saves
- * each closure table into `_comb_keep_<t>` (rowid kept, generated columns left out), saves `T`'s
+ * each closure table into `_comb_keep_<t>` (generated columns left out), saves `T`'s
  * sqlite_sequence value, and empties the closure, each table after the tables that reference it.
- * After the rename it refills the closure in the opposite order, parents first, restores the sequence, and drops the keep tables. The rows, rowids,
- * keys and sequences end as they were, at twice the closure's writes.
+ * The guard opens with `PRAGMA defer_foreign_keys = on`, whatever the file holds, so the refill's
+ * keys are checked at commit: a closure that is a reference cycle has no order that satisfies
+ * them one row at a time. After the rename it refills the closure in the opposite order, parents
+ * first, restores the sequence, and drops the keep tables. The rows, keys and sequences end as
+ * they were, at twice the closure's writes.
+ *
+ * The rowids end as they were too. A table whose key is its rowid keeps them with its key; any
+ * other rowid table carries them apart, in the keep table and, for `T`, in Atlas's copy, which
+ * comb rewrites to `INSERT INTO new_T (rowid, …) SELECT rowid, …`. D1 caps a SELECT at 100 result
+ * columns, so a table carries its rowid beside at most 99 columns; at 100 its rows are kept whole
+ * under new rowids, and the classification names it.
  *
  * A trigger on a reached table fires on both the emptying and the refill. That nets out only for
  * an FTS trigger, which deletes and re-adds the same entry, so any other trigger there is refused.
@@ -20,35 +29,31 @@
 import type { ExtractedSchema } from "../types.ts"
 import type { FtsState } from "./fts-migration.ts"
 import { extractSchema } from "./schema.ts"
+import { readCopy } from "./rebuild-copy.ts"
+import { kept, quote, type Rebuild, renumberedBy, rowidCopy } from "./rebuild-rowids.ts"
 import { codeOf, lastPart, QNAME } from "./sql-code.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 
 const KEEP = "_comb_keep_"
 
-const quote = (name: string): string => `\`${name.replaceAll("`", "``")}\``
 const keep = (table: string): string => quote(`${KEEP}${table}`)
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`
-
-/** An Atlas rebuild: `table` copied into `temp`, dropped, and `temp` renamed onto it */
-type Rebuild = { table: string; temp: string }
 
 /** A rebuild in a file: the indexes of its copy, its drop and its rename among the file's statements */
 type Located = Rebuild & { copy: number; drop: number; rename: number }
 
-// per-process-constant: the three statements of an Atlas rebuild, composed once
-const COPY = /* @__PURE__ */ new RegExp(`^INSERT INTO (${QNAME}) \\([^)]*\\) SELECT\\b.* FROM (${QNAME})$`, "i")
-// per-process-constant: see above
+// per-process-constant: the drop and the rename of an Atlas rebuild, composed once; its copy is readCopy's
 const DROP = /* @__PURE__ */ new RegExp(`^DROP TABLE (?:IF EXISTS )?(${QNAME})$`, "i")
 // per-process-constant: see above
 const RENAME = /* @__PURE__ */ new RegExp(`^ALTER TABLE (${QNAME}) RENAME TO (${QNAME})$`, "i")
 
-/** The rebuilds among a file's statement codes: a copy of `T` into `temp`, a drop of `T`, `temp` renamed to `T` */
-function locateRebuilds(codes: readonly string[]): Located[] {
+/** The rebuilds among a file's statements and their codes: a copy of `T` into `temp`, a drop of `T`, `temp` renamed to `T` */
+function locateRebuilds(statements: readonly string[], codes: readonly string[]): Located[] {
 	const copies = new Map<string, { copy: number; drop?: number; table: string }>()
 	const out: Located[] = []
 	for (const [i, code] of codes.entries()) {
-		const [, into, from] = COPY.exec(code) ?? []
-		if (into !== undefined && from !== undefined) copies.set(lastPart(into), { copy: i, table: lastPart(from) })
+		const read = /^INSERT INTO\b/i.test(code) ? readCopy(statements[i] as string, () => "") : undefined
+		if (read !== undefined) copies.set(read.into, { copy: i, table: read.from })
 		const dropped = DROP.exec(code)?.[1]
 		const open = [...copies.values()].find((c) => c.table === lastPart(dropped ?? "") && c.drop === undefined)
 		if (dropped !== undefined && open !== undefined) open.drop = i
@@ -103,31 +108,20 @@ function childrenFirst(closure: readonly string[], schema: ExtractedSchema): str
 	return out
 }
 
-/** The columns an INSERT may write: every column but the generated ones */
-function stored(table: string, schema: ExtractedSchema): string[] {
-	const generated = schema.tableInfo.get(table)?.generatedColumns ?? []
-	return (schema.tables.get(table) ?? []).filter((column) => !generated.includes(column))
-}
-
-/** A closure table's columns as the keep table holds them: its rowid first, unless it has none */
-function kept(table: string, schema: ExtractedSchema): { columns: string[]; rowid: boolean } {
-	return { columns: stored(table, schema).map(quote), rowid: schema.tableInfo.get(table)?.withoutRowid !== true }
-}
-
 /**
  * The guard a rebuild needs, given the schema at Atlas's copy: undefined when no table
  * references the rebuilt one, so its drop reaches nothing
  */
-function guardOf({ table, temp }: Rebuild, schema: ExtractedSchema): Guard | undefined {
+function guardOf({ table, temp }: Rebuild, schema: ExtractedSchema, legacy = false): Guard | undefined {
 	const closure = reached(table, schema)
 	if (closure.length === 0) return undefined
 	const sequence = schema.tableInfo.get(table)?.autoincrement === true
 	const save = (t: string) => {
-		const { columns, rowid } = kept(t, schema)
+		const { columns, rowid } = kept(t, schema, legacy)
 		return `CREATE TABLE ${keep(t)} AS SELECT ${[...(rowid ? ["rowid AS `_comb_rowid`"] : []), ...columns].join(", ")} FROM ${quote(t)}`
 	}
 	const refill = (t: string) => {
-		const { columns, rowid } = kept(t, schema)
+		const { columns, rowid } = kept(t, schema, legacy)
 		const into = [...(rowid ? ["rowid"] : []), ...columns].join(", ")
 		const from = [...(rowid ? ["`_comb_rowid`"] : []), ...columns].join(", ")
 		return `INSERT INTO ${quote(t === temp ? table : t)} (${into}) SELECT ${from} FROM ${keep(t)}`
@@ -135,6 +129,8 @@ function guardOf({ table, temp }: Rebuild, schema: ExtractedSchema): Guard | und
 	const name = literal(table)
 	const emptying = childrenFirst(closure, schema)
 	const before = [
+		/* the refill's keys checked at commit, whatever order a cycle leaves; the file may not defer them */
+		...(legacy ? [] : ["PRAGMA defer_foreign_keys = on"]),
 		...closure.map(save),
 		...(sequence ? [`CREATE TABLE ${keep(table)} AS SELECT seq FROM sqlite_sequence WHERE name = ${name}`] : []),
 		...emptying.map((t) => `DELETE FROM ${quote(t)}`),
@@ -190,60 +186,95 @@ function refuseUnguardable({ table }: Rebuild, schema: ExtractedSchema, fts: Fts
  */
 function guardRebuilds(sql: string, before: ExtractedSchema | undefined, fts?: FtsState): string {
 	const statements = splitSqlStatements(sql)
-	const rebuilds = before === undefined ? [] : locateRebuilds(statements.map((stmt) => codeOf(stmt, "sqlite")))
-	/* by statement index: what goes before a rebuild's drop, and after its rename */
+	const codes = statements.map((stmt) => codeOf(stmt, "sqlite"))
+	const rebuilds = before === undefined ? [] : locateRebuilds(statements, codes)
+	/* by statement index: what goes before a rebuild's drop, after its rename, and in place of its copy */
 	const ahead = new Map<number, string[]>()
 	const behind = new Map<number, string[]>()
+	const copies = new Map<number, string>()
 	for (const rebuild of rebuilds) {
 		const schema = schemaAt(statements, rebuild, before as ExtractedSchema)
+		const copy = rowidCopy(
+			{ code: codes[rebuild.copy] as string, stmt: statements[rebuild.copy] as string },
+			rebuild,
+			schema,
+		)
+		if (copy !== undefined) copies.set(rebuild.copy, copy)
 		const guard = guardOf(rebuild, schema)
 		if (guard === undefined) continue
 		refuseUnguardable(rebuild, schema, fts)
 		ahead.set(rebuild.drop, guard.before)
 		behind.set(rebuild.rename, guard.after)
 	}
-	if (ahead.size === 0) return sql
-	const out = statements.flatMap((stmt, i) => [...(ahead.get(i) ?? []), stmt, ...(behind.get(i) ?? [])])
+	if (ahead.size === 0 && copies.size === 0) return sql
+	const out = statements.flatMap((stmt, i) => [
+		...(ahead.get(i) ?? []),
+		copies.get(i) ?? stmt,
+		...(behind.get(i) ?? []),
+	])
 	return `${out.join(";\n")};\n`
 }
 
+/** A file with no guards: the guards a dialect without rebuilds reads */
+const noGuards = (): Guards => ({ guarded: new Set(), kept: new Map(), renumbered: new Map(), unguarded: new Map() })
+
+/** What a file's guards come to: see readGuards */
+type Guards = {
+	guarded: Set<number>
+	kept: Map<string, string[]>
+	renumbered: Map<string, string[]>
+	unguarded: Map<string, string[]>
+}
+
 /**
- * The statements of a file that are the guards comb wrote, each exactly as comb writes it, the
- * tables each guarded rebuild keeps the rows of, and the rebuilt tables of referenced rebuilds
- * left unguarded, with the tables their drop reaches
+ * The statements of a file that are the guards comb wrote, each exactly as comb writes it (or as
+ * comb 0.8 wrote it), the tables each guarded rebuild keeps the rows of, the tables each rebuild
+ * leaves under new rowids, and the rebuilt tables of referenced rebuilds left unguarded, with the
+ * tables their drop reaches
  */
 function readGuards(
 	statements: readonly string[],
 	codes: readonly string[],
 	before: ExtractedSchema | undefined,
-): { guarded: Set<number>; kept: Map<string, string[]>; unguarded: Map<string, string[]> } {
-	const guarded = new Set<number>()
-	const keeps = new Map<string, string[]>()
-	const unguarded = new Map<string, string[]>()
+): Guards {
+	const out = noGuards()
 	const same = (at: number, expected: readonly string[]) =>
 		expected.every((stmt, k) => normalizeSql(statements[at + k] ?? "") === normalizeSql(stmt))
-	for (const rebuild of before === undefined ? [] : locateRebuilds(codes)) {
+	for (const rebuild of before === undefined ? [] : locateRebuilds(statements, codes)) {
 		const schema = schemaAt(statements, rebuild, before as ExtractedSchema)
-		const guard = guardOf(rebuild, schema)
-		if (guard === undefined) continue
-		const start = rebuild.drop - guard.before.length
-		const whole =
-			start > rebuild.copy &&
-			rebuild.rename === rebuild.drop + 1 &&
-			same(start, guard.before) &&
-			same(rebuild.rename + 1, guard.after)
-		if (!whole) {
-			unguarded.set(rebuild.table, reached(rebuild.table, schema))
+		const closure = reached(rebuild.table, schema)
+		const copy = codes[rebuild.copy] as string
+		const whole = (guard: Guard) => {
+			const start = rebuild.drop - guard.before.length
+			return (
+				start > rebuild.copy &&
+				rebuild.rename === rebuild.drop + 1 &&
+				same(start, guard.before) &&
+				same(rebuild.rename + 1, guard.after)
+			)
+		}
+		const current = guardOf(rebuild, schema)
+		if (current === undefined) {
+			out.renumbered.set(rebuild.table, renumberedBy(rebuild, schema, { closure: [], code: copy }))
 			continue
 		}
-		keeps.set(
+		const guard = [current, guardOf(rebuild, schema, true) as Guard].find(whole)
+		if (guard === undefined) {
+			out.unguarded.set(rebuild.table, closure)
+			continue
+		}
+		out.kept.set(
 			rebuild.table,
-			reached(rebuild.table, schema).filter((t) => t !== rebuild.temp),
+			closure.filter((t) => t !== rebuild.temp),
 		)
-		for (let i = start; i < rebuild.drop; i++) guarded.add(i)
-		for (let i = 1; i <= guard.after.length; i++) guarded.add(rebuild.rename + i)
+		out.renumbered.set(
+			rebuild.table,
+			renumberedBy(rebuild, schema, { closure: guard === current ? closure : [], code: copy }),
+		)
+		for (let i = rebuild.drop - guard.before.length; i < rebuild.drop; i++) out.guarded.add(i)
+		for (let i = 1; i <= guard.after.length; i++) out.guarded.add(rebuild.rename + i)
 	}
-	return { guarded, kept: keeps, unguarded }
+	return out
 }
 
 /** Each referenced table a file rebuilds, with the tables its drop reaches by the history */
@@ -252,10 +283,13 @@ function guardedClosures(
 	before: ExtractedSchema,
 ): Array<{ closure: string[]; table: string; temp: string }> {
 	const statements = splitSqlStatements(sql)
-	return locateRebuilds(statements.map((stmt) => codeOf(stmt, "sqlite"))).flatMap((rebuild) => {
+	return locateRebuilds(
+		statements,
+		statements.map((stmt) => codeOf(stmt, "sqlite")),
+	).flatMap((rebuild) => {
 		const closure = reached(rebuild.table, schemaAt(statements, rebuild, before))
 		return closure.length === 0 ? [] : [{ closure, table: rebuild.table, temp: rebuild.temp }]
 	})
 }
 
-export { guardedClosures, guardRebuilds, readGuards }
+export { guardedClosures, guardRebuilds, noGuards, readGuards }

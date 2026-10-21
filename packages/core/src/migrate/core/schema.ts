@@ -84,6 +84,10 @@ const GENERATED = /\b(?:GENERATED ALWAYS )?AS ?\(/i
 
 const names = (list: string): string[] => splitTopLevel(list).map(lastPart)
 
+/** A table-level key's columns, each without its COLLATE and sort order */
+const keyNames = (list: string): string[] =>
+	splitTopLevel(list).map((part) => lastPart(part.replace(/(?:\s+COLLATE\s+\S+)?(?:\s+(?:ASC|DESC))?\s*$/i, "")))
+
 const onDeleteOf = (rest: string): ForeignKey["onDelete"] =>
 	(/\bON DELETE (CASCADE|SET NULL|SET DEFAULT|RESTRICT|NO ACTION)\b/i.exec(rest)?.[1]?.toUpperCase() ??
 		"NO ACTION") as ForeignKey["onDelete"]
@@ -124,8 +128,11 @@ function tableDefinition(code: string, table: string): { info: TableInfo; keys: 
 		autoincrement: /\bAUTOINCREMENT\b/i.test(code),
 		generatedColumns: [],
 		primaryKey: [],
+		rowidAlias: false,
 		withoutRowid: /\)[^()]*\bWITHOUT ROWID\b[^()]*$/i.test(code),
 	}
+	/* each column's definition, by name: its declared type decides a rowid alias */
+	const definitions = new Map<string, string>()
 	for (const part of bodyParts(code)) {
 		const [, columns, parent, parentColumns, rest] = TABLE_FK.exec(part) ?? []
 		if (columns !== undefined) {
@@ -140,16 +147,33 @@ function tableDefinition(code: string, table: string): { info: TableInfo; keys: 
 			continue
 		}
 		const primary = TABLE_PK.exec(part)?.[1]
-		if (primary !== undefined) info.primaryKey = names(primary)
+		if (primary !== undefined) info.primaryKey = keyNames(primary)
 		const [, name, definition = ""] = COLUMN.exec(part) ?? []
 		if (name === undefined || CONSTRAINT_WORDS.test(name) || primary !== undefined) continue
 		const column = lastPart(name)
+		definitions.set(column, definition)
 		if (/\bPRIMARY KEY\b/i.test(definition)) info.primaryKey = [column]
 		if (GENERATED.test(definition)) info.generatedColumns.push(column)
 		const key = columnKey(table, column, definition)
 		if (key !== undefined) keys.push(key)
 	}
+	info.rowidAlias = rowidAliasOf(info, definitions)
 	return { info, keys }
+}
+
+/* a column declared exactly INTEGER, then nothing or its constraints */
+const INTEGER_COLUMN =
+	/^INTEGER(?:\s+(?:CONSTRAINT|NOT|NULL|PRIMARY|UNIQUE|CHECK|DEFAULT|COLLATE|REFERENCES|GENERATED|AS)\b.*)?$/is
+
+/**
+ * Whether a table's key is its rowid: a lone key column declared exactly INTEGER, in a rowid
+ * table, and not an inline `PRIMARY KEY DESC`, which SQLite keeps apart from the rowid
+ */
+function rowidAliasOf({ primaryKey, withoutRowid }: TableInfo, definitions: ReadonlyMap<string, string>): boolean {
+	const [lone, ...more] = primaryKey
+	if (withoutRowid || lone === undefined || more.length > 0) return false
+	const definition = definitions.get(lone) ?? ""
+	return INTEGER_COLUMN.test(definition) && !/\bPRIMARY KEY DESC\b/i.test(definition)
 }
 
 /** A CREATE TABLE's keys and shape replace the table's; an ADD COLUMN adds its key and generated column */

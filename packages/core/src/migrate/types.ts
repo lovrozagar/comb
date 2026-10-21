@@ -169,6 +169,8 @@ export type TableInfo = {
 	primaryKey: string[]
 	/** a WITHOUT ROWID table, whose rows are saved by primary key */
 	withoutRowid: boolean
+	/** its primary key is the rowid: a lone INTEGER column, so writing the key writes the rowid */
+	rowidAlias: boolean
 	/** columns no INSERT may write */
 	generatedColumns: string[]
 	/** SQLite keeps its next id in sqlite_sequence */

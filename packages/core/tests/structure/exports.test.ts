@@ -85,7 +85,6 @@ describe("public entry points", () => {
 		"EMPTY_OBJ",
 		"EMPTY_ARR",
 		"sleep",
-		"confirmDrops",
 		"printMigrationSummary",
 		"aggregateErrors",
 		"drizzle",

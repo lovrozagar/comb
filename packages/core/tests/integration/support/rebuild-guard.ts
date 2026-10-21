@@ -96,8 +96,8 @@ export type History = {
 	dispose(): void
 }
 
-/** A history in `dir`, a fresh directory by default */
-export function history(dir: string = mkdtempSync(join(tmpdir(), "comb-rebuild-guard-"))): History {
+/** A history in `dir`, a fresh directory by default, whose diffs add the FTS groups in `fts` */
+export function history(dir: string = mkdtempSync(join(tmpdir(), "comb-rebuild-guard-")), fts = FTS): History {
 	const files = () =>
 		readdirSync(dir)
 			.filter((file) => file.endsWith(".sql"))
@@ -111,7 +111,7 @@ export function history(dir: string = mkdtempSync(join(tmpdir(), "comb-rebuild-g
 		diff(schema, name) {
 			const result = generateIncrementalMigration({
 				dialect: "sqlite",
-				ftsSql: FTS,
+				ftsSql: fts,
 				migrationName: name,
 				migrationsDir: dir,
 				targetSchema: schema,
