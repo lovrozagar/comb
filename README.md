@@ -49,6 +49,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.10](#upgrading-to-010)
 - [Upgrading to 0.9](#upgrading-to-09)
 - [Upgrading to 0.8.0](#upgrading-to-080)
 - [Upgrading to 0.7.0](#upgrading-to-070)
@@ -993,7 +994,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun
 - The run record moves to `.comb.codegen.json` beside `comb.config.ts`; the first run reads the old `.<prefix>.codegen.json` once and removes it. Commit the new file.
 - A failing database writes nothing for any database.
 - Tables whose generated paths differ only in case fail the run; a database holding both Postgres and SQLite tables fails it.
-- A many relation named like a column takes `Relation`; drizzle's `unique()` and a named `.unique()` reach the constraint map and the published `uniqueIndexes`; diagram SQL quotes every identifier; the FTS map lists SQL column names.
+- A many relation whose name a column or a one relation of its table already holds takes a `Relation` suffix: `posts` becomes `postsRelation`, so a query's `with: { posts }` becomes `with: { postsRelation }`. Drizzle's `unique()` and a named `.unique()` reach the constraint map and the published `uniqueIndexes`; diagram SQL quotes every identifier; the FTS map lists SQL column names.
 - A CHECK written `check("name", sql.raw("…"))` reaches the constraint map; a `check()` codegen cannot read fails the run. Regenerate, then translate the new error keys.
 
 ## Upgrading to 0.9
