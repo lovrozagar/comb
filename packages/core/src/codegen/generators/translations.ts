@@ -18,11 +18,14 @@ type TranslationsConfig = {
 type ErrorKey = { cause: string; key: string }
 
 /**
- * The en-US message for a key. A duplicate names its column from the cause, since the key alone
- * cannot say where a table name ends and a snake_case column begins.
+ * The en-US message for a key. A duplicate names its column, or a composite unique its columns, from
+ * the cause, since the key alone cannot say where a table name ends and a snake_case column begins.
  */
 function englishMessage({ cause, key }: ErrorKey): string {
 	if (key.endsWith("_duplicate")) {
+		/* a composite unique names its columns together, as its constraint's cause does */
+		const columns = /^A record with this (.+) combination already exists$/.exec(cause)?.[1]
+		if (columns !== undefined) return `A record with this ${columns.replaceAll("_", " ")} combination already exists`
 		const field = /^A record with this (\S+) value already exists$/.exec(cause)?.[1]
 		if (field === undefined || field === "id") return "Record with this ID already exists"
 		return `A record with this ${field.replaceAll("_", " ")} already exists`

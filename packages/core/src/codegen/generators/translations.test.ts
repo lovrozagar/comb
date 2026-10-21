@@ -103,3 +103,15 @@ describe("generateTranslations", () => {
 		expect(fs.existsSync(path.join(tmpDir, "db.test.error-keys.gen.ts"))).toBe(false)
 	})
 })
+
+describe("generateTranslations — composite uniques", () => {
+	it("names a composite unique's columns together, never as an ID (C3)", () => {
+		fromTables(`${HEAD}export const account = createTable("account", { id: text("id").primaryKey(), provider: text("provider"), account_id: text("account_id") }, (t) => [
+	uniqueIndex("account_provider_account").on(t.provider, t.account_id),
+])
+`)
+		expect(english("db.test")).toContain(
+			'account_provider_account_id_duplicate: "A record with this provider and account id combination already exists"',
+		)
+	})
+})
