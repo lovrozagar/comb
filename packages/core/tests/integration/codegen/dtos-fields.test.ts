@@ -195,3 +195,18 @@ describe("the _shared file of the generated DTOs (F17)", () => {
 		)
 	})
 })
+
+describe("an email column's DTO (F15)", () => {
+	it("trims and lowercases before it validates, and still publishes the email format and bounds", async () => {
+		const tables = `export const member = sqliteTable("member", { id: c.id("mem"), email: c.text("email", { email: true, max: 254, min: 5 }).notNull() })`
+		const member = (await generatedDtos("email-format", tables)).member as GeneratedEntity
+		const create = member.memberDtoCreateSchema as z.ZodObject
+		expect(create.safeParse({ email: " Ann@Example.COM " })).toMatchObject({
+			data: { email: "ann@example.com" },
+			success: true,
+		})
+		expect(create.safeParse({ email: "nope" }).success).toBe(false)
+		const published = z.toJSONSchema(create, { io: "input" }) as { properties: Record<string, Record<string, unknown>> }
+		expect(published.properties["email"]).toMatchObject({ format: "email", maxLength: 254, minLength: 5 })
+	})
+})

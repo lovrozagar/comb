@@ -120,8 +120,9 @@ function textBase(build: Build): Built {
 	const typed = field.raw.includes(".$type<") ? typedSchema(field.raw, imports.jsonSchemaImports) : null
 	if (typed !== null) return typed
 	const mutative = isMutative(schemaType)
-	/* an email is normalized first, then validated: z.email() would refuse the padded input */
-	if (annotations.email && mutative) return `z.string().trim().toLowerCase().pipe(z.email()${textBounds(build)})`
+	/* an email is normalized first, then validated: z.email() would refuse the padded input. Checks
+	 * run in chain order, and unlike a pipe the chain still publishes the email format and bounds */
+	if (annotations.email && mutative) return `z.string().trim().toLowerCase().check(z.email())${textBounds(build)}`
 	return stringKind(annotations, mutative) + transforms(annotations, mutative) + textBounds(build)
 }
 
