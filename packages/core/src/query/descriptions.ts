@@ -12,7 +12,8 @@ import type { FieldType, FilterOperator } from "./types.ts"
 
 const CURSOR_DESCRIPTION =
 	"Opaque cursor for forward pagination. Pass the nextCursor from the previous response with the same order. Takes precedence over page when both are sent."
-const CURSOR_EXAMPLES: string[] = ["eyJpIjoiMDFIIiwicyI6IiIsInYiOltdfQ"]
+/* a cursor's shape, a payload and its tag, signed for this example by a secret no app uses */
+const CURSOR_EXAMPLES: string[] = ["eyJpIjoiMDFIIiwicyI6IiIsInYiOltdfQ.kN0DoTIsZ_6mRKkqzpgyMCshx7D1WhyEBdnvI5qtDTE"]
 
 const LIMIT_DESCRIPTION = "Maximum number of items per page. Defaults to 20, capped by the endpoint's maxLimit."
 const LIMIT_EXAMPLES: number[] = [20, 50]

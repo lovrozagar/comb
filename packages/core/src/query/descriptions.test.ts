@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { filterParamMeta, orderParamMeta, searchParamMeta } from "./descriptions.ts"
+import { cursorProblem } from "./cursor.ts"
+import { CURSOR_EXAMPLES, filterParamMeta, orderParamMeta, searchParamMeta } from "./descriptions.ts"
 import type { FieldType, FilterOperator } from "./types.ts"
 
 const LIMITS = { maxConditions: 20, maxDepth: 3, maxInValues: 50, maxValues: 60 }
@@ -58,5 +59,11 @@ describe("searchParamMeta", () => {
 		expect(searchParamMeta(["name", "email"], 8).description).toBe(
 			"Free-text search over: name, email. Whitespace-separated terms must all match; at most 8 terms.",
 		)
+	})
+})
+
+describe("CURSOR_EXAMPLES", () => {
+	it("has the shape the list schema takes, a payload and its tag, so a published example is a cursor (Q7)", () => {
+		for (const example of CURSOR_EXAMPLES) expect(cursorProblem(example, [])).toBeNull()
 	})
 })
