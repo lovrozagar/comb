@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { approveMigration } from "./approval.ts"
 import { planApply, type PlanOptions, wranglerOrder } from "./plan-apply.ts"
+import { provePending } from "./proof-run.ts"
 
 describe("wranglerOrder", () => {
 	it("orders by leading number, then by name, files without a number last", () => {
@@ -106,6 +107,18 @@ describe("planApply joining a proof to the classification", () => {
 		)
 		await run()
 		expect(seen[0]).toContain("proof run: fills users.tier's NULLs with its default")
+		await conn.close()
+	})
+})
+
+describe("the proof only adds strictness (G1b)", () => {
+	it("keeps the classifier's unsafe for a file whose predicate no seed row meets, though its proof is clean", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple("CREATE TABLE u (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT);")
+		const file = "DELETE FROM u WHERE email LIKE '%@%';"
+		const proof = (await provePending(conn, [{ name: "1_purge.sql", sql: file }])).get("1_purge.sql")
+		expect(proof).toEqual({ cautious: [], unproven: [], unsafe: [] })
+		await expect(plan({ "1_purge.sql": file }, { conn }).run()).rejects.toThrow(/^1_purge\.sql is unsafe/)
 		await conn.close()
 	})
 })

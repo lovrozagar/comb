@@ -2,7 +2,8 @@
  * The proof run's seed: six rows for each table of an in-memory copy of a database, chosen so a
  * change to any value shows. Row 0 takes every default; rows 1 to 3 hold discriminating values
  * (text that looks numeric, mixed case, non-ASCII, signed and large numbers), each column's three
- * distinct; row 4 is NULL in every nullable column; rows 4 and 5 repeat row 1's values where the
+ * distinct, and no two columns sharing a value in a row, so a copy or a swap between columns shows;
+ * row 4 is NULL in every nullable column; rows 4 and 5 repeat row 1's values where the
  * table allows a duplicate, so a new UNIQUE … ON CONFLICT shows what it drops. A column checked
  * `IN (...)` takes its listed values, and a key column its parent's keys, parents seeded first. A
  * table whose six rows do not all go in is unproven: a partial seed could hide a loss.
@@ -12,6 +13,8 @@ import { affinityOf } from "./sqlite-affinity.ts"
 
 type Column = {
 	hasDefault: boolean
+	/** its position in the table, which sets its values apart from every other column's */
+	index: number
 	insertable: boolean
 	name: string
 	nullable: boolean
@@ -48,8 +51,9 @@ function uniqueColumns(db: MemoryDb, table: string): Set<string> {
 /** The columns a table declares, by PRAGMA table_xinfo: a generated or hidden column takes no value */
 function columnsOf(db: MemoryDb, table: string): Column[] {
 	const unique = uniqueColumns(db, table)
-	return db.all(`PRAGMA table_xinfo(${quote(table)})`).map((row) => ({
+	return db.all(`PRAGMA table_xinfo(${quote(table)})`).map((row, index) => ({
 		hasDefault: row["dflt_value"] !== null,
+		index,
 		insertable: row["hidden"] === 0,
 		name: String(row["name"]),
 		nullable: row["notnull"] === 0 && row["pk"] === 0,
@@ -81,10 +85,21 @@ function listedValues(sql: string, column: string): unknown[] | undefined {
 	)
 }
 
-/** The value row `row` gives `column`, from its listed values or its affinity's */
+/**
+ * `value` made the column's own: a string gains its position's digits, a number moves a thousand
+ * per position away from zero, so it keeps the sign, size and kind that make it discriminating
+ */
+function ownValue(value: unknown, index: number): unknown {
+	if (index === 0) return value
+	if (typeof value === "string") return `${value}${index}`
+	const number = value as number
+	return number + (number < 0 ? -1 : 1) * index * 1000
+}
+
+/** The value row `row` gives `column`, from its listed values (rotated by its position) or its affinity's */
 function valueFor(column: Column, slot: number, listed: readonly unknown[] | undefined): unknown {
-	if (listed !== undefined && listed.length > 0) return listed[(slot + 1) % listed.length]
-	return (VALUES[affinityOf(column.type)] as readonly unknown[])[slot]
+	if (listed !== undefined && listed.length > 0) return listed[(slot + 1 + column.index) % listed.length]
+	return ownValue((VALUES[affinityOf(column.type)] as readonly unknown[])[slot], column.index)
 }
 
 /** The primary key columns of a parent, for a key that names none */

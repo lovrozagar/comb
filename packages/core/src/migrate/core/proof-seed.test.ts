@@ -23,14 +23,14 @@ describe("seedTables", () => {
 			t: "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT DEFAULT 'd', b TEXT NOT NULL)",
 		})
 		expect(unproven).toEqual(new Map())
-		/* by key, as the rowid orders them: row 0 is 42 (no default for id), the repeats 99 and 100 */
+		/* by key: row 0 is 42, the repeats 99 and 100; each column's values carry its position (G1b) */
 		expect(rows("t").map((row) => [row["id"], row["a"], row["b"]])).toEqual([
-			[-1, "Mixed Case", "Mixed Case"],
-			[7, "007", "007"],
-			[42, "d", "010"],
-			[99, null, "007"],
-			[100, "007", "007"],
-			[2_147_483_648, "ñandú Ü", "ñandú Ü"],
+			[-1, "Mixed Case1", "Mixed Case2"],
+			[7, "0071", "0072"],
+			[42, "d", "0102"],
+			[99, null, "0072"],
+			[100, "0071", "0072"],
+			[2_147_483_648, "ñandú Ü1", "ñandú Ü2"],
 		])
 	})
 

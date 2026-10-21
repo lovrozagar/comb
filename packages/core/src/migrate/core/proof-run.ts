@@ -2,11 +2,15 @@
  * The proof run, on the SQLite family (bun:sqlite, libsql, D1): before a check or an apply, each
  * pending file runs on a private in-memory copy of the target's live schema, seeded with rows that
  * show any change (proof-seed.ts), and every table that was there before is compared, row for row,
- * on the columns it had. A lost row, a lost column or a changed value makes the file unsafe, and
- * the reason names the table and column. One allowance: a NULL that lands as the column's new
+ * on the columns it had, as a multiset of whole rows. A lost row, a lost column or a changed value
+ * makes the file unsafe, and the reason names the table and column. One allowance: a NULL that lands as the column's new
  * DEFAULT, in a column the file made NOT NULL, is cautious (Atlas's "make NOT NULL with a
  * default" rebuild). A table comb cannot seed is unproven, and its rating stays the classifier's.
  * The target is only read: its schema, through one SELECT.
+ *
+ * The proof only adds strictness. Its rows are synthetic, so they cannot meet every predicate a
+ * file holds: `DELETE FROM u WHERE email LIKE '%@%'` proves clean, as no seeded email has an @.
+ * The classifier stays authoritative, and no classifier rule is ever relaxed because a proof passed.
  */
 import { openMemory, type MemoryDb } from "../drivers/memory.ts"
 import type { Connection } from "../types.ts"
@@ -114,60 +118,95 @@ function snapshot(db: MemoryDb): Map<string, Shape> {
 	return out
 }
 
-/** The values of `column` across `rows`, as a count per value */
-function counts(rows: readonly string[][], index: number): Map<string, number> {
+/** What a file did to the tables before it: the proof's findings without what it could not prove */
+type Findings = Pick<Proof, "cautious" | "unsafe">
+
+/** Each value of `keys`, with how many times it occurs */
+function counts(keys: readonly string[]): Map<string, number> {
 	const out = new Map<string, number>()
-	for (const row of rows) out.set(row[index] as string, (out.get(row[index] as string) ?? 0) + 1)
+	for (const key of keys) out.set(key, (out.get(key) ?? 0) + 1)
 	return out
 }
 
-/** What `a` holds beyond `b`, as values with how many more */
-const beyond = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>): Array<[string, number]> =>
-	[...a].filter(([value, n]) => n > (b.get(value) ?? 0)).map(([value, n]) => [value, n - (b.get(value) ?? 0)])
+/** How many of `before` are not in `after`, each counted as often as it occurs */
+function missing(before: readonly string[], after: readonly string[]): number {
+	const held = counts(after)
+	return [...counts(before)].reduce((sum, [key, n]) => sum + Math.max(0, n - (held.get(key) ?? 0)), 0)
+}
 
 /**
- * How one column's values changed: unchanged; NULLs that landed as the column's new default in a
- * column made NOT NULL, the one allowance; or changed
+ * The one allowance: each column the file made NOT NULL with a DEFAULT, which was nullable, with
+ * that default as SQLite quotes it. Atlas's "make NOT NULL with a default" rebuild fills its NULLs so.
  */
-function columnChange(
-	db: MemoryDb,
-	column: string,
-	{ now, was }: { now: Shape; was: Shape },
-): "default" | "same" | "changed" {
-	const before = counts(was.rows, was.columns.indexOf(column))
-	const after = counts(now.rows, now.columns.indexOf(column))
-	const gone = beyond(before, after)
-	const came = beyond(after, before)
-	if (gone.length === 0) return "same"
-	const fresh = now.defaults.get(column)
-	if (!was.nullable.has(column) || now.nullable.has(column) || fresh === null || fresh === undefined) return "changed"
-	const value = String(db.all(`SELECT quote(${fresh}) AS v`)[0]?.["v"])
-	const onlyNulls = gone.length === 1 && gone[0]?.[0] === "NULL"
-	const asDefault = came.length === 1 && came[0]?.[0] === value && came[0][1] === gone[0]?.[1]
-	return onlyNulls && asDefault ? "default" : "changed"
+function allowedDefaults(db: MemoryDb, { now, was }: { now: Shape; was: Shape }): Map<string, string> {
+	const out = new Map<string, string>()
+	for (const column of was.columns) {
+		const fresh = now.defaults.get(column)
+		if (!was.nullable.has(column) || now.nullable.has(column) || fresh === null || fresh === undefined) continue
+		out.set(column, String(db.all(`SELECT quote(${fresh}) AS v`)[0]?.["v"]))
+	}
+	return out
+}
+
+/** Each row of `shape` as one key over `columns`, a NULL in a column of `fill` read as its default */
+function rowKeys(shape: Shape, columns: readonly string[], fill: ReadonlyMap<string, string> = new Map()): string[] {
+	const at = columns.map((column) => shape.columns.indexOf(column))
+	return shape.rows.map((row) =>
+		JSON.stringify(
+			columns.map((column, i) => {
+				const value = row[at[i] as number] as string
+				return value === "NULL" ? (fill.get(column) ?? value) : value
+			}),
+		),
+	)
+}
+
+/**
+ * The columns whose values a file changed: those whose own values differ, else those whose
+ * leaving out makes the rows match (a value moved between rows keeps the column's values)
+ */
+function changedColumns(was: Shape, now: Shape, fill: ReadonlyMap<string, string>): string[] {
+	const columns = was.columns.filter((each) => now.columns.includes(each))
+	const differs = (picked: readonly string[]) => missing(rowKeys(was, picked, fill), rowKeys(now, picked)) > 0
+	const own = columns.filter((column) => differs([column]))
+	return own.length > 0 ? own : columns.filter((column) => !differs(columns.filter((each) => each !== column)))
+}
+
+/**
+ * What a file did to one table that was there before it, compared as a multiset of whole rows over
+ * the columns it had: so a value copied, swapped or moved between rows shows, not only one lost
+ */
+function compareTable(db: MemoryDb, table: string, { now, was }: { now: Shape; was: Shape }): Findings {
+	const out: Findings = { cautious: [], unsafe: [] }
+	for (const column of was.columns.filter((each) => !now.columns.includes(each)))
+		out.unsafe.push(`loses ${table}.${column}`)
+	if (now.rows.length < was.rows.length)
+		out.unsafe.push(`loses ${was.rows.length - now.rows.length} of ${table}'s ${was.rows.length} rows`)
+	const columns = was.columns.filter((each) => now.columns.includes(each))
+	const fill = allowedDefaults(db, { now, was })
+	if (missing(rowKeys(was, columns, fill), rowKeys(now, columns)) === 0) {
+		const nulls = [...fill.keys()].filter((column) =>
+			was.rows.some((row) => row[was.columns.indexOf(column)] === "NULL"),
+		)
+		for (const column of nulls) out.cautious.push(`fills ${table}.${column}'s NULLs with its default`)
+		return out
+	}
+	const changed = changedColumns(was, now, fill)
+	if (changed.length === 0) out.unsafe.push(`changes rows of ${table}`)
+	for (const column of changed) out.unsafe.push(`changes values of ${table}.${column}`)
+	return out
 }
 
 /** What a file did to each table that was there before it */
-function compare(
-	db: MemoryDb,
-	before: ReadonlyMap<string, Shape>,
-	after: ReadonlyMap<string, Shape>,
-): Pick<Proof, "cautious" | "unsafe"> {
-	const out: Pick<Proof, "cautious" | "unsafe"> = { cautious: [], unsafe: [] }
+function compare(db: MemoryDb, before: ReadonlyMap<string, Shape>, after: ReadonlyMap<string, Shape>): Findings {
+	const out: Findings = { cautious: [], unsafe: [] }
 	for (const [table, was] of before) {
 		const now = after.get(table)
-		if (now === undefined) {
-			out.unsafe.push(`loses every row of ${table}`)
-			continue
-		}
-		for (const column of was.columns.filter((each) => !now.columns.includes(each)))
-			out.unsafe.push(`loses ${table}.${column}`)
-		if (now.rows.length < was.rows.length)
-			out.unsafe.push(`loses ${was.rows.length - now.rows.length} of ${table}'s ${was.rows.length} rows`)
-		for (const column of was.columns.filter((each) => now.columns.includes(each))) {
-			const change = columnChange(db, column, { now, was })
-			if (change === "changed") out.unsafe.push(`changes values of ${table}.${column}`)
-			else if (change === "default") out.cautious.push(`fills ${table}.${column}'s NULLs with its default`)
+		if (now === undefined) out.unsafe.push(`loses every row of ${table}`)
+		else {
+			const found = compareTable(db, table, { now, was })
+			out.cautious.push(...found.cautious)
+			out.unsafe.push(...found.unsafe)
 		}
 	}
 	return out

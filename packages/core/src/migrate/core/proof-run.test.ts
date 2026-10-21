@@ -224,3 +224,43 @@ describe("provePending with the database's own triggers and views", () => {
 		])
 	})
 })
+
+const T = "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, b TEXT, n INTEGER NOT NULL DEFAULT 0);"
+
+describe("provePending on values moved between columns or rows of one type (G1b)", () => {
+	it.each([
+		["a copy of one column into another of its type", "UPDATE t SET a = b;", "changes values of t.a"],
+		["a swap of two columns of one type", "UPDATE t SET a = b, b = a;", "changes values of t.a"],
+		[
+			"a rotation of one column across rows, which keeps its values",
+			"CREATE TEMP TABLE r AS SELECT id, a FROM t;\nUPDATE t SET a = (SELECT r.a FROM r WHERE r.id = COALESCE((SELECT min(id) FROM r WHERE id > t.id), (SELECT min(id) FROM r)));",
+			"changes values of t.a",
+		],
+		["a rebuild whose copy feeds a from b", rebuildT("id, b, b, n"), "changes values of t.a"],
+	])("catches %s", async (_, file, found) => {
+		expect((await prove(T, file)).unsafe).toContain(found)
+	})
+
+	it("says the rows changed when two columns each moved across rows, which no one column explains", async () => {
+		const both =
+			"CREATE TEMP TABLE r AS SELECT id, a, b FROM t;\nUPDATE t SET a = (SELECT r.a FROM r WHERE r.id = COALESCE((SELECT min(id) FROM r WHERE id > t.id), (SELECT min(id) FROM r))), b = (SELECT r.b FROM r WHERE r.id = COALESCE((SELECT max(id) FROM r WHERE id < t.id), (SELECT max(id) FROM r)));"
+		expect((await prove(T, both)).unsafe).toEqual(["changes rows of t"])
+	})
+
+	it("still proves a no-op and Atlas's plain rebuild clean, and the NOT NULL default rebuild cautious", async () => {
+		const clean = { cautious: [], unproven: [], unsafe: [] }
+		expect(await prove(T, "SELECT 1;")).toEqual(clean)
+		expect(await prove(T, rebuildT("id, a, b, n"))).toEqual(clean)
+		const defaulted = rebuildT("id, IFNULL(a, ''), b, n").replace("a TEXT,", "a TEXT NOT NULL DEFAULT '',")
+		expect(await prove(T, defaulted)).toEqual({
+			cautious: ["fills t.a's NULLs with its default"],
+			unproven: [],
+			unsafe: [],
+		})
+	})
+})
+
+/** Atlas's rebuild of t, copying `copy` */
+function rebuildT(copy: string): string {
+	return `CREATE TABLE new_t (id INTEGER PRIMARY KEY, a TEXT, b TEXT, n INTEGER NOT NULL DEFAULT 0);\nINSERT INTO new_t (id, a, b, n) SELECT ${copy} FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;`
+}
