@@ -6,7 +6,8 @@
  * row 4 is NULL in every nullable column; rows 4 and 5 repeat row 1's values where the
  * table allows a duplicate, so a new UNIQUE … ON CONFLICT shows what it drops. A column checked
  * `IN (...)` takes its listed values, and a key column its parent's keys, parents seeded first. A
- * table whose six rows do not all go in is unproven: a partial seed could hide a loss.
+ * row the table refuses (a CHECK across columns, a range) takes its defaults, then each slot's values
+ * in turn. A table whose six rows do not all go in is unproven: a partial seed could hide a loss.
  */
 import type { MemoryDb } from "../drivers/memory.ts"
 import { affinityOf } from "./sqlite-affinity.ts"
@@ -118,12 +119,15 @@ type Seeding = {
 	sql: string
 }
 
+/** Which values a row tries: its slot, and whether every column with a default takes it */
+type Attempt = { defaults: boolean; row: number; slot: number }
+
 /** Row `row` of a table: each column's value, a key's columns from a parent row, or nothing where a default fills it */
-function rowOf(db: MemoryDb, seeding: Seeding, at: { row: number; slot: number }): Map<string, unknown> | undefined {
+function rowOf(db: MemoryDb, seeding: Seeding, at: Attempt): Map<string, unknown> | undefined {
 	const { row, slot } = at
 	const values = new Map<string, unknown>()
 	for (const column of seeding.columns.filter((each) => each.insertable)) {
-		if (row === 0 && column.hasDefault) continue
+		if (at.defaults && column.hasDefault) continue
 		values.set(
 			column.name,
 			row === 4 && column.nullable
@@ -170,16 +174,37 @@ function insertRow(db: MemoryDb, table: string, values: ReadonlyMap<string, unkn
 	}
 }
 
+/**
+ * What row `row` tries, in order: its repeat of row 1, its own slot, then, for a row the table
+ * refuses, every default with each slot (row 0 takes every default from the start)
+ */
+function attempts(row: number): Attempt[] {
+	const own = [...new Set([REPEATING[row] as number, FRESH[row] as number])]
+	const withDefaults = [...new Set([...own, ...FRESH])].map((slot) => ({ defaults: true, row, slot }))
+	return row === 0 ? withDefaults : [...own.map((slot) => ({ defaults: false, row, slot })), ...withDefaults]
+}
+
+/* why a row cannot go in when a key it may not leave NULL has no parent row to take */
+const NO_PARENT = "a key it may not leave NULL references a table comb could not seed"
+
+/** Insert row `row` of `table` by the first attempt the table takes; or why not, its first refusal */
+function seedRow(db: MemoryDb, seeding: Seeding & { table: string }, row: number): string | undefined {
+	let refusal: string | undefined
+	for (const attempt of attempts(row)) {
+		const values = rowOf(db, seeding, attempt)
+		if (values === undefined) return NO_PARENT
+		const refused = insertRow(db, seeding.table, values)
+		if (refused === undefined) return undefined
+		/* the first refusal names why: a fallback's is about its own values */
+		refusal ??= refused
+	}
+	return refusal
+}
+
 /** Seed `table`: its six rows, a repeat of row 1 where the table allows one, or why a row would not go in */
 function seedTable(db: MemoryDb, table: string, seeding: Seeding): string | undefined {
 	for (let row = 0; row < ROWS; row++) {
-		let failed: string | undefined = "a key it may not leave NULL references a table comb could not seed"
-		for (const slot of new Set([REPEATING[row] as number, FRESH[row] as number])) {
-			const values = rowOf(db, seeding, { row, slot })
-			if (values === undefined) break
-			failed = insertRow(db, table, values)
-			if (failed === undefined) break
-		}
+		const failed = seedRow(db, { ...seeding, table }, row)
 		if (failed !== undefined) return failed
 	}
 	return undefined

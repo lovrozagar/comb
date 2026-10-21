@@ -48,7 +48,7 @@ describe("seedTables", () => {
 
 	it("calls unproven a table whose key comb cannot fill, and one whose seeded rows break their key", async () => {
 		const { unproven } = await seeded({
-			bad: "CREATE TABLE bad (id INTEGER PRIMARY KEY, code TEXT NOT NULL CHECK (length(code) = 11))",
+			bad: "CREATE TABLE bad (id INTEGER PRIMARY KEY, code TEXT NOT NULL CHECK (length(code) = 20))",
 			orphan: "CREATE TABLE orphan (b INTEGER NOT NULL REFERENCES bad(id))",
 			parent: "CREATE TABLE parent (id TEXT PRIMARY KEY)",
 			retyped: "CREATE TABLE retyped (p INTEGER REFERENCES parent(id))",
@@ -67,6 +67,17 @@ describe("seedTables", () => {
 		expect(unproven).toEqual(new Map())
 		expect(rows("c").every((row) => row["gone"] === null)).toBe(true)
 		expect(rows("a")).toHaveLength(6)
+	})
+})
+
+describe("seedTables on CHECK constraints", () => {
+	it("seeds a row a CHECK refuses with the table's defaults, then another slot's values", async () => {
+		const { rows, unproven } = await seeded({
+			grant:
+				"CREATE TABLE grant (id TEXT PRIMARY KEY, credits INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0, CHECK (credits >= 1), CHECK (used <= credits))",
+		})
+		expect(unproven).toEqual(new Map())
+		expect(rows("grant")).toHaveLength(6)
 	})
 
 	it("takes a CHECK … IN list's values, numbers included", async () => {

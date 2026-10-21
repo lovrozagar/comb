@@ -109,6 +109,17 @@ describe("provePending on comb 0.8's bypasses, and on a rebuild that loses nothi
 		expect((await prove(USERS, file)).unsafe.join("\n")).toContain(found)
 	})
 
+	it("reports a loss of rows once, not as a change to every column's values", async () => {
+		const proof = await prove(
+			USERS,
+			rebuild("id INTEGER PRIMARY KEY, email TEXT, code TEXT, tier TEXT").replace(
+				"FROM users;",
+				"FROM users WHERE id > 1;",
+			),
+		)
+		expect(proof.unsafe).toEqual([expect.stringMatching(/^loses \d of users's 6 rows$/)])
+	})
+
 	it("proves Atlas's plain rebuild clean, and a new column's backfill too", async () => {
 		const clean = await prove(
 			USERS,
@@ -156,10 +167,10 @@ describe("provePending on comb 0.8's bypasses, and on a rebuild that loses nothi
 describe("provePending on what it cannot seed or apply", () => {
 	it("lists a table whose rows it cannot make as unproven, and proves nothing of it", async () => {
 		const proof = await prove(
-			"CREATE TABLE codes (id INTEGER PRIMARY KEY, code TEXT NOT NULL CHECK (length(code) = 11));",
+			"CREATE TABLE codes (id INTEGER PRIMARY KEY, code TEXT NOT NULL CHECK (length(code) = 20));",
 			"DELETE FROM codes;",
 		)
-		expect(proof.unproven).toEqual(["codes"])
+		expect(proof.unproven).toEqual([{ table: "codes", why: "CHECK constraint failed: length(code) = 20" }])
 		expect(proof.unsafe).toEqual([])
 	})
 
@@ -203,7 +214,7 @@ describe("provePending on what the copy cannot make, and on a lost column", () =
 			[{ name: "1.sql", sql: "SELECT 1;" }],
 		)
 		const unproven = proofs.get("1.sql")?.unproven ?? []
-		expect(unproven).toEqual(expect.arrayContaining(["odd", "box"]))
+		expect(unproven.map(({ table }) => table)).toEqual(expect.arrayContaining(["odd", "box"]))
 	})
 
 	it("calls a dropped column lost", async () => {
@@ -217,11 +228,7 @@ describe("provePending with the database's own triggers and views", () => {
 			`${USERS}\nCREATE TABLE audit (id INTEGER PRIMARY KEY, note TEXT);\nCREATE TRIGGER purge AFTER INSERT ON users BEGIN DELETE FROM audit; END;\nCREATE VIEW emails AS SELECT email FROM users;`,
 			"INSERT INTO users (email) VALUES ('new');",
 		)
-		expect(proof.unsafe).toEqual([
-			"loses 6 of audit's 6 rows",
-			"changes values of audit.id",
-			"changes values of audit.note",
-		])
+		expect(proof.unsafe).toEqual(["loses 6 of audit's 6 rows"])
 	})
 })
 

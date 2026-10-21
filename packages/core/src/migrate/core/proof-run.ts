@@ -21,8 +21,8 @@ type Proof = {
 	cautious: string[]
 	/** why the file did not apply to the copy, so nothing about it is proven */
 	failed?: string | undefined
-	/** the tables comb could not seed, which nothing here proves */
-	unproven: string[]
+	/** the tables comb could not seed, which nothing here proves, each with why */
+	unproven: Array<{ table: string; why: string }>
 	unsafe: string[]
 }
 
@@ -180,8 +180,11 @@ function compareTable(db: MemoryDb, table: string, { now, was }: { now: Shape; w
 	const out: Findings = { cautious: [], unsafe: [] }
 	for (const column of was.columns.filter((each) => !now.columns.includes(each)))
 		out.unsafe.push(`loses ${table}.${column}`)
-	if (now.rows.length < was.rows.length)
+	/* a lost row changes every column's values: the loss alone is the finding */
+	if (now.rows.length < was.rows.length) {
 		out.unsafe.push(`loses ${was.rows.length - now.rows.length} of ${table}'s ${was.rows.length} rows`)
+		return out
+	}
 	const columns = was.columns.filter((each) => now.columns.includes(each))
 	const fill = allowedDefaults(db, { now, was })
 	if (missing(rowKeys(was, columns, fill), rowKeys(now, columns)) === 0) {
@@ -242,7 +245,7 @@ async function provePending(
 		let failed: string | undefined
 		for (const { name, sql } of files) {
 			const before = snapshot(db)
-			const unprovenHere = [...unproven.keys()]
+			const unprovenHere = [...unproven].map(([table, why]) => ({ table, why }))
 			if (failed !== undefined) {
 				proofs.set(name, { cautious: [], failed, unproven: unprovenHere, unsafe: [] })
 				continue

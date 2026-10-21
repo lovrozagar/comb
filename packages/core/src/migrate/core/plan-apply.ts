@@ -84,7 +84,9 @@ function withProof(migration: ParsedMigration, proof: Proof): ParsedMigration {
 function proofGaps(name: string, proof: Proof): string[] {
 	const gaps = proof.failed === undefined ? [] : [`Proof run: ${name}: ${proof.failed}; its rating is the classifier's`]
 	if (proof.unproven.length > 0)
-		gaps.push(`Proof run: ${name}: unproven, comb could not seed ${proof.unproven.join(", ")}`)
+		gaps.push(
+			`Proof run: ${name}: unproven, comb could not seed ${proof.unproven.map(({ table, why }) => `${table} (${why})`).join(", ")}`,
+		)
 	return gaps
 }
 
