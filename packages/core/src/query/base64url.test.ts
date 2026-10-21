@@ -11,6 +11,13 @@ describe("base64url", () => {
 		expect(decodeBase64Url("")).toEqual(new Uint8Array())
 	})
 
+	it("is null for a non-canonical spelling: trailing bits no byte holds", () => {
+		expect(decodeBase64Url("AA")).toEqual(new Uint8Array([0]))
+		expect(decodeBase64Url("AAA")).toEqual(new Uint8Array([0, 0]))
+		expect(decodeBase64Url("_w")).toEqual(new Uint8Array([0xff]))
+		for (const text of ["AB", "AAB", "_x", "__9"]) expect(decodeBase64Url(text)).toBeNull()
+	})
+
 	it("is null for text that is not base64url", () => {
 		for (const text of ["a+b", "a/b", "a=", "a", "!!"]) expect(decodeBase64Url(text)).toBeNull()
 	})

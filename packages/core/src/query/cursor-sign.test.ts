@@ -69,6 +69,16 @@ describe("signPayload and verifyTag", () => {
 			expect(verifyTag("eyJ4IjoxfQ", odd, SECRET)).toBe(false)
 	})
 
+	it("refuses a tag spelled another way for the same bytes, and a payload spelled another way", () => {
+		const tag = signPayload("eyJ4IjoxfQ", SECRET)
+		/* a 32-byte tag's last character carries two padding bits: setting one keeps the bytes */
+		const last = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".indexOf(tag.at(-1) as string)
+		const respelled = `${tag.slice(0, -1)}${"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"[last ^ 1]}`
+		expect(verifyTag("eyJ4IjoxfQ", respelled, SECRET)).toBe(false)
+		/* the tag covers the payload's text, not its bytes: "eyJ4IjoxfR" decodes as "eyJ4IjoxfQ" does */
+		expect(verifyTag("eyJ4IjoxfR", tag, SECRET)).toBe(false)
+	})
+
 	it("throws a 500 for a secret under 32 bytes, counted in UTF-8, or one that is no string", () => {
 		expect(MIN_CURSOR_SECRET_BYTES).toBe(32)
 		const short = expect.objectContaining({ errorKey: "cursor_not_wired", status: 500 })

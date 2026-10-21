@@ -1,7 +1,7 @@
 /**
  * base64url (RFC 4648 §5) without padding, as a cursor's payload and tag are written: bytes in,
- * text out, and back. Strict on the way in: text with any other character, or a length no bytes
- * encode to, is null.
+ * text out, and back. Strict on the way in: text with any other character, a length no bytes
+ * encode to, or trailing bits no byte holds is null, so each byte string has exactly one spelling.
  */
 
 /** `bytes` as unpadded base64url */
@@ -17,7 +17,9 @@ function decodeBase64Url(text: string): Uint8Array | null {
 	if (!/^[\w-]*$/.test(text) || text.length % 4 === 1) return null
 	const base64 = text.replace(/-/g, "+").replace(/_/g, "/")
 	const binary = atob(base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "="))
-	return Uint8Array.from(binary, (char) => char.charCodeAt(0))
+	const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+	/* the last character's unused low bits must be zero: "AB" and "AA" would both decode to [0] */
+	return encodeBase64Url(bytes) === text ? bytes : null
 }
 
 export { decodeBase64Url, encodeBase64Url }
