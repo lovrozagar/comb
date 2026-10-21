@@ -18,7 +18,7 @@
     },
     "packages/core": {
       "name": "@lovrozagar/comb",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "bin": {
         "comb": "./src/bin.ts",
       },
@@ -52,7 +52,7 @@
         "drizzle-kit": ">=1.0.0-rc.4 <2",
         "drizzle-orm": ">=1.0.0-rc.4 <2",
         "ts-morph": ">=28.0.0 <29",
-        "wrangler": ">=4 <5",
+        "wrangler": ">=4.147.0 <5",
         "zod": ">=4.5.4 <5",
       },
       "optionalPeers": [
