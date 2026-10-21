@@ -131,18 +131,28 @@ describe("readSqliteError: a bound parameter never decides the classification (C
 		expect(readSqliteError(new DrizzleQueryError("insert into post (title) values (?)", [crafted], bind))).toBeNull()
 	})
 
-	it("reads a flattened chain only from its last line, which is the engine's, never a params or SQL line", () => {
+	it("reads no text that carries a params line, whose values may hold the engine's words (C1)", () => {
+		for (const params of [crafted, "x", "hi"]) {
+			expect(
+				readSqliteMessage(
+					`Failed query: insert into note (body) values (?)\nparams: ${params}\nUNIQUE constraint failed: user.email`,
+				),
+			).toBeNull()
+		}
 		expect(
-			readSqliteMessage(
-				`Failed query: insert into user (email) values (?)\nparams: ${crafted}\nNetwork connection lost.`,
+			readSqliteError(
+				"Failed query: insert into note (body) values (?)\nparams: hi\nUNIQUE constraint failed: user.email",
 			),
 		).toBeNull()
-		expect(
-			readSqliteMessage(
-				`Failed query: insert into user (email) values (?)\nparams: x\nUNIQUE constraint failed: user.email`,
-			),
-		).toMatchObject({
+		expect(readSqliteMessage(`Failed query: x\n  params: a\nNetwork connection lost.`)).toBeNull()
+		/* an engine's own text, one line or several, is read from its last line */
+		expect(readSqliteMessage("UNIQUE constraint failed: user.email")).toMatchObject({
 			code: "SQLITE_CONSTRAINT_UNIQUE",
 		})
+		expect(
+			readSqliteMessage(
+				"D1_ERROR: UNIQUE constraint failed: user.email: SQLITE_CONSTRAINT\nUNIQUE constraint failed: user.email",
+			),
+		).toMatchObject({ code: "SQLITE_CONSTRAINT_UNIQUE" })
 	})
 })

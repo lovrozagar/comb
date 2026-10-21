@@ -948,6 +948,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun
 
 - A composite unique violation reports its columns together, under the codegen key `<table>_<a>_<b>_duplicate`. Deleting a row others still reference reports "The record is still referenced by other records", with no column.
 - On Postgres, `53300`, `53400`, `57P01`, `57P05` and `25P03` map to unavailable, and `55P03` to retry.
+- Error text that carries a `params:` line (0.4.x's flattened cause chain) is no longer classified: a bound value may hold a newline and write the engine's words itself. Pass the error object, whose cause chain comb reads safely. A `DELETE` behind a `WITH` clause or a comment is read as the delete it is.
 
 **Codegen**
 

@@ -126,6 +126,27 @@ describe("constraintError: check, not null, foreign key", () => {
 	})
 })
 
+/** The error a foreign key violation recorded with `query` becomes */
+const fk = (query: string) =>
+	thrown(wrapped(engine("SQLITE_CONSTRAINT_FOREIGNKEY", "FOREIGN KEY constraint failed"), query))
+
+describe("sqliteErrorHandler: the statement behind a foreign key violation", () => {
+	it("reads a delete behind a CTE or a comment as a delete, and a CTE's name as nothing", () => {
+		/* a delete behind a CTE or a comment is still a delete */
+		for (const query of [
+			'with gone as (select "id" from "old") delete from "store" where "id" in (select "id" from gone)',
+			'/* purge */ delete from "store" where "id" = ?',
+			'-- purge\ndelete from "store" where "id" = ?',
+		]) {
+			expect(fk(query)).toMatchObject({ cause: "The record is still referenced by other records", column: undefined })
+		}
+		/* a write whose CTE only reads with a delete-like name is not one */
+		expect(fk('with "delete" as (select 1) insert into "store" ("id", "owner_id") values (?, ?)')).toMatchObject({
+			errorKey: "store_owner_missing",
+		})
+	})
+})
+
 describe("handleConstraintViolation and sqliteErrorHandler", () => {
 	it("throw the mapped error, and leave non-constraint errors alone", () => {
 		const unique = engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: store.slug")
@@ -216,18 +237,16 @@ describe("constraintError: a CHECK name two tables share", () => {
 })
 
 describe("handleConstraintViolation given 0.4.x's flattened message", () => {
-	it("classifies the engine line, wherever it sits in the text", () => {
+	it("classifies nothing in text that carries a params line: a bound value may write the engine's words", () => {
 		const maps: ConstraintMap[] = [
 			{ user: { check: { user_status_enum: { cause: "Invalid status", errorKey: "invalid_status" } } } },
 		]
 		const flattened =
 			'Failed query: insert into "user" (id) values (?)\nparams: u1\nCHECK constraint failed: user_status_enum'
-		expect(() => handleConstraintViolation(flattened, maps)).toThrow(
+		expect(() => handleConstraintViolation(flattened, maps)).not.toThrow()
+		expect(() => handleConstraintViolation("CHECK constraint failed: user_status_enum", maps)).toThrow(
 			expect.objectContaining({ errorKey: "invalid_status" }),
 		)
-		const d1 =
-			'Failed query: insert into "user" (id) values (?)\nparams: u1\nD1_ERROR: CHECK constraint failed: user_status_enum: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)\nCHECK constraint failed: user_status_enum: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_CHECK)'
-		expect(() => handleConstraintViolation(d1, maps)).toThrow(expect.objectContaining({ errorKey: "invalid_status" }))
 	})
 })
 

@@ -7,6 +7,7 @@ import { type Fallback, type Found, findCheck, lookup, own, toCombError } from "
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { readSqliteError, type SqliteErrorRead } from "./read-error.ts"
+import { statementHead } from "./statement-head.ts"
 
 type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown }
 
@@ -20,9 +21,11 @@ function failedColumns(message: string): { columns: string[]; table: string | un
 	return { columns: pairs.map((pair) => pair[2] as string), table: pairs[0]?.[1] }
 }
 
-/* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded */
-const STATEMENT_TABLE = /^\s*(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from)\s+["`[]?(\w+)/i
-const statementTable = (query: string | undefined) => STATEMENT_TABLE.exec(query ?? "")?.[1]
+/* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded, read from the
+ * statement's own verb on */
+const STATEMENT_TABLE =
+	/^(?:insert\s+(?:or\s+\w+\s+)?into|replace\s+into|update(?:\s+or\s+\w+)?|delete\s+from)\s+["`[]?(\w+)/i
+const statementTable = (query: string | undefined) => STATEMENT_TABLE.exec(statementHead(query ?? ""))?.[1]
 
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
@@ -88,7 +91,7 @@ const MISSING_OR_REFERENCED = "Referenced record does not exist or is still in u
  * fail on the other side, a row that references the deleted one, so no key of its own is blamed. */
 function foreignKey(v: Violation): CombError {
 	const table = statementTable(v.read.query)
-	if (/^\s*delete\b/i.test(v.read.query ?? "")) {
+	if (/^delete\b/i.test(statementHead(v.read.query ?? ""))) {
 		const fallback = {
 			cause: STILL_REFERENCED,
 			errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,

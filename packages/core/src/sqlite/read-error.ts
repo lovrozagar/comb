@@ -63,16 +63,15 @@ function readLine(line: string): SqliteErrorRead | null {
 }
 
 /**
- * An engine message given as text (D1, libsql or bare SQLite wording), or null. Text with
- * several lines, such as 0.4.x's flattened cause chain, is read from its last non-empty line
- * alone: the engine's words come after the wrapper's SQL and params, and a line above them may be
- * a bound value a request shaped like an engine message.
+ * An engine message given as text (D1, libsql or bare SQLite wording), or null. Text with several
+ * lines is read from its last non-empty line, where an engine puts its words. Text with a `params:`
+ * line (0.4.x's flattened cause chain, drizzle's wrapper message) is not read at all: a bound value
+ * may hold a newline and write that last line itself, and nothing in the text tells its lines apart.
  */
 export function readSqliteMessage(text: string): SqliteErrorRead | null {
-	const last = text
-		.split("\n")
-		.map((line) => line.trim())
-		.findLast((line) => line !== "")
+	const lines = text.split("\n").map((line) => line.trim())
+	if (lines.some((line) => /^params:/i.test(line))) return null
+	const last = lines.findLast((line) => line !== "")
 	return last === undefined ? null : readLine(last)
 }
 
