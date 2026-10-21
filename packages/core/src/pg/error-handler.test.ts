@@ -50,6 +50,7 @@ describe("readPgError", () => {
 			column: "c",
 			constraint: "k",
 			keyColumns: ["a", "b"],
+			message: "server error",
 			referenced: false,
 			table: "t",
 		}
@@ -261,6 +262,23 @@ describe("pgErrorHandler: more values a request can send (Q8)", () => {
 		expect(thrown(overlap("other"), maps)).toMatchObject({
 			errorKey: "exclusion_constraint_violation",
 			status: 409,
+		})
+	})
+})
+
+describe("pgErrorHandler: a trigger's RAISE EXCEPTION", () => {
+	it("says a constraint was violated when the RAISE gave no message", () => {
+		expect(thrown(nodePg({ code: "P0001", message: "" }))).toMatchObject({
+			cause: "Constraint violated",
+			errorKey: "constraint_violation",
+		})
+	})
+
+	it("maps P0001 to a 400 constraint_violation with the message it raised", () => {
+		expect(thrown(nodePg({ code: "P0001", message: "qty must be positive" }))).toMatchObject({
+			cause: "qty must be positive",
+			errorKey: "constraint_violation",
+			status: 400,
 		})
 	})
 })

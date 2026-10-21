@@ -6,6 +6,8 @@ export type PgErrorRead = {
     constraint: string | undefined;
     /** the columns in `detail`'s `Key (a, b)=(…)` */
     keyColumns: string[];
+    /** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
+    message: string | undefined;
     /** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
     referenced: boolean;
     table: string | undefined;
@@ -30,6 +32,7 @@ export declare const statusKeyToCode: Record<StatusKey, number>;
 /** Database-related error key constants */
 export declare const combErrorKeys: {
     readonly CHECK_CONSTRAINT_VIOLATION: "check_constraint_violation";
+    readonly CONSTRAINT_VIOLATION: "constraint_violation";
     readonly CURSOR_NOT_WIRED: "cursor_not_wired";
     readonly CURSOR_PAGINATION_UNSUPPORTED: "cursor_pagination_unsupported";
     readonly DATABASE_IO_ERROR: "database_io_error";

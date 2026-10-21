@@ -152,12 +152,7 @@ describe("handleConstraintViolation and sqliteErrorHandler", () => {
 		const unique = engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: store.slug")
 		expect(() => handleConstraintViolation(unique, MAPS)).toThrow(CombError)
 		expect(() => sqliteErrorHandler(unique, MAPS)).toThrow(CombError)
-		for (const other of [
-			engine("SQLITE_CONSTRAINT_TRIGGER", "x"),
-			engine("SQLITE_ERROR", "no such column: x"),
-			new Error("x"),
-			"x",
-		]) {
+		for (const other of [engine("SQLITE_ERROR", "no such column: x"), new Error("x"), "x"]) {
 			expect(() => handleConstraintViolation(other, MAPS)).not.toThrow()
 			expect(() => sqliteErrorHandler(other, MAPS)).not.toThrow()
 		}
@@ -325,5 +320,13 @@ describe("constraintError: a value the column cannot hold (Q10)", () => {
 		expect(() => sqliteErrorHandler(engine("SQLITE_TOOBIG", "string or blob too big"), [])).toThrow(
 			expect.objectContaining({ cause: "Value too large", errorKey: "value_too_large", status: 400 }),
 		)
+	})
+})
+
+describe("constraintError: a trigger's RAISE", () => {
+	it("is a 400 constraint_violation with the trigger's message, under its code or a bare SQLITE_CONSTRAINT", () => {
+		const raised = { cause: "qty must be positive", errorKey: "constraint_violation", status: 400 }
+		expect(thrown(engine("SQLITE_CONSTRAINT_TRIGGER", "qty must be positive"), [])).toMatchObject(raised)
+		expect(thrown(engine("SQLITE_CONSTRAINT", "qty must be positive"), [])).toMatchObject(raised)
 	})
 })

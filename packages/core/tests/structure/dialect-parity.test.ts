@@ -62,6 +62,8 @@ const FIXTURE_KEY: Record<string, string> = {
 	foreignKey: "member_org_missing",
 	notNull: "required_field_missing",
 	primaryKey: "member_id_taken",
+	/* a trigger's RAISE: SQLITE_CONSTRAINT_TRIGGER on SQLite, P0001 on Postgres */
+	raised: "constraint_violation",
 	unique: "member_email_taken",
 }
 

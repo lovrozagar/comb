@@ -15,6 +15,8 @@ export type PgErrorRead = {
 	constraint: string | undefined
 	/** the columns in `detail`'s `Key (a, b)=(…)` */
 	keyColumns: string[]
+	/** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
+	message: string | undefined
 	/** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
 	referenced: boolean
 	table: string | undefined
@@ -34,6 +36,7 @@ type DriverError = {
 	constraint_name?: unknown
 	detail?: unknown
 	errno?: unknown
+	message?: unknown
 	table?: unknown
 	table_name?: unknown
 }
@@ -72,6 +75,7 @@ export function readPgError(error: unknown): PgErrorRead | null {
 			column: text(f.column) ?? text(f.column_name),
 			constraint: text(f.constraint) ?? text(f.constraint_name),
 			keyColumns: keyColumns(text(f.detail)),
+			message: text(f.message),
 			/* anchored on the tail Postgres writes after the key values, which a value can spell */
 			referenced: /\) is still referenced from table "(?:[^"]|"")+"\.$/.test(text(f.detail) ?? ""),
 			table: text(f.table) ?? text(f.table_name),
@@ -180,12 +184,24 @@ function exclusion(v: Violation): CombError {
 	return toError(v, { entry: lookup(v.maps, table, (t) => own(t.exclusion, constraint)), fallback, table })
 }
 
+/** A rule a trigger or function enforces with RAISE EXCEPTION (P0001): a 400 whose cause is its message */
+function raised(v: Violation): CombError {
+	return new CombError({
+		cause: v.read.message ?? "Constraint violated",
+		errorKey: combErrorKeys.CONSTRAINT_VIOLATION,
+		source: v.source,
+		status: "bad_request",
+		table: v.read.table,
+	})
+}
+
 const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
 	"23502": notNull,
 	"23503": foreignKey,
 	"23505": unique,
 	"23514": check,
 	"23P01": exclusion,
+	P0001: raised,
 }
 
 const UNAVAILABLE: Fallback = {

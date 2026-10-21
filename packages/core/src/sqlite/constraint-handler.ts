@@ -133,11 +133,26 @@ function foreignKey(v: Violation): CombError {
 	return toError(v, { column: entry === undefined ? undefined : column, entry, fallback, table })
 }
 
+/**
+ * A rule a trigger enforces with RAISE(ABORT | FAIL | ROLLBACK, message): a 400 whose cause is the
+ * message the app wrote for it. A bare SQLITE_CONSTRAINT whose wording names no other kind is one
+ * too, as D1 may report it without its extended code.
+ */
+const raised = (v: Violation): CombError =>
+	new CombError({
+		cause: v.read.message,
+		errorKey: combErrorKeys.CONSTRAINT_VIOLATION,
+		source: v.source,
+		status: "bad_request",
+	})
+
 const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
+	SQLITE_CONSTRAINT: raised,
 	SQLITE_CONSTRAINT_CHECK: check,
 	SQLITE_CONSTRAINT_FOREIGNKEY: foreignKey,
 	SQLITE_CONSTRAINT_NOTNULL: notNull,
 	SQLITE_CONSTRAINT_PRIMARYKEY: primaryKey,
+	SQLITE_CONSTRAINT_TRIGGER: raised,
 	SQLITE_CONSTRAINT_UNIQUE: unique,
 }
 

@@ -102,3 +102,26 @@ describe("d1ErrorHandler on Miniflare through drizzle", () => {
 		}
 	})
 })
+
+describe("d1ErrorHandler on Miniflare: a trigger's RAISE", () => {
+	let harness: D1Harness
+
+	beforeEach(async () => {
+		harness = await d1Memory()
+	})
+	afterEach(() => harness.dispose())
+
+	const run = (statement: string) => () => drizzle(harness.CORE).run(sql.raw(statement))
+
+	it("answers a trigger's RAISE with the 400 every engine gives, its message the cause", async () => {
+		await harness.CORE.prepare("CREATE TABLE stock (qty INTEGER)").run()
+		await harness.CORE.prepare(
+			"CREATE TRIGGER qty_positive BEFORE INSERT ON stock WHEN new.qty <= 0 BEGIN SELECT RAISE(ABORT, 'qty must be positive'); END",
+		).run()
+		expect(await handled(run("INSERT INTO stock VALUES (0)"))).toMatchObject({
+			cause: "qty must be positive",
+			errorKey: "constraint_violation",
+			status: 400,
+		})
+	})
+})

@@ -8,7 +8,7 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
 import { createCursor, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
-import { assertCursorSecret } from "./cursor-sign.ts"
+import { assertCursorSecret, NO_CURSOR_SECRET } from "./cursor-sign.ts"
 import { assertCursorFits } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
 import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
@@ -160,8 +160,9 @@ function drizzleListOptions(
 		sortOrderBy: Record<string, "asc" | "desc">
 		validated?: true | undefined
 	},
-	{ cursorSecret }: CursorOptions,
+	options: CursorOptions,
 ): DrizzleListOptions {
+	const { cursorSecret } = options ?? NO_CURSOR_SECRET
 	assertSchemaParsed(query)
 	/* a secret that cannot sign is a wiring mistake on page 1 too, not only once a cursor comes back */
 	assertCursorSecret(cursorSecret)
@@ -247,8 +248,9 @@ function drizzlePaginationResult<T extends object>(
 		parsedSort: SortField[]
 		validated?: true | undefined
 	},
-	options: PaginateOptions,
+	given: PaginateOptions,
 ): readonly [T[], PaginationMeta] {
+	const options = given ?? NO_CURSOR_SECRET
 	assertCursorSecret(options.cursorSecret)
 	const hasMore = items.length > query.limit
 	const sliced = hasMore ? items.slice(0, query.limit) : items

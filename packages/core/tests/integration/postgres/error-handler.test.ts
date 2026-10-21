@@ -362,6 +362,15 @@ describePg("pgErrorHandler on a real server: values a request can send (Q8)", ()
 		).toMatchObject({ errorKey: "value_too_large", status: 400 })
 	})
 
+	it("answers a trigger's RAISE EXCEPTION (P0001) with the 400 SQLite gives, its message the cause", async () => {
+		expect(
+			await failure(
+				"CREATE TEMP TABLE stock (qty int); CREATE FUNCTION pg_temp.qty_positive() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.qty <= 0 THEN RAISE EXCEPTION 'qty must be positive'; END IF; RETURN NEW; END $$; CREATE TRIGGER qty_positive BEFORE INSERT ON stock FOR EACH ROW EXECUTE FUNCTION pg_temp.qty_positive()",
+				"INSERT INTO stock VALUES (0)",
+			),
+		).toMatchObject({ cause: "qty must be positive", errorKey: "constraint_violation", status: 400 })
+	})
+
 	it("maps an overlapping row under an EXCLUDE constraint through the map", async () => {
 		expect(
 			await failure(

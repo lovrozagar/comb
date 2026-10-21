@@ -9,7 +9,7 @@
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { decodeBase64Url, encodeBase64Url } from "./base64url.ts"
-import { assertCursorSecret, signPayload, verifyTag } from "./cursor-sign.ts"
+import { assertCursorSecret, NO_CURSOR_SECRET, signPayload, verifyTag } from "./cursor-sign.ts"
 import type { SortDirection, SortField, SortNulls } from "./types.ts"
 
 /**
@@ -161,10 +161,10 @@ function createCursor(
 	parsedSort: readonly SortField[],
 	opts: { cursorSecret: string; idField?: string | undefined },
 ): string {
-	const idField = opts.idField ?? CURSOR_TIEBREAK_COLUMN
+	const { cursorSecret, idField = CURSOR_TIEBREAK_COLUMN } = opts ?? NO_CURSOR_SECRET
 	return encodeCursor(
 		{ i: record[idField] as CursorId, s: sortSignature(parsedSort), v: parsedSort.map(({ field }) => record[field]) },
-		opts.cursorSecret,
+		cursorSecret,
 	)
 }
 

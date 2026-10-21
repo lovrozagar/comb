@@ -1,6 +1,6 @@
 /** queryHelpers.paginate beyond the id-keyed rows drizzle.test.ts pages */
 import { describe, expect, it } from "vitest"
-import { verifiedCursor } from "./cursor.ts"
+import { createCursor, verifiedCursor } from "./cursor.ts"
 import { queryHelpers } from "./drizzle.ts"
 import { createListQuerySchema } from "./schema.ts"
 import { CURSOR_SECRET, SIGNED } from "./__fixtures__/cursor-secret.ts"
@@ -20,5 +20,18 @@ describe("queryHelpers.paginate on rows keyed by another field (C8)", () => {
 		expect(() => queryHelpers.paginate(rows, query, SIGNED)).toThrow(
 			expect.objectContaining({ errorKey: "sort_not_wired" }),
 		)
+	})
+})
+
+describe("the cursor helpers called without their options, as JS or a cast can", () => {
+	const schema = createListQuerySchema({ sort: ["name"] })
+	const notWired = expect.objectContaining({ errorKey: "cursor_not_wired", status: 500 })
+	const missing = undefined as unknown as typeof SIGNED
+
+	it("say the secret is missing, rather than fail to destructure", () => {
+		const query = schema.parse({ limit: "1" })
+		expect(() => queryHelpers.listOptions(query, missing)).toThrow(notWired)
+		expect(() => queryHelpers.paginate([{ id: "a", name: "x" }], query, missing)).toThrow(notWired)
+		expect(() => createCursor({ id: "a", name: "x" }, query.parsedSort, missing)).toThrow(notWired)
 	})
 })

@@ -212,3 +212,24 @@ describe("bun:sqlite maps an expression index and a STRICT mismatch as libsql do
 		})
 	})
 })
+
+describe("bun:sqlite answers a trigger's RAISE as libsql does", () => {
+	it("is a 400 constraint_violation with the trigger's message", () => {
+		const sqlite = new Database(":memory:")
+		sqlite.run("CREATE TABLE stock (qty INTEGER)")
+		sqlite.run(
+			"CREATE TRIGGER qty_positive BEFORE INSERT ON stock WHEN new.qty <= 0 BEGIN SELECT RAISE(ABORT, 'qty must be positive'); END",
+		)
+		let thrown: unknown
+		try {
+			drizzle({ client: sqlite }).run(sql.raw("INSERT INTO stock VALUES (0)"))
+		} catch (error) {
+			try {
+				sqliteErrorHandler(error, [])
+			} catch (mapped) {
+				thrown = mapped
+			}
+		}
+		expect(thrown).toMatchObject({ cause: "qty must be positive", errorKey: "constraint_violation", status: 400 })
+	})
+})

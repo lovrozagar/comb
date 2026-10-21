@@ -92,13 +92,16 @@ export { createCursor, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem,
 declare const MIN_CURSOR_SECRET_BYTES = 32;
 /** HMAC-SHA256 of `data` under `key` */
 declare const macOf: (key: Uint8Array, data: Uint8Array) => Uint8Array;
+declare const NO_CURSOR_SECRET: {
+    readonly cursorSecret: string;
+};
 /** Throw the 500 keyOf throws when `secret` cannot sign a cursor */
 declare function assertCursorSecret(secret: string): void;
 /** The base64url tag of `payload` under `secret` */
 declare function signPayload(payload: string, secret: string): string;
 /** Whether `tag` is `payload`'s under `secret`, compared in constant time over the whole tag */
 declare function verifyTag(payload: string, tag: string, secret: string): boolean;
-export { assertCursorSecret, macOf, MIN_CURSOR_SECRET_BYTES, signPayload, verifyTag };
+export { assertCursorSecret, macOf, NO_CURSOR_SECRET, MIN_CURSOR_SECRET_BYTES, signPayload, verifyTag };
 
 // query/drizzle.d.ts
 /**
@@ -166,7 +169,7 @@ declare function drizzleListOptions(query: {
     parsedSort: SortField[];
     sortOrderBy: Record<string, "asc" | "desc">;
     validated?: true | undefined;
-}, { cursorSecret }: CursorOptions): DrizzleListOptions;
+}, options: CursorOptions): DrizzleListOptions;
 type DrizzleListResult<T> = T & {
     _total?: number;
 };
@@ -185,7 +188,7 @@ declare function drizzlePaginationResult<T extends object>(items: DrizzleListRes
     parsedFields?: ParsedFields | null | undefined;
     parsedSort: SortField[];
     validated?: true | undefined;
-}, options: PaginateOptions): readonly [T[], PaginationMeta];
+}, given: PaginateOptions): readonly [T[], PaginationMeta];
 declare function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
 /** List-query helpers for drizzle queries: count, options, pagination, projection */
 declare const queryHelpers: {

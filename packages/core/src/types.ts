@@ -19,6 +19,7 @@ export const statusKeyToCode: Record<StatusKey, number> = {
 /** Database-related error key constants */
 export const combErrorKeys = {
 	CHECK_CONSTRAINT_VIOLATION: "check_constraint_violation",
+	CONSTRAINT_VIOLATION: "constraint_violation",
 	CURSOR_NOT_WIRED: "cursor_not_wired",
 	CURSOR_PAGINATION_UNSUPPORTED: "cursor_pagination_unsupported",
 	DATABASE_IO_ERROR: "database_io_error",

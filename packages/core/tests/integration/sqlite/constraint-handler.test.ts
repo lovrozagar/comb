@@ -236,3 +236,22 @@ describe("sqliteErrorHandler on libsql: an expression index and a STRICT column 
 		})
 	})
 })
+
+describe("sqliteErrorHandler on libsql: a trigger's RAISE", () => {
+	const db = useMemberDb()
+
+	it.each(["ABORT", "FAIL"])(
+		"answers RAISE(%s, …) with a 400 constraint_violation, its message the cause",
+		async (kind) => {
+			await db().client.execute("CREATE TABLE stock (qty INTEGER)")
+			await db().client.execute(
+				`CREATE TRIGGER qty_positive BEFORE INSERT ON stock WHEN new.qty <= 0 BEGIN SELECT RAISE(${kind}, 'qty must be positive'); END`,
+			)
+			expect(await classify(db(), "INSERT INTO stock VALUES (0)")).toMatchObject({
+				cause: "qty must be positive",
+				errorKey: "constraint_violation",
+				status: 400,
+			})
+		},
+	)
+})

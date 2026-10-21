@@ -28,6 +28,9 @@ function keyOf(secret: string): Uint8Array {
 	})
 }
 
+/* what a caller that left out its options (JS, or a cast) holds: no secret, which keyOf refuses with a 500 */
+const NO_CURSOR_SECRET: { readonly cursorSecret: string } = { cursorSecret: "" }
+
 /** Throw the 500 keyOf throws when `secret` cannot sign a cursor */
 function assertCursorSecret(secret: string): void {
 	keyOf(secret)
@@ -49,4 +52,4 @@ function verifyTag(payload: string, tag: string, secret: string): boolean {
 	return difference === 0
 }
 
-export { assertCursorSecret, macOf, MIN_CURSOR_SECRET_BYTES, signPayload, verifyTag }
+export { assertCursorSecret, macOf, NO_CURSOR_SECRET, MIN_CURSOR_SECRET_BYTES, signPayload, verifyTag }
