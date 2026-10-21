@@ -3,7 +3,7 @@
  * messages, built from the same analysis as the constraints file, so the two always agree.
  */
 import path from "node:path"
-import { propertyName, stringLiteral, toScreamingSnakeCase } from "../utils/case.ts"
+import { dbIdentifiers, propertyName, stringLiteral } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { buildConstraintMap, constraintsIn } from "./constraints.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -68,12 +68,12 @@ export function generateTranslations(ctx: GeneratorContext, config: Translations
 
 type TranslationFile = { dbName: string; errorKeys: ErrorKey[]; filePrefix: string }
 
-const errorKeysConst = (dbName: string) => `${toScreamingSnakeCase(dbName)}_DB_ERROR_KEYS`
+const errorKeysConst = (dbName: string) => `${dbIdentifiers(dbName).constant}_DB_ERROR_KEYS`
 
 /** Generate error keys TypeScript file */
 function generateErrorKeysFile({ dbName, errorKeys }: TranslationFile): string {
 	const constName = errorKeysConst(dbName)
-	const typeName = `${dbName.charAt(0).toUpperCase() + dbName.slice(1)}DbErrorKey`
+	const typeName = `${dbIdentifiers(dbName).pascal}DbErrorKey`
 	return [
 		`const ${constName} = {`,
 		errorKeys.map(({ key }) => `\t${propertyName(key)}: ${stringLiteral(key)}`).join(",\n"),

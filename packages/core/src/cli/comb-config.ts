@@ -1,6 +1,7 @@
 /** comb.config.ts: the databases codegen and migrate diff read their tables and FTS from. */
 import fs from "node:fs"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import type { CodegenConfig, DatabaseCodegen } from "../codegen/config.ts"
 import { CliError, type CliIo } from "./output.ts"
 
@@ -11,7 +12,9 @@ export async function findCombConfig(cwd: string): Promise<CodegenConfig | undef
 	for (const name of ["comb.config.ts", "comb.config.js"]) {
 		const fp = path.resolve(cwd, name)
 		if (fs.existsSync(fp)) {
-			const mod = (await import(fp)) as { default?: CodegenConfig }
+			/* keyed by its mtime, so a process that runs codegen again after the config changed reads the change */
+			const url = `${pathToFileURL(fp).href}?mtime=${fs.statSync(fp).mtimeMs}`
+			const mod = (await import(url)) as { default?: CodegenConfig }
 			return mod.default ?? (mod as unknown as CodegenConfig)
 		}
 	}

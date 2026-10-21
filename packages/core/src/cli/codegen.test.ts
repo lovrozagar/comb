@@ -90,7 +90,7 @@ describe("comb codegen: config mode generator selection", () => {
 		expect(await runCli(["codegen", "core"], makeIo(dir))).toBe(0)
 		/* orm without a dialect and driver, and fts without a config, write nothing */
 		expect(readdirSync(dir).sort()).toEqual([
-			".db.core.codegen.json",
+			".comb.codegen.json",
 			"comb.config.ts",
 			"db.core.manifest.gen.json",
 			"db.core.tables.ts",
@@ -102,7 +102,7 @@ describe("comb codegen: config mode generator selection", () => {
 		config(one, {})
 		expect(await runCli(["codegen", "-g", "manifest"], makeIo(one))).toBe(0)
 		expect(readdirSync(one).sort()).toEqual([
-			".db.core.codegen.json",
+			".comb.codegen.json",
 			"comb.config.ts",
 			"db.core.manifest.gen.json",
 			"db.core.tables.ts",

@@ -188,6 +188,8 @@ type ImportsMeta = {
 type AnalysisResult = {
     /** Database name derived from tables file path */
     dbName: string;
+    /** The engine the tables are built for, by the drizzle builder each one's file imports; null when none says */
+    dialect: "postgres" | "sqlite" | null;
     imports: ImportsMeta;
     tables: TableMeta[];
     /** Relative import path for the tables file */

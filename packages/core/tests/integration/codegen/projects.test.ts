@@ -4,78 +4,17 @@
  * a database named apart from its tables file. Each database gets only its own tables and its own
  * package exports, and every generated import resolves under tsc.
  */
-import { spawnSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
-import { runCli } from "../../../src/cli/index.ts"
+import { describe, expect, it } from "vitest"
+import { codegen, exportsOf, project, read, typecheck, useProjects } from "../support/codegen-project.ts"
 
-const CORE = path.join(import.meta.dirname, "../../..")
-
-const made: string[] = []
-afterEach(() => {
-	for (const dir of made.splice(0)) fs.rmSync(dir, { force: true, recursive: true })
-})
-
-/** A project inside the package, so its imports of comb and drizzle resolve as an installed app's would */
-function project(files: Record<string, string>): string {
-	const dir = fs.mkdtempSync(path.join(CORE, ".tmp-codegen-"))
-	made.push(dir)
-	const all = { "package.json": JSON.stringify({ name: "app", private: true, type: "module" }), ...files }
-	for (const [name, text] of Object.entries(all)) {
-		fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
-		fs.writeFileSync(path.join(dir, name), text)
-	}
-	return dir
-}
+useProjects()
 
 const tables = (name: string) => `import { sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const ${name}Item = sqliteTable("${name}_item", { id: c.id("it${name}"), name: c.text("name").notNull() })
 `
-
-async function codegen(dir: string): Promise<void> {
-	const errors: string[] = []
-	const io = { cwd: dir, err: (line: string) => errors.push(line), out: () => undefined }
-	expect(await runCli(["codegen"], io), errors.join("\n")).toBe(0)
-}
-
-const read = (dir: string, file: string) => fs.readFileSync(path.join(dir, file), "utf8")
-const exportsOf = (dir: string) =>
-	(JSON.parse(read(dir, "package.json")) as { exports: Record<string, string> }).exports
-
-/** tsc over every generated file of the project under the strict flags a consumer may set: its imports must resolve */
-function typecheck(dir: string): string {
-	const generated = fs
-		.readdirSync(dir, { recursive: true, withFileTypes: true })
-		.filter((entry) => entry.isFile() && entry.name.endsWith(".gen.ts"))
-		.map((entry) => path.join(entry.parentPath, entry.name))
-	fs.writeFileSync(
-		path.join(dir, "tsconfig.json"),
-		JSON.stringify({
-			compilerOptions: {
-				allowImportingTsExtensions: true,
-				exactOptionalPropertyTypes: true,
-				module: "preserve",
-				moduleResolution: "bundler",
-				noEmit: true,
-				noFallthroughCasesInSwitch: true,
-				noImplicitReturns: true,
-				noPropertyAccessFromIndexSignature: true,
-				noUncheckedIndexedAccess: true,
-				noUnusedLocals: true,
-				noUnusedParameters: true,
-				skipLibCheck: true,
-				strict: true,
-				target: "esnext",
-				verbatimModuleSyntax: true,
-			},
-			files: generated,
-		}),
-	)
-	const ran = spawnSync("bunx", ["tsc", "-p", path.join(dir, "tsconfig.json")], { cwd: CORE, encoding: "utf8" })
-	return `${ran.stdout}${ran.stderr}`.trim()
-}
 
 describe("comb codegen: two databases in one folder (D1)", () => {
 	it("gives each database only the tables its own tables file declares", async () => {

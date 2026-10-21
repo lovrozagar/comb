@@ -419,6 +419,8 @@ export default defineCodegenConfig({
 
 `defineCodegenConfig` types the file, so a mistyped generator, `output` key or driver fails to compile. `output.default` is the directory every generator writes to unless the config names its own output; without it, files go beside the tables file.
 
+A run writes nothing until every database's generators succeed, then writes them all at once, so a failing database leaves the others' files and `package.json` as they were. It then deletes what each database's last run wrote and this one no longer does, but only files carrying comb's header. A table that was removed, a `filePrefix` that changed and an `output.default` that moved all count. The record of what each database wrote is `.comb.codegen.json` beside `comb.config.ts` (beside the tables file in `--tables` mode); commit it with the output. A database's name becomes the stem of generated identifiers, camel-cased across any character an identifier cannot hold (`my-db` gives `createMyDbDb` and `MY_DB_DB_CONSTRAINT_MAP`); a name that still makes no identifier fails the run. Without a `dialect` in the config, the drizzle builder each table's file imports decides it (`pgTable` or `sqliteTable`, through any re-export), and a database holding both is refused.
+
 ### Generators
 
 `@lovrozagar/comb/codegen/generators` exports each one directly; the CLI runs them by name via `-g`.

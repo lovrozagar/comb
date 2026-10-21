@@ -6,7 +6,7 @@
  * to labels, and strips common suffixes (_json, _id).
  */
 import path from "node:path"
-import { commentText, propertyName, toScreamingSnakeCase } from "../utils/case.ts"
+import { commentText, dbIdentifiers, propertyName } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { findNearestPackageJson, setPackageExport } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -54,8 +54,9 @@ function generateFieldNames(ctx: GeneratorContext, config: FieldNamesConfig): vo
 		entries.push([name, fieldToLabel(name)])
 	}
 
-	const constName = `${toScreamingSnakeCase(dbName)}_DB_FIELD_NAMES`
-	const typeName = `${dbName.charAt(0).toUpperCase() + dbName.slice(1)}DbFieldName`
+	const { constant, pascal } = dbIdentifiers(dbName)
+	const constName = `${constant}_DB_FIELD_NAMES`
+	const typeName = `${pascal}DbFieldName`
 
 	const lines: string[] = []
 	lines.push(`const ${constName} = {`)

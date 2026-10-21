@@ -7,7 +7,7 @@
 import type { Project } from "ts-morph"
 import { parseTable } from "./analyze-table.ts"
 import type { AnalysisResult, ImportsMeta, TableMeta } from "./analyzer-types.ts"
-import { isTableDefinition, tableBuilders } from "./utils/table-builders.ts"
+import { builderDialects, calleeOf, isTableDefinition, tableBuilders } from "./utils/table-builders.ts"
 import { buildIdentifierValueMap } from "./utils/constraint-text.ts"
 import { createProjectFromTablesDir, extractDbName, getTablesImportPath, tableSourceFiles } from "./utils/ts-morph.ts"
 
@@ -28,20 +28,36 @@ function collectImports(project: Project): ImportsMeta {
 	return imports
 }
 
-/** Every table the tables file declares, itself or through a file it re-exports. */
-function collectTables(project: Project, tablesPath: string, imports: ImportsMeta): TableMeta[] {
+/**
+ * Every table the tables file declares, itself or through a file it re-exports, and the engine
+ * their builders build for; tables of both engines in one database are refused
+ */
+function collectTables(
+	project: Project,
+	tablesPath: string,
+	imports: ImportsMeta,
+): Pick<AnalysisResult, "dialect" | "tables"> {
 	const tables: TableMeta[] = []
+	const dialects = new Set<"postgres" | "sqlite">()
 	for (const file of tableSourceFiles(project, tablesPath)) {
 		const builders = tableBuilders(file)
+		const engines = builderDialects(file)
 		for (const statement of file.getVariableStatements()) {
 			const declaration = statement.getDeclarations()[0]
 			const text = declaration?.getInitializer()?.getText()
 			if (declaration === undefined || text === undefined || !isTableDefinition(text, builders)) continue
 			const table = parseTable(declaration, imports)
-			if (table !== null) tables.push(table)
+			if (table === null) continue
+			tables.push(table)
+			const engine = engines.get(calleeOf(text) as string)
+			if (engine !== undefined) dialects.add(engine)
 		}
 	}
-	return tables.sort((a, b) => a.varName.localeCompare(b.varName))
+	if (dialects.size > 1)
+		throw new Error(
+			`${tablesPath}: the database holds both Postgres and SQLite tables; give each engine its own database`,
+		)
+	return { dialect: [...dialects][0] ?? null, tables: tables.sort((a, b) => a.varName.localeCompare(b.varName)) }
 }
 
 /**
@@ -56,7 +72,7 @@ function analyze(tablesPath: string, cwd?: string): AnalysisResult {
 	return {
 		dbName: extractDbName(tablesPath),
 		imports,
-		tables: collectTables(project, tablesPath, imports),
+		...collectTables(project, tablesPath, imports),
 		tablesImportPath: getTablesImportPath(tablesPath),
 	}
 }

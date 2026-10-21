@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
 	camelToKebab,
 	commentText,
+	dbIdentifiers,
 	propertyAccess,
 	propertyName,
 	snakeToCamel,
@@ -87,5 +88,18 @@ describe("sqlIdentifier", () => {
 		expect(sqlIdentifier("user_id")).toBe("user_id")
 		expect(sqlIdentifier('quo"ted')).toBe('"quo""ted"')
 		expect(sqlIdentifier("price$")).toBe('"price$"')
+	})
+})
+
+describe("dbIdentifiers (F1)", () => {
+	it("camel-cases a name across what no identifier holds, and keeps one that already is", () => {
+		expect(dbIdentifiers("my-db")).toEqual({ camel: "myDb", constant: "MY_DB", pascal: "MyDb" })
+		expect(dbIdentifiers("core")).toEqual({ camel: "core", constant: "CORE", pascal: "Core" })
+		expect(dbIdentifiers("appCore")).toEqual({ camel: "appCore", constant: "APP_CORE", pascal: "AppCore" })
+		expect(dbIdentifiers("a b.c")).toMatchObject({ camel: "aBC" })
+	})
+
+	it("throws, naming the database, when no identifier can be made of it", () => {
+		for (const name of ["1db", "", "--"]) expect(() => dbIdentifiers(name)).toThrow(`database "${name}"`)
 	})
 })

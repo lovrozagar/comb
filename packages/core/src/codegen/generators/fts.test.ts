@@ -335,6 +335,6 @@ describe("generateFts — the metadata map", () => {
 		})
 
 		const ts = fs.readFileSync(path.join(tmpDir(), "db.my-content.fts.gen.ts"), "utf-8")
-		expect(ts).toContain("MY-CONTENT_DB_FTS")
+		expect(ts).toContain("MY_CONTENT_DB_FTS")
 	})
 })

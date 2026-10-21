@@ -25,6 +25,22 @@ export function toScreamingSnakeCase(str: string): string {
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
 
+/** The identifiers generated code names a database by */
+export type DbIdentifiers = { camel: string; constant: string; pascal: string }
+
+/**
+ * A database name as identifiers: camelCase across any character an identifier cannot hold
+ * (`my-db` is myDb, MyDb and MY_DB), a name that already is one kept as written. Throws when even
+ * that is no identifier, as with a leading digit, so codegen fails before writing a file.
+ */
+export function dbIdentifiers(name: string): DbIdentifiers {
+	const [first = "", ...rest] = name.split(/[^\w$]+/).filter((word) => word !== "")
+	const camel = first + rest.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("")
+	if (!IDENTIFIER.test(camel))
+		throw new Error(`database "${name}": generated code names it by identifiers, and none can be made of it; rename it`)
+	return { camel, constant: toScreamingSnakeCase(camel), pascal: camel.charAt(0).toUpperCase() + camel.slice(1) }
+}
+
 /** A key as an object property: bare when it is an identifier, quoted otherwise */
 export const propertyName = (key: string): string => (IDENTIFIER.test(key) ? key : JSON.stringify(key))
 

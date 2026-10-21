@@ -4,7 +4,7 @@
  * Generates constraint maps from analyzed table metadata for database error handling.
  */
 import path from "node:path"
-import { commentText, propertyName, stringLiteral, toScreamingSnakeCase } from "../utils/case.ts"
+import { commentText, dbIdentifiers, propertyName, stringLiteral } from "../utils/case.ts"
 import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -193,7 +193,7 @@ function generateConstraintMapCode(map: ConstraintMap, dbName: string): string {
 		]
 	})
 	return [
-		`export const ${toScreamingSnakeCase(dbName)}_DB_CONSTRAINT_MAP = {`,
+		`export const ${dbIdentifiers(dbName).constant}_DB_CONSTRAINT_MAP = {`,
 		...joined(blocks),
 		"} as const",
 		"",

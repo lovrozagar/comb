@@ -6,7 +6,7 @@
  * - db.{dbName}.fts.gen.ts   — type-safe FTS table metadata map
  */
 import path from "node:path"
-import { propertyName, stringLiteral, toScreamingSnakeCase } from "../utils/case.ts"
+import { dbIdentifiers, propertyName, stringLiteral } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { dedup, ftsReferenceSql, type FtsTableConfig } from "./fts-sql.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -38,7 +38,7 @@ function generateFts(ctx: GeneratorContext, config: FtsGeneratorConfig): void {
 	ctx.log(`  fts: ${sqlPath} (${entries.length} table${entries.length > 1 ? "s" : ""})`)
 
 	/* TypeScript file */
-	const constName = `${toScreamingSnakeCase(dbName)}_DB_FTS`
+	const constName = `${dbIdentifiers(dbName).constant}_DB_FTS`
 	const tsLines: string[] = []
 
 	tsLines.push(`const ${constName} = {`)

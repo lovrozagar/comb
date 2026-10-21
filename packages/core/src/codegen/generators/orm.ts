@@ -7,6 +7,7 @@ import path from "node:path"
 import { writeGenFile } from "../utils/fs.ts"
 import { importPathFrom } from "../utils/ts-morph.ts"
 import type { GeneratorContext } from "./context-types.ts"
+import { dbIdentifiers } from "../utils/case.ts"
 
 type OrmDialect = "sqlite" | "postgres"
 type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso"
@@ -160,7 +161,10 @@ function generateNeonOrm(n: OrmNames): string {
 		`import { drizzle as drizzleServerless } from "drizzle-orm/neon-serverless"`,
 		...schemaImports(n),
 		"",
-		`const ${n.dbName}DbIsolateCache = new Map<string, ReturnType<typeof create${n.pascal}DbHttp>>()`,
+		/* the cache is typed from the driver, not from the factory that fills it, which would make its type circular (F3) */
+		`const $clientType = () => drizzleHttp({ client: neon(""), relations })`,
+		"",
+		`const ${n.dbName}DbIsolateCache = new Map<string, ReturnType<typeof $clientType>>()`,
 		"",
 		`function create${n.pascal}DbHttp(connectionString: string) {`,
 		...cachedBody(n, "connectionString", [
@@ -214,10 +218,10 @@ export function generateOrm(ctx: GeneratorContext, config: OrmConfig): void {
 	/* each import runs from where the client is written */
 	const tablesImport = importPathFrom(outputPath, path.resolve(ctx.cwd, ctx.tablesPath))
 	const names: OrmNames = {
-		dbName,
-		pascal: dbName.charAt(0).toUpperCase() + dbName.slice(1),
+		dbName: dbIdentifiers(dbName).camel,
+		pascal: dbIdentifiers(dbName).pascal,
 		relationsImport: importPathFrom(outputPath, path.resolve(ctx.cwd, relationsFileOf(config, outputPath, dbName))),
-		schemaImport: `${dbName}DbSchema`,
+		schemaImport: `${dbIdentifiers(dbName).camel}DbSchema`,
 		tablesImport,
 	}
 	writeGenFile(outputPath, render(names), { generator: "comb", staged: ctx.staged })

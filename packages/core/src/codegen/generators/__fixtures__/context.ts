@@ -16,7 +16,7 @@ function testContext(
 	{ cwd, dbName = "test", dialect = "sqlite", tablesPath = "" }: ContextOptions,
 ): TestContext {
 	const analysis = Array.isArray(source)
-		? { dbName, imports: emptyImports(), tables: source, tablesImportPath: "" }
+		? { dbName, dialect, imports: emptyImports(), tables: source, tablesImportPath: "" }
 		: source
 	const logged: string[] = []
 	const warned: string[] = []
