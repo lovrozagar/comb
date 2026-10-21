@@ -4,7 +4,7 @@
  * 0.9.0's release failed in both publish steps, and its manifest would have lost the comb bin.
  */
 import { spawnSync } from "node:child_process"
-import { readFileSync, rmSync } from "node:fs"
+import { readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { describe, expect, it } from "vitest"
 
@@ -45,6 +45,24 @@ const flagsOf = (line: string) =>
 		.slice(3)
 		.filter((flag) => flag !== "--provenance" && flag !== "--dry-run")
 
+/** A dry run of a publish line on `dir`, npm logged out on every machine as on CI */
+function dryRun(dir: string, line: string): { status: number | null; stderr: string; warnings: string[] } {
+	const userconfig = join(dirname(dir), "empty.npmrc")
+	writeFileSync(userconfig, "")
+	const run = spawnSync("npm", ["publish", dir, "--dry-run", ...flagsOf(line)], {
+		cwd: dir,
+		encoding: "utf8",
+		env: { ...process.env, NPM_CONFIG_USERCONFIG: userconfig },
+	})
+	/* any normalization npm applies to the manifest only warns, and each one counts; the one warning a
+	 * logged-out dry run always prints is not about the package */
+	const warnings = run.stderr
+		.split("\n")
+		.filter((text) => text.startsWith("npm warn publish"))
+		.filter((text) => !/^npm warn publish This command requires you to be logged in to \S+ \(dry-run\)$/.test(text))
+	return { status: run.status, stderr: run.stderr, warnings }
+}
+
 describe("the published package (P2)", () => {
 	it("is packed with every catalog: and workspace: version resolved", () => {
 		withPacked((dir) => {
@@ -59,10 +77,9 @@ describe("the published package (P2)", () => {
 			/* npm 11+ drops a bin written `./path` from the manifest it publishes, and only warns */
 			expect(manifestOf(dir)["bin"]).toEqual({ comb: "src/bin.ts" })
 			for (const line of PUBLISHES) {
-				const run = spawnSync("npm", ["publish", dir, "--dry-run", ...flagsOf(line)], { cwd: dir, encoding: "utf8" })
+				const run = dryRun(dir, line)
 				expect(run.status, `${line.trim()}\n${run.stderr}`).toBe(0)
-				/* any normalization npm applies to the manifest only warns; each one fails here */
-				expect(run.stderr, line.trim()).not.toMatch(/^npm warn publish/m)
+				expect(run.warnings, line.trim()).toEqual([])
 			}
 		})
 	}, 120_000)
