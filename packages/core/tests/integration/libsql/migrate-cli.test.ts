@@ -238,4 +238,14 @@ describe("migrate apply and check --json on libsql (C5)", () => {
 		])
 		expect(apply.errors).toContain("Apply: 20260101000000_init.sql")
 	})
+
+	it("reports a config that throws a string as that string in refused", async () => {
+		const { dir } = project({ "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" })
+		fs.writeFileSync(path.join(dir, "comb.migrate.config.ts"), `throw "plain string from config"\n`)
+		const status = io(dir)
+		expect(await runCli(["migrate", "status", "core", "--json"], status)).toBe(1)
+		expect(status.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
+			{ applied: [], database: "core", pending: [], refused: ["plain string from config"] },
+		])
+	})
 })

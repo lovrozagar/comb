@@ -157,8 +157,8 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliI
 	try {
 		report(await runMode({ args, db, io: { ...io, out: io.err }, mode }), [])
 	} catch (error) {
-		/* the CLI throws Errors: a refusal, a config it cannot load, a command that failed */
-		report({ applied: [], pending: [] }, [(error as Error).message])
+		/* a refusal or a failed command is an Error; a user's config can throw anything */
+		report({ applied: [], pending: [] }, [error instanceof Error ? error.message : String(error)])
 		throw error
 	}
 }
