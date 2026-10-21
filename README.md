@@ -49,6 +49,8 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.9](#upgrading-to-09)
+- [Upgrading to 0.8.0](#upgrading-to-080)
 - [Upgrading to 0.7.0](#upgrading-to-070)
 - [Upgrading to 0.6.1](#upgrading-to-061)
 - [Upgrading to 0.6.0](#upgrading-to-060)
@@ -928,9 +930,9 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
 
-## Upgrading to 0.9.0
+## Upgrading to 0.9
 
-0.9.0 closes the findings of a fresh review of 0.8.0. It is a breaking minor; what changes for a project on 0.8:
+0.9.1 is the first 0.9 release on npm: 0.9.0 was tagged but never published, since its release failed before either registry received it. 0.9 closes the findings of a fresh review of 0.8.0. It is a breaking minor; what changes for a project on 0.8:
 
 **Migrations**
 
