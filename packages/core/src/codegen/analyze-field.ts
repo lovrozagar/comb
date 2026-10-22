@@ -43,6 +43,11 @@ function extractForeignKey(raw: string, fieldName: string): ForeignKeyRef | null
 	}
 }
 
+/** Whether a column references another: `.references(...)`, or the c.ref helper, which always does */
+export function isReference(field: Pick<FieldMeta, "foreignKey" | "raw">): boolean {
+	return field.foreignKey !== null || /c\.ref[<(]/.test(field.raw)
+}
+
 /* c.id(prefix) and c.serialId() always make the column "id"; their argument is no column name */
 const ID_HELPERS = /^\s*c\.(?:id|serialId)\s*\(/
 
@@ -82,6 +87,8 @@ export function parseField(
 	const isNotNull = /\.notNull\(\)/.test(raw) || isPrimaryKey || /^\s*c\.(?:createdAt|updatedAt)\s*\(/.test(raw)
 	const drizzleHelper = extractDrizzleHelper(raw)
 	const fk = extractForeignKey(raw, key)
+	if (constraints.mutable && !isReference({ foreignKey: fk, raw }))
+		throw new Error(`${read.place}: mutable lets a reference move on update, and ${key} references nothing`)
 	const length = lengthOf(declared, raw)
 
 	return {

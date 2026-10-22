@@ -1,4 +1,5 @@
 /** The Zod expression one column gets in each of the read, readPartial, create and update DTOs. */
+import { isReference } from "../../analyze-field.ts"
 import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { FieldConstraints } from "../../annotations.ts"
 import { isGenerated } from "../../entity-meta.ts"
@@ -16,8 +17,8 @@ type Build = {
 /* Postgres stores c.integer in int4 */
 const INT4 = { max: 2147483647, min: -2147483648 }
 
-/** A builder's answer: the Zod base, `null` to leave the column out, `undefined` when it is not its kind. */
-type Built = string | null | undefined
+/** A builder's answer: the Zod base, or `undefined` when the column is not its kind. */
+type Built = string | undefined
 
 const isMutative = (schemaType: SchemaType) => schemaType === "create" || schemaType === "update"
 const isRead = (schemaType: SchemaType) => schemaType === "read" || schemaType === "readPartial"
@@ -55,12 +56,11 @@ function jsonBase({ annotations, dialect, field, schemaType }: Build): Built {
 const NUMERIC =
 	/^\s*(?:c\.)?(?:integer|serialId|serial|bigserial|smallint|bigint|int|real|doublePrecision|numeric)\s*[<(]/
 
-/* a reference is set once, at creation, so it has no place in an update body. A numeric one takes
- * the number rules and a c.text one its own text rules, its declared bounds included; a c.ref,
- * which points at a c.id key, the id string */
-function foreignKeyBase({ field, schemaType }: Build): Built {
-	if (field.foreignKey === null && !/c\.ref[<(]/.test(field.raw)) return undefined
-	if (schemaType === "update") return null
+/* a numeric reference takes the number rules and a c.text one its own text rules, its declared
+ * bounds included; a c.ref, which points at a c.id key, the id string. Whether it enters the update
+ * body is generate.ts's (isExcludedFromUpdate) */
+function foreignKeyBase({ field }: Build): Built {
+	if (!isReference(field)) return undefined
 	if (NUMERIC.test(field.raw) || /c\.(text|id)[<(]/.test(field.raw)) return undefined
 	return "z.string().min(1).max(48)"
 }
@@ -203,7 +203,6 @@ export function generateFieldSchema(
 	const build: Build = { annotations: field.constraints, dialect, field, imports, schemaType }
 	for (const builder of BUILDERS) {
 		const base = builder(build)
-		if (base === null) return null
 		if (base !== undefined) return finish(build, base)
 	}
 	return finish(build, "z.unknown()")

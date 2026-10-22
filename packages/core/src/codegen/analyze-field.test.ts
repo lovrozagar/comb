@@ -80,3 +80,25 @@ describe("parseField: a text column's length", () => {
 		expect(parseField("n", 'c.text("name")').length).toBeNull()
 	})
 })
+
+describe("parseField: mutable, a reference's opt-in to move on update (F25)", () => {
+	it("reads mutable on a reference", () => {
+		expect(
+			parseField("teamId", 'c.text("team_id", { mutable: true }).references(() => team.id)').constraints.mutable,
+		).toBe(true)
+		expect(parseField("teamId", 'c.ref("team_id", { mutable: true })').constraints.mutable).toBe(true)
+		expect(parseField("teamId", 'c.ref("team_id")').constraints.mutable).toBe(false)
+	})
+
+	it("refuses mutable on a column that references nothing, naming it", () => {
+		expect(() => parseField("title", 'c.text("title", { mutable: true })')).toThrow(
+			'c.text("title", { mutable: true }): mutable lets a reference move on update, and title references nothing',
+		)
+	})
+
+	it("refuses mutable together with nomutate", () => {
+		expect(() => parseField("teamId", 'c.ref("team_id", { mutable: true, nomutate: true })')).toThrow(
+			'c.ref("team_id", { mutable: true, nomutate: true }): mutable and nomutate contradict; declare one',
+		)
+	})
+})

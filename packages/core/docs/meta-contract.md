@@ -262,7 +262,8 @@ named "immutable":
 if (isUpdateSchema) return null
 ```
 
-Foreign keys are immutable in comb by design, and publishing `immutable` without them would have
+Foreign keys are immutable in comb by design, unless a column declares `{ mutable: true }` for a
+reference that moves (a person's team, a category's parent), and publishing `immutable` without them would have
 told a consumer that `project_id` and `author_id` are freely mutable — the fields a tenant-boundary
 attack tries first. The `patch.immutable-field-rejected` check would have run, passed, and covered
 nothing.
@@ -276,9 +277,9 @@ const updateFields = new Set(fields.filter((f) => f.type === "update").map((f) =
 deriveEntityMeta(meta, updateFields)
 ```
 
-The generator still decides which columns enter the update body with `isExcludedFromUpdate`, which
-now names foreign keys, and `generateFieldSchema` drops foreign keys on its own as well. Today the
-two rules agree, so the emitted set and the predicate give the same list. The emitted set is what
+The generator decides which columns enter the update body with `isExcludedFromUpdate`, which names
+foreign keys and their `mutable` opt-in; `generateFieldSchema` renders a column's rules and decides
+nothing about the update body. So the emitted set and the predicate give the same list. The emitted set is what
 keeps the stamp right if a later rule lands in `generateFieldSchema` only. A caller with no
 generator output gets the predicate: `deriveEntityMeta(table)` falls back to it, and the manifest
 calls it that way (§8.2). This is the same lesson as §7, from the other direction: a fact restated
@@ -538,7 +539,7 @@ the rule §6.2 was written to enforce, applied to a second output. Because the s
 nothing about a private column, a private column's `generated` and `immutable` flags are `false`,
 and a unique index over one is left out of both. The manifest has no generator output to hand, so
 its `immutable` flags come from `isExcludedFromUpdate` (§6.2). A table with a composite key has no
-stamp; its flags fall back to the column's own `autogenerate` and `nomutate` annotations. A test
+stamp; its flags fall back to the column's own `autogenerate` annotation and to `isExcludedFromUpdate`. A test
 asserts the two agree field by field.
 
 Entities are sorted by name and the file carries a checksum header, so regenerating an unchanged

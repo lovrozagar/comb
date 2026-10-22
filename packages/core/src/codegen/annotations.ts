@@ -30,6 +30,7 @@ const KNOWN = /* @__PURE__ */ new Set([
 	"max",
 	"maxBytes",
 	"min",
+	"mutable",
 	"name",
 	"nomutate",
 	"password",
@@ -60,6 +61,8 @@ export function fieldConstraintsOf(
 ): FieldConstraints {
 	const unknown = Object.keys(constraints).find((key) => !KNOWN.has(key))
 	if (unknown !== undefined) throw new Error(`${place}: comb reads no constraint named ${unknown}`)
+	if (constraints["mutable"] === true && constraints["nomutate"] === true)
+		throw new Error(`${place}: mutable and nomutate contradict; declare one`)
 
 	/* Check if this is a timestamp field */
 	/* what fills the column, never its name (F13): comb's own timestamp helpers, or a timestamp's
@@ -78,6 +81,7 @@ export function fieldConstraintsOf(
 		max: typeof constraints["max"] === "number" ? constraints["max"] : null,
 		maxBytes: typeof constraints["maxBytes"] === "number" ? constraints["maxBytes"] : null,
 		min: typeof constraints["min"] === "number" ? constraints["min"] : null,
+		mutable: constraints["mutable"] === true,
 		name: constraints["name"] === true,
 		nomutate: constraints["nomutate"] === true,
 		password: constraints["password"] === true,

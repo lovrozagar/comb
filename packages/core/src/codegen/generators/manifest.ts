@@ -6,7 +6,7 @@
  * a change to one moves the other. See docs/meta-contract.md §8.2.
  */
 import path from "node:path"
-import { deriveEntityMeta, publishedUniqueIndexes } from "../entity-meta.ts"
+import { deriveEntityMeta, isExcludedFromUpdate, publishedUniqueIndexes } from "../entity-meta.ts"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -90,7 +90,7 @@ function toColumn(field: FieldMeta, entityMeta: ReturnType<typeof deriveEntityMe
 	return {
 		enumValues: field.enumValues,
 		generated: entityMeta ? entityMeta.generated.includes(field.name) : constraints.autogenerate,
-		immutable: entityMeta ? entityMeta.immutable.includes(field.name) : constraints.nomutate,
+		immutable: entityMeta ? entityMeta.immutable.includes(field.name) : isExcludedFromUpdate(field),
 		kind: field.drizzleHelper,
 		max: constraints.max ?? field.length,
 		min: constraints.min,

@@ -64,6 +64,8 @@ type FieldConstraintsMeta = {
     min: number | null;
     /** a name: letters, marks, numbers, spaces and punctuation */
     name: boolean;
+    /** a reference that moves on update; every other reference is set once (F25) */
+    mutable: boolean;
     nomutate: boolean;
     password: boolean;
     pattern: string | null;
@@ -242,9 +244,7 @@ import type { FieldMeta, TableMeta } from "./analyzer-types.ts";
  * `deriveEntityMeta` falls back to it when called without generator output, as
  * the manifest calls it. The schema stamp reads the field set the generator
  * actually emitted instead, so a rule `generateFieldSchema` adds on its own
- * still reaches `immutable`. That has happened once: foreign keys are dropped
- * from update bodies inside `generateFieldSchema`, which this predicate did not
- * mention at the time.
+ * still reaches `immutable`.
  */
 declare function isExcludedFromUpdate(field: FieldMeta): boolean;
 declare function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"];

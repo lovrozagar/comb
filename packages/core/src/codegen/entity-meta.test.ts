@@ -125,7 +125,12 @@ describe("deriveEntityMeta: identity", () => {
 describe("isExcludedFromUpdate", () => {
 	it.each([
 		["id", 'c.id("itm")', true],
+		/* a reference is set once, at creation, unless it declares mutable (F25) */
 		["owner_id", 'c.ref("owner_id").references(() => owner.id)', true],
+		["owner_id", 'c.ref("owner_id")', true],
+		["owner_id", 'c.text("owner_id").references(() => owner.id)', true],
+		["team_id", 'c.ref("team_id", { mutable: true }).references(() => team.id)', false],
+		["team_id", 'c.text("team_id", { mutable: true }).references(() => team.id)', false],
 		["slug", 'c.text("slug", { nomutate: true })', true],
 		["created_at", 'c.createdAt("created_at")', true],
 		["title", 'c.text("title")', false],

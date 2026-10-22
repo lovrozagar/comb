@@ -16,6 +16,7 @@ function makeField(overrides: Partial<FieldMeta> & { name: string }): FieldMeta 
 			max: null,
 			maxBytes: null,
 			min: null,
+			mutable: false,
 			name: false,
 			nomutate: false,
 			password: false,

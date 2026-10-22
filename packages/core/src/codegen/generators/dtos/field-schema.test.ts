@@ -41,7 +41,7 @@ describe("generateFieldSchema: what each schema type includes", () => {
 			/^z\.number\(\)\.int\(\)\.min\(Number\.MIN_SAFE_INTEGER\)/,
 		)
 		expect(generateFieldSchema(team, "read", { imports: imports() })).toMatch(/^z\.number\(\)\.int\(\)/)
-		expect(generateFieldSchema(team, "update", { imports: imports() })).toBeNull()
+		expect(generateFieldSchema(team, "update", { imports: imports() })).toMatch(/^z\.number\(\)\.int\(\)/)
 		/* a text reference to a c.id key takes the id bounds; to any other column, its own (F5, F10) */
 		const owner = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.id)', {
 			foreignKey: { ...fk, toId: true },
@@ -55,8 +55,9 @@ describe("generateFieldSchema: what each schema type includes", () => {
 		expect(generateFieldSchema(slug, "create", { imports: imports() })).toBe("z.string().min(1).max(200)")
 	})
 
-	it("leaves a reference out of the update body", () => {
-		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBeNull()
+	/* whether a reference enters the update DTO is isExcludedFromUpdate's (entity-meta.ts); this renders its rules */
+	it("renders a reference's rules for every schema type", () => {
+		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBe("z.string().min(1).max(48).nullable().optional()")
 		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe("z.string().min(1).max(48).nullable().optional()")
 	})
 })

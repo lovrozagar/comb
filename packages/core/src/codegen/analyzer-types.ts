@@ -15,6 +15,8 @@ type FieldConstraintsMeta = {
 	min: number | null
 	/** a name: letters, marks, numbers, spaces and punctuation */
 	name: boolean
+	/** a reference that moves on update; every other reference is set once (F25) */
+	mutable: boolean
 	nomutate: boolean
 	password: boolean
 	pattern: string | null

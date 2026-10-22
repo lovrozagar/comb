@@ -6,6 +6,7 @@
  * generated text. See docs/meta-contract.md.
  */
 import type { CombEntityMetaInput } from "../meta.ts"
+import { isReference } from "./analyze-field.ts"
 import type { FieldMeta, TableMeta, UniqueIndexMeta } from "./analyzer-types.ts"
 
 /**
@@ -15,9 +16,7 @@ import type { FieldMeta, TableMeta, UniqueIndexMeta } from "./analyzer-types.ts"
  * `deriveEntityMeta` falls back to it when called without generator output, as
  * the manifest calls it. The schema stamp reads the field set the generator
  * actually emitted instead, so a rule `generateFieldSchema` adds on its own
- * still reaches `immutable`. That has happened once: foreign keys are dropped
- * from update bodies inside `generateFieldSchema`, which this predicate did not
- * mention at the time.
+ * still reaches `immutable`.
  */
 function isExcludedFromUpdate(field: FieldMeta): boolean {
 	return (
@@ -25,9 +24,9 @@ function isExcludedFromUpdate(field: FieldMeta): boolean {
 		field.name === "id" ||
 		field.constraints.nomutate ||
 		field.constraints.autogenerate ||
-		/* Set once at creation — see the FK branch of generateFieldSchema */
-		field.foreignKey !== null ||
-		/c\.ref[<(]/.test(field.raw)
+		/* a reference is set once, at creation, unless it declares mutable (F25): an ownership key
+		   (organization, project) that a body could move would move the row to another tenant */
+		(isReference(field) && !field.constraints.mutable)
 	)
 }
 

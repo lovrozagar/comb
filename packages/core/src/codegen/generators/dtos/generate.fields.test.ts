@@ -5,7 +5,8 @@
 import fs from "node:fs"
 import path from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import type * as z from "zod"
+import * as z from "zod"
+import { readCombEntityMeta } from "../../../meta/read.ts"
 import { analyze } from "../../analyzer.ts"
 import { testContext } from "../__fixtures__/context.ts"
 import { generateDtos } from "./generate.ts"
@@ -17,11 +18,13 @@ let person: Record<string, z.ZodType> = {}
 const TABLES = `import { sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const team = sqliteTable("team", { id: c.id("tm") })
+export const org = sqliteTable("org", { id: c.id("org") })
 export const person = sqliteTable("person", {
 	id: c.id("per"),
 	slug: c.text("slug", { nomutate: true }).notNull(),
 	externalId: c.text("external_id").notNull(),
-	teamId: c.text("team_id").references(() => team.id),
+	orgId: c.text("org_id").references(() => org.id),
+	teamId: c.text("team_id", { mutable: true }).references(() => team.id),
 	bornAt: c.timestamp("born_at"),
 	email: c.text("email", { email: true }),
 	site: c.text("site", { url: true }),
@@ -42,7 +45,7 @@ afterAll(() => fs.rmSync(dir, { force: true, recursive: true }))
 const schema = (name: string) => person[`personDto${name}Schema`] as z.ZodType
 const accepts = (name: string, value: object) => schema(name).safeParse(value).success
 const CREATE = { createdAt: 1, externalId: "e", slug: "s" }
-const ROW = { ...CREATE, bornAt: null, email: null, id: "per_1", site: null, teamId: null, updatedAt: 1 }
+const ROW = { ...CREATE, bornAt: null, email: null, id: "per_1", orgId: null, site: null, teamId: null, updatedAt: 1 }
 
 describe("generated DTOs on comb's own columns", () => {
 	it("keeps a nomutate column on create, which it must be given, and leaves it off update (F9)", () => {
@@ -57,6 +60,17 @@ describe("generated DTOs on comb's own columns", () => {
 		expect(accepts("Read", { ...ROW, externalId: digest })).toBe(true)
 		expect(accepts("Create", { ...CREATE, teamId: "tm 1" })).toBe(false)
 		expect(accepts("Create", { ...CREATE, teamId: "t".repeat(49) })).toBe(false)
+	})
+
+	it("keeps a reference out of update and in immutable, unless it declares mutable (F25)", () => {
+		const update = Object.keys((schema("Update") as z.ZodObject).shape)
+		expect(update).not.toContain("orgId")
+		expect(schema("Update").parse({ orgId: "org_2" })).toEqual({})
+		expect(update).toContain("teamId")
+		expect(schema("Update").parse({ teamId: "tm_2" })).toEqual({ teamId: "tm_2" })
+		const meta = readCombEntityMeta(z.toJSONSchema(schema("Read"), { unrepresentable: "any" }))
+		expect(meta?.immutable).toContain("orgId")
+		expect(meta?.immutable).not.toContain("teamId")
 	})
 
 	it("takes a c.timestamp before 1970 on create and read (F11)", () => {

@@ -7,6 +7,12 @@
 type BaseConstraints = {
 	/** Field is filled by comb or the database: generated create and update DTOs leave it out */
 	autogenerate?: boolean
+	/**
+	 * A foreign key that may move after creation (a person to another team): generated update DTOs
+	 * take it. Every other reference is set once, at creation. Refused on a column that references
+	 * nothing, and together with `nomutate`.
+	 */
+	mutable?: boolean
 	/** Field cannot be mutated after creation */
 	nomutate?: boolean
 	/** Field is never read back: generated read DTOs, the meta stamp and the manifest leave it out */
