@@ -137,8 +137,9 @@ async function buildFtsWhereWithSpellfix(
  */
 type LikeSearchResolver = (q: string) => SQL | null
 
-/* the Latin combining marks NFKD splits off a letter: é is e + U+0301 */
-const DIACRITICS = /[\u0300-\u036f]/g
+/* the combining marks NFKD splits off a letter (é is e + U+0301), but those that make a Cyrillic
+   letter of its own (й is и + U+0306, ї is і + U+0308), which stay for NFC to put back */
+const DIACRITICS = /(?<!\p{Script=Cyrillic}[\u0300-\u036f]*)[\u0300-\u036f]/gu
 
 /* the Latin letters NFKD leaves whole, each with the ASCII a reader types for it (ẞ, Æ, … lowercase to these first) */
 const LATIN_FOLD: Readonly<Record<string, string>> = {
@@ -160,19 +161,27 @@ const LATIN_LETTERS = /[ðßæøþđħıĸłŋœŧ]/g
 
 /**
  * The text a `_search` column stores for `parts`, and what likeSearch folds each term to: the
- * present parts joined by a space, compatibility forms folded (ＦＩＬＥ, ﬁ), lowercased, Latin
- * diacritics removed, and the Latin letters with no decomposition spelled in ASCII (ß ss, æ ae,
- * œ oe, ø o, ł l, đ and ð d, þ th, ı i, ĸ k, ŋ n, ŧ t, ħ h). Other scripts stay as they are.
- * Write the column with it, so the reader and the writer are one function.
+ * present parts joined by a space, compatibility forms folded (ＦＩＬＥ, ﬁ), lowercased, Greek final
+ * sigma ς as σ (so a letter folds the same wherever it stands), combining marks removed but those
+ * that make a Cyrillic letter (й, ї, ё), the Latin letters with no decomposition spelled in ASCII
+ * (ß ss, æ ae, œ oe, ø o, ł l, đ and ð d, þ th, ı i, ĸ k, ŋ n, ŧ t, ħ h), then composed again (NFC),
+ * so й and Hangul syllables stay whole. Write the column with it, so the reader and the writer
+ * are one function.
  */
 function searchText(...parts: Array<string | null | undefined>): string {
-	return parts
-		.filter((part): part is string => typeof part === "string" && part !== "")
-		.join(" ")
-		.normalize("NFKD")
-		.toLowerCase()
-		.replace(DIACRITICS, "")
-		.replace(LATIN_LETTERS, (letter) => LATIN_FOLD[letter] as string)
+	return (
+		parts
+			.filter((part): part is string => typeof part === "string" && part !== "")
+			.join(" ")
+			.normalize("NFKD")
+			.toLowerCase()
+			/* toLowerCase writes Σ as ς at a word end and σ inside one: one letter, whatever its place */
+			.replace(/ς/g, "σ")
+			.replace(DIACRITICS, "")
+			.replace(LATIN_LETTERS, (letter) => LATIN_FOLD[letter] as string)
+			/* what kept its marks, and Hangul's jamo, composed back: й, ї and 가 as they were written */
+			.normalize("NFC")
+	)
 }
 
 /**
