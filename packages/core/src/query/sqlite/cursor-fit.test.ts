@@ -2,7 +2,7 @@ import { getTableColumns, sql } from "drizzle-orm"
 import { blob, customType, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 
-import { assertCursorFits, boundForKeys, DateKey } from "./cursor-fit.ts"
+import { assertCursorFits, bindable, boundForKeys, DateKey } from "./cursor-fit.ts"
 
 const columns = getTableColumns(
 	sqliteTable("t", {
@@ -56,15 +56,31 @@ describe("assertCursorFits", () => {
 		expect(fits(column, value)).toBe(false)
 	})
 
-	it("takes on a derived sort only what every driver binds, and a Date only on one declared as time (Q4)", () => {
-		for (const value of ["a", 1, true, null]) expect(() => assertCursorFits([sql`lower(name)`], [value])).not.toThrow()
-		for (const value of [new Date(0), { any: 1 }, 1n])
+	it("takes on a derived sort only what every driver binds, and on one declared as time a Date or its epoch milliseconds (Q4, R3)", () => {
+		for (const value of ["a", 1, true, null, 1n])
+			expect(() => assertCursorFits([sql`lower(name)`], [value])).not.toThrow()
+		for (const value of [new Date(0), { any: 1 }])
 			expect(() => assertCursorFits([sql`length(name)`], [value])).toThrow()
 		const at = new DateKey(sql`max(created_at)`)
-		expect(() => assertCursorFits([at], [new Date(0)])).not.toThrow()
-		expect(() => assertCursorFits([at], [0])).toThrow()
+		/* a row that selected the key as sql<number> holds a number, or a bigint on libsql's bigint mode */
+		for (const value of [new Date(0), 0, 1700000000000, 1700000000000n])
+			expect(() => assertCursorFits([at], [value])).not.toThrow()
+		for (const value of ["2024", Number.NaN, Number.POSITIVE_INFINITY])
+			expect(() => assertCursorFits([at], [value])).toThrow()
 		expect(boundForKeys([at, sql`x`], [new Date(5), new Date(6)])).toEqual([5, new Date(6)])
 		expect(at.getSQL()).toBe(at.expression.getSQL())
+	})
+
+	it("takes a bigint on a number column, as libsql's bigint mode and bun:sqlite's safeIntegers return it (R3)", () => {
+		expect(() => assertCursorFits([columns.count], [7n])).not.toThrow()
+		expect(() => assertCursorFits([columns.count], [9007199254740993n])).not.toThrow()
+	})
+
+	it("binds a bigint a number holds exactly as that number, and a larger one as it is", () => {
+		expect(bindable(7n)).toBe(7)
+		expect(bindable(9007199254740993n)).toBe(9007199254740993n)
+		expect(bindable("7")).toBe("7")
+		expect(boundForKeys([sql`x`, sql`y`], [7n, 9007199254740993n])).toEqual([7, 9007199254740993n])
 	})
 
 	it("checks every position, the tiebreak id last", () => {

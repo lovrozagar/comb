@@ -9,13 +9,17 @@ import { Column, is, type SQL, type SQLWrapper } from "drizzle-orm"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
 
-/** Whether `value` is what a column of this drizzle `dataType` holds; json and blobs hold nothing a cursor carries */
+/**
+ * Whether `value` is what a column of this drizzle `dataType` holds; json and blobs hold nothing a
+ * cursor carries. A number column holds a bigint too where the driver returns integers as one
+ * (libsql's intMode "bigint", bun:sqlite's safeIntegers), and a cursor minted from its row carries it.
+ */
 function fitsDataType(dataType: string, value: unknown): boolean {
 	switch (dataType.split(" ")[0]) {
 		case "string":
 			return typeof value === "string"
 		case "number":
-			return typeof value === "number"
+			return typeof value === "number" || typeof value === "bigint"
 		case "boolean":
 			return typeof value === "boolean"
 		case "bigint":
@@ -29,7 +33,7 @@ function fitsDataType(dataType: string, value: unknown): boolean {
 
 /**
  * A derived sort key declared as time: its expression yields epoch milliseconds, and its cursor
- * value is a Date, bound as that number
+ * value is a Date, bound as that number, or the number itself when the row selected it as one
  */
 class DateKey implements SQLWrapper {
 	readonly expression: SQLWrapper
@@ -43,21 +47,30 @@ class DateKey implements SQLWrapper {
 	}
 }
 
+const isInteger = (value: unknown) => typeof value === "bigint" || (typeof value === "number" && Number.isFinite(value))
+
 /**
- * Null fits every key. A column takes what its dataType holds; a key declared as time, a Date; any
- * other SQL expression (a derived sort) only what every driver binds as it is: a string, a number
- * or a boolean (bun:sqlite and D1 refuse a Date that libsql would bind)
+ * Null fits every key. A column takes what its dataType holds; a key declared as time, a Date or
+ * the epoch milliseconds its row selected; any other SQL expression (a derived sort) only what
+ * every driver binds: a string, a number, a bigint or a boolean (bun:sqlite and D1 refuse a Date
+ * that libsql would bind)
  */
 function fits(column: SQLWrapper, value: unknown): boolean {
 	if (value === null) return true
-	if (column instanceof DateKey) return value instanceof Date
+	if (column instanceof DateKey) return value instanceof Date || isInteger(value)
 	if (is(column, Column)) return fitsDataType(column.dataType, value)
-	return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+	return (
+		typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
+	)
 }
 
-/** The cursor's values as the keys bind them: a Date on a key declared as time, as its epoch milliseconds */
+/** A cursor value as every driver binds it: a bigint a number holds exactly, as that number (D1 binds no bigint) */
+const bindable = (value: unknown): unknown =>
+	typeof value === "bigint" && Number.isSafeInteger(Number(value)) ? Number(value) : value
+
+/** The cursor's values as the keys bind them: a Date on a key declared as time as its epoch milliseconds, a safe bigint as a number */
 const boundForKeys = (columns: readonly SQLWrapper[], values: readonly unknown[]): unknown[] =>
-	values.map((value, i) => (columns[i] instanceof DateKey && value instanceof Date ? value.getTime() : value))
+	values.map((value, i) => (columns[i] instanceof DateKey && value instanceof Date ? value.getTime() : bindable(value)))
 
 /** Throw a 400 unless every cursor value, the tiebreak id last, fits its column */
 function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unknown[]): void {
@@ -65,4 +78,4 @@ function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unkno
 	throw new CombError({ cause: "Invalid cursor", errorKey: combErrorKeys.INVALID_CURSOR, status: "bad_request" })
 }
 
-export { assertCursorFits, boundForKeys, DateKey }
+export { assertCursorFits, bindable, boundForKeys, DateKey }

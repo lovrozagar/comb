@@ -7,9 +7,9 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
-import { createCursor, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
+import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
-import { assertCursorFits } from "./sqlite/cursor-fit.ts"
+import { assertCursorFits, bindable } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
 import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import { assertSchemaParsed } from "./trusted.ts"
@@ -174,7 +174,13 @@ function drizzleListOptions(
 		const { keys, tiebreak } = keysOn(table, sort)
 		/* the cursor is client input: each value must be what its column holds, or it is a 400 */
 		assertCursorFits([...keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
-		return keysetSQL({ id: cursor.id, keys: atCursorPrecision(keys), tiebreak, values: boundAs(keys, cursor.values) })
+		const id = bindable(cursor.id) as CursorId
+		return keysetSQL({
+			id,
+			keys: atCursorPrecision(keys),
+			tiebreak,
+			values: boundAs(keys, cursor.values.map(bindable)),
+		})
 	}
 	return { ...base, offset: 0, where: { RAW: where } }
 }

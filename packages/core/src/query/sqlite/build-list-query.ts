@@ -3,12 +3,12 @@ import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
-import { CURSOR_TIEBREAK_COLUMN, type CursorOptions, readCursor } from "../cursor.ts"
+import { CURSOR_TIEBREAK_COLUMN, type CursorId, type CursorOptions, readCursor } from "../cursor.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
 import { assertSchemaParsed } from "../trusted.ts"
-import { assertCursorFits, boundForKeys, DateKey } from "./cursor-fit.ts"
+import { assertCursorFits, bindable, boundForKeys, DateKey } from "./cursor-fit.ts"
 import { keysetSQL, orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
 import type { LikeSearchResolver } from "./search.ts"
 import type { RelationConfig } from "./types.ts"
@@ -146,7 +146,7 @@ function finish({ cursor: options, keyset, parsed, sort, tiebreak, where }: Fini
 			keyset.keys.map(({ column }) => column),
 			cursor.values,
 		)
-		const after = keysetSQL({ id: cursor.id, keys: keyset.keys, tiebreak, values })
+		const after = keysetSQL({ id: bindable(cursor.id) as CursorId, keys: keyset.keys, tiebreak, values })
 		return {
 			limit: parsed.limit + 1,
 			meta: { limit: parsed.limit, page: 1, type: "cursor" },

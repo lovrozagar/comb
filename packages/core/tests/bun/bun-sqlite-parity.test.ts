@@ -14,6 +14,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import type { CombError } from "../../src/error.ts"
 import { pgErrorHandler } from "../../src/pg/error-handler.ts"
+import { queryHelpers } from "../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
 import { sqliteErrorHandler } from "../../src/sqlite/constraint-handler.ts"
@@ -62,6 +63,32 @@ describe("bun:sqlite runs comb's list queries like libsql does", () => {
 
 	it("orders nulls last ascending by default", () => {
 		expect(vendors({ order: "amount.asc" })).toEqual(["abc", "acme", "ACME", "a?c"])
+	})
+})
+
+describe("bun:sqlite with safeIntegers pages by cursor (R3)", () => {
+	it("pages an integer sort every row once, though every INTEGER comes back a bigint", () => {
+		const raw = new Database(":memory:", { safeIntegers: true })
+		raw.exec("CREATE TABLE item (id INTEGER PRIMARY KEY, n INTEGER NOT NULL)")
+		raw.exec("INSERT INTO item VALUES (1, 30), (2, 10), (3, 50), (4, 9007199254740993), (5, 40)")
+		const counted = sqliteTable("item", { id: integer("id").primaryKey(), n: integer("n").notNull() })
+		const db = drizzle({ client: raw })
+		const byN = createListQuerySchema({ sort: ["n"], pagination: { defaultLimit: 2, maxLimit: 2 } })
+		const ids: string[] = []
+		let cursor: string | undefined
+		for (let guard = 0; guard < 6; guard++) {
+			const parsed = byN.parse({ cursor, order: "n.asc" })
+			const rows = applyListQuery(
+				db.select().from(counted).$dynamic(),
+				buildListQuery({ ...SEALED, parsed, table: counted }),
+			).all()
+			const [items, pagination] = queryHelpers.paginate(rows, parsed, SEALED)
+			ids.push(...items.map((row) => String(row.id)))
+			if (pagination.nextCursor === null) break
+			cursor = pagination.nextCursor
+		}
+		expect(ids).toEqual(["2", "1", "5", "3", "4"])
+		raw.close()
 	})
 })
 

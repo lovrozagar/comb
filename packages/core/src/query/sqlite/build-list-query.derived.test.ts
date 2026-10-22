@@ -214,8 +214,15 @@ describe("buildDerivedListQuery — a sort key declared as time (Q4)", () => {
 		expect(params).toContain(1700000000000)
 	})
 
-	it("refuses a number where the key declared a Date", () => {
+	it("takes the epoch milliseconds a row selected as sql<number> where the key declared a Date (R3)", () => {
 		const cursor = createCursor({ id: "d_9", latest: 1700000000000 }, sort, SEALED)
+		expect(() =>
+			buildDerivedListQuery({ ...SEALED, ...timed, parsed: { cursor, limit: 20, parsedSort: sort } }),
+		).not.toThrow()
+	})
+
+	it("refuses a string where the key declared a Date", () => {
+		const cursor = createCursor({ id: "d_9", latest: "2024-01-01" }, sort, SEALED)
 		expect(() =>
 			buildDerivedListQuery({ ...SEALED, ...timed, parsed: { cursor, limit: 20, parsedSort: sort } }),
 		).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
