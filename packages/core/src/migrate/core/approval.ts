@@ -2,9 +2,11 @@
  * Who may let a destructive migration run. A cautious file runs with `--yes` or a yes on a
  * terminal. An unsafe one loses data, so a standing `--yes` in a pipeline must not cover it: it
  * runs only on a yes from a person at a terminal, or when the file itself carries a reviewed
- * `-- comb:allow-unsafe: <reason>` line, which the migration's hash and history then record.
+ * `-- comb:allow-unsafe: <reason>` line. atlas.sum records that line with the rest of the file's
+ * bytes; comb's own hash leaves comments out, so it holds the SQL approved, not the approval.
  */
 import type { Dialect, MigrationClassification } from "../types.ts"
+import { extractDropStatements } from "./classify.ts"
 import { segments } from "./sql-scan.ts"
 import { dropsQuestion } from "./utils.ts"
 
@@ -51,9 +53,9 @@ async function approveMigration(migration: Reviewed, options: ApprovalOptions): 
 	if (approvedBy !== undefined) return { approvedBy, ok: true }
 	if (!unsafe && options.yes) return { ok: true }
 	const statements = unsafe ? c.unsafeStatements : c.cautiousStatements
-	/* a drop a listed statement already shows, quotes aside, is not named twice */
-	const shown = statements.map((stmt) => stmt.replace(/["`]/g, ""))
-	const drops = migration.drops.filter((drop) => !shown.some((stmt) => stmt.includes(drop)))
+	/* a drop a listed statement already shows is not named twice: each is read for what it drops */
+	const shown = new Set(statements.flatMap((stmt) => extractDropStatements(stmt, { dialect: options.dialect })))
+	const drops = migration.drops.filter((drop) => !shown.has(drop))
 	const listed = [...new Set([...drops, ...statements])]
 	if (options.confirm !== undefined && (await options.confirm(dropsQuestion(listed, options.target))))
 		return { ok: true }

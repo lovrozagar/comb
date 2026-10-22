@@ -123,7 +123,7 @@ describe("provePending on comb 0.8's bypasses, and on a rebuild that loses nothi
 				"FROM users WHERE id > 1;",
 			),
 		)
-		expect(proof.unsafe).toEqual([expect.stringMatching(/^loses \d of users's 6 rows$/)])
+		expect(proof.unsafe).toEqual([expect.stringMatching(/^loses \d of the 6 rows of users$/)])
 	})
 
 	it("proves Atlas's plain rebuild clean, and a new column's backfill too", async () => {
@@ -203,11 +203,15 @@ describe("provePending on what it cannot seed or apply", () => {
 })
 
 /** A target whose sqlite_master holds exactly `objects`, read through a connection that answers only that */
-const target = (objects: Array<[type: string, name: string, sql: string]>) => ({
+/** A target whose schema is `objects`, each on the table it names last, as sqlite_master's tbl_name has it */
+const target = (objects: Array<[type: string, name: string, sql: string, table?: string]>) => ({
 	batch: async () => undefined,
 	close: async () => undefined,
 	dialect: "sqlite" as const,
-	execute: async () => ({ columns: ["type", "name", "sql"], rows: objects }),
+	execute: async () => ({
+		columns: ["type", "name", "sql", "tbl_name"],
+		rows: objects.map(([type, name, sql, table = name]) => [type, name, sql, table]),
+	}),
 })
 
 describe("provePending on what the copy cannot make, and on a lost column", () => {
@@ -223,6 +227,20 @@ describe("provePending on what the copy cannot make, and on a lost column", () =
 		expect(unproven.map(({ table }) => table)).toEqual(expect.arrayContaining(["odd", "box"]))
 	})
 
+	it("lists a trigger the copy cannot create as its table, unproven, and a view it cannot as nothing (M20)", async () => {
+		const proofs = await provePending(
+			target([
+				["table", "t", "CREATE TABLE t (a TEXT)"],
+				["trigger", "tr", "CREATE TRIGGER tr INSTEAD OF INSERT ON t BEGIN SELECT 1; END", "t"],
+				["view", "v", "CREATE VIEW v AS SELECT a FROM t GROUP", "v"],
+			]),
+			[{ name: "1.sql", sql: "SELECT 1;" }],
+		)
+		expect(proofs.get("1.sql")?.unproven).toEqual([
+			{ table: "t", why: "its trigger tr could not be created: cannot create INSTEAD OF trigger on table: t" },
+		])
+	})
+
 	it("calls a dropped column lost", async () => {
 		expect((await prove(USERS, "ALTER TABLE users DROP COLUMN code;")).unsafe).toEqual(["loses users.code"])
 	})
@@ -234,7 +252,7 @@ describe("provePending with the database's own triggers and views", () => {
 			`${USERS}\nCREATE TABLE audit (id INTEGER PRIMARY KEY, note TEXT);\nCREATE TRIGGER purge AFTER INSERT ON users BEGIN DELETE FROM audit; END;\nCREATE VIEW emails AS SELECT email FROM users;`,
 			"INSERT INTO users (email) VALUES ('new');",
 		)
-		expect(proof.unsafe).toEqual(["loses 6 of audit's 6 rows"])
+		expect(proof.unsafe).toEqual(["loses 6 of the 6 rows of audit"])
 	})
 })
 

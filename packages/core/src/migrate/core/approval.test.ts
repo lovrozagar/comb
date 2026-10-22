@@ -81,16 +81,20 @@ describe("approveMigration", () => {
 })
 
 describe("approveMigration: what the refusal names", () => {
-	it("names each statement once, a drop it already shows included", async () => {
+	it("names each statement once, and no drop a statement already shows, by what it drops (M18)", async () => {
 		const { parseMigration } = await import("./parse.ts")
-		const migration = parseMigration("DROP TABLE `vote`;\nALTER TABLE post DROP COLUMN body;", "1_x.sql", {
-			dialect: "sqlite",
-		})
-		const approval = await approveMigration(migration, { target: "core", yes: false })
+		const sql = "DROP TABLE `vote`;\nDROP TABLE IF EXISTS legacy;\nALTER TABLE post DROP COLUMN body;"
+		const approval = await approveMigration(parseMigration(sql, "1_x.sql", { dialect: "sqlite" }), nobody)
 		expect(approval).toEqual({
 			message:
-				'1_x.sql is unsafe (DROP COLUMN post.body; DROP TABLE `vote`; ALTER TABLE post DROP COLUMN body); confirm it on a terminal, or approve it in the file with a line "-- comb:allow-unsafe: <reason>"',
+				'1_x.sql is unsafe (DROP TABLE `vote`; DROP TABLE IF EXISTS legacy; ALTER TABLE post DROP COLUMN body); confirm it on a terminal, or approve it in the file with a line "-- comb:allow-unsafe: <reason>"',
 			ok: false,
 		})
+	})
+
+	it("names a drop no statement shows, though one names a table that starts the same", async () => {
+		const shown = { ...reviewed("DROP TABLE bb;"), drops: ["DROP TABLE b", "DROP TABLE bb"] }
+		const approval = await approveMigration(shown, nobody)
+		expect(approval.ok === false && approval.message).toMatch(/^2_x\.sql is unsafe \(DROP TABLE b; DROP TABLE bb\);/)
 	})
 })

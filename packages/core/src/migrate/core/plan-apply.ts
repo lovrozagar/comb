@@ -83,14 +83,15 @@ function withProof(migration: ParsedMigration, proof: Proof): ParsedMigration {
 	return { ...migration, classification: { ...classification, cautiousStatements, safety, unsafeStatements } }
 }
 
-/** What the proof could not prove of a file, as lines to print */
-function proofGaps(name: string, proof: Proof): string[] {
-	const gaps = proof.failed === undefined ? [] : [`Proof run: ${name}: ${proof.failed}; its rating is the classifier's`]
-	if (proof.unproven.length > 0)
-		gaps.push(
-			`Proof run: ${name}: unproven, comb could not seed ${proof.unproven.map(({ table, why }) => `${table} (${why})`).join(", ")}`,
-		)
-	return gaps
+/** The tables the proof could not seed, as lines to print: one per distinct list, naming the files it holds for */
+function unprovenLines(proofs: ReadonlyMap<string, Proof>): string[] {
+	const files = new Map<string, string[]>()
+	for (const [name, proof] of proofs) {
+		if (proof.unproven.length === 0) continue
+		const tables = proof.unproven.map(({ table, why }) => `${table} (${why})`).join(", ")
+		files.set(tables, [...(files.get(tables) ?? []), name])
+	}
+	return [...files].map(([tables, names]) => `Proof run: ${names.join(", ")}: unproven, comb could not seed ${tables}`)
 }
 
 /** Each unapplied file, classified against the schema the files before it leave */
@@ -131,14 +132,15 @@ async function approveAll(
 	if (empty) {
 		const n = classified.length
 		print(
-			`Empty target: no tables and no applied history, so nothing can be lost; ${n} file${n === 1 ? "" : "s"} apply without the unsafe gate`,
+			`Empty target: no tables and no applied history, so nothing can be lost; ${n === 1 ? "1 file applies" : `${n} files apply`} without the unsafe gate`,
 		)
 	}
+	for (const line of unprovenLines(proofs)) print(line)
 	const pending: Pending[] = []
 	for (const each of classified) {
 		const proof = proofs.get(each.name)
 		const migration = proof === undefined ? each.migration : withProof(each.migration, proof)
-		for (const line of proof === undefined ? [] : proofGaps(each.name, proof)) print(line)
+		if (proof?.failed !== undefined) print(`Proof run: ${each.name}: ${proof.failed}; its rating is the classifier's`)
 		const approval = empty ? { ok: true as const } : await options.approve(migration)
 		if (!approval.ok)
 			throw new Refused(

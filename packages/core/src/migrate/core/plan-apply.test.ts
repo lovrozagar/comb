@@ -72,7 +72,7 @@ describe("planApply", () => {
 })
 
 describe("planApply's proof run, on a database it reads", () => {
-	it("says which tables the proof could not seed, and a file the copy refused, and keeps the classifier's rating", async () => {
+	it("says once which tables the proof could not seed, and each file the copy refused, and keeps the classifier's rating (M18)", async () => {
 		const conn = libsqlConnection()
 		await conn.client.executeMultiple(
 			"CREATE TABLE codes (id INTEGER PRIMARY KEY, code TEXT NOT NULL CHECK (length(code) = 20)); CREATE TABLE post (id TEXT);",
@@ -83,10 +83,9 @@ describe("planApply's proof run, on a database it reads", () => {
 		)
 		await run()
 		expect(out).toEqual([
+			"Proof run: 1_bad.sql, 2_ok.sql: unproven, comb could not seed codes (CHECK constraint failed: length(code) = 20)",
 			"Proof run: 1_bad.sql: it did not apply to the copy, reseeded or not: no such table: missing; its rating is the classifier's",
-			"Proof run: 1_bad.sql: unproven, comb could not seed codes (CHECK constraint failed: length(code) = 20)",
 			"Proof run: 2_ok.sql: an earlier pending file, 1_bad.sql, did not apply to the copy; its rating is the classifier's",
-			"Proof run: 2_ok.sql: unproven, comb could not seed codes (CHECK constraint failed: length(code) = 20)",
 		])
 		await conn.close()
 	})

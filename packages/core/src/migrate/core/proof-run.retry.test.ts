@@ -35,7 +35,7 @@ describe("provePending after a file the copy refuses (M7)", () => {
 	])("proves %s, and the lossy file after it", async (_, first) => {
 		const proofs = await prove(LIVE, [["1_first.sql", first], LOSSY])
 		expect(proofs.get("1_first.sql")?.failed).toBeUndefined()
-		expect(proofs.get("2_lossy.sql")?.unsafe.join("\n")).toMatch(/loses 6 of users's 6 rows/)
+		expect(proofs.get("2_lossy.sql")?.unsafe.join("\n")).toMatch(/loses 6 of the 6 rows of users/)
 	})
 
 	it("leaves a file the copy refuses twice, and every file after it, unproven", async () => {
@@ -58,7 +58,7 @@ describe("provePending after a file the copy refuses (M7)", () => {
 			LOSSY,
 		])
 		expect(proofs.get("2_collides.sql")?.failed).toBeUndefined()
-		expect(proofs.get("2_lossy.sql")?.unsafe.join("\n")).toMatch(/loses 6 of users's 6 rows/)
+		expect(proofs.get("2_lossy.sql")?.unsafe.join("\n")).toMatch(/loses 6 of the 6 rows of users/)
 	})
 
 	it("proves nothing more when a file that applied before no longer applies on the reseeded copy", async () => {

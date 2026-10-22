@@ -77,7 +77,7 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 		expect(await runCli(["migrate", "apply", "core"], first)).toBe(0)
 		/* a database with no tables and no history holds nothing to lose (C3) */
 		expect(first.outputs).toEqual([
-			"Empty target: no tables and no applied history, so nothing can be lost; 1 file apply without the unsafe gate",
+			"Empty target: no tables and no applied history, so nothing can be lost; 1 file applies without the unsafe gate",
 			"Apply: 1_init.sql",
 			"\nDone: 1 applied, 0 skipped",
 		])

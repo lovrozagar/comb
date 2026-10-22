@@ -62,7 +62,7 @@ describe("compare", () => {
 		).toEqual(["loses t.b"])
 		expect(
 			compare(db, new Map([["t", was]]), new Map([["t", shape(was.columns, [was.rows[0] as string[]])]])).unsafe,
-		).toEqual(["loses 1 of t's 2 rows"])
+		).toEqual(["loses 1 of the 2 rows of t"])
 		expect(
 			compare(
 				db,

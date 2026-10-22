@@ -28,8 +28,8 @@ type Proof = {
 	unsafe: string[]
 }
 
-/** One object of the live schema */
-type LiveObject = { name: string; sql: string; type: string }
+/** One object of the live schema, and the table it belongs to (sqlite_master's tbl_name) */
+type LiveObject = { name: string; sql: string; table: string; type: string }
 
 /* the shadow tables FTS3/4/5 and R*Tree make for a virtual table, which creating it makes again */
 const SHADOWS = ["config", "content", "data", "docsize", "idx", "node", "parent", "rowid", "segdir", "segments", "stat"]
@@ -37,12 +37,13 @@ const SHADOWS = ["config", "content", "data", "docsize", "idx", "node", "parent"
 /** The target's schema, read in one SELECT: SQLite's and D1's own objects left out */
 async function liveObjects(conn: Connection): Promise<LiveObject[]> {
 	const { columns, rows } = await conn.execute(
-		`SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL${notEngineTables(conn)} ORDER BY rowid`,
+		`SELECT type, name, sql, tbl_name FROM sqlite_master WHERE sql IS NOT NULL${notEngineTables(conn)} ORDER BY rowid`,
 	)
 	const at = (name: string) => columns.indexOf(name)
 	return rows.map((row) => ({
 		name: String(row[at("name")]),
 		sql: String(row[at("sql")]),
+		table: String(row[at("tbl_name")]),
 		type: String(row[at("type")]),
 	}))
 }
@@ -58,9 +59,17 @@ function creatable(objects: readonly LiveObject[]): LiveObject[] {
 	return objects.filter((object) => !(object.type === "table" && shadow(object.name.toLowerCase())))
 }
 
+/** Why a table is unproven when the copy cannot create `object`: none for a view, which holds no rows */
+function uncreated(object: LiveObject, message: string): [table: string, why: string] | undefined {
+	if (object.type === "view") return undefined
+	if (object.type === "trigger")
+		return [object.table.toLowerCase(), `its trigger ${object.name} could not be created: ${message}`]
+	return [object.table.toLowerCase(), `comb could not create it in the copy: ${message}`]
+}
+
 /**
  * The copy: tables and indexes, then the seed, then triggers and views, as the database has them;
- * returns the tables it could not create or seed, with why
+ * returns the tables it could not create or seed, or whose trigger it could not create, with why
  */
 function buildCopy(db: MemoryDb, objects: readonly LiveObject[], variant = 0): Map<string, string> {
 	const unproven = new Map<string, string>()
@@ -68,8 +77,9 @@ function buildCopy(db: MemoryDb, objects: readonly LiveObject[], variant = 0): M
 		try {
 			db.exec(object.sql)
 		} catch (error) {
-			// reason: what the copy cannot create, nothing proves; the table is listed unproven with why
-			unproven.set(object.name.toLowerCase(), `comb could not create it in the copy: ${(error as Error).message}`)
+			// reason: what the copy cannot create, nothing proves; its table is listed unproven with why
+			const [table, why] = uncreated(object, (error as Error).message) ?? []
+			if (table !== undefined && why !== undefined && !unproven.has(table)) unproven.set(table, why)
 		}
 	}
 	const tables = objects.filter((each) => each.type === "table")
@@ -94,7 +104,14 @@ function snapshot(db: MemoryDb): Map<string, Shape> {
 	const tables = db.all(
 		"SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
 	)
-	const live = creatable(tables.map((row) => ({ name: String(row["name"]), sql: String(row["sql"]), type: "table" })))
+	const live = creatable(
+		tables.map((row) => ({
+			name: String(row["name"]),
+			sql: String(row["sql"]),
+			table: String(row["name"]),
+			type: "table",
+		})),
+	)
 	for (const { name } of live.filter((object) => !isMirror(object))) {
 		const info = db.all(`PRAGMA table_xinfo(${quote(name)})`).filter((row) => row["hidden"] === 0)
 		const columns = info.map((row) => String(row["name"]))

@@ -43,7 +43,7 @@ describe("migrate apply on D1 without a migrate config", () => {
 		const io = makeIo(dir, d1)
 		expect(await runCli(["migrate", "apply", "core", "--local"], io)).toBe(0)
 		expect(io.outputs).toEqual([
-			"Empty target: no tables and no applied history, so nothing can be lost; 1 file apply without the unsafe gate",
+			"Empty target: no tables and no applied history, so nothing can be lost; 1 file applies without the unsafe gate",
 			"Apply: 20260101000000_init.sql",
 			"\nDone: 1 applied",
 		])

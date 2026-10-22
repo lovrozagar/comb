@@ -73,7 +73,7 @@ function compareTable(db: MemoryDb, table: string, { now, was }: { now: Shape; w
 		out.unsafe.push(`loses ${table}.${column}`)
 	/* a lost row changes every column's values: the loss alone is the finding */
 	if (now.rows.length < was.rows.length) {
-		out.unsafe.push(`loses ${was.rows.length - now.rows.length} of ${table}'s ${was.rows.length} rows`)
+		out.unsafe.push(`loses ${was.rows.length - now.rows.length} of the ${was.rows.length} rows of ${table}`)
 		return out
 	}
 	const columns = was.columns.filter((each) => now.columns.includes(each))
