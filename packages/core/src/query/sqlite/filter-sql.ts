@@ -9,11 +9,15 @@ import { combErrorKeys } from "../../types.ts"
 
 import type { FilterCondition, FilterGroup } from "../types.ts"
 import { quoteIdent } from "./identifier.ts"
+import { isSecondsOperator, secondsBound } from "./executor.ts"
 import { patternToSQL } from "./pattern.ts"
 
+/** A mapped column: its name, and for a date field the unit it stores (milliseconds unless `"s"`) */
+type MappedColumn = string | { column: string; unit: "ms" | "s" }
+
 type FilterSQLConfig = {
-	/** Column map: API field name -> SQL column name */
-	columnMap: Record<string, string>
+	/** Column map: API field name -> SQL column name, or `{ column, unit: "s" }` for a date stored in seconds */
+	columnMap: Record<string, MappedColumn>
 	/** Table alias used in query (e.g. "pc" for productCollection) */
 	tableAlias: string
 }
@@ -78,13 +82,25 @@ const LOWER: Readonly<Partial<Record<FilterCondition["operator"], Lower>>> = {
 	nin: (column, value) => listSQL(column, value, true),
 }
 
-/** One condition as SQL on its mapped column; null when the field is unmapped or the value unusable */
-function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig): SQL | null {
-	const colName = Object.hasOwn(config.columnMap, condition.field) ? config.columnMap[condition.field] : undefined
-	const lower = Object.hasOwn(LOWER, condition.operator) ? LOWER[condition.operator] : undefined
-	if (!colName || !lower) return null
-	const column = sql`${sql.raw(quoteIdent(config.tableAlias))}.${sql.raw(quoteIdent(colName))}`
-	return lower(column, condition.value)
+/** A date condition's epoch milliseconds on a column of whole seconds, rounded as the executor rounds them */
+function inSeconds(column: SQL, operator: FilterCondition["operator"], value: unknown): SQL | null {
+	if (!isSecondsOperator(operator) || typeof value !== "number") return null
+	const bound = secondsBound(operator, value)
+	if (bound === "none") return sql`0`
+	if (bound === "present") return sql`${column} IS NOT NULL`
+	return (LOWER[bound.operator] as Lower)(column, bound.seconds)
 }
 
-export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig }
+/** One condition as SQL on its mapped column; null when the field is unmapped or the value unusable */
+function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig): SQL | null {
+	const mapped = Object.hasOwn(config.columnMap, condition.field) ? config.columnMap[condition.field] : undefined
+	const lower = Object.hasOwn(LOWER, condition.operator) ? LOWER[condition.operator] : undefined
+	const colName = typeof mapped === "string" ? mapped : mapped?.column
+	if (!colName || !lower) return null
+	const column = sql`${sql.raw(quoteIdent(config.tableAlias))}.${sql.raw(quoteIdent(colName))}`
+	const seconds =
+		typeof mapped === "object" && mapped.unit === "s" ? inSeconds(column, condition.operator, condition.value) : null
+	return seconds ?? lower(column, condition.value)
+}
+
+export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig, type MappedColumn }

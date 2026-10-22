@@ -211,3 +211,32 @@ describe("buildFilterSQL on an empty group (Q-D1)", () => {
 		expect(dialect.sqlToQuery(buildFilterSQL({ ...empty("and"), subgroups: [empty("or")] }, config)).sql).toBe("(0)")
 	})
 })
+
+/** A date field `at` mapped to a column of `unit` */
+const at = (unit: "ms" | "s") => ({ columnMap: { at: { column: "at", unit } }, tableAlias: "e" })
+/** A condition on `at` */
+const condition = (operator: FilterCondition["operator"], value: unknown): FilterCondition => ({
+	field: "at",
+	operator,
+	value,
+})
+
+describe("buildConditionSQL — a date column's unit (R9)", () => {
+	it("binds milliseconds as they are on a column declared in milliseconds", () => {
+		expect(compile(buildConditionSQL(condition("gt", 1500), at("ms"))!)).toEqual({
+			params: [1500],
+			sql: '"e"."at" > ?',
+		})
+	})
+
+	it("rounds milliseconds to the second that keeps a seconds column's comparison exact", () => {
+		expect(compile(buildConditionSQL(condition("gt", 1500), at("s"))!)).toEqual({ params: [1], sql: '"e"."at" > ?' })
+		expect(compile(buildConditionSQL(condition("gte", 1500), at("s"))!)).toEqual({ params: [2], sql: '"e"."at" >= ?' })
+		expect(compile(buildConditionSQL(condition("eq", 1500), at("s"))!).sql).toBe("0")
+		expect(compile(buildConditionSQL(condition("neq", 1500), at("s"))!).sql).toBe('"e"."at" IS NOT NULL')
+	})
+
+	it("leaves an operator that takes no instant, such as is, as it is on a seconds column", () => {
+		expect(compile(buildConditionSQL(condition("is", null), at("s"))!).sql).toBe('"e"."at" IS NULL')
+	})
+})

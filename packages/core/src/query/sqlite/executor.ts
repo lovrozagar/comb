@@ -51,9 +51,17 @@ const inSeconds = (column: SQLiteColumn): boolean =>
 	column.dataType === "object date" && (column as { mode?: unknown }).mode === "timestamp"
 
 /** The operators a date field takes with one number, which a seconds column rounds */
+type SecondsOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "ne" | "neq"
 // lookup-table: the comparison operators secondsCondition rounds
-const SECONDS_OPERATORS = /* @__PURE__ */ new Set(["eq", "gt", "gte", "lt", "lte", "ne", "neq"] as const)
-type SecondsOperator = typeof SECONDS_OPERATORS extends Set<infer T> ? T : never
+const SECONDS_OPERATORS: ReadonlySet<SecondsOperator> = /* @__PURE__ */ new Set<SecondsOperator>([
+	"eq",
+	"gt",
+	"gte",
+	"lt",
+	"lte",
+	"ne",
+	"neq",
+])
 const isSecondsOperator = (operator: string): operator is SecondsOperator =>
 	SECONDS_OPERATORS.has(operator as SecondsOperator)
 
@@ -63,24 +71,30 @@ const isSecondsOperator = (operator: string): operator is SecondsOperator =>
  * a value between two seconds match no row and every row that has one
  */
 function secondsCondition(column: SQLiteColumn, operator: SecondsOperator, ms: number): SQL {
-	const below = new Date(Math.floor(ms / 1000) * 1000)
-	const above = new Date(Math.ceil(ms / 1000) * 1000)
+	const bound = secondsBound(operator, ms)
+	if (bound === "none") return sql`0`
+	if (bound === "present") return isNotNull(column)
+	const at = new Date(bound.seconds * 1000)
+	const compare = { eq, gt, gte, lt, lte, ne }[bound.operator]
+	return compare(column, at)
+}
+
+/**
+ * How a seconds column compares with epoch milliseconds `ms` under `operator`: the comparison on
+ * the whole second that keeps it exact, or, for eq and ne on a value between two seconds, no row
+ * ("none") or every row that has a value ("present"). The raw builder binds the seconds as they are.
+ */
+function secondsBound(
+	operator: SecondsOperator,
+	ms: number,
+): "none" | "present" | { operator: "eq" | "gt" | "gte" | "lt" | "lte" | "ne"; seconds: number } {
+	const below = Math.floor(ms / 1000)
+	const above = Math.ceil(ms / 1000)
 	const whole = ms % 1000 === 0
-	switch (operator) {
-		case "gt":
-			return gt(column, below)
-		case "lte":
-			return lte(column, below)
-		case "gte":
-			return gte(column, above)
-		case "lt":
-			return lt(column, above)
-		case "eq":
-			return whole ? eq(column, below) : sql`0`
-		case "ne":
-		case "neq":
-			return whole ? ne(column, below) : isNotNull(column)
-	}
+	if (operator === "gt" || operator === "lte") return { operator, seconds: below }
+	if (operator === "gte" || operator === "lt") return { operator, seconds: above }
+	if (operator === "eq") return whole ? { operator, seconds: below } : "none"
+	return whole ? { operator: "ne", seconds: below } : "present"
 }
 
 /** Whether `value` is a number (or holds one) meant for a text column, which SQLite would compare as text */
@@ -230,4 +244,4 @@ function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | nu
 	return ast ? groupToSQL(ast.root, config) : null
 }
 
-export { conditionToSQL, filterToSQL, type FilterToSQLConfig }
+export { conditionToSQL, filterToSQL, type FilterToSQLConfig, isSecondsOperator, secondsBound }

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { CombError } from "../../../src/error.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
+import { buildFilterSQL } from "../../../src/query/sqlite/filter-sql.ts"
 import type { ComputedFilterResolver } from "../../../src/query/types.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
@@ -253,6 +254,30 @@ describe("date filters bind in the unit their column stores (B4)", () => {
 	it("refuses a date filter wired to a text column, which would compare text with a number", async () => {
 		await expect(eventIds("day.gt.2000")).rejects.toMatchObject({ errorKey: "filter_not_wired" })
 	})
+})
+
+/** The ids the raw builder selects with `filter`, at_s declared in seconds */
+async function rawIds(filter: string): Promise<number[]> {
+	const harness = libsqlMemory()
+	open.push(harness)
+	await harness.client
+		.executeMultiple(`CREATE TABLE event (id INTEGER PRIMARY KEY, at_s INTEGER, at_ms INTEGER, day TEXT);
+INSERT INTO event VALUES (1, 1, 1000, '1970-01-01'), (2, 5, 5000, '1970-01-01'), (3, 9, 9000, '1970-01-01');`)
+	const ast = events.parse({ filter, limit: "100", order: "id.asc" }).filterAst
+	const where = buildFilterSQL(ast!.root, { columnMap: { at_s: { column: "at_s", unit: "s" } }, tableAlias: "e" })
+	const rows = await harness.db.all<{ id: number }>(sql`SELECT id FROM event AS "e" WHERE ${where} ORDER BY id`)
+	return rows.map((row) => row.id)
+}
+
+describe("buildFilterSQL on a seconds column, as the executor (R9)", () => {
+	const OPERATORS = ["eq", "gt", "gte", "lt", "lte", "neq"]
+	const VALUES = [1000, 1500, 4999, 5000, 5001, 9000]
+	it.each(OPERATORS.flatMap((op) => VALUES.map((ms) => `at_s.${op}.${ms}`)))(
+		"%s selects what the executor does",
+		async (filter) => {
+			expect(await rawIds(filter)).toEqual(await eventIds(filter))
+		},
+	)
 })
 
 /* item ← link → item: a relation back to the main table itself */
