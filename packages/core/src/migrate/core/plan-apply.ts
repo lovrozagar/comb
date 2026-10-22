@@ -152,12 +152,12 @@ async function planApply(options: PlanOptions): Promise<Pending[]> {
 	const applied = new Set(files.filter((name, i) => options.applied(name, texts[i] as string)))
 	if (options.whole !== false) refuseOutOfOrder(files, applied)
 	const classified = classifyPending(files, texts, applied)
+	/* the live guard refuses outright and names the cause, so it runs before the proof and approval (M17) */
+	if (conn !== undefined) await refuseUnseenReach(conn, classified)
 	const proofs =
 		conn === undefined || classified.length === 0 ? new Map<string, Proof>() : await provePending(conn, classified)
 	const empty = conn !== undefined && applied.size === 0 && classified.length > 0 && (await isEmptyTarget(conn))
-	const pending = await approveAll(classified, { empty, options, proofs })
-	if (conn !== undefined) await refuseUnseenReach(conn, pending)
-	return pending
+	return approveAll(classified, { empty, options, proofs })
 }
 
 export { type Pending, planApply, type PlanOptions, wranglerOrder }

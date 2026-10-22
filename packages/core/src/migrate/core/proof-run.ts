@@ -14,6 +14,7 @@
  */
 import { openMemory, type MemoryDb } from "../drivers/memory.ts"
 import type { Connection } from "../types.ts"
+import { compare, type Shape } from "./proof-compare.ts"
 import { quote, seedTables } from "./proof-seed.ts"
 
 /** What the proof run found for one file */
@@ -60,7 +61,7 @@ function creatable(objects: readonly LiveObject[]): LiveObject[] {
  * The copy: tables and indexes, then the seed, then triggers and views, as the database has them;
  * returns the tables it could not create or seed, with why
  */
-function buildCopy(db: MemoryDb, objects: readonly LiveObject[]): Map<string, string> {
+function buildCopy(db: MemoryDb, objects: readonly LiveObject[], variant = 0): Map<string, string> {
 	const unproven = new Map<string, string>()
 	const make = (object: LiveObject) => {
 		try {
@@ -80,14 +81,11 @@ function buildCopy(db: MemoryDb, objects: readonly LiveObject[]): Map<string, st
 	)
 	for (const object of tables.filter((each) => isVirtual(each) && !seedable.includes(each) && !isMirror(each)))
 		unproven.set(object.name.toLowerCase(), "a virtual table comb does not seed")
-	for (const [table, why] of seedTables(db, new Map(seedable.map((object) => [object.name, object.sql]))))
+	for (const [table, why] of seedTables(db, new Map(seedable.map((object) => [object.name, object.sql])), variant))
 		unproven.set(table.toLowerCase(), why)
 	for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
 	return unproven
 }
-
-/** One table as the proof compares it: its stored columns, whether each may hold NULL, its default, and its rows */
-type Shape = { columns: string[]; defaults: Map<string, string | null>; nullable: Set<string>; rows: string[][] }
 
 /** Every table of the copy but a mirror FTS table, each with its stored columns and rows (each value as SQLite quotes it) */
 function snapshot(db: MemoryDb): Map<string, Shape> {
@@ -118,103 +116,6 @@ function snapshot(db: MemoryDb): Map<string, Shape> {
 	return out
 }
 
-/** What a file did to the tables before it: the proof's findings without what it could not prove */
-type Findings = Pick<Proof, "cautious" | "unsafe">
-
-/** Each value of `keys`, with how many times it occurs */
-function counts(keys: readonly string[]): Map<string, number> {
-	const out = new Map<string, number>()
-	for (const key of keys) out.set(key, (out.get(key) ?? 0) + 1)
-	return out
-}
-
-/** How many of `before` are not in `after`, each counted as often as it occurs */
-function missing(before: readonly string[], after: readonly string[]): number {
-	const held = counts(after)
-	return [...counts(before)].reduce((sum, [key, n]) => sum + Math.max(0, n - (held.get(key) ?? 0)), 0)
-}
-
-/**
- * The one allowance: each column the file made NOT NULL with a DEFAULT, which was nullable, with
- * that default as SQLite quotes it. Atlas's "make NOT NULL with a default" rebuild fills its NULLs so.
- */
-function allowedDefaults(db: MemoryDb, { now, was }: { now: Shape; was: Shape }): Map<string, string> {
-	const out = new Map<string, string>()
-	for (const column of was.columns) {
-		const fresh = now.defaults.get(column)
-		if (!was.nullable.has(column) || now.nullable.has(column) || fresh === null || fresh === undefined) continue
-		out.set(column, String(db.all(`SELECT quote(${fresh}) AS v`)[0]?.["v"]))
-	}
-	return out
-}
-
-/** Each row of `shape` as one key over `columns`, a NULL in a column of `fill` read as its default */
-function rowKeys(shape: Shape, columns: readonly string[], fill: ReadonlyMap<string, string> = new Map()): string[] {
-	const at = columns.map((column) => shape.columns.indexOf(column))
-	return shape.rows.map((row) =>
-		JSON.stringify(
-			columns.map((column, i) => {
-				const value = row[at[i] as number] as string
-				return value === "NULL" ? (fill.get(column) ?? value) : value
-			}),
-		),
-	)
-}
-
-/**
- * The columns whose values a file changed: those whose own values differ, else those whose
- * leaving out makes the rows match (a value moved between rows keeps the column's values)
- */
-function changedColumns(was: Shape, now: Shape, fill: ReadonlyMap<string, string>): string[] {
-	const columns = was.columns.filter((each) => now.columns.includes(each))
-	const differs = (picked: readonly string[]) => missing(rowKeys(was, picked, fill), rowKeys(now, picked)) > 0
-	const own = columns.filter((column) => differs([column]))
-	return own.length > 0 ? own : columns.filter((column) => !differs(columns.filter((each) => each !== column)))
-}
-
-/**
- * What a file did to one table that was there before it, compared as a multiset of whole rows over
- * the columns it had: so a value copied, swapped or moved between rows shows, not only one lost
- */
-function compareTable(db: MemoryDb, table: string, { now, was }: { now: Shape; was: Shape }): Findings {
-	const out: Findings = { cautious: [], unsafe: [] }
-	for (const column of was.columns.filter((each) => !now.columns.includes(each)))
-		out.unsafe.push(`loses ${table}.${column}`)
-	/* a lost row changes every column's values: the loss alone is the finding */
-	if (now.rows.length < was.rows.length) {
-		out.unsafe.push(`loses ${was.rows.length - now.rows.length} of ${table}'s ${was.rows.length} rows`)
-		return out
-	}
-	const columns = was.columns.filter((each) => now.columns.includes(each))
-	const fill = allowedDefaults(db, { now, was })
-	if (missing(rowKeys(was, columns, fill), rowKeys(now, columns)) === 0) {
-		const nulls = [...fill.keys()].filter((column) =>
-			was.rows.some((row) => row[was.columns.indexOf(column)] === "NULL"),
-		)
-		for (const column of nulls) out.cautious.push(`fills ${table}.${column}'s NULLs with its default`)
-		return out
-	}
-	const changed = changedColumns(was, now, fill)
-	if (changed.length === 0) out.unsafe.push(`changes rows of ${table}`)
-	for (const column of changed) out.unsafe.push(`changes values of ${table}.${column}`)
-	return out
-}
-
-/** What a file did to each table that was there before it */
-function compare(db: MemoryDb, before: ReadonlyMap<string, Shape>, after: ReadonlyMap<string, Shape>): Findings {
-	const out: Findings = { cautious: [], unsafe: [] }
-	for (const [table, was] of before) {
-		const now = after.get(table)
-		if (now === undefined) out.unsafe.push(`loses every row of ${table}`)
-		else {
-			const found = compareTable(db, table, { now, was })
-			out.cautious.push(...found.cautious)
-			out.unsafe.push(...found.unsafe)
-		}
-	}
-	return out
-}
-
 /** Apply one file to the copy, as the target would: foreign keys on, the file in one transaction */
 function applyToCopy(db: MemoryDb, sql: string): string | undefined {
 	try {
@@ -229,45 +130,81 @@ function applyToCopy(db: MemoryDb, sql: string): string | undefined {
 	}
 }
 
+/** One copy of the target: its database, and the tables comb could not seed in it, with why */
+type Copy = { db: MemoryDb; unproven: Map<string, string> }
+
+/** A copy of `objects`, seeded as seed `variant` */
+async function copyOf(objects: readonly LiveObject[], variant: number): Promise<Copy> {
+	const db = await openMemory()
+	return { db, unproven: buildCopy(db, objects, variant) }
+}
+
+/**
+ * A fresh copy, reseeded with values the first seed never held, the files that applied before
+ * replayed on it; undefined, and closed, when one of them no longer applies
+ */
+async function reseeded(objects: readonly LiveObject[], applied: readonly string[]): Promise<Copy | undefined> {
+	const copy = await copyOf(objects, 1)
+	if (applied.every((sql) => applyToCopy(copy.db, sql) === undefined)) return copy
+	copy.db.close()
+	return undefined
+}
+
 /**
  * Prove each pending file, in order, on a seeded in-memory copy of the database `conn` reaches;
- * returns each file's proof by name. A file that does not apply to the copy proves nothing, nor
- * does any after it.
+ * returns each file's proof by name. A file the copy refuses is tried once more on a reseeded copy
+ * (a seed's value can meet a file's unique index or explicit id); a file refused both ways proves
+ * nothing, nor does any after it, and their ratings are the classifier's.
  */
 async function provePending(
 	conn: Connection,
 	files: ReadonlyArray<{ name: string; sql: string }>,
 ): Promise<Map<string, Proof>> {
-	const db = await openMemory()
+	const objects = creatable(await liveObjects(conn))
+	let copy = await copyOf(objects, 0)
 	const proofs = new Map<string, Proof>()
+	const applied: string[] = []
+	let failed: string | undefined
 	try {
-		const unproven = buildCopy(db, creatable(await liveObjects(conn)))
-		let failed: string | undefined
 		for (const { name, sql } of files) {
-			const before = snapshot(db)
-			const unprovenHere = [...unproven].map(([table, why]) => ({ table, why }))
 			if (failed !== undefined) {
-				proofs.set(name, { cautious: [], failed, unproven: unprovenHere, unsafe: [] })
+				proofs.set(name, { cautious: [], failed, unproven: unprovenOf(copy), unsafe: [] })
 				continue
 			}
-			const error = applyToCopy(db, sql)
+			let before = snapshot(copy.db)
+			let error = applyToCopy(copy.db, sql)
+			const retry = error === undefined ? undefined : await reseeded(objects, applied)
+			if (retry !== undefined) {
+				copy.db.close()
+				copy = retry
+				before = snapshot(copy.db)
+				error = applyToCopy(copy.db, sql)
+			}
 			if (error !== undefined) {
 				failed = `an earlier pending file, ${name}, did not apply to the copy`
 				proofs.set(name, {
 					cautious: [],
-					failed: `it did not apply to the copy: ${error}`,
-					unproven: unprovenHere,
+					failed: `it did not apply to the copy, reseeded or not: ${error}`,
+					unproven: unprovenOf(copy),
 					unsafe: [],
 				})
 				continue
 			}
-			const found = compare(db, new Map([...before].filter(([table]) => !unproven.has(table))), snapshot(db))
-			proofs.set(name, { ...found, unproven: unprovenHere })
+			applied.push(sql)
+			const found = compare(
+				copy.db,
+				new Map([...before].filter(([table]) => !copy.unproven.has(table))),
+				snapshot(copy.db),
+			)
+			proofs.set(name, { ...found, unproven: unprovenOf(copy) })
 		}
 	} finally {
-		db.close()
+		copy.db.close()
 	}
 	return proofs
 }
+
+/** The tables a copy could not seed, as a proof lists them */
+const unprovenOf = (copy: Copy) => [...copy.unproven].map(([table, why]) => ({ table, why }))
 
 export { type Proof, provePending }

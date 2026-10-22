@@ -6,6 +6,8 @@ import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { approveMigration } from "./approval.ts"
 import { planApply, type PlanOptions, wranglerOrder } from "./plan-apply.ts"
 import { provePending } from "./proof-run.ts"
+import { guardRebuilds } from "./rebuild-guard.ts"
+import { extractSchema } from "./schema.ts"
 
 describe("wranglerOrder", () => {
 	it("orders by leading number, then by name, files without a number last", () => {
@@ -81,7 +83,7 @@ describe("planApply's proof run, on a database it reads", () => {
 		)
 		await run()
 		expect(out).toEqual([
-			"Proof run: 1_bad.sql: it did not apply to the copy: no such table: missing; its rating is the classifier's",
+			"Proof run: 1_bad.sql: it did not apply to the copy, reseeded or not: no such table: missing; its rating is the classifier's",
 			"Proof run: 1_bad.sql: unproven, comb could not seed codes (CHECK constraint failed: length(code) = 20)",
 			"Proof run: 2_ok.sql: an earlier pending file, 1_bad.sql, did not apply to the copy; its rating is the classifier's",
 			"Proof run: 2_ok.sql: unproven, comb could not seed codes (CHECK constraint failed: length(code) = 20)",
@@ -119,6 +121,28 @@ describe("the proof only adds strictness (G1b)", () => {
 		const proof = (await provePending(conn, [{ name: "1_purge.sql", sql: file }])).get("1_purge.sql")
 		expect(proof).toEqual({ cautious: [], unproven: [], unsafe: [] })
 		await expect(plan({ "1_purge.sql": file }, { conn }).run()).rejects.toThrow(/^1_purge\.sql is unsafe/)
+		await conn.close()
+	})
+})
+
+/* the live guard names the cause; the proof's finding about the same rows reads like noise (M17) */
+describe("planApply's live guard comes first", () => {
+	it("refuses a rebuild the live database reaches beyond its history with the guard's reason, not the proof's", async () => {
+		const init =
+			"CREATE TABLE `u` (`id` integer PRIMARY KEY);\nCREATE TABLE `post` (`id` integer PRIMARY KEY, `u` integer REFERENCES `u`(`id`) ON DELETE CASCADE);"
+		const rebuild = guardRebuilds(
+			"CREATE TABLE `new_u` (`id` integer NOT NULL, PRIMARY KEY (`id`));\nINSERT INTO `new_u` (`id`) SELECT `id` FROM `u`;\nDROP TABLE `u`;\nALTER TABLE `new_u` RENAME TO `u`;\n",
+			extractSchema(init),
+		)
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple(
+			`${init}\nCREATE TABLE \`extra\` (\`u\` integer REFERENCES \`u\`(\`id\`) ON DELETE CASCADE);`,
+		)
+		const run = plan(
+			{ "1_init.sql": init, "2_rebuild.sql": rebuild },
+			{ applied: (name) => name === "1_init.sql", conn },
+		).run()
+		await expect(run).rejects.toThrow(/^2_rebuild\.sql rebuilds u, which the database's table extra references/)
 		await conn.close()
 	})
 })

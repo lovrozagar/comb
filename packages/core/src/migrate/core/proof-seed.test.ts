@@ -18,19 +18,20 @@ async function seeded(schema: Record<string, string>) {
 }
 
 describe("seedTables", () => {
-	it("makes six rows: defaults, three distinct values, NULLs, and a repeat of row 1 where the table allows it", async () => {
+	it("makes six rows: defaults, three distinct values, NULLs, and no repeat down a column", async () => {
 		const { rows, unproven } = await seeded({
 			t: "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT DEFAULT 'd', b TEXT NOT NULL)",
 		})
 		expect(unproven).toEqual(new Map())
-		/* by key: row 0 is 42, the repeats 99 and 100; each column's values carry its position (G1b) */
+		/* by key, each past 2^40: row 0 is 42; each column's values carry its position (G1b) */
+		const K = 2 ** 40
 		expect(rows("t").map((row) => [row["id"], row["a"], row["b"]])).toEqual([
-			[-1, "Mixed Case1", "Mixed Case2"],
-			[7, "0071", "0072"],
-			[42, "d", "0102"],
-			[99, null, "0072"],
-			[100, "0071", "0072"],
-			[2_147_483_648, "ñandú Ü1", "ñandú Ü2"],
+			[-1 - K, "Mixed Case1", "Mixed Case2"],
+			[7 + K, "0071", "0072"],
+			[42 + K, "d", "0102"],
+			[99 + K, null, "Zz2"],
+			[100 + K, "zZ 21", "zZ 22"],
+			[2_147_483_648 + K, "ñandú Ü1", "ñandú Ü2"],
 		])
 	})
 
@@ -86,5 +87,38 @@ describe("seedTables on CHECK constraints", () => {
 		})
 		expect(new Set(rows("e").map((row) => row["k"]))).toEqual(new Set(["a", "it's"]))
 		expect(new Set(rows("e").map((row) => row["n"]))).toEqual(new Set([1, -2]))
+	})
+})
+
+describe("seedTables on mixed-case names and self-references (M14)", () => {
+	it("seeds the children of a parent named in mixed case, and points a self-reference at an earlier row", async () => {
+		const { rows, unproven } = await seeded({
+			User: 'CREATE TABLE "User" (id TEXT PRIMARY KEY, managerId TEXT REFERENCES "User" (id))',
+			Post: 'CREATE TABLE "Post" (id TEXT PRIMARY KEY, authorId TEXT NOT NULL REFERENCES "User" (id))',
+		})
+		expect(unproven).toEqual(new Map())
+		const users = rows("User").map((row) => row["id"])
+		expect(rows("Post").every((row) => users.includes(row["authorId"]))).toBe(true)
+		expect(rows("User").filter((row) => row["managerId"] !== null).length).toBeGreaterThan(0)
+	})
+})
+
+describe("seedTables on common CHECK shapes (M15)", () => {
+	it.each([
+		["json_valid(meta)", "meta TEXT NOT NULL CHECK (json_valid(meta))"],
+		["an email shape", "email TEXT NOT NULL CHECK (email LIKE '%_@_%')"],
+		["a fixed length", "uid TEXT NOT NULL CHECK (length(uid) = 26)"],
+		["a percentage range", "pct INTEGER NOT NULL CHECK (pct >= 0 AND pct <= 100)"],
+		["a type on a nullable column", "n INTEGER CHECK (typeof(n) = 'integer')"],
+	])("seeds a table checked by %s", async (_, column) => {
+		const { rows, unproven } = await seeded({ t: `CREATE TABLE t (id INTEGER PRIMARY KEY, ${column})` })
+		expect(unproven).toEqual(new Map())
+		expect(rows("t")).toHaveLength(6)
+	})
+
+	it("repeats no value across rows in a column that allows a repeat", async () => {
+		const { rows } = await seeded({ t: "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT NOT NULL, n INTEGER NOT NULL)" })
+		for (const column of ["a", "n"]) expect(new Set(rows("t").map((row) => row[column])).size).toBe(6)
+		expect(rows("t").every((row) => Math.abs(Number(row["id"])) >= 2 ** 40)).toBe(true)
 	})
 })

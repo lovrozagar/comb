@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { libsqlConnection, type LibsqlConnection } from "../__fixtures__/libsql-connection.ts"
+import { classifyMigration } from "./classify.ts"
 import { type Proof, provePending } from "./proof-run.ts"
+import { extractSchema } from "./schema.ts"
 
 const open: LibsqlConnection[] = []
 afterEach(async () => {
@@ -52,16 +54,20 @@ const REVIEW_BYPASSES: Array<[string, string, string]> = [
 		"changes values of users.code",
 	],
 	[
-		"M5: UNIQUE ON CONFLICT IGNORE",
-		rebuild("id INTEGER PRIMARY KEY, email TEXT, code TEXT, tier TEXT UNIQUE ON CONFLICT IGNORE"),
-		"loses",
-	],
-	[
 		"M5: NOT NULL ON CONFLICT IGNORE",
 		rebuild("id INTEGER PRIMARY KEY, email TEXT NOT NULL ON CONFLICT IGNORE, code TEXT, tier TEXT"),
 		"loses",
 	],
 ]
+
+/* the seed repeats no value now (plan 12, M7), so a new UNIQUE … ON CONFLICT IGNORE drops no seeded row: the classifier rates it */
+describe("a rebuild to UNIQUE ON CONFLICT IGNORE (0.9.1's M5)", () => {
+	it("is unsafe by the classifier, whatever the proof sees", () => {
+		const file = rebuild("id INTEGER PRIMARY KEY, email TEXT, code TEXT, tier TEXT UNIQUE ON CONFLICT IGNORE")
+		const before = extractSchema(USERS)
+		expect(classifyMigration(file, { before, dialect: "sqlite" }).safety).toBe("unsafe")
+	})
+})
 
 describe("provePending catches each 0.9.1 review bypass on its own (M1–M5, M8)", () => {
 	it.each(REVIEW_BYPASSES)("%s", async (_, file, found) => {
@@ -182,7 +188,7 @@ describe("provePending on what it cannot seed or apply", () => {
 			{ name: "2_bad.sql", sql: "ALTER TABLE missing ADD COLUMN x TEXT;" },
 			{ name: "3_after.sql", sql: "DELETE FROM users;" },
 		])
-		expect(proofs.get("2_bad.sql")?.failed).toMatch(/^it did not apply to the copy: .*missing/)
+		expect(proofs.get("2_bad.sql")?.failed).toMatch(/^it did not apply to the copy, reseeded or not: .*missing/)
 		expect(proofs.get("3_after.sql")?.failed).toBe("an earlier pending file, 2_bad.sql, did not apply to the copy")
 	})
 
