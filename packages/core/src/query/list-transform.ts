@@ -55,9 +55,9 @@ function parsedSortOf<TSortField extends string>(
 	return parsedSort
 }
 
-/** An issue on `cursor` when it was not minted under this sort */
-function checkCursor(cursor: string | undefined, parsedSort: readonly SortField[], ctx: z.RefinementCtx): void {
-	const problem = cursor ? cursorProblem(cursor, parsedSort) : null
+/** An issue on `cursor` when it has no sealed cursor's shape; what it holds, readCursor opens */
+function checkCursor(cursor: string | undefined, ctx: z.RefinementCtx): void {
+	const problem = cursor ? cursorProblem(cursor) : null
 	if (problem) ctx.addIssue({ code: "custom", message: problem, path: ["cursor"] })
 }
 

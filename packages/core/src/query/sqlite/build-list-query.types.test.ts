@@ -44,7 +44,7 @@ import { buildListQuery } from "./sqlite/build-list-query.ts"
 const post = sqliteTable("post", { created_at: integer("created_at").notNull(), id: text("id").primaryKey(), title: text("title") })
 const schema = createListQuerySchema({ filter: { title: "string" }, search: ["title"], sort: ["created_at"] })
 const parsed = schema.parse({})
-export const query = buildListQuery({ cursorSecret: "x".repeat(32), parsed, table: post })
+export const query = buildListQuery({ cursorScope: "post:list", cursorSecret: "x".repeat(32), parsed, table: post })
 `
 			expect(diagnostics(source)).toEqual([])
 		},

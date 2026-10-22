@@ -15,8 +15,8 @@ export {
 	readCursor,
 	sortSignature,
 } from "./cursor.ts"
-export type { CursorPayload, DecodedCursor, PaginationMeta } from "./cursor.ts"
-export { MIN_CURSOR_SECRET_BYTES } from "./cursor-sign.ts"
+export type { CursorOptions, CursorPayload, DecodedCursor, PaginationMeta } from "./cursor.ts"
+export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts"
 
 /* Drizzle relational helpers */
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts"

@@ -18,7 +18,7 @@ import { createListQuerySchema } from "../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
 import { sqliteErrorHandler } from "../../src/sqlite/constraint-handler.ts"
 import type { ConstraintMap } from "../../src/types.ts"
-import { SIGNED } from "../../src/query/__fixtures__/cursor-secret.ts"
+import { SEALED } from "../../src/query/__fixtures__/cursor-secret.ts"
 
 const item = sqliteTable("item", {
 	amount: integer("amount"),
@@ -48,7 +48,7 @@ function open() {
 
 function vendors(query: Record<string, string>): string[] {
 	const parsed = schema.parse({ limit: "50", ...query })
-	return applyListQuery(open().select().from(item).$dynamic(), buildListQuery({ ...SIGNED, parsed, table: item }))
+	return applyListQuery(open().select().from(item).$dynamic(), buildListQuery({ ...SEALED, parsed, table: item }))
 		.all()
 		.map((row) => row.vendor)
 }

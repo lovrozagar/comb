@@ -63,7 +63,7 @@ describe("searchParamMeta", () => {
 })
 
 describe("CURSOR_EXAMPLES", () => {
-	it("has the shape the list schema takes, a payload and its tag, so a published example is a cursor (Q7)", () => {
-		for (const example of CURSOR_EXAMPLES) expect(cursorProblem(example, [])).toBeNull()
+	it("has the shape the list schema takes, a sealed cursor, so a published example is a cursor (Q7, R1)", () => {
+		for (const example of CURSOR_EXAMPLES) expect(cursorProblem(example)).toBeNull()
 	})
 })

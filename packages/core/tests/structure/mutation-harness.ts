@@ -83,9 +83,18 @@ export const GUARDS: readonly Guard[] = [
 	},
 	{
 		catches: "a cursor the client wrote itself, whose sort value probes a column it cannot select",
-		disable: () => ({ verifyTag: () => true }),
-		id: "cursor-tag",
-		module: "src/query/cursor-sign.ts",
+		/* the seal skipped: a cursor's bytes taken as its payload, as an unsealed cursor would be */
+		disable: () => ({
+			openSealed: (cursor: string) => {
+				try {
+					return Uint8Array.from(atob(cursor.replace(/-/g, "+").replace(/_/g, "/")), (char) => char.charCodeAt(0))
+				} catch {
+					return null
+				}
+			},
+		}),
+		id: "cursor-seal",
+		module: "src/query/cursor-seal.ts",
 	},
 	{
 		catches: "an identifier holding a double quote spliced into raw SQL unescaped",

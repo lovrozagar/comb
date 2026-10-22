@@ -8,7 +8,7 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
 import { createCursor, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
-import { assertCursorSecret, NO_CURSOR_SECRET } from "./cursor-sign.ts"
+import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { assertCursorFits } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
 import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
@@ -143,13 +143,10 @@ const boundAs = (keys: readonly SortKey[], values: readonly unknown[]): unknown[
 			: sql.param(value, column as never)
 	})
 
-/** What signs and verifies the cursors of a list: the app's secret, of at least 32 UTF-8 bytes */
-type CursorOptions = { cursorSecret: string }
-
 /**
  * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
- * list query schema's output, the cursor's tag verified under `cursorSecret`. The limit is one
- * over the page so `paginate` can tell there is more.
+ * list query schema's output, the cursor opened under `options`: the app's secret and the list's
+ * scope. The limit is one over the page so `paginate` can tell there is more.
  */
 function drizzleListOptions(
 	query: {
@@ -162,10 +159,9 @@ function drizzleListOptions(
 	},
 	options: CursorOptions,
 ): DrizzleListOptions {
-	const { cursorSecret } = options ?? NO_CURSOR_SECRET
 	assertSchemaParsed(query)
-	/* a secret that cannot sign is a wiring mistake on page 1 too, not only once a cursor comes back */
-	assertCursorSecret(cursorSecret)
+	/* options that cannot seal are a wiring mistake on page 1 too, not only once a cursor comes back */
+	assertCursorWired(options)
 	const sort = query.parsedSort
 	const orderBy = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
@@ -173,7 +169,7 @@ function drizzleListOptions(
 	}
 	const base = { limit: query.limit + 1, orderBy, sortOrderBy: query.sortOrderBy }
 	if (!query.cursor) return { ...base, offset: ((query.page ?? 1) - 1) * query.limit }
-	const cursor = readCursor(query.cursor, sort, cursorSecret)
+	const cursor = readCursor(query.cursor, sort, options)
 	const where = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
 		/* the cursor is client input: each value must be what its column holds, or it is a 400 */
@@ -208,7 +204,8 @@ function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: Pa
  * would mint a cursor that repeats or ends the list, so that is a wiring mistake: select them.
  * Any id the row holds, 0 and "" included, carries the next page.
  */
-function mintFrom(row: object, parsedSort: SortField[], { cursorSecret, idField }: PaginateOptions): string {
+function mintFrom(row: object, parsedSort: SortField[], options: PaginateOptions): string {
+	const { idField } = options
 	const missing = [...parsedSort.map(({ field }) => field), idField ?? CURSOR_TIEBREAK_COLUMN].filter(
 		(key) => !Object.hasOwn(row, key),
 	)
@@ -219,7 +216,7 @@ function mintFrom(row: object, parsedSort: SortField[], { cursorSecret, idField 
 			status: "internal_server_error",
 		})
 	}
-	const cursor = createCursor(row as Record<string, unknown>, parsedSort, { cursorSecret, idField })
+	const cursor = createCursor(row as Record<string, unknown>, parsedSort, options)
 	/* a cursor the list would refuse ends the list on page 2; say so on page 1, where it is a wiring mistake */
 	if (cursor.length > MAX_CURSOR_LENGTH) {
 		throw new CombError({
@@ -231,12 +228,12 @@ function mintFrom(row: object, parsedSort: SortField[], { cursorSecret, idField 
 	return cursor
 }
 
-/** paginate's options: the cursor secret, and the field a row's tiebreak id is in (default `id`) */
+/** paginate's options: the cursor secret and scope, and the field a row's tiebreak id is in (default `id`) */
 type PaginateOptions = CursorOptions & { idField?: string | undefined }
 
 /**
- * Create pagination result from drizzle query results with _total extra, the next cursor signed
- * under `cursorSecret` and keyed by `idField`, as buildDerivedListQuery's idColumn keys the page
+ * Create pagination result from drizzle query results with _total extra, the next cursor sealed
+ * under `options` and keyed by `idField`, as buildDerivedListQuery's idColumn keys the page
  */
 function drizzlePaginationResult<T extends object>(
 	items: DrizzleListResult<T>[],
@@ -248,10 +245,9 @@ function drizzlePaginationResult<T extends object>(
 		parsedSort: SortField[]
 		validated?: true | undefined
 	},
-	given: PaginateOptions,
+	options: PaginateOptions,
 ): readonly [T[], PaginationMeta] {
-	const options = given ?? NO_CURSOR_SECRET
-	assertCursorSecret(options.cursorSecret)
+	assertCursorWired(options)
 	const hasMore = items.length > query.limit
 	const sliced = hasMore ? items.slice(0, query.limit) : items
 

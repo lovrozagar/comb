@@ -11,7 +11,7 @@ import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import type { ComputedFilterResolver } from "../../../src/query/types.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
-import { SIGNED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 const post = sqliteTable("post", {
 	created_at: integer("created_at").notNull(),
@@ -69,7 +69,7 @@ const score: ComputedFilterResolver = (operator, value) =>
 async function ids(filter: string, computedFilters = { "@score": score }): Promise<number[]> {
 	const db = await seeded()
 	const parsed = schema.parse({ filter, limit: "100", order: "id.asc" })
-	const query = buildListQuery({ ...SIGNED, computedFilters, parsed, table: post })
+	const query = buildListQuery({ ...SEALED, computedFilters, parsed, table: post })
 	const rows = await applyListQuery(db.select({ id: post.id }).from(post).$dynamic(), query)
 	return rows.map((row) => row.id)
 }
@@ -117,13 +117,13 @@ describe("declared fields the query cannot resolve fail closed (Q-H3)", () => {
 	it("throws for a relation field with no relation configured", async () => {
 		const relational = createListQuerySchema({ filter: { "author.name": "string" }, sort: ["id"] })
 		const parsed = relational.parse({ filter: "author.name.eq.zzz" })
-		expect(() => buildListQuery({ ...SIGNED, parsed, table: post })).toThrow(CombError)
+		expect(() => buildListQuery({ ...SEALED, parsed, table: post })).toThrow(CombError)
 	})
 
 	it("throws when a resolver declines the operator it was given", async () => {
 		const declining = createListQuerySchema({ filter: { "@score": "number" }, sort: ["id"] })
 		const parsed = declining.parse({ filter: "@score.lt.9" })
-		expect(() => buildListQuery({ ...SIGNED, computedFilters: { "@score": score }, parsed, table: post })).toThrow(
+		expect(() => buildListQuery({ ...SEALED, computedFilters: { "@score": score }, parsed, table: post })).toThrow(
 			CombError,
 		)
 	})
@@ -196,7 +196,7 @@ INSERT INTO tag VALUES (10, 'release'), (20, 'draft');
 INSERT INTO post_tag VALUES (1, 3, 10), (2, 5, 10), (3, 1, 20);`)
 	const parsed = tagged.parse({ filter, limit: "100", order: "id.asc" })
 	const relations = { tags: relation as never }
-	const query = buildListQuery({ ...SIGNED, parsed, relations, table: post })
+	const query = buildListQuery({ ...SEALED, parsed, relations, table: post })
 	const rows = await applyListQuery(db.select({ id: post.id }).from(post).$dynamic(), query)
 	return rows.map((row) => row.id)
 }
@@ -238,7 +238,7 @@ async function eventIds(filter: string): Promise<number[]> {
 		.executeMultiple(`CREATE TABLE event (id INTEGER PRIMARY KEY, at_s INTEGER, at_ms INTEGER, day TEXT);
 INSERT INTO event VALUES (1, 1, 1000, '1970-01-01'), (2, 5, 5000, '1970-01-01'), (3, 9, 9000, '1970-01-01');`)
 	const parsed = events.parse({ filter, limit: "100", order: "id.asc" })
-	const query = buildListQuery({ ...SIGNED, parsed, table: event })
+	const query = buildListQuery({ ...SEALED, parsed, table: event })
 	const rows = await applyListQuery(harness.db.select({ id: event.id }).from(event).$dynamic(), query)
 	return rows.map((row) => row.id)
 }
@@ -277,7 +277,7 @@ INSERT INTO link VALUES (1, 2), (3, 1);`)
 		}
 		const names = async (filter: string) => {
 			const parsed = linked.parse({ filter, limit: "100", order: "id.asc" })
-			const query = buildListQuery({ ...SIGNED, parsed, relations: { related }, table: item })
+			const query = buildListQuery({ ...SEALED, parsed, relations: { related }, table: item })
 			return (await applyListQuery(harness.db.select({ name: item.name }).from(item).$dynamic(), query)).map(
 				(r) => r.name,
 			)

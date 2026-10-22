@@ -15,7 +15,7 @@ import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import type { SortField } from "../../../src/query/types.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
-import { CURSOR_SECRET, SIGNED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 const open: LibsqlHarness[] = []
 afterEach(() => {
@@ -40,7 +40,7 @@ type Derived = { created_at: number; rid: number }
 /** One page of a derived query whose id is an expression, so it has no column affinity */
 async function derivedPage(db: LibSQLDatabase, cursor: string | null) {
 	const built = buildDerivedListQuery({
-		...SIGNED,
+		...SEALED,
 		idColumn: sql`rid`,
 		parsed: { cursor, limit: 2, parsedSort: SORT },
 		sortColumns: { created_at: sql`created_at` },
@@ -52,7 +52,7 @@ async function derivedPage(db: LibSQLDatabase, cursor: string | null) {
 	const last = page.at(-1)
 	return {
 		ids: page.map((row) => row.rid),
-		next: rows.length > 2 && last ? createCursor({ ...last, id: last.rid }, SORT, SIGNED) : null,
+		next: rows.length > 2 && last ? createCursor({ ...last, id: last.rid }, SORT, SEALED) : null,
 	}
 }
 
@@ -77,17 +77,28 @@ describe("a derived query's expression id pages forward (Q-H4)", () => {
 
 /** A cursor minted for SORT whose values and id are whatever the test says */
 const crafted = (values: unknown[], id: unknown = "p1") =>
-	encodeCursor({ i: id, s: sortSignature(SORT), v: values } as Parameters<typeof encodeCursor>[0], CURSOR_SECRET)
+	encodeCursor({ i: id, s: sortSignature(SORT), v: values } as Parameters<typeof encodeCursor>[0], SEALED)
 
-describe("a cursor with a valid signature but values SQLite cannot compare (Q-M3)", () => {
+/** The derived list over `cursor`, ordered by SORT, its key a plain expression or one of epoch milliseconds */
+const derivedWith = (cursor: string, key: "date" | "plain" = "plain") =>
+	buildDerivedListQuery({
+		...SEALED,
+		idColumn: sql`rid`,
+		parsed: { cursor, limit: 2, parsedSort: SORT },
+		sortColumns: { created_at: key === "date" ? { sql: sql`created_at`, type: "date" } : sql`created_at` },
+	})
+
+describe("a sealed cursor holding values SQLite cannot compare (Q-M3)", () => {
+	const invalid = expect.objectContaining({ errorKey: "invalid_cursor", status: 400 })
 	const schema = createListQuerySchema({ filter: { title: "string" }, sort: ["created_at"] })
+
 	it.each([
 		["an object", [{ x: 1 }]],
 		["an invalid date", [{ $date: "nope" }]],
 		["an array", [[1, 2]]],
-	])("is a 400 when a value is %s", (_label, values) => {
-		const result = schema.safeParse({ cursor: crafted(values), order: "created_at.desc" })
-		expect(result.success).toBe(false)
+	])("is a 400 when a value is %s, though its shape passes the schema", (_label, values) => {
+		expect(schema.safeParse({ cursor: crafted(values), order: "created_at.desc" }).success).toBe(true)
+		expect(() => derivedWith(crafted(values))).toThrow(invalid)
 	})
 
 	it.each([
@@ -95,18 +106,11 @@ describe("a cursor with a valid signature but values SQLite cannot compare (Q-M3
 		["a boolean", true],
 		["null", null],
 	])("is a 400 when the id is %s", (_label, id) => {
-		expect(schema.safeParse({ cursor: crafted([7], id), order: "created_at.desc" }).success).toBe(false)
+		expect(() => derivedWith(crafted([7], id))).toThrow(invalid)
 	})
 
-	it("is refused by the SQL builder too, as invalid_cursor", () => {
-		expect(() =>
-			buildDerivedListQuery({
-				...SIGNED,
-				idColumn: sql`rid`,
-				parsed: { cursor: crafted([{ x: 1 }]), limit: 2, parsedSort: SORT },
-				sortColumns: { created_at: sql`created_at` },
-			}),
-		).toThrow(CombError)
+	it("is a CombError, not a driver's TypeError", () => {
+		expect(() => derivedWith(crafted([{ x: 1 }]))).toThrow(CombError)
 	})
 
 	it("accepts a numeric id, a string id, dates and null sort values", () => {
@@ -114,10 +118,10 @@ describe("a cursor with a valid signature but values SQLite cannot compare (Q-M3
 			[[7], 5],
 			[[7], "post_5"],
 			[[null], 5],
-			[[{ $date: 1700000000000 }], 5],
 		] as const) {
-			expect(schema.safeParse({ cursor: crafted([...values], id), order: "created_at.desc" }).success).toBe(true)
+			expect(() => derivedWith(crafted([...values], id))).not.toThrow()
 		}
+		expect(() => derivedWith(crafted([{ $date: 1700000000000 }], 5), "date")).not.toThrow()
 	})
 })
 
@@ -128,7 +132,7 @@ describe("paginate mints a cursor for every last row, whatever its id (Q-M6)", (
 				{ created_at: 2, id },
 				{ created_at: 1, id: "next" },
 			]
-			const [, pagination] = queryHelpers.paginate(rows, { limit: 1, parsedSort: SORT }, SIGNED)
+			const [, pagination] = queryHelpers.paginate(rows, { limit: 1, parsedSort: SORT }, SEALED)
 			expect(pagination.hasMore).toBe(true)
 			expect(pagination.nextCursor).not.toBeNull()
 		}
@@ -143,14 +147,14 @@ describe("pagination.count (Q-M5)", () => {
 	async function page(params: Record<string, string>) {
 		const db = await tied()
 		const parsed = schema.parse({ limit: "2", order: "created_at.desc", ...params })
-		const built = buildListQuery({ ...SIGNED, parsed, table: post })
+		const built = buildListQuery({ ...SEALED, parsed, table: post })
 		const query = db
 			.select({ created_at: post.created_at, id: post.id, ...queryHelpers.countExtra(parsed) })
 			.from(post)
 			.$dynamic()
 		const statement = applyListQuery(query, built)
 		const rows = await statement
-		const [, pagination] = queryHelpers.paginate(rows, parsed, SIGNED)
+		const [, pagination] = queryHelpers.paginate(rows, parsed, SEALED)
 		return { pagination, sql: statement.toSQL().sql.toLowerCase() }
 	}
 
@@ -173,7 +177,7 @@ describe("pagination.count (Q-M5)", () => {
 	})
 
 	it("is null when the query did not select the count", () => {
-		const [, pagination] = queryHelpers.paginate([{ id: 1 }], { limit: 2, parsedSort: SORT }, SIGNED)
+		const [, pagination] = queryHelpers.paginate([{ id: 1 }], { limit: 2, parsedSort: SORT }, SEALED)
 		expect(pagination.count).toBeNull()
 	})
 })
@@ -192,14 +196,14 @@ describe("queryHelpers.listOptions pages the relational API by cursor (Q-L4)", (
 		let cursor: string | null = null
 		for (let guard = 0; guard < 6 && (pages.length === 0 || cursor); guard++) {
 			const parsed = schema.parse({ limit, order: "created_at.desc", ...(cursor ? { cursor } : {}) })
-			const options = queryHelpers.listOptions(parsed, SIGNED)
+			const options = queryHelpers.listOptions(parsed, SEALED)
 			const rows = await db.query.post.findMany({
 				limit: options.limit,
 				offset: options.offset,
 				orderBy: options.orderBy,
 				...(options.where ? { where: options.where } : {}),
 			})
-			const [items, pagination] = queryHelpers.paginate(rows, parsed, SIGNED)
+			const [items, pagination] = queryHelpers.paginate(rows, parsed, SEALED)
 			pages.push(items.map((row) => row.id))
 			cursor = pagination.nextCursor
 		}
@@ -214,8 +218,8 @@ describe("queryHelpers.listOptions pages the relational API by cursor (Q-L4)", (
 		/* a caller that skips the schema: listOptions checks the cursor itself */
 		const parsed = {
 			...schema.parse({ order: "created_at.desc" }),
-			cursor: encodeCursor({ i: 1, s: "id.asc.nullslast", v: [1] }, CURSOR_SECRET),
+			cursor: encodeCursor({ i: 1, s: "id.asc.nullslast", v: [1] }, SEALED),
 		}
-		expect(() => queryHelpers.listOptions(parsed, SIGNED)).toThrow(CombError)
+		expect(() => queryHelpers.listOptions(parsed, SEALED)).toThrow(CombError)
 	})
 })

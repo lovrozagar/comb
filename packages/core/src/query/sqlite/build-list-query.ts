@@ -3,8 +3,8 @@ import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
-import { CURSOR_TIEBREAK_COLUMN, readCursor } from "../cursor.ts"
-import { assertCursorSecret } from "../cursor-sign.ts"
+import { CURSOR_TIEBREAK_COLUMN, type CursorOptions, readCursor } from "../cursor.ts"
+import { assertCursorWired } from "../cursor-seal.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
 import { assertSchemaParsed } from "../trusted.ts"
@@ -36,7 +36,9 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
 	baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL)
 	computedFilters?: Record<string, ComputedFilterResolver>
 	computedSorts?: Record<string, ComputedSortResolver>
-	/** the app's secret a cursor's tag is verified under, of at least 32 UTF-8 bytes */
+	/** the list's scope, its route and tenant: a cursor minted in another opens in none here */
+	cursorScope: string
+	/** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
 	cursorSecret: string
 	parsed: ListQueryParsed
 	relations?: Record<string, RelationConfig>
@@ -47,7 +49,9 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
 
 type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 	baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL)
-	/** the app's secret a cursor's tag is verified under, of at least 32 UTF-8 bytes */
+	/** the list's scope, its route and tenant: a cursor minted in another opens in none here */
+	cursorScope: string
+	/** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
 	cursorSecret: string
 	filterWhere?: SQL | null
 	idColumn: SQLWrapper
@@ -111,7 +115,7 @@ type Keyset = {
 }
 
 type Finish = {
-	cursorSecret: string
+	cursor: CursorOptions
 	keyset: Keyset
 	parsed: ListQueryParsed
 	sort: readonly SortField[]
@@ -124,8 +128,8 @@ type Finish = {
  * Shared tail of both builders: cursor predicate, pagination mode, result shape.
  * `keys` null means the order includes something keyset cannot express.
  */
-function finish({ cursorSecret, keyset, parsed, sort, tiebreak, where }: Finish): ListQueryResult {
-	assertCursorSecret(cursorSecret)
+function finish({ cursor: options, keyset, parsed, sort, tiebreak, where }: Finish): ListQueryResult {
+	assertCursorWired(options)
 	const search = parsed.q?.trim() || null
 
 	if (parsed.cursor) {
@@ -136,7 +140,7 @@ function finish({ cursorSecret, keyset, parsed, sort, tiebreak, where }: Finish)
 				status: "bad_request",
 			})
 		}
-		const cursor = readCursor(parsed.cursor, sort, cursorSecret)
+		const cursor = readCursor(parsed.cursor, sort, options)
 		assertCursorFits([...keyset.keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
 		const values = boundForKeys(
 			keyset.keys.map(({ column }) => column),
@@ -238,7 +242,7 @@ function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTa
 	}
 
 	return finish({
-		cursorSecret: opts.cursorSecret,
+		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret },
 		keyset,
 		parsed,
 		sort,
@@ -266,7 +270,7 @@ function buildDerivedListQuery<TSortField extends string>(
 	const orderBy = orderByKeys(keys, tiebreak)
 
 	return finish({
-		cursorSecret: opts.cursorSecret,
+		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret },
 		keyset: { keys, orderBy },
 		parsed: opts.parsed,
 		sort,

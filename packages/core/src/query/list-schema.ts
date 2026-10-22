@@ -147,7 +147,7 @@ function createListQuerySchema<
 		const filterAst = filterAstOf(optional.filter, { fields: filterConfig, limits }, ctx)
 		const parsedSort = parsedSortOf<TSortField>(data.order, { maxSortKeys: limits.maxSortKeys, sort: sortConfig }, ctx)
 		/* cursor takes precedence over page — both accepted gracefully */
-		checkCursor(data.cursor, parsedSort, ctx)
+		checkCursor(data.cursor, ctx)
 		const select = typeof optional.select === "string" ? optional.select : undefined
 		const output = {
 			cursor: data.cursor,

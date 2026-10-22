@@ -3,7 +3,7 @@ import * as z from "zod"
 import { createCursor } from "./cursor.ts"
 import { FILTER_LIMITS } from "./filter.ts"
 import { checkCursor, filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
-import { SIGNED } from "./__fixtures__/cursor-secret.ts"
+import { SEALED } from "./__fixtures__/cursor-secret.ts"
 
 type Issue = { message: string; path: PropertyKey[] }
 
@@ -64,12 +64,13 @@ describe("parsedSortOf", () => {
 describe("checkCursor", () => {
 	const sort = [{ direction: "desc" as const, field: "created_at" }]
 
-	it("accepts no cursor and one minted under this sort, and reports one minted under another", () => {
+	it("accepts no cursor and a sealed one, whatever sort it holds, and reports one of no sealed shape", () => {
 		const { ctx, issues } = recorder()
-		checkCursor(undefined, sort, ctx)
-		checkCursor(createCursor({ created_at: 1, id: 1 }, sort, SIGNED), sort, ctx)
-		checkCursor(createCursor({ id: 1, title: "a" }, [{ direction: "asc", field: "title" }], SIGNED), sort, ctx)
-		expect(issues).toEqual([{ message: "Cursor was issued for a different order", path: ["cursor"] }])
+		checkCursor(undefined, ctx)
+		checkCursor(createCursor({ created_at: 1, id: 1 }, sort, SEALED), ctx)
+		checkCursor(createCursor({ id: 1, title: "a" }, [{ direction: "asc", field: "title" }], SEALED), ctx)
+		checkCursor("eyJ4IjoxfQ", ctx)
+		expect(issues).toEqual([{ message: "Invalid cursor", path: ["cursor"] }])
 	})
 })
 

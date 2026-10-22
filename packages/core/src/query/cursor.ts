@@ -2,14 +2,14 @@
  * Cursor-based pagination — encode/decode + pagination helpers.
  * DB-agnostic: no SQL dependencies.
  *
- * A cursor is `<payload>.<tag>`: the payload base64url JSON, the tag its HMAC-SHA256 under the
- * app's cursor secret (cursor-sign.ts). Only a verifying call, readCursor, hands back its values;
- * the list schema checks its shape alone, as it holds no secret.
+ * A cursor is its payload, JSON, sealed under the app's cursor secret and the list's scope
+ * (cursor-seal.ts): a client can neither read the sort values it carries nor write one, nor spend
+ * it in another list. Only an opening call, readCursor, hands back its values; the list schema
+ * checks its shape alone, as it holds no secret.
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { decodeBase64Url, encodeBase64Url } from "./base64url.ts"
-import { assertCursorSecret, NO_CURSOR_SECRET, signPayload, verifyTag } from "./cursor-sign.ts"
+import { type CursorOptions, isSealedShape, openSealed, seal } from "./cursor-seal.ts"
 import type { SortDirection, SortField, SortNulls } from "./types.ts"
 
 /**
@@ -110,35 +110,14 @@ function decodeId(value: unknown): CursorId | undefined {
 	return typeof id === "bigint" || isPlain(id) ? id : undefined
 }
 
-/** The payload segment: the payload as base64url JSON */
-function encodePayload(payload: CursorPayload): string {
+/** A sealed cursor for `payload`, opened only under the same `options` */
+function encodeCursor(payload: CursorPayload, options: CursorOptions): string {
 	const json = JSON.stringify({ ...payload, i: encodeValue(payload.i), v: payload.v.map(encodeValue) })
-	return encodeBase64Url(new TextEncoder().encode(json))
+	return seal(new TextEncoder().encode(json), options)
 }
 
-/** A signed cursor for `payload` */
-function encodeCursor(payload: CursorPayload, secret: string): string {
-	const body = encodePayload(payload)
-	return `${body}.${signPayload(body, secret)}`
-}
-
-/* a tag is 32 bytes of base64url */
-const TAG = /^[\w-]{43}$/
-
-/** A cursor's payload and tag, or null when it has not that shape */
-function segmentsOf(cursor: string): { payload: string; tag: string } | null {
-	const at = cursor.lastIndexOf(".")
-	const tag = cursor.slice(at + 1)
-	return at < 1 || !TAG.test(tag) ? null : { payload: cursor.slice(0, at), tag }
-}
-
-/**
- * The payload segment's cursor, or null when it is not one this version minted. It does not
- * verify the tag: only readCursor, which does, and cursorProblem, which returns no value, call it.
- */
-function decodePayload(payload: string): DecodedCursor | null {
-	const bytes = decodeBase64Url(payload)
-	if (bytes === null) return null
+/** The opened payload's cursor, or null when it is not one this version minted */
+function decodePayload(bytes: Uint8Array): DecodedCursor | null {
 	try {
 		const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown
 		if (typeof parsed !== "object" || parsed === null) return null
@@ -155,27 +134,25 @@ function decodePayload(payload: string): DecodedCursor | null {
 	}
 }
 
-/** Mint the cursor for the row after which the next page starts. */
+/** Mint the cursor for the row after which the next page starts, sealed under `options` and keyed by `idField` */
 function createCursor(
 	record: Record<string, unknown>,
 	parsedSort: readonly SortField[],
-	opts: { cursorSecret: string; idField?: string | undefined },
+	options: CursorOptions & { idField?: string | undefined },
 ): string {
-	const { cursorSecret, idField = CURSOR_TIEBREAK_COLUMN } = opts ?? NO_CURSOR_SECRET
+	const idField = options?.idField ?? CURSOR_TIEBREAK_COLUMN
 	return encodeCursor(
 		{ i: record[idField] as CursorId, s: sortSignature(parsedSort), v: parsedSort.map(({ field }) => record[field]) },
-		cursorSecret,
+		options,
 	)
 }
 
 /**
- * Why a cursor cannot be used under this sort, or null when its shape can: the list schema's
- * check, a 400 at validation. Its tag is verified by readCursor, which holds the secret.
+ * Why `cursor` cannot be one, or null when its shape can: the list schema's check, a 400 at
+ * validation. What it holds, and the sort it was minted under, only readCursor can open.
  */
-function cursorProblem(cursor: string, parsedSort: readonly SortField[]): string | null {
-	const segments = segmentsOf(cursor)
-	const decoded = segments === null ? null : decodePayload(segments.payload)
-	return decoded ? signatureProblem(decoded, parsedSort) : "Invalid cursor"
+function cursorProblem(cursor: string): string | null {
+	return isSealedShape(cursor) ? null : "Invalid cursor"
 }
 
 function signatureProblem(decoded: DecodedCursor, parsedSort: readonly SortField[]): string | null {
@@ -183,16 +160,15 @@ function signatureProblem(decoded: DecodedCursor, parsedSort: readonly SortField
 	return matches ? null : "Cursor was issued for a different order"
 }
 
-/** The cursor `secret` signed, decoded; null when its tag is not that secret's or it is no cursor */
-function verifiedCursor(cursor: string, secret: string): DecodedCursor | null {
-	assertCursorSecret(secret)
-	const segments = segmentsOf(cursor)
-	return segments !== null && verifyTag(segments.payload, segments.tag, secret) ? decodePayload(segments.payload) : null
+/** The cursor sealed under `options`, opened and decoded; null when it was not, or it is no cursor */
+function openCursor(cursor: string, options: CursorOptions): DecodedCursor | null {
+	const bytes = openSealed(cursor, options)
+	return bytes === null ? null : decodePayload(bytes)
 }
 
-/** Verify a cursor's tag under `secret` and decode it for this sort, or throw a 400 CombError. */
-function readCursor(cursor: string, parsedSort: readonly SortField[], secret: string): DecodedCursor {
-	const decoded = verifiedCursor(cursor, secret)
+/** Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. */
+function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor {
+	const decoded = openCursor(cursor, options)
 	const problem = decoded ? signatureProblem(decoded, parsedSort) : "Invalid cursor"
 	if (problem) throw new CombError({ cause: problem, errorKey: combErrorKeys.INVALID_CURSOR, status: "bad_request" })
 	return decoded as DecodedCursor
@@ -208,9 +184,10 @@ export {
 	readCursor,
 	sortSignature,
 	type CursorId,
+	type CursorOptions,
 	type CursorPayload,
 	type CursorValue,
 	type DecodedCursor,
+	openCursor,
 	type PaginationMeta,
-	verifiedCursor,
 }

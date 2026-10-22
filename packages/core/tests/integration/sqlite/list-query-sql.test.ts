@@ -7,13 +7,13 @@ import { asc, sql } from "drizzle-orm"
 import type { LibSQLDatabase } from "drizzle-orm/libsql"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
-import { createCursor, verifiedCursor } from "../../../src/query/cursor.ts"
+import { createCursor, openCursor } from "../../../src/query/cursor.ts"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import type { SortField } from "../../../src/query/types.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
-import { CURSOR_SECRET, SIGNED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 const item = sqliteTable("item", {
 	amount: integer("amount"),
@@ -69,15 +69,15 @@ const label = (row: Pick<Item, "amount" | "vendor">) => `${row.vendor}:${row.amo
 
 async function listTable(db: LibSQLDatabase, query: Record<string, string>) {
 	const parsed = schema.parse(query)
-	const built = buildListQuery({ ...SIGNED, parsed, table: item })
+	const built = buildListQuery({ ...SEALED, parsed, table: item })
 	const rows = await applyListQuery(db.select().from(item).$dynamic(), built)
-	const [items, pagination] = queryHelpers.paginate(rows, parsed, SIGNED)
+	const [items, pagination] = queryHelpers.paginate(rows, parsed, SEALED)
 	return { items: items.map(label), nextCursor: pagination.nextCursor }
 }
 
 async function listDerived(db: LibSQLDatabase, parsedSort: SortField<"amount" | "vendor">[], cursor?: string) {
 	const built = buildDerivedListQuery({
-		...SIGNED,
+		...SEALED,
 		idColumn: item.id,
 		parsed: { cursor, limit: 2, parsedSort },
 		sortColumns: { amount: item.amount, vendor: item.vendor },
@@ -92,7 +92,7 @@ async function listDerived(db: LibSQLDatabase, parsedSort: SortField<"amount" | 
 	const last = page.at(-1)
 	return {
 		items: page.map(label),
-		nextCursor: hasMore && last ? createCursor(last, parsedSort, SIGNED) : null,
+		nextCursor: hasMore && last ? createCursor(last, parsedSort, SEALED) : null,
 	}
 }
 
@@ -200,14 +200,16 @@ describe("keyset pagination returns every row exactly once, in order", () => {
 
 	it("a cursor carries non-ASCII sort values", () => {
 		const sort: SortField[] = [{ direction: "asc", field: "vendor" }]
-		const cursor = createCursor({ id: "i10", vendor: "Žena" }, sort, SIGNED)
-		expect(verifiedCursor(cursor, CURSOR_SECRET)?.values).toEqual(["Žena"])
+		const cursor = createCursor({ id: "i10", vendor: "Žena" }, sort, SEALED)
+		expect(openCursor(cursor, SEALED)?.values).toEqual(["Žena"])
 	})
 
 	it("a cursor minted for one order is rejected under another", async () => {
 		const db = await seeded()
 		const first = await listTable(db, { limit: "2", order: "amount.asc" })
 		expect(first.nextCursor).not.toBeNull()
-		expect(() => schema.parse({ cursor: first.nextCursor!, limit: "2", order: "vendor.asc" })).toThrow()
+		await expect(listTable(db, { cursor: first.nextCursor!, limit: "2", order: "vendor.asc" })).rejects.toThrow(
+			expect.objectContaining({ cause: "Cursor was issued for a different order", errorKey: "invalid_cursor" }),
+		)
 	})
 })

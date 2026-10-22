@@ -11,7 +11,7 @@ import { buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
 import { keysetSQL, type KeysetPosition } from "../../src/query/sqlite/index.ts"
 import { queryHelpers } from "../../src/query/drizzle.ts"
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
-import { SIGNED } from "../../src/query/__fixtures__/cursor-secret.ts"
+import { SEALED } from "../../src/query/__fixtures__/cursor-secret.ts"
 
 const listSchema = createListQuerySchema({
 	extend: { archived: z.enum(["yes", "no"]).optional() },
@@ -46,7 +46,7 @@ const post = sqliteTable("post", {
 	title: text("title"),
 })
 declare const parsed: ListOutput
-const built = buildListQuery({ ...SIGNED, parsed, table: post })
+const built = buildListQuery({ ...SEALED, parsed, table: post })
 expectTypeOf(queryHelpers.countExtra(built)).toEqualTypeOf<ReturnType<typeof queryHelpers.countExtra>>()
 expectTypeOf(queryHelpers.countExtra(parsed)).toEqualTypeOf<ReturnType<typeof queryHelpers.countExtra>>()
 // @ts-expect-error countExtra takes a parsed request or a built query, nothing else
