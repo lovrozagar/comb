@@ -247,3 +247,20 @@ describe("comb codegen: the dialect of a tables file", () => {
 		expect(readFileSync(join(dir, "db.core.enum-checks.gen.ts"), "utf8")).toContain('from "drizzle-orm/pg-core"')
 	})
 })
+
+describe("comb codegen: a config dialect the tables contradict (F18)", () => {
+	it("fails naming both, rather than generate SQLite code for Postgres tables", async () => {
+		const dir = project()
+		config(dir, { dialect: "sqlite", generators: ["enum-checks"] })
+		writeFileSync(
+			join(dir, "db.core.tables.ts"),
+			`import { pgTable } from "drizzle-orm/pg-core"\nimport { c } from "@lovrozagar/comb/pg/columns"\nexport const post = pgTable("post", { id: c.id("pst"), s: c.enum("s", ["a", "b"]) })\n`,
+		)
+		const io = makeIo(dir)
+		expect(await runCli(["codegen"], io)).toBe(1)
+		expect(io.errors.join("\n")).toMatch(
+			/core: comb\.config\.ts says dialect sqlite, but db\.core\.tables\.ts declares postgres tables/,
+		)
+		expect(existsSync(join(dir, "db.core.enum-checks.gen.ts"))).toBe(false)
+	})
+})

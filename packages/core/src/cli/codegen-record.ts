@@ -50,25 +50,56 @@ function removeStale(file: string, top: string): void {
 
 /**
  * Write everything the run staged, once every database's generators have run, record what each
- * wrote, then delete each file a database's last run wrote and this one did not, as long as comb
- * wrote it. A file without comb's header is never touched. A run of some generators (-g) only adds
- * to a database's record: it cannot tell the others' files stale.
+ * wrote, then delete each file a database's last run wrote that no database wrote this time, as
+ * long as comb wrote it (F15). A file without comb's header is never touched. A run of some
+ * generators (-g) only adds to a database's record: it cannot tell the others' files stale. A run
+ * of the whole config names every database it `declared`, and a record entry it does not name is
+ * a database renamed or removed, whose files are stale too (F14). Two databases that wrote one path
+ * would overwrite each other, so that fails before anything is written (F16).
  */
-export function commitRuns(staged: Staged, runs: readonly Run[], recordDir: string): void {
+export function commitRuns(
+	staged: Staged,
+	runs: readonly Run[],
+	{ declared, recordDir }: { declared?: readonly string[] | undefined; recordDir: string },
+): void {
+	refuseShared(runs, recordDir)
 	const recordPath = path.join(recordDir, RECORD)
 	const record = readRecord(recordPath)
-	const stale: string[] = []
+	const before: string[] = []
+	const now = new Set<string>()
 	for (const run of runs) {
-		const before = [
+		const last = [
 			...(record.databases[run.name] ?? []).map((file) => path.resolve(recordDir, file)),
 			...legacyFiles(run.root, run.prefix),
 		]
-		const now = new Set([...run.wrote, ...(run.partial ? before : [])])
-		record.databases[run.name] = [...now].map((file) => path.relative(recordDir, file)).sort()
-		stale.push(...before.filter((file) => !now.has(file)))
+		const kept = new Set([...run.wrote, ...(run.partial ? last : [])])
+		record.databases[run.name] = [...kept].map((file) => path.relative(recordDir, file)).sort()
+		before.push(...last)
+		for (const file of kept) now.add(file)
+	}
+	const gone = Object.entries(record.databases).filter(([each]) => declared !== undefined && !declared.includes(each))
+	for (const [name, files] of gone) {
+		before.push(...files.map((file) => path.resolve(recordDir, file)))
+		delete record.databases[name]
 	}
 	writeGenJsonFile(recordPath, record, { generator: "comb", staged })
 	commitStaged(staged)
-	for (const file of stale) removeStale(file, recordDir)
+	for (const file of before.filter((each) => !now.has(each))) removeStale(file, recordDir)
 	for (const run of runs) fs.rmSync(legacyRecord(run.root, run.prefix), { force: true })
+}
+
+/** A path two databases wrote: neither may own it, as the second would replace the first's tables */
+function refuseShared(runs: readonly Run[], recordDir: string): void {
+	const owner = new Map<string, string>()
+	for (const run of runs) {
+		for (const file of run.wrote) {
+			const first = owner.get(file)
+			if (first !== undefined && first !== run.name) {
+				throw new Error(
+					`databases ${first} and ${run.name} both write ${path.relative(recordDir, file)}; give each its own filePrefix or output`,
+				)
+			}
+			owner.set(file, run.name)
+		}
+	}
 }

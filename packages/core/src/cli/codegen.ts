@@ -179,6 +179,15 @@ function assertNamable(dbName: string): void {
 	}
 }
 
+/** Refuse a config dialect the tables contradict: it would generate the wrong engine's code (F18) */
+function assertDialect(database: Database, tables: "postgres" | "sqlite" | null): void {
+	const declared = database.db.dialect
+	if (declared === undefined || tables === null || declared === tables) return
+	throw new CliError(
+		`${database.name}: comb.config.ts says dialect ${declared}, but ${path.basename(database.tablesPath)} declares ${tables} tables; fix the config's dialect`,
+	)
+}
+
 /** Validate, analyze and run `database`'s generators (all, or `only`) into `staged`; returns what it staged */
 async function generate(
 	database: Database,
@@ -194,6 +203,7 @@ async function generate(
 			? `Analyzed ${analysis.tables.length} tables (${analysis.dbName})`
 			: `  ${analysis.tables.length} tables`,
 	)
+	assertDialect(database, analysis.dialect)
 	const tablesDir = path.dirname(database.tablesPath)
 	const plan: Plan = {
 		ctx: {
@@ -264,5 +274,10 @@ export async function cmdCodegen(argv: readonly string[], io: CliIo): Promise<vo
 		runs.push(await generate(database, { only, staged }, io))
 	}
 	const direct = picked.find((database) => database.direct)
-	commitRuns(staged, runs, direct === undefined ? io.cwd : path.dirname(direct.tablesPath))
+	/* a run of the whole config knows every database it declares; one that names some, or runs one generator, does not */
+	const whole = direct === undefined && positionals.length === 0 && only === undefined
+	commitRuns(staged, runs, {
+		declared: whole ? picked.map((database) => database.name) : undefined,
+		recordDir: direct === undefined ? io.cwd : path.dirname(direct.tablesPath),
+	})
 }

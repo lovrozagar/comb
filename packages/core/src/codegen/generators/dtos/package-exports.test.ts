@@ -26,7 +26,12 @@ describe("updatePackageJson", () => {
 	}
 
 	it("keeps . first, then the generated subpaths, then what the package already had", () => {
-		const exports = run({ ".": "./index.ts", "./dtos/old": "./gone.ts", "./tables": "./old.ts", "./x": "./x.ts" })
+		const exports = run({
+			".": "./index.ts",
+			"./dtos/old": "./src/dtos/old/index.gen.ts",
+			"./tables": "./old.ts",
+			"./x": "./x.ts",
+		})
 		expect(Object.entries(exports)).toEqual([
 			[".", "./index.ts"],
 			["./dtos/_shared", "./src/dtos/_shared/index.gen.ts"],
@@ -53,5 +58,32 @@ describe("updatePackageJson", () => {
 		expect(exports["./dtos/post"]).toBe("./src/dtos/post/db.blog.post.gen.ts")
 		expect(exports["./dtos/_shared"]).toBe("./src/dtos/_shared/db.blog._shared.gen.ts")
 		expect(exports["./relations"]).toBe("./src/db.blog.relations.gen.ts")
+	})
+})
+
+describe("updatePackageJson: the subpaths codegen owns (F19)", () => {
+	let dir: string
+	beforeEach(() => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-pkg-owned-"))
+	})
+	afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
+
+	function run(exports: unknown): Record<string, unknown> {
+		const file = path.join(dir, "package.json")
+		fs.writeFileSync(file, JSON.stringify({ exports, name: "app" }))
+		const ctx = testContext([], { cwd: dir, dbName: "blog", tablesPath: path.join(dir, "src/db.blog.tables.ts") })
+		updatePackageJson(file, { config: { output: "src/dtos" }, ctx, entities: ["post"] })
+		return (JSON.parse(fs.readFileSync(file, "utf8")) as { exports: Record<string, unknown> }).exports
+	}
+
+	it("owns only the subpaths whose target it writes, and leaves the package's own ./dtos entries (F19)", () => {
+		const exports = run({
+			"./dtos/gone": "./src/dtos/gone/index.gen.ts",
+			"./dtos/search": "./src/api/search-dto.ts",
+			"./dtos/nested": { import: "./src/dtos/nested/index.gen.ts" },
+		})
+		expect(exports["./dtos/search"]).toBe("./src/api/search-dto.ts")
+		expect(exports["./dtos/nested"]).toEqual({ import: "./src/dtos/nested/index.gen.ts" })
+		expect(exports["./dtos/gone"]).toBeUndefined()
 	})
 })

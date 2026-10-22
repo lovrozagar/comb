@@ -8,8 +8,18 @@ import type { DtosConfig } from "./dto-types.ts"
 
 export type PackageExportsInput = { config: DtosConfig; ctx: GeneratorContext; entities: string[] }
 
-/* the subpaths this generator writes for a database, before any namespace */
-const owned = (key: string) => key.startsWith("./dtos/") || key === "./tables" || key === "./relations"
+/*
+ * The subpaths this generator owns for a database, before any namespace: ./tables, ./relations,
+ * and a ./dtos/ subpath only when its target is a generated file under its own output. The
+ * package's own ./dtos/search, pointing at its own code, is the package's (F19).
+ */
+const ownedUnder = (outputDir: string) => (key: string, target: ExportTarget | undefined) =>
+	key === "./tables" ||
+	key === "./relations" ||
+	(key.startsWith("./dtos/") &&
+		typeof target === "string" &&
+		target.startsWith(`${outputDir}/`) &&
+		target.endsWith(".gen.ts"))
 
 const relativeTo = (from: string, to: string) => `./${path.relative(from, to)}`
 
@@ -43,8 +53,11 @@ export function updatePackageJson(packageJsonPath: string, input: PackageExports
 	const existing = readExports(pkg)
 	const root: Record<string, ExportTarget> = existing["."] === undefined ? {} : { ".": existing["."] }
 	const namespace = input.ctx.exportNamespace
+	const owned = ownedUnder(relativeTo(path.dirname(packageJsonPath), path.resolve(input.ctx.cwd, input.config.output)))
 	const kept = Object.fromEntries(
-		Object.entries(existing).filter(([key]) => key !== "." && !ownsKey(namespace, key, owned)),
+		Object.entries(existing).filter(
+			([key, target]) => key !== "." && !ownsKey(namespace, key, (bare) => owned(bare, target)),
+		),
 	)
 	pkg["exports"] = { ...root, ...generatedExports(path.dirname(packageJsonPath), input), ...kept }
 	writeJsonAtomic(packageJsonPath, pkg, input.ctx.staged)

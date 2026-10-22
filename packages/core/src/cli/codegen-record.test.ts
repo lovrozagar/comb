@@ -37,10 +37,10 @@ describe("commitRuns", () => {
 	it("writes what it staged, records it by database, and removes what the last run wrote and this one did not", () => {
 		const dir = dirWith({})
 		const fresh = path.join(dir, "src/db/db.core.rows.gen.ts")
-		commitRuns(new Map([[fresh, GENERATED]]), [run(dir, { wrote: [fresh] })], dir)
+		commitRuns(new Map([[fresh, GENERATED]]), [run(dir, { wrote: [fresh] })], { recordDir: dir })
 		expect(record(dir).databases["core"]).toEqual(["src/db/db.core.rows.gen.ts"])
 		const moved = path.join(dir, "src/gen/app.core.rows.gen.ts")
-		commitRuns(new Map([[moved, GENERATED]]), [run(dir, { prefix: "app.core", wrote: [moved] })], dir)
+		commitRuns(new Map([[moved, GENERATED]]), [run(dir, { prefix: "app.core", wrote: [moved] })], { recordDir: dir })
 		expect(fs.existsSync(fresh)).toBe(false)
 		/* the old root, empty now, goes too */
 		expect(fs.existsSync(path.join(dir, "src/db"))).toBe(false)
@@ -54,7 +54,7 @@ describe("commitRuns", () => {
 			"src/db/db.core.old.gen.ts": GENERATED,
 			"src/db/db.core.tables.ts": "export {}\n",
 		})
-		commitRuns(new Map(), [run(dir)], dir)
+		commitRuns(new Map(), [run(dir)], { recordDir: dir })
 		expect(fs.existsSync(path.join(dir, "src/db/db.core.old.gen.ts"))).toBe(false)
 		/* a file comb did not write stays, whatever a record says */
 		expect(fs.existsSync(path.join(dir, "src/db/db.core.mine.ts"))).toBe(true)
@@ -64,13 +64,59 @@ describe("commitRuns", () => {
 	it("only adds to the record on a run of some generators, and keeps every other database's entry", () => {
 		const dir = dirWith({ "src/db/db.core.rows.gen.ts": GENERATED })
 		const kept = path.join(dir, "src/db/db.core.rows.gen.ts")
-		commitRuns(new Map([[kept, GENERATED]]), [run(dir, { wrote: [kept] }), run(dir, { name: "audit" })], dir)
+		commitRuns(new Map([[kept, GENERATED]]), [run(dir, { wrote: [kept] }), run(dir, { name: "audit" })], {
+			recordDir: dir,
+		})
 		const added = path.join(dir, "src/db/db.core.manifest.gen.json")
-		commitRuns(new Map([[added, "{}"]]), [run(dir, { partial: true, wrote: [added] })], dir)
+		commitRuns(new Map([[added, "{}"]]), [run(dir, { partial: true, wrote: [added] })], { recordDir: dir })
 		expect(fs.existsSync(kept)).toBe(true)
 		expect(record(dir).databases).toEqual({
 			audit: [],
 			core: ["src/db/db.core.manifest.gen.json", "src/db/db.core.rows.gen.ts"],
 		})
+	})
+})
+
+describe("commitRuns: what each database owns (F14, F15, F16)", () => {
+	it("on a run of the whole config, removes the files of a database the config no longer declares", () => {
+		const dir = dirWith({})
+		const aux = path.join(dir, "src/db/db.aux.rows.gen.ts")
+		commitRuns(new Map([[aux, GENERATED]]), [run(dir, { name: "aux", wrote: [aux] })], { recordDir: dir })
+		const core = path.join(dir, "src/db/db.core.rows.gen.ts")
+		/* a run that names its databases leaves the others alone */
+		commitRuns(new Map([[core, GENERATED]]), [run(dir, { wrote: [core] })], { recordDir: dir })
+		expect(fs.existsSync(aux)).toBe(true)
+		commitRuns(new Map([[core, GENERATED]]), [run(dir, { wrote: [core] })], { declared: ["core"], recordDir: dir })
+		expect(fs.existsSync(aux)).toBe(false)
+		expect(Object.keys(record(dir).databases)).toEqual(["core"])
+	})
+
+	it("keeps a file one database stops writing and another starts writing in the same run", () => {
+		const dir = dirWith({})
+		const manifest = path.join(dir, "manifest.gen.json")
+		const json = `${JSON.stringify({ _generated: "comb checksum:x" })}\n`
+		commitRuns(new Map([[manifest, json]]), [run(dir, { wrote: [manifest] })], { recordDir: dir })
+		commitRuns(new Map([[manifest, json]]), [run(dir), run(dir, { name: "aux", wrote: [manifest] })], {
+			recordDir: dir,
+		})
+		expect(fs.existsSync(manifest)).toBe(true)
+		expect(record(dir).databases["aux"]).toEqual(["manifest.gen.json"])
+	})
+
+	it("fails, naming both databases and the path, when two stage one file", () => {
+		const dir = dirWith({})
+		const shared = path.join(dir, "src/db/db.app.rows.gen.ts")
+		expect(() =>
+			commitRuns(
+				new Map([[shared, GENERATED]]),
+				[run(dir, { wrote: [shared] }), run(dir, { name: "aux", wrote: [shared] })],
+				{
+					recordDir: dir,
+				},
+			),
+		).toThrow(
+			/^databases core and aux both write src\/db\/db\.app\.rows\.gen\.ts; give each its own filePrefix or output$/,
+		)
+		expect(fs.existsSync(shared)).toBe(false)
 	})
 })
