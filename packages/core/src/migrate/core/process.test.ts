@@ -101,3 +101,16 @@ describe("run: the child's environment", () => {
 		expect(envOf({ PGHOST: "set-on-purpose" }).pg).toEqual(["PGHOST"])
 	})
 })
+
+describe("run: a process a signal stopped", () => {
+	it("says which signal stopped it when it printed nothing, rather than fail with an empty reason", () => {
+		const result = run("sh", ["-c", "kill -9 $$"])
+		expect(result.code).toBe(137)
+		expect(result.stderr).toBe("sh was stopped by SIGKILL")
+	})
+
+	it("keeps what it printed before the signal", () => {
+		const result = run("sh", ["-c", "echo said >&2; kill -9 $$"])
+		expect(result.stderr).toBe("said\n")
+	})
+})

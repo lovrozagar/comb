@@ -63,6 +63,8 @@ export const run: Run = (cmd, args, options = {}) => {
 	const signal = result.signal === null ? 0 : 128 + constants.signals[result.signal]
 	/* `bun <package>` with the package missing says only that the script is not found */
 	const missing = cmd === "bun" && result.stderr.includes(`Script not found "${args[0]}"`)
-	const stderr = missing ? `${result.stderr.trimEnd()}${installHint(args[0] as string)}` : result.stderr
+	const said = missing ? `${result.stderr.trimEnd()}${installHint(args[0] as string)}` : result.stderr
+	/* a process a signal stopped before it said anything would fail with an empty reason: name the signal */
+	const stderr = result.signal !== null && said === "" ? `${cmd} was stopped by ${result.signal}` : said
 	return { code: result.status ?? signal, stderr, stdout: result.stdout }
 }
