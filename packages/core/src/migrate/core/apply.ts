@@ -1,5 +1,6 @@
 /**
- * comb's own migration record on SQLite: the `__drizzle_migrations` table and the hashes in it
+ * comb's own migration record on SQLite: the `__drizzle_migrations` table, the hashes in it and,
+ * from 0.11, each file's name beside its hash, so an applied file edited since is told from a new one
  */
 import type { Connection } from "../types.ts"
 
@@ -12,9 +13,15 @@ export async function ensureMigrationsTable(conn: Connection): Promise<void> {
     CREATE TABLE IF NOT EXISTS __drizzle_migrations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hash TEXT NOT NULL UNIQUE,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      name TEXT
     )
   `)
+	/* a history from before 0.11 gains the column; drizzle's own migrator ignores it */
+	/* PRAGMA table_info answers in rows, since a driver may name no columns for an empty result */
+	const { columns, rows } = await conn.execute("PRAGMA table_info(__drizzle_migrations)")
+	const named = rows.some((row) => row[columns.indexOf("name")] === "name")
+	if (!named) await conn.execute("ALTER TABLE __drizzle_migrations ADD COLUMN name TEXT")
 }
 
 /**
@@ -28,6 +35,11 @@ export async function checkMigrationHash(conn: Connection, hashes: string | read
 	return result.rows.length > 0
 }
 
-export async function recordMigrationHash(conn: Connection, hash: string): Promise<void> {
-	await conn.execute("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)", [hash, Date.now()])
+/** Record `hash` as applied, under the file's `name` when given (an unnamed row is named on the next apply) */
+export async function recordMigrationHash(conn: Connection, hash: string, name?: string): Promise<void> {
+	await conn.execute("INSERT INTO __drizzle_migrations (hash, created_at, name) VALUES (?, ?, ?)", [
+		hash,
+		Date.now(),
+		name ?? null,
+	])
 }

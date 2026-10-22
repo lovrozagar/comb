@@ -7,6 +7,7 @@ import { describe, expect, it } from "bun:test"
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { ensureMigrationsTable } from "../../src/migrate/core/apply.ts"
 import { createBunSqliteProvider } from "../../src/migrate/drivers/bun-sqlite.ts"
 
 const DB = { migrationsDir: "m", name: "local", provider: { path: ":memory:", type: "bun-sqlite" as const } }
@@ -55,5 +56,19 @@ describe("createBunSqliteProvider read-only, as check and status open it (M10)",
 		} finally {
 			rmSync(dir, { force: true, recursive: true })
 		}
+	})
+})
+
+describe("ensureMigrationsTable on bun:sqlite, which names no columns for an empty result (M10)", () => {
+	it("adds the name column to a history from before 0.11 once, however often it runs", async () => {
+		const conn = await createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" }).connect(DB)
+		await conn.execute(
+			"CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL)",
+		)
+		await ensureMigrationsTable(conn)
+		await ensureMigrationsTable(conn)
+		const { rows } = await conn.execute("SELECT name FROM pragma_table_info('__drizzle_migrations') ORDER BY cid")
+		expect(rows).toEqual([["id"], ["hash"], ["created_at"], ["name"]])
+		await conn.close()
 	})
 })

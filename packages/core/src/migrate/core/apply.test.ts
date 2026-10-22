@@ -39,11 +39,17 @@ describe("checkMigrationHash", () => {
 describe("recordMigrationHash", () => {
 	it("inserts hash with timestamp", async () => {
 		const conn = mockConnection()
-		await recordMigrationHash(conn, "abc123")
+		await recordMigrationHash(conn, "abc123", "1_init.sql")
 		expect(conn.execute).toHaveBeenCalledWith(
 			expect.stringContaining("INSERT INTO __drizzle_migrations"),
-			expect.arrayContaining(["abc123"]),
+			expect.arrayContaining(["abc123", "1_init.sql"]),
 		)
+	})
+
+	it("leaves the name NULL when none is given, for the next apply to fill", async () => {
+		const conn = mockConnection()
+		await recordMigrationHash(conn, "abc123")
+		expect(conn.execute).toHaveBeenCalledWith(expect.any(String), ["abc123", expect.any(Number), null])
 	})
 })
 
@@ -53,7 +59,7 @@ describe("checkMigrationHash — hashes recorded before 0.5.0 (S-13)", () => {
 		const conn = libsqlConnection()
 		try {
 			await ensureMigrationsTable(conn)
-			await recordMigrationHash(conn, legacyMigrationHash(sql))
+			await recordMigrationHash(conn, legacyMigrationHash(sql), "1_legacy.sql")
 			expect(generateMigrationHash(sql)).not.toBe(legacyMigrationHash(sql))
 			expect(await checkMigrationHash(conn, migrationHashes(sql))).toBe(true)
 			expect(await checkMigrationHash(conn, generateMigrationHash(sql))).toBe(false)
