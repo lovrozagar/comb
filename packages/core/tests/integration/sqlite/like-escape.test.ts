@@ -94,3 +94,41 @@ describe("likeSearch over a _search column searchText wrote (Q14)", () => {
 		}
 	})
 })
+
+describe("likeSearch on a term that folds to no letter or digit (R7)", () => {
+	const ROWS = ["Οδυσσέας ταξιδεύει", "page not found", "hello world", "café ´au lait"]
+
+	/** The rows likeSearch finds for `q` over a `_search` column searchText wrote */
+	async function found(q: string): Promise<unknown[]> {
+		const harness = libsqlMemory()
+		try {
+			await harness.client.execute("CREATE TABLE doc (name TEXT NOT NULL, _search TEXT NOT NULL)")
+			for (const name of ROWS)
+				await harness.client.execute({ args: [name, searchText(name)], sql: "INSERT INTO doc VALUES (?, ?)" })
+			const where = likeSearch(item.name)(q)
+			if (where === null) return ["(no clause)"]
+			const { params, sql } = dialect.sqlToQuery(where)
+			const query = sql.replaceAll('"item"."name"', "_search")
+			const result = await harness.client.execute({
+				args: params as string[],
+				sql: `SELECT name FROM doc WHERE ${query}`,
+			})
+			return result.rows.map((row) => row.name)
+		} finally {
+			harness.close()
+		}
+	}
+
+	it.each(["́", "´", "¨", "˝", "´ ¨"])("finds no row for %j, as FTS does, instead of every row", async (q) => {
+		expect(await found(q)).toEqual([])
+	})
+
+	it("drops such a term beside real ones", async () => {
+		expect(await found("cafe ´")).toEqual(["café ´au lait"])
+		expect(await found("hello ́")).toEqual(["hello world"])
+	})
+
+	it("adds no clause for a blank query", async () => {
+		expect(likeSearch(item.name)("   ")).toBeNull()
+	})
+})
