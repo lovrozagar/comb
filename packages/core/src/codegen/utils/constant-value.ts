@@ -4,6 +4,7 @@
  * to a `const` initializer, each read at its own node. Codegen executes no user module: running one would run its side effects
  * and its own imports. A value it cannot read statically fails codegen, naming where it stands.
  */
+import path from "node:path"
 import { Node, type Project, type SourceFile, SyntaxKind, ts } from "ts-morph"
 import type { ConstantValue } from "../analyzer-types.ts"
 import { placeOf } from "./node-text.ts"
@@ -27,6 +28,33 @@ type Read = { depth: number; project: Project }
 
 /** A node and the file it stands in, which its names resolve against */
 type At = { file: SourceFile; node: Node }
+
+/** What a name is bound to: a node, or a whole module, as `import * as L` and `export * as L` bind one */
+type Bound = At | { module: SourceFile }
+
+/** `bound` as a node; a module there is no value of its own */
+function atOf(bound: Bound, name: string): At {
+	if ("module" in bound) throw new Unreadable(`${name} is a module, not a value: name one of its exports`)
+	return bound
+}
+
+/**
+ * The resolution `from` resolves under: the bundler's, with the `paths` and `baseUrl` of the
+ * tsconfig nearest it, so an alias the consumer's build resolves resolves here too (F22)
+ */
+function resolutionFor(from: SourceFile): ts.CompilerOptions {
+	const config = ts.findConfigFile(path.dirname(from.getFilePath()), ts.sys.fileExists)
+	if (config === undefined) return RESOLUTION
+	const raw = ts.readConfigFile(config, ts.sys.readFile).config as unknown
+	const parsed = ts.parseJsonConfigFileContent(raw, ts.sys, path.dirname(config))
+	/* only what the tsconfig sets: an option given as undefined is not one left out */
+	const { baseUrl, paths, pathsBasePath } = parsed.options
+	return {
+		...RESOLUTION,
+		...(baseUrl === undefined ? {} : { baseUrl }),
+		...(paths === undefined ? {} : { paths, pathsBasePath }),
+	}
+}
 
 /** `read` one reference further, refused past MAX_DEPTH, where a cycle would otherwise run forever */
 function deeper(read: Read): Read {
@@ -96,15 +124,24 @@ function literalOf(node: Node): ConstantValue | undefined {
 
 /** The file `specifier` names from `from`, added to the project to be read, never run */
 function moduleFile(project: Project, from: SourceFile, specifier: string): SourceFile {
-	const resolved = ts.resolveModuleName(specifier, from.getFilePath(), RESOLUTION, ts.sys).resolvedModule
+	const resolved = ts.resolveModuleName(specifier, from.getFilePath(), resolutionFor(from), ts.sys).resolvedModule
 	if (resolved === undefined) throw new Unreadable(`its module "${specifier}" does not resolve`)
 	if (/\.d\.[cm]?ts$/.test(resolved.resolvedFileName))
 		throw new Unreadable(`its module "${specifier}" ships only declarations, which hold no values`)
 	return project.getSourceFile(resolved.resolvedFileName) ?? project.addSourceFileAtPath(resolved.resolvedFileName)
 }
 
-/** Where a name is bound in a file: its `const` initializer, or the export of the module it imports it from */
-function bindingOf(read: Read, file: SourceFile, name: string): At {
+/** The node a module's default export stands for: `export default <expression>`, or `export { X as default }` */
+function defaultOf(read: Read, file: SourceFile): Bound {
+	const assigned = file.getExportAssignment((each) => !each.isExportEquals())
+	return assigned === undefined ? exportOf(read, file, "default") : { file, node: assigned.getExpression() }
+}
+
+/**
+ * Where a name is bound in a file: its `const` initializer, the export of the module it imports it
+ * from, that module's default export, or the module itself for `import * as`
+ */
+function bindingOf(read: Read, file: SourceFile, name: string): Bound {
 	const local = file.getVariableDeclaration(name)
 	if (local !== undefined) {
 		if (local.getVariableStatement()?.getDeclarationKind() !== "const") throw new Unreadable(`${name} is not a const`)
@@ -116,15 +153,19 @@ function bindingOf(read: Read, file: SourceFile, name: string): At {
 		const named = declaration
 			.getNamedImports()
 			.find((each) => (each.getAliasNode()?.getText() ?? each.getName()) === name)
-		if (named === undefined) continue
+		const whole = declaration.getNamespaceImport()?.getText() === name
+		const fallback = declaration.getDefaultImport()?.getText() === name
+		if (named === undefined && !whole && !fallback) continue
 		const target = moduleFile(read.project, file, declaration.getModuleSpecifierValue())
-		return exportOf(deeper(read), target, named.getName())
+		if (whole) return { module: target }
+		if (fallback) return defaultOf(deeper(read), target)
+		return exportOf(deeper(read), target, named?.getName() as string)
 	}
 	throw new Unreadable(`${name} is not a const of its file or an import of one`)
 }
 
-/** The node an export of `file` named `name` stands for, through `export { … }` and re-exports */
-function exportOf(read: Read, file: SourceFile, name: string): At {
+/** What an export of `file` named `name` stands for, through `export { … }`, re-exports and `export * as` */
+function exportOf(read: Read, file: SourceFile, name: string): Bound {
 	if (file.getVariableDeclaration(name)?.isExported()) return bindingOf(read, file, name)
 	for (const declaration of file.getExportDeclarations()) {
 		const specifier = declaration.getModuleSpecifierValue()
@@ -135,6 +176,9 @@ function exportOf(read: Read, file: SourceFile, name: string): At {
 			return specifier === undefined
 				? bindingOf(deeper(read), file, named.getName())
 				: exportOf(deeper(read), moduleFile(read.project, file, specifier), named.getName())
+		/* `export * as L from`: the module itself, under that name */
+		if (specifier !== undefined && declaration.getNamespaceExport()?.getName() === name)
+			return { module: moduleFile(read.project, file, specifier) }
 		const star =
 			specifier !== undefined && declaration.getNamedExports().length === 0 && !declaration.getNamespaceExport()
 		/* `export * from`: the name is the target's export, if it has one */
@@ -145,7 +189,7 @@ function exportOf(read: Read, file: SourceFile, name: string): At {
 }
 
 /** exportOf, or undefined when `file` does not export the name (an `export *` target it is not in) */
-function tryExportOf(read: Read, file: SourceFile, name: string): At | undefined {
+function tryExportOf(read: Read, file: SourceFile, name: string): Bound | undefined {
 	try {
 		return exportOf(read, file, name)
 	} catch (error) {
@@ -155,8 +199,9 @@ function tryExportOf(read: Read, file: SourceFile, name: string): At | undefined
 	}
 }
 
-/** The object literal `at` stands for */
-function objectOf(read: Read, at: At): At {
+/** The object literal `at` stands for, or the module a namespace binding names */
+function objectOf(read: Read, at: Bound): Bound {
+	if ("module" in at) return at
 	const node = bare(at.node)
 	if (Node.isObjectLiteralExpression(node)) return { file: at.file, node }
 	if (Node.isIdentifier(node)) return objectOf(deeper(read), bindingOf(deeper(read), at.file, node.getText()))
@@ -168,10 +213,16 @@ function valueOf(read: Read, at: At): ConstantValue {
 	const node = bare(at.node)
 	const literal = literalOf(node)
 	if (literal !== undefined) return literal
-	if (Node.isIdentifier(node)) return valueOf(deeper(read), bindingOf(deeper(read), at.file, node.getText()))
+	if (Node.isIdentifier(node))
+		return valueOf(deeper(read), atOf(bindingOf(deeper(read), at.file, node.getText()), node.getText()))
 	const access = node.asKind(SyntaxKind.PropertyAccessExpression)
 	if (access === undefined) throw new Unreadable(`${node.getText()} is computed, not a literal`)
 	const owner = objectOf(deeper(read), { file: at.file, node: access.getExpression() })
+	/* `L.MAX` of a namespace: the module's export named MAX */
+	if ("module" in owner) {
+		const exported = exportOf(deeper(read), owner.module, access.getName())
+		return valueOf(deeper(read), atOf(exported, access.getText()))
+	}
 	const property = owner.node.asKindOrThrow(SyntaxKind.ObjectLiteralExpression).getProperty(access.getName())
 	/* `{ SLUG }` is `{ SLUG: SLUG }`: the name, bound in the object's file */
 	const value =

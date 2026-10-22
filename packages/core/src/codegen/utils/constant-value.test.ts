@@ -237,3 +237,59 @@ describe("a pattern comb cannot emit, through analyze (F5, F6)", () => {
 		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(why)
 	})
 })
+
+describe("constants reached the other ways TypeScript allows (F22)", () => {
+	it("reads through a tsconfig paths alias", () => {
+		const values = constants(
+			{
+				"lib/limits.ts": "export const LIMITS = { NAME: 80 } as const\n",
+				"tsconfig.json": JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@lib/*": ["lib/*"] } } }),
+			},
+			'import { LIMITS } from "@lib/limits"',
+			'name: c.text("name", { max: LIMITS.NAME })',
+		)
+		expect(values).toEqual({ name: { max: 80 } })
+	})
+
+	it("reads through a namespace import, a default import and an `export * as` re-export", () => {
+		const values = constants(
+			{
+				"barrel.ts": 'export * as L from "./limits.ts"\n',
+				"defaults.ts": "export default { MIN: 2 } as const\n",
+				"limits.ts": "export const MAX = 9\n",
+			},
+			'import * as LIM from "./limits.ts"\nimport D from "./defaults.ts"\nimport { L } from "./barrel.ts"',
+			'a: c.text("a", { max: LIM.MAX }), b: c.text("b", { min: D.MIN }), d: c.text("d", { max: L.MAX })',
+		)
+		expect(values).toEqual({ a: { max: 9 }, b: { min: 2 }, d: { max: 9 } })
+	})
+
+	it("reads a default export written as `export { X as default }`", () => {
+		const values = constants(
+			{ "defaults.ts": "const X = { MIN: 3 } as const\nexport { X as default }\n" },
+			'import D from "./defaults.ts"',
+			'b: c.text("b", { min: D.MIN })',
+		)
+		expect(values).toEqual({ b: { min: 3 } })
+	})
+
+	it("fails on a namespace import used as a value, naming it", () => {
+		expect(() =>
+			constants(
+				{ "limits.ts": "export const MAX = 9\n" },
+				'import * as LIM from "./limits.ts"',
+				'a: c.text("a", { max: LIM })',
+			),
+		).toThrow(/LIM is a module, not a value: name one of its exports/)
+	})
+
+	it("still fails on a namespace member the module does not export", () => {
+		expect(() =>
+			constants(
+				{ "limits.ts": "export const MAX = 9\n" },
+				'import * as LIM from "./limits.ts"',
+				'a: c.text("a", { max: LIM.NOPE })',
+			),
+		).toThrow(/limits\.ts exports no NOPE/)
+	})
+})
