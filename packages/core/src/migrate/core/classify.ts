@@ -230,8 +230,18 @@ function classifyMigration(sql: string, options: ClassifyOptions = {}): Migratio
 	const reads = readings(sql, options)
 	for (const read of reads) refuseUnrunnable(read, sql)
 	const unsafeStatements = [...new Set(entries(reads, "unsafe"))]
-	/* a statement is listed once, at the strictest level a finding gives it */
-	const cautiousStatements = [...new Set(entries(reads, "cautious"))].filter((stmt) => !unsafeStatements.includes(stmt))
+	/* a statement is listed once, at the strictest level any reading gives it, whatever each finding's note */
+	const unsafe = new Set(
+		reads.filter(({ findings }) => findings.some((f) => f.level === "unsafe")).map(({ stmt }) => preview(stmt)),
+	)
+	const cautiousStatements = [
+		...new Set(
+			entries(
+				reads.filter(({ stmt }) => !unsafe.has(preview(stmt))),
+				"cautious",
+			),
+		),
+	]
 	if (TXMODE_NONE.test(sql)) cautiousStatements.push("-- atlas:txmode none: the file is not applied in one transaction")
 	const safety = unsafeStatements.length > 0 ? "unsafe" : cautiousStatements.length > 0 ? "cautious" : "safe"
 	return { cautiousStatements, lockWarnings: [...new Set(entries(reads, "lock"))], safety, unsafeStatements }

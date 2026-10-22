@@ -47,6 +47,21 @@ describe("classifyMigration on Atlas's Postgres output", () => {
 	})
 })
 
+describe("classifyMigration lists a statement at its strictest level alone", () => {
+	it("leaves an unsafe statement out of the cautious list, whatever its notes say", () => {
+		const before = extractSchema(
+			"CREATE TABLE t (id int); CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;",
+			undefined,
+			"postgres",
+		)
+		const replaced =
+			"CREATE OR REPLACE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM t; RETURN NEW; END $$;"
+		const c = classifyMigration(replaced, { before, dialect: "postgres" })
+		expect(c.unsafeStatements).toEqual([expect.stringContaining("comb does not recognize CREATE OR REPLACE FUNCTION")])
+		expect(c.cautiousStatements).toEqual([])
+	})
+})
+
 describe("classifyMigration on hand-written Postgres that loses data", () => {
 	it.each([
 		"ALTER TABLE ONLY post DROP COLUMN c",
