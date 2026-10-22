@@ -71,13 +71,23 @@ describe("snapshotDir", () => {
 		}
 	})
 
+	/* the copy goes under a temp dir of this test's own: the shared one holds other runs' copies,
+	   which come and go while this one counts (a verify failed so, finding one gone) */
 	it("refuses a directory whose sum does not match, and leaves no copy behind", () => {
 		writeFileSync(join(dir, "1_a.sql"), "")
 		hashDir(fakeHash, dir)
 		writeFileSync(join(dir, "2_b.sql"), "")
-		const before = readdirSync(tmpdir()).filter((name) => name.startsWith("comb-migrate-snapshot-")).length
-		expect(() => snapshotDir(fakeHash, dir)).toThrow(`${dir}/atlas.sum does not match its migrations`)
-		expect(readdirSync(tmpdir()).filter((name) => name.startsWith("comb-migrate-snapshot-"))).toHaveLength(before)
+		const own = mkdtempSync(join(tmpdir(), "comb-atlas-tmp-"))
+		const shared = process.env["TMPDIR"]
+		process.env["TMPDIR"] = own
+		try {
+			expect(() => snapshotDir(fakeHash, dir)).toThrow(`${dir}/atlas.sum does not match its migrations`)
+			expect(readdirSync(own).filter((name) => name.startsWith("comb-migrate-snapshot-"))).toEqual([])
+		} finally {
+			if (shared === undefined) delete process.env["TMPDIR"]
+			else process.env["TMPDIR"] = shared
+			rmSync(own, { force: true, recursive: true })
+		}
 	})
 })
 
