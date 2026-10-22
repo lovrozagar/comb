@@ -21,28 +21,49 @@ function toCamelCase(s: string): string {
 	return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
 }
 
+/** `word` with its first letter upper-cased */
+const capitalized = (word: string) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`
+
+/** A SQL column without its `_id` / `Id` suffix (only at a word boundary, so `rapid` stays `rapid`), in camelCase */
+const roleOf = (sqlColumn: string) => toCamelCase(sqlColumn.replace(/_id$/, "").replace(/([a-z0-9])Id$/, "$1"))
+
 /**
- * The r.one name of a foreign key, read from its SQL column: `customer_id` or `customerId` gives
- * `customer`, `invited_by_user_id` toward `user` gives `invitedBy`. `Id` is stripped only at a word
- * boundary, so `rapid` stays `rapid`. A name one of the table's columns holds gets `Relation`
- * appended, since a relation and a column of one name collide in drizzle.
+ * A relation's name, read from its own foreign key alone and nothing else of either table: another
+ * key added later never renames it (F24). Two keys whose names would collide fail codegen (F7),
+ * since any rule that picked one of them to rename would rename an existing relation for the other.
  */
-function deriveOneName(sqlColumn: string, refTable: string, columns: ReadonlySet<string>): string {
-	const base = toCamelCase(sqlColumn.replace(/_id$/, "").replace(/([a-z0-9])Id$/, "$1"))
-	const ref = `${refTable.charAt(0).toUpperCase()}${refTable.slice(1)}`
+type Named = { name: string; place: string }
+
+/**
+ * The r.one name of a foreign key, its role: `customer_id` or `customerId` gives `customer`, and
+ * `invited_by_user_id` toward `user` gives `invitedBy`
+ */
+function oneName(sqlColumn: string, refTable: string): string {
+	const whole = roleOf(sqlColumn)
+	const ref = capitalized(refTable)
 	/* invitedByUser toward user: the prefix names the role */
-	const name = base !== refTable && base.endsWith(ref) && base.length > ref.length ? base.slice(0, -ref.length) : base
-	return columns.has(name) ? `${name}Relation` : name
+	return whole !== refTable && whole.endsWith(ref) && whole.length > ref.length ? whole.slice(0, -ref.length) : whole
 }
 
-/** Derive r.many relation name: camelCase + pluralize the source table */
-function deriveManyName(sourceTable: string): string {
-	return pluralize(toCamelCase(sourceTable))
+/**
+ * The name of the relation back from a key's target to its source: `posts` when the key is the
+ * target's plain `<target>_id`, and `postsBy<Column>` for every other key. A unique key's way back
+ * holds one row, so it is singular (F23).
+ */
+function backName(
+	source: TableMeta,
+	fk: { column: string; refTable: string; sqlColumn: string },
+	unique: boolean,
+): string {
+	const name = toCamelCase(source.varName)
+	const count = unique ? pluralize.singular(name) : pluralize(name)
+	if (roleOf(fk.sqlColumn) === fk.refTable) return count
+	return `${count}By${capitalized(toCamelCase(fk.column.replace(/_id$/, "")))}`
 }
 
 type OneRelation = { column: string; name: string; refColumn: string; refTable: string }
-/** `targetColumn` is the referenced column on this table, which the many side joins from. */
-type ManyRelation = { name: string; sourceColumn: string; sourceTable: string; targetColumn: string }
+/** `targetColumn` is the referenced column on this table, which the other side joins from; `one` for a unique key's way back */
+type ManyRelation = { name: string; one: boolean; sourceColumn: string; sourceTable: string; targetColumn: string }
 
 type Graph = { manys: Map<string, ManyRelation[]>; ones: Map<string, OneRelation[]> }
 
@@ -53,50 +74,60 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
 	else map.set(key, [value])
 }
 
-/** r.one on each FK's own table, r.many on the table it references */
+/** Whether a field's key is unique on its own: `.unique()`, a one-column unique index, or the primary key */
+const isUnique = (table: TableMeta, field: TableMeta["fields"][number]) =>
+	field.isPrimaryKey ||
+	/\.unique\(/.test(field.raw) ||
+	table.uniqueIndexes.some((index) => index.columns.length === 1 && index.columns[0] === field.name)
+
+/**
+ * Each relation's name on one table, a name a column holds given `Relation` appended, since a
+ * relation and a column of one name collide in drizzle; two relations of one name fail codegen,
+ * naming both keys
+ */
+function settle(table: string, named: Array<Named & { target: { name: string } }>, columns: ReadonlySet<string>): void {
+	const first = new Map<string, string>()
+	for (const { name, place } of named) {
+		const other = first.get(name)
+		if (other !== undefined)
+			throw new Error(
+				`${table}: the relations of ${other} and ${place} both take the name ${name}; rename one key's column`,
+			)
+		first.set(name, place)
+	}
+	for (const each of named) each.target.name = columns.has(each.name) ? `${each.name}Relation` : each.name
+}
+
+/** r.one on each FK's own table, r.many (or r.one, for a unique key) on the table it references */
 function buildGraph(tables: TableMeta[]): Graph {
 	const graph: Graph = { manys: new Map(), ones: new Map() }
+	const named = new Map<string, Array<Named & { target: { name: string } }>>()
 	for (const table of tables) {
-		const columns = new Set(table.fields.map((field) => field.name))
-		for (const { foreignKey: fk, sqlName } of table.fields) {
+		for (const field of table.fields) {
+			const fk = field.foreignKey
 			if (!fk) continue
-			const one = {
-				column: fk.column,
-				name: deriveOneName(sqlName, fk.refTable, columns),
-				refColumn: fk.refColumn,
-				refTable: fk.refTable,
-			}
+			const place = `${table.varName}.${fk.column}`
+			const one = { column: fk.column, name: "", refColumn: fk.refColumn, refTable: fk.refTable }
 			push(graph.ones, table.varName, one)
-			const many = {
-				name: deriveManyName(table.varName),
+			push(named, table.varName, { name: oneName(field.sqlName, fk.refTable), place, target: one })
+			const unique = isUnique(table, field)
+			const back = {
+				name: "",
+				one: unique,
 				sourceColumn: fk.column,
 				sourceTable: table.varName,
 				targetColumn: fk.refColumn,
 			}
-			push(graph.manys, fk.refTable, many)
+			push(graph.manys, fk.refTable, back)
+			const sqlColumn = field.sqlName
+			push(named, fk.refTable, { name: backName(table, { ...fk, sqlColumn }, unique), place, target: back })
 		}
 	}
-	for (const [target, manys] of graph.manys) {
-		disambiguate(manys)
-		/* a many name its table already uses, for a column or a one relation, takes the suffix the one side takes (F7) */
-		const taken = new Set([
-			...(tables.find((table) => table.varName === target)?.fields.map((field) => field.name) ?? []),
-			...(graph.ones.get(target) ?? []).map((one) => one.name),
-		])
-		for (const many of manys) if (taken.has(many.name)) many.name = `${many.name}Relation`
+	for (const [table, relations] of named) {
+		const columns = new Set(tables.find((each) => each.varName === table)?.fields.map((field) => field.name) ?? [])
+		settle(table, relations, columns)
 	}
 	return graph
-}
-
-/** Several r.many of one name on a table: append "By" + the source column without `_id` */
-function disambiguate(manys: ManyRelation[]): void {
-	const names = manys.map((m) => m.name)
-	const repeated = new Set(names.filter((name, i) => names.indexOf(name) !== i))
-	for (const m of manys) {
-		if (!repeated.has(m.name)) continue
-		const suffix = toCamelCase(m.sourceColumn.replace(/_id$/, ""))
-		m.name = `${m.name}By${suffix.charAt(0).toUpperCase()}${suffix.slice(1)}`
-	}
 }
 
 type RelationEntry = { kind: "many"; rel: ManyRelation } | { kind: "one"; rel: OneRelation }
@@ -111,9 +142,9 @@ function entryLines(tableName: string, entry: RelationEntry): string[] {
 			"\t\t}),",
 		]
 	}
-	const { name, sourceColumn, sourceTable, targetColumn } = entry.rel
+	const { name, one, sourceColumn, sourceTable, targetColumn } = entry.rel
 	return [
-		`\t\t${propertyName(name)}: r.many.${sourceTable}({`,
+		`\t\t${propertyName(name)}: r.${one ? "one" : "many"}.${sourceTable}({`,
 		`\t\t\tfrom: ${propertyAccess(`r.${tableName}`, targetColumn)},`,
 		`\t\t\tto: ${propertyAccess(`r.${sourceTable}`, sourceColumn)},`,
 		"\t\t}),",
