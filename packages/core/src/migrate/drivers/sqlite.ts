@@ -42,6 +42,8 @@ export type TursoCredentialsRequest = TursoDeps & {
 	/** The placement group a database created on demand joins (default "default") */
 	group?: string | undefined
 	org: string
+	/** a reader's credentials: a missing database is an error, not created, and the token is read-only */
+	readonly?: boolean | undefined
 }
 
 /** Turso's error message from a failed response, or the HTTP status when its body has none */
@@ -71,7 +73,11 @@ async function createTursoDatabase(
 	log(`Created "${dbName}"`)
 }
 
-/** The libsql URL and a one-hour token for a Turso database, creating the database when it is missing */
+/**
+ * The libsql URL and a one-hour token for a Turso database, creating the database when it is
+ * missing; for a reader, a read-only token, and a missing database is an error. Turso reads the
+ * token's expiration and authorization from the query (a body is ignored, and the default never expires).
+ */
 export async function getTursoCredentials(
 	request: TursoCredentialsRequest,
 ): Promise<{ url: string; authToken: string }> {
@@ -81,6 +87,8 @@ export async function getTursoCredentials(
 	const headers = { Authorization: `Bearer ${apiToken}` }
 
 	let dbRes = await call(baseUrl, { headers })
+	if (dbRes.status === 404 && request.readonly === true)
+		throw new Error(`Turso database "${org}/${dbName}" does not exist; check and status create none`)
 	if (dbRes.status === 404) {
 		await createTursoDatabase({ ...request, fetch: call, group: request.group ?? "default" })
 		dbRes = await call(baseUrl, { headers })
@@ -88,9 +96,9 @@ export async function getTursoCredentials(
 	if (!dbRes.ok) throw new Error(`Turso API error for "${org}/${dbName}": ${await failure(dbRes)}`)
 	const dbInfo = tursoDbInfoSchema().parse(await dbRes.json())
 
-	const tokenRes = await call(`${baseUrl}/auth/tokens`, {
-		body: JSON.stringify({ expiration: "1h" }),
-		headers: { ...headers, "Content-Type": "application/json" },
+	const authorization = request.readonly === true ? "read-only" : "full-access"
+	const tokenRes = await call(`${baseUrl}/auth/tokens?expiration=1h&authorization=${authorization}`, {
+		headers,
 		method: "POST",
 	})
 	if (!tokenRes.ok) throw new Error(`Turso auth token error for "${org}/${dbName}": ${await failure(tokenRes)}`)
@@ -139,7 +147,14 @@ export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps
 	return {
 		async connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
 			const { apiToken, group, org } = config
-			const creds = await getTursoCredentials({ ...deps, apiToken, dbName: dbConfig.name, group, org })
+			const creds = await getTursoCredentials({
+				...deps,
+				apiToken,
+				dbName: dbConfig.name,
+				group,
+				org,
+				readonly: dbConfig.readonly,
+			})
 			const { createClient } = await import("@libsql/client")
 			const client = createClient({ authToken: creds.authToken, url: creds.url })
 			return createLibsqlConnection(client)

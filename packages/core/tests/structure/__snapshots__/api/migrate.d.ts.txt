@@ -547,8 +547,14 @@ export type TursoCredentialsRequest = TursoDeps & {
     /** The placement group a database created on demand joins (default "default") */
     group?: string | undefined;
     org: string;
+    /** a reader's credentials: a missing database is an error, not created, and the token is read-only */
+    readonly?: boolean | undefined;
 };
-/** The libsql URL and a one-hour token for a Turso database, creating the database when it is missing */
+/**
+ * The libsql URL and a one-hour token for a Turso database, creating the database when it is
+ * missing; for a reader, a read-only token, and a missing database is an error. Turso reads the
+ * token's expiration and authorization from the query (a body is ignored, and the default never expires).
+ */
 export declare function getTursoCredentials(request: TursoCredentialsRequest): Promise<{
     url: string;
     authToken: string;

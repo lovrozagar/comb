@@ -35,7 +35,7 @@ describe("getTursoCredentials", () => {
 		expect(creds).toEqual({ authToken: "jwt-1", url: "libsql://core-acme.turso.io" })
 		expect(api.requests.map((r) => r.url)).toEqual([
 			"https://api.turso.tech/v1/organizations/acme/databases/core",
-			"https://api.turso.tech/v1/organizations/acme/databases/core/auth/tokens",
+			"https://api.turso.tech/v1/organizations/acme/databases/core/auth/tokens?expiration=1h&authorization=full-access",
 		])
 		expect(lines).toEqual([])
 	})
@@ -196,5 +196,36 @@ describe("getSqliteColumns", () => {
 describe("getSqliteIndexes", () => {
 	it("returns index names from sqlite_master", async () => {
 		expect(await withSchema(USERS, getSqliteIndexes)).toEqual(["idx_users_email"])
+	})
+})
+
+describe("Turso for a reader (M9)", () => {
+	/* Turso reads both from the query: a body is ignored, and its default expiration is never */
+	it("mints a read-only token, and creates nothing, for a reader (M9)", async () => {
+		const api = fakeTurso([DB_INFO, TOKEN])
+		await getTursoCredentials({ ...REQUEST, fetch: api.fetch, readonly: true })
+		expect(api.requests[1]?.url).toBe(
+			"https://api.turso.tech/v1/organizations/acme/databases/core/auth/tokens?expiration=1h&authorization=read-only",
+		)
+		const missing = fakeTurso([[404, {}]])
+		await expect(getTursoCredentials({ ...REQUEST, fetch: missing.fetch, readonly: true })).rejects.toThrow(
+			'Turso database "acme/core" does not exist; check and status create none',
+		)
+		expect(missing.requests).toHaveLength(1)
+	})
+	it("connects a reader without creating its database", async () => {
+		const reader = fakeTurso([[404, {}]])
+		const readOnly = createTursoProvider(
+			{ apiToken: "tok", group: "default", org: "acme", type: "turso" },
+			{ fetch: reader.fetch },
+		)
+		await expect(
+			readOnly.connect({
+				migrationsDir: "m",
+				name: "typo-db",
+				provider: { apiToken: "tok", group: "default", org: "acme", type: "turso" },
+				readonly: true,
+			}),
+		).rejects.toThrow("does not exist")
 	})
 })
