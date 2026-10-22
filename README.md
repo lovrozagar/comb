@@ -49,6 +49,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.12](#upgrading-to-012)
 - [Upgrading to 0.11](#upgrading-to-011)
 - [Upgrading to 0.10](#upgrading-to-010)
 - [Upgrading to 0.9](#upgrading-to-09)
@@ -955,11 +956,15 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
 
+## Upgrading to 0.12
+
+0.12 makes the cursor seal's two packages peers. It is a breaking minor; what changes for a project on 0.11:
+
+**Install** `@noble/ciphers` and `@noble/hashes` (`>=2.4.0 <3`) beside comb. From 0.12 they are required peers, which seal and key the cursors, so the app and comb share one copy.
+
 ## Upgrading to 0.11
 
 0.11 closes the findings of a fresh review of 0.10. It is a breaking minor; what changes for a project on 0.10:
-
-**Install** `@noble/ciphers` and `@noble/hashes` (`>=2.4.0 <3`) beside comb. From 0.11.1 they are required peers, which seal and key the cursors, so the app and comb share one copy.
 
 **Migrations**
 
