@@ -4,8 +4,9 @@
  * Extracts constraints from type arguments:
  * Example: c.text("name", { min: 5, max: 254, email: true })
  */
-import type { FieldConstraintsMeta } from "./analyzer-types.ts"
-import { extractConstraints, type IdentifierValues } from "./utils/constraint-text.ts"
+import type { ConstantValue, FieldConstraintsMeta } from "./analyzer-types.ts"
+import { constraintsOfText } from "./utils/constraint-reader.ts"
+import { patternLiteral } from "./utils/pattern.ts"
 
 /** Field constraints extracted from type arguments */
 export type FieldConstraints = FieldConstraintsMeta
@@ -35,14 +36,20 @@ const KNOWN = /* @__PURE__ */ new Set([
  * Extracts constraints from c.method("name", { ... }) pattern.
  * For timestamp fields (createdAt, updatedAt, deletedAt), autogenerate defaults to true.
  */
-export function parseFieldConstraints(
-	raw: string,
-	fieldName?: string,
-	identifiers?: IdentifierValues,
+export function parseFieldConstraints(raw: string, fieldName?: string): FieldConstraints {
+	return fieldConstraintsOf(constraintsOfText(raw), { fieldName, place: raw })
+}
+
+/**
+ * A field's constraints from the record its column helper declares (constraint-reader.ts), every
+ * key one the column types allow and a pattern one comb can emit; an error at `place` otherwise
+ */
+export function fieldConstraintsOf(
+	constraints: Readonly<Record<string, ConstantValue>>,
+	{ fieldName, place }: { fieldName?: string | undefined; place: string },
 ): FieldConstraints {
-	const constraints = extractConstraints(raw, identifiers)
 	const unknown = Object.keys(constraints).find((key) => !KNOWN.has(key))
-	if (unknown !== undefined) throw new Error(`${raw}: comb reads no constraint named ${unknown}`)
+	if (unknown !== undefined) throw new Error(`${place}: comb reads no constraint named ${unknown}`)
 
 	/* Check if this is a timestamp field */
 	const isTimestampField =
@@ -63,7 +70,7 @@ export function parseFieldConstraints(
 		name: constraints["name"] === true,
 		nomutate: constraints["nomutate"] === true,
 		password: constraints["password"] === true,
-		pattern: typeof constraints["pattern"] === "string" ? constraints["pattern"] : null,
+		pattern: typeof constraints["pattern"] === "string" ? patternLiteral(constraints["pattern"], place) : null,
 		private: constraints["private"] === true || fieldName?.startsWith("_") || false,
 		tenant: constraints["tenant"] === true,
 		trim: constraints["trim"] === true,

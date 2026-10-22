@@ -10,6 +10,7 @@ import {
 	type VariableDeclaration,
 } from "ts-morph"
 import { parseField } from "./analyze-field.ts"
+import { constraintsAt } from "./utils/constraint-reader.ts"
 import { readTableOptions } from "./analyze-options.ts"
 import type { FieldMeta, ImportsMeta, TableMeta, TimestampsMeta } from "./analyzer-types.ts"
 import { readEnum, resolve } from "./utils/enum-source.ts"
@@ -98,7 +99,11 @@ function fieldOf(key: string, value: Node, imports: ImportsMeta): FieldMeta {
 	const json = readJsonSchema(value)
 	const schemaImports = importRefs(importedNames(enumReference, json, raw), value.getSourceFile())
 	recordImports(schemaImports, enumReference, imports)
-	const parsed = parseField(key, raw, imports.identifierValues)
+	/* each value read at its own node, through the project that resolves its imports (F1) */
+	const parsed = parseField(key, raw, {
+		declared: constraintsAt(value.getProject(), value),
+		place: `${placeOf(value)}: ${key}`,
+	})
 	return {
 		...parsed,
 		sqlName: astSqlName(value, parsed.sqlName),

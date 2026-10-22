@@ -5,7 +5,10 @@
 import fs from "node:fs"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import { SyntaxKind } from "ts-morph"
 import { analyze } from "../analyzer.ts"
+import { constraintsAt } from "./constraint-reader.ts"
+import { createProjectFromTablesDir } from "./ts-morph.ts"
 
 const CORE = path.join(import.meta.dirname, "../../..")
 
@@ -29,13 +32,21 @@ const HEAD = `import { sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 
-/** The constants analyze reads for a tables file of `columns` (after HEAD and `imports`) */
+/** Each column's constraints in a tables file of `columns` (after HEAD and `imports`), read as analyze reads them */
 function constants(files: Record<string, string>, imports: string, columns: string) {
 	const dir = dirWith({
 		...files,
 		"db.x.tables.ts": `${HEAD}${imports}\nexport const t = sqliteTable("t", { id: c.id("t"), ${columns} })\n`,
 	})
-	return Object.fromEntries(analyze(path.join(dir, "db.x.tables.ts")).imports.identifierValues)
+	const tables = path.join(dir, "db.x.tables.ts")
+	const project = createProjectFromTablesDir(tables)
+	const call = project.getSourceFileOrThrow(tables).getVariableDeclarationOrThrow("t").getInitializerOrThrow()
+	const object = call.asKindOrThrow(SyntaxKind.CallExpression).getArguments()[1]
+	const read = (object?.asKindOrThrow(SyntaxKind.ObjectLiteralExpression).getProperties() ?? []).map((property) => {
+		const assigned = property.asKindOrThrow(SyntaxKind.PropertyAssignment)
+		return [assigned.getName(), constraintsAt(project, assigned.getInitializerOrThrow())] as const
+	})
+	return Object.fromEntries(read.filter(([, record]) => Object.keys(record).length > 0))
 }
 
 describe("constraint constants, read statically", () => {
@@ -54,7 +65,7 @@ throw new CombError({ errorKey: "x", status: "bad_request" })
 			'import { LIMITS } from "./limits.ts"',
 			'name: c.text("name", { max: LIMITS.NAME, trim: LIMITS.ENABLED })',
 		)
-		expect(values).toEqual({ "LIMITS.ENABLED": true, "LIMITS.NAME": 80 })
+		expect(values).toEqual({ name: { max: 80, trim: true } })
 		expect(fs.existsSync(marker)).toBe(false)
 	})
 
@@ -64,7 +75,7 @@ throw new CombError({ errorKey: "x", status: "bad_request" })
 			'import { patterns } from "@lovrozagar/comb/sqlite/patterns"',
 			'phone: c.text("phone", { pattern: patterns.E164_PHONE })',
 		)
-		expect(values).toEqual({ "patterns.E164_PHONE": "/^\\+[1-9]\\d{7,14}$/" })
+		expect(values).toEqual({ phone: { pattern: "/^\\+[1-9]\\d{7,14}$/" } })
 	})
 
 	it("follows a re-export chain, an alias, `export *`, `as const`, `satisfies` and a const referencing a const", () => {
@@ -79,7 +90,7 @@ throw new CombError({ errorKey: "x", status: "bad_request" })
 			'import { R } from "./index.ts"',
 			'slug: c.text("slug", { pattern: R.SLUG, max: R.LONG })',
 		)
-		expect(values).toEqual({ "R.LONG": 40, "R.SLUG": "^[a-z-]+$" })
+		expect(values).toEqual({ slug: { max: 40, pattern: "^[a-z-]+$" } })
 	})
 
 	it("reads a regex literal, new RegExp with literal arguments, a negative number and a bare const", () => {
@@ -88,7 +99,12 @@ throw new CombError({ errorKey: "x", status: "bad_request" })
 			'const CODE = /^[A-Z]{3}$/i\nconst PATH = new RegExp("^a/b$", "u")\nconst LOW = -5\nconst OFF = false',
 			'code: c.text("code", { pattern: CODE }), path: c.text("path", { pattern: PATH }), n: c.integer("n", { min: LOW }), t: c.text("tt", { trim: OFF })',
 		)
-		expect(values).toEqual({ CODE: "/^[A-Z]{3}$/i", LOW: -5, OFF: false, PATH: "/^a\\/b$/u" })
+		expect(values).toEqual({
+			code: { pattern: "/^[A-Z]{3}$/i" },
+			n: { min: -5 },
+			path: { pattern: "/^a\\/b$/u" },
+			t: { trim: false },
+		})
 	})
 })
 
@@ -135,15 +151,13 @@ describe("constraint constants that only running could produce", () => {
 		const dir = dirWith({
 			"db.x.tables.ts": `${HEAD}${imports}\nexport const t = sqliteTable("t", {\n\tid: c.id("t"),\n\tn: c.integer("n", { ${constraint} }),\n})\n`,
 		})
-		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(
-			/db\.x\.tables\.ts:\d+: comb cannot read the constant/,
-		)
+		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(/db\.x\.tables\.ts:\d+: comb cannot read /)
 		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(why)
 	})
 })
 
 describe("constraint constants across exports, and RegExp and declarations it cannot read", () => {
-	it("reads a same-file aliased export, skips an export that misses before a `export *` that holds the name, and reads one constant once", () => {
+	it("reads a same-file aliased export, skips an export that misses before a `export *` that holds the name, and reads each use at its own node", () => {
 		const values = constants(
 			{
 				"index.ts":
@@ -152,9 +166,9 @@ describe("constraint constants across exports, and RegExp and declarations it ca
 				"rules.ts": "export const RULES = { MIN: 2 } as const\n",
 			},
 			'import { L, RULES } from "./index.ts"',
-			'a: c.integer("a", { max: L.MAX, min: RULES.MIN }), b: c.integer("b", { max: L.MAX, ...SPREAD })',
+			'a: c.integer("a", { max: L.MAX, min: RULES.MIN }), b: c.integer("b", { max: L.MAX })',
 		)
-		expect(values).toEqual({ "L.MAX": 9, "RULES.MIN": 2 })
+		expect(values).toEqual({ a: { max: 9, min: 2 }, b: { max: 9 } })
 	})
 
 	it.each([
@@ -194,5 +208,32 @@ describe("constraint constants across exports, and RegExp and declarations it ca
 			"db.x.tables.ts": `${HEAD}const A = B\nconst B = A\nexport const t = sqliteTable("t", { id: c.id("t"), n: c.integer("n", { max: A }) })\n`,
 		})
 		expect(() => analyze(path.join(cycle, "db.x.tables.ts"))).toThrow(/more than 8 references/)
+	})
+})
+
+describe("one constant name in two table files (F1)", () => {
+	it("reads each file's own NAME_MAX, not the first file's for both", () => {
+		const dir = dirWith({
+			"alpha.ts": `${HEAD}const NAME_MAX = 10\nexport const alpha = sqliteTable("alpha", { id: c.id("a"), name: c.text("name", { max: NAME_MAX }) })\n`,
+			"beta.ts": `${HEAD}const NAME_MAX = 200\nexport const beta = sqliteTable("beta", { id: c.id("b"), name: c.text("name", { max: NAME_MAX }) })\n`,
+			"db.x.tables.ts": 'export * from "./alpha.ts"\nexport * from "./beta.ts"\n',
+		})
+		const { tables } = analyze(path.join(dir, "db.x.tables.ts"))
+		const maxOf = (name: string) =>
+			tables.find((table) => table.varName === name)?.fields.find((f) => f.name === "name")?.constraints.max
+		expect([maxOf("alpha"), maxOf("beta")]).toEqual([10, 200])
+	})
+})
+
+describe("a pattern comb cannot emit, through analyze (F5, F6)", () => {
+	it.each([
+		['pattern: "^[a-z]+$"', /is not a regex/],
+		["pattern: /^[a-z]+$/i", /takes the flag i/],
+	])("fails codegen on %s at the field's place", (constraint, why) => {
+		const dir = dirWith({
+			"db.x.tables.ts": `${HEAD}export const t = sqliteTable("t", { id: c.id("t"), name: c.text("name", { ${constraint} }) })\n`,
+		})
+		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(/db\.x\.tables\.ts:\d+: name: pattern /)
+		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(why)
 	})
 })

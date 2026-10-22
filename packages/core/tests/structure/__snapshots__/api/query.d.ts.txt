@@ -983,8 +983,6 @@ type ImportsMeta = {
     identifiers: Map<string, string>;
     /** JSON schema names referenced by c.json() */
     jsonSchemaImports: Set<string>;
-    /** `"identifier.PROPERTY"` → the string an imported constant holds, for constraint references */
-    identifierValues: Map<string, ConstantValue>;
 };
 /** What a constraint constant can hold, read from its source (codegen/utils/constant-value.ts) */
 type ConstantValue = boolean | number | string;

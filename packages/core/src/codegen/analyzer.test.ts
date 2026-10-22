@@ -56,14 +56,14 @@ export const middle = createTable("middle", { id: c.id() })
 
 describe("analyzer: the constants a constraint names", () => {
 	it("resolves imported constants for constraint references when given the project directory", () => {
-		fs.writeFileSync(path.join(tmpDir, "patterns.ts"), 'export const PATTERNS = { SLUG: "^[a-z]+$" } as const\n')
+		fs.writeFileSync(path.join(tmpDir, "patterns.ts"), 'export const PATTERNS = { SLUG: "/^[a-z]+$/" } as const\n')
 		const fp = writeTablesFile(`
 import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { PATTERNS } from "./patterns"
 const c = { text: (name: string, _constraints: object) => text(name) }
 export const post = sqliteTable("post", { id: text("id").primaryKey(), slug: c.text("slug", { pattern: PATTERNS.SLUG }) })
 `)
-		expect(analyze(fp).imports.identifierValues.get("PATTERNS.SLUG")).toBe("^[a-z]+$")
+		expect(analyze(fp).tables[0]?.fields.find((field) => field.name === "slug")?.constraints.pattern).toBe("/^[a-z]+$/")
 	})
 
 	it("loads only the modules a table names a constant of, never another file's imports or its own unused ones", () => {
@@ -79,7 +79,7 @@ import { V } from "./effect"
 import { users } from "./other"
 export const post = sqliteTable("post", { id: text("id").primaryKey(), owner: text("owner").references(() => users.id), a: V.A ? text("a") : text("b") })
 `)
-		expect(analyze(fp).imports.identifierValues.size).toBe(0)
+		expect(() => analyze(fp)).not.toThrow()
 		expect(fs.existsSync(marker)).toBe(false)
 	})
 })

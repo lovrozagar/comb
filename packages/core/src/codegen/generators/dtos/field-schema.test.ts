@@ -6,7 +6,7 @@ import { generateFieldSchema } from "./field-schema.ts"
 
 const imports = (): ImportsMeta => ({
 	enumImports: new Map(),
-	identifierValues: new Map(),
+
 	identifiers: new Map(),
 	jsonSchemaImports: new Set(),
 })

@@ -7,7 +7,6 @@
 import type { Project } from "ts-morph"
 import { parseTable } from "./analyze-table.ts"
 import type { AnalysisResult, ImportsMeta, TableMeta } from "./analyzer-types.ts"
-import { constraintConstants } from "./utils/constant-value.ts"
 import { builderDialects, calleeOf, isTableDefinition, tableBuilders } from "./utils/table-builders.ts"
 import { createProjectFromTablesDir, extractDbName, getTablesImportPath, tableSourceFiles } from "./utils/ts-morph.ts"
 
@@ -15,7 +14,7 @@ import { createProjectFromTablesDir, extractDbName, getTablesImportPath, tableSo
 function collectImports(project: Project): ImportsMeta {
 	const imports: ImportsMeta = {
 		enumImports: new Map(),
-		identifierValues: new Map(),
+
 		identifiers: new Map(),
 		jsonSchemaImports: new Set(),
 	}
@@ -67,8 +66,6 @@ function collectTables(
 function analyze(tablesPath: string): AnalysisResult {
 	const project = createProjectFromTablesDir(tablesPath)
 	const imports = collectImports(project)
-	/* the constants the constraints name, read from source: codegen runs no user module */
-	imports.identifierValues = constraintConstants(project, tablesPath)
 	return {
 		dbName: extractDbName(tablesPath),
 		imports,

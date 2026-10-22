@@ -11,7 +11,7 @@ function tableOf(source: string, imports: ImportsMeta = emptyImports()) {
 }
 
 function emptyImports(): ImportsMeta {
-	return { enumImports: new Map(), identifierValues: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() }
+	return { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() }
 }
 
 describe("parseTable", () => {

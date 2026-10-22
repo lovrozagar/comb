@@ -1,13 +1,12 @@
 /**
  * The constants a table's column constraints name, read from source and never run: `pattern:
  * patterns.E164_PHONE` or `max: NAME_MAX`, followed through local consts, imports and re-exports
- * to a `const` initializer. Codegen executes no user module: running one would run its side effects
+ * to a `const` initializer, each read at its own node. Codegen executes no user module: running one would run its side effects
  * and its own imports. A value it cannot read statically fails codegen, naming where it stands.
  */
 import { Node, type Project, type SourceFile, SyntaxKind, ts } from "ts-morph"
 import type { ConstantValue } from "../analyzer-types.ts"
 import { placeOf } from "./node-text.ts"
-import { tableSourceFiles } from "./ts-morph.ts"
 
 /* how many references a constant may pass through before it is called a cycle */
 const MAX_DEPTH = 8
@@ -71,18 +70,27 @@ function newRegExp(node: Node): string | undefined {
 	return text === undefined || flagText === undefined ? undefined : regexLiteral(text, flagText)
 }
 
+/**
+ * A numeric literal's value as runtime computes it. ts-morph's getLiteralValue parses with parseInt
+ * unless the text holds a dot, so `1e-7` would read as 1 and `1e21` as 1 (F3); Number takes every
+ * form a literal is written in: exponents, hex, binary, octal, a leading dot, separators.
+ */
+const numberOf = (node: Node): number => Number(node.getText().replaceAll("_", ""))
+
 /** The value a literal node holds; undefined when `node` is no literal */
 function literalOf(node: Node): ConstantValue | undefined {
 	const text = textOf(node)
 	if (text !== undefined) return text
-	if (Node.isNumericLiteral(node)) return node.getLiteralValue()
+	if (Node.isNumericLiteral(node)) return numberOf(node)
 	if (node.getKind() === SyntaxKind.TrueKeyword) return true
 	if (node.getKind() === SyntaxKind.FalseKeyword) return false
 	if (Node.isRegularExpressionLiteral(node)) return node.getText()
-	const negative = node.asKind(SyntaxKind.PrefixUnaryExpression)
-	const operand = negative?.getOperand()
-	if (negative?.getOperatorToken() === SyntaxKind.MinusToken && Node.isNumericLiteral(operand))
-		return -operand.getLiteralValue()
+	const signed = node.asKind(SyntaxKind.PrefixUnaryExpression)
+	const operand = signed?.getOperand()
+	if (signed !== undefined && Node.isNumericLiteral(operand)) {
+		if (signed.getOperatorToken() === SyntaxKind.MinusToken) return -numberOf(operand)
+		if (signed.getOperatorToken() === SyntaxKind.PlusToken) return numberOf(operand)
+	}
 	return newRegExp(node)
 }
 
@@ -174,42 +182,17 @@ function valueOf(read: Read, at: At): ConstantValue {
 }
 
 /**
- * The constraint values of a table file that name a constant: the identifier and `identifier.PROPERTY`
- * values of each `c.<helper>(…)` call's object arguments, c.enum's state machine aside
+ * The value `node` stands for, read at that node: a literal, or a reference followed through
+ * consts, imports and re-exports to one; an error naming its file, line and expression otherwise
  */
-function constantReferences(file: SourceFile): Node[] {
-	return file
-		.getDescendantsOfKind(SyntaxKind.CallExpression)
-		.filter((call) => /^c\.\w+$/.test(call.getExpression().getText()) && call.getExpression().getText() !== "c.enum")
-		.flatMap((call) => call.getArguments().map(bare))
-		.flatMap((arg) => arg.asKind(SyntaxKind.ObjectLiteralExpression)?.getProperties() ?? [])
-		.flatMap((property) => property.asKind(SyntaxKind.PropertyAssignment)?.getInitializer() ?? [])
-		.filter((value) => Node.isIdentifier(bare(value)) || Node.isPropertyAccessExpression(bare(value)))
-}
-
-/** The value `reference` (in `file`) names, or an error naming its file, line and expression */
-function readConstant(project: Project, file: SourceFile, reference: Node): ConstantValue {
+export function readValue(project: Project, node: Node): ConstantValue {
 	try {
-		return valueOf({ depth: 0, project }, { file, node: reference })
+		return valueOf({ depth: 0, project }, { file: node.getSourceFile(), node })
 	} catch (error) {
-		/* every failure names where the constant stands; the original is kept as the cause */
+		/* every failure names where the value stands; the original is kept as the cause */
 		throw new Error(
-			`${placeOf(reference)}: comb cannot read the constant ${reference.getText()}: ${(error as Error).message}; write it as a literal, or a const of literals`,
+			`${placeOf(node)}: comb cannot read ${node.getText()}: ${(error as Error).message}; write it as a literal, or a const of literals`,
 			{ cause: error },
 		)
 	}
-}
-
-/**
- * Every constant the tables' constraints name, by the text that names it (`patterns.E164_PHONE`),
- * read statically; throws, naming the file, line and expression, for one it cannot read
- */
-export function constraintConstants(project: Project, tablesPath: string): Map<string, ConstantValue> {
-	const out = new Map<string, ConstantValue>()
-	for (const file of tableSourceFiles(project, tablesPath)) {
-		for (const reference of constantReferences(file)) {
-			if (!out.has(reference.getText())) out.set(reference.getText(), readConstant(project, file, reference))
-		}
-	}
-	return out
 }

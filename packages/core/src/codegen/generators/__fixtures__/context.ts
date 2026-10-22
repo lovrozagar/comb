@@ -7,7 +7,7 @@ type TestContext = GeneratorContext & { logged: string[]; warned: string[] }
 type ContextOptions = { cwd: string; dbName?: string; dialect?: GeneratorContext["dialect"]; tablesPath?: string }
 
 function emptyImports(): AnalysisResult["imports"] {
-	return { enumImports: new Map(), identifiers: new Map(), identifierValues: new Map(), jsonSchemaImports: new Set() }
+	return { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() }
 }
 
 /** Build from an analyzer result, or from hand-made tables under `dbName` (default "test"). */

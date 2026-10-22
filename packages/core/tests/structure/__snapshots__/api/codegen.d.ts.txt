@@ -181,8 +181,6 @@ type ImportsMeta = {
     identifiers: Map<string, string>;
     /** JSON schema names referenced by c.json() */
     jsonSchemaImports: Set<string>;
-    /** `"identifier.PROPERTY"` → the string an imported constant holds, for constraint references */
-    identifierValues: Map<string, ConstantValue>;
 };
 /** What a constraint constant can hold, read from its source (codegen/utils/constant-value.ts) */
 type ConstantValue = boolean | number | string;
@@ -206,8 +204,7 @@ export type { ConstantValue, ImportRef, AnalysisResult, CheckConstraintMeta, Fie
  * Extracts constraints from type arguments:
  * Example: c.text("name", { min: 5, max: 254, email: true })
  */
-import type { FieldConstraintsMeta } from "./analyzer-types.ts";
-import { type IdentifierValues } from "./utils/constraint-text.ts";
+import type { ConstantValue, FieldConstraintsMeta } from "./analyzer-types.ts";
 /** Field constraints extracted from type arguments */
 export type FieldConstraints = FieldConstraintsMeta;
 /**
@@ -215,7 +212,15 @@ export type FieldConstraints = FieldConstraintsMeta;
  * Extracts constraints from c.method("name", { ... }) pattern.
  * For timestamp fields (createdAt, updatedAt, deletedAt), autogenerate defaults to true.
  */
-export declare function parseFieldConstraints(raw: string, fieldName?: string, identifiers?: IdentifierValues): FieldConstraints;
+export declare function parseFieldConstraints(raw: string, fieldName?: string): FieldConstraints;
+/**
+ * A field's constraints from the record its column helper declares (constraint-reader.ts), every
+ * key one the column types allow and a pattern one comb can emit; an error at `place` otherwise
+ */
+export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, place }: {
+    fieldName?: string | undefined;
+    place: string;
+}): FieldConstraints;
 
 // codegen/entity-meta.d.ts
 /**
@@ -311,27 +316,6 @@ type OrmConfig = {
 /** Generate ORM client file based on config */
 export declare function generateOrm(ctx: GeneratorContext, config: OrmConfig): void;
 export {};
-
-// codegen/utils/constraint-text.d.ts
-/**
- * A column helper's constraint object, read from its text: `c.text("name", { min: 5, max: 254 })`
- * or `c.text<{ min: 5 }>("name")`. References to imported constants resolve through the values the
- * caller passes, so two codegen runs never share state.
- */
-import type { ConstantValue } from "../analyzer-types.ts";
-/** A constraint's constant reference, as written (`patterns.E164_PHONE`), → the value its const holds */
-export type IdentifierValues = ReadonlyMap<string, ConstantValue>;
-/**
- * Extract constraint object from column function parameter or type argument
- * Parameter format: c.text("name", { min: 5, max: 254 })
- * Type arg format: c.text<{ min: 5, max: 254 }>("name")
- */
-export declare function extractConstraints(raw: string, identifiers?: IdentifierValues): Record<string, unknown>;
-/**
- * Extract length constraint from field definition
- * Prioritizes constraints.max, falls back to legacy formats
- */
-export declare function extractLength(raw: string): number | null;
 
 // meta.d.ts
 /**

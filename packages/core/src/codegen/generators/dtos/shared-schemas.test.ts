@@ -17,7 +17,7 @@ function table(name: string, zodTypes: string[]): TableInfo {
 
 const imports = (external: string[] = []): ImportsMeta => ({
 	enumImports: new Map(external.map((name) => [name, "./enums"])),
-	identifierValues: new Map(),
+
 	identifiers: new Map(),
 	jsonSchemaImports: new Set(),
 })

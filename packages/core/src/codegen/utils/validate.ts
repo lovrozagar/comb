@@ -21,7 +21,7 @@ type Declared = { optionsText: string; table: TableMeta }
 
 const emptyImports = (): ImportsMeta => ({
 	enumImports: new Map(),
-	identifierValues: new Map(),
+
 	identifiers: new Map(),
 	jsonSchemaImports: new Set(),
 })

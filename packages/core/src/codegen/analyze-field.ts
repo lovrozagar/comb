@@ -3,9 +3,9 @@
  * keys, references and annotations every generator needs. Enum values and states need the AST
  * and are read by analyze-table.
  */
-import type { FieldMeta, ForeignKeyRef } from "./analyzer-types.ts"
-import { parseFieldConstraints } from "./annotations.ts"
-import { extractLength, type IdentifierValues } from "./utils/constraint-text.ts"
+import type { ConstantValue, FieldMeta, ForeignKeyRef } from "./analyzer-types.ts"
+import { fieldConstraintsOf } from "./annotations.ts"
+import { constraintsOfText } from "./utils/constraint-reader.ts"
 
 /**
  * Extract Drizzle helper name from raw initializer text.
@@ -53,15 +53,36 @@ function sqlNameOf(key: string, raw: string): string {
 	return named?.[2] ?? key
 }
 
-/** Parse a single field from a property assignment node. */
-export function parseField(key: string, raw: string, identifiers?: IdentifierValues): FieldMeta {
-	const constraints = parseFieldConstraints(raw, key, identifiers)
+/**
+ * A text column's length: its `max` constraint, else drizzle's own `text("name", 50)` or `{ length: 50 }`
+ */
+function lengthOf(declared: Readonly<Record<string, ConstantValue>>, raw: string): number | null {
+	if (typeof declared["max"] === "number") return declared["max"]
+	const positional = /c\.text\("[\w_]+",\s*(\d+)/.exec(raw)?.[1] ?? /length:\s*(\d+)/.exec(raw)?.[1]
+	return positional === undefined ? null : Number.parseInt(positional, 10)
+}
+
+/**
+ * Parse a single field from its initializer's text, its constraints the record the table pass read
+ * on the AST (constraint-reader.ts) and the place an error names; without them, read from `raw` by
+ * the same reader, an error naming the text
+ */
+export function parseField(
+	key: string,
+	raw: string,
+	read: { declared: Readonly<Record<string, ConstantValue>>; place: string } = {
+		declared: constraintsOfText(raw),
+		place: raw,
+	},
+): FieldMeta {
+	const { declared } = read
+	const constraints = fieldConstraintsOf(declared, { fieldName: key, place: read.place })
 	const isPrimaryKey = /\.primaryKey\(/.test(raw) || ID_HELPERS.test(raw)
 	/* c.createdAt and c.updatedAt call .notNull() inside the helper, where the text cannot see it */
 	const isNotNull = /\.notNull\(\)/.test(raw) || isPrimaryKey || /^\s*c\.(?:createdAt|updatedAt)\s*\(/.test(raw)
 	const drizzleHelper = extractDrizzleHelper(raw)
 	const fk = extractForeignKey(raw, key)
-	const length = extractLength(raw)
+	const length = lengthOf(declared, raw)
 
 	return {
 		constraints,
