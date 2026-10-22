@@ -7,7 +7,8 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
-import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
+import { type CursorId, CURSOR_TIEBREAK_COLUMN, readCursor } from "./cursor.ts"
+import { anchored, type KeysetKind, mintWithin } from "./cursor-ref.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { atCursorPrecision, boundAs } from "./cursor-precision.ts"
 import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
@@ -148,10 +149,11 @@ function drizzleListOptions(
 		/* the cursor is client input: each value must be what its column holds, or it is a 400 */
 		assertCursorFits([...keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
 		const id = bindableOn(tiebreak.column, cursor.id) as CursorId
-		const values = boundAs(
+		const bound = boundAs(
 			keys,
 			cursor.values.map((value, i) => bindableOn(keys[i]?.column, value)),
 		)
+		const values = anchored(keys, bound, { id, table, tiebreak: tiebreak.column })
 		return keysetSQL({
 			id,
 			keys: atCursorPrecision(keys),
@@ -199,20 +201,15 @@ function mintFrom(row: object, parsedSort: SortField[], options: PaginateOptions
 			status: "internal_server_error",
 		})
 	}
-	const cursor = createCursor(row as Record<string, unknown>, parsedSort, options)
-	/* a cursor the list would refuse ends the list on page 2; say so on page 1, where it is a wiring mistake */
-	if (cursor.length > MAX_CURSOR_LENGTH) {
-		throw new CombError({
-			cause: `the sort by ${parsedSort.map(({ field }) => field).join(", ")} mints a cursor of ${cursor.length} characters, past ${MAX_CURSOR_LENGTH}: sort key too long for a cursor; sort by a bounded column`,
-			errorKey: combErrorKeys.SORT_NOT_WIRED,
-			status: "internal_server_error",
-		})
-	}
-	return cursor
+	/* a key too long for the cap goes by reference; a derived list, which cannot read it, says so on page 1 */
+	return mintWithin(row as Record<string, unknown>, parsedSort, options)
 }
 
-/** paginate's options: the cursor secret and scope, and the field a row's tiebreak id is in (default `id`) */
-type PaginateOptions = CursorOptions & { idField?: string | undefined }
+/**
+ * paginate's options: the cursor secret and scope, the field a row's tiebreak id is in (default
+ * `id`), and `keyset: "derived"` for a buildDerivedListQuery list, whose keys no row holds
+ */
+type PaginateOptions = CursorOptions & { idField?: string | undefined; keyset?: KeysetKind | undefined }
 
 /**
  * Create pagination result from drizzle query results with _total extra, the next cursor sealed

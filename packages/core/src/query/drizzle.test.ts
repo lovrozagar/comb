@@ -2,7 +2,7 @@ import { getTableColumns, type SQL, sql } from "drizzle-orm"
 import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { CombError } from "../error.ts"
-import { createCursor, encodeCursor, sortSignature, openCursor } from "./cursor.ts"
+import { createCursor, CursorRef, encodeCursor, openCursor, sortSignature } from "./cursor.ts"
 import { createListQuerySchema } from "./schema.ts"
 import { buildListQuery } from "./sqlite/build-list-query.ts"
 import { queryHelpers } from "./drizzle.ts"
@@ -467,11 +467,21 @@ describe("queryHelpers.listOptions — a cursor and an empty sort (B2, B3)", () 
 describe("queryHelpers.paginate and the cursor length (Q6)", () => {
 	const schema = createListQuerySchema({ sort: ["title", "id"] })
 
-	it("throws on page 1 when the next cursor would pass what the list takes, and takes any it mints", () => {
+	it("carries a key too long for the cap by reference within it, and refuses it on page 1 of a derived list (R8)", () => {
 		const query = schema.parse({ limit: "1", order: "title.asc" })
 		const long = { id: "a", title: "字".repeat(2100) }
-		expect(() => queryHelpers.paginate([long, { id: "b", title: "x" }], query, SEALED)).toThrow(
-			expect.objectContaining({ errorKey: "sort_not_wired" }),
+		const [, byReference] = queryHelpers.paginate([long, { id: "b", title: "x" }], query, SEALED)
+		expect(byReference.nextCursor?.length).toBeLessThanOrEqual(8192)
+		expect(openCursor(byReference.nextCursor as string, SEALED)?.values[0]).toBeInstanceOf(CursorRef)
+		expect(() =>
+			queryHelpers.paginate([long, { id: "b", title: "x" }], query, { ...SEALED, keyset: "derived" }),
+		).toThrow(
+			expect.objectContaining({
+				cause: expect.stringMatching(
+					/^a row's title is too long to page this list by: its cursor would be \d+ characters, past 8192; a derived list reads no row/,
+				),
+				errorKey: "sort_not_wired",
+			}),
 		)
 		const [, meta] = queryHelpers.paginate(
 			[

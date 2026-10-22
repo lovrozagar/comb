@@ -1,0 +1,195 @@
+/**
+ * A sort key too long for a cursor (R8): any client can write a 9000-character title, and the
+ * cursor at that row would pass the cap. The cursor then carries the row's id and the longest
+ * prefix that fits, and the keyset reads the value from the row itself: exact while the row is
+ * there, and, once it is deleted, resumed from the prefix, which may repeat rows and skips none.
+ */
+import { defineRelations, sql } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/libsql"
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { describe, expect, it } from "vitest"
+import { queryHelpers } from "../../../src/query/drizzle.ts"
+import { createListQuerySchema } from "../../../src/query/schema.ts"
+import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
+import { libsqlMemory } from "../support/libsql.ts"
+import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+
+const doc = sqliteTable("doc", { id: integer("id").primaryKey(), title: text("title").notNull() })
+const schema = createListQuerySchema({ sort: ["title"], pagination: { defaultLimit: 1, maxLimit: 1 } })
+const LONG = "長".repeat(3000)
+
+/* long titles that share their first 3000 characters, short ones around them */
+const TITLES: Array<[number, string]> = [
+	[1, `${LONG}b`],
+	[2, "a"],
+	[3, `${LONG}a`],
+	[4, `${LONG}c`],
+	[5, "zz"],
+	[6, `${LONG}a`],
+	[7, "長"],
+]
+
+type Harness = ReturnType<typeof libsqlMemory>
+
+async function seeded(collate = ""): Promise<Harness> {
+	const harness = libsqlMemory()
+	await harness.client.execute(`CREATE TABLE doc (id INTEGER PRIMARY KEY, title TEXT NOT NULL ${collate})`)
+	for (const [id, title] of TITLES)
+		await harness.client.execute({ args: [id, title], sql: "INSERT INTO doc VALUES (?, ?)" })
+	return harness
+}
+
+type Page = (
+	harness: Harness,
+	order: string,
+	cursor: string | undefined,
+) => Promise<{ ids: number[]; next: string | null }>
+
+const BUILDER: Page = async (harness, order, cursor) => {
+	const parsed = schema.parse({ cursor, order })
+	const rows = await applyListQuery(
+		harness.db.select().from(doc).$dynamic(),
+		buildListQuery({ ...SEALED, parsed, table: doc }),
+	)
+	const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+	return { ids: items.map((row) => row.id), next: meta.nextCursor }
+}
+
+const RELATIONAL: Page = async (harness, order, cursor) => {
+	const db = drizzle({ client: harness.client, relations: defineRelations({ doc }) })
+	const query = { ...schema.parse({ order }), cursor }
+	const rows = await db.query.doc.findMany(queryHelpers.listOptions(query, SEALED) as never)
+	const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; title: string }>, query, SEALED)
+	return { ids: items.map((row) => row.id), next: meta.nextCursor }
+}
+
+/** Every id under `order`, one row a page; `between` runs after each page with the ids so far */
+async function pageAll(
+	harness: Harness,
+	page: Page,
+	{ between, order }: { between?: (seen: number[]) => Promise<void>; order: string },
+) {
+	const seen: number[] = []
+	let cursor: string | undefined
+	for (let guard = 0; guard < 30; guard++) {
+		const { ids, next } = await page(harness, order, cursor)
+		seen.push(...ids)
+		if (next === null) return seen
+		expect(next.length).toBeLessThanOrEqual(8192)
+		cursor = next
+		await between?.(seen)
+	}
+	throw new Error(`${order} did not end in 30 pages`)
+}
+
+/** The ids in SQLite's own order */
+async function inOrder(harness: Harness, order: string): Promise<number[]> {
+	const direction = order.endsWith("desc") ? "DESC" : "ASC"
+	const rows = await harness.client.execute(`SELECT id FROM doc ORDER BY title ${direction}, id ${direction}`)
+	return rows.rows.map((row) => Number(row[0]))
+}
+
+describe("a sort key too long for a cursor (R8)", () => {
+	for (const [name, page] of [
+		["buildListQuery", BUILDER],
+		["listOptions", RELATIONAL],
+	] as const) {
+		it.each(["title.asc", "title.desc"])(`pages %s exactly through ${name} while every row is there`, async (order) => {
+			const harness = await seeded()
+			try {
+				expect(await pageAll(harness, page, { order })).toEqual(await inOrder(harness, order))
+			} finally {
+				harness.close()
+			}
+		})
+
+		for (const collate of ["", "COLLATE NOCASE"]) {
+			it.each(["title.asc", "title.desc"])(
+				`resumes %s through ${name} with no row skipped when the page's last row is deleted ${collate}`,
+				async (order) => {
+					const harness = await seeded(collate)
+					try {
+						const all = await inOrder(harness, order)
+						const deleted = new Set<number>()
+						const seen = await pageAll(harness, page, {
+							order,
+							between: async (ids) => {
+								/* the first long row a page ends on goes away before the next page */
+								const last = ids.at(-1) as number
+								if (deleted.size === 0 && (TITLES.find(([id]) => id === last)?.[1].length ?? 0) > 100) {
+									deleted.add(last)
+									await harness.client.execute({ args: [last], sql: "DELETE FROM doc WHERE id = ?" })
+								}
+							},
+						})
+						expect(deleted.size).toBe(1)
+						expect(all.filter((id) => !seen.includes(id))).toEqual([])
+					} finally {
+						harness.close()
+					}
+				},
+			)
+		}
+	}
+})
+
+describe("a derived list's key too long for a cursor (R8)", () => {
+	it("refuses on page 1, naming the field, as a derived list reads no row to page by reference", async () => {
+		const harness = await seeded()
+		try {
+			const sort = [{ direction: "asc" as const, field: "label" }]
+			const built = buildDerivedListQuery({
+				...SEALED,
+				idColumn: doc.id,
+				parsed: { limit: 1, parsedSort: sort },
+				sortColumns: { label: doc.title },
+			})
+			const rows = await harness.db
+				.select({ id: doc.id, label: doc.title })
+				.from(doc)
+				.orderBy(...built.orderBy)
+				.limit(built.limit)
+				.where(sql`length(${doc.title}) > 100`)
+			expect(() =>
+				queryHelpers.paginate(rows, { limit: 1, parsedSort: sort }, { ...SEALED, keyset: "derived" }),
+			).toThrow(
+				expect.objectContaining({
+					cause: expect.stringMatching(/^a row's label is too long to page this list by/),
+					status: 500,
+				}),
+			)
+		} finally {
+			harness.close()
+		}
+	})
+
+	it("says to declare the list derived when paginate minted a reference it cannot read", async () => {
+		const harness = await seeded()
+		try {
+			const sort = [{ direction: "asc" as const, field: "label" }]
+			const [, meta] = queryHelpers.paginate(
+				[
+					{ id: 1, label: `${LONG}b` },
+					{ id: 2, label: "zz" },
+				],
+				{ limit: 1, parsedSort: sort },
+				SEALED,
+			)
+			expect(() =>
+				buildDerivedListQuery({
+					...SEALED,
+					idColumn: doc.id,
+					parsed: { cursor: meta.nextCursor as string, limit: 1, parsedSort: sort },
+					sortColumns: { label: doc.title },
+				}),
+			).toThrow(
+				expect.objectContaining({
+					cause: expect.stringContaining("pass { keyset: 'derived' } to paginate"),
+					status: 500,
+				}),
+			)
+		} finally {
+			harness.close()
+		}
+	})
+})

@@ -8,6 +8,7 @@ import { Column, is, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../../error.ts"
+import { CursorRef } from "../cursor.ts"
 import { combErrorKeys } from "../../types.ts"
 
 /**
@@ -58,6 +59,8 @@ const isInteger = (value: unknown) => typeof value === "bigint" || (typeof value
  */
 function fits(column: SQLWrapper, value: unknown): boolean {
 	if (value === null) return true
+	/* a reference reads a text column's value from the row: no other key holds one */
+	if (value instanceof CursorRef) return is(column, Column) && column.dataType.startsWith("string")
 	if (column instanceof DateKey) return value instanceof Date || isInteger(value)
 	if (is(column, Column)) return fitsDataType(column.dataType, value)
 	return (

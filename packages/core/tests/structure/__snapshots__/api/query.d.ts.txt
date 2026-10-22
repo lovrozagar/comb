@@ -56,8 +56,13 @@ type DecodedCursor = {
     sort: string;
     values: CursorValue[];
 };
-/** What a sort key can hold and its database can compare */
-type CursorValue = bigint | boolean | Date | number | string | null;
+/** A sort value carried by reference (cursor-ref.ts): the prefix of it that fit, the rest read from the row */
+declare class CursorRef {
+    readonly prefix: string;
+    constructor(prefix: string);
+}
+/** What a sort key can hold and its database can compare, or a long one carried by reference */
+type CursorValue = bigint | boolean | CursorRef | Date | number | string | null;
 type PaginationMeta = {
     /** Rows the filter matches across all pages; null when the response cannot know */
     count: number | null;
@@ -85,7 +90,7 @@ declare function cursorProblem(cursor: string): string | null;
 declare function openCursor(cursor: string, options: CursorOptions): DecodedCursor | null;
 /** Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
-export { createCursor, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
+export { createCursor, CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
 
 // query/cursor-seal.d.ts
 /** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
@@ -113,6 +118,7 @@ export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CU
  * query-helpers with drizzle's relational query API.
  */
 import { type SQL } from "drizzle-orm";
+import { type KeysetKind } from "./cursor-ref.ts";
 import { type CursorOptions } from "./cursor-seal.ts";
 import type { FilterAST, ParsedFields, SortField } from "./types.ts";
 import type { paginationResponseSchema } from "./schema.ts";
@@ -174,9 +180,13 @@ declare function drizzleListOptions(query: {
 type DrizzleListResult<T> = T & {
     _total?: number;
 };
-/** paginate's options: the cursor secret and scope, and the field a row's tiebreak id is in (default `id`) */
+/**
+ * paginate's options: the cursor secret and scope, the field a row's tiebreak id is in (default
+ * `id`), and `keyset: "derived"` for a buildDerivedListQuery list, whose keys no row holds
+ */
 type PaginateOptions = CursorOptions & {
     idField?: string | undefined;
+    keyset?: KeysetKind | undefined;
 };
 /**
  * Create pagination result from drizzle query results with _total extra, the next cursor sealed
@@ -424,6 +434,48 @@ type ListQueryCapabilities = {
     sortFields: Set<string>;
 };
 export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ParsedFields, SortDirection, SortField, SortNulls, };
+
+// query/cursor-ref.d.ts
+/**
+ * A sort key too long for a cursor (R8). Any client can write a long title, and a cursor carries
+ * every sort value, so the cursor at that row would pass MAX_CURSOR_LENGTH and the next page would
+ * refuse it. Such a value is carried by reference instead: the cursor holds the row's id (it always
+ * does) and the longest prefix of the value that fits, and the keyset reads the value from the row:
+ *
+ *   COALESCE((SELECT key FROM t WHERE id = ?), fallback)
+ *
+ * Exact while the row is there. Once it is deleted the fallback is the prefix itself ascending and
+ * the prefix followed by U+10FFFF descending: under binary, NOCASE and C collation the first sorts
+ * at or before the value and the second at or after it, so resuming there may repeat rows that
+ * share the prefix and skips none. Postgres takes the fallback only on a C or POSIX collation; under
+ * any other, neither bound is safe, and a deleted anchor ends the list. A derived list has no table
+ * to read from, so its overflowing cursor is refused when it is minted.
+ */
+import { type SQL, type SQLWrapper } from "drizzle-orm";
+import type { CursorOptions } from "./cursor-seal.ts";
+import type { SortKey } from "./sqlite/keyset.ts";
+import type { SortField } from "./types.ts";
+/** paginate's choice for an overflowing key: by reference on a table, refused on a derived list */
+type KeysetKind = "derived" | "table";
+/**
+ * The cursor for `row`, its longest string values carried by reference while it passes the cap;
+ * a 500 on a derived list, or when no reference makes it fit
+ */
+declare function mintWithin(row: Record<string, unknown>, sort: readonly SortField[], options: CursorOptions & {
+    idField?: string | undefined;
+    keyset?: KeysetKind | undefined;
+}): string;
+/** `table` as a FROM item: its own name, with the alias a relational query gave it reapplied */
+declare function fromOf(table: object): SQL;
+/** A 500 when a list with no table to read from got a reference: paginate was not told the list is derived */
+declare function assertNoReference(values: readonly unknown[]): void;
+/** The cursor's values with each reference resolved against `table`, the row keyed `id` by `tiebreak` */
+declare function anchored(keys: readonly SortKey[], values: readonly unknown[], at: {
+    id: unknown;
+    table: object;
+    tiebreak: SQLWrapper;
+}): unknown[];
+export { anchored, assertNoReference, fromOf, type KeysetKind, mintWithin };
 
 // query/filter-parse.d.ts
 /**
@@ -748,6 +800,47 @@ type RetrieveQueryOutput = {
     parsedFields: ParsedFields | null;
 };
 export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, OutputStableShape, PaginationConfig, RetrieveQueryConfig, RetrieveQueryOutput, };
+
+// query/sqlite/keyset.d.ts
+/**
+ * Ordering and keyset predicates — one implementation for every SQLite builder.
+ *
+ * ORDER BY and the cursor predicate must agree on direction AND null placement
+ * for every key, or pagination skips and repeats rows. Both are derived here
+ * from the same `SortKey[]`, so they cannot disagree.
+ */
+import { type SQL, type SQLWrapper } from "drizzle-orm";
+import type { SortDirection, SortNulls } from "../types.ts";
+type SortKey = {
+    column: SQLWrapper;
+    direction: SortDirection;
+    nulls?: SortNulls | undefined;
+};
+type Tiebreak = {
+    column: SQLWrapper;
+    direction: SortDirection;
+};
+/** `col ASC NULLS LAST` — explicit placement so SQLite's default never leaks in. */
+declare function orderSQL(key: SortKey): SQL;
+/** ORDER BY for the keys followed by the tiebreak, which makes the order total. */
+declare function orderByKeys(keys: readonly SortKey[], tiebreak: Tiebreak): SQL[];
+/**
+ * Lexicographic "after this row" over every key plus the tiebreak:
+ *
+ *   (k1 after) OR (k1 = v1 AND k2 after) OR … OR (k1 = v1 AND … AND id after)
+ *
+ * Expanded rather than a row-value comparison because each key carries its own
+ * direction and null placement.
+ */
+/** Where a cursor points: the sort keys and the row's values for them, then the tiebreak and its id */
+type KeysetPosition = {
+    id: unknown;
+    keys: readonly SortKey[];
+    tiebreak: Tiebreak;
+    values: readonly unknown[];
+};
+declare function keysetSQL({ id, keys, tiebreak, values }: KeysetPosition): SQL;
+export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak };
 
 // codegen/analyzer-types.d.ts
 /**

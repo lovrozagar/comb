@@ -52,8 +52,17 @@ type DecodedCursor = {
 	values: CursorValue[]
 }
 
-/** What a sort key can hold and its database can compare */
-type CursorValue = bigint | boolean | Date | number | string | null
+/** A sort value carried by reference (cursor-ref.ts): the prefix of it that fit, the rest read from the row */
+class CursorRef {
+	readonly prefix: string
+
+	constructor(prefix: string) {
+		this.prefix = prefix
+	}
+}
+
+/** What a sort key can hold and its database can compare, or a long one carried by reference */
+type CursorValue = bigint | boolean | CursorRef | Date | number | string | null
 
 type PaginationMeta = {
 	/** Rows the filter matches across all pages; null when the response cannot know */
@@ -81,10 +90,12 @@ function sortSignature(parsedSort: readonly SortField[]): string {
 const DATE_TAG = "$date"
 const BIGINT_TAG = "$bigint"
 const NUM_TAG = "$num"
+const REF_TAG = "$ref"
 const NON_FINITE = ["Infinity", "-Infinity", "NaN"]
 
 function encodeValue(value: unknown): unknown {
 	if (value instanceof Date) return { [DATE_TAG]: value.getTime() }
+	if (value instanceof CursorRef) return { [REF_TAG]: value.prefix }
 	if (typeof value === "number" && !Number.isFinite(value)) return { [NUM_TAG]: String(value) }
 	return typeof value === "bigint" ? { [BIGINT_TAG]: value.toString() } : (value ?? null)
 }
@@ -92,8 +103,10 @@ function encodeValue(value: unknown): unknown {
 const isPlain = (value: unknown): value is number | string =>
 	typeof value === "string" || (typeof value === "number" && Number.isFinite(value))
 
-/** A tagged value from the wire: a Date a JS Date can hold, a bigint of decimal digits, or ±Infinity or NaN */
-function decodeTagged(value: Record<string, unknown>): Date | bigint | number | undefined {
+/** A tagged value from the wire: a Date a JS Date can hold, a bigint of decimal digits, ±Infinity or NaN, or a reference */
+function decodeTagged(value: Record<string, unknown>): CursorRef | Date | bigint | number | undefined {
+	const prefix = value[REF_TAG]
+	if (typeof prefix === "string") return new CursorRef(prefix)
 	const named = value[NUM_TAG]
 	if (typeof named === "string") return NON_FINITE.includes(named) ? Number(named) : undefined
 	const time = value[DATE_TAG]
@@ -194,6 +207,7 @@ function readCursor(cursor: string, parsedSort: readonly SortField[], options: C
 
 export {
 	createCursor,
+	CursorRef,
 	CURSOR_TIEBREAK_COLUMN,
 	MAX_CURSOR_LENGTH,
 	cursorProblem,

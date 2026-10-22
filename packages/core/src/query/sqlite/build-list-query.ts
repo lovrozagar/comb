@@ -3,13 +3,14 @@ import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
-import { CURSOR_TIEBREAK_COLUMN, type CursorId, type CursorOptions, readCursor } from "../cursor.ts"
+import { CURSOR_TIEBREAK_COLUMN, type CursorOptions } from "../cursor.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
 import { assertSchemaParsed } from "../trusted.ts"
-import { assertCursorFits, bindable, boundForKeys, DateKey } from "./cursor-fit.ts"
-import { keysetSQL, orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
+import { DateKey } from "./cursor-fit.ts"
+import { cursorWhere } from "./cursor-where.ts"
+import { orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
 import type { LikeSearchResolver } from "./search.ts"
 import type { RelationConfig } from "./types.ts"
 
@@ -116,6 +117,8 @@ type Keyset = {
 
 type Finish = {
 	cursor: CursorOptions
+	/** the table a cursor's references are read from; none on a derived list */
+	table?: SQLiteTable | undefined
 	keyset: Keyset
 	parsed: ListQueryParsed
 	sort: readonly SortField[]
@@ -128,7 +131,7 @@ type Finish = {
  * Shared tail of both builders: cursor predicate, pagination mode, result shape.
  * `keys` null means the order includes something keyset cannot express.
  */
-function finish({ cursor: options, keyset, parsed, sort, tiebreak, where }: Finish): ListQueryResult {
+function finish({ cursor: options, keyset, parsed, sort, table, tiebreak, where }: Finish): ListQueryResult {
 	assertCursorWired(options)
 	const search = parsed.q?.trim() || null
 
@@ -140,13 +143,7 @@ function finish({ cursor: options, keyset, parsed, sort, tiebreak, where }: Fini
 				status: "bad_request",
 			})
 		}
-		const cursor = readCursor(parsed.cursor, sort, options)
-		assertCursorFits([...keyset.keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
-		const values = boundForKeys(
-			keyset.keys.map(({ column }) => column),
-			cursor.values,
-		)
-		const after = keysetSQL({ id: bindable(cursor.id) as CursorId, keys: keyset.keys, tiebreak, values })
+		const after = cursorWhere({ cursor: parsed.cursor, keys: keyset.keys, options, sort, table, tiebreak })
 		return {
 			limit: parsed.limit + 1,
 			meta: { limit: parsed.limit, page: 1, type: "cursor" },
@@ -245,6 +242,7 @@ function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTa
 		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret },
 		keyset,
 		parsed,
+		table,
 		sort,
 		tiebreak,
 		where: [
