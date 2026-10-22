@@ -50,7 +50,7 @@ export const post = createTable("post", {
 		/* check constraints */
 		check: {
 			post_x_enum: {
-				errorKey: "post_post_x_enum_failed",
+				errorKey: "post_x_enum_failed",
 				cause: "Invalid enum value",
 				statusKey: "bad_request",
 			}

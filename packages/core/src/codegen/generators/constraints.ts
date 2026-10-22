@@ -77,6 +77,10 @@ function checkVerdict(name: string, expression: string): Omit<Constraint, "error
 	}
 }
 
+/** A CHECK's name under its table, which a name already starting with the table carries once (F35) */
+const keyed = (table: TableMeta, name: string) =>
+	name.startsWith(`${table.sqlName}_`) ? name : `${table.sqlName}_${name}`
+
 /**
  * Each CHECK of a table by the name the engine reports: the declared ones and comb's own enum
  * CHECKs (F28), cut to what Postgres keeps of a name (F21). Two that cut to one fail codegen.
@@ -86,7 +90,7 @@ function checksOf(table: TableMeta, dialect: Dialect): Record<string, Constraint
 	const entries: Array<[string, string, Constraint]> = table.checkConstraints.map((chk) => [
 		chk.name,
 		key(chk.name),
-		{ ...checkVerdict(chk.name, chk.expression), errorKey: `${table.sqlName}_${chk.name}_failed` },
+		{ ...checkVerdict(chk.name, chk.expression), errorKey: `${keyed(table, chk.name)}_failed` },
 	])
 	for (const field of table.fields.filter((each) => (each.enumValues?.length ?? 0) > 0)) {
 		const name = enumCheckName(table, field.name)

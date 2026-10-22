@@ -93,3 +93,16 @@ describe("buildConstraintMap: a CHECK's verdict (F27) and comb's own enum CHECKs
 		expect(Object.keys(pg)).toEqual([name.slice(0, 63)])
 	})
 })
+
+describe("buildConstraintMap: a CHECK named after its table (F35)", () => {
+	it("names its key once with the table, not twice", () => {
+		const tables =
+			tablesOf(`${SQLITE}export const invite = sqliteTable("invite", { id: text("id").primaryKey(), seats: integer("seats") }, (t) => [
+	check("invite_seats_in_range", sql\`\${t.seats} < 20\`),
+	check("seats_positive", sql\`\${t.seats} > 0\`),
+])\n`)
+		const check = buildConstraintMap(tables)["invite"]?.check
+		expect(check?.["invite_seats_in_range"]?.errorKey).toBe("invite_seats_in_range_failed")
+		expect(check?.["seats_positive"]?.errorKey).toBe("invite_seats_positive_failed")
+	})
+})
