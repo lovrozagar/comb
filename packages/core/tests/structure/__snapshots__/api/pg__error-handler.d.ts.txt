@@ -8,6 +8,8 @@ export type PgErrorRead = {
     keyColumns: string[];
     /** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
     message: string | undefined;
+    /** the SQL a wrapper such as drizzle's recorded, when one did */
+    query?: string | undefined;
     /** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
     referenced: boolean;
     table: string | undefined;

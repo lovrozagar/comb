@@ -7,6 +7,7 @@
 import { type Fallback, type Found, findNamed, lookup, own, toCombError } from "../constraint-map.ts"
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
+import { statementTable } from "../statement-head.ts"
 import { valueError } from "../value-error.ts"
 
 export type PgErrorRead = {
@@ -17,6 +18,8 @@ export type PgErrorRead = {
 	keyColumns: string[]
 	/** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
 	message: string | undefined
+	/** the SQL a wrapper such as drizzle's recorded, when one did */
+	query?: string | undefined
 	/** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
 	referenced: boolean
 	table: string | undefined
@@ -37,6 +40,7 @@ type DriverError = {
 	detail?: unknown
 	errno?: unknown
 	message?: unknown
+	query?: unknown
 	table?: unknown
 	table_name?: unknown
 }
@@ -76,6 +80,8 @@ export function readPgError(error: unknown): PgErrorRead | null {
 			constraint: text(f.constraint) ?? text(f.constraint_name),
 			keyColumns: keyColumns(text(f.detail)),
 			message: text(f.message),
+			/* the outermost wrapper's SQL: the statement as the app sent it */
+			query: chain.map((each) => text(each.query)).find((query) => query !== undefined),
 			/* anchored on the tail Postgres writes after the key values, which a value can spell */
 			referenced: /\) is still referenced from table "(?:[^"]|"")+"\.$/.test(text(f.detail) ?? ""),
 			table: text(f.table) ?? text(f.table_name),
@@ -129,14 +135,15 @@ function primaryKey(v: Violation): CombError {
 
 function foreignKey(v: Violation): CombError {
 	const { constraint, keyColumns: columns, referenced, table } = v.read
-	/* the key named is the parent's, on a child's constraint: nothing in the map describes it */
+	/* the key named is the parent's, on a child's constraint: nothing in the map describes it. The
+	   table is the statement's, the parent's, as SQLite can name it too (R11); unknown without the SQL */
 	if (referenced) {
 		const fallback = {
 			cause: "The record is still referenced by other records",
 			errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
 			status: "conflict",
 		} as const
-		return toError(v, { entry: undefined, fallback, table })
+		return toError(v, { entry: undefined, fallback, table: statementTable(v.read.query) })
 	}
 	const column = columns[0]
 	const entry = lookup(v.maps, table, (t) => own(t.foreignKey, column) ?? own(t.foreignKey, constraint))

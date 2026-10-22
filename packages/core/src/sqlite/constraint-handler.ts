@@ -8,7 +8,7 @@ import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { valueError } from "../value-error.ts"
 import { readSqliteError, type SqliteErrorRead } from "./read-error.ts"
-import { statementHead } from "./statement-head.ts"
+import { statementHead, statementTable } from "../statement-head.ts"
 
 type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown }
 
@@ -28,15 +28,6 @@ function failedColumns(message: string): { columns: string[]; table: string | un
 	return { columns: pairs.map((pair) => pair[2] as string), table: pairs[0]?.[1] }
 }
 
-/* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded, read from the
- * statement's own verb on: a quoted name whole, its doubled quotes undone, or a bare one */
-const STATEMENT_TABLE =
-	/^(?:insert\s+(?:or\s+\w+\s+)?into|replace\s+into|update(?:\s+or\s+\w+)?|delete\s+from)\s+(?:"((?:[^"]|"")+)"|`((?:[^`]|``)+)`|\[([^\]]+)\]|([^\s(]+))/i
-function statementTable(query: string | undefined): string | undefined {
-	const [, double, back, bracket, bare] = STATEMENT_TABLE.exec(statementHead(query ?? "")) ?? []
-	return double?.replaceAll('""', '"') ?? back?.replaceAll("``", "`") ?? bracket ?? bare
-}
-
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
 /** A unique index on an expression, by name: in the statement's table first, as a CHECK, then in any */
@@ -50,7 +41,8 @@ function uniqueIndex(v: Violation, index: string): CombError {
 	const entry = lookup(v.maps, table, (t) => own(t.unique, index))
 	if (entry !== undefined) return toError(v, { entry, fallback, table })
 	const found = findNamed(v.maps, "unique", index)
-	return toError(v, { entry: found?.entry, fallback, table: found?.table })
+	/* unmapped, the index is still the statement's table's, as Postgres names it (R11) */
+	return toError(v, { entry: found?.entry, fallback, table: found?.table ?? table })
 }
 
 function unique(v: Violation): CombError {

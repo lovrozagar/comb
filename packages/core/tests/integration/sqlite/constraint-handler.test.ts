@@ -315,3 +315,23 @@ INSERT INTO "line-item" VALUES ('l1', 'A', 1);`)
 		expect(await mapped("INSERT INTO `line-item` VALUES ('l4', 'C', 0)")).toMatchObject({ table: "line-item" })
 	})
 })
+
+describe("an unmapped unique index on an expression (R11)", () => {
+	it("names the statement's table, as Postgres does", async () => {
+		const harness = libsqlMemory()
+		try {
+			await harness.client.executeMultiple(`CREATE TABLE "line-item" (id TEXT PRIMARY KEY, sku TEXT);
+CREATE UNIQUE INDEX "line-item_sku_lower" ON "line-item" (lower(sku));
+INSERT INTO "line-item" VALUES ('l1', 'A');`)
+			const failure = await harness.db
+				.run(sql.raw(`INSERT INTO "line-item" VALUES ('l2', 'a')`))
+				.catch((error: unknown) => error)
+			expect(constraintError(failure, [])).toMatchObject({
+				errorKey: "unique_constraint_violation",
+				table: "line-item",
+			})
+		} finally {
+			harness.close()
+		}
+	})
+})

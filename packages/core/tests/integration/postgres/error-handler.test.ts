@@ -131,6 +131,9 @@ describePg("pgErrorHandler on a real server", () => {
 				errorKey: "foreign_key_violation",
 			})
 			expect((thrown as CombError).column).toBeUndefined()
+			/* the statement's table, as SQLite names it, wherever the SQL is recorded: on drizzle's wrapper,
+			   and on postgres.js's own error; bare node-postgres records none (R11) */
+			expect((thrown as CombError).table).toBe(driver === "node-postgres" ? undefined : "org")
 		})
 
 		it(`${driver}: finds the primary key of a table whose name Postgres cut`, async () => {

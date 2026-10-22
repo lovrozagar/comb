@@ -55,9 +55,11 @@ describe("readPgError", () => {
 			table: "t",
 		}
 		const detail = 'Key (a, "b")=(1, 2) already exists.'
-		expect(readPgError(wrapped(nodePg({ code: "23505", column: "c", constraint: "k", detail, table: "t" })))).toEqual(
-			expected,
-		)
+		/* a wrapper adds the SQL it recorded, which no bare driver error holds */
+		expect(readPgError(wrapped(nodePg({ code: "23505", column: "c", constraint: "k", detail, table: "t" })))).toEqual({
+			...expected,
+			query: "insert ...",
+		})
 		expect(
 			readPgError(postgresJs({ code: "23505", column_name: "c", constraint_name: "k", detail, table_name: "t" })),
 		).toEqual(expected)

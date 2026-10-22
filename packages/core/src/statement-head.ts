@@ -58,3 +58,13 @@ export function statementHead(sql: string): string {
 	const verb = /^with\b/i.test(top.slice(start)) ? top.slice(start).search(VERB) : 0
 	return sql.slice(start + Math.max(verb, 0)).trim()
 }
+
+/* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded, read from the
+ * statement's own verb on: a quoted name whole, its doubled quotes undone, or a bare one */
+const STATEMENT_TABLE =
+	/^(?:insert\s+(?:or\s+\w+\s+)?into|replace\s+into|update(?:\s+or\s+\w+)?|delete\s+from)\s+(?:"((?:[^"]|"")+)"|`((?:[^`]|``)+)`|\[([^\]]+)\]|([^\s(]+))/i
+/** The table `query` writes to, or undefined when no wrapper recorded the SQL or it writes none */
+export function statementTable(query: string | undefined): string | undefined {
+	const [, double, back, bracket, bare] = STATEMENT_TABLE.exec(statementHead(query ?? "")) ?? []
+	return double?.replaceAll('""', '"') ?? back?.replaceAll("``", "`") ?? bracket ?? bare
+}
