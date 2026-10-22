@@ -11,14 +11,14 @@ const code = (raw: string, overrides: Partial<FieldMeta> = {}) =>
 	generateExampleMeta(field(raw, overrides))?.code ?? null
 
 describe("generateExampleMeta", () => {
-	it("gives private, password, reference, JSON and timestamp columns no example", () => {
+	/* comb's own timestamp columns take timestampSchema, whose meta carries the example */
+	it("gives private, password, reference, JSON and comb-filled timestamp columns no example", () => {
 		for (const raw of [
 			'c.text("f", { private: true })',
 			'c.text("f", { password: true })',
 			'c.ref("f")',
 			'c.json("f", schema)',
 			'c.createdAt("created_at")',
-			'c.timestamp("f")',
 		]) {
 			expect(code(raw)).toBeNull()
 		}
@@ -64,6 +64,16 @@ describe("generateExampleMeta", () => {
 
 	it("declares a shared value for every shared key", () => {
 		expect(Object.keys(SHARED_META_VALUES).sort()).toEqual([...SHARED_META_KEYS].sort())
+	})
+})
+
+/* a c.timestamp has its own range since F11, so no shared schema brings its example */
+describe("generateExampleMeta: a c.timestamp's range (F11)", () => {
+	it("gives the shared timestamp example its bounds accept, else a value inside them", () => {
+		expect(code('c.timestamp("f")')).toBe(".meta(_m.timestamp)")
+		expect(code('c.timestamp("f", { min: 0 })')).toBe(".meta(_m.timestamp)")
+		expect(code('c.timestamp("f", { max: 0 })')).toBe(".meta({ examples: [0] })")
+		expect(code('c.timestamp("f", { min: -100, max: 100 })')).toBe(".meta({ examples: [0] })")
 	})
 })
 

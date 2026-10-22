@@ -25,7 +25,6 @@ function fieldInfosOf(meta: TableMeta, ctx: GeneratorContext): FieldInfo[] {
 	const fields: FieldInfo[] = []
 	for (const field of meta.fields) {
 		for (const type of SCHEMA_TYPES) {
-			if (type === "create" && field.constraints.nomutate) continue
 			/* Shared with the published `immutable` list so the two cannot disagree */
 			if (type === "update" && isExcludedFromUpdate(field)) continue
 			const zodType = generateFieldSchema(field, type, { dialect: ctx.dialect, imports: ctx.analysis.imports })

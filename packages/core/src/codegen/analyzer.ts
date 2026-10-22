@@ -27,6 +27,18 @@ function collectImports(project: Project): ImportsMeta {
 	return imports
 }
 
+/** Mark each reference whose target column is a c.id key: the reference takes the id rules (F10) */
+function markIdReferences(tables: TableMeta[]): void {
+	for (const field of tables.flatMap((table) => table.fields)) {
+		const fk = field.foreignKey
+		if (fk === null) continue
+		const target = tables
+			.find((table) => table.varName === fk.refTable)
+			?.fields.find((each) => each.name === fk.refColumn)
+		fk.toId = target !== undefined && /^\s*c\.id\s*[<(]/.test(target.raw)
+	}
+}
+
 /**
  * Every table the tables file declares, itself or through a file it re-exports, and the engine
  * their builders build for; tables of both engines in one database are refused
@@ -62,6 +74,7 @@ function collectTables(
 		throw new Error(
 			`${tablesPath}: the database holds both Postgres and SQLite tables; give each engine its own database`,
 		)
+	markIdReferences(tables)
 	return { dialect: [...dialects][0] ?? null, tables: tables.sort((a, b) => a.varName.localeCompare(b.varName)) }
 }
 

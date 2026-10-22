@@ -71,3 +71,12 @@ describe("parseField: nullability the helpers declare (M-M9)", () => {
 		expect(parseField("deleted_at", 'c.deletedAt("deleted_at")').isNotNull).toBe(false)
 	})
 })
+
+describe("parseField: a text column's length", () => {
+	it("is its max, else drizzle's own positional length or length option, else none", () => {
+		expect(parseField("n", 'c.text("name", { max: 100 })').length).toBe(100)
+		expect(parseField("n", 'c.text("name", 50)').length).toBe(50)
+		expect(parseField("n", 'text("n", { length: 40 })').length).toBe(40)
+		expect(parseField("n", 'c.text("name")').length).toBeNull()
+	})
+})

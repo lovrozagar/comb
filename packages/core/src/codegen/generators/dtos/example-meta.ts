@@ -61,22 +61,22 @@ function hasNoExample({ constraints, foreignKey, raw }: FieldMeta): boolean {
 	/* a pattern decides what the value looks like, which no generic example can know */
 	if (constraints.private || constraints.password || constraints.pattern !== null || foreignKey !== null) return true
 	if (/\.\$type<\s*z\.infer\b/.test(raw)) return true
-	return /c\.(ref|json|createdAt|updatedAt|deletedAt|timestamp)[<(]/.test(raw)
+	return /c\.(ref|json|createdAt|updatedAt|deletedAt)[<(]/.test(raw)
 }
 
 /* the shared examples' own values, which a bound may refuse */
-const SHARED_NUMBER = { integer: 42, real: 0.5 }
+const SHARED_NUMBER = { integer: 42, real: 0.5, timestamp: 1_711_468_800_000 }
 
 /**
  * A number its bounds accept: the shared example when it fits, else the midpoint of two bounds,
  * or the one bound it misses
  */
-function midpoint(field: FieldMeta, key: "integer" | "real"): ExampleResult {
+function midpoint(field: FieldMeta, key: keyof typeof SHARED_NUMBER): ExampleResult {
 	const { max, min } = field.constraints
 	const fits = (value: number) => (min === null || value >= min) && (max === null || value <= max)
 	if (fits(SHARED_NUMBER[key])) return shared(key)
 	if (min !== null && max !== null)
-		return inline(String(key === "integer" ? Math.floor((min + max) / 2) : (min + max) / 2))
+		return inline(String(key === "real" ? (min + max) / 2 : Math.floor((min + max) / 2)))
 	return inline(String(min ?? max))
 }
 
@@ -109,7 +109,9 @@ const RULES: Rule[] = [
 			? midpoint(field, "integer")
 			: /c\.real[<(]/.test(field.raw)
 				? midpoint(field, "real")
-				: undefined,
+				: /c\.timestamp[<(]/.test(field.raw)
+					? midpoint(field, "timestamp")
+					: undefined,
 	(field) => (/c\.(text|id|enum)[<(]/.test(field.raw) ? textExample(field) : undefined),
 ]
 

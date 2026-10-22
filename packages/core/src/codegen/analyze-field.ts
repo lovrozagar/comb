@@ -76,7 +76,7 @@ export function parseField(
 	},
 ): FieldMeta {
 	const { declared } = read
-	const constraints = fieldConstraintsOf(declared, { fieldName: key, place: read.place })
+	const constraints = fieldConstraintsOf(declared, { fieldName: key, place: read.place, raw })
 	const isPrimaryKey = /\.primaryKey\(/.test(raw) || ID_HELPERS.test(raw)
 	/* c.createdAt and c.updatedAt call .notNull() inside the helper, where the text cannot see it */
 	const isNotNull = /\.notNull\(\)/.test(raw) || isPrimaryKey || /^\s*c\.(?:createdAt|updatedAt)\s*\(/.test(raw)

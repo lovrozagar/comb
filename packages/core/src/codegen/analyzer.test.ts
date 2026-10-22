@@ -147,11 +147,13 @@ export const post = createTable("post", {
 		const result = analyze(fp)
 		const postTable = result.tables.find((t) => t.varName === "post")
 		const fkField = postTable?.fields.find((f) => f.name === "author_id")
+		/* user.id is a c.id key, so the reference takes the id rules (F10) */
 		expect(fkField?.foreignKey).toEqual({
 			column: "author_id",
 			onDelete: "cascade",
 			refColumn: "id",
 			refTable: "user",
+			toId: true,
 		})
 	})
 

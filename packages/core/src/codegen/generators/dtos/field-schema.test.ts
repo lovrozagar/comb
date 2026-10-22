@@ -42,9 +42,13 @@ describe("generateFieldSchema: what each schema type includes", () => {
 		)
 		expect(generateFieldSchema(team, "read", { imports: imports() })).toMatch(/^z\.number\(\)\.int\(\)/)
 		expect(generateFieldSchema(team, "update", { imports: imports() })).toBeNull()
-		const owner = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.id)', { foreignKey: fk })
-		/* an id-named text reference without bounds of its own takes the id bounds; a declared bound wins (F5) */
+		/* a text reference to a c.id key takes the id bounds; to any other column, its own (F5, F10) */
+		const owner = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.id)', {
+			foreignKey: { ...fk, toId: true },
+		})
 		expect(generateFieldSchema(owner, "create", { imports: imports() })).toBe("z.string().regex(/^\\S{1,48}$/)")
+		const named = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.email)', { foreignKey: fk })
+		expect(generateFieldSchema(named, "create", { imports: imports() })).toBe("z.string().min(1)")
 		const slug = fieldOf("pageSlug", 'c.text("page_slug", { max: 200 }).notNull().references(() => page.slug)', {
 			foreignKey: { column: "pageSlug", refColumn: "slug", refTable: "page" },
 		})
@@ -139,7 +143,7 @@ describe("generateFieldSchema: JSON", () => {
 			generateFieldSchema(fieldOf("e", 'c.text("e", { email: true }, 80).notNull()', { length: 80 }), "read", {
 				imports: imports(),
 			}),
-		).toBe("z.email().max(80).meta(_m.email)")
+		).toBe("z.string().max(80).meta(_m.email)")
 		expect(schema("u", 'c.text("u", { url: true }).notNull()', "create")).toBe(
 			'z.url().regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" }).meta(_m.url)',
 		)
@@ -161,9 +165,8 @@ describe("generateFieldSchema: JSON", () => {
 describe("generateFieldSchema: ids, typed text and numbers", () => {
 	it("bounds an id-like text column, and uses a typed schema when the column names one", () => {
 		expect(schema("id", 'c.id("usr")', "read")).toContain(".min(1).max(48)")
-		expect(schema("orgId", 'c.text("orgId").notNull()', "create")).toBe(
-			"z.string().regex(/^\\S{1,48}$/).meta(_m.string)",
-		)
+		/* by helper, never by name: a text column named orgId is text (F10) */
+		expect(schema("orgId", 'c.text("orgId").notNull()', "create")).toBe("z.string().min(1).meta(_m.string)")
 		const typed = generateFieldSchema(parseField("p", 'c.text("p").$type<z.infer<typeof prefs>>()'), "read", {
 			imports: imports(),
 		})
@@ -181,7 +184,10 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		expect(schema("n", "c.serialId()", "read")).toBe(
 			"z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER).meta(_m.serialId)",
 		)
-		expect(schema("at", 'c.timestamp("at").notNull()', "read")).toBe("timestampSchema")
+		expect(schema("at", 'c.timestamp("at").notNull()', "read")).toBe(
+			"z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER).meta(_m.timestamp)",
+		)
+		expect(schema("at", 'c.createdAt("at")', "read")).toBe("timestampSchema")
 		expect(schema("b", 'c.boolean("b").notNull()', "read")).toBe("z.boolean().meta(_m.boolean)")
 		expect(schema("r", 'c.real("r").notNull()', "read")).toBe("z.number().meta(_m.real)")
 		expect(schema("x", 'blob("x")', "read")).toBe("z.unknown().nullable()")

@@ -65,10 +65,12 @@ function foreignKeyBase({ field, schemaType }: Build): Built {
 	return "z.string().min(1).max(48)"
 }
 
-/* a password's rules bound what a person types; what is read back is its stored hash */
+/* a format bounds what is written; what is read back is whatever the column holds: a password's
+ * stored hash, an email or URL a migration or an older rule stored (F12). A written email takes
+ * textBase's own normalize-then-check path */
 function stringKind(annotations: FieldConstraints, mutative: boolean): string {
-	if (annotations.password) return mutative ? "z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)" : "z.string()"
-	if (annotations.email) return "z.email()"
+	if (!mutative) return "z.string()"
+	if (annotations.password) return "z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)"
 	return annotations.url ? "z.url()" : "z.string()"
 }
 
@@ -111,7 +113,8 @@ function textBounds({ annotations, dialect, field, schemaType }: Build): string 
 	if (annotations.password) return ""
 	if (annotations.email) return emailBounds(annotations, field)
 	const mutative = isMutative(schemaType)
-	const isIdField = field.name === "id" || field.name.endsWith("Id") || field.name.endsWith("_id")
+	/* a key and a reference to one take the id rules, never a column by its name (F10) */
+	const isIdField = /^\s*c\.id\s*[<(]/.test(field.raw) || field.foreignKey?.toId === true
 	/* an id-like column gets the id bounds only when it declares none of its own */
 	const declares = field.length !== null || annotations.min !== null || annotations.max !== null
 	if (isIdField && !declares) return mutative ? ".regex(/^\\S{1,48}$/)" : ".min(1).max(48)"
@@ -143,8 +146,11 @@ function textBase(build: Build): Built {
 }
 
 function numberBase({ annotations, dialect, field }: Build): Built {
-	if (/c\.(createdAt|updatedAt|deletedAt|timestamp)[<(]/.test(field.raw)) return "timestampSchema"
 	const { max, min } = annotations
+	if (/c\.(createdAt|updatedAt|deletedAt)[<(]/.test(field.raw)) return "timestampSchema"
+	/* a date before 1970 is a negative epoch, which both engines store (F11) */
+	if (/c\.timestamp[<(]/.test(field.raw))
+		return `z.number().int().min(${min ?? "Number.MIN_SAFE_INTEGER"}).max(${max ?? "Number.MAX_SAFE_INTEGER"})`
 	if (/c\.(integer|serialId)[<(]/.test(field.raw)) {
 		/* written and read alike, so a value read back can be sent back: the declared bounds, clamped to
 		 * what the column holds (int4 on Postgres, a JS number's exact range on SQLite) */

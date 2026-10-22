@@ -223,6 +223,8 @@ type ForeignKeyRef = {
     onUpdate?: string | undefined;
     refColumn: string;
     refTable: string;
+    /** whether the referenced column is a c.id key, whose id rules the reference takes (F10) */
+    toId?: boolean | undefined;
 };
 /** A single column/field in a table */
 type FieldMeta = {

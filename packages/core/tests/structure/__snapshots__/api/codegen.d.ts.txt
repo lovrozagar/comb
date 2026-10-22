@@ -97,6 +97,8 @@ type ForeignKeyRef = {
     onUpdate?: string | undefined;
     refColumn: string;
     refTable: string;
+    /** whether the referenced column is a c.id key, whose id rules the reference takes (F10) */
+    toId?: boolean | undefined;
 };
 /** A single column/field in a table */
 type FieldMeta = {
@@ -217,9 +219,10 @@ export declare function parseFieldConstraints(raw: string, fieldName?: string): 
  * A field's constraints from the record its column helper declares (constraint-reader.ts), every
  * key one the column types allow and a pattern one comb can emit; an error at `place` otherwise
  */
-export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, place }: {
+export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, place, raw }: {
     fieldName?: string | undefined;
     place: string;
+    raw: string;
 }): FieldConstraints;
 
 // codegen/entity-meta.d.ts
