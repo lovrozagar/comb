@@ -15,6 +15,7 @@
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
+import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
 import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
 import { callFindings, type Routines, routinesOf } from "./classify-routine.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
@@ -175,6 +176,7 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 	const rebuilds: Rebuilds = dialect === "sqlite" ? rebuildsOf(statements, codes, guards.guarded) : new Map()
 	const reindexed = dialect === "sqlite" ? reindexedOf(statements) : new Set<string>()
 	const prepared = preparedOf(codes)
+	const ftsTriggers = ftsTriggersOf(statements, before, dialect)
 	const ctx: FileContext = {
 		before,
 		created,
@@ -196,7 +198,10 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 	)
 	return statements.map((stmt, i) => {
 		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
-		const findings = guards.guarded.has(i) ? [] : findingsOf(codes[i] as string, stmt, ctx)
+		/* every other statement is rated by the rules, and only as a shape the grammar recognizes */
+		const findings = guards.guarded.has(i)
+			? []
+			: [...findingsOf(codes[i] as string, stmt, ctx), ...grammarFindings(codes[i] as string, { ...ctx, ftsTriggers })]
 		followAdds(codes[i] as string, ctx.fresh)
 		return { code: codes[i] as string, dialect, findings, stmt }
 	})

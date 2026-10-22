@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest"
 import { alterTableFindings } from "./classify-alter.ts"
 import { classifyMigration } from "./classify.ts"
 
-const pg = { dialect: "postgres", rebuilds: new Map<string, { temp: string }>() } as const
+const pg = {
+	dialect: "postgres",
+	earlierRoutines: new Set<string>(),
+	rebuilds: new Map<string, { temp: string }>(),
+	routines: new Map<string, unknown>(),
+} as const
 const levels = (code: string, ctx: Parameters<typeof alterTableFindings>[1] = pg) =>
 	alterTableFindings(code, ctx)?.map((finding) => finding.level)
 
@@ -25,14 +30,14 @@ describe("alterTableFindings", () => {
 	})
 
 	it("warns of no lock on SQLite", () => {
-		const lite = { dialect: "sqlite", rebuilds: new Map<string, { temp: string }>() } as const
+		const lite = { ...pg, dialect: "sqlite", rebuilds: new Map<string, { temp: string }>() } as const
 		expect(levels("ALTER TABLE post ALTER COLUMN a TYPE bigint", lite)).toEqual(["unsafe"])
 		expect(levels("ALTER TABLE post ADD CONSTRAINT fk FOREIGN KEY (a) REFERENCES b (id)", lite)).toEqual([])
 		expect(levels("ALTER TABLE post ADD COLUMN a uuid DEFAULT gen_random_uuid()", lite)).toEqual([])
 	})
 
 	it("lets the rename that ends a SQLite rebuild pass, and no other rename", () => {
-		const lite = { dialect: "sqlite", rebuilds: new Map([["post", { temp: "new_post" }]]) } as const
+		const lite = { ...pg, dialect: "sqlite", rebuilds: new Map([["post", { temp: "new_post" }]]) } as const
 		expect(levels("ALTER TABLE `new_post` RENAME TO `post`", lite)).toEqual([])
 		expect(levels("ALTER TABLE `other` RENAME TO `post`", lite)).toEqual(["unsafe"])
 		expect(levels("ALTER TABLE `new_post` RENAME TO `gone`", lite)).toEqual(["unsafe"])
@@ -50,12 +55,22 @@ describe("classifyMigration on row level security (M15)", () => {
 		"ALTER TABLE post FORCE ROW LEVEL SECURITY",
 		"ALTER TABLE post NO FORCE ROW LEVEL SECURITY",
 		"ALTER TABLE post DISABLE ROW LEVEL SECURITY",
-		"CREATE POLICY p ON post AS RESTRICTIVE USING (false)",
 	])("rates %j cautious: what the deployed code reads changes", (sql) => {
 		expect(classifyMigration(sql, { dialect: "postgres" }).safety).toBe("cautious")
 	})
 
-	it("leaves a permissive policy safe", () => {
-		expect(classifyMigration("CREATE POLICY p ON post USING (true)", { dialect: "postgres" }).safety).toBe("safe")
+	/* a policy decides which rows the deployed code reads, and destroys none: comb does not read its predicate (M16) */
+	it.each(["CREATE POLICY p ON post USING (true)", "CREATE POLICY p ON post AS RESTRICTIVE USING (false)"])(
+		"rates %j cautious: what the deployed code reads changes",
+		(sql) => {
+			expect(classifyMigration(sql, { dialect: "postgres" }).safety).toBe("cautious")
+		},
+	)
+
+	it("rates an ALTER TABLE action comb does not know unsafe, and names it", () => {
+		const rated = classifyMigration("ALTER TABLE post INHERIT base", { dialect: "postgres" })
+		expect(rated.unsafeStatements).toEqual([
+			"ALTER TABLE post INHERIT base (comb does not recognize ALTER TABLE … INHERIT base; approve it in the file)",
+		])
 	})
 })

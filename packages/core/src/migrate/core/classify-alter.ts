@@ -9,8 +9,16 @@ import { IDENT, lastPart, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 /** What one statement or action makes of the migration: its level, the drops it names, and why */
 type Finding = { drops?: string[] | undefined; level: "cautious" | "lock" | "unsafe"; note?: string | undefined }
 
-/** What the rules need from the file: the dialect, and the SQLite rebuilds it makes */
-type AlterContext = { dialect: Dialect; rebuilds: ReadonlyMap<string, { temp: string }> }
+/**
+ * What the rules need from the file: the dialect, the SQLite rebuilds it makes, and the routines a
+ * migration made (an earlier file's, and this file's), whose bodies may write
+ */
+type AlterContext = {
+	dialect: Dialect
+	earlierRoutines: ReadonlySet<string>
+	rebuilds: ReadonlyMap<string, { temp: string }>
+	routines: ReadonlyMap<string, unknown>
+}
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const ALTER_TABLE = /* @__PURE__ */ new RegExp(`^ALTER TABLE (?:IF EXISTS )?(?:ONLY )?(${QNAME})(?: \\*)? (.+)$`, "i")
@@ -62,8 +70,37 @@ function renameTable(table: string, target: string, ctx: AlterContext): Finding[
 	return rebuild !== undefined && rebuild.temp === lastPart(table) ? [] : [{ level: "unsafe" }]
 }
 
-/** One action of the list */
+/**
+ * The routines a migration made that an action calls: in a DEFAULT, a CHECK or a generated
+ * expression they run for every existing row, and in SET DEFAULT on every later insert
+ */
+function routineCalls(action: string, ctx: AlterContext): Finding[] {
+	const names = [...ctx.earlierRoutines, ...ctx.routines.keys()].map((name) => lastPart(name).toLowerCase())
+	const calls = [...action.matchAll(/([\w$]+)\s*\(/g)].map((m) => (m[1] as string).toLowerCase())
+	return [...new Set(calls.filter((call) => names.includes(call)))].map((name) => ({
+		level: "unsafe" as const,
+		note: `calls ${name}, a routine a migration made, for every row it fills`,
+	}))
+}
+
+/** Every other ALTER TABLE action comb reads; an action not listed is unsafe */
+const KNOWN_ACTION =
+	/^(?:ADD (?:CONSTRAINT \S+ )?(?:PRIMARY KEY|UNIQUE|EXCLUDE)\b|VALIDATE CONSTRAINT|ALTER CONSTRAINT|SET (?:LOGGED|WITHOUT CLUSTER|\()|RESET \(|REPLICA IDENTITY|CLUSTER ON|ATTACH PARTITION)\b/i
+
+/** One action of the list, and the routines it calls */
 function actionFindings(table: string, action: string, ctx: AlterContext): Finding[] {
+	return [...ruleFindings(table, action, ctx), ...routineCalls(action, ctx)]
+}
+
+/** A cautious action's finding: row level security says whose rows it changes */
+function cautiousAction(table: string, action: string): Finding {
+	return /\bROW LEVEL SECURITY$/i.test(action)
+		? { level: "cautious", note: `changes which rows each role sees on ${unquote(table)}` }
+		: { level: "cautious" }
+}
+
+/** What the rules make of one action */
+function ruleFindings(table: string, action: string, ctx: AlterContext): Finding[] {
 	const pg = ctx.dialect === "postgres"
 	const dropped = DROP_COLUMN.exec(action)?.[1]
 	if (dropped !== undefined) return [{ drops: [`DROP COLUMN ${unquote(table)}.${unquote(dropped)}`], level: "unsafe" }]
@@ -76,8 +113,16 @@ function actionFindings(table: string, action: string, ctx: AlterContext): Findi
 	}
 	const renamedTo = RENAME_TO.exec(action)?.[1]
 	if (renamedTo !== undefined) return renameTable(table, renamedTo, ctx)
-	if (CAUTIOUS_ACTION.test(action)) return [{ level: "cautious" }]
-	return /^(?:RENAME|SET SCHEMA)\b/i.test(action) ? [{ level: "unsafe" }] : []
+	if (CAUTIOUS_ACTION.test(action)) return [cautiousAction(table, action)]
+	if (/^(?:RENAME|SET SCHEMA)\b/i.test(action)) return [{ level: "unsafe" }]
+	return KNOWN_ACTION.test(action)
+		? []
+		: [
+				{
+					level: "unsafe",
+					note: `comb does not recognize ALTER TABLE … ${action.split(" ").slice(0, 2).join(" ")}; approve it in the file`,
+				},
+			]
 }
 
 /** The findings of an ALTER TABLE, action by action; undefined for code that is not one */

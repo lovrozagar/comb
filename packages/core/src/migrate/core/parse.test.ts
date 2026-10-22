@@ -85,7 +85,10 @@ describe("classifyMigration", () => {
 
 	it("classifies cautious migrations: a drop that loses no rows", () => {
 		expect(classifyMigration("DROP INDEX IF EXISTS idx_old;").safety).toBe("cautious")
-		expect(classifyMigration("DROP TRIGGER t_ai;").safety).toBe("cautious")
+	})
+
+	it("classifies a trigger's drop unsafe, unless it is an FTS sync trigger comb wrote", () => {
+		expect(classifyMigration("DROP TRIGGER t_ai;").safety).toBe("unsafe")
 	})
 
 	it("classifies unsafe migrations (DROP without IF EXISTS)", () => {

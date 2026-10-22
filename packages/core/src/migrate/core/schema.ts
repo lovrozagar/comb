@@ -7,7 +7,7 @@ import { codeOf, IDENT, lastPart, nameKey, QNAME, splitTopLevel } from "./sql-co
 import { splitSqlStatements } from "./sql-scan.ts"
 import { COLUMN, columnKey, columnNames, CONSTRAINT_WORDS, GENERATED, tableDefinition } from "./schema-table.ts"
 import { definitionAffinity } from "./sqlite-affinity.ts"
-import type { Dialect, ExtractedSchema } from "../types.ts"
+import type { Dialect, ExtractedSchema, TriggerEvent } from "../types.ts"
 
 type SchemaSoFar = ExtractedSchema
 
@@ -33,7 +33,7 @@ const DROPS_TABLES = /* @__PURE__ */ new RegExp(`^DROP TABLE (?:IF EXISTS )?(${Q
 const RENAMES_TABLE = /* @__PURE__ */ new RegExp(`^ALTER TABLE (${QNAME}) RENAME TO (${QNAME})$`, "i")
 // per-process-constant: see above
 const CREATE_TRIGGER = /* @__PURE__ */ new RegExp(
-	`^CREATE (?:TEMP |TEMPORARY )?TRIGGER (?:IF NOT EXISTS )?(${QNAME}) .*?\\bON (${QNAME})`,
+	`^CREATE (?:OR REPLACE )?(?:CONSTRAINT )?(?:TEMP |TEMPORARY )?TRIGGER (?:IF NOT EXISTS )?(${QNAME}) (.*?)\\bON (${QNAME})`,
 	"i",
 )
 // per-process-constant: see above
@@ -107,11 +107,41 @@ function followTableLife(schema: SchemaSoFar, code: string, dialect: Dialect): v
 	if (from !== undefined && to !== undefined) renameShapes(schema, nameKey(from, dialect), nameKey(to, dialect))
 }
 
+/**
+ * Whether a CREATE TRIGGER's body only inserts into external-content FTS5 tables: the sync triggers
+ * comb writes. Literals are blank in `code`, so the 'delete' command reads as an empty value.
+ */
+function syncsFts(code: string, externalFts: readonly string[], dialect: Dialect): boolean {
+	const body = /\bBEGIN (.+?);? END$/i.exec(code)?.[1]
+	if (body === undefined) return false
+	return body
+		.split(";")
+		.map((part) => part.trim())
+		.filter((part) => part !== "")
+		.every((write) => {
+			const target = new RegExp(`^INSERT INTO (${QNAME}) ?\\(`, "i").exec(write)?.[1]
+			return target !== undefined && externalFts.includes(nameKey(target, dialect)) && !/\bSELECT\b/i.test(write)
+		})
+}
+
 /** Triggers and routines made and dropped */
 function followRoutines(schema: SchemaSoFar, code: string, dialect: Dialect): void {
 	const key = (name: string) => nameKey(name, dialect)
-	const [, trigger, on] = CREATE_TRIGGER.exec(code) ?? []
-	if (trigger !== undefined) schema.triggers.push({ name: key(trigger), table: key(on as string) })
+	const [, trigger, timing, on] = CREATE_TRIGGER.exec(code) ?? []
+	if (trigger !== undefined) {
+		/* what writes fire it: INSERT, UPDATE [OF …], DELETE, joined by OR on Postgres */
+		const events = [
+			...new Set(
+				[...(timing as string).matchAll(/\b(INSERT|UPDATE|DELETE)\b/gi)].map((m) => (m[1] as string).toLowerCase()),
+			),
+		]
+		schema.triggers.push({
+			events: events as TriggerEvent[],
+			ftsSync: syncsFts(code, schema.externalFts, dialect),
+			name: key(trigger),
+			table: key(on as string),
+		})
+	}
 	const goneTrigger = DROP_TRIGGER.exec(code)?.[1]
 	if (goneTrigger !== undefined) schema.triggers = schema.triggers.filter((t) => t.name !== key(goneTrigger))
 	const routine = CREATE_ROUTINE.exec(code)?.[1]

@@ -103,7 +103,7 @@ describe.skipIf(server === undefined)(
 		it("adds a column, a view and a policy, and applies them", async () => {
 			project.write({ "src/db/core.tables.ts": tables(VIEW_AND_POLICY, '\n\tbody: text("body"),') })
 			ok(project.comb("migrate", "diff", "core", "view"), "diff")
-			/* a policy turns on row level security, which changes what the deployed code reads: cautious (M15) */
+			/* a policy changes which rows a role sees and destroys none: cautious, so --yes applies it (M16) */
 			ok(project.comb("migrate", "apply", "core", "--yes"), "apply")
 			const client = new pg.Client({ connectionString: database(target) })
 			await client.connect()

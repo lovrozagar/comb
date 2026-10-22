@@ -30,8 +30,9 @@ describe("classifyMigration on comb's FTS regroup", () => {
 DROP TABLE IF EXISTS post_fts;
 CREATE VIRTUAL TABLE IF NOT EXISTS post_fts USING fts5(title, content='post', content_rowid='id');
 INSERT INTO post_fts(post_fts) VALUES ('rebuild');`
+		/* the history comb's FTS migration left: the index and its sync trigger */
 		const external = extractSchema(
-			"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id');",
+			"CREATE TABLE post (id INTEGER PRIMARY KEY, title TEXT);\nCREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id');\nCREATE TRIGGER post_fts_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END;",
 		)
 		expect(lite(regroup, external).safety).toBe("cautious")
 		expect(lite(regroup.replace("content='post', ", ""), external).safety).toBe("unsafe")
@@ -61,10 +62,10 @@ INSERT INTO notes(notes) VALUES ('rebuild');`
 describe("classifyMigration on a SQLite pragma", () => {
 	it.each([
 		["PRAGMA writable_schema = 1;", "unsafe"],
-		["PRAGMA ignore_check_constraints = on;", "cautious"],
+		["PRAGMA ignore_check_constraints = on;", "unsafe"],
 		["PRAGMA foreign_keys = off;", "cautious"],
 		["PRAGMA defer_foreign_keys = on;", "safe"],
-	])("rates %j %s, as only defer_foreign_keys is a pragma comb writes", (sql, safety) => {
+	])("rates %j %s: only the two foreign-key pragmas are shapes comb recognizes", (sql, safety) => {
 		expect(lite(sql).safety).toBe(safety)
 	})
 })

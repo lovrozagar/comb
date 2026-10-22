@@ -6,6 +6,7 @@
  * lose data, and the reading names what does.
  */
 import { IDENT, lastPart, nameKey, QNAME, topLevel } from "./sql-code.ts"
+import { affinityOf, definitionAffinity } from "./sqlite-affinity.ts"
 import { normalizeSql, segments } from "./sql-scan.ts"
 
 /* Atlas's directive to run a file outside a transaction, where the guard's deferred keys and refill fail */
@@ -57,6 +58,22 @@ const CLAUSE = /^(?:(?:NATURAL |LEFT |RIGHT |FULL |INNER |CROSS |OUTER )*JOIN|GR
 const names = (expr: string, column: string): boolean => NAME.test(expr) && lastPart(expr) === column
 
 /** The DEFAULT each column of a CREATE TABLE declares, as written */
+/** Each column of a CREATE TABLE with its definition after the name */
+function columnDefinitions(create: string): Map<string, string> {
+	const text = normalizeSql(create)
+	const mask = masked(text)
+	const body = text.slice(mask.indexOf("(") + 1, mask.lastIndexOf(")"))
+	const bodyMask = mask.slice(mask.indexOf("(") + 1, mask.lastIndexOf(")"))
+	const out = new Map<string, string>()
+	let at = 0
+	for (const part of topLevelItems(body, bodyMask)) {
+		at = body.indexOf(part, at) + part.length
+		const name = new RegExp(`^${IDENT}`).exec(part)?.[0]
+		if (name !== undefined) out.set(lastPart(name), part.slice(name.length).trim())
+	}
+	return out
+}
+
 function defaults(create: string): Map<string, string> {
 	const text = normalizeSql(create)
 	const mask = masked(text)
@@ -90,15 +107,24 @@ function closing(mask: string): number {
 	return mask.length
 }
 
-/** Whether `expr` fills `column` with its own value: bare, cast, or IFNULL'd to `fallback`, its new default */
+/**
+ * Whether `expr` fills `column` with its own value: bare, IFNULL'd to `fallback`, its new default,
+ * or cast to text when the column is text. Any other CAST converts its value (a REAL to an
+ * INTEGER drops the fraction, a large integer to REAL loses digits, text to a number becomes 0).
+ */
 function keeps(
 	expr: string,
 	mask: string,
-	{ column, fallback }: { column: string; fallback: string | undefined },
+	{ column, definition, fallback }: { column: string; definition: string | undefined; fallback: string | undefined },
 ): boolean {
 	if (names(expr, column)) return true
-	const cast = /^CAST\((.*) AS [\w ]+(?:\([\d ,]*\))?\)$/is.exec(expr)
-	if (cast !== null) return names((cast[1] as string).trim(), column)
+	const cast = /^CAST\((.*) AS ([\w ]+(?:\([\d ,]*\))?)\)$/is.exec(expr)
+	if (cast !== null)
+		return (
+			names((cast[1] as string).trim(), column) &&
+			affinityOf(cast[2] as string) === "TEXT" &&
+			definitionAffinity(definition ?? "") === "TEXT"
+		)
 	if (!/^IFNULL\(/i.test(mask) || closing(mask.slice(6)) !== mask.length - 7) return false
 	const [value, other, ...more] = topLevelItems(expr.slice(7, -1), mask.slice(7, -1))
 	return more.length === 0 && names(value as string, column) && other !== undefined && other === fallback
@@ -113,6 +139,7 @@ function itemProblem(
 	const items = topLevelItems(text, mask)
 	if (items.length !== columns.length) return `its copy has ${items.length} values for ${columns.length} columns`
 	const fallbacks = defaults(create)
+	const definitions = columnDefinitions(create)
 	let at = 0
 	for (const [i, item] of items.entries()) {
 		const start = text.indexOf(item, at)
@@ -124,7 +151,11 @@ function itemProblem(
 		const aliasOk = alias === null || lastPart(item.slice(alias.index + 4)) === column
 		if (
 			!aliasOk ||
-			!keeps(expr.trim(), itemMask.slice(0, expr.length).trim(), { column, fallback: fallbacks.get(column) })
+			!keeps(expr.trim(), itemMask.slice(0, expr.length).trim(), {
+				column,
+				definition: definitions.get(column),
+				fallback: fallbacks.get(column),
+			})
 		) {
 			return `its copy fills ${column} from ${item}`
 		}

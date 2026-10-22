@@ -61,7 +61,7 @@ describe("extractSchema: foreign keys, triggers, functions and table shapes", ()
 				withoutRowid: false,
 			},
 		})
-		expect(schema.triggers).toEqual([{ name: "post_ai", table: "post" }])
+		expect(schema.triggers).toEqual([{ events: ["insert"], ftsSync: false, name: "post_ai", table: "post" }])
 	})
 })
 
@@ -89,11 +89,10 @@ ALTER TABLE \`new_u\` RENAME TO \`u\`;`,
 		})
 		expect(rebuilt.tableInfo.has("new_u")).toBe(false)
 	})
-
 	it("drops a dropped table's keys, triggers and shape, and renames them with the table", () => {
 		const after = extractSchema('DROP TABLE "tag";\nALTER TABLE "post" RENAME TO "article";', extractSchema(HISTORY))
 		expect(after.foreignKeys.map((fk) => `${fk.table}->${fk.parent}`)).toEqual(["u->u", "article->u"])
-		expect(after.triggers).toEqual([{ name: "post_ai", table: "article" }])
+		expect(after.triggers).toEqual([{ events: ["insert"], ftsSync: false, name: "post_ai", table: "article" }])
 		expect([...after.tableInfo.keys()]).toEqual(["u", "article"])
 	})
 
@@ -125,6 +124,32 @@ DROP FUNCTION IF EXISTS gone();`,
 
 /** Whether table t of `sql` is keyed by its rowid */
 const alias = (sql: string) => extractSchema(sql).tableInfo.get("t")?.rowidAlias
+
+describe("extractSchema: trigger events and FTS sync triggers", () => {
+	it("forgets an external FTS5 table it drops", () => {
+		const schema = extractSchema(
+			"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post');\nDROP TABLE post_fts;",
+		)
+		expect(schema.externalFts).toEqual([])
+	})
+
+	it("records each trigger's events, joined by OR on Postgres, and whether it syncs an external FTS5 table", () => {
+		const pg = extractSchema(
+			"CREATE TRIGGER t BEFORE INSERT OR UPDATE OF a, b OR DELETE ON post FOR EACH ROW EXECUTE FUNCTION f();",
+			undefined,
+			"postgres",
+		)
+		expect(pg.triggers).toEqual([{ events: ["insert", "update", "delete"], ftsSync: false, name: "t", table: "post" }])
+		const fts = extractSchema(
+			"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post');\nCREATE TRIGGER post_fts_ad AFTER DELETE ON post BEGIN INSERT INTO post_fts(post_fts, rowid, title) VALUES ('delete', old.id, old.title); END;\nCREATE TRIGGER copy AFTER DELETE ON post BEGIN INSERT INTO post_fts(rowid, title) SELECT id, title FROM post; END;\nCREATE TRIGGER nobody AFTER DELETE ON post BEGIN SELECT 1; END;",
+		)
+		expect(fts.triggers.map(({ ftsSync, name }) => [name, ftsSync])).toEqual([
+			["post_fts_ad", true],
+			["copy", false],
+			["nobody", false],
+		])
+	})
+})
 
 describe("extractSchema: rowid aliases", () => {
 	it("reads a rowid alias: a lone INTEGER key, inline or table-level, but no DESC inline key, other type, composite or WITHOUT ROWID", () => {

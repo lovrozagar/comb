@@ -85,12 +85,8 @@ describe("classifyMigration on hand-written Postgres that loses data", () => {
 describe("classifyMigration on hand-written Postgres that keeps every row", () => {
 	it.each([
 		"DROP VIEW v",
-		"DROP POLICY p ON post",
-		"DROP TRIGGER t ON post",
-		"DROP FUNCTION f()",
 		"MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)",
 		"CREATE OR REPLACE VIEW v AS SELECT 1",
-		"CREATE OR REPLACE FUNCTION f() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql",
 		"GRANT SELECT ON post TO r",
 		"REVOKE SELECT ON post FROM r",
 		"CALL p()",
@@ -101,7 +97,6 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 		"ALTER TABLE post SET UNLOGGED",
 		"ALTER TABLE post ALTER COLUMN id DROP IDENTITY",
 		"-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY i ON post (a);",
-		"DO $$ BEGIN EXECUTE format('DROP TABLE %I', 'post'); END $$",
 	])("calls %j cautious", (sql) => {
 		expect(pg(sql).safety).toBe("cautious")
 	})
@@ -111,12 +106,22 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 		"ALTER TABLE post ADD COLUMN x text NOT NULL DEFAULT ''",
 		"ALTER TABLE post ADD COLUMN n bigint NOT NULL GENERATED ALWAYS AS IDENTITY",
 		"ALTER TABLE post ALTER COLUMN a SET DEFAULT 1",
-		"CREATE FUNCTION f() RETURNS void AS $$ DROP TABLE post $$ LANGUAGE sql",
 		"CREATE TABLE child (id int REFERENCES parent (id) ON DELETE CASCADE)",
 		"ALTER TABLE post ADD CONSTRAINT fk FOREIGN KEY (a) REFERENCES b (id) ON DELETE CASCADE NOT VALID",
 		"SELECT 'DROP TABLE post'",
 	])("calls %j safe", (sql) => {
 		expect(pg(sql).safety).toBe("safe")
+	})
+
+	/* default-deny: code that runs on later writes, or that decides what the deployed code reads */
+	it.each([
+		"DROP TRIGGER t ON post",
+		"DROP FUNCTION f()",
+		"CREATE FUNCTION f() RETURNS void AS $$ DROP TABLE post $$ LANGUAGE sql",
+		"CREATE OR REPLACE FUNCTION f() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql",
+		"DO $$ BEGIN EXECUTE format('DROP TABLE %I', 'post'); END $$",
+	])("calls %j unsafe: no shape comb recognizes", (sql) => {
+		expect(pg(sql).unsafeStatements.join("\n")).toMatch(/comb does not recognize/)
 	})
 })
 
@@ -170,8 +175,8 @@ describe("classifyMigration on SQL that hid a destructive change", () => {
 		},
 	)
 
-	it("reads a DO with no body as running nothing", () => {
-		expect(pg("DO").safety).toBe("safe")
+	it("rates a DO with no body unsafe, as every DO is", () => {
+		expect(pg("DO").safety).toBe("unsafe")
 	})
 })
 
@@ -347,9 +352,9 @@ describe("classifyMigration on a copy that is no plain copy", () => {
 
 describe("classifyMigration: each statement once", () => {
 	it("lists a statement only at its strictest level", () => {
-		expect(pg("DROP FUNCTION f CASCADE")).toMatchObject({
+		expect(pg("DROP VIEW v CASCADE")).toMatchObject({
 			cautiousStatements: [],
-			unsafeStatements: ["DROP FUNCTION f CASCADE"],
+			unsafeStatements: ["DROP VIEW v CASCADE"],
 		})
 	})
 })
@@ -363,6 +368,13 @@ describe("classifyMigration on a SQLite trigger that writes (M1)", () => {
 	})
 })
 
+/** The level the file's statement starting with `call` lands at (the routine itself is unsafe by default-deny) */
+function levelOf(sql: string, call: string) {
+	const rated = pg(sql)
+	if (rated.unsafeStatements.some((entry) => entry.startsWith(call.replace(/;$/, "")))) return "unsafe"
+	return rated.cautiousStatements.some((entry) => entry.startsWith(call.replace(/;$/, ""))) ? "cautious" : "safe"
+}
+
 describe("classifyMigration on a call of a routine the file creates (M2)", () => {
 	const wipe = "CREATE FUNCTION wipe() RETURNS int AS $$ BEGIN DELETE FROM users; RETURN 1; END $$ LANGUAGE plpgsql;\n"
 
@@ -372,20 +384,26 @@ describe("classifyMigration on a call of a routine the file creates (M2)", () =>
 		["CREATE TABLE snap AS SELECT wipe() AS n;", "a CREATE TABLE AS"],
 		["CREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();", "a trigger"],
 	])("rates %j unsafe when the routine's body deletes rows (%s)", (call) => {
-		expect(pg(`${wipe}${call}`).safety).toBe("unsafe")
-		expect(pg(wipe).safety).toBe("safe")
+		expect(levelOf(`${wipe}${call}`, call)).toBe("unsafe")
+		expect(pg(wipe).unsafeStatements.join("\n")).toMatch(/comb does not recognize CREATE FUNCTION/)
 	})
 
 	it("rates a call by the body: harmless safe, a quoted SQL body that nulls unsafe, another language cautious", () => {
-		expect(pg('CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nCALL "p"();').safety).toBe("cautious")
-		expect(pg('CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nPERFORM "p"();').safety).toBe("safe")
-		expect(
-			pg("CREATE FUNCTION n() RETURNS int LANGUAGE sql AS 'UPDATE users SET email = NULL RETURNING 1';\nSELECT n();")
-				.safety,
-		).toBe("unsafe")
-		expect(pg("CREATE FUNCTION py() RETURNS int LANGUAGE plpython3u AS $$ return 1 $$;\nSELECT py();").safety).toBe(
+		expect(levelOf('CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nCALL "p"();', 'CALL "p"()')).toBe(
 			"cautious",
 		)
+		expect(levelOf('CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nSELECT "p"();', 'SELECT "p"()')).toBe(
+			"safe",
+		)
+		expect(
+			levelOf(
+				"CREATE FUNCTION n() RETURNS int LANGUAGE sql AS 'UPDATE users SET email = NULL RETURNING 1';\nSELECT n();",
+				"SELECT n()",
+			),
+		).toBe("unsafe")
+		expect(
+			levelOf("CREATE FUNCTION py() RETURNS int LANGUAGE plpython3u AS $$ return 1 $$;\nSELECT py();", "SELECT py()"),
+		).toBe("cautious")
 	})
 })
 

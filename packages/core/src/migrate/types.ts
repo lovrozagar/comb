@@ -184,13 +184,19 @@ export type TableInfo = {
 	strict: boolean
 }
 
+/** A write that fires a trigger */
+export type TriggerEvent = "delete" | "insert" | "update"
+
 export type ExtractedSchema = {
 	tables: Map<string, string[]>
 	indexes: string[]
 	droppedTables: string[]
 	foreignKeys: ForeignKey[]
-	/** each trigger left, by its table */
-	triggers: Array<{ name: string; table: string }>
+	/**
+	 * each trigger left, by its table, with the writes that fire it; `ftsSync` when its body only
+	 * writes into an external-content FTS5 table (the sync triggers comb writes)
+	 */
+	triggers: Array<{ events: TriggerEvent[]; ftsSync: boolean; name: string; table: string }>
 	/** the FTS5 tables whose text lives elsewhere (`content='src'`, or contentless `content=''`): a drop of one loses nothing */
 	externalFts: string[]
 	/** the functions and procedures left, unquoted */
