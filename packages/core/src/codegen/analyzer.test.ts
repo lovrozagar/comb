@@ -349,3 +349,16 @@ describe("analyze — referential actions", () => {
 		expect(fk?.onUpdate).toBeUndefined()
 	})
 })
+
+describe("analyzer: a table declared without export (F8)", () => {
+	it("refuses it, naming it and its file, as the generated files could not import it", () => {
+		const fp = writeTablesFile(`
+import { sqliteTable, text } from "drizzle-orm/sqlite-core"
+const hidden = sqliteTable("hidden", { id: text("id").primaryKey() })
+export const post = sqliteTable("post", { id: text("id").primaryKey(), hidden_id: text("hidden_id").references(() => hidden.id) })
+`)
+		expect(() => analyze(fp)).toThrow(
+			/^table "hidden" is declared in .*\.ts without export, so the generated files cannot import it; export it$/,
+		)
+	})
+})

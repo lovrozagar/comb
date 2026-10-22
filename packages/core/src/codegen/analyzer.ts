@@ -45,6 +45,12 @@ function collectTables(
 			const declaration = statement.getDeclarations()[0]
 			const text = declaration?.getInitializer()?.getText()
 			if (declaration === undefined || text === undefined || !isTableDefinition(text, builders)) continue
+			/* the rows, column and relations files import every table they generate for (F8) */
+			if (!statement.isExported()) {
+				throw new Error(
+					`table "${declaration.getName()}" is declared in ${file.getFilePath()} without export, so the generated files cannot import it; export it`,
+				)
+			}
 			const table = parseTable(declaration, imports)
 			if (table === null) continue
 			tables.push(table)
