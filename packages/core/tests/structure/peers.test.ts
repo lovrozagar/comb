@@ -112,3 +112,14 @@ describe("package.json peers", () => {
 		expect(table).toEqual(peers)
 	})
 })
+
+/* the cursor seal's crypto: one copy across comb and the app, so the consumer installs it (user's decision) */
+describe("package.json peers: the cursor seal", () => {
+	it("requires @noble/ciphers and @noble/hashes as peers, not dependencies", () => {
+		for (const name of ["@noble/ciphers", "@noble/hashes"]) {
+			expect(peers[name], name).toBe(">=2.4.0 <3")
+			expect(optional.has(name), name).toBe(false)
+			expect(pkg.dependencies?.[name], name).toBeUndefined()
+		}
+	})
+})

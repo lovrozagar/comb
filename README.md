@@ -76,15 +76,15 @@ Every layer is usable on its own. Nothing here requires an HTTP framework.
 ## Install
 
 ```bash
-bun add @lovrozagar/comb drizzle-orm zod
+bun add @lovrozagar/comb drizzle-orm zod @noble/ciphers @noble/hashes
 ```
 
 ```bash
-npm install @lovrozagar/comb drizzle-orm zod
+npm install @lovrozagar/comb drizzle-orm zod @noble/ciphers @noble/hashes
 ```
 
 ```bash
-pnpm add @lovrozagar/comb drizzle-orm zod
+pnpm add @lovrozagar/comb drizzle-orm zod @noble/ciphers @noble/hashes
 ```
 
 Comb ships TypeScript source, not a build. Your bundler or runtime compiles it.
@@ -105,6 +105,8 @@ Peer dependencies:
 | --------------------------- | ------------------- | --------------------------------------------------------------- |
 | `drizzle-orm`               | `>=1.0.0-rc.4 <2`   | yes — the relational API (`defineRelations`) is v1-only         |
 | `zod`                       | `>=4.5.4 <5`        | yes — every schema module builds on it (`z.compile` is Zod 4.5) |
+| `@noble/ciphers`            | `>=2.4.0 <3`        | yes — cursors are sealed with its XChaCha20-Poly1305            |
+| `@noble/hashes`             | `>=2.4.0 <3`        | yes — the cursor key is derived with its HKDF-SHA256            |
 | `ts-morph`                  | `>=28.0.0 <29`      | only for codegen                                                |
 | `@libsql/client`            | `>=0.17.4 <0.18`    | only for the libsql/Turso migration providers                   |
 | `@cloudflare/workers-types` | `>=5.20260815.1 <6` | only for the D1 modules' types (`sqlite/d1/*`)                  |
@@ -956,6 +958,8 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun
 ## Upgrading to 0.11
 
 0.11 closes the findings of a fresh review of 0.10. It is a breaking minor; what changes for a project on 0.10:
+
+**Install** `@noble/ciphers` and `@noble/hashes` (`>=2.4.0 <3`) beside comb. From 0.11.1 they are required peers, which seal and key the cursors, so the app and comb share one copy.
 
 **Migrations**
 
