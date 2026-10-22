@@ -4,6 +4,7 @@
  */
 import { existsSync } from "node:fs"
 import { dirname, resolve } from "node:path"
+import * as z from "zod"
 import { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL } from "./config-schema.ts"
 import type { Run } from "./core/process.ts"
 import { createD1Provider } from "./drivers/d1.ts"
@@ -200,7 +201,12 @@ export async function loadConfig(configPath?: string, cwd: string = process.cwd(
 
 	const module = (await import(resolvedPath)) as { default?: unknown }
 	const rawConfig = module.default ?? module
-	const config =
-		typeof rawConfig === "function" ? (rawConfig as () => MigrationConfig)() : (rawConfig as MigrationConfig)
-	return { config, configDir: dirname(resolvedPath) }
+	const exported: unknown = typeof rawConfig === "function" ? (rawConfig as () => unknown)() : rawConfig
+	/* a plain object is checked as defineConfig checks its input; defineConfig's own output parses as it is */
+	try {
+		return { config: defineConfig(exported as CombMigrateConfig), configDir: dirname(resolvedPath) }
+	} catch (error) {
+		if (!(error instanceof z.ZodError)) throw error
+		throw new Error(`${resolvedPath} is not a valid migrate config:\n${z.prettifyError(error)}`, { cause: error })
+	}
 }

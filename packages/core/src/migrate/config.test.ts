@@ -266,6 +266,9 @@ describe("defineConfig — the rest of the input", () => {
 
 const project = () => mkdtempSync(join(tmpdir(), "comb-migrate-config-"))
 
+/* a database a config file names, as source text */
+const DB = '{ migrationsDir: "m", name: "local", provider: { path: "db.sqlite", type: "bun-sqlite" } }'
+
 describe("findConfigFile and loadConfig", () => {
 	it("finds comb.migrate.config.ts first, and nothing in a project without one", () => {
 		const dir = project()
@@ -282,9 +285,9 @@ describe("findConfigFile and loadConfig", () => {
 	it("loads a default object, a default function, or the module itself, relative to cwd", async () => {
 		const dir = project()
 		try {
-			writeFileSync(join(dir, "a.config.ts"), "export default { databases: { a: {} } }\n")
-			writeFileSync(join(dir, "b.config.ts"), "export default () => ({ databases: { b: {} } })\n")
-			writeFileSync(join(dir, "c.config.ts"), "export const databases = { c: {} }\n")
+			writeFileSync(join(dir, "a.config.ts"), `export default { databases: { a: ${DB} } }\n`)
+			writeFileSync(join(dir, "b.config.ts"), `export default () => ({ databases: { b: ${DB} } })\n`)
+			writeFileSync(join(dir, "c.config.ts"), `export const databases = { c: ${DB} }\n`)
 			for (const [file, key] of [
 				["a.config.ts", "a"],
 				["b.config.ts", "b"],
@@ -294,7 +297,7 @@ describe("findConfigFile and loadConfig", () => {
 				expect(Object.keys(loaded.config.databases)).toEqual([key])
 				expect(loaded.configDir).toBe(dir)
 			}
-			writeFileSync(join(dir, "comb.migrate.config.ts"), "export default { databases: { found: {} } }\n")
+			writeFileSync(join(dir, "comb.migrate.config.ts"), `export default { databases: { found: ${DB} } }\n`)
 			expect(Object.keys((await loadConfig(undefined, dir)).config.databases)).toEqual(["found"])
 		} finally {
 			rmSync(dir, { force: true, recursive: true })
@@ -310,6 +313,50 @@ describe("findConfigFile and loadConfig", () => {
 			await expect(loadConfig(undefined, dir)).rejects.toThrow(
 				"No config file found. Create one of: comb.migrate.config.ts",
 			)
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+})
+
+describe("loadConfig validates what the file exports, however it exports it (M12)", () => {
+	it("refuses a mistyped provider in a plain object, a function's result and the module itself, naming the file", async () => {
+		const dir = project()
+		try {
+			const typo = '{ m: { migrationsDir: "m", name: "local", provider: { file: "db.sqlite", type: "bun-sqlite" } } }'
+			writeFileSync(join(dir, "a.config.ts"), `export default { databases: ${typo} }\n`)
+			writeFileSync(join(dir, "b.config.ts"), `export default () => ({ databases: ${typo} })\n`)
+			writeFileSync(join(dir, "c.config.ts"), `export const databases = ${typo}\n`)
+			for (const file of ["a.config.ts", "b.config.ts", "c.config.ts"]) {
+				const loading = loadConfig(file, dir)
+				await expect(loading).rejects.toThrow(`${join(dir, file)} is not a valid migrate config:`)
+				await expect(loadConfig(file, dir)).rejects.toThrow(/databases\.m\.provider\.path/)
+			}
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
+	it("says what defineConfig says of a database with neither a name nor environments", async () => {
+		const dir = project()
+		try {
+			writeFileSync(join(dir, "a.config.ts"), 'export default { databases: { a: { migrationsDir: "m" } } }\n')
+			await expect(loadConfig("a.config.ts", dir)).rejects.toThrow(
+				`Database "a": legacy format requires both 'name' and 'provider' fields`,
+			)
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
+	it("takes a config defineConfig already made as it is", async () => {
+		const dir = project()
+		try {
+			const made = defineConfig({
+				databases: { a: { migrationsDir: "m", name: "local", provider: { path: "db.sqlite", type: "bun-sqlite" } } },
+			})
+			writeFileSync(join(dir, "a.config.ts"), `export default ${JSON.stringify(made)}\n`)
+			expect((await loadConfig("a.config.ts", dir)).config).toEqual(made)
 		} finally {
 			rmSync(dir, { force: true, recursive: true })
 		}
