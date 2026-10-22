@@ -14,6 +14,7 @@
  */
 import { openMemory, type MemoryDb } from "../drivers/memory.ts"
 import type { Connection } from "../types.ts"
+import { notEngineTables } from "./engine-tables.ts"
 import { compare, type Shape } from "./proof-compare.ts"
 import { quote, seedTables } from "./proof-seed.ts"
 
@@ -36,7 +37,7 @@ const SHADOWS = ["config", "content", "data", "docsize", "idx", "node", "parent"
 /** The target's schema, read in one SELECT: SQLite's and D1's own objects left out */
 async function liveObjects(conn: Connection): Promise<LiveObject[]> {
 	const { columns, rows } = await conn.execute(
-		"SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY rowid",
+		`SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL${notEngineTables(conn)} ORDER BY rowid`,
 	)
 	const at = (name: string) => columns.indexOf(name)
 	return rows.map((row) => ({

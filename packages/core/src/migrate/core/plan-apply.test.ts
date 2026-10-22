@@ -146,3 +146,38 @@ describe("planApply's live guard comes first", () => {
 		await conn.close()
 	})
 })
+
+/* `_cf_` is D1's alone: on any other SQLite engine it is a user's table name (M8) */
+describe("planApply on a table named _cf_… off D1", () => {
+	it("counts it as the user's: the target is not empty, and its drop is unsafe", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple("CREATE TABLE _cf_audit (n INTEGER); INSERT INTO _cf_audit VALUES (1), (2);")
+		const { out, run } = plan({ "1_drop.sql": "DROP TABLE _cf_audit;" }, { conn })
+		await expect(run()).rejects.toThrow(/^1_drop\.sql is unsafe/)
+		expect(out.join("\n")).not.toMatch(/Empty target/)
+		await conn.close()
+	})
+
+	it("skips them on a connection whose engine owns the prefix, as D1 does", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple("CREATE TABLE _cf_KV (k TEXT);")
+		const { out, run } = plan({ "1_init.sql": "CREATE TABLE t (id TEXT);" }, { conn: { ...conn, ownedPrefix: "_cf_" } })
+		await run()
+		expect(out.join("\n")).toMatch(/Empty target/)
+		await conn.close()
+	})
+})
+
+/* a D1 binding's custom migrations_table is a history table too, made by apply before it plans (M13) */
+describe("planApply on a database holding only its migration history", () => {
+	it("calls a target empty whose only table is the history it is told of", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple("CREATE TABLE schema_history (id INTEGER PRIMARY KEY, name TEXT);")
+		const files = { "1_init.sql": "DROP TABLE IF EXISTS legacy;\nCREATE TABLE t (id TEXT);" }
+		const told = plan(files, { conn, historyTables: ["schema_history"] })
+		await told.run()
+		expect(told.out.join("\n")).toMatch(/Empty target/)
+		await expect(plan(files, { conn }).run()).rejects.toThrow(/^1_init\.sql is unsafe/)
+		await conn.close()
+	})
+})

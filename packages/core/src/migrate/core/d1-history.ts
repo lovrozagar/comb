@@ -165,6 +165,8 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		dir: target.migrationsDir,
 		exec: target.exec,
 		files,
+		/* the binding's own history table, which apply may have made already */
+		historyTables: [table],
 		print: options.print,
 	})
 	const names = pending.map(({ name }) => name)

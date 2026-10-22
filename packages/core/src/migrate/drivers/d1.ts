@@ -113,6 +113,8 @@ function createD1Connection(databaseName: string, flags: readonly string[], exec
 			return Promise.resolve()
 		},
 		dialect: "sqlite",
+		/* D1 keeps _cf_ tables of its own, which refuse even a read of their schema */
+		ownedPrefix: "_cf_",
 
 		async execute(sql: string, params?: unknown[]): Promise<QueryResult> {
 			const finalSql = params && params.length > 0 ? inlineParams(sql, params) : sql

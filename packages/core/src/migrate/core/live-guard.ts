@@ -8,6 +8,7 @@
 import type { Connection } from "../types.ts"
 import type { Pending } from "./plan-apply.ts"
 import type { ExtractedSchema } from "../types.ts"
+import { notEngineTables } from "./engine-tables.ts"
 import { locateRebuilds, reached, schemaAt } from "./rebuild-guard.ts"
 import { codeOf } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
@@ -28,9 +29,7 @@ async function liveKeys(conn: Connection): Promise<Array<[string, string]>> {
 		return pairs((await conn.execute(joined)).rows)
 	}
 	/* D1's own _cf_ tables refuse even a pragma, and SQLite's own hold no keys */
-	const listed = await conn.execute(
-		"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
-	)
+	const listed = await conn.execute(`SELECT name FROM sqlite_master WHERE type = 'table'${notEngineTables(conn)}`)
 	const tables = listed.rows.map((row) => String(row[0]))
 	const keys: Array<[string, string]> = []
 	for (let at = 0; at < tables.length; at += CHUNK) {

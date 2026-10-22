@@ -12,6 +12,7 @@ import { join } from "node:path"
 import type { Connection, ExtractedSchema, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { verifySum } from "./atlas-dir.ts"
+import { notEngineTables } from "./engine-tables.ts"
 import { refuseUnseenReach } from "./live-guard.ts"
 import { parseMigration } from "./parse.ts"
 import { type Proof, provePending } from "./proof-run.ts"
@@ -36,6 +37,8 @@ type PlanOptions = {
 	whole?: boolean | undefined
 	/** the database, whose own foreign keys and triggers a guarded rebuild is checked against */
 	conn?: Connection | undefined
+	/** the tables the target's migration history lives in, which an empty target may hold (default: comb's and wrangler's) */
+	historyTables?: readonly string[] | undefined
 }
 
 /** The leading number of a migration file name: `20260101000000_x.sql` is 20260101000000 */
@@ -104,10 +107,14 @@ function classifyPending(files: readonly string[], texts: readonly string[], app
 	return pending
 }
 
-/** Whether the database holds no table but SQLite's, D1's and the migration histories: nothing in it can be lost */
-async function isEmptyTarget(conn: Connection): Promise<boolean> {
+/* the history tables comb's apply and wrangler keep, when the target names no other */
+const HISTORY_TABLES = ["__drizzle_migrations", "d1_migrations"]
+
+/** Whether the database holds no table but its engine's and its migration histories: nothing in it can be lost */
+async function isEmptyTarget(conn: Connection, historyTables: readonly string[]): Promise<boolean> {
+	const histories = historyTables.map((name) => `'${name.replaceAll("'", "''")}'`).join(", ")
 	const { rows } = await conn.execute(
-		"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name NOT IN ('__drizzle_migrations', 'd1_migrations')",
+		`SELECT count(*) FROM sqlite_master WHERE type = 'table'${notEngineTables(conn)} AND name NOT IN (${histories})`,
 	)
 	return Number(rows[0]?.[0]) === 0
 }
@@ -156,7 +163,9 @@ async function planApply(options: PlanOptions): Promise<Pending[]> {
 	if (conn !== undefined) await refuseUnseenReach(conn, classified)
 	const proofs =
 		conn === undefined || classified.length === 0 ? new Map<string, Proof>() : await provePending(conn, classified)
-	const empty = conn !== undefined && applied.size === 0 && classified.length > 0 && (await isEmptyTarget(conn))
+	const histories = options.historyTables ?? HISTORY_TABLES
+	const empty =
+		conn !== undefined && applied.size === 0 && classified.length > 0 && (await isEmptyTarget(conn, histories))
 	return approveAll(classified, { empty, options, proofs })
 }
 

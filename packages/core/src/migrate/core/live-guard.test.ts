@@ -113,8 +113,10 @@ describe("refuseUnseenReach through a driver that reads in batches, as D1's does
 			"CREATE TABLE `extra` (`u` integer REFERENCES `u`(`id`) ON DELETE CASCADE); CREATE TABLE `_cf_KV` (`k` text);",
 		)
 		const asked: string[][] = []
+		/* D1 as its driver makes it: one wrangler call per batch of reads, and _cf_ tables of its own */
 		const batched = {
 			...conn,
+			ownedPrefix: "_cf_",
 			executeEach: async (statements: readonly string[]) => {
 				asked.push([...statements])
 				return Promise.all(statements.map((sql) => conn.execute(sql)))

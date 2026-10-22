@@ -155,6 +155,8 @@ export type Connection = {
      * wrangler) has it
      */
     executeEach?(statements: readonly string[]): Promise<QueryResult[]>;
+    /** the prefix of the tables the engine keeps for itself (D1: `_cf_`), which comb never counts or copies */
+    ownedPrefix?: string | undefined;
 };
 export type ConnectionProvider = {
     dialect: Dialect;
