@@ -3,7 +3,7 @@
  * private snapshot of the migrations directory (atlas-dir.ts), so Atlas executes exactly the bytes
  * comb classified. In order: Atlas's status, which must report no error except a file it ran
  * halfway outside a transaction; a dry run, so a database that needs a baseline fails before anyone
- * is asked; each pending file classified and approved (approval.ts); then the apply. comb passes no
+ * is asked (a check of a database with no history inspects it instead, atlas-clean.ts); each pending file classified and approved (approval.ts); then the apply. comb passes no
  * flag that would skip a check (--exec-order, --allow-dirty, --tx-mode, --baseline) and no amount.
  */
 import { readFileSync, rmSync } from "node:fs"
@@ -11,6 +11,7 @@ import { join } from "node:path"
 import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles, sumHashes } from "./atlas-dir.ts"
+import { refuseUnclean } from "./atlas-clean.ts"
 import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { refuseDrift } from "./baseline-compare.ts"
 import { extractSchema, parseMigration } from "./parse.ts"
@@ -180,8 +181,10 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 			return []
 		}
 		/* Atlas's dry run creates its revisions schema on a database with none, so a check of a
-		   database with nothing applied skips it: a check writes nothing */
-		if (options.checkOnly !== true || status.applied.length > 0) {
+		   database with nothing applied inspects it instead, refusing what the dry run would: a check writes nothing */
+		if (options.checkOnly === true && status.applied.length === 0)
+			refuseUnclean({ exec: options.exec ?? run, target: options.target })
+		else {
 			const dry = atlas(options, copy, ["apply", "--dry-run", "--format", APPLY_FORMAT])
 			if (dry.code !== 0) throw new Error(dry.stderr)
 		}

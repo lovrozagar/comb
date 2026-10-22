@@ -21,7 +21,13 @@ const revision = (version: string, more: Record<string, unknown> = {}) => ({
 	...more,
 })
 
-type Answers = { apply?: RunResult; dryRun?: RunResult; schemaDiff?: RunResult; status?: RunResult }
+type Answers = {
+	apply?: RunResult
+	dryRun?: RunResult
+	inspect?: RunResult
+	schemaDiff?: RunResult
+	status?: RunResult
+}
 type Fake = Run & {
 	calls: Array<{ args: string[]; env: Readonly<Record<string, string | undefined>> | undefined }>
 	/** each file of the history a schema diff replayed */
@@ -45,6 +51,7 @@ function fakeAtlas(answers: Answers): Fake {
 			return ok()
 		}
 		if (args[1] === "status") return answers.status ?? ok("{}")
+		if (args[1] === "inspect") return answers.inspect ?? ok("{}")
 		if (args[0] === "schema") {
 			const to = (args[args.indexOf("--to") + 1] as string).replace("file://", "")
 			replayed.push(...sqlFiles(to).map((name) => readFileSync(join(to, name), "utf8")))
@@ -144,6 +151,35 @@ describe("applyWithAtlas", () => {
 		const run = options(atlas, { approve: async () => ({ message: "2_b.sql is unsafe", ok: false }) })
 		await expect(applyWithAtlas(run)).rejects.toThrow("2_b.sql is unsafe")
 		expect(atlas.calls.some((call) => call.args[1] === "apply" && !call.args.includes("--dry-run"))).toBe(false)
+	})
+})
+
+/** The Atlas commands a fake was asked to run, by their first two words */
+const commands = (fake: Fake) => fake.calls.map((call) => call.args.slice(0, 2).join(" "))
+
+describe("applyWithAtlas: a check (M11)", () => {
+	it("inspects a database with no history instead of the dry run, and refuses one holding a table", async () => {
+		const legacy = ok(JSON.stringify({ schemas: [{ name: "public", tables: [{ name: "legacy" }] }] }))
+		const unclean = fakeAtlas({ inspect: legacy, status: PENDING })
+		await expect(applyWithAtlas({ ...options(unclean), checkOnly: true })).rejects.toThrow("comb migrate baseline")
+		const clean = fakeAtlas({ status: PENDING })
+		expect(await applyWithAtlas({ ...options(clean), checkOnly: true })).toEqual(["1_a.sql", "2_b.sql"])
+		expect(commands(clean)).not.toContain("migrate apply")
+		expect(commands(clean)).toContain("schema inspect")
+	})
+
+	it("dry-runs a database with history, and inspects nothing", async () => {
+		const fake = fakeAtlas({
+			status: status({
+				applied: [revision("1")],
+				available: [file("1_a.sql"), file("2_b.sql")],
+				current: "1",
+				pending: [file("2_b.sql")],
+			}),
+		})
+		expect(await applyWithAtlas({ ...options(fake), checkOnly: true })).toEqual(["2_b.sql"])
+		expect(commands(fake)).toContain("migrate apply")
+		expect(commands(fake)).not.toContain("schema inspect")
 	})
 })
 

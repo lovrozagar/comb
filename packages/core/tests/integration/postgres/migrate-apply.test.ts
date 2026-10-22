@@ -145,6 +145,21 @@ describePg("migrate check on Postgres reads only (M11)", () => {
 				expect(await tables(url)).toEqual([])
 			})
 		}, 60_000)
+
+		it("refuses a database with tables but no history, as apply does, and still writes nothing", async () => {
+			await withScratchDb(async (url) => {
+				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
+				await query(url, "CREATE TABLE legacy (id integer); INSERT INTO legacy VALUES (1)")
+				const refusal =
+					"the database has objects but no migration history; if its schema matches the migrations, record them with comb migrate baseline"
+				await expect(applyWithAtlas(command(url))).rejects.toThrow(refusal)
+				await query(url, "DROP SCHEMA IF EXISTS atlas_schema_revisions CASCADE")
+				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(refusal)
+				const made = await query(url, "SELECT 1 FROM pg_namespace WHERE nspname = 'atlas_schema_revisions'")
+				expect(made).toEqual([])
+				expect(await tables(url)).toEqual(["legacy"])
+			})
+		}, 60_000)
 	})
 })
 

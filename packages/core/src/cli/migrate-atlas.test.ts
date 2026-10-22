@@ -9,7 +9,7 @@ const temp = projects()
 const project = temp.make
 afterEach(temp.clean)
 
-/** Atlas on a Postgres database: hash sums file names, status lists `pending`, apply applies them, set records */
+/** Atlas on an empty Postgres database: hash sums file names, status lists `pending`, apply applies them, set records */
 function pgAtlas(pending: string[]): Run & { calls: string[][]; envs: unknown[] } {
 	const calls: string[][] = []
 	const envs: unknown[] = []
@@ -25,7 +25,8 @@ function pgAtlas(pending: string[]): Run & { calls: string[][]; envs: unknown[] 
 			writeFileSync(join(dir, "atlas.sum"), `h1:x=\n${names.map((f) => `${f} h1:${f.length}=`).join("\n")}\n`)
 			return ok()
 		}
-		if (args[0] === "schema") return ok("Schemas are synced, no changes to be made.\n")
+		/* an empty database, for a check of one with no history; a diff finds it synced */
+		if (args[0] === "schema") return ok(args[1] === "inspect" ? "{}" : "Schemas are synced, no changes to be made.\n")
 		const files = pending.map((Name) => ({ Description: "", Name, Version: Name.split("_")[0] }))
 		if (args[1] === "status")
 			return ok(
