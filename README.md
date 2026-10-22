@@ -969,6 +969,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun
 - Turso `check` and `status` create no database and read with a one-hour read-only token. `_cf_` tables are reserved on D1 alone.
 - A migrate database whose tables live under another name in `comb.config.ts` says so with `codegen: "<name>"`; `diff` takes the migrate name, as `apply` and `check` do.
 - `ExtractedSchema` triggers gain `events` and `ftsSync`, and `TriggerEvent` is exported.
+- `Connection.executeEach` is gone: the live guard reads every foreign key in one query, one wrangler call on D1.
 
 **Query layer**
 

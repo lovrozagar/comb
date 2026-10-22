@@ -121,12 +121,6 @@ function createD1Connection(databaseName: string, flags: readonly string[], exec
 			const stdout = runWrangler(exec, ["d1", "execute", databaseName, ...flags, "--json", `--command=${finalSql}`])
 			return asQueryResult(readResults(stdout))
 		},
-
-		async executeEach(statements: readonly string[]): Promise<QueryResult[]> {
-			const command = statements.join(";\n")
-			const stdout = runWrangler(exec, ["d1", "execute", databaseName, ...flags, "--json", `--command=${command}`])
-			return readAllResults(stdout).map(asQueryResult)
-		},
 	}
 }
 

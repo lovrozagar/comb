@@ -107,25 +107,26 @@ describe("refuseUnseenReach on a rebuild the history leaves unguarded, and acros
 	})
 })
 
-describe("refuseUnseenReach through a driver that reads in batches, as D1's does", () => {
-	it("reads each table's keys by PRAGMA, skipping D1's own tables, and finds the same reach", async () => {
+describe("refuseUnseenReach on D1, which refuses a pragma that reaches its own tables", () => {
+	it("reads every table's keys in one query, leaving out D1's own tables, and finds the same reach", async () => {
 		const conn = await database(
 			"CREATE TABLE `extra` (`u` integer REFERENCES `u`(`id`) ON DELETE CASCADE); CREATE TABLE `_cf_KV` (`k` text);",
 		)
-		const asked: string[][] = []
-		/* D1 as its driver makes it: one wrangler call per batch of reads, and _cf_ tables of its own */
-		const batched = {
+		const asked: string[] = []
+		/* D1 as measured on a live database: pragma_foreign_key_list over the catalog is refused with
+		   SQLITE_AUTH unless the _cf_ tables are left out first; each execute is one wrangler call */
+		const d1 = {
 			...conn,
-			ownedPrefix: "_cf_",
-			executeEach: async (statements: readonly string[]) => {
-				asked.push([...statements])
-				return Promise.all(statements.map((sql) => conn.execute(sql)))
+			execute: (sql: string) => {
+				asked.push(sql)
+				if (sql.includes("pragma_foreign_key_list") && !sql.includes("NOT LIKE '\\_cf\\_%'"))
+					return Promise.reject(new Error("not authorized: SQLITE_AUTH [code: 7500]"))
+				return conn.execute(sql)
 			},
+			ownedPrefix: "_cf_",
 		}
-		await expect(refuseUnseenReach(batched, pending(REBUILD))).rejects.toThrow("the database's table extra references")
-		expect(asked).toEqual([
-			['PRAGMA foreign_key_list("u")', 'PRAGMA foreign_key_list("post")', 'PRAGMA foreign_key_list("extra")'],
-		])
+		await expect(refuseUnseenReach(d1, pending(REBUILD))).rejects.toThrow("the database's table extra references")
+		expect(asked.filter((sql) => sql.includes("foreign_key_list"))).toHaveLength(1)
 		await conn.close()
 	})
 })

@@ -17,30 +17,13 @@ import { splitSqlStatements } from "./sql-scan.ts"
 const folded = (name: unknown): string => String(name).toLowerCase()
 const pairs = (rows: unknown[][]): Array<[string, string]> => rows.map((row) => [folded(row[0]), folded(row[1])])
 
-/* D1 refuses pragma_foreign_key_list as a table but runs PRAGMA foreign_key_list, so a driver that
-   reads in batches is asked table by table, this many tables a round trip */
-const CHUNK = 100
-
-/** The live foreign keys as child → parent pairs */
+/**
+ * The live foreign keys as child → parent pairs, in one query (one wrangler call on D1). D1 refuses
+ * pragma_foreign_key_list on its own _cf_ tables, so they are left out before the join reaches them.
+ */
 async function liveKeys(conn: Connection): Promise<Array<[string, string]>> {
-	const executeEach = conn.executeEach?.bind(conn)
-	if (executeEach === undefined) {
-		const joined = `SELECT m.name, f."table" FROM sqlite_master m, pragma_foreign_key_list(m.name) f WHERE m.type = 'table'`
-		return pairs((await conn.execute(joined)).rows)
-	}
-	/* D1's own _cf_ tables refuse even a pragma, and SQLite's own hold no keys */
-	const listed = await conn.execute(`SELECT name FROM sqlite_master WHERE type = 'table'${notEngineTables(conn)}`)
-	const tables = listed.rows.map((row) => String(row[0]))
-	const keys: Array<[string, string]> = []
-	for (let at = 0; at < tables.length; at += CHUNK) {
-		const chunk = tables.slice(at, at + CHUNK)
-		const results = await executeEach(chunk.map((table) => `PRAGMA foreign_key_list("${table.replaceAll('"', '""')}")`))
-		for (const [i, result] of results.entries()) {
-			const parent = result.columns.indexOf("table")
-			for (const row of result.rows) keys.push([folded(chunk[i]), folded(row[parent])])
-		}
-	}
-	return keys
+	const joined = `SELECT m.name, f."table" FROM sqlite_master m, pragma_foreign_key_list(m.name) f WHERE m.type = 'table'${notEngineTables(conn)}`
+	return pairs((await conn.execute(joined)).rows)
 }
 
 /** The live foreign keys as child → parent pairs, and the live triggers by table */

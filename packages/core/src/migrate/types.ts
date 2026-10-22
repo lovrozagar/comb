@@ -22,11 +22,6 @@ export type Connection = {
 	execute(sql: string, params?: unknown[]): Promise<QueryResult>
 	batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void>
 	close(): Promise<void>
-	/**
-	 * Several reads in one round trip, a result each; a driver whose every call is costly (D1 runs
-	 * wrangler) has it
-	 */
-	executeEach?(statements: readonly string[]): Promise<QueryResult[]>
 	/** the prefix of the tables the engine keeps for itself (D1: `_cf_`), which comb never counts or copies */
 	ownedPrefix?: string | undefined
 }
