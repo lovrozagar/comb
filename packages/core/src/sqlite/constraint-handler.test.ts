@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { CombError } from "../error.ts"
 import type { ConstraintMap } from "../types.ts"
-import { constraintError, handleConstraintViolation, sqliteErrorHandler } from "./constraint-handler.ts"
+import {
+	classifySqliteError,
+	constraintError,
+	handleConstraintViolation,
+	sqliteErrorHandler,
+} from "./constraint-handler.ts"
 
 /* bun:sqlite's shape: the extended code on `code`; the real-engine cases live in tests/integration/sqlite */
 const engine = (code: string, message: string) => Object.assign(new Error(message), { code })
@@ -328,5 +333,26 @@ describe("constraintError: a trigger's RAISE", () => {
 		const raised = { cause: "qty must be positive", errorKey: "constraint_violation", status: 400 }
 		expect(thrown(engine("SQLITE_CONSTRAINT_TRIGGER", "qty must be positive"), [])).toMatchObject(raised)
 		expect(thrown(engine("SQLITE_CONSTRAINT", "qty must be positive"), [])).toMatchObject(raised)
+	})
+})
+
+/** What `handler` throws for `error`, or undefined when it throws nothing */
+function thrownBy(handler: (error: unknown) => void, error: unknown): unknown {
+	try {
+		handler(error)
+	} catch (error_) {
+		return error_
+	}
+	return undefined
+}
+
+describe("classifySqliteError: what sqliteErrorHandler would throw, thrown by nobody (C6)", () => {
+	it.each([
+		["a unique violation", engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: store.slug")],
+		["a busy database", engine("SQLITE_BUSY", "database is locked")],
+		["an error that is neither", engine("SQLITE_ERROR", "no such table: x")],
+		["no engine error", new Error("boom")],
+	])("returns for %s what the handler throws, or undefined when it throws nothing", (_, error) => {
+		expect(classifySqliteError(error, MAPS)).toEqual(thrownBy((e) => sqliteErrorHandler(e, MAPS), error))
 	})
 })

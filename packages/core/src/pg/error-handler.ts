@@ -265,19 +265,25 @@ const RESOURCE: Record<string, Fallback> = {
 }
 
 /**
- * Handle PostgreSQL errors: constraint violations through the app's maps, a value the column
- * cannot hold to a 400 (value-error.ts), resource and availability errors to their generic keys. Anything else
- * is left for the caller.
+ * The CombError a PostgreSQL error is: a constraint violation through the app's maps, a value the
+ * column cannot hold as a 400 (value-error.ts), a resource or availability error as its generic
+ * key; undefined for anything else. It throws nothing, so a caller can ask what an error is.
  */
-function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
+function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined {
 	const read = readPgError(error)
-	if (read === null) return
+	if (read === null) return undefined
 	const handler = own(CONSTRAINTS, read.code)
-	if (handler !== undefined) throw handler({ maps: constraintMaps, read, source: error })
+	if (handler !== undefined) return handler({ maps: constraintMaps, read, source: error })
 	const value = valueError(read.code, read, error)
-	if (value !== undefined) throw value
+	if (value !== undefined) return value
 	const resource = own(RESOURCE, read.code)
-	if (resource !== undefined) throw new CombError({ ...resource, source: error })
+	return resource === undefined ? undefined : new CombError({ ...resource, source: error })
 }
 
-export { pgErrorHandler }
+/** Throw the CombError classifyPgError finds for `error`; anything else is left for the caller */
+function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
+	const classified = classifyPgError(error, constraintMaps)
+	if (classified !== undefined) throw classified
+}
+
+export { classifyPgError, pgErrorHandler }

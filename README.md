@@ -386,6 +386,7 @@ try {
 - `d1ErrorHandler` — Cloudflare D1. Constraint violations go through the same SQLite mapping. Other errors with an SQLite code are query errors (500); a D1 platform failure without one is transient (503) or a storage limit (422).
 - `pgErrorHandler` — PostgreSQL on node-postgres, postgres.js and Bun.SQL. Classifies by SQLSTATE (read from `code`, or Bun.SQL's `errno`) and reads `table`/`table_name`, `constraint`/`constraint_name` and `column`/`column_name` alike. The primary key is a 23505 on `<table>_pkey`.
 - `handleConstraintViolation` — the constraint half of `sqliteErrorHandler`. It also accepts an engine message given as text.
+- `classifySqliteError`, `classifyD1Error`, `classifyPgError` — the same answers without throwing: the `CombError` each handler would throw, or `undefined` when it would throw nothing, so code that expects one violation can ask instead of catching: `classifyD1Error(error, maps)?.errorKey === "project_member_taken"`.
 
 A rule a trigger enforces is the same 400 `constraint_violation` on every engine, its cause the message the app raised: `RAISE(ABORT, 'qty must be positive')` on SQLite, libsql and D1 (`SQLITE_CONSTRAINT_TRIGGER`), and `RAISE EXCEPTION 'qty must be positive'` (P0001) on Postgres. Write that message for the client.
 
@@ -895,14 +896,14 @@ ULIDs use Crockford base32 with a 10-character timestamp and 16 characters of ra
 | `@lovrozagar/comb/sqlite/columns`            | `c` for SQLite                                                                                     |
 | `@lovrozagar/comb/sqlite/constraints`        | constraint types                                                                                   |
 | `@lovrozagar/comb/sqlite/patterns`           | shared regex patterns                                                                              |
-| `@lovrozagar/comb/sqlite/constraint-handler` | `sqliteErrorHandler`, `handleConstraintViolation`                                                  |
+| `@lovrozagar/comb/sqlite/constraint-handler` | `sqliteErrorHandler`, `classifySqliteError`, `handleConstraintViolation`                           |
 | `@lovrozagar/comb/sqlite/d1/session`         | `openD1Session`                                                                                    |
 | `@lovrozagar/comb/sqlite/d1/bookmark`        | `BookmarkTracker`                                                                                  |
-| `@lovrozagar/comb/sqlite/d1/error-handler`   | `d1ErrorHandler`                                                                                   |
+| `@lovrozagar/comb/sqlite/d1/error-handler`   | `d1ErrorHandler`, `classifyD1Error`                                                                |
 | `@lovrozagar/comb/sqlite/d1/sharding`        | `ShardRouter`, `shardMap`                                                                          |
 | `@lovrozagar/comb/states`                    | `defineStateMachine`, `canTransition`, `assertTransition`, `nextStates`, `isState`, `isTerminal`   |
 | `@lovrozagar/comb/pg/columns`                | `c` for PostgreSQL                                                                                 |
-| `@lovrozagar/comb/pg/error-handler`          | `pgErrorHandler`                                                                                   |
+| `@lovrozagar/comb/pg/error-handler`          | `pgErrorHandler`, `classifyPgError`                                                                |
 
 ## Repository layout
 

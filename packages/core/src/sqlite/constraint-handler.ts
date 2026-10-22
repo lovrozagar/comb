@@ -211,13 +211,20 @@ const resourceOutcome = (code: string | undefined): Fallback | undefined =>
 	own(RESOURCE, code?.replace(/^(SQLITE_[A-Z]+)_.*$/, "$1"))
 
 /**
- * The error handler for libsql, Turso and bun:sqlite: throws a CombError for constraint
- * violations and resource errors; any other error is left for the caller.
+ * The CombError a libsql, Turso or bun:sqlite error is: a constraint violation or a resource
+ * error; undefined for any other. It throws nothing, so a caller can ask what an error is.
  */
-function sqliteErrorHandler(error: unknown, maps: ConstraintMap[]): void {
-	handleConstraintViolation(error, maps)
+function classifySqliteError(error: unknown, maps: ConstraintMap[]): CombError | undefined {
+	const constraint = constraintError(error, maps)
+	if (constraint !== null) return constraint
 	const resource = resourceOutcome(readSqliteError(error)?.code)
-	if (resource !== undefined) throw new CombError({ ...resource, source: error })
+	return resource === undefined ? undefined : new CombError({ ...resource, source: error })
 }
 
-export { constraintError, handleConstraintViolation, resourceOutcome, sqliteErrorHandler }
+/** The error handler for libsql, Turso and bun:sqlite: throws what classifySqliteError finds; any other error is left for the caller */
+function sqliteErrorHandler(error: unknown, maps: ConstraintMap[]): void {
+	const classified = classifySqliteError(error, maps)
+	if (classified !== undefined) throw classified
+}
+
+export { classifySqliteError, constraintError, handleConstraintViolation, resourceOutcome, sqliteErrorHandler }

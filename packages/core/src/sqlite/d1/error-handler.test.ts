@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CombError } from "../../error.ts"
-import { d1ErrorHandler } from "./error-handler.ts"
+import { classifyD1Error, d1ErrorHandler } from "./error-handler.ts"
 
 /* D1 shapes as workerd produces them; the real-engine cases live in tests/integration/d1 */
 const d1 = (message: string) => {
@@ -129,5 +129,28 @@ describe("d1ErrorHandler on a value the column cannot hold (Q10)", () => {
 				d1("cannot store TEXT value in INTEGER column s.n: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_DATATYPE)"),
 			),
 		).toMatchObject({ column: "n", errorKey: "invalid_value", status: 400 })
+	})
+})
+
+/** What `handler` throws for `error`, or undefined when it throws nothing */
+function thrownBy(handler: (error: unknown) => void, error: unknown): unknown {
+	try {
+		handler(error)
+	} catch (error_) {
+		return error_
+	}
+	return undefined
+}
+
+describe("classifyD1Error: what d1ErrorHandler would throw, thrown by nobody (C6)", () => {
+	it.each([
+		["a unique violation", d1("UNIQUE constraint failed: store.slug: SQLITE_CONSTRAINT_UNIQUE")],
+		["a dropped connection", d1("Network connection lost.")],
+		["a full database", d1("Exceeded maximum DB size limit")],
+		["an unknown D1 failure", d1("something else")],
+		["an error D1 did not raise", new Error("boom")],
+		["no error at all", "text"],
+	])("returns for %s what the handler throws, or undefined when it throws nothing", (_, error) => {
+		expect(classifyD1Error(error, [])).toEqual(thrownBy((e) => d1ErrorHandler(e, []), error))
 	})
 })

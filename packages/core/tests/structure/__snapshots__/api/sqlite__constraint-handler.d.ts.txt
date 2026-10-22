@@ -20,11 +20,13 @@ declare function handleConstraintViolation(error: unknown, maps: ConstraintMap[]
 /** The outcome of an engine resource code, its extended form read as its primary; undefined for any other */
 declare const resourceOutcome: (code: string | undefined) => Fallback | undefined;
 /**
- * The error handler for libsql, Turso and bun:sqlite: throws a CombError for constraint
- * violations and resource errors; any other error is left for the caller.
+ * The CombError a libsql, Turso or bun:sqlite error is: a constraint violation or a resource
+ * error; undefined for any other. It throws nothing, so a caller can ask what an error is.
  */
+declare function classifySqliteError(error: unknown, maps: ConstraintMap[]): CombError | undefined;
+/** The error handler for libsql, Turso and bun:sqlite: throws what classifySqliteError finds; any other error is left for the caller */
 declare function sqliteErrorHandler(error: unknown, maps: ConstraintMap[]): void;
-export { constraintError, handleConstraintViolation, resourceOutcome, sqliteErrorHandler };
+export { classifySqliteError, constraintError, handleConstraintViolation, resourceOutcome, sqliteErrorHandler };
 
 // constraint-map.d.ts
 /**

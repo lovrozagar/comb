@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { CombError } from "../error.ts"
 import type { ConstraintMap } from "../types.ts"
-import { pgErrorHandler, readPgError } from "./error-handler.ts"
+import { classifyPgError, pgErrorHandler, readPgError } from "./error-handler.ts"
 
 /* driver shapes as node-postgres, postgres.js and Bun.SQL produce them; the real-server cases
  * live in tests/integration/postgres and tests/bun */
@@ -282,5 +282,30 @@ describe("pgErrorHandler: a trigger's RAISE EXCEPTION", () => {
 			errorKey: "constraint_violation",
 			status: 400,
 		})
+	})
+})
+
+/** What `handler` throws for `error`, or undefined when it throws nothing */
+function thrownBy(handler: (error: unknown) => void, error: unknown): unknown {
+	try {
+		handler(error)
+	} catch (error_) {
+		return error_
+	}
+	return undefined
+}
+
+describe("classifyPgError: what pgErrorHandler would throw, thrown by nobody (C6)", () => {
+	it.each([
+		[
+			"a unique violation",
+			nodePg({ code: "23505", constraint: "k", detail: "Key (a)=(1) already exists.", table: "t" }),
+		],
+		["a value the column cannot hold", nodePg({ code: "22P02" })],
+		["a server shutting down", nodePg({ code: "57P01" })],
+		["a code comb does not map", nodePg({ code: "42601" })],
+		["no server error", new Error("boom")],
+	])("returns for %s what the handler throws, or undefined when it throws nothing", (_, error) => {
+		expect(classifyPgError(error, MAPS)).toEqual(thrownBy((e) => pgErrorHandler(e, MAPS), error))
 	})
 })

@@ -1,4 +1,5 @@
 // pg/error-handler.d.ts
+import { CombError } from "../error.ts";
 import { type ConstraintMap } from "../types.ts";
 export type PgErrorRead = {
     code: string;
@@ -20,12 +21,36 @@ export type PgErrorRead = {
  */
 export declare function readPgError(error: unknown): PgErrorRead | null;
 /**
- * Handle PostgreSQL errors: constraint violations through the app's maps, a value the column
- * cannot hold to a 400 (value-error.ts), resource and availability errors to their generic keys. Anything else
- * is left for the caller.
+ * The CombError a PostgreSQL error is: a constraint violation through the app's maps, a value the
+ * column cannot hold as a 400 (value-error.ts), a resource or availability error as its generic
+ * key; undefined for anything else. It throws nothing, so a caller can ask what an error is.
  */
+declare function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined;
+/** Throw the CombError classifyPgError finds for `error`; anything else is left for the caller */
 declare function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void;
-export { pgErrorHandler };
+export { classifyPgError, pgErrorHandler };
+
+// error.d.ts
+import type { StatusKey } from "./types.ts";
+export declare class CombError extends Error {
+    readonly column?: string | undefined;
+    readonly errorKey: string;
+    readonly status: number;
+    readonly statusKey: StatusKey;
+    readonly table?: string | undefined;
+    /** The error this one was made from, for logs. Never serialized: it can hold SQL and bound values. */
+    readonly source: unknown;
+    constructor(opts: {
+        /** A message safe to show the client. */
+        cause?: unknown;
+        column?: string | undefined;
+        errorKey: string;
+        /** The original error, kept for logs and never serialized. */
+        source?: unknown;
+        status: StatusKey;
+        table?: string | undefined;
+    });
+}
 
 // types.d.ts
 /** Database-relevant HTTP status keys */

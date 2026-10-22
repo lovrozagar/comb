@@ -75,20 +75,27 @@ function engineOutcome(code: string): Outcome {
 }
 
 /**
- * Handle Cloudflare D1 database errors: constraint violations through the shared SQLite
- * handlers, then query errors (500) and platform failures (transient 503, storage 422).
- * The CombError's `cause` is safe for clients; the original error, which holds the SQL and
- * its bound values, is on `source`.
+ * The CombError a Cloudflare D1 database error is: a constraint violation through the shared
+ * SQLite handlers, then a query error (500) or a platform failure (transient 503, storage 422);
+ * undefined for an error that is none of these. It throws nothing, so a caller can ask what an
+ * error is (a unique violation it expects, say) without catching. The CombError's `cause` is safe
+ * for clients; the original error, which holds the SQL and its bound values, is on `source`.
  */
-function d1ErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
-	if (!(error instanceof Error)) return
+function classifyD1Error(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined {
+	if (!(error instanceof Error)) return undefined
 	const constraint = constraintError(error, constraintMaps)
-	if (constraint !== null) throw constraint
+	if (constraint !== null) return constraint
 	const read = readSqliteError(error)
 	const platform = read === null ? platformMessage(error) : null
-	if (read === null && platform === null) return
+	if (read === null && platform === null) return undefined
 	const outcome = read === null ? platformOutcome(platform as string) : engineOutcome(read.code)
-	throw new CombError({ ...outcome, source: error })
+	return new CombError({ ...outcome, source: error })
 }
 
-export { d1ErrorHandler }
+/** Throw the CombError classifyD1Error finds for `error`; return when it finds none */
+function d1ErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
+	const classified = classifyD1Error(error, constraintMaps)
+	if (classified !== undefined) throw classified
+}
+
+export { classifyD1Error, d1ErrorHandler }
