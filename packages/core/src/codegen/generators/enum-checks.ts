@@ -29,6 +29,10 @@ type EnumField = {
 	values: string[]
 }
 
+/** The name of the CHECK comb writes for an enum column; the constraint map keys its entry by it */
+export const enumCheckName = (table: Pick<TableMeta, "sqlName">, fieldName: string): string =>
+	`${table.sqlName}_${fieldName}_enum`
+
 function getEnumFields(table: TableMeta): EnumField[] {
 	const result: EnumField[] = []
 
@@ -93,7 +97,7 @@ export function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConf
 
 		for (const ef of enumFields) {
 			const inList = ef.values.map((v) => `'${escapeValue(v)}'`).join(", ")
-			const checkName = `${table.sqlName}_${ef.fieldName}_enum`
+			const checkName = enumCheckName(table, ef.fieldName)
 			/* bracket access keeps the generated file valid under noPropertyAccessFromIndexSignature */
 			lines.push(
 				`\t\tcheck(${stringLiteral(checkName)}, sql\`\${table[${JSON.stringify(ef.fieldName)}]} IN (${inList})\`),`,

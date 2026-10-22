@@ -40,11 +40,17 @@ type TableConstraints = {
     unique?: Record<string, Constraint>;
 };
 type ConstraintMap = Record<string, TableConstraints>;
+type Dialect = "postgres" | "sqlite";
 type ConstraintsConfig = {
     output: string;
 };
-/** The constraint map of every table that has a constraint, keyed by SQL table name */
-export declare function buildConstraintMap(tables: readonly TableMeta[]): ConstraintMap;
+/**
+ * The constraint map of every table that has a constraint, keyed by SQL table name. An error key
+ * two constraints would mint fails codegen, naming both: a client could not tell them apart, and
+ * the one translation would name the wrong column for one (F20). Renaming the keys would break
+ * every consumer's translations, so a repeat is refused instead.
+ */
+export declare function buildConstraintMap(tables: readonly TableMeta[], dialect?: Dialect): ConstraintMap;
 /** Every constraint in the map, flattened */
 export declare function constraintsIn(map: ConstraintMap): Constraint[];
 /** Generate constraint map from analyzed tables */
@@ -209,10 +215,13 @@ declare function generateEntities(ctx: GeneratorContext, config: EntitiesConfig)
 export { generateEntities };
 
 // codegen/generators/enum-checks.d.ts
+import type { TableMeta } from "../analyzer-types.ts";
 import type { GeneratorContext } from "./context-types.ts";
 type EnumChecksConfig = {
     output: string;
 };
+/** The name of the CHECK comb writes for an enum column; the constraint map keys its entry by it */
+export declare const enumCheckName: (table: Pick<TableMeta, "sqlName">, fieldName: string) => string;
 export declare function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConfig): void;
 export {};
 

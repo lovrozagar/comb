@@ -163,28 +163,14 @@ describe("generateConstraints — check-constraint classification", () => {
 		)
 	})
 
-	it("keeps the generic size message when no limit can be read", () => {
+	it("keeps the generic message, a 400, for a size check whose limit it cannot read", () => {
 		expect(checkFor("doc_body_size", "length(x) > 0")).toContain(
-			`cause: "Check constraint violated",\n\t\t\t\tstatusKey: "conflict"`,
+			`cause: "Check constraint violated",\n\t\t\t\tstatusKey: "bad_request"`,
 		)
 	})
 
-	it("reads expiry and valid checks as date constraints", () => {
-		expect(checkFor("doc_expiry_check")).toContain("Invalid date/time constraint")
-		expect(checkFor("doc_valid_range")).toContain(
-			`cause: "Invalid date/time constraint",\n\t\t\t\tstatusKey: "bad_request"`,
-		)
-	})
-
-	it("reads an integrity check as a data integrity failure, staying at conflict", () => {
-		expect(checkFor("doc_integrity_check")).toContain(
-			`cause: "Data integrity constraint violated",\n\t\t\t\tstatusKey: "conflict"`,
-		)
-	})
-
-	it("falls back to the generic message and conflict for an unclassified check", () => {
-		expect(checkFor("doc_something_else")).toContain(
-			`cause: "Check constraint violated",\n\t\t\t\tstatusKey: "conflict"`,
-		)
+	it("reads nothing else from a name: expiry, valid and integrity checks get the generic 400 (F27)", () => {
+		for (const name of ["doc_expiry_check", "doc_valid_range", "doc_integrity_check", "doc_something_else"])
+			expect(checkFor(name)).toContain(`cause: "Check constraint violated",\n\t\t\t\tstatusKey: "bad_request"`)
 	})
 })

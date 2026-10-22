@@ -7,6 +7,7 @@
 import { type Fallback, type Found, findNamed, lookup, own, toCombError } from "../constraint-map.ts"
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
+import { truncateUtf8 } from "../identifier.ts"
 import { statementTable } from "../statement-head.ts"
 import { valueError } from "../value-error.ts"
 
@@ -93,18 +94,6 @@ export function readPgError(error: unknown): PgErrorRead | null {
 type Violation = { maps: ConstraintMap[]; read: PgErrorRead; source: unknown }
 
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
-
-/** `name` cut to at most `bytes` UTF-8 bytes, never inside a character */
-function truncateUtf8(name: string, bytes: number): string {
-	let out = ""
-	let used = 0
-	for (const char of name) {
-		used += new TextEncoder().encode(char).length
-		if (used > bytes) break
-		out += char
-	}
-	return out
-}
 
 /* Postgres names a primary key `<table>_pkey`, the table cut so the whole fits its 63-byte identifiers */
 const pkeyOf = (table: string) => `${truncateUtf8(table, 58)}_pkey`

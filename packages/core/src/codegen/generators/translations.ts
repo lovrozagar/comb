@@ -36,7 +36,9 @@ function englishMessage({ cause, key }: ErrorKey): string {
 
 /** Every error key the tables' constraint map declares, sorted, with its cause */
 function errorKeysOf(ctx: GeneratorContext): ErrorKey[] {
-	const byKey = new Map(constraintsIn(buildConstraintMap(ctx.analysis.tables)).map((c) => [c.errorKey, c.cause]))
+	const byKey = new Map(
+		constraintsIn(buildConstraintMap(ctx.analysis.tables, ctx.dialect)).map((c) => [c.errorKey, c.cause]),
+	)
 	/* keys are unique, so no two compare equal */
 	return [...byKey].sort(([a], [b]) => (a < b ? -1 : 1)).map(([key, cause]) => ({ cause, key }))
 }

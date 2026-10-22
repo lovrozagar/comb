@@ -6,7 +6,9 @@
 import path from "node:path"
 import { commentText, dbIdentifiers, propertyName, stringLiteral } from "../utils/case.ts"
 import type { TableMeta } from "../analyzer-types.ts"
+import { pgIdentifier } from "../../identifier.ts"
 import { writeGenFile } from "../utils/fs.ts"
+import { enumCheckName } from "./enum-checks.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
 type Constraint = {
@@ -23,6 +25,8 @@ type TableConstraints = {
 }
 
 type ConstraintMap = Record<string, TableConstraints>
+
+type Dialect = "postgres" | "sqlite"
 
 type ConstraintsConfig = {
 	output: string
@@ -55,25 +59,58 @@ function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 	return Object.keys(unique).length > 0 ? unique : undefined
 }
 
-/** The cause and status a CHECK reports, read from its name's convention */
+/* what a violated CHECK reports when its name follows none of comb's own conventions: what the handler reports unmapped */
+const CHECK_FAILED = { cause: "Check constraint violated", statusKey: "bad_request" } as const
+
+/**
+ * The cause and status a CHECK reports. Only the two conventions comb itself writes are read from
+ * a name, `_enum` and `_size`; any other word in a name says nothing reliable (a seats check named
+ * `…_within_valid_range` is no date), so every other CHECK is a 400 as the handler's fallback (F27)
+ */
 function checkVerdict(name: string, expression: string): Omit<Constraint, "errorKey"> {
 	if (name.endsWith("_enum")) return { cause: "Invalid enum value", statusKey: "bad_request" }
-	if (name.includes("_size")) {
-		const bytes = expression.match(/<=\s*(\d+)/)?.[1]
-		if (bytes === undefined) return { cause: "Check constraint violated", statusKey: "conflict" }
-		return {
-			cause: `Exceeds maximum size of ${Math.round(Number.parseInt(bytes, 10) / 1024)}KB`,
-			statusKey: "bad_request",
-		}
+	const bytes = name.includes("_size") ? expression.match(/<=\s*(\d+)/)?.[1] : undefined
+	if (bytes === undefined) return CHECK_FAILED
+	return {
+		cause: `Exceeds maximum size of ${Math.round(Number.parseInt(bytes, 10) / 1024)}KB`,
+		statusKey: "bad_request",
 	}
-	if (name.includes("expiry") || name.includes("valid")) {
-		return { cause: "Invalid date/time constraint", statusKey: "bad_request" }
-	}
-	if (name.includes("integrity")) return { cause: "Data integrity constraint violated", statusKey: "conflict" }
-	return { cause: "Check constraint violated", statusKey: "conflict" }
 }
 
-function constraintsOf(table: TableMeta): TableConstraints {
+/**
+ * Each CHECK of a table by the name the engine reports: the declared ones and comb's own enum
+ * CHECKs (F28), cut to what Postgres keeps of a name (F21). Two that cut to one fail codegen.
+ */
+function checksOf(table: TableMeta, dialect: Dialect): Record<string, Constraint> | undefined {
+	const key = (name: string) => (dialect === "postgres" ? pgIdentifier(name) : name)
+	const entries: Array<[string, string, Constraint]> = table.checkConstraints.map((chk) => [
+		chk.name,
+		key(chk.name),
+		{ ...checkVerdict(chk.name, chk.expression), errorKey: `${table.sqlName}_${chk.name}_failed` },
+	])
+	for (const field of table.fields.filter((each) => (each.enumValues?.length ?? 0) > 0)) {
+		const name = enumCheckName(table, field.name)
+		entries.push([
+			name,
+			key(name),
+			{ ...checkVerdict(name, ""), errorKey: `${table.sqlName}_${field.name}_enum_invalid` },
+		])
+	}
+	const out: Record<string, Constraint> = {}
+	const declared = new Map<string, string>()
+	for (const [name, reported, constraint] of entries) {
+		const first = declared.get(reported)
+		if (first !== undefined)
+			throw new Error(
+				`${table.sqlName}: the CHECKs ${first} and ${name} share the 63 bytes Postgres keeps of their names; rename one`,
+			)
+		declared.set(reported, name)
+		out[reported] = constraint
+	}
+	return entries.length > 0 ? out : undefined
+}
+
+function constraintsOf(table: TableMeta, dialect: Dialect): TableConstraints {
 	const entry: TableConstraints = {}
 	if (table.fields.some((f) => f.isPrimaryKey) || table.hasCompositePrimaryKey) {
 		entry.primaryKey = conflict("Record with this ID already exists", `${table.sqlName}_id_duplicate`)
@@ -89,25 +126,44 @@ function constraintsOf(table: TableMeta): TableConstraints {
 	}
 	const unique = uniqueOf(table)
 	if (unique) entry.unique = unique
-	if (table.checkConstraints.length > 0) {
-		entry.check = Object.fromEntries(
-			table.checkConstraints.map((chk) => [
-				chk.name,
-				{ ...checkVerdict(chk.name, chk.expression), errorKey: `${table.sqlName}_${chk.name}_failed` },
-			]),
-		)
-	}
+	const check = checksOf(table, dialect)
+	if (check) entry.check = check
 	return entry
 }
 
-/** The constraint map of every table that has a constraint, keyed by SQL table name */
-export function buildConstraintMap(tables: readonly TableMeta[]): ConstraintMap {
+/**
+ * The constraint map of every table that has a constraint, keyed by SQL table name. An error key
+ * two constraints would mint fails codegen, naming both: a client could not tell them apart, and
+ * the one translation would name the wrong column for one (F20). Renaming the keys would break
+ * every consumer's translations, so a repeat is refused instead.
+ */
+export function buildConstraintMap(tables: readonly TableMeta[], dialect: Dialect = "sqlite"): ConstraintMap {
 	const map: ConstraintMap = {}
+	const owner = new Map<string, string>()
 	for (const table of tables) {
-		const entry = constraintsOf(table)
+		const entry = constraintsOf(table, dialect)
+		for (const [place, constraint] of placed(table.sqlName, entry)) {
+			const first = owner.get(constraint.errorKey)
+			if (first !== undefined)
+				throw new Error(
+					`the error key ${constraint.errorKey} names two constraints: ${first} and ${place}; rename a column`,
+				)
+			owner.set(constraint.errorKey, place)
+		}
 		if (Object.keys(entry).length > 0) map[table.sqlName] = entry
 	}
 	return map
+}
+
+/** Each constraint of a table's entry with where it stands: `user.unique.email` */
+function placed(table: string, entry: TableConstraints): Array<[string, Constraint]> {
+	const groups = (["check", "foreignKey", "unique"] as const).flatMap((group) =>
+		Object.entries(entry[group] ?? {}).map(([name, constraint]): [string, Constraint] => [
+			`${table}.${group}.${name}`,
+			constraint,
+		]),
+	)
+	return [...(entry.primaryKey ? [[`${table}.primaryKey`, entry.primaryKey] as [string, Constraint]] : []), ...groups]
 }
 
 /** Every constraint in the map, flattened */
@@ -131,7 +187,7 @@ function countConstraints(map: ConstraintMap): number {
 export function generateConstraints(ctx: GeneratorContext, config: ConstraintsConfig): void {
 	const { dbName, tables } = ctx.analysis
 	const outputPath = path.resolve(ctx.cwd, config.output)
-	const constraintMap = buildConstraintMap(tables)
+	const constraintMap = buildConstraintMap(tables, ctx.dialect)
 
 	writeGenFile(outputPath, generateConstraintMapCode(constraintMap, dbName), { generator: "comb", staged: ctx.staged })
 
