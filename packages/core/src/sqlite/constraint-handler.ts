@@ -15,21 +15,27 @@ type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown
 /** The index a UNIQUE violation names instead of columns, when it is on an expression: `index 'u_email_lower'` */
 const failedIndex = (message: string): string | undefined => /constraint failed: index '([^']+)'$/i.exec(message)?.[1]
 
-/** `UNIQUE constraint failed: member.first, member.last` → member, [first, last] */
+/**
+ * `UNIQUE constraint failed: member.first, member.last` → member, [first, last]. A table name may
+ * hold any character but a dot here, as SQLite writes it unquoted: each pair splits on its last dot.
+ */
 function failedColumns(message: string): { columns: string[]; table: string | undefined } {
 	const list = /constraint failed: (.+)$/i.exec(message)?.[1] ?? ""
 	const pairs = list
 		.split(", ")
-		.map((pair) => /^(\w+)\.(\w+)$/.exec(pair.trim()))
+		.map((pair) => /^(.+)\.([^.]+)$/.exec(pair.trim()))
 		.filter((pair) => pair !== null)
 	return { columns: pairs.map((pair) => pair[2] as string), table: pairs[0]?.[1] }
 }
 
 /* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded, read from the
- * statement's own verb on */
+ * statement's own verb on: a quoted name whole, its doubled quotes undone, or a bare one */
 const STATEMENT_TABLE =
-	/^(?:insert\s+(?:or\s+\w+\s+)?into|replace\s+into|update(?:\s+or\s+\w+)?|delete\s+from)\s+["`[]?(\w+)/i
-const statementTable = (query: string | undefined) => STATEMENT_TABLE.exec(statementHead(query ?? ""))?.[1]
+	/^(?:insert\s+(?:or\s+\w+\s+)?into|replace\s+into|update(?:\s+or\s+\w+)?|delete\s+from)\s+(?:"((?:[^"]|"")+)"|`((?:[^`]|``)+)`|\[([^\]]+)\]|([^\s(]+))/i
+function statementTable(query: string | undefined): string | undefined {
+	const [, double, back, bracket, bare] = STATEMENT_TABLE.exec(statementHead(query ?? "")) ?? []
+	return double?.replaceAll('""', '"') ?? back?.replaceAll("``", "`") ?? bracket ?? bare
+}
 
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
@@ -75,7 +81,8 @@ function primaryKey(v: Violation): CombError {
 }
 
 function check(v: Violation): CombError {
-	const name = /CHECK constraint failed: (\w+)$/i.exec(v.read.message)?.[1]
+	/* the rest of the line: a name may hold any character, and an unnamed CHECK is its expression */
+	const name = /CHECK constraint failed: (.+)$/i.exec(v.read.message)?.[1]
 	const fallback = {
 		cause: "Data validation failed",
 		errorKey: combErrorKeys.CHECK_CONSTRAINT_VIOLATION,

@@ -5,7 +5,11 @@
 import { sql } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CombError } from "../../../src/error.ts"
-import { handleConstraintViolation, sqliteErrorHandler } from "../../../src/sqlite/constraint-handler.ts"
+import {
+	constraintError,
+	handleConstraintViolation,
+	sqliteErrorHandler,
+} from "../../../src/sqlite/constraint-handler.ts"
 import type { ConstraintMap } from "../../../src/types.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 
@@ -254,4 +258,60 @@ describe("sqliteErrorHandler on libsql: a trigger's RAISE", () => {
 			})
 		},
 	)
+})
+
+describe("names outside [A-Za-z0-9_] (R6)", () => {
+	const PUNCTUATED: ConstraintMap[] = [
+		{
+			acct: { check: { "age-adult": { cause: "Must be an adult", errorKey: "acct_age_adult" } } },
+			line: { check: { price_positive: { cause: "the other table's", errorKey: "line_price_positive" } } },
+			"line-item": {
+				check: { price_positive: { cause: "Price must be positive", errorKey: "line_item_price_positive" } },
+				unique: { sku: { cause: "SKU taken", errorKey: "line_item_sku_taken" } },
+			},
+		},
+	]
+	let punctuated: LibsqlHarness
+	beforeEach(async () => {
+		punctuated = libsqlMemory()
+		await punctuated.client
+			.executeMultiple(`CREATE TABLE acct (id TEXT PRIMARY KEY, age INTEGER, CONSTRAINT "age-adult" CHECK (age >= 18));
+CREATE TABLE line (id TEXT PRIMARY KEY, price INTEGER, CONSTRAINT price_positive CHECK (price > 0));
+CREATE TABLE "line-item" (id TEXT PRIMARY KEY, sku TEXT UNIQUE, price INTEGER, CONSTRAINT price_positive CHECK (price > 0));
+INSERT INTO "line-item" VALUES ('l1', 'A', 1);`)
+	})
+	afterEach(() => punctuated.close())
+
+	/** What the handler makes of `statement`'s violation */
+	async function mapped(statement: string): Promise<CombError> {
+		try {
+			await punctuated.db.run(sql.raw(statement))
+		} catch (error) {
+			const mappedError = constraintError(error, PUNCTUATED)
+			if (mappedError !== null) return mappedError
+			throw error
+		}
+		throw new Error(`${statement} did not fail`)
+	}
+
+	it("maps a CHECK whose name holds a hyphen", async () => {
+		expect(await mapped("INSERT INTO acct VALUES ('a1', 12)")).toMatchObject({ errorKey: "acct_age_adult" })
+	})
+
+	it("maps a unique column of a hyphenated table, naming that table", async () => {
+		expect(await mapped(`INSERT INTO "line-item" VALUES ('l2', 'A', 2)`)).toMatchObject({
+			column: "sku",
+			errorKey: "line_item_sku_taken",
+			table: "line-item",
+		})
+	})
+
+	it("blames a CHECK on the hyphenated table, not a table its name starts with", async () => {
+		expect(await mapped(`INSERT INTO "line-item" VALUES ('l3', 'B', 0)`)).toMatchObject({
+			errorKey: "line_item_price_positive",
+			table: "line-item",
+		})
+		expect(await mapped(`UPDATE [line-item] SET price = -1`)).toMatchObject({ errorKey: "line_item_price_positive" })
+		expect(await mapped("INSERT INTO `line-item` VALUES ('l4', 'C', 0)")).toMatchObject({ table: "line-item" })
+	})
 })
