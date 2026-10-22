@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { oxlintReports, reportsOf } from "./rule-harness.ts"
+import { oxlintJson, oxlintReports, reportsOf } from "./rule-harness.ts"
 import { children } from "./scope.js"
 
 /** A rule that reports the comments the harness says touch every `debugger` statement. */
@@ -43,6 +43,30 @@ describe("oxlintReports", () => {
 	it("refuses a TMPDIR inside a git checkout, where oxlint would lint nothing", () => {
 		process.env["TMPDIR"] = import.meta.dirname
 		expect(() => oxlintReports("no-console", {})).toThrow("is inside a git checkout")
+	})
+})
+
+describe("oxlintJson", () => {
+	const killed = { error: undefined, signal: "SIGKILL" as const, status: null, stderr: "", stdout: "" }
+
+	it("reads the report oxlint printed", () => {
+		expect(oxlintJson({ ...killed, signal: null, status: 1, stdout: '{"diagnostics":[]}' })).toEqual({
+			diagnostics: [],
+		})
+	})
+
+	/* a child killed under memory pressure leaves no output at all; the failure must say how it ended */
+	it("names how a child that printed no report ended: its signal, exit, spawn error and stderr", () => {
+		expect(() => oxlintJson(killed)).toThrow("oxlint printed no JSON report (exit null, signal SIGKILL): no stderr")
+		expect(() => oxlintJson({ ...killed, signal: null, status: 1, stderr: "failed to load plugin\n" })).toThrow(
+			"oxlint printed no JSON report (exit 1, signal none): failed to load plugin",
+		)
+		const error = Object.assign(new Error("spawnSync oxlint EAGAIN"), { code: "EAGAIN" })
+		/* a child that never started has neither stream, as node:child_process returns it */
+		const unstarted = { error, signal: null, status: null, stderr: undefined, stdout: undefined }
+		expect(() => oxlintJson(unstarted as unknown as typeof killed)).toThrow(
+			"oxlint printed no JSON report (exit null, signal none, spawnSync oxlint EAGAIN): no stderr",
+		)
 	})
 })
 

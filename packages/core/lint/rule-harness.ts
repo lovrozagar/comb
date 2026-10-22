@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process"
+import { type SpawnSyncReturns, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
@@ -92,6 +92,28 @@ function insideGitCheckout(dir: string): boolean {
 	return false
 }
 
+/** What `oxlint --format json` prints */
+type OxlintReport = { diagnostics: Array<{ filename: string; message: string }> }
+
+/**
+ * The report a finished oxlint run printed. A child that printed none, killed by a signal (a
+ * SIGKILL under memory pressure leaves neither stdout nor stderr), failed to start or exited with
+ * an error, fails naming its exit, signal, spawn error and stderr, so the next one names itself.
+ */
+export function oxlintJson(
+	proc: Pick<SpawnSyncReturns<string>, "error" | "signal" | "status" | "stderr" | "stdout">,
+): OxlintReport {
+	try {
+		return JSON.parse(proc.stdout) as OxlintReport
+	} catch {
+		const spawn = proc.error === undefined ? "" : `, ${proc.error.message}`
+		const stderr = proc.stderr?.trim() || "no stderr"
+		throw new Error(
+			`oxlint printed no JSON report (exit ${proc.status}, signal ${proc.signal ?? "none"}${spawn}): ${stderr}`,
+		)
+	}
+}
+
 /** Runs the real oxlint binary with the comb plugin and only `comb/<name>` on, over the fixture. */
 export function oxlintReports(name: string, fixture: Fixture): Report[] {
 	const dir = mkdtempSync(join(tmpdir(), "comb-lint-"))
@@ -112,9 +134,8 @@ export function oxlintReports(name: string, fixture: Fixture): Report[] {
 		const files = Object.keys(fixture).map((file) => join(dir, file))
 		const args = ["--config", join(dir, ".oxlintrc.json"), "--format", "json", "--no-ignore", ...files]
 		const proc = spawnSync(OXLINT, args, { encoding: "utf8" })
-		const out = JSON.parse(proc.stdout) as { diagnostics: Array<{ filename: string; message: string }> }
-		return out.diagnostics
-			.map((d) => ({ file: d.filename.slice(dir.length + 1), message: d.message }))
+		return oxlintJson(proc)
+			.diagnostics.map((d) => ({ file: d.filename.slice(dir.length + 1), message: d.message }))
 			.sort((a, b) => a.file.localeCompare(b.file))
 	} finally {
 		rmSync(dir, { force: true, recursive: true })
