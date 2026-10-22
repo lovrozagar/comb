@@ -279,3 +279,20 @@ describe("generateFieldSchema: a key on create, by what fills it (F6)", () => {
 		)
 	})
 })
+
+describe("generateFieldSchema: a JSON column's rules, published (F26)", () => {
+	it("names the byte limit and, on Postgres, the U+0000 rule in the schema's meta", () => {
+		const blob = fieldOf("b", 'c.json("b", blobSchema, { maxBytes: 20 })', { jsonSchemaName: "blobSchema" })
+		const pg = generateFieldSchema(blob, "create", { dialect: "postgres", imports: imports() })
+		expect(pg).toContain(
+			'.meta({ description: "At most 20 bytes when serialized as JSON; must not contain U+0000", "x-comb-maxBytes": 20 })',
+		)
+		const plain = fieldOf("b", 'c.json("b", blobSchema)', { jsonSchemaName: "blobSchema" })
+		expect(generateFieldSchema(plain, "create", { dialect: "postgres", imports: imports() })).toContain(
+			'.meta({ description: "Must not contain U+0000" })',
+		)
+		expect(generateFieldSchema(plain, "create", { dialect: "sqlite", imports: imports() })).toBe(
+			"blobSchema.nullable().optional()",
+		)
+	})
+})

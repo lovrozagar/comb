@@ -47,9 +47,27 @@ function jsonBase({ annotations, dialect, field, schemaType }: Build): Built {
 	if (!field.jsonSchemaName) throw new Error(`c.json() must have schema as second parameter: ${field.raw}`)
 	if (!isMutative(schemaType)) return field.jsonSchemaName
 	const nul = dialect === "postgres" ? JSON_NUL_CHECK : ""
-	if (annotations.maxBytes === null) return `${field.jsonSchemaName}${nul}`
 	const limit = annotations.maxBytes
-	return `${field.jsonSchemaName}.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })${nul}`
+	const size =
+		limit === null
+			? ""
+			: `.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
+	return `${field.jsonSchemaName}${size}${nul}${jsonRules(limit, nul !== "")}`
+}
+
+/**
+ * The refines' rules as the schema's meta, which JSON Schema publishes (a refine it cannot): the
+ * byte limit as `x-comb-maxBytes`, and both in the description a client reads (F26)
+ */
+function jsonRules(limit: number | null, noNul: boolean): string {
+	const rules = [
+		...(limit === null ? [] : [`At most ${limit} bytes when serialized as JSON`]),
+		...(noNul ? ["must not contain U+0000"] : []),
+	]
+	if (rules.length === 0) return ""
+	const description = rules.join("; ")
+	const text = JSON.stringify(`${description.charAt(0).toUpperCase()}${description.slice(1)}`)
+	return `.meta({ description: ${text}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
 }
 
 // lookup-table: the column builders whose values are numbers, comb's and drizzle's

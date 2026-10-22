@@ -17,6 +17,8 @@ let person: Record<string, z.ZodType> = {}
 
 const TABLES = `import { sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
+import * as z from "zod"
+export const blobSchema = z.object({ s: z.string() })
 export const team = sqliteTable("team", { id: c.id("tm") })
 export const org = sqliteTable("org", { id: c.id("org") })
 export const person = sqliteTable("person", {
@@ -30,6 +32,7 @@ export const person = sqliteTable("person", {
 	site: c.text("site", { url: true }),
 	createdAt: c.timestamp("created_at").notNull(),
 	updatedAt: c.updatedAt("updated_at"),
+	blob: c.json("blob", blobSchema, { maxBytes: 20 }),
 })
 `
 
@@ -45,7 +48,17 @@ afterAll(() => fs.rmSync(dir, { force: true, recursive: true }))
 const schema = (name: string) => person[`personDto${name}Schema`] as z.ZodType
 const accepts = (name: string, value: object) => schema(name).safeParse(value).success
 const CREATE = { createdAt: 1, externalId: "e", slug: "s" }
-const ROW = { ...CREATE, bornAt: null, email: null, id: "per_1", orgId: null, site: null, teamId: null, updatedAt: 1 }
+const ROW = {
+	...CREATE,
+	blob: null,
+	bornAt: null,
+	email: null,
+	id: "per_1",
+	orgId: null,
+	site: null,
+	teamId: null,
+	updatedAt: 1,
+}
 
 describe("generated DTOs on comb's own columns", () => {
 	it("keeps a nomutate column on create, which it must be given, and leaves it off update (F9)", () => {
@@ -71,6 +84,17 @@ describe("generated DTOs on comb's own columns", () => {
 		const meta = readCombEntityMeta(z.toJSONSchema(schema("Read"), { unrepresentable: "any" }))
 		expect(meta?.immutable).toContain("orgId")
 		expect(meta?.immutable).not.toContain("teamId")
+	})
+
+	it("publishes a JSON column's byte limit in its JSON Schema, as its refine enforces it (F26)", () => {
+		const published = z.toJSONSchema(schema("Create"), { io: "input", unrepresentable: "any" }) as {
+			properties: Record<string, { anyOf?: Array<Record<string, unknown>> }>
+		}
+		expect(published.properties["blob"]?.anyOf?.[0]).toMatchObject({
+			description: "At most 20 bytes when serialized as JSON",
+			"x-comb-maxBytes": 20,
+		})
+		expect(accepts("Create", { ...CREATE, blob: { s: "x".repeat(30) } })).toBe(false)
 	})
 
 	it("takes a c.timestamp before 1970 on create and read (F11)", () => {
