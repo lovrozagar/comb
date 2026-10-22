@@ -7,6 +7,7 @@
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
+import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
 
 type Parsed = { filterAst?: unknown; parsedSort: readonly unknown[]; validated?: true | undefined }
 
@@ -32,4 +33,18 @@ function assertSchemaParsed(parsed: Parsed): void {
 	}
 }
 
-export { assertSchemaParsed }
+/**
+ * Throw a 400 when a page no schema bounded passes the default maxPage: an offset that deep makes
+ * the database skip every row before it, which a list schema refuses (C4). A schema's own page,
+ * under whatever maxPage it was built with, is trusted.
+ */
+function assertPageWithin(parsed: { page?: number | null | undefined; validated?: true | undefined }): void {
+	if (parsed.validated === true || (parsed.page ?? 1) <= PAGINATION_DEFAULTS.maxPage) return
+	throw new CombError({
+		cause: `page ${parsed.page} is past ${PAGINATION_DEFAULTS.maxPage}; page further by cursor`,
+		errorKey: combErrorKeys.PAGE_TOO_DEEP,
+		status: "bad_request",
+	})
+}
+
+export { assertPageWithin, assertSchemaParsed }

@@ -7,7 +7,7 @@ import { CURSOR_TIEBREAK_COLUMN, type CursorOptions } from "../cursor.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
 import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
-import { assertSchemaParsed } from "../trusted.ts"
+import { assertPageWithin, assertSchemaParsed } from "../trusted.ts"
 import { DateKey } from "./cursor-fit.ts"
 import { cursorWhere } from "./cursor-where.ts"
 import { orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
@@ -154,6 +154,7 @@ function finish({ cursor: options, keyset, parsed, sort, table, tiebreak, where 
 		}
 	}
 
+	assertPageWithin(parsed)
 	const page = parsed.page ?? 1
 	return {
 		limit: parsed.limit + 1,

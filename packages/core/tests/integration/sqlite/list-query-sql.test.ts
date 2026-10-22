@@ -213,3 +213,14 @@ describe("keyset pagination returns every row exactly once, in order", () => {
 		)
 	})
 })
+
+describe("a page no schema bounded, on the builders (C4)", () => {
+	it("is refused past 10 000 by buildListQuery and buildDerivedListQuery alike", () => {
+		const parsed = { cursor: undefined, filterAst: null, limit: 20, page: 999_999_999, parsedSort: [] }
+		const deep = expect.objectContaining({ errorKey: "page_too_deep", status: 400 })
+		expect(() => buildListQuery({ ...SEALED, parsed, table: item })).toThrow(deep)
+		expect(() =>
+			buildDerivedListQuery({ ...SEALED, idColumn: item.id, parsed: { ...parsed, parsedSort: [] }, sortColumns: {} }),
+		).toThrow(deep)
+	})
+})
