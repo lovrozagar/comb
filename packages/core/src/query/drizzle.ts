@@ -9,7 +9,8 @@ import { combErrorKeys } from "../types.ts"
 
 import { createCursor, type CursorId, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
-import { assertCursorFits, bindable } from "./sqlite/cursor-fit.ts"
+import { atCursorPrecision, boundAs } from "./cursor-precision.ts"
+import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
 import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import { assertSchemaParsed } from "./trusted.ts"
@@ -101,17 +102,6 @@ function extractFilterValues<T extends Record<string, unknown>>(
 	return result
 }
 
-/**
- * A sort key as the cursor can carry it. A Postgres `timestamp` in date mode keeps microseconds
- * (precision 6 unless set) while its cursor, a JS Date, keeps milliseconds, so it is ordered and
- * compared at milliseconds and the id breaks the tie among rows of one millisecond.
- */
-function cursorPrecision(column: SQLWrapper): SQLWrapper {
-	const { columnType, precision } = column as { columnType?: unknown; precision?: unknown }
-	if (columnType !== "PgTimestamp" || (typeof precision === "number" && precision <= 3)) return column
-	return sql`date_trunc('milliseconds', ${column})`
-}
-
 /** The sort keys and tiebreak against the queried table; a sort field it lacks is a wiring mistake */
 function keysOn(table: RelationalTable, sort: readonly SortField[]): { keys: SortKey[]; tiebreak: SortKey } {
 	const column = (field: string): SQLWrapper => {
@@ -125,23 +115,6 @@ function keysOn(table: RelationalTable, sort: readonly SortField[]): { keys: Sor
 	const keys = sort.map(({ direction, field, nulls }) => ({ column: column(field), direction, nulls }))
 	return { keys, tiebreak: { column: column(CURSOR_TIEBREAK_COLUMN), direction: sort[0]?.direction ?? "desc" } }
 }
-
-/** The keys as they order and seek: each at the precision its cursor carries */
-const atCursorPrecision = (keys: readonly SortKey[]): SortKey[] =>
-	keys.map((key) => ({ ...key, column: cursorPrecision(key.column) }))
-
-/**
- * The cursor's values as the keys compare them: a value compared with a truncated key is bound
- * through its column, as a comparison with the column itself binds it (a JS Date as the driver
- * writes that column), so the expression around the column changes nothing about the value
- */
-const boundAs = (keys: readonly SortKey[], values: readonly unknown[]): unknown[] =>
-	values.map((value, i) => {
-		const column = keys[i]?.column as SQLWrapper
-		return value === null || value === undefined || cursorPrecision(column) === column
-			? value
-			: sql.param(value, column as never)
-	})
 
 /**
  * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
@@ -174,12 +147,16 @@ function drizzleListOptions(
 		const { keys, tiebreak } = keysOn(table, sort)
 		/* the cursor is client input: each value must be what its column holds, or it is a 400 */
 		assertCursorFits([...keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
-		const id = bindable(cursor.id) as CursorId
+		const id = bindableOn(tiebreak.column, cursor.id) as CursorId
+		const values = boundAs(
+			keys,
+			cursor.values.map((value, i) => bindableOn(keys[i]?.column, value)),
+		)
 		return keysetSQL({
 			id,
 			keys: atCursorPrecision(keys),
 			tiebreak,
-			values: boundAs(keys, cursor.values.map(bindable)),
+			values,
 		})
 	}
 	return { ...base, offset: 0, where: { RAW: where } }

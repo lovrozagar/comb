@@ -76,20 +76,26 @@ function sortSignature(parsedSort: readonly SortField[]): string {
 		.join(",")
 }
 
-/* Dates survive JSON as tagged epoch ms so a timestamp column compares as one, and a bigint as its decimal digits */
+/* Dates survive JSON as tagged epoch ms so a timestamp column compares as one, a bigint as its
+   decimal digits, and a number JSON has none for (±Infinity, NaN) as its name, not as null */
 const DATE_TAG = "$date"
 const BIGINT_TAG = "$bigint"
+const NUM_TAG = "$num"
+const NON_FINITE = ["Infinity", "-Infinity", "NaN"]
 
 function encodeValue(value: unknown): unknown {
 	if (value instanceof Date) return { [DATE_TAG]: value.getTime() }
+	if (typeof value === "number" && !Number.isFinite(value)) return { [NUM_TAG]: String(value) }
 	return typeof value === "bigint" ? { [BIGINT_TAG]: value.toString() } : (value ?? null)
 }
 
 const isPlain = (value: unknown): value is number | string =>
 	typeof value === "string" || (typeof value === "number" && Number.isFinite(value))
 
-/** A tagged value from the wire: a Date a JS Date can hold, or a bigint of decimal digits */
-function decodeTagged(value: Record<string, unknown>): Date | bigint | undefined {
+/** A tagged value from the wire: a Date a JS Date can hold, a bigint of decimal digits, or ±Infinity or NaN */
+function decodeTagged(value: Record<string, unknown>): Date | bigint | number | undefined {
+	const named = value[NUM_TAG]
+	if (typeof named === "string") return NON_FINITE.includes(named) ? Number(named) : undefined
 	const time = value[DATE_TAG]
 	/* a forged time a Date cannot hold reads as Invalid Date, which no driver binds */
 	if (typeof time === "number") return Number.isNaN(new Date(time).getTime()) ? undefined : new Date(time)
@@ -141,6 +147,18 @@ function createCursor(
 	options: CursorOptions & { idField?: string | undefined },
 ): string {
 	const idField = options?.idField ?? CURSOR_TIEBREAK_COLUMN
+	/* a Date no JS Date holds (Postgres 'infinity' read in date mode) has lost its sign: a cursor
+	   would mean NULL and skip or repeat rows, so the sort is refused on the page that meets it */
+	const unheld = parsedSort.find(
+		({ field }) => record[field] instanceof Date && Number.isNaN((record[field] as Date).getTime()),
+	)
+	if (unheld !== undefined) {
+		throw new CombError({
+			cause: `the sort by ${unheld.field} reads a date no JS Date holds, as Postgres 'infinity' reads in date mode; select it in string mode or sort by another column`,
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
 	return encodeCursor(
 		{ i: record[idField] as CursorId, s: sortSignature(parsedSort), v: parsedSort.map(({ field }) => record[field]) },
 		options,

@@ -95,6 +95,25 @@ describe("cursor encode/decode", () => {
 	})
 })
 
+describe("cursor values JSON has no number for (R4)", () => {
+	it("carries ±Infinity and NaN as themselves, not as null", () => {
+		const encoded = encodeCursor({ i: 1, s: "", v: [Infinity, -Infinity, Number.NaN] }, SEALED)
+		expect(decoded(encoded)?.values).toEqual([Infinity, -Infinity, Number.NaN])
+	})
+
+	it("opens no other name under the number tag", () => {
+		expect(decoded(wire({ i: 1, s: "", v: [{ $num: "infinity" }] }))).toBeNull()
+		expect(decoded(wire({ i: 1, s: "", v: [{ $num: 5 }] }))).toBeNull()
+	})
+
+	it("mints no cursor from a Date no JS Date holds, which would mean null: a 500 on that page", () => {
+		const sort: SortField[] = [{ direction: "asc", field: "at" }]
+		expect(() => createCursor({ at: new Date(Number.NaN), id: 1 }, sort, SEALED)).toThrow(
+			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
+		)
+	})
+})
+
 describe("sortSignature", () => {
 	it("spells out the effective null placement", () => {
 		expect(sortSignature([{ direction: "asc", field: "name" }])).toBe("name.asc.nullslast")

@@ -4,7 +4,8 @@
  * stale cursor, answered with a 400 before drizzle maps it (a string on a timestamp column would
  * otherwise throw a TypeError, a 500).
  */
-import { Column, is, type SQL, type SQLWrapper } from "drizzle-orm"
+import { Column, is, type SQL, type SQLWrapper, sql } from "drizzle-orm"
+import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
@@ -64,9 +65,16 @@ function fits(column: SQLWrapper, value: unknown): boolean {
 	)
 }
 
-/** A cursor value as every driver binds it: a bigint a number holds exactly, as that number (D1 binds no bigint) */
-const bindable = (value: unknown): unknown =>
-	typeof value === "bigint" && Number.isSafeInteger(Number(value)) ? Number(value) : value
+/**
+ * A cursor value as every SQLite driver binds it: a bigint a number holds exactly as that number
+ * (D1 binds no bigint), and ±Infinity as the literal SQLite reads as it (libsql binds no Infinity;
+ * SQLite stores NaN as NULL, so no SQLite row holds one)
+ */
+function bindable(value: unknown): unknown {
+	if (typeof value === "number" && Number.isFinite(value) === false && !Number.isNaN(value))
+		return value > 0 ? sql`9e999` : sql`-9e999`
+	return typeof value === "bigint" && Number.isSafeInteger(Number(value)) ? Number(value) : value
+}
 
 /** The cursor's values as the keys bind them: a Date on a key declared as time as its epoch milliseconds, a safe bigint as a number */
 const boundForKeys = (columns: readonly SQLWrapper[], values: readonly unknown[]): unknown[] =>
@@ -78,4 +86,8 @@ function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unkno
 	throw new CombError({ cause: "Invalid cursor", errorKey: combErrorKeys.INVALID_CURSOR, status: "bad_request" })
 }
 
-export { assertCursorFits, bindable, boundForKeys, DateKey }
+/** A cursor value as `column`'s driver binds it: SQLite's way on a SQLite column, as it is elsewhere (Postgres reads 'Infinity') */
+const bindableOn = (column: SQLWrapper | undefined, value: unknown): unknown =>
+	is(column, SQLiteColumn) ? bindable(value) : value
+
+export { assertCursorFits, bindable, bindableOn, boundForKeys, DateKey }
