@@ -37,8 +37,25 @@ interface Relation {
 	to: string
 }
 
-/** Map Drizzle helper to SQL type */
-function drizzleHelperToSqlType(helper: string): string {
+/* the Postgres type comb's pg columns create for each helper: epoch timestamps are bigint, json jsonb */
+// lookup-table: comb's pg helpers to the types their columns hold
+const PG_TYPES: Readonly<Record<string, string>> = {
+	blob: "BYTEA",
+	boolean: "BOOLEAN",
+	createdAt: "BIGINT",
+	deletedAt: "BIGINT",
+	int: "INTEGER",
+	integer: "INTEGER",
+	json: "JSONB",
+	real: "DOUBLE PRECISION",
+	serialId: "SERIAL",
+	timestamp: "BIGINT",
+	updatedAt: "BIGINT",
+}
+
+/** Map a Drizzle helper to its SQL type on the database's engine (F36) */
+function drizzleHelperToSqlType(helper: string, dialect: "postgres" | "sqlite"): string {
+	if (dialect === "postgres") return Object.hasOwn(PG_TYPES, helper) ? (PG_TYPES[helper] as string) : "TEXT"
 	switch (helper) {
 		case "integer":
 		case "int":
@@ -58,8 +75,37 @@ function drizzleHelperToSqlType(helper: string): string {
 	}
 }
 
+/**
+ * `tables` with each after the tables it references, so the DDL creates every table before a key
+ * names it (F36): a table whose references are all placed goes next, in name order; a cycle, which
+ * no order satisfies, keeps the rest in name order. A self-reference needs no other table.
+ */
+function inDependencyOrder(tables: Table[]): Table[] {
+	const placed: Table[] = []
+	const done = new Set<string>()
+	const waiting = [...tables]
+	while (waiting.length > 0) {
+		const ready = (table: Table) =>
+			table.columns.every(
+				(col) =>
+					col.reference === undefined ||
+					col.reference.table === table.name ||
+					done.has(col.reference.table) ||
+					!tables.some((t) => t.name === col.reference?.table),
+			)
+		const next = waiting.findIndex(ready)
+		const [table] = waiting.splice(next === -1 ? 0 : next, 1) as [Table]
+		placed.push(table)
+		done.add(table.name)
+	}
+	return placed
+}
+
 /** Transform TableMeta[] into diagram structures */
-function transformTables(metas: TableMeta[]): { relations: Relation[]; tables: Table[] } {
+function transformTables(
+	metas: TableMeta[],
+	dialect: "postgres" | "sqlite",
+): { relations: Relation[]; tables: Table[] } {
 	const tables: Table[] = []
 	const relations: Relation[] = []
 	/* a key names its target by variable and property; SQL and the JSON name it by table and column */
@@ -78,7 +124,7 @@ function transformTables(metas: TableMeta[]): { relations: Relation[]; tables: T
 				name: field.sqlName,
 				nullable: !field.isNotNull,
 				primaryKey: field.isPrimaryKey,
-				type: drizzleHelperToSqlType(field.drizzleHelper),
+				type: drizzleHelperToSqlType(field.drizzleHelper, dialect),
 			}
 
 			if (field.foreignKey) {
@@ -108,13 +154,13 @@ function transformTables(metas: TableMeta[]): { relations: Relation[]; tables: T
 	return { relations, tables }
 }
 
-function generateDDL(tables: Table[], dbName: string): string {
+function generateDDL(tables: Table[], { dbName, dialect }: { dbName: string; dialect: "postgres" | "sqlite" }): string {
 	const lines: string[] = []
-	lines.push(`-- ${dbName} Database Schema (SQLite)`)
+	lines.push(`-- ${dbName} Database Schema (${dialect === "postgres" ? "Postgres" : "SQLite"})`)
 	lines.push(`-- Tables: ${tables.length}`)
 	lines.push("")
 
-	for (const table of tables) {
+	for (const table of inDependencyOrder(tables)) {
 		lines.push(`CREATE TABLE ${sqlIdentifier(table.name)} (`)
 
 		const colDefs: string[] = []
@@ -218,10 +264,10 @@ export function generateDiagrams(ctx: GeneratorContext, config: DiagramsConfig):
 	const outputDir = path.resolve(cwd, config.output)
 	const { dbName } = ctx.analysis
 
-	const { relations, tables } = transformTables(ctx.analysis.tables)
+	const { relations, tables } = transformTables(ctx.analysis.tables, ctx.dialect)
 
 	/* Generate DDL for ChartDB */
-	const ddl = generateDDL(tables, dbName)
+	const ddl = generateDDL(tables, { dbName, dialect: ctx.dialect })
 	const ddlPath = path.join(outputDir, `${dbName}-schema.gen.sql`)
 	writeGenFile(ddlPath, ddl, { generator: "comb", staged: ctx.staged })
 

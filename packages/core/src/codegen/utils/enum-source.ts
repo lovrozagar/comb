@@ -4,6 +4,7 @@
  * from a file in the project, a machine's `.values`, and a machine passed by reference or declared
  * through `defineStateMachine`.
  */
+import { placeOf } from "./node-text.ts"
 import { type CallExpression, type Node, type ObjectLiteralExpression, SyntaxKind } from "ts-morph"
 import type { StateMachineMeta } from "../analyzer-types.ts"
 
@@ -34,11 +35,21 @@ function unwrap(node: Node): Node {
 	return current
 }
 
-/** The initializer of the const an identifier names, following an import to its source. */
+/**
+ * The initializer of the const an identifier names, following an import to its source. A let or a
+ * var may hold another value at runtime than its initializer, so it is refused, as the constant
+ * reader refuses it (F34).
+ */
 function definitionOf(node: Node): Node | undefined {
 	const symbol = node.getSymbol()
 	const target = symbol?.isAlias() ? symbol.getAliasedSymbol() : symbol
-	return target?.getDeclarations()[0]?.asKind(SyntaxKind.VariableDeclaration)?.getInitializer()
+	const declaration = target?.getDeclarations()[0]?.asKind(SyntaxKind.VariableDeclaration)
+	const kind = declaration?.getVariableStatement()?.getDeclarationKind()
+	if (kind !== undefined && kind !== "const")
+		throw new Error(
+			`${placeOf(node)}: ${node.getText()} is declared with ${kind}, not const, so comb cannot know its value; declare it const`,
+		)
+	return declaration?.getInitializer()
 }
 
 /** The expression `node` stands for, through consts and property accesses. */

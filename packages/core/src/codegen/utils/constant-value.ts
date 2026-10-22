@@ -5,7 +5,7 @@
  * and its own imports. A value it cannot read statically fails codegen, naming where it stands.
  */
 import path from "node:path"
-import { Node, type Project, type SourceFile, SyntaxKind, ts } from "ts-morph"
+import { Node, type Project, type PropertyAccessExpression, type SourceFile, SyntaxKind, ts } from "ts-morph"
 import type { ConstantValue } from "../analyzer-types.ts"
 import { placeOf } from "./node-text.ts"
 
@@ -142,6 +142,9 @@ function defaultOf(read: Read, file: SourceFile): Bound {
  * from, that module's default export, or the module itself for `import * as`
  */
 function bindingOf(read: Read, file: SourceFile, name: string): Bound {
+	/* an enum: its members are read as an object's properties (F33) */
+	const declared = file.getEnum(name)
+	if (declared !== undefined) return { file, node: declared }
 	const local = file.getVariableDeclaration(name)
 	if (local !== undefined) {
 		if (local.getVariableStatement()?.getDeclarationKind() !== "const") throw new Unreadable(`${name} is not a const`)
@@ -166,7 +169,8 @@ function bindingOf(read: Read, file: SourceFile, name: string): Bound {
 
 /** What an export of `file` named `name` stands for, through `export { … }`, re-exports and `export * as` */
 function exportOf(read: Read, file: SourceFile, name: string): Bound {
-	if (file.getVariableDeclaration(name)?.isExported()) return bindingOf(read, file, name)
+	if (file.getVariableDeclaration(name)?.isExported() || file.getEnum(name)?.isExported())
+		return bindingOf(read, file, name)
 	for (const declaration of file.getExportDeclarations()) {
 		const specifier = declaration.getModuleSpecifierValue()
 		const named = declaration
@@ -203,9 +207,29 @@ function tryExportOf(read: Read, file: SourceFile, name: string): Bound | undefi
 function objectOf(read: Read, at: Bound): Bound {
 	if ("module" in at) return at
 	const node = bare(at.node)
-	if (Node.isObjectLiteralExpression(node)) return { file: at.file, node }
+	if (Node.isObjectLiteralExpression(node) || Node.isEnumDeclaration(node)) return { file: at.file, node }
 	if (Node.isIdentifier(node)) return objectOf(deeper(read), bindingOf(deeper(read), at.file, node.getText()))
 	throw new Unreadable(`${node.getText()} is not an object literal`)
+}
+
+/* the constants of Number that are finite numbers, which a bound may name (F33) */
+// lookup-table: Number's finite constants by name
+const NUMBER_CONSTANTS: ReadonlyMap<string, number> = /* @__PURE__ */ new Map([
+	["EPSILON", Number.EPSILON],
+	["MAX_SAFE_INTEGER", Number.MAX_SAFE_INTEGER],
+	["MAX_VALUE", Number.MAX_VALUE],
+	["MIN_SAFE_INTEGER", Number.MIN_SAFE_INTEGER],
+	["MIN_VALUE", Number.MIN_VALUE],
+])
+
+/** `Number.MAX_SAFE_INTEGER` and its kind, when `access` is one and the file binds no Number of its own */
+function numberConstantOf(file: SourceFile, access: Node): number | undefined {
+	const property = access.asKind(SyntaxKind.PropertyAccessExpression)
+	if (property?.getExpression().getText() !== "Number" || file.getVariableDeclaration("Number") !== undefined)
+		return undefined
+	const value = NUMBER_CONSTANTS.get(property.getName())
+	if (value === undefined) throw new Unreadable(`${property.getText()} is not a constant comb reads`)
+	return value
 }
 
 /** The value `at` stands for, following references to a literal */
@@ -217,11 +241,20 @@ function valueOf(read: Read, at: At): ConstantValue {
 		return valueOf(deeper(read), atOf(bindingOf(deeper(read), at.file, node.getText()), node.getText()))
 	const access = node.asKind(SyntaxKind.PropertyAccessExpression)
 	if (access === undefined) throw new Unreadable(`${node.getText()} is computed, not a literal`)
+	const numberConstant = numberConstantOf(at.file, access)
+	if (numberConstant !== undefined) return numberConstant
 	const owner = objectOf(deeper(read), { file: at.file, node: access.getExpression() })
+	return valueOf(deeper(read), memberOf(read, owner, access))
+}
+
+/** The node `owner.<name>` stands for: a namespace's export, an enum member's initializer, or an object's property */
+function memberOf(read: Read, owner: Bound, access: PropertyAccessExpression): At {
 	/* `L.MAX` of a namespace: the module's export named MAX */
-	if ("module" in owner) {
-		const exported = exportOf(deeper(read), owner.module, access.getName())
-		return valueOf(deeper(read), atOf(exported, access.getText()))
+	if ("module" in owner) return atOf(exportOf(deeper(read), owner.module, access.getName()), access.getText())
+	if (owner.node.isKind(SyntaxKind.EnumDeclaration)) {
+		const initializer = owner.node.getMember(access.getName())?.getInitializer()
+		if (initializer === undefined) throw new Unreadable(`${access.getText()} has no literal initializer`)
+		return { file: owner.file, node: initializer }
 	}
 	const property = owner.node.asKindOrThrow(SyntaxKind.ObjectLiteralExpression).getProperty(access.getName())
 	/* `{ SLUG }` is `{ SLUG: SLUG }`: the name, bound in the object's file */
@@ -229,7 +262,7 @@ function valueOf(read: Read, at: At): ConstantValue {
 		property?.asKind(SyntaxKind.PropertyAssignment)?.getInitializer() ??
 		property?.asKind(SyntaxKind.ShorthandPropertyAssignment)?.getNameNode()
 	if (value === undefined) throw new Unreadable(`its object has no plain property ${access.getName()}`)
-	return valueOf(deeper(read), { file: owner.file, node: value })
+	return { file: owner.file, node: value }
 }
 
 /**

@@ -244,9 +244,11 @@ describe("generateFieldSchema: name and imageUri (F3)", () => {
 			'z.string().min(1).regex(/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" }).meta(_m.string)',
 		)
 		expect(schema("a", 'c.text("a", { imageUri: true })', "update")).toBe(
-			'z.string().regex(/^(?:https:\\/\\/|data:image\\/)/, { message: "Must be an HTTPS URL or a data:image/ URI" }).meta(_m.string).nullable().optional()',
+			'z.string().regex(/^(?:https:\\/\\/|data:image\\/)/, { message: "Must be an HTTPS URL or a data:image/ URI" }).meta({ examples: ["https://example.com/a.png"] }).nullable().optional()',
 		)
-		expect(schema("a", 'c.text("a", { imageUri: true })', "read")).toBe("z.string().meta(_m.string).nullable()")
+		expect(schema("a", 'c.text("a", { imageUri: true })', "read")).toBe(
+			'z.string().meta({ examples: ["https://example.com/a.png"] }).nullable()',
+		)
 	})
 })
 

@@ -293,3 +293,38 @@ describe("constants reached the other ways TypeScript allows (F22)", () => {
 		).toThrow(/limits\.ts exports no NOPE/)
 	})
 })
+
+describe("compile-time constants that are no const (F33)", () => {
+	it("reads Number's finite constants and an enum member with a literal initializer, local or imported", () => {
+		const values = constants(
+			{ "lim.ts": "export enum Shared { Max = 40 }\n" },
+			'import { Shared } from "./lim.ts"\nenum Lim { Max = 9, Min = -2 }',
+			'a: c.integer("a", { max: Number.MAX_SAFE_INTEGER, min: Number.MIN_SAFE_INTEGER }), b: c.integer("b", { max: Lim.Max, min: Lim.Min }), d: c.text("d", { max: Shared.Max })',
+		)
+		expect(values).toEqual({
+			a: { max: Number.MAX_SAFE_INTEGER, min: Number.MIN_SAFE_INTEGER },
+			b: { max: 9, min: -2 },
+			d: { max: 40 },
+		})
+	})
+
+	it("still fails on an enum member it cannot read, and on Number's other properties", () => {
+		expect(() => constants({}, "enum Lim { Max }", 'a: c.integer("a", { max: Lim.Max })')).toThrow(
+			/Lim\.Max has no literal initializer/,
+		)
+		expect(() => constants({}, "", 'a: c.integer("a", { max: Number.parseInt })')).toThrow(
+			/Number\.parseInt is not a constant comb reads/,
+		)
+	})
+})
+
+describe("an enum's values in a let (F34)", () => {
+	it("refuses them, as a let can hold another value at runtime than its initializer", () => {
+		const dir = dirWith({
+			"db.x.tables.ts": `${HEAD}let STATUS = ["a", "b"] as const\nSTATUS = ["a", "c"] as const\nexport const t = sqliteTable("t", { id: c.id("t"), s: c.enum("s", STATUS) })\n`,
+		})
+		expect(() => analyze(path.join(dir, "db.x.tables.ts"))).toThrow(
+			/db\.x\.tables\.ts:\d+: STATUS is declared with let, not const/,
+		)
+	})
+})

@@ -82,3 +82,16 @@ describe("generateExampleMeta: typed columns", () => {
 		expect(generateExampleMeta(parseField("p", 'c.text("p").$type<z.infer<typeof prefs>>()'))).toBeNull()
 	})
 })
+
+describe("generateExampleMeta: an email, URL or image URI its own bounds and rules accept (F31)", () => {
+	it("gives each kind its own example, and none where the column is shorter than the example", () => {
+		expect(generateExampleMeta(parseField("m", 'c.text("m", { email: true })'))?.code).toBe(".meta(_m.email)")
+		expect(generateExampleMeta(parseField("m", 'c.text("m", { email: true, max: 10 })'))).toBeNull()
+		expect(generateExampleMeta(parseField("u", 'c.text("u", { url: true, max: 12 })'))).toBeNull()
+		expect(generateExampleMeta(parseField("i", 'c.text("i", { imageUri: true })'))?.code).toBe(
+			'.meta({ examples: ["https://example.com/a.png"] })',
+		)
+		expect(generateExampleMeta(parseField("i", 'c.text("i", 20)'))?.code).toBe(".meta(_m.string)")
+		expect(generateExampleMeta(parseField("i", 'c.text("i", { imageUri: true, max: 20 })'))).toBeNull()
+	})
+})

@@ -146,3 +146,36 @@ export const e = createTable("e", {
 		)
 	})
 })
+
+describe("generateDiagrams on a Postgres database (F36)", () => {
+	it("writes Postgres DDL, each table after the tables it references, which Postgres takes as it is", () => {
+		const fp = path.join(tmpDir, "db.test.tables.ts")
+		fs.writeFileSync(
+			fp,
+			`import { pgTable } from "drizzle-orm/pg-core"
+import { c } from "@lovrozagar/comb/pg/columns"
+import * as z from "zod"
+export const meta = z.object({ a: z.string() })
+export const alpha = pgTable("alpha", { id: c.id("al"), teamId: c.ref("team_id").references(() => zteam.id), at: c.timestamp("at"), ok: c.boolean("ok"), blob: c.json("blob", meta), ratio: c.real("ratio") })
+export const zteam = pgTable("zteam", { id: c.id("tm"), parentId: c.ref("parent_id").references((): any => zteam.id) })
+`,
+		)
+		const ctx = { ...testContext(analyze(fp), { cwd: tmpDir }), dialect: "postgres" as const }
+		generateDiagrams(ctx, { output: "diagrams" })
+		const ddl = fs.readFileSync(path.join(tmpDir, "diagrams", "test-schema.gen.sql"), "utf-8")
+		expect(ddl).toContain("-- test Database Schema (Postgres)")
+		expect(ddl.indexOf('CREATE TABLE "zteam"')).toBeLessThan(ddl.indexOf('CREATE TABLE "alpha"'))
+		for (const type of ['"at" BIGINT', '"ok" BOOLEAN', '"blob" JSONB', '"ratio" DOUBLE PRECISION', '"team_id" TEXT'])
+			expect(ddl).toContain(type)
+	})
+})
+
+describe("generateDiagrams: a reference cycle", () => {
+	it("writes every table of a cycle, which no order satisfies, in name order", () => {
+		const { ddl } =
+			generate(`export const a = createTable("a", { id: text("id").primaryKey(), b_id: text("b_id").references((): any => b.id) })
+export const b = createTable("b", { id: text("id").primaryKey(), a_id: text("a_id").references((): any => a.id) })`)
+		expect(ddl.indexOf('CREATE TABLE "a"')).toBeLessThan(ddl.indexOf('CREATE TABLE "b"'))
+		expect(ddl).toContain('"b_id" TEXT REFERENCES "b"("id")')
+	})
+})
