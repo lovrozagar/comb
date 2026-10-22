@@ -64,6 +64,20 @@ export function setPackageExport(
 	subpath = exportKey(namespace, subpath)
 	delete exports[subpath]
 	exports[subpath] = `./${path.relative(path.dirname(packageJsonPath), file)}`
-	pkg["exports"] = exports
+	pkg["exports"] = orderedExports(exports)
 	writeJsonAtomic(packageJsonPath, pkg, staged)
+}
+
+/**
+ * `exports` as comb writes it: `.` first, then every subpath by key, so a run of the databases in
+ * any order writes the same bytes (F32). Node matches a subpath by its key alone, so the order a
+ * map holds them in changes nothing it resolves.
+ */
+export function orderedExports<T>(exports: Record<string, T>): Record<string, T> {
+	const keys = Object.keys(exports)
+		.filter((key) => key !== ".")
+		.sort()
+	return Object.fromEntries(
+		[...(Object.hasOwn(exports, ".") ? ["."] : []), ...keys].map((key) => [key, exports[key] as T]),
+	)
 }

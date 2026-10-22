@@ -5,6 +5,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { commitStaged, isGeneratedContent, type Staged, writeGenJsonFile } from "../codegen/utils/fs.ts"
+import { CliError } from "./output.ts"
 
 /*
  * What each database's last run wrote, in one record beside comb.config.ts (beside the tables file in
@@ -17,7 +18,13 @@ type RunRecord = { databases: Record<string, string[]> }
 
 function readRecord(recordPath: string): RunRecord {
 	if (!fs.existsSync(recordPath)) return { databases: {} }
-	return JSON.parse(fs.readFileSync(recordPath, "utf8")) as RunRecord
+	try {
+		return JSON.parse(fs.readFileSync(recordPath, "utf8")) as RunRecord
+	} catch (error) {
+		throw new CliError(
+			`${RECORD} is not JSON (a merge conflict?): delete it, and the next run removes nothing stale; ${(error as Error).message}`,
+		)
+	}
 }
 
 /* 0.9's record, one per output root and file prefix: read once, so the first run after an upgrade still removes its files */
@@ -82,6 +89,8 @@ export function commitRuns(
 		before.push(...files.map((file) => path.resolve(recordDir, file)))
 		delete record.databases[name]
 	}
+	/* by name, so the databases in any order write the same bytes (F32) */
+	record.databases = Object.fromEntries(Object.entries(record.databases).sort(([a], [b]) => a.localeCompare(b)))
 	writeGenJsonFile(recordPath, record, { generator: "comb", staged })
 	commitStaged(staged)
 	for (const file of before.filter((each) => !now.has(each))) removeStale(file, recordDir)

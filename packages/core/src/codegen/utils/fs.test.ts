@@ -3,6 +3,7 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
+	commitStaged,
 	ensureDir,
 	fileExists,
 	isGeneratedContent,
@@ -230,6 +231,26 @@ describe("the overwrite guard takes comb's own header alone (F17)", () => {
 			fs.writeFileSync(json, JSON.stringify({ _generated: "comb checksum:1" }))
 			expect(() => writeGenJsonFile(json, {}, { generator: "comb" })).not.toThrow()
 		} finally {
+			fs.rmSync(dir, { force: true, recursive: true })
+		}
+	})
+})
+
+describe("commitStaged on a write that fails (F29)", () => {
+	it("removes every temporary file it wrote, changes no output, and rethrows", () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-commit-"))
+		const locked = path.join(dir, "locked")
+		fs.mkdirSync(locked)
+		fs.chmodSync(locked, 0o500)
+		try {
+			const staged = new Map([
+				[path.join(dir, "a.gen.ts"), "a"],
+				[path.join(locked, "b.gen.ts"), "b"],
+			])
+			expect(() => commitStaged(staged)).toThrow(/EACCES/)
+			expect(fs.readdirSync(dir).sort()).toEqual(["locked"])
+		} finally {
+			fs.chmodSync(locked, 0o700)
 			fs.rmSync(dir, { force: true, recursive: true })
 		}
 	})

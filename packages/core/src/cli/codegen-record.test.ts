@@ -120,3 +120,18 @@ describe("commitRuns: what each database owns (F14, F15, F16)", () => {
 		expect(fs.existsSync(shared)).toBe(false)
 	})
 })
+
+describe("commitRuns: the record's own form (F30, F32)", () => {
+	it("records the databases by name, whatever order they ran in", () => {
+		const dir = dirWith({})
+		commitRuns(new Map(), [run(dir, { name: "core" }), run(dir, { name: "aux" })], { recordDir: dir })
+		expect(Object.keys(record(dir).databases)).toEqual(["aux", "core"])
+	})
+
+	it("says which file is not JSON, and that deleting it is safe", () => {
+		const dir = dirWith({ ".comb.codegen.json": "<<<<<<< HEAD\n{}\n" })
+		expect(() => commitRuns(new Map(), [run(dir)], { recordDir: dir })).toThrow(
+			/^\.comb\.codegen\.json is not JSON \(a merge conflict\?\): delete it, and the next run removes nothing stale; /,
+		)
+	})
+})

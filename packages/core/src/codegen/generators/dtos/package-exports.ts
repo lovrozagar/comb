@@ -2,7 +2,7 @@
 import path from "node:path"
 import { camelToKebab } from "../../utils/case.ts"
 import { readStaged, writeJsonAtomic } from "../../utils/fs.ts"
-import { exportKey, type ExportTarget, ownsKey, readExports } from "../../utils/package-json.ts"
+import { exportKey, type ExportTarget, orderedExports, ownsKey, readExports } from "../../utils/package-json.ts"
 import type { GeneratorContext } from "../context-types.ts"
 import type { DtosConfig } from "./dto-types.ts"
 
@@ -59,7 +59,7 @@ export function updatePackageJson(packageJsonPath: string, input: PackageExports
 			([key, target]) => key !== "." && !ownsKey(namespace, key, (bare) => owned(bare, target)),
 		),
 	)
-	pkg["exports"] = { ...root, ...generatedExports(path.dirname(packageJsonPath), input), ...kept }
+	pkg["exports"] = orderedExports({ ...root, ...generatedExports(path.dirname(packageJsonPath), input), ...kept })
 	writeJsonAtomic(packageJsonPath, pkg, input.ctx.staged)
 	input.ctx.log(`Updated package.json exports with ${input.entities.length} entities`)
 }

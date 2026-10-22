@@ -47,12 +47,19 @@ export function commitStaged(staged: Staged): void {
 	const changed = [...staged].filter(
 		([file, content]) => !fs.existsSync(file) || fs.readFileSync(file, "utf-8") !== content,
 	)
-	const written = changed.map(([file, content]) => {
-		ensureDir(path.dirname(file))
-		const tmpPath = tmpPathFor(file)
-		fs.writeFileSync(tmpPath, content)
-		return [tmpPath, file] as const
-	})
+	const written: Array<readonly [string, string]> = []
+	try {
+		for (const [file, content] of changed) {
+			ensureDir(path.dirname(file))
+			const tmpPath = tmpPathFor(file)
+			fs.writeFileSync(tmpPath, content)
+			written.push([tmpPath, file])
+		}
+	} catch (error) {
+		/* nothing is renamed yet: the output is as it was, and no temporary file stays behind (F29) */
+		for (const [tmpPath] of written) fs.rmSync(tmpPath, { force: true })
+		throw error
+	}
 	for (const [tmpPath, file] of written) fs.renameSync(tmpPath, file)
 }
 
