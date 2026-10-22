@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import { createCursor, MAX_CURSOR_LENGTH } from "./cursor.ts"
+import { createCursor, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
 import { createListQuerySchema } from "./list-schema.ts"
 import { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
@@ -64,8 +64,11 @@ describe("createListQuerySchema — defaults and validation", () => {
 		expect(data.page).toBe(2)
 	})
 
-	it("rejects a cursor that does not decode", () => {
-		expect(listSchema.safeParse({ cursor: "abc" }).success).toBe(false)
+	it("leaves a cursor that does not decode to readCursor, so every unusable cursor is invalid_cursor (C5)", () => {
+		expect(listSchema.safeParse({ cursor: "abc" }).success).toBe(true)
+		expect(() => readCursor("abc", [{ direction: "desc", field: "createdAt" }], SEALED)).toThrow(
+			expect.objectContaining({ errorKey: "invalid_cursor", status: 400 }),
+		)
 	})
 })
 
@@ -432,12 +435,13 @@ describe("filter length (Q-L6)", () => {
 describe("cursor and order length (S-L1)", () => {
 	const capped = createListQuerySchema({ sort: ["created_at", "title"] })
 
-	it("refuses a cursor over MAX_CURSOR_LENGTH characters and an order over 200, valid as they otherwise are", () => {
+	it("leaves a cursor over MAX_CURSOR_LENGTH to readCursor, which refuses it as invalid_cursor, and refuses an order over 200", () => {
 		const sort = [{ direction: "asc" as const, field: "title" }]
 		const long = createCursor({ id: "p1", title: "t".repeat(MAX_CURSOR_LENGTH) }, sort, SEALED)
 		const short = createCursor({ id: "p1", title: "t" }, sort, SEALED)
 		expect(capped.safeParse({ cursor: short, order: "title.asc" }).success).toBe(true)
-		expect(capped.safeParse({ cursor: long, order: "title.asc" }).success).toBe(false)
+		expect(capped.safeParse({ cursor: long, order: "title.asc" }).success).toBe(true)
+		expect(() => readCursor(long, sort, SEALED)).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
 		expect(capped.safeParse({ order: `title.asc${" ".repeat(200)}` }).success).toBe(false)
 		expect(capped.safeParse({ order: "created_at.desc.nullslast,title.asc" }).success).toBe(true)
 	})

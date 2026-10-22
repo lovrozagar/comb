@@ -8,8 +8,8 @@ import { EMPTY_OBJ } from "../empty.ts"
 import { filterParamMeta, orderParamMeta, searchParamMeta } from "./descriptions.ts"
 import { OPERATORS_BY_TYPE } from "./filter.ts"
 import { listQueryStamp } from "./list-meta.ts"
-import { checkCursor, filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
-import { LIST_QUERY_LIMITS } from "./schema-limits.ts"
+import { filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
+import { encodedMessage, LIST_QUERY_LIMITS, REQUEST_BYTES, withinBytes } from "./schema-limits.ts"
 import {
 	baseListQueryShape,
 	filterAstSchema,
@@ -79,12 +79,14 @@ function optionalShapeFor(config: AdvertisedConfig, limits: ListQueryLimits): Op
 	const filter = z
 		.string()
 		.max(limits.maxFilterLength)
+		.refine(withinBytes(REQUEST_BYTES.filter), { message: encodedMessage(REQUEST_BYTES.filter) })
 		.optional()
 		.meta(filterParamMeta(filterConfig, (type) => OPERATORS_BY_TYPE[type], limits))
 	const q = (terms: readonly string[]) =>
 		z
 			.string()
 			.max(200)
+			.refine(withinBytes(REQUEST_BYTES.q), { message: encodedMessage(REQUEST_BYTES.q) })
 			.refine((value) => value.split(/\s+/u).filter(Boolean).length <= limits.maxSearchTerms, {
 				message: `At most ${limits.maxSearchTerms} search terms`,
 			})
@@ -147,7 +149,6 @@ function createListQuerySchema<
 		const filterAst = filterAstOf(optional.filter, { fields: filterConfig, limits }, ctx)
 		const parsedSort = parsedSortOf<TSortField>(data.order, { maxSortKeys: limits.maxSortKeys, sort: sortConfig }, ctx)
 		/* cursor takes precedence over page — both accepted gracefully */
-		checkCursor(data.cursor, ctx)
 		const select = typeof optional.select === "string" ? optional.select : undefined
 		const output = {
 			cursor: data.cursor,

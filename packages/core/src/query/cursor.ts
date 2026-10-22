@@ -199,7 +199,8 @@ function openCursor(cursor: string, options: CursorOptions): DecodedCursor | nul
 
 /** Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. */
 function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor {
-	const decoded = openCursor(cursor, options)
+	/* longer than any cursor comb mints: refused before it is decoded */
+	const decoded = cursor.length > MAX_CURSOR_LENGTH ? null : openCursor(cursor, options)
 	const problem = decoded ? signatureProblem(decoded, parsedSort) : "Invalid cursor"
 	if (problem) throw new CombError({ cause: problem, errorKey: combErrorKeys.INVALID_CURSOR, status: "bad_request" })
 	return decoded as DecodedCursor

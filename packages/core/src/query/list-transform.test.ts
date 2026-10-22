@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import { createCursor } from "./cursor.ts"
 import { FILTER_LIMITS } from "./filter.ts"
-import { checkCursor, filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
-import { SEALED } from "./__fixtures__/cursor-secret.ts"
+import { filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
 
 type Issue = { message: string; path: PropertyKey[] }
 
@@ -58,19 +56,6 @@ describe("parsedSortOf", () => {
 			{ message: "Too many sort keys: 3 (max 2)", path: ["order"] },
 			{ message: "Unknown sort field: nope", path: ["order"] },
 		])
-	})
-})
-
-describe("checkCursor", () => {
-	const sort = [{ direction: "desc" as const, field: "created_at" }]
-
-	it("accepts no cursor and a sealed one, whatever sort it holds, and reports one of no sealed shape", () => {
-		const { ctx, issues } = recorder()
-		checkCursor(undefined, ctx)
-		checkCursor(createCursor({ created_at: 1, id: 1 }, sort, SEALED), ctx)
-		checkCursor(createCursor({ id: 1, title: "a" }, [{ direction: "asc", field: "title" }], SEALED), ctx)
-		checkCursor("eyJ4IjoxfQ", ctx)
-		expect(issues).toEqual([{ message: "Invalid cursor", path: ["cursor"] }])
 	})
 })
 

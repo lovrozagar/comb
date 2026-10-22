@@ -4,7 +4,6 @@
  */
 import type * as z from "zod"
 
-import { cursorProblem } from "./cursor.ts"
 import { type FilterLimits, parseOrder, validateFilter } from "./filter.ts"
 import type { FieldType, FilterAST, SortDirection, SortField } from "./types.ts"
 
@@ -55,12 +54,6 @@ function parsedSortOf<TSortField extends string>(
 	return parsedSort
 }
 
-/** An issue on `cursor` when it has no sealed cursor's shape; what it holds, readCursor opens */
-function checkCursor(cursor: string | undefined, ctx: z.RefinementCtx): void {
-	const problem = cursor ? cursorProblem(cursor) : null
-	if (problem) ctx.addIssue({ code: "custom", message: problem, path: ["cursor"] })
-}
-
 /** Each sort field's direction */
 function sortOrderByOf<TSortField extends string>(
 	parsedSort: ReadonlyArray<SortField<TSortField>>,
@@ -78,4 +71,4 @@ function reportOutputIssues(outputSchema: z.ZodType, output: unknown, ctx: z.Ref
 	}
 }
 
-export { checkCursor, filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf }
+export { filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf }

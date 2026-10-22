@@ -30,10 +30,12 @@ const langQueryField: z.ZodOptional<z.ZodString> = /* @__PURE__ */ z.string().mi
 })
 
 const baseListQueryShape: { cursor: z.ZodOptional<z.ZodString> } = {
-	/* a cursor carries its sort values, so it is as long as they are; past this it is not one comb minted for a list */
-	cursor: /* @__PURE__ */ z.string().max(MAX_CURSOR_LENGTH).optional().meta({
+	/* any string: readCursor answers every one it cannot use, past MAX_CURSOR_LENGTH included, with
+	   invalid_cursor, so a client restarts on one key (C5); the bound is published all the same */
+	cursor: /* @__PURE__ */ z.string().optional().meta({
 		description: CURSOR_DESCRIPTION,
 		examples: CURSOR_EXAMPLES,
+		maxLength: MAX_CURSOR_LENGTH,
 	}),
 }
 

@@ -54,3 +54,50 @@ describe("the page bound (Q13)", () => {
 		expect(() => createListQuerySchema({ pagination: { maxPage: 0 }, sort: ["id"] })).toThrow(TypeError)
 	})
 })
+
+describe("request caps by percent-encoded bytes, which a URL limit counts (R10)", () => {
+	const schema = createListQuerySchema({
+		fields: { scalars: ["id", "title"] },
+		filter: { title: "string" },
+		search: ["title"],
+		sort: ["id"],
+	})
+	const ok = (input: Record<string, string>) => schema.safeParse(input).success
+
+	it("takes an ASCII filter of 2048 characters and refuses a CJK one of the same length", () => {
+		expect(ok({ filter: `title.eq.${"a".repeat(2039)}` })).toBe(true)
+		/* each CJK character percent-encodes to 9 bytes: 2048 of them are 18 KB */
+		expect(ok({ filter: `title.eq.${"長".repeat(2039)}` })).toBe(false)
+	})
+
+	it("refuses a q of 200 CJK characters, past 600 encoded bytes, and takes 66 of them", () => {
+		expect(ok({ q: "長".repeat(66) })).toBe(true)
+		expect(ok({ q: "長".repeat(200) })).toBe(false)
+	})
+
+	it("refuses a value that holds a lone surrogate, which no URL can carry", () => {
+		expect(ok({ q: "a\uD800b" })).toBe(false)
+		expect(ok({ filter: "title.eq.\uDC00" })).toBe(false)
+	})
+
+	it("keeps the whole query string of the largest accepted request under 16 KB", () => {
+		const largest = {
+			cursor: "A".repeat(8192),
+			filter: `title.eq.${"%".repeat(Math.floor((5120 - 18) / 3))}`,
+			order: "id.asc",
+			q: "%".repeat(200),
+			select: "id,title",
+		}
+		expect(ok(largest)).toBe(true)
+		const query = new URLSearchParams(largest).toString()
+		expect(Buffer.byteLength(query)).toBeLessThan(15_500)
+	})
+})
+
+describe("the cursor param takes any string, which readCursor answers (C5)", () => {
+	it("passes a malformed or over-long cursor to readCursor, which refuses it as invalid_cursor", () => {
+		const schema = createListQuerySchema({ sort: ["id"] })
+		expect(schema.safeParse({ cursor: "abc" }).success).toBe(true)
+		expect(schema.safeParse({ cursor: "A".repeat(9000) }).success).toBe(true)
+	})
+})

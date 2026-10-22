@@ -724,7 +724,14 @@ declare const PAGINATION_DEFAULTS: {
     readonly maxPage: 10000;
 };
 declare const LIST_QUERY_LIMITS: ListQueryLimits;
-export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS };
+declare const REQUEST_BYTES: {
+    readonly filter: 5120;
+    readonly q: 600;
+};
+/** Whether `value` percent-encodes to at most `bytes`; a lone surrogate encodes to nothing, and no URL carries one */
+declare const withinBytes: (bytes: number) => (value: string) => boolean;
+declare const encodedMessage: (bytes: number) => string;
+export { encodedMessage, LIST_QUERY_LIMITS, PAGINATION_DEFAULTS, REQUEST_BYTES, withinBytes };
 
 // query/schema-types.d.ts
 /** The configs and outputs of the list and retrieve query schemas. Declaration-only. */

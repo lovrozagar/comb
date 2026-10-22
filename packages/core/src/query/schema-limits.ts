@@ -21,4 +21,25 @@ const LIST_QUERY_LIMITS: ListQueryLimits = {
 	maxSortKeys: 3,
 }
 
-export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS }
+/*
+ * A URL limit counts bytes once percent-encoded (Cloudflare's is 16 KB), and one CJK character is
+ * nine of them, so the free-text params are capped that way too. With the cursor's 8192 and order's
+ * 200, the largest accepted query string stays near 15 KB, which leaves room for the path.
+ */
+const REQUEST_BYTES = { filter: 5120, q: 600 } as const
+
+/** Whether `value` percent-encodes to at most `bytes`; a lone surrogate encodes to nothing, and no URL carries one */
+const withinBytes =
+	(bytes: number) =>
+	(value: string): boolean => {
+		try {
+			return encodeURIComponent(value).length <= bytes
+		} catch {
+			// reason: encodeURIComponent throws URIError on a lone surrogate; such a value is refused
+			return false
+		}
+	}
+
+const encodedMessage = (bytes: number): string => `At most ${bytes} bytes once percent-encoded`
+
+export { encodedMessage, LIST_QUERY_LIMITS, PAGINATION_DEFAULTS, REQUEST_BYTES, withinBytes }
