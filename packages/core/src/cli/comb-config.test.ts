@@ -46,13 +46,13 @@ describe("configuredFtsSql", () => {
 	it("has no FTS without a config, a database name, or fts on the database", async () => {
 		const dir = project()
 		const io = makeIo(dir)
-		expect(await configuredFtsSql(dir, "core", io)).toBeUndefined()
+		expect(await configuredFtsSql(dir, { name: "core" }, io)).toBeUndefined()
 		writeFileSync(
 			join(dir, "comb.config.ts"),
 			'export default { databases: { core: { tables: "./db.core.tables.ts", fts: {} } } }\n',
 		)
-		expect(await configuredFtsSql(dir, undefined, io)).toBeUndefined()
-		expect(await configuredFtsSql(dir, "core", io)).toBeUndefined()
+		expect(await configuredFtsSql(dir, { name: undefined }, io)).toBeUndefined()
+		expect(await configuredFtsSql(dir, { name: "core" }, io)).toBeUndefined()
 	})
 
 	it("is the FTS5 DDL the database's fts config declares", async () => {
@@ -62,7 +62,7 @@ describe("configuredFtsSql", () => {
 			join(dir, "comb.config.ts"),
 			'export default { databases: { core: { tables: "./db.core.tables.ts", fts: { post: { columns: ["title"] } } } } }\n',
 		)
-		expect(await configuredFtsSql(dir, "core", makeIo(dir))).toMatch(
+		expect(await configuredFtsSql(dir, { name: "core" }, makeIo(dir))).toMatch(
 			/CREATE VIRTUAL TABLE IF NOT EXISTS "post_fts" USING fts5/,
 		)
 	})

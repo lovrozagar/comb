@@ -21,6 +21,8 @@ type TargetRequest = {
 
 /** A database resolved for one command */
 type MigrateTarget = {
+	/** the comb.config.ts database it maps to: its own name unless it says another (C7) */
+	codegen: string
 	database: string
 	dialect: Dialect
 	drizzleConfigPath: string | undefined
@@ -77,8 +79,10 @@ async function resolveMigrateTarget(request: TargetRequest): Promise<MigrateTarg
 	const env = request.env ?? (request.mode === "diff" ? diffEnvironment(db) : undefined)
 	const resolved = resolveDatabaseConfig(db, env)
 	const dialect = dialectOf(resolved.provider.type)
-	if (dialect === "postgres") await assertNoFts(request.cwd, request.db)
+	const codegen = db.codegen ?? request.db
+	if (dialect === "postgres") await assertNoFts(request.cwd, codegen)
 	return {
+		codegen,
 		database: request.db,
 		dialect,
 		drizzleConfigPath:

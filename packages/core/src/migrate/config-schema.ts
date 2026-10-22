@@ -68,6 +68,7 @@ const environmentConfigInputSchema = () =>
 
 const databaseConfigInputSchema = () =>
 	z.object({
+		codegen: z.string().min(1).optional(),
 		drizzleConfigPath: z.string().optional(),
 		environments: z.record(z.string(), environmentConfigInputSchema()).optional(),
 		migrationsDir: z.string().min(1),

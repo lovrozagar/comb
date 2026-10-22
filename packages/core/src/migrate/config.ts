@@ -132,6 +132,7 @@ export function defineConfig(input: CombMigrateConfig): MigrationConfig {
 			}
 
 			databases[key] = {
+				codegen: dbInput.codegen,
 				drizzleConfigPath: dbInput.drizzleConfigPath,
 				environments,
 				migrationsDir: dbInput.migrationsDir,
@@ -144,6 +145,7 @@ export function defineConfig(input: CombMigrateConfig): MigrationConfig {
 			}
 
 			databases[key] = {
+				codegen: dbInput.codegen,
 				drizzleConfigPath: dbInput.drizzleConfigPath,
 				migrationsDir: dbInput.migrationsDir,
 				name: dbInput.name,

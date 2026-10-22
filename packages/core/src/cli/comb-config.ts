@@ -27,11 +27,11 @@ export async function loadCombConfig(cwd: string): Promise<CodegenConfig> {
 	throw new CliError("No comb.config.ts found. Create one or use --tables <path> for direct mode.")
 }
 
-/** The database `name` declares, or a CliError naming the ones it does */
-export function databaseIn(config: CodegenConfig, name: string): DatabaseCodegen {
+/** The database `name` declares, or a CliError naming the ones it does, and `hint` when the caller has one */
+export function databaseIn(config: CodegenConfig, name: string, hint?: string): DatabaseCodegen {
 	if (Object.hasOwn(config.databases, name)) return config.databases[name] as DatabaseCodegen
 	throw new CliError(
-		`comb.config.ts declares no database "${name}". Available: ${Object.keys(config.databases).join(", ")}`,
+		`comb.config.ts declares no database "${name}". Available: ${Object.keys(config.databases).join(", ")}${hint === undefined ? "" : `. ${hint}`}`,
 	)
 }
 
@@ -48,12 +48,12 @@ export function tablesFile(cwd: string, tables: string): string {
  */
 export async function configuredFtsSql(
 	cwd: string,
-	dbName: string | undefined,
+	{ hint, name: dbName }: { hint?: string | undefined; name: string | undefined },
 	io: CliIo,
 ): Promise<string | undefined> {
 	const config = await findCombConfig(cwd)
 	if (!config || dbName === undefined) return undefined
-	const db = databaseIn(config, dbName)
+	const db = databaseIn(config, dbName, hint)
 	if (!db.fts || Object.keys(db.fts).length === 0) return undefined
 	const resolvedTables = tablesFile(cwd, db.tables)
 	const { analyze } = await import("../codegen/analyzer.ts")

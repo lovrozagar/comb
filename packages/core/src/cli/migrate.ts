@@ -86,7 +86,7 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const { checkAtlasInstalled, exportDrizzleSchema, generateIncrementalMigration } =
 		await import("../migrate/core/atlas.ts")
 	if (!checkAtlasInstalled(io.run)) throw new CliError("Atlas not found. Install: https://atlasgo.io/getting-started")
-	const { exported, migrationsDir, pg } = await diffTarget(db, io)
+	const { codegen, exported, migrationsDir, pg } = await diffTarget(db, io)
 	const dialect = exported.dialect
 	const dryRun = args.options["dry-run"] === true
 	/* a dry run diffs a copy, since a diff writes its file and rehashes atlas.sum */
@@ -94,7 +94,7 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	try {
 		const { files, synced } = generateIncrementalMigration({
 			dialect,
-			ftsSql: pg === undefined ? await configuredFtsSql(io.cwd, db, io) : undefined,
+			ftsSql: pg === undefined ? await configuredFtsSql(io.cwd, codegen, io) : undefined,
 			migrationName: name ?? `migration_${Date.now()}`,
 			migrationsDir: dir,
 			run: io.run,
@@ -120,7 +120,15 @@ async function diffTarget(db: string | undefined, io: CliIo) {
 		run: io.run,
 		schema: pg?.schema,
 	} as const
-	return { exported, migrationsDir: target?.migrationsDir ?? path.resolve(io.cwd, "atlas-migrations"), pg }
+	/* the codegen database a migrate database maps to; a name with no mapping says how to give one (C7) */
+	const codegen = {
+		hint:
+			target === undefined || target.codegen !== target.database
+				? undefined
+				: `Set codegen: "<its comb.config.ts name>" on ${target.database} in comb.migrate.config.ts`,
+		name: target?.codegen ?? db,
+	}
+	return { codegen, exported, migrationsDir: target?.migrationsDir ?? path.resolve(io.cwd, "atlas-migrations"), pg }
 }
 
 /** Print the files a diff would write, and fail: the schema drifted from the migrations */

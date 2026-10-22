@@ -265,3 +265,44 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 		expect(envs[diffAt]?.["COMB_ATLAS_DEV_URL"]).toBe("postgres://dev:Dev-Secret-0451@localhost/dev?search_path=app")
 	})
 })
+
+/** A comb.migrate.config.ts declaring shard-0, with `codegen` written into its entry */
+const MIGRATE = (codegen: string) =>
+	`export default { databases: { "shard-0": { migrationsDir: "m", name: "shard-0", ${codegen}provider: { type: "libsql", url: "file:s0.db" } } } }\n`
+
+describe("comb migrate diff: the name apply and check take (C7)", () => {
+	it("takes a migrate name and reads FTS from the comb.config.ts database it maps to", async () => {
+		const dir = project()
+		mkdirSync(join(dir, "m"), { recursive: true })
+		writeFileSync(join(dir, "comb.migrate.config.ts"), MIGRATE('codegen: "shard", '))
+		writeFileSync(
+			join(dir, "comb.config.ts"),
+			'export default { databases: { shard: { fts: { post: { columns: ["title"] } }, tables: "./missing.tables.ts" } } }\n',
+		)
+		const io = makeIo(
+			dir,
+			fakeAtlas(() => undefined),
+		)
+		expect(await runCli(["migrate", "diff", "shard-0"], io)).toBe(1)
+		/* the FTS lookup reached shard's tables file: the mapping held */
+		expect(io.errors.join("\n")).toMatch(/missing\.tables\.ts/)
+	})
+
+	it("says how to map a migrate name comb.config.ts does not declare", async () => {
+		const dir = project()
+		mkdirSync(join(dir, "m"), { recursive: true })
+		writeFileSync(join(dir, "comb.migrate.config.ts"), MIGRATE(""))
+		writeFileSync(
+			join(dir, "comb.config.ts"),
+			'export default { databases: { shard: { tables: "./db.core.tables.ts" } } }\n',
+		)
+		const io = makeIo(
+			dir,
+			fakeAtlas(() => undefined),
+		)
+		expect(await runCli(["migrate", "diff", "shard-0"], io)).toBe(1)
+		expect(io.errors.join("\n")).toContain(
+			'comb.config.ts declares no database "shard-0". Available: shard. Set codegen: "<its comb.config.ts name>" on shard-0 in comb.migrate.config.ts',
+		)
+	})
+})
