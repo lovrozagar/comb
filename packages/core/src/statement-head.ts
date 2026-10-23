@@ -90,17 +90,31 @@ export function statementTable(query: string | undefined): string | undefined {
 	return name === undefined ? undefined : unquoted(name.match(ONE_PART)?.at(-1) as string)
 }
 
-// per-process-constant: an UPDATE up to its SET list
+// per-process-constant: an UPDATE up to its SET list, past an alias and an INDEXED BY or NOT INDEXED
 const UPDATE_SET = /* @__PURE__ */ new RegExp(
-	`^update(?:\\s+or\\s+\\w+)?\\s+${NAME}(?:\\s+(?:as\\s+)?\\w+)?\\s+set\\s+`,
+	`^update(?:\\s+or\\s+\\w+)?\\s+${NAME}(?:\\s+(?:as\\s+)?\\w+)?(?:\\s+indexed\\s+by\\s+(?:${PART})|\\s+not\\s+indexed)?\\s+set\\s+`,
 	"i",
 )
-// per-process-constant: one assignment's column, at the list's start or after a comma
-const ASSIGNED = /* @__PURE__ */ new RegExp(`(?:^|,)\\s*(${PART})\\s*=`, "g")
+// per-process-constant: the head of one assignment: a column, or a parenthesized list of them, before its `=`
+const ASSIGNED = /* @__PURE__ */ new RegExp(`^\\s*(?:\\(([^)]*)\\)|(${PART}))\\s*=`)
+
+/** The raw pieces of `list` between its top-level commas: none inside a literal, a quoted name or a group */
+function topLevelPieces(list: string): string[] {
+	const top = blanked(list)
+	const pieces: string[] = []
+	let start = 0
+	for (let i = 0; i < top.length; i++) {
+		if (top[i] !== ",") continue
+		pieces.push(list.slice(start, i))
+		start = i + 1
+	}
+	return [...pieces, list.slice(start)]
+}
 
 /**
  * The columns an UPDATE's SET list assigns, unquoted, its list read up to a top-level WHERE, FROM
- * or RETURNING; undefined when `query` is no UPDATE
+ * or RETURNING: each assignment's head, one column or a row value's list of them; undefined when
+ * `query` is no UPDATE
  */
 export function updatedColumns(query: string | undefined): string[] | undefined {
 	const head = statementHead(query ?? "")
@@ -108,5 +122,9 @@ export function updatedColumns(query: string | undefined): string[] | undefined 
 	if (set === null) return undefined
 	const list = head.slice(set[0].length)
 	const end = blanked(list).search(/\b(?:where|from|returning)\b/i)
-	return [...(end === -1 ? list : list.slice(0, end)).matchAll(ASSIGNED)].map((match) => unquoted(match[1] as string))
+	return topLevelPieces(end === -1 ? list : list.slice(0, end)).flatMap((piece) => {
+		const [, many, one] = ASSIGNED.exec(piece) ?? []
+		if (one !== undefined) return [unquoted(one)]
+		return many === undefined ? [] : (many.match(ONE_PART) ?? []).map(unquoted)
+	})
 }

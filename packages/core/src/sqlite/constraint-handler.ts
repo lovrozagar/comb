@@ -108,19 +108,23 @@ const MISSING_OR_REFERENCED = "Referenced record does not exist or is still in u
 /* SQLite's FOREIGN KEY message names neither table nor column; the statement's target table
  * does, and a table with one foreign key leaves no doubt about the column. A DELETE can only
  * fail on the other side, a row that references the deleted one, so no key of its own is blamed;
- * nor can an UPDATE whose SET list leaves that key's column alone, as one of a referenced key does (U6). */
+ * nor can an UPDATE whose SET list assigns none of the foreign key columns the table's maps list, as
+ * one of a referenced key does (U6). */
 function foreignKey(v: Violation): CombError {
 	const table = statementTable(v.read.query)
 	let column: string | undefined
+	/* every foreign key column a map lists for the table: none, one or many; undefined when no map lists it */
+	let keys: string[] | undefined
 	const entry = lookup(v.maps, table, (t) => {
-		const keys = Object.keys(t.foreignKey ?? {})
-		column = keys.length === 1 ? keys[0] : undefined
+		const listed = Object.keys(t.foreignKey ?? {})
+		keys = [...(keys ?? []), ...listed]
+		column = listed.length === 1 ? listed[0] : undefined
 		return own(t.foreignKey, column)
 	})
 	const assigned = updatedColumns(v.read.query)
 	const otherSide =
 		/^delete\b/i.test(statementHead(v.read.query ?? "")) ||
-		(assigned !== undefined && column !== undefined && !assigned.includes(column))
+		(assigned !== undefined && keys !== undefined && !assigned.some((name) => keys?.includes(name) === true))
 	if (otherSide) {
 		const fallback = {
 			cause: STILL_REFERENCED,

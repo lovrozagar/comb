@@ -62,3 +62,19 @@ describe("updatedColumns", () => {
 		expect(updatedColumns(undefined)).toBeUndefined()
 	})
 })
+
+/* the 3.2 review of U6: a row-value SET, a literal holding a comma, and an index the UPDATE names */
+describe("updatedColumns, as SQLite writes an UPDATE", () => {
+	it.each([
+		['update "m" set ("owner_id", "name") = (?, ?)', ["owner_id", "name"]],
+		['update "m" set "name" = \'x, owner_id = 1\'', ["name"]],
+		['update "m" indexed by "ix" set "name" = ?', ["name"]],
+		['update "m" not indexed set "name" = ?, (a, "b") = (select 1, 2)', ["name", "a", "b"]],
+		['update "m" as x indexed by ix set name = ?', ["name"]],
+		/* what is no assignment's head reads as no column: an expression, or an empty list */
+		['update "m" set .x = 2, "name" = ?', ["name"]],
+		['update "m" set () = ()', []],
+	])("reads %s", (query, columns) => {
+		expect(updatedColumns(query)).toEqual(columns)
+	})
+})

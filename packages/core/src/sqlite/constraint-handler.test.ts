@@ -379,3 +379,36 @@ describe("sqliteErrorHandler: an UPDATE behind a foreign key violation", () => {
 			})
 	})
 })
+
+/* the 3.2 review of U6: which columns an UPDATE sets, however its SET list is written, and every key a map lists */
+describe("sqliteErrorHandler: an UPDATE's own keys, read whole", () => {
+	it("reads a row-value SET as each of its columns (U6a)", () => {
+		expect(fk('update "store" set ("owner_id", "slug") = (?, ?)')).toMatchObject({ errorKey: "store_owner_missing" })
+	})
+
+	it("reads no column inside a literal (U6b)", () => {
+		expect(fk('update "store" set "slug" = \'x, owner_id = 1\'')).toMatchObject({
+			cause: "The record is still referenced by other records",
+		})
+	})
+
+	it("reads an UPDATE that names its index (U6c)", () => {
+		for (const query of [
+			'update "store" indexed by "store_slug" set "slug" = ?',
+			'update "store" not indexed set "slug" = ?',
+		])
+			expect(fk(query)).toMatchObject({ cause: "The record is still referenced by other records" })
+	})
+
+	it("reads an UPDATE of a table with no foreign key, or two, by every key its map lists (U6d)", () => {
+		for (const query of ['update "legacy" set "id" = ?', 'update "multi" set "name" = ?'])
+			expect(fk(query)).toMatchObject({
+				cause: "The record is still referenced by other records",
+				errorKey: "foreign_key_violation",
+			})
+		expect(fk('update "multi" set "a_id" = ?')).toMatchObject({
+			cause: "Referenced record does not exist or is still in use",
+			column: undefined,
+		})
+	})
+})
