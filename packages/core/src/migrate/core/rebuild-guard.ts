@@ -30,9 +30,9 @@ import type { ExtractedSchema } from "../types.ts"
 import type { FtsState } from "./fts-migration.ts"
 import { extractSchema } from "./schema.ts"
 import { NO_TRANSACTION, readCopy, TXMODE_NONE } from "./rebuild-copy.ts"
-import { kept, quote, type Rebuild, renumberedBy, rowidCopy } from "./rebuild-rowids.ts"
+import { kept, quote, type Rebuild, rowidCopy } from "./rebuild-rowids.ts"
 import { codeOf, nameKey, QNAME } from "./sql-code.ts"
-import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
+import { splitSqlStatements } from "./sql-scan.ts"
 
 const KEEP = "_comb_keep_"
 
@@ -158,6 +158,20 @@ function guardOf({ table, temp }: Rebuild, schema: ExtractedSchema, legacy = fal
 const ftsTriggers = (fts: FtsState | undefined): Set<string> =>
 	new Set([...(fts ?? [])].filter(([, object]) => object.kind === "trigger").map(([name]) => name))
 
+/** A trigger a guard fires as it empties and refills a table */
+type Fired = { table: string; trigger: string }
+
+/** A trigger on the rebuilt table or a table its guard empties, one `synced` names aside: the guard fires it */
+function firedBy(table: string, schema: ExtractedSchema, synced: (name: string) => boolean): Fired | undefined {
+	const tables = new Set([table, ...reached(table, schema)])
+	const trigger = schema.triggers.find((t) => tables.has(t.table) && !synced(t.name))
+	return trigger === undefined ? undefined : { table: trigger.table, trigger: trigger.name }
+}
+
+/** Why a rebuild's guard cannot keep `fired`'s table whole */
+const firesMessage = (table: string, { table: on, trigger }: Fired): string =>
+	`empties and refills ${on}, which fires its trigger ${trigger}; drop the trigger first, or change ${table} by hand`
+
 /**
  * Refuses a rebuild the guard cannot keep whole, naming what stops it: a table already using the
  * guard's prefix, a reached table whose columns the history does not show, or a trigger other
@@ -176,13 +190,8 @@ function refuseUnguardable({ table }: Rebuild, schema: ExtractedSchema, fts: Fts
 		throw new Error(`a rebuild of ${table} reaches ${unknown}, whose columns the migrations do not show`)
 	}
 	const owned = ftsTriggers(fts)
-	const tables = new Set([table, ...closure])
-	const trigger = schema.triggers.find((t) => tables.has(t.table) && !owned.has(t.name))
-	if (trigger !== undefined) {
-		throw new Error(
-			`a rebuild of ${table} empties and refills ${trigger.table}, which fires its trigger ${trigger.name}; drop the trigger first, or change ${table} by hand`,
-		)
-	}
+	const fired = firedBy(table, schema, (name) => owned.has(name))
+	if (fired !== undefined) throw new Error(`a rebuild of ${table} ${firesMessage(table, fired)}`)
 }
 
 /**
@@ -224,66 +233,4 @@ function guardRebuilds(sql: string, before: ExtractedSchema | undefined, fts?: F
 	return `${out.join(";\n")};\n`
 }
 
-/** A file with no guards: the guards a dialect without rebuilds reads */
-const noGuards = (): Guards => ({ guarded: new Set(), kept: new Map(), renumbered: new Map(), unguarded: new Map() })
-
-/** What a file's guards come to: see readGuards */
-type Guards = {
-	guarded: Set<number>
-	kept: Map<string, string[]>
-	renumbered: Map<string, string[]>
-	unguarded: Map<string, string[]>
-}
-
-/**
- * The statements of a file that are the guards comb wrote, each exactly as comb writes it (or as
- * comb 0.8 wrote it), the tables each guarded rebuild keeps the rows of, the tables each rebuild
- * leaves under new rowids, and the rebuilt tables of referenced rebuilds left unguarded, with the
- * tables their drop reaches
- */
-function readGuards(
-	statements: readonly string[],
-	codes: readonly string[],
-	before: ExtractedSchema | undefined,
-): Guards {
-	const out = noGuards()
-	const same = (at: number, expected: readonly string[]) =>
-		expected.every((stmt, k) => normalizeSql(statements[at + k] ?? "") === normalizeSql(stmt))
-	for (const rebuild of before === undefined ? [] : locateRebuilds(statements, codes)) {
-		const schema = schemaAt(statements, rebuild, before as ExtractedSchema)
-		const closure = reached(rebuild.table, schema)
-		const copy = codes[rebuild.copy] as string
-		const whole = (guard: Guard) => {
-			const start = rebuild.drop - guard.before.length
-			return (
-				start > rebuild.copy &&
-				rebuild.rename === rebuild.drop + 1 &&
-				same(start, guard.before) &&
-				same(rebuild.rename + 1, guard.after)
-			)
-		}
-		const current = guardOf(rebuild, schema)
-		if (current === undefined) {
-			out.renumbered.set(rebuild.table, renumberedBy(rebuild, schema, { closure: [], code: copy }))
-			continue
-		}
-		const guard = [current, guardOf(rebuild, schema, true) as Guard].find(whole)
-		if (guard === undefined) {
-			out.unguarded.set(rebuild.table, closure)
-			continue
-		}
-		out.kept.set(
-			rebuild.table,
-			closure.filter((t) => t !== rebuild.temp),
-		)
-		out.renumbered.set(
-			rebuild.table,
-			renumberedBy(rebuild, schema, { closure: guard === current ? closure : [], code: copy }),
-		)
-		for (let i = rebuild.drop - guard.before.length; i < rebuild.drop; i++) out.guarded.add(i)
-		for (let i = 1; i <= guard.after.length; i++) out.guarded.add(rebuild.rename + i)
-	}
-	return out
-}
-
-export { guardRebuilds, locateRebuilds, noGuards, reached, readGuards, schemaAt }
+export { firedBy, firesMessage, type Guard, guardOf, guardRebuilds, type Located, locateRebuilds, reached, schemaAt }

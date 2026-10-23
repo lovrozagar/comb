@@ -11,7 +11,7 @@
 import type { MemoryDb } from "../drivers/memory.ts"
 import type { ExtractedSchema } from "../types.ts"
 import { preview } from "./classify-file.ts"
-import { readGuards } from "./rebuild-guard.ts"
+import { readGuards } from "./guard-read.ts"
 import { extractSchema } from "./schema.ts"
 import { type Context, type Effects, MARK, walkProgram } from "./proof-walk.ts"
 import { codeOf } from "./sql-code.ts"
@@ -140,7 +140,8 @@ function tablesOf(db: MemoryDb): Map<string, Set<string>> {
  * on SQLite codes as a delete of the table's rows and of what cascades from them (the classifier
  * rates a drop, a rebuild and an FTS index's drop, and the row compare checks what they leave), and
  * each statement of comb's guard around a rebuild, exactly as comb wrote it, which empties and
- * refills what the drop reaches (rebuild-guard.ts)
+ * refills what the drop reaches (rebuild-guard.ts). Only their deletes are the classifier's: a
+ * trigger one of them fires is still the engine's finding.
  */
 function classifiedOf(statements: readonly string[], before: ExtractedSchema): Set<number> {
 	const codes = statements.map((statement) => codeOf(statement, "sqlite"))
@@ -201,6 +202,10 @@ function engineFindings(
 	const unsafe: string[] = []
 	const cautious: string[] = []
 	const shadowed = new Set<string>()
+	for (const { effects, statement } of steps.filter((step) => step.classified)) {
+		const at = preview(statement)
+		for (const trigger of effects.triggers) unsafe.push(`${at}: fires trigger ${trigger} (its WHEN is not evaluated)`)
+	}
 	for (const { effects, shadows, statement } of steps.filter((step) => !step.classified)) {
 		const at = preview(statement)
 		for (const [table, columns] of effects.assigns) {

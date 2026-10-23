@@ -8,7 +8,8 @@ import { extractSchema } from "./schema.ts"
 const BEFORE = extractSchema(`CREATE TABLE \`u\` (\`id\` integer PRIMARY KEY, \`name\` text);
 CREATE TABLE \`post\` (\`id\` integer PRIMARY KEY, \`author\` integer REFERENCES \`u\`(\`id\`) ON DELETE CASCADE, \`title\` text);
 CREATE TABLE \`tag\` (\`post\` integer NOT NULL REFERENCES \`post\`(\`id\`), \`name\` text NOT NULL, PRIMARY KEY (\`post\`, \`name\`)) WITHOUT ROWID;
-CREATE TRIGGER post_fts_ai AFTER INSERT ON post BEGIN SELECT 1; END;`)
+CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id');
+CREATE TRIGGER post_fts_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END;`)
 
 /* Atlas v1.3.0's rebuild of u */
 const REBUILD = `PRAGMA defer_foreign_keys = on;
@@ -103,6 +104,16 @@ describe("classifyMigration on a rebuild of a referenced table", () => {
 			cautiousStatements: ["DROP TABLE `u` (rebuilds u; comb keeps the rows of post, tag)"],
 			safety: "cautious",
 		})
+	})
+
+	/* M24 of the 0.13 review: a trigger a later file put on a table the guard empties fires as the guard keeps its rows */
+	it("calls comb's guard unsafe when the schema at it has a trigger on a table the guard empties", () => {
+		const later = extractSchema("CREATE TRIGGER tag_gone AFTER DELETE ON tag BEGIN SELECT 1; END;", BEFORE)
+		expect(
+			classifyMigration(guardRebuilds(REBUILD, BEFORE, FTS), { before: later, dialect: "sqlite" }).unsafeStatements,
+		).toEqual([
+			"DROP TABLE `u` (rebuilds u: its guard empties and refills tag, which fires its trigger tag_gone; drop the trigger first, or change u by hand)",
+		])
 	})
 
 	it("calls a guard edited by hand unsafe, as it no longer keeps every row", () => {

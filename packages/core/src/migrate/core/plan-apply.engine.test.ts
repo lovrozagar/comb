@@ -217,6 +217,21 @@ describe("engine ratings: comb's guarded rebuild", () => {
 		const edited = guarded.replace("DELETE FROM `tag`;", "DELETE FROM `tag` WHERE 1;")
 		expect((await rate(edited, FAMILY)).safety).toBe("unsafe")
 	})
+	/* M24 of the 0.13 review: a trigger a later file put on a table the guard empties fires as the guard keeps its rows */
+	it("calls comb's guard unsafe when the schema at it has a trigger on a table the guard empties, its FTS sync aside", async () => {
+		const guarded = guardRebuilds(REBUILD, extractSchema(FAMILY))
+		const gone = `${FAMILY}\nCREATE TABLE audit (x TEXT);\nCREATE TRIGGER tag_gone AFTER DELETE ON tag BEGIN DELETE FROM audit WHERE length(x) = 999; END;`
+		const rated = await rate(guarded, gone)
+		expect(rated.safety).toBe("unsafe")
+		expect(rated.notes).toEqual(
+			expect.arrayContaining([
+				expect.stringContaining("fires trigger tag_gone"),
+				expect.stringContaining("rebuilds u: its guard empties and refills tag, which fires its trigger tag_gone"),
+			]),
+		)
+		const synced = `${FAMILY}\nCREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id');\nCREATE TRIGGER post_fts_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END;`
+		expect(await rate(guarded, synced)).toMatchObject({ safety: "cautious" })
+	})
 })
 
 /* the SQLite verdicts the text classifier gave (classify-write.test.ts), now the engine's: what a

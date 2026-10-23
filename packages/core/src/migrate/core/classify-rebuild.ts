@@ -16,6 +16,8 @@ type RebuildContext = {
 	dialect: Dialect
 	/** how many DROPs of each rebuilt table the file has read so far: the next pairs with the next rebuild */
 	drops: Map<string, number>
+	/** rebuilt tables whose guard fires a trigger as it keeps their rows, with why */
+	fired: Map<string, string>
 	/** rebuilt tables comb guarded, with the tables whose rows the guard keeps */
 	kept: Map<string, string[]>
 	rebuilds: Rebuilds
@@ -34,6 +36,8 @@ function rebuildRefusal(name: string, rebuild: FileRebuild, ctx: RebuildContext)
 	if (ctx.txmodeNone) return { level: "unsafe", note: `rebuilds ${name}: ${NO_TRANSACTION}` }
 	if (ctx.before?.tables.get(name) === undefined)
 		return { level: "unsafe", note: `rebuilds ${name}, whose earlier columns are unknown` }
+	const fires = ctx.fired.get(name)
+	if (fires !== undefined) return { level: "unsafe", note: `rebuilds ${name}: its guard ${fires}` }
 	const reached = ctx.unguarded.get(name)
 	if (reached !== undefined) {
 		return {

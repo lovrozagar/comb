@@ -25,7 +25,7 @@ import { type Facts, historyFacts } from "./pg-history.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
 import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
-import { noGuards, readGuards } from "./rebuild-guard.ts"
+import { noGuards, readGuards } from "./guard-read.ts"
 import { codeOf, nameKey, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
@@ -167,6 +167,7 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
 		prepared,
 		drops: new Map(),
+		fired: guards.fired,
 		rebuilds,
 		reindexed,
 		kept: guards.kept,
