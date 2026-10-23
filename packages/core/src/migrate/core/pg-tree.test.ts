@@ -111,3 +111,24 @@ describe("Postgres classification from the parse tree: notes and controls", () =
 		expect(rate(sql).safety).toBe(safety)
 	})
 })
+
+/* T8 of the 2.3 review: one name key, public and unqualified alike, any other schema kept */
+describe("Postgres names, keyed as Postgres resolves them", () => {
+	beforeAll(loadPostgresParser)
+
+	it("reads public.fresh and fresh as one table", () => {
+		expect(rate("CREATE TABLE public.fresh (id int);\nUPDATE fresh SET id = 1;").safety).toBe("cautious")
+		expect(rate("CREATE TABLE fresh (id int);\nUPDATE public.fresh SET id = 1;").safety).toBe("cautious")
+	})
+
+	it("keeps a table of another schema apart from public's", () => {
+		expect(rate("CREATE SCHEMA s;\nCREATE TABLE s.users (id int, n int);\nUPDATE s.users SET n = 1;").safety).toBe(
+			"cautious",
+		)
+		/* the history's trigger is on public.logged, not on s.logged */
+		expect(
+			rate("CREATE SCHEMA s;\nCREATE TABLE s.logged (id int);\nINSERT INTO s.logged (id) VALUES (1);").safety,
+		).toBe("safe")
+		expect(rate("INSERT INTO public.logged (id) VALUES (1);").safety).toBe("unsafe")
+	})
+})

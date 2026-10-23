@@ -28,12 +28,16 @@ const unquote = (name: string): string => [...name.matchAll(PARTS)].map((match) 
 const lastPart = (name: string): string => unquote(name).split(".").at(-1) as string
 
 /**
- * The name a table, trigger or routine is matched by: its last part as `dialect` resolves it.
- * SQLite matches every identifier without regard to ASCII case, quoted or not; Postgres folds an
- * unquoted name to lower case and keeps a quoted one exact.
+ * The name a table, trigger or routine is matched by, as `dialect` resolves it. SQLite matches
+ * every identifier without regard to ASCII case, quoted or not, by its last part. Postgres folds an
+ * unquoted name to lower case and keeps a quoted one exact, and keeps a schema other than `public`:
+ * `public.users` and `users` are one table, `s.users` another.
  */
 function nameKey(name: string, dialect: Dialect): string {
-	return partKey([...name.matchAll(PARTS)].at(-1)?.[0] ?? name, dialect)
+	const parts = [...name.matchAll(PARTS)].map((match) => partKey(match[0], dialect))
+	const last = parts.at(-1) ?? partKey(name, dialect)
+	const schema = parts.at(-2)
+	return dialect === "postgres" && schema !== undefined && schema !== "public" ? `${schema}.${last}` : last
 }
 
 /** One name part as `dialect` resolves it (see nameKey) */
@@ -42,9 +46,14 @@ function partKey(part: string, dialect: Dialect): string {
 	return dialect === "sqlite" || bare === part ? bare.toLowerCase() : bare
 }
 
-/** A whole name, schema included when written, each part as `dialect` resolves it: `Public."Post"` is `public.Post` */
+/**
+ * A whole name as `dialect` resolves it, each part folded: on SQLite with the schema it was written
+ * with (`main."Post"` is `main.post`), on Postgres as nameKey keys it (`Public."Post"` is `Post`)
+ */
 const qualifiedKey = (name: string, dialect: Dialect): string =>
-	[...name.matchAll(PARTS)].map((match) => partKey(match[0], dialect)).join(".")
+	dialect === "postgres"
+		? nameKey(name, dialect)
+		: [...name.matchAll(PARTS)].map((match) => partKey(match[0], dialect)).join(".")
 
 /** A dollar-quoted body without its tags */
 function bodyText(text: string): string {

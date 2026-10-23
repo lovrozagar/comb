@@ -45,7 +45,8 @@ const names = (list: unknown): string[] => (list as Array<{ String: { sval: stri
 function tableOf(relation: unknown): { key: string; name: string; temp: boolean } {
 	const rel = relation as { relname: string; relpersistence: string; schemaname?: string }
 	const name = rel.relname
-	const key = rel.schemaname === undefined ? name : `${rel.schemaname}.${name}`
+	/* keyed as nameKey keys a Postgres name: public and unqualified alike, any other schema kept */
+	const key = rel.schemaname === undefined || rel.schemaname === "public" ? name : `${rel.schemaname}.${name}`
 	return { key, name, temp: rel.relpersistence === "t" || rel.schemaname === "pg_temp" }
 }
 
@@ -82,11 +83,11 @@ function writeFindings(
 ): Finding[] {
 	const table = tableOf(node["relation"])
 	if (type === "DeleteStmt")
-		return [{ level: "unsafe", note: `deletes rows of ${table.name}` }, ...firedOn(ctx.before, table.name, ["delete"])]
+		return [{ level: "unsafe", note: `deletes rows of ${table.name}` }, ...firedOn(ctx.before, table.key, ["delete"])]
 	if (type === "UpdateStmt")
 		return [
 			updateFinding(table, assigned(node["targetList"]), ctx.fresh),
-			...firedOn(ctx.before, table.name, ["update"]),
+			...firedOn(ctx.before, table.key, ["update"]),
 		]
 	if (type === "MergeStmt") {
 		const commands = (node["mergeWhenClauses"] as Array<{ MergeWhenClause: { commandType: string } }>).map(
@@ -98,16 +99,16 @@ function writeFindings(
 			changes
 				? { level: "unsafe", note: `merges into ${table.name}, updating or deleting its rows` }
 				: { level: "cautious", note: `merges new rows into ${table.name}` },
-			...firedOn(ctx.before, table.name, events),
+			...firedOn(ctx.before, table.key, events),
 		]
 	}
 	const conflict = node["onConflictClause"] as Node | undefined
 	if (conflict?.["action"] === "ONCONFLICT_UPDATE")
 		return [
 			updateFinding(table, assigned(conflict["targetList"]), ctx.fresh),
-			...firedOn(ctx.before, table.name, ["insert", "update"]),
+			...firedOn(ctx.before, table.key, ["insert", "update"]),
 		]
-	return firedOn(ctx.before, table.name, ["insert"])
+	return firedOn(ctx.before, table.key, ["insert"])
 }
 
 /** A node that runs code comb does not read, or shadows a table: its finding */
