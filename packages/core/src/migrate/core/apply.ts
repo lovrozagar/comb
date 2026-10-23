@@ -55,7 +55,13 @@ export async function ensureMigrationsTable(
 			: "coalesce((SELECT seq FROM sqlite_sequence WHERE name = '__drizzle_migrations'), 0)"
 	const counter = await conn.execute(`SELECT max(${counted}, coalesce((SELECT max(id) FROM __drizzle_migrations), 0))`)
 	const seq = Number(counter.rows[0]?.[0])
-	await conn.batch([
+	/* a view or trigger over the history would fail the rename: it goes before the rebuild and comes back after (M42) */
+	const over = await conn.execute(
+		"SELECT type, name, sql FROM sqlite_master WHERE type IN ('view', 'trigger') AND instr(lower(sql), '__drizzle_migrations') > 0 ORDER BY rowid",
+	)
+	const dependents = over.rows.map((row) => ({ name: String(row[1]), sql: String(row[2]), type: String(row[0]) }))
+	const statements = [
+		...dependents.map(({ name, type }) => ({ sql: `DROP ${type.toUpperCase()} "${name.replaceAll('"', '""')}"` })),
 		{ sql: `CREATE TABLE __drizzle_migrations_next ${TABLE}` },
 		{
 			sql: "INSERT INTO __drizzle_migrations_next (id, hash, created_at, name) SELECT id, hash, created_at, name FROM __drizzle_migrations",
@@ -68,7 +74,22 @@ export async function ensureMigrationsTable(
 		{ sql: "ALTER TABLE __drizzle_migrations_next RENAME TO __drizzle_migrations" },
 		{ sql: "DELETE FROM sqlite_sequence WHERE name = '__drizzle_migrations'" },
 		{ params: [seq], sql: "INSERT INTO sqlite_sequence (name, seq) VALUES ('__drizzle_migrations', ?)" },
-	])
+		...dependents.map(({ sql }) => ({ sql })),
+		/* SQLite resolves a view's columns only when it is read: each is read once, so one that no longer resolves rolls back */
+		...dependents
+			.filter(({ type }) => type === "view")
+			.map(({ name }) => ({ sql: `SELECT * FROM "${name.replaceAll('"', '""')}" LIMIT 0` })),
+	]
+	try {
+		await conn.batch(statements)
+	} catch (error) {
+		if (dependents.length === 0) throw error
+		const objects = dependents.map(({ name, type }) => `${type} ${name}`).join(", ")
+		throw new Error(
+			`comb could not rebuild __drizzle_migrations for 0.13 with the ${objects} over it, and changed nothing: ${(error as Error).message}`,
+			{ cause: error },
+		)
+	}
 }
 
 /**

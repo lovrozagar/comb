@@ -20,6 +20,15 @@ describe("ensureMigrationsTable", () => {
 		await ensureMigrationsTable(conn)
 		expect(conn.execute).toHaveBeenCalledWith(expect.stringContaining("CREATE TABLE IF NOT EXISTS"))
 	})
+
+	it("passes a 0.12 history's failed rebuild on as it came when nothing over the history was moved", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple(
+			"CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, name TEXT);",
+		)
+		const failing: Connection = { ...conn, batch: () => Promise.reject(new Error("disk full")) }
+		await expect(ensureMigrationsTable(failing)).rejects.toThrow(/^disk full$/)
+	})
 })
 
 describe("checkMigrationHash", () => {

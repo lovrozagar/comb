@@ -290,3 +290,40 @@ describe("migrate apply --file in a subdirectory of the migrations directory (M3
 		expect(await rows(url, "SELECT name FROM sqlite_master WHERE name = '__drizzle_migrations'")).toEqual([])
 	})
 })
+
+/* M42 of the 0.13 review: a view or trigger over the history moves through the rebuild with it */
+describe("comb's SQLite history from 0.12 with a view and a trigger over it, rebuilt (M42)", () => {
+	it("applies, and keeps the view and the trigger working on the rebuilt history", async () => {
+		const { dir, url, write } = configured({ "1_a.sql": A })
+		await history012(url, {
+			recorded: [[1, A, "1_a.sql"]],
+			setup: `${A}\nCREATE TABLE seen (name TEXT);`,
+		})
+		const client = createClient({ url })
+		await client.executeMultiple(
+			"CREATE VIEW last_migration AS SELECT name FROM __drizzle_migrations ORDER BY id DESC LIMIT 1;\nCREATE TRIGGER noted AFTER INSERT ON __drizzle_migrations BEGIN INSERT INTO seen VALUES (new.name); END;",
+		)
+		client.close()
+		write({ "2_b.sql": B })
+		const apply = makeIo(dir, fakeAtlas())
+		expect(await runCli(["migrate", "apply", "core"], apply), apply.errors.join("\n")).toBe(0)
+		expect(await rows(url, "SELECT name FROM last_migration")).toEqual([["2_b.sql"]])
+		expect(await rows(url, "SELECT name FROM seen")).toEqual([["2_b.sql"]])
+	})
+
+	it("refuses, naming the view, and changes nothing, when a view over the history cannot come back", async () => {
+		const { dir, url, write } = configured({ "1_a.sql": A })
+		const client = createClient({ url })
+		await client.executeMultiple(
+			`${A}\nCREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, name TEXT, note TEXT);\nINSERT INTO __drizzle_migrations VALUES (1, '${migrationHashes(A)[0] as string}', 1, '1_a.sql', 'kept');\nCREATE VIEW notes AS SELECT note FROM __drizzle_migrations;`,
+		)
+		client.close()
+		write({ "2_b.sql": B })
+		const apply = makeIo(dir, fakeAtlas())
+		expect(await runCli(["migrate", "apply", "core"], apply)).toBe(1)
+		expect(apply.errors.join("\n")).toMatch(
+			/could not rebuild __drizzle_migrations for 0\.13 with the view notes over it, and changed nothing/,
+		)
+		expect(await rows(url, "SELECT note FROM notes")).toEqual([["kept"]])
+	})
+})
