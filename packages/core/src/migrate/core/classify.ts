@@ -22,6 +22,7 @@ import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
 import { type Facts, historyFacts } from "./pg-history.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
+import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
 import { noGuards, readGuards } from "./rebuild-guard.ts"
 import { codeOf, nameKey, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
@@ -43,6 +44,8 @@ type FileContext = RebuildContext & {
 	facts: Facts
 	/** the functions the history and the file so far define, keyed as nameKey keys them (pg-tree.ts) */
 	functions: Set<string>
+	/** the schema the history and the file so far leave, statement by statement */
+	schema: ExtractedSchema
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
 	reindexed: Set<string>
 	/** the statements the file prepares, by name, with the code each runs */
@@ -158,6 +161,7 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		dialect,
 		facts: historyFacts(dialect === "postgres" ? before : undefined),
 		functions: new Set(before?.functions ?? []),
+		schema: before ?? extractSchema("", undefined, dialect),
 		fresh: freshStart(before, dialect),
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
 		prepared,
@@ -181,6 +185,7 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 						: pgTreeFindings(stmt, ctx)),
 				]
 		followAdds(codes[i] as string, ctx.fresh)
+		if (dialect === "sqlite") ctx.schema = extractSchema(stmt, ctx.schema)
 		return { code: codes[i] as string, dialect, findings, stmt }
 	})
 }

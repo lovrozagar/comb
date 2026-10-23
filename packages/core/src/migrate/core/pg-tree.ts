@@ -54,8 +54,8 @@ function updateFinding(table: { key: string; name: string }, columns: string[], 
 		fresh.tables.has(table.key) || (columns.length > 0 && columns.every((column) => added?.has(column) === true))
 	for (const column of columns) added?.delete(column)
 	return backfill
-		? { level: "cautious", note: `backfills ${table.name} (${columns.join(", ")}), new in this file` }
-		: { level: "unsafe", note: `updates existing rows of ${table.name} (${columns.join(", ")})` }
+		? { level: "cautious", note: `backfills ${table.key} (${columns.join(", ")}), new in this file` }
+		: { level: "unsafe", note: `updates existing rows of ${table.key} (${columns.join(", ")})` }
 }
 
 /** A write node's findings: its own rating, and what it runs on every table it reaches */
@@ -64,7 +64,7 @@ function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
 	/* a write without ONLY reaches the table's partitions and inheritance children */
 	const target = { inh: (node["relation"] as { inh?: boolean }).inh === true, key: table.key }
 	if (type === "DeleteStmt")
-		return [{ level: "unsafe", note: `deletes rows of ${table.name}` }, ...reachFindings(target, ["delete"], ctx)]
+		return [{ level: "unsafe", note: `deletes rows of ${table.key}` }, ...reachFindings(target, ["delete"], ctx)]
 	if (type === "UpdateStmt")
 		return [updateFinding(table, assigned(node["targetList"]), ctx.fresh), ...reachFindings(target, ["update"], ctx)]
 	if (type === "MergeStmt") {
@@ -75,8 +75,8 @@ function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
 		const events = commands.map((command) => command.replace("CMD_", "").toLowerCase())
 		return [
 			changes
-				? { level: "unsafe", note: `merges into ${table.name}, updating or deleting its rows` }
-				: { level: "cautious", note: `merges new rows into ${table.name}` },
+				? { level: "unsafe", note: `merges into ${table.key}, updating or deleting its rows` }
+				: { level: "cautious", note: `merges new rows into ${table.key}` },
 			...reachFindings(target, events, ctx),
 		]
 	}

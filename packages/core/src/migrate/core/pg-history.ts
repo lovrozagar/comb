@@ -2,7 +2,8 @@
  * What the Postgres history attached to its tables, read from the parse tree of each statement
  * (pg-tree.ts walks a file against it): each table's parents, by partition or inheritance, and the
  * code a write to a table runs besides its triggers. That code is a function a DEFAULT, a CHECK,
- * a generated column or a column's domain calls, a rule on the table, or an implicit or assignment
+ * a generated column, an index's expression or predicate, or a column's domain calls, a rule on
+ * the table, or an implicit or assignment
  * cast to one of its columns' types; a table made LIKE another takes the other's. The functions
  * behind a migration's operators and casts are kept too, so a use of one is read as a call.
  */
@@ -162,7 +163,12 @@ function followTree(stmts: unknown, facts: Facts, defined: ReadonlySet<string>):
 	for (const [type, node] of nodesOf(stmts)) {
 		if (type === "CreateStmt") followCreate(node, reader)
 		else if (type === "AlterTableStmt") followAlter(node, reader)
-		else if (type === "RuleStmt") {
+		else if (type === "IndexStmt") {
+			/* an index's expressions and a partial index's predicate run on every write to its table */
+			const table = tableOf(node["relation"]).key
+			const runs = callIn([node["indexParams"], node["whereClause"]], defined)
+			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
+		} else if (type === "RuleStmt") {
 			const table = tableOf(node["relation"]).key
 			if (!facts.code.has(table)) facts.code.set(table, `rule ${String(node["rulename"])}`)
 		} else followDefinition(type, node, reader)

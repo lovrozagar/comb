@@ -3,13 +3,15 @@
  * proof run reads what each statement writes from SQLite itself (proof-engine.ts); the classifier
  * reads only text, so it clears just what text can show: any write to a table the file created,
  * a backfill of only the columns the file added (cautious, once), and an insert no history trigger
- * watches that replaces nothing. Every other write, and any it cannot read, is unsafe, pending the
+ * watches that replaces nothing. A table whose definition replaces on conflict (`ON CONFLICT
+ * REPLACE`, in the history or made in the file) is never cleared: a plain insert into it deletes
+ * the row it meets. Every other write, and any it cannot read, is unsafe, pending the
  * proof run's read: planApply's proof replaces those entries with the engine's own findings.
  */
 import type { ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
-import { IDENT, lastPart, QNAME, qualifiedKey, splitTopLevel, topLevel } from "./sql-code.ts"
+import { IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel, topLevel } from "./sql-code.ts"
 
 /** A finding the proof run's engine findings replace */
 type Pending = Finding & { pending: true }
@@ -65,15 +67,29 @@ function insertFinding(
 	return watched ? [PENDING] : []
 }
 
+/**
+ * What the table alone settles: any write to a table that replaces on conflict is held for the
+ * engine, and any other write to a table the file created is cleared; undefined when neither
+ */
+function byTable(table: string, ctx: { fresh: Fresh; schema: ExtractedSchema }): Finding[] | undefined {
+	const conflicts = ctx.schema.tableInfo.get(nameKey(table, "sqlite"))?.conflicts ?? []
+	if (conflicts.some((conflict) => conflict.endsWith(": REPLACE"))) return [PENDING]
+	return ctx.fresh.tables.has(qualifiedKey(table, "sqlite")) ? [] : undefined
+}
+
 /** What the classifier makes of `code` when it is a SQLite write; nothing when it is none */
-function sqliteWriteFindings(code: string, ctx: { before?: ExtractedSchema | undefined; fresh: Fresh }): Finding[] {
+function sqliteWriteFindings(
+	code: string,
+	ctx: { before?: ExtractedSchema | undefined; fresh: Fresh; schema: ExtractedSchema },
+): Finding[] {
 	const bare = topLevel(code)
 	const verb = VERB.exec(bare)?.[1]?.toUpperCase()
 	if (verb === undefined) return []
 	const named = (verb === "DELETE" ? DELETE : verb === "UPDATE" ? UPDATE : INSERT).exec(bare)
 	if (named === null) return [PENDING]
 	const table = named[verb === "DELETE" ? 1 : 2] as string
-	if (ctx.fresh.tables.has(qualifiedKey(table, "sqlite"))) return []
+	const settled = byTable(table, ctx)
+	if (settled !== undefined) return settled
 	if (verb === "DELETE") return [PENDING]
 	if (verb !== "UPDATE") return insertFinding(verb, [code, bare], ctx)
 	if (named[1]?.toUpperCase() === "REPLACE") return [PENDING]

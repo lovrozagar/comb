@@ -57,3 +57,20 @@ describe("classifyMigration on a SQLite write, without the proof run", () => {
 		).toBe("unsafe")
 	})
 })
+
+/* T12 of the 2.3 re-probe: ON CONFLICT REPLACE in a table's definition makes a plain insert delete the row it meets */
+describe("classifyMigration on a SQLite insert into a table that replaces on conflict", () => {
+	const REPLACING = extractSchema(
+		"CREATE TABLE a (id INTEGER PRIMARY KEY ON CONFLICT REPLACE, x TEXT);\nCREATE TABLE b (id INTEGER PRIMARY KEY, v TEXT UNIQUE ON CONFLICT REPLACE);\nCREATE TABLE c (id INTEGER PRIMARY KEY, v TEXT, UNIQUE (v) ON CONFLICT REPLACE);",
+	)
+	it.each([
+		"INSERT INTO a VALUES (1, 'x');",
+		"INSERT INTO b (v) VALUES ('x');",
+		"INSERT INTO c (v) VALUES ('x');",
+		"CREATE TABLE d (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);\nINSERT INTO d VALUES (1);",
+	])("holds %j for the engine", (sql) => {
+		const rated = classifyMigration(sql, { before: REPLACING, dialect: "sqlite" })
+		expect(rated.safety).toBe("unsafe")
+		expect(rated.pendingStatements).toHaveLength(1)
+	})
+})

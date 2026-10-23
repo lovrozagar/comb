@@ -274,3 +274,36 @@ describe("Postgres writes that run the code the history attached (T6)", () => {
 		expect(rated.unsafeStatements.join("\n")).toContain(note)
 	})
 })
+
+/* T11 and the T8 nit of the 2.3 re-probe */
+describe("Postgres writes to a table whose index runs a function, and notes by key", () => {
+	beforeAll(loadPostgresParser)
+	const INDEXED = extractSchema(
+		"CREATE TABLE u2 (id int, v text);\nCREATE INDEX u2e ON u2 (g(v));\nCREATE TABLE u3 (id int);\nCREATE INDEX u3p ON u3 (id) WHERE h() > 0;\nCREATE TABLE u4 (id int);",
+		undefined,
+		"postgres",
+	)
+	const indexed = (sql: string) => classifyMigration(sql, { before: INDEXED, dialect: "postgres" })
+
+	it.each([
+		["an index expression", "INSERT INTO u2 VALUES (1, 'x');", "runs g on every write to u2"],
+		["a partial index's predicate", "INSERT INTO u3 VALUES (1);", "runs h on every write to u3"],
+		[
+			"an index the file makes",
+			"CREATE INDEX u4e ON u4 (k(id));\nINSERT INTO u4 VALUES (1);",
+			"runs k on every write to u4",
+		],
+	])("rates a write through %s that calls a function unsafe (T11)", (_label, sql, note) => {
+		const rated = indexed(sql)
+		expect(rated.safety).toBe("unsafe")
+		expect(rated.unsafeStatements.join("\n")).toContain(note)
+	})
+
+	it("names a table of another schema by its key", () => {
+		expect(
+			rate(
+				"CREATE SCHEMA s;\nCREATE TABLE s.users (id int, n int);\nUPDATE s.users SET n = 1;",
+			).cautiousStatements.join("\n"),
+		).toContain("backfills s.users (n)")
+	})
+})
