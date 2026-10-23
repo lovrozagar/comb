@@ -230,8 +230,10 @@ describe("revisionsSchema", () => {
 		expect(revisionsSchema(target({ schema: "tenant_a" }))).toBe("atlas_schema_revisions_tenant_a")
 	})
 
-	it("follows a search_path the URL names over the configured schema, as Atlas's scope does", () => {
-		expect(revisionsSchema(target({ url: `${base}?search_path=tenant_b` }))).toBe("atlas_schema_revisions_tenant_b")
+	it("takes the configured schema, which a search_path in the url must name (M39)", () => {
+		expect(revisionsSchema(target({ schema: "tenant_b", url: `${base}?search_path=tenant_b` }))).toBe(
+			"atlas_schema_revisions_tenant_b",
+		)
 	})
 
 	it("names a scope Postgres would cut or fold by its hash, so two never meet", () => {
@@ -247,5 +249,30 @@ describe("revisionsSchema", () => {
 				'revisions_schema = "atlas_schema_revisions_tenant_a"',
 			)
 		})
+	})
+})
+
+/* M39 of the 0.13 review: comb migrates one schema, so the URL's own search_path must be that one */
+describe("pgUrlProblems: a search_path in the url", () => {
+	const base = "postgres://app@db.example.com/app"
+	it.each([
+		[
+			"public,extensions",
+			"public",
+			"the url's search_path names more than one schema (public,extensions); comb migrates one: set schema to it, and drop search_path from the url",
+		],
+		[
+			"tenant_b",
+			"tenant_a",
+			"the url's search_path names tenant_b, but schema is tenant_a; comb migrates one: set schema to it, and drop search_path from the url",
+		],
+	])("refuses search_path=%s with schema %s, naming both", (path, schema, error) => {
+		expect(pgUrlProblems(target({ schema, url: `${base}?search_path=${encodeURIComponent(path)}` })).errors).toEqual([
+			error,
+		])
+	})
+
+	it("takes a search_path that names the configured schema", () => {
+		expect(pgUrlProblems(target({ schema: "tenant_a", url: `${base}?search_path=tenant_a` })).errors).toEqual([])
 	})
 })

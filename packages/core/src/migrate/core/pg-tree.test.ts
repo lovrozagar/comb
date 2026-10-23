@@ -307,3 +307,32 @@ describe("Postgres writes to a table whose index runs a function, and notes by k
 		).toContain("backfills s.users (n)")
 	})
 })
+
+/* M40 and M41 of the 0.13 review: what an ALTER TABLE turns off, read from the parse tree */
+describe("Postgres ALTER TABLE actions that drop integrity or durability", () => {
+	it.each([
+		[
+			"ALTER TABLE users DISABLE TRIGGER ALL;",
+			"disables every trigger on users, the ones that enforce its foreign keys among them",
+		],
+		[
+			"ALTER TABLE users SET UNLOGGED;",
+			"makes users unlogged: an unlogged table is emptied after a crash and not replicated",
+		],
+	])("rates %s unsafe", (sql, note) => {
+		expect(rate(sql).safety).toBe("unsafe")
+		expect(notes(sql)).toContain(note)
+	})
+
+	it.each([
+		"ALTER TABLE users DISABLE TRIGGER USER;",
+		"ALTER TABLE users DISABLE TRIGGER logged_audit;",
+		"ALTER TABLE users SET LOGGED;",
+	])("leaves %s cautious", (sql) => {
+		expect(rate(sql).safety).toBe("cautious")
+	})
+
+	it("leaves a new unlogged table as any new table", () => {
+		expect(rate("CREATE UNLOGGED TABLE scratch (id int);").safety).toBe(rate("CREATE TABLE scratch (id int);").safety)
+	})
+})

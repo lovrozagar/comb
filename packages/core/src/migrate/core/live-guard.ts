@@ -10,11 +10,11 @@ import type { Pending } from "./plan-apply.ts"
 import type { ExtractedSchema } from "../types.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { locateRebuilds, reached, schemaAt } from "./rebuild-guard.ts"
-import { codeOf } from "./sql-code.ts"
+import { asciiFold, codeOf } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 /* SQLite matches a table or trigger name without regard to case, and the catalog keeps each as written */
-const folded = (name: unknown): string => String(name).toLowerCase()
+const folded = (name: unknown): string => asciiFold(String(name))
 const pairs = (rows: unknown[][]): Array<[string, string]> => rows.map((row) => [folded(row[0]), folded(row[1])])
 
 /**

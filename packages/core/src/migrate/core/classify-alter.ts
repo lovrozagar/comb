@@ -4,7 +4,7 @@
  * column and `ALTER COLUMN a DROP NOT NULL` adds no constraint.
  */
 import type { Dialect } from "../types.ts"
-import { IDENT, lastPart, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
+import { IDENT, nameKey, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 
 /** What one statement or action makes of the migration: its level, the drops it names, and why */
 type Finding = {
@@ -43,9 +43,9 @@ const ADD_SCANNING_CONSTRAINT = /* @__PURE__ */ new RegExp(
 )
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const RENAME_TO = /* @__PURE__ */ new RegExp(`^RENAME TO (${QNAME})$`, "i")
-/* enabling or forcing row level security hides every row no policy grants the deployed code */
+/* enabling or forcing row level security hides every row no policy grants the deployed code; SET LOGGED rewrites the table (pg-tree.ts rates DISABLE TRIGGER ALL and SET UNLOGGED unsafe) */
 const CAUTIOUS_ACTION =
-	/^(?:DROP CONSTRAINT|RENAME CONSTRAINT|DISABLE (?:ROW LEVEL SECURITY|TRIGGER)|(?:ENABLE|NO FORCE|FORCE) ROW LEVEL SECURITY|SET UNLOGGED|DETACH PARTITION|OWNER TO)\b/i
+	/^(?:DROP CONSTRAINT|RENAME CONSTRAINT|DISABLE (?:ROW LEVEL SECURITY|TRIGGER)|(?:ENABLE|NO FORCE|FORCE) ROW LEVEL SECURITY|SET (?:UN)?LOGGED|DETACH PARTITION|OWNER TO)\b/i
 /* a default these compute per row rewrites the whole table when the column is added */
 const VOLATILE_DEFAULT =
 	/\bDEFAULT\b.*\b(?:clock_timestamp|random|gen_random_uuid|uuid_generate_v1|uuid_generate_v1mc|uuid_generate_v4|timeofday|nextval)\s*\(/i
@@ -71,8 +71,10 @@ function addColumn(definition: string, pg: boolean): Finding[] {
 
 /** A RENAME TO: unsafe, unless it ends a SQLite rebuild by moving the copy into the table's name */
 function renameTable(table: string, target: string, ctx: AlterContext): Finding[] {
-	const rebuilt = ctx.rebuilds.get(lastPart(target)) ?? []
-	return rebuilt.some((rebuild) => rebuild.temp === lastPart(table)) ? [] : [{ level: "unsafe" }]
+	/* rebuilds are keyed folded, as SQLite resolves the names: `new_Parent` closes the rebuild of `Parent` */
+	const rebuilt = ctx.rebuilds.get(nameKey(target, "sqlite")) ?? []
+	const temp = nameKey(table, "sqlite")
+	return rebuilt.some((rebuild) => nameKey(rebuild.temp, "sqlite") === temp) ? [] : [{ level: "unsafe" }]
 }
 
 /** Every other ALTER TABLE action comb reads; an action not listed is unsafe */

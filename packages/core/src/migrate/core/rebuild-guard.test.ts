@@ -264,3 +264,15 @@ describe("a rebuild in a file that opts out of its transaction", () => {
 		).toBe("cautious")
 	})
 })
+
+/* M38 of the 0.13 review: a rebuild of a mixed-case table closes with its RENAME as any other */
+describe("classifyMigration on comb's guarded rebuild of a mixed-case table", () => {
+	it("calls it cautious, as for a lower-case name", () => {
+		const before = extractSchema(
+			"CREATE TABLE `Parent` (`id` integer PRIMARY KEY, `name` text);\nCREATE TABLE `child` (`id` integer PRIMARY KEY, `p` integer REFERENCES `Parent`(`id`));",
+		)
+		const parent =
+			"CREATE TABLE `new_Parent` (`id` integer NOT NULL, `name` text NOT NULL DEFAULT '', PRIMARY KEY (`id`));\nINSERT INTO `new_Parent` (`id`, `name`) SELECT `id`, IFNULL(`name`, '') AS `name` FROM `Parent`;\nDROP TABLE `Parent`;\nALTER TABLE `new_Parent` RENAME TO `Parent`;\n"
+		expect(classifyMigration(guardRebuilds(parent, before), { before, dialect: "sqlite" }).safety).toBe("cautious")
+	})
+})

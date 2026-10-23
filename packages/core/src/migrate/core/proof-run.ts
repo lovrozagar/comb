@@ -19,6 +19,7 @@ import { notEngineTables } from "./engine-tables.ts"
 import { compare, type Shape } from "./proof-compare.ts"
 import { applyToCopy, engineFindings } from "./proof-engine.ts"
 import { quote, seedTables } from "./proof-seed.ts"
+import { asciiFold } from "./sql-code.ts"
 
 /** What the proof run found for one file */
 type Proof = {
@@ -68,10 +69,10 @@ function creatable(objects: readonly LiveObject[]): LiveObject[] {
 		objects.filter(isVirtual).flatMap((object) => {
 			/* a CREATE VIRTUAL TABLE names its module */
 			const module = (/\bUSING\s+(\w+)/i.exec(object.sql) as RegExpExecArray)[1]?.toLowerCase() as string
-			return (SHADOWS[module] ?? []).map((suffix) => `${object.name}_${suffix}`.toLowerCase())
+			return (SHADOWS[module] ?? []).map((suffix) => asciiFold(`${object.name}_${suffix}`))
 		}),
 	)
-	return objects.filter((object) => !(object.type === "table" && shadows.has(object.name.toLowerCase())))
+	return objects.filter((object) => !(object.type === "table" && shadows.has(asciiFold(object.name))))
 }
 
 /** The columns, by lower-case name, a pending file reads with a `json_*` function: the seed holds JSON there */
@@ -81,7 +82,7 @@ function jsonColumns(files: ReadonlyArray<{ sql: string }>): Set<string> {
 	const arrow = /(?:["`[]?\w+["`\]]?\s*\.\s*)?["`[]?(\w+)["`\]]?\s*->>?/g
 	return new Set(
 		files.flatMap(({ sql }) =>
-			[...sql.matchAll(call), ...sql.matchAll(arrow)].map((match) => (match[1] as string).toLowerCase()),
+			[...sql.matchAll(call), ...sql.matchAll(arrow)].map((match) => asciiFold(match[1] as string)),
 		),
 	)
 }
@@ -90,8 +91,8 @@ function jsonColumns(files: ReadonlyArray<{ sql: string }>): Set<string> {
 function uncreated(object: LiveObject, message: string): [table: string, why: string] | undefined {
 	if (object.type === "view") return undefined
 	if (object.type === "trigger")
-		return [object.table.toLowerCase(), `its trigger ${object.name} could not be created: ${message}`]
-	return [object.table.toLowerCase(), `comb could not create it in the copy: ${message}`]
+		return [asciiFold(object.table), `its trigger ${object.name} could not be created: ${message}`]
+	return [asciiFold(object.table), `comb could not create it in the copy: ${message}`]
 }
 
 /** How a copy is seeded: which seed, and the columns pending files read as JSON; none for a copy of the schema alone */
@@ -120,12 +121,12 @@ function buildCopy(db: MemoryDb, objects: readonly LiveObject[], seed: Seed): Ma
 	}
 	const seedable = tables.filter(
 		(object) =>
-			!unproven.has(object.name.toLowerCase()) &&
+			!unproven.has(asciiFold(object.name)) &&
 			(!isVirtual(object) || /\busing fts5\b/i.test(object.sql)) &&
 			!isMirror(object),
 	)
 	for (const object of tables.filter((each) => isVirtual(each) && !seedable.includes(each) && !isMirror(each)))
-		unproven.set(object.name.toLowerCase(), "a virtual table comb does not seed")
+		unproven.set(asciiFold(object.name), "a virtual table comb does not seed")
 	const definitions = new Map(seedable.map((object) => [object.name, object.sql]))
 	for (const [table, why] of seedTables(db, definitions, seed)) unproven.set(table, why)
 	for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
@@ -155,7 +156,7 @@ function snapshot(db: MemoryDb): Map<string, Shape> {
 				`SELECT ${columns.map((column) => `quote(${quote(column)}) AS ${quote(column)}`).join(", ")} FROM main.${quote(name)}`,
 			)
 			.map((row) => columns.map((column) => String(row[column])))
-		out.set(name.toLowerCase(), {
+		out.set(asciiFold(name), {
 			columns,
 			defaults: new Map(
 				info.map((row) => [String(row["name"]), row["dflt_value"] === null ? null : String(row["dflt_value"])]),

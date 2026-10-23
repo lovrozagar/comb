@@ -14,7 +14,7 @@ import { preview } from "./classify-file.ts"
 import { readGuards } from "./guard-read.ts"
 import { extractSchema } from "./schema.ts"
 import { type Context, type Effects, MARK, walkProgram } from "./proof-walk.ts"
-import { codeOf } from "./sql-code.ts"
+import { asciiFold, codeOf } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 /**
@@ -37,7 +37,7 @@ function rootsOf(db: MemoryDb): Pick<Context, "main" | "tables"> {
 	const main = new Map<number, string>()
 	const tables = new Set<number>()
 	for (const row of db.all("SELECT type, rootpage, tbl_name FROM main.sqlite_schema WHERE rootpage > 0")) {
-		main.set(Number(row["rootpage"]), String(row["tbl_name"]).toLowerCase())
+		main.set(Number(row["rootpage"]), asciiFold(String(row["tbl_name"])))
 		if (row["type"] === "table") tables.add(Number(row["rootpage"]))
 	}
 	return { main, tables }
@@ -52,14 +52,15 @@ function rootsOf(db: MemoryDb): Pick<Context, "main" | "tables"> {
 function placeProbes(db: MemoryDb, existing: ReadonlySet<string>): Array<{ column: string; table: string }> {
 	const probes: Array<{ column: string; table: string }> = []
 	for (const row of db.all("PRAGMA main.table_list")) {
-		const table = String(row["name"]).toLowerCase()
-		if (row["type"] !== "table" || !existing.has(table)) continue
+		/* the catalog's own name: a folded one SQLite would not find unless only ASCII letters differ */
+		const table = String(row["name"])
+		if (row["type"] !== "table" || !existing.has(asciiFold(table))) continue
 		for (const info of db.all(`PRAGMA main.table_xinfo(${quote(table)})`)) {
 			const column = String(info["name"])
 			db.exec(
 				`CREATE TEMP TRIGGER ${PROBE}${probes.length} BEFORE UPDATE OF ${quote(column)} ON main.${quote(table)} BEGIN SELECT ${MARK + probes.length}; END`,
 			)
-			probes.push({ column: column.toLowerCase(), table })
+			probes.push({ column: asciiFold(column), table: asciiFold(table) })
 		}
 	}
 	return probes
@@ -88,8 +89,8 @@ function watching(db: MemoryDb, existing: ReadonlySet<string>): Set<string> {
 	const out = new Set<string>()
 	for (const schema of ["main", "temp"]) {
 		for (const row of db.all(`SELECT name, tbl_name FROM ${schema}.sqlite_schema WHERE type = 'trigger'`)) {
-			const name = String(row["name"]).toLowerCase()
-			if (existing.has(String(row["tbl_name"]).toLowerCase()) && !synced.has(name)) out.add(name)
+			const name = asciiFold(String(row["name"]))
+			if (existing.has(asciiFold(String(row["tbl_name"]))) && !synced.has(name)) out.add(name)
 		}
 	}
 	return out
@@ -116,7 +117,7 @@ function explainStatement(db: MemoryDb, sql: string, existing: ReadonlySet<strin
 function shadowsOf(db: MemoryDb, existing: ReadonlySet<string>): Array<{ name: string; type: string }> {
 	return db
 		.all("SELECT name, type FROM temp.sqlite_schema WHERE type IN ('table', 'view')")
-		.map((row) => ({ name: String(row["name"]).toLowerCase(), type: String(row["type"]) }))
+		.map((row) => ({ name: asciiFold(String(row["name"])), type: String(row["type"]) }))
 		.filter(({ name }) => existing.has(name))
 }
 
@@ -128,8 +129,8 @@ function tablesOf(db: MemoryDb): Map<string, Set<string>> {
 	)) {
 		const name = String(row["name"])
 		out.set(
-			name.toLowerCase(),
-			new Set(db.all(`PRAGMA main.table_xinfo(${quote(name)})`).map((c) => String(c["name"]).toLowerCase())),
+			asciiFold(name),
+			new Set(db.all(`PRAGMA main.table_xinfo(${quote(name)})`).map((c) => asciiFold(String(c["name"])))),
 		)
 	}
 	return out

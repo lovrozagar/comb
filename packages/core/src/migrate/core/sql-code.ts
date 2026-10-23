@@ -40,10 +40,16 @@ function nameKey(name: string, dialect: Dialect): string {
 	return dialect === "postgres" && schema !== undefined && schema !== "public" ? `${schema}.${last}` : last
 }
 
+/**
+ * A name as SQLite folds it, and Postgres an unquoted one in UTF-8: its ASCII letters lowered and no
+ * other, so "Über" and "über" are two names and "Users" and "users" one
+ */
+const asciiFold = (name: string): string => name.replace(/[A-Z]+/g, (letters) => letters.toLowerCase())
+
 /** One name part as `dialect` resolves it (see nameKey) */
 function partKey(part: string, dialect: Dialect): string {
 	const bare = unquotePart(part)
-	return dialect === "sqlite" || bare === part ? bare.toLowerCase() : bare
+	return dialect === "sqlite" || bare === part ? asciiFold(bare) : bare
 }
 
 /**
@@ -106,4 +112,4 @@ function topLevel(code: string): string {
 	return out
 }
 
-export { bodyText, codeOf, IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel, topLevel, unquote }
+export { asciiFold, bodyText, codeOf, IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel, topLevel, unquote }

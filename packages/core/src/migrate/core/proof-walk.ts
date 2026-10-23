@@ -8,6 +8,7 @@
  */
 
 import { KEEPS, NOT_CURSOR, OPENS } from "./proof-opcodes.ts"
+import { asciiFold } from "./sql-code.ts"
 
 /** What a statement does to existing tables, each table and column by its lower-case name */
 type Effects = {
@@ -88,7 +89,7 @@ function notCursor(op: Record<string, unknown>, walk: Walk, ctx: Context): void 
 		const table = ctx.tables.has(p1) ? rootOf(op["p1"], op["p3"], ctx) : undefined
 		if (table !== undefined) effects.drops.add(table)
 	} else if (opcode === "DropTable") {
-		const table = String(op["p4"]).toLowerCase()
+		const table = asciiFold(String(op["p4"]))
 		if (p1 === 0 && ctx.existing.has(table)) effects.drops.add(table)
 	}
 }
@@ -98,9 +99,7 @@ function visit(op: Record<string, unknown>, walk: Walk, ctx: Context): void {
 	const opcode = String(op["opcode"])
 	const p1 = Number(op["p1"])
 	if (opcode === "Init" && Number(op["addr"]) === 0) {
-		walk.trigger = String(op["p4"])
-			.replace(/^-- TRIGGER /, "")
-			.toLowerCase()
+		walk.trigger = asciiFold(String(op["p4"]).replace(/^-- TRIGGER /, ""))
 		if (ctx.watched.has(walk.trigger)) walk.fired.add(walk.trigger)
 		/* a subprogram numbers its cursors from 0 again */
 		walk.cursors = new Map()

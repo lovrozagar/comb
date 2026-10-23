@@ -110,8 +110,8 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 		"ALTER SEQUENCE s RESTART",
 		"ALTER INDEX i RENAME TO j",
 		"ALTER TABLE post DISABLE ROW LEVEL SECURITY",
-		"ALTER TABLE post DISABLE TRIGGER ALL",
-		"ALTER TABLE post SET UNLOGGED",
+		"ALTER TABLE post DISABLE TRIGGER USER",
+		"ALTER TABLE post SET LOGGED",
 		"ALTER TABLE post ALTER COLUMN id DROP IDENTITY",
 		"-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY i ON post (a);",
 	])("calls %j cautious", (sql) => {

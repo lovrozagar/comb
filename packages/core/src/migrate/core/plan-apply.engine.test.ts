@@ -281,3 +281,14 @@ describe("engine ratings: SQLite writes", () => {
 		expect((await rate(`${created}DELETE FROM fresh WHERE id = 1;`)).safety).toBe("safe")
 	})
 })
+
+/* M37 of the 0.13 review: SQLite folds an identifier's ASCII letters only, so a table named with a non-ASCII capital is probed as itself */
+describe("engine ratings: a table named with a non-ASCII capital", () => {
+	it.each(['"Uber"', '"Über"'])("calls a backfill of a column the file added to %s cautious", async (table) => {
+		const rated = await rate(
+			`ALTER TABLE ${table} ADD COLUMN y TEXT;\nUPDATE ${table} SET y = 'filled';`,
+			`CREATE TABLE ${table} (id INTEGER PRIMARY KEY, x TEXT);`,
+		)
+		expect(rated.safety).toBe("cautious")
+	})
+})

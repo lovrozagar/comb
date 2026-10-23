@@ -293,3 +293,14 @@ ALTER TABLE t RENAME TO u;`)
 		expect(schema.droppedTables).toEqual(["x"])
 	})
 })
+
+/* M37 of the 0.13 review: SQLite folds an identifier's ASCII letters only */
+describe("extractSchema: names SQLite folds", () => {
+	it('keeps "Über" and "über" apart, and "Users" and "users" one, tables and triggers alike', () => {
+		const schema = extractSchema(
+			'CREATE TABLE "Über" (a);\nCREATE TABLE "über" (b);\nCREATE TABLE "Users" (c);\nCREATE TRIGGER t AFTER INSERT ON "Über" BEGIN SELECT 1; END;',
+		)
+		expect([...schema.tables.keys()]).toEqual(["Über", "über", "users"])
+		expect(schema.triggers.map(({ table }) => table)).toEqual(["Über"])
+	})
+})

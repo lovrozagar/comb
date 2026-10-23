@@ -29,6 +29,7 @@ import {
 	slotOf,
 	valueFor,
 } from "./proof-seed-values.ts"
+import { asciiFold } from "./sql-code.ts"
 
 /** A foreign key: its columns, the table they reference, and the referenced columns (none: its primary key) */
 type Key = { from: string[]; table: string; to: string[] }
@@ -76,7 +77,7 @@ function keysOf(db: MemoryDb, table: string): Key[] {
 	const keys = new Map<number, Key>()
 	for (const row of db.all(`PRAGMA foreign_key_list(${quote(table)})`)) {
 		const id = Number(row["id"])
-		const key = keys.get(id) ?? { from: [], table: String(row["table"]).toLowerCase(), to: [] }
+		const key = keys.get(id) ?? { from: [], table: asciiFold(String(row["table"])), to: [] }
 		key.from.push(String(row["from"]))
 		if (row["to"] !== null) key.to.push(String(row["to"]))
 		keys.set(id, key)
@@ -120,7 +121,7 @@ function nullAt(row: number, ordinal: number, variant: number): boolean {
 
 /** A column's value in row `row`: JSON where a pending file reads it so, else the attempt's */
 function valueOf(seeding: Seeding, column: Column, at: Attempt): unknown {
-	if (!at.fallback && seeding.json.has(column.name.toLowerCase()) && affinityOf(column.type) === "TEXT")
+	if (!at.fallback && seeding.json.has(asciiFold(column.name)) && affinityOf(column.type) === "TEXT")
 		return JSON_SHAPE(at.row, column.index, seeding.variant)
 	return valueFor(column, { ...at, variant: seeding.variant }, listedValues(seeding.sql, column.name))
 }
@@ -150,7 +151,7 @@ function keyValues(
 ): boolean {
 	const { key, row, values } = at
 	/* a self-reference points at the row before it, which the table holds already */
-	const self = key.table === seeding.table.toLowerCase()
+	const self = key.table === asciiFold(seeding.table)
 	const parent = self ? db.all(`SELECT * FROM ${quote(seeding.table)}`) : (seeding.parents.get(key.table) ?? [])
 	const source = self ? parent.at(-1) : parent[row % Math.max(parent.length, 1)]
 	const columns = key.from.map((name) => seeding.columns.find((c) => c.name === name))
@@ -232,8 +233,8 @@ function seedTable(db: MemoryDb, seeding: Seeding): string | undefined {
  * resolves them; a cycle keeps the order it was given
  */
 function parentsFirst(db: MemoryDb, tables: readonly string[]): string[] {
-	const written = new Map(tables.map((table) => [table.toLowerCase(), table]))
-	const parentsOf = new Map(tables.map((table) => [table.toLowerCase(), keysOf(db, table).map((key) => key.table)]))
+	const written = new Map(tables.map((table) => [asciiFold(table), table]))
+	const parentsOf = new Map(tables.map((table) => [asciiFold(table), keysOf(db, table).map((key) => key.table)]))
 	const done: string[] = []
 	const visit = (key: string, path: ReadonlySet<string>) => {
 		if (done.includes(key) || path.has(key)) return
@@ -241,7 +242,7 @@ function parentsFirst(db: MemoryDb, tables: readonly string[]): string[] {
 			if (parentsOf.has(parent)) visit(parent, new Set([...path, key]))
 		done.push(key)
 	}
-	for (const table of tables) visit(table.toLowerCase(), new Set())
+	for (const table of tables) visit(asciiFold(table), new Set())
 	return done.map((key) => written.get(key) as string)
 }
 
@@ -270,11 +271,11 @@ function seedTables(
 		}
 		const failed = seedTable(db, seeding)
 		/* keyed folded, as PRAGMA foreign_key_check and a child's key name the table */
-		if (failed !== undefined) unproven.set(table.toLowerCase(), failed)
-		parents.set(table.toLowerCase(), db.all(`SELECT * FROM ${quote(table)}`))
+		if (failed !== undefined) unproven.set(asciiFold(table), failed)
+		parents.set(asciiFold(table), db.all(`SELECT * FROM ${quote(table)}`))
 	}
 	for (const row of db.all("PRAGMA foreign_key_check")) {
-		const table = String(row["table"]).toLowerCase()
+		const table = asciiFold(String(row["table"]))
 		if (!unproven.has(table)) unproven.set(table, `its seeded rows break its key to ${String(row["parent"])}`)
 	}
 	return unproven

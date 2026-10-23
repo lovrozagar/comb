@@ -5,7 +5,7 @@
  * cap on a SELECT's columns lets them fit.
  */
 import type { ExtractedSchema, TableInfo } from "../types.ts"
-import { lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
+import { asciiFold, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
 
 /**
  * D1's cap on a result set's columns. On wrangler --local (2026-10-21) a 100-column table and an
@@ -68,7 +68,7 @@ function renumberedBy(
 	{ closure, code }: { closure: readonly string[]; code: string },
 ): string[] {
 	const columns = copied(code)
-	const carried = lastPart(columns[0] as string).toLowerCase() === "rowid"
+	const carried = asciiFold(lastPart(columns[0] as string)) === "rowid"
 	const self = schema.tableInfo.get(table)?.withoutRowid === false && rowidApart(schema.tableInfo.get(temp))
 	return [
 		...(self && !carried && !rowidFits(columns.length) ? [renumbered(table, columns.length)] : []),

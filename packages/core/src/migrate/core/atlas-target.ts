@@ -86,6 +86,13 @@ function pgUrlProblems(
 		errors.push("url and devUrl are the same database; Atlas empties the dev database, so give it its own")
 	}
 	if (!/^[A-Za-z_][\w$]*$/.test(target.schema)) errors.push('schema must be a plain name such as "public"')
+	const scope = url.url?.searchParams.get("search_path")
+	if (scope !== null && scope !== undefined) {
+		const fix = "comb migrates one: set schema to it, and drop search_path from the url"
+		if (scope.includes(",")) errors.push(`the url's search_path names more than one schema (${scope}); ${fix}`)
+		else if (scope !== target.schema)
+			errors.push(`the url's search_path names ${scope}, but schema is ${target.schema}; ${fix}`)
+	}
 	if (!/^(?:0|\d+(?:ms|s|min))$/.test(target.lockTimeout))
 		errors.push("lockTimeout must look like 5s, 1500ms, 1min or 0")
 	return { errors, warnings: url.url === undefined ? [] : hostWarnings(url.url) }
@@ -121,7 +128,8 @@ const SHARED_REVISIONS = "atlas_schema_revisions"
  * name at 63 bytes, so a scope too long, or not a plain lower-case name, is named by its hash.
  */
 function revisionsSchema(target: PgTarget): string {
-	const scope = scoped(target.url, target.schema).searchParams.get("search_path") as string
+	/* a search_path the url names is the schema itself, or pgUrlProblems refused it (M39) */
+	const scope = target.schema
 	if (scope === "public") return SHARED_REVISIONS
 	const own = `${SHARED_REVISIONS}_${scope}`
 	if (/^[a-z_][a-z0-9_]*$/.test(scope) && own.length <= 63) return own

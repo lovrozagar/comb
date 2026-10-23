@@ -11,7 +11,7 @@
 import type { ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
-import { IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel, topLevel } from "./sql-code.ts"
+import { asciiFold, IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel, topLevel } from "./sql-code.ts"
 
 /** A finding the proof run's engine findings replace */
 type Pending = Finding & { pending: true }
@@ -70,7 +70,7 @@ function insertFinding(
 		const start = upsert.index + upsert[0].length
 		return [setFinding(table as string, assigned(code.slice(start), bare.slice(start)), ctx.fresh)]
 	}
-	const name = lastPart(table as string).toLowerCase()
+	const name = asciiFold(lastPart(table as string))
 	const watched = (ctx.before?.triggers ?? []).some(
 		(trigger) => trigger.table === name && trigger.events.includes("insert"),
 	)
