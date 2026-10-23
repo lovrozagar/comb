@@ -171,13 +171,13 @@ describe("provePending on comb 0.8's bypasses, and on a rebuild that loses nothi
 })
 
 describe("provePending on what it cannot seed or apply", () => {
-	it("lists a table whose rows it cannot make as unproven, and proves nothing of it", async () => {
+	it("lists a table whose rows it cannot make as unproven, and still sees a delete of its rows", async () => {
 		const proof = await prove(
 			"CREATE TABLE codes (id INTEGER PRIMARY KEY, code TEXT NOT NULL CHECK (length(code) = 20));",
 			"DELETE FROM codes;",
 		)
 		expect(proof.unproven).toEqual([{ table: "codes", why: "CHECK constraint failed: length(code) = 20" }])
-		expect(proof.unsafe).toEqual([])
+		expect(proof.unsafe).toEqual(["DELETE FROM codes: deletes existing rows of codes"])
 	})
 
 	it("says a file that does not apply to the copy proves nothing, nor does any after it", async () => {
@@ -264,6 +264,7 @@ describe("provePending with the database's own triggers and views", () => {
 			"INSERT INTO users (email) VALUES ('new');",
 		)
 		expect(proof.unsafe).toEqual([
+			"INSERT INTO users (email) VALUES ('new'): deletes existing rows of audit",
 			"INSERT INTO users (email) VALUES ('new'): fires trigger purge (its WHEN is not evaluated)",
 			"loses 6 of the 6 rows of audit",
 		])

@@ -13,27 +13,9 @@ import type { ExtractedSchema } from "../types.ts"
 import { preview } from "./classify-file.ts"
 import { readGuards } from "./rebuild-guard.ts"
 import { extractSchema } from "./schema.ts"
+import { type Context, type Effects, MARK, walkProgram } from "./proof-walk.ts"
 import { codeOf } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
-
-/** What a statement does to existing tables, each table and column by its lower-case name */
-type Effects = {
-	/** the columns an update assigns, by table */
-	assigns: Map<string, Set<string>>
-	/** the tables whose existing rows it deletes, an update's own rewrite of a row aside */
-	deletes: Set<string>
-	/**
-	 * the triggers on existing tables it can fire, directly or through another trigger, comb's FTS
-	 * sync triggers aside; a trigger's WHEN is not evaluated
-	 */
-	triggers: string[]
-	/**
-	 * whether it updates, deletes or replaces rows of a virtual table itself, not through a trigger:
-	 * SQLite codes an insert's VUpdate with P1 1, an update's and a delete's with 0, and P5 is the
-	 * insert's conflict resolution, 5 for REPLACE
-	 */
-	virtual: boolean
-}
 
 /**
  * What one statement of a file did, read before it ran, and the temp objects that shadow a table
@@ -46,29 +28,19 @@ type Step = {
 	statement: string
 }
 
-/** What the walk over one statement's program knows: the tables, the probes and the triggers that count */
-type Context = {
-	existing: ReadonlySet<string>
-	main: ReadonlyMap<number, string>
-	probes: ReadonlyArray<{ column: string; table: string }>
-	watched: ReadonlySet<string>
-}
-
-/** Where the walk is: the program's cursors open for writing, by number, and the trigger it is in */
-type Walk = { cursors: Map<number, string>; effects: Effects; fired: Set<string>; trigger?: string }
-
-/* the marker a probe trigger selects: probe i selects MARK + i */
-const MARK = 7_770_000
 const PROBE = "comb_probe_"
 
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 
-/** The tables of main by root page, each name lower-cased */
-function roots(db: MemoryDb): Map<number, string> {
-	const out = new Map<number, string>()
-	for (const row of db.all("SELECT rootpage, name FROM main.sqlite_schema WHERE rootpage > 0"))
-		out.set(Number(row["rootpage"]), String(row["name"]).toLowerCase())
-	return out
+/** Main's root pages: the table each stores, an index's root its table's, and which are tables' own */
+function rootsOf(db: MemoryDb): Pick<Context, "main" | "tables"> {
+	const main = new Map<number, string>()
+	const tables = new Set<number>()
+	for (const row of db.all("SELECT type, rootpage, tbl_name FROM main.sqlite_schema WHERE rootpage > 0")) {
+		main.set(Number(row["rootpage"]), String(row["tbl_name"]).toLowerCase())
+		if (row["type"] === "table") tables.add(Number(row["rootpage"]))
+	}
+	return { main, tables }
 }
 
 /**
@@ -123,41 +95,6 @@ function watching(db: MemoryDb, existing: ReadonlySet<string>): Set<string> {
 	return out
 }
 
-/** A cursor opened for writing: it writes an existing table when its root page is one of main's */
-function openWrite(op: Record<string, unknown>, walk: Walk, ctx: Context): void {
-	const table = Number(op["p3"]) === 0 ? ctx.main.get(Number(op["p2"])) : undefined
-	if (table !== undefined && ctx.existing.has(table)) walk.cursors.set(Number(op["p1"]), table)
-	else walk.cursors.delete(Number(op["p1"]))
-}
-
-/** A probe's marker: the statement assigns that probe's column */
-function assign(marker: number, walk: Walk, ctx: Context): void {
-	const probe = ctx.probes[marker - MARK]
-	if (marker < MARK || probe === undefined) return
-	const columns = walk.effects.assigns.get(probe.table) ?? new Set<string>()
-	walk.effects.assigns.set(probe.table, columns.add(probe.column))
-}
-
-/** One opcode of the program after its first: the main program's, or a trigger's after its `Init` at address 0 */
-function visit(op: Record<string, unknown>, walk: Walk, ctx: Context): void {
-	const opcode = String(op["opcode"])
-	const p1 = Number(op["p1"])
-	if (opcode === "Init" && Number(op["addr"]) === 0) {
-		walk.trigger = String(op["p4"])
-			.replace(/^-- TRIGGER /, "")
-			.toLowerCase()
-		if (ctx.watched.has(walk.trigger)) walk.fired.add(walk.trigger)
-		/* a subprogram numbers its cursors from 0 again */
-		walk.cursors = new Map()
-	} else if (opcode === "OpenWrite") openWrite(op, walk, ctx)
-	else if (opcode === "Delete") {
-		const table = walk.cursors.get(p1)
-		if (table !== undefined) walk.effects.deletes.add(table)
-	} else if (opcode === "VUpdate") {
-		if (walk.trigger === undefined && (p1 === 0 || Number(op["p5"]) === 5)) walk.effects.virtual = true
-	} else if (opcode === "Integer") assign(p1, walk, ctx)
-}
-
 /**
  * What `sql`, one statement, does to `existing` on `db`, read before it runs; why, when SQLite
  * cannot prepare it
@@ -172,19 +109,7 @@ function explainStatement(db: MemoryDb, sql: string, existing: ReadonlySet<strin
 	} finally {
 		for (let i = 0; i < probes.length; i++) db.exec(`DROP TRIGGER temp.${PROBE}${i}`)
 	}
-	const ctx: Context = { existing, main: roots(db), probes, watched: watching(db, existing) }
-	const walk: Walk = {
-		cursors: new Map(),
-		effects: { assigns: new Map(), deletes: new Set(), triggers: [], virtual: false },
-		fired: new Set(),
-	}
-	/* the main program's own Init comes first */
-	for (const op of ops.slice(1)) visit(op, walk, ctx)
-	const { effects } = walk
-	/* an update rewrites the rows it assigns: their Delete is no deletion of a row */
-	for (const table of effects.assigns.keys()) effects.deletes.delete(table)
-	effects.triggers = [...walk.fired].toSorted()
-	return effects
+	return walkProgram(ops, { existing, probes, watched: watching(db, existing), ...rootsOf(db) })
 }
 
 /** The temp objects that answer for an existing table's name */
@@ -286,6 +211,8 @@ function engineFindings(
 				cautious.push(`${at}: backfills ${table} (${listed}), columns this file added`)
 		}
 		for (const table of effects.deletes) unsafe.push(`${at}: deletes existing rows of ${table}`)
+		for (const table of effects.drops) unsafe.push(`${at}: drops ${table} outside a DROP TABLE`)
+		for (const unread of effects.unread) unsafe.push(`${at}: does what comb cannot read to ${unread}`)
 		for (const trigger of effects.triggers) unsafe.push(`${at}: fires trigger ${trigger} (its WHEN is not evaluated)`)
 		if (effects.virtual) unsafe.push(`${at}: writes over rows of a virtual table`)
 		for (const { name, type } of shadows.filter((shadow) => !shadowed.has(shadow.name))) {

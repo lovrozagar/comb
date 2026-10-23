@@ -53,6 +53,8 @@ From the repo root. CI runs `fmt:check` in place of `fmt`, and covers `test` via
 `COMB_TEST_PG_URL` set; without either the run fails rather than skipping the
 Postgres and Atlas suites. On this machine the `comb-pg17` container serves
 `COMB_TEST_PG_URL='postgres://lovro@localhost:55432/postgres?sslmode=disable'`.
+When docker is not reachable, `node ~/.cache/pg17-embedded/start.mjs` starts a
+user-level PostgreSQL 17 on the same URL instead.
 
 `typecheck:strict` exists because comb ships TypeScript source, so a consumer's
 strict flags apply to it. Must stay at zero — see
