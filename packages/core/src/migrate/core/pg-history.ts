@@ -5,59 +5,16 @@
  * a generated column, an index's expression or predicate, or a column's domain calls, a rule on
  * the table, or an implicit or assignment
  * cast to one of its columns' types; a table made LIKE another takes the other's. The functions
- * behind a migration's operators and casts are kept too, so a use of one is read as a call.
+ * behind a migration's operators and casts are kept too, so a use of one is read as a call. So are
+ * each table's triggers, followed through renames, moves to another schema and drops, and every
+ * function, procedure and aggregate a migration defined, under each name it ever had: a dropped
+ * overload leaves others of its name, so a name once defined stays defined.
  */
 import type { ExtractedSchema } from "../types.ts"
 import { builtinFinding } from "./pg-builtins.ts"
+import { followNames } from "./pg-names.ts"
+import { type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf } from "./pg-nodes.ts"
 import { postgresParser } from "./pg-parser.ts"
-
-type Node = Record<string, unknown>
-
-/** What the history attached to its tables, keyed as nameKey keys a Postgres name */
-type Facts = {
-	/** each type a migration's cast reaches, with the cast's function, and whether the cast is implicit or on assignment */
-	casts: Map<string, { automatic: boolean; fn: string }>
-	/** why a write to a table runs code: what it runs */
-	code: Map<string, string>
-	/** each table's column types */
-	columnTypes: Map<string, Set<string>>
-	/** each domain whose CHECK calls a function, with the function */
-	domains: Map<string, string>
-	/** each operator a migration defined, with its function */
-	operators: Map<string, string>
-	/** each table's parents, and whether it is their partition */
-	parents: Map<string, Array<{ parent: string; partition: boolean }>>
-}
-
-/** Every node under `node`, by its type, the type's fields with it */
-function nodesOf(node: unknown, out: Array<[string, Node]> = []): Array<[string, Node]> {
-	if (Array.isArray(node)) for (const each of node) nodesOf(each, out)
-	else if (node !== null && typeof node === "object") {
-		for (const [key, value] of Object.entries(node)) {
-			if (value !== null && typeof value === "object" && !Array.isArray(value) && /^[A-Z]/.test(key))
-				out.push([key, value as Node])
-			nodesOf(value, out)
-		}
-	}
-	return out
-}
-
-/* the parts of a name, as the parser lists them: each a String node */
-const names = (list: unknown): string[] => (list as Array<{ String: { sval: string } }>).map((part) => part.String.sval)
-
-/** A name's key, as nameKey keys a Postgres name: pg_catalog and public left out */
-const keyOf = (parts: readonly string[]): string =>
-	parts.filter((part, i) => (i < parts.length - 1 ? part !== "pg_catalog" && part !== "public" : true)).join(".")
-
-/** A RangeVar's table: its bare name, its key, and whether it is temporary */
-function tableOf(relation: unknown): { key: string; name: string; temp: boolean } {
-	const rel = relation as { relname: string; relpersistence: string; schemaname?: string }
-	const key = keyOf(rel.schemaname === undefined ? [rel.relname] : [rel.schemaname, rel.relname])
-	return { key, name: rel.relname, temp: rel.relpersistence === "t" || rel.schemaname === "pg_temp" }
-}
-
-/** A type's key */
-const typeOf = (typeName: unknown): string => keyOf(names((typeName as Node)["names"]))
 
 /** The first function an expression calls that is no pure built-in, by name */
 function callIn(expression: unknown, defined: ReadonlySet<string>): string | undefined {
@@ -140,12 +97,14 @@ function followDefinition(type: string, node: Node, { defined, facts }: Reader):
 			.map((each) => callIn((each["Constraint"] as Node)["raw_expr"], defined))
 			.find((fn) => fn !== undefined)
 		if (runs !== undefined) facts.domains.set(keyOf(names(node["domainname"])), runs)
+	} else if (type === "DefineStmt" && node["kind"] === "OBJECT_AGGREGATE") {
+		facts.defined.add(keyOf(names(node["defnames"])))
 	} else if (type === "DefineStmt" && node["kind"] === "OBJECT_OPERATOR") {
 		/* Postgres refuses an operator without its function, named FUNCTION or PROCEDURE */
 		const fn = (node["definition"] as Node[])
 			.map((each) => each["DefElem"] as Node)
 			.find((elem) => elem["defname"] === "function" || elem["defname"] === "procedure") as Node
-		facts.operators.set(names(node["defnames"]).join("."), typeOf((fn["arg"] as Node)["TypeName"]))
+		facts.operators.set(keyOf(names(node["defnames"])), typeOf((fn["arg"] as Node)["TypeName"]))
 	} else if (type === "CreateCastStmt" && node["func"] !== undefined) {
 		const target = typeOf(node["targettype"])
 		const automatic = node["context"] === "COERCION_IMPLICIT" || node["context"] === "COERCION_ASSIGNMENT"
@@ -157,11 +116,14 @@ function followDefinition(type: string, node: Node, { defined, facts }: Reader):
 	}
 }
 
-/** `facts` after one statement's parse tree; `defined` the functions migrations define */
-function followTree(stmts: unknown, facts: Facts, defined: ReadonlySet<string>): void {
-	const reader = { defined, facts }
+/** `facts` after one statement's parse tree, the functions it defines among them */
+function followTree(stmts: unknown, facts: Facts): void {
+	const reader = { defined: facts.defined, facts }
+	const defined = facts.defined
 	for (const [type, node] of nodesOf(stmts)) {
-		if (type === "CreateStmt") followCreate(node, reader)
+		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"])))
+		else if (followNames(type, node, facts)) continue
+		else if (type === "CreateStmt") followCreate(node, reader)
 		else if (type === "AlterTableStmt") followAlter(node, reader)
 		else if (type === "IndexStmt") {
 			/* an index's expressions and a partial index's predicate run on every write to its table */
@@ -184,15 +146,16 @@ function historyFacts(before: ExtractedSchema | undefined): Facts {
 		casts: new Map(),
 		code: new Map(),
 		columnTypes: new Map(),
+		defined: new Set(),
 		domains: new Map(),
 		operators: new Map(),
 		parents: new Map(),
+		triggers: new Map(),
 	}
 	if (before === undefined) return empty
 	let facts = CACHE.get(before)
 	if (facts === undefined) {
 		facts = empty
-		const defined = new Set(before.functions)
 		for (const statement of before.statements) {
 			let tree: { stmts?: unknown }
 			try {
@@ -201,7 +164,7 @@ function historyFacts(before: ExtractedSchema | undefined): Facts {
 				// reason: a history statement Postgres cannot parse attached nothing comb can read; the walk goes on
 				continue
 			}
-			followTree(tree.stmts, facts, defined)
+			followTree(tree.stmts, facts)
 		}
 		CACHE.set(before, facts)
 	}

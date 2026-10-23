@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { classifyMigration } from "./classify.ts"
 import { historyFacts } from "./pg-history.ts"
 import { extractSchema } from "./schema.ts"
 
@@ -86,4 +87,103 @@ describe("what a Postgres history's parents, casts, operators and domains are", 
 		expect(facts("CREATE DOMAIN pos AS int CHECK (VALUE > 0);").domains).toEqual(new Map())
 		expect(facts("CREATE DOMAIN pos AS int CHECK (VALUE > f());").domains).toEqual(new Map([["pos", "f"]]))
 	})
+})
+
+/* M25–M28 of the 0.13 review: what the history defined, read from its parse trees, however it was spelled or moved */
+const WIPE =
+	"CREATE TABLE users (id int);\nCREATE TABLE victim (id int);\nCREATE FUNCTION wipe() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN DELETE FROM victim; RETURN NEW; END$$;\n"
+const later = (history: string, file: string) => {
+	const rated = classifyMigration(file, { before: extractSchema(history, undefined, "postgres"), dialect: "postgres" })
+	return { notes: [...rated.unsafeStatements, ...rated.cautiousStatements].join("\n"), safety: rated.safety }
+}
+
+const fn = (name: string, arg = "int") =>
+	`CREATE FUNCTION ${name}(${arg}) RETURNS int LANGUAGE sql AS 'DELETE FROM victim RETURNING 1';\n`
+const op = (name: string) =>
+	`${WIPE}CREATE FUNCTION evil_eq(int, int) RETURNS boolean LANGUAGE sql AS 'DELETE FROM victim RETURNING true';\nCREATE OPERATOR ${name} (LEFTARG = int, RIGHTARG = int, FUNCTION = evil_eq);`
+
+describe("a Postgres history's triggers, however the table was named or moved (M25)", () => {
+	it.each([
+		["ON users", "CREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();", "users"],
+		[
+			"a Unicode-escaped name",
+			'CREATE TRIGGER t AFTER INSERT ON U&"\\0075sers" FOR EACH ROW EXECUTE FUNCTION wipe();',
+			"users",
+		],
+		[
+			"a rename with IF EXISTS",
+			"CREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();\nALTER TABLE IF EXISTS users RENAME TO members;",
+			"members",
+		],
+		[
+			"a rename with ONLY",
+			"CREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();\nALTER TABLE ONLY users RENAME TO members;",
+			"members",
+		],
+		[
+			"a move to another schema",
+			"CREATE SCHEMA app;\nCREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();\nALTER TABLE users SET SCHEMA app;",
+			"app.users",
+		],
+	])("names the trigger an insert fires after %s", (_label, history, table) => {
+		expect(later(`${WIPE}${history}`, `INSERT INTO ${table} VALUES (1);`).notes).toContain("fires trigger t")
+	})
+
+	it("forgets a trigger once it is dropped, and one a renamed table took with it", () => {
+		const trigger = "CREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();\n"
+		expect(later(`${WIPE}${trigger}DROP TRIGGER t ON users;`, "INSERT INTO users VALUES (1);").notes).not.toContain(
+			"fires trigger",
+		)
+		expect(
+			later(`${WIPE}${trigger}ALTER TABLE users RENAME TO members;`, "INSERT INTO users VALUES (1);").notes,
+		).not.toContain("fires trigger")
+	})
+})
+
+describe("a Postgres history's functions, however named, renamed or dropped (M26, M28)", () => {
+	it.each([
+		["a Unicode-escaped name", fn('U&"\\006Cower"')],
+		["a rename", `${fn("evil")}ALTER FUNCTION evil(int) RENAME TO lower;`],
+		["one overload dropped of two", `${fn("lower")}${fn("lower", "bigint")}DROP FUNCTION lower(bigint);`],
+		[
+			"a move to another schema",
+			`CREATE SCHEMA app;\n${fn("evil")}ALTER FUNCTION evil(int) SET SCHEMA app;\nALTER FUNCTION app.evil(int) RENAME TO lower;`,
+		],
+		["another schema, called bare through the search path", `CREATE SCHEMA app;\n${fn("app.lower")}`],
+	])("calls lower a migration's function after %s", (_label, history) => {
+		expect(later(`${WIPE}${history}`, "INSERT INTO users SELECT lower(5);").notes).toContain(
+			"calls lower, a function a migration defined",
+		)
+	})
+
+	it("calls an aggregate a migration defined its function", () => {
+		const history = `${WIPE}CREATE FUNCTION pick(text, text, text) RETURNS text LANGUAGE sql AS 'SELECT $2';\nCREATE AGGREGATE count(text, text) (SFUNC = pick, STYPE = text);`
+		expect(later(history, "INSERT INTO users SELECT count('a', 'b');").notes).toContain(
+			"calls count, a function a migration defined",
+		)
+	})
+})
+
+describe("a Postgres history's operators, qualified or not (M27)", () => {
+	it.each([
+		["public.===", "INSERT INTO users SELECT 1 WHERE 1 === 1;"],
+		["===", "INSERT INTO users SELECT 1 WHERE 1 OPERATOR(public.===) 1;"],
+	])("names a use of %s", (name, file) => {
+		expect(later(op(name), file).notes).toContain("uses operator ===, which a migration defined")
+	})
+
+	it("leaves an operator qualified by another schema to that schema", () => {
+		expect(later(op("==="), "INSERT INTO users SELECT 1 WHERE 1 OPERATOR(app.===) 1;").notes).not.toContain(
+			"uses operator",
+		)
+	})
+})
+
+describe("Postgres settings that change who later names resolve for (M28)", () => {
+	it.each(["SET ROLE app;", "SET SESSION AUTHORIZATION app;", "RESET ROLE;", "RESET SESSION AUTHORIZATION;"])(
+		"rates %s unsafe",
+		(file) => {
+			expect(later(WIPE, file).safety).toBe("unsafe")
+		},
+	)
 })

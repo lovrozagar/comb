@@ -43,8 +43,6 @@ type FileContext = RebuildContext & {
 	created: Set<string>
 	/** what the Postgres history and the file so far attached to their tables (pg-history.ts) */
 	facts: Facts
-	/** the functions the history and the file so far define, keyed as nameKey keys them (pg-tree.ts) */
-	functions: Set<string>
 	/** the schema the history and the file so far leave, statement by statement */
 	schema: ExtractedSchema
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
@@ -161,7 +159,6 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		created,
 		dialect,
 		facts: historyFacts(dialect === "postgres" ? before : undefined),
-		functions: new Set(before?.functions ?? []),
 		schema: before ?? extractSchema("", undefined, dialect),
 		fresh: freshStart(before, dialect),
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),

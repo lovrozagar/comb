@@ -157,7 +157,8 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
  * What a call of `name` (its parts as the parser gives them) makes the statement, if anything.
  * A name a migration defined (`defined`, keyed as nameKey keys it) is that migration's function,
  * not the built-in, unless the call names pg_catalog: an overload of `lower` for a type of its
- * own is what Postgres resolves `lower(x)` to.
+ * own is what Postgres resolves `lower(x)` to. A bare call names it in any schema, as the search
+ * path may hold that schema.
  */
 function builtinFinding(
 	name: readonly string[],
@@ -166,7 +167,9 @@ function builtinFinding(
 	const catalog = name[0] === "pg_catalog"
 	const parts = catalog || name[0] === "public" ? name.slice(1) : name
 	const key = parts.join(".")
-	if (!catalog && defined.has(key)) return { level: "unsafe", note: `calls ${key}, a function a migration defined` }
+	/* a bare name resolves through the search path, so it may be a migration's function in any schema */
+	const mine = parts.length === 1 ? [...defined].some((each) => each.split(".").at(-1) === key) : defined.has(key)
+	if (!catalog && mine) return { level: "unsafe", note: `calls ${key}, a function a migration defined` }
 	if (parts.length === 1 && PURE.has(key)) return undefined
 	if (key === "setval") return { level: "cautious", note: "sets a sequence, as a RESTART does" }
 	if (key === "dblink" || key === "dblink_exec")

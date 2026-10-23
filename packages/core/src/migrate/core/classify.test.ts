@@ -9,7 +9,6 @@ const schemaWith = (table: string, columns: string[]): ExtractedSchema => ({
 	droppedTables: [],
 	externalFts: [],
 	foreignKeys: [],
-	functions: [],
 	statements: [],
 	indexes: [],
 	tableInfo: new Map(),

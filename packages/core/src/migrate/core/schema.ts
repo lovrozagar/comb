@@ -38,10 +38,6 @@ const CREATE_TRIGGER = /* @__PURE__ */ new RegExp(
 )
 // per-process-constant: see above
 const DROP_TRIGGER = /* @__PURE__ */ new RegExp(`^DROP TRIGGER (?:IF EXISTS )?(${QNAME})`, "i")
-// per-process-constant: see above
-const CREATE_ROUTINE = /* @__PURE__ */ new RegExp(`^CREATE (?:OR REPLACE )?(?:FUNCTION|PROCEDURE) (${QNAME})`, "i")
-// per-process-constant: see above
-const DROP_ROUTINE = /* @__PURE__ */ new RegExp(`^DROP (?:FUNCTION|PROCEDURE) (?:IF EXISTS )?(${QNAME})`, "i")
 // per-process-constant: an FTS5 table and its arguments, composed once
 const CREATE_FTS = /* @__PURE__ */ new RegExp(
 	`^CREATE VIRTUAL TABLE (?:IF NOT EXISTS )?(${QNAME}) USING fts5 ?\\(.*\\)$`,
@@ -124,8 +120,12 @@ function syncsFts(code: string, externalFts: readonly string[], dialect: Dialect
 		})
 }
 
-/** Triggers and routines made and dropped */
-function followRoutines(schema: SchemaSoFar, code: string, dialect: Dialect): void {
+/**
+ * SQLite triggers made and dropped. A Postgres history's triggers and routines are read from its
+ * parse trees (pg-history.ts), which no spelling, rename or move hides.
+ */
+function followTriggers(schema: SchemaSoFar, code: string, dialect: Dialect): void {
+	if (dialect === "postgres") return
 	const key = (name: string) => nameKey(name, dialect)
 	const [, trigger, timing, on] = CREATE_TRIGGER.exec(code) ?? []
 	if (trigger !== undefined) {
@@ -144,10 +144,6 @@ function followRoutines(schema: SchemaSoFar, code: string, dialect: Dialect): vo
 	}
 	const goneTrigger = DROP_TRIGGER.exec(code)?.[1]
 	if (goneTrigger !== undefined) schema.triggers = schema.triggers.filter((t) => t.name !== key(goneTrigger))
-	const routine = CREATE_ROUTINE.exec(code)?.[1]
-	if (routine !== undefined && !schema.functions.includes(key(routine))) schema.functions.push(key(routine))
-	const goneRoutine = DROP_ROUTINE.exec(code)?.[1]
-	if (goneRoutine !== undefined) schema.functions = schema.functions.filter((name) => name !== key(goneRoutine))
 }
 
 /** A table renamed: its keys, the keys to it, its triggers and its shape follow the new name */
@@ -172,7 +168,7 @@ function follow(schema: SchemaSoFar, stmt: string, dialect: Dialect): void {
 	const code = codeOf(stmt, dialect)
 	followTableShape(schema, code, dialect)
 	followTableLife(schema, code, dialect)
-	followRoutines(schema, code, dialect)
+	followTriggers(schema, code, dialect)
 	followColumns(schema, code, dialect)
 	const index = CREATE_INDEX.exec(code)?.[1]
 	if (index !== undefined) schema.indexes.push(nameKey(index, dialect))
@@ -186,7 +182,6 @@ const EMPTY: ExtractedSchema = {
 	droppedTables: [],
 	externalFts: [],
 	foreignKeys: [],
-	functions: [],
 	indexes: [],
 	statements: [],
 	tableInfo: /* @__PURE__ */ new Map(),
@@ -203,7 +198,6 @@ function extractSchema(sql: string, from: ExtractedSchema = EMPTY, dialect: Dial
 		droppedTables: [...from.droppedTables],
 		externalFts: [...from.externalFts],
 		foreignKeys: [...from.foreignKeys],
-		functions: [...from.functions],
 		indexes: [...from.indexes],
 		statements: [...from.statements],
 		tableInfo: new Map(

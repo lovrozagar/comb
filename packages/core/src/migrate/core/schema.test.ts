@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { historyFacts } from "./pg-history.ts"
 import { extractSchema } from "./schema.ts"
 
 /* Atlas v1.3.0's SQLite rebuild of a parent with a self-reference, and drizzle-kit's own export forms */
@@ -109,7 +110,7 @@ ALTER TABLE \`new_u\` RENAME TO \`u\`;`,
 		expect(extractSchema("CREATE TABLE e ();").tableInfo.get("e")?.primaryKey).toEqual([])
 	})
 
-	it("reads the functions and procedures a Postgres file creates, and forgets a dropped one", () => {
+	it("reads the functions and procedures a Postgres file creates from its parse trees, and keeps a dropped one's name", () => {
 		const schema = extractSchema(
 			`CREATE OR REPLACE FUNCTION "public"."purge"() RETURNS void LANGUAGE plpgsql AS $$ BEGIN DELETE FROM a; END $$;
 CREATE PROCEDURE p() LANGUAGE sql AS $$ SELECT 1; $$;
@@ -118,7 +119,7 @@ DROP FUNCTION IF EXISTS gone();`,
 			undefined,
 			"postgres",
 		)
-		expect(schema.functions).toEqual(["purge", "p"])
+		expect([...historyFacts(schema).defined]).toEqual(["purge", "p", "gone"])
 	})
 })
 
@@ -139,10 +140,17 @@ describe("extractSchema: trigger events and FTS sync triggers", () => {
 			undefined,
 			"postgres",
 		)
-		expect(pg.triggers).toEqual([{ events: ["insert", "update", "delete"], ftsSync: false, name: "t", table: "post" }])
+		/* a Postgres history's triggers are read from its parse trees, not its text */
+		expect(pg.triggers).toEqual([])
+		expect(historyFacts(pg).triggers).toEqual(
+			new Map([["post", [{ events: ["insert", "delete", "update"], name: "t" }]]]),
+		)
 		const fts = extractSchema(
 			"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post');\nCREATE TRIGGER post_fts_ad AFTER DELETE ON post BEGIN INSERT INTO post_fts(post_fts, rowid, title) VALUES ('delete', old.id, old.title); END;\nCREATE TRIGGER copy AFTER DELETE ON post BEGIN INSERT INTO post_fts(rowid, title) SELECT id, title FROM post; END;\nCREATE TRIGGER nobody AFTER DELETE ON post BEGIN SELECT 1; END;",
 		)
+		expect(extractSchema("CREATE TRIGGER cut AFTER DELETE ON post").triggers).toMatchObject([
+			{ ftsSync: false, name: "cut" },
+		])
 		expect(fts.triggers.map(({ ftsSync, name }) => [name, ftsSync])).toEqual([
 			["post_fts_ad", true],
 			["copy", false],

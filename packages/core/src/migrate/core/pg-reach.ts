@@ -9,7 +9,7 @@
 import type { ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
-import { type Facts, names, tableOf, typeOf } from "./pg-history.ts"
+import { type Facts, keyOf, names, tableOf, typeOf } from "./pg-history.ts"
 
 type Node = Record<string, unknown>
 
@@ -34,8 +34,8 @@ function reachFindings(
 	ctx: { before?: ExtractedSchema | undefined; facts: Facts },
 ): Finding[] {
 	return reached(table.key, table.inh, ctx.facts).flatMap((key) => [
-		...(ctx.before?.triggers ?? [])
-			.filter((trigger) => trigger.table === key && trigger.events.some((event) => events.includes(event)))
+		...(ctx.facts.triggers.get(key) ?? [])
+			.filter((trigger) => trigger.events.some((event) => events.includes(event)))
 			.map((trigger) => ({
 				level: "unsafe" as const,
 				note: `fires trigger ${trigger.name}, whose body runs for every row it writes`,
@@ -49,8 +49,13 @@ function reachFindings(
 /** A use of a migration's operator, or a cast to a type a migration's cast reaches: its finding */
 function useFinding(type: string, node: Node, facts: Facts): Finding | undefined {
 	if (type === "A_Expr" && Array.isArray(node["name"])) {
-		const operator = names(node["name"]).join(".")
-		const fn = facts.operators.get(operator)
+		const operator = keyOf(names(node["name"]))
+		/* a bare operator resolves through the search path, so it may be a migration's in any schema */
+		const fn =
+			facts.operators.get(operator) ??
+			(operator.includes(".")
+				? undefined
+				: [...facts.operators].find(([key]) => key.split(".").at(-1) === operator)?.[1])
 		if (fn !== undefined)
 			return { level: "unsafe", note: `uses operator ${operator}, which a migration defined (${fn})` }
 	}

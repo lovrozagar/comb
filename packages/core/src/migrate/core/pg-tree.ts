@@ -22,26 +22,27 @@ import type { ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
 import { builtinFinding } from "./pg-builtins.ts"
-import { type Facts, followTree, names, nodesOf, tableOf } from "./pg-history.ts"
+import { type Facts, followTree, keyOf, names, nodesOf, tableOf } from "./pg-history.ts"
 import { postgresParser } from "./pg-parser.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 
 type Node = Record<string, unknown>
 
-/** What the walk reads a statement against: the history, what the file made fresh, and the functions migrations defined */
+/** What the walk reads a statement against: the history, what it and the file so far attached and defined, and what the file made fresh */
 type TreeContext = {
 	before?: ExtractedSchema | undefined
 	/** what the history and the file so far attached to their tables (pg-history.ts) */
 	facts: Facts
 	fresh: Fresh
-	/** the functions the history and the file so far define, keyed as nameKey keys them */
-	functions: Set<string>
 }
 
 // lookup-table: the settings whose change decides what a later statement runs, and why
 const SETTINGS: Readonly<Record<string, string>> = {
 	search_path: "sets search_path, which decides the function or table every later unqualified name resolves to",
 	session_replication_role: "sets session_replication_role, which can turn off triggers and foreign-key checks",
+	role: 'sets the role, which changes the schemas "$user" puts on the search path and what later names resolve to',
+	session_authorization:
+		'sets the session user, which changes the schemas "$user" puts on the search path and what later names resolve to',
 }
 /** The columns a SET list assigns */
 const assigned = (targets: unknown): string[] =>
@@ -100,7 +101,7 @@ function settingFinding(node: Node): Finding | undefined {
 function routineFinding(node: Node, ctx: TreeContext): Finding {
 	const kind = node["is_procedure"] === true ? "procedure" : "function"
 	const name = names(node["funcname"])
-	ctx.functions.add((name[0] === "public" ? name.slice(1) : name).join("."))
+	ctx.facts.defined.add(keyOf(name))
 	return { level: "unsafe", note: `creates ${kind} ${name.join(".")}, whose body comb does not read` }
 }
 
@@ -114,9 +115,9 @@ function codeFinding(type: string, node: Node, ctx: TreeContext): Finding | unde
 			note: `creates trigger ${String(node["trigname"])}, which runs a function on later writes`,
 		}
 	if (type === "VariableSetStmt") return settingFinding(node)
-	if (type === "FuncCall") return builtinFinding(names(node["funcname"]), ctx.functions)
+	if (type === "FuncCall") return builtinFinding(names(node["funcname"]), ctx.facts.defined)
 	/* a CALL holds its call as a plain field, not a typed node */
-	if (type === "CallStmt") return builtinFinding(names((node["funccall"] as Node)["funcname"]), ctx.functions)
+	if (type === "CallStmt") return builtinFinding(names((node["funccall"] as Node)["funcname"]), ctx.facts.defined)
 	return useFinding(type, node, ctx.facts) ?? shadowFinding(type, node, ctx.before)
 }
 
@@ -155,7 +156,7 @@ function pgTreeFindings(stmt: string, ctx: TreeContext): Finding[] {
 	)
 	/* what the statement attached and reparented counts for the statements after it */
 	for (const [type, node] of nodes) if (type === "AlterTableStmt") followParentage(node, ctx.fresh)
-	followTree(tree.stmts, ctx.facts, ctx.functions)
+	followTree(tree.stmts, ctx.facts)
 	return findings
 }
 

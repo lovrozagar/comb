@@ -7,12 +7,14 @@ const FACTS: Facts = {
 	casts: new Map([["mt", { automatic: true, fn: "tomt" }]]),
 	code: new Map([["c", "f"]]),
 	columnTypes: new Map(),
+	defined: new Set(),
 	domains: new Map(),
 	operators: new Map([["===", "eq3"]]),
 	parents: new Map([
 		["c", [{ parent: "p", partition: true }]],
 		["g", [{ parent: "c", partition: true }]],
 	]),
+	triggers: new Map(),
 }
 
 const notes = (key: string, inh: boolean) =>
