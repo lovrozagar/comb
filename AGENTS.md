@@ -49,6 +49,11 @@ From the repo root. CI runs `fmt:check` in place of `fmt`, and covers `test` via
     bun run test:coverage     # vitest at 100% per file, as CI enforces
     bun run test:bun     # bun test — the bun:sqlite replay suite
 
+`test`, `test:coverage`, `test:bun` and `verify` need `atlas` on `PATH` and
+`COMB_TEST_PG_URL` set; without either the run fails rather than skipping the
+Postgres and Atlas suites. On this machine the `comb-pg17` container serves
+`COMB_TEST_PG_URL='postgres://lovro@localhost:55432/postgres?sslmode=disable'`.
+
 `typecheck:strict` exists because comb ships TypeScript source, so a consumer's
 strict flags apply to it. Must stay at zero — see
 `packages/core/docs/meta-contract.md` §10.
