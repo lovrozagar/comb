@@ -123,7 +123,7 @@ describe("provePending on comb 0.8's bypasses, and on a rebuild that loses nothi
 				"FROM users WHERE id > 1;",
 			),
 		)
-		expect(proof.unsafe).toEqual([expect.stringMatching(/^loses \d of the 6 rows of users$/)])
+		expect(proof.unsafe).toEqual([expect.stringMatching(/^loses \d of the 8 rows of users$/)])
 	})
 
 	it("proves Atlas's plain rebuild clean, and calls a new column's backfill cautious", async () => {
@@ -255,7 +255,7 @@ describe("provePending with the database's own triggers and views", () => {
 	/* M12 of the 0.12 round: a temp table of the same name answers for a bare name, so the rows compared are main's */
 	it("compares main's rows, though a temp table takes the table's name", async () => {
 		const proof = await prove(USERS, "CREATE TEMP TABLE users AS SELECT * FROM main.users;\nDELETE FROM main.users;")
-		expect(proof.unsafe).toContain("loses 6 of the 6 rows of users")
+		expect(proof.unsafe).toContain("loses 8 of the 8 rows of users")
 	})
 
 	it("runs a live trigger as the target would: an insert that fires one emptying a table loses its rows", async () => {

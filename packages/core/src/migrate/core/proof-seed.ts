@@ -1,18 +1,21 @@
 /**
- * The proof run's seed: six rows for each table of an in-memory copy of a database, chosen so a
- * change to any value shows. Row 0 takes every default; rows 1 to 3 hold discriminating values
- * (text that looks numeric, mixed case, non-ASCII, signed and large numbers), each column's three
- * distinct, and no two columns sharing a value in a row, so a copy or a swap between columns shows;
- * rows 4 and 5 hold NULLs staggered, row 4 in the even-positioned nullable columns and row 5 in the
- * odd ones (a reseed swaps them), so each NULL sits beside values and a fill from another column
- * shows. Text holds outer whitespace and an empty string. A column a pending file reads with a
- * `json_*` function holds JSON. No value repeats down a column, and an INTEGER primary
+ * The proof run's seed: rows for each table of an in-memory copy of a database, chosen so a change
+ * to any value shows. Row 0 takes every default; rows 1 to 3 hold discriminating values (text that
+ * looks numeric, mixed case, non-ASCII, signed and large numbers), each column's three distinct,
+ * and no two columns sharing a value in a row, so a copy or a swap between columns shows. Then a
+ * pair of rows per bit of the nullable columns' numbering (at least one pair): numbering the
+ * nullable columns 0 to n-1, the pair's first row is NULL where the column's bit is 1 and its
+ * second where it is 0 (a reseed swaps them), so any two nullable columns have a row where one is
+ * NULL and the other holds a value, either way round, and a fill between them shows. Text holds
+ * outer whitespace, and an empty string in row 0's columns without a default (the one value those
+ * columns share). A column a pending file reads as JSON holds JSON, its column's and its seed's
+ * own. No value repeats down a column, and an INTEGER primary
  * key starts past 2^40, an id no migration writes: a file's new unique index or explicit id meets
  * no seeded row. A column checked `IN (...)` takes its listed values, and a key column its parent's
  * keys, parents seeded first (a self-reference, the row before it). A row the table refuses (a
  * CHECK across columns, a range, a shape) takes its defaults, then each slot's values, then each
  * slot's values without the column's offset, then each affinity's shapes (proof-seed-values.ts);
- * rows 4 and 5 take values where their NULLs are refused. A table whose six rows do not all go in is
+ * a NULL row takes values where its NULLs are refused. A table whose rows do not all go in is
  * unproven: a partial seed could hide a loss.
  */
 import type { MemoryDb } from "../drivers/memory.ts"
@@ -20,17 +23,21 @@ import { affinityOf } from "./sqlite-affinity.ts"
 import {
 	type Attempt,
 	type Column,
-	FRESH,
 	JSON_SHAPE,
 	listedValues,
 	shapeCount,
+	slotOf,
 	valueFor,
 } from "./proof-seed-values.ts"
 
 /** A foreign key: its columns, the table they reference, and the referenced columns (none: its primary key) */
 type Key = { from: string[]; table: string; to: string[] }
 
-const ROWS = 6
+/** How many rows a table of `columns` takes: four, and a pair per bit of its nullable columns' numbering */
+function rowCount(columns: readonly Column[]): number {
+	const nullable = columns.filter((column) => column.nullOrdinal >= 0).length
+	return 4 + 2 * Math.max(1, Math.ceil(Math.log2(Math.max(nullable, 1))))
+}
 
 const quote = (name: string): string => `"${name.replaceAll('"', '""')}"`
 
@@ -46,16 +53,22 @@ function uniqueColumns(db: MemoryDb, table: string): Set<string> {
 /** The columns a table declares, by PRAGMA table_xinfo: a generated or hidden column takes no value */
 function columnsOf(db: MemoryDb, table: string): Column[] {
 	const unique = uniqueColumns(db, table)
-	return db.all(`PRAGMA table_xinfo(${quote(table)})`).map((row, index) => ({
-		hasDefault: row["dflt_value"] !== null,
-		index,
-		insertable: row["hidden"] === 0,
-		name: String(row["name"]),
-		nullable: row["notnull"] === 0 && row["pk"] === 0,
-		key: Number(row["pk"]) > 0,
-		type: String(row["type"]),
-		unique: Number(row["pk"]) > 0 || unique.has(String(row["name"])),
-	}))
+	let ordinal = 0
+	return db.all(`PRAGMA table_xinfo(${quote(table)})`).map((row, index) => {
+		const nullable = row["notnull"] === 0 && row["pk"] === 0
+		const insertable = row["hidden"] === 0
+		return {
+			hasDefault: row["dflt_value"] !== null,
+			index,
+			insertable,
+			name: String(row["name"]),
+			nullable,
+			nullOrdinal: nullable && insertable ? ordinal++ : -1,
+			key: Number(row["pk"]) > 0,
+			type: String(row["type"]),
+			unique: Number(row["pk"]) > 0 || unique.has(String(row["name"])),
+		}
+	})
 }
 
 /** A table's foreign keys, each column group of PRAGMA foreign_key_list together */
@@ -93,13 +106,22 @@ type Seeding = {
 }
 
 /** Whether row `row` leaves the column at `index` NULL: row 4 the even positions, row 5 the odd, swapped by a reseed */
-const nullAt = (row: number, index: number, variant: number): boolean =>
-	(row === 4 || row === 5) && (index + variant) % 2 === row % 2
+/**
+ * Whether row `row` leaves the nullable column numbered `ordinal` NULL: rows from 4 come in pairs,
+ * one per bit of the numbering; the first of a pair is NULL where the bit is 1, the second where it
+ * is 0, and a reseed swaps them
+ */
+function nullAt(row: number, ordinal: number, variant: number): boolean {
+	if (row < 4 || ordinal < 0) return false
+	const bit = (ordinal >> Math.floor((row - 4) / 2)) & 1
+	const first = (row - 4) % 2 === 0
+	return bit === (first === (variant % 2 === 0) ? 1 : 0)
+}
 
 /** A column's value in row `row`: JSON where a pending file reads it so, else the attempt's */
 function valueOf(seeding: Seeding, column: Column, at: Attempt): unknown {
 	if (!at.fallback && seeding.json.has(column.name.toLowerCase()) && affinityOf(column.type) === "TEXT")
-		return JSON_SHAPE(at.row)
+		return JSON_SHAPE(at.row, column.index, seeding.variant)
 	return valueFor(column, { ...at, variant: seeding.variant }, listedValues(seeding.sql, column.name))
 }
 
@@ -109,7 +131,7 @@ function rowOf(db: MemoryDb, seeding: Seeding, at: Attempt): Map<string, unknown
 	const values = new Map<string, unknown>()
 	for (const column of seeding.columns.filter((each) => each.insertable)) {
 		if (at.defaults && column.hasDefault) continue
-		const empty = column.nullable && !at.fallback && nullAt(row, column.index, seeding.variant)
+		const empty = !at.fallback && nullAt(row, column.nullOrdinal, seeding.variant)
 		values.set(column.name, empty ? null : valueOf(seeding, column, at))
 	}
 	for (const key of seeding.keys) if (!keyValues(db, seeding, { key, row, values })) return undefined
@@ -135,7 +157,7 @@ function keyValues(
 	const nullable = columns.every((column) => column?.nullable === true)
 	if (source === undefined && !nullable) return false
 	const to = key.to.length > 0 ? key.to : primaryKeyOf(db, key.table)
-	const empty = nullable && nullAt(row, (columns[0] as Column).index, seeding.variant)
+	const empty = nullable && nullAt(row, (columns[0] as Column).nullOrdinal, seeding.variant)
 	for (const [i, name] of key.from.entries())
 		values.set(name, source === undefined || empty ? null : source[to[i] as string])
 	return true
@@ -161,9 +183,9 @@ function insertRow(db: MemoryDb, table: string, values: ReadonlyMap<string, unkn
  * table refuses, every default with each slot, each slot plain, and each shape
  */
 function attempts(row: number): Attempt[] {
-	const own = FRESH[row] as number
+	const own = slotOf(row)
 	const first = { defaults: row === 0, fallback: false, plain: false, row, slot: own }
-	const slots = [own, ...FRESH.filter((slot) => slot !== own)]
+	const slots = [own, ...[0, 1, 2, 3, 4, 5].filter((slot) => slot !== own)]
 	return [
 		first,
 		...slots.map((slot) => ({ defaults: true, fallback: true, plain: false, row, slot })),
@@ -196,9 +218,9 @@ function seedRow(db: MemoryDb, seeding: Seeding, row: number): string | undefine
 	return refusal
 }
 
-/** Seed `table`: its six rows, or why a row would not go in */
+/** Seed `table`: its rows, or why a row would not go in */
 function seedTable(db: MemoryDb, seeding: Seeding): string | undefined {
-	for (let row = 0; row < ROWS; row++) {
+	for (let row = 0; row < rowCount(seeding.columns); row++) {
 		const failed = seedRow(db, seeding, row)
 		if (failed !== undefined) return failed
 	}

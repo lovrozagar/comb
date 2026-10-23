@@ -45,9 +45,9 @@ const SHADOWS: Readonly<Record<string, readonly string[]>> = {
 }
 
 /** The target's schema, read in one SELECT: SQLite's and D1's own objects left out */
-async function liveObjects(conn: Connection): Promise<LiveObject[]> {
+async function liveObjects(conn: Connection, engine: string): Promise<LiveObject[]> {
 	const { columns, rows } = await conn.execute(
-		`SELECT type, name, sql, tbl_name FROM sqlite_master WHERE sql IS NOT NULL${notEngineTables(conn)} ORDER BY rowid`,
+		`SELECT type, name, sql, tbl_name FROM sqlite_master WHERE sql IS NOT NULL${engine} ORDER BY rowid`,
 	)
 	const at = (name: string) => columns.indexOf(name)
 	return rows.map((row) => ({
@@ -76,8 +76,14 @@ function creatable(objects: readonly LiveObject[]): LiveObject[] {
 
 /** The columns, by lower-case name, a pending file reads with a `json_*` function: the seed holds JSON there */
 function jsonColumns(files: ReadonlyArray<{ sql: string }>): Set<string> {
-	const read = /\bjson\w*\s*\(\s*(?:["`[]?\w+["`\]]?\s*\.\s*)?["`[]?(\w+)/gi
-	return new Set(files.flatMap(({ sql }) => [...sql.matchAll(read)].map((match) => (match[1] as string).toLowerCase())))
+	/* a json_* function's first argument, or the column before a -> or ->> */
+	const call = /\bjson\w*\s*\(\s*(?:["`[]?\w+["`\]]?\s*\.\s*)?["`[]?(\w+)/gi
+	const arrow = /(?:["`[]?\w+["`\]]?\s*\.\s*)?["`[]?(\w+)["`\]]?\s*->>?/g
+	return new Set(
+		files.flatMap(({ sql }) =>
+			[...sql.matchAll(call), ...sql.matchAll(arrow)].map((match) => (match[1] as string).toLowerCase()),
+		),
+	)
 }
 
 /** Why a table is unproven when the copy cannot create `object`: none for a view, which holds no rows */
@@ -196,6 +202,7 @@ async function reseeded(
 async function schemaAfter(
 	objects: readonly LiveObject[],
 	files: readonly string[],
+	engine: string,
 ): Promise<LiveObject[] | undefined> {
 	const db = await openMemory()
 	try {
@@ -203,7 +210,7 @@ async function schemaAfter(
 		if (!files.every((sql) => applyToCopy(db, sql).error === undefined)) return undefined
 		return creatable(
 			db
-				.all("SELECT type, name, sql, tbl_name FROM main.sqlite_master WHERE sql IS NOT NULL ORDER BY rowid")
+				.all(`SELECT type, name, sql, tbl_name FROM main.sqlite_master WHERE sql IS NOT NULL${engine} ORDER BY rowid`)
 				.map((row) => ({
 					name: String(row["name"]),
 					sql: String(row["sql"]),
@@ -228,7 +235,9 @@ async function provePending(
 	files: ReadonlyArray<{ name: string; sql: string }>,
 ): Promise<Map<string, Proof>> {
 	const json = jsonColumns(files)
-	let objects = creatable(await liveObjects(conn))
+	/* the engine's own tables, left out of every read of a schema: the target's and the copy's (P4) */
+	const engineTables = notEngineTables(conn)
+	let objects = creatable(await liveObjects(conn, engineTables))
 	let copy = await copyOf(objects, { json, variant: 0 })
 	const proofs = new Map<string, Proof>()
 	let applied: string[] = []
@@ -252,7 +261,7 @@ async function provePending(
 				const why = `comb could not run this in the proof copy: ${run.error}`
 				proofs.set(name, { cautious: [], failed: why, unproven: unprovenOf(copy), unsafe: [why] })
 				/* the later files are proven on the schema this one leaves, seeded fresh (M13) */
-				const after = await schemaAfter(objects, [...applied, sql])
+				const after = await schemaAfter(objects, [...applied, sql], engineTables)
 				if (after === undefined) {
 					failed = `an earlier pending file, ${name}, could not run in the proof copy, so this one is unproven`
 					continue

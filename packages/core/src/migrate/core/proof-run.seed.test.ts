@@ -111,3 +111,50 @@ describe("the copy beside a virtual table", () => {
 		expect(proof).toEqual({ cautious: [], unproven: [], unsafe: [] })
 	})
 })
+
+/* P1–P4 of the 2.4 review */
+describe("the seed against fills between any two nullable columns (P1)", () => {
+	it("catches a fill between nullable columns a NOT NULL column parts", async () => {
+		const live = "CREATE TABLE k (id INTEGER PRIMARY KEY, a TEXT, x INTEGER NOT NULL DEFAULT 0, b TEXT);"
+		const copy =
+			"CREATE TABLE new_k (id INTEGER PRIMARY KEY, a TEXT, x INTEGER NOT NULL DEFAULT 0, b TEXT);\nINSERT INTO new_k (id, a, x, b) SELECT id, a, x, coalesce(b, a) FROM k;\nDROP TABLE k;\nALTER TABLE new_k RENAME TO k;"
+		expect((await prove(live, copy)).unsafe).toContain("changes values of k.b")
+	})
+
+	const FOUR = ["a", "b", "c", "d"]
+	it.each(FOUR.flatMap((from) => FOUR.filter((to) => to !== from).map((to) => [from, to])))(
+		"catches a fill of %s into %s among four nullable columns",
+		async (from, to) => {
+			const columns = FOUR.map((name) => (name === to ? `coalesce(${to}, ${from})` : name)).join(", ")
+			const file = `CREATE TABLE new_n (id INTEGER PRIMARY KEY, a TEXT, b TEXT, c TEXT, d TEXT);\nINSERT INTO new_n (id, a, b, c, d) SELECT id, ${columns} FROM n;\nDROP TABLE n;\nALTER TABLE new_n RENAME TO n;`
+			const proof = await prove("CREATE TABLE n (id INTEGER PRIMARY KEY, a TEXT, b TEXT, c TEXT, d TEXT);", file)
+			expect(proof.unsafe).toContain(`changes values of n.${to as string}`)
+		},
+	)
+})
+
+describe("the seed's JSON, the json readers, and the schema after a failed file (P2–P4)", () => {
+	/* NOT NULL: a swap shows only by the values themselves, never by where NULLs fall */
+	const J = "CREATE TABLE k (id INTEGER PRIMARY KEY, j TEXT NOT NULL UNIQUE, j2 TEXT NOT NULL UNIQUE);"
+
+	it("holds JSON that differs between columns, so a swap shows (P2)", async () => {
+		const swap =
+			"CREATE TABLE new_k (id INTEGER PRIMARY KEY, j TEXT NOT NULL UNIQUE, j2 TEXT NOT NULL UNIQUE);\nINSERT INTO new_k (id, j, j2) SELECT id, j2, j FROM k;\nSELECT json_extract(j, '$.r'), json_extract(j2, '$.r') FROM new_k;\nDROP TABLE k;\nALTER TABLE new_k RENAME TO k;"
+		expect((await prove(J, swap)).unsafe).toContain("changes values of k.j")
+	})
+
+	it("seeds JSON where a file reads a column with -> or ->> (P3)", async () => {
+		const proof = await prove(J, `UPDATE k SET j2 = j ->> '$.r';\nUPDATE k SET j2 = "k".j -> '$.r';`)
+		expect(proof.failed).toBeUndefined()
+	})
+
+	it("leaves the engine's own tables out of the schema a failed file leaves (P4)", async () => {
+		const proofs = await proveAll(K, [
+			["1_auto.sql", "CREATE TABLE s (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT);\nINSERT INTO s (v) VALUES ('a');"],
+			["2_strict.sql", "CREATE TABLE z (n TEXT NOT NULL);\nINSERT INTO z SELECT b FROM k;"],
+			["3_new.sql", "CREATE TABLE ok (id INTEGER PRIMARY KEY);"],
+		])
+		expect(proofs.get("2_strict.sql")?.failed).toMatch(/NOT NULL constraint failed/)
+		expect(proofs.get("3_new.sql")).toEqual({ cautious: [], unproven: [], unsafe: [] })
+	})
+})

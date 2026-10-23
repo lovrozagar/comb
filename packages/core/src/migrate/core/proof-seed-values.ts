@@ -16,6 +16,8 @@ type Column = {
 	insertable: boolean
 	name: string
 	nullable: boolean
+	/** its position among the table's nullable columns, which sets the rows that leave it NULL; -1 for any other */
+	nullOrdinal: number
 	/** a column of the primary key, whose INTEGER values start past 2^40 */
 	key: boolean
 	type: string
@@ -33,27 +35,36 @@ const VALUES: Readonly<Record<string, readonly unknown[]>> = {
 	   alternate columns NULL, hold outer whitespace in the others */
 	TEXT: ["007", "Mixed Case", "ñandú Ü", "", " x ", " zZ "],
 }
-/* each row's slot */
-const FRESH: readonly number[] = [3, 0, 1, 2, 4, 5]
+/**
+ * Each row's slot: row 0 slot 3, rows 1 to 3 slots 0 to 2, and each pair of NULL rows after them
+ * slots 4 and 5 (proof-seed.ts)
+ */
+const slotOf = (row: number): number => (row === 0 ? 3 : row < 4 ? row - 1 : 4 + ((row - 4) % 2))
+/* which pair of NULL rows a row is in, which moves its values apart from every other pair's */
+const pairOf = (row: number): number => (row < 4 ? 0 : Math.floor((row - 4) / 2))
 /* where an INTEGER primary key's values start: past any id a migration writes */
 const KEY_BASE = 2 ** 40
-/* the shapes a CHECK commonly asks for, by affinity, each row `row`'s own */
-const JSON_SHAPE = (row: number): string => `{"r":${row}}`
-const RATIO = (row: number): number => (row + 1) / 8
-const EPOCH_MS = (row: number): number => 1_700_000_000_000 + row
+/** A number for one row of one column in one seed: the shapes' own, no two alike */
+const tag = (row: number, column: number, variant: number): number => row + column * 64 + variant * 65_536
+/* the shapes a CHECK commonly asks for, by affinity, each the row's, the column's and the seed's own */
+const JSON_SHAPE = (row: number, column: number, variant: number): string =>
+	JSON.stringify({ c: column, r: row, v: variant })
+const RATIO = (row: number, column: number, variant: number): number => (row + 1) / 64 + variant / 128 + column / 1e6
+const EPOCH_MS = (row: number, column: number, variant: number): number => 1_700_000_000_000 + tag(row, column, variant)
+type Shape = (row: number, column: number, variant: number) => unknown
 // lookup-table: each affinity's fallback shapes, tried in order
-const SHAPES: Readonly<Record<string, ReadonlyArray<(row: number) => unknown>>> = {
-	BLOB: [(row) => bytes(0xb0, row)],
+const SHAPES: Readonly<Record<string, readonly Shape[]>> = {
+	BLOB: [(row, column, variant) => bytes(0xb0, row, column % 256, variant)],
 	INTEGER: [EPOCH_MS],
-	NUMERIC: [RATIO, EPOCH_MS, (row) => bytes(0xb0, row)],
+	NUMERIC: [RATIO, EPOCH_MS, (row, column, variant) => bytes(0xb0, row, column % 256, variant)],
 	REAL: [RATIO],
 	TEXT: [
 		JSON_SHAPE,
-		(row) => `r${row}@seed.test`,
-		(row) => `${"abcdefghijklmnopqrstuvwxy"}${row}`,
-		(row) => `00000000-0000-4000-8000-00000000000${row}`,
-		(row) => `${"a".repeat(63)}${row}`,
-		(row) => `1000${row}`,
+		(row, column, variant) => `r${row}c${column}v${variant}@seed.test`,
+		(row, column, variant) => tag(row, column, variant).toString(36).padStart(26, "z"),
+		(row, column, variant) => `00000000-0000-4000-8000-${tag(row, column, variant).toString(16).padStart(12, "0")}`,
+		(row, column, variant) => tag(row, column, variant).toString(16).padStart(64, "a"),
+		(row, column, variant) => String(10_000 + (tag(row, column, variant) % 90_000)),
 	],
 }
 /** The most shapes any affinity has: how many shape attempts a row makes */
@@ -107,19 +118,21 @@ function ownValue(value: unknown, index: number): unknown {
  */
 function valueFor(column: Column, at: Attempt & { variant: number }, listed: readonly unknown[] | undefined): unknown {
 	/* a unique column keeps the row's own slot, so no fallback repeats another row's value */
-	const slot = column.unique ? (FRESH[at.row] as number) : at.slot
+	const slot = column.unique ? slotOf(at.row) : at.slot
 	if (listed !== undefined && listed.length > 0) return listed[(slot + 1 + column.index) % listed.length]
 	const affinity = affinityOf(column.type)
 	const shape = at.shape === undefined ? undefined : SHAPES[affinity]?.[at.shape]
-	if (shape !== undefined) return shape(at.row)
+	if (shape !== undefined) return shape(at.row, column.index, at.variant)
 	const slotted = (VALUES[affinity] as readonly unknown[])[slot]
 	const raw = affinity === "BLOB" ? bytes((slotted as number) >> 8, (slotted as number) & 0xff) : slotted
 	/* a reseed moves each column's values by 50 positions, so none is one the first seed held */
-	const value = at.plain ? raw : ownValue(raw, column.index + at.variant * 50)
+	/* each later pair of NULL rows moves its values by 200 positions, so none repeats down a column */
+	const pair = pairOf(at.row) * 200
+	const value = at.plain ? ownValue(raw, pair) : ownValue(raw, column.index + at.variant * 50 + pair)
 	if (!column.key || affinity !== "INTEGER") return value
 	const number = value as number
 	const base = KEY_BASE * (1 + at.variant)
 	return number < 0 ? number - base : number + base
 }
 
-export { type Attempt, type Column, FRESH, JSON_SHAPE, listedValues, shapeCount, valueFor }
+export { type Attempt, type Column, JSON_SHAPE, listedValues, shapeCount, slotOf, valueFor }
