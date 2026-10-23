@@ -13,7 +13,7 @@ import { runCli } from "../../../src/cli/index.ts"
 import { legacyMigrationHash } from "../../../src/migrate/core/parse.ts"
 import { guardRebuilds } from "../../../src/migrate/core/rebuild-guard.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { describeAtlas } from "../support/atlas.ts"
+
 import { CYCLE_BASE, CYCLE_REBUILD } from "../support/cycle-guard.ts"
 
 const dirs: string[] = []
@@ -168,7 +168,7 @@ const WITH_FTS = {
 		"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post');\nCREATE TRIGGER post_fts_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.rowid, new.title); END;",
 }
 
-describeAtlas("migrate baseline", () => {
+describe("migrate baseline", () => {
 	it("records each migration once the database's schema is the one they leave, FTS index and all", async () => {
 		const { dir, url } = project(WITH_FTS)
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
@@ -210,7 +210,7 @@ describe("migrate options", () => {
 	})
 })
 
-describeAtlas("migrate apply refuses a rebuild outside the file's transaction", () => {
+describe("migrate apply refuses a rebuild outside the file's transaction", () => {
 	it("refuses a guarded rebuild in an atlas:txmode none file even with --yes, and keeps every row", async () => {
 		const { dir, url } = project({ "20260101000000_init.sql": CYCLE_BASE })
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)

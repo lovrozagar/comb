@@ -11,8 +11,8 @@ import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import type { MigrationSafety } from "../../../src/migrate/types.ts"
-import { describeAtlas } from "../support/atlas.ts"
-import { describePg, withScratchDb } from "../support/pg.ts"
+
+import { withScratchDb } from "../support/pg.ts"
 
 const POST = (columns: string) => `CREATE TABLE post (id integer PRIMARY KEY, ${columns});`
 const BASE = `${POST("title text NOT NULL, body text, big bigint, price numeric(10,2), n integer DEFAULT 1 CONSTRAINT post_n_check CHECK (n > 0)")}
@@ -35,8 +35,8 @@ const CASES: ReadonlyArray<[string, string, MigrationSafety]> = [
 	["add a nullable column", BASE.replace("body text,", "body text, extra text,"), "safe"],
 ]
 
-describePg("the destructive-change gate on Atlas's Postgres output", () => {
-	describeAtlas("Atlas v1.3.0 diffs", () => {
+describe("the destructive-change gate on Atlas's Postgres output", () => {
+	describe("Atlas v1.3.0 diffs", () => {
 		let dir: string
 
 		beforeAll(() => {

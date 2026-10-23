@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { describeAtlas } from "../support/atlas.ts"
+
 import { FTS, history } from "../support/rebuild-guard.ts"
 
 /* u is referenced, so rebuilding it is Atlas's guarded rebuild; tag is referenced by nothing */
@@ -28,7 +28,7 @@ const STEPS: Array<{ name: string; target: string }> = [
 	{ name: "guarded_rebuild", target: schema({ column: ", `bio` text", strictName: true, strictTag: true }) },
 ]
 
-describeAtlas("comb's own diff output on SQLite", () => {
+describe("comb's own diff output on SQLite", () => {
 	describe("each file comb writes", () => {
 		it("rates safe or cautious, never unsafe, against the history before it", () => {
 			const h = history(undefined, FTS)

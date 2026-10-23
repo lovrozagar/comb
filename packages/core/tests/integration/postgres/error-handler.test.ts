@@ -7,11 +7,11 @@ import { sql } from "drizzle-orm"
 import { drizzle as drizzlePg } from "drizzle-orm/node-postgres"
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js"
 import pg from "pg"
-import { expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { CombError } from "../../../src/error.ts"
 import { pgErrorHandler } from "../../../src/pg/error-handler.ts"
 import type { ConstraintMap } from "../../../src/types.ts"
-import { describePg, type PgSessions, pgUrl, usePg } from "../support/pg.ts"
+import { type PgSessions, pgUrl, usePg } from "../support/pg.ts"
 
 /* 60 characters: Postgres cuts the name of its primary key to fit 63 bytes */
 const LONG = "a_table_whose_name_runs_long_enough_that_its_pkey_is_cut_xyz"
@@ -112,7 +112,7 @@ async function handled(sessions: PgSessions, runner: Runner, statement: string):
 	return "not handled"
 }
 
-describePg("pgErrorHandler on a real server", () => {
+describe("pgErrorHandler on a real server", () => {
 	const sessions = usePg()
 
 	for (const [driver, runner] of Object.entries(RUNNERS)) {
@@ -169,7 +169,7 @@ const caught = (error: unknown) => {
 	return "not handled"
 }
 
-describePg("pgErrorHandler on a real server: retryable failures", () => {
+describe("pgErrorHandler on a real server: retryable failures", () => {
 	const sessions = usePg()
 
 	it("maps a statement timeout (57014) to 503", async () => {
@@ -210,7 +210,7 @@ describePg("pgErrorHandler on a real server: retryable failures", () => {
 	})
 })
 
-describePg("pgErrorHandler on a real server: a server that refuses or ends the session", () => {
+describe("pgErrorHandler on a real server: a server that refuses or ends the session", () => {
 	const sessions = usePg()
 
 	it("maps a write in a read-only transaction (25006) to 503 database_readonly", async () => {
@@ -252,7 +252,7 @@ describePg("pgErrorHandler on a real server: a server that refuses or ends the s
 	})
 })
 
-describePg("pgErrorHandler on a real server: a busy server", () => {
+describe("pgErrorHandler on a real server: a busy server", () => {
 	const sessions = usePg()
 
 	it("maps a lock it gave up waiting for (55P03) to 503, a retry", async () => {
@@ -282,7 +282,7 @@ describePg("pgErrorHandler on a real server: a busy server", () => {
 		const admin = sessions.pg()
 		await admin.query(`CREATE ROLE ${role} LOGIN PASSWORD 'x' CONNECTION LIMIT 0`)
 		try {
-			const url = new URL(pgUrl() as string)
+			const url = new URL(pgUrl())
 			url.username = role
 			url.password = "x"
 			const client = new pg.Client({ connectionString: url.href })
@@ -299,7 +299,7 @@ describePg("pgErrorHandler on a real server: a busy server", () => {
 	})
 })
 
-describePg("pgErrorHandler on a real server: a session the server ends for idling", () => {
+describe("pgErrorHandler on a real server: a session the server ends for idling", () => {
 	const sessions = usePg()
 
 	/** The error the server sends `victim` when it ends the session after `setting` passes */
@@ -324,7 +324,7 @@ describePg("pgErrorHandler on a real server: a session the server ends for idlin
 	})
 })
 
-describePg("pgErrorHandler on a real server: values a request can send (Q8)", () => {
+describe("pgErrorHandler on a real server: values a request can send (Q8)", () => {
 	const sessions = usePg()
 	const MAPS_Q8: ConstraintMap[] = [
 		{ booking: { exclusion: { booking_no_overlap: { cause: "Room booked", errorKey: "room_booked" } } } },

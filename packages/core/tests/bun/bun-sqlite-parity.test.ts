@@ -134,14 +134,11 @@ describe("bun:sqlite constraint errors map like libsql's", () => {
 	})
 })
 
-const PG_URL = process.env.COMB_TEST_PG_URL
+/* required, as in the vitest suites: a run without the server would pass with these skipped */
+const PG_URL = process.env.COMB_TEST_PG_URL ?? ""
+if (PG_URL === "") throw new Error("COMB_TEST_PG_URL is unset: the Bun.SQL cases are required (docs/testing.md)")
 
 describe("Bun.SQL error shape", () => {
-	if (PG_URL === undefined || PG_URL === "") {
-		it.skip("needs COMB_TEST_PG_URL (unset: skipped)", () => undefined)
-		return
-	}
-
 	it("reports SQLSTATE in errno and the constraint name", async () => {
 		const client = new SQL({ max: 1, url: PG_URL })
 		try {
@@ -159,11 +156,6 @@ describe("Bun.SQL error shape", () => {
 })
 
 describe("pgErrorHandler on Bun.SQL, raw and through drizzle", () => {
-	if (PG_URL === undefined || PG_URL === "") {
-		it.skip("needs COMB_TEST_PG_URL (unset: skipped)", () => undefined)
-		return
-	}
-
 	const MAPS: ConstraintMap[] = [
 		{
 			member: {

@@ -13,8 +13,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { PgTarget } from "../../../src/migrate/core/atlas-target.ts"
 import { exportDrizzleSchema } from "../../../src/migrate/core/atlas.ts"
 import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-diff.ts"
-import { DOCKER_VAR, describeAtlas, dockerDevWanted } from "../support/atlas.ts"
-import { describePg, withScratchDb } from "../support/pg.ts"
+import { DOCKER_VAR, dockerDevWanted } from "../support/atlas.ts"
+import { withScratchDb } from "../support/pg.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -92,8 +92,8 @@ const policy = (using: string) => `CREATE POLICY "own" ON "post" AS PERMISSIVE F
 const enumSchema = (values: string, initial: string) =>
 	`CREATE TYPE "status" AS ENUM(${values});\nCREATE TABLE "post" ("id" integer PRIMARY KEY, "s" "status" DEFAULT '${initial}'::"status" NOT NULL);\n`
 
-describePg("migrate diff on Postgres: tables, views and policies", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate diff on Postgres: tables, views and policies", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("diffs a first migration, finds the history synced, and adds a column", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
@@ -144,8 +144,8 @@ describePg("migrate diff on Postgres: tables, views and policies", () => {
 	})
 })
 
-describePg("migrate diff on Postgres: row level security", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate diff on Postgres: row level security", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("enables row level security without a policy, and forces it", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
@@ -190,8 +190,8 @@ describePg("migrate diff on Postgres: row level security", () => {
 	})
 })
 
-describePg("migrate diff on Postgres: row level security across renames and drops", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate diff on Postgres: row level security across renames and drops", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("secures the table a rename creates, as Atlas writes a rename as a create and a drop", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
@@ -239,8 +239,8 @@ describePg("migrate diff on Postgres: row level security across renames and drop
 	})
 })
 
-describePg("migrate diff on Postgres: extensions, enums and schemas", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate diff on Postgres: extensions, enums and schemas", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("diffs an extension's type on a persistent dev database that has the extension", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				await query(devUrl, "CREATE EXTENSION citext")
@@ -329,8 +329,8 @@ describe("dockerDevWanted", () => {
 	})
 })
 
-describePg("migrate diff on Postgres: the default dev database", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate diff on Postgres: the default dev database", () => {
+	describe("with Atlas v1.3.0", () => {
 		it.skipIf(!docker)(
 			"diffs on docker://postgres/17/dev, Atlas's own throwaway container",
 			() => {
@@ -364,8 +364,8 @@ CREATE VIEW "titles" AS (select "id" from "post");
 CREATE POLICY "own" ON "post" AS PERMISSIVE FOR SELECT TO "${role}" USING (owner = current_user);
 `
 
-describePg("migrate diff on Postgres: sequences a default uses", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate diff on Postgres: sequences a default uses", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("diffs drizzle-kit's export of a sequence a column default uses, applies it, and finds it synced", async () => {
 			const role = roleName()
 			await withDevAndTarget(async (devUrl, url) => {
@@ -400,8 +400,8 @@ describePg("migrate diff on Postgres: sequences a default uses", () => {
 const teamPolicy = (idType: string) =>
 	`CREATE TABLE "team" ("id" ${idType} PRIMARY KEY);\nCREATE TABLE "post" ("id" integer PRIMARY KEY, "team_id" integer);\nALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\nCREATE POLICY "p" ON "post" USING (team_id IN (SELECT id FROM team));\n`
 
-describePg("migrate diff on Postgres: a policy over another table, and a role another database made", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate diff on Postgres: a policy over another table, and a role another database made", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("drops and recreates a policy that reads a table Atlas retypes, so the file applies", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
@@ -433,8 +433,8 @@ describePg("migrate diff on Postgres: a policy over another table, and a role an
 	})
 })
 
-describePg("migrate diff on Postgres: hand-written statements about comb's objects", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate diff on Postgres: hand-written statements about comb's objects", () => {
+	describe("with Atlas v1.3.0", () => {
 		const VIEW = 'CREATE VIEW "v" AS (select "id" from "post");\n'
 		const MATVIEW = 'CREATE MATERIALIZED VIEW "mv" AS (select "id" from "post");\n'
 		const POLICY = policy("true")

@@ -7,12 +7,11 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { exportDrizzleSchema } from "../../../src/migrate/core/atlas.ts"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-diff.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { describeAtlas } from "../support/atlas.ts"
 
 const core = join(import.meta.dirname, "../../..")
 
@@ -58,7 +57,7 @@ const exported = () =>
 const diff = (name: string) =>
 	generateIncrementalMigration({ dialect: "sqlite", migrationName: name, migrationsDir: dir, targetSchema: exported() })
 
-describeAtlas("the normalized drizzle-kit SQLite export on Atlas v1.3.0", () => {
+describe("the normalized drizzle-kit SQLite export on Atlas v1.3.0", () => {
 	it("diffs as synced against a history whose key columns are NOT NULL", () => {
 		writeFileSync(join(dir, "20260101000000_init.sql"), SYNCED)
 		generateIncrementalMigration({ dialect: "sqlite", migrationName: "hash", migrationsDir: dir, targetSchema: SYNCED })

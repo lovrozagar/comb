@@ -11,8 +11,8 @@ import { describe, expect, it } from "vitest"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-diff.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { describeAtlas } from "../support/atlas.ts"
-import { describePg, withScratchDb } from "../support/pg.ts"
+
+import { withScratchDb } from "../support/pg.ts"
 
 const TABLES = `CREATE TYPE "status" AS ENUM ('active', 'banned');
 CREATE TABLE "member" ("id" text PRIMARY KEY, "org" text NOT NULL, "status" "status" NOT NULL DEFAULT 'active', "seats" integer NOT NULL DEFAULT 1 CHECK ("seats" > 0)COLUMN);
@@ -30,8 +30,8 @@ const STEPS: Array<{ name: string; target: string }> = [
 	{ name: "drop_policy", target: TABLES.replace("COLUMN", ', "bio" text') },
 ]
 
-describePg("comb's own diff output on Postgres", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("comb's own diff output on Postgres", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("rates safe or cautious, never unsafe, against the history before it", async () => {
 			const dir = mkdtempSync(join(tmpdir(), "comb-pg-own-"))
 			try {

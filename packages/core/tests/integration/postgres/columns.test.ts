@@ -5,9 +5,9 @@
 import { getTableColumns, type SQL } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { PgDialect, pgTable } from "drizzle-orm/pg-core"
-import { expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { c } from "../../../src/pg/columns.ts"
-import { describePg, usePg } from "../support/pg.ts"
+import { usePg } from "../support/pg.ts"
 
 const stamp = pgTable("stamp", {
 	created_at: c.createdAt("created_at"),
@@ -29,7 +29,7 @@ function ddl(): string {
 	return `CREATE TEMP TABLE stamp (${columns.join(", ")})`
 }
 
-describePg("pg columns hold epoch milliseconds (plan 3.10)", () => {
+describe("pg columns hold epoch milliseconds (plan 3.10)", () => {
 	const sessions = usePg()
 
 	it("defaults created_at and updated_at to now, and stores a millisecond timestamp", async () => {

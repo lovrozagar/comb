@@ -2,7 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { applySqliteMigrationTransforms } from "../../../src/migrate/core/atlas.ts"
-import { describeAtlas } from "../support/atlas.ts"
+
 import { libsqlMemory } from "../support/libsql.ts"
 import { BASE, type Engine, FTS, history, REBUILD_U, runScenario, SOUND } from "../support/rebuild-guard.ts"
 import { runCycleScenario } from "../support/cycle-guard.ts"
@@ -190,7 +190,7 @@ function libsqlEngine(): Engine & { close(): void } {
 	}
 }
 
-describeAtlas("the guard around Atlas's rebuild of a referenced table, on libsql", () => {
+describe("the guard around Atlas's rebuild of a referenced table, on libsql", () => {
 	it("keeps every row, key, rowid, sequence and index entry through a rebuild of the parent, then of parent and child", async () => {
 		const engine = libsqlEngine()
 		const h = history()
@@ -240,7 +240,7 @@ describeAtlas("the guard around Atlas's rebuild of a referenced table, on libsql
 	})
 })
 
-describeAtlas("the rowids through Atlas's rebuild, on libsql", () => {
+describe("the rowids through Atlas's rebuild, on libsql", () => {
 	it("keeps every rowid of a text-keyed table and its children through a rebuild, but a 100-column table's without a rowid key, naming it", async () => {
 		const engine = libsqlEngine()
 		const h = history(undefined, "")

@@ -4,10 +4,10 @@
  * rebuild rates cautious; a column retyped to another affinity changes what lands, so it is unsafe.
  */
 import { readFileSync } from "node:fs"
-import { expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { describeAtlas } from "../support/atlas.ts"
+
 import { history } from "../support/rebuild-guard.ts"
 
 const BEFORE = "CREATE TABLE `t` (`id` text PRIMARY KEY, `a` integer, `b` text, `c` integer, `d` text, `e` real);"
@@ -15,7 +15,7 @@ const AFTER =
 	"CREATE TABLE `t` (`id` text PRIMARY KEY, `a` integer NOT NULL DEFAULT (unixepoch() * 1000), `b` text NOT NULL DEFAULT CURRENT_TIMESTAMP, `c` integer, `d` text NOT NULL DEFAULT '0', `e` real NOT NULL DEFAULT -1.5);"
 const RETYPED = AFTER.replace("`c` integer", "`c` text")
 
-describeAtlas("the classification of Atlas's rebuild copies", () => {
+describe("the classification of Atlas's rebuild copies", () => {
 	it("rates a rebuild that fills new NOT NULL columns with their defaults cautious", () => {
 		const h = history(undefined, "")
 		try {

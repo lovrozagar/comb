@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest"
-import { describePg, PG_URL_VAR, pgUrl, usePg } from "../support/pg.ts"
+import { PG_URL_VAR, pgUrl, usePg } from "../support/pg.ts"
 
 describe("pg harness: configuration", () => {
-	it("uses the URL when set, skips locally when unset, and refuses an unset URL in CI", () => {
+	/* a run without the server would pass with the Postgres suites skipped, and a verify stamp would
+	   vouch for it: an unset URL fails the run, locally as in CI */
+	it("uses the URL when set and refuses an unset or empty one, locally as in CI", () => {
 		expect(pgUrl({ [PG_URL_VAR]: "postgres://x" })).toBe("postgres://x")
-		expect(pgUrl({})).toBeUndefined()
-		expect(pgUrl({ [PG_URL_VAR]: "" })).toBeUndefined()
-		expect(() => pgUrl({ CI: "true" })).toThrow(`${PG_URL_VAR} must be set in CI`)
+		expect(() => pgUrl({})).toThrow(`${PG_URL_VAR} is unset: the Postgres suites are required`)
+		expect(() => pgUrl({ [PG_URL_VAR]: "" })).toThrow(`${PG_URL_VAR} is unset`)
+		expect(() => pgUrl({ CI: "true" })).toThrow(`${PG_URL_VAR} is unset`)
 	})
 })
 
-describePg("pg harness: server", () => {
+describe("pg harness: server", () => {
 	const sessions = usePg()
 
 	it("runs node-postgres and postgres.js against TEMP tables", async () => {

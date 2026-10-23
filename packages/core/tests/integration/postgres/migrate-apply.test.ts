@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import pg from "pg"
-import { afterEach, beforeEach, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas, baselineWithAtlas, statusWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
@@ -15,8 +15,8 @@ import { splitEnumValues } from "../../../src/migrate/core/pg-enum-split.ts"
 import { wrapAtlasFile } from "../../../src/migrate/core/pg-objects.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
-import { describeAtlas } from "../support/atlas.ts"
-import { describePg, withScratchDb } from "../support/pg.ts"
+
+import { withScratchDb } from "../support/pg.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -81,8 +81,8 @@ async function editWhileAsking(m: ParsedMigration) {
 	return approveMigration(m, { target: "core", yes: false })
 }
 
-describePg("migrate apply on Postgres", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate apply on Postgres", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("applies, keeps the history out of public, and applies nothing the second time", async () => {
 			await withScratchDb(async (url) => {
 				migrations({
@@ -129,8 +129,8 @@ describePg("migrate apply on Postgres", () => {
 	})
 })
 
-describePg("migrate check on Postgres reads only (M11)", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate check on Postgres reads only (M11)", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("checks a database with no history without creating Atlas's revisions schema on it", async () => {
 			await withScratchDb(async (url) => {
 				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
@@ -163,8 +163,8 @@ describePg("migrate check on Postgres reads only (M11)", () => {
 	})
 })
 
-describePg("migrate apply on Postgres: history it refuses", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate apply on Postgres: history it refuses", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("refuses a file added before one already applied", async () => {
 			await withScratchDb(async (url) => {
 				migrations({ "20260102000000_b.sql": 'CREATE TABLE "b" ("id" integer);\n' })
@@ -187,8 +187,8 @@ describePg("migrate apply on Postgres: history it refuses", () => {
 	})
 })
 
-describePg("migrate apply on Postgres: locks", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate apply on Postgres: locks", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("fails an ALTER that waits behind a reader after lockTimeout, instead of queueing every query", async () => {
 			await withScratchDb(async (url) => {
 				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
@@ -227,8 +227,8 @@ describePg("migrate apply on Postgres: locks", () => {
 	})
 })
 
-describePg("migrate baseline and status on Postgres", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate baseline and status on Postgres", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("records the history of a database set up by hand, runs none of it, and then has nothing to apply", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				await query(url, 'CREATE TABLE "a" ("id" integer)')
@@ -282,8 +282,8 @@ const approveWithYes = (m: ParsedMigration) => approveMigration(m, { target: "co
 /* each writer, given a file whose directive has no blank line after it, as a person may write one */
 const TIGHT = '-- atlas:txmode none\nCREATE INDEX CONCURRENTLY "a_x" ON "a" ("x");\n'
 
-describePg("migrate apply on Postgres: files comb rewrites keep their directives", () => {
-	describeAtlas("with Atlas v1.3.0", () => {
+describe("migrate apply on Postgres: files comb rewrites keep their directives", () => {
+	describe("with Atlas v1.3.0", () => {
 		it("applies each rewritten txmode none file statement by statement, so CREATE INDEX CONCURRENTLY runs", async () => {
 			await withScratchDb(async (url) => {
 				migrations({

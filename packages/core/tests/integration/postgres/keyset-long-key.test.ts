@@ -7,10 +7,10 @@
 import { defineRelations } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { integer, pgTable, text } from "drizzle-orm/pg-core"
-import { expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
-import { describePg, usePg } from "../support/pg.ts"
+import { usePg } from "../support/pg.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 const doc = pgTable("doc", { id: integer("id").primaryKey(), title: text("title").notNull() })
@@ -61,7 +61,7 @@ async function inOrder(sessions: Sessions, order: string): Promise<number[]> {
 	return result.rows.map((row: { id: number }) => row.id)
 }
 
-describePg("a sort key too long for a cursor, on Postgres, while every row is there (R8)", () => {
+describe("a sort key too long for a cursor, on Postgres, while every row is there (R8)", () => {
 	const sessions = usePg()
 	for (const collation of ['"C"', '"default"']) {
 		it.each(["title.asc", "title.desc"])(`pages %s exactly, collation ${collation}`, async (order) => {
@@ -71,7 +71,7 @@ describePg("a sort key too long for a cursor, on Postgres, while every row is th
 	}
 })
 
-describePg("a sort key too long for a cursor, on Postgres, after its anchor row is deleted (R8)", () => {
+describe("a sort key too long for a cursor, on Postgres, after its anchor row is deleted (R8)", () => {
 	const sessions = usePg()
 
 	it.each(["title.asc", "title.desc"])("resumes %s with no row skipped, collation C", async (order) => {

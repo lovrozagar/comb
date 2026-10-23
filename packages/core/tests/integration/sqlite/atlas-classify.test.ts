@@ -12,7 +12,16 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { classifyMigration, extractDropStatements } from "../../../src/migrate/core/classify.ts"
 import { extractSchema } from "../../../src/migrate/core/parse.ts"
 import type { MigrationSafety } from "../../../src/migrate/types.ts"
-import { describeAtlas } from "../support/atlas.ts"
+import { requireAtlas } from "../support/atlas.ts"
+
+/* a run without Atlas would pass with its suites skipped, and a verify stamp would vouch for it:
+   a missing binary fails the run, locally as in CI */
+describe("atlas harness: configuration", () => {
+	it("passes when atlas runs and refuses a missing binary, locally as in CI", () => {
+		expect(() => requireAtlas(() => true)).not.toThrow()
+		expect(() => requireAtlas(() => false)).toThrow("atlas is not on PATH: the Atlas suites are required")
+	})
+})
 
 const BASE = `CREATE TABLE post (id text PRIMARY KEY, title text NOT NULL, body text, n integer);
 CREATE TABLE gone (id text);
@@ -56,7 +65,7 @@ const CASES: readonly Case[] = [
 	{ drops: [], name: "add a nullable column", safety: "safe", to: BASE.replace("n integer", "n integer, extra text") },
 ]
 
-describeAtlas("the destructive-change gate on Atlas's SQLite output", () => {
+describe("the destructive-change gate on Atlas's SQLite output", () => {
 	let dir: string
 
 	beforeAll(() => {

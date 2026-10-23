@@ -6,10 +6,10 @@
 import { defineRelations } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { bigint, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core"
-import { expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
-import { describePg, usePg } from "../support/pg.ts"
+import { usePg } from "../support/pg.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 const item = pgTable("item", {
@@ -19,7 +19,7 @@ const item = pgTable("item", {
 })
 const schema = createListQuerySchema({ sort: ["created", "id"] })
 
-describePg("keyset pagination on a microsecond timestamp (Q2)", () => {
+describe("keyset pagination on a microsecond timestamp (Q2)", () => {
 	const sessions = usePg()
 
 	it.each(["created.desc", "created.asc"])(
@@ -68,7 +68,7 @@ const big = pgTable("big", {
 })
 const bigSchema = createListQuerySchema({ sort: ["name", "id"] })
 
-describePg("keyset pagination on a bigint id (Q5)", () => {
+describe("keyset pagination on a bigint id (Q5)", () => {
 	const sessions = usePg()
 
 	it("pages through ids past 2^53, minting and reading each cursor", async () => {

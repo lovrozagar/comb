@@ -1,7 +1,7 @@
 /**
  * A real Postgres server for the Postgres suites, at `COMB_TEST_PG_URL`. comb's Postgres
  * defects live in driver error shapes, so these run on node-postgres and postgres.js against a
- * server, not an emulator. CI must set the URL; locally the suites skip and say why.
+ * server, not an emulator. The suites are required, locally as in CI: an unset URL fails the run.
  *
  * Every test gets its own sessions, and every table a test makes is TEMP, so tests never see
  * each other's tables and nothing outlives the session.
@@ -9,23 +9,17 @@
 import { randomUUID } from "node:crypto"
 import pg from "pg"
 import postgres from "postgres"
-import { afterEach, beforeEach, describe } from "vitest"
+import { afterEach, beforeEach } from "vitest"
 
 export const PG_URL_VAR = "COMB_TEST_PG_URL"
 
-/** The server URL, or undefined locally when it is unset; under CI an unset URL is an error. */
-export function pgUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+/** The server URL; unset or empty, the run fails, since a skipped suite would pass the gates. */
+export function pgUrl(env: NodeJS.ProcessEnv = process.env): string {
 	const url = env[PG_URL_VAR]
 	if (url !== undefined && url !== "") return url
-	if (env.CI !== undefined && env.CI !== "")
-		throw new Error(`${PG_URL_VAR} must be set in CI: the Postgres suites are required`)
-	return undefined
-}
-
-/** `describe` when a server is configured, else a skipped suite; global-setup.ts prints why. */
-export function describePg(name: string, suite: () => void): void {
-	const unset = pgUrl() === undefined
-	describe.skipIf(unset)(unset ? `${name} (${PG_URL_VAR} unset)` : name, suite)
+	throw new Error(
+		`${PG_URL_VAR} is unset: the Postgres suites are required. Set it to a Postgres server URL (docs/testing.md)`,
+	)
 }
 
 export type PgSessions = {

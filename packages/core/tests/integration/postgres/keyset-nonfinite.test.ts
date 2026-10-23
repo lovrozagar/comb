@@ -8,10 +8,10 @@
 import { defineRelations } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { doublePrecision, integer, pgTable, timestamp } from "drizzle-orm/pg-core"
-import { expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
-import { describePg, usePg } from "../support/pg.ts"
+import { usePg } from "../support/pg.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 const point = pgTable("point", {
@@ -25,7 +25,7 @@ const ROWS = `INSERT INTO point (id, x, at) VALUES
 	(1, 'Infinity', 'infinity'), (2, '-Infinity', '-infinity'), (3, 'NaN', '2026-01-03'),
 	(4, 1.5, '2026-01-04'), (5, NULL, NULL), (6, -2, '2026-01-01 00:00:00.5'), (7, 'Infinity', 'infinity')`
 
-describePg("keyset pagination on keys JSON has no number for (R4)", () => {
+describe("keyset pagination on keys JSON has no number for (R4)", () => {
 	const sessions = usePg()
 
 	/** Every id, a page of one at a time, under `order` */

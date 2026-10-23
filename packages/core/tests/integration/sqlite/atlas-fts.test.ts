@@ -6,9 +6,9 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { generateIncrementalMigration } from "../../../src/migrate/core/atlas.ts"
-import { describeAtlas } from "../support/atlas.ts"
+
 import { libsqlMemory } from "../support/libsql.ts"
 
 /** The FTS DDL the fts generator writes for `table` over `columns` */
@@ -70,7 +70,7 @@ async function search(dir: string, term: string): Promise<string[]> {
 	}
 }
 
-describeAtlas("atlas migrate diff with FTS5 tables (S-12)", () => {
+describe("atlas migrate diff with FTS5 tables (S-12)", () => {
 	it("diffs a plain change on a history that holds FTS, and the FTS still works after it", async () => {
 		const dir = history(["name"])
 		const result = generateIncrementalMigration({

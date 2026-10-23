@@ -9,13 +9,12 @@ import fs from "node:fs"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { runCli } from "../../../src/cli/index.ts"
 import { migrationHashes } from "../../../src/migrate/core/parse.ts"
 import { guardRebuilds } from "../../../src/migrate/core/rebuild-guard.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
 import { run, type Run } from "../../../src/migrate/core/process.ts"
-import { describeAtlas } from "../support/atlas.ts"
 
 const WRANGLER = path.join(
 	path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json")),
@@ -74,7 +73,7 @@ function column(dir: string, sql: string): unknown[] {
 
 const INIT = { "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" }
 
-describeAtlas("comb migrate on D1 through wrangler, --local", () => {
+describe("comb migrate on D1 through wrangler, --local", () => {
 	it("applies through wrangler into d1_migrations, lists it as applied, and finds nothing pending after", async () => {
 		const dir = project(INIT)
 		const apply = io(dir)
@@ -102,7 +101,7 @@ describeAtlas("comb migrate on D1 through wrangler, --local", () => {
 	}, 120_000)
 })
 
-describeAtlas("comb migrate on D1 through wrangler, --local: history and the live schema", () => {
+describe("comb migrate on D1 through wrangler, --local: history and the live schema", () => {
 	it("copies comb 0.7's record into d1_migrations with baseline, so apply runs only what was never applied", async () => {
 		const dir = project(INIT)
 		const hash = migrationHashes(INIT["20260101000000_init.sql"])[0] as string

@@ -9,8 +9,8 @@ import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
 import { createClient } from "@libsql/client"
-import { expect, it } from "vitest"
-import { describeAtlas } from "../support/atlas.ts"
+import { describe, expect, it } from "vitest"
+
 import { type Engine, history, runScenario, SOUND } from "../support/rebuild-guard.ts"
 import { runCycleScenario } from "../support/cycle-guard.ts"
 import { ROWID_NOTES, runRowidScenario } from "../support/rowid-guard.ts"
@@ -76,7 +76,7 @@ function d1FileEngine(dir: string): Engine {
 	}
 }
 
-describeAtlas("the guard around Atlas's rebuild of a referenced table, on D1 through wrangler", () => {
+describe("the guard around Atlas's rebuild of a referenced table, on D1 through wrangler", () => {
 	it("keeps every row, key, rowid, sequence and index entry through a rebuild of the parent, then of parent and child", async () => {
 		const dir = project()
 		try {
