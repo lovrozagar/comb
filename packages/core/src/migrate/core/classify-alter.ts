@@ -7,7 +7,13 @@ import type { Dialect } from "../types.ts"
 import { IDENT, lastPart, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 
 /** What one statement or action makes of the migration: its level, the drops it names, and why */
-type Finding = { drops?: string[] | undefined; level: "cautious" | "lock" | "unsafe"; note?: string | undefined }
+type Finding = {
+	drops?: string[] | undefined
+	level: "cautious" | "lock" | "unsafe"
+	note?: string | undefined
+	/** a SQLite write the classifier leaves to the proof run's engine read (classify-sqlite-write.ts) */
+	pending?: true
+}
 
 /**
  * What the rules need from the file: the dialect and the SQLite rebuilds it makes. A function an

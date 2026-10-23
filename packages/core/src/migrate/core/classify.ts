@@ -16,6 +16,7 @@ import type { Dialect, ExtractedSchema, MigrationClassification } from "../types
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { ftsCommandFindings, preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
+import { sqliteWriteFindings } from "./classify-sqlite-write.ts"
 import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
@@ -168,7 +169,9 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 			: [
 					...findingsOf(codes[i] as string, ctx),
 					...grammarFindings(codes[i] as string, { ...ctx, ftsTriggers }),
-					...(dialect === "sqlite" ? ftsCommandFindings(stmt) : pgTreeFindings(stmt, ctx)),
+					...(dialect === "sqlite"
+						? [...ftsCommandFindings(stmt), ...sqliteWriteFindings(codes[i] as string, ctx)]
+						: pgTreeFindings(stmt, ctx)),
 				]
 		followAdds(codes[i] as string, ctx.fresh)
 		return { code: codes[i] as string, dialect, findings, stmt }
@@ -181,12 +184,11 @@ const readings = (sql: string, { before, dialect }: ClassifyOptions): Read[] =>
 		? [...readFile(sql, before, "sqlite"), ...readFile(sql, before, "postgres")]
 		: readFile(sql, before, dialect)
 
-const entries = (reads: readonly Read[], level: Finding["level"]) =>
+const entries = (reads: readonly Read[], keep: (finding: Finding) => boolean) =>
 	reads.flatMap(({ findings, stmt }) =>
-		findings
-			.filter((f) => f.level === level)
-			.map((f) => (f.note === undefined ? preview(stmt) : `${preview(stmt)} (${f.note})`)),
+		findings.filter(keep).map((f) => (f.note === undefined ? preview(stmt) : `${preview(stmt)} (${f.note})`)),
 	)
+const at = (level: Finding["level"]) => (finding: Finding) => finding.level === level
 
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 function extractDropStatements(sql: string, options: ClassifyOptions = {}): string[] {
@@ -197,7 +199,7 @@ function extractDropStatements(sql: string, options: ClassifyOptions = {}): stri
 function classifyMigration(sql: string, options: ClassifyOptions = {}): MigrationClassification {
 	const reads = readings(sql, options)
 	for (const read of reads) refuseUnrunnable(read, sql)
-	const unsafeStatements = [...new Set(entries(reads, "unsafe"))]
+	const unsafeStatements = [...new Set(entries(reads, at("unsafe")))]
 	/* a statement is listed once, at the strictest level any reading gives it, whatever each finding's note */
 	const unsafe = new Set(
 		reads.filter(({ findings }) => findings.some((f) => f.level === "unsafe")).map(({ stmt }) => preview(stmt)),
@@ -206,13 +208,19 @@ function classifyMigration(sql: string, options: ClassifyOptions = {}): Migratio
 		...new Set(
 			entries(
 				reads.filter(({ stmt }) => !unsafe.has(preview(stmt))),
-				"cautious",
+				at("cautious"),
 			),
 		),
 	]
 	if (TXMODE_NONE.test(sql)) cautiousStatements.push("-- atlas:txmode none: the file is not applied in one transaction")
 	const safety = unsafeStatements.length > 0 ? "unsafe" : cautiousStatements.length > 0 ? "cautious" : "safe"
-	return { cautiousStatements, lockWarnings: [...new Set(entries(reads, "lock"))], safety, unsafeStatements }
+	return {
+		cautiousStatements,
+		lockWarnings: [...new Set(entries(reads, at("lock")))],
+		pendingStatements: [...new Set(entries(reads, (finding) => finding.pending === true))],
+		safety,
+		unsafeStatements,
+	}
 }
 
 export { classifyMigration, type ClassifyOptions, extractDropStatements }

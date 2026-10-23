@@ -73,14 +73,21 @@ function refuseOutOfOrder(files: readonly string[], applied: ReadonlySet<string>
  */
 function withProof(migration: ParsedMigration, proof: Proof): ParsedMigration {
 	const { classification } = migration
-	const unsafeStatements = [...classification.unsafeStatements, ...proof.unsafe.map((note) => `proof run: ${note}`)]
+	/* the engine read what each write does: its findings replace the writes the classifier left pending */
+	const pending = new Set(classification.pendingStatements)
+	const unsafeStatements = [
+		...classification.unsafeStatements.filter((entry) => !pending.has(entry)),
+		...proof.unsafe.map((note) => `proof run: ${note}`),
+	]
 	const cautiousStatements = [
 		...classification.cautiousStatements,
 		...proof.cautious.map((note) => `proof run: ${note}`),
 	]
-	const safety =
-		unsafeStatements.length > 0 ? "unsafe" : cautiousStatements.length > 0 ? "cautious" : classification.safety
-	return { ...migration, classification: { ...classification, cautiousStatements, safety, unsafeStatements } }
+	const safety = unsafeStatements.length > 0 ? "unsafe" : cautiousStatements.length > 0 ? "cautious" : "safe"
+	return {
+		...migration,
+		classification: { ...classification, cautiousStatements, pendingStatements: [], safety, unsafeStatements },
+	}
 }
 
 /** The tables the proof could not seed, as lines to print: one per distinct list, naming the files it holds for */

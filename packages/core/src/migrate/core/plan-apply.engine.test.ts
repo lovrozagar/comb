@@ -149,6 +149,24 @@ describe("engine ratings: triggers, virtual tables and a file the copy refuses",
 	})
 })
 
+/* T10 of the 2.3 review: the classifier alone leaves these writes pending; the proof's own findings replace them */
+describe("engine ratings replace the classifier's pending writes", () => {
+	it("names the engine's finding for a delete, not the pending one", async () => {
+		const { notes, safety } = await rate("DELETE FROM accounts WHERE id = 1;")
+		expect(safety).toBe("unsafe")
+		expect(notes.join("\n")).toContain("deletes existing rows of accounts")
+		expect(notes.join("\n")).not.toContain("pending the proof run's read")
+	})
+
+	it("gives an upsert the engine's finding of the column it updates, not the pending one", async () => {
+		const { notes, safety } = await rate(
+			"INSERT INTO k (id, a) VALUES (1, 'x') ON CONFLICT (id) DO UPDATE SET b = excluded.a WHERE false;",
+		)
+		expect(notes.join("\n")).not.toContain("pending the proof run's read")
+		expect(safety).toBe("unsafe")
+	})
+})
+
 describe("engine ratings: the controls keep theirs", () => {
 	it.each([
 		[

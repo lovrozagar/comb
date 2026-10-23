@@ -332,6 +332,11 @@ export type MigrationClassification = {
     cautiousStatements: string[];
     /** Postgres statements that block a table while they run, with what to do instead */
     lockWarnings: string[];
+    /**
+     * the SQLite writes among `unsafeStatements` the classifier could not clear on its own, pending
+     * the proof run's read of what each writes; the proof's findings replace them
+     */
+    pendingStatements: string[];
 };
 export type ParsedMigration = {
     sql: string;
