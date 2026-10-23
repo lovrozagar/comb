@@ -46,8 +46,9 @@ describe("seal and openSealed", () => {
 		expect(sealed[0]).toBe(1)
 		const aad = new Uint8Array([1, ...bytes(KEYS.cursorScope)])
 		const opened = xchacha20poly1305(cursorKey(KEYS.cursorSecret), sealed.slice(1, 25), aad).decrypt(sealed.slice(25))
-		expect(text(opened)).toBe("plain")
-		expect(sealed.length).toBe(1 + 24 + 5 + 16)
+		/* the text, padded with spaces to the 256-byte bucket (U9) */
+		expect(text(opened)).toBe("plain".padEnd(256, " "))
+		expect(sealed.length).toBe(1 + 24 + 256 + 16)
 	})
 
 	it("opens nothing under another scope or secret, or minted by a client with neither", () => {
@@ -75,8 +76,8 @@ describe("openSealed on what no seal under these options wrote", () => {
 	})
 
 	it("opens nothing spelled another way for the same bytes, or that is no base64url", () => {
-		/* 46 bytes leave 4 padding bits in the last character: setting one keeps the bytes */
-		const sealed = seal(bytes("plain"), KEYS)
+		/* two buckets seal to 553 bytes, which leave 4 padding bits in the last character: setting one keeps the bytes */
+		const sealed = seal(bytes("p".repeat(300)), KEYS)
 		const last = BASE64URL.indexOf(sealed.at(-1) as string)
 		const respelled = `${sealed.slice(0, -1)}${BASE64URL[last ^ 1]}`
 		expect(decodeBase64Url(respelled)).toBeNull()
@@ -133,5 +134,26 @@ describe("assertCursorWired", () => {
 		expect(() => openSealed("x", { ...KEYS, cursorSecret: "short" })).toThrow(unwired)
 		/* eleven three-byte characters are 33 bytes */
 		expect(() => assertCursorWired({ ...KEYS, cursorSecret: "字".repeat(11) })).not.toThrow()
+	})
+})
+
+/* U9 of the 0.12 round: a sealed cursor's length gives away no value's length within its bucket */
+describe("seal: the plaintext padded to a bucket", () => {
+	it("seals plaintexts whose lengths differ within 256 bytes to one length, and a longer one to the next", () => {
+		const short = seal(bytes('{"v":[99000]}'), KEYS)
+		expect(seal(bytes('{"v":[100000]}'), KEYS).length).toBe(short.length)
+		expect(seal(bytes(`{"v":["${"x".repeat(200)}"]}`), KEYS).length).toBe(short.length)
+		expect(seal(bytes(`{"v":["${"x".repeat(300)}"]}`), KEYS).length).toBeGreaterThan(short.length)
+	})
+
+	it("puts 255 and 256 bytes in one bucket and 257 in the next", () => {
+		const [at255, at256, at257] = [255, 256, 257].map((n) => seal(bytes("x".repeat(n)), KEYS).length)
+		expect(at255).toBe(at256)
+		expect(at257).toBeGreaterThan(at256)
+		expect(text(openSealed(seal(bytes("x".repeat(257)), KEYS), KEYS))).toBe("x".repeat(257))
+	})
+
+	it("opens to the plaintext, its padding stripped", () => {
+		expect(text(openSealed(seal(bytes('{"v":[1]}'), KEYS), KEYS))).toBe('{"v":[1]}')
 	})
 })

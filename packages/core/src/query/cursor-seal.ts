@@ -68,11 +68,20 @@ function assertCursorWired(options: CursorOptions): void {
 	sealing(options)
 }
 
-/** `plaintext` sealed under `options`, as base64url */
+/* the size a plaintext is padded up to a multiple of, so a cursor's length tells no value's length within it */
+const BUCKET_BYTES = 256
+
+/**
+ * `plaintext` sealed under `options`, as base64url, padded with spaces up to a multiple of 256
+ * bytes first (U9): AEAD hides the bytes, not their count, and a cursor carries a hidden column's
+ * value too. openSealed strips them: what seal takes ends in no space of its own.
+ */
 function seal(plaintext: Uint8Array, options: CursorOptions): string {
 	const { aad, key } = sealing(options)
 	const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES))
-	const sealed = xchacha20poly1305(key, nonce, aad).encrypt(plaintext)
+	const padded = new Uint8Array(Math.ceil(Math.max(plaintext.length, 1) / BUCKET_BYTES) * BUCKET_BYTES).fill(0x20)
+	padded.set(plaintext)
+	const sealed = xchacha20poly1305(key, nonce, aad).encrypt(padded)
 	return encodeBase64Url(new Uint8Array([VERSION, ...nonce, ...sealed]))
 }
 
@@ -91,7 +100,11 @@ function openSealed(cursor: string, options: CursorOptions): Uint8Array | null {
 	const raw = sealedBytes(cursor)
 	if (raw === null) return null
 	try {
-		return xchacha20poly1305(key, raw.slice(1, 1 + NONCE_BYTES), aad).decrypt(raw.slice(1 + NONCE_BYTES))
+		const padded = xchacha20poly1305(key, raw.slice(1, 1 + NONCE_BYTES), aad).decrypt(raw.slice(1 + NONCE_BYTES))
+		/* the padding seal adds; a cursor's JSON ends in no space of its own */
+		let end = padded.length
+		while (end > 0 && padded[end - 1] === 0x20) end--
+		return padded.slice(0, end)
 	} catch {
 		// reason: a tag that does not verify is a forged, tampered or foreign cursor; callers answer invalid_cursor
 		return null

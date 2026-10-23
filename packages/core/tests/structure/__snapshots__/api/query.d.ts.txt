@@ -109,7 +109,11 @@ declare const MIN_CURSOR_SECRET_BYTES = 32;
 declare function cursorKey(secret: string): Uint8Array;
 /** Throw the 500 sealing throws when `options` cannot seal a cursor */
 declare function assertCursorWired(options: CursorOptions): void;
-/** `plaintext` sealed under `options`, as base64url */
+/**
+ * `plaintext` sealed under `options`, as base64url, padded with spaces up to a multiple of 256
+ * bytes first (U9): AEAD hides the bytes, not their count, and a cursor carries a hidden column's
+ * value too. openSealed strips them: what seal takes ends in no space of its own.
+ */
 declare function seal(plaintext: Uint8Array, options: CursorOptions): string;
 /** Whether `cursor` has a sealed cursor's shape: what a check without the secret can know */
 declare const isSealedShape: (cursor: string) => boolean;
