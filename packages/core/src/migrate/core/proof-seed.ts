@@ -247,7 +247,7 @@ function parentsFirst(db: MemoryDb, tables: readonly string[]): string[] {
 
 /**
  * Seed every table of `tables` (by name, each with its CREATE TABLE) in the copy; returns each
- * table comb could not seed, with why. Foreign keys are off while it seeds, and the seed is then
+ * table comb could not seed, by its folded name, with why. Foreign keys are off while it seeds, and the seed is then
  * checked against them: a table whose rows break a key is unproven too.
  */
 function seedTables(
@@ -269,8 +269,8 @@ function seedTables(
 			variant,
 		}
 		const failed = seedTable(db, seeding)
-		if (failed !== undefined) unproven.set(table, failed)
-		/* a child's key names its parent folded, as PRAGMA foreign_key_list reports it */
+		/* keyed folded, as PRAGMA foreign_key_check and a child's key name the table */
+		if (failed !== undefined) unproven.set(table.toLowerCase(), failed)
 		parents.set(table.toLowerCase(), db.all(`SELECT * FROM ${quote(table)}`))
 	}
 	for (const row of db.all("PRAGMA foreign_key_check")) {

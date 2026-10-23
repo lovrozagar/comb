@@ -127,7 +127,7 @@ function buildCopy(db: MemoryDb, objects: readonly LiveObject[], seed: Seed): Ma
 	for (const object of tables.filter((each) => isVirtual(each) && !seedable.includes(each) && !isMirror(each)))
 		unproven.set(object.name.toLowerCase(), "a virtual table comb does not seed")
 	const definitions = new Map(seedable.map((object) => [object.name, object.sql]))
-	for (const [table, why] of seedTables(db, definitions, seed)) unproven.set(table.toLowerCase(), why)
+	for (const [table, why] of seedTables(db, definitions, seed)) unproven.set(table, why)
 	for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
 	return unproven
 }

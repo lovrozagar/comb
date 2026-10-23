@@ -124,3 +124,21 @@ describe("seedTables on common CHECK shapes (M15)", () => {
 		expect(rows("t").every((row) => Math.abs(Number(row["id"])) >= 2 ** 40)).toBe(true)
 	})
 })
+
+describe("seedTables on a table that fails after a row broke its key", () => {
+	it("keeps why a table failed to seed over its broken key, its name folded however it was written", async () => {
+		const db = await openMemory()
+		open.push(db)
+		const schema = {
+			Kid: "CREATE TABLE Kid (id INTEGER PRIMARY KEY, p INTEGER REFERENCES parent(id))",
+			parent: "CREATE TABLE parent (id TEXT PRIMARY KEY)",
+		}
+		for (const sql of Object.values(schema)) db.exec(sql)
+		/* the second row breaks the key to parent, and the third is refused */
+		db.exec(
+			"CREATE TRIGGER full BEFORE INSERT ON Kid WHEN (SELECT count(*) FROM Kid) >= 2 BEGIN SELECT RAISE(ABORT, 'full'); END",
+		)
+		const unproven = seedTables(db, new Map(Object.entries(schema)), { json: new Set(), variant: 0 })
+		expect(Object.fromEntries(unproven)).toEqual({ kid: "full" })
+	})
+})
