@@ -41,3 +41,16 @@ describe("assertPageWithin: a page no schema bounded (C4)", () => {
 		expect(() => assertPageWithin({})).not.toThrow()
 	})
 })
+
+/* U5 of the 0.12 round: a page no schema validated is a whole number from 1, in both builders */
+describe("assertPageWithin: a page that is no page", () => {
+	it.each([0, -1, 1.5, Number.NaN])("refuses page %s with invalid_page", (page) => {
+		expect(() => assertPageWithin({ page })).toThrow(
+			expect.objectContaining({
+				cause: `page ${page} is not a whole number from 1`,
+				errorKey: "invalid_page",
+				status: 400,
+			}),
+		)
+	})
+})

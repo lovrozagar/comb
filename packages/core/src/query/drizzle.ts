@@ -14,7 +14,7 @@ import { atCursorPrecision, boundAs } from "./cursor-precision.ts"
 import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
 import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
-import { assertSchemaParsed } from "./trusted.ts"
+import { assertPageWithin, assertSchemaParsed } from "./trusted.ts"
 import type { FilterAST, ParsedFields, SortField } from "./types.ts"
 import type { paginationResponseSchema } from "./schema.ts"
 import type * as z from "zod"
@@ -142,7 +142,11 @@ function drizzleListOptions(
 		return orderByKeys(atCursorPrecision(keys), tiebreak)
 	}
 	const base = { limit: query.limit + 1, orderBy, sortOrderBy: query.sortOrderBy }
-	if (!query.cursor) return { ...base, offset: ((query.page ?? 1) - 1) * query.limit }
+	if (!query.cursor) {
+		/* a page no schema bounded is bounded here, as buildListQuery bounds it (U5) */
+		assertPageWithin(query)
+		return { ...base, offset: ((query.page ?? 1) - 1) * query.limit }
+	}
 	const cursor = readCursor(query.cursor, sort, options)
 	const where = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)

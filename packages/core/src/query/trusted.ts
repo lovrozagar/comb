@@ -34,12 +34,21 @@ function assertSchemaParsed(parsed: Parsed): void {
 }
 
 /**
- * Throw a 400 when a page no schema bounded passes the default maxPage: an offset that deep makes
- * the database skip every row before it, which a list schema refuses (C4). A schema's own page,
- * under whatever maxPage it was built with, is trusted.
+ * Throw a 400 for a page no schema bounded that is not a whole number from 1 (U5), which would bind
+ * a negative or fractional offset, or that passes the default maxPage: an offset that deep makes the
+ * database skip every row before it, which a list schema refuses (C4). A schema's own page, under
+ * whatever maxPage it was built with, is trusted.
  */
 function assertPageWithin(parsed: { page?: number | null | undefined; validated?: true | undefined }): void {
-	if (parsed.validated === true || (parsed.page ?? 1) <= PAGINATION_DEFAULTS.maxPage) return
+	if (parsed.validated === true) return
+	const page = parsed.page ?? 1
+	if (!Number.isInteger(page) || page < 1)
+		throw new CombError({
+			cause: `page ${page} is not a whole number from 1`,
+			errorKey: combErrorKeys.INVALID_PAGE,
+			status: "bad_request",
+		})
+	if (page <= PAGINATION_DEFAULTS.maxPage) return
 	throw new CombError({
 		cause: `page ${parsed.page} is past ${PAGINATION_DEFAULTS.maxPage}; page further by cursor`,
 		errorKey: combErrorKeys.PAGE_TOO_DEEP,

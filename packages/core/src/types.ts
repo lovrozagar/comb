@@ -29,6 +29,7 @@ export const combErrorKeys = {
 	FILTER_NOT_WIRED: "filter_not_wired",
 	FOREIGN_KEY_VIOLATION: "foreign_key_violation",
 	INVALID_CURSOR: "invalid_cursor",
+	INVALID_PAGE: "invalid_page",
 	INVALID_SELECT: "invalid_select",
 	INVALID_STATE_TRANSITION: "invalid_state_transition",
 	INVALID_VALUE: "invalid_value",
