@@ -90,6 +90,14 @@ describe("provePending catches each 0.9.1 review bypass on its own (M1–M5, M8)
 		)
 		expect(proof.unsafe).toContain("loses every row of notes")
 	})
+
+	it("M22: names a renamed column and a renamed table as renames, still unsafe", async () => {
+		const users = "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);"
+		expect((await prove(users, "ALTER TABLE users RENAME COLUMN email TO mail;")).unsafe).toEqual([
+			"renames users.email to users.mail",
+		])
+		expect((await prove(users, "ALTER TABLE users RENAME TO accounts;")).unsafe).toEqual(["renames users to accounts"])
+	})
 })
 
 /** comb 0.8's bypasses (G1–G3) as files, and what their proof says */

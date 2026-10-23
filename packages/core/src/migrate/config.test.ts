@@ -297,16 +297,19 @@ describe("findConfigFile and loadConfig", () => {
 		}
 	})
 
-	it("loads a default object, a default function, or the module itself, relative to cwd", async () => {
+	it("loads a default object, a default function, sync or async, or the module itself, relative to cwd", async () => {
 		const dir = project()
 		try {
 			writeFileSync(join(dir, "a.config.ts"), `export default { databases: { a: ${DB} } }\n`)
 			writeFileSync(join(dir, "b.config.ts"), `export default () => ({ databases: { b: ${DB} } })\n`)
 			writeFileSync(join(dir, "c.config.ts"), `export const databases = { c: ${DB} }\n`)
+			/* M23 of the 0.12 round: a function that returns a promise of the config */
+			writeFileSync(join(dir, "d.config.ts"), `export default async () => ({ databases: { d: ${DB} } })\n`)
 			for (const [file, key] of [
 				["a.config.ts", "a"],
 				["b.config.ts", "b"],
 				["c.config.ts", "c"],
+				["d.config.ts", "d"],
 			] as const) {
 				const loaded = await loadConfig(file, dir)
 				expect(Object.keys(loaded.config.databases)).toEqual([key])

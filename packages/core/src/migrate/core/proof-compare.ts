@@ -2,7 +2,9 @@
  * The proof run's comparison (proof-run.ts): each table that was there before a file, before and
  * after it, as a multiset of whole rows over the columns it had. A lost row, a lost column or a
  * changed value is unsafe, and the reason names the table and column; a NULL that lands as the
- * column's new DEFAULT, in a column the file made NOT NULL, is cautious.
+ * column's new DEFAULT, in a column the file made NOT NULL, is cautious. A column or table whose
+ * every value a new one holds, row for row, is named as renamed: still unsafe, since code that
+ * reads the old name breaks.
  */
 import type { MemoryDb } from "../drivers/memory.ts"
 
@@ -63,14 +65,31 @@ function changedColumns(was: Shape, now: Shape, fill: ReadonlyMap<string, string
 	return own.length > 0 ? own : columns.filter((column) => !differs(columns.filter((each) => each !== column)))
 }
 
+/** The new column of `now` that holds `lost`'s values row for row, beside the columns both keep */
+function renamedTo({ now, was }: { now: Shape; was: Shape }, lost: string, taken: ReadonlySet<string>) {
+	const kept = was.columns.filter((each) => now.columns.includes(each))
+	const before = rowKeys(was, [...kept, lost])
+	return now.columns.find(
+		(column) =>
+			!was.columns.includes(column) && !taken.has(column) && missing(before, rowKeys(now, [...kept, column])) === 0,
+	)
+}
+
 /**
  * What a file did to one table that was there before it, compared as a multiset of whole rows over
  * the columns it had: so a value copied, swapped or moved between rows shows, not only one lost
  */
 function compareTable(db: MemoryDb, table: string, { now, was }: { now: Shape; was: Shape }): Findings {
 	const out: Findings = { cautious: [], unsafe: [] }
-	for (const column of was.columns.filter((each) => !now.columns.includes(each)))
-		out.unsafe.push(`loses ${table}.${column}`)
+	const taken = new Set<string>()
+	for (const column of was.columns.filter((each) => !now.columns.includes(each))) {
+		const renamed = renamedTo({ now, was }, column, taken)
+		if (renamed === undefined) out.unsafe.push(`loses ${table}.${column}`)
+		else {
+			taken.add(renamed)
+			out.unsafe.push(`renames ${table}.${column} to ${table}.${renamed}`)
+		}
+	}
 	/* a lost row changes every column's values: the loss alone is the finding */
 	if (now.rows.length < was.rows.length) {
 		out.unsafe.push(`loses ${was.rows.length - now.rows.length} of the ${was.rows.length} rows of ${table}`)
@@ -91,12 +110,26 @@ function compareTable(db: MemoryDb, table: string, { now, was }: { now: Shape; w
 	return out
 }
 
+/** The new table of `after` that holds every column and row of `was`, if one does */
+function renamedTable(was: Shape, before: ReadonlyMap<string, Shape>, after: ReadonlyMap<string, Shape>) {
+	const rows = rowKeys(was, was.columns)
+	return [...after].find(
+		([name, now]) =>
+			!before.has(name) &&
+			now.rows.length === was.rows.length &&
+			was.columns.every((column) => now.columns.includes(column)) &&
+			missing(rows, rowKeys(now, was.columns)) === 0,
+	)?.[0]
+}
+
 /** What a file did to each table that was there before it */
 function compare(db: MemoryDb, before: ReadonlyMap<string, Shape>, after: ReadonlyMap<string, Shape>): Findings {
 	const out: Findings = { cautious: [], unsafe: [] }
 	for (const [table, was] of before) {
 		const now = after.get(table)
-		if (now === undefined) out.unsafe.push(`loses every row of ${table}`)
+		const renamed = now === undefined ? renamedTable(was, before, after) : undefined
+		if (renamed !== undefined) out.unsafe.push(`renames ${table} to ${renamed}`)
+		else if (now === undefined) out.unsafe.push(`loses every row of ${table}`)
 		else {
 			const found = compareTable(db, table, { now, was })
 			out.cautious.push(...found.cautious)

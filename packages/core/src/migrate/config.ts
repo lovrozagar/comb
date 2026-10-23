@@ -206,7 +206,8 @@ export async function loadConfig(configPath?: string, cwd: string = process.cwd(
 
 	const module = (await import(resolvedPath)) as { default?: unknown }
 	const rawConfig = module.default ?? module
-	const exported: unknown = typeof rawConfig === "function" ? (rawConfig as () => unknown)() : rawConfig
+	/* a function may return the config or a promise of it */
+	const exported: unknown = typeof rawConfig === "function" ? await (rawConfig as () => unknown)() : rawConfig
 	/* a plain object is checked as defineConfig checks its input; defineConfig's own output parses as it is */
 	try {
 		return { config: defineConfig(exported as CombMigrateConfig), configDir: dirname(resolvedPath) }

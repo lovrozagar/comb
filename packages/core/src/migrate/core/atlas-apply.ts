@@ -254,8 +254,7 @@ function baselineWithAtlas(options: AtlasCommand): string[] {
 	})
 }
 
-/** Print what is applied and pending, where a file stopped halfway, and each applied file that changed since */
-/** Print what Atlas records as applied and what is pending; returns both, by file name */
+/** Print what Atlas records as applied, what is pending, and where a file stopped halfway; returns both, by file name */
 function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: string[] } {
 	return onSnapshot(options, (copy) => {
 		const status = atlasStatus(options, copy)

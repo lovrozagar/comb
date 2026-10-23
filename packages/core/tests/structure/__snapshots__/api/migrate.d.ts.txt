@@ -496,8 +496,9 @@ export declare function generateIncrementalMigration(options: MigrateDiffOptions
  *
  * unsafe: loses data or breaks deployed code by name (table, column, schema, type, sequence,
  * role drops; CASCADE; retypes; SET NOT NULL; a NOT NULL column without a default; renames;
- * TRUNCATE). cautious: drops nothing a row holds (indexes, constraints, views, policies, triggers,
- * functions, defaults), a grant, or a file Atlas runs outside a transaction. A lock warning names a
+ * TRUNCATE; a statement comb does not recognize, a trigger or routine made or dropped among them).
+ * cautious: drops nothing a row holds (indexes, constraints, views, policies, defaults), a grant, or
+ * a file Atlas runs outside a transaction. A lock warning names a
  * statement that blocks a Postgres table while it runs. What a statement writes is read from the
  * engine: on SQLite by the proof run (proof-engine.ts), on Postgres from its parse tree
  * (pg-tree.ts), which also rates the code a statement runs: DO blocks, routines and function

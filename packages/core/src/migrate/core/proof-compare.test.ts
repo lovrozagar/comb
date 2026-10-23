@@ -125,3 +125,54 @@ describe("compare: the NULL allowance and moved values", () => {
 		])
 	})
 })
+
+/* M22 of the 0.12 round: a rename keeps every value, so the proof says so, still unsafe, rather than call it a loss */
+describe("compare: renames", () => {
+	const users = shape(
+		["id", "email"],
+		[
+			["1", "'a@x'"],
+			["2", "'b@x'"],
+		],
+	)
+
+	it("names a column whose values a new column holds row for row as renamed", async () => {
+		const renamed = shape(["id", "mail"], users.rows)
+		expect(compare(await memory(), new Map([["users", users]]), new Map([["users", renamed]])).unsafe).toEqual([
+			"renames users.email to users.mail",
+		])
+	})
+
+	it("calls a column lost when the new column's values do not follow its rows", async () => {
+		const shuffled = shape(
+			["id", "mail"],
+			[
+				["1", "'b@x'"],
+				["2", "'a@x'"],
+			],
+		)
+		expect(compare(await memory(), new Map([["users", users]]), new Map([["users", shuffled]])).unsafe).toEqual([
+			"loses users.email",
+		])
+	})
+
+	it("gives each new column to one lost column only", async () => {
+		const twins = shape(["id", "a", "b"], [["1", "'v'", "'v'"]])
+		const one = shape(["id", "c"], [["1", "'v'"]])
+		expect(compare(await memory(), new Map([["t", twins]]), new Map([["t", one]])).unsafe).toEqual([
+			"renames t.a to t.c",
+			"loses t.b",
+		])
+	})
+
+	it("names a table whose rows a new table holds as renamed, and a table with other rows as lost", async () => {
+		const db = await memory()
+		expect(compare(db, new Map([["users", users]]), new Map([["accounts", users]])).unsafe).toEqual([
+			"renames users to accounts",
+		])
+		const other = shape(users.columns, [users.rows[0] as string[]])
+		expect(compare(db, new Map([["users", users]]), new Map([["accounts", other]])).unsafe).toEqual([
+			"loses every row of users",
+		])
+	})
+})
