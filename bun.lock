@@ -8,7 +8,7 @@
         "@clack/prompts": "^0.11.0",
         "@commitlint/cli": "21.2.4",
         "@commitlint/config-conventional": "21.2.4",
-        "@lovrozagar/grunt": "0.11.1",
+        "@lovrozagar/grunt": "0.11.2",
         "lefthook": "2.2.2",
         "oxfmt": "0.74.0",
         "oxlint": "1.89.0",
@@ -329,7 +329,7 @@
 
     "@lovrozagar/comb": ["@lovrozagar/comb@workspace:packages/core"],
 
-    "@lovrozagar/grunt": ["@lovrozagar/grunt@0.11.1", "", { "dependencies": { "@clack/prompts": "^0.11.0", "cross-spawn": "^7.0.6", "smol-toml": "^1.8.0" }, "bin": { "grunt": "bin/grunt.js" } }, "sha512-+h41bf5YqMGgyqKWelzx68bgW6zfeggxwXp+X5c1uKKCKqRfVa05n6tJRRzpYoskoOcIxKduX5M1pU4HG/TMDw=="],
+    "@lovrozagar/grunt": ["@lovrozagar/grunt@0.11.2", "", { "dependencies": { "@clack/prompts": "^0.11.0", "cross-spawn": "^7.0.6", "smol-toml": "^1.8.0" }, "bin": { "grunt": "bin/grunt.js" } }, "sha512-Bbv928IPeLBQUkqlP5CMLP+oCmfuYsvq1dwq7EmsQEXlyxFLICVDx4+BlAo+NICwGUyqBnvGY9M3p0PbiPKlBQ=="],
 
     "@modelcontextprotocol/client": ["@modelcontextprotocol/client@2.3.1", "", { "dependencies": { "@modelcontextprotocol/core": "2.3.1", "cross-spawn": "^7.0.5", "eventsource": "^3.0.2", "eventsource-parser": "^3.0.8", "jose": "^6.1.3", "pkce-challenge": "^5.0.0", "zod": "^4.2.0" } }, "sha512-mIGZXpHsjnZ6lD+gD/WCMpR5k8yVQQ8nNFH1N0Srf7AvnwTUMYD6pvTY8ng2+He5FfV7YMZLmrjL7cLa/cc3dQ=="],
 
