@@ -38,6 +38,8 @@ type FileContext = RebuildContext & {
 	/** the columns the file has added so far and nothing has written since: a backfill may fill them */
 	fresh: Fresh
 	created: Set<string>
+	/** the functions the history and the file so far define, keyed as nameKey keys them (pg-tree.ts) */
+	functions: Set<string>
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
 	reindexed: Set<string>
 	/** the statements the file prepares, by name, with the code each runs */
@@ -151,6 +153,7 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		before,
 		created,
 		dialect,
+		functions: new Set(before?.functions ?? []),
 		fresh: freshStart(before, dialect),
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
 		prepared,

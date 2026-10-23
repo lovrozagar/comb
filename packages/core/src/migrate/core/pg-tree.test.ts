@@ -132,3 +132,45 @@ describe("Postgres names, keyed as Postgres resolves them", () => {
 		expect(rate("INSERT INTO public.logged (id) VALUES (1);").safety).toBe("unsafe")
 	})
 })
+
+/* T1, T2, T3 and T7 of the 2.3 review */
+describe("Postgres statements that change what later names resolve to, or what a write runs", () => {
+	beforeAll(loadPostgresParser)
+	const OVERLOADED = extractSchema(
+		"CREATE TYPE mytype AS (v int);\nCREATE TABLE users (id int PRIMARY KEY);\nCREATE FUNCTION public.lower(mytype) RETURNS text LANGUAGE sql AS $$ DELETE FROM users RETURNING 'x' $$;",
+		undefined,
+		"postgres",
+	)
+
+	it("reads a built-in's name that a migration defined as that migration's function (T1)", () => {
+		const call = "SELECT 1 WHERE lower(ROW(1)::mytype) IS NULL;"
+		expect(classifyMigration(call, { before: OVERLOADED, dialect: "postgres" }).safety).toBe("unsafe")
+		expect(classifyMigration(call, { before: OVERLOADED, dialect: "postgres" }).unsafeStatements.join("\n")).toContain(
+			"calls lower, a function a migration defined",
+		)
+		/* pg_catalog's own, called by its schema, is the built-in */
+		expect(classifyMigration("SELECT pg_catalog.lower('X');", { before: OVERLOADED, dialect: "postgres" }).safety).toBe(
+			"safe",
+		)
+	})
+
+	it.each([
+		["SET search_path TO public, pg_catalog;", "search_path"],
+		["SET LOCAL search_path = app;", "search_path"],
+		["RESET search_path;", "search_path"],
+		["SET session_replication_role = replica;", "session_replication_role"],
+	])("rates %j unsafe (T2, T3)", (sql, setting) => {
+		const rated = rate(sql)
+		expect(rated.safety).toBe("unsafe")
+		expect(rated.unsafeStatements.join("\n")).toContain(`sets ${setting}`)
+	})
+
+	it("keeps an ordinary setting safe", () => {
+		expect(rate("SET statement_timeout = '5s';").safety).toBe("safe")
+	})
+
+	it("reads SELECT INTO TEMP as a temp table that takes the name (T7)", () => {
+		expect(notes("SELECT * INTO TEMP users FROM audit;")).toContain("shadows users for the rest of the file")
+		expect(rate("SELECT * INTO TEMP scratch FROM audit;").safety).toBe("safe")
+	})
+})

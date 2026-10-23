@@ -25,6 +25,20 @@ import { builtinFinding } from "./pg-builtins.ts"
 import { postgresParser } from "./pg-parser.ts"
 
 type Node = Record<string, unknown>
+
+/** What the walk reads a statement against: the history, what the file made fresh, and the functions migrations defined */
+type TreeContext = {
+	before?: ExtractedSchema | undefined
+	fresh: Fresh
+	/** the functions the history and the file so far define, keyed as nameKey keys them */
+	functions: Set<string>
+}
+
+// lookup-table: the settings whose change decides what a later statement runs, and why
+const SETTINGS: Readonly<Record<string, string>> = {
+	search_path: "sets search_path, which decides the function or table every later unqualified name resolves to",
+	session_replication_role: "sets session_replication_role, which can turn off triggers and foreign-key checks",
+}
 /** Every node under `node`, by its type, the type's fields with it */
 function nodesOf(node: unknown, out: Array<[string, Node]> = []): Array<[string, Node]> {
 	if (Array.isArray(node)) for (const each of node) nodesOf(each, out)
@@ -76,11 +90,7 @@ function updateFinding(table: { key: string; name: string }, columns: string[], 
 }
 
 /** A write node's findings: its own rating, and the triggers it fires */
-function writeFindings(
-	type: string,
-	node: Node,
-	ctx: { before?: ExtractedSchema | undefined; fresh: Fresh },
-): Finding[] {
+function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
 	const table = tableOf(node["relation"])
 	if (type === "DeleteStmt")
 		return [{ level: "unsafe", note: `deletes rows of ${table.name}` }, ...firedOn(ctx.before, table.key, ["delete"])]
@@ -111,30 +121,40 @@ function writeFindings(
 	return firedOn(ctx.before, table.key, ["insert"])
 }
 
-/** A node that runs code comb does not read, or shadows a table: its finding */
-function codeFinding(type: string, node: Node, before: ExtractedSchema | undefined): Finding | undefined {
+/** A SET, SET LOCAL or RESET of a setting that decides what later statements run: its finding */
+function settingFinding(node: Node): Finding | undefined {
+	if (node["kind"] === "VAR_RESET_ALL") return { level: "unsafe", note: "resets every setting, search_path among them" }
+	const note = SETTINGS[String(node["name"])]
+	return note === undefined ? undefined : { level: "unsafe", note }
+}
+
+/** A function or procedure the file creates: its finding, its name kept as one a migration defined */
+function routineFinding(node: Node, ctx: TreeContext): Finding {
+	const kind = node["is_procedure"] === true ? "procedure" : "function"
+	const name = names(node["funcname"])
+	ctx.functions.add((name[0] === "public" ? name.slice(1) : name).join("."))
+	return { level: "unsafe", note: `creates ${kind} ${name.join(".")}, whose body comb does not read` }
+}
+
+/** A node that runs code comb does not read, changes what later names resolve to, or shadows a table: its finding */
+function codeFinding(type: string, node: Node, ctx: TreeContext): Finding | undefined {
 	if (type === "DoStmt") return { level: "unsafe", note: "runs a DO block, whose body comb does not read" }
-	if (type === "CreateFunctionStmt") {
-		const kind = node["is_procedure"] === true ? "procedure" : "function"
-		return {
-			level: "unsafe",
-			note: `creates ${kind} ${names(node["funcname"]).join(".")}, whose body comb does not read`,
-		}
-	}
+	if (type === "CreateFunctionStmt") return routineFinding(node, ctx)
 	if (type === "CreateTrigStmt")
 		return {
 			level: "unsafe",
 			note: `creates trigger ${String(node["trigname"])}, which runs a function on later writes`,
 		}
-	if (type === "FuncCall") return builtinFinding(names(node["funcname"]))
+	if (type === "VariableSetStmt") return settingFinding(node)
+	if (type === "FuncCall") return builtinFinding(names(node["funcname"]), ctx.functions)
 	/* a CALL holds its call as a plain field, not a typed node */
-	if (type === "CallStmt") return builtinFinding(names((node["funccall"] as Node)["funcname"]))
-	return shadowFinding(type, node, before)
+	if (type === "CallStmt") return builtinFinding(names((node["funccall"] as Node)["funcname"]), ctx.functions)
+	return shadowFinding(type, node, ctx.before)
 }
 
 /** A temp table or view that takes an existing table's name: its finding */
 function shadowFinding(type: string, node: Node, before: ExtractedSchema | undefined): Finding | undefined {
-	/* a CREATE TABLE AS holds its target as a plain field, not a typed node */
+	/* a CREATE TABLE AS holds its target as a plain field, as SELECT … INTO does, not a typed node */
 	const relation =
 		type === "CreateStmt"
 			? node["relation"]
@@ -142,7 +162,7 @@ function shadowFinding(type: string, node: Node, before: ExtractedSchema | undef
 				? node["view"]
 				: type === "CreateTableAsStmt"
 					? (node["into"] as Node)["rel"]
-					: undefined
+					: (node["intoClause"] as Node | undefined)?.["rel"]
 	const table = relation === undefined ? undefined : tableOf(relation)
 	if (table?.temp === true && before?.tables.has(table.name) === true)
 		return { level: "unsafe", note: `shadows ${table.name} for the rest of the file` }
@@ -150,7 +170,7 @@ function shadowFinding(type: string, node: Node, before: ExtractedSchema | undef
 }
 
 /** One Postgres statement's findings, read from its parse tree */
-function pgTreeFindings(stmt: string, ctx: { before?: ExtractedSchema | undefined; fresh: Fresh }): Finding[] {
+function pgTreeFindings(stmt: string, ctx: TreeContext): Finding[] {
 	const parser = postgresParser()
 	let tree: { stmts?: unknown }
 	try {
@@ -162,8 +182,8 @@ function pgTreeFindings(stmt: string, ctx: { before?: ExtractedSchema | undefine
 	return nodesOf(tree.stmts).flatMap(([type, node]) =>
 		/^(?:InsertStmt|UpdateStmt|DeleteStmt|MergeStmt)$/.test(type)
 			? writeFindings(type, node, ctx)
-			: [codeFinding(type, node, ctx.before)].filter((finding) => finding !== undefined),
+			: [codeFinding(type, node, ctx)].filter((finding) => finding !== undefined),
 	)
 }
 
-export { pgTreeFindings }
+export { pgTreeFindings, type TreeContext }
