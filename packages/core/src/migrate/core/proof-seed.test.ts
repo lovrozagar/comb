@@ -12,25 +12,27 @@ async function seeded(schema: Record<string, string>) {
 	const db = await openMemory()
 	open.push(db)
 	for (const sql of Object.values(schema)) db.exec(sql)
-	const unproven = seedTables(db, new Map(Object.entries(schema)))
+	const unproven = seedTables(db, new Map(Object.entries(schema)), { json: new Set(), variant: 0 })
 	const rows = (table: string) => db.all(`SELECT * FROM ${quote(table)}`)
 	return { rows, unproven }
 }
 
 describe("seedTables", () => {
-	it("makes six rows: defaults, three distinct values, NULLs, and no repeat down a column", async () => {
+	it("makes six rows: defaults, three distinct values, staggered NULLs, and no repeat down a column", async () => {
 		const { rows, unproven } = await seeded({
 			t: "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT DEFAULT 'd', b TEXT NOT NULL)",
 		})
 		expect(unproven).toEqual(new Map())
-		/* by key, each past 2^40: row 0 is 42; each column's values carry its position (G1b) */
+		/* by key, each past 2^40: row 0 is 42; each column's values carry its position (G1b), before any
+		   trailing whitespace; row 0 holds an empty string where no default fills it, and rows 4 and 5
+		   leave alternate columns NULL, holding outer whitespace in the others (M10) */
 		const K = 2 ** 40
 		expect(rows("t").map((row) => [row["id"], row["a"], row["b"]])).toEqual([
 			[-1 - K, "Mixed Case1", "Mixed Case2"],
 			[7 + K, "0071", "0072"],
-			[42 + K, "d", "0102"],
-			[99 + K, null, "Zz2"],
-			[100 + K, "zZ 21", "zZ 22"],
+			[42 + K, "d", ""],
+			[99 + K, " x1 ", " x2 "],
+			[100 + K, null, " zZ2 "],
 			[2_147_483_648 + K, "ñandú Ü1", "ñandú Ü2"],
 		])
 	})

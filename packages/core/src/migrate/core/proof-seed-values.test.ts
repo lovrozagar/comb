@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type Column, FRESH, listedValues, SHAPES, valueFor } from "./proof-seed-values.ts"
+import { type Column, FRESH, listedValues, valueFor } from "./proof-seed-values.ts"
 
 const column = (over: Partial<Column> = {}): Column => ({
 	hasDefault: false,
@@ -40,8 +40,17 @@ describe("valueFor", () => {
 		expect(valueFor(column({ unique: true }), at({ row: 4, slot: 0 }), undefined)).toBe(
 			valueFor(column(), at({ row: 4, slot: FRESH[4] }), undefined),
 		)
-		expect(valueFor(column(), at({ plain: true, shape: 1 }), undefined)).toBe((SHAPES[1] as (row: number) => string)(1))
-		expect(valueFor(column({ type: "INTEGER" }), at({ shape: 0 }), undefined)).toBe(1007)
+		expect(valueFor(column(), at({ plain: true, shape: 1 }), undefined)).toBe("r1@seed.test")
+		expect(valueFor(column(), at({ plain: true, shape: 3 }), undefined)).toHaveLength(36)
+		expect(valueFor(column(), at({ plain: true, shape: 4 }), undefined)).toMatch(/^[0-9a-f]{64}$/)
+		expect(valueFor(column(), at({ plain: true, shape: 5 }), undefined)).toMatch(/^\d{5}$/)
+		/* M11: each affinity's own shapes, a ratio in [0, 1], epoch milliseconds and bytes among them */
+		expect(valueFor(column({ type: "INTEGER" }), at({ shape: 0 }), undefined)).toBe(1_700_000_000_001)
+		expect(valueFor(column({ type: "REAL" }), at({ shape: 0 }), undefined)).toBe(0.25)
+		expect(valueFor(column({ type: "" }), at({ shape: 0 }), undefined)).toEqual(Uint8Array.from([0xb0, 1]))
+		expect(valueFor(column({ type: "NUMERIC" }), at({ shape: 2 }), undefined)).toEqual(Uint8Array.from([0xb0, 1]))
+		/* a shape the affinity has none of falls back to its slot */
+		expect(valueFor(column({ type: "REAL" }), at({ shape: 3 }), undefined)).toBe(1.5 + 1000)
 		expect(valueFor(column(), at(), ["a", "b"])).toBe("a")
 	})
 

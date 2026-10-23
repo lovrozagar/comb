@@ -3,17 +3,29 @@
  * change to any value shows. Row 0 takes every default; rows 1 to 3 hold discriminating values
  * (text that looks numeric, mixed case, non-ASCII, signed and large numbers), each column's three
  * distinct, and no two columns sharing a value in a row, so a copy or a swap between columns shows;
- * row 4 is NULL in every nullable column. No value repeats down a column, and an INTEGER primary
+ * rows 4 and 5 hold NULLs staggered, row 4 in the even-positioned nullable columns and row 5 in the
+ * odd ones (a reseed swaps them), so each NULL sits beside values and a fill from another column
+ * shows. Text holds outer whitespace and an empty string. A column a pending file reads with a
+ * `json_*` function holds JSON. No value repeats down a column, and an INTEGER primary
  * key starts past 2^40, an id no migration writes: a file's new unique index or explicit id meets
  * no seeded row. A column checked `IN (...)` takes its listed values, and a key column its parent's
  * keys, parents seeded first (a self-reference, the row before it). A row the table refuses (a
  * CHECK across columns, a range, a shape) takes its defaults, then each slot's values, then each
- * slot's values without the column's offset, then a JSON object, an email and a 26-character
- * text; row 4 takes values where its NULLs are refused. A table whose six rows do not all go in is
+ * slot's values without the column's offset, then each affinity's shapes (proof-seed-values.ts);
+ * rows 4 and 5 take values where their NULLs are refused. A table whose six rows do not all go in is
  * unproven: a partial seed could hide a loss.
  */
 import type { MemoryDb } from "../drivers/memory.ts"
-import { type Attempt, type Column, FRESH, listedValues, SHAPES, valueFor } from "./proof-seed-values.ts"
+import { affinityOf } from "./sqlite-affinity.ts"
+import {
+	type Attempt,
+	type Column,
+	FRESH,
+	JSON_SHAPE,
+	listedValues,
+	shapeCount,
+	valueFor,
+} from "./proof-seed-values.ts"
 
 /** A foreign key: its columns, the table they reference, and the referenced columns (none: its primary key) */
 type Key = { from: string[]; table: string; to: string[] }
@@ -72,10 +84,23 @@ type Seeding = {
 	columns: Column[]
 	keys: Key[]
 	parents: ReadonlyMap<string, Array<Record<string, unknown>>>
+	/** the columns, by lower-case name, a pending file reads with a `json_*` function */
+	json: ReadonlySet<string>
 	sql: string
 	table: string
 	/** which seed this is: a reseed (1) holds values the first seed (0) never did */
 	variant: number
+}
+
+/** Whether row `row` leaves the column at `index` NULL: row 4 the even positions, row 5 the odd, swapped by a reseed */
+const nullAt = (row: number, index: number, variant: number): boolean =>
+	(row === 4 || row === 5) && (index + variant) % 2 === row % 2
+
+/** A column's value in row `row`: JSON where a pending file reads it so, else the attempt's */
+function valueOf(seeding: Seeding, column: Column, at: Attempt): unknown {
+	if (!at.fallback && seeding.json.has(column.name.toLowerCase()) && affinityOf(column.type) === "TEXT")
+		return JSON_SHAPE(at.row)
+	return valueFor(column, { ...at, variant: seeding.variant }, listedValues(seeding.sql, column.name))
 }
 
 /** Row `row` of a table: each column's value, a key's columns from a parent row, or nothing where a default fills it */
@@ -84,20 +109,17 @@ function rowOf(db: MemoryDb, seeding: Seeding, at: Attempt): Map<string, unknown
 	const values = new Map<string, unknown>()
 	for (const column of seeding.columns.filter((each) => each.insertable)) {
 		if (at.defaults && column.hasDefault) continue
-		values.set(
-			column.name,
-			row === 4 && column.nullable && !at.fallback
-				? null
-				: valueFor(column, { ...at, variant: seeding.variant }, listedValues(seeding.sql, column.name)),
-		)
+		const empty = column.nullable && !at.fallback && nullAt(row, column.index, seeding.variant)
+		values.set(column.name, empty ? null : valueOf(seeding, column, at))
 	}
 	for (const key of seeding.keys) if (!keyValues(db, seeding, { key, row, values })) return undefined
 	return values
 }
 
 /**
- * A key's columns in row `row`, from a parent row (NULL in row 4 where every column may be NULL,
- * or when the parent has no rows); false when the parent has none and the key may not be NULL
+ * A key's columns in row `row`, from a parent row (NULL where the row leaves its first column NULL
+ * and every column may be, or when the parent has no rows); false when the parent has none and
+ * the key may not be NULL
  */
 function keyValues(
 	db: MemoryDb,
@@ -109,11 +131,13 @@ function keyValues(
 	const self = key.table === seeding.table.toLowerCase()
 	const parent = self ? db.all(`SELECT * FROM ${quote(seeding.table)}`) : (seeding.parents.get(key.table) ?? [])
 	const source = self ? parent.at(-1) : parent[row % Math.max(parent.length, 1)]
-	const nullable = key.from.every((name) => seeding.columns.find((c) => c.name === name)?.nullable === true)
+	const columns = key.from.map((name) => seeding.columns.find((c) => c.name === name))
+	const nullable = columns.every((column) => column?.nullable === true)
 	if (source === undefined && !nullable) return false
 	const to = key.to.length > 0 ? key.to : primaryKeyOf(db, key.table)
+	const empty = nullable && nullAt(row, (columns[0] as Column).index, seeding.variant)
 	for (const [i, name] of key.from.entries())
-		values.set(name, source === undefined || (row === 4 && nullable) ? null : source[to[i] as string])
+		values.set(name, source === undefined || empty ? null : source[to[i] as string])
 	return true
 }
 
@@ -134,7 +158,7 @@ function insertRow(db: MemoryDb, table: string, values: ReadonlyMap<string, unkn
 
 /**
  * What row `row` tries, in order: its own slot (row 0 with every default), then, for a row the
- * table refuses, every default with each slot, each slot plain, and each text shape
+ * table refuses, every default with each slot, each slot plain, and each shape
  */
 function attempts(row: number): Attempt[] {
 	const own = FRESH[row] as number
@@ -144,7 +168,14 @@ function attempts(row: number): Attempt[] {
 		first,
 		...slots.map((slot) => ({ defaults: true, fallback: true, plain: false, row, slot })),
 		...slots.map((slot) => ({ defaults: true, fallback: true, plain: true, row, slot })),
-		...SHAPES.map((_, shape) => ({ defaults: true, fallback: true, plain: true, row, shape, slot: own })),
+		...Array.from({ length: shapeCount() }, (_, shape) => ({
+			defaults: true,
+			fallback: true,
+			plain: true,
+			row,
+			shape,
+			slot: own,
+		})),
 	]
 }
 
@@ -197,13 +228,18 @@ function parentsFirst(db: MemoryDb, tables: readonly string[]): string[] {
  * table comb could not seed, with why. Foreign keys are off while it seeds, and the seed is then
  * checked against them: a table whose rows break a key is unproven too.
  */
-function seedTables(db: MemoryDb, tables: ReadonlyMap<string, string>, variant = 0): Map<string, string> {
+function seedTables(
+	db: MemoryDb,
+	tables: ReadonlyMap<string, string>,
+	{ json, variant }: { json: ReadonlySet<string>; variant: number },
+): Map<string, string> {
 	const unproven = new Map<string, string>()
 	const parents = new Map<string, Array<Record<string, unknown>>>()
 	db.exec("PRAGMA foreign_keys = OFF")
 	for (const table of parentsFirst(db, [...tables.keys()])) {
 		const seeding = {
 			columns: columnsOf(db, table),
+			json,
 			keys: keysOf(db, table),
 			parents,
 			sql: tables.get(table) as string,

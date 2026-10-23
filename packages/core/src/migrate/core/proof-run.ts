@@ -33,8 +33,16 @@ type Proof = {
 /** One object of the live schema, and the table it belongs to (sqlite_master's tbl_name) */
 type LiveObject = { name: string; sql: string; table: string; type: string }
 
-/* the shadow tables FTS3/4/5 and R*Tree make for a virtual table, which creating it makes again */
-const SHADOWS = ["config", "content", "data", "docsize", "idx", "node", "parent", "rowid", "segdir", "segments", "stat"]
+// lookup-table: the shadow tables each module makes beside its virtual table, which creating it makes again
+const SHADOWS: Readonly<Record<string, readonly string[]>> = {
+	fts3: ["content", "docsize", "segdir", "segments", "stat"],
+	fts4: ["content", "docsize", "segdir", "segments", "stat"],
+	fts5: ["config", "content", "data", "docsize", "idx"],
+	geopoly: ["node", "parent", "rowid"],
+	rtree: ["node", "parent", "rowid"],
+	rtree_i32: ["node", "parent", "rowid"],
+	spellfix1: ["vocab"],
+}
 
 /** The target's schema, read in one SELECT: SQLite's and D1's own objects left out */
 async function liveObjects(conn: Connection): Promise<LiveObject[]> {
@@ -54,11 +62,22 @@ const isVirtual = (object: LiveObject) => /^CREATE VIRTUAL TABLE\b/i.test(object
 /* an external-content or contentless FTS table mirrors another table: its rows prove nothing of their own */
 const isMirror = (object: LiveObject) => isVirtual(object) && /\bcontent\s*=\s*'/i.test(object.sql)
 
-/** The objects the copy creates: every one but a virtual table's shadow tables */
+/** The objects the copy creates: every one but a virtual table's own module's shadow tables */
 function creatable(objects: readonly LiveObject[]): LiveObject[] {
-	const virtual = objects.filter(isVirtual).map((object) => object.name.toLowerCase())
-	const shadow = (name: string) => virtual.some((table) => SHADOWS.some((suffix) => name === `${table}_${suffix}`))
-	return objects.filter((object) => !(object.type === "table" && shadow(object.name.toLowerCase())))
+	const shadows = new Set(
+		objects.filter(isVirtual).flatMap((object) => {
+			/* a CREATE VIRTUAL TABLE names its module */
+			const module = (/\bUSING\s+(\w+)/i.exec(object.sql) as RegExpExecArray)[1]?.toLowerCase() as string
+			return (SHADOWS[module] ?? []).map((suffix) => `${object.name}_${suffix}`.toLowerCase())
+		}),
+	)
+	return objects.filter((object) => !(object.type === "table" && shadows.has(object.name.toLowerCase())))
+}
+
+/** The columns, by lower-case name, a pending file reads with a `json_*` function: the seed holds JSON there */
+function jsonColumns(files: ReadonlyArray<{ sql: string }>): Set<string> {
+	const read = /\bjson\w*\s*\(\s*(?:["`[]?\w+["`\]]?\s*\.\s*)?["`[]?(\w+)/gi
+	return new Set(files.flatMap(({ sql }) => [...sql.matchAll(read)].map((match) => (match[1] as string).toLowerCase())))
 }
 
 /** Why a table is unproven when the copy cannot create `object`: none for a view, which holds no rows */
@@ -69,11 +88,14 @@ function uncreated(object: LiveObject, message: string): [table: string, why: st
 	return [object.table.toLowerCase(), `comb could not create it in the copy: ${message}`]
 }
 
+/** How a copy is seeded: which seed, and the columns pending files read as JSON; none for a copy of the schema alone */
+type Seed = { json: ReadonlySet<string>; variant: number } | undefined
+
 /**
  * The copy: tables and indexes, then the seed, then triggers and views, as the database has them;
  * returns the tables it could not create or seed, or whose trigger it could not create, with why
  */
-function buildCopy(db: MemoryDb, objects: readonly LiveObject[], variant = 0): Map<string, string> {
+function buildCopy(db: MemoryDb, objects: readonly LiveObject[], seed: Seed): Map<string, string> {
 	const unproven = new Map<string, string>()
 	const make = (object: LiveObject) => {
 		try {
@@ -86,6 +108,10 @@ function buildCopy(db: MemoryDb, objects: readonly LiveObject[], variant = 0): M
 	}
 	const tables = objects.filter((each) => each.type === "table")
 	for (const object of [...tables, ...objects.filter((each) => each.type === "index")]) make(object)
+	if (seed === undefined) {
+		for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
+		return unproven
+	}
 	const seedable = tables.filter(
 		(object) =>
 			!unproven.has(object.name.toLowerCase()) &&
@@ -94,8 +120,8 @@ function buildCopy(db: MemoryDb, objects: readonly LiveObject[], variant = 0): M
 	)
 	for (const object of tables.filter((each) => isVirtual(each) && !seedable.includes(each) && !isMirror(each)))
 		unproven.set(object.name.toLowerCase(), "a virtual table comb does not seed")
-	for (const [table, why] of seedTables(db, new Map(seedable.map((object) => [object.name, object.sql])), variant))
-		unproven.set(table.toLowerCase(), why)
+	const definitions = new Map(seedable.map((object) => [object.name, object.sql]))
+	for (const [table, why] of seedTables(db, definitions, seed)) unproven.set(table.toLowerCase(), why)
 	for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
 	return unproven
 }
@@ -140,37 +166,72 @@ function snapshot(db: MemoryDb): Map<string, Shape> {
 /** One copy of the target: its database, and the tables comb could not seed in it, with why */
 type Copy = { db: MemoryDb; unproven: Map<string, string> }
 
-/** A copy of `objects`, seeded as seed `variant` */
-async function copyOf(objects: readonly LiveObject[], variant: number): Promise<Copy> {
+/** A copy of `objects`, seeded as `seed` */
+async function copyOf(objects: readonly LiveObject[], seed: NonNullable<Seed>): Promise<Copy> {
 	const db = await openMemory()
-	return { db, unproven: buildCopy(db, objects, variant) }
+	return { db, unproven: buildCopy(db, objects, seed) }
 }
 
 /**
  * A fresh copy, reseeded with values the first seed never held, the files that applied before
  * replayed on it; undefined, and closed, when one of them no longer applies
  */
-async function reseeded(objects: readonly LiveObject[], applied: readonly string[]): Promise<Copy | undefined> {
-	const copy = await copyOf(objects, 1)
+async function reseeded(
+	objects: readonly LiveObject[],
+	applied: readonly string[],
+	json: ReadonlySet<string>,
+): Promise<Copy | undefined> {
+	const copy = await copyOf(objects, { json, variant: 1 })
 	if (applied.every((sql) => applyToCopy(copy.db, sql).error === undefined)) return copy
 	copy.db.close()
 	return undefined
 }
 
 /**
+ * The schema `files` leave when applied to `objects` with no rows, as the objects of a fresh copy;
+ * undefined when one of them fails even there. A file that fails only on the seed's rows (a NOT
+ * NULL over a column the seed holds NULLs in, JSON read from seeded text) leaves a schema the later
+ * files can be proven on.
+ */
+async function schemaAfter(
+	objects: readonly LiveObject[],
+	files: readonly string[],
+): Promise<LiveObject[] | undefined> {
+	const db = await openMemory()
+	try {
+		buildCopy(db, objects, undefined)
+		if (!files.every((sql) => applyToCopy(db, sql).error === undefined)) return undefined
+		return creatable(
+			db
+				.all("SELECT type, name, sql, tbl_name FROM main.sqlite_master WHERE sql IS NOT NULL ORDER BY rowid")
+				.map((row) => ({
+					name: String(row["name"]),
+					sql: String(row["sql"]),
+					table: String(row["tbl_name"]),
+					type: String(row["type"]),
+				})),
+		)
+	} finally {
+		db.close()
+	}
+}
+
+/**
  * Prove each pending file, in order, on a seeded in-memory copy of the database `conn` reaches;
  * returns each file's proof by name. A file the copy refuses is tried once more on a reseeded copy
  * (a seed's value can meet a file's unique index or explicit id); a file refused both ways is
- * unproven, and so unsafe, as is every file after it.
+ * unproven, and so unsafe. The later files are proven on the schema it leaves, seeded fresh; when
+ * it fails even on a copy with no rows, they are unproven too.
  */
 async function provePending(
 	conn: Connection,
 	files: ReadonlyArray<{ name: string; sql: string }>,
 ): Promise<Map<string, Proof>> {
-	const objects = creatable(await liveObjects(conn))
-	let copy = await copyOf(objects, 0)
+	const json = jsonColumns(files)
+	let objects = creatable(await liveObjects(conn))
+	let copy = await copyOf(objects, { json, variant: 0 })
 	const proofs = new Map<string, Proof>()
-	const applied: string[] = []
+	let applied: string[] = []
 	let failed: string | undefined
 	try {
 		for (const { name, sql } of files) {
@@ -180,7 +241,7 @@ async function provePending(
 			}
 			let before = snapshot(copy.db)
 			let run = applyToCopy(copy.db, sql)
-			const retry = run.error === undefined ? undefined : await reseeded(objects, applied)
+			const retry = run.error === undefined ? undefined : await reseeded(objects, applied, json)
 			if (retry !== undefined) {
 				copy.db.close()
 				copy = retry
@@ -188,9 +249,18 @@ async function provePending(
 				run = applyToCopy(copy.db, sql)
 			}
 			if (run.error !== undefined) {
-				failed = `an earlier pending file, ${name}, could not run in the proof copy, so this one is unproven`
 				const why = `comb could not run this in the proof copy: ${run.error}`
 				proofs.set(name, { cautious: [], failed: why, unproven: unprovenOf(copy), unsafe: [why] })
+				/* the later files are proven on the schema this one leaves, seeded fresh (M13) */
+				const after = await schemaAfter(objects, [...applied, sql])
+				if (after === undefined) {
+					failed = `an earlier pending file, ${name}, could not run in the proof copy, so this one is unproven`
+					continue
+				}
+				copy.db.close()
+				objects = after
+				applied = []
+				copy = await copyOf(objects, { json, variant: 0 })
 				continue
 			}
 			applied.push(sql)
