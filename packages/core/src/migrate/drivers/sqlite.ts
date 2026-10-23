@@ -170,8 +170,8 @@ export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps
 export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider {
 	return {
 		async connect(dbConfig?: ResolvedDatabaseConfig): Promise<Connection> {
-			/* libsql has no read-only mode for a file, and creates a missing one on connect */
-			const file = /^file:(?:\/\/)?([^?]*)/.exec(config.url)?.[1]
+			/* libsql has no read-only mode for a file, and creates a missing one on connect; it reads the scheme in any case */
+			const file = /^file:(?:\/\/)?([^?]*)/i.exec(config.url)?.[1]
 			if (dbConfig?.readonly === true && file !== undefined && file !== ":memory:" && !existsSync(file))
 				throw new Error(`${file} does not exist; check and status open a database read-only, and create none`)
 			const { createClient } = await import("@libsql/client")

@@ -29,3 +29,68 @@ describe("configInputSchema", () => {
 		expect(configInputSchema().safeParse(neon).success).toBe(false)
 	})
 })
+
+const db = { migrationsDir: "./m", name: "core" }
+
+/** Each level of the config, with a key misspelled on it */
+const MISSPELLED: Array<[string, unknown, string]> = [
+	["d1", { databases: { core: { ...db, provider: { databaseName: "core", locla: true, type: "d1" } } } }, "locla"],
+	[
+		"postgres",
+		{ databases: { core: { ...db, provider: { devURL: "postgres://d", type: "postgres", url: "postgres://u" } } } },
+		"devURL",
+	],
+	[
+		"libsql",
+		{ databases: { core: { ...db, provider: { type: "libsql", url: ":memory:", authtoken: "t" } } } },
+		"authtoken",
+	],
+	[
+		"turso",
+		{ databases: { core: { ...db, provider: { apiToken: "t", org: "o", grup: "g", type: "turso" } } } },
+		"grup",
+	],
+	["bun-sqlite", { databases: { core: { ...db, provider: { path: "x.db", type: "bun-sqlite", wal: true } } } }, "wal"],
+	[
+		"a database",
+		{ databases: { core: { ...db, enviroments: {}, provider: { path: "x.db", type: "bun-sqlite" } } } },
+		"enviroments",
+	],
+	[
+		"an environment",
+		{
+			databases: {
+				core: {
+					environments: { prod: { name: "p", provder: { path: "x.db", type: "bun-sqlite" } } },
+					migrationsDir: "./m",
+					provider: { path: "x.db", type: "bun-sqlite" },
+				},
+			},
+		},
+		"provder",
+	],
+	[
+		"multiTenant",
+		{
+			databases: {},
+			multiTenant: { enabled: true, rootDatabase: "r", tenantQuery: "q", concurency: 5 },
+		},
+		"concurency",
+	],
+	[
+		"a circuit breaker",
+		{
+			databases: {},
+			multiTenant: { circuitBreaker: { treshold: 0.2 }, enabled: true, rootDatabase: "r", tenantQuery: "q" },
+		},
+		"treshold",
+	],
+	["the top level", { databases: {}, multiTennant: {} }, "multiTennant"],
+]
+
+/* M19 of the 0.12 round: a key the config does not know is a typo, refused at load, never dropped for its default */
+describe("migrate/config: an unknown key at any level", () => {
+	it.each(MISSPELLED)("refuses one on %s, by name", (_level, config, key) => {
+		expect(() => defineConfig(config as never)).toThrow(key)
+	})
+})

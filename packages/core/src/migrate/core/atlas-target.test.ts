@@ -5,6 +5,7 @@ import {
 	explainAtlasFailure,
 	pgUrlProblems,
 	redactUrl,
+	revisionsSchema,
 	scrubAtlasOutput,
 	withAtlasEnv,
 	type PgTarget,
@@ -218,5 +219,33 @@ describe("withAtlasEnv", () => {
 		expect(() => withAtlasEnv(target({ url: "" }), { url: true }, () => undefined)).toThrow("url is empty")
 		const scrubbed = withAtlasEnv(target(), { url: true }, (atlas) => atlas.scrub("auth failed for S3cret"))
 		expect(scrubbed).toBe("auth failed for ***")
+	})
+})
+
+/* M21 of the 0.12 round: two schemas of one database never share a history */
+describe("revisionsSchema", () => {
+	const base = "postgres://app@db.example.com/app"
+	it("keeps public's history where it always was, and gives any other schema its own", () => {
+		expect(revisionsSchema(target())).toBe("atlas_schema_revisions")
+		expect(revisionsSchema(target({ schema: "tenant_a" }))).toBe("atlas_schema_revisions_tenant_a")
+	})
+
+	it("follows a search_path the URL names over the configured schema, as Atlas's scope does", () => {
+		expect(revisionsSchema(target({ url: `${base}?search_path=tenant_b` }))).toBe("atlas_schema_revisions_tenant_b")
+	})
+
+	it("names a scope Postgres would cut or fold by its hash, so two never meet", () => {
+		const long = (tail: string) => revisionsSchema(target({ schema: `${"t".repeat(40)}${tail}` }))
+		expect(long("a")).toMatch(/^atlas_schema_revisions_[0-9a-f]{16}$/)
+		expect(long("a")).not.toBe(long("b"))
+		expect(revisionsSchema(target({ schema: "Tenant" }))).not.toBe(revisionsSchema(target({ schema: "tenant" })))
+	})
+
+	it("writes the target's history schema into the Atlas config", () => {
+		withAtlasEnv(target({ schema: "tenant_a" }), { url: true }, (atlas) => {
+			expect(readFileSync(`${atlas.dir}/atlas.hcl`, "utf8")).toContain(
+				'revisions_schema = "atlas_schema_revisions_tenant_a"',
+			)
+		})
 	})
 })

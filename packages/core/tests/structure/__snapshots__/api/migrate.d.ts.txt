@@ -363,6 +363,7 @@ export type CircuitBreakerState = {
 // migrate/config-schema.d.ts
 /**
  * The Zod schema comb.migrate.config.ts is validated against: a typo fails at load, not at apply.
+ * Every object is strict, so a misspelled key is refused by name rather than dropped for its default.
  */
 import * as z from "zod";
 import type { DatabaseConfig, MultiTenantConfig } from "./types.ts";
@@ -422,6 +423,12 @@ declare function pgUrlProblems(target: PgTarget, needs?: AtlasNeeds): {
     errors: string[];
     warnings: string[];
 };
+/**
+ * The schema Atlas keeps `target`'s history in: the shared one for public, and one of its own for
+ * any other scope, so two schemas of one database never read each other's history. Postgres cuts a
+ * name at 63 bytes, so a scope too long, or not a plain lower-case name, is named by its hash.
+ */
+declare function revisionsSchema(target: PgTarget): string;
 /** Both URLs as Atlas gets them */
 declare const atlasUrls: (target: PgTarget) => {
     devUrl: string;
@@ -433,14 +440,14 @@ declare function redactUrl(raw: string): string;
 declare function scrubAtlasOutput(text: string, urls: readonly string[]): string;
 /** Atlas's failure in comb's terms where comb knows the fix; otherwise as Atlas said it */
 declare function explainAtlasFailure(stderr: string): string;
-/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to one schema */
-declare function atlasConfig(needs: AtlasNeeds): string;
+/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to `revisions` */
+declare function atlasConfig(needs: AtlasNeeds, revisions: string): string;
 /**
  * Run `body` with an Atlas config for `target` and `needs` in a fresh 0700 directory, removed
  * afterwards however `body` ends. A target with errors is refused before anything is written.
  */
 declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
-export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, pgUrlProblems, type PgTarget, redactUrl, scrubAtlasOutput, withAtlasEnv, };
+export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, pgUrlProblems, type PgTarget, redactUrl, revisionsSchema, scrubAtlasOutput, withAtlasEnv, };
 
 // migrate/core/atlas-env.d.ts
 import type { ExtractedSchema } from "../types.ts";

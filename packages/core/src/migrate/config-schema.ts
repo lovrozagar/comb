@@ -1,5 +1,6 @@
 /**
  * The Zod schema comb.migrate.config.ts is validated against: a typo fails at load, not at apply.
+ * Every object is strict, so a misspelled key is refused by name rather than dropped for its default.
  */
 import * as z from "zod"
 import type { DatabaseConfig, MultiTenantConfig } from "./types.ts"
@@ -17,22 +18,22 @@ const NEON_IS_POSTGRES =
 /* Built on use: defineConfig runs once per process, and module scope stays free of work */
 const providerInputSchema = () =>
 	z.discriminatedUnion("type", [
-		z.object({
+		z.strictObject({
 			apiToken: z.string().min(1),
 			group: z.string().min(1).default("default"),
 			org: z.string().min(1),
 			type: z.literal("turso"),
 		}),
-		z.object({
+		z.strictObject({
 			authToken: z.string().optional(),
 			type: z.literal("libsql"),
 			url: z.string().min(1),
 		}),
-		z.object({
+		z.strictObject({
 			path: z.string().min(1),
 			type: z.literal("bun-sqlite"),
 		}),
-		z.object({
+		z.strictObject({
 			devUrl: z.string().min(1).optional(),
 			lockTimeout: z.string().min(1).optional(),
 			schema: z.string().min(1).optional(),
@@ -40,11 +41,12 @@ const providerInputSchema = () =>
 			url: z.string().min(1),
 		}),
 		/* there is no neon type: a Neon or Supabase database is a postgres URL */
+		/* loose, so a neon provider's url and other keys reach the message that says what to use instead */
 		z.object({ type: z.literal("neon") }).transform((_, ctx) => {
 			ctx.addIssue({ code: "custom", message: NEON_IS_POSTGRES })
 			return z.NEVER
 		}),
-		z.object({
+		z.strictObject({
 			/* 0.8 required it and never read it; refused by name, so a config that still passes one learns why */
 			databaseId: z
 				.never({
@@ -61,13 +63,13 @@ const providerInputSchema = () =>
 	])
 
 const environmentConfigInputSchema = () =>
-	z.object({
+	z.strictObject({
 		name: z.string().min(1),
 		provider: providerInputSchema().optional(),
 	})
 
 const databaseConfigInputSchema = () =>
-	z.object({
+	z.strictObject({
 		codegen: z.string().min(1).optional(),
 		drizzleConfigPath: z.string().optional(),
 		environments: z.record(z.string(), environmentConfigInputSchema()).optional(),
@@ -77,9 +79,9 @@ const databaseConfigInputSchema = () =>
 	})
 
 const multiTenantConfigInputSchema = () =>
-	z.object({
+	z.strictObject({
 		circuitBreaker: z
-			.object({
+			.strictObject({
 				failureThreshold: z.number().min(0).max(1).default(0.1),
 				minSampleSize: z.number().int().min(1).default(50),
 			})
@@ -102,7 +104,7 @@ type CombMigrateConfig = {
 
 /* typed with the declared config, so the schema cannot drift from it */
 const configInputSchema = (): z.ZodType<CombMigrateConfig> =>
-	z.object({
+	z.strictObject({
 		databases: z.record(z.string(), databaseConfigInputSchema()),
 		multiTenant: multiTenantConfigInputSchema().optional(),
 	})

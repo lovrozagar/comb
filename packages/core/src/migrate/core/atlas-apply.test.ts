@@ -141,7 +141,7 @@ describe("applyWithAtlas", () => {
 		})
 		const run = options(atlas)
 		await expect(applyWithAtlas(run)).rejects.toThrow(
-			"the database has objects but no migration history; if its schema matches the migrations, record them with comb migrate baseline",
+			"the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline",
 		)
 		expect(run.seen).toEqual([])
 	})

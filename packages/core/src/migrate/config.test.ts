@@ -125,6 +125,21 @@ describe("migrate/config: resolveDatabaseConfig refusals", () => {
 
 		expect(() => resolveDatabaseConfig(config.databases.core, "staging")).toThrow('Environment "staging" not found')
 	})
+
+	/* M20 of the 0.12 round */
+	it("refuses -e on a database that declares no environments, rather than resolve its one name", () => {
+		const legacy = { migrationsDir: "m", name: "app-dev", provider: { path: "x.db", type: "bun-sqlite" as const } }
+		expect(() => resolveDatabaseConfig(legacy, "prod")).toThrow(
+			"the database declares no environments, so -e prod names none; drop -e",
+		)
+	})
+
+	it.each(["constructor", "toString", "__proto__"])("finds no environment named %s through the prototype", (env) => {
+		const config = defineConfig({
+			databases: { core: { environments: { local: { name: "local-db" } }, migrationsDir: "./m" } },
+		})
+		expect(() => resolveDatabaseConfig(config.databases.core, env)).toThrow(`Environment "${env}" not found`)
+	})
 })
 
 const PROVIDERS = [

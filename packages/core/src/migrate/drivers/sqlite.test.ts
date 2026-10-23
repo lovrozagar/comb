@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import { type LibsqlConnection, libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import {
@@ -227,5 +230,19 @@ describe("Turso for a reader (M9)", () => {
 				readonly: true,
 			}),
 		).rejects.toThrow("does not exist")
+	})
+})
+
+/* M18 of the 0.12 round: libsql reads a URL's scheme in any case, so the read-only guard does too */
+describe("libsql for a reader (M18)", () => {
+	it.each(["file:", "FILE:", "File://"])("refuses a missing file under %s, and creates none", async (scheme) => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-libsql-ro-"))
+		const path = join(dir, "missing.db")
+		const provider = { type: "libsql" as const, url: `${scheme}${path}` }
+		await expect(
+			createLibsqlProvider(provider).connect({ migrationsDir: "m", name: "core", provider, readonly: true }),
+		).rejects.toThrow(`${path} does not exist; check and status open a database read-only, and create none`)
+		expect(existsSync(path)).toBe(false)
+		rmSync(dir, { force: true, recursive: true })
 	})
 })

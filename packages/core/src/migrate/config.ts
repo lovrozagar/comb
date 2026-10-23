@@ -79,7 +79,8 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
 			throw new Error(`Database config has environments; pass -e/--env with one of: ${available}`)
 		}
 
-		const envConfig = dbConfig.environments[envName]
+		/* own keys only: `constructor` or `__proto__` names no environment */
+		const envConfig = Object.hasOwn(dbConfig.environments, envName) ? dbConfig.environments[envName] : undefined
 		if (!envConfig) {
 			const available = Object.keys(dbConfig.environments).join(", ")
 			throw new Error(`Environment "${envName}" not found in config. Available: ${available}`)
@@ -99,6 +100,8 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
 	}
 
 	/* Legacy format: no environments, single name */
+	if (envName !== undefined)
+		throw new Error(`the database declares no environments, so -e ${envName} names none; drop -e`)
 	if (!dbConfig.name) {
 		throw new Error("Database config must have either 'name' field or 'environments' object")
 	}

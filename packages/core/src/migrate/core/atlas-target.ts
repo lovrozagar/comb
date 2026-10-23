@@ -3,8 +3,10 @@
  * child's environment (`COMB_ATLAS_URL`, `COMB_ATLAS_DEV_URL`), which a temporary atlas.hcl reads
  * with getenv, so they never reach argv, where any local user can read them. Each URL is checked
  * before Atlas sees it, scoped to the configured schema (`search_path`), and the target's lock wait
- * is bounded (`lock_timeout`). Every byte of Atlas output comb relays is scrubbed of secrets.
+ * is bounded (`lock_timeout`). Every byte of Atlas output comb relays is scrubbed of secrets. Each
+ * schema keeps its own history: public the shared `atlas_schema_revisions`, any other its own.
  */
+import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -110,6 +112,22 @@ function atlasTargetUrl(target: PgTarget): string {
 /** The dev URL Atlas gets: scoped to the schema like the target, since a scoped target needs a scoped dev database */
 const atlasDevUrl = (target: PgTarget): string => scoped(target.devUrl, target.schema).href
 
+/** The schema Atlas keeps public's history in, as it always has */
+const SHARED_REVISIONS = "atlas_schema_revisions"
+
+/**
+ * The schema Atlas keeps `target`'s history in: the shared one for public, and one of its own for
+ * any other scope, so two schemas of one database never read each other's history. Postgres cuts a
+ * name at 63 bytes, so a scope too long, or not a plain lower-case name, is named by its hash.
+ */
+function revisionsSchema(target: PgTarget): string {
+	const scope = scoped(target.url, target.schema).searchParams.get("search_path") as string
+	if (scope === "public") return SHARED_REVISIONS
+	const own = `${SHARED_REVISIONS}_${scope}`
+	if (/^[a-z_][a-z0-9_]*$/.test(scope) && own.length <= 63) return own
+	return `${SHARED_REVISIONS}_${createHash("sha256").update(scope).digest("hex").slice(0, 16)}`
+}
+
 /** Both URLs as Atlas gets them */
 const atlasUrls = (target: PgTarget): { devUrl: string; url: string } => ({
 	devUrl: atlasDevUrl(target),
@@ -166,7 +184,7 @@ function explainAtlasFailure(stderr: string): string {
 		return "another migrate apply is running on this database; run it again once that one finishes"
 	}
 	if (/connected database is not clean/.test(stderr)) {
-		return "the database has objects but no migration history; if its schema matches the migrations, record them with comb migrate baseline"
+		return "the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline"
 	}
 	const late = /migration file (\S+) was added out of order/.exec(stderr)?.[1]
 	if (late !== undefined) {
@@ -189,14 +207,14 @@ const hclString = (value: string) =>
 		.replaceAll("${", () => "$${")
 		.replaceAll("%{", () => "%%{")
 
-/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to one schema */
-function atlasConfig(needs: AtlasNeeds): string {
+/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to `revisions` */
+function atlasConfig(needs: AtlasNeeds, revisions: string): string {
 	const lines = ['env "comb" {']
 	if (needs.url) lines.push('  url = getenv("COMB_ATLAS_URL")')
 	if (needs.dev) lines.push('  dev = getenv("COMB_ATLAS_DEV_URL")')
 	lines.push("  migration {")
 	if (needs.dir !== undefined) lines.push(`    dir = ${hclString(`file://${needs.dir}`)}`)
-	lines.push('    revisions_schema = "atlas_schema_revisions"', "  }", "}", "")
+	lines.push(`    revisions_schema = ${hclString(revisions)}`, "  }", "}", "")
 	return lines.join("\n")
 }
 
@@ -211,7 +229,9 @@ function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: Atla
 	const remove = () => rmSync(dir, { force: true, recursive: true })
 	let pending = false
 	try {
-		writeFileSync(join(dir, "atlas.hcl"), atlasConfig(needs), { mode: 0o600 })
+		/* a dev-only call reads no history, and may have no target URL to scope one by */
+		const revisions = needs.url === true ? revisionsSchema(target) : SHARED_REVISIONS
+		writeFileSync(join(dir, "atlas.hcl"), atlasConfig(needs, revisions), { mode: 0o600 })
 		const env: Record<string, string> = {}
 		if (needs.url) env["COMB_ATLAS_URL"] = atlasTargetUrl(target)
 		if (needs.dev) env["COMB_ATLAS_DEV_URL"] = atlasDevUrl(target)
@@ -237,6 +257,7 @@ export {
 	pgUrlProblems,
 	type PgTarget,
 	redactUrl,
+	revisionsSchema,
 	scrubAtlasOutput,
 	withAtlasEnv,
 }
