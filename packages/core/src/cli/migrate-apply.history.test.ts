@@ -311,6 +311,18 @@ describe("comb's SQLite history from 0.12 with a view and a trigger over it, reb
 		expect(await rows(url, "SELECT name FROM seen")).toEqual([["2_b.sql"]])
 	})
 
+	it("keeps an index made on the history", async () => {
+		const { dir, url } = configured({ "1_a.sql": A })
+		await history012(url, { recorded: [[1, A, "1_a.sql"]], setup: A })
+		const client = createClient({ url })
+		await client.execute("CREATE INDEX by_created ON __drizzle_migrations (created_at)")
+		client.close()
+		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await rows(url, "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'by_created'")).toEqual([
+			["by_created"],
+		])
+	})
+
 	it("refuses, naming the view, and changes nothing, when a view over the history cannot come back", async () => {
 		const { dir, url, write } = configured({ "1_a.sql": A })
 		const client = createClient({ url })

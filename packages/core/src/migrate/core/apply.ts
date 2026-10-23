@@ -55,9 +55,9 @@ export async function ensureMigrationsTable(
 			: "coalesce((SELECT seq FROM sqlite_sequence WHERE name = '__drizzle_migrations'), 0)"
 	const counter = await conn.execute(`SELECT max(${counted}, coalesce((SELECT max(id) FROM __drizzle_migrations), 0))`)
 	const seq = Number(counter.rows[0]?.[0])
-	/* a view or trigger over the history would fail the rename: it goes before the rebuild and comes back after (M42) */
+	/* a view or trigger over the history would fail the rename, and the drop takes an index on it: each goes before the rebuild and comes back after (M42) */
 	const over = await conn.execute(
-		"SELECT type, name, sql FROM sqlite_master WHERE type IN ('view', 'trigger') AND instr(lower(sql), '__drizzle_migrations') > 0 ORDER BY rowid",
+		"SELECT type, name, sql FROM sqlite_master WHERE type IN ('index', 'view', 'trigger') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND instr(lower(sql), '__drizzle_migrations') > 0 ORDER BY rowid",
 	)
 	const dependents = over.rows.map((row) => ({ name: String(row[1]), sql: String(row[2]), type: String(row[0]) }))
 	const statements = [

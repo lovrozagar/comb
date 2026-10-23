@@ -47,3 +47,29 @@ describe("searchText over every scalar value (R5)", () => {
 		expect(searchText("Οδυσσέας").includes(searchText("ΟΔΥΣ"))).toBe(true)
 	})
 })
+
+/* U7 of the 0.12 round: a mark after a Cyrillic letter stays only where it makes a letter of its own */
+describe("searchText on Cyrillic marks", () => {
+	it.each([
+		["й", "й"],
+		["ё", "ё"],
+		["ї", "ї"],
+		["ў", "ў"],
+		["ѝ", "ѝ"],
+	])("keeps the mark that makes %s a letter", (text, folded) => {
+		expect(searchText(text)).toBe(folded)
+	})
+
+	it.each([
+		["доро́га", "дорога"],
+		["а́", "а"],
+		["Москва́", "москва"],
+	])("drops a stress mark, which makes no letter: %s", (text, folded) => {
+		expect(searchText(text)).toBe(folded)
+	})
+
+	it("keeps a letter's own mark and drops a stress mark in one word", () => {
+		expect(searchText("йо́д")).toBe("йод")
+		expect(searchText("ё́ж")).toBe("ёж")
+	})
+})

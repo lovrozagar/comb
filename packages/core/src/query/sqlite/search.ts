@@ -137,9 +137,20 @@ async function buildFtsWhereWithSpellfix(
  */
 type LikeSearchResolver = (q: string) => SQL | null
 
-/* the combining marks NFKD splits off a letter (é is e + U+0301), but those that make a Cyrillic
-   letter of its own (й is и + U+0306, ї is і + U+0308), which stay for NFC to put back */
-const DIACRITICS = /(?<!\p{Script=Cyrillic}[\u0300-\u036f]*)[\u0300-\u036f]/gu
+/* a run of the combining marks NFKD splits off a letter (é is e + U+0301), with the letter before it when that letter is Cyrillic */
+const MARKS = /(\p{Script=Cyrillic})?([\u0300-\u036f]+)/gu
+
+/**
+ * `text` without its combining marks, but those that make a Cyrillic letter of its own (й is и +
+ * U+0306, ї is і + U+0308): a mark stays only where NFC puts it back into one letter with the one
+ * before it, so a stress mark (а́, which no letter holds) goes, as FTS5's unicode61 drops it (U7)
+ */
+const unmarked = (text: string): string =>
+	text.replace(MARKS, (_run, letter: string | undefined, marks: string) =>
+		letter === undefined
+			? ""
+			: letter + [...marks].filter((mark) => [...`${letter}${mark}`.normalize("NFC")].length === 1).join(""),
+	)
 
 /* the Latin letters NFKD leaves whole, each with the ASCII a reader types for it (ẞ, Æ, … lowercase to these first) */
 const LATIN_FOLD: Readonly<Record<string, string>> = {
@@ -169,15 +180,15 @@ const LATIN_LETTERS = /[ðßæøþđħıĸłŋœŧ]/g
  * are one function.
  */
 function searchText(...parts: Array<string | null | undefined>): string {
+	const lowered = parts
+		.filter((part): part is string => typeof part === "string" && part !== "")
+		.join(" ")
+		.normalize("NFKD")
+		.toLowerCase()
+		/* toLowerCase writes Σ as ς at a word end and σ inside one: one letter, whatever its place */
+		.replace(/ς/g, "σ")
 	return (
-		parts
-			.filter((part): part is string => typeof part === "string" && part !== "")
-			.join(" ")
-			.normalize("NFKD")
-			.toLowerCase()
-			/* toLowerCase writes Σ as ς at a word end and σ inside one: one letter, whatever its place */
-			.replace(/ς/g, "σ")
-			.replace(DIACRITICS, "")
+		unmarked(lowered)
 			.replace(LATIN_LETTERS, (letter) => LATIN_FOLD[letter] as string)
 			/* what kept its marks, and Hangul's jamo, composed back: й, ї and 가 as they were written */
 			.normalize("NFC")
