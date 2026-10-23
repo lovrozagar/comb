@@ -39,3 +39,46 @@ describe("a Postgres function call", () => {
 		})
 	})
 })
+
+/* M29 of the 0.13 review: what a call writes or copies out, rated as such */
+describe("a Postgres call that advances a sequence or reads a setting", () => {
+	it("is cautious for nextval, which a rollback does not undo, and unsafe for current_setting", () => {
+		expect(builtinFinding(["nextval"], new Set())).toEqual({
+			level: "cautious",
+			note: "advances a sequence; a rollback does not undo it",
+		})
+		expect(builtinFinding(["current_setting"], new Set())?.level).toBe("unsafe")
+		expect(builtinFinding(["currval"], new Set())).toBeUndefined()
+		expect(builtinFinding(["lastval"], new Set())).toBeUndefined()
+	})
+})
+
+/* M30 of the 0.13 review: the side-effect-free built-ins a backfill uses */
+describe("a Postgres backfill's common pure built-ins", () => {
+	it.each([
+		"row_number",
+		"rank",
+		"dense_rank",
+		"lag",
+		"lead",
+		"first_value",
+		"last_value",
+		"ntile",
+		"position",
+		"overlay",
+		"string_to_table",
+		"regexp_like",
+		"sha256",
+		"ln",
+		"log",
+		"exp",
+		"pi",
+		"div",
+		"array_upper",
+		"jsonb_path_query_first",
+		"to_regclass",
+		"date_bin",
+	])("is nothing for %s", (name) => {
+		expect(builtinFinding([name], new Set())).toBeUndefined()
+	})
+})

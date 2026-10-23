@@ -2,7 +2,9 @@
  * The Postgres functions a migration may call without a rating of its own (pg-tree.ts): built-ins
  * that read their arguments and return a value, writing nothing and running no SQL, plus the
  * extensions' few that do the same (uuid-ossp, unaccent, pgcrypto's digest). A call of any other
- * function runs code comb cannot read, and is unsafe; `setval` is cautious, as a RESTART is.
+ * function runs code comb cannot read, and is unsafe; `setval` is cautious, as a RESTART is, and
+ * so is `nextval`, whose advance a rollback does not undo. `current_setting` is no pure call: it
+ * copies a setting, an application's secret among them, into what it writes.
  * Names are as the parser gives them, a `pg_catalog.` qualifier dropped.
  */
 
@@ -26,6 +28,12 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"lpad",
 	"ltrim",
 	"md5",
+	"overlay",
+	"position",
+	"regexp_count",
+	"regexp_instr",
+	"regexp_like",
+	"regexp_substr",
 	"octet_length",
 	"quote_ident",
 	"quote_literal",
@@ -45,11 +53,15 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"string_agg",
 	"string_to_array",
 	"strpos",
+	"string_to_table",
 	"substr",
 	"substring",
 	"to_hex",
+	"sha224",
+	"sha256",
+	"sha384",
+	"sha512",
 	"translate",
-	"trim",
 	"unaccent",
 	"upper",
 	/* numbers */
@@ -57,6 +69,15 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"ceil",
 	"ceiling",
 	"floor",
+	"cbrt",
+	"degrees",
+	"div",
+	"exp",
+	"ln",
+	"log",
+	"log10",
+	"pi",
+	"radians",
 	"mod",
 	"power",
 	"random",
@@ -68,6 +89,8 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"age",
 	"clock_timestamp",
 	"date_part",
+	"date_bin",
+	"isfinite",
 	"date_trunc",
 	"extract",
 	"justify_days",
@@ -97,6 +120,7 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"json_array_length",
 	"json_build_array",
 	"json_build_object",
+	"json_typeof",
 	"json_object_agg",
 	"jsonb_agg",
 	"jsonb_array_elements",
@@ -111,6 +135,12 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"jsonb_insert",
 	"jsonb_object_agg",
 	"jsonb_object_keys",
+	"jsonb_path_exists",
+	"jsonb_path_match",
+	"jsonb_path_query",
+	"jsonb_path_query_array",
+	"jsonb_path_query_first",
+	"jsonb_pretty",
 	"jsonb_set",
 	"jsonb_strip_nulls",
 	"jsonb_typeof",
@@ -122,6 +152,14 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"array_append",
 	"array_cat",
 	"array_length",
+	"array_dims",
+	"array_fill",
+	"array_lower",
+	"array_ndims",
+	"array_positions",
+	"array_replace",
+	"array_upper",
+	"trim_array",
 	"array_position",
 	"array_prepend",
 	"array_remove",
@@ -145,12 +183,24 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"to_tsvector",
 	"ts_rank",
 	"websearch_to_tsquery",
-	/* sequences, read or advanced */
+	/* sequences, read */
 	"currval",
 	"lastval",
-	"nextval",
-	/* settings, read */
-	"current_setting",
+	/* window functions */
+	"cume_dist",
+	"dense_rank",
+	"first_value",
+	"lag",
+	"last_value",
+	"lead",
+	"nth_value",
+	"ntile",
+	"percent_rank",
+	"rank",
+	"row_number",
+	/* catalog lookups, read */
+	"to_regclass",
+	"to_regtype",
 ])
 
 /**
@@ -172,9 +222,10 @@ function builtinFinding(
 	if (!catalog && mine) return { level: "unsafe", note: `calls ${key}, a function a migration defined` }
 	if (parts.length === 1 && PURE.has(key)) return undefined
 	if (key === "setval") return { level: "cautious", note: "sets a sequence, as a RESTART does" }
+	if (key === "nextval") return { level: "cautious", note: "advances a sequence; a rollback does not undo it" }
 	if (key === "dblink" || key === "dblink_exec")
 		return { level: "unsafe", note: `calls ${key}, which runs SQL comb cannot read` }
 	return { level: "unsafe", note: `calls ${key}, which comb cannot read` }
 }
 
-export { builtinFinding }
+export { builtinFinding, PURE as PURE_BUILTINS }
