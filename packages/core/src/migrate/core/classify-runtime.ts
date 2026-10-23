@@ -6,14 +6,12 @@
  * write itself (writable_schema can corrupt the schema).
  */
 import type { Finding } from "./classify-alter.ts"
-import { writeFindings } from "./classify-write.ts"
 import { IDENT, lastPart } from "./sql-code.ts"
 
 // per-process-constant: patterns composed from the name grammar, compiled once
 const PREPARE = /* @__PURE__ */ new RegExp(`^PREPARE (${IDENT})(?: ?\\([^)]*\\))? AS (.+)$`, "i")
 // per-process-constant: see above
 const EXECUTE = /* @__PURE__ */ new RegExp(`^EXECUTE (${IDENT})`, "i")
-const RULE_ACTION = /^CREATE (?:OR REPLACE )?RULE .*?\bDO (?:ALSO |INSTEAD )?(?!\(|NOTHING\b)(.+)$/i
 // per-process-constant: a rule's event, its table and whether it replaces the event, composed once
 const RULE = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:OR REPLACE )?RULE ${IDENT} AS ON (SELECT|INSERT|UPDATE|DELETE) TO (${IDENT}(?: ?\\. ?${IDENT})?)\\b.*?\\bDO (INSTEAD )?(NOTHING\\b)?`,
@@ -62,10 +60,13 @@ function ruleFinding(code: string): Finding | undefined {
 	return { level: "cautious", note: `replaces every ${event.toUpperCase()} on ${lastPart(table as string)}` }
 }
 
+/* a statement of a SQLite trigger body that changes or removes rows: a DELETE, an UPDATE, a REPLACE or an upsert */
+const CHANGES = /^(?:DELETE|UPDATE|REPLACE|INSERT OR REPLACE)\b|\bON CONFLICT\b.*\bDO UPDATE\b/i
+
 /**
- * A trigger's findings: each statement of a SQLite BEGIN … END body as a write that runs on every
- * later write to its table, so nothing it touches is a fresh backfill; a trigger that neither has
- * such a body nor executes a function runs code comb cannot read
+ * A trigger's findings: each statement of a SQLite BEGIN … END body that changes or removes rows
+ * runs on every later write to its table, so it is unsafe; a trigger that neither has such a body
+ * nor executes a function runs code comb cannot read
  */
 function triggerFindings(code: string): Finding[] {
 	const [, on, rest] = TRIGGER.exec(code) ?? []
@@ -81,7 +82,8 @@ function triggerFindings(code: string): Finding[] {
 		.split(";")
 		.map((part) => part.trim())
 		.filter((part) => part !== "")
-		.flatMap((part) => writeFindings(part).map((finding) => ({ ...finding, note })))
+		.filter((part) => CHANGES.test(part))
+		.map(() => ({ level: "unsafe" as const, note }))
 }
 
 /**
@@ -99,8 +101,6 @@ function runtimeFindings(
 	if (body !== undefined) findings.push(...read(body))
 	else if (executed !== undefined || /^EXECUTE\b/i.test(code))
 		findings.push({ level: "cautious", note: "runs a prepared statement comb cannot read" })
-	const action = RULE_ACTION.exec(code)?.[1]
-	if (action !== undefined) findings.push(...writeFindings(action))
 	const rule = ruleFinding(code)
 	if (rule !== undefined) findings.push(rule)
 	findings.push(...triggerFindings(code))

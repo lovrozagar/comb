@@ -1,19 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { classifyMigration } from "./classify.ts"
-import { writeFindings } from "./classify-write.ts"
 import { extractSchema } from "./schema.ts"
 
 const pg = (sql: string) => classifyMigration(sql, { dialect: "postgres" })
-
-describe("writeFindings", () => {
-	it("rates each write at every depth, its own first", () => {
-		expect(writeFindings("WITH d AS (DELETE FROM a RETURNING *) UPDATE b SET x = 1 WHERE id = 2")).toEqual([
-			{ level: "unsafe" },
-			{ level: "unsafe" },
-		])
-		expect(writeFindings("SELECT 1")).toEqual([])
-	})
-})
 
 /* the write bypasses of the 0.7.0 review (classify-probe.ts): a write hidden in a CTE or a subquery, or filtered by a tautology */
 describe("classifyMigration on a write that hid", () => {

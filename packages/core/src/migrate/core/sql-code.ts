@@ -97,37 +97,4 @@ function topLevel(code: string): string {
 	return out
 }
 
-/** A string or dollar-quoted literal's text: `'it''s'` is `it's` */
-const literalText = (text: string): string =>
-	text.startsWith("'") ? text.slice(1, -1).replaceAll("''", "'") : bodyText(text)
-
-/** The SQL a DO statement runs: its dollar-quoted or single-quoted body */
-function doBody(stmt: string): string {
-	const body = segments(stmt, "postgres").find(({ kind }) => kind === "body" || kind === "literal")
-	return body === undefined ? "" : literalText(body.text)
-}
-
-/** The SQL each `EXECUTE '<literal>'` (or `EXECUTE $tag$…$tag$`) of a DO body runs */
-function executedSql(body: string): string[] {
-	const parts = segments(body, "postgres")
-	return parts.flatMap((part, i) => {
-		const next = parts[i + 1]
-		const literal = part.kind === "code" && /\bEXECUTE\s*$/i.test(part.text) && next?.kind === "literal"
-		return literal ? [literalText(next.text)] : []
-	})
-}
-
-export {
-	bodyText,
-	codeOf,
-	doBody,
-	executedSql,
-	IDENT,
-	lastPart,
-	nameKey,
-	QNAME,
-	qualifiedKey,
-	splitTopLevel,
-	topLevel,
-	unquote,
-}
+export { bodyText, codeOf, IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel, topLevel, unquote }

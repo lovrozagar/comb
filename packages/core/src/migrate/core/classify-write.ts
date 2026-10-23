@@ -1,16 +1,12 @@
 /**
- * The write rules of the destructive-change gate. A DELETE, UPDATE, MERGE or upsert is read at
- * every depth, a CTE, a subquery or a rule's action included. Unsafe means it may destroy existing
- * values: every DELETE, whatever its WHERE (no reading of a WHERE proves it spares a row), every
- * REPLACE, a MERGE that updates or deletes, and every UPDATE or upsert but a backfill, which is
- * cautious: one into a table the same file created and no copy of existing rows has filled since, or one that sets
- * only columns the same file added and nothing has written since. Created and added mean new: a
- * CREATE TABLE or ADD COLUMN without IF NOT EXISTS, of a name the earlier migrations do not show.
- * A schema-qualified table matches only itself, folded as its dialect folds names.
+ * What a backfill may fill, followed statement by statement: the tables a file has created and no
+ * copy of existing rows has filled since, and the columns it has added. Created and added mean new:
+ * a CREATE TABLE or ADD COLUMN without IF NOT EXISTS, of a name the earlier migrations do not show.
+ * A schema-qualified table matches only itself, folded as its dialect folds names. The writes
+ * themselves are read from the engine: SQLite's in the proof run, Postgres's parse tree in pg-tree.ts.
  */
 import type { Dialect, ExtractedSchema } from "../types.ts"
-import type { Finding } from "./classify-alter.ts"
-import { IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel, topLevel } from "./sql-code.ts"
+import { IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel } from "./sql-code.ts"
 
 /**
  * What a backfill may fill: the tables a file has created and nothing has filled since, and the
@@ -31,19 +27,6 @@ const freshStart = (before?: ExtractedSchema, dialect: Dialect = "sqlite"): Fres
 	tables: new Set(),
 })
 
-const QUOTED_NAME = /"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]/g
-const DELETE = /^(?:WITH\b.*?\b)?DELETE\b/i
-const REPLACE = /^(?:WITH\b.*?\b)?(?:REPLACE|INSERT OR REPLACE|UPDATE OR REPLACE)\b/i
-// per-process-constant: an UPDATE's table and what follows its SET, composed once
-const UPDATE = /* @__PURE__ */ new RegExp(
-	`^(?:WITH\\b.*?\\b)?UPDATE (?:OR \\w+ )?(?:ONLY )?(${QNAME})(?: \\*)?(?: (?:AS )?${IDENT})? SET (.*)$`,
-	"id",
-)
-// per-process-constant: an upsert's table and what follows its DO UPDATE SET, composed once
-const UPSERT = /* @__PURE__ */ new RegExp(
-	`^(?:WITH\\b.*?\\b)?INSERT (?:OR \\w+ )?INTO (${QNAME})\\b.*?\\bON CONFLICT\\b.*?\\bDO UPDATE SET (.*)$`,
-	"id",
-)
 // per-process-constant: a CREATE TABLE's table, composed once
 const CREATE = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:(?:TEMP|TEMPORARY|UNLOGGED) )?TABLE (?:IF NOT EXISTS )?(${QNAME})`,
@@ -58,72 +41,6 @@ const ADD = /* @__PURE__ */ new RegExp(
 	`^ADD (?:COLUMN )?(?:IF NOT EXISTS )?(?!(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|EXCLUDE)\\b)(${IDENT})`,
 	"i",
 )
-// per-process-constant: one assignment's column, or a parenthesized list of them
-const ASSIGNED = /* @__PURE__ */ new RegExp(`^(?:\\(([^)]*)\\)|(${QNAME})) ?=`)
-
-/** The columns a SET list assigns */
-function assigned(list: string): string[] {
-	return splitTopLevel(list).flatMap((assignment) => {
-		const [, many, one] = ASSIGNED.exec(assignment) ?? []
-		return many !== undefined ? splitTopLevel(many).map(lastPart) : one !== undefined ? [lastPart(one)] : []
-	})
-}
-
-/**
- * An UPDATE's or upsert's own finding: cautious when it backfills only columns in `fresh`, which
- * it then takes out, as written; unsafe otherwise
- */
-function updateFinding(code: string, bare: string, fresh: Fresh): Finding | undefined {
-	const write = UPDATE.exec(bare) ?? UPSERT.exec(bare)
-	if (write === null) return undefined
-	const indices = write.indices as RegExpIndicesArray
-	const [tableStart, tableEnd] = indices[1] as [number, number]
-	const [setStart] = indices[2] as [number, number]
-	const end = /\b(?:FROM|WHERE|RETURNING)\b/i.exec(bare.slice(setStart))
-	const columns = assigned(code.slice(setStart, end === null ? undefined : setStart + end.index))
-	const table = qualifiedKey(code.slice(tableStart, tableEnd), fresh.dialect)
-	const added = fresh.columns.get(table)
-	const backfill =
-		fresh.tables.has(table) || (columns.length > 0 && columns.every((column) => added?.has(column) === true))
-	for (const column of columns) added?.delete(column)
-	return { level: backfill ? "cautious" : "unsafe" }
-}
-
-/** A write's own finding, its nested writes aside */
-function ownWriteFinding(code: string, fresh: Fresh): Finding | undefined {
-	if (/^MERGE\b/i.test(code)) return { level: /\bTHEN (?:DELETE|UPDATE)\b/i.test(code) ? "unsafe" : "cautious" }
-	/* a quoted name is no keyword: blank it, keeping each offset */
-	const bare = topLevel(code.replace(QUOTED_NAME, (name) => "_".repeat(name.length)))
-	if (DELETE.test(bare) || REPLACE.test(bare)) return { level: "unsafe" }
-	return updateFinding(code, bare, fresh)
-}
-
-/** The parenthesized groups of `code` at its first depth, each without its parentheses */
-function groups(code: string): string[] {
-	const out: string[] = []
-	let depth = 0
-	let start = 0
-	for (let i = 0; i < code.length; i++) {
-		if (code[i] === "(" && depth++ === 0) start = i + 1
-		else if (code[i] === ")" && --depth === 0) out.push(code.slice(start, i).trim())
-	}
-	return out
-}
-
-/**
- * Each DELETE, UPDATE, MERGE or upsert in `code`, at any depth (a CTE, a subquery, a rule's
- * action), rated against `fresh`, the columns the file has added and nothing has written since
- */
-function writeFindings(code: string, fresh: Fresh = freshStart()): Finding[] {
-	const own = ownWriteFinding(code, fresh)
-	const nested = groups(code).flatMap((group) =>
-		/^(?:WITH|DELETE|UPDATE|MERGE)\b/i.test(group)
-			? writeFindings(group, fresh)
-			: groups(group).flatMap((inner) => writeFindings(inner, fresh)),
-	)
-	return own === undefined ? nested : [own, ...nested]
-}
-
 /** `fresh` with the table a CREATE TABLE in `code` creates new: no IF NOT EXISTS, and a name the earlier migrations do not show */
 function followCreate(code: string, fresh: Fresh): void {
 	const created = CREATE.exec(code)?.[1]
@@ -157,4 +74,4 @@ function followAdds(code: string, fresh: Fresh): void {
 	followAlter(code, fresh)
 }
 
-export { followAdds, type Fresh, freshStart, writeFindings }
+export { followAdds, type Fresh, freshStart }
