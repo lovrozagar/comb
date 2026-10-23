@@ -58,6 +58,30 @@ describe("classifyMigration on a SQLite write, without the proof run", () => {
 	})
 })
 
+/* every assignment of a SET list is read, or the write is held: a backfill clears only when each is a new column */
+describe("classifyMigration on a SQLite SET list beside a backfill", () => {
+	it.each([
+		`ALTER TABLE q ADD COLUMN plan TEXT;\nUPDATE q SET plan = 'free', "from" = 'y';`,
+		"ALTER TABLE q ADD COLUMN plan TEXT;\nUPDATE q SET plan = 'free', [where] = 'y';",
+		"ALTER TABLE q ADD COLUMN plan TEXT;\nUPDATE q SET plan = 'free', `returning` = 'y';",
+	])("holds %j, an old column named for a keyword beside a backfill, for the engine", (sql) => {
+		const before = extractSchema(
+			'CREATE TABLE q (id INTEGER PRIMARY KEY, "from" TEXT, "where" TEXT, "returning" TEXT);',
+		)
+		expect(classifyMigration(sql, { before, dialect: "sqlite" }).safety).toBe("unsafe")
+	})
+
+	it("reads a parenthesized SET list: new columns only backfill, an old one among them is held", () => {
+		const added = "ALTER TABLE a ADD COLUMN plan TEXT;\nALTER TABLE a ADD COLUMN tier TEXT;\n"
+		expect(lite(`${added}UPDATE a SET (plan, tier) = ('free', 'low');`).safety).toBe("cautious")
+		expect(lite(`${added}UPDATE a SET (plan, x) = ('free', 'y');`).safety).toBe("unsafe")
+	})
+
+	it("holds a SET list beside a backfill that it cannot read for the engine", () => {
+		expect(lite("ALTER TABLE a ADD COLUMN plan TEXT;\nUPDATE a SET plan = 'free', 1 = 2;").safety).toBe("unsafe")
+	})
+})
+
 /* T12 of the 2.3 re-probe: ON CONFLICT REPLACE in a table's definition makes a plain insert delete the row it meets */
 describe("classifyMigration on a SQLite insert into a table that replaces on conflict", () => {
 	const REPLACING = extractSchema(

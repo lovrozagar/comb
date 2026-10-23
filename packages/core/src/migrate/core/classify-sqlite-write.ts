@@ -29,20 +29,30 @@ const UPDATE = /* @__PURE__ */ new RegExp(`${CTE}UPDATE(?: OR (\\w+))? (${QNAME}
 const DELETE = /* @__PURE__ */ new RegExp(`${CTE}DELETE FROM (${QNAME})`, "i")
 // per-process-constant: one assignment's column, or a parenthesized list of them
 const ASSIGNED = /* @__PURE__ */ new RegExp(`^(?:\\(([^)]*)\\)|(${QNAME})) ?=`)
+// per-process-constant: the word that ends a SET list, past any quoted name or string that holds one
+const SET_END = /"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]|'(?:[^']|'')*'|\b(FROM|WHERE|RETURNING)\b/gi
 
-/** The columns a SET list assigns, `code` from the list's start, `bare` the same with groups blanked */
-function assigned(code: string, bare: string): string[] {
-	const end = /\b(?:FROM|WHERE|RETURNING)\b/i.exec(bare)
-	return splitTopLevel(code.slice(0, end?.index)).flatMap((assignment) => {
+/**
+ * The columns a SET list assigns, `code` from the list's start, `bare` the same with groups
+ * blanked; undefined when an assignment is one it cannot read
+ */
+function assigned(code: string, bare: string): string[] | undefined {
+	const end = [...bare.matchAll(SET_END)].find((match) => match[1] !== undefined)
+	const columns: string[] = []
+	for (const assignment of splitTopLevel(code.slice(0, end?.index))) {
 		const [, many, one] = ASSIGNED.exec(assignment) ?? []
-		return many !== undefined ? splitTopLevel(many).map(lastPart) : one !== undefined ? [lastPart(one)] : []
-	})
+		if (many !== undefined) columns.push(...splitTopLevel(many).map(lastPart))
+		else if (one !== undefined) columns.push(lastPart(one))
+		else return undefined
+	}
+	return columns
 }
 
 /** An UPDATE's or upsert's finding: a backfill of only the columns `fresh` holds, which it then takes out; pending otherwise */
-function setFinding(table: string, columns: readonly string[], fresh: Fresh): Finding {
+function setFinding(table: string, columns: readonly string[] | undefined, fresh: Fresh): Finding {
 	const added = fresh.columns.get(qualifiedKey(table, "sqlite"))
-	if (columns.length === 0 || !columns.every((column) => added?.has(column) === true)) return PENDING
+	if (columns === undefined || columns.length === 0 || !columns.every((column) => added?.has(column) === true))
+		return PENDING
 	for (const column of columns) added?.delete(column)
 	return { level: "cautious", note: `backfills ${lastPart(table)} (${columns.join(", ")}), new in this file` }
 }
