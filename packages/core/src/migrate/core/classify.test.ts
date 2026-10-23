@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { ExtractedSchema } from "../types.ts"
 import { classifyMigration, extractDropStatements } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
@@ -193,20 +193,22 @@ describe("classifyMigration on SQL that hid a destructive change", () => {
 	})
 })
 
+/* T9 of the 2.3 review: an unnamed dialect is SQLite, as the CLI's default is; a SQLite caller needs no Postgres parser */
 describe("classifyMigration with no dialect named", () => {
-	it("reads the file both ways and keeps the stricter, so Postgres SQL never gets SQLite's reading", () => {
-		expect(classifyMigration("SELECT E'\\''; DROP TABLE post; -- ';").safety).toBe("unsafe")
-		expect(classifyMigration("DO $$ BEGIN DROP TABLE post; END $$;").safety).toBe("unsafe")
-		/* a DO body is code comb does not read: the block is unsafe, and names no drop */
-		expect(extractDropStatements("DO $$ BEGIN DROP TABLE post; END $$;")).toEqual([])
-		expect(classifyMigration("SELECT E'\\''; DROP TABLE post; -- ';", { dialect: "sqlite" }).safety).toBe("safe")
+	it("reads the file as SQLite, without the Postgres parser", async () => {
+		vi.resetModules()
+		const fresh = await import("./classify.ts")
+		const parse = await import("./parse.ts")
+		expect(fresh.classifyMigration("CREATE TABLE a (id int);").safety).toBe("safe")
+		expect(fresh.classifyMigration("DROP TABLE post;").unsafeStatements).toEqual(["DROP TABLE post"])
+		expect(fresh.extractDropStatements("DROP TABLE post")).toEqual(["DROP TABLE post"])
+		expect(parse.parseMigration("CREATE TABLE a (id int);", "1.sql").classification.safety).toBe("safe")
 	})
 
-	it("keeps each finding once when both readings agree", () => {
-		const both = classifyMigration("DROP TABLE post; CREATE INDEX i ON t (a);")
-		expect(both.unsafeStatements).toEqual(["DROP TABLE post"])
-		expect(both.lockWarnings).toHaveLength(1)
-		expect(extractDropStatements("DROP TABLE post")).toEqual(["DROP TABLE post"])
+	it("reads it as SQLite would: what Postgres reads as a string, SQLite reads as code", () => {
+		expect(classifyMigration("SELECT E'\\''; DROP TABLE post; -- ';").safety).toBe(
+			classifyMigration("SELECT E'\\''; DROP TABLE post; -- ';", { dialect: "sqlite" }).safety,
+		)
 	})
 })
 

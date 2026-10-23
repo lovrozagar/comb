@@ -495,7 +495,7 @@ import type { Dialect, ExtractedSchema, MigrationClassification } from "../types
 type ClassifyOptions = {
     /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
     before?: ExtractedSchema | undefined;
-    /** how the file is read; unnamed, it is read both ways and the stricter finding counts */
+    /** how the file is read; unnamed, as SQLite, the CLI's default */
     dialect?: Dialect | undefined;
 };
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */

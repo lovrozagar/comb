@@ -29,7 +29,7 @@ import { splitSqlStatements } from "./sql-scan.ts"
 type ClassifyOptions = {
 	/** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
 	before?: ExtractedSchema | undefined
-	/** how the file is read; unnamed, it is read both ways and the stricter finding counts */
+	/** how the file is read; unnamed, as SQLite, the CLI's default */
 	dialect?: Dialect | undefined
 }
 
@@ -178,11 +178,9 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 	})
 }
 
-/** The file as its dialect reads it; with none named, as both read it, so the stricter reading counts */
+/** The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default */
 const readings = (sql: string, { before, dialect }: ClassifyOptions): Read[] =>
-	dialect === undefined
-		? [...readFile(sql, before, "sqlite"), ...readFile(sql, before, "postgres")]
-		: readFile(sql, before, dialect)
+	readFile(sql, before, dialect ?? "sqlite")
 
 const entries = (reads: readonly Read[], keep: (finding: Finding) => boolean) =>
 	reads.flatMap(({ findings, stmt }) =>
