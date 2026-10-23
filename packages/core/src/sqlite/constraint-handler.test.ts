@@ -356,3 +356,26 @@ describe("classifySqliteError: what sqliteErrorHandler would throw, thrown by no
 		expect(classifySqliteError(error, MAPS)).toEqual(thrownBy((e) => sqliteErrorHandler(e, MAPS), error))
 	})
 })
+
+/* U6 of the 0.12 round: an UPDATE breaks its table's own key only by setting that key's column */
+describe("sqliteErrorHandler: an UPDATE behind a foreign key violation", () => {
+	it("blames the table's own key only when the SET list names its column", () => {
+		expect(fk('update "store" set "owner_id" = ? where "id" = ?')).toMatchObject({
+			column: "owner_id",
+			errorKey: "store_owner_missing",
+		})
+		expect(fk('update "store" set "name" = ?, "owner_id" = ? where "id" = ?')).toMatchObject({
+			errorKey: "store_owner_missing",
+		})
+	})
+
+	it("reads an UPDATE of any other column, the referenced key itself among them, as the other side, as a delete is", () => {
+		for (const query of ['update "store" set "id" = ? where "id" = ?', 'update or abort "store" set "name" = ?'])
+			expect(fk(query)).toMatchObject({
+				cause: "The record is still referenced by other records",
+				column: undefined,
+				errorKey: "foreign_key_violation",
+				table: "store",
+			})
+	})
+})

@@ -8,7 +8,7 @@ import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { valueError } from "../value-error.ts"
 import { readSqliteError, type SqliteErrorRead } from "./read-error.ts"
-import { statementHead, statementTable } from "../statement-head.ts"
+import { statementHead, statementTable, updatedColumns } from "../statement-head.ts"
 
 type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown }
 
@@ -107,10 +107,21 @@ const MISSING_OR_REFERENCED = "Referenced record does not exist or is still in u
 
 /* SQLite's FOREIGN KEY message names neither table nor column; the statement's target table
  * does, and a table with one foreign key leaves no doubt about the column. A DELETE can only
- * fail on the other side, a row that references the deleted one, so no key of its own is blamed. */
+ * fail on the other side, a row that references the deleted one, so no key of its own is blamed;
+ * nor can an UPDATE whose SET list leaves that key's column alone, as one of a referenced key does (U6). */
 function foreignKey(v: Violation): CombError {
 	const table = statementTable(v.read.query)
-	if (/^delete\b/i.test(statementHead(v.read.query ?? ""))) {
+	let column: string | undefined
+	const entry = lookup(v.maps, table, (t) => {
+		const keys = Object.keys(t.foreignKey ?? {})
+		column = keys.length === 1 ? keys[0] : undefined
+		return own(t.foreignKey, column)
+	})
+	const assigned = updatedColumns(v.read.query)
+	const otherSide =
+		/^delete\b/i.test(statementHead(v.read.query ?? "")) ||
+		(assigned !== undefined && column !== undefined && !assigned.includes(column))
+	if (otherSide) {
 		const fallback = {
 			cause: STILL_REFERENCED,
 			errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
@@ -118,12 +129,6 @@ function foreignKey(v: Violation): CombError {
 		} as const
 		return toError(v, { entry: undefined, fallback, table })
 	}
-	let column: string | undefined
-	const entry = lookup(v.maps, table, (t) => {
-		const keys = Object.keys(t.foreignKey ?? {})
-		column = keys.length === 1 ? keys[0] : undefined
-		return own(t.foreignKey, column)
-	})
 	const fallback = {
 		cause: MISSING_OR_REFERENCED,
 		errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,

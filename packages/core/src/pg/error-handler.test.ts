@@ -200,6 +200,17 @@ describe("pgErrorHandler: which side of a foreign key failed, and long table nam
 		expect(caught?.column).toBeUndefined()
 	})
 
+	/* U8 of the 0.12 round */
+	it("names the parent of a schema-qualified delete, not its schema", () => {
+		const driver = nodePg({ code: "23503", detail: 'Key (id)=(10) is still referenced from table "c".', table: "c" })
+		const query = 'delete from "app"."parent" where "id" = $1'
+		const error = Object.assign(new Error(`Failed query: ${query}`, { cause: driver }), {
+			name: "DrizzleQueryError",
+			query,
+		})
+		expect(thrown(error, [])).toMatchObject({ errorKey: "foreign_key_violation", table: "parent" })
+	})
+
 	it("reads a missing parent as such when the child's key value spells the referenced phrase (Q-D6)", () => {
 		const error = nodePg({
 			code: "23503",

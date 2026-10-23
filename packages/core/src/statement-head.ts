@@ -59,12 +59,54 @@ export function statementHead(sql: string): string {
 	return sql.slice(start + Math.max(verb, 0)).trim()
 }
 
+/* one part of a name: quoted whole, its doubled quotes standing for one, or bare */
+const PART = '"(?:[^"]|"")+"|`(?:[^`]|``)+`|\\[[^\\]]+\\]|[^\\s(."`\\[,=]+'
+// per-process-constant: one part, captured
+const ONE_PART = /* @__PURE__ */ new RegExp(PART, "g")
+// per-process-constant: a name, its schema parts before it, as a pattern
+const NAME = `(?:(?:${PART})\\s*\\.\\s*)*(?:${PART})`
+
 /* the table an INSERT, UPDATE or DELETE targets, from the SQL a wrapper recorded, read from the
- * statement's own verb on: a quoted name whole, its doubled quotes undone, or a bare one */
-const STATEMENT_TABLE =
-	/^(?:insert\s+(?:or\s+\w+\s+)?into|replace\s+into|update(?:\s+or\s+\w+)?|delete\s+from)\s+(?:"((?:[^"]|"")+)"|`((?:[^`]|``)+)`|\[([^\]]+)\]|([^\s(]+))/i
-/** The table `query` writes to, or undefined when no wrapper recorded the SQL or it writes none */
+ * statement's own verb on: a name its schema qualifies or not, each part quoted or bare */
+// per-process-constant: see above
+const STATEMENT_TABLE = /* @__PURE__ */ new RegExp(
+	`^(?:insert\\s+(?:or\\s+\\w+\\s+)?into|replace\\s+into|update(?:\\s+or\\s+\\w+)?|delete\\s+from)\\s+(${NAME})`,
+	"i",
+)
+
+/** One name part as written, unquoted */
+function unquoted(part: string): string {
+	if (part.startsWith('"')) return part.slice(1, -1).replaceAll('""', '"')
+	if (part.startsWith("`")) return part.slice(1, -1).replaceAll("``", "`")
+	return part.startsWith("[") ? part.slice(1, -1) : part
+}
+
+/**
+ * The table `query` writes to, or undefined when no wrapper recorded the SQL or it writes none: the
+ * table itself, not its schema, as the constraint maps and the engines' errors name it (U8)
+ */
 export function statementTable(query: string | undefined): string | undefined {
-	const [, double, back, bracket, bare] = STATEMENT_TABLE.exec(statementHead(query ?? "")) ?? []
-	return double?.replaceAll('""', '"') ?? back?.replaceAll("``", "`") ?? bracket ?? bare
+	const name = STATEMENT_TABLE.exec(statementHead(query ?? ""))?.[1]
+	return name === undefined ? undefined : unquoted(name.match(ONE_PART)?.at(-1) as string)
+}
+
+// per-process-constant: an UPDATE up to its SET list
+const UPDATE_SET = /* @__PURE__ */ new RegExp(
+	`^update(?:\\s+or\\s+\\w+)?\\s+${NAME}(?:\\s+(?:as\\s+)?\\w+)?\\s+set\\s+`,
+	"i",
+)
+// per-process-constant: one assignment's column, at the list's start or after a comma
+const ASSIGNED = /* @__PURE__ */ new RegExp(`(?:^|,)\\s*(${PART})\\s*=`, "g")
+
+/**
+ * The columns an UPDATE's SET list assigns, unquoted, its list read up to a top-level WHERE, FROM
+ * or RETURNING; undefined when `query` is no UPDATE
+ */
+export function updatedColumns(query: string | undefined): string[] | undefined {
+	const head = statementHead(query ?? "")
+	const set = UPDATE_SET.exec(head)
+	if (set === null) return undefined
+	const list = head.slice(set[0].length)
+	const end = blanked(list).search(/\b(?:where|from|returning)\b/i)
+	return [...(end === -1 ? list : list.slice(0, end)).matchAll(ASSIGNED)].map((match) => unquoted(match[1] as string))
 }
