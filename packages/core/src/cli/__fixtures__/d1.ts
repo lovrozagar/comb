@@ -6,9 +6,10 @@
  * row in the migrations table, in wrangler's order.
  */
 import { createHash } from "node:crypto"
-import { readdirSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
+import { localD1Path } from "../../migrate/core/d1-binding.ts"
 import { wranglerOrder } from "../../migrate/core/plan-apply.ts"
 import type { Run, RunResult } from "../../migrate/core/process.ts"
 
@@ -23,6 +24,13 @@ export function writeSum(dir: string): void {
 	const digest = createHash("sha256")
 	for (const file of files) digest.update(`${file}\n${readFileSync(join(dir, file), "utf8")}\n`)
 	writeFileSync(join(dir, "atlas.sum"), `h1:${digest.digest("hex")}\n`)
+}
+
+/** The file wrangler keeps `binding`'s local database in under `configDir`, made as a first --local command makes it */
+export function localD1(configDir: string, binding: Parameters<typeof localD1Path>[1]): void {
+	const path = localD1Path(configDir, binding)
+	mkdirSync(dirname(path), { recursive: true })
+	writeFileSync(path, "")
 }
 
 type AtlasAnswers = { schemaDiff?: RunResult | undefined }

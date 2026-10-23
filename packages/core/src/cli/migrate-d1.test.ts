@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { type FakeD1, fakeD1, writeSum } from "./__fixtures__/d1.ts"
+import { type FakeD1, fakeD1, localD1, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, projects } from "./__fixtures__/io.ts"
 import { runCli } from "./run.ts"
 
@@ -25,6 +25,7 @@ function worker(migrations: Record<string, string>, toml = TOML): string {
 	mkdirSync(join(dir, "atlas-migrations"))
 	for (const [name, sql] of Object.entries(migrations)) writeFileSync(join(dir, "atlas-migrations", name), sql)
 	writeSum(join(dir, "atlas-migrations"))
+	localD1(dir, { binding: "CORE", database_id: "00000000-0000-0000-0000-000000000000" })
 	return dir
 }
 

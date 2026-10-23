@@ -11,6 +11,7 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { runCli } from "../../../src/cli/index.ts"
+import { localD1Path } from "../../../src/migrate/core/d1-binding.ts"
 import { migrationHashes } from "../../../src/migrate/core/parse.ts"
 import { guardRebuilds } from "../../../src/migrate/core/rebuild-guard.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
@@ -143,4 +144,44 @@ describe("comb migrate on D1 through wrangler, --local: history and the live sch
 		expect(column(dir, "SELECT count(*) FROM extra")).toEqual([1])
 		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
 	}, 120_000)
+})
+
+/* M33 of the 0.13 review: check and status read a local D1 only where wrangler already keeps one */
+describe("comb migrate check and status on D1 --local, the local database missing", () => {
+	it("refuse, saying comb cannot confirm it exists, and create none", async () => {
+		const dir = project(INIT)
+		for (const mode of ["check", "status"]) {
+			const out = io(dir)
+			expect(await runCli(["migrate", mode, "core", "--local"], out)).toBe(1)
+			expect(out.errors[0]).toMatch(/^comb cannot confirm core's local database exists/)
+		}
+		expect(fs.existsSync(path.join(dir, ".wrangler"))).toBe(false)
+	}, 120_000)
+
+	it.each([
+		["database_id", { database_id: "11111111-1111-1111-1111-111111111111" }],
+		[
+			"preview_database_id",
+			{
+				database_id: "22222222-2222-2222-2222-222222222222",
+				preview_database_id: "33333333-3333-3333-3333-333333333333",
+			},
+		],
+		["the binding alone", {}],
+	])(
+		"names the file wrangler keeps a local database in, by %s",
+		(_label, ids) => {
+			const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-d1-local-"))
+			dirs.push(dir)
+			const entry = { binding: "CORE", database_name: "core", ...ids }
+			fs.writeFileSync(
+				path.join(dir, "wrangler.json"),
+				JSON.stringify({ compatibility_date: "2026-10-01", d1_databases: [entry], name: "probe" }),
+			)
+			expect(fs.existsSync(localD1Path(dir, entry))).toBe(false)
+			expect(wrangler(dir)("wrangler", ["d1", "execute", "CORE", "--local", "--command=SELECT 1"]).code).toBe(0)
+			expect(fs.existsSync(localD1Path(dir, entry))).toBe(true)
+		},
+		120_000,
+	)
 })

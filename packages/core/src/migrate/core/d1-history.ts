@@ -8,79 +8,20 @@
  * That table records names only, so comb records each applied file's hash in its own table, and
  * refuses a file applied, then edited, as it does on its other engines.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 import type { Connection, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
+import { assertLocalExists, type D1Target, type ReadConfig, resolveBinding } from "./d1-binding.ts"
+import { orphanMessage } from "./history-match.ts"
 import { migrationHashes } from "./parse.ts"
 import { planApply, wranglerOrder } from "./plan-apply.ts"
-import type { Run } from "./process.ts"
-
-/** A D1 binding as wrangler's config reader returns it, for the environment asked */
-type WranglerD1 = {
-	binding: string
-	database_name?: string | undefined
-	migrations_dir?: string | undefined
-	migrations_pattern?: string | undefined
-	migrations_table?: string | undefined
-}
-
-/** What comb reads of wrangler's resolved config */
-type WranglerConfig = { d1_databases: readonly WranglerD1[] }
-
-/** wrangler's `unstable_readConfig`; tests pass a fake */
-type ReadConfig = (args: { config: string; env?: string | undefined }) => WranglerConfig
-
-/** The D1 database a command works on, as wrangler names and reaches it */
-type D1Target = {
-	/** the database's wrangler commands: the d1 execute connection, flags included */
-	conn: Connection
-	exec: Run
-	/** --local or --remote, then --config and --env */
-	flags: readonly string[]
-	migrationsDir: string
-	/** the binding's name or database_name, as every wrangler command takes it */
-	name: string
-	/** the wrangler config file */
-	wranglerConfig: string
-	wranglerEnv?: string | undefined
-}
 
 const DRIZZLE_TABLE = "__drizzle_migrations"
 /* comb's own record of the hash each file was applied under: wrangler's table holds names only */
 const HASH_TABLE = "_comb_migration_hashes"
-const CONFIG_NAMES = ["wrangler.json", "wrangler.jsonc", "wrangler.toml"]
-
 const quoteName = (name: string): string => `"${name.replaceAll('"', '""')}"`
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`
-
-/** The wrangler config wrangler itself would read in `cwd`; undefined when there is none */
-function findWranglerConfig(cwd: string): string | undefined {
-	return CONFIG_NAMES.map((name) => join(cwd, name)).find((file) => existsSync(file))
-}
-
-/**
- * The binding `target` names in its wrangler config, checked: it must exist in the environment,
- * read the migrations comb reads, and take every .sql file there. Returns its migrations table.
- */
-function resolveBinding(read: ReadConfig, target: D1Target): string {
-	const config = read({ config: target.wranglerConfig, env: target.wranglerEnv })
-	const where = `${target.wranglerConfig}${target.wranglerEnv === undefined ? "" : ` (env ${target.wranglerEnv})`}`
-	const d1 = config.d1_databases.find((db) => db.database_name === target.name || db.binding === target.name)
-	if (d1 === undefined) throw new Error(`${where} has no D1 database named or bound as ${target.name}`)
-	const dirName = d1.migrations_dir ?? "migrations"
-	const dir = resolve(dirname(target.wranglerConfig), dirName)
-	if (dir !== resolve(target.migrationsDir)) {
-		throw new Error(
-			`${where} applies ${target.name}'s migrations from ${dir}, but comb reads them from ${resolve(target.migrationsDir)}; point migrations_dir at comb's migrationsDir`,
-		)
-	}
-	const pattern = d1.migrations_pattern
-	if (pattern !== undefined && pattern.replace(/^\.\//, "") !== `${dirName.replace(/^\.\/|\/$/g, "")}/*.sql`) {
-		throw new Error(`${where} sets migrations_pattern ${pattern}; comb applies every .sql file of ${dirName}`)
-	}
-	return d1.migrations_table ?? "d1_migrations"
-}
 
 /** The rows of one column of `sql` */
 async function column(conn: Connection, sql: string): Promise<string[]> {
@@ -151,14 +92,16 @@ function recordedByDrizzle(
 
 /**
  * The history: the migrations table's names, refused while `__drizzle_migrations` records a file
- * it does not; `create` makes a missing table, as only apply may
+ * it does not, or while it records a name no file has (an applied file renamed or deleted since),
+ * which only status lets by, to name; `create` makes a missing table, as only apply may
  */
 async function history(
 	read: ReadConfig,
 	target: D1Target,
-	create: boolean,
-): Promise<{ applied: Set<string>; table: string; unhashed: string[] }> {
+	{ create, status = false }: { create: boolean; status?: boolean },
+): Promise<{ applied: Set<string>; orphans: string; table: string; unhashed: string[] }> {
 	const table = resolveBinding(read, target)
+	if (!create) assertLocalExists(read, target)
 	const applied = await appliedNames(target.conn, table, create)
 	const files = filesOf(target.migrationsDir)
 	const hashes = await drizzleHashes(target.conn)
@@ -179,7 +122,17 @@ async function history(
 		)
 	}
 	const unhashed = files.filter(({ name }) => applied.has(name) && !recorded.has(name)).map(({ name }) => name)
-	return { applied, table, unhashed }
+	const named = new Set(files.map(({ name }) => name))
+	const gone = [...applied].filter((name) => !named.has(name))
+	const orphans =
+		gone.length === 0
+			? ""
+			: orphanMessage(
+					gone.map((name) => ({ hash: "", name })),
+					target.migrationsDir,
+				)
+	if (orphans !== "" && !status) throw new Error(orphans)
+	return { applied, orphans, table, unhashed }
 }
 
 type D1Apply = {
@@ -192,7 +145,7 @@ type D1Apply = {
 
 /** Check the pending migrations and, unless only checking, apply them through wrangler; returns them */
 async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
-	const { applied, table } = await history(options.read, target, options.checkOnly !== true)
+	const { applied, table } = await history(options.read, target, { create: options.checkOnly !== true })
 	const files = filesOf(target.migrationsDir).map(({ name }) => name)
 	const pending = await planApply({
 		applied: (name) => applied.has(name),
@@ -209,8 +162,17 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	if (names.length === 0 || options.checkOnly === true) return names
 	for (const name of names) options.print(`Apply: ${name}`)
 	const ran = target.exec("wrangler", ["d1", "migrations", "apply", target.name, ...target.flags], { input: "" })
-	if (ran.code !== 0) throw new Error(`wrangler d1 migrations apply failed: ${`${ran.stderr}${ran.stdout}`.trim()}`)
 	const after = await appliedNames(target.conn, table, true)
+	if (ran.code !== 0) {
+		/* the files wrangler applied before it failed are applied: their hashes are recorded as any other's */
+		const done = pending.filter(({ name }) => after.has(name))
+		if (done.length > 0)
+			await recordHashes(
+				target.conn,
+				done.map(({ migration, name }) => ({ hash: migration.hash, name })),
+			)
+		throw new Error(`wrangler d1 migrations apply failed: ${`${ran.stderr}${ran.stdout}`.trim()}`)
+	}
 	const added = [...after].filter((name) => !applied.has(name))
 	if (added.length !== names.length || names.some((name) => !after.has(name))) {
 		throw new Error(
@@ -266,7 +228,8 @@ async function statusD1(
 	read: ReadConfig,
 	print: (line: string) => void,
 ): Promise<{ applied: string[]; pending: string[] }> {
-	const { applied: recorded, unhashed } = await history(read, target, false)
+	const { applied: recorded, orphans, unhashed } = await history(read, target, { create: false, status: true })
+	if (orphans !== "") print(orphans)
 	const files = filesOf(target.migrationsDir).map(({ name }) => name)
 	const applied = files.filter((name) => recorded.has(name))
 	const pending = files.filter((name) => !recorded.has(name))
@@ -279,4 +242,4 @@ async function statusD1(
 	return { applied, pending }
 }
 
-export { applyD1, baselineD1, type D1Target, findWranglerConfig, type ReadConfig, statusD1, type WranglerConfig }
+export { applyD1, baselineD1, statusD1 }

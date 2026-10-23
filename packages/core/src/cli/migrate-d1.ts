@@ -7,14 +7,8 @@
 import fs from "node:fs"
 import path from "node:path"
 import { approveMigration } from "../migrate/core/approval.ts"
-import {
-	applyD1,
-	baselineD1,
-	type D1Target,
-	findWranglerConfig,
-	type ReadConfig,
-	statusD1,
-} from "../migrate/core/d1-history.ts"
+import { type D1Target, findWranglerConfig, type ReadConfig } from "../migrate/core/d1-binding.ts"
+import { applyD1, baselineD1, statusD1 } from "../migrate/core/d1-history.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import { createD1Provider, wranglerFlags } from "../migrate/drivers/d1.ts"
 import type { D1ProviderConfig } from "../migrate/types.ts"
