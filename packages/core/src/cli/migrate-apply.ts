@@ -11,16 +11,18 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import { ensureMigrationsTable, recordMigrationHash } from "../migrate/core/apply.ts"
+import { ensureMigrationsTable, hashUnique, recordMigrationHash } from "../migrate/core/apply.ts"
 import { approveMigration } from "../migrate/core/approval.ts"
 import { sqlFiles } from "../migrate/core/atlas-dir.ts"
 import { sqliteDrift } from "../migrate/core/baseline-compare.ts"
 import {
 	type FileHashes,
 	type HistoryRow,
+	type LegacyRow,
 	type Matched,
 	matchHistory,
 	orphanMessage,
+	resolveLegacy,
 } from "../migrate/core/history-match.ts"
 import { migrationHashes } from "../migrate/core/parse.ts"
 import { type Pending, planApply } from "../migrate/core/plan-apply.ts"
@@ -74,17 +76,33 @@ async function applyPending({ migration }: Pending, target: Target, io: CliIo): 
 }
 
 /** The history `__drizzle_migrations` holds, row by row: nothing when it is missing, which only a write would create */
-async function recordedHistory(conn: Connection): Promise<HistoryRow[]> {
+async function recordedHistory(conn: Connection): Promise<LegacyRow[]> {
 	const table = await conn.execute(
 		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'",
 	)
 	if (table.rows.length === 0) return []
 	const { columns, rows } = await conn.execute("SELECT * FROM __drizzle_migrations ORDER BY id")
-	const [hash, name] = [columns.indexOf("hash"), columns.indexOf("name")]
+	const [hash, name, id] = [columns.indexOf("hash"), columns.indexOf("name"), columns.indexOf("id")]
 	return rows.map((row) => ({
 		hash: String(row[hash]),
+		id: Number(row[id]),
 		name: name >= 0 && row[name] !== null ? String(row[name]) : null,
 	}))
+}
+
+/**
+ * The history, with a history from before 0.13 read as 0.13 names it (history-match.ts
+ * resolveLegacy), and those names, which apply's rebuild then records
+ */
+async function readHistory(
+	conn: Connection,
+	dir: string,
+): Promise<{ renamed: Array<{ id: number; name: string }>; rows: HistoryRow[] }> {
+	const rows = await recordedHistory(conn)
+	if (rows.length === 0 || !(await hashUnique(conn))) return { renamed: [], rows }
+	const renamed = resolveLegacy(hashed(dir, sqlFiles(dir)), rows)
+	const names = new Map(renamed.map(({ id, name }) => [id, name]))
+	return { renamed, rows: rows.map((row) => ({ ...row, name: names.get(row.id) ?? row.name })) }
 }
 
 /** Each of `files`, a file of `dir`, with the hashes its text has */
@@ -143,18 +161,32 @@ async function baseline(
 }
 
 /**
+ * A --file's name: its path from the migrations directory, `../lone.sql` outside it; refused in a
+ * subdirectory of it, which no whole-directory run reads (M34)
+ */
+function fileName(single: string, { cwd, dir }: { cwd: string; dir: string }): string {
+	const relative = path.relative(dir, path.resolve(cwd, single))
+	if (!relative.startsWith("..") && relative.includes(path.sep))
+		throw new CliError(
+			`${single} is in a subdirectory of ${dir}, which a whole-directory run does not read; move it to the directory's top level, or outside it`,
+		)
+	return relative
+}
+
+/**
  * `request.mode` on a SQLite database whose history is comb's own `__drizzle_migrations`; check and
  * status only read it, and create neither it nor the database. Each recorded row is matched to one
  * file (history-match.ts): a named row by its name, an unnamed one by its hash.
  */
 async function migrateSqlite({ args, io, mode }: Request, target: Target): Promise<MigrateOutcome> {
 	const writes = mode === "apply" || mode === "baseline"
-	if (writes) await ensureMigrationsTable(target.conn)
 	const single = option(args, "file")
 	const dir = target.migrationsDir
-	/* a --file is named by its path from the migrations directory: outside it, `../lone.sql` */
-	const files = hashed(dir, single === undefined ? sqlFiles(dir) : [path.relative(dir, path.resolve(io.cwd, single))])
-	const matched = matchHistory(files, await recordedHistory(target.conn), single === undefined)
+	const relative = single === undefined ? undefined : fileName(single, { cwd: io.cwd, dir })
+	const { renamed, rows } = await readHistory(target.conn, dir)
+	if (writes) await ensureMigrationsTable(target.conn, renamed)
+	const files = hashed(dir, relative === undefined ? sqlFiles(dir) : [relative])
+	const matched = matchHistory(files, rows, single === undefined)
 	refuseUnmatched(matched, { dir, io, mode })
 	if (writes) await nameRecorded(target.conn, matched.named)
 	if (mode === "baseline") {

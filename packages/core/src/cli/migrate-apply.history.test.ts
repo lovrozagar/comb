@@ -3,7 +3,7 @@
  * since was taken for a new one, and apply ran it again.
  */
 import { createClient } from "@libsql/client"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { migrationHashes } from "../migrate/core/parse.ts"
@@ -142,5 +142,151 @@ describe("comb's SQLite history and two files of one text (M16)", () => {
 		expect(await rows(url, "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'plans_name'")).toEqual([
 			["plans_name"],
 		])
+	})
+})
+
+/** comb 0.12's history over `url`: hash unique, each row named as 0.12 named it, the AUTOINCREMENT counter at `seq` */
+async function history012(
+	url: string,
+	{ recorded, seq = 0, setup }: { recorded: Array<[number, string, string]>; seq?: number; setup: string },
+) {
+	const client = createClient({ url })
+	try {
+		await client.executeMultiple(
+			`${setup}\nCREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, name TEXT);`,
+		)
+		for (const [id, sql, name] of recorded)
+			await client.execute({
+				args: [id, migrationHashes(sql)[0] as string, name],
+				sql: "INSERT INTO __drizzle_migrations (id, hash, created_at, name) VALUES (?, ?, 1, ?)",
+			})
+		if (seq > 0)
+			await client.execute({
+				args: [seq],
+				sql: "UPDATE sqlite_sequence SET seq = ? WHERE name = '__drizzle_migrations'",
+			})
+	} finally {
+		client.close()
+	}
+}
+
+const A = "CREATE TABLE a (id INTEGER PRIMARY KEY);"
+const B = "CREATE TABLE b (id INTEGER PRIMARY KEY);"
+const LONE = "CREATE TABLE lone (id INTEGER PRIMARY KEY);"
+const names = async (url: string) => (await rows(url, "SELECT name FROM __drizzle_migrations ORDER BY id")).flat()
+
+/* M35 of the 0.13 review: a 0.12 history's named rows, resolved once to the files they name */
+describe("comb's SQLite history from 0.12, its named rows resolved (M35)", () => {
+	it("takes a row 0.12 recorded for a --file outside the directory as one, in check, status and apply", async () => {
+		const { dir, url } = configured({ "1_a.sql": A })
+		await history012(url, {
+			recorded: [
+				[1, A, "1_a.sql"],
+				[2, LONE, "lone.sql"],
+			],
+			setup: `${A}\n${LONE}`,
+		})
+		expect(await runCli(["migrate", "check", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		const status = makeIo(dir, fakeAtlas())
+		expect(await runCli(["migrate", "status", "core"], status)).toBe(0)
+		expect(status.outputs).toEqual(["Applied: 1_a.sql", "Pending: none"])
+		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await names(url)).toEqual(["1_a.sql", "../lone.sql"])
+	})
+
+	it("names a row by the one file that holds its hash, so a file renamed under 0.12 does not run again", async () => {
+		const { dir, url } = configured({ "1_a.sql": A, "2_b_renamed.sql": B })
+		await history012(url, {
+			recorded: [
+				[1, A, "1_a.sql"],
+				[2, B, "2_b.sql"],
+			],
+			setup: `${A}\n${B}`,
+		})
+		const check = makeIo(dir, fakeAtlas())
+		expect(await runCli(["migrate", "check", "core"], check), check.errors.join("\n")).toBe(0)
+		expect(check.outputs.at(-1)).toBe("\nCheck passed: 0 pending")
+		const apply = makeIo(dir, fakeAtlas())
+		expect(await runCli(["migrate", "apply", "core"], apply)).toBe(0)
+		expect(apply.outputs.filter((line) => line.startsWith("Apply:"))).toEqual([])
+		expect(await names(url)).toEqual(["1_a.sql", "2_b_renamed.sql"])
+	})
+
+	it("takes a row for a file deleted under 0.12 as one from outside the directory, as 0.12 could not tell either", async () => {
+		const { dir, url } = configured({ "1_a.sql": A })
+		await history012(url, {
+			recorded: [
+				[1, A, "1_a.sql"],
+				[2, B, "2_gone.sql"],
+			],
+			setup: `${A}\n${B}`,
+		})
+		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await names(url)).toEqual(["1_a.sql", "../2_gone.sql"])
+	})
+})
+
+describe("comb's SQLite history from 0.12: what stays refused (M35)", () => {
+	it("refuses a row whose hash two unrecorded files hold, naming them", async () => {
+		const { dir, url } = configured({ "1_a.sql": A, "2_x.sql": B, "3_y.sql": B })
+		await history012(url, {
+			recorded: [
+				[1, A, "1_a.sql"],
+				[2, B, "2_b.sql"],
+			],
+			setup: `${A}\n${B}`,
+		})
+		for (const mode of ["check", "status", "apply"]) {
+			const io = makeIo(dir, fakeAtlas())
+			expect(await runCli(["migrate", mode, "core"], io)).toBe(1)
+			expect(io.errors.join("\n")).toMatch(/2_b\.sql.*2_x\.sql, 3_y\.sql/)
+		}
+	})
+
+	it("holds every row strictly once 0.13 rebuilt the history: a file renamed after is refused", async () => {
+		const { dir, url, write } = configured({ "1_a.sql": A })
+		await history012(url, { recorded: [[1, A, "1_a.sql"]], setup: A })
+		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		rmSync(join(dir, "m", "1_a.sql"))
+		write({ "1_a_renamed.sql": A })
+		const check = makeIo(dir, fakeAtlas())
+		expect(await runCli(["migrate", "check", "core"], check)).toBe(1)
+		expect(check.errors.join("\n")).toMatch(/matches no file in .* \(1_a\.sql\)/)
+	})
+})
+
+/* M36 of the 0.13 review: the rebuild keeps the history's AUTOINCREMENT counter, so no id is used twice */
+describe("comb's SQLite history from 0.12, rebuilt (M36)", () => {
+	it("keeps the AUTOINCREMENT counter above every id it handed out", async () => {
+		const { dir, url } = configured({ "1_a.sql": A })
+		await history012(url, { recorded: [[1, A, "1_a.sql"]], setup: A, seq: 7 })
+		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await rows(url, "SELECT seq FROM sqlite_sequence WHERE name = '__drizzle_migrations'")).toEqual([[7]])
+	})
+
+	it("starts the counter at the largest id of a history made without AUTOINCREMENT", async () => {
+		const { dir, url } = configured({ "1_a.sql": A })
+		const client = createClient({ url })
+		await client.executeMultiple(
+			`${A}\nCREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, name TEXT);\nINSERT INTO __drizzle_migrations VALUES (4, '${migrationHashes(A)[0] as string}', 1, '1_a.sql');`,
+		)
+		client.close()
+		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await rows(url, "SELECT seq FROM sqlite_sequence WHERE name = '__drizzle_migrations'")).toEqual([[4]])
+	})
+})
+
+/* M34 of the 0.13 review: a whole-directory run reads only the directory's top level */
+describe("migrate apply --file in a subdirectory of the migrations directory (M34)", () => {
+	it("is refused up front, as no later whole-directory run would read it", async () => {
+		const { dir, url } = configured({ "1_a.sql": A })
+		mkdirSync(join(dir, "m", "manual"))
+		writeFileSync(join(dir, "m", "manual", "fix.sql"), B)
+		const io = makeIo(dir, fakeAtlas())
+		expect(await runCli(["migrate", "apply", "core", "--file", "m/manual/fix.sql"], io)).toBe(1)
+		expect(io.errors.join("\n")).toMatch(
+			/m\/manual\/fix\.sql is in a subdirectory of .*\/m, which a whole-directory run does not read/,
+		)
+		expect(await rows(url, "SELECT name FROM sqlite_master WHERE name = '__drizzle_migrations'")).toEqual([])
 	})
 })

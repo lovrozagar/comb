@@ -37,7 +37,17 @@ export declare function loadConfig(configPath?: string, cwd?: string): Promise<L
  * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
  */
 import type { Connection } from "../types.ts";
-export declare function ensureMigrationsTable(conn: Connection): Promise<void>;
+/** Whether a unique index of comb's history holds its hash alone, as comb's table did before 0.13 */
+export declare function hashUnique(conn: Connection): Promise<boolean>;
+/**
+ * comb's history, made where it is missing, named from 0.11, and from a history before 0.13
+ * rebuilt in one batch: every row and id kept, each row `renamed` lists taking its new name (M35),
+ * and the AUTOINCREMENT counter kept above every id it handed out (M36)
+ */
+export declare function ensureMigrationsTable(conn: Connection, renamed?: ReadonlyArray<{
+    id: number;
+    name: string;
+}>): Promise<void>;
 /**
  * Whether a migration is recorded under any of `hashes`; pass `migrationHashes(sql)` so a file
  * recorded under the pre-0.5.0 hash still counts as applied.

@@ -52,6 +52,35 @@ function matchHistory(files: readonly FileHashes[], rows: readonly HistoryRow[],
 	return matched
 }
 
+/** A row of a history comb 0.12 left, by id */
+type LegacyRow = HistoryRow & { id: number }
+
+/**
+ * The names comb 0.12's named rows take in 0.13, which a rebuild records once (M35). 0.12 named a
+ * --file by its base name, wherever it was, so a name no file has is resolved in turn: a row whose
+ * name a top-level file has keeps it; one whose hash exactly one file no other row holds has takes
+ * that file's name (a file renamed under 0.12, so it is not applied again); any other is a file from
+ * outside the directory, `../<name>`, as 0.13 names one. A file deleted under 0.12 reads so too:
+ * 0.12 could not tell it either. A hash several such files hold names none of them, and is refused.
+ */
+function resolveLegacy(files: readonly FileHashes[], rows: readonly LegacyRow[]): Array<{ id: number; name: string }> {
+	const byName = new Set(files.map((file) => file.name))
+	const claimed = new Set(rows.flatMap((row) => (row.name !== null && byName.has(row.name) ? [row.name] : [])))
+	const renamed: Array<{ id: number; name: string }> = []
+	for (const row of rows) {
+		if (row.name === null || byName.has(row.name)) continue
+		const holders = files.filter((file) => !claimed.has(file.name) && file.hashes.includes(row.hash))
+		if (holders.length > 1)
+			throw new Error(
+				`${row.name}, applied before 0.13, holds the text of ${holders.map((file) => file.name).join(", ")}, none of them recorded: comb cannot tell which it was; rename all but one`,
+			)
+		const name = holders[0]?.name ?? `../${row.name}`
+		if (holders[0] !== undefined) claimed.add(name)
+		renamed.push({ id: row.id, name })
+	}
+	return renamed
+}
+
 /** Why the orphans of a history refuse a check or an apply, naming each row by its name, or its hash's start */
 function orphanMessage(orphans: readonly HistoryRow[], dir: string): string {
 	const n = orphans.length
@@ -59,4 +88,4 @@ function orphanMessage(orphans: readonly HistoryRow[], dir: string): string {
 	return `${n} applied migration${n === 1 ? " matches" : "s match"} no file in ${dir} (${rows}): one was edited or renamed after it was applied; restore it, or record the change in a new file`
 }
 
-export { type FileHashes, type HistoryRow, type Matched, matchHistory, orphanMessage }
+export { type FileHashes, type HistoryRow, type LegacyRow, type Matched, matchHistory, orphanMessage, resolveLegacy }
