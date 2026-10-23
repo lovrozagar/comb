@@ -20,6 +20,7 @@ import { sqliteWriteFindings } from "./classify-sqlite-write.ts"
 import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
+import { type Facts, historyFacts } from "./pg-history.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
 import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
 import { noGuards, readGuards } from "./rebuild-guard.ts"
@@ -38,6 +39,8 @@ type FileContext = RebuildContext & {
 	/** the columns the file has added so far and nothing has written since: a backfill may fill them */
 	fresh: Fresh
 	created: Set<string>
+	/** what the Postgres history and the file so far attached to their tables (pg-history.ts) */
+	facts: Facts
 	/** the functions the history and the file so far define, keyed as nameKey keys them (pg-tree.ts) */
 	functions: Set<string>
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
@@ -153,6 +156,7 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		before,
 		created,
 		dialect,
+		facts: historyFacts(dialect === "postgres" ? before : undefined),
 		functions: new Set(before?.functions ?? []),
 		fresh: freshStart(before, dialect),
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),

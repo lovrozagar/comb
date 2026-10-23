@@ -200,6 +200,11 @@ export type ExtractedSchema = {
 	externalFts: string[]
 	/** the functions and procedures left, unquoted */
 	functions: string[]
+	/**
+	 * the statements of the history, in order: on Postgres, what its parse tree shows a write runs
+	 * (parentage, defaults, rules, operators, casts) is read from them (pg-history.ts)
+	 */
+	statements: string[]
 	tableInfo: Map<string, TableInfo>
 }
 

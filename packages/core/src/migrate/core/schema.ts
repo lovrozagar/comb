@@ -188,6 +188,7 @@ const EMPTY: ExtractedSchema = {
 	foreignKeys: [],
 	functions: [],
 	indexes: [],
+	statements: [],
 	tableInfo: /* @__PURE__ */ new Map(),
 	tables: /* @__PURE__ */ new Map(),
 	triggers: [],
@@ -204,6 +205,7 @@ function extractSchema(sql: string, from: ExtractedSchema = EMPTY, dialect: Dial
 		foreignKeys: [...from.foreignKeys],
 		functions: [...from.functions],
 		indexes: [...from.indexes],
+		statements: [...from.statements],
 		tableInfo: new Map(
 			[...from.tableInfo].map(([table, info]) => [
 				table,
@@ -218,7 +220,10 @@ function extractSchema(sql: string, from: ExtractedSchema = EMPTY, dialect: Dial
 		tables: new Map(from.tables),
 		triggers: [...from.triggers],
 	}
-	for (const stmt of splitSqlStatements(sql, dialect)) follow(schema, stmt, dialect)
+	for (const stmt of splitSqlStatements(sql, dialect)) {
+		follow(schema, stmt, dialect)
+		schema.statements.push(stmt)
+	}
 	return schema
 }
 

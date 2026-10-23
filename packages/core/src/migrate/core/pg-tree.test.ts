@@ -46,6 +46,7 @@ describe("Postgres classification from the parse tree", () => {
 		["dblink, which runs SQL comb cannot read", "SELECT dblink_exec('conn', 'DELETE FROM users');"],
 		["a DO block", "DO $$ BEGIN PERFORM 1; END $$;"],
 		["a function", "CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;"],
+		["a function in public", "CREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;\nSELECT f();"],
 		["a procedure", "CREATE PROCEDURE p() LANGUAGE sql AS $$ SELECT 1 $$;"],
 		["a trigger", "CREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION f();"],
 		["a CALL", "CALL p();"],
@@ -158,11 +159,12 @@ describe("Postgres statements that change what later names resolve to, or what a
 		["SET search_path TO public, pg_catalog;", "search_path"],
 		["SET LOCAL search_path = app;", "search_path"],
 		["RESET search_path;", "search_path"],
+		["RESET ALL;", "every setting"],
 		["SET session_replication_role = replica;", "session_replication_role"],
 	])("rates %j unsafe (T2, T3)", (sql, setting) => {
 		const rated = rate(sql)
 		expect(rated.safety).toBe("unsafe")
-		expect(rated.unsafeStatements.join("\n")).toContain(`sets ${setting}`)
+		expect(rated.unsafeStatements.join("\n")).toMatch(new RegExp(`(?:sets|resets) ${setting}`))
 	})
 
 	it("keeps an ordinary setting safe", () => {
@@ -172,5 +174,103 @@ describe("Postgres statements that change what later names resolve to, or what a
 	it("reads SELECT INTO TEMP as a temp table that takes the name (T7)", () => {
 		expect(notes("SELECT * INTO TEMP users FROM audit;")).toContain("shadows users for the rest of the file")
 		expect(rate("SELECT * INTO TEMP scratch FROM audit;").safety).toBe("safe")
+	})
+})
+
+/* the history T4–T6 read against: partitions, inheritance, and code attached to tables */
+const HISTORY = extractSchema(
+	[
+		"CREATE TABLE users (id int PRIMARY KEY, n int);",
+		"CREATE FUNCTION wipe() RETURNS int LANGUAGE sql AS $$ DELETE FROM users RETURNING 1 $$;",
+		"CREATE TABLE pp (id int, v int) PARTITION BY RANGE (id);",
+		"CREATE TABLE pc PARTITION OF pp FOR VALUES FROM (0) TO (10);",
+		"CREATE TRIGGER tp AFTER INSERT ON pc FOR EACH ROW EXECUTE FUNCTION wipe();",
+		"CREATE TRIGGER tq AFTER UPDATE ON pp FOR EACH ROW EXECUTE FUNCTION wipe();",
+		"CREATE TABLE ip (id int);",
+		"CREATE TABLE ic (x int) INHERITS (ip);",
+		"CREATE TRIGGER ti AFTER DELETE ON ic FOR EACH ROW EXECUTE FUNCTION wipe();",
+		"CREATE TABLE d (id int, v int DEFAULT wipe());",
+		"CREATE TABLE chk (id int, v int CHECK (v > wipe()));",
+		"CREATE DOMAIN dd AS int CHECK (VALUE > wipe());",
+		"CREATE TABLE dt (id int, v dd);",
+		"CREATE TABLE rr (id int);",
+		"CREATE RULE r AS ON INSERT TO rr DO ALSO DELETE FROM users;",
+		"CREATE FUNCTION eq3(int, int) RETURNS bool LANGUAGE sql AS $$ SELECT true $$;",
+		"CREATE OPERATOR === (FUNCTION = eq3, LEFTARG = int, RIGHTARG = int);",
+		"CREATE TYPE mt AS (v int);",
+		"CREATE FUNCTION tomt(int) RETURNS mt LANGUAGE sql AS $$ SELECT ROW($1)::mt $$;",
+		"CREATE CAST (int AS mt) WITH FUNCTION tomt(int) AS IMPLICIT;",
+		"CREATE TABLE ct (id int, m mt);",
+	].join("\n"),
+	undefined,
+	"postgres",
+)
+
+const on = (sql: string) => classifyMigration(sql, { before: HISTORY, dialect: "postgres" })
+const noted = (sql: string) => {
+	const rated = on(sql)
+	return { notes: [...rated.unsafeStatements, ...rated.cautiousStatements].join("\n"), safety: rated.safety }
+}
+
+/* T4, T5 and T6 of the 2.3 review: what a write reaches through parentage, and the code the history attached to a table */
+describe("Postgres writes through partitions, inheritance and the history's attached code", () => {
+	beforeAll(loadPostgresParser)
+
+	it("takes a parent out of the fresh tables once an existing table becomes its child (T4)", () => {
+		expect(
+			noted(
+				"CREATE TABLE q (id int, n int) PARTITION BY RANGE (id);\nALTER TABLE q ATTACH PARTITION users FOR VALUES FROM (0) TO (100);\nUPDATE q SET n = 0;",
+			).notes,
+		).toContain("updates existing rows of q (n)")
+		expect(noted("CREATE TABLE p (id int, n int);\nALTER TABLE users INHERIT p;\nUPDATE p SET n = 0;").notes).toContain(
+			"updates existing rows of p (n)",
+		)
+	})
+
+	it.each([
+		["an insert routed to a partition that has a trigger", "INSERT INTO pp (id, v) VALUES (1, 1);", "fires trigger tp"],
+		["an update of a partition whose parent has a trigger", "UPDATE pc SET v = 1;", "fires trigger tq"],
+		["a delete of an inheritance parent whose child has a trigger", "DELETE FROM ip;", "fires trigger ti"],
+	])("names %s (T5)", (_label, sql, note) => {
+		expect(noted(sql).notes).toContain(note)
+	})
+
+	it("leaves a parent's children out of a write to ONLY the parent", () => {
+		expect(noted("DELETE FROM ONLY ip;").notes).not.toContain("fires trigger ti")
+	})
+})
+
+describe("Postgres writes that run the code the history attached (T6)", () => {
+	beforeAll(loadPostgresParser)
+
+	it.each([
+		["a DEFAULT that calls a function", "INSERT INTO d (id) VALUES (1);", "runs wipe on every write to d"],
+		["a CHECK that calls a function", "INSERT INTO chk (id, v) VALUES (1, 1);", "runs wipe on every write to chk"],
+		[
+			"a domain whose CHECK calls a function",
+			"INSERT INTO dt (id, v) VALUES (1, 1);",
+			"runs wipe on every write to dt",
+		],
+		["a rule", "INSERT INTO rr (id) VALUES (1);", "runs rule r on every write to rr"],
+		[
+			"a copy made LIKE such a table",
+			"CREATE TABLE c2 (LIKE chk INCLUDING ALL);\nINSERT INTO c2 (id, v) VALUES (1, 1);",
+			"runs wipe on every write to c2",
+		],
+		[
+			"a column of a type an implicit cast reaches",
+			"INSERT INTO ct (id, m) VALUES (1, 1);",
+			"runs tomt on every write to ct",
+		],
+		["a migration's operator", "SELECT 1 === 2;", "uses operator ===, which a migration defined"],
+		[
+			"a cast to a type a migration's cast reaches",
+			"SELECT 1::mt;",
+			"casts to mt through tomt, which a migration defined",
+		],
+	])("rates %s unsafe (T6)", (_label, sql, note) => {
+		const rated = on(sql)
+		expect(rated.safety).toBe("unsafe")
+		expect(rated.unsafeStatements.join("\n")).toContain(note)
 	})
 })

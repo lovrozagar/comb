@@ -10,6 +10,7 @@ const schemaWith = (table: string, columns: string[]): ExtractedSchema => ({
 	externalFts: [],
 	foreignKeys: [],
 	functions: [],
+	statements: [],
 	indexes: [],
 	tableInfo: new Map(),
 	tables: new Map([[table, columns]]),

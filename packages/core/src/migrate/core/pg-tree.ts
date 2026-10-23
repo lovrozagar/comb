@@ -22,13 +22,17 @@ import type { ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
 import { builtinFinding } from "./pg-builtins.ts"
+import { type Facts, followTree, names, nodesOf, tableOf } from "./pg-history.ts"
 import { postgresParser } from "./pg-parser.ts"
+import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 
 type Node = Record<string, unknown>
 
 /** What the walk reads a statement against: the history, what the file made fresh, and the functions migrations defined */
 type TreeContext = {
 	before?: ExtractedSchema | undefined
+	/** what the history and the file so far attached to their tables (pg-history.ts) */
+	facts: Facts
 	fresh: Fresh
 	/** the functions the history and the file so far define, keyed as nameKey keys them */
 	functions: Set<string>
@@ -39,44 +43,9 @@ const SETTINGS: Readonly<Record<string, string>> = {
 	search_path: "sets search_path, which decides the function or table every later unqualified name resolves to",
 	session_replication_role: "sets session_replication_role, which can turn off triggers and foreign-key checks",
 }
-/** Every node under `node`, by its type, the type's fields with it */
-function nodesOf(node: unknown, out: Array<[string, Node]> = []): Array<[string, Node]> {
-	if (Array.isArray(node)) for (const each of node) nodesOf(each, out)
-	else if (node !== null && typeof node === "object") {
-		for (const [key, value] of Object.entries(node)) {
-			if (value !== null && typeof value === "object" && !Array.isArray(value) && /^[A-Z]/.test(key))
-				out.push([key, value as Node])
-			nodesOf(value, out)
-		}
-	}
-	return out
-}
-
-/* the parts of a name, as the parser lists them: each a String node */
-const names = (list: unknown): string[] => (list as Array<{ String: { sval: string } }>).map((part) => part.String.sval)
-
-/** A RangeVar's table, by its name and, schema included, its key as comb keys names */
-function tableOf(relation: unknown): { key: string; name: string; temp: boolean } {
-	const rel = relation as { relname: string; relpersistence: string; schemaname?: string }
-	const name = rel.relname
-	/* keyed as nameKey keys a Postgres name: public and unqualified alike, any other schema kept */
-	const key = rel.schemaname === undefined || rel.schemaname === "public" ? name : `${rel.schemaname}.${name}`
-	return { key, name, temp: rel.relpersistence === "t" || rel.schemaname === "pg_temp" }
-}
-
 /** The columns a SET list assigns */
 const assigned = (targets: unknown): string[] =>
 	(targets as Array<{ ResTarget: { name: string } }>).map((target) => target.ResTarget.name)
-
-/** The triggers the history holds on `table` for any of `events` */
-function firedOn(before: ExtractedSchema | undefined, table: string, events: readonly string[]): Finding[] {
-	return (before?.triggers ?? [])
-		.filter((trigger) => trigger.table === table && trigger.events.some((event) => events.includes(event)))
-		.map((trigger) => ({
-			level: "unsafe",
-			note: `fires trigger ${trigger.name}, whose body runs for every row it writes`,
-		}))
-}
 
 /** An UPDATE's or upsert's rating: cautious when it backfills only what `fresh` holds, which it then takes out */
 function updateFinding(table: { key: string; name: string }, columns: string[], fresh: Fresh): Finding {
@@ -89,16 +58,15 @@ function updateFinding(table: { key: string; name: string }, columns: string[], 
 		: { level: "unsafe", note: `updates existing rows of ${table.name} (${columns.join(", ")})` }
 }
 
-/** A write node's findings: its own rating, and the triggers it fires */
+/** A write node's findings: its own rating, and what it runs on every table it reaches */
 function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
 	const table = tableOf(node["relation"])
+	/* a write without ONLY reaches the table's partitions and inheritance children */
+	const target = { inh: (node["relation"] as { inh?: boolean }).inh === true, key: table.key }
 	if (type === "DeleteStmt")
-		return [{ level: "unsafe", note: `deletes rows of ${table.name}` }, ...firedOn(ctx.before, table.key, ["delete"])]
+		return [{ level: "unsafe", note: `deletes rows of ${table.name}` }, ...reachFindings(target, ["delete"], ctx)]
 	if (type === "UpdateStmt")
-		return [
-			updateFinding(table, assigned(node["targetList"]), ctx.fresh),
-			...firedOn(ctx.before, table.key, ["update"]),
-		]
+		return [updateFinding(table, assigned(node["targetList"]), ctx.fresh), ...reachFindings(target, ["update"], ctx)]
 	if (type === "MergeStmt") {
 		const commands = (node["mergeWhenClauses"] as Array<{ MergeWhenClause: { commandType: string } }>).map(
 			(each) => each.MergeWhenClause.commandType,
@@ -109,16 +77,16 @@ function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
 			changes
 				? { level: "unsafe", note: `merges into ${table.name}, updating or deleting its rows` }
 				: { level: "cautious", note: `merges new rows into ${table.name}` },
-			...firedOn(ctx.before, table.key, events),
+			...reachFindings(target, events, ctx),
 		]
 	}
 	const conflict = node["onConflictClause"] as Node | undefined
 	if (conflict?.["action"] === "ONCONFLICT_UPDATE")
 		return [
 			updateFinding(table, assigned(conflict["targetList"]), ctx.fresh),
-			...firedOn(ctx.before, table.key, ["insert", "update"]),
+			...reachFindings(target, ["insert", "update"], ctx),
 		]
-	return firedOn(ctx.before, table.key, ["insert"])
+	return reachFindings(target, ["insert"], ctx)
 }
 
 /** A SET, SET LOCAL or RESET of a setting that decides what later statements run: its finding */
@@ -149,7 +117,7 @@ function codeFinding(type: string, node: Node, ctx: TreeContext): Finding | unde
 	if (type === "FuncCall") return builtinFinding(names(node["funcname"]), ctx.functions)
 	/* a CALL holds its call as a plain field, not a typed node */
 	if (type === "CallStmt") return builtinFinding(names((node["funccall"] as Node)["funcname"]), ctx.functions)
-	return shadowFinding(type, node, ctx.before)
+	return useFinding(type, node, ctx.facts) ?? shadowFinding(type, node, ctx.before)
 }
 
 /** A temp table or view that takes an existing table's name: its finding */
@@ -179,11 +147,16 @@ function pgTreeFindings(stmt: string, ctx: TreeContext): Finding[] {
 		// reason: a statement Postgres cannot parse is the statement's finding, unsafe
 		return [{ level: "unsafe", note: `comb could not parse this as Postgres 17: ${(error as Error).message}` }]
 	}
-	return nodesOf(tree.stmts).flatMap(([type, node]) =>
+	const nodes = nodesOf(tree.stmts)
+	const findings = nodes.flatMap(([type, node]) =>
 		/^(?:InsertStmt|UpdateStmt|DeleteStmt|MergeStmt)$/.test(type)
 			? writeFindings(type, node, ctx)
 			: [codeFinding(type, node, ctx)].filter((finding) => finding !== undefined),
 	)
+	/* what the statement attached and reparented counts for the statements after it */
+	for (const [type, node] of nodes) if (type === "AlterTableStmt") followParentage(node, ctx.fresh)
+	followTree(tree.stmts, ctx.facts, ctx.functions)
+	return findings
 }
 
 export { pgTreeFindings, type TreeContext }
