@@ -26,6 +26,7 @@ export {
 	parseMigration,
 	splitSqlStatements,
 } from "./core/parse.ts"
+export { loadPostgresParser } from "./core/pg-parser.ts"
 export {
 	checkCircuitBreaker,
 	createCircuitBreaker,

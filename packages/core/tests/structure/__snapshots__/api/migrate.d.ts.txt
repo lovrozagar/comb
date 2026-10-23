@@ -3,6 +3,7 @@ export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfi
 export { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./core/apply.ts";
 export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
 export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, parseMigration, splitSqlStatements, } from "./core/parse.ts";
+export { loadPostgresParser } from "./core/pg-parser.ts";
 export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCircuitBreaker, withRetry, } from "./core/utils.ts";
 export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./drivers/index.ts";
 export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, MultiTenantConfig, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
@@ -101,6 +102,23 @@ export { classifyMigration, extractDropStatements };
  * statements are applied as written, as wrangler and Atlas apply them
  */
 export declare function parseMigration(sql: string, filename: string, options?: ClassifyOptions): ParsedMigration;
+
+// migrate/core/pg-parser.d.ts
+/**
+ * comb's Postgres parser: libpg-query 17, the parser of the server comb migrates, an optional peer.
+ * `loadPostgresParser()` loads it once; every comb path that classifies a Postgres migration
+ * awaits it first, and a caller of `classifyMigration` on Postgres does too.
+ */
+type Parser = {
+    parseSync(sql: string): {
+        stmts?: unknown;
+    };
+};
+/** Load libpg-query, comb's Postgres parser, once; a Postgres file is classified only after it */
+declare function loadPostgresParser(): Promise<void>;
+/** The loaded parser; throws when it was never loaded */
+declare function postgresParser(): Parser;
+export { loadPostgresParser, postgresParser };
 
 // migrate/core/utils.d.ts
 /**
@@ -460,13 +478,13 @@ export declare function generateIncrementalMigration(options: MigrateDiffOptions
  *
  * unsafe: loses data or breaks deployed code by name (table, column, schema, type, sequence,
  * role drops; CASCADE; retypes; SET NOT NULL; a NOT NULL column without a default; renames;
- * TRUNCATE; DELETE or UPDATE without a top-level WHERE, or with one that is always true, at any
- * depth: in a CTE, a subquery or a rule). cautious: drops nothing a row holds (indexes,
- * constraints, views, policies, triggers, functions, defaults), a filtered write, a grant, a call
- * of a function a migration created, a SQLite REPLACE, or a file Atlas runs outside a transaction.
- * A lock warning names a statement that blocks a Postgres table while it runs. A `DO` body runs,
- * so its statements are read too, and so is the literal SQL it EXECUTEs. A statement Postgres
- * refuses inside a transaction is refused outright unless its file runs outside one.
+ * TRUNCATE). cautious: drops nothing a row holds (indexes, constraints, views, policies, triggers,
+ * functions, defaults), a grant, or a file Atlas runs outside a transaction. A lock warning names a
+ * statement that blocks a Postgres table while it runs. What a statement writes is read from the
+ * engine: on SQLite by the proof run (proof-engine.ts), on Postgres from its parse tree
+ * (pg-tree.ts), which also rates the code a statement runs: DO blocks, routines and function
+ * calls. A statement Postgres refuses inside a transaction is refused outright unless its file
+ * runs outside one.
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
 type ClassifyOptions = {

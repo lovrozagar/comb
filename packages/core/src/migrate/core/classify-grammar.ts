@@ -13,10 +13,11 @@
  * a role sees, and it can be reversed. Not recognized, so unsafe: triggers, functions, procedures
  * and rules (made, replaced, altered or dropped), DO blocks, and every other pragma. The one trigger shape comb recognizes is
  * the one it writes: an external-content FTS5 table's sync trigger, whose body only inserts the
- * row's columns or the `'delete'` command into that table; its DROP, when the file makes it again. A recognized write is unsafe too when a
- * trigger the history left fires on it, since the trigger's body runs for every row it touches.
+ * row's columns or the `'delete'` command into that table; its DROP, when the file makes it again.
+ * What a recognized statement writes, shadows or fires is the engine's to read: SQLite's in the
+ * proof run, Postgres's parser in pg-tree.ts.
  */
-import type { Dialect, ExtractedSchema, TriggerEvent } from "../types.ts"
+import type { Dialect, ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { nameKey, QNAME, unquote } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
@@ -48,14 +49,6 @@ const CAUTIOUS_SHAPES: ReadonlyArray<[RegExp, string]> = [
 	[/^(?:CREATE|ALTER) EXTENSION\b/i, "runs the extension's script"],
 	[/^ALTER (?!TABLE\b)(?:MATERIALIZED VIEW|\w+) \S+.* OWNER TO\b/i, "a new owner, who bypasses row level security"],
 ]
-
-// per-process-constant: a pattern composed from the name grammar, compiled once
-const TEMP_TABLE = /* @__PURE__ */ new RegExp(`^CREATE (?:TEMP|TEMPORARY) TABLE (?:IF NOT EXISTS )?(${QNAME})`, "i")
-// per-process-constant: a pattern composed from the name grammar, compiled once
-const WRITE = /* @__PURE__ */ new RegExp(
-	`^(?:(INSERT|REPLACE)(?: OR \\w+)? INTO|(UPDATE)(?: OR \\w+)?(?: ONLY)?|(DELETE) FROM(?: ONLY)?) (${QNAME})`,
-	"i",
-)
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const SYNC_TRIGGER = /* @__PURE__ */ new RegExp(
@@ -143,18 +136,6 @@ function kindOf(code: string): string {
 		.join(" ")
 }
 
-/** The triggers the history left that fire on this write, by name */
-function firedTriggers(code: string, ctx: GrammarContext): string[] {
-	const [, insert, update, , table] = WRITE.exec(code) ?? []
-	if (table === undefined) return []
-	/* the pattern matched one of its three verbs */
-	const event: TriggerEvent = insert !== undefined ? "insert" : update !== undefined ? "update" : "delete"
-	const key = nameKey(table, ctx.dialect)
-	return (ctx.before?.triggers ?? [])
-		.filter((trigger) => trigger.table === key && trigger.events.includes(event))
-		.map((trigger) => trigger.name)
-}
-
 /** What the grammar makes of one top-level statement: nothing when comb recognizes it as it is */
 function grammarFindings(statement: string, ctx: GrammarContext): Finding[] {
 	/* an EXPLAIN is the statement it explains (ANALYZE runs it) */
@@ -166,16 +147,7 @@ function grammarFindings(statement: string, ctx: GrammarContext): Finding[] {
 	if (policy !== undefined)
 		return /^ALTER POLICY .* RENAME TO \S+$/i.test(code) ? [] : [{ level: "cautious", note: policy }]
 	const cautious = CAUTIOUS_SHAPES.find(([shape]) => shape.test(code))
-	if (cautious !== undefined) return [{ level: "cautious", note: cautious[1] }]
-	/* on SQLite the proof's engine pass reads temp shadows and fired triggers from SQLite itself */
-	if (ctx.dialect === "sqlite") return []
-	const temp = TEMP_TABLE.exec(code)?.[1]
-	if (temp !== undefined && ctx.before?.tables.has(nameKey(temp, ctx.dialect)) === true)
-		return [{ level: "unsafe", note: `shadows ${temp} for the rest of the file` }]
-	return firedTriggers(code, ctx).map((name) => ({
-		level: "unsafe" as const,
-		note: `fires trigger ${name}, whose body runs for every row it writes`,
-	}))
+	return cautious === undefined ? [] : [{ level: "cautious", note: cautious[1] }]
 }
 
 export { ftsTriggersOf, type GrammarContext, grammarFindings }

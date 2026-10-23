@@ -4,25 +4,25 @@
  *
  * unsafe: loses data or breaks deployed code by name (table, column, schema, type, sequence,
  * role drops; CASCADE; retypes; SET NOT NULL; a NOT NULL column without a default; renames;
- * TRUNCATE; DELETE or UPDATE without a top-level WHERE, or with one that is always true, at any
- * depth: in a CTE, a subquery or a rule). cautious: drops nothing a row holds (indexes,
- * constraints, views, policies, triggers, functions, defaults), a filtered write, a grant, a call
- * of a function a migration created, a SQLite REPLACE, or a file Atlas runs outside a transaction.
- * A lock warning names a statement that blocks a Postgres table while it runs. A `DO` body runs,
- * so its statements are read too, and so is the literal SQL it EXECUTEs. A statement Postgres
- * refuses inside a transaction is refused outright unless its file runs outside one.
+ * TRUNCATE). cautious: drops nothing a row holds (indexes, constraints, views, policies, triggers,
+ * functions, defaults), a grant, or a file Atlas runs outside a transaction. A lock warning names a
+ * statement that blocks a Postgres table while it runs. What a statement writes is read from the
+ * engine: on SQLite by the proof run (proof-engine.ts), on Postgres from its parse tree
+ * (pg-tree.ts), which also rates the code a statement runs: DO blocks, routines and function
+ * calls. A statement Postgres refuses inside a transaction is refused outright unless its file
+ * runs outside one.
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { ftsCommandFindings, preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
 import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
-import { callFindings, type Routines, routinesOf } from "./classify-routine.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
-import { followAdds, type Fresh, freshStart, writeFindings } from "./classify-write.ts"
+import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
+import { pgTreeFindings } from "./pg-tree.ts"
 import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
 import { noGuards, readGuards } from "./rebuild-guard.ts"
-import { codeOf, doBody, executedSql, nameKey, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
+import { codeOf, nameKey, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 type ClassifyOptions = {
@@ -37,10 +37,6 @@ type FileContext = RebuildContext & {
 	/** the columns the file has added so far and nothing has written since: a backfill may fill them */
 	fresh: Fresh
 	created: Set<string>
-	/** the functions and procedures an earlier file created, whose bodies this file does not hold */
-	earlierRoutines: Set<string>
-	/** the routines this file creates, each with what a call of it runs */
-	routines: Routines
 	/** external-content FTS5 tables the file creates again and rebuilds from their content: a drop of one loses nothing */
 	reindexed: Set<string>
 	/** the statements the file prepares, by name, with the code each runs */
@@ -118,10 +114,7 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 		findings.push({ drops: dropNames(code), level: "unsafe" })
 	else if (CAUTIOUS.test(code)) findings.push({ drops: dropNames(code), level: "cautious" })
 	if (/\bCASCADE\b/i.test(code.replace(/\bON (?:DELETE|UPDATE) CASCADE\b/gi, ""))) findings.push({ level: "unsafe" })
-	/* on SQLite the proof's engine pass rates writes (proof-engine.ts), read from SQLite itself */
-	if (ctx.dialect !== "sqlite") findings.push(...writeFindings(code, ctx.fresh))
-	findings.push(...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, body, ctx)))
-	findings.push(...callFindings(code, { dialect: ctx.dialect, earlier: ctx.earlierRoutines, routines: ctx.routines }))
+	findings.push(...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, ctx)))
 	if (ctx.dialect === "postgres") {
 		const index = indexWarning(code, ctx)
 		if (index !== undefined) findings.push(index)
@@ -130,38 +123,11 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 	return findings
 }
 
-/**
- * The findings of one statement, given its code and its text; a DO body's statements are read as
- * the code they run, and an EXPLAIN as the statement it explains (ANALYZE runs it)
- */
-function findingsOf(code: string, stmt: string, ctx: FileContext): Finding[] {
-	if (/^DO\b/i.test(code)) return doFindings(stmt, ctx)
-	if (EXPLAIN.test(code)) return findingsOf(code.replace(EXPLAIN, ""), stmt, ctx)
+/** The findings of one statement's code; an EXPLAIN as the statement it explains (ANALYZE runs it) */
+function findingsOf(code: string, ctx: FileContext): Finding[] {
+	if (EXPLAIN.test(code)) return findingsOf(code.replace(EXPLAIN, ""), ctx)
 	const table = /^ALTER TABLE\b/i.test(code) ? alterTableFindings(code, ctx) : undefined
 	return table ?? statementFindings(code, ctx)
-}
-
-/**
- * A DO block: each statement of its body, control words stripped, and the literal SQL it
- * EXECUTEs; any other EXECUTE runs SQL comb cannot read
- */
-function doFindings(stmt: string, ctx: FileContext): Finding[] {
-	return bodyFindings(doBody(stmt), ctx)
-}
-
-/** A Postgres body's findings: each of its statements, control words stripped, and the literal SQL it EXECUTEs */
-function bodyFindings(body: string, ctx: FileContext): Finding[] {
-	const read = (sql: string) =>
-		splitSqlStatements(sql, "postgres").flatMap((part) => {
-			const code = codeOf(part, "postgres").replace(
-				/^(?:(?:BEGIN|ELSE|LOOP|THEN|DECLARE)\s+|(?:IF|ELSIF|WHEN)\b.*?\bTHEN\s+)*/i,
-				"",
-			)
-			return findingsOf(code, part, ctx)
-		})
-	const findings = [...read(body), ...executedSql(body).flatMap(read)]
-	if (/\bEXECUTE\b/i.test(codeOf(body, "postgres"))) findings.push({ level: "cautious" })
-	return findings
 }
 
 type Read = ReadStatement & { findings: Finding[] }
@@ -184,8 +150,6 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		before,
 		created,
 		dialect,
-		earlierRoutines: new Set(before?.functions ?? []),
-		routines: new Map(),
 		fresh: freshStart(before, dialect),
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
 		prepared,
@@ -196,19 +160,15 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		renumbered: guards.renumbered,
 		unguarded: guards.unguarded,
 	}
-	/* a routine's body runs when it is called, after the file's backfills: nothing in it is fresh */
-	ctx.routines = routinesOf({ codes, dialect, statements }, (body) =>
-		bodyFindings(body, { ...ctx, fresh: freshStart(before, dialect) }),
-	)
 	return statements.map((stmt, i) => {
 		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
 		/* every other statement is rated by the rules, and only as a shape the grammar recognizes */
 		const findings = guards.guarded.has(i)
 			? []
 			: [
-					...findingsOf(codes[i] as string, stmt, ctx),
+					...findingsOf(codes[i] as string, ctx),
 					...grammarFindings(codes[i] as string, { ...ctx, ftsTriggers }),
-					...(dialect === "sqlite" ? ftsCommandFindings(stmt) : []),
+					...(dialect === "sqlite" ? ftsCommandFindings(stmt) : pgTreeFindings(stmt, ctx)),
 				]
 		followAdds(codes[i] as string, ctx.fresh)
 		return { code: codes[i] as string, dialect, findings, stmt }

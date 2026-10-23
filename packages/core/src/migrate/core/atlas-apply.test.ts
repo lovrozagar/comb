@@ -184,9 +184,10 @@ describe("applyWithAtlas: a check (M11)", () => {
 })
 
 describe("applyWithAtlas: what it classifies against", () => {
-	it("classifies each pending file against the schema the files before it leave, a function they create included", async () => {
-		writeFileSync(join(dir, "1_a.sql"), "CREATE FUNCTION purge() RETURNS void LANGUAGE sql AS $$ DELETE FROM a $$;\n")
-		writeFileSync(join(dir, "2_b.sql"), "SELECT purge();\n")
+	it("classifies each pending file against the schema the files before it leave", async () => {
+		writeFileSync(join(dir, "1_a.sql"), "CREATE TABLE a (id int);\n")
+		/* a temp table shadows a only when the history holds a */
+		writeFileSync(join(dir, "2_b.sql"), "CREATE TEMP TABLE a (id int);\n")
 		const safety: string[] = []
 		const later = status({
 			applied: [revision("1")],
@@ -200,7 +201,7 @@ describe("applyWithAtlas: what it classifies against", () => {
 			{ ok: true as const }
 		)
 		await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: later }), { approve }))
-		expect(safety).toEqual(["cautious"])
+		expect(safety).toEqual(["unsafe"])
 	})
 })
 

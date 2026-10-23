@@ -57,7 +57,10 @@ describe("classifyMigration lists a statement at its strictest level alone", () 
 		const replaced =
 			"CREATE OR REPLACE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM t; RETURN NEW; END $$;"
 		const c = classifyMigration(replaced, { before, dialect: "postgres" })
-		expect(c.unsafeStatements).toEqual([expect.stringContaining("comb does not recognize CREATE OR REPLACE FUNCTION")])
+		expect(c.unsafeStatements).toEqual([
+			expect.stringContaining("comb does not recognize CREATE OR REPLACE FUNCTION"),
+			expect.stringContaining("creates function f, whose body comb does not read"),
+		])
 		expect(c.cautiousStatements).toEqual([])
 	})
 })
@@ -104,7 +107,6 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 		"CREATE OR REPLACE VIEW v AS SELECT 1",
 		"GRANT SELECT ON post TO r",
 		"REVOKE SELECT ON post FROM r",
-		"CALL p()",
 		"ALTER SEQUENCE s RESTART",
 		"ALTER INDEX i RENAME TO j",
 		"ALTER TABLE post DISABLE ROW LEVEL SECURITY",
@@ -167,10 +169,11 @@ describe("classifyMigration on SQL that hid a destructive change", () => {
 		expect(pg(sql).safety).toBe("cautious")
 	})
 
-	it("calls a function an earlier file created cautious", () => {
+	/* a function that is no pure built-in runs code comb cannot read, whoever created it (pg-tree.ts) */
+	it("calls a function an earlier file created unsafe, as any that is no pure built-in", () => {
 		const before = { ...schemaWith("users", ["id"]), functions: ["purge"] }
-		expect(classifyMigration("SELECT purge();", { before, dialect: "postgres" }).safety).toBe("cautious")
-		expect(pg("SELECT purge();").safety).toBe("safe")
+		expect(classifyMigration("SELECT purge();", { before, dialect: "postgres" }).safety).toBe("unsafe")
+		expect(pg("SELECT purge();").safety).toBe("unsafe")
 	})
 
 	it.each([
@@ -194,7 +197,8 @@ describe("classifyMigration with no dialect named", () => {
 	it("reads the file both ways and keeps the stricter, so Postgres SQL never gets SQLite's reading", () => {
 		expect(classifyMigration("SELECT E'\\''; DROP TABLE post; -- ';").safety).toBe("unsafe")
 		expect(classifyMigration("DO $$ BEGIN DROP TABLE post; END $$;").safety).toBe("unsafe")
-		expect(extractDropStatements("DO $$ BEGIN DROP TABLE post; END $$;")).toEqual(["DROP TABLE post"])
+		/* a DO body is code comb does not read: the block is unsafe, and names no drop */
+		expect(extractDropStatements("DO $$ BEGIN DROP TABLE post; END $$;")).toEqual([])
 		expect(classifyMigration("SELECT E'\\''; DROP TABLE post; -- ';", { dialect: "sqlite" }).safety).toBe("safe")
 	})
 
@@ -398,22 +402,14 @@ describe("classifyMigration on a call of a routine the file creates (M2)", () =>
 		expect(pg(wipe).unsafeStatements.join("\n")).toMatch(/comb does not recognize CREATE FUNCTION/)
 	})
 
-	it("rates a call by the body: harmless safe, a quoted SQL body that nulls unsafe, another language cautious", () => {
-		expect(levelOf('CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nCALL "p"();', 'CALL "p"()')).toBe(
-			"cautious",
-		)
-		expect(levelOf('CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;\nSELECT "p"();', 'SELECT "p"()')).toBe(
-			"safe",
-		)
-		expect(
-			levelOf(
-				"CREATE FUNCTION n() RETURNS int LANGUAGE sql AS 'UPDATE users SET email = NULL RETURNING 1';\nSELECT n();",
-				"SELECT n()",
-			),
-		).toBe("unsafe")
-		expect(
-			levelOf("CREATE FUNCTION py() RETURNS int LANGUAGE plpython3u AS $$ return 1 $$;\nSELECT py();", "SELECT py()"),
-		).toBe("cautious")
+	/* a routine's body is code comb does not read, in any language: its creation and every call are unsafe */
+	it("rates every call of a routine the file creates unsafe, whatever its body or language", () => {
+		for (const [routine, call] of [
+			['CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;', 'CALL "p"()'],
+			['CREATE PROCEDURE "p"() LANGUAGE sql AS $$ SELECT 1 $$;', 'SELECT "p"()'],
+			["CREATE FUNCTION py() RETURNS int LANGUAGE plpython3u AS $$ return 1 $$;", "SELECT py()"],
+		])
+			expect(levelOf(`${routine}\n${call};`, call)).toBe("unsafe")
 	})
 })
 

@@ -116,8 +116,9 @@ describe("classifyMigration: a DELETE, and an UPDATE of existing values, may des
 			'ALTER TABLE users ADD COLUMN tier text;\nALTER TABLE "users" ADD COLUMN "since" integer, ADD COLUMN x text;\n'
 		expect(pg(`${added}UPDATE users SET (tier, x) = ('free', 'y');`).safety).toBe("cautious")
 		expect(pg(`${added}UPDATE users SET tier = 'free', email = NULL;`).safety).toBe("unsafe")
-		/* an element of an array column names no column comb can match: it may overwrite */
-		expect(pg("ALTER TABLE users ADD COLUMN tags text[];\nUPDATE users SET tags[1] = 'x';").safety).toBe("unsafe")
+		/* the parse tree names the column an element belongs to: the file's own, which held nothing before it */
+		expect(pg("ALTER TABLE users ADD COLUMN tags text[];\nUPDATE users SET tags[1] = 'x';").safety).toBe("cautious")
+		expect(pg("UPDATE users SET email[1] = 'x';").safety).toBe("unsafe")
 		expect(pg(`UPDATE users SET tier = 'free';\n${added}`).safety).toBe("unsafe")
 	})
 })

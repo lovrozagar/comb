@@ -7,12 +7,16 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
 import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-diff.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
 
 import { withScratchDb } from "../support/pg.ts"
+import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
+
+/* a caller of classifyMigration on Postgres loads comb's parser first */
+beforeAll(loadPostgresParser)
 
 const TABLES = `CREATE TYPE "status" AS ENUM ('active', 'banned');
 CREATE TABLE "member" ("id" text PRIMARY KEY, "org" text NOT NULL, "status" "status" NOT NULL DEFAULT 'active', "seats" integer NOT NULL DEFAULT 1 CHECK ("seats" > 0)COLUMN);

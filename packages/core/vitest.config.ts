@@ -7,6 +7,7 @@ export default defineConfig({
 				test: {
 					name: "unit",
 					include: ["src/**/*.test.ts", "lint/**/*.test.ts", "tests/structure/**/*.test.ts"],
+					setupFiles: ["tests/support/pg-parser.setup.ts"],
 				},
 			},
 			{

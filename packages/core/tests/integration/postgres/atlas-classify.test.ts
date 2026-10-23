@@ -13,6 +13,10 @@ import { classifyMigration } from "../../../src/migrate/core/classify.ts"
 import type { MigrationSafety } from "../../../src/migrate/types.ts"
 
 import { withScratchDb } from "../support/pg.ts"
+import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
+
+/* a caller of classifyMigration on Postgres loads comb's parser first */
+beforeAll(loadPostgresParser)
 
 const POST = (columns: string) => `CREATE TABLE post (id integer PRIMARY KEY, ${columns});`
 const BASE = `${POST("title text NOT NULL, body text, big bigint, price numeric(10,2), n integer DEFAULT 1 CONSTRAINT post_n_check CHECK (n > 0)")}

@@ -48,13 +48,15 @@ function inFileApproval(sql: string, dialect: Dialect = "sqlite"): string | unde
 async function approveMigration(migration: Reviewed, options: ApprovalOptions): Promise<Approval> {
 	const { classification: c } = migration
 	if (c.safety === "safe") return { ok: true }
+	/* SQLite's callers name no dialect: the file is read as SQLite, as it was classified */
+	const dialect = options.dialect ?? "sqlite"
 	const unsafe = c.safety === "unsafe"
-	const approvedBy = unsafe ? inFileApproval(migration.sql, options.dialect) : undefined
+	const approvedBy = unsafe ? inFileApproval(migration.sql, dialect) : undefined
 	if (approvedBy !== undefined) return { approvedBy, ok: true }
 	if (!unsafe && options.yes) return { ok: true }
 	const statements = unsafe ? c.unsafeStatements : c.cautiousStatements
 	/* a drop a listed statement already shows is not named twice: each is read for what it drops */
-	const shown = new Set(statements.flatMap((stmt) => extractDropStatements(stmt, { dialect: options.dialect })))
+	const shown = new Set(statements.flatMap((stmt) => extractDropStatements(stmt, { dialect })))
 	const drops = migration.drops.filter((drop) => !shown.has(drop))
 	const listed = [...new Set([...drops, ...statements])]
 	if (options.confirm !== undefined && (await options.confirm(dropsQuestion(listed, options.target))))

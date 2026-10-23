@@ -89,6 +89,7 @@
 		"bun-types": "catalog:",
 		"drizzle-kit": "catalog:",
 		"drizzle-orm": "catalog:",
+		"libpg-query": "catalog:",
 		"miniflare": "catalog:",
 		"oxc-parser": "catalog:",
 		"pg": "catalog:",
@@ -106,6 +107,7 @@
 		"@noble/hashes": ">=2.4.0 <3",
 		"drizzle-kit": ">=1.0.0-rc.4 <2",
 		"drizzle-orm": ">=1.0.0-rc.4 <2",
+		"libpg-query": ">=17.7.4 <18",
 		"ts-morph": ">=28.0.0 <29",
 		"wrangler": ">=4.147.0 <5",
 		"zod": ">=4.5.4 <5"
@@ -118,6 +120,9 @@
 			"optional": true
 		},
 		"drizzle-kit": {
+			"optional": true
+		},
+		"libpg-query": {
 			"optional": true
 		},
 		"ts-morph": {

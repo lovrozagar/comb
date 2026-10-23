@@ -45,7 +45,8 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "ALTER VIEW v OWNER TO r", "cautious"],
 	["postgres", "ANALYZE post", "safe"],
 	["postgres", "BEGIN", "safe"],
-	["postgres", "CALL p()", "cautious"],
+	/* a procedure's body is code comb does not read (pg-tree.ts) */
+	["postgres", "CALL p()", "unsafe"],
 	["postgres", "CHECKPOINT", "unsafe"],
 	["postgres", "CLOSE c", "unsafe"],
 	["postgres", "CLUSTER post USING i", "safe"],

@@ -17,6 +17,7 @@ import { refuseDrift } from "./baseline-compare.ts"
 import { extractSchema, parseMigration } from "./parse.ts"
 import { type Run, type RunResult, run } from "./process.ts"
 import { Refused } from "./refused.ts"
+import { loadPostgresParser } from "./pg-parser.ts"
 
 /** A migration file as Atlas lists it */
 type AtlasFile = { Description: string; Name: string; Version: string }
@@ -137,6 +138,8 @@ function checkHistory(status: AtlasStatus, copy: string): string | undefined {
  * before it leave, approved, its lock warnings shown
  */
 async function approvePending(options: ApplyOptions, copy: string, pending: readonly AtlasFile[]): Promise<void> {
+	/* Postgres statements are read from Postgres's parser, loaded once */
+	await loadPostgresParser()
 	const waiting = new Set(pending.map((file) => file.Name))
 	let schema = extractSchema("", undefined, "postgres")
 	for (const Name of sqlFiles(copy)) {
