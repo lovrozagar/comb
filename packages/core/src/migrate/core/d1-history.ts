@@ -5,6 +5,8 @@
  * wrangler does, reads the table, checks the pending files (plan-apply.ts) in wrangler's order,
  * hands them to wrangler with stdin closed, and fails unless the table then holds exactly the
  * files it checked. wrangler takes no backup; bookmark a production database before an apply.
+ * That table records names only, so comb records each applied file's hash in its own table, and
+ * refuses a file applied, then edited, as it does on its other engines.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
@@ -45,6 +47,8 @@ type D1Target = {
 }
 
 const DRIZZLE_TABLE = "__drizzle_migrations"
+/* comb's own record of the hash each file was applied under: wrangler's table holds names only */
+const HASH_TABLE = "_comb_migration_hashes"
 const CONFIG_NAMES = ["wrangler.json", "wrangler.jsonc", "wrangler.toml"]
 
 const quoteName = (name: string): string => `"${name.replaceAll('"', '""')}"`
@@ -102,6 +106,26 @@ async function appliedNames(conn: Connection, table: string, create: boolean): P
 	return new Set(await column(conn, `SELECT name FROM ${quoteName(table)} ORDER BY id`))
 }
 
+/** The hash comb recorded for each applied file; `create` (apply and baseline) makes the table */
+async function appliedHashes(conn: Connection, create: boolean): Promise<Map<string, string>> {
+	if (create) await conn.execute(`CREATE TABLE IF NOT EXISTS ${HASH_TABLE} (name TEXT PRIMARY KEY, hash TEXT NOT NULL)`)
+	else if (
+		(await column(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${HASH_TABLE}'`)).length === 0
+	)
+		return new Map()
+	const { rows } = await conn.execute(`SELECT name, hash FROM ${HASH_TABLE}`)
+	return new Map(rows.map((row) => [String(row[0]), String(row[1])]))
+}
+
+/** Record the hash each of `files` was applied under; both callers pass at least one */
+async function recordHashes(conn: Connection, files: ReadonlyArray<{ hash: string; name: string }>): Promise<void> {
+	await conn.batch(
+		files.map(({ hash, name }) => ({
+			sql: `INSERT OR REPLACE INTO ${HASH_TABLE} (name, hash) VALUES (${literal(name)}, ${literal(hash)})`,
+		})),
+	)
+}
+
 /** The hashes comb before 0.8 recorded in `__drizzle_migrations`; undefined when the table is absent */
 async function drizzleHashes(conn: Connection): Promise<Set<string> | undefined> {
 	const found = await column(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${DRIZZLE_TABLE}'`)
@@ -133,17 +157,29 @@ async function history(
 	read: ReadConfig,
 	target: D1Target,
 	create: boolean,
-): Promise<{ applied: Set<string>; table: string }> {
+): Promise<{ applied: Set<string>; table: string; unhashed: string[] }> {
 	const table = resolveBinding(read, target)
 	const applied = await appliedNames(target.conn, table, create)
+	const files = filesOf(target.migrationsDir)
 	const hashes = await drizzleHashes(target.conn)
-	const copied = hashes === undefined ? [] : recordedByDrizzle(filesOf(target.migrationsDir), hashes, applied)
+	const copied = hashes === undefined ? [] : recordedByDrizzle(files, hashes, applied)
 	if (copied.length > 0) {
 		throw new Error(
 			`${target.name} records ${copied.join(", ")} in ${DRIZZLE_TABLE}, comb's history before 0.8, but not in ${table}, wrangler's; run comb migrate baseline once to copy the record`,
 		)
 	}
-	return { applied, table }
+	const recorded = await appliedHashes(target.conn, create)
+	const edited = files.find(
+		({ name, sql }) =>
+			applied.has(name) && recorded.has(name) && !migrationHashes(sql).includes(recorded.get(name) as string),
+	)
+	if (edited !== undefined) {
+		throw new Error(
+			`${edited.name} was applied, then edited: its hash is not the one comb recorded; restore the file, or put the change in a new one`,
+		)
+	}
+	const unhashed = files.filter(({ name }) => applied.has(name) && !recorded.has(name)).map(({ name }) => name)
+	return { applied, table, unhashed }
 }
 
 type D1Apply = {
@@ -165,8 +201,8 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		dir: target.migrationsDir,
 		exec: target.exec,
 		files,
-		/* the binding's own history table, which apply may have made already */
-		historyTables: [table],
+		/* the binding's own history table, and comb's record of hashes, which apply may have made already */
+		historyTables: [table, HASH_TABLE],
 		print: options.print,
 	})
 	const names = pending.map(({ name }) => name)
@@ -181,6 +217,10 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 			`wrangler recorded ${added.join(", ") || "nothing"} in ${table}, where comb checked ${names.join(", ")}; see the wrangler output above`,
 		)
 	}
+	await recordHashes(
+		target.conn,
+		pending.map(({ migration, name }) => ({ hash: migration.hash, name })),
+	)
 	return names
 }
 
@@ -204,6 +244,14 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
 		await target.conn.batch(
 			copied.map((name) => ({ sql: `INSERT OR IGNORE INTO ${quoteName(table)} (name) VALUES (${literal(name)})` })),
 		)
+		/* each copied file was applied under the hash comb's old history records for it */
+		await appliedHashes(target.conn, true)
+		await recordHashes(
+			target.conn,
+			files
+				.filter(({ name }) => copied.includes(name))
+				.map(({ name, sql }) => ({ hash: migrationHashes(sql).find((hash) => hashes.has(hash)) as string, name })),
+		)
 	}
 	for (const name of copied) print(`Marked applied: ${name}`)
 	for (const { name } of files.filter((file) => !applied.has(file.name) && !copied.includes(file.name))) {
@@ -218,12 +266,16 @@ async function statusD1(
 	read: ReadConfig,
 	print: (line: string) => void,
 ): Promise<{ applied: string[]; pending: string[] }> {
-	const recorded = (await history(read, target, false)).applied
+	const { applied: recorded, unhashed } = await history(read, target, false)
 	const files = filesOf(target.migrationsDir).map(({ name }) => name)
 	const applied = files.filter((name) => recorded.has(name))
 	const pending = files.filter((name) => !recorded.has(name))
 	print(`Applied: ${applied.join(", ") || "none"}`)
 	print(`Pending: ${pending.join(", ") || "none"}`)
+	if (unhashed.length > 0)
+		print(
+			`No hash recorded for ${unhashed.join(", ")}, applied before comb recorded them: comb cannot tell whether ${unhashed.length === 1 ? "it was" : "they were"} edited since`,
+		)
 	return { applied, pending }
 }
 

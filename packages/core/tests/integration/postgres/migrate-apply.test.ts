@@ -261,16 +261,14 @@ describe("migrate baseline and status on Postgres", () => {
 			})
 		}, 60_000)
 
-		it("warns of an applied file that was edited and rehashed since", async () => {
+		it("refuses an applied file that was edited and rehashed since, in status and apply (M17)", async () => {
 			await withScratchDb(async (url) => {
 				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 				await applyWithAtlas(command(url))
 				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" bigint);\n' })
-				const status = command(url)
-				statusWithAtlas(status)
-				expect(status.out.at(-1)).toBe(
-					"Changed after it was applied: 20260101000000_a.sql; Atlas will not run it again, so the database may not match it",
-				)
+				const refusal = /^20260101000000_a\.sql was applied, then edited/
+				expect(() => statusWithAtlas(command(url))).toThrow(refusal)
+				await expect(applyWithAtlas(command(url))).rejects.toThrow(refusal)
 			})
 		}, 60_000)
 	})

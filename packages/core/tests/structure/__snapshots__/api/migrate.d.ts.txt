@@ -33,7 +33,8 @@ export declare function loadConfig(configPath?: string, cwd?: string): Promise<L
 // migrate/core/apply.d.ts
 /**
  * comb's own migration record on SQLite: the `__drizzle_migrations` table, the hashes in it and,
- * from 0.11, each file's name beside its hash, so an applied file edited since is told from a new one
+ * from 0.11, each file's name beside its hash, so an applied file edited since is told from a new one;
+ * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
  */
 import type { Connection } from "../types.ts";
 export declare function ensureMigrationsTable(conn: Connection): Promise<void>;

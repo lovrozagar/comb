@@ -1,6 +1,7 @@
 /**
  * comb's own migration record on SQLite: the `__drizzle_migrations` table, the hashes in it and,
- * from 0.11, each file's name beside its hash, so an applied file edited since is told from a new one
+ * from 0.11, each file's name beside its hash, so an applied file edited since is told from a new one;
+ * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
  */
 import type { Connection } from "../types.ts"
 
@@ -8,20 +9,44 @@ import type { Connection } from "../types.ts"
    MIGRATIONS TABLE
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export async function ensureMigrationsTable(conn: Connection): Promise<void> {
-	await conn.execute(`
-    CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+/* comb's history from 0.13: a name is recorded once, a hash as often as files hold that text (M16) */
+const TABLE = `(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      hash TEXT NOT NULL UNIQUE,
+      hash TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      name TEXT
-    )
-  `)
+      name TEXT UNIQUE
+    )`
+
+/** Whether a unique index of comb's history holds its hash alone, as comb's table did before 0.13 */
+async function hashUnique(conn: Connection): Promise<boolean> {
+	const list = await conn.execute("PRAGMA index_list(__drizzle_migrations)")
+	const unique = list.rows.filter((row) => Number(row[list.columns.indexOf("unique")]) === 1)
+	for (const index of unique) {
+		const name = String(index[list.columns.indexOf("name")])
+		const info = await conn.execute(`PRAGMA index_info("${name.replaceAll('"', '""')}")`)
+		const columns = info.rows.map((row) => String(row[info.columns.indexOf("name")]))
+		if (columns.length === 1 && columns[0] === "hash") return true
+	}
+	return false
+}
+
+export async function ensureMigrationsTable(conn: Connection): Promise<void> {
+	await conn.execute(`CREATE TABLE IF NOT EXISTS __drizzle_migrations ${TABLE}`)
 	/* a history from before 0.11 gains the column; drizzle's own migrator ignores it */
 	/* PRAGMA table_info answers in rows, since a driver may name no columns for an empty result */
 	const { columns, rows } = await conn.execute("PRAGMA table_info(__drizzle_migrations)")
 	const named = rows.some((row) => row[columns.indexOf("name")] === "name")
 	if (!named) await conn.execute("ALTER TABLE __drizzle_migrations ADD COLUMN name TEXT")
+	/* a history from before 0.13 holds each hash once: rebuilt, in one batch, with every row and id kept */
+	if (!(await hashUnique(conn))) return
+	await conn.batch([
+		{ sql: `CREATE TABLE __drizzle_migrations_next ${TABLE}` },
+		{
+			sql: "INSERT INTO __drizzle_migrations_next (id, hash, created_at, name) SELECT id, hash, created_at, name FROM __drizzle_migrations",
+		},
+		{ sql: "DROP TABLE __drizzle_migrations" },
+		{ sql: "ALTER TABLE __drizzle_migrations_next RENAME TO __drizzle_migrations" },
+	])
 }
 
 /**

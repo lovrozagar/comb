@@ -110,6 +110,21 @@ const fileOf = (copy: string, version: string) =>
  * transaction, if it is unchanged: Atlas resumes it by statement count, so an edit would shift
  * which statements it skips. Returns where that file stopped, if one did.
  */
+/**
+ * Refuses an applied file edited since, as comb does on SQLite: Atlas never runs it again, so the
+ * database does not hold what the file now says, and later files would be classified against it
+ */
+function refuseEdited(status: AtlasStatus, copy: string): void {
+	const hashes = sumHashes(copy)
+	for (const revision of status.applied) {
+		const name = fileOf(copy, revision.version)
+		if (!hashes.has(name) || hashes.get(name) === revision.hash) continue
+		throw new Error(
+			`${name} was applied, then edited: its hash is not the one Atlas recorded; restore the file, or put the change in a new one`,
+		)
+	}
+}
+
 function checkHistory(status: AtlasStatus, copy: string): string | undefined {
 	const partial = status.applied.find((revision) => revision.applied < revision.total && revision.error !== "")
 	if (partial === undefined) {
@@ -121,6 +136,7 @@ function checkHistory(status: AtlasStatus, copy: string): string | undefined {
 			(file) => current !== undefined && !recorded.has(file.Version) && file.Version < current,
 		)
 		if (late !== undefined) throw new Error(explainAtlasFailure(`migration file ${late.Name} was added out of order`))
+		refuseEdited(status, copy)
 		return undefined
 	}
 	const name = fileOf(copy, partial.version)
@@ -247,15 +263,6 @@ function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: s
 		options.print(`Applied: ${status.applied.length}${status.applied.length > 0 ? ` (up to ${status.current})` : ""}`)
 		options.print(`Pending: ${status.pending.map((file) => file.Name).join(", ") || "none"}`)
 		if (halfway !== undefined) options.print(`${halfway}; migrate apply resumes after them`)
-		const hashes = sumHashes(copy)
-		for (const revision of status.applied) {
-			const name = fileOf(copy, revision.version)
-			if (hashes.has(name) && hashes.get(name) !== revision.hash && revision.applied === revision.total) {
-				options.print(
-					`Changed after it was applied: ${name}; Atlas will not run it again, so the database may not match it`,
-				)
-			}
-		}
 		return {
 			applied: status.applied.map((revision) => fileOf(copy, revision.version)),
 			pending: status.pending.map((file) => file.Name),

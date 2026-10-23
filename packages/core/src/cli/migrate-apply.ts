@@ -15,6 +15,13 @@ import { ensureMigrationsTable, recordMigrationHash } from "../migrate/core/appl
 import { approveMigration } from "../migrate/core/approval.ts"
 import { sqlFiles } from "../migrate/core/atlas-dir.ts"
 import { sqliteDrift } from "../migrate/core/baseline-compare.ts"
+import {
+	type FileHashes,
+	type HistoryRow,
+	type Matched,
+	matchHistory,
+	orphanMessage,
+} from "../migrate/core/history-match.ts"
 import { migrationHashes } from "../migrate/core/parse.ts"
 import { type Pending, planApply } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
@@ -66,59 +73,59 @@ async function applyPending({ migration }: Pending, target: Target, io: CliIo): 
 	await withRetry(() => target.conn.batch(statements))
 }
 
-/** What `__drizzle_migrations` records: its hashes, and the hash each named file was applied under */
-type Recorded = { hashes: Set<string>; names: Map<string, string> }
-
-/** The history `__drizzle_migrations` holds: nothing when it is missing, which only a write would create */
-async function recordedHistory(conn: Connection): Promise<Recorded> {
+/** The history `__drizzle_migrations` holds, row by row: nothing when it is missing, which only a write would create */
+async function recordedHistory(conn: Connection): Promise<HistoryRow[]> {
 	const table = await conn.execute(
 		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'",
 	)
-	if (table.rows.length === 0) return { hashes: new Set(), names: new Map() }
-	const { columns, rows } = await conn.execute("SELECT * FROM __drizzle_migrations")
+	if (table.rows.length === 0) return []
+	const { columns, rows } = await conn.execute("SELECT * FROM __drizzle_migrations ORDER BY id")
 	const [hash, name] = [columns.indexOf("hash"), columns.indexOf("name")]
-	const named = rows.filter((row) => name >= 0 && row[name] !== null)
-	return {
-		hashes: new Set(rows.map((row) => String(row[hash]))),
-		names: new Map(named.map((row) => [String(row[name]), String(row[hash])])),
-	}
+	return rows.map((row) => ({
+		hash: String(row[hash]),
+		name: name >= 0 && row[name] !== null ? String(row[name]) : null,
+	}))
 }
 
-/** Name each recorded row a history from before 0.11 left unnamed, by the file whose hash it holds */
-async function nameRecorded(conn: Connection, dir: string, { files, recorded }: History): Promise<void> {
-	for (const name of files.filter((file) => !recorded.names.has(file))) {
-		const hashes = migrationHashes(fs.readFileSync(path.join(dir, name), "utf8"))
-		const hash = hashes.find((each) => recorded.hashes.has(each))
-		if (hash === undefined) continue
-		await conn.execute("UPDATE __drizzle_migrations SET name = ? WHERE hash = ? AND name IS NULL", [name, hash])
-		recorded.names.set(name, hash)
-	}
-}
+/** Each of `files`, a file of `dir`, with the hashes its text has */
+const hashed = (dir: string, files: readonly string[]): FileHashes[] =>
+	files.map((name) => ({ hashes: migrationHashes(fs.readFileSync(path.join(dir, name), "utf8")), name }))
 
-/** Refuses a file recorded by name under a hash it no longer has: it was applied, then edited */
-function refuseEdited(dir: string, { files, recorded }: History): void {
-	for (const name of files) {
-		const was = recorded.names.get(name)
-		if (was === undefined || migrationHashes(fs.readFileSync(path.join(dir, name), "utf8")).includes(was)) continue
+/**
+ * Refuses what the history cannot vouch for: a file applied, then edited, in every mode; a row no
+ * file matches (edited or renamed after it was applied) in every mode but status, which names it
+ */
+function refuseUnmatched(matched: Matched, { dir, io, mode }: { dir: string; io: CliIo; mode: Mode }): void {
+	const [edited] = matched.edited
+	if (edited !== undefined)
 		throw new CliError(
-			`${name} was applied, then edited: its hash is not the one recorded; restore the file, or put the change in a new one`,
+			`${edited} was applied, then edited: its hash is not the one recorded; restore the file, or put the change in a new one`,
 		)
-	}
+	if (matched.orphans.length === 0) return
+	const message = orphanMessage(matched.orphans, dir)
+	if (mode !== "status") throw new CliError(message)
+	io.out(message)
 }
 
-/** Whether `name`, a file of `dir`, is recorded under one of its hashes */
-const recordedIn = (dir: string, recorded: ReadonlySet<string>) => (name: string) =>
-	migrationHashes(fs.readFileSync(path.join(dir, name), "utf8")).some((hash) => recorded.has(hash))
+/** Name each row a history from before 0.11 left unnamed, by the file it matched */
+async function nameRecorded(conn: Connection, named: ReadonlyArray<{ hash: string; name: string }>): Promise<void> {
+	for (const { hash, name } of named)
+		await conn.execute(
+			"UPDATE __drizzle_migrations SET name = ? WHERE id = (SELECT id FROM __drizzle_migrations WHERE hash = ? AND name IS NULL ORDER BY id LIMIT 1)",
+			[name, hash],
+		)
+}
 
 /**
  * Record each file not yet recorded, once the database's schema is the one the files leave: comb
  * compares the two (baseline-compare.ts) and refuses any difference, so nothing is recorded as
  * applied that the database does not reflect
  */
-/** The files of a directory, and what the database records */
-type History = { files: readonly string[]; recorded: Recorded }
-
-async function baseline(target: Target, { files, recorded }: History, io: CliIo) {
+async function baseline(
+	target: Target,
+	{ files, matched }: { files: readonly FileHashes[]; matched: Matched },
+	io: CliIo,
+) {
 	const drift = await sqliteDrift(target.conn, target.migrationsDir, io.run ?? runProcess)
 	if (drift !== "") {
 		throw new CliError(
@@ -126,9 +133,8 @@ async function baseline(target: Target, { files, recorded }: History, io: CliIo)
 		)
 	}
 	let marked = 0
-	for (const name of files) {
-		const hashes = migrationHashes(fs.readFileSync(path.join(target.migrationsDir, name), "utf8"))
-		if (hashes.some((hash) => recorded.hashes.has(hash))) continue
+	for (const { hashes, name } of files) {
+		if (matched.applied.has(name)) continue
 		await recordMigrationHash(target.conn, hashes[0] as string, name)
 		io.out(`Marked applied: ${name}`)
 		marked++
@@ -138,49 +144,51 @@ async function baseline(target: Target, { files, recorded }: History, io: CliIo)
 
 /**
  * `request.mode` on a SQLite database whose history is comb's own `__drizzle_migrations`; check and
- * status only read it, and create neither it nor the database
+ * status only read it, and create neither it nor the database. Each recorded row is matched to one
+ * file (history-match.ts): a named row by its name, an unnamed one by its hash.
  */
 async function migrateSqlite({ args, io, mode }: Request, target: Target): Promise<MigrateOutcome> {
 	const writes = mode === "apply" || mode === "baseline"
 	if (writes) await ensureMigrationsTable(target.conn)
-	const recorded = await recordedHistory(target.conn)
 	const single = option(args, "file")
-	const dir = single === undefined ? target.migrationsDir : path.dirname(path.resolve(io.cwd, single))
-	const files = single === undefined ? sqlFiles(dir) : [path.basename(single)]
-	if (writes) await nameRecorded(target.conn, dir, { files, recorded })
-	refuseEdited(dir, { files, recorded })
+	const dir = target.migrationsDir
+	/* a --file is named by its path from the migrations directory: outside it, `../lone.sql` */
+	const files = hashed(dir, single === undefined ? sqlFiles(dir) : [path.relative(dir, path.resolve(io.cwd, single))])
+	const matched = matchHistory(files, await recordedHistory(target.conn), single === undefined)
+	refuseUnmatched(matched, { dir, io, mode })
+	if (writes) await nameRecorded(target.conn, matched.named)
 	if (mode === "baseline") {
-		await baseline(target, { files, recorded }, io)
+		await baseline(target, { files, matched }, io)
 		return { applied: [], pending: [] }
 	}
-	const isRecorded = recordedIn(dir, recorded.hashes)
+	const names = files.map(({ name }) => name)
 	if (mode === "status") {
-		const unapplied = files.filter((name) => !isRecorded(name))
-		const applied = files.filter(isRecorded)
+		const applied = names.filter((name) => matched.applied.has(name))
+		const unapplied = names.filter((name) => !matched.applied.has(name))
 		io.out(`Applied: ${applied.join(", ") || "none"}`)
 		io.out(`Pending: ${unapplied.join(", ") || "none"}`)
 		return { applied, pending: unapplied }
 	}
 	const yes = args.options["yes"] === true
 	const pending = await planApply({
-		applied: (_, sql) => migrationHashes(sql).some((hash) => recorded.hashes.has(hash)),
+		applied: (name) => matched.applied.has(name),
 		approve: (migration) => approveMigration(migration, { confirm: io.confirm, target: target.name, yes }),
 		conn: target.conn,
 		dir,
 		exec: io.run ?? runProcess,
-		files,
+		files: names,
 		print: io.out,
 		whole: single === undefined,
 	})
-	const names = pending.map(({ name }) => name)
+	const pendingNames = pending.map(({ name }) => name)
 	if (mode === "check") {
-		io.out(checkPassed(names))
-		return { applied: [], pending: names }
+		io.out(checkPassed(pendingNames))
+		return { applied: [], pending: pendingNames }
 	}
-	for (const name of files.filter((file) => !names.includes(file))) io.out(`Skip (already applied): ${name}`)
+	for (const name of names.filter((file) => !pendingNames.includes(file))) io.out(`Skip (already applied): ${name}`)
 	for (const each of pending) await applyPending(each, target, io)
-	io.out(`\nDone: ${names.length} applied, ${files.length - names.length} skipped`)
-	return { applied: names, pending: [] }
+	io.out(`\nDone: ${pendingNames.length} applied, ${names.length - pendingNames.length} skipped`)
+	return { applied: pendingNames, pending: [] }
 }
 
 /** A mode's usage line: apply takes --file and --yes, check --yes, and every mode but status --local */

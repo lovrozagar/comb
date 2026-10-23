@@ -76,3 +76,45 @@ describe("statusD1 and a check on a database without the migrations table", () =
 		expect(before).not.toContain("d1_migrations")
 	})
 })
+
+/* M17 of the 0.12 round: D1's history holds names only, so comb records each applied file's hash itself */
+describe("applyD1 and statusD1 on an applied file edited since", () => {
+	it("records each applied file's hash, and refuses the file edited since, in check, apply and status", async () => {
+		const { d1, read } = await target({})
+		expect(await applyD1(d1, { approve, print: () => undefined, read })).toEqual(["1_init.sql"])
+		writeFileSync(join(d1.migrationsDir, "1_init.sql"), "CREATE TABLE post (id TEXT, body TEXT);")
+		writeSum(d1.migrationsDir)
+		const refusal = /^1_init\.sql was applied, then edited: its hash is not the one comb recorded/
+		await expect(applyD1(d1, { approve, checkOnly: true, print: () => undefined, read })).rejects.toThrow(refusal)
+		await expect(applyD1(d1, { approve, print: () => undefined, read })).rejects.toThrow(refusal)
+		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(refusal)
+	})
+
+	it("says which applied files comb has no hash for, so cannot tell edited", async () => {
+		const { d1, read } = await target({})
+		await d1.conn.execute(
+			"CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)",
+		)
+		await d1.conn.execute("INSERT INTO d1_migrations (name) VALUES ('1_init.sql')")
+		const lines: string[] = []
+		await statusD1(d1, read, (line) => lines.push(line))
+		expect(lines).toContain(
+			"No hash recorded for 1_init.sql, applied before comb recorded them: comb cannot tell whether it was edited since",
+		)
+	})
+
+	it("names every such file, and says they", async () => {
+		const { d1, read } = await target({})
+		writeFileSync(join(d1.migrationsDir, "2_more.sql"), "CREATE TABLE more (id TEXT);")
+		writeSum(d1.migrationsDir)
+		await d1.conn.execute(
+			"CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)",
+		)
+		await d1.conn.execute("INSERT INTO d1_migrations (name) VALUES ('1_init.sql'), ('2_more.sql')")
+		const lines: string[] = []
+		await statusD1(d1, read, (line) => lines.push(line))
+		expect(lines).toContain(
+			"No hash recorded for 1_init.sql, 2_more.sql, applied before comb recorded them: comb cannot tell whether they were edited since",
+		)
+	})
+})

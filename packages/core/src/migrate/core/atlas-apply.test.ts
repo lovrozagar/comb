@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { ParsedMigration } from "../types.ts"
 import { applyWithAtlas, type ApplyOptions, baselineWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
-import { sqlFiles } from "./atlas-dir.ts"
+import { sqlFiles, sumHashes } from "./atlas-dir.ts"
 import type { Run, RunResult } from "./process.ts"
 
 const ok = (stdout = ""): RunResult => ({ code: 0, stderr: "", stdout })
@@ -171,7 +171,8 @@ describe("applyWithAtlas: a check (M11)", () => {
 	it("dry-runs a database with history, and inspects nothing", async () => {
 		const fake = fakeAtlas({
 			status: status({
-				applied: [revision("1")],
+				/* the hash atlas.sum records for the file, as Atlas recorded it */
+				applied: [revision("1", { hash: sumHashes(dir).get("1_a.sql") })],
 				available: [file("1_a.sql"), file("2_b.sql")],
 				current: "1",
 				pending: [file("2_b.sql")],
@@ -190,7 +191,7 @@ describe("applyWithAtlas: what it classifies against", () => {
 		writeFileSync(join(dir, "2_b.sql"), "CREATE TEMP TABLE a (id int);\n")
 		const safety: string[] = []
 		const later = status({
-			applied: [revision("1")],
+			applied: [revision("1", { hash: sumHashes(dir).get("1_a.sql") })],
 			available: [file("1_a.sql"), file("2_b.sql")],
 			current: "1",
 			pending: [file("2_b.sql")],
@@ -385,6 +386,9 @@ describe("baselineWithAtlas: what it refuses", () => {
 	})
 })
 
+/* a history whose one applied file was edited since: its recorded hash is not the sum's */
+const edited = () => fakeAtlas({ status: status({ applied: [revision("1", { hash: "other=" })], current: "1" }) })
+
 describe("statusWithAtlas", () => {
 	it("lists what is applied and what is pending", () => {
 		const run = options(
@@ -401,14 +405,12 @@ describe("statusWithAtlas", () => {
 		expect(run.out).toEqual(["Applied: 1 (up to 1)", "Pending: 2_b.sql"])
 	})
 
-	it("warns of an applied file that changed since, which Atlas never runs again", () => {
-		const run = options(fakeAtlas({ status: status({ applied: [revision("1", { hash: "other=" })], current: "1" }) }))
-		statusWithAtlas(run)
-		expect(run.out).toEqual([
-			"Applied: 1 (up to 1)",
-			"Pending: none",
-			"Changed after it was applied: 1_a.sql; Atlas will not run it again, so the database may not match it",
-		])
+	/* M17 of the 0.12 round: as on SQLite, an applied file edited since is refused, not a warning */
+	it("refuses an applied file that changed since, in status, check and apply", async () => {
+		const refusal = /^1_a\.sql was applied, then edited: its hash is not the one Atlas recorded/
+		expect(() => statusWithAtlas(options(edited()))).toThrow(refusal)
+		await expect(applyWithAtlas({ ...options(edited()), checkOnly: true })).rejects.toThrow(refusal)
+		await expect(applyWithAtlas(options(edited()))).rejects.toThrow(refusal)
 	})
 
 	it("names a revision whose file is gone by its version, and does not call it changed", () => {
