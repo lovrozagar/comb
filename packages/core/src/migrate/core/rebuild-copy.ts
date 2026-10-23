@@ -196,7 +196,8 @@ function readCopy(stmt: string, createOf: (table: string) => string): Copy | und
 
 /** A SQLite rebuild of `table`: the temporary table it is copied into, and the columns copied */
 /** Each rebuilt table: the columns its copy writes, what is wrong with the copy, the copy, and the copy's CREATE TABLE */
-type Rebuilds = Map<string, { columns: string[]; definition: string; problem: string | undefined; temp: string }>
+/** Each table's rebuilds, in the order the file makes them: a DROP pairs with the next one, by position (M5) */
+type Rebuilds = Map<string, Array<{ columns: string[]; definition: string; problem: string | undefined; temp: string }>>
 
 // per-process-constant: a CREATE TABLE's table, composed once
 const CREATE = /* @__PURE__ */ new RegExp(`^CREATE (?:TEMP |TEMPORARY )?TABLE (?:IF NOT EXISTS )?(${QNAME})`, "i")
@@ -234,13 +235,16 @@ function rebuildsOf(
 		if (copy !== undefined) copies.set(copy.into, copy)
 		const done = renamedCopy(code, copies)
 		if (done !== undefined) {
-			rebuilds.set(done.copy.from, {
-				columns: done.copy.columns,
-				/* a copy reads only into a table the file created, so its CREATE is known */
-				definition: created.get(done.temp) as string,
-				problem: done.copy.problem,
-				temp: done.temp,
-			})
+			rebuilds.set(done.copy.from, [
+				...(rebuilds.get(done.copy.from) ?? []),
+				{
+					columns: done.copy.columns,
+					/* a copy reads only into a table the file created, so its CREATE is known */
+					definition: created.get(done.temp) as string,
+					problem: done.copy.problem,
+					temp: done.temp,
+				},
+			])
 		}
 	}
 	return rebuilds

@@ -16,7 +16,7 @@ type Finding = { drops?: string[] | undefined; level: "cautious" | "lock" | "uns
 type AlterContext = {
 	dialect: Dialect
 	earlierRoutines: ReadonlySet<string>
-	rebuilds: ReadonlyMap<string, { temp: string }>
+	rebuilds: ReadonlyMap<string, ReadonlyArray<{ temp: string }>>
 	routines: ReadonlyMap<string, unknown>
 }
 
@@ -66,8 +66,8 @@ function addColumn(definition: string, pg: boolean): Finding[] {
 
 /** A RENAME TO: unsafe, unless it ends a SQLite rebuild by moving the copy into the table's name */
 function renameTable(table: string, target: string, ctx: AlterContext): Finding[] {
-	const rebuild = ctx.rebuilds.get(lastPart(target))
-	return rebuild !== undefined && rebuild.temp === lastPart(table) ? [] : [{ level: "unsafe" }]
+	const rebuilt = ctx.rebuilds.get(lastPart(target)) ?? []
+	return rebuilt.some((rebuild) => rebuild.temp === lastPart(table)) ? [] : [{ level: "unsafe" }]
 }
 
 /**

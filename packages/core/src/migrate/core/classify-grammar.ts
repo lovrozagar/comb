@@ -149,11 +149,9 @@ function firedTriggers(code: string, ctx: GrammarContext): string[] {
 	if (table === undefined) return []
 	/* the pattern matched one of its three verbs */
 	const event: TriggerEvent = insert !== undefined ? "insert" : update !== undefined ? "update" : "delete"
-	/* a REPLACE deletes the row it conflicts with before it inserts */
-	const events: TriggerEvent[] = /^REPLACE\b|^INSERT OR REPLACE\b/i.test(code) ? ["insert", "delete"] : [event]
 	const key = nameKey(table, ctx.dialect)
 	return (ctx.before?.triggers ?? [])
-		.filter((trigger) => trigger.table === key && trigger.events.some((each) => events.includes(each)))
+		.filter((trigger) => trigger.table === key && trigger.events.includes(event))
 		.map((trigger) => trigger.name)
 }
 
@@ -169,6 +167,8 @@ function grammarFindings(statement: string, ctx: GrammarContext): Finding[] {
 		return /^ALTER POLICY .* RENAME TO \S+$/i.test(code) ? [] : [{ level: "cautious", note: policy }]
 	const cautious = CAUTIOUS_SHAPES.find(([shape]) => shape.test(code))
 	if (cautious !== undefined) return [{ level: "cautious", note: cautious[1] }]
+	/* on SQLite the proof's engine pass reads temp shadows and fired triggers from SQLite itself */
+	if (ctx.dialect === "sqlite") return []
 	const temp = TEMP_TABLE.exec(code)?.[1]
 	if (temp !== undefined && ctx.before?.tables.has(nameKey(temp, ctx.dialect)) === true)
 		return [{ level: "unsafe", note: `shadows ${temp} for the rest of the file` }]

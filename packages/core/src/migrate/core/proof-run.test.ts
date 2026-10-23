@@ -126,7 +126,7 @@ describe("provePending on comb 0.8's bypasses, and on a rebuild that loses nothi
 		expect(proof.unsafe).toEqual([expect.stringMatching(/^loses \d of the 6 rows of users$/)])
 	})
 
-	it("proves Atlas's plain rebuild clean, and a new column's backfill too", async () => {
+	it("proves Atlas's plain rebuild clean, and calls a new column's backfill cautious", async () => {
 		const clean = await prove(
 			USERS,
 			rebuild(
@@ -136,7 +136,7 @@ describe("provePending on comb 0.8's bypasses, and on a rebuild that loses nothi
 		)
 		expect(clean).toEqual({ cautious: ["fills users.tier's NULLs with its default"], unproven: [], unsafe: [] })
 		expect(await prove(USERS, "ALTER TABLE users ADD COLUMN plan TEXT;\nUPDATE users SET plan = 'free';")).toEqual({
-			cautious: [],
+			cautious: ["UPDATE users SET plan = 'free': backfills users (plan), columns this file added"],
 			unproven: [],
 			unsafe: [],
 		})
@@ -188,8 +188,10 @@ describe("provePending on what it cannot seed or apply", () => {
 			{ name: "2_bad.sql", sql: "ALTER TABLE missing ADD COLUMN x TEXT;" },
 			{ name: "3_after.sql", sql: "DELETE FROM users;" },
 		])
-		expect(proofs.get("2_bad.sql")?.failed).toMatch(/^it did not apply to the copy, reseeded or not: .*missing/)
-		expect(proofs.get("3_after.sql")?.failed).toBe("an earlier pending file, 2_bad.sql, did not apply to the copy")
+		expect(proofs.get("2_bad.sql")?.failed).toMatch(/^comb could not run this in the proof copy: .*missing/)
+		expect(proofs.get("3_after.sql")?.failed).toBe(
+			"an earlier pending file, 2_bad.sql, could not run in the proof copy, so this one is unproven",
+		)
 	})
 
 	it("seeds a parent before its child, an enum column from its listed values, and leaves D1's own tables out", async () => {
@@ -198,7 +200,10 @@ describe("provePending on what it cannot seed or apply", () => {
 			"UPDATE child SET kind = 'a';",
 		)
 		expect(proof.unproven).toEqual([])
-		expect(proof.unsafe).toEqual(["changes values of child.kind"])
+		expect(proof.unsafe).toEqual([
+			"UPDATE child SET kind = 'a': updates existing rows of child (kind)",
+			"changes values of child.kind",
+		])
 	})
 })
 
@@ -247,12 +252,21 @@ describe("provePending on what the copy cannot make, and on a lost column", () =
 })
 
 describe("provePending with the database's own triggers and views", () => {
+	/* M12 of the 0.12 round: a temp table of the same name answers for a bare name, so the rows compared are main's */
+	it("compares main's rows, though a temp table takes the table's name", async () => {
+		const proof = await prove(USERS, "CREATE TEMP TABLE users AS SELECT * FROM main.users;\nDELETE FROM main.users;")
+		expect(proof.unsafe).toContain("loses 6 of the 6 rows of users")
+	})
+
 	it("runs a live trigger as the target would: an insert that fires one emptying a table loses its rows", async () => {
 		const proof = await prove(
 			`${USERS}\nCREATE TABLE audit (id INTEGER PRIMARY KEY, note TEXT);\nCREATE TRIGGER purge AFTER INSERT ON users BEGIN DELETE FROM audit; END;\nCREATE VIEW emails AS SELECT email FROM users;`,
 			"INSERT INTO users (email) VALUES ('new');",
 		)
-		expect(proof.unsafe).toEqual(["loses 6 of the 6 rows of audit"])
+		expect(proof.unsafe).toEqual([
+			"INSERT INTO users (email) VALUES ('new'): fires trigger purge (its WHEN is not evaluated)",
+			"loses 6 of the 6 rows of audit",
+		])
 	})
 })
 
@@ -275,7 +289,7 @@ describe("provePending on values moved between columns or rows of one type (G1b)
 	it("says the rows changed when two columns each moved across rows, which no one column explains", async () => {
 		const both =
 			"CREATE TEMP TABLE r AS SELECT id, a, b FROM t;\nUPDATE t SET a = (SELECT r.a FROM r WHERE r.id = COALESCE((SELECT min(id) FROM r WHERE id > t.id), (SELECT min(id) FROM r))), b = (SELECT r.b FROM r WHERE r.id = COALESCE((SELECT max(id) FROM r WHERE id < t.id), (SELECT max(id) FROM r)));"
-		expect((await prove(T, both)).unsafe).toEqual(["changes rows of t"])
+		expect((await prove(T, both)).unsafe).toContain("changes rows of t")
 	})
 
 	it("still proves a no-op and Atlas's plain rebuild clean, and the NOT NULL default rebuild cautious", async () => {

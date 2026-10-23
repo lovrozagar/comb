@@ -72,7 +72,7 @@ describe("planApply", () => {
 })
 
 describe("planApply's proof run, on a database it reads", () => {
-	it("says once which tables the proof could not seed, and each file the copy refused, and keeps the classifier's rating (M18)", async () => {
+	it("says once which tables the proof could not seed, and each file the copy refused, which is unsafe (M18)", async () => {
 		const conn = libsqlConnection()
 		await conn.client.executeMultiple(
 			"CREATE TABLE codes (id INTEGER PRIMARY KEY, code TEXT NOT NULL CHECK (length(code) = 20)); CREATE TABLE post (id TEXT);",
@@ -81,11 +81,10 @@ describe("planApply's proof run, on a database it reads", () => {
 			{ "1_bad.sql": "ALTER TABLE missing ADD COLUMN x TEXT;", "2_ok.sql": "CREATE TABLE note (id TEXT);" },
 			{ conn },
 		)
-		await run()
+		await expect(run()).rejects.toThrow(/^1_bad\.sql is unsafe \(proof run: comb could not run this in the proof copy/)
 		expect(out).toEqual([
 			"Proof run: 1_bad.sql, 2_ok.sql: unproven, comb could not seed codes (CHECK constraint failed: length(code) = 20)",
-			"Proof run: 1_bad.sql: it did not apply to the copy, reseeded or not: no such table: missing; its rating is the classifier's",
-			"Proof run: 2_ok.sql: an earlier pending file, 1_bad.sql, did not apply to the copy; its rating is the classifier's",
+			"Proof run: 1_bad.sql: comb could not run this in the proof copy: ALTER TABLE missing ADD COLUMN x TEXT: no such table: missing",
 		])
 		await conn.close()
 	})
@@ -113,12 +112,16 @@ describe("planApply joining a proof to the classification", () => {
 })
 
 describe("the proof only adds strictness (G1b)", () => {
-	it("keeps the classifier's unsafe for a file whose predicate no seed row meets, though its proof is clean", async () => {
+	it("calls a delete unsafe though no seed row meets its predicate: the engine sees the delete, not the rows", async () => {
 		const conn = libsqlConnection()
 		await conn.client.executeMultiple("CREATE TABLE u (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT);")
 		const file = "DELETE FROM u WHERE email LIKE '%@%';"
 		const proof = (await provePending(conn, [{ name: "1_purge.sql", sql: file }])).get("1_purge.sql")
-		expect(proof).toEqual({ cautious: [], unproven: [], unsafe: [] })
+		expect(proof).toEqual({
+			cautious: [],
+			unproven: [],
+			unsafe: ["DELETE FROM u WHERE email LIKE '%@%': deletes existing rows of u"],
+		})
 		await expect(plan({ "1_purge.sql": file }, { conn }).run()).rejects.toThrow(/^1_purge\.sql is unsafe/)
 		await conn.close()
 	})

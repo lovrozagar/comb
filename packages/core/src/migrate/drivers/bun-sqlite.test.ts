@@ -17,6 +17,11 @@ vi.mock("bun:sqlite", async () => {
 			return this.prepare(sql).run(...(params as never[]))
 		}
 
+		/* bun's statements hold their table until finalized; Node's have nothing to free */
+		override prepare(sql: string) {
+			return Object.assign(super.prepare(sql), { finalize: () => undefined })
+		}
+
 		transaction(work: () => void) {
 			return () => {
 				this.exec("BEGIN")

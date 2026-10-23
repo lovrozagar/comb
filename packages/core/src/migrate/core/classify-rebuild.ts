@@ -14,6 +14,8 @@ import { definitionDrift } from "./sqlite-affinity.ts"
 type RebuildContext = {
 	before: ExtractedSchema | undefined
 	dialect: Dialect
+	/** how many DROPs of each rebuilt table the file has read so far: the next pairs with the next rebuild */
+	drops: Map<string, number>
 	/** rebuilt tables comb guarded, with the tables whose rows the guard keeps */
 	kept: Map<string, string[]>
 	rebuilds: Rebuilds
@@ -65,8 +67,12 @@ function copyOutcome(
 /** A SQLite drop that is a table rebuild: lossless when it copies every column the table had, as it had it */
 function rebuildFinding(table: string | undefined, ctx: RebuildContext): Finding | undefined {
 	const name = table === undefined ? undefined : nameKey(table, ctx.dialect)
-	const rebuild = name === undefined ? undefined : ctx.rebuilds.get(name)
-	if (name === undefined || rebuild === undefined) return undefined
+	const rebuilt = name === undefined ? undefined : ctx.rebuilds.get(name)
+	if (name === undefined || rebuilt === undefined) return undefined
+	/* each DROP pairs with its own rebuild, by position: a clean one later cannot launder a lossy one (M5) */
+	const nth = ctx.drops.get(name) ?? 0
+	ctx.drops.set(name, nth + 1)
+	const rebuild = rebuilt[Math.min(nth, rebuilt.length - 1)] as FileRebuild
 	const refusal = rebuildRefusal(name, rebuild, ctx)
 	if (refusal !== undefined) return refusal
 	const { drift, stored } = copyOutcome(name, rebuild, ctx.before as ExtractedSchema)

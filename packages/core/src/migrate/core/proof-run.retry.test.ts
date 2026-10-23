@@ -45,9 +45,9 @@ describe("provePending after a file the copy refuses (M7)", () => {
 			LOSSY,
 		])
 		expect(proofs.get("1_parent.sql")?.failed).toMatch(
-			/did not apply to the copy, reseeded or not: FOREIGN KEY constraint failed/,
+			/^comb could not run this in the proof copy: .*FOREIGN KEY constraint failed/,
 		)
-		expect(proofs.get("2_lossy.sql")?.failed).toMatch(/an earlier pending file, 1_parent\.sql, did not apply/)
+		expect(proofs.get("2_lossy.sql")?.failed).toMatch(/an earlier pending file, 1_parent\.sql, could not run/)
 	})
 
 	/* ids that meet a seed's keys on purpose: 2^40 + 7 is the first seed's, 2^41 + 50 007 the reseed's */
@@ -67,6 +67,8 @@ describe("provePending after a file the copy refuses (M7)", () => {
 			["2_parent.sql", "INSERT INTO users (email, plan_id) VALUES ('c@x.io', 1);"],
 		])
 		expect(proofs.get("1_meets_reseed.sql")?.failed).toBeUndefined()
-		expect(proofs.get("2_parent.sql")?.failed).toMatch(/reseeded or not: FOREIGN KEY constraint failed/)
+		expect(proofs.get("2_parent.sql")?.failed).toMatch(
+			/could not run this in the proof copy: .*FOREIGN KEY constraint failed/,
+		)
 	})
 })

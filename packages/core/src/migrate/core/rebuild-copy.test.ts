@@ -55,7 +55,7 @@ describe("rebuildsOf", () => {
 				statements,
 				statements.map((stmt) => codeOf(stmt, "sqlite")),
 			),
-		).toEqual(new Map([["t", { columns: ["id"], definition: CREATE, problem: "its copy has WHERE", temp: "new_t" }]]))
+		).toEqual(new Map([["t", [{ columns: ["id"], definition: CREATE, problem: "its copy has WHERE", temp: "new_t" }]]]))
 	})
 })
 

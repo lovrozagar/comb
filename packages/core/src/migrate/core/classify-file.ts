@@ -1,9 +1,11 @@
 /**
  * The file-level rules of the destructive-change gate: a statement Postgres runs only outside a
- * transaction is refused unless its file runs outside one, and an external-content FTS5 index the
- * file creates again and rebuilds is known to lose nothing when it is dropped.
+ * transaction is refused unless its file runs outside one, an external-content FTS5 index the
+ * file creates again and rebuilds is known to lose nothing when it is dropped, and an FTS5 command
+ * that removes indexed rows is unsafe.
  */
 import type { Dialect } from "../types.ts"
+import type { Finding } from "./classify-alter.ts"
 import { atlasDirectives } from "./pg-objects.ts"
 import { nameKey, QNAME } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
@@ -21,6 +23,28 @@ const FTS_COMMAND = /* @__PURE__ */ new RegExp(
 	`^INSERT INTO (${QNAME}) ?\\( ?(${QNAME}) ?\\) VALUES ?\\( ?'rebuild' ?\\)$`,
 	"i",
 )
+
+// per-process-constant: a pattern composed from the name grammar, compiled once
+const FTS_ANY_COMMAND = /* @__PURE__ */ new RegExp(`^INSERT INTO (${QNAME}) ?\\( ?(${QNAME}) ?[,)]`, "i")
+/* one row of an FTS5 command that rebuilds, merges or checks an index, or sets one of its options, with its
+   one number or string argument: none removes an indexed row */
+const KEEPS_ROWS =
+	/\) ?VALUES ?\( ?'(?:rebuild|optimize|merge|automerge|crisismerge|usermerge|deletemerge|pgsz|rank|integrity-check|secure-delete)' ?(?:, ?(?:-?\d+|'[^']*') ?)?\)$/i
+
+/**
+ * An FTS5 command, an insert into the table's own hidden column, that removes indexed rows
+ * ('delete', 'delete-all') or whose command comb cannot read is unsafe. SQLite runs it as an
+ * insert, so the proof's engine pass sees no deletion; the command is its value.
+ */
+function ftsCommandFindings(stmt: string): Finding[] {
+	const sql = normalizeSql(stmt).replace(/ ?;$/, "")
+	const [, into, column] = FTS_ANY_COMMAND.exec(sql) ?? []
+	if (into === undefined || nameKey(into, "sqlite") !== nameKey(column as string, "sqlite") || KEEPS_ROWS.test(sql))
+		return []
+	return [
+		{ level: "unsafe", note: `runs an FTS5 command on ${into} that removes indexed rows, or one comb cannot read` },
+	]
+}
 
 /** A statement as a person reads it in a prompt: comments and layout gone, cut at 80 characters */
 function preview(stmt: string): string {
@@ -74,4 +98,4 @@ function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): 
 	}
 }
 
-export { preview, type ReadStatement, refuseUnrunnable, reindexedOf }
+export { ftsCommandFindings, preview, type ReadStatement, refuseUnrunnable, reindexedOf }

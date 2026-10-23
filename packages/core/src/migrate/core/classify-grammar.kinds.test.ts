@@ -146,7 +146,8 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["sqlite", "DETACH DATABASE y", "unsafe"],
 	["sqlite", "PRAGMA defer_foreign_keys = on", "safe"],
 	["sqlite", "PRAGMA journal_mode = wal", "unsafe"],
-	["sqlite", "REPLACE INTO post (id) VALUES (1)", "unsafe"],
+	/* the text's rating; on a real target the proof's engine pass sees the delete and rates it unsafe */
+	["sqlite", "REPLACE INTO post (id) VALUES (1)", "cautious"],
 	["sqlite", "CREATE VIRTUAL TABLE f USING fts5(a)", "safe"],
 	["sqlite", "CREATE TRIGGER t AFTER INSERT ON post BEGIN SELECT 1; END", "unsafe"],
 	["sqlite", "INSERT OR IGNORE INTO post (id) VALUES (1)", "safe"],

@@ -15,7 +15,8 @@ const context = (over: Partial<RebuildContext> = {}): RebuildContext => ({
 	before,
 	dialect: "sqlite",
 	kept: new Map(),
-	rebuilds: new Map([["t", rebuild]]),
+	drops: new Map(),
+	rebuilds: new Map([["t", [rebuild]]]),
 	renumbered: new Map(),
 	txmodeNone: false,
 	unguarded: new Map(),
@@ -34,7 +35,7 @@ describe("rebuildFinding", () => {
 			"rebuilds t, whose earlier columns are unknown",
 		)
 		expect(rebuildFinding("t", context({ unguarded: new Map([["t", ["c"]]]) }))?.note).toContain("rebuilds t unguarded")
-		const changed = new Map([["t", { ...rebuild, problem: "its copy is changed before the rename" }]])
+		const changed = new Map([["t", [{ ...rebuild, problem: "its copy is changed before the rename" }]]])
 		expect(rebuildFinding("t", context({ rebuilds: changed }))?.note).toBe(
 			"rebuilds t: its copy is changed before the rename",
 		)
@@ -54,19 +55,19 @@ describe("rebuildFinding", () => {
 	})
 
 	it("rates a copy that leaves a column out, or retypes one, unsafe", () => {
-		const without = new Map([["t", { ...rebuild, columns: ["id"] }]])
+		const without = new Map([["t", [{ ...rebuild, columns: ["id"] }]]])
 		expect(rebuildFinding("t", context({ rebuilds: without }))).toEqual({
 			drops: ["DROP COLUMN t.a"],
 			level: "unsafe",
 			note: "rebuilds t without a",
 		})
 		const retyped = new Map([
-			["t", { ...rebuild, definition: "CREATE TABLE new_t (id INTEGER PRIMARY KEY, a INTEGER)" }],
+			["t", [{ ...rebuild, definition: "CREATE TABLE new_t (id INTEGER PRIMARY KEY, a INTEGER)" }]],
 		])
 		expect(rebuildFinding("t", context({ rebuilds: retyped }))?.note).toContain(
 			"changes a's affinity from TEXT to INTEGER",
 		)
-		const undefinedCopy = new Map([["t", { ...rebuild, definition: "" }]])
+		const undefinedCopy = new Map([["t", [{ ...rebuild, definition: "" }]]])
 		expect(rebuildFinding("t", context({ rebuilds: undefinedCopy }))?.level).toBe("cautious")
 	})
 })

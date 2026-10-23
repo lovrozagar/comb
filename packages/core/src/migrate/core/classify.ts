@@ -14,7 +14,7 @@
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
-import { preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
+import { ftsCommandFindings, preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
 import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
 import { callFindings, type Routines, routinesOf } from "./classify-routine.ts"
@@ -94,30 +94,33 @@ function indexWarning(code: string, ctx: FileContext): Finding | undefined {
 	}
 }
 
-/** The findings of one statement's code that are not ALTER TABLE actions */
-function statementFindings(code: string, ctx: FileContext): Finding[] {
-	const rebuild = rebuildFinding(DROP_LIST.exec(code)?.[2], ctx)
-	if (rebuild !== undefined) return [rebuild]
+/** Whether `code` drops only external-content FTS5 indexes the file creates again and rebuilds */
+function dropsRebuiltIndex(code: string, ctx: FileContext): boolean {
 	const dropped = DROP_LIST.exec(code)
-	if (
+	return (
 		dropped?.[1]?.toUpperCase() === "TABLE" &&
 		splitTopLevel(dropped[2] as string).every((t) => {
 			const key = nameKey(t, ctx.dialect)
 			/* only a table whose text lives elsewhere is an index: a stored-content FTS5 table holds the only copy */
 			return ctx.reindexed.has(key) && ctx.before?.externalFts.includes(key) === true
 		})
-	) {
+	)
+}
+
+/** The findings of one statement's code that are not ALTER TABLE actions */
+function statementFindings(code: string, ctx: FileContext): Finding[] {
+	const rebuild = rebuildFinding(DROP_LIST.exec(code)?.[2], ctx)
+	if (rebuild !== undefined) return [rebuild]
+	if (dropsRebuiltIndex(code, ctx))
 		return [{ level: "cautious", note: "an FTS index comb rebuilds from its content table" }]
-	}
 	const findings: Finding[] = []
 	if (UNSAFE_DROP.test(code) || /^TRUNCATE\b/i.test(code) || RENAMES_NAMED.test(code))
 		findings.push({ drops: dropNames(code), level: "unsafe" })
 	else if (CAUTIOUS.test(code)) findings.push({ drops: dropNames(code), level: "cautious" })
 	if (/\bCASCADE\b/i.test(code.replace(/\bON (?:DELETE|UPDATE) CASCADE\b/gi, ""))) findings.push({ level: "unsafe" })
-	findings.push(
-		...writeFindings(code, ctx.fresh),
-		...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, body, ctx)),
-	)
+	/* on SQLite the proof's engine pass rates writes (proof-engine.ts), read from SQLite itself */
+	if (ctx.dialect !== "sqlite") findings.push(...writeFindings(code, ctx.fresh))
+	findings.push(...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, body, ctx)))
 	findings.push(...callFindings(code, { dialect: ctx.dialect, earlier: ctx.earlierRoutines, routines: ctx.routines }))
 	if (ctx.dialect === "postgres") {
 		const index = indexWarning(code, ctx)
@@ -186,6 +189,7 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		fresh: freshStart(before, dialect),
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
 		prepared,
+		drops: new Map(),
 		rebuilds,
 		reindexed,
 		kept: guards.kept,
@@ -201,7 +205,11 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 		/* every other statement is rated by the rules, and only as a shape the grammar recognizes */
 		const findings = guards.guarded.has(i)
 			? []
-			: [...findingsOf(codes[i] as string, stmt, ctx), ...grammarFindings(codes[i] as string, { ...ctx, ftsTriggers })]
+			: [
+					...findingsOf(codes[i] as string, stmt, ctx),
+					...grammarFindings(codes[i] as string, { ...ctx, ftsTriggers }),
+					...(dialect === "sqlite" ? ftsCommandFindings(stmt) : []),
+				]
 		followAdds(codes[i] as string, ctx.fresh)
 		return { code: codes[i] as string, dialect, findings, stmt }
 	})

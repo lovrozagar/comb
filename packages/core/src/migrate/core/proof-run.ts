@@ -3,19 +3,21 @@
  * pending file runs on a private in-memory copy of the target's live schema, seeded with rows that
  * show any change (proof-seed.ts), and every table that was there before is compared, row for row,
  * on the columns it had, as a multiset of whole rows. A lost row, a lost column or a changed value
- * makes the file unsafe, and the reason names the table and column. One allowance: a NULL that lands as the column's new
- * DEFAULT, in a column the file made NOT NULL, is cautious (Atlas's "make NOT NULL with a
- * default" rebuild). A table comb cannot seed is unproven, and its rating stays the classifier's.
- * The target is only read: its schema, through one SELECT.
+ * makes the file unsafe, and the reason names the table and column. One allowance: a NULL that
+ * lands as the column's new DEFAULT, in a column the file made NOT NULL, is cautious (Atlas's "make
+ * NOT NULL with a default" rebuild). A table comb cannot seed is unproven, and its rating stays the
+ * classifier's. The target is only read: its schema, through one SELECT.
  *
- * The proof only adds strictness. Its rows are synthetic, so they cannot meet every predicate a
- * file holds: `DELETE FROM u WHERE email LIKE '%@%'` proves clean, as no seeded email has an @.
- * The classifier stays authoritative, and no classifier rule is ever relaxed because a proof passed.
+ * Seeded rows cannot meet every predicate a file holds, so what each statement writes is read from
+ * SQLite itself as it runs (proof-engine.ts): an update of a column that was there before, a
+ * delete, a trigger fired or a temp shadow is unsafe whichever rows it meets, and a backfill of the
+ * file's own columns is cautious. A file the copy cannot run is unproven, and unproven is unsafe.
  */
 import { openMemory, type MemoryDb } from "../drivers/memory.ts"
 import type { Connection } from "../types.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { compare, type Shape } from "./proof-compare.ts"
+import { applyToCopy, engineFindings } from "./proof-engine.ts"
 import { quote, seedTables } from "./proof-seed.ts"
 
 /** What the proof run found for one file */
@@ -101,8 +103,9 @@ function buildCopy(db: MemoryDb, objects: readonly LiveObject[], variant = 0): M
 /** Every table of the copy but a mirror FTS table, each with its stored columns and rows (each value as SQLite quotes it) */
 function snapshot(db: MemoryDb): Map<string, Shape> {
 	const out = new Map<string, Shape>()
+	/* main's own: a temp table of the same name would answer for a bare name (M12) */
 	const tables = db.all(
-		"SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+		"SELECT name, sql FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
 	)
 	const live = creatable(
 		tables.map((row) => ({
@@ -113,11 +116,11 @@ function snapshot(db: MemoryDb): Map<string, Shape> {
 		})),
 	)
 	for (const { name } of live.filter((object) => !isMirror(object))) {
-		const info = db.all(`PRAGMA table_xinfo(${quote(name)})`).filter((row) => row["hidden"] === 0)
+		const info = db.all(`PRAGMA main.table_xinfo(${quote(name)})`).filter((row) => row["hidden"] === 0)
 		const columns = info.map((row) => String(row["name"]))
 		const rows = db
 			.all(
-				`SELECT ${columns.map((column) => `quote(${quote(column)}) AS ${quote(column)}`).join(", ")} FROM ${quote(name)}`,
+				`SELECT ${columns.map((column) => `quote(${quote(column)}) AS ${quote(column)}`).join(", ")} FROM main.${quote(name)}`,
 			)
 			.map((row) => columns.map((column) => String(row[column])))
 		out.set(name.toLowerCase(), {
@@ -132,20 +135,6 @@ function snapshot(db: MemoryDb): Map<string, Shape> {
 		})
 	}
 	return out
-}
-
-/** Apply one file to the copy, as the target would: foreign keys on, the file in one transaction */
-function applyToCopy(db: MemoryDb, sql: string): string | undefined {
-	try {
-		db.exec("PRAGMA foreign_keys = ON")
-		db.exec("BEGIN")
-		db.exec(sql)
-		db.exec("COMMIT")
-		return undefined
-	} catch (error) {
-		db.exec("ROLLBACK")
-		return (error as Error).message
-	}
 }
 
 /** One copy of the target: its database, and the tables comb could not seed in it, with why */
@@ -163,7 +152,7 @@ async function copyOf(objects: readonly LiveObject[], variant: number): Promise<
  */
 async function reseeded(objects: readonly LiveObject[], applied: readonly string[]): Promise<Copy | undefined> {
 	const copy = await copyOf(objects, 1)
-	if (applied.every((sql) => applyToCopy(copy.db, sql) === undefined)) return copy
+	if (applied.every((sql) => applyToCopy(copy.db, sql).error === undefined)) return copy
 	copy.db.close()
 	return undefined
 }
@@ -171,8 +160,8 @@ async function reseeded(objects: readonly LiveObject[], applied: readonly string
 /**
  * Prove each pending file, in order, on a seeded in-memory copy of the database `conn` reaches;
  * returns each file's proof by name. A file the copy refuses is tried once more on a reseeded copy
- * (a seed's value can meet a file's unique index or explicit id); a file refused both ways proves
- * nothing, nor does any after it, and their ratings are the classifier's.
+ * (a seed's value can meet a file's unique index or explicit id); a file refused both ways is
+ * unproven, and so unsafe, as is every file after it.
  */
 async function provePending(
 	conn: Connection,
@@ -186,26 +175,22 @@ async function provePending(
 	try {
 		for (const { name, sql } of files) {
 			if (failed !== undefined) {
-				proofs.set(name, { cautious: [], failed, unproven: unprovenOf(copy), unsafe: [] })
+				proofs.set(name, { cautious: [], failed, unproven: unprovenOf(copy), unsafe: [failed] })
 				continue
 			}
 			let before = snapshot(copy.db)
-			let error = applyToCopy(copy.db, sql)
-			const retry = error === undefined ? undefined : await reseeded(objects, applied)
+			let run = applyToCopy(copy.db, sql)
+			const retry = run.error === undefined ? undefined : await reseeded(objects, applied)
 			if (retry !== undefined) {
 				copy.db.close()
 				copy = retry
 				before = snapshot(copy.db)
-				error = applyToCopy(copy.db, sql)
+				run = applyToCopy(copy.db, sql)
 			}
-			if (error !== undefined) {
-				failed = `an earlier pending file, ${name}, did not apply to the copy`
-				proofs.set(name, {
-					cautious: [],
-					failed: `it did not apply to the copy, reseeded or not: ${error}`,
-					unproven: unprovenOf(copy),
-					unsafe: [],
-				})
+			if (run.error !== undefined) {
+				failed = `an earlier pending file, ${name}, could not run in the proof copy, so this one is unproven`
+				const why = `comb could not run this in the proof copy: ${run.error}`
+				proofs.set(name, { cautious: [], failed: why, unproven: unprovenOf(copy), unsafe: [why] })
 				continue
 			}
 			applied.push(sql)
@@ -214,7 +199,12 @@ async function provePending(
 				new Map([...before].filter(([table]) => !copy.unproven.has(table))),
 				snapshot(copy.db),
 			)
-			proofs.set(name, { ...found, unproven: unprovenOf(copy) })
+			const engine = engineFindings(run.steps, run.start)
+			proofs.set(name, {
+				cautious: [...engine.cautious, ...found.cautious],
+				unproven: unprovenOf(copy),
+				unsafe: [...engine.unsafe, ...found.unsafe],
+			})
 		}
 	} finally {
 		copy.db.close()

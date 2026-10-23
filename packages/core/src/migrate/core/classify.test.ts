@@ -183,12 +183,7 @@ describe("classifyMigration on SQL that hid a destructive change", () => {
 		expect(pg(sql).safety).toBe("unsafe")
 	})
 
-	it.each(["REPLACE INTO t VALUES (1)", "INSERT OR REPLACE INTO t VALUES (1)"])(
-		"calls %j, which deletes the row it replaces, unsafe on SQLite",
-		(sql) => {
-			expect(lite(sql).safety).toBe("unsafe")
-		},
-	)
+	/* a SQLite REPLACE deletes the row it replaces: the proof's engine pass rates it unsafe (plan-apply.engine.test.ts) */
 
 	it("rates a DO with no body unsafe, as every DO is", () => {
 		expect(pg("DO").safety).toBe("unsafe")

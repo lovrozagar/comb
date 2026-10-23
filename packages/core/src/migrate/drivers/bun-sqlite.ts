@@ -20,7 +20,11 @@ type SqliteParam = string | number | bigint | boolean | null | Uint8Array
 type BunMemory = {
 	close(): void
 	exec(sql: string): unknown
-	prepare(sql: string): { all(...params: SqliteParam[]): unknown[]; run(...params: SqliteParam[]): unknown }
+	prepare(sql: string): {
+		all(...params: SqliteParam[]): unknown[]
+		finalize(): void
+		run(...params: SqliteParam[]): unknown
+	}
 }
 
 /** The part of bun:sqlite's Database a migration connection uses */
@@ -71,15 +75,27 @@ export function createBunSqliteProvider(config: BunSqliteProviderConfig): Connec
 	}
 }
 
+/** `use` on `sql` prepared, the statement finalized whatever `use` does */
+function once<T>(db: BunMemory, sql: string, use: (stmt: ReturnType<BunMemory["prepare"]>) => T): T {
+	const stmt = db.prepare(sql)
+	try {
+		return use(stmt)
+	} finally {
+		stmt.finalize()
+	}
+}
+
 /** A private in-memory bun:sqlite database, for the proof run (memory.ts) */
 async function openBunMemory(): Promise<MemoryDb> {
 	const { Database } = (await import(BUN_SQLITE)) as { Database: new (path: string) => BunMemory }
 	const db = new Database(":memory:")
 	return {
-		all: (sql, params = []) => db.prepare(sql).all(...(params as SqliteParam[])) as Array<Record<string, unknown>>,
+		/* each statement finalized at once: one left open (an EXPLAIN DROP TABLE among them) keeps its table locked */
+		all: (sql, params = []) =>
+			once(db, sql, (stmt) => stmt.all(...(params as SqliteParam[]))) as Array<Record<string, unknown>>,
 		close: () => db.close(),
 		exec: (sql) => void db.exec(sql),
-		run: (sql, params = []) => void db.prepare(sql).run(...(params as SqliteParam[])),
+		run: (sql, params = []) => void once(db, sql, (stmt) => stmt.run(...(params as SqliteParam[]))),
 	}
 }
 

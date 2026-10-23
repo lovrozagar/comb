@@ -88,8 +88,8 @@ describe("classifyMigration on a write the G1 review found rated low", () => {
 	})
 })
 
-/* the G3 review (loss-proof.ts, classify-probe.ts): no WHERE makes a DELETE or an UPDATE of existing values safe to run */
-const lite = (sql: string) => classifyMigration(sql, { dialect: "sqlite" })
+/* the G3 review (loss-proof.ts, classify-probe.ts): no WHERE makes a DELETE or an UPDATE of existing values
+   safe to run. On SQLite the proof's engine pass rates writes (plan-apply.engine.test.ts); these are Postgres's */
 
 describe("classifyMigration: a DELETE, and an UPDATE of existing values, may destroy them", () => {
 	it.each([
@@ -100,17 +100,8 @@ describe("classifyMigration: a DELETE, and an UPDATE of existing values, may des
 		"DELETE FROM users WHERE id = 1;",
 		"UPDATE users SET tier = 'pro' WHERE id = 1;",
 		"INSERT INTO users (id, tier) VALUES (1, 'x') ON CONFLICT (id) DO UPDATE SET tier = excluded.tier;",
-	])("calls %j unsafe on both dialects", (sql) => {
-		expect(lite(sql).safety).toBe("unsafe")
+	])("calls %j unsafe", (sql) => {
 		expect(pg(sql).safety).toBe("unsafe")
-	})
-
-	it.each([
-		"UPDATE OR REPLACE users SET email = 'a' WHERE id = 1;",
-		"REPLACE INTO users (id, tier) VALUES (1, 'x');",
-		"INSERT OR REPLACE INTO users (id, tier) VALUES (1, 'x');",
-	])("calls SQLite's %j unsafe", (sql) => {
-		expect(lite(sql).safety).toBe("unsafe")
 	})
 
 	it("calls a MERGE that updates or deletes unsafe, and one that only inserts cautious", () => {
@@ -120,29 +111,14 @@ describe("classifyMigration: a DELETE, and an UPDATE of existing values, may des
 		)
 	})
 
-	it("calls a backfill of columns this file added cautious, and a second write to them unsafe", () => {
+	it("calls a backfill of columns this file added cautious, and a write to an older one unsafe", () => {
 		const added =
 			'ALTER TABLE users ADD COLUMN tier text;\nALTER TABLE "users" ADD COLUMN "since" integer, ADD COLUMN x text;\n'
-		expect(lite(`${added}UPDATE users SET tier = 'free', "since" = 0 WHERE tier IS NULL;`).safety).toBe("cautious")
 		expect(pg(`${added}UPDATE users SET (tier, x) = ('free', 'y');`).safety).toBe("cautious")
-		expect(lite(`${added}UPDATE users SET tier = 'free';\nUPDATE users SET tier = 'pro' WHERE id = 1;`).safety).toBe(
-			"unsafe",
-		)
-		expect(lite(`${added}UPDATE users SET tier = 'free', email = NULL;`).safety).toBe("unsafe")
-		expect(lite(`${added}UPDATE other SET tier = 'free';`).safety).toBe("unsafe")
+		expect(pg(`${added}UPDATE users SET tier = 'free', email = NULL;`).safety).toBe("unsafe")
 		/* an element of an array column names no column comb can match: it may overwrite */
 		expect(pg("ALTER TABLE users ADD COLUMN tags text[];\nUPDATE users SET tags[1] = 'x';").safety).toBe("unsafe")
-		expect(lite(`UPDATE users SET tier = 'free';\n${added}`).safety).toBe("unsafe")
-	})
-
-	it("calls an UPDATE or upsert into a table this file created earlier cautious, and a DELETE from it still unsafe", () => {
-		const created = "CREATE TABLE `fresh` (`id` integer PRIMARY KEY, `a` text);\nINSERT INTO fresh VALUES (1, 'x');\n"
-		expect(lite(`${created}UPDATE fresh SET a = 'y' WHERE id = 1;`).safety).toBe("cautious")
-		expect(
-			lite(`${created}INSERT INTO fresh VALUES (1, 'z') ON CONFLICT (id) DO UPDATE SET a = excluded.a;`).safety,
-		).toBe("cautious")
-		expect(lite(`${created}DELETE FROM fresh WHERE id = 1;`).safety).toBe("unsafe")
-		expect(lite(`UPDATE fresh SET a = 'y';\n${created}`).safety).toBe("unsafe")
+		expect(pg(`UPDATE users SET tier = 'free';\n${added}`).safety).toBe("unsafe")
 	})
 })
 
@@ -153,18 +129,16 @@ describe("classifyMigration on a backfill of something that held data", () => {
 	const rate = (sql: string, dialect: "postgres" | "sqlite") =>
 		classifyMigration(sql, { before: before(dialect), dialect }).safety
 
-	it("rates an UPDATE after CREATE TABLE IF NOT EXISTS of an existing table unsafe, on either dialect", () => {
-		for (const dialect of ["sqlite", "postgres"] as const) {
-			expect(
-				rate(
-					"CREATE TABLE IF NOT EXISTS users (id integer PRIMARY KEY, email text);\nUPDATE users SET email = NULL;",
-					dialect,
-				),
-			).toBe("unsafe")
-			expect(
-				rate("CREATE TABLE Users (id integer PRIMARY KEY, email text);\nUPDATE users SET email = NULL;", dialect),
-			).toBe("unsafe")
-		}
+	it("rates an UPDATE after CREATE TABLE IF NOT EXISTS of an existing table unsafe", () => {
+		expect(
+			rate(
+				"CREATE TABLE IF NOT EXISTS users (id integer PRIMARY KEY, email text);\nUPDATE users SET email = NULL;",
+				"postgres",
+			),
+		).toBe("unsafe")
+		expect(
+			rate("CREATE TABLE Users (id integer PRIMARY KEY, email text);\nUPDATE users SET email = NULL;", "postgres"),
+		).toBe("unsafe")
 	})
 
 	it("rates an UPDATE of a column added IF NOT EXISTS, or one the table had, unsafe", () => {

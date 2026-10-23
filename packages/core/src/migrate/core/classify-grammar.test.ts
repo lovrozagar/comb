@@ -63,16 +63,6 @@ describe("default-deny: the 0.10 review's bypasses are unsafe (M1–M6)", () => 
 			"CREATE TEMP TABLE users AS SELECT * FROM main.users WHERE coalesce(email, '') NOT LIKE '%@%';\nDROP TABLE users;",
 			USERS,
 		],
-		[
-			"M4: a backfill a live trigger observes",
-			"ALTER TABLE users ADD COLUMN plan TEXT;\nUPDATE users SET plan = 'free';",
-			`${USERS}\nCREATE TABLE sessions (uid INTEGER);\nCREATE TRIGGER logout AFTER UPDATE ON users WHEN NEW.email LIKE '%@%' BEGIN DELETE FROM sessions WHERE uid = NEW.id; END;`,
-		],
-		[
-			"M4: an insert a live trigger observes",
-			"INSERT INTO users (email) VALUES ('x');",
-			`${USERS}\nCREATE TABLE sessions (uid INTEGER);\nCREATE TRIGGER wipe AFTER INSERT ON users BEGIN DELETE FROM sessions; END;`,
-		],
 	])("%s", (_, sql, history) => {
 		const rated = rate(sql, history)
 		expect(rated.safety).toBe("unsafe")
@@ -100,6 +90,26 @@ describe("default-deny: the 0.10 review's bypasses are unsafe (M1–M6)", () => 
 	it("names what it does not recognize, and how to approve it", () => {
 		const rated = rate("CREATE TRIGGER t BEFORE INSERT ON users BEGIN SELECT 1; END;", USERS)
 		expect(rated.unsafeStatements.join("\n")).toMatch(/comb does not recognize .*; approve it in the file/)
+	})
+})
+
+/* on SQLite the proof's engine pass names these (plan-apply.engine.test.ts) */
+describe("default-deny on Postgres: a temp shadow and a live trigger (M3, M4)", () => {
+	it.each([
+		[
+			"M3: a TEMP table named like a live table",
+			"CREATE TEMP TABLE users AS SELECT * FROM users WHERE false;",
+			"shadows users",
+		],
+		[
+			"M4: a write a live trigger observes",
+			"INSERT INTO users (email) VALUES ('x');",
+			"fires trigger wipe, whose body runs for every row it writes",
+		],
+	])("%s (postgres)", (_, sql, note) => {
+		const history =
+			"CREATE TABLE users (id int PRIMARY KEY, email text); CREATE TABLE sessions (uid int); CREATE TRIGGER wipe AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();"
+		expect(rate(sql, history, "postgres").unsafeStatements.join("\n")).toContain(note)
 	})
 })
 
@@ -146,7 +156,6 @@ describe("default-deny keeps the shapes it recognizes (controls)", () => {
 			"CREATE TABLE tiers (id TEXT);\nINSERT INTO tiers VALUES ('free');",
 			"safe",
 		],
-		["a trigger-free backfill", "ALTER TABLE users ADD COLUMN plan TEXT;\nUPDATE users SET plan = 'free';", "cautious"],
 		["Atlas's plain rebuild", castRebuild("`n` AS `n`, `b` AS `b`"), "cautious"],
 	])("%s", (_, sql, safety) => {
 		const history = sql.includes("`new_t`") ? T : USERS

@@ -43,6 +43,28 @@ INSERT INTO post_fts(post_fts) VALUES ('rebuild');`
 	})
 })
 
+describe("classifyMigration on an FTS5 command", () => {
+	it.each([
+		"INSERT INTO post_fts(post_fts) VALUES ('delete-all');",
+		"INSERT INTO \"post_fts\" ( \"post_fts\", rowid, title ) VALUES ( 'delete', 1, 'x' );",
+		"INSERT INTO post_fts(post_fts) SELECT 'delete-all';",
+		"INSERT INTO post_fts(post_fts) VALUES (lower('DELETE-ALL'));",
+		"INSERT INTO post_fts(post_fts) VALUES ('rebuild'), ('delete-all');",
+	])("calls %j unsafe: it removes indexed rows, or comb cannot read which command it runs", (sql) => {
+		expect(lite(sql).unsafeStatements.join("\n")).toContain("FTS5 command")
+	})
+
+	it.each([
+		"INSERT INTO post_fts(post_fts) VALUES ('rebuild');",
+		"INSERT INTO post_fts(post_fts, rank) VALUES ('merge', 500);",
+		"INSERT INTO post_fts(post_fts, rank) VALUES ('rank', 'bm25(10.0, 5.0)');",
+		"INSERT INTO post_fts(post_fts) VALUES('optimize');",
+		"INSERT INTO post_fts(title) VALUES ('x');",
+	])("leaves %j to the other rules: it keeps every indexed row", (sql) => {
+		expect(lite(sql).unsafeStatements).toEqual([])
+	})
+})
+
 describe("classifyMigration on a drop of an FTS5 table that stored its own text (M8)", () => {
 	it("rates it unsafe though the file recreates it as an external-content index of an empty table", () => {
 		const stored = extractSchema(

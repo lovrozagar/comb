@@ -140,7 +140,7 @@ async function approveAll(
 	for (const each of classified) {
 		const proof = proofs.get(each.name)
 		const migration = proof === undefined ? each.migration : withProof(each.migration, proof)
-		if (proof?.failed !== undefined) print(`Proof run: ${each.name}: ${proof.failed}; its rating is the classifier's`)
+		if (proof?.failed !== undefined) print(`Proof run: ${each.name}: ${proof.failed}`)
 		const approval = empty ? { ok: true as const } : await options.approve(migration)
 		if (!approval.ok)
 			throw new Refused(
