@@ -31,10 +31,14 @@ const TITLES: Array<[number, string]> = [
 
 type Harness = ReturnType<typeof libsqlMemory>
 
-async function seeded(collate = ""): Promise<Harness> {
+/* the same, of astral characters (two UTF-16 units each), so a prefix is cut inside a run of them */
+const ASTRAL = "𠀀".repeat(2000)
+const ASTRAL_TITLES: Array<[number, string]> = TITLES.map(([id, title]) => [id, title.replaceAll(LONG, ASTRAL)])
+
+async function seeded(collate = "", titles = TITLES): Promise<Harness> {
 	const harness = libsqlMemory()
 	await harness.client.execute(`CREATE TABLE doc (id INTEGER PRIMARY KEY, title TEXT NOT NULL ${collate})`)
-	for (const [id, title] of TITLES)
+	for (const [id, title] of titles)
 		await harness.client.execute({ args: [id, title], sql: "INSERT INTO doc VALUES (?, ?)" })
 	return harness
 }
@@ -130,6 +134,51 @@ describe("a sort key too long for a cursor (R8)", () => {
 				},
 			)
 		}
+	}
+})
+
+/** The ids after `title` and `id` under `order`, in the table as it is now: where a plain cursor resumes */
+async function after(harness: Harness, order: string, [id, title]: [number, string]): Promise<number[]> {
+	const [cmp, direction] = order.endsWith("desc") ? ["<", "DESC"] : [">", "ASC"]
+	const rows = await harness.client.execute({
+		args: [title, title, id],
+		sql: `SELECT id FROM doc WHERE title ${cmp} ? OR (title = ? AND id ${cmp} ?) ORDER BY title ${direction}, id ${direction}`,
+	})
+	return rows.rows.map((row) => Number(row[0]))
+}
+
+/* U2 of the 0.12 round: a cursor resumes where its row's value stood when it was minted, as a plain cursor does */
+describe("a sort key too long for a cursor, its row renamed between pages (U2)", () => {
+	for (const [name, page, titles] of [
+		["buildListQuery", BUILDER, TITLES],
+		["listOptions", RELATIONAL, TITLES],
+		["buildListQuery, astral titles,", BUILDER, ASTRAL_TITLES],
+		["listOptions, astral titles,", RELATIONAL, ASTRAL_TITLES],
+	] as const) {
+		it.each(["title.asc", "title.desc"])(`resumes %s through ${name} where the old title stood`, async (order) => {
+			const harness = await seeded("", titles)
+			try {
+				let anchor: [number, string] | undefined
+				let rest: number[] = []
+				let before: number[] = []
+				const seen = await pageAll(harness, page, {
+					order,
+					between: async (ids) => {
+						const last = ids.at(-1) as number
+						const title = titles.find(([id]) => id === last)?.[1] as string
+						if (anchor !== undefined || title.length < 100) return
+						anchor = [last, title]
+						before = [...ids]
+						await harness.client.execute({ args: [last], sql: "UPDATE doc SET title = 'a-renamed' WHERE id = ?" })
+						rest = await after(harness, order, anchor)
+					},
+				})
+				expect(anchor).toBeDefined()
+				expect(seen).toEqual([...before, ...rest])
+			} finally {
+				harness.close()
+			}
+		})
 	}
 })
 

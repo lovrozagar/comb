@@ -22,13 +22,13 @@ describe("cursorWhere", () => {
 			tiebreak,
 		})
 		expect(dialect.sqlToQuery(plain).params).toEqual(["b", "b", 3])
-		const byRef = createCursor({ id: 3, title: new CursorRef("b") }, sort, SEALED)
+		const byRef = createCursor({ id: 3, title: new CursorRef("b", 1) }, sort, SEALED)
 		const read = cursorWhere({ cursor: byRef, keys, options: SEALED, sort, table: doc, tiebreak })
-		expect(dialect.sqlToQuery(read).sql).toContain('(SELECT "doc"."title" FROM "doc" WHERE "doc"."id" = ?)')
+		expect(dialect.sqlToQuery(read).sql).toContain('LEFT JOIN "doc" ON "doc"."id" = ?)')
 	})
 
 	it("refuses a reference on a list with no table, and a value its key cannot take", () => {
-		const byRef = createCursor({ id: 3, title: new CursorRef("b") }, sort, SEALED)
+		const byRef = createCursor({ id: 3, title: new CursorRef("b", 1) }, sort, SEALED)
 		expect(() => cursorWhere({ cursor: byRef, keys, options: SEALED, sort, table: undefined, tiebreak })).toThrow(
 			expect.objectContaining({ status: 500 }),
 		)

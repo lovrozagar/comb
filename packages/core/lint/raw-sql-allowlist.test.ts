@@ -4,7 +4,7 @@ import { oxlintReports, reportsOf } from "./rule-harness.ts"
 
 const rule = plugin.rules["raw-sql-allowlist"]
 const PLACE = "sql.raw belongs to query/sqlite/{search,keyset,filter-sql}.ts; build the query with sql``"
-const ARG = "sql.raw takes a string literal, a ternary of string literals, or quoteIdent(…)"
+const ARG = "sql.raw takes a string literal, a ternary of string literals, quoteIdent(…) or countText(…)"
 
 describe("comb/raw-sql-allowlist", () => {
 	it("rejects sql.raw outside the three query builders, called or passed around", () => {
@@ -26,22 +26,24 @@ describe("comb/raw-sql-allowlist", () => {
 			"packages/core/src/query/sqlite/filter-sql.ts":
 				"export const c = (a: string, b: string) => sql.raw(`${a}.${b}`)\n",
 			"packages/core/src/query/sqlite/keyset.ts":
-				'export const d = (asc: boolean, x: string) => sql.raw(asc ? "ASC" : x)\nexport const e = () => sql.raw()\n',
+				'export const d = (asc: boolean, x: string) => sql.raw(asc ? "ASC" : x)\nexport const e = () => sql.raw()\nexport const f = (n: number) => sql.raw(String(n))\n',
 		}
 		expect(reportsOf(rule, fixture)).toEqual([
 			{ file: "packages/core/src/query/sqlite/search.ts", message: ARG },
 			{ file: "packages/core/src/query/sqlite/filter-sql.ts", message: ARG },
 			{ file: "packages/core/src/query/sqlite/keyset.ts", message: ARG },
 			{ file: "packages/core/src/query/sqlite/keyset.ts", message: ARG },
+			{ file: "packages/core/src/query/sqlite/keyset.ts", message: ARG },
 		])
 	})
 
-	it("allows literals, ternaries of literals and quoteIdent in the allowlisted files", () => {
+	it("allows literals, ternaries of literals, quoteIdent and countText in the allowlisted files", () => {
 		const fixture = {
 			"packages/core/src/query/sqlite/keyset.ts": [
 				'export const d = (asc: boolean) => sql.raw(asc ? "ASC" : "DESC")',
 				'export const n = (f: boolean, l: boolean) => sql.raw(f ? "NULLS FIRST" : l ? "NULLS LAST" : `NULLS DEFAULT`)',
 				"export const s = () => sql.raw(`SELECT 1`)",
+				"export const c = (n: number) => sql.raw(countText(n))",
 				"",
 			].join("\n"),
 			"packages/core/src/query/sqlite/search.ts":

@@ -52,12 +52,18 @@ type DecodedCursor = {
 	values: CursorValue[]
 }
 
-/** A sort value carried by reference (cursor-ref.ts): the prefix of it that fit, the rest read from the row */
+/**
+ * A sort value carried by reference (cursor-ref.ts): the prefix of it that fit and the whole
+ * value's length, both in code points as SQLite's substr() and Postgres's left() count them; the
+ * rest is read from the row while it still has that prefix and length
+ */
 class CursorRef {
+	readonly length: number
 	readonly prefix: string
 
-	constructor(prefix: string) {
+	constructor(prefix: string, length: number) {
 		this.prefix = prefix
+		this.length = length
 	}
 }
 
@@ -95,7 +101,7 @@ const NON_FINITE = ["Infinity", "-Infinity", "NaN"]
 
 function encodeValue(value: unknown): unknown {
 	if (value instanceof Date) return { [DATE_TAG]: value.getTime() }
-	if (value instanceof CursorRef) return { [REF_TAG]: value.prefix }
+	if (value instanceof CursorRef) return { [REF_TAG]: [value.prefix, value.length] }
 	if (typeof value === "number" && !Number.isFinite(value)) return { [NUM_TAG]: String(value) }
 	return typeof value === "bigint" ? { [BIGINT_TAG]: value.toString() } : (value ?? null)
 }
@@ -103,10 +109,17 @@ function encodeValue(value: unknown): unknown {
 const isPlain = (value: unknown): value is number | string =>
 	typeof value === "string" || (typeof value === "number" && Number.isFinite(value))
 
+/** A reference from the wire: its prefix, and a whole length the prefix fits in; a 0.12 reference, a bare prefix, is none */
+function decodeRef(ref: unknown): CursorRef | undefined {
+	if (!Array.isArray(ref) || ref.length !== 2) return undefined
+	const [prefix, length] = ref as [unknown, unknown]
+	if (typeof prefix !== "string" || !Number.isSafeInteger(length)) return undefined
+	return (length as number) >= Array.from(prefix).length ? new CursorRef(prefix, length as number) : undefined
+}
+
 /** A tagged value from the wire: a Date a JS Date can hold, a bigint of decimal digits, ±Infinity or NaN, or a reference */
 function decodeTagged(value: Record<string, unknown>): CursorRef | Date | bigint | number | undefined {
-	const prefix = value[REF_TAG]
-	if (typeof prefix === "string") return new CursorRef(prefix)
+	if (Object.hasOwn(value, REF_TAG)) return decodeRef(value[REF_TAG])
 	const named = value[NUM_TAG]
 	if (typeof named === "string") return NON_FINITE.includes(named) ? Number(named) : undefined
 	const time = value[DATE_TAG]

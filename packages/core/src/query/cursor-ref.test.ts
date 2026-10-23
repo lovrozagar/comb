@@ -1,9 +1,9 @@
-import { SQL } from "drizzle-orm"
 import { PgDialect, integer as pgInteger, pgTable, text as pgText } from "drizzle-orm/pg-core"
 import { alias, integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { createCursor, CursorRef, openCursor } from "./cursor.ts"
 import { anchored, assertNoReference, fromOf, mintWithin } from "./cursor-ref.ts"
+import { AnchorBound } from "./sqlite/keyset.ts"
 import type { SortField } from "./types.ts"
 import { SEALED } from "./__fixtures__/cursor-secret.ts"
 
@@ -30,7 +30,9 @@ describe("mintWithin", () => {
 		const longer = Array.from(title)
 			.slice(0, Array.from(prefix).length + 1)
 			.join("")
-		expect(createCursor({ id: 1, title: new CursorRef(longer) }, BY_TITLE, SEALED).length).toBeGreaterThan(8192)
+		expect((ref as CursorRef).length).toBe(Array.from(title).length)
+		const wider = new CursorRef(longer, Array.from(title).length)
+		expect(createCursor({ id: 1, title: wider }, BY_TITLE, SEALED).length).toBeGreaterThan(8192)
 	})
 
 	it("carries the longest values first, each by what room the others leave", () => {
@@ -41,7 +43,7 @@ describe("mintWithin", () => {
 		const cursor = mintWithin({ a: "甲".repeat(4000), b: "乙".repeat(3500), id: 1 }, sort, SEALED)
 		const [a, b] = openCursor(cursor, SEALED)?.values ?? []
 		expect(cursor.length).toBeLessThanOrEqual(8192)
-		expect(a).toEqual(new CursorRef(""))
+		expect(a).toEqual(new CursorRef("", 4000))
 		expect(b).toBeInstanceOf(CursorRef)
 	})
 
@@ -70,34 +72,38 @@ describe("fromOf", () => {
 const at = (table: object, column: { id: unknown }) => ({ id: 7, table, tiebreak: column.id as never })
 
 describe("anchored and assertNoReference", () => {
-	it("reads a reference from the row, falling back to the prefix, or past it descending, on SQLite", () => {
+	it("reads a reference from the row while it keeps the prefix and length, else the prefix, or past it descending, on SQLite", () => {
 		const keys = [
 			{ column: doc.title, direction: "asc" as const },
 			{ column: doc.title, direction: "desc" as const },
 		]
-		const [asc, desc, plain] = anchored(
-			[...keys, keys[0]!],
-			[new CursorRef("ab"), new CursorRef("ab"), "x"],
+		const [asc, desc, empty, plain] = anchored(
+			[...keys, keys[0]!, keys[0]!],
+			[new CursorRef("a𝟘", 9), new CursorRef("ab", 9), new CursorRef("", 9), "x"],
 			at(doc, doc),
 		)
-		expect(sqlite.sqlToQuery(asc as SQL)).toEqual({
-			params: [7, "ab"],
-			sql: 'COALESCE((SELECT "doc"."title" FROM "doc" WHERE "doc"."id" = ?), ?)',
+		expect(asc).toBeInstanceOf(AnchorBound)
+		expect(sqlite.sqlToQuery((asc as AnchorBound).value)).toEqual({
+			params: ["a𝟘", 7],
+			sql: '(SELECT CASE WHEN substr("doc"."title", 1, 2) = comb_anchor.v AND length("doc"."title") = 9 THEN "doc"."title" ELSE comb_anchor.v END FROM (SELECT ? AS v) AS comb_anchor LEFT JOIN "doc" ON "doc"."id" = ?)',
 		})
-		expect(sqlite.sqlToQuery(desc as SQL).params).toEqual([7, "ab\u{10FFFF}"])
+		expect(sqlite.sqlToQuery((desc as AnchorBound).value).sql).toContain("ELSE (comb_anchor.v || char(1114111)) END")
+		expect(sqlite.sqlToQuery((empty as AnchorBound).value)).toMatchObject({ params: [7] })
+		expect((asc as AnchorBound).ends).toBe(false)
 		expect(plain).toBe("x")
 	})
 
-	it("takes the prefix on Postgres only where the column sorts by code point", () => {
-		const [bound] = anchored([{ column: pgDoc.title, direction: "asc" }], [new CursorRef("ab")], at(pgDoc, pgDoc))
-		expect(pg.sqlToQuery(bound as SQL).sql).toMatch(
-			/^COALESCE\(\(SELECT "doc"\."title" FROM "doc" WHERE "doc"\."id" = \$1\), CASE WHEN \(pg_collation_for\("doc"\."title"\) IN \('"C"', '"POSIX"'\)/,
+	it("takes the prefix on Postgres only where the column sorts by code point, and ends the list where it does not", () => {
+		const [bound] = anchored([{ column: pgDoc.title, direction: "asc" }], [new CursorRef("ab", 5)], at(pgDoc, pgDoc))
+		expect((bound as AnchorBound).ends).toBe(true)
+		expect(pg.sqlToQuery((bound as AnchorBound).value).sql).toMatch(
+			/^\(SELECT CASE WHEN left\("doc"\."title", 2\) = comb_anchor\.v AND char_length\("doc"\."title"\) = 5 THEN "doc"\."title" ELSE CASE WHEN \(pg_collation_for/,
 		)
 	})
 
 	it("refuses a reference where no row can be read, and lets every other value by", () => {
 		expect(() => assertNoReference(["a", 1, null])).not.toThrow()
-		expect(() => assertNoReference([new CursorRef("a")])).toThrow(
+		expect(() => assertNoReference([new CursorRef("a", 1)])).toThrow(
 			expect.objectContaining({
 				cause: expect.stringContaining("pass { keyset: 'derived' } to paginate"),
 				status: 500,

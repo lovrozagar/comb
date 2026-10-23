@@ -173,14 +173,20 @@ type Tiebreak = {
 declare function orderSQL(key: SortKey): SQL;
 /** ORDER BY for the keys followed by the tiebreak, which makes the order total. */
 declare function orderByKeys(keys: readonly SortKey[], tiebreak: Tiebreak): SQL[];
+/** A count as a SQL literal, where a bound parameter would cost the D1 budget one */
+declare const countLiteral: (value: number) => SQL;
 /**
- * Lexicographic "after this row" over every key plus the tiebreak:
- *
- *   (k1 after) OR (k1 = v1 AND k2 after) OR … OR (k1 = v1 AND … AND id after)
- *
- * Expanded rather than a row-value comparison because each key carries its own
- * direction and null placement.
+ * A bound the keyset reads from the cursor's own row (cursor-ref.ts) rather than binds: a long text
+ * value carried by reference, or a SQLite number the cursor carried as null, which may be a
+ * ±Infinity D1 hands over as null. Each is SQL that binds, so the keyset reads it twice at most;
+ * `ends` when a NULL bound means no bound is safe, and the list ends there.
  */
+declare class AnchorBound {
+    readonly ends: boolean;
+    readonly kind: "infinite" | "text";
+    readonly value: SQL;
+    constructor(kind: "infinite" | "text", value: SQL, ends?: boolean);
+}
 /** Where a cursor points: the sort keys and the row's values for them, then the tiebreak and its id */
 type KeysetPosition = {
     id: unknown;
@@ -188,8 +194,13 @@ type KeysetPosition = {
     tiebreak: Tiebreak;
     values: readonly unknown[];
 };
-declare function keysetSQL({ id, keys, tiebreak, values }: KeysetPosition): SQL;
-export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak };
+/**
+ * Lexicographic "after this row" over every key plus the tiebreak, expanded rather than a row-value
+ * comparison because each key carries its own direction and null placement. A bound that `ends`
+ * must not be NULL, or no row is after it.
+ */
+declare function keysetSQL(position: KeysetPosition): SQL;
+export { AnchorBound, countLiteral, type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak };
 
 // query/sqlite/pattern.d.ts
 /**

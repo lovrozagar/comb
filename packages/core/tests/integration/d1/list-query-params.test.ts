@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import * as z from "zod"
 import { readCombQueryMeta } from "../../../src/meta.ts"
 import { createCursor } from "../../../src/query/cursor.ts"
+import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { likeSearch } from "../../../src/query/sqlite/search.ts"
@@ -77,4 +78,28 @@ describe("the worst-case accepted list request runs on D1 (S-11)", () => {
 		const db = drizzle(harness.CORE)
 		await expect(applyListQuery(db.select().from(post).$dynamic(), query)).resolves.toEqual([])
 	})
+
+	/* U1 of the 0.12 round: a key the cursor carries by reference keeps within the same budget */
+	it.each(["created_at.desc,minute_read.asc,title.asc", "title.asc,created_at.desc,minute_read.asc"])(
+		"binds no more than D1 allows with a long title carried by reference, sorted %s",
+		async (order) => {
+			harness = await d1Memory()
+			await harness.CORE.exec(
+				"CREATE TABLE post (id integer PRIMARY KEY, title text NOT NULL, minute_read integer NOT NULL, created_at integer NOT NULL, _search text NOT NULL)",
+			)
+			const sort = schema.parse({ order }).parsedSort
+			const row = { created_at: 1, id: 1, minute_read: 1, title: "長".repeat(3000) }
+			const [, meta] = queryHelpers.paginate([row, { ...row, id: 2 }], { limit: 1, parsedSort: sort }, SEALED)
+			const result = schema.safeParse({ cursor: meta.nextCursor, filter: largestFilter(), order, q: longestSearch() })
+			expect(result.success).toBe(true)
+			const query = buildListQuery({
+				...SEALED,
+				parsed: result.data as never,
+				search: likeSearch(post._search),
+				table: post,
+			})
+			const db = drizzle(harness.CORE)
+			await expect(applyListQuery(db.select().from(post).$dynamic(), query)).resolves.toEqual([])
+		},
+	)
 })

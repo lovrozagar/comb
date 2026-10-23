@@ -1,7 +1,7 @@
 import type { SQL } from "drizzle-orm"
 import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
-import { keysetSQL, orderByKeys, orderSQL } from "./keyset.ts"
+import { countLiteral, keysetSQL, orderByKeys, orderSQL } from "./keyset.ts"
 
 const post = sqliteTable("post", { id: text("id").primaryKey(), score: integer("score"), title: text("title") })
 
@@ -95,5 +95,13 @@ describe("keysetSQL — null placement", () => {
 		expect(after.sql).toBe(
 			'(((("post"."score" < ?) or (("post"."score" is null)))) or ((("post"."score" = ?) and ("post"."id" < ?))))',
 		)
+	})
+})
+
+describe("countLiteral", () => {
+	it("writes a count as digits, and refuses anything but a non-negative safe integer", () => {
+		expect(new SQLiteDialect().sqlToQuery(countLiteral(42))).toEqual({ params: [], sql: "42" })
+		for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53])
+			expect(() => countLiteral(bad)).toThrow(RangeError)
 	})
 })

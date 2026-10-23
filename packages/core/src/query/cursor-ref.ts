@@ -2,16 +2,28 @@
  * A sort key too long for a cursor (R8). Any client can write a long title, and a cursor carries
  * every sort value, so the cursor at that row would pass MAX_CURSOR_LENGTH and the next page would
  * refuse it. Such a value is carried by reference instead: the cursor holds the row's id (it always
- * does) and the longest prefix of the value that fits, and the keyset reads the value from the row:
+ * does), the longest prefix of the value that fits and the value's length, both in code points, and
+ * the keyset reads the value from the row while the row still has that prefix and length:
  *
- *   COALESCE((SELECT key FROM t WHERE id = ?), fallback)
+ *   (SELECT CASE WHEN substr(t.key, 1, L) = p.v AND length(t.key) = N THEN t.key ELSE fallback END
+ *    FROM (SELECT ? AS v) AS p LEFT JOIN t ON t.id = ?)
  *
- * Exact while the row is there. Once it is deleted the fallback is the prefix itself ascending and
- * the prefix followed by U+10FFFF descending: under binary, NOCASE and C collation the first sorts
- * at or before the value and the second at or after it, so resuming there may repeat rows that
- * share the prefix and skips none. Postgres takes the fallback only on a C or POSIX collation; under
- * any other, neither bound is safe, and a deleted anchor ends the list. A derived list has no table
- * to read from, so its overflowing cursor is refused when it is minted.
+ * Exact while the row is there unchanged. An edit that keeps both the prefix and the length still
+ * moves the bound to the new value; any other edit, or a delete, resumes from the fallback: the
+ * prefix itself ascending and the prefix followed by U+10FFFF descending. Under binary, NOCASE and C
+ * collation the first sorts at or before the value and the second at or after it, so resuming
+ * there may repeat rows that share the prefix and skips none. Postgres takes the fallback only on a
+ * C or POSIX collation; under any other, neither bound is safe, the bound is NULL, and the list
+ * ends there. A derived list has no table to read from, so its overflowing cursor is refused when
+ * it is minted.
+ *
+ * D1 hands a REAL ±Infinity over as null (its transport is JSON), so a cursor minted from such a
+ * row carries null. On a SQLite number key a null is read back from the row, ±Infinity only:
+ *
+ *   (SELECT CASE WHEN t.key IN (9e999, -9e999) THEN t.key END FROM t WHERE t.id = ?)
+ *
+ * which is NULL whenever the row holds anything else or is gone, the null the cursor carried. A
+ * deleted ±Infinity anchor so resumes from the NULLs' place.
  */
 import { getTableName, is, type SQL, type SQLWrapper, sql, type Table } from "drizzle-orm"
 import { SQLiteColumn } from "drizzle-orm/sqlite-core"
@@ -20,7 +32,7 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { createCursor, CursorRef, MAX_CURSOR_LENGTH } from "./cursor.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
-import type { SortKey } from "./sqlite/keyset.ts"
+import { AnchorBound, countLiteral, type SortKey } from "./sqlite/keyset.ts"
 import type { SortField } from "./types.ts"
 
 /** paginate's choice for an overflowing key: by reference on a table, refused on a derived list */
@@ -28,17 +40,18 @@ type KeysetKind = "derived" | "table"
 
 const codePoints = (text: string): string[] => Array.from(text)
 
-/** The longest prefix of `record[field]` whose cursor fits, given the other values; undefined when none does */
+/** `record[field]` by reference: its longest prefix whose cursor fits, given the other values, cut on a code point; undefined when none does */
 function longestFitting(record: Record<string, unknown>, field: string, fits: (r: Record<string, unknown>) => boolean) {
 	const points = codePoints(record[field] as string)
+	const ref = (n: number) => new CursorRef(points.slice(0, n).join(""), points.length)
 	let [low, high] = [0, points.length]
-	if (!fits({ ...record, [field]: new CursorRef("") })) return undefined
+	if (!fits({ ...record, [field]: ref(0) })) return undefined
 	while (low < high) {
 		const mid = Math.ceil((low + high) / 2)
-		if (fits({ ...record, [field]: new CursorRef(points.slice(0, mid).join("")) })) low = mid
+		if (fits({ ...record, [field]: ref(mid) })) low = mid
 		else high = mid - 1
 	}
-	return points.slice(0, low).join("")
+	return ref(low)
 }
 
 /** The overflow, as paginate reports it on the page that met it: a 500 naming the field and the cap */
@@ -75,9 +88,9 @@ function mintWithin(
 		.sort((a, b) => (row[b] as string).length - (row[a] as string).length)
 	let record = row
 	for (const field of long) {
-		const prefix = longestFitting(record, field, fits)
-		record = { ...record, [field]: new CursorRef(prefix ?? "") }
-		if (prefix !== undefined) return mint(record)
+		const ref = longestFitting(record, field, fits)
+		record = { ...record, [field]: ref ?? new CursorRef("", codePoints(row[field] as string).length) }
+		if (ref !== undefined) return mint(record)
 	}
 	throw tooLong(fields, whole.length, "table")
 }
@@ -97,19 +110,40 @@ function fromOf(table: object): SQL {
 	return name === original ? qualified : sql`${qualified} AS ${sql.identifier(name)}`
 }
 
-/* the largest code point: a prefix followed by it sorts at or after every value with that prefix */
-const LAST = "\u{10FFFF}"
-
 /** Whether `column` sorts by code point on Postgres: C or POSIX, its own or the database's default */
 const byCodePoint = (column: SQLWrapper) =>
 	sql`(pg_collation_for(${column}) IN ('"C"', '"POSIX"') OR (pg_collation_for(${column}) = '"default"' AND (SELECT datcollate FROM pg_database WHERE datname = current_database()) IN ('C', 'POSIX')))`
 
-/** The bound a reference compares with: the row's own value, else the prefix bound where it is safe */
-function anchorBound(key: SortKey, ref: CursorRef, source: SQL): SQL {
-	const fallback = key.direction === "asc" ? ref.prefix : `${ref.prefix}${LAST}`
-	if (is(key.column, SQLiteColumn)) return sql`COALESCE(${source}, ${fallback})`
-	return sql`COALESCE(${source}, CASE WHEN ${byCodePoint(key.column)} THEN ${fallback} END)`
+/** Where the keyset reads the cursor's row: the table, the tiebreak column and the row's id */
+type Anchor = { id: unknown; table: object; tiebreak: SQLWrapper }
+
+/**
+ * The bound a reference compares with: the row's value while it has the reference's prefix and
+ * length, in code points, else the prefix bound where it is safe (NULL where it is not). The prefix
+ * is bound once, so the bound costs two parameters, and one for an empty prefix.
+ */
+function textBound(key: SortKey, ref: CursorRef, at: Anchor): SQL {
+	const { column, direction } = key
+	const sqlite = is(column, SQLiteColumn)
+	const cut = countLiteral(Array.from(ref.prefix).length)
+	const head = sqlite ? sql`substr(${column}, 1, ${cut})` : sql`left(${column}, ${cut})`
+	const size = sqlite ? sql`length(${column})` : sql`char_length(${column})`
+	const prefix = ref.prefix === "" ? sql`''` : sql`${ref.prefix}`
+	const above =
+		direction === "asc"
+			? sql`comb_anchor.v`
+			: sql`(comb_anchor.v || ${sqlite ? sql`char(1114111)` : sql`chr(1114111)`})`
+	const fallback = sqlite ? above : sql`CASE WHEN ${byCodePoint(column)} THEN ${above} END`
+	return sql`(SELECT CASE WHEN ${head} = comb_anchor.v AND ${size} = ${countLiteral(ref.length)} THEN ${column} ELSE ${fallback} END FROM (SELECT ${prefix} AS v) AS comb_anchor LEFT JOIN ${fromOf(at.table)} ON ${at.tiebreak} = ${at.id})`
 }
+
+/** Whether `column` is a SQLite number, which D1 may hand over as null when it holds ±Infinity */
+const holdsInfinity = (column: SQLWrapper) =>
+	is(column, SQLiteColumn) && (column.dataType.startsWith("number") || column.dataType === "object date")
+
+/** A null on a SQLite number key: the row's own value where it is ±Infinity, NULL otherwise or once the row is gone */
+const infiniteBound = ({ column }: SortKey, at: Anchor): SQL =>
+	sql`(SELECT CASE WHEN ${column} IN (9e999, -9e999) THEN ${column} END FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id})`
 
 /** A 500 when a list with no table to read from got a reference: paginate was not told the list is derived */
 function assertNoReference(values: readonly unknown[]): void {
@@ -122,17 +156,16 @@ function assertNoReference(values: readonly unknown[]): void {
 	})
 }
 
-/** The cursor's values with each reference resolved against `table`, the row keyed `id` by `tiebreak` */
-function anchored(
-	keys: readonly SortKey[],
-	values: readonly unknown[],
-	at: { id: unknown; table: object; tiebreak: SQLWrapper },
-): unknown[] {
+/**
+ * The cursor's values with each one the row must supply read from `table`, the row keyed `id` by
+ * `tiebreak`: a reference, and a null on a SQLite number key
+ */
+function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anchor): unknown[] {
 	return values.map((value, i) => {
-		if (!(value instanceof CursorRef)) return value
 		const key = keys[i] as SortKey
-		const source = sql`(SELECT ${key.column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id})`
-		return anchorBound(key, value, source)
+		if (value instanceof CursorRef)
+			return new AnchorBound("text", textBound(key, value, at), !is(key.column, SQLiteColumn))
+		return value === null && holdsInfinity(key.column) ? new AnchorBound("infinite", infiniteBound(key, at)) : value
 	})
 }
 

@@ -34,29 +34,64 @@ function orderByKeys(keys: readonly SortKey[], tiebreak: Tiebreak): SQL[] {
 	return [...keys.map(orderSQL), orderSQL({ column: tiebreak.column, direction: tiebreak.direction })]
 }
 
+/** A count as SQL text: a non-negative safe integer, checked, so nothing but digits reaches sql.raw */
+function countText(value: number): string {
+	if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`not a count: ${value}`)
+	return String(value)
+}
+
+/** A count as a SQL literal, where a bound parameter would cost the D1 budget one */
+const countLiteral = (value: number): SQL => sql.raw(countText(value))
+
+/**
+ * A bound the keyset reads from the cursor's own row (cursor-ref.ts) rather than binds: a long text
+ * value carried by reference, or a SQLite number the cursor carried as null, which may be a
+ * ±Infinity D1 hands over as null. Each is SQL that binds, so the keyset reads it twice at most;
+ * `ends` when a NULL bound means no bound is safe, and the list ends there.
+ */
+class AnchorBound {
+	readonly ends: boolean
+	readonly kind: "infinite" | "text"
+	readonly value: SQL
+
+	constructor(kind: "infinite" | "text", value: SQL, ends = false) {
+		this.ends = ends
+		this.kind = kind
+		this.value = value
+	}
+}
+
 function equalTo(key: SortKey, value: unknown): SQL {
+	if (value instanceof AnchorBound)
+		return value.kind === "infinite" ? sql`${key.column} IS ${value.value}` : (eq(key.column, value.value) as SQL)
 	return value === null || value === undefined ? isNull(key.column) : (eq(key.column, value) as SQL)
+}
+
+/**
+ * Rows after an infinite bound, NULL or ±Infinity, in one comparison: the key and whether it is
+ * NULL as a row value, the flag first, so the bound is read once whichever it holds
+ */
+function afterInfinite(key: SortKey, bound: AnchorBound): SQL {
+	const nulls = effectiveNulls(key.direction, key.nulls)
+	/* NULLs are last ascending and first descending exactly when they flag 1 in the row's order */
+	const flag = sql.raw((nulls === "last") === (key.direction === "asc") ? "IS NULL" : "IS NOT NULL")
+	const op = sql.raw(key.direction === "asc" ? ">" : "<")
+	return sql`(${key.column} ${flag}, ${key.column}) ${op} (SELECT comb_bound ${flag}, comb_bound FROM (SELECT ${bound.value} AS comb_bound))`
 }
 
 /** Rows strictly after `value` on this key alone; null when none can be. */
 function after(key: SortKey, value: unknown): SQL | null {
+	if (value instanceof AnchorBound && value.kind === "infinite") return afterInfinite(key, value)
 	const nulls = effectiveNulls(key.direction, key.nulls)
 	if (value === null || value === undefined) {
 		/* At a null: non-null values come after only when nulls sort first. */
 		return nulls === "first" ? isNotNull(key.column) : null
 	}
-	const beyond = (key.direction === "asc" ? gt(key.column, value) : lt(key.column, value)) as SQL
+	const bound = value instanceof AnchorBound ? value.value : value
+	const beyond = (key.direction === "asc" ? gt(key.column, bound) : lt(key.column, bound)) as SQL
 	return nulls === "last" ? (or(beyond, isNull(key.column)) as SQL) : beyond
 }
 
-/**
- * Lexicographic "after this row" over every key plus the tiebreak:
- *
- *   (k1 after) OR (k1 = v1 AND k2 after) OR … OR (k1 = v1 AND … AND id after)
- *
- * Expanded rather than a row-value comparison because each key carries its own
- * direction and null placement.
- */
 /** Where a cursor points: the sort keys and the row's values for them, then the tiebreak and its id */
 type KeysetPosition = {
 	id: unknown
@@ -65,21 +100,48 @@ type KeysetPosition = {
 	values: readonly unknown[]
 }
 
-function keysetSQL({ id, keys, tiebreak, values }: KeysetPosition): SQL {
+const anyOf = (branches: readonly SQL[]): SQL =>
+	branches.length === 1 ? (branches[0] as SQL) : (or(...branches) as SQL)
+
+/**
+ * "After this row" over the keys from `start`, the earlier ones equal: flat, so each value repeats
+ * in every later branch, until a bound read from the row, where it nests so that bound is read twice
+ *
+ *   (k1 after) OR (k1 = v1 AND k2 after) OR (k1 = v1 AND k2 = v2 AND (k3 after OR (k3 = v3 AND …)))
+ */
+function afterFrom(position: KeysetPosition, start: number): SQL {
+	const { id, keys, tiebreak, values } = position
 	const branches: SQL[] = []
 	const prefix: SQL[] = []
-
-	keys.forEach((key, index) => {
+	const within = (step: SQL) => (prefix.length > 0 ? (and(...prefix, step) as SQL) : step)
+	for (let index = start; index < keys.length; index++) {
+		const key = keys[index] as SortKey
 		const value = values[index]
+		if (value instanceof AnchorBound) {
+			const rest = and(equalTo(key, value), afterFrom(position, index + 1)) as SQL
+			/* a bound read from the row is never a bare null, so some row can follow it */
+			branches.push(within(or(after(key, value) as SQL, rest) as SQL))
+			return anyOf(branches)
+		}
 		const step = after(key, value)
-		if (step) branches.push(prefix.length > 0 ? (and(...prefix, step) as SQL) : step)
+		if (step) branches.push(within(step))
 		prefix.push(equalTo(key, value))
-	})
-
-	const idAfter = (tiebreak.direction === "asc" ? gt(tiebreak.column, id) : lt(tiebreak.column, id)) as SQL
-	branches.push(prefix.length > 0 ? (and(...prefix, idAfter) as SQL) : idAfter)
-
-	return branches.length === 1 ? (branches[0] as SQL) : (or(...branches) as SQL)
+	}
+	branches.push(within((tiebreak.direction === "asc" ? gt(tiebreak.column, id) : lt(tiebreak.column, id)) as SQL))
+	return anyOf(branches)
 }
 
-export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak }
+/**
+ * Lexicographic "after this row" over every key plus the tiebreak, expanded rather than a row-value
+ * comparison because each key carries its own direction and null placement. A bound that `ends`
+ * must not be NULL, or no row is after it.
+ */
+function keysetSQL(position: KeysetPosition): SQL {
+	const guards = position.values.flatMap((value) =>
+		value instanceof AnchorBound && value.ends ? [isNotNull(value.value)] : [],
+	)
+	const seek = afterFrom(position, 0)
+	return guards.length > 0 ? (and(seek, ...guards) as SQL) : seek
+}
+
+export { AnchorBound, countLiteral, type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak }

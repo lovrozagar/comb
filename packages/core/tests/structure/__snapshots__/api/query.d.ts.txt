@@ -56,10 +56,15 @@ type DecodedCursor = {
     sort: string;
     values: CursorValue[];
 };
-/** A sort value carried by reference (cursor-ref.ts): the prefix of it that fit, the rest read from the row */
+/**
+ * A sort value carried by reference (cursor-ref.ts): the prefix of it that fit and the whole
+ * value's length, both in code points as SQLite's substr() and Postgres's left() count them; the
+ * rest is read from the row while it still has that prefix and length
+ */
 declare class CursorRef {
+    readonly length: number;
     readonly prefix: string;
-    constructor(prefix: string);
+    constructor(prefix: string, length: number);
 }
 /** What a sort key can hold and its database can compare, or a long one carried by reference */
 type CursorValue = bigint | boolean | CursorRef | Date | number | string | null;
@@ -440,20 +445,32 @@ export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, Fiel
  * A sort key too long for a cursor (R8). Any client can write a long title, and a cursor carries
  * every sort value, so the cursor at that row would pass MAX_CURSOR_LENGTH and the next page would
  * refuse it. Such a value is carried by reference instead: the cursor holds the row's id (it always
- * does) and the longest prefix of the value that fits, and the keyset reads the value from the row:
+ * does), the longest prefix of the value that fits and the value's length, both in code points, and
+ * the keyset reads the value from the row while the row still has that prefix and length:
  *
- *   COALESCE((SELECT key FROM t WHERE id = ?), fallback)
+ *   (SELECT CASE WHEN substr(t.key, 1, L) = p.v AND length(t.key) = N THEN t.key ELSE fallback END
+ *    FROM (SELECT ? AS v) AS p LEFT JOIN t ON t.id = ?)
  *
- * Exact while the row is there. Once it is deleted the fallback is the prefix itself ascending and
- * the prefix followed by U+10FFFF descending: under binary, NOCASE and C collation the first sorts
- * at or before the value and the second at or after it, so resuming there may repeat rows that
- * share the prefix and skips none. Postgres takes the fallback only on a C or POSIX collation; under
- * any other, neither bound is safe, and a deleted anchor ends the list. A derived list has no table
- * to read from, so its overflowing cursor is refused when it is minted.
+ * Exact while the row is there unchanged. An edit that keeps both the prefix and the length still
+ * moves the bound to the new value; any other edit, or a delete, resumes from the fallback: the
+ * prefix itself ascending and the prefix followed by U+10FFFF descending. Under binary, NOCASE and C
+ * collation the first sorts at or before the value and the second at or after it, so resuming
+ * there may repeat rows that share the prefix and skips none. Postgres takes the fallback only on a
+ * C or POSIX collation; under any other, neither bound is safe, the bound is NULL, and the list
+ * ends there. A derived list has no table to read from, so its overflowing cursor is refused when
+ * it is minted.
+ *
+ * D1 hands a REAL ±Infinity over as null (its transport is JSON), so a cursor minted from such a
+ * row carries null. On a SQLite number key a null is read back from the row, ±Infinity only:
+ *
+ *   (SELECT CASE WHEN t.key IN (9e999, -9e999) THEN t.key END FROM t WHERE t.id = ?)
+ *
+ * which is NULL whenever the row holds anything else or is gone, the null the cursor carried. A
+ * deleted ±Infinity anchor so resumes from the NULLs' place.
  */
 import { type SQL, type SQLWrapper } from "drizzle-orm";
 import type { CursorOptions } from "./cursor-seal.ts";
-import type { SortKey } from "./sqlite/keyset.ts";
+import { type SortKey } from "./sqlite/keyset.ts";
 import type { SortField } from "./types.ts";
 /** paginate's choice for an overflowing key: by reference on a table, refused on a derived list */
 type KeysetKind = "derived" | "table";
@@ -467,14 +484,19 @@ declare function mintWithin(row: Record<string, unknown>, sort: readonly SortFie
 }): string;
 /** `table` as a FROM item: its own name, with the alias a relational query gave it reapplied */
 declare function fromOf(table: object): SQL;
-/** A 500 when a list with no table to read from got a reference: paginate was not told the list is derived */
-declare function assertNoReference(values: readonly unknown[]): void;
-/** The cursor's values with each reference resolved against `table`, the row keyed `id` by `tiebreak` */
-declare function anchored(keys: readonly SortKey[], values: readonly unknown[], at: {
+/** Where the keyset reads the cursor's row: the table, the tiebreak column and the row's id */
+type Anchor = {
     id: unknown;
     table: object;
     tiebreak: SQLWrapper;
-}): unknown[];
+};
+/** A 500 when a list with no table to read from got a reference: paginate was not told the list is derived */
+declare function assertNoReference(values: readonly unknown[]): void;
+/**
+ * The cursor's values with each one the row must supply read from `table`, the row keyed `id` by
+ * `tiebreak`: a reference, and a null on a SQLite number key
+ */
+declare function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anchor): unknown[];
 export { anchored, assertNoReference, fromOf, type KeysetKind, mintWithin };
 
 // query/filter-parse.d.ts
@@ -831,14 +853,20 @@ type Tiebreak = {
 declare function orderSQL(key: SortKey): SQL;
 /** ORDER BY for the keys followed by the tiebreak, which makes the order total. */
 declare function orderByKeys(keys: readonly SortKey[], tiebreak: Tiebreak): SQL[];
+/** A count as a SQL literal, where a bound parameter would cost the D1 budget one */
+declare const countLiteral: (value: number) => SQL;
 /**
- * Lexicographic "after this row" over every key plus the tiebreak:
- *
- *   (k1 after) OR (k1 = v1 AND k2 after) OR … OR (k1 = v1 AND … AND id after)
- *
- * Expanded rather than a row-value comparison because each key carries its own
- * direction and null placement.
+ * A bound the keyset reads from the cursor's own row (cursor-ref.ts) rather than binds: a long text
+ * value carried by reference, or a SQLite number the cursor carried as null, which may be a
+ * ±Infinity D1 hands over as null. Each is SQL that binds, so the keyset reads it twice at most;
+ * `ends` when a NULL bound means no bound is safe, and the list ends there.
  */
+declare class AnchorBound {
+    readonly ends: boolean;
+    readonly kind: "infinite" | "text";
+    readonly value: SQL;
+    constructor(kind: "infinite" | "text", value: SQL, ends?: boolean);
+}
 /** Where a cursor points: the sort keys and the row's values for them, then the tiebreak and its id */
 type KeysetPosition = {
     id: unknown;
@@ -846,8 +874,13 @@ type KeysetPosition = {
     tiebreak: Tiebreak;
     values: readonly unknown[];
 };
-declare function keysetSQL({ id, keys, tiebreak, values }: KeysetPosition): SQL;
-export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak };
+/**
+ * Lexicographic "after this row" over every key plus the tiebreak, expanded rather than a row-value
+ * comparison because each key carries its own direction and null placement. A bound that `ends`
+ * must not be NULL, or no row is after it.
+ */
+declare function keysetSQL(position: KeysetPosition): SQL;
+export { AnchorBound, countLiteral, type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak };
 
 // codegen/analyzer-types.d.ts
 /**

@@ -3,6 +3,7 @@ import { CombError } from "../error.ts"
 import { decodeBase64Url, encodeBase64Url } from "./base64url.ts"
 import {
 	createCursor,
+	CursorRef,
 	cursorProblem,
 	effectiveNulls,
 	encodeCursor,
@@ -104,6 +105,13 @@ describe("cursor values JSON has no number for (R4)", () => {
 	it("opens no other name under the number tag", () => {
 		expect(decoded(wire({ i: 1, s: "", v: [{ $num: "infinity" }] }))).toBeNull()
 		expect(decoded(wire({ i: 1, s: "", v: [{ $num: 5 }] }))).toBeNull()
+	})
+
+	/* U2 of the 0.12 round: a reference carries its prefix and the whole value's length, in code points */
+	it("opens a reference only as a prefix and a length the prefix fits in, so a 0.12 reference restarts the list", () => {
+		expect(decoded(wire({ i: 1, s: "", v: [{ $ref: ["a𝟘", 2] }] }))?.values).toEqual([new CursorRef("a𝟘", 2)])
+		for (const ref of ["ab", ["ab"], ["ab", 2, 3], [5, 2], ["ab", 1.5], ["ab", 2 ** 53], ["a𝟘b", 2]])
+			expect(decoded(wire({ i: 1, s: "", v: [{ $ref: ref }] }))).toBeNull()
 	})
 
 	it("mints no cursor from a Date no JS Date holds, which would mean null: a 500 on that page", () => {
