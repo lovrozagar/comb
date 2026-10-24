@@ -157,3 +157,16 @@ describe("classifyMigration on a backfill of something that held data", () => {
 		expect(read.unsafeStatements.join("\n")).toContain("its copy is changed before the rename")
 	})
 })
+
+/* M74 of the 0.13.0 review: a renamed schema's tables keep the triggers the history put on them */
+describe("classifyMigration on a write to a table whose schema the history renamed", () => {
+	it("rates an insert unsafe for the trigger it fires under the new name", () => {
+		const before = extractSchema(
+			"CREATE SCHEMA app;\nCREATE TABLE app.users (id int);\nCREATE FUNCTION public.wipe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM victim; RETURN NEW; END $$;\nCREATE TRIGGER t AFTER INSERT ON app.users FOR EACH ROW EXECUTE FUNCTION public.wipe();\nALTER SCHEMA app RENAME TO app2;",
+			undefined,
+			"postgres",
+		)
+		const rated = classifyMigration("INSERT INTO app2.users VALUES (1);", { before, dialect: "postgres" })
+		expect(rated.safety).toBe("unsafe")
+	})
+})

@@ -23,6 +23,42 @@ function moveTable(facts: Facts, from: string, to: string): void {
 	for (const parents of facts.parents.values()) for (const each of parents) if (each.parent === from) each.parent = to
 }
 
+/** A key moved from schema `from` to schema `to` (public's keys are unqualified); undefined when it is not under `from` */
+function movedKey(key: string, from: string, to: string): string | undefined {
+	const parts = key.split(".")
+	const under = from === "public" ? parts.length === 1 : parts.length > 1 && parts[0] === from
+	return under ? keyOf([to, ...(from === "public" ? parts : parts.slice(1))]) : undefined
+}
+
+/**
+ * A schema renamed: every table, type, operator and routine named under it moves with it, keys and
+ * references alike, and a routine keeps the key it had beside its new one (M74)
+ */
+function moveSchema(facts: Facts, from: string, to: string): void {
+	const move = (key: string) => movedKey(key, from, to) ?? key
+	const maps = [
+		facts.casts,
+		facts.code,
+		facts.columnTypes,
+		facts.domains,
+		facts.operators,
+		facts.parents,
+		facts.triggers,
+	]
+	for (const map of maps as Array<Map<string, unknown>>) {
+		/* a snapshot: the loop moves the entries it reads */
+		for (const [key, value] of Array.from(map)) {
+			if (move(key) === key) continue
+			map.delete(key)
+			map.set(move(key), value)
+		}
+	}
+	for (const parents of facts.parents.values()) for (const each of parents) each.parent = move(each.parent)
+	for (const cast of facts.casts.values()) cast.fn = move(cast.fn)
+	for (const map of [facts.domains, facts.operators]) for (const [key, fn] of map) map.set(key, move(fn))
+	for (const key of Array.from(facts.defined)) facts.defined.add(move(key))
+}
+
 /** A trigger made, renamed or dropped */
 function followTrigger(type: string, node: Node, facts: Facts): void {
 	if (type === "CreateTrigStmt") {
@@ -53,10 +89,12 @@ const ROUTINES = /* @__PURE__ */ new Set(["OBJECT_AGGREGATE", "OBJECT_FUNCTION",
 /** A routine's name parts from an ObjectWithArgs */
 const routineOf = (object: unknown): string[] => names(((object as Node)["ObjectWithArgs"] as Node)["objname"])
 
-/** A table or routine renamed or moved to another schema: the table's facts follow it; the routine gains the name */
+/** A schema renamed, or a table or routine renamed or moved to another schema: the table's facts follow it; the routine gains the name */
 function followName(type: string, node: Node, facts: Facts): void {
 	const kind = String(node[type === "RenameStmt" ? "renameType" : "objectType"])
-	if (kind === "OBJECT_TABLE") {
+	if (kind === "OBJECT_SCHEMA" && type === "RenameStmt")
+		moveSchema(facts, String(node["subname"]), String(node["newname"]))
+	else if (kind === "OBJECT_TABLE") {
 		const rel = node["relation"] as { relname: string; schemaname?: string }
 		const to =
 			type === "RenameStmt"
