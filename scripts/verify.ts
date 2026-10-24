@@ -13,8 +13,13 @@ export type Gate = { name: string; command: readonly string[] }
 
 const BASE = ["fmt:check", "lint", "typecheck", "test"]
 
+// A repo whose gates name `test:coverage` runs it in the base `test`'s place: the same suite with its thresholds,
+// as its CI runs it, so the stamp covers what CI checks and the suite runs once.
 export function gates(extra: readonly string[]): Gate[] {
-	return [...BASE, ...extra].map((name) => ({ name, command: ["bun", "run", name] }))
+	const coverage = extra.includes("test:coverage")
+	const base = coverage ? BASE.map((name) => (name === "test" ? "test:coverage" : name)) : BASE
+	const rest = coverage ? extra.filter((name) => name !== "test:coverage") : extra
+	return [...base, ...rest].map((name) => ({ name, command: ["bun", "run", name] }))
 }
 
 export type VerifyDeps = {

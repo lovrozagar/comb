@@ -10,7 +10,7 @@ Every change starts with a test: a bug, a reported issue, a review finding, a fe
 
 ## Every gate passes before moving on
 
-`bun run verify` runs every gate in order, stops at the first failure, and stamps the commit when all pass. For comb: `fmt:check`, `lint`, `typecheck`, `test`, then:
+`bun run verify` runs every gate in order, stops at the first failure, and stamps the commit when all pass. For comb: `fmt:check`, `lint`, `typecheck`, `test:coverage`, then:
 - `typecheck:strict`
 - `test:bun`
 - `test:e2e`

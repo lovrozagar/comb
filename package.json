@@ -86,6 +86,7 @@
 	"standards": {
 		"repo": "comb",
 		"gates": [
+			"test:coverage",
 			"typecheck:strict",
 			"test:bun",
 			"test:e2e",
