@@ -132,7 +132,10 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 		immutable,
 		kind: "entity",
 		name: table.sqlName,
-		softDelete: table.timestamps.names.deletedAt,
+		/* a private name never reaches the document (docs/meta-contract.md §8) */
+		softDelete: published.some((f) => f.name === table.timestamps.names.deletedAt)
+			? table.timestamps.names.deletedAt
+			: null,
 		states: statesOf(table),
 		tenantColumn: tenantColumnOf(table),
 		uniqueIndexes: publishedUniqueIndexes(table),

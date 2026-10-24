@@ -1,5 +1,4 @@
 /** The Zod expression one column gets in each of the read, readPartial, create and update DTOs. */
-import { isReference } from "../../analyze-field.ts"
 import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { FieldConstraints } from "../../annotations.ts"
 import { isGenerated } from "../../entity-meta.ts"
@@ -28,34 +27,36 @@ function enumBase({ field }: Build): Built {
 	return field.enumValues === null ? undefined : `z.enum(${JSON.stringify(field.enumValues)})`
 }
 
-/* jsonb refuses U+0000 anywhere in a value: with every escaped backslash taken out of its JSON, a \u0000 left is one */
+/* no engine stores U+0000 or a lone UTF-16 surrogate as sent: jsonb refuses both, Postgres text
+ * refuses U+0000 and turns a surrogate into U+FFFD, libsql cuts at U+0000 and bun:sqlite reads both
+ * back as other text (F11). With every escaped
+ * backslash taken out of its JSON, a \u0000 left is the one, and a \ud800-\udfff escape a lone
+ * surrogate, as JSON.stringify writes a pair as it is */
 const JSON_NUL_CHECK =
-	'.refine((val) => !JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "").includes("\\\\u0000"), { message: "Must not contain U+0000" })'
+	'.refine((val) => !/\\\\u(?:0000|d[89a-f])/i.test(JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "")), { message: "Must not contain U+0000 or an unpaired surrogate" })'
 
 /* a c.json column is its schema, which the runtime reader found exported; a plain json column any JSON value */
-function jsonBase({ annotations, dialect, field, schemaType }: Build): Built {
+function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const schema = field.combKind === "json" ? field.jsonSchemaName : field.dataType === "object json" ? "z.json()" : null
 	if (schema === null) return undefined
 	if (!isMutative(schemaType)) return schema
-	const nul = dialect === "postgres" ? JSON_NUL_CHECK : ""
 	const limit = annotations.maxBytes
 	const size =
 		limit === null
 			? ""
 			: `.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
-	return `${schema}${size}${nul}${jsonRules(limit, nul !== "")}`
+	return `${schema}${size}${JSON_NUL_CHECK}${jsonRules(limit)}`
 }
 
 /**
  * The refines' rules as the schema's meta, which JSON Schema publishes (a refine it cannot): the
  * byte limit as `x-comb-maxBytes`, and both in the description a client reads (F26)
  */
-function jsonRules(limit: number | null, noNul: boolean): string {
+function jsonRules(limit: number | null): string {
 	const rules = [
 		...(limit === null ? [] : [`At most ${limit} bytes when serialized as JSON`]),
-		...(noNul ? ["must not contain U+0000"] : []),
+		"must not contain U+0000 or an unpaired surrogate",
 	]
-	if (rules.length === 0) return ""
 	const description = rules.join("; ")
 	const text = JSON.stringify(`${description.charAt(0).toUpperCase()}${description.slice(1)}`)
 	return `.meta({ description: ${text}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
@@ -77,21 +78,17 @@ const NUMBER_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set([
 const isNumeric = (field: FieldMeta) =>
 	field.combKind === null ? field.dataType.startsWith("number") : NUMBER_KINDS.has(field.combKind)
 
-/* a numeric reference takes the number rules and a c.text one its own text rules, its declared
- * bounds included; a c.ref, which points at a c.id key, the id string. Whether it enters the update
- * body is generate.ts's (isExcludedFromUpdate) */
-function foreignKeyBase({ field }: Build): Built {
-	if (!isReference(field)) return undefined
-	if (isNumeric(field) || field.combKind === "text" || field.combKind === "id") return undefined
-	return "z.string().min(1).max(48)"
-}
-
 /* a format bounds what is written; what is read back is whatever the column holds: a password's
  * stored hash, an email or URL a migration or an older rule stored (F12). A written email takes
  * textBase's own normalize-then-check path */
 function stringKind(annotations: FieldConstraints, mutative: boolean): string {
 	if (!mutative) return "z.string()"
-	if (annotations.password) return "z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)"
+	/* its own rule, printable ASCII within bcrypt's 72 bytes, under the bounds it declares (F9) */
+	if (annotations.password) {
+		const min = annotations.min ?? 8
+		const max = Math.min(annotations.max ?? 72, 72)
+		return `z.string().min(${min}).max(${max}).regex(/^[\\x20-\\x7E]+$/)`
+	}
 	return annotations.url ? "z.url()" : "z.string()"
 }
 
@@ -108,8 +105,10 @@ function maxOf(annotations: FieldConstraints, field: FieldMeta): string {
 	return field.length === null ? "" : `.max(${field.length})`
 }
 
-function emailBounds(annotations: FieldConstraints, field: FieldMeta): string {
-	return (annotations.min === null ? "" : `.min(${annotations.min})`) + maxOf(annotations, field)
+/** An email's bounds, and on a write the pattern it declares, checked after the format (F9) */
+function emailBounds(annotations: FieldConstraints, field: FieldMeta, mutative: boolean): string {
+	const pattern = mutative && annotations.pattern !== null ? `.regex(${annotations.pattern})` : ""
+	return (annotations.min === null ? "" : `.min(${annotations.min})`) + maxOf(annotations, field) + pattern
 }
 
 /* a required text column takes no empty string on create or update */
@@ -130,27 +129,30 @@ function kindChecks(annotations: FieldConstraints): string {
 	return name + image
 }
 
-function textBounds({ annotations, dialect, field, schemaType }: Build): string {
-	if (annotations.password) return ""
-	if (annotations.email) return emailBounds(annotations, field)
+function textBounds({ annotations, field, schemaType }: Build): string {
 	const mutative = isMutative(schemaType)
-	/* a key and a reference to one take the id rules, never a column by its name (F10) */
+	if (annotations.password) return mutative && annotations.pattern !== null ? `.regex(${annotations.pattern})` : ""
+	if (annotations.email) return emailBounds(annotations, field, mutative)
+	/* a key and a reference to one take the id rules, never a column by its name (F10); any other
+	 * reference, a c.ref to a natural key included, its own text rules (F9) */
 	const isIdField = field.combKind === "id" || field.foreignKey?.toId === true
 	/* an id-like column gets the id bounds only when it declares none of its own */
 	const declares = field.length !== null || annotations.min !== null || annotations.max !== null
 	if (isIdField && !declares) return mutative ? ".regex(/^\\S{1,48}$/)" : ".min(1).max(48)"
 	const min = minOf(annotations, field, schemaType)
-	return min + maxOf(annotations, field) + (mutative ? writeChecks(annotations, dialect) : "")
+	return min + maxOf(annotations, field) + (mutative ? writeChecks(annotations) : "")
 }
 
 /**
  * The checks only a written value takes: its pattern, https, a name's characters, an image URI's
- * scheme, and on Postgres no U+0000, which its text refuses (22021): a 400 here, not a 500 there
+ * scheme, and no U+0000 or lone surrogate, which no engine stores as sent (F11): a 400 here, not a
+ * 500 or another value there
  */
-function writeChecks(annotations: FieldConstraints, dialect: Build["dialect"]): string {
+function writeChecks(annotations: FieldConstraints): string {
 	const pattern = annotations.pattern === null ? "" : `.regex(${annotations.pattern})`
 	const https = annotations.url ? `.regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" })` : ""
-	const nul = dialect === "postgres" ? '.regex(/^[^\\u0000]*$/, { message: "Must not contain U+0000" })' : ""
+	/* under u, a lone surrogate is a code point of the range, a pair one code point past it (F11) */
+	const nul = '.regex(/^[^\\u0000\\uD800-\\uDFFF]*$/u, { message: "Must not contain U+0000 or an unpaired surrogate" })'
 	return pattern + https + kindChecks(annotations) + nul
 }
 
@@ -199,7 +201,7 @@ function numberBase({ annotations, dialect, field }: Build): Built {
 	return `z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`
 }
 
-const BUILDERS = [enumBase, jsonBase, foreignKeyBase, numberBase]
+const BUILDERS = [enumBase, jsonBase, numberBase]
 
 /* SQLite fills an INTEGER PRIMARY KEY, the rowid's alias, when a create body leaves it out */
 const isRowid = (field: FieldMeta, dialect: Build["dialect"]) =>

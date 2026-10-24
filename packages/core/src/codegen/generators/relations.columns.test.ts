@@ -157,3 +157,13 @@ export const profile = sqliteTable("profile", { id: text("id").primaryKey(), use
 		expect(content).not.toContain("profiles:")
 	})
 })
+
+/* the 0.12 review's F15: the Relation suffix made a name another relation already held */
+describe("generateRelations: a name the Relation suffix takes (F15)", () => {
+	it("fails codegen naming both keys, rather than write one relation twice", () => {
+		expect(() =>
+			relationsOf(`export const user = sqliteTable("user", { id: text("id").primaryKey() })
+export const post = sqliteTable("post", { id: text("id").primaryKey(), author: text("author"), authorId: text("author_id").references(() => user.id), authorRelationId: text("author_relation_id").references(() => user.id) })`),
+		).toThrow("post: the relations of post.authorId and post.authorRelationId both take the name authorRelation")
+	})
+})

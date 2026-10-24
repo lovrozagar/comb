@@ -1,10 +1,23 @@
+import { pgTable } from "drizzle-orm/pg-core"
 import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { parseField } from "../../__fixtures__/runtime.ts"
+import { c as pgC } from "../../../pg/columns.ts"
 import { c } from "../../../sqlite/columns.ts"
 import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { SchemaType } from "./dto-types.ts"
-import { generateFieldSchema } from "./field-schema.ts"
+import { generateFieldSchema as generated } from "./field-schema.ts"
+
+/* every written text and JSON field ends with the F11 rule; the tests below read the other rules, and
+ * "the rule no engine stores" reads this one */
+const TEXT_RULE =
+	'.regex(/^[^\\u0000\\uD800-\\uDFFF]*$/u, { message: "Must not contain U+0000 or an unpaired surrogate" })'
+const JSON_RULE =
+	'.refine((val) => !/\\\\u(?:0000|d[89a-f])/i.test(JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "")), { message: "Must not contain U+0000 or an unpaired surrogate" })'
+const generateFieldSchema = (...args: Parameters<typeof generated>) =>
+	generated(...args)
+		?.replace(TEXT_RULE, "")
+		.replace(JSON_RULE, "") ?? null
 
 const imports = (): ImportsMeta => ({
 	enumImports: new Map(),
@@ -64,9 +77,9 @@ describe("generateFieldSchema: what each schema type includes", () => {
 	})
 
 	/* whether a reference enters the update DTO is isExcludedFromUpdate's (entity-meta.ts); this renders its rules */
-	it("renders a reference's rules for every schema type", () => {
-		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBe("z.string().min(1).max(48).nullable().optional()")
-		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe("z.string().min(1).max(48).nullable().optional()")
+	it("renders a reference's rules for every schema type: a c.ref that names no c.id key, its own text rules (F9)", () => {
+		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBe("z.string().nullable().optional()")
+		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe("z.string().nullable().optional()")
 	})
 })
 
@@ -284,18 +297,19 @@ describe("generateFieldSchema: a key on create, by what fills it (F6)", () => {
 })
 
 describe("generateFieldSchema: a JSON column's rules, published (F26)", () => {
-	it("names the byte limit and, on Postgres, the U+0000 rule in the schema's meta", () => {
+	it("names the byte limit and the U+0000 and surrogate rule in the schema's meta, on either dialect", () => {
 		const blob = fieldOf("b", 'c.json("b", blobSchema, { maxBytes: 20 })', { jsonSchemaName: "blobSchema" })
 		const pg = generateFieldSchema(blob, "create", { dialect: "postgres", imports: imports() })
 		expect(pg).toContain(
-			'.meta({ description: "At most 20 bytes when serialized as JSON; must not contain U+0000", "x-comb-maxBytes": 20 })',
+			'.meta({ description: "At most 20 bytes when serialized as JSON; must not contain U+0000 or an unpaired surrogate", "x-comb-maxBytes": 20 })',
 		)
 		const plain = fieldOf("b", 'c.json("b", blobSchema)', { jsonSchemaName: "blobSchema" })
 		expect(generateFieldSchema(plain, "create", { dialect: "postgres", imports: imports() })).toContain(
-			'.meta({ description: "Must not contain U+0000" })',
+			'.meta({ description: "Must not contain U+0000 or an unpaired surrogate" })',
 		)
+		/* on SQLite too, which stores neither as sent (F11) */
 		expect(generateFieldSchema(plain, "create", { dialect: "sqlite", imports: imports() })).toBe(
-			"blobSchema.nullable().optional()",
+			'blobSchema.meta({ description: "Must not contain U+0000 or an unpaired surrogate" }).nullable().optional()',
 		)
 	})
 })
@@ -316,5 +330,63 @@ describe("generateFieldSchema: a plain drizzle column, typed from its data type 
 		)
 		expect(pg('boolean("n").notNull()')).toBe("z.boolean()")
 		expect(pg('doublePrecision("n").notNull()')).toBe("z.number()")
+	})
+})
+
+/* the 0.12 review's F9: a column kind that read its declared constraints and dropped them */
+describe("generateFieldSchema: what a reference, a password and an email declare (F9)", () => {
+	const keyed = {
+		country: sqliteTable("country", { code: c.text("code", { max: 64 }).primaryKey() }),
+		user: sqliteTable("user", { id: c.id("usr") }),
+	}
+	const of = (name: string, raw: string, type: SchemaType) =>
+		generateFieldSchema(parseField(name, raw, { scope: keyed }), type, { imports: imports() })
+
+	it("gives a c.ref to a natural key its own text rules, and the id rules only to a c.id key", () => {
+		const country =
+			'c.ref("country_code", { max: 64, pattern: "/^[A-Z-]+$/" }).notNull().references(() => country.code)'
+		expect(of("countryCode", country, "create")).toBe("z.string().min(1).max(64).regex(/^[A-Z-]+$/)")
+		expect(of("countryCode", country, "read")).toBe("z.string().max(64)")
+		expect(of("ownerId", 'c.ref("owner_id").notNull().references(() => user.id)', "create")).toBe(
+			"z.string().regex(/^\\S{1,48}$/)",
+		)
+	})
+
+	it("refuses U+0000 in a Postgres c.ref, as in its text", () => {
+		const pgKeyed = { country: pgTable("country", { code: pgC.text("code").primaryKey() }) }
+		const field = parseField("countryCode", 'c.ref("country_code").notNull().references(() => country.code)', {
+			dialect: "postgres",
+			scope: pgKeyed,
+		})
+		expect(generated(field, "create", { dialect: "postgres", imports: imports() })).toContain(TEXT_RULE)
+	})
+
+	it("applies a password's declared bounds and pattern on top of its own rule, and an email's pattern after the format", () => {
+		expect(of("pw", 'c.text("pw", { password: true, min: 12, pattern: "/\\\\d/" }).notNull()', "create")).toBe(
+			"z.string().min(12).max(72).regex(/^[\\x20-\\x7E]+$/).regex(/\\d/)",
+		)
+		expect(of("pw", 'c.text("pw", { password: true, max: 200 }).notNull()', "create")).toBe(
+			"z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)",
+		)
+		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "create")).toBe(
+			/* a pattern decides what the value looks like, so it gets no example (F18) */
+			"z.string().trim().toLowerCase().check(z.email()).regex(/@corp\\.io$/)",
+		)
+		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "read")).toBe("z.string()")
+	})
+})
+
+/* the 0.12 review's F11: no engine stores U+0000 or a lone surrogate as sent */
+describe("generateFieldSchema: the rule no engine stores", () => {
+	it("ends every written text and JSON field, on both dialects, and no read one", () => {
+		for (const dialect of ["sqlite", "postgres"] as const) {
+			const textField = parseField("n", 'c.text("n")', { dialect })
+			expect(generated(textField, "create", { dialect, imports: imports() })).toBe(
+				`z.string()${TEXT_RULE}.meta(_m.string).nullable().optional()`,
+			)
+			expect(generated(textField, "read", { dialect, imports: imports() })).not.toContain(TEXT_RULE)
+			const json = { ...parseField("b", 'c.json("b", blobSchema)', { dialect }), jsonSchemaName: "blobSchema" }
+			expect(generated(json, "update", { dialect, imports: imports() })).toContain(JSON_RULE)
+		}
 	})
 })

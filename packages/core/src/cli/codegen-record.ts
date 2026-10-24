@@ -69,9 +69,9 @@ export function commitRuns(
 	runs: readonly Run[],
 	{ declared, recordDir }: { declared?: readonly string[] | undefined; recordDir: string },
 ): void {
-	refuseShared(runs, recordDir)
 	const recordPath = path.join(recordDir, RECORD)
 	const record = readRecord(recordPath)
+	refuseShared(runs, { record, recordDir })
 	const before: string[] = []
 	const now = new Set<string>()
 	for (const run of runs) {
@@ -93,13 +93,46 @@ export function commitRuns(
 	record.databases = Object.fromEntries(Object.entries(record.databases).sort(([a], [b]) => a.localeCompare(b)))
 	writeGenJsonFile(recordPath, record, { generator: "comb", staged })
 	commitStaged(staged)
-	for (const file of before.filter((each) => !now.has(each))) removeStale(file, recordDir)
+	/* a file another database's entry lists is that database's, whatever this one's last run wrote (F20) */
+	const others = new Set(
+		Object.entries(record.databases)
+			.filter(([name]) => !runs.some((each) => each.name === name))
+			.flatMap(([, files]) => files.map((file) => path.resolve(recordDir, file))),
+	)
+	for (const file of before.filter((each) => !now.has(each) && !others.has(each))) removeStale(file, recordDir)
 	for (const run of runs) fs.rmSync(legacyRecord(run.root, run.prefix), { force: true })
 }
 
-/** A path two databases wrote: neither may own it, as the second would replace the first's tables */
-function refuseShared(runs: readonly Run[], recordDir: string): void {
+type Claim = { cwd: string; generator: string; last: Staged; run: string; staged: Staged }
+
+/**
+ * Record the generated files `generator` staged as its own; one another generator of the database
+ * staged is configured onto one path, and the second would replace the first (F21)
+ */
+export function claim(owners: Map<string, string>, { cwd, generator, last, run, staged }: Claim): void {
+	for (const [file, content] of staged) {
+		if (last.get(file) === content || !isGeneratedContent(content)) continue
+		const first = owners.get(file)
+		/* each generator runs once, so a path already claimed is another generator's */
+		if (first !== undefined)
+			throw new Error(
+				`generators ${first} and ${generator} of ${run} both write ${path.relative(cwd, file)}; give each its own output`,
+			)
+		owners.set(file, generator)
+	}
+}
+
+/**
+ * A path two databases write: neither may own it, as the second would replace the first's files.
+ * That is two databases of this run, or one of this run and one whose record entry lists the path,
+ * which a run that names only some databases would otherwise overwrite (F21)
+ */
+function refuseShared(runs: readonly Run[], { record, recordDir }: { record: RunRecord; recordDir: string }): void {
 	const owner = new Map<string, string>()
+	for (const [name, files] of Object.entries(record.databases)) {
+		if (runs.some((each) => each.name === name)) continue
+		for (const file of files) owner.set(path.resolve(recordDir, file), name)
+	}
 	for (const run of runs) {
 		for (const file of run.wrote) {
 			const first = owner.get(file)

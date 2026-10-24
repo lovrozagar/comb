@@ -135,3 +135,45 @@ describe("commitRuns: the record's own form (F30, F32)", () => {
 		)
 	})
 })
+
+/* the 0.12 review's F20 and F21: a run of some databases against what another database's record lists */
+/** The manifest path two databases are given in the F20 and F21 cases */
+const manifestOf = (dir: string) => path.join(dir, "src/shared/manifest.gen.json")
+
+describe("commitRuns: a path another database's record lists (F20, F21)", () => {
+	const json = `${JSON.stringify({ _generated: "comb checksum:x" })}\n`
+
+	it("refuses a run that writes a path another database's record lists, naming both, and writes nothing", () => {
+		const dir = dirWith({})
+		const manifest = manifestOf(dir)
+		commitRuns(new Map([[manifest, json]]), [run(dir, { name: "aux", wrote: [manifest] })], { recordDir: dir })
+		const rows = path.join(dir, "src/db/db.core.rows.gen.ts")
+		expect(() =>
+			commitRuns(
+				new Map([
+					[manifest, json],
+					[rows, GENERATED],
+				]),
+				[run(dir, { wrote: [manifest, rows] })],
+				{ recordDir: dir },
+			),
+		).toThrow("databases aux and core both write src/shared/manifest.gen.json; give each its own filePrefix or output")
+		expect(fs.existsSync(rows)).toBe(false)
+	})
+
+	it("deletes no file another database's record lists, even one this database's last run wrote", () => {
+		const dir = dirWith({})
+		const manifest = manifestOf(dir)
+		/* a record two databases list, as one written before the refusal above could be */
+		fs.mkdirSync(path.dirname(manifest), { recursive: true })
+		fs.writeFileSync(manifest, json)
+		const both = { aux: ["src/shared/manifest.gen.json"], core: ["src/shared/manifest.gen.json"] }
+		fs.writeFileSync(
+			path.join(dir, ".comb.codegen.json"),
+			JSON.stringify({ _generated: "comb checksum:x", databases: both }),
+		)
+		commitRuns(new Map(), [run(dir)], { recordDir: dir })
+		expect(fs.existsSync(manifest)).toBe(true)
+		expect(record(dir).databases).toEqual({ aux: ["src/shared/manifest.gen.json"], core: [] })
+	})
+})

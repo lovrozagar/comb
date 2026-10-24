@@ -109,7 +109,7 @@ describe("deriveEntityMeta: identity", () => {
 			tenantColumn: "org_id",
 		})
 		const camel = table(
-			{ id: 'c.id("itm")' },
+			{ deletedAt: 'c.deletedAt("deleted_at")', id: 'c.id("itm")' },
 			{
 				timestamps: {
 					createdAt: false,
@@ -121,6 +121,12 @@ describe("deriveEntityMeta: identity", () => {
 			},
 		)
 		expect(deriveEntityMeta(camel)?.softDelete).toBe("deletedAt")
+		/* a private tombstone is no published name (F10) */
+		const hidden = table(
+			{ deletedAt: 'c.deletedAt("deleted_at", { private: true })', id: 'c.id("itm")' },
+			{ timestamps: camel.timestamps },
+		)
+		expect(deriveEntityMeta(hidden)?.softDelete).toBeNull()
 	})
 })
 

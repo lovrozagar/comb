@@ -10,7 +10,7 @@ describe("patternLiteral: a pattern comb can emit and publish (F5, F6)", () => {
 		/* the engine's own source, which a regex in the tables file publishes as: a slash in a class stays */
 		expect(patternLiteral("/^[A-Za-z_/]+$/", "x")).toBe("/^[A-Za-z_/]+$/")
 		expect(patternLiteral("/[^/]/b/", "x")).toBe(String.raw`/[^/]\/b/`)
-		for (const pattern of ["/^a+$/", "/^a/b$/", "/^a\nb$/", '/^[^"]+$/v'])
+		for (const pattern of ["/^a+$/", "/^a/b$/", "/^a\nb$/", '/^[^"]+$/u'])
 			expect(() => new Function(`return ${patternLiteral(pattern, "x")}`)()).not.toThrow()
 	})
 
@@ -21,13 +21,16 @@ describe("patternLiteral: a pattern comb can emit and publish (F5, F6)", () => {
 			)
 	})
 
-	it("refuses every flag JSON Schema cannot publish, and takes u and v", () => {
-		for (const flag of ["i", "m", "s", "g", "y", "d"])
+	it("refuses every flag JSON Schema cannot publish, and takes u alone", () => {
+		/* JSON Schema compiles a pattern under u, as Ajv does: a v source (set subtraction) does not compile there (F5) */
+		for (const flag of ["i", "m", "s", "g", "y", "d", "v"])
 			expect(() => patternLiteral(`/^a$/${flag}`, "t.code")).toThrow(
 				/takes the flag .*, which JSON Schema cannot publish/,
 			)
 		expect(patternLiteral("/^a$/u", "x")).toBe("/^a$/u")
-		expect(patternLiteral("/^a$/v", "x")).toBe("/^a$/v")
+		expect(() => patternLiteral("/^[\\p{L}--[a-z]]+$/v", "t.name")).toThrow(
+			"t.name: pattern /^[\\p{L}--[a-z]]+$/v takes the flag v, which JSON Schema cannot publish",
+		)
 	})
 
 	it("refuses a source the engine cannot compile, with the engine's message", () => {

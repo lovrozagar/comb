@@ -53,12 +53,18 @@ function detectTimestamps(fields: FieldMeta[]): TimestampsMeta {
 	const declared = Object.values(names).filter((name) => name !== null)
 	const snake = declared.filter((name) => name.includes("_")).length
 	const style = snake === 0 ? "camelCase" : snake === declared.length ? "snake_case" : "mixed"
+	/* the shared spread takes a column only when its own read schema is the spread's (F10): comb's
+	 * helper of that name, read back, NOT NULL but for deletedAt; any other is its own field */
+	const spread = (key: keyof TimestampsMeta["names"]) => {
+		const field = fields.find((each) => each.name === names[key])
+		return field?.combKind === key && !field.constraints.private && field.isNotNull === (key !== "deletedAt")
+	}
 	return {
-		createdAt: names.createdAt !== null,
-		deletedAt: names.deletedAt !== null,
+		createdAt: spread("createdAt"),
+		deletedAt: spread("deletedAt"),
 		names,
 		style,
-		updatedAt: names.updatedAt !== null,
+		updatedAt: spread("updatedAt"),
 	}
 }
 

@@ -150,3 +150,19 @@ throw new Error("not import-safe")
 		expect(exportsOf(dir)).toBeUndefined()
 	}, 120_000)
 })
+
+/* the 0.12 review's F21: two generators of one database configured onto one path */
+describe("two generators writing one path (F21)", () => {
+	it("fails, naming both generators and the path, and writes nothing", async () => {
+		const dir = project({
+			"comb.config.ts": `export default { databases: { core: { tables: "./src/db/db.core.tables.ts", output: { rows: "./src/gen/db.gen.ts", constraints: "./src/gen/db.gen.ts" } } } }\n`,
+			"src/db/db.core.tables.ts": SQLITE,
+		})
+		const run = await runCodegen(dir)
+		expect(run.code).not.toBe(0)
+		expect(run.err).toMatch(
+			/generators (?:rows and constraints|constraints and rows) of core both write src\/gen\/db\.gen\.ts/,
+		)
+		expect(generatedFiles(dir)).toEqual([])
+	}, 120_000)
+})

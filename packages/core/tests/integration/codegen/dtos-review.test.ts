@@ -107,13 +107,19 @@ describe("bounds, URL rules and examples (F15, F16, F18)", () => {
 
 	it("publish the image URI and https rules as patterns, so the JSON Schema refuses what the server does (F16)", () => {
 		const json = z.toJSONSchema(dtos["account"]?.["accountDtoCreateSchema"] as z.ZodObject, { io: "input" }) as {
-			properties: Record<string, { anyOf?: Array<{ pattern?: string }>; pattern?: string }>
+			properties: Record<string, unknown>
 		}
-		const pattern = (name: string) =>
-			json.properties[name]?.pattern ?? json.properties[name]?.anyOf?.find((each) => each.pattern)?.pattern
-		expect(new RegExp(pattern("avatar") as string).test("ftp://x")).toBe(false)
-		expect(new RegExp(pattern("avatar") as string).test("data:image/png;base64,x")).toBe(true)
-		expect(new RegExp(pattern("site") as string).test("http://x.com")).toBe(false)
+		/* every pattern a property publishes, at any depth: a client's validator applies them all */
+		const patterns = (node: unknown): string[] =>
+			typeof node !== "object" || node === null
+				? []
+				: Object.entries(node).flatMap(([key, value]) => (key === "pattern" ? [value as string] : patterns(value)))
+		const accepted = (name: string, value: string) =>
+			patterns(json.properties[name]).every((pattern) => new RegExp(pattern, "u").test(value))
+		expect(accepted("avatar", "ftp://x")).toBe(false)
+		expect(accepted("avatar", "data:image/png;base64,x")).toBe(true)
+		expect(accepted("site", "http://x.com")).toBe(false)
+		expect(accepted("site", "https://x.com")).toBe(true)
 	})
 
 	it("give examples the field's own rules accept, and none where a pattern decides (F18)", () => {

@@ -86,16 +86,18 @@ const isUnique = (table: TableMeta, field: TableMeta["fields"][number]) =>
  * naming both keys
  */
 function settle(table: string, named: Array<Named & { target: { name: string } }>, columns: ReadonlySet<string>): void {
+	/* checked on the names written, the Relation suffix applied, which another relation may hold (F15) */
 	const first = new Map<string, string>()
-	for (const { name, place } of named) {
+	for (const each of named) {
+		const name = columns.has(each.name) ? `${each.name}Relation` : each.name
 		const other = first.get(name)
 		if (other !== undefined)
 			throw new Error(
-				`${table}: the relations of ${other} and ${place} both take the name ${name}; rename one key's column`,
+				`${table}: the relations of ${other} and ${each.place} both take the name ${name}; rename one key's column`,
 			)
-		first.set(name, place)
+		first.set(name, each.place)
+		each.target.name = name
 	}
-	for (const each of named) each.target.name = columns.has(each.name) ? `${each.name}Relation` : each.name
 }
 
 /** r.one on each FK's own table, r.many (or r.one, for a unique key) on the table it references */

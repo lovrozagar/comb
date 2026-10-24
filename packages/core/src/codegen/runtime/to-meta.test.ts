@@ -49,10 +49,12 @@ describe("toAnalysis", () => {
 
 describe("toAnalysis: timestamps and what fills them", () => {
 	it("detects timestamps by name on epoch columns only, and their casing", () => {
+		/* a plain integer is named, but no spread holds it: its read schema is its own (F10) */
 		expect(meta({ createdAt: c.createdAt("created_at"), updated_at: integer("updated_at") })).toMatchObject({
 			createdAt: true,
+			names: { createdAt: "createdAt", deletedAt: null, updatedAt: "updated_at" },
 			style: "mixed",
-			updatedAt: true,
+			updatedAt: false,
 		})
 		expect(meta({ created_at: c.createdAt("created_at") })?.style).toBe("snake_case")
 		expect(meta({ createdAt: text("created_at") })).toMatchObject({ createdAt: false, style: "camelCase" })

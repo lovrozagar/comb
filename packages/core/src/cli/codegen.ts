@@ -6,7 +6,7 @@
 import path from "node:path"
 import type { GeneratorContext } from "../codegen/generators/context-types.ts"
 import { isGeneratedContent, type Staged } from "../codegen/utils/fs.ts"
-import { commitRuns, type Run } from "./codegen-record.ts"
+import { claim, commitRuns, type Run } from "./codegen-record.ts"
 import { parseArgs } from "./args.ts"
 import { type CodegenConfig, type DatabaseCodegen, databaseIn, loadCombConfig, tablesFile } from "./comb-config.ts"
 import { CliError, type CliIo } from "./output.ts"
@@ -219,9 +219,12 @@ async function generate(
 		prefix: database.direct ? `db.${analysis.dbName}` : (database.db.filePrefix ?? `db.${database.name}`),
 	}
 	const before = new Map(run.staged)
+	const owners = new Map<string, string>()
 	for (const generator of GENERATORS) {
-		if (database.generators.includes(generator) && (run.only === undefined || run.only === generator))
-			await STEPS[generator](plan)
+		if (!database.generators.includes(generator) || (run.only !== undefined && run.only !== generator)) continue
+		const last = new Map(run.staged)
+		await STEPS[generator](plan)
+		claim(owners, { cwd: plan.ctx.cwd, generator, last, run: database.name, staged: run.staged })
 	}
 	const wrote = [...run.staged]
 		.filter(([file, content]) => before.get(file) !== content && isGeneratedContent(content))
