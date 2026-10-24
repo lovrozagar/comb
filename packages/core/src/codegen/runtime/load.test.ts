@@ -30,11 +30,11 @@ function fakeRun(code: number, result?: unknown, stderr = ""): Run & { calls: Ar
 }
 
 describe("childArgs", () => {
-	it("runs child.ts alone by -e: under bun as is, under node with the hooks and the resolve flag first", () => {
+	it("runs child.ts alone by -e: under bun with no dotenv file, under node with the hooks and the resolve flag first", () => {
 		const bun = childArgs("bun", ["t.ts", "r.json"])
-		expect(bun[0]).toBe("-e")
-		expect(bun[1]).toMatch(/await import\("file:\/\/.*\/runtime\/child\.ts"\)/)
-		expect(bun.slice(2)).toEqual(["t.ts", "r.json"])
+		expect(bun.slice(0, 2)).toEqual(["--no-env-file", "-e"])
+		expect(bun[2]).toMatch(/await import\("file:\/\/.*\/runtime\/child\.ts"\)/)
+		expect(bun.slice(3)).toEqual(["t.ts", "r.json"])
 		const node = childArgs("node", ["t.ts", "r.json"])
 		expect(node.slice(0, 3)).toEqual([
 			"--experimental-import-meta-resolve",
@@ -105,7 +105,7 @@ describe("loadSnapshot on bun", () => {
 		try {
 			const run = fakeRun(0, { snapshot: { tables: [] } })
 			loadSnapshot(path.join(dir, "db.core.tables.ts"), { run })
-			expect(run.calls[0]?.[1][0]).toBe("-e")
+			expect(run.calls[0]?.[1].slice(0, 2)).toEqual(["--no-env-file", "-e"])
 		} finally {
 			Reflect.deleteProperty(process.versions, "bun")
 		}

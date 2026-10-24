@@ -8,6 +8,7 @@ coverageThreshold = { lines = 1.0, functions = 1.0 }
 coveragePathIgnorePatterns = [
 	"tests/**",
 	"src/*.ts",
+	"src/codegen/**",
 	"src/meta/**",
 	"src/pg/**",
 	"src/query/**",

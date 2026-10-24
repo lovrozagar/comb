@@ -30,7 +30,8 @@ function childEnv(): Record<string, string> {
 function childArgs(runtime: "bun" | "node", rest: readonly string[]): string[] {
 	const child = new URL("child.ts", import.meta.url).href
 	const script = `const { writeSnapshot } = await import(${JSON.stringify(child)}); await writeSnapshot(process.argv.slice(-2))`
-	if (runtime === "bun") return ["-e", script, ...rest]
+	/* bun reads .env and .env.local from the working directory unless told not to (F41) */
+	if (runtime === "bun") return ["--no-env-file", "-e", script, ...rest]
 	const hooks = new URL("node-hooks.mjs", import.meta.url).href
 	return [
 		/* a package import.meta.resolve()s from the file that imports it, a second argument node 22 flags */
