@@ -50,6 +50,15 @@ describe("classifyMigration on an FTS5 command", () => {
 		"INSERT INTO post_fts(post_fts) SELECT 'delete-all';",
 		"INSERT INTO post_fts(post_fts) VALUES (lower('DELETE-ALL'));",
 		"INSERT INTO post_fts(post_fts) VALUES ('rebuild'), ('delete-all');",
+		/* M42: every spelling of an insert into the table's own column is a command */
+		"INSERT OR IGNORE INTO post_fts(post_fts) VALUES ('delete-all');",
+		"INSERT OR ABORT INTO post_fts(post_fts) VALUES ('delete-all');",
+		"INSERT OR ROLLBACK INTO post_fts(post_fts) VALUES ('delete-all');",
+		"INSERT OR FAIL INTO post_fts(post_fts) VALUES ('delete-all');",
+		"INSERT OR REPLACE INTO post_fts(post_fts) VALUES ('delete-all');",
+		"REPLACE INTO post_fts(post_fts) VALUES ('delete-all');",
+		"WITH x AS (SELECT 1) INSERT INTO post_fts(post_fts) VALUES ('delete-all');",
+		"WITH x AS (SELECT 'delete-all' AS c) INSERT OR IGNORE INTO main.post_fts(post_fts) SELECT c FROM x;",
 	])("calls %j unsafe: it removes indexed rows, or comb cannot read which command it runs", (sql) => {
 		expect(lite(sql).unsafeStatements.join("\n")).toContain("FTS5 command")
 	})
@@ -60,6 +69,8 @@ describe("classifyMigration on an FTS5 command", () => {
 		"INSERT INTO post_fts(post_fts, rank) VALUES ('rank', 'bm25(10.0, 5.0)');",
 		"INSERT INTO post_fts(post_fts) VALUES('optimize');",
 		"INSERT INTO post_fts(title) VALUES ('x');",
+		"INSERT OR IGNORE INTO post_fts(post_fts) VALUES ('rebuild');",
+		"WITH x AS (SELECT 1) INSERT INTO post_fts(post_fts) VALUES ('optimize');",
 	])("leaves %j to the other rules: it keeps every indexed row", (sql) => {
 		expect(lite(sql).unsafeStatements).toEqual([])
 	})

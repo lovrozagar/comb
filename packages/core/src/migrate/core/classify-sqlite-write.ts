@@ -26,10 +26,12 @@ const PENDING: Pending = { level: "unsafe", note: "pending the proof run's read 
 const REPLACES: Finding = { level: "unsafe", note: "replaces the rows it conflicts with, deleting them" }
 
 const CTE = "^(?:WITH\\b.*?\\b)?"
+/* every spelling of an insert, up to its table: any CTE, any conflict clause, and REPLACE (M42) */
+const INSERT_INTO: string = `${CTE}(?:INSERT(?: OR (\\w+))?|REPLACE) INTO `
 // per-process-constant: a write's verb, after any CTE
 const VERB = /* @__PURE__ */ new RegExp(`${CTE}(INSERT|REPLACE|UPDATE|DELETE)\\b`, "i")
 // per-process-constant: an INSERT's or REPLACE's conflict clause and table
-const INSERT = /* @__PURE__ */ new RegExp(`${CTE}(?:INSERT(?: OR (\\w+))?|REPLACE) INTO (${QNAME})`, "i")
+const INSERT = /* @__PURE__ */ new RegExp(`${INSERT_INTO}(${QNAME})`, "i")
 // per-process-constant: an UPDATE's conflict clause, table, and where its SET list starts
 const UPDATE = /* @__PURE__ */ new RegExp(`${CTE}UPDATE(?: OR (\\w+))? (${QNAME})(?: (?:AS )?${IDENT})? SET `, "i")
 // per-process-constant: a DELETE's table
@@ -116,4 +118,4 @@ function sqliteWriteFindings(
 	return [setFinding(table, assigned(code.slice(start), bare.slice(start)), ctx.fresh)]
 }
 
-export { type Pending, sqliteWriteFindings }
+export { INSERT_INTO, type Pending, sqliteWriteFindings }

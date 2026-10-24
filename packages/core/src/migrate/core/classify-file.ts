@@ -6,6 +6,7 @@
  */
 import type { Dialect } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
+import { INSERT_INTO } from "./classify-sqlite-write.ts"
 import { atlasDirectives } from "./pg-objects.ts"
 import { nameKey, QNAME } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
@@ -25,7 +26,7 @@ const FTS_COMMAND = /* @__PURE__ */ new RegExp(
 )
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
-const FTS_ANY_COMMAND = /* @__PURE__ */ new RegExp(`^INSERT INTO (${QNAME}) ?\\( ?(${QNAME}) ?[,)]`, "i")
+const FTS_ANY_COMMAND = /* @__PURE__ */ new RegExp(`${INSERT_INTO}(${QNAME}) ?\\( ?(${QNAME}) ?[,)]`, "i")
 /* one row of an FTS5 command that rebuilds, merges or checks an index, or sets one of its options, with its
    one number or string argument: none removes an indexed row */
 const KEEPS_ROWS =
@@ -38,7 +39,7 @@ const KEEPS_ROWS =
  */
 function ftsCommandFindings(stmt: string): Finding[] {
 	const sql = normalizeSql(stmt).replace(/ ?;$/, "")
-	const [, into, column] = FTS_ANY_COMMAND.exec(sql) ?? []
+	const [, , into, column] = FTS_ANY_COMMAND.exec(sql) ?? []
 	if (into === undefined || nameKey(into, "sqlite") !== nameKey(column as string, "sqlite") || KEEPS_ROWS.test(sql))
 		return []
 	return [

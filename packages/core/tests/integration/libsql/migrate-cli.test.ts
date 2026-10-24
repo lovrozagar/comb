@@ -403,3 +403,28 @@ describe("migrate apply --yes on a REPLACE backfill (M41)", () => {
 		client.close()
 	})
 })
+
+/* M42: a contentless FTS5 table holds the only copy of its index, so a 'delete-all' spelled with a
+   conflict clause must be refused like the plain one */
+describe("migrate apply --yes on an FTS5 'delete-all' with a conflict clause (M42)", () => {
+	it("refuses it as unsafe, and the index keeps its entries", async () => {
+		const { dir, url } = project({
+			"20260101000000_init.sql": "CREATE VIRTUAL TABLE cl USING fts5(body, content='');",
+		})
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
+		const client = createClient({ url: url("local.db") })
+		await client.execute("INSERT INTO cl(rowid, body) VALUES (1, 'alpha one'), (2, 'alpha two')")
+		const hits = async () =>
+			(await client.execute("SELECT rowid FROM cl WHERE cl MATCH 'alpha' ORDER BY rowid")).rows.map((row) => row[0])
+		fs.writeFileSync(
+			path.join(dir, "atlas-migrations", "20260102000000_wipe.sql"),
+			"INSERT OR ABORT INTO cl(cl) VALUES ('delete-all');",
+		)
+		spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
+		const run = io(dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], run)).toBe(1)
+		expect(run.errors.join("\n")).toContain("FTS5 command")
+		expect(await hits()).toEqual([1, 2])
+		client.close()
+	})
+})
