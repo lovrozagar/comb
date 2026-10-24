@@ -141,3 +141,32 @@ describe("keyset pagination on a seconds-mode timestamp before 1970, its cursor 
 		}
 	})
 })
+
+/* the 3.3 review of U10: a Date of 0 is any stored value within a millisecond of the epoch, on either side */
+describe("keyset pagination on a seconds-mode timestamp at the epoch, its cursor row deleted", () => {
+	it.each([
+		["at.asc", [1, 2, 3, 4, 5, 6], 2],
+		["at.desc", [6, 5, 4, 3, 2, 1], 5],
+	] as const)("pages %s exactly to %j, deleting row %s once a page ends on it", async (order, want, gone) => {
+		const harness = libsqlMemory()
+		await harness.client.executeMultiple(
+			"CREATE TABLE event (id INTEGER PRIMARY KEY, at INTEGER NOT NULL);\nINSERT INTO event VALUES (1, -1), (2, -0.0008), (3, -0.0005), (4, 0.0005), (5, 0.0008), (6, 1);",
+		)
+		try {
+			const seen = await pageAll(async (cursor) => {
+				const parsed = schema.parse({ cursor, order })
+				const rows = await applyListQuery(
+					harness.db.select().from(event).$dynamic(),
+					buildListQuery({ ...SEALED, parsed, table: event }),
+				)
+				const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+				if (items.at(-1)?.id === gone)
+					await harness.client.execute({ args: [gone], sql: "DELETE FROM event WHERE id = ?" })
+				return { ids: items.map((row) => row.id), next: meta.nextCursor }
+			})
+			expect(seen).toEqual(want)
+		} finally {
+			harness.close()
+		}
+	})
+})

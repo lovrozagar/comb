@@ -142,12 +142,13 @@ function textBound(key: SortKey, ref: CursorRef, at: Anchor): SQL {
  * A Date on a seconds-mode SQLite timestamp key: the row's own value, whose fraction below a
  * millisecond no Date holds (U10); once the row is gone, the edge of the millisecond the stored value
  * lay in toward the rows already served, so a row of that millisecond may come again and none is
- * skipped. A Date truncates toward zero, so that millisecond is [ms, ms + 1) from 1970 and
- * (ms - 1, ms] before it. The milliseconds are literals, so the bound costs the id alone.
+ * skipped. A Date truncates toward zero, so that millisecond is [ms, ms + 1) after 1970, (ms - 1,
+ * ms] before it, and (-1, 1) at 0. The milliseconds are literals, so the bound costs the id alone.
  */
 function secondsBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
 	const truncated = value.getTime()
-	const [low, high] = truncated < 0 ? [truncated - 1, truncated] : [truncated, truncated + 1]
+	/* each edge widened on its own: a Date of 0 is any stored value within a millisecond either side of it */
+	const [low, high] = [truncated > 0 ? truncated : truncated - 1, truncated < 0 ? truncated : truncated + 1]
 	const ms = direction === "asc" ? low : high
 	const fallback = sql`(${ms < 0 ? sql`-` : sql``}${countLiteral(Math.abs(ms))} / 1000.0)`
 	return sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${fallback})`
