@@ -265,3 +265,36 @@ describe("comb codegen: a config dialect the tables contradict (F18)", () => {
 		expect(existsSync(join(dir, "db.core.enum-checks.gen.ts"))).toBe(false)
 	})
 })
+
+/* the 0.12 review's F26: a database named twice ran twice into one staged map, and its record emptied */
+describe("comb codegen: a database named twice (F26)", () => {
+	it("runs it once, so its record still lists every file it writes", async () => {
+		const dir = project()
+		writeTables(dir)
+		config(dir, {})
+		expect(await runCli(["codegen"], makeIo(dir))).toBe(0)
+		const entries = () =>
+			(JSON.parse(readFileSync(join(dir, ".comb.codegen.json"), "utf8")) as { databases: Record<string, string[]> })
+				.databases["core"]?.length
+		const before = entries()
+		const io = makeIo(dir)
+		expect(await runCli(["codegen", "core", "core"], io)).toBe(0)
+		expect(entries()).toBe(before)
+		expect(io.outputs.filter((line) => line === "\nCodegen: core")).toHaveLength(1)
+	})
+})
+
+/* the 0.12 review's F32: -g named a generator the run does not run, and it exited 0, writing nothing */
+describe("comb codegen: -g for a generator no database runs (F32)", () => {
+	it("refuses it, naming the generators the run does run", async () => {
+		const dir = project()
+		const tables = writeTables(dir)
+		const io = makeIo(dir)
+		expect(await runCli(["codegen", "--tables", tables, "-g", "orm"], io)).not.toBe(0)
+		expect(io.errors.join("\n")).toMatch(/^codegen does not run orm here; it runs /)
+		config(dir, { generators: ["rows"] })
+		const configured = makeIo(dir)
+		expect(await runCli(["codegen", "-g", "orm"], configured)).not.toBe(0)
+		expect(configured.errors.join("\n")).toBe("codegen does not run orm here; it runs rows")
+	})
+})

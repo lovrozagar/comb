@@ -169,3 +169,15 @@ export const b = createTable("b", { id: text("id").primaryKey(), a_id: text("a_i
 		expect(ddl).toContain('"b_id" TEXT REFERENCES "b"("id")')
 	})
 })
+
+/* the 0.12 review's F33: the diagram DDL left out a composite key, and said nothing of what it omits */
+describe("generateDiagrams: a composite key, and what the DDL is (F33)", () => {
+	it("writes the composite key, its columns NOT NULL, and says it outlines the schema", () => {
+		const { ddl } = generate(`import { primaryKey } from "drizzle-orm/sqlite-core"
+export const membership = createTable("membership", { orgSlug: c.text("org_slug"), userSlug: c.text("user_slug"), role: c.text("role") }, (t) => [primaryKey({ columns: [t.orgSlug, t.userSlug] })])`)
+		expect(ddl).toContain(
+			'  "org_slug" TEXT NOT NULL,\n  "user_slug" TEXT NOT NULL,\n  "role" TEXT,\n  PRIMARY KEY ("org_slug", "user_slug")\n);',
+		)
+		expect(ddl).toContain("-- An outline of the schema: tables, types, keys, NOT NULL and references")
+	})
+})

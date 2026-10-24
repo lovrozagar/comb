@@ -106,13 +106,14 @@ type Rule = (field: FieldMeta) => ExampleResult | null | undefined
 /* each text kind's example, which its own check accepts: an image URI is an HTTPS URL to an image */
 const KIND_EXAMPLES = { email: "user@example.com", imageUri: "https://example.com/a.png", url: "https://example.com" }
 
-/** The example of a text kind, or none when the column is shorter than it (F31) */
+/** The example of a text kind, or none when the column is shorter than it (F31) or needs more (F30) */
 function kindExample(field: FieldMeta): ExampleResult | null | undefined {
 	const { constraints } = field
 	const kind = constraints.email ? "email" : constraints.url ? "url" : constraints.imageUri ? "imageUri" : undefined
 	if (kind === undefined) return undefined
 	const max = constraints.max ?? field.length
-	if (max !== null && max < KIND_EXAMPLES[kind].length) return null
+	const length = KIND_EXAMPLES[kind].length
+	if ((max !== null && max < length) || (constraints.min !== null && constraints.min > length)) return null
 	return kind === "imageUri" ? inline(JSON.stringify(KIND_EXAMPLES.imageUri)) : shared(kind)
 }
 

@@ -83,13 +83,13 @@ describe("generateTranslations", () => {
 		expect(english("db.test")).toContain('doc_created_by_duplicate: "A record with this created by already exists"')
 	})
 
-	it("falls back to a generic message for keys with no convention, and quotes keys that are not identifiers", () => {
+	it("names a size CHECK by its cause, and quotes keys that are not identifiers", () => {
 		fromTables(`${HEAD}export const auditLog = createTable("audit-log", { body: text("body") }, () => [
 	check("body_size", sql\`length(body) <= 2048\`),
 ])
 `)
 		const en = english("db.test")
-		expect(en).toContain('"audit-log_body_size_failed": "An error occurred. Please try again."')
+		expect(en).toContain('"audit-log_body_size_failed": "Exceeds maximum size of 2KB"')
 		expect(read("db.test.error-keys.gen.ts")).toContain('"audit-log_body_size_failed": "audit-log_body_size_failed"')
 	})
 
@@ -109,5 +109,24 @@ describe("generateTranslations — composite uniques", () => {
 		expect(english("db.test")).toContain(
 			'account_provider_account_id_duplicate: "A record with this provider and account id combination already exists"',
 		)
+	})
+})
+
+/* the 0.12 review's F34: a 400 no retry fixes was told to try again */
+describe("generateTranslations: a CHECK and an enum key (F34)", () => {
+	it("says what the value broke, never to try again", () => {
+		fromTables(`import { sql } from "drizzle-orm"
+import { check, sqliteTable } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+export const seat = sqliteTable("seat", { id: c.id("set"), kind: c.enum("kind", ["a", "b"]), n: c.integer("n"), note: c.text("note") }, (t) => [
+	check("seat_n_positive", sql\`\${t.n} > 0\`),
+	check("seat_note_size", sql\`length(\${t.note}) <= 2048\`),
+])
+`)
+		const en = english("db.test")
+		expect(en).toContain('seat_kind_enum_invalid: "This value is not one of the allowed values"')
+		expect(en).toContain('seat_n_positive_failed: "This value breaks a rule of the record"')
+		expect(en).toContain('seat_note_size_failed: "Exceeds maximum size of 2KB"')
+		expect(en).not.toContain("Please try again")
 	})
 })

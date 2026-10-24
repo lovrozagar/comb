@@ -31,7 +31,9 @@ function englishMessage({ cause, key }: ErrorKey): string {
 		return `A record with this ${field.replaceAll("_", " ")} already exists`
 	}
 	if (key.endsWith("_reference_not_found")) return "Referenced record does not exist"
-	return "An error occurred. Please try again."
+	/* the rest are 400s no retry fixes (F34): an enum value, or a CHECK, by the cause it names when it names one */
+	if (key.endsWith("_enum_invalid")) return "This value is not one of the allowed values"
+	return cause === "Check constraint violated" ? "This value breaks a rule of the record" : cause
 }
 
 /** Every error key the tables' constraint map declares, sorted, with its cause */

@@ -191,3 +191,16 @@ export const note = sqliteTable("note", { id: c.id("not") })
 		expect((await readTables(tables)).tables.map((table) => table.exportName)).toEqual(["note"])
 	})
 })
+
+/* the 0.12 review's F36: a column named __proto__, which drizzle assigns onto the table as its prototype */
+describe("snapshotOf: a table a column named __proto__ broke (F36)", () => {
+	it("is refused, naming the export, not left out of every generated file", () => {
+		const columns = Object.defineProperty({ id: c.id("brk") }, "__proto__", { enumerable: true, value: c.text("p") })
+		const broken = sqliteTable("broken", columns as never)
+		expect(() => analyzeNamespace({ broken })).toThrow(
+			"broken: a column named __proto__ replaced this table's prototype, so drizzle cannot use it; rename the column",
+		)
+		/* any other value without drizzle's table name is no table, and is passed over */
+		expect(analyzeNamespace({ answer: 42, list: [] }).tables).toEqual([])
+	})
+})

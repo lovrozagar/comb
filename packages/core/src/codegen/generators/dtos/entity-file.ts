@@ -131,7 +131,7 @@ function sharedImports(table: TableInfo, spread: Spread, shared: Map<string, Sha
 		}
 		if (field.zodType.includes("timestampSchema")) names.push("timestampSchema")
 		const resolved = rewriteWithShared(field.zodType, shared)
-		names.push(...(resolved.match(/_z\d+/g) ?? []))
+		names.push(...(resolved.match(/_z_[0-9a-f]{8,16}/g) ?? []))
 		const alias = BASE_TYPE_ALIASES.find(([, a]) => resolved.startsWith(a))?.[1]
 		if (alias !== undefined) names.push(alias)
 	}

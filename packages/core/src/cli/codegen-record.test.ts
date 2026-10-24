@@ -177,3 +177,28 @@ describe("commitRuns: a path another database's record lists (F20, F21)", () => 
 		expect(record(dir).databases).toEqual({ aux: ["src/shared/manifest.gen.json"], core: [] })
 	})
 })
+
+/* the 0.12 review's F28 and F29: a stale file that would not go, and 0.9's record when it is no JSON */
+describe("commitRuns: deleting what is stale (F28, F29)", () => {
+	it("keeps a stale file in the record when it cannot be deleted, so a later run deletes it", () => {
+		const dir = dirWith({})
+		const gone = path.join(dir, "src/db/dtos/gone/db.core.gone.gen.ts")
+		commitRuns(new Map([[gone, GENERATED]]), [run(dir, { wrote: [gone] })], { recordDir: dir })
+		fs.chmodSync(path.dirname(gone), 0o555)
+		try {
+			expect(() => commitRuns(new Map(), [run(dir)], { recordDir: dir })).toThrow(/EACCES/)
+			expect(record(dir).databases["core"]).toEqual(["src/db/dtos/gone/db.core.gone.gen.ts"])
+		} finally {
+			fs.chmodSync(path.dirname(gone), 0o755)
+		}
+		commitRuns(new Map(), [run(dir)], { recordDir: dir })
+		expect(fs.existsSync(gone)).toBe(false)
+	})
+
+	it("names 0.9's record when it is no JSON, as it names the current one", () => {
+		const dir = dirWith({ "src/db/.db.core.codegen.json": "<<<<<<< HEAD\n" })
+		expect(() => commitRuns(new Map(), [run(dir)], { recordDir: dir })).toThrow(
+			/^src\/db\/\.db\.core\.codegen\.json is not JSON \(a merge conflict\?\): delete it, and the next run removes nothing stale/,
+		)
+	})
+})

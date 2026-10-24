@@ -282,19 +282,19 @@ function generateDedup(): { alpha: string; beta: string; shared: string } {
 describe("generateDtos — auto-dedup shared schemas", () => {
 	it("emits _z* constants in shared file for repeated schemas", () => {
 		const { shared } = generateDedup()
-		/* FK ref _str.min(1).max(48) — base type aliased */
-		expect(shared).toMatch(/export const _z\d+ = _str\.min\(1\)\.max\(48\)/)
+		/* the reference's text rules, shared across the three tables, base type aliased */
+		expect(shared).toMatch(/export const _z_[0-9a-f]{8} = _str\b/)
 	})
 
 	it("entity files reference _z* instead of inline schemas", () => {
 		const { alpha } = generateDedup()
-		/* owner_id (FK ref) should use _z* ref, not inline z.string().min(1).max(48) */
-		expect(alpha).toMatch(/owner_id: _z\d+/)
+		/* owner_id uses its shared schema, not an inline z.string() */
+		expect(alpha).toMatch(/owner_id: _z_[0-9a-f]{8}/)
 	})
 
 	it("entity files import _z* constants from shared", () => {
 		const { alpha } = generateDedup()
-		expect(alpha).toMatch(/import \{.*_z\d+.*\} from "\.\.\/_shared\/index\.gen"/)
+		expect(alpha).toMatch(/import \{.*_z_[0-9a-f]{8}.*\} from "\.\.\/_shared\/index\.gen"/)
 	})
 
 	it("does not dedup schemas with unique per-table values", () => {
@@ -306,6 +306,27 @@ describe("generateDtos — auto-dedup shared schemas", () => {
 
 	it("adds usage count comment to shared constants", () => {
 		const { shared } = generateDedup()
-		expect(shared).toMatch(/export const _z\d+ = .+ \/\* \d+x \*\//)
+		expect(shared).toMatch(/export const _z_[0-9a-f]{8} = .+ \/\* \d+x \*\//)
+	})
+})
+
+/* the 0.12 review's F35: shared schemas numbered by use, so one column renumbered every table's file */
+/** Three tables sharing schemas, `extra` added to the last one's columns */
+const sharingTables = (extra: string) => `import { sqliteTable as createTable } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+export const book = createTable("book", { id: c.id("bok"), title: c.text("title").notNull(), note: c.text("note") })
+export const shelf = createTable("shelf", { id: c.id("shf"), title: c.text("title").notNull(), note: c.text("note") })
+export const author = createTable("author", { id: c.id("aut"), name: c.text("name").notNull()${extra} })
+`
+
+describe("generateDtos — shared schema names (F35)", () => {
+	it("leave another table's DTO file unchanged when a column is added to one table", () => {
+		const before = read(generate(sharingTables("")), "book").entity
+		const after = read(
+			generate(sharingTables(', a: c.integer("a"), b: c.integer("b"), d: c.integer("d"), e: c.integer("e")')),
+			"book",
+		).entity
+		expect(after).toBe(before)
+		expect(before).toMatch(/_z_[0-9a-f]{8}/)
 	})
 })

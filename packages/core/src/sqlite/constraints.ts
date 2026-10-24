@@ -90,7 +90,8 @@ export type JsonConstraints = BaseConstraints & {
  * Timestamp column constraints
  * Closed record - only these properties allowed
  */
-export type TimestampConstraints = BaseConstraints
+/* the earliest and latest instant, in epoch milliseconds, that codegen bounds the DTO by (F38) */
+export type TimestampConstraints = BaseConstraints & NumericRangeConstraints
 
 /**
  * State machine declared alongside an enum column's values.

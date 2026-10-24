@@ -57,3 +57,11 @@ describe("c column metadata", () => {
 		expect(combColumnMeta({ config: {} })).toBeUndefined()
 	})
 })
+
+/* the 0.12 review's F38: the generator honours a timestamp's bounds, which its type refused */
+describe("c.timestamp bounds (F38)", () => {
+	it("takes min and max, as codegen bounds the DTO by them", () => {
+		const since = getTableColumns(sqliteTable("t", { since: c.timestamp("since", { max: 10, min: 0 }) })).since
+		expect(combColumnMeta(since)).toEqual({ constraints: { max: 10, min: 0 }, kind: "timestamp" })
+	})
+})

@@ -89,3 +89,11 @@ describe("generateExampleMeta: an email, URL or image URI its own bounds and rul
 		expect(generateExampleMeta(parseField("i", 'c.text("i", { imageUri: true, max: 20 })'))).toBeNull()
 	})
 })
+
+/* the 0.12 review's F30: a kind's example was checked against max alone */
+describe("generateExampleMeta: an example shorter than the column's min (F30)", () => {
+	it("is left out, as one longer than its max is", () => {
+		expect(generateExampleMeta(parseField("m", 'c.text("m", { email: true, min: 20, max: 100 })'))).toBeNull()
+		expect(generateExampleMeta(parseField("m", 'c.text("m", { email: true, min: 5 })'))?.code).toBe(".meta(_m.email)")
+	})
+})

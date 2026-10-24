@@ -16,27 +16,30 @@ const RECORD = ".comb.codegen.json"
 
 type RunRecord = { databases: Record<string, string[]> }
 
-function readRecord(recordPath: string): RunRecord {
-	if (!fs.existsSync(recordPath)) return { databases: {} }
+/** A record's JSON; an error naming it, by its path from `recordDir`, when it is no JSON (F29) */
+function parsed<T>(file: string, recordDir: string): T {
 	try {
-		return JSON.parse(fs.readFileSync(recordPath, "utf8")) as RunRecord
+		return JSON.parse(fs.readFileSync(file, "utf8")) as T
 	} catch (error) {
 		throw new CliError(
-			`${RECORD} is not JSON (a merge conflict?): delete it, and the next run removes nothing stale; ${(error as Error).message}`,
+			`${path.relative(recordDir, file)} is not JSON (a merge conflict?): delete it, and the next run removes nothing stale; ${(error as Error).message}`,
 		)
 	}
+}
+
+function readRecord(recordPath: string): RunRecord {
+	if (!fs.existsSync(recordPath)) return { databases: {} }
+	return parsed<RunRecord>(recordPath, path.dirname(recordPath))
 }
 
 /* 0.9's record, one per output root and file prefix: read once, so the first run after an upgrade still removes its files */
 const legacyRecord = (root: string, prefix: string): string => path.join(root, `.${prefix}.codegen.json`)
 
 /** The absolute paths 0.9's record at `root` lists; none when there is no such record */
-function legacyFiles(root: string, prefix: string): string[] {
+function legacyFiles(root: string, prefix: string, recordDir: string): string[] {
 	const file = legacyRecord(root, prefix)
 	if (!fs.existsSync(file)) return []
-	return (JSON.parse(fs.readFileSync(file, "utf8")) as { files: string[] }).files.map((each) =>
-		path.resolve(root, each),
-	)
+	return parsed<{ files: string[] }>(file, recordDir).files.map((each) => path.resolve(root, each))
 }
 
 /** Remove `dir` and its parents while they are empty, up to `root` */
@@ -77,7 +80,7 @@ export function commitRuns(
 	for (const run of runs) {
 		const last = [
 			...(record.databases[run.name] ?? []).map((file) => path.resolve(recordDir, file)),
-			...legacyFiles(run.root, run.prefix),
+			...legacyFiles(run.root, run.prefix, recordDir),
 		]
 		const kept = new Set([...run.wrote, ...(run.partial ? last : [])])
 		record.databases[run.name] = [...kept].map((file) => path.relative(recordDir, file)).sort()
@@ -91,15 +94,17 @@ export function commitRuns(
 	}
 	/* by name, so the databases in any order write the same bytes (F32) */
 	record.databases = Object.fromEntries(Object.entries(record.databases).sort(([a], [b]) => a.localeCompare(b)))
-	writeGenJsonFile(recordPath, record, { generator: "comb", staged })
-	commitStaged(staged)
 	/* a file another database's entry lists is that database's, whatever this one's last run wrote (F20) */
 	const others = new Set(
 		Object.entries(record.databases)
 			.filter(([name]) => !runs.some((each) => each.name === name))
 			.flatMap(([, files]) => files.map((file) => path.resolve(recordDir, file))),
 	)
+	/* deleted before anything is written: one that will not go fails the run with the record as it was,
+	 * so the next run deletes it (F28) */
 	for (const file of before.filter((each) => !now.has(each) && !others.has(each))) removeStale(file, recordDir)
+	writeGenJsonFile(recordPath, record, { generator: "comb", staged })
+	commitStaged(staged)
 	for (const run of runs) fs.rmSync(legacyRecord(run.root, run.prefix), { force: true })
 }
 

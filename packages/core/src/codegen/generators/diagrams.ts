@@ -27,6 +27,8 @@ interface Column {
 
 interface Table {
 	columns: Column[]
+	/** a composite primary key's SQL columns, empty for none */
+	key: string[]
 	name: string
 }
 
@@ -118,7 +120,8 @@ function transformTables(
 		for (const field of meta.fields) {
 			const col: Column = {
 				name: field.sqlName,
-				nullable: !field.isNotNull,
+				/* a key's column holds no NULL (F33) */
+				nullable: !field.isNotNull && !field.inCompositeKey,
 				primaryKey: field.isPrimaryKey,
 				/* a plain drizzle column is the type drizzle itself writes for it */
 				type: field.combKind === null ? field.sqlType.toUpperCase() : drizzleHelperToSqlType(field.combKind, dialect),
@@ -144,7 +147,8 @@ function transformTables(
 		}
 
 		if (columns.length > 0) {
-			tables.push({ columns, name: meta.sqlName })
+			const key = meta.fields.filter((field) => field.inCompositeKey).map((field) => field.sqlName)
+			tables.push({ columns, key, name: meta.sqlName })
 		}
 	}
 
@@ -155,6 +159,10 @@ function generateDDL(tables: Table[], { dbName, dialect }: { dbName: string; dia
 	const lines: string[] = []
 	lines.push(`-- ${dbName} Database Schema (${dialect === "postgres" ? "Postgres" : "SQLite"})`)
 	lines.push(`-- Tables: ${tables.length}`)
+	/* what it renders, so no reader takes it for the database's own DDL (F33) */
+	lines.push(
+		"-- An outline of the schema: tables, types, keys, NOT NULL and references. Defaults, identity and generated columns are left out; drizzle-kit export writes the full DDL.",
+	)
 	lines.push("")
 
 	for (const table of inDependencyOrder(tables)) {
@@ -172,6 +180,7 @@ function generateDDL(tables: Table[], { dbName, dialect }: { dbName: string; dia
 			}
 			colDefs.push(def)
 		}
+		if (table.key.length > 0) colDefs.push(`  PRIMARY KEY (${table.key.map(sqlIdentifier).join(", ")})`)
 
 		lines.push(colDefs.join(",\n"))
 		lines.push(");")

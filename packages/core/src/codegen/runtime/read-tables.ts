@@ -7,6 +7,7 @@
 import { type Column, getTableColumns, getTableName, is, type SQL, type Table } from "drizzle-orm"
 import { getTableConfig as pgConfig, PgDialect, PgTable } from "drizzle-orm/pg-core"
 import { getTableConfig as sqliteConfig, SQLiteDialect, SQLiteTable } from "drizzle-orm/sqlite-core"
+import { pgObjectName } from "../../identifier.ts"
 import { combColumnMeta } from "../../meta/column.ts"
 import type {
 	ModuleExport,
@@ -114,6 +115,15 @@ type ReadColumn = Column & {
 }
 
 /**
+ * The name an unnamed `.unique()` has in the database: drizzle-kit writes it named on SQLite, and as
+ * a bare UNIQUE on Postgres, which Postgres names `<table>_<column>_key` (F31)
+ */
+const unnamedUnique = (column: ReadColumn): string =>
+	is(column.table, PgTable)
+		? pgObjectName(getTableName(column.table), column.name, "key")
+		: `${getTableName(column.table)}_${column.name}_unique`
+
+/**
  * Whether a write that leaves the column out still fills it: a default, a default or update
  * function, an identity, or a Postgres serial. Not drizzle's own hasDefault, which an SQLite
  * integer key has for its rowid, a value the engine fills only when none is given
@@ -143,9 +153,7 @@ function columnOf([key, column]: [string, ReadColumn], at: string, context: Cont
 		primary: column.primary,
 		sqlName: column.name,
 		sqlType: column.getSQLType(),
-		/* an unnamed .unique() is named as drizzle-kit names it */
-		unique:
-			column.isUnique === true ? (column.uniqueName ?? `${getTableName(column.table)}_${column.name}_unique`) : null,
+		unique: column.isUnique === true ? (column.uniqueName ?? unnamedUnique(column)) : null,
 	}
 }
 
@@ -256,10 +264,20 @@ function snapshotOf(loaded: readonly Loaded[], unloaded: readonly string[] = [])
 	for (const name of Object.keys(first.namespace).sort()) {
 		const value = first.namespace[name]
 		if (isTable(value) && !tables.has(value)) tables.set(value, name)
+		/* drizzle assigns each column onto its table, so one named __proto__ replaces the table's
+		 * prototype: what is left keeps drizzle's table name but is no table (F36) */
+		else if (!isTable(value) && hasTableName(value))
+			throw new Error(
+				`${name}: a column named __proto__ replaced this table's prototype, so drizzle cannot use it; rename the column`,
+			)
 	}
 	const context: Context = { loaded, tables, tablesPath: first.module, unloaded }
 	return { tables: [...tables].map((entry) => tableOf(entry, context)) }
 }
+
+/** Whether `value` carries drizzle's table name, as every table drizzle builds does */
+const hasTableName = (value: unknown): boolean =>
+	typeof value === "object" && value !== null && Object.hasOwn(value, Symbol.for("drizzle:Name"))
 
 const isTable = (value: unknown): value is Table => is(value, SQLiteTable) || is(value, PgTable)
 

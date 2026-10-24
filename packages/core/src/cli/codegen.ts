@@ -245,7 +245,8 @@ async function databases(positionals: readonly string[], tables: string | undefi
 		return [{ db: { tables }, direct: true, exportNamespace: undefined, generators: DIRECT, name: "", tablesPath }]
 	}
 	const config = await loadCombConfig(io.cwd)
-	const names = positionals.length > 0 ? positionals : Object.keys(config.databases)
+	/* a name given twice runs once: a second run into the same staged map would record nothing (F26) */
+	const names = positionals.length > 0 ? [...new Set(positionals)] : Object.keys(config.databases)
 	const picked = names.map((name) => [name, databaseIn(config, name)] as const)
 	const namespaces = await exportNamespaces(config, io.cwd)
 	return picked.map(([name, db]) => ({
@@ -265,6 +266,10 @@ export async function cmdCodegen(argv: readonly string[], io: CliIo): Promise<vo
 		throw new CliError(`Unknown generator: ${only}. Known: ${GENERATORS.join(", ")}`)
 	}
 	const picked = await databases(positionals, options["tables"] as string | undefined, io)
+	/* a generator no picked database runs would write nothing and exit 0 (F32) */
+	const runnable = GENERATORS.filter((generator) => picked.some((database) => database.generators.includes(generator)))
+	if (only !== undefined && !runnable.includes(only as Generator))
+		throw new CliError(`codegen does not run ${only} here; it runs ${runnable.join(", ")}`)
 	/* every database runs into one staged set, so nothing is written until every one succeeds (F17)
 	 * and databases sharing a package.json each see the exports the others staged */
 	const staged: Staged = new Map()

@@ -2,6 +2,7 @@
  * Cross-entity dedup: Zod expressions repeated across entities become one constant in
  * `_shared`, and every entity references it.
  */
+import { createHash } from "node:crypto"
 import type { ImportsMeta } from "../../analyzer-types.ts"
 import type { SharedSchema, TableInfo } from "./dto-types.ts"
 
@@ -81,12 +82,20 @@ function sharedBases(usage: Usage): string[] {
 		.map(([base]) => base)
 }
 
-/** Emits `_z0`, `_z1`, … into one map, in order. */
+/**
+ * Emits each shared schema under a name its own code gives, `_z_<8 hex>`, so adding a column to
+ * one table renames nothing another table's file uses (F35); a second schema whose 8 hex digits
+ * another holds takes 16
+ */
 class SharedNames {
 	readonly result = new Map<string, SharedSchema>()
+	private readonly taken = new Set<string>()
 
 	add(zodType: string, code: string, count: number): string {
-		const name = `_z${this.result.size}`
+		const digest = createHash("sha256").update(zodType).digest("hex")
+		const short = `_z_${digest.slice(0, 8)}`
+		const name = this.taken.has(short) ? `_z_${digest.slice(0, 16)}` : short
+		this.taken.add(name)
 		this.result.set(zodType, { code, count, name })
 		return name
 	}
