@@ -1,36 +1,23 @@
 // sqlite/d1/sharding/index.d.ts
-export { ShardRouter, type ShardRouterConfig } from "./router.ts";
+export { ShardRouter } from "./router.ts";
 export { shardMap } from "./shard-map.ts";
-export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardResolverDeps } from "./types.ts";
+export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, } from "./types.ts";
 
 // sqlite/d1/sharding/router.d.ts
-import type { ShardDbHandle, ShardKv, ShardMapping, ShardResolverDeps } from "./types.ts";
-/** Structural type so both `@cloudflare/workers-types` and `cloudflare:workers` satisfy it */
-type WaitUntilCtx = {
-    waitUntil: (promise: Promise<unknown>) => void;
-};
-/** Pluggable logger — defaults to no-op */
-type LogFn = (event: string, data: Record<string, unknown>) => void;
-interface ShardRouterConfig {
-    kvTtlSeconds?: number;
-    log?: LogFn;
-    lruHardTtlMs?: number;
-    lruMaxSize?: number;
-    lruTtlMs?: number;
-    maxOrgsPerShard?: number;
-    totalShards: number;
-}
+import type { ShardDbHandle, ShardKv, ShardMapping, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
 /**
  * Shard router — resolves org -> D1 database handle.
  *
  * Instantiate once per isolate (module-level) so the LRU cache persists.
- * 3-tier lookup: LRU -> KV -> Core D1; a new org goes to the shard with the most headroom.
+ * 3-tier lookup: LRU -> KV -> Core D1; a new org goes to the shard `pick` names.
  */
 declare class ShardRouter {
     private readonly kvTtlSeconds;
     private readonly log;
     private readonly lru;
-    private readonly maxOrgsPerShard;
+    /** Orgs the primary had no mapping for, so a run of requests for an unknown id reads it once */
+    private readonly misses;
+    private readonly pick;
     /** Revalidations running now, by org, so concurrent stale hits share one */
     private readonly revalidating;
     /**
@@ -49,38 +36,64 @@ declare class ShardRouter {
     /**
      * Resolve shard mapping via LRU (SWR) -> KV -> Core D1.
      * Returns undefined if org has no mapping.
-     * The core read opens a D1 session with no bookmark, so it goes to the nearest replica.
+     * The core read goes to the nearest replica, and to the primary when the replica has no
+     * mapping, which a fresh placement may not have reached yet; a miss there is remembered for
+     * missTtlMs, so a run of requests for an unknown id cannot load the primary.
      */
     resolve(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping | undefined>;
     /**
-     * Allocate a shard for an org. A soft-deleted org is revived on the shard it had, where its
-     * data is, even past the cap: moving it would leave its rows behind. A new org goes to the D1
-     * shard with the most headroom; its insert does nothing when a racing router got there first,
-     * and the row read back afterwards is the winner's. Writes go to the primary; the bookmark is
-     * kept for the reads that follow.
+     * Resolve as `resolve` does, then check with `deps.present` that the org's rows are on the shard
+     * named: a mapping cached here can predate a `move` in another isolate, since invalidate
+     * reaches only this isolate's LRU and KV. When they are not, the primary is read past every
+     * cache and its mapping, or undefined when the org is gone, is cached and returned without a
+     * second probe: when it names the shard just probed, the org's rows may not be there yet.
+     */
+    resolveVerified(orgId: string, deps: ShardVerifyDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping | undefined>;
+    /**
+     * Allocate a shard for an org: the one `pick` names, told each shard's live count. A
+     * soft-deleted org is revived on the shard it had, where its data is, without asking pick. The
+     * count is read before the insert, so two isolates allocating at once can both take a shard's
+     * last place: maxOrgsPerShard is a soft cap. Writes go to the primary; the bookmark is kept for
+     * the reads that follow.
      */
     allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping>;
+    /**
+     * Place an org on a shard the app chose. The first writer wins: an org that has a row keeps
+     * its shard, a soft-deleted one revived there, and the mapping that stands is returned, so two
+     * isolates placing one new org at once agree. To put a placed org elsewhere, `move` it.
+     */
+    place(placement: ShardPlacement, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping>;
+    /**
+     * Move an org to `shardId`, overwriting its mapping, and invalidate it here. Moving its rows is
+     * the app's; another isolate keeps routing it to the old shard until its caches expire, or
+     * until `resolveVerified` finds the rows gone.
+     */
+    move(placement: ShardPlacement, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping>;
+    /** Soft-delete an org's mapping and invalidate it here; a later allocate or place revives it on its shard */
+    unplace(orgId: string, deps: ShardResolverDeps): Promise<void>;
     /**
      * Resolve a shard mapping to a concrete D1 database handle.
      * Reads `SHARD_DB_{target}` binding from env.
      */
     getHandle(mapping: ShardMapping, env: Record<string, unknown>): ShardDbHandle;
-    /** Invalidate both cache tiers. Use after whale graduation or reassignment. */
+    /**
+     * Invalidate both cache tiers. Use after whale graduation or reassignment. It reaches this
+     * isolate's LRU and the KV; another isolate's LRU keeps the mapping until it expires.
+     */
     invalidate(orgId: string, kv: ShardKv): Promise<void>;
     private generationOf;
     private kvKey;
-    /** The D1 shard with the most remaining capacity; shards_full (503) when none has any */
-    private pickShard;
     private populateCaches;
-    /** The live mapping in the core database, read from the nearest replica; undefined when none */
-    private readMapping;
     /** One background revalidation per org at a time, however many requests see it stale */
     private revalidateOnce;
     /** Background SWR revalidation — refreshes LRU from KV or Core D1 */
     private revalidateShard;
-    private rowToMapping;
+    /** Places an org as `place` does, unchecked: an org being revived keeps the shard it had */
+    private placeFirst;
+    /** Caches the row a write left standing, this isolate's miss for the org forgotten, and returns its mapping */
+    private settle;
 }
-export { ShardRouter, type ShardRouterConfig };
+export { ShardRouter };
 
 // sqlite/d1/sharding/shard-map.d.ts
 import { type BuildColumns, type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
@@ -137,7 +150,43 @@ type ShardResolverDeps = {
     coreDb: D1Database;
     kv: ShardKv;
 };
-export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardResolverDeps };
+/** What `pick` is told about a new org: how many live orgs each D1 shard holds, absent when none */
+type ShardPickInput = {
+    counts: ReadonlyMap<number, number>;
+    orgId: string;
+    totalShards: number;
+};
+/** The shard a new org goes to, or undefined when none should take it (`shards_full`) */
+type ShardPick = (input: ShardPickInput) => number | undefined | Promise<number | undefined>;
+/** Structural type so both `@cloudflare/workers-types` and `cloudflare:workers` satisfy it */
+type WaitUntilCtx = {
+    waitUntil: (promise: Promise<unknown>) => void;
+};
+/** Pluggable logger — defaults to no-op */
+type LogFn = (event: string, data: Record<string, unknown>) => void;
+/** An org and the shard to put it on */
+type ShardPlacement = {
+    orgId: string;
+    shardId: number;
+};
+/** The deps of `resolveVerified`: those of `resolve`, and how the app checks an org's rows are on the shard a mapping names */
+type ShardVerifyDeps = ShardResolverDeps & {
+    present: (mapping: ShardMapping) => Promise<boolean>;
+};
+interface ShardRouterConfig {
+    kvTtlSeconds?: number;
+    log?: LogFn;
+    lruHardTtlMs?: number;
+    lruMaxSize?: number;
+    lruTtlMs?: number;
+    maxOrgsPerShard?: number;
+    /** How long this isolate remembers that the primary has no mapping for an org */
+    missTtlMs?: number;
+    /** The shard a new org goes to; the default takes the one with the most headroom under maxOrgsPerShard */
+    pick?: ShardPick;
+    totalShards: number;
+}
+export type { LogFn, ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx, };
 
 // sqlite/columns.d.ts
 /**

@@ -1,31 +1,42 @@
 import type { D1Database } from "@cloudflare/workers-types"
-import { and, eq, isNull, sql } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
-import { CombError } from "../../../error.ts"
 import { LruCache } from "../../../lru.ts"
-import { combErrorKeys } from "../../../types.ts"
 import { openD1Session } from "../session.ts"
+import {
+	assertShard,
+	headroomPick,
+	insertFirst,
+	overwrite,
+	pickShard,
+	readLive,
+	readLiveRow,
+	type ShardRow,
+	softDelete,
+	toMapping,
+} from "./placement.ts"
 import { shardMap } from "./shard-map.ts"
-import type { ShardDbHandle, ShardKv, ShardMapping, ShardResolverDeps } from "./types.ts"
-
-/** Structural type so both `@cloudflare/workers-types` and `cloudflare:workers` satisfy it */
-type WaitUntilCtx = { waitUntil: (promise: Promise<unknown>) => void }
+import type {
+	LogFn,
+	ShardDbHandle,
+	ShardKv,
+	ShardMapping,
+	ShardPick,
+	ShardPlacement,
+	ShardResolverDeps,
+	ShardRouterConfig,
+	ShardVerifyDeps,
+	WaitUntilCtx,
+} from "./types.ts"
 
 /** Where a resolved mapping is cached: the KV namespace, written off the request path */
 type CacheTargets = { executionCtx: WaitUntilCtx; kv: ShardKv }
 
-/** Pluggable logger — defaults to no-op */
-type LogFn = (event: string, data: Record<string, unknown>) => void
+/** Where a write's row is cached, and the bookmark of the session that wrote it */
+type SettleTargets = CacheTargets & { bookmark: string | null | undefined }
 
-interface ShardRouterConfig {
-	kvTtlSeconds?: number
-	log?: LogFn
-	lruHardTtlMs?: number
-	lruMaxSize?: number
-	lruTtlMs?: number
-	maxOrgsPerShard?: number
-	totalShards: number
-}
+/** How a write placed an org: on a new row, on its soft-deleted one, or over its live one */
+type Placement = "allocate" | "move" | "revive"
 
 const DEFAULTS = {
 	kvTtlSeconds: 60,
@@ -33,19 +44,22 @@ const DEFAULTS = {
 	lruMaxSize: 1000,
 	lruTtlMs: 5 * 60 * 1000,
 	maxOrgsPerShard: 500,
+	missTtlMs: 5000,
 } as const
 
 /**
  * Shard router — resolves org -> D1 database handle.
  *
  * Instantiate once per isolate (module-level) so the LRU cache persists.
- * 3-tier lookup: LRU -> KV -> Core D1; a new org goes to the shard with the most headroom.
+ * 3-tier lookup: LRU -> KV -> Core D1; a new org goes to the shard `pick` names.
  */
 class ShardRouter {
 	private readonly kvTtlSeconds: number
 	private readonly log: LogFn
 	private readonly lru: LruCache<string, ShardMapping>
-	private readonly maxOrgsPerShard: number
+	/** Orgs the primary had no mapping for, so a run of requests for an unknown id reads it once */
+	private readonly misses: LruCache<string, true>
+	private readonly pick: ShardPick
 	/** Revalidations running now, by org, so concurrent stale hits share one */
 	private readonly revalidating = new Map<string, Promise<void>>()
 	/**
@@ -58,14 +72,16 @@ class ShardRouter {
 
 	constructor(config: ShardRouterConfig) {
 		this.totalShards = config.totalShards
-		this.maxOrgsPerShard = config.maxOrgsPerShard ?? DEFAULTS.maxOrgsPerShard
+		this.pick = config.pick ?? headroomPick(config.maxOrgsPerShard ?? DEFAULTS.maxOrgsPerShard)
 		this.kvTtlSeconds = config.kvTtlSeconds ?? DEFAULTS.kvTtlSeconds
 		this.log = config.log ?? (() => {})
+		const maxSize = config.lruMaxSize ?? DEFAULTS.lruMaxSize
 		this.lru = new LruCache<string, ShardMapping>({
 			hardTtlMs: config.lruHardTtlMs ?? DEFAULTS.lruHardTtlMs,
-			maxSize: config.lruMaxSize ?? DEFAULTS.lruMaxSize,
+			maxSize,
 			ttlMs: config.lruTtlMs ?? DEFAULTS.lruTtlMs,
 		})
+		this.misses = new LruCache<string, true>({ maxSize, ttlMs: config.missTtlMs ?? DEFAULTS.missTtlMs })
 	}
 
 	/**
@@ -81,7 +97,9 @@ class ShardRouter {
 	/**
 	 * Resolve shard mapping via LRU (SWR) -> KV -> Core D1.
 	 * Returns undefined if org has no mapping.
-	 * The core read opens a D1 session with no bookmark, so it goes to the nearest replica.
+	 * The core read goes to the nearest replica, and to the primary when the replica has no
+	 * mapping, which a fresh placement may not have reached yet; a miss there is remembered for
+	 * missTtlMs, so a run of requests for an unknown id cannot load the primary.
 	 */
 	async resolve(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping | undefined> {
 		/* L1: per-isolate LRU with SWR */
@@ -101,10 +119,11 @@ class ShardRouter {
 			return kvValue
 		}
 
-		/* L3: Core D1 — session reads from nearest replica */
-		const mapping = await this.readMapping(orgId, deps)
+		/* L3: Core D1, unless the primary missed it just now */
+		const mapping = this.misses.get(orgId) ? undefined : await readLive(deps.coreDb, orgId)
 		if (!mapping) {
 			this.log("shard-router.miss", { orgId })
+			if (this.generationOf(orgId) === generation) this.misses.set(orgId, true)
 			return undefined
 		}
 		this.log("shard-router.hit", { orgId, tier: "d1" })
@@ -113,36 +132,68 @@ class ShardRouter {
 	}
 
 	/**
-	 * Allocate a shard for an org. A soft-deleted org is revived on the shard it had, where its
-	 * data is, even past the cap: moving it would leave its rows behind. A new org goes to the D1
-	 * shard with the most headroom; its insert does nothing when a racing router got there first,
-	 * and the row read back afterwards is the winner's. Writes go to the primary; the bookmark is
-	 * kept for the reads that follow.
+	 * Resolve as `resolve` does, then check with `deps.present` that the org's rows are on the shard
+	 * named: a mapping cached here can predate a `move` in another isolate, since invalidate
+	 * reaches only this isolate's LRU and KV. When they are not, the primary is read past every
+	 * cache and its mapping, or undefined when the org is gone, is cached and returned without a
+	 * second probe: when it names the shard just probed, the org's rows may not be there yet.
+	 */
+	async resolveVerified(
+		orgId: string,
+		deps: ShardVerifyDeps,
+		executionCtx: WaitUntilCtx,
+	): Promise<ShardMapping | undefined> {
+		const cached = await this.resolve(orgId, deps, executionCtx)
+		if (!cached || (await deps.present(cached))) return cached
+		const { mapping } = await readLiveRow(deps.coreDb, orgId, "first-primary")
+		this.log("shard-router.reresolve", { from: cached.shardId, orgId, to: mapping?.shardId })
+		await this.invalidate(orgId, deps.kv)
+		if (mapping) this.populateCaches(orgId, mapping, { executionCtx, kv: deps.kv })
+		return mapping
+	}
+
+	/**
+	 * Allocate a shard for an org: the one `pick` names, told each shard's live count. A
+	 * soft-deleted org is revived on the shard it had, where its data is, without asking pick. The
+	 * count is read before the insert, so two isolates allocating at once can both take a shard's
+	 * last place: maxOrgsPerShard is a soft cap. Writes go to the primary; the bookmark is kept for
+	 * the reads that follow.
 	 */
 	async allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
+		const db = drizzle(openD1Session(deps.coreDb).client)
+		const existing = await db.select().from(shardMap).where(eq(shardMap.org_id, orgId)).get()
+		const shardId = existing?.shard_id ?? (await pickShard(db, this.pick, { orgId, totalShards: this.totalShards }))
+		return this.placeFirst({ orgId, shardId }, deps, executionCtx)
+	}
+
+	/**
+	 * Place an org on a shard the app chose. The first writer wins: an org that has a row keeps
+	 * its shard, a soft-deleted one revived there, and the mapping that stands is returned, so two
+	 * isolates placing one new org at once agree. To put a placed org elsewhere, `move` it.
+	 */
+	async place(placement: ShardPlacement, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
+		assertShard(placement.shardId, this.totalShards)
+		return this.placeFirst(placement, deps, executionCtx)
+	}
+
+	/**
+	 * Move an org to `shardId`, overwriting its mapping, and invalidate it here. Moving its rows is
+	 * the app's; another isolate keeps routing it to the old shard until its caches expire, or
+	 * until `resolveVerified` finds the rows gone.
+	 */
+	async move(placement: ShardPlacement, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
+		const { orgId, shardId } = placement
+		assertShard(shardId, this.totalShards)
 		const { client, session } = openD1Session(deps.coreDb)
-		const db = drizzle(client)
-		const byOrg = eq(shardMap.org_id, orgId)
+		const row = await overwrite(drizzle(client), orgId, shardId)
+		await this.invalidate(orgId, deps.kv)
+		return this.settle(row, "move", { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv })
+	}
 
-		const existing = await db.select().from(shardMap).where(byOrg).get()
-		const revived = existing !== undefined && existing.deleted_at !== null
-		if (revived) {
-			await db.update(shardMap).set({ deleted_at: null, updated_at: Date.now() }).where(byOrg)
-		} else if (existing === undefined) {
-			const shardId = await this.pickShard(db)
-			await db
-				.insert(shardMap)
-				.values({ driver: "d1", org_id: orgId, shard_id: shardId, target: String(shardId) })
-				.onConflictDoNothing({ target: shardMap.org_id })
-		}
-
-		/* the row that stands now: revived, this router's, or a racer's that got there first */
-		const winner = await db.select().from(shardMap).where(byOrg).get()
-		const mapping = this.rowToMapping(winner as typeof shardMap.$inferSelect)
-		mapping.d1Bookmark = session?.getBookmark() ?? undefined
-		this.log("shard-router.allocate", { orgId, shardId: mapping.shardId, ...(revived ? { revived: true } : {}) })
-		this.populateCaches(orgId, mapping, { executionCtx, kv: deps.kv })
-		return mapping
+	/** Soft-delete an org's mapping and invalidate it here; a later allocate or place revives it on its shard */
+	async unplace(orgId: string, deps: ShardResolverDeps): Promise<void> {
+		await softDelete(drizzle(openD1Session(deps.coreDb).client), orgId)
+		await this.invalidate(orgId, deps.kv)
 	}
 
 	/**
@@ -157,10 +208,14 @@ class ShardRouter {
 		return { driver: "d1", handle: binding as D1Database }
 	}
 
-	/** Invalidate both cache tiers. Use after whale graduation or reassignment. */
+	/**
+	 * Invalidate both cache tiers. Use after whale graduation or reassignment. It reaches this
+	 * isolate's LRU and the KV; another isolate's LRU keeps the mapping until it expires.
+	 */
 	async invalidate(orgId: string, kv: ShardKv): Promise<void> {
 		this.generations.set(orgId, this.generationOf(orgId) + 1)
 		this.lru.delete(orgId)
+		this.misses.delete(orgId)
 		await kv.delete(this.kvKey(orgId))
 	}
 
@@ -174,35 +229,6 @@ class ShardRouter {
 		return `shard:${orgId}`
 	}
 
-	/** The D1 shard with the most remaining capacity; shards_full (503) when none has any */
-	private async pickShard(db: ReturnType<typeof drizzle>): Promise<number> {
-		const counts = await db
-			.select({ count: sql<number>`count(*)`.as("count"), shardId: shardMap.shard_id })
-			.from(shardMap)
-			.where(and(eq(shardMap.driver, "d1"), isNull(shardMap.deleted_at)))
-			.groupBy(shardMap.shard_id)
-			.all()
-		const usage = new Map(counts.map((row) => [row.shardId, row.count]))
-		let best = -1
-		let bestHeadroom = 0
-		for (let shard = 0; shard < this.totalShards; shard++) {
-			const headroom = this.maxOrgsPerShard - (usage.get(shard) ?? 0)
-			if (headroom > bestHeadroom) {
-				bestHeadroom = headroom
-				best = shard
-			}
-		}
-		if (best === -1) {
-			/* an operator capacity problem, not the client's: provision another D1 database */
-			throw new CombError({
-				cause: "No shard has capacity for a new organization.",
-				errorKey: combErrorKeys.SHARDS_FULL,
-				status: "service_unavailable",
-			})
-		}
-		return best
-	}
-
 	private populateCaches(orgId: string, mapping: ShardMapping, { executionCtx, kv }: CacheTargets): void {
 		this.lru.set(orgId, mapping)
 		executionCtx.waitUntil(
@@ -210,21 +236,6 @@ class ShardRouter {
 				expirationTtl: this.kvTtlSeconds,
 			}),
 		)
-	}
-
-	/** The live mapping in the core database, read from the nearest replica; undefined when none */
-	private async readMapping(orgId: string, deps: ShardResolverDeps): Promise<ShardMapping | undefined> {
-		/* a lagging replica that misses a fresh mapping sends the request to allocate, which reads the primary */
-		const { client, session } = openD1Session(deps.coreDb, { constraint: "first-unconstrained" })
-		const row = await drizzle(client)
-			.select()
-			.from(shardMap)
-			.where(and(eq(shardMap.org_id, orgId), isNull(shardMap.deleted_at)))
-			.get()
-		if (!row) return undefined
-		const mapping = this.rowToMapping(row)
-		mapping.d1Bookmark = session?.getBookmark() ?? undefined
-		return mapping
 	}
 
 	/** One background revalidation per org at a time, however many requests see it stale */
@@ -245,7 +256,7 @@ class ShardRouter {
 				if (current()) this.lru.set(orgId, kvValue)
 				return
 			}
-			const mapping = await this.readMapping(orgId, deps)
+			const mapping = await readLive(deps.coreDb, orgId)
 			if (!current()) return
 			if (!mapping) {
 				/* the core database has no live row: the org is gone, so the stale entry stops routing it now */
@@ -260,17 +271,30 @@ class ShardRouter {
 		}
 	}
 
-	private rowToMapping(row: typeof shardMap.$inferSelect): ShardMapping {
-		return {
-			createdAt: row.created_at,
-			deletedAt: row.deleted_at,
-			driver: row.driver,
-			orgId: row.org_id,
-			shardId: row.shard_id,
-			target: row.target,
-			updatedAt: row.updated_at,
-		}
+	/** Places an org as `place` does, unchecked: an org being revived keeps the shard it had */
+	private async placeFirst(
+		{ orgId, shardId }: ShardPlacement,
+		deps: ShardResolverDeps,
+		executionCtx: WaitUntilCtx,
+	): Promise<ShardMapping> {
+		const { client, session } = openD1Session(deps.coreDb)
+		const { revived, row } = await insertFirst(drizzle(client), orgId, shardId)
+		const targets = { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv }
+		return this.settle(row, revived ? "revive" : "allocate", targets)
+	}
+
+	/** Caches the row a write left standing, this isolate's miss for the org forgotten, and returns its mapping */
+	private settle(row: ShardRow, how: Placement, { bookmark, ...targets }: SettleTargets): ShardMapping {
+		const mapping = toMapping(row, bookmark)
+		const data = { orgId: row.org_id, shardId: row.shard_id }
+		this.log(
+			`shard-router.${how === "move" ? "move" : "allocate"}`,
+			how === "revive" ? { ...data, revived: true } : data,
+		)
+		this.misses.delete(row.org_id)
+		this.populateCaches(row.org_id, mapping, targets)
+		return mapping
 	}
 }
 
-export { ShardRouter, type ShardRouterConfig }
+export { ShardRouter }

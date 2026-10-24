@@ -29,4 +29,49 @@ type ShardResolverDeps = {
 	kv: ShardKv
 }
 
-export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardResolverDeps }
+/** What `pick` is told about a new org: how many live orgs each D1 shard holds, absent when none */
+type ShardPickInput = { counts: ReadonlyMap<number, number>; orgId: string; totalShards: number }
+
+/** The shard a new org goes to, or undefined when none should take it (`shards_full`) */
+type ShardPick = (input: ShardPickInput) => number | undefined | Promise<number | undefined>
+
+/** Structural type so both `@cloudflare/workers-types` and `cloudflare:workers` satisfy it */
+type WaitUntilCtx = { waitUntil: (promise: Promise<unknown>) => void }
+
+/** Pluggable logger — defaults to no-op */
+type LogFn = (event: string, data: Record<string, unknown>) => void
+
+/** An org and the shard to put it on */
+type ShardPlacement = { orgId: string; shardId: number }
+
+/** The deps of `resolveVerified`: those of `resolve`, and how the app checks an org's rows are on the shard a mapping names */
+type ShardVerifyDeps = ShardResolverDeps & { present: (mapping: ShardMapping) => Promise<boolean> }
+
+interface ShardRouterConfig {
+	kvTtlSeconds?: number
+	log?: LogFn
+	lruHardTtlMs?: number
+	lruMaxSize?: number
+	lruTtlMs?: number
+	maxOrgsPerShard?: number
+	/** How long this isolate remembers that the primary has no mapping for an org */
+	missTtlMs?: number
+	/** The shard a new org goes to; the default takes the one with the most headroom under maxOrgsPerShard */
+	pick?: ShardPick
+	totalShards: number
+}
+
+export type {
+	LogFn,
+	ShardDbHandle,
+	ShardDriver,
+	ShardKv,
+	ShardMapping,
+	ShardPick,
+	ShardPickInput,
+	ShardPlacement,
+	ShardResolverDeps,
+	ShardRouterConfig,
+	ShardVerifyDeps,
+	WaitUntilCtx,
+}
