@@ -23,6 +23,13 @@ const DDL = [
 	)`,
 	"INSERT INTO org VALUES ('o1')",
 	"INSERT INTO member (id, email) VALUES ('m1', 'reset@x')",
+	/* U23: a composite key mapped on its first column, as codegen writes it, and a key no map lists */
+	"CREATE TABLE parent (a TEXT, b TEXT, PRIMARY KEY (a, b))",
+	"CREATE TABLE child (id TEXT PRIMARY KEY, pa TEXT, pb TEXT, FOREIGN KEY (pa, pb) REFERENCES parent (a, b))",
+	"CREATE TABLE team (id TEXT PRIMARY KEY, name TEXT, owner_id TEXT REFERENCES org(id))",
+	"INSERT INTO parent VALUES ('x', '1')",
+	"INSERT INTO child VALUES ('c1', 'x', '1')",
+	"INSERT INTO team VALUES ('t1', 'one', 'o1')",
 ]
 
 const MAPS: ConstraintMap[] = [
@@ -123,5 +130,43 @@ describe("d1ErrorHandler on Miniflare: a trigger's RAISE", () => {
 			errorKey: "constraint_violation",
 			status: 400,
 		})
+	})
+})
+
+/* U23 of the 0.13.0 round, on D1: an UPDATE of a foreign key column the map does not list */
+describe("d1ErrorHandler on Miniflare: an UPDATE of a foreign key column the map does not list (U23)", () => {
+	let harness: D1Harness
+
+	beforeEach(async () => {
+		harness = await d1Memory()
+		for (const statement of DDL) await harness.CORE.prepare(statement).run()
+	})
+
+	afterEach(() => harness.dispose())
+
+	const PARTIAL: ConstraintMap[] = [
+		{
+			child: { foreignKey: { pa: { cause: "No such parent", errorKey: "child_parent_missing" } } },
+			team: { primaryKey: { cause: "Team exists", errorKey: "team_id_taken" } },
+		},
+	]
+
+	it.each([
+		["the second column of a composite key", "UPDATE child SET pb = '9' WHERE id = 'c1'", "child"],
+		["a key the map leaves out", "UPDATE team SET owner_id = 'nope' WHERE id = 't1'", "team"],
+	])("answers %s with the neutral cause", async (_, statement, table) => {
+		const failure = await drizzle(harness.CORE)
+			.run(sql.raw(statement))
+			.then(
+				() => new Error("the statement did not fail"),
+				(error: unknown) => error,
+			)
+		expect(() => d1ErrorHandler(failure, PARTIAL)).toThrow(
+			expect.objectContaining({
+				cause: "Referenced record does not exist or is still in use",
+				errorKey: "foreign_key_violation",
+				table,
+			}),
+		)
 	})
 })

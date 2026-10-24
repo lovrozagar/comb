@@ -134,6 +134,54 @@ describe("bun:sqlite constraint errors map like libsql's", () => {
 	})
 })
 
+/* U23 of the 0.13.0 round, on bun:sqlite: an UPDATE of a foreign key column the map does not list */
+describe("bun:sqlite answers an UPDATE of a foreign key column the map does not list neutrally (U23)", () => {
+	const PARTIAL: ConstraintMap[] = [
+		{
+			child: { foreignKey: { pa: { cause: "No such parent", errorKey: "child_parent_missing" } } },
+			team: { primaryKey: { cause: "Team exists", errorKey: "team_id_taken" } },
+		},
+	]
+
+	/** What sqliteErrorHandler throws for `statement` on the U23 schema */
+	function thrownBy(statement: string): CombError | undefined {
+		const sqlite = new Database(":memory:")
+		for (const ddl of [
+			"PRAGMA foreign_keys = ON",
+			"CREATE TABLE org (id TEXT PRIMARY KEY)",
+			"INSERT INTO org VALUES ('o1')",
+			"CREATE TABLE parent (a TEXT, b TEXT, PRIMARY KEY (a, b))",
+			"CREATE TABLE child (id TEXT PRIMARY KEY, pa TEXT, pb TEXT, FOREIGN KEY (pa, pb) REFERENCES parent (a, b))",
+			"CREATE TABLE team (id TEXT PRIMARY KEY, name TEXT, owner_id TEXT REFERENCES org(id))",
+			"INSERT INTO parent VALUES ('x', '1')",
+			"INSERT INTO child VALUES ('c1', 'x', '1')",
+			"INSERT INTO team VALUES ('t1', 'one', 'o1')",
+		])
+			sqlite.run(ddl)
+		try {
+			drizzle({ client: sqlite }).run(sql.raw(statement))
+		} catch (error) {
+			try {
+				sqliteErrorHandler(error, PARTIAL)
+			} catch (thrown) {
+				return thrown as CombError
+			}
+		}
+		return undefined
+	}
+
+	it.each([
+		["UPDATE child SET pb = '9' WHERE id = 'c1'", "child"],
+		["UPDATE team SET owner_id = 'nope' WHERE id = 't1'", "team"],
+	])("%s answers the neutral cause", (statement, table) => {
+		expect(thrownBy(statement)).toMatchObject({
+			cause: "Referenced record does not exist or is still in use",
+			errorKey: "foreign_key_violation",
+			table,
+		})
+	})
+})
+
 /* required, as in the vitest suites: a run without the server would pass with these skipped */
 const PG_URL = process.env.COMB_TEST_PG_URL ?? ""
 if (PG_URL === "") throw new Error("COMB_TEST_PG_URL is unset: the Bun.SQL cases are required (docs/testing.md)")

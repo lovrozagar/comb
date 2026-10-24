@@ -38,6 +38,13 @@ const DDL = [
 	"INSERT INTO author VALUES ('a1')",
 	"INSERT INTO post VALUES ('p1', 'a1')",
 	"INSERT INTO comment VALUES ('c1', 'p1')",
+	/* U23: a composite key mapped on its first column, as codegen writes it, and a key no map lists */
+	"CREATE TABLE parent (a TEXT, b TEXT, PRIMARY KEY (a, b))",
+	"CREATE TABLE child (id TEXT PRIMARY KEY, pa TEXT, pb TEXT, FOREIGN KEY (pa, pb) REFERENCES parent (a, b))",
+	"CREATE TABLE team (id TEXT PRIMARY KEY, name TEXT, owner_id TEXT REFERENCES org(id))",
+	"INSERT INTO parent VALUES ('x', '1')",
+	"INSERT INTO child VALUES ('c1', 'x', '1')",
+	"INSERT INTO team VALUES ('t1', 'one', 'o1')",
 ]
 
 const MAPS: ConstraintMap[] = [
@@ -333,5 +340,39 @@ INSERT INTO "line-item" VALUES ('l1', 'A');`)
 		} finally {
 			harness.close()
 		}
+	})
+})
+
+/* U23 of the 0.13.0 round: a map may not list every foreign key, so an UPDATE of a column it does
+   not list may have broken the table's own key: the neutral cause, never "still referenced" */
+const PARTIAL: ConstraintMap[] = [
+	{
+		child: { foreignKey: { pa: { cause: "No such parent", errorKey: "child_parent_missing" } } },
+		team: { primaryKey: { cause: "Team exists", errorKey: "team_id_taken" } },
+	},
+]
+
+describe("sqliteErrorHandler on libsql: an UPDATE of a foreign key column the map does not list (U23)", () => {
+	const db = useMemberDb()
+
+	it.each([
+		["the second column of a composite key", "UPDATE child SET pb = '9' WHERE id = 'c1'", "child"],
+		["a key the map leaves out", "UPDATE team SET owner_id = 'nope' WHERE id = 't1'", "team"],
+	])("answers %s with the neutral cause", async (_, statement, table) => {
+		expect(await classify(db(), statement, { maps: PARTIAL })).toMatchObject({
+			cause: "Referenced record does not exist or is still in use",
+			errorKey: "foreign_key_violation",
+			status: 409,
+			table,
+		})
+	})
+
+	it("still names the listed key, and still calls a delete's failure the other side", async () => {
+		expect(await classify(db(), "UPDATE child SET pa = 'nope' WHERE id = 'c1'", { maps: PARTIAL })).toMatchObject({
+			errorKey: "child_parent_missing",
+		})
+		expect(await classify(db(), "DELETE FROM parent WHERE a = 'x'", { maps: PARTIAL })).toMatchObject({
+			cause: "The record is still referenced by other records",
+		})
 	})
 })

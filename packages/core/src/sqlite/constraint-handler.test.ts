@@ -369,10 +369,11 @@ describe("sqliteErrorHandler: an UPDATE behind a foreign key violation", () => {
 		})
 	})
 
-	it("reads an UPDATE of any other column, the referenced key itself among them, as the other side, as a delete is", () => {
+	/* U23 of the 0.13.0 round: a map need not list every key, so which side failed is unknown: the neutral cause */
+	it("answers an UPDATE of any other column with the neutral cause, never the table's own key", () => {
 		for (const query of ['update "store" set "id" = ? where "id" = ?', 'update or abort "store" set "name" = ?'])
 			expect(fk(query)).toMatchObject({
-				cause: "The record is still referenced by other records",
+				cause: "Referenced record does not exist or is still in use",
 				column: undefined,
 				errorKey: "foreign_key_violation",
 				table: "store",
@@ -388,7 +389,7 @@ describe("sqliteErrorHandler: an UPDATE's own keys, read whole", () => {
 
 	it("reads no column inside a literal (U6b)", () => {
 		expect(fk('update "store" set "slug" = \'x, owner_id = 1\'')).toMatchObject({
-			cause: "The record is still referenced by other records",
+			cause: "Referenced record does not exist or is still in use",
 		})
 	})
 
@@ -397,13 +398,16 @@ describe("sqliteErrorHandler: an UPDATE's own keys, read whole", () => {
 			'update "store" indexed by "store_slug" set "slug" = ?',
 			'update "store" not indexed set "slug" = ?',
 		])
-			expect(fk(query)).toMatchObject({ cause: "The record is still referenced by other records" })
+			expect(fk(query)).toMatchObject({
+				cause: "Referenced record does not exist or is still in use",
+				column: undefined,
+			})
 	})
 
 	it("reads an UPDATE of a table with no foreign key, or two, by every key its map lists (U6d)", () => {
 		for (const query of ['update "legacy" set "id" = ?', 'update "multi" set "name" = ?'])
 			expect(fk(query)).toMatchObject({
-				cause: "The record is still referenced by other records",
+				cause: "Referenced record does not exist or is still in use",
 				errorKey: "foreign_key_violation",
 			})
 		expect(fk('update "multi" set "a_id" = ?')).toMatchObject({

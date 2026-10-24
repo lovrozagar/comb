@@ -118,9 +118,9 @@ const MISSING_OR_REFERENCED = "Referenced record does not exist or is still in u
 
 /* SQLite's FOREIGN KEY message names neither table nor column; the statement's target table
  * does, and a table with one foreign key leaves no doubt about the column. A DELETE can only
- * fail on the other side, a row that references the deleted one, so no key of its own is blamed;
- * nor can an UPDATE whose SET list assigns none of the foreign key columns the table's maps list, as
- * one of a referenced key does (U6). */
+ * fail on the other side, a row that references the deleted one, so no key of its own is blamed.
+ * An UPDATE whose SET list assigns none of the foreign key columns the table's maps list blames no
+ * key of its own either (U6), and says neither side: a map need not list every key (U23). */
 function foreignKey(v: Violation): CombError {
 	const table = statementTable(v.read.query)
 	let column: string | undefined
@@ -133,10 +133,10 @@ function foreignKey(v: Violation): CombError {
 		return own(t.foreignKey, column)
 	})
 	const assigned = updatedColumns(v.read.query)
-	const otherSide =
-		/^delete\b/i.test(statementHead(v.read.query ?? "")) ||
-		(assigned !== undefined && keys !== undefined && !assigned.some((name) => keys?.includes(name) === true))
-	if (otherSide) {
+	/* an UPDATE that sets none of the keys a map lists may still have broken one the map leaves out,
+	   a composite key's later column among them: which side failed is unknown (U23) */
+	const unlisted = assigned !== undefined && !assigned.some((name) => keys?.includes(name) === true)
+	if (/^delete\b/i.test(statementHead(v.read.query ?? ""))) {
 		const fallback = {
 			cause: STILL_REFERENCED,
 			errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
@@ -149,6 +149,7 @@ function foreignKey(v: Violation): CombError {
 		errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
 		status: "conflict",
 	} as const
+	if (unlisted) return toError(v, { entry: undefined, fallback, table })
 	return toError(v, { column: entry === undefined ? undefined : column, entry, fallback, table })
 }
 
