@@ -86,17 +86,15 @@ const inSeconds = (column: SQLWrapper | undefined): boolean =>
 	(column as unknown as { mode?: unknown }).mode === "timestamp"
 
 /**
- * A Date on a seconds-mode timestamp key as the exact seconds it holds, fraction kept (U10): a row
- * stored at 1700000000.25 would otherwise compare greater than its own cursor, floored to 1700000000
+ * A Date on a seconds-mode timestamp key as the seconds it holds, to the millisecond (U10): drizzle
+ * would floor it to the second. A key the keyset can read from its row reads it there instead
+ * (cursor-ref.ts), as a stored fraction below a millisecond is one no Date holds.
  */
 const exactSeconds = (value: Date): SQL => sql`${value.getTime() / 1000}`
 
 /** The cursor's values as the keys bind them: a Date on a key declared as time as its epoch milliseconds, a safe bigint as a number */
 const boundForKeys = (columns: readonly SQLWrapper[], values: readonly unknown[]): unknown[] =>
-	values.map((value, i) => {
-		if (columns[i] instanceof DateKey && value instanceof Date) return value.getTime()
-		return value instanceof Date && inSeconds(columns[i]) ? exactSeconds(value) : bindable(value)
-	})
+	values.map((value, i) => (columns[i] instanceof DateKey && value instanceof Date ? value.getTime() : bindable(value)))
 
 /** Throw a 400 unless every cursor value, the tiebreak id last, fits its column */
 function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unknown[]): void {
@@ -105,9 +103,7 @@ function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unkno
 }
 
 /** A cursor value as `column`'s driver binds it: SQLite's way on a SQLite column, as it is elsewhere (Postgres reads 'Infinity') */
-const bindableOn = (column: SQLWrapper | undefined, value: unknown): unknown => {
-	if (value instanceof Date && inSeconds(column)) return exactSeconds(value)
-	return is(column, SQLiteColumn) ? bindable(value) : value
-}
+const bindableOn = (column: SQLWrapper | undefined, value: unknown): unknown =>
+	is(column, SQLiteColumn) ? bindable(value) : value
 
-export { assertCursorFits, bindable, bindableOn, boundForKeys, DateKey }
+export { assertCursorFits, bindable, bindableOn, boundForKeys, DateKey, exactSeconds, inSeconds }

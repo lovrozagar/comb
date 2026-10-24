@@ -45,16 +45,16 @@ const countLiteral = (value: number): SQL => sql.raw(countText(value))
 
 /**
  * A bound the keyset reads from the cursor's own row (cursor-ref.ts) rather than binds: a long text
- * value carried by reference, or a SQLite number the cursor carried as null, which may be a
- * ±Infinity D1 hands over as null. Each is SQL that binds, so the keyset reads it twice at most;
+ * value carried by reference, or a seconds-mode timestamp, whose fraction no Date holds (`row`); or
+ * a SQLite number the cursor carried as null, which may be a ±Infinity D1 hands over as null. Each is SQL that binds, so the keyset reads it twice at most;
  * `ends` when a NULL bound means no bound is safe, and the list ends there.
  */
 class AnchorBound {
 	readonly ends: boolean
-	readonly kind: "infinite" | "text"
+	readonly kind: "infinite" | "row"
 	readonly value: SQL
 
-	constructor(kind: "infinite" | "text", value: SQL, ends = false) {
+	constructor(kind: "infinite" | "row", value: SQL, ends = false) {
 		this.ends = ends
 		this.kind = kind
 		this.value = value

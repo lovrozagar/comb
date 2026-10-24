@@ -23,7 +23,7 @@ const schema = createListQuerySchema({ sort: ["at"], pagination: { defaultLimit:
 async function seeded() {
 	const harness = libsqlMemory()
 	await harness.client.executeMultiple(
-		"CREATE TABLE event (id INTEGER PRIMARY KEY, at INTEGER NOT NULL);\nINSERT INTO event VALUES (1, 1700000000.25), (2, 1700000000.75), (3, 1700000001), (4, 1699999999.5);",
+		"CREATE TABLE event (id INTEGER PRIMARY KEY, at INTEGER NOT NULL);\nINSERT INTO event VALUES (1, 1700000000.25), (2, 1700000000.75), (3, 1700000001), (4, 1699999999.5), (5, 1700000000.1234567), (6, 1700000000.1234568);",
 	)
 	return harness
 }
@@ -44,8 +44,8 @@ async function pageAll(page: Page): Promise<number[]> {
 
 describe("keyset pagination on a seconds-mode timestamp holding fractions (U10)", () => {
 	it.each([
-		["at.asc", [4, 1, 2, 3]],
-		["at.desc", [3, 2, 1, 4]],
+		["at.asc", [4, 5, 6, 1, 2, 3]],
+		["at.desc", [3, 2, 1, 6, 5, 4]],
 	])("pages %s exactly through buildListQuery and listOptions", async (order, want) => {
 		const harness = await seeded()
 		try {
@@ -67,6 +67,38 @@ describe("keyset pagination on a seconds-mode timestamp holding fractions (U10)"
 				return { ids: items.map((row) => row.id), next: meta.nextCursor }
 			})
 			expect(relational).toEqual(want)
+		} finally {
+			harness.close()
+		}
+	})
+})
+
+/* the 3.3 review of U10: a fraction below a millisecond, which no Date holds, is read from the cursor's row;
+   once that row is gone the cursor's milliseconds bound it, toward repeating a row of that millisecond, never skipping one */
+describe("keyset pagination on a seconds-mode timestamp, its cursor row deleted", () => {
+	it.each([
+		["at.asc", [4, 5, 6, 1, 2, 3]],
+		["at.desc", [3, 2, 1, 6, 5, 4]],
+	])("pages %s on from the cursor's milliseconds once its row is gone", async (order, want) => {
+		const harness = await seeded()
+		try {
+			let deleted = false
+			const seen = await pageAll(async (cursor) => {
+				const parsed = schema.parse({ cursor, order })
+				const rows = await applyListQuery(
+					harness.db.select().from(event).$dynamic(),
+					buildListQuery({ ...SEALED, parsed, table: event }),
+				)
+				const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+				/* the first row a page ends on whose fraction no Date holds goes before the next page */
+				const last = items.at(-1)?.id
+				if (!deleted && (last === 5 || last === 6)) {
+					deleted = true
+					await harness.client.execute({ args: [last], sql: "DELETE FROM event WHERE id = ?" })
+				}
+				return { ids: items.map((row) => row.id), next: meta.nextCursor }
+			})
+			expect(seen).toEqual(want)
 		} finally {
 			harness.close()
 		}

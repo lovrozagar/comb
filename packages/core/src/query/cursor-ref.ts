@@ -32,6 +32,7 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { createCursor, CursorRef, MAX_CURSOR_LENGTH } from "./cursor.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
+import { inSeconds } from "./sqlite/cursor-fit.ts"
 import { AnchorBound, countLiteral, type SortKey } from "./sqlite/keyset.ts"
 import type { SortField } from "./types.ts"
 
@@ -137,6 +138,18 @@ function textBound(key: SortKey, ref: CursorRef, at: Anchor): SQL {
 	return sql`(SELECT CASE WHEN ${head} = comb_anchor.v AND ${size} = ${countLiteral(ref.length)} THEN ${column} ELSE ${fallback} END FROM (SELECT ${prefix} AS v) AS comb_anchor LEFT JOIN ${fromOf(at.table)} ON ${at.tiebreak} = ${at.id})`
 }
 
+/**
+ * A Date on a seconds-mode SQLite timestamp key: the row's own value, whose fraction below a
+ * millisecond no Date holds (U10); once the row is gone, the cursor's milliseconds, rounded toward
+ * the rows already served, so a row of that millisecond may come again and none is skipped. The
+ * milliseconds are literals, so the bound costs the id alone.
+ */
+function secondsBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
+	const ms = value.getTime() + (direction === "asc" ? 0 : 1)
+	const fallback = sql`(${ms < 0 ? sql`-` : sql``}${countLiteral(Math.abs(ms))} / 1000.0)`
+	return sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${fallback})`
+}
+
 /** Whether `column` is a SQLite number, which D1 may hand over as null when it holds ±Infinity */
 const holdsInfinity = (column: SQLWrapper) =>
 	is(column, SQLiteColumn) && (column.dataType.startsWith("number") || column.dataType === "object date")
@@ -158,13 +171,14 @@ function assertNoReference(values: readonly unknown[]): void {
 
 /**
  * The cursor's values with each one the row must supply read from `table`, the row keyed `id` by
- * `tiebreak`: a reference, and a null on a SQLite number key
+ * `tiebreak`: a reference, a Date on a seconds-mode timestamp key, and a null on a SQLite number key
  */
 function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anchor): unknown[] {
 	return values.map((value, i) => {
 		const key = keys[i] as SortKey
 		if (value instanceof CursorRef)
-			return new AnchorBound("text", textBound(key, value, at), !is(key.column, SQLiteColumn))
+			return new AnchorBound("row", textBound(key, value, at), !is(key.column, SQLiteColumn))
+		if (value instanceof Date && inSeconds(key.column)) return new AnchorBound("row", secondsBound(key, value, at))
 		return value === null && holdsInfinity(key.column) ? new AnchorBound("infinite", infiniteBound(key, at)) : value
 	})
 }

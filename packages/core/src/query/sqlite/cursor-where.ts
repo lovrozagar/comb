@@ -9,7 +9,7 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core"
 import { type CursorId, type CursorOptions, readCursor } from "../cursor.ts"
 import { anchored, assertNoReference } from "../cursor-ref.ts"
 import type { SortField } from "../types.ts"
-import { assertCursorFits, bindable, boundForKeys } from "./cursor-fit.ts"
+import { assertCursorFits, bindable, boundForKeys, exactSeconds, inSeconds } from "./cursor-fit.ts"
 import { keysetSQL, type SortKey } from "./keyset.ts"
 
 /** What resuming after a cursor needs: it, how it was sealed, the sort, the keys, and the table */
@@ -30,7 +30,11 @@ function cursorWhere({ cursor: given, keys, options, sort, table, tiebreak }: Cu
 	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id])
 	const id = bindable(cursor.id) as CursorId
 	const bound = boundForKeys(columns, cursor.values)
-	const values = table === undefined ? bound : anchored(keys, bound, { id, table, tiebreak: tiebreak.column })
+	/* a list with no table binds a seconds-mode timestamp to the millisecond; one with a table reads it from the row */
+	const values =
+		table === undefined
+			? bound.map((value, i) => (value instanceof Date && inSeconds(columns[i]) ? exactSeconds(value) : value))
+			: anchored(keys, bound, { id, table, tiebreak: tiebreak.column })
 	return keysetSQL({ id, keys, tiebreak, values })
 }
 

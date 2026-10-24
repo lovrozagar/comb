@@ -1,7 +1,7 @@
 /**
  * U1 of the 0.12 round: the README budgets 10 bound parameters for a three-key cursor, so a page of
  * the largest request the list schema accepts fits D1's 100. A key the keyset reads from the row
- * (a long text by reference, a SQLite number the cursor carried as null) must keep within it too,
+ * (a long text by reference, a SQLite number the cursor carried as null, a seconds-mode time) must keep within it too,
  * through both builders, whatever mix the keys hold and however they sort.
  */
 import { SQLiteDialect, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
@@ -13,6 +13,9 @@ import { cursorWhere } from "./sqlite/cursor-where.ts"
 import { SEALED } from "./__fixtures__/cursor-secret.ts"
 
 const t = sqliteTable("t", {
+	d1: integer("d1", { mode: "timestamp" }),
+	d2: integer("d2", { mode: "timestamp" }),
+	d3: integer("d3", { mode: "timestamp" }),
 	id: integer("id").primaryKey(),
 	r1: real("r1"),
 	r2: real("r2"),
@@ -21,14 +24,14 @@ const t = sqliteTable("t", {
 	s2: text("s2"),
 	s3: text("s3"),
 })
-const COLUMNS = ["s1", "s2", "s3", "r1", "r2", "r3"] as const
+const COLUMNS = ["s1", "s2", "s3", "r1", "r2", "r3", "d1", "d2", "d3"] as const
 const schema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 1 }, sort: [...COLUMNS] })
 const dialect = new SQLiteDialect()
 const LONG = "長".repeat(3000)
 
-/** What a key holds on the cursor's row: a short text, a long text carried by reference, or a null number */
-type Kind = "null" | "plain" | "ref"
-const KINDS: Kind[] = ["plain", "ref", "null"]
+/** What a key holds on the cursor's row: a short text, a long text carried by reference, a null number, or a seconds-mode time */
+type Kind = "null" | "plain" | "ref" | "time"
+const KINDS: Kind[] = ["plain", "ref", "null", "time"]
 const MIXES: Kind[][] = KINDS.flatMap((a) => KINDS.flatMap((b) => KINDS.map((c) => [a, b, c])))
 const ORDERS = [
 	["asc", "asc", "asc"],
@@ -41,8 +44,9 @@ const ORDERS = [
 function request(mix: readonly Kind[], order: readonly string[]) {
 	const row: Record<string, unknown> = { id: 7, r1: 1, r2: 2, r3: 3, s1: "a", s2: "b", s3: "c" }
 	const fields = mix.map((kind, i) => {
-		const field = kind === "null" ? `r${i + 1}` : `s${i + 1}`
-		row[field] = kind === "null" ? null : kind === "ref" ? LONG : row[field]
+		const field = kind === "null" ? `r${i + 1}` : kind === "time" ? `d${i + 1}` : `s${i + 1}`
+		row[field] =
+			kind === "null" ? null : kind === "ref" ? LONG : kind === "time" ? new Date(1_700_000_000_123) : row[field]
 		return `${field}.${order[i]}`
 	})
 	return { order: fields.join(","), row }

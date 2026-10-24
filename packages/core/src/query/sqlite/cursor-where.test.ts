@@ -38,3 +38,37 @@ describe("cursorWhere", () => {
 		)
 	})
 })
+
+/* U10 of the 0.12 round: a seconds-mode key with no table to read its row from binds its Date to the millisecond */
+describe("cursorWhere on a seconds-mode timestamp key", () => {
+	const event = sqliteTable("event", { at: integer("at", { mode: "timestamp" }), id: integer("id").primaryKey() })
+	const bySort: SortField[] = [{ direction: "asc", field: "at" }]
+	const atKeys = [{ column: event.at, direction: "asc" as const }]
+	const cursor = createCursor({ at: new Date(1_700_000_000_123), id: 3 }, bySort, SEALED)
+
+	it("binds the exact milliseconds on a list with no table", () => {
+		const where = cursorWhere({
+			cursor,
+			keys: atKeys,
+			options: SEALED,
+			sort: bySort,
+			table: undefined,
+			tiebreak: { column: event.id, direction: "asc" },
+		})
+		expect(dialect.sqlToQuery(where).params).toContain(1_700_000_000.123)
+	})
+
+	it("reads the bound from the row on a list with a table, the milliseconds its fallback", () => {
+		const where = cursorWhere({
+			cursor,
+			keys: atKeys,
+			options: SEALED,
+			sort: bySort,
+			table: event,
+			tiebreak: { column: event.id, direction: "asc" },
+		})
+		expect(dialect.sqlToQuery(where).sql).toContain(
+			'coalesce((SELECT "event"."at" FROM "event" WHERE "event"."id" = ?), (1700000000123 / 1000.0))',
+		)
+	})
+})

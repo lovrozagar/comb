@@ -111,3 +111,20 @@ describe("anchored and assertNoReference", () => {
 		)
 	})
 })
+
+/* U10 of the 0.12 round: a seconds-mode key's fallback, before 1970 too, rounded toward the rows already served */
+describe("anchored on a seconds-mode timestamp key", () => {
+	const event = sqliteTable("event", { at: integer("at", { mode: "timestamp" }), id: integer("id").primaryKey() })
+	it("falls back to the milliseconds ascending, and one past them descending, signed", () => {
+		const [asc, desc] = anchored(
+			[
+				{ column: event.at, direction: "asc" },
+				{ column: event.at, direction: "desc" },
+			],
+			[new Date(-1500), new Date(-1500)],
+			at(event, event),
+		)
+		expect(sqlite.sqlToQuery((asc as AnchorBound).value).sql).toContain("(-1500 / 1000.0)")
+		expect(sqlite.sqlToQuery((desc as AnchorBound).value).sql).toContain("(-1499 / 1000.0)")
+	})
+})
