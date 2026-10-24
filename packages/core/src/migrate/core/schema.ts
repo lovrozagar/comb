@@ -4,7 +4,8 @@
  * reads a file against it, and the SQLite rebuild guard finds the tables a rebuild reaches by it.
  */
 import { codeOf, IDENT, lastPart, nameKey, QNAME, splitTopLevel } from "./sql-code.ts"
-import { splitSqlStatements } from "./sql-scan.ts"
+import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
+import { syncTriggerOf } from "./fts-sync.ts"
 import { COLUMN, columnKey, columnNames, CONSTRAINT_WORDS, GENERATED, tableDefinition } from "./schema-table.ts"
 import { definitionAffinity } from "./sqlite-affinity.ts"
 import type { Dialect, ExtractedSchema, TriggerEvent } from "../types.ts"
@@ -104,27 +105,10 @@ function followTableLife(schema: SchemaSoFar, code: string, dialect: Dialect): v
 }
 
 /**
- * Whether a CREATE TRIGGER's body only inserts into external-content FTS5 tables: the sync triggers
- * comb writes. Literals are blank in `code`, so the 'delete' command reads as an empty value.
- */
-function syncsFts(code: string, externalFts: readonly string[], dialect: Dialect): boolean {
-	const body = /\bBEGIN (.+?);? END$/i.exec(code)?.[1]
-	if (body === undefined) return false
-	return body
-		.split(";")
-		.map((part) => part.trim())
-		.filter((part) => part !== "")
-		.every((write) => {
-			const target = new RegExp(`^INSERT INTO (${QNAME}) ?\\(`, "i").exec(write)?.[1]
-			return target !== undefined && externalFts.includes(nameKey(target, dialect)) && !/\bSELECT\b/i.test(write)
-		})
-}
-
-/**
  * SQLite triggers made and dropped. A Postgres history's triggers and routines are read from its
  * parse trees (pg-history.ts), which no spelling, rename or move hides.
  */
-function followTriggers(schema: SchemaSoFar, code: string, dialect: Dialect): void {
+function followTriggers(schema: SchemaSoFar, [code, text]: [string, string], dialect: Dialect): void {
 	if (dialect === "postgres") return
 	const key = (name: string) => nameKey(name, dialect)
 	const [, trigger, timing, on] = CREATE_TRIGGER.exec(code) ?? []
@@ -137,7 +121,7 @@ function followTriggers(schema: SchemaSoFar, code: string, dialect: Dialect): vo
 		]
 		schema.triggers.push({
 			events: events as TriggerEvent[],
-			ftsSync: syncsFts(code, schema.externalFts, dialect),
+			ftsSync: syncTriggerOf(text, new Set(schema.externalFts), dialect) !== undefined,
 			name: key(trigger),
 			table: key(on as string),
 		})
@@ -168,7 +152,8 @@ function follow(schema: SchemaSoFar, stmt: string, dialect: Dialect): void {
 	const code = codeOf(stmt, dialect)
 	followTableShape(schema, code, dialect)
 	followTableLife(schema, code, dialect)
-	followTriggers(schema, code, dialect)
+	/* the sync rule reads the 'delete' command, a literal codeOf blanks (M43) */
+	followTriggers(schema, [code, normalizeSql(stmt).replace(/;$/, "")], dialect)
 	followColumns(schema, code, dialect)
 	const index = CREATE_INDEX.exec(code)?.[1]
 	if (index !== undefined) schema.indexes.push(nameKey(index, dialect))

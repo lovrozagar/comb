@@ -21,6 +21,7 @@ import type { Dialect, ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { nameKey, QNAME, unquote } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
+import { SYNC_TRIGGER, syncTriggerOf } from "./fts-sync.ts"
 
 /** What the grammar needs from the file: the schema before it, and the FTS sync triggers it makes */
 type GrammarContext = { before: ExtractedSchema | undefined; dialect: Dialect; ftsTriggers: ReadonlySet<string> }
@@ -51,16 +52,6 @@ const CAUTIOUS_SHAPES: ReadonlyArray<[RegExp, string]> = [
 ]
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
-const SYNC_TRIGGER = /* @__PURE__ */ new RegExp(
-	`^CREATE (?:TEMP |TEMPORARY )?TRIGGER (?:IF NOT EXISTS )?(${QNAME}) (?:BEFORE|AFTER) (?:INSERT|DELETE|UPDATE(?: OF [^;]+?)?) ON ${QNAME}(?: FOR EACH ROW)? BEGIN (.+?);? END$`,
-	"i",
-)
-// per-process-constant: a pattern composed from the name grammar, compiled once
-const SYNC_WRITE = /* @__PURE__ */ new RegExp(
-	`^INSERT INTO (${QNAME}) ?\\([^()]*\\) VALUES ?\\(((?:\\s*(?:(?:new|old)\\.[\\w"\`]+|'delete')\\s*,?)+)\\)$`,
-	"i",
-)
-// per-process-constant: a pattern composed from the name grammar, compiled once
 const FTS_EXTERNAL = /* @__PURE__ */ new RegExp(
 	`^CREATE VIRTUAL TABLE (?:IF NOT EXISTS )?(${QNAME}) USING fts5\\(.*\\bcontent ?= ?'[^']+'`,
 	"i",
@@ -87,17 +78,8 @@ function ftsTriggersOf(
 	}
 	const out = new Set<string>()
 	for (const code of codes) {
-		const [, name, body] = SYNC_TRIGGER.exec(code) ?? []
-		if (name === undefined || body === undefined) continue
-		const writes = body
-			.split(";")
-			.map((part) => part.trim())
-			.filter((part) => part !== "")
-		const synced = writes.every((write) => {
-			const target = SYNC_WRITE.exec(write)?.[1]
-			return target !== undefined && fts.has(nameKey(target, dialect))
-		})
-		if (synced) out.add(nameKey(name, dialect))
+		const name = syncTriggerOf(code, fts, dialect)
+		if (name !== undefined) out.add(name)
 	}
 	return out
 }

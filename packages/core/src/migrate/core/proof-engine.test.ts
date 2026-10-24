@@ -350,3 +350,23 @@ CREATE TABLE wr (k TEXT PRIMARY KEY, n INTEGER) WITHOUT ROWID;`
 		expect(unsafe.join("\n")).not.toContain("deletes existing rows")
 	})
 })
+
+/* M43: a history trigger that runs 'delete-all' is no FTS sync trigger, so an insert that fires it is unsafe */
+describe("the engine pass on a write that fires a trigger running an FTS5 command", () => {
+	it("calls the insert unsafe for firing it, while comb's own sync trigger fires to no note", async () => {
+		const history = `CREATE TABLE post (id INTEGER PRIMARY KEY, title TEXT);
+CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id');
+CREATE TRIGGER post_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(post_fts) VALUES ('delete-all'); INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END;`
+		const db = await openMemory()
+		db.exec(history)
+		const run = applyToCopy(db, "INSERT INTO post (id, title) VALUES (10, 'fresh');")
+		expect(run.error).toBeUndefined()
+		expect(engineFindings(run.steps, run.start).unsafe.join("\n")).toContain("fires trigger post_ai")
+		db.close()
+		const synced = await openMemory()
+		synced.exec(history.replace(/INSERT INTO post_fts\(post_fts\) VALUES \('delete-all'\); /, ""))
+		const clean = applyToCopy(synced, "INSERT INTO post (id, title) VALUES (10, 'fresh');")
+		expect(engineFindings(clean.steps, clean.start).unsafe).toEqual([])
+		synced.close()
+	})
+})

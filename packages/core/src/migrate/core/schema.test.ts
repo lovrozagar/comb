@@ -157,6 +157,33 @@ describe("extractSchema: trigger events and FTS sync triggers", () => {
 			["nobody", false],
 		])
 	})
+
+	/*
+	 * M43: an FTS sync trigger is one that writes only row values or 'delete' into an external FTS5
+	 * table, as the grammar reads it; a trigger that runs another FTS5 command, 'delete-all' among
+	 * them, is a trigger like any other, and a write that fires it is unsafe
+	 */
+	it("calls a trigger that runs another FTS5 command no sync trigger, whatever else it writes", () => {
+		const head =
+			"CREATE TABLE post (id INTEGER PRIMARY KEY, title TEXT);\nCREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id');\n"
+		const synced = (body: string) =>
+			extractSchema(`${head}CREATE TRIGGER t AFTER INSERT ON post BEGIN ${body} END;`).triggers[0]?.ftsSync
+		expect(
+			synced(
+				"INSERT INTO post_fts(post_fts) VALUES ('delete-all'); INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title);",
+			),
+		).toBe(false)
+		expect(synced("INSERT INTO post_fts(post_fts) VALUES ('delete-all');")).toBe(false)
+		expect(synced("INSERT INTO post_fts(post_fts, rowid, title) VALUES ('x', new.id, new.title);")).toBe(false)
+		expect(synced("INSERT OR REPLACE INTO post_fts(rowid, title) VALUES (new.id, new.title);")).toBe(false)
+		/* comb's own sync triggers, as codegen writes them (fts-sql.ts) */
+		expect(synced("\n\tINSERT INTO post_fts(rowid, title)\n\tVALUES (new.rowid, new.title);")).toBe(true)
+		expect(
+			synced(
+				"\n\tINSERT INTO post_fts(post_fts, rowid, title)\n\tVALUES ('delete', old.rowid, old.title);\n\tINSERT INTO post_fts(rowid, title)\n\tVALUES (new.rowid, new.title);",
+			),
+		).toBe(true)
+	})
 })
 
 describe("extractSchema: rowid aliases", () => {

@@ -428,3 +428,32 @@ describe("migrate apply --yes on an FTS5 'delete-all' with a conflict clause (M4
 		client.close()
 	})
 })
+
+/* M43: a history trigger that runs 'delete-all' wipes the index on every insert it fires on, so
+   --yes must refuse a plain insert into its table */
+describe("migrate apply --yes on an insert that fires a trigger running an FTS5 command (M43)", () => {
+	it("refuses it as unsafe, and the index keeps its entries", async () => {
+		const { dir, url } = project({
+			"20260101000000_init.sql": `CREATE TABLE post (id INTEGER PRIMARY KEY, title TEXT);
+CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id');
+CREATE TRIGGER post_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(post_fts) VALUES ('delete-all'); INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END;`,
+		})
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
+		const client = createClient({ url: url("local.db") })
+		await client.execute("INSERT INTO post_fts(rowid, title) VALUES (1, 'alpha one'), (2, 'alpha two')")
+		const hits = async () =>
+			(await client.execute("SELECT rowid FROM post_fts WHERE post_fts MATCH 'alpha' ORDER BY rowid")).rows.map(
+				(row) => row[0],
+			)
+		fs.writeFileSync(
+			path.join(dir, "atlas-migrations", "20260102000000_seed.sql"),
+			"INSERT INTO post (id, title) VALUES (10, 'fresh');",
+		)
+		spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
+		const run = io(dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], run)).toBe(1)
+		expect(run.errors.join("\n")).toContain("fires trigger post_ai")
+		expect(await hits()).toEqual([1, 2])
+		client.close()
+	})
+})
