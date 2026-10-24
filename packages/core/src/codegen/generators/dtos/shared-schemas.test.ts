@@ -121,3 +121,37 @@ describe("shared-schemas: remaining layers", () => {
 		expect(shared([table("a", ['z.string().max(5).meta({ examples: ["a"] })'])])).toEqual({})
 	})
 })
+
+/** The 16-hex name a schema takes when another shares its first 8 */
+const long = (zodType: string) => `_z_${createHash("sha256").update(zodType).digest("hex").slice(0, 16)}`
+const nameOf = (tables: TableInfo[], zodType: string) => buildSharedSchemas(tables, imports()).get(zodType)?.name
+
+/* the 0.12 review's F35: a name comes from the schema's own code; two whose sha256 share the first 8
+   hex digits (a real pair, found by search) both take 16, so neither name depends on which is used more */
+describe("buildSharedSchemas: two schemas whose 8 hex digits collide", () => {
+	const A = "z.string().max(34540)"
+	const B = "z.string().max(86368)"
+
+	it("collide in their first 8 hex digits and differ in 16", () => {
+		expect(n(A)).toBe(n(B))
+		expect(long(A)).not.toBe(long(B))
+	})
+
+	it("give both 16 hex digits, whichever is used more", () => {
+		for (const [more, less] of [
+			[A, B],
+			[B, A],
+		] as const) {
+			const tables = [table("a", [more, more, more, less]), table("b", [less])]
+			expect(nameOf(tables, A)).toBe(long(A))
+			expect(nameOf(tables, B)).toBe(long(B))
+		}
+	})
+
+	it("chain each variant on its base's 16-digit name, and leave a schema no other collides with at 8", () => {
+		const s = "z.string().max(10)"
+		const result = shared([table("a", [A, `${A}.nullable()`, B, B, B, s, s]), table("b", [A, s])])
+		expect(result[`${A}.nullable()`]).toBe(`${n(`${A}.nullable()`)} = ${long(A)}.nullable() (1)`)
+		expect(result[s]).toBe(`${n(s)} = _str.max(10) (3)`)
+	})
+})

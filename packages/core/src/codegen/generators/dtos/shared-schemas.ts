@@ -82,23 +82,37 @@ function sharedBases(usage: Usage): string[] {
 		.map(([base]) => base)
 }
 
+const digestOf = (zodType: string) => createHash("sha256").update(zodType).digest("hex")
+
 /**
  * Emits each shared schema under a name its own code gives, `_z_<8 hex>`, so adding a column to
- * one table renames nothing another table's file uses (F35); a second schema whose 8 hex digits
- * another holds takes 16
+ * one table renames nothing another table's file uses (F35). Schemas whose 8 hex digits collide
+ * (`colliding`, read from every schema the run names) each take 16, whichever is added first.
  */
 class SharedNames {
 	readonly result = new Map<string, SharedSchema>()
-	private readonly taken = new Set<string>()
+
+	constructor(private readonly colliding: ReadonlySet<string> = new Set()) {}
 
 	add(zodType: string, code: string, count: number): string {
-		const digest = createHash("sha256").update(zodType).digest("hex")
-		const short = `_z_${digest.slice(0, 8)}`
-		const name = this.taken.has(short) ? `_z_${digest.slice(0, 16)}` : short
-		this.taken.add(name)
+		const digest = digestOf(zodType)
+		const short = digest.slice(0, 8)
+		const name = `_z_${this.colliding.has(short) ? digest.slice(0, 16) : short}`
 		this.result.set(zodType, { code, count, name })
 		return name
 	}
+}
+
+/** The 8-hex prefixes two or more of `zodTypes` share */
+function collidingPrefixes(zodTypes: Iterable<string>): Set<string> {
+	const seen = new Set<string>()
+	const out = new Set<string>()
+	for (const zodType of zodTypes) {
+		const short = digestOf(zodType).slice(0, 8)
+		if (seen.has(short)) out.add(short)
+		seen.add(short)
+	}
+	return out
 }
 
 /** A shared base and its variants: `.nullable()`, `.nullable().optional()`, `.optional()`. */
@@ -137,10 +151,14 @@ function addCores(names: SharedNames, tables: TableInfo[], external: ReadonlySet
 export function buildSharedSchemas(tables: TableInfo[], imports: ImportsMeta): Map<string, SharedSchema> {
 	const external = new Set<string>([...imports.enumImports.keys(), ...imports.jsonSchemaImports])
 	const usage = usageOf(tables, external)
-	const names = new SharedNames()
-	for (const base of sharedBases(usage)) addVariants(names, base, usage.counts)
-	addCores(names, tables, external)
-	return names.result
+	/* which schemas are shared turns on their use, never on their names: a first pass collects them,
+	   so a colliding pair is named alike in any order */
+	const run = (names: SharedNames) => {
+		for (const base of sharedBases(usage)) addVariants(names, base, usage.counts)
+		addCores(names, tables, external)
+		return names.result
+	}
+	return run(new SharedNames(collidingPrefixes(run(new SharedNames()).keys())))
 }
 
 /**
