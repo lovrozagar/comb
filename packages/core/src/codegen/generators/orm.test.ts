@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { generateOrm } from "./orm.ts"
@@ -13,7 +13,7 @@ type Config = Omit<Parameters<typeof generateOrm>[1], "dialect" | "driver" | "ou
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-orm-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-gen-orm-"))
 })
 
 afterEach(() => {

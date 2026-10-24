@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
@@ -8,13 +8,13 @@ import { testContext } from "./__fixtures__/context.ts"
 
 const HEAD = `import { sql } from "drizzle-orm"
 import { sqliteTable as createTable, text, integer, check, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core"
-const c = { id: () => text("id").primaryKey(), text: (name: string) => text(name) }
+import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-constraints-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-gen-constraints-"))
 })
 
 afterEach(() => {
@@ -142,13 +142,6 @@ describe("generateConstraints — unique indexes", () => {
 			`"org_id,email": {\n\t\t\t\terrorKey: "member_orgId_email_duplicate",\n\t\t\t\tcause: "A record with this orgId and email combination already exists",`,
 		)
 		expect(content).not.toContain("org_id: {")
-	})
-
-	it("keeps the index's own column name when no field declares it", () => {
-		const { content } = generate(`export const user = createTable("user", { id: c.id() }, (t) => [
-	uniqueIndex("user_ghost_idx").on(t.ghost),
-])`)
-		expect(content).toContain(`ghost: {\n\t\t\t\terrorKey: "user_ghost_duplicate",`)
 	})
 })
 

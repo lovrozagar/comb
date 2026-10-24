@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
@@ -8,10 +8,7 @@ import { testContext } from "./__fixtures__/context.ts"
 
 const PRELUDE = `
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	text: (name: string, opts?: { private?: boolean }) => text(name),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 const POST = `export const post = createTable("post", { id: c.id(), title: c.text("title") })`
 
@@ -20,7 +17,7 @@ type Options = Omit<Parameters<typeof generateColumns>[1], "output">
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-columns-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-gen-columns-"))
 })
 
 afterEach(() => {

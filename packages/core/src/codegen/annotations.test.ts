@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { parseFieldConstraints } from "./annotations.ts"
+import * as z from "zod"
+import { fieldOf } from "./__fixtures__/runtime.ts"
+
+/* the schema the c.json columns below are given, exported beside the table so the reader finds it */
+const schema = z.object({})
+
+/** The constraints a column written as `source` gets, under the property `key` */
+const parseFieldConstraints = (source: string, key = "f") => fieldOf(key, source, { scope: { schema } }).constraints
 
 describe("parseFieldConstraints: validation constraints", () => {
 	it("extracts min/max from parameter constraints", () => {
@@ -95,7 +102,7 @@ describe("parseFieldConstraints: every key the column types allow, and no other 
 
 	it("fails on a key it does not handle, naming it, rather than ignoring it", () => {
 		expect(() => parseFieldConstraints('c.text("n", { nmae: true })')).toThrow(
-			'c.text("n", { nmae: true }): comb reads no constraint named nmae',
+			"/fixture/db.core.tables.ts: fixture.f: comb reads no constraint named nmae",
 		)
 	})
 
@@ -103,5 +110,13 @@ describe("parseFieldConstraints: every key the column types allow, and no other 
 		expect(parseFieldConstraints('c.json("m", schema).default({ max: 5 })').max).toBeNull()
 		expect(parseFieldConstraints('c.json("m", schema, { maxBytes: 9 }).default({ a: 1 })').maxBytes).toBe(9)
 		expect(parseFieldConstraints('c.text("e", { email: true }, 80)').email).toBe(true)
+	})
+})
+
+describe("parseFieldConstraints: keys that contradict", () => {
+	it("refuses mutable and nomutate together", () => {
+		expect(() => parseFieldConstraints('c.ref("f", { mutable: true, nomutate: true })')).toThrow(
+			"/fixture/db.core.tables.ts: fixture.f: mutable and nomutate contradict; declare one",
+		)
 	})
 })

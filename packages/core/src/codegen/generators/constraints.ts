@@ -5,7 +5,7 @@
  */
 import path from "node:path"
 import { commentText, dbIdentifiers, propertyName, stringLiteral } from "../utils/case.ts"
-import type { TableMeta } from "../analyzer-types.ts"
+import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { pgIdentifier } from "../../identifier.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { enumCheckName } from "./enum-checks.ts"
@@ -36,11 +36,12 @@ const conflict = (cause: string, errorKey: string): Constraint => ({ cause, erro
 
 /**
  * The column-level and index-level unique constraints, keyed by the column's SQL name; a
- * composite index by its SQL columns together (`org_id,email`), as the engine reports the pair
+ * composite index by its SQL columns together (`org_id,email`), as the engine reports the pair; an
+ * index on an expression by its name
  */
 function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 	const unique: Record<string, Constraint> = {}
-	for (const field of table.fields.filter((f) => /\.unique\(/.test(f.raw))) {
+	for (const field of table.fields.filter((f) => f.unique !== null)) {
 		unique[field.sqlName] = conflict(
 			`A record with this ${field.name} value already exists`,
 			`${table.sqlName}_${field.name}_duplicate`,
@@ -49,13 +50,16 @@ function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 	/* a partial index fails with the same "UNIQUE constraint failed: <table>.<column>" as a full one */
 	for (const { columns } of [...table.uniqueIndexes, ...table.partialUniqueIndexes]) {
 		/* the engine reports the columns' SQL names; the error key keeps the property names */
-		const sqlNames = columns.map((col) => table.fields.find((f) => f.name === col)?.sqlName ?? col)
+		const sqlNames = columns.map((col) => (table.fields.find((f) => f.name === col) as FieldMeta).sqlName)
 		const cause =
 			columns.length === 1
 				? `A record with this ${columns[0]} value already exists`
 				: `A record with this ${columns.join(" and ")} combination already exists`
 		unique[sqlNames.join(",")] = conflict(cause, `${table.sqlName}_${columns.join("_")}_duplicate`)
 	}
+	/* an index on an expression is reported by its name, which the handlers look up under unique (F14) */
+	for (const { expression, name } of table.expressionIndexes)
+		unique[name] = conflict(`A record with this ${expression} value already exists`, `${name}_duplicate`)
 	return Object.keys(unique).length > 0 ? unique : undefined
 }
 

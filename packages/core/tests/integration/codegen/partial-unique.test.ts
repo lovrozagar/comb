@@ -1,3 +1,4 @@
+import { fixtureRoot } from "../../../src/codegen/__fixtures__/temp.ts"
 /**
  * A partial unique index (`.where()`) is no column uniqueness, so the published entity meta leaves
  * it out; but SQLite reports its violation as "UNIQUE constraint failed: <table>.<column>" like any
@@ -6,7 +7,6 @@
  * idx_user_email_unique lost user_email_duplicate).
  */
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { sql } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -23,7 +23,7 @@ import { libsqlMemory } from "../support/libsql.ts"
 const TABLES = `
 import { sql } from "drizzle-orm"
 import { sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
-const c = { id: (_prefix: string) => text("id").primaryKey(), text: (name: string) => text(name) }
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = sqliteTable("user", {
 	id: c.id("usr"),
 	email: c.text("email"),
@@ -43,7 +43,7 @@ let table: TableMeta
 let map: ConstraintMap
 
 beforeAll(async () => {
-	dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-partial-unique-"))
+	dir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-partial-unique-"))
 	const tables = path.join(dir, "db.app.tables.ts")
 	fs.writeFileSync(tables, TABLES)
 	const analysis = analyze(tables)

@@ -21,6 +21,10 @@ import type { FieldMeta, TableMeta, UniqueIndexMeta } from "./analyzer-types.ts"
 function isExcludedFromUpdate(field: FieldMeta): boolean {
 	return (
 		field.isPrimaryKey ||
+		/* a composite key's column is the row's identity too (F7) */
+		field.inCompositeKey ||
+		/* the database writes a generated column and refuses a value for it (F8) */
+		field.generated ||
 		field.name === "id" ||
 		field.constraints.nomutate ||
 		field.constraints.autogenerate ||
@@ -75,29 +79,24 @@ function statesOf(table: TableMeta): CombEntityMetaInput["states"] {
  * would otherwise reach the document. The stamp and the manifest both read this.
  */
 /** A column's own `.unique()` as an index: under the name it gives, else drizzle's `<table>_<column>_unique` */
-const columnUnique = (table: TableMeta, field: FieldMeta): UniqueIndexMeta | null => {
-	const unique = /\.unique\(\s*(?:(["'`])((?:(?!\1).)*)\1)?\s*\)/.exec(field.raw)
-	if (unique === null) return null
-	return { columns: [field.name], name: unique[2] ?? `${table.sqlName}_${field.sqlName}_unique` }
-}
+const columnUnique = (field: FieldMeta): UniqueIndexMeta | null =>
+	field.unique === null ? null : { columns: [field.name], name: field.unique }
 
 function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"] {
 	const hidden = new Set(table.fields.filter((f) => f.constraints.private).map((f) => f.name))
-	const columns = table.fields.flatMap((field) => columnUnique(table, field) ?? [])
+	const columns = table.fields.flatMap((field) => columnUnique(field) ?? [])
 	return [...table.uniqueIndexes, ...columns].filter((index) => !index.columns.some((column) => hidden.has(column)))
 }
 
-/* something other than the caller fills the key: comb (c.id's prefix), the database
- * (c.serialId, autoIncrement) or a default; a natural key the caller supplies is not generated */
-// lookup-table: the key forms the caller does not fill
-const KEY_FILLED = /^\s*c\.(?:id|serialId)\s*\(|autoIncrement\s*:\s*true|\.(?:default|\$defaultFn|\$default)\s*\(/
-
 /**
- * Whether comb or the database fills `field`: an `autogenerate` column, or a key that c.id,
- * c.serialId, autoIncrement or a default fills
+ * Whether comb or the database fills `field`: an `autogenerate` column, a generated or identity
+ * column (F8), or a key that c.id, c.serialId, AUTOINCREMENT or a default fills; a natural key the
+ * caller supplies is not generated
  */
 function isGenerated(field: FieldMeta): boolean {
-	return field.constraints.autogenerate || (field.isPrimaryKey && KEY_FILLED.test(field.raw))
+	if (field.constraints.autogenerate || field.generated || field.identity) return true
+	const filledKey = field.combKind === "id" || field.combKind === "serialId" || field.autoIncrement || field.hasDefault
+	return field.isPrimaryKey && filledKey
 }
 
 /**
@@ -117,7 +116,7 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 	   the parsed constraints cover both the explicit and the implied cases. */
 	/* a private column is absent from every published list (docs/meta-contract.md §8) */
 	const published = table.fields.filter((f) => !f.constraints.private)
-	const generated = published.filter((f) => f.constraints.autogenerate).map((f) => f.name)
+	const generated = published.filter((f) => f.constraints.autogenerate || f.generated).map((f) => f.name)
 	if (isGenerated(primaryKey) && !generated.includes(primaryKey.name)) generated.unshift(primaryKey.name)
 
 	/* Prefer the field set the generator actually emitted: whatever is missing

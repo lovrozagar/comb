@@ -1,3 +1,4 @@
+import { fixtureRoot } from "../codegen/__fixtures__/temp.ts"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -5,7 +6,7 @@ import { makeIo, projects, writeTables } from "./__fixtures__/io.ts"
 import { configuredFtsSql, databaseIn, findCombConfig, loadCombConfig, tablesFile } from "./comb-config.ts"
 import { CliError } from "./output.ts"
 
-const temp = projects()
+const temp = projects(fixtureRoot())
 const project = temp.make
 afterEach(temp.clean)
 

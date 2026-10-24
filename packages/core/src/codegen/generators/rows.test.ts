@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
@@ -10,7 +10,7 @@ import { testContext } from "./__fixtures__/context.ts"
 function useTmpDir(prefix: string): () => string {
 	let dir = ""
 	beforeEach(() => {
-		dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+		dir = fs.mkdtempSync(path.join(fixtureRoot(), prefix))
 	})
 	afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
 	return () => dir
@@ -30,10 +30,7 @@ describe("generateRows — row types", () => {
 	it("generates row types for each table", () => {
 		const result = writeTablesAndAnalyze(`
 import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	text: (name: string) => text(name),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", { id: c.id(), name: c.text("name") })
 export const post = createTable("post", { id: c.id(), title: c.text("title") })
 `)
@@ -69,7 +66,7 @@ describe("generateRows — the tables import", () => {
 	it("generates correct import path", () => {
 		const result = writeTablesAndAnalyze(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = { id: () => text("id").primaryKey() }
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const item = createTable("item", { id: c.id() })
 `)
 		const tablesPath = path.join(tmpDir(), "db.test.tables.ts")

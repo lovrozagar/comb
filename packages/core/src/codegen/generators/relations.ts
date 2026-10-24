@@ -6,7 +6,7 @@
  */
 import path from "node:path"
 import { propertyAccess, propertyName } from "../utils/case.ts"
-import { importPathFrom } from "../utils/ts-morph.ts"
+import { importPathFrom } from "../utils/paths.ts"
 import pluralize from "pluralize"
 import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile } from "../utils/fs.ts"
@@ -77,7 +77,7 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
 /** Whether a field's key is unique on its own: `.unique()`, a one-column unique index, or the primary key */
 const isUnique = (table: TableMeta, field: TableMeta["fields"][number]) =>
 	field.isPrimaryKey ||
-	/\.unique\(/.test(field.raw) ||
+	field.unique !== null ||
 	table.uniqueIndexes.some((index) => index.columns.length === 1 && index.columns[0] === field.name)
 
 /**
@@ -124,7 +124,9 @@ function buildGraph(tables: TableMeta[]): Graph {
 		}
 	}
 	for (const [table, relations] of named) {
-		const columns = new Set(tables.find((each) => each.varName === table)?.fields.map((field) => field.name) ?? [])
+		const columns = new Set(
+			(tables.find((each) => each.varName === table) as TableMeta).fields.map((field) => field.name),
+		)
 		settle(table, relations, columns)
 	}
 	return graph

@@ -23,36 +23,27 @@ type Built = string | undefined
 const isMutative = (schemaType: SchemaType) => schemaType === "create" || schemaType === "update"
 const isRead = (schemaType: SchemaType) => schemaType === "read" || schemaType === "readPartial"
 
-/** The named schema in `.$type<z.infer<typeof schema>>()`, recorded as an import; else null. */
-function typedSchema(raw: string, jsonSchemaImports: Set<string>): string | null {
-	const name = /\.\$type<\s*z\.infer<\s*typeof\s+(\w+)\s*>\s*>/.exec(raw)?.[1]
-	if (name === undefined) return null
-	jsonSchemaImports.add(name)
-	return name
-}
-
+/** A c.enum, a pgEnum or an enum text column, its values read at runtime and written out */
 function enumBase({ field }: Build): Built {
-	if (field.enumValues !== null) return `z.enum(${JSON.stringify(field.enumValues)})`
-	if (field.enumName !== null) return `z.enum(${field.enumName})`
-	if (field.drizzleHelper !== "enum") return undefined
-	throw new Error(`c.enum column "${field.name}": its values are not string literals comb can read: ${field.raw}`)
+	return field.enumValues === null ? undefined : `z.enum(${JSON.stringify(field.enumValues)})`
 }
 
 /* jsonb refuses U+0000 anywhere in a value: with every escaped backslash taken out of its JSON, a \u0000 left is one */
 const JSON_NUL_CHECK =
 	'.refine((val) => !JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "").includes("\\\\u0000"), { message: "Must not contain U+0000" })'
 
+/* a c.json column is its schema, which the runtime reader found exported; a plain json column any JSON value */
 function jsonBase({ annotations, dialect, field, schemaType }: Build): Built {
-	if (!/c\.json[<(]/.test(field.raw)) return undefined
-	if (!field.jsonSchemaName) throw new Error(`c.json() must have schema as second parameter: ${field.raw}`)
-	if (!isMutative(schemaType)) return field.jsonSchemaName
+	const schema = field.combKind === "json" ? field.jsonSchemaName : field.dataType === "object json" ? "z.json()" : null
+	if (schema === null) return undefined
+	if (!isMutative(schemaType)) return schema
 	const nul = dialect === "postgres" ? JSON_NUL_CHECK : ""
 	const limit = annotations.maxBytes
 	const size =
 		limit === null
 			? ""
 			: `.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
-	return `${field.jsonSchemaName}${size}${nul}${jsonRules(limit, nul !== "")}`
+	return `${schema}${size}${nul}${jsonRules(limit, nul !== "")}`
 }
 
 /**
@@ -70,16 +61,28 @@ function jsonRules(limit: number | null, noNul: boolean): string {
 	return `.meta({ description: ${text}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
 }
 
-// lookup-table: the column builders whose values are numbers, comb's and drizzle's
-const NUMERIC =
-	/^\s*(?:c\.)?(?:integer|serialId|serial|bigserial|smallint|bigint|int|real|doublePrecision|numeric)\s*[<(]/
+// lookup-table: the c helpers whose values are numbers or booleans, which numberBase types
+const NUMBER_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"boolean",
+	"createdAt",
+	"deletedAt",
+	"integer",
+	"real",
+	"serialId",
+	"timestamp",
+	"updatedAt",
+])
+
+/** Whether a column holds numbers: a comb number helper, or a drizzle column whose data type is one */
+const isNumeric = (field: FieldMeta) =>
+	field.combKind === null ? field.dataType.startsWith("number") : NUMBER_KINDS.has(field.combKind)
 
 /* a numeric reference takes the number rules and a c.text one its own text rules, its declared
  * bounds included; a c.ref, which points at a c.id key, the id string. Whether it enters the update
  * body is generate.ts's (isExcludedFromUpdate) */
 function foreignKeyBase({ field }: Build): Built {
 	if (!isReference(field)) return undefined
-	if (NUMERIC.test(field.raw) || /c\.(text|id)[<(]/.test(field.raw)) return undefined
+	if (isNumeric(field) || field.combKind === "text" || field.combKind === "id") return undefined
 	return "z.string().min(1).max(48)"
 }
 
@@ -132,7 +135,7 @@ function textBounds({ annotations, dialect, field, schemaType }: Build): string 
 	if (annotations.email) return emailBounds(annotations, field)
 	const mutative = isMutative(schemaType)
 	/* a key and a reference to one take the id rules, never a column by its name (F10) */
-	const isIdField = /^\s*c\.id\s*[<(]/.test(field.raw) || field.foreignKey?.toId === true
+	const isIdField = field.combKind === "id" || field.foreignKey?.toId === true
 	/* an id-like column gets the id bounds only when it declares none of its own */
 	const declares = field.length !== null || annotations.min !== null || annotations.max !== null
 	if (isIdField && !declares) return mutative ? ".regex(/^\\S{1,48}$/)" : ".min(1).max(48)"
@@ -151,11 +154,9 @@ function writeChecks(annotations: FieldConstraints, dialect: Build["dialect"]): 
 	return pattern + https + kindChecks(annotations) + nul
 }
 
-function textBase(build: Build): Built {
-	const { annotations, field, imports, schemaType } = build
-	if (!/c\.(text|id)[<(]/.test(field.raw)) return undefined
-	const typed = field.raw.includes(".$type<") ? typedSchema(field.raw, imports.jsonSchemaImports) : null
-	if (typed !== null) return typed
+/** A c.text or c.id column, or any other string column: what every builder before it left */
+function textBase(build: Build): string {
+	const { annotations, schemaType } = build
 	const mutative = isMutative(schemaType)
 	/* an email is normalized first, then validated: z.email() would refuse the padded input. Checks
 	 * run in chain order, and unlike a pipe the chain still publishes the email format and bounds */
@@ -163,43 +164,60 @@ function textBase(build: Build): Built {
 	return stringKind(annotations, mutative) + transforms(annotations, mutative) + textBounds(build)
 }
 
+/* the integer range each column holds: Postgres's int2 and int4, else a JS number's exact range */
+const INT2 = { max: 32767, min: -32768 }
+const SAFE = { max: "Number.MAX_SAFE_INTEGER", min: "Number.MIN_SAFE_INTEGER" }
+
+type Range = { max: number | string; min: number | string }
+
+/** The range an integer column holds, by what the dialect stores it in */
+function integerRange(field: FieldMeta, dialect: Build["dialect"]): Range {
+	if (dialect === "sqlite") return SAFE
+	if (field.combKind === "integer" || field.combKind === "serialId" || field.dataType === "number int32") return INT4
+	return field.dataType === "number int16" ? INT2 : SAFE
+}
+
+/** A declared bound clamped to the column's, which a numeric bound is and a safe-integer name is not */
+const clamp = (declared: number | null, bound: number | string, pick: (a: number, b: number) => number) =>
+	declared === null ? bound : typeof bound === "number" ? pick(declared, bound) : declared
+
+/** An integer: the declared bounds, clamped to what the column holds, so a value read back can be sent back */
+function integerOf(annotations: FieldConstraints, range: Range): string {
+	return `z.number().int().min(${clamp(annotations.min, range.min, Math.max)}).max(${clamp(annotations.max, range.max, Math.min)})`
+}
+
 function numberBase({ annotations, dialect, field }: Build): Built {
+	if (!isNumeric(field)) return field.dataType === "boolean" ? "z.boolean()" : undefined
 	const { max, min } = annotations
-	if (/c\.(createdAt|updatedAt|deletedAt)[<(]/.test(field.raw)) return "timestampSchema"
+	const kind = field.combKind
+	if (kind === "createdAt" || kind === "updatedAt" || kind === "deletedAt") return "timestampSchema"
+	if (kind === "boolean") return "z.boolean()"
 	/* a date before 1970 is a negative epoch, which both engines store (F11) */
-	if (/c\.timestamp[<(]/.test(field.raw))
-		return `z.number().int().min(${min ?? "Number.MIN_SAFE_INTEGER"}).max(${max ?? "Number.MAX_SAFE_INTEGER"})`
-	if (/c\.(integer|serialId)[<(]/.test(field.raw)) {
-		/* written and read alike, so a value read back can be sent back: the declared bounds, clamped to
-		 * what the column holds (int4 on Postgres, a JS number's exact range on SQLite) */
-		if (dialect === "postgres")
-			return `z.number().int().min(${Math.max(min ?? INT4.min, INT4.min)}).max(${Math.min(max ?? INT4.max, INT4.max)})`
-		return `z.number().int().min(${min ?? "Number.MIN_SAFE_INTEGER"}).max(${max ?? "Number.MAX_SAFE_INTEGER"})`
-	}
-	if (/c\.boolean[<(]/.test(field.raw)) return "z.boolean()"
-	if (!/c\.real[<(]/.test(field.raw)) return undefined
+	if (kind === "timestamp") return integerOf(annotations, SAFE)
+	const integer = kind === null ? field.dataType.startsWith("number int") : kind === "integer" || kind === "serialId"
+	if (integer) return integerOf(annotations, integerRange(field, dialect))
 	return `z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`
 }
 
-const BUILDERS = [enumBase, jsonBase, foreignKeyBase, textBase, numberBase]
-
-/* the database fills a column with a default when a create body leaves it out */
-const hasDefault = (raw: string) => /\.(?:default|\$defaultFn|\$default)\s*\(/.test(raw)
+const BUILDERS = [enumBase, jsonBase, foreignKeyBase, numberBase]
 
 /* SQLite fills an INTEGER PRIMARY KEY, the rowid's alias, when a create body leaves it out */
 const isRowid = (field: FieldMeta, dialect: Build["dialect"]) =>
-	dialect === "sqlite" && field.isPrimaryKey && /^\s*(?:c\.)?integer\s*\(/.test(field.raw)
+	dialect === "sqlite" &&
+	field.isPrimaryKey &&
+	(field.combKind === "integer" || (field.combKind === null && field.columnType === "SQLiteInteger"))
 
 /* by what fills the column, never by its name: a natural key named id is the caller's to give (F6) */
 function optionalOnCreate(field: FieldMeta, required: boolean, dialect: Build["dialect"]): boolean {
 	if (!required) return true
-	return field.constraints.autogenerate || hasDefault(field.raw) || isRowid(field, dialect)
+	return field.constraints.autogenerate || field.hasDefault || field.identity || isRowid(field, dialect)
 }
 
 /** `base` with its OpenAPI example, nullability and the schema type's optionality. */
 function finish({ dialect, field, schemaType }: Build, base: string): string {
 	const example = generateExampleMeta(field)
-	const required = field.isPrimaryKey || field.isNotNull
+	/* a composite key's column is required as a single key is (F7) */
+	const required = field.isPrimaryKey || field.isNotNull || field.inCompositeKey
 	const zodType = `${base}${example?.code ?? ""}${required ? "" : ".nullable()"}`
 	if (schemaType === "read") return zodType
 	if (schemaType === "create" && !optionalOnCreate(field, required, dialect)) return zodType
@@ -223,5 +241,5 @@ export function generateFieldSchema(
 		const base = builder(build)
 		if (base !== undefined) return finish(build, base)
 	}
-	return finish(build, "z.unknown()")
+	return finish(build, textBase(build))
 }

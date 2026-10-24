@@ -1,3 +1,4 @@
+import type { CombColumnKind } from "../meta/column.ts"
 /**
  * TableMeta — serializable intermediate format produced by TableAnalyzer.
  * No ts-morph or Drizzle dependencies. All generators consume this.
@@ -57,40 +58,67 @@ type ForeignKeyRef = {
 	toId?: boolean | undefined
 }
 
-/** A single column/field in a table */
+/** A single column/field in a table, as drizzle built it and its `c` helper recorded it */
 type FieldMeta = {
+	/** SQLite's AUTOINCREMENT on an integer key */
+	autoIncrement: boolean
+	/** drizzle's column class: `SQLiteText`, `PgVarchar` */
+	columnType: string
+	/** the `c` helper that built the column; null for a plain drizzle column */
+	combKind: CombColumnKind | null
 	constraints: FieldConstraintsMeta
-	/** Drizzle helper: "text", "integer", "boolean", "timestamp", "createdAt", etc. */
+	/** drizzle's data type: `string`, `number int53`, `object json` */
+	dataType: string
+	/** the `c` helper's name, else drizzle's column class */
 	drizzleHelper: string
-	/** Enum constant name if .$type<(typeof X)[number]> or c.enum("name", X) */
-	enumName: string | null
-	/** Inline enum values if c.enum("name", ["a", "b"]), null if const ref */
+	/** the values of a c.enum, a pgEnum or an enum text column; null for any other */
 	enumValues: string[] | null
 	/** State machine declared as c.enum's third argument, null when absent */
 	states: StateMachineMeta | null
 	/** FK reference if .references(() => table.column) */
 	foreignKey: ForeignKeyRef | null
-	/** Whether .notNull() is present */
+	/** generated always as an expression: the database writes it */
+	generated: boolean
+	/** a default value, default SQL or default function fills it when a write leaves it out */
+	hasDefault: boolean
+	/** an identity column, always or by default */
+	identity: boolean
+	/** a column of the table's composite primary key */
+	inCompositeKey: boolean
+	/** NOT NULL */
 	isNotNull: boolean
-	/** Whether .primaryKey() or c.id("prefix") */
+	/** the table's single-column primary key */
 	isPrimaryKey: boolean
-	/** the schema expression of c.json(name, schema), as written */
+	/** the name the generated DTO imports a c.json column's schema under, null for any other column */
 	jsonSchemaName: string | null
-	/** the names the field's generated schema uses and must import (schemas, unreadable enum consts) */
+	/** the names the field's generated schema uses and must import (a c.json schema) */
 	schemaImports: ImportRef[]
-	/** Length from positional arg or constraints */
+	/** the declared length: c.text's max, or drizzle's `length` */
 	length: number | null
 	/** Field name as defined in the table schema object */
 	name: string
+	/** c.id's prefix; null for any other column */
+	prefix: string | null
+	/** an update hook fills it on every update */
+	onUpdate: boolean
 	/** The column's SQL name: what the engine reports in errors and what DDL and triggers name */
 	sqlName: string
-	/** Full raw text of the initializer expression */
-	raw: string
+	/** the column's SQL type, as DDL writes it */
+	sqlType: string
+	/** the name of the column's own `.unique()`, drizzle's when it gives none; null when it has none */
+	unique: string | null
 }
 
 /** Unique index from table options (3rd arg arrow function) */
 type UniqueIndexMeta = {
 	columns: string[]
+	name: string
+}
+
+/** A unique index whose keys are not all plain columns, keyed in the constraint map by its name */
+type ExpressionIndexMeta = {
+	/** its keys as SQL */
+	expression: string
 	name: string
 }
 
@@ -117,10 +145,14 @@ type TableMeta = {
 	checkConstraints: CheckConstraintMeta[]
 	/** All fields in the table */
 	fields: FieldMeta[]
+	/** unique indexes on an expression */
+	expressionIndexes: ExpressionIndexMeta[]
 	/** Whether composite PK exists in table options */
 	hasCompositePrimaryKey: boolean
 	/** Entity ID prefix from c.id("prefix"), null if c.serialId() or missing */
 	idPrefix: string | null
+	/** the Postgres schema of a pgSchema's table; null for the default */
+	schema: string | null
 	/** SQL table name (first arg to createTable) */
 	sqlName: string
 	/** Detected timestamp fields and style */
@@ -143,7 +175,7 @@ type ImportsMeta = {
 	jsonSchemaImports: Set<string>
 }
 
-/** What a constraint constant can hold, read from its source (codegen/utils/constant-value.ts) */
+/** What a constraint can hold */
 type ConstantValue = boolean | number | string
 
 /** Full analysis result */
@@ -160,6 +192,7 @@ type AnalysisResult = {
 
 export type {
 	ConstantValue,
+	ExpressionIndexMeta,
 	ImportRef,
 	AnalysisResult,
 	CheckConstraintMeta,

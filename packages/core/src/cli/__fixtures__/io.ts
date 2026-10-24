@@ -13,15 +13,18 @@ export function makeIo(cwd: string, run?: Run, confirm?: CliIo["confirm"]): Test
 	return { confirm, cwd, err: (line) => errors.push(line), errors, out: (line) => outputs.push(line), outputs, run }
 }
 
-/** Fresh project directories; `clean` removes every one made so far (register it with afterEach) */
-export function projects(): { clean: () => void; make: () => string } {
+/**
+ * Fresh project directories under `base`; `clean` removes every one made so far (register it with
+ * afterEach). A codegen test makes them inside the package, so the tables it loads import drizzle and comb
+ */
+export function projects(base: string = tmpdir()): { clean: () => void; make: () => string } {
 	const dirs: string[] = []
 	return {
 		clean: () => {
 			for (const dir of dirs.splice(0)) rmSync(dir, { force: true, recursive: true })
 		},
 		make: () => {
-			const dir = mkdtempSync(join(tmpdir(), "comb-cli-"))
+			const dir = mkdtempSync(join(base, "comb-cli-"))
 			dirs.push(dir)
 			return dir
 		},

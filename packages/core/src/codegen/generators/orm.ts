@@ -5,7 +5,7 @@
  */
 import path from "node:path"
 import { writeGenFile } from "../utils/fs.ts"
-import { importPathFrom } from "../utils/ts-morph.ts"
+import { importPathFrom } from "../utils/paths.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { dbIdentifiers } from "../utils/case.ts"
 

@@ -7,7 +7,7 @@
  * - Compact summary for AI context
  */
 import * as path from "node:path"
-import type { TableMeta } from "../analyzer-types.ts"
+import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { sqlIdentifier } from "../utils/case.ts"
 import { writeGenFile, writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -40,11 +40,9 @@ interface Relation {
 /* the Postgres type comb's pg columns create for each helper: epoch timestamps are bigint, json jsonb */
 // lookup-table: comb's pg helpers to the types their columns hold
 const PG_TYPES: Readonly<Record<string, string>> = {
-	blob: "BYTEA",
 	boolean: "BOOLEAN",
 	createdAt: "BIGINT",
 	deletedAt: "BIGINT",
-	int: "INTEGER",
 	integer: "INTEGER",
 	json: "JSONB",
 	real: "DOUBLE PRECISION",
@@ -53,12 +51,11 @@ const PG_TYPES: Readonly<Record<string, string>> = {
 	updatedAt: "BIGINT",
 }
 
-/** Map a Drizzle helper to its SQL type on the database's engine (F36) */
+/** Map a comb helper to its SQL type on the database's engine (F36) */
 function drizzleHelperToSqlType(helper: string, dialect: "postgres" | "sqlite"): string {
 	if (dialect === "postgres") return Object.hasOwn(PG_TYPES, helper) ? (PG_TYPES[helper] as string) : "TEXT"
 	switch (helper) {
 		case "integer":
-		case "int":
 		case "serialId":
 		case "timestamp":
 		case "createdAt":
@@ -68,8 +65,6 @@ function drizzleHelperToSqlType(helper: string, dialect: "postgres" | "sqlite"):
 			return "INTEGER"
 		case "real":
 			return "REAL"
-		case "blob":
-			return "BLOB"
 		default:
 			return "TEXT"
 	}
@@ -110,10 +105,11 @@ function transformTables(
 	const relations: Relation[] = []
 	/* a key names its target by variable and property; SQL and the JSON name it by table and column */
 	const byVar = new Map(metas.map((meta) => [meta.varName, meta]))
+	/* the reader resolves every key to a table of the analysis, and its column to one of that table's */
 	const target = (refTable: string, refColumn: string) => {
-		const table = byVar.get(refTable)
-		const column = table?.fields.find((field) => field.name === refColumn)?.sqlName ?? refColumn
-		return { column, table: table?.sqlName ?? refTable }
+		const table = byVar.get(refTable) as TableMeta
+		const column = (table.fields.find((field) => field.name === refColumn) as FieldMeta).sqlName
+		return { column, table: table.sqlName }
 	}
 
 	for (const meta of metas) {
@@ -124,7 +120,8 @@ function transformTables(
 				name: field.sqlName,
 				nullable: !field.isNotNull,
 				primaryKey: field.isPrimaryKey,
-				type: drizzleHelperToSqlType(field.drizzleHelper, dialect),
+				/* a plain drizzle column is the type drizzle itself writes for it */
+				type: field.combKind === null ? field.sqlType.toUpperCase() : drizzleHelperToSqlType(field.combKind, dialect),
 			}
 
 			if (field.foreignKey) {
@@ -228,7 +225,7 @@ function summaryRefLines(tables: Table[]): string[] {
 	for (const [i, table] of tables.entries()) {
 		for (const { name, reference } of table.columns) {
 			if (!reference) continue
-			const targetIdx = tableIndex.get(reference.table) ?? 0
+			const targetIdx = tableIndex.get(reference.table) as number
 			byTarget.set(targetIdx, [
 				...(byTarget.get(targetIdx) ?? []),
 				`${i + 1}.${name}${deleteSuffix(reference.onDelete)}`,

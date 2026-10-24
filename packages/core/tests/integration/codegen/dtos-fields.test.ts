@@ -128,13 +128,13 @@ describe("numeric bounds (REVIEW 3.2)", () => {
 })
 
 describe("what the 0.8.0 codegen review found in the generated DTOs (F4, F5, F6, F17)", () => {
-	it("fails on a column spread it cannot read, naming the file and line, rather than dropping its columns (F4)", async () => {
-		const tables = `const auditCols = () => ({ note: c.text("note") })
+	it("types every column a spread puts in, however the module builds it, rather than dropping them (F4)", async () => {
+		const tables = `const auditCols = () => ({ note: c.text("note", { max: 3 }) })
 const sharedCols = { ...auditCols() }
 export const memo = sqliteTable("memo", { id: c.id("mem"), ...sharedCols })`
-		await expect(generatedDtos("spread", tables)).rejects.toThrow(
-			/db\.x\.tables\.ts:4: comb cannot read the columns of \.\.\.auditCols\(\)/,
-		)
+		const create = (await generatedDtos("spread", tables))["memo"]?.["memoDtoCreateSchema"]
+		expect(Object.keys(create?.shape ?? {})).toEqual(["note"])
+		expect(create?.safeParse({ note: "abcd" }).success).toBe(false)
 	})
 
 	it("names each timestamp as the table declares it, never by a table-wide style (F5)", async () => {

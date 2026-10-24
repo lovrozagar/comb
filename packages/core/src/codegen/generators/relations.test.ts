@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
@@ -7,14 +7,14 @@ import { generateRelations } from "./relations.ts"
 import { testContext } from "./__fixtures__/context.ts"
 
 const HEAD = `import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = { id: () => text("id").primaryKey(), ref: (name: string) => text(name) }
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", { id: c.id() })
 `
 
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-relations-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-gen-relations-"))
 })
 
 afterEach(() => {
@@ -109,11 +109,16 @@ describe("generateRelations without a relation (F10)", () => {
 })
 
 describe("generateRelations — a key to a table outside the file", () => {
-	it("writes the one side, and no many side for a table the file does not declare", () => {
-		const { content } = generate(`import { account } from "./elsewhere"
-export const post = createTable("post", { id: c.id(), accountId: c.ref("account_id").references(() => account.id) })`)
-		/* the many side has no table of the file to live on; the one side does */
-		expect(content).toContain("account: r.one.account(")
-		expect(content).not.toContain("r.many.post(")
+	it("refuses it, naming the module that exports the table, as the relations import every table from the tables file", () => {
+		fs.writeFileSync(
+			path.join(tmpDir, "elsewhere.ts"),
+			`${HEAD}export const account = createTable("account", { id: c.id() })\n`,
+		)
+		expect(() =>
+			generate(`import { account } from "./elsewhere.ts"
+export const post = createTable("post", { id: c.id(), accountId: c.ref("account_id").references(() => account.id) })`),
+		).toThrow(
+			/post\.accountId references the table account \(account in .*elsewhere\.ts\), which the tables file does not export; export it there/,
+		)
 	})
 })

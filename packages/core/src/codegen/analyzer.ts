@@ -1,96 +1,16 @@
 /**
- * TableAnalyzer — single-pass ts-morph AST traversal.
- *
- * Produces TableMeta[] consumed by all generators as pure transformers.
- * Centralizes all AST parsing so generators never touch ts-morph.
+ * The analysis every generator consumes: the tables module loaded at runtime in codegen's own
+ * child (runtime/load.ts), each table read as drizzle built it and as comb's `c` helpers recorded
+ * it (runtime/read-tables.ts), then named as the generators ask (runtime/to-meta.ts). Generators
+ * never load or read source themselves.
  */
-import type { Project } from "ts-morph"
-import { parseTable } from "./analyze-table.ts"
-import type { AnalysisResult, ImportsMeta, TableMeta } from "./analyzer-types.ts"
-import { builderDialects, calleeOf, isTableDefinition, tableBuilders } from "./utils/table-builders.ts"
-import { createProjectFromTablesDir, extractDbName, getTablesImportPath, tableSourceFiles } from "./utils/ts-morph.ts"
+import type { AnalysisResult, TableMeta } from "./analyzer-types.ts"
+import { loadSnapshot } from "./runtime/load.ts"
+import { toAnalysis } from "./runtime/to-meta.ts"
 
-/** Every named import across the project, by local name, with the module it comes from. */
-function collectImports(project: Project): ImportsMeta {
-	const imports: ImportsMeta = {
-		enumImports: new Map(),
-
-		identifiers: new Map(),
-		jsonSchemaImports: new Set(),
-	}
-	for (const file of project.getSourceFiles()) {
-		for (const declaration of file.getImportDeclarations()) {
-			const moduleSpecifier = declaration.getModuleSpecifierValue()
-			for (const named of declaration.getNamedImports()) imports.identifiers.set(named.getName(), moduleSpecifier)
-		}
-	}
-	return imports
-}
-
-/** Mark each reference whose target column is a c.id key: the reference takes the id rules (F10) */
-function markIdReferences(tables: TableMeta[]): void {
-	for (const field of tables.flatMap((table) => table.fields)) {
-		const fk = field.foreignKey
-		if (fk === null) continue
-		const target = tables
-			.find((table) => table.varName === fk.refTable)
-			?.fields.find((each) => each.name === fk.refColumn)
-		fk.toId = target !== undefined && /^\s*c\.id\s*[<(]/.test(target.raw)
-	}
-}
-
-/**
- * Every table the tables file declares, itself or through a file it re-exports, and the engine
- * their builders build for; tables of both engines in one database are refused
- */
-function collectTables(
-	project: Project,
-	tablesPath: string,
-	imports: ImportsMeta,
-): Pick<AnalysisResult, "dialect" | "tables"> {
-	const tables: TableMeta[] = []
-	const dialects = new Set<"postgres" | "sqlite">()
-	for (const file of tableSourceFiles(project, tablesPath)) {
-		const builders = tableBuilders(file)
-		const engines = builderDialects(file)
-		for (const statement of file.getVariableStatements()) {
-			const declaration = statement.getDeclarations()[0]
-			const text = declaration?.getInitializer()?.getText()
-			if (declaration === undefined || text === undefined || !isTableDefinition(text, builders)) continue
-			/* the rows, column and relations files import every table they generate for (F8) */
-			if (!statement.isExported()) {
-				throw new Error(
-					`table "${declaration.getName()}" is declared in ${file.getFilePath()} without export, so the generated files cannot import it; export it`,
-				)
-			}
-			const table = parseTable(declaration, imports)
-			if (table === null) continue
-			tables.push(table)
-			const engine = engines.get(calleeOf(text) as string)
-			if (engine !== undefined) dialects.add(engine)
-		}
-	}
-	if (dialects.size > 1)
-		throw new Error(
-			`${tablesPath}: the database holds both Postgres and SQLite tables; give each engine its own database`,
-		)
-	markIdReferences(tables)
-	return { dialect: [...dialects][0] ?? null, tables: tables.sort((a, b) => a.varName.localeCompare(b.varName)) }
-}
-
-/**
- * Analyze a tables file and produce the full AnalysisResult.
- * Single-pass ts-morph traversal — all generators consume this output.
- */
+/** Load and analyze a tables file. Loading runs the module, which must be import-safe. */
 function analyze(tablesPath: string): AnalysisResult {
-	const project = createProjectFromTablesDir(tablesPath)
-	const imports = collectImports(project)
-	return {
-		dbName: extractDbName(tablesPath),
-		imports,
-		...collectTables(project, tablesPath, imports),
-		tablesImportPath: getTablesImportPath(tablesPath),
-	}
+	return toAnalysis(loadSnapshot(tablesPath), tablesPath)
 }
 
 export { analyze }

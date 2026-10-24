@@ -24,6 +24,7 @@ import {
 	type SetNotNull,
 	text,
 } from "drizzle-orm/pg-core"
+import { withCombColumn } from "../meta/column.ts"
 /* Constraint types are dialect-agnostic; they live under sqlite/ because that is
    the published export path and moving them would be a breaking change. */
 import type {
@@ -83,48 +84,55 @@ type PgColumns = {
 
 export const c: PgColumns = {
 	/* Native boolean */
-	boolean: (name: string) => boolean(name),
+	boolean: (name: string) => withCombColumn(boolean(name), { kind: "boolean" }),
 
 	/* Standard createdAt timestamp */
-	createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) =>
-		epochMs(name).notNull().default(timestampDefaults.now()),
+	createdAt: (name: CreatedAtName, constraints?: TimestampConstraints) =>
+		withCombColumn(epochMs(name).notNull().default(timestampDefaults.now()), { constraints, kind: "createdAt" }),
 
 	/* Standard deletedAt timestamp (nullable) */
-	deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => epochMs(name),
+	deletedAt: (name: DeletedAtName, constraints?: TimestampConstraints) =>
+		withCombColumn(epochMs(name), { constraints, kind: "deletedAt" }),
 
 	/* Enum stored as text with type annotation */
-	enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) =>
-		text(name).$type<T[number]>(),
+	enum: <T extends readonly string[]>(name: string, values: T, states?: EnumStates<T[number]>) =>
+		withCombColumn(text(name).$type<T[number]>(), { kind: "enum", states, values }),
 
 	/* Text primary key — prefix is type-erased metadata for codegen */
-	id: (_prefix: string) => text("id").primaryKey(),
+	id: (prefix: string) => withCombColumn(text("id").primaryKey(), { kind: "id", prefix }),
 
 	/* Integer */
-	integer: (name: string, _constraints?: IntegerConstraints) => integer(name),
+	integer: (name: string, constraints?: IntegerConstraints) =>
+		withCombColumn(integer(name), { constraints, kind: "integer" }),
 
 	/* Native JSONB, typed by its Zod schema */
-	json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) =>
-		jsonb(name).$type<z.infer<TSchema>>(),
+	json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, schema: TSchema, constraints?: JsonConstraints) =>
+		withCombColumn(jsonb(name).$type<z.infer<TSchema>>(), { constraints, kind: "json", schema }),
 
 	/* Floating point (double precision) */
-	real: (name: string, _constraints?: IntegerConstraints) => doublePrecision(name),
+	real: (name: string, constraints?: IntegerConstraints) =>
+		withCombColumn(doublePrecision(name), { constraints, kind: "real" }),
 
 	/* Foreign key reference - use with .references() */
-	ref: (name: string, _constraints?: TextConstraints) => text(name),
+	ref: (name: string, constraints?: TextConstraints) => withCombColumn(text(name), { constraints, kind: "ref" }),
 
 	/* Auto-increment integer primary key */
-	serialId: () => serial("id").primaryKey(),
+	serialId: () => withCombColumn(serial("id").primaryKey(), { kind: "serialId" }),
 
 	/* Text: PostgreSQL text has no length limit, so `max` bounds the generated DTOs only */
-	text: (name: string, _constraints?: TextConstraints) => text(name),
+	text: (name: string, constraints?: TextConstraints) => withCombColumn(text(name), { constraints, kind: "text" }),
 
 	/* Timestamp as integer (milliseconds) */
-	timestamp: (name: string, _constraints?: TimestampConstraints) => epochMs(name),
+	timestamp: (name: string, constraints?: TimestampConstraints) =>
+		withCombColumn(epochMs(name), { constraints, kind: "timestamp" }),
 
 	/* Standard updatedAt timestamp with $onUpdate */
-	updatedAt: (name: UpdatedAtName, _constraints?: TimestampConstraints) =>
-		epochMs(name)
-			.notNull()
-			.default(timestampDefaults.now())
-			.$onUpdate(() => Date.now()),
+	updatedAt: (name: UpdatedAtName, constraints?: TimestampConstraints) =>
+		withCombColumn(
+			epochMs(name)
+				.notNull()
+				.default(timestampDefaults.now())
+				.$onUpdate(() => Date.now()),
+			{ constraints, kind: "updatedAt" },
+		),
 }

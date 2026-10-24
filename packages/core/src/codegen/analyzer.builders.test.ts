@@ -1,5 +1,5 @@
+import { fixtureRoot } from "./__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "./analyzer.ts"
@@ -14,7 +14,7 @@ describe("analyzer: table builders", () => {
 	let dir: string
 
 	beforeEach(() => {
-		dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-analyzer-builders-"))
+		dir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-analyzer-builders-"))
 	})
 
 	afterEach(() => {
@@ -43,7 +43,7 @@ describe("analyzer: table builders", () => {
 
 	it("ignores calls that are not a table builder", () => {
 		const source = `import { text } from "drizzle-orm/sqlite-core"
-import { define } from "./elsewhere"
+const define = (name: string, cols: object) => ({ cols, name })
 const make = (name: string, cols: object) => ({ name, cols })
 export const a = make("a", ${COLUMNS})
 export const b = define("b", ${COLUMNS})

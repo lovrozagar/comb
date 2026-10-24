@@ -56,12 +56,21 @@ const inline = (example: string): ExampleResult => ({
 	needsSharedMeta: false,
 })
 
+// lookup-table: the helpers whose values get no example: a reference, a JSON document, a timestamp comb fills
+const NO_EXAMPLE_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"createdAt",
+	"deletedAt",
+	"json",
+	"ref",
+	"updatedAt",
+])
+
 /* sensitive or structured values get no example: the schema says enough, the value would leak */
-function hasNoExample({ constraints, foreignKey, raw }: FieldMeta): boolean {
+function hasNoExample({ combKind, constraints, dataType, foreignKey }: FieldMeta): boolean {
 	/* a pattern decides what the value looks like, which no generic example can know */
 	if (constraints.private || constraints.password || constraints.pattern !== null || foreignKey !== null) return true
-	if (/\.\$type<\s*z\.infer\b/.test(raw)) return true
-	return /c\.(ref|json|createdAt|updatedAt|deletedAt)[<(]/.test(raw)
+	if (combKind === null) return dataType === "object json"
+	return NO_EXAMPLE_KINDS.has(combKind)
 }
 
 /* the shared examples' own values, which a bound may refuse */
@@ -110,23 +119,17 @@ function kindExample(field: FieldMeta): ExampleResult | null | undefined {
 const RULES: Rule[] = [
 	kindExample,
 	/* an id with a prefix is unique per table */
-	({ raw }) => {
-		if (!/c\.id[<(]/.test(raw)) return undefined
-		return inline(`"${/c\.id\(["'](\w+)["']\)/.exec(raw)?.[1] ?? "id"}_${EXAMPLE_ULID}"`)
-	},
-	({ raw }) =>
-		/c\.serialId[<(]/.test(raw) ? shared("serialId") : /c\.boolean[<(]/.test(raw) ? shared("boolean") : undefined,
+	({ combKind, prefix }) => (combKind === "id" ? inline(`"${prefix ?? "id"}_${EXAMPLE_ULID}"`) : undefined),
+	({ combKind }) =>
+		combKind === "serialId" ? shared("serialId") : combKind === "boolean" ? shared("boolean") : undefined,
 	({ enumValues }) =>
 		enumValues !== null && enumValues.length > 0 ? inline(JSON.stringify(enumValues[0])) : undefined,
 	(field) =>
-		/c\.integer[<(]/.test(field.raw)
-			? midpoint(field, "integer")
-			: /c\.real[<(]/.test(field.raw)
-				? midpoint(field, "real")
-				: /c\.timestamp[<(]/.test(field.raw)
-					? midpoint(field, "timestamp")
-					: undefined,
-	(field) => (/c\.(text|id|enum)[<(]/.test(field.raw) ? textExample(field) : undefined),
+		field.combKind === "integer" || field.combKind === "real" || field.combKind === "timestamp"
+			? midpoint(field, field.combKind)
+			: undefined,
+	(field) =>
+		field.combKind === "text" || field.combKind === "id" || field.combKind === "enum" ? textExample(field) : undefined,
 ]
 
 /**

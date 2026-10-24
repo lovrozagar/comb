@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
@@ -9,11 +9,7 @@ import { type TestContext, testContext } from "./__fixtures__/context.ts"
 
 const TABLES = `
 import { sqliteTable as createTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	text: (name: string) => text(name),
-	ref: (name: string) => text(name),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", {
 	id: c.id(),
 	email: c.text("email").notNull(),
@@ -29,7 +25,7 @@ export const post = createTable("post", {
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-translations-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-gen-translations-"))
 })
 
 afterEach(() => {

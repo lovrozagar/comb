@@ -15,8 +15,8 @@ beforeAll(() => {
 	tarball = pack()
 })
 
-/* without ts-morph, the codegen entries cannot load; every runtime subpath can */
-const NEEDS_TS_MORPH = ["@lovrozagar/comb/codegen", "@lovrozagar/comb/codegen/generators"]
+/* every subpath loads without ts-morph: codegen loads it in the child that reads the tables (codegen/runtime/load.ts) */
+const NEEDS_TS_MORPH: string[] = []
 
 describe.each([
 	["required", NEEDS_TS_MORPH],

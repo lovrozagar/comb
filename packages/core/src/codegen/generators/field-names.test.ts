@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
@@ -28,7 +28,18 @@ function field(name: string): FieldMeta {
 			url: false,
 		},
 		drizzleHelper: "text",
-		enumName: null,
+		autoIncrement: false,
+		columnType: "SQLiteText",
+		combKind: "text",
+		dataType: "string",
+		generated: false,
+		hasDefault: false,
+		identity: false,
+		inCompositeKey: false,
+		onUpdate: false,
+		prefix: null,
+		sqlType: "text",
+		unique: null,
 		enumValues: null,
 		states: null,
 		foreignKey: null,
@@ -37,7 +48,6 @@ function field(name: string): FieldMeta {
 		jsonSchemaName: null,
 		length: null,
 		name,
-		raw: `c.text("${name}")`,
 		schemaImports: [],
 		sqlName: name,
 	}
@@ -46,6 +56,8 @@ function field(name: string): FieldMeta {
 function table(sqlName: string, fieldNames: string[]): TableMeta {
 	return {
 		checkConstraints: [],
+		expressionIndexes: [],
+		schema: null,
 		fields: fieldNames.map(field),
 		hasCompositePrimaryKey: false,
 		idPrefix: null,
@@ -67,7 +79,7 @@ function table(sqlName: string, fieldNames: string[]): TableMeta {
 function useTmpDir(prefix: string): () => string {
 	let dir = ""
 	beforeEach(() => {
-		dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+		dir = fs.mkdtempSync(path.join(fixtureRoot(), prefix))
 	})
 	afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
 	return () => dir

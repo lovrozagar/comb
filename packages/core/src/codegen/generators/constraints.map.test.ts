@@ -1,6 +1,6 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 /** The constraint map's keys and verdicts, built from analyzed tables on each dialect */
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
@@ -13,7 +13,7 @@ afterEach(() => {
 
 /** The tables of `source`, analyzed */
 function tablesOf(source: string) {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-constraint-map-"))
+	const dir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-constraint-map-"))
 	made.push(dir)
 	const file = path.join(dir, "db.test.tables.ts")
 	fs.writeFileSync(file, source)

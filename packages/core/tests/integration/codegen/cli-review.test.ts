@@ -139,8 +139,8 @@ describe("a run with one database that fails (F17)", () => {
 } }\n`,
 			"src/bad/db.bad.tables.ts": `import { sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
-const kinds = () => ["a", "b"] as const
-export const thing = sqliteTable("thing", { id: c.id("thg"), kind: c.enum("kind", kinds()).notNull() })
+export const thing = sqliteTable("thing", { id: c.id("thg") })
+throw new Error("not import-safe")
 `,
 			"src/core/db.core.tables.ts": SQLITE,
 		})

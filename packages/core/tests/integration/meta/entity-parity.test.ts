@@ -1,3 +1,4 @@
+import { fixtureRoot } from "../../../src/codegen/__fixtures__/temp.ts"
 /**
  * The published entity facts must match the analyzer's view of the table, and
  * the DTOs generated from that same view.
@@ -7,7 +8,6 @@
  * restatement of the rule.
  */
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../../../src/codegen/analyzer.ts"
@@ -18,22 +18,13 @@ import { testContext } from "../../../src/codegen/generators/__fixtures__/contex
 
 const PRELUDE = `
 import { sqliteTable as createTable, text, integer, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core"
-const c = {
-	id: (_p: string) => text("id").primaryKey(),
-	serialId: () => integer("id").primaryKey({ autoIncrement: true }),
-	text: (name: string, _o?: { max?: number; nomutate?: boolean; private?: boolean }) => text(name),
-	enum: (name: string, _v: readonly string[], _s?: object) => text(name),
-	ref: (name: string, _o?: { tenant?: boolean }) => text(name),
-	createdAt: (name: string) => integer(name, { mode: "number" }).notNull(),
-	updatedAt: (name: string) => integer(name, { mode: "number" }).notNull(),
-	deletedAt: (name: string) => integer(name, { mode: "number" }),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-meta-entity-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-meta-entity-"))
 })
 
 afterEach(() => {
@@ -52,7 +43,7 @@ function analyzeSource(source: string) {
 }
 
 function validateSource(source: string) {
-	return validateTables(writeSource(source))
+	return validateTables(analyze(writeSource(source)))
 }
 
 function metaFor(body: string) {

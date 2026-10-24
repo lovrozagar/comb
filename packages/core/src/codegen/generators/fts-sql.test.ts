@@ -1,11 +1,13 @@
 import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it } from "vitest"
-import { parseField } from "../analyze-field.ts"
+import { parseField } from "../__fixtures__/runtime.ts"
 import type { TableMeta } from "../analyzer-types.ts"
 import { dedup, ftsReferenceSql, generateFtsSql } from "./fts-sql.ts"
 
 const post: TableMeta = {
 	checkConstraints: [],
+	expressionIndexes: [],
+	schema: null,
 	fields: [
 		parseField("id", 'c.id("pst")'),
 		parseField("bodyText", 'c.text("body_text")'),

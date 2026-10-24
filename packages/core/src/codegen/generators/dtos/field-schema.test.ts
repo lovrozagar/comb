@@ -1,5 +1,7 @@
+import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
-import { parseField } from "../../analyze-field.ts"
+import { parseField } from "../../__fixtures__/runtime.ts"
+import { c } from "../../../sqlite/columns.ts"
 import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { generateFieldSchema } from "./field-schema.ts"
@@ -15,9 +17,15 @@ function schema(name: string, raw: string, type: SchemaType) {
 	return generateFieldSchema(parseField(name, raw), type, { imports: imports() })
 }
 
-/** A parsed field with what the analyzer would have filled in from elsewhere in the file */
+/* the tables the references below point at */
+const scope = {
+	page: sqliteTable("page", { slug: c.text("slug", { max: 200 }) }),
+	user: sqliteTable("user", { email: text("email"), id: c.id("usr") }),
+}
+
+/** A read field with what the test pins over it */
 function fieldOf(name: string, raw: string, overrides: Partial<FieldMeta>): FieldMeta {
-	return { ...parseField(name, raw), ...overrides }
+	return { ...parseField(name, raw, { scope }), ...overrides }
 }
 
 describe("generateFieldSchema: what each schema type includes", () => {
@@ -99,19 +107,11 @@ describe("generateFieldSchema: optionality", () => {
 })
 
 describe("generateFieldSchema: kinds", () => {
-	it("writes an enum from its values or its imported name, and refuses one it cannot read", () => {
-		expect(
-			generateFieldSchema(fieldOf("s", 'c.enum("s", ["a", "b"]).notNull()', { enumValues: ["a", "b"] }), "read", {
-				imports: imports(),
-			}),
-		).toBe('z.enum(["a","b"]).meta({ examples: ["a"] })')
-		expect(
-			generateFieldSchema(fieldOf("s", 'c.enum("s", ROLES).notNull()', { enumName: "ROLES" }), "read", {
-				imports: imports(),
-			}),
-		).toBe("z.enum(ROLES).meta(_m.string)")
-		expect(() => schema("s", 'c.enum("s", [a, b])', "read")).toThrow(
-			'c.enum column "s": its values are not string literals',
+	it("writes an enum from the values it holds at runtime, inline or through a const", () => {
+		expect(schema("s", 'c.enum("s", ["a", "b"]).notNull()', "read")).toBe('z.enum(["a","b"]).meta({ examples: ["a"] })')
+		const roles = parseField("s", 'c.enum("s", ROLES).notNull()', { scope: { ROLES: ["admin", "member"] } })
+		expect(generateFieldSchema(roles, "read", { imports: imports() })).toBe(
+			'z.enum(["admin","member"]).meta({ examples: ["admin"] })',
 		)
 	})
 })
@@ -130,7 +130,9 @@ describe("generateFieldSchema: JSON", () => {
 				{ imports: imports() },
 			),
 		).toContain("new TextEncoder().encode(JSON.stringify(val)).length <= 100")
-		expect(() => schema("p", 'c.json("p")', "read")).toThrow("c.json() must have schema as second parameter")
+		expect(() => schema("p", 'c.json("p")', "read")).toThrow(
+			"fixture.p: no module of the project exports the schema its c.json is given",
+		)
 	})
 
 	it("builds text from its annotations: kind, transforms, then bounds", () => {
@@ -151,7 +153,7 @@ describe("generateFieldSchema: JSON", () => {
 		expect(schema("n", 'c.text("n", { trim: true, lowercase: true, max: 20 }).notNull()', "update")).toBe(
 			"z.string().trim().toLowerCase().min(1).max(20).meta(_m.string).optional()",
 		)
-		expect(schema("n", 'c.text("n", { uppercase: true, pattern: /^[A-Z]+$/ }).notNull()', "create")).toBe(
+		expect(schema("n", 'c.text("n", { uppercase: true, pattern: "/^[A-Z]+$/" }).notNull()', "create")).toBe(
 			/* a pattern decides what the value looks like, so it gets no example (F18) */
 			"z.string().toUpperCase().min(1).regex(/^[A-Z]+$/)",
 		)
@@ -164,15 +166,10 @@ describe("generateFieldSchema: JSON", () => {
 })
 
 describe("generateFieldSchema: ids, typed text and numbers", () => {
-	it("bounds an id-like text column, and uses a typed schema when the column names one", () => {
+	it("bounds an id-like text column, by helper and never by name", () => {
 		expect(schema("id", 'c.id("usr")', "read")).toContain(".min(1).max(48)")
-		/* by helper, never by name: a text column named orgId is text (F10) */
+		/* a text column named orgId is text (F10) */
 		expect(schema("orgId", 'c.text("orgId").notNull()', "create")).toBe("z.string().min(1).meta(_m.string)")
-		const typed = generateFieldSchema(parseField("p", 'c.text("p").$type<z.infer<typeof prefs>>()'), "read", {
-			imports: imports(),
-		})
-		expect(typed).toBe("prefs.nullable()")
-		expect(schema("p", 'c.text("p").$type<string>()', "read")).toBe("z.string().meta(_m.string).nullable()")
 	})
 
 	it("writes numbers, timestamps and booleans", () => {
@@ -191,7 +188,11 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		expect(schema("at", 'c.createdAt("at")', "read")).toBe("timestampSchema")
 		expect(schema("b", 'c.boolean("b").notNull()', "read")).toBe("z.boolean().meta(_m.boolean)")
 		expect(schema("r", 'c.real("r").notNull()', "read")).toBe("z.number().meta(_m.real)")
-		expect(schema("x", 'blob("x")', "read")).toBe("z.unknown().nullable()")
+		/* a plain drizzle column is typed from its data type: a JSON blob takes any JSON value */
+		expect(schema("x", 'blob("x")', "read")).toBe("z.json().nullable()")
+		expect(() => schema("x", 'blob("x", { mode: "buffer" })', "read")).toThrow(
+			"fixture.x: comb has no rule for a SQLiteBlobBuffer column (object buffer)",
+		)
 	})
 
 	it("carries every declared numeric bound (REVIEW 3.2)", () => {
@@ -296,5 +297,24 @@ describe("generateFieldSchema: a JSON column's rules, published (F26)", () => {
 		expect(generateFieldSchema(plain, "create", { dialect: "sqlite", imports: imports() })).toBe(
 			"blobSchema.nullable().optional()",
 		)
+	})
+})
+
+/** The read schema of a Postgres column written as `raw` */
+const pg = (raw: string) =>
+	generateFieldSchema(parseField("n", raw, { dialect: "postgres" }), "read", {
+		dialect: "postgres",
+		imports: imports(),
+	})
+
+describe("generateFieldSchema: a plain drizzle column, typed from its data type (F6)", () => {
+	it("bounds an integer by what its Postgres type holds, and takes a boolean and a double as they are", () => {
+		expect(pg('smallint("n").notNull()')).toBe("z.number().int().min(-32768).max(32767)")
+		expect(pg('integer("n").notNull()')).toBe("z.number().int().min(-2147483648).max(2147483647)")
+		expect(pg('bigint("n", { mode: "number" }).notNull()')).toBe(
+			"z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER)",
+		)
+		expect(pg('boolean("n").notNull()')).toBe("z.boolean()")
+		expect(pg('doublePrecision("n").notNull()')).toBe("z.number()")
 	})
 })

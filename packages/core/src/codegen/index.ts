@@ -18,6 +18,6 @@ export type {
 	TimestampsMeta,
 	UniqueIndexMeta,
 } from "./analyzer-types.ts"
-export { type FieldConstraints, parseFieldConstraints } from "./annotations.ts"
+export { type FieldConstraints, fieldConstraintsOf } from "./annotations.ts"
 export { deriveEntityMeta, isExcludedFromUpdate } from "./entity-meta.ts"
 export { validateTables } from "./utils/validate.ts"

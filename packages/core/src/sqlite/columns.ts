@@ -16,6 +16,7 @@ import {
 	text,
 } from "drizzle-orm/sqlite-core"
 import type * as z from "zod"
+import { withCombColumn } from "../meta/column.ts"
 import type {
 	EnumStates,
 	IntegerConstraints,
@@ -63,50 +64,62 @@ export type SqliteColumns = {
 
 export const c: SqliteColumns = {
 	/* Boolean as integer */
-	boolean: (name: string) => integer(name, { mode: "boolean" }),
+	boolean: (name: string) => withCombColumn(integer(name, { mode: "boolean" }), { kind: "boolean" }),
 
 	/* Standard createdAt timestamp */
-	createdAt: (name: "createdAt" | "created_at", _constraints?: TimestampConstraints) =>
-		integer(name, { mode: "number" }).notNull().default(timestampDefaults.now()),
+	createdAt: (name: "createdAt" | "created_at", constraints?: TimestampConstraints) =>
+		withCombColumn(integer(name, { mode: "number" }).notNull().default(timestampDefaults.now()), {
+			constraints,
+			kind: "createdAt",
+		}),
 
 	/* Standard deletedAt timestamp (nullable) */
-	deletedAt: (name: "deletedAt" | "deleted_at", _constraints?: TimestampConstraints) =>
-		integer(name, { mode: "number" }),
+	deletedAt: (name: "deletedAt" | "deleted_at", constraints?: TimestampConstraints) =>
+		withCombColumn(integer(name, { mode: "number" }), { constraints, kind: "deletedAt" }),
 
 	/* Enum stored as text with type annotation */
-	enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) =>
-		text(name).$type<T[number]>(),
+	enum: <T extends readonly string[]>(name: string, values: T, states?: EnumStates<T[number]>) =>
+		withCombColumn(text(name).$type<T[number]>(), { kind: "enum", states, values }),
 
 	/* Text primary key — prefix is type-erased metadata for codegen */
-	id: (_prefix: string) => text("id").primaryKey(),
+	id: (prefix: string) => withCombColumn(text("id").primaryKey(), { kind: "id", prefix }),
 
 	/* Integer with number mode */
-	integer: (name: string, _constraints?: IntegerConstraints) => integer(name, { mode: "number" }),
+	integer: (name: string, constraints?: IntegerConstraints) =>
+		withCombColumn(integer(name, { mode: "number" }), { constraints, kind: "integer" }),
 
 	/* JSON stored as text with Zod schema */
-	json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) =>
-		text(name, { mode: "json" }).$type<z.infer<TSchema>>(),
+	json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, schema: TSchema, constraints?: JsonConstraints) =>
+		withCombColumn(text(name, { mode: "json" }).$type<z.infer<TSchema>>(), { constraints, kind: "json", schema }),
 
 	/* Floating point */
-	real: (name: string, _constraints?: IntegerConstraints) => real(name),
+	real: (name: string, constraints?: IntegerConstraints) => withCombColumn(real(name), { constraints, kind: "real" }),
 
 	/* Foreign key reference - use with .references() */
-	ref: (name: string, _constraints?: TextConstraints) => text(name),
+	ref: (name: string, constraints?: TextConstraints) => withCombColumn(text(name), { constraints, kind: "ref" }),
 
 	/* Auto-increment integer primary key */
-	serialId: () => integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }),
+	serialId: () =>
+		withCombColumn(integer("id", { mode: "number" }).primaryKey({ autoIncrement: true }), { kind: "serialId" }),
 
 	/* Text with optional constraints */
-	text: (name: string, _constraints?: TextConstraints) =>
-		_constraints?.max ? text(name, { length: _constraints.max }) : text(name),
+	text: (name: string, constraints?: TextConstraints) =>
+		withCombColumn(constraints?.max ? text(name, { length: constraints.max }) : text(name), {
+			constraints,
+			kind: "text",
+		}),
 
 	/* Timestamp as integer (milliseconds) */
-	timestamp: (name: string, _constraints?: TimestampConstraints) => integer(name, { mode: "number" }),
+	timestamp: (name: string, constraints?: TimestampConstraints) =>
+		withCombColumn(integer(name, { mode: "number" }), { constraints, kind: "timestamp" }),
 
 	/* Standard updatedAt timestamp with $onUpdate */
-	updatedAt: (name: "updatedAt" | "updated_at", _constraints?: TimestampConstraints) =>
-		integer(name, { mode: "number" })
-			.notNull()
-			.default(timestampDefaults.now())
-			.$onUpdate(() => Date.now()),
+	updatedAt: (name: "updatedAt" | "updated_at", constraints?: TimestampConstraints) =>
+		withCombColumn(
+			integer(name, { mode: "number" })
+				.notNull()
+				.default(timestampDefaults.now())
+				.$onUpdate(() => Date.now()),
+			{ constraints, kind: "updatedAt" },
+		),
 }

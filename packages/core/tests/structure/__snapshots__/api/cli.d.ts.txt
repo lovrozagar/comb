@@ -53,9 +53,13 @@ export type RunOptions = {
     cwd?: string | undefined;
     /** Variables set over the parent's environment for the child; an undefined value removes one. */
     env?: Readonly<Record<string, string | undefined>> | undefined;
+    /** The child's whole environment, none of the parent's, in place of `env` */
+    exactEnv?: Readonly<Record<string, string>> | undefined;
     input?: string | undefined;
     /** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
     maxBuffer?: number | undefined;
+    /** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
+    timeoutMs?: number | undefined;
 };
 export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
 /** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */

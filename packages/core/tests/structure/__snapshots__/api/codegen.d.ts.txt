@@ -2,16 +2,19 @@
 export { analyze } from "./analyzer.ts";
 export { type CodegenConfig, type DatabaseCodegen, defineCodegenConfig, type FtsTableConfig, GENERATORS, type GeneratorName, } from "./config.ts";
 export type { AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, } from "./analyzer-types.ts";
-export { type FieldConstraints, parseFieldConstraints } from "./annotations.ts";
+export { type FieldConstraints, fieldConstraintsOf } from "./annotations.ts";
 export { deriveEntityMeta, isExcludedFromUpdate } from "./entity-meta.ts";
 export { validateTables } from "./utils/validate.ts";
 
 // codegen/analyzer.d.ts
-import type { AnalysisResult, TableMeta } from "./analyzer-types.ts";
 /**
- * Analyze a tables file and produce the full AnalysisResult.
- * Single-pass ts-morph traversal — all generators consume this output.
+ * The analysis every generator consumes: the tables module loaded at runtime in codegen's own
+ * child (runtime/load.ts), each table read as drizzle built it and as comb's `c` helpers recorded
+ * it (runtime/read-tables.ts), then named as the generators ask (runtime/to-meta.ts). Generators
+ * never load or read source themselves.
  */
+import type { AnalysisResult, TableMeta } from "./analyzer-types.ts";
+/** Load and analyze a tables file. Loading runs the module, which must be import-safe. */
 declare function analyze(tablesPath: string): AnalysisResult;
 export { analyze };
 export type { AnalysisResult, TableMeta };
@@ -48,6 +51,7 @@ export type CodegenConfig = {
 export declare function defineCodegenConfig(config: CodegenConfig): CodegenConfig;
 
 // codegen/analyzer-types.d.ts
+import type { CombColumnKind } from "../meta/column.ts";
 /**
  * TableMeta — serializable intermediate format produced by TableAnalyzer.
  * No ts-morph or Drizzle dependencies. All generators consume this.
@@ -102,39 +106,65 @@ type ForeignKeyRef = {
     /** whether the referenced column is a c.id key, whose id rules the reference takes (F10) */
     toId?: boolean | undefined;
 };
-/** A single column/field in a table */
+/** A single column/field in a table, as drizzle built it and its `c` helper recorded it */
 type FieldMeta = {
+    /** SQLite's AUTOINCREMENT on an integer key */
+    autoIncrement: boolean;
+    /** drizzle's column class: `SQLiteText`, `PgVarchar` */
+    columnType: string;
+    /** the `c` helper that built the column; null for a plain drizzle column */
+    combKind: CombColumnKind | null;
     constraints: FieldConstraintsMeta;
-    /** Drizzle helper: "text", "integer", "boolean", "timestamp", "createdAt", etc. */
+    /** drizzle's data type: `string`, `number int53`, `object json` */
+    dataType: string;
+    /** the `c` helper's name, else drizzle's column class */
     drizzleHelper: string;
-    /** Enum constant name if .$type<(typeof X)[number]> or c.enum("name", X) */
-    enumName: string | null;
-    /** Inline enum values if c.enum("name", ["a", "b"]), null if const ref */
+    /** the values of a c.enum, a pgEnum or an enum text column; null for any other */
     enumValues: string[] | null;
     /** State machine declared as c.enum's third argument, null when absent */
     states: StateMachineMeta | null;
     /** FK reference if .references(() => table.column) */
     foreignKey: ForeignKeyRef | null;
-    /** Whether .notNull() is present */
+    /** generated always as an expression: the database writes it */
+    generated: boolean;
+    /** a default value, default SQL or default function fills it when a write leaves it out */
+    hasDefault: boolean;
+    /** an identity column, always or by default */
+    identity: boolean;
+    /** a column of the table's composite primary key */
+    inCompositeKey: boolean;
+    /** NOT NULL */
     isNotNull: boolean;
-    /** Whether .primaryKey() or c.id("prefix") */
+    /** the table's single-column primary key */
     isPrimaryKey: boolean;
-    /** the schema expression of c.json(name, schema), as written */
+    /** the name the generated DTO imports a c.json column's schema under, null for any other column */
     jsonSchemaName: string | null;
-    /** the names the field's generated schema uses and must import (schemas, unreadable enum consts) */
+    /** the names the field's generated schema uses and must import (a c.json schema) */
     schemaImports: ImportRef[];
-    /** Length from positional arg or constraints */
+    /** the declared length: c.text's max, or drizzle's `length` */
     length: number | null;
     /** Field name as defined in the table schema object */
     name: string;
+    /** c.id's prefix; null for any other column */
+    prefix: string | null;
+    /** an update hook fills it on every update */
+    onUpdate: boolean;
     /** The column's SQL name: what the engine reports in errors and what DDL and triggers name */
     sqlName: string;
-    /** Full raw text of the initializer expression */
-    raw: string;
+    /** the column's SQL type, as DDL writes it */
+    sqlType: string;
+    /** the name of the column's own `.unique()`, drizzle's when it gives none; null when it has none */
+    unique: string | null;
 };
 /** Unique index from table options (3rd arg arrow function) */
 type UniqueIndexMeta = {
     columns: string[];
+    name: string;
+};
+/** A unique index whose keys are not all plain columns, keyed in the constraint map by its name */
+type ExpressionIndexMeta = {
+    /** its keys as SQL */
+    expression: string;
     name: string;
 };
 /** Check constraint from table options */
@@ -162,10 +192,14 @@ type TableMeta = {
     checkConstraints: CheckConstraintMeta[];
     /** All fields in the table */
     fields: FieldMeta[];
+    /** unique indexes on an expression */
+    expressionIndexes: ExpressionIndexMeta[];
     /** Whether composite PK exists in table options */
     hasCompositePrimaryKey: boolean;
     /** Entity ID prefix from c.id("prefix"), null if c.serialId() or missing */
     idPrefix: string | null;
+    /** the Postgres schema of a pgSchema's table; null for the default */
+    schema: string | null;
     /** SQL table name (first arg to createTable) */
     sqlName: string;
     /** Detected timestamp fields and style */
@@ -186,7 +220,7 @@ type ImportsMeta = {
     /** JSON schema names referenced by c.json() */
     jsonSchemaImports: Set<string>;
 };
-/** What a constraint constant can hold, read from its source (codegen/utils/constant-value.ts) */
+/** What a constraint can hold */
 type ConstantValue = boolean | number | string;
 /** Full analysis result */
 type AnalysisResult = {
@@ -199,32 +233,27 @@ type AnalysisResult = {
     /** Relative import path for the tables file */
     tablesImportPath: string;
 };
-export type { ConstantValue, ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };
+export type { ConstantValue, ExpressionIndexMeta, ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };
 
 // codegen/annotations.d.ts
 /**
- * Field constraint types and parser for Drizzle table fields
- *
- * Extracts constraints from type arguments:
- * Example: c.text("name", { min: 5, max: 254, email: true })
+ * A column's constraints, from the record its `c` helper was given: every key one the column
+ * types allow, a pattern one comb can emit, and `autogenerate` defaulting to true on a column
+ * something other than the caller fills.
  */
 import type { ConstantValue, FieldConstraintsMeta } from "./analyzer-types.ts";
 /** Field constraints extracted from type arguments */
 export type FieldConstraints = FieldConstraintsMeta;
 /**
- * Parse field constraints from type arguments.
- * Extracts constraints from c.method("name", { ... }) pattern.
- * For timestamp fields (createdAt, updatedAt, deletedAt), autogenerate defaults to true.
+ * A field's constraints from the record its column helper was given, every key one the column
+ * types allow and a pattern one comb can emit; an error at `place` otherwise. `filled` says what
+ * fills the column, never its name (F13): comb's own timestamp helpers, or a timestamp's default
+ * or update hook; a column named createdAt that nothing fills is the caller's to give
  */
-export declare function parseFieldConstraints(raw: string, fieldName?: string): FieldConstraints;
-/**
- * A field's constraints from the record its column helper declares (constraint-reader.ts), every
- * key one the column types allow and a pattern one comb can emit; an error at `place` otherwise
- */
-export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, place, raw }: {
-    fieldName?: string | undefined;
+export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, filled, place }: {
+    fieldName: string;
+    filled: boolean;
     place: string;
-    raw: string;
 }): FieldConstraints;
 
 // codegen/entity-meta.d.ts
@@ -249,8 +278,9 @@ import type { FieldMeta, TableMeta } from "./analyzer-types.ts";
 declare function isExcludedFromUpdate(field: FieldMeta): boolean;
 declare function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"];
 /**
- * Whether comb or the database fills `field`: an `autogenerate` column, or a key that c.id,
- * c.serialId, autoIncrement or a default fills
+ * Whether comb or the database fills `field`: an `autogenerate` column, a generated or identity
+ * column (F8), or a key that c.id, c.serialId, AUTOINCREMENT or a default fills; a natural key the
+ * caller supplies is not generated
  */
 declare function isGenerated(field: FieldMeta): boolean;
 /**
@@ -264,15 +294,16 @@ declare function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<s
 export { deriveEntityMeta, isExcludedFromUpdate, isGenerated, publishedUniqueIndexes };
 
 // codegen/utils/validate.d.ts
+import type { AnalysisResult } from "../analyzer-types.ts";
 type ValidationResult = {
     errors: string[];
     warnings: string[];
 };
 /**
- * Validate tables file before codegen. Returns errors + warnings.
+ * Validate the analysis before codegen. Returns errors + warnings.
  * Hard errors should abort generation. Warnings are informational.
  */
-export declare function validateTables(tablesPath: string): ValidationResult;
+export declare function validateTables(analysis: AnalysisResult): ValidationResult;
 export {};
 
 // codegen/generators/fts-sql.d.ts
@@ -319,6 +350,31 @@ type OrmConfig = {
 /** Generate ORM client file based on config */
 export declare function generateOrm(ctx: GeneratorContext, config: OrmConfig): void;
 export {};
+
+// meta/column.d.ts
+/**
+ * What a `c` helper records on the column it builds, for codegen to read at runtime: the helper's
+ * kind and the very values it was given. Kept under a registered symbol on drizzle's builder
+ * config, which the built column keeps, so a second copy of comb reads what the first wrote.
+ */
+/** The `c` helpers, by name */
+type CombColumnKind = "boolean" | "createdAt" | "deletedAt" | "enum" | "id" | "integer" | "json" | "real" | "ref" | "serialId" | "text" | "timestamp" | "updatedAt";
+/** A column's comb metadata: its helper, and the constraints, enum values, states, schema or prefix it took */
+type CombColumnMeta = {
+    constraints?: Readonly<Record<string, unknown>>;
+    kind: CombColumnKind;
+    prefix?: string;
+    schema?: unknown;
+    states?: unknown;
+    values?: readonly string[];
+};
+/** `builder` with `meta` recorded on its config; the options a helper was not given are left out */
+declare function withCombColumn<B>(builder: B, meta: {
+    [K in keyof CombColumnMeta]: CombColumnMeta[K] | undefined;
+}): B;
+/** The comb metadata a built column (or its builder) carries; undefined for a column no `c` helper built */
+declare function combColumnMeta(column: unknown): CombColumnMeta | undefined;
+export { combColumnMeta, withCombColumn, type CombColumnKind, type CombColumnMeta };
 
 // meta.d.ts
 /**

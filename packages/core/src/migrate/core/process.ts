@@ -11,9 +11,13 @@ export type RunOptions = {
 	cwd?: string | undefined
 	/** Variables set over the parent's environment for the child; an undefined value removes one. */
 	env?: Readonly<Record<string, string | undefined>> | undefined
+	/** The child's whole environment, none of the parent's, in place of `env` */
+	exactEnv?: Readonly<Record<string, string>> | undefined
 	input?: string | undefined
 	/** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
 	maxBuffer?: number | undefined
+	/** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
+	timeoutMs?: number | undefined
 }
 
 export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult
@@ -48,7 +52,10 @@ const installHint = (name: string): string =>
 		: ""
 
 /** How a process the OS could not run (or had to stop) is reported: POSIX shell codes where they exist. */
-function startFailure(cmd: string, error: NodeJS.ErrnoException, maxBuffer: number): RunResult {
+function startFailure(cmd: string, error: NodeJS.ErrnoException, options: RunOptions): RunResult {
+	const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER
+	if (error.code === "ETIMEDOUT")
+		return { code: 124, stderr: `${cmd}: stopped after ${options.timeoutMs} ms`, stdout: "" }
 	if (error.code === "ENOENT") return { code: 127, stderr: `${cmd}: command not found${installHint(cmd)}`, stdout: "" }
 	if (error.code === "ENOBUFS") return { code: 1, stderr: `${cmd}: output exceeded ${maxBuffer} bytes`, stdout: "" }
 	return { code: 126, stderr: `${cmd}: ${error.message}`, stdout: "" }
@@ -57,9 +64,10 @@ function startFailure(cmd: string, error: NodeJS.ErrnoException, maxBuffer: numb
 /** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
 export const run: Run = (cmd, args, options = {}) => {
 	const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER
-	const env = childEnv(options.env)
-	const result = spawnSync(cmd, args, { cwd: options.cwd, encoding: "utf8", env, input: options.input, maxBuffer })
-	if (result.error !== undefined) return startFailure(cmd, result.error as NodeJS.ErrnoException, maxBuffer)
+	const env = options.exactEnv === undefined ? childEnv(options.env) : { ...options.exactEnv }
+	const { cwd, input, timeoutMs: timeout } = options
+	const result = spawnSync(cmd, args, { cwd, encoding: "utf8", env, input, maxBuffer, timeout })
+	if (result.error !== undefined) return startFailure(cmd, result.error as NodeJS.ErrnoException, options)
 	const signal = result.signal === null ? 0 : 128 + constants.signals[result.signal]
 	/* `bun <package>` with the package missing says only that the script is not found */
 	const missing = cmd === "bun" && result.stderr.includes(`Script not found "${args[0]}"`)

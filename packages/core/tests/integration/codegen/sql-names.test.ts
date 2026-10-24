@@ -1,10 +1,10 @@
+import { fixtureRoot } from "../../../src/codegen/__fixtures__/temp.ts"
 /**
  * A column's SQL name is what the engine reports and what triggers reference, so everything
  * comb generates for the engine keys on it, not on the TypeScript property that holds it.
  * Here every property differs from its column, and the generated map and FTS DDL run on libsql.
  */
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { sql } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
@@ -20,11 +20,7 @@ import { testContext } from "../../../src/codegen/generators/__fixtures__/contex
 
 const TABLES = `
 import { sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
-const c = {
-	id: (_prefix: string) => text("id").primaryKey(),
-	text: (name: string) => text(name),
-	ref: (name: string) => text(name),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const owner = sqliteTable("owner", { id: c.id("own") })
 export const member = sqliteTable("member", {
 	id: c.id("mem"),
@@ -55,7 +51,7 @@ let analysis: AnalysisResult
 let map: ConstraintMap
 
 beforeAll(async () => {
-	dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-sql-names-"))
+	dir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-sql-names-"))
 	const tables = path.join(dir, "db.app.tables.ts")
 	fs.writeFileSync(tables, TABLES)
 	analysis = analyze(tables)

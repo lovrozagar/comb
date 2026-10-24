@@ -1,60 +1,16 @@
 /**
- * Pre-generation validation for Drizzle table definitions.
+ * Pre-generation validation of the tables codegen read at runtime.
  *
- * Tiered: hard errors (would produce invalid code) vs warnings (suspicious patterns). It reads
- * tables through the analyzer's own parser, so it checks exactly what codegen will generate from.
+ * Tiered: hard errors (would produce invalid code) vs warnings (suspicious patterns). It checks the
+ * analysis every generator consumes, so it checks exactly what codegen will generate from.
  */
-import { SyntaxKind, type VariableDeclaration } from "ts-morph"
 import { CURSOR_TIEBREAK_COLUMN } from "../../query/cursor.ts"
-import { parseTable } from "../analyze-table.ts"
-import type { FieldMeta, ImportsMeta, TableMeta } from "../analyzer-types.ts"
+import type { AnalysisResult, FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { camelToKebab, snakeToPascal } from "./case.ts"
-import { isTableDefinition, tableBuilders } from "./table-builders.ts"
-import { createProjectFromTablesDir, tableSourceFiles } from "./ts-morph.ts"
 
 type ValidationResult = {
 	errors: string[]
 	warnings: string[]
-}
-
-type Declared = { optionsText: string; table: TableMeta }
-
-const emptyImports = (): ImportsMeta => ({
-	enumImports: new Map(),
-
-	identifiers: new Map(),
-	jsonSchemaImports: new Set(),
-})
-
-/** The table `declaration` declares, with its options' source; a table comb cannot read is an error. */
-function declaredTable(declaration: VariableDeclaration, report: ValidationResult): Declared | null {
-	try {
-		const table = parseTable(declaration, emptyImports())
-		if (table === null) return null
-		/* parseTable read a call, so the initializer is one */
-		const args = declaration.getInitializerIfKindOrThrow(SyntaxKind.CallExpression).getArguments()
-		return { optionsText: args[2]?.getText() ?? "", table }
-	} catch (error) {
-		// reason: an unreadable table is reported to the caller as a validation error
-		report.errors.push(`${declaration.getName()}: ${(error as Error).message}`)
-		return null
-	}
-}
-
-/** Every table the tables file declares, itself or through a file it re-exports. */
-function declaredTables(tablesPath: string, report: ValidationResult): Declared[] {
-	const declared: Declared[] = []
-	for (const file of tableSourceFiles(createProjectFromTablesDir(tablesPath), tablesPath)) {
-		const builders = tableBuilders(file)
-		for (const statement of file.getVariableStatements()) {
-			const declaration = statement.getDeclarations()[0]
-			const text = declaration?.getInitializer()?.getText()
-			if (declaration === undefined || text === undefined || !isTableDefinition(text, builders)) continue
-			const table = declaredTable(declaration, report)
-			if (table !== null) declared.push(table)
-		}
-	}
-	return declared
 }
 
 /**
@@ -71,20 +27,17 @@ function checkPaths(varName: string, paths: Map<string, string>, report: Validat
 	}
 }
 
-function checkNames(declared: Declared[], report: ValidationResult): void {
+function checkNames(tables: readonly TableMeta[], report: ValidationResult): void {
 	const sqlNames = new Set<string>()
-	const varNames = new Set<string>()
 	/* the generated type names (post_tag and postTag both make PostTag) and the id prefixes, by the table that took them */
 	const typeNames = new Map<string, string>()
 	const prefixes = new Map<string, string>()
 	const paths = new Map<string, string>()
-	for (const { table } of declared) {
+	for (const table of tables) {
 		checkPaths(table.varName, paths, report)
 		if (sqlNames.has(table.sqlName))
 			report.errors.push(`Duplicate SQL table name: "${table.sqlName}" (var: ${table.varName})`)
-		if (varNames.has(table.varName)) report.errors.push(`Duplicate table variable name: "${table.varName}"`)
 		sqlNames.add(table.sqlName)
-		varNames.add(table.varName)
 		const typeName = snakeToPascal(table.varName)
 		const typed = typeNames.get(typeName)
 		if (typed !== undefined && typed !== table.varName)
@@ -100,11 +53,6 @@ function checkNames(declared: Declared[], report: ValidationResult): void {
 }
 
 function checkFields(table: TableMeta, report: ValidationResult): void {
-	const seen = new Set<string>()
-	for (const field of table.fields) {
-		if (seen.has(field.name)) report.errors.push(`${table.varName}: duplicate field "${field.name}"`)
-		seen.add(field.name)
-	}
 	/* A table has one tenant boundary or none. Two declarations have no safe resolution —
 	   picking either would publish a boundary nobody chose — so the fact is dropped and reported. */
 	const tenants = table.fields.filter((f) => f.constraints.tenant).map((f) => f.name)
@@ -136,10 +84,15 @@ function checkPrimaryKey(table: TableMeta, report: ValidationResult): void {
 	)
 }
 
-function checkConstraintNames({ optionsText, table }: Declared, report: ValidationResult): void {
+function checkConstraintNames(table: TableMeta, report: ValidationResult): void {
 	const names = new Set<string>()
-	for (const match of optionsText.matchAll(/(?:uniqueIndex|check)\s*\(\s*["']([^"']+)["']/g)) {
-		const name = match[1] as string
+	const declared = [
+		...table.uniqueIndexes,
+		...table.partialUniqueIndexes,
+		...table.expressionIndexes,
+		...table.checkConstraints,
+	]
+	for (const { name } of declared) {
 		if (names.has(name)) report.warnings.push(`${table.varName}: duplicate constraint name "${name}"`)
 		names.add(name)
 	}
@@ -197,11 +150,8 @@ function checkMachines(table: TableMeta, report: ValidationResult): void {
 	const declaring = table.fields.filter((f) => f.states !== null)
 	for (const field of declaring) {
 		const at = `${table.varName}.${field.name}`
-		if (field.enumValues === null) {
-			report.warnings.push(`${at}: states declared but the enum values are a reference comb cannot read`)
-			continue
-		}
-		const machine: Machine = { at, field, report, values: field.enumValues }
+		/* a machine is c.enum's third argument, so its values are read with it */
+		const machine: Machine = { at, field, report, values: field.enumValues as string[] }
 		checkMachineNames(machine)
 		checkMachineGraph(machine)
 	}
@@ -214,33 +164,18 @@ function checkMachines(table: TableMeta, report: ValidationResult): void {
 	}
 }
 
-function checkReferences(declared: Declared[], report: ValidationResult): void {
-	const varNames = new Set(declared.map(({ table }) => table.varName))
-	for (const { table } of declared) {
-		for (const field of table.fields) {
-			const target = field.foreignKey?.refTable
-			if (target === undefined || varNames.has(target)) continue
-			report.errors.push(
-				`${table.varName}.${field.name}: FK references "${target}" which is not defined in tables file`,
-			)
-		}
-	}
-}
-
 /**
- * Validate tables file before codegen. Returns errors + warnings.
+ * Validate the analysis before codegen. Returns errors + warnings.
  * Hard errors should abort generation. Warnings are informational.
  */
-export function validateTables(tablesPath: string): ValidationResult {
+export function validateTables(analysis: AnalysisResult): ValidationResult {
 	const report: ValidationResult = { errors: [], warnings: [] }
-	const declared = declaredTables(tablesPath, report)
-	checkNames(declared, report)
-	for (const entry of declared) {
-		checkFields(entry.table, report)
-		checkMachines(entry.table, report)
-		checkConstraintNames(entry, report)
-		checkPrimaryKey(entry.table, report)
+	checkNames(analysis.tables, report)
+	for (const table of analysis.tables) {
+		checkFields(table, report)
+		checkMachines(table, report)
+		checkConstraintNames(table, report)
+		checkPrimaryKey(table, report)
 	}
-	checkReferences(declared, report)
 	return report
 }

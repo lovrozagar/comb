@@ -1,13 +1,17 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { validateTables } from "./validate.ts"
+import { analyze } from "../analyzer.ts"
+import { validateTables as validateAnalysis } from "./validate.ts"
+
+/** The validation of the tables file `file`, read at runtime as codegen reads it */
+const validateTables = (file: string) => validateAnalysis(analyze(file))
 
 let dir: string
 
 beforeEach(() => {
-	dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-machines-"))
+	dir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-validate-machines-"))
 })
 
 afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
@@ -51,17 +55,12 @@ export const t = sqliteTable("t", { id: c.id("ttt"), status: c.enum("status", de
 	})
 
 	it("validates tables declared with pgTable", () => {
-		const result = validateTables(
-			(() => {
-				const file = path.join(dir, "db.pg.tables.ts")
-				fs.writeFileSync(
-					file,
-					`import { pgTable, text } from "drizzle-orm/pg-core"\nexport const a = pgTable("a", { id: text("id").primaryKey(), id2: text("id2").references(() => missing.id) })`,
-				)
-				return file
-			})(),
+		const file = path.join(dir, "db.pg.tables.ts")
+		fs.writeFileSync(
+			file,
+			`import { pgTable, text } from "drizzle-orm/pg-core"\nexport const a = pgTable("a", { id: text("id").primaryKey(), id2: text("id2").references(() => a.id) })`,
 		)
-		expect(result.errors).toEqual(['a.id2: FK references "missing" which is not defined in tables file'])
+		expect(validateTables(file)).toEqual({ errors: [], warnings: [] })
 	})
 })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseField } from "./analyze-field.ts"
+import { parseField } from "./__fixtures__/runtime.ts"
 import type { FieldMeta, TableMeta } from "./analyzer-types.ts"
 import { deriveEntityMeta, isExcludedFromUpdate } from "./entity-meta.ts"
 
@@ -7,6 +7,8 @@ function table(columns: Record<string, string>, overrides: Partial<TableMeta> = 
 	const fields: FieldMeta[] = Object.entries(columns).map(([key, raw]) => parseField(key, raw))
 	return {
 		checkConstraints: [],
+		expressionIndexes: [],
+		schema: null,
 		fields,
 		hasCompositePrimaryKey: false,
 		idPrefix: null,
@@ -85,7 +87,7 @@ describe("deriveEntityMeta: identity", () => {
 				id: 'c.id("itm")',
 				org_id: 'c.ref("org_id", { tenant: true })',
 				deleted_at: 'c.deletedAt("deleted_at")',
-				status: "x",
+				status: 'c.text("status")',
 			},
 			{
 				timestamps: {

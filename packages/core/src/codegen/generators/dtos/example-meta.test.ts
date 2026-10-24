@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseField } from "../../analyze-field.ts"
+import { parseField } from "../../__fixtures__/runtime.ts"
 import type { FieldMeta } from "../../analyzer-types.ts"
 import { generateExampleMeta, SHARED_META_KEYS, SHARED_META_VALUES } from "./example-meta.ts"
 
@@ -41,7 +41,7 @@ describe("generateExampleMeta", () => {
 			code: '.meta({ examples: ["usr_01h5a3g8k9m2n4p6q8r0t2v4x6"] })',
 			needsSharedMeta: false,
 		})
-		expect(code("c.id(prefix)")).toBe('.meta({ examples: ["id_01h5a3g8k9m2n4p6q8r0t2v4x6"] })')
+		expect(code("c.id(undefined)")).toBe('.meta({ examples: ["id_01h5a3g8k9m2n4p6q8r0t2v4x6"] })')
 		expect(code('c.enum("f", ["a", "b"])', { enumValues: ["a", "b"] })).toBe('.meta({ examples: ["a"] })')
 		expect(code('c.text("f", { min: 4, max: 4 })')).toBe('.meta({ examples: ["a1b2"] })')
 	})
@@ -74,12 +74,6 @@ describe("generateExampleMeta: a c.timestamp's range (F11)", () => {
 		expect(code('c.timestamp("f", { min: 0 })')).toBe(".meta(_m.timestamp)")
 		expect(code('c.timestamp("f", { max: 0 })')).toBe(".meta({ examples: [0] })")
 		expect(code('c.timestamp("f", { min: -100, max: 100 })')).toBe(".meta({ examples: [0] })")
-	})
-})
-
-describe("generateExampleMeta: typed columns", () => {
-	it("gives a column typed by a named schema no string example", () => {
-		expect(generateExampleMeta(parseField("p", 'c.text("p").$type<z.infer<typeof prefs>>()'))).toBeNull()
 	})
 })
 

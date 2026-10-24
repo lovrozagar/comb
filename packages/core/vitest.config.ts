@@ -8,6 +8,8 @@ export default defineConfig({
 					name: "unit",
 					include: ["src/**/*.test.ts", "lint/**/*.test.ts", "tests/structure/**/*.test.ts"],
 					setupFiles: ["tests/support/pg-parser.setup.ts"],
+					/* a codegen test loads its tables in codegen's own child process, a fraction of a second each */
+					testTimeout: 30_000,
 				},
 			},
 			{

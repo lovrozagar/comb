@@ -67,7 +67,7 @@ Comb sits on top of [Drizzle ORM](https://orm.drizzle.team). Drizzle stays the q
 
 - **One column vocabulary across dialects.** `c.timestamp()`, `c.json()`, `c.id()` mean the same thing whether the table compiles to SQLite or PostgreSQL, so a table file can move between the two.
 - **Constraint violations as domain errors.** A unique-index failure from D1, libsql, or Postgres becomes a single `CombError` with an `errorKey`, an HTTP status, and the offending table and column.
-- **Codegen from the table files.** A ts-morph analyzer reads your Drizzle tables plus Comb's constraint annotations and emits DTOs, Zod schemas, relations, FTS5 tables, column name maps, ER diagrams, and a typed ORM client.
+- **Codegen from the table files.** Codegen loads your Drizzle tables module and reads each table as drizzle built it, with the constraints Comb's column helpers recorded, and emits DTOs, Zod schemas, relations, FTS5 tables, column name maps, ER diagrams, and a typed ORM client.
 - **Migrations with a safety rail.** Atlas produces the diff; Comb classifies it, makes it idempotent, hashes it, records it, rewrites SQLite's `foreign_keys` pragma dance into a `defer_foreign_keys` prelude, and guards a rebuild of a table other tables reference so its drop deletes none of their rows.
 - **A list-query layer.** A PostgREST-style `filter`, `order`, `select` grammar parsed into an AST, validated against declared field types, and lowered to SQLite SQL with cursor pagination and FTS5 search.
 - **D1 at scale.** The Sessions API for read-after-write consistency, bookmark tracking, and an org-to-shard router with a three-tier LRU → KV → core-D1 lookup.
@@ -102,18 +102,18 @@ The consumer suite (`bun run test:consumers`) checks each supported row in CI: i
 
 Peer dependencies:
 
-| Package                     | Range               | Required                                                        |
-| --------------------------- | ------------------- | --------------------------------------------------------------- |
-| `drizzle-orm`               | `>=1.0.0-rc.4 <2`   | yes — the relational API (`defineRelations`) is v1-only         |
-| `zod`                       | `>=4.5.4 <5`        | yes — every schema module builds on it (`z.compile` is Zod 4.5) |
-| `@noble/ciphers`            | `>=2.0.0 <3`        | yes — cursors are sealed with its XChaCha20-Poly1305            |
-| `@noble/hashes`             | `>=2.0.0 <3`        | yes — the cursor key is derived with its HKDF-SHA256            |
-| `ts-morph`                  | `>=28.0.0 <29`      | only for codegen                                                |
-| `@libsql/client`            | `>=0.17.4 <0.18`    | only for the libsql/Turso migration providers                   |
-| `@cloudflare/workers-types` | `>=5.20260815.1 <6` | only for the D1 modules' types (`sqlite/d1/*`)                  |
-| `drizzle-kit`               | `>=1.0.0-rc.4 <2`   | only for `comb migrate diff`, which runs `drizzle-kit export`   |
-| `wrangler`                  | `>=4.147.0 <5`      | only to migrate a D1 database, which wrangler applies           |
-| `libpg-query`               | `>=17.7.4 <18`      | only to migrate Postgres: comb reads each statement with it     |
+| Package                     | Range               | Required                                                             |
+| --------------------------- | ------------------- | -------------------------------------------------------------------- |
+| `drizzle-orm`               | `>=1.0.0-rc.4 <2`   | yes — the relational API (`defineRelations`) is v1-only              |
+| `zod`                       | `>=4.5.4 <5`        | yes — every schema module builds on it (`z.compile` is Zod 4.5)      |
+| `@noble/ciphers`            | `>=2.0.0 <3`        | yes — cursors are sealed with its XChaCha20-Poly1305                 |
+| `@noble/hashes`             | `>=2.0.0 <3`        | yes — the cursor key is derived with its HKDF-SHA256                 |
+| `ts-morph`                  | `>=28.0.0 <29`      | only for codegen (resolves imports, and loads TypeScript under node) |
+| `@libsql/client`            | `>=0.17.4 <0.18`    | only for the libsql/Turso migration providers                        |
+| `@cloudflare/workers-types` | `>=5.20260815.1 <6` | only for the D1 modules' types (`sqlite/d1/*`)                       |
+| `drizzle-kit`               | `>=1.0.0-rc.4 <2`   | only for `comb migrate diff`, which runs `drizzle-kit export`        |
+| `wrangler`                  | `>=4.147.0 <5`      | only to migrate a D1 database, which wrangler applies                |
+| `libpg-query`               | `>=17.7.4 <18`      | only to migrate Postgres: comb reads each statement with it          |
 
 Each range stops before the next breaking release, so an install never pairs comb with a major it was not tested against.
 
@@ -156,7 +156,7 @@ export const post = sqliteTable("post", {
 })
 ```
 
-The second argument to each factory is a **constraint object**. At runtime most of it is inert — `c.text("title", { max: 200 })` just becomes `text("title", { length: 200 })`. Its real job is to be read back out of the source by the codegen analyzer, which turns `{ min: 2, max: 64, trim: true }` into a Zod schema, a CHECK constraint, and an OpenAPI description. Constraints live next to the column, once. A constraint value may name a constant, such as `pattern: patterns.E164_PHONE` or `max: NAME_MAX`. Codegen reads it from source and never runs a module: it follows the name through consts, imports and re-exports to a literal (a string, number, boolean, regex literal, `new RegExp` of literals, or an object of those, through `as const` and `satisfies`). A value only running could produce, such as a call or a `let`, fails codegen with its file, line and expression.
+The second argument to each factory is a **constraint object**. At runtime most of it is inert — `c.text("title", { max: 200 })` just becomes `text("title", { length: 200 })` — and the helper records it on the column for codegen, which turns `{ min: 2, max: 64, trim: true }` into a Zod schema, a CHECK constraint, and an OpenAPI description. Constraints live next to the column, once. Codegen loads the tables module, so a constraint value is whatever the module computes: a constant (`pattern: patterns.E164_PHONE`, `max: NAME_MAX`), an enum member, an object spread over another, a constraint object passed by name, or an enum list built by a call. Each value must be a boolean, a number or a string; `pattern` is a `/source/flags` string.
 
 Point a config at the file:
 
@@ -460,14 +460,15 @@ Writes are atomic (temp file plus rename) and skipped when the checksum is uncha
 ### Analyzer
 
 ```ts
-import { analyze, validateTables, parseFieldConstraints } from "@lovrozagar/comb/codegen"
+import { analyze, validateTables } from "@lovrozagar/comb/codegen"
 
 const result = analyze("./src/db/core.tables.ts")
+const { errors, warnings } = validateTables(result)
 ```
 
-`analyze()` returns an `AnalysisResult` — `TableMeta` per table with `FieldMeta`, `FieldConstraintsMeta`, `ForeignKeyRef`, `UniqueIndexMeta`, `CheckConstraintMeta`, and `TimestampsMeta`. It is a ts-morph pass over the source, not a runtime import, so it sees the constraint literals you wrote rather than the erased runtime values.
+`analyze()` returns an `AnalysisResult` — `TableMeta` per table with `FieldMeta`, `FieldConstraintsMeta`, `ForeignKeyRef`, `UniqueIndexMeta`, `CheckConstraintMeta`, and `TimestampsMeta`. It loads the tables module and reads every table it exports as drizzle built it (`getTableConfig`) and as the `c` helpers recorded it, so a bound, an enum list or an id prefix is the value the module computes, however its source spells it. The module runs in a child process on the runtime codegen runs on, with only `PATH`, `HOME` and `NODE_OPTIONS` in its environment and 60 seconds to load, so a tables module must be import-safe, as drizzle-kit already needs it to be: no connection, no secret read, no work at import. Under node the child loads TypeScript itself, resolving imports as the nearest `tsconfig.json` does (`paths` included); bun does that natively. A module that fails to load, a column comb cannot type, a `c.json` schema no module exports, or a key into a table the tables file does not export fails codegen, naming the file, the table and the column.
 
-`validateTables()` runs the checks the generators assume: id prefixes match `^[a-z][a-z0-9]{1,9}$`, enum columns declare values, foreign keys resolve, translation tables pair with a base table.
+`validateTables()` checks an analysis before the generators run: names and id prefixes two tables may not share, one tenant column per table, state machines against their values, and primary keys a cursor can page.
 
 ## Migrations
 
@@ -917,7 +918,7 @@ ULIDs use Crockford base32 with a 10-character timestamp and 16 characters of ra
 | `@lovrozagar/comb`                           | `CombError`, `createUlidFactory`, `generateId`, `generateUlid`, `LruCache`, error keys and types   |
 | `@lovrozagar/comb/types`                     | `StatusKey`, `ConstraintMap`, `DatabaseErrorHandler`, …                                            |
 | `@lovrozagar/comb/cli`                       | `runCli(argv, io)`: run the CLI in process and get its exit code                                   |
-| `@lovrozagar/comb/codegen`                   | `analyze`, `validateTables`, `parseFieldConstraints`, analysis types                               |
+| `@lovrozagar/comb/codegen`                   | `analyze`, `validateTables`, `fieldConstraintsOf`, analysis types                                  |
 | `@lovrozagar/comb/codegen/generators`        | every `generate*` function                                                                         |
 | `@lovrozagar/comb/meta`                      | `combMeta`, `readCombMeta`, `readCombEntityMeta`, `readCombQueryMeta`, `carryCombMeta`, meta types |
 | `@lovrozagar/comb/migrate`                   | config, providers, apply, parse, Atlas helpers                                                     |
@@ -1010,6 +1011,9 @@ What changes for a project on 0.12:
 - **A page past `maxPage` is `page_too_deep` on every list.** A schema-built list answered it with a validation issue on `page`, while a list no schema bounded answered `page_too_deep`. `createListQuerySchema` now throws `CombError` `page_too_deep` (400) from `parse`, `safeParse` and `~standard.validate`, so map `CombError` in your error handler; the param's `maximum` is still published.
 - **`ShardRouter` places orgs as the app decides.** `pick({ orgId, counts, totalShards })` names a new org's shard (the default keeps the headroom rule, and `maxOrgsPerShard` is documented as a soft cap); `place`, `move` and `unplace` write a mapping yourself; `resolveVerified` checks the org's rows are on its cached shard and rereads the primary when not. A replica miss now rereads the primary, and a primary miss is remembered for `missTtlMs` (5 s).
 - **`validateFilter` types a runtime field map.** A field may be a spec, `{ type, operators?, format? }`: its own operator set, `contains` (typed as one scalar of the field's type), ordered comparison on a string, and `format: "iso"` for a date stored as ISO 8601 text. `parseFilterNumber` exports the number rule, which refuses `0x`, `0b` and `0o` spellings and integers past ±(2^53 − 1). A field given as a bare type checks as before.
+- **Codegen loads the tables module instead of reading its source.** Each table is read as drizzle built it (`getTableConfig`) and with the constraints, enum values, machine, schema and id prefix the `c` helpers now record on the column, so a value is what the module computes however it is spelled: a const, an enum member, a spread, a constraint object by name, a `paths` alias, a namespace or default import, a block body, two tables in one statement, a columns const, a re-export through a local binding, `pgSchema(...).table` and `pgTable.withRLS`, and a key through an import alias all read as they run. The module runs in a child process with only `PATH`, `HOME` and `NODE_OPTIONS` and 60 seconds to load, so it must be import-safe, as drizzle-kit needs it to be. A load error, a column of a type comb cannot type (a buffer blob, a bigint, a date mode), a `c.json` schema no module exports (export an inline one), and a key into a table the tables file does not export fail codegen, naming the file, the table and the column.
+- **What the DTOs take changes where the source reading was wrong.** A plain drizzle column is typed from its data type (a `varchar`'s length, a `uuid` key's default, a `pgEnum`'s values) instead of `z.unknown()`. A composite primary key's columns are required on create and out of update. An identity key and a `generatedAlwaysAs` column are out of the write DTOs and listed as `generated`. An unnamed `unique()` maps under drizzle's own name for it, and a unique index on an expression under its index name. `.$type<z.infer<typeof X>>()` is a type, which the loaded module never holds, so such a column is typed by its helper; use `c.enum` or `c.json`. Regenerate and review the diff.
+- **The codegen API follows.** `validateTables(analysis)` takes the `AnalysisResult` that `analyze(tablesPath)` returns. `parseFieldConstraints(raw)` is gone; `fieldConstraintsOf(record, { fieldName, filled, place })` checks a constraint record. `FieldMeta.raw` and `enumName` are gone; `combKind`, `columnType`, `dataType`, `sqlType`, `hasDefault`, `generated`, `identity`, `inCompositeKey`, `onUpdate`, `autoIncrement`, `prefix` and `unique` say what the generators read. `TableMeta` gains `expressionIndexes` and `schema`.
 - **A guarded rebuild whose guard would fire a trigger is unsafe.** `migrate diff` refuses to guard a rebuild whose guard empties a table with a trigger other than an FTS sync one; a trigger a later file put there after the guard was written is now caught too: `check` and `apply` rate the rebuild unsafe, naming the trigger, and the proof counts a trigger the guard's statements fire.
 - **The proof names a rename.** A column or table whose every value a new one holds, row for row, is reported as `renames users.email to users.mail` or `renames users to accounts`, still unsafe, rather than as a loss.
 - **A libsql URL's `file:` scheme is read in any case**, so `check` and `status` refuse a missing `FILE:` database, as they do a `file:` one, and create none.

@@ -3,7 +3,6 @@
  * database comb.config.ts declares; direct mode (--tables) is one database with the direct set
  * of generators, written beside the tables file.
  */
-import fs from "node:fs"
 import path from "node:path"
 import type { GeneratorContext } from "../codegen/generators/context-types.ts"
 import { isGeneratedContent, type Staged } from "../codegen/utils/fs.ts"
@@ -137,12 +136,13 @@ type Database = {
 async function analyzed(tablesPath: string, io: CliIo) {
 	const { analyze } = await import("../codegen/analyzer.ts")
 	const { validateTables } = await import("../codegen/utils/validate.ts")
-	const validation = validateTables(tablesPath)
+	const analysis = analyze(tablesPath)
+	const validation = validateTables(analysis)
 	if (validation.errors.length > 0) {
 		throw new CliError(["Validation errors:", ...validation.errors.map((e) => `  ${e}`)].join("\n"))
 	}
 	for (const warning of validation.warnings) io.err(`  warn: ${warning}`)
-	return analyze(tablesPath)
+	return analysis
 }
 
 /** Where a database's files go unless a generator has its own output: output.default, else the tables' directory */
@@ -165,10 +165,6 @@ async function exportNamespaces(config: CodegenConfig, cwd: string): Promise<Map
 	for (const names of byPackage.values()) if (names.length > 1) for (const name of names) namespaces.set(name, name)
 	return namespaces
 }
-
-/** The engine a tables file builds for when neither the config nor its builders say: Postgres when it takes comb's pg columns */
-const dialectOfTables = (tablesPath: string): "postgres" | "sqlite" =>
-	/["']@lovrozagar\/comb\/pg\/columns["']/.test(fs.readFileSync(tablesPath, "utf8")) ? "postgres" : "sqlite"
 
 /** The identifiers the database's name gives generated code; a name none can be made of fails the run */
 function assertNamable(dbName: string): void {
@@ -209,7 +205,8 @@ async function generate(
 		ctx: {
 			analysis,
 			cwd: database.direct ? tablesDir : io.cwd,
-			dialect: database.db.dialect ?? analysis.dialect ?? dialectOfTables(database.tablesPath),
+			/* the engine its tables are built for; a database with no table yet generates nothing an engine shapes */
+			dialect: database.db.dialect ?? analysis.dialect ?? "sqlite",
 			exportNamespace: database.exportNamespace,
 			log: io.out,
 			staged: run.staged,

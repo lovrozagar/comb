@@ -25,14 +25,7 @@ const WORK_DIR = path.resolve(import.meta.dirname, ".tmp-stamp-e2e")
 
 const TABLES = `
 import { sqliteTable as createTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core"
-const c = {
-	id: (_p: string) => text("id").primaryKey(),
-	text: (n: string, _o?: { max?: number; nomutate?: boolean }) => text(n),
-	ref: (n: string) => text(n),
-	createdAt: (n: string) => integer(n, { mode: "number" }).notNull(),
-	updatedAt: (n: string) => integer(n, { mode: "number" }).notNull(),
-	deletedAt: (n: string) => integer(n, { mode: "number" }),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const author = createTable("author", { id: c.id("aut"), name: c.text("name") })
 export const article = createTable("article", {
 	id: c.id("art"),

@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
@@ -8,15 +8,7 @@ import { testContext } from "./__fixtures__/context.ts"
 
 const PRELUDE = `
 import { sqliteTable as createTable, text, integer, real, blob } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	text: (n: string) => text(n),
-	integer: (n: string) => integer(n, { mode: "number" }),
-	boolean: (n: string) => integer(n, { mode: "boolean" }),
-	real: (n: string) => real(n),
-	blob: (n: string) => blob(n),
-	ref: (n: string) => text(n),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 
 type Generated = { ddl: string; json: { relationCount: number; tableCount: number }; logged: string[]; summary: string }
@@ -24,7 +16,7 @@ type Generated = { ddl: string; json: { relationCount: number; tableCount: numbe
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-diagrams-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-gen-diagrams-"))
 })
 
 afterEach(() => {
@@ -73,7 +65,7 @@ export const mixed = createTable("mixed", {
 	count: c.integer("count"),
 	active: c.boolean("active"),
 	score: c.real("score"),
-	data: c.blob("data"),
+	data: blob("data"),
 })
 `)
 		for (const def of [
@@ -130,7 +122,6 @@ export const ping = createTable("ping", { id: c.id() })
 
 	it("numbers references by table, marks delete rules, and puts the most referenced target first", () => {
 		const { summary } = generate(`
-import { ghost } from "./other"
 export const hot = createTable("hot", { id: c.id() })
 export const cold = createTable("cold", { id: c.id() })
 export const a = createTable("a", { id: c.id(), x: c.ref("x").references(() => hot.id, { onDelete: "cascade" }) })
@@ -138,11 +129,10 @@ export const b = createTable("b", { id: c.id(), y: c.ref("y").references(() => h
 export const e = createTable("e", {
 	id: c.id(),
 	z: c.ref("z").references(() => cold.id, { onDelete: "set null" }),
-	g: c.ref("g").references(() => ghost.id, { onDelete: "no action" }),
 })
 `)
 		expect(summary.slice(summary.indexOf("## FK refs"))).toBe(
-			"## FK refs (target <- source.col)\n5 <- 1.x[c], 2.y[r]\n0 <- 4.g\n3 <- 4.z[n]\n",
+			"## FK refs (target <- source.col)\n5 <- 1.x[c], 2.y[r]\n3 <- 4.z[n]\n",
 		)
 	})
 })

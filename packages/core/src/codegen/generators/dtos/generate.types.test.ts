@@ -1,3 +1,4 @@
+import { fixtureRoot } from "../../__fixtures__/temp.ts"
 /**
  * The `.$type<…>()` → Zod conversion inside the DTO generator.
  *
@@ -5,7 +6,6 @@
  * so the assertions describe what a consumer's generated file actually says.
  */
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../../analyzer.ts"
@@ -14,17 +14,13 @@ import { type TestContext, testContext } from "../__fixtures__/context.ts"
 
 const PRELUDE = `
 import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	text: (n: string) => text(n),
-	integer: (n: string) => integer(n, { mode: "number" }),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-dtos-types-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-dtos-types-"))
 })
 
 afterEach(() => {
@@ -75,9 +71,10 @@ function exportsOf(): Record<string, string> {
 }
 
 describe("generateDtos — $type handling", () => {
-	it("uses a named schema referenced through z.infer", () => {
+	it("types the column by its helper: $type is a type, which the loaded module never holds", () => {
 		const content = generateFor("z.infer<typeof settingsSchema>")
-		expect(content).toContain("settingsSchema")
+		expect(content).not.toContain("settingsSchema")
+		expect(content).toMatch(/_str|z\.string\(\)/)
 	})
 
 	it("falls back to the column helper's own schema for a structural type", () => {

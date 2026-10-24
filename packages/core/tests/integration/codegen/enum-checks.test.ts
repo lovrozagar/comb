@@ -8,7 +8,7 @@ import { type SQL, sql } from "drizzle-orm"
 import { SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterAll, describe, expect, it } from "vitest"
 import type { FieldMeta, TableMeta } from "../../../src/codegen/analyzer-types.ts"
-import { parseField } from "../../../src/codegen/analyze-field.ts"
+import { parseField } from "../../../src/codegen/__fixtures__/runtime.ts"
 import { generateEnumChecks } from "../../../src/codegen/generators/enum-checks.ts"
 import { libsqlMemory } from "../support/libsql.ts"
 import { testContext } from "../../../src/codegen/generators/__fixtures__/context.ts"
@@ -24,9 +24,14 @@ const dialect = new (SQLiteDialect as unknown as new () => {
 
 describe("generateEnumChecks", () => {
 	it("emits a CHECK SQLite runs, that admits exactly the declared values", async () => {
-		const field: FieldMeta = { ...parseField("status", 'c.enum("status", VALUES)'), enumValues: VALUES }
+		const field: FieldMeta = {
+			...parseField("status", 'c.enum("status", VALUES)', { scope: { VALUES } }),
+			enumValues: VALUES,
+		}
 		const table: TableMeta = {
 			checkConstraints: [],
+			expressionIndexes: [],
+			schema: null,
 			fields: [parseField("id", 'c.id("itm")'), field],
 			hasCompositePrimaryKey: false,
 			idPrefix: "itm",

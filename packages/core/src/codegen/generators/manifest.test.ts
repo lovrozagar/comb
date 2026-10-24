@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../analyzer.ts"
@@ -10,16 +10,7 @@ import { testContext } from "./__fixtures__/context.ts"
 const PRELUDE = `
 import { sqliteTable as createTable, text, integer, uniqueIndex, check, primaryKey } from "drizzle-orm/sqlite-core"
 import { sql } from "drizzle-orm"
-const c = {
-	id: (_p: string) => text("id").primaryKey(),
-	text: (n: string, _o?: { max?: number; min?: number; pattern?: string; private?: boolean; nomutate?: boolean }) => text(n),
-	integer: (n: string, _o?: { min?: number; max?: number }) => integer(n, { mode: "number" }),
-	enum: (n: string, _v: readonly string[], _s?: object) => text(n),
-	ref: (n: string, _o?: { tenant?: boolean }) => text(n),
-	createdAt: (n: string) => integer(n, { mode: "number" }).notNull(),
-	updatedAt: (n: string) => integer(n, { mode: "number" }).notNull(),
-	deletedAt: (n: string) => integer(n, { mode: "number" }),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 
 const SCHEMA = `
@@ -49,7 +40,7 @@ export const post_tag = createTable("post_tag", {
 function useTmpDir(prefix: string): () => string {
 	let dir = ""
 	beforeEach(() => {
-		dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+		dir = fs.mkdtempSync(path.join(fixtureRoot(), prefix))
 	})
 	afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
 	return () => dir

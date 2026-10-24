@@ -1,13 +1,17 @@
+import { fixtureRoot } from "../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { validateTables } from "./validate.ts"
+import { analyze } from "../analyzer.ts"
+import { validateTables as validateAnalysis } from "./validate.ts"
+
+/** The validation of the tables file `file`, read at runtime as codegen reads it */
+const validateTables = (file: string) => validateAnalysis(analyze(file))
 
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-validate-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-validate-"))
 })
 
 afterEach(() => {
@@ -24,7 +28,7 @@ function writeTables(content: string): string {
 const STRUCTURE_PRELUDE = `
 import { sqliteTable as createTable, text, uniqueIndex, check } from "drizzle-orm/sqlite-core"
 import { sql } from "drizzle-orm"
-const c = { id: () => text("id").primaryKey(), text: (n: string) => text(n), ref: (n: string) => text(n) }
+import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 
 /** Validates `body` under the structural-check prelude. */
@@ -33,11 +37,8 @@ function validateStructure(body: string) {
 }
 
 const MACHINE_PRELUDE = `
-import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	enum: (n: string, _v: readonly string[], _s?: object) => text(n),
-}
+import { sqliteTable as createTable } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 
 /** Validates `body` under the state-machine prelude. */
@@ -49,7 +50,7 @@ describe("validateTables", () => {
 	it("returns no errors for valid schema", () => {
 		const fp = writeTables(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = { id: () => text("id").primaryKey() }
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", { id: c.id() })
 `)
 		const result = validateTables(fp)
@@ -59,7 +60,7 @@ export const user = createTable("user", { id: c.id() })
 	it("warns about missing primary key", () => {
 		const fp = writeTables(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = { text: (name: string) => text(name) }
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const log = createTable("log", { msg: c.text("msg") })
 `)
 		const result = validateTables(fp)
@@ -69,7 +70,7 @@ export const log = createTable("log", { msg: c.text("msg") })
 	it("errors on duplicate table names", () => {
 		const fp = writeTables(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = { id: () => text("id").primaryKey() }
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", { id: c.id() })
 export const user2 = createTable("user", { id: c.id() })
 `)
@@ -79,29 +80,24 @@ export const user2 = createTable("user", { id: c.id() })
 })
 
 describe("validateTables: foreign keys", () => {
-	it("errors on FK referencing non-existent table", () => {
+	it("refuses a foreign key into a table the module never defines, naming the table it is on", () => {
 		const fp = writeTables(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	ref: (name: string) => text(name),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const post = createTable("post", {
 	id: c.id(),
 	author_id: c.ref("author_id").references(() => missing_table.id),
 })
 `)
-		const result = validateTables(fp)
-		expect(result.errors.some((e) => e.includes("FK references"))).toBe(true)
+		expect(() => validateTables(fp)).toThrow(
+			"post: a foreign key's target cannot be read: missing_table is not defined",
+		)
 	})
 
 	it("returns clean result for multi-table schema with valid FKs", () => {
 		const fp = writeTables(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	ref: (name: string) => text(name),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", { id: c.id() })
 export const post = createTable("post", {
 	id: c.id(),
@@ -122,18 +118,12 @@ export const b = createTable("post", { id: c.id() })
 		expect(result.errors.join("\n")).toContain("Duplicate SQL table name")
 	})
 
-	it("rejects a duplicated field within a table", () => {
-		const result = validateStructure(`
-export const post = createTable("post", { id: c.id(), title: c.text("title"), title: c.text("title") })
-`)
-		expect(result.errors.join("\n")).toContain('duplicate field "title"')
-	})
-
-	it("rejects a foreign key pointing at a table that is not defined", () => {
-		const result = validateStructure(`
+	it("refuses a foreign key pointing at a table that is not defined", () => {
+		expect(() =>
+			validateStructure(`
 export const post = createTable("post", { id: c.id(), author_id: c.ref("author_id").references(() => author.id) })
-`)
-		expect(result.errors.join("\n")).toContain('FK references "author"')
+`),
+		).toThrow("author is not defined")
 	})
 
 	it("accepts a foreign key whose target is defined", () => {
@@ -166,17 +156,15 @@ export const post = createTable("post", { id: c.id(), a: c.text("a"), b: c.text(
 	it("ignores variable statements that are not table definitions", () => {
 		const result = validateStructure(`
 export const notATable = { id: "x" }
+const someOtherCall = (name: string, columns: object) => ({ columns, name })
 export const alsoNot = someOtherCall("post", {})
 export const post = createTable("post", { id: c.id() })
 `)
 		expect(result.errors).toEqual([])
 	})
 
-	it("ignores a table call with too few arguments to inspect", () => {
-		const result = validateStructure(`
-export const post = createTable("post")
-`)
-		expect(result.errors).toEqual([])
+	it("refuses a table call drizzle cannot build, as the module does not load", () => {
+		expect(() => validateStructure(`\nexport const post = createTable("post")\n`)).toThrow("comb could not load")
 	})
 
 	it("accepts a composite primary key declared in the options", () => {
@@ -288,18 +276,6 @@ export const delivery = createTable("delivery", {
 		expect(result.errors).toEqual(['delivery.status: terminal names "gone", which is not a declared value'])
 	})
 
-	it("warns when the value list is a reference it cannot read", () => {
-		const result = validateMachine(`
-import { STATUSES } from "@app/shared"
-export const delivery = createTable("delivery", {
-	id: c.id(),
-	status: c.enum("status", STATUSES, { terminal: ["sent"] }),
-})
-`)
-		expect(result.errors).toEqual([])
-		expect(result.warnings.join("\n")).toContain("enum values are a reference")
-	})
-
 	it("warns when two columns declare a machine", () => {
 		const result = validateMachine(`
 export const delivery = createTable("delivery", {
@@ -315,8 +291,8 @@ export const delivery = createTable("delivery", {
 })
 
 describe("validateTables: names two tables may not share (F13, F14)", () => {
-	const prelude = `import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = { id: (_prefix: string) => text("id").primaryKey() }
+	const prelude = `import { sqliteTable as createTable } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 	it("refuses two tables whose names make one generated type name, naming both (F13)", () => {
 		const result = validateTables(

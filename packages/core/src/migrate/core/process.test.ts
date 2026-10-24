@@ -114,3 +114,23 @@ describe("run: a process a signal stopped", () => {
 		expect(result.stderr).toBe("said\n")
 	})
 })
+
+/* codegen loads a tables module in a child that sees none of the parent's secrets, for at most a minute */
+describe("run: an exact environment and a timeout", () => {
+	afterEach(() => vi.unstubAllEnvs())
+
+	it("gives the child exactEnv alone, none of the parent's variables", () => {
+		vi.stubEnv("COMB_SECRET", "parent")
+		const script =
+			"process.stdout.write(JSON.stringify(Object.keys(process.env).filter((k) => k !== '__CF_USER_TEXT_ENCODING').sort()))"
+		const { stdout } = run(process.execPath, ["-e", script], {
+			exactEnv: { HOME: "/h", PATH: process.env["PATH"] ?? "" },
+		})
+		expect(JSON.parse(stdout)).toEqual(["HOME", "PATH"])
+	})
+
+	it("stops a child past timeoutMs and answers 124, naming the limit", () => {
+		const result = run(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { timeoutMs: 200 })
+		expect(result).toEqual({ code: 124, stderr: `${process.execPath}: stopped after 200 ms`, stdout: "" })
+	})
+})

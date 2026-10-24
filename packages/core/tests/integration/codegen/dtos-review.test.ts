@@ -95,7 +95,7 @@ describe("bounds, URL rules and examples (F15, F16, F18)", () => {
 	priority: c.integer("priority", { min: 100 }),
 	code: c.text("code", { min: 10 }),
 	sku: c.text("sku", { min: 50, max: 50 }),
-	zip: c.text("zip", { pattern: /^\\d{5}$/ }),
+	zip: c.text("zip", { pattern: "/^\\d{5}$/" }),
 })`,
 		)
 		const account = dtos["account"] as GeneratedEntity

@@ -1,22 +1,10 @@
 /**
- * Field constraint types and parser for Drizzle table fields
- *
- * Extracts constraints from type arguments:
- * Example: c.text("name", { min: 5, max: 254, email: true })
+ * A column's constraints, from the record its `c` helper was given: every key one the column
+ * types allow, a pattern one comb can emit, and `autogenerate` defaulting to true on a column
+ * something other than the caller fills.
  */
 import type { ConstantValue, FieldConstraintsMeta } from "./analyzer-types.ts"
-import { constraintsOfText } from "./utils/constraint-reader.ts"
 import { patternLiteral } from "./utils/pattern.ts"
-
-// lookup-table: the timestamp names a default or update hook marks as filled by the server
-const TIMESTAMP_NAMES = /* @__PURE__ */ new Set([
-	"createdAt",
-	"updatedAt",
-	"deletedAt",
-	"created_at",
-	"updated_at",
-	"deleted_at",
-])
 
 /** Field constraints extracted from type arguments */
 export type FieldConstraints = FieldConstraintsMeta
@@ -43,34 +31,20 @@ const KNOWN = /* @__PURE__ */ new Set([
 ])
 
 /**
- * Parse field constraints from type arguments.
- * Extracts constraints from c.method("name", { ... }) pattern.
- * For timestamp fields (createdAt, updatedAt, deletedAt), autogenerate defaults to true.
- */
-export function parseFieldConstraints(raw: string, fieldName?: string): FieldConstraints {
-	return fieldConstraintsOf(constraintsOfText(raw), { fieldName, place: raw, raw })
-}
-
-/**
- * A field's constraints from the record its column helper declares (constraint-reader.ts), every
- * key one the column types allow and a pattern one comb can emit; an error at `place` otherwise
+ * A field's constraints from the record its column helper was given, every key one the column
+ * types allow and a pattern one comb can emit; an error at `place` otherwise. `filled` says what
+ * fills the column, never its name (F13): comb's own timestamp helpers, or a timestamp's default
+ * or update hook; a column named createdAt that nothing fills is the caller's to give
  */
 export function fieldConstraintsOf(
 	constraints: Readonly<Record<string, ConstantValue>>,
-	{ fieldName, place, raw }: { fieldName?: string | undefined; place: string; raw: string },
+	{ fieldName, filled, place }: { fieldName: string; filled: boolean; place: string },
 ): FieldConstraints {
 	const unknown = Object.keys(constraints).find((key) => !KNOWN.has(key))
 	if (unknown !== undefined) throw new Error(`${place}: comb reads no constraint named ${unknown}`)
 	if (constraints["mutable"] === true && constraints["nomutate"] === true)
 		throw new Error(`${place}: mutable and nomutate contradict; declare one`)
 
-	/* Check if this is a timestamp field */
-	/* what fills the column, never its name (F13): comb's own timestamp helpers, or a timestamp's
-	   default or update hook; a column named createdAt that nothing fills is the caller's to give */
-	const filled =
-		/^\s*c\.(?:createdAt|updatedAt|deletedAt)\s*[<(]/.test(raw) ||
-		(TIMESTAMP_NAMES.has(fieldName ?? "") &&
-			/\.(?:default|\$defaultFn|\$default|\$onUpdate|\$onUpdateFn)\s*\(/.test(raw))
 	const autogenerate = filled ? constraints["autogenerate"] !== false : constraints["autogenerate"] === true
 
 	return {
@@ -86,7 +60,7 @@ export function fieldConstraintsOf(
 		nomutate: constraints["nomutate"] === true,
 		password: constraints["password"] === true,
 		pattern: typeof constraints["pattern"] === "string" ? patternLiteral(constraints["pattern"], place) : null,
-		private: constraints["private"] === true || fieldName?.startsWith("_") || false,
+		private: constraints["private"] === true || fieldName.startsWith("_"),
 		tenant: constraints["tenant"] === true,
 		trim: constraints["trim"] === true,
 		uppercase: constraints["uppercase"] === true,

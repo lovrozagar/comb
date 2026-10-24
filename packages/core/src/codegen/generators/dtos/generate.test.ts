@@ -1,5 +1,5 @@
+import { fixtureRoot } from "../../__fixtures__/temp.ts"
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../../analyzer.ts"
@@ -9,7 +9,7 @@ import { testContext } from "../__fixtures__/context.ts"
 let tmpDir: string
 
 beforeEach(() => {
-	tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-gen-dtos-"))
+	tmpDir = fs.mkdtempSync(path.join(fixtureRoot(), "comb-gen-dtos-"))
 })
 
 afterEach(() => {
@@ -34,15 +34,7 @@ function read(dtosDir: string, entity: string): { all: string; entity: string; s
 
 const basicSchema = `
 import { sqliteTable as createTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	text: (name: string, opts?: { min?: number, max?: number, email?: boolean, trim?: boolean, lowercase?: boolean }) => text(name),
-	integer: (name: string) => integer(name, { mode: "number" }),
-	boolean: (name: string) => integer(name, { mode: "boolean" }),
-	createdAt: (name: string) => integer(name, { mode: "number" }).notNull(),
-	updatedAt: (name: string) => integer(name, { mode: "number" }).notNull(),
-	deletedAt: (name: string) => integer(name, { mode: "number" }),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", {
 	id: c.id(),
 	email: c.text("email", { min: 5, max: 254, email: true, trim: true, lowercase: true }).notNull(),
@@ -107,7 +99,7 @@ describe("generateDtos — keys and tables", () => {
 		const { entity } = read(
 			generate(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = { id: () => text("id").primaryKey(), text: (name: string) => text(name) }
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const member = createTable("member", { id: c.id(), "display-name": c.text("display_name") })
 `),
 			"member",
@@ -119,10 +111,7 @@ export const member = createTable("member", { id: c.id(), "display-name": c.text
 	it("handles multiple tables", () => {
 		const dtosDir = generate(`
 import { sqliteTable as createTable, text } from "drizzle-orm/sqlite-core"
-const c = {
-	id: () => text("id").primaryKey(),
-	text: (name: string) => text(name),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const user = createTable("user", { id: c.id(), name: c.text("name") })
 export const post = createTable("post", { id: c.id(), title: c.text("title") })
 `)
@@ -178,16 +167,7 @@ describe("generateDtos — timestamps and optionality", () => {
 
 const metaSchema = `
 import { sqliteTable as createTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core"
-const c = {
-	id: (prefix: string) => text("id").primaryKey(),
-	text: (name: string, opts?: any) => text(name),
-	integer: (name: string, opts?: any) => integer(name, { mode: "number" }),
-	real: (name: string) => real(name),
-	boolean: (name: string) => integer(name, { mode: "boolean" }),
-	enum: (name: string, values: readonly string[]) => text(name),
-	createdAt: (name: string) => integer(name, { mode: "number" }).notNull(),
-	updatedAt: (name: string) => integer(name, { mode: "number" }).notNull(),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const item = createTable("item", {
 	id: c.id("itm"),
 	email: c.text("email", { min: 5, max: 254, email: true }).notNull(),
@@ -266,13 +246,7 @@ describe("generateDtos — meta examples: per field", () => {
 
 const dedupSchema = `
 import { sqliteTable as createTable, text, integer } from "drizzle-orm/sqlite-core"
-const c = {
-	id: (prefix: string) => text("id").primaryKey(),
-	text: (name: string, opts?: any) => text(name),
-	ref: (name: string) => text(name),
-	boolean: (name: string) => integer(name, { mode: "boolean" }),
-	createdAt: (name: string) => integer(name, { mode: "number" }).notNull(),
-}
+import { c } from "@lovrozagar/comb/sqlite/columns"
 export const alpha = createTable("alpha", {
 	id: c.id("alp"),
 	owner_id: c.ref("owner_id").notNull(),
