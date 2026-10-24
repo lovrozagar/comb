@@ -150,12 +150,25 @@ export function guardNamed(id: string | undefined): Guard | undefined {
 /** The absolute path a suite mocks for a guard */
 export const guardModule = (guard: Guard): string => resolve(CORE, guard.module)
 
-/** The adversarial suite's exit status, with `mutant` disabled when given */
-export function runSuite(mutant: string | undefined): number {
+/** How the adversarial suite ended: its status, and what it printed, said when it fails */
+type SuiteRun = { output: string; status: number }
+
+/** The adversarial suite run with `mutant` disabled when given: its status, and its output, signal or start error */
+export function suiteRun(mutant: string | undefined): SuiteRun {
 	const env = { ...process.env, COMB_MUTANT: mutant ?? "" }
-	const run = spawnSync(process.execPath, [VITEST, "run", SUITE], { cwd: CORE, encoding: "utf8", env })
-	return run.status ?? 1
+	/* past spawnSync's 1 MiB default a run would end ENOBUFS, read as a failure of the suite */
+	const run = spawnSync(process.execPath, [VITEST, "run", SUITE], {
+		cwd: CORE,
+		encoding: "utf8",
+		env,
+		maxBuffer: 64 * 1024 * 1024,
+	})
+	const ended = [run.signal === null ? "" : `stopped by ${run.signal}`, run.error === undefined ? "" : `${run.error}`]
+	return { output: [...ended.filter(Boolean), run.stdout, run.stderr].join("\n"), status: run.status ?? 1 }
 }
+
+/** The adversarial suite's exit status, with `mutant` disabled when given */
+export const runSuite = (mutant: string | undefined): number => suiteRun(mutant).status
 
 /** The guards whose removal left the suite green */
 export function survivors(results: ReadonlyArray<{ id: string; status: number }>): string[] {
@@ -163,8 +176,9 @@ export function survivors(results: ReadonlyArray<{ id: string; status: number }>
 }
 
 function main(): number {
-	if (runSuite(undefined) !== 0) {
-		process.stderr.write("mutation: the adversarial suite fails with every guard in place\n")
+	const plain = suiteRun(undefined)
+	if (plain.status !== 0) {
+		process.stderr.write(`mutation: the adversarial suite fails with every guard in place\n${plain.output}\n`)
 		return 1
 	}
 	const results = GUARDS.map((g) => ({ id: g.id, status: runSuite(g.id) }))

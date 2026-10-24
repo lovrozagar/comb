@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { GUARDS, guardNamed, runSuite, survivors } from "./mutation-harness.ts"
+import { GUARDS, guardNamed, runSuite, suiteRun, survivors } from "./mutation-harness.ts"
 
 describe("the guard registry", () => {
 	it("names each guard once, with the module it lives in", () => {
@@ -31,7 +31,9 @@ describe("survivors", () => {
 
 describe("the adversarial suite against each guard", () => {
 	it("passes with every guard in place", () => {
-		expect(runSuite(undefined)).toBe(0)
+		/* a failure names what the nested run printed, so it is never a bare exit code */
+		const run = suiteRun(undefined)
+		expect(run.status, run.output).toBe(0)
 	}, 120_000)
 
 	it.each(GUARDS.map((g) => g.id))(
