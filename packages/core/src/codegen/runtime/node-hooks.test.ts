@@ -94,3 +94,13 @@ describe("install", () => {
 		expect(register).toHaveBeenCalledWith(expect.stringMatching(/node-hooks\.mjs$/))
 	})
 })
+
+describe("loadSync: a TypeScript URL with a query", () => {
+	it("transpiles it as the file it names, as comb imports comb.config.ts with ?mtime=", () => {
+		const url = `${pathToFileURL(path.join(dir, "src/lib/enums.ts")).href}?mtime=1`
+		const loaded = loadSync(url, {}, () => {
+			throw new Error("not called")
+		}) as { format: string }
+		expect(loaded.format).toBe("module")
+	})
+})

@@ -53,7 +53,8 @@ export function resolveSync(specifier, context, nextResolve) {
  * @param {(url: string, context: unknown) => unknown} nextLoad
  */
 export function loadSync(url, context, nextLoad) {
-	if (!url.startsWith("file:") || !TYPESCRIPT.test(url)) return nextLoad(url, context)
+	/* by its path: comb imports comb.config.ts with a ?mtime= query */
+	if (!url.startsWith("file:") || !TYPESCRIPT.test(new URL(url).pathname)) return nextLoad(url, context)
 	return { format: "module", shortCircuit: true, source: transpiled(fileURLToPath(url)) }
 }
 
