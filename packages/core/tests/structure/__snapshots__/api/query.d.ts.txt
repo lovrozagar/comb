@@ -5,8 +5,8 @@
  * Parsers, validators, Zod schemas, and pagination utilities.
  * For SQLite-specific SQL generation, use @lovrozagar/comb/query/sqlite.
  */
-export { createCursor, CURSOR_TIEBREAK_COLUMN, cursorProblem, effectiveNulls, MAX_CURSOR_LENGTH, readCursor, sortSignature, } from "./cursor.ts";
-export type { CursorOptions, CursorPayload, DecodedCursor, PaginationMeta } from "./cursor.ts";
+export { createCursor, CursorRef, CURSOR_TIEBREAK_COLUMN, cursorProblem, effectiveNulls, MAX_CURSOR_LENGTH, readCursor, sortSignature, } from "./cursor.ts";
+export type { CursorOptions, CursorPayload, CursorValue, DecodedCursor, PaginationMeta } from "./cursor.ts";
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts";
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
 export { filterBySelect, parseSelect } from "./fields.ts";
@@ -93,7 +93,11 @@ declare function createCursor(record: Record<string, unknown>, parsedSort: reado
 declare function cursorProblem(cursor: string): string | null;
 /** The cursor sealed under `options`, opened and decoded; null when it was not, or it is no cursor */
 declare function openCursor(cursor: string, options: CursorOptions): DecodedCursor | null;
-/** Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. */
+/**
+ * Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. A value may
+ * be a CursorRef: a long sort value carried by reference, its prefix and length, which a keyset
+ * of its own must read from the cursor's row (cursor-ref.ts), never bind as it is.
+ */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
 export { createCursor, CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
 

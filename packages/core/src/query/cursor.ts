@@ -9,7 +9,7 @@
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { type CursorOptions, isSealedShape, openSealed, seal } from "./cursor-seal.ts"
+import { assertCursorWired, type CursorOptions, isSealedShape, openSealed, seal } from "./cursor-seal.ts"
 import type { SortDirection, SortField, SortNulls } from "./types.ts"
 
 /**
@@ -210,8 +210,14 @@ function openCursor(cursor: string, options: CursorOptions): DecodedCursor | nul
 	return bytes === null ? null : decodePayload(bytes)
 }
 
-/** Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. */
+/**
+ * Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. A value may
+ * be a CursorRef: a long sort value carried by reference, its prefix and length, which a keyset
+ * of its own must read from the cursor's row (cursor-ref.ts), never bind as it is.
+ */
 function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor {
+	/* options that cannot seal are the handler's 500 whatever the cursor, a long one too (U12) */
+	assertCursorWired(options)
 	/* longer than any cursor comb mints: refused before it is decoded */
 	const decoded = cursor.length > MAX_CURSOR_LENGTH ? null : openCursor(cursor, options)
 	const problem = decoded ? signatureProblem(decoded, parsedSort) : "Invalid cursor"

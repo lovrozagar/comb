@@ -103,8 +103,8 @@
 	"peerDependencies": {
 		"@cloudflare/workers-types": ">=5.20260815.1 <6",
 		"@libsql/client": ">=0.17.4 <0.18",
-		"@noble/ciphers": ">=2.4.0 <3",
-		"@noble/hashes": ">=2.4.0 <3",
+		"@noble/ciphers": ">=2.0.0 <3",
+		"@noble/hashes": ">=2.0.0 <3",
 		"drizzle-kit": ">=1.0.0-rc.4 <2",
 		"drizzle-orm": ">=1.0.0-rc.4 <2",
 		"libpg-query": ">=17.7.4 <18",

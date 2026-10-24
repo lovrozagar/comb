@@ -9,8 +9,8 @@
 		"catalog": {
 			"@cloudflare/workers-types": "5.20260815.1",
 			"@libsql/client": "0.17.4",
-			"@noble/ciphers": "2.4.0",
-			"@noble/hashes": "2.4.0",
+			"@noble/ciphers": "2.0.0",
+			"@noble/hashes": "2.0.0",
 			"@total-typescript/ts-reset": "0.6.1",
 			"@types/node": "26.2.0",
 			"@types/pg": "8.23.1",

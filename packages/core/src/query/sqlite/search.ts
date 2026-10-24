@@ -25,13 +25,13 @@ function sanitizeFtsTerm(term: string): string {
 	return TOKEN.test(sanitized) ? sanitized : ""
 }
 
-/** The usable terms of a search string */
-function ftsTerms(query: string | null): string[] {
+/** The usable terms of a search string, each folded with searchText when the FTS table indexes a folded column */
+function ftsTerms(query: string | null, folded = false): string[] {
 	if (!query) return []
 	return query
 		.trim()
 		.split(/\s+/)
-		.map(sanitizeFtsTerm)
+		.map((term) => sanitizeFtsTerm(folded ? searchText(term) : term))
 		.filter((term) => term.length > 0)
 }
 
@@ -48,9 +48,16 @@ const ident = (name: string) => sql.raw(quoteIdent(name))
  */
 const termless = (query: string | null): SQL | null => (query === null || query.trim() === "" ? null : sql`0`)
 
-/** `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS syntax spells */
-function buildFtsMatch(ftsTableName: string, query: string | null): SQL | null {
-	const terms = ftsTerms(query)
+/**
+ * `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS
+ * syntax spells. `folded` when the FTS table indexes a searchText column: each term is folded so
+ */
+function buildFtsMatch(
+	ftsTableName: string,
+	query: string | null,
+	{ folded = false }: { folded?: boolean | undefined } = {},
+): SQL | null {
+	const terms = ftsTerms(query, folded)
 	return terms.length === 0 ? termless(query) : sql`${ident(ftsTableName)} MATCH ${matchQuery(terms, "AND")}`
 }
 
@@ -58,7 +65,15 @@ function buildFtsMatch(ftsTableName: string, query: string | null): SQL | null {
  * A table and the FTS5 table that indexes it by rowid (external content, `content_rowid` its
  * rowid or its integer key)
  */
-type FtsSource = { ftsTable: string; table: SQLiteTable }
+type FtsSource = {
+	/**
+	 * The FTS table indexes a searchText column (`_search`): each term is folded with searchText as
+	 * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it (U16)
+	 */
+	folded?: boolean | undefined
+	ftsTable: string
+	table: SQLiteTable
+}
 
 /**
  * `<table>.rowid IN (SELECT rowid FROM <fts> WHERE <fts> MATCH ?)`: the rowid qualified by its
@@ -74,7 +89,7 @@ function inMatches({ ftsTable, table }: FtsSource, query: string): SQL {
  * for one only FTS syntax spells
  */
 function buildFtsWhere(source: FtsSource, query: string | null): SQL | null {
-	const terms = ftsTerms(query)
+	const terms = ftsTerms(query, source.folded)
 	return terms.length === 0 ? termless(query) : inMatches(source, matchQuery(terms, "AND"))
 }
 
@@ -120,7 +135,7 @@ async function buildFtsWhereWithSpellfix(
 	search: SpellfixSearch,
 	query: string | null,
 ): Promise<SQL | null> {
-	const terms = ftsTerms(query)
+	const terms = ftsTerms(query, search.folded)
 	if (terms.length === 0) return termless(query)
 	const groups: string[] = []
 	for (const term of terms) {

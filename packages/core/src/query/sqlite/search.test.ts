@@ -1,5 +1,5 @@
 import { type SQL, sql as drizzleSql } from "drizzle-orm"
-import { SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import {
 	buildFtsHighlight,
@@ -246,5 +246,22 @@ describe("buildFtsWhereWithSpellfix — corrections, fallback and binding", () =
 		const { params, sql } = compile(built!)
 		expect(sql).not.toContain("hello")
 		expect(params).toContain('"hello"*')
+	})
+})
+
+/* U16 of the 0.12 round: an FTS table over a searchText column takes its terms folded as the column was */
+const foldedPost = sqliteTable("post", { id: integer("id").primaryKey() })
+
+/** The FTS match buildFtsWhere binds for "Straße Οδυσσέας", folded or not */
+const foldedMatch = (folded?: boolean) =>
+	new SQLiteDialect().sqlToQuery(
+		buildFtsWhere({ folded, ftsTable: "post_fts", table: foldedPost }, "Straße Οδυσσέας") as SQL,
+	).params
+
+describe("buildFtsWhere on a folded source", () => {
+	it("folds each term with searchText, so a term typed with ß, æ or a Greek accent finds the folded text", () => {
+		/* searchText writes a final ς as σ, as it folds the column */
+		expect(foldedMatch(true)).toEqual(['"strasse"* AND "οδυσσεασ"*'])
+		expect(foldedMatch()).toEqual(['"Straße"* AND "Οδυσσέας"*'])
 	})
 })

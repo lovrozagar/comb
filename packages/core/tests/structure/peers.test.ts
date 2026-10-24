@@ -117,7 +117,7 @@ describe("package.json peers", () => {
 describe("package.json peers: the cursor seal", () => {
 	it("requires @noble/ciphers and @noble/hashes as peers, not dependencies", () => {
 		for (const name of ["@noble/ciphers", "@noble/hashes"]) {
-			expect(peers[name], name).toBe(">=2.4.0 <3")
+			expect(peers[name], name).toBe(">=2.0.0 <3")
 			expect(optional.has(name), name).toBe(false)
 			expect(pkg.dependencies?.[name], name).toBeUndefined()
 		}

@@ -8,6 +8,7 @@
 /* Cursor & pagination */
 export {
 	createCursor,
+	CursorRef,
 	CURSOR_TIEBREAK_COLUMN,
 	cursorProblem,
 	effectiveNulls,
@@ -15,7 +16,7 @@ export {
 	readCursor,
 	sortSignature,
 } from "./cursor.ts"
-export type { CursorOptions, CursorPayload, DecodedCursor, PaginationMeta } from "./cursor.ts"
+export type { CursorOptions, CursorPayload, CursorValue, DecodedCursor, PaginationMeta } from "./cursor.ts"
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts"
 
 /* Drizzle relational helpers */

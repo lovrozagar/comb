@@ -225,13 +225,23 @@ import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
  * is left, as no token matches it. Quotes stay: the phrase builder escapes them where it quotes the term.
  */
 declare function sanitizeFtsTerm(term: string): string;
-/** `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS syntax spells */
-declare function buildFtsMatch(ftsTableName: string, query: string | null): SQL | null;
+/**
+ * `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS
+ * syntax spells. `folded` when the FTS table indexes a searchText column: each term is folded so
+ */
+declare function buildFtsMatch(ftsTableName: string, query: string | null, { folded }?: {
+    folded?: boolean | undefined;
+}): SQL | null;
 /**
  * A table and the FTS5 table that indexes it by rowid (external content, `content_rowid` its
  * rowid or its integer key)
  */
 type FtsSource = {
+    /**
+     * The FTS table indexes a searchText column (`_search`): each term is folded with searchText as
+     * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it (U16)
+     */
+    folded?: boolean | undefined;
     ftsTable: string;
     table: SQLiteTable;
 };

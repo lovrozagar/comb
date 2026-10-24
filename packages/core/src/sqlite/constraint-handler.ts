@@ -16,16 +16,27 @@ type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown
 const failedIndex = (message: string): string | undefined => /constraint failed: index '([^']+)'$/i.exec(message)?.[1]
 
 /**
- * `UNIQUE constraint failed: member.first, member.last` → member, [first, last]. A table name may
- * hold any character but a dot here, as SQLite writes it unquoted: each pair splits on its last dot.
+ * A `table.column` pair as SQLite writes it, unquoted: split after the statement's own table when the
+ * pair starts with it, as a dot may sit in either name (U13); else on its last dot
  */
-function failedColumns(message: string): { columns: string[]; table: string | undefined } {
+function splitPair(pair: string, table: string | undefined): { column: string; table: string } | undefined {
+	if (table !== undefined && pair.startsWith(`${table}.`)) return { column: pair.slice(table.length + 1), table }
+	const at = /^(.+)\.([^.]+)$/.exec(pair)
+	return at === null ? undefined : { column: at[2] as string, table: at[1] as string }
+}
+
+/**
+ * `UNIQUE constraint failed: member.first, member.last` → member, [first, last]. A table name may
+ * hold any character, a dot included: each pair splits at `query`'s table (splitPair).
+ */
+function failedColumns(message: string, query: string | undefined): { columns: string[]; table: string | undefined } {
 	const list = /constraint failed: (.+)$/i.exec(message)?.[1] ?? ""
+	const known = statementTable(query)
 	const pairs = list
 		.split(", ")
-		.map((pair) => /^(.+)\.([^.]+)$/.exec(pair.trim()))
-		.filter((pair) => pair !== null)
-	return { columns: pairs.map((pair) => pair[2] as string), table: pairs[0]?.[1] }
+		.map((pair) => splitPair(pair.trim(), known))
+		.filter((pair) => pair !== undefined)
+	return { columns: pairs.map((pair) => pair.column), table: pairs[0]?.table }
 }
 
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
@@ -48,7 +59,7 @@ function uniqueIndex(v: Violation, index: string): CombError {
 function unique(v: Violation): CombError {
 	const index = failedIndex(v.read.message)
 	if (index !== undefined) return uniqueIndex(v, index)
-	const { columns, table } = failedColumns(v.read.message)
+	const { columns, table } = failedColumns(v.read.message, v.read.query)
 	/* a composite unique is keyed by its columns together; one column alone would blame half the pair */
 	const column = columns.length === 1 ? columns[0] : undefined
 	const entry = lookup(v.maps, table, (t) => own(t.unique, columns.join(",")))
@@ -61,7 +72,7 @@ function unique(v: Violation): CombError {
 }
 
 function primaryKey(v: Violation): CombError {
-	const { columns, table } = failedColumns(v.read.message)
+	const { columns, table } = failedColumns(v.read.message, v.read.query)
 	/* a map written before 0.5.0 may list the key column under `unique` */
 	const entry = lookup(v.maps, table, (t) => t.primaryKey ?? own(t.unique, columns[0]))
 	const fallback = {
@@ -89,7 +100,7 @@ function check(v: Violation): CombError {
 }
 
 function notNull(v: Violation): CombError {
-	const { columns, table } = failedColumns(v.read.message)
+	const { columns, table } = failedColumns(v.read.message, v.read.query)
 	const column = columns[0]
 	return new CombError({
 		cause: column === undefined ? "Required field missing" : `Required field missing: ${column}`,
@@ -165,9 +176,10 @@ const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
 }
 
 /** A STRICT mismatch's `cannot store TEXT value in INTEGER column s.n` → s, n */
-const mismatchAt = (message: string) => {
-	const at = /\bcolumn (\w+)\.(\w+)$/.exec(message)
-	return { column: at?.[2], table: at?.[1] }
+const mismatchAt = (message: string, query: string | undefined) => {
+	const pair = /\bcolumn (.+)$/.exec(message)?.[1]
+	const at = pair === undefined ? undefined : splitPair(pair, statementTable(query))
+	return { column: at?.column, table: at?.table }
 }
 
 /**
@@ -179,7 +191,7 @@ function constraintError(error: unknown, maps: ConstraintMap[]): CombError | nul
 	if (read === null) return null
 	const handler = own(CONSTRAINTS, read.code)
 	if (handler !== undefined) return handler({ maps, read, source: error })
-	return valueError(read.code, mismatchAt(read.message), error) ?? null
+	return valueError(read.code, mismatchAt(read.message, read.query), error) ?? null
 }
 
 /**

@@ -5,7 +5,7 @@
 import { eq, type SQL, sql } from "drizzle-orm"
 import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
-import { buildFtsMatch, buildFtsWhere } from "../../../src/query/sqlite/search.ts"
+import { buildFtsMatch, buildFtsWhere, searchText } from "../../../src/query/sqlite/search.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 
 const open: LibsqlHarness[] = []
@@ -116,4 +116,30 @@ INSERT INTO note VALUES ('n1', 'a1', 'postgres tips'), ('n2', 'a1', 'unrelated')
 			.where(where as SQL)
 		expect(rows).toEqual([{ id: "n1", name: "Ada" }])
 	})
+})
+
+/* U16 of the 0.12 round: FTS over a searchText column finds what likeSearch finds, once its terms fold */
+describe("FTS over a folded _search column", () => {
+	const folded = sqliteTable("folded", { _search: text("_search").notNull(), title: text("title").notNull() })
+
+	it.each(["Straße", "strasse", "ﬁle", "Οδυσσέας", "ｶﾀｶﾅ"])(
+		"finds %s with the folded flag, as likeSearch does",
+		async (query) => {
+			const harness = libsqlMemory()
+			open.push(harness)
+			await harness.client.executeMultiple(`
+CREATE TABLE folded (title TEXT NOT NULL, _search TEXT NOT NULL);
+CREATE VIRTUAL TABLE folded_fts USING fts5(_search, content='folded', content_rowid='rowid');
+CREATE TRIGGER folded_fts_ai AFTER INSERT ON folded BEGIN INSERT INTO folded_fts(rowid, _search) VALUES (new.rowid, new._search); END;
+`)
+			for (const title of ["Straße", "ﬁle", "Οδυσσέας", "カタカナ", "other"])
+				await harness.client.execute({
+					args: [title, searchText(title)],
+					sql: "INSERT INTO folded (title, _search) VALUES (?, ?)",
+				})
+			const where = buildFtsWhere({ folded: true, ftsTable: "folded_fts", table: folded }, query) as SQL
+			const rows = await harness.db.all<{ title: string }>(sql`SELECT title FROM folded WHERE ${where}`)
+			expect(rows.length).toBe(1)
+		},
+	)
 })

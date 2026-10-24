@@ -412,3 +412,36 @@ describe("sqliteErrorHandler: an UPDATE's own keys, read whole", () => {
 		})
 	})
 })
+
+/* U13 of the 0.12 round: a table or column with any character in its name, a dot or a dash included */
+describe("sqliteErrorHandler: names with dots and dashes", () => {
+	it("reads a STRICT mismatch on a table whose name is no word", () => {
+		expect(
+			thrown(engine("SQLITE_CONSTRAINT_DATATYPE", "cannot store TEXT value in INTEGER column line-item.n"), []),
+		).toMatchObject({
+			column: "n",
+			errorKey: "invalid_value",
+			table: "line-item",
+		})
+	})
+
+	it("splits a dotted table and column at the statement's own table", () => {
+		const unique = (query: string) =>
+			thrown(wrapped(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: a.b.c.d"), query), [])
+		expect(unique('insert into "a.b" ("c.d") values (?)')).toMatchObject({ column: "c.d", table: "a.b" })
+		expect(
+			thrown(
+				wrapped(
+					engine("SQLITE_CONSTRAINT_DATATYPE", "cannot store TEXT value in INTEGER column a.b.c.d"),
+					'insert into "a.b" ("c.d") values (?)',
+				),
+				[],
+			),
+		).toMatchObject({ column: "c.d", table: "a.b" })
+		/* with no statement, the last dot: what SQLite's message alone can say */
+		expect(thrown(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: a.b.c"), [])).toMatchObject({
+			column: "c",
+			table: "a.b",
+		})
+	})
+})

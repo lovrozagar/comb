@@ -266,3 +266,18 @@ describe("sealed and scoped cursors (R1, R2)", () => {
 		expect(cursorProblem(`a+b${minted}`)).toBe("Invalid cursor")
 	})
 })
+
+/* U12 of the 0.12 round: a handler that cannot seal says so for every cursor, a long one included */
+describe("readCursor on options that cannot seal", () => {
+	it("answers a cursor past 8192 with cursor_not_wired, as every other", () => {
+		const long = "A".repeat(8193)
+		const sort: SortField[] = [{ direction: "asc", field: "id" }]
+		for (const options of [
+			{ ...SEALED, cursorScope: "" },
+			{ ...SEALED, cursorSecret: "short" },
+		])
+			expect(() => readCursor(long, sort, options)).toThrow(
+				expect.objectContaining({ errorKey: "cursor_not_wired", status: 500 }),
+			)
+	})
+})

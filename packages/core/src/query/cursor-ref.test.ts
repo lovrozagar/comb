@@ -128,3 +128,11 @@ describe("anchored on a seconds-mode timestamp key", () => {
 		expect(sqlite.sqlToQuery((desc as AnchorBound).value).sql).toContain("(-1500 / 1000.0)")
 	})
 })
+
+/* U14 of the 0.12 round: a value readCursor returns by reference is one a consumer can test for */
+describe("the query entry point", () => {
+	it("exports the CursorRef readCursor may return", async () => {
+		const query = await import("./index.ts")
+		expect(query.CursorRef).toBe(CursorRef)
+	})
+})
