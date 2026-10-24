@@ -5,7 +5,7 @@
  * any other FTS5 command, `'delete-all'` among them, makes it a trigger like any other.
  */
 import type { Dialect } from "../types.ts"
-import { nameKey, QNAME } from "./sql-code.ts"
+import { lastPart, nameKey, QNAME } from "./sql-code.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const SYNC_TRIGGER: RegExp = /* @__PURE__ */ new RegExp(
@@ -13,10 +13,32 @@ const SYNC_TRIGGER: RegExp = /* @__PURE__ */ new RegExp(
 	"i",
 )
 // per-process-constant: a pattern composed from the name grammar, compiled once
-const SYNC_WRITE = /* @__PURE__ */ new RegExp(
-	`^INSERT INTO (${QNAME}) ?\\([^()]*\\) VALUES ?\\(((?:\\s*(?:(?:new|old)\\.[\\w"\`]+|'delete')\\s*,?)+)\\)$`,
-	"i",
-)
+const SYNC_WRITE = /* @__PURE__ */ new RegExp(`^INSERT INTO (${QNAME}) ?\\(([^()]*)\\) VALUES ?\\(([^()]*)\\)$`, "i")
+/* a row's own value, as a sync write takes it */
+const ROW_VALUE = /^(?:new|old)\.[\w"`]+$/i
+
+/* a column or value list's entries, as a sync write's simple lists hold them */
+const listOf = (list: string | undefined): string[] => (list as string).split(",").map((part) => part.trim())
+
+/**
+ * Whether `write` syncs one of `fts`: each column takes its value by position,
+ * the table's own column and rank only the 'delete' command (FTS5 reads what lands there as one),
+ * every other column a row's own value
+ */
+function syncsTable(write: string, fts: ReadonlySet<string>, dialect: Dialect): boolean {
+	const [, target, columnList, valueList] = SYNC_WRITE.exec(write) ?? []
+	if (target === undefined || !fts.has(nameKey(target, dialect))) return false
+	const [columns, values] = [listOf(columnList), listOf(valueList)]
+	const own = nameKey(lastPart(target), dialect)
+	return (
+		columns.length === values.length &&
+		columns.every((column, i) => {
+			const value = values[i] as string
+			const command = nameKey(column, dialect) === own || nameKey(column, dialect) === "rank"
+			return command ? /^'delete'$/i.test(value) : ROW_VALUE.test(value)
+		})
+	)
+}
 
 /**
  * The name of the trigger `text` makes, by its key, when every statement of its body syncs one of
@@ -30,10 +52,7 @@ function syncTriggerOf(text: string, fts: ReadonlySet<string>, dialect: Dialect)
 		.split(";")
 		.map((part) => part.trim())
 		.filter((part) => part !== "")
-		.every((write) => {
-			const target = SYNC_WRITE.exec(write)?.[1]
-			return target !== undefined && fts.has(nameKey(target, dialect))
-		})
+		.every((write) => syncsTable(write, fts, dialect))
 	return synced ? nameKey(name, dialect) : undefined
 }
 
