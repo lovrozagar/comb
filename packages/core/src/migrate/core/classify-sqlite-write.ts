@@ -5,7 +5,7 @@
  * a backfill of only the columns the file added (cautious, once), and an insert no history trigger
  * watches that replaces nothing. A table whose definition replaces on conflict (`ON CONFLICT
  * REPLACE`, in the history or made in the file) is never cleared: a plain insert into it deletes
- * the row it meets. Every other write, and any it cannot read, is unsafe, pending the
+ * the row it meets. A REPLACE on a table that was there before the file is unsafe outright (M41). Every other write, and any it cannot read, is unsafe, pending the
  * proof run's read: planApply's proof replaces those entries with the engine's own findings.
  */
 import type { ExtractedSchema } from "../types.ts"
@@ -17,6 +17,13 @@ import { asciiFold, IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel
 type Pending = Finding & { pending: true }
 
 const PENDING: Pending = { level: "unsafe", note: "pending the proof run's read of what it writes", pending: true }
+
+/*
+ * A REPLACE on a table that was there before the file: unsafe whatever the proof run reads, as the
+ * rows it meets are deleted in a way the engine cannot always tell from an update's own rewrite of a
+ * row (a conflict on a rowid table with indexes is an IdxDelete and an Insert over it, M41)
+ */
+const REPLACES: Finding = { level: "unsafe", note: "replaces the rows it conflicts with, deleting them" }
 
 const CTE = "^(?:WITH\\b.*?\\b)?"
 // per-process-constant: a write's verb, after any CTE
@@ -64,7 +71,7 @@ function insertFinding(
 	ctx: { before?: ExtractedSchema | undefined; fresh: Fresh },
 ): Finding[] {
 	const [, conflict, table] = INSERT.exec(bare) as RegExpExecArray
-	if (verb === "REPLACE" || conflict?.toUpperCase() === "REPLACE") return [PENDING]
+	if (verb === "REPLACE" || conflict?.toUpperCase() === "REPLACE") return [REPLACES]
 	const upsert = /\bON CONFLICT\b.*?\bDO UPDATE SET /i.exec(bare)
 	if (upsert !== null) {
 		const start = upsert.index + upsert[0].length
@@ -78,13 +85,15 @@ function insertFinding(
 }
 
 /**
- * What the table alone settles: any write to a table that replaces on conflict is held for the
- * engine, and any other write to a table the file created is cleared; undefined when neither
+ * What the table alone settles: any write to a table that replaces on conflict is unsafe when the
+ * table was there before the file and held for the engine when the file created it, and any other
+ * write to a table the file created is cleared; undefined when neither
  */
 function byTable(table: string, ctx: { fresh: Fresh; schema: ExtractedSchema }): Finding[] | undefined {
 	const conflicts = ctx.schema.tableInfo.get(nameKey(table, "sqlite"))?.conflicts ?? []
-	if (conflicts.some((conflict) => conflict.endsWith(": REPLACE"))) return [PENDING]
-	return ctx.fresh.tables.has(qualifiedKey(table, "sqlite")) ? [] : undefined
+	const fresh = ctx.fresh.tables.has(qualifiedKey(table, "sqlite"))
+	if (conflicts.some((conflict) => conflict.endsWith(": REPLACE"))) return [fresh ? PENDING : REPLACES]
+	return fresh ? [] : undefined
 }
 
 /** What the classifier makes of `code` when it is a SQLite write; nothing when it is none */
@@ -102,7 +111,7 @@ function sqliteWriteFindings(
 	if (settled !== undefined) return settled
 	if (verb === "DELETE") return [PENDING]
 	if (verb !== "UPDATE") return insertFinding(verb, [code, bare], ctx)
-	if (named[1]?.toUpperCase() === "REPLACE") return [PENDING]
+	if (named[1]?.toUpperCase() === "REPLACE") return [REPLACES]
 	const start = named[0].length
 	return [setFinding(table, assigned(code.slice(start), bare.slice(start)), ctx.fresh)]
 }

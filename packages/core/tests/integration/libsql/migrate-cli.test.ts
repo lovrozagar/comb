@@ -380,3 +380,26 @@ describe("migrate never runs a file that reaches outside its database (M40)", ()
 		)
 	})
 })
+
+/* M41: a REPLACE backfill of a column the file added deletes the rows its value meets; --yes covers
+   only cautious files, so it must not be one */
+describe("migrate apply --yes on a REPLACE backfill (M41)", () => {
+	it("refuses it as unsafe, and every user stays", async () => {
+		const { dir, url } = project({
+			"20260101000000_init.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT);",
+		})
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
+		const client = createClient({ url: url("local.db") })
+		await client.execute("INSERT INTO users VALUES (1, 'a@x.io'), (2, 'b@x.io'), (3, 'c@y.io')")
+		fs.writeFileSync(
+			path.join(dir, "atlas-migrations", "20260102000000_tag.sql"),
+			"ALTER TABLE users ADD COLUMN tag TEXT;\nCREATE UNIQUE INDEX users_tag ON users (tag);\nUPDATE OR REPLACE users SET tag = 'x' WHERE email LIKE '%@x.io';",
+		)
+		spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
+		const run = io(dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--yes"], run)).toBe(1)
+		expect(run.errors.join("\n")).toContain("replaces the rows it conflicts with")
+		expect((await client.execute("SELECT id FROM users ORDER BY id")).rows.map((row) => row[0])).toEqual([1, 2, 3])
+		client.close()
+	})
+})

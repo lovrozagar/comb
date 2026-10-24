@@ -14,7 +14,7 @@ import { asciiFold } from "./sql-code.ts"
 type Effects = {
 	/** the columns an update assigns, by table */
 	assigns: Map<string, Set<string>>
-	/** the tables whose existing rows it deletes, an update's own rewrite of a row aside */
+	/** the tables whose existing rows it deletes: a REPLACE's conflicts included, an update's own rewrite of a row aside */
 	deletes: Set<string>
 	/** the existing tables it drops */
 	drops: Set<string>
@@ -46,15 +46,20 @@ type Context = {
 
 /**
  * Where the walk is: the cursors open for writing on existing tables, by number, the trigger it is
- * in, and the tables a Delete touched (an update's own rewrite nets out) apart from those emptied
+ * in, the tables emptied, and the tables where a row was rewritten or an index entry removed, which
+ * an update that assigns that table does to every row it writes
  */
 type Walk = {
 	cursors: Map<number, string>
 	effects: Effects
 	emptied: Set<string>
 	fired: Set<string>
+	rewrites: Set<string>
 	trigger?: string
 }
+
+/* OPFLAG_ISUPDATE (0x04): a Delete that is an update's own rewrite of its row, not a deletion (M41) */
+const IS_UPDATE = 4
 
 /* the marker a probe trigger selects: probe i selects MARK + i */
 const MARK = 7_770_000
@@ -114,7 +119,9 @@ function visit(op: Record<string, unknown>, walk: Walk, ctx: Context): void {
 	if (NOT_CURSOR.has(opcode)) return notCursor(op, walk, ctx)
 	const table = walk.cursors.get(p1)
 	if (table === undefined || KEEPS.has(opcode)) return
-	if (opcode === "Delete" || opcode === "IdxDelete") walk.effects.deletes.add(table)
+	/* a REPLACE conflict's Delete carries no ISUPDATE: only the rewrite's, and an index entry's, can net out */
+	if (opcode === "Delete" && (Number(op["p2"]) & IS_UPDATE) === 0) walk.effects.deletes.add(table)
+	else if (opcode === "Delete" || opcode === "IdxDelete") walk.rewrites.add(table)
 	else walk.effects.unread.add(`${table} (${opcode})`)
 }
 
@@ -132,12 +139,14 @@ function walkProgram(ops: ReadonlyArray<Record<string, unknown>>, ctx: Context):
 		},
 		emptied: new Set(),
 		fired: new Set(),
+		rewrites: new Set(),
 	}
 	/* the main program's own Init comes first */
 	for (const op of ops.slice(1)) visit(op, walk, ctx)
 	const { effects } = walk
-	/* an update rewrites the rows it assigns: their Delete is no deletion of a row; a Clear is */
-	for (const table of effects.assigns.keys()) effects.deletes.delete(table)
+	/* an update rewrites the rows it assigns: its rewrite and index entries there are no deletion,
+	   elsewhere they are; a Clear always is */
+	for (const table of walk.rewrites) if (!effects.assigns.has(table)) effects.deletes.add(table)
 	for (const table of walk.emptied) effects.deletes.add(table)
 	effects.triggers = [...walk.fired].toSorted()
 	return effects

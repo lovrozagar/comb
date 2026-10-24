@@ -19,9 +19,6 @@ describe("classifyMigration on a SQLite write, without the proof run", () => {
 		"DELETE FROM a WHERE id = 1;",
 		"UPDATE a SET x = 'y';",
 		`UPDATE "a"SET x = 'y';`,
-		"UPDATE OR REPLACE a SET x = 'y';",
-		"REPLACE INTO a (id, x) VALUES (1, 'y');",
-		"INSERT OR REPLACE INTO a (id, x) VALUES (1, 'y');",
 		"INSERT INTO a (id, x) VALUES (1, 'y') ON CONFLICT (id) DO UPDATE SET x = excluded.x;",
 		"WITH c AS (SELECT 1) DELETE FROM a;",
 		"INSERT INTO logged (id) VALUES (1);",
@@ -30,6 +27,20 @@ describe("classifyMigration on a SQLite write, without the proof run", () => {
 		expect(rated.safety).toBe("unsafe")
 		expect(rated.pendingStatements).toEqual(rated.unsafeStatements)
 		expect(rated.unsafeStatements.join("\n")).toContain("pending the proof run's read of what it writes")
+	})
+
+	/* M41: a REPLACE deletes the rows it meets, which the engine cannot always tell from an update's own
+	   rewrite (an IdxDelete carries no flag), so the engine's read never clears it on an existing table */
+	it.each([
+		"UPDATE OR REPLACE a SET x = 'y';",
+		"REPLACE INTO a (id, x) VALUES (1, 'y');",
+		"INSERT OR REPLACE INTO a (id, x) VALUES (1, 'y');",
+		"ALTER TABLE a ADD COLUMN slot INTEGER;\nUPDATE OR REPLACE a SET slot = 1;",
+	])("rates %j unsafe outright: the engine's read does not replace it", (sql) => {
+		const rated = lite(sql)
+		expect(rated.safety).toBe("unsafe")
+		expect(rated.pendingStatements).toEqual([])
+		expect(rated.unsafeStatements.join("\n")).toContain("replaces the rows it conflicts with")
 	})
 
 	it.each([
@@ -87,13 +98,23 @@ describe("classifyMigration on a SQLite insert into a table that replaces on con
 	const REPLACING = extractSchema(
 		"CREATE TABLE a (id INTEGER PRIMARY KEY ON CONFLICT REPLACE, x TEXT);\nCREATE TABLE b (id INTEGER PRIMARY KEY, v TEXT UNIQUE ON CONFLICT REPLACE);\nCREATE TABLE c (id INTEGER PRIMARY KEY, v TEXT, UNIQUE (v) ON CONFLICT REPLACE);",
 	)
-	it.each([
-		"INSERT INTO a VALUES (1, 'x');",
-		"INSERT INTO b (v) VALUES ('x');",
-		"INSERT INTO c (v) VALUES ('x');",
-		"CREATE TABLE d (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);\nINSERT INTO d VALUES (1);",
-	])("holds %j for the engine", (sql) => {
-		const rated = classifyMigration(sql, { before: REPLACING, dialect: "sqlite" })
+	it.each(["INSERT INTO a VALUES (1, 'x');", "INSERT INTO b (v) VALUES ('x');", "INSERT INTO c (v) VALUES ('x');"])(
+		"rates %j unsafe outright on a table that was there before the file (M41)",
+		(sql) => {
+			const rated = classifyMigration(sql, { before: REPLACING, dialect: "sqlite" })
+			expect(rated.safety).toBe("unsafe")
+			expect(rated.pendingStatements).toEqual([])
+		},
+	)
+
+	it("holds an insert into such a table the file created for the engine, which sees no row there before it", () => {
+		const rated = classifyMigration(
+			"CREATE TABLE d (id INTEGER PRIMARY KEY ON CONFLICT REPLACE);\nINSERT INTO d VALUES (1);",
+			{
+				before: REPLACING,
+				dialect: "sqlite",
+			},
+		)
 		expect(rated.safety).toBe("unsafe")
 		expect(rated.pendingStatements).toHaveLength(1)
 	})

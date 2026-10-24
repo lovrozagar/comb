@@ -290,3 +290,63 @@ describe("the engine pass never lets a statement reach outside the copy", () => 
 		db.close()
 	})
 })
+
+/*
+ * The 0.13 review's M41: a REPLACE conflict deletes the rows it meets, and SQLite codes those as
+ * Delete on the table the statement assigns. Only the update's own rewrite of a row carries
+ * OPFLAG_ISUPDATE (P2 & 0x04); a REPLACE's Delete carries 0, so it is a deletion even when every
+ * column the statement assigns is one the file added.
+ */
+describe("the engine pass on a REPLACE that deletes the rows it meets", () => {
+	const REPLACING = `CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT UNIQUE);
+CREATE TABLE wr (k TEXT PRIMARY KEY, n INTEGER) WITHOUT ROWID;`
+
+	/** The unsafe and cautious notes the engine pass gives `sql` on a copy of REPLACING */
+	async function findingsOf(sql: string): Promise<{ cautious: string[]; unsafe: string[] }> {
+		const db = await openMemory()
+		db.exec(REPLACING)
+		const run = applyToCopy(db, sql)
+		db.close()
+		expect(run.error).toBeUndefined()
+		return engineFindings(run.steps, run.start)
+	}
+
+	it.each([
+		[
+			"UPDATE OR REPLACE of a column the file added",
+			"ALTER TABLE users ADD COLUMN slot INTEGER;\nCREATE UNIQUE INDEX users_slot ON users (slot);\nUPDATE OR REPLACE users SET slot = 1 WHERE id BETWEEN 1 AND 1000000;",
+			"users",
+		],
+		[
+			"UPDATE OR REPLACE with an ordinary predicate",
+			"ALTER TABLE users ADD COLUMN tag TEXT;\nCREATE UNIQUE INDEX users_tag ON users (tag);\nUPDATE OR REPLACE users SET tag = 'x' WHERE email LIKE '%@x.io';",
+			"users",
+		],
+		[
+			"UPDATE OR REPLACE from an expression",
+			"ALTER TABLE users ADD COLUMN k INTEGER;\nCREATE UNIQUE INDEX users_k ON users (k);\nUPDATE OR REPLACE users SET k = length(email) WHERE id < 1000000;",
+			"users",
+		],
+		[
+			"INSERT OR REPLACE with an upsert of a column the file added",
+			"ALTER TABLE users ADD COLUMN seen INTEGER;\nINSERT OR REPLACE INTO users (id, email) VALUES (99, 'a@x.io') ON CONFLICT (id) DO UPDATE SET seen = 1;",
+			"users",
+		],
+		[
+			"UPDATE OR REPLACE on a WITHOUT ROWID table",
+			"CREATE UNIQUE INDEX wr_n ON wr (n);\nUPDATE OR REPLACE wr SET n = 1 WHERE k IN ('a', 'b');",
+			"wr",
+		],
+	])("finds the deletion in %s, not a backfill", async (_, sql, table) => {
+		const { cautious, unsafe } = await findingsOf(sql)
+		expect(unsafe.join("\n")).toContain(`deletes existing rows of ${table}`)
+		expect(cautious.join("\n")).not.toContain("backfills")
+	})
+
+	it("still nets out a plain update's own rewrite, an indexed column's and a key's included", async () => {
+		const { unsafe } = await findingsOf(
+			"ALTER TABLE users ADD COLUMN slot INTEGER;\nCREATE UNIQUE INDEX users_slot ON users (slot);\nUPDATE users SET slot = 1 WHERE id = 2;",
+		)
+		expect(unsafe.join("\n")).not.toContain("deletes existing rows")
+	})
+})

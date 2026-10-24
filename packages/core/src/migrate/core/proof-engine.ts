@@ -272,8 +272,9 @@ function engineFindings(
 		for (const [table, columns] of effects.assigns) {
 			const listed = [...columns].join(", ")
 			const old = [...columns].some((column) => start.get(table)?.has(column) === true)
+			/* a write that also deletes rows of the table, as a REPLACE does, is no backfill of it (M41) */
 			if (old) unsafe.push(`${at}: updates existing rows of ${table} (${listed})`)
-			else if (effects.triggers.length === 0)
+			else if (effects.triggers.length === 0 && !effects.deletes.has(table))
 				cautious.push(`${at}: backfills ${table} (${listed}), columns this file added`)
 		}
 		for (const table of effects.deletes) unsafe.push(`${at}: deletes existing rows of ${table}`)
