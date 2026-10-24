@@ -124,7 +124,7 @@ describe("anchored on a seconds-mode timestamp key", () => {
 			[new Date(-1500), new Date(-1500)],
 			at(event, event),
 		)
-		expect(sqlite.sqlToQuery((asc as AnchorBound).value).sql).toContain("(-1500 / 1000.0)")
-		expect(sqlite.sqlToQuery((desc as AnchorBound).value).sql).toContain("(-1499 / 1000.0)")
+		expect(sqlite.sqlToQuery((asc as AnchorBound).value).sql).toContain("(-1501 / 1000.0)")
+		expect(sqlite.sqlToQuery((desc as AnchorBound).value).sql).toContain("(-1500 / 1000.0)")
 	})
 })

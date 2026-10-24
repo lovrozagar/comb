@@ -104,3 +104,40 @@ describe("keyset pagination on a seconds-mode timestamp, its cursor row deleted"
 		}
 	})
 })
+
+/** A table of times before 1970, two in one millisecond, and one at the epoch */
+async function negative() {
+	const harness = libsqlMemory()
+	await harness.client.executeMultiple(
+		"CREATE TABLE event (id INTEGER PRIMARY KEY, at INTEGER NOT NULL);\nINSERT INTO event VALUES (1, -1.5), (2, -1.4999), (3, -1.4995), (4, 0);",
+	)
+	return harness
+}
+
+/* the 3.3 review of U10: before 1970 a Date truncates toward zero, its milliseconds the ceiling of the stored value */
+describe("keyset pagination on a seconds-mode timestamp before 1970, its cursor row deleted", () => {
+	it.each([
+		["at.asc", [1, 2, 3, 4], undefined],
+		["at.desc", [4, 3, 2, 1], undefined],
+		["at.asc", [1, 2, 3, 4], 2],
+		["at.desc", [4, 3, 2, 1], 3],
+	] as const)("pages %s exactly to %j, deleting row %s once a page ends on it", async (order, want, gone) => {
+		const harness = await negative()
+		try {
+			const seen = await pageAll(async (cursor) => {
+				const parsed = schema.parse({ cursor, order })
+				const rows = await applyListQuery(
+					harness.db.select().from(event).$dynamic(),
+					buildListQuery({ ...SEALED, parsed, table: event }),
+				)
+				const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+				if (gone !== undefined && items.at(-1)?.id === gone)
+					await harness.client.execute({ args: [gone], sql: "DELETE FROM event WHERE id = ?" })
+				return { ids: items.map((row) => row.id), next: meta.nextCursor }
+			})
+			expect(seen).toEqual(want)
+		} finally {
+			harness.close()
+		}
+	})
+})
