@@ -28,8 +28,9 @@ function enumBase({ field }: Build): Built {
 }
 
 /* no engine stores U+0000 or a lone UTF-16 surrogate as sent: jsonb refuses both, Postgres text
- * refuses U+0000 and turns a surrogate into U+FFFD, libsql cuts at U+0000 and bun:sqlite reads both
- * back as other text (F11). With every escaped
+ * refuses U+0000 and takes a lone surrogate as U+FFFD (the driver's UTF-8), libsql cuts at U+0000,
+ * bun:sqlite reads a lone surrogate back as other text and SQLite's text functions stop at U+0000
+ * (F11). With every escaped
  * backslash taken out of its JSON, a \u0000 left is the one, and a \ud800-\udfff escape a lone
  * surrogate, as JSON.stringify writes a pair as it is */
 const JSON_NUL_CHECK =
