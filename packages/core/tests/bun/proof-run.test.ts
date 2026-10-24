@@ -3,7 +3,11 @@
  * The proof run under Bun, where its in-memory copy is bun:sqlite (memory.ts picks it): the target
  * is a bun:sqlite database too, read only for its schema.
  */
+import { Database } from "bun:sqlite"
 import { describe, expect, it } from "bun:test"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { FILE, START, stateOf } from "../../src/migrate/__fixtures__/apply-parity.ts"
 import { applyToCopy } from "../../src/migrate/core/proof-engine.ts"
 import { provePending } from "../../src/migrate/core/proof-run.ts"
@@ -43,5 +47,37 @@ describe("the proof's engine pass on bun:sqlite", () => {
 		expect(await stateOf(async (sql) => copy.all(sql))).toEqual(await stateOf(read))
 		copy.close()
 		await target.close()
+	})
+})
+
+/* M40 on bun:sqlite: the copy never runs a statement that reaches outside it, so a file that attaches
+   another database to delete its rows leaves them, and a VACUUM INTO writes no file */
+describe("the proof's copy on bun:sqlite never reaches outside itself", () => {
+	it("refuses an ATTACH before it runs, and the attached database keeps its rows", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-outside-bun-"))
+		const victim = new Database(path.join(dir, "live.db"))
+		victim.exec(
+			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT); INSERT INTO users VALUES (1, 'a@x.io'), (2, 'b@x.io');",
+		)
+		victim.close()
+		const conn = await createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" }).connect(DB)
+		await conn.batch([{ sql: "CREATE TABLE t (id INTEGER PRIMARY KEY)" }])
+		const file = `ATTACH '${path.join(dir, "live.db")}' AS live;\nDELETE FROM live.users;`
+		await expect(provePending(conn, [{ name: "1_attach.sql", sql: file }])).rejects.toThrow("comb never runs ATTACH")
+		const after = new Database(path.join(dir, "live.db"), { readonly: true })
+		expect(after.query("SELECT id FROM users ORDER BY id").values()).toEqual([[1], [2]])
+		after.close()
+		await conn.close()
+		fs.rmSync(dir, { force: true, recursive: true })
+	})
+
+	it("refuses a VACUUM INTO before it runs, and writes no file", async () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-outside-bun-"))
+		const copy = await openBunMemory()
+		copy.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+		expect(() => applyToCopy(copy, `VACUUM INTO '${path.join(dir, "copy.db")}'`)).toThrow("comb never runs VACUUM INTO")
+		copy.close()
+		expect(fs.readdirSync(dir)).toEqual([])
+		fs.rmSync(dir, { force: true, recursive: true })
 	})
 })

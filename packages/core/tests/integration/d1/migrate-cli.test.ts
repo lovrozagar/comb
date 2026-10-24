@@ -4,6 +4,7 @@
  * in one batch, and comb reads that table back. A database comb 0.7 migrated keeps its record in
  * `__drizzle_migrations` until `baseline` copies it.
  */
+import { createClient } from "@libsql/client"
 import { spawnSync } from "node:child_process"
 import fs from "node:fs"
 import { createRequire } from "node:module"
@@ -184,4 +185,29 @@ describe("comb migrate check and status on D1 --local, the local database missin
 		},
 		120_000,
 	)
+})
+
+/* M40 on D1 --local: check and apply prove a pending file on comb's copy before wrangler runs, so
+   a file that attaches another database to delete its rows is refused there, and those rows stay */
+describe("comb migrate on D1 --local never runs a file that reaches outside its database (M40)", () => {
+	it("refuses it in check and apply, and the attached database keeps its rows", async () => {
+		const dir = project(INIT)
+		expect(await runCli(["migrate", "apply", "core", "--local"], io(dir))).toBe(0)
+		const live = path.join(dir, "live.db")
+		const seed = createClient({ url: `file:${live}` })
+		await seed.executeMultiple(
+			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT); INSERT INTO users VALUES (1, 'a@x.io'), (2, 'b@x.io');",
+		)
+		seed.close()
+		write(dir, { "20260102000000_attach.sql": `ATTACH '${live}' AS live;\nDELETE FROM live.users;` })
+		for (const command of ["check", "apply"]) {
+			const ran = io(dir)
+			expect(await runCli(["migrate", command, "core", "--local"], ran)).toBe(1)
+			expect(ran.errors.join("\n")).toContain("comb never runs ATTACH in a migration")
+		}
+		const read = createClient({ url: `file:${live}` })
+		expect((await read.execute("SELECT id FROM users ORDER BY id")).rows.map((row) => row[0])).toEqual([1, 2])
+		read.close()
+		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
+	}, 120_000)
 })

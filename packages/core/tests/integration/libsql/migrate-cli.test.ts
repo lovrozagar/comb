@@ -316,3 +316,67 @@ describe("migrate apply and check --json on libsql (C5)", () => {
 		])
 	})
 })
+
+/** A database file beside the project holding two users, and its rows read back */
+async function victim(dir: string): Promise<{ ids: () => Promise<unknown[]>; path: string }> {
+	const file = path.join(dir, "live.db")
+	const client = createClient({ url: `file:${file}` })
+	await client.executeMultiple(
+		"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT); INSERT INTO users VALUES (1, 'a@x.io'), (2, 'b@x.io');",
+	)
+	client.close()
+	return {
+		ids: async () => {
+			const read = createClient({ url: `file:${file}` })
+			try {
+				return (await read.execute("SELECT id FROM users ORDER BY id")).rows.map((row) => row[0])
+			} finally {
+				read.close()
+			}
+		},
+		path: file,
+	}
+}
+
+/** A pending file that attaches the database at `file` and deletes its users, under `approval` */
+const attach = (file: string, approval = "") => `${approval}ATTACH '${file}' AS live;\nDELETE FROM live.users;`
+
+/*
+ * M40: a pending file that attaches another database. check proves it on a copy, apply proves it
+ * before it runs, and an empty target applies without the gate, so each must refuse it before
+ * anything runs it: the attached database keeps its rows, whatever the file approves.
+ */
+describe("migrate never runs a file that reaches outside its database (M40)", () => {
+	it("refuses it in check, apply --yes and an approved file, and the attached database keeps its rows", async () => {
+		const { dir, url } = project({ "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" })
+		const live = await victim(dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
+		for (const [file, args] of [
+			[attach(live.path), ["check", "core", "-e", "local"]],
+			[attach(live.path), ["apply", "core", "-e", "local", "--yes"]],
+			[attach(live.path, "-- comb:allow-unsafe: reads the old store\n"), ["apply", "core", "-e", "local", "--yes"]],
+		] as const) {
+			fs.writeFileSync(path.join(dir, "atlas-migrations", "20260102000000_attach.sql"), file)
+			spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
+			const run = io(dir)
+			expect(await runCli(["migrate", ...args], run)).toBe(1)
+			expect(run.errors.join("\n")).toContain("comb never runs ATTACH in a migration")
+			expect(await live.ids()).toEqual([1, 2])
+		}
+		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "post"])
+	})
+
+	it("refuses it on an empty target too, where the unsafe gate does not apply", async () => {
+		const { dir, url } = project({})
+		const live = await victim(dir)
+		fs.writeFileSync(path.join(dir, "atlas-migrations", "20260101000000_attach.sql"), attach(live.path))
+		spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
+		const run = io(dir)
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], run)).toBe(1)
+		expect(run.errors.join("\n")).toContain("comb never runs ATTACH in a migration")
+		expect(await live.ids()).toEqual([1, 2])
+		expect(fs.existsSync(url("local.db").slice("file:".length)) ? await tables(url("local.db")) : []).not.toContain(
+			"users",
+		)
+	})
+})

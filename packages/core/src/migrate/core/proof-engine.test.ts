@@ -1,3 +1,7 @@
+import { createClient } from "@libsql/client"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { FILE, type Read, START, stateOf } from "../__fixtures__/apply-parity.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
@@ -218,5 +222,71 @@ describe("writtenTables: the existing tables a statement's program opens for wri
 		expect(writtenTables([op("CreateBtree", 7), op("OpenWrite", 7, { p5: 17 }), op("OpenWrite", 4)], main)).toEqual(
 			new Set(["pet"]),
 		)
+	})
+})
+
+/*
+ * The 0.13 review's M40: the copy runs each statement it proves, so a statement whose program opens
+ * or writes a file outside it, or loads code into the process, would act on the real machine before
+ * any rating. Each is refused from its compiled program before it runs, whatever its spelling, and
+ * no approval overrides that.
+ */
+/** A fresh directory for the files a statement outside the copy would write */
+const scratch = () => fs.mkdtempSync(path.join(os.tmpdir(), "comb-outside-"))
+
+describe("the engine pass never lets a statement reach outside the copy", () => {
+	it.each([
+		["an ATTACH", (dir: string) => `ATTACH DATABASE '${path.join(dir, "side.db")}' AS side`, "ATTACH"],
+		[
+			"an ATTACH spelled with a comment and a lower-case keyword",
+			(dir: string) => `attach /* x */ '${path.join(dir, "side.db")}' as side`,
+			"ATTACH",
+		],
+		["a DETACH", () => "DETACH DATABASE side", "DETACH"],
+		["a VACUUM INTO", (dir: string) => `VACUUM INTO '${path.join(dir, "copy.db")}'`, "VACUUM INTO"],
+		["a load_extension call", (dir: string) => `SELECT load_extension('${path.join(dir, "ext")}')`, "load_extension"],
+	])("refuses %s before it runs, and leaves no file behind", async (_, statement, named) => {
+		const dir = scratch()
+		const db = await openMemory()
+		db.exec(TABLES)
+		expect(() => applyToCopy(db, statement(dir))).toThrow(
+			`comb never runs ${named} in a migration: it reaches outside the database the migration applies to`,
+		)
+		db.close()
+		expect(fs.readdirSync(dir)).toEqual([])
+		fs.rmSync(dir, { force: true, recursive: true })
+	})
+
+	/* SQLite marks load_extension direct-only: a trigger that calls it cannot prepare, so it never runs */
+	it("never runs a write that fires a trigger calling load_extension: SQLite refuses to prepare it", async () => {
+		const db = await openMemory()
+		db.exec(TABLES)
+		const file =
+			"CREATE TRIGGER k_load AFTER INSERT ON k BEGIN SELECT load_extension('x'); END;\nINSERT INTO k (a) VALUES ('a');"
+		expect(applyToCopy(db, file).error).toContain("unsafe use of load_extension()")
+		db.close()
+	})
+
+	it("leaves another database's rows as they were when a file attaches it to delete them", async () => {
+		const dir = scratch()
+		const victim = createClient({ url: `file:${path.join(dir, "live.db")}` })
+		await victim.executeMultiple(
+			"CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT); INSERT INTO users VALUES (1, 'a@x.io'), (2, 'b@x.io');",
+		)
+		const target = libsqlConnection()
+		await target.client.executeMultiple(START)
+		const file = `ATTACH '${path.join(dir, "live.db")}' AS live;\nDELETE FROM live.users;`
+		await expect(provePending(target, [{ name: "1_attach.sql", sql: file }])).rejects.toThrow("comb never runs ATTACH")
+		expect((await victim.execute("SELECT id FROM users ORDER BY id")).rows.map((row) => row[0])).toEqual([1, 2])
+		victim.close()
+		await target.close()
+		fs.rmSync(dir, { force: true, recursive: true })
+	})
+
+	it("runs a statement calling an ordinary function, which reaches nothing outside", async () => {
+		const db = await openMemory()
+		db.exec(TABLES)
+		expect(applyToCopy(db, "UPDATE k SET a = upper(a)").error).toBeUndefined()
+		db.close()
 	})
 })

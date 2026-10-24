@@ -12,6 +12,7 @@ import type { MemoryDb } from "../drivers/memory.ts"
 import type { ExtractedSchema } from "../types.ts"
 import { preview } from "./classify-file.ts"
 import { readGuards } from "./guard-read.ts"
+import { outsideReach } from "./proof-outside.ts"
 import { extractSchema } from "./schema.ts"
 import { type Context, type Effects, MARK, walkProgram } from "./proof-walk.ts"
 import { asciiFold, codeOf } from "./sql-code.ts"
@@ -148,6 +149,13 @@ function explainStatement(db: MemoryDb, sql: string, existing: ReadonlySet<strin
 		ops = db.all(`EXPLAIN ${sql}`)
 	} catch (error) {
 		return (error as Error).message
+	}
+	/* the copy runs what it proves, so this is refused before it runs, and no approval overrides it (M40) */
+	const outside = outsideReach(ops)
+	if (outside !== undefined) {
+		throw new Error(
+			`${preview(sql)}: comb never runs ${outside} in a migration: it reaches outside the database the migration applies to, and D1 refuses it`,
+		)
 	}
 	const roots = rootsOf(db)
 	const written = writtenTables(ops, roots.main)
