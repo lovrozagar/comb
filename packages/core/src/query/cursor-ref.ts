@@ -139,11 +139,16 @@ function textBound(key: SortKey, ref: CursorRef, at: Anchor): SQL {
 	return sql`(SELECT CASE WHEN ${head} = comb_anchor.v AND ${size} = ${countLiteral(ref.length)} THEN ${column} ELSE ${fallback} END FROM (SELECT ${prefix} AS v) AS comb_anchor LEFT JOIN ${fromOf(at.table)} ON ${at.tiebreak} = ${at.id})`
 }
 
+/** An integer as an SQL literal, its sign kept */
+const literal = (n: number): SQL => sql`${n < 0 ? sql`-` : sql``}${countLiteral(Math.abs(n))}`
+
 /**
- * A Date on a seconds-mode SQLite timestamp key: the row's own value, whose fraction below a
- * millisecond no Date holds (U10); once the row is gone, the edge of the millisecond the stored value
- * lay in toward the rows already served, so a row of that millisecond may come again and none is
- * skipped. A Date truncates toward zero, so that millisecond is [ms, ms + 1) after 1970, (ms - 1,
+ * A Date on a seconds-mode SQLite timestamp key: the row's own value while it still lies in the
+ * cursor's millisecond, whose fraction below it no Date holds (U10). A Date truncates toward zero,
+ * as `CAST(… AS INTEGER)` does, so that is the row whose value times 1000 truncates to the Date's
+ * milliseconds. Otherwise (the row edited since, an updated_at bump among them, or gone, its id
+ * perhaps given out again) the edge of that millisecond toward the rows already served, so a row of
+ * it may come again and none is skipped (U20): the millisecond is [ms, ms + 1) after 1970, (ms - 1,
  * ms] before it, and (-1, 1) at 0. The milliseconds are literals, so the bound costs the id alone.
  */
 function secondsBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
@@ -151,8 +156,9 @@ function secondsBound({ column, direction }: SortKey, value: Date, at: Anchor): 
 	/* each edge widened on its own: a Date of 0 is any stored value within a millisecond either side of it */
 	const [low, high] = [truncated > 0 ? truncated : truncated - 1, truncated < 0 ? truncated : truncated + 1]
 	const ms = direction === "asc" ? low : high
-	const fallback = sql`(${ms < 0 ? sql`-` : sql``}${countLiteral(Math.abs(ms))} / 1000.0)`
-	return sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${fallback})`
+	const fallback = sql`(${literal(ms)} / 1000.0)`
+	const kept = sql`CASE WHEN CAST(${column} * 1000 AS INTEGER) = ${literal(truncated)} THEN ${column} END`
+	return sql`coalesce((SELECT ${kept} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${fallback})`
 }
 
 /** Whether `column` is a Postgres `timestamp` read in date mode, which reads 'infinity' and '-infinity' as one valid Date */
@@ -161,21 +167,24 @@ const misreadsInfinity = (column: SQLWrapper): boolean => {
 	return columnType === "PgTimestamp" && withTimezone !== true
 }
 
+/* the Date node-postgres reads a `timestamp` 'infinity' and '-infinity' as: 2000-01-01, local midnight */
+const misreadInfinity = (value: Date): boolean => value.getTime() === new Date(2000, 0, 1).getTime()
+
 /**
- * A Date on a date-mode Postgres `timestamp` key: the row's own value, at the precision the order
- * compares it (U17), as the engine holds an 'infinity' node-postgres reads as 2000-01-01, local
- * midnight, for 'infinity' and '-infinity' alike. Once the row is gone, the Date itself, unless it is
- * that one: the row may have held either infinity, so the list resumes from the direction's own end,
- * repeating rows and skipping none. A driver that reads infinity as an Invalid Date mints no cursor.
+ * The Date node-postgres gives both infinities, on a date-mode Postgres `timestamp` key: the row's
+ * own value while it is infinite, at the precision the order compares it (U17); the Date itself
+ * while the row still holds it, as a row of local 2000-01-01 does (U20). Once the row is gone, or
+ * edited to another finite value, it may have held either infinity, so the list resumes from the
+ * direction's own end, repeating rows and skipping none. Every other Date is bound as it is. A driver that reads
+ * infinity as an Invalid Date mints no cursor.
  */
 function timestampBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
-	const fallback =
-		value.getTime() === new Date(2000, 0, 1).getTime()
-			? direction === "asc"
-				? sql`'-infinity'::timestamp`
-				: sql`'infinity'::timestamp`
-			: sql.param(value, column as never)
-	return sql`coalesce((SELECT ${cursorPrecision(column)} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${fallback})`
+	const end = direction === "asc" ? sql`'-infinity'::timestamp` : sql`'infinity'::timestamp`
+	const date = sql.param(value, column as never)
+	/* an infinite row is its own bound; a finite one only while it is still that Date (a row of local
+	   2000-01-01); one edited since, an infinite one made finite among them, bounds as a deleted row */
+	const kept = sql`CASE WHEN NOT isfinite(${column}) THEN ${cursorPrecision(column)} WHEN ${cursorPrecision(column)} = ${date} THEN ${date} END`
+	return sql`coalesce((SELECT ${kept} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${end})`
 }
 
 /** Whether `column` is a SQLite number, which D1 may hand over as null when it holds ±Infinity */
@@ -207,7 +216,7 @@ function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anch
 		if (value instanceof CursorRef)
 			return new AnchorBound("row", textBound(key, value, at), !is(key.column, SQLiteColumn))
 		if (value instanceof Date && inSeconds(key.column)) return new AnchorBound("row", secondsBound(key, value, at))
-		if (value instanceof Date && misreadsInfinity(key.column))
+		if (value instanceof Date && misreadsInfinity(key.column) && misreadInfinity(value))
 			return new AnchorBound("row", timestampBound(key, value, at))
 		return value === null && holdsInfinity(key.column) ? new AnchorBound("infinite", infiniteBound(key, at)) : value
 	})

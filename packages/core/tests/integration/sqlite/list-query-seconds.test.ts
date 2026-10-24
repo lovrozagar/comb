@@ -13,6 +13,7 @@ import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { libsqlMemory } from "../support/libsql.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { ANCHOR_CASES, servedAround } from "../support/seconds-anchor.ts"
 
 const event = sqliteTable("event", {
 	at: integer("at", { mode: "timestamp" }).notNull(),
@@ -165,6 +166,24 @@ describe("keyset pagination on a seconds-mode timestamp at the epoch, its cursor
 				return { ids: items.map((row) => row.id), next: meta.nextCursor }
 			})
 			expect(seen).toEqual(want)
+		} finally {
+			harness.close()
+		}
+	})
+})
+
+/* U20 of the 0.13.0 round, on libsql: the shared cases (support/seconds-anchor.ts) */
+describe("keyset pagination on a seconds-mode timestamp whose cursor row changes between pages (U20)", () => {
+	it.each(ANCHOR_CASES)("pages $name exactly", async (one) => {
+		const harness = libsqlMemory()
+		try {
+			const engine = {
+				db: harness.db as never,
+				exec: async (statement: string) => {
+					await harness.client.execute(statement)
+				},
+			}
+			expect(await servedAround(engine, one)).toEqual(one.want)
 		} finally {
 			harness.close()
 		}

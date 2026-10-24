@@ -24,24 +24,31 @@ const schema = createListQuerySchema({ sort: ["ts", "tz", "d"], pagination: { de
 /* ±infinity, a time before 2000 and after it, two in one millisecond (microseconds apart), and a NULL */
 const ROWS = `INSERT INTO vals (id, ts) VALUES
 	(1, 'infinity'), (2, '-infinity'), (3, '1999-06-01 00:00:00'), (4, '2026-01-03 04:05:06.789001'),
-	(5, '2026-01-03 04:05:06.789002'), (6, NULL), (7, '2026-01-04')`
+	(5, '2026-01-03 04:05:06.789002'), (6, NULL), (7, '2026-01-04'),
+	/* a finite row at local 2000-01-01, the very Date node-postgres reads ±infinity as (U20) */
+	(8, '2000-01-01 00:00:00')`
 
 type Sessions = ReturnType<typeof usePg>
 
 /** Every id, a page of one at a time, under `order`; `edit` runs once on the first page that ends on `at` */
-async function pageAll(sessions: Sessions, order: string, at?: number): Promise<number[]> {
+async function pageAll(
+	sessions: Sessions,
+	order: string,
+	{ at, edit = "DELETE FROM vals WHERE id = $1" }: { at?: number; edit?: string } = {},
+): Promise<number[]> {
 	const client = sessions.pg()
 	const db = drizzle({ client, relations: defineRelations({ vals }) })
 	const query = schema.parse({ order })
+	let anchor = at
 	const seen: number[] = []
 	let cursor: string | undefined
 	for (let page = 0; page < 20; page++) {
 		const rows = await db.query.vals.findMany(queryHelpers.listOptions({ ...query, cursor }, SEALED) as never)
 		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, { ...query, cursor }, SEALED)
 		seen.push(...items.map((row) => row.id))
-		if (at !== undefined && items.at(-1)?.id === at) {
-			await client.query("DELETE FROM vals WHERE id = $1", [at])
-			at = undefined
+		if (anchor !== undefined && items.at(-1)?.id === anchor) {
+			await client.query(edit, [anchor])
+			anchor = undefined
 		}
 		if (meta.nextCursor === null) return seen
 		cursor = meta.nextCursor
@@ -76,7 +83,7 @@ describe("keyset pagination on a date-mode timestamp holding ±infinity (U17)", 
 	] as const)("pages %s on exactly once its finite cursor row %s is deleted", async (order, at) => {
 		const inOrder = await seeded(sessions)
 		const all = await inOrder(order)
-		expect(await pageAll(sessions, order, at)).toEqual(all)
+		expect(await pageAll(sessions, order, { at })).toEqual(all)
 	})
 
 	/* resumed from the direction's own end, as the row may have held either infinity */
@@ -88,7 +95,7 @@ describe("keyset pagination on a date-mode timestamp holding ±infinity (U17)", 
 		async (order, at) => {
 			const inOrder = await seeded(sessions)
 			const all = await inOrder(order)
-			const seen = await pageAll(sessions, order, at)
+			const seen = await pageAll(sessions, order, { at })
 			expect(all.filter((id) => !seen.includes(id))).toEqual([])
 			expect(seen.length).toBeGreaterThan(all.length)
 		},
@@ -100,7 +107,7 @@ describe("keyset pagination on a date-mode timestamp holding ±infinity (U17)", 
 	] as const)("pages %s on exactly once its infinite cursor row %s, at the near end, is deleted", async (order, at) => {
 		const inOrder = await seeded(sessions)
 		const all = await inOrder(order)
-		expect(await pageAll(sessions, order, at)).toEqual(all)
+		expect(await pageAll(sessions, order, { at })).toEqual(all)
 	})
 })
 
@@ -133,4 +140,41 @@ describe("a date-mode timestamptz or date holding ±infinity (U17)", () => {
 			)
 		},
 	)
+})
+
+/*
+ * U20 of the 0.13.0 round: the bound is the Date the cursor was minted from, read from the row only
+ * when that Date is the one node-postgres gives both infinities and the row holds one. An anchor
+ * edited between pages, an updated_at bump among them, then resumes where its old value stood.
+ */
+describe("keyset pagination on a date-mode timestamp whose cursor row is edited between pages (U20)", () => {
+	const sessions = usePg()
+	const BUMP = "UPDATE vals SET ts = '2030-01-01' WHERE id = $1"
+
+	it.each([
+		["ts.asc", 4],
+		["ts.desc", 5],
+		["ts.asc", 8],
+		["ts.desc", 8],
+	] as const)("pages %s on past its finite cursor row %s bumped later, skipping none", async (order, at) => {
+		const inOrder = await seeded(sessions)
+		const all = await inOrder(order)
+		const seen = await pageAll(sessions, order, { at, edit: BUMP })
+		const upTo = all.indexOf(at) + 1
+		expect(seen.slice(0, upTo)).toEqual(all.slice(0, upTo))
+		expect(seen.slice(upTo).filter((id) => id !== at)).toEqual(all.slice(upTo))
+		expect(seen.filter((id) => id === at).length).toBeLessThanOrEqual(2)
+	})
+
+	/* minted on an infinite row, which the edit makes finite: its Date is the one both infinities read as,
+	   so the bound resumes from the direction's own end, as for a deleted row, repeating rows and skipping none */
+	it.each([
+		["ts.desc", 1],
+		["ts.asc", 2],
+	] as const)("skips no row on %s once its infinite cursor row %s is made finite", async (order, at) => {
+		const inOrder = await seeded(sessions)
+		const all = await inOrder(order)
+		const seen = await pageAll(sessions, order, { at, edit: BUMP })
+		expect(new Set(seen)).toEqual(new Set(all))
+	})
 })

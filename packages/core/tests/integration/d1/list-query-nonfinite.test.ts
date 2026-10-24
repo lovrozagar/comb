@@ -7,6 +7,7 @@
 import { drizzle } from "drizzle-orm/d1"
 import { afterEach, describe, expect, it } from "vitest"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
+import { ANCHOR_CASES, servedAround } from "../support/seconds-anchor.ts"
 import {
 	type Edit,
 	type Engine,
@@ -64,4 +65,19 @@ describe("keyset pagination on ±Infinity and NULL in a SQLite REAL, on D1 (U4)"
 			)
 		}
 	}
+})
+
+/* U20 of the 0.13.0 round, on D1: the shared seconds-mode cases (support/seconds-anchor.ts) */
+describe("keyset pagination on D1 over a seconds-mode timestamp whose cursor row changes between pages (U20)", () => {
+	it.each(ANCHOR_CASES)("pages $name exactly", async (one) => {
+		harness = await d1Memory()
+		const d1 = harness.CORE
+		const engine = {
+			db: drizzle(d1) as never,
+			exec: async (statement: string) => {
+				await d1.prepare(statement).run()
+			},
+		}
+		expect(await servedAround(engine, one)).toEqual(one.want)
+	})
 })

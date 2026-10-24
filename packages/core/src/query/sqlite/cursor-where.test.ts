@@ -68,7 +68,7 @@ describe("cursorWhere on a seconds-mode timestamp key", () => {
 			tiebreak: { column: event.id, direction: "asc" },
 		})
 		expect(dialect.sqlToQuery(where).sql).toContain(
-			'coalesce((SELECT "event"."at" FROM "event" WHERE "event"."id" = ?), (1700000000123 / 1000.0))',
+			'coalesce((SELECT CASE WHEN CAST("event"."at" * 1000 AS INTEGER) = 1700000000123 THEN "event"."at" END FROM "event" WHERE "event"."id" = ?), (1700000000123 / 1000.0))',
 		)
 	})
 })
