@@ -62,16 +62,20 @@ function assertShard(shardId: number, totalShards: number): void {
  */
 async function insertFirst(db: ShardDb, orgId: string, shardId: number): Promise<{ revived: boolean; row: ShardRow }> {
 	const byOrg = eq(shardMap.org_id, orgId)
-	await db
-		.insert(shardMap)
-		.values({ driver: "d1", org_id: orgId, shard_id: shardId, target: String(shardId) })
-		.onConflictDoNothing({ target: shardMap.org_id })
-	const revived = await db
-		.update(shardMap)
-		.set({ deleted_at: null, updated_at: Date.now() })
-		.where(and(byOrg, isNotNull(shardMap.deleted_at)))
-		.returning({ orgId: shardMap.org_id })
-	return { revived: revived.length > 0, row: (await db.select().from(shardMap).where(byOrg).get()) as ShardRow }
+	/* one batch is one transaction: the read-back sees what the insert and the revive left, and no unplace between */
+	const [, revived, [row]] = await db.batch([
+		db
+			.insert(shardMap)
+			.values({ driver: "d1", org_id: orgId, shard_id: shardId, target: String(shardId) })
+			.onConflictDoNothing({ target: shardMap.org_id }),
+		db
+			.update(shardMap)
+			.set({ deleted_at: null, updated_at: Date.now() })
+			.where(and(byOrg, isNotNull(shardMap.deleted_at)))
+			.returning({ orgId: shardMap.org_id }),
+		db.select().from(shardMap).where(byOrg),
+	])
+	return { revived: revived.length > 0, row: row as ShardRow }
 }
 
 /** Puts an org on `shardId` whatever row it had, live or soft-deleted */

@@ -250,3 +250,17 @@ describe("ShardRouter: the cached miss", () => {
 		expect(log).toHaveBeenCalledWith("shard-router.hit", { orgId: "org-1", stale: false, tier: "lru" })
 	})
 })
+
+/* the 3.5 review: an unplace landing between place's insert, revive and read-back returned a deleted row */
+describe("ShardRouter: place in one transaction", () => {
+	it("sends its insert, its revive and its read-back as one D1 batch", async () => {
+		const { primary } = await core([["org-1", 0]])
+		const batch = vi.fn((statements: unknown) => primary.batch(statements as never))
+		const coreDb = { batch, prepare: (query: string) => primary.prepare(query) } as unknown as D1Database
+		const router = new ShardRouter({ totalShards: 3 })
+		await router.unplace("org-1", { coreDb: primary, kv: noKv })
+		expect((await router.place({ orgId: "org-1", shardId: 2 }, { coreDb, kv: noKv }, ctx)).shardId).toBe(0)
+		expect(batch).toHaveBeenCalledTimes(1)
+		expect(batch.mock.calls[0]?.[0]).toHaveLength(3)
+	})
+})
