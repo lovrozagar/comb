@@ -8,6 +8,7 @@
  * the parser accepts — and stays when a publisher strips `x-*` extensions.
  */
 import type { FilterLimits } from "./filter.ts"
+import { REQUEST_BYTES } from "./schema-limits.ts"
 import type { FieldType, FilterOperator } from "./types.ts"
 
 const CURSOR_DESCRIPTION =
@@ -62,7 +63,7 @@ function filterParamMeta(
 		`Fields: ${fieldList}.`,
 		"`like` is case-sensitive and `ilike` ignores ASCII case; `*` is the wildcard.",
 		"`in`/`nin` take `(a,b)`; `is` takes `null` or `notnull`, and `true` or `false` on a boolean.",
-		`At most ${limits.maxConditions} conditions, ${limits.maxDepth} nested groups, ${limits.maxInValues} in/nin values per list, ${limits.maxValues} values in all.`,
+		`At most ${limits.maxConditions} conditions, ${limits.maxDepth} nested groups, ${limits.maxInValues} in/nin values per list, ${limits.maxValues} values in all, and at most ${REQUEST_BYTES.filter} bytes once percent-encoded.`,
 	].join(" ")
 
 	const samples = entries.map(([field, type]) => sampleCondition(field, type))
@@ -94,7 +95,7 @@ function orderParamMeta(sort: readonly string[], maxSortKeys: number): ParamMeta
 
 function searchParamMeta(search: readonly string[], maxTerms: number): ParamMeta {
 	return {
-		description: `Free-text search over: ${search.join(", ")}. Whitespace-separated terms must all match; at most ${maxTerms} terms.`,
+		description: `Free-text search over: ${search.join(", ")}. Whitespace-separated terms must all match; at most ${maxTerms} terms, and at most ${REQUEST_BYTES.q} bytes once percent-encoded.`,
 		examples: ["acme", "acme corp"],
 	}
 }

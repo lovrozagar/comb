@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { cursorProblem } from "./cursor.ts"
 import { CURSOR_EXAMPLES, filterParamMeta, orderParamMeta, searchParamMeta } from "./descriptions.ts"
 import type { FieldType, FilterOperator } from "./types.ts"
+import { FILTER_LIMITS } from "./filter.ts"
 
 const LIMITS = { maxConditions: 20, maxDepth: 3, maxInValues: 50, maxValues: 60 }
 const operatorsFor = (type: FieldType): readonly FilterOperator[] => (type === "boolean" ? ["eq", "is"] : ["eq", "in"])
@@ -11,7 +12,7 @@ describe("filterParamMeta", () => {
 		const { description } = filterParamMeta({ active: "boolean", title: "string" }, operatorsFor, LIMITS)
 		expect(description).toContain("Fields: active (boolean: eq, is); title (string: eq, in).")
 		expect(description).toContain(
-			"At most 20 conditions, 3 nested groups, 50 in/nin values per list, 60 values in all.",
+			"At most 20 conditions, 3 nested groups, 50 in/nin values per list, 60 values in all, and at most 5120 bytes once percent-encoded.",
 		)
 	})
 
@@ -57,7 +58,7 @@ describe("orderParamMeta", () => {
 describe("searchParamMeta", () => {
 	it("names the searched fields and the term cap", () => {
 		expect(searchParamMeta(["name", "email"], 8).description).toBe(
-			"Free-text search over: name, email. Whitespace-separated terms must all match; at most 8 terms.",
+			"Free-text search over: name, email. Whitespace-separated terms must all match; at most 8 terms, and at most 600 bytes once percent-encoded.",
 		)
 	})
 })
@@ -65,5 +66,15 @@ describe("searchParamMeta", () => {
 describe("CURSOR_EXAMPLES", () => {
 	it("has the shape the list schema takes, a sealed cursor, so a published example is a cursor (Q7, R1)", () => {
 		for (const example of CURSOR_EXAMPLES) expect(cursorProblem(example)).toBeNull()
+	})
+})
+
+/* U11 of the 0.12 round: a byte cap a request meets is named where its field is described */
+describe("the filter and search descriptions name their byte caps", () => {
+	it("says how many bytes each takes once percent-encoded", () => {
+		expect(filterParamMeta({ title: "string" }, () => ["eq"], FILTER_LIMITS).description).toContain(
+			"at most 5120 bytes once percent-encoded",
+		)
+		expect(searchParamMeta(["title"], 8).description).toContain("at most 600 bytes once percent-encoded")
 	})
 })

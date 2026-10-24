@@ -157,6 +157,8 @@ type QueryRequired = Omit<
 	| "maxFilterValues"
 	| "maxInValues"
 	| "maxPage"
+	| "maxFilterBytes"
+	| "maxSearchBytes"
 	| "maxSearchTerms"
 	| "maxSortKeys"
 	| "nulls"
@@ -170,6 +172,8 @@ type QueryOptional = Pick<
 	| "maxFilterValues"
 	| "maxInValues"
 	| "maxPage"
+	| "maxFilterBytes"
+	| "maxSearchBytes"
 	| "maxSearchTerms"
 	| "maxSortKeys"
 	| "nulls"
@@ -226,6 +230,8 @@ function readQueryOptional(raw: Record<string, unknown>, diagnose: Diagnose): Qu
 		"maxFilterDepth",
 		"maxFilterValues",
 		"maxInValues",
+		"maxFilterBytes",
+		"maxSearchBytes",
 		"maxSearchTerms",
 		"maxSortKeys",
 	] as const) {

@@ -192,3 +192,30 @@ describe("a config change moves the published facts with it", () => {
 		})
 	})
 })
+
+/** `head` and CJK characters (nine bytes each once percent-encoded), then ASCII, to exactly `bytes` encoded */
+function encodedTo(head: string, bytes: number): string {
+	const room = bytes - encodeURIComponent(head).length
+	return `${head}${"長".repeat(Math.floor(room / 9))}${"x".repeat(room % 9)}`
+}
+
+/* U11 of the 0.12 round: the byte caps a client reads match the ones the parser enforces */
+describe("maxFilterBytes and maxSearchBytes match the parser", () => {
+	it("accepts a filter of the published bytes, and refuses one byte more", () => {
+		const { maxFilterBytes } = meta()
+		expect(maxFilterBytes).toBeDefined()
+		const filter = encodedTo("title.eq.", maxFilterBytes as number)
+		expect(encodeURIComponent(filter).length).toBe(maxFilterBytes)
+		expect(schema.safeParse({ filter }).success).toBe(true)
+		expect(schema.safeParse({ filter: `${filter}x` }).success).toBe(false)
+	})
+
+	it("accepts a search of the published bytes, and refuses one byte more", () => {
+		const searched = createListQuerySchema({ search: ["title"], sort: ["created_at"] })
+		const published = readCombQueryMeta(z.toJSONSchema(searched, { io: "input", unrepresentable: "any" }))
+		const bytes = published?.maxSearchBytes as number
+		const q = encodedTo("", bytes)
+		expect(searched.safeParse({ q }).success).toBe(true)
+		expect(searched.safeParse({ q: `${q}x` }).success).toBe(false)
+	})
+})

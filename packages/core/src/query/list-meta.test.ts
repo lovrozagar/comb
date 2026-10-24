@@ -47,3 +47,11 @@ describe("listQueryStamp", () => {
 		})
 	})
 })
+
+/* U11 of the 0.12 round: the byte caps the schema enforces are published where a client reads its limits */
+describe("listQueryStamp: the request byte caps", () => {
+	it("stamps the filter's and the search's encoded byte caps", () => {
+		const stamp = listQueryStamp({ search: ["title"], sort: ["id"] }, LIST_QUERY_LIMITS)
+		expect(stamp[COMB_META_KEY]).toMatchObject({ maxFilterBytes: 5120, maxSearchBytes: 600 })
+	})
+})
