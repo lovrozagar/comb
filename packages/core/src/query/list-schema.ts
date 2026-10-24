@@ -9,7 +9,7 @@ import { filterParamMeta, orderParamMeta, searchParamMeta } from "./descriptions
 import { OPERATORS_BY_TYPE } from "./filter.ts"
 import { listQueryStamp } from "./list-meta.ts"
 import { filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
-import { encodedMessage, LIST_QUERY_LIMITS, REQUEST_BYTES, withinBytes } from "./schema-limits.ts"
+import { encodedMessage, LIST_QUERY_LIMITS, PAGINATION_DEFAULTS, REQUEST_BYTES, withinBytes } from "./schema-limits.ts"
 import {
 	baseListQueryShape,
 	filterAstSchema,
@@ -22,6 +22,7 @@ import {
 	selectQueryField,
 	sortDirectionEnum,
 } from "./schema-params.ts"
+import { pageTooDeep } from "./trusted.ts"
 import type { ListQueryConfig, ListQueryLimits, ListQueryOutput, OutputStableShape } from "./schema-types.ts"
 import { validateSelectWithConfig } from "./select-validate.ts"
 import type { FieldType } from "./types.ts"
@@ -143,7 +144,9 @@ function createListQuerySchema<
 	const schema = z.compile(extendFields ? z.strictObject({ ...shape, ...extendFields }) : z.strictObject(shape))
 	const outputSchema = outputSchemaFor(sortConfig, extensions)
 
+	const maxPage = config.pagination?.maxPage ?? PAGINATION_DEFAULTS.maxPage
 	const piped = schema.transform((data, ctx): ExtendedOutput => {
+		if (data.page !== undefined && data.page > maxPage) throw pageTooDeep(data.page, maxPage)
 		/* Optional params exist on `data` only when advertised above. */
 		const optional = data as { filter?: string; lang?: string; q?: string; select?: unknown }
 		const filterAst = filterAstOf(optional.filter, { fields: filterConfig, limits }, ctx)

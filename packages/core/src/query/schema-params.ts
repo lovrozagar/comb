@@ -89,10 +89,16 @@ function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<
 }
 
 /** The `page` param: coerced, from 1 to maxPage */
+/**
+ * The `page` param: coerced, a whole number from 1. Its bound, maxPage, is published but not
+ * checked here: the list schema answers a deeper page `page_too_deep`, as an unbounded list does,
+ * where a field error would give one condition two contracts (L2)
+ */
 function pageSchema(maxPage: number): z.ZodOptional<z.ZodCoercedNumber<unknown>> {
-	return z.coerce.number().int().min(1).max(maxPage).optional().meta({
+	return z.coerce.number().int().min(1).optional().meta({
 		description: PAGE_DESCRIPTION,
 		examples: PAGE_EXAMPLES,
+		maximum: maxPage,
 	})
 }
 

@@ -36,18 +36,31 @@ describe("an extension named like a param or an output key (Q12)", () => {
 })
 
 describe("the page bound (Q13)", () => {
-	it("takes pages up to maxPage, 10 000 by default, and refuses one past it", () => {
+	/* L2 of the 0.12 consumers review: one contract for a deep page, the one the hand-built list answers */
+	const tooDeep = expect.objectContaining({ errorKey: "page_too_deep", status: 400 })
+
+	it("takes pages up to maxPage, 10 000 by default, and answers one past it page_too_deep", async () => {
 		const schema = createListQuerySchema({ sort: ["id"] })
 		expect(PAGINATION_DEFAULTS.maxPage).toBe(10_000)
 		expect(schema.safeParse({ page: "10000" }).success).toBe(true)
-		expect(schema.safeParse({ page: "10001" }).success).toBe(false)
-		expect(schema.safeParse({ page: String(Number.MAX_SAFE_INTEGER) }).success).toBe(false)
+		for (const page of ["10001", "999999999", String(Number.MAX_SAFE_INTEGER)]) {
+			expect(() => schema.safeParse({ page })).toThrow(tooDeep)
+			expect(() => schema.parse({ cursor: "c", page })).toThrow(tooDeep)
+			await expect(schema["~standard"].validate({ page })).rejects.toThrow(tooDeep)
+		}
+		expect(z.toJSONSchema(schema, { io: "input" }).properties?.page).toMatchObject({ maximum: 10_000, minimum: 1 })
+	})
+
+	it("keeps a page that is no whole number from 1 a field error", () => {
+		const schema = createListQuerySchema({ sort: ["id"] })
+		for (const page of ["0", "-3", "1.5", "x"]) expect(schema.safeParse({ page }).success).toBe(false)
 	})
 
 	it("takes a maxPage of its own, and refuses one whose last offset is past 2^53 - 1", () => {
-		const schema = createListQuerySchema({ pagination: { maxPage: 3 }, sort: ["id"] })
-		expect(schema.safeParse({ page: "3" }).success).toBe(true)
-		expect(schema.safeParse({ page: "4" }).success).toBe(false)
+		const schema = createListQuerySchema({ pagination: { maxPage: 50 }, sort: ["id"] })
+		expect(schema.safeParse({ page: "50" }).success).toBe(true)
+		expect(() => schema.safeParse({ page: "51" })).toThrow(tooDeep)
+		expect(() => schema.parse({ page: 51 })).toThrow(tooDeep)
 		expect(() =>
 			createListQuerySchema({ pagination: { maxLimit: 2000, maxPage: Number.MAX_SAFE_INTEGER }, sort: ["id"] }),
 		).toThrow(TypeError)

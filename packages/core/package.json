@@ -79,6 +79,7 @@
 	},
 	"devDependencies": {
 		"@cloudflare/workers-types": "catalog:",
+		"@hono/zod-validator": "catalog:",
 		"@libsql/client": "catalog:",
 		"@noble/ciphers": "catalog:",
 		"@noble/hashes": "catalog:",
@@ -89,6 +90,7 @@
 		"bun-types": "catalog:",
 		"drizzle-kit": "catalog:",
 		"drizzle-orm": "catalog:",
+		"hono": "catalog:",
 		"libpg-query": "catalog:",
 		"miniflare": "catalog:",
 		"oxc-parser": "catalog:",

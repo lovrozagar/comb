@@ -106,11 +106,13 @@ describe("maxLimit matches the parser", () => {
 })
 
 describe("maxPage matches the parser (Q13)", () => {
-	it("accepts the published last page and rejects the one after it", () => {
+	it("accepts the published last page and answers the one after it page_too_deep", () => {
 		const { maxPage } = meta()
 		expect(maxPage).toBeDefined()
 		expect(schema.safeParse({ page: maxPage }).success).toBe(true)
-		expect(schema.safeParse({ page: (maxPage ?? 0) + 1 }).success).toBe(false)
+		expect(() => schema.safeParse({ page: (maxPage ?? 0) + 1 })).toThrow(
+			expect.objectContaining({ errorKey: "page_too_deep" }),
+		)
 	})
 })
 

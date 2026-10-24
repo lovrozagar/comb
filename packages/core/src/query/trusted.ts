@@ -48,12 +48,16 @@ function assertPageWithin(parsed: { page?: number | null | undefined; validated?
 			errorKey: combErrorKeys.INVALID_PAGE,
 			status: "bad_request",
 		})
-	if (page <= PAGINATION_DEFAULTS.maxPage) return
-	throw new CombError({
-		cause: `page ${parsed.page} is past ${PAGINATION_DEFAULTS.maxPage}; page further by cursor`,
+	if (page > PAGINATION_DEFAULTS.maxPage) throw pageTooDeep(page, PAGINATION_DEFAULTS.maxPage)
+}
+
+/** The 400 for a page past `maxPage`, from a list schema or from a list no schema bounded */
+function pageTooDeep(page: number, maxPage: number): CombError {
+	return new CombError({
+		cause: `page ${page} is past ${maxPage}; page further by cursor`,
 		errorKey: combErrorKeys.PAGE_TOO_DEEP,
 		status: "bad_request",
 	})
 }
 
-export { assertPageWithin, assertSchemaParsed }
+export { assertPageWithin, assertSchemaParsed, pageTooDeep }
