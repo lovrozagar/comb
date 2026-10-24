@@ -65,18 +65,19 @@ export const post = sqliteTable("post", {
 		expect(content).toContain("user: r.one.user({\n\t\t\tfrom: r.post.userId,")
 	})
 
-	it("keeps Id inside a word, and suffixes a name a column already holds (D4)", () => {
+	it("keeps Id inside a word, and refuses a name a column already holds (D4, F22)", () => {
 		const content = relationsOf(`export const user = sqliteTable("user", { id: text("id").primaryKey() })
 export const post = sqliteTable("post", {
 	id: text("id").primaryKey(),
-	owner: text("owner"),
-	ownerId: text("owner_id").references(() => user.id),
 	paidId: text("paidId").references(() => user.id),
-	rapid: text("rapid").references(() => user.id),
+	rapidId: text("rapid_id").references(() => user.id),
 })`)
-		expect(content).toContain("ownerRelation: r.one.user({\n\t\t\tfrom: r.post.ownerId,")
 		expect(content).toContain("paid: r.one.user({\n\t\t\tfrom: r.post.paidId,")
-		expect(content).toContain("rapidRelation: r.one.user({\n\t\t\tfrom: r.post.rapid,")
+		expect(content).toContain("rapid: r.one.user({\n\t\t\tfrom: r.post.rapidId,")
+		expect(() =>
+			relationsOf(`export const user = sqliteTable("user", { id: text("id").primaryKey() })
+export const post = sqliteTable("post", { id: text("id").primaryKey(), rapid: text("rapid").references(() => user.id) })`),
+		).toThrow("post: the relation rapid of post.rapid takes the name of the column post.rapid; rename the column")
 	})
 })
 
@@ -158,12 +159,34 @@ export const profile = sqliteTable("profile", { id: text("id").primaryKey(), use
 	})
 })
 
-/* the 0.12 review's F15: the Relation suffix made a name another relation already held */
-describe("generateRelations: a name the Relation suffix takes (F15)", () => {
-	it("fails codegen naming both keys, rather than write one relation twice", () => {
+/* the 0.12 review's F15: the Relation suffix made a name another relation already held; F22 left no suffix */
+describe("generateRelations: a name the Relation suffix took (F15)", () => {
+	it("fails codegen on the column the relation would take, so no suffix can collide", () => {
 		expect(() =>
 			relationsOf(`export const user = sqliteTable("user", { id: text("id").primaryKey() })
 export const post = sqliteTable("post", { id: text("id").primaryKey(), author: text("author"), authorId: text("author_id").references(() => user.id), authorRelationId: text("author_relation_id").references(() => user.id) })`),
-		).toThrow("post: the relations of post.authorId and post.authorRelationId both take the name authorRelation")
+		).toThrow("post: the relation author of post.authorId takes the name of the column post.author; rename the column")
+	})
+})
+
+/* the 0.12 review's F22: a column added to the target renamed an existing relation with the suffix */
+describe("generateRelations: a relation named like a column of its table (F22)", () => {
+	it("fails codegen naming both, rather than rename the relation", () => {
+		expect(() =>
+			relationsOf(`export const user = sqliteTable("user", { id: text("id").primaryKey(), posts: text("posts") })
+export const post = sqliteTable("post", { id: text("id").primaryKey(), userId: text("user_id").references(() => user.id) })`),
+		).toThrow("user: the relation posts of post.userId takes the name of the column user.posts; rename the column")
+	})
+})
+
+/* the 0.12 review's F23: the way back named from the property, the one side from the SQL column's role */
+describe("generateRelations: the two halves of one key share its role (F23)", () => {
+	it("names the way back by the role the one side has: postsByAuthor, postsByInvitedBy", () => {
+		const content = relationsOf(`export const user = sqliteTable("user", { id: text("id").primaryKey() })
+export const post = sqliteTable("post", { id: text("id").primaryKey(), authorId: text("author_id").references(() => user.id), invitedByUserId: text("invited_by_user_id").references(() => user.id) })`)
+		expect(content).toContain("author: r.one.user(")
+		expect(content).toContain("postsByAuthor: r.many.post(")
+		expect(content).toContain("invitedBy: r.one.user(")
+		expect(content).toContain("postsByInvitedBy: r.many.post(")
 	})
 })

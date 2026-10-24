@@ -32,16 +32,16 @@ export const apiKEY = sqliteTable("api_key_upper", { id: c.id("apu") })
 })
 
 describe("a many relation named like a column of its table (F7)", () => {
-	it("takes the Relation suffix, so the relations load", async () => {
+	it("fails codegen naming both, rather than rename the relation (0.12's F22)", async () => {
 		const dir = project({
 			"comb.config.ts": config(),
 			"src/db/db.core.tables.ts": `${HEAD}export const user = sqliteTable("user", { id: c.id("usr"), posts: c.integer("posts") })
 export const post = sqliteTable("post", { id: c.id("pst"), userId: c.ref("user_id").references(() => user.id) })
 `,
 		})
-		await codegen(dir)
-		expect(read(dir, "src/db/db.core.relations.gen.ts")).toContain("postsRelation: r.many.post(")
-		await expect(import(path.join(dir, "src/db/db.core.relations.gen.ts"))).resolves.toBeDefined()
+		const run = await runCodegen(dir)
+		expect(run.code).not.toBe(0)
+		expect(run.err).toContain("user: the relation posts of post.userId takes the name of the column user.posts")
 	}, 120_000)
 })
 

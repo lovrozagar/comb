@@ -153,7 +153,9 @@ function writeChecks(annotations: FieldConstraints): string {
 	const https = annotations.url ? `.regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" })` : ""
 	/* under u, a lone surrogate is a code point of the range, a pair one code point past it (F11) */
 	const nul = '.regex(/^[^\\u0000\\uD800-\\uDFFF]*$/u, { message: "Must not contain U+0000 or an unpaired surrogate" })'
-	return pattern + https + kindChecks(annotations) + nul
+	/* zod drops a url's format once a regex follows it; published again, a client refuses what z.url() does (F25) */
+	const format = annotations.url ? '.meta({ format: "uri" })' : ""
+	return pattern + https + kindChecks(annotations) + nul + format
 }
 
 /** A c.text or c.id column, or any other string column: what every builder before it left */

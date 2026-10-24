@@ -95,8 +95,9 @@ describe("generateRelations — relation names", () => {
 	sender_user_id: c.ref("sender_user_id").references(() => user.id),
 	receiver_user_id: c.ref("receiver_user_id").references(() => user.id),
 })`)
-		expect(content).toContain("transfersByReceiverUser: r.many.transfer")
-		expect(content).toContain("transfersBySenderUser: r.many.transfer")
+		/* the role each key's one side is named by (F23) */
+		expect(content).toContain("transfersByReceiver: r.many.transfer")
+		expect(content).toContain("transfersBySender: r.many.transfer")
 	})
 })
 

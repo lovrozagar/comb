@@ -47,7 +47,7 @@ function oneName(sqlColumn: string, refTable: string): string {
 
 /**
  * The name of the relation back from a key's target to its source: `posts` when the key is the
- * target's plain `<target>_id`, and `postsBy<Column>` for every other key. A unique key's way back
+ * target's plain `<target>_id`, and `postsBy<Role>`, the role the one side is named by, for every other key. A unique key's way back
  * holds one row, so it is singular (F23).
  */
 function backName(
@@ -58,7 +58,8 @@ function backName(
 	const name = toCamelCase(source.varName)
 	const count = unique ? pluralize.singular(name) : pluralize(name)
 	if (roleOf(fk.sqlColumn) === fk.refTable) return count
-	return `${count}By${capitalized(toCamelCase(fk.column.replace(/_id$/, "")))}`
+	/* the role the one side is named by, so the two halves of one key agree (F23) */
+	return `${count}By${capitalized(oneName(fk.sqlColumn, fk.refTable))}`
 }
 
 type OneRelation = { column: string; name: string; refColumn: string; refTable: string }
@@ -81,15 +82,19 @@ const isUnique = (table: TableMeta, field: TableMeta["fields"][number]) =>
 	table.uniqueIndexes.some((index) => index.columns.length === 1 && index.columns[0] === field.name)
 
 /**
- * Each relation's name on one table, a name a column holds given `Relation` appended, since a
- * relation and a column of one name collide in drizzle; two relations of one name fail codegen,
- * naming both keys
+ * Each relation's name on one table; one a column holds, or two relations of one name, fail
+ * codegen, naming both
  */
 function settle(table: string, named: Array<Named & { target: { name: string } }>, columns: ReadonlySet<string>): void {
-	/* checked on the names written, the Relation suffix applied, which another relation may hold (F15) */
 	const first = new Map<string, string>()
 	for (const each of named) {
-		const name = columns.has(each.name) ? `${each.name}Relation` : each.name
+		const name = each.name
+		/* a relation and a column of one name collide in drizzle; renaming either would change a name
+		 * code already uses when the other is added, so the person picks (F22) */
+		if (columns.has(name))
+			throw new Error(
+				`${table}: the relation ${name} of ${each.place} takes the name of the column ${table}.${name}; rename the column`,
+			)
 		const other = first.get(name)
 		if (other !== undefined)
 			throw new Error(
