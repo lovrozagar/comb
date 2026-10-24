@@ -10,7 +10,7 @@ export type { CursorOptions, CursorPayload, CursorValue, DecodedCursor, Paginati
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts";
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
 export { filterBySelect, parseSelect } from "./fields.ts";
-export { FILTER_LIMITS, FILTER_OPERATORS, type FilterLimits, type FilterValidationResult, OPERATORS_BY_TYPE, parseFilter, parseOrder, validateFilter, } from "./filter.ts";
+export { FILTER_LIMITS, FILTER_OPERATORS, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, } from "./filter.ts";
 export { escapeLike, globPattern, likePattern } from "./like.ts";
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts";
 export { createListQuerySchema, createRetrieveQuerySchema, type FieldsConfig, LIST_QUERY_LIMITS, type ListQueryConfig, type ListQueryLimits, type ListQueryOutput, PAGINATION_DEFAULTS, paginationResponseSchema, type RetrieveQueryConfig, type RetrieveQueryOutput, } from "./schema.ts";
@@ -247,7 +247,7 @@ export { filterBySelect, MAX_SELECT_DEPTH, parseSelect, readSelect, TOO_DEEP };
  * the AST and its checks. The grammar lives in filter-parse.ts, the checks in filter-validate.ts.
  */
 import { FILTER_OPERATORS, parseFilter } from "./filter-parse.ts";
-import { FILTER_LIMITS, OPERATORS_BY_TYPE, type FilterLimits, type FilterValidationResult, validateFilter } from "./filter-validate.ts";
+import { FILTER_LIMITS, OPERATORS_BY_TYPE, parseFilterNumber, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, validateFilter } from "./filter-validate.ts";
 import type { SortField } from "./types.ts";
 /**
  * Parse PostgREST-style `order` string into SortField array.
@@ -271,7 +271,7 @@ import type { SortField } from "./types.ts";
  * rejects unknown fields, which catches most mistakes.
  */
 declare function parseOrder(input: string | null | undefined): SortField[];
-export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseOrder, validateFilter, type FilterLimits, type FilterValidationResult, };
+export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, };
 
 // query/like.d.ts
 /**
@@ -531,6 +531,18 @@ export { FILTER_OPERATORS, parseFilter };
 // query/filter-validate.d.ts
 import type { FieldType, FilterAST, FilterOperator } from "./types.ts";
 declare const OPERATORS_BY_TYPE: Record<FieldType, readonly FilterOperator[]>;
+/**
+ * A field as a runtime field map declares it: its type, the operators it takes when not its
+ * type's (`OPERATORS_BY_TYPE`), and for a date, `format: "iso"` to take ISO 8601 text, as a
+ * column that stores it holds, in place of epoch milliseconds
+ */
+type FilterFieldSpec = {
+    format?: "iso" | undefined;
+    operators?: readonly FilterOperator[] | undefined;
+    type: FieldType;
+};
+/** A field of `validateFilter`'s map: a bare type, or a spec */
+type FilterField = FieldType | FilterFieldSpec;
 type FilterValidationResult = {
     ast: FilterAST;
     valid: true;
@@ -549,11 +561,22 @@ type FilterLimits = {
 };
 declare const FILTER_LIMITS: FilterLimits;
 /**
- * Parse `filterString` and check it against `allowedFields`: known fields, operators their type
- * allows, values of their type, within `limits`. Null when there is no filter.
+ * A number field's value: finite (1e999 reads as Infinity, which no column holds), and within
+ * ±(2^53 − 1), past which a double binds a neighbouring value. The value is read, not its
+ * spelling: `9007199254740993.0` and `9.007199254740993e15` are the same unsafe integer.
  */
-declare function validateFilter(filterString: string | null | undefined, allowedFields: Record<string, FieldType>, limits?: Partial<FilterLimits>): FilterValidationResult | null;
-export { FILTER_LIMITS, OPERATORS_BY_TYPE, validateFilter, type FilterLimits, type FilterValidationResult };
+declare function parseFilterNumber(raw: string): {
+    value: number;
+} | {
+    error: string;
+};
+/**
+ * Parse `filterString` and check it against `allowedFields`: known fields, operators their type
+ * or spec allows, values of their type, within `limits`. Null when there is no filter. A spec
+ * that lists an operator its type cannot take, or a format on no date, throws a TypeError.
+ */
+declare function validateFilter(filterString: string | null | undefined, allowedFields: Record<string, FilterField>, limits?: Partial<FilterLimits>): FilterValidationResult | null;
+export { FILTER_LIMITS, OPERATORS_BY_TYPE, parseFilterNumber, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, };
 
 // meta/contract.d.ts
 /**

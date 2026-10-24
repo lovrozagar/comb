@@ -645,6 +645,17 @@ if (result && !result.valid) {
 const ast = result?.ast
 ```
 
+A runtime field map, such as one built from a user table's columns, can give a field a spec in place of its type: `{ type, operators?, format? }`. `operators` replaces the type's defaults (`OPERATORS_BY_TYPE`) and may add `contains` on any type, its value typed as one scalar of the type, for an array or multi-select column whose lowering is yours (comb's `filterToSQL` runs no `contains`). It may also add `gt`, `gte`, `lt` and `lte` on a `string`, which compare text, so stored values must share one form: an ISO instant written in two offsets, `2024-01-01T01:00+01:00` and `2024-01-01T00:00Z`, is one instant that sorts as two. `format: "iso"` on a `date` takes ISO 8601 text, a date (`2024-02-29`) or a date-time with `Z` or an offset (`2024-01-01T00:00+14:00`), naming a real day and time, in place of epoch milliseconds, and hands it back as written. A spec that lists an operator its type cannot type (`like` on a `number`, `in` on a `boolean`) or puts `format` on no date throws a `TypeError` naming the field, the operator and the type. `parseFilterNumber(raw)` is the number rule on its own: `{ value }`, or `{ error }` for a spelling `Number()` takes and comb does not (`0x4d2`, `0b1`, `0o7`, `1e999`) or an integer past ±(2^53 − 1), which a double would bind as its neighbour.
+
+```ts
+import { validateFilter } from "@lovrozagar/comb/query"
+
+const rows = validateFilter("tags.contains.red,due.gte.2024-02-29", {
+	due: { format: "iso", type: "date" },
+	tags: { operators: ["contains", "is"], type: "string" },
+})
+```
+
 `parseFilter()` is the parse-only half, returning a `FilterAST` (or `null`) without validating field names.
 
 ### Sorting
@@ -998,6 +1009,7 @@ What changes for a project on 0.12:
 - **A page no schema validated is a whole number from 1, in both builders.** `buildListQuery` and `queryHelpers.listOptions` refuse page 0, a negative page or a fraction with the new key `invalid_page`, a 400, and a page past 10 000 with `page_too_deep`; `listOptions` bounded no page before.
 - **A page past `maxPage` is `page_too_deep` on every list.** A schema-built list answered it with a validation issue on `page`, while a list no schema bounded answered `page_too_deep`. `createListQuerySchema` now throws `CombError` `page_too_deep` (400) from `parse`, `safeParse` and `~standard.validate`, so map `CombError` in your error handler; the param's `maximum` is still published.
 - **`ShardRouter` places orgs as the app decides.** `pick({ orgId, counts, totalShards })` names a new org's shard (the default keeps the headroom rule, and `maxOrgsPerShard` is documented as a soft cap); `place`, `move` and `unplace` write a mapping yourself; `resolveVerified` checks the org's rows are on its cached shard and rereads the primary when not. A replica miss now rereads the primary, and a primary miss is remembered for `missTtlMs` (5 s).
+- **`validateFilter` types a runtime field map.** A field may be a spec, `{ type, operators?, format? }`: its own operator set, `contains` (typed as one scalar of the field's type), ordered comparison on a string, and `format: "iso"` for a date stored as ISO 8601 text. `parseFilterNumber` exports the number rule, which refuses `0x`, `0b` and `0o` spellings and integers past ±(2^53 − 1). A field given as a bare type checks as before.
 - **A guarded rebuild whose guard would fire a trigger is unsafe.** `migrate diff` refuses to guard a rebuild whose guard empties a table with a trigger other than an FTS sync one; a trigger a later file put there after the guard was written is now caught too: `check` and `apply` rate the rebuild unsafe, naming the trigger, and the proof counts a trigger the guard's statements fire.
 - **The proof names a rename.** A column or table whose every value a new one holds, row for row, is reported as `renames users.email to users.mail` or `renames users to accounts`, still unsafe, rather than as a loss.
 - **A libsql URL's `file:` scheme is read in any case**, so `check` and `status` refuse a missing `FILE:` database, as they do a `file:` one, and create none.

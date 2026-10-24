@@ -31,10 +31,13 @@ export { filterBySelect, parseSelect } from "./fields.ts"
 export {
 	FILTER_LIMITS,
 	FILTER_OPERATORS,
+	type FilterField,
+	type FilterFieldSpec,
 	type FilterLimits,
 	type FilterValidationResult,
 	OPERATORS_BY_TYPE,
 	parseFilter,
+	parseFilterNumber,
 	parseOrder,
 	validateFilter,
 } from "./filter.ts"

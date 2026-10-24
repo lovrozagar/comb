@@ -6,6 +6,9 @@ import { FILTER_OPERATORS, parseFilter } from "./filter-parse.ts"
 import {
 	FILTER_LIMITS,
 	OPERATORS_BY_TYPE,
+	parseFilterNumber,
+	type FilterField,
+	type FilterFieldSpec,
 	type FilterLimits,
 	type FilterValidationResult,
 	validateFilter,
@@ -80,8 +83,11 @@ export {
 	FILTER_OPERATORS,
 	OPERATORS_BY_TYPE,
 	parseFilter,
+	parseFilterNumber,
 	parseOrder,
 	validateFilter,
+	type FilterField,
+	type FilterFieldSpec,
 	type FilterLimits,
 	type FilterValidationResult,
 }
