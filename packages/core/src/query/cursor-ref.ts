@@ -32,6 +32,7 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { createCursor, CursorRef, MAX_CURSOR_LENGTH } from "./cursor.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
+import { cursorPrecision } from "./cursor-precision.ts"
 import { inSeconds } from "./sqlite/cursor-fit.ts"
 import { AnchorBound, countLiteral, type SortKey } from "./sqlite/keyset.ts"
 import type { SortField } from "./types.ts"
@@ -154,6 +155,29 @@ function secondsBound({ column, direction }: SortKey, value: Date, at: Anchor): 
 	return sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${fallback})`
 }
 
+/** Whether `column` is a Postgres `timestamp` read in date mode, which reads 'infinity' and '-infinity' as one valid Date */
+const misreadsInfinity = (column: SQLWrapper): boolean => {
+	const { columnType, withTimezone } = column as { columnType?: unknown; withTimezone?: unknown }
+	return columnType === "PgTimestamp" && withTimezone !== true
+}
+
+/**
+ * A Date on a date-mode Postgres `timestamp` key: the row's own value, at the precision the order
+ * compares it (U17), as the engine holds an 'infinity' node-postgres reads as 2000-01-01, local
+ * midnight, for 'infinity' and '-infinity' alike. Once the row is gone, the Date itself, unless it is
+ * that one: the row may have held either infinity, so the list resumes from the direction's own end,
+ * repeating rows and skipping none. A driver that reads infinity as an Invalid Date mints no cursor.
+ */
+function timestampBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
+	const fallback =
+		value.getTime() === new Date(2000, 0, 1).getTime()
+			? direction === "asc"
+				? sql`'-infinity'::timestamp`
+				: sql`'infinity'::timestamp`
+			: sql.param(value, column as never)
+	return sql`coalesce((SELECT ${cursorPrecision(column)} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${fallback})`
+}
+
 /** Whether `column` is a SQLite number, which D1 may hand over as null when it holds ±Infinity */
 const holdsInfinity = (column: SQLWrapper) =>
 	is(column, SQLiteColumn) && (column.dataType.startsWith("number") || column.dataType === "object date")
@@ -183,6 +207,8 @@ function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anch
 		if (value instanceof CursorRef)
 			return new AnchorBound("row", textBound(key, value, at), !is(key.column, SQLiteColumn))
 		if (value instanceof Date && inSeconds(key.column)) return new AnchorBound("row", secondsBound(key, value, at))
+		if (value instanceof Date && misreadsInfinity(key.column))
+			return new AnchorBound("row", timestampBound(key, value, at))
 		return value === null && holdsInfinity(key.column) ? new AnchorBound("infinite", infiniteBound(key, at)) : value
 	})
 }

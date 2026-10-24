@@ -153,11 +153,15 @@ function drizzleListOptions(
 		/* the cursor is client input: each value must be what its column holds, or it is a 400 */
 		assertCursorFits([...keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
 		const id = bindableOn(tiebreak.column, cursor.id) as CursorId
-		const bound = boundAs(
+		/* a value the keyset reads from the row is anchored first; the others bind as their keys compare them */
+		const values = boundAs(
 			keys,
-			cursor.values.map((value, i) => bindableOn(keys[i]?.column, value)),
+			anchored(
+				keys,
+				cursor.values.map((value, i) => bindableOn(keys[i]?.column, value)),
+				{ id, table, tiebreak: tiebreak.column },
+			),
 		)
-		const values = anchored(keys, bound, { id, table, tiebreak: tiebreak.column })
 		return keysetSQL({
 			id,
 			keys: atCursorPrecision(keys),

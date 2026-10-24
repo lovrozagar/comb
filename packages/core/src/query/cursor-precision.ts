@@ -5,7 +5,7 @@
  */
 import { type SQLWrapper, sql } from "drizzle-orm"
 
-import type { SortKey } from "./sqlite/keyset.ts"
+import { AnchorBound, type SortKey } from "./sqlite/keyset.ts"
 
 /** `column` as a cursor compares it: a finer Postgres timestamp truncated to milliseconds */
 function cursorPrecision(column: SQLWrapper): SQLWrapper {
@@ -21,12 +21,13 @@ const atCursorPrecision = (keys: readonly SortKey[]): SortKey[] =>
 /**
  * The cursor's values as the keys compare them: a value compared with a truncated key is bound
  * through its column, as a comparison with the column itself binds it (a JS Date as the driver
- * writes that column), so the expression around the column changes nothing about the value
+ * writes that column), so the expression around the column changes nothing about the value; a
+ * bound read from the row (cursor-ref.ts) reads it at that precision already
  */
 const boundAs = (keys: readonly SortKey[], values: readonly unknown[]): unknown[] =>
 	values.map((value, i) => {
 		const column = keys[i]?.column as SQLWrapper
-		return value === null || value === undefined || cursorPrecision(column) === column
+		return value === null || value === undefined || value instanceof AnchorBound || cursorPrecision(column) === column
 			? value
 			: sql.param(value, column as never)
 	})

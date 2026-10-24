@@ -180,7 +180,7 @@ function createCursor(
 	)
 	if (unheld !== undefined) {
 		throw new CombError({
-			cause: `the sort by ${unheld.field} reads a date no JS Date holds, as Postgres 'infinity' reads in date mode; select it in string mode or sort by another column`,
+			cause: `the sort by ${unheld.field} reads a date no JS Date holds (a Postgres 'infinity' read in date mode, or a SQLite seconds timestamp holding ±Infinity); select it in string mode or sort by another column`,
 			errorKey: combErrorKeys.SORT_NOT_WIRED,
 			status: "internal_server_error",
 		})
