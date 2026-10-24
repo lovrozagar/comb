@@ -134,9 +134,11 @@ function textBounds({ annotations, field, schemaType }: Build): string {
 	const mutative = isMutative(schemaType)
 	if (annotations.password) return mutative && annotations.pattern !== null ? `.regex(${annotations.pattern})` : ""
 	if (annotations.email) return emailBounds(annotations, field, mutative)
-	/* a key and a reference to one take the id rules, never a column by its name (F10); any other
-	 * reference, a c.ref to a natural key included, its own text rules (F9) */
-	const isIdField = field.combKind === "id" || field.foreignKey?.toId === true
+	/* a key and a reference to one take the id rules, never a column by its name (F10), and so does a
+	 * c.ref that names no target, as one to another database's key; a reference to a natural key, a
+	 * c.ref included, takes its own text rules (F9) */
+	const untargetedRef = field.combKind === "ref" && field.foreignKey === null
+	const isIdField = field.combKind === "id" || field.foreignKey?.toId === true || untargetedRef
 	/* an id-like column gets the id bounds only when it declares none of its own */
 	const declares = field.length !== null || annotations.min !== null || annotations.max !== null
 	if (isIdField && !declares) return mutative ? ".regex(/^\\S{1,48}$/)" : ".min(1).max(48)"

@@ -1,6 +1,7 @@
 import { pgTable } from "drizzle-orm/pg-core"
 import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
+import * as z from "zod"
 import { parseField } from "../../__fixtures__/runtime.ts"
 import { c as pgC } from "../../../pg/columns.ts"
 import { c } from "../../../sqlite/columns.ts"
@@ -77,9 +78,14 @@ describe("generateFieldSchema: what each schema type includes", () => {
 	})
 
 	/* whether a reference enters the update DTO is isExcludedFromUpdate's (entity-meta.ts); this renders its rules */
-	it("renders a reference's rules for every schema type: a c.ref that names no c.id key, its own text rules (F9)", () => {
-		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBe("z.string().nullable().optional()")
-		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe("z.string().nullable().optional()")
+	it("renders a reference's rules for every schema type: a c.ref that names no target, the id rules", () => {
+		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBe(
+			"z.string().regex(/^\\S{1,48}$/).nullable().optional()",
+		)
+		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe(
+			"z.string().regex(/^\\S{1,48}$/).nullable().optional()",
+		)
+		expect(schema("owner_id", 'c.ref("owner_id")', "read")).toBe("z.string().min(1).max(48).nullable()")
 	})
 })
 
@@ -350,6 +356,19 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 		expect(of("ownerId", 'c.ref("owner_id").notNull().references(() => user.id)', "create")).toBe(
 			"z.string().regex(/^\\S{1,48}$/)",
 		)
+	})
+
+	/* a ref to a table in another database, as a shard's user_id to core's user, names no target */
+	it("gives a c.ref that names no target the id rules, unless it declares its own", () => {
+		const write = of("userId", 'c.ref("user_id").notNull()', "create")
+		expect(write).toBe("z.string().regex(/^\\S{1,48}$/)")
+		expect(of("userId", 'c.ref("user_id").notNull()', "read")).toBe("z.string().min(1).max(48)")
+		const parse = new Function("z", `return ${write}`)(z) as z.ZodString
+		expect(parse.safeParse("u".repeat(48)).success).toBe(true)
+		expect(parse.safeParse("u".repeat(49)).success).toBe(false)
+		expect(parse.safeParse("usr 01").success).toBe(false)
+		expect(of("userId", 'c.ref("user_id", { max: 20 }).notNull()', "create")).toBe("z.string().min(1).max(20)")
+		expect(of("userId", 'c.ref("user_id", { max: 20 }).notNull()', "read")).toBe("z.string().max(20)")
 	})
 
 	it("refuses U+0000 in a Postgres c.ref, as in its text", () => {
