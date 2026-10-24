@@ -44,17 +44,17 @@ function rootsOf(db: MemoryDb): Pick<Context, "main" | "tables"> {
 }
 
 /**
- * One probe trigger per column of each existing table: its marker shows the column is assigned. A
+ * One probe trigger per column of each table of `probed`: its marker shows the column is assigned. A
  * virtual table and the shadow tables that store one take no trigger and need none: a statement
  * writes a virtual table through VUpdate, and SQLite refuses to prepare one that writes a shadow
  * table itself.
  */
-function placeProbes(db: MemoryDb, existing: ReadonlySet<string>): Array<{ column: string; table: string }> {
+function placeProbes(db: MemoryDb, probed: ReadonlySet<string>): Array<{ column: string; table: string }> {
 	const probes: Array<{ column: string; table: string }> = []
 	for (const row of db.all("PRAGMA main.table_list")) {
 		/* the catalog's own name: a folded one SQLite would not find unless only ASCII letters differ */
 		const table = String(row["name"])
-		if (row["type"] !== "table" || !existing.has(asciiFold(table))) continue
+		if (row["type"] !== "table" || !probed.has(asciiFold(table))) continue
 		for (const info of db.all(`PRAGMA main.table_xinfo(${quote(table)})`)) {
 			const column = String(info["name"])
 			db.exec(
@@ -81,8 +81,16 @@ function schemaOf(db: MemoryDb): ExtractedSchema {
  * comb's FTS sync triggers aside, main's and temp's alike
  */
 function watching(db: MemoryDb, existing: ReadonlySet<string>): Set<string> {
+	/* an FTS sync trigger is read from its body and the external-content FTS tables before it: the
+	   rest of the schema, read again for every statement, cost a schema of thousands of tables seconds */
+	const ftsAndTriggers = db
+		.all(
+			"SELECT sql FROM main.sqlite_schema WHERE sql IS NOT NULL AND (type = 'trigger' OR sql LIKE 'CREATE VIRTUAL TABLE%') ORDER BY rowid",
+		)
+		.map((row) => `${String(row["sql"])};`)
+		.join("\n")
 	const synced = new Set(
-		schemaOf(db)
+		extractSchema(ftsAndTriggers)
 			.triggers.filter((trigger) => trigger.ftsSync)
 			.map((trigger) => trigger.name),
 	)
@@ -96,21 +104,65 @@ function watching(db: MemoryDb, existing: ReadonlySet<string>): Set<string> {
 	return out
 }
 
+/* OPFLAG_P2ISREG (0x10): an OpenWrite whose P2 is the register that holds its root page */
+const P2_IS_REGISTER = 16
+
+/**
+ * The tables of main a program opens for writing, its triggers' and foreign-key actions'
+ * subprograms included, each by the table a root page stores, an index's its table's. The schema
+ * table, another database's cursor and a btree the program itself creates (CREATE INDEX, CREATE
+ * TABLE AS) hold no existing row. Undefined when a root page is not one of main's, or sits in a
+ * register no CreateBtree filled: then every existing table takes probes.
+ */
+function writtenTables(
+	ops: ReadonlyArray<Record<string, unknown>>,
+	main: ReadonlyMap<number, string>,
+): Set<string> | undefined {
+	const out = new Set<string>()
+	const created = new Set<number>()
+	for (const op of ops) {
+		if (op["opcode"] === "CreateBtree") created.add(Number(op["p2"]))
+		if (op["opcode"] !== "OpenWrite" || Number(op["p3"]) !== 0) continue
+		const root = Number(op["p2"])
+		if (Math.floor(Number(op["p5"]) / P2_IS_REGISTER) % 2 === 1) {
+			if (!created.has(root)) return undefined
+			continue
+		}
+		const table = root === 1 ? null : main.get(root)
+		if (table === undefined) return undefined
+		if (table !== null) out.add(table)
+	}
+	return out
+}
+
 /**
  * What `sql`, one statement, does to `existing` on `db`, read before it runs; why, when SQLite
- * cannot prepare it
+ * cannot prepare it. A first `EXPLAIN` without probes names the tables the statement writes, and
+ * only those of `existing` take probes for the second: a probe's body opens no cursor, so a table
+ * the first does not write cannot be assigned, and a probe on every column of a schema of
+ * thousands cost seconds a statement.
  */
 function explainStatement(db: MemoryDb, sql: string, existing: ReadonlySet<string>): Effects | string {
-	const probes = placeProbes(db, existing)
 	let ops: Array<Record<string, unknown>>
 	try {
 		ops = db.all(`EXPLAIN ${sql}`)
 	} catch (error) {
 		return (error as Error).message
-	} finally {
-		for (let i = 0; i < probes.length; i++) db.exec(`DROP TRIGGER temp.${PROBE}${i}`)
 	}
-	return walkProgram(ops, { existing, probes, watched: watching(db, existing), ...rootsOf(db) })
+	const roots = rootsOf(db)
+	const written = writtenTables(ops, roots.main)
+	const probes = placeProbes(
+		db,
+		written === undefined ? existing : new Set([...written].filter((t) => existing.has(t))),
+	)
+	if (probes.length > 0) {
+		try {
+			ops = db.all(`EXPLAIN ${sql}`)
+		} finally {
+			for (let i = 0; i < probes.length; i++) db.exec(`DROP TRIGGER temp.${PROBE}${i}`)
+		}
+	}
+	return walkProgram(ops, { existing, probes, watched: watching(db, existing), ...roots })
 }
 
 /** The temp objects that answer for an existing table's name */
@@ -229,4 +281,4 @@ function engineFindings(
 	return { cautious, unsafe }
 }
 
-export { applyToCopy, engineFindings }
+export { applyToCopy, engineFindings, writtenTables }
