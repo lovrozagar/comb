@@ -1,12 +1,15 @@
 /**
  * Every GitHub Action the workflows run is pinned to a full commit SHA, with the release it
- * names in a trailing comment. A tag can be moved to other code; a SHA cannot.
+ * names in a trailing comment. A tag can be moved to other code; a SHA cannot. And CI runs the
+ * gates `bun run verify` runs, no more and no fewer, so a stamp vouches for what CI checks.
  */
+import { execFileSync } from "node:child_process"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
-const WORKFLOWS = join(import.meta.dirname, "../../../../.github/workflows")
+const ROOT = join(import.meta.dirname, "../../../..")
+const WORKFLOWS = join(ROOT, ".github/workflows")
 
 const USES = /^\s*-?\s*uses:\s*(\S+)(.*)$/
 
@@ -87,5 +90,69 @@ describe("workflow actions", () => {
 		["      - run: echo uses: actions/checkout@v4", []],
 	])("the checker: %s", (yaml, expected) => {
 		expect(unpinned(yaml)).toEqual(expected)
+	})
+})
+
+/**
+ * One CI step as ci.yml lists it: a one-line `run:` by its command, a `run: |` block by its step's
+ * name. A step's `bun run [--filter <package>] <script>` names the script it runs.
+ */
+export function ciSteps(yaml: string): Array<{ command?: string; name?: string }> {
+	const steps: Array<{ command?: string; name?: string }> = []
+	let name: string | undefined
+	for (const line of yaml.split("\n")) {
+		const named = /^\s+- name:\s*(.+?)\s*$/.exec(line)
+		if (named !== null) name = named[1]
+		const run = /^\s+(-\s+)?run:\s*(.*?)\s*$/.exec(line)
+		if (run === null) continue
+		steps.push(run[2] === "|" ? { name } : { command: run[2] })
+		name = undefined
+	}
+	return steps
+}
+
+/** The gates `bun run verify` runs, in its order: verify's own gates() over package.json's standards.gates */
+function verifyGates(): string[] {
+	const script =
+		'const { gates } = await import("./scripts/verify.ts"); const pkg = await Bun.file("package.json").json(); console.log(JSON.stringify(gates(pkg.standards.gates).map((g) => g.name)))'
+	return JSON.parse(execFileSync("bun", ["-e", script], { cwd: ROOT, encoding: "utf8" })) as string[]
+}
+
+/** The script a `bun run` step runs, through comb's package filter or the root */
+const scriptOf = (command: string) => /^bun run (?:--filter \S+ )?(\S+)$/.exec(command)?.[1]
+
+/* the CI steps no local gate stands for: installs, the commit-message lint lefthook's commit-msg
+   hook runs, the release dry run, and the Atlas binary the test jobs fetch */
+const SETUP = {
+	commands: ["bun install --frozen-lockfile", "npm install -g npm@latest"],
+	names: ["Lint commit messages", "dry-run the release publish", "install atlas v1.3.0"],
+}
+
+describe("ci.yml and verify run the same gates", () => {
+	/* the 0.13 RC: CI ran test:coverage and verify ran test, so a stamp passed what CI failed */
+	it("every bun run step in CI is a verify gate, every verify gate a CI step, and every other step setup", () => {
+		const steps = ciSteps(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8"))
+		const verified = verifyGates()
+		const ran = steps.flatMap(({ command }) => {
+			const script = command === undefined ? undefined : scriptOf(command)
+			return script === undefined ? [] : [script]
+		})
+		const other = steps.filter(({ command }) => command === undefined || scriptOf(command) === undefined)
+		expect([...new Set(ran)].toSorted()).toEqual([...verified].toSorted())
+		expect(
+			other.filter(({ command, name }) =>
+				command === undefined ? !SETUP.names.includes(name ?? "") : !SETUP.commands.includes(command),
+			),
+		).toEqual([])
+	})
+
+	it("reads a step's script through comb's package filter, and a block step by its name", () => {
+		expect(
+			ciSteps(
+				"      - run: bun run --filter @lovrozagar/comb test:e2e\n      - name: x\n        run: |\n          y\n",
+			),
+		).toEqual([{ command: "bun run --filter @lovrozagar/comb test:e2e" }, { name: "x" }])
+		expect(scriptOf("bun run --filter @lovrozagar/comb test:e2e")).toBe("test:e2e")
+		expect(scriptOf("bun install --frozen-lockfile")).toBeUndefined()
 	})
 })
