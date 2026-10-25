@@ -111,3 +111,14 @@ describe("loadSnapshot on bun", () => {
 		}
 	})
 })
+
+/* F42 of the 0.13.0 round: a module that keeps a timer or a pool open must not keep the child alive
+   once the snapshot is written, so the parent reads it at once instead of waiting out the timeout */
+describe("loadSnapshot on a module that holds the event loop open", () => {
+	it("reads the snapshot without waiting for the module's timer", () => {
+		fs.writeFileSync(tables(), "setInterval(() => {}, 1000)\nexport {}\n")
+		const started = Date.now()
+		expect(loadSnapshot(tables(), { run: realRun, timeoutMs: 8000 })).toEqual({ tables: [] })
+		expect(Date.now() - started).toBeLessThan(8000)
+	})
+})

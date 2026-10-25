@@ -29,7 +29,9 @@ function childEnv(): Record<string, string> {
  */
 function childArgs(runtime: "bun" | "node", rest: readonly string[]): string[] {
 	const child = new URL("child.ts", import.meta.url).href
-	const script = `const { writeSnapshot } = await import(${JSON.stringify(child)}); await writeSnapshot(process.argv.slice(-2))`
+	/* writeSnapshot has written and closed the result file when it returns, so the exit drops nothing; a
+	   module's timer or pool would otherwise keep the child alive past it (F42) */
+	const script = `const { writeSnapshot } = await import(${JSON.stringify(child)}); await writeSnapshot(process.argv.slice(-2)); process.exit(0)`
 	/* bun reads .env and .env.local from the working directory unless told not to (F41) */
 	if (runtime === "bun") return ["--no-env-file", "-e", script, ...rest]
 	const hooks = new URL("node-hooks.mjs", import.meta.url).href
@@ -46,7 +48,12 @@ function childArgs(runtime: "bun" | "node", rest: readonly string[]): string[] {
 	]
 }
 
-type LoadOptions = { run?: Run | undefined; runtime?: "bun" | "node" | undefined }
+type LoadOptions = {
+	run?: Run | undefined
+	runtime?: "bun" | "node" | undefined
+	/** How long the child may take; LOAD_TIMEOUT_MS unless a test needs less */
+	timeoutMs?: number | undefined
+}
 
 /** The snapshot of every table `tablesPath` exports; an error naming the file when it cannot be loaded */
 function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
@@ -55,12 +62,13 @@ function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
 	try {
 		const result = path.join(dir, "snapshot.json")
 		const args = childArgs(runtime, [path.resolve(tablesPath), result])
+		const timeoutMs = options.timeoutMs ?? LOAD_TIMEOUT_MS
 		const ran = (options.run ?? defaultRun)(process.execPath, args, {
 			cwd: path.dirname(path.resolve(tablesPath)),
 			exactEnv: childEnv(),
-			timeoutMs: LOAD_TIMEOUT_MS,
+			timeoutMs,
 		})
-		if (ran.code === 124) throw new Error(`comb could not load ${tablesPath} within ${LOAD_TIMEOUT_MS / 1000} s`)
+		if (ran.code === 124) throw new Error(`comb could not load ${tablesPath} within ${timeoutMs / 1000} s`)
 		if (!fs.existsSync(result))
 			throw new Error(`comb could not load ${tablesPath}: ${ran.stderr.trim() || `the loader exited ${ran.code}`}`)
 		const read = JSON.parse(fs.readFileSync(result, "utf8")) as { error: string } | { snapshot: Snapshot }

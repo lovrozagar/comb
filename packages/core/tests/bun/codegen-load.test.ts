@@ -39,3 +39,14 @@ describe("loadSnapshot on bun with dotenv files beside the tables module (F41)",
 		expect(JSON.parse(fs.readFileSync(seen, "utf8"))).toEqual([])
 	})
 })
+
+/* F42 on bun: a module's timer keeps no child alive once the snapshot is written */
+describe("loadSnapshot on bun with a module that holds the event loop open (F42)", () => {
+	it("reads the snapshot without waiting for the module's timer", () => {
+		const tables = path.join(dir, "db.core.tables.ts")
+		fs.writeFileSync(tables, "setInterval(() => {}, 1000)\nexport {}\n")
+		const started = Date.now()
+		expect(loadSnapshot(tables, { timeoutMs: 8000 })).toMatchObject({ tables: [] })
+		expect(Date.now() - started).toBeLessThan(8000)
+	})
+})
