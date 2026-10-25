@@ -537,7 +537,8 @@ import type { Dialect, ExtractedSchema } from "../types.ts";
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
  * migration leaves, after `from` when given, read as `readAs` names a dialect; a Postgres name keyed
- * under `readAs.schema`, the schema comb's URLs set as search_path, public unnamed (M72)
+ * under `readAs.schema`, the schema comb's URLs set as search_path, public unnamed (M72). Postgres
+ * text is read as the statements Postgres runs, by its parser: `loadPostgresParser()` first (M75)
  */
 declare function extractSchema(sql: string, from?: ExtractedSchema, readAs?: Dialect | {
     dialect: Dialect;
@@ -565,9 +566,11 @@ type Segment = {
 /** `sql` as consecutive segments that concatenate back to it, read as `dialect` reads it */
 declare function segments(sql: string, dialect?: Dialect): Segment[];
 /**
- * The statements of `sql`, without their terminating `;`. A `;` ends a statement only in code:
- * never inside a literal or a comment, nor inside a trigger's BEGIN … END. A stretch that holds
- * only comments is not a statement.
+ * The statements of `sql`, without their terminating `;`. On SQLite a `;` ends a statement only
+ * in code: never inside a literal or a comment, nor inside a trigger's BEGIN … END. On Postgres
+ * they are the chunks Atlas sends one at a time (atlas-scan.ts, M75), `-- atlas:delimiter` held;
+ * pg-split.ts reads each as the statements Postgres runs. A stretch that holds only comments is
+ * not a statement.
  */
 declare function splitSqlStatements(sql: string, dialect?: Dialect): string[];
 /**

@@ -4,6 +4,7 @@
  * reads a file against it, and the SQLite rebuild guard finds the tables a rebuild reaches by it.
  */
 import { codeOf, dialectOf, IDENT, lastPart, nameKey, type Naming, namingOf, QNAME, splitTopLevel } from "./sql-code.ts"
+import { pgStatements } from "./pg-split.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 import { syncTriggerOf } from "./fts-sync.ts"
 import { COLUMN, columnKey, columnNames, CONSTRAINT_WORDS, GENERATED, tableDefinition } from "./schema-table.ts"
@@ -177,7 +178,8 @@ const EMPTY: ExtractedSchema = {
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
  * migration leaves, after `from` when given, read as `readAs` names a dialect; a Postgres name keyed
- * under `readAs.schema`, the schema comb's URLs set as search_path, public unnamed (M72)
+ * under `readAs.schema`, the schema comb's URLs set as search_path, public unnamed (M72). Postgres
+ * text is read as the statements Postgres runs, by its parser: `loadPostgresParser()` first (M75)
  */
 function extractSchema(
 	sql: string,
@@ -206,7 +208,8 @@ function extractSchema(
 		tables: new Map(from.tables),
 		triggers: [...from.triggers],
 	}
-	for (const stmt of splitSqlStatements(sql, dialect)) {
+	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75) */
+	for (const stmt of dialect === "postgres" ? pgStatements(sql) : splitSqlStatements(sql)) {
 		follow(schema, stmt, naming)
 		schema.statements.push(stmt)
 	}

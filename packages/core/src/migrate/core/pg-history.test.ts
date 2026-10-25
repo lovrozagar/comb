@@ -11,8 +11,10 @@ describe("what a Postgres history attached to its tables", () => {
 		expect(historyFacts(undefined, "public").code).toEqual(new Map())
 	})
 
-	it("reads past a statement Postgres cannot parse", () => {
-		expect(facts("CREATE TABL broken;\nCREATE TABLE t (id int DEFAULT f());").code).toEqual(new Map([["t", "f"]]))
+	it("fails on a statement Postgres cannot parse, since the facts after it are unknown (M75)", () => {
+		expect(() => facts("CREATE TABL broken;\nCREATE TABLE t (id int DEFAULT f());")).toThrow(
+			'comb could not read the history: "CREATE TABL broken" (syntax error at or near "TABL")',
+		)
 	})
 
 	it("gives each reader its own copy", () => {

@@ -27,6 +27,7 @@ import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
 import { noGuards, readGuards } from "./guard-read.ts"
 import { codeOf, nameKey, namingOf, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
+import { pgStatements } from "./pg-split.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 type ClassifyOptions = {
@@ -165,7 +166,8 @@ function readFile(
 	{ before, dialect, schema }: { before: ExtractedSchema | undefined; dialect: Dialect; schema: string },
 ): Read[] {
 	const naming = namingOf(dialect, schema)
-	const statements = splitSqlStatements(sql, dialect)
+	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75) */
+	const statements = dialect === "postgres" ? pgStatements(sql) : splitSqlStatements(sql)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
 	const created = new Set(
 		codes.flatMap((code) => {

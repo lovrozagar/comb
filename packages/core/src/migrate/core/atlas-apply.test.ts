@@ -206,6 +206,42 @@ describe("applyWithAtlas: what it classifies against", () => {
 	})
 })
 
+/** 1_a.sql applied as `history`, 2_b.sql pending */
+function onHistory(history: string) {
+	writeFileSync(join(dir, "1_a.sql"), history)
+	const later = status({
+		applied: [revision("1", { hash: sumHashes(dir).get("1_a.sql") })],
+		available: [file("1_a.sql"), file("2_b.sql")],
+		current: "1",
+		pending: [file("2_b.sql")],
+		status: "PENDING",
+	})
+	return options(fakeAtlas({ apply: APPLIED, status: later }))
+}
+
+describe("applyWithAtlas: a file before a pending one that it cannot read (M75)", () => {
+	it("refuses a history file holding a statement Postgres's parser cannot read, by name", async () => {
+		const run = onHistory("CREATE TABLE a (id int);\nCREATE TABL b (id int);\n")
+		await expect(applyWithAtlas(run)).rejects.toThrow(
+			'comb could not read 1_a.sql: "CREATE TABL b (id int)" (syntax error at or near "TABL")',
+		)
+		expect(run.seen).toEqual([])
+	})
+
+	it("refuses a file Atlas cannot split, by name, with Atlas's reason", async () => {
+		await expect(applyWithAtlas(onHistory("SELECT (1;\n"))).rejects.toThrow(
+			"comb could not read 1_a.sql: Atlas cannot split this file: 1:8: unclosed '('",
+		)
+	})
+
+	it("rates a pending file the parser cannot read, then refuses the pending file after it", async () => {
+		writeFileSync(join(dir, "1_a.sql"), "CREATE TABL b (id int);\n")
+		const run = options(fakeAtlas({ apply: APPLIED, status: PENDING }))
+		await expect(applyWithAtlas(run)).rejects.toThrow('comb could not read 1_a.sql: "CREATE TABL b (id int)"')
+		expect(run.seen).toEqual(["1_a.sql"])
+	})
+})
+
 describe("applyWithAtlas: what it prints", () => {
 	it("prints each pending file's lock warnings before it applies", async () => {
 		writeFileSync(join(dir, "1_a.sql"), 'CREATE INDEX "i" ON "post" ("id");\n')

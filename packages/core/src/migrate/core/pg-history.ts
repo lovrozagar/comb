@@ -262,9 +262,11 @@ function historyFacts(before: ExtractedSchema | undefined, schema: string): Fact
 			let tree: { stmts?: unknown }
 			try {
 				tree = postgresParser().parseSync(statement)
-			} catch {
-				// reason: a history statement Postgres cannot parse attached nothing comb can read; the walk goes on
-				continue
+			} catch (error) {
+				/* what it defined or attached is unknown, so the facts after it are too (M75) */
+				throw new Error(`comb could not read the history: ${JSON.stringify(statement)} (${(error as Error).message})`, {
+					cause: error,
+				})
 			}
 			followTree(tree.stmts, facts)
 		}
