@@ -117,6 +117,50 @@ function followDefinition(type: string, node: Node, facts: Facts): void {
 	}
 }
 
+/** The parts of the column a view's target names, none for an expression */
+const fields = (target: Node): Node[] =>
+	(((target["val"] as Node | undefined)?.["ColumnRef"] as Node | undefined)?.["fields"] as Node[] | undefined) ?? []
+
+/**
+ * A view, with the one table or view its query reads and how its columns name that one's: what
+ * Postgres can write through, a single relation in FROM and no set operation (M71)
+ */
+function followView(node: Node, facts: Facts): void {
+	const query = (node["query"] as Node)["SelectStmt"] as Node | undefined
+	const from = (query?.["fromClause"] as Node[] | undefined) ?? []
+	const single = query?.["op"] === "SETOP_NONE" && from.length === 1 && from[0]?.["RangeVar"] !== undefined
+	const base = single ? tableOf(from[0]?.["RangeVar"], facts.schema).key : undefined
+	const targets = ((query?.["targetList"] as Node[] | undefined) ?? []).map((each) => each["ResTarget"] as Node)
+	const columns = targets.some((target) => fields(target).some((field) => field["A_Star"] !== undefined))
+		? "all"
+		: new Map(
+				targets.flatMap((target) => {
+					const last = fields(target).at(-1)?.["String"] as { sval: string } | undefined
+					return last === undefined ? [] : [[String(target["name"] ?? last.sval), last.sval] as [string, string]]
+				}),
+			)
+	facts.views.set(tableOf(node["view"], facts.schema).key, { base, columns })
+}
+
+/** An index, a table made from a query, a view or a rule: `facts` after it; whether `type` was one */
+function followRelation(type: string, node: Node, facts: Facts): boolean {
+	if (type === "IndexStmt") {
+		/* an index's expressions and a partial index's predicate run on every write to its table */
+		const table = tableOf(node["relation"], facts.schema).key
+		const runs = callIn([node["indexParams"], node["whereClause"]], facts)
+		if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
+	} else if (type === "CreateTableAsStmt" || (type === "SelectStmt" && node["intoClause"] !== undefined)) {
+		/* a table made from a query: its columns are the query's, which these rules need not name */
+		const into = (type === "CreateTableAsStmt" ? node["into"] : node["intoClause"]) as Node
+		facts.tables.set(tableOf(into["rel"], facts.schema).key, new Set())
+	} else if (type === "ViewStmt") followView(node, facts)
+	else if (type === "RuleStmt") {
+		const table = tableOf(node["relation"], facts.schema).key
+		if (!facts.code.has(table)) facts.code.set(table, `rule ${String(node["rulename"])}`)
+	} else return false
+	return true
+}
+
 /** `facts` after one statement's parse tree, the functions it defines among them */
 function followTree(stmts: unknown, facts: Facts): void {
 	const defined = facts.defined
@@ -125,19 +169,7 @@ function followTree(stmts: unknown, facts: Facts): void {
 		else if (followNames(type, node, facts)) continue
 		else if (type === "CreateStmt") followCreate(node, facts)
 		else if (type === "AlterTableStmt") followAlter(node, facts)
-		else if (type === "IndexStmt") {
-			/* an index's expressions and a partial index's predicate run on every write to its table */
-			const table = tableOf(node["relation"], facts.schema).key
-			const runs = callIn([node["indexParams"], node["whereClause"]], facts)
-			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
-		} else if (type === "CreateTableAsStmt" || (type === "SelectStmt" && node["intoClause"] !== undefined)) {
-			/* a table made from a query: its columns are the query's, which these rules need not name */
-			const into = (type === "CreateTableAsStmt" ? node["into"] : node["intoClause"]) as Node
-			facts.tables.set(tableOf(into["rel"], facts.schema).key, new Set())
-		} else if (type === "RuleStmt") {
-			const table = tableOf(node["relation"], facts.schema).key
-			if (!facts.code.has(table)) facts.code.set(table, `rule ${String(node["rulename"])}`)
-		} else followDefinition(type, node, facts)
+		else if (!followRelation(type, node, facts)) followDefinition(type, node, facts)
 	}
 }
 
@@ -160,6 +192,7 @@ function historyFacts(before: ExtractedSchema | undefined, schema: string): Fact
 		schema,
 		tables: new Map(),
 		triggers: new Map(),
+		views: new Map(),
 	}
 	if (before === undefined) return empty
 	const read = CACHE.get(before) ?? new Map<string, Facts>()

@@ -12,6 +12,7 @@ const FACTS: Facts = {
 	operators: new Map([["===", "eq3"]]),
 	schema: "public",
 	tables: new Map(),
+	views: new Map(),
 	parents: new Map([
 		["c", [{ parent: "p", partition: true }]],
 		["g", [{ parent: "c", partition: true }]],

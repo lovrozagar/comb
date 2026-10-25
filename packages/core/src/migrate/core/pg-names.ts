@@ -15,7 +15,7 @@ const EVENTS: ReadonlyArray<[number, TriggerEvent]> = [
 
 /** A table's facts moved to its new key: a rename, or a move to another schema */
 function moveTable(facts: Facts, from: string, to: string): void {
-	for (const map of [facts.code, facts.columnTypes, facts.parents, facts.tables, facts.triggers] as Array<
+	for (const map of [facts.code, facts.columnTypes, facts.parents, facts.tables, facts.triggers, facts.views] as Array<
 		Map<string, unknown>
 	>) {
 		if (!map.has(from)) continue
@@ -23,6 +23,7 @@ function moveTable(facts: Facts, from: string, to: string): void {
 		map.delete(from)
 	}
 	for (const parents of facts.parents.values()) for (const each of parents) if (each.parent === from) each.parent = to
+	for (const view of facts.views.values()) if (view.base === from) view.base = to
 }
 
 /**
@@ -50,6 +51,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.parents,
 		facts.tables,
 		facts.triggers,
+		facts.views,
 	]
 	for (const map of maps as Array<Map<string, unknown>>) {
 		/* a snapshot: the loop moves the entries it reads */
@@ -60,6 +62,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		}
 	}
 	for (const parents of facts.parents.values()) for (const each of parents) each.parent = move(each.parent)
+	for (const view of facts.views.values()) if (view.base !== undefined) view.base = move(view.base)
 	for (const cast of facts.casts.values()) cast.fn = move(cast.fn)
 	for (const map of [facts.domains, facts.operators]) for (const [key, fn] of map) map.set(key, move(fn))
 	for (const key of Array.from(facts.defined)) facts.defined.add(move(key))
@@ -89,6 +92,22 @@ function followTrigger(type: string, node: Node, facts: Facts): void {
 	}
 }
 
+// lookup-table: the relations a rename, a move or a drop follows: a table, and what Postgres writes through as one (M71)
+const RELATIONS = /* @__PURE__ */ new Set(["OBJECT_FOREIGN_TABLE", "OBJECT_MATVIEW", "OBJECT_TABLE", "OBJECT_VIEW"])
+
+/** A column renamed: a table's column, or a view's, whose base column stays the one it named */
+function renameColumn(node: Node, facts: Facts): void {
+	const key = tableOf(node["relation"], facts.schema).key
+	const [was, now] = [String(node["subname"]), String(node["newname"])]
+	const columns = facts.tables.get(key)
+	if (columns?.delete(was) === true) columns.add(now)
+	const view = facts.views.get(key)
+	const base = view?.columns === "all" ? undefined : view?.columns.get(was)
+	if (base === undefined || view === undefined || view.columns === "all") return
+	view.columns.delete(was)
+	view.columns.set(now, base)
+}
+
 // lookup-table: the kinds of object a routine's rename or move names
 const ROUTINES = /* @__PURE__ */ new Set(["OBJECT_AGGREGATE", "OBJECT_FUNCTION", "OBJECT_PROCEDURE", "OBJECT_ROUTINE"])
 
@@ -100,10 +119,8 @@ function followName(type: string, node: Node, facts: Facts): void {
 	const kind = String(node[type === "RenameStmt" ? "renameType" : "objectType"])
 	if (kind === "OBJECT_SCHEMA" && type === "RenameStmt")
 		moveSchema(facts, String(node["subname"]), String(node["newname"]))
-	else if (kind === "OBJECT_COLUMN" && type === "RenameStmt") {
-		const columns = facts.tables.get(tableOf(node["relation"], facts.schema).key)
-		if (columns?.delete(String(node["subname"])) === true) columns.add(String(node["newname"]))
-	} else if (kind === "OBJECT_TABLE") {
+	else if (kind === "OBJECT_COLUMN" && type === "RenameStmt") renameColumn(node, facts)
+	else if (RELATIONS.has(kind)) {
 		const rel = node["relation"] as { relname: string; schemaname?: string }
 		const to =
 			type === "RenameStmt"
@@ -126,13 +143,14 @@ function followName(type: string, node: Node, facts: Facts): void {
 	}
 }
 
-/** A table dropped takes its triggers and its columns with it */
+/** A table or view dropped takes its triggers, its columns and its view with it */
 function followDrop(node: Node, facts: Facts): void {
-	if (node["removeType"] !== "OBJECT_TABLE") return
+	if (!RELATIONS.has(String(node["removeType"]))) return
 	for (const object of node["objects"] as Node[]) {
 		const table = keyOf(names((object["List"] as Node)["items"]), facts.schema)
 		facts.triggers.delete(table)
 		facts.tables.delete(table)
+		facts.views.delete(table)
 	}
 }
 

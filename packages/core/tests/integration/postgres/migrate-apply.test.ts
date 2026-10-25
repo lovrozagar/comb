@@ -402,6 +402,29 @@ describe("migrate check on Postgres: DDL in any spelling", () => {
 	})
 })
 
+/* M71 of the 0.13.0 round: a write through a view runs its base table's triggers */
+describe("migrate check on Postgres: a write through a view", () => {
+	describe("with Atlas v1.3.0", () => {
+		it("refuses an insert through a view over a table whose trigger the history made", async () => {
+			await withScratchDb(async (url) => {
+				migrations({
+					"20260101000000_t.sql": `CREATE TABLE victim (id int PRIMARY KEY);
+CREATE FUNCTION wipe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM victim; RETURN NEW; END $$;
+CREATE TABLE users (id int, email text);
+CREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();
+CREATE VIEW v AS SELECT * FROM users;
+`,
+				})
+				expect(await applyWithAtlas(command(url, { approve: approveAll }))).toEqual(["20260101000000_t.sql"])
+				migrations({ "20260102000000_seed.sql": "INSERT INTO v VALUES (1, 'admin@x');\n" })
+				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(
+					/20260102000000_seed\.sql is unsafe/,
+				)
+			})
+		}, 60_000)
+	})
+})
+
 it("keeps the scratch directory per test", () => {
 	expect(dir).toContain("comb-pg-apply-")
 })

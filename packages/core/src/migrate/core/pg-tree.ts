@@ -60,15 +60,38 @@ function updateFinding(table: { key: string; name: string }, columns: string[], 
 		: { level: "unsafe", note: `updates existing rows of ${table.key} (${columns.join(", ")})` }
 }
 
+/**
+ * The table a write to `key` lands in, through every view it names, and how a column the write
+ * names is that table's; undefined when a view reads no single table (M71)
+ */
+function baseOf(key: string, facts: Facts): { column: (name: string) => string; key: string } | undefined {
+	let at = { column: (name: string) => name, key }
+	for (let view = facts.views.get(at.key); view !== undefined; view = facts.views.get(at.key)) {
+		const { base, columns } = view
+		if (base === undefined) return undefined
+		const outer = at.column
+		at = { column: (name) => (columns === "all" ? outer(name) : (columns.get(outer(name)) ?? outer(name))), key: base }
+	}
+	return at
+}
+
 /** A write node's findings: its own rating, and what it runs on every table it reaches */
 function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
-	const table = tableOf(node["relation"], ctx.facts.schema)
+	const named = tableOf(node["relation"], ctx.facts.schema)
+	const base = baseOf(named.key, ctx.facts)
+	/* a view Postgres writes through only by a trigger or a rule comb cannot follow to one table */
+	if (base === undefined)
+		return [{ level: "unsafe", note: `writes through the view ${named.key}, which comb cannot follow to one table` }]
+	const table = { key: base.key, name: named.name }
 	/* a write without ONLY reaches the table's partitions and inheritance children */
-	const target = { inh: (node["relation"] as { inh?: boolean }).inh === true, key: table.key }
+	const target = { inh: (node["relation"] as { inh?: boolean }).inh === true, key: named.key }
 	if (type === "DeleteStmt")
 		return [{ level: "unsafe", note: `deletes rows of ${table.key}` }, ...reachFindings(target, ["delete"], ctx)]
 	if (type === "UpdateStmt")
-		return [updateFinding(table, assigned(node["targetList"]), ctx.fresh), ...reachFindings(target, ["update"], ctx)]
+		return [
+			updateFinding(table, assigned(node["targetList"]).map(base.column), ctx.fresh),
+			...reachFindings(target, ["update"], ctx),
+		]
 	if (type === "MergeStmt") {
 		const commands = (node["mergeWhenClauses"] as Array<{ MergeWhenClause: { commandType: string } }>).map(
 			(each) => each.MergeWhenClause.commandType,
@@ -85,7 +108,7 @@ function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
 	const conflict = node["onConflictClause"] as Node | undefined
 	if (conflict?.["action"] === "ONCONFLICT_UPDATE")
 		return [
-			updateFinding(table, assigned(conflict["targetList"]), ctx.fresh),
+			updateFinding(table, assigned(conflict["targetList"]).map(base.column), ctx.fresh),
 			...reachFindings(target, ["insert", "update"], ctx),
 		]
 	return reachFindings(target, ["insert"], ctx)

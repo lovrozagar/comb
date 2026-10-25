@@ -27,6 +27,11 @@ type Facts = {
 	schema: string
 	/** each table the history's trees made, with its columns (M70) */
 	tables: Map<string, Set<string>>
+	/**
+	 * each view, with the one table or view its query reads, undefined when it reads no single one
+	 * (a join, a set operation), and how its columns name the base's, `all` for `*` (M71)
+	 */
+	views: Map<string, { base: string | undefined; columns: Map<string, string> | "all" }>
 	/** each table's triggers, with the writes that fire them */
 	triggers: Map<string, Array<{ events: TriggerEvent[]; name: string }>>
 }

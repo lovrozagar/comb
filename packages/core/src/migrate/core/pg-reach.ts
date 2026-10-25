@@ -13,11 +13,16 @@ import { type Facts, keyOf, names, tableOf, typeOf } from "./pg-history.ts"
 
 type Node = Record<string, unknown>
 
-/** The tables a write to `table` reaches: itself, its descendants unless ONLY, and the partitions' parents */
+/**
+ * The tables a write to `table` reaches: itself, the base table a view writes through (M71), its
+ * descendants unless ONLY, and the partitions' parents
+ */
 function reached(table: string, inh: boolean, facts: Facts): string[] {
 	const out = [table]
 	for (let i = 0; i < out.length; i++) {
 		const at = out[i] as string
+		const base = facts.views.get(at)?.base
+		if (base !== undefined && !out.includes(base)) out.push(base)
 		for (const [child, parents] of facts.parents)
 			if (inh && parents.some(({ parent }) => parent === at) && !out.includes(child)) out.push(child)
 		/* a partitioned parent's row triggers are cloned onto each partition */
