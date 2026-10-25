@@ -219,9 +219,13 @@ describe("extractDropStatements", () => {
 		["DROP INDEX CONCURRENTLY idx_a", ["DROP INDEX idx_a"]],
 		['DROP INDEX CONCURRENTLY IF EXISTS "public"."idx_a"', ["DROP INDEX public.idx_a"]],
 		['ALTER TABLE "public"."post" DROP COLUMN "body", ADD COLUMN "c" text', ["DROP COLUMN public.post.body"]],
-		["ALTER TABLE `post` DROP COLUMN `title`", ["DROP COLUMN post.title"]],
 	])("names the drops of %j", (sql, drops) => {
 		expect(extractDropStatements(sql, { dialect: "postgres" })).toEqual(drops)
+	})
+
+	/* Postgres refuses a backtick-quoted name, so only SQLite names its drop (M70: Postgres's from its parser) */
+	it("names a backtick-quoted drop on SQLite", () => {
+		expect(extractDropStatements("ALTER TABLE `post` DROP COLUMN `title`")).toEqual(["DROP COLUMN post.title"])
 	})
 })
 

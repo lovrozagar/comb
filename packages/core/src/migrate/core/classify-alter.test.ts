@@ -2,50 +2,44 @@ import { describe, expect, it } from "vitest"
 import { alterTableFindings } from "./classify-alter.ts"
 import { classifyMigration } from "./classify.ts"
 
-const pg = {
-	dialect: "postgres",
-	earlierRoutines: new Set<string>(),
-	rebuilds: new Map<string, Array<{ temp: string }>>(),
-	routines: new Map<string, unknown>(),
-} as const
-const levels = (code: string, ctx: Parameters<typeof alterTableFindings>[1] = pg) =>
-	alterTableFindings(code, ctx)?.map((finding) => finding.level)
+const ctx = { rebuilds: new Map<string, Array<{ temp: string }>>() }
+const levels = (code: string, at: Parameters<typeof alterTableFindings>[1] = ctx) =>
+	alterTableFindings(code, at)?.map((finding) => finding.level)
 
+/* SQLite's ALTER TABLE, read from its text; Postgres's is pg-ddl.ts's, from its parse tree (M70) */
 describe("alterTableFindings", () => {
 	it("reads nothing but an ALTER TABLE", () => {
-		expect(alterTableFindings("ALTER INDEX i RENAME TO j", pg)).toBeUndefined()
+		expect(alterTableFindings("ALTER INDEX i RENAME TO j", ctx)).toBeUndefined()
 	})
 
-	it("reads each action of the list on its own", () => {
+	it("reads each action of the list on its own, and warns of no lock", () => {
 		expect(levels("ALTER TABLE post ADD COLUMN x int, DROP COLUMN body, ALTER COLUMN t DROP NOT NULL")).toEqual([
 			"unsafe",
 		])
-		expect(levels("ALTER TABLE post ALTER COLUMN a TYPE bigint")).toEqual(["unsafe", "lock"])
-		expect(levels("ALTER TABLE post ADD COLUMN a uuid DEFAULT gen_random_uuid()")).toEqual(["lock"])
+		expect(levels("ALTER TABLE post ALTER COLUMN a TYPE bigint")).toEqual(["unsafe"])
+		expect(levels("ALTER TABLE post ADD COLUMN a int NOT NULL")).toEqual(["unsafe"])
+		expect(levels("ALTER TABLE post ADD CONSTRAINT fk FOREIGN KEY (a) REFERENCES b (id)")).toEqual([])
+		expect(levels("ALTER TABLE post ADD COLUMN a text DEFAULT (random())")).toEqual([])
+		expect(levels("ALTER TABLE post ALTER COLUMN a DROP DEFAULT")).toEqual(["cautious"])
 	})
 
 	it("names a dropped column with its table as written", () => {
-		const [finding] = alterTableFindings('ALTER TABLE ONLY "public"."post" DROP COLUMN IF EXISTS "body"', pg) ?? []
-		expect(finding?.drops).toEqual(["DROP COLUMN public.post.body"])
-	})
-
-	it("warns of no lock on SQLite", () => {
-		const lite = { ...pg, dialect: "sqlite", rebuilds: new Map<string, Array<{ temp: string }>>() } as const
-		expect(levels("ALTER TABLE post ALTER COLUMN a TYPE bigint", lite)).toEqual(["unsafe"])
-		expect(levels("ALTER TABLE post ADD CONSTRAINT fk FOREIGN KEY (a) REFERENCES b (id)", lite)).toEqual([])
-		expect(levels("ALTER TABLE post ADD COLUMN a uuid DEFAULT gen_random_uuid()", lite)).toEqual([])
+		const [finding] = alterTableFindings('ALTER TABLE ONLY "main"."post" DROP COLUMN IF EXISTS "body"', ctx) ?? []
+		expect(finding?.drops).toEqual(["DROP COLUMN main.post.body"])
 	})
 
 	it("lets the rename that ends a SQLite rebuild pass, and no other rename", () => {
-		const lite = { ...pg, dialect: "sqlite", rebuilds: new Map([["post", [{ temp: "new_post" }]]]) } as const
-		expect(levels("ALTER TABLE `new_post` RENAME TO `post`", lite)).toEqual([])
-		expect(levels("ALTER TABLE `other` RENAME TO `post`", lite)).toEqual(["unsafe"])
-		expect(levels("ALTER TABLE `new_post` RENAME TO `gone`", lite)).toEqual(["unsafe"])
+		const rebuilding = { rebuilds: new Map([["post", [{ temp: "new_post" }]]]) }
+		expect(levels("ALTER TABLE `new_post` RENAME TO `post`", rebuilding)).toEqual([])
+		expect(levels("ALTER TABLE `other` RENAME TO `post`", rebuilding)).toEqual(["unsafe"])
+		expect(levels("ALTER TABLE `new_post` RENAME TO `gone`", rebuilding)).toEqual(["unsafe"])
 	})
 
-	it("calls an unknown action safe, and a new owner cautious, as an owner bypasses row level security", () => {
+	it("calls a known action safe, a new owner cautious, and an unknown one unsafe", () => {
 		expect(levels("ALTER TABLE post SET (fillfactor = 70)")).toEqual([])
 		expect(levels("ALTER TABLE post OWNER TO r")).toEqual(["cautious"])
+		expect(levels("ALTER TABLE post ENABLE TRIGGER t")).toEqual(["unsafe"])
+		expect(levels("ALTER TABLE post RENAME COLUMN a TO b")).toEqual(["unsafe"])
 	})
 })
 
@@ -70,7 +64,7 @@ describe("classifyMigration on row level security (M15)", () => {
 	it("rates an ALTER TABLE action comb does not know unsafe, and names it", () => {
 		const rated = classifyMigration("ALTER TABLE post INHERIT base", { dialect: "postgres" })
 		expect(rated.unsafeStatements).toEqual([
-			"ALTER TABLE post INHERIT base (comb does not recognize ALTER TABLE … INHERIT base; approve it in the file)",
+			"ALTER TABLE post INHERIT base (comb does not recognize ALTER TABLE … ADD INHERIT; approve it in the file)",
 		])
 	})
 })

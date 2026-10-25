@@ -59,7 +59,7 @@ function assigned(code: string, bare: string): string[] | undefined {
 
 /** An UPDATE's or upsert's finding: a backfill of only the columns `fresh` holds, which it then takes out; pending otherwise */
 function setFinding(table: string, columns: readonly string[] | undefined, fresh: Fresh): Finding {
-	const added = fresh.columns.get(qualifiedKey(table, "sqlite"))
+	const added = fresh.columns.get(qualifiedKey(table))
 	if (columns === undefined || columns.length === 0 || !columns.every((column) => added?.has(column) === true))
 		return PENDING
 	for (const column of columns) added?.delete(column)
@@ -93,7 +93,7 @@ function insertFinding(
  */
 function byTable(table: string, ctx: { fresh: Fresh; schema: ExtractedSchema }): Finding[] | undefined {
 	const conflicts = ctx.schema.tableInfo.get(nameKey(table, "sqlite"))?.conflicts ?? []
-	const fresh = ctx.fresh.tables.has(qualifiedKey(table, "sqlite"))
+	const fresh = ctx.fresh.tables.has(qualifiedKey(table))
 	if (conflicts.some((conflict) => conflict.endsWith(": REPLACE"))) return [fresh ? PENDING : REPLACES]
 	return fresh ? [] : undefined
 }

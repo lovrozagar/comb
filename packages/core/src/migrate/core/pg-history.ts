@@ -28,6 +28,7 @@ function callIn(expression: unknown, { defined, schema }: Pick<Facts, "defined" 
 
 /** A table's new column: its type, and the code its default, checks, generated value, domain or cast run */
 function followColumn(table: string, column: Node, facts: Facts): void {
+	facts.tables.set(table, (facts.tables.get(table) ?? new Set()).add(String(column["colname"])))
 	const type = typeOf(column["typeName"], facts.schema)
 	facts.columnTypes.set(table, (facts.columnTypes.get(table) ?? new Set()).add(type))
 	const constraints = (column["constraints"] as Node[] | undefined) ?? []
@@ -41,6 +42,7 @@ function followColumn(table: string, column: Node, facts: Facts): void {
 /** A CREATE TABLE: its parents, its columns, its checks, and what a table it is LIKE runs */
 function followCreate(node: Node, facts: Facts): void {
 	const table = tableOf(node["relation"], facts.schema).key
+	facts.tables.set(table, new Set())
 	const parents = ((node["inhRelations"] as Node[] | undefined) ?? []).map(
 		(each) => tableOf(each["RangeVar"], facts.schema).key,
 	)
@@ -78,6 +80,7 @@ function followAlter(node: Node, facts: Facts): void {
 				{ parent: tableOf(def["RangeVar"], facts.schema).key, partition: false },
 			])
 		} else if (cmd["subtype"] === "AT_AddColumn") followColumn(table, def["ColumnDef"] as Node, facts)
+		else if (cmd["subtype"] === "AT_DropColumn") facts.tables.get(table)?.delete(String(cmd["name"]))
 		else {
 			const runs = callIn(def, facts)
 			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
@@ -127,6 +130,10 @@ function followTree(stmts: unknown, facts: Facts): void {
 			const table = tableOf(node["relation"], facts.schema).key
 			const runs = callIn([node["indexParams"], node["whereClause"]], facts)
 			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
+		} else if (type === "CreateTableAsStmt" || (type === "SelectStmt" && node["intoClause"] !== undefined)) {
+			/* a table made from a query: its columns are the query's, which these rules need not name */
+			const into = (type === "CreateTableAsStmt" ? node["into"] : node["intoClause"]) as Node
+			facts.tables.set(tableOf(into["rel"], facts.schema).key, new Set())
 		} else if (type === "RuleStmt") {
 			const table = tableOf(node["relation"], facts.schema).key
 			if (!facts.code.has(table)) facts.code.set(table, `rule ${String(node["rulename"])}`)
@@ -151,6 +158,7 @@ function historyFacts(before: ExtractedSchema | undefined, schema: string): Fact
 		operators: new Map(),
 		parents: new Map(),
 		schema,
+		tables: new Map(),
 		triggers: new Map(),
 	}
 	if (before === undefined) return empty

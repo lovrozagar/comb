@@ -187,3 +187,27 @@ describe("Postgres settings that change who later names resolve for (M28)", () =
 		},
 	)
 })
+
+/* M70 of the 0.13.0 round: the tables the history's trees made, with their columns, keyed as the parser names them */
+describe("the tables a Postgres history made", () => {
+	it("follows each table's columns through adds, drops, renames, queries and drops of the table", () => {
+		const read = facts(`CREATE TABLE U&"\\0074" (Id int, b int);
+ALTER TABLE t ADD COLUMN c int, DROP COLUMN b;
+ALTER TABLE t RENAME COLUMN c TO d;
+ALTER TABLE t RENAME COLUMN gone TO e;
+CREATE TABLE q AS SELECT 1 AS x;
+SELECT 1 AS y INTO r;
+CREATE TABLE old (a int);
+ALTER TABLE old RENAME TO kept;
+CREATE TABLE dropped (a int);
+DROP TABLE dropped;`)
+		expect(read.tables).toEqual(
+			new Map([
+				["t", new Set(["id", "d"])],
+				["q", new Set()],
+				["r", new Set()],
+				["kept", new Set(["a"])],
+			]),
+		)
+	})
+})

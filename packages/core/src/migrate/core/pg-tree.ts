@@ -24,6 +24,7 @@ import type { Fresh } from "./classify-write.ts"
 import { builtinFinding } from "./pg-builtins.ts"
 import { type Facts, followTree, keyOf, names, nodesOf, tableOf } from "./pg-history.ts"
 import { postgresParser } from "./pg-parser.ts"
+import { ddlFindings, followFresh } from "./pg-ddl.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 
 type Node = Record<string, unknown>
@@ -170,10 +171,13 @@ function pgTreeFindings(stmt: string, ctx: TreeContext): Finding[] {
 	const findings = nodes.flatMap(([type, node]) =>
 		/^(?:InsertStmt|UpdateStmt|DeleteStmt|MergeStmt)$/.test(type)
 			? writeFindings(type, node, ctx)
-			: [codeFinding(type, node, ctx)].filter((finding) => finding !== undefined),
+			: [...(ddlFindings(type, node) ?? []), codeFinding(type, node, ctx)].filter((finding) => finding !== undefined),
 	)
-	/* what the statement attached and reparented counts for the statements after it */
-	for (const [type, node] of nodes) if (type === "AlterTableStmt") followParentage(node, ctx.fresh, ctx.facts.schema)
+	/* what the statement made new, attached and reparented counts for the statements after it */
+	for (const [type, node] of nodes) {
+		followFresh(type, node, ctx)
+		if (type === "AlterTableStmt") followParentage(node, ctx.fresh, ctx.facts.schema)
+	}
 	followTree(tree.stmts, ctx.facts)
 	return findings
 }

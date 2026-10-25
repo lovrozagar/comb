@@ -25,6 +25,8 @@ type Facts = {
 	parents: Map<string, Array<{ parent: string; partition: boolean }>>
 	/** the schema an unqualified name resolves in, the one each key leaves out (M72) */
 	schema: string
+	/** each table the history's trees made, with its columns (M70) */
+	tables: Map<string, Set<string>>
 	/** each table's triggers, with the writes that fire them */
 	triggers: Map<string, Array<{ events: TriggerEvent[]; name: string }>>
 }

@@ -386,6 +386,22 @@ CREATE TRIGGER t AFTER INSERT ON app.users FOR EACH ROW EXECUTE FUNCTION wipe();
 	})
 })
 
+/* M70 of the 0.13.0 round: Postgres DDL is rated from its parse tree, so no spelling hides a drop */
+describe("migrate check on Postgres: DDL in any spelling", () => {
+	describe("with Atlas v1.3.0", () => {
+		it("refuses a column dropped with no space after the quoted table name", async () => {
+			await withScratchDb(async (url) => {
+				migrations({ "20260101000000_t.sql": "CREATE TABLE users (id int PRIMARY KEY, email text);\n" })
+				expect(await applyWithAtlas(command(url, { approve: approveAll }))).toEqual(["20260101000000_t.sql"])
+				migrations({ "20260102000000_drop.sql": 'ALTER TABLE "users"DROP COLUMN email;\n' })
+				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(
+					/20260102000000_drop\.sql is unsafe/,
+				)
+			})
+		}, 60_000)
+	})
+})
+
 it("keeps the scratch directory per test", () => {
 	expect(dir).toContain("comb-pg-apply-")
 })

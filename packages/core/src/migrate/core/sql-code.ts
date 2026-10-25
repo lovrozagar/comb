@@ -65,15 +65,9 @@ function partKey(part: string, dialect: Dialect): string {
 	return dialect === "sqlite" || bare === part ? asciiFold(bare) : bare
 }
 
-/**
- * A whole name as `naming` resolves it, each part folded: on SQLite with the schema it was written
- * with (`main."Post"` is `main.post`), on Postgres as nameKey keys it (`public."Post"` is `Post`
- * under public)
- */
-const qualifiedKey = (name: string, naming: Naming): string =>
-	naming === "sqlite"
-		? [...name.matchAll(PARTS)].map((match) => partKey(match[0], "sqlite")).join(".")
-		: nameKey(name, naming)
+/** A whole name as SQLite resolves it, each part folded, with the schema it was written with (`main."Post"` is `main.post`) */
+const qualifiedKey = (name: string): string =>
+	[...name.matchAll(PARTS)].map((match) => partKey(match[0], "sqlite")).join(".")
 
 /** A dollar-quoted body without its tags */
 function bodyText(text: string): string {

@@ -65,6 +65,12 @@ const CAUTIOUS = /* @__PURE__ */ new RegExp(
 	`^(?:DROP|GRANT|REVOKE|CALL|CREATE OR REPLACE|REPLACE|INSERT OR REPLACE|ALTER SEQUENCE (?:IF EXISTS )?${QNAME} RESTART|ALTER (?:INDEX|POLICY|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE)\\b.*\\bRENAME)\\b`,
 	"i",
 )
+/* on Postgres, what CAUTIOUS names but the parse tree does not rate: drops and renames are pg-ddl.ts's (M70) */
+// per-process-constant: a pattern composed from the name grammar, compiled once
+const PG_CAUTIOUS = /* @__PURE__ */ new RegExp(
+	`^(?:GRANT|REVOKE|CALL|CREATE OR REPLACE|ALTER SEQUENCE (?:IF EXISTS )?${QNAME} RESTART)\\b`,
+	"i",
+)
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const RENAMES_NAMED = /* @__PURE__ */ new RegExp(
 	`^ALTER (?:TYPE|SCHEMA|VIEW|MATERIALIZED VIEW) (?:IF EXISTS )?${QNAME} (?:RENAME|SET SCHEMA|DROP ATTRIBUTE)\\b`,
@@ -113,16 +119,26 @@ function dropsRebuiltIndex(code: string, ctx: FileContext): boolean {
 	)
 }
 
+/** A SQLite statement's drop, rename or other destructive shape, read from its code */
+function sqliteDropFindings(code: string): Finding[] {
+	if (UNSAFE_DROP.test(code) || /^TRUNCATE\b/i.test(code) || RENAMES_NAMED.test(code))
+		return [{ drops: dropNames(code), level: "unsafe" }]
+	return CAUTIOUS.test(code) ? [{ drops: dropNames(code), level: "cautious" }] : []
+}
+
+/** What the parse tree leaves to a Postgres statement's code: a TRUNCATE, and the grants, calls and replacements */
+function pgTextFindings(code: string): Finding[] {
+	if (/^TRUNCATE\b/i.test(code)) return [{ level: "unsafe" }]
+	return PG_CAUTIOUS.test(code) ? [{ level: "cautious" }] : []
+}
+
 /** The findings of one statement's code that are not ALTER TABLE actions */
 function statementFindings(code: string, ctx: FileContext): Finding[] {
 	const rebuild = rebuildFinding(DROP_LIST.exec(code)?.[2], ctx)
 	if (rebuild !== undefined) return [rebuild]
 	if (dropsRebuiltIndex(code, ctx))
 		return [{ level: "cautious", note: "an FTS index comb rebuilds from its content table" }]
-	const findings: Finding[] = []
-	if (UNSAFE_DROP.test(code) || /^TRUNCATE\b/i.test(code) || RENAMES_NAMED.test(code))
-		findings.push({ drops: dropNames(code), level: "unsafe" })
-	else if (CAUTIOUS.test(code)) findings.push({ drops: dropNames(code), level: "cautious" })
+	const findings: Finding[] = ctx.dialect === "postgres" ? pgTextFindings(code) : sqliteDropFindings(code)
 	if (/\bCASCADE\b/i.test(code.replace(/\bON (?:DELETE|UPDATE) CASCADE\b/gi, ""))) findings.push({ level: "unsafe" })
 	findings.push(...runtimeFindings(code, ctx.prepared, (body) => findingsOf(body, ctx)))
 	if (ctx.dialect === "postgres") {
@@ -136,8 +152,9 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 /** The findings of one statement's code; an EXPLAIN as the statement it explains (ANALYZE runs it) */
 function findingsOf(code: string, ctx: FileContext): Finding[] {
 	if (EXPLAIN.test(code)) return findingsOf(code.replace(EXPLAIN, ""), ctx)
-	const table = /^ALTER TABLE\b/i.test(code) ? alterTableFindings(code, ctx) : undefined
-	return table ?? statementFindings(code, ctx)
+	if (!/^ALTER TABLE\b/i.test(code)) return statementFindings(code, ctx)
+	/* on Postgres an ALTER TABLE is rated from its parse tree, command by command (pg-ddl.ts, M70) */
+	return ctx.dialect === "postgres" ? [] : (alterTableFindings(code, ctx) ?? statementFindings(code, ctx))
 }
 
 type Read = ReadStatement & { findings: Finding[] }
@@ -168,7 +185,7 @@ function readFile(
 		facts: historyFacts(dialect === "postgres" ? before : undefined, schema),
 		naming,
 		schema: before ?? extractSchema("", undefined, { dialect, schema }),
-		fresh: freshStart(before, naming),
+		fresh: freshStart(before),
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
 		prepared,
 		drops: new Map(),
@@ -191,8 +208,11 @@ function readFile(
 						? [...ftsCommandFindings(stmt), ...sqliteWriteFindings(codes[i] as string, ctx)]
 						: pgTreeFindings(stmt, ctx)),
 				]
-		followAdds(codes[i] as string, ctx.fresh)
-		if (dialect === "sqlite") ctx.schema = extractSchema(stmt, ctx.schema)
+		/* on Postgres what a statement makes new is followed from its parse tree (pg-ddl.ts) */
+		if (dialect === "sqlite") {
+			followAdds(codes[i] as string, ctx.fresh)
+			ctx.schema = extractSchema(stmt, ctx.schema)
+		}
 		return { code: codes[i] as string, dialect, findings, stmt }
 	})
 }
