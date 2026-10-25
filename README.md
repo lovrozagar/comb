@@ -213,6 +213,8 @@ OPTIONS:
 
 The binary requires Bun — the shebang is `#!/usr/bin/env bun`, and `comb migrate diff` invokes `bun drizzle-kit export`.
 
+The CLI is tested on Linux and relies on POSIX process groups, so Windows is not supported: `comb codegen` loads each tables module in a child of its own process group, which a supervisor kills whole, with every process the module started, after 60 s or when the run is interrupted. The library itself (columns, queries, error handling) runs wherever its database driver does.
+
 External tools the migration commands shell out to, none of them install-time dependencies:
 
 | Command                                              | Needs                                                                                                                              |
