@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config"
+import { OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "./tests/support/off-utc.ts"
 
 /* every test run is in UTC, as CI's runners are, so a local stamp vouches for what CI sees; the
    workers forked after this file is read inherit it (tests/structure/workflows.test.ts holds it) */
@@ -23,6 +24,26 @@ export default defineConfig({
 					globalSetup: ["tests/integration/support/global-setup.ts"],
 					testTimeout: 60_000,
 					hookTimeout: 60_000,
+				},
+			},
+			/* the suites that page or read Date keys, once more far from UTC (tests/support/off-utc.ts) */
+			{
+				test: {
+					env: { TZ: OFF_UTC_ZONE },
+					include: OFF_UTC_UNIT,
+					name: `unit (${OFF_UTC_ZONE})`,
+					setupFiles: ["tests/support/pg-parser.setup.ts"],
+					testTimeout: 30_000,
+				},
+			},
+			{
+				test: {
+					env: { TZ: OFF_UTC_ZONE },
+					globalSetup: ["tests/integration/support/global-setup.ts"],
+					hookTimeout: 60_000,
+					include: OFF_UTC_INTEGRATION,
+					name: `integration (${OFF_UTC_ZONE})`,
+					testTimeout: 60_000,
 				},
 			},
 		],

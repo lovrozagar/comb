@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { DATE_KEYS, OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "../support/off-utc.ts"
 
 const ROOT = join(import.meta.dirname, "../../../..")
 const WORKFLOWS = join(ROOT, ".github/workflows")
@@ -179,5 +180,38 @@ describe("the time zone every test run uses", () => {
 		const preload = /^preload = \["\.\/(.+?)"\]$/m.exec(bunfig)?.[1]
 		expect(preload).toBe("tests/bun/support/utc.ts")
 		expect(readFileSync(join(CORE, preload as string), "utf8")).toContain(PIN)
+	})
+})
+
+/*
+ * The suites that page or read Date keys run a second time far from UTC (tests/support/off-utc.ts):
+ * every one of them, found by its own text, so a new one cannot miss the pass, in a zone whose
+ * offset is no whole hour, so no hour-rounding hides a bug.
+ */
+describe("the pass of the Date-key suites off UTC", () => {
+	const CORE = join(ROOT, "packages/core")
+
+	/** Every test file under `dir`, relative to packages/core */
+	const testFiles = (dir: string): string[] =>
+		(readdirSync(join(CORE, dir), { recursive: true }) as string[])
+			.filter((name) => name.endsWith(".test.ts"))
+			.map((name) => `${dir}/${name}`)
+
+	it("takes every suite that touches a Date key, and no other", () => {
+		const scanned = [...testFiles("src"), ...testFiles("tests/integration")]
+			.filter((file) => DATE_KEYS.test(readFileSync(join(CORE, file), "utf8")))
+			.toSorted()
+		expect([...OFF_UTC_UNIT, ...OFF_UTC_INTEGRATION].toSorted()).toEqual(scanned)
+	})
+
+	it("runs them in a zone whose offset is a fraction of an hour, in both projects of the config", () => {
+		const offset = new Intl.DateTimeFormat("en-US", { timeZone: OFF_UTC_ZONE, timeZoneName: "longOffset" })
+			.formatToParts(new Date(2000, 0, 1))
+			.find((part) => part.type === "timeZoneName")?.value
+		expect(offset).toMatch(/^GMT[+-]\d{2}:(?!00)\d{2}$/)
+		const config = readFileSync(join(CORE, "vitest.config.ts"), "utf8")
+		expect(config.match(/env: \{ TZ: OFF_UTC_ZONE \}/g)).toHaveLength(2)
+		expect(config).toContain("include: OFF_UTC_UNIT")
+		expect(config).toContain("include: OFF_UTC_INTEGRATION")
 	})
 })
