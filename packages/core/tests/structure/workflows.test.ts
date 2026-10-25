@@ -156,3 +156,28 @@ describe("ci.yml and verify run the same gates", () => {
 		expect(scriptOf("bun install --frozen-lockfile")).toBeUndefined()
 	})
 })
+
+/*
+ * CI's runners are in UTC, so every local test run is too: a time-zone-dependent expectation that
+ * passed in another zone passed verify and failed CI (U20's row 8). The vitest configs pin TZ before
+ * their workers fork, and bun's preload pins it for its suites, whatever the shell's TZ.
+ */
+describe("the time zone every test run uses", () => {
+	const CORE = join(ROOT, "packages/core")
+	const PIN = 'process.env.TZ = "UTC"'
+
+	it("is UTC in this run", () => {
+		expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe("UTC")
+		expect(new Date(2000, 0, 1).getTimezoneOffset()).toBe(0)
+	})
+
+	it("is pinned in every vitest config and in bun's preload", () => {
+		const configs = readdirSync(CORE).filter((name) => /^vitest(\..+)?\.config\.ts$/.test(name))
+		expect(configs.length).toBeGreaterThanOrEqual(3)
+		for (const name of configs) expect(readFileSync(join(CORE, name), "utf8"), name).toContain(PIN)
+		const bunfig = readFileSync(join(CORE, "bunfig.toml"), "utf8")
+		const preload = /^preload = \["\.\/(.+?)"\]$/m.exec(bunfig)?.[1]
+		expect(preload).toBe("tests/bun/support/utc.ts")
+		expect(readFileSync(join(CORE, preload as string), "utf8")).toContain(PIN)
+	})
+})

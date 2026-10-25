@@ -2,6 +2,8 @@
 # gates the one file only Bun can run, drivers/bun-sqlite.ts, at 100%; vitest measures the
 # rest, so everything else these suites happen to load is left out here.
 [test]
+# every run is in UTC, as CI's runners are (tests/bun/support/utc.ts)
+preload = ["./tests/bun/support/utc.ts"]
 coverage = true
 coverageSkipTestFiles = true
 coverageThreshold = { lines = 1.0, functions = 1.0 }
