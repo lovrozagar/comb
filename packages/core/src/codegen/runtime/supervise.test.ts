@@ -1,6 +1,7 @@
+import { EventEmitter } from "node:events"
 import fs from "node:fs"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
 import { main, supervise } from "./supervise.mjs"
 
@@ -34,15 +35,23 @@ async function grandchildOf(pids: string): Promise<number> {
 
 describe("supervise: a child in a process group of its own", () => {
 	it("answers the child's exit code, and 128 + the signal's number when a signal ended it", async () => {
-		expect(await supervise(10_000, process.execPath, ["-e", "process.exit(3)"]).done).toEqual({ code: 3 })
-		expect(await supervise(10_000, process.execPath, ["-e", "process.kill(process.pid, 'SIGKILL')"]).done).toEqual({
+		expect(await supervise({ args: ["-e", "process.exit(3)"], cmd: process.execPath, timeoutMs: 10_000 }).done).toEqual(
+			{ code: 3 },
+		)
+		expect(
+			await supervise({
+				args: ["-e", "process.kill(process.pid, 'SIGKILL')"],
+				cmd: process.execPath,
+				timeoutMs: 10_000,
+			}).done,
+		).toEqual({
 			code: 137,
 		})
 	})
 
 	it("kills the child's whole group at the timeout, a grandchild that ignores nothing included", async () => {
 		const pids = path.join(dir, "pids")
-		const run = supervise(1500, process.execPath, ["-e", stuck(pids)])
+		const run = supervise({ args: ["-e", stuck(pids)], cmd: process.execPath, timeoutMs: 1500 })
 		const grandchild = await grandchildOf(pids)
 		expect(await run.done).toEqual({ timedOut: true })
 		await new Promise((r) => setTimeout(r, 200))
@@ -51,7 +60,7 @@ describe("supervise: a child in a process group of its own", () => {
 
 	it("kills the group on stop(), and a second stop() of a group already gone is no error", async () => {
 		const pids = path.join(dir, "pids")
-		const run = supervise(60_000, process.execPath, ["-e", stuck(pids)])
+		const run = supervise({ args: ["-e", stuck(pids)], cmd: process.execPath, timeoutMs: 60_000 })
 		const grandchild = await grandchildOf(pids)
 		run.stop()
 		expect(await run.done).toEqual({ code: 137 })
@@ -114,5 +123,64 @@ describe("main: the supervisor's process", () => {
 		expect(fake.exits[0]).toBe(130)
 		await new Promise((r) => setTimeout(r, 200))
 		expect(alive(grandchild)).toBe(false)
+	})
+})
+
+/** A child stand-in with `pid`, which emits `events` once the supervisor listens */
+function fakeChild(pid: number | undefined, events: Array<[string, ...unknown[]]>) {
+	const child = Object.assign(new EventEmitter(), { pid })
+	queueMicrotask(() => {
+		for (const [name, ...args] of events) child.emit(name, ...args)
+	})
+	return child
+}
+
+/* the 0.13.1 review of d67fa44: kill(-0) would signal the supervisor's own group, and kill(-1) every
+   process the user owns, so the group is killed only for a child this supervisor saw start */
+describe("supervise: which group stop() may kill", () => {
+	it.each([
+		["pid 0, the supervisor's own group", 0],
+		["pid 1, every process the user owns", 1],
+		["no pid", undefined],
+	])("never calls kill for %s", async (_, pid) => {
+		const kill = vi.fn()
+		const run = supervise({
+			args: [],
+			cmd: "cmd",
+			kill,
+			spawn: () => fakeChild(pid, [["spawn"]]) as never,
+			timeoutMs: 60_000,
+		})
+		await new Promise((r) => setTimeout(r, 0))
+		run.stop()
+		expect(kill).not.toHaveBeenCalled()
+	})
+
+	it("never calls kill for a child that failed to start, and answers 127 at once", async () => {
+		const kill = vi.fn()
+		const run = supervise({
+			args: [],
+			cmd: "cmd",
+			kill,
+			spawn: () => fakeChild(4242, [["error", new Error("spawn cmd ENOENT")]]) as never,
+			timeoutMs: 60_000,
+		})
+		expect(await run.done).toEqual({ code: 127 })
+		run.stop()
+		expect(kill).not.toHaveBeenCalled()
+	})
+
+	it("kills the group of a child it saw start, by its negative pid", async () => {
+		const kill = vi.fn()
+		const run = supervise({
+			args: [],
+			cmd: "cmd",
+			kill,
+			spawn: () => fakeChild(4242, [["spawn"]]) as never,
+			timeoutMs: 60_000,
+		})
+		await new Promise((r) => setTimeout(r, 0))
+		run.stop()
+		expect(kill).toHaveBeenCalledWith(-4242, "SIGKILL")
 	})
 })

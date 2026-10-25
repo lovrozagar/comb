@@ -18,17 +18,24 @@ const SIGNALS = /** @type {const} */ (["SIGHUP", "SIGINT", "SIGTERM"])
 /**
  * `cmd` with `args` in a process group of its own, its stdout and stderr this process's, its stdin
  * a pipe no one writes; the group killed with SIGKILL after `timeoutMs`, once the child exits, or on
- * `stop()`
- * @param {number} timeoutMs
- * @param {string} cmd
- * @param {readonly string[]} args
+ * `stop()`. A child that cannot start answers 127, as a shell does. `spawn` and `kill` are the
+ * runtime's own unless a test passes stand-ins.
+ * @param {{ args: readonly string[], cmd: string, kill?: (pid: number, signal: NodeJS.Signals) => void, spawn?: typeof spawn, timeoutMs: number }} job
  * @returns {{ done: Promise<{ code: number } | { timedOut: true }>, stop: () => void }}
  */
-function supervise(timeoutMs, cmd, args) {
-	const child = spawn(cmd, args, { detached: true, stdio: ["pipe", "inherit", "inherit"] })
+function supervise({ args, cmd, kill = (pid, signal) => process.kill(pid, signal), spawn: start = spawn, timeoutMs }) {
+	const child = start(cmd, args, { detached: true, stdio: ["pipe", "inherit", "inherit"] })
+	let started = false
+	child.on("spawn", () => {
+		started = true
+	})
+	/* the group is killed only for a child seen to start whose pid names a group of its own: -0 is
+	   this process's own group, and -1 every process the user owns */
 	const stop = () => {
+		const pid = child.pid
+		if (!started || pid === undefined || !Number.isInteger(pid) || pid <= 1) return
 		try {
-			process.kill(-(/** @type {number} */ (child.pid)), "SIGKILL")
+			kill(-pid, "SIGKILL")
 		} catch {
 			// reason: the group is gone already, which is what killing it asks for
 		}
@@ -39,6 +46,10 @@ function supervise(timeoutMs, cmd, args) {
 			stop()
 			resolve({ timedOut: true })
 		}, timeoutMs)
+		child.on("error", () => {
+			clearTimeout(timer)
+			resolve({ code: 127 })
+		})
 		child.on("exit", (code, signal) => {
 			clearTimeout(timer)
 			/* a module that exits leaves its pool's processes behind: they go with it */
@@ -58,7 +69,7 @@ function supervise(timeoutMs, cmd, args) {
  */
 async function main(proc) {
 	const { args, cmd, status, timeoutMs } = JSON.parse(/** @type {string} */ (proc.argv.at(-1)))
-	const run = supervise(timeoutMs, cmd, args)
+	const run = supervise({ args, cmd, timeoutMs })
 	for (const signal of SIGNALS) {
 		proc.on(signal, () => {
 			run.stop()
