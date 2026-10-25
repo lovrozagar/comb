@@ -104,3 +104,73 @@ describe("loadSync: a TypeScript URL with a query", () => {
 		expect(loaded.format).toBe("module")
 	})
 })
+
+/*
+ * F54 of the 0.13.0 round: node loads a TypeScript file in the format node itself gives it (type
+ * stripping): a .cts file, or one of a package with no "type": "module" that has no module syntax
+ * once its types are stripped, as CommonJS; anything else as an ES module
+ */
+const REQUIRES = "const path = require('node:path')\nexport = path.join(__dirname, 'x')\n"
+
+/** loadSync's answer for `file` holding `source`, under a package.json of `pkg` when given */
+function formatOf(file: string, source: string, pkg?: Record<string, unknown>) {
+	if (pkg !== undefined) fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify(pkg))
+	const at = path.join(dir, file)
+	fs.mkdirSync(path.dirname(at), { recursive: true })
+	fs.writeFileSync(at, source)
+	return loadSync(pathToFileURL(at).href, {}, () => ({})) as { format: string; source: string }
+}
+
+describe("loadSync: a TypeScript file's format, as node gives it (F54)", () => {
+	it("loads a file of a package with no type and no module syntax as CommonJS, transpiled to it", () => {
+		const { format, source } = formatOf("db.tables.ts", REQUIRES, { name: "app" })
+		expect(format).toBe("commonjs")
+		expect(source).toContain("__dirname")
+		/* an import only types use is stripped, as node strips it, and leaves no module syntax */
+		expect(formatOf("t.ts", `import type { X } from "./x"\nconst x: X | null = null\n${REQUIRES}`).format).toBe(
+			"commonjs",
+		)
+	})
+
+	it("loads one with module syntax as an ES module, as node detects it in a package with no type", () => {
+		const modules = [
+			"import path from 'node:path'\n",
+			"export const a = 1\n",
+			"export default 1\n",
+			"export { a } from './a'\n",
+			"const u = import.meta.url\n",
+			"function f() { return import.meta.url }\n",
+			"await Promise.resolve()\n",
+			"for await (const x of []) {}\n",
+		]
+		for (const source of modules)
+			expect(formatOf("db.tables.ts", source, { name: "app" }).format, source).toBe("module")
+	})
+
+	it("takes what node strips or runs in CommonJS as no module syntax: types, ambient exports, export =, a function's await", () => {
+		const scripts = [
+			"export type A = string\n",
+			"export interface B { b: string }\n",
+			"export type { C } from './c'\n",
+			"export declare const d: number\n",
+			"const e = 1\nexport = e\n",
+			"async function f() { await Promise.resolve() }\n",
+			"class G { static { void 0 } }\n",
+		]
+		for (const source of scripts)
+			expect(formatOf("db.tables.ts", source, { name: "app" }).format, source).toBe("commonjs")
+	})
+
+	it("follows the nearest package.json's type, and takes .cts and .mts by their extension", () => {
+		expect(formatOf("db.tables.ts", REQUIRES, { type: "module" }).format).toBe("module")
+		fs.mkdirSync(path.join(dir, "cjs"))
+		fs.writeFileSync(path.join(dir, "cjs/package.json"), JSON.stringify({ type: "commonjs" }))
+		expect(formatOf("cjs/db.tables.ts", "import path from 'node:path'\nexport const p = path\n").format).toBe(
+			"commonjs",
+		)
+		expect(formatOf("a.cts", "import path from 'node:path'\nexport = path\n", { type: "module" }).format).toBe(
+			"commonjs",
+		)
+		expect(formatOf("b.mts", REQUIRES.replace("export = ", "export default "), { name: "app" }).format).toBe("module")
+	})
+})

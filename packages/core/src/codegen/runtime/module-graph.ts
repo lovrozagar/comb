@@ -5,22 +5,9 @@
  * would. Type-only imports load nothing at runtime and are left out. The same walk runs under bun
  * and node, so what the reader finds by identity is the same on both.
  */
-import fs from "node:fs"
 import path from "node:path"
 import { ts } from "ts-morph"
-import { compilerOptionsFor, transpiled } from "./ts-options.mjs"
-
-/** Whether `file` runs as CommonJS: a .cjs or .cts file, or one whose package.json names no "type": "module" */
-function commonJs(file: string): boolean {
-	if (/\.c[jt]s$/.test(file)) return true
-	if (/\.m[jt]s$/.test(file)) return false
-	for (let dir = path.dirname(file); ; dir = path.dirname(dir)) {
-		const manifest = path.join(dir, "package.json")
-		if (fs.existsSync(manifest))
-			return (JSON.parse(fs.readFileSync(manifest, "utf8")) as { type?: unknown }).type !== "module"
-		if (path.dirname(dir) === dir) return true
-	}
-}
+import { compilerOptionsFor, isCommonJs, transpiled } from "./ts-options.mjs"
 
 /** The literal module a `require("…")` call names, alone or under a property read; undefined for any other expression */
 function required(expression: ts.Expression | undefined): string | undefined {
@@ -43,7 +30,7 @@ function required(expression: ts.Expression | undefined): string | undefined {
  */
 function runtimeSpecifiers(file: string): string[] {
 	const source = ts.createSourceFile(file, transpiled(file), ts.ScriptTarget.Latest, false)
-	const cjs = commonJs(file)
+	const cjs = isCommonJs(file)
 	const out: string[] = []
 	for (const statement of source.statements) {
 		const from =

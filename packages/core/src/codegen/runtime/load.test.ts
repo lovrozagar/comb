@@ -217,3 +217,17 @@ describe("loadSnapshot on a tables module that imports a seeder on demand", () =
 		expect(fs.existsSync(ran)).toBe(false)
 	})
 })
+
+/* F54 of the 0.13.0 round: a tables module in a CommonJS package loads under node as node runs it */
+describe("loadSnapshot on a tables module of a CommonJS package", () => {
+	/* no module syntax, so node runs it as CommonJS, and bun runs it either way */
+	it("loads one that reads __dirname and requires, as node and bun both run it", () => {
+		fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "app" }))
+		fs.writeFileSync(path.join(dir, "seed.json"), '{ "ok": true }\n')
+		fs.writeFileSync(
+			tables(),
+			`const path = require("node:path")\nconst seed: { ok: boolean } = require(path.join(__dirname, "seed.json"))\nif (!seed.ok) throw new Error("no seed")\n`,
+		)
+		expect(loadSnapshot(tables(), { run: realRun })).toEqual({ tables: [] })
+	})
+})

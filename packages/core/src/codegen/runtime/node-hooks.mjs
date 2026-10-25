@@ -9,9 +9,10 @@
 import nodeModule from "node:module"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { ts } from "ts-morph"
-import { compilerOptionsFor, transpiled } from "./ts-options.mjs"
+import fs from "node:fs"
+import { compilerOptionsFor, runsAsCommonJs, transpiled } from "./ts-options.mjs"
 
-const TYPESCRIPT = /\.(?:ts|tsx|mts)$/
+const TYPESCRIPT = /\.(?:ts|tsx|mts|cts)$/
 
 /**
  * The URL a specifier names from a TypeScript parent, as the consumer's tsconfig resolves it;
@@ -47,7 +48,8 @@ export function resolveSync(specifier, context, nextResolve) {
 }
 
 /**
- * A TypeScript file as the ES module its transpiled text is; anything else as node loads it
+ * A TypeScript file in the format node itself gives it, transpiled to that format (F54); anything
+ * else as node loads it
  * @param {string} url
  * @param {unknown} context
  * @param {(url: string, context: unknown) => unknown} nextLoad
@@ -55,7 +57,10 @@ export function resolveSync(specifier, context, nextResolve) {
 export function loadSync(url, context, nextLoad) {
 	/* by its path: comb imports comb.config.ts with a ?mtime= query */
 	if (!url.startsWith("file:") || !TYPESCRIPT.test(new URL(url).pathname)) return nextLoad(url, context)
-	return { format: "module", shortCircuit: true, source: transpiled(fileURLToPath(url)) }
+	const file = fileURLToPath(url)
+	if (!runsAsCommonJs(file, fs.readFileSync(file, "utf8")))
+		return { format: "module", shortCircuit: true, source: transpiled(file) }
+	return { format: "commonjs", shortCircuit: true, source: transpiled(file, ts.ModuleKind.CommonJS) }
 }
 
 /**
