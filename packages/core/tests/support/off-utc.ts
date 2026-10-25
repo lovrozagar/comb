@@ -11,7 +11,7 @@ export const OFF_UTC_ZONE = "Asia/Kathmandu"
 
 /** What makes a suite one of them: a Date key, a timestamp mode, or the shared seconds-mode cases */
 export const DATE_KEYS =
-	/mode: "timestamp"|timestamp\(|new Date\(|getTimezoneOffset|secondsBound|timestampBound|seconds-anchor/
+	/mode: "timestamp"|(?<![\w$])timestamp\(|new Date\(|getTimezoneOffset|secondsBound|timestampBound|seconds-anchor/
 
 /** The unit suites that page, read or write Date keys */
 export const OFF_UTC_UNIT = [
@@ -20,7 +20,6 @@ export const OFF_UTC_UNIT = [
 	"src/codegen/generators/dtos/field-schema.test.ts",
 	"src/codegen/generators/dtos/generate.fields.test.ts",
 	"src/migrate/core/atlas-dir.test.ts",
-	"src/migrate/core/classify.test.ts",
 	"src/migrate/drivers/d1.test.ts",
 	"src/pg/columns.meta.test.ts",
 	"src/pg/columns.test.ts",

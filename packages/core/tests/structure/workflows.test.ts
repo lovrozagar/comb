@@ -204,6 +204,15 @@ describe("the pass of the Date-key suites off UTC", () => {
 		expect([...OFF_UTC_UNIT, ...OFF_UTC_INTEGRATION].toSorted()).toEqual(scanned)
 	})
 
+	/* a function whose name ends in timestamp, as Postgres's clock_timestamp(), is no comb timestamp column */
+	it("takes c.timestamp( as a Date key, and no name that only ends in timestamp(", () => {
+		expect(DATE_KEYS.test('c.timestamp("at")')).toBe(true)
+		expect(DATE_KEYS.test("timestamp(")).toBe(true)
+		expect(DATE_KEYS.test("DEFAULT clock_timestamp()")).toBe(false)
+		expect(DATE_KEYS.test("now_timestamp(")).toBe(false)
+		expect(DATE_KEYS.test("$timestamp(")).toBe(false)
+	})
+
 	it("runs them in a zone whose offset is a fraction of an hour, in both projects of the config", () => {
 		const offset = new Intl.DateTimeFormat("en-US", { timeZone: OFF_UTC_ZONE, timeZoneName: "longOffset" })
 			.formatToParts(new Date(2000, 0, 1))
