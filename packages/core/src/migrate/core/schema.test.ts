@@ -143,7 +143,7 @@ describe("extractSchema: trigger events and FTS sync triggers", () => {
 		/* a Postgres history's triggers are read from its parse trees, not its text */
 		expect(pg.triggers).toEqual([])
 		expect(historyFacts(pg, "public").triggers).toEqual(
-			new Map([["post", [{ events: ["insert", "delete", "update"], name: "t" }]]]),
+			new Map([["post", [{ enabled: true, events: ["insert", "delete", "update"], name: "t" }]]]),
 		)
 		const fts = extractSchema(
 			"CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post');\nCREATE TRIGGER post_fts_ad AFTER DELETE ON post BEGIN INSERT INTO post_fts(post_fts, rowid, title) VALUES ('delete', old.id, old.title); END;\nCREATE TRIGGER copy AFTER DELETE ON post BEGIN INSERT INTO post_fts(rowid, title) SELECT id, title FROM post; END;\nCREATE TRIGGER nobody AFTER DELETE ON post BEGIN SELECT 1; END;",

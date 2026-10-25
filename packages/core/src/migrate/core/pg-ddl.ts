@@ -261,4 +261,4 @@ function followFresh(type: string, node: Node, ctx: FreshContext): void {
 	}
 }
 
-export { ddlFindings, followFresh }
+export { ddlFindings, followFresh, REWRITES }

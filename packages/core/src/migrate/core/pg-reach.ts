@@ -32,23 +32,41 @@ function reached(table: string, inh: boolean, facts: Facts): string[] {
 	return out
 }
 
+/**
+ * The tables whose defaults and checks a write to `table` takes: itself and its inheritance
+ * ancestors, as a child copies its parents' (M73); a partition's are its own
+ */
+function inheritedFrom(table: string, facts: Facts): string[] {
+	const out = [table]
+	for (let i = 0; i < out.length; i++)
+		for (const { parent, partition } of facts.parents.get(out[i] as string) ?? [])
+			if (!partition && !out.includes(parent)) out.push(parent)
+	return out
+}
+
 /** What a write to `table` runs, for any of `events`: each trigger and each attached code of every table it reaches */
 function reachFindings(
 	table: { inh: boolean; key: string },
 	events: readonly string[],
-	ctx: { before?: ExtractedSchema | undefined; facts: Facts },
+	ctx: { before?: ExtractedSchema | undefined; everyTrigger?: boolean | undefined; facts: Facts },
 ): Finding[] {
-	return reached(table.key, table.inh, ctx.facts).flatMap((key) => [
-		...(ctx.facts.triggers.get(key) ?? [])
-			.filter((trigger) => trigger.events.some((event) => events.includes(event)))
-			.map((trigger) => ({
-				level: "unsafe" as const,
-				note: `fires trigger ${trigger.name}, whose body runs for every row it writes`,
-			})),
-		...(ctx.facts.code.has(key)
-			? [{ level: "unsafe" as const, note: `runs ${ctx.facts.code.get(key) as string} on every write to ${key}` }]
-			: []),
-	])
+	return reached(table.key, table.inh, ctx.facts).flatMap((key) => {
+		const code = inheritedFrom(key, ctx.facts).find((each) => ctx.facts.code.has(each))
+		return [
+			...(ctx.facts.triggers.get(key) ?? [])
+				.filter(
+					(trigger) =>
+						(trigger.enabled || ctx.everyTrigger === true) && trigger.events.some((event) => events.includes(event)),
+				)
+				.map((trigger) => ({
+					level: "unsafe" as const,
+					note: `fires trigger ${trigger.name}, whose body runs for every row it writes`,
+				})),
+			...(code === undefined
+				? []
+				: [{ level: "unsafe" as const, note: `runs ${ctx.facts.code.get(code) as string} on every write to ${key}` }]),
+		]
+	})
 }
 
 /** A use of a migration's operator, or a cast to a type a migration's cast reaches: its finding */

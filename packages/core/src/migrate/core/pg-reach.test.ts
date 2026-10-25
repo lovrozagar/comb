@@ -8,6 +8,7 @@ const FACTS: Facts = {
 	code: new Map([["c", "f"]]),
 	columnTypes: new Map(),
 	defined: new Set(),
+	eventTriggers: new Map(),
 	domains: new Map(),
 	operators: new Map([["===", "eq3"]]),
 	schema: "public",

@@ -75,7 +75,7 @@ function followTrigger(type: string, node: Node, facts: Facts): void {
 		const name = String(node["trigname"])
 		const events = EVENTS.filter(([bit]) => ((node["events"] as number) & bit) !== 0).map(([, event]) => event)
 		const kept = (facts.triggers.get(table) ?? []).filter((each) => each.name !== name)
-		facts.triggers.set(table, [...kept, { events, name }])
+		facts.triggers.set(table, [...kept, { enabled: true, events, name }])
 	} else if (type === "RenameStmt" && node["renameType"] === "OBJECT_TRIGGER") {
 		const table = tableOf(node["relation"], facts.schema).key
 		for (const each of facts.triggers.get(table) ?? [])

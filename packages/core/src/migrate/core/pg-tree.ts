@@ -25,6 +25,7 @@ import { builtinFinding } from "./pg-builtins.ts"
 import { type Facts, followTree, keyOf, names, nodesOf, tableOf } from "./pg-history.ts"
 import { postgresParser } from "./pg-parser.ts"
 import { ddlFindings, followFresh } from "./pg-ddl.ts"
+import { eventFindings } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 
 type Node = Record<string, unknown>
@@ -32,6 +33,11 @@ type Node = Record<string, unknown>
 /** What the walk reads a statement against: the history, what it and the file so far attached and defined, and what the file made fresh */
 type TreeContext = {
 	before?: ExtractedSchema | undefined
+	/**
+	 * whether the file so far set session_replication_role, which flips which triggers fire: from
+	 * then on every trigger counts as firing, whatever the history left its state (M73)
+	 */
+	everyTrigger?: boolean | undefined
 	/** what the history and the file so far attached to their tables (pg-history.ts) */
 	facts: Facts
 	fresh: Fresh
@@ -40,7 +46,7 @@ type TreeContext = {
 // lookup-table: the settings whose change decides what a later statement runs, and why
 const SETTINGS: Readonly<Record<string, string>> = {
 	search_path: "sets search_path, which decides the function or table every later unqualified name resolves to",
-	session_replication_role: "sets session_replication_role, which can turn off triggers and foreign-key checks",
+	session_replication_role: "disables foreign key checks and ordinary triggers for the session",
 	role: 'sets the role, which changes the schemas "$user" puts on the search path and what later names resolve to',
 	session_authorization:
 		'sets the session user, which changes the schemas "$user" puts on the search path and what later names resolve to',
@@ -121,6 +127,19 @@ function settingFinding(node: Node): Finding | undefined {
 	return note === undefined ? undefined : { level: "unsafe", note }
 }
 
+/**
+ * A set_config of session_replication_role, or of a setting comb cannot read: the SET's finding,
+ * every later trigger counted as firing; undefined for any other call
+ */
+function replicationFinding(node: Node, ctx: TreeContext): Finding | undefined {
+	if (names(node["funcname"]).at(-1) !== "set_config") return undefined
+	const first = ((node["args"] as Node[] | undefined) ?? [])[0]?.["A_Const"] as Node | undefined
+	const setting = (first?.["sval"] as { sval: string } | undefined)?.sval
+	if (setting !== undefined && setting !== "session_replication_role") return undefined
+	ctx.everyTrigger = true
+	return { level: "unsafe", note: SETTINGS["session_replication_role"] }
+}
+
 /** A function or procedure the file creates: its finding, its name kept as one a migration defined */
 function routineFinding(node: Node, ctx: TreeContext): Finding {
 	const kind = node["is_procedure"] === true ? "procedure" : "function"
@@ -156,8 +175,12 @@ function codeFinding(type: string, node: Node, ctx: TreeContext): Finding | unde
 			level: "unsafe",
 			note: `creates trigger ${String(node["trigname"])}, which runs a function on later writes`,
 		}
-	if (type === "VariableSetStmt") return settingFinding(node)
-	if (type === "FuncCall") return builtinFinding(names(node["funcname"]), ctx.facts.defined)
+	if (type === "VariableSetStmt") {
+		if (node["name"] === "session_replication_role") ctx.everyTrigger = true
+		return settingFinding(node)
+	}
+	if (type === "FuncCall")
+		return replicationFinding(node, ctx) ?? builtinFinding(names(node["funcname"]), ctx.facts.defined)
 	/* a CALL holds its call as a plain field, not a typed node */
 	if (type === "CallStmt") return builtinFinding(names((node["funccall"] as Node)["funcname"]), ctx.facts.defined)
 	return useFinding(type, node, ctx.facts) ?? shadowFinding(type, node, ctx)
@@ -201,6 +224,8 @@ function pgTreeFindings(stmt: string, ctx: TreeContext): Finding[] {
 		followFresh(type, node, ctx)
 		if (type === "AlterTableStmt") followParentage(node, ctx.fresh, ctx.facts.schema)
 	}
+	/* the event triggers the history made run on this statement before what it makes counts */
+	findings.push(...eventFindings(tree.stmts, ctx))
 	followTree(tree.stmts, ctx.facts)
 	return findings
 }

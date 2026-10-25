@@ -160,11 +160,17 @@ describe("Postgres statements that change what later names resolve to, or what a
 		["SET LOCAL search_path = app;", "search_path"],
 		["RESET search_path;", "search_path"],
 		["RESET ALL;", "every setting"],
-		["SET session_replication_role = replica;", "session_replication_role"],
 	])("rates %j unsafe (T2, T3)", (sql, setting) => {
 		const rated = rate(sql)
 		expect(rated.safety).toBe("unsafe")
 		expect(rated.unsafeStatements.join("\n")).toMatch(new RegExp(`(?:sets|resets) ${setting}`))
+	})
+
+	/* M73: what session_replication_role turns off, said in its note */
+	it("rates a SET of session_replication_role unsafe, saying what it turns off", () => {
+		expect(rate("SET session_replication_role = replica;").unsafeStatements.join("\n")).toContain(
+			"disables foreign key checks and ordinary triggers for the session",
+		)
 	})
 
 	it("keeps an ordinary setting safe", () => {

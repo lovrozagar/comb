@@ -7,6 +7,9 @@ import type { TriggerEvent } from "../types.ts"
 
 type Node = Record<string, unknown>
 
+/** An event trigger the history made: the event it runs on, its `WHEN TAG IN` list, and whether it is enabled (M73) */
+type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefined }
+
 /** What the history attached to its tables, keyed as nameKey keys a Postgres name */
 type Facts = {
 	/** each type a migration's cast reaches, with the cast's function, and whether the cast is implicit or on assignment */
@@ -15,6 +18,8 @@ type Facts = {
 	code: Map<string, string>
 	/** each table's column types */
 	columnTypes: Map<string, Set<string>>
+	/** each event trigger the history made, by name */
+	eventTriggers: Map<string, EventTrigger>
 	/** every function, procedure and aggregate a migration defined, by each key it had */
 	defined: Set<string>
 	/** each domain whose CHECK calls a function, with the function */
@@ -33,7 +38,7 @@ type Facts = {
 	 */
 	views: Map<string, { base: string | undefined; columns: Map<string, string> | "all" }>
 	/** each table's triggers, with the writes that fire them */
-	triggers: Map<string, Array<{ events: TriggerEvent[]; name: string }>>
+	triggers: Map<string, Array<{ enabled: boolean; events: TriggerEvent[]; name: string }>>
 }
 
 /** Every node under `node`, by its type, the type's fields with it */
@@ -69,4 +74,4 @@ function tableOf(relation: unknown, schema: string): { key: string; name: string
 /** A type's key under `schema` */
 const typeOf = (typeName: unknown, schema: string): string => keyOf(names((typeName as Node)["names"]), schema)
 
-export { type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf }
+export { type EventTrigger, type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf }
