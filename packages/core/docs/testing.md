@@ -33,7 +33,7 @@ packages/core/
 
 `bun run verify` runs each gate in order, stops at the first failure, and stamps the commit when all pass; it refuses a dirty tree. pre-push refuses any commit without a stamp.
 
-Every test run is in UTC, as CI's runners are: the vitest configs set `TZ` before their workers fork, and `bunfig.toml` preloads `tests/bun/support/utc.ts` for the bun suites, whatever the shell's `TZ`. A time-zone-dependent expectation then fails locally as it would in CI (`tests/structure/workflows.test.ts` holds the pins).
+Every test run is in UTC, as CI's runners are: the vitest configs set `TZ` before their workers fork, and `bunfig.toml` preloads `tests/bun/support/utc.ts` for the bun suites, whatever the shell's `TZ`. A time-zone-dependent expectation then fails locally as it would in CI (`tests/structure/workflows.test.ts` holds the pins). The suites that turn a `Date` into a key or a bound run a second time in Asia/Kathmandu (UTC+05:45), as the vitest projects `unit (Asia/Kathmandu)` and `integration (Asia/Kathmandu)`, listed in `tests/support/off-utc.ts`; a value that shifts with the time zone fails there though it passes in UTC.
 
 | Gate               | Runs                                                                                                | In CI                          |
 | ------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------ |
