@@ -4,8 +4,8 @@
  * Objects a generated file must import, a c.json schema or a c.enum values array, are located by
  * identity among the exports of the project modules the tables module loads.
  */
-import { type Column, getTableColumns, getTableName, is, type SQL, type Table } from "drizzle-orm"
-import { getTableConfig as pgConfig, PgDialect, PgTable } from "drizzle-orm/pg-core"
+import { Column, getTableColumns, getTableName, is, type SQL, type Table } from "drizzle-orm"
+import { ExtraConfigColumn, getTableConfig as pgConfig, IndexedColumn, PgDialect, PgTable } from "drizzle-orm/pg-core"
 import { getTableConfig as sqliteConfig, SQLiteDialect, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { pgObjectName } from "../../identifier.ts"
 import { combColumnMeta } from "../../meta/column.ts"
@@ -223,7 +223,21 @@ function tableOf([table, exportName]: [Table, string], context: Context): Snapsh
 	const dialect = dialectOf(table)
 	const config = dialect.config(table)
 	const entries = Object.entries(getTableColumns(table)) as Array<[string, ReadColumn]>
-	const keyOf = (column: unknown) => entries.find(([, each]) => each === column)?.[0]
+	/*
+	 * A column a third argument names, by its key: sqlite-core passes the table's own column, pg-core
+	 * a stand-in (an ExtraConfigColumn, or an index's IndexedColumn) matched by its SQL name (F45).
+	 * SQL is no column (undefined); any other column, one of another table, is refused naming this one.
+	 */
+	const keyOf = (column: unknown): string | undefined => {
+		const own = entries.find(([, each]) => each === column)?.[0]
+		if (own !== undefined || !(is(column, Column) || is(column, IndexedColumn))) return own
+		const standIn = is(column, ExtraConfigColumn) || is(column, IndexedColumn)
+		const named = standIn ? entries.find(([, each]) => each.name === column.name)?.[0] : undefined
+		if (named !== undefined) return named
+		throw new Error(
+			`${exportName}: its third argument names the column ${column.name}, which is no column of ${config.name}`,
+		)
+	}
 	const columns = entries.map((entry) => columnOf(entry, `${exportName}.${entry[0]}`, context))
 	for (const fk of config.foreignKeys) {
 		const reference = referenceOf(fk, exportName)

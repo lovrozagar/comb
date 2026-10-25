@@ -86,6 +86,21 @@ export const membership = sqliteTable("membership", { orgSlug: c.text("org_slug"
 		expect(accepts(dtos["membershipDtoCreateSchema"], { orgSlug: "o", role: "admin", userSlug: "u" })).toBe(true)
 		expect(keys(dtos["membershipDtoUpdateSchema"])).toEqual(["role"])
 	}, 120_000)
+
+	/* F45 of the 0.13.0 round: pg-core's third argument names the key columns through stand-ins, so the
+	   key was dropped and an update body could re-key a row */
+	it("does the same on Postgres, so an update body cannot change a part of the key", async () => {
+		const dir = await generated(
+			`import { primaryKey } from "drizzle-orm/pg-core"
+export const membership = pgTable("membership", { orgSlug: c.text("org_slug"), userSlug: c.text("user_slug"), role: c.text("role").notNull() }, (t) => [primaryKey({ columns: [t.orgSlug, t.userSlug] })])`,
+			{ dialect: "postgres" },
+		)
+		const dtos = await dtosOf(dir, "membership")
+		expect(accepts(dtos["membershipDtoCreateSchema"], { role: "admin" })).toBe(false)
+		expect(accepts(dtos["membershipDtoCreateSchema"], { orgSlug: "o", role: "admin", userSlug: "u" })).toBe(true)
+		expect(keys(dtos["membershipDtoUpdateSchema"])).toEqual(["role"])
+		expect(dtos["membershipDtoUpdateSchema"]?.parse({ role: "admin", userSlug: "other" })).toEqual({ role: "admin" })
+	}, 120_000)
 })
 
 describe("columns the database fills (F8)", () => {
