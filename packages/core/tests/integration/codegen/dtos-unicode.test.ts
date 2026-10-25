@@ -106,3 +106,50 @@ export const page = ${table}("page", { id: c.id("pag"), slug: c.text("slug", { m
 		})
 	}
 })
+
+/** The F48 tables on `table`, a pgTable or a sqliteTable */
+const TABLES = (table: string) => `export const account = ${table}("account", { id: c.id("acc") })
+export const plain = ${table}("plain", { id: c.id("pln"), ownerId: c.ref("owner_id").notNull().references(() => account.id), homeId: c.ref("home_id"), byText: c.text("by_text").notNull().references(() => account.id) })`
+
+/*
+ * F48 of the 0.13.0 round: a key reference takes the id rule, `^\S{1,48}$`, which U+0000 and either
+ * half of a surrogate pair match, so it takes the text guard after it, as every written text does
+ */
+describe("a reference under the id rule (F48)", () => {
+	const BODY = { byText: "acc_1", homeId: "hom_1", ownerId: "acc_1" }
+
+	for (const dialect of ["postgres", "sqlite"] as const) {
+		it(`refuses U+0000 and a lone surrogate in each, and takes an id, on ${dialect}`, async () => {
+			const dtos = await generatedDtos(`f48-${dialect}`, TABLES(dialect === "postgres" ? "pgTable" : "sqliteTable"), {
+				dialect,
+			})
+			const create = dtos["plain"]?.["plainDtoCreateSchema"] as z.ZodObject
+			expect(create.safeParse(BODY).success).toBe(true)
+			expect(create.safeParse({ ...BODY, ownerId: "acc_😀" }).success).toBe(true)
+			for (const key of ["byText", "homeId", "ownerId"])
+				for (const bad of ["acc_1\u0000", "acc_\ud800", "\udc00"])
+					expect(create.safeParse({ ...BODY, [key]: bad }).success, `${key} ${JSON.stringify(bad)}`).toBe(false)
+		})
+	}
+
+	it("stores no row for a NUL reference on SQLite with foreign keys off, which libsql would cut to a real id", async () => {
+		const dtos = await generatedDtos("f48-store", TABLES("sqliteTable"))
+		const create = dtos["plain"]?.["plainDtoCreateSchema"] as z.ZodObject
+		const { client, close } = libsqlMemory()
+		try {
+			await client.executeMultiple(`PRAGMA foreign_keys = OFF;
+CREATE TABLE plain (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, home_id TEXT, by_text TEXT NOT NULL);`)
+			const body = { ...BODY, ownerId: "acc_1\u0000tail" }
+			const parsed = create.safeParse(body)
+			if (parsed.success)
+				await client.execute({
+					args: ["pln_1", body.ownerId, body.homeId, body.byText],
+					sql: "INSERT INTO plain VALUES (?, ?, ?, ?)",
+				})
+			expect(parsed.success).toBe(false)
+			expect((await client.execute("SELECT count(*) AS n FROM plain")).rows[0]?.["n"]).toBe(0)
+		} finally {
+			close()
+		}
+	})
+})

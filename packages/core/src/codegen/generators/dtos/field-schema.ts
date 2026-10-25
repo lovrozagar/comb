@@ -40,6 +40,13 @@ const JSON_NUL_CHECK =
 const TEXT_RULE = "no U+0000 or unpaired surrogate"
 
 /*
+ * the text guard every written text takes: under u, a lone surrogate is a code point of the range, a
+ * pair one code point past it (F11). A refine, not a regex: published as a pattern, Go's and Rust's
+ * engines refuse \\u and a surrogate, and a field's own pattern would move into an allOf (F56)
+ */
+const TEXT_GUARD = `.refine((val) => /^[^\\u0000\\uD800-\\uDFFF]*$/u.test(val), { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${TEXT_RULE}" })`
+
+/*
  * a c.json column is its schema, which the runtime reader found exported; a plain json column any
  * JSON value. A written c.json value is piped from its schema into its refined copy: meta on the
  * copy itself would publish the schema inline beside its $ref, while the pipe publishes a plain $ref,
@@ -138,7 +145,8 @@ function textBounds({ annotations, field, schemaType }: Build): string {
 	const isIdField = field.combKind === "id" || field.foreignKey?.toId === true || untargetedRef
 	/* an id-like column gets the id bounds only when it declares none of its own */
 	const declares = field.length !== null || annotations.min !== null || annotations.max !== null
-	if (isIdField && !declares) return mutative ? ".regex(/^\\S{1,48}$/)" : ".min(1).max(48)"
+	/* \S matches U+0000 and either half of a pair, so a written id takes the text guard after it (F48) */
+	if (isIdField && !declares) return mutative ? `.regex(/^\\S{1,48}$/)${TEXT_GUARD}` : ".min(1).max(48)"
 	const min = minOf(annotations, field, schemaType)
 	return min + maxOf(annotations, field) + (mutative ? writeChecks(annotations) : "")
 }
@@ -151,13 +159,9 @@ function textBounds({ annotations, field, schemaType }: Build): string {
 function writeChecks(annotations: FieldConstraints): string {
 	const pattern = annotations.pattern === null ? "" : `.regex(${annotations.pattern})`
 	const https = annotations.url ? `.regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" })` : ""
-	/* under u, a lone surrogate is a code point of the range, a pair one code point past it (F11). A
-	 * refine, not a regex: published as a pattern, Go's and Rust's engines refuse \\u and a surrogate,
-	 * and a field's own pattern would move into an allOf (F56) */
-	const nul = `.refine((val) => /^[^\\u0000\\uD800-\\uDFFF]*$/u.test(val), { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": ${JSON.stringify(TEXT_RULE)} })`
 	/* zod drops a url's format once a regex follows it; published again, a client refuses what z.url() does (F25) */
 	const format = annotations.url ? '.meta({ format: "uri" })' : ""
-	return pattern + https + kindChecks(annotations) + nul + format
+	return pattern + https + kindChecks(annotations) + TEXT_GUARD + format
 }
 
 /** A c.text or c.id column, or any other string column: what every builder before it left */
