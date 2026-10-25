@@ -33,10 +33,10 @@ export const membership = sqliteTable("membership", {
 }, (t) => [primaryKey({ columns: [t.userId, t.role] })])
 `
 
-const PG_TABLES = `import { pgEnum, pgTable, varchar } from "drizzle-orm/pg-core"
+const PG_TABLES = `import { integer, pgEnum, pgTable, text, varchar } from "drizzle-orm/pg-core"
 import { c } from "@lovrozagar/comb/pg/columns"
 export const mood = pgEnum("mood", ["ok", "sad"])
-export const ticket = pgTable("ticket", { id: c.integer("id").primaryKey().generatedAlwaysAsIdentity(), code: varchar("code", { length: 3 }).notNull(), feeling: mood("feeling") })
+export const ticket = pgTable("ticket", { id: c.integer("id").primaryKey().generatedAlwaysAsIdentity(), code: varchar("code", { length: 3 }).notNull(), feeling: mood("feeling"), tags: text("tags").array(), grid: integer("grid").array("[][]") })
 `
 
 const FILES = {

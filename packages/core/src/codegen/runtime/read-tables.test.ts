@@ -225,3 +225,19 @@ describe("snapshotOf: a composite foreign key (F46)", () => {
 		])
 	})
 })
+
+/* F49 of the 0.13.0 round: a Postgres array's dimensions, as drizzle reads them from .array() */
+describe("snapshotOf: a Postgres array column's dimensions (F49)", () => {
+	it("reads each, 0 for a column of one value, and refuses one drizzle could not read", () => {
+		const bag = pgTable("bag", {
+			one: integer("one"),
+			list: integer("list").array(),
+			grid: integer("grid").array("[][]"),
+		})
+		expect(analyzeNamespace({ bag }).tables[0]?.fields.map((field) => field.dimensions)).toEqual([0, 1, 2])
+		const odd = pgTable("odd", { n: integer("n").array(3 as never) })
+		expect(() => analyzeNamespace({ odd })).toThrow(
+			'odd.n: drizzle could not read its array dimensions; write .array() or .array("[][]")',
+		)
+	})
+})

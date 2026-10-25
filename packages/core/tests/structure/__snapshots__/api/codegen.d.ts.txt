@@ -147,6 +147,8 @@ type FieldMeta = {
     /** the names the field's generated schema uses and must import (a c.json schema) */
     schemaImports: ImportRef[];
     /** the declared length: c.text's max, or drizzle's `length` */
+    /** a Postgres array's declared dimensions; 0 or absent for a column of one value (F49) */
+    dimensions?: number | undefined;
     length: number | null;
     /** Field name as defined in the table schema object */
     name: string;

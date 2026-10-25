@@ -247,9 +247,40 @@ export function generateFieldSchema(
 	if (field.constraints.private && isRead(schemaType)) return null
 	if (isMutative(schemaType) && isGenerated(field)) return null
 	const build: Build = { annotations: field.constraints, dialect, field, imports, schemaType }
+	const dimensions = field.dimensions ?? 0
+	if (dimensions === 0) return finish(build, baseOf(build))
+	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49) */
+	const element = baseOf({ ...build, field: { ...field, dimensions: 0, isNotNull: false } })
+	return finish(build, arrayOf(dimensions, schemaType, `${element}.nullable()`))
+}
+
+/** The Zod base of a column of one value: the first builder's that takes it, else text */
+function baseOf(build: Build): string {
 	for (const builder of BUILDERS) {
 		const base = builder(build)
-		if (base !== undefined) return finish(build, base)
+		if (base !== undefined) return base
 	}
-	return finish(build, textBase(build))
+	return textBase(build)
+}
+
+/* Postgres keeps at most 6 dimensions (MAXDIM) */
+const MAX_DIMENSIONS = 6
+
+/* Postgres refuses a ragged multidimensional array: each level's sub-arrays must share one shape */
+const RECTANGULAR =
+	'.refine((value) => { const shape = (part: unknown): string => (Array.isArray(part) ? `${part.length}[${[...new Set(part.map(shape))].join("|")}]` : ""); return !shape(value).includes("|") }, { message: "Must be a rectangular array: every sub-array of a level the same length" })'
+
+/**
+ * An array column of `item`s: written, in exactly its declared dimensions, rectangular past one; read,
+ * in any depth Postgres holds, as it keeps no declared dimensions and a read never refuses a stored
+ * row (F49)
+ */
+function arrayOf(dimensions: number, schemaType: SchemaType, item: string): string {
+	let nested = `z.array(${item})`
+	if (!isMutative(schemaType)) {
+		for (let depth = 1; depth < MAX_DIMENSIONS; depth++) nested = `z.array(z.union([${item}, ${nested}]))`
+		return nested
+	}
+	for (let depth = 1; depth < dimensions; depth++) nested = `z.array(${nested})`
+	return dimensions > 1 ? `${nested}${RECTANGULAR}` : nested
 }

@@ -142,6 +142,7 @@ function fieldOf(column: SnapshotColumn, { file, table, tables }: Build): FieldM
 		inCompositeKey: table.compositeKey.includes(column.key),
 		isNotNull: column.notNull,
 		isPrimaryKey: column.primary,
+		dimensions: column.dimensions,
 		length: typeof constraints.max === "number" ? constraints.max : column.length,
 		name: column.key,
 		onUpdate: column.onUpdate,

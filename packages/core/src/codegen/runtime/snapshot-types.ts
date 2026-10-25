@@ -49,6 +49,8 @@ type SnapshotColumn = {
 	identity: boolean
 	/** the property key */
 	key: string
+	/** a Postgres array's declared dimensions, 0 for a column of one value */
+	dimensions: number
 	length: number | null
 	notNull: boolean
 	onUpdate: boolean

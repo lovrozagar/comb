@@ -66,9 +66,11 @@ const NO_EXAMPLE_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set([
 ])
 
 /* sensitive or structured values get no example: the schema says enough, the value would leak */
-function hasNoExample({ combKind, constraints, dataType, foreignKey }: FieldMeta): boolean {
-	/* a pattern decides what the value looks like, which no generic example can know */
+function hasNoExample({ combKind, constraints, dataType, dimensions, foreignKey }: FieldMeta): boolean {
+	/* a pattern decides what the value looks like, which no generic example can know; an array's
+	 * example would be its element's, of the wrong shape (F49) */
 	if (constraints.private || constraints.password || constraints.pattern !== null || foreignKey !== null) return true
+	if ((dimensions ?? 0) > 0) return true
 	if (combKind === null) return dataType === "object json"
 	return NO_EXAMPLE_KINDS.has(combKind)
 }

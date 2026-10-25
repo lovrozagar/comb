@@ -130,7 +130,7 @@ function transformTables(
 				primaryKey: field.isPrimaryKey,
 				...(reference && { reference }),
 				/* a plain drizzle column is the type drizzle itself writes for it */
-				type: field.combKind === null ? field.sqlType.toUpperCase() : drizzleHelperToSqlType(field.combKind, dialect),
+				type: `${field.combKind === null ? field.sqlType.toUpperCase() : drizzleHelperToSqlType(field.combKind, dialect)}${"[]".repeat(field.dimensions ?? 0)}`,
 			})
 			if (relation) relations.push(relation)
 			if (tableKey) foreignKeys.push(tableKey)

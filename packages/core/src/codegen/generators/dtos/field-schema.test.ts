@@ -1,5 +1,6 @@
 import { pgTable } from "drizzle-orm/pg-core"
 import { sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { parseField } from "../../__fixtures__/runtime.ts"
@@ -410,5 +411,48 @@ describe("generateFieldSchema: the rule no engine stores", () => {
 			const json = { ...parseField("b", 'c.json("b", blobSchema)', { dialect }), jsonSchemaName: "blobSchema" }
 			expect(generated(json, "update", { dialect, imports: imports() })).toContain(JSON_RULE)
 		}
+	})
+})
+
+/** The schema of a Postgres column `a` written as `raw` */
+const array = (raw: string, type: SchemaType) =>
+	generateFieldSchema(parseField("a", raw, { dialect: "postgres" }), type, { dialect: "postgres", imports: imports() })
+
+/*
+ * F49 of the 0.13.0 round: a Postgres array is its element in an array per declared dimension on a
+ * write, rectangular past one, and in any depth Postgres holds on a read; each element nullable
+ */
+describe("generateFieldSchema: a Postgres array column (F49)", () => {
+	it("writes its element, nullable and with no min(1), in an array per dimension, and no example", () => {
+		expect(array('text("a").array().notNull()', "create")).toBe("z.array(z.string().nullable())")
+		expect(array('integer("a").array("[][]")', "update")).toMatch(
+			/^z\.array\(z\.array\(z\.number\(\)\.int\(\)\.min\(-2147483648\)\.max\(2147483647\)\.nullable\(\)\)\)\.refine\(/,
+		)
+	})
+
+	it("refuses a ragged multidimensional value, which Postgres refuses, and takes a rectangular one", () => {
+		/* the generated refine is TypeScript, typed for a consumer's noImplicitAny */
+		const code = ts.transpile(`return ${array('integer("a").array("[][][]").notNull()', "create")}`)
+		const write = new Function("z", code)(z) as z.ZodType
+		expect(write.safeParse([[[1, 2]], [[3, 4]]]).success).toBe(true)
+		expect(write.safeParse([[[1, 2]], [[3]]]).success).toBe(false)
+		expect(write.safeParse([[[1]], [[2], [3]]]).success).toBe(false)
+		expect(write.safeParse([]).success).toBe(true)
+	})
+
+	it("takes a FieldMeta without dimensions, as a consumer may build one, for a column of one value", () => {
+		const field = parseField("n", 'c.text("n")')
+		const bare = { ...field, dimensions: undefined }
+		expect(generateFieldSchema(bare, "create", { imports: imports() })).toBe(
+			generateFieldSchema(field, "create", { imports: imports() }),
+		)
+	})
+
+	it("reads any depth up to Postgres's six, as it keeps no declared dimensions", () => {
+		const read = new Function("z", `return ${array('text("a").array().notNull()', "read")}`)(z) as z.ZodType
+		expect(read.safeParse(["a", null]).success).toBe(true)
+		expect(read.safeParse([[[[[["deep"]]]]]]).success).toBe(true)
+		expect(read.safeParse([[[[[[["seven"]]]]]]]).success).toBe(false)
+		expect(read.safeParse("a").success).toBe(false)
 	})
 })

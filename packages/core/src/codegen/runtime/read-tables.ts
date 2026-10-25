@@ -74,6 +74,7 @@ function combOf(column: Column, at: string, context: Context): SnapshotComb | nu
 type ReadColumn = Column & {
 	autoIncrement?: boolean
 	defaultFn?: unknown
+	dimensions?: number | null
 	generated?: unknown
 	generatedIdentity?: unknown
 	isUnique?: boolean
@@ -104,12 +105,20 @@ const filledByDefault = (column: ReadColumn) =>
 	column.generatedIdentity !== undefined ||
 	/^Pg(?:Big|Small)?Serial/.test(column.columnType)
 
+/** A Postgres array's dimensions, which drizzle reads from `.array("[][]")`; an error for one it could not read */
+function dimensionsOf(column: ReadColumn, at: string): number {
+	const dimensions = column.dimensions ?? 0
+	if (Number.isInteger(dimensions) && dimensions >= 0) return dimensions
+	throw new Error(`${at}: drizzle could not read its array dimensions; write .array() or .array("[][]")`)
+}
+
 function columnOf([key, column]: [string, ReadColumn], at: string, context: Context): SnapshotColumn {
 	return {
 		autoIncrement: column.autoIncrement === true,
 		comb: combOf(column, at, context),
 		columnType: column.columnType,
 		dataType: column.dataType,
+		dimensions: dimensionsOf(column, at),
 		enumValues: column.enumValues === undefined ? null : [...column.enumValues],
 		foreignKey: null,
 		generated: column.generated !== undefined,

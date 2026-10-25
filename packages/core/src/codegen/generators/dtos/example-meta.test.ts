@@ -97,3 +97,12 @@ describe("generateExampleMeta: an example shorter than the column's min (F30)", 
 		expect(generateExampleMeta(parseField("m", 'c.text("m", { email: true, min: 5 })'))?.code).toBe(".meta(_m.email)")
 	})
 })
+
+/* F49 of the 0.13.0 round: an array's example would be its element's, of the wrong shape */
+describe("generateExampleMeta: a Postgres array column (F49)", () => {
+	it("gives an array no example, and a column a FieldMeta without dimensions its own", () => {
+		expect(code('c.text("f")', { dimensions: 1 })).toBeNull()
+		expect(code('c.text("f")', { dimensions: undefined })).toBe(code('c.text("f")'))
+		expect(code('c.text("f")')).not.toBeNull()
+	})
+})

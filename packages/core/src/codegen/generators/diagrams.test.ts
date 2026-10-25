@@ -147,11 +147,11 @@ describe("generateDiagrams on a Postgres database (F36)", () => {
 		const fp = path.join(tmpDir, "db.test.tables.ts")
 		fs.writeFileSync(
 			fp,
-			`import { pgTable } from "drizzle-orm/pg-core"
+			`import { pgTable, text } from "drizzle-orm/pg-core"
 import { c } from "@lovrozagar/comb/pg/columns"
 import * as z from "zod"
 export const meta = z.object({ a: z.string() })
-export const alpha = pgTable("alpha", { id: c.id("al"), teamId: c.ref("team_id").references(() => zteam.id), at: c.timestamp("at"), ok: c.boolean("ok"), blob: c.json("blob", meta), ratio: c.real("ratio") })
+export const alpha = pgTable("alpha", { id: c.id("al"), tags: text("tags").array(), teamId: c.ref("team_id").references(() => zteam.id), at: c.timestamp("at"), ok: c.boolean("ok"), blob: c.json("blob", meta), ratio: c.real("ratio") })
 export const zteam = pgTable("zteam", { id: c.id("tm"), parentId: c.ref("parent_id").references((): any => zteam.id) })
 `,
 		)
@@ -160,7 +160,14 @@ export const zteam = pgTable("zteam", { id: c.id("tm"), parentId: c.ref("parent_
 		const ddl = fs.readFileSync(path.join(tmpDir, "diagrams", "test-schema.gen.sql"), "utf-8")
 		expect(ddl).toContain("-- test Database Schema (Postgres)")
 		expect(ddl.indexOf('CREATE TABLE "zteam"')).toBeLessThan(ddl.indexOf('CREATE TABLE "alpha"'))
-		for (const type of ['"at" BIGINT', '"ok" BOOLEAN', '"blob" JSONB', '"ratio" DOUBLE PRECISION', '"team_id" TEXT'])
+		for (const type of [
+			'"tags" TEXT[]',
+			'"at" BIGINT',
+			'"ok" BOOLEAN',
+			'"blob" JSONB',
+			'"ratio" DOUBLE PRECISION',
+			'"team_id" TEXT',
+		])
 			expect(ddl).toContain(type)
 	})
 })
@@ -214,5 +221,30 @@ export const grant = createTable("grant", { id: c.id(), orgId: c.text("org_id"),
 		})
 		expect(summary).toContain("# 2 tables, 1 FKs")
 		expect(summary).toContain("2 <- 1.(org_id, user_id)[c]")
+	})
+})
+
+/* F49 of the 0.13.0 round: a Postgres array's type takes [] per dimension; a FieldMeta a consumer
+ * built without dimensions is a column of one value */
+describe("generateDiagrams: an array column's type (F49)", () => {
+	it("writes [] per dimension, and none for a field without dimensions", () => {
+		const fp = path.join(tmpDir, "db.test.tables.ts")
+		fs.writeFileSync(
+			fp,
+			`import { integer, pgTable, text } from "drizzle-orm/pg-core"
+export const bag = pgTable("bag", { id: text("id").primaryKey(), grid: integer("grid").array("[][]"), note: text("note") })
+`,
+		)
+		const analysis = analyze(fp)
+		const fields = analysis.tables[0]?.fields ?? []
+		const bare = fields.map((field) => (field.name === "note" ? { ...field, dimensions: undefined } : field))
+		const tables = [{ ...(analysis.tables[0] as (typeof analysis.tables)[number]), fields: bare }]
+		generateDiagrams(
+			{ ...testContext({ ...analysis, tables }, { cwd: tmpDir }), dialect: "postgres" },
+			{ output: "diagrams" },
+		)
+		const ddl = fs.readFileSync(path.join(tmpDir, "diagrams", "test-schema.gen.sql"), "utf-8")
+		expect(ddl).toContain('"grid" INTEGER[][]')
+		expect(ddl).toContain('"note" TEXT\n')
 	})
 })

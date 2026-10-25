@@ -127,6 +127,7 @@ describe("toAnalysis: a schema a package exports", () => {
 			},
 			columnType: "SQLiteTextJson",
 			dataType: "object json",
+			dimensions: 0,
 			enumValues: null,
 			foreignKey: null,
 			generated: false,
