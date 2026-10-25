@@ -355,6 +355,37 @@ describe("migrate apply on Postgres: files comb rewrites keep their directives",
 	})
 })
 
+/** An approval of every file, for a history set up by the test */
+const approveAll = () => Promise.resolve({ ok: true as const })
+
+/*
+ * M72 of the 0.13.0 round: comb scopes the URL to search_path=<schema>, so an unqualified name is the
+ * schema's own; a trigger the history wrote on app.users fires on a later INSERT INTO users
+ */
+describe("migrate check on Postgres under a configured schema", () => {
+	describe("with Atlas v1.3.0", () => {
+		it("refuses a write to a table whose trigger the history named with the schema", async () => {
+			await withScratchDb(async (url) => {
+				await query(url, "CREATE SCHEMA app")
+				migrations({
+					"20260101000000_t.sql": `CREATE TABLE victim (id int PRIMARY KEY);
+CREATE FUNCTION wipe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM victim; RETURN NEW; END $$;
+CREATE TABLE users (id int);
+CREATE TRIGGER t AFTER INSERT ON app.users FOR EACH ROW EXECUTE FUNCTION wipe();
+`,
+				})
+				expect(await applyWithAtlas(command(url, { approve: approveAll, schema: "app" }))).toEqual([
+					"20260101000000_t.sql",
+				])
+				migrations({ "20260102000000_seed.sql": "INSERT INTO users VALUES (1);\n" })
+				await expect(applyWithAtlas({ ...command(url, { schema: "app" }), checkOnly: true })).rejects.toThrow(
+					/20260102000000_seed\.sql is unsafe/,
+				)
+			})
+		}, 60_000)
+	})
+})
+
 it("keeps the scratch directory per test", () => {
 	expect(dir).toContain("comb-pg-apply-")
 })

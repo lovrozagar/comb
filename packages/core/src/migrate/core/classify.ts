@@ -26,7 +26,7 @@ import { pgTreeFindings } from "./pg-tree.ts"
 import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
 import { noGuards, readGuards } from "./guard-read.ts"
-import { codeOf, nameKey, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
+import { codeOf, nameKey, namingOf, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 type ClassifyOptions = {
@@ -34,6 +34,8 @@ type ClassifyOptions = {
 	before?: ExtractedSchema | undefined
 	/** how the file is read; unnamed, as SQLite, the CLI's default */
 	dialect?: Dialect | undefined
+	/** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
+	schema?: string | undefined
 }
 
 /** What the statements of one file show, read once before the rules run */
@@ -91,7 +93,7 @@ function dropNames(code: string): string[] {
 /** A CREATE INDEX that blocks writes to a table this file did not create */
 function indexWarning(code: string, ctx: FileContext): Finding | undefined {
 	const table = INDEX_ON.exec(code)?.[1]
-	if (table === undefined || ctx.created.has(nameKey(table, ctx.dialect))) return undefined
+	if (table === undefined || ctx.created.has(nameKey(table, ctx.naming))) return undefined
 	return {
 		level: "lock",
 		note: `blocks writes to ${unquote(table)} while it builds; use CREATE INDEX CONCURRENTLY in its own -- atlas:txmode none file`,
@@ -104,7 +106,7 @@ function dropsRebuiltIndex(code: string, ctx: FileContext): boolean {
 	return (
 		dropped?.[1]?.toUpperCase() === "TABLE" &&
 		splitTopLevel(dropped[2] as string).every((t) => {
-			const key = nameKey(t, ctx.dialect)
+			const key = nameKey(t, ctx.naming)
 			/* only a table whose text lives elsewhere is an index: a stored-content FTS5 table holds the only copy */
 			return ctx.reindexed.has(key) && ctx.before?.externalFts.includes(key) === true
 		})
@@ -140,27 +142,33 @@ function findingsOf(code: string, ctx: FileContext): Finding[] {
 
 type Read = ReadStatement & { findings: Finding[] }
 
-function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dialect): Read[] {
+/** The file read as `dialect` reads it, against `before`, a Postgres name keyed under `schema` */
+function readFile(
+	sql: string,
+	{ before, dialect, schema }: { before: ExtractedSchema | undefined; dialect: Dialect; schema: string },
+): Read[] {
+	const naming = namingOf(dialect, schema)
 	const statements = splitSqlStatements(sql, dialect)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
 	const created = new Set(
 		codes.flatMap((code) => {
 			const table = CREATE_TABLE.exec(code)?.[1]
-			return table === undefined ? [] : [nameKey(table, dialect)]
+			return table === undefined ? [] : [nameKey(table, naming)]
 		}),
 	)
 	const guards = dialect === "sqlite" ? readGuards(statements, codes, before) : noGuards()
 	const rebuilds: Rebuilds = dialect === "sqlite" ? rebuildsOf(statements, codes, guards.guarded) : new Map()
 	const reindexed = dialect === "sqlite" ? reindexedOf(statements) : new Set<string>()
 	const prepared = preparedOf(codes)
-	const ftsTriggers = ftsTriggersOf(statements, before, dialect)
+	const ftsTriggers = ftsTriggersOf(statements, before, naming)
 	const ctx: FileContext = {
 		before,
 		created,
 		dialect,
-		facts: historyFacts(dialect === "postgres" ? before : undefined),
-		schema: before ?? extractSchema("", undefined, dialect),
-		fresh: freshStart(before, dialect),
+		facts: historyFacts(dialect === "postgres" ? before : undefined, schema),
+		naming,
+		schema: before ?? extractSchema("", undefined, { dialect, schema }),
+		fresh: freshStart(before, naming),
 		txmodeNone: dialect === "sqlite" && TXMODE_NONE.test(sql),
 		prepared,
 		drops: new Map(),
@@ -190,8 +198,8 @@ function readFile(sql: string, before: ExtractedSchema | undefined, dialect: Dia
 }
 
 /** The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default */
-const readings = (sql: string, { before, dialect }: ClassifyOptions): Read[] =>
-	readFile(sql, before, dialect ?? "sqlite")
+const readings = (sql: string, { before, dialect, schema }: ClassifyOptions): Read[] =>
+	readFile(sql, { before, dialect: dialect ?? "sqlite", schema: schema ?? "public" })
 
 const entries = (reads: readonly Read[], keep: (finding: Finding) => boolean) =>
 	reads.flatMap(({ findings, stmt }) =>

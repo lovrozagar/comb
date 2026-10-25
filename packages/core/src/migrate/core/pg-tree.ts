@@ -61,7 +61,7 @@ function updateFinding(table: { key: string; name: string }, columns: string[], 
 
 /** A write node's findings: its own rating, and what it runs on every table it reaches */
 function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
-	const table = tableOf(node["relation"])
+	const table = tableOf(node["relation"], ctx.facts.schema)
 	/* a write without ONLY reaches the table's partitions and inheritance children */
 	const target = { inh: (node["relation"] as { inh?: boolean }).inh === true, key: table.key }
 	if (type === "DeleteStmt")
@@ -101,7 +101,7 @@ function settingFinding(node: Node): Finding | undefined {
 function routineFinding(node: Node, ctx: TreeContext): Finding {
 	const kind = node["is_procedure"] === true ? "procedure" : "function"
 	const name = names(node["funcname"])
-	ctx.facts.defined.add(keyOf(name))
+	ctx.facts.defined.add(keyOf(name, ctx.facts.schema))
 	return { level: "unsafe", note: `creates ${kind} ${name.join(".")}, whose body comb does not read` }
 }
 
@@ -113,8 +113,8 @@ const UNGUARDING: Readonly<Record<string, (table: string) => string>> = {
 }
 
 /** An ALTER TABLE that turns off a table's foreign keys or durability (M40, M41): its finding */
-function unguardingFinding(node: Node): Finding | undefined {
-	const table = tableOf(node["relation"]).key
+function unguardingFinding(node: Node, schema: string): Finding | undefined {
+	const table = tableOf(node["relation"], schema).key
 	for (const each of node["cmds"] as Node[]) {
 		const note = UNGUARDING[String((each["AlterTableCmd"] as Node)["subtype"])]
 		if (note !== undefined) return { level: "unsafe", note: note(table) }
@@ -124,7 +124,7 @@ function unguardingFinding(node: Node): Finding | undefined {
 
 /** A node that runs code comb does not read, changes what later names resolve to, or shadows a table: its finding */
 function codeFinding(type: string, node: Node, ctx: TreeContext): Finding | undefined {
-	if (type === "AlterTableStmt") return unguardingFinding(node)
+	if (type === "AlterTableStmt") return unguardingFinding(node, ctx.facts.schema)
 	if (type === "DoStmt") return { level: "unsafe", note: "runs a DO block, whose body comb does not read" }
 	if (type === "CreateFunctionStmt") return routineFinding(node, ctx)
 	if (type === "CreateTrigStmt")
@@ -136,11 +136,11 @@ function codeFinding(type: string, node: Node, ctx: TreeContext): Finding | unde
 	if (type === "FuncCall") return builtinFinding(names(node["funcname"]), ctx.facts.defined)
 	/* a CALL holds its call as a plain field, not a typed node */
 	if (type === "CallStmt") return builtinFinding(names((node["funccall"] as Node)["funcname"]), ctx.facts.defined)
-	return useFinding(type, node, ctx.facts) ?? shadowFinding(type, node, ctx.before)
+	return useFinding(type, node, ctx.facts) ?? shadowFinding(type, node, ctx)
 }
 
 /** A temp table or view that takes an existing table's name: its finding */
-function shadowFinding(type: string, node: Node, before: ExtractedSchema | undefined): Finding | undefined {
+function shadowFinding(type: string, node: Node, ctx: TreeContext): Finding | undefined {
 	/* a CREATE TABLE AS holds its target as a plain field, as SELECT … INTO does, not a typed node */
 	const relation =
 		type === "CreateStmt"
@@ -150,8 +150,8 @@ function shadowFinding(type: string, node: Node, before: ExtractedSchema | undef
 				: type === "CreateTableAsStmt"
 					? (node["into"] as Node)["rel"]
 					: (node["intoClause"] as Node | undefined)?.["rel"]
-	const table = relation === undefined ? undefined : tableOf(relation)
-	if (table?.temp === true && before?.tables.has(table.name) === true)
+	const table = relation === undefined ? undefined : tableOf(relation, ctx.facts.schema)
+	if (table?.temp === true && ctx.before?.tables.has(table.name) === true)
 		return { level: "unsafe", note: `shadows ${table.name} for the rest of the file` }
 	return undefined
 }
@@ -173,7 +173,7 @@ function pgTreeFindings(stmt: string, ctx: TreeContext): Finding[] {
 			: [codeFinding(type, node, ctx)].filter((finding) => finding !== undefined),
 	)
 	/* what the statement attached and reparented counts for the statements after it */
-	for (const [type, node] of nodes) if (type === "AlterTableStmt") followParentage(node, ctx.fresh)
+	for (const [type, node] of nodes) if (type === "AlterTableStmt") followParentage(node, ctx.fresh, ctx.facts.schema)
 	followTree(tree.stmts, ctx.facts)
 	return findings
 }

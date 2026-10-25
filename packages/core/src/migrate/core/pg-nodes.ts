@@ -23,6 +23,8 @@ type Facts = {
 	operators: Map<string, string>
 	/** each table's parents, and whether it is their partition */
 	parents: Map<string, Array<{ parent: string; partition: boolean }>>
+	/** the schema an unqualified name resolves in, the one each key leaves out (M72) */
+	schema: string
 	/** each table's triggers, with the writes that fire them */
 	triggers: Map<string, Array<{ events: TriggerEvent[]; name: string }>>
 }
@@ -43,18 +45,21 @@ function nodesOf(node: unknown, out: Array<[string, Node]> = []): Array<[string,
 /* the parts of a name, as the parser lists them: each a String node */
 const names = (list: unknown): string[] => (list as Array<{ String: { sval: string } }>).map((part) => part.String.sval)
 
-/** A name's key, as nameKey keys a Postgres name: pg_catalog and public left out */
-const keyOf = (parts: readonly string[]): string =>
-	parts.filter((part, i) => (i < parts.length - 1 ? part !== "pg_catalog" && part !== "public" : true)).join(".")
+/**
+ * A name's key, as nameKey keys a Postgres name under `schema`, the one an unqualified name resolves
+ * in: pg_catalog and `schema` left out, so `users` and `<schema>.users` are one key (M72)
+ */
+const keyOf = (parts: readonly string[], schema: string): string =>
+	parts.filter((part, i) => (i < parts.length - 1 ? part !== "pg_catalog" && part !== schema : true)).join(".")
 
-/** A RangeVar's table: its bare name, its key, and whether it is temporary */
-function tableOf(relation: unknown): { key: string; name: string; temp: boolean } {
+/** A RangeVar's table under `schema`: its bare name, its key, and whether it is temporary */
+function tableOf(relation: unknown, schema: string): { key: string; name: string; temp: boolean } {
 	const rel = relation as { relname: string; relpersistence: string; schemaname?: string }
-	const key = keyOf(rel.schemaname === undefined ? [rel.relname] : [rel.schemaname, rel.relname])
+	const key = keyOf(rel.schemaname === undefined ? [rel.relname] : [rel.schemaname, rel.relname], schema)
 	return { key, name: rel.relname, temp: rel.relpersistence === "t" || rel.schemaname === "pg_temp" }
 }
 
-/** A type's key */
-const typeOf = (typeName: unknown): string => keyOf(names((typeName as Node)["names"]))
+/** A type's key under `schema` */
+const typeOf = (typeName: unknown, schema: string): string => keyOf(names((typeName as Node)["names"]), schema)
 
 export { type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf }

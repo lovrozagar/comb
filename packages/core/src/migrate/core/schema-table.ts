@@ -3,8 +3,8 @@
  * table-level), and its shape (primary key, rowid alias, generated columns, AUTOINCREMENT,
  * WITHOUT ROWID, STRICT, each column's affinity and the conflict resolutions it declares).
  */
-import type { Dialect, ForeignKey, TableInfo } from "../types.ts"
-import { IDENT, lastPart, nameKey, QNAME, splitTopLevel } from "./sql-code.ts"
+import type { ForeignKey, TableInfo } from "../types.ts"
+import { IDENT, lastPart, nameKey, type Naming, QNAME, splitTopLevel } from "./sql-code.ts"
 import { conflictsOf, definitionAffinity, isStrict } from "./sqlite-affinity.ts"
 
 const CONSTRAINT_WORDS: RegExp = /^(?:CONSTRAINT|PRIMARY|FOREIGN|UNIQUE|CHECK)/i
@@ -60,18 +60,15 @@ const onDeleteOf = (rest: string): ForeignKey["onDelete"] =>
 		"NO ACTION") as ForeignKey["onDelete"]
 
 /** The foreign key a column definition declares inline, if any */
-function columnKey(
-	definition: string,
-	at: { column: string; dialect: Dialect; table: string },
-): ForeignKey | undefined {
-	const { column, dialect, table } = at
+function columnKey(definition: string, at: { column: string; naming: Naming; table: string }): ForeignKey | undefined {
+	const { column, naming, table } = at
 	const [, parent, parentColumns, rest] = COLUMN_REF.exec(definition) ?? []
 	if (parent === undefined) return undefined
 	const onDelete = onDeleteOf(rest as string)
 	return {
 		columns: [column],
 		onDelete,
-		parent: nameKey(parent, dialect),
+		parent: nameKey(parent, naming),
 		parentColumns: names(parentColumns ?? ""),
 		table,
 	}
@@ -80,7 +77,7 @@ function columnKey(
 /** A CREATE TABLE being read: its keys and shape so far, and each column's definition by name */
 type Reading = {
 	definitions: Map<string, string>
-	dialect: Dialect
+	naming: Naming
 	info: TableInfo
 	keys: ForeignKey[]
 	table: string
@@ -88,12 +85,12 @@ type Reading = {
 
 /** One column: its definition decides its affinity, its rowid alias, whether it is generated, and its key */
 function readColumn(column: string, definition: string, into: Reading): void {
-	const { dialect, info, keys, table } = into
+	const { naming, info, keys, table } = into
 	into.definitions.set(column, definition)
 	info.affinity[column] = definitionAffinity(definition)
 	if (/\bPRIMARY KEY\b/i.test(definition)) info.primaryKey = [column]
 	if (GENERATED.test(definition)) info.generatedColumns.push(column)
-	const key = columnKey(definition, { column, dialect, table })
+	const key = columnKey(definition, { column, naming, table })
 	if (key !== undefined) keys.push(key)
 }
 
@@ -104,7 +101,7 @@ function readPart(part: string, into: Reading): void {
 		into.keys.push({
 			columns: names(columns),
 			onDelete: onDeleteOf(rest as string),
-			parent: nameKey(parent as string, into.dialect),
+			parent: nameKey(parent as string, into.naming),
 			parentColumns: names(parentColumns ?? ""),
 			table: into.table,
 		})
@@ -119,10 +116,10 @@ function readPart(part: string, into: Reading): void {
 }
 
 /** What a CREATE TABLE's code declares: its keys and its shape */
-function tableDefinition(code: string, table: string, dialect: Dialect): { info: TableInfo; keys: ForeignKey[] } {
+function tableDefinition(code: string, table: string, naming: Naming): { info: TableInfo; keys: ForeignKey[] } {
 	const into: Reading = {
 		definitions: new Map(),
-		dialect,
+		naming,
 		info: {
 			affinity: {},
 			autoincrement: /\bAUTOINCREMENT\b/i.test(code),

@@ -17,98 +17,96 @@ import { type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf } from ".
 import { postgresParser } from "./pg-parser.ts"
 
 /** The first function an expression calls that is no pure built-in, by name */
-function callIn(expression: unknown, defined: ReadonlySet<string>): string | undefined {
+function callIn(expression: unknown, { defined, schema }: Pick<Facts, "defined" | "schema">): string | undefined {
 	for (const [type, node] of nodesOf([expression])) {
 		if (type !== "FuncCall") continue
 		const name = names(node["funcname"])
-		if (builtinFinding(name, defined) !== undefined) return keyOf(name)
+		if (builtinFinding(name, defined) !== undefined) return keyOf(name, schema)
 	}
 	return undefined
 }
 
-/** What the history is read into, and the functions migrations define */
-type Reader = { defined: ReadonlySet<string>; facts: Facts }
-
 /** A table's new column: its type, and the code its default, checks, generated value, domain or cast run */
-function followColumn(table: string, column: Node, { defined, facts }: Reader): void {
-	const type = typeOf(column["typeName"])
+function followColumn(table: string, column: Node, facts: Facts): void {
+	const type = typeOf(column["typeName"], facts.schema)
 	facts.columnTypes.set(table, (facts.columnTypes.get(table) ?? new Set()).add(type))
 	const constraints = (column["constraints"] as Node[] | undefined) ?? []
 	const runs =
-		constraints
-			.map((each) => callIn((each["Constraint"] as Node)["raw_expr"], defined))
-			.find((fn) => fn !== undefined) ??
+		constraints.map((each) => callIn((each["Constraint"] as Node)["raw_expr"], facts)).find((fn) => fn !== undefined) ??
 		facts.domains.get(type) ??
 		(facts.casts.get(type)?.automatic === true ? facts.casts.get(type)?.fn : undefined)
 	if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
 }
 
 /** A CREATE TABLE: its parents, its columns, its checks, and what a table it is LIKE runs */
-function followCreate(node: Node, reader: Reader): void {
-	const { defined, facts } = reader
-	const table = tableOf(node["relation"]).key
-	const parents = ((node["inhRelations"] as Node[] | undefined) ?? []).map((each) => tableOf(each["RangeVar"]).key)
+function followCreate(node: Node, facts: Facts): void {
+	const table = tableOf(node["relation"], facts.schema).key
+	const parents = ((node["inhRelations"] as Node[] | undefined) ?? []).map(
+		(each) => tableOf(each["RangeVar"], facts.schema).key,
+	)
 	if (parents.length > 0)
 		facts.parents.set(
 			table,
 			parents.map((parent) => ({ parent, partition: node["partbound"] !== undefined })),
 		)
 	for (const element of (node["tableElts"] as Node[] | undefined) ?? []) {
-		if (element["ColumnDef"] !== undefined) followColumn(table, element["ColumnDef"] as Node, reader)
+		if (element["ColumnDef"] !== undefined) followColumn(table, element["ColumnDef"] as Node, facts)
 		const check =
-			element["Constraint"] === undefined ? undefined : callIn((element["Constraint"] as Node)["raw_expr"], defined)
+			element["Constraint"] === undefined ? undefined : callIn((element["Constraint"] as Node)["raw_expr"], facts)
 		if (check !== undefined && !facts.code.has(table)) facts.code.set(table, check)
 		const like =
 			element["TableLikeClause"] === undefined
 				? undefined
-				: tableOf((element["TableLikeClause"] as Node)["relation"]).key
+				: tableOf((element["TableLikeClause"] as Node)["relation"], facts.schema).key
 		const copied = like === undefined ? undefined : facts.code.get(like)
 		if (copied !== undefined && !facts.code.has(table)) facts.code.set(table, copied)
 	}
 }
 
 /** An ALTER TABLE: a partition attached, a parent inherited, a column, a default or a check added */
-function followAlter(node: Node, reader: Reader): void {
-	const { defined, facts } = reader
-	const table = tableOf(node["relation"]).key
+function followAlter(node: Node, facts: Facts): void {
+	const table = tableOf(node["relation"], facts.schema).key
 	for (const each of node["cmds"] as Node[]) {
 		const cmd = each["AlterTableCmd"] as Node
 		const def = cmd["def"] as Node
 		if (cmd["subtype"] === "AT_AttachPartition") {
-			const child = tableOf((def["PartitionCmd"] as Node)["name"]).key
+			const child = tableOf((def["PartitionCmd"] as Node)["name"], facts.schema).key
 			facts.parents.set(child, [...(facts.parents.get(child) ?? []), { parent: table, partition: true }])
 		} else if (cmd["subtype"] === "AT_AddInherit") {
 			facts.parents.set(table, [
 				...(facts.parents.get(table) ?? []),
-				{ parent: tableOf(def["RangeVar"]).key, partition: false },
+				{ parent: tableOf(def["RangeVar"], facts.schema).key, partition: false },
 			])
-		} else if (cmd["subtype"] === "AT_AddColumn") followColumn(table, def["ColumnDef"] as Node, reader)
+		} else if (cmd["subtype"] === "AT_AddColumn") followColumn(table, def["ColumnDef"] as Node, facts)
 		else {
-			const runs = callIn(def, defined)
+			const runs = callIn(def, facts)
 			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
 		}
 	}
 }
 
 /** A domain, an operator or a cast with the function it runs */
-function followDefinition(type: string, node: Node, { defined, facts }: Reader): void {
+function followDefinition(type: string, node: Node, facts: Facts): void {
 	if (type === "CreateDomainStmt") {
 		const runs = ((node["constraints"] as Node[] | undefined) ?? [])
-			.map((each) => callIn((each["Constraint"] as Node)["raw_expr"], defined))
+			.map((each) => callIn((each["Constraint"] as Node)["raw_expr"], facts))
 			.find((fn) => fn !== undefined)
-		if (runs !== undefined) facts.domains.set(keyOf(names(node["domainname"])), runs)
+		if (runs !== undefined) facts.domains.set(keyOf(names(node["domainname"]), facts.schema), runs)
 	} else if (type === "DefineStmt" && node["kind"] === "OBJECT_AGGREGATE") {
-		facts.defined.add(keyOf(names(node["defnames"])))
+		facts.defined.add(keyOf(names(node["defnames"]), facts.schema))
 	} else if (type === "DefineStmt" && node["kind"] === "OBJECT_OPERATOR") {
 		/* Postgres refuses an operator without its function, named FUNCTION or PROCEDURE */
 		const fn = (node["definition"] as Node[])
 			.map((each) => each["DefElem"] as Node)
 			.find((elem) => elem["defname"] === "function" || elem["defname"] === "procedure") as Node
-		facts.operators.set(keyOf(names(node["defnames"])), typeOf((fn["arg"] as Node)["TypeName"]))
+		facts.operators.set(
+			keyOf(names(node["defnames"]), facts.schema),
+			typeOf((fn["arg"] as Node)["TypeName"], facts.schema),
+		)
 	} else if (type === "CreateCastStmt" && node["func"] !== undefined) {
-		const target = typeOf(node["targettype"])
+		const target = typeOf(node["targettype"], facts.schema)
 		const automatic = node["context"] === "COERCION_IMPLICIT" || node["context"] === "COERCION_ASSIGNMENT"
-		const fn = keyOf(names((node["func"] as Node)["objname"]))
+		const fn = keyOf(names((node["func"] as Node)["objname"]), facts.schema)
 		facts.casts.set(target, { automatic, fn })
 		if (!automatic) return
 		for (const [table, types] of facts.columnTypes)
@@ -118,30 +116,32 @@ function followDefinition(type: string, node: Node, { defined, facts }: Reader):
 
 /** `facts` after one statement's parse tree, the functions it defines among them */
 function followTree(stmts: unknown, facts: Facts): void {
-	const reader = { defined: facts.defined, facts }
 	const defined = facts.defined
 	for (const [type, node] of nodesOf(stmts)) {
-		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"])))
+		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"]), facts.schema))
 		else if (followNames(type, node, facts)) continue
-		else if (type === "CreateStmt") followCreate(node, reader)
-		else if (type === "AlterTableStmt") followAlter(node, reader)
+		else if (type === "CreateStmt") followCreate(node, facts)
+		else if (type === "AlterTableStmt") followAlter(node, facts)
 		else if (type === "IndexStmt") {
 			/* an index's expressions and a partial index's predicate run on every write to its table */
-			const table = tableOf(node["relation"]).key
-			const runs = callIn([node["indexParams"], node["whereClause"]], defined)
+			const table = tableOf(node["relation"], facts.schema).key
+			const runs = callIn([node["indexParams"], node["whereClause"]], facts)
 			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
 		} else if (type === "RuleStmt") {
-			const table = tableOf(node["relation"]).key
+			const table = tableOf(node["relation"], facts.schema).key
 			if (!facts.code.has(table)) facts.code.set(table, `rule ${String(node["rulename"])}`)
-		} else followDefinition(type, node, reader)
+		} else followDefinition(type, node, facts)
 	}
 }
 
-// lru-cache: each history's facts, read once per schema object, released with it
-const CACHE = /* @__PURE__ */ new WeakMap<ExtractedSchema, Facts>()
+// lru-cache: each history's facts under each schema, read once per schema object, released with it
+const CACHE = /* @__PURE__ */ new WeakMap<ExtractedSchema, Map<string, Facts>>()
 
-/** What `before`'s history attached to its tables: a copy the file's own statements then follow */
-function historyFacts(before: ExtractedSchema | undefined): Facts {
+/**
+ * What `before`'s history attached to its tables, its names keyed under `schema`: a copy the file's
+ * own statements then follow
+ */
+function historyFacts(before: ExtractedSchema | undefined, schema: string): Facts {
 	const empty: Facts = {
 		casts: new Map(),
 		code: new Map(),
@@ -150,10 +150,13 @@ function historyFacts(before: ExtractedSchema | undefined): Facts {
 		domains: new Map(),
 		operators: new Map(),
 		parents: new Map(),
+		schema,
 		triggers: new Map(),
 	}
 	if (before === undefined) return empty
-	let facts = CACHE.get(before)
+	const read = CACHE.get(before) ?? new Map<string, Facts>()
+	CACHE.set(before, read)
+	let facts = read.get(schema)
 	if (facts === undefined) {
 		facts = empty
 		for (const statement of before.statements) {
@@ -166,7 +169,7 @@ function historyFacts(before: ExtractedSchema | undefined): Facts {
 			}
 			followTree(tree.stmts, facts)
 		}
-		CACHE.set(before, facts)
+		read.set(schema, facts)
 	}
 	return structuredClone(facts)
 }

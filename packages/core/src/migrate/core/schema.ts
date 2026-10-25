@@ -3,7 +3,7 @@
  * keys and shape, the indexes, the dropped tables, the triggers and the routines. The classifier
  * reads a file against it, and the SQLite rebuild guard finds the tables a rebuild reaches by it.
  */
-import { codeOf, IDENT, lastPart, nameKey, QNAME, splitTopLevel } from "./sql-code.ts"
+import { codeOf, dialectOf, IDENT, lastPart, nameKey, type Naming, namingOf, QNAME, splitTopLevel } from "./sql-code.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 import { syncTriggerOf } from "./fts-sync.ts"
 import { COLUMN, columnKey, columnNames, CONSTRAINT_WORDS, GENERATED, tableDefinition } from "./schema-table.ts"
@@ -46,9 +46,9 @@ const CREATE_FTS = /* @__PURE__ */ new RegExp(
 )
 
 /** What an ALTER TABLE ADD, DROP or RENAME COLUMN does to a followed table's columns */
-function followColumns(schema: SchemaSoFar, code: string, dialect: Dialect): void {
+function followColumns(schema: SchemaSoFar, code: string, naming: Naming): void {
 	const [, altered, verb, added] = ADDS_OR_DROPS.exec(code) ?? []
-	const table = altered === undefined ? undefined : nameKey(altered, dialect)
+	const table = altered === undefined ? undefined : nameKey(altered, naming)
 	const columns = table === undefined ? undefined : schema.tables.get(table)
 	const column = added === undefined ? "" : lastPart(added)
 	if (columns !== undefined && !CONSTRAINT_WORDS.test(column)) {
@@ -56,7 +56,7 @@ function followColumns(schema: SchemaSoFar, code: string, dialect: Dialect): voi
 		schema.tables.set(table as string, verb?.toUpperCase() === "ADD" ? [...kept, column] : kept)
 	}
 	const [, renamedIn, from, to] = RENAMES_COLUMN.exec(code) ?? []
-	const inTable = renamedIn === undefined ? undefined : nameKey(renamedIn, dialect)
+	const inTable = renamedIn === undefined ? undefined : nameKey(renamedIn, naming)
 	const before = inTable === undefined ? undefined : schema.tables.get(inTable)
 	if (before === undefined) return
 	const [was, now] = [lastPart(from as string), lastPart(to as string)]
@@ -67,21 +67,21 @@ function followColumns(schema: SchemaSoFar, code: string, dialect: Dialect): voi
 }
 
 /** A CREATE TABLE's keys and shape replace the table's; an ADD COLUMN adds its key and generated column */
-function followTableShape(schema: SchemaSoFar, code: string, dialect: Dialect): void {
+function followTableShape(schema: SchemaSoFar, code: string, naming: Naming): void {
 	const created = TABLE_DEFINITION.exec(code)?.[1]
 	if (created !== undefined) {
-		const table = nameKey(created, dialect)
-		const { info, keys } = tableDefinition(code, table, dialect)
+		const table = nameKey(created, naming)
+		const { info, keys } = tableDefinition(code, table, naming)
 		schema.tables.set(table, columnNames(code))
 		schema.foreignKeys = [...schema.foreignKeys.filter((fk) => fk.table !== table), ...keys]
 		schema.tableInfo.set(table, info)
 	}
 	const [, alteredTable, added] = ADD_COLUMN.exec(code) ?? []
 	if (alteredTable === undefined || added === undefined) return
-	const table = nameKey(alteredTable, dialect)
+	const table = nameKey(alteredTable, naming)
 	const [, name, definition = ""] = COLUMN.exec(added) as RegExpExecArray
 	const column = lastPart(name as string)
-	const key = columnKey(definition, { column, dialect, table })
+	const key = columnKey(definition, { column, naming, table })
 	if (key !== undefined) schema.foreignKeys.push(key)
 	const info = schema.tableInfo.get(table)
 	if (info === undefined) return
@@ -90,9 +90,9 @@ function followTableShape(schema: SchemaSoFar, code: string, dialect: Dialect): 
 }
 
 /** A DROP TABLE takes each table's keys, triggers and shape with it; a rename moves them */
-function followTableLife(schema: SchemaSoFar, code: string, dialect: Dialect): void {
+function followTableLife(schema: SchemaSoFar, code: string, naming: Naming): void {
 	const dropped = DROPS_TABLES.exec(code)?.[1]
-	for (const table of dropped === undefined ? [] : splitTopLevel(dropped).map((name) => nameKey(name, dialect))) {
+	for (const table of dropped === undefined ? [] : splitTopLevel(dropped).map((name) => nameKey(name, naming))) {
 		schema.droppedTables.push(table)
 		schema.externalFts = schema.externalFts.filter((fts) => fts !== table)
 		schema.tables.delete(table)
@@ -101,16 +101,16 @@ function followTableLife(schema: SchemaSoFar, code: string, dialect: Dialect): v
 		schema.tableInfo.delete(table)
 	}
 	const [, from, to] = RENAMES_TABLE.exec(code) ?? []
-	if (from !== undefined && to !== undefined) renameShapes(schema, nameKey(from, dialect), nameKey(to, dialect))
+	if (from !== undefined && to !== undefined) renameShapes(schema, nameKey(from, naming), nameKey(to, naming))
 }
 
 /**
  * SQLite triggers made and dropped. A Postgres history's triggers and routines are read from its
  * parse trees (pg-history.ts), which no spelling, rename or move hides.
  */
-function followTriggers(schema: SchemaSoFar, [code, text]: [string, string], dialect: Dialect): void {
-	if (dialect === "postgres") return
-	const key = (name: string) => nameKey(name, dialect)
+function followTriggers(schema: SchemaSoFar, [code, text]: [string, string], naming: Naming): void {
+	if (naming !== "sqlite") return
+	const key = (name: string) => nameKey(name, naming)
 	const [, trigger, timing, on] = CREATE_TRIGGER.exec(code) ?? []
 	if (trigger !== undefined) {
 		/* what writes fire it: INSERT, UPDATE [OF …], DELETE, joined by OR on Postgres */
@@ -121,7 +121,7 @@ function followTriggers(schema: SchemaSoFar, [code, text]: [string, string], dia
 		]
 		schema.triggers.push({
 			events: events as TriggerEvent[],
-			ftsSync: syncTriggerOf(text, new Set(schema.externalFts), dialect) !== undefined,
+			ftsSync: syncTriggerOf(text, new Set(schema.externalFts), naming) !== undefined,
 			name: key(trigger),
 			table: key(on as string),
 		})
@@ -148,18 +148,18 @@ function renameShapes(schema: SchemaSoFar, from: string, to: string): void {
 }
 
 /** What one statement does to the schema being followed, read from its code: a comment or a string names nothing */
-function follow(schema: SchemaSoFar, stmt: string, dialect: Dialect): void {
-	const code = codeOf(stmt, dialect)
-	followTableShape(schema, code, dialect)
-	followTableLife(schema, code, dialect)
+function follow(schema: SchemaSoFar, stmt: string, naming: Naming): void {
+	const code = codeOf(stmt, dialectOf(naming))
+	followTableShape(schema, code, naming)
+	followTableLife(schema, code, naming)
 	/* the sync rule reads the 'delete' command, a literal codeOf blanks (M43) */
-	followTriggers(schema, [code, normalizeSql(stmt).replace(/;$/, "")], dialect)
-	followColumns(schema, code, dialect)
+	followTriggers(schema, [code, normalizeSql(stmt).replace(/;$/, "")], naming)
+	followColumns(schema, code, naming)
 	const index = CREATE_INDEX.exec(code)?.[1]
-	if (index !== undefined) schema.indexes.push(nameKey(index, dialect))
+	if (index !== undefined) schema.indexes.push(nameKey(index, naming))
 	const fts = CREATE_FTS.exec(code)?.[1]
 	/* codeOf blanks a string to one space, so content='src' and content='' read alike: both keep no text */
-	if (fts !== undefined && /\bcontent ?= ?'/i.test(stmt)) schema.externalFts.push(nameKey(fts, dialect))
+	if (fts !== undefined && /\bcontent ?= ?'/i.test(stmt)) schema.externalFts.push(nameKey(fts, naming))
 }
 
 /** The schema before any migration */
@@ -176,9 +176,16 @@ const EMPTY: ExtractedSchema = {
 
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
- * migration leaves, after `from` when given, read as `dialect` reads it
+ * migration leaves, after `from` when given, read as `readAs` names a dialect; a Postgres name keyed
+ * under `readAs.schema`, the schema comb's URLs set as search_path, public unnamed (M72)
  */
-function extractSchema(sql: string, from: ExtractedSchema = EMPTY, dialect: Dialect = "sqlite"): ExtractedSchema {
+function extractSchema(
+	sql: string,
+	from: ExtractedSchema = EMPTY,
+	readAs: Dialect | { dialect: Dialect; schema?: string | undefined } = "sqlite",
+): ExtractedSchema {
+	const { dialect, schema: searchSchema } = typeof readAs === "string" ? { dialect: readAs, schema: undefined } : readAs
+	const naming = namingOf(dialect, searchSchema)
 	const schema: SchemaSoFar = {
 		droppedTables: [...from.droppedTables],
 		externalFts: [...from.externalFts],
@@ -200,7 +207,7 @@ function extractSchema(sql: string, from: ExtractedSchema = EMPTY, dialect: Dial
 		triggers: [...from.triggers],
 	}
 	for (const stmt of splitSqlStatements(sql, dialect)) {
-		follow(schema, stmt, dialect)
+		follow(schema, stmt, naming)
 		schema.statements.push(stmt)
 	}
 	return schema

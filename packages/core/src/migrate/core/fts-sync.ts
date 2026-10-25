@@ -4,8 +4,7 @@
  * only a row's own values, or the `'delete'` command, into FTS5 tables whose text lives elsewhere;
  * any other FTS5 command, `'delete-all'` among them, makes it a trigger like any other.
  */
-import type { Dialect } from "../types.ts"
-import { lastPart, nameKey, QNAME } from "./sql-code.ts"
+import { lastPart, nameKey, type Naming, QNAME } from "./sql-code.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const SYNC_TRIGGER: RegExp = /* @__PURE__ */ new RegExp(
@@ -25,16 +24,16 @@ const listOf = (list: string | undefined): string[] => (list as string).split(",
  * the table's own column and rank only the 'delete' command (FTS5 reads what lands there as one),
  * every other column a row's own value
  */
-function syncsTable(write: string, fts: ReadonlySet<string>, dialect: Dialect): boolean {
+function syncsTable(write: string, fts: ReadonlySet<string>, naming: Naming): boolean {
 	const [, target, columnList, valueList] = SYNC_WRITE.exec(write) ?? []
-	if (target === undefined || !fts.has(nameKey(target, dialect))) return false
+	if (target === undefined || !fts.has(nameKey(target, naming))) return false
 	const [columns, values] = [listOf(columnList), listOf(valueList)]
-	const own = nameKey(lastPart(target), dialect)
+	const own = nameKey(lastPart(target), naming)
 	return (
 		columns.length === values.length &&
 		columns.every((column, i) => {
 			const value = values[i] as string
-			const command = nameKey(column, dialect) === own || nameKey(column, dialect) === "rank"
+			const command = nameKey(column, naming) === own || nameKey(column, naming) === "rank"
 			return command ? /^'delete'$/i.test(value) : ROW_VALUE.test(value)
 		})
 	)
@@ -45,15 +44,15 @@ function syncsTable(write: string, fts: ReadonlySet<string>, dialect: Dialect): 
  * `fts`; undefined for any other statement. `text` keeps its literals (the `'delete'` command is
  * one), without comments and its final semicolon.
  */
-function syncTriggerOf(text: string, fts: ReadonlySet<string>, dialect: Dialect): string | undefined {
+function syncTriggerOf(text: string, fts: ReadonlySet<string>, naming: Naming): string | undefined {
 	const [, name, body] = SYNC_TRIGGER.exec(text) ?? []
 	if (name === undefined || body === undefined) return undefined
 	const synced = body
 		.split(";")
 		.map((part) => part.trim())
 		.filter((part) => part !== "")
-		.every((write) => syncsTable(write, fts, dialect))
-	return synced ? nameKey(name, dialect) : undefined
+		.every((write) => syncsTable(write, fts, naming))
+	return synced ? nameKey(name, naming) : undefined
 }
 
 export { SYNC_TRIGGER, syncTriggerOf }

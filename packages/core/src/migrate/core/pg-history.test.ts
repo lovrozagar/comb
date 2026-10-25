@@ -3,12 +3,12 @@ import { classifyMigration } from "./classify.ts"
 import { historyFacts } from "./pg-history.ts"
 import { extractSchema } from "./schema.ts"
 
-const facts = (sql: string) => historyFacts(extractSchema(sql, undefined, "postgres"))
+const facts = (sql: string) => historyFacts(extractSchema(sql, undefined, "postgres"), "public")
 
 /* T5 and T6 of the 2.3 review: what the history attached to its tables, read from its parse trees */
 describe("what a Postgres history attached to its tables", () => {
 	it("reads nothing without a history", () => {
-		expect(historyFacts(undefined).code).toEqual(new Map())
+		expect(historyFacts(undefined, "public").code).toEqual(new Map())
 	})
 
 	it("reads past a statement Postgres cannot parse", () => {
@@ -17,8 +17,8 @@ describe("what a Postgres history attached to its tables", () => {
 
 	it("gives each reader its own copy", () => {
 		const schema = extractSchema("CREATE TABLE t (id int DEFAULT f());", undefined, "postgres")
-		historyFacts(schema).code.clear()
-		expect(historyFacts(schema).code).toEqual(new Map([["t", "f"]]))
+		historyFacts(schema, "public").code.clear()
+		expect(historyFacts(schema, "public").code).toEqual(new Map([["t", "f"]]))
 	})
 
 	it("keeps the first code a table runs, and none for a pure default or a drop", () => {

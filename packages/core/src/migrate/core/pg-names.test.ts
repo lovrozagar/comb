@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { historyFacts } from "./pg-history.ts"
 import { extractSchema } from "./schema.ts"
 
-const facts = (sql: string) => historyFacts(extractSchema(sql, undefined, "postgres"))
+const facts = (sql: string) => historyFacts(extractSchema(sql, undefined, "postgres"), "public")
 const ON = "CREATE TRIGGER t AFTER DELETE ON users FOR EACH ROW EXECUTE FUNCTION f();\n"
 
 /* M25 and M26 of the 0.13 review: what a history names, followed through its parse trees */

@@ -523,6 +523,8 @@ type ClassifyOptions = {
     before?: ExtractedSchema | undefined;
     /** how the file is read; unnamed, as SQLite, the CLI's default */
     dialect?: Dialect | undefined;
+    /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
+    schema?: string | undefined;
 };
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 declare function extractDropStatements(sql: string, options?: ClassifyOptions): string[];
@@ -534,9 +536,13 @@ export { classifyMigration, type ClassifyOptions, extractDropStatements };
 import type { Dialect, ExtractedSchema } from "../types.ts";
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
- * migration leaves, after `from` when given, read as `dialect` reads it
+ * migration leaves, after `from` when given, read as `readAs` names a dialect; a Postgres name keyed
+ * under `readAs.schema`, the schema comb's URLs set as search_path, public unnamed (M72)
  */
-declare function extractSchema(sql: string, from?: ExtractedSchema, dialect?: Dialect): ExtractedSchema;
+declare function extractSchema(sql: string, from?: ExtractedSchema, readAs?: Dialect | {
+    dialect: Dialect;
+    schema?: string | undefined;
+}): ExtractedSchema;
 export { extractSchema };
 
 // migrate/core/sql-scan.d.ts

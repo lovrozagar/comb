@@ -151,19 +151,22 @@ function checkHistory(status: AtlasStatus, copy: string): string | undefined {
 
 /**
  * Each pending file read from the snapshot, classified as Postgres against the schema the files
- * before it leave, approved, its lock warnings shown
+ * before it leave, names keyed under the target's schema, approved, its lock warnings shown
  */
 async function approvePending(options: ApplyOptions, copy: string, pending: readonly AtlasFile[]): Promise<void> {
 	/* Postgres statements are read from Postgres's parser, loaded once */
 	await loadPostgresParser()
 	const waiting = new Set(pending.map((file) => file.Name))
-	let schema = extractSchema("", undefined, "postgres")
+	/* names are keyed as Postgres resolves them under the URL's search_path, the target's schema (M72) */
+	const scope = { schema: options.target.schema }
+	const readAs = { dialect: "postgres" as const, ...scope }
+	let schema = extractSchema("", undefined, readAs)
 	for (const Name of sqlFiles(copy)) {
 		const sql = readFileSync(join(copy, Name), "utf8")
 		const before = schema
-		schema = extractSchema(sql, before, "postgres")
+		schema = extractSchema(sql, before, readAs)
 		if (!waiting.has(Name)) continue
-		const migration = parseMigration(sql, Name, { before, dialect: "postgres" })
+		const migration = parseMigration(sql, Name, { before, dialect: "postgres", ...scope })
 		for (const warning of migration.classification.lockWarnings) options.print(`Lock warning in ${Name}: ${warning}`)
 		const approval = await options.approve(migration)
 		if (!approval.ok) throw new Refused(approval.message, [...waiting])

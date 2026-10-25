@@ -7,13 +7,15 @@ import type { Dialect, ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { NO_TRANSACTION, type Rebuilds } from "./rebuild-copy.ts"
 import { extractSchema } from "./schema.ts"
-import { nameKey } from "./sql-code.ts"
+import { nameKey, type Naming } from "./sql-code.ts"
 import { definitionDrift } from "./sqlite-affinity.ts"
 
 /** What the rebuild rule reads of a file */
 type RebuildContext = {
 	before: ExtractedSchema | undefined
 	dialect: Dialect
+	/** how names are keyed: SQLite's way, or Postgres's under its schema */
+	naming: Naming
 	/** how many DROPs of each rebuilt table the file has read so far: the next pairs with the next rebuild */
 	drops: Map<string, number>
 	/** rebuilt tables whose guard fires a trigger as it keeps their rows, with why */
@@ -70,7 +72,7 @@ function copyOutcome(
 
 /** A SQLite drop that is a table rebuild: lossless when it copies every column the table had, as it had it */
 function rebuildFinding(table: string | undefined, ctx: RebuildContext): Finding | undefined {
-	const name = table === undefined ? undefined : nameKey(table, ctx.dialect)
+	const name = table === undefined ? undefined : nameKey(table, ctx.naming)
 	const rebuilt = name === undefined ? undefined : ctx.rebuilds.get(name)
 	if (name === undefined || rebuilt === undefined) return undefined
 	/* each DROP pairs with its own rebuild, by position: a clean one later cannot launder a lossy one (M5) */

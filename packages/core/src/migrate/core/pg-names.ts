@@ -23,11 +23,14 @@ function moveTable(facts: Facts, from: string, to: string): void {
 	for (const parents of facts.parents.values()) for (const each of parents) if (each.parent === from) each.parent = to
 }
 
-/** A key moved from schema `from` to schema `to` (public's keys are unqualified); undefined when it is not under `from` */
-function movedKey(key: string, from: string, to: string): string | undefined {
+/**
+ * A key moved from schema `from` to schema `to`, the keys of `schema` (where an unqualified name
+ * resolves) unqualified; undefined when it is not under `from`
+ */
+function movedKey(key: string, { from, to }: { from: string; to: string }, schema: string): string | undefined {
 	const parts = key.split(".")
-	const under = from === "public" ? parts.length === 1 : parts.length > 1 && parts[0] === from
-	return under ? keyOf([to, ...(from === "public" ? parts : parts.slice(1))]) : undefined
+	const under = from === schema ? parts.length === 1 : parts.length > 1 && parts[0] === from
+	return under ? keyOf([to, ...(from === schema ? parts : parts.slice(1))], schema) : undefined
 }
 
 /**
@@ -35,7 +38,7 @@ function movedKey(key: string, from: string, to: string): string | undefined {
  * references alike, and a routine keeps the key it had beside its new one (M74)
  */
 function moveSchema(facts: Facts, from: string, to: string): void {
-	const move = (key: string) => movedKey(key, from, to) ?? key
+	const move = (key: string) => movedKey(key, { from, to }, facts.schema) ?? key
 	const maps = [
 		facts.casts,
 		facts.code,
@@ -62,19 +65,19 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 /** A trigger made, renamed or dropped */
 function followTrigger(type: string, node: Node, facts: Facts): void {
 	if (type === "CreateTrigStmt") {
-		const table = tableOf(node["relation"]).key
+		const table = tableOf(node["relation"], facts.schema).key
 		const name = String(node["trigname"])
 		const events = EVENTS.filter(([bit]) => ((node["events"] as number) & bit) !== 0).map(([, event]) => event)
 		const kept = (facts.triggers.get(table) ?? []).filter((each) => each.name !== name)
 		facts.triggers.set(table, [...kept, { events, name }])
 	} else if (type === "RenameStmt" && node["renameType"] === "OBJECT_TRIGGER") {
-		const table = tableOf(node["relation"]).key
+		const table = tableOf(node["relation"], facts.schema).key
 		for (const each of facts.triggers.get(table) ?? [])
 			if (each.name === node["subname"]) each.name = String(node["newname"])
 	} else if (type === "DropStmt" && node["removeType"] === "OBJECT_TRIGGER") {
 		for (const object of node["objects"] as Node[]) {
 			const parts = names((object["List"] as Node)["items"])
-			const table = keyOf(parts.slice(0, -1))
+			const table = keyOf(parts.slice(0, -1), facts.schema)
 			facts.triggers.set(
 				table,
 				(facts.triggers.get(table) ?? []).filter((each) => each.name !== parts.at(-1)),
@@ -98,9 +101,12 @@ function followName(type: string, node: Node, facts: Facts): void {
 		const rel = node["relation"] as { relname: string; schemaname?: string }
 		const to =
 			type === "RenameStmt"
-				? keyOf(rel.schemaname === undefined ? [String(node["newname"])] : [rel.schemaname, String(node["newname"])])
-				: keyOf([String(node["newschema"]), rel.relname])
-		moveTable(facts, tableOf(rel).key, to)
+				? keyOf(
+						rel.schemaname === undefined ? [String(node["newname"])] : [rel.schemaname, String(node["newname"])],
+						facts.schema,
+					)
+				: keyOf([String(node["newschema"]), rel.relname], facts.schema)
+		moveTable(facts, tableOf(rel, facts.schema).key, to)
 	} else if (ROUTINES.has(kind)) {
 		const parts = routineOf(node["object"])
 		facts.defined.add(
@@ -108,6 +114,7 @@ function followName(type: string, node: Node, facts: Facts): void {
 				type === "RenameStmt"
 					? [...parts.slice(0, -1), String(node["newname"])]
 					: [String(node["newschema"]), parts.at(-1) as string],
+				facts.schema,
 			),
 		)
 	}
@@ -116,7 +123,8 @@ function followName(type: string, node: Node, facts: Facts): void {
 /** A table dropped takes its triggers with it */
 function followDrop(node: Node, facts: Facts): void {
 	if (node["removeType"] !== "OBJECT_TABLE") return
-	for (const object of node["objects"] as Node[]) facts.triggers.delete(keyOf(names((object["List"] as Node)["items"])))
+	for (const object of node["objects"] as Node[])
+		facts.triggers.delete(keyOf(names((object["List"] as Node)["items"]), facts.schema))
 }
 
 /**

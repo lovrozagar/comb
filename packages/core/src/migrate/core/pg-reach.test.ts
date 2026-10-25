@@ -10,6 +10,7 @@ const FACTS: Facts = {
 	defined: new Set(),
 	domains: new Map(),
 	operators: new Map([["===", "eq3"]]),
+	schema: "public",
 	parents: new Map([
 		["c", [{ parent: "p", partition: true }]],
 		["g", [{ parent: "c", partition: true }]],
@@ -50,11 +51,11 @@ describe("a Postgres write's reach", () => {
 	})
 
 	it("keeps a parent fresh when the child it takes is fresh too", () => {
-		const fresh = freshStart(undefined, "postgres")
+		const fresh = freshStart(undefined, { schema: "public" })
 		fresh.tables.add("q").add("r")
-		followParentage(attach("r"), fresh)
+		followParentage(attach("r"), fresh, "public")
 		expect(fresh.tables.has("q")).toBe(true)
-		followParentage(attach("users"), fresh)
+		followParentage(attach("users"), fresh, "public")
 		expect(fresh.tables.has("q")).toBe(false)
 	})
 })

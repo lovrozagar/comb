@@ -5,25 +5,26 @@
  * A schema-qualified table matches only itself, folded as its dialect folds names. The writes
  * themselves are read from the engine: SQLite's in the proof run, Postgres's parse tree in pg-tree.ts.
  */
-import type { Dialect, ExtractedSchema } from "../types.ts"
-import { IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel } from "./sql-code.ts"
+import type { ExtractedSchema } from "../types.ts"
+import { IDENT, lastPart, nameKey, type Naming, QNAME, qualifiedKey, splitTopLevel } from "./sql-code.ts"
 
 /**
  * What a backfill may fill: the tables a file has created and nothing has filled since, and the
- * columns it has added and nothing has written since; read against the earlier schema, in a dialect
+ * columns it has added and nothing has written since; read against the earlier schema, names keyed
+ * by a naming
  */
 type Fresh = {
 	before?: ExtractedSchema | undefined
 	columns: Map<string, Set<string>>
-	dialect: Dialect
+	naming: Naming
 	tables: Set<string>
 }
 
 /** A file's start: nothing created or added yet */
-const freshStart = (before?: ExtractedSchema, dialect: Dialect = "sqlite"): Fresh => ({
+const freshStart = (before?: ExtractedSchema, naming: Naming = "sqlite"): Fresh => ({
 	before,
 	columns: new Map(),
-	dialect,
+	naming,
 	tables: new Set(),
 })
 
@@ -45,16 +46,16 @@ const ADD = /* @__PURE__ */ new RegExp(
 function followCreate(code: string, fresh: Fresh): void {
 	const created = CREATE.exec(code)?.[1]
 	if (created === undefined || /\bIF NOT EXISTS\b/i.test(code)) return
-	if (fresh.before?.tables.has(nameKey(created, fresh.dialect)) !== true)
-		fresh.tables.add(qualifiedKey(created, fresh.dialect))
+	if (fresh.before?.tables.has(nameKey(created, fresh.naming)) !== true)
+		fresh.tables.add(qualifiedKey(created, fresh.naming))
 }
 
 /** `fresh` with the columns an ALTER TABLE in `code` adds new: no IF NOT EXISTS, and none the table had */
 function followAlter(code: string, fresh: Fresh): void {
 	const [, table, actions] = ALTER.exec(code) ?? []
 	if (table === undefined || actions === undefined) return
-	const key = qualifiedKey(table, fresh.dialect)
-	const had = fresh.before?.tables.get(nameKey(table, fresh.dialect)) ?? []
+	const key = qualifiedKey(table, fresh.naming)
+	const had = fresh.before?.tables.get(nameKey(table, fresh.naming)) ?? []
 	for (const action of splitTopLevel(actions)) {
 		const column = ADD.exec(action)?.[1]
 		if (column === undefined || /^ADD (?:COLUMN )?IF NOT EXISTS\b/i.test(action) || had.includes(lastPart(column)))
@@ -70,7 +71,7 @@ function followAlter(code: string, fresh: Fresh): void {
 function followAdds(code: string, fresh: Fresh): void {
 	followCreate(code, fresh)
 	const filled = INSERT.exec(code)?.[1]
-	if (filled !== undefined && /\bSELECT\b/i.test(code)) fresh.tables.delete(qualifiedKey(filled, fresh.dialect))
+	if (filled !== undefined && /\bSELECT\b/i.test(code)) fresh.tables.delete(qualifiedKey(filled, fresh.naming))
 	followAlter(code, fresh)
 }
 

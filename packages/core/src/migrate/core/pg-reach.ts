@@ -49,7 +49,7 @@ function reachFindings(
 /** A use of a migration's operator, or a cast to a type a migration's cast reaches: its finding */
 function useFinding(type: string, node: Node, facts: Facts): Finding | undefined {
 	if (type === "A_Expr" && Array.isArray(node["name"])) {
-		const operator = keyOf(names(node["name"]))
+		const operator = keyOf(names(node["name"]), facts.schema)
 		/* a bare operator resolves through the search path, so it may be a migration's in any schema */
 		const fn =
 			facts.operators.get(operator) ??
@@ -60,7 +60,7 @@ function useFinding(type: string, node: Node, facts: Facts): Finding | undefined
 			return { level: "unsafe", note: `uses operator ${operator}, which a migration defined (${fn})` }
 	}
 	if (type === "TypeCast") {
-		const target = typeOf(node["typeName"])
+		const target = typeOf(node["typeName"], facts.schema)
 		const cast = facts.casts.get(target)
 		if (cast !== undefined)
 			return { level: "unsafe", note: `casts to ${target} through ${cast.fn}, which a migration defined` }
@@ -70,18 +70,18 @@ function useFinding(type: string, node: Node, facts: Facts): Finding | undefined
 
 /**
  * `fresh` after an ALTER TABLE: a table the file did not create made a partition or an inheritance
- * child of a fresh table puts its rows under it, so the parent is fresh no longer
+ * child of a fresh table puts its rows under it, so the parent is fresh no longer; keyed under `schema`
  */
-function followParentage(node: Node, fresh: Fresh): void {
-	const relation = tableOf(node["relation"]).key
+function followParentage(node: Node, fresh: Fresh, schema: string): void {
+	const relation = tableOf(node["relation"], schema).key
 	for (const each of node["cmds"] as Node[]) {
 		const cmd = each["AlterTableCmd"] as Node
 		const def = cmd["def"] as Node
 		const [child, parent] =
 			cmd["subtype"] === "AT_AttachPartition"
-				? [tableOf((def["PartitionCmd"] as Node)["name"]).key, relation]
+				? [tableOf((def["PartitionCmd"] as Node)["name"], schema).key, relation]
 				: cmd["subtype"] === "AT_AddInherit"
-					? [relation, tableOf(def["RangeVar"]).key]
+					? [relation, tableOf(def["RangeVar"], schema).key]
 					: []
 		if (child === undefined || parent === undefined || fresh.tables.has(child)) continue
 		fresh.tables.delete(parent)

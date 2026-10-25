@@ -38,12 +38,12 @@ describe("columnNames and columnKey", () => {
 	})
 
 	it("reads an inline key's parent as its dialect resolves the name", () => {
-		expect(columnKey('integer REFERENCES "Users"(id)', { column: "u", dialect: "postgres", table: "t" })?.parent).toBe(
-			"Users",
-		)
-		expect(columnKey("integer REFERENCES Users(id)", { column: "u", dialect: "postgres", table: "t" })?.parent).toBe(
-			"users",
-		)
-		expect(columnKey("integer", { column: "u", dialect: "sqlite", table: "t" })).toBeUndefined()
+		expect(
+			columnKey('integer REFERENCES "Users"(id)', { column: "u", naming: { schema: "public" }, table: "t" })?.parent,
+		).toBe("Users")
+		expect(
+			columnKey("integer REFERENCES Users(id)", { column: "u", naming: { schema: "public" }, table: "t" })?.parent,
+		).toBe("users")
+		expect(columnKey("integer", { column: "u", naming: "sqlite", table: "t" })).toBeUndefined()
 	})
 })

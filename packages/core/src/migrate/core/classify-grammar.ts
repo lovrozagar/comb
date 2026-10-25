@@ -19,12 +19,17 @@
  */
 import type { Dialect, ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
-import { nameKey, QNAME, unquote } from "./sql-code.ts"
+import { nameKey, type Naming, QNAME, unquote } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 import { SYNC_TRIGGER, syncTriggerOf } from "./fts-sync.ts"
 
 /** What the grammar needs from the file: the schema before it, and the FTS sync triggers it makes */
-type GrammarContext = { before: ExtractedSchema | undefined; dialect: Dialect; ftsTriggers: ReadonlySet<string> }
+type GrammarContext = {
+	before: ExtractedSchema | undefined
+	dialect: Dialect
+	ftsTriggers: ReadonlySet<string>
+	naming: Naming
+}
 
 const RECOGNIZED = [
 	/^CREATE (?:UNIQUE )?INDEX\b/i,
@@ -67,18 +72,18 @@ const DROP_TRIGGER = /* @__PURE__ */ new RegExp(`^DROP TRIGGER (?:IF EXISTS )?($
 function ftsTriggersOf(
 	statements: readonly string[],
 	before: ExtractedSchema | undefined,
-	dialect: Dialect,
+	naming: Naming,
 ): Set<string> {
 	/* read with their literals, since the 'delete' command is one, and without comments */
 	const codes = statements.map((statement) => normalizeSql(statement).replace(/;$/, ""))
 	const fts = new Set(before?.externalFts ?? [])
 	for (const code of codes) {
 		const table = FTS_EXTERNAL.exec(code)?.[1]
-		if (table !== undefined) fts.add(nameKey(table, dialect))
+		if (table !== undefined) fts.add(nameKey(table, naming))
 	}
 	const out = new Set<string>()
 	for (const code of codes) {
-		const name = syncTriggerOf(code, fts, dialect)
+		const name = syncTriggerOf(code, fts, naming)
 		if (name !== undefined) out.add(name)
 	}
 	return out
@@ -87,10 +92,10 @@ function ftsTriggersOf(
 /** Whether `code` is an FTS sync trigger the file makes, or the drop of one the file makes or the history left */
 function isFtsSync(code: string, ctx: GrammarContext): boolean {
 	const made = SYNC_TRIGGER.exec(code)?.[1]
-	if (made !== undefined) return ctx.ftsTriggers.has(nameKey(made, ctx.dialect))
+	if (made !== undefined) return ctx.ftsTriggers.has(nameKey(made, ctx.naming))
 	const dropped = DROP_TRIGGER.exec(code)?.[1]
 	if (dropped === undefined) return false
-	const key = nameKey(dropped, ctx.dialect)
+	const key = nameKey(dropped, ctx.naming)
 	return ctx.ftsTriggers.has(key) || (ctx.before?.triggers.some((t) => t.name === key && t.ftsSync) ?? false)
 }
 

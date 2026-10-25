@@ -119,7 +119,7 @@ DROP FUNCTION IF EXISTS gone();`,
 			undefined,
 			"postgres",
 		)
-		expect([...historyFacts(schema).defined]).toEqual(["purge", "p", "gone"])
+		expect([...historyFacts(schema, "public").defined]).toEqual(["purge", "p", "gone"])
 	})
 })
 
@@ -142,7 +142,7 @@ describe("extractSchema: trigger events and FTS sync triggers", () => {
 		)
 		/* a Postgres history's triggers are read from its parse trees, not its text */
 		expect(pg.triggers).toEqual([])
-		expect(historyFacts(pg).triggers).toEqual(
+		expect(historyFacts(pg, "public").triggers).toEqual(
 			new Map([["post", [{ events: ["insert", "delete", "update"], name: "t" }]]]),
 		)
 		const fts = extractSchema(

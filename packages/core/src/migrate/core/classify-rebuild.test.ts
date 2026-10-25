@@ -14,6 +14,7 @@ const rebuild = {
 const context = (over: Partial<RebuildContext> = {}): RebuildContext => ({
 	before,
 	dialect: "sqlite",
+	naming: "sqlite",
 	kept: new Map(),
 	drops: new Map(),
 	fired: new Map(),

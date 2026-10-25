@@ -28,16 +28,29 @@ const unquote = (name: string): string => [...name.matchAll(PARTS)].map((match) 
 const lastPart = (name: string): string => unquote(name).split(".").at(-1) as string
 
 /**
- * The name a table, trigger or routine is matched by, as `dialect` resolves it. SQLite matches
- * every identifier without regard to ASCII case, quoted or not, by its last part. Postgres folds an
- * unquoted name to lower case and keeps a quoted one exact, and keeps a schema other than `public`:
- * `public.users` and `users` are one table, `s.users` another.
+ * How names are keyed: SQLite's way, or Postgres's under the schema comb scopes every URL's
+ * search_path to, where an unqualified name resolves (M72)
  */
-function nameKey(name: string, dialect: Dialect): string {
+type Naming = "sqlite" | { schema: string }
+
+/** The naming of `dialect`, a Postgres one under `schema` */
+const namingOf = (dialect: Dialect, schema = "public"): Naming => (dialect === "sqlite" ? "sqlite" : { schema })
+
+/** The dialect a naming reads names as */
+const dialectOf = (naming: Naming): Dialect => (naming === "sqlite" ? "sqlite" : "postgres")
+
+/**
+ * The name a table, trigger or routine is matched by, as `naming` resolves it. SQLite matches
+ * every identifier without regard to ASCII case, quoted or not, by its last part. Postgres folds an
+ * unquoted name to lower case and keeps a quoted one exact, and resolves an unqualified name in its
+ * schema: under `app`, `users` and `app.users` are one table, `public.users` another (M72).
+ */
+function nameKey(name: string, naming: Naming): string {
+	const dialect = dialectOf(naming)
 	const parts = [...name.matchAll(PARTS)].map((match) => partKey(match[0], dialect))
 	const last = parts.at(-1) ?? partKey(name, dialect)
 	const schema = parts.at(-2)
-	return dialect === "postgres" && schema !== undefined && schema !== "public" ? `${schema}.${last}` : last
+	return naming !== "sqlite" && schema !== undefined && schema !== naming.schema ? `${schema}.${last}` : last
 }
 
 /**
@@ -53,13 +66,14 @@ function partKey(part: string, dialect: Dialect): string {
 }
 
 /**
- * A whole name as `dialect` resolves it, each part folded: on SQLite with the schema it was written
- * with (`main."Post"` is `main.post`), on Postgres as nameKey keys it (`Public."Post"` is `Post`)
+ * A whole name as `naming` resolves it, each part folded: on SQLite with the schema it was written
+ * with (`main."Post"` is `main.post`), on Postgres as nameKey keys it (`public."Post"` is `Post`
+ * under public)
  */
-const qualifiedKey = (name: string, dialect: Dialect): string =>
-	dialect === "postgres"
-		? nameKey(name, dialect)
-		: [...name.matchAll(PARTS)].map((match) => partKey(match[0], dialect)).join(".")
+const qualifiedKey = (name: string, naming: Naming): string =>
+	naming === "sqlite"
+		? [...name.matchAll(PARTS)].map((match) => partKey(match[0], "sqlite")).join(".")
+		: nameKey(name, naming)
 
 /** A dollar-quoted body without its tags */
 function bodyText(text: string): string {
@@ -112,4 +126,19 @@ function topLevel(code: string): string {
 	return out
 }
 
-export { asciiFold, bodyText, codeOf, IDENT, lastPart, nameKey, QNAME, qualifiedKey, splitTopLevel, topLevel, unquote }
+export {
+	asciiFold,
+	bodyText,
+	codeOf,
+	dialectOf,
+	IDENT,
+	lastPart,
+	nameKey,
+	type Naming,
+	namingOf,
+	QNAME,
+	qualifiedKey,
+	splitTopLevel,
+	topLevel,
+	unquote,
+}
