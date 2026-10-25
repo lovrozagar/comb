@@ -91,8 +91,8 @@ describe("generated DTOs on comb's own columns", () => {
 			properties: Record<string, { anyOf?: Array<Record<string, unknown>> }>
 		}
 		expect(published.properties["blob"]?.anyOf?.[0]).toMatchObject({
-			description: "At most 20 bytes when serialized as JSON; must not contain U+0000 or an unpaired surrogate",
 			"x-comb-maxBytes": 20,
+			"x-comb-text": "no U+0000 or unpaired surrogate",
 		})
 		expect(accepts("Create", { ...CREATE, blob: { s: "x".repeat(30) } })).toBe(false)
 	})

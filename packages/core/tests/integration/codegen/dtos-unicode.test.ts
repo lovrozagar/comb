@@ -25,7 +25,8 @@ export const item = pgTable("item", { id: c.id("itm"), note: c.text("note"), dat
 		}
 		expect(create.safeParse({ data: { s: "a😀b" }, note: "a😀b" }).success).toBe(true)
 		expect(create.safeParse({ note: "a\u0000b" }).success).toBe(false)
-		expect(JSON.stringify(z.toJSONSchema(create, { io: "input" }))).toContain("uD800")
+		/* the rule is a refine, which JSON Schema publishes as x-comb-text, never as a pattern (F56) */
+		expect(JSON.stringify(z.toJSONSchema(create, { io: "input" }))).not.toContain("uD800")
 	})
 })
 
@@ -60,4 +61,48 @@ export const item = sqliteTable("item", { id: c.id("itm"), note: c.text("note"),
 			close()
 		}
 	})
+})
+
+/*
+ * F56 and F63 of the 0.13.0 round: the text guard is a refine, stated as `x-comb-text`, never a
+ * pattern: Go's and Rust's regex engines refuse `\u` and a surrogate, a field's own pattern stays its
+ * `pattern`, and a c.json field stays a plain `$ref` to its schema, its description its own
+ */
+describe("the text guard, published (F56, F63)", () => {
+	const RULE = "no U+0000 or unpaired surrogate"
+	for (const dialect of ["postgres", "sqlite"] as const) {
+		it(`keeps a field's own pattern and a c.json $ref, and names the guard in x-comb-text, on ${dialect}`, async () => {
+			const table = dialect === "postgres" ? "pgTable" : "sqliteTable"
+			const dtos = await generatedDtos(
+				`f56-${dialect}`,
+				`import * as z from "zod"
+export const prefsSchema = z.object({ theme: z.string() }).meta({ id: "Prefs", description: "The account's display preferences" })
+export const page = ${table}("page", { id: c.id("pag"), slug: c.text("slug", { max: 40, pattern: "/^[a-z0-9-]+$/" }).notNull(), note: c.text("note"), prefs: c.json("prefs", prefsSchema).notNull(), extra: c.json("extra", prefsSchema) })`,
+				{ dialect },
+			)
+			const create = dtos["page"]?.["pageDtoCreateSchema"] as z.ZodObject
+			for (const io of ["input", "output"] as const) {
+				const published = z.toJSONSchema(create, { io }) as {
+					$defs: Record<string, { description?: string }>
+					properties: Record<string, Record<string, unknown>>
+				}
+				expect(published.properties["slug"]).toMatchObject({ pattern: "^[a-z0-9-]+$", "x-comb-text": RULE })
+				expect(published.properties["slug"]).not.toHaveProperty("allOf")
+				expect(published.properties["prefs"]).toEqual({ $ref: "#/$defs/Prefs", "x-comb-text": RULE })
+				expect(published.properties["extra"]).toEqual({
+					anyOf: [{ $ref: "#/$defs/Prefs", "x-comb-text": RULE }, { type: "null" }],
+				})
+				expect(published.$defs["Prefs"]?.description).toBe("The account's display preferences")
+				expect(JSON.stringify(published)).not.toMatch(/\\u|uD800|uDFFF/i)
+			}
+			const body = { prefs: { theme: "dark" }, slug: "a-b" }
+			expect(create.safeParse(body).success).toBe(true)
+			/* under u a pair is one code point outside the class: an emoji passes, a lone half does not */
+			expect(create.safeParse({ ...body, note: "a😀b", prefs: { theme: "😀" } }).success).toBe(true)
+			for (const bad of ["a\u0000", "a\ud800"]) {
+				expect(create.safeParse({ ...body, note: bad }).success).toBe(false)
+				expect(create.safeParse({ ...body, prefs: { theme: bad } }).success).toBe(false)
+			}
+		})
+	}
 })

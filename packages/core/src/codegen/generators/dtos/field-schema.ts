@@ -36,7 +36,15 @@ function enumBase({ field }: Build): Built {
 const JSON_NUL_CHECK =
 	'.refine((val) => !/\\\\u(?:0000|d[89a-f])/i.test(JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "")), { message: "Must not contain U+0000 or an unpaired surrogate" })'
 
-/* a c.json column is its schema, which the runtime reader found exported; a plain json column any JSON value */
+/* how JSON Schema names the text guard, a refine it cannot publish as a rule (F56) */
+const TEXT_RULE = "no U+0000 or unpaired surrogate"
+
+/*
+ * a c.json column is its schema, which the runtime reader found exported; a plain json column any
+ * JSON value. A written c.json value is piped from its schema into its refined copy: meta on the
+ * copy itself would publish the schema inline beside its $ref, while the pipe publishes a plain $ref,
+ * the schema's own description kept, with the refines' rules in x- keys beside it (F26, F63)
+ */
 function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const schema = field.combKind === "json" ? field.jsonSchemaName : field.dataType === "object json" ? "z.json()" : null
 	if (schema === null) return undefined
@@ -46,21 +54,10 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 		limit === null
 			? ""
 			: `.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
-	return `${schema}${size}${JSON_NUL_CHECK}${jsonRules(limit)}`
-}
-
-/**
- * The refines' rules as the schema's meta, which JSON Schema publishes (a refine it cannot): the
- * byte limit as `x-comb-maxBytes`, and both in the description a client reads (F26)
- */
-function jsonRules(limit: number | null): string {
-	const rules = [
-		...(limit === null ? [] : [`At most ${limit} bytes when serialized as JSON`]),
-		"must not contain U+0000 or an unpaired surrogate",
-	]
-	const description = rules.join("; ")
-	const text = JSON.stringify(`${description.charAt(0).toUpperCase()}${description.slice(1)}`)
-	return `.meta({ description: ${text}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
+	const rules = `.meta({ "x-comb-text": ${JSON.stringify(TEXT_RULE)}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
+	const refined = `${schema}${size}${JSON_NUL_CHECK}`
+	/* keep the pipe: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63) */
+	return field.combKind === "json" ? `z.pipe(${schema}, ${refined})${rules}` : `${refined}${rules}`
 }
 
 // lookup-table: the c helpers whose values are numbers or booleans, which numberBase types
@@ -154,8 +151,10 @@ function textBounds({ annotations, field, schemaType }: Build): string {
 function writeChecks(annotations: FieldConstraints): string {
 	const pattern = annotations.pattern === null ? "" : `.regex(${annotations.pattern})`
 	const https = annotations.url ? `.regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" })` : ""
-	/* under u, a lone surrogate is a code point of the range, a pair one code point past it (F11) */
-	const nul = '.regex(/^[^\\u0000\\uD800-\\uDFFF]*$/u, { message: "Must not contain U+0000 or an unpaired surrogate" })'
+	/* under u, a lone surrogate is a code point of the range, a pair one code point past it (F11). A
+	 * refine, not a regex: published as a pattern, Go's and Rust's engines refuse \\u and a surrogate,
+	 * and a field's own pattern would move into an allOf (F56) */
+	const nul = `.refine((val) => /^[^\\u0000\\uD800-\\uDFFF]*$/u.test(val), { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": ${JSON.stringify(TEXT_RULE)} })`
 	/* zod drops a url's format once a regex follows it; published again, a client refuses what z.url() does (F25) */
 	const format = annotations.url ? '.meta({ format: "uri" })' : ""
 	return pattern + https + kindChecks(annotations) + nul + format

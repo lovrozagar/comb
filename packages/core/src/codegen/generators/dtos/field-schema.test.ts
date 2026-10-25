@@ -12,7 +12,7 @@ import { generateFieldSchema as generated } from "./field-schema.ts"
 /* every written text and JSON field ends with the F11 rule; the tests below read the other rules, and
  * "the rule no engine stores" reads this one */
 const TEXT_RULE =
-	'.regex(/^[^\\u0000\\uD800-\\uDFFF]*$/u, { message: "Must not contain U+0000 or an unpaired surrogate" })'
+	'.refine((val) => /^[^\\u0000\\uD800-\\uDFFF]*$/u.test(val), { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" })'
 const JSON_RULE =
 	'.refine((val) => !/\\\\u(?:0000|d[89a-f])/i.test(JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "")), { message: "Must not contain U+0000 or an unpaired surrogate" })'
 const generateFieldSchema = (...args: Parameters<typeof generated>) =>
@@ -209,6 +209,10 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		expect(schema("r", 'c.real("r").notNull()', "read")).toBe("z.number().meta(_m.real)")
 		/* a plain drizzle column is typed from its data type: a JSON blob takes any JSON value */
 		expect(schema("x", 'blob("x")', "read")).toBe("z.json().nullable()")
+		/* written, it takes the refine with its rule as meta, no $ref to keep plain (F63) */
+		expect(schema("x", 'blob("x")', "create")).toBe(
+			'z.json().meta({ "x-comb-text": "no U+0000 or unpaired surrogate" }).nullable().optional()',
+		)
 		expect(() => schema("x", 'blob("x", { mode: "buffer" })', "read")).toThrow(
 			"fixture.x: comb has no rule for a SQLiteBlobBuffer column (object buffer)",
 		)
@@ -303,19 +307,18 @@ describe("generateFieldSchema: a key on create, by what fills it (F6)", () => {
 })
 
 describe("generateFieldSchema: a JSON column's rules, published (F26)", () => {
-	it("names the byte limit and the U+0000 and surrogate rule in the schema's meta, on either dialect", () => {
+	it("names the byte limit and the U+0000 and surrogate rule in x- keys of the field's meta, on either dialect", () => {
 		const blob = fieldOf("b", 'c.json("b", blobSchema, { maxBytes: 20 })', { jsonSchemaName: "blobSchema" })
 		const pg = generateFieldSchema(blob, "create", { dialect: "postgres", imports: imports() })
-		expect(pg).toContain(
-			'.meta({ description: "At most 20 bytes when serialized as JSON; must not contain U+0000 or an unpaired surrogate", "x-comb-maxBytes": 20 })',
-		)
+		expect(pg).toContain('.meta({ "x-comb-text": "no U+0000 or unpaired surrogate", "x-comb-maxBytes": 20 })')
 		const plain = fieldOf("b", 'c.json("b", blobSchema)', { jsonSchemaName: "blobSchema" })
 		expect(generateFieldSchema(plain, "create", { dialect: "postgres", imports: imports() })).toContain(
-			'.meta({ description: "Must not contain U+0000 or an unpaired surrogate" })',
+			'.meta({ "x-comb-text": "no U+0000 or unpaired surrogate" })',
 		)
-		/* on SQLite too, which stores neither as sent (F11) */
+		/* on SQLite too, which stores neither as sent (F11); piped from the schema into its refined copy,
+		 * so it publishes a plain $ref to it (F63) */
 		expect(generateFieldSchema(plain, "create", { dialect: "sqlite", imports: imports() })).toBe(
-			'blobSchema.meta({ description: "Must not contain U+0000 or an unpaired surrogate" }).nullable().optional()',
+			'z.pipe(blobSchema, blobSchema).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" }).nullable().optional()',
 		)
 	})
 })
