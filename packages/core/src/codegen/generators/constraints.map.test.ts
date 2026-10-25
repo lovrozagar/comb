@@ -106,3 +106,46 @@ describe("buildConstraintMap: a CHECK named after its table (F35)", () => {
 		expect(check?.["seats_positive"]?.errorKey).toBe("invite_seats_positive_failed")
 	})
 })
+
+/*
+ * F47 of the 0.13.0 round: a declared CHECK under comb's enum CHECK name is comb's own, applied, and
+ * maps once; two CHECKs of one name blame Postgres's cut only when the cut is what joins them.
+ */
+describe("buildConstraintMap: comb's enum CHECK declared, and CHECKs of one name (F47)", () => {
+	const ENUM = `import { c } from "@lovrozagar/comb/sqlite/columns"
+export const t = sqliteTable("t", { id: text("id").primaryKey(), status: c.enum("status", ["a", "it's"]) }, (t) => [`
+
+	it("maps comb's own enum CHECK once, as the enum's, when the table declares it", () => {
+		const tables = tablesOf(`${SQLITE}${ENUM}check("t_status_enum", sql\`\${t.status} IN ('a', 'it''s')\`)])\n`)
+		expect(buildConstraintMap(tables)["t"]?.check).toEqual({
+			t_status_enum: expect.objectContaining({ errorKey: "t_status_enum_invalid" }),
+		})
+	})
+
+	it("maps it once on Postgres too, as pg-core renders it", () => {
+		const tables = tablesOf(`${PG}import { c } from "@lovrozagar/comb/pg/columns"
+export const t = pgTable("t", { id: text("id").primaryKey(), status: c.enum("status", ["a", "it's"]) }, (t) => [check("t_status_enum", sql\`\${t.status} IN ('a', 'it''s')\`)])\n`)
+		expect(Object.keys(buildConstraintMap(tables, "postgres")["t"]?.check ?? {})).toEqual(["t_status_enum"])
+	})
+
+	it("refuses a CHECK under comb's enum name that checks something else", () => {
+		const tables = tablesOf(`${SQLITE}${ENUM}check("t_status_enum", sql\`\${t.status} IN ('a')\`)])\n`)
+		expect(() => buildConstraintMap(tables)).toThrow(
+			"t: the CHECK t_status_enum takes the name comb gives the enum CHECK of t.status, but checks something else; rename it",
+		)
+	})
+
+	it("names two CHECKs of one name as such, on either dialect", () => {
+		for (const [head, builder, dialect] of [
+			[SQLITE, "sqliteTable", "sqlite"],
+			[PG, "pgTable", "postgres"],
+		] as const) {
+			const tables =
+				tablesOf(`${head}export const t = ${builder}("t", { id: text("id").primaryKey(), seats: integer("seats") }, (t) => [
+	check("seats_ok", sql\`\${t.seats} < 20\`),
+	check("seats_ok", sql\`\${t.seats} > 0\`),
+])\n`)
+			expect(() => buildConstraintMap(tables, dialect)).toThrow(/^t: two CHECKs are named seats_ok; rename one$/)
+		}
+	})
+})

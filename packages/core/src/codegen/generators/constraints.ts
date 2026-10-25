@@ -86,17 +86,41 @@ const keyed = (table: TableMeta, name: string) =>
 	name.startsWith(`${table.sqlName}_`) ? name : `${table.sqlName}_${name}`
 
 /**
+ * The SQL the reader renders comb's enum CHECK of a column to, once a table applies it: the column
+ * by its SQL name, and each value a literal (F47)
+ */
+const enumCheckExpression = (sqlName: string, values: readonly string[]): string =>
+	`"${sqlName}" IN (${values.map((value) => `'${value.replaceAll("'", "''")}'`).join(", ")})`
+
+/**
+ * The declared CHECKs of a table that are not comb's own enum CHECK, applied: one under comb's
+ * name for an enum column is comb's when it checks what comb writes, and refused otherwise (F47)
+ */
+function declaredChecks(table: TableMeta, enums: readonly FieldMeta[]): TableMeta["checkConstraints"] {
+	return table.checkConstraints.filter((chk) => {
+		const field = enums.find((each) => enumCheckName(table, each.name) === chk.name)
+		if (field === undefined) return true
+		if (chk.expression === enumCheckExpression(field.sqlName, field.enumValues as string[])) return false
+		throw new Error(
+			`${table.sqlName}: the CHECK ${chk.name} takes the name comb gives the enum CHECK of ${table.sqlName}.${field.name}, but checks something else; rename it`,
+		)
+	})
+}
+
+/**
  * Each CHECK of a table by the name the engine reports: the declared ones and comb's own enum
- * CHECKs (F28), cut to what Postgres keeps of a name (F21). Two that cut to one fail codegen.
+ * CHECKs (F28), cut to what Postgres keeps of a name (F21). Two of one name, or that cut to one,
+ * fail codegen.
  */
 function checksOf(table: TableMeta, dialect: Dialect): Record<string, Constraint> | undefined {
 	const key = (name: string) => (dialect === "postgres" ? pgIdentifier(name) : name)
-	const entries: Array<[string, string, Constraint]> = table.checkConstraints.map((chk) => [
+	const enums = table.fields.filter((each) => (each.enumValues?.length ?? 0) > 0)
+	const entries: Array<[string, string, Constraint]> = declaredChecks(table, enums).map((chk) => [
 		chk.name,
 		key(chk.name),
 		{ ...checkVerdict(chk.name, chk.expression), errorKey: `${keyed(table, chk.name)}_failed` },
 	])
-	for (const field of table.fields.filter((each) => (each.enumValues?.length ?? 0) > 0)) {
+	for (const field of enums) {
 		const name = enumCheckName(table, field.name)
 		entries.push([
 			name,
@@ -108,6 +132,7 @@ function checksOf(table: TableMeta, dialect: Dialect): Record<string, Constraint
 	const declared = new Map<string, string>()
 	for (const [name, reported, constraint] of entries) {
 		const first = declared.get(reported)
+		if (first === name) throw new Error(`${table.sqlName}: two CHECKs are named ${name}; rename one`)
 		if (first !== undefined)
 			throw new Error(
 				`${table.sqlName}: the CHECKs ${first} and ${name} share the 63 bytes Postgres keeps of their names; rename one`,
