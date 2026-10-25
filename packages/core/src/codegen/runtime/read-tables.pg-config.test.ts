@@ -46,6 +46,18 @@ describe("a Postgres table's third argument, read by column (F45)", () => {
 		})
 	})
 
+	it("records a composite foreignKey() on each of its columns, the key whole beside it (F46)", () => {
+		const pair = pgTable("pair", { a: integer("a"), b: integer("bee") }, (t) => [
+			foreignKey({ columns: [t.a, t.b], foreignColumns: [child.a, child.b] }),
+		])
+		const readPair = tablesOf({ child, pair, parent }).find((table) => table.exportName === "pair")
+		const key = { columns: ["a", "b"], refColumns: ["a", "b"] }
+		expect(readPair?.columns.map((column) => column.foreignKey)).toEqual([
+			expect.objectContaining({ column: "a", key, table: "child" }),
+			expect.objectContaining({ column: "b", key, table: "child" }),
+		])
+	})
+
 	it("refuses, naming the table, a part that is neither its column nor SQL", () => {
 		const stray = pgTable("stray", { a: integer("a") }, () => [index("stray_x").on(parent.id)])
 		expect(() => tablesOf({ parent, stray })).toThrow("stray")

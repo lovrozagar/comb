@@ -83,6 +83,7 @@ function foreignKeyOf(column: SnapshotColumn, tables: readonly SnapshotTable[]):
 	const target = tables.find((each) => each.exportName === fk.table)
 	return {
 		column: column.key,
+		key: fk.key ?? undefined,
 		onDelete: fk.onDelete ?? undefined,
 		onUpdate: fk.onUpdate ?? undefined,
 		refColumn: fk.column,

@@ -163,10 +163,14 @@ function stuckTables(): string {
 	return tables()
 }
 
-/** The pids the module recorded, once it has */
+/**
+ * The pids the module recorded, once it has, waiting up to 20 s: a loader starts slowly on a machine
+ * a full coverage run loads (it once missed a 3 s timeout), and the test is of the kill, not the start
+ */
 async function pidsOf(): Promise<{ grandchild: number; loader: number }> {
 	const file = path.join(dir, "pids.json")
-	for (let tries = 0; tries < 200 && !fs.existsSync(file); tries++) await new Promise((r) => setTimeout(r, 50))
+	for (let tries = 0; tries < 400 && !fs.existsSync(file); tries++) await new Promise((r) => setTimeout(r, 50))
+	expect(fs.existsSync(file), "the module started and recorded its pids").toBe(true)
 	return JSON.parse(fs.readFileSync(file, "utf8")) as { grandchild: number; loader: number }
 }
 
@@ -177,8 +181,8 @@ async function pidsOf(): Promise<{ grandchild: number; loader: number }> {
  */
 describe("loadSnapshot on a module stuck in a synchronous loop, with a process of its own", () => {
 	it("times out, naming the file and the time, and leaves neither the loader nor its grandchild", async () => {
-		expect(() => loadSnapshot(stuckTables(), { run: realRun, timeoutMs: 3000 })).toThrow(
-			`comb timed out after 3 s loading ${tables()}`,
+		expect(() => loadSnapshot(stuckTables(), { run: realRun, timeoutMs: 10_000 })).toThrow(
+			`comb timed out after 10 s loading ${tables()}`,
 		)
 		const { grandchild, loader } = await pidsOf()
 		await new Promise((r) => setTimeout(r, 200))

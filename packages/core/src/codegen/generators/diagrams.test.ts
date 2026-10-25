@@ -11,7 +11,12 @@ import { sqliteTable as createTable, text, integer, real, blob } from "drizzle-o
 import { c } from "@lovrozagar/comb/sqlite/columns"
 `
 
-type Generated = { ddl: string; json: { relationCount: number; tableCount: number }; logged: string[]; summary: string }
+type Generated = {
+	ddl: string
+	json: { relationCount: number; relations: unknown[]; tableCount: number }
+	logged: string[]
+	summary: string
+}
 
 let tmpDir: string
 
@@ -179,5 +184,35 @@ export const membership = createTable("membership", { orgSlug: c.text("org_slug"
 			'  "org_slug" TEXT NOT NULL,\n  "user_slug" TEXT NOT NULL,\n  "role" TEXT,\n  PRIMARY KEY ("org_slug", "user_slug")\n);',
 		)
 		expect(ddl).toContain("-- An outline of the schema: tables, types, keys, NOT NULL and references")
+	})
+})
+
+/*
+ * F46 of the 0.13.0 round: a composite foreign key is one key on its table, so the DDL writes it as
+ * FOREIGN KEY (a, b) REFERENCES t(x, y), never as a REFERENCES on each column, which names a column
+ * that is not unique alone.
+ */
+describe("generateDiagrams: a composite foreign key (F46)", () => {
+	const TABLES = `import { foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
+export const member = createTable("member", { orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [primaryKey({ columns: [t.orgId, t.userId] })])
+export const grant = createTable("grant", { id: c.id(), orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [foreignKey({ columns: [t.orgId, t.userId], foreignColumns: [member.orgId, member.userId] }).onDelete("cascade")])`
+
+	it("writes it on the table, after the table it references", () => {
+		const { ddl } = generate(TABLES)
+		expect(ddl).toContain(
+			'  "org_id" TEXT,\n  "user_id" TEXT,\n  FOREIGN KEY ("org_id", "user_id") REFERENCES "member"("org_id", "user_id") ON DELETE CASCADE\n);',
+		)
+		expect(ddl).not.toContain('"org_id" TEXT REFERENCES')
+		expect(ddl.indexOf('CREATE TABLE "member"')).toBeLessThan(ddl.indexOf('CREATE TABLE "grant"'))
+	})
+
+	it("counts it as one relation, in the JSON and the summary", () => {
+		const { json, summary } = generate(TABLES)
+		expect(json).toMatchObject({
+			relationCount: 1,
+			relations: [{ from: "grant.(org_id, user_id)", onDelete: "cascade", to: "member.(org_id, user_id)" }],
+		})
+		expect(summary).toContain("# 2 tables, 1 FKs")
+		expect(summary).toContain("2 <- 1.(org_id, user_id)[c]")
 	})
 })

@@ -3,7 +3,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { sql } from "drizzle-orm"
 import { integer, pgEnum, pgSchema, pgTable } from "drizzle-orm/pg-core"
-import { check, integer as sqliteInteger, sqliteTable } from "drizzle-orm/sqlite-core"
+import { check, foreignKey, integer as sqliteInteger, primaryKey, sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "../../sqlite/columns.ts"
 import { analyzeNamespace } from "../__fixtures__/runtime.ts"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
@@ -202,5 +202,26 @@ describe("snapshotOf: a table a column named __proto__ broke (F36)", () => {
 		)
 		/* any other value without drizzle's table name is no table, and is passed over */
 		expect(analyzeNamespace({ answer: 42, list: [] }).tables).toEqual([])
+	})
+})
+
+/* F46 of the 0.13.0 round: a composite foreign key is recorded on every one of its columns */
+describe("snapshotOf: a composite foreign key (F46)", () => {
+	it("records each column's own target column, with the key whole; a one-column key carries none", () => {
+		const member = sqliteTable("member", { orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [
+			primaryKey({ columns: [t.orgId, t.userId] }),
+		])
+		const grant = sqliteTable(
+			"grant",
+			{ org: c.text("org_id"), user: c.text("user_id"), owner: c.ref("owner_id").references(() => member.userId) },
+			(t) => [foreignKey({ columns: [t.org, t.user], foreignColumns: [member.orgId, member.userId] })],
+		)
+		const fields = analyzeNamespace({ grant, member }).tables.find((table) => table.varName === "grant")?.fields
+		const key = { columns: ["org", "user"], refColumns: ["orgId", "userId"] }
+		expect(fields?.map((field) => field.foreignKey)).toEqual([
+			expect.objectContaining({ column: "org", key, refColumn: "orgId", refTable: "member" }),
+			expect.objectContaining({ column: "user", key, refColumn: "userId", refTable: "member" }),
+			expect.objectContaining({ column: "owner", key: undefined, refColumn: "userId" }),
+		])
 	})
 })

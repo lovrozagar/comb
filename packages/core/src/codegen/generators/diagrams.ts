@@ -11,33 +11,8 @@ import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { sqlIdentifier } from "../utils/case.ts"
 import { writeGenFile, writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
-
-interface Column {
-	name: string
-	nullable: boolean
-	primaryKey: boolean
-	reference?: {
-		column: string
-		onDelete?: string | undefined
-		onUpdate?: string | undefined
-		table: string
-	}
-	type: string
-}
-
-interface Table {
-	columns: Column[]
-	/** a composite primary key's SQL columns, empty for none */
-	key: string[]
-	name: string
-}
-
-interface Relation {
-	from: string
-	onDelete?: string | undefined
-	onUpdate?: string | undefined
-	to: string
-}
+import type { Column, Relation, Table, TableKey } from "./diagram-types.ts"
+import { generateCompactAI } from "./diagrams-summary.ts"
 
 /* the Postgres type comb's pg columns create for each helper: epoch timestamps are bigint, json jsonb */
 // lookup-table: comb's pg helpers to the types their columns hold
@@ -83,19 +58,54 @@ function inDependencyOrder(tables: Table[]): Table[] {
 	const waiting = [...tables]
 	while (waiting.length > 0) {
 		const ready = (table: Table) =>
-			table.columns.every(
-				(col) =>
-					col.reference === undefined ||
-					col.reference.table === table.name ||
-					done.has(col.reference.table) ||
-					!tables.some((t) => t.name === col.reference?.table),
-			)
+			[
+				...table.columns.flatMap((col) => (col.reference ? [col.reference.table] : [])),
+				...table.foreignKeys.map((fk) => fk.table),
+			].every((to) => to === table.name || done.has(to) || !tables.some((t) => t.name === to))
 		const next = waiting.findIndex(ready)
 		const [table] = waiting.splice(next === -1 ? 0 : next, 1) as [Table]
 		placed.push(table)
 		done.add(table.name)
 	}
 	return placed
+}
+
+/* the reader resolves every key to a table of the analysis, and its column to one of that table's */
+const sqlNameOf = (table: TableMeta, name: string) =>
+	(table.fields.find((field) => field.name === name) as FieldMeta).sqlName
+
+/**
+ * What `field`'s foreign key adds to the diagram: a one-column key's REFERENCES on the column, or a
+ * composite key's FOREIGN KEY on the table, read at its first column (F46). A key names its target
+ * by variable and property; SQL and the JSON name it by table and column.
+ */
+function keyOf(
+	meta: TableMeta,
+	field: FieldMeta,
+	byVar: ReadonlyMap<string, TableMeta>,
+): { reference?: Column["reference"]; relation?: Relation; tableKey?: TableKey } {
+	const fk = field.foreignKey
+	if (!fk || (fk.key !== undefined && fk.key.columns[0] !== field.name)) return {}
+	const { onDelete, onUpdate } = fk
+	const to = byVar.get(fk.refTable) as TableMeta
+	if (fk.key === undefined) {
+		const column = sqlNameOf(to, fk.refColumn)
+		return {
+			reference: { column, onDelete, onUpdate, table: to.sqlName },
+			relation: { from: `${meta.sqlName}.${field.sqlName}`, onDelete, onUpdate, to: `${to.sqlName}.${column}` },
+		}
+	}
+	const columns = fk.key.columns.map((name) => sqlNameOf(meta, name))
+	const refColumns = fk.key.refColumns.map((name) => sqlNameOf(to, name))
+	return {
+		relation: {
+			from: `${meta.sqlName}.(${columns.join(", ")})`,
+			onDelete,
+			onUpdate,
+			to: `${to.sqlName}.(${refColumns.join(", ")})`,
+		},
+		tableKey: { columns, onDelete, onUpdate, refColumns, table: to.sqlName },
+	}
 }
 
 /** Transform TableMeta[] into diagram structures */
@@ -105,54 +115,46 @@ function transformTables(
 ): { relations: Relation[]; tables: Table[] } {
 	const tables: Table[] = []
 	const relations: Relation[] = []
-	/* a key names its target by variable and property; SQL and the JSON name it by table and column */
 	const byVar = new Map(metas.map((meta) => [meta.varName, meta]))
-	/* the reader resolves every key to a table of the analysis, and its column to one of that table's */
-	const target = (refTable: string, refColumn: string) => {
-		const table = byVar.get(refTable) as TableMeta
-		const column = (table.fields.find((field) => field.name === refColumn) as FieldMeta).sqlName
-		return { column, table: table.sqlName }
-	}
 
 	for (const meta of metas) {
 		const columns: Column[] = []
+		const foreignKeys: TableKey[] = []
 
 		for (const field of meta.fields) {
-			const col: Column = {
+			const { reference, relation, tableKey } = keyOf(meta, field, byVar)
+			columns.push({
 				name: field.sqlName,
 				/* a key's column holds no NULL (F33) */
 				nullable: !field.isNotNull && !field.inCompositeKey,
 				primaryKey: field.isPrimaryKey,
+				...(reference && { reference }),
 				/* a plain drizzle column is the type drizzle itself writes for it */
 				type: field.combKind === null ? field.sqlType.toUpperCase() : drizzleHelperToSqlType(field.combKind, dialect),
-			}
-
-			if (field.foreignKey) {
-				const to = target(field.foreignKey.refTable, field.foreignKey.refColumn)
-				col.reference = {
-					column: to.column,
-					onDelete: field.foreignKey.onDelete,
-					onUpdate: field.foreignKey.onUpdate,
-					table: to.table,
-				}
-				relations.push({
-					from: `${meta.sqlName}.${field.sqlName}`,
-					onDelete: field.foreignKey.onDelete,
-					onUpdate: field.foreignKey.onUpdate,
-					to: `${to.table}.${to.column}`,
-				})
-			}
-
-			columns.push(col)
+			})
+			if (relation) relations.push(relation)
+			if (tableKey) foreignKeys.push(tableKey)
 		}
 
 		if (columns.length > 0) {
 			const key = meta.fields.filter((field) => field.inCompositeKey).map((field) => field.sqlName)
-			tables.push({ columns, key, name: meta.sqlName })
+			tables.push({ columns, foreignKeys, key, name: meta.sqlName })
 		}
 	}
 
 	return { relations, tables }
+}
+
+/** A key's REFERENCES clause toward `columns` of `table`, with its rules */
+function referencesOf(
+	table: string,
+	columns: readonly string[],
+	{ onDelete, onUpdate }: { onDelete?: string | undefined; onUpdate?: string | undefined },
+): string {
+	let clause = ` REFERENCES ${sqlIdentifier(table)}(${columns.map(sqlIdentifier).join(", ")})`
+	if (onDelete) clause += ` ON DELETE ${onDelete.toUpperCase()}`
+	if (onUpdate) clause += ` ON UPDATE ${onUpdate.toUpperCase()}`
+	return clause
 }
 
 function generateDDL(tables: Table[], { dbName, dialect }: { dbName: string; dialect: "postgres" | "sqlite" }): string {
@@ -173,14 +175,15 @@ function generateDDL(tables: Table[], { dbName, dialect }: { dbName: string; dia
 			let def = `  ${sqlIdentifier(col.name)} ${col.type}`
 			if (col.primaryKey) def += " PRIMARY KEY"
 			if (!col.nullable && !col.primaryKey) def += " NOT NULL"
-			if (col.reference) {
-				def += ` REFERENCES ${sqlIdentifier(col.reference.table)}(${sqlIdentifier(col.reference.column)})`
-				if (col.reference.onDelete) def += ` ON DELETE ${col.reference.onDelete.toUpperCase()}`
-				if (col.reference.onUpdate) def += ` ON UPDATE ${col.reference.onUpdate.toUpperCase()}`
-			}
+			if (col.reference) def += referencesOf(col.reference.table, [col.reference.column], col.reference)
 			colDefs.push(def)
 		}
 		if (table.key.length > 0) colDefs.push(`  PRIMARY KEY (${table.key.map(sqlIdentifier).join(", ")})`)
+		for (const fk of table.foreignKeys) {
+			colDefs.push(
+				`  FOREIGN KEY (${fk.columns.map(sqlIdentifier).join(", ")})${referencesOf(fk.table, fk.refColumns, fk)}`,
+			)
+		}
 
 		lines.push(colDefs.join(",\n"))
 		lines.push(");")
@@ -197,68 +200,6 @@ function generateRelationsJSON(tables: Table[], relations: Relation[]): Record<s
 		tableCount: tables.length,
 		tables: tables.map((t) => t.name),
 	}
-}
-
-/** Columns nearly every table carries, left out of the compact summary */
-function isCommonColumn(name: string): boolean {
-	return ["id", "created_at", "updated_at", "deleted_at", "metadata", "createdAt", "updatedAt", "deletedAt"].includes(
-		name,
-	)
-}
-
-/** The summary's shorthand for a delete rule; rules without one print nothing */
-function deleteSuffix(onDelete: string | undefined): string {
-	switch (onDelete) {
-		case "cascade":
-			return "[c]"
-		case "restrict":
-			return "[r]"
-		case "set null":
-			return "[n]"
-		default:
-			return ""
-	}
-}
-
-function summaryTableLines(tables: Table[]): string[] {
-	return tables.map((t, i) => {
-		const cols = t.columns.filter((c) => !isCommonColumn(c.name)).map((c) => c.name)
-		return `${i + 1}. ${t.name}: ${cols.length > 0 ? cols.join(", ") : "(only common cols)"}`
-	})
-}
-
-/** One line per referenced table, by 1-based table number (0 when outside the file), most referenced first */
-function summaryRefLines(tables: Table[]): string[] {
-	const tableIndex = new Map(tables.map((t, i) => [t.name, i + 1]))
-	const byTarget = new Map<number, string[]>()
-	for (const [i, table] of tables.entries()) {
-		for (const { name, reference } of table.columns) {
-			if (!reference) continue
-			const targetIdx = tableIndex.get(reference.table) as number
-			byTarget.set(targetIdx, [
-				...(byTarget.get(targetIdx) ?? []),
-				`${i + 1}.${name}${deleteSuffix(reference.onDelete)}`,
-			])
-		}
-	}
-	return [...byTarget]
-		.sort(([a], [b]) => a - b)
-		.sort(([, a], [, b]) => b.length - a.length)
-		.map(([targetIdx, refs]) => `${targetIdx} <- ${refs.join(", ")}`)
-}
-
-function generateCompactAI(tables: Table[], relations: Relation[]): string {
-	return [
-		`# ${tables.length} tables, ${relations.length} FKs`,
-		"# [c]=cascade [r]=restrict [n]=set null",
-		"# Columns exclude: id, createdAt, updatedAt, deletedAt, metadata",
-		"",
-		"## Tables & Columns",
-		...summaryTableLines(tables),
-		"",
-		"## FK refs (target <- source.col)",
-		...summaryRefLines(tables),
-	].join("\n")
 }
 
 type DiagramsConfig = {

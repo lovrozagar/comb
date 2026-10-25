@@ -62,9 +62,15 @@ function backName(
 	return `${count}By${capitalized(oneName(fk.sqlColumn, fk.refTable))}`
 }
 
-type OneRelation = { column: string; name: string; refColumn: string; refTable: string }
+type OneRelation = { columns: string[]; name: string; refColumns: string[]; refTable: string }
 /** `targetColumn` is the referenced column on this table, which the other side joins from; `one` for a unique key's way back */
-type ManyRelation = { name: string; one: boolean; sourceColumn: string; sourceTable: string; targetColumn: string }
+type ManyRelation = {
+	name: string
+	one: boolean
+	sourceColumns: string[]
+	sourceTable: string
+	targetColumns: string[]
+}
 
 type Graph = { manys: Map<string, ManyRelation[]>; ones: Map<string, OneRelation[]> }
 
@@ -76,10 +82,14 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
 }
 
 /** Whether a field's key is unique on its own: `.unique()`, a one-column unique index, or the primary key */
-const isUnique = (table: TableMeta, field: TableMeta["fields"][number]) =>
-	field.isPrimaryKey ||
-	field.unique !== null ||
-	table.uniqueIndexes.some((index) => index.columns.length === 1 && index.columns[0] === field.name)
+/** Whether `columns`, a key's own, are unique on `table` together: its primary key, a unique column, or a unique set */
+function isUnique(table: TableMeta, columns: readonly string[]): boolean {
+	const same = (set: readonly string[]) => set.length === columns.length && set.every((name) => columns.includes(name))
+	const field = columns.length === 1 ? table.fields.find((each) => each.name === columns[0]) : undefined
+	if (field !== undefined && (field.isPrimaryKey || field.unique !== null)) return true
+	const key = table.fields.filter((each) => each.inCompositeKey).map((each) => each.name)
+	return (key.length > 0 && same(key)) || table.uniqueIndexes.some((index) => same(index.columns))
+}
 
 /**
  * Each relation's name on one table; one a column holds, or two relations of one name, fail
@@ -112,21 +122,25 @@ function buildGraph(tables: TableMeta[]): Graph {
 	for (const table of tables) {
 		for (const field of table.fields) {
 			const fk = field.foreignKey
-			if (!fk) continue
+			/* a composite key is one relation, on its first column, joining every column pair (F46) */
+			if (!fk || (fk.key !== undefined && fk.key.columns[0] !== fk.column)) continue
+			const columns = fk.key?.columns ?? [fk.column]
+			const refColumns = fk.key?.refColumns ?? [fk.refColumn]
 			const place = `${table.varName}.${fk.column}`
-			const one = { column: fk.column, name: "", refColumn: fk.refColumn, refTable: fk.refTable }
+			/* no one column names a composite key's role: it is named for its table, as <table>_id is */
+			const sqlColumn = fk.key === undefined ? field.sqlName : `${fk.refTable}_id`
+			const one = { columns, name: "", refColumns, refTable: fk.refTable }
 			push(graph.ones, table.varName, one)
-			push(named, table.varName, { name: oneName(field.sqlName, fk.refTable), place, target: one })
-			const unique = isUnique(table, field)
+			push(named, table.varName, { name: oneName(sqlColumn, fk.refTable), place, target: one })
+			const unique = isUnique(table, columns)
 			const back = {
 				name: "",
 				one: unique,
-				sourceColumn: fk.column,
+				sourceColumns: columns,
 				sourceTable: table.varName,
-				targetColumn: fk.refColumn,
+				targetColumns: refColumns,
 			}
 			push(graph.manys, fk.refTable, back)
-			const sqlColumn = field.sqlName
 			push(named, fk.refTable, { name: backName(table, { ...fk, sqlColumn }, unique), place, target: back })
 		}
 	}
@@ -141,21 +155,27 @@ function buildGraph(tables: TableMeta[]): Graph {
 
 type RelationEntry = { kind: "many"; rel: ManyRelation } | { kind: "one"; rel: OneRelation }
 
+/** `columns` of `table` as a relation names them: one column alone, a composite key's as a list */
+const accessOf = (table: string, columns: readonly string[]): string =>
+	columns.length === 1
+		? propertyAccess(table, columns[0] as string)
+		: `[${columns.map((column) => propertyAccess(table, column)).join(", ")}]`
+
 function entryLines(tableName: string, entry: RelationEntry): string[] {
 	if (entry.kind === "one") {
-		const { column, name, refColumn, refTable } = entry.rel
+		const { columns, name, refColumns, refTable } = entry.rel
 		return [
 			`\t\t${propertyName(name)}: r.one.${refTable}({`,
-			`\t\t\tfrom: ${propertyAccess(`r.${tableName}`, column)},`,
-			`\t\t\tto: ${propertyAccess(`r.${refTable}`, refColumn)},`,
+			`\t\t\tfrom: ${accessOf(`r.${tableName}`, columns)},`,
+			`\t\t\tto: ${accessOf(`r.${refTable}`, refColumns)},`,
 			"\t\t}),",
 		]
 	}
-	const { name, one, sourceColumn, sourceTable, targetColumn } = entry.rel
+	const { name, one, sourceColumns, sourceTable, targetColumns } = entry.rel
 	return [
 		`\t\t${propertyName(name)}: r.${one ? "one" : "many"}.${sourceTable}({`,
-		`\t\t\tfrom: ${propertyAccess(`r.${tableName}`, targetColumn)},`,
-		`\t\t\tto: ${propertyAccess(`r.${sourceTable}`, sourceColumn)},`,
+		`\t\t\tfrom: ${accessOf(`r.${tableName}`, targetColumns)},`,
+		`\t\t\tto: ${accessOf(`r.${sourceTable}`, sourceColumns)},`,
 		"\t\t}),",
 	]
 }

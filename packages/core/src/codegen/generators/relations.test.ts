@@ -123,3 +123,51 @@ export const post = createTable("post", { id: c.id(), accountId: c.ref("account_
 		)
 	})
 })
+
+/*
+ * F46 of the 0.13.0 round: a composite foreign key joins on every column pair, so `with:` serves the
+ * row the key references. Its way back is a one() only when the key's columns are unique on the
+ * referencing table; otherwise a many().
+ */
+describe("generateRelations on a composite foreign key", () => {
+	const MEMBER = `import { foreignKey, primaryKey, unique } from "drizzle-orm/sqlite-core"
+export const member = createTable("member", { orgId: c.text("org_id"), userId: c.text("user_id"), role: c.text("role") }, (t) => [primaryKey({ columns: [t.orgId, t.userId] })])
+`
+
+	it("joins on both columns, and gives the way back as many() when the key is not unique on its table", () => {
+		const { content } = generate(
+			`${MEMBER}export const grant = createTable("grant", { id: c.id(), orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [foreignKey({ columns: [t.orgId, t.userId], foreignColumns: [member.orgId, member.userId] })])`,
+		)
+		expect(content).toContain(
+			"member: r.one.member({\n\t\t\tfrom: [r.grant.orgId, r.grant.userId],\n\t\t\tto: [r.member.orgId, r.member.userId],",
+		)
+		expect(content).toContain(
+			"grants: r.many.grant({\n\t\t\tfrom: [r.member.orgId, r.member.userId],\n\t\t\tto: [r.grant.orgId, r.grant.userId],",
+		)
+		expect(content).not.toContain("r.one.grant(")
+		expect(content.match(/r\.one\.member\(/g)).toHaveLength(1)
+	})
+
+	it("gives the way back as one() when the key's columns are unique on its table", () => {
+		const { content } = generate(
+			`${MEMBER}export const badge = createTable("badge", { id: c.id(), orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [unique("badge_member").on(t.orgId, t.userId), foreignKey({ columns: [t.orgId, t.userId], foreignColumns: [member.orgId, member.userId] })])`,
+		)
+		expect(content).toContain(
+			"badge: r.one.badge({\n\t\t\tfrom: [r.member.orgId, r.member.userId],\n\t\t\tto: [r.badge.orgId, r.badge.userId],",
+		)
+	})
+
+	it("gives the way back as one() when the key's columns are its table's composite primary key", () => {
+		const { content } = generate(
+			`${MEMBER}export const seat = createTable("seat", { orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [primaryKey({ columns: [t.orgId, t.userId] }), foreignKey({ columns: [t.orgId, t.userId], foreignColumns: [member.orgId, member.userId] })])`,
+		)
+		expect(content).toContain("seat: r.one.seat({\n\t\t\tfrom: [r.member.orgId, r.member.userId],")
+	})
+
+	it("gives the way back as many() when only part of the key is unique on its table", () => {
+		const { content } = generate(
+			`${MEMBER}export const pass = createTable("pass", { id: c.id(), orgId: c.text("org_id"), userId: c.text("user_id") }, (t) => [unique("pass_org").on(t.orgId), foreignKey({ columns: [t.orgId, t.userId], foreignColumns: [member.orgId, member.userId] })])`,
+		)
+		expect(content).toContain("passes: r.many.pass({\n\t\t\tfrom: [r.member.orgId, r.member.userId],")
+	})
+})

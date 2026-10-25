@@ -972,6 +972,11 @@ type ForeignKeyRef = {
     refTable: string;
     /** whether the referenced column is a c.id key, whose id rules the reference takes (F10) */
     toId?: boolean | undefined;
+    /** a composite key's columns, each paired by position with the referenced one (F46) */
+    key?: {
+        columns: string[];
+        refColumns: string[];
+    } | undefined;
 };
 /** A single column/field in a table, as drizzle built it and its `c` helper recorded it */
 type FieldMeta = {
