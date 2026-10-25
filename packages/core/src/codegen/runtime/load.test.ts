@@ -199,3 +199,17 @@ describe("loadSnapshot on a module stuck in a synchronous loop, with a process o
 		expect([alive(codegen.pid as number), alive(loader), alive(grandchild)]).toEqual([false, false, false])
 	})
 })
+
+/* F44 of the 0.13.0 round: a seeder the tables module imports only on demand never runs at codegen */
+describe("loadSnapshot on a tables module that imports a seeder on demand", () => {
+	it("loads the tables module without running the seeder", () => {
+		const ran = path.join(dir, "seeded")
+		fs.writeFileSync(
+			path.join(dir, "seed.ts"),
+			`import fs from "node:fs"\nfs.writeFileSync(${JSON.stringify(ran)}, "ran")\nexport {}\n`,
+		)
+		fs.writeFileSync(tables(), `export async function seed() {\n\tawait import("./seed.ts")\n}\n`)
+		expect(loadSnapshot(tables(), { run: realRun })).toEqual({ tables: [] })
+		expect(fs.existsSync(ran)).toBe(false)
+	})
+})

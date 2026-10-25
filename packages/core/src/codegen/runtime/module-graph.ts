@@ -5,16 +5,63 @@
  * would. Type-only imports load nothing at runtime and are left out. The same walk runs under bun
  * and node, so what the reader finds by identity is the same on both.
  */
+import fs from "node:fs"
 import path from "node:path"
 import { ts } from "ts-morph"
 import { compilerOptionsFor, transpiled } from "./ts-options.mjs"
 
+/** Whether `file` runs as CommonJS: a .cjs or .cts file, or one whose package.json names no "type": "module" */
+function commonJs(file: string): boolean {
+	if (/\.c[jt]s$/.test(file)) return true
+	if (/\.m[jt]s$/.test(file)) return false
+	for (let dir = path.dirname(file); ; dir = path.dirname(dir)) {
+		const manifest = path.join(dir, "package.json")
+		if (fs.existsSync(manifest))
+			return (JSON.parse(fs.readFileSync(manifest, "utf8")) as { type?: unknown }).type !== "module"
+		if (path.dirname(dir) === dir) return true
+	}
+}
+
+/** The literal module a `require("…")` call names, alone or under a property read; undefined for any other expression */
+function required(expression: ts.Expression | undefined): string | undefined {
+	const call =
+		expression !== undefined && ts.isPropertyAccessExpression(expression) ? expression.expression : expression
+	if (call === undefined || !ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) return undefined
+	const [first] = call.arguments
+	return call.expression.text === "require" && first !== undefined && ts.isStringLiteral(first) ? first.text : undefined
+}
+
 /**
- * The specifiers `file` loads at runtime: the imports and re-exports of the module it transpiles
- * to, so an import only types use, however written, loads nothing, as at runtime (F42a)
+ * The specifiers `file` loads as soon as it runs, read from the module it transpiles to, so an
+ * import only types use, however written, loads nothing, as at runtime (F42a): its import and
+ * re-export declarations (an `import x = require`, no ES module syntax, transpiles to nothing), and
+ * in a CommonJS file the `require("…")` its top-level statements make,
+ * that file's static imports. An `import()` anywhere, and a `require()` inside a function, a
+ * condition or a callback, loads its module only when that code runs, so it is no import here
+ * (F44): codegen loads every project file this walk finds, to find the tables and enum lists they
+ * hold, and a module it loads runs. A missed edge leaves a table or a list codegen cannot name.
  */
 function runtimeSpecifiers(file: string): string[] {
-	return ts.preProcessFile(transpiled(file), true, false).importedFiles.map(({ fileName }) => fileName)
+	const source = ts.createSourceFile(file, transpiled(file), ts.ScriptTarget.Latest, false)
+	const cjs = commonJs(file)
+	const out: string[] = []
+	for (const statement of source.statements) {
+		const from =
+			ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement) ? statement.moduleSpecifier : undefined
+		if (from !== undefined && ts.isStringLiteral(from)) out.push(from.text)
+		else if (cjs) {
+			const expressions = ts.isExpressionStatement(statement)
+				? [statement.expression]
+				: ts.isVariableStatement(statement)
+					? statement.declarationList.declarations.map((declaration) => declaration.initializer)
+					: []
+			for (const expression of expressions) {
+				const module = required(expression)
+				if (module !== undefined) out.push(module)
+			}
+		}
+	}
+	return out
 }
 
 /** A package a project file imports, by the specifier it wrote */

@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
@@ -96,5 +97,85 @@ describe("compilerOptionsFor", () => {
 		fs.chmodSync(path.join(dir, "tsconfig.json"), 0o000)
 		expect(() => compilerOptionsFor(path.join(dir, "a.ts"))).toThrow(path.join(dir, "tsconfig.json"))
 		fs.chmodSync(path.join(dir, "tsconfig.json"), 0o644)
+	})
+})
+
+/* F44 of the 0.13.0 round: a call of import() or require() loads its module only when the code runs,
+   so codegen, which imports what the tables module loads at once, must not load it */
+describe("runtimeSpecifiers: a module loaded on demand", () => {
+	it("leaves out import() and require() calls, at the top level or in a function, in an ES module", () => {
+		write({
+			"a.ts": `import { a } from "./b"
+import fs = require("./legacy")
+export async function seed() {
+	await import("./seed")
+	require("./other")
+}
+const lazy = import("./lazy")
+export const x = [a, fs, lazy]
+`,
+		})
+		/* `import fs = require` is no ES module syntax: transpiled as one, it is gone, and loads nothing */
+		expect(runtimeSpecifiers(path.join(dir, "a.ts"))).toEqual(["./b"])
+	})
+
+	it("walks no file a tables module imports only on demand", () => {
+		write({
+			"db.tables.ts": `export const t = 1\nexport async function seed() { await import("./seed.ts") }\n`,
+			"seed.ts": `export const seeded = true\n`,
+		})
+		expect(moduleGraph(path.join(dir, "db.tables.ts")).files.map((file) => path.basename(file))).toEqual([
+			"db.tables.ts",
+		])
+	})
+})
+
+/* F44 with F54 in view: in a CommonJS file, a top-level require is that file's static import */
+describe("runtimeSpecifiers: a CommonJS module's top-level requires", () => {
+	it("walks a CommonJS tables module's top-level require of its sibling, its static import, but not one in a function", () => {
+		write({
+			"cjs/package.json": JSON.stringify({ name: "cjs-app" }),
+			"cjs/db.tables.ts": `const columns = require("./columns")\nrequire("./side")\nexports.t = columns.t\nexports.seed = () => require("./seed")\n`,
+			"cjs/columns.ts": `exports.t = 1\n`,
+			"cjs/side.ts": `exports.s = 1\n`,
+			"cjs/seed.ts": `exports.seeded = true\n`,
+		})
+		expect(runtimeSpecifiers(path.join(dir, "cjs/db.tables.ts"))).toEqual(["./columns", "./side"])
+		expect(moduleGraph(path.join(dir, "cjs/db.tables.ts")).files.map((file) => path.basename(file))).toEqual([
+			"db.tables.ts",
+			"columns.ts",
+			"side.ts",
+		])
+	})
+
+	it("reads a top-level require as no import in an ES module, which has no require", () => {
+		write({
+			"esm/package.json": JSON.stringify({ type: "module" }),
+			"esm/a.ts": `const b = require("./b")\nexport const x = b\n`,
+		})
+		expect(runtimeSpecifiers(path.join(dir, "esm/a.ts"))).toEqual([])
+	})
+
+	it("reads a .cjs file as CommonJS and an .mjs one as an ES module, whatever the package says, and only a literal require", () => {
+		write({
+			"cjs/package.json": JSON.stringify({ name: "cjs-app" }),
+			"cjs/a.cjs": `const p = require("./p").value\nconst name = "./dynamic"\nconst d = require(name)\nconst plain = 1\nfunction later() { return require("./later") }\nexports.x = [p, d, plain, later]\n`,
+			"cjs/b.mjs": `const c = require("./c")\nexport const x = c\n`,
+			"esm/package.json": JSON.stringify({ type: "module" }),
+			"esm/c.cjs": `require("./d")\n`,
+		})
+		expect(runtimeSpecifiers(path.join(dir, "cjs/a.cjs"))).toEqual(["./p"])
+		expect(runtimeSpecifiers(path.join(dir, "cjs/b.mjs"))).toEqual([])
+		expect(runtimeSpecifiers(path.join(dir, "esm/c.cjs"))).toEqual(["./d"])
+	})
+
+	it("reads a file with no package.json above it as CommonJS, as node does", () => {
+		const loose = fs.mkdtempSync(path.join(os.tmpdir(), "comb-module-graph-"))
+		try {
+			fs.writeFileSync(path.join(loose, "a.ts"), `require("./b")\n`)
+			expect(runtimeSpecifiers(path.join(loose, "a.ts"))).toEqual(["./b"])
+		} finally {
+			fs.rmSync(loose, { force: true, recursive: true })
+		}
 	})
 })
