@@ -154,8 +154,6 @@ describe("keyset pagination on a date-mode timestamp whose cursor row is edited 
 	it.each([
 		["ts.asc", 4],
 		["ts.desc", 5],
-		["ts.asc", 8],
-		["ts.desc", 8],
 	] as const)("pages %s on past its finite cursor row %s bumped later, skipping none", async (order, at) => {
 		const inOrder = await seeded(sessions)
 		const all = await inOrder(order)
@@ -166,12 +164,19 @@ describe("keyset pagination on a date-mode timestamp whose cursor row is edited 
 		expect(seen.filter((id) => id === at).length).toBeLessThanOrEqual(2)
 	})
 
-	/* minted on an infinite row, which the edit makes finite: its Date is the one both infinities read as,
-	   so the bound resumes from the direction's own end, as for a deleted row, repeating rows and skipping none */
+	/*
+	 * Minted on a row whose Date is the one both infinities read as, which the edit leaves finite: an
+	 * infinite row made finite, or row 8, whose finite 2000-01-01 reads as that very Date where the
+	 * process runs in UTC (drizzle reads a finite `timestamp` as UTC, an infinite one as local
+	 * 2000-01-01). Which the row was is gone, so the bound resumes from the direction's own end, as
+	 * for a deleted row, repeating rows and skipping none, in every time zone.
+	 */
 	it.each([
 		["ts.desc", 1],
 		["ts.asc", 2],
-	] as const)("skips no row on %s once its infinite cursor row %s is made finite", async (order, at) => {
+		["ts.asc", 8],
+		["ts.desc", 8],
+	] as const)("skips no row on %s once its cursor row %s is edited to another finite value", async (order, at) => {
 		const inOrder = await seeded(sessions)
 		const all = await inOrder(order)
 		const seen = await pageAll(sessions, order, { at, edit: BUMP })
