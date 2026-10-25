@@ -5,6 +5,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
+import * as z from "zod"
 import {
 	codegen,
 	exportsOf,
@@ -164,5 +165,57 @@ describe("two generators writing one path (F21)", () => {
 			/generators (?:rows and constraints|constraints and rows) of core both write src\/gen\/db\.gen\.ts/,
 		)
 		expect(generatedFiles(dir)).toEqual([])
+	}, 120_000)
+})
+
+const DEFAULTED_SCHEMAS = `import * as z from "zod"
+export const extractionSchema = z.object({ columns: z.array(z.object({ name: z.string(), type: z.enum(["string", "number"]).default("string") })) }).meta({ id: "Extraction", description: "What to extract" })
+`
+const DEFAULTED_TABLES = `import { sqliteTable } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+import { extractionSchema } from "./schemas.ts"
+export const batch = sqliteTable("batch", { id: c.id("bat"), schemaJson: c.json("schema_json", extractionSchema).notNull(), extra: c.json("extra", extractionSchema), preset: c.json("preset", extractionSchema).notNull().default({ columns: [] }) })
+`
+/** The schema DEFAULTED_SCHEMAS declares, as its own JSON Schema reads without the id */
+const extraction = () =>
+	z
+		.object({ columns: z.array(z.object({ name: z.string(), type: z.enum(["string", "number"]).default("string") })) })
+		.meta({ description: "What to extract" })
+
+/*
+ * F63's follow-up, found by the 0.13.1 RC: a written c.json field was z.pipe(schema, refined copy),
+ * which TypeScript refuses for a schema whose input is not its output (a .default(), a transform)
+ */
+describe("a c.json schema whose input and output differ", () => {
+	it("writes create and update DTOs that typecheck", async () => {
+		const dir = project({
+			"comb.config.ts": `export default { databases: { core: { tables: "./src/db/db.core.tables.ts" } } }\n`,
+			"src/db/db.core.tables.ts": DEFAULTED_TABLES,
+			"src/db/schemas.ts": DEFAULTED_SCHEMAS,
+		})
+		await codegen(dir)
+		expect(typecheck(dir)).toBe("")
+	}, 120_000)
+
+	it("keeps the schema's defaults and the column's: optional on create, filled in its output", async () => {
+		const dir = project({
+			"comb.config.ts": `export default { databases: { core: { tables: "./src/db/db.core.tables.ts" } } }\n`,
+			"src/db/db.core.tables.ts": DEFAULTED_TABLES,
+			"src/db/schemas.ts": DEFAULTED_SCHEMAS,
+		})
+		await codegen(dir)
+		const dtos = (await import(path.join(dir, "src/db/dtos/batch/db.core.batch.gen.ts"))) as Record<string, z.ZodObject>
+		const create = dtos["batchDtoCreateSchema"] as z.ZodObject
+		/* the schema's defaulted key may be left out, and the column's default fills the field */
+		expect(create.parse({ schemaJson: { columns: [{ name: "a" }] } })).toEqual({
+			schemaJson: { columns: [{ name: "a", type: "string" }] },
+		})
+		/* the wrapped field publishes what the schema itself publishes, its required keys included, in either io */
+		for (const io of ["input", "output"] as const) {
+			const published = z.toJSONSchema(create, { io }) as { $defs: Record<string, unknown>; required?: string[] }
+			const { $schema: _, ...own } = z.toJSONSchema(extraction(), { io })
+			expect(published.$defs["Extraction"]).toEqual(own)
+			expect(published.required).toEqual(["schemaJson"])
+		}
 	}, 120_000)
 })

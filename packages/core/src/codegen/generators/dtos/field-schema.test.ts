@@ -316,10 +316,10 @@ describe("generateFieldSchema: a JSON column's rules, published (F26)", () => {
 		expect(generateFieldSchema(plain, "create", { dialect: "postgres", imports: imports() })).toContain(
 			'.meta({ "x-comb-text": "no U+0000 or unpaired surrogate" })',
 		)
-		/* on SQLite too, which stores neither as sent (F11); piped from the schema into its refined copy,
-		 * so it publishes a plain $ref to it (F63) */
+		/* on SQLite too, which stores neither as sent (F11); the refined schema as a union's one option,
+		 * so it publishes anyOf: [$ref] to it (F63) */
 		expect(generateFieldSchema(plain, "create", { dialect: "sqlite", imports: imports() })).toBe(
-			'z.pipe(blobSchema, blobSchema).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" }).nullable().optional()',
+			'z.union([blobSchema]).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" }).nullable().optional()',
 		)
 	})
 })

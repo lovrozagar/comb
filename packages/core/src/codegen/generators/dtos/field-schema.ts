@@ -48,9 +48,11 @@ const TEXT_GUARD = `.refine((val) => /^[^\\u0000\\uD800-\\uDFFF]*$/u.test(val), 
 
 /*
  * a c.json column is its schema, which the runtime reader found exported; a plain json column any
- * JSON value. A written c.json value is piped from its schema into its refined copy: meta on the
- * copy itself would publish the schema inline beside its $ref, while the pipe publishes a plain $ref,
- * the schema's own description kept, with the refines' rules in x- keys beside it (F26, F63)
+ * JSON value. A written c.json value is its refined schema as the one option of a union: meta on the
+ * refined copy itself would publish the schema inline beside its $ref, while the union publishes
+ * `anyOf: [$ref]`, the schema's own description kept, with the refines' rules in x- keys beside it
+ * (F26, F63). A union, not a pipe from the schema into its copy: a pipe needs the copy's input to be
+ * the schema's output, which TypeScript refuses for a schema with a default or a transform
  */
 function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const schema = field.combKind === "json" ? field.jsonSchemaName : field.dataType === "object json" ? "z.json()" : null
@@ -63,8 +65,8 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 			: `.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
 	const rules = `.meta({ "x-comb-text": ${JSON.stringify(TEXT_RULE)}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
 	const refined = `${schema}${size}${JSON_NUL_CHECK}`
-	/* keep the pipe: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63) */
-	return field.combKind === "json" ? `z.pipe(${schema}, ${refined})${rules}` : `${refined}${rules}`
+	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63) */
+	return field.combKind === "json" ? `z.union([${refined}])${rules}` : `${refined}${rules}`
 }
 
 // lookup-table: the c helpers whose values are numbers or booleans, which numberBase types

@@ -66,7 +66,7 @@ export const item = sqliteTable("item", { id: c.id("itm"), note: c.text("note"),
 /*
  * F56 and F63 of the 0.13.0 round: the text guard is a refine, stated as `x-comb-text`, never a
  * pattern: Go's and Rust's regex engines refuse `\u` and a surrogate, a field's own pattern stays its
- * `pattern`, and a c.json field stays a plain `$ref` to its schema, its description its own
+ * `pattern`, and a c.json field stays a `$ref` to its schema, its description its own
  */
 describe("the text guard, published (F56, F63)", () => {
 	const RULE = "no U+0000 or unpaired surrogate"
@@ -88,9 +88,9 @@ export const page = ${table}("page", { id: c.id("pag"), slug: c.text("slug", { m
 				}
 				expect(published.properties["slug"]).toMatchObject({ pattern: "^[a-z0-9-]+$", "x-comb-text": RULE })
 				expect(published.properties["slug"]).not.toHaveProperty("allOf")
-				expect(published.properties["prefs"]).toEqual({ $ref: "#/$defs/Prefs", "x-comb-text": RULE })
+				expect(published.properties["prefs"]).toEqual({ anyOf: [{ $ref: "#/$defs/Prefs" }], "x-comb-text": RULE })
 				expect(published.properties["extra"]).toEqual({
-					anyOf: [{ $ref: "#/$defs/Prefs", "x-comb-text": RULE }, { type: "null" }],
+					anyOf: [{ anyOf: [{ $ref: "#/$defs/Prefs" }], "x-comb-text": RULE }, { type: "null" }],
 				})
 				expect(published.$defs["Prefs"]?.description).toBe("The account's display preferences")
 				expect(JSON.stringify(published)).not.toMatch(/\\u|uD800|uDFFF/i)
