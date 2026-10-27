@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
 import { moduleGraph, runtimeSpecifiers } from "./module-graph.ts"
 import { compilerOptionsFor } from "./ts-options.mjs"
@@ -173,8 +173,12 @@ describe("runtimeSpecifiers: a CommonJS module's top-level requires", () => {
 		const loose = fs.mkdtempSync(path.join(os.tmpdir(), "comb-module-graph-"))
 		try {
 			fs.writeFileSync(path.join(loose, "a.ts"), `require("./b")\n`)
+			/* the walk sees only the scratch directory: a package.json above the system's temp directory is the machine's, not the test's */
+			const real = fs.existsSync
+			vi.spyOn(fs, "existsSync").mockImplementation((file) => String(file).startsWith(loose) && real(file))
 			expect(runtimeSpecifiers(path.join(loose, "a.ts"))).toEqual(["./b"])
 		} finally {
+			vi.restoreAllMocks()
 			fs.rmSync(loose, { force: true, recursive: true })
 		}
 	})

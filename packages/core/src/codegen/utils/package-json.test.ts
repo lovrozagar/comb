@@ -25,16 +25,19 @@ describe("findNearestPackageJson and setPackageExport", () => {
 	beforeEach(() => {
 		dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-package-json-"))
 	})
-	afterEach(() => fs.rmSync(dir, { force: true, recursive: true }))
+	afterEach(() => {
+		vi.restoreAllMocks()
+		fs.rmSync(dir, { force: true, recursive: true })
+	})
 
 	it("finds the package.json in the closest directory above, and null when none exists", () => {
 		const nested = path.join(dir, "src", "gen")
 		fs.mkdirSync(nested, { recursive: true })
 		/* the walk sees only the scratch directory: a package.json above the system's temp directory is the machine's, not the test's */
 		const real = fs.existsSync
-		const seen = vi.spyOn(fs, "existsSync").mockImplementation((file) => String(file).startsWith(dir) && real(file))
+		vi.spyOn(fs, "existsSync").mockImplementation((file) => String(file).startsWith(dir) && real(file))
 		expect(findNearestPackageJson(nested)).toBeNull()
-		seen.mockRestore()
+		vi.restoreAllMocks()
 		fs.writeFileSync(path.join(dir, "package.json"), "{}")
 		expect(findNearestPackageJson(nested)).toBe(path.join(dir, "package.json"))
 	})
