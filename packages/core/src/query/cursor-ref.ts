@@ -30,7 +30,7 @@ import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { createCursor, CursorRef, MAX_CURSOR_LENGTH } from "./cursor.ts"
+import { createCursor, CursorRef, lossy, MAX_CURSOR_LENGTH } from "./cursor.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
 import { cursorPrecision } from "./cursor-precision.ts"
 import { inSeconds } from "./sqlite/cursor-fit.ts"
@@ -195,6 +195,10 @@ const holdsInfinity = (column: SQLWrapper) =>
 const infiniteBound = ({ column }: SortKey, at: Anchor): SQL =>
 	sql`(SELECT CASE WHEN ${column} IN (9e999, -9e999) THEN ${column} END FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id})`
 
+/** A rounded integer key: the row's own exact value, the cursor's once the row is gone */
+const exactBound = ({ column }: SortKey, value: number, at: Anchor): SQL =>
+	sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${value})`
+
 /** A 500 when a list with no table to read from got a reference: paginate was not told the list is derived */
 function assertNoReference(values: readonly unknown[]): void {
 	if (!values.some((value) => value instanceof CursorRef)) return
@@ -208,7 +212,8 @@ function assertNoReference(values: readonly unknown[]): void {
 
 /**
  * The cursor's values with each one the row must supply read from `table`, the row keyed `id` by
- * `tiebreak`: a reference, a Date on a seconds-mode timestamp key, and a null on a SQLite number key
+ * `tiebreak`: a reference, a Date on a seconds-mode timestamp key, a null on a SQLite number key, and an
+ * integer a JS number rounds
  */
 function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anchor): unknown[] {
 	return values.map((value, i) => {
@@ -218,6 +223,7 @@ function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anch
 		if (value instanceof Date && inSeconds(key.column)) return new AnchorBound("row", secondsBound(key, value, at))
 		if (value instanceof Date && misreadsInfinity(key.column) && misreadInfinity(value))
 			return new AnchorBound("row", timestampBound(key, value, at))
+		if (lossy(value)) return new AnchorBound("row", exactBound(key, value, at))
 		return value === null && holdsInfinity(key.column) ? new AnchorBound("infinite", infiniteBound(key, at)) : value
 	})
 }

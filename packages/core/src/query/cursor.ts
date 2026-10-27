@@ -166,6 +166,10 @@ function decodePayload(bytes: Uint8Array): DecodedCursor | null {
 	}
 }
 
+/** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key (U22) */
+const lossy = (value: unknown): value is number =>
+	typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)
+
 /** Mint the cursor for the row after which the next page starts, sealed under `options` and keyed by `idField` */
 function createCursor(
 	record: Record<string, unknown>,
@@ -181,6 +185,14 @@ function createCursor(
 	if (unheld !== undefined) {
 		throw new CombError({
 			cause: `the sort by ${unheld.field} reads a date no JS Date holds (a Postgres 'infinity' read in date mode, or a SQLite seconds timestamp holding ±Infinity); select it in string mode or sort by another column`,
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
+	/* a tiebreak id a JS number rounds cannot find its own row, so the keyset would repeat or skip it (U22) */
+	if (lossy(record[idField])) {
+		throw new CombError({
+			cause: `the tiebreak id ${idField} reads ${String(record[idField])}, past 2^53, where a JS number rounds it, so no cursor can find its row; read it exactly (bun:sqlite safeIntegers, libsql intMode: "bigint", drizzle's mode: "bigint" on Postgres), or on D1 key the table by a text id`,
 			errorKey: combErrorKeys.SORT_NOT_WIRED,
 			status: "internal_server_error",
 		})
@@ -233,6 +245,7 @@ export {
 	cursorProblem,
 	effectiveNulls,
 	encodeCursor,
+	lossy,
 	readCursor,
 	sortSignature,
 	type CursorId,

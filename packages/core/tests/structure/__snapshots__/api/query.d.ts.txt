@@ -82,6 +82,8 @@ declare function effectiveNulls(direction: SortDirection, nulls?: SortNulls): So
 declare function sortSignature(parsedSort: readonly SortField[]): string;
 /** A sealed cursor for `payload`, opened only under the same `options` */
 declare function encodeCursor(payload: CursorPayload, options: CursorOptions): string;
+/** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key (U22) */
+declare const lossy: (value: unknown) => value is number;
 /** Mint the cursor for the row after which the next page starts, sealed under `options` and keyed by `idField` */
 declare function createCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & {
     idField?: string | undefined;
@@ -99,7 +101,7 @@ declare function openCursor(cursor: string, options: CursorOptions): DecodedCurs
  * of its own must read from the cursor's row (cursor-ref.ts), never bind as it is.
  */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
-export { createCursor, CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
+export { createCursor, CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
 
 // query/cursor-seal.d.ts
 /** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
@@ -502,7 +504,8 @@ type Anchor = {
 declare function assertNoReference(values: readonly unknown[]): void;
 /**
  * The cursor's values with each one the row must supply read from `table`, the row keyed `id` by
- * `tiebreak`: a reference, a Date on a seconds-mode timestamp key, and a null on a SQLite number key
+ * `tiebreak`: a reference, a Date on a seconds-mode timestamp key, a null on a SQLite number key, and an
+ * integer a JS number rounds
  */
 declare function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anchor): unknown[];
 export { anchored, assertNoReference, fromOf, type KeysetKind, mintWithin };

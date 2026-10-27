@@ -99,3 +99,34 @@ describe("keyset pagination on a bigint id (Q5)", () => {
 		expect(seen).toEqual([1n, 2n, 3n, 4n, 5n].map((n) => 9007199254740990n + n))
 	})
 })
+
+/* U22: drizzle's bigint in number mode reads 9007199254740993 as …992, so the keyset reads the exact key from the row */
+const counter = pgTable("counter", { id: integer("id").primaryKey(), n: bigint("n", { mode: "number" }).notNull() })
+const counterSchema = createListQuerySchema({ pagination: { defaultLimit: 1, maxLimit: 1 }, sort: ["n"] })
+
+describe("keyset pagination on a bigint key past 2^53 read in number mode (U22)", () => {
+	const sessions = usePg()
+
+	it.each([
+		["n.asc", [1, 5, 2, 3, 4]],
+		["n.desc", [4, 3, 2, 5, 1]],
+	] as const)("pages %s each row once", async (order, expected) => {
+		const client = sessions.pg()
+		await client.query("CREATE TEMP TABLE counter (id integer PRIMARY KEY, n bigint NOT NULL)")
+		await client.query(
+			"INSERT INTO counter VALUES (1, 1), (2, 9007199254740993), (3, 9007199254740995), (4, 9007199254740997), (5, 100)",
+		)
+		const db = drizzle({ client, relations: defineRelations({ counter }) })
+		const seen: number[] = []
+		let cursor: string | undefined
+		for (let page = 0; page < 12; page++) {
+			const query = { ...counterSchema.parse({ order }), cursor }
+			const rows = await db.query.counter.findMany(queryHelpers.listOptions(query, SEALED) as never)
+			const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; n: number }>, query, SEALED)
+			seen.push(...items.map((row) => row.id))
+			if (meta.nextCursor === null) break
+			cursor = meta.nextCursor
+		}
+		expect(seen).toEqual(expected)
+	})
+})
