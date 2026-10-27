@@ -75,7 +75,7 @@
 		"@clack/prompts": "^0.11.0",
 		"@commitlint/cli": "21.2.4",
 		"@commitlint/config-conventional": "21.2.4",
-		"@lovrozagar/grunt": "0.11.2",
+		"@lovrozagar/grunt": "0.12.0",
 		"lefthook": "2.2.2",
 		"oxfmt": "0.75.0",
 		"oxlint": "1.90.0",
