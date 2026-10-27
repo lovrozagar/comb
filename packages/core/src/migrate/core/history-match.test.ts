@@ -28,6 +28,19 @@ describe("matchHistory: the legacy hash", () => {
 	})
 })
 
+/* M45: a file applied with --file, then copied into the directory, would run again */
+describe("matchHistory: a file whose text a --file row holds", () => {
+	it("names each unapplied file a ../ row holds the text of, and never one a row records itself", () => {
+		const rows = [
+			{ createdAt: NOW, hash: "h", name: "../hotfix.sql" },
+			{ createdAt: NOW, hash: "a", name: "1.sql" },
+		]
+		const matched = matchHistory([file("1.sql", "a"), file("2_hotfix.sql", "h")], rows, true)
+		expect(matched.copies).toEqual([{ file: "2_hotfix.sql", row: "../hotfix.sql" }])
+		expect(matchHistory([file("1.sql", "h")], [{ createdAt: NOW, hash: "h", name: "1.sql" }], true).copies).toEqual([])
+	})
+})
+
 /* M15 and M16 of the 0.12 round: each row of the history records one file */
 describe("matchHistory", () => {
 	it("matches a named row by its name, and calls the file edited when its hash moved", () => {

@@ -121,6 +121,14 @@ function refuseUnmatched(matched: Matched, { dir, io, mode }: { dir: string; io:
 		throw new CliError(
 			`${edited} was applied, then edited: its hash is not the one recorded; restore the file, or put the change in a new one`,
 		)
+	/* a copy of a --file is what baseline records, so only check and apply refuse it (M45) */
+	const copies = matched.copies.map(
+		({ file, row }) =>
+			`${file} has the text of ${row}, applied with --file; run comb migrate baseline to record it, or remove it`,
+	)
+	const [copy] = copies
+	if (copy !== undefined && (mode === "check" || mode === "apply")) throw new CliError(copy)
+	if (mode === "status") for (const line of copies) io.out(line)
 	if (matched.orphans.length === 0) return
 	const message = orphanMessage(matched.orphans, dir)
 	if (mode !== "status") throw new CliError(message)

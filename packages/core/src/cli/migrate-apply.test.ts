@@ -109,6 +109,32 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 	})
 })
 
+describe("migrate on SQLite: a --file moved into the directory (M45)", () => {
+	/* M45: moving a hotfix into the history is the usual next step, and it would run the hotfix again */
+	it("refuses a pending file whose text a --file row holds, naming both, and lets baseline record it", async () => {
+		const { dir } = configured({ "1_init.sql": "CREATE TABLE post (id TEXT);" })
+		const hotfix = "CREATE TABLE audit (note TEXT);"
+		writeFileSync(join(dir, "hotfix.sql"), hotfix)
+		expect(await runCli(["migrate", "apply", "core", "--file", "hotfix.sql"], io(dir))).toBe(0)
+		writeFileSync(join(dir, "m", "2_hotfix.sql"), hotfix)
+		writeSum(join(dir, "m"))
+		const refusal =
+			"2_hotfix.sql has the text of ../hotfix.sql, applied with --file; run comb migrate baseline to record it, or remove it"
+		for (const mode of ["check", "apply"]) {
+			const run = io(dir)
+			expect(await runCli(["migrate", mode, "core"], run), mode).toBe(1)
+			expect(run.errors, mode).toEqual([refusal])
+		}
+		const status = io(dir)
+		expect(await runCli(["migrate", "status", "core"], status)).toBe(0)
+		expect(status.outputs).toContain(refusal)
+		const baseline = io(dir)
+		expect(await runCli(["migrate", "baseline", "core"], baseline)).toBe(0)
+		expect(baseline.outputs).toContain("Marked applied: 2_hotfix.sql")
+		expect(await runCli(["migrate", "check", "core"], io(dir))).toBe(0)
+	})
+})
+
 /** A SQLite table rebuild of post, as Atlas writes it, copying `copied` */
 const rebuild = (copied: string) =>
 	`CREATE TABLE new_post (id TEXT, title TEXT);\nINSERT INTO new_post (${copied}) SELECT ${copied} FROM post;\nDROP TABLE post;\nALTER TABLE new_post RENAME TO post;`

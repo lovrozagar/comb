@@ -5,7 +5,9 @@
  * named row holds, so two files of one text (an index dropped, then made again) are two files. A
  * row that matches no file was edited or renamed after it was applied; read over the whole
  * directory, comb refuses it. A file applied with --file from outside the directory is recorded by
- * its path from it (`../lone.sql`), and no file of the directory is expected to match it. A file's
+ * its path from it (`../lone.sql`), and no file of the directory is expected to match it: a file
+ * that has its text, a copy of it moved into the directory, is named, since it would run again
+ * (M45). A file's
  * pre-0.5.0 hash matches only a row recorded before 0.5.0: a later row was recorded under the
  * current hash, so a match by the legacy one is an edit its normalizing hides (M44).
  */
@@ -33,11 +35,13 @@ type Matched = {
 	named: Array<{ hash: string; name: string }>
 	/** the rows that match no file: edited or renamed since they were applied */
 	orphans: HistoryRow[]
+	/** the files not applied whose text a --file row (`../name`) holds */
+	copies: Array<{ file: string; row: string }>
 }
 
 /** Match `rows` to `files`; `whole` when `files` is the whole directory, so a row no file matches is an orphan */
 function matchHistory(files: readonly FileHashes[], rows: readonly HistoryRow[], whole: boolean): Matched {
-	const matched: Matched = { applied: new Set(), edited: [], named: [], orphans: [] }
+	const matched: Matched = { applied: new Set(), copies: [], edited: [], named: [], orphans: [] }
 	const byName = new Map(files.map((file) => [file.name, file]))
 	const held = new Set(rows.flatMap((row) => (row.name === null ? [] : [row.name])))
 	for (const row of rows.filter((each) => each.name !== null)) {
@@ -56,6 +60,9 @@ function matchHistory(files: readonly FileHashes[], rows: readonly HistoryRow[],
 		matched.applied.add(file.name)
 		matched.named.push({ hash: row.hash, name: file.name })
 	}
+	for (const row of rows.filter((each) => each.name?.startsWith("../") === true))
+		for (const file of files.filter((each) => !matched.applied.has(each.name) && holds(each, row)))
+			matched.copies.push({ file: file.name, row: row.name as string })
 	return matched
 }
 
