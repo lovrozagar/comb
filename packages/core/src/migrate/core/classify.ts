@@ -66,12 +66,9 @@ const CAUTIOUS = /* @__PURE__ */ new RegExp(
 	`^(?:DROP|GRANT|REVOKE|CALL|CREATE OR REPLACE|REPLACE|INSERT OR REPLACE|ALTER SEQUENCE (?:IF EXISTS )?${QNAME} RESTART|ALTER (?:INDEX|POLICY|FUNCTION|PROCEDURE|TRIGGER|SEQUENCE)\\b.*\\bRENAME)\\b`,
 	"i",
 )
-/* on Postgres, what CAUTIOUS names but the parse tree does not rate: drops and renames are pg-ddl.ts's (M70) */
+/* on Postgres, what CAUTIOUS names but the parse tree does not rate: drops and renames (M70) and restarts (M82) are pg-ddl.ts's */
 // per-process-constant: a pattern composed from the name grammar, compiled once
-const PG_CAUTIOUS = /* @__PURE__ */ new RegExp(
-	`^(?:GRANT|REVOKE|CALL|CREATE OR REPLACE|ALTER SEQUENCE (?:IF EXISTS )?${QNAME} RESTART)\\b`,
-	"i",
-)
+const PG_CAUTIOUS = /* @__PURE__ */ new RegExp(`^(?:GRANT|REVOKE|CALL|CREATE OR REPLACE)\\b`, "i")
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const RENAMES_NAMED = /* @__PURE__ */ new RegExp(
 	`^ALTER (?:TYPE|SCHEMA|VIEW|MATERIALIZED VIEW) (?:IF EXISTS )?${QNAME} (?:RENAME|SET SCHEMA|DROP ATTRIBUTE)\\b`,

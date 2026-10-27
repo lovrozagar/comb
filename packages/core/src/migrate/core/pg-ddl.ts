@@ -122,6 +122,16 @@ const written = (relation: unknown): string => {
 	return rel.schemaname === undefined ? rel.relname : `${rel.schemaname}.${rel.relname}`
 }
 
+/** A sequence restart, as an ALTER SEQUENCE or an identity column's SET or ADD spells it (M82) */
+const RESTART: Finding = {
+	level: "cautious",
+	note: "restarts a sequence, as a RESTART does: its next values may repeat ones already used",
+}
+
+/** Whether `options`, an option list of a sequence or an identity, holds a RESTART */
+const restarts = (options: unknown): boolean =>
+	nodesOf(options).some(([type, node]) => type === "DefElem" && node["defname"] === "restart")
+
 /** An added column's findings: NOT NULL without a default fails on a table with rows; a volatile default rewrites it */
 function addColumn(def: Node): Finding[] {
 	const column = def["ColumnDef"] as Node
@@ -145,6 +155,8 @@ function columnFindings(cmd: Node, table: string): Finding[] | undefined {
 	if (subtype === "AT_AlterColumnType" || subtype === "AT_SetNotNull")
 		return [{ level: "unsafe" }, { level: "lock", note: REWRITES }]
 	if (subtype === "AT_AddColumn") return addColumn(cmd["def"] as Node)
+	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
+	if ((subtype === "AT_SetIdentity" || subtype === "AT_AddIdentity") && restarts(cmd["def"])) return [RESTART]
 	/* a new generation expression recomputes every row's stored value (M81) */
 	if (subtype === "AT_SetExpression")
 		return [
@@ -215,6 +227,9 @@ function dropFindings(node: Node): Finding[] {
 	return [{ drops, level: UNSAFE_DROPS.has(kind) ? "unsafe" : "cautious" }]
 }
 
+// lookup-table: the DDL nodes that drop what no file can bring back: a database, a role, what a role owns
+const UNSAFE_NODES = /* @__PURE__ */ new Set(["DropOwnedStmt", "DropRoleStmt", "DropdbStmt"])
+
 /** One DDL node's findings, read from its parse tree; undefined for a node that is not DDL these rules rate */
 function ddlFindings(type: string, node: Node): Finding[] | undefined {
 	if (type === "AlterTableStmt") return alterFindings(node)
@@ -225,9 +240,9 @@ function ddlFindings(type: string, node: Node): Finding[] | undefined {
 	}
 	/* a renamed enum value no longer matches what stored rows and the deployed code name */
 	if (type === "AlterEnumStmt") return node["oldVal"] === undefined ? [] : [{ level: "unsafe" }]
+	if (type === "AlterSeqStmt") return restarts(node["options"]) ? [RESTART] : []
 	if (type === "DropStmt") return dropFindings(node)
-	if (type === "DropdbStmt" || type === "DropRoleStmt" || type === "DropOwnedStmt") return [{ level: "unsafe" }]
-	return undefined
+	return UNSAFE_NODES.has(type) ? [{ level: "unsafe" }] : undefined
 }
 
 // lookup-table: the constraints an ADD backs with an index it builds in place, under an ACCESS EXCLUSIVE lock
