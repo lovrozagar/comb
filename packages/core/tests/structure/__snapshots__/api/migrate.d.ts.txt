@@ -636,6 +636,12 @@ export declare function getTursoCredentials(request: TursoCredentialsRequest): P
     authToken: string;
 }>;
 export declare function createTursoProvider(config: TursoProviderConfig, deps?: TursoDeps): ConnectionProvider;
+/**
+ * The file a libsql `file:` URL opens, read as @libsql/core's parseUri reads it (M80): the scheme in
+ * any case, an optional `//authority`, and the path up to `?` or `#`, percent-decoded. Undefined for
+ * another scheme, or a path libsql itself refuses to decode.
+ */
+export declare function libsqlFile(url: string): string | undefined;
 export declare function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider;
 export declare function introspectSqliteSchema(conn: Connection): Promise<string>;
 export declare function getSqliteTables(conn: Connection): Promise<string[]>;

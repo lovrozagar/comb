@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { parseUri } from "@libsql/core/uri"
 import { describe, expect, it, vi } from "vitest"
 import { type LibsqlConnection, libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import {
@@ -12,6 +13,7 @@ import {
 	getSqliteTables,
 	getTursoCredentials,
 	introspectSqliteSchema,
+	libsqlFile,
 } from "./sqlite.ts"
 
 /** A fake Turso API: each call takes the next answer, and every request is kept */
@@ -244,5 +246,74 @@ describe("libsql for a reader (M18)", () => {
 		).rejects.toThrow(`${path} does not exist; check and status open a database read-only, and create none`)
 		expect(existsSync(path)).toBe(false)
 		rmSync(dir, { force: true, recursive: true })
+	})
+})
+
+/* M80 of the 0.13.0 round: libsql percent-decodes a file: URL's path, so the read-only guard checks the path libsql opens */
+/** A read-only libsql connection to `url`, as check and status open one */
+function readOnlyAt(url: string) {
+	const provider = { type: "libsql" as const, url }
+	return createLibsqlProvider(provider).connect({ migrationsDir: "m", name: "core", provider, readonly: true })
+}
+
+describe("libsql for a reader, its file: path decoded as libsql reads it (M80)", () => {
+	it("refuses a URL whose decoded file is missing beside a file named as the URL spells it, and creates none", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-libsql-m80-"))
+		writeFileSync(join(dir, "a%20b.db"), "")
+		await expect(readOnlyAt(`file:${dir}/a%20b.db`)).rejects.toThrow(
+			`${join(dir, "a b.db")} does not exist; check and status open a database read-only, and create none`,
+		)
+		expect(readdirSync(dir)).toEqual(["a%20b.db"])
+		rmSync(dir, { force: true, recursive: true })
+	})
+
+	it("opens a file a URL names percent-encoded, and creates nothing beside it", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-libsql-m80-"))
+		writeFileSync(join(dir, "x y.db"), "")
+		const conn = await readOnlyAt(`file://${dir}/x%20y.db`)
+		await conn.execute("SELECT 1")
+		await conn.close()
+		expect(readdirSync(dir)).toEqual(["x y.db"])
+		rmSync(dir, { force: true, recursive: true })
+	})
+
+	it("leaves a path libsql cannot decode to libsql, which refuses it before opening anything", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-libsql-m80-"))
+		await expect(readOnlyAt(`file:${dir}/bad%ZZ.db`)).rejects.toThrow(/percent encoding/)
+		expect(readdirSync(dir)).toEqual([])
+		rmSync(dir, { force: true, recursive: true })
+	})
+})
+
+/* M80: libsqlFile mirrors @libsql/core's parseUri; pinned against it, so a libsql upgrade that reads a URL otherwise fails here */
+describe("libsqlFile against @libsql/core's parseUri", () => {
+	it("reads every URL of the corpus as parseUri does, and refuses what it refuses", () => {
+		const corpus = [
+			"file:a.db",
+			"FILE:a.db",
+			"File://x/a.db",
+			"file:///tmp/a.db",
+			"file://host/a.db",
+			"file:a.db?mode=ro",
+			"file:a.db#frag",
+			"file:a.db?x=1#f",
+			"file:a%20b.db",
+			"file:100%25.db",
+			"file:dir%2Fa.db",
+			"file:%E2%82%AC.db",
+			"file:bad%ZZ.db",
+			"file::memory:",
+			"libsql://db.example.com",
+		]
+		for (const url of corpus) {
+			let expected: string | undefined
+			try {
+				const uri = parseUri(url)
+				expected = uri.scheme.toLowerCase() === "file" ? uri.path : undefined
+			} catch {
+				expected = undefined
+			}
+			expect([url, libsqlFile(url)]).toEqual([url, expected])
+		}
 	})
 })

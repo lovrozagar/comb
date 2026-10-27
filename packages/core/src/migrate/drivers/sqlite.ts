@@ -167,11 +167,27 @@ export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps
    LIBSQL PROVIDER (direct connection string)
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/**
+ * The file a libsql `file:` URL opens, read as @libsql/core's parseUri reads it (M80): the scheme in
+ * any case, an optional `//authority`, and the path up to `?` or `#`, percent-decoded. Undefined for
+ * another scheme, or a path libsql itself refuses to decode.
+ */
+export function libsqlFile(url: string): string | undefined {
+	const [, scheme, path] = /^([A-Za-z][A-Za-z0-9+.-]*):(?:\/\/[^/?#]*)?([^?#]*)/su.exec(url) ?? []
+	if (scheme?.toLowerCase() !== "file" || path === undefined) return undefined
+	try {
+		return decodeURIComponent(path)
+	} catch {
+		// reason: libsql refuses a path it cannot decode before it opens any file, so there is none to guard
+		return undefined
+	}
+}
+
 export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider {
 	return {
 		async connect(dbConfig?: ResolvedDatabaseConfig): Promise<Connection> {
-			/* libsql has no read-only mode for a file, and creates a missing one on connect; it reads the scheme in any case */
-			const file = /^file:(?:\/\/)?([^?]*)/i.exec(config.url)?.[1]
+			/* libsql has no read-only mode for a file, and creates a missing one on connect */
+			const file = libsqlFile(config.url)
 			if (dbConfig?.readonly === true && file !== undefined && file !== ":memory:" && !existsSync(file))
 				throw new Error(`${file} does not exist; check and status open a database read-only, and create none`)
 			const { createClient } = await import("@libsql/client")
