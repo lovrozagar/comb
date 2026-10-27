@@ -22,7 +22,7 @@ if (mutant !== undefined) {
 
 /* imported after the mock, so a mutant reaches every module that uses the guard */
 const { buildListQuery } = await import("../../../src/query/sqlite/build-list-query.ts")
-const { createCursor } = await import("../../../src/query/cursor.ts")
+const { createCursor } = await import("../../../src/query/cursor-mint.ts")
 const { buildFtsWhere } = await import("../../../src/query/sqlite/search.ts")
 const { sqliteErrorHandler } = await import("../../../src/sqlite/constraint-handler.ts")
 const { d1ErrorHandler } = await import("../../../src/sqlite/d1/error-handler.ts")

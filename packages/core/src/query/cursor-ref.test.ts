@@ -1,63 +1,14 @@
 import { PgDialect, integer as pgInteger, pgTable, text as pgText } from "drizzle-orm/pg-core"
 import { alias, integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
-import { createCursor, CursorRef, openCursor } from "./cursor.ts"
-import { anchored, assertNoReference, fromOf, mintWithin } from "./cursor-ref.ts"
+import { CursorRef } from "./cursor.ts"
+import { anchored, assertNoReference, fromOf } from "./cursor-ref.ts"
 import { AnchorBound } from "./sqlite/keyset.ts"
-import type { SortField } from "./types.ts"
-import { SEALED } from "./__fixtures__/cursor-secret.ts"
 
-const BY_TITLE: SortField[] = [{ direction: "asc", field: "title" }]
 const doc = sqliteTable("doc", { id: integer("id").primaryKey(), title: text("title") })
 const pgDoc = pgTable("doc", { id: pgInteger("id").primaryKey(), title: pgText("title") })
 const sqlite = new SQLiteDialect()
 const pg = new PgDialect()
-
-describe("mintWithin", () => {
-	it("mints a cursor as it is while it fits the cap", () => {
-		expect(openCursor(mintWithin({ id: 1, title: "short" }, BY_TITLE, SEALED), SEALED)?.values).toEqual(["short"])
-	})
-
-	it("carries an overflowing value by the longest prefix of it that fits, within the cap", () => {
-		const title = `${"長".repeat(3000)}tail`
-		const cursor = mintWithin({ id: 1, title }, BY_TITLE, SEALED)
-		expect(cursor.length).toBeLessThanOrEqual(8192)
-		const [ref] = openCursor(cursor, SEALED)?.values ?? []
-		expect(ref).toBeInstanceOf(CursorRef)
-		const { prefix } = ref as CursorRef
-		expect(title.startsWith(prefix)).toBe(true)
-		/* one more code point of prefix would not fit */
-		const longer = Array.from(title)
-			.slice(0, Array.from(prefix).length + 1)
-			.join("")
-		expect((ref as CursorRef).length).toBe(Array.from(title).length)
-		const wider = new CursorRef(longer, Array.from(title).length)
-		expect(createCursor({ id: 1, title: wider }, BY_TITLE, SEALED).length).toBeGreaterThan(8192)
-	})
-
-	it("carries the longest values first, each by what room the others leave", () => {
-		const sort: SortField[] = [
-			{ direction: "asc", field: "a" },
-			{ direction: "asc", field: "b" },
-		]
-		const cursor = mintWithin({ a: "甲".repeat(4000), b: "乙".repeat(3500), id: 1 }, sort, SEALED)
-		const [a, b] = openCursor(cursor, SEALED)?.values ?? []
-		expect(cursor.length).toBeLessThanOrEqual(8192)
-		expect(a).toEqual(new CursorRef("", 4000))
-		expect(b).toBeInstanceOf(CursorRef)
-	})
-
-	it("refuses a derived list's overflow, and one no reference can bring under the cap, with a 500", () => {
-		const derived = { ...SEALED, keyset: "derived" as const }
-		expect(() => mintWithin({ id: 1, title: "長".repeat(3000) }, BY_TITLE, derived)).toThrow(
-			expect.objectContaining({ cause: expect.stringContaining("a derived list reads no row"), status: 500 }),
-		)
-		const huge = BigInt(`1${"0".repeat(7000)}`)
-		expect(() => mintWithin({ id: 1, title: huge }, BY_TITLE, SEALED)).toThrow(
-			expect.objectContaining({ cause: expect.stringContaining("the other keys leave no room"), status: 500 }),
-		)
-	})
-})
 
 describe("fromOf", () => {
 	it("names a table as itself, and an aliased one by its name with the alias reapplied", () => {

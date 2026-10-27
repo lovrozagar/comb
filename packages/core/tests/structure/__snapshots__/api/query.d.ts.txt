@@ -5,8 +5,9 @@
  * Parsers, validators, Zod schemas, and pagination utilities.
  * For SQLite-specific SQL generation, use @lovrozagar/comb/query/sqlite.
  */
-export { createCursor, CursorRef, CURSOR_TIEBREAK_COLUMN, cursorProblem, effectiveNulls, MAX_CURSOR_LENGTH, readCursor, sortSignature, } from "./cursor.ts";
+export { CursorRef, CURSOR_TIEBREAK_COLUMN, cursorProblem, effectiveNulls, MAX_CURSOR_LENGTH, readCursor, sortSignature, } from "./cursor.ts";
 export type { CursorOptions, CursorPayload, CursorValue, DecodedCursor, PaginationMeta } from "./cursor.ts";
+export { createCursor } from "./cursor-mint.ts";
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts";
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
 export { filterBySelect, parseSelect } from "./fields.ts";
@@ -84,8 +85,11 @@ declare function sortSignature(parsedSort: readonly SortField[]): string;
 declare function encodeCursor(payload: CursorPayload, options: CursorOptions): string;
 /** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key (U22) */
 declare const lossy: (value: unknown) => value is number;
-/** Mint the cursor for the row after which the next page starts, sealed under `options` and keyed by `idField` */
-declare function createCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & {
+/**
+ * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
+ * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37)
+ */
+declare function mintCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & {
     idField?: string | undefined;
 }): string;
 /**
@@ -101,7 +105,23 @@ declare function openCursor(cursor: string, options: CursorOptions): DecodedCurs
  * of its own must read from the cursor's row (cursor-ref.ts), never bind as it is.
  */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
-export { createCursor, CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
+export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
+
+// query/cursor-mint.d.ts
+import type { CursorOptions } from "./cursor-seal.ts";
+import type { SortField } from "./types.ts";
+/** paginate's choice for an overflowing key: by reference on a table, refused on a derived list */
+type KeysetKind = "derived" | "table";
+/**
+ * Mint the cursor for the row after which the next page starts, as `paginate` does: its longest
+ * string values carried by reference while it passes the cap that `readCursor` holds; a 500 on a
+ * derived list (`keyset: "derived"`), or when no reference makes it fit
+ */
+declare function createCursor(row: Record<string, unknown>, sort: readonly SortField[], options: CursorOptions & {
+    idField?: string | undefined;
+    keyset?: KeysetKind | undefined;
+}): string;
+export { createCursor, type KeysetKind };
 
 // query/cursor-seal.d.ts
 /** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
@@ -140,7 +160,7 @@ export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CU
  * query-helpers with drizzle's relational query API.
  */
 import { type SQL } from "drizzle-orm";
-import { type KeysetKind } from "./cursor-ref.ts";
+import { type KeysetKind } from "./cursor-mint.ts";
 import { type CursorOptions } from "./cursor-seal.ts";
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts";
 import type { ParsedFields, SortField } from "./types.ts";
@@ -457,67 +477,6 @@ type ListQueryCapabilities = {
     sortFields: Set<string>;
 };
 export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ParsedFields, SortDirection, SortField, SortNulls, };
-
-// query/cursor-ref.d.ts
-/**
- * A sort key too long for a cursor (R8). Any client can write a long title, and a cursor carries
- * every sort value, so the cursor at that row would pass MAX_CURSOR_LENGTH and the next page would
- * refuse it. Such a value is carried by reference instead: the cursor holds the row's id (it always
- * does), the longest prefix of the value that fits and the value's length, both in code points, and
- * the keyset reads the value from the row while the row still has that prefix and length:
- *
- *   (SELECT CASE WHEN substr(t.key, 1, L) = p.v AND length(t.key) = N THEN t.key ELSE fallback END
- *    FROM (SELECT ? AS v) AS p LEFT JOIN t ON t.id = ?)
- *
- * Exact while the row is there unchanged. An edit that keeps both the prefix and the length still
- * moves the bound to the new value; any other edit, or a delete, resumes from the fallback: the
- * prefix itself ascending and the prefix followed by U+10FFFF descending. Under binary, NOCASE and C
- * collation the first sorts at or before the value and the second at or after it, so resuming
- * there may repeat rows that share the prefix and skips none. Postgres takes the fallback only on a
- * C or POSIX collation; under any other, neither bound is safe, the bound is NULL, and the list
- * ends there. A derived list has no table to read from, so its overflowing cursor is refused when
- * it is minted.
- *
- * D1 hands a REAL ±Infinity over as null (its transport is JSON), so a cursor minted from such a
- * row carries null. On a SQLite number key a null is read back from the row, ±Infinity only:
- *
- *   (SELECT CASE WHEN t.key IN (9e999, -9e999) THEN t.key END FROM t WHERE t.id = ?)
- *
- * which is NULL whenever the row holds anything else or is gone, the null the cursor carried. A
- * deleted ±Infinity anchor so resumes from the NULLs' place.
- */
-import { type SQL, type SQLWrapper } from "drizzle-orm";
-import type { CursorOptions } from "./cursor-seal.ts";
-import { type SortKey } from "./sqlite/keyset.ts";
-import type { SortField } from "./types.ts";
-/** paginate's choice for an overflowing key: by reference on a table, refused on a derived list */
-type KeysetKind = "derived" | "table";
-/**
- * The cursor for `row`, its longest string values carried by reference while it passes the cap;
- * a 500 on a derived list, or when no reference makes it fit
- */
-declare function mintWithin(row: Record<string, unknown>, sort: readonly SortField[], options: CursorOptions & {
-    idField?: string | undefined;
-    keyset?: KeysetKind | undefined;
-}): string;
-/** `table` as a FROM item: its own name, with the alias a relational query gave it reapplied */
-declare function fromOf(table: object): SQL;
-/** Where the keyset reads the cursor's row: the table, the tiebreak column and the row's id */
-type Anchor = {
-    id: unknown;
-    nonFinite?: "exact" | undefined;
-    table: object;
-    tiebreak: SQLWrapper;
-};
-/** A 500 when a list with no table to read from got a reference: paginate was not told the list is derived */
-declare function assertNoReference(values: readonly unknown[]): void;
-/**
- * The cursor's values with each one the row must supply read from `table`, the row keyed `id` by
- * `tiebreak`: a reference, a Date on a seconds-mode timestamp key, a null on a SQLite number key, and an
- * integer a JS number rounds
- */
-declare function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anchor): unknown[];
-export { anchored, assertNoReference, fromOf, type KeysetKind, mintWithin };
 
 // query/filter-values.d.ts
 /** The values a filter names for one field or several: queryHelpers.filterValue and filterValues */
@@ -898,64 +857,6 @@ type RetrieveQueryOutput = {
     parsedFields: ParsedFields | null;
 };
 export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, OutputStableShape, PaginationConfig, RetrieveQueryConfig, RetrieveQueryOutput, };
-
-// query/sqlite/keyset.d.ts
-/**
- * Ordering and keyset predicates — one implementation for every SQLite builder.
- *
- * ORDER BY and the cursor predicate must agree on direction AND null placement
- * for every key, or pagination skips and repeats rows. Both are derived here
- * from the same `SortKey[]`, so they cannot disagree.
- */
-import { type SQL, type SQLWrapper } from "drizzle-orm";
-import type { SortDirection, SortNulls } from "../types.ts";
-type SortKey = {
-    column: SQLWrapper;
-    direction: SortDirection;
-    nulls?: SortNulls | undefined;
-};
-type Tiebreak = {
-    column: SQLWrapper;
-    direction: SortDirection;
-};
-/** `col ASC NULLS LAST` — explicit placement so SQLite's default never leaks in. */
-declare function orderSQL(key: SortKey): SQL;
-/** ORDER BY for the keys followed by the tiebreak, which makes the order total. */
-declare function orderByKeys(keys: readonly SortKey[], tiebreak: Tiebreak): SQL[];
-/** A count as a SQL literal, where a bound parameter would cost the D1 budget one */
-declare const countLiteral: (value: number) => SQL;
-/**
- * A bound the keyset reads from the cursor's own row (cursor-ref.ts) rather than binds: a long text
- * value carried by reference, or a seconds-mode timestamp, whose fraction no Date holds (`row`); or
- * a SQLite number the cursor carried as null, which may be a ±Infinity D1 hands over as null. Each is SQL that binds, so the keyset reads it twice at most;
- * `ends` when a NULL bound means no bound is safe, and the list ends there.
- */
-declare class AnchorBound {
-    readonly ends: boolean;
-    readonly kind: "infinite" | "row";
-    readonly value: SQL;
-    constructor(kind: "infinite" | "row", value: SQL, ends?: boolean);
-}
-/** Where a cursor points: the sort keys and the row's values for them, then the tiebreak and its id */
-type KeysetPosition = {
-    id: unknown;
-    keys: readonly SortKey[];
-    tiebreak: Tiebreak;
-    values: readonly unknown[];
-};
-/**
- * Lexicographic "after this row" over every key plus the tiebreak, expanded rather than a row-value
- * comparison because each key carries its own direction and null placement. A bound that `ends`
- * is NULL once its anchor is gone: every row passes then, each carrying anchorGone's flag, so the
- * page answers invalid_cursor rather than end the list unseen (U26).
- */
-declare function keysetSQL(position: KeysetPosition): SQL;
-/**
- * 1 where a bound with no safe fallback is NULL, its anchor row gone or renamed, else 0; undefined
- * when no bound can be. It reads the anchor row alone, so Postgres plans it once a query (U26).
- */
-declare function anchorGone(values: readonly unknown[]): SQL | undefined;
-export { AnchorBound, anchorGone, countLiteral, type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak, };
 
 // codegen/analyzer-types.d.ts
 import type { CombColumnKind } from "../meta/column.ts";

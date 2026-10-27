@@ -170,8 +170,11 @@ function decodePayload(bytes: Uint8Array): DecodedCursor | null {
 const lossy = (value: unknown): value is number =>
 	typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)
 
-/** Mint the cursor for the row after which the next page starts, sealed under `options` and keyed by `idField` */
-function createCursor(
+/**
+ * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
+ * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37)
+ */
+function mintCursor(
 	record: Record<string, unknown>,
 	parsedSort: readonly SortField[],
 	options: CursorOptions & { idField?: string | undefined },
@@ -238,7 +241,6 @@ function readCursor(cursor: string, parsedSort: readonly SortField[], options: C
 }
 
 export {
-	createCursor,
 	CursorRef,
 	CURSOR_TIEBREAK_COLUMN,
 	MAX_CURSOR_LENGTH,
@@ -246,6 +248,7 @@ export {
 	effectiveNulls,
 	encodeCursor,
 	lossy,
+	mintCursor,
 	readCursor,
 	sortSignature,
 	type CursorId,

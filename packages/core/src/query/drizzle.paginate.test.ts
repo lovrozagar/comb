@@ -1,6 +1,7 @@
 /** queryHelpers.paginate beyond the id-keyed rows drizzle.test.ts pages */
 import { describe, expect, it } from "vitest"
-import { createCursor, openCursor } from "./cursor.ts"
+import { openCursor } from "./cursor.ts"
+import { createCursor } from "./cursor-mint.ts"
 import { queryHelpers } from "./drizzle.ts"
 import { createListQuerySchema } from "./schema.ts"
 import { SEALED } from "./__fixtures__/cursor-secret.ts"

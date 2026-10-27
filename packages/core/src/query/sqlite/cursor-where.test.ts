@@ -1,6 +1,7 @@
 import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
-import { CursorRef, createCursor } from "../cursor.ts"
+import { CursorRef } from "../cursor.ts"
+import { createCursor } from "../cursor-mint.ts"
 import type { SortField } from "../types.ts"
 import { SEALED } from "../__fixtures__/cursor-secret.ts"
 import { cursorWhere } from "./cursor-where.ts"

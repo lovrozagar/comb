@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { CombError } from "../error.ts"
 import { decodeBase64Url, encodeBase64Url } from "./base64url.ts"
 import {
-	createCursor,
+	mintCursor,
 	CursorRef,
 	cursorProblem,
 	effectiveNulls,
@@ -116,7 +116,7 @@ describe("cursor values JSON has no number for (R4)", () => {
 
 	it("mints no cursor from a Date no JS Date holds, which would mean null: a 500 on that page", () => {
 		const sort: SortField[] = [{ direction: "asc", field: "at" }]
-		expect(() => createCursor({ at: new Date(Number.NaN), id: 1 }, sort, SEALED)).toThrow(
+		expect(() => mintCursor({ at: new Date(Number.NaN), id: 1 }, sort, SEALED)).toThrow(
 			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
 		)
 	})
@@ -144,28 +144,28 @@ describe("effectiveNulls", () => {
 	})
 })
 
-describe("createCursor", () => {
+describe("mintCursor", () => {
 	it("captures every sort key and the id", () => {
 		const sort: SortField[] = [
 			{ direction: "asc", field: "name" },
 			{ direction: "desc", field: "created_at" },
 		]
-		const cursor = createCursor({ created_at: 5, id: "abc", name: "x" }, sort, SEALED)
+		const cursor = mintCursor({ created_at: 5, id: "abc", name: "x" }, sort, SEALED)
 		expect(decoded(cursor)).toEqual({ id: "abc", sort: sortSignature(sort), values: ["x", 5] })
 	})
 
 	it("reads the id from a custom field", () => {
-		const cursor = createCursor({ _id: "row1", created_at: 1 }, BY_CREATED, { ...SEALED, idField: "_id" })
+		const cursor = mintCursor({ _id: "row1", created_at: 1 }, BY_CREATED, { ...SEALED, idField: "_id" })
 		expect(decoded(cursor)?.id).toBe("row1")
 	})
 
 	it("records a missing sort value as null", () => {
-		expect(decoded(createCursor({ id: "abc" }, BY_CREATED, SEALED))?.values).toEqual([null])
+		expect(decoded(mintCursor({ id: "abc" }, BY_CREATED, SEALED))?.values).toEqual([null])
 	})
 })
 
 describe("cursorProblem / readCursor", () => {
-	const cursor = createCursor({ created_at: 1, id: "abc" }, BY_CREATED, SEALED)
+	const cursor = mintCursor({ created_at: 1, id: "abc" }, BY_CREATED, SEALED)
 
 	it("accepts a cursor under the sort that minted it", () => {
 		expect(cursorProblem(cursor)).toBeNull()
@@ -214,7 +214,7 @@ describe("openCursor — what a cursor may carry (Q-M3, Q-H4)", () => {
 })
 
 describe("sealed and scoped cursors (R1, R2)", () => {
-	const minted = createCursor(
+	const minted = mintCursor(
 		{ created_at: 1, id: "abc", salary: 73519 },
 		[{ direction: "desc", field: "salary" }],
 		SEALED,
@@ -255,8 +255,8 @@ describe("sealed and scoped cursors (R1, R2)", () => {
 	it("throws a 500 on a secret under 32 bytes or no scope, minting or reading", () => {
 		const unwired = expect.objectContaining({ errorKey: "cursor_not_wired", status: 500 })
 		expect(() => readCursor(minted, bySalary, { ...SEALED, cursorSecret: "short" })).toThrow(unwired)
-		expect(() => createCursor({ id: "abc" }, BY_CREATED, { ...SEALED, cursorScope: "" })).toThrow(unwired)
-		expect(() => createCursor({ id: "abc" }, BY_CREATED, undefined as unknown as typeof SEALED)).toThrow(unwired)
+		expect(() => mintCursor({ id: "abc" }, BY_CREATED, { ...SEALED, cursorScope: "" })).toThrow(unwired)
+		expect(() => mintCursor({ id: "abc" }, BY_CREATED, undefined as unknown as typeof SEALED)).toThrow(unwired)
 	})
 
 	it("lets the schema check only the shape, which needs no secret", () => {

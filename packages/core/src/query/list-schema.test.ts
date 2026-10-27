@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
-import { createCursor, MAX_CURSOR_LENGTH, readCursor } from "./cursor.ts"
+import { MAX_CURSOR_LENGTH, mintCursor, readCursor } from "./cursor.ts"
+import { createCursor } from "./cursor-mint.ts"
 import { createListQuerySchema } from "./list-schema.ts"
 import { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
@@ -437,7 +438,8 @@ describe("cursor and order length (S-L1)", () => {
 
 	it("leaves a cursor over MAX_CURSOR_LENGTH to readCursor, which refuses it as invalid_cursor, and refuses an order over 200", () => {
 		const sort = [{ direction: "asc" as const, field: "title" }]
-		const long = createCursor({ id: "p1", title: "t".repeat(MAX_CURSOR_LENGTH) }, sort, SEALED)
+		/* minted whole, past the cap, as a client could forge one: createCursor would carry it by reference */
+		const long = mintCursor({ id: "p1", title: "t".repeat(MAX_CURSOR_LENGTH) }, sort, SEALED)
 		const short = createCursor({ id: "p1", title: "t" }, sort, SEALED)
 		expect(capped.safeParse({ cursor: short, order: "title.asc" }).success).toBe(true)
 		expect(capped.safeParse({ cursor: long, order: "title.asc" }).success).toBe(true)

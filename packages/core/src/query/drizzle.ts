@@ -8,7 +8,8 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
 import { type CursorId, CursorRef, CURSOR_TIEBREAK_COLUMN, readCursor } from "./cursor.ts"
-import { anchored, type KeysetKind, mintWithin } from "./cursor-ref.ts"
+import { createCursor, type KeysetKind } from "./cursor-mint.ts"
+import { anchored } from "./cursor-ref.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
@@ -174,7 +175,7 @@ function mintFrom(row: object, parsedSort: SortField[], options: PaginateOptions
 		})
 	}
 	/* a key too long for the cap goes by reference; a derived list, which cannot read it, says so on page 1 */
-	return mintWithin(row as Record<string, unknown>, parsedSort, options)
+	return createCursor(row as Record<string, unknown>, parsedSort, options)
 }
 
 /**
