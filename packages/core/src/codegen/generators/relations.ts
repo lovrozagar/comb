@@ -6,6 +6,7 @@
  */
 import path from "node:path"
 import { propertyAccess, propertyName } from "../utils/case.ts"
+import { byCodeUnit } from "../utils/order.ts"
 import { importPathFrom } from "../utils/paths.ts"
 import pluralize from "pluralize"
 import type { TableMeta } from "../analyzer-types.ts"
@@ -187,7 +188,7 @@ function tableLines(tableName: string, graph: Graph): string[] {
 		...(graph.ones.get(tableName) ?? []).map((rel): RelationEntry => ({ kind: "one", rel })),
 	]
 	if (entries.length === 0) return []
-	entries.sort((a, b) => a.rel.name.localeCompare(b.rel.name))
+	entries.sort((a, b) => byCodeUnit(a.rel.name, b.rel.name))
 	return [`\t${tableName}: {`, ...entries.flatMap((entry) => entryLines(tableName, entry)), "\t},"]
 }
 

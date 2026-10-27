@@ -14,6 +14,7 @@ import type {
 	UniqueIndexMeta,
 } from "../analyzer-types.ts"
 import { fieldConstraintsOf } from "../annotations.ts"
+import { byCodeUnit } from "../utils/order.ts"
 import { extractDbName, getTablesImportPath } from "../utils/paths.ts"
 import type { ModuleExport, Snapshot, SnapshotColumn, SnapshotTable } from "./snapshot-types.ts"
 
@@ -191,7 +192,7 @@ function toAnalysis(snapshot: Snapshot, tablesPath: string): AnalysisResult {
 			`${tablesPath}: the database holds both Postgres and SQLite tables; give each engine its own database`,
 		)
 	const build = (table: SnapshotTable) => tableOf({ file: tablesPath, table, tables: snapshot.tables })
-	const tables = snapshot.tables.map(build).sort((a, b) => a.varName.localeCompare(b.varName))
+	const tables = snapshot.tables.map(build).sort((a, b) => byCodeUnit(a.varName, b.varName))
 	const schemas = tables.flatMap((table) => table.fields.flatMap((field) => field.schemaImports))
 	return {
 		dbName: extractDbName(tablesPath),

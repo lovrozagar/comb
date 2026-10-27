@@ -5,6 +5,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { commitStaged, isGeneratedContent, type Staged, writeGenJsonFile } from "../codegen/utils/fs.ts"
+import { byCodeUnit } from "../codegen/utils/order.ts"
 import { CliError } from "./output.ts"
 
 /*
@@ -93,7 +94,7 @@ export function commitRuns(
 		delete record.databases[name]
 	}
 	/* by name, so the databases in any order write the same bytes (F32) */
-	record.databases = Object.fromEntries(Object.entries(record.databases).sort(([a], [b]) => a.localeCompare(b)))
+	record.databases = Object.fromEntries(Object.entries(record.databases).sort(([a], [b]) => byCodeUnit(a, b)))
 	/* a file another database's entry lists is that database's, whatever this one's last run wrote (F20) */
 	const others = new Set(
 		Object.entries(record.databases)

@@ -8,6 +8,7 @@ import { Column, getTableColumns, getTableName, is, type SQL, type Table } from 
 import { ExtraConfigColumn, getTableConfig as pgConfig, IndexedColumn, PgDialect, PgTable } from "drizzle-orm/pg-core"
 import { getTableConfig as sqliteConfig, SQLiteDialect, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { pgObjectName } from "../../identifier.ts"
+import { byCodeUnit } from "../utils/order.ts"
 import { combColumnMeta } from "../../meta/column.ts"
 import { constraintsOf, statesOf, STRING_LIST } from "./read-comb.ts"
 import type {
@@ -34,8 +35,8 @@ function exportsHolding(value: unknown, loaded: readonly Loaded[], tablesPath: s
 		(a, b) =>
 			rank(a) - rank(b) ||
 			a.module.length - b.module.length ||
-			a.module.localeCompare(b.module) ||
-			a.name.localeCompare(b.name),
+			byCodeUnit(a.module, b.module) ||
+			byCodeUnit(a.name, b.name),
 	)
 }
 

@@ -3,6 +3,7 @@ import path from "node:path"
 import type { CombEntityMetaInput } from "../../../meta.ts"
 import type { ImportRef } from "../../analyzer-types.ts"
 import { propertyName, snakeToCamel, snakeToPascal } from "../../utils/case.ts"
+import { byCodeUnit } from "../../utils/order.ts"
 import type { FieldInfo, SchemaType, SharedSchema, TableInfo } from "./dto-types.ts"
 import { BASE_TYPE_ALIASES, rewriteWithShared } from "./shared-schemas.ts"
 import { comboFields, comboOf, type TimestampCombo, timestampNames } from "./timestamps.ts"
@@ -87,7 +88,7 @@ export function schemaImportLines(refs: ImportRef[], entityDir: string): string[
 		byModule.set(specifier, [...(byModule.get(specifier) ?? []), ref])
 	}
 	return [...byModule.entries()]
-		.sort(([a], [b]) => a.localeCompare(b))
+		.sort(([a], [b]) => byCodeUnit(a, b))
 		.flatMap(([specifier, group]) => {
 			const named = group
 				.filter((r) => r.imported !== "*" && r.imported !== "default")

@@ -70,6 +70,7 @@
 				"vitest/no-focused-tests": "error",
 				"comb/boundaries": "error",
 				"comb/no-console": "error",
+				"comb/no-locale-compare": "error",
 				"comb/no-module-side-effects": "error",
 				"comb/no-module-state": "error",
 				"comb/no-silent-catch": "error",

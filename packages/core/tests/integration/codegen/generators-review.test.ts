@@ -27,7 +27,8 @@ export const apiKEY = sqliteTable("api_key_upper", { id: c.id("apu") })
 		})
 		const run = await runCodegen(dir)
 		expect(run.code).not.toBe(0)
-		expect(run.err).toMatch(/apiKey and apiKEY/)
+		/* tables in code-unit order, the same on every machine (F40): uppercase first */
+		expect(run.err).toMatch(/apiKEY and apiKey/)
 	}, 120_000)
 })
 

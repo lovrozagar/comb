@@ -3,6 +3,7 @@
  * constraint an `{ errorKey, cause, statusKey }` object, and a table's referenced columns a list.
  */
 import { commentText, dbIdentifiers, propertyName, stringLiteral } from "../utils/case.ts"
+import { byCodeUnit } from "../utils/order.ts"
 
 export type Constraint = {
 	cause: string
@@ -20,8 +21,8 @@ export type TableConstraints = {
 
 export type ConstraintMap = Record<string, TableConstraints>
 
-/** Entries in the order a plain `.sort()` puts their keys */
-const byKey = ([a]: [string, unknown], [b]: [string, unknown]): number => (a < b ? -1 : 1)
+/** Entries in the order of their keys, by code unit (F40) */
+const byKey = ([a]: [string, unknown], [b]: [string, unknown]): number => byCodeUnit(a, b)
 
 const GROUP_LABELS: Record<string, string> = {
 	check: "check constraints",

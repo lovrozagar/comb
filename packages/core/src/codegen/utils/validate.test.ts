@@ -299,7 +299,8 @@ import { c } from "@lovrozagar/comb/sqlite/columns"
 			writeTables(`${prelude}export const post_tag = createTable("post_tag", { id: c.id("pt") })
 export const postTag = createTable("post_tags", { id: c.id("pts") })`),
 		)
-		expect(result.errors).toContain('Tables post_tag and postTag both generate the type name "PostTag"')
+		/* tables in code-unit order, the same on every machine (F40): T before _ */
+		expect(result.errors).toContain('Tables postTag and post_tag both generate the type name "PostTag"')
 	})
 
 	it("refuses two tables that share an id prefix, naming both (F14)", () => {
