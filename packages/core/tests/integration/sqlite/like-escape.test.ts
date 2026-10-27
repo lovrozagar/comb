@@ -46,15 +46,16 @@ describe("name.like.% / name.ilike.% against SQLite", () => {
 
 		harness = libsqlMemory()
 		const result = await namesMatching(harness, "name.like.%", ["alice", "bob", "100%", "%"])
+		/* a value with no * is a fixed text, compared with no pattern at all (U21) */
 		expect(result.params).toEqual(["%"])
-		expect(result.sql.toLowerCase()).toContain("glob")
+		expect(result.sql.toLowerCase()).not.toMatch(/\b(?:glob|like)\b/)
 		expect(result.names).toEqual(["%"])
 	})
 
-	it("ilike escapes % for LIKE and still matches only the character", async () => {
+	it("ilike matches only the character %, compared as a fixed text", async () => {
 		harness = libsqlMemory()
 		const result = await namesMatching(harness, "name.ilike.%", ["alice", "100%", "%"])
-		expect(result.params).toEqual(["\\%"])
+		expect(result.params).toEqual(["%"])
 		expect(result.names).toEqual(["%"])
 	})
 })

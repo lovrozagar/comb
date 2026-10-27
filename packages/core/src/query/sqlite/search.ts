@@ -5,7 +5,6 @@
 import { type SQL, sql } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 
-import { escapeLike } from "../like.ts"
 import { quoteIdent } from "./identifier.ts"
 
 /* control characters: a NUL ends the C string FTS5 parses, mid-phrase */
@@ -214,8 +213,9 @@ function searchText(...parts: Array<string | null | undefined>): string {
  * Factory for LIKE-based search on a `_search` column that searchText wrote, or any SQL expression
  * that holds such text. Each whitespace-separated term is folded by searchText and trimmed, and
  * kept only when it holds a letter or digit, as FTS keeps its terms: a mark alone folds to nothing
- * or a space, and would match every row. Its LIKE specials (`%`, `_`, `\`) are escaped, and every
- * term is required. A query whose terms all fold away matches no row, as FTS answers it.
+ * or a space, and would match every row. Each term is found with `instr`, both sides already
+ * folded, so no LIKE pattern is built and none meets D1's 50-byte pattern cap (U21); every term is
+ * required. A query whose terms all fold away matches no row, as FTS answers it.
  */
 function likeSearch(column: SQLiteColumn | SQL): LikeSearchResolver {
 	return (q) => {
@@ -223,8 +223,7 @@ function likeSearch(column: SQLiteColumn | SQL): LikeSearchResolver {
 			.split(/\s+/u)
 			.map((term) => searchText(term).trim())
 			.filter((term) => TOKEN.test(term))
-			.map(escapeLike)
-		const clauses = terms.map((term) => sql`${column} LIKE ${`%${term}%`} ESCAPE '\\'`)
+		const clauses = terms.map((term) => sql`instr(${column}, ${term}) > 0`)
 		return clauses.length === 0 ? termless(q) : sql.join(clauses, sql` AND `)
 	}
 }

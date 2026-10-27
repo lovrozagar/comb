@@ -71,7 +71,7 @@ describe("buildConditionSQL — patterns and null checks", () => {
 		expect(buildConditionSQL(condition, config)).toBeTruthy()
 	})
 
-	it("lowers name.like.% to GLOB, where % is literal", () => {
+	it("lowers name.like.% to a fixed text, where % is literal (U21)", () => {
 		const ast = parseFilter("name.like.%")
 		const condition = ast?.root.conditions[0]
 		expect(condition?.value).toBe("%")
@@ -79,7 +79,7 @@ describe("buildConditionSQL — patterns and null checks", () => {
 		expect(built).toBeTruthy()
 		const { params, sql } = dialect.sqlToQuery(built as SQL)
 		expect(params).toEqual(["%"])
-		expect(sql.toLowerCase()).toContain("glob")
+		expect(sql.toLowerCase()).toContain("= ? collate binary")
 	})
 
 	it("builds ilike condition", () => {

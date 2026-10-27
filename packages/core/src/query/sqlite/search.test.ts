@@ -34,17 +34,18 @@ describe("likeSearch", () => {
 		expect(search("   ")).toBeNull()
 	})
 
-	it("binds one contains pattern per term, ANDed, against the escape character", () => {
-		expect(bound("  hello  ")).toEqual({ params: ["%hello%"], sql: `"item"."_search" LIKE ? ESCAPE '\\'` })
-		expect(bound("a b")?.sql).toBe(`"item"."_search" LIKE ? ESCAPE '\\' AND "item"."_search" LIKE ? ESCAPE '\\'`)
+	/* U21: instr finds a folded term with no LIKE pattern, so no term meets D1's 50-byte pattern cap */
+	it("binds one instr per term, ANDed", () => {
+		expect(bound("  hello  ")).toEqual({ params: ["hello"], sql: `instr("item"."_search", ?) > 0` })
+		expect(bound("a b")?.sql).toBe(`instr("item"."_search", ?) > 0 AND instr("item"."_search", ?) > 0`)
 	})
 
 	it("folds diacritics and case the way the _search column stores them", () => {
-		expect(bound("José HELLO")?.params).toEqual(["%jose%", "%hello%"])
+		expect(bound("José HELLO")?.params).toEqual(["jose", "hello"])
 	})
 
-	it("escapes the LIKE specials so they match themselves", () => {
-		expect(bound("100% foo_bar path\\file")?.params).toEqual(["%100\\%%", "%foo\\_bar%", "%path\\\\file%"])
+	it("binds LIKE's specials as they are, since instr reads no pattern", () => {
+		expect(bound("100% foo_bar path\\file")?.params).toEqual(["100%", "foo_bar", "path\\file"])
 	})
 })
 
@@ -74,7 +75,7 @@ describe("searchText: the _search column's writer, which likeSearch reads with (
 describe("likeSearch on a raw expression (C7)", () => {
 	it("takes an SQL expression as well as a column", () => {
 		const built = likeSearch(drizzleSql.raw('"_search"'))("hi")
-		expect(compile(built as SQL)).toEqual({ params: ["%hi%"], sql: `"_search" LIKE ? ESCAPE '\\'` })
+		expect(compile(built as SQL)).toEqual({ params: ["hi"], sql: `instr("_search", ?) > 0` })
 	})
 })
 

@@ -55,10 +55,10 @@ describe("conditionToSQL", () => {
 		})
 	}
 
-	it("lowers like to case-sensitive GLOB, keeping * as the wildcard", () => {
-		const { params, sql } = compile(conditionToSQL(cond("title", "like", "*intro?*"), post.title))
+	it("lowers like with a * inside it to case-sensitive GLOB, keeping * as the wildcard", () => {
+		const { params, sql } = compile(conditionToSQL(cond("title", "like", "in*tro?"), post.title))
 		expect(sql.toLowerCase()).toContain("glob ?")
-		expect(params).toEqual(["*intro[?]*"])
+		expect(params).toEqual(["in*tro[?]"])
 	})
 
 	it("lowers in/nin to bound lists", () => {
@@ -70,19 +70,20 @@ describe("conditionToSQL", () => {
 		expect(ninSql.sql.toLowerCase()).toContain("not in")
 	})
 
-	it("lowers ilike to LIKE … ESCAPE (SQLite LIKE ignores ASCII case)", () => {
-		const { params, sql } = compile(conditionToSQL(cond("title", "ilike", "*Intro*"), post.title))
+	it("lowers ilike with a * inside it to LIKE … ESCAPE (SQLite LIKE ignores ASCII case)", () => {
+		const { params, sql } = compile(conditionToSQL(cond("title", "ilike", "In*tro"), post.title))
 		expect(sql.toLowerCase()).toContain("like ?")
 		expect(sql.toLowerCase()).toContain("escape")
-		expect(params).toEqual(["%Intro%"])
+		expect(params).toEqual(["In%tro"])
 	})
 
 	it("does not treat name.ilike.% as a match-all wildcard", () => {
 		const parsed = parseFilter("name.ilike.%")
 		expect(parsed?.root.conditions[0]?.value).toBe("%")
 		const { params, sql } = compile(conditionToSQL(parsed!.root.conditions[0]!, post.title))
-		expect(params).toEqual(["\\%"])
-		expect(sql.toLowerCase()).toContain("escape")
+		/* a value with no * is a fixed text, compared with no pattern (U21) */
+		expect(params).toEqual(["%"])
+		expect(sql.toLowerCase()).toBe('lower("post"."title") = lower(?) collate binary')
 	})
 })
 

@@ -33,6 +33,13 @@ const QUERY_FAILED: Outcome = {
 	status: "internal_server_error",
 }
 
+/* D1 caps a LIKE or GLOB pattern at 50 bytes (SQLITE_LIMIT_LIKE_PATTERN_LENGTH): the request's to shorten (U21) */
+const PATTERN_TOO_LONG: Outcome = {
+	cause: "A like or ilike filter value with a * inside it may be at most 50 bytes on D1.",
+	errorKey: combErrorKeys.INVALID_VALUE,
+	status: "bad_request",
+}
+
 const STORAGE_FULL: Outcome = {
 	cause: "The database storage limit has been reached.",
 	errorKey: combErrorKeys.STORAGE_LIMIT_REACHED,
@@ -52,6 +59,13 @@ function platformMessage(error: Error): string | null {
 		.toReversed()
 		.find((link) => typeof (link as { query?: unknown }).query !== "string" && D1_PREFIX.test(link.message))
 	return platform?.message ?? null
+}
+
+/** Whether D1 refused a pattern over its LIKE cap, anywhere in the error's chain */
+function tooComplex(error: Error): boolean {
+	for (let current: unknown = error, depth = 0; depth < 8 && current instanceof Error; current = current.cause, depth++)
+		if (current.message.includes("LIKE or GLOB pattern too complex")) return true
+	return false
 }
 
 function platformOutcome(message: string): Outcome {
@@ -85,6 +99,7 @@ function classifyD1Error(error: unknown, constraintMaps: ConstraintMap[]): CombE
 	if (!(error instanceof Error)) return undefined
 	const constraint = constraintError(error, constraintMaps)
 	if (constraint !== null) return constraint
+	if (tooComplex(error)) return new CombError({ ...PATTERN_TOO_LONG, source: error })
 	const read = readSqliteError(error)
 	const platform = read === null ? platformMessage(error) : null
 	if (read === null && platform === null) return undefined

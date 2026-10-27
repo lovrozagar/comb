@@ -206,9 +206,14 @@ export { AnchorBound, countLiteral, type KeysetPosition, keysetSQL, orderByKeys,
 /**
  * The one lowering of `like` / `ilike` for SQLite. Every filter path calls this,
  * so the two operators cannot drift apart between builders.
+ *
+ * A value whose only `*` are at its ends is a fixed text to find, not a pattern (U21): it lowers
+ * to `instr`, `substr` or `=`, which no length cap limits, where D1 refuses a LIKE or GLOB
+ * pattern over 50 bytes. `like` stays case-sensitive, as GLOB is; `ilike` compares both sides
+ * through `lower()`, ASCII as LIKE folds. A NULL column matches neither, as it matches no pattern.
  */
 import { type SQL, type SQLWrapper } from "drizzle-orm";
-/** `like` → GLOB (case-sensitive). `ilike` → LIKE (ASCII case-insensitive). */
+/** `like` → GLOB (case-sensitive). `ilike` → LIKE (ASCII case-insensitive). A fixed text → a search for it. */
 declare function patternToSQL(column: SQLWrapper, operator: "like" | "ilike", value: unknown): SQL;
 export { patternToSQL };
 
@@ -292,8 +297,9 @@ declare function searchText(...parts: Array<string | null | undefined>): string;
  * Factory for LIKE-based search on a `_search` column that searchText wrote, or any SQL expression
  * that holds such text. Each whitespace-separated term is folded by searchText and trimmed, and
  * kept only when it holds a letter or digit, as FTS keeps its terms: a mark alone folds to nothing
- * or a space, and would match every row. Its LIKE specials (`%`, `_`, `\`) are escaped, and every
- * term is required. A query whose terms all fold away matches no row, as FTS answers it.
+ * or a space, and would match every row. Each term is found with `instr`, both sides already
+ * folded, so no LIKE pattern is built and none meets D1's 50-byte pattern cap (U21); every term is
+ * required. A query whose terms all fold away matches no row, as FTS answers it.
  */
 declare function likeSearch(column: SQLiteColumn | SQL): LikeSearchResolver;
 export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, likeSearch, type LikeSearchResolver, sanitizeFtsTerm, searchText, type SpellfixDb, type SpellfixSearch, };
