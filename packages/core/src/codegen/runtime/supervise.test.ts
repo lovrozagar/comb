@@ -40,7 +40,10 @@ const stuck = (pids: string) =>
 /** The grandchild's pid, once the child has written it */
 async function grandchildOf(pids: string): Promise<number> {
 	for (let tries = 0; tries < 100 && !fs.existsSync(pids); tries++) await new Promise((r) => setTimeout(r, 50))
-	return Number(fs.readFileSync(pids, "utf8"))
+	const pid = Number(fs.readFileSync(pids, "utf8"))
+	// signal 0 on pid 0 or 1 would probe this test's own group or init, never the grandchild
+	expect(pid).toBeGreaterThan(1)
+	return pid
 }
 
 describe("supervise: a child in a process group of its own", () => {
