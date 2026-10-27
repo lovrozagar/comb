@@ -4,6 +4,7 @@ import type { FieldConstraints } from "../../annotations.ts"
 import { isGenerated } from "../../entity-meta.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { generateExampleMeta } from "./example-meta.ts"
+import { pgWriteRule } from "./pg-types.ts"
 
 type Build = {
 	annotations: FieldConstraints
@@ -211,7 +212,11 @@ function numberBase({ annotations, dialect, field }: Build): Built {
 	return `z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`
 }
 
-const BUILDERS = [enumBase, jsonBase, numberBase]
+/** A plain Postgres column's write rule by its data type (F50); a read keeps the plain type (F65) */
+const pgTypeBase = ({ dialect, field, schemaType }: Build): Built =>
+	dialect === "postgres" && field.combKind === null && isMutative(schemaType) ? pgWriteRule(field) : undefined
+
+const BUILDERS = [enumBase, jsonBase, pgTypeBase, numberBase]
 
 /* SQLite fills an INTEGER PRIMARY KEY, the rowid's alias, when a create body leaves it out */
 const isRowid = (field: FieldMeta, dialect: Build["dialect"]) =>

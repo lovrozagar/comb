@@ -19,6 +19,7 @@ export const OFF_UTC_UNIT = [
 	"src/codegen/generators/dtos/example-meta.test.ts",
 	"src/codegen/generators/dtos/field-schema.test.ts",
 	"src/codegen/generators/dtos/generate.fields.test.ts",
+	"src/codegen/generators/dtos/pg-types.test.ts",
 	"src/migrate/core/atlas-dir.test.ts",
 	"src/migrate/drivers/d1.test.ts",
 	"src/pg/columns.meta.test.ts",
@@ -40,6 +41,7 @@ export const OFF_UTC_UNIT = [
 /** The integration suites that page or read Date keys */
 export const OFF_UTC_INTEGRATION = [
 	"tests/integration/codegen/dtos-timestamps.test.ts",
+	"tests/integration/codegen/pg-types.test.ts",
 	"tests/integration/d1/list-query-nonfinite.test.ts",
 	"tests/integration/libsql/date-filter.test.ts",
 	"tests/integration/postgres/columns.test.ts",
