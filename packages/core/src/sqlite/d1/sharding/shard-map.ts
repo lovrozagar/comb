@@ -8,6 +8,18 @@ const SHARD_DRIVERS: readonly ["d1"] = ["d1"] as const satisfies readonly ShardD
 /** The longest org id `shard_map.org_id` holds; a longer one is no org's */
 export const ORG_ID_MAX_LENGTH = 64
 
+/**
+ * Refuse an org id longer than the column holds, measured in UTF-16 code units as `resolve`
+ * measures it, so no row is written that `resolve` would answer as a miss (U41). The id is the
+ * caller's input: a route that takes it from a path validates it first.
+ */
+export function assertOrgId(orgId: string): void {
+	if (orgId.length > ORG_ID_MAX_LENGTH)
+		throw new RangeError(
+			`orgId must be at most ${ORG_ID_MAX_LENGTH} UTF-16 code units, the length shard_map.org_id holds, got ${orgId.length}`,
+		)
+}
+
 /** Each column's builder, from the `c` factory that makes it */
 type ShardMapColumns = {
 	created_at: ReturnType<SqliteColumns["createdAt"]>

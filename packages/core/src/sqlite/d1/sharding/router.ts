@@ -17,7 +17,7 @@ import {
 	softDelete,
 	toMapping,
 } from "./placement.ts"
-import { ORG_ID_MAX_LENGTH, shardMap } from "./shard-map.ts"
+import { assertOrgId, ORG_ID_MAX_LENGTH, shardMap } from "./shard-map.ts"
 import type {
 	LogFn,
 	ShardDbHandle,
@@ -159,6 +159,7 @@ class ShardRouter {
 	 * the reads that follow.
 	 */
 	async allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
+		assertOrgId(orgId)
 		const db = drizzle(openD1Session(deps.coreDb).client)
 		const existing = await db.select().from(shardMap).where(eq(shardMap.org_id, orgId)).get()
 		const shardId = existing?.shard_id ?? (await pickShard(db, this.pick, { orgId, totalShards: this.totalShards }))
@@ -171,6 +172,7 @@ class ShardRouter {
 	 * isolates placing one new org at once agree. To put a placed org elsewhere, `move` it.
 	 */
 	async place(placement: ShardPlacement, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
+		assertOrgId(placement.orgId)
 		assertShard(placement.shardId, this.totalShards)
 		return this.placeFirst(placement, deps, executionCtx)
 	}
@@ -182,6 +184,7 @@ class ShardRouter {
 	 */
 	async move(placement: ShardPlacement, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
 		const { orgId, shardId } = placement
+		assertOrgId(orgId)
 		assertShard(shardId, this.totalShards)
 		const { client, session } = openD1Session(deps.coreDb)
 		const row = await overwrite(drizzle(client), orgId, shardId)

@@ -351,4 +351,23 @@ describe("ShardRouter: an org id longer than the column", () => {
 		expect(await router.resolve("o".repeat(64), { coreDb, kv }, ctx)).toBeUndefined()
 		expect(kv.get).toHaveBeenCalledTimes(1)
 	})
+
+	/* a row resolve can never find must not be written: the same bound, in the same UTF-16 units */
+	it("is refused by place, move and allocate, which write no row for it, and a 64-unit id is placed", async () => {
+		const { primary } = await core()
+		const deps = { coreDb: primary, kv: memoryKv() }
+		const router = new ShardRouter({ totalShards: 3 })
+		const long = "o".repeat(65)
+		const refused = new RangeError(
+			"orgId must be at most 64 UTF-16 code units, the length shard_map.org_id holds, got 65",
+		)
+		await expect(router.place({ orgId: long, shardId: 1 }, deps, ctx)).rejects.toThrow(refused)
+		await expect(router.move({ orgId: long, shardId: 1 }, deps, ctx)).rejects.toThrow(refused)
+		await expect(router.allocate(long, deps, ctx)).rejects.toThrow(refused)
+		await expect(router.resolveOrAllocate(long, deps, ctx)).rejects.toThrow(refused)
+		expect(await primary.prepare("SELECT count(*) AS n FROM shard_map").first("n")).toBe(0)
+		const fits = "o".repeat(64)
+		expect((await router.place({ orgId: fits, shardId: 1 }, deps, ctx)).shardId).toBe(1)
+		expect((await new ShardRouter({ totalShards: 3 }).resolve(fits, deps, ctx))?.shardId).toBe(1)
+	})
 })
