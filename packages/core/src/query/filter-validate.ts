@@ -84,8 +84,12 @@ function parseFilterNumber(raw: string): { value: number } | { error: string } {
 /* a date, or a date-time with seconds and a fraction optional and an offset required */
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-](\d{2}):(\d{2})))?$/
 
-/** Days in `month` (1 to 12) of `year`, by the proleptic Gregorian calendar */
-const daysIn = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate()
+/* days in each month of a common year */
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const
+
+/** Days in `month` (1 to 12) of `year`, by the proleptic Gregorian calendar, where year 0 is a leap year (U35) */
+const daysIn = (year: number, month: number): number =>
+	month === 2 && year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : (MONTH_DAYS[month - 1] as number)
 
 /** An ISO date field's value: an ISO 8601 date or date-time naming a real day and time, as written */
 function typedIsoDate(raw: string): Typed {

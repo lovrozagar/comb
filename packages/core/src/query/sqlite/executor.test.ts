@@ -328,4 +328,19 @@ describe("conditionToSQL — values and the column's type (B4)", () => {
 		expect(conditionToSQL(cond("name", "in", ["a", 1]), typed.name)).toBeNull()
 		expect(conditionToSQL(cond("name", "in", ["a", "b"]), typed.name)).not.toBeNull()
 	})
+
+	/* U35: an ISO date field lowers onto a text column only; a date column's mapper takes a Date, and a number column compares text as text */
+	it("refuses text, or a list holding it, against a date or a number column, and answers filter_not_wired", () => {
+		const counted = sqliteTable("counted", { at: integer("at", { mode: "timestamp" }), n: integer("n") })
+		const iso = "2023-11-14T22:13:20Z"
+		expect(conditionToSQL(cond("at", "eq", iso), counted.at)).toBeNull()
+		expect(conditionToSQL(cond("at", "in", [iso]), counted.at)).toBeNull()
+		expect(conditionToSQL(cond("n", "gte", iso), counted.n)).toBeNull()
+		expect(conditionToSQL(cond("at", "is", "notnull"), counted.at)).not.toBeNull()
+		expect(conditionToSQL(cond("at", "eq", 2000), counted.at)).not.toBeNull()
+		const unwired: FilterAST = { root: { conditions: [cond("at", "lt", iso)], logic: "and", subgroups: [] } }
+		expect(() => filterToSQL(unwired, { mainTable: counted })).toThrow(
+			expect.objectContaining({ errorKey: "filter_not_wired" }),
+		)
+	})
 })

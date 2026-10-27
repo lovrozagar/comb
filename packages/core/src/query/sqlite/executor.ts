@@ -117,14 +117,26 @@ function secondsList(column: SQLiteColumn, operator: "in" | "nin", members: read
 	return dates.length === 0 ? isNotNull(column) : notInArray(column, dates)
 }
 
-/** Whether `value` is a number (or holds one) meant for a text column, which SQLite would compare as text */
-const numberOnText = (column: SQLiteColumn, value: unknown): boolean =>
-	column.dataType.startsWith("string") &&
-	(typeof value === "number" || (Array.isArray(value) && value.some((member) => typeof member === "number")))
+/** Whether `value` is of `type`, or a list holding one */
+const holds = (value: unknown, type: "number" | "string"): boolean =>
+	typeof value === type || (Array.isArray(value) && value.some((member) => typeof member === type))
+
+/**
+ * Whether the condition's value is one `column` cannot compare: a number on a text column, which
+ * SQLite would compare as text, or text (an ISO date field's) on a date column, whose mapper takes
+ * a Date, or on a number column, which would compare it as text (U35). `is` and the patterns take
+ * text on any column.
+ */
+const mismatched = (column: SQLiteColumn, { operator, value }: FilterCondition): boolean =>
+	column.dataType.startsWith("string")
+		? holds(value, "number")
+		: (column.dataType === "object date" || column.dataType.startsWith("number")) &&
+			!["ilike", "is", "like"].includes(operator) &&
+			holds(value, "string")
 
 /** One condition on one column; null when the operator or value is not one this column can take */
 function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL | null {
-	if (numberOnText(column, condition.value)) return null
+	if (mismatched(column, condition)) return null
 	const { operator } = condition
 	if (inSeconds(column) && (operator === "in" || operator === "nin") && Array.isArray(condition.value))
 		return secondsList(column, operator, condition.value)

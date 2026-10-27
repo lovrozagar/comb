@@ -76,7 +76,15 @@ describe("validateFilter: an ISO 8601 date field", () => {
 	const due = { format: "iso", type: "date" } as const
 
 	it("takes a date or a date-time, with Z or an offset, and hands it back as written", () => {
-		for (const raw of ["2024-02-29", "2024-01-01T10:20Z", "2024-01-01T10:20:30.123Z", "2024-01-01T00:00+14:00"])
+		/* U35: year 0 is a leap year in the proleptic Gregorian calendar ISO 8601 counts in */
+		for (const raw of [
+			"0000-02-29",
+			"2000-02-29",
+			"2024-02-29",
+			"2024-01-01T10:20Z",
+			"2024-01-01T10:20:30.123Z",
+			"2024-01-01T00:00+14:00",
+		])
 			expect(typed(`due.gte.${raw}`, { due })).toBe(raw)
 		expect(typed("due.is.null", { due })).toBeNull()
 	})
@@ -84,6 +92,8 @@ describe("validateFilter: an ISO 8601 date field", () => {
 	it("refuses a day the calendar has not, a bad time, and epoch milliseconds", () => {
 		for (const raw of [
 			"2025-02-29",
+			"1900-02-29",
+			"0100-02-29",
 			"2024-02-30",
 			"2024-13-01",
 			"2024-00-10",
