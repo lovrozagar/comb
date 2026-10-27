@@ -12,7 +12,7 @@ describe("filterParamMeta", () => {
 		const { description } = filterParamMeta({ active: "boolean", title: "string" }, operatorsFor, LIMITS)
 		expect(description).toContain("Fields: active (boolean: eq, is); title (string: eq, in).")
 		expect(description).toContain(
-			"At most 20 conditions, 3 nested groups, 50 in/nin values per list, 60 values in all, and at most 5120 bytes once percent-encoded.",
+			"At most 20 conditions, 3 nested groups, 50 in/nin values per list, 60 values in all, and at most 4608 bytes however a URL or a form encodes it.",
 		)
 	})
 
@@ -58,7 +58,7 @@ describe("orderParamMeta", () => {
 describe("searchParamMeta", () => {
 	it("names the searched fields and the term cap", () => {
 		expect(searchParamMeta(["name", "email"], 8).description).toBe(
-			"Free-text search over: name, email. Whitespace-separated terms must all match; at most 8 terms, and at most 600 bytes once percent-encoded.",
+			"Free-text search over: name, email. Whitespace-separated terms must all match; at most 8 terms, and at most 600 bytes however a URL or a form encodes it.",
 		)
 	})
 })
@@ -71,10 +71,10 @@ describe("CURSOR_EXAMPLES", () => {
 
 /* U11 of the 0.12 round: a byte cap a request meets is named where its field is described */
 describe("the filter and search descriptions name their byte caps", () => {
-	it("says how many bytes each takes once percent-encoded", () => {
+	it("says how many bytes each takes however a URL or a form encodes it", () => {
 		expect(filterParamMeta({ title: "string" }, () => ["eq"], FILTER_LIMITS).description).toContain(
-			"at most 5120 bytes once percent-encoded",
+			"at most 4608 bytes however a URL or a form encodes it",
 		)
-		expect(searchParamMeta(["title"], 8).description).toContain("at most 600 bytes once percent-encoded")
+		expect(searchParamMeta(["title"], 8).description).toContain("at most 600 bytes however a URL or a form encodes it")
 	})
 })

@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { createListQuerySchema } from "./list-schema.ts"
-import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
+import { MAX_CURSOR_LENGTH } from "./cursor.ts"
+import { MAX_QUERY_BYTES, PAGINATION_DEFAULTS, REQUEST_BYTES } from "./schema-limits.ts"
 
 const RESERVED = [
 	"cursor",
@@ -68,6 +69,9 @@ describe("the page bound (Q13)", () => {
 	})
 })
 
+/** A value of `prefix` and as many ~ as `bytes` takes, each ~ three bytes as a form writes it */
+const at = (bytes: number, prefix = "") => `${prefix}${"~".repeat(Math.floor((bytes - prefix.length) / 3))}`
+
 describe("request caps by percent-encoded bytes, which a URL limit counts (R10)", () => {
 	const schema = createListQuerySchema({
 		fields: { scalars: ["id", "title"] },
@@ -93,17 +97,32 @@ describe("request caps by percent-encoded bytes, which a URL limit counts (R10)"
 		expect(ok({ filter: "title.eq.\uDC00" })).toBe(false)
 	})
 
-	it("keeps the whole query string of the largest accepted request under 16 KB", () => {
+	/* U28: a byte a form or a URL may write as three is counted as three, so an accepted request fits however it is sent */
+	it("counts the widest common encoding: ~ and ! as a form writes them, a space as a URL does", () => {
+		/* encodeURIComponent leaves ~ as one byte; URLSearchParams writes it as %7E */
+		expect(ok({ filter: `title.eq.${"~".repeat(2039)}` })).toBe(false)
+		expect(ok({ filter: `title.eq.${"~".repeat(1530)}` })).toBe(true)
+		expect(ok({ q: " ".repeat(201) })).toBe(false)
+	})
+
+	it("keeps the largest accepted request within the stated query budget, however a client encodes it", () => {
 		const largest = {
-			cursor: "A".repeat(8192),
-			filter: `title.eq.${"%".repeat(Math.floor((5120 - 18) / 3))}`,
+			cursor: "A".repeat(MAX_CURSOR_LENGTH),
+			filter: at(REQUEST_BYTES.filter, "title.eq."),
 			order: "id.asc",
-			q: "%".repeat(200),
+			q: at(REQUEST_BYTES.q),
 			select: "id,title",
 		}
 		expect(ok(largest)).toBe(true)
-		const query = new URLSearchParams(largest).toString()
-		expect(Buffer.byteLength(query)).toBeLessThan(15_500)
+		const form = new URLSearchParams(largest).toString()
+		const uri = Object.entries(largest)
+			.map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+			.join("&")
+		for (const query of [form, uri]) expect(Buffer.byteLength(query)).toBeLessThanOrEqual(MAX_QUERY_BYTES)
+		/* every capped param at its cap, with its name, separator, and lang, limit and page beside them */
+		const caps = MAX_CURSOR_LENGTH + REQUEST_BYTES.filter + REQUEST_BYTES.q + REQUEST_BYTES.order + REQUEST_BYTES.select
+		expect(caps + 128).toBeLessThanOrEqual(MAX_QUERY_BYTES)
+		expect(MAX_QUERY_BYTES).toBe(16_384 - 2048)
 	})
 })
 

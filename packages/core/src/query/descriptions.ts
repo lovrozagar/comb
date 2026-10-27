@@ -63,7 +63,7 @@ function filterParamMeta(
 		`Fields: ${fieldList}.`,
 		"`like` is case-sensitive and `ilike` ignores ASCII case; `*` is the wildcard.",
 		"`in`/`nin` take `(a,b)`; `is` takes `null` or `notnull`, and `true` or `false` on a boolean.",
-		`At most ${limits.maxConditions} conditions, ${limits.maxDepth} nested groups, ${limits.maxInValues} in/nin values per list, ${limits.maxValues} values in all, and at most ${REQUEST_BYTES.filter} bytes once percent-encoded.`,
+		`At most ${limits.maxConditions} conditions, ${limits.maxDepth} nested groups, ${limits.maxInValues} in/nin values per list, ${limits.maxValues} values in all, and at most ${REQUEST_BYTES.filter} bytes however a URL or a form encodes it.`,
 	].join(" ")
 
 	const samples = entries.map(([field, type]) => sampleCondition(field, type))
@@ -95,7 +95,7 @@ function orderParamMeta(sort: readonly string[], maxSortKeys: number): ParamMeta
 
 function searchParamMeta(search: readonly string[], maxTerms: number): ParamMeta {
 	return {
-		description: `Free-text search over: ${search.join(", ")}. Whitespace-separated terms must all match; at most ${maxTerms} terms, and at most ${REQUEST_BYTES.q} bytes once percent-encoded.`,
+		description: `Free-text search over: ${search.join(", ")}. Whitespace-separated terms must all match; at most ${maxTerms} terms, and at most ${REQUEST_BYTES.q} bytes however a URL or a form encodes it.`,
 		examples: ["acme", "acme corp"],
 	}
 }

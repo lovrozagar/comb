@@ -234,8 +234,9 @@ builder no longer emits it.
 
 `filterFields` (`{ field, type, ops }[]`), `nulls`, `maxFilterConditions`, `maxFilterDepth`,
 `maxFilterValues` (bound values in all), `maxInValues`, `maxPage` (the last page offset pagination
-serves), `maxSearchTerms`, `maxSortKeys`, and the byte caps `maxFilterBytes` and `maxSearchBytes` (what `filter`
-and `q` may take once percent-encoded) were added after v1 shipped. They are optional in the type and
+serves), `maxSearchTerms`, `maxSortKeys`, the byte caps `maxFilterBytes` and `maxSearchBytes` (what `filter`
+and `q` may take however a client encodes them, a space or a mark such as `~` counted as 3), and
+`maxQueryBytes` (the whole accepted query string, 16 KB less a 2 KB path budget) were added after v1 shipped. They are optional in the type and
 validated when present, so a v1 reader built before them ignores them — which is why adding them
 did not bump `v`. Each value is computed from the config that parses the request, and
 `tests/integration/meta/query-parity.test.ts` drives the parser to prove it.

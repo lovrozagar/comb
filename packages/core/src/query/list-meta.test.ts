@@ -52,6 +52,6 @@ describe("listQueryStamp", () => {
 describe("listQueryStamp: the request byte caps", () => {
 	it("stamps the filter's and the search's encoded byte caps", () => {
 		const stamp = listQueryStamp({ search: ["title"], sort: ["id"] }, LIST_QUERY_LIMITS)
-		expect(stamp[COMB_META_KEY]).toMatchObject({ maxFilterBytes: 5120, maxSearchBytes: 600 })
+		expect(stamp[COMB_META_KEY]).toMatchObject({ maxFilterBytes: 4608, maxQueryBytes: 14_336, maxSearchBytes: 600 })
 	})
 })

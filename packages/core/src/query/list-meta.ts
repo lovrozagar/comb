@@ -6,7 +6,7 @@ import { COMB_FILTER_GRAMMAR, type CombMetaStamp, type CombQueryMeta, combMeta }
 import { EMPTY_OBJ } from "../empty.ts"
 import { CURSOR_TIEBREAK_COLUMN } from "./cursor.ts"
 import { OPERATORS_BY_TYPE } from "./filter.ts"
-import { PAGINATION_DEFAULTS, REQUEST_BYTES } from "./schema-limits.ts"
+import { MAX_QUERY_BYTES, PAGINATION_DEFAULTS, REQUEST_BYTES } from "./schema-limits.ts"
 import type { FieldsConfig, ListQueryConfig, ListQueryLimits } from "./schema-types.ts"
 import type { FieldType } from "./types.ts"
 
@@ -53,6 +53,7 @@ function listQueryStamp(config: PublishedConfig, limits: ListQueryLimits): CombM
 		maxLimit: config.pagination?.maxLimit ?? PAGINATION_DEFAULTS.maxLimit,
 		maxPage: config.pagination?.maxPage ?? PAGINATION_DEFAULTS.maxPage,
 		maxFilterBytes: REQUEST_BYTES.filter,
+		maxQueryBytes: MAX_QUERY_BYTES,
 		maxSearchBytes: REQUEST_BYTES.q,
 		maxSearchTerms: limits.maxSearchTerms,
 		maxSortKeys: limits.maxSortKeys,

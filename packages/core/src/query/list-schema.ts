@@ -94,11 +94,22 @@ function optionalShapeFor(config: AdvertisedConfig, limits: ListQueryLimits): Op
 			.optional()
 			.meta(searchParamMeta(terms, limits.maxSearchTerms))
 	return {
-		order: z.string().max(200).optional().meta(orderParamMeta(config.sort, limits.maxSortKeys)),
+		order: z
+			.string()
+			.max(200)
+			.refine(withinBytes(REQUEST_BYTES.order), { message: encodedMessage(REQUEST_BYTES.order) })
+			.optional()
+			.meta(orderParamMeta(config.sort, limits.maxSortKeys)),
 		...(Object.keys(filterConfig).length > 0 ? { filter } : {}),
 		...(search ? { q: q(search) } : {}),
 		...(config.lang ? { lang: langQueryField } : {}),
-		...(config.fields ? { select: selectQueryField } : {}),
+		...(config.fields
+			? {
+					select: selectQueryField.refine((value) => value === undefined || withinBytes(REQUEST_BYTES.select)(value), {
+						message: encodedMessage(REQUEST_BYTES.select),
+					}),
+				}
+			: {}),
 	}
 }
 
