@@ -77,12 +77,18 @@ function hostWarnings(url: URL): string[] {
 }
 
 /**
- * The database a Postgres URL reaches: its host, localhost and the loopback addresses as one, its
- * port, 5432 unnamed, and its database, the user's name unnamed, as libpq defaults them
+ * The database a Postgres URL reaches, read as libpq reads it, a query parameter over the URI's
+ * part: its host without case, localhost for the loopback addresses and for a Unix socket (an empty
+ * host or one that is a path), so a local socket and local TCP count as one server; its port,
+ * 5432 unnamed; and its database, the user's name unnamed (M89)
  */
 function databaseOf(url: URL): string {
-	const host = LOCAL_HOSTS.has(url.hostname) ? "localhost" : url.hostname.toLowerCase()
-	return `${host}:${url.port === "" ? "5432" : url.port}/${decodeURIComponent(url.pathname.slice(1) || url.username)}`
+	const param = (key: string) => url.searchParams.get(key)
+	const named = (param("host") ?? url.hostname).toLowerCase()
+	const host = named === "" || named.startsWith("/") || LOCAL_HOSTS.has(named) ? "localhost" : named
+	const port = param("port") ?? (url.port === "" ? "5432" : url.port)
+	const database = param("dbname") ?? decodeURIComponent(url.pathname.slice(1))
+	return `${host}:${port}/${database === "" ? (param("user") ?? decodeURIComponent(url.username)) : database}`
 }
 
 /** One URL field checked: the parsed URL, or the error that names the field (never its value) */

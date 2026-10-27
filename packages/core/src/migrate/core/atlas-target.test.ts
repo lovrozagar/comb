@@ -76,6 +76,9 @@ describe("pgUrlProblems", () => {
 	})
 })
 
+/** What pgUrlProblems refuses in a target with `devUrl` and `url` */
+const refusals = (devUrl: string, url: string) => pgUrlProblems(target({ devUrl, url })).errors
+
 describe("pgUrlProblems: a dev database that is the target (M89)", () => {
 	const SAME = "url and devUrl are the same database; Atlas empties the dev database, so give it its own"
 
@@ -86,6 +89,21 @@ describe("pgUrlProblems: a dev database that is the target (M89)", () => {
 		expect(pgUrlProblems(target({ devUrl: dev, url: "postgres://app@localhost/other" })).errors).toEqual([])
 		/* a URL that names no database reaches the one named after its user */
 		expect(pgUrlProblems(target({ devUrl: dev, url: "postgres://app@localhost" })).errors).toEqual([SAME])
+	})
+
+	/* two spellings of one database read as one: the guard errs toward refusing a config, never toward wiping a target */
+	it("reads the host without its case, and libpq's query parameters over the URI's parts", () => {
+		expect(refusals("postgres://app@DB.Example.com/app", "postgres://app@db.example.com/app")).toEqual([SAME])
+		expect(refusals("postgres://x/app?host=localhost", "postgres://localhost/app")).toEqual([SAME])
+		expect(refusals("postgres://localhost/dev?dbname=app", "postgres://localhost/app")).toEqual([SAME])
+		expect(refusals("postgres://localhost:5433/app?port=5432", "postgres://localhost/app")).toEqual([SAME])
+		expect(refusals("postgres://localhost?user=app", "postgres://localhost/app")).toEqual([SAME])
+		expect(refusals("postgres://localhost/app?port=5433", "postgres://localhost/app")).toEqual([])
+	})
+
+	it("reads a Unix socket, an empty host or a host that is a path, as localhost", () => {
+		expect(refusals("postgres:///app?host=/var/run/postgresql", "postgres://localhost/app")).toEqual([SAME])
+		expect(refusals("postgres:///app", "postgres://127.0.0.1/app")).toEqual([SAME])
 	})
 
 	it("runs whenever the url is configured, a call that does not reach the url (diff) included", () => {
