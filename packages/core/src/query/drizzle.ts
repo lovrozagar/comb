@@ -13,9 +13,10 @@ import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { atCursorPrecision, boundAs } from "./cursor-precision.ts"
 import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
+import { extractFilterValue, extractFilterValues } from "./filter-values.ts"
 import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import { assertPageWithin, assertSchemaParsed } from "./trusted.ts"
-import type { FilterAST, ParsedFields, SortField } from "./types.ts"
+import type { ParsedFields, SortField } from "./types.ts"
 import type { paginationResponseSchema } from "./schema.ts"
 import type * as z from "zod"
 
@@ -66,41 +67,6 @@ function countOf(
 	const first = items[0]
 	if (first === undefined) return (query.page ?? 1) === 1 ? 0 : null
 	return first._total ?? null
-}
-
-/** Extract a single filter value from FilterAST */
-function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined {
-	if (!filterAst?.root.conditions) {
-		return undefined
-	}
-
-	const condition = filterAst.root.conditions.find((c) => c.field === field)
-	if (!condition) {
-		return undefined
-	}
-
-	return condition.value as T
-}
-
-/** Extract multiple filter values from FilterAST */
-function extractFilterValues<T extends Record<string, unknown>>(
-	filterAst: FilterAST | null,
-	fields: (keyof T)[],
-): Partial<T> {
-	const result: Partial<T> = {}
-
-	if (!filterAst?.root.conditions) {
-		return result
-	}
-
-	for (const field of fields) {
-		const condition = filterAst.root.conditions.find((c) => c.field === field)
-		if (condition) {
-			result[field] = condition.value as T[keyof T]
-		}
-	}
-
-	return result
 }
 
 /** The sort keys and tiebreak against the queried table; a sort field it lacks is a wiring mistake */

@@ -142,7 +142,8 @@ export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CU
 import { type SQL } from "drizzle-orm";
 import { type KeysetKind } from "./cursor-ref.ts";
 import { type CursorOptions } from "./cursor-seal.ts";
-import type { FilterAST, ParsedFields, SortField } from "./types.ts";
+import { extractFilterValue, extractFilterValues } from "./filter-values.ts";
+import type { ParsedFields, SortField } from "./types.ts";
 import type { paginationResponseSchema } from "./schema.ts";
 import type * as z from "zod";
 /** The pagination meta paginate returns: the list response's own schema */
@@ -182,10 +183,6 @@ type CountQuery = {
 declare function countExtra(query: CountQuery): {
     _total?: SQL.Aliased<number>;
 };
-/** Extract a single filter value from FilterAST */
-declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
-/** Extract multiple filter values from FilterAST */
-declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
 /**
  * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
  * list query schema's output, the cursor opened under `options`: the app's secret and the list's
@@ -517,6 +514,15 @@ declare function assertNoReference(values: readonly unknown[]): void;
  */
 declare function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anchor): unknown[];
 export { anchored, assertNoReference, fromOf, type KeysetKind, mintWithin };
+
+// query/filter-values.d.ts
+/** The values a filter names for one field or several: queryHelpers.filterValue and filterValues */
+import type { FilterAST } from "./types.ts";
+/** Extract a single filter value from FilterAST */
+declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
+/** Extract multiple filter values from FilterAST */
+declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
+export { extractFilterValue, extractFilterValues };
 
 // query/filter-parse.d.ts
 /**
