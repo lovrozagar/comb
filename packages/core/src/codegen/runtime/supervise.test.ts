@@ -23,6 +23,16 @@ const alive = (pid: number): boolean => {
 	}
 }
 
+/**
+ * Whether `pid` is gone before `ms` pass: a killed process stays a zombie, which signal 0 still
+ * finds, until its new parent reaps it, and how soon that happens depends on the machine's load
+ */
+async function goneWithin(pid: number, ms: number): Promise<boolean> {
+	for (const deadline = Date.now() + ms; Date.now() < deadline; await new Promise((r) => setTimeout(r, 50)))
+		if (!alive(pid)) return true
+	return !alive(pid)
+}
+
 /** A child that starts a sleeping grandchild, writes its pid to `pids`, ignores SIGTERM and never ends */
 const stuck = (pids: string) =>
 	`const { spawn } = require("node:child_process"); process.on("SIGTERM", () => {}); const g = spawn("sleep", ["600"], { stdio: "ignore" }); require("node:fs").writeFileSync(${JSON.stringify(pids)}, String(g.pid)); setInterval(() => {}, 1000)`
@@ -54,8 +64,7 @@ describe("supervise: a child in a process group of its own", () => {
 		const run = supervise({ args: ["-e", stuck(pids)], cmd: process.execPath, timeoutMs: 1500 })
 		const grandchild = await grandchildOf(pids)
 		expect(await run.done).toEqual({ timedOut: true })
-		await new Promise((r) => setTimeout(r, 200))
-		expect(alive(grandchild)).toBe(false)
+		expect(await goneWithin(grandchild, 10_000)).toBe(true)
 	})
 
 	it("kills the group on stop(), and a second stop() of a group already gone is no error", async () => {
@@ -65,8 +74,7 @@ describe("supervise: a child in a process group of its own", () => {
 		run.stop()
 		expect(await run.done).toEqual({ code: 137 })
 		run.stop()
-		await new Promise((r) => setTimeout(r, 200))
-		expect(alive(grandchild)).toBe(false)
+		expect(await goneWithin(grandchild, 10_000)).toBe(true)
 	})
 })
 
