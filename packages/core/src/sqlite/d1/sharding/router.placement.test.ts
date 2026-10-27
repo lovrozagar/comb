@@ -264,3 +264,43 @@ describe("ShardRouter: place in one transaction", () => {
 		expect(batch.mock.calls[0]?.[0]).toHaveLength(3)
 	})
 })
+
+/* U34: KV is a cache, so a KV that fails is a miss, and a write that committed in D1 does not throw for it */
+describe("ShardRouter: a KV that fails", () => {
+	const broken: ShardKv = {
+		delete: () => Promise.reject(new Error("kv down")),
+		get: () => Promise.reject(new Error("kv down")),
+		put: () => Promise.reject(new Error("kv down")),
+	}
+
+	it("resolves from the core table, logging the failure, and moves, unplaces and invalidates without throwing", async () => {
+		const { primary } = await core([["org-1", 1]])
+		const log = vi.fn()
+		const router = new ShardRouter({ log, totalShards: 3 })
+		const deps = { coreDb: primary, kv: broken }
+		expect((await router.resolve("org-1", deps, ctx))?.shardId).toBe(1)
+		await Promise.all(outstanding.splice(0))
+		expect(log).toHaveBeenCalledWith("shard-router.kv.error", expect.objectContaining({ orgId: "org-1" }))
+		expect((await router.move({ orgId: "org-1", shardId: 2 }, deps, ctx)).shardId).toBe(2)
+		await expect(router.unplace("org-1", deps)).resolves.toBeUndefined()
+		await expect(router.invalidate("org-1", broken)).resolves.toBeUndefined()
+		await Promise.all(outstanding.splice(0))
+	})
+
+	it("logs a revalidation whose core read then fails, instead of throwing it into waitUntil", async () => {
+		const { primary } = await core([["org-1", 1]])
+		const events: string[] = []
+		const router = new ShardRouter({ log: (event) => events.push(event), lruTtlMs: 1, totalShards: 3 })
+		await router.resolve("org-1", { coreDb: primary, kv: broken }, ctx)
+		await Promise.all(outstanding.splice(0))
+		await new Promise((resolve) => setTimeout(resolve, 5))
+		const down = {
+			withSession: () => {
+				throw new Error("d1 down")
+			},
+		} as unknown as D1Database
+		expect((await router.resolve("org-1", { coreDb: down, kv: broken }, ctx))?.shardId).toBe(1)
+		await Promise.all(outstanding.splice(0))
+		expect(events.slice(-2)).toEqual(["shard-router.kv.error", "shard-router.revalidate.error"])
+	})
+})

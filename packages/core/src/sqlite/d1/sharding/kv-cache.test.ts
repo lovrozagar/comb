@@ -35,12 +35,12 @@ const mapping = (shardId: number, updatedAt: number): ShardMapping => ({
 describe("putUnlessNewer", () => {
 	it("skips a mapping older than the one KV holds, and puts a newer or an equal one", async () => {
 		const kv = memoryKV()
-		await putUnlessNewer(kv, mapping(2, 2000), 60)
-		await putUnlessNewer(kv, mapping(1, 1000), 60)
+		await putUnlessNewer(kv, mapping(2, 2000), { log: () => {}, ttlSeconds: 60 })
+		await putUnlessNewer(kv, mapping(1, 1000), { log: () => {}, ttlSeconds: 60 })
 		expect(shardIn(kv)).toBe(2)
-		await putUnlessNewer(kv, mapping(3, 2000), 60)
+		await putUnlessNewer(kv, mapping(3, 2000), { log: () => {}, ttlSeconds: 60 })
 		expect(shardIn(kv)).toBe(3)
-		await putUnlessNewer(kv, mapping(4, 3000), 60)
+		await putUnlessNewer(kv, mapping(4, 3000), { log: () => {}, ttlSeconds: 60 })
 		expect(shardIn(kv)).toBe(4)
 	})
 

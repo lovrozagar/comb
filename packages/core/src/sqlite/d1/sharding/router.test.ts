@@ -410,21 +410,6 @@ describe("ShardRouter — revalidation from the core database", () => {
 		expect(await d.kv.get("shard:org-d1", "json")).toMatchObject({ shardId: 1 })
 	})
 
-	it("logs a revalidation that fails instead of throwing it into waitUntil", async () => {
-		const events: string[] = []
-		const router = new ShardRouter({ log: (event) => events.push(event), lruTtlMs: 1, totalShards: 2 })
-		const { calls, ctx } = mockWaitUntil()
-		const d = await seeded()
-		await router.resolve("org-d1", d, ctx)
-		await Promise.all(calls.splice(0))
-		await new Promise((resolve) => setTimeout(resolve, 5))
-
-		const down = { get: () => Promise.reject(new Error("kv down")) } as unknown as KVNamespace
-		await router.resolve("org-d1", { ...d, kv: down }, ctx)
-		await Promise.all(calls)
-		expect(events.at(-1)).toBe("shard-router.revalidate.error")
-	})
-
 	it("stops routing an org once revalidation finds it soft-deleted, before the hard TTL (Q-S1)", async () => {
 		const router = new ShardRouter({ lruHardTtlMs: 60_000, lruTtlMs: 1, totalShards: 2 })
 		const { calls, ctx } = mockWaitUntil()

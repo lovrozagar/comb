@@ -1,4 +1,4 @@
-import { kvKey, putUnlessNewer } from "./kv-cache.ts"
+import { kvDelete, kvRead, putUnlessNewer } from "./kv-cache.ts"
 import type { D1Database } from "@cloudflare/workers-types"
 import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
@@ -113,7 +113,7 @@ class ShardRouter {
 
 		/* L2: KV */
 		const generation = this.generationOf(orgId)
-		const kvValue = (await deps.kv.get(kvKey(orgId), "json")) as ShardMapping | null
+		const kvValue = await kvRead(deps.kv, orgId, this.log)
 		if (kvValue) {
 			this.log("shard-router.hit", { orgId, tier: "kv" })
 			if (this.generationOf(orgId) === generation) this.lru.set(orgId, kvValue)
@@ -217,7 +217,7 @@ class ShardRouter {
 		this.generations.set(orgId, this.generationOf(orgId) + 1)
 		this.lru.delete(orgId)
 		this.misses.delete(orgId)
-		await kv.delete(kvKey(orgId))
+		await kvDelete(kv, orgId, this.log)
 	}
 
 	/* -- Private -- */
@@ -229,7 +229,7 @@ class ShardRouter {
 	private populateCaches(orgId: string, mapping: ShardMapping, { executionCtx, kv }: CacheTargets): void {
 		this.lru.set(orgId, mapping)
 		/* a read that began before a move elsewhere holds the older row: it does not overwrite the newer one (U33) */
-		executionCtx.waitUntil(putUnlessNewer(kv, mapping, this.kvTtlSeconds))
+		executionCtx.waitUntil(putUnlessNewer(kv, mapping, { log: this.log, ttlSeconds: this.kvTtlSeconds }))
 	}
 
 	/** One background revalidation per org at a time, however many requests see it stale */
@@ -245,7 +245,7 @@ class ShardRouter {
 		const generation = this.generationOf(orgId)
 		const current = () => this.generationOf(orgId) === generation
 		try {
-			const kvValue = (await deps.kv.get(kvKey(orgId), "json")) as ShardMapping | null
+			const kvValue = await kvRead(deps.kv, orgId, this.log)
 			if (kvValue) {
 				if (current()) this.lru.set(orgId, kvValue)
 				return
@@ -255,11 +255,11 @@ class ShardRouter {
 			if (!mapping) {
 				/* the core database has no live row: the org is gone, so the stale entry stops routing it now */
 				this.lru.delete(orgId)
-				await deps.kv.delete(kvKey(orgId))
+				await kvDelete(deps.kv, orgId, this.log)
 				return
 			}
 			this.lru.set(orgId, mapping)
-			await putUnlessNewer(deps.kv, mapping, this.kvTtlSeconds)
+			await putUnlessNewer(deps.kv, mapping, { log: this.log, ttlSeconds: this.kvTtlSeconds })
 		} catch (e) {
 			this.log("shard-router.revalidate.error", { error: e, orgId })
 		}

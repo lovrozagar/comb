@@ -3,7 +3,7 @@
  * soft-deleted org can be allocated again, stale cache hits share one revalidation, and every
  * lookup reports what it did through `log`.
  */
-import type { KVNamespace } from "@cloudflare/workers-types"
+import type { D1Database, KVNamespace } from "@cloudflare/workers-types"
 import { afterEach, describe, expect, it } from "vitest"
 import { ShardRouter } from "../../../src/sqlite/d1/sharding/router.ts"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
@@ -148,8 +148,14 @@ describe("log (S-14)", () => {
 		await shared.resolveOrAllocate("org_5", deps, ctx)
 		await settle()
 		await new Promise((resolve) => setTimeout(resolve, 5))
-		const broken = { ...deps.kv, get: () => Promise.reject(new Error("kv down")) } as unknown as KVNamespace
-		await shared.resolve("org_5", { ...deps, kv: broken }, ctx)
+		/* a KV that fails is a miss (U34), so the revalidation fails where the core read does */
+		const missing = { ...deps.kv, get: () => Promise.resolve(null) } as unknown as KVNamespace
+		const down = {
+			withSession: () => {
+				throw new Error("d1 down")
+			},
+		} as unknown as D1Database
+		await shared.resolve("org_5", { ...deps, coreDb: down, kv: missing }, ctx)
 		await settle()
 		expect(events.at(-1)?.[0]).toBe("shard-router.revalidate.error")
 	})
