@@ -13,6 +13,7 @@
  * delete, a trigger fired or a temp shadow is unsafe whichever rows it meets, and a backfill of the
  * file's own columns is cautious. A file the copy cannot run is unproven, and unproven is unsafe.
  */
+import { isMirror, mirrorFindings, mirrorRows, seedMirrors } from "./proof-mirror.ts"
 import { openMemory, type MemoryDb } from "../drivers/memory.ts"
 import type { Connection } from "../types.ts"
 import { notEngineTables } from "./engine-tables.ts"
@@ -60,8 +61,6 @@ async function liveObjects(conn: Connection, engine: string): Promise<LiveObject
 }
 
 const isVirtual = (object: LiveObject) => /^CREATE VIRTUAL TABLE\b/i.test(object.sql)
-/* an external-content or contentless FTS table mirrors another table: its rows prove nothing of their own */
-const isMirror = (object: LiveObject) => isVirtual(object) && /\bcontent\s*=\s*'/i.test(object.sql)
 
 /** The objects the copy creates: every one but a virtual table's own module's shadow tables */
 function creatable(objects: readonly LiveObject[]): LiveObject[] {
@@ -128,7 +127,8 @@ function buildCopy(db: MemoryDb, objects: readonly LiveObject[], seed: Seed): Ma
 	for (const object of tables.filter((each) => isVirtual(each) && !seedable.includes(each) && !isMirror(each)))
 		unproven.set(asciiFold(object.name), "a virtual table comb does not seed")
 	const definitions = new Map(seedable.map((object) => [object.name, object.sql]))
-	for (const [table, why] of seedTables(db, definitions, seed)) unproven.set(table, why)
+	for (const [table, why] of [...seedTables(db, definitions, seed), ...seedMirrors(db, tables.filter(isMirror))])
+		unproven.set(table, why)
 	for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
 	return unproven
 }
@@ -249,13 +249,13 @@ async function provePending(
 				proofs.set(name, { cautious: [], failed, unproven: unprovenOf(copy), unsafe: [failed] })
 				continue
 			}
-			let before = snapshot(copy.db)
+			let [before, mirrors] = [snapshot(copy.db), mirrorRows(copy.db)]
 			let run = applyToCopy(copy.db, sql)
 			const retry = run.error === undefined ? undefined : await reseeded(objects, applied, json)
 			if (retry !== undefined) {
 				copy.db.close()
 				copy = retry
-				before = snapshot(copy.db)
+				;[before, mirrors] = [snapshot(copy.db), mirrorRows(copy.db)]
 				run = applyToCopy(copy.db, sql)
 			}
 			if (run.error !== undefined) {
@@ -283,7 +283,7 @@ async function provePending(
 			proofs.set(name, {
 				cautious: [...engine.cautious, ...found.cautious],
 				unproven: unprovenOf(copy),
-				unsafe: [...engine.unsafe, ...found.unsafe],
+				unsafe: [...engine.unsafe, ...found.unsafe, ...mirrorFindings(mirrors, mirrorRows(copy.db))],
 			})
 		}
 	} finally {
