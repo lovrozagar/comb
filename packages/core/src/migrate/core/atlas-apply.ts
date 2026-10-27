@@ -24,7 +24,7 @@ import { fileUnreadable } from "./pg-split.ts"
 const STATUS_FORMAT =
 	'{"status":{{ json .Status }},"current":{{ json .Current }},"available":{{ json .Available }},"pending":{{ json .Pending }},' +
 	'"applied":[{{ range $i, $r := .Applied }}{{ if $i }},{{ end }}{"version":{{ json $r.Version }},"type":{{ json $r.Type }},' +
-	'"applied":{{ json $r.Applied }},"total":{{ json $r.Total }},"error":{{ json $r.Error }},"errorStmt":{{ json $r.ErrorStmt }},' +
+	'"description":{{ json $r.Description }},"applied":{{ json $r.Applied }},"total":{{ json $r.Total }},"error":{{ json $r.Error }},"errorStmt":{{ json $r.ErrorStmt }},' +
 	'"hash":{{ json $r.Hash }}}{{ end }}],"error":{{ json .Error }}}'
 const APPLY_FORMAT = '{"target":{{ json .Target }},"applied":{{ json .Applied }},"error":{{ json .Error }}}'
 
@@ -207,9 +207,11 @@ function baselineWithAtlas(options: AtlasCommand): string[] {
 function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: string[] } {
 	return onSnapshot(options, (copy) => {
 		const status = atlasStatus(options, copy)
-		const halfway = checkHistory(status, copy)
+		const missing: string[] = []
+		const halfway = checkHistory(status, copy, (line) => missing.push(line))
 		options.print(`Applied: ${status.applied.length}${status.applied.length > 0 ? ` (up to ${status.current})` : ""}`)
 		options.print(`Pending: ${status.pending.map((file) => file.Name).join(", ") || "none"}`)
+		for (const line of missing) options.print(line)
 		if (halfway !== undefined) options.print(`${halfway}; migrate apply resumes after them`)
 		return {
 			applied: status.applied.map((revision) => fileOf(copy, revision.version)),

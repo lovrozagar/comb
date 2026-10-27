@@ -11,8 +11,10 @@ import type { Run, RunResult } from "./process.ts"
 const ok = (stdout = ""): RunResult => ({ code: 0, stderr: "", stdout })
 const fail = (stderr: string, stdout = ""): RunResult => ({ code: 1, stderr, stdout })
 const file = (name: string) => ({ Description: name.split("_")[1], Name: name, Version: name.split("_")[0] })
+/* a revision as Atlas records one of the fixture's files: 1_a.sql, 2_b.sql */
 const revision = (version: string, more: Record<string, unknown> = {}) => ({
 	applied: 1,
+	description: ({ "1": "a", "2": "b" } as Record<string, string>)[version] ?? "",
 	error: "",
 	errorStmt: "",
 	hash: `${version.length}=`,
@@ -448,6 +450,10 @@ describe("baselineWithAtlas: what it refuses", () => {
 	})
 })
 
+/* a history whose second applied file is gone: no file of version 9 */
+const gone = () =>
+	fakeAtlas({ status: status({ applied: [revision("1", { hash: "7=" }), revision("9")], current: "9" }) })
+
 describe("statusWithAtlas", () => {
 	it("lists what is applied and what is pending", () => {
 		const run = options(
@@ -464,10 +470,13 @@ describe("statusWithAtlas", () => {
 		expect(run.out).toEqual(["Applied: 1 (up to 1)", "Pending: 2_b.sql"])
 	})
 
-	it("names a revision whose file is gone by its version, and does not call it changed", () => {
-		const run = options(fakeAtlas({ status: status({ applied: [revision("9", { hash: "x=" })], current: "9" }) }))
-		statusWithAtlas(run)
-		expect(run.out).toEqual(["Applied: 1 (up to 9)", "Pending: none"])
+	/* M76 (atlas-history.ts): status names a revision whose file is gone; check and apply refuse it */
+	it("names a revision whose file is gone in status, and refuses it in check and apply", async () => {
+		const run = options(gone())
+		expect(statusWithAtlas(run).applied).toEqual(["1_a.sql", "9"])
+		expect(run.out).toEqual(["Applied: 2 (up to 9)", "Pending: none", "9 was applied, and its file is gone or renamed"])
+		await expect(applyWithAtlas({ ...options(gone()), checkOnly: true })).rejects.toThrow("9 was applied, and its file")
+		await expect(applyWithAtlas(options(gone()))).rejects.toThrow("9 was applied, and its file")
 	})
 
 	it("reports a file Atlas ran halfway, and an error in the history", () => {
