@@ -89,7 +89,9 @@ export function fakeD1(options: D1Options, atlas: Run = fakeAtlas()): FakeD1 {
 		const command = args.find((arg) => arg.startsWith("--command="))
 		if (command !== undefined) {
 			try {
-				return ok(JSON.stringify([{ results: db.prepare(command.slice("--command=".length)).all() }]))
+				/* wrangler answers each statement of a command, split here as comb joins them */
+				const statements = command.slice("--command=".length).split(";\n")
+				return ok(JSON.stringify(statements.map((sql) => ({ results: db.prepare(sql).all() }))))
 			} catch (error) {
 				return fail((error as Error).message)
 			}

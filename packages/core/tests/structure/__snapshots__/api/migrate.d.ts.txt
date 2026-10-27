@@ -680,7 +680,15 @@ import { type Run } from "../core/process.ts";
 import type { ConnectionProvider, D1ProviderConfig } from "../types.ts";
 /** What every wrangler command on the database takes: --local or --remote, then its config and environment */
 declare function wranglerFlags(config: D1ProviderConfig): string[];
-export { wranglerFlags };
+/**
+ * Each of `statements`' rows from one `wrangler d1 execute --json --command`, one wrangler process
+ * for them all: wrangler answers a result per statement, and one that fails fails the call (R1)
+ */
+declare function executeAll(exec: Run, { flags, name }: {
+    flags: readonly string[];
+    name: string;
+}, statements: readonly string[]): Array<Array<Record<string, unknown>>>;
+export { executeAll, wranglerFlags };
 export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): ConnectionProvider;
 
 // migrate/drivers/sqlite.d.ts

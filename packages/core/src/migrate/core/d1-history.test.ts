@@ -56,6 +56,22 @@ async function target(binding: Record<string, string>) {
 	return { apply: () => applyD1(d1, { approve, print: () => undefined, read }), d1, read, run }
 }
 
+/** The `wrangler d1 execute` calls a fake took, each its own process on a real wrangler */
+const executes = (run: { calls: string[][] }) =>
+	run.calls.filter(([cmd, sub, verb]) => cmd === "wrangler" && sub === "d1" && verb === "execute").length
+
+/* R1: every wrangler call is a process of its own, so comb reads its history in one */
+describe("applyD1 and statusD1: wrangler calls", () => {
+	it("reads the history in one call, the schema in two, and the result and hashes in one each", async () => {
+		const { apply, d1, read, run } = await target({})
+		expect(await apply()).toEqual(["1_init.sql"])
+		expect(executes(run)).toBe(5)
+		run.calls.length = 0
+		await statusD1(d1, read, () => undefined)
+		expect(executes(run)).toBe(2)
+	})
+})
+
 describe("applyD1: the binding", () => {
 	it("reads wrangler's default migrations directory, and a pattern that names every .sql file of it", async () => {
 		const { apply } = await target({ migrations_pattern: "./migrations/*.sql" })

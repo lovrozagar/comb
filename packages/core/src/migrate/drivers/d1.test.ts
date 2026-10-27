@@ -3,7 +3,7 @@ import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { describe, expect, it } from "vitest"
 import type { Run, RunOptions, RunResult } from "../core/process.ts"
 import type { D1ProviderConfig, ResolvedDatabaseConfig } from "../types.ts"
-import { createD1Provider } from "./d1.ts"
+import { createD1Provider, executeAll } from "./d1.ts"
 
 type Call = { cmd: string; args: readonly string[]; options: RunOptions | undefined }
 
@@ -25,6 +25,21 @@ const DB: ResolvedDatabaseConfig = { migrationsDir: "m", name: "core-local", pro
 async function connect(run: Run, config: D1ProviderConfig = CONFIG) {
 	return createD1Provider(config, run).connect(DB)
 }
+
+/* R1: several statements in one wrangler process, each answered */
+describe("executeAll", () => {
+	it("runs every statement in one wrangler call, and refuses an answer that leaves one out", () => {
+		const two = fakeRun(() => json([{ results: [{ n: 1 }] }, { results: [] }]))
+		expect(executeAll(two, { flags: ["--local"], name: "core" }, ["SELECT 1 AS n", "CREATE TABLE t (x)"])).toEqual([
+			[{ n: 1 }],
+			[],
+		])
+		const one = fakeRun(() => json([{ results: [] }]))
+		expect(() => executeAll(one, { flags: [], name: "core" }, ["SELECT 1", "SELECT 2"])).toThrow(
+			"wrangler answered 1 results for 2 statements",
+		)
+	})
+})
 
 describe("createD1Provider: execute", () => {
 	it("runs wrangler against the resolved database name, remote by default, and maps rows to columns", async () => {

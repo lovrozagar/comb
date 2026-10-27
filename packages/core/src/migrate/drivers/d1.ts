@@ -124,7 +124,23 @@ function createD1Connection(databaseName: string, flags: readonly string[], exec
 	}
 }
 
-export { wranglerFlags }
+/**
+ * Each of `statements`' rows from one `wrangler d1 execute --json --command`, one wrangler process
+ * for them all: wrangler answers a result per statement, and one that fails fails the call (R1)
+ */
+function executeAll(
+	exec: Run,
+	{ flags, name }: { flags: readonly string[]; name: string },
+	statements: readonly string[],
+): Array<Array<Record<string, unknown>>> {
+	const stdout = runWrangler(exec, ["d1", "execute", name, ...flags, "--json", `--command=${statements.join(";\n")}`])
+	const results = readAllResults(stdout)
+	if (results.length !== statements.length)
+		throw new Error(`wrangler answered ${results.length} results for ${statements.length} statements`)
+	return results
+}
+
+export { executeAll, wranglerFlags }
 
 export function createD1Provider(config: D1ProviderConfig, exec: Run = run): ConnectionProvider {
 	return {

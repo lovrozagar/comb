@@ -12,6 +12,7 @@ import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Connection, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
+import { executeAll } from "../drivers/d1.ts"
 import { assertLocalExists, type D1Target, type ReadConfig, resolveBinding } from "./d1-binding.ts"
 import { orphanMessage } from "./history-match.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
@@ -23,39 +24,57 @@ const HASH_TABLE = "_comb_migration_hashes"
 const quoteName = (name: string): string => `"${name.replaceAll('"', '""')}"`
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`
 
-/** The rows of one column of `sql` */
-async function column(conn: Connection, sql: string): Promise<string[]> {
-	return (await conn.execute(sql)).rows.map((row) => String(row[0]))
-}
+/** wrangler's own migrations table, made as wrangler makes it */
+const historyTable = (table: string): string =>
+	`CREATE TABLE IF NOT EXISTS ${quoteName(table)} (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)`
+
+/** The names the migrations table `table` records, in order */
+const namesOf = (table: string): string => `SELECT name FROM ${quoteName(table)} ORDER BY id`
+
+/** One statement's rows, as executeAll answers them */
+type Rows = Array<Record<string, unknown>>
+
+/** What the history tables hold: wrangler's names, comb's hashes, and comb's pre-0.8 record, undefined where it is absent */
+type HistoryRead = { applied: Set<string>; drizzle: Set<string> | undefined; recorded: Map<string, string> }
 
 /**
- * The names the migrations table records. With `create` (apply and baseline) the table is made
- * as wrangler makes it when missing; without (status and check, which never write), a missing
- * table records nothing.
+ * The history in as few wrangler calls as it takes, each a process of its own (R1). With `create`
+ * (apply and baseline) the tables are made as wrangler makes them and read in that one call;
+ * without (status and check, which never write) a listing says which exist, and one more call
+ * reads those, as does a pre-0.8 record that exists.
  */
-async function appliedNames(conn: Connection, table: string, create: boolean): Promise<Set<string>> {
-	if (create) {
-		await conn.execute(
-			`CREATE TABLE IF NOT EXISTS ${quoteName(table)} (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)`,
-		)
-	} else if (
-		(await column(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${literal(table)}`)).length ===
-		0
-	) {
-		return new Set()
-	}
-	return new Set(await column(conn, `SELECT name FROM ${quoteName(table)} ORDER BY id`))
-}
-
-/** The hash comb recorded for each applied file; `create` (apply and baseline) makes the table */
-async function appliedHashes(conn: Connection, create: boolean): Promise<Map<string, string>> {
-	if (create) await conn.execute(`CREATE TABLE IF NOT EXISTS ${HASH_TABLE} (name TEXT PRIMARY KEY, hash TEXT NOT NULL)`)
-	else if (
-		(await column(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${HASH_TABLE}'`)).length === 0
+function readHistory(target: D1Target, table: string, create: boolean): HistoryRead {
+	const [names, hashes, drizzle] = [
+		namesOf(table),
+		`SELECT name, hash FROM ${HASH_TABLE}`,
+		`SELECT hash FROM ${DRIZZLE_TABLE}`,
+	]
+	const listing = `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${[table, HASH_TABLE, DRIZZLE_TABLE].map(literal).join(", ")})`
+	const made = [
+		historyTable(table),
+		`CREATE TABLE IF NOT EXISTS ${HASH_TABLE} (name TEXT PRIMARY KEY, hash TEXT NOT NULL)`,
+	]
+	const first = executeAll(target.exec, target, create ? [...made, listing, names, hashes] : [listing])
+	/* executeAll answers one result per statement, or throws */
+	const present = new Set((first[create ? 2 : 0] as Rows).map((row) => String(row["name"])))
+	const rows = new Map(
+		create
+			? [
+					[names, first[3]],
+					[hashes, first[4]],
+				]
+			: [],
 	)
-		return new Map()
-	const { rows } = await conn.execute(`SELECT name, hash FROM ${HASH_TABLE}`)
-	return new Map(rows.map((row) => [String(row[0]), String(row[1])]))
+	const later = [names, hashes, drizzle].filter(
+		(sql, i) => !rows.has(sql) && present.has([table, HASH_TABLE, DRIZZLE_TABLE][i] as string),
+	)
+	if (later.length > 0) executeAll(target.exec, target, later).forEach((each, i) => rows.set(later[i] as string, each))
+	const read = (sql: string) => rows.get(sql) ?? []
+	return {
+		applied: new Set(read(names).map((row) => String(row["name"]))),
+		drizzle: present.has(DRIZZLE_TABLE) ? new Set(read(drizzle).map((row) => String(row["hash"]))) : undefined,
+		recorded: new Map(read(hashes).map((row) => [String(row["name"]), String(row["hash"])])),
+	}
 }
 
 /** Record the hash each of `files` was applied under; both callers pass at least one */
@@ -65,12 +84,6 @@ async function recordHashes(conn: Connection, files: ReadonlyArray<{ hash: strin
 			sql: `INSERT OR REPLACE INTO ${HASH_TABLE} (name, hash) VALUES (${literal(name)}, ${literal(hash)})`,
 		})),
 	)
-}
-
-/** The hashes comb before 0.8 recorded in `__drizzle_migrations`; undefined when the table is absent */
-async function drizzleHashes(conn: Connection): Promise<Set<string> | undefined> {
-	const found = await column(conn, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${DRIZZLE_TABLE}'`)
-	return found.length === 0 ? undefined : new Set(await column(conn, `SELECT hash FROM ${DRIZZLE_TABLE}`))
 }
 
 /**
@@ -110,16 +123,14 @@ async function history(
 ): Promise<{ applied: Set<string>; orphans: string; table: string; unhashed: string[] }> {
 	const table = resolveBinding(read, target)
 	if (!create) assertLocalExists(read, target)
-	const applied = await appliedNames(target.conn, table, create)
+	const { applied, drizzle: hashes, recorded } = readHistory(target, table, create)
 	const files = filesOf(target.migrationsDir)
-	const hashes = await drizzleHashes(target.conn)
 	const copied = hashes === undefined ? [] : recordedByDrizzle(files, hashes, applied)
 	if (copied.length > 0) {
 		throw new Error(
 			`${target.name} records ${copied.join(", ")} in ${DRIZZLE_TABLE}, comb's history before 0.8, but not in ${table}, wrangler's; run comb migrate baseline once to copy the record`,
 		)
 	}
-	const recorded = await appliedHashes(target.conn, create)
 	const edited = files.find(
 		({ name, sql }) => applied.has(name) && recorded.has(name) && !vouched(sql, recorded.get(name) as string, hashes),
 	)
@@ -169,7 +180,10 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	if (names.length === 0 || options.checkOnly === true) return names
 	for (const name of names) options.print(`Apply: ${name}`)
 	const ran = target.exec("wrangler", ["d1", "migrations", "apply", target.name, ...target.flags], { input: "" })
-	const after = await appliedNames(target.conn, table, true)
+	/* what wrangler recorded, read back from the table, never from its output */
+	const after = new Set(
+		(executeAll(target.exec, target, [namesOf(table)])[0] as Rows).map((row) => String(row["name"])),
+	)
 	if (ran.code !== 0) {
 		/* the files wrangler applied before it failed are applied: their hashes are recorded as any other's */
 		const done = pending.filter(({ name }) => after.has(name))
@@ -200,8 +214,7 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
  */
 async function baselineD1(target: D1Target, read: ReadConfig, print: (line: string) => void): Promise<string[]> {
 	const table = resolveBinding(read, target)
-	const applied = await appliedNames(target.conn, table, true)
-	const hashes = await drizzleHashes(target.conn)
+	const { applied, drizzle: hashes } = readHistory(target, table, true)
 	if (hashes === undefined) {
 		throw new Error(
 			`${target.name} has no ${DRIZZLE_TABLE} to copy from; baseline records only what a history shows was applied`,
@@ -214,7 +227,6 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
 			copied.map((name) => ({ sql: `INSERT OR IGNORE INTO ${quoteName(table)} (name) VALUES (${literal(name)})` })),
 		)
 		/* each copied file is vouched for now, so it is recorded under its current hash, the one D1 compares (M44) */
-		await appliedHashes(target.conn, true)
 		await recordHashes(
 			target.conn,
 			files
