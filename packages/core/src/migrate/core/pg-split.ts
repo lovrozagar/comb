@@ -2,16 +2,27 @@
  * A Postgres file as Postgres runs it (M75): the chunks Atlas sends one at a time (atlas-scan.ts),
  * each split into the statements Postgres's parser reads in it, by each RawStmt's `stmt_location`
  * and `stmt_len`, offsets in UTF-8 bytes. A chunk the parser cannot read stays one statement: the
- * classifier rates it unsafe, and a history holding one fails the classification. A file comb
- * writes from such statements (atlasFile) is one Atlas sends each of alone.
+ * classifier rates it unsafe, and a history holding one fails the classification. Each file is
+ * parsed once: its read keeps every statement's parse tree, and extractSchema records it beside
+ * the schema it leaves (recordRead), which the history's facts and the file-naming check read. A
+ * file comb writes from such statements (atlasFile) is one Atlas sends each of alone.
  */
 import { atlasChunks, type Chunk, unterminated } from "./atlas-scan.ts"
 import { postgresParser } from "./pg-parser.ts"
 
 type RawStmt = { stmt_len?: number; stmt_location?: number }
 
+/** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
+type PgStatement = { text: string; tree: RawStmt[] | undefined }
+
+/** A statement the parser cannot read, with its reason */
+type Unreadable = { error: string; statement: string }
+
 /** A chunk's statements, or the chunk whole with the parser's reason when it cannot read it */
-type Read = { error?: string; statements: string[] }
+type Read = { error?: string; statements: PgStatement[] }
+
+/** A Postgres file read: its statements in order, and the first the parser cannot read */
+type PgRead = { statements: PgStatement[]; unreadable: Unreadable | undefined }
 
 /** The statements Postgres reads in one chunk, the comments before it kept on the first */
 function readChunk(chunk: Chunk): Read {
@@ -23,14 +34,16 @@ function readChunk(chunk: Chunk): Read {
 	try {
 		stmts = parser.parseSync(source).stmts as RawStmt[]
 	} catch (error) {
-		return { error: (error as Error).message, statements: [unterminated(chunk)] }
+		return { error: (error as Error).message, statements: [{ text: unterminated(chunk), tree: undefined }] }
 	}
 	const bytes = new TextEncoder().encode(source)
 	const decoder = new TextDecoder()
-	const statements = stmts.map(({ stmt_len: length = 0, stmt_location: from = 0 }) =>
-		decoder.decode(bytes.subarray(from, length === 0 ? bytes.length : from + length)).trim(),
-	)
-	return { statements: statements.filter((statement) => statement !== "") }
+	const statements = stmts.map((stmt) => {
+		const { stmt_len: length = 0, stmt_location: from = 0 } = stmt
+		const text = decoder.decode(bytes.subarray(from, length === 0 ? bytes.length : from + length)).trim()
+		return { text, tree: [stmt] }
+	})
+	return { statements: statements.filter(({ text }) => text !== "") }
 }
 
 /** A migration file's leading `atlas:` directive lines, with the blank lines after them */
@@ -44,17 +57,38 @@ function chunksOf(sql: string): Chunk[] {
 	return chunks
 }
 
-/** The statements of the Postgres file `sql`, in the order Postgres runs them; throws for a file Atlas cannot split */
-const pgStatements = (sql: string): string[] => chunksOf(sql).flatMap((chunk) => readChunk(chunk).statements)
-
-/** The first statement of `sql` Postgres's parser cannot read, with its reason; undefined when it reads them all */
-function pgUnreadable(sql: string): { error: string; statement: string } | undefined {
+/** The Postgres file `sql` read once: its statements in the order Postgres runs them, with their trees; throws for a file Atlas cannot split */
+function pgRead(sql: string): PgRead {
+	const read: PgRead = { statements: [], unreadable: undefined }
 	for (const chunk of chunksOf(sql)) {
 		const { error, statements } = readChunk(chunk)
-		if (error !== undefined) return { error, statement: statements[0] as string }
+		if (error !== undefined) read.unreadable ??= { error, statement: (statements[0] as PgStatement).text }
+		read.statements.push(...statements)
 	}
-	return undefined
+	return read
 }
+
+/** The statements of the Postgres file `sql`, in the order Postgres runs them; throws for a file Atlas cannot split */
+const pgStatements = (sql: string): string[] => pgRead(sql).statements.map(({ text }) => text)
+
+/** What extractSchema read for a schema: the history's trees (none when one before it was never read), and its file's first unreadable statement */
+type Recorded = { trees: Array<RawStmt[] | undefined> | undefined; unreadable: Unreadable | undefined }
+
+// lru-cache: each Postgres schema's read, released with the schema; one without a record (a copy, or one built elsewhere) is parsed again
+const READS = /* @__PURE__ */ new WeakMap<object, Recorded>()
+
+/** Record `read`, the file that took `from` to `schema`, beside `schema` */
+function recordRead(schema: object, from: { statements: readonly string[] }, read: PgRead): void {
+	const before = from.statements.length === 0 ? [] : READS.get(from)?.trees
+	const trees = before === undefined ? undefined : [...before, ...read.statements.map(({ tree }) => tree)]
+	READS.set(schema, { trees, unreadable: read.unreadable })
+}
+
+/** The parse tree of each of `schema`'s history statements, none for one the parser cannot read; undefined without a record */
+const historyTrees = (schema: object): ReadonlyArray<RawStmt[] | undefined> | undefined => READS.get(schema)?.trees
+
+/** The first statement of the file that left `schema` the parser cannot read, with its reason */
+const fileUnreadable = (schema: object): Unreadable | undefined => READS.get(schema)?.unreadable
 
 /** A first-line delimiter directive, which Atlas honors only there */
 const DELIMITER_DIRECTIVE = /^-- atlas:delimiter(?=[ \n])[^\n]*\n/
@@ -72,7 +106,7 @@ function sendsAlone(file: string, statements: readonly string[]): boolean {
 		chunks.length === statements.length &&
 		chunks.every((chunk, i) => {
 			const read = readChunk(chunk)
-			return read.error === undefined && read.statements.length === 1 && read.statements[0] === statements[i]
+			return read.error === undefined && read.statements.length === 1 && read.statements[0]?.text === statements[i]
 		})
 	)
 }
@@ -101,4 +135,14 @@ function atlasFile(statements: readonly string[], head = ""): string {
 	throw new Error(`comb cannot write these statements so that Atlas sends each alone: ${JSON.stringify(statements)}`)
 }
 
-export { atlasDirectives, atlasFile, pgStatements, pgUnreadable }
+export {
+	atlasDirectives,
+	atlasFile,
+	fileUnreadable,
+	historyTrees,
+	type PgRead,
+	pgRead,
+	type PgStatement,
+	pgStatements,
+	recordRead,
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { atlasChunks } from "./atlas-scan.ts"
-import { atlasFile, pgStatements, pgUnreadable } from "./pg-split.ts"
+import { atlasFile, pgRead, pgStatements } from "./pg-split.ts"
 
 describe("pgStatements: a Postgres file as the statements Postgres runs", () => {
 	it("splits a chunk Atlas sends whole into each statement, by the parser's byte offsets", () => {
@@ -20,13 +20,12 @@ describe("pgStatements: a Postgres file as the statements Postgres runs", () => 
 	})
 })
 
-describe("pgUnreadable: the first statement the parser cannot read", () => {
-	it("names it with the parser's reason, and none when it reads them all", () => {
-		expect(pgUnreadable("SELECT 1; SELEC 2; SELEC 3;")).toEqual({
-			error: 'syntax error at or near "SELEC"',
-			statement: "SELEC 2",
-		})
-		expect(pgUnreadable("SELECT 1;")).toBeUndefined()
+describe("pgRead: the file read once, each statement's tree kept, and its first unreadable statement", () => {
+	it("names the first statement the parser cannot read with its reason, and none when it reads them all", () => {
+		const read = pgRead("SELECT 1; SELEC 2; SELEC 3;")
+		expect(read.unreadable).toEqual({ error: 'syntax error at or near "SELEC"', statement: "SELEC 2" })
+		expect(read.statements.map(({ tree }) => tree === undefined)).toEqual([false, true, true])
+		expect(pgRead("SELECT 1;").unreadable).toBeUndefined()
 	})
 })
 

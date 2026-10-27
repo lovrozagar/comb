@@ -1,10 +1,11 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ParsedMigration } from "../types.ts"
 import { applyWithAtlas, type ApplyOptions, baselineWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
 import { sqlFiles, sumHashes } from "./atlas-dir.ts"
+import { postgresParser } from "./pg-parser.ts"
 import type { Run, RunResult } from "./process.ts"
 
 const ok = (stdout = ""): RunResult => ({ code: 0, stderr: "", stdout })
@@ -239,6 +240,20 @@ describe("applyWithAtlas: a file before a pending one that it cannot read (M75)"
 		const run = options(fakeAtlas({ apply: APPLIED, status: PENDING }))
 		await expect(applyWithAtlas(run)).rejects.toThrow('comb could not read 1_a.sql: "CREATE TABL b (id int)"')
 		expect(run.seen).toEqual(["1_a.sql"])
+	})
+})
+
+/* S1 of the M75 review: the history's read, recorded beside the schema it leaves, serves its facts and the naming check */
+describe("applyWithAtlas: each history file parsed once", () => {
+	it("parses an applied file once, whatever the pending files after it read of it", async () => {
+		const parse = vi.spyOn(postgresParser(), "parseSync")
+		try {
+			const pending = status({ applied: [revision("1", { hash: "7=" })], current: "1", pending: [file("2_b.sql")] })
+			await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: pending })))
+			expect(parse.mock.calls.filter(([sql]) => sql.includes('CREATE TABLE "a"'))).toHaveLength(1)
+		} finally {
+			parse.mockRestore()
+		}
 	})
 })
 

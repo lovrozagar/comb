@@ -18,7 +18,7 @@ import { extractSchema, parseMigration } from "./parse.ts"
 import { type Run, type RunResult, run } from "./process.ts"
 import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
-import { pgUnreadable } from "./pg-split.ts"
+import { fileUnreadable } from "./pg-split.ts"
 
 /** A migration file as Atlas lists it */
 type AtlasFile = { Description: string; Name: string; Version: string }
@@ -178,7 +178,8 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 		if (waiting.has(Name) && unread !== undefined) throw new Error(unread)
 		const before = schema
 		schema = named(Name, () => extractSchema(sql, before, readAs))
-		const unreadable = pgUnreadable(sql)
+		/* the file's read, recorded beside the schema it left: no second parse */
+		const unreadable = fileUnreadable(schema)
 		unread ??=
 			unreadable && `comb could not read ${Name}: ${JSON.stringify(unreadable.statement)} (${unreadable.error})`
 		if (!waiting.has(Name)) continue

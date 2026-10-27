@@ -16,6 +16,7 @@ import { followEventTrigger } from "./pg-events.ts"
 import { followNames } from "./pg-names.ts"
 import { type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf } from "./pg-nodes.ts"
 import { postgresParser } from "./pg-parser.ts"
+import { historyTrees } from "./pg-split.ts"
 
 /** The first function an expression calls that is no pure built-in, by name */
 function callIn(expression: unknown, { defined, schema }: Pick<Facts, "defined" | "schema">): string | undefined {
@@ -230,6 +231,18 @@ function followTree(stmts: unknown, facts: Facts): void {
 	}
 }
 
+/** A history statement's parse tree; throws for one the parser cannot read */
+function historyTree(statement: string): unknown {
+	try {
+		return postgresParser().parseSync(statement).stmts
+	} catch (error) {
+		/* what it defined or attached is unknown, so the facts after it are too (M75) */
+		throw new Error(`comb could not read the history: ${JSON.stringify(statement)} (${(error as Error).message})`, {
+			cause: error,
+		})
+	}
+}
+
 // lru-cache: each history's facts under each schema, read once per schema object, released with it
 const CACHE = /* @__PURE__ */ new WeakMap<ExtractedSchema, Map<string, Facts>>()
 
@@ -258,18 +271,9 @@ function historyFacts(before: ExtractedSchema | undefined, schema: string): Fact
 	let facts = read.get(schema)
 	if (facts === undefined) {
 		facts = empty
-		for (const statement of before.statements) {
-			let tree: { stmts?: unknown }
-			try {
-				tree = postgresParser().parseSync(statement)
-			} catch (error) {
-				/* what it defined or attached is unknown, so the facts after it are too (M75) */
-				throw new Error(`comb could not read the history: ${JSON.stringify(statement)} (${(error as Error).message})`, {
-					cause: error,
-				})
-			}
-			followTree(tree.stmts, facts)
-		}
+		/* the trees extractSchema kept; a statement without one is parsed here, which fails for one the parser cannot read */
+		const trees = historyTrees(before)
+		for (const [i, statement] of before.statements.entries()) followTree(trees?.[i] ?? historyTree(statement), facts)
 		read.set(schema, facts)
 	}
 	return structuredClone(facts)

@@ -4,7 +4,7 @@
  * reads a file against it, and the SQLite rebuild guard finds the tables a rebuild reaches by it.
  */
 import { codeOf, dialectOf, IDENT, lastPart, nameKey, type Naming, namingOf, QNAME, splitTopLevel } from "./sql-code.ts"
-import { pgStatements } from "./pg-split.ts"
+import { pgRead, recordRead } from "./pg-split.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 import { syncTriggerOf } from "./fts-sync.ts"
 import { COLUMN, columnKey, columnNames, CONSTRAINT_WORDS, GENERATED, tableDefinition } from "./schema-table.ts"
@@ -208,11 +208,13 @@ function extractSchema(
 		tables: new Map(from.tables),
 		triggers: [...from.triggers],
 	}
-	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75) */
-	for (const stmt of dialect === "postgres" ? pgStatements(sql) : splitSqlStatements(sql)) {
+	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75), read once */
+	const read = dialect === "postgres" ? pgRead(sql) : undefined
+	for (const stmt of read === undefined ? splitSqlStatements(sql) : read.statements.map(({ text }) => text)) {
 		follow(schema, stmt, naming)
 		schema.statements.push(stmt)
 	}
+	if (read !== undefined) recordRead(schema, from, read)
 	return schema
 }
 

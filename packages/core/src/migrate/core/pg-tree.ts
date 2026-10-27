@@ -203,12 +203,12 @@ function shadowFinding(type: string, node: Node, ctx: TreeContext): Finding | un
 	return undefined
 }
 
-/** One Postgres statement's findings, read from its parse tree */
-function pgTreeFindings(stmt: string, ctx: TreeContext): Finding[] {
+/** One Postgres statement's findings, read from its parse tree: the one its file's read kept, else parsed here */
+function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): Finding[] {
 	const parser = postgresParser()
 	let tree: { stmts?: unknown }
 	try {
-		tree = parser.parseSync(stmt)
+		tree = kept === undefined ? parser.parseSync(stmt) : { stmts: kept }
 	} catch (error) {
 		// reason: a statement Postgres cannot parse is the statement's finding, unsafe
 		return [{ level: "unsafe", note: `comb could not parse this as Postgres 17: ${(error as Error).message}` }]

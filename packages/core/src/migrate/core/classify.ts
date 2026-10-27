@@ -27,7 +27,7 @@ import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
 import { noGuards, readGuards } from "./guard-read.ts"
 import { codeOf, nameKey, namingOf, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
-import { pgStatements } from "./pg-split.ts"
+import { pgRead } from "./pg-split.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 type ClassifyOptions = {
@@ -166,8 +166,9 @@ function readFile(
 	{ before, dialect, schema }: { before: ExtractedSchema | undefined; dialect: Dialect; schema: string },
 ): Read[] {
 	const naming = namingOf(dialect, schema)
-	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75) */
-	const statements = dialect === "postgres" ? pgStatements(sql) : splitSqlStatements(sql)
+	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75), each tree kept */
+	const read = dialect === "postgres" ? pgRead(sql) : undefined
+	const statements = read === undefined ? splitSqlStatements(sql) : read.statements.map(({ text }) => text)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
 	const created = new Set(
 		codes.flatMap((code) => {
@@ -208,7 +209,7 @@ function readFile(
 					...grammarFindings(codes[i] as string, { ...ctx, ftsTriggers }),
 					...(dialect === "sqlite"
 						? [...ftsCommandFindings(stmt), ...sqliteWriteFindings(codes[i] as string, ctx)]
-						: pgTreeFindings(stmt, ctx)),
+						: pgTreeFindings(stmt, ctx, read?.statements[i]?.tree)),
 				]
 		/* on Postgres what a statement makes new is followed from its parse tree (pg-ddl.ts) */
 		if (dialect === "sqlite") {
