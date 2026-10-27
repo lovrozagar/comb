@@ -131,17 +131,39 @@ function afterFrom(position: KeysetPosition, start: number): SQL {
 	return anyOf(branches)
 }
 
+/** The NULL checks of each bound with no safe fallback: one is NULL once its anchor row is gone or renamed */
+const unsafeBounds = (values: readonly unknown[]): SQL[] =>
+	values.flatMap((value) => (value instanceof AnchorBound && value.ends ? [isNull(value.value)] : []))
+
 /**
  * Lexicographic "after this row" over every key plus the tiebreak, expanded rather than a row-value
  * comparison because each key carries its own direction and null placement. A bound that `ends`
- * must not be NULL, or no row is after it.
+ * is NULL once its anchor is gone: every row passes then, each carrying anchorGone's flag, so the
+ * page answers invalid_cursor rather than end the list unseen (U26).
  */
 function keysetSQL(position: KeysetPosition): SQL {
-	const guards = position.values.flatMap((value) =>
-		value instanceof AnchorBound && value.ends ? [isNotNull(value.value)] : [],
-	)
+	const unsafe = unsafeBounds(position.values)
 	const seek = afterFrom(position, 0)
-	return guards.length > 0 ? (and(seek, ...guards) as SQL) : seek
+	return unsafe.length > 0 ? (or(...unsafe, seek) as SQL) : seek
 }
 
-export { AnchorBound, countLiteral, type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak }
+/**
+ * 1 where a bound with no safe fallback is NULL, its anchor row gone or renamed, else 0; undefined
+ * when no bound can be. It reads the anchor row alone, so Postgres plans it once a query (U26).
+ */
+function anchorGone(values: readonly unknown[]): SQL | undefined {
+	const unsafe = unsafeBounds(values)
+	return unsafe.length === 0 ? undefined : sql`CASE WHEN ${or(...unsafe)} THEN 1 ELSE 0 END`
+}
+
+export {
+	AnchorBound,
+	anchorGone,
+	countLiteral,
+	type KeysetPosition,
+	keysetSQL,
+	orderByKeys,
+	orderSQL,
+	type SortKey,
+	type Tiebreak,
+}

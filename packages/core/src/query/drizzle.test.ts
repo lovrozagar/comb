@@ -218,6 +218,23 @@ describe("queryHelpers.paginate — next cursor and hasMore", () => {
 	})
 })
 
+/* U26: a gone anchor's flag rides in each row; paginate reads it first, before the page or its total */
+describe("queryHelpers.paginate — an anchor gone where no bound is safe", () => {
+	const query = {
+		cursor: "c",
+		limit: 1,
+		parsedSort: [{ direction: "asc" as const, field: "id" }],
+		validated: true as const,
+	}
+
+	it("answers invalid_cursor before it reads _total, and strips the flag from a page it serves", () => {
+		const gone = () => queryHelpers.paginate([{ _combAnchorGone: 1, _total: 9, id: 1 }], query, SEALED)
+		expect(gone).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
+		const [items] = queryHelpers.paginate([{ _combAnchorGone: 0, id: 1 }], query, SEALED)
+		expect(items).toEqual([{ id: 1 }])
+	})
+})
+
 describe("queryHelpers.paginate — count and page", () => {
 	it("uses _total from first item", () => {
 		const items = [{ _total: 42, id: "1" }]

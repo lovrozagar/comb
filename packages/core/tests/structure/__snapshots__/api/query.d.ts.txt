@@ -161,6 +161,10 @@ type DrizzleListOptions = {
     where?: {
         RAW: (table: RelationalTable) => SQL;
     };
+    /** Whether the cursor's anchor is gone where no bound is safe, for `findMany({ extras })`: paginate reads it (U26) */
+    extras?: {
+        _combAnchorGone: (table: RelationalTable) => SQL;
+    };
 };
 /**
  * The parsed request, or the `ListQueryResult` built from it: what a service or a repository holds.
@@ -929,10 +933,16 @@ type KeysetPosition = {
 /**
  * Lexicographic "after this row" over every key plus the tiebreak, expanded rather than a row-value
  * comparison because each key carries its own direction and null placement. A bound that `ends`
- * must not be NULL, or no row is after it.
+ * is NULL once its anchor is gone: every row passes then, each carrying anchorGone's flag, so the
+ * page answers invalid_cursor rather than end the list unseen (U26).
  */
 declare function keysetSQL(position: KeysetPosition): SQL;
-export { AnchorBound, countLiteral, type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak };
+/**
+ * 1 where a bound with no safe fallback is NULL, its anchor row gone or renamed, else 0; undefined
+ * when no bound can be. It reads the anchor row alone, so Postgres plans it once a query (U26).
+ */
+declare function anchorGone(values: readonly unknown[]): SQL | undefined;
+export { AnchorBound, anchorGone, countLiteral, type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak, };
 
 // codegen/analyzer-types.d.ts
 import type { CombColumnKind } from "../meta/column.ts";

@@ -2,7 +2,8 @@
  * A sort key too long for a cursor on Postgres (R8): the cursor carries the row's id and a prefix,
  * and the keyset reads the value from the row. Exact while the row is there. Once it is deleted, a
  * column sorted by code point (C or POSIX) resumes from the prefix, repeating rows that share it and
- * skipping none; under any other collation neither prefix bound is safe, and the list ends. A row
+ * skipping none; under any other collation neither prefix bound is safe, so the next page answers
+ * invalid_cursor, where it ended the list silently (U26): the client starts it again. A row
  * renamed between pages is a row whose value no longer has the cursor's prefix and length: it
  * resumes as a deleted one does.
  */
@@ -10,6 +11,7 @@ import { defineRelations } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
 import { integer, pgTable, text } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "vitest"
+import { CombError } from "../../../src/error.ts"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { usePg } from "../support/pg.ts"
@@ -44,7 +46,7 @@ async function pageAll(
 	sessions: Sessions,
 	order: string,
 	edit: Edit | false,
-): Promise<{ deleted: number[]; seen: number[] }> {
+): Promise<{ deleted: number[]; refused?: CombError; seen: number[] }> {
 	const client = sessions.pg()
 	const db = drizzle({ client, relations: defineRelations({ doc }) })
 	const seen: number[] = []
@@ -53,7 +55,14 @@ async function pageAll(
 	for (let guard = 0; guard < 30; guard++) {
 		const query = { ...schema.parse({ order }), cursor }
 		const rows = await db.query.doc.findMany(queryHelpers.listOptions(query, SEALED) as never)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; title: string }>, query, SEALED)
+		let paged: ReturnType<typeof queryHelpers.paginate<{ id: number; title: string }>>
+		try {
+			paged = queryHelpers.paginate(rows as Array<{ id: number; title: string }>, query, SEALED)
+		} catch (error) {
+			if (error instanceof CombError) return { deleted, refused: error, seen }
+			throw error
+		}
+		const [items, meta] = paged
 		seen.push(...items.map((row) => row.id))
 		if (meta.nextCursor === null) return { deleted, seen }
 		expect(meta.nextCursor.length).toBeLessThanOrEqual(8192)
@@ -99,25 +108,27 @@ describe("a sort key too long for a cursor, on Postgres, after its anchor row is
 	})
 
 	it.each(["title.asc", "title.desc"])(
-		"ends %s without an error under a collation not by code point",
+		"answers invalid_cursor for %s under a collation not by code point, where it ended silently (U26)",
 		async (order) => {
 			await seeded(sessions, ICU)
 			const all = await inOrder(sessions, order)
-			const { deleted, seen } = await pageAll(sessions, order, DELETE)
+			const { deleted, refused, seen } = await pageAll(sessions, order, DELETE)
 			expect(deleted).toHaveLength(1)
 			expect(seen).toEqual(through(all, deleted[0] as number))
+			expect(refused?.errorKey).toBe("invalid_cursor")
 		},
 	)
 
 	/* U3 of the 0.12 round: a NULL bound must not let the NULL rows through */
 	it.each(["title.asc", "title.desc", "title.asc.nullsfirst", "title.desc.nullslast"])(
-		"ends %s at a deleted anchor on a nullable column, serving none of the NULLs past it",
+		"answers invalid_cursor for %s at a deleted anchor on a nullable column, serving none of the NULLs past it",
 		async (order) => {
 			await seeded(sessions, ICU, ["b", `${LONG}m`, `${LONG}n`, `${LONG}o`, null, null])
 			const all = await inOrderBy(sessions, order)
-			const { deleted, seen } = await pageAll(sessions, order, DELETE)
+			const { deleted, refused, seen } = await pageAll(sessions, order, DELETE)
 			expect(deleted).toHaveLength(1)
 			expect(seen).toEqual(through(all, deleted[0] as number))
+			expect(refused?.errorKey).toBe("invalid_cursor")
 		},
 	)
 })
@@ -148,13 +159,14 @@ describe("a sort key too long for a cursor, on Postgres, after its anchor row is
 	})
 
 	it.each(["title.asc", "title.desc"])(
-		"ends %s at the renamed anchor under a collation not by code point",
+		"answers invalid_cursor for %s at the renamed anchor under a collation not by code point (U26)",
 		async (order) => {
 			await seeded(sessions, ICU)
 			const all = await inOrder(sessions, order)
-			const { deleted, seen } = await pageAll(sessions, order, RENAME)
+			const { deleted, refused, seen } = await pageAll(sessions, order, RENAME)
 			expect(deleted).toHaveLength(1)
 			expect(seen).toEqual(through(all, deleted[0] as number))
+			expect(refused?.errorKey).toBe("invalid_cursor")
 		},
 	)
 })
@@ -176,3 +188,30 @@ async function inOrderBy(sessions: Sessions, order: string): Promise<number[]> {
 		.query(`SELECT id FROM doc ORDER BY title ${sort}, id ${(direction as string).toUpperCase()}`)
 	return result.rows.map((row: { id: number }) => row.id)
 }
+
+/* U26: the anchor's flag reads the anchor row alone, so Postgres evaluates it once a query, never once a row */
+describe("the gone-anchor flag on Postgres (U26)", () => {
+	const sessions = usePg()
+
+	it("plans as one InitPlan, not a subquery per row", async () => {
+		/* every title long, so page 1's anchor goes by reference */
+		await seeded(sessions, ICU, [`${LONG}a`, `${LONG}b`, `${LONG}c`])
+		const client = sessions.pg()
+		const db = drizzle({ client, relations: defineRelations({ doc }) })
+		const first = schema.parse({ order: "title.asc" })
+		const page = queryHelpers.paginate(
+			(await db.query.doc.findMany(queryHelpers.listOptions(first, SEALED) as never)) as Array<{
+				id: number
+				title: string
+			}>,
+			first,
+			SEALED,
+		)
+		const query = { ...first, cursor: page[1].nextCursor as string }
+		const built = db.query.doc.findMany(queryHelpers.listOptions(query, SEALED) as never).toSQL()
+		const plan = await client.query(`EXPLAIN ${built.sql}`, built.params as unknown[])
+		const lines = plan.rows.map((row: Record<string, string>) => Object.values(row)[0]).join("\n")
+		expect(lines).toMatch(/InitPlan|\$0/)
+		expect(lines).not.toMatch(/SubPlan/)
+	})
+})

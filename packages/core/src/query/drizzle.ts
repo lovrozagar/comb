@@ -7,14 +7,14 @@ import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
-import { type CursorId, CURSOR_TIEBREAK_COLUMN, readCursor } from "./cursor.ts"
+import { type CursorId, CursorRef, CURSOR_TIEBREAK_COLUMN, readCursor } from "./cursor.ts"
 import { anchored, type KeysetKind, mintWithin } from "./cursor-ref.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { atCursorPrecision, boundAs } from "./cursor-precision.ts"
 import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts"
-import { keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
+import { anchorGone, keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import { assertPageWithin, assertSchemaParsed } from "./trusted.ts"
 import type { ParsedFields, SortField } from "./types.ts"
 import type { paginationResponseSchema } from "./schema.ts"
@@ -35,6 +35,8 @@ type DrizzleListOptions = {
 	sortOrderBy: Record<string, "asc" | "desc">
 	/** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
 	where?: { RAW: (table: RelationalTable) => SQL }
+	/** Whether the cursor's anchor is gone where no bound is safe, for `findMany({ extras })`: paginate reads it (U26) */
+	extras?: { _combAnchorGone: (table: RelationalTable) => SQL }
 }
 
 /**
@@ -114,7 +116,7 @@ function drizzleListOptions(
 		return { ...base, offset: ((query.page ?? 1) - 1) * query.limit }
 	}
 	const cursor = readCursor(query.cursor, sort, options)
-	const where = (table: RelationalTable) => {
+	const positionOn = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
 		/* the cursor is client input: each value must be what its column holds, or it is a 400 */
 		assertCursorFits([...keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
@@ -128,23 +130,23 @@ function drizzleListOptions(
 				{ id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column },
 			),
 		)
-		return keysetSQL({
-			id,
-			keys: atCursorPrecision(keys),
-			tiebreak,
-			values,
-		})
+		return { id, keys: atCursorPrecision(keys), tiebreak, values }
 	}
-	return { ...base, offset: 0, where: { RAW: where } }
+	const where = (table: RelationalTable) => keysetSQL(positionOn(table))
+	if (!cursor.values.some((value) => value instanceof CursorRef)) return { ...base, offset: 0, where: { RAW: where } }
+	/* a reference may have no safe bound once its row is gone: the flag tells paginate, which has no database */
+	const gone = (table: RelationalTable) => anchorGone(positionOn(table).values) ?? sql`0`
+	return { ...base, extras: { _combAnchorGone: gone }, offset: 0, where: { RAW: where } }
 }
 
 type DrizzleListResult<T> = T & { _total?: number }
 
 /** `_total` is a window extra, never a public field. Callers read pagination.count. */
 function stripWindowTotal<T extends Record<string, unknown>>(row: T): T {
-	if (!Object.hasOwn(row, "_total")) return row
+	if (!Object.hasOwn(row, "_total") && !Object.hasOwn(row, "_combAnchorGone")) return row
 	const rest = { ...row }
 	delete rest["_total"]
+	delete rest["_combAnchorGone"]
 	return rest
 }
 
@@ -202,6 +204,15 @@ function drizzlePaginationResult<T extends object>(
 	options: PaginateOptions,
 ): readonly [T[], PaginationMeta] {
 	assertCursorWired(options)
+	/* read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
+	if (items.some((item) => Number((item as Record<string, unknown>)["_combAnchorGone"]) === 1)) {
+		throw new CombError({
+			cause:
+				"the row this cursor resumes from was renamed or deleted, and no bound is safe under its collation; start the list again",
+			errorKey: combErrorKeys.INVALID_CURSOR,
+			status: "bad_request",
+		})
+	}
 	const hasMore = items.length > query.limit
 	const sliced = hasMore ? items.slice(0, query.limit) : items
 
