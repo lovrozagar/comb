@@ -76,6 +76,25 @@ describe("pgUrlProblems", () => {
 	})
 })
 
+describe("pgUrlProblems: a dev database that is the target (M89)", () => {
+	const SAME = "url and devUrl are the same database; Atlas empties the dev database, so give it its own"
+
+	it("compares host, port and database, localhost and its loopback addresses as one", () => {
+		const dev = "postgres://dev:pw@127.0.0.1:5432/app?sslmode=disable"
+		expect(pgUrlProblems(target({ devUrl: dev, url: "postgres://app@localhost/app" })).errors).toEqual([SAME])
+		expect(pgUrlProblems(target({ devUrl: dev, url: "postgres://app@localhost:5433/app" })).errors).toEqual([])
+		expect(pgUrlProblems(target({ devUrl: dev, url: "postgres://app@localhost/other" })).errors).toEqual([])
+		/* a URL that names no database reaches the one named after its user */
+		expect(pgUrlProblems(target({ devUrl: dev, url: "postgres://app@localhost" })).errors).toEqual([SAME])
+	})
+
+	it("runs whenever the url is configured, a call that does not reach the url (diff) included", () => {
+		const same = "postgres://localhost/app?sslmode=disable"
+		expect(pgUrlProblems(target({ devUrl: same, url: same }), { dev: true, url: false }).errors).toEqual([SAME])
+		expect(pgUrlProblems(target({ devUrl: same, url: "" }), { dev: true, url: false }).errors).toEqual([])
+	})
+})
+
 describe("pgUrlProblems: the schema's name (M87)", () => {
 	it("refuses a name Postgres folds where comb writes it unquoted, naming what it folds to", () => {
 		expect(pgUrlProblems(target({ schema: "Tenant" })).errors).toEqual([

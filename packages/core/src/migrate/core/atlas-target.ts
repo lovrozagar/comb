@@ -76,6 +76,15 @@ function hostWarnings(url: URL): string[] {
 	return warnings
 }
 
+/**
+ * The database a Postgres URL reaches: its host, localhost and the loopback addresses as one, its
+ * port, 5432 unnamed, and its database, the user's name unnamed, as libpq defaults them
+ */
+function databaseOf(url: URL): string {
+	const host = LOCAL_HOSTS.has(url.hostname) ? "localhost" : url.hostname.toLowerCase()
+	return `${host}:${url.port === "" ? "5432" : url.port}/${decodeURIComponent(url.pathname.slice(1) || url.username)}`
+}
+
 /** One URL field checked: the parsed URL, or the error that names the field (never its value) */
 function checkUrl(field: "devUrl" | "url", raw: string, schemes: readonly string[]): { error?: string; url?: URL } {
 	if (raw.trim() === "") return { error: `${field} is empty` }
@@ -110,7 +119,9 @@ function pgUrlProblems(
 	const url = needs.url ? checkUrl("url", target.url, ["postgres:", "postgresql:"]) : {}
 	const dev = needs.dev ? checkUrl("devUrl", target.devUrl, ["postgres:", "postgresql:", "docker:"]) : {}
 	const errors = [url.error, dev.error].filter((error): error is string => error !== undefined)
-	if (url.url !== undefined && url.url.href === dev.url?.href) {
+	/* the target guarded whenever it is configured, on a call that does not reach it too (M89) */
+	const configured = parseUrl(target.url, ["postgres:", "postgresql:"])
+	if (configured !== undefined && dev.url !== undefined && databaseOf(configured) === databaseOf(dev.url)) {
 		errors.push("url and devUrl are the same database; Atlas empties the dev database, so give it its own")
 	}
 	const named = schemaProblem(target.schema)
