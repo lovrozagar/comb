@@ -10,7 +10,8 @@ import { readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
-import { snapshotDir, sqlFiles, sumHashes } from "./atlas-dir.ts"
+import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
+import { type AtlasFile, type AtlasStatus, checkHistory, fileOf } from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
 import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { refuseDrift } from "./baseline-compare.ts"
@@ -19,30 +20,6 @@ import { type Run, type RunResult, run } from "./process.ts"
 import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { fileUnreadable } from "./pg-split.ts"
-
-/** A migration file as Atlas lists it */
-type AtlasFile = { Description: string; Name: string; Version: string }
-
-/** A revision Atlas recorded: how many of the file's statements ran, and where it failed */
-type AtlasRevision = {
-	applied: number
-	error: string
-	errorStmt: string
-	hash: string
-	total: number
-	type: string
-	version: string
-}
-
-/** What `atlas migrate status` reports, read through a template that never selects the URL */
-type AtlasStatus = {
-	applied: AtlasRevision[]
-	available: AtlasFile[]
-	current: string
-	error: string
-	pending: AtlasFile[]
-	status: string
-}
 
 const STATUS_FORMAT =
 	'{"status":{{ json .Status }},"current":{{ json .Current }},"available":{{ json .Available }},"pending":{{ json .Pending }},' +
@@ -100,54 +77,6 @@ function atlasStatus(options: AtlasCommand, copy: string, allowNotClean = false)
 		return NO_HISTORY
 	if (ran.code !== 0) throw new Error(`atlas migrate status: ${ran.stderr || `exit ${ran.code}: ${ran.stdout}`}`)
 	return json<AtlasStatus>(ran.stdout, "status")
-}
-
-/** The file of `version` in the snapshot */
-const fileOf = (copy: string, version: string) =>
-	sqlFiles(copy).find((name) => name.startsWith(`${version}_`)) ?? version
-
-/**
- * A history Atlas reports no error for may proceed. So may a file Atlas ran halfway outside a
- * transaction, if it is unchanged: Atlas resumes it by statement count, so an edit would shift
- * which statements it skips. Returns where that file stopped, if one did.
- */
-/**
- * Refuses an applied file edited since, as comb does on SQLite: Atlas never runs it again, so the
- * database does not hold what the file now says, and later files would be classified against it
- */
-function refuseEdited(status: AtlasStatus, copy: string): void {
-	const hashes = sumHashes(copy)
-	for (const revision of status.applied) {
-		const name = fileOf(copy, revision.version)
-		if (!hashes.has(name) || hashes.get(name) === revision.hash) continue
-		throw new Error(
-			`${name} was applied, then edited: its hash is not the one Atlas recorded; restore the file, or put the change in a new one`,
-		)
-	}
-}
-
-function checkHistory(status: AtlasStatus, copy: string): string | undefined {
-	const partial = status.applied.find((revision) => revision.applied < revision.total && revision.error !== "")
-	if (partial === undefined) {
-		if (status.error !== "") throw new Error(`atlas migrate status: ${explainAtlasFailure(status.error)}`)
-		/* Atlas lists a file older than the latest applied one as neither pending nor an error */
-		const recorded = new Set(status.applied.map((revision) => revision.version))
-		const current = /^\d+$/.test(status.current) ? status.current : undefined
-		const late = status.available.find(
-			(file) => current !== undefined && !recorded.has(file.Version) && file.Version < current,
-		)
-		if (late !== undefined) throw new Error(explainAtlasFailure(`migration file ${late.Name} was added out of order`))
-		refuseEdited(status, copy)
-		return undefined
-	}
-	const name = fileOf(copy, partial.version)
-	const where = `${name} ran ${partial.applied} of its ${partial.total} statements before it failed at ${partial.errorStmt} (${partial.error})`
-	if (sumHashes(copy).get(name) !== partial.hash) {
-		throw new Error(
-			`${where}, outside a transaction, and has changed since; restore it, or fix the database by hand and run comb migrate baseline`,
-		)
-	}
-	return where
 }
 
 /** `read()`, a file `name` Atlas cannot split refused by name */

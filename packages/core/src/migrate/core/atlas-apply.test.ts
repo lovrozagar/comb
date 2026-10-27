@@ -448,9 +448,6 @@ describe("baselineWithAtlas: what it refuses", () => {
 	})
 })
 
-/* a history whose one applied file was edited since: its recorded hash is not the sum's */
-const edited = () => fakeAtlas({ status: status({ applied: [revision("1", { hash: "other=" })], current: "1" }) })
-
 describe("statusWithAtlas", () => {
 	it("lists what is applied and what is pending", () => {
 		const run = options(
@@ -465,14 +462,6 @@ describe("statusWithAtlas", () => {
 		)
 		statusWithAtlas(run)
 		expect(run.out).toEqual(["Applied: 1 (up to 1)", "Pending: 2_b.sql"])
-	})
-
-	/* M17 of the 0.12 round: as on SQLite, an applied file edited since is refused, not a warning */
-	it("refuses an applied file that changed since, in status, check and apply", async () => {
-		const refusal = /^1_a\.sql was applied, then edited: its hash is not the one Atlas recorded/
-		expect(() => statusWithAtlas(options(edited()))).toThrow(refusal)
-		await expect(applyWithAtlas({ ...options(edited()), checkOnly: true })).rejects.toThrow(refusal)
-		await expect(applyWithAtlas(options(edited()))).rejects.toThrow(refusal)
 	})
 
 	it("names a revision whose file is gone by its version, and does not call it changed", () => {
