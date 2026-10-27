@@ -39,6 +39,26 @@ export const user_email = sqliteTable("user_email", { id: text("id").primaryKey(
 	})
 })
 
+/* U43: the columns of a table some foreign key points at, so the handler can tell when an UPDATE changes one */
+describe("buildConstraintMap: referenced columns", () => {
+	it("lists each table's columns a foreign key references, by SQL name, sorted and once each", () => {
+		const map = buildConstraintMap(
+			tablesOf(`${SQLITE}import { foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
+export const user = sqliteTable("user", { id: text("id").primaryKey() })
+export const post = sqliteTable("post", { id: text("id").primaryKey(), authorId: text("author_id").references(() => user.id), editorId: text("editor_id").references(() => user.id) })
+export const node = sqliteTable("node", { id: text("id").primaryKey(), parentId: text("parent_id").references((): any => node.id) })
+export const member = sqliteTable("member", { orgId: text("org_ref"), userId: text("user_ref") }, (t) => [primaryKey({ columns: [t.orgId, t.userId] })])
+export const grant = sqliteTable("grant", { id: text("id").primaryKey(), orgId: text("org_id"), userId: text("user_id") }, (t) => [foreignKey({ columns: [t.userId, t.orgId], foreignColumns: [member.userId, member.orgId] })])
+`),
+		)
+		expect(map["user"]?.referenced).toEqual(["id"])
+		expect(map["node"]?.referenced).toEqual(["id"])
+		expect(map["member"]?.referenced).toEqual(["org_ref", "user_ref"])
+		expect(map["post"]?.referenced).toBeUndefined()
+		expect(map["grant"]?.referenced).toBeUndefined()
+	})
+})
+
 describe("buildConstraintMap: a CHECK name Postgres cuts (F21)", () => {
 	const LONG = "organization_membership_invitation_seats_must_stay_inside_the_allowed_range"
 	const source = (dialect: string) =>

@@ -4,27 +4,17 @@
  * Generates constraint maps from analyzed table metadata for database error handling.
  */
 import path from "node:path"
-import { commentText, dbIdentifiers, propertyName, stringLiteral } from "../utils/case.ts"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { pgIdentifier } from "../../identifier.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { enumCheckName } from "./enum-checks.ts"
+import {
+	type Constraint,
+	type ConstraintMap,
+	generateConstraintMapCode,
+	type TableConstraints,
+} from "./constraints-code.ts"
 import type { GeneratorContext } from "./context-types.ts"
-
-type Constraint = {
-	cause: string
-	errorKey: string
-	statusKey: string
-}
-
-type TableConstraints = {
-	check?: Record<string, Constraint>
-	foreignKey?: Record<string, Constraint>
-	primaryKey?: Constraint
-	unique?: Record<string, Constraint>
-}
-
-type ConstraintMap = Record<string, TableConstraints>
 
 type Dialect = "postgres" | "sqlite"
 
@@ -165,6 +155,23 @@ function constraintsOf(table: TableMeta, dialect: Dialect): TableConstraints {
 }
 
 /**
+ * Each table's columns some foreign key points at, by SQL name, sorted and once each: a composite
+ * key's column by column, and a table's reference to itself among them (U43)
+ */
+function referencedColumns(tables: readonly TableMeta[]): Map<string, string[]> {
+	const out = new Map<string, Set<string>>()
+	for (const fk of tables.flatMap((table) => table.fields.flatMap((field) => field.foreignKey ?? []))) {
+		/* the analyzer refuses a reference to a table the tables file does not export, so each target is here */
+		const target = tables.find((table) => table.varName === fk.refTable) as TableMeta
+		for (const column of fk.key?.refColumns ?? [fk.refColumn]) {
+			const { sqlName } = target.fields.find((field) => field.name === column) as FieldMeta
+			out.set(target.sqlName, (out.get(target.sqlName) ?? new Set()).add(sqlName))
+		}
+	}
+	return new Map([...out].map(([table, columns]) => [table, [...columns].sort()]))
+}
+
+/**
  * The constraint map of every table that has a constraint, keyed by SQL table name. An error key
  * two constraints would mint fails codegen, naming both: a client could not tell them apart, and
  * the one translation would name the wrong column for one (F20). Renaming the keys would break
@@ -173,8 +180,11 @@ function constraintsOf(table: TableMeta, dialect: Dialect): TableConstraints {
 export function buildConstraintMap(tables: readonly TableMeta[], dialect: Dialect = "sqlite"): ConstraintMap {
 	const map: ConstraintMap = {}
 	const owner = new Map<string, string>()
+	const referenced = referencedColumns(tables)
 	for (const table of tables) {
 		const entry = constraintsOf(table, dialect)
+		const columns = referenced.get(table.sqlName)
+		if (columns !== undefined) entry.referenced = columns
 		for (const [place, constraint] of placed(table.sqlName, entry)) {
 			const first = owner.get(constraint.errorKey)
 			if (first !== undefined)
@@ -226,65 +236,4 @@ export function generateConstraints(ctx: GeneratorContext, config: ConstraintsCo
 
 	ctx.log(`Generated constraint map for ${dbName} database at: ${outputPath}`)
 	ctx.log(`Tables: ${Object.keys(constraintMap).length}, Total constraints: ${countConstraints(constraintMap)}`)
-}
-
-/** Entries in the order a plain `.sort()` puts their keys */
-const byKey = ([a]: [string, unknown], [b]: [string, unknown]): number => (a < b ? -1 : 1)
-
-const GROUP_LABELS: Record<string, string> = {
-	check: "check constraints",
-	foreignKey: "foreign key constraints",
-	unique: "unique constraints",
-}
-
-/** The lines of one `{ errorKey, cause, statusKey }` object at `indent` */
-function constraintLines(constraint: Constraint, indent: string): string[] {
-	return [
-		`${indent}errorKey: ${stringLiteral(constraint.errorKey)},`,
-		`${indent}cause: ${stringLiteral(constraint.cause)},`,
-		`${indent}statusKey: ${stringLiteral(constraint.statusKey)},`,
-	]
-}
-
-/** Entries joined the way the generated map writes them: a comma after every closing brace but the last */
-function joined(blocks: string[][]): string[] {
-	return blocks.flatMap((block, i) => (i < blocks.length - 1 ? [...block.slice(0, -1), `${block.at(-1)},`] : block))
-}
-
-function groupLines(type: string, group: Constraint | Record<string, Constraint>): string[] {
-	if (type === "primaryKey") {
-		return [
-			"\t\t/* primary key constraint */",
-			"\t\tprimaryKey: {",
-			...constraintLines(group as Constraint, "\t\t\t"),
-			"\t\t}",
-		]
-	}
-	const columns = Object.entries(group as Record<string, Constraint>).sort(byKey)
-	const blocks = columns.map(([column, constraint]) => [
-		`\t\t\t${propertyName(column)}: {`,
-		...constraintLines(constraint, "\t\t\t\t"),
-		"\t\t\t}",
-	])
-	return [`\t\t/* ${GROUP_LABELS[type]} */`, `\t\t${type}: {`, ...joined(blocks), "\t\t}"]
-}
-
-/** Generate TypeScript constraint map code */
-function generateConstraintMapCode(map: ConstraintMap, dbName: string): string {
-	const tables = Object.entries(map).sort(byKey)
-	const blocks = tables.map(([tableName, constraints]) => {
-		const groups = Object.entries(constraints).sort(byKey)
-		return [
-			`\t/* ${commentText(tableName)} table constraints */`,
-			`\t${propertyName(tableName)}: {`,
-			...joined(groups.map(([type, group]) => groupLines(type, group as Constraint | Record<string, Constraint>))),
-			"\t}",
-		]
-	})
-	return [
-		`export const ${dbIdentifiers(dbName).constant}_DB_CONSTRAINT_MAP = {`,
-		...joined(blocks),
-		"} as const",
-		"",
-	].join("\n")
 }

@@ -8,7 +8,7 @@ import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { valueError } from "../value-error.ts"
 import { readSqliteError, type SqliteErrorRead } from "./read-error.ts"
-import { statementHead, statementTable, updatedColumns } from "../statement-head.ts"
+import { statementHead, statementTable, updatedColumns, upsertColumns } from "../statement-head.ts"
 
 type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown }
 
@@ -142,6 +142,12 @@ function foreignKey(v: Violation): CombError {
 	   a composite key's later column among them: which side failed is unknown (U23) */
 	const folded = new Set(keys?.map(asciiFolded))
 	const unlisted = assigned !== undefined && !assigned.some((name) => folded.has(asciiFolded(name)))
+	/* a statement that changes a key other tables reference may have failed on a row that references
+	   the old value, its own key valid: which side failed is unknown (U43) */
+	const referenced = new Set(v.maps.flatMap((map) => own(map, table)?.referenced ?? []).map(asciiFolded))
+	const changesReferenced = (assigned ?? upsertColumns(v.read.query) ?? []).some((name) =>
+		referenced.has(asciiFolded(name)),
+	)
 	if (/^delete\b/i.test(statementHead(v.read.query ?? ""))) {
 		const fallback = {
 			cause: STILL_REFERENCED,
@@ -155,7 +161,7 @@ function foreignKey(v: Violation): CombError {
 		errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
 		status: "conflict",
 	} as const
-	if (unlisted) return toError(v, { entry: undefined, fallback, table })
+	if (unlisted || changesReferenced) return toError(v, { entry: undefined, fallback, table })
 	return toError(v, { column: entry === undefined ? undefined : column, entry, fallback, table })
 }
 

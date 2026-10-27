@@ -78,6 +78,8 @@ export const post = createTable("post", {
 			cause: "Record with this ID already exists",
 			statusKey: "conflict",
 		},
+		/* columns other tables' foreign keys reference */
+		referenced: ["id"],
 		/* unique constraints */
 		unique: {
 			email: {

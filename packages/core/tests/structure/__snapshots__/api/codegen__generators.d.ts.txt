@@ -27,19 +27,8 @@ export {};
 
 // codegen/generators/constraints.d.ts
 import type { TableMeta } from "../analyzer-types.ts";
+import { type Constraint, type ConstraintMap } from "./constraints-code.ts";
 import type { GeneratorContext } from "./context-types.ts";
-type Constraint = {
-    cause: string;
-    errorKey: string;
-    statusKey: string;
-};
-type TableConstraints = {
-    check?: Record<string, Constraint>;
-    foreignKey?: Record<string, Constraint>;
-    primaryKey?: Constraint;
-    unique?: Record<string, Constraint>;
-};
-type ConstraintMap = Record<string, TableConstraints>;
 type Dialect = "postgres" | "sqlite";
 type ConstraintsConfig = {
     output: string;
@@ -498,6 +487,23 @@ type AnalysisResult = {
     tablesImportPath: string;
 };
 export type { ConstantValue, ExpressionIndexMeta, ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };
+
+// codegen/generators/constraints-code.d.ts
+export type Constraint = {
+    cause: string;
+    errorKey: string;
+    statusKey: string;
+};
+export type TableConstraints = {
+    check?: Record<string, Constraint>;
+    foreignKey?: Record<string, Constraint>;
+    primaryKey?: Constraint;
+    referenced?: string[];
+    unique?: Record<string, Constraint>;
+};
+export type ConstraintMap = Record<string, TableConstraints>;
+/** Generate TypeScript constraint map code */
+export declare function generateConstraintMapCode(map: ConstraintMap, dbName: string): string;
 
 // codegen/generators/dtos/generate.d.ts
 import type { GeneratorContext } from "../context-types.ts";

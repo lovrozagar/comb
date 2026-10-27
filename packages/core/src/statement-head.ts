@@ -120,11 +120,30 @@ export function updatedColumns(query: string | undefined): string[] | undefined 
 	const head = statementHead(query ?? "")
 	const set = UPDATE_SET.exec(head)
 	if (set === null) return undefined
-	const list = head.slice(set[0].length)
-	const end = blanked(list).search(/\b(?:where|from|returning)\b/i)
-	return topLevelPieces(end === -1 ? list : list.slice(0, end)).flatMap((piece) => {
+	return assignedIn(head.slice(set[0].length), /\b(?:where|from|returning)\b/i)
+}
+
+/** The columns a SET list assigns, unquoted, the list read up to the first top-level match of `end` */
+function assignedIn(list: string, end: RegExp): string[] {
+	const stop = blanked(list).search(end)
+	return topLevelPieces(stop === -1 ? list : list.slice(0, stop)).flatMap((piece) => {
 		const [, many, one] = ASSIGNED.exec(piece) ?? []
 		if (one !== undefined) return [unquoted(one)]
 		return many === undefined ? [] : (many.match(ONE_PART) ?? []).map(unquoted)
 	})
+}
+
+/**
+ * The columns an upsert's DO UPDATE SET lists assign, unquoted, each list read up to a top-level
+ * WHERE, RETURNING or next ON CONFLICT; undefined when `query` is no INSERT or has none (U43)
+ */
+export function upsertColumns(query: string | undefined): string[] | undefined {
+	/* matched on the blanked head, where a quoted name is spaces: the match ends at SET, so none is swallowed */
+	const head = statementHead(query ?? "")
+	if (!/^(?:insert|replace)\b/i.test(head)) return undefined
+	const sets = [...blanked(head).matchAll(/\bdo\s+update\s+set\b/gi)]
+	if (sets.length === 0) return undefined
+	return sets.flatMap((set) =>
+		assignedIn(head.slice(set.index + set[0].length), /\b(?:where|returning|on\s+conflict)\b/i),
+	)
 }
