@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { exportKey, findNearestPackageJson, ownsKey, readExports, setPackageExport } from "./package-json.ts"
 
 describe("readExports", () => {
@@ -30,7 +30,11 @@ describe("findNearestPackageJson and setPackageExport", () => {
 	it("finds the package.json in the closest directory above, and null when none exists", () => {
 		const nested = path.join(dir, "src", "gen")
 		fs.mkdirSync(nested, { recursive: true })
+		/* the walk sees only the scratch directory: a package.json above the system's temp directory is the machine's, not the test's */
+		const real = fs.existsSync
+		const seen = vi.spyOn(fs, "existsSync").mockImplementation((file) => String(file).startsWith(dir) && real(file))
 		expect(findNearestPackageJson(nested)).toBeNull()
+		seen.mockRestore()
 		fs.writeFileSync(path.join(dir, "package.json"), "{}")
 		expect(findNearestPackageJson(nested)).toBe(path.join(dir, "package.json"))
 	})
