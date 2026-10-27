@@ -47,14 +47,18 @@ function assertPageWithin(parsed: {
 	validated?: true | undefined
 }): void {
 	const page = parsed.page ?? 1
-	if (!Number.isInteger(page) || page < 1)
-		throw new CombError({
-			cause: `page ${page} is not a whole number from 1`,
-			errorKey: combErrorKeys.INVALID_PAGE,
-			status: "bad_request",
-		})
+	if (!Number.isInteger(page) || page < 1) throw invalidPage(page)
 	if (parsed.pageBounded !== true && page > PAGINATION_DEFAULTS.maxPage)
 		throw pageTooDeep(page, PAGINATION_DEFAULTS.maxPage)
+}
+
+/** The 400 for a page that is no whole number from 1, from a list schema or from a builder (U36) */
+function invalidPage(page: unknown): CombError {
+	return new CombError({
+		cause: `page ${typeof page === "string" ? JSON.stringify(page) : String(page)} is not a whole number from 1`,
+		errorKey: combErrorKeys.INVALID_PAGE,
+		status: "bad_request",
+	})
 }
 
 /** The 400 for a page past `maxPage`, from a list schema or from a list no schema bounded */
@@ -66,4 +70,4 @@ function pageTooDeep(page: number, maxPage: number): CombError {
 	})
 }
 
-export { assertPageWithin, assertSchemaParsed, pageTooDeep }
+export { assertPageWithin, assertSchemaParsed, invalidPage, pageTooDeep }

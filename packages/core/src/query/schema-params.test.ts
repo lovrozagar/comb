@@ -51,7 +51,7 @@ describe("the shared params and outputs", () => {
 	it("coerce page to an integer from 1 to maxPage and take a cursor string", () => {
 		const shape = z.object({ ...baseListQueryShape, page: pageSchemaFor(undefined) })
 		expect(shape.parse({ cursor: "c", page: "2" })).toEqual({ cursor: "c", page: 2 })
-		expect(shape.safeParse({ page: "0" }).success).toBe(false)
+		expect(() => shape.safeParse({ page: "0" })).toThrow(expect.objectContaining({ errorKey: "invalid_page" }))
 		expect(pageSchemaFor({ maxPage: 10_000 })).toBe(pageSchemaFor(undefined))
 	})
 

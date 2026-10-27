@@ -32,12 +32,16 @@ describe("a page past maxPage through a Hono app", () => {
 		expect(await get(hono, "page=10001")).toEqual({ body: { error_key: "page_too_deep" }, status: 400 })
 	})
 
-	it("answers a list's own maxPage the same way, and keeps a malformed page zValidator's 400", async () => {
+	it("answers a list's own maxPage the same way", async () => {
 		const hono = app(50) as unknown as Hono
 		expect(await get(hono, "page=50")).toEqual({ body: { page: 50 }, status: 200 })
 		expect(await get(hono, "page=51")).toEqual({ body: { error_key: "page_too_deep" }, status: 400 })
-		const malformed = await get(hono, "page=0")
-		expect(malformed.status).toBe(400)
-		expect(malformed.body).toMatchObject({ success: false })
+	})
+
+	/* U36: a malformed page is the 400 invalid_page buildListQuery and paginate answer, not a field error */
+	it("answers a page that is no whole number from 1, in decimal digits, 400 invalid_page", async () => {
+		const hono = app(50) as unknown as Hono
+		for (const page of ["0", "1.5", "0x10", "1e3", "x"])
+			expect(await get(hono, `page=${page}`)).toEqual({ body: { error_key: "invalid_page" }, status: 400 })
 	})
 })

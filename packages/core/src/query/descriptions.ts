@@ -18,11 +18,12 @@ const CURSOR_EXAMPLES: string[] = [
 	"ASn8RENHxqUqaT3GyAjswCNMhnBUPacQgKWXLWiCGhUKQIBM2U3QAkmouu9d15bdcZNupXh3LbTaWVbHOjHodwGo",
 ]
 
-const LIMIT_DESCRIPTION = "Maximum number of items per page. Defaults to 20, capped by the endpoint's maxLimit."
+const LIMIT_DESCRIPTION =
+	"Maximum number of items per page, in decimal digits. Defaults to 20, capped by the endpoint's maxLimit."
 const LIMIT_EXAMPLES: number[] = [20, 50]
 
 const PAGE_DESCRIPTION =
-	"1-based page number for offset pagination, up to the endpoint's maxPage (x-comb); page further by cursor. A page past maxPage is a 400 page_too_deep, with or without a cursor. Ignored when cursor is present."
+	"1-based page number for offset pagination, up to the endpoint's maxPage (x-comb); page further by cursor. A page that is no whole number from 1, in decimal digits, is a 400 invalid_page, and one past maxPage a 400 page_too_deep, with or without a cursor. Ignored when cursor is present."
 const PAGE_EXAMPLES: number[] = [1, 2]
 
 const LANG_DESCRIPTION =

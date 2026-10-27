@@ -17,6 +17,7 @@ import {
 import { FILTER_OPERATORS } from "./filter-parse.ts"
 import { PAGINATION_DEFAULTS } from "./schema-limits.ts"
 import type { PaginationConfig } from "./schema-types.ts"
+import { invalidPage } from "./trusted.ts"
 import type { FieldSelection, FilterAST, FilterGroup, ParsedFields } from "./types.ts"
 
 const selectQueryField: z.ZodOptional<z.ZodString> = /* @__PURE__ */ z.string().max(500).optional().meta({
@@ -70,36 +71,60 @@ const filterAstSchema: z.ZodType<FilterAST, FilterAST> = /* @__PURE__ */ z.objec
 
 const sortDirectionEnum: z.ZodEnum<{ asc: "asc"; desc: "desc" }> = /* @__PURE__ */ z.enum(["asc", "desc"])
 
-/** The `limit` param: coerced, at least 1, at most maxLimit, defaultLimit when absent */
-function limitSchema(defaultLimit: number, maxLimit: number): z.ZodDefault<z.ZodCoercedNumber<unknown>> {
-	return z.coerce.number().int().min(1).max(maxLimit).default(defaultLimit).meta({
+/** A count param as a schema takes it: a number, or the string of one in decimal digits */
+type CountParam = z.ZodPreprocess<z.ZodNumber, unknown>
+
+/* a count in a query string: decimal digits, with no sign, space, fraction, exponent or 0x, 0b or 0o prefix (U36) */
+const DECIMAL_DIGITS = /^\d+$/
+
+/** `raw` as a number: as given, or read from decimal digits; NaN for any other string, which a number schema refuses */
+const fromDigits = (raw: unknown): unknown =>
+	typeof raw === "string" ? (DECIMAL_DIGITS.test(raw) ? Number(raw) : Number.NaN) : raw
+
+/** `raw` as a page, a whole number from 1; anything else is invalid_page, as the builders answer it (U36) */
+function pageFrom(raw: unknown): unknown {
+	const page = fromDigits(raw)
+	if (typeof page !== "number" || !Number.isInteger(page) || page < 1) throw invalidPage(raw)
+	return page
+}
+
+/**
+ * The `limit` param: decimal digits or a number, at least 1, at most maxLimit, defaultLimit when
+ * absent. JSON Schema publishes a preprocessed param by its inner number, so the metadata sits
+ * there, and names the default the outer `.default()` applies
+ */
+function limitSchema(defaultLimit: number, maxLimit: number): z.ZodDefault<CountParam> {
+	const limit = z.number().int().min(1).max(maxLimit).meta({
+		default: defaultLimit,
 		description: LIMIT_DESCRIPTION,
 		examples: LIMIT_EXAMPLES,
 	})
+	return z.preprocess(fromDigits, limit).default(defaultLimit)
 }
 
 const defaultLimitSchema = /* @__PURE__ */ limitSchema(PAGINATION_DEFAULTS.defaultLimit, PAGINATION_DEFAULTS.maxLimit)
 
 /** The `limit` param for this pagination; the shared default instance when it is the default */
-function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<z.ZodCoercedNumber<unknown>> {
+function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<CountParam> {
 	const defaultLimit = pagination?.defaultLimit ?? PAGINATION_DEFAULTS.defaultLimit
 	const maxLimit = pagination?.maxLimit ?? PAGINATION_DEFAULTS.maxLimit
 	const isDefault = defaultLimit === PAGINATION_DEFAULTS.defaultLimit && maxLimit === PAGINATION_DEFAULTS.maxLimit
 	return isDefault ? defaultLimitSchema : limitSchema(defaultLimit, maxLimit)
 }
 
-/** The `page` param: coerced, from 1 to maxPage */
 /**
- * The `page` param: coerced, a whole number from 1. Its bound, maxPage, is published but not
- * checked here: the list schema answers a deeper page `page_too_deep`, as an unbounded list does,
- * where a field error would give one condition two contracts (L2)
+ * The `page` param: decimal digits or a number, a whole number from 1. Neither bound is a field
+ * error, which would give one condition two contracts: a page that is no whole number from 1 is
+ * `invalid_page` (U36), and maxPage, published but not checked here, is the list schema's
+ * `page_too_deep` (L2), each as an unbounded list answers it
  */
-function pageSchema(maxPage: number): z.ZodOptional<z.ZodCoercedNumber<unknown>> {
-	return z.coerce.number().int().min(1).optional().meta({
-		description: PAGE_DESCRIPTION,
-		examples: PAGE_EXAMPLES,
-		maximum: maxPage,
-	})
+function pageSchema(maxPage: number): z.ZodOptional<CountParam> {
+	const page = z
+		.number()
+		.int()
+		.min(1)
+		.meta({ description: PAGE_DESCRIPTION, examples: PAGE_EXAMPLES, maximum: maxPage })
+	return z.preprocess(pageFrom, page).optional()
 }
 
 const defaultPageSchema = /* @__PURE__ */ pageSchema(PAGINATION_DEFAULTS.maxPage)
@@ -108,7 +133,7 @@ const defaultPageSchema = /* @__PURE__ */ pageSchema(PAGINATION_DEFAULTS.maxPage
  * The `page` param for this pagination; the shared default instance when it is the default. A
  * maxPage whose last offset passes 2^53 - 1 is refused: SQLite fails on an OFFSET past int64.
  */
-function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<z.ZodCoercedNumber<unknown>> {
+function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<CountParam> {
 	const maxPage = pagination?.maxPage ?? PAGINATION_DEFAULTS.maxPage
 	const maxLimit = pagination?.maxLimit ?? PAGINATION_DEFAULTS.maxLimit
 	if (!Number.isSafeInteger(maxPage) || maxPage < 1 || (maxPage - 1) * maxLimit > Number.MAX_SAFE_INTEGER) {

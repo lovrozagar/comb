@@ -52,9 +52,31 @@ describe("the page bound (Q13)", () => {
 		expect(z.toJSONSchema(schema, { io: "input" }).properties?.page).toMatchObject({ maximum: 10_000, minimum: 1 })
 	})
 
-	it("keeps a page that is no whole number from 1 a field error", () => {
+	/* U36: one contract for a page that is no whole number from 1, the one buildListQuery and paginate answer */
+	it("answers a page that is no whole number from 1, in decimal digits, invalid_page", async () => {
 		const schema = createListQuerySchema({ sort: ["id"] })
-		for (const page of ["0", "-3", "1.5", "x"]) expect(schema.safeParse({ page }).success).toBe(false)
+		const invalid = expect.objectContaining({ errorKey: "invalid_page", status: 400 })
+		for (const page of ["0", "-3", "1.5", "x", "", " 2", "0x10", "0b1", "0o7", "1e3", "Infinity", 0, 1.5, -1]) {
+			expect(() => schema.safeParse({ page })).toThrow(invalid)
+			await expect(schema["~standard"].validate({ page })).rejects.toThrow(invalid)
+		}
+		expect(schema.parse({ page: "16" }).page).toBe(16)
+		expect(schema.parse({ page: 16 }).page).toBe(16)
+		expect(z.toJSONSchema(schema, { io: "input" }).properties?.page).toMatchObject({ minimum: 1, type: "integer" })
+	})
+
+	it("takes a limit in decimal digits only, and refuses any other spelling as a field error", () => {
+		const schema = createListQuerySchema({ sort: ["id"] })
+		for (const limit of ["0x10", "0b1", "0o7", "1e1", " 16", "", "1.5"])
+			expect(schema.safeParse({ limit }).success).toBe(false)
+		expect(schema.parse({ limit: "16" }).limit).toBe(16)
+		expect(schema.parse({ limit: 16 }).limit).toBe(16)
+		expect(schema.parse({}).limit).toBe(PAGINATION_DEFAULTS.defaultLimit)
+		expect(z.toJSONSchema(schema, { io: "input" }).properties?.limit).toMatchObject({
+			maximum: PAGINATION_DEFAULTS.maxLimit,
+			minimum: 1,
+			type: "integer",
+		})
 	})
 
 	it("takes a maxPage of its own, and refuses one whose last offset is past 2^53 - 1", () => {

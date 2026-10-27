@@ -371,9 +371,9 @@ import type { FilterLimits } from "./filter.ts";
 import type { FieldType, FilterOperator } from "./types.ts";
 declare const CURSOR_DESCRIPTION = "Opaque cursor for forward pagination. Pass the nextCursor from the previous response with the same order. Takes precedence over page when both are sent.";
 declare const CURSOR_EXAMPLES: string[];
-declare const LIMIT_DESCRIPTION = "Maximum number of items per page. Defaults to 20, capped by the endpoint's maxLimit.";
+declare const LIMIT_DESCRIPTION = "Maximum number of items per page, in decimal digits. Defaults to 20, capped by the endpoint's maxLimit.";
 declare const LIMIT_EXAMPLES: number[];
-declare const PAGE_DESCRIPTION = "1-based page number for offset pagination, up to the endpoint's maxPage (x-comb); page further by cursor. A page past maxPage is a 400 page_too_deep, with or without a cursor. Ignored when cursor is present.";
+declare const PAGE_DESCRIPTION = "1-based page number for offset pagination, up to the endpoint's maxPage (x-comb); page further by cursor. A page that is no whole number from 1, in decimal digits, is a 400 invalid_page, and one past maxPage a 400 page_too_deep, with or without a cursor. Ignored when cursor is present.";
 declare const PAGE_EXAMPLES: number[];
 declare const LANG_DESCRIPTION = "BCP-47 language tag selecting localized text fields (falls back to default locale when absent).";
 declare const LANG_EXAMPLES: string[];
@@ -1165,13 +1165,15 @@ declare const sortDirectionEnum: z.ZodEnum<{
     asc: "asc";
     desc: "desc";
 }>;
+/** A count param as a schema takes it: a number, or the string of one in decimal digits */
+type CountParam = z.ZodPreprocess<z.ZodNumber, unknown>;
 /** The `limit` param for this pagination; the shared default instance when it is the default */
-declare function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+declare function limitSchemaFor(pagination: PaginationConfig | undefined): z.ZodDefault<CountParam>;
 /**
  * The `page` param for this pagination; the shared default instance when it is the default. A
  * maxPage whose last offset passes 2^53 - 1 is refused: SQLite fails on an OFFSET past int64.
  */
-declare function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<z.ZodCoercedNumber<unknown>>;
+declare function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<CountParam>;
 /** Throw when `extendFields` names a key of `reserved`, which the schema owns */
 declare function assertNotReserved(builder: string, extendFields: Record<string, unknown> | undefined, reserved: readonly string[]): void;
 /** The values of `extendFields`' keys in `data`; `{}` without extensions */
