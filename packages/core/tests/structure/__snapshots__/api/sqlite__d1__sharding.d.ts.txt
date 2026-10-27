@@ -89,7 +89,10 @@ declare class ShardRouter {
     private revalidateShard;
     /** Places an org as `place` does, unchecked: an org being revived keeps the shard it had */
     private placeFirst;
-    /** Caches the row a write left standing, this isolate's miss for the org forgotten, and returns its mapping */
+    /**
+     * Caches the row a write left standing, this isolate's miss for the org forgotten, and returns
+     * its mapping; logs the placement only when the write placed it, so the events count rows (U40)
+     */
     private settle;
 }
 export { ShardRouter };

@@ -304,3 +304,33 @@ describe("ShardRouter: a KV that fails", () => {
 		expect(events.slice(-2)).toEqual(["shard-router.kv.error", "shard-router.revalidate.error"])
 	})
 })
+
+/** The allocations `log` was told of */
+const allocations = (log: ReturnType<typeof vi.fn>) =>
+	log.mock.calls.filter(([event]) => event === "shard-router.allocate")
+
+/* U40: shard-router.allocate counts the rows a placement wrote, so a metric on it does not overcount */
+describe("ShardRouter: an allocation logged only when it wrote a row", () => {
+	it("logs nothing for a place or an allocate of an org already placed", async () => {
+		const { primary } = await core()
+		const log = vi.fn()
+		const deps = { coreDb: primary, kv: memoryKv() }
+		const router = new ShardRouter({ log, totalShards: 3 })
+		await router.place({ orgId: "org-1", shardId: 1 }, deps, ctx)
+		expect((await router.place({ orgId: "org-1", shardId: 2 }, deps, ctx)).shardId).toBe(1)
+		expect((await router.allocate("org-1", deps, ctx)).shardId).toBe(1)
+		expect(allocations(log)).toEqual([["shard-router.allocate", { orgId: "org-1", shardId: 1 }]])
+	})
+
+	it("logs one allocation when two isolates allocate one new org at once", async () => {
+		const { primary } = await core()
+		const log = vi.fn()
+		const deps = { coreDb: primary, kv: memoryKv() }
+		const [a, b] = await Promise.all([
+			new ShardRouter({ log, totalShards: 3 }).allocate("org-1", deps, ctx),
+			new ShardRouter({ log, totalShards: 3 }).allocate("org-1", deps, ctx),
+		])
+		expect(a.shardId).toBe(b.shardId)
+		expect(allocations(log)).toHaveLength(1)
+	})
+})

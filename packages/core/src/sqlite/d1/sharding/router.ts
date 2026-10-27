@@ -37,8 +37,8 @@ type CacheTargets = { executionCtx: WaitUntilCtx; kv: ShardKv }
 /** Where a write's row is cached, and the bookmark of the session that wrote it */
 type SettleTargets = CacheTargets & { bookmark: string | null | undefined }
 
-/** How a write placed an org: on a new row, on its soft-deleted one, or over its live one */
-type Placement = "allocate" | "move" | "revive"
+/** How a write placed an org: on a new row, on its soft-deleted one, over its live one, or not at all, its live row standing */
+type Placement = "allocate" | "move" | "revive" | "standing"
 
 /**
  * Shard router — resolves org -> D1 database handle.
@@ -265,19 +265,23 @@ class ShardRouter {
 		executionCtx: WaitUntilCtx,
 	): Promise<ShardMapping> {
 		const { client, session } = openD1Session(deps.coreDb)
-		const { revived, row } = await insertFirst(drizzle(client), orgId, shardId)
+		const { how, row } = await insertFirst(drizzle(client), orgId, shardId)
 		const targets = { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv }
-		return this.settle(row, revived ? "revive" : "allocate", targets)
+		return this.settle(row, how, targets)
 	}
 
-	/** Caches the row a write left standing, this isolate's miss for the org forgotten, and returns its mapping */
+	/**
+	 * Caches the row a write left standing, this isolate's miss for the org forgotten, and returns
+	 * its mapping; logs the placement only when the write placed it, so the events count rows (U40)
+	 */
 	private settle(row: ShardRow, how: Placement, { bookmark, ...targets }: SettleTargets): ShardMapping {
 		const mapping = toMapping(row, bookmark)
 		const data = { orgId: row.org_id, shardId: row.shard_id }
-		this.log(
-			`shard-router.${how === "move" ? "move" : "allocate"}`,
-			how === "revive" ? { ...data, revived: true } : data,
-		)
+		if (how !== "standing")
+			this.log(
+				`shard-router.${how === "move" ? "move" : "allocate"}`,
+				how === "revive" ? { ...data, revived: true } : data,
+			)
 		this.misses.delete(row.org_id)
 		this.populateCaches(row.org_id, mapping, targets)
 		return mapping
