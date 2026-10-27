@@ -30,7 +30,7 @@ import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { createCursor, CursorRef, lossy, MAX_CURSOR_LENGTH } from "./cursor.ts"
+import { createCursor, CursorRef, effectiveNulls, lossy, MAX_CURSOR_LENGTH } from "./cursor.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
 import { cursorPrecision } from "./cursor-precision.ts"
 import { inSeconds } from "./sqlite/cursor-fit.ts"
@@ -191,9 +191,16 @@ function timestampBound({ column, direction }: SortKey, value: Date, at: Anchor)
 const holdsInfinity = (column: SQLWrapper) =>
 	is(column, SQLiteColumn) && (column.dataType.startsWith("number") || column.dataType === "object date")
 
-/** A null on a SQLite number key: the row's own value where it is ±Infinity, NULL otherwise or once the row is gone */
-const infiniteBound = ({ column }: SortKey, at: Anchor): SQL =>
-	sql`(SELECT CASE WHEN ${column} IN (9e999, -9e999) THEN ${column} END FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id})`
+/**
+ * A null on a SQLite number key: the row's own value where it is ±Infinity, NULL where it is NULL.
+ * Once the row is gone the null may have been any of the three, so it is the earliest of them in
+ * the order (U24): NULL where NULLs come first, else -Infinity ascending and +Infinity descending,
+ * which repeats rows and skips none. One aggregate over the row tells a gone row from a NULL one.
+ */
+function infiniteBound({ column, direction, nulls }: SortKey, at: Anchor): SQL {
+	const gone = effectiveNulls(direction, nulls) === "first" ? sql`NULL` : direction === "asc" ? sql`-9e999` : sql`9e999`
+	return sql`(SELECT CASE WHEN count(*) = 0 THEN ${gone} WHEN max(${column}) IN (9e999, -9e999) THEN max(${column}) END FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id})`
+}
 
 /** A rounded integer key: the row's own exact value, the cursor's once the row is gone */
 const exactBound = ({ column }: SortKey, value: number, at: Anchor): SQL =>

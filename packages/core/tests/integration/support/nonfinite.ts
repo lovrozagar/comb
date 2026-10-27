@@ -24,6 +24,8 @@ export const SEED = [
 	"INSERT INTO point VALUES (1, 9e999), (2, -9e999), (3, 1.5), (4, NULL), (5, -2), (6, 9e999), (7, -9e999), (8, NULL), (9, NULL)",
 ]
 const NULL_IDS = new Set([4, 8, 9])
+/* the rows D1 reads as null too: its JSON transport has no ±Infinity */
+const INFINITE_IDS = new Set([1, 2, 6, 7])
 
 /** What a test runs on one engine: its SQL, and the drizzle database over it */
 export type Engine = {
@@ -84,7 +86,21 @@ function afterNull(engine: Engine, order: string, id: number): Promise<number[]>
 	)
 }
 
-/** How the first NULL-keyed row a page ends on is edited before the next page */
+/**
+ * The ids a list resumes with once the null-keyed anchor `id` is gone: a null cursor may stand for
+ * NULL, +Infinity or -Infinity, so it resumes from the earliest of them in the order (U24), NULL
+ * where NULLs come first, else -Infinity ascending and +Infinity descending, repeating rows and
+ * skipping none
+ */
+function afterGone(engine: Engine, order: string, id: number): Promise<number[]> {
+	const { direction, nullsFirst } = orderBy(order)
+	if (nullsFirst) return afterNull(engine, order, id)
+	const [edge, op] = direction === "asc" ? ["-9e999", ">"] : ["9e999", "<"]
+	const where = `x IS NULL OR x ${op} ${edge} OR (x = ${edge} AND id ${op} ${id})`
+	return engine.ids(`SELECT id FROM point WHERE ${where} ORDER BY x ${direction} NULLS LAST, id ${direction}`)
+}
+
+/** How the first null-keyed row a page ends on is edited before the next page: a D1 ±Infinity reads as null too */
 export type Edit = "delete" | "set to 5"
 
 /**
@@ -94,7 +110,7 @@ export type Edit = "delete" | "set to 5"
 export async function pageAll(
 	engine: Engine,
 	page: Page,
-	{ edit, order }: { edit?: Edit | undefined; order: string },
+	{ edit, infinities = false, order }: { edit?: Edit | undefined; infinities?: boolean; order: string },
 ): Promise<{ expected: number[]; seen: number[] }> {
 	let expected = await inOrder(engine, order)
 	const seen: number[] = []
@@ -105,12 +121,12 @@ export async function pageAll(
 		seen.push(...ids)
 		if (next === null) return { expected, seen }
 		const last = ids.at(-1) as number
-		if (edit !== undefined && !edited && NULL_IDS.has(last)) {
+		if (edit !== undefined && !edited && (NULL_IDS.has(last) || (infinities && INFINITE_IDS.has(last)))) {
 			edited = true
 			await engine.exec(
 				edit === "delete" ? `DELETE FROM point WHERE id = ${last}` : `UPDATE point SET x = 5 WHERE id = ${last}`,
 			)
-			expected = [...seen, ...(await afterNull(engine, order, last))]
+			expected = [...seen, ...(await (edit === "delete" ? afterGone : afterNull)(engine, order, last))]
 		}
 		cursor = next
 	}

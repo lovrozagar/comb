@@ -59,7 +59,8 @@ describe("keyset pagination on ±Infinity and NULL in a SQLite REAL, on D1 (U4)"
 				`pages %s through ${via} every row once${edit ? `, its NULL anchor's row ${edit}` : ""}`,
 				async (order) => {
 					const { engine, pages } = await seeded()
-					const { expected, seen } = await pageAll(engine, pages[via], { edit, order })
+					/* on D1 a ±Infinity anchor reads as null too, so the first of either is the one edited (U24) */
+					const { expected, seen } = await pageAll(engine, pages[via], { edit, infinities: true, order })
 					expect(seen).toEqual(expected)
 				},
 			)
