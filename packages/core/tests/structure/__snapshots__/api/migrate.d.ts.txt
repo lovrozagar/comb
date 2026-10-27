@@ -432,8 +432,10 @@ type PgTarget = {
 type AtlasNeeds = {
     dev?: boolean | undefined;
     dir?: string | undefined;
-    /** the shared history public keeps, whatever the target's schema: 0.12 kept every schema's there (M77) */
-    shared?: boolean | undefined;
+    /** the target unscoped, for the one call that lists the database's schemas (M78) */
+    allSchemas?: boolean | undefined;
+    /** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in (M77), or another schema's own (M78) */
+    revisions?: string | undefined;
     url?: boolean | undefined;
 };
 /** The flags and environment an Atlas call runs with, its scratch directory, and the scrubber for its output */
@@ -448,6 +450,8 @@ declare function pgUrlProblems(target: PgTarget, needs?: AtlasNeeds): {
     errors: string[];
     warnings: string[];
 };
+/** The schema Atlas keeps public's history in, as it always has */
+declare const SHARED_REVISIONS = "atlas_schema_revisions";
 /**
  * The schema Atlas keeps `target`'s history in: the shared one for public, and one of its own for
  * any other scope, so two schemas of one database never read each other's history. Postgres cuts a
@@ -472,7 +476,7 @@ declare function atlasConfig(needs: AtlasNeeds, revisions: string): string;
  * afterwards however `body` ends. A target with errors is refused before anything is written.
  */
 declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
-export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, pgUrlProblems, type PgTarget, redactUrl, revisionsSchema, scrubAtlasOutput, withAtlasEnv, };
+export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, pgUrlProblems, type PgTarget, redactUrl, revisionsSchema, SHARED_REVISIONS, scrubAtlasOutput, withAtlasEnv, };
 
 // migrate/core/atlas-env.d.ts
 import type { ExtractedSchema } from "../types.ts";

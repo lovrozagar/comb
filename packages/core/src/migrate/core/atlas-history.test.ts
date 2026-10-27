@@ -49,7 +49,7 @@ const history = (revisions: AtlasRevision[]): AtlasStatus => ({
 /** What status prints of `status` against the snapshot: its gone files, after any refusal */
 function named(status: AtlasStatus): string[] {
 	const lines: string[] = []
-	checkHistory(status, dir, (line) => lines.push(line))
+	checkHistory(status, dir, { gone: (line) => lines.push(line) })
 	return lines
 }
 
@@ -71,6 +71,18 @@ describe("an applied file gone, or renamed to another version", () => {
 		const status = history([applied("1_a.sql"), applied("2_b.sql", "other=")])
 		expect(named(status)).toEqual(["1 was applied, and its file is gone or renamed"])
 		expect(() => checkHistory(status, dir)).toThrow(/^1 was applied, and its file is gone or renamed$/)
+	})
+
+	/* the gone row is what Atlas calls a later file out of order for, so its refusal wins over Atlas's error (M78) */
+	it("refuses a gone file before Atlas's out-of-order error, in check and apply and in status", () => {
+		snapshot({ "1_a.sql": "SELECT 1;\n", "3_c.sql": "SELECT 3;\n" })
+		const status = {
+			...history([applied("1_a.sql"), applied("5_e.sql")]),
+			error: "migration file 3_c.sql was added out of order",
+		}
+		const gone = /^5 was applied, and its file is gone or renamed$/
+		expect(() => checkHistory(status, dir)).toThrow(gone)
+		expect(() => named(status)).toThrow(gone)
 	})
 
 	it("refuses the last applied file renamed to a new version, the file Atlas then lists as pending", () => {

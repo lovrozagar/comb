@@ -18,8 +18,10 @@ type PgTarget = { devUrl: string; lockTimeout: string; schema: string; url: stri
 type AtlasNeeds = {
 	dev?: boolean | undefined
 	dir?: string | undefined
-	/** the shared history public keeps, whatever the target's schema: 0.12 kept every schema's there (M77) */
-	shared?: boolean | undefined
+	/** the target unscoped, for the one call that lists the database's schemas (M78) */
+	allSchemas?: boolean | undefined
+	/** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in (M77), or another schema's own (M78) */
+	revisions?: string | undefined
 	url?: boolean | undefined
 }
 
@@ -109,6 +111,13 @@ function scoped(raw: string, schema: string): URL {
 	const url = new URL(raw)
 	if (!url.searchParams.has("search_path")) url.searchParams.set("search_path", schema)
 	return url
+}
+
+/** `raw` with no search_path, so Atlas sees every schema of the database */
+function unscoped(raw: string): string {
+	const url = new URL(raw)
+	url.searchParams.delete("search_path")
+	return url.href
 }
 
 /** The target URL Atlas gets: scoped to the schema, its lock wait bounded unless the URL sets one */
@@ -244,10 +253,10 @@ function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: Atla
 	let pending = false
 	try {
 		/* a dev-only call reads no history, and may have no target URL to scope one by */
-		const revisions = needs.url === true && needs.shared !== true ? revisionsSchema(target) : SHARED_REVISIONS
+		const revisions = needs.revisions ?? (needs.url === true ? revisionsSchema(target) : SHARED_REVISIONS)
 		writeFileSync(join(dir, "atlas.hcl"), atlasConfig(needs, revisions), { mode: 0o600 })
 		const env: Record<string, string> = {}
-		if (needs.url) env["COMB_ATLAS_URL"] = atlasTargetUrl(target)
+		if (needs.url) env["COMB_ATLAS_URL"] = needs.allSchemas === true ? unscoped(target.url) : atlasTargetUrl(target)
 		if (needs.dev) env["COMB_ATLAS_DEV_URL"] = atlasDevUrl(target)
 		const secrets = [target.url, target.devUrl, ...Object.values(env)].filter((url) => url !== "")
 		const args = ["--config", `file://${join(dir, "atlas.hcl")}`, "--env", "comb"]
@@ -272,6 +281,7 @@ export {
 	type PgTarget,
 	redactUrl,
 	revisionsSchema,
+	SHARED_REVISIONS,
 	scrubAtlasOutput,
 	withAtlasEnv,
 }

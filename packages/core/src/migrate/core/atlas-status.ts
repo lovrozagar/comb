@@ -19,14 +19,14 @@ type AtlasCommand = {
 	/** The process runner; tests pass a fake. */
 	exec?: Run | undefined
 	print(line: string): void
-	/** read the shared history 0.12 kept every schema's in, not the target's own (M77) */
-	shared?: boolean | undefined
+	/** a history other than the target's own, by its schema: 0.12's shared one (M77), or another schema's own (M78) */
+	revisions?: string | undefined
 	target: PgTarget
 }
 
 /** `atlas migrate <args>` on the snapshot `copy` against the target, its output scrubbed */
 function atlas(options: AtlasCommand, copy: string, args: readonly string[]): RunResult {
-	return withAtlasEnv(options.target, { shared: options.shared, url: true }, (env) => {
+	return withAtlasEnv(options.target, { revisions: options.revisions, url: true }, (env) => {
 		const ran = (options.exec ?? run)("atlas", ["migrate", ...args, "--dir", `file://${copy}`, ...env.args], {
 			env: env.env,
 		})

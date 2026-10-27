@@ -4,7 +4,10 @@
  * comb classified. In order: Atlas's status, which must report no error except a file it ran
  * halfway outside a transaction; a dry run, so a database that needs a baseline fails before anyone
  * is asked (a check of a database with no history inspects it instead, atlas-clean.ts); each pending file classified and approved (approval.ts); then the apply. comb passes no
- * flag that would skip a check (--exec-order, --allow-dirty, --tx-mode, --baseline) and no amount.
+ * flag that would skip a check (--allow-dirty, --tx-mode, --baseline) and no amount. The one
+ * --exec-order it passes, non-linear, goes only to public's dry run and apply while public's
+ * history holds another schema's 0.12 row (atlas-foreign.ts, M78): Atlas would count that row as
+ * public's position, and checkHistory's late check over public's own revisions replaces Atlas's.
  */
 import { readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
@@ -12,9 +15,10 @@ import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
 import { adopted, adopts, sharedPrefix } from "./atlas-adopt.ts"
-import { type AtlasFile, type AtlasStatus, checkHistory, fileOf, versionOf } from "./atlas-history.ts"
+import { execOrder, type Foreign, foreignRows, ignoredLines, ownHistory } from "./atlas-foreign.ts"
+import { type AtlasFile, type AtlasStatus, checkHistory, fileOf, filesOf, versionOf } from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
-import { explainAtlasFailure } from "./atlas-target.ts"
+import { explainAtlasFailure, SHARED_REVISIONS } from "./atlas-target.ts"
 import { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY } from "./atlas-status.ts"
 import { refuseDrift } from "./baseline-compare.ts"
 import { extractSchema, parseMigration } from "./parse.ts"
@@ -35,7 +39,7 @@ type ApplyOptions = AtlasCommand & {
 /** The files 0.12's shared history ran, while `own`, the schema's own history, records none (M77) */
 function sharedRan(options: AtlasCommand, copy: string, own: AtlasStatus): string[] {
 	if (options.target.schema === "public" || own.applied.length > 0) return []
-	return sharedPrefix(atlasStatus({ ...options, shared: true }, copy, { notClean: true }), copy)
+	return sharedPrefix(atlasStatus({ ...options, revisions: SHARED_REVISIONS }, copy, { notClean: true }), copy)
 }
 
 /** `own` as status, apply and check take it: a database with objects and no history, or one adoption gave, refused */
@@ -43,6 +47,13 @@ function known(own: AtlasStatus): AtlasStatus {
 	if (own === NO_HISTORY)
 		throw new Error(`atlas migrate status: ${explainAtlasFailure("connected database is not clean")}`)
 	return own
+}
+
+/** `raw` as the target's own history: another schema's rows in public's left out, each named (M78) */
+function ownOf(options: AtlasCommand, copy: string, raw: AtlasStatus): { foreign: Foreign; status: AtlasStatus } {
+	const foreign = foreignRows(options, copy, raw)
+	for (const line of ignoredLines(foreign)) options.print(line)
+	return { foreign, status: ownHistory(raw, foreign, copy) }
 }
 
 /** Record `ran` in the schema's own history, without running it: Atlas writes the rows in one transaction */
@@ -53,10 +64,7 @@ function adopt(options: AtlasCommand, copy: string, ran: readonly string[]): voi
 }
 
 /** The snapshot's files after `ran`, as Atlas lists a pending file */
-const after = (copy: string, ran: readonly string[]): AtlasFile[] =>
-	sqlFiles(copy)
-		.slice(ran.length)
-		.map((Name) => ({ Description: versionOf(Name).description, Name, Version: versionOf(Name).version }))
+const after = (copy: string, ran: readonly string[]): AtlasFile[] => filesOf(copy).slice(ran.length)
 
 /** `read()`, a file `name` Atlas cannot split refused by name */
 function named<T>(name: string, read: () => T): T {
@@ -129,8 +137,8 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 			return after(copy, ran).map((file) => file.Name)
 		}
 		if (ran.length > 0) adopt(options, copy, ran)
-		const status = ran.length > 0 ? atlasStatus(options, copy) : known(own)
-		const halfway = checkHistory(status, copy)
+		const { foreign, status } = ownOf(options, copy, ran.length > 0 ? atlasStatus(options, copy) : known(own))
+		const halfway = checkHistory(status, copy, { unread: foreign.unread })
 		if (halfway !== undefined) options.print(`${halfway}; resuming after them`)
 		if (status.pending.length === 0) {
 			options.print("No migrations to apply")
@@ -141,12 +149,12 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		if (options.checkOnly === true && status.applied.length === 0)
 			refuseUnclean({ exec: options.exec ?? run, target: options.target })
 		else {
-			const dry = atlas(options, copy, ["apply", "--dry-run", "--format", APPLY_FORMAT])
+			const dry = atlas(options, copy, ["apply", "--dry-run", ...execOrder(foreign), "--format", APPLY_FORMAT])
 			if (dry.code !== 0) throw new Error(dry.stderr)
 		}
 		await approvePending(options, copy, status.pending)
 		if (options.checkOnly === true) return status.pending.map((file) => file.Name)
-		const files = applied(atlas(options, copy, ["apply", "--format", APPLY_FORMAT]))
+		const files = applied(atlas(options, copy, ["apply", ...execOrder(foreign), "--format", APPLY_FORMAT]))
 		for (const name of files) options.print(`Apply: ${name}`)
 		return files
 	} finally {
@@ -209,9 +217,9 @@ function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: s
 			options.print(adopts(ran))
 			return { applied: [], pending: rest }
 		}
-		const status = known(own)
+		const { foreign, status } = ownOf(options, copy, known(own))
 		const missing: string[] = []
-		const halfway = checkHistory(status, copy, (line) => missing.push(line))
+		const halfway = checkHistory(status, copy, { gone: (line) => missing.push(line), unread: foreign.unread })
 		options.print(`Applied: ${status.applied.length}${status.applied.length > 0 ? ` (up to ${status.current})` : ""}`)
 		options.print(`Pending: ${status.pending.map((file) => file.Name).join(", ") || "none"}`)
 		for (const line of missing) options.print(line)

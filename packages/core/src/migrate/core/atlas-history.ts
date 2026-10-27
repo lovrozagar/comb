@@ -39,6 +39,10 @@ function versionOf(name: string): { description: string; version: string } {
 	return { description, version }
 }
 
+/** The snapshot's files as Atlas lists one */
+const filesOf = (copy: string): AtlasFile[] =>
+	sqlFiles(copy).map((Name) => ({ Description: versionOf(Name).description, Name, Version: versionOf(Name).version }))
+
 /** The file of `version` in the snapshot, as Atlas maps a revision to its file; the version when none is */
 const fileOf = (copy: string, version: string): string =>
 	sqlFiles(copy).find((name) => versionOf(name).version === version) ?? version
@@ -58,10 +62,16 @@ function refuseRenamed(status: AtlasStatus, copy: string): void {
 }
 
 /** Each applied revision whose file is gone or renamed to another version (M76), named by its version */
-const goneFiles = (status: AtlasStatus, copy: string): string[] =>
+const goneFiles = (status: AtlasStatus, copy: string, unread: string | undefined): string[] =>
 	status.applied
 		.filter((revision) => fileOf(copy, revision.version) === revision.version)
-		.map((revision) => `${revision.version} was applied, and its file is gone or renamed`)
+		.map(
+			(revision) =>
+				`${revision.version} was applied, and its file is gone or renamed${unread === undefined ? "" : `; another schema's history could not be read: ${unread}`}`,
+		)
+
+/** How checkHistory reports: `gone` takes a gone file's line, as status does; `unread`, why another schema's history could not be read (M78) */
+type Report = { gone?: ((line: string) => void) | undefined; unread?: string | undefined }
 
 /**
  * Refuses an applied file edited since, as comb does on SQLite: Atlas never runs it again, so the
@@ -86,10 +96,18 @@ function refuseEdited(status: AtlasStatus, copy: string): void {
  * Atlas's hashes are cumulative; a gone file is only named when `gone` takes it, as status does,
  * and then no hash is compared, as every one after it reads as changed.
  */
-function checkHistory(status: AtlasStatus, copy: string, gone?: (line: string) => void): string | undefined {
+function checkHistory(status: AtlasStatus, copy: string, { gone, unread }: Report = {}): string | undefined {
 	const partial = status.applied.find((revision) => revision.applied < revision.total && revision.error !== "")
 	if (partial === undefined) {
-		if (status.error !== "") throw new Error(`atlas migrate status: ${explainAtlasFailure(status.error)}`)
+		/* a renamed or gone file first: Atlas calls a file older than a gone one out of order, and the gone one is the cause */
+		refuseRenamed(status, copy)
+		const missing = goneFiles(status, copy, unread)
+		if (missing.length > 0 && gone === undefined) throw new Error(missing.join("; "))
+		/* an error Atlas reports past a gone file is the gone file's doing, so status names that too */
+		if (status.error !== "")
+			throw new Error(
+				missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${explainAtlasFailure(status.error)}`,
+			)
 		/* Atlas lists a file older than the latest applied one as neither pending nor an error */
 		const recorded = new Set(status.applied.map((revision) => revision.version))
 		const current = /^\d+$/.test(status.current) ? status.current : undefined
@@ -97,9 +115,6 @@ function checkHistory(status: AtlasStatus, copy: string, gone?: (line: string) =
 			(file) => current !== undefined && !recorded.has(file.Version) && file.Version < current,
 		)
 		if (late !== undefined) throw new Error(explainAtlasFailure(`migration file ${late.Name} was added out of order`))
-		refuseRenamed(status, copy)
-		const missing = goneFiles(status, copy)
-		if (missing.length > 0 && gone === undefined) throw new Error(missing.join("; "))
 		for (const line of missing) gone?.(line)
 		if (missing.length === 0) refuseEdited(status, copy)
 		return undefined
@@ -114,4 +129,4 @@ function checkHistory(status: AtlasStatus, copy: string, gone?: (line: string) =
 	return where
 }
 
-export { type AtlasFile, type AtlasRevision, type AtlasStatus, checkHistory, fileOf, versionOf }
+export { type AtlasFile, type AtlasRevision, type AtlasStatus, checkHistory, fileOf, filesOf, versionOf }
