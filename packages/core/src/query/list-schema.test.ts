@@ -459,6 +459,7 @@ describe("the parsed cursor (Q7)", () => {
 			"lang",
 			"limit",
 			"page",
+			"pageBounded",
 			"parsedFields",
 			"parsedSort",
 			"q",

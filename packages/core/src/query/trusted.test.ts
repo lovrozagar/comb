@@ -36,13 +36,31 @@ describe("assertPageWithin: a page no schema bounded (C4)", () => {
 		expect(() => assertPageWithin({ page: 10_001 })).toThrow(
 			expect.objectContaining({ errorKey: "page_too_deep", status: 400 }),
 		)
-		/* a schema configured with a deeper maxPage checked the page already */
-		expect(() => assertPageWithin({ page: 50_000, validated: true })).not.toThrow()
+		/* a schema configured with a deeper maxPage checked the page already, and brands it so (U29) */
+		expect(() => assertPageWithin({ page: 50_000, pageBounded: true })).not.toThrow()
 		expect(() => assertPageWithin({})).not.toThrow()
 	})
 })
 
 /* U5 of the 0.12 round: a page no schema validated is a whole number from 1, in both builders */
+/* U29: validated: true says the filter and order were checked, never that the page was */
+describe("assertPageWithin: a page on a filter its caller checked itself", () => {
+	it.each([0, -1, 1.5, Number.NaN])("refuses page %s with invalid_page, validated or not", (page) => {
+		expect(() => assertPageWithin({ page, validated: true })).toThrow(
+			expect.objectContaining({ errorKey: "invalid_page" }),
+		)
+		expect(() => assertPageWithin({ page, pageBounded: true })).toThrow(
+			expect.objectContaining({ errorKey: "invalid_page" }),
+		)
+	})
+
+	it("refuses a page past the default maxPage when only the filter was checked", () => {
+		expect(() => assertPageWithin({ page: 10_001, validated: true })).toThrow(
+			expect.objectContaining({ errorKey: "page_too_deep" }),
+		)
+	})
+})
+
 describe("assertPageWithin: a page that is no page", () => {
 	it.each([0, -1, 1.5, Number.NaN])("refuses page %s with invalid_page", (page) => {
 		expect(() => assertPageWithin({ page })).toThrow(

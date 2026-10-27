@@ -63,7 +63,17 @@ expectTypeOf(keysetSQL).parameter(0).toEqualTypeOf<KeysetPosition>()
 /* Q7: the parsed query hands on the cursor as the raw string the client sent, and nothing decoded
    from it; only a verifying call (readCursor, listOptions, buildListQuery) reaches its values */
 expectTypeOf<keyof ListQueryOutput<"created_at">>().toEqualTypeOf<
-	"cursor" | "filterAst" | "lang" | "limit" | "page" | "parsedFields" | "parsedSort" | "q" | "sortOrderBy" | "validated"
+	| "cursor"
+	| "filterAst"
+	| "lang"
+	| "limit"
+	| "page"
+	| "pageBounded"
+	| "parsedFields"
+	| "parsedSort"
+	| "q"
+	| "sortOrderBy"
+	| "validated"
 >()
 expectTypeOf<z.output<ReturnType<typeof createListQuerySchema<Record<string, never>, ["created_at"]>>>>().toMatchTypeOf<
 	ListQueryOutput<"created_at">

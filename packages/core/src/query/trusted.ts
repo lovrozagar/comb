@@ -34,13 +34,18 @@ function assertSchemaParsed(parsed: Parsed): void {
 }
 
 /**
- * Throw a 400 for a page no schema bounded that is not a whole number from 1 (U5), which would bind
- * a negative or fractional offset, or that passes the default maxPage: an offset that deep makes the
- * database skip every row before it, which a list schema refuses (C4). A schema's own page, under
- * whatever maxPage it was built with, is trusted.
+ * Throw a 400 for a page that is not a whole number from 1 (U5), which would bind a negative or
+ * fractional offset, or that passes the default maxPage: an offset that deep makes the database
+ * skip every row before it, which a list schema refuses (C4). Only a schema's own page, branded
+ * `pageBounded` under whatever maxPage it was built with, skips that comparison; `validated` says
+ * the filter and the order were checked, never the page (U29).
  */
-function assertPageWithin(parsed: { page?: number | null | undefined; validated?: true | undefined }): void {
-	if (parsed.validated === true) return
+function assertPageWithin(parsed: {
+	page?: number | null | undefined
+	pageBounded?: true | undefined
+	/** the filter's and the order's check, which says nothing of the page: not read here */
+	validated?: true | undefined
+}): void {
 	const page = parsed.page ?? 1
 	if (!Number.isInteger(page) || page < 1)
 		throw new CombError({
@@ -48,7 +53,8 @@ function assertPageWithin(parsed: { page?: number | null | undefined; validated?
 			errorKey: combErrorKeys.INVALID_PAGE,
 			status: "bad_request",
 		})
-	if (page > PAGINATION_DEFAULTS.maxPage) throw pageTooDeep(page, PAGINATION_DEFAULTS.maxPage)
+	if (parsed.pageBounded !== true && page > PAGINATION_DEFAULTS.maxPage)
+		throw pageTooDeep(page, PAGINATION_DEFAULTS.maxPage)
 }
 
 /** The 400 for a page past `maxPage`, from a list schema or from a list no schema bounded */

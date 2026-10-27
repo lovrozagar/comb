@@ -129,6 +129,7 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 				.array(),
 			q: z.string().optional(),
 			sortOrderBy: z.partialRecord(sortFieldSchema, sortDirectionEnum),
+			pageBounded: z.literal(true),
 			validated: z.literal(true),
 			...extendFields,
 		}),
@@ -174,6 +175,7 @@ function createListQuerySchema<
 			parsedSort,
 			q: optional.q,
 			sortOrderBy: sortOrderByOf(parsedSort),
+			pageBounded: true as const,
 			validated: true as const,
 			...(pickExtended(extensions, data) as { [K in keyof T]: z.infer<T[K]> }),
 		}
