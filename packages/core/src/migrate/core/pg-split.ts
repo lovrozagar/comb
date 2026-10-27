@@ -8,7 +8,7 @@
  * file comb writes from such statements (atlasFile) is one Atlas sends each of alone.
  */
 import { atlasChunks, type Chunk, unterminated } from "./atlas-scan.ts"
-import { postgresParser } from "./pg-parser.ts"
+import { parsePostgres, postgresParser } from "./pg-parser.ts"
 
 type RawStmt = { stmt_len?: number; stmt_location?: number }
 
@@ -26,13 +26,14 @@ type PgRead = { statements: PgStatement[]; unreadable: Unreadable | undefined }
 
 /** The statements Postgres reads in one chunk, the comments before it kept on the first */
 function readChunk(chunk: Chunk): Read {
-	const parser = postgresParser()
+	/* the parser is loaded, or this throws before a chunk is read as unreadable */
+	postgresParser()
 	const source = chunk.lead === "" ? chunk.text : `${chunk.lead}\n${chunk.text}`
 	/* an empty chunk, as two delimiters in a row send, is no statement; the parser refuses it */
 	if (source === "") return { statements: [] }
 	let stmts: RawStmt[]
 	try {
-		stmts = parser.parseSync(source).stmts as RawStmt[]
+		stmts = parsePostgres(source).stmts as RawStmt[]
 	} catch (error) {
 		return { error: (error as Error).message, statements: [{ text: unterminated(chunk), tree: undefined }] }
 	}

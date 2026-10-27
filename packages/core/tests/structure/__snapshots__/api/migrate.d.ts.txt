@@ -133,7 +133,14 @@ type Parser = {
 declare function loadPostgresParser(): Promise<void>;
 /** The loaded parser; throws when it was never loaded */
 declare function postgresParser(): Parser;
-export { loadPostgresParser, postgresParser };
+/**
+ * `sql` parsed by the loaded parser, the one way comb parses Postgres: names inside CREATE SCHEMA
+ * elements qualified as Postgres resolves them (pg-schema-elts.ts), before anything keeps the tree
+ */
+declare function parsePostgres(sql: string): {
+    stmts?: unknown;
+};
+export { loadPostgresParser, parsePostgres, postgresParser };
 
 // migrate/core/utils.d.ts
 /**

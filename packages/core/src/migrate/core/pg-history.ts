@@ -15,7 +15,7 @@ import { builtinFinding } from "./pg-builtins.ts"
 import { followEventTrigger } from "./pg-events.ts"
 import { followNames } from "./pg-names.ts"
 import { type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf } from "./pg-nodes.ts"
-import { postgresParser } from "./pg-parser.ts"
+import { parsePostgres } from "./pg-parser.ts"
 import { historyTrees } from "./pg-split.ts"
 
 /** The first function an expression calls that is no pure built-in, by name */
@@ -234,7 +234,7 @@ function followTree(stmts: unknown, facts: Facts): void {
 /** A history statement's parse tree; throws for one the parser cannot read */
 function historyTree(statement: string): unknown {
 	try {
-		return postgresParser().parseSync(statement).stmts
+		return parsePostgres(statement).stmts
 	} catch (error) {
 		/* what it defined or attached is unknown, so the facts after it are too (M75) */
 		throw new Error(`comb could not read the history: ${JSON.stringify(statement)} (${(error as Error).message})`, {

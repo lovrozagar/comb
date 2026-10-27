@@ -23,7 +23,7 @@ import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
 import { builtinFinding } from "./pg-builtins.ts"
 import { type Facts, followTree, keyOf, names, nodesOf, tableOf } from "./pg-history.ts"
-import { postgresParser } from "./pg-parser.ts"
+import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import { ddlFindings, followFresh } from "./pg-ddl.ts"
 import { eventFindings } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
@@ -205,10 +205,11 @@ function shadowFinding(type: string, node: Node, ctx: TreeContext): Finding | un
 
 /** One Postgres statement's findings, read from its parse tree: the one its file's read kept, else parsed here */
 function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): Finding[] {
-	const parser = postgresParser()
+	/* the parser is loaded, or this throws before the statement is rated */
+	postgresParser()
 	let tree: { stmts?: unknown }
 	try {
-		tree = kept === undefined ? parser.parseSync(stmt) : { stmts: kept }
+		tree = kept === undefined ? parsePostgres(stmt) : { stmts: kept }
 	} catch (error) {
 		// reason: a statement Postgres cannot parse is the statement's finding, unsafe
 		return [{ level: "unsafe", note: `comb could not parse this as Postgres 17: ${(error as Error).message}` }]

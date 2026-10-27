@@ -4,6 +4,8 @@
  * awaits it first, and a caller of `classifyMigration` on Postgres does too.
  */
 
+import { qualifySchemaElements } from "./pg-schema-elts.ts"
+
 type Parser = { parseSync(sql: string): { stmts?: unknown } }
 
 // per-process-constant: the parser module, set once by loadPostgresParser
@@ -32,4 +34,14 @@ function postgresParser(): Parser {
 	return parser
 }
 
-export { loadPostgresParser, postgresParser }
+/**
+ * `sql` parsed by the loaded parser, the one way comb parses Postgres: names inside CREATE SCHEMA
+ * elements qualified as Postgres resolves them (pg-schema-elts.ts), before anything keeps the tree
+ */
+function parsePostgres(sql: string): { stmts?: unknown } {
+	const tree = postgresParser().parseSync(sql)
+	qualifySchemaElements(tree.stmts)
+	return tree
+}
+
+export { loadPostgresParser, parsePostgres, postgresParser }
