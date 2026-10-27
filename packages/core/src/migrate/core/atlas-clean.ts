@@ -32,7 +32,7 @@ function refuseUnclean(options: { exec: Run; target: PgTarget }): void {
 		/* a failure's output is free text, scrubbed; a success's is JSON, parsed before anything is masked */
 		if (result.code !== 0)
 			throw new Error(
-				`atlas schema inspect: ${`${explainAtlasFailure(env.scrub(result.stderr))}${env.scrub(result.stdout)}`.trim()}`,
+				`atlas schema inspect: ${`${env.scrub(`${explainAtlasFailure(result.stderr)}${result.stdout}`)}`.trim()}`,
 			)
 		return readInspect(result.stdout)
 	})

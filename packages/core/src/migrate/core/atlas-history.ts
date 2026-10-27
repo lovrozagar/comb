@@ -70,8 +70,8 @@ const goneFiles = (status: AtlasStatus, copy: string, unread: string | undefined
 				`${revision.version} was applied, and its file is gone or renamed${unread === undefined ? "" : `; another schema's history could not be read: ${unread}`}`,
 		)
 
-/** How checkHistory reports: `gone` takes a gone file's line, as status does; `unread`, why another schema's history could not be read (M78) */
-type Report = { gone?: ((line: string) => void) | undefined; unread?: string | undefined }
+/** How checkHistory reports: `scrub` for Atlas's text it prints, every decision read raw (M79); `gone` takes a gone file's line, as status does; `unread`, why another schema's history could not be read (M78) */
+type Report = { gone?: ((line: string) => void) | undefined; scrub(text: string): string; unread?: string | undefined }
 
 /**
  * Refuses an applied file edited since, as comb does on SQLite: Atlas never runs it again, so the
@@ -96,7 +96,7 @@ function refuseEdited(status: AtlasStatus, copy: string): void {
  * Atlas's hashes are cumulative; a gone file is only named when `gone` takes it, as status does,
  * and then no hash is compared, as every one after it reads as changed.
  */
-function checkHistory(status: AtlasStatus, copy: string, { gone, unread }: Report = {}): string | undefined {
+function checkHistory(status: AtlasStatus, copy: string, { gone, scrub, unread }: Report): string | undefined {
 	const partial = status.applied.find((revision) => revision.applied < revision.total && revision.error !== "")
 	if (partial === undefined) {
 		/* a renamed or gone file first: Atlas calls a file older than a gone one out of order, and the gone one is the cause */
@@ -106,7 +106,7 @@ function checkHistory(status: AtlasStatus, copy: string, { gone, unread }: Repor
 		/* an error Atlas reports past a gone file is the gone file's doing, so status names that too */
 		if (status.error !== "")
 			throw new Error(
-				missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${explainAtlasFailure(status.error)}`,
+				missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${scrub(explainAtlasFailure(status.error))}`,
 			)
 		/* Atlas lists a file older than the latest applied one as neither pending nor an error */
 		const recorded = new Set(status.applied.map((revision) => revision.version))
@@ -120,7 +120,9 @@ function checkHistory(status: AtlasStatus, copy: string, { gone, unread }: Repor
 		return undefined
 	}
 	const name = fileOf(copy, partial.version)
-	const where = `${name} ran ${partial.applied} of its ${partial.total} statements before it failed at ${partial.errorStmt} (${partial.error})`
+	const where = scrub(
+		`${name} ran ${partial.applied} of its ${partial.total} statements before it failed at ${partial.errorStmt} (${partial.error})`,
+	)
 	if (sumHashes(copy).get(name) !== partial.hash) {
 		throw new Error(
 			`${where}, outside a transaction, and has changed since; restore it, or fix the database by hand and run comb migrate baseline`,

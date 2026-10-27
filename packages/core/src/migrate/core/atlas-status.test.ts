@@ -30,4 +30,15 @@ describe("atlasStatus: Atlas's status of the snapshot", () => {
 	it("refuses output it cannot read without repeating it", () => {
 		expect(() => json("{ secret", "status")).toThrow(/^unexpected output from atlas migrate status$/)
 	})
+
+	/* M79: Atlas's words are matched as Atlas wrote them, so a password that spells one changes nothing */
+	it("reads a database Atlas calls not clean as having no history whatever the password spells", () => {
+		const notClean = answering(1, "", "Error: sql/migrate: connected database is not clean: found table")
+		for (const password of ["clean", "database", "connected"]) {
+			const secret = { ...target, url: `postgres://app:${password}@localhost/app` }
+			expect(atlasStatus({ dir: "", exec: notClean, print, target: secret }, "/copy", { notClean: true })).toBe(
+				NO_HISTORY,
+			)
+		}
+	})
 })

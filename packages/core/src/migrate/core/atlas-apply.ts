@@ -19,7 +19,7 @@ import { execOrder, type Foreign, foreignRows, ignoredLines, ownHistory } from "
 import { type AtlasFile, type AtlasStatus, checkHistory, fileOf, filesOf, versionOf } from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
 import { explainAtlasFailure, SHARED_REVISIONS } from "./atlas-target.ts"
-import { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran } from "./atlas-status.ts"
+import { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran, scrubbing } from "./atlas-status.ts"
 import { refuseDrift } from "./baseline-compare.ts"
 import { extractSchema, parseMigration } from "./parse.ts"
 import { run } from "./process.ts"
@@ -59,7 +59,7 @@ function ownOf(options: AtlasCommand, copy: string, raw: AtlasStatus): { foreign
 /** Record `ran` in the schema's own history, without running it: Atlas writes the rows in one transaction */
 function adopt(options: AtlasCommand, copy: string, ran: readonly string[]): void {
 	const set = atlas(options, copy, ["set", versionOf(ran.at(-1) as string).version])
-	if (set.code !== 0) throw new Error(`atlas migrate set: ${set.stderr}`)
+	if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)
 	options.print(adopted(ran))
 }
 
@@ -111,7 +111,7 @@ type ApplyReport = { applied: Array<{ Error?: { Stmt: string; Text: string }; Na
 
 /** The apply's result: the files it applied, or the file and statement that failed */
 function applied(ran: Ran): string[] {
-	if (ran.stdout.trim() === "") throw new Error(`atlas migrate apply: ${ran.stderr}`)
+	if (ran.stdout.trim() === "") throw new Error(`atlas migrate apply: ${ran.said}`)
 	const report = json<ApplyReport>(ran.stdout, "apply")
 	const failed = report.applied.find((file) => file.Error !== undefined)
 	if (failed?.Error !== undefined) {
@@ -121,7 +121,9 @@ function applied(ran: Ran): string[] {
 		)
 	}
 	if (ran.code !== 0 || report.error !== "")
-		throw new Error(`atlas migrate apply: ${explainAtlasFailure(ran.scrub(report.error) || ran.stderr)}`)
+		throw new Error(
+			`atlas migrate apply: ${report.error === "" ? ran.said : ran.scrub(explainAtlasFailure(report.error))}`,
+		)
 	return report.applied.map((file) => file.Name)
 }
 
@@ -139,7 +141,7 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		}
 		if (ran.length > 0) adopt(options, copy, ran)
 		const { foreign, status } = ownOf(options, copy, ran.length > 0 ? atlasStatus(options, copy) : known(own))
-		const halfway = checkHistory(status, copy, { unread: foreign.unread })
+		const halfway = checkHistory(status, copy, { scrub: scrubbing(options.target), unread: foreign.unread })
 		if (halfway !== undefined) options.print(`${halfway}; resuming after them`)
 		if (status.pending.length === 0) {
 			options.print("No migrations to apply")
@@ -151,7 +153,7 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 			refuseUnclean({ exec: options.exec ?? run, target: options.target })
 		else {
 			const dry = atlas(options, copy, ["apply", "--dry-run", ...execOrder(foreign), "--format", APPLY_FORMAT])
-			if (dry.code !== 0) throw new Error(dry.stderr)
+			if (dry.code !== 0) throw new Error(dry.said)
 		}
 		await approvePending(options, copy, status.pending)
 		if (options.checkOnly === true) return status.pending.map((file) => file.Name)
@@ -200,7 +202,7 @@ function baselineWithAtlas(options: AtlasCommand): string[] {
 		if (latest === undefined) throw new Error("there are no migrations to record")
 		refuseDrift({ exec: options.exec ?? run, target: options.target }, copy)
 		const set = atlas(options, copy, ["set", latest])
-		if (set.code !== 0) throw new Error(`atlas migrate set: ${set.stderr}`)
+		if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)
 		for (const name of files) options.print(`Marked applied: ${name}`)
 		return files
 	})
@@ -220,7 +222,11 @@ function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: s
 		}
 		const { foreign, status } = ownOf(options, copy, known(own))
 		const missing: string[] = []
-		const halfway = checkHistory(status, copy, { gone: (line) => missing.push(line), unread: foreign.unread })
+		const halfway = checkHistory(status, copy, {
+			gone: (line) => missing.push(line),
+			scrub: scrubbing(options.target),
+			unread: foreign.unread,
+		})
 		options.print(`Applied: ${status.applied.length}${status.applied.length > 0 ? ` (up to ${status.current})` : ""}`)
 		options.print(`Pending: ${status.pending.map((file) => file.Name).join(", ") || "none"}`)
 		for (const line of missing) options.print(line)

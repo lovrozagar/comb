@@ -4,7 +4,7 @@
  * status read through a template that never selects the URL.
  */
 import type { AtlasStatus } from "./atlas-history.ts"
-import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { explainAtlasFailure, type PgTarget, scrubAtlasOutput, withAtlasEnv } from "./atlas-target.ts"
 import { type Run, type RunResult, run } from "./process.ts"
 
 const STATUS_FORMAT =
@@ -24,20 +24,23 @@ type AtlasCommand = {
 	target: PgTarget
 }
 
-/** What an Atlas call returned: its stderr scrubbed, its stdout as Atlas wrote it, and the scrubber for what comb prints of it */
-type Ran = RunResult & { scrub(text: string): string }
+/**
+ * What an Atlas call returned, as Atlas wrote it, for comb's decisions; `said`, its stderr as comb
+ * prints it (explained, then scrubbed); `scrub`, for any other text comb prints of it
+ */
+type Ran = RunResult & { said: string; scrub(text: string): string }
 
 /**
  * `atlas migrate <args>` on the snapshot `copy` against the target. Its stdout is JSON comb parses
- * as written and never scrubbed (M79), since a secret that spells a key or a name would change what
- * comb reads; a caller scrubs a value only where it prints it.
+ * as written, its stderr too, and never scrubbed (M79), since a secret that spells a key, a name or
+ * a word Atlas prints would change what comb reads; a caller scrubs a value only where it prints it.
  */
 function atlas(options: AtlasCommand, copy: string, args: readonly string[]): Ran {
 	return withAtlasEnv(options.target, { revisions: options.revisions, url: true }, (env) => {
 		const ran = (options.exec ?? run)("atlas", ["migrate", ...args, "--dir", `file://${copy}`, ...env.args], {
 			env: env.env,
 		})
-		return { ...ran, scrub: env.scrub, stderr: explainAtlasFailure(env.scrub(ran.stderr)) }
+		return { ...ran, said: env.scrub(explainAtlasFailure(ran.stderr)), scrub: env.scrub }
 	})
 }
 
@@ -64,18 +67,17 @@ function atlasStatus(
 	{ notClean = false }: { notClean?: boolean } = {},
 ): AtlasStatus {
 	const ran = atlas(options, copy, ["status", "--format", STATUS_FORMAT])
-	if (ran.code !== 0 && notClean && ran.stderr === explainAtlasFailure("connected database is not clean"))
-		return NO_HISTORY
+	if (ran.code !== 0 && notClean && /connected database is not clean/.test(ran.stderr)) return NO_HISTORY
 	if (ran.code !== 0)
-		throw new Error(`atlas migrate status: ${ran.stderr || `exit ${ran.code}: ${ran.scrub(ran.stdout)}`}`)
-	const status = json<AtlasStatus>(ran.stdout, "status")
-	/* the free text comb prints of a status, scrubbed; versions, hashes and names stay as Atlas wrote them */
-	const applied = status.applied.map((revision) => ({
-		...revision,
-		error: ran.scrub(revision.error),
-		errorStmt: ran.scrub(revision.errorStmt),
-	}))
-	return { ...status, applied, error: ran.scrub(status.error) }
+		throw new Error(`atlas migrate status: ${ran.said || `exit ${ran.code}: ${ran.scrub(ran.stdout)}`}`)
+	/* as Atlas wrote it: what comb prints of it is scrubbed where it prints it (checkHistory's `scrub`) */
+	return json<AtlasStatus>(ran.stdout, "status")
 }
 
-export { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran }
+/** The scrubber for text comb prints of `target`'s Atlas calls, outside one */
+const scrubbing =
+	(target: PgTarget) =>
+	(text: string): string =>
+		scrubAtlasOutput(text, [target.url, target.devUrl])
+
+export { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran, scrubbing }

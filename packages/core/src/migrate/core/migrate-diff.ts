@@ -92,7 +92,7 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 				? atlas.exec("atlas", [...args, "--dev-url", sqliteDevUrl(), ...format])
 				: withAtlasEnv(atlas.target, { dev: true }, (env) => {
 						const ran = atlas.exec("atlas", [...args, ...env.args, ...format], { env: env.env })
-						return { ...ran, stderr: explainAtlasFailure(env.scrub(ran.stderr)), stdout: env.scrub(ran.stdout) }
+						return { ...ran, stderr: env.scrub(explainAtlasFailure(ran.stderr)), stdout: env.scrub(ran.stdout) }
 					})
 		/* in sync, Atlas exits 0, says so on stdout and writes no file: the empty list below */
 		if (result.code !== 0) throw new Error(`atlas migrate diff failed: ${result.stderr || result.stdout.trim()}`)

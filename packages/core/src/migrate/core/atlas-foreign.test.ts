@@ -161,4 +161,14 @@ describe("public's history read with a password that spells another schema's nam
 		expect(out[0]).toBe("5 is schema ***'s, recorded in atlas_schema_revisions_***; public ignores it")
 		expect(execOrders(atlas.calls)).toHaveLength(2)
 	})
+
+	it("still clears Atlas's out-of-order error and applies c when the password spells its words", async () => {
+		for (const password of ["order", "added"]) {
+			const atlas = fakeAtlas({ shared: withApps() })
+			const secret = { ...target, url: `postgres://app:${password}@localhost/app` }
+			expect(await applyWithAtlas({ approve, dir, exec: atlas, print: () => undefined, target: secret })).toEqual([
+				"3_c.sql",
+			])
+		}
+	})
 })

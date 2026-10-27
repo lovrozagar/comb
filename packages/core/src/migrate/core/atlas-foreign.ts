@@ -46,7 +46,7 @@ function histories(options: AtlasCommand): string[] {
 		const result = (options.exec ?? run)("atlas", args, { env: env.env })
 		if (result.code !== 0)
 			throw new Error(
-				`atlas schema inspect: ${explainAtlasFailure(env.scrub(result.stderr)).trim() || `exit ${result.code}`}`,
+				`atlas schema inspect: ${env.scrub(explainAtlasFailure(result.stderr)).trim() || `exit ${result.code}`}`,
 			)
 		/* the names as the database has them; only a printed line is masked (M79) */
 		return readInspect(result.stdout)
