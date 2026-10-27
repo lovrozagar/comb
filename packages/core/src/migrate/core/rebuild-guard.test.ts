@@ -26,7 +26,6 @@ describe("guardRebuilds", () => {
 		expect(guardRebuilds(REBUILD, BEFORE, FTS)).toBe(`PRAGMA defer_foreign_keys = on;
 CREATE TABLE \`new_u\` (\`id\` integer NOT NULL, \`name\` text NOT NULL DEFAULT '', PRIMARY KEY (\`id\`));
 INSERT INTO \`new_u\` (\`id\`, \`name\`) SELECT \`id\`, IFNULL(\`name\`, '') AS \`name\` FROM \`u\`;
-PRAGMA defer_foreign_keys = on;
 CREATE TABLE \`_comb_keep_post\` AS SELECT \`id\`, \`author\`, \`title\` FROM \`post\`;
 CREATE TABLE \`_comb_keep_tag\` AS SELECT \`post\`, \`name\` FROM \`tag\`;
 DELETE FROM \`tag\`;

@@ -11,7 +11,8 @@
  * `T` (a self-reference points at the original). Between Atlas's copy and its drop, comb saves
  * each closure table into `_comb_keep_<t>` (generated columns left out), saves `T`'s
  * sqlite_sequence value, and empties the closure, each table after the tables that reference it.
- * The guard opens with `PRAGMA defer_foreign_keys = on`, whatever the file holds, so the refill's
+ * The guard opens with `PRAGMA defer_foreign_keys = on` unless the file set it before the drop (as
+ * Atlas's file does, atlas-env.ts; M48), so the refill's
  * keys are checked at commit: a closure that is a reference cycle has no order that satisfies
  * them one row at a time. After the rename it refills the closure in the opposite order, parents
  * first, restores the sequence, and drops the keep tables. The rows, keys and sequences end as
@@ -118,7 +119,11 @@ function childrenFirst(closure: readonly string[], schema: ExtractedSchema): str
  * The guard a rebuild needs, given the schema at Atlas's copy: undefined when no table
  * references the rebuilt one, so its drop reaches nothing
  */
-function guardOf({ table, temp }: Rebuild, schema: ExtractedSchema, legacy = false): Guard | undefined {
+function guardOf(
+	{ table, temp }: Rebuild,
+	schema: ExtractedSchema,
+	{ deferred = false, legacy = false }: { deferred?: boolean; legacy?: boolean } = {},
+): Guard | undefined {
 	const closure = reached(table, schema)
 	if (closure.length === 0) return undefined
 	const sequence = schema.tableInfo.get(table)?.autoincrement === true
@@ -135,8 +140,8 @@ function guardOf({ table, temp }: Rebuild, schema: ExtractedSchema, legacy = fal
 	const name = literal(table)
 	const emptying = childrenFirst(closure, schema)
 	const before = [
-		/* the refill's keys checked at commit, whatever order a cycle leaves; the file may not defer them */
-		...(legacy ? [] : ["PRAGMA defer_foreign_keys = on"]),
+		/* the refill's keys checked at commit, whatever order a cycle leaves, unless the file deferred them already */
+		...(legacy || deferred ? [] : ["PRAGMA defer_foreign_keys = on"]),
 		...closure.map(save),
 		...(sequence ? [`CREATE TABLE ${keep(table)} AS SELECT seq FROM sqlite_sequence WHERE name = ${name}`] : []),
 		...emptying.map((t) => `DELETE FROM ${quote(t)}`),
@@ -194,6 +199,15 @@ function refuseUnguardable({ table }: Rebuild, schema: ExtractedSchema, fts: Fts
 	if (fired !== undefined) throw new Error(`a rebuild of ${table} ${firesMessage(table, fired)}`)
 }
 
+/** Whether the statements before `at` leave the file's foreign-key checks deferred: its last defer pragma set on */
+function deferredAt(codes: readonly string[], at: number): boolean {
+	const set = codes
+		.slice(0, at)
+		.map((code) => /^PRAGMA (?:main\.)?defer_foreign_keys ?= ?(\w+)$/i.exec(code.trim())?.[1])
+		.findLast((value) => value !== undefined)
+	return set !== undefined && /^(?:on|true|1|yes)$/i.test(set)
+}
+
 /**
  * `sql` with each rebuild of a referenced table guarded, read against `before`, the schema the
  * earlier migrations leave; FTS triggers in `fts` are the ones the guard may fire. Refuses a
@@ -218,7 +232,7 @@ function guardRebuilds(sql: string, before: ExtractedSchema | undefined, fts?: F
 			schema,
 		)
 		if (copy !== undefined) copies.set(rebuild.copy, copy)
-		const guard = guardOf(rebuild, schema)
+		const guard = guardOf(rebuild, schema, { deferred: deferredAt(codes, rebuild.drop) })
 		if (guard === undefined) continue
 		refuseUnguardable(rebuild, schema, fts)
 		ahead.set(rebuild.drop, guard.before)
@@ -233,4 +247,15 @@ function guardRebuilds(sql: string, before: ExtractedSchema | undefined, fts?: F
 	return `${out.join(";\n")};\n`
 }
 
-export { firedBy, firesMessage, type Guard, guardOf, guardRebuilds, type Located, locateRebuilds, reached, schemaAt }
+export {
+	deferredAt,
+	firedBy,
+	firesMessage,
+	type Guard,
+	guardOf,
+	guardRebuilds,
+	type Located,
+	locateRebuilds,
+	reached,
+	schemaAt,
+}

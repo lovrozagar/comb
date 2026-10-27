@@ -31,6 +31,17 @@ describe("readGuards", () => {
 		expect(guards.fired).toEqual(new Map())
 	})
 
+	/* M48: a file Atlas wrote already defers its keys (atlas-env.ts), so the guard leaves its own pragma out */
+	it("writes the defer pragma once when the file already opens with it, and reads both forms as comb's guard", () => {
+		const deferred = `PRAGMA defer_foreign_keys = on;\n${REBUILD}`
+		const guarded = guardRebuilds(deferred, BEFORE)
+		expect(guarded.match(/PRAGMA defer_foreign_keys = on/g)).toHaveLength(1)
+		expect(read(guarded).kept).toEqual(new Map([["u", ["post"]]]))
+		/* 0.13 wrote the guard's pragma again; a file it wrote reads as guarded still */
+		const twice = guardRebuilds(REBUILD, BEFORE).replace(/^/, "PRAGMA defer_foreign_keys = on;\n")
+		expect(read(twice).kept).toEqual(new Map([["u", ["post"]]]))
+	})
+
 	/* M24 of the 0.13 review */
 	it("names the trigger a guard would fire on a table it empties, a trigger a later file made, an FTS sync aside", () => {
 		const later = extractSchema("CREATE TRIGGER post_gone AFTER DELETE ON post BEGIN SELECT 1; END;", BEFORE)

@@ -6,7 +6,16 @@
  */
 import type { ExtractedSchema } from "../types.ts"
 import { renumberedBy } from "./rebuild-rowids.ts"
-import { firedBy, firesMessage, type Guard, guardOf, locateRebuilds, reached, schemaAt } from "./rebuild-guard.ts"
+import {
+	deferredAt,
+	firedBy,
+	firesMessage,
+	type Guard,
+	guardOf,
+	locateRebuilds,
+	reached,
+	schemaAt,
+} from "./rebuild-guard.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
 /** A file with no guards: the guards a dialect without rebuilds reads */
@@ -57,11 +66,17 @@ function readGuards(
 			)
 		}
 		const current = guardOf(rebuild, schema)
+		/* a file that deferred its keys before the drop holds the guard without its pragma (M48), or with it, as 0.13 wrote it */
+		const forms = [
+			...(deferredAt(codes, rebuild.drop) ? [guardOf(rebuild, schema, { deferred: true })] : []),
+			current,
+			guardOf(rebuild, schema, { legacy: true }),
+		]
 		if (current === undefined) {
 			out.renumbered.set(rebuild.table, renumberedBy(rebuild, schema, { closure: [], code: copy }))
 			continue
 		}
-		const guard = [current, guardOf(rebuild, schema, true) as Guard].find(whole)
+		const guard = (forms as Guard[]).find(whole)
 		if (guard === undefined) {
 			out.unguarded.set(rebuild.table, closure)
 			continue
@@ -75,7 +90,7 @@ function readGuards(
 		if (fired !== undefined) out.fired.set(rebuild.table, firesMessage(rebuild.table, fired))
 		out.renumbered.set(
 			rebuild.table,
-			renumberedBy(rebuild, schema, { closure: guard === current ? closure : [], code: copy }),
+			renumberedBy(rebuild, schema, { closure: guard === forms.at(-1) ? [] : closure, code: copy }),
 		)
 		for (let i = rebuild.drop - guard.before.length; i < rebuild.drop; i++) out.guarded.add(i)
 		for (let i = 1; i <= guard.after.length; i++) out.guarded.add(rebuild.rename + i)
