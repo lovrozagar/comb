@@ -79,6 +79,7 @@ const QUIET_COMMANDS = /* @__PURE__ */ new Set([
 const UNSAFE_RENAMES = /* @__PURE__ */ new Set([
 	"OBJECT_ATTRIBUTE",
 	"OBJECT_COLUMN",
+	"OBJECT_DOMAIN",
 	"OBJECT_FOREIGN_TABLE",
 	"OBJECT_MATVIEW",
 	"OBJECT_SCHEMA",
@@ -90,6 +91,7 @@ const UNSAFE_RENAMES = /* @__PURE__ */ new Set([
 // lookup-table: the kinds whose rename only callers by name notice: cautious
 const CAUTIOUS_RENAMES = /* @__PURE__ */ new Set([
 	"OBJECT_AGGREGATE",
+	"OBJECT_DOMCONSTRAINT",
 	"OBJECT_FUNCTION",
 	"OBJECT_INDEX",
 	"OBJECT_POLICY",

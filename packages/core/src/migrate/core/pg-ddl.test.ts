@@ -102,7 +102,7 @@ describe("ddlFindings: an ALTER TABLE that rewrites the table", () => {
 })
 
 describe("ddlFindings: renames, moves, enum values and drops", () => {
-	it("rates a rename or move of a table, column, view, type or schema unsafe, of an index cautious", () => {
+	it("rates a rename or move of a table, column, view, type, domain or schema unsafe, of an index or constraint cautious", () => {
 		for (const sql of [
 			"ALTER TABLE t RENAME TO u",
 			"ALTER TABLE t RENAME COLUMN a TO b",
@@ -110,13 +110,15 @@ describe("ddlFindings: renames, moves, enum values and drops", () => {
 			"ALTER SCHEMA s RENAME TO r",
 			"ALTER TABLE t SET SCHEMA s",
 			"ALTER TYPE e SET SCHEMA s",
+			"ALTER DOMAIN d RENAME TO e",
+			"ALTER DOMAIN d SET SCHEMA s",
 		])
 			expect(rated(sql), sql).toEqual([{ level: "unsafe" }])
 		expect(rated("ALTER INDEX i RENAME TO j")).toEqual([{ level: "cautious" }])
 		expect(rated("ALTER TABLE t RENAME CONSTRAINT a TO b")).toEqual([{ level: "cautious" }])
-		/* a sequence moved keeps its values; a domain renamed is M85's (pg-ddl rates it nothing yet) */
+		expect(rated("ALTER DOMAIN d RENAME CONSTRAINT a TO b")).toEqual([{ level: "cautious" }])
+		/* a sequence moved keeps its values */
 		expect(rated("ALTER SEQUENCE q SET SCHEMA s")).toEqual([])
-		expect(rated("ALTER DOMAIN d RENAME TO e")).toEqual([])
 	})
 
 	it("rates an enum value renamed unsafe, and one added nothing", () => {

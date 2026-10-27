@@ -78,6 +78,8 @@ describe("classifyMigration on hand-written Postgres that loses data", () => {
 		"ALTER TABLE post SET SCHEMA archive",
 		"ALTER TYPE mood RENAME VALUE 'a' TO 'b'",
 		"ALTER TYPE mood RENAME TO feeling",
+		"ALTER DOMAIN d RENAME TO e",
+		"ALTER DOMAIN d SET SCHEMA archive",
 		"TRUNCATE post",
 		"DELETE FROM post",
 		"DELETE FROM post USING (SELECT 1 WHERE true) s",
