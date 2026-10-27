@@ -208,17 +208,22 @@ const PURE: ReadonlySet<string> = /* @__PURE__ */ new Set([
  * A name a migration defined (`defined`, keyed as nameKey keys it) is that migration's function,
  * not the built-in, unless the call names pg_catalog: an overload of `lower` for a type of its
  * own is what Postgres resolves `lower(x)` to. A bare call names it in any schema, as the search
- * path may hold that schema.
+ * path may hold that schema; one qualified by `schema`, the target's, names it there. Only
+ * pg_catalog names a built-in: `public.lower` is a function of public's, from outside the history
+ * unless a migration defined it (M90).
  */
 function builtinFinding(
 	name: readonly string[],
-	defined: ReadonlySet<string>,
+	{ defined, schema }: { defined: ReadonlySet<string>; schema: string },
 ): { level: "cautious" | "unsafe"; note: string } | undefined {
 	const catalog = name[0] === "pg_catalog"
-	const parts = catalog || name[0] === "public" ? name.slice(1) : name
+	const parts = catalog ? name.slice(1) : name
 	const key = parts.join(".")
-	/* a bare name resolves through the search path, so it may be a migration's function in any schema */
-	const mine = parts.length === 1 ? [...defined].some((each) => each.split(".").at(-1) === key) : defined.has(key)
+	/* a bare name resolves through the search path, so it may be a migration's function in any schema; defined keys the target's schema out */
+	const mine =
+		parts.length === 1
+			? [...defined].some((each) => each.split(".").at(-1) === key)
+			: defined.has(key) || (parts.length === 2 && parts[0] === schema && defined.has(parts[1] as string))
 	if (!catalog && mine) return { level: "unsafe", note: `calls ${key}, a function a migration defined` }
 	if (parts.length === 1 && PURE.has(key)) return undefined
 	if (key === "setval") return { level: "cautious", note: "sets a sequence, as a RESTART does" }

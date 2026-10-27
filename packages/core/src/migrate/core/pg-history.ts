@@ -27,7 +27,7 @@ function callIn(expression: unknown, { defined, schema }: Pick<Facts, "defined" 
 	for (const [type, node] of nodesOf([expression])) {
 		if (type !== "FuncCall") continue
 		const name = names(node["funcname"])
-		if (builtinFinding(name, defined)?.level === "unsafe") return keyOf(name, schema)
+		if (builtinFinding(name, { defined, schema })?.level === "unsafe") return keyOf(name, schema)
 	}
 	return undefined
 }

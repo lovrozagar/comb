@@ -180,10 +180,9 @@ function codeFinding(type: string, node: Node, ctx: TreeContext): Finding | unde
 		if (node["name"] === "session_replication_role") ctx.everyTrigger = true
 		return settingFinding(node)
 	}
-	if (type === "FuncCall")
-		return replicationFinding(node, ctx) ?? builtinFinding(names(node["funcname"]), ctx.facts.defined)
+	if (type === "FuncCall") return replicationFinding(node, ctx) ?? builtinFinding(names(node["funcname"]), ctx.facts)
 	/* a CALL holds its call as a plain field, not a typed node */
-	if (type === "CallStmt") return builtinFinding(names((node["funccall"] as Node)["funcname"]), ctx.facts.defined)
+	if (type === "CallStmt") return builtinFinding(names((node["funccall"] as Node)["funcname"]), ctx.facts)
 	return useFinding(type, node, ctx.facts) ?? shadowFinding(type, node, ctx)
 }
 
