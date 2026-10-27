@@ -224,6 +224,23 @@ describe("migrate apply on D1: comb's history before 0.8", () => {
 		expect(recorded(d1)).toEqual(["20260101000000_init.sql", "20260102000000_more.sql"])
 	})
 
+	/* M44: D1 keeps no time a hash was recorded, so baseline records the current hash, the one check compares */
+	it("records the current hash for a file comb 0.7 recorded under its pre-0.5.0 hash, so check passes", async () => {
+		const sql = "INSERT INTO post VALUES ('a -- b\nc');"
+		const dir = worker({ ...INIT, "20260101000001_row.sql": sql })
+		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
+		const { generateMigrationHash, legacyMigrationHash } = await import("../migrate/core/parse.ts")
+		d1.db.exec("CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT, created_at INTEGER)")
+		d1.db.exec("CREATE TABLE post (id TEXT)")
+		const record = d1.db.prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, 1)")
+		for (const hash of [generateMigrationHash(INIT["20260101000000_init.sql"]), legacyMigrationHash(sql)])
+			record.run(hash)
+		expect(await runCli(["migrate", "baseline", "core", "--local"], makeIo(dir, d1))).toBe(0)
+		const check = makeIo(dir, d1)
+		const checked = await runCli(["migrate", "check", "core", "--local"], check)
+		expect([checked, check.errors]).toEqual([0, []])
+	})
+
 	it("refuses a baseline with no history to copy from", async () => {
 		const dir = worker(INIT)
 		const io = makeIo(dir, fakeD1({ dir: join(dir, "atlas-migrations") }))

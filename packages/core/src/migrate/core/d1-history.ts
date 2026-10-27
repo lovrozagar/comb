@@ -14,7 +14,7 @@ import type { Connection, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { assertLocalExists, type D1Target, type ReadConfig, resolveBinding } from "./d1-binding.ts"
 import { orphanMessage } from "./history-match.ts"
-import { migrationHashes } from "./parse.ts"
+import { generateMigrationHash, migrationHashes } from "./parse.ts"
 import { planApply, wranglerOrder } from "./plan-apply.ts"
 
 const DRIZZLE_TABLE = "__drizzle_migrations"
@@ -113,8 +113,7 @@ async function history(
 	}
 	const recorded = await appliedHashes(target.conn, create)
 	const edited = files.find(
-		({ name, sql }) =>
-			applied.has(name) && recorded.has(name) && !migrationHashes(sql).includes(recorded.get(name) as string),
+		({ name, sql }) => applied.has(name) && recorded.has(name) && generateMigrationHash(sql) !== recorded.get(name),
 	)
 	if (edited !== undefined) {
 		throw new Error(
@@ -206,13 +205,13 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
 		await target.conn.batch(
 			copied.map((name) => ({ sql: `INSERT OR IGNORE INTO ${quoteName(table)} (name) VALUES (${literal(name)})` })),
 		)
-		/* each copied file was applied under the hash comb's old history records for it */
+		/* each copied file is vouched for now, so it is recorded under its current hash, the one D1 compares (M44) */
 		await appliedHashes(target.conn, true)
 		await recordHashes(
 			target.conn,
 			files
 				.filter(({ name }) => copied.includes(name))
-				.map(({ name, sql }) => ({ hash: migrationHashes(sql).find((hash) => hashes.has(hash)) as string, name })),
+				.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), name })),
 		)
 	}
 	for (const name of copied) print(`Marked applied: ${name}`)

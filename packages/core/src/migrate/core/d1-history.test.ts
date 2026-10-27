@@ -92,6 +92,17 @@ describe("applyD1 and statusD1 on an applied file edited since", () => {
 		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(refusal)
 	})
 
+	/* M44: the pre-0.5.0 normalizing hides an edit inside a string literal, so D1 compares the current hash only */
+	it("refuses a file edited inside a string literal, which the pre-0.5.0 hash cannot tell", async () => {
+		const { d1, read } = await target({})
+		writeFileSync(join(d1.migrationsDir, "1_init.sql"), "CREATE TABLE post (id TEXT DEFAULT 'hello world');")
+		writeSum(d1.migrationsDir)
+		expect(await applyD1(d1, { approve, print: () => undefined, read })).toEqual(["1_init.sql"])
+		writeFileSync(join(d1.migrationsDir, "1_init.sql"), "CREATE TABLE post (id TEXT DEFAULT 'hello\n\n   world');")
+		writeSum(d1.migrationsDir)
+		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(/^1_init\.sql was applied, then edited/)
+	})
+
 	it("says which applied files comb has no hash for, so cannot tell edited", async () => {
 		const { d1, read } = await target({})
 		await d1.conn.execute(
