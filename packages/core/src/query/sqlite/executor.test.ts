@@ -5,7 +5,7 @@
  * shape.
  */
 import type { SQL } from "drizzle-orm"
-import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { integer, numeric, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { parseFilter } from "../filter.ts"
 import { CombError } from "../../error.ts"
@@ -327,6 +327,16 @@ describe("conditionToSQL — values and the column's type (B4)", () => {
 		expect(conditionToSQL(cond("name", "gt", 5), typed.name)).toBeNull()
 		expect(conditionToSQL(cond("name", "in", ["a", 1]), typed.name)).toBeNull()
 		expect(conditionToSQL(cond("name", "in", ["a", "b"]), typed.name)).not.toBeNull()
+	})
+})
+
+describe("conditionToSQL — text and numbers on numeric, date and number columns (U35)", () => {
+	/* U35b: drizzle labels numeric() "string numeric", and its NUMERIC affinity compares a number as a number */
+	it("lowers a number, or a list of them, on a numeric column", () => {
+		const priced = sqliteTable("priced", { amount: numeric("amount") })
+		expect(compile(conditionToSQL(cond("amount", "gte", 9.5), priced.amount))?.sql).toBe('"priced"."amount" >= ?')
+		expect(conditionToSQL(cond("amount", "in", [2, 10]), priced.amount)).not.toBeNull()
+		expect(conditionToSQL(cond("amount", "eq", "10"), priced.amount)).not.toBeNull()
 	})
 
 	/* U35: an ISO date field lowers onto a text column only; a date column's mapper takes a Date, and a number column compares text as text */

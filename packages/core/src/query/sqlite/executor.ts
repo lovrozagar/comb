@@ -124,12 +124,13 @@ const holds = (value: unknown, type: "number" | "string"): boolean =>
 /**
  * Whether the condition's value is one `column` cannot compare: a number on a text column, which
  * SQLite would compare as text, or text (an ISO date field's) on a date column, whose mapper takes
- * a Date, or on a number column, which would compare it as text (U35). `is` and the patterns take
+ * a Date, or on a number column, which would compare it as text (U35). `numeric()`, "string
+ * numeric" to drizzle, compares both as numbers by its affinity (U35b). `is` and the patterns take
  * text on any column.
  */
 const mismatched = (column: SQLiteColumn, { operator, value }: FilterCondition): boolean =>
 	column.dataType.startsWith("string")
-		? holds(value, "number")
+		? column.dataType !== "string numeric" && holds(value, "number")
 		: (column.dataType === "object date" || column.dataType.startsWith("number")) &&
 			!["ilike", "is", "like"].includes(operator) &&
 			holds(value, "string")
