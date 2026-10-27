@@ -96,7 +96,7 @@ export declare function exportDrizzleSchema(options: DrizzleExportOptions): stri
 
 // migrate/core/parse.d.ts
 import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts";
-import { type PgRead } from "./pg-split.ts";
+import { type FileRead } from "./pg-split.ts";
 import { extractSchema } from "./schema.ts";
 import { splitSqlStatements } from "./sql-scan.ts";
 import type { ParsedMigration } from "../types.ts";
@@ -118,12 +118,10 @@ export { classifyMigration, extractDropStatements };
  * earlier files leave; its statements are applied as written, as wrangler and Atlas apply them
  */
 export declare function parseMigration(sql: string, filename: string, options?: ClassifyOptions): ParsedMigration;
-/** parseMigration of a file its caller has read: on Postgres `read` is the file's one parse (M86) */
-export declare function parseRead({ filename, read, sql }: {
+/** parseMigration of a file its caller has read: on Postgres its one parse (M86) */
+export declare function parseRead(file: FileRead & {
     filename: string;
-    read: PgRead | undefined;
-    sql: string;
-}, options: ClassifyOptions): ParsedMigration;
+}, { before, schema }: Omit<ClassifyOptions, "dialect">): ParsedMigration;
 
 // migrate/core/pg-parser.d.ts
 /**
@@ -577,6 +575,7 @@ declare function classificationOf(reads: readonly Read[], sql: string): Migratio
 export { classificationOf, classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings };
 
 // migrate/core/pg-split.d.ts
+import type { Dialect } from "../types.ts";
 type RawStmt = {
     stmt_len?: number;
     stmt_location?: number;
@@ -596,10 +595,21 @@ type PgRead = {
     statements: PgStatement[];
     unreadable: Unreadable | undefined;
 };
+/** A migration file as its dialect reads it: a Postgres file always with its one parse (M86) */
+type FileRead = {
+    dialect: "sqlite";
+    sql: string;
+} | {
+    dialect: "postgres";
+    read: PgRead;
+    sql: string;
+};
 /** A migration file's leading `atlas:` directive lines, with the blank lines after them */
 declare const atlasDirectives: (file: string) => string;
 /** The Postgres file `sql` read once: its statements in the order Postgres runs them, with their trees; throws for a file Atlas cannot split */
 declare function pgRead(sql: string): PgRead;
+/** `sql` as `dialect` reads it, a Postgres file parsed here */
+declare const fileRead: (sql: string, dialect: Dialect) => FileRead;
 /** The statements of the Postgres file `sql`, in the order Postgres runs them; throws for a file Atlas cannot split */
 declare const pgStatements: (sql: string) => string[];
 /** Record the trees of `read`, the file that took `from` to `schema`, beside `schema` */
@@ -615,10 +625,10 @@ declare const historyTrees: (schema: object) => ReadonlyArray<RawStmt[] | undefi
  * the file's own, which its first line sets
  */
 declare function atlasFile(statements: readonly string[], head?: string): string;
-export { atlasDirectives, atlasFile, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead };
+export { atlasDirectives, atlasFile, type FileRead, fileRead, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead, };
 
 // migrate/core/schema.d.ts
-import { type PgRead } from "./pg-split.ts";
+import { type FileRead } from "./pg-split.ts";
 import type { Dialect, ExtractedSchema } from "../types.ts";
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
@@ -631,16 +641,10 @@ declare function extractSchema(sql: string, from?: ExtractedSchema, readAs?: Dia
     schema?: string | undefined;
 }): ExtractedSchema;
 /**
- * extractSchema of a file its caller has read: on Postgres `read` is its one parse, shared with the
- * file's classification (M86); undefined, the file is read as SQLite
+ * extractSchema of a file its caller has read: on Postgres its one parse, shared with the file's
+ * classification (M86); a Postgres name keyed under `searchSchema`
  */
-declare function schemaOfRead({ read, sql }: {
-    read: PgRead | undefined;
-    sql: string;
-}, { dialect, schema: searchSchema }: {
-    dialect: Dialect;
-    schema?: string | undefined;
-}, from?: ExtractedSchema): ExtractedSchema;
+declare function schemaOfRead(file: FileRead, searchSchema: string | undefined, from?: ExtractedSchema): ExtractedSchema;
 export { extractSchema, schemaOfRead };
 
 // migrate/core/sql-scan.d.ts

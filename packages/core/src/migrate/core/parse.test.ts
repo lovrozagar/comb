@@ -5,10 +5,12 @@ import {
 	extractSchema,
 	generateMigrationHash,
 	parseMigration,
+	parseRead,
 	splitSqlStatements,
 	legacyMigrationHash,
 	migrationHashes,
 } from "./parse.ts"
+import { pgRead } from "./pg-split.ts"
 
 describe("splitSqlStatements", () => {
 	it("splits simple statements on semicolons", () => {
@@ -233,6 +235,17 @@ describe("parseMigration", () => {
 			"CREATE TABLE app.post (id int)",
 		])
 		expect([...parsed.expected.tables.keys()]).toEqual(["post"])
+	})
+
+	it("takes a Postgres file only with its read, so it is never read as SQLite", () => {
+		const sql = "CREATE FUNCTION f() RETURNS int AS $$ SELECT 1; SELECT 2 $$ LANGUAGE sql;"
+		const parsed = parseRead({ dialect: "postgres", filename: "1_f.sql", read: pgRead(sql), sql }, {})
+		expect(parsed.expected.statements).toEqual([
+			"CREATE FUNCTION f() RETURNS int AS $$ SELECT 1; SELECT 2 $$ LANGUAGE sql",
+		])
+		// @ts-expect-error a Postgres file without its read is not a FileRead
+		const unread = () => parseRead({ dialect: "postgres", filename: "1_f.sql", sql }, {})
+		expect(unread).toBeTypeOf("function")
 	})
 
 	it("hashes the same SQL to the same value and different SQL differently", () => {

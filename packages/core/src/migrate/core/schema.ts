@@ -4,7 +4,7 @@
  * reads a file against it, and the SQLite rebuild guard finds the tables a rebuild reaches by it.
  */
 import { codeOf, dialectOf, IDENT, lastPart, nameKey, type Naming, namingOf, QNAME, splitTopLevel } from "./sql-code.ts"
-import { type PgRead, pgRead, recordRead } from "./pg-split.ts"
+import { type FileRead, fileRead, recordRead } from "./pg-split.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 import { syncTriggerOf } from "./fts-sync.ts"
 import { COLUMN, columnKey, columnNames, CONSTRAINT_WORDS, GENERATED, tableDefinition } from "./schema-table.ts"
@@ -186,19 +186,21 @@ function extractSchema(
 	from: ExtractedSchema = EMPTY,
 	readAs: Dialect | { dialect: Dialect; schema?: string | undefined } = "sqlite",
 ): ExtractedSchema {
-	const as = typeof readAs === "string" ? { dialect: readAs } : readAs
-	return schemaOfRead({ read: as.dialect === "postgres" ? pgRead(sql) : undefined, sql }, as, from)
+	const { dialect, schema } = typeof readAs === "string" ? { dialect: readAs, schema: undefined } : readAs
+	return schemaOfRead(fileRead(sql, dialect), schema, from)
 }
 
 /**
- * extractSchema of a file its caller has read: on Postgres `read` is its one parse, shared with the
- * file's classification (M86); undefined, the file is read as SQLite
+ * extractSchema of a file its caller has read: on Postgres its one parse, shared with the file's
+ * classification (M86); a Postgres name keyed under `searchSchema`
  */
 function schemaOfRead(
-	{ read, sql }: { read: PgRead | undefined; sql: string },
-	{ dialect, schema: searchSchema }: { dialect: Dialect; schema?: string | undefined },
+	file: FileRead,
+	searchSchema: string | undefined,
 	from: ExtractedSchema = EMPTY,
 ): ExtractedSchema {
+	const { dialect, sql } = file
+	const read = dialect === "postgres" ? file.read : undefined
 	const naming = namingOf(dialect, searchSchema)
 	const schema: SchemaSoFar = {
 		droppedTables: [...from.droppedTables],

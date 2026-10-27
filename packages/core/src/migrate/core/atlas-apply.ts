@@ -93,13 +93,13 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 		if (waiting.has(Name) && unread !== undefined) throw new Error(unread)
 		const before = schema
 		/* the file's one parse, for the schema it leaves and, pending, its approval (M86) */
-		const read = named(Name, () => pgRead(sql))
-		schema = schemaOfRead({ read, sql }, readAs, before)
-		const { unreadable } = read
+		const file = { dialect: "postgres" as const, read: named(Name, () => pgRead(sql)), sql }
+		schema = schemaOfRead(file, readAs.schema, before)
+		const { unreadable } = file.read
 		unread ??=
 			unreadable && `comb could not read ${Name}: ${JSON.stringify(unreadable.statement)} (${unreadable.error})`
 		if (!waiting.has(Name)) continue
-		const migration = parseRead({ filename: Name, read, sql }, { before, ...readAs })
+		const migration = parseRead({ ...file, filename: Name }, { before, schema: readAs.schema })
 		for (const warning of migration.classification.lockWarnings) options.print(`Lock warning in ${Name}: ${warning}`)
 		const approval = await options.approve(migration)
 		if (!approval.ok) throw new Refused(approval.message, [...waiting])

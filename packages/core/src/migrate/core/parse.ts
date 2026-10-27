@@ -10,7 +10,7 @@ import {
 	extractDropStatements,
 	readings,
 } from "./classify.ts"
-import { type PgRead, pgRead } from "./pg-split.ts"
+import { type FileRead, fileRead } from "./pg-split.ts"
 import { extractSchema, schemaOfRead } from "./schema.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 import type { ParsedMigration } from "../types.ts"
@@ -72,19 +72,20 @@ export { classifyMigration, extractDropStatements }
  * earlier files leave; its statements are applied as written, as wrangler and Atlas apply them
  */
 export function parseMigration(sql: string, filename: string, options: ClassifyOptions = {}): ParsedMigration {
-	return parseRead({ filename, read: options.dialect === "postgres" ? pgRead(sql) : undefined, sql }, options)
+	return parseRead({ ...fileRead(sql, options.dialect ?? "sqlite"), filename }, options)
 }
 
-/** parseMigration of a file its caller has read: on Postgres `read` is the file's one parse (M86) */
+/** parseMigration of a file its caller has read: on Postgres its one parse (M86) */
 export function parseRead(
-	{ filename, read, sql }: { filename: string; read: PgRead | undefined; sql: string },
-	options: ClassifyOptions,
+	file: FileRead & { filename: string },
+	{ before, schema }: Omit<ClassifyOptions, "dialect">,
 ): ParsedMigration {
-	const reads = readings(sql, options, read)
+	const { dialect, filename, sql } = file
+	const reads = readings(sql, { before, dialect, schema }, dialect === "postgres" ? file.read : undefined)
 	return {
 		classification: classificationOf(reads, sql),
 		drops: dropsOf(reads),
-		expected: schemaOfRead({ read, sql }, { dialect: options.dialect ?? "sqlite", schema: options.schema }),
+		expected: schemaOfRead(file, schema),
 		filename,
 		hash: generateMigrationHash(sql),
 		sql,

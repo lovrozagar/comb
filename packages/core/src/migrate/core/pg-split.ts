@@ -9,6 +9,7 @@
  */
 import { atlasChunks, type Chunk, unterminated } from "./atlas-scan.ts"
 import { parsePostgres, postgresParser } from "./pg-parser.ts"
+import type { Dialect } from "../types.ts"
 
 type RawStmt = { stmt_len?: number; stmt_location?: number }
 
@@ -23,6 +24,9 @@ type Read = { error?: string; statements: PgStatement[] }
 
 /** A Postgres file read: its statements in order, and the first the parser cannot read */
 type PgRead = { statements: PgStatement[]; unreadable: Unreadable | undefined }
+
+/** A migration file as its dialect reads it: a Postgres file always with its one parse (M86) */
+type FileRead = { dialect: "sqlite"; sql: string } | { dialect: "postgres"; read: PgRead; sql: string }
 
 /** The statements Postgres reads in one chunk, the comments before it kept on the first */
 function readChunk(chunk: Chunk): Read {
@@ -68,6 +72,10 @@ function pgRead(sql: string): PgRead {
 	}
 	return read
 }
+
+/** `sql` as `dialect` reads it, a Postgres file parsed here */
+const fileRead = (sql: string, dialect: Dialect): FileRead =>
+	dialect === "postgres" ? { dialect, read: pgRead(sql), sql } : { dialect, sql }
 
 /** The statements of the Postgres file `sql`, in the order Postgres runs them; throws for a file Atlas cannot split */
 const pgStatements = (sql: string): string[] => pgRead(sql).statements.map(({ text }) => text)
@@ -134,4 +142,15 @@ function atlasFile(statements: readonly string[], head = ""): string {
 	throw new Error(`comb cannot write these statements so that Atlas sends each alone: ${JSON.stringify(statements)}`)
 }
 
-export { atlasDirectives, atlasFile, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead }
+export {
+	atlasDirectives,
+	atlasFile,
+	type FileRead,
+	fileRead,
+	historyTrees,
+	type PgRead,
+	pgRead,
+	type PgStatement,
+	pgStatements,
+	recordRead,
+}
