@@ -188,13 +188,25 @@ function aliasedColumns(table: SQLiteTable, name: string): { columns: Record<str
 	}
 }
 
+/**
+ * A negative operator's positive, which a relation filter reads as "no related row matches it"
+ * (U30): ne and nin as no related row equal to or in the value, is.null as no related row with a
+ * value, is.notnull as no related row without one. undefined for an operator that is its own positive.
+ */
+function positiveOf({ operator, value }: FilterCondition): Pick<FilterCondition, "operator" | "value"> | undefined {
+	if (operator === "ne" || operator === "neq") return { operator: "eq", value }
+	if (operator === "nin") return { operator: "in", value }
+	if (operator === "is" && value === null) return { operator: "is", value: "notnull" }
+	if (operator === "is" && value === "notnull") return { operator: "is", value: null }
+	return undefined
+}
+
 function relationFilterToSQL(
 	condition: FilterCondition,
 	relationConfig: RelationConfig,
 	mainTable: SQLiteTable,
 ): SQL | null {
-	const { field, operator, value } = condition
-	const targetFieldName = field.slice(field.lastIndexOf(".") + 1)
+	const targetFieldName = condition.field.slice(condition.field.lastIndexOf(".") + 1)
 	/* aliased, as a relation back to the main table would otherwise read its own key for the outer row's */
 	const target = aliasedColumns(relationConfig.target, "comb_rel_target")
 	const through = aliasedColumns(relationConfig.through, "comb_rel_through")
@@ -213,10 +225,11 @@ function relationFilterToSQL(
 	const targetKeyColumn = own(targetColumns, relationConfig.targetKey)
 	if (!sourceColumn || !throughSourceColumn || !throughTargetColumn || !targetKeyColumn) return null
 
-	const targetCondition = conditionToSQL({ field: targetFieldName, operator, value }, targetColumn)
+	const positive = positiveOf(condition)
+	const targetCondition = conditionToSQL({ ...condition, ...positive, field: targetFieldName }, targetColumn)
 	if (!targetCondition) return null
 
-	return sql`EXISTS (
+	return sql`${positive === undefined ? sql`` : sql`NOT `}EXISTS (
 		SELECT 1 FROM ${through.from}
 		INNER JOIN ${target.from} ON ${targetKeyColumn} = ${throughTargetColumn}
 		WHERE ${throughSourceColumn} = ${sourceColumn}

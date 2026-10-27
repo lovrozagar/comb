@@ -188,13 +188,13 @@ const postTag = sqliteTable("post_tag", {
 const tagged = createListQuerySchema({ filter: { "tags.slug": "string" }, sort: ["id"] })
 
 /** The ids `filter` selects through the tags relation, ascending */
-async function taggedIds(filter: string, relation: Record<string, unknown>): Promise<number[]> {
+async function taggedIds(filter: string, relation: Record<string, unknown>, extra = ""): Promise<number[]> {
 	const db = await seeded()
 	const harness = open.at(-1) as LibsqlHarness
 	await harness.client.executeMultiple(`CREATE TABLE tag (id INTEGER PRIMARY KEY, slug TEXT);
 CREATE TABLE post_tag (id INTEGER PRIMARY KEY, post_id INTEGER, tag_id INTEGER);
 INSERT INTO tag VALUES (10, 'release'), (20, 'draft');
-INSERT INTO post_tag VALUES (1, 3, 10), (2, 5, 10), (3, 1, 20);`)
+INSERT INTO post_tag VALUES (1, 3, 10), (2, 5, 10), (3, 1, 20);${extra}`)
 	const parsed = tagged.parse({ filter, limit: "100", order: "id.asc" })
 	const relations = { tags: relation as never }
 	const query = buildListQuery({ ...SEALED, parsed, relations, table: post })
@@ -214,6 +214,18 @@ describe("relation filters run against the join table's own keys (B1)", () => {
 	it("selects the rows whose related row matches", async () => {
 		expect(await taggedIds("tags.slug.eq.release", relation)).toEqual([3, 5])
 		expect(await taggedIds("tags.slug.eq.draft", relation)).toEqual([1])
+	})
+
+	/* U30: a negative on a relation means no related row matches the positive, so it never takes the rows the positive took */
+	it("reads ne, nin and is on a relation as no related row matching their positive", async () => {
+		/* post 3 is tagged release and draft, post 2 only with a tag of no slug; posts 4 and 6 are untagged */
+		const both = "\nINSERT INTO tag VALUES (30, NULL);\nINSERT INTO post_tag VALUES (4, 3, 20), (5, 2, 30);"
+		const posts = (filter: string) => taggedIds(filter, relation, both)
+		expect(await posts("tags.slug.eq.release")).toEqual([3, 5])
+		expect(await posts("tags.slug.ne.release")).toEqual([1, 2, 4, 6])
+		expect(await posts("tags.slug.nin.(release,draft)")).toEqual([2, 4, 6])
+		expect(await posts("tags.slug.is.null")).toEqual([2, 4, 6])
+		expect(await posts("tags.slug.is.notnull")).toEqual([1, 3, 4, 5, 6])
 	})
 
 	it("refuses a relation whose key names no column, instead of joining a guess", async () => {
