@@ -4,7 +4,8 @@
  * the seeded content table ('rebuild'), or from rows of its own for a contentless one, and a file
  * is compared by the index's row count: `<t>_docsize`, a row per document, or `<t>_idx` where the
  * table keeps no docsize. A count that falls is an index the file emptied, whatever its command's
- * spelling.
+ * spelling. An fts4 mirror kept with matchinfo=fts3 has neither and is not counted: fts4 refuses
+ * a delete-all command.
  */
 import type { MemoryDb } from "../drivers/memory.ts"
 import { asciiFold } from "./sql-code.ts"
