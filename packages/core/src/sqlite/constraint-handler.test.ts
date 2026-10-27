@@ -369,6 +369,16 @@ describe("sqliteErrorHandler: an UPDATE behind a foreign key violation", () => {
 		})
 	})
 
+	/* U42: SQLite reads a column name in any ASCII case, quoted or bare, so the SET list is read as it does */
+	it("reads the SET list's column in any ASCII case, quoted or bare", () => {
+		for (const query of [
+			'update "store" set OWNER_ID = ?',
+			'update "store" set "Owner_Id" = ?',
+			"update store set [OWNER_id] = ?",
+		])
+			expect(fk(query)).toMatchObject({ column: "owner_id", errorKey: "store_owner_missing" })
+	})
+
 	/* U23 of the 0.13.0 round: a map need not list every key, so which side failed is unknown: the neutral cause */
 	it("answers an UPDATE of any other column with the neutral cause, never the table's own key", () => {
 		for (const query of ['update "store" set "id" = ? where "id" = ?', 'update or abort "store" set "name" = ?'])

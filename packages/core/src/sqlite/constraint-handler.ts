@@ -135,7 +135,8 @@ function foreignKey(v: Violation): CombError {
 	const assigned = updatedColumns(v.read.query)
 	/* an UPDATE that sets none of the keys a map lists may still have broken one the map leaves out,
 	   a composite key's later column among them: which side failed is unknown (U23) */
-	const unlisted = assigned !== undefined && !assigned.some((name) => keys?.includes(name) === true)
+	const folded = new Set(keys?.map(asciiFolded))
+	const unlisted = assigned !== undefined && !assigned.some((name) => folded.has(asciiFolded(name)))
 	if (/^delete\b/i.test(statementHead(v.read.query ?? ""))) {
 		const fallback = {
 			cause: STILL_REFERENCED,
@@ -165,6 +166,9 @@ const raised = (v: Violation): CombError =>
 		source: v.source,
 		status: "bad_request",
 	})
+
+/** `name` with its ASCII letters lowercased: SQLite reads a column name in any ASCII case, and folds no other letter (U42) */
+const asciiFolded = (name: string): string => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
 
 const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
 	SQLITE_CONSTRAINT: raised,
