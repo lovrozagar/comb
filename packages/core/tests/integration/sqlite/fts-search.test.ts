@@ -5,7 +5,7 @@
 import { eq, type SQL, sql } from "drizzle-orm"
 import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
-import { buildFtsMatch, buildFtsWhere, searchText } from "../../../src/query/sqlite/search.ts"
+import { buildFtsMatch, buildFtsWhere, likeSearch, searchText } from "../../../src/query/sqlite/search.ts"
 import { DEFAULT_TOKENIZER } from "../../../src/codegen/generators/fts-sql.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 
@@ -160,4 +160,49 @@ CREATE TRIGGER folded_fts_ai AFTER INSERT ON folded BEGIN INSERT INTO folded_fts
 			expect(rows.length).toBe(1)
 		},
 	)
+})
+
+/* U38: what the README says folded FTS does not find that likeSearch does, pinned on real FTS5 under the generated tokenizer */
+describe("folded FTS against likeSearch: token prefixes, not substrings", () => {
+	const folded = sqliteTable("folded", { _search: text("_search").notNull(), title: text("title").notNull() })
+	const TEXTS = ["reassess", "東京都庁", "한국어", "c++ tips", "cats", "dogs"]
+
+	/** The titles folded FTS and likeSearch each find for `query` */
+	async function both(query: string): Promise<{ fts: string[]; like: string[] }> {
+		const harness = libsqlMemory()
+		open.push(harness)
+		await harness.client.executeMultiple(`
+CREATE TABLE folded (title TEXT NOT NULL, _search TEXT NOT NULL);
+CREATE VIRTUAL TABLE folded_fts USING fts5(_search, content='folded', content_rowid='rowid', tokenize='${DEFAULT_TOKENIZER.replaceAll("'", "''")}');
+CREATE TRIGGER folded_fts_ai AFTER INSERT ON folded BEGIN INSERT INTO folded_fts(rowid, _search) VALUES (new.rowid, new._search); END;
+`)
+		for (const title of TEXTS)
+			await harness.client.execute({
+				args: [title, searchText(title)],
+				sql: "INSERT INTO folded (title, _search) VALUES (?, ?)",
+			})
+		const titles = async (where: SQL) =>
+			(await harness.db.all<{ title: string }>(sql`SELECT title FROM folded WHERE ${where} ORDER BY rowid`)).map(
+				(row) => row.title,
+			)
+		return {
+			fts: await titles(buildFtsWhere({ folded: true, ftsTable: "folded_fts", table: folded }, query) as SQL),
+			like: await titles(likeSearch(folded._search)(query) as SQL),
+		}
+	}
+
+	it("finds a term at a token's start, where likeSearch finds it inside a word", async () => {
+		expect(await both("asse")).toEqual({ fts: [], like: ["reassess"] })
+		expect(await both("reas")).toEqual({ fts: ["reassess"], like: ["reassess"] })
+	})
+
+	it("finds no term inside an unspaced CJK or Hangul run, which is one token", async () => {
+		expect(await both("都庁")).toEqual({ fts: [], like: ["東京都庁"] })
+		expect(await both("국어")).toEqual({ fts: [], like: ["한국어"] })
+		expect(await both("東京")).toEqual({ fts: ["東京都庁"], like: ["東京都庁"] })
+	})
+
+	it("drops the symbols the tokenizer does not index, so c++ searches c*", async () => {
+		expect(await both("c++")).toEqual({ fts: ["c++ tips", "cats"], like: ["c++ tips"] })
+	})
 })
