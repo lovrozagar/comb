@@ -12,7 +12,7 @@ Every change starts with a test: a bug, a reported issue, a review finding, a fe
 - `test:e2e`
 - `test:consumers`
 
-Hooks enforce it. pre-commit fixes, formats and lints the staged files and type-checks. pre-push checks fmt and lint over the whole tree, checks the repo is in sync with `~/Development/standards`, and refuses any commit without a verify stamp. Never use `--no-verify`, never stamp by hand. CI runs the same scripts on every push to `main`. While any gate is red, locally or in CI, the only work is fixing it. A failure is never skipped, retried away, or called flaky. Detail: `.rulesync/reference/gates.md`.
+Hooks enforce it. pre-commit fixes, formats and lints the staged files and type-checks. pre-push checks fmt and lint over the whole tree, checks the repo is in sync with `~/Development/standards`, and refuses a push whose tip has no verify stamp; the commits under the tip ride on its verify. Never use `--no-verify`, never stamp by hand. CI runs the same scripts on every push to `main`. While any gate is red, locally or in CI, the only work is fixing it. A failure is never skipped, retried away, or called flaky. Detail: `.rulesync/reference/gates.md`.
 
 ## Managed files
 

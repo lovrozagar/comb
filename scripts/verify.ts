@@ -3,7 +3,7 @@
 // `bun run verify`: every local gate in order, stopping at the first that fails with its exit code. The base four
 // run in every repo; the repo's own gates follow, from `standards.gates` in package.json (set by sync from
 // standards.json). On a clean tree where all pass, it stamps HEAD in `standards-verified/<sha>` of the repository's
-// common git dir, which every worktree shares and nothing commits. pre-push requires the stamp of every pushed commit.
+// common git dir, which every worktree shares and nothing commits. pre-push requires the stamp of each pushed tip.
 // A dirty tree is refused: the stamp would vouch for a commit the gates did not run on.
 import { spawnSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"

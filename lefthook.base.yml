@@ -4,7 +4,7 @@
 # pre-commit: fixers first, the formatter last so it has the final word (oxlint autofixes emit their own style),
 # `stage_fixed` restages what they changed; then the same checks CI runs, on the staged files, and the type check.
 # pre-push: fmt and lint over the whole tree (catches commits made without hooks), the standards drift check, and the
-# verify stamp on every pushed commit.
+# verify stamp on each pushed tip.
 min_version: 2.2.2
 # `**/` matches any depth, the repo root included.
 glob_matcher: doublestar

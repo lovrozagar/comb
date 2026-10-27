@@ -15,16 +15,16 @@ Every repo has these `package.json` scripts. Hooks, `verify` and CI call only th
 
 ## Where each gate runs
 
-| when       | what                                                                                                                                | blocks                |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| pre-commit | `oxlint --fix`, then `oxfmt` on staged files (restaged); `oxfmt --check` and `oxlint` on them; `bun run typecheck`                  | the commit            |
-| commit-msg | commitlint (Conventional Commits)                                                                                                   | the commit            |
-| pre-push   | `fmt:check`, `lint` on the whole tree; `scripts/standards-check.ts`; `scripts/pre-push.ts` (every pushed commit has a verify stamp) | the push              |
-| CI         | the same scripts on every push to `main`                                                                                            | new work, until fixed |
+| when       | what                                                                                                                            | blocks                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| pre-commit | `oxlint --fix`, then `oxfmt` on staged files (restaged); `oxfmt --check` and `oxlint` on them; `bun run typecheck`              | the commit            |
+| commit-msg | commitlint (Conventional Commits)                                                                                               | the commit            |
+| pre-push   | `fmt:check`, `lint` on the whole tree; `scripts/standards-check.ts`; `scripts/pre-push.ts` (each pushed tip has a verify stamp) | the push              |
+| CI         | the same scripts on every push to `main`                                                                                        | new work, until fixed |
 
 ## verify and the stamp
 
-`bun run verify` refuses a dirty tree, runs every gate, and on success writes `standards-verified/<sha>` in the common git dir. Worktrees share it, so a commit verified in a worktree pushes from the main checkout. Nothing commits the stamp.
+`bun run verify` refuses a dirty tree, runs every gate, and on success writes `standards-verified/<sha>` in the common git dir. Worktrees share it, so a commit verified in a worktree pushes from the main checkout. Nothing commits the stamp. Push and CI are the full gate: only the pushed tip needs a stamp, and the commits under it ride on its verify, so a stack of commits costs one verify, not one each.
 
 ## Standards sync
 
