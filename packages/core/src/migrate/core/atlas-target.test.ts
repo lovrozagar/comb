@@ -136,25 +136,28 @@ describe("redactUrl and scrubAtlasOutput", () => {
 	})
 })
 
+/** A scrub that keeps the text: these messages hold no secret */
+const kept = (text: string) => text
+
 describe("explainAtlasFailure", () => {
 	it("says to set devUrl when Atlas cannot reach Docker for the default dev database", () => {
-		expect(explainAtlasFailure("Error: docker: Cannot connect to the Docker daemon")).toBe(
+		expect(explainAtlasFailure("Error: docker: Cannot connect to the Docker daemon", kept)).toBe(
 			"Atlas needs Docker for the default devUrl (docker://postgres/17/dev); set devUrl to an empty Postgres database instead",
 		)
-		expect(explainAtlasFailure("Error: pq: relation missing")).toBe("Error: pq: relation missing")
+		expect(explainAtlasFailure("Error: pq: relation missing", kept)).toBe("Error: pq: relation missing")
 	})
 
 	it("says another migration is running when Atlas cannot take its lock", () => {
-		expect(explainAtlasFailure("Error: acquiring database lock: sql/schema: lock is held by other session")).toBe(
+		expect(explainAtlasFailure("Error: acquiring database lock: sql/schema: lock is held by other session", kept)).toBe(
 			"another migrate apply is running on this database; run it again once that one finishes",
 		)
 	})
 
 	it("says how to drop an enum value by hand, and what to do with an object Atlas OSS refuses", () => {
-		expect(explainAtlasFailure('Error: dropping value "b" from enum "mood" is not supported')).toBe(
+		expect(explainAtlasFailure('Error: dropping value "b" from enum "mood" is not supported', kept)).toBe(
 			'Atlas cannot drop the value "b" of enum "mood": write that migration by hand (a new type without it, the columns moved to it, the old type dropped), then run migrate diff again',
 		)
-		expect(explainAtlasFailure("Error: functions are available to logged-in users only. Use 'atlas login'")).toBe(
+		expect(explainAtlasFailure("Error: functions are available to logged-in users only. Use 'atlas login'", kept)).toBe(
 			"Atlas OSS does not diff functions: take them out of the drizzle schema and write their migration by hand, or use Atlas Pro",
 		)
 	})

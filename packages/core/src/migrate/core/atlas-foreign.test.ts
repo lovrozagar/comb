@@ -159,6 +159,17 @@ describe("public's history read with a password that spells another schema's nam
 			await applyWithAtlas({ approve, dir, exec: atlas, print: (line) => out.push(line), target: secret }),
 		).toEqual(["3_c.sql"])
 		expect(out[0]).toBe("5 is schema ***'s, recorded in atlas_schema_revisions_***; public ignores it")
+		/* comb's own words stay whole when the password spells one: only the schema's name is masked */
+		const words: string[] = []
+		const spelled = { ...target, url: "postgres://app:schema@localhost/app" }
+		await applyWithAtlas({
+			approve,
+			dir,
+			exec: fakeAtlas({ shared: withApps() }),
+			print: (line) => words.push(line),
+			target: spelled,
+		})
+		expect(words[0]).toBe("5 is schema app's, recorded in atlas_schema_revisions_app; public ignores it")
 		expect(execOrders(atlas.calls)).toHaveLength(2)
 	})
 

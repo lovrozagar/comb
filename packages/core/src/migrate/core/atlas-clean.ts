@@ -4,7 +4,7 @@
  * URL to the target's schema (`search_path`), and Atlas calls a bound target clean while its schema
  * holds no table. Atlas OSS inspects no view or function, so those do not count.
  */
-import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { explainAtlasFailure, NOT_CLEAN, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import type { Run } from "./process.ts"
 
 /** The schemas `atlas schema inspect` reports, by name, with their tables */
@@ -32,12 +32,11 @@ function refuseUnclean(options: { exec: Run; target: PgTarget }): void {
 		/* a failure's output is free text, scrubbed; a success's is JSON, parsed before anything is masked */
 		if (result.code !== 0)
 			throw new Error(
-				`atlas schema inspect: ${`${env.scrub(`${explainAtlasFailure(result.stderr)}${result.stdout}`)}`.trim()}`,
+				`atlas schema inspect: ${`${`${explainAtlasFailure(result.stderr, env.scrub)}${env.scrub(result.stdout)}`}`.trim()}`,
 			)
 		return readInspect(result.stdout)
 	})
-	if (schemas.some((schema) => (schema.tables ?? []).length > 0))
-		throw new Error(explainAtlasFailure("connected database is not clean"))
+	if (schemas.some((schema) => (schema.tables ?? []).length > 0)) throw new Error(NOT_CLEAN)
 }
 
 export { type Inspected, readInspect, refuseUnclean }

@@ -106,7 +106,7 @@ function checkHistory(status: AtlasStatus, copy: string, { gone, scrub, unread }
 		/* an error Atlas reports past a gone file is the gone file's doing, so status names that too */
 		if (status.error !== "")
 			throw new Error(
-				missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${scrub(explainAtlasFailure(status.error))}`,
+				missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${explainAtlasFailure(status.error, scrub)}`,
 			)
 		/* Atlas lists a file older than the latest applied one as neither pending nor an error */
 		const recorded = new Set(status.applied.map((revision) => revision.version))
@@ -114,15 +114,15 @@ function checkHistory(status: AtlasStatus, copy: string, { gone, scrub, unread }
 		const late = status.available.find(
 			(file) => current !== undefined && !recorded.has(file.Version) && file.Version < current,
 		)
-		if (late !== undefined) throw new Error(explainAtlasFailure(`migration file ${late.Name} was added out of order`))
+		if (late !== undefined)
+			throw new Error(explainAtlasFailure(`migration file ${late.Name} was added out of order`, scrub))
 		for (const line of missing) gone?.(line)
 		if (missing.length === 0) refuseEdited(status, copy)
 		return undefined
 	}
 	const name = fileOf(copy, partial.version)
-	const where = scrub(
-		`${name} ran ${partial.applied} of its ${partial.total} statements before it failed at ${partial.errorStmt} (${partial.error})`,
-	)
+	/* only Atlas's text is scrubbed: the statement and its error; comb's words stay as written */
+	const where = `${name} ran ${partial.applied} of its ${partial.total} statements before it failed at ${scrub(partial.errorStmt)} (${scrub(partial.error)})`
 	if (sumHashes(copy).get(name) !== partial.hash) {
 		throw new Error(
 			`${where}, outside a transaction, and has changed since; restore it, or fix the database by hand and run comb migrate baseline`,

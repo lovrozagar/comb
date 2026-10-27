@@ -40,7 +40,7 @@ function atlas(options: AtlasCommand, copy: string, args: readonly string[]): Ra
 		const ran = (options.exec ?? run)("atlas", ["migrate", ...args, "--dir", `file://${copy}`, ...env.args], {
 			env: env.env,
 		})
-		return { ...ran, said: env.scrub(explainAtlasFailure(ran.stderr)), scrub: env.scrub }
+		return { ...ran, said: explainAtlasFailure(ran.stderr, env.scrub), scrub: env.scrub }
 	})
 }
 

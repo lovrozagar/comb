@@ -18,7 +18,7 @@ import { adopted, adopts, sharedPrefix } from "./atlas-adopt.ts"
 import { execOrder, type Foreign, foreignRows, ignoredLines, ownHistory } from "./atlas-foreign.ts"
 import { type AtlasFile, type AtlasStatus, checkHistory, fileOf, filesOf, versionOf } from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
-import { explainAtlasFailure, SHARED_REVISIONS } from "./atlas-target.ts"
+import { explainAtlasFailure, NOT_CLEAN, SHARED_REVISIONS } from "./atlas-target.ts"
 import { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran, scrubbing } from "./atlas-status.ts"
 import { refuseDrift } from "./baseline-compare.ts"
 import { extractSchema, parseMigration } from "./parse.ts"
@@ -44,8 +44,7 @@ function sharedRan(options: AtlasCommand, copy: string, own: AtlasStatus): strin
 
 /** `own` as status, apply and check take it: a database with objects and no history, or one adoption gave, refused */
 function known(own: AtlasStatus): AtlasStatus {
-	if (own === NO_HISTORY)
-		throw new Error(`atlas migrate status: ${explainAtlasFailure("connected database is not clean")}`)
+	if (own === NO_HISTORY) throw new Error(`atlas migrate status: ${NOT_CLEAN}`)
 	return own
 }
 
@@ -122,7 +121,7 @@ function applied(ran: Ran): string[] {
 	}
 	if (ran.code !== 0 || report.error !== "")
 		throw new Error(
-			`atlas migrate apply: ${report.error === "" ? ran.said : ran.scrub(explainAtlasFailure(report.error))}`,
+			`atlas migrate apply: ${report.error === "" ? ran.said : explainAtlasFailure(report.error, ran.scrub)}`,
 		)
 	return report.applied.map((file) => file.Name)
 }

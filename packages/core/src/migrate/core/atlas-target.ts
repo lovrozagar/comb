@@ -207,29 +207,31 @@ function scrubAtlasOutput(text: string, urls: readonly string[]): string {
 	)
 }
 
-/** Atlas's failure in comb's terms where comb knows the fix; otherwise as Atlas said it */
-function explainAtlasFailure(stderr: string): string {
+/** comb's answer to a database Atlas calls not clean: objects but no history */
+const NOT_CLEAN =
+	"the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline"
+
+/** Atlas's failure in comb's terms where comb knows the fix, else as Atlas said it; `scrub` takes only the text Atlas wrote, never comb's words */
+function explainAtlasFailure(stderr: string, scrub: (text: string) => string): string {
 	if (/Error: docker:|Cannot connect to the Docker daemon/i.test(stderr)) {
 		return "Atlas needs Docker for the default devUrl (docker://postgres/17/dev); set devUrl to an empty Postgres database instead"
 	}
 	if (/lock is held by other session/.test(stderr)) {
 		return "another migrate apply is running on this database; run it again once that one finishes"
 	}
-	if (/connected database is not clean/.test(stderr)) {
-		return "the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline"
-	}
+	if (/connected database is not clean/.test(stderr)) return NOT_CLEAN
 	const late = /migration file (\S+) was added out of order/.exec(stderr)?.[1]
 	if (late !== undefined) {
-		return `${late} is older than a migration already applied; rename it to a newer version and run atlas migrate hash`
+		return `${scrub(late)} is older than a migration already applied; rename it to a newer version and run atlas migrate hash`
 	}
 	const [, value, type] = /dropping value "([^"]*)" from enum "([^"]*)" is not supported/.exec(stderr) ?? []
 	if (value !== undefined) {
-		return `Atlas cannot drop the value "${value}" of enum "${type}": write that migration by hand (a new type without it, the columns moved to it, the old type dropped), then run migrate diff again`
+		return `Atlas cannot drop the value "${scrub(value)}" of enum "${scrub(type as string)}": write that migration by hand (a new type without it, the columns moved to it, the old type dropped), then run migrate diff again`
 	}
 	const refused = /(\w[\w ]*?) (?:is|are) available to logged-in users only/.exec(stderr)?.[1]
 	return refused === undefined
-		? stderr
-		: `Atlas OSS does not diff ${refused.replace(/^Error: /, "")}: take them out of the drizzle schema and write their migration by hand, or use Atlas Pro`
+		? scrub(stderr)
+		: `Atlas OSS does not diff ${scrub(refused.replace(/^Error: /, ""))}: take them out of the drizzle schema and write their migration by hand, or use Atlas Pro`
 }
 
 /** A string HCL reads back as `value`: JSON-escaped, with interpolation markers doubled */
@@ -287,6 +289,7 @@ export {
 	atlasUrls,
 	explainAtlasFailure,
 	maskSecrets,
+	NOT_CLEAN,
 	pgUrlProblems,
 	type PgTarget,
 	redactUrl,

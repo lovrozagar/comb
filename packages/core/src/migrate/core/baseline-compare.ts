@@ -107,7 +107,7 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string): vo
 			const result = options.exec("atlas", args, { env: env.env })
 			/* compared as Atlas wrote it; scrubbed only in what comb prints (M79) */
 			if (result.code !== 0) {
-				const said = env.scrub(`${explainAtlasFailure(result.stderr)}${result.stdout}`)
+				const said = `${explainAtlasFailure(result.stderr, env.scrub)}${env.scrub(result.stdout)}`
 				throw new Error(`atlas schema diff: ${said.trim()}`)
 			}
 			return { stdout: result.stdout.trim(), shown: env.scrub(result.stdout).trim() }

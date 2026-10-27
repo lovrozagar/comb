@@ -147,3 +147,48 @@ describe("no Atlas path prints the target's password (M79)", () => {
 		expect(said).not.toContain(SECRET)
 	})
 })
+
+/** A target whose password is `password`, and Atlas echoing it in a not-clean refusal */
+const at = (password: string) => ({ ...target(), url: `postgres://app:${password}@db/app` })
+const echo = (password: string) =>
+	`Error: sql/migrate: connected database is not clean: dial postgres://app:${password}@db/app`
+
+/* CI's Postgres password is `comb`: a scrub must touch only what Atlas wrote, never comb's own words */
+describe("comb's own words, whatever the password spells (M79)", () => {
+	it("keeps the not-clean refusal whole under CI's password, and masks the password Atlas echoed", async () => {
+		/* CI's path: a database with tables and no history, whose dry run Atlas refuses as not clean */
+		const notClean = fake({ dry: { code: 1, stderr: echo("comb"), stdout: "" }, status: status(PENDING) })
+		await expect(
+			applyWithAtlas({ approve, dir, exec: notClean, print: () => undefined, target: at("comb") }),
+		).rejects.toThrow(
+			"the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline",
+		)
+	})
+
+	it("keeps each explained sentence whole when the password is one of its words", async () => {
+		const explained: Array<[string, string]> = [
+			["Error: docker: Cannot connect to the Docker daemon", "set devUrl to an empty Postgres database instead"],
+			["Error: lock is held by other session", "run it again once that one finishes"],
+			[
+				"Error: migration file 2_b.sql was added out of order",
+				"is older than a migration already applied; rename it to a newer version and run atlas migrate hash",
+			],
+			['Error: dropping value "x" from enum "e" is not supported', "write that migration by hand"],
+			["Error: functions are available to logged-in users only", "take them out of the drizzle schema"],
+		]
+		for (const [stderr, sentence] of explained) {
+			for (const password of ["comb", ...sentence.split(/\W+/).filter((word) => word.length > 2)]) {
+				const said = await leaks((print) =>
+					applyWithAtlas({
+						approve,
+						dir,
+						exec: fake({ status: { code: 1, stderr: `${stderr} ${password}@`, stdout: "" } }),
+						print,
+						target: at(password),
+					}),
+				)
+				expect([password, said]).toEqual([password, expect.stringContaining(sentence)])
+			}
+		}
+	})
+})

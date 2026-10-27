@@ -46,7 +46,7 @@ function histories(options: AtlasCommand): string[] {
 		const result = (options.exec ?? run)("atlas", args, { env: env.env })
 		if (result.code !== 0)
 			throw new Error(
-				`atlas schema inspect: ${env.scrub(explainAtlasFailure(result.stderr)).trim() || `exit ${result.code}`}`,
+				`atlas schema inspect: ${explainAtlasFailure(result.stderr, env.scrub).trim() || `exit ${result.code}`}`,
 			)
 		/* the names as the database has them; only a printed line is masked (M79) */
 		return readInspect(result.stdout)
@@ -94,12 +94,11 @@ function ownHistory(status: AtlasStatus, { ignored }: Foreign, copy: string): At
 
 /** What public says of each row it ignores, the target's secrets masked where a schema's name holds one (M79) */
 const ignoredLines = ({ ignored }: Foreign, target: PgTarget): string[] =>
-	[...ignored].map(([version, schema]) =>
-		maskSecrets(`${version} is schema ${schema}'s, recorded in ${OWN}${schema}; public ignores it`, [
-			target.url,
-			target.devUrl,
-		]),
-	)
+	[...ignored].map(([version, schema]) => {
+		/* only the schema's name, a value the database holds, is masked: comb's words stay as written */
+		const name = maskSecrets(schema, [target.url, target.devUrl])
+		return `${version} is schema ${name}'s, recorded in ${OWN}${name}; public ignores it`
+	})
 
 /** The flag the dry run and apply need when public ignores a row: Atlas would count it as public's position */
 const execOrder = ({ ignored }: Foreign): string[] => (ignored.size > 0 ? ["--exec-order", "non-linear"] : [])
