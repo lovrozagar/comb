@@ -141,7 +141,11 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		}
 		if (ran.length > 0) adopt(options, copy, ran)
 		const { foreign, status } = ownOf(options, copy, ran.length > 0 ? atlasStatus(options, copy) : known(own))
-		const halfway = checkHistory(status, copy, { scrub: scrubbing(options.target), unread: foreign.unread })
+		const halfway = checkHistory(status, copy, {
+			elsewhere: foreign.elsewhere,
+			scrub: scrubbing(options.target),
+			unread: foreign.unread,
+		})
 		if (halfway !== undefined) options.print(`${halfway}; resuming after them`)
 		if (status.pending.length === 0) {
 			options.print("No migrations to apply")
@@ -230,6 +234,7 @@ function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: s
 			gone: (line) => missing.push(line),
 			scrub: scrubbing(options.target),
 			unread: foreign.unread,
+			elsewhere: foreign.elsewhere,
 		})
 		options.print(`Applied: ${status.applied.length}${status.applied.length > 0 ? ` (up to ${status.current})` : ""}`)
 		options.print(`Pending: ${status.pending.map((file) => file.Name).join(", ") || "none"}`)

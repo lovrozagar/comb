@@ -149,6 +149,25 @@ describe("public's history beside another schema's 0.12 rows it cannot read (M78
 	})
 })
 
+/* G1-b: before app's own apply adopts its row, public's leftover of it is named for what it may be */
+describe("public's history holding a row no schema's own history matches (G1-b)", () => {
+	const gone = "5 was applied, and its file is gone or renamed"
+	it("says the row may be another schema's from 0.12 when another schema exists, and not otherwise", async () => {
+		const p21 = fakeAtlas({ inspect: ok('{"schemas":[{"name":"public"},{"name":"app"}]}'), shared: withApps() })
+		await expect(applyWithAtlas({ approve, dir, exec: p21, print: () => undefined, target })).rejects.toThrow(
+			`${gone}; if it is another schema's row from comb 0.12, run apply on that schema first to adopt it`,
+		)
+		const alone = fakeAtlas({
+			/* a schema Atlas lists without a name suggests nothing */
+			inspect: ok('{"schemas":[{"name":"public"},{"name":"atlas_schema_revisions"},{}]}'),
+			shared: withApps(),
+		})
+		await expect(applyWithAtlas({ approve, dir, exec: alone, print: () => undefined, target })).rejects.toThrow(
+			new RegExp(`^${gone}$`),
+		)
+	})
+})
+
 /* M79: the listing's names are used as the database has them; only the printed line is masked */
 describe("public's history read with a password that spells another schema's name (M78, M79)", () => {
 	it("still matches app's row and ignores it, its line masking the password", async () => {

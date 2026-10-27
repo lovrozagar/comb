@@ -61,17 +61,27 @@ function refuseRenamed(status: AtlasStatus, copy: string): void {
 	}
 }
 
+/** Why a gone revision may be no gone file: another schema's history unread, or another schema there at all (G1-b) */
+function goneWhy({ elsewhere, unread }: Pick<Report, "elsewhere" | "unread">): string {
+	if (unread !== undefined) return `; another schema's history could not be read: ${unread}`
+	return elsewhere === true
+		? "; if it is another schema's row from comb 0.12, run apply on that schema first to adopt it"
+		: ""
+}
+
 /** Each applied revision whose file is gone or renamed to another version (M76), named by its version */
-const goneFiles = (status: AtlasStatus, copy: string, unread: string | undefined): string[] =>
+const goneFiles = (status: AtlasStatus, copy: string, why: Pick<Report, "elsewhere" | "unread">): string[] =>
 	status.applied
 		.filter((revision) => fileOf(copy, revision.version) === revision.version)
-		.map(
-			(revision) =>
-				`${revision.version} was applied, and its file is gone or renamed${unread === undefined ? "" : `; another schema's history could not be read: ${unread}`}`,
-		)
+		.map((revision) => `${revision.version} was applied, and its file is gone or renamed${goneWhy(why)}`)
 
 /** How checkHistory reports: `scrub` for Atlas's text it prints, every decision read raw (M79); `gone` takes a gone file's line, as status does; `unread`, why another schema's history could not be read (M78) */
-type Report = { gone?: ((line: string) => void) | undefined; scrub(text: string): string; unread?: string | undefined }
+type Report = {
+	elsewhere?: boolean | undefined
+	gone?: ((line: string) => void) | undefined
+	scrub(text: string): string
+	unread?: string | undefined
+}
 
 /**
  * Refuses an applied file edited since, as comb does on SQLite: Atlas never runs it again, so the
@@ -96,12 +106,16 @@ function refuseEdited(status: AtlasStatus, copy: string): void {
  * Atlas's hashes are cumulative; a gone file is only named when `gone` takes it, as status does,
  * and then no hash is compared, as every one after it reads as changed.
  */
-function checkHistory(status: AtlasStatus, copy: string, { gone, scrub, unread }: Report): string | undefined {
+function checkHistory(
+	status: AtlasStatus,
+	copy: string,
+	{ elsewhere, gone, scrub, unread }: Report,
+): string | undefined {
 	const partial = status.applied.find((revision) => revision.applied < revision.total && revision.error !== "")
 	if (partial === undefined) {
 		/* a renamed or gone file first: Atlas calls a file older than a gone one out of order, and the gone one is the cause */
 		refuseRenamed(status, copy)
-		const missing = goneFiles(status, copy, unread)
+		const missing = goneFiles(status, copy, { elsewhere, unread })
 		if (missing.length > 0 && gone === undefined) throw new Error(missing.join("; "))
 		/* an error Atlas reports past a gone file is the gone file's doing, so status names that too */
 		if (status.error !== "")

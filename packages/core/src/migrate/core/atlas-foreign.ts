@@ -17,21 +17,25 @@
 import { readInspect } from "./atlas-clean.ts"
 import { type AtlasStatus, fileOf, filesOf } from "./atlas-history.ts"
 import { atlasStatus, type AtlasCommand } from "./atlas-status.ts"
-import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { explainAtlasFailure, type PgTarget, SHARED_REVISIONS, withAtlasEnv } from "./atlas-target.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 import { run } from "./process.ts"
 
 /** Another schema's own history, by the prefix Atlas's per-schema histories share */
 const OWN = "atlas_schema_revisions_"
 
-/** What public's history holds of other schemas: each ignored version with its schema, or why they could not be read */
-type Foreign = { ignored: Map<string, string>; unread: string | undefined }
+/**
+ * What public's history holds of other schemas: each ignored version with its schema, or why they
+ * could not be read; `elsewhere` when the database holds a schema but public, so a row no own
+ * history matches may be one comb 0.12 recorded for it, not yet adopted (G1-b)
+ */
+type Foreign = { elsewhere: boolean; ignored: Map<string, string>; unread: string | undefined }
 
 /** No row of another schema's, nothing unread */
-const none = (): Foreign => ({ ignored: new Map(), unread: undefined })
+const none = (): Foreign => ({ elsewhere: false, ignored: new Map(), unread: undefined })
 
-/** The names of the database's other schemas' own histories */
-function histories(options: AtlasCommand): string[] {
+/** The names of the database's schemas */
+function schemasOf(options: AtlasCommand): string[] {
 	const ran = withAtlasEnv(options.target, { allSchemas: true, url: true }, (env) => {
 		const args = [
 			"schema",
@@ -52,7 +56,7 @@ function histories(options: AtlasCommand): string[] {
 		/* the names as the database has them; only a printed line is masked (M79) */
 		return readInspect(result.stdout)
 	})
-	return (ran.schemas ?? []).flatMap((schema) => (schema.name?.startsWith(OWN) === true ? [schema.name] : []))
+	return (ran.schemas ?? []).flatMap((schema) => (schema.name === undefined ? [] : [schema.name]))
 }
 
 /** The revisions of public's history `status` that are another schema's, read from those schemas' own histories */
@@ -61,8 +65,11 @@ function foreignRows(options: AtlasCommand, copy: string, status: AtlasStatus): 
 	const fileless = status.applied.filter((revision) => fileOf(copy, revision.version) === revision.version)
 	if (fileless.length === 0) return none()
 	const own = new Map<string, string>()
+	let elsewhere = false
 	try {
-		for (const name of histories(options)) {
+		const schemas = schemasOf(options)
+		elsewhere = schemas.some((name) => name !== "public" && name !== SHARED_REVISIONS)
+		for (const name of schemas.filter((each) => each.startsWith(OWN))) {
 			for (const revision of atlasStatus({ ...options, revisions: name }, copy, { notClean: true }).applied)
 				own.set(`${revision.version} ${revision.hash}`, name.slice(OWN.length))
 		}
@@ -74,7 +81,7 @@ function foreignRows(options: AtlasCommand, copy: string, status: AtlasStatus): 
 		const schema = own.get(`${revision.version} ${revision.hash}`)
 		return schema === undefined ? [] : [[revision.version, schema]]
 	})
-	return { ignored: new Map(ignored), unread: undefined }
+	return { elsewhere, ignored: new Map(ignored), unread: undefined }
 }
 
 /**
