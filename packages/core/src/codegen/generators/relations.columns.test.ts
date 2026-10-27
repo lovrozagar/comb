@@ -81,19 +81,22 @@ export const post = sqliteTable("post", { id: text("id").primaryKey(), rapid: te
 	})
 })
 
+/** The relations of user and a post holding a key to user for each of `keys`, in that order */
+const postWith = (...keys: string[]) =>
+	relationsOf(
+		`export const user = sqliteTable("user", { id: text("id").primaryKey() })\nexport const post = sqliteTable("post", {\n\tid: text("id").primaryKey(),\n${keys.map((key) => `\t${key}: text("${key}").references(() => user.id),`).join("\n")}\n})`,
+	)
+
 describe("generateRelations: names a key added to either table never changes (F24)", () => {
-	it("keeps an existing relation's name whichever key is added second, the plain one or another", () => {
-		const user = 'export const user = sqliteTable("user", { id: text("id").primaryKey() })\n'
-		const post = (...keys: string[]) =>
-			relationsOf(
-				`${user}export const post = sqliteTable("post", {\n\tid: text("id").primaryKey(),\n${keys.map((key) => `\t${key}: text("${key}").references(() => user.id),`).join("\n")}\n})`,
-			)
-		/* author first, then the plain user_id: postsByAuthor stays, posts is the newcomer's */
-		expect(post("author_id")).toContain("postsByAuthor: r.many.post({")
-		expect(post("author_id", "user_id")).toContain("postsByAuthor: r.many.post({")
-		/* the plain user_id first, then author: posts stays */
-		expect(post("user_id")).toContain("posts: r.many.post({")
-		expect(post("user_id", "author_id")).toContain("posts: r.many.post({")
+	/* each ordering is a test of its own: every relationsOf is a codegen child of its own (R1) */
+	it("keeps postsByAuthor when the plain user_id is added after author_id", () => {
+		expect(postWith("author_id")).toContain("postsByAuthor: r.many.post({")
+		expect(postWith("author_id", "user_id")).toContain("postsByAuthor: r.many.post({")
+	})
+
+	it("keeps posts when author_id is added after the plain user_id", () => {
+		expect(postWith("user_id")).toContain("posts: r.many.post({")
+		expect(postWith("user_id", "author_id")).toContain("posts: r.many.post({")
 	})
 
 	const USER = 'export const user = sqliteTable("user", { id: text("id").primaryKey() })\n'
