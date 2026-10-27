@@ -50,6 +50,14 @@ describe("likeSearch", () => {
 })
 
 describe("searchText: the _search column's writer, which likeSearch reads with (Q14)", () => {
+	/* U31: vowel points and tatweel are optional and not typed, as Latin accents are */
+	it("drops Hebrew niqqud and cantillation, Arabic harakat and tatweel, keeping the letters", () => {
+		expect(searchText("שָׁלוֹם")).toBe(searchText("שלום"))
+		expect(searchText("مُحَمَّد")).toBe("محمد")
+		expect(searchText("مـحـمـد")).toBe("محمد")
+		expect(searchText("الْقُرْآن")).toBe(searchText("القرآن"))
+	})
+
 	it("folds case, diacritics and compatibility forms, and joins the parts it is given", () => {
 		expect(searchText("Évaluation", null, "Crème Brûlée", undefined)).toBe("evaluation creme brulee")
 		expect(searchText("ＦＩＬＥ ﬁx")).toBe("file fix")

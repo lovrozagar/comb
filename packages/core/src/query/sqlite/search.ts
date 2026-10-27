@@ -153,6 +153,9 @@ type LikeSearchResolver = (q: string) => SQL | null
 
 /* a run of the combining marks NFKD splits off a letter (é is e + U+0301), with the letter before it when that letter is Cyrillic */
 const MARKS = /(\p{Script=Cyrillic})?([\u0300-\u036f]+)/gu
+/* Hebrew points and cantillation, Arabic harakat, the superscript alef and Quranic marks, and the
+   tatweel that stretches a word: optional, and not typed (U31) */
+const SEMITIC_MARKS = /[\u0591-\u05c7\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed\u0640]/gu
 
 /**
  * `text` without its combining marks, but those that make a Cyrillic letter of its own (й is и +
@@ -160,11 +163,13 @@ const MARKS = /(\p{Script=Cyrillic})?([\u0300-\u036f]+)/gu
  * before it, so a stress mark (а́, which no letter holds) goes, as FTS5's unicode61 drops it (U7)
  */
 const unmarked = (text: string): string =>
-	text.replace(MARKS, (_run, letter: string | undefined, marks: string) =>
-		letter === undefined
-			? ""
-			: letter + [...marks].filter((mark) => [...`${letter}${mark}`.normalize("NFC")].length === 1).join(""),
-	)
+	text
+		.replace(MARKS, (_run, letter: string | undefined, marks: string) =>
+			letter === undefined
+				? ""
+				: letter + [...marks].filter((mark) => [...`${letter}${mark}`.normalize("NFC")].length === 1).join(""),
+		)
+		.replace(SEMITIC_MARKS, "")
 
 /* the Latin letters NFKD leaves whole, each with the ASCII a reader types for it (ẞ, Æ, … lowercase to these first) */
 const LATIN_FOLD: Readonly<Record<string, string>> = {
