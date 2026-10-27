@@ -82,6 +82,7 @@ type FtsTableConfig = {
     columns: string[];
     tokenizer?: string;
 };
+declare const DEFAULT_TOKENIZER = "unicode61 remove_diacritics 2 categories 'L* N* Co M*'";
 /** Deduplicate columns preserving order */
 declare function dedup(columns: string[]): string[];
 /** Generate FTS5 SQL for all configured tables. Returns empty string if nothing to generate. */
@@ -95,7 +96,7 @@ declare function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, F
 declare function ftsReferenceSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
 /** The SQL columns of an FTS index configured on `table` as `columns`, each once */
 declare const ftsColumns: (table: TableMeta, columns: readonly string[]) => string[];
-export { dedup, ftsColumns, ftsReferenceSql, generateFtsSql };
+export { dedup, DEFAULT_TOKENIZER, ftsColumns, ftsReferenceSql, generateFtsSql };
 export type { FtsTableConfig };
 
 // codegen/generators/manifest.d.ts

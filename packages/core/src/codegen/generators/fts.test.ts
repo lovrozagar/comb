@@ -112,7 +112,7 @@ describe("generateFtsSql — the virtual table", () => {
 			article_translation: { columns: ["title"] },
 		})
 
-		expect(sql).toContain("\ttokenize='unicode61 remove_diacritics 2'")
+		expect(sql).toContain("\ttokenize='unicode61 remove_diacritics 2 categories ''L* N* Co M*'''")
 	})
 
 	it("uses custom tokenizer when specified", () => {

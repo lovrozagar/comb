@@ -6,6 +6,7 @@ import { eq, type SQL, sql } from "drizzle-orm"
 import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
 import { buildFtsMatch, buildFtsWhere, searchText } from "../../../src/query/sqlite/search.ts"
+import { DEFAULT_TOKENIZER } from "../../../src/codegen/generators/fts-sql.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 
 const open: LibsqlHarness[] = []
@@ -17,12 +18,12 @@ const doc = sqliteTable("doc", { title: text("title").notNull() })
 
 const TITLES = ["post", "postgres tips", "posture", "o'reilly books", 'say "hi" twice', "unrelated"]
 
-async function indexed(titles: readonly string[] = TITLES) {
+async function indexed(titles: readonly string[] = TITLES, tokenizer = "unicode61 remove_diacritics 2") {
 	const harness = libsqlMemory()
 	open.push(harness)
 	await harness.client.executeMultiple(`
 CREATE TABLE doc (title TEXT NOT NULL);
-CREATE VIRTUAL TABLE doc_fts USING fts5(title, content='doc', content_rowid='rowid', tokenize='unicode61 remove_diacritics 2');
+CREATE VIRTUAL TABLE doc_fts USING fts5(title, content='doc', content_rowid='rowid', tokenize='${tokenizer.replaceAll("'", "''")}');
 CREATE TRIGGER doc_fts_ai AFTER INSERT ON doc BEGIN INSERT INTO doc_fts(rowid, title) VALUES (new.rowid, new.title); END;
 `)
 	for (const title of titles) await harness.client.execute({ args: [title], sql: "INSERT INTO doc (title) VALUES (?)" })
@@ -37,6 +38,23 @@ async function found(query: string, titles: readonly string[] = TITLES): Promise
 	const rows = await db.all<{ title: string }>(sql`SELECT title FROM doc WHERE ${where} ORDER BY rowid`)
 	return rows.map((row) => row.title)
 }
+
+/* U32: the generator's tokenizer counts combining marks as word characters, so a term is a word's start, not a consonant's */
+describe("the generated FTS tokenizer (U32)", () => {
+	const words = ["हिन्दी", "café", "שׁלום"]
+	const generated = async (query: string) => {
+		const db = await indexed(words, DEFAULT_TOKENIZER)
+		const where = buildFtsWhere({ ftsTable: "doc_fts", table: doc }, query)
+		const rows = await db.all<{ title: string }>(sql`SELECT title FROM doc WHERE ${where as SQL} ORDER BY rowid`)
+		return rows.map((row) => row.title)
+	}
+
+	it("finds a word by its start and never by a fragment a mark splits off", async () => {
+		expect(await generated("हिन्दी")).toEqual(["हिन्दी"])
+		expect(await generated("हु")).toEqual([])
+		expect(await generated("cafe")).toEqual(["café"])
+	})
+})
 
 describe("FTS terms are prefix queries (S-3)", () => {
 	it("finds every word that starts with the term", async () => {

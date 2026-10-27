@@ -88,6 +88,17 @@ describe("ftsDelta", () => {
 		)
 	})
 
+	/* U32: the generator's new tokenizer is a changed definition, so the next diff writes the index again */
+	it("rewrites and rebuilds a group whose tokenizer changed, as a history under the old default has", () => {
+		const old =
+			"CREATE VIRTUAL TABLE notes_fts USING fts5(body, content='notes', tokenize='unicode61 remove_diacritics 2')"
+		const current = old.replace("remove_diacritics 2'", "remove_diacritics 2 categories ''L* N* Co M*'''")
+		const out = delta(asSql([TABLE, TRIGGER, old, NOTES_TRIGGER]), asSql([TABLE, TRIGGER, current, NOTES_TRIGGER]))
+		expect(out).toContain('DROP TABLE IF EXISTS "notes_fts"')
+		expect(out).toContain("categories ''L* N* Co M*''")
+		expect(out).toContain(`INSERT INTO "notes_fts"("notes_fts") VALUES ('rebuild')`)
+	})
+
 	it("adds a new group, and only drops a removed one", () => {
 		expect(delta(asSql([TABLE, TRIGGER]), both)).toBe(
 			asSql([NOTES, NOTES_TRIGGER, `INSERT INTO "notes_fts"("notes_fts") VALUES ('rebuild')`]),

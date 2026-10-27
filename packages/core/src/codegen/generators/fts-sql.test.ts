@@ -44,7 +44,8 @@ describe("generateFtsSql", () => {
 		const { sql } = generate({ post: { columns: ["title", "bodyText"] } })
 		expect(sql).toContain('CREATE VIRTUAL TABLE IF NOT EXISTS "post_fts" USING fts5(\n\t"title", "body_text",')
 		expect(sql).toContain("\tcontent='post',")
-		expect(sql).toContain("tokenize='unicode61 remove_diacritics 2'")
+		/* U32: marks are word characters, so a word is never split into its consonants */
+		expect(sql).toContain("tokenize='unicode61 remove_diacritics 2 categories ''L* N* Co M*'''")
 		expect(sql).toContain('CREATE TRIGGER IF NOT EXISTS "post_fts_ai" AFTER INSERT ON "post" BEGIN')
 		expect(sql).toContain(`VALUES ('delete', old.rowid, old."title", old."body_text");`)
 		expect(sql).toContain('CREATE TRIGGER IF NOT EXISTS "post_fts_au" AFTER UPDATE ON "post" BEGIN')
