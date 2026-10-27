@@ -147,6 +147,14 @@ describe("the engine pass probes only the tables a statement writes", () => {
 		expect(placed).toEqual(["k.a", "k.b", "k.id"])
 	})
 
+	/* M46: a file may name a temp trigger anything, so the probes' names are the run's own */
+	it("probes a table when the file holds a temp trigger of a probe's old name", async () => {
+		const { findings } = await probed(
+			"CREATE TEMP TRIGGER comb_probe_0 AFTER INSERT ON k BEGIN SELECT 1; END;\nUPDATE k SET a = 'x';",
+		)
+		expect(findings.unsafe).toContain("UPDATE k SET a = 'x': updates existing rows of k (a)")
+	})
+
 	it("probes a table a statement writes only through a trigger, and finds what the trigger assigns", async () => {
 		const { findings, placed } = await probed("INSERT INTO src (n) VALUES (1);")
 		expect(findings.unsafe).toEqual([

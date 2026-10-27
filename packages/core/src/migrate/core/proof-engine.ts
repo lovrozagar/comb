@@ -8,6 +8,7 @@
  * its own cursors. Then the statement runs, and a temp object that took an existing table's name is
  * a shadow. The probes exist only on the copy, between the `EXPLAIN` and the run.
  */
+import { randomBytes } from "node:crypto"
 import type { MemoryDb } from "../drivers/memory.ts"
 import type { ExtractedSchema } from "../types.ts"
 import { preview } from "./classify-file.ts"
@@ -29,7 +30,8 @@ type Step = {
 	statement: string
 }
 
-const PROBE = "comb_probe_"
+/** A run's probe-name prefix: a token of its own, so no temp trigger a file made can take a probe's name (M46) */
+const probePrefix = (): string => `comb_probe_${randomBytes(8).toString("hex")}_`
 
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 
@@ -50,7 +52,10 @@ function rootsOf(db: MemoryDb): Pick<Context, "main" | "tables"> {
  * writes a virtual table through VUpdate, and SQLite refuses to prepare one that writes a shadow
  * table itself.
  */
-function placeProbes(db: MemoryDb, probed: ReadonlySet<string>): Array<{ column: string; table: string }> {
+function placeProbes(
+	db: MemoryDb,
+	{ prefix, probed }: { prefix: string; probed: ReadonlySet<string> },
+): Array<{ column: string; table: string }> {
 	const probes: Array<{ column: string; table: string }> = []
 	for (const row of db.all("PRAGMA main.table_list")) {
 		/* the catalog's own name: a folded one SQLite would not find unless only ASCII letters differ */
@@ -59,7 +64,7 @@ function placeProbes(db: MemoryDb, probed: ReadonlySet<string>): Array<{ column:
 		for (const info of db.all(`PRAGMA main.table_xinfo(${quote(table)})`)) {
 			const column = String(info["name"])
 			db.exec(
-				`CREATE TEMP TRIGGER ${PROBE}${probes.length} BEFORE UPDATE OF ${quote(column)} ON main.${quote(table)} BEGIN SELECT ${MARK + probes.length}; END`,
+				`CREATE TEMP TRIGGER ${prefix}${probes.length} BEFORE UPDATE OF ${quote(column)} ON main.${quote(table)} BEGIN SELECT ${MARK + probes.length}; END`,
 			)
 			probes.push({ column: asciiFold(column), table: asciiFold(table) })
 		}
@@ -159,15 +164,16 @@ function explainStatement(db: MemoryDb, sql: string, existing: ReadonlySet<strin
 	}
 	const roots = rootsOf(db)
 	const written = writtenTables(ops, roots.main)
-	const probes = placeProbes(
-		db,
-		written === undefined ? existing : new Set([...written].filter((t) => existing.has(t))),
-	)
+	const prefix = probePrefix()
+	const probes = placeProbes(db, {
+		prefix,
+		probed: written === undefined ? existing : new Set([...written].filter((t) => existing.has(t))),
+	})
 	if (probes.length > 0) {
 		try {
 			ops = db.all(`EXPLAIN ${sql}`)
 		} finally {
-			for (let i = 0; i < probes.length; i++) db.exec(`DROP TRIGGER temp.${PROBE}${i}`)
+			for (let i = 0; i < probes.length; i++) db.exec(`DROP TRIGGER temp.${prefix}${i}`)
 		}
 	}
 	return walkProgram(ops, { existing, probes, watched: watching(db, existing), ...roots })
