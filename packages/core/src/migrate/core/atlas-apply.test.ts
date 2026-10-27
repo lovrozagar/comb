@@ -325,6 +325,15 @@ describe("baselineWithAtlas", () => {
 		expect(run.out).toEqual(["Marked applied: 1_a.sql", "Marked applied: 2_b.sql"])
 	})
 
+	/* M88: the version as Atlas reads a file name, M76's reader: a file with no description is its version alone */
+	it("records the latest file's version, read as Atlas reads it, when the file has no description", () => {
+		writeFileSync(join(dir, "3.sql"), 'CREATE TABLE "c" ("id" int);\n')
+		writeFileSync(join(dir, "atlas.sum"), "h1:x=\n1_a.sql h1:7=\n2_b.sql h1:7=\n3.sql h1:5=\n")
+		const atlas = fakeAtlas({ status: status({}) })
+		expect(baselineWithAtlas(options(atlas))).toEqual(["1_a.sql", "2_b.sql", "3.sql"])
+		expect(atlas.calls.find((call) => call.args[1] === "set")?.args.slice(0, 3)).toEqual(["migrate", "set", "3"])
+	})
+
 	it("compares the database with the history replayed without comb's objects but its sequences", () => {
 		writeFileSync(
 			join(dir, "1_a.sql"),
