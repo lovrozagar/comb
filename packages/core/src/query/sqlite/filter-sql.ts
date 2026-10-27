@@ -9,7 +9,7 @@ import { combErrorKeys } from "../../types.ts"
 
 import type { FilterCondition, FilterGroup } from "../types.ts"
 import { quoteIdent } from "./identifier.ts"
-import { isSecondsOperator, secondsBound } from "./executor.ts"
+import { isSecondsOperator, secondsBound, wholeSeconds } from "./executor.ts"
 import { patternToSQL } from "./pattern.ts"
 
 /** A mapped column: its name, and for a date field the unit it stores (milliseconds unless `"s"`) */
@@ -84,6 +84,12 @@ const LOWER: Readonly<Partial<Record<FilterCondition["operator"], Lower>>> = {
 
 /** A date condition's epoch milliseconds on a column of whole seconds, rounded as the executor rounds them */
 function inSeconds(column: SQL, operator: FilterCondition["operator"], value: unknown): SQL | null {
+	/* each in/nin member as eq or ne takes it, as the executor binds them (U25) */
+	if ((operator === "in" || operator === "nin") && Array.isArray(value)) {
+		const seconds = wholeSeconds(value)
+		if (seconds.length > 0) return listSQL(column, seconds, operator === "nin")
+		return operator === "in" ? sql`0` : sql`${column} IS NOT NULL`
+	}
 	if (!isSecondsOperator(operator) || typeof value !== "number") return null
 	const bound = secondsBound(operator, value)
 	if (bound === "none") return sql`0`

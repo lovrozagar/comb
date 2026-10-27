@@ -42,9 +42,18 @@ function isToSQL(column: SQLiteColumn, value: unknown): SQL | null {
  * date column, so drizzle writes them in the unit the column stores (seconds or milliseconds)
  */
 function boundValue(column: SQLiteColumn, value: unknown): unknown {
-	/* a date field takes no list operator, so its value is one number */
-	return column.dataType === "object date" && typeof value === "number" ? new Date(value) : value
+	if (column.dataType !== "object date") return value
+	/* an in/nin list's members each as one value is (U25): a date field's are numbers, as validated */
+	if (Array.isArray(value)) return value.map((member) => new Date(member as number))
+	return typeof value === "number" ? new Date(value) : value
 }
+
+/**
+ * The whole seconds of `members`, epoch milliseconds: what each matches on a seconds column, as
+ * secondsBound rounds eq's value; one between two seconds matches no row, and is left out (U25)
+ */
+const wholeSeconds = (members: readonly unknown[]): number[] =>
+	members.flatMap((ms) => (typeof ms === "number" && ms % 1000 === 0 ? [ms / 1000] : []))
 
 /** Whether a date column stores whole seconds: drizzle's integer `timestamp` mode, which binds `floor(ms / 1000)` */
 const inSeconds = (column: SQLiteColumn): boolean =>
@@ -97,6 +106,17 @@ function secondsBound(
 	return whole ? { operator: "ne", seconds: below } : "present"
 }
 
+/**
+ * A seconds column's in/nin on epoch milliseconds, each member as eq (in) or ne (nin) takes it:
+ * a member between two seconds matches no row, so in on none of a whole second matches nothing,
+ * and nin of none leaves every row that has a value (U25)
+ */
+function secondsList(column: SQLiteColumn, operator: "in" | "nin", members: readonly unknown[]): SQL {
+	const dates = wholeSeconds(members).map((seconds) => new Date(seconds * 1000))
+	if (operator === "in") return dates.length === 0 ? sql`0` : inArray(column, dates)
+	return dates.length === 0 ? isNotNull(column) : notInArray(column, dates)
+}
+
 /** Whether `value` is a number (or holds one) meant for a text column, which SQLite would compare as text */
 const numberOnText = (column: SQLiteColumn, value: unknown): boolean =>
 	column.dataType.startsWith("string") &&
@@ -106,6 +126,8 @@ const numberOnText = (column: SQLiteColumn, value: unknown): boolean =>
 function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL | null {
 	if (numberOnText(column, condition.value)) return null
 	const { operator } = condition
+	if (inSeconds(column) && (operator === "in" || operator === "nin") && Array.isArray(condition.value))
+		return secondsList(column, operator, condition.value)
 	const seconds =
 		inSeconds(column) && isSecondsOperator(operator) && typeof condition.value === "number"
 			? secondsCondition(column, operator, condition.value)
@@ -244,4 +266,4 @@ function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | nu
 	return ast ? groupToSQL(ast.root, config) : null
 }
 
-export { conditionToSQL, filterToSQL, type FilterToSQLConfig, isSecondsOperator, secondsBound }
+export { conditionToSQL, filterToSQL, type FilterToSQLConfig, isSecondsOperator, secondsBound, wholeSeconds }

@@ -236,6 +236,15 @@ describe("buildConditionSQL — a date column's unit (R9)", () => {
 		expect(compile(buildConditionSQL(condition("neq", 1500), at("s"))!).sql).toBe('"e"."at" IS NOT NULL')
 	})
 
+	/* U25: each in/nin member as eq (in) or ne (nin) takes it, the executor's one rule */
+	it("binds each in and nin member as a seconds column takes it, a member between two seconds as eq does", () => {
+		expect(compile(buildConditionSQL(condition("in", [2000, 3500]), at("s"))!).params).toEqual([2])
+		expect(compile(buildConditionSQL(condition("in", [3500]), at("s"))!).sql).toBe("0")
+		expect(compile(buildConditionSQL(condition("nin", [2000, 3500]), at("s"))!).params).toEqual([2])
+		expect(compile(buildConditionSQL(condition("nin", [3500]), at("s"))!).sql).toBe('"e"."at" IS NOT NULL')
+		expect(compile(buildConditionSQL(condition("in", [2000, 3500]), at("ms"))!).params).toEqual([2000, 3500])
+	})
+
 	it("leaves an operator that takes no instant, such as is, as it is on a seconds column", () => {
 		expect(compile(buildConditionSQL(condition("is", null), at("s"))!).sql).toBe('"e"."at" IS NULL')
 	})

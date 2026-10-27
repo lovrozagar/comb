@@ -296,6 +296,33 @@ describe("conditionToSQL — values and the column's type (B4)", () => {
 		expect(compile(conditionToSQL(cond("at", "gt", 2000), typed.at)).params).toEqual([2])
 	})
 
+	/* U25: each in/nin member of a date field is bound as eq's value is, in the column's own unit */
+	it("binds each in and nin member as the column's unit, on milliseconds and on seconds", () => {
+		const ms = sqliteTable("ms", { at: integer("at", { mode: "timestamp_ms" }) })
+		expect(compile(conditionToSQL(cond("at", "in", [2000, 3500]), ms.at))).toEqual({
+			params: [2000, 3500],
+			sql: '"ms"."at" in (?, ?)',
+		})
+		expect(compile(conditionToSQL(cond("at", "nin", [2000]), ms.at)).params).toEqual([2000])
+		expect(compile(conditionToSQL(cond("at", "gt", 1500), ms.at)).params).toEqual([1500])
+		/* is takes no instant, so its null stays as it is */
+		expect(compile(conditionToSQL(cond("at", "is", null), ms.at)).sql).toBe('("ms"."at" is null)')
+		/* on seconds a member between two seconds matches no row, as eq's value does, and nin leaves every row with a value */
+		expect(compile(conditionToSQL(cond("at", "in", [2000, 3500]), typed.at))).toEqual({
+			params: [2],
+			sql: '"typed"."at" in (?)',
+		})
+		expect(compile(conditionToSQL(cond("at", "in", [3500]), typed.at))).toEqual({ params: [], sql: "0" })
+		expect(compile(conditionToSQL(cond("at", "nin", [2000, 3500]), typed.at))).toEqual({
+			params: [2],
+			sql: '"typed"."at" not in (?)',
+		})
+		expect(compile(conditionToSQL(cond("at", "nin", [3500]), typed.at))).toEqual({
+			params: [],
+			sql: '("typed"."at" is not null)',
+		})
+	})
+
 	it("refuses a number, or a list holding one, against a text column", () => {
 		expect(conditionToSQL(cond("name", "gt", 5), typed.name)).toBeNull()
 		expect(conditionToSQL(cond("name", "in", ["a", 1]), typed.name)).toBeNull()

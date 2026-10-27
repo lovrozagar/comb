@@ -97,6 +97,11 @@ import { type SQL } from "drizzle-orm";
 import { type SQLiteColumn, type SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { ComputedFilterResolver, FilterAST, FilterCondition } from "../types.ts";
 import type { RelationConfig } from "./types.ts";
+/**
+ * The whole seconds of `members`, epoch milliseconds: what each matches on a seconds column, as
+ * secondsBound rounds eq's value; one between two seconds matches no row, and is left out (U25)
+ */
+declare const wholeSeconds: (members: readonly unknown[]) => number[];
 /** The operators a date field takes with one number, which a seconds column rounds */
 type SecondsOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "ne" | "neq";
 declare const isSecondsOperator: (operator: string) => operator is SecondsOperator;
@@ -121,7 +126,7 @@ type FilterToSQLConfig = {
     relations?: Record<string, RelationConfig> | undefined;
 };
 declare function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | null;
-export { conditionToSQL, filterToSQL, type FilterToSQLConfig, isSecondsOperator, secondsBound };
+export { conditionToSQL, filterToSQL, type FilterToSQLConfig, isSecondsOperator, secondsBound, wholeSeconds };
 
 // query/sqlite/filter-sql.d.ts
 /**
