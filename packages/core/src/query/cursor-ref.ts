@@ -183,8 +183,24 @@ function timestampBound({ column, direction }: SortKey, value: Date, at: Anchor)
 	const date = sql.param(value, column as never)
 	/* an infinite row is its own bound; a finite one only while it is still that Date (a row of local
 	   2000-01-01); one edited since, an infinite one made finite among them, bounds as a deleted row */
-	const kept = sql`CASE WHEN NOT isfinite(${column}) THEN ${cursorPrecision(column)} WHEN ${cursorPrecision(column)} = ${date} THEN ${date} END`
+	const kept = sql`CASE WHEN NOT isfinite(${column}) THEN ${column} WHEN ${cursorPrecision(column)} = ${date} THEN ${column} END`
 	return sql`coalesce((SELECT ${kept} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${end})`
+}
+
+/**
+ * A Date on a Postgres timestamp finer than the millisecond its cursor keeps: the row's exact value
+ * while it truncates to that millisecond, else the millisecond's edge toward the rows already
+ * served, its start ascending and its end descending, so a row of it may come again and none is
+ * skipped. The key is ordered and sought as the column itself, so an index on it and the id
+ * serves the page (U27), as SQLite seconds are bounded (U20).
+ */
+function millisecondBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
+	const date = sql.param(value, column as never)
+	const type = (column as { withTimezone?: unknown }).withTimezone === true ? sql`timestamptz` : sql`timestamp`
+	const edge =
+		direction === "asc" ? sql`CAST(${date} AS ${type})` : sql`(CAST(${date} AS ${type}) + interval '1 millisecond')`
+	const kept = sql`CASE WHEN ${cursorPrecision(column)} = ${date} THEN ${column} END`
+	return sql`coalesce((SELECT ${kept} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${edge})`
 }
 
 /** Whether `column` is a SQLite number, which D1 may hand over as null when it holds ±Infinity */
@@ -233,6 +249,8 @@ function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anch
 		if (value instanceof Date && inSeconds(key.column)) return new AnchorBound("row", secondsBound(key, value, at))
 		if (value instanceof Date && misreadsInfinity(key.column) && misreadInfinity(value))
 			return new AnchorBound("row", timestampBound(key, value, at))
+		if (value instanceof Date && cursorPrecision(key.column) !== key.column)
+			return new AnchorBound("row", millisecondBound(key, value, at))
 		if (lossy(value)) return new AnchorBound("row", exactBound(key, value, at))
 		return value === null && holdsInfinity(key.column) ? new AnchorBound("infinite", infiniteBound(key, at)) : value
 	})

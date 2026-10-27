@@ -10,7 +10,6 @@ import { combErrorKeys } from "../types.ts"
 import { type CursorId, CursorRef, CURSOR_TIEBREAK_COLUMN, readCursor } from "./cursor.ts"
 import { anchored, type KeysetKind, mintWithin } from "./cursor-ref.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
-import { atCursorPrecision, boundAs } from "./cursor-precision.ts"
 import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
 import { filterBySelect } from "./fields.ts"
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts"
@@ -107,7 +106,7 @@ function drizzleListOptions(
 	const sort = query.parsedSort
 	const orderBy = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
-		return orderByKeys(atCursorPrecision(keys), tiebreak)
+		return orderByKeys(keys, tiebreak)
 	}
 	const base = { limit: query.limit + 1, orderBy, sortOrderBy: query.sortOrderBy }
 	if (!query.cursor) {
@@ -121,16 +120,13 @@ function drizzleListOptions(
 		/* the cursor is client input: each value must be what its column holds, or it is a 400 */
 		assertCursorFits([...keys.map(({ column }) => column), tiebreak.column], [...cursor.values, cursor.id])
 		const id = bindableOn(tiebreak.column, cursor.id) as CursorId
-		/* a value the keyset reads from the row is anchored first; the others bind as their keys compare them */
-		const values = boundAs(
+		/* a value the keyset reads from the row is anchored; the others bind as their keys compare them */
+		const values = anchored(
 			keys,
-			anchored(
-				keys,
-				cursor.values.map((value, i) => bindableOn(keys[i]?.column, value)),
-				{ id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column },
-			),
+			cursor.values.map((value, i) => bindableOn(keys[i]?.column, value)),
+			{ id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column },
 		)
-		return { id, keys: atCursorPrecision(keys), tiebreak, values }
+		return { id, keys, tiebreak, values }
 	}
 	const where = (table: RelationalTable) => keysetSQL(positionOn(table))
 	if (!cursor.values.some((value) => value instanceof CursorRef)) return { ...base, offset: 0, where: { RAW: where } }
