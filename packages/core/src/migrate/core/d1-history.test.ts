@@ -7,6 +7,7 @@ import { createD1Provider } from "../drivers/d1.ts"
 import { approveMigration } from "./approval.ts"
 import { type D1Target, findWranglerConfig, type ReadConfig } from "./d1-binding.ts"
 import { applyD1, statusD1 } from "./d1-history.ts"
+import { legacyMigrationHash } from "./parse.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -80,6 +81,27 @@ describe("statusD1 and a check on a database without the migrations table", () =
 })
 
 /* M17 of the 0.12 round: D1's history holds names only, so comb records each applied file's hash itself */
+describe("statusD1 on a hash a 0.13 baseline copied from comb's pre-0.8 history", () => {
+	/* M44: a 0.13 baseline recorded the pre-0.5.0 hash drizzle held; drizzle still holding it proves the record is that old */
+	it("takes a pre-0.5.0 hash only where comb's pre-0.8 history still holds it for the file", async () => {
+		const { d1, read } = await target({})
+		const sql = "CREATE TABLE post (id TEXT DEFAULT 'a -- b\nc');"
+		writeFileSync(join(d1.migrationsDir, "1_init.sql"), sql)
+		writeSum(d1.migrationsDir)
+		expect(await applyD1(d1, { approve, print: () => undefined, read })).toEqual(["1_init.sql"])
+		const legacy = legacyMigrationHash(sql)
+		await d1.conn.execute("UPDATE _comb_migration_hashes SET hash = ? WHERE name = '1_init.sql'", [legacy])
+		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(/^1_init\.sql was applied, then edited/)
+		await d1.conn.execute("CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT, created_at INTEGER)")
+		await d1.conn.execute("INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('other', 1)")
+		await expect(statusD1(d1, read, () => undefined)).rejects.toThrow(/^1_init\.sql was applied, then edited/)
+		await d1.conn.execute("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, 1)", [legacy])
+		const lines: string[] = []
+		await statusD1(d1, read, (line) => lines.push(line))
+		expect(lines).toEqual(["Applied: 1_init.sql", "Pending: none"])
+	})
+})
+
 describe("applyD1 and statusD1 on an applied file edited since", () => {
 	it("records each applied file's hash, and refuses the file edited since, in check, apply and status", async () => {
 		const { d1, read } = await target({})

@@ -14,7 +14,7 @@ import type { Connection, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { assertLocalExists, type D1Target, type ReadConfig, resolveBinding } from "./d1-binding.ts"
 import { orphanMessage } from "./history-match.ts"
-import { generateMigrationHash, migrationHashes } from "./parse.ts"
+import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
 import { planApply, wranglerOrder } from "./plan-apply.ts"
 
 const DRIZZLE_TABLE = "__drizzle_migrations"
@@ -73,6 +73,14 @@ async function drizzleHashes(conn: Connection): Promise<Set<string> | undefined>
 	return found.length === 0 ? undefined : new Set(await column(conn, `SELECT hash FROM ${DRIZZLE_TABLE}`))
 }
 
+/**
+ * Whether `hash`, recorded for a file of text `sql`, is that text: its current hash, or its
+ * pre-0.5.0 one where comb's pre-0.8 history (`drizzle`) still holds it, proof the record is from
+ * before 0.5.0, as a 0.13 baseline copied it (M44)
+ */
+const vouched = (sql: string, hash: string, drizzle: ReadonlySet<string> | undefined): boolean =>
+	hash === generateMigrationHash(sql) || (hash === legacyMigrationHash(sql) && drizzle?.has(hash) === true)
+
 /** The migration files of the directory in wrangler's order, with their text */
 function filesOf(dir: string): Array<{ name: string; sql: string }> {
 	const names = wranglerOrder(readdirSync(dir).filter((name) => name.endsWith(".sql")))
@@ -113,7 +121,7 @@ async function history(
 	}
 	const recorded = await appliedHashes(target.conn, create)
 	const edited = files.find(
-		({ name, sql }) => applied.has(name) && recorded.has(name) && generateMigrationHash(sql) !== recorded.get(name),
+		({ name, sql }) => applied.has(name) && recorded.has(name) && !vouched(sql, recorded.get(name) as string, hashes),
 	)
 	if (edited !== undefined) {
 		throw new Error(
