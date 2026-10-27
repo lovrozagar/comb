@@ -224,6 +224,17 @@ describe("parseMigration", () => {
 		expect(parsed.expected.tables.has("post")).toBe(true)
 	})
 
+	it("reads a Postgres file as Postgres: its statements as Postgres splits them, its schema keyed under the target's", () => {
+		const sql =
+			"CREATE FUNCTION f() RETURNS int AS $$ SELECT 1; SELECT 2 $$ LANGUAGE sql;\nCREATE TABLE app.post (id int);"
+		const parsed = parseMigration(sql, "1_f.sql", { dialect: "postgres", schema: "app" })
+		expect(parsed.statements).toEqual([
+			"CREATE FUNCTION f() RETURNS int AS $$ SELECT 1; SELECT 2 $$ LANGUAGE sql",
+			"CREATE TABLE app.post (id int)",
+		])
+		expect([...parsed.expected.tables.keys()]).toEqual(["post"])
+	})
+
 	it("hashes the same SQL to the same value and different SQL differently", () => {
 		expect(parseMigration("SELECT 1;", "a.sql").hash).toBe(parseMigration("SELECT 1;", "b.sql").hash)
 		expect(parseMigration("SELECT 1;", "a.sql").hash).not.toBe(parseMigration("SELECT 2;", "a.sql").hash)

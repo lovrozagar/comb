@@ -60,13 +60,14 @@ export { classifyMigration, extractDropStatements }
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /**
- * A migration file, classified against `options.before`, the schema the earlier files leave; its
- * statements are applied as written, as wrangler and Atlas apply them
+ * A migration file, read as `options.dialect`, classified against `options.before`, the schema the
+ * earlier files leave; its statements are applied as written, as wrangler and Atlas apply them
  */
 export function parseMigration(sql: string, filename: string, options: ClassifyOptions = {}): ParsedMigration {
+	const readAs = { dialect: options.dialect ?? "sqlite", schema: options.schema }
 	const hash = generateMigrationHash(sql)
-	const expected = extractSchema(sql)
-	const statements = splitSqlStatements(sql)
+	const expected = extractSchema(sql, undefined, readAs)
+	const statements = splitSqlStatements(sql, readAs.dialect)
 	const drops = extractDropStatements(sql, options)
 	const classification = classifyMigration(sql, options)
 

@@ -113,8 +113,8 @@ export declare function migrationHashes(sql: string): string[];
 export { extractSchema };
 export { classifyMigration, extractDropStatements };
 /**
- * A migration file, classified against `options.before`, the schema the earlier files leave; its
- * statements are applied as written, as wrangler and Atlas apply them
+ * A migration file, read as `options.dialect`, classified against `options.before`, the schema the
+ * earlier files leave; its statements are applied as written, as wrangler and Atlas apply them
  */
 export declare function parseMigration(sql: string, filename: string, options?: ClassifyOptions): ParsedMigration;
 
