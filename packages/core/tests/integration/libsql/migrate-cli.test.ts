@@ -142,22 +142,34 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 	})
 })
 
+/** A project whose 2_row.sql is recorded, as an earlier comb did, under its pre-0.5.0 hash at `at` */
+async function legacyRecorded(at: number) {
+	const sql = "INSERT INTO t VALUES ('a -- b\nc');"
+	const { dir, url } = project({ "1_t.sql": "CREATE TABLE t (v TEXT);", "2_row.sql": sql })
+	expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
+	const client = createClient({ url: url("local.db") })
+	await client.execute("DELETE FROM t")
+	await client.execute("DELETE FROM __drizzle_migrations WHERE id = 2")
+	await client.execute({
+		args: [legacyMigrationHash(sql), at],
+		sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
+	})
+	client.close()
+	return dir
+}
+
 describe("migrate apply through comb.migrate.config.ts (A-H4): files recorded by an earlier comb", () => {
-	it("skips a file recorded under its pre-0.5.0 hash", async () => {
-		const sql = "INSERT INTO t VALUES ('a -- b\nc');"
-		const { dir, url } = project({ "1_t.sql": "CREATE TABLE t (v TEXT);", "2_row.sql": sql })
-		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(0)
-		const client = createClient({ url: url("local.db") })
-		await client.execute("DELETE FROM t")
-		await client.execute("DELETE FROM __drizzle_migrations WHERE id = 2")
-		await client.execute({
-			args: [legacyMigrationHash(sql), Date.now()],
-			sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
-		})
-		client.close()
-		const run = io(dir)
+	it("skips a file recorded under its pre-0.5.0 hash before 0.5.0", async () => {
+		const run = io(await legacyRecorded(Date.parse("2026-10-17T12:00:00Z")))
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], run)).toBe(0)
 		expect(run.outputs.join("\n")).toContain("Skip (already applied): 2_row.sql")
+	})
+
+	/* M44: since 0.5.0 a row holds the current hash, so a match by the legacy one is an edit the old normalizing hides */
+	it("refuses a row recorded since 0.5.0 that only the pre-0.5.0 hash matches", async () => {
+		const run = io(await legacyRecorded(Date.parse("2026-10-20T12:00:00Z")))
+		expect(await runCli(["migrate", "apply", "core", "-e", "local"], run)).toBe(1)
+		expect(run.errors.join("\n")).toContain("1 applied migration matches no file")
 	})
 })
 

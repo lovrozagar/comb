@@ -83,7 +83,9 @@ async function recordedHistory(conn: Connection): Promise<LegacyRow[]> {
 	if (table.rows.length === 0) return []
 	const { columns, rows } = await conn.execute("SELECT * FROM __drizzle_migrations ORDER BY id")
 	const [hash, name, id] = [columns.indexOf("hash"), columns.indexOf("name"), columns.indexOf("id")]
+	const createdAt = columns.indexOf("created_at")
 	return rows.map((row) => ({
+		createdAt: Number(row[createdAt]),
 		hash: String(row[hash]),
 		id: Number(row[id]),
 		name: name >= 0 && row[name] !== null ? String(row[name]) : null,

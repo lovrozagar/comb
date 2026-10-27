@@ -5,14 +5,23 @@
  * named row holds, so two files of one text (an index dropped, then made again) are two files. A
  * row that matches no file was edited or renamed after it was applied; read over the whole
  * directory, comb refuses it. A file applied with --file from outside the directory is recorded by
- * its path from it (`../lone.sql`), and no file of the directory is expected to match it.
+ * its path from it (`../lone.sql`), and no file of the directory is expected to match it. A file's
+ * pre-0.5.0 hash matches only a row recorded before 0.5.0: a later row was recorded under the
+ * current hash, so a match by the legacy one is an edit its normalizing hides (M44).
  */
 
-/** A file of the directory, and the hashes its text has (migrationHashes: current and pre-0.5.0) */
+/** A file of the directory, and the hashes its text has (migrationHashes: current first, then pre-0.5.0) */
 type FileHashes = { hashes: readonly string[]; name: string }
 
-/** One row of the history */
-type HistoryRow = { hash: string; name: string | null }
+/** One row of the history, with when it was recorded (`created_at`, ms) */
+type HistoryRow = { createdAt: number; hash: string; name: string | null }
+
+/** When v0.5.0, which changed the hash, was tagged (2026-10-18T00:56:29Z, ms): a row recorded before it may hold the legacy hash */
+const V0_5_0 = 1792284989000
+
+/** Whether `row` records `file`'s text: its current hash, or its legacy one on a row from before 0.5.0 */
+const holds = (file: FileHashes, row: HistoryRow): boolean =>
+	row.hash === file.hashes[0] || (row.createdAt < V0_5_0 && file.hashes.includes(row.hash))
 
 /** What the history makes of the files */
 type Matched = {
@@ -35,13 +44,11 @@ function matchHistory(files: readonly FileHashes[], rows: readonly HistoryRow[],
 		const file = byName.get(row.name as string)
 		if (file === undefined) {
 			if (whole && !(row.name as string).startsWith("../")) matched.orphans.push(row)
-		} else if (file.hashes.includes(row.hash)) matched.applied.add(file.name)
+		} else if (holds(file, row)) matched.applied.add(file.name)
 		else matched.edited.push(file.name)
 	}
 	for (const row of rows.filter((each) => each.name === null)) {
-		const file = files.find(
-			(each) => !held.has(each.name) && !matched.applied.has(each.name) && each.hashes.includes(row.hash),
-		)
+		const file = files.find((each) => !held.has(each.name) && !matched.applied.has(each.name) && holds(each, row))
 		if (file === undefined) {
 			if (whole) matched.orphans.push(row)
 			continue
@@ -69,7 +76,7 @@ function resolveLegacy(files: readonly FileHashes[], rows: readonly LegacyRow[])
 	const renamed: Array<{ id: number; name: string }> = []
 	for (const row of rows) {
 		if (row.name === null || byName.has(row.name)) continue
-		const holders = files.filter((file) => !claimed.has(file.name) && file.hashes.includes(row.hash))
+		const holders = files.filter((file) => !claimed.has(file.name) && holds(file, row))
 		if (holders.length > 1)
 			throw new Error(
 				`${row.name}, applied before 0.13, holds the text of ${holders.map((file) => file.name).join(", ")}, none of them recorded: comb cannot tell which it was; rename all but one`,
@@ -82,7 +89,7 @@ function resolveLegacy(files: readonly FileHashes[], rows: readonly LegacyRow[])
 }
 
 /** Why the orphans of a history refuse a check or an apply, naming each row by its name, or its hash's start */
-function orphanMessage(orphans: readonly HistoryRow[], dir: string): string {
+function orphanMessage(orphans: ReadonlyArray<Pick<HistoryRow, "hash" | "name">>, dir: string): string {
 	const n = orphans.length
 	const rows = orphans.map((row) => row.name ?? row.hash.slice(0, 12)).join(", ")
 	return `${n} applied migration${n === 1 ? " matches" : "s match"} no file in ${dir} (${rows}): one was edited or renamed after it was applied; restore it, or record the change in a new file`

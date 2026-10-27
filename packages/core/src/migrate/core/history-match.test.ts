@@ -3,14 +3,39 @@ import { matchHistory, orphanMessage } from "./history-match.ts"
 
 const file = (name: string, ...hashes: string[]) => ({ hashes, name })
 
+/** A row recorded since 0.5.0, as every row the current comb writes is */
+const NOW = Date.parse("2026-10-27T00:00:00Z")
+
+/* M44: a file's pre-0.5.0 hash matches only a row recorded before 0.5.0, so an edit its normalizing hides is an edit */
+describe("matchHistory: the legacy hash", () => {
+	const before = Date.parse("2026-10-17T12:00:00Z")
+	const after = Date.parse("2026-10-20T12:00:00Z")
+
+	it("matches a named row by the file's legacy hash only when the row predates 0.5.0", () => {
+		const files = [file("1.sql", "current", "legacy")]
+		expect([...matchHistory(files, [{ createdAt: before, hash: "legacy", name: "1.sql" }], true).applied]).toEqual([
+			"1.sql",
+		])
+		expect(matchHistory(files, [{ createdAt: after, hash: "legacy", name: "1.sql" }], true).edited).toEqual(["1.sql"])
+	})
+
+	it("matches an unnamed row by the legacy hash only when the row predates 0.5.0", () => {
+		const files = [file("1.sql", "current", "legacy")]
+		expect(matchHistory(files, [{ createdAt: before, hash: "legacy", name: null }], true).named).toEqual([
+			{ hash: "legacy", name: "1.sql" },
+		])
+		expect(matchHistory(files, [{ createdAt: after, hash: "legacy", name: null }], true).orphans).toHaveLength(1)
+	})
+})
+
 /* M15 and M16 of the 0.12 round: each row of the history records one file */
 describe("matchHistory", () => {
 	it("matches a named row by its name, and calls the file edited when its hash moved", () => {
 		const matched = matchHistory(
 			[file("1.sql", "a"), file("2.sql", "b2")],
 			[
-				{ hash: "a", name: "1.sql" },
-				{ hash: "b", name: "2.sql" },
+				{ createdAt: NOW, hash: "a", name: "1.sql" },
+				{ createdAt: NOW, hash: "b", name: "2.sql" },
 			],
 			true,
 		)
@@ -22,8 +47,8 @@ describe("matchHistory", () => {
 		const matched = matchHistory(
 			[file("2.sql", "x"), file("4.sql", "x"), file("5.sql", "y")],
 			[
-				{ hash: "x", name: "2.sql" },
-				{ hash: "y", name: null },
+				{ createdAt: NOW, hash: "x", name: "2.sql" },
+				{ createdAt: NOW, hash: "y", name: null },
 			],
 			true,
 		)
@@ -33,15 +58,15 @@ describe("matchHistory", () => {
 
 	it("calls a row that matches no file an orphan over the whole directory, and nothing over one file", () => {
 		const rows = [
-			{ hash: "a", name: "gone.sql" },
-			{ hash: "zzzzzzzzzzzzzzzz", name: null },
+			{ createdAt: NOW, hash: "a", name: "gone.sql" },
+			{ createdAt: NOW, hash: "zzzzzzzzzzzzzzzz", name: null },
 		]
 		expect(matchHistory([file("1.sql", "b")], rows, true).orphans).toEqual(rows)
 		expect(matchHistory([file("1.sql", "b")], rows, false).orphans).toEqual([])
 	})
 
 	it("leaves a row --file recorded from outside the directory out of the orphans", () => {
-		const rows = [{ hash: "a", name: "../lone.sql" }]
+		const rows = [{ createdAt: NOW, hash: "a", name: "../lone.sql" }]
 		expect(matchHistory([file("1.sql", "b")], rows, true).orphans).toEqual([])
 	})
 
