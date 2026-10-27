@@ -17,6 +17,7 @@ import {
   rewriteGruntScratchPath,
 } from "../../.rulesync/scripts/gate-fat-tools.mjs";
 import { persistPlan } from "../../.rulesync/scripts/persist-plan.mjs";
+import { isFullRoadmapBody, persistRoadmap } from "../../.rulesync/scripts/persist-roadmap.mjs";
 import { persistHandoff } from "../../.rulesync/scripts/persist-handoff.mjs";
 import { persistImplementation, isFullImplementationBody, validateImplementation } from "../../.rulesync/scripts/persist-implementation.mjs";
 import { persistTmp } from "../../.rulesync/scripts/persist-tmp.mjs";
@@ -131,6 +132,10 @@ export function isUnderPlans(filePath, workspaceRoot) {
   return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "plans"]);
 }
 
+export function isUnderRoadmaps(filePath, workspaceRoot) {
+  return isUnderDir(filePath, workspaceRoot, ["docs", "roadmaps"]);
+}
+
 export function isUnderHandoffs(filePath, workspaceRoot) {
   return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "handoffs"]);
 }
@@ -178,6 +183,20 @@ function parentWrite(data, toolInput) {
   if (isUnderPlans(rawPath, ws)) {
     persist = persistPlan;
     invalid = "invalid plan";
+  } else if (isUnderRoadmaps(rawPath, ws)) {
+    const roadmapPath = path.isAbsolute(rawPath)
+      ? path.resolve(rawPath)
+      : path.resolve(ws, rawPath);
+    const content = typeof toolInput.content === "string" ? toolInput.content : "";
+    let exists = false;
+    try {
+      exists = fs.statSync(roadmapPath).isFile();
+    } catch {
+      exists = false;
+    }
+    if (exists && !isFullRoadmapBody(content)) return null;
+    persist = (args) => persistRoadmap({ ...args, filePath: roadmapPath });
+    invalid = "invalid roadmap";
   } else if (isUnderHandoffs(rawPath, ws)) {
     persist = persistHandoff;
     invalid = "invalid handoff";
@@ -203,7 +222,7 @@ function parentWrite(data, toolInput) {
         return 0;
       }
       const next = Object.assign({}, toolInput, {
-        file_path: abs,
+        file_path: path.relative(ws, abs).replace(/\\/g, "/"),
         content,
       });
       emit({
@@ -240,7 +259,7 @@ function parentWrite(data, toolInput) {
 }
 
 function rewriteSpawn(toolInput, data) {
-  const updated = rewriteSpawnToolInput(toolInput, { defaultGrunt: true });
+  const updated = rewriteSpawnToolInput(toolInput);
   const prompt =
     updated && typeof updated.prompt === "string"
       ? updated.prompt

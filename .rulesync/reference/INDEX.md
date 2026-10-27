@@ -6,7 +6,7 @@ Protocol stays overview; domain fills this.
 
 ## Skills naming
 
-Reserved (do not reuse in consumer custom skills): `ask` `auto` `browser` `clasp` `commit` `commit-and-push` `commit-push` `commit-push-deploy` `commit-push-release` `explain` `google-workspace` `handoff` `implement-plan` `jev` `listen` `pickup` `speak` `su` `tmp` `write-plan`.
+Do not reuse a grunt skill name for a consumer custom skill. `grunt upgrade` prints the reserved list. Pack names stay reserved when their directory is absent.
 
 Override: same name → one SSOT path (`.rulesync/skills/<name>/`). Re-init / `grunt upgrade` force-refresh overwrites grunt-owned names; consumer extras kept. Maps `origin` badge ≠ content picker.
 
@@ -18,20 +18,52 @@ Upgrade copies the current package trees and product scripts (to `.rulesync/scri
 | --- | --- | --- | --- | --- | --- |
 | ask | grunt | Session flag. Finish one step, recap, then ask before the next. |  |  |  |
 | auto | grunt | Session flag. Default. Work the task through. Ask on blockers instead of monkey-patching. |  |  |  |
+| blast-radius | local | Find what a change could break somewhere else before it ships, beyond the diff, and prove the one fact it's safe becaus… |  |  |  |
+| bro | local | Restate the last message in plain human language, with no jargon. |  |  |  |
 | browser | grunt | Browse via node .rulesync/scripts/browser.mjs (Lightpanda). App e2e uses Playwright. |  |  |  |
 | commit | grunt | Inspect the diff and commit with a Conventional Commits subject line. Use for /commit, "commit this", "commit these cha… |  |  |  |
 | commit-and-push | grunt | Alias of commit-push (1-release stub). Use for /commit-and-push, "commit and push", "commit this and push". Must push.… |  |  |  |
 | commit-push | grunt | Commit with a Conventional Commits subject, then push. Use for /commit-push, "commit and push", "commit this and push".… |  |  |  |
 | commit-push-deploy | grunt | Commit, push, then deploy only if allowlisted infra already exists. Use for /commit-push-deploy, "commit push deploy",… |  |  |  |
 | commit-push-release | grunt | Commit, push, bump package.json, tag vX.Y.Z, push the tag. CI publishes. Use for /commit-push-release, "commit push rel… |  |  |  |
+| correct | local | Find the mistakes agents keep repeating in this repo and make each one impossible. Try architecture first, then types,… |  |  |  |
 | explain | grunt | Longer human recap this reply only. |  |  |  |
 | handoff | grunt | Write a session handoff under .tmp/grunt/handoffs/. Continue with /pickup. |  |  |  |
 | implement-plan | grunt | Execute remaining leaves in a .tmp/grunt/plans checklist. Skip [x]. |  |  |  |
+| implement-roadmap | local | Run a locked roadmap in order. Use for /implement-roadmap. Writes each missing plan, then /implement-plan. Refuses a dr… |  |  |  |
 | jev | grunt | Yes/no or named-option decision on text already saved. Run node .rulesync/scripts/jev.mjs --available first. On yes, on… |  |  |  |
 | pickup | grunt | Continue a handoff under .tmp/grunt/handoffs/. |  |  |  |
+| principle-attack-the-premise | local | Apply when two or more fixes that share one premise have failed the same gate. Write the premise down and test it direc… |  |  |  |
+| principle-boundary-discipline | local | Apply when wiring validation, error handling, or framework adapters. Concentrate guards at system boundaries (CLI, conf… |  |  |  |
+| principle-build-the-lever | local | Apply to any non-trivial work, not just bulk work: edits, migrations, analyses, checks. Build the tool that does it or… |  |  |  |
+| principle-encode-lessons-in-structure | local | Apply when you catch yourself writing the same instruction a second time, or notice a recurring correction. Encode the… |  |  |  |
+| principle-exhaust-the-design-space | local | Apply when facing a novel UI interaction or architectural decision with no precedent in the codebase. Build 2-3 competi… |  |  |  |
+| principle-experience-first | local | Apply when product, UX, or feature-scope tradeoffs come up. Choose user delight over implementation convenience; ship f… |  |  |  |
+| principle-explain-the-number | local | Apply before you trust, report, or act on a number you measured: a speedup, a regression, a throughput, a latency, or a… |  |  |  |
+| principle-fix-root-causes | local | Apply when debugging. Trace each symptom back to the first place the system went wrong and fix it there. A guard is a f… |  |  |  |
+| principle-foundational-thinking | local | Apply before writing logic: choosing core types and data structures, sequencing scaffold-vs-feature work, asking what c… |  |  |  |
+| principle-guard-the-context-window | local | Apply when context is filling up: large outputs, long files, repeated reads, fan-out planning. Route bulk to grunt-job… |  |  |  |
+| principle-laziness-protocol | local | Apply when refactoring, evaluating diff size, or tempted to add abstractions, layers, or signal threading. Bias toward… |  |  |  |
+| principle-make-operations-idempotent | local | Apply when designing commands, lifecycle steps, or processing loops that run amid crashes, restarts, and retries. Conve… |  |  |  |
+| principle-migrate-callers-then-delete-legacy-apis | local | Apply when introducing a new internal API while old callers still exist. Migrate callers and delete the old API in the… |  |  |  |
+| principle-minimize-reader-load | local | Apply when reviewing or shaping code that's hard to trace. Count layers between question and answer, and hidden state i… |  |  |  |
+| principle-model-the-domain | local | Apply when writing stateful logic, or when code branches a lot or repeats a shape assumption across files. Use for /pri… |  |  |  |
+| principle-never-block-on-the-human | local | Apply when tempted to ask 'should I do X?' on reversible work. Use for /principle-never-block-on-the-human. |  |  |  |
+| principle-outcome-oriented-execution | local | Apply during planned rewrites and migrations with explicit phase boundaries. Converge on the target architecture; don't… |  |  |  |
+| principle-prove-it-works | local | Apply after completing a task, before declaring done. Verify against the real artifact (run the feature, read the actua… |  |  |  |
+| principle-redesign-from-first-principles | local | Apply when integrating a new requirement into an existing design. Use for /principle-redesign-from-first-principles. |  |  |  |
+| principle-separate-before-serializing-shared-state | local | Apply when concurrent actors might write to the same file, branch, key, or state object. Eliminate the sharing first; s… |  |  |  |
+| principle-sequence-verifiable-units | local | Apply to multi-step work (sweeps, migrations, runs of similar edits) and to how you stack commits and PRs. Break work i… |  |  |  |
+| principle-subtract-before-you-add | local | Apply when sequencing an addition, refactor, or rewrite. Remove dead code, redundant validators, and stub references fi… |  |  |  |
+| principle-test-behavior-not-implementation | local | Apply when you write, change, or keep a test. Assert what the code's users can observe, so that the test fails when tha… |  |  |  |
+| principle-type-system-discipline | local | Apply when designing types, reviewing a function signature, or writing code in any statically-typed language. Make ille… |  |  |  |
 | su | grunt | Short status update: done, next, and blockers or on-track ETA. |  |  |  |
+| teach | local | Explain a body of work plainly so a person actually understands it. Dig into how it works and why it is that way, then… |  |  |  |
 | tmp | grunt | Dump a one-off convo artifact under .tmp/grunt/. |  |  |  |
+| typescript-best-practices | local | TypeScript best practices. Use when reading or editing any .ts or .tsx file, or for /typescript-best-practices. |  |  |  |
+| unslop | local | Cut AI tells from any writing. Use for /unslop. |  |  |  |
 | write-plan | grunt | Write a local checklist under .tmp/grunt/plans/. Then /implement-plan {n}. |  |  |  |
+| write-roadmap | local | Write an ordered program of plans under docs/roadmaps/. Use for /write-roadmap. Stops for lock. Does not implement. |  |  |  |
 
 # Refs
 
@@ -45,8 +77,9 @@ Upgrade copies the current package trees and product scripts (to `.rulesync/scri
 | .rulesync/reference/jev.md | Jev | jev | Closed external decision. The source text is already saved. The question is a yes/no or a named choice. One call. Not o… |
 | .rulesync/reference/law.md | Law |  | Protocol stays overview; domain fills this. |
 | .rulesync/reference/map.md | Map | map | Cheap outline. Not a file dump. |
-| .rulesync/reference/output.md | Output | output | en-US unless asked. Concise complete sentences with natural grammar. Skip filler and fluff. Examples are a class. |
+| .rulesync/reference/output.md | Output | output | en-US unless asked. Examples are a class. |
 | .rulesync/reference/plan-format.md | Plan format (SSOT) |  | Local session checklist. Not a design doc, PR stack, or DAG. |
+| .rulesync/reference/roadmap-format.md | Roadmap format (SSOT) |  | Ordered program of child plans. Not a plan, a handoff, or a design doc. |
 | .rulesync/reference/rtk.md | RTK | rtk | Shell stdout compression. PreToolUse: Bash → `rtk <cmd>`. Not Read/Grep/Glob/prompts/images. |
 | .rulesync/reference/scope.md | Scope | scope | Plan by default. A straight shot is the exception. The plan caps the result, so its depth scales with the work. This fi… |
 | .rulesync/reference/setup.md | Setup | setup | Handheld machine setup for optional integrations. Any OS. Secrets stay in `~/.grunt/` (Windows `%USERPROFILE%\.grunt`).… |

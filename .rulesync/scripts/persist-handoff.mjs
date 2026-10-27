@@ -197,7 +197,14 @@ export function persistHandoff({ workspaceRoot, content, source, created } = {})
   if (errors.length) return { ok: false, error: errors.join("; "), errors };
   ensureGitignore(ws);
   fs.writeFileSync(dest, full);
-  return { ok: true, path: dest, serial, slug, content: full, filename };
+  return {
+    ok: true,
+    path: `${HANDOFF_DIR}/${filename}`,
+    serial,
+    slug,
+    content: full,
+    filename,
+  };
 }
 
 function main() {

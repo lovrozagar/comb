@@ -12,7 +12,7 @@ In `sessionGate=ask`, parent Stop on `end_turn` blocks unless the recap asks (`?
 
 Claude / Codex / Antigravity PreToolUse still run `../../.rulesync/scripts/scrub-spawn-prompt.mjs` and `../../.rulesync/scripts/gate-fat-tools.mjs`. Grok spawn/fat rewrite is `../../.grok/hooks/orchestrate-parent.js`. RTK stays `../../.grok/hooks/rtk.json`.
 
-Session agent tools are on. Fat Read/Grep/Glob/Bash still gate. Writes under `.tmp/grunt/plans/`, `.tmp/grunt/handoffs/`, `.tmp/grunt/implementations/`, and `.tmp/grunt/` root files persist via `../../.rulesync/scripts/persist-plan.mjs` / `persist-handoff.mjs` / `persist-implementation.mjs` / `persist-tmp.mjs`. Invalid body denies.
+Session agent tools are on. Fat Read/Grep/Glob/Bash still gate. Writes under `.tmp/grunt/plans/`, `.tmp/grunt/handoffs/`, `.tmp/grunt/implementations/`, `.tmp/grunt/` root files, and `docs/roadmaps/` persist via `../../.rulesync/scripts/persist-plan.mjs` / `persist-handoff.mjs` / `persist-implementation.mjs` / `persist-tmp.mjs` / `persist-roadmap.mjs`. Invalid body denies.
 
 SubagentStop (and child Stop with `subagentType`) intercepts a parseable `need:` whose jobs are all `search|exec|slice|fetch` (cap 4): runs grunt-job in-hook and continues the child with concatenated facts. Mixed/web/test, parse fail, FALLBACK, `stopHookActive`, or more than 3 intercepts per child session → empty stdout (allow stop).
 

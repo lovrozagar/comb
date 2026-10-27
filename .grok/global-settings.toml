@@ -14,9 +14,9 @@ name = "orchestrator"
 # SSOT: .grok/agents/orchestrator.md (discovered).
 
 [subagents.toggle]
-explore = false
-plan = false
-general-purpose = false
+explore = true
+plan = true
+general-purpose = true
 
 [subagents.models]
 explore = "grok-4.5"

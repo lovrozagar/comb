@@ -4,7 +4,7 @@ Protocol stays overview; domain fills this.
 
 ## Skills naming
 
-Reserved (do not reuse in consumer custom skills): `ask` `auto` `browser` `clasp` `commit` `commit-and-push` `commit-push` `commit-push-deploy` `commit-push-release` `explain` `google-workspace` `handoff` `implement-plan` `jev` `listen` `pickup` `speak` `su` `tmp` `write-plan`.
+Do not reuse a grunt skill name for a consumer custom skill. `grunt upgrade` prints the reserved list. Pack names stay reserved when their directory is absent.
 
 Override: same name → one SSOT path (`.rulesync/skills/<name>/`). Re-init / `grunt upgrade` force-refresh overwrites grunt-owned names; consumer extras kept. Maps `origin` badge ≠ content picker.
 

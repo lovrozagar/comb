@@ -89,7 +89,15 @@ export function persistTmp({ workspaceRoot, content, created } = {}) {
   if (!FILENAME_RE.test(filename)) return { ok: false, error: "filename" };
   ensureGitignore(ws);
   fs.writeFileSync(dest, body);
-  return { ok: true, path: dest, serial, slug, ext, content: body, filename };
+  return {
+    ok: true,
+    path: `${TMP_DIR}/${filename}`,
+    serial,
+    slug,
+    ext,
+    content: body,
+    filename,
+  };
 }
 
 function main() {

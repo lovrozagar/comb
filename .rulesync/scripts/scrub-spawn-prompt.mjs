@@ -6,7 +6,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { scrubText } from "./scrub-text-lib.mjs";
 import { denyResponse } from "./gate-fat-tools.mjs";
 
-const ALLOWED_TYPES = new Set(["grunt"]);
 export const MAX_PROMPT_CHARS = 100000;
 export const TRUNCATE_SUFFIX = "…[truncated]";
 /** `router` is a legacy transcript prefix; keep matching it to strip old pastes. */
@@ -76,51 +75,13 @@ export function capSpawnPrompt(prompt) {
   return s.trim();
 }
 
-const SPAWN_TYPE_KEYS = ["subagent_type", "subagentType", "name", "type", "agent"];
-const FORBIDDEN_SPAWN_TYPES = new Set([
-  "explore",
-  "plan",
-  "general-purpose",
-  "orchestrator",
-]);
-
-function spawnTypeCandidate(toolInput) {
-  for (const k of SPAWN_TYPE_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(toolInput, k)) continue;
-    if (toolInput[k] == null) continue;
-    const v = String(toolInput[k]).trim();
-    if (!v) continue;
-    const key = v.toLowerCase();
-    if (ALLOWED_TYPES.has(key)) return key;
-    if (FORBIDDEN_SPAWN_TYPES.has(key)) return "";
-    return "";
-  }
-  return "";
-}
-
-export function rewriteSpawnToolInput(toolInput, { defaultGrunt = false } = {}) {
+export function rewriteSpawnToolInput(toolInput) {
   if (!toolInput || typeof toolInput !== "object" || Array.isArray(toolInput)) {
-    return defaultGrunt ? { subagent_type: "grunt" } : null;
+    return null;
   }
 
   const next = Object.assign({}, toolInput);
   let changed = false;
-
-  if (defaultGrunt) {
-    const cur = spawnTypeCandidate(toolInput);
-    if (ALLOWED_TYPES.has(cur)) {
-      if (String(next.subagent_type || "") !== cur) {
-        next.subagent_type = cur;
-        changed = true;
-      }
-    } else {
-      next.subagent_type = "grunt";
-      if (Object.prototype.hasOwnProperty.call(toolInput, "subagentType")) {
-        next.subagentType = "grunt";
-      }
-      changed = true;
-    }
-  }
 
   if (typeof next.prompt === "string") {
     const scrubbed = capSpawnPrompt(next.prompt);
@@ -133,17 +94,11 @@ export function rewriteSpawnToolInput(toolInput, { defaultGrunt = false } = {}) 
   return changed ? next : null;
 }
 
-export function grokDefaultGrunt() {
-  return Boolean(process.env.GROK_HOOK_EVENT);
-}
-
 export function processHookPayload(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   let toolInput = data.toolInput;
   if (toolInput == null) toolInput = data.tool_input;
-  const updated = rewriteSpawnToolInput(toolInput, {
-    defaultGrunt: grokDefaultGrunt(),
-  });
+  const updated = rewriteSpawnToolInput(toolInput);
   const prompt =
     updated && typeof updated.prompt === "string"
       ? updated.prompt

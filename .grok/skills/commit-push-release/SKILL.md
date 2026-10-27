@@ -7,6 +7,8 @@ description: >
 ---
 Inspect `git status` + `git diff` (staged and unstaged) before the message.
 
+Diff pass on the hunks you will stage: delete narrating comments, unused defensive guards or try/catch on trusted paths, `any` casts that only silence types, dead compatibility, and unrelated hunks. Keep a comment only when it states a constraint the code cannot encode. Keep behavior otherwise. Do not spawn a reviewer.
+
 Stage only user intent. Never blind `git add -A` / `git add .`. Split unrelated concerns into multiple commits.
 
 If a unique in-progress file exists under `.tmp/grunt/implementations/`, its `## Files` is the default stage set. Still inspect `git status`.

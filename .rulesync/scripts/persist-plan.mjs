@@ -28,6 +28,9 @@ export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 export const CREATED_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}Z)?$/;
 export const FILENAME_STAMP_RE = /-\d{8}T\d{6}Z$/;
+/** Conventional Commits subject. Scope optional. Lowercase, no trailing period. */
+export const COMMIT_SUBJECT_RE =
+  /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([a-z0-9]+(?:-[a-z0-9]+)*\))?: [a-z0-9](?:[a-z0-9 .'/:_,-]*[a-z0-9])?$/;
 export const REQUIRED_H2 = [
   "Goal",
   "Context",
@@ -123,7 +126,30 @@ function stripFrontmatter(text) {
   return s.slice(end + 5);
 }
 
-export function injectFrontmatter({ serial, slug, source, body, created }) {
+export function extractCommit(content) {
+  const text = String(content).replace(/^\uFEFF/, "");
+  if (text.startsWith("---\n")) {
+    const fm = parseFrontmatter(text);
+    if (!fm.error && Object.prototype.hasOwnProperty.call(fm.map, "commit")) {
+      return fm.map.commit;
+    }
+  }
+  const m = text.match(/^commit:\s*(.*?)\s*$/m);
+  return m ? m[1] : undefined;
+}
+
+function stripCommitLine(content) {
+  return String(content).replace(/^commit:\s*.*\n/m, "");
+}
+
+export function injectFrontmatter({
+  serial,
+  slug,
+  source,
+  body,
+  created,
+  commit,
+}) {
   const src = String(source || "").slice(0, 120);
   let rest = stripFrontmatter(body).replace(/^\s+/, "");
   if (!rest.startsWith("# ")) {
@@ -131,13 +157,15 @@ export function injectFrontmatter({ serial, slug, source, body, created }) {
   } else {
     rest = rest.replace(/^# .+/, `# ${slug}`);
   }
+  const commitLine =
+    commit != null && commit !== "" ? `commit: ${commit}\n` : "";
   return `---
 serial: ${serial}
 name: ${slug}
 status: ready
 created: ${created || utcDateTime()}
 source: ${JSON.stringify(src)}
----
+${commitLine}---
 
 ${rest}`;
 }
@@ -197,6 +225,12 @@ export function validatePlan(filename, text) {
   if (typeof map.source === "string" && map.source.length > 120) {
     errors.push("source length");
   }
+  if (
+    Object.prototype.hasOwnProperty.call(map, "commit") &&
+    !COMMIT_SUBJECT_RE.test(String(map.commit))
+  ) {
+    errors.push("commit");
+  }
   const slugFromName = map.name;
   if (slugFromName && slugFromFilename(filename) !== slugFromName) {
     errors.push("name/filename slug");
@@ -250,7 +284,8 @@ export function persistPlan({
   const src =
     source ||
     (raw.match(/^\s*source:\s*(.+)$/m) ? undefined : planName);
-  const body = stripPlanName(raw);
+  const commit = extractCommit(raw);
+  const body = stripCommitLine(stripPlanName(raw));
   migrateLegacyPlansDir(ws);
   const plansDir = path.join(ws, PLAN_DIR);
   fs.mkdirSync(plansDir, { recursive: true });
@@ -282,6 +317,7 @@ export function persistPlan({
     source: sourceText,
     body,
     created: createdAt,
+    commit,
   });
   const errors = validatePlan(filename, full);
   if (errors.length) {
@@ -289,7 +325,14 @@ export function persistPlan({
   }
   ensureGitignore(ws);
   fs.writeFileSync(dest, full);
-  return { ok: true, path: dest, serial, slug, content: full, filename };
+  return {
+    ok: true,
+    path: `${PLAN_DIR}/${filename}`,
+    serial,
+    slug,
+    content: full,
+    filename,
+  };
 }
 
 function main() {

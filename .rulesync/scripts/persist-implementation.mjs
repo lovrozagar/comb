@@ -244,7 +244,15 @@ export function persistImplementation({
   if (errors.length) return { ok: false, error: errors.join("; "), errors };
   ensureGitignore(ws);
   fs.writeFileSync(dest, full);
-  return { ok: true, path: dest, serial, slug, content: full, filename, plan };
+  return {
+    ok: true,
+    path: `${IMPLEMENTATION_DIR}/${filename}`,
+    serial,
+    slug,
+    content: full,
+    filename,
+    plan,
+  };
 }
 
 function main() {

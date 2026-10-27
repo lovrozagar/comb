@@ -90,7 +90,7 @@ No required Why heading. Optional why footnote only (not a `##`). Pick2 file pla
 | Section | Amount |
 |---|---|
 | Goal | 1–3 sentences. What “done” means. |
-| Context / Constraints / Watch-outs | bullets only. Watch-outs: non-obvious footguns; empty allowed (`(none)`). |
+| Context / Constraints / Watch-outs | bullets only. Watch-outs: non-obvious footguns; empty allowed (`(none)`). Context includes `Task type:`, `Named checks:` from `.rulesync/reference/scope.md` ## Types, and a skip-with-reason when a named check is dropped. |
 | Steps | bulk of the file; each leaf = one coherent edit or one file-level action |
 | Verify | 1–5 runnable leaves (cmd or observable) |
 
@@ -102,12 +102,12 @@ Thinker cites **absolute paths**. Leaves must be implementable without re-planni
 
 - filename matches new stamped regex or legacy unstamped; new writes unpadded + stamp (`1-foo-20260826T143000Z.md` not `0001-foo.md`); serial int equals leading digits; `name` equals slug after stripping optional trailing `-\d{8}T\d{6}Z`
 - frontmatter `serial` line matches `^serial: [1-9][0-9]*$` (unpadded decimal ≥ 1; reject `0001`, `"0001"`, `0`, `01`)
-- frontmatter keys: `serial`, `name`, `status`, `created`, `source`
+- frontmatter keys: `serial`, `name`, `status`, `created`, `source`. Optional `commit:` is a Conventional Commits subject (`type(scope): subject`, scope optional, imperative lowercase, no trailing period). A new plan includes it. A plan with no `commit` key stays valid. A present `commit` that is not that subject is invalid
 - `status` ∈ `ready` | `in-progress` | `done` | `blocked`; `created` `YYYY-MM-DDTHH:MM:SSZ` (new writes) or legacy `YYYY-MM-DD`; `source` ≤120
 - headings in order only; no extra `##`; no required Why heading (optional footnote only)
 - ≥1 `N.M [ ]` leaf; every phase has ≥1 leaf; Verify is last numbered phase
 - checkbox grammar (`N [ ]` / `N.M [ ]` / `N.M.K [ ]`); no `- [ ]`; no `1. [ ]`
-- fresh write: zero `[x]` / `[X]`; Goal 1–3 sentences; Context/Constraints/Watch-outs bullets; Verify 1–5 leaves
+- fresh write: zero `[x]` / `[X]`; Goal 1–3 sentences; Context/Constraints/Watch-outs bullets; Context includes `Task type:`, `Named checks:`, and a skip-with-reason when a named check is dropped; frontmatter includes `commit:`; Verify 1–5 leaves
 
 ## Worked example
 
@@ -120,6 +120,7 @@ name: add-tmp-ignore
 status: ready
 created: 2026-08-26T14:30:00Z
 source: "gitignore .tmp so local plans stay untracked"
+commit: chore: ignore .tmp
 ---
 
 # add-tmp-ignore
@@ -128,6 +129,9 @@ source: "gitignore .tmp so local plans stay untracked"
 Repo `.gitignore` ignores `.tmp/` so files under `.tmp/grunt/plans/` stay untracked. Existing ignore entries stay.
 
 ## Context
+- Task type: chore
+- Named checks: no test leaf unless a check already exists
+- Skip test leaf: no check already exists for `.gitignore`
 - `/home/ecomet/Development/example-app/.gitignore` may be missing or lack `.tmp/`
 - Plans live at `/home/ecomet/Development/example-app/.tmp/grunt/plans/`
 - No python helpers; bash only

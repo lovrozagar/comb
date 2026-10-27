@@ -7,13 +7,13 @@ tags: [map]
 Cheap outline. Not a file dump.
 
 ## Protocol
-- `.rulesync/reference/cascade.md` — session agent tools; grunt-job first; spawn grunt when cheaper
+- `.rulesync/reference/cascade.md` — session agent tools; grunt-job first; spawn grunt when the dump needs judgment
 - `.rulesync/reference/rtk.md` — shell compression
 - `.rulesync/reference/browser.md` — Lightpanda-first session CLI (`nav|snap|click|fill|scroll|wait|hover|select|shot|pdf|stop`); not MCP
 - `.rulesync/reference/hooks.md` — hook policy
 - `.rulesync/reference/map.md` — this file
 - `.rulesync/reference/output.md` — default voice
-- `.rulesync/reference/scope.md` — size gate; plan by default: research → `/write-plan` → approval → `/implement-plan`
+- `.rulesync/reference/scope.md` — size gate; plan by default: research → `/write-plan` → approval → `/implement-plan`; two or more slices → `/write-roadmap`
 - `.rulesync/reference/law.md` — domain law (stub; protocol stays cascade/overview)
 - Generated catalogs: `.rulesync/reference/INDEX.md` — aggregate catalog composed from slices (law.md, skills-map.md, refs-map.md). Maps/law = slices for deep dive. INDEX always. Not if-maps-else
 
