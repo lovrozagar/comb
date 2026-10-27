@@ -114,4 +114,4 @@ function checkHistory(status: AtlasStatus, copy: string, gone?: (line: string) =
 	return where
 }
 
-export { type AtlasFile, type AtlasRevision, type AtlasStatus, checkHistory, fileOf }
+export { type AtlasFile, type AtlasRevision, type AtlasStatus, checkHistory, fileOf, versionOf }

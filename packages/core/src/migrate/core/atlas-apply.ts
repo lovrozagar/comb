@@ -11,7 +11,8 @@ import { join } from "node:path"
 import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
-import { type AtlasFile, type AtlasStatus, checkHistory, fileOf } from "./atlas-history.ts"
+import { adopted, adopts, sharedPrefix } from "./atlas-adopt.ts"
+import { type AtlasFile, type AtlasStatus, checkHistory, fileOf, versionOf } from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
 import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { refuseDrift } from "./baseline-compare.ts"
@@ -34,6 +35,8 @@ type AtlasCommand = {
 	/** The process runner; tests pass a fake. */
 	exec?: Run | undefined
 	print(line: string): void
+	/** read the shared history 0.12 kept every schema's in, not the target's own (M77) */
+	shared?: boolean | undefined
 	target: PgTarget
 }
 
@@ -46,7 +49,7 @@ type ApplyOptions = AtlasCommand & {
 
 /** `atlas migrate <args>` on the snapshot `copy` against the target, its output scrubbed */
 function atlas(options: AtlasCommand, copy: string, args: readonly string[]): RunResult {
-	return withAtlasEnv(options.target, { url: true }, (env) => {
+	return withAtlasEnv(options.target, { shared: options.shared, url: true }, (env) => {
 		const ran = (options.exec ?? run)("atlas", ["migrate", ...args, "--dir", `file://${copy}`, ...env.args], {
 			env: env.env,
 		})
@@ -67,17 +70,47 @@ function json<T>(text: string, command: string): T {
 const NO_HISTORY: AtlasStatus = { applied: [], available: [], current: "", error: "", pending: [], status: "PENDING" }
 
 /**
- * Atlas's status for the snapshot `copy`. With `allowNotClean`, a database that has objects but no
+ * Atlas's status for the snapshot `copy`. With `notClean`, a database that has objects but no
  * history reads as having none recorded: Atlas refuses its status once a refused apply left an
- * empty history table, and that database is the one baseline is for.
+ * empty history table, and that database is the one baseline and adoption are for.
  */
-function atlasStatus(options: AtlasCommand, copy: string, allowNotClean = false): AtlasStatus {
+function atlasStatus(
+	options: AtlasCommand,
+	copy: string,
+	{ notClean = false }: { notClean?: boolean } = {},
+): AtlasStatus {
 	const ran = atlas(options, copy, ["status", "--format", STATUS_FORMAT])
-	if (ran.code !== 0 && allowNotClean && ran.stderr === explainAtlasFailure("connected database is not clean"))
+	if (ran.code !== 0 && notClean && ran.stderr === explainAtlasFailure("connected database is not clean"))
 		return NO_HISTORY
 	if (ran.code !== 0) throw new Error(`atlas migrate status: ${ran.stderr || `exit ${ran.code}: ${ran.stdout}`}`)
 	return json<AtlasStatus>(ran.stdout, "status")
 }
+
+/** The files 0.12's shared history ran, while `own`, the schema's own history, records none (M77) */
+function sharedRan(options: AtlasCommand, copy: string, own: AtlasStatus): string[] {
+	if (options.target.schema === "public" || own.applied.length > 0) return []
+	return sharedPrefix(atlasStatus({ ...options, shared: true }, copy, { notClean: true }), copy)
+}
+
+/** `own` as status, apply and check take it: a database with objects and no history, or one adoption gave, refused */
+function known(own: AtlasStatus): AtlasStatus {
+	if (own === NO_HISTORY)
+		throw new Error(`atlas migrate status: ${explainAtlasFailure("connected database is not clean")}`)
+	return own
+}
+
+/** Record `ran` in the schema's own history, without running it: Atlas writes the rows in one transaction */
+function adopt(options: AtlasCommand, copy: string, ran: readonly string[]): void {
+	const set = atlas(options, copy, ["set", versionOf(ran.at(-1) as string).version])
+	if (set.code !== 0) throw new Error(`atlas migrate set: ${set.stderr}`)
+	options.print(adopted(ran))
+}
+
+/** The snapshot's files after `ran`, as Atlas lists a pending file */
+const after = (copy: string, ran: readonly string[]): AtlasFile[] =>
+	sqlFiles(copy)
+		.slice(ran.length)
+		.map((Name) => ({ Description: versionOf(Name).description, Name, Version: versionOf(Name).version }))
 
 /** `read()`, a file `name` Atlas cannot split refused by name */
 function named<T>(name: string, read: () => T): T {
@@ -141,7 +174,16 @@ function applied(ran: RunResult): string[] {
 async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 	const copy = snapshotDir(options.exec ?? run, options.dir)
 	try {
-		const status = atlasStatus(options, copy)
+		const own = atlasStatus(options, copy, { notClean: true })
+		const ran = sharedRan(options, copy, own)
+		/* a check of an adoption writes nothing: it classifies the files after what 0.12 ran */
+		if (ran.length > 0 && options.checkOnly === true) {
+			options.print(adopts(ran))
+			await approvePending(options, copy, after(copy, ran))
+			return after(copy, ran).map((file) => file.Name)
+		}
+		if (ran.length > 0) adopt(options, copy, ran)
+		const status = ran.length > 0 ? atlasStatus(options, copy) : known(own)
 		const halfway = checkHistory(status, copy)
 		if (halfway !== undefined) options.print(`${halfway}; resuming after them`)
 		if (status.pending.length === 0) {
@@ -186,11 +228,17 @@ const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
  */
 function baselineWithAtlas(options: AtlasCommand): string[] {
 	return onSnapshot(options, (copy) => {
-		const status = atlasStatus(options, copy, true)
+		const status = atlasStatus(options, copy, { notClean: true })
 		if (status.applied.length > 0) {
 			throw new Error(
 				`the database already records ${migrations(status.applied.length)} (up to ${status.current}); baseline marks a database that has none`,
 			)
+		}
+		/* what 0.12 ran is recorded, and only that: the files after it still run on apply (M77) */
+		const ran = sharedRan(options, copy, status)
+		if (ran.length > 0) {
+			adopt(options, copy, ran)
+			return ran
 		}
 		const files = sqlFiles(copy)
 		const latest = files.at(-1)?.split("_")[0]
@@ -206,7 +254,16 @@ function baselineWithAtlas(options: AtlasCommand): string[] {
 /** Print what Atlas records as applied, what is pending, and where a file stopped halfway; returns both, by file name */
 function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: string[] } {
 	return onSnapshot(options, (copy) => {
-		const status = atlasStatus(options, copy)
+		const own = atlasStatus(options, copy, { notClean: true })
+		const ran = sharedRan(options, copy, own)
+		if (ran.length > 0) {
+			const rest = after(copy, ran).map((file) => file.Name)
+			options.print("Applied: 0")
+			options.print(`Pending: ${rest.join(", ") || "none"}`)
+			options.print(adopts(ran))
+			return { applied: [], pending: rest }
+		}
+		const status = known(own)
 		const missing: string[] = []
 		const halfway = checkHistory(status, copy, (line) => missing.push(line))
 		options.print(`Applied: ${status.applied.length}${status.applied.length > 0 ? ` (up to ${status.current})` : ""}`)

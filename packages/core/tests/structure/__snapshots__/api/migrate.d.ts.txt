@@ -421,10 +421,12 @@ type PgTarget = {
     schema: string;
     url: string;
 };
-/** What an Atlas call reads from its config: the target, the dev database, the migrations dir */
+/** What an Atlas call reads from its config: the target, the dev database, the migrations dir, and whose history */
 type AtlasNeeds = {
     dev?: boolean | undefined;
     dir?: string | undefined;
+    /** the shared history public keeps, whatever the target's schema: 0.12 kept every schema's there (M77) */
+    shared?: boolean | undefined;
     url?: boolean | undefined;
 };
 /** The flags and environment an Atlas call runs with, its scratch directory, and the scrubber for its output */

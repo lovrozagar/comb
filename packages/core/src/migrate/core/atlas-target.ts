@@ -14,8 +14,14 @@ import { join } from "node:path"
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
 type PgTarget = { devUrl: string; lockTimeout: string; schema: string; url: string }
 
-/** What an Atlas call reads from its config: the target, the dev database, the migrations dir */
-type AtlasNeeds = { dev?: boolean | undefined; dir?: string | undefined; url?: boolean | undefined }
+/** What an Atlas call reads from its config: the target, the dev database, the migrations dir, and whose history */
+type AtlasNeeds = {
+	dev?: boolean | undefined
+	dir?: string | undefined
+	/** the shared history public keeps, whatever the target's schema: 0.12 kept every schema's there (M77) */
+	shared?: boolean | undefined
+	url?: boolean | undefined
+}
 
 /** The flags and environment an Atlas call runs with, its scratch directory, and the scrubber for its output */
 type AtlasEnv = {
@@ -238,7 +244,7 @@ function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: Atla
 	let pending = false
 	try {
 		/* a dev-only call reads no history, and may have no target URL to scope one by */
-		const revisions = needs.url === true ? revisionsSchema(target) : SHARED_REVISIONS
+		const revisions = needs.url === true && needs.shared !== true ? revisionsSchema(target) : SHARED_REVISIONS
 		writeFileSync(join(dir, "atlas.hcl"), atlasConfig(needs, revisions), { mode: 0o600 })
 		const env: Record<string, string> = {}
 		if (needs.url) env["COMB_ATLAS_URL"] = atlasTargetUrl(target)
