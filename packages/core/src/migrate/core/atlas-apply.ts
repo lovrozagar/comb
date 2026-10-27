@@ -21,11 +21,12 @@ import { refuseUnclean } from "./atlas-clean.ts"
 import { explainAtlasFailure, NOT_CLEAN, SHARED_REVISIONS } from "./atlas-target.ts"
 import { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran, scrubbing } from "./atlas-status.ts"
 import { refuseDrift } from "./baseline-compare.ts"
-import { extractSchema, parseMigration } from "./parse.ts"
+import { extractSchema, parseRead } from "./parse.ts"
 import { run } from "./process.ts"
 import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
-import { fileUnreadable } from "./pg-split.ts"
+import { pgRead } from "./pg-split.ts"
+import { schemaOfRead } from "./schema.ts"
 
 const APPLY_FORMAT = '{"target":{{ json .Target }},"applied":{{ json .Applied }},"error":{{ json .Error }}}'
 
@@ -83,8 +84,7 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 	await loadPostgresParser()
 	const waiting = new Set(pending.map((file) => file.Name))
 	/* names are keyed as Postgres resolves them under the URL's search_path, the target's schema (M72) */
-	const scope = { schema: options.target.schema }
-	const readAs = { dialect: "postgres" as const, ...scope }
+	const readAs = { dialect: "postgres" as const, schema: options.target.schema }
 	let schema = extractSchema("", undefined, readAs)
 	/* a file before a pending one that Postgres's parser cannot read leaves its facts unknown (M75) */
 	let unread: string | undefined
@@ -92,13 +92,14 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 		const sql = readFileSync(join(copy, Name), "utf8")
 		if (waiting.has(Name) && unread !== undefined) throw new Error(unread)
 		const before = schema
-		schema = named(Name, () => extractSchema(sql, before, readAs))
-		/* the file's read, recorded beside the schema it left: no second parse */
-		const unreadable = fileUnreadable(schema)
+		/* the file's one parse, for the schema it leaves and, pending, its approval (M86) */
+		const read = named(Name, () => pgRead(sql))
+		schema = schemaOfRead({ read, sql }, readAs, before)
+		const { unreadable } = read
 		unread ??=
 			unreadable && `comb could not read ${Name}: ${JSON.stringify(unreadable.statement)} (${unreadable.error})`
 		if (!waiting.has(Name)) continue
-		const migration = parseMigration(sql, Name, { before, dialect: "postgres", ...scope })
+		const migration = parseRead({ filename: Name, read, sql }, { before, ...readAs })
 		for (const warning of migration.classification.lockWarnings) options.print(`Lock warning in ${Name}: ${warning}`)
 		const approval = await options.approve(migration)
 		if (!approval.ok) throw new Refused(approval.message, [...waiting])

@@ -1,7 +1,7 @@
 /**
  * S1 of the M75 review: a Postgres file is parsed once. The read keeps each statement's parse
  * tree beside the schema it leaves, so the history's facts and each statement's findings follow
- * those trees, and the file-naming check reads that read's first unreadable statement.
+ * those trees; apply's file-naming check reads that read's first unreadable statement (M86).
  */
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { classifyMigration } from "./classify.ts"

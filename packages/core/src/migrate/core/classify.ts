@@ -27,7 +27,7 @@ import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
 import { noGuards, readGuards } from "./guard-read.ts"
 import { codeOf, nameKey, namingOf, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
-import { pgRead } from "./pg-split.ts"
+import { type PgRead, pgRead } from "./pg-split.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 
 type ClassifyOptions = {
@@ -161,10 +161,10 @@ type Read = ReadStatement & { findings: Finding[] }
 function readFile(
 	sql: string,
 	{ before, dialect, schema }: { before: ExtractedSchema | undefined; dialect: Dialect; schema: string },
+	read: PgRead | undefined,
 ): Read[] {
 	const naming = namingOf(dialect, schema)
 	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75), each tree kept */
-	const read = dialect === "postgres" ? pgRead(sql) : undefined
 	const statements = read === undefined ? splitSqlStatements(sql) : read.statements.map(({ text }) => text)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
 	const created = new Set(
@@ -217,9 +217,15 @@ function readFile(
 	})
 }
 
-/** The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default */
-const readings = (sql: string, { before, dialect, schema }: ClassifyOptions): Read[] =>
-	readFile(sql, { before, dialect: dialect ?? "sqlite", schema: schema ?? "public" })
+/**
+ * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
+ * Postgres `read` is the file's one parse, its caller's when it holds one (M86)
+ */
+const readings = (
+	sql: string,
+	{ before, dialect, schema }: ClassifyOptions,
+	read: PgRead | undefined = dialect === "postgres" ? pgRead(sql) : undefined,
+): Read[] => readFile(sql, { before, dialect: dialect ?? "sqlite", schema: schema ?? "public" }, read)
 
 const entries = (reads: readonly Read[], keep: (finding: Finding) => boolean) =>
 	reads.flatMap(({ findings, stmt }) =>
@@ -229,12 +235,21 @@ const at = (level: Finding["level"]) => (finding: Finding) => finding.level === 
 
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 function extractDropStatements(sql: string, options: ClassifyOptions = {}): string[] {
-	return [...new Set(readings(sql, options).flatMap(({ findings }) => findings.flatMap((f) => f.drops ?? [])))]
+	return dropsOf(readings(sql, options))
 }
+
+/** The drops the readings of a file find */
+const dropsOf = (reads: readonly Read[]): string[] => [
+	...new Set(reads.flatMap(({ findings }) => findings.flatMap((f) => f.drops ?? []))),
+]
 
 /** How destructive a migration is, which statements make it so, and which block a Postgres table */
 function classifyMigration(sql: string, options: ClassifyOptions = {}): MigrationClassification {
-	const reads = readings(sql, options)
+	return classificationOf(readings(sql, options), sql)
+}
+
+/** classifyMigration of the readings of `sql` */
+function classificationOf(reads: readonly Read[], sql: string): MigrationClassification {
 	for (const read of reads) refuseUnrunnable(read, sql)
 	const unsafeStatements = [...new Set(entries(reads, at("unsafe")))]
 	/* a statement is listed once, at the strictest level any reading gives it, whatever each finding's note */
@@ -260,4 +275,4 @@ function classifyMigration(sql: string, options: ClassifyOptions = {}): Migratio
 	}
 }
 
-export { classifyMigration, type ClassifyOptions, extractDropStatements }
+export { classificationOf, classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings }

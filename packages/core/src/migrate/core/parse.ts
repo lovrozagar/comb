@@ -2,8 +2,16 @@
  * SQL parsing utilities for migrations
  */
 import { createHash } from "node:crypto"
-import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts"
-import { extractSchema } from "./schema.ts"
+import {
+	classificationOf,
+	classifyMigration,
+	type ClassifyOptions,
+	dropsOf,
+	extractDropStatements,
+	readings,
+} from "./classify.ts"
+import { type PgRead, pgRead } from "./pg-split.ts"
+import { extractSchema, schemaOfRead } from "./schema.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
 import type { ParsedMigration } from "../types.ts"
 
@@ -64,20 +72,22 @@ export { classifyMigration, extractDropStatements }
  * earlier files leave; its statements are applied as written, as wrangler and Atlas apply them
  */
 export function parseMigration(sql: string, filename: string, options: ClassifyOptions = {}): ParsedMigration {
-	const readAs = { dialect: options.dialect ?? "sqlite", schema: options.schema }
-	const hash = generateMigrationHash(sql)
-	const expected = extractSchema(sql, undefined, readAs)
-	const statements = splitSqlStatements(sql, readAs.dialect)
-	const drops = extractDropStatements(sql, options)
-	const classification = classifyMigration(sql, options)
+	return parseRead({ filename, read: options.dialect === "postgres" ? pgRead(sql) : undefined, sql }, options)
+}
 
+/** parseMigration of a file its caller has read: on Postgres `read` is the file's one parse (M86) */
+export function parseRead(
+	{ filename, read, sql }: { filename: string; read: PgRead | undefined; sql: string },
+	options: ClassifyOptions,
+): ParsedMigration {
+	const reads = readings(sql, options, read)
 	return {
-		classification,
-		drops,
-		expected,
+		classification: classificationOf(reads, sql),
+		drops: dropsOf(reads),
+		expected: schemaOfRead({ read, sql }, { dialect: options.dialect ?? "sqlite", schema: options.schema }),
 		filename,
-		hash,
+		hash: generateMigrationHash(sql),
 		sql,
-		statements,
+		statements: reads.map(({ stmt }) => stmt),
 	}
 }

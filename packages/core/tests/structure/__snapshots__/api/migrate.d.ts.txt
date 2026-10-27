@@ -96,6 +96,7 @@ export declare function exportDrizzleSchema(options: DrizzleExportOptions): stri
 
 // migrate/core/parse.d.ts
 import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts";
+import { type PgRead } from "./pg-split.ts";
 import { extractSchema } from "./schema.ts";
 import { splitSqlStatements } from "./sql-scan.ts";
 import type { ParsedMigration } from "../types.ts";
@@ -117,6 +118,12 @@ export { classifyMigration, extractDropStatements };
  * earlier files leave; its statements are applied as written, as wrangler and Atlas apply them
  */
 export declare function parseMigration(sql: string, filename: string, options?: ClassifyOptions): ParsedMigration;
+/** parseMigration of a file its caller has read: on Postgres `read` is the file's one parse (M86) */
+export declare function parseRead({ filename, read, sql }: {
+    filename: string;
+    read: PgRead | undefined;
+    sql: string;
+}, options: ClassifyOptions): ParsedMigration;
 
 // migrate/core/pg-parser.d.ts
 /**
@@ -540,6 +547,9 @@ export declare function generateIncrementalMigration(options: MigrateDiffOptions
  * runs outside one.
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
+import { type Finding } from "./classify-alter.ts";
+import { type ReadStatement } from "./classify-file.ts";
+import { type PgRead } from "./pg-split.ts";
 type ClassifyOptions = {
     /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
     before?: ExtractedSchema | undefined;
@@ -548,13 +558,67 @@ type ClassifyOptions = {
     /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
     schema?: string | undefined;
 };
+type Read = ReadStatement & {
+    findings: Finding[];
+};
+/**
+ * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
+ * Postgres `read` is the file's one parse, its caller's when it holds one (M86)
+ */
+declare const readings: (sql: string, { before, dialect, schema }: ClassifyOptions, read?: PgRead | undefined) => Read[];
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 declare function extractDropStatements(sql: string, options?: ClassifyOptions): string[];
+/** The drops the readings of a file find */
+declare const dropsOf: (reads: readonly Read[]) => string[];
 /** How destructive a migration is, which statements make it so, and which block a Postgres table */
 declare function classifyMigration(sql: string, options?: ClassifyOptions): MigrationClassification;
-export { classifyMigration, type ClassifyOptions, extractDropStatements };
+/** classifyMigration of the readings of `sql` */
+declare function classificationOf(reads: readonly Read[], sql: string): MigrationClassification;
+export { classificationOf, classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings };
+
+// migrate/core/pg-split.d.ts
+type RawStmt = {
+    stmt_len?: number;
+    stmt_location?: number;
+};
+/** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
+type PgStatement = {
+    text: string;
+    tree: RawStmt[] | undefined;
+};
+/** A statement the parser cannot read, with its reason */
+type Unreadable = {
+    error: string;
+    statement: string;
+};
+/** A Postgres file read: its statements in order, and the first the parser cannot read */
+type PgRead = {
+    statements: PgStatement[];
+    unreadable: Unreadable | undefined;
+};
+/** A migration file's leading `atlas:` directive lines, with the blank lines after them */
+declare const atlasDirectives: (file: string) => string;
+/** The Postgres file `sql` read once: its statements in the order Postgres runs them, with their trees; throws for a file Atlas cannot split */
+declare function pgRead(sql: string): PgRead;
+/** The statements of the Postgres file `sql`, in the order Postgres runs them; throws for a file Atlas cannot split */
+declare const pgStatements: (sql: string) => string[];
+/** Record the trees of `read`, the file that took `from` to `schema`, beside `schema` */
+declare function recordRead(schema: object, from: {
+    statements: readonly string[];
+}, read: PgRead): void;
+/** The parse tree of each of `schema`'s history statements, none for one the parser cannot read; undefined without a record */
+declare const historyTrees: (schema: object) => ReadonlyArray<RawStmt[] | undefined> | undefined;
+/**
+ * The migration file of `statements` under `head`, its directives kept as they are (Atlas honors
+ * one only when a blank line follows), a delimiter directive dropped: one Atlas sends each
+ * statement of alone, each ended by `;` where Atlas reads it so, else every one by a delimiter of
+ * the file's own, which its first line sets
+ */
+declare function atlasFile(statements: readonly string[], head?: string): string;
+export { atlasDirectives, atlasFile, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead };
 
 // migrate/core/schema.d.ts
+import { type PgRead } from "./pg-split.ts";
 import type { Dialect, ExtractedSchema } from "../types.ts";
 /**
  * The tables (with columns, keys and shape), indexes, dropped tables, triggers and routines a
@@ -566,7 +630,18 @@ declare function extractSchema(sql: string, from?: ExtractedSchema, readAs?: Dia
     dialect: Dialect;
     schema?: string | undefined;
 }): ExtractedSchema;
-export { extractSchema };
+/**
+ * extractSchema of a file its caller has read: on Postgres `read` is its one parse, shared with the
+ * file's classification (M86); undefined, the file is read as SQLite
+ */
+declare function schemaOfRead({ read, sql }: {
+    read: PgRead | undefined;
+    sql: string;
+}, { dialect, schema: searchSchema }: {
+    dialect: Dialect;
+    schema?: string | undefined;
+}, from?: ExtractedSchema): ExtractedSchema;
+export { extractSchema, schemaOfRead };
 
 // migrate/core/sql-scan.d.ts
 /**
@@ -684,6 +759,57 @@ type FtsDelta = {
 /** The FTS statements a migration needs after its plain part; "" when it needs none */
 declare function ftsDelta({ from, plainDiff, to, toStatements }: FtsDelta): string;
 export { asSql, ftsDelta, separate, type FtsState };
+
+// migrate/core/classify-alter.d.ts
+/** What one statement or action makes of the migration: its level, the drops it names, and why */
+type Finding = {
+    drops?: string[] | undefined;
+    level: "cautious" | "lock" | "unsafe";
+    note?: string | undefined;
+    /** a SQLite write the classifier leaves to the proof run's engine read (classify-sqlite-write.ts) */
+    pending?: true;
+};
+/** What the rules need from the file: the SQLite rebuilds it makes */
+type AlterContext = {
+    rebuilds: ReadonlyMap<string, ReadonlyArray<{
+        temp: string;
+    }>>;
+};
+/** The findings of an ALTER TABLE, action by action; undefined for code that is not one */
+declare function alterTableFindings(code: string, ctx: AlterContext): Finding[] | undefined;
+export { alterTableFindings, type Finding };
+
+// migrate/core/classify-file.d.ts
+/**
+ * The file-level rules of the destructive-change gate: a statement Postgres runs only outside a
+ * transaction is refused unless its file runs outside one, an external-content FTS5 index the
+ * file creates again and rebuilds is known to lose nothing when it is dropped, and an FTS5 command
+ * that removes indexed rows is unsafe.
+ */
+import type { Dialect } from "../types.ts";
+import type { Finding } from "./classify-alter.ts";
+/**
+ * An FTS5 command, an insert into the table's own hidden column, that removes indexed rows
+ * ('delete', 'delete-all') or whose command comb cannot read is unsafe. SQLite runs it as an
+ * insert, so the proof's engine pass sees no deletion; the command is its value.
+ */
+declare function ftsCommandFindings(stmt: string): Finding[];
+/** A statement as a person reads it in a prompt: comments and layout gone, cut at 80 characters */
+declare function preview(stmt: string): string;
+/**
+ * The external-content FTS5 tables a file creates and then rebuilds from their content table:
+ * such a table holds only an index of rows kept elsewhere
+ */
+declare function reindexedOf(statements: readonly string[]): Set<string>;
+/** A statement as the gate read it: its code, its text, and the dialect it was read as */
+type ReadStatement = {
+    code: string;
+    dialect: Dialect;
+    stmt: string;
+};
+/** Refuses a statement that cannot run in its file `sql`: no `-- comb:allow-unsafe:` overrides this */
+declare function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): void;
+export { ftsCommandFindings, preview, type ReadStatement, refuseUnrunnable, reindexedOf };
 
 // migrate/drivers/bun-sqlite.d.ts
 import type { MemoryDb } from "./memory.ts";

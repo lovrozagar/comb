@@ -3,8 +3,8 @@
  * each split into the statements Postgres's parser reads in it, by each RawStmt's `stmt_location`
  * and `stmt_len`, offsets in UTF-8 bytes. A chunk the parser cannot read stays one statement: the
  * classifier rates it unsafe, and a history holding one fails the classification. Each file is
- * parsed once: its read keeps every statement's parse tree, and extractSchema records it beside
- * the schema it leaves (recordRead), which the history's facts and the file-naming check read. A
+ * parsed once: its read keeps every statement's parse tree, and extractSchema records the history's
+ * trees beside the schema it leaves (recordRead), which the history's facts read. A
  * file comb writes from such statements (atlasFile) is one Atlas sends each of alone.
  */
 import { atlasChunks, type Chunk, unterminated } from "./atlas-scan.ts"
@@ -72,24 +72,22 @@ function pgRead(sql: string): PgRead {
 /** The statements of the Postgres file `sql`, in the order Postgres runs them; throws for a file Atlas cannot split */
 const pgStatements = (sql: string): string[] => pgRead(sql).statements.map(({ text }) => text)
 
-/** What extractSchema read for a schema: the history's trees (none when one before it was never read), and its file's first unreadable statement */
-type Recorded = { trees: Array<RawStmt[] | undefined> | undefined; unreadable: Unreadable | undefined }
+/** A history's trees: each statement's, none for one the parser cannot read */
+type Trees = Array<RawStmt[] | undefined>
 
-// lru-cache: each Postgres schema's read, released with the schema; one without a record (a copy, or one built elsewhere) is parsed again
-const READS = /* @__PURE__ */ new WeakMap<object, Recorded>()
+// lru-cache: each Postgres schema's history trees, released with the schema; one without a record is parsed again.
+// A schema is public data (ExtractedSchema) that a caller of classifyMigration or parseMigration builds with
+// extractSchema and hands back as `before`, so its trees cannot travel on it (M86)
+const TREES = /* @__PURE__ */ new WeakMap<object, Trees | undefined>()
 
-/** Record `read`, the file that took `from` to `schema`, beside `schema` */
+/** Record the trees of `read`, the file that took `from` to `schema`, beside `schema` */
 function recordRead(schema: object, from: { statements: readonly string[] }, read: PgRead): void {
-	const before = from.statements.length === 0 ? [] : READS.get(from)?.trees
-	const trees = before === undefined ? undefined : [...before, ...read.statements.map(({ tree }) => tree)]
-	READS.set(schema, { trees, unreadable: read.unreadable })
+	const before = from.statements.length === 0 ? [] : TREES.get(from)
+	TREES.set(schema, before === undefined ? undefined : [...before, ...read.statements.map(({ tree }) => tree)])
 }
 
 /** The parse tree of each of `schema`'s history statements, none for one the parser cannot read; undefined without a record */
-const historyTrees = (schema: object): ReadonlyArray<RawStmt[] | undefined> | undefined => READS.get(schema)?.trees
-
-/** The first statement of the file that left `schema` the parser cannot read, with its reason */
-const fileUnreadable = (schema: object): Unreadable | undefined => READS.get(schema)?.unreadable
+const historyTrees = (schema: object): ReadonlyArray<RawStmt[] | undefined> | undefined => TREES.get(schema)
 
 /** A first-line delimiter directive, which Atlas honors only there */
 const DELIMITER_DIRECTIVE = /^-- atlas:delimiter(?=[ \n])[^\n]*\n/
@@ -136,14 +134,4 @@ function atlasFile(statements: readonly string[], head = ""): string {
 	throw new Error(`comb cannot write these statements so that Atlas sends each alone: ${JSON.stringify(statements)}`)
 }
 
-export {
-	atlasDirectives,
-	atlasFile,
-	fileUnreadable,
-	historyTrees,
-	type PgRead,
-	pgRead,
-	type PgStatement,
-	pgStatements,
-	recordRead,
-}
+export { atlasDirectives, atlasFile, historyTrees, type PgRead, pgRead, type PgStatement, pgStatements, recordRead }
