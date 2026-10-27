@@ -470,7 +470,7 @@ declare const atlasUrls: (target: PgTarget) => {
     url: string;
 };
 /** comb's answer to a database Atlas calls not clean: objects but no history */
-declare const NOT_CLEAN = "the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline";
+declare const NOT_CLEAN = "the database has objects but no migration history, and no shared history row matches this directory's files (a database made by hand, or another directory's history); if its schema matches the migrations, record them with comb migrate baseline";
 /** Atlas's failure in comb's terms where comb knows the fix, else as Atlas said it; `scrub` takes only the text Atlas wrote, never comb's words */
 declare function explainAtlasFailure(stderr: string, scrub: (text: string) => string): string;
 /** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to `revisions` */

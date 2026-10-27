@@ -4,7 +4,7 @@ import type { Run, RunResult } from "./process.ts"
 
 const TARGET = { devUrl: "", lockTimeout: "5s", schema: "app", url: "postgres://app:S3cret@db/app" }
 const BASELINE =
-	"the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline"
+	"the database has objects but no migration history, and no shared history row matches this directory's files (a database made by hand, or another directory's history); if its schema matches the migrations, record them with comb migrate baseline"
 
 /** Atlas answering every call with `answer`, recording the arguments and the URL it was given */
 function atlas(answer: RunResult) {

@@ -47,7 +47,7 @@ describe("pgUrlProblems", () => {
 
 	it("refuses a schema that is not a plain name, and a lock timeout it cannot pass on", () => {
 		expect(pgUrlProblems(target({ schema: "public;drop" })).errors).toEqual([
-			'schema must be a plain name such as "public"',
+			'schema must be a lowercase plain name such as "public"',
 		])
 		expect(pgUrlProblems(target({ lockTimeout: "soon" })).errors).toEqual([
 			"lockTimeout must look like 5s, 1500ms, 1min or 0",
@@ -73,6 +73,15 @@ describe("pgUrlProblems", () => {
 		).toEqual([
 			"url uses port 6543, Supabase's transaction pooler; migrations need the direct or session connection on 5432",
 		])
+	})
+})
+
+describe("pgUrlProblems: the schema's name (M87)", () => {
+	it("refuses a name Postgres folds where comb writes it unquoted, naming what it folds to", () => {
+		expect(pgUrlProblems(target({ schema: "Tenant" })).errors).toEqual([
+			'schema must be a lowercase plain name such as "public": Postgres folds Tenant to tenant where it is unquoted',
+		])
+		expect(pgUrlProblems(target({ schema: "tenant_b$2" })).errors).toEqual([])
 	})
 })
 

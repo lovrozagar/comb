@@ -167,7 +167,7 @@ describe("migrate check on Postgres reads only (M11)", () => {
 				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
 				await query(url, "CREATE TABLE legacy (id integer); INSERT INTO legacy VALUES (1)")
 				const refusal =
-					"the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline"
+					"the database has objects but no migration history, and no shared history row matches this directory's files (a database made by hand, or another directory's history); if its schema matches the migrations, record them with comb migrate baseline"
 				await expect(applyWithAtlas(command(url))).rejects.toThrow(refusal)
 				await query(url, "DROP SCHEMA IF EXISTS atlas_schema_revisions CASCADE")
 				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(refusal)
@@ -340,13 +340,13 @@ describe("migrate apply on Postgres: one history per schema", () => {
 			})
 		}, 60_000)
 
-		it("refuses a schema migrated before 0.13, whose history is the shared one, and says to baseline it", async () => {
+		it("refuses a schema holding objects that no history row matches, and says to baseline it", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				await query(devUrl, "CREATE SCHEMA tenant_a")
 				await query(url, 'CREATE SCHEMA tenant_a; CREATE TABLE tenant_a."t" ("id" integer)')
 				migrations({ "20260101000000_t.sql": 'CREATE TABLE "t" ("id" integer);\n' })
 				const refusal =
-					/before 0\.13, a schema other than public kept its history in the shared atlas_schema_revisions[\s\S]*comb migrate baseline/
+					/no shared history row matches this directory's files \(a database made by hand, or another directory's history\)[\s\S]*comb migrate baseline/
 				await expect(applyWithAtlas(command(url, { schema: "tenant_a" }))).rejects.toThrow(refusal)
 				expect(baselineWithAtlas(command(url, { devUrl, schema: "tenant_a" }))).toEqual(["20260101000000_t.sql"])
 				expect(await applyWithAtlas(command(url, { schema: "tenant_a" }))).toEqual([])

@@ -39,6 +39,7 @@ type AtlasEnv = {
 const LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 // lookup-table: sslmodes that encrypt the connection
 const VERIFIED_SSL = /* @__PURE__ */ new Set(["require", "verify-ca", "verify-full"])
+const PLAIN_SCHEMA = /^[a-z_][a-z0-9_$]*$/
 const ENCODE_HINT = "percent-encode special characters (#, /, ?, @) in the password"
 
 /** `raw` as a URL with one of `schemes`, or undefined */
@@ -82,6 +83,14 @@ function checkUrl(field: "devUrl" | "url", raw: string, schemes: readonly string
 	return url === undefined ? { error: `${field} is not ${accepted} URL; ${ENCODE_HINT}` } : { url }
 }
 
+/** Why `schema` cannot be the target's: Postgres folds the name comb writes unquoted, so only a lowercase one is kept (M87) */
+function schemaProblem(schema: string): string | undefined {
+	if (PLAIN_SCHEMA.test(schema)) return undefined
+	const folded = schema.toLowerCase()
+	const fold = PLAIN_SCHEMA.test(folded) ? `: Postgres folds ${schema} to ${folded} where it is unquoted` : ""
+	return `schema must be a lowercase plain name such as "public"${fold}`
+}
+
 /** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */
 function pgUrlProblems(
 	target: PgTarget,
@@ -93,7 +102,8 @@ function pgUrlProblems(
 	if (url.url !== undefined && url.url.href === dev.url?.href) {
 		errors.push("url and devUrl are the same database; Atlas empties the dev database, so give it its own")
 	}
-	if (!/^[A-Za-z_][\w$]*$/.test(target.schema)) errors.push('schema must be a plain name such as "public"')
+	const named = schemaProblem(target.schema)
+	if (named !== undefined) errors.push(named)
 	const scope = url.url?.searchParams.get("search_path")
 	if (scope !== null && scope !== undefined) {
 		const fix = "comb migrates one: set schema to it, and drop search_path from the url"
@@ -159,7 +169,7 @@ const atlasUrls = (target: PgTarget): { devUrl: string; url: string } => ({
 
 /** comb's answer to a database Atlas calls not clean: objects but no history */
 const NOT_CLEAN =
-	"the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline"
+	"the database has objects but no migration history, and no shared history row matches this directory's files (a database made by hand, or another directory's history); if its schema matches the migrations, record them with comb migrate baseline"
 
 /** Atlas's failure in comb's terms where comb knows the fix, else as Atlas said it; `scrub` takes only the text Atlas wrote, never comb's words */
 function explainAtlasFailure(stderr: string, scrub: (text: string) => string): string {
