@@ -112,8 +112,19 @@ describe("seedTables on common CHECK shapes (M15)", () => {
 		["a fixed length", "uid TEXT NOT NULL CHECK (length(uid) = 26)"],
 		["a percentage range", "pct INTEGER NOT NULL CHECK (pct >= 0 AND pct <= 100)"],
 		["a type on a nullable column", "n INTEGER CHECK (typeof(n) = 'integer')"],
+		/* M47: text datetime() keeps as written, YYYY-MM-DD HH:MM:SS */
+		["a datetime text", "at TEXT NOT NULL CHECK (at IS datetime(at))"],
 	])("seeds a table checked by %s", async (_, column) => {
 		const { rows, unproven } = await seeded({ t: `CREATE TABLE t (id INTEGER PRIMARY KEY, ${column})` })
+		expect(unproven).toEqual(new Map())
+		expect(rows("t")).toHaveLength(6)
+	})
+
+	/* M47: keys start past 2^40, so a key held to 32 bits takes a fallback counting down from 2^31 - 1 */
+	it("seeds an INTEGER key a CHECK holds to 32 bits", async () => {
+		const { rows, unproven } = await seeded({
+			t: "CREATE TABLE t (id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 2147483647), a TEXT)",
+		})
 		expect(unproven).toEqual(new Map())
 		expect(rows("t")).toHaveLength(6)
 	})

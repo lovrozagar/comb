@@ -4,7 +4,8 @@
  * column checked `IN (…)` takes its listed values; a reseed's never meet the first seed's. Text
  * holds outer whitespace and an empty string, so a trim or a NULLIF shows; BLOB slots are bytes.
  * The shapes a CHECK commonly asks for are each affinity's fallbacks: JSON, an email, a UUID, a
- * hex digest and digits for text, a ratio in [0, 1] for reals, epoch milliseconds for integers.
+ * hex digest, digits and a datetime() text for text, a ratio in [0, 1] for reals, epoch
+ * milliseconds and a 32-bit number counting down from 2^31 - 1 for integers (M47).
  */
 import { affinityOf } from "./sqlite-affinity.ts"
 
@@ -51,11 +52,16 @@ const JSON_SHAPE = (row: number, column: number, variant: number): string =>
 	JSON.stringify({ c: column, r: row, v: variant })
 const RATIO = (row: number, column: number, variant: number): number => (row + 1) / 64 + variant / 128 + column / 1e6
 const EPOCH_MS = (row: number, column: number, variant: number): number => 1_700_000_000_000 + tag(row, column, variant)
+/* a key or a count a CHECK holds to 32 bits: positive, below 2^31 */
+const INT32 = (row: number, column: number, variant: number): number => 2_147_483_647 - tag(row, column, variant)
+/* text as datetime() writes it, YYYY-MM-DD HH:MM:SS, a second per tag */
+const DATETIME = (row: number, column: number, variant: number): string =>
+	new Date(Date.UTC(2026, 0, 1) + tag(row, column, variant) * 1000).toISOString().replace("T", " ").slice(0, 19)
 type Shape = (row: number, column: number, variant: number) => unknown
 // lookup-table: each affinity's fallback shapes, tried in order
 const SHAPES: Readonly<Record<string, readonly Shape[]>> = {
 	BLOB: [(row, column, variant) => bytes(0xb0, row, column % 256, variant)],
-	INTEGER: [EPOCH_MS],
+	INTEGER: [EPOCH_MS, INT32],
 	NUMERIC: [RATIO, EPOCH_MS, (row, column, variant) => bytes(0xb0, row, column % 256, variant)],
 	REAL: [RATIO],
 	TEXT: [
@@ -65,6 +71,7 @@ const SHAPES: Readonly<Record<string, readonly Shape[]>> = {
 		(row, column, variant) => `00000000-0000-4000-8000-${tag(row, column, variant).toString(16).padStart(12, "0")}`,
 		(row, column, variant) => tag(row, column, variant).toString(16).padStart(64, "a"),
 		(row, column, variant) => String(10_000 + (tag(row, column, variant) % 90_000)),
+		DATETIME,
 	],
 }
 /** The most shapes any affinity has: how many shape attempts a row makes */
