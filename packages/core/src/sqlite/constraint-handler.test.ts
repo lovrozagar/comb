@@ -452,6 +452,19 @@ describe("sqliteErrorHandler: names with dots and dashes", () => {
 				[],
 			),
 		).toMatchObject({ column: "c.d", table: "a.b" })
+		/* U44: a name holding ", " splits at ", <table>." when the statement names the table */
+		const commas = 'insert into "a, b" ("x, y", "z") values (?, ?)'
+		expect(
+			thrown(wrapped(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: a, b.x, y"), commas), []),
+		).toMatchObject({ column: "x, y", table: "a, b" })
+		/* a composite unique is found by its columns together, each read whole */
+		const pair = [{ "a, b": { unique: { "x, y,z": { cause: "Taken", errorKey: "ab_taken" } } } }]
+		expect(
+			thrown(wrapped(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: a, b.x, y, a, b.z"), commas), pair),
+		).toMatchObject({ errorKey: "ab_taken", table: "a, b" })
+		expect(
+			thrown(wrapped(engine("SQLITE_CONSTRAINT_NOTNULL", "NOT NULL constraint failed: a, b.x, y"), commas), []),
+		).toMatchObject({ column: "x, y", table: "a, b" })
 		/* with no statement, the last dot: what SQLite's message alone can say */
 		expect(thrown(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: a.b.c"), [])).toMatchObject({
 			column: "c",

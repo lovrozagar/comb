@@ -27,15 +27,20 @@ function splitPair(pair: string, table: string | undefined): { column: string; t
 
 /**
  * `UNIQUE constraint failed: member.first, member.last` → member, [first, last]. A table name may
- * hold any character, a dot included: each pair splits at `query`'s table (splitPair).
+ * hold any character, a dot or ", " included: with `query`'s table known, each pair starts at
+ * ", <table>." (U44) and splits at that table (splitPair); else at each ", ".
  */
 function failedColumns(message: string, query: string | undefined): { columns: string[]; table: string | undefined } {
 	const list = /constraint failed: (.+)$/i.exec(message)?.[1] ?? ""
 	const known = statementTable(query)
-	const pairs = list
-		.split(", ")
-		.map((pair) => splitPair(pair.trim(), known))
-		.filter((pair) => pair !== undefined)
+	const raw =
+		known !== undefined && list.startsWith(`${known}.`)
+			? list
+					.slice(known.length + 1)
+					.split(`, ${known}.`)
+					.map((column) => `${known}.${column}`)
+			: list.split(", ")
+	const pairs = raw.map((pair) => splitPair(pair.trim(), known)).filter((pair) => pair !== undefined)
 	return { columns: pairs.map((pair) => pair.column), table: pairs[0]?.table }
 }
 

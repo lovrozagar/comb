@@ -56,9 +56,23 @@ function sqlstate(error: DriverError): string | undefined {
 	return undefined
 }
 
+/* one name in a Key list: an identifier Postgres quoted, its doubled quotes standing for one, or
+   bare text up to a top-level comma, an expression's parentheses included (U44) */
+// per-process-constant: see above
+const KEY_NAME = /\s*(?:"((?:[^"]|"")*)"|((?:[^,()]|\((?:[^()]|\([^()]*\))*\))+))\s*(,|\)=)/y
+
+/** The columns in `detail`'s `Key (a, "b, c")=(…)`, each read as the identifier Postgres wrote */
 function keyColumns(detail: string | undefined): string[] {
-	const list = /^Key \(([^)]+)\)=/.exec(detail ?? "")?.[1]
-	return list === undefined ? [] : list.split(",").map((column) => column.trim().replace(/^"|"$/g, ""))
+	const line = detail ?? ""
+	if (!line.startsWith("Key (")) return []
+	const columns: string[] = []
+	KEY_NAME.lastIndex = "Key (".length
+	for (let at = KEY_NAME.exec(line); at !== null; at = KEY_NAME.exec(line)) {
+		const [, quoted, bare, end] = at
+		columns.push(quoted === undefined ? (bare as string).trim() : quoted.replaceAll('""', '"'))
+		if (end === ")=") return columns
+	}
+	return []
 }
 
 /**

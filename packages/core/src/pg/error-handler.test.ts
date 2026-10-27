@@ -43,6 +43,9 @@ function thrown(error: unknown, maps = MAPS): CombError | undefined {
 	return undefined
 }
 
+/** The key columns readPgError reads from a unique violation's `detail` */
+const keys = (detail: string) => readPgError(nodePg({ code: "23505", detail, table: "t" }))?.keyColumns
+
 describe("readPgError", () => {
 	it("reads every driver's field names, through wrappers", () => {
 		const expected = {
@@ -64,6 +67,15 @@ describe("readPgError", () => {
 			readPgError(postgresJs({ code: "23505", column_name: "c", constraint_name: "k", detail, table_name: "t" })),
 		).toEqual(expected)
 		expect(readPgError(bunSql({ column: "c", constraint: "k", detail, errno: "23505", table: "t" }))).toEqual(expected)
+	})
+
+	/* U44: Postgres quotes a key column as an identifier, so one may hold a comma, a quote or a parenthesis */
+	it("reads the key's columns as quoted identifiers", () => {
+		expect(keys('Key ("x, y", z)=(1, 2) already exists.')).toEqual(["x, y", "z"])
+		expect(keys('Key ("say ""hi""", "f(x)")=(1, 2) already exists.')).toEqual(['say "hi"', "f(x)"])
+		expect(keys("Key (lower(name::text))=(a) already exists.")).toEqual(["lower(name::text)"])
+		expect(keys("no key here")).toEqual([])
+		expect(keys("Key (a, b")).toEqual([])
 	})
 
 	it("is null without a SQLSTATE", () => {
