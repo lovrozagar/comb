@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
+import { RESERVED_SCHEMA_WORDS } from "./pg-keywords.ts"
 
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
 type PgTarget = { devUrl: string; lockTimeout: string; schema: string; url: string }
@@ -83,12 +84,22 @@ function checkUrl(field: "devUrl" | "url", raw: string, schemes: readonly string
 	return url === undefined ? { error: `${field} is not ${accepted} URL; ${ENCODE_HINT}` } : { url }
 }
 
-/** Why `schema` cannot be the target's: Postgres folds the name comb writes unquoted, so only a lowercase one is kept (M87) */
+/**
+ * Why `schema` cannot be the target's: comb writes it unquoted, so it must be a name Postgres keeps
+ * as written, never one it folds, cuts or reads as a keyword (M87)
+ */
 function schemaProblem(schema: string): string | undefined {
-	if (PLAIN_SCHEMA.test(schema)) return undefined
-	const folded = schema.toLowerCase()
-	const fold = PLAIN_SCHEMA.test(folded) ? `: Postgres folds ${schema} to ${folded} where it is unquoted` : ""
-	return `schema must be a lowercase plain name such as "public"${fold}`
+	if (!PLAIN_SCHEMA.test(schema)) {
+		const folded = schema.toLowerCase()
+		const fold = PLAIN_SCHEMA.test(folded) ? `: Postgres folds ${schema} to ${folded} where it is unquoted` : ""
+		return `schema must be a lowercase plain name such as "public"${fold}`
+	}
+	/* a plain name is ASCII, one byte a character; Postgres keeps NAMEDATALEN - 1 of them */
+	if (schema.length > 63)
+		return "schema must be at most 63 bytes: Postgres cuts a longer name to 63, which names another schema"
+	if (RESERVED_SCHEMA_WORDS.has(schema))
+		return `schema must not be ${schema}, a word Postgres reserves: unquoted, it is refused or read as something else`
+	return undefined
 }
 
 /** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */

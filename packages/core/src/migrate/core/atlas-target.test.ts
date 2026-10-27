@@ -83,6 +83,21 @@ describe("pgUrlProblems: the schema's name (M87)", () => {
 		])
 		expect(pgUrlProblems(target({ schema: "tenant_b$2" })).errors).toEqual([])
 	})
+
+	it("refuses a name Postgres cuts to 63 bytes, and keeps one of 63", () => {
+		expect(pgUrlProblems(target({ schema: "t".repeat(64) })).errors).toEqual([
+			"schema must be at most 63 bytes: Postgres cuts a longer name to 63, which names another schema",
+		])
+		expect(pgUrlProblems(target({ schema: "t".repeat(63) })).errors).toEqual([])
+	})
+
+	it("refuses a reserved word, which Postgres refuses or reads otherwise unquoted, and keeps a column-name keyword", () => {
+		for (const word of ["user", "order"])
+			expect(pgUrlProblems(target({ schema: word })).errors, word).toEqual([
+				`schema must not be ${word}, a word Postgres reserves: unquoted, it is refused or read as something else`,
+			])
+		expect(pgUrlProblems(target({ schema: "int" })).errors).toEqual([])
+	})
 })
 
 describe("atlasUrls", () => {
