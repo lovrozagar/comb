@@ -469,12 +469,6 @@ declare const atlasUrls: (target: PgTarget) => {
     devUrl: string;
     url: string;
 };
-/** `raw` with its password and every secret-looking query value masked; unparseable, masked whole */
-declare function redactUrl(raw: string): string;
-/** `text` with every secret of `urls` masked, the literal strings only: for a line comb prints (M79) */
-declare function maskSecrets(text: string, urls: readonly string[]): string;
-/** `text` with every secret of `urls` masked, and any other URL's password or secret query value too */
-declare function scrubAtlasOutput(text: string, urls: readonly string[]): string;
 /** comb's answer to a database Atlas calls not clean: objects but no history */
 declare const NOT_CLEAN = "the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline";
 /** Atlas's failure in comb's terms where comb knows the fix, else as Atlas said it; `scrub` takes only the text Atlas wrote, never comb's words */
@@ -486,7 +480,7 @@ declare function atlasConfig(needs: AtlasNeeds, revisions: string): string;
  * afterwards however `body` ends. A target with errors is refused before anything is written.
  */
 declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
-export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, maskSecrets, NOT_CLEAN, pgUrlProblems, type PgTarget, redactUrl, revisionsSchema, SHARED_REVISIONS, scrubAtlasOutput, withAtlasEnv, };
+export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, NOT_CLEAN, pgUrlProblems, type PgTarget, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
 
 // migrate/core/atlas-env.d.ts
 import type { ExtractedSchema } from "../types.ts";

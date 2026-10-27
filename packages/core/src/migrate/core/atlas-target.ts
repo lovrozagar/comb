@@ -3,13 +3,14 @@
  * child's environment (`COMB_ATLAS_URL`, `COMB_ATLAS_DEV_URL`), which a temporary atlas.hcl reads
  * with getenv, so they never reach argv, where any local user can read them. Each URL is checked
  * before Atlas sees it, scoped to the configured schema (`search_path`), and the target's lock wait
- * is bounded (`lock_timeout`). Every byte of Atlas output comb relays is scrubbed of secrets. Each
+ * is bounded (`lock_timeout`). Every byte of Atlas output comb relays is scrubbed of secrets (atlas-secrets.ts). Each
  * schema keeps its own history: public the shared `atlas_schema_revisions`, any other its own.
  */
 import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { scrubAtlasOutput } from "./atlas-secrets.ts"
 
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
 type PgTarget = { devUrl: string; lockTimeout: string; schema: string; url: string }
@@ -34,8 +35,6 @@ type AtlasEnv = {
 	scrub(text: string): string
 }
 
-const REDACTED = "***"
-const SECRET_KEY = /pass|secret|token|key/i
 // lookup-table: hosts a password never leaves the machine for
 const LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
 // lookup-table: sslmodes that encrypt the connection
@@ -158,55 +157,6 @@ const atlasUrls = (target: PgTarget): { devUrl: string; url: string } => ({
 	url: atlasTargetUrl(target),
 })
 
-/** `raw` with its password and every secret-looking query value masked; unparseable, masked whole */
-function redactUrl(raw: string): string {
-	let url: URL
-	try {
-		url = new URL(raw)
-	} catch {
-		// reason: a URL that does not parse cannot be partly masked, so none of it is shown
-		return "<redacted url>"
-	}
-	if (url.password !== "") url.password = REDACTED
-	/* a copy of the keys, since set() rewrites the list being read */
-	const keys = Array.from(url.searchParams.keys())
-	for (const key of keys) if (SECRET_KEY.test(key)) url.searchParams.set(key, REDACTED)
-	return url.href.replaceAll(encodeURIComponent(REDACTED), REDACTED)
-}
-
-/** `text` percent-decoded, or as it is when it holds a `%` that starts no escape */
-const decoded = (text: string): string => (/%(?![0-9a-f]{2})/i.test(text) ? text : decodeURIComponent(text))
-
-/**
- * The secret strings a URL holds, as written and as Atlas may print them: the password is kept
- * percent-encoded by the URL, a query value comes back already decoded
- */
-function secretsOf(raw: string): string[] {
-	const url = URL.canParse(raw) ? new URL(raw) : undefined
-	if (url === undefined) return [raw]
-	const query = [...url.searchParams].filter(([key]) => SECRET_KEY.test(key)).map(([, value]) => value)
-	const secrets = [url.password, decoded(url.password), ...query.flatMap((value) => [value, encodeURIComponent(value)])]
-	return [raw, ...secrets].filter((secret) => secret !== "")
-}
-
-/** `text` with every secret of `urls` masked, the literal strings only: for a line comb prints (M79) */
-function maskSecrets(text: string, urls: readonly string[]): string {
-	const secrets = [...new Set(urls.flatMap(secretsOf))].sort((a, b) => b.length - a.length)
-	let out = text
-	for (const secret of secrets) out = out.replaceAll(secret, REDACTED)
-	return out
-}
-
-/** `text` with every secret of `urls` masked, and any other URL's password or secret query value too */
-function scrubAtlasOutput(text: string, urls: readonly string[]): string {
-	return (
-		maskSecrets(text, urls)
-			.replace(/\b(postgres(?:ql)?:\/\/[^:/\s@]+:)[^@\s]+@/g, `$1${REDACTED}@`)
-			/* free text's key=value only: a JSON key such as "primary_key": is Atlas's structure, not a secret (M79) */
-			.replace(/((?:^|[?&"\s])\w*(?:pass|secret|token|key)\w*=)[^&\s"]+/gi, `$1${REDACTED}`)
-	)
-}
-
 /** comb's answer to a database Atlas calls not clean: objects but no history */
 const NOT_CLEAN =
 	"the database has objects but no migration history (before 0.13, a schema other than public kept its history in the shared atlas_schema_revisions); if its schema matches the migrations, record them with comb migrate baseline"
@@ -288,13 +238,10 @@ export {
 	type AtlasNeeds,
 	atlasUrls,
 	explainAtlasFailure,
-	maskSecrets,
 	NOT_CLEAN,
 	pgUrlProblems,
 	type PgTarget,
-	redactUrl,
 	revisionsSchema,
 	SHARED_REVISIONS,
-	scrubAtlasOutput,
 	withAtlasEnv,
 }

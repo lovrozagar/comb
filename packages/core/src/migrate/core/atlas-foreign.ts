@@ -17,7 +17,8 @@
 import { readInspect } from "./atlas-clean.ts"
 import { type AtlasStatus, fileOf, filesOf } from "./atlas-history.ts"
 import { atlasStatus, type AtlasCommand } from "./atlas-status.ts"
-import { explainAtlasFailure, maskSecrets, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { maskSecrets } from "./atlas-secrets.ts"
 import { run } from "./process.ts"
 
 /** Another schema's own history, by the prefix Atlas's per-schema histories share */
