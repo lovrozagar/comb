@@ -113,8 +113,8 @@ const misreadInfinity = (value: Date): boolean => value.getTime() === new Date(2
  * own value while it is infinite, at the precision the order compares it (U17); the Date itself
  * while the row still holds it, as a row of local 2000-01-01 does (U20). Once the row is gone, or
  * edited to another finite value, it may have held either infinity, so the list resumes from the
- * direction's own end, repeating rows and skipping none. Every other Date is bound as it is. A driver that reads
- * infinity as an Invalid Date mints no cursor.
+ * direction's own end, repeating rows and skipping none. Every other Date is bound as it is; a driver
+ * that reads infinity as an Invalid Date is bounded by unheldBound.
  */
 function timestampBound({ column, direction }: SortKey, value: Date, at: Anchor): SQL {
 	const end = direction === "asc" ? sql`'-infinity'::timestamp` : sql`'infinity'::timestamp`
@@ -139,6 +139,30 @@ function millisecondBound({ column, direction }: SortKey, value: Date, at: Ancho
 		direction === "asc" ? sql`CAST(${date} AS ${type})` : sql`(CAST(${date} AS ${type}) + interval '1 millisecond')`
 	const kept = sql`CASE WHEN ${cursorPrecision(column)} = ${date} THEN ${column} END`
 	return sql`coalesce((SELECT ${kept} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${edge})`
+}
+
+/**
+ * `'-infinity'` or `'infinity'` as `column`'s own Postgres type: a `date`, else a `timestamptz`, the
+ * two that read an infinity as an Invalid Date (a `timestamp` reads it as 2000-01-01, U17)
+ */
+function pgInfinity(column: SQLWrapper, sign: "-" | "+"): SQL {
+	const word = sign === "-" ? sql`'-infinity'` : sql`'infinity'`
+	return (column as { columnType?: unknown }).columnType === "PgDate" ? sql`${word}::date` : sql`${word}::timestamptz`
+}
+
+/**
+ * A Date no JS Date holds, which a date-mode Postgres `timestamptz` or `date` holding ±infinity
+ * reads as, and so does a SQLite timestamp holding ±Infinity on bun:sqlite and libsql (3.24): the
+ * row's own value while it is infinite, exact as the order compares it. Once the row is gone, or
+ * finite, it may have held either infinity, so the list resumes from the direction's own end,
+ * repeating rows and skipping none, as a date-mode `timestamp` does (U17).
+ */
+function unheldBound({ column, direction }: SortKey, at: Anchor): SQL {
+	const sqlite = is(column, SQLiteColumn)
+	const infinite = sqlite ? sql`${column} IN (9e999, -9e999)` : sql`NOT isfinite(${column})`
+	const sign = direction === "asc" ? "-" : "+"
+	const end = sqlite ? (sign === "-" ? sql`-9e999` : sql`9e999`) : pgInfinity(column, sign)
+	return sql`coalesce((SELECT CASE WHEN ${infinite} THEN ${column} END FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${end})`
 }
 
 /** Whether `column` is a SQLite number, which D1 may hand over as null when it holds ±Infinity */
@@ -184,6 +208,7 @@ function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anch
 		const key = keys[i] as SortKey
 		if (value instanceof CursorRef)
 			return new AnchorBound("row", textBound(key, value, at), !is(key.column, SQLiteColumn))
+		if (value instanceof Date && Number.isNaN(value.getTime())) return new AnchorBound("row", unheldBound(key, at))
 		if (value instanceof Date && inSeconds(key.column)) return new AnchorBound("row", secondsBound(key, value, at))
 		if (value instanceof Date && misreadsInfinity(key.column) && misreadInfinity(value))
 			return new AnchorBound("row", timestampBound(key, value, at))

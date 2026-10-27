@@ -114,11 +114,13 @@ describe("cursor values JSON has no number for (R4)", () => {
 			expect(decoded(wire({ i: 1, s: "", v: [{ $ref: ref }] }))).toBeNull()
 	})
 
-	it("mints no cursor from a Date no JS Date holds, which would mean null: a 500 on that page", () => {
+	/* 3.24: a date-mode ±infinity reads as one, and its bound is read from its row */
+	it("carries a Date no JS Date holds as itself, never as the null group", () => {
 		const sort: SortField[] = [{ direction: "asc", field: "at" }]
-		expect(() => mintCursor({ at: new Date(Number.NaN), id: 1 }, sort, SEALED)).toThrow(
-			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
-		)
+		const [value] = decoded(mintCursor({ at: new Date(Number.NaN), id: 1 }, sort, SEALED))?.values ?? []
+		expect(value).toBeInstanceOf(Date)
+		expect(Number.isNaN((value as Date).getTime())).toBe(true)
+		expect(decoded(mintCursor({ at: null, id: 1 }, sort, SEALED))?.values).toEqual([null])
 	})
 })
 

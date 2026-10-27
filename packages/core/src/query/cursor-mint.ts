@@ -51,6 +51,15 @@ function createCursor(
 	sort: readonly SortField[],
 	options: CursorOptions & { idField?: string | undefined; keyset?: KeysetKind | undefined },
 ): string {
+	/* a date-mode ±infinity is bounded from its row, which a derived list has none of (3.24) */
+	const unheld = sort.find(({ field }) => row[field] instanceof Date && Number.isNaN((row[field] as Date).getTime()))
+	if (unheld !== undefined && options?.keyset === "derived") {
+		throw new CombError({
+			cause: `the sort by ${unheld.field} reads a date no JS Date holds (a Postgres 'infinity' read in date mode, or a SQLite timestamp holding ±Infinity), which a derived list has no row to read back; select it in string mode or sort by another column`,
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
 	const mint = (record: Record<string, unknown>) => mintCursor(record, sort, options)
 	const fits = (record: Record<string, unknown>) => mint(record).length <= MAX_CURSOR_LENGTH
 	const whole = mint(row)

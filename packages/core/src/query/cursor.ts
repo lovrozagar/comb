@@ -100,7 +100,8 @@ const REF_TAG = "$ref"
 const NON_FINITE = ["Infinity", "-Infinity", "NaN"]
 
 function encodeValue(value: unknown): unknown {
-	if (value instanceof Date) return { [DATE_TAG]: value.getTime() }
+	/* a Date no JS Date holds, a date-mode ±infinity, stays a Date: null under the tag, never the null group (3.24) */
+	if (value instanceof Date) return { [DATE_TAG]: Number.isNaN(value.getTime()) ? null : value.getTime() }
 	if (value instanceof CursorRef) return { [REF_TAG]: [value.prefix, value.length] }
 	if (typeof value === "number" && !Number.isFinite(value)) return { [NUM_TAG]: String(value) }
 	return typeof value === "bigint" ? { [BIGINT_TAG]: value.toString() } : (value ?? null)
@@ -123,6 +124,8 @@ function decodeTagged(value: Record<string, unknown>): CursorRef | Date | bigint
 	const named = value[NUM_TAG]
 	if (typeof named === "string") return NON_FINITE.includes(named) ? Number(named) : undefined
 	const time = value[DATE_TAG]
+	/* an infinity read in date mode: its bound is read from its row (cursor-ref.ts), never bound itself */
+	if (time === null) return new Date(Number.NaN)
 	/* a forged time a Date cannot hold reads as Invalid Date, which no driver binds */
 	if (typeof time === "number") return Number.isNaN(new Date(time).getTime()) ? undefined : new Date(time)
 	const digits = value[BIGINT_TAG]
@@ -180,18 +183,6 @@ function mintCursor(
 	options: CursorOptions & { idField?: string | undefined },
 ): string {
 	const idField = options?.idField ?? CURSOR_TIEBREAK_COLUMN
-	/* a Date no JS Date holds (Postgres 'infinity' read in date mode) has lost its sign: a cursor
-	   would mean NULL and skip or repeat rows, so the sort is refused on the page that meets it */
-	const unheld = parsedSort.find(
-		({ field }) => record[field] instanceof Date && Number.isNaN((record[field] as Date).getTime()),
-	)
-	if (unheld !== undefined) {
-		throw new CombError({
-			cause: `the sort by ${unheld.field} reads a date no JS Date holds (a Postgres 'infinity' read in date mode, or a SQLite seconds timestamp holding ±Infinity); select it in string mode or sort by another column`,
-			errorKey: combErrorKeys.SORT_NOT_WIRED,
-			status: "internal_server_error",
-		})
-	}
 	/* a tiebreak id a JS number rounds cannot find its own row, so the keyset would repeat or skip it (U22) */
 	if (lossy(record[idField])) {
 		throw new CombError({
