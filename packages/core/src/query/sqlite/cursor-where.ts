@@ -34,7 +34,7 @@ function cursorWhere({ cursor: given, keys, options, sort, table, tiebreak }: Cu
 	const values =
 		table === undefined
 			? bound.map((value, i) => (value instanceof Date && inSeconds(columns[i]) ? exactSeconds(value) : value))
-			: anchored(keys, bound, { id, table, tiebreak: tiebreak.column })
+			: anchored(keys, bound, { id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column })
 	return keysetSQL({ id, keys, tiebreak, values })
 }
 

@@ -117,7 +117,7 @@ const byCodePoint = (column: SQLWrapper) =>
 	sql`(pg_collation_for(${column}) IN ('"C"', '"POSIX"') OR (pg_collation_for(${column}) = '"default"' AND (SELECT datcollate FROM pg_database WHERE datname = current_database()) IN ('C', 'POSIX')))`
 
 /** Where the keyset reads the cursor's row: the table, the tiebreak column and the row's id */
-type Anchor = { id: unknown; table: object; tiebreak: SQLWrapper }
+type Anchor = { id: unknown; nonFinite?: "exact" | undefined; table: object; tiebreak: SQLWrapper }
 
 /**
  * The bound a reference compares with: the row's value while it has the reference's prefix and
@@ -193,12 +193,15 @@ const holdsInfinity = (column: SQLWrapper) =>
 
 /**
  * A null on a SQLite number key: the row's own value where it is ±Infinity, NULL where it is NULL.
- * Once the row is gone the null may have been any of the three, so it is the earliest of them in
- * the order (U24): NULL where NULLs come first, else -Infinity ascending and +Infinity descending,
- * which repeats rows and skips none. One aggregate over the row tells a gone row from a NULL one.
+ * Once the row is gone, on a driver that reads ±Infinity as null (D1) the null may have been any
+ * of the three, so it is the earliest of them in the order (U24): NULL where NULLs come first,
+ * else -Infinity ascending and +Infinity descending, which repeats rows and skips none. With
+ * `nonFinite: "exact"` the driver reads them back, so a null is a real NULL and stays one. One
+ * aggregate over the row tells a gone row from a NULL one.
  */
 function infiniteBound({ column, direction, nulls }: SortKey, at: Anchor): SQL {
-	const gone = effectiveNulls(direction, nulls) === "first" ? sql`NULL` : direction === "asc" ? sql`-9e999` : sql`9e999`
+	const earliest = effectiveNulls(direction, nulls) === "first" || at.nonFinite === "exact"
+	const gone = earliest ? sql`NULL` : direction === "asc" ? sql`-9e999` : sql`9e999`
 	return sql`(SELECT CASE WHEN count(*) = 0 THEN ${gone} WHEN max(${column}) IN (9e999, -9e999) THEN max(${column}) END FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id})`
 }
 

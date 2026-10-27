@@ -17,7 +17,17 @@ import { combErrorKeys } from "../types.ts"
 import { decodeBase64Url, encodeBase64Url } from "./base64url.ts"
 
 /** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
-type CursorOptions = { cursorScope: string; cursorSecret: string }
+type CursorOptions = {
+	cursorScope: string
+	cursorSecret: string
+	/**
+	 * "exact" when the driver reads a SQLite REAL's ±Infinity back as Infinity (a local libsql file,
+	 * bun:sqlite), so a null cursor is a real NULL and a list whose NULL anchor is deleted resumes
+	 * right after it. Unset, as on D1, which reads ±Infinity as null, such a list resumes from the
+	 * earliest value the null may stand for, repeating rows and skipping none (U24).
+	 */
+	nonFinite?: "exact" | undefined
+}
 
 /** The shortest secret a cursor is sealed under, in UTF-8 bytes: the key's length */
 const MIN_CURSOR_SECRET_BYTES = 32

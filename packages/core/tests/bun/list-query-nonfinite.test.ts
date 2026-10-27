@@ -7,6 +7,8 @@
 import { Database } from "bun:sqlite"
 import { describe, expect, it } from "bun:test"
 import { drizzle } from "drizzle-orm/bun-sqlite"
+import type { CursorOptions } from "../../src/query/cursor-seal.ts"
+import { SEALED } from "../../src/query/__fixtures__/cursor-secret.ts"
 import { ANCHOR_CASES, servedAround } from "../integration/support/seconds-anchor.ts"
 import {
 	type Edit,
@@ -20,7 +22,7 @@ import {
 } from "../integration/support/nonfinite.ts"
 
 /** bun:sqlite in memory, seeded */
-function seeded() {
+function seeded(options: CursorOptions = SEALED) {
 	const client = new Database(":memory:")
 	for (const statement of SEED) client.run(statement)
 	const engine: Engine = {
@@ -37,8 +39,8 @@ function seeded() {
 		client,
 		engine,
 		pages: {
-			buildListQuery: viaBuilder(drizzle({ client }) as never),
-			listOptions: viaRelational(drizzle({ client, relations: pointRelations }) as never),
+			buildListQuery: viaBuilder(drizzle({ client }) as never, options),
+			listOptions: viaRelational(drizzle({ client, relations: pointRelations }) as never, options),
 		},
 	}
 }
@@ -57,6 +59,24 @@ describe("keyset pagination on ±Infinity and NULL in a SQLite REAL, on bun:sqli
 					}
 				})
 			}
+		}
+	}
+})
+
+/* U24: bun:sqlite reads ±Infinity back as Infinity, so with nonFinite "exact" a null cursor is a real NULL */
+describe("keyset pagination on bun:sqlite with nonFinite exact: a deleted NULL anchor (U24)", () => {
+	for (const via of ["buildListQuery", "listOptions"] as const) {
+		for (const order of ORDERS) {
+			it(`pages ${order} through ${via} resuming right after it, no row repeated`, async () => {
+				const { client, engine, pages } = seeded({ ...SEALED, nonFinite: "exact" })
+				try {
+					const { expected, seen } = await pageAll(engine, pages[via], { edit: "delete", exact: true, order })
+					expect(seen).toEqual(expected)
+					expect(new Set(seen).size).toBe(seen.length)
+				} finally {
+					client.close()
+				}
+			})
 		}
 	}
 })

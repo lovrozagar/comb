@@ -41,6 +41,8 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
 	cursorScope: string
 	/** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
 	cursorSecret: string
+	/** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL (CursorOptions) */
+	nonFinite?: "exact" | undefined
 	parsed: ListQueryParsed
 	relations?: Record<string, RelationConfig>
 	/** LIKE-based search resolver — use `likeSearch(column)` factory */
@@ -240,7 +242,7 @@ function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTa
 	}
 
 	return finish({
-		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret },
+		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret, nonFinite: opts.nonFinite },
 		keyset,
 		parsed,
 		table,

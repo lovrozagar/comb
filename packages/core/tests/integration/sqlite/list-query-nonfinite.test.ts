@@ -7,6 +7,8 @@
  */
 import { drizzle } from "drizzle-orm/libsql"
 import { describe, expect, it } from "vitest"
+import type { CursorOptions } from "../../../src/query/cursor-seal.ts"
+import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 import { libsqlMemory } from "../support/libsql.ts"
 import {
 	type Edit,
@@ -20,7 +22,7 @@ import {
 } from "../support/nonfinite.ts"
 
 /** libsql in memory, seeded */
-async function seeded() {
+async function seeded(options: CursorOptions = SEALED) {
 	const harness = libsqlMemory()
 	for (const statement of SEED) await harness.client.execute(statement)
 	const engine: Engine = {
@@ -33,7 +35,10 @@ async function seeded() {
 	return {
 		close: harness.close,
 		engine,
-		pages: { buildListQuery: viaBuilder(harness.db as never), listOptions: viaRelational(db as never) },
+		pages: {
+			buildListQuery: viaBuilder(harness.db as never, options),
+			listOptions: viaRelational(db as never, options),
+		},
 	}
 }
 
@@ -53,5 +58,21 @@ describe("keyset pagination on ±Infinity and NULL in a SQLite REAL, on libsql (
 				},
 			)
 		}
+	}
+})
+
+/* U24: libsql reads ±Infinity back as Infinity, so with nonFinite "exact" a null cursor is a real NULL */
+describe("keyset pagination on libsql with nonFinite exact: a deleted NULL anchor (U24)", () => {
+	for (const via of ["buildListQuery", "listOptions"] as const) {
+		it.each(ORDERS)(`pages %s through ${via} resuming right after it, no row repeated`, async (order) => {
+			const { close, engine, pages } = await seeded({ ...SEALED, nonFinite: "exact" })
+			try {
+				const { expected, seen } = await pageAll(engine, pages[via], { edit: "delete", exact: true, order })
+				expect(seen).toEqual(expected)
+				expect(new Set(seen).size).toBe(seen.length)
+			} finally {
+				close()
+			}
+		})
 	}
 })

@@ -159,7 +159,7 @@ function drizzleListOptions(
 			anchored(
 				keys,
 				cursor.values.map((value, i) => bindableOn(keys[i]?.column, value)),
-				{ id, table, tiebreak: tiebreak.column },
+				{ id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column },
 			),
 		)
 		return keysetSQL({

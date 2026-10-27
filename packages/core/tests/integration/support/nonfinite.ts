@@ -10,6 +10,7 @@ import { integer, real, sqliteTable } from "drizzle-orm/sqlite-core"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
+import type { CursorOptions } from "../../../src/query/cursor-seal.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 
 export const point = sqliteTable("point", { id: integer("id").primaryKey(), x: real("x") })
@@ -41,24 +42,24 @@ type Relational = { query: { point: { findMany(options: never): Promise<unknown[
 
 /** A page read through buildListQuery */
 export const viaBuilder =
-	(db: Builder): Page =>
+	(db: Builder, options: CursorOptions = SEALED): Page =>
 	async (order, cursor) => {
 		const parsed = schema.parse({ cursor, order })
 		const rows = await applyListQuery(
 			db.select().from(point).$dynamic(),
-			buildListQuery({ ...SEALED, parsed, table: point }),
+			buildListQuery({ ...options, parsed, table: point }),
 		)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, parsed, SEALED)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, parsed, options)
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 
 /** A page read through queryHelpers.listOptions and drizzle's findMany */
 export const viaRelational =
-	(db: Relational): Page =>
+	(db: Relational, options: CursorOptions = SEALED): Page =>
 	async (order, cursor) => {
 		const query = { ...schema.parse({ order }), cursor }
-		const rows = await db.query.point.findMany(queryHelpers.listOptions(query, SEALED) as never)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, query, SEALED)
+		const rows = await db.query.point.findMany(queryHelpers.listOptions(query, options) as never)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, query, options)
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 
@@ -110,7 +111,12 @@ export type Edit = "delete" | "set to 5"
 export async function pageAll(
 	engine: Engine,
 	page: Page,
-	{ edit, infinities = false, order }: { edit?: Edit | undefined; infinities?: boolean; order: string },
+	{
+		edit,
+		exact = false,
+		infinities = false,
+		order,
+	}: { edit?: Edit | undefined; exact?: boolean; infinities?: boolean; order: string },
 ): Promise<{ expected: number[]; seen: number[] }> {
 	let expected = await inOrder(engine, order)
 	const seen: number[] = []
@@ -126,7 +132,8 @@ export async function pageAll(
 			await engine.exec(
 				edit === "delete" ? `DELETE FROM point WHERE id = ${last}` : `UPDATE point SET x = 5 WHERE id = ${last}`,
 			)
-			expected = [...seen, ...(await (edit === "delete" ? afterGone : afterNull)(engine, order, last))]
+			/* a gone anchor resumes from the earliest reading of its null, unless the driver reads ±Infinity exactly */
+			expected = [...seen, ...(await (edit === "delete" && !exact ? afterGone : afterNull)(engine, order, last))]
 		}
 		cursor = next
 	}
