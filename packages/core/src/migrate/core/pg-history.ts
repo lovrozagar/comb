@@ -18,12 +18,16 @@ import { type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf } from ".
 import { parsePostgres } from "./pg-parser.ts"
 import { historyTrees } from "./pg-split.ts"
 
-/** The first function an expression calls that is no pure built-in, by name */
+/**
+ * The first function an expression calls whose finding is unsafe, by name: code a write runs that
+ * comb cannot read. A cautious call such as a default's nextval, which is what a serial does, is
+ * no such code (M83).
+ */
 function callIn(expression: unknown, { defined, schema }: Pick<Facts, "defined" | "schema">): string | undefined {
 	for (const [type, node] of nodesOf([expression])) {
 		if (type !== "FuncCall") continue
 		const name = names(node["funcname"])
-		if (builtinFinding(name, defined) !== undefined) return keyOf(name, schema)
+		if (builtinFinding(name, defined)?.level === "unsafe") return keyOf(name, schema)
 	}
 	return undefined
 }
