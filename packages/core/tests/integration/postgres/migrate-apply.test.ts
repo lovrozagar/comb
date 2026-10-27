@@ -277,6 +277,18 @@ describe("migrate baseline and status on Postgres", () => {
 			})
 		}, 60_000)
 
+		/* G1-a: Atlas's status skips the clean check on public, where its revisions table is missing; comb makes it */
+		it("refuses a public schema holding a table and no history in status, as apply does, and lists an empty one's files", async () => {
+			await withScratchDb(async (url) => {
+				migrations({ "20260101000000_t.sql": 'CREATE TABLE "t" ("id" integer);\n' })
+				const status = command(url)
+				statusWithAtlas(status)
+				expect(status.out).toEqual(["Applied: 0", "Pending: 20260101000000_t.sql"])
+				await query(url, 'CREATE TABLE "legacy" ("id" integer)')
+				expect(() => statusWithAtlas(command(url))).toThrow(/^the database has objects but no migration history/)
+			})
+		}, 60_000)
+
 		it("refuses an applied file that was edited and rehashed since, in status and apply (M17)", async () => {
 			await withScratchDb(async (url) => {
 				migrations({ "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })

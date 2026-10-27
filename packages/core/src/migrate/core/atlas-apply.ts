@@ -222,6 +222,9 @@ function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: s
 			return { applied: [], pending: rest }
 		}
 		const { foreign, status } = ownOf(options, copy, known(own))
+		/* Atlas's status skips the clean check its apply's dry run makes, so it is inspected here as a check does (G1-a) */
+		if (status.applied.length === 0 && status.pending.length > 0)
+			refuseUnclean({ exec: options.exec ?? run, target: options.target })
 		const missing: string[] = []
 		const halfway = checkHistory(status, copy, {
 			gone: (line) => missing.push(line),

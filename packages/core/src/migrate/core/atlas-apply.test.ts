@@ -420,6 +420,17 @@ describe("statusWithAtlas", () => {
 		expect(run.out).toEqual(["Applied: 1 (up to 1)", "Pending: 2_b.sql"])
 	})
 
+	/* G1-a: Atlas's status skips the clean check apply's dry run makes, so status inspects as a check does */
+	it("refuses a database holding tables and no history as apply does, and lists every file of an empty one", () => {
+		const legacy = ok(JSON.stringify({ schemas: [{ name: "public", tables: [{ name: "legacy" }] }] }))
+		expect(() => statusWithAtlas(options(fakeAtlas({ inspect: legacy, status: PENDING })))).toThrow(
+			/^the database has objects but no migration history/,
+		)
+		const empty = options(fakeAtlas({ status: PENDING }))
+		statusWithAtlas(empty)
+		expect(empty.out).toEqual(["Applied: 0", "Pending: 1_a.sql, 2_b.sql"])
+	})
+
 	/* M76 (atlas-history.ts): status names a revision whose file is gone; check and apply refuse it */
 	it("names a revision whose file is gone in status, and refuses it in check and apply", async () => {
 		const run = options(gone())
