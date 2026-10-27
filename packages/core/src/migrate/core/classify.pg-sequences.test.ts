@@ -36,6 +36,7 @@ describe("a sequence reset, in every spelling (M82)", () => {
 		])
 			expect([later, rate(later).safety]).toEqual([later, "cautious"])
 		expect(rate("ALTER TABLE users ALTER COLUMN id SET INCREMENT BY 2;").safety).toBe("safe")
+		expect(rate("ALTER TABLE users ALTER COLUMN name ADD GENERATED ALWAYS AS IDENTITY;").safety).toBe("safe")
 	})
 
 	it("leaves the other resets as they were rated: TRUNCATE … RESTART IDENTITY unsafe, setval cautious", () => {

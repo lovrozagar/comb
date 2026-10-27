@@ -148,29 +148,35 @@ function addColumn(def: Node): Finding[] {
 	return findings
 }
 
+// lookup-table: the commands one rule rates, by subtype; undefined leaves a command to the table's rules
+const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string) => Finding[] | undefined>> = {
+	AT_AddColumn: (cmd) => addColumn(cmd["def"] as Node),
+	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
+	AT_AddIdentity: (cmd) => (restarts(cmd["def"]) ? [RESTART] : undefined),
+	AT_AlterColumnType: () => [{ level: "unsafe" }, { level: "lock", note: REWRITES }],
+	/* a SET DEFAULT changes no stored value; a DROP DEFAULT, with no def, changes what later writes store */
+	AT_ColumnDefault: (cmd) => (cmd["def"] === undefined ? [{ level: "cautious" }] : []),
+	AT_DropColumn: (cmd, table) => [{ drops: [`DROP COLUMN ${table}.${String(cmd["name"])}`], level: "unsafe" }],
+	/* a new generation expression recomputes every row's stored value (M81) */
+	AT_SetExpression: (cmd) => [
+		{ level: "cautious", note: `recomputes every stored value of ${String(cmd["name"])}` },
+		{ level: "lock", note: REWRITES },
+	],
+	AT_SetIdentity: (cmd) => (restarts(cmd["def"]) ? [RESTART] : undefined),
+	AT_SetNotNull: () => [{ level: "unsafe" }, { level: "lock", note: REWRITES }],
+}
+
+/** A constraint ADD's findings: a foreign key or check scans every row unless NOT VALID */
+function addConstraint(cmd: Node): Finding[] {
+	const constraint = (cmd["def"] as Node)["Constraint"] as Node
+	const scans = constraint["contype"] === "CONSTR_FOREIGN" || constraint["contype"] === "CONSTR_CHECK"
+	return scans && constraint["skip_validation"] !== true ? [{ level: "lock", note: REWRITES }] : []
+}
+
 /** A command on one column or constraint: its findings, or undefined for a command on the whole table */
 function columnFindings(cmd: Node, table: string): Finding[] | undefined {
 	const subtype = String(cmd["subtype"])
-	if (subtype === "AT_DropColumn") return [{ drops: [`DROP COLUMN ${table}.${String(cmd["name"])}`], level: "unsafe" }]
-	if (subtype === "AT_AlterColumnType" || subtype === "AT_SetNotNull")
-		return [{ level: "unsafe" }, { level: "lock", note: REWRITES }]
-	if (subtype === "AT_AddColumn") return addColumn(cmd["def"] as Node)
-	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
-	if ((subtype === "AT_SetIdentity" || subtype === "AT_AddIdentity") && restarts(cmd["def"])) return [RESTART]
-	/* a new generation expression recomputes every row's stored value (M81) */
-	if (subtype === "AT_SetExpression")
-		return [
-			{ level: "cautious", note: `recomputes every stored value of ${String(cmd["name"])}` },
-			{ level: "lock", note: REWRITES },
-		]
-	if (subtype === "AT_AddConstraint") {
-		const constraint = (cmd["def"] as Node)["Constraint"] as Node
-		const scans = constraint["contype"] === "CONSTR_FOREIGN" || constraint["contype"] === "CONSTR_CHECK"
-		return scans && constraint["skip_validation"] !== true ? [{ level: "lock", note: REWRITES }] : []
-	}
-	/* a SET DEFAULT changes no stored value; a DROP DEFAULT, with no def, changes what later writes store */
-	if (subtype === "AT_ColumnDefault") return cmd["def"] === undefined ? [{ level: "cautious" }] : []
-	return undefined
+	return subtype === "AT_AddConstraint" ? addConstraint(cmd) : COMMAND_RULES[subtype]?.(cmd, table)
 }
 
 /** A command on the whole table: its findings; one comb does not list is unsafe, named in words */
