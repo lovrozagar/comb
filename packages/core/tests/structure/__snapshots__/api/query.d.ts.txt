@@ -682,11 +682,13 @@ type CombQueryMeta = {
     /** Values one filter binds in all, every in/nin member counted */
     maxFilterValues?: number;
     maxInValues?: number;
-    /** Bytes one `filter` may take once percent-encoded, beside its character cap */
+    /** Bytes one `filter` may take however a client encodes it (U28), beside its character cap */
     maxFilterBytes?: number;
+    /** Bytes the whole query string comb accepts takes at most, however a client encodes it: 16 KB less a 2 KB path budget */
+    maxQueryBytes?: number;
     /** Whitespace-separated words one `q` may hold */
     maxSearchTerms?: number;
-    /** Bytes one `q` may take once percent-encoded */
+    /** Bytes one `q` may take however a client encodes it */
     maxSearchBytes?: number;
     maxSortKeys?: number;
     /** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */
@@ -802,14 +804,23 @@ declare const PAGINATION_DEFAULTS: {
     readonly maxPage: 10000;
 };
 declare const LIST_QUERY_LIMITS: ListQueryLimits;
+declare const MAX_QUERY_BYTES: number;
 declare const REQUEST_BYTES: {
-    readonly filter: 5120;
+    readonly filter: 4608;
+    readonly order: 200;
     readonly q: 600;
+    readonly select: 500;
 };
-/** Whether `value` percent-encodes to at most `bytes`; a lone surrogate encodes to nothing, and no URL carries one */
+/**
+ * `value`'s bytes as the widest common encoding writes it: a character either encoding escapes,
+ * a space (%20 in a URL) and ~ or ! (%7E, %21 in a form) among them, as three per UTF-8 byte;
+ * undefined for a lone surrogate, which no URL carries
+ */
+declare function encodedBytes(value: string): number | undefined;
+/** Whether `value` takes at most `bytes` however a client encodes it */
 declare const withinBytes: (bytes: number) => (value: string) => boolean;
 declare const encodedMessage: (bytes: number) => string;
-export { encodedMessage, LIST_QUERY_LIMITS, PAGINATION_DEFAULTS, REQUEST_BYTES, withinBytes };
+export { encodedBytes, encodedMessage, LIST_QUERY_LIMITS, MAX_QUERY_BYTES, PAGINATION_DEFAULTS, REQUEST_BYTES, withinBytes, };
 
 // query/schema-types.d.ts
 /** The configs and outputs of the list and retrieve query schemas. Declaration-only. */

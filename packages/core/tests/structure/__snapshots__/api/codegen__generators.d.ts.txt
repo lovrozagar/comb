@@ -684,11 +684,13 @@ type CombQueryMeta = {
     /** Values one filter binds in all, every in/nin member counted */
     maxFilterValues?: number;
     maxInValues?: number;
-    /** Bytes one `filter` may take once percent-encoded, beside its character cap */
+    /** Bytes one `filter` may take however a client encodes it (U28), beside its character cap */
     maxFilterBytes?: number;
+    /** Bytes the whole query string comb accepts takes at most, however a client encodes it: 16 KB less a 2 KB path budget */
+    maxQueryBytes?: number;
     /** Whitespace-separated words one `q` may hold */
     maxSearchTerms?: number;
-    /** Bytes one `q` may take once percent-encoded */
+    /** Bytes one `q` may take however a client encodes it */
     maxSearchBytes?: number;
     maxSortKeys?: number;
     /** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */

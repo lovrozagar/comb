@@ -28,7 +28,7 @@ const LIST_QUERY_LIMITS: ListQueryLimits = {
  */
 const URL_BYTES = 16_384
 const PATH_BUDGET = 2048
-const MAX_QUERY_BYTES = URL_BYTES - PATH_BUDGET
+const MAX_QUERY_BYTES: number = URL_BYTES - PATH_BUDGET
 const REQUEST_BYTES = { filter: 4608, order: 200, q: 600, select: 500 } as const
 
 /* the characters both a URL (encodeURIComponent) and a form (URLSearchParams) write as themselves */
