@@ -334,3 +334,21 @@ describe("ShardRouter: an allocation logged only when it wrote a row", () => {
 		expect(allocations(log)).toHaveLength(1)
 	})
 })
+
+/* U41: an id longer than shard_map.org_id holds is no org's, so it is a miss before KV, whose keys stop at 512 bytes */
+describe("ShardRouter: an org id longer than the column", () => {
+	it("is a miss that touches neither KV nor the core database", async () => {
+		const { primary } = await core()
+		const kv = { delete: vi.fn(), get: vi.fn(async () => null), put: vi.fn() }
+		const coreDb = { withSession: vi.fn(() => primary.withSession()) } as unknown as D1Database
+		const log = vi.fn()
+		const router = new ShardRouter({ log, totalShards: 3 })
+		expect(await router.resolve("o".repeat(65), { coreDb, kv }, ctx)).toBeUndefined()
+		expect(await router.resolve("€".repeat(600), { coreDb, kv }, ctx)).toBeUndefined()
+		expect(kv.get).not.toHaveBeenCalled()
+		expect(coreDb.withSession).not.toHaveBeenCalled()
+		expect(log).toHaveBeenCalledWith("shard-router.miss", { orgId: "o".repeat(65) })
+		expect(await router.resolve("o".repeat(64), { coreDb, kv }, ctx)).toBeUndefined()
+		expect(kv.get).toHaveBeenCalledTimes(1)
+	})
+})

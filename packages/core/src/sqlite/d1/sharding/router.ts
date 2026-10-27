@@ -17,7 +17,7 @@ import {
 	softDelete,
 	toMapping,
 } from "./placement.ts"
-import { shardMap } from "./shard-map.ts"
+import { ORG_ID_MAX_LENGTH, shardMap } from "./shard-map.ts"
 import type {
 	LogFn,
 	ShardDbHandle,
@@ -96,6 +96,11 @@ class ShardRouter {
 	 * missTtlMs, so a run of requests for an unknown id cannot load the primary.
 	 */
 	async resolve(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping | undefined> {
+		/* an id the column cannot hold is no org's: a miss before KV, whose keys stop at 512 bytes (U41) */
+		if (orgId.length > ORG_ID_MAX_LENGTH) {
+			this.log("shard-router.miss", { orgId })
+			return undefined
+		}
 		/* L1: per-isolate LRU with SWR */
 		const lruResult = this.lru.getWithMeta(orgId)
 		if (lruResult) {

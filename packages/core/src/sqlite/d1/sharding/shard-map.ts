@@ -5,6 +5,9 @@ import type { ShardDriver } from "./types.ts"
 
 const SHARD_DRIVERS: readonly ["d1"] = ["d1"] as const satisfies readonly ShardDriver[]
 
+/** The longest org id `shard_map.org_id` holds; a longer one is no org's */
+export const ORG_ID_MAX_LENGTH = 64
+
 /** Each column's builder, from the `c` factory that makes it */
 type ShardMapColumns = {
 	created_at: ReturnType<SqliteColumns["createdAt"]>
@@ -31,7 +34,7 @@ function defineShardMap(): ShardMapTable {
 			created_at: c.createdAt("created_at"),
 			deleted_at: c.deletedAt("deleted_at"),
 			driver: c.enum("driver", SHARD_DRIVERS).notNull().default("d1"),
-			org_id: c.text("org_id", { max: 64 }).primaryKey(),
+			org_id: c.text("org_id", { max: ORG_ID_MAX_LENGTH }).primaryKey(),
 			shard_id: c.integer("shard_id").notNull(),
 			target: c.text("target", { max: 128 }).notNull(),
 			updated_at: c.updatedAt("updated_at"),
