@@ -68,7 +68,6 @@ const QUIET_COMMANDS = /* @__PURE__ */ new Set([
 	"AT_ResetOptions",
 	"AT_ResetRelOptions",
 	"AT_SetCompression",
-	"AT_SetExpression",
 	"AT_SetIdentity",
 	"AT_SetOptions",
 	"AT_SetRelOptions",
@@ -146,6 +145,12 @@ function columnFindings(cmd: Node, table: string): Finding[] | undefined {
 	if (subtype === "AT_AlterColumnType" || subtype === "AT_SetNotNull")
 		return [{ level: "unsafe" }, { level: "lock", note: REWRITES }]
 	if (subtype === "AT_AddColumn") return addColumn(cmd["def"] as Node)
+	/* a new generation expression recomputes every row's stored value (M81) */
+	if (subtype === "AT_SetExpression")
+		return [
+			{ level: "cautious", note: `recomputes every stored value of ${String(cmd["name"])}` },
+			{ level: "lock", note: REWRITES },
+		]
 	if (subtype === "AT_AddConstraint") {
 		const constraint = (cmd["def"] as Node)["Constraint"] as Node
 		const scans = constraint["contype"] === "CONSTR_FOREIGN" || constraint["contype"] === "CONSTR_CHECK"
@@ -228,6 +233,31 @@ function ddlFindings(type: string, node: Node): Finding[] | undefined {
 /** What followFresh reads and writes: the history's tables, and what the file made new */
 type FreshContext = { facts: Facts; fresh: Fresh }
 
+// lookup-table: the constraints an ADD backs with an index it builds in place, under an ACCESS EXCLUSIVE lock
+const INDEX_CONSTRAINTS = /* @__PURE__ */ new Set(["CONSTR_EXCLUSION", "CONSTR_PRIMARY", "CONSTR_UNIQUE"])
+
+/**
+ * The lock warnings of an ALTER TABLE that adds a primary key, unique or exclusion constraint
+ * without USING INDEX on a table the file did not create (M81): it locks the table against reads
+ * and writes while it builds the index. A unique or primary key can take an index built
+ * concurrently first; an exclusion constraint cannot.
+ */
+function constraintIndexWarnings(node: Node, { facts, fresh }: FreshContext): Finding[] {
+	if (node["objtype"] !== "OBJECT_TABLE" || fresh.tables.has(tableOf(node["relation"], facts.schema).key)) return []
+	const table = written(node["relation"])
+	return (node["cmds"] as Node[]).flatMap((each): Finding[] => {
+		const cmd = each["AlterTableCmd"] as Node
+		const constraint = cmd["subtype"] === "AT_AddConstraint" ? ((cmd["def"] as Node)["Constraint"] as Node) : undefined
+		if (constraint === undefined || !INDEX_CONSTRAINTS.has(String(constraint["contype"]))) return []
+		if (constraint["indexname"] !== undefined) return []
+		const concurrent =
+			constraint["contype"] === "CONSTR_EXCLUSION"
+				? ""
+				: "; build it first with CREATE UNIQUE INDEX CONCURRENTLY, then ADD … USING INDEX"
+		return [{ level: "lock", note: `locks ${table} against reads and writes while it builds its index${concurrent}` }]
+	})
+}
+
 /** A CREATE TABLE makes its table new: no IF NOT EXISTS, and a name the history's trees do not show */
 function freshTable(node: Node, { facts, fresh }: FreshContext): void {
 	const key = tableOf(node["relation"], facts.schema).key
@@ -261,4 +291,4 @@ function followFresh(type: string, node: Node, ctx: FreshContext): void {
 	}
 }
 
-export { ddlFindings, followFresh, REWRITES }
+export { constraintIndexWarnings, ddlFindings, followFresh, REWRITES }

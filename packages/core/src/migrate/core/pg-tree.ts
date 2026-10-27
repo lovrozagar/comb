@@ -24,7 +24,7 @@ import type { Fresh } from "./classify-write.ts"
 import { builtinFinding } from "./pg-builtins.ts"
 import { type Facts, followTree, keyOf, names, nodesOf, tableOf } from "./pg-history.ts"
 import { parsePostgres, postgresParser } from "./pg-parser.ts"
-import { ddlFindings, followFresh } from "./pg-ddl.ts"
+import { constraintIndexWarnings, ddlFindings, followFresh } from "./pg-ddl.ts"
 import { eventFindings } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 
@@ -218,7 +218,11 @@ function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): Finding
 	const findings = nodes.flatMap(([type, node]) =>
 		/^(?:InsertStmt|UpdateStmt|DeleteStmt|MergeStmt)$/.test(type)
 			? writeFindings(type, node, ctx)
-			: [...(ddlFindings(type, node) ?? []), codeFinding(type, node, ctx)].filter((finding) => finding !== undefined),
+			: [
+					...(ddlFindings(type, node) ?? []),
+					...(type === "AlterTableStmt" ? constraintIndexWarnings(node, ctx) : []),
+					codeFinding(type, node, ctx),
+				].filter((finding) => finding !== undefined),
 	)
 	/* what the statement made new, attached and reparented counts for the statements after it */
 	for (const [type, node] of nodes) {
