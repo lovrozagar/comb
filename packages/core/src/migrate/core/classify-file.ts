@@ -7,7 +7,7 @@
 import type { Dialect } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { INSERT_INTO } from "./classify-sqlite-write.ts"
-import { atlasDirectives } from "./pg-objects.ts"
+import { atlasDirectives } from "./pg-split.ts"
 import { nameKey, QNAME } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 

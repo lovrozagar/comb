@@ -38,6 +38,15 @@ describe("splitEnumValues", () => {
 		expect(tight?.[1].startsWith("-- atlas:txmode none\n\n-- Modify")).toBe(true)
 	})
 
+	/* M75: the statements Postgres runs, read over the whole file, a delimiter directive in place */
+	it("reads a file Atlas splits by its own delimiter, and writes each part so Atlas sends each statement alone", () => {
+		const file = `-- atlas:delimiter GO\n\nALTER TYPE "status" ADD VALUE 'archived'; ALTER TABLE "post" ADD COLUMN "s" "status"\nGO\n`
+		expect(splitEnumValues("20261018000000_add.sql", file)).toEqual([
+			["20261018000000_add_enum_values.sql", `ALTER TYPE "status" ADD VALUE 'archived';\n`],
+			["20261018000001_add.sql", `ALTER TABLE "post" ADD COLUMN "s" "status";\n`],
+		])
+	})
+
 	it("leaves a file alone that only adds values, or adds none", () => {
 		const only = `ALTER TYPE "status" ADD VALUE 'archived';\n`
 		expect(splitEnumValues("20261018000000_add.sql", only)).toEqual([["20261018000000_add.sql", only]])

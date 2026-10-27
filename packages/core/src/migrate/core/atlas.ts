@@ -9,7 +9,7 @@ import { normalizeSqliteExport, sqliteDevUrl } from "./atlas-env.ts"
 import { type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { type Run, run } from "./process.ts"
 import { codeOf, IDENT, QNAME, unquote } from "./sql-code.ts"
-import { splitSqlStatements } from "./sql-scan.ts"
+import { atlasFile, pgStatements } from "./pg-split.ts"
 
 export { applySqliteMigrationTransforms } from "./atlas-env.ts"
 export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiffResult } from "./migrate-diff.ts"
@@ -118,7 +118,7 @@ function schemasNamed(code: string): string[] {
  */
 function scopeExport(sql: string, schema: string): string {
 	const kept: string[] = []
-	const statements = splitSqlStatements(sql, "postgres")
+	const statements = pgStatements(sql)
 	for (const statement of statements) {
 		const code = codeOf(statement, "postgres")
 		const created = CREATE_SCHEMA.exec(code)?.[1]
@@ -131,9 +131,13 @@ function scopeExport(sql: string, schema: string): string {
 		}
 		if (created === undefined) kept.push(statement)
 	}
-	return kept.length === statements.length ? sql : `${kept.join(";\n")};\n`
+	return kept.length === statements.length ? sql : atlasFile(kept)
 }
 
+/**
+ * drizzle-kit's export of the schema, normalized for the dialect: on Postgres, scoped to the
+ * database's schema and read as the statements Postgres runs, so `loadPostgresParser()` first
+ */
 export function exportDrizzleSchema(options: DrizzleExportOptions): string {
 	const { configPath, cwd, dialect, run: exec = run } = options
 

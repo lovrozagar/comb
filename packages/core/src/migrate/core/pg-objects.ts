@@ -22,7 +22,8 @@ import { affected, isView, same } from "./pg-dependents.ts"
 import { extrasAfter, followExtra } from "./pg-extras.ts"
 import { atlasTables, followRls, type Rls, rlsDelta, type Statement } from "./pg-tables.ts"
 import { codeOf, IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
-import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"
+import { atlasDirectives, pgStatements } from "./pg-split.ts"
+import { normalizeSql } from "./sql-scan.ts"
 
 type PgObjectKind = "extension" | "materialized view" | "policy" | "role" | "sequence" | "view"
 
@@ -173,8 +174,8 @@ function follow(statement: Statement, state: PgObjects, source: string): boolean
 function separatePgObjects(sql: string, state: PgObjects = emptyPgObjects(), source = "the target schema"): Separated {
 	const objects: PgObject[] = []
 	const plain: string[] = []
-	for (const statement of splitSqlStatements(sql, "postgres")) {
-		const text = statement.trim()
+	/* the statements Postgres runs, read over the whole file, its delimiter directive in place (M75) */
+	for (const text of pgStatements(sql)) {
 		const code = codeOf(text, "postgres")
 		const made = defined(code, text)
 		if (made !== undefined) objects.push(made)
@@ -255,9 +256,6 @@ function devPrelude(...states: PgObjects[]): string {
 	return made.size === 0 ? "" : `DO $comb$ BEGIN ${[...made.values()].join("; ")}; END $comb$;\n`
 }
 
-/** A migration file's leading `atlas:` directive lines, with the blank lines after them */
-const atlasDirectives = (file: string): string => /^(?:--[ \t]*atlas:[^\n]*\n)+\n*/.exec(file)?.[0] ?? ""
-
 /**
  * `body` under the directive lines of `head`, with exactly one blank line between: Atlas honors a
  * file directive such as `-- atlas:txmode none` only when a blank line follows it, and otherwise
@@ -278,7 +276,6 @@ function wrapAtlasFile(file: string, { after, before }: Delta): string {
 }
 
 export {
-	atlasDirectives,
 	devPrelude,
 	emptyPgObjects,
 	type PgObject,

@@ -9,12 +9,16 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import pg from "pg"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import type { PgTarget } from "../../../src/migrate/core/atlas-target.ts"
 import { exportDrizzleSchema } from "../../../src/migrate/core/atlas.ts"
 import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-diff.ts"
+import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { DOCKER_VAR, dockerDevWanted } from "../support/atlas.ts"
 import { withScratchDb } from "../support/pg.ts"
+
+/* a diff and a baseline read Postgres files with Postgres's parser, which their callers load (M75) */
+beforeAll(loadPostgresParser)
 
 let dir = ""
 beforeEach(() => {

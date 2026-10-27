@@ -3,20 +3,24 @@
  * migrations directory, applies it to a scratch database through applyWithAtlas, and reads the
  * result back from the database.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import pg from "pg"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas, baselineWithAtlas, statusWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { splitEnumValues } from "../../../src/migrate/core/pg-enum-split.ts"
+import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { wrapAtlasFile } from "../../../src/migrate/core/pg-objects.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 
 import { withScratchDb } from "../support/pg.ts"
+
+/* a diff and a baseline read Postgres files with Postgres's parser, which their callers load (M75) */
+beforeAll(loadPostgresParser)
 
 let dir = ""
 beforeEach(() => {
@@ -272,6 +276,28 @@ describe("migrate baseline and status on Postgres", () => {
 				await expect(applyWithAtlas(command(url))).rejects.toThrow(refusal)
 			})
 		}, 60_000)
+	})
+})
+
+/* M75: baseline replays the history as Postgres runs it, a delimiter directive and a chunk of several statements read */
+describe("migrate baseline on Postgres: a history Atlas splits as it runs it", () => {
+	describe("with Atlas v1.3.0", () => {
+		it("records a hand-made database against a history split by its own delimiter, BEGIN ATOMIC and a rule among it", async () => {
+			const histories = [
+				'-- atlas:delimiter GO\n\nCREATE VIEW "v" AS (select 1 as x)\nGO\nCREATE SEQUENCE "n"; CREATE TABLE "a" ("id" integer DEFAULT nextval(\'n\'))\nGO\nCREATE TABLE "b" ("id" integer) -- the bs\nGO\n',
+				'CREATE TABLE "a" ("id" integer);\nCREATE TABLE "b" ("id" integer);\nCREATE FUNCTION "one"() RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT 1; SELECT 2; END;\nCREATE RULE "r" AS ON INSERT TO "a" DO ALSO (INSERT INTO "b" VALUES (1); INSERT INTO "b" VALUES (2));\n',
+			]
+			for (const history of histories) {
+				await withDevAndTarget(async (devUrl, url) => {
+					rmSync(dir, { force: true, recursive: true })
+					mkdirSync(dir)
+					await query(url, history.replace(/^-- atlas:delimiter GO\n\n/, "").replaceAll("\nGO\n", ";\n"))
+					migrations({ "20260101000000_a.sql": history })
+					expect(baselineWithAtlas(command(url, { devUrl }))).toEqual(["20260101000000_a.sql"])
+					expect(await revisions(url)).toEqual(["20260101000000"])
+				})
+			}
+		}, 120_000)
 	})
 })
 

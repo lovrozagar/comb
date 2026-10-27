@@ -7,6 +7,7 @@ import fs from "node:fs"
 import { approveMigration } from "../migrate/core/approval.ts"
 import { applyWithAtlas, baselineWithAtlas, statusWithAtlas } from "../migrate/core/atlas-apply.ts"
 import { pgUrlProblems } from "../migrate/core/atlas-target.ts"
+import { loadPostgresParser } from "../migrate/core/pg-parser.ts"
 import type { ResolvedPostgresProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
@@ -28,6 +29,8 @@ export async function migratePostgres(
 	for (const warning of pgUrlProblems(target.provider, { url: true }).warnings) io.err(`Warning: ${warning}`)
 	const options = { dir: target.migrationsDir, exec: io.run, print: io.out, target: target.provider }
 	if (mode === "baseline") {
+		/* baseline replays the history as the statements Postgres runs (M75) */
+		await loadPostgresParser()
 		io.out(`\nBaseline done: ${baselineWithAtlas(options).length} marked`)
 		return { applied: [], pending: [] }
 	}

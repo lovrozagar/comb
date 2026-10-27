@@ -27,7 +27,8 @@ import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target
 import { asSql, type FtsState, ftsDelta, separate } from "./fts-migration.ts"
 import { splitEnumValues } from "./pg-enum-split.ts"
 import { extractSchema } from "./schema.ts"
-import { atlasDirectives, devPrelude, emptyPgObjects, pgDelta, separatePgObjects, wrapAtlasFile } from "./pg-objects.ts"
+import { devPrelude, emptyPgObjects, pgDelta, separatePgObjects, wrapAtlasFile } from "./pg-objects.ts"
+import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
 import { type Run, run } from "./process.ts"
 
 export type MigrateDiffOptions = {
@@ -170,14 +171,14 @@ function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): MigrateDiffRes
 		const history = emptyPgObjects()
 		const plain = sqlFiles(migrationsDir).map((file) => {
 			const sql = readFileSync(join(migrationsDir, file), "utf8")
-			const head = atlasDirectives(sql)
-			return { body: asSql(separatePgObjects(sql.slice(head.length), history, file).plain), file, head }
+			return { file, head: atlasDirectives(sql), plain: separatePgObjects(sql, history, file).plain }
 		})
 		const target = separatePgObjects(options.targetSchema)
 		/* the dev database gets the sequences and extensions a table may need first, in the copy's first file and the target */
 		const prelude = devPrelude(history, target.state)
-		for (const [i, { body, file, head }] of plain.entries())
-			writeFileSync(join(copy, file), head + (i === 0 ? prelude : "") + body)
+		/* each written back so Atlas sends each statement alone, as Postgres runs it (M75) */
+		for (const [i, { file, head, plain: kept }] of plain.entries())
+			writeFileSync(join(copy, file), atlasFile([...(i === 0 ? pgStatements(prelude) : []), ...kept], head))
 		hashDir(atlas.exec, copy)
 		const added = atlasDiff(atlas, copy, { name: migrationName, schema: prelude + asSql(target.plain) })
 		const atlasFiles = added.map((file) => readFileSync(join(copy, file), "utf8"))

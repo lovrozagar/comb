@@ -165,6 +165,20 @@ describe("withDirectivesFirst", () => {
 	})
 })
 
+/* M75: one Postgres split, over the whole file, so a delimiter directive and a chunk of many statements are read */
+describe("separatePgObjects: a file Atlas splits by its own delimiter", () => {
+	it("reads each statement of it, a chunk of several among them", () => {
+		for (const file of [
+			"-- atlas:delimiter GO\n\nCREATE ROLE r\nGO\nCREATE TABLE t (id int)\nGO\n",
+			"-- atlas:delimiter GO\n\nCREATE ROLE r; CREATE TABLE t (id int);\nGO\n",
+		]) {
+			const { objects, plain } = separatePgObjects(file)
+			expect(objects.map((o) => `${o.kind} ${o.key}`)).toEqual(["role r"])
+			expect(plain).toEqual(["CREATE TABLE t (id int)"])
+		}
+	})
+})
+
 describe("devPrelude", () => {
 	it("creates each extension, then each sequence, the states hold, once and only where missing", () => {
 		const history = separatePgObjects('CREATE EXTENSION citext;\nCREATE SEQUENCE "public"."n" START WITH 5;').state

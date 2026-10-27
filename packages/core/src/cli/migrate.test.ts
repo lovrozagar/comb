@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Run } from "../migrate/core/process.ts"
 import { fakeAtlas as hashingAtlas, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, ok, projects, writeTables } from "./__fixtures__/io.ts"
@@ -263,6 +263,24 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 		const diffAt = atlas.calls.findIndex((call) => call[2] === "diff")
 		expect(atlas.calls[diffAt]?.join(" ")).not.toContain("Dev-Secret-0451")
 		expect(envs[diffAt]?.["COMB_ATLAS_DEV_URL"]).toBe("postgres://dev:Dev-Secret-0451@localhost/dev?search_path=app")
+	})
+
+	/* M75: a Postgres diff reads its history and the export with Postgres's parser, so it loads it first */
+	it("loads the Postgres parser itself before it reads a Postgres diff", async () => {
+		const dir = project()
+		writeFileSync(
+			join(dir, "comb.migrate.config.ts"),
+			'export default { databases: { core: { migrationsDir: "pg", name: "core", provider: { devUrl: "postgres://localhost/dev", type: "postgres", url: "postgres://localhost/app" } } } }\n',
+		)
+		const atlas = fakeAtlas((replayed) =>
+			writeFileSync(join(replayed, "1_init.sql"), 'CREATE TABLE "post" ("id" integer);\n'),
+		)
+		/* a fresh module graph: the setup file loaded the parser in the one the other tests share */
+		vi.resetModules()
+		const fresh = await import("./run.ts")
+		const io = makeIo(dir, atlas)
+		expect(await fresh.runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
+		expect(io.outputs).toEqual([`Generated: ${join(dir, "pg", "1_init.sql")}`])
 	})
 })
 

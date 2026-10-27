@@ -254,7 +254,7 @@ describe("generateIncrementalMigration — postgres objects Atlas refuses", () =
 			options(atlas, { dialect: "postgres", target, targetSchema: schema }),
 		)
 		expect(seen[0]?.history["20260101000000_init.sql"]).toBe(
-			'-- atlas:txmode none\nCREATE TABLE "post" ("title" text);\n\nCREATE INDEX CONCURRENTLY "i" ON "post" ("title");\n',
+			'-- atlas:txmode none\nCREATE TABLE "post" ("title" text);\nCREATE INDEX CONCURRENTLY "i" ON "post" ("title");\n',
 		)
 		expect(seen[0]?.target).toBe('CREATE TABLE "post" ("title" varchar(50));\n')
 		expect(readFileSync(files[0] as string, "utf8")).toBe(

@@ -89,6 +89,8 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const { codegen, exported, migrationsDir, pg } = await diffTarget(db, io)
 	const dialect = exported.dialect
 	const dryRun = args.options["dry-run"] === true
+	/* a Postgres diff reads the history and the export as the statements Postgres runs (M75) */
+	if (dialect === "postgres") await (await import("../migrate/core/pg-parser.ts")).loadPostgresParser()
 	/* a dry run diffs a copy, since a diff writes its file and rehashes atlas.sum */
 	const dir = dryRun ? copyOf(migrationsDir) : migrationsDir
 	try {

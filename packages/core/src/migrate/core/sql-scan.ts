@@ -6,7 +6,7 @@
  * only, nests comments, escapes with backslashes in `E'…'`, and dollar-quotes `$tag$…$tag$`.
  */
 import type { Dialect } from "../types.ts"
-import { atlasChunks, unterminated } from "./atlas-scan.ts"
+import { pgStatements } from "./pg-split.ts"
 
 /**
  * `body` is a dollar-quoted `DO` body: it runs during the migration, so it is code to classify,
@@ -156,15 +156,11 @@ function finish(reading: Reading): string {
 /**
  * The statements of `sql`, without their terminating `;`. On SQLite a `;` ends a statement only
  * in code: never inside a literal or a comment, nor inside a trigger's BEGIN … END. On Postgres
- * they are the chunks Atlas sends one at a time (atlas-scan.ts, M75), `-- atlas:delimiter` held;
- * pg-split.ts reads each as the statements Postgres runs. A stretch that holds only comments is
- * not a statement.
+ * they are the statements Postgres runs, the one Postgres split (pg-split.ts, M75), read after
+ * loadPostgresParser(). A stretch that holds only comments is not a statement.
  */
 function splitSqlStatements(sql: string, dialect: Dialect = "sqlite"): string[] {
-	if (dialect === "postgres")
-		return atlasChunks(sql)
-			.map(unterminated)
-			.filter((chunk) => chunk !== "")
+	if (dialect === "postgres") return pgStatements(sql)
 	const reading: Reading = { code: "", depth: 0, text: "" }
 	const statements: string[] = []
 	for (const segment of segments(sql, dialect)) {

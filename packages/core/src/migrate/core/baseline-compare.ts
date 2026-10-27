@@ -14,10 +14,10 @@ import { hashDir, sqlFiles } from "./atlas-dir.ts"
 import { sqliteDevUrl } from "./atlas-env.ts"
 import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { asSql, type FtsState, separate } from "./fts-migration.ts"
-import { atlasDirectives, emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
+import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
+import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
 import type { Run } from "./process.ts"
 import { codeOf } from "./sql-code.ts"
-import { splitSqlStatements } from "./sql-scan.ts"
 
 const SYNCED = "Schemas are synced, no changes to be made."
 /* the tables SQLite keeps behind every fts5 table */
@@ -83,13 +83,12 @@ function replayableHistory(exec: Run, copy: string): string {
 	const state = emptyPgObjects()
 	for (const name of sqlFiles(copy)) {
 		const sql = readFileSync(join(copy, name), "utf8")
-		const head = atlasDirectives(sql)
-		const kept = new Set(separatePgObjects(sql.slice(head.length), state, name).plain)
-		const statements = splitSqlStatements(sql.slice(head.length), "postgres").map((stmt) => stmt.trim())
-		const replayed = statements.filter(
+		/* the statements Postgres runs, written back so Atlas sends each alone (M75) */
+		const kept = new Set(separatePgObjects(sql, state, name).plain)
+		const replayed = pgStatements(sql).filter(
 			(stmt) => kept.has(stmt) || /^(?:CREATE|ALTER|DROP) SEQUENCE\b/i.test(codeOf(stmt, "postgres")),
 		)
-		writeFileSync(join(plain, name), `${head}${replayed.map((stmt) => `${stmt};\n`).join("")}`)
+		writeFileSync(join(plain, name), atlasFile(replayed, atlasDirectives(sql)))
 	}
 	hashDir(exec, plain)
 	return plain

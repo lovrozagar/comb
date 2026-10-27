@@ -88,6 +88,10 @@ export type DrizzleExportOptions = {
     /** Postgres: the one schema the database's migrations own; default `public` */
     schema?: string | undefined;
 };
+/**
+ * drizzle-kit's export of the schema, normalized for the dialect: on Postgres, scoped to the
+ * database's schema and read as the statements Postgres runs, so `loadPostgresParser()` first
+ */
 export declare function exportDrizzleSchema(options: DrizzleExportOptions): string;
 
 // migrate/core/parse.d.ts
@@ -568,9 +572,8 @@ declare function segments(sql: string, dialect?: Dialect): Segment[];
 /**
  * The statements of `sql`, without their terminating `;`. On SQLite a `;` ends a statement only
  * in code: never inside a literal or a comment, nor inside a trigger's BEGIN … END. On Postgres
- * they are the chunks Atlas sends one at a time (atlas-scan.ts, M75), `-- atlas:delimiter` held;
- * pg-split.ts reads each as the statements Postgres runs. A stretch that holds only comments is
- * not a statement.
+ * they are the statements Postgres runs, the one Postgres split (pg-split.ts, M75), read after
+ * loadPostgresParser(). A stretch that holds only comments is not a statement.
  */
 declare function splitSqlStatements(sql: string, dialect?: Dialect): string[];
 /**

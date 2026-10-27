@@ -7,7 +7,7 @@
  * delta after Atlas's statements.
  */
 import { codeOf, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
-import { splitSqlStatements } from "./sql-scan.ts"
+import { pgStatements } from "./pg-split.ts"
 
 /** A table's row level security as a migration leaves it */
 type Rls = {
@@ -36,7 +36,7 @@ function atlasTables(atlasSql: string): AtlasTables {
 	const altered = new Set<string>()
 	const created = new Set<string>()
 	const dropped = new Set<string>()
-	for (const statement of splitSqlStatements(atlasSql, "postgres")) {
+	for (const statement of pgStatements(atlasSql)) {
 		const code = codeOf(statement, "postgres")
 		const [, alter, drops] = ALTERS_TABLE.exec(code) ?? []
 		if (alter !== undefined) altered.add(lastPart(alter))

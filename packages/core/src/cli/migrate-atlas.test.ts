@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Run } from "../migrate/core/process.ts"
 import { makeIo, ok, projects } from "./__fixtures__/io.ts"
 import { runCli } from "./run.ts"
@@ -94,6 +94,17 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 			"Marked applied: 2_more.sql",
 			"\nBaseline done: 2 marked",
 		])
+	})
+
+	/* M75: baseline replays the history as Postgres's parser reads it, so it loads it first */
+	it("loads the Postgres parser itself before baseline reads the history", async () => {
+		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
+		/* a fresh module graph: the setup file loaded the parser in the one the other tests share */
+		vi.resetModules()
+		const fresh = await import("./run.ts")
+		const io = makeIo(dir, pgAtlas([]))
+		expect(await fresh.runCli(["migrate", "baseline", "core"], io)).toBe(0)
+		expect(io.outputs.at(-1)).toBe("\nBaseline done: 1 marked")
 	})
 
 	it("refuses --file and --local, which Atlas has no use for", async () => {

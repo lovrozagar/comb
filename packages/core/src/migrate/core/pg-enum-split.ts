@@ -6,27 +6,25 @@
  * transaction.
  */
 import { nextVersion } from "./atlas-dir.ts"
-import { atlasDirectives, withDirectivesFirst } from "./pg-objects.ts"
 import { codeOf, QNAME } from "./sql-code.ts"
-import { splitSqlStatements } from "./sql-scan.ts"
+import { withDirectivesFirst } from "./pg-objects.ts"
+import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const ADD_VALUE = /* @__PURE__ */ new RegExp(`^ALTER TYPE (?:IF EXISTS )?${QNAME} ADD VALUE\\b`, "i")
 const VERSIONED = /^(\d{14})(.*)\.sql$/
 
-const joined = (statements: readonly string[]) => `${statements.join(";\n")};\n`
-
 /** The files a migration becomes: itself, or its ADD VALUE statements first and the rest a version later */
 function splitEnumValues(name: string, file: string): Array<[string, string]> {
 	const [, version, suffix] = VERSIONED.exec(name) ?? []
-	const head = atlasDirectives(file)
-	const statements = splitSqlStatements(file.slice(head.length), "postgres")
+	const statements = pgStatements(file)
 	const values = statements.filter((stmt) => ADD_VALUE.test(codeOf(stmt, "postgres")))
 	const rest = statements.filter((stmt) => !values.includes(stmt))
 	if (version === undefined || values.length === 0 || rest.length === 0) return [[name, file]]
 	return [
-		[`${version}${suffix}_enum_values.sql`, joined(values)],
-		[`${nextVersion(version)}${suffix}.sql`, withDirectivesFirst(head, joined(rest))],
+		[`${version}${suffix}_enum_values.sql`, atlasFile(values)],
+		/* comb's file: its directives honored, a blank line after them (withDirectivesFirst) */
+		[`${nextVersion(version)}${suffix}.sql`, atlasFile(rest, withDirectivesFirst(atlasDirectives(file), ""))],
 	]
 }
 

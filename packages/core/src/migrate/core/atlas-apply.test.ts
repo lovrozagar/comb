@@ -380,6 +380,17 @@ describe("baselineWithAtlas", () => {
 		expect(diff?.env?.["COMB_ATLAS_DEV_URL"]).toBe(`${TARGET.devUrl}?search_path=public`)
 	})
 
+	/* M75: the replay is read as Postgres runs it and written so Atlas sends each statement alone */
+	it("replays a history Atlas splits by its own delimiter, each statement of a chunk read", () => {
+		writeFileSync(
+			join(dir, "1_a.sql"),
+			'-- atlas:delimiter GO\n\nCREATE ROLE "r"; CREATE TABLE "a" ("id" int)\nGO\nCREATE VIEW "v" AS (select 1)\nGO\n',
+		)
+		const atlas = fakeAtlas({ status: status({}) })
+		baselineWithAtlas(options(atlas))
+		expect(atlas.replayed[0]).toBe('CREATE TABLE "a" ("id" int);\n')
+	})
+
 	it("records nothing when the database's tables differ from the history's, naming the difference", () => {
 		const atlas = fakeAtlas({
 			schemaDiff: ok('-- Modify "a" table\nALTER TABLE "a" ADD COLUMN "x" int;\n'),
