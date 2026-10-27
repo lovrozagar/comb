@@ -23,7 +23,7 @@ declare class ShardRouter {
     /**
      * How many times each org was invalidated in this isolate: a read that began before an
      * invalidate holds the mapping from before it and must not write it back. The guard is per
-     * isolate; another isolate's in-flight read can still repopulate KV, for at most kvTtlSeconds.
+     * isolate; across isolates KV keeps the newest mapping by its updatedAt (kv-cache.ts, U33).
      */
     private readonly generations;
     private readonly totalShards;
@@ -82,7 +82,6 @@ declare class ShardRouter {
      */
     invalidate(orgId: string, kv: ShardKv): Promise<void>;
     private generationOf;
-    private kvKey;
     private populateCaches;
     /** One background revalidation per org at a time, however many requests see it stale */
     private revalidateOnce;

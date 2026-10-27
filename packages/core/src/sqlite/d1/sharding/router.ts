@@ -1,3 +1,4 @@
+import { kvKey, putUnlessNewer } from "./kv-cache.ts"
 import type { D1Database } from "@cloudflare/workers-types"
 import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
@@ -65,7 +66,7 @@ class ShardRouter {
 	/**
 	 * How many times each org was invalidated in this isolate: a read that began before an
 	 * invalidate holds the mapping from before it and must not write it back. The guard is per
-	 * isolate; another isolate's in-flight read can still repopulate KV, for at most kvTtlSeconds.
+	 * isolate; across isolates KV keeps the newest mapping by its updatedAt (kv-cache.ts, U33).
 	 */
 	private readonly generations = new Map<string, number>()
 	private readonly totalShards: number
@@ -112,7 +113,7 @@ class ShardRouter {
 
 		/* L2: KV */
 		const generation = this.generationOf(orgId)
-		const kvValue = (await deps.kv.get(this.kvKey(orgId), "json")) as ShardMapping | null
+		const kvValue = (await deps.kv.get(kvKey(orgId), "json")) as ShardMapping | null
 		if (kvValue) {
 			this.log("shard-router.hit", { orgId, tier: "kv" })
 			if (this.generationOf(orgId) === generation) this.lru.set(orgId, kvValue)
@@ -216,7 +217,7 @@ class ShardRouter {
 		this.generations.set(orgId, this.generationOf(orgId) + 1)
 		this.lru.delete(orgId)
 		this.misses.delete(orgId)
-		await kv.delete(this.kvKey(orgId))
+		await kv.delete(kvKey(orgId))
 	}
 
 	/* -- Private -- */
@@ -225,17 +226,10 @@ class ShardRouter {
 		return this.generations.get(orgId) ?? 0
 	}
 
-	private kvKey(orgId: string): string {
-		return `shard:${orgId}`
-	}
-
 	private populateCaches(orgId: string, mapping: ShardMapping, { executionCtx, kv }: CacheTargets): void {
 		this.lru.set(orgId, mapping)
-		executionCtx.waitUntil(
-			kv.put(this.kvKey(orgId), JSON.stringify(mapping), {
-				expirationTtl: this.kvTtlSeconds,
-			}),
-		)
+		/* a read that began before a move elsewhere holds the older row: it does not overwrite the newer one (U33) */
+		executionCtx.waitUntil(putUnlessNewer(kv, mapping, this.kvTtlSeconds))
 	}
 
 	/** One background revalidation per org at a time, however many requests see it stale */
@@ -251,7 +245,7 @@ class ShardRouter {
 		const generation = this.generationOf(orgId)
 		const current = () => this.generationOf(orgId) === generation
 		try {
-			const kvValue = (await deps.kv.get(this.kvKey(orgId), "json")) as ShardMapping | null
+			const kvValue = (await deps.kv.get(kvKey(orgId), "json")) as ShardMapping | null
 			if (kvValue) {
 				if (current()) this.lru.set(orgId, kvValue)
 				return
@@ -261,11 +255,11 @@ class ShardRouter {
 			if (!mapping) {
 				/* the core database has no live row: the org is gone, so the stale entry stops routing it now */
 				this.lru.delete(orgId)
-				await deps.kv.delete(this.kvKey(orgId))
+				await deps.kv.delete(kvKey(orgId))
 				return
 			}
 			this.lru.set(orgId, mapping)
-			await deps.kv.put(this.kvKey(orgId), JSON.stringify(mapping), { expirationTtl: this.kvTtlSeconds })
+			await putUnlessNewer(deps.kv, mapping, this.kvTtlSeconds)
 		} catch (e) {
 			this.log("shard-router.revalidate.error", { error: e, orgId })
 		}
