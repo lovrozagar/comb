@@ -151,6 +151,17 @@ describe("migrate check on Postgres reads only (M11)", () => {
 			})
 		}, 60_000)
 
+		/* M79: Atlas's inspect of a table with a primary key holds "primary_key", which the scrubber took for a secret */
+		it("refuses a database whose table has a primary key, with the baseline message, not a parse error", async () => {
+			await withScratchDb(async (url) => {
+				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
+				await query(url, "CREATE TABLE legacy (id integer PRIMARY KEY, api_token text)")
+				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(
+					/^the database has objects but no migration history/,
+				)
+			})
+		}, 60_000)
+
 		it("refuses a database with tables but no history, as apply does, and still writes nothing", async () => {
 			await withScratchDb(async (url) => {
 				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })

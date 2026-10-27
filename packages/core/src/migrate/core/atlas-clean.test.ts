@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { refuseUnclean } from "./atlas-clean.ts"
+import { readInspect, refuseUnclean } from "./atlas-clean.ts"
 import type { Run, RunResult } from "./process.ts"
 
 const TARGET = { devUrl: "", lockTimeout: "5s", schema: "app", url: "postgres://app:S3cret@db/app" }
@@ -37,6 +37,21 @@ describe("refuseUnclean", () => {
 	it("refuses a schema holding a table with apply's baseline message", () => {
 		const fake = atlas(inspected({ schemas: [{ name: "app", tables: [{ name: "legacy" }] }] }))
 		expect(() => refuseUnclean({ exec: fake.exec, target: TARGET })).toThrow(BASELINE)
+	})
+
+	/* M79: Atlas's inspect of a table with a primary key, read as Atlas wrote it */
+	it("refuses a schema whose table has a primary key and a token column with the baseline message, not a parse error", () => {
+		const table = { columns: [{ name: "api_token" }], name: "t", primary_key: { parts: [{ column: "id" }] } }
+		const fake = atlas(inspected({ schemas: [{ name: "app", tables: [table] }] }))
+		expect(() => refuseUnclean({ exec: fake.exec, target: TARGET })).toThrow(BASELINE)
+	})
+
+	/* M79: parsed as Atlas wrote it and never scrubbed, so a password that spells a key changes nothing it reads */
+	it("reads Atlas's JSON as written, so a password that spells a key changes nothing it reads", () => {
+		const keyword = { ...TARGET, url: "postgres://app:tables@db/app" }
+		const table = atlas(inspected({ schemas: [{ name: "app", tables: [{ name: "tables" }] }] }))
+		expect(() => refuseUnclean({ exec: table.exec, target: keyword })).toThrow(BASELINE)
+		expect(() => readInspect("{ S3cret")).toThrow(/^unexpected output from atlas schema inspect$/)
 	})
 
 	it("says what Atlas said when the inspect fails, scrubbed of the password", () => {

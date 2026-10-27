@@ -14,9 +14,10 @@
  * Pro's. It runs only while public holds such a revision, the one-time state after 0.12; comb has
  * no Postgres client of its own, and this is no reason for one.
  */
+import { readInspect } from "./atlas-clean.ts"
 import { type AtlasStatus, fileOf, filesOf } from "./atlas-history.ts"
 import { atlasStatus, type AtlasCommand } from "./atlas-status.ts"
-import { explainAtlasFailure, withAtlasEnv } from "./atlas-target.ts"
+import { explainAtlasFailure, maskSecrets, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { run } from "./process.ts"
 
 /** Another schema's own history, by the prefix Atlas's per-schema histories share */
@@ -43,11 +44,14 @@ function histories(options: AtlasCommand): string[] {
 			...env.args,
 		]
 		const result = (options.exec ?? run)("atlas", args, { env: env.env })
-		return { ...result, stderr: explainAtlasFailure(env.scrub(result.stderr)) }
+		if (result.code !== 0)
+			throw new Error(
+				`atlas schema inspect: ${explainAtlasFailure(env.scrub(result.stderr)).trim() || `exit ${result.code}`}`,
+			)
+		/* the names as the database has them; only a printed line is masked (M79) */
+		return readInspect(result.stdout)
 	})
-	if (ran.code !== 0) throw new Error(`atlas schema inspect: ${ran.stderr.trim() || `exit ${ran.code}`}`)
-	const { schemas = [] } = JSON.parse(ran.stdout) as { schemas?: Array<{ name: string }> }
-	return schemas.map((schema) => schema.name).filter((name) => name.startsWith(OWN))
+	return (ran.schemas ?? []).flatMap((schema) => (schema.name?.startsWith(OWN) === true ? [schema.name] : []))
 }
 
 /** The revisions of public's history `status` that are another schema's, read from those schemas' own histories */
@@ -88,10 +92,13 @@ function ownHistory(status: AtlasStatus, { ignored }: Foreign, copy: string): At
 	return { ...status, applied, available, current, error, pending }
 }
 
-/** What public says of each row it ignores */
-const ignoredLines = ({ ignored }: Foreign): string[] =>
-	[...ignored].map(
-		([version, schema]) => `${version} is schema ${schema}'s, recorded in ${OWN}${schema}; public ignores it`,
+/** What public says of each row it ignores, the target's secrets masked where a schema's name holds one (M79) */
+const ignoredLines = ({ ignored }: Foreign, target: PgTarget): string[] =>
+	[...ignored].map(([version, schema]) =>
+		maskSecrets(`${version} is schema ${schema}'s, recorded in ${OWN}${schema}; public ignores it`, [
+			target.url,
+			target.devUrl,
+		]),
 	)
 
 /** The flag the dry run and apply need when public ignores a row: Atlas would count it as public's position */

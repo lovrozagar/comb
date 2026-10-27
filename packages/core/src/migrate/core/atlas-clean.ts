@@ -7,20 +7,37 @@
 import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import type { Run } from "./process.ts"
 
-/** The schemas `atlas schema inspect` reports, with their tables */
-type Inspected = { schemas?: Array<{ tables?: unknown[] }> }
+/** The schemas `atlas schema inspect` reports, by name, with their tables */
+type Inspected = { schemas?: Array<{ name?: string; tables?: unknown[] }> }
+
+/**
+ * Atlas's inspect JSON `stdout`, parsed as Atlas wrote it and never scrubbed (M79): its names are
+ * the database's, used as they are, and a caller masks a value only where it prints it, since a
+ * secret that spells a name or a key would otherwise change what comb reads
+ */
+function readInspect(stdout: string): Inspected {
+	try {
+		return JSON.parse(stdout) as Inspected
+	} catch {
+		// reason: unreadable output may hold anything Atlas printed, so it is not repeated
+		throw new Error("unexpected output from atlas schema inspect")
+	}
+}
 
 /** Refuses, with apply's baseline message, a database Atlas would call not clean; reads only */
 function refuseUnclean(options: { exec: Run; target: PgTarget }): void {
-	const ran = withAtlasEnv(options.target, { url: true }, (env) => {
+	const { schemas = [] } = withAtlasEnv(options.target, { url: true }, (env) => {
 		const args = ["schema", "inspect", "--url", "env://url", "--format", "{{ json . }}", ...env.args]
 		const result = options.exec("atlas", args, { env: env.env })
-		return { ...result, stderr: explainAtlasFailure(env.scrub(result.stderr)), stdout: env.scrub(result.stdout) }
+		/* a failure's output is free text, scrubbed; a success's is JSON, parsed before anything is masked */
+		if (result.code !== 0)
+			throw new Error(
+				`atlas schema inspect: ${`${explainAtlasFailure(env.scrub(result.stderr))}${env.scrub(result.stdout)}`.trim()}`,
+			)
+		return readInspect(result.stdout)
 	})
-	if (ran.code !== 0) throw new Error(`atlas schema inspect: ${`${ran.stderr}${ran.stdout}`.trim()}`)
-	const { schemas = [] } = JSON.parse(ran.stdout) as Inspected
 	if (schemas.some((schema) => (schema.tables ?? []).length > 0))
 		throw new Error(explainAtlasFailure("connected database is not clean"))
 }
 
-export { refuseUnclean }
+export { type Inspected, readInspect, refuseUnclean }

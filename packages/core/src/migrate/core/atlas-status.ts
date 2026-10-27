@@ -24,13 +24,20 @@ type AtlasCommand = {
 	target: PgTarget
 }
 
-/** `atlas migrate <args>` on the snapshot `copy` against the target, its output scrubbed */
-function atlas(options: AtlasCommand, copy: string, args: readonly string[]): RunResult {
+/** What an Atlas call returned: its stderr scrubbed, its stdout as Atlas wrote it, and the scrubber for what comb prints of it */
+type Ran = RunResult & { scrub(text: string): string }
+
+/**
+ * `atlas migrate <args>` on the snapshot `copy` against the target. Its stdout is JSON comb parses
+ * as written and never scrubbed (M79), since a secret that spells a key or a name would change what
+ * comb reads; a caller scrubs a value only where it prints it.
+ */
+function atlas(options: AtlasCommand, copy: string, args: readonly string[]): Ran {
 	return withAtlasEnv(options.target, { revisions: options.revisions, url: true }, (env) => {
 		const ran = (options.exec ?? run)("atlas", ["migrate", ...args, "--dir", `file://${copy}`, ...env.args], {
 			env: env.env,
 		})
-		return { ...ran, stderr: explainAtlasFailure(env.scrub(ran.stderr)), stdout: env.scrub(ran.stdout) }
+		return { ...ran, scrub: env.scrub, stderr: explainAtlasFailure(env.scrub(ran.stderr)) }
 	})
 }
 
@@ -59,8 +66,16 @@ function atlasStatus(
 	const ran = atlas(options, copy, ["status", "--format", STATUS_FORMAT])
 	if (ran.code !== 0 && notClean && ran.stderr === explainAtlasFailure("connected database is not clean"))
 		return NO_HISTORY
-	if (ran.code !== 0) throw new Error(`atlas migrate status: ${ran.stderr || `exit ${ran.code}: ${ran.stdout}`}`)
-	return json<AtlasStatus>(ran.stdout, "status")
+	if (ran.code !== 0)
+		throw new Error(`atlas migrate status: ${ran.stderr || `exit ${ran.code}: ${ran.scrub(ran.stdout)}`}`)
+	const status = json<AtlasStatus>(ran.stdout, "status")
+	/* the free text comb prints of a status, scrubbed; versions, hashes and names stay as Atlas wrote them */
+	const applied = status.applied.map((revision) => ({
+		...revision,
+		error: ran.scrub(revision.error),
+		errorStmt: ran.scrub(revision.errorStmt),
+	}))
+	return { ...status, applied, error: ran.scrub(status.error) }
 }
 
-export { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY }
+export { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran }

@@ -148,3 +148,17 @@ describe("public's history beside another schema's 0.12 rows it cannot read (M78
 		)
 	})
 })
+
+/* M79: the listing's names are used as the database has them; only the printed line is masked */
+describe("public's history read with a password that spells another schema's name (M78, M79)", () => {
+	it("still matches app's row and ignores it, its line masking the password", async () => {
+		const atlas = fakeAtlas({ shared: withApps() })
+		const out: string[] = []
+		const secret = { ...target, url: "postgres://app:app@localhost/app" }
+		expect(
+			await applyWithAtlas({ approve, dir, exec: atlas, print: (line) => out.push(line), target: secret }),
+		).toEqual(["3_c.sql"])
+		expect(out[0]).toBe("5 is schema ***'s, recorded in atlas_schema_revisions_***; public ignores it")
+		expect(execOrders(atlas.calls)).toHaveLength(2)
+	})
+})

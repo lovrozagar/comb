@@ -19,10 +19,10 @@ import { execOrder, type Foreign, foreignRows, ignoredLines, ownHistory } from "
 import { type AtlasFile, type AtlasStatus, checkHistory, fileOf, filesOf, versionOf } from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
 import { explainAtlasFailure, SHARED_REVISIONS } from "./atlas-target.ts"
-import { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY } from "./atlas-status.ts"
+import { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran } from "./atlas-status.ts"
 import { refuseDrift } from "./baseline-compare.ts"
 import { extractSchema, parseMigration } from "./parse.ts"
-import { type RunResult, run } from "./process.ts"
+import { run } from "./process.ts"
 import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { fileUnreadable } from "./pg-split.ts"
@@ -52,7 +52,7 @@ function known(own: AtlasStatus): AtlasStatus {
 /** `raw` as the target's own history: another schema's rows in public's left out, each named (M78) */
 function ownOf(options: AtlasCommand, copy: string, raw: AtlasStatus): { foreign: Foreign; status: AtlasStatus } {
 	const foreign = foreignRows(options, copy, raw)
-	for (const line of ignoredLines(foreign)) options.print(line)
+	for (const line of ignoredLines(foreign, options.target)) options.print(line)
 	return { foreign, status: ownHistory(raw, foreign, copy) }
 }
 
@@ -110,17 +110,18 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 type ApplyReport = { applied: Array<{ Error?: { Stmt: string; Text: string }; Name: string }>; error: string }
 
 /** The apply's result: the files it applied, or the file and statement that failed */
-function applied(ran: RunResult): string[] {
+function applied(ran: Ran): string[] {
 	if (ran.stdout.trim() === "") throw new Error(`atlas migrate apply: ${ran.stderr}`)
 	const report = json<ApplyReport>(ran.stdout, "apply")
 	const failed = report.applied.find((file) => file.Error !== undefined)
 	if (failed?.Error !== undefined) {
+		const { Stmt, Text } = failed.Error
 		throw new Error(
-			`${failed.Name} failed at ${failed.Error.Stmt}: ${failed.Error.Text}. It was rolled back; the files before it stay applied`,
+			`${failed.Name} failed at ${ran.scrub(Stmt)}: ${ran.scrub(Text)}. It was rolled back; the files before it stay applied`,
 		)
 	}
 	if (ran.code !== 0 || report.error !== "")
-		throw new Error(`atlas migrate apply: ${explainAtlasFailure(report.error || ran.stderr)}`)
+		throw new Error(`atlas migrate apply: ${explainAtlasFailure(ran.scrub(report.error) || ran.stderr)}`)
 	return report.applied.map((file) => file.Name)
 }
 

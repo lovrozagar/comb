@@ -30,6 +30,7 @@ type AtlasEnv = {
 	args: readonly string[]
 	dir: string
 	env: Readonly<Record<string, string>>
+	/** free text: the call's secrets, and any other URL's password or secret query value, masked */
 	scrub(text: string): string
 }
 
@@ -188,14 +189,22 @@ function secretsOf(raw: string): string[] {
 	return [raw, ...secrets].filter((secret) => secret !== "")
 }
 
-/** `text` with every secret of `urls` masked, and any other URL's password or secret query value too */
-function scrubAtlasOutput(text: string, urls: readonly string[]): string {
+/** `text` with every secret of `urls` masked, the literal strings only: for a line comb prints (M79) */
+function maskSecrets(text: string, urls: readonly string[]): string {
 	const secrets = [...new Set(urls.flatMap(secretsOf))].sort((a, b) => b.length - a.length)
 	let out = text
 	for (const secret of secrets) out = out.replaceAll(secret, REDACTED)
 	return out
-		.replace(/\b(postgres(?:ql)?:\/\/[^:/\s@]+:)[^@\s]+@/g, `$1${REDACTED}@`)
-		.replace(/([?&"]\w*(?:pass|secret|token|key)\w*["]?[=:]["]?)[^&\s"]+/gi, `$1${REDACTED}`)
+}
+
+/** `text` with every secret of `urls` masked, and any other URL's password or secret query value too */
+function scrubAtlasOutput(text: string, urls: readonly string[]): string {
+	return (
+		maskSecrets(text, urls)
+			.replace(/\b(postgres(?:ql)?:\/\/[^:/\s@]+:)[^@\s]+@/g, `$1${REDACTED}@`)
+			/* free text's key=value only: a JSON key such as "primary_key": is Atlas's structure, not a secret (M79) */
+			.replace(/((?:^|[?&"\s])\w*(?:pass|secret|token|key)\w*=)[^&\s"]+/gi, `$1${REDACTED}`)
+	)
 }
 
 /** Atlas's failure in comb's terms where comb knows the fix; otherwise as Atlas said it */
@@ -277,6 +286,7 @@ export {
 	type AtlasNeeds,
 	atlasUrls,
 	explainAtlasFailure,
+	maskSecrets,
 	pgUrlProblems,
 	type PgTarget,
 	redactUrl,

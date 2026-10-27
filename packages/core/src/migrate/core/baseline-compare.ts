@@ -105,12 +105,16 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string): vo
 		const ran = withAtlasEnv(options.target, { dev: true, url: true }, (env) => {
 			const args = ["schema", "diff", "--from", "env://url", "--to", `file://${plain}`, ...env.args]
 			const result = options.exec("atlas", args, { env: env.env })
-			return { ...result, stderr: explainAtlasFailure(env.scrub(result.stderr)), stdout: env.scrub(result.stdout) }
+			/* compared as Atlas wrote it; scrubbed only in what comb prints (M79) */
+			if (result.code !== 0) {
+				const said = `${explainAtlasFailure(env.scrub(result.stderr))}${env.scrub(result.stdout)}`
+				throw new Error(`atlas schema diff: ${said.trim()}`)
+			}
+			return { stdout: result.stdout.trim(), shown: env.scrub(result.stdout).trim() }
 		})
-		if (ran.code !== 0) throw new Error(`atlas schema diff: ${`${ran.stderr}${ran.stdout}`.trim()}`)
-		if (ran.stdout.trim() !== SYNCED) {
+		if (ran.stdout !== SYNCED) {
 			throw new Error(
-				`the database's tables are not the ones the migrations leave, so baseline records nothing; the difference:\n${ran.stdout.trim()}`,
+				`the database's tables are not the ones the migrations leave, so baseline records nothing; the difference:\n${ran.shown}`,
 			)
 		}
 	} finally {

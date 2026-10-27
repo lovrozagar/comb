@@ -6,6 +6,7 @@ import {
 	pgUrlProblems,
 	redactUrl,
 	revisionsSchema,
+	maskSecrets,
 	scrubAtlasOutput,
 	withAtlasEnv,
 	type PgTarget,
@@ -119,6 +120,16 @@ describe("redactUrl and scrubAtlasOutput", () => {
 		expect(out).toContain("postgres://other:***@host/x")
 	})
 
+	/* M79: the generic rule masks free text's `key=value`, never a JSON key that names a key */
+	it("leaves Atlas's JSON whole, its primary_key and foreign_keys among it, and masks a key=value in free text", () => {
+		const json =
+			'{"tables":[{"name":"a","columns":[{"name":"api_token"}],"primary_key":{"parts":[]},"foreign_keys":[]}]}'
+		expect(scrubAtlasOutput(json, ["postgres://app:S3cret@db/app"])).toBe(json)
+		expect(scrubAtlasOutput("dial with api_key=K9 and ?password=P1&x=1", [])).toBe(
+			"dial with api_key=*** and ?password=***&x=1",
+		)
+	})
+
 	it("masks a URL that does not parse as the whole string", () => {
 		const raw = "postgres://app:ab#cd@db/app"
 		expect(scrubAtlasOutput(`parse open url ${raw}: invalid port`, [raw])).toBe("parse open url ***: invalid port")
@@ -219,6 +230,8 @@ describe("withAtlasEnv", () => {
 		expect(() => withAtlasEnv(target({ url: "" }), { url: true }, () => undefined)).toThrow("url is empty")
 		const scrubbed = withAtlasEnv(target(), { url: true }, (atlas) => atlas.scrub("auth failed for S3cret"))
 		expect(scrubbed).toBe("auth failed for ***")
+		/* M79: maskSecrets takes the given URLs' secrets only, not the generic rules */
+		expect(maskSecrets("auth failed for S3cret, api_key=x", [target().url])).toBe("auth failed for ***, api_key=x")
 	})
 })
 

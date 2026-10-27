@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
-import { sqliteDrift } from "./baseline-compare.ts"
+import { refuseDrift, sqliteDrift } from "./baseline-compare.ts"
 import type { Run } from "./process.ts"
 
 let dir = ""
@@ -17,9 +17,8 @@ afterEach(() => rmSync(dir, { force: true, recursive: true }))
 function atlas(stdout: string, code = 0): Run & { live: string[] } {
 	const live: string[] = []
 	const run: Run = (_cmd, args) => {
-		if (args[0] === "schema") {
-			live.push(readFileSync((args[args.indexOf("--from") + 1] as string).replace("file://", ""), "utf8"))
-		}
+		const from = args[args.indexOf("--from") + 1] as string
+		if (args[0] === "schema" && from.startsWith("file://")) live.push(readFileSync(from.replace("file://", ""), "utf8"))
 		if (args[0] !== "schema") return { code: 0, stderr: "", stdout: "" }
 		return { code, stderr: code === 0 ? "" : "boom", stdout }
 	}
@@ -40,5 +39,28 @@ describe("sqliteDrift", () => {
 		expect(run.live).toEqual(["CREATE TABLE post (id TEXT, title TEXT);\n"])
 		await expect(sqliteDrift(conn, join(dir, "m"), atlas("", 1))).rejects.toThrow("atlas schema diff failed: boom")
 		await conn.close()
+	})
+})
+
+/* M79: Atlas's answer is compared as Atlas wrote it, and scrubbed only where comb prints it */
+/** A Postgres target whose password is `password` */
+const target = (password: string) => ({
+	devUrl: "postgres://localhost/dev",
+	lockTimeout: "5s",
+	schema: "public",
+	url: `postgres://app:${password}@db/app`,
+})
+
+describe("refuseDrift: the Postgres database against its replayed history", () => {
+	it("finds a synced database synced whatever its password spells, and prints a difference scrubbed", () => {
+		writeFileSync(join(dir, "m", "1_a.sql"), 'CREATE TABLE "a" ("id" int);\n')
+		for (const password of ["synced", "are", "changes"]) {
+			const exec = atlas("Schemas are synced, no changes to be made.\n")
+			expect(() => refuseDrift({ exec, target: target(password) }, join(dir, "m"))).not.toThrow()
+		}
+		const drifted = atlas('-- Modify "a" table: synced\nALTER TABLE "a" ADD COLUMN "x" int;\n')
+		expect(() => refuseDrift({ exec: drifted, target: target("synced") }, join(dir, "m"))).toThrow(
+			'the difference:\n-- Modify "a" table: ***\nALTER TABLE "a" ADD COLUMN "x" int;',
+		)
 	})
 })

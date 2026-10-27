@@ -443,6 +443,7 @@ type AtlasEnv = {
     args: readonly string[];
     dir: string;
     env: Readonly<Record<string, string>>;
+    /** free text: the call's secrets, and any other URL's password or secret query value, masked */
     scrub(text: string): string;
 };
 /** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */
@@ -465,6 +466,8 @@ declare const atlasUrls: (target: PgTarget) => {
 };
 /** `raw` with its password and every secret-looking query value masked; unparseable, masked whole */
 declare function redactUrl(raw: string): string;
+/** `text` with every secret of `urls` masked, the literal strings only: for a line comb prints (M79) */
+declare function maskSecrets(text: string, urls: readonly string[]): string;
 /** `text` with every secret of `urls` masked, and any other URL's password or secret query value too */
 declare function scrubAtlasOutput(text: string, urls: readonly string[]): string;
 /** Atlas's failure in comb's terms where comb knows the fix; otherwise as Atlas said it */
@@ -476,7 +479,7 @@ declare function atlasConfig(needs: AtlasNeeds, revisions: string): string;
  * afterwards however `body` ends. A target with errors is refused before anything is written.
  */
 declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
-export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, pgUrlProblems, type PgTarget, redactUrl, revisionsSchema, SHARED_REVISIONS, scrubAtlasOutput, withAtlasEnv, };
+export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, maskSecrets, pgUrlProblems, type PgTarget, redactUrl, revisionsSchema, SHARED_REVISIONS, scrubAtlasOutput, withAtlasEnv, };
 
 // migrate/core/atlas-env.d.ts
 import type { ExtractedSchema } from "../types.ts";
