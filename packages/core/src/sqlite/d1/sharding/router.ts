@@ -1,3 +1,4 @@
+import { DEFAULTS, routerSettings } from "./config.ts"
 import { kvDelete, kvRead, putUnlessNewer } from "./kv-cache.ts"
 import type { D1Database } from "@cloudflare/workers-types"
 import { eq } from "drizzle-orm"
@@ -39,15 +40,6 @@ type SettleTargets = CacheTargets & { bookmark: string | null | undefined }
 /** How a write placed an org: on a new row, on its soft-deleted one, or over its live one */
 type Placement = "allocate" | "move" | "revive"
 
-const DEFAULTS = {
-	kvTtlSeconds: 60,
-	lruHardTtlMs: 15 * 60 * 1000,
-	lruMaxSize: 1000,
-	lruTtlMs: 5 * 60 * 1000,
-	maxOrgsPerShard: 500,
-	missTtlMs: 5000,
-} as const
-
 /**
  * Shard router — resolves org -> D1 database handle.
  *
@@ -72,9 +64,10 @@ class ShardRouter {
 	private readonly totalShards: number
 
 	constructor(config: ShardRouterConfig) {
-		this.totalShards = config.totalShards
-		this.pick = config.pick ?? headroomPick(config.maxOrgsPerShard ?? DEFAULTS.maxOrgsPerShard)
-		this.kvTtlSeconds = config.kvTtlSeconds ?? DEFAULTS.kvTtlSeconds
+		const { kvTtlSeconds, maxOrgsPerShard, totalShards } = routerSettings(config)
+		this.totalShards = totalShards
+		this.pick = config.pick ?? headroomPick(maxOrgsPerShard)
+		this.kvTtlSeconds = kvTtlSeconds
 		this.log = config.log ?? (() => {})
 		const maxSize = config.lruMaxSize ?? DEFAULTS.lruMaxSize
 		this.lru = new LruCache<string, ShardMapping>({
