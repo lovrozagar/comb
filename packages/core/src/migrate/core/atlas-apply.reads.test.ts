@@ -7,9 +7,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { applyWithAtlas } from "./atlas-apply.ts"
-import { sqlFiles } from "./atlas-dir.ts"
 import { pgRead } from "./pg-split.ts"
-import type { Run, RunResult } from "./process.ts"
+import { fakeAtlas, file, status } from "../../../tests/support/fake-atlas.ts"
 
 vi.mock("./pg-split.ts", async (importOriginal) => {
 	const real = await importOriginal<typeof import("./pg-split.ts")>()
@@ -17,27 +16,9 @@ vi.mock("./pg-split.ts", async (importOriginal) => {
 })
 
 const FILES = { "1_a.sql": 'CREATE TABLE "a" ("id" int);\n', "2_b.sql": 'ALTER TABLE "a" ADD COLUMN "b" int;\n' }
-const ok = (stdout = "{}"): RunResult => ({ code: 0, stderr: "", stdout })
-const file = (name: string) => ({ Description: name.split("_")[1], Name: name, Version: name.split("_")[0] })
-
-/** Atlas on a database with no history: hash writes a sum, status lists every file pending */
-const atlas: Run = (_cmd, args) => {
-	if (args[1] === "hash") {
-		const dir = (args[args.indexOf("--dir") + 1] as string).replace("file://", "")
-		writeFileSync(
-			join(dir, "atlas.sum"),
-			`h1:x=\n${sqlFiles(dir)
-				.map((f) => `${f} h1:${f.length}=`)
-				.join("\n")}\n`,
-		)
-		return ok()
-	}
-	if (args[1] !== "status") return ok()
-	const files = Object.keys(FILES).map(file)
-	return ok(
-		JSON.stringify({ applied: [], available: files, current: "", error: "", pending: files, status: "PENDING" }),
-	)
-}
+/** Atlas on a database with no history: every file pending */
+const pending = Object.keys(FILES).map(file)
+const atlas = fakeAtlas({ status: status({ available: pending, pending, status: "PENDING" }) })
 
 let dir = ""
 beforeEach(() => {
