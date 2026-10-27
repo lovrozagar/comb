@@ -64,7 +64,6 @@ const QUIET_COMMANDS = /* @__PURE__ */ new Set([
 	"AT_ClusterOn",
 	"AT_DropCluster",
 	"AT_DropNotNull",
-	"AT_ReplicaIdentity",
 	"AT_ResetOptions",
 	"AT_ResetRelOptions",
 	"AT_SetCompression",
@@ -122,6 +121,12 @@ const written = (relation: unknown): string => {
 	return rel.schemaname === undefined ? rel.relname : `${rel.schemaname}.${rel.relname}`
 }
 
+/** A table left with no replica identity: a publication's UPDATE and DELETE on it fail (M84) */
+const NO_IDENTITY: Finding = {
+	level: "cautious",
+	note: "UPDATE and DELETE fail on a table a publication publishes them for",
+}
+
 /** A sequence restart, as an ALTER SEQUENCE or an identity column's SET or ADD spells it (M82) */
 const RESTART: Finding = {
 	level: "cautious",
@@ -157,6 +162,9 @@ const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string) => Findi
 	/* a SET DEFAULT changes no stored value; a DROP DEFAULT, with no def, changes what later writes store */
 	AT_ColumnDefault: (cmd) => (cmd["def"] === undefined ? [{ level: "cautious" }] : []),
 	AT_DropColumn: (cmd, table) => [{ drops: [`DROP COLUMN ${table}.${String(cmd["name"])}`], level: "unsafe" }],
+	/* with no replica identity a publication's UPDATE and DELETE fail; Postgres refuses an index unfit for one (M84) */
+	AT_ReplicaIdentity: (cmd) =>
+		((cmd["def"] as Node)["ReplicaIdentityStmt"] as Node)["identity_type"] === "n" ? [NO_IDENTITY] : [],
 	/* a new generation expression recomputes every row's stored value (M81) */
 	AT_SetExpression: (cmd) => [
 		{ level: "cautious", note: `recomputes every stored value of ${String(cmd["name"])}` },
