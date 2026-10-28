@@ -128,7 +128,8 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 			.array(),
 		q: z.string().optional(),
 		sortOrderBy: z.partialRecord(sortFieldSchema, sortDirectionEnum),
-		pageBounded: z.literal(true),
+		/* set on every parse; optional, as ListQueryOutput types it, so a handler's input takes a hand-built object (U29) */
+		pageBounded: z.literal(true).optional(),
 		validated: z.literal(true),
 		...extendFields,
 	})

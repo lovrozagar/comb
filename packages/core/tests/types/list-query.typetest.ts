@@ -96,3 +96,11 @@ const handBuilt: ListQueryOutput = {
 	validated: true,
 }
 void handBuilt
+
+/*
+ * G2 of plan 14: the schema's own output agrees, so a ListQueryOutput passes where a handler takes
+ * the schema's inferred output, as honey's generated handlers do
+ */
+const handler = (input: ListOutput) => input.limit
+handler({ ...handBuilt, archived: undefined, parsedSort: [] })
+expectTypeOf<ListOutput["pageBounded"]>().toEqualTypeOf<true | undefined>()
