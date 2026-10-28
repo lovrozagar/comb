@@ -4,7 +4,16 @@
  * name its fields differently, and `readPgError` reads all three.
  * https://www.postgresql.org/docs/current/errcodes-appendix.html
  */
-import { type Fallback, type Found, findNamed, lookup, own, toCombError } from "../constraint-map.ts"
+import {
+	type Fallback,
+	type Found,
+	findNamed,
+	lookup,
+	own,
+	shown,
+	shownColumn,
+	toCombError,
+} from "../constraint-map.ts"
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { truncateUtf8 } from "../identifier.ts"
@@ -28,9 +37,10 @@ function unique(v: Violation): CombError {
 	if (constraint !== undefined && v.read.table !== undefined && constraint === pkeyOf(v.read.table))
 		return primaryKey(v)
 	/* a composite unique is keyed by its columns together; one column alone would blame half the pair */
-	const column = columns.length === 1 ? columns[0] : undefined
+	const visible = shown(v.maps, table, columns)
+	const column = visible.length === 1 ? visible[0] : undefined
 	const entry = lookup(v.maps, table, (t) => own(t.unique, columns.join(",")) ?? own(t.unique, constraint))
-	const named = columns.map((c) => (table === undefined ? c : `${table}.${c}`)).join(", ")
+	const named = visible.map((c) => (table === undefined ? c : `${table}.${c}`)).join(", ")
 	const cause = named === "" ? "Duplicate value detected" : `Duplicate value for ${named}`
 	const fallback = { cause, errorKey: combErrorKeys.UNIQUE_CONSTRAINT_VIOLATION, status: "conflict" } as const
 	return toError(v, { column, entry, fallback, table })
@@ -69,7 +79,7 @@ function foreignKey(v: Violation): CombError {
 		errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
 		status: "conflict",
 	} as const
-	return toError(v, { column, entry, fallback, table })
+	return toError(v, { column: shownColumn(v.maps, table, column), entry, fallback, table })
 }
 
 function check(v: Violation): CombError {
@@ -87,8 +97,8 @@ function check(v: Violation): CombError {
 }
 
 function notNull(v: Violation): CombError {
-	const { column } = v.read
 	const { table } = v
+	const column = shownColumn(v.maps, table, v.read.column)
 	return new CombError({
 		cause: column === undefined ? "Required field missing" : `Required field missing: ${column}`,
 		column,
@@ -193,9 +203,13 @@ function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombE
 	const read = readPgError(error)
 	if (read === null) return undefined
 	const handler = own(CONSTRAINTS, read.code)
-	if (handler !== undefined)
-		return handler({ maps: constraintMaps, read, source: error, table: mapTable(constraintMaps, read) })
-	const value = valueError(read.code, read, error)
+	const table = mapTable(constraintMaps, read)
+	if (handler !== undefined) return handler({ maps: constraintMaps, read, source: error, table })
+	const value = valueError(
+		read.code,
+		{ column: shownColumn(constraintMaps, table, read.column), table: read.table },
+		error,
+	)
 	if (value !== undefined) return value
 	const resource = own(RESOURCE, read.code)
 	return resource === undefined ? undefined : new CombError({ ...resource, source: error })

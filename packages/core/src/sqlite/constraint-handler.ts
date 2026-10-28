@@ -3,7 +3,16 @@
  * Shared by the libsql, bun:sqlite and D1 handlers: the engine is the same, only the way the
  * driver carries the code differs, and `readSqliteError` absorbs that.
  */
-import { type Fallback, type Found, findNamed, lookup, own, toCombError } from "../constraint-map.ts"
+import {
+	type Fallback,
+	type Found,
+	findNamed,
+	lookup,
+	own,
+	shown,
+	shownColumn,
+	toCombError,
+} from "../constraint-map.ts"
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { valueError } from "../value-error.ts"
@@ -65,13 +74,14 @@ function unique(v: Violation): CombError {
 	const index = failedIndex(v.read.message)
 	if (index !== undefined) return uniqueIndex(v, index)
 	const { columns, table } = failedColumns(v.read.message, v.read.query)
+	const named = shown(v.maps, table, columns)
 	/* a composite unique is keyed by its columns together; one column alone would blame half the pair */
-	const column = columns.length === 1 ? columns[0] : undefined
+	const column = named.length === 1 ? named[0] : undefined
 	const entry = lookup(v.maps, table, (t) => own(t.unique, columns.join(",")))
 	const cause =
-		columns.length === 0
+		named.length === 0
 			? "Duplicate value detected"
-			: `Duplicate value for ${columns.map((c) => `${table}.${c}`).join(", ")}`
+			: `Duplicate value for ${named.map((c) => `${table}.${c}`).join(", ")}`
 	const fallback = { cause, errorKey: combErrorKeys.UNIQUE_CONSTRAINT_VIOLATION, status: "conflict" } as const
 	return toError(v, { column, entry, fallback, table })
 }
@@ -106,7 +116,7 @@ function check(v: Violation): CombError {
 
 function notNull(v: Violation): CombError {
 	const { columns, table } = failedColumns(v.read.message, v.read.query)
-	const column = columns[0]
+	const column = shownColumn(v.maps, table, columns[0])
 	return new CombError({
 		cause: column === undefined ? "Required field missing" : `Required field missing: ${column}`,
 		column,
@@ -162,7 +172,12 @@ function foreignKey(v: Violation): CombError {
 		status: "conflict",
 	} as const
 	if (unlisted || changesReferenced) return toError(v, { entry: undefined, fallback, table })
-	return toError(v, { column: entry === undefined ? undefined : column, entry, fallback, table })
+	return toError(v, {
+		column: entry === undefined ? undefined : shownColumn(v.maps, table, column),
+		entry,
+		fallback,
+		table,
+	})
 }
 
 /**
@@ -207,7 +222,8 @@ function constraintError(error: unknown, maps: ConstraintMap[]): CombError | nul
 	if (read === null) return null
 	const handler = own(CONSTRAINTS, read.code)
 	if (handler !== undefined) return handler({ maps, read, source: error })
-	return valueError(read.code, mismatchAt(read.message, read.query), error) ?? null
+	const at = mismatchAt(read.message, read.query)
+	return valueError(read.code, { column: shownColumn(maps, at.table, at.column), table: at.table }, error) ?? null
 }
 
 /**

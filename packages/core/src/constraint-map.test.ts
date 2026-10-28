@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findNamed, lookup, own, toCombError } from "./constraint-map.ts"
+import { findNamed, lookup, own, shown, shownColumn, toCombError } from "./constraint-map.ts"
 import type { ConstraintMap } from "./types.ts"
 
 const MAPS: ConstraintMap[] = [
@@ -60,5 +60,23 @@ describe("toCombError", () => {
 			status: 409,
 			table: "a",
 		})
+	})
+})
+
+/* F67: the columns an error may name, by the private columns any map lists for the table */
+describe("shown and shownColumn", () => {
+	const maps: ConstraintMap[] = [{ a: {} }, { a: { private: ["pin"] } }]
+
+	it("names every column, or none once any map lists one as the table's private column", () => {
+		expect(shown(maps, "a", ["owner", "slug"])).toEqual(["owner", "slug"])
+		expect(shown(maps, "a", ["owner", "pin"])).toEqual([])
+		expect(shown(maps, "b", ["pin"])).toEqual(["pin"])
+		expect(shown(maps, undefined, ["pin"])).toEqual(["pin"])
+	})
+
+	it("names one column unless it is private, and nothing for no column", () => {
+		expect(shownColumn(maps, "a", "owner")).toBe("owner")
+		expect(shownColumn(maps, "a", "pin")).toBeUndefined()
+		expect(shownColumn(maps, "a", undefined)).toBeUndefined()
 	})
 })

@@ -52,6 +52,13 @@ export type Found = {
 };
 /** `record[key]` when `key` is the record's own (never an inherited name such as `constructor`). */
 export declare const own: <T>(record: Record<string, T> | undefined, key: string | undefined) => T | undefined;
+/**
+ * The columns an error may name of those a violation reports: all of them, or none when a map lists
+ * one as the table's private column, since naming the rest would point at it (F67)
+ */
+export declare function shown(maps: ConstraintMap[], table: string | undefined, columns: readonly string[]): readonly string[];
+/** `column`, or undefined when a map lists it among `table`'s private columns (F67) */
+export declare const shownColumn: (maps: ConstraintMap[], table: string | undefined, column: string | undefined) => string | undefined;
 /** The first entry `pick` finds for `table` across `maps`. */
 export declare function lookup(maps: ConstraintMap[], table: string | undefined, pick: (t: TableMap) => ConstraintMapEntry | undefined): ConstraintMapEntry | undefined;
 /** The `kind` entry named `name` (a CHECK, or a unique index) in any table, with that table. */
@@ -131,6 +138,11 @@ export type ConstraintMap = {
         exclusion?: Record<string, ConstraintMapEntry>;
         foreignKey?: Record<string, ConstraintMapEntry>;
         primaryKey?: ConstraintMapEntry;
+        /**
+         * The columns of this table the client never sees, by SQL name: an error names none of them,
+         * in its `column` or its cause (F67). Codegen writes it; a map without it names every column.
+         */
+        private?: readonly string[];
         /**
          * The columns of this table some foreign key points at, by SQL name: an UPDATE, or an
          * upsert's DO UPDATE, that assigns one may have failed on a row referencing the old value,

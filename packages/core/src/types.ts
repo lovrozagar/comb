@@ -63,6 +63,11 @@ export type ConstraintMap = {
 		foreignKey?: Record<string, ConstraintMapEntry>
 		primaryKey?: ConstraintMapEntry
 		/**
+		 * The columns of this table the client never sees, by SQL name: an error names none of them,
+		 * in its `column` or its cause (F67). Codegen writes it; a map without it names every column.
+		 */
+		private?: readonly string[]
+		/**
 		 * The columns of this table some foreign key points at, by SQL name: an UPDATE, or an
 		 * upsert's DO UPDATE, that assigns one may have failed on a row referencing the old value,
 		 * so SQLite's handler answers it with the neutral cause (U43). Codegen writes it.

@@ -117,6 +117,9 @@ describe("buildConstraintMap: a private column's constraints", () => {
 			{ cause: "Check constraint violated", errorKey: "doc_check_failed", statusKey: "bad_request" },
 			{ cause: "Invalid enum value", errorKey: "doc_value_invalid", statusKey: "bad_request" },
 		])
+		/* the handlers name none of them in an error's column or cause (F67) */
+		expect(doc?.private).toEqual(["kind_sql", "owner_ref_sql", "pin_sql", "secret_sql"])
+		expect(buildConstraintMap(tablesOf(DOC))["doc"]).not.toHaveProperty("private")
 		/* no key or cause of the table names a private column by its property or its SQL name; the map's
 		 * own keys are the names the engine reports, which never reach the client */
 		const sent = JSON.stringify(

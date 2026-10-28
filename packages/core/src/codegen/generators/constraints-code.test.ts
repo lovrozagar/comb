@@ -28,4 +28,19 @@ describe("generateConstraintMapCode", () => {
 } as const
 `)
 	})
+
+	/* F67: a table's private columns are written as a list, which the handlers read */
+	it("writes a table's private columns as a list beside its constraints", () => {
+		const code = generateConstraintMapCode({ doc: { private: ["pin", "secret"], referenced: ["id"] } }, "test")
+		expect(code).toBe(`export const TEST_DB_CONSTRAINT_MAP = {
+	/* doc table constraints */
+	doc: {
+		/* private columns, which no error names */
+		private: ["pin", "secret"],
+		/* columns other tables' foreign keys reference */
+		referenced: ["id"]
+	}
+} as const
+`)
+	})
 })

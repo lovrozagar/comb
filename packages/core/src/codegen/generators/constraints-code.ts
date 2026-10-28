@@ -15,6 +15,7 @@ export type TableConstraints = {
 	check?: Record<string, Constraint>
 	foreignKey?: Record<string, Constraint>
 	primaryKey?: Constraint
+	private?: string[]
 	referenced?: string[]
 	unique?: Record<string, Constraint>
 }
@@ -44,12 +45,15 @@ function joined(blocks: string[][]): string[] {
 	return blocks.flatMap((block, i) => (i < blocks.length - 1 ? [...block.slice(0, -1), `${block.at(-1)},`] : block))
 }
 
+/* what each list of a table's columns is */
+const LIST_LABELS: Record<string, string> = {
+	private: "private columns, which no error names",
+	referenced: "columns other tables' foreign keys reference",
+}
+
 function groupLines(type: string, group: Constraint | Record<string, Constraint> | string[]): string[] {
 	if (Array.isArray(group))
-		return [
-			"\t\t/* columns other tables' foreign keys reference */",
-			`\t\treferenced: [${group.map(stringLiteral).join(", ")}]`,
-		]
+		return [`\t\t/* ${LIST_LABELS[type]} */`, `\t\t${type}: [${group.map(stringLiteral).join(", ")}]`]
 	if (type === "primaryKey") {
 		return [
 			"\t\t/* primary key constraint */",

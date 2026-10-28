@@ -23,6 +23,25 @@ export type Found = {
 export const own = <T>(record: Record<string, T> | undefined, key: string | undefined): T | undefined =>
 	record !== undefined && key !== undefined && Object.hasOwn(record, key) ? record[key] : undefined
 
+/** Whether a map lists `column` among `table`'s private columns */
+const listsPrivate = (maps: ConstraintMap[], table: string | undefined, column: string) =>
+	maps.some((map) => own(map, table)?.private?.includes(column) === true)
+
+/**
+ * The columns an error may name of those a violation reports: all of them, or none when a map lists
+ * one as the table's private column, since naming the rest would point at it (F67)
+ */
+export function shown(maps: ConstraintMap[], table: string | undefined, columns: readonly string[]): readonly string[] {
+	return columns.some((column) => listsPrivate(maps, table, column)) ? [] : columns
+}
+
+/** `column`, or undefined when a map lists it among `table`'s private columns (F67) */
+export const shownColumn = (
+	maps: ConstraintMap[],
+	table: string | undefined,
+	column: string | undefined,
+): string | undefined => (column === undefined ? undefined : shown(maps, table, [column])[0])
+
 /** The first entry `pick` finds for `table` across `maps`. */
 export function lookup(
 	maps: ConstraintMap[],

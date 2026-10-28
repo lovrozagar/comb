@@ -189,6 +189,9 @@ function constraintsOf(table: TableMeta, dialect: Dialect): TableConstraints {
 	if (unique) entry.unique = unique
 	const check = checksOf(table, dialect, hidden)
 	if (check) entry.check = check
+	/* the columns the handlers name in no error (F67), sorted by code unit */
+	const hiddenColumns = table.fields.filter((f) => f.constraints.private).map((f) => f.sqlName)
+	if (hiddenColumns.length > 0) entry.private = hiddenColumns.sort()
 	return entry
 }
 

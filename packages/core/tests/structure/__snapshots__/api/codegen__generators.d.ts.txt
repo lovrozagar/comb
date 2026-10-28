@@ -504,6 +504,7 @@ export type TableConstraints = {
     check?: Record<string, Constraint>;
     foreignKey?: Record<string, Constraint>;
     primaryKey?: Constraint;
+    private?: string[];
     referenced?: string[];
     unique?: Record<string, Constraint>;
 };
