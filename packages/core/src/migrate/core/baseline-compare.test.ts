@@ -14,13 +14,13 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
 /** atlas: hash writes nothing; schema diff keeps the database's DDL it was handed and answers `stdout` */
-function atlas(stdout: string, code = 0): Run & { live: string[] } {
+function atlas(stdout: string, code = 0, notice = ""): Run & { live: string[] } {
 	const live: string[] = []
 	const run: Run = (_cmd, args) => {
 		const from = args[args.indexOf("--from") + 1] as string
 		if (args[0] === "schema" && from.startsWith("file://")) live.push(readFileSync(from.replace("file://", ""), "utf8"))
 		if (args[0] !== "schema") return { code: 0, stderr: "", stdout: "" }
-		return { code, stderr: code === 0 ? "" : "boom", stdout }
+		return { code, stderr: code === 0 ? notice : "boom", stdout }
 	}
 	return Object.assign(run, { live })
 }
@@ -58,6 +58,9 @@ describe("refuseDrift: the Postgres database against its replayed history", () =
 			const exec = atlas("Schemas are synced, no changes to be made.\n")
 			expect(() => refuseDrift({ exec, target: target(password) }, join(dir, "m"))).not.toThrow()
 		}
+		/* what Atlas says as it succeeds comes back, scrubbed, for baseline to warn with (plan 14's 5.4) */
+		const said = atlas("Schemas are synced, no changes to be made.\n", 0, "Skipped triggers on synced\n")
+		expect(refuseDrift({ exec: said, target: target("synced") }, join(dir, "m"))).toEqual(["Skipped triggers on ***"])
 		const drifted = atlas('-- Modify "a" table: synced\nALTER TABLE "a" ADD COLUMN "x" int;\n')
 		expect(() => refuseDrift({ exec: drifted, target: target("synced") }, join(dir, "m"))).toThrow(
 			'the difference:\n-- Modify "a" table: ***\nALTER TABLE "a" ADD COLUMN "x" int;',

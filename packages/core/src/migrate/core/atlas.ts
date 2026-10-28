@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
 import { normalizeSqliteExport, sqliteDevUrl } from "./atlas-env.ts"
-import { type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { atlasNotices, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { type Run, run } from "./process.ts"
 import { codeOf, IDENT, QNAME, unquote } from "./sql-code.ts"
 import { atlasFile, pgStatements } from "./pg-split.ts"
@@ -44,6 +44,8 @@ export type SchemaDiffOptions = {
 
 export type SchemaDiffResult = {
 	diff: string | null
+	/** what Atlas said on stderr as it succeeded, a line each, for the caller to warn with */
+	notices: string[]
 	synced: boolean
 }
 
@@ -73,7 +75,10 @@ export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult
 		if (result.code !== 0) throw new Error(`Atlas diff failed: ${result.stderr}`)
 		/* in sync, Atlas exits 0 and says so on stdout (probed on v1.3.0) */
 		const diff = result.stdout.trim()
-		return diff.includes("Schemas are synced") ? { diff: null, synced: true } : { diff, synced: false }
+		const notices = atlasNotices(result.stderr)
+		return diff.includes("Schemas are synced")
+			? { diff: null, notices, synced: true }
+			: { diff, notices, synced: false }
 	} finally {
 		rmSync(tmpDir, { force: true, recursive: true })
 	}

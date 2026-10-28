@@ -94,7 +94,7 @@ describe("generateIncrementalMigration", () => {
 			return ok()
 		})
 		const result = generateIncrementalMigration(options(run))
-		expect(result).toEqual({ files: [join(dir, "20261017_add_b.sql")], synced: false })
+		expect(result).toEqual({ files: [join(dir, "20261017_add_b.sql")], notices: [], synced: false })
 		expect(readFileSync(join(dir, "20261017_add_b.sql"), "utf8")).toBe(
 			"PRAGMA defer_foreign_keys = on;\nCREATE TABLE b (x);\n",
 		)
@@ -112,20 +112,21 @@ describe("generateIncrementalMigration", () => {
 	it("skips the hash when atlas.sum exists and reports synced when nothing new appears", () => {
 		seed("CREATE TABLE a (x);")
 		const run = fakeAtlas(() => ({ code: 0, stderr: "", stdout: NO_CHANGES }))
-		expect(generateIncrementalMigration(options(run))).toEqual({ files: [], synced: true })
+		expect(generateIncrementalMigration(options(run))).toEqual({ files: [], notices: [], synced: true })
 		/* the integrity check and the replayed copy are hashed; the directory itself is not */
 		expect(run.calls.filter((call) => call[1] === "hash")).toHaveLength(2)
 	})
 
 	it("reports synced when atlas exits 0 and writes nothing", () => {
 		seed("CREATE TABLE a (x);")
-		expect(generateIncrementalMigration(options(fakeAtlas()))).toEqual({ files: [], synced: true })
+		expect(generateIncrementalMigration(options(fakeAtlas()))).toEqual({ files: [], notices: [], synced: true })
 	})
 
 	it("creates the migrations directory when it is missing", () => {
 		const missing = join(dir, "nested", "migrations")
 		expect(generateIncrementalMigration(options(fakeAtlas(), { migrationsDir: missing }))).toEqual({
 			files: [],
+			notices: [],
 			synced: true,
 		})
 		expect(existsSync(join(missing, "atlas.sum"))).toBe(true)
@@ -171,7 +172,7 @@ describe("generateIncrementalMigration — FTS kept out of what atlas sees (S-12
 		const result = generateIncrementalMigration(
 			options(run, { ftsSql: FTS, targetSchema: "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);" }),
 		)
-		expect(result).toEqual({ files: [], synced: true })
+		expect(result).toEqual({ files: [], notices: [], synced: true })
 	})
 
 	it("writes a timestamped migration holding only the FTS delta when atlas has no changes", () => {
@@ -217,6 +218,7 @@ describe("generateIncrementalMigration — postgres", () => {
 		})
 		expect(generateIncrementalMigration(options(added, { dialect: "postgres", target }))).toEqual({
 			files: [join(dir, "20261017_add_b.sql")],
+			notices: [],
 			synced: false,
 		})
 		const diff = added.calls.findIndex((call) => call[1] === "diff")
@@ -230,6 +232,7 @@ describe("generateIncrementalMigration — postgres", () => {
 			generateIncrementalMigration(options(fakeAtlas(), { dialect: "postgres", migrationName: "again", target })),
 		).toEqual({
 			files: [],
+			notices: [],
 			synced: true,
 		})
 	})

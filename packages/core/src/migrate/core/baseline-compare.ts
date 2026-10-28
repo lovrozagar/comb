@@ -12,7 +12,7 @@ import { join } from "node:path"
 import type { Connection } from "../types.ts"
 import { hashDir, sqlFiles } from "./atlas-dir.ts"
 import { sqliteDevUrl } from "./atlas-env.ts"
-import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { atlasNotices, explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { asSql, type FtsState, separate } from "./fts-migration.ts"
 import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
 import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
@@ -99,7 +99,7 @@ function replayableHistory(exec: Run, copy: string): string {
  * against the history replayed on the dev database. Atlas OSS inspects no view, policy or
  * sequence, so those are not compared.
  */
-function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string): void {
+function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string): string[] {
 	const plain = replayableHistory(options.exec, copy)
 	try {
 		const ran = withAtlasEnv(options.target, { dev: true, url: true }, (env) => {
@@ -110,13 +110,18 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string): vo
 				const said = `${explainAtlasFailure(result.stderr, env.scrub)}${env.scrub(result.stdout)}`
 				throw new Error(`atlas schema diff: ${said.trim()}`)
 			}
-			return { stdout: result.stdout.trim(), shown: env.scrub(result.stdout).trim() }
+			return {
+				notices: atlasNotices(env.scrub(result.stderr)),
+				stdout: result.stdout.trim(),
+				shown: env.scrub(result.stdout).trim(),
+			}
 		})
 		if (ran.stdout !== SYNCED) {
 			throw new Error(
 				`the database's tables are not the ones the migrations leave, so baseline records nothing; the difference:\n${ran.shown}`,
 			)
 		}
+		return ran.notices
 	} finally {
 		rmSync(plain, { force: true, recursive: true })
 	}

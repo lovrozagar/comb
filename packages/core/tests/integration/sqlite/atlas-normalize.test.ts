@@ -61,7 +61,7 @@ describe("the normalized drizzle-kit SQLite export on Atlas v1.3.0", () => {
 	it("diffs as synced against a history whose key columns are NOT NULL", () => {
 		writeFileSync(join(dir, "20260101000000_init.sql"), SYNCED)
 		generateIncrementalMigration({ dialect: "sqlite", migrationName: "hash", migrationsDir: dir, targetSchema: SYNCED })
-		expect(diff("again")).toEqual({ files: [], synced: true })
+		expect(diff("again")).toEqual({ files: [], notices: [], synced: true })
 	}, 60_000)
 
 	it("rebuilds the text keys of a history comb 0.7 wrote from the raw export once, guarding a referenced one", () => {

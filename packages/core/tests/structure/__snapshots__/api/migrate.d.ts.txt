@@ -75,6 +75,8 @@ export type SchemaDiffOptions = {
 };
 export type SchemaDiffResult = {
     diff: string | null;
+    /** what Atlas said on stderr as it succeeded, a line each, for the caller to warn with */
+    notices: string[];
     synced: boolean;
 };
 export declare function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult;
@@ -480,7 +482,12 @@ declare function atlasConfig(needs: AtlasNeeds, revisions: string): string;
  * afterwards however `body` ends. A target with errors is refused before anything is written.
  */
 declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
-export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasUrls, explainAtlasFailure, NOT_CLEAN, pgUrlProblems, type PgTarget, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
+/**
+ * What Atlas said on stderr as it succeeded, a line each: comb passes each on as a warning, as Atlas
+ * OSS may say it left part of a schema out of what it compared (plan 14's 5.4)
+ */
+declare const atlasNotices: (stderr: string) => string[];
+export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasNotices, atlasUrls, explainAtlasFailure, NOT_CLEAN, pgUrlProblems, type PgTarget, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
 
 // migrate/core/atlas-env.d.ts
 import type { ExtractedSchema } from "../types.ts";
@@ -518,6 +525,8 @@ export type MigrateDiffOptions = {
 };
 export type MigrateDiffResult = {
     files: string[];
+    /** what Atlas said on stderr as it succeeded, a line each, for the caller to warn with */
+    notices: string[];
     synced: boolean;
 };
 export declare function generateIncrementalMigration(options: MigrateDiffOptions): MigrateDiffResult;

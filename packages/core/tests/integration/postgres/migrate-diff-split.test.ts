@@ -72,7 +72,7 @@ describe("migrate diff on Postgres: a history Atlas splits as it runs it", () =>
 						mkdirSync(dir)
 						handWritten("20260101000000_go.sql", history)
 						const schema = i < 2 ? `CREATE ROLE "${role}";\n${POST}` : POST
-						expect(diff(target(devUrl), schema)).toEqual({ files: [], synced: true })
+						expect(diff(target(devUrl), schema)).toEqual({ files: [], notices: [], synced: true })
 					})
 				}
 			} finally {
@@ -87,7 +87,7 @@ describe("migrate diff on Postgres: a history Atlas splits as it runs it", () =>
 					"20260101000000_code.sql",
 					`${POST}${log}CREATE FUNCTION "one"() RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT 1; SELECT 2; END;\nCREATE RULE "r" AS ON INSERT TO "post" DO ALSO (INSERT INTO "log" VALUES (1); INSERT INTO "log" VALUES (2));\n`,
 				)
-				expect(diff(target(devUrl), `${POST}${log}`)).toEqual({ files: [], synced: true })
+				expect(diff(target(devUrl), `${POST}${log}`)).toEqual({ files: [], notices: [], synced: true })
 			})
 		}, 60_000)
 	})

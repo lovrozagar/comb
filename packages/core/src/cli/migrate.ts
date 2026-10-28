@@ -94,7 +94,7 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	/* a dry run diffs a copy, since a diff writes its file and rehashes atlas.sum */
 	const dir = dryRun ? copyOf(migrationsDir) : migrationsDir
 	try {
-		const { files, synced } = generateIncrementalMigration({
+		const { files, notices, synced } = generateIncrementalMigration({
 			dialect,
 			ftsSql: pg === undefined ? await configuredFtsSql(io.cwd, codegen, io) : undefined,
 			migrationName: name ?? `migration_${Date.now()}`,
@@ -103,6 +103,8 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 			target: pg,
 			targetSchema: exportDrizzleSchema(exported),
 		})
+		/* Atlas OSS may say it left part of the schema out of the diff (plan 14's 5.4) */
+		for (const notice of notices) io.err(`Warning: Atlas: ${notice}`)
 		if (synced) io.out("Schema is already in sync — no migration needed")
 		else if (dryRun) reportDrift(db, files, io)
 		else for (const file of files) io.out(`Generated: ${file}`)

@@ -372,6 +372,16 @@ describe("baselineWithAtlas", () => {
 	})
 })
 
+describe("baselineWithAtlas: what Atlas says", () => {
+	/* plan 14's 5.4: what Atlas says as its comparison succeeds is a warning baseline prints */
+	it("warns with what Atlas said as it found the database synced", () => {
+		const said = { code: 0, stderr: "Skipped triggers.\n", stdout: "Schemas are synced, no changes to be made.\n" }
+		const run = options(fakeAtlas({ schemaDiff: said, status: status({}) }))
+		expect(baselineWithAtlas(run)).toEqual(["1_a.sql", "2_b.sql"])
+		expect(run.out).toEqual(["Warning: Atlas: Skipped triggers.", "Marked applied: 1_a.sql", "Marked applied: 2_b.sql"])
+	})
+})
+
 describe("baselineWithAtlas: what it refuses", () => {
 	it("refuses a database that already records migrations, and a directory with none", () => {
 		const recorded = status({ applied: [revision("1")], current: "1" })

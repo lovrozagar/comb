@@ -110,7 +110,7 @@ describe("atlas migrate diff with FTS5 tables (S-12)", () => {
 			migrationsDir: dir,
 			targetSchema: ITEMS,
 		})
-		expect(result).toEqual({ files: [], synced: true })
+		expect(result).toEqual({ files: [], notices: [], synced: true })
 	})
 
 	it("recreates the FTS triggers when Atlas rewrites their content table", async () => {

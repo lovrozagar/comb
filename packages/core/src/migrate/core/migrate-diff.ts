@@ -23,7 +23,7 @@ import { join } from "node:path"
 import type { Dialect } from "../types.ts"
 import { freshVersion, hashDir, nextVersion, sqlFiles, verifySum } from "./atlas-dir.ts"
 import { applySqliteMigrationTransforms, sqliteDevUrl } from "./atlas-env.ts"
-import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { atlasNotices, explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { asSql, type FtsState, ftsDelta, separate } from "./fts-migration.ts"
 import { splitEnumValues } from "./pg-enum-split.ts"
 import { extractSchema } from "./schema.ts"
@@ -46,10 +46,16 @@ export type MigrateDiffOptions = {
 
 export type MigrateDiffResult = {
 	files: string[]
+	/** what Atlas said on stderr as it succeeded, a line each, for the caller to warn with */
+	notices: string[]
 	synced: boolean
 }
 
-type Atlas = { dialect: Dialect; exec: Run; target?: PgTarget | undefined }
+/** A diff's own result, before the notices Atlas gave along the way join it */
+type Diffed = Omit<MigrateDiffResult, "notices">
+
+/** How a diff runs Atlas, and what Atlas said as it succeeded */
+type Atlas = { dialect: Dialect; exec: Run; notices: string[]; target?: PgTarget | undefined }
 
 /** A migration to diff: its name and the schema it should reach */
 type Target = { name: string; schema: string }
@@ -96,6 +102,7 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 					})
 		/* in sync, Atlas exits 0, says so on stdout and writes no file: the empty list below */
 		if (result.code !== 0) throw new Error(`atlas migrate diff failed: ${result.stderr || result.stdout.trim()}`)
+		atlas.notices.push(...atlasNotices(result.stderr))
 		/* sorted: readdir order is the filesystem's (APFS returns no fixed order), and the first file carries the migration */
 		const added = readdirSync(dir)
 			.filter((file) => !before.has(file) && file !== "atlas.sum")
@@ -107,7 +114,7 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 }
 
 /** The plain-only diff on a stripped copy of the history, and the FTS delta comb adds to it */
-function diffWithFts(atlas: Atlas, options: MigrateDiffOptions): MigrateDiffResult {
+function diffWithFts(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 	verifySum(atlas.exec, options.migrationsDir)
 	const groups = new Set<string>()
 	const copy = mkdtempSync(join(tmpdir(), "comb-migrate-history-"))
@@ -145,7 +152,7 @@ type Finish = {
 	transform: (sql: string) => string
 }
 
-function finish({ added, atlas, copy, fts, options, plainDiff, transform }: Finish): MigrateDiffResult {
+function finish({ added, atlas, copy, fts, options, plainDiff, transform }: Finish): Diffed {
 	const { migrationName, migrationsDir } = options
 	if (added.length === 0 && fts === "") return { files: [], synced: true }
 	const name = added[0] ?? `${freshVersion(migrationsDir)}_${migrationName}.sql`
@@ -163,7 +170,7 @@ function finish({ added, atlas, copy, fts, options, plainDiff, transform }: Fini
  * keeping its atlas: directives) and diffs it against the target without them; comb wraps the file
  * Atlas writes with those objects' part (pg-objects.ts)
  */
-function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): MigrateDiffResult {
+function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 	const { migrationName, migrationsDir } = options
 	verifySum(atlas.exec, migrationsDir)
 	const copy = mkdtempSync(join(tmpdir(), "comb-migrate-history-"))
@@ -203,8 +210,9 @@ export function generateIncrementalMigration(options: MigrateDiffOptions): Migra
 	if (dialect === "postgres" && target === undefined) {
 		throw new Error("a Postgres diff needs the database's target (devUrl and schema)")
 	}
-	const atlas: Atlas = { dialect, exec, target: dialect === "postgres" ? target : undefined }
+	const atlas: Atlas = { dialect, exec, notices: [], target: dialect === "postgres" ? target : undefined }
 	if (!existsSync(migrationsDir)) mkdirSync(migrationsDir, { recursive: true })
 	if (!existsSync(join(migrationsDir, "atlas.sum"))) hashDir(atlas.exec, migrationsDir)
-	return dialect === "sqlite" ? diffWithFts(atlas, options) : diffPostgres(atlas, options)
+	const diffed = dialect === "sqlite" ? diffWithFts(atlas, options) : diffPostgres(atlas, options)
+	return { ...diffed, notices: atlas.notices }
 }

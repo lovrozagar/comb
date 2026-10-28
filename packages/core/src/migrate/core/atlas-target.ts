@@ -270,10 +270,21 @@ function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: Atla
 	}
 }
 
+/**
+ * What Atlas said on stderr as it succeeded, a line each: comb passes each on as a warning, as Atlas
+ * OSS may say it left part of a schema out of what it compared (plan 14's 5.4)
+ */
+const atlasNotices = (stderr: string): string[] =>
+	stderr
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line !== "")
+
 export {
 	atlasConfig,
 	type AtlasEnv,
 	type AtlasNeeds,
+	atlasNotices,
 	atlasUrls,
 	explainAtlasFailure,
 	NOT_CLEAN,

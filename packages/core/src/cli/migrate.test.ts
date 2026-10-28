@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { Run } from "../migrate/core/process.ts"
+import type { Run, RunResult } from "../migrate/core/process.ts"
 import { fakeAtlas as hashingAtlas, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, ok, projects, writeTables } from "./__fixtures__/io.ts"
 import { help, runCli } from "./run.ts"
@@ -16,7 +16,7 @@ const dirArg = (args: readonly string[]) => (args[args.indexOf("--dir") + 1] as 
  * Atlas as the migrate commands drive it: `migrate hash` writes atlas.sum from the directory's
  * files, `migrate diff` hands the directory it replays to `diff`; drizzle-kit exports SCHEMA.
  */
-function fakeAtlas(diff: (dir: string) => void): Run & { calls: string[][] } {
+function fakeAtlas(diff: (dir: string) => RunResult | undefined | void): Run & { calls: string[][] } {
 	const calls: string[][] = []
 	const run: Run = (cmd, args) => {
 		calls.push([cmd, ...args])
@@ -33,8 +33,7 @@ function fakeAtlas(diff: (dir: string) => void): Run & { calls: string[][] } {
 			)
 			return ok()
 		}
-		diff(dir)
-		return ok()
+		return diff(dir) ?? ok()
 	}
 	return Object.assign(run, { calls })
 }
@@ -144,6 +143,32 @@ describe("comb migrate diff", () => {
 		expect(await runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "atlas-migrations", "20260101000000_init.sql")}`])
 		expect(run.calls.find((call) => call[2] === "diff")?.[3]).toBe("init")
+	})
+})
+
+/* plan 14's 5.4: Atlas OSS leaves out the triggers, functions and procedures a schema holds, and says so on stderr */
+describe("comb migrate diff: what Atlas says as it succeeds", () => {
+	const SKIPPED =
+		"Skipped triggers, functions, stored procedures, and other advanced objects. Atlas Pro includes them in the diff."
+
+	it("is a warning, whether Atlas wrote a migration or found the schema in sync", async () => {
+		const dir = project()
+		const wrote = makeIo(
+			dir,
+			fakeAtlas((replayed) => {
+				writeFileSync(join(replayed, "20260101000000_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n")
+				return { code: 0, stderr: `${SKIPPED}\n`, stdout: "" }
+			}),
+		)
+		expect(await runCli(["migrate", "diff", "core", "init"], wrote)).toBe(0)
+		expect(wrote.errors).toEqual([`Warning: Atlas: ${SKIPPED}`])
+		const synced = makeIo(
+			dir,
+			fakeAtlas(() => ({ code: 0, stderr: SKIPPED, stdout: "" })),
+		)
+		expect(await runCli(["migrate", "diff", "core", "--dry-run"], synced)).toBe(0)
+		expect(synced.outputs).toEqual(["Schema is already in sync — no migration needed"])
+		expect(synced.errors).toEqual([`Warning: Atlas: ${SKIPPED}`])
 	})
 })
 

@@ -102,7 +102,7 @@ describe("migrate diff on Postgres: tables, views and policies", () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
 				expect(diff(dev, POST).files).toHaveLength(1)
-				expect(diff(dev, POST, "again")).toEqual({ files: [], synced: true })
+				expect(diff(dev, POST, "again")).toEqual({ files: [], notices: [], synced: true })
 				const [added] = diff(dev, POST.replace("NOT NULL)", 'NOT NULL, "body" text)'), "body").files
 				expect(readFileSync(added as string, "utf8")).toContain('ADD COLUMN "body" text')
 				await applyAll(url)

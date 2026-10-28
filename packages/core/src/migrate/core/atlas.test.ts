@@ -58,7 +58,7 @@ describe("generateSchemaDiff", () => {
 			return ok("ALTER TABLE `a` ADD COLUMN `b` text;\n")
 		})
 		const result = generateSchemaDiff({ dialect: "sqlite", fromSchema: "FROM", run, toSchema: "TO" })
-		expect(result).toEqual({ diff: "ALTER TABLE `a` ADD COLUMN `b` text;", synced: false })
+		expect(result).toEqual({ diff: "ALTER TABLE `a` ADD COLUMN `b` text;", notices: [], synced: false })
 		expect(seen).toEqual(["FROM", "TO"])
 		const [call] = run.calls
 		expect(call?.cmd).toBe("atlas")
@@ -79,8 +79,18 @@ describe("generateSchemaDiff", () => {
 	})
 
 	it("reports synced schemas", () => {
-		const synced = { diff: null, synced: true }
+		const synced = { diff: null, notices: [], synced: true }
 		expect(diffWith(ok("Schemas are synced, no changes to be made.\n"))).toEqual(synced)
+	})
+
+	/* plan 14's 5.4: Atlas OSS may say on stderr, as it succeeds, that it left part of a schema out */
+	it("returns what Atlas said as it succeeded, a line each", () => {
+		const said = {
+			code: 0,
+			stderr: "Skipped triggers.\n\n  Atlas Pro includes them.\n",
+			stdout: "Schemas are synced, no changes to be made.\n",
+		}
+		expect(diffWith(said).notices).toEqual(["Skipped triggers.", "Atlas Pro includes them."])
 	})
 
 	it("throws atlas's stderr when the diff fails", () => {

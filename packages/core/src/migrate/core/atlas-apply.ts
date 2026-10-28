@@ -204,7 +204,8 @@ function baselineWithAtlas(options: AtlasCommand): string[] {
 		const files = sqlFiles(copy)
 		const latest = files.at(-1)
 		if (latest === undefined) throw new Error("there are no migrations to record")
-		refuseDrift({ exec: options.exec ?? run, target: options.target }, copy)
+		for (const notice of refuseDrift({ exec: options.exec ?? run, target: options.target }, copy))
+			options.print(`Warning: Atlas: ${notice}`)
 		/* the version as Atlas reads the name, the reader status and adoption use (M76, M88) */
 		const set = atlas(options, copy, ["set", versionOf(latest).version])
 		if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)
