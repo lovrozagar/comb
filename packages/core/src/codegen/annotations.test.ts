@@ -120,3 +120,20 @@ describe("parseFieldConstraints: keys that contradict", () => {
 		)
 	})
 })
+
+/* F57: a key may name its relation, as an identifier the generated relations can hold */
+describe("parseFieldConstraints: a key's relation", () => {
+	it("records the name a key gives its relation, and none by default", () => {
+		expect(parseFieldConstraints('c.ref("f", { relation: "owner" }).references(() => user.id)').relation).toBe("owner")
+		expect(parseFieldConstraints('c.ref("f").references(() => user.id)').relation).toBeNull()
+	})
+
+	it("refuses a relation that is no identifier", () => {
+		for (const relation of ["", "has space", "1st"])
+			expect(() =>
+				parseFieldConstraints(`c.ref("f", { relation: ${JSON.stringify(relation)} }).references(() => user.id)`),
+			).toThrow(
+				`/fixture/db.core.tables.ts: fixture.f: relation ${JSON.stringify(relation)} is no name a relation can take`,
+			)
+	})
+})

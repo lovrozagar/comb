@@ -51,16 +51,12 @@ function oneName(sqlColumn: string, refTable: string): string {
  * target's plain `<target>_id`, and `postsBy<Role>`, the role the one side is named by, for every other key. A unique key's way back
  * holds one row, so it is singular (F23).
  */
-function backName(
-	source: TableMeta,
-	fk: { column: string; refTable: string; sqlColumn: string },
-	unique: boolean,
-): string {
+function backName(source: TableMeta, { plain, role }: { plain: boolean; role: string }, unique: boolean): string {
 	const name = toCamelCase(source.varName)
 	const count = unique ? pluralize.singular(name) : pluralize(name)
-	if (roleOf(fk.sqlColumn) === fk.refTable) return count
+	if (plain) return count
 	/* the role the one side is named by, so the two halves of one key agree (F23) */
-	return `${count}By${capitalized(oneName(fk.sqlColumn, fk.refTable))}`
+	return `${count}By${capitalized(role)}`
 }
 
 type OneRelation = { columns: string[]; name: string; refColumns: string[]; refTable: string }
@@ -104,7 +100,7 @@ function settle(table: string, named: Array<Named & { target: { name: string } }
 		 * code already uses when the other is added, so the person picks (F22) */
 		if (columns.has(name))
 			throw new Error(
-				`${table}: the relation ${name} of ${each.place} takes the name of the column ${table}.${name}; rename the column`,
+				`${table}: the relation ${name} of ${each.place} takes the name of the column ${table}.${name}; rename the column, or give the key { relation: "…" }`,
 			)
 		const other = first.get(name)
 		if (other !== undefined)
@@ -131,8 +127,11 @@ function buildGraph(tables: TableMeta[]): Graph {
 			/* no one column names a composite key's role: it is named for its table, as <table>_id is */
 			const sqlColumn = fk.key === undefined ? field.sqlName : `${fk.refTable}_id`
 			const one = { columns, name: "", refColumns, refTable: fk.refTable }
+			/* a key that names its relation takes that name on both sides; else its column's role (F57) */
+			const relation = field.constraints.relation ?? null
+			const role = relation ?? oneName(sqlColumn, fk.refTable)
 			push(graph.ones, table.varName, one)
-			push(named, table.varName, { name: oneName(sqlColumn, fk.refTable), place, target: one })
+			push(named, table.varName, { name: role, place, target: one })
 			const unique = isUnique(table, columns)
 			const back = {
 				name: "",
@@ -142,7 +141,8 @@ function buildGraph(tables: TableMeta[]): Graph {
 				targetColumns: refColumns,
 			}
 			push(graph.manys, fk.refTable, back)
-			push(named, fk.refTable, { name: backName(table, { ...fk, sqlColumn }, unique), place, target: back })
+			const plain = relation === null && roleOf(sqlColumn) === fk.refTable
+			push(named, fk.refTable, { name: backName(table, { plain, role }, unique), place, target: back })
 		}
 	}
 	for (const [table, relations] of named) {

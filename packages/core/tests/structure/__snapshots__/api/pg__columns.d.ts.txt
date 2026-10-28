@@ -47,6 +47,8 @@ type BaseConstraints = {
     nomutate?: boolean;
     /** Field is never read back: generated read DTOs, the meta stamp and the manifest leave it out */
     private?: boolean;
+    /** the name this key's relation takes, where its column's role would take the column's own name (F57) */
+    relation?: string;
     /**
      * This column scopes rows to a tenant.
      *

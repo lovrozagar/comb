@@ -77,7 +77,9 @@ export const post = sqliteTable("post", {
 		expect(() =>
 			relationsOf(`export const user = sqliteTable("user", { id: text("id").primaryKey() })
 export const post = sqliteTable("post", { id: text("id").primaryKey(), rapid: text("rapid").references(() => user.id) })`),
-		).toThrow("post: the relation rapid of post.rapid takes the name of the column post.rapid; rename the column")
+		).toThrow(
+			'post: the relation rapid of post.rapid takes the name of the column post.rapid; rename the column, or give the key { relation: "…" }',
+		)
 	})
 })
 

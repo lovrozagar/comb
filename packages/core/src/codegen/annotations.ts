@@ -24,6 +24,7 @@ const KNOWN = /* @__PURE__ */ new Set([
 	"password",
 	"pattern",
 	"private",
+	"relation",
 	"tenant",
 	"trim",
 	"uppercase",
@@ -44,6 +45,10 @@ export function fieldConstraintsOf(
 	if (unknown !== undefined) throw new Error(`${place}: comb reads no constraint named ${unknown}`)
 	if (constraints["mutable"] === true && constraints["nomutate"] === true)
 		throw new Error(`${place}: mutable and nomutate contradict; declare one`)
+	const relation = constraints["relation"]
+	/* a relation's name is a property of the generated relations, so it is an identifier (F57) */
+	if (relation !== undefined && (typeof relation !== "string" || !/^[A-Za-z_$][\w$]*$/.test(relation)))
+		throw new Error(`${place}: relation ${JSON.stringify(relation)} is no name a relation can take`)
 
 	const autogenerate = filled ? constraints["autogenerate"] !== false : constraints["autogenerate"] === true
 
@@ -61,6 +66,7 @@ export function fieldConstraintsOf(
 		password: constraints["password"] === true,
 		pattern: typeof constraints["pattern"] === "string" ? patternLiteral(constraints["pattern"], place) : null,
 		private: constraints["private"] === true || fieldName.startsWith("_"),
+		relation: typeof relation === "string" ? relation : null,
 		tenant: constraints["tenant"] === true,
 		trim: constraints["trim"] === true,
 		uppercase: constraints["uppercase"] === true,

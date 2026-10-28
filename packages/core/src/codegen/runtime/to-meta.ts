@@ -164,6 +164,8 @@ function fieldOf(column: SnapshotColumn, { file, table, tables }: Build): FieldM
 	const constraints = fieldConstraintsOf(column.comb?.constraints ?? {}, { fieldName: column.key, filled, place })
 	if (constraints.mutable && column.foreignKey === null && kind !== "ref")
 		throw new Error(`${place}: mutable lets a reference move on update, and ${column.key} references nothing`)
+	if (constraints.relation !== null && column.foreignKey === null)
+		throw new Error(`${place}: relation names the relation of a key, and ${column.key} references nothing`)
 	return {
 		...combFactsOf(column),
 		autoIncrement: column.autoIncrement,

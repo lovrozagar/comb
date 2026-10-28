@@ -22,6 +22,8 @@ type FieldConstraintsMeta = {
 	password: boolean
 	pattern: string | null
 	private: boolean
+	/** the name a key's relation takes, where its role would collide (F57); null or absent for its role */
+	relation?: string | null | undefined
 	tenant: boolean
 	trim: boolean
 	uppercase: boolean
