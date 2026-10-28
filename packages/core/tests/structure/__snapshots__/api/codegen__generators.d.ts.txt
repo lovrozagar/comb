@@ -398,9 +398,9 @@ type FieldMeta = {
     jsonSchemaName: string | null;
     /** the names the field's generated schema uses and must import (a c.json schema) */
     schemaImports: ImportRef[];
-    /** the declared length: c.text's max, or drizzle's `length` */
     /** a Postgres array's declared dimensions; 0 or absent for a column of one value (F49) */
     dimensions?: number | undefined;
+    /** the column's own length, drizzle's `length` (a varchar(n), a SQLite text({ length })); a declared max is the constraints' (F65) */
     length: number | null;
     /** Field name as defined in the table schema object */
     name: string;

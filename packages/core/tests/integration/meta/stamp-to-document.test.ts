@@ -90,7 +90,8 @@ describe("entity stamp — bare item schema", () => {
 		expect(json["type"]).toBe("object")
 		expect(Object.keys(json)).toContain(COMB_META_KEY)
 		/* honey reads the root; anything under properties/items would be missed by search: "root" */
-		expect(JSON.stringify(json["properties"])).not.toContain(COMB_META_KEY)
+		/* by the key itself: a property's own rules are x-comb-* keys (F65) */
+		expect(JSON.stringify(json["properties"])).not.toContain(`"${COMB_META_KEY}":`)
 	})
 
 	it("is found by honey's root search at depth 0", () => {

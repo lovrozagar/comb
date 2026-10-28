@@ -86,7 +86,9 @@ describe("generateFieldSchema: what each schema type includes", () => {
 		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe(
 			"z.string().regex(/^\\S{1,48}$/).nullable().optional()",
 		)
-		expect(schema("owner_id", 'c.ref("owner_id")', "read")).toBe("z.string().min(1).max(48).nullable()")
+		expect(schema("owner_id", 'c.ref("owner_id")', "read")).toBe(
+			'z.string().meta({"x-comb-maxLength":48,"x-comb-minLength":1}).nullable()',
+		)
 	})
 })
 
@@ -166,7 +168,7 @@ describe("generateFieldSchema: JSON", () => {
 			generateFieldSchema(fieldOf("e", 'c.text("e", { email: true }, 80).notNull()', { length: 80 }), "read", {
 				imports: imports(),
 			}),
-		).toBe("z.string().max(80).meta(_m.email)")
+		).toBe('z.string().meta({"x-comb-maxLength":80}).meta(_m.email)')
 		expect(schema("u", 'c.text("u", { url: true }).notNull()', "create")).toBe(
 			'z.url().regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" }).meta({ format: "uri" }).meta(_m.url)',
 		)
@@ -181,13 +183,16 @@ describe("generateFieldSchema: JSON", () => {
 			generateFieldSchema(fieldOf("n", 'c.text("n", { min: 2 }, 10).notNull()', { length: 10 }), "read", {
 				imports: imports(),
 			}),
-		).toBe("z.string().min(2).max(10).meta(_m.string)")
+		).toBe('z.string().meta({"x-comb-maxLength":10,"x-comb-minLength":2}).meta(_m.string)')
 	})
 })
 
 describe("generateFieldSchema: ids, typed text and numbers", () => {
 	it("bounds an id-like text column, by helper and never by name", () => {
-		expect(schema("id", 'c.id("usr")', "read")).toContain(".min(1).max(48)")
+		/* read, comb's id length is stated: an imported or older id may not keep to it (F65) */
+		expect(schema("id", 'c.id("usr")', "read")).toContain(
+			'z.string().meta({"x-comb-maxLength":48,"x-comb-minLength":1})',
+		)
 		/* a text column named orgId is text (F10) */
 		expect(schema("orgId", 'c.text("orgId").notNull()', "create")).toBe("z.string().min(1).meta(_m.string)")
 	})
@@ -198,7 +203,7 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 			expect(schema("n", 'c.integer("n").notNull()', type)).toMatch(
 				/^z\.number\(\)\.int\(\)\.min\(Number\.MIN_SAFE_INTEGER\)\.max\(Number\.MAX_SAFE_INTEGER\)/,
 			)
-		expect(schema("n", 'c.integer("n", { min: 5 }).notNull()', "read")).toContain("z.number().int().min(5)")
+		expect(schema("n", 'c.integer("n", { min: 5 }).notNull()', "create")).toContain("z.number().int().min(5)")
 		expect(schema("n", "c.serialId()", "read")).toBe(
 			"z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER).meta(_m.serialId)",
 		)
@@ -219,18 +224,25 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		)
 	})
 
-	it("carries every declared numeric bound (REVIEW 3.2)", () => {
-		expect(schema("t", 'c.integer("t", { min: -40, max: 60 }).notNull()', "read")).toMatch(
+	it("enforces every declared numeric bound on a write and states it on a read (REVIEW 3.2, F65)", () => {
+		expect(schema("t", 'c.integer("t", { min: -40, max: 60 }).notNull()', "create")).toMatch(
 			/^z\.number\(\)\.int\(\)\.min\(-40\)\.max\(60\)/,
+		)
+		expect(schema("t", 'c.integer("t", { min: -40, max: 60 }).notNull()', "read")).toMatch(
+			/^z\.number\(\)\.int\(\)\.min\(Number\.MIN_SAFE_INTEGER\)\.max\(Number\.MAX_SAFE_INTEGER\)\.meta\(\{"x-comb-maximum":60,"x-comb-minimum":-40\}\)/,
 		)
 		expect(schema("c", 'c.integer("c", { max: 9 }).notNull()', "create")).toMatch(
 			/^z\.number\(\)\.int\(\)\.min\(Number\.MIN_SAFE_INTEGER\)\.max\(9\)/,
 		)
-		expect(schema("l", 'c.real("l", { min: -90.5, max: 90.5 }).notNull()', "read")).toMatch(
+		expect(schema("l", 'c.real("l", { min: -90.5, max: 90.5 }).notNull()', "create")).toMatch(
 			/^z\.number\(\)\.min\(-90\.5\)\.max\(90\.5\)/,
 		)
-		expect(schema("d", 'c.real("d", { min: -0.25 }).notNull()', "read")).toMatch(/^z\.number\(\)\.min\(-0\.25\)\.meta/)
-		expect(schema("r", 'c.real("r", { max: 1.5 }).notNull()', "read")).toMatch(/^z\.number\(\)\.max\(1\.5\)\.meta/)
+		expect(schema("d", 'c.real("d", { min: -0.25 }).notNull()', "create")).toMatch(
+			/^z\.number\(\)\.min\(-0\.25\)\.meta/,
+		)
+		expect(schema("r", 'c.real("r", { max: 1.5 }).notNull()', "read")).toMatch(
+			/^z\.number\(\)\.meta\(\{"x-comb-maximum":1\.5\}\)\.meta/,
+		)
 	})
 })
 
@@ -258,7 +270,7 @@ describe("generateFieldSchema: what the 0.8.0 codegen review found (F1, F2, F15,
 			'z.string().min(10).meta({ examples: ["a1b2c3d4e5"] }).nullable().optional()',
 		)
 		expect(schema("externalId", 'c.text("external_id", { max: 60 })', "read")).toBe(
-			"z.string().max(60).meta(_m.string).nullable()",
+			'z.string().meta({"x-comb-maxLength":60}).meta(_m.string).nullable()',
 		)
 	})
 })
@@ -356,7 +368,7 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 		const country =
 			'c.ref("country_code", { max: 64, pattern: "/^[A-Z-]+$/" }).notNull().references(() => country.code)'
 		expect(of("countryCode", country, "create")).toBe("z.string().min(1).max(64).regex(/^[A-Z-]+$/)")
-		expect(of("countryCode", country, "read")).toBe("z.string().max(64)")
+		expect(of("countryCode", country, "read")).toBe('z.string().meta({"x-comb-maxLength":64})')
 		expect(of("ownerId", 'c.ref("owner_id").notNull().references(() => user.id)', "create")).toBe(
 			"z.string().regex(/^\\S{1,48}$/)",
 		)
@@ -366,13 +378,17 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 	it("gives a c.ref that names no target the id rules, unless it declares its own", () => {
 		const write = of("userId", 'c.ref("user_id").notNull()', "create")
 		expect(write).toBe("z.string().regex(/^\\S{1,48}$/)")
-		expect(of("userId", 'c.ref("user_id").notNull()', "read")).toBe("z.string().min(1).max(48)")
+		expect(of("userId", 'c.ref("user_id").notNull()', "read")).toBe(
+			'z.string().meta({"x-comb-maxLength":48,"x-comb-minLength":1})',
+		)
 		const parse = new Function("z", `return ${write}`)(z) as z.ZodString
 		expect(parse.safeParse("u".repeat(48)).success).toBe(true)
 		expect(parse.safeParse("u".repeat(49)).success).toBe(false)
 		expect(parse.safeParse("usr 01").success).toBe(false)
 		expect(of("userId", 'c.ref("user_id", { max: 20 }).notNull()', "create")).toBe("z.string().min(1).max(20)")
-		expect(of("userId", 'c.ref("user_id", { max: 20 }).notNull()', "read")).toBe("z.string().max(20)")
+		expect(of("userId", 'c.ref("user_id", { max: 20 }).notNull()', "read")).toBe(
+			'z.string().meta({"x-comb-maxLength":20})',
+		)
 	})
 
 	it("refuses U+0000 in a Postgres c.ref, as in its text", () => {

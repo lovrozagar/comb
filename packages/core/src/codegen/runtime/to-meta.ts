@@ -182,7 +182,7 @@ function fieldOf(column: SnapshotColumn, { file, table, tables }: Build): FieldM
 		isNotNull: column.notNull,
 		isPrimaryKey: column.primary,
 		dimensions: column.dimensions,
-		length: typeof constraints.max === "number" ? constraints.max : column.length,
+		length: column.length,
 		name: column.key,
 		onUpdate: column.onUpdate,
 		sqlName: column.sqlName,
