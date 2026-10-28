@@ -313,7 +313,8 @@ describe("ShardRouter — allocation races and cache priming", () => {
 		/* KV write is handed to waitUntil, not awaited inline */
 		expect(calls.length).toBeGreaterThan(0)
 		await Promise.all(calls)
-		expect(await d.kv.get("shard:org-5", "json")).toEqual(mapping)
+		/* KV keeps when the fill read the core table, which the isolate that invalidates reads (U33) */
+		expect(await d.kv.get("shard:org-5", "json")).toEqual({ ...mapping, readAt: expect.any(Number) })
 		/* the LRU now answers without a new cache write */
 		await router.resolve("org-5", d, ctx)
 		expect(calls).toHaveLength(1)
@@ -482,7 +483,8 @@ describe("ShardRouter — an invalidate while a read is in flight (E-N2)", () =>
 		const resolving = router.resolve("org-1", { coreDb: mockD1(), kv }, ctx)
 		await router.invalidate("org-1", kv)
 		release(kvMapping)
-		expect(await resolving).toEqual(kvMapping)
+		/* an entry read across this isolate's own invalidate is no hit: the core read finds nothing, and nothing is cached */
+		expect(await resolving).toBeUndefined()
 		expect(await router.resolve("org-1", { coreDb: mockD1([]), kv: mockKV() }, ctx)).toBeUndefined()
 	})
 })

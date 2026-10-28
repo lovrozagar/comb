@@ -77,3 +77,21 @@ describe("ShardCache", () => {
 		expect(JSON.parse(store.store.get("shard:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
 	})
 })
+
+/* G2 of plan 14 (U33): the isolate that invalidated an org trusts no KV entry read from the core table before it */
+describe("ShardCache.readKv", () => {
+	it("is a miss for an entry read at or before this isolate's invalidate, and a hit for one read after", async () => {
+		const [cache, kv] = [cacheOf(), memoryKv()]
+		const at = (readAt: number) => kv.store.set("shard:org-1", JSON.stringify({ ...mapping(1, 10), readAt }))
+		at(1)
+		expect(await cache.readKv("org-1", kv)).toEqual(mapping(1, 10))
+		await cache.invalidate("org-1", kv)
+		const invalidatedAt = Date.now()
+		at(invalidatedAt - 1)
+		expect(await cache.readKv("org-1", kv)).toBeNull()
+		at(invalidatedAt + 1)
+		expect(await cache.readKv("org-1", kv)).toEqual(mapping(1, 10))
+		kv.store.set("shard:org-1", JSON.stringify(mapping(1, 10)))
+		expect(await cache.readKv("org-1", kv)).toBeNull()
+	})
+})

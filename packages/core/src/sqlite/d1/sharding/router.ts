@@ -1,6 +1,5 @@
 import { type CacheTargets, ShardCache } from "./cache.ts"
 import { routerSettings } from "./config.ts"
-import { kvRead } from "./kv-cache.ts"
 import type { D1Database } from "@cloudflare/workers-types"
 import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
@@ -90,10 +89,11 @@ class ShardRouter {
 
 		/* L2: KV */
 		const generation = this.cache.generationOf(orgId)
-		const kvValue = await kvRead(deps.kv, orgId, this.log)
+		/* readKv answers only a mapping read from the core table after every invalidate here, one during its read included */
+		const kvValue = await this.cache.readKv(orgId, deps.kv)
 		if (kvValue) {
 			this.log("shard-router.hit", { orgId, tier: "kv" })
-			if (this.cache.generationOf(orgId) === generation) this.cache.lru.set(orgId, kvValue)
+			this.cache.lru.set(orgId, kvValue)
 			return kvValue
 		}
 

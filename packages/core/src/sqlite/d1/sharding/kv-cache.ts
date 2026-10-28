@@ -30,8 +30,11 @@ async function guarded<T>(
 	}
 }
 
+/** A mapping as KV holds it, with when the fill that wrote it read the core table; none before 0.14 */
+type Stored = ShardMapping & { readAt?: number }
+
 /** What KV holds for an org: its mapping, or the tombstone an invalidate left */
-type Held = ShardMapping | { invalidatedAt: number }
+type Held = Stored | { invalidatedAt: number }
 
 const isTombstone = (held: Held): held is { invalidatedAt: number } => Object.hasOwn(held, "invalidatedAt")
 
@@ -39,10 +42,19 @@ const isTombstone = (held: Held): held is { invalidatedAt: number } => Object.ha
 const kvHeld = (kv: ShardKv, orgId: string, log: LogFn): Promise<Held | null> =>
 	guarded({ log, op: "get", orgId }, async () => (await kv.get(kvKey(orgId), "json")) as Held | null, null)
 
-/** The org's mapping in KV; null when KV holds none, holds its tombstone, or fails */
-async function kvRead(kv: ShardKv, orgId: string, log: LogFn): Promise<ShardMapping | null> {
+/**
+ * The org's mapping in KV, and when the fill that wrote it read the core table (-Infinity for one a
+ * fill before 0.14 wrote, which said not); null when KV holds none, holds its tombstone, or fails
+ */
+async function kvRead(
+	kv: ShardKv,
+	orgId: string,
+	log: LogFn,
+): Promise<{ mapping: ShardMapping; readAt: number } | null> {
 	const held = await kvHeld(kv, orgId, log)
-	return held === null || isTombstone(held) ? null : held
+	if (held === null || isTombstone(held)) return null
+	const { readAt, ...mapping } = held
+	return { mapping, readAt: readAt ?? Number.NEGATIVE_INFINITY }
 }
 
 /** Leave the org's tombstone in KV for `ttlSeconds`, a failure logged */
@@ -76,7 +88,7 @@ async function putUnlessNewer(
 	if (!current()) return
 	await guarded(
 		{ log, op: "put", orgId: mapping.orgId },
-		() => kv.put(kvKey(mapping.orgId), JSON.stringify(mapping), { expirationTtl: ttlSeconds }),
+		() => kv.put(kvKey(mapping.orgId), JSON.stringify({ ...mapping, readAt }), { expirationTtl: ttlSeconds }),
 		undefined,
 	)
 }

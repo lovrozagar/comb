@@ -23,6 +23,12 @@ class ShardCache {
 	private readonly revalidating = new Map<string, Promise<void>>()
 	/** How many times each org was invalidated in this isolate */
 	private readonly generations = new Map<string, number>()
+	/**
+	 * When this isolate last invalidated each org, for the KV TTL: a KV entry a fill in any isolate
+	 * read from the core table at or before then is a miss here, as KV has no compare-and-set to stop
+	 * another isolate's fill landing over the invalidation
+	 */
+	private readonly invalidated: LruCache<string, number>
 
 	constructor(config: ShardRouterConfig, { kvTtlSeconds, log }: { kvTtlSeconds: number; log: LogFn }) {
 		this.kvTtlSeconds = kvTtlSeconds
@@ -34,6 +40,15 @@ class ShardCache {
 			ttlMs: config.lruTtlMs ?? DEFAULTS.lruTtlMs,
 		})
 		this.misses = new LruCache<string, true>({ maxSize, ttlMs: config.missTtlMs ?? DEFAULTS.missTtlMs })
+		this.invalidated = new LruCache<string, number>({ maxSize, ttlMs: kvTtlSeconds * 1000 })
+	}
+
+	/** The org's mapping in KV, unless a fill read it from the core table at or before this isolate last invalidated it */
+	async readKv(orgId: string, kv: ShardKv): Promise<ShardMapping | null> {
+		const held = await kvRead(kv, orgId, this.log)
+		if (held === null) return null
+		const invalidatedAt = this.invalidated.get(orgId)
+		return invalidatedAt !== undefined && held.readAt <= invalidatedAt ? null : held.mapping
 	}
 
 	generationOf(orgId: string): number {
@@ -55,6 +70,7 @@ class ShardCache {
 		this.generations.set(orgId, this.generationOf(orgId) + 1)
 		this.lru.delete(orgId)
 		this.misses.delete(orgId)
+		this.invalidated.set(orgId, Date.now())
 		await kvInvalidate(kv, orgId, { log: this.log, ttlSeconds: this.kvTtlSeconds })
 	}
 
@@ -71,9 +87,10 @@ class ShardCache {
 		const generation = this.generationOf(orgId)
 		const current = () => this.generationOf(orgId) === generation
 		try {
-			const kvValue = await kvRead(deps.kv, orgId, this.log)
+			/* readKv answers only a mapping read from the core table after every invalidate here, one during its read included */
+			const kvValue = await this.readKv(orgId, deps.kv)
 			if (kvValue) {
-				if (current()) this.lru.set(orgId, kvValue)
+				this.lru.set(orgId, kvValue)
 				return
 			}
 			const readAt = Date.now()

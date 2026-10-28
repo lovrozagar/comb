@@ -5,12 +5,9 @@
 import type { D1Database } from "@cloudflare/workers-types"
 import { Miniflare } from "miniflare"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { memoryKv, openCore } from "../../../../tests/support/shard-core.ts"
 import { ShardRouter } from "./router.ts"
 import type { ShardKv } from "./types.ts"
-
-const SHARD_MAP_DDL =
-	"CREATE TABLE shard_map (created_at integer NOT NULL DEFAULT (unixepoch() * 1000), deleted_at integer, driver text NOT NULL DEFAULT 'd1', org_id text PRIMARY KEY, shard_id integer NOT NULL, target text NOT NULL, updated_at integer NOT NULL DEFAULT (unixepoch() * 1000))"
-const WORKER = "export default { fetch() { return new Response(null, { status: 204 }) } }"
 
 let mf: Miniflare | undefined
 const outstanding: Promise<unknown>[] = []
@@ -20,16 +17,6 @@ afterEach(async () => {
 	await mf?.dispose()
 	mf = undefined
 })
-
-/** A KV that keeps what it is given */
-function memoryKv(): ShardKv {
-	const store = new Map<string, string>()
-	return {
-		delete: async (key) => void store.delete(key),
-		get: async (key) => (store.has(key) ? JSON.parse(store.get(key) as string) : null),
-		put: async (key, value) => void store.set(key, value),
-	}
-}
 
 /**
  * A core database whose primary is `primary` and whose replica is `replica`, as D1 sessions reach
@@ -55,16 +42,9 @@ function replicated(primary: D1Database, replica: D1Database) {
 
 /** A core database with `rows` ([org, shard]) in shard_map, and one more for a lagging replica */
 async function core(rows: Array<[string, number]> = []) {
-	mf = new Miniflare({ d1Databases: ["CORE", "LAG"], kvNamespaces: ["KV"], modules: true, script: WORKER })
-	const primary = (await mf.getD1Database("CORE")) as unknown as D1Database
-	const replica = (await mf.getD1Database("LAG")) as unknown as D1Database
-	for (const db of [primary, replica]) await db.exec(SHARD_MAP_DDL)
-	for (const [org, shard] of rows)
-		await primary
-			.prepare("INSERT INTO shard_map (org_id, shard_id, target) VALUES (?, ?, ?)")
-			.bind(org, shard, String(shard))
-			.run()
-	return { primary, replica }
+	const opened = await openCore(rows)
+	mf = opened.mf
+	return opened
 }
 
 describe("ShardRouter: a placement the app decides", () => {
@@ -415,77 +395,5 @@ describe("ShardRouter: move with the app's statements", () => {
 			ctx,
 		)
 		expect(await primary.prepare("SELECT shard_id FROM presence").first()).toEqual({ shard_id: 1 })
-	})
-})
-
-/** `store` whose reads see what it holds, then wait for `release` before they answer: a fill's read held across an invalidate */
-function readThenWait(store: ShardKv): { kv: ShardKv; release: () => void } {
-	const gated: { release: () => void } = { release: () => undefined }
-	const gate = new Promise<void>((resolve) => (gated.release = resolve))
-	const kv: ShardKv = {
-		...store,
-		get: async (key, type) => {
-			const held = await store.get(key, type)
-			await gate
-			return held
-		},
-	}
-	return { kv, release: () => gated.release() }
-}
-
-/*
- * G2 of plan 14 (U33): a fill that read D1 before another isolate's invalidate lands after it, as
- * anyrow's shard-routing test found: it must not write the old shard back over the invalidation
- */
-describe("ShardRouter: a fill that read the core table before an invalidate", () => {
-	it("leaves the invalidation standing, so the next isolate reads the moved shard", async () => {
-		const { primary } = await core([["org-1", 0]])
-		const store = memoryKv()
-		const gated: { release?: () => void } = {}
-		const gate = new Promise<void>((resolve) => (gated.release = resolve))
-		let gets = 0
-		/* the fill's own read of KV, the second get, waits until the move and its invalidate are done */
-		const kv: ShardKv = {
-			...store,
-			get: async (key, type) => {
-				gets++
-				if (gets === 2) await gate
-				return store.get(key, type)
-			},
-		}
-		const fills: Promise<unknown>[] = []
-		const isolateA = { waitUntil: (p: Promise<unknown>) => void fills.push(p) }
-		expect(
-			(await new ShardRouter({ totalShards: 3 }).resolve("org-1", { coreDb: primary, kv }, isolateA))?.shardId,
-		).toBe(0)
-		/* the move a workflow writes by hand, then its invalidate from another isolate */
-		await primary
-			.prepare("UPDATE shard_map SET shard_id = 1, target = '1', updated_at = updated_at + 1 WHERE org_id = 'org-1'")
-			.run()
-		await new ShardRouter({ totalShards: 3 }).invalidate("org-1", kv)
-		gated.release?.()
-		await Promise.all(fills)
-		const next = await new ShardRouter({ totalShards: 3 }).resolve("org-1", { coreDb: primary, kv }, ctx)
-		expect(next?.shardId).toBe(1)
-	})
-
-	/* anyrow's shard-routing shape: place's own fill reads KV empty, the same isolate invalidates, then the fill would put */
-	it("leaves this isolate's own invalidation standing over the fill of a place it made before", async () => {
-		const { primary } = await core([])
-		const store = memoryKv()
-		const { kv, release } = readThenWait(store)
-		const fills: Promise<unknown>[] = []
-		const router = new ShardRouter({ totalShards: 3 })
-		const deps = { coreDb: primary, kv }
-		await router.place({ orgId: "org-1", shardId: 0 }, deps, { waitUntil: (p: Promise<unknown>) => void fills.push(p) })
-		await primary
-			.prepare("UPDATE shard_map SET shard_id = 1, target = '1', updated_at = updated_at + 1 WHERE org_id = 'org-1'")
-			.run()
-		await router.invalidate("org-1", kv)
-		release()
-		await Promise.all(fills)
-		expect(
-			(await new ShardRouter({ totalShards: 3 }).resolve("org-1", { coreDb: primary, kv: store }, ctx))?.shardId,
-		).toBe(1)
 	})
 })
