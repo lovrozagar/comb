@@ -78,3 +78,21 @@ expectTypeOf<keyof ListQueryOutput<"created_at">>().toEqualTypeOf<
 expectTypeOf<z.output<ReturnType<typeof createListQuerySchema<Record<string, never>, ["created_at"]>>>>().toMatchTypeOf<
 	ListQueryOutput<"created_at">
 >()
+
+/*
+ * U29's type: a parsed object built by hand, as a handler that checks its own filter builds it,
+ * compiles without `pageBounded`, which absent means checked against the default maxPage
+ */
+const handBuilt: ListQueryOutput = {
+	cursor: undefined,
+	filterAst: null,
+	lang: undefined,
+	limit: 20,
+	page: 1,
+	parsedFields: null,
+	parsedSort: [],
+	q: undefined,
+	sortOrderBy: {},
+	validated: true,
+}
+void handBuilt
