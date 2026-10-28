@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import * as z from "zod"
 import { parseField } from "../../__fixtures__/runtime.ts"
 import type { ImportsMeta } from "../../analyzer-types.ts"
 import type { SchemaType } from "./dto-types.ts"
@@ -28,6 +29,23 @@ describe("pgWriteRule: a plain Postgres column's write rule by its data type (F5
 		expect(rule('time("v")')).toBe("z.iso.time()")
 		expect(rule('time("v", { withTimezone: true })')).toMatch(/^z\.string\(\)\.regex\(.*\(\?:Z\|\[\+-\]/)
 		expect(rule('text("v")')).toBeUndefined()
+	})
+
+	/* the shapes the Postgres suite leaves out, evaluated as the generated DTO evaluates them */
+	it("bounds a numeric by its own precision and scale, a fraction-only one at 0 before the point", () => {
+		const check = (source: string) => new Function("z", `return ${rule(source)}`)(z) as z.ZodType
+		const fractionOnly = check('numeric("v", { precision: 2, scale: 2 })')
+		expect(["0.99", "-0.5", "0", ".5", "1.0", "0.123"].map((v) => fractionOnly.safeParse(v).success)).toEqual([
+			true,
+			true,
+			true,
+			false,
+			false,
+			false,
+		])
+		expect(rule('numeric("v", { mode: "number" })')).toBeUndefined()
+		expect(check('numeric("v", { mode: "number", precision: 3 })').safeParse(999.4).success).toBe(true)
+		expect(check('numeric("v", { mode: "number", precision: 3 })').safeParse(999.5).success).toBe(false)
 	})
 
 	it("is the create and update DTOs' rule, and a read keeps the plain type", () => {

@@ -5,6 +5,7 @@
  * the DTO never takes what Postgres refuses, and refuses what Postgres takes only for a spelling
  * the 0.14 changelog lists. A read DTO keeps the plain type, as a read never refuses a stored row.
  */
+import type pg from "pg"
 import type * as z from "zod"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { cleanGeneratedDtos, generatedDtos } from "../support/dtos.ts"
@@ -20,11 +21,18 @@ const COLUMNS = `{
 	tz: timestamp("tz", { mode: "string", withTimezone: true }),
 	t: time("t"),
 	tt: time("tt", { withTimezone: true }),
+	n52: numeric("n52", { precision: 5, scale: 2 }),
+	n3: numeric("n3", { precision: 3 }),
+	nn: numeric("nn"),
+	nr: numeric("nr", { mode: "number", precision: 5, scale: 2 }),
+	b: bigint("b", { mode: "string" }),
+	r: real("r"),
 }`
-const DDL = "CREATE TEMP TABLE kinds (id text PRIMARY KEY, d date, ts timestamp, tz timestamptz, t time, tt timetz)"
+const DDL =
+	"CREATE TEMP TABLE kinds (id text PRIMARY KEY, d date, ts timestamp, tz timestamptz, t time, tt timetz, n52 numeric(5,2), n3 numeric(3), nn numeric, nr numeric(5,2), b bigint, r real)"
 
 /** [column, value, whether the write DTO takes it, whether Postgres does] */
-type Case = [column: string, value: string, dto: boolean, pg: boolean]
+type Case = [column: string, value: number | string, dto: boolean, pg: boolean]
 
 const CASES: Case[] = [
 	["d", "2024-02-29", true, true],
@@ -53,13 +61,60 @@ const CASES: Case[] = [
 	["tt", "10:00Z", true, true],
 	["tt", "10:00:00+02:30", true, true],
 	["tt", "10:61:00+02", false, false],
+	["n52", "123.45", true, true],
+	["n52", "-999.99", true, true],
+	["n52", "0012.5", true, true],
+	["n52", "1234.5", false, false],
+	/* Postgres rounds the fraction first, and 999.995 rounds to 1000.00, past numeric(5,2): a 22003 */
+	["n52", "999.995", false, false],
+	["n52", "abc", false, false],
+	/* stricter than Postgres, listed in the 0.14 changelog: a fraction it would round, an exponent, NaN */
+	["n52", "1.234", false, true],
+	["n52", "1e2", false, true],
+	["n52", "NaN", false, true],
+	["n3", "999", true, true],
+	["n3", "1000", false, false],
+	["n3", "1.5", false, true],
+	["nn", "123456789012345678901234567890.123", true, true],
+	["nn", "-0.5", true, true],
+	["nn", "1.5e3", false, true],
+	["nr", 999.99, true, true],
+	["nr", -999.994, true, true],
+	["nr", 999.995, false, false],
+	["nr", 1000, false, false],
+	["b", "9223372036854775807", true, true],
+	["b", "-9223372036854775808", true, true],
+	["b", "9223372036854775808", false, false],
+	["b", "-9223372036854775809", false, false],
+	["b", "12.5", false, false],
+	["r", 3.4028235e38, true, true],
+	["r", -3.4028235e38, true, true],
+	["r", 3.5e38, false, false],
+	["r", 0, true, true],
+	/* real refuses what rounds to zero: at or below half the smallest float4, 2^-150 */
+	["r", 1e-50, false, false],
+	["r", 7.006492321624085e-46, false, false],
+	["r", 7.006492321624087e-46, true, true],
+	["r", 1e-45, true, true],
+	["r", -1e-45, true, true],
 ]
+
+/** Whether Postgres stores `value` in `column` */
+async function stored(client: pg.Client, [column, value]: [string, number | string]): Promise<boolean> {
+	try {
+		await client.query(`INSERT INTO kinds (id, ${column}) VALUES ('k', $1)`, [value])
+		return true
+	} catch {
+		// reason: the probe asks whether Postgres refuses the value; a refusal is the answer, not a failure
+		return false
+	}
+}
 
 /** The kinds table's generated create and read DTOs */
 async function kindsDtos(): Promise<{ create: z.ZodObject; read: z.ZodObject }> {
 	const dtos = await generatedDtos(
 		"f50",
-		`import { date, text, time, timestamp } from "drizzle-orm/pg-core"\nexport const kinds = pgTable("kinds", ${COLUMNS})`,
+		`import { bigint, date, numeric, real, text, time, timestamp } from "drizzle-orm/pg-core"\nexport const kinds = pgTable("kinds", ${COLUMNS})`,
 		{ dialect: "postgres" },
 	)
 	return {
@@ -81,20 +136,9 @@ describe("a plain Postgres column's write DTO, by its data type (F50)", () => {
 		await sessions.pg().query(DDL)
 	})
 
-	/** Whether Postgres stores `value` in `column` */
-	const stored = async (column: string, value: string) => {
-		try {
-			await sessions.pg().query(`INSERT INTO kinds (id, ${column}) VALUES ('k', $1)`, [value])
-			return true
-		} catch {
-			// reason: the probe asks whether Postgres refuses the value; a refusal is the answer, not a failure
-			return false
-		}
-	}
-
 	it.each(CASES)("%s %j: the DTO takes it %s, Postgres %s", async (...[column, value, dto, pg]: Case) => {
 		expect(create.safeParse({ id: "k", [column]: value }).success).toBe(dto)
-		expect(await stored(column, value)).toBe(pg)
+		expect(await stored(sessions.pg(), [column, value])).toBe(pg)
 	})
 
 	/* why each refuses what Postgres takes: the instant a timestamp or a session zone would lose */
@@ -119,11 +163,15 @@ describe("a plain Postgres column's write DTO, by its data type (F50)", () => {
 	it("reads back whatever Postgres stores, its infinities and its own spellings included", async () => {
 		await sessions
 			.pg()
-			.query("INSERT INTO kinds VALUES ('k', 'infinity', 'infinity', '-infinity', '24:00', '24:00+00')")
+			.query(
+				"INSERT INTO kinds VALUES ('k', 'infinity', 'infinity', '-infinity', '24:00', '24:00+00', 'NaN', 7, 'Infinity', 1.5, 1, 1e-45)",
+			)
 		/* as text, as drizzle's string mode reads each of them */
 		const { rows } = await sessions
 			.pg()
-			.query("SELECT id, d::text AS d, ts::text AS ts, tz::text AS tz, t::text AS t, tt::text AS tt FROM kinds")
+			.query(
+				"SELECT id, d::text AS d, ts::text AS ts, tz::text AS tz, t::text AS t, tt::text AS tt, n52::text AS n52, n3::text AS n3, nn::text AS nn, nr::float8 AS nr, b::text AS b, r FROM kinds",
+			)
 		expect(read.safeParse(rows[0]).success).toBe(true)
 	})
 })

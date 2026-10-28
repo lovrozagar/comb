@@ -19,10 +19,57 @@ const TIMESTAMP =
 	'z.iso.datetime({ local: true }).regex(/[^Zz]$/, { message: "Must be a local date-time, with no offset or Z, which timestamp would discard" })'
 const TIMESTAMPTZ = "z.iso.datetime({ offset: true })"
 
+/** A numeric's declared precision and scale, from drizzle's `numeric(p, s)`; null when it declares none */
+function precisionOf(sqlType: string): { precision: number; scale: number } | null {
+	const declared = /^numeric\((\d+)(?:, ?(\d+))?\)/.exec(sqlType)
+	return declared === null ? null : { precision: Number(declared[1]), scale: Number(declared[2] ?? 0) }
+}
+
+/**
+ * A numeric as text: its digits, with no more before the point than precision less scale and no
+ * more after it than scale. Postgres rounds a longer fraction first, which may carry it past the
+ * precision (999.995 into numeric(5,2) is a 22003), so the DTO takes none
+ */
+function numericText(sqlType: string): string {
+	const declared = precisionOf(sqlType)
+	if (declared === null) return "z.string().regex(/^-?\\d+(?:\\.\\d+)?$/)"
+	const { precision, scale } = declared
+	const whole = precision - scale === 0 ? "0" : `\\d{1,${precision - scale}}`
+	const fraction = scale === 0 ? "" : `(?:\\.\\d{1,${scale}})?`
+	return `z.string().regex(/^-?0*${whole}${fraction}$/, { message: "Must be a number of at most ${precision - scale} digits before the point and ${scale} after it" })`
+}
+
+/**
+ * A numeric read in drizzle's number mode: below 10^(precision - scale) in magnitude by at least
+ * half its last place, so Postgres's rounding keeps it within the precision
+ */
+function numericNumber(sqlType: string): string | undefined {
+	const declared = precisionOf(sqlType)
+	if (declared === null) return undefined
+	const bound = 10 ** (declared.precision - declared.scale) - 5 * 10 ** -(declared.scale + 1)
+	return `z.number().gt(${-bound}).lt(${bound})`
+}
+
+/* a bigint in drizzle's string mode: decimal digits within int8's range, read as a BigInt once
+   they are digits, as zod runs a refine after a failed regex too */
+const INT64_TEXT =
+	'z.string().regex(/^-?\\d+$/).refine((val) => !/^-?\\d+$/.test(val) || (BigInt(val) >= BigInt("-9223372036854775808") && BigInt(val) <= BigInt("9223372036854775807")), { message: "Must be within bigint\'s range, -2^63 to 2^63 - 1" })'
+
+/*
+ * float4 holds magnitudes up to 3.4028235e38, and refuses a value that rounds to zero: at or below
+ * half its smallest subnormal, 2^-150 (1e-45 rounds up to 1.4e-45 and is taken; 1e-50 is not)
+ */
+const REAL =
+	'z.number().min(-3.4028235e38).max(3.4028235e38).refine((val) => val === 0 || Math.abs(val) > 7.006492321624085e-46, { message: "Must be zero or above 2^-150 in magnitude, which real would round to zero" })'
+
 /* each data type drizzle gives a Postgres column, and its rule */
 // lookup-table: a data type's write rule
-const RULES: Readonly<Record<string, (field: FieldMeta) => string>> = {
+const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> = {
+	number: ({ sqlType }) => numericNumber(sqlType),
+	"number float": () => REAL,
 	"string date": () => "z.iso.date()",
+	"string int64": () => INT64_TEXT,
+	"string numeric": ({ sqlType }) => numericText(sqlType),
 	"string time": ({ sqlType }) => (sqlType.startsWith("time with time zone") ? TIMETZ : "z.iso.time()"),
 	"string timestamp": ({ sqlType }) => (sqlType.includes("with time zone") ? TIMESTAMPTZ : TIMESTAMP),
 }
@@ -30,6 +77,6 @@ const RULES: Readonly<Record<string, (field: FieldMeta) => string>> = {
 /** The write rule of a plain Postgres column of `field`'s data type; undefined when the plain type is its rule */
 export function pgWriteRule(field: FieldMeta): string | undefined {
 	return Object.hasOwn(RULES, field.dataType)
-		? (RULES[field.dataType] as (field: FieldMeta) => string)(field)
+		? (RULES[field.dataType] as (field: FieldMeta) => string | undefined)(field)
 		: undefined
 }
