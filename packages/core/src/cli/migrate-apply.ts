@@ -50,6 +50,10 @@ async function configuredTarget(
 	target: MigrateTarget & { provider: ConnectionProviderConfig },
 ): Promise<Target> {
 	if (args.options["local"]) throw new CliError("--local is for a D1 database; set local: true on its d1 provider")
+	if (args.options["hashes"])
+		throw new CliError(
+			"--hashes is for a D1 database, whose history records names alone: this one records each file's hash as it applies it",
+		)
 	const { createProvider } = await import("../migrate/config.ts")
 	if (option(args, "file") === undefined && !fs.existsSync(target.migrationsDir))
 		throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)

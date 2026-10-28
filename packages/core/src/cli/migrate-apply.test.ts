@@ -106,6 +106,11 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 		const local = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "--local"], local)).toBe(1)
 		expect(local.errors).toEqual(["--local is for a D1 database; set local: true on its d1 provider"])
+		const hashes = io(dir)
+		expect(await runCli(["migrate", "baseline", "core", "--hashes"], hashes)).toBe(1)
+		expect(hashes.errors).toEqual([
+			"--hashes is for a D1 database, whose history records names alone: this one records each file's hash as it applies it",
+		])
 	})
 })
 

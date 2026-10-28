@@ -241,6 +241,24 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
 	return copied
 }
 
+/**
+ * Record the current hash of each applied file comb has none for, as applied before comb recorded
+ * hashes (M1), and print each; returns them. The operator vouches that the files are what was
+ * applied, having checked them against git; the history's own checks run first, so a pre-0.8
+ * record to copy, an applied file edited since, or a name no file has refuses it.
+ */
+async function adoptHashesD1(target: D1Target, read: ReadConfig, print: (line: string) => void): Promise<string[]> {
+	const { unhashed } = await history(read, target, { create: true })
+	const files = filesOf(target.migrationsDir).filter(({ name }) => unhashed.includes(name))
+	if (files.length > 0)
+		await recordHashes(
+			target.conn,
+			files.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), name })),
+		)
+	for (const { name } of files) print(`Hash recorded: ${name}`)
+	return unhashed
+}
+
 /** Print what wrangler's table records as applied, and what is pending, in wrangler's order; returns both */
 async function statusD1(
 	target: D1Target,
@@ -261,4 +279,4 @@ async function statusD1(
 	return { applied, pending }
 }
 
-export { applyD1, baselineD1, statusD1 }
+export { adoptHashesD1, applyD1, baselineD1, statusD1 }

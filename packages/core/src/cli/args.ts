@@ -68,6 +68,12 @@ export const OPTIONS: readonly OptionSpec[] = [
 		long: "--local",
 	},
 	{
+		commands: ["migrate baseline"],
+		description:
+			"On D1: record the current hash of each applied file that has none (check the files against git first)",
+		long: "--hashes",
+	},
+	{
 		commands: ["migrate apply", "migrate check", "migrate status"],
 		description: "Print one JSON object (database, applied, pending, refused) as the only stdout",
 		long: "--json",

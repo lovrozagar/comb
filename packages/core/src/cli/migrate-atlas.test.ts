@@ -116,6 +116,15 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 		}
 	})
 
+	/* M1: only D1's history records names apart from hashes */
+	it("refuses baseline --hashes, as Atlas records each file's hash in its revisions", async () => {
+		const io = makeIo(postgresProject({}), pgAtlas([]))
+		expect(await runCli(["migrate", "baseline", "core", "--hashes"], io)).toBe(1)
+		expect(io.errors).toEqual([
+			"--hashes is for a D1 database, whose history records names alone: Atlas records each file's hash as it applies it",
+		])
+	})
+
 	it("refuses a migrations directory that does not exist", async () => {
 		const dir = postgresProject({})
 		const io = makeIo(dir, pgAtlas([]))

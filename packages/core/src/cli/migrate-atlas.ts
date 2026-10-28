@@ -25,6 +25,10 @@ export async function migratePostgres(
 		if (args.options[flag] !== undefined)
 			throw new CliError(`--${flag} does not apply to a Postgres database: Atlas applies its migrations directory`)
 	}
+	if (args.options["hashes"] !== undefined)
+		throw new CliError(
+			"--hashes is for a D1 database, whose history records names alone: Atlas records each file's hash as it applies it",
+		)
 	if (!fs.existsSync(target.migrationsDir)) throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)
 	for (const warning of pgUrlProblems(target.provider, { url: true }).warnings) io.err(`Warning: ${warning}`)
 	const options = { dir: target.migrationsDir, exec: io.run, print: io.out, target: target.provider }

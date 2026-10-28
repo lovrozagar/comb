@@ -8,7 +8,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { approveMigration } from "../migrate/core/approval.ts"
 import { type D1Target, findWranglerConfig, type ReadConfig } from "../migrate/core/d1-binding.ts"
-import { applyD1, baselineD1, statusD1 } from "../migrate/core/d1-history.ts"
+import { adoptHashesD1, applyD1, baselineD1, statusD1 } from "../migrate/core/d1-history.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import { createD1Provider, wranglerFlags } from "../migrate/drivers/d1.ts"
 import type { D1ProviderConfig } from "../migrate/types.ts"
@@ -82,6 +82,11 @@ export async function migrateD1(request: D1Request, resolved: MigrateTarget | un
 	const read = await wranglerReader()
 	const label = resolved?.label ?? name
 	if (mode === "status") return statusD1(target, read, io.out)
+	if (mode === "baseline" && args.options["hashes"] === true) {
+		const recorded = (await adoptHashesD1(target, read, io.out)).length
+		io.out(`\nBaseline done: ${recorded} hash${recorded === 1 ? "" : "es"} recorded`)
+		return { applied: [], pending: [] }
+	}
 	if (mode === "baseline") {
 		io.out(`\nBaseline done: ${(await baselineD1(target, read, io.out)).length} marked`)
 		return { applied: [], pending: [] }

@@ -251,6 +251,59 @@ describe("migrate apply on D1: comb's history before 0.8", () => {
 	})
 })
 
+/** A database that applied INIT and MORE before comb recorded hashes */
+async function unhashed(): Promise<{ d1: FakeD1; dir: string }> {
+	const dir = worker({ ...INIT, "20260102000000_more.sql": "CREATE TABLE tag (id TEXT);" })
+	const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
+	expect(await runCli(["migrate", "apply", "core", "--local"], makeIo(dir, d1))).toBe(0)
+	d1.db.exec("DELETE FROM _comb_migration_hashes")
+	return { d1, dir }
+}
+
+/*
+ * M1: a file applied before comb recorded hashes has none, so comb cannot tell whether it was edited
+ * since; `baseline --hashes`, run once by an operator who checked the files against git, records them
+ */
+describe("migrate baseline --hashes on D1", () => {
+	it("records the current hash of each applied file that has none, and status then names none", async () => {
+		const { d1, dir } = await unhashed()
+		const before = makeIo(dir, d1)
+		expect(await runCli(["migrate", "status", "core", "--local"], before)).toBe(0)
+		expect(before.outputs.at(-1)).toMatch(/^No hash recorded for 20260101000000_init.sql, 20260102000000_more.sql/)
+		const io = makeIo(dir, d1)
+		expect(await runCli(["migrate", "baseline", "core", "--local", "--hashes"], io)).toBe(0)
+		expect(io.outputs).toEqual([
+			"Hash recorded: 20260101000000_init.sql",
+			"Hash recorded: 20260102000000_more.sql",
+			"\nBaseline done: 2 hashes recorded",
+		])
+		const { generateMigrationHash } = await import("../migrate/core/parse.ts")
+		expect(d1.db.prepare("SELECT name, hash FROM _comb_migration_hashes ORDER BY name").all()).toEqual([
+			{ hash: generateMigrationHash(INIT["20260101000000_init.sql"]), name: "20260101000000_init.sql" },
+			{ hash: generateMigrationHash("CREATE TABLE tag (id TEXT);"), name: "20260102000000_more.sql" },
+		])
+		const after = makeIo(dir, d1)
+		expect(await runCli(["migrate", "status", "core", "--local"], after)).toBe(0)
+		expect(after.outputs).toEqual(["Applied: 20260101000000_init.sql, 20260102000000_more.sql", "Pending: none"])
+		const again = makeIo(dir, d1)
+		expect(await runCli(["migrate", "baseline", "core", "--local", "--hashes"], again)).toBe(0)
+		expect(again.outputs).toEqual(["\nBaseline done: 0 hashes recorded"])
+		d1.db.exec("DELETE FROM _comb_migration_hashes WHERE name = '20260102000000_more.sql'")
+		const one = makeIo(dir, d1)
+		expect(await runCli(["migrate", "baseline", "core", "--local", "--hashes"], one)).toBe(0)
+		expect(one.outputs).toEqual(["Hash recorded: 20260102000000_more.sql", "\nBaseline done: 1 hash recorded"])
+	})
+
+	it("refuses, recording nothing, while the history names a file the directory lacks", async () => {
+		const { d1, dir } = await unhashed()
+		d1.db.exec("INSERT INTO d1_migrations (name) VALUES ('20251231000000_gone.sql')")
+		const io = makeIo(dir, d1)
+		expect(await runCli(["migrate", "baseline", "core", "--local", "--hashes"], io)).toBe(1)
+		expect(io.errors[0]).toMatch(/^1 applied migration matches no file in .+ \(20251231000000_gone.sql\)/)
+		expect(d1.db.prepare("SELECT name FROM _comb_migration_hashes").all()).toEqual([])
+	})
+})
+
 const ENV_ONLY = `name = "probe"
 compatibility_date = "2026-10-01"
 

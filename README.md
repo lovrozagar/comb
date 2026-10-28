@@ -49,6 +49,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.14](#upgrading-to-014)
 - [Upgrading to 0.13.1](#upgrading-to-0131)
 - [Upgrading to 0.13](#upgrading-to-013)
 - [Upgrading to 0.12](#upgrading-to-012)
@@ -211,6 +212,7 @@ OPTIONS:
   --file <path>           Apply this one migration file [migrate apply]
   -y, --yes               Approve cautious changes without asking (not unsafe ones) [migrate apply, migrate check]
   --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline, migrate check, migrate status]
+  --hashes                On D1: record the current hash of each applied file that has none (check the files against git first) [migrate baseline]
   --json                  Print one JSON object (database, applied, pending, refused) as the only stdout [migrate apply, migrate check, migrate status]
   --help                  Show this help
 ```
@@ -577,7 +579,7 @@ A migration's hash is its SQL with comments and layout normalized away, never th
 
 4. On SQLite, libsql and Turso, comb applies each file's statements, as written, and the insert of its hash as one batch, which every provider runs all-or-nothing. A file is applied and recorded, or neither. A transient failure (rate limit, reset connection) retries the whole batch through `withRetry()`. `--file` applies one file on its own, which no sum or order covers.
 
-On D1, wrangler applies. comb reads the binding from the wrangler config with wrangler's own reader, refuses when its `migrations_dir` is not comb's `migrationsDir` or its `migrations_pattern` takes anything but that directory's `.sql` files, orders the files as wrangler does (by leading number, then name, so 8- and 14-digit prefixes mix), checks exactly the files wrangler will apply, and runs `wrangler d1 migrations apply` with stdin closed. wrangler runs each file and its `d1_migrations` row as one batch locally and one query remotely, and takes no backup, so bookmark a production database (Time Travel) before an apply. comb then reads the table back and fails unless it holds exactly the files it checked; a declined prompt or a failed file leaves its row out. `--file` does not apply to D1. A database comb 0.7 migrated records its files in `__drizzle_migrations`; apply refuses it until `comb migrate baseline <db>` copies that record into `d1_migrations` once.
+On D1, wrangler applies. comb reads the binding from the wrangler config with wrangler's own reader, refuses when its `migrations_dir` is not comb's `migrationsDir` or its `migrations_pattern` takes anything but that directory's `.sql` files, orders the files as wrangler does (by leading number, then name, so 8- and 14-digit prefixes mix), checks exactly the files wrangler will apply, and runs `wrangler d1 migrations apply` with stdin closed. wrangler runs each file and its `d1_migrations` row as one batch locally and one query remotely, and takes no backup, so bookmark a production database (Time Travel) before an apply. comb then reads the table back and fails unless it holds exactly the files it checked; a declined prompt or a failed file leaves its row out. `--file` does not apply to D1. A database comb 0.7 migrated records its files in `__drizzle_migrations`; apply refuses it until `comb migrate baseline <db>` copies that record into `d1_migrations` once. wrangler's table records names only, so comb records each applied file's hash beside it and refuses a file applied, then edited. A file applied before comb recorded hashes has none, and `status` names it; once you have checked those files against git, `comb migrate baseline <db> --hashes` records the current hash of each applied file that has none, after the same checks apply runs (it refuses while a name in the history matches no file, or a recorded hash is not its file's). Run it once; `--hashes` is for D1 alone, as every other history records each hash as it applies.
 
 `baseline <db>` records the files as applied without running them, for a database whose schema was set up out of band, after Atlas compares the database's schema with the one the history leaves; any difference is printed and nothing is recorded. On SQLite comb reads the schema from the database itself and compares FTS5 tables by name, since Atlas's dev SQLite has no fts5 module. On D1 it copies only what `__drizzle_migrations` records.
 
@@ -994,6 +996,10 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 `tests/bun/` is separate because it imports `bun:sqlite` and `bun:test`, which vitest cannot load. It replays a full Atlas-shaped drift migration against an in-memory database to prove the SQLite transforms survive a real commit with foreign keys enforced.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
+
+## Upgrading to 0.14
+
+- **D1 files applied before comb recorded hashes:** `comb migrate status <db>` names them (`No hash recorded for …`), and comb cannot tell whether one was edited since. Check those files against git, then run `comb migrate baseline <db> --hashes` once on each D1 database: it records each one's current hash, so a later edit is refused as any other is. It refuses, recording nothing, while the history names a file the directory lacks.
 
 ## Upgrading to 0.13.1
 
