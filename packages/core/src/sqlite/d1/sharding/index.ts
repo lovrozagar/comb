@@ -5,6 +5,7 @@ export type {
 	ShardDriver,
 	ShardKv,
 	ShardMapping,
+	ShardMove,
 	ShardPick,
 	ShardPickInput,
 	ShardPlacement,

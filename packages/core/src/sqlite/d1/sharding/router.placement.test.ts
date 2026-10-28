@@ -378,3 +378,42 @@ describe("ShardRouter: an org id longer than the column", () => {
 		expect((await new ShardRouter({ totalShards: 3 }).resolve(fits, deps, ctx))?.shardId).toBe(1)
 	})
 })
+
+/* R4 of the 0.13.0 consumers review: a move and the app's own writes for it, in one batch */
+describe("ShardRouter: move with the app's statements", () => {
+	const PRESENCE_DDL =
+		"CREATE TABLE presence (org_id text NOT NULL, shard_id integer NOT NULL, UNIQUE (org_id, shard_id))"
+
+	it("writes them in one batch with the mapping, so a failing one leaves the org where it was", async () => {
+		const { primary } = await core([["org-1", 0]])
+		await primary.exec(PRESENCE_DDL)
+		const deps = { coreDb: primary, kv: memoryKv() }
+		const router = new ShardRouter({ totalShards: 3 })
+		const presence = (shard: number) =>
+			primary.prepare("INSERT INTO presence (org_id, shard_id) VALUES (?, ?)").bind("org-1", shard)
+		const moved = await router.move({ orgId: "org-1", shardId: 2, with: [presence(2)] }, deps, ctx)
+		expect(moved.shardId).toBe(2)
+		expect((await primary.prepare("SELECT org_id, shard_id FROM presence").all()).results).toEqual([
+			{ org_id: "org-1", shard_id: 2 },
+		])
+		/* the repeated presence row fails the batch: the mapping stays on 2, here and in the table */
+		await expect(router.move({ orgId: "org-1", shardId: 1, with: [presence(2)] }, deps, ctx)).rejects.toThrow(/UNIQUE/)
+		expect(await primary.prepare("SELECT shard_id FROM shard_map WHERE org_id = 'org-1'").first()).toEqual({
+			shard_id: 2,
+		})
+		expect((await router.resolve("org-1", deps, ctx))?.shardId).toBe(2)
+	})
+
+	it("batches them through the core database's session, as it writes the mapping", async () => {
+		const { primary, replica } = await core([["org-1", 0]])
+		await primary.exec(PRESENCE_DDL)
+		const { coreDb } = replicated(primary, replica)
+		const statement = coreDb.prepare("INSERT INTO presence (org_id, shard_id) VALUES ('org-1', 1)")
+		await new ShardRouter({ totalShards: 3 }).move(
+			{ orgId: "org-1", shardId: 1, with: [statement] },
+			{ coreDb, kv: memoryKv() },
+			ctx,
+		)
+		expect(await primary.prepare("SELECT shard_id FROM presence").first()).toEqual({ shard_id: 1 })
+	})
+})

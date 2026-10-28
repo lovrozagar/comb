@@ -1,11 +1,11 @@
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm"
-import type { D1Database, D1DatabaseSession } from "@cloudflare/workers-types"
+import type { D1Database, D1DatabaseSession, D1PreparedStatement } from "@cloudflare/workers-types"
 import { drizzle } from "drizzle-orm/d1"
 import { CombError } from "../../../error.ts"
 import { combErrorKeys } from "../../../types.ts"
 import { openD1Session, type SessionConstraint } from "../session.ts"
 import { shardMap } from "./shard-map.ts"
-import type { ShardMapping, ShardPick, ShardPickInput } from "./types.ts"
+import type { ShardMapping, ShardMove, ShardPick, ShardPickInput } from "./types.ts"
 
 type ShardDb = ReturnType<typeof drizzle>
 type ShardRow = typeof shardMap.$inferSelect
@@ -85,15 +85,22 @@ async function insertFirst(
 	return { how, row: row as ShardRow }
 }
 
-/** Puts an org on `shardId` whatever row it had, live or soft-deleted */
-async function overwrite(db: ShardDb, orgId: string, shardId: number): Promise<ShardRow> {
+/**
+ * Puts an org on `shardId` whatever row it had, live or soft-deleted, in one batch with the
+ * caller's own statements on the core database (`with`), so all of them land or none (R4)
+ */
+async function overwrite(client: D1Database | D1DatabaseSession, move: ShardMove): Promise<ShardRow> {
+	const { orgId, shardId } = move
 	const placed = { deleted_at: null, shard_id: shardId, target: String(shardId), updated_at: Date.now() }
-	const [row] = await db
+	const query = drizzle(client as D1Database)
 		.insert(shardMap)
 		.values({ driver: "d1", org_id: orgId, ...placed })
 		.onConflictDoUpdate({ set: placed, target: shardMap.org_id })
 		.returning()
-	return row as ShardRow
+		.toSQL()
+	const write: D1PreparedStatement = client.prepare(query.sql).bind(...query.params)
+	const [placedRow] = await client.batch<ShardRow>([write, ...(move.with ?? [])])
+	return placedRow?.results[0] as ShardRow
 }
 
 /** Soft-deletes an org's live row, leaving its shard on record for a revival */

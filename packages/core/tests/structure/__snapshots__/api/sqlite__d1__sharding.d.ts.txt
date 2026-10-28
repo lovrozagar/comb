@@ -1,10 +1,10 @@
 // sqlite/d1/sharding/index.d.ts
 export { ShardRouter } from "./router.ts";
 export { shardMap } from "./shard-map.ts";
-export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, } from "./types.ts";
+export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, } from "./types.ts";
 
 // sqlite/d1/sharding/router.d.ts
-import type { ShardDbHandle, ShardKv, ShardMapping, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
+import type { ShardDbHandle, ShardKv, ShardMapping, ShardMove, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
 /**
  * Shard router — resolves org -> D1 database handle.
  *
@@ -64,11 +64,11 @@ declare class ShardRouter {
      */
     place(placement: ShardPlacement, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping>;
     /**
-     * Move an org to `shardId`, overwriting its mapping, and invalidate it here. Moving its rows is
-     * the app's; another isolate keeps routing it to the old shard until its caches expire, or
-     * until `resolveVerified` finds the rows gone.
+     * Move an org to `shardId` and invalidate it here. Moving its rows is the app's; its writes on
+     * the core database for the move (`with`) batch with the mapping's, landing together or not at
+     * all (R4). Another isolate routes to the old shard until its caches expire or it verifies.
      */
-    move(placement: ShardPlacement, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping>;
+    move(placement: ShardMove, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping>;
     /** Soft-delete an org's mapping and invalidate it here; a later allocate or place revives it on its shard */
     unplace(orgId: string, deps: ShardResolverDeps): Promise<void>;
     /**
@@ -129,7 +129,7 @@ export declare const shardMap: ShardMapTable;
 export {};
 
 // sqlite/d1/sharding/types.d.ts
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 type ShardDriver = "d1";
 type ShardMapping = {
     createdAt: number;
@@ -179,6 +179,10 @@ type ShardPlacement = {
     orgId: string;
     shardId: number;
 };
+/** A move: the placement, and the app's own statements on the core database to batch with it (R4) */
+type ShardMove = ShardPlacement & {
+    with?: readonly D1PreparedStatement[] | undefined;
+};
 /** The deps of `resolveVerified`: those of `resolve`, and how the app checks an org's rows are on the shard a mapping names */
 type ShardVerifyDeps = ShardResolverDeps & {
     present: (mapping: ShardMapping) => Promise<boolean>;
@@ -196,7 +200,7 @@ interface ShardRouterConfig {
     pick?: ShardPick;
     totalShards: number;
 }
-export type { LogFn, ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx, };
+export type { LogFn, ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx, };
 
 // sqlite/columns.d.ts
 /**

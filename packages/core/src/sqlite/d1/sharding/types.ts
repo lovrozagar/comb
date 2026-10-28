@@ -1,4 +1,4 @@
-import type { D1Database } from "@cloudflare/workers-types"
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types"
 type ShardDriver = "d1"
 
 type ShardMapping = {
@@ -44,6 +44,9 @@ type LogFn = (event: string, data: Record<string, unknown>) => void
 /** An org and the shard to put it on */
 type ShardPlacement = { orgId: string; shardId: number }
 
+/** A move: the placement, and the app's own statements on the core database to batch with it (R4) */
+type ShardMove = ShardPlacement & { with?: readonly D1PreparedStatement[] | undefined }
+
 /** The deps of `resolveVerified`: those of `resolve`, and how the app checks an org's rows are on the shard a mapping names */
 type ShardVerifyDeps = ShardResolverDeps & { present: (mapping: ShardMapping) => Promise<boolean> }
 
@@ -67,6 +70,7 @@ export type {
 	ShardDriver,
 	ShardKv,
 	ShardMapping,
+	ShardMove,
 	ShardPick,
 	ShardPickInput,
 	ShardPlacement,

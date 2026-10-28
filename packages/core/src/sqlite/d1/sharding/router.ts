@@ -23,6 +23,7 @@ import type {
 	ShardDbHandle,
 	ShardKv,
 	ShardMapping,
+	ShardMove,
 	ShardPick,
 	ShardPlacement,
 	ShardResolverDeps,
@@ -178,16 +179,16 @@ class ShardRouter {
 	}
 
 	/**
-	 * Move an org to `shardId`, overwriting its mapping, and invalidate it here. Moving its rows is
-	 * the app's; another isolate keeps routing it to the old shard until its caches expire, or
-	 * until `resolveVerified` finds the rows gone.
+	 * Move an org to `shardId` and invalidate it here. Moving its rows is the app's; its writes on
+	 * the core database for the move (`with`) batch with the mapping's, landing together or not at
+	 * all (R4). Another isolate routes to the old shard until its caches expire or it verifies.
 	 */
-	async move(placement: ShardPlacement, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
+	async move(placement: ShardMove, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
 		const { orgId, shardId } = placement
 		assertOrgId(orgId)
 		assertShard(shardId, this.totalShards)
 		const { client, session } = openD1Session(deps.coreDb)
-		const row = await overwrite(drizzle(client), orgId, shardId)
+		const row = await overwrite(client, placement)
 		await this.invalidate(orgId, deps.kv)
 		return this.settle(row, "move", { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv })
 	}
