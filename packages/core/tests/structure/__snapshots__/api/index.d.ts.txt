@@ -89,6 +89,8 @@ type UlidFactoryOptions = {
     /** Fills the bytes with randomness; `crypto.getRandomValues` by default */
     random?: (bytes: Uint8Array<ArrayBuffer>) => void;
 };
+/** Throw for a prefix generateId refuses: c.id checks it too, so a tables module fails where the app would (F55) */
+declare function checkPrefix(prefix: string): void;
 /**
  * A ULID source whose ids strictly increase: within one millisecond the random part counts up
  * by one, a clock that steps back is held at the last time issued, and a random part that cannot
@@ -102,7 +104,7 @@ declare function createUlidFactory(options?: UlidFactoryOptions): {
 declare function generateUlid(): string;
 /** Generate a prefixed ID: `{prefix}_{ulid}` */
 declare function generateId(prefix: string): string;
-export { createUlidFactory, generateId, generateUlid, type UlidFactoryOptions };
+export { checkPrefix, createUlidFactory, generateId, generateUlid, type UlidFactoryOptions };
 
 // lru.d.ts
 type LruMeta<V> = {

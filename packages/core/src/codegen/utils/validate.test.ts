@@ -305,11 +305,11 @@ export const postTag = createTable("post_tags", { id: c.id("pts") })`),
 
 	it("refuses two tables that share an id prefix, naming both (F14)", () => {
 		const result = validateTables(
-			writeTables(`${prelude}export const team = createTable("team", { id: c.id("id_x") })
-export const user = createTable("user", { id: c.id("id_x") })`),
+			writeTables(`${prelude}export const team = createTable("team", { id: c.id("idx") })
+export const user = createTable("user", { id: c.id("idx") })`),
 		)
 		expect(result.errors).toContain(
-			'Tables team and user share the id prefix "id_x"; ids of one would pass for the other',
+			'Tables team and user share the id prefix "idx"; ids of one would pass for the other',
 		)
 	})
 })

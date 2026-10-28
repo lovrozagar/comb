@@ -24,6 +24,7 @@ import type {
 	TextConstraints,
 	TimestampConstraints,
 } from "./constraints.ts"
+import { checkPrefix } from "../id.ts"
 
 const timestampDefaults = {
 	now: () => sql`(unixepoch() * 1000)`,
@@ -82,7 +83,10 @@ export const c: SqliteColumns = {
 		withCombColumn(text(name).$type<T[number]>(), { kind: "enum", states, values }),
 
 	/* Text primary key — prefix is type-erased metadata for codegen */
-	id: (prefix: string) => withCombColumn(text("id").primaryKey(), { kind: "id", prefix }),
+	id: (prefix: string) => {
+		checkPrefix(prefix)
+		return withCombColumn(text("id").primaryKey(), { kind: "id", prefix })
+	},
 
 	/* Integer with number mode */
 	integer: (name: string, constraints?: IntegerConstraints) =>

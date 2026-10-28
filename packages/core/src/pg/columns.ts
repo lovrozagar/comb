@@ -35,6 +35,7 @@ import type {
 	TimestampConstraints,
 } from "../sqlite/constraints.ts"
 import type * as z from "zod"
+import { checkPrefix } from "../id.ts"
 
 /* Epoch milliseconds (about 1.76e12) overflow a 4-byte integer; bigint in number mode holds them
    exactly up to 2^53, and reads back as a JS number like the SQLite columns do. */
@@ -99,7 +100,10 @@ export const c: PgColumns = {
 		withCombColumn(text(name).$type<T[number]>(), { kind: "enum", states, values }),
 
 	/* Text primary key — prefix is type-erased metadata for codegen */
-	id: (prefix: string) => withCombColumn(text("id").primaryKey(), { kind: "id", prefix }),
+	id: (prefix: string) => {
+		checkPrefix(prefix)
+		return withCombColumn(text("id").primaryKey(), { kind: "id", prefix })
+	},
 
 	/* Integer */
 	integer: (name: string, constraints?: IntegerConstraints) =>

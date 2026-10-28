@@ -47,7 +47,11 @@ function defaultScope(dialect: Dialect): Record<string, unknown> {
 		columns: object,
 	) => unknown
 	const tables = Object.fromEntries(
-		["author", "owner", "team", "tenant", "user", "x"].map((name) => [name, define(name, { id: c.id(name) })]),
+		/* each key's prefix one generateId takes (F55): the one-letter x is keyed xx */
+		["author", "owner", "team", "tenant", "user", "x"].map((name) => [
+			name,
+			define(name, { id: c.id(name.padEnd(2, "x")) }),
+		]),
 	)
 	return { ...tables, blobSchema: z.object({}), prefs: z.object({}), schema: z.object({}) }
 }

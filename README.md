@@ -260,21 +260,21 @@ Config mode reads `comb.config.ts` (or `.js`) from the working directory. Direct
 
 `@lovrozagar/comb/sqlite/columns` exports `c`:
 
-| Factory                              | Emits                                               | Notes                                                                |
-| ------------------------------------ | --------------------------------------------------- | -------------------------------------------------------------------- |
-| `c.id(prefix)`                       | `text("id").primaryKey()`                           | `prefix` is type-erased metadata; codegen uses it for `generateId()` |
-| `c.serialId()`                       | `integer("id").primaryKey({ autoIncrement: true })` |                                                                      |
-| `c.text(name, constraints?)`         | `text(name)`                                        | `max` becomes `{ length: max }`                                      |
-| `c.integer(name, constraints?)`      | `integer(name, { mode: "number" })`                 |                                                                      |
-| `c.real(name, constraints?)`         | `real(name)`                                        |                                                                      |
-| `c.boolean(name)`                    | `integer(name, { mode: "boolean" })`                |                                                                      |
-| `c.enum(name, values)`               | `text(name).$type<T[number]>()`                     | `values` is type-erased; codegen emits the CHECK                     |
-| `c.json(name, schema, constraints?)` | `text(name, { mode: "json" }).$type<z.infer<S>>()`  |                                                                      |
-| `c.ref(name)`                        | `text(name)`                                        | chain `.references(() => other.id)`                                  |
-| `c.timestamp(name, constraints?)`    | `integer(name, { mode: "number" })`                 | epoch milliseconds                                                   |
-| `c.createdAt(name)`                  | non-null, defaults to `unixepoch() * 1000`          | name must be `createdAt` or `created_at`                             |
-| `c.updatedAt(name)`                  | non-null, with `$onUpdate`                          | name must be `updatedAt` or `updated_at`                             |
-| `c.deletedAt(name)`                  | nullable timestamp                                  | name must be `deletedAt` or `deleted_at`                             |
+| Factory                              | Emits                                               | Notes                                                                                                                                                                    |
+| ------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `c.id(prefix)`                       | `text("id").primaryKey()`                           | `prefix` is type-erased metadata; codegen uses it for `generateId()`, and `c.id` throws for one `generateId` refuses (2–10 lowercase letters and digits, a letter first) |
+| `c.serialId()`                       | `integer("id").primaryKey({ autoIncrement: true })` |                                                                                                                                                                          |
+| `c.text(name, constraints?)`         | `text(name)`                                        | `max` becomes `{ length: max }`                                                                                                                                          |
+| `c.integer(name, constraints?)`      | `integer(name, { mode: "number" })`                 |                                                                                                                                                                          |
+| `c.real(name, constraints?)`         | `real(name)`                                        |                                                                                                                                                                          |
+| `c.boolean(name)`                    | `integer(name, { mode: "boolean" })`                |                                                                                                                                                                          |
+| `c.enum(name, values)`               | `text(name).$type<T[number]>()`                     | `values` is type-erased; codegen emits the CHECK                                                                                                                         |
+| `c.json(name, schema, constraints?)` | `text(name, { mode: "json" }).$type<z.infer<S>>()`  |                                                                                                                                                                          |
+| `c.ref(name)`                        | `text(name)`                                        | chain `.references(() => other.id)`                                                                                                                                      |
+| `c.timestamp(name, constraints?)`    | `integer(name, { mode: "number" })`                 | epoch milliseconds                                                                                                                                                       |
+| `c.createdAt(name)`                  | non-null, defaults to `unixepoch() * 1000`          | name must be `createdAt` or `created_at`                                                                                                                                 |
+| `c.updatedAt(name)`                  | non-null, with `$onUpdate`                          | name must be `updatedAt` or `updated_at`                                                                                                                                 |
+| `c.deletedAt(name)`                  | nullable timestamp                                  | name must be `deletedAt` or `deleted_at`                                                                                                                                 |
 
 Timestamps are integer milliseconds, not SQLite's `TEXT` dates — comparisons, cursors, and index ranges all stay numeric.
 

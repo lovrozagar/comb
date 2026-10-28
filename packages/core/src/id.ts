@@ -62,6 +62,7 @@ const webRandom = (bytes: Uint8Array<ArrayBuffer>) => {
 	crypto.getRandomValues(bytes)
 }
 
+/** Throw for a prefix generateId refuses: c.id checks it too, so a tables module fails where the app would (F55) */
 function checkPrefix(prefix: string): void {
 	if (!PREFIX_PATTERN.test(prefix)) {
 		throw new Error(
@@ -109,4 +110,4 @@ function generateId(prefix: string): string {
 	return `${prefix}_${generateUlid()}`
 }
 
-export { createUlidFactory, generateId, generateUlid, type UlidFactoryOptions }
+export { checkPrefix, createUlidFactory, generateId, generateUlid, type UlidFactoryOptions }
