@@ -26,7 +26,6 @@ function isExcludedFromUpdate(field: FieldMeta): boolean {
 		field.inCompositeKey ||
 		/* the database writes a generated column and refuses a value for it (F8) */
 		field.generated ||
-		field.name === "id" ||
 		field.constraints.nomutate ||
 		field.constraints.autogenerate ||
 		/* a reference is set once, at creation, unless it declares mutable (F25): an ownership key

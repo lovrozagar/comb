@@ -146,3 +146,14 @@ describe("isExcludedFromUpdate", () => {
 		expect(isExcludedFromUpdate(parseField(name, raw))).toBe(expected)
 	})
 })
+
+/* F61: a column leaves update by what fills it or keys the row, never by its name */
+describe("isExcludedFromUpdate: a column named id that is no key", () => {
+	it("is updatable, as any other column is, where the key is another column", () => {
+		const partnerRef = parseField("id", 'c.text("partner_ref").notNull()')
+		expect(partnerRef.isPrimaryKey).toBe(false)
+		expect(isExcludedFromUpdate(partnerRef)).toBe(false)
+		/* a key named id still leaves update, as its key rule says */
+		expect(isExcludedFromUpdate(parseField("id", 'c.id("ptn")'))).toBe(true)
+	})
+})
