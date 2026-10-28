@@ -147,7 +147,7 @@ describe("ShardRouter — resolve and invalidate", () => {
 		const kv = mockKV()
 		await router.invalidate("org-1", kv)
 		/* a tombstone for the TTL, which a fill that read the core table before it does not overwrite (U33) */
-		expect(kv.put).toHaveBeenCalledWith("shard:org-1", expect.stringMatching(/^\{"invalidatedAt":\d+\}$/), {
+		expect(kv.put).toHaveBeenCalledWith("shard:org-1:inv", expect.stringMatching(/^\{"invalidatedAt":\d+\}$/), {
 			expirationTtl: 60,
 		})
 	})
@@ -331,7 +331,7 @@ describe("ShardRouter — allocation races and cache priming", () => {
 
 		await Promise.all(calls)
 		await router.invalidate("org-6", d.kv)
-		expect(await d.kv.get("shard:org-6", "json")).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(await d.kv.get("shard:org-6:inv", "json")).toEqual({ invalidatedAt: expect.any(Number) })
 	})
 })
 
@@ -367,7 +367,7 @@ describe("ShardRouter — the core database tier", () => {
 		} as unknown as typeof d.kv
 		expect(await router.resolve("org-d1", { coreDb: d.coreDb, kv }, ctx)).toMatchObject({ shardId: 1 })
 		await Promise.all(calls)
-		expect(await d.kv.get("shard:org-d1", "json")).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(await d.kv.get("shard:org-d1:inv", "json")).toEqual({ invalidatedAt: expect.any(Number) })
 	})
 
 	it("carries the session bookmark on what it allocates and what it reads, none when D1 has none", async () => {
@@ -428,7 +428,7 @@ describe("ShardRouter — revalidation from the core database", () => {
 		expect(await router.resolve("org-d1", d, ctx)).toMatchObject({ shardId: 1 })
 		await Promise.all(calls.splice(0))
 		expect(await router.resolve("org-d1", d, ctx)).toBeUndefined()
-		expect(await d.kv.get("shard:org-d1", "json")).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(await d.kv.get("shard:org-d1:inv", "json")).toEqual({ invalidatedAt: expect.any(Number) })
 	})
 })
 
@@ -471,9 +471,9 @@ describe("ShardRouter — an invalidate while a read is in flight (E-N2)", () =>
 		release(null)
 		await router.invalidate("org-1", kv)
 		await Promise.all(calls)
-		/* the invalidate's tombstone is the one write: the outdated revalidation evicts nothing */
+		/* the invalidate's tombstone and delete are the only writes: the outdated revalidation evicts nothing */
 		expect(kv.put).toHaveBeenCalledTimes(1)
-		expect(kv.delete).not.toHaveBeenCalled()
+		expect(kv.delete).toHaveBeenCalledTimes(1)
 	})
 
 	it("drops a resolve's cache write when the org was invalidated during its KV read", async () => {

@@ -42,7 +42,8 @@ describe("ShardCache", () => {
 		cache.misses.set("org-1", true)
 		await cache.invalidate("org-1", kv)
 		expect([cache.lru.getWithMeta("org-1"), cache.misses.get("org-1")]).toEqual([undefined, undefined])
-		expect(JSON.parse(kv.store.get("shard:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(kv.store.has("shard:org-1")).toBe(false)
+		expect(JSON.parse(kv.store.get("shard:org-1:inv") as string)).toEqual({ invalidatedAt: expect.any(Number) })
 		expect(cache.generationOf("org-1")).toBe(1)
 	})
 
@@ -56,25 +57,26 @@ describe("ShardCache", () => {
 		expect(cache.lru.getWithMeta("org-1")?.value.shardId).toBe(2)
 	})
 
-	/* G2 of plan 14: a fill whose KV read came before this isolate's invalidate puts nothing after it */
+	/* G2 of plan 14: a fill whose KV reads came before this isolate's invalidate landed puts nothing after it */
 	it("puts nothing once the org was invalidated here while its fill read KV", async () => {
 		const [cache, store, { ctx, settle }] = [cacheOf(), memoryKv(), context()]
 		const gated: { release?: () => void } = {}
 		const gate = new Promise<void>((resolve) => (gated.release = resolve))
-		/* the fill's read sees KV empty, and returns only once the invalidate has written its tombstone */
+		/* the invalidate's tombstone is still in flight while the fill reads both keys empty */
 		const kv: ShardKv = {
 			...store,
-			get: async (key, type) => {
-				const held = await store.get(key, type)
-				await gate
-				return held
+			put: async (key, value) => {
+				if (key.endsWith(":inv")) await gate
+				await store.put(key, value)
 			},
 		}
 		cache.populate("org-1", mapping(1, 10), { executionCtx: ctx, kv, readAt: Date.now() })
-		await cache.invalidate("org-1", kv)
-		gated.release?.()
+		const invalidating = cache.invalidate("org-1", kv)
 		await settle()
-		expect(JSON.parse(store.store.get("shard:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(store.store.has("shard:org-1")).toBe(false)
+		gated.release?.()
+		await invalidating
+		expect(JSON.parse(store.store.get("shard:org-1:inv") as string)).toEqual({ invalidatedAt: expect.any(Number) })
 	})
 })
 

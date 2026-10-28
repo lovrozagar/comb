@@ -76,11 +76,12 @@ describe("an invalidation in KV", () => {
 		}
 		await kv.put(kvKey("org-1"), JSON.stringify(mapping(1, 1000)))
 		await kvInvalidate(watched, "org-1", options)
-		expect(JSON.parse(kv.values.get(kvKey("org-1")) as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(JSON.parse(kv.values.get(`${kvKey("org-1")}:inv`) as string)).toEqual({ invalidatedAt: expect.any(Number) })
 		expect(puts).toEqual([{ ttl: 60 }])
 		expect(await kvRead(kv, "org-1", options.log)).toBeNull()
 	})
 
+	/* the tombstone where 0.14.0 left it, in the mapping's key */
 	it("stops a fill that read the core table before it, and takes one that read it after", async () => {
 		const kv = memoryKV()
 		await kv.put(kvKey("org-1"), JSON.stringify({ invalidatedAt: 5000 }))
@@ -89,5 +90,29 @@ describe("an invalidation in KV", () => {
 		expect(JSON.parse(kv.values.get(kvKey("org-1")) as string)).toEqual({ invalidatedAt: 5000 })
 		await putUnlessNewer(kv, mapping(2, 6000), { ...options, readAt: 5001 })
 		expect(shardIn(kv)).toBe(2)
+	})
+})
+
+/* G3 of plan 14: a router on 0.13.x reading the same KV in a rolling deploy sees an invalidation as a plain miss */
+describe("an invalidation, as a 0.13 router reads KV", () => {
+	const options = { current: () => true, log: () => undefined, readAt: 0, ttlSeconds: 60 }
+
+	it("leaves the mapping key empty, its tombstone apart, and still stops a fill that read before it", async () => {
+		const kv = memoryKV()
+		await kv.put(kvKey("org-1"), JSON.stringify(mapping(1, 1000)))
+		await kvInvalidate(kv, "org-1", options)
+		/* 0.13.1 parses the mapping key as a mapping: after an invalidate it must find nothing there */
+		expect(kv.values.has(kvKey("org-1"))).toBe(false)
+		expect(JSON.parse(kv.values.get(`${kvKey("org-1")}:inv`) as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		await putUnlessNewer(kv, mapping(1, 1000), { ...options, readAt: 0 })
+		expect(kv.values.has(kvKey("org-1"))).toBe(false)
+		await putUnlessNewer(kv, mapping(2, 2000), { ...options, readAt: Date.now() + 1 })
+		expect(shardIn(kv)).toBe(2)
+	})
+
+	it("is a miss where 0.14.0 left its tombstone in the mapping key", async () => {
+		const kv = memoryKV()
+		await kv.put(kvKey("org-1"), JSON.stringify({ invalidatedAt: 5000 }))
+		expect(await kvRead(kv, "org-1", options.log)).toBeNull()
 	})
 })
