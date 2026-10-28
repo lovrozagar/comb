@@ -4,7 +4,8 @@
  * parent reads. Its own stdout and stderr stay the module's, so a module that logs cannot corrupt it.
  */
 import fs from "node:fs"
-import { pathToFileURL } from "node:url"
+import path from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { moduleGraph } from "./module-graph.ts"
 import { type Loaded, type Namespace, snapshotOf } from "./read-tables.ts"
 import type { Snapshot } from "./snapshot-types.ts"
@@ -46,6 +47,24 @@ async function readTables(tablesPath: string, importer: Importer = (url) => impo
 	return snapshotOf(loaded, unloaded)
 }
 
+/* comb's own source, whose frames are the loader's and never the project's */
+const COMB_SRC = /* @__PURE__ */ path.resolve(import.meta.dirname, "../..")
+
+/**
+ * The first frame of `error`'s stack in the project's own code, `file:line:col`: past comb's own
+ * source, a package and node's internals, so a throw in a module the tables file imports names
+ * that module (F64); undefined when no frame is the project's
+ */
+function projectFrame(error: unknown): string | undefined {
+	const stack = error instanceof Error ? (error.stack ?? "") : ""
+	for (const [, location] of stack.matchAll(/^\s*at (?:.*\()?((?:file:\/\/)?\/[^()]+:\d+:\d+)\)?$/gm)) {
+		const at = (location as string).startsWith("file://") ? fileURLToPath(location as string) : (location as string)
+		const file = at.replace(/:\d+:\d+$/, "")
+		if (!file.includes(`${path.sep}node_modules${path.sep}`) && !file.startsWith(COMB_SRC)) return at
+	}
+	return undefined
+}
+
 /** Read `tablesPath` and write what came of it to `resultPath` */
 async function writeSnapshot([tablesPath, resultPath]: readonly string[]): Promise<void> {
 	if (tablesPath === undefined || resultPath === undefined) throw new Error("writeSnapshot takes [tables, result]")
@@ -54,9 +73,10 @@ async function writeSnapshot([tablesPath, resultPath]: readonly string[]): Promi
 		result = { snapshot: await readTables(tablesPath) }
 	} catch (error) {
 		// reason: the parent reports the error, naming the tables file; this process only carries it across
-		result = { error: error instanceof Error ? error.message : String(error) }
+		const at = projectFrame(error)
+		result = { error: error instanceof Error ? error.message : String(error), ...(at === undefined ? {} : { at }) }
 	}
 	fs.writeFileSync(resultPath, JSON.stringify(result))
 }
 
-export { readTables, writeSnapshot, type Importer }
+export { projectFrame, readTables, writeSnapshot, type Importer }

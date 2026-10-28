@@ -3,12 +3,19 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { sql } from "drizzle-orm"
 import { integer, pgEnum, pgSchema, pgTable } from "drizzle-orm/pg-core"
-import { check, foreignKey, integer as sqliteInteger, primaryKey, sqliteTable } from "drizzle-orm/sqlite-core"
+import {
+	check,
+	foreignKey,
+	integer as sqliteInteger,
+	primaryKey,
+	sqliteTable,
+	text as sqliteText,
+} from "drizzle-orm/sqlite-core"
 import { c } from "../../sqlite/columns.ts"
 import { analyzeNamespace } from "../__fixtures__/runtime.ts"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
 import { readTables } from "./child.ts"
-import { exportsHolding } from "./read-tables.ts"
+import { exportsHolding, snapshotOf } from "./read-tables.ts"
 
 let dir: string
 
@@ -238,6 +245,21 @@ describe("snapshotOf: a Postgres array column's dimensions (F49)", () => {
 		const odd = pgTable("odd", { n: integer("n").array(3 as never) })
 		expect(() => analyzeNamespace({ odd })).toThrow(
 			'odd.n: drizzle could not read its array dimensions; write .array() or .array("[][]")',
+		)
+	})
+})
+
+/* F64: a crash in comb's own reader says it is the reader's, naming the table, never the module's */
+describe("snapshotOf: an error the reader did not mean", () => {
+	it("names the table it was reading", () => {
+		const t = sqliteTable("t", { id: sqliteText("id").primaryKey() })
+		Object.defineProperty(t.id, "dataType", {
+			get: () => {
+				throw new TypeError("chunk.inlineParams is not a function")
+			},
+		})
+		expect(() => snapshotOf([{ external: false, module: "/p/db.core.tables.ts", namespace: { t } }])).toThrow(
+			"comb could not read table t: chunk.inlineParams is not a function",
 		)
 	})
 })

@@ -273,7 +273,20 @@ function snapshotOf(loaded: readonly Loaded[], unloaded: readonly string[] = [])
 			)
 	}
 	const context: Context = { loaded, tables, tablesPath: first.module, unloaded }
-	return { tables: [...tables].map((entry) => tableOf(entry, context)) }
+	return { tables: [...tables].map((entry) => readTable(entry, context)) }
+}
+
+/**
+ * One table, read; an error the reader did not mean, of a class other than the plain Error its
+ * own diagnostics throw, names the table and says the reader failed, never the module (F64)
+ */
+function readTable(entry: [Table, string], context: Context): SnapshotTable {
+	try {
+		return tableOf(entry, context)
+	} catch (error) {
+		if (!(error instanceof Error) || error.constructor === Error) throw error
+		throw new Error(`comb could not read table ${entry[1]}: ${error.message}`, { cause: error })
+	}
 }
 
 /** Whether `value` carries drizzle's table name, as every table drizzle builds does */

@@ -105,8 +105,11 @@ function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
 			throw new Error(`comb timed out after ${timeoutMs / 1000} s loading ${tablesPath}`)
 		if (!fs.existsSync(result))
 			throw new Error(`comb could not load ${tablesPath}: ${ran.stderr.trim() || `the loader exited ${ran.code}`}`)
-		const read = JSON.parse(fs.readFileSync(result, "utf8")) as { error: string } | { snapshot: Snapshot }
-		if ("error" in read) throw new Error(`comb could not load ${tablesPath}: ${read.error}`)
+		const read = JSON.parse(fs.readFileSync(result, "utf8")) as { at?: string; error: string } | { snapshot: Snapshot }
+		if ("error" in read)
+			throw new Error(
+				`comb could not load ${tablesPath}: ${read.error}${read.at === undefined ? "" : ` (at ${read.at})`}`,
+			)
 		return read.snapshot
 	} finally {
 		fs.rmSync(dir, { force: true, recursive: true })
