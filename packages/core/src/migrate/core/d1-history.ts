@@ -14,13 +14,11 @@ import type { Connection, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { executeAll } from "../drivers/d1.ts"
 import { assertLocalExists, type D1Target, type ReadConfig, resolveBinding } from "./d1-binding.ts"
+import { D1_HASH_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
 import { orphanMessage } from "./history-match.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
 import { planApply, wranglerOrder } from "./plan-apply.ts"
 
-const DRIZZLE_TABLE = "__drizzle_migrations"
-/* comb's own record of the hash each file was applied under: wrangler's table holds names only */
-const HASH_TABLE = "_comb_migration_hashes"
 const quoteName = (name: string): string => `"${name.replaceAll('"', '""')}"`
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`
 
@@ -46,13 +44,13 @@ type HistoryRead = { applied: Set<string>; drizzle: Set<string> | undefined; rec
 function readHistory(target: D1Target, table: string, create: boolean): HistoryRead {
 	const [names, hashes, drizzle] = [
 		namesOf(table),
-		`SELECT name, hash FROM ${HASH_TABLE}`,
-		`SELECT hash FROM ${DRIZZLE_TABLE}`,
+		`SELECT name, hash FROM ${D1_HASH_TABLE}`,
+		`SELECT hash FROM ${DRIZZLE_HISTORY_TABLE}`,
 	]
-	const listing = `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${[table, HASH_TABLE, DRIZZLE_TABLE].map(literal).join(", ")})`
+	const listing = `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${[table, D1_HASH_TABLE, DRIZZLE_HISTORY_TABLE].map(literal).join(", ")})`
 	const made = [
 		historyTable(table),
-		`CREATE TABLE IF NOT EXISTS ${HASH_TABLE} (name TEXT PRIMARY KEY, hash TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS ${D1_HASH_TABLE} (name TEXT PRIMARY KEY, hash TEXT NOT NULL)`,
 	]
 	const first = executeAll(target.exec, target, create ? [...made, listing, names, hashes] : [listing])
 	/* executeAll answers one result per statement, or throws */
@@ -66,13 +64,13 @@ function readHistory(target: D1Target, table: string, create: boolean): HistoryR
 			: [],
 	)
 	const later = [names, hashes, drizzle].filter(
-		(sql, i) => !rows.has(sql) && present.has([table, HASH_TABLE, DRIZZLE_TABLE][i] as string),
+		(sql, i) => !rows.has(sql) && present.has([table, D1_HASH_TABLE, DRIZZLE_HISTORY_TABLE][i] as string),
 	)
 	if (later.length > 0) executeAll(target.exec, target, later).forEach((each, i) => rows.set(later[i] as string, each))
 	const read = (sql: string) => rows.get(sql) ?? []
 	return {
 		applied: new Set(read(names).map((row) => String(row["name"]))),
-		drizzle: present.has(DRIZZLE_TABLE) ? new Set(read(drizzle).map((row) => String(row["hash"]))) : undefined,
+		drizzle: present.has(DRIZZLE_HISTORY_TABLE) ? new Set(read(drizzle).map((row) => String(row["hash"]))) : undefined,
 		recorded: new Map(read(hashes).map((row) => [String(row["name"]), String(row["hash"])])),
 	}
 }
@@ -81,7 +79,7 @@ function readHistory(target: D1Target, table: string, create: boolean): HistoryR
 async function recordHashes(conn: Connection, files: ReadonlyArray<{ hash: string; name: string }>): Promise<void> {
 	await conn.batch(
 		files.map(({ hash, name }) => ({
-			sql: `INSERT OR REPLACE INTO ${HASH_TABLE} (name, hash) VALUES (${literal(name)}, ${literal(hash)})`,
+			sql: `INSERT OR REPLACE INTO ${D1_HASH_TABLE} (name, hash) VALUES (${literal(name)}, ${literal(hash)})`,
 		})),
 	)
 }
@@ -128,7 +126,7 @@ async function history(
 	const copied = hashes === undefined ? [] : recordedByDrizzle(files, hashes, applied)
 	if (copied.length > 0) {
 		throw new Error(
-			`${target.name} records ${copied.join(", ")} in ${DRIZZLE_TABLE}, comb's history before 0.8, but not in ${table}, wrangler's; run comb migrate baseline once to copy the record`,
+			`${target.name} records ${copied.join(", ")} in ${DRIZZLE_HISTORY_TABLE}, comb's history before 0.8, but not in ${table}, wrangler's; run comb migrate baseline once to copy the record`,
 		)
 	}
 	const edited = files.find(
@@ -173,7 +171,7 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		exec: target.exec,
 		files,
 		/* the binding's own history table, and comb's record of hashes, which apply may have made already */
-		historyTables: [table, HASH_TABLE],
+		historyTables: [table, D1_HASH_TABLE],
 		print: options.print,
 	})
 	const names = pending.map(({ name }) => name)
@@ -217,7 +215,7 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
 	const { applied, drizzle: hashes } = readHistory(target, table, true)
 	if (hashes === undefined) {
 		throw new Error(
-			`${target.name} has no ${DRIZZLE_TABLE} to copy from; baseline records only what a history shows was applied`,
+			`${target.name} has no ${DRIZZLE_HISTORY_TABLE} to copy from; baseline records only what a history shows was applied`,
 		)
 	}
 	const files = filesOf(target.migrationsDir)
@@ -236,7 +234,7 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
 	}
 	for (const name of copied) print(`Marked applied: ${name}`)
 	for (const { name } of files.filter((file) => !applied.has(file.name) && !copied.includes(file.name))) {
-		print(`Not marked: ${name} (${DRIZZLE_TABLE} has no record of it; comb migrate apply runs it)`)
+		print(`Not marked: ${name} (${DRIZZLE_HISTORY_TABLE} has no record of it; comb migrate apply runs it)`)
 	}
 	return copied
 }

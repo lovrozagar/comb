@@ -1,6 +1,7 @@
 // migrate/index.d.ts
 export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
 export { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./core/apply.ts";
+export { D1_HASH_TABLE, D1_MIGRATIONS_TABLE, d1HistoryTables, DRIZZLE_HISTORY_TABLE } from "./core/d1-history-tables.ts";
 export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
 export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, parseMigration, splitSqlStatements, } from "./core/parse.ts";
 export { loadPostgresParser } from "./core/pg-parser.ts";
@@ -55,6 +56,23 @@ export declare function ensureMigrationsTable(conn: Connection, renamed?: Readon
 export declare function checkMigrationHash(conn: Connection, hashes: string | readonly string[]): Promise<boolean>;
 /** Record `hash` as applied, under the file's `name` when given (an unnamed row is named on the next apply) */
 export declare function recordMigrationHash(conn: Connection, hash: string, name?: string): Promise<void>;
+
+// migrate/core/d1-history-tables.d.ts
+/**
+ * The tables a D1 database's migration history lives in (M2 of the 0.13.0 consumers review): a tool
+ * that empties a database keeps them, rows and all, or every applied file loses what comb knows of
+ * it. wrangler's own table records each applied file by name; comb's records the hash each was
+ * applied under, which refuses a file applied, then edited; comb's history before 0.8 is what a
+ * baseline copies from.
+ */
+/** wrangler's migrations table where the binding names no `migrations_table` */
+export declare const D1_MIGRATIONS_TABLE = "d1_migrations";
+/** comb's record of the hash each D1 file was applied under, which wrangler's table does not keep */
+export declare const D1_HASH_TABLE = "_comb_migration_hashes";
+/** comb's migration history before 0.8, which `comb migrate baseline` copies into wrangler's */
+export declare const DRIZZLE_HISTORY_TABLE = "__drizzle_migrations";
+/** Every table a D1 database's history is in, the binding's own `migrations_table` first */
+export declare const d1HistoryTables: (migrationsTable?: string) => string[];
 
 // migrate/core/atlas.d.ts
 import type { Dialect } from "../types.ts";

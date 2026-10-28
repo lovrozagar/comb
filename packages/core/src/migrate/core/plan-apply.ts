@@ -12,6 +12,7 @@ import { join } from "node:path"
 import type { Connection, ExtractedSchema, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { verifySum } from "./atlas-dir.ts"
+import { D1_MIGRATIONS_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { refuseUnseenReach } from "./live-guard.ts"
 import { parseMigration } from "./parse.ts"
@@ -116,7 +117,7 @@ function classifyPending(files: readonly string[], texts: readonly string[], app
 }
 
 /* the history tables comb's apply and wrangler keep, when the target names no other */
-const HISTORY_TABLES = ["__drizzle_migrations", "d1_migrations"]
+const HISTORY_TABLES = [DRIZZLE_HISTORY_TABLE, D1_MIGRATIONS_TABLE]
 
 /** Whether the database holds no table but its engine's and its migration histories: nothing in it can be lost */
 async function isEmptyTarget(conn: Connection, historyTables: readonly string[]): Promise<boolean> {

@@ -8,6 +8,7 @@ import { existsSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import type { Connection } from "../types.ts"
 import type { Run } from "./process.ts"
+import { D1_MIGRATIONS_TABLE } from "./d1-history-tables.ts"
 
 /** A D1 binding as wrangler's config reader returns it, for the environment asked */
 type WranglerD1 = {
@@ -65,7 +66,7 @@ function resolveBinding(read: ReadConfig, target: D1Target): string {
 	if (pattern !== undefined && pattern.replace(/^\.\//, "") !== `${dirName.replace(/^\.\/|\/$/g, "")}/*.sql`) {
 		throw new Error(`${where} sets migrations_pattern ${pattern}; comb applies every .sql file of ${dirName}`)
 	}
-	return d1.migrations_table ?? "d1_migrations"
+	return d1.migrations_table ?? D1_MIGRATIONS_TABLE
 }
 
 /** The binding `target` names in its wrangler config, and where comb says it read it */
