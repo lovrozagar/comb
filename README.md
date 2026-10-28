@@ -999,7 +999,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun
 
 ## Upgrading to 0.14
 
-- **D1 files applied before comb recorded hashes:** `comb migrate status <db>` names them (`No hash recorded for …`), and comb cannot tell whether one was edited since. Check those files against git, then run `comb migrate baseline <db> --hashes` once on each D1 database: it records each one's current hash, so a later edit is refused as any other is. It refuses, recording nothing, while the history names a file the directory lacks.
+- **D1 files applied before comb recorded hashes:** `comb migrate status <db>` names them (`No hash recorded for …`), and comb cannot tell whether one was edited since. Check those files against git, then run `comb migrate baseline <db> --hashes` once on each D1 database: it records each one's current hash, so a later edit is refused as any other is. It records a file's current text as the text that ran, which is the one thing it cannot verify, so run it from the commit that applied those files, after `git log` shows no edit to them since. It refuses, recording nothing, while the history names a file the directory lacks.
 
 ## Upgrading to 0.13.1
 
