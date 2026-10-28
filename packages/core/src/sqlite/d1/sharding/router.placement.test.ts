@@ -418,6 +418,21 @@ describe("ShardRouter: move with the app's statements", () => {
 	})
 })
 
+/** `store` whose reads see what it holds, then wait for `release` before they answer: a fill's read held across an invalidate */
+function readThenWait(store: ShardKv): { kv: ShardKv; release: () => void } {
+	const gated: { release: () => void } = { release: () => undefined }
+	const gate = new Promise<void>((resolve) => (gated.release = resolve))
+	const kv: ShardKv = {
+		...store,
+		get: async (key, type) => {
+			const held = await store.get(key, type)
+			await gate
+			return held
+		},
+	}
+	return { kv, release: () => gated.release() }
+}
+
 /*
  * G2 of plan 14 (U33): a fill that read D1 before another isolate's invalidate lands after it, as
  * anyrow's shard-routing test found: it must not write the old shard back over the invalidation
@@ -452,5 +467,25 @@ describe("ShardRouter: a fill that read the core table before an invalidate", ()
 		await Promise.all(fills)
 		const next = await new ShardRouter({ totalShards: 3 }).resolve("org-1", { coreDb: primary, kv }, ctx)
 		expect(next?.shardId).toBe(1)
+	})
+
+	/* anyrow's shard-routing shape: place's own fill reads KV empty, the same isolate invalidates, then the fill would put */
+	it("leaves this isolate's own invalidation standing over the fill of a place it made before", async () => {
+		const { primary } = await core([])
+		const store = memoryKv()
+		const { kv, release } = readThenWait(store)
+		const fills: Promise<unknown>[] = []
+		const router = new ShardRouter({ totalShards: 3 })
+		const deps = { coreDb: primary, kv }
+		await router.place({ orgId: "org-1", shardId: 0 }, deps, { waitUntil: (p: Promise<unknown>) => void fills.push(p) })
+		await primary
+			.prepare("UPDATE shard_map SET shard_id = 1, target = '1', updated_at = updated_at + 1 WHERE org_id = 'org-1'")
+			.run()
+		await router.invalidate("org-1", kv)
+		release()
+		await Promise.all(fills)
+		expect(
+			(await new ShardRouter({ totalShards: 3 }).resolve("org-1", { coreDb: primary, kv: store }, ctx))?.shardId,
+		).toBe(1)
 	})
 })

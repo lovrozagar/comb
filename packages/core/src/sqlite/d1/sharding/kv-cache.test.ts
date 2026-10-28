@@ -35,12 +35,12 @@ const mapping = (shardId: number, updatedAt: number): ShardMapping => ({
 describe("putUnlessNewer", () => {
 	it("skips a mapping older than the one KV holds, and puts a newer or an equal one", async () => {
 		const kv = memoryKV()
-		await putUnlessNewer(kv, mapping(2, 2000), { log: () => {}, readAt: 0, ttlSeconds: 60 })
-		await putUnlessNewer(kv, mapping(1, 1000), { log: () => {}, readAt: 0, ttlSeconds: 60 })
+		await putUnlessNewer(kv, mapping(2, 2000), { current: () => true, log: () => {}, readAt: 0, ttlSeconds: 60 })
+		await putUnlessNewer(kv, mapping(1, 1000), { current: () => true, log: () => {}, readAt: 0, ttlSeconds: 60 })
 		expect(shardIn(kv)).toBe(2)
-		await putUnlessNewer(kv, mapping(3, 2000), { log: () => {}, readAt: 0, ttlSeconds: 60 })
+		await putUnlessNewer(kv, mapping(3, 2000), { current: () => true, log: () => {}, readAt: 0, ttlSeconds: 60 })
 		expect(shardIn(kv)).toBe(3)
-		await putUnlessNewer(kv, mapping(4, 3000), { log: () => {}, readAt: 0, ttlSeconds: 60 })
+		await putUnlessNewer(kv, mapping(4, 3000), { current: () => true, log: () => {}, readAt: 0, ttlSeconds: 60 })
 		expect(shardIn(kv)).toBe(4)
 	})
 
@@ -62,7 +62,7 @@ describe("putUnlessNewer", () => {
 
 /* G2 of plan 14 (U33): an invalidate leaves a tombstone, which a fill that read D1 before it does not overwrite */
 describe("an invalidation in KV", () => {
-	const options = { log: () => undefined, readAt: 0, ttlSeconds: 60 }
+	const options = { current: () => true, log: () => undefined, readAt: 0, ttlSeconds: 60 }
 
 	it("is a tombstone kvRead answers as a miss, kept for the TTL", async () => {
 		const kv = memoryKV()

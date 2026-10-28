@@ -55,4 +55,25 @@ describe("ShardCache", () => {
 		await settle()
 		expect(cache.lru.getWithMeta("org-1")?.value.shardId).toBe(2)
 	})
+
+	/* G2 of plan 14: a fill whose KV read came before this isolate's invalidate puts nothing after it */
+	it("puts nothing once the org was invalidated here while its fill read KV", async () => {
+		const [cache, store, { ctx, settle }] = [cacheOf(), memoryKv(), context()]
+		const gated: { release?: () => void } = {}
+		const gate = new Promise<void>((resolve) => (gated.release = resolve))
+		/* the fill's read sees KV empty, and returns only once the invalidate has written its tombstone */
+		const kv: ShardKv = {
+			...store,
+			get: async (key, type) => {
+				const held = await store.get(key, type)
+				await gate
+				return held
+			},
+		}
+		cache.populate("org-1", mapping(1, 10), { executionCtx: ctx, kv, readAt: Date.now() })
+		await cache.invalidate("org-1", kv)
+		gated.release?.()
+		await settle()
+		expect(JSON.parse(store.store.get("shard:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
+	})
 })

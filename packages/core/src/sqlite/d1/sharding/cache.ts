@@ -42,8 +42,12 @@ class ShardCache {
 
 	populate(orgId: string, mapping: ShardMapping, { executionCtx, kv, readAt }: CacheTargets): void {
 		this.lru.set(orgId, mapping)
-		/* a read that began before a move or an invalidate elsewhere does not overwrite what it left (U33) */
-		executionCtx.waitUntil(putUnlessNewer(kv, mapping, { log: this.log, readAt, ttlSeconds: this.kvTtlSeconds }))
+		const generation = this.generationOf(orgId)
+		const current = () => this.generationOf(orgId) === generation
+		/* a read that began before a move or an invalidate, here or elsewhere, does not overwrite what it left (U33) */
+		executionCtx.waitUntil(
+			putUnlessNewer(kv, mapping, { current, log: this.log, readAt, ttlSeconds: this.kvTtlSeconds }),
+		)
 	}
 
 	/** Forget the org in this isolate's tiers and in KV; another isolate's LRU keeps it until it expires */
@@ -82,7 +86,7 @@ class ShardCache {
 				return
 			}
 			this.lru.set(orgId, mapping)
-			await putUnlessNewer(deps.kv, mapping, { log: this.log, readAt, ttlSeconds: this.kvTtlSeconds })
+			await putUnlessNewer(deps.kv, mapping, { current, log: this.log, readAt, ttlSeconds: this.kvTtlSeconds })
 		} catch (e) {
 			this.log("shard-router.revalidate.error", { error: e, orgId })
 		}

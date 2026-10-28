@@ -61,15 +61,19 @@ const kvInvalidate = (
  * Put `mapping`, read from the core table at `readAt`, into KV for `ttlSeconds`, unless KV holds a
  * mapping of the org updated after it, or a tombstone an invalidate left at or after `readAt`: a
  * read in the invalidation's own millisecond cannot be ordered against it, so it is skipped, which
- * costs one more core read where a put could route to the old shard for the TTL. A failure logged.
+ * costs one more core read where a put could route to the old shard for the TTL. `current` says
+ * whether this isolate has not invalidated the org since the fill began: it is asked after the KV
+ * read and right before the put is issued, with no await between, so an invalidate here that wrote
+ * its tombstone after that read is not put over. A failure logged.
  */
 async function putUnlessNewer(
 	kv: ShardKv,
 	mapping: ShardMapping,
-	{ log, readAt, ttlSeconds }: { log: LogFn; readAt: number; ttlSeconds: number },
+	{ current, log, readAt, ttlSeconds }: { current: () => boolean; log: LogFn; readAt: number; ttlSeconds: number },
 ): Promise<void> {
 	const held = await kvHeld(kv, mapping.orgId, log)
 	if (held !== null && (isTombstone(held) ? held.invalidatedAt >= readAt : held.updatedAt > mapping.updatedAt)) return
+	if (!current()) return
 	await guarded(
 		{ log, op: "put", orgId: mapping.orgId },
 		() => kv.put(kvKey(mapping.orgId), JSON.stringify(mapping), { expirationTtl: ttlSeconds }),
