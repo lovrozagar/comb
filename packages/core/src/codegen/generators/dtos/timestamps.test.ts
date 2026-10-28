@@ -58,7 +58,7 @@ describe("generateSharedFile", () => {
 	const none = { camelCase: new Set<TimestampCombo>(), snakeCase: new Set<TimestampCombo>() }
 
 	it("emits what a DTO imports and what that names, nothing else (F17)", () => {
-		const file = generateSharedFile(none, new Map(), new Set(["timestampSchema"]))
+		const file = generateSharedFile(none, new Map(), { imported: new Set(["timestampSchema"]) })
 		expect(file).toContain("export const timestampSchema = _intNN.max(Number.MAX_SAFE_INTEGER).meta(_m.timestamp)")
 		expect(file).toContain("export const _intNN = ")
 		expect(file).toContain("export const _m = {")
@@ -68,9 +68,22 @@ describe("generateSharedFile", () => {
 		expect(file).toContain('import * as z from "zod"')
 	})
 
+	/* F50: a cidr column's rule refuses a bit past its prefix through comb's own isCidr, imported only for it */
+	it("imports isCidr, from where generated code imports comb, only when it keeps cidrSchema", () => {
+		const cidr = generateSharedFile(none, new Map(), { combFrom: "~/comb", imported: new Set(["cidrSchema"]) })
+		expect(cidr).toContain('import { isCidr } from "~/comb"')
+		expect(cidr).toContain(
+			"export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(isCidr, ",
+		)
+		expect(generateSharedFile(none, new Map(), { imported: new Set(["cidrSchema"]) })).toContain(
+			'import { isCidr } from "@lovrozagar/comb"',
+		)
+		expect(generateSharedFile(none, new Map(), { imported: new Set(["timestampSchema"]) })).not.toContain("isCidr")
+	})
+
 	it("imports zod only when what it keeps uses it, and is an empty module when it keeps nothing (F12)", () => {
-		expect(generateSharedFile(none, new Map(), new Set()).trim()).toBe("export {}")
-		const meta = generateSharedFile(none, new Map(), new Set(["_m"]))
+		expect(generateSharedFile(none, new Map(), { imported: new Set() }).trim()).toBe("export {}")
+		const meta = generateSharedFile(none, new Map(), { imported: new Set(["_m"]) })
 		expect(meta).toContain("export const _m = {")
 		expect(meta).not.toContain("zod")
 	})
@@ -83,7 +96,7 @@ describe("generateSharedFile", () => {
 		const file = generateSharedFile(
 			{ camelCase: new Set(["CreatedUpdatedDeleted"]), snakeCase: new Set(["Created"]) },
 			shared,
-			new Set(["_z0", "timestampsCreatedUpdatedDeletedRead", "timestampsCreatedReadPartialSnakeCase"]),
+			{ imported: new Set(["_z0", "timestampsCreatedUpdatedDeletedRead", "timestampsCreatedReadPartialSnakeCase"]) },
 		)
 		expect(file).toContain("export const _z0 = _str.max(9) /* 3x */")
 		expect(file).toContain("export const _z1 = timestampSchema.nullable()\n")

@@ -64,7 +64,10 @@ type Written = { outputDir: string; sharedSchemas: Map<string, SharedSchema>; ta
 function writeShared(written: Written, config: DtosConfig, ctx: GeneratorContext): void {
 	const sharedDir = path.join(written.outputDir, "_shared")
 	const imported = new Set(written.tables.flatMap((table) => sharedImportsOf(table, written.sharedSchemas)))
-	const content = generateSharedFile(collectUsedTimestampCombos(written.tables), written.sharedSchemas, imported)
+	const content = generateSharedFile(collectUsedTimestampCombos(written.tables), written.sharedSchemas, {
+		combFrom: config.importFrom,
+		imported,
+	})
 	const file = path.join(sharedDir, config.filePrefix ? `${config.filePrefix}._shared.gen.ts` : "index.gen.ts")
 	writeGenFile(file, content, { generator: "comb", staged: ctx.staged })
 	ctx.log(`Generated: ${path.relative(ctx.cwd, file)}`)

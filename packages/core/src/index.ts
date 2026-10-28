@@ -1,3 +1,4 @@
+export { isCidr } from "./cidr.ts"
 export { CombError } from "./error.ts"
 export {
 	carryCombMeta,

@@ -117,9 +117,10 @@ function keepImported(lines: readonly string[], imported: ReadonlySet<string>): 
 
 const ZOD_IMPORT = `import * as z from "zod"`
 
-function header(): string[] {
+function header(combFrom: string): string[] {
 	return [
 		ZOD_IMPORT,
+		cidrImport(combFrom),
 		"",
 		...BASE_TYPE_ALIASES.map(([expr, alias]) => `export const ${alias} = ${expr}`),
 		"",
@@ -137,8 +138,14 @@ function header(): string[] {
 		"/** Nullable timestamp field */",
 		"export const timestampNullableSchema = _intNN.max(Number.MAX_SAFE_INTEGER).nullable()",
 		"",
+		"/** A Postgres cidr: an address, its prefix length, and no bit set past it (F50) */",
+		'export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(isCidr, { message: "Must be a network with no bit set past its prefix length" })',
+		"",
 	]
 }
+
+/** The import of comb's isCidr, from where the generated code imports comb */
+const cidrImport = (combFrom: string) => `import { isCidr } from "${combFrom}"`
 
 /**
  * The shared `_shared/index.gen.ts` content: the combos tables use, the deduped schemas, and of
@@ -147,9 +154,9 @@ function header(): string[] {
 export function generateSharedFile(
 	used: UsedTimestampCombos,
 	sharedSchemas: Map<string, SharedSchema>,
-	imported: ReadonlySet<string>,
+	{ combFrom = "@lovrozagar/comb", imported }: { combFrom?: string | undefined; imported: ReadonlySet<string> },
 ): string {
-	const lines = header()
+	const lines = header(combFrom)
 	/* Auto-deduped shared schema constants — must be before timestamp spreads that reference them */
 	if (sharedSchemas.size > 0) {
 		lines.push("/** Auto-deduped schemas — variants chain on shared bases */")
@@ -160,12 +167,16 @@ export function generateSharedFile(
 	}
 	if (used.camelCase.size > 0) lines.push(...timestampVariants(used.camelCase, "camelCase", sharedSchemas))
 	if (used.snakeCase.size > 0) lines.push(...timestampVariants(used.snakeCase, "snake_case", sharedSchemas))
-	return withoutUnusedZod(keepImported(lines, imported)).join("\n")
+	return withoutUnusedImports(keepImported(lines, imported), cidrImport(combFrom)).join("\n")
 }
 
-/** The lines without the zod import when nothing kept uses it, and an empty module when nothing is kept at all */
-function withoutUnusedZod(lines: readonly string[]): readonly string[] {
-	if (lines.some((line) => line !== ZOD_IMPORT && /\bz\./.test(line))) return lines
-	const rest = lines.filter((line) => line !== ZOD_IMPORT)
+/**
+ * The lines without the zod import, or comb's, when nothing kept uses it, and an empty module when
+ * nothing is kept at all
+ */
+function withoutUnusedImports(lines: readonly string[], comb: string): readonly string[] {
+	const uses = (pattern: RegExp) => lines.some((line) => line !== ZOD_IMPORT && line !== comb && pattern.test(line))
+	const unused = new Set([...(uses(/\bz\./) ? [] : [ZOD_IMPORT]), ...(uses(/\bisCidr\b/) ? [] : [comb])])
+	const rest = lines.filter((line) => !unused.has(line))
 	return rest.some((line) => line.trim() !== "") ? rest : ["export {}", ""]
 }

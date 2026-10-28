@@ -62,12 +62,18 @@ const INT64_TEXT =
 const REAL =
 	'z.number().min(-3.4028235e38).max(3.4028235e38).refine((val) => val === 0 || Math.abs(val) > 7.006492321624085e-46, { message: "Must be zero or above 2^-150 in magnitude, which real would round to zero" })'
 
+/* an inet holds a host address, its netmask optional; a cidr is the shared cidrSchema, which also
+   refuses a bit set past its prefix length, through comb's own isCidr */
+const INET = "z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()])"
+
 /* each data type drizzle gives a Postgres column, and its rule */
 // lookup-table: a data type's write rule
 const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> = {
 	number: ({ sqlType }) => numericNumber(sqlType),
 	"number float": () => REAL,
+	"string cidr": () => "cidrSchema",
 	"string date": () => "z.iso.date()",
+	"string inet": () => INET,
 	"string int64": () => INT64_TEXT,
 	"string numeric": ({ sqlType }) => numericText(sqlType),
 	"string time": ({ sqlType }) => (sqlType.startsWith("time with time zone") ? TIMETZ : "z.iso.time()"),

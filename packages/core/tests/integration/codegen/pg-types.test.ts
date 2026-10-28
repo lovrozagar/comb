@@ -27,9 +27,11 @@ const COLUMNS = `{
 	nr: numeric("nr", { mode: "number", precision: 5, scale: 2 }),
 	b: bigint("b", { mode: "string" }),
 	r: real("r"),
+	ip: inet("ip"),
+	net: cidr("net"),
 }`
 const DDL =
-	"CREATE TEMP TABLE kinds (id text PRIMARY KEY, d date, ts timestamp, tz timestamptz, t time, tt timetz, n52 numeric(5,2), n3 numeric(3), nn numeric, nr numeric(5,2), b bigint, r real)"
+	"CREATE TEMP TABLE kinds (id text PRIMARY KEY, d date, ts timestamp, tz timestamptz, t time, tt timetz, n52 numeric(5,2), n3 numeric(3), nn numeric, nr numeric(5,2), b bigint, r real, ip inet, net cidr)"
 
 /** [column, value, whether the write DTO takes it, whether Postgres does] */
 type Case = [column: string, value: number | string, dto: boolean, pg: boolean]
@@ -97,6 +99,26 @@ const CASES: Case[] = [
 	["r", 7.006492321624087e-46, true, true],
 	["r", 1e-45, true, true],
 	["r", -1e-45, true, true],
+	["ip", "192.168.0.1", true, true],
+	["ip", "192.168.0.1/24", true, true],
+	["ip", "::1", true, true],
+	["ip", "fe80::1/64", true, true],
+	["ip", "300.1.1.1", false, false],
+	["ip", "localhost", false, false],
+	["net", "192.168.0.0/24", true, true],
+	["net", "10.0.0.0/8", true, true],
+	["net", "192.168.0.1", true, true],
+	["net", "2001:db8::/32", true, true],
+	["net", "fe80::/64", true, true],
+	["net", "::ffff:192.168.0.0/120", true, true],
+	/* a cidr has no bits set right of its mask: Postgres refuses each of these */
+	["net", "192.168.0.1/24", false, false],
+	["net", "10.0.0.1/8", false, false],
+	["net", "fe80::1/64", false, false],
+	["net", "2001:db8::1/32", false, false],
+	["net", "192.168.0.0/33", false, false],
+	/* stricter than Postgres, listed in the 0.14 changelog: an abbreviated network */
+	["net", "10.1", false, true],
 ]
 
 /** Whether Postgres stores `value` in `column` */
@@ -114,7 +136,7 @@ async function stored(client: pg.Client, [column, value]: [string, number | stri
 async function kindsDtos(): Promise<{ create: z.ZodObject; read: z.ZodObject }> {
 	const dtos = await generatedDtos(
 		"f50",
-		`import { bigint, date, numeric, real, text, time, timestamp } from "drizzle-orm/pg-core"\nexport const kinds = pgTable("kinds", ${COLUMNS})`,
+		`import { bigint, cidr, date, inet, numeric, real, text, time, timestamp } from "drizzle-orm/pg-core"\nexport const kinds = pgTable("kinds", ${COLUMNS})`,
 		{ dialect: "postgres" },
 	)
 	return {
@@ -170,7 +192,7 @@ describe("a plain Postgres column's write DTO, by its data type (F50)", () => {
 		const { rows } = await sessions
 			.pg()
 			.query(
-				"SELECT id, d::text AS d, ts::text AS ts, tz::text AS tz, t::text AS t, tt::text AS tt, n52::text AS n52, n3::text AS n3, nn::text AS nn, nr::float8 AS nr, b::text AS b, r FROM kinds",
+				"SELECT id, d::text AS d, ts::text AS ts, tz::text AS tz, t::text AS t, tt::text AS tt, n52::text AS n52, n3::text AS n3, nn::text AS nn, nr::float8 AS nr, b::text AS b, r, ip::text AS ip, net::text AS net FROM kinds",
 			)
 		expect(read.safeParse(rows[0]).success).toBe(true)
 	})

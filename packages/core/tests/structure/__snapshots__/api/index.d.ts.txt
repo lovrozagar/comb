@@ -1,9 +1,19 @@
 // index.d.ts
+export { isCidr } from "./cidr.ts";
 export { CombError } from "./error.ts";
 export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, readCombEntityMeta, readCombMeta, readCombQueryMeta, } from "./meta.ts";
 export { createUlidFactory, generateId, generateUlid, type UlidFactoryOptions } from "./id.ts";
 export { LruCache, type LruMeta } from "./lru.ts";
 export { type CombErrorKey, type ConstraintMap, type ConstraintMapEntry, combErrorKeys, type DatabaseErrorHandler, type StatusKey, statusKeyToCode, } from "./types.ts";
+
+// cidr.d.ts
+/**
+ * Whether a network is one Postgres's `cidr` takes: an IPv4 or IPv6 address, with or without a
+ * prefix length, and no bit set past that length ('192.168.0.1/24' is refused, '192.168.0.0/24'
+ * is taken). Generated write DTOs import it for a `cidr` column, so the rule has one source (F50).
+ */
+/** Whether `value` is a network Postgres's `cidr` takes, with no bit set past its prefix length */
+export declare function isCidr(value: string): boolean;
 
 // error.d.ts
 import type { StatusKey } from "./types.ts";
