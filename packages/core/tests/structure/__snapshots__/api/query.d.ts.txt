@@ -223,6 +223,19 @@ declare function drizzleListOptions(query: {
 type DrizzleListResult<T> = T & {
     _total?: number;
 };
+/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
+declare function refuseGoneAnchor(items: readonly object[]): void;
+/**
+ * Last mutation of item shape. Query stays fat; the returned object is the
+ * public subset. No-op (minus `_total`) when parsedFields is null.
+ */
+declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
+/**
+ * The next cursor, minted from the last row of the page. A row without a sort key or the id
+ * would mint a cursor that repeats or ends the list, so that is a wiring mistake: select them.
+ * Any id the row holds, 0 and "" included, carries the next page.
+ */
+declare function mintFrom(row: object, parsedSort: SortField[], options: PaginateOptions): string;
 /**
  * paginate's options: the cursor secret and scope, the field a row's tiebreak id is in (default
  * `id`), and `keyset: "derived"` for a buildDerivedListQuery list, whose keys no row holds
@@ -253,7 +266,7 @@ declare const queryHelpers: {
     paginate: typeof drizzlePaginationResult;
     project: typeof drizzleProject;
 };
-export { type CursorOptions, type DrizzleListOptions, type PaginateOptions, queryHelpers };
+export { applySelect, type CursorOptions, type DrizzleListOptions, mintFrom, type PaginateOptions, queryHelpers, refuseGoneAnchor, };
 
 // query/fields.d.ts
 import type { ParsedFields } from "./types.ts";

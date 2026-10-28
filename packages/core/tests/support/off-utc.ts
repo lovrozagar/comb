@@ -29,6 +29,7 @@ export const OFF_UTC_UNIT = [
 	"src/query/cursor.test.ts",
 	"src/query/drizzle.test.ts",
 	"src/query/keyset-budget.test.ts",
+	"src/query/merged.test.ts",
 	"src/query/sqlite/build-list-query.derived.test.ts",
 	"src/query/sqlite/build-list-query.test.ts",
 	"src/query/sqlite/cursor-fit.test.ts",

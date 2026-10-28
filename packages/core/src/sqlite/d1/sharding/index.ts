@@ -1,3 +1,4 @@
+export { type MergedListOptions, mergedListOptions, paginateMerged } from "../../../query/merged.ts"
 export { ShardRouter } from "./router.ts"
 export { shardMap } from "./shard-map.ts"
 export type {

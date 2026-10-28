@@ -138,6 +138,18 @@ function drizzleListOptions(
 
 type DrizzleListResult<T> = T & { _total?: number }
 
+/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
+function refuseGoneAnchor(items: readonly object[]): void {
+	if (items.some((item) => Number((item as Record<string, unknown>)["_combAnchorGone"]) === 1)) {
+		throw new CombError({
+			cause:
+				"the row this cursor resumes from was renamed or deleted, and no bound is safe under its collation; start the list again",
+			errorKey: combErrorKeys.INVALID_CURSOR,
+			status: "bad_request",
+		})
+	}
+}
+
 /** `_total` is a window extra, never a public field. Callers read pagination.count. */
 function stripWindowTotal<T extends Record<string, unknown>>(row: T): T {
 	if (!Object.hasOwn(row, "_total") && !Object.hasOwn(row, "_combAnchorGone")) return row
@@ -201,15 +213,7 @@ function drizzlePaginationResult<T extends object>(
 	options: PaginateOptions,
 ): readonly [T[], PaginationMeta] {
 	assertCursorWired(options)
-	/* read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
-	if (items.some((item) => Number((item as Record<string, unknown>)["_combAnchorGone"]) === 1)) {
-		throw new CombError({
-			cause:
-				"the row this cursor resumes from was renamed or deleted, and no bound is safe under its collation; start the list again",
-			errorKey: combErrorKeys.INVALID_CURSOR,
-			status: "bad_request",
-		})
-	}
+	refuseGoneAnchor(items)
 	const hasMore = items.length > query.limit
 	const sliced = hasMore ? items.slice(0, query.limit) : items
 
@@ -253,4 +257,12 @@ const queryHelpers: {
 	project: drizzleProject,
 }
 
-export { type CursorOptions, type DrizzleListOptions, type PaginateOptions, queryHelpers }
+export {
+	applySelect,
+	type CursorOptions,
+	type DrizzleListOptions,
+	mintFrom,
+	type PaginateOptions,
+	queryHelpers,
+	refuseGoneAnchor,
+}
