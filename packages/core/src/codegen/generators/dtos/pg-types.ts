@@ -66,14 +66,34 @@ const REAL =
    refuses a bit set past its prefix length, through comb's own isCidr */
 const INET = "z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()])"
 
+/*
+ * The spellings Postgres takes for a MAC address: octets of one or two hex digits each, all split
+ * by `:` or all by `-`; two halves of six digits; groups of four split by `.` or `-`; or the digits
+ * bare. A macaddr8 takes eight octets, or six, which it widens with ff:fe.
+ */
+const MACADDR =
+	'z.string().regex(/^(?:[\\da-f]{1,2}([:-])(?:[\\da-f]{1,2}\\1){4}[\\da-f]{1,2}|[\\da-f]{6}[:-][\\da-f]{6}|[\\da-f]{4}([.-])[\\da-f]{4}\\2[\\da-f]{4}|[\\da-f]{12})$/i, { message: "Must be a MAC address of six octets" })'
+const MACADDR8 =
+	'z.string().regex(/^(?:[\\da-f]{1,2}([:-])(?:[\\da-f]{1,2}\\1){4}(?:(?:[\\da-f]{1,2}\\1){2})?[\\da-f]{1,2}|[\\da-f]{6}[:-](?:[\\da-f]{6}|[\\da-f]{10})|[\\da-f]{8}[:-][\\da-f]{8}|[\\da-f]{4}([.-])[\\da-f]{4}\\2[\\da-f]{4}(?:\\2[\\da-f]{4})?|[\\da-f]{12}|[\\da-f]{16})$/i, { message: "Must be a MAC address of six or eight octets" })'
+
+/** A bit(n) string, drizzle's bit always declaring n: exactly n bits, as an insert takes it (a cast pads or cuts) */
+function bitString(sqlType: string): string {
+	const length = Number((/^bit\((\d+)\)/.exec(sqlType) as RegExpExecArray)[1])
+	return `z.string().regex(/^[01]{${length}}$/, { message: "Must be exactly ${length} bits" })`
+}
+
 /* each data type drizzle gives a Postgres column, and its rule */
 // lookup-table: a data type's write rule
 const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> = {
 	number: ({ sqlType }) => numericNumber(sqlType),
 	"number float": () => REAL,
+	"string binary": ({ sqlType }) => bitString(sqlType),
 	"string cidr": () => "cidrSchema",
 	"string date": () => "z.iso.date()",
 	"string inet": () => INET,
+	"string interval": () => "z.iso.duration()",
+	"string macaddr": () => MACADDR,
+	"string macaddr8": () => MACADDR8,
 	"string int64": () => INT64_TEXT,
 	"string numeric": ({ sqlType }) => numericText(sqlType),
 	"string time": ({ sqlType }) => (sqlType.startsWith("time with time zone") ? TIMETZ : "z.iso.time()"),

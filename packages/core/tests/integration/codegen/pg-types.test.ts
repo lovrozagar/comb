@@ -29,9 +29,13 @@ const COLUMNS = `{
 	r: real("r"),
 	ip: inet("ip"),
 	net: cidr("net"),
+	mac: macaddr("mac"),
+	mac8: macaddr8("mac8"),
+	bits: bit("bits", { dimensions: 3 }),
+	iv: interval("iv"),
 }`
 const DDL =
-	"CREATE TEMP TABLE kinds (id text PRIMARY KEY, d date, ts timestamp, tz timestamptz, t time, tt timetz, n52 numeric(5,2), n3 numeric(3), nn numeric, nr numeric(5,2), b bigint, r real, ip inet, net cidr)"
+	"CREATE TEMP TABLE kinds (id text PRIMARY KEY, d date, ts timestamp, tz timestamptz, t time, tt timetz, n52 numeric(5,2), n3 numeric(3), nn numeric, nr numeric(5,2), b bigint, r real, ip inet, net cidr, mac macaddr, mac8 macaddr8, bits bit(3), iv interval)"
 
 /** [column, value, whether the write DTO takes it, whether Postgres does] */
 type Case = [column: string, value: number | string, dto: boolean, pg: boolean]
@@ -119,6 +123,42 @@ const CASES: Case[] = [
 	["net", "192.168.0.0/33", false, false],
 	/* stricter than Postgres, listed in the 0.14 changelog: an abbreviated network */
 	["net", "10.1", false, true],
+	["mac", "08:00:2b:01:02:03", true, true],
+	["mac", "08-00-2B-01-02-03", true, true],
+	["mac", "08002b:010203", true, true],
+	["mac", "0800.2b01.0203", true, true],
+	["mac", "0800-2b01-0203", true, true],
+	["mac", "08002b010203", true, true],
+	["mac", "8:0:2b:1:2:3", true, true],
+	["mac", "08:00-2b:01:02:03", false, false],
+	["mac", "08:00:2b:01:02", false, false],
+	["mac", "08:00:2b:01:02:03:04:05", false, false],
+	["mac", "08:00:2g:01:02:03", false, false],
+	["mac8", "08:00:2b:01:02:03:04:05", true, true],
+	["mac8", "08002b:0102030405", true, true],
+	["mac8", "0800.2b01.0203.0405", true, true],
+	["mac8", "08002b01:02030405", true, true],
+	["mac8", "08002b0102030405", true, true],
+	/* six octets, which macaddr8 widens with ff:fe */
+	["mac8", "08:00:2b:01:02:03", true, true],
+	["mac8", "08002b010203", true, true],
+	["mac8", "08:00:2b:01:02:03:04", false, false],
+	["mac8", "08:00:2b:01:02:03:04:05:06", false, false],
+	["bits", "101", true, true],
+	["bits", "000", true, true],
+	["bits", "10", false, false],
+	["bits", "1010", false, false],
+	["bits", "102", false, false],
+	["iv", "P1Y2M3DT4H5M6S", true, true],
+	["iv", "PT0.5S", true, true],
+	["iv", "P1W", true, true],
+	["iv", "P", false, false],
+	["iv", "-P1D", false, false],
+	/* stricter than Postgres, listed in the 0.14 changelog: a negative or fractional part, the alternative format, and Postgres's own spelling */
+	["iv", "P-1D", false, true],
+	["iv", "P1.5Y", false, true],
+	["iv", "P0001-02-03T04:05:06", false, true],
+	["iv", "1 day", false, true],
 ]
 
 /** Whether Postgres stores `value` in `column` */
@@ -136,7 +176,7 @@ async function stored(client: pg.Client, [column, value]: [string, number | stri
 async function kindsDtos(): Promise<{ create: z.ZodObject; read: z.ZodObject }> {
 	const dtos = await generatedDtos(
 		"f50",
-		`import { bigint, cidr, date, inet, numeric, real, text, time, timestamp } from "drizzle-orm/pg-core"\nexport const kinds = pgTable("kinds", ${COLUMNS})`,
+		`import { bigint, bit, cidr, date, inet, interval, macaddr, macaddr8, numeric, real, text, time, timestamp } from "drizzle-orm/pg-core"\nexport const kinds = pgTable("kinds", ${COLUMNS})`,
 		{ dialect: "postgres" },
 	)
 	return {
@@ -192,7 +232,7 @@ describe("a plain Postgres column's write DTO, by its data type (F50)", () => {
 		const { rows } = await sessions
 			.pg()
 			.query(
-				"SELECT id, d::text AS d, ts::text AS ts, tz::text AS tz, t::text AS t, tt::text AS tt, n52::text AS n52, n3::text AS n3, nn::text AS nn, nr::float8 AS nr, b::text AS b, r, ip::text AS ip, net::text AS net FROM kinds",
+				"SELECT id, d::text AS d, ts::text AS ts, tz::text AS tz, t::text AS t, tt::text AS tt, n52::text AS n52, n3::text AS n3, nn::text AS nn, nr::float8 AS nr, b::text AS b, r, ip::text AS ip, net::text AS net, mac::text AS mac, mac8::text AS mac8, bits::text AS bits, iv::text AS iv FROM kinds",
 			)
 		expect(read.safeParse(rows[0]).success).toBe(true)
 	})

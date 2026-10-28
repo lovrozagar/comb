@@ -48,6 +48,16 @@ describe("pgWriteRule: a plain Postgres column's write rule by its data type (F5
 		expect(check('numeric("v", { mode: "number", precision: 3 })').safeParse(999.5).success).toBe(false)
 	})
 
+	/* F50: a Postgres data type with no rule is refused, never typed as plain text, naming what comb types */
+	it("refuses a Postgres type comb has no rule for, listing the ones it types", () => {
+		expect(() => rule('sparsevec("v", { dimensions: 3 })')).toThrow(
+			/fixture\.v: comb has no rule for a PgSparseVector column \(string sparsevec\); build it with a c helper, or as drizzle text, varchar, char, uuid, .*inet, cidr, macaddr, macaddr8, bit/,
+		)
+		expect(rule('bit("v", { dimensions: 3 })')).toBe(
+			'z.string().regex(/^[01]{3}$/, { message: "Must be exactly 3 bits" })',
+		)
+	})
+
 	it("is the create and update DTOs' rule, and a read keeps the plain type", () => {
 		expect(pgSchema('date("v").notNull()', "create")).toBe("z.iso.date()")
 		expect(pgSchema('date("v")', "update")).toBe("z.iso.date().nullable().optional()")

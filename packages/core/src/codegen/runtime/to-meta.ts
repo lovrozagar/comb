@@ -98,8 +98,44 @@ const isFilled = (column: SnapshotColumn, kind: string | null) =>
 	TIMESTAMP_KINDS.has(kind ?? "") ||
 	(Object.hasOwn(TIMESTAMP_KEYS, column.key) && (column.hasDefault || column.onUpdate))
 
-/* what a drizzle column with no comb helper may hold for a DTO to type it: text, numbers, a boolean, JSON */
-const TYPABLE = /^(?:string|number|boolean$|object json$)/
+/*
+ * The data types drizzle gives a column that comb types with no c helper, each by its own rule: text,
+ * numbers, a boolean and JSON on both dialects, and each Postgres type with one (F50). Any other is
+ * refused rather than typed as plain text, a type drizzle adds later among them.
+ */
+// lookup-table: the data types a plain drizzle column may have
+const TYPABLE: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"boolean",
+	"number",
+	"number double",
+	"number float",
+	"number int16",
+	"number int32",
+	"number int53",
+	"object json",
+	"string",
+	"string binary",
+	"string cidr",
+	"string date",
+	"string enum",
+	"string inet",
+	"string int64",
+	"string interval",
+	"string macaddr",
+	"string macaddr8",
+	"string numeric",
+	"string time",
+	"string timestamp",
+	"string uuid",
+])
+
+/* the plain drizzle columns comb types, by dialect, as a refusal names them */
+// lookup-table: a dialect's typable drizzle columns
+const TYPED_COLUMNS = {
+	postgres:
+		"text, varchar, char, uuid, date, timestamp, time and interval (in string mode), numeric, smallint, integer, bigint, serial, real, double precision, boolean, json, jsonb, inet, cidr, macaddr, macaddr8, bit or an enum",
+	sqlite: "text, integer, real, numeric, boolean or json",
+} as const
 
 /** What a column's `c` helper recorded, as FieldMeta names it; a plain drizzle column's own enum values */
 function combFactsOf(
@@ -120,9 +156,9 @@ function combFactsOf(
 function fieldOf(column: SnapshotColumn, { file, table, tables }: Build): FieldMeta {
 	const kind = (column.comb?.kind ?? null) as CombColumnKind | null
 	const place = `${file}: ${table.exportName}.${column.key}`
-	if (kind === null && !TYPABLE.test(column.dataType))
+	if (kind === null && !TYPABLE.has(column.dataType))
 		throw new Error(
-			`${place}: comb has no rule for a ${column.columnType} column (${column.dataType}); build it with a c helper, or as drizzle text, varchar, integer, real, boolean or json`,
+			`${place}: comb has no rule for a ${column.columnType} column (${column.dataType}); build it with a c helper, or as drizzle ${TYPED_COLUMNS[table.dialect]}`,
 		)
 	const filled = isFilled(column, kind)
 	const constraints = fieldConstraintsOf(column.comb?.constraints ?? {}, { fieldName: column.key, filled, place })
