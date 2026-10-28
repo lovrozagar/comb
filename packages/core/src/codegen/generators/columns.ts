@@ -14,6 +14,7 @@ import { propertyAccess, propertyName, snakeToCamel, stringLiteral } from "../ut
 import { readStaged, type Staged, writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
 import { exportKey, type ExportTarget, ownsKey, readExports } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
+import { qualifiedName } from "../utils/table-name.ts"
 
 type ColumnsConfig = {
 	filePrefix?: string | undefined
@@ -60,7 +61,8 @@ export function generateColumns(ctx: GeneratorContext, config: ColumnsConfig): v
 			.filter((f) => !f.constraints.private)
 			.map((f) => f.name)
 			.sort(),
-		sqlName: t.sqlName,
+		/* auth.users for a pgSchema's table, which a bare users would send raw SQL to another (F51) */
+		sqlName: qualifiedName(t),
 		varName: t.varName,
 	}))
 

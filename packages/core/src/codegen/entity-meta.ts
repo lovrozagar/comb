@@ -8,6 +8,7 @@
 import type { CombEntityMetaInput } from "../meta.ts"
 import { isReference } from "./analyze-field.ts"
 import type { FieldMeta, TableMeta, UniqueIndexMeta } from "./analyzer-types.ts"
+import { qualifiedName } from "./utils/table-name.ts"
 
 /**
  * Whether a field is absent from the generated update body.
@@ -131,7 +132,7 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 		identity: primaryKey.name,
 		immutable,
 		kind: "entity",
-		name: table.sqlName,
+		name: qualifiedName(table),
 		/* a private name never reaches the document (docs/meta-contract.md §8) */
 		softDelete: published.some((f) => f.name === table.timestamps.names.deletedAt)
 			? table.timestamps.names.deletedAt

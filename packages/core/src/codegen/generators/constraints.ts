@@ -7,6 +7,7 @@ import path from "node:path"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { pgIdentifier } from "../../identifier.ts"
 import { writeGenFile } from "../utils/fs.ts"
+import { errorKeyPrefix, qualifiedName } from "../utils/table-name.ts"
 import { enumCheckName } from "./enum-checks.ts"
 import {
 	type Constraint,
@@ -34,7 +35,7 @@ function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 	for (const field of table.fields.filter((f) => f.unique !== null)) {
 		unique[field.sqlName] = conflict(
 			`A record with this ${field.name} value already exists`,
-			`${table.sqlName}_${field.name}_duplicate`,
+			`${errorKeyPrefix(table)}_${field.name}_duplicate`,
 		)
 	}
 	/* a partial index fails with the same "UNIQUE constraint failed: <table>.<column>" as a full one */
@@ -45,7 +46,7 @@ function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 			columns.length === 1
 				? `A record with this ${columns[0]} value already exists`
 				: `A record with this ${columns.join(" and ")} combination already exists`
-		unique[sqlNames.join(",")] = conflict(cause, `${table.sqlName}_${columns.join("_")}_duplicate`)
+		unique[sqlNames.join(",")] = conflict(cause, `${errorKeyPrefix(table)}_${columns.join("_")}_duplicate`)
 	}
 	/* an index on an expression is reported by its name, which the handlers look up under unique (F14) */
 	for (const { expression, name } of table.expressionIndexes)
@@ -73,7 +74,7 @@ function checkVerdict(name: string, expression: string): Omit<Constraint, "error
 
 /** A CHECK's name under its table, which a name already starting with the table carries once (F35) */
 const keyed = (table: TableMeta, name: string) =>
-	name.startsWith(`${table.sqlName}_`) ? name : `${table.sqlName}_${name}`
+	name.startsWith(`${errorKeyPrefix(table)}_`) ? name : `${errorKeyPrefix(table)}_${name}`
 
 /**
  * The SQL the reader renders comb's enum CHECK of a column to, once a table applies it: the column
@@ -92,7 +93,7 @@ function declaredChecks(table: TableMeta, enums: readonly FieldMeta[]): TableMet
 		if (field === undefined) return true
 		if (chk.expression === enumCheckExpression(field.sqlName, field.enumValues as string[])) return false
 		throw new Error(
-			`${table.sqlName}: the CHECK ${chk.name} takes the name comb gives the enum CHECK of ${table.sqlName}.${field.name}, but checks something else; rename it`,
+			`${qualifiedName(table)}: the CHECK ${chk.name} takes the name comb gives the enum CHECK of ${qualifiedName(table)}.${field.name}, but checks something else; rename it`,
 		)
 	})
 }
@@ -115,17 +116,17 @@ function checksOf(table: TableMeta, dialect: Dialect): Record<string, Constraint
 		entries.push([
 			name,
 			key(name),
-			{ ...checkVerdict(name, ""), errorKey: `${table.sqlName}_${field.name}_enum_invalid` },
+			{ ...checkVerdict(name, ""), errorKey: `${errorKeyPrefix(table)}_${field.name}_enum_invalid` },
 		])
 	}
 	const out: Record<string, Constraint> = {}
 	const declared = new Map<string, string>()
 	for (const [name, reported, constraint] of entries) {
 		const first = declared.get(reported)
-		if (first === name) throw new Error(`${table.sqlName}: two CHECKs are named ${name}; rename one`)
+		if (first === name) throw new Error(`${qualifiedName(table)}: two CHECKs are named ${name}; rename one`)
 		if (first !== undefined)
 			throw new Error(
-				`${table.sqlName}: the CHECKs ${first} and ${name} share the 63 bytes Postgres keeps of their names; rename one`,
+				`${qualifiedName(table)}: the CHECKs ${first} and ${name} share the 63 bytes Postgres keeps of their names; rename one`,
 			)
 		declared.set(reported, name)
 		out[reported] = constraint
@@ -136,14 +137,14 @@ function checksOf(table: TableMeta, dialect: Dialect): Record<string, Constraint
 function constraintsOf(table: TableMeta, dialect: Dialect): TableConstraints {
 	const entry: TableConstraints = {}
 	if (table.fields.some((f) => f.isPrimaryKey) || table.hasCompositePrimaryKey) {
-		entry.primaryKey = conflict("Record with this ID already exists", `${table.sqlName}_id_duplicate`)
+		entry.primaryKey = conflict("Record with this ID already exists", `${errorKeyPrefix(table)}_id_duplicate`)
 	}
 	const fkFields = table.fields.filter((f) => f.foreignKey !== null)
 	if (fkFields.length > 0) {
 		entry.foreignKey = Object.fromEntries(
 			fkFields.map((field) => [
 				field.sqlName,
-				conflict("Referenced record does not exist", `${table.sqlName}_${field.name}_reference_not_found`),
+				conflict("Referenced record does not exist", `${errorKeyPrefix(table)}_${field.name}_reference_not_found`),
 			]),
 		)
 	}
@@ -165,7 +166,7 @@ function referencedColumns(tables: readonly TableMeta[]): Map<string, string[]> 
 		const target = tables.find((table) => table.varName === fk.refTable) as TableMeta
 		for (const column of fk.key?.refColumns ?? [fk.refColumn]) {
 			const { sqlName } = target.fields.find((field) => field.name === column) as FieldMeta
-			out.set(target.sqlName, (out.get(target.sqlName) ?? new Set()).add(sqlName))
+			out.set(qualifiedName(target), (out.get(qualifiedName(target)) ?? new Set()).add(sqlName))
 		}
 	}
 	return new Map([...out].map(([table, columns]) => [table, [...columns].sort()]))
@@ -183,9 +184,9 @@ export function buildConstraintMap(tables: readonly TableMeta[], dialect: Dialec
 	const referenced = referencedColumns(tables)
 	for (const table of tables) {
 		const entry = constraintsOf(table, dialect)
-		const columns = referenced.get(table.sqlName)
+		const columns = referenced.get(qualifiedName(table))
 		if (columns !== undefined) entry.referenced = columns
-		for (const [place, constraint] of placed(table.sqlName, entry)) {
+		for (const [place, constraint] of placed(qualifiedName(table), entry)) {
 			const first = owner.get(constraint.errorKey)
 			if (first !== undefined)
 				throw new Error(
@@ -193,7 +194,7 @@ export function buildConstraintMap(tables: readonly TableMeta[], dialect: Dialec
 				)
 			owner.set(constraint.errorKey, place)
 		}
-		if (Object.keys(entry).length > 0) map[table.sqlName] = entry
+		if (Object.keys(entry).length > 0) map[qualifiedName(table)] = entry
 	}
 	return map
 }

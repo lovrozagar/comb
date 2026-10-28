@@ -9,6 +9,7 @@
 import * as path from "node:path"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { sqlIdentifier } from "../utils/case.ts"
+import { qualifiedName, tableIdentifier } from "../utils/table-name.ts"
 import { writeGenFile, writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import type { Column, Relation, Table, TableKey } from "./diagram-types.ts"
@@ -91,20 +92,25 @@ function keyOf(
 	if (fk.key === undefined) {
 		const column = sqlNameOf(to, fk.refColumn)
 		return {
-			reference: { column, onDelete, onUpdate, table: to.sqlName },
-			relation: { from: `${meta.sqlName}.${field.sqlName}`, onDelete, onUpdate, to: `${to.sqlName}.${column}` },
+			reference: { column, onDelete, onUpdate, table: qualifiedName(to) },
+			relation: {
+				from: `${qualifiedName(meta)}.${field.sqlName}`,
+				onDelete,
+				onUpdate,
+				to: `${qualifiedName(to)}.${column}`,
+			},
 		}
 	}
 	const columns = fk.key.columns.map((name) => sqlNameOf(meta, name))
 	const refColumns = fk.key.refColumns.map((name) => sqlNameOf(to, name))
 	return {
 		relation: {
-			from: `${meta.sqlName}.(${columns.join(", ")})`,
+			from: `${qualifiedName(meta)}.(${columns.join(", ")})`,
 			onDelete,
 			onUpdate,
-			to: `${to.sqlName}.(${refColumns.join(", ")})`,
+			to: `${qualifiedName(to)}.(${refColumns.join(", ")})`,
 		},
-		tableKey: { columns, onDelete, onUpdate, refColumns, table: to.sqlName },
+		tableKey: { columns, onDelete, onUpdate, refColumns, table: qualifiedName(to) },
 	}
 }
 
@@ -138,26 +144,35 @@ function transformTables(
 
 		if (columns.length > 0) {
 			const key = meta.fields.filter((field) => field.inCompositeKey).map((field) => field.sqlName)
-			tables.push({ columns, foreignKeys, key, name: meta.sqlName })
+			tables.push({ columns, foreignKeys, key, name: qualifiedName(meta) })
 		}
 	}
 
 	return { relations, tables }
 }
 
-/** A key's REFERENCES clause toward `columns` of `table`, with its rules */
+/** A key's REFERENCES clause toward `columns` of the table SQL names `identifier`, with its rules */
 function referencesOf(
-	table: string,
+	identifier: string,
 	columns: readonly string[],
 	{ onDelete, onUpdate }: { onDelete?: string | undefined; onUpdate?: string | undefined },
 ): string {
-	let clause = ` REFERENCES ${sqlIdentifier(table)}(${columns.map(sqlIdentifier).join(", ")})`
+	let clause = ` REFERENCES ${identifier}(${columns.map(sqlIdentifier).join(", ")})`
 	if (onDelete) clause += ` ON DELETE ${onDelete.toUpperCase()}`
 	if (onUpdate) clause += ` ON UPDATE ${onUpdate.toUpperCase()}`
 	return clause
 }
 
-function generateDDL(tables: Table[], { dbName, dialect }: { dbName: string; dialect: "postgres" | "sqlite" }): string {
+/** The outline's DDL; `identifiers` gives each table, by its qualified name, as SQL names it (F51) */
+function generateDDL(
+	tables: Table[],
+	{
+		dbName,
+		dialect,
+		identifiers,
+	}: { dbName: string; dialect: "postgres" | "sqlite"; identifiers: Map<string, string> },
+): string {
+	const identifier = (name: string) => identifiers.get(name) as string
 	const lines: string[] = []
 	lines.push(`-- ${dbName} Database Schema (${dialect === "postgres" ? "Postgres" : "SQLite"})`)
 	lines.push(`-- Tables: ${tables.length}`)
@@ -168,20 +183,20 @@ function generateDDL(tables: Table[], { dbName, dialect }: { dbName: string; dia
 	lines.push("")
 
 	for (const table of inDependencyOrder(tables)) {
-		lines.push(`CREATE TABLE ${sqlIdentifier(table.name)} (`)
+		lines.push(`CREATE TABLE ${identifier(table.name)} (`)
 
 		const colDefs: string[] = []
 		for (const col of table.columns) {
 			let def = `  ${sqlIdentifier(col.name)} ${col.type}`
 			if (col.primaryKey) def += " PRIMARY KEY"
 			if (!col.nullable && !col.primaryKey) def += " NOT NULL"
-			if (col.reference) def += referencesOf(col.reference.table, [col.reference.column], col.reference)
+			if (col.reference) def += referencesOf(identifier(col.reference.table), [col.reference.column], col.reference)
 			colDefs.push(def)
 		}
 		if (table.key.length > 0) colDefs.push(`  PRIMARY KEY (${table.key.map(sqlIdentifier).join(", ")})`)
 		for (const fk of table.foreignKeys) {
 			colDefs.push(
-				`  FOREIGN KEY (${fk.columns.map(sqlIdentifier).join(", ")})${referencesOf(fk.table, fk.refColumns, fk)}`,
+				`  FOREIGN KEY (${fk.columns.map(sqlIdentifier).join(", ")})${referencesOf(identifier(fk.table), fk.refColumns, fk)}`,
 			)
 		}
 
@@ -214,7 +229,8 @@ export function generateDiagrams(ctx: GeneratorContext, config: DiagramsConfig):
 	const { relations, tables } = transformTables(ctx.analysis.tables, ctx.dialect)
 
 	/* Generate DDL for ChartDB */
-	const ddl = generateDDL(tables, { dbName, dialect: ctx.dialect })
+	const identifiers = new Map(ctx.analysis.tables.map((meta) => [qualifiedName(meta), tableIdentifier(meta)]))
+	const ddl = generateDDL(tables, { dbName, dialect: ctx.dialect, identifiers })
 	const ddlPath = path.join(outputDir, `${dbName}-schema.gen.sql`)
 	writeGenFile(ddlPath, ddl, { generator: "comb", staged: ctx.staged })
 

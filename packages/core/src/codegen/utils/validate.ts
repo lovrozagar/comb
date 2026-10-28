@@ -7,6 +7,7 @@
 import { CURSOR_TIEBREAK_COLUMN } from "../../query/cursor.ts"
 import type { AnalysisResult, FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { camelToKebab, snakeToPascal } from "./case.ts"
+import { qualifiedName } from "./table-name.ts"
 
 type ValidationResult = {
 	errors: string[]
@@ -35,9 +36,10 @@ function checkNames(tables: readonly TableMeta[], report: ValidationResult): voi
 	const paths = new Map<string, string>()
 	for (const table of tables) {
 		checkPaths(table.varName, paths, report)
-		if (sqlNames.has(table.sqlName))
-			report.errors.push(`Duplicate SQL table name: "${table.sqlName}" (var: ${table.varName})`)
-		sqlNames.add(table.sqlName)
+		/* auth.users beside the app's users is two tables (F51) */
+		const name = qualifiedName(table)
+		if (sqlNames.has(name)) report.errors.push(`Duplicate SQL table name: "${name}" (var: ${table.varName})`)
+		sqlNames.add(name)
 		const typeName = snakeToPascal(table.varName)
 		const typed = typeNames.get(typeName)
 		if (typed !== undefined && typed !== table.varName)

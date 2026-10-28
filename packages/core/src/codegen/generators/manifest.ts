@@ -10,6 +10,7 @@ import { deriveEntityMeta, isExcludedFromUpdate, publishedUniqueIndexes } from "
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
+import { qualifiedName } from "../utils/table-name.ts"
 
 /**
  * Manifest format version.
@@ -132,7 +133,7 @@ function toEntity(table: TableMeta): ManifestEntity {
 		compositePrimaryKey: table.hasCompositePrimaryKey,
 		identity: meta?.identity ?? null,
 		idPrefix: table.idPrefix,
-		name: table.sqlName,
+		name: qualifiedName(table),
 		relations,
 		softDelete: meta?.softDelete ?? null,
 		tenantColumn: meta?.tenantColumn ?? null,
