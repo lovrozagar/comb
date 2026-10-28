@@ -12,7 +12,6 @@ import { type CodegenConfig, type DatabaseCodegen, databaseIn, loadCombConfig, t
 import { CliError, type CliIo } from "./output.ts"
 import { dbIdentifiers } from "../codegen/utils/case.ts"
 import { GENERATORS, type GeneratorName } from "../codegen/config.ts"
-import { tsconfigOptions } from "../codegen/runtime/ts-options.mjs"
 import { importStyleOf } from "../codegen/utils/paths.ts"
 
 type Generator = GeneratorName
@@ -203,6 +202,8 @@ async function generate(
 	)
 	assertDialect(database, analysis.dialect)
 	const tablesDir = path.dirname(database.tablesPath)
+	/* loaded with the run, as the generators are: ts-morph is an optional peer, and the cli entry loads without it */
+	const { tsconfigOptions } = await import("../codegen/runtime/ts-options.mjs")
 	const plan: Plan = {
 		ctx: {
 			analysis,
