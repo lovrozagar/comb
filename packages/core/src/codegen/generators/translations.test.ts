@@ -130,3 +130,25 @@ export const seat = sqliteTable("seat", { id: c.id("set"), kind: c.enum("kind", 
 		expect(en).not.toContain("Please try again")
 	})
 })
+
+/* G2 of plan 14: the table-level keys F66 gives a private column's constraints, in English */
+describe("generateTranslations: a private column's keys (F66)", () => {
+	it("says each kind's generic cause, never another's", () => {
+		fromTables(`import { sql } from "drizzle-orm"
+import { check, sqliteTable } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+export const user = sqliteTable("user", { id: c.id("usr") })
+export const doc = sqliteTable("doc", {
+	id: c.id("doc"),
+	secret: c.text("secret", { private: true }).unique(),
+	_owner: c.ref("owner").references(() => user.id),
+	_kind: c.enum("kind", ["a", "b"]),
+}, (t) => [check("doc_secret_len", sql\`length(\${t.secret}) < 64\`)])
+`)
+		const en = english("db.test")
+		expect(en).toContain('doc_duplicate: "A record with these values already exists"')
+		expect(en).toContain('doc_reference_not_found: "Referenced record does not exist"')
+		expect(en).toContain('doc_value_invalid: "This value is not one of the allowed values"')
+		expect(en).toContain('doc_check_failed: "This value breaks a rule of the record"')
+	})
+})

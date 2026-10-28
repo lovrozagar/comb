@@ -24,6 +24,8 @@ type ErrorKey = { cause: string; key: string }
  */
 function englishMessage({ cause, key }: ErrorKey): string {
 	if (key.endsWith("_duplicate")) {
+		/* a private column's constraint names no column, so its message names none either (F66) */
+		if (cause === "A record with these values already exists") return cause
 		/* a composite unique names its columns together, as its constraint's cause does */
 		const columns = /^A record with this (.+) combination already exists$/.exec(cause)?.[1]
 		if (columns !== undefined) return `A record with this ${columns.replaceAll("_", " ")} combination already exists`
@@ -33,7 +35,9 @@ function englishMessage({ cause, key }: ErrorKey): string {
 	}
 	if (key.endsWith("_reference_not_found")) return "Referenced record does not exist"
 	/* the rest are 400s no retry fixes (F34): an enum value, or a CHECK, by the cause it names when it names one */
-	if (key.endsWith("_enum_invalid")) return "This value is not one of the allowed values"
+	/* a private column's enum CHECK keys under its table (`<table>_value_invalid`, F66), any other under its column */
+	if (key.endsWith("_enum_invalid") || key.endsWith("_value_invalid"))
+		return "This value is not one of the allowed values"
 	return cause === "Check constraint violated" ? "This value breaks a rule of the record" : cause
 }
 
