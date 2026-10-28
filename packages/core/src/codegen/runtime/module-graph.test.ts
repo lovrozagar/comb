@@ -183,3 +183,32 @@ describe("runtimeSpecifiers: a CommonJS module's top-level requires", () => {
 		}
 	})
 })
+
+/* F52: the walk follows what the runtime loads, not what TypeScript resolves for types */
+describe("moduleGraph: the files the runtime loads", () => {
+	it("walks a declaration's runtime file, and no asset or declaration that has none", () => {
+		write({
+			"a.ts": `import roles from "./roles.json" with { type: "json" }
+import { b } from "./b.js"
+import { c } from "./c.mjs"
+import { d } from "./d.cjs"
+import { e } from "./e.js"
+export const all = [roles, b, c, d, e]
+`,
+			"roles.json": "[]",
+			"b.js": "export const b = 1\n",
+			"b.d.ts": "export declare const b: number\n",
+			"c.mjs": "export const c = 1\n",
+			"c.d.mts": "export declare const c: number\n",
+			"d.cjs": "exports.d = 1\n",
+			"d.d.cts": "export declare const d: number\n",
+			/* a declaration with no runtime file beside it: nothing to load */
+			"e.d.ts": "export declare const e: number\n",
+			"tsconfig.json": JSON.stringify({
+				compilerOptions: { allowJs: false, module: "nodenext", resolveJsonModule: true },
+			}),
+		})
+		const files = moduleGraph(path.join(dir, "a.ts")).files.map((file) => path.relative(dir, file))
+		expect(files).toEqual(["a.ts", "b.js", "c.mjs", "d.cjs"])
+	})
+})

@@ -5,6 +5,7 @@
  * would. Type-only imports load nothing at runtime and are left out. The same walk runs under bun
  * and node, so what the reader finds by identity is the same on both.
  */
+import fs from "node:fs"
 import path from "node:path"
 import { ts } from "ts-morph"
 import { compilerOptionsFor, isCommonJs, transpiled } from "./ts-options.mjs"
@@ -51,6 +52,22 @@ function runtimeSpecifiers(file: string): string[] {
 	return out
 }
 
+/* the sources a runtime runs; a JSON or other asset a module imports holds no table, and is no TypeScript to read (F52) */
+const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx)$/
+
+/**
+ * The file the runtime loads for a project file TypeScript resolved: a source as it is, and a
+ * declaration file's runtime file beside it (`.d.ts` describes the `.js`, `.d.mts` the `.mjs`,
+ * `.d.cts` the `.cjs`), as checked-in generated code ships; undefined for an asset, or a
+ * declaration with no runtime file (F52)
+ */
+function runtimeFile(resolved: string): string | undefined {
+	const declaration = /\.d(\.[cm]?)ts$/.exec(resolved)
+	if (declaration === null) return SOURCE.test(resolved) ? resolved : undefined
+	const runtime = `${resolved.slice(0, -declaration[0].length)}${declaration[1]}js`
+	return fs.existsSync(runtime) ? runtime : undefined
+}
+
 /** A package a project file imports, by the specifier it wrote */
 type PackageImport = { from: string; specifier: string }
 
@@ -68,9 +85,10 @@ function moduleGraph(tablesPath: string): ModuleGraph {
 		files.push(file)
 		for (const specifier of runtimeSpecifiers(file)) {
 			const resolved = ts.resolveModuleName(specifier, file, options, ts.sys).resolvedModule
-			const local = resolved?.isExternalLibraryImport === false && !resolved.resolvedFileName.endsWith(".d.ts")
-			if (local) queue.push(path.resolve((resolved as ts.ResolvedModuleFull).resolvedFileName))
-			else if (!specifier.startsWith(".") && !specifier.startsWith("node:")) packages.push({ from: file, specifier })
+			if (resolved?.isExternalLibraryImport === false) {
+				const runtime = runtimeFile(path.resolve(resolved.resolvedFileName))
+				if (runtime !== undefined) queue.push(runtime)
+			} else if (!specifier.startsWith(".") && !specifier.startsWith("node:")) packages.push({ from: file, specifier })
 		}
 	}
 	return { files, packages }
