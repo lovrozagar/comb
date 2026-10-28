@@ -64,7 +64,8 @@ describe("childArgs", () => {
 const tables = () => path.join(dir, "db.core.tables.ts")
 
 describe("loadSnapshot", () => {
-	it("runs the child with PATH, HOME and NODE_OPTIONS only, a minute to finish, beside the tables file", () => {
+	/* F58: the child runs where comb runs, as the app and drizzle-kit do, never beside the tables file */
+	it("runs the child with PATH, HOME and NODE_OPTIONS only, a minute to finish, in comb's working directory", () => {
 		vi.stubEnv("COMB_SECRET", "parent")
 		vi.stubEnv("NODE_OPTIONS", "--max-old-space-size=512")
 		const run = fakeRun(0, { result: { snapshot: { tables: [] } } })
@@ -73,9 +74,12 @@ describe("loadSnapshot", () => {
 		expect(cmd).toBe(process.execPath)
 		expect(Object.keys(options.exactEnv ?? {}).sort()).toEqual(["HOME", "NODE_OPTIONS", "PATH"])
 		/* the child gets the minute; codegen stops the supervisor only if it outlives the child's timeout */
-		expect(options).toMatchObject({ cwd: dir, timeoutMs: LOAD_TIMEOUT_MS + 10_000 })
+		expect(options).toMatchObject({ cwd: process.cwd(), timeoutMs: LOAD_TIMEOUT_MS + 10_000 })
 		expect(jobOf(args)).toMatchObject({ cmd: process.execPath, timeoutMs: LOAD_TIMEOUT_MS })
 		expect(LOAD_TIMEOUT_MS).toBe(60_000)
+		const given = fakeRun(0, { result: { snapshot: { tables: [] } } })
+		loadSnapshot(tables(), { cwd: "/srv/app", run: given, runtime: "bun" })
+		expect(given.calls[0]?.[2]).toMatchObject({ cwd: "/srv/app" })
 	})
 
 	it("leaves out a variable the parent does not have", () => {

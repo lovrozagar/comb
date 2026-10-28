@@ -137,7 +137,7 @@ type Database = {
 async function analyzed(tablesPath: string, io: CliIo) {
 	const { analyze } = await import("../codegen/analyzer.ts")
 	const { validateTables } = await import("../codegen/utils/validate.ts")
-	const analysis = analyze(tablesPath)
+	const analysis = analyze(tablesPath, { cwd: io.cwd })
 	const validation = validateTables(analysis)
 	if (validation.errors.length > 0) {
 		throw new CliError(["Validation errors:", ...validation.errors.map((e) => `  ${e}`)].join("\n"))

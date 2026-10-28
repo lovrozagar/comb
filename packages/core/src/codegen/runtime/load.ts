@@ -71,6 +71,11 @@ function childArgs(runtime: "bun" | "node", rest: readonly string[]): string[] {
 }
 
 type LoadOptions = {
+	/**
+	 * The working directory the module loads in: comb's own, where the app and drizzle-kit run, so a
+	 * root-relative read finds what it finds for them (F58); the process's by default
+	 */
+	cwd?: string | undefined
 	run?: Run | undefined
 	runtime?: "bun" | "node" | undefined
 	/** How long the child may take; LOAD_TIMEOUT_MS unless a test needs less */
@@ -90,7 +95,7 @@ function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
 			process.execPath,
 			supervisorArgs(runtime, { ...child, status, timeoutMs }),
 			{
-				cwd: path.dirname(path.resolve(tablesPath)),
+				cwd: options.cwd ?? process.cwd(),
 				exactEnv: childEnv(),
 				timeoutMs: timeoutMs + SUPERVISOR_GRACE_MS,
 			},

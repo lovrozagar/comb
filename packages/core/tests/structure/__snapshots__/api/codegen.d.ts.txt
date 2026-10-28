@@ -14,8 +14,13 @@ export { validateTables } from "./utils/validate.ts";
  * never load or read source themselves.
  */
 import type { AnalysisResult, TableMeta } from "./analyzer-types.ts";
-/** Load and analyze a tables file. Loading runs the module, which must be import-safe. */
-declare function analyze(tablesPath: string): AnalysisResult;
+/**
+ * Load and analyze a tables file. Loading runs the module, which must be import-safe, in `cwd`:
+ * the working directory the app runs in, the process's own by default (F58)
+ */
+declare function analyze(tablesPath: string, { cwd }?: {
+    cwd?: string | undefined;
+}): AnalysisResult;
 export { analyze };
 export type { AnalysisResult, TableMeta };
 
