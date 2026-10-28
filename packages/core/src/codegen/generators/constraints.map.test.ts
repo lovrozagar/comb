@@ -59,6 +59,36 @@ export const grant = sqliteTable("grant", { id: text("id").primaryKey(), orgId: 
 	})
 })
 
+/* F66: a private name never reaches the document, nor the 409 its constraint answers with */
+describe("buildConstraintMap: a private column's unique constraints", () => {
+	it("give a generic cause and a key by the constraint's own name, never the property's", () => {
+		const map = buildConstraintMap(
+			tablesOf(`${SQLITE}import { uniqueIndex } from "drizzle-orm/sqlite-core"
+export const doc = sqliteTable("doc", { id: text("id").primaryKey(), secret: text("secret").unique("doc_token_key"), owner: text("owner"), pin: text("pin") }, (t) => [uniqueIndex("doc_owner_pin_idx").on(t.owner, t.pin)])
+`).map((table) => ({
+				...table,
+				fields: table.fields.map((field) =>
+					field.name === "secret" || field.name === "pin"
+						? { ...field, constraints: { ...field.constraints, private: true } }
+						: field,
+				),
+			})),
+		)
+		expect(map["doc"]?.unique).toEqual({
+			"owner,pin": {
+				cause: "A record with these values already exists",
+				errorKey: "doc_owner_pin_idx_duplicate",
+				statusKey: "conflict",
+			},
+			secret: {
+				cause: "A record with these values already exists",
+				errorKey: "doc_token_key_duplicate",
+				statusKey: "conflict",
+			},
+		})
+	})
+})
+
 describe("buildConstraintMap: a CHECK name Postgres cuts (F21)", () => {
 	const LONG = "organization_membership_invitation_seats_must_stay_inside_the_allowed_range"
 	const source = (dialect: string) =>

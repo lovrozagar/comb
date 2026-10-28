@@ -33,15 +33,22 @@ const conflict = (cause: string, errorKey: string): Constraint => ({ cause, erro
 function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 	const unique: Record<string, Constraint> = {}
 	for (const field of table.fields.filter((f) => f.unique !== null)) {
-		unique[field.sqlName] = conflict(
-			`A record with this ${field.name} value already exists`,
-			`${errorKeyPrefix(table)}_${field.name}_duplicate`,
-		)
+		unique[field.sqlName] = field.constraints.private
+			? hidden(field.unique as string)
+			: conflict(
+					`A record with this ${field.name} value already exists`,
+					`${errorKeyPrefix(table)}_${field.name}_duplicate`,
+				)
 	}
 	/* a partial index fails with the same "UNIQUE constraint failed: <table>.<column>" as a full one */
-	for (const { columns } of [...table.uniqueIndexes, ...table.partialUniqueIndexes]) {
+	for (const { columns, name } of [...table.uniqueIndexes, ...table.partialUniqueIndexes]) {
 		/* the engine reports the columns' SQL names; the error key keeps the property names */
-		const sqlNames = columns.map((col) => (table.fields.find((f) => f.name === col) as FieldMeta).sqlName)
+		const fields = columns.map((col) => table.fields.find((f) => f.name === col) as FieldMeta)
+		const sqlNames = fields.map((field) => field.sqlName)
+		if (fields.some((field) => field.constraints.private)) {
+			unique[sqlNames.join(",")] = hidden(name)
+			continue
+		}
 		const cause =
 			columns.length === 1
 				? `A record with this ${columns[0]} value already exists`
@@ -53,6 +60,13 @@ function uniqueOf(table: TableMeta): Record<string, Constraint> | undefined {
 		unique[name] = conflict(`A record with this ${expression} value already exists`, `${name}_duplicate`)
 	return Object.keys(unique).length > 0 ? unique : undefined
 }
+
+/**
+ * The 409 of a unique constraint that holds a private column: its cause names no column and its key
+ * comes from the constraint's own name, since both reach the client and a private name never does (F66)
+ */
+const hidden = (constraint: string): Constraint =>
+	conflict("A record with these values already exists", `${constraint}_duplicate`)
 
 /* what a violated CHECK reports when its name follows none of comb's own conventions: what the handler reports unmapped */
 const CHECK_FAILED = { cause: "Check constraint violated", statusKey: "bad_request" } as const
