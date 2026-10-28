@@ -33,12 +33,17 @@ const CASES: Case[] = [
 	["d", "tomorrow", false, true],
 	["d", "10000-01-01", false, true],
 	["ts", "2024-01-01T10:00:00", true, true],
-	["ts", "2024-01-01T10:00:00.123456Z", true, true],
+	["ts", "2024-01-01T10:00:00.123456", true, true],
 	["ts", "2024-13-01T10:00:00", false, false],
 	["ts", "soon", false, false],
+	/* stricter than Postgres, listed in the 0.14 changelog: a timestamp discards an offset or Z */
+	["ts", "2024-01-01T10:00:00+05:00", false, true],
+	["ts", "2024-01-01T10:00:00Z", false, true],
 	["tz", "2024-01-01T10:00:00+02:00", true, true],
 	["tz", "2024-01-01T10:00:00.1234567Z", true, true],
 	["tz", "2024-01-01T25:00:00Z", false, false],
+	/* stricter than Postgres, listed in the 0.14 changelog: a local time's instant depends on the session's TimeZone */
+	["tz", "2024-01-01T10:00:00", false, true],
 	["t", "10:00", true, true],
 	["t", "23:59:59.999999", true, true],
 	["t", "25:00", false, false],
@@ -90,6 +95,25 @@ describe("a plain Postgres column's write DTO, by its data type (F50)", () => {
 	it.each(CASES)("%s %j: the DTO takes it %s, Postgres %s", async (...[column, value, dto, pg]: Case) => {
 		expect(create.safeParse({ id: "k", [column]: value }).success).toBe(dto)
 		expect(await stored(column, value)).toBe(pg)
+	})
+
+	/* why each refuses what Postgres takes: the instant a timestamp or a session zone would lose */
+	it("keeps the instant of each kind's accepted form, where the refused one loses it", async () => {
+		const client = sessions.pg()
+		const local = "2024-01-01T10:00:00"
+		const instant = "2024-01-01T10:00:00+05:00"
+		expect(create.safeParse({ id: "a", ts: local, tz: instant }).success).toBe(true)
+		await client.query("INSERT INTO kinds (id, ts, tz) VALUES ('a', $1, $2)", [local, instant])
+		await client.query("INSERT INTO kinds (id, ts) VALUES ('b', $1)", [instant])
+		const at = async (id: string) =>
+			(await client.query("SELECT ts::text AS ts, (tz AT TIME ZONE 'UTC')::text AS tz FROM kinds WHERE id = $1", [id]))
+				.rows[0]
+		expect(await at("a")).toEqual({ ts: "2024-01-01 10:00:00", tz: "2024-01-01 05:00:00" })
+		/* the +05:00 is gone: the stored timestamp names 10:00 in no zone, not 05:00 UTC */
+		expect(await at("b")).toMatchObject({ ts: "2024-01-01 10:00:00" })
+		await client.query("SET TIME ZONE 'Asia/Kathmandu'")
+		await client.query("INSERT INTO kinds (id, tz) VALUES ('c', $1)", [local])
+		expect(await at("c")).toMatchObject({ tz: "2024-01-01 04:15:00" })
 	})
 
 	it("reads back whatever Postgres stores, its infinities and its own spellings included", async () => {

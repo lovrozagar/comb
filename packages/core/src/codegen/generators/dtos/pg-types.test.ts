@@ -20,9 +20,10 @@ const rule = (source: string) => pgWriteRule(parseField("v", source, { dialect: 
 describe("pgWriteRule: a plain Postgres column's write rule by its data type (F50)", () => {
 	it("gives the date and time types their ISO rule, a time with a zone its offset", () => {
 		expect(rule('date("v")')).toBe("z.iso.date()")
-		expect(rule('timestamp("v", { mode: "string" })')).toBe("z.iso.datetime({ local: true, offset: true })")
-		expect(rule('timestamp("v", { mode: "string", withTimezone: true })')).toBe(
-			"z.iso.datetime({ local: true, offset: true })",
+		/* each keeps the instant: a timestamp only a local time, a timestamptz only one with its offset */
+		expect(rule('timestamp("v", { mode: "string" })')).toMatch(/^z\.iso\.datetime\(\{ local: true \}\)\.regex\(/)
+		expect(rule('timestamp("v", { mode: "string", withTimezone: true, precision: 3 })')).toBe(
+			"z.iso.datetime({ offset: true })",
 		)
 		expect(rule('time("v")')).toBe("z.iso.time()")
 		expect(rule('time("v", { withTimezone: true })')).toMatch(/^z\.string\(\)\.regex\(.*\(\?:Z\|\[\+-\]/)

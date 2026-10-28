@@ -10,12 +10,21 @@ import type { FieldMeta } from "../../analyzer-types.ts"
 const TIMETZ =
 	"z.string().regex(/^(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|[+-](?:[01]\\d|2[0-3])(?::?[0-5]\\d)?)$/)"
 
+/*
+ * A timestamp keeps no zone: given an offset or Z it discards it, so the instant is lost. A
+ * timestamptz given a local time reads it in the session's TimeZone, so the instant depends on
+ * the server's config. Each takes only the form whose instant it keeps.
+ */
+const TIMESTAMP =
+	'z.iso.datetime({ local: true }).regex(/[^Zz]$/, { message: "Must be a local date-time, with no offset or Z, which timestamp would discard" })'
+const TIMESTAMPTZ = "z.iso.datetime({ offset: true })"
+
 /* each data type drizzle gives a Postgres column, and its rule */
 // lookup-table: a data type's write rule
 const RULES: Readonly<Record<string, (field: FieldMeta) => string>> = {
 	"string date": () => "z.iso.date()",
 	"string time": ({ sqlType }) => (sqlType.startsWith("time with time zone") ? TIMETZ : "z.iso.time()"),
-	"string timestamp": () => "z.iso.datetime({ local: true, offset: true })",
+	"string timestamp": ({ sqlType }) => (sqlType.includes("with time zone") ? TIMESTAMPTZ : TIMESTAMP),
 }
 
 /** The write rule of a plain Postgres column of `field`'s data type; undefined when the plain type is its rule */
