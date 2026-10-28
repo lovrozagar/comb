@@ -1,25 +1,7 @@
 // pg/error-handler.d.ts
 import { CombError } from "../error.ts";
 import { type ConstraintMap } from "../types.ts";
-export type PgErrorRead = {
-    code: string;
-    column: string | undefined;
-    constraint: string | undefined;
-    /** the columns in `detail`'s `Key (a, b)=(…)` */
-    keyColumns: string[];
-    /** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
-    message: string | undefined;
-    /** the SQL a wrapper such as drizzle's recorded, when one did */
-    query?: string | undefined;
-    /** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
-    referenced: boolean;
-    table: string | undefined;
-};
-/**
- * The Postgres server error inside `error`, or null when there is none. The chain is read innermost
- * first: the driver's error is the deepest, and a wrapper's own `code` never wins over it.
- */
-export declare function readPgError(error: unknown): PgErrorRead | null;
+import { type PgErrorRead, readPgError } from "./read-error.ts";
 /**
  * The CombError a PostgreSQL error is: a constraint violation through the app's maps, a value the
  * column cannot hold as a 400 (value-error.ts), a resource or availability error as its generic
@@ -28,7 +10,7 @@ export declare function readPgError(error: unknown): PgErrorRead | null;
 declare function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined;
 /** Throw the CombError classifyPgError finds for `error`; anything else is left for the caller */
 declare function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void;
-export { classifyPgError, pgErrorHandler };
+export { classifyPgError, pgErrorHandler, type PgErrorRead, readPgError };
 
 // error.d.ts
 import type { StatusKey } from "./types.ts";
@@ -110,3 +92,32 @@ export type ConstraintMap = {
 };
 /** Function signature for database error handlers */
 export type DatabaseErrorHandler = (error: unknown, constraintMaps: ConstraintMap[]) => void;
+
+// pg/read-error.d.ts
+/**
+ * A Postgres server error as the three drivers hand it over, read into one shape: node-postgres,
+ * postgres.js and Bun.SQL name its fields differently, and a wrapper such as drizzle's may carry
+ * the SQL it ran. error-handler.ts maps what this reads to a CombError.
+ */
+type PgErrorRead = {
+    code: string;
+    column: string | undefined;
+    constraint: string | undefined;
+    /** the columns in `detail`'s `Key (a, b)=(…)` */
+    keyColumns: string[];
+    /** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
+    message: string | undefined;
+    /** the SQL a wrapper such as drizzle's recorded, when one did */
+    query?: string | undefined;
+    /** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
+    referenced: boolean;
+    /** the violated table's schema, which a pgSchema's table is keyed by in the maps (F51) */
+    schema: string | undefined;
+    table: string | undefined;
+};
+/**
+ * The Postgres server error inside `error`, or null when there is none. The chain is read innermost
+ * first: the driver's error is the deepest, and a wrapper's own `code` never wins over it.
+ */
+declare function readPgError(error: unknown): PgErrorRead | null;
+export { type PgErrorRead, readPgError };

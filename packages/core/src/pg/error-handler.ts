@@ -8,104 +8,13 @@ import { type Fallback, type Found, findNamed, lookup, own, toCombError } from "
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { truncateUtf8 } from "../identifier.ts"
+import { mapTable } from "./map-table.ts"
+import { type PgErrorRead, readPgError } from "./read-error.ts"
 import { statementTable } from "../statement-head.ts"
 import { valueError } from "../value-error.ts"
 
-export type PgErrorRead = {
-	code: string
-	column: string | undefined
-	constraint: string | undefined
-	/** the columns in `detail`'s `Key (a, b)=(…)` */
-	keyColumns: string[]
-	/** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
-	message: string | undefined
-	/** the SQL a wrapper such as drizzle's recorded, when one did */
-	query?: string | undefined
-	/** a foreign key violation of a row others still reference (a delete or a key update), not of a missing parent */
-	referenced: boolean
-	table: string | undefined
-}
-
-const SQLSTATE = /^[0-9A-Z]{5}$/
-
-const text = (value: unknown): string | undefined => (typeof value === "string" && value !== "" ? value : undefined)
-
-/** The fields the three drivers put on a server error, under either name. */
-type DriverError = {
-	cause?: unknown
-	code?: unknown
-	column?: unknown
-	column_name?: unknown
-	constraint?: unknown
-	constraint_name?: unknown
-	detail?: unknown
-	errno?: unknown
-	message?: unknown
-	query?: unknown
-	table?: unknown
-	table_name?: unknown
-}
-
-function fields(error: object): DriverError {
-	return error as DriverError
-}
-
-/** The SQLSTATE of one error: node-postgres and postgres.js put it on `code`, Bun.SQL on `errno`. */
-function sqlstate(error: DriverError): string | undefined {
-	for (const value of [error.code, error.errno]) if (typeof value === "string" && SQLSTATE.test(value)) return value
-	return undefined
-}
-
-/* one name in a Key list: an identifier Postgres quoted, its doubled quotes standing for one, or
-   bare text up to a top-level comma, an expression's parentheses included (U44) */
-// per-process-constant: see above
-const KEY_NAME = /\s*(?:"((?:[^"]|"")*)"|((?:[^,()]|\((?:[^()]|\([^()]*\))*\))+))\s*(,|\)=)/y
-
-/** The columns in `detail`'s `Key (a, "b, c")=(…)`, each read as the identifier Postgres wrote */
-function keyColumns(detail: string | undefined): string[] {
-	const line = detail ?? ""
-	if (!line.startsWith("Key (")) return []
-	const columns: string[] = []
-	KEY_NAME.lastIndex = "Key (".length
-	for (let at = KEY_NAME.exec(line); at !== null; at = KEY_NAME.exec(line)) {
-		const [, quoted, bare, end] = at
-		columns.push(quoted === undefined ? (bare as string).trim() : quoted.replaceAll('""', '"'))
-		if (end === ")=") return columns
-	}
-	return []
-}
-
-/**
- * The Postgres server error inside `error`, or null when there is none. The chain is read innermost
- * first: the driver's error is the deepest, and a wrapper's own `code` never wins over it.
- */
-export function readPgError(error: unknown): PgErrorRead | null {
-	const chain: DriverError[] = []
-	for (let current: unknown = error; chain.length < 8 && typeof current === "object" && current !== null;) {
-		const f = fields(current)
-		chain.push(f)
-		current = f.cause
-	}
-	for (const f of chain.toReversed()) {
-		const code = sqlstate(f)
-		if (code === undefined) continue
-		return {
-			code,
-			column: text(f.column) ?? text(f.column_name),
-			constraint: text(f.constraint) ?? text(f.constraint_name),
-			keyColumns: keyColumns(text(f.detail)),
-			message: text(f.message),
-			/* the outermost wrapper's SQL: the statement as the app sent it */
-			query: chain.map((each) => text(each.query)).find((query) => query !== undefined),
-			/* anchored on the tail Postgres writes after the key values, which a value can spell */
-			referenced: /\) is still referenced from table "(?:[^"]|"")+"\.$/.test(text(f.detail) ?? ""),
-			table: text(f.table) ?? text(f.table_name),
-		}
-	}
-	return null
-}
-
-type Violation = { maps: ConstraintMap[]; read: PgErrorRead; source: unknown }
+/** A violation, `table` the violated table's key in the maps: qualified for a pgSchema's (F51) */
+type Violation = { maps: ConstraintMap[]; read: PgErrorRead; source: unknown; table: string | undefined }
 
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
@@ -113,8 +22,11 @@ const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 const pkeyOf = (table: string) => `${truncateUtf8(table, 58)}_pkey`
 
 function unique(v: Violation): CombError {
-	const { constraint, keyColumns: columns, table } = v.read
-	if (constraint !== undefined && table !== undefined && constraint === pkeyOf(table)) return primaryKey(v)
+	const { constraint, keyColumns: columns } = v.read
+	const { table } = v
+	/* Postgres names the key for the table alone, its schema apart */
+	if (constraint !== undefined && v.read.table !== undefined && constraint === pkeyOf(v.read.table))
+		return primaryKey(v)
 	/* a composite unique is keyed by its columns together; one column alone would blame half the pair */
 	const column = columns.length === 1 ? columns[0] : undefined
 	const entry = lookup(v.maps, table, (t) => own(t.unique, columns.join(",")) ?? own(t.unique, constraint))
@@ -125,7 +37,8 @@ function unique(v: Violation): CombError {
 }
 
 function primaryKey(v: Violation): CombError {
-	const { keyColumns: columns, table } = v.read
+	const { keyColumns: columns } = v.read
+	const { table } = v
 	/* a map written before 0.5.0 may list the key column under `unique` */
 	const entry = lookup(v.maps, table, (t) => t.primaryKey ?? own(t.unique, columns[0]))
 	const fallback = {
@@ -137,7 +50,8 @@ function primaryKey(v: Violation): CombError {
 }
 
 function foreignKey(v: Violation): CombError {
-	const { constraint, keyColumns: columns, referenced, table } = v.read
+	const { constraint, keyColumns: columns, referenced } = v.read
+	const { table } = v
 	/* the key named is the parent's, on a child's constraint: nothing in the map describes it. The
 	   table is the statement's, the parent's, as SQLite can name it too (R11); unknown without the SQL */
 	if (referenced) {
@@ -159,7 +73,8 @@ function foreignKey(v: Violation): CombError {
 }
 
 function check(v: Violation): CombError {
-	const { constraint, table } = v.read
+	const { constraint } = v.read
+	const { table } = v
 	const fallback = {
 		cause: "Data validation failed",
 		errorKey: combErrorKeys.CHECK_CONSTRAINT_VIOLATION,
@@ -172,7 +87,8 @@ function check(v: Violation): CombError {
 }
 
 function notNull(v: Violation): CombError {
-	const { column, table } = v.read
+	const { column } = v.read
+	const { table } = v
 	return new CombError({
 		cause: column === undefined ? "Required field missing" : `Required field missing: ${column}`,
 		column,
@@ -185,7 +101,8 @@ function notNull(v: Violation): CombError {
 
 /** An EXCLUDE constraint's violation, an overlapping row: the map's entry by name, else a 409 */
 function exclusion(v: Violation): CombError {
-	const { constraint, table } = v.read
+	const { constraint } = v.read
+	const { table } = v
 	const fallback = {
 		cause: "The record conflicts with an existing one",
 		errorKey: combErrorKeys.EXCLUSION_CONSTRAINT_VIOLATION,
@@ -201,7 +118,7 @@ function raised(v: Violation): CombError {
 		errorKey: combErrorKeys.CONSTRAINT_VIOLATION,
 		source: v.source,
 		status: "bad_request",
-		table: v.read.table,
+		table: v.table,
 	})
 }
 
@@ -276,7 +193,8 @@ function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombE
 	const read = readPgError(error)
 	if (read === null) return undefined
 	const handler = own(CONSTRAINTS, read.code)
-	if (handler !== undefined) return handler({ maps: constraintMaps, read, source: error })
+	if (handler !== undefined)
+		return handler({ maps: constraintMaps, read, source: error, table: mapTable(constraintMaps, read) })
 	const value = valueError(read.code, read, error)
 	if (value !== undefined) return value
 	const resource = own(RESOURCE, read.code)
@@ -289,4 +207,4 @@ function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
 	if (classified !== undefined) throw classified
 }
 
-export { classifyPgError, pgErrorHandler }
+export { classifyPgError, pgErrorHandler, type PgErrorRead, readPgError }
