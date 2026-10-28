@@ -50,7 +50,7 @@ declare function paginateMerged<T extends object>(rowsPerShard: ReadonlyArray<Re
 export { type MergedListOptions, mergedListOptions, paginateMerged };
 
 // sqlite/d1/sharding/router.d.ts
-import type { ShardDbHandle, ShardKv, ShardMapping, ShardMove, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
+import type { ShardDbHandle, ShardMapping, ShardMove, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
 /**
  * Shard router — resolves org -> D1 database handle.
  *
@@ -58,20 +58,9 @@ import type { ShardDbHandle, ShardKv, ShardMapping, ShardMove, ShardPlacement, S
  * 3-tier lookup: LRU -> KV -> Core D1; a new org goes to the shard `pick` names.
  */
 declare class ShardRouter {
-    private readonly kvTtlSeconds;
+    private readonly cache;
     private readonly log;
-    private readonly lru;
-    /** Orgs the primary had no mapping for, so a run of requests for an unknown id reads it once */
-    private readonly misses;
     private readonly pick;
-    /** Revalidations running now, by org, so concurrent stale hits share one */
-    private readonly revalidating;
-    /**
-     * How many times each org was invalidated in this isolate: a read that began before an
-     * invalidate holds the mapping from before it and must not write it back. The guard is per
-     * isolate; across isolates KV keeps the newest mapping by its updatedAt (kv-cache.ts, U33).
-     */
-    private readonly generations;
     private readonly totalShards;
     constructor(config: ShardRouterConfig);
     /**
@@ -126,13 +115,7 @@ declare class ShardRouter {
      * Invalidate both cache tiers. Use after whale graduation or reassignment. It reaches this
      * isolate's LRU and the KV; another isolate's LRU keeps the mapping until it expires.
      */
-    invalidate(orgId: string, kv: ShardKv): Promise<void>;
-    private generationOf;
-    private populateCaches;
-    /** One background revalidation per org at a time, however many requests see it stale */
-    private revalidateOnce;
-    /** Background SWR revalidation — refreshes LRU from KV or Core D1 */
-    private revalidateShard;
+    invalidate(orgId: string, kv: ShardResolverDeps["kv"]): Promise<void>;
     /** Places an org as `place` does, unchecked: an org being revived keeps the shard it had */
     private placeFirst;
     /**

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { kvKey, putUnlessNewer } from "./kv-cache.ts"
-import { ShardRouter } from "./router.ts"
+import { ShardCache } from "./cache.ts"
 import type { ShardKv, ShardMapping } from "./types.ts"
 
 /** A KV namespace over a map, its values as KV stores them: JSON text */
@@ -48,11 +48,12 @@ describe("putUnlessNewer", () => {
 		const kv = memoryKV()
 		await kv.put(kvKey("org-1"), JSON.stringify(mapping(2, 2000)))
 		const waits: Promise<unknown>[] = []
-		const router = new ShardRouter({ totalShards: 4 })
-		const stale = mapping(1, 1000)
+		const cache = new ShardCache({ totalShards: 4 }, { kvTtlSeconds: 60, log: () => undefined })
 		/* the old row, as a core read that began before the move returns it */
-		const populate = (router as unknown as { populateCaches: (...args: unknown[]) => void }).populateCaches
-		populate.call(router, "org-1", stale, { executionCtx: { waitUntil: (p: Promise<unknown>) => waits.push(p) }, kv })
+		cache.populate("org-1", mapping(1, 1000), {
+			executionCtx: { waitUntil: (p: Promise<unknown>) => waits.push(p) },
+			kv,
+		})
 		await Promise.all(waits)
 		expect(shardIn(kv)).toBe(2)
 	})

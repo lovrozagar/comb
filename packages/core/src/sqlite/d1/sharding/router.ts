@@ -1,9 +1,9 @@
-import { DEFAULTS, routerSettings } from "./config.ts"
-import { kvDelete, kvRead, putUnlessNewer } from "./kv-cache.ts"
+import { type CacheTargets, ShardCache } from "./cache.ts"
+import { routerSettings } from "./config.ts"
+import { kvRead } from "./kv-cache.ts"
 import type { D1Database } from "@cloudflare/workers-types"
 import { eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
-import { LruCache } from "../../../lru.ts"
 import { openD1Session } from "../session.ts"
 import {
 	assertShard,
@@ -21,7 +21,6 @@ import { assertOrgId, ORG_ID_MAX_LENGTH, shardMap } from "./shard-map.ts"
 import type {
 	LogFn,
 	ShardDbHandle,
-	ShardKv,
 	ShardMapping,
 	ShardMove,
 	ShardPick,
@@ -31,9 +30,6 @@ import type {
 	ShardVerifyDeps,
 	WaitUntilCtx,
 } from "./types.ts"
-
-/** Where a resolved mapping is cached: the KV namespace, written off the request path */
-type CacheTargets = { executionCtx: WaitUntilCtx; kv: ShardKv }
 
 /** Where a write's row is cached, and the bookmark of the session that wrote it */
 type SettleTargets = CacheTargets & { bookmark: string | null | undefined }
@@ -48,35 +44,17 @@ type Placement = "allocate" | "move" | "revive" | "standing"
  * 3-tier lookup: LRU -> KV -> Core D1; a new org goes to the shard `pick` names.
  */
 class ShardRouter {
-	private readonly kvTtlSeconds: number
+	private readonly cache: ShardCache
 	private readonly log: LogFn
-	private readonly lru: LruCache<string, ShardMapping>
-	/** Orgs the primary had no mapping for, so a run of requests for an unknown id reads it once */
-	private readonly misses: LruCache<string, true>
 	private readonly pick: ShardPick
-	/** Revalidations running now, by org, so concurrent stale hits share one */
-	private readonly revalidating = new Map<string, Promise<void>>()
-	/**
-	 * How many times each org was invalidated in this isolate: a read that began before an
-	 * invalidate holds the mapping from before it and must not write it back. The guard is per
-	 * isolate; across isolates KV keeps the newest mapping by its updatedAt (kv-cache.ts, U33).
-	 */
-	private readonly generations = new Map<string, number>()
 	private readonly totalShards: number
 
 	constructor(config: ShardRouterConfig) {
 		const { kvTtlSeconds, maxOrgsPerShard, totalShards } = routerSettings(config)
 		this.totalShards = totalShards
 		this.pick = config.pick ?? headroomPick(maxOrgsPerShard)
-		this.kvTtlSeconds = kvTtlSeconds
 		this.log = config.log ?? (() => {})
-		const maxSize = config.lruMaxSize ?? DEFAULTS.lruMaxSize
-		this.lru = new LruCache<string, ShardMapping>({
-			hardTtlMs: config.lruHardTtlMs ?? DEFAULTS.lruHardTtlMs,
-			maxSize,
-			ttlMs: config.lruTtlMs ?? DEFAULTS.lruTtlMs,
-		})
-		this.misses = new LruCache<string, true>({ maxSize, ttlMs: config.missTtlMs ?? DEFAULTS.missTtlMs })
+		this.cache = new ShardCache(config, { kvTtlSeconds, log: this.log })
 	}
 
 	/**
@@ -103,31 +81,32 @@ class ShardRouter {
 			return undefined
 		}
 		/* L1: per-isolate LRU with SWR */
-		const lruResult = this.lru.getWithMeta(orgId)
+		const lruResult = this.cache.lru.getWithMeta(orgId)
 		if (lruResult) {
 			this.log("shard-router.hit", { orgId, stale: lruResult.stale, tier: "lru" })
-			if (lruResult.stale) this.revalidateOnce(orgId, deps, executionCtx)
+			if (lruResult.stale) this.cache.revalidateOnce(orgId, deps, executionCtx)
 			return lruResult.value
 		}
 
 		/* L2: KV */
-		const generation = this.generationOf(orgId)
+		const generation = this.cache.generationOf(orgId)
 		const kvValue = await kvRead(deps.kv, orgId, this.log)
 		if (kvValue) {
 			this.log("shard-router.hit", { orgId, tier: "kv" })
-			if (this.generationOf(orgId) === generation) this.lru.set(orgId, kvValue)
+			if (this.cache.generationOf(orgId) === generation) this.cache.lru.set(orgId, kvValue)
 			return kvValue
 		}
 
 		/* L3: Core D1, unless the primary missed it just now */
-		const mapping = this.misses.get(orgId) ? undefined : await readLive(deps.coreDb, orgId)
+		const mapping = this.cache.misses.get(orgId) ? undefined : await readLive(deps.coreDb, orgId)
 		if (!mapping) {
 			this.log("shard-router.miss", { orgId })
-			if (this.generationOf(orgId) === generation) this.misses.set(orgId, true)
+			if (this.cache.generationOf(orgId) === generation) this.cache.misses.set(orgId, true)
 			return undefined
 		}
 		this.log("shard-router.hit", { orgId, tier: "d1" })
-		if (this.generationOf(orgId) === generation) this.populateCaches(orgId, mapping, { executionCtx, kv: deps.kv })
+		if (this.cache.generationOf(orgId) === generation)
+			this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv })
 		return mapping
 	}
 
@@ -148,7 +127,7 @@ class ShardRouter {
 		const { mapping } = await readLiveRow(deps.coreDb, orgId, "first-primary")
 		this.log("shard-router.reresolve", { from: cached.shardId, orgId, to: mapping?.shardId })
 		await this.invalidate(orgId, deps.kv)
-		if (mapping) this.populateCaches(orgId, mapping, { executionCtx, kv: deps.kv })
+		if (mapping) this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv })
 		return mapping
 	}
 
@@ -215,57 +194,11 @@ class ShardRouter {
 	 * Invalidate both cache tiers. Use after whale graduation or reassignment. It reaches this
 	 * isolate's LRU and the KV; another isolate's LRU keeps the mapping until it expires.
 	 */
-	async invalidate(orgId: string, kv: ShardKv): Promise<void> {
-		this.generations.set(orgId, this.generationOf(orgId) + 1)
-		this.lru.delete(orgId)
-		this.misses.delete(orgId)
-		await kvDelete(kv, orgId, this.log)
+	async invalidate(orgId: string, kv: ShardResolverDeps["kv"]): Promise<void> {
+		await this.cache.invalidate(orgId, kv)
 	}
 
 	/* -- Private -- */
-
-	private generationOf(orgId: string): number {
-		return this.generations.get(orgId) ?? 0
-	}
-
-	private populateCaches(orgId: string, mapping: ShardMapping, { executionCtx, kv }: CacheTargets): void {
-		this.lru.set(orgId, mapping)
-		/* a read that began before a move elsewhere holds the older row: it does not overwrite the newer one (U33) */
-		executionCtx.waitUntil(putUnlessNewer(kv, mapping, { log: this.log, ttlSeconds: this.kvTtlSeconds }))
-	}
-
-	/** One background revalidation per org at a time, however many requests see it stale */
-	private revalidateOnce(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): void {
-		if (this.revalidating.has(orgId)) return
-		const running = this.revalidateShard(orgId, deps).finally(() => this.revalidating.delete(orgId))
-		this.revalidating.set(orgId, running)
-		executionCtx.waitUntil(running)
-	}
-
-	/** Background SWR revalidation — refreshes LRU from KV or Core D1 */
-	private async revalidateShard(orgId: string, deps: ShardResolverDeps): Promise<void> {
-		const generation = this.generationOf(orgId)
-		const current = () => this.generationOf(orgId) === generation
-		try {
-			const kvValue = await kvRead(deps.kv, orgId, this.log)
-			if (kvValue) {
-				if (current()) this.lru.set(orgId, kvValue)
-				return
-			}
-			const mapping = await readLive(deps.coreDb, orgId)
-			if (!current()) return
-			if (!mapping) {
-				/* the core database has no live row: the org is gone, so the stale entry stops routing it now */
-				this.lru.delete(orgId)
-				await kvDelete(deps.kv, orgId, this.log)
-				return
-			}
-			this.lru.set(orgId, mapping)
-			await putUnlessNewer(deps.kv, mapping, { log: this.log, ttlSeconds: this.kvTtlSeconds })
-		} catch (e) {
-			this.log("shard-router.revalidate.error", { error: e, orgId })
-		}
-	}
 
 	/** Places an org as `place` does, unchecked: an org being revived keeps the shard it had */
 	private async placeFirst(
@@ -291,8 +224,8 @@ class ShardRouter {
 				`shard-router.${how === "move" ? "move" : "allocate"}`,
 				how === "revive" ? { ...data, revived: true } : data,
 			)
-		this.misses.delete(row.org_id)
-		this.populateCaches(row.org_id, mapping, targets)
+		this.cache.misses.delete(row.org_id)
+		this.cache.populate(row.org_id, mapping, targets)
 		return mapping
 	}
 }
