@@ -4,10 +4,11 @@
  * gates `bun run verify` runs, no more and no fewer, so a stamp vouches for what CI checks.
  */
 import { execFileSync } from "node:child_process"
-import { readdirSync, readFileSync } from "node:fs"
+import { globSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { DATE_KEYS, OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "../support/off-utc.ts"
+import { POSIX_SUITES } from "../support/posix.ts"
 
 const ROOT = join(import.meta.dirname, "../../../..")
 const WORKFLOWS = join(ROOT, ".github/workflows")
@@ -112,6 +113,19 @@ export function ciSteps(yaml: string): Array<{ command?: string; name?: string }
 	return steps
 }
 
+/** Each job of a workflow: its runner and its own lines */
+export function ciJobs(yaml: string): Array<{ lines: string; name: string; runsOn: string }> {
+	const body = yaml.slice(yaml.search(/^jobs:\n/m) + "jobs:\n".length)
+	return body
+		.split(/^(?= {2}[\w-]+:$)/m)
+		.filter((block) => /^ {2}[\w-]+:$/m.test(block))
+		.map((lines) => ({
+			lines,
+			name: /^ {2}([\w-]+):$/m.exec(lines)?.[1] as string,
+			runsOn: /^ {4}runs-on:\s*(\S+)/m.exec(lines)?.[1] ?? "",
+		}))
+}
+
 /** The gates `bun run verify` runs, in its order: verify's own gates() over package.json's standards.gates */
 function verifyGates(): string[] {
 	const script =
@@ -129,15 +143,24 @@ const SETUP = {
 	names: ["Lint commit messages", "dry-run the release publish", "install atlas v1.3.0"],
 }
 
+/** The scripts a job's `bun run` steps run */
+const scriptsOf = (lines: string) =>
+	ciSteps(lines).flatMap(({ command }) => {
+		const script = command === undefined ? undefined : scriptOf(command)
+		return script === undefined ? [] : [script]
+	})
+
+/* what a job off Linux runs: a part of a verify gate, never a gate of its own (4.19) */
+const OFF_LINUX = { "macos-latest": ["test:posix"] }
+
 describe("ci.yml and verify run the same gates", () => {
+	const jobs = ciJobs(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8"))
 	/* the 0.13 RC: CI ran test:coverage and verify ran test, so a stamp passed what CI failed */
-	it("every bun run step in CI is a verify gate, every verify gate a CI step, and every other step setup", () => {
-		const steps = ciSteps(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8"))
+	it("every bun run step on Linux is a verify gate, every verify gate a Linux step, and every other step setup", () => {
+		const linux = jobs.filter((job) => job.runsOn === "ubuntu-latest")
+		const steps = linux.flatMap((job) => ciSteps(job.lines))
 		const verified = verifyGates()
-		const ran = steps.flatMap(({ command }) => {
-			const script = command === undefined ? undefined : scriptOf(command)
-			return script === undefined ? [] : [script]
-		})
+		const ran = linux.flatMap((job) => scriptsOf(job.lines))
 		const other = steps.filter(({ command }) => command === undefined || scriptOf(command) === undefined)
 		expect([...new Set(ran)].toSorted()).toEqual([...verified].toSorted())
 		expect(
@@ -145,6 +168,26 @@ describe("ci.yml and verify run the same gates", () => {
 				command === undefined ? !SETUP.names.includes(name ?? "") : !SETUP.commands.includes(command),
 			),
 		).toEqual([])
+	})
+
+	it("runs on another runner only a part of a gate, and every suite of it in the unit project on Linux too", () => {
+		const off = jobs.filter((job) => job.runsOn !== "ubuntu-latest")
+		expect(off.map((job) => [job.runsOn, scriptsOf(job.lines)])).toEqual(Object.entries(OFF_LINUX))
+		const CORE = join(ROOT, "packages/core")
+		for (const pattern of POSIX_SUITES) {
+			const files = globSync(pattern, { cwd: CORE })
+			expect(files.length, pattern).toBeGreaterThan(0)
+			for (const file of files) expect(file, pattern).toMatch(/^(?:src\/.+|tests\/structure\/[^/]+)\.test\.ts$/)
+		}
+	})
+
+	it("splits a workflow into its jobs, each with its runner", () => {
+		const yaml =
+			"on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - run: x\n  b-c:\n    runs-on: macos-latest\n"
+		expect(ciJobs(yaml).map(({ name, runsOn }) => [name, runsOn])).toEqual([
+			["a", "ubuntu-latest"],
+			["b-c", "macos-latest"],
+		])
 	})
 
 	it("reads a step's script through comb's package filter, and a block step by its name", () => {

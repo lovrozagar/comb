@@ -68,6 +68,7 @@
 		"test:coverage": "vitest run --coverage",
 		"test:consumers": "vitest run --config vitest.consumers.config.ts",
 		"test:e2e": "vitest run --config vitest.e2e.config.ts",
+		"test:posix": "vitest run --config vitest.posix.config.ts",
 		"test:all": "vitest run && bun test tests/bun",
 		"test:watch": "vitest",
 		"type:check": "tsc --noEmit",
