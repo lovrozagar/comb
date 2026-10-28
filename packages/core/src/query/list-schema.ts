@@ -116,24 +116,22 @@ function optionalShapeFor(config: AdvertisedConfig, limits: ListQueryLimits): Op
 /** What the transform returns, as a schema the pipe checks it against */
 function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<string, z.ZodType> | undefined) {
 	const sortFieldSchema = z.enum(sortConfig as [string, ...string[]])
-	return z.compile(
-		z.object({
-			cursor: z.string().optional(),
-			filterAst: filterAstSchema.nullable(),
-			lang: z.string().optional(),
-			limit: z.number(),
-			page: z.number().optional(),
-			parsedFields: parsedFieldsSchema.nullable(),
-			parsedSort: z
-				.object({ direction: sortDirectionEnum, field: sortFieldSchema, nulls: z.enum(["first", "last"]).optional() })
-				.array(),
-			q: z.string().optional(),
-			sortOrderBy: z.partialRecord(sortFieldSchema, sortDirectionEnum),
-			pageBounded: z.literal(true),
-			validated: z.literal(true),
-			...extendFields,
-		}),
-	)
+	return z.object({
+		cursor: z.string().optional(),
+		filterAst: filterAstSchema.nullable(),
+		lang: z.string().optional(),
+		limit: z.number(),
+		page: z.number().optional(),
+		parsedFields: parsedFieldsSchema.nullable(),
+		parsedSort: z
+			.object({ direction: sortDirectionEnum, field: sortFieldSchema, nulls: z.enum(["first", "last"]).optional() })
+			.array(),
+		q: z.string().optional(),
+		sortOrderBy: z.partialRecord(sortFieldSchema, sortDirectionEnum),
+		pageBounded: z.literal(true),
+		validated: z.literal(true),
+		...extendFields,
+	})
 }
 
 function createListQuerySchema<
@@ -153,7 +151,7 @@ function createListQuerySchema<
 		limit: limitSchemaFor(config.pagination),
 		page: pageSchemaFor(config.pagination),
 	}
-	const schema = z.compile(extendFields ? z.strictObject({ ...shape, ...extendFields }) : z.strictObject(shape))
+	const schema = extendFields ? z.strictObject({ ...shape, ...extendFields }) : z.strictObject(shape)
 	const outputSchema = outputSchemaFor(sortConfig, extensions)
 
 	const maxPage = config.pagination?.maxPage ?? PAGINATION_DEFAULTS.maxPage

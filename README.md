@@ -107,7 +107,7 @@ Peer dependencies:
 | Package                     | Range               | Required                                                             |
 | --------------------------- | ------------------- | -------------------------------------------------------------------- |
 | `drizzle-orm`               | `>=1.0.0-rc.4 <2`   | yes — the relational API (`defineRelations`) is v1-only              |
-| `zod`                       | `>=4.5.4 <5`        | yes — every schema module builds on it (`z.compile` is Zod 4.5)      |
+| `zod`                       | `>=4.5.4 <5`        | yes — every schema module builds on it                               |
 | `@noble/ciphers`            | `>=2.0.0 <3`        | yes — cursors are sealed with its XChaCha20-Poly1305                 |
 | `@noble/hashes`             | `>=2.0.0 <3`        | yes — the cursor key is derived with its HKDF-SHA256                 |
 | `ts-morph`                  | `>=28.0.0 <29`      | only for codegen (resolves imports, and loads TypeScript under node) |
@@ -118,6 +118,8 @@ Peer dependencies:
 | `libpg-query`               | `>=17.7.4 <18`      | only to migrate Postgres: comb reads each statement with it          |
 
 Each range stops before the next breaking release, so an install never pairs comb with a major it was not tested against.
+
+Comb's schemas are plain Zod; none is compiled. A Worker refuses the code a compiled schema builds (`new Function`), so there the compiler only added to the bundle. A Node or Bun app that wants compiled parsing opts in with `import "zod/compile"` as the first import of its entry: every schema built after it, comb's included, compiles on its first parse, and one the compiler cannot take keeps Zod's own parser. Zod 4.5.4 is the first release with that import.
 
 The migration toolkit also shells out to [Atlas](https://atlasgo.io), which no package ships: `comb migrate diff`, `check`, `apply` and `baseline` need it on `PATH`. When `drizzle-kit` or `wrangler` cannot start, comb names the package and says to run comb through a package script (so `node_modules/.bin` is on `PATH`) or install it.
 

@@ -68,14 +68,10 @@ describe("generateEntityFile", () => {
 			{ metaImportFrom: "@app/comb/meta" },
 		)
 		expect(output).toContain('import { combMeta } from "@app/comb/meta"')
-		expect(output).toContain(
-			"export const blogPostDtoReadSchema = z.compile(z.object({\n\tid: _str,\n})).meta(combMeta({",
-		)
+		expect(output).toContain("export const blogPostDtoReadSchema = z.object({\n\tid: _str,\n}).meta(combMeta({")
 		expect(output).toContain('\tstates: {\n\t\tcolumn: "status",\n\t\tinitial: null,\n\t\tterminal: ["done"],')
 		expect(output).toContain('\tuniqueIndexes: [{ columns: ["slug"], name: "post_slug" }],')
-		expect(output).toContain(
-			"export const blogPostDtoCreateSchema = z.compile(z.object({\n\tid: _str.optional(),\n}))\n",
-		)
+		expect(output).toContain("export const blogPostDtoCreateSchema = z.object({\n\tid: _str.optional(),\n})\n")
 		expect(output).not.toContain("blogPostDtoUpdateSchema")
 		expect(output).toContain("export type BlogPostDtoRead = z.infer<typeof blogPostDtoReadSchema>")
 		expect(output).toContain('import { _str } from "../_shared/index.gen"')
@@ -106,9 +102,7 @@ describe("generateEntityFile: shared module imports", () => {
 			filePrefix: "db.blog",
 		})
 		expect(output).toContain("\t...timestampsCreatedUpdatedReadSnakeCase,\n\ttitle: _str,\n")
-		expect(output).toContain(
-			"blogPostDtoUpdateSchema = z.compile(z.object({\n\tcreated_at: timestampSchema.optional(),",
-		)
+		expect(output).toContain("blogPostDtoUpdateSchema = z.object({\n\tcreated_at: timestampSchema.optional(),")
 		expect(output).toContain(
 			'import { _str, timestampSchema, timestampsCreatedUpdatedReadPartialSnakeCase, timestampsCreatedUpdatedReadSnakeCase } from "../_shared/db.blog._shared.gen"',
 		)

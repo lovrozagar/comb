@@ -5,7 +5,8 @@
  * under strict flags in a bundler project and in a nodenext project.
  */
 import { readdirSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { Miniflare } from "miniflare"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { APP } from "./fixture.ts"
 import { failures, IMPORT_ALL, ok, pack, run, type Stage, stage } from "./stage.ts"
@@ -52,6 +53,39 @@ describe.each([
 			ok(run(app.dir, "npx", ["wrangler", "deploy", "--dry-run", "--outdir", "dist-worker"]), "wrangler"),
 		).toContain("--dry-run: exiting now.")
 	})
+
+	/* 4.18: workerd refuses code from strings, so no comb schema may build any, nor bundle zod's compiler */
+	it.runIf(peers === "required")(
+		"runs on workerd, its schemas built and parsed with no code from a string",
+		async () => {
+			const args = [
+				"wrangler",
+				"deploy",
+				"src/no-eval.ts",
+				"--name",
+				"no-eval",
+				"--dry-run",
+				"--outdir",
+				"dist-no-eval",
+			]
+			ok(run(app.dir, "npx", args), "wrangler no-eval")
+			const scriptPath = join(app.dir, "dist-no-eval", "no-eval.js")
+			expect(readFileSync(scriptPath, "utf8")).not.toContain("ZodCompileUnsupportedError")
+			/* a date every workerd binary takes, so the test does not follow miniflare's version */
+			const worker = new Miniflare({
+				compatibilityDate: "2025-01-01",
+				modules: true,
+				modulesRoot: dirname(scriptPath),
+				scriptPath,
+			})
+			try {
+				const response = await worker.dispatchFetch("http://comb.test/")
+				expect(await response.json()).toEqual({ made: 0, parsed: [true, true, true] })
+			} finally {
+				await worker.dispose()
+			}
+		},
+	)
 
 	it.runIf(peers === "all").each(["tsconfig.bundler.json", "tsconfig.nodenext.json"])(
 		"type-checks every subpath under strict flags (%s)",

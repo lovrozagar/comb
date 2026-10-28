@@ -138,7 +138,7 @@ describe("entity meta matches the generated DTOs", () => {
 	it("declares immutable exactly as the fields absent from the update DTO", () => {
 		const analyzed = analyzeSource(fullTable)
 		const generated = generatedFile(analyzed, "post")
-		const updateBlock = generated.match(/postDtoUpdateSchema = z\.compile\(z\.object\(\{([\s\S]*?)\n\}\)\)/)?.[1] ?? ""
+		const updateBlock = generated.match(/postDtoUpdateSchema = z\.object\(\{([\s\S]*?)\n\}\)/)?.[1] ?? ""
 		const inUpdate = new Set([...updateBlock.matchAll(/^\t(\w+):/gm)].map((m) => m[1]!))
 
 		const table = analyzed.analysis.tables[0]!
@@ -158,7 +158,7 @@ describe("entity meta matches the generated DTOs", () => {
 		const generated = generatedFile(analyzeSource(fullTable), "post")
 		expect(generated).toContain(`import { combMeta } from "@lovrozagar/comb/meta"`)
 		expect(generated.match(/combMeta\(\{/g)).toHaveLength(1)
-		expect(generated).toMatch(/postDtoReadSchema = z\.compile\(z\.object\(\{[\s\S]*?\}\)\)\.meta\(combMeta\(\{/)
+		expect(generated).toMatch(/postDtoReadSchema = z\.object\(\{[\s\S]*?\}\)\.meta\(combMeta\(\{/)
 	})
 
 	it("emits no stamp and no import when no table has a single identity", () => {
@@ -387,7 +387,7 @@ export const post = createTable("post", {
 		const meta = deriveEntityMeta(table)!
 		const rendered = `[${meta.uniqueIndexes.map((idx) => `{ columns: ${list(idx.columns)}, name: ${JSON.stringify(idx.name)} }`).join(", ")}]`
 
-		expect(generated).toMatch(/postDtoReadSchema = z\.compile\(z\.object\(\{[\s\S]*?\}\)\)\.meta\(combMeta\(\{/)
+		expect(generated).toMatch(/postDtoReadSchema = z\.object\(\{[\s\S]*?\}\)\.meta\(combMeta\(\{/)
 		expect(generated).toContain(`uniqueIndexes: ${rendered}`)
 		expect(meta.uniqueIndexes).toEqual(table.uniqueIndexes)
 

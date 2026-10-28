@@ -30,7 +30,7 @@ function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<string, neve
 	assertNotReserved("createRetrieveQuerySchema", extensions, RESERVED)
 
 	const shape: RetrieveShape = { select: selectQueryField, ...(config.lang ? { lang: langQueryField } : {}) }
-	const schema = z.compile(z.strictObject({ ...shape, ...extensions }))
+	const schema = z.strictObject({ ...shape, ...extensions })
 
 	type ExtendedOutput = RetrieveQueryOutput & {
 		[K in keyof T]: z.infer<T[K]>

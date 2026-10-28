@@ -163,9 +163,9 @@ function schemaLines(type: SchemaType, emit: Emit): string[] {
 	const fields = ownFields(table, spread).filter((f) => f.type === type)
 	/* Entity facts ride on the read schema — the one a response is validated against — so a
 	   consumer reads them off the same object. docs/meta-contract.md */
-	const close = type === "read" && table.combMeta ? `})).meta(combMeta(${renderCombMeta(table.combMeta)}))` : "}))"
+	const close = type === "read" && table.combMeta ? `}).meta(combMeta(${renderCombMeta(table.combMeta)}))` : "})"
 	return [
-		`export const ${snakeToCamel(table.name)}${SUFFIX[type]}Schema = z.compile(z.object({`,
+		`export const ${snakeToCamel(table.name)}${SUFFIX[type]}Schema = z.object({`,
 		...(spreadAs === null ? [] : [`\t...${spreadAs},`]),
 		...fields.map((f) => fieldLine(f, emit)),
 		close,

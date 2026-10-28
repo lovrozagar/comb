@@ -28,6 +28,36 @@ export default {
 }
 `
 
+/**
+ * Counts every Function made from a string. Imported first, so it is in place before comb's modules
+ * build their schemas; on workerd the call then throws, as it refuses code from strings (4.18)
+ */
+export const COUNT_EVAL = `const Real = globalThis.Function
+export const counter = { made: 0 }
+globalThis.Function = new Proxy(Real, {
+	apply: (target, self, args) => (counter.made++, Reflect.apply(target, self, args)),
+	construct: (target, args) => (counter.made++, Reflect.construct(target, args)),
+})
+`
+
+/** A Worker that builds and parses comb's query schemas and says how many Functions that made */
+export const NO_EVAL_WORKER = `import { counter } from "./count-eval.ts"
+import { createListQuerySchema, createRetrieveQuerySchema, paginationResponseSchema } from "@lovrozagar/comb/query"
+
+export default {
+	async fetch(): Promise<Response> {
+		const list = createListQuerySchema({ filter: { status: "enum" }, sort: ["createdAt", "name"] as const })
+		const retrieve = createRetrieveQuerySchema({ fields: { scalars: ["id", "name"] } })
+		const parsed = [
+			list.safeParse({ filter: "status.eq.active", limit: "10", order: "name.desc" }).success,
+			retrieve.safeParse({ select: "id" }).success,
+			paginationResponseSchema.safeParse({ count: 1, hasMore: false, limit: 10, nextCursor: null, page: 1 }).success,
+		]
+		return Response.json({ made: counter.made, parsed })
+	},
+}
+`
+
 /** A module that imports the types of every subpath */
 export const ALL_TYPES = `${SUBPATHS.map((spec, i) => `import type * as m${i} from "${spec}"`).join("\n")}
 export type All = [${SUBPATHS.map((_, i) => `typeof m${i}`).join(", ")}]
@@ -45,6 +75,8 @@ const STRICT = {
 
 /** The files every staged consumer holds: the Worker, the types module, two tsconfigs, wrangler and vite config */
 export const APP: Record<string, string> = {
+	"src/count-eval.ts": COUNT_EVAL,
+	"src/no-eval.ts": NO_EVAL_WORKER,
 	"src/types.ts": ALL_TYPES,
 	"src/worker.ts": WORKER,
 	/* a bundler project: comb's .ts source compiles as the app's own */
