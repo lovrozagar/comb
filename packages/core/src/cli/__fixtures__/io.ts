@@ -3,14 +3,27 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Run, RunResult } from "../../migrate/core/process.ts"
+import type { LiveObjects } from "../../migrate/core/pg-live-types.ts"
 import type { CliIo } from "../output.ts"
 
 export type TestIo = CliIo & { errors: string[]; outputs: string[] }
 
+/* a Postgres baseline's catalog read reaches no database: its schema holds no function or trigger */
+const readPgObjects = async (): Promise<LiveObjects> => ({ routines: new Map(), triggers: new Map() })
+
 export function makeIo(cwd: string, run?: Run, confirm?: CliIo["confirm"]): TestIo {
 	const outputs: string[] = []
 	const errors: string[] = []
-	return { confirm, cwd, err: (line) => errors.push(line), errors, out: (line) => outputs.push(line), outputs, run }
+	return {
+		confirm,
+		cwd,
+		err: (line) => errors.push(line),
+		errors,
+		out: (line) => outputs.push(line),
+		outputs,
+		readPgObjects,
+		run,
+	}
 }
 
 /**

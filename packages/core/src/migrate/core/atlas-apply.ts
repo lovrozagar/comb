@@ -20,7 +20,7 @@ import { type AtlasFile, type AtlasStatus, checkHistory, fileOf, filesOf, versio
 import { refuseUnclean } from "./atlas-clean.ts"
 import { explainAtlasFailure, NOT_CLEAN, SHARED_REVISIONS } from "./atlas-target.ts"
 import { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran, scrubbing } from "./atlas-status.ts"
-import { refuseDrift } from "./baseline-compare.ts"
+import { type ObjectsCompare, refuseDrift, refuseObjectDrift } from "./baseline-compare.ts"
 import { extractSchema, parseRead } from "./parse.ts"
 import { run } from "./process.ts"
 import { Refused } from "./refused.ts"
@@ -179,16 +179,26 @@ function onSnapshot<T>(options: AtlasCommand, body: (copy: string) => T): T {
 	}
 }
 
+/** `body`, which reads the database as it goes, on a snapshot of the directory, removed once it is done */
+async function onSnapshotAsync<T>(options: AtlasCommand, body: (copy: string) => Promise<T>): Promise<T> {
+	const copy = snapshotDir(options.exec ?? run, options.dir)
+	try {
+		return await body(copy)
+	} finally {
+		rmSync(copy, { force: true, recursive: true })
+	}
+}
+
 const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
 
 /**
  * Record every migration of the directory as applied without running any (`atlas migrate set` to
  * the latest file's version), for a database whose schema was set up some other way. Refused when
- * the database already records migrations, and when its tables are not the ones the migrations
- * leave. Returns the files marked.
+ * the database already records migrations, and when its tables, functions or triggers are not the
+ * ones the migrations leave. Returns the files marked.
  */
-function baselineWithAtlas(options: AtlasCommand): string[] {
-	return onSnapshot(options, (copy) => {
+async function baselineWithAtlas(options: AtlasCommand & Pick<ObjectsCompare, "readLive">): Promise<string[]> {
+	return onSnapshotAsync(options, async (copy) => {
 		const status = atlasStatus(options, copy, { notClean: true })
 		if (status.applied.length > 0) {
 			throw new Error(
@@ -206,6 +216,7 @@ function baselineWithAtlas(options: AtlasCommand): string[] {
 		if (latest === undefined) throw new Error("there are no migrations to record")
 		for (const notice of refuseDrift({ exec: options.exec ?? run, target: options.target }, copy))
 			options.print(`Warning: Atlas: ${notice}`)
+		await refuseObjectDrift(options, copy)
 		/* the version as Atlas reads the name, the reader status and adoption use (M76, M88) */
 		const set = atlas(options, copy, ["set", versionOf(latest).version])
 		if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)

@@ -105,18 +105,19 @@ The consumer suite (`bun run test:consumers`) checks each supported row in CI: i
 
 Peer dependencies:
 
-| Package                     | Range               | Required                                                             |
-| --------------------------- | ------------------- | -------------------------------------------------------------------- |
-| `drizzle-orm`               | `>=1.0.0-rc.4 <2`   | yes — the relational API (`defineRelations`) is v1-only              |
-| `zod`                       | `>=4.5.4 <5`        | yes — every schema module builds on it                               |
-| `@noble/ciphers`            | `>=2.0.0 <3`        | yes — cursors are sealed with its XChaCha20-Poly1305                 |
-| `@noble/hashes`             | `>=2.0.0 <3`        | yes — the cursor key is derived with its HKDF-SHA256                 |
-| `ts-morph`                  | `>=28.0.0 <29`      | only for codegen (resolves imports, and loads TypeScript under node) |
-| `@libsql/client`            | `>=0.17.4 <0.18`    | only for the libsql/Turso migration providers                        |
-| `@cloudflare/workers-types` | `>=5.20260815.1 <6` | only for the D1 modules' types (`sqlite/d1/*`)                       |
-| `drizzle-kit`               | `>=1.0.0-rc.4 <2`   | only for `comb migrate diff`, which runs `drizzle-kit export`        |
-| `wrangler`                  | `>=4.147.0 <5`      | only to migrate a D1 database, which wrangler applies                |
-| `libpg-query`               | `>=17.7.4 <18`      | only to migrate Postgres: comb reads each statement with it          |
+| Package                     | Range               | Required                                                                    |
+| --------------------------- | ------------------- | --------------------------------------------------------------------------- |
+| `drizzle-orm`               | `>=1.0.0-rc.4 <2`   | yes — the relational API (`defineRelations`) is v1-only                     |
+| `zod`                       | `>=4.5.4 <5`        | yes — every schema module builds on it                                      |
+| `@noble/ciphers`            | `>=2.0.0 <3`        | yes — cursors are sealed with its XChaCha20-Poly1305                        |
+| `@noble/hashes`             | `>=2.0.0 <3`        | yes — the cursor key is derived with its HKDF-SHA256                        |
+| `ts-morph`                  | `>=28.0.0 <29`      | only for codegen (resolves imports, and loads TypeScript under node)        |
+| `@libsql/client`            | `>=0.17.4 <0.18`    | only for the libsql/Turso migration providers                               |
+| `@cloudflare/workers-types` | `>=5.20260815.1 <6` | only for the D1 modules' types (`sqlite/d1/*`)                              |
+| `drizzle-kit`               | `>=1.0.0-rc.4 <2`   | only for `comb migrate diff`, which runs `drizzle-kit export`               |
+| `wrangler`                  | `>=4.147.0 <5`      | only to migrate a D1 database, which wrangler applies                       |
+| `libpg-query`               | `>=17.7.4 <18`      | only to migrate Postgres: comb reads each statement with it                 |
+| `postgres`                  | `>=3.4.9 <4`        | only to baseline a Postgres database: comb reads its functions and triggers |
 
 Each range stops before the next breaking release, so an install never pairs comb with a major it was not tested against.
 
@@ -599,7 +600,7 @@ An enum value Atlas adds goes into a file of its own a version earlier, since Po
 
 `apply` works on a private copy of the migrations directory, checked against `atlas.sum`, so what Atlas runs is exactly what comb read. It asks Atlas for its status and stops at any error, and at a file older than the latest applied one, which Atlas would skip without a word; a file Atlas ran halfway outside a transaction resumes only if unchanged, since Atlas resumes it by statement count. A dry run comes next, so a database that has objects but no history is told to `baseline` before anyone is asked. Each pending file is then classified and approved as on SQLite (unsafe: a yes on a terminal or `-- comb:allow-unsafe: <reason>`; cautious: `--yes` too), with lock warnings for statements that block a table: a non-concurrent index on an existing table, a volatile default, a scanning constraint without `NOT VALID`, a retype. Atlas then applies each file in its own transaction and records it; a failed file is named with its statement, and the files before it stay applied. Atlas holds a lock while it applies, so two applies never run at once. `--file` and `--local` do not apply to Postgres.
 
-`baseline <db>` records every file up to the directory's latest as applied without running any, and refuses a database that already records migrations, and one whose tables are not the ones the history leaves on the dev database (Atlas OSS inspects no view, policy or sequence, so those are not compared). Whatever Atlas says on stderr as a `diff` or a `baseline` compare succeeds, comb prints as `Warning: Atlas: …`, as Atlas OSS may say there that it left part of a schema out. `status <db>` lists applied and pending files and warns of an applied file edited since, which Atlas never runs again. Atlas prints every statement it runs, so keep secrets out of data migrations; take a snapshot (a PITR point, a Neon branch) before an unsafe apply, and prefer expand-and-contract to renames and drops in one deploy.
+`baseline <db>` records every file up to the directory's latest as applied without running any, and refuses a database that already records migrations, and one whose tables are not the ones the history leaves on the dev database (Atlas OSS inspects no view, policy or sequence, so those are not compared). Atlas OSS leaves out functions, procedures and triggers too, and finds a database that differs only there in sync, so baseline compares them itself by name, reading the target schema's catalog through `postgres` (an optional peer, which baseline refuses without): one the database or the history lacks refuses the baseline, extensions' own functions aside, and when the names match baseline warns that their bodies were not compared, since neither Atlas OSS nor comb reads them. Whatever Atlas says on stderr as a `diff` or a `baseline` compare succeeds, comb prints as `Warning: Atlas: …`, as Atlas OSS may say there that it left part of a schema out. `status <db>` lists applied and pending files and warns of an applied file edited since, which Atlas never runs again. Atlas prints every statement it runs, so keep secrets out of data migrations; take a snapshot (a PITR point, a Neon branch) before an unsafe apply, and prefer expand-and-contract to renames and drops in one deploy.
 
 ### SQLite transforms
 

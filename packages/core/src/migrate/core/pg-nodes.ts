@@ -10,6 +10,9 @@ type Node = Record<string, unknown>
 /** An event trigger the history made: the event it runs on, its `WHEN TAG IN` list, and whether it is enabled (M73) */
 type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefined }
 
+/** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
+type Routines = Map<string, { kind: "function" | "procedure"; signatures: Set<string> }>
+
 /** What the history attached to its tables, keyed as nameKey keys a Postgres name */
 type Facts = {
 	/** each type a migration's cast reaches, with the cast's function, and whether the cast is implicit or on assignment */
@@ -22,6 +25,8 @@ type Facts = {
 	eventTriggers: Map<string, EventTrigger>
 	/** every function, procedure and aggregate a migration defined, by each key it had */
 	defined: Set<string>
+	/** the functions and procedures the history leaves, by key, with their signatures (pg-routines.ts) */
+	routines: Routines
 	/** each domain whose CHECK calls a function, with the function */
 	domains: Map<string, string>
 	/** each operator a migration defined, with its function */
@@ -74,4 +79,4 @@ function tableOf(relation: unknown, schema: string): { key: string; name: string
 /** A type's key under `schema` */
 const typeOf = (typeName: unknown, schema: string): string => keyOf(names((typeName as Node)["names"]), schema)
 
-export { type EventTrigger, type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf }
+export { type EventTrigger, type Facts, keyOf, names, type Node, nodesOf, type Routines, tableOf, typeOf }

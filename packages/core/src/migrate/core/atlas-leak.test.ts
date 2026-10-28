@@ -3,6 +3,7 @@
  * prints any of it must scrub it. Each Atlas path here runs against a fake whose stdout and stderr
  * both carry the target's password, and nothing comb throws or prints may hold it.
  */
+import type { LiveObjects } from "./pg-live-types.ts"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -87,6 +88,9 @@ async function leaks(body: (print: (line: string) => void) => unknown): Promise<
 
 const approve = async () => ({ ok: true }) as const
 
+/* the catalog read reaches no database: its schema holds no function or trigger */
+const noObjects = async (): Promise<LiveObjects> => ({ routines: new Map(), triggers: new Map() })
+
 describe("no Atlas path prints the target's password (M79)", () => {
 	it("scrubs every apply and check failure Atlas reports", async () => {
 		const runs: Array<Parameters<typeof fake>[0]> = [
@@ -127,11 +131,15 @@ describe("no Atlas path prints the target's password (M79)", () => {
 			{ schemaDiff: { code: 0, stderr: LEAK, stdout: LEAK }, status: empty },
 			{ schemaDiff: { code: 0, stderr: "", stdout: "Schemas are synced, no changes to be made." }, status: empty },
 		]) {
-			const said = await leaks((print) => baselineWithAtlas({ dir, exec: fake(answers), print, target: target() }))
+			const said = await leaks((print) =>
+				baselineWithAtlas({ dir, exec: fake(answers), print, readLive: noObjects, target: target() }),
+			)
 			expect(said).not.toContain(SECRET)
 		}
 	})
+})
 
+describe("no Atlas path prints the target's password (M79): another schema's history", () => {
 	it("scrubs why public could not read another schema's history", async () => {
 		const shared = status({ applied: [revision("1"), revision("5", { hash: "b=" })], current: "5" })
 		const said = await leaks((print) =>

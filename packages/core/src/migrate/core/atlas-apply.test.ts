@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ParsedMigration } from "../types.ts"
 import { applyWithAtlas, type ApplyOptions, baselineWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
+import type { ObjectsCompare } from "./baseline-compare.ts"
 import { sumHashes } from "./atlas-dir.ts"
 import { postgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
@@ -26,7 +27,10 @@ const TARGET = {
 	url: "postgres://app:S3cret@db/app?sslmode=require",
 }
 
-function options(exec: Run, more: Partial<ApplyOptions> = {}): ApplyOptions & { out: string[]; seen: string[] } {
+function options(
+	exec: Run,
+	more: Partial<ApplyOptions> = {},
+): ApplyOptions & Pick<ObjectsCompare, "readLive"> & { out: string[]; seen: string[] } {
 	const out: string[] = []
 	const seen: string[] = []
 	return {
@@ -35,6 +39,7 @@ function options(exec: Run, more: Partial<ApplyOptions> = {}): ApplyOptions & { 
 		exec,
 		out,
 		print: (line: string) => out.push(line),
+		readLive: async () => ({ routines: new Map(), triggers: new Map() }),
 		seen,
 		target: TARGET,
 		...more,
@@ -316,31 +321,31 @@ describe("applyWithAtlas: a file Atlas runs outside a transaction that failed ha
 })
 
 describe("baselineWithAtlas", () => {
-	it("records every file up to the directory's latest as applied, running none", () => {
+	it("records every file up to the directory's latest as applied, running none", async () => {
 		const atlas = fakeAtlas({ status: status({ pending: [file("1_a.sql"), file("2_b.sql")] }) })
 		const run = options(atlas)
-		expect(baselineWithAtlas(run)).toEqual(["1_a.sql", "2_b.sql"])
+		expect(await baselineWithAtlas(run)).toEqual(["1_a.sql", "2_b.sql"])
 		const set = atlas.calls.find((call) => call.args[1] === "set")
 		expect(set?.args.slice(0, 3)).toEqual(["migrate", "set", "2"])
 		expect(run.out).toEqual(["Marked applied: 1_a.sql", "Marked applied: 2_b.sql"])
 	})
 
 	/* M88: the version as Atlas reads a file name, M76's reader: a file with no description is its version alone */
-	it("records the latest file's version, read as Atlas reads it, when the file has no description", () => {
+	it("records the latest file's version, read as Atlas reads it, when the file has no description", async () => {
 		writeFileSync(join(dir, "3.sql"), 'CREATE TABLE "c" ("id" int);\n')
 		writeFileSync(join(dir, "atlas.sum"), "h1:x=\n1_a.sql h1:7=\n2_b.sql h1:7=\n3.sql h1:5=\n")
 		const atlas = fakeAtlas({ status: status({}) })
-		expect(baselineWithAtlas(options(atlas))).toEqual(["1_a.sql", "2_b.sql", "3.sql"])
+		expect(await baselineWithAtlas(options(atlas))).toEqual(["1_a.sql", "2_b.sql", "3.sql"])
 		expect(atlas.calls.find((call) => call.args[1] === "set")?.args.slice(0, 3)).toEqual(["migrate", "set", "3"])
 	})
 
-	it("compares the database with the history replayed without comb's objects but its sequences", () => {
+	it("compares the database with the history replayed without comb's objects but its sequences", async () => {
 		writeFileSync(
 			join(dir, "1_a.sql"),
 			'CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\nCREATE VIEW "v" AS (select 1);\nCREATE ROLE "r";\n',
 		)
 		const atlas = fakeAtlas({ status: status({}) })
-		baselineWithAtlas(options(atlas))
+		await baselineWithAtlas(options(atlas))
 		expect(atlas.replayed[0]).toBe('CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\n')
 		const diff = atlas.calls.find((call) => call.args[0] === "schema")
 		expect(diff?.args.slice(0, 4)).toEqual(["schema", "diff", "--from", "env://url"])
@@ -348,65 +353,67 @@ describe("baselineWithAtlas", () => {
 	})
 
 	/* M75: the replay is read as Postgres runs it and written so Atlas sends each statement alone */
-	it("replays a history Atlas splits by its own delimiter, each statement of a chunk read", () => {
+	it("replays a history Atlas splits by its own delimiter, each statement of a chunk read", async () => {
 		writeFileSync(
 			join(dir, "1_a.sql"),
 			'-- atlas:delimiter GO\n\nCREATE ROLE "r"; CREATE TABLE "a" ("id" int)\nGO\nCREATE VIEW "v" AS (select 1)\nGO\n',
 		)
 		const atlas = fakeAtlas({ status: status({}) })
-		baselineWithAtlas(options(atlas))
+		await baselineWithAtlas(options(atlas))
 		expect(atlas.replayed[0]).toBe('CREATE TABLE "a" ("id" int);\n')
 	})
 
-	it("records nothing when the database's tables differ from the history's, naming the difference", () => {
+	it("records nothing when the database's tables differ from the history's, naming the difference", async () => {
 		const atlas = fakeAtlas({
 			schemaDiff: ok('-- Modify "a" table\nALTER TABLE "a" ADD COLUMN "x" int;\n'),
 			status: status({}),
 		})
-		expect(() => baselineWithAtlas(options(atlas))).toThrow(
+		await expect(baselineWithAtlas(options(atlas))).rejects.toThrow(
 			'the database\'s tables are not the ones the migrations leave, so baseline records nothing; the difference:\n-- Modify "a" table\nALTER TABLE "a" ADD COLUMN "x" int;',
 		)
 		expect(atlas.calls.some((call) => call.args[1] === "set")).toBe(false)
 		const broken = fakeAtlas({ schemaDiff: fail("Error: dev database unreachable"), status: status({}) })
-		expect(() => baselineWithAtlas(options(broken))).toThrow("atlas schema diff: Error: dev database unreachable")
+		await expect(baselineWithAtlas(options(broken))).rejects.toThrow(
+			"atlas schema diff: Error: dev database unreachable",
+		)
 	})
 })
 
 describe("baselineWithAtlas: what Atlas says", () => {
 	/* plan 14's 5.4: what Atlas says as its comparison succeeds is a warning baseline prints */
-	it("warns with what Atlas said as it found the database synced", () => {
+	it("warns with what Atlas said as it found the database synced", async () => {
 		const said = { code: 0, stderr: "Skipped triggers.\n", stdout: "Schemas are synced, no changes to be made.\n" }
 		const run = options(fakeAtlas({ schemaDiff: said, status: status({}) }))
-		expect(baselineWithAtlas(run)).toEqual(["1_a.sql", "2_b.sql"])
+		expect(await baselineWithAtlas(run)).toEqual(["1_a.sql", "2_b.sql"])
 		expect(run.out).toEqual(["Warning: Atlas: Skipped triggers.", "Marked applied: 1_a.sql", "Marked applied: 2_b.sql"])
 	})
 })
 
 describe("baselineWithAtlas: what it refuses", () => {
-	it("refuses a database that already records migrations, and a directory with none", () => {
+	it("refuses a database that already records migrations, and a directory with none", async () => {
 		const recorded = status({ applied: [revision("1")], current: "1" })
-		expect(() => baselineWithAtlas(options(fakeAtlas({ status: recorded })))).toThrow(
+		await expect(baselineWithAtlas(options(fakeAtlas({ status: recorded })))).rejects.toThrow(
 			"the database already records 1 migration (up to 1); baseline marks a database that has none",
 		)
 		rmSync(join(dir, "1_a.sql"))
 		rmSync(join(dir, "2_b.sql"))
 		writeFileSync(join(dir, "atlas.sum"), "h1:x=\n\n")
-		expect(() => baselineWithAtlas(options(fakeAtlas({ status: status({}) })))).toThrow(
+		await expect(baselineWithAtlas(options(fakeAtlas({ status: status({}) })))).rejects.toThrow(
 			"there are no migrations to record",
 		)
 	})
 
-	it("records a database whose status Atlas refuses as not clean, which is what baseline is for", () => {
+	it("records a database whose status Atlas refuses as not clean, which is what baseline is for", async () => {
 		const notClean = fail('Error: sql/migrate: connected database is not clean: found table "post" in schema "public".')
 		const atlas = fakeAtlas({ status: notClean })
-		expect(baselineWithAtlas(options(atlas))).toEqual(["1_a.sql", "2_b.sql"])
+		expect(await baselineWithAtlas(options(atlas))).toEqual(["1_a.sql", "2_b.sql"])
 		expect(atlas.calls.some((call) => call.args[1] === "set")).toBe(true)
 	})
 
-	it("says what Atlas could not set", () => {
+	it("says what Atlas could not set", async () => {
 		const atlas = fakeAtlas({ status: status({}) })
 		const failing: Run = (cmd, args, more) => (args[1] === "set" ? fail("Error: boom") : atlas(cmd, args, more))
-		expect(() => baselineWithAtlas(options(failing))).toThrow("atlas migrate set: Error: boom")
+		await expect(baselineWithAtlas(options(failing))).rejects.toThrow("atlas migrate set: Error: boom")
 	})
 })
 

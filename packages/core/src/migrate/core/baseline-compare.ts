@@ -9,14 +9,18 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { Connection } from "../types.ts"
+import type { Connection, ExtractedSchema } from "../types.ts"
 import { hashDir, sqlFiles } from "./atlas-dir.ts"
 import { sqliteDevUrl } from "./atlas-env.ts"
 import { atlasNotices, explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { asSql, type FtsState, separate } from "./fts-migration.ts"
+import { historyFacts } from "./pg-history.ts"
+import { liveDrift, readLiveObjects } from "./pg-live-objects.ts"
+import type { LiveRead } from "./pg-live-types.ts"
 import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
 import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
 import type { Run } from "./process.ts"
+import { extractSchema } from "./schema.ts"
 import { codeOf } from "./sql-code.ts"
 
 const SYNCED = "Schemas are synced, no changes to be made."
@@ -127,4 +131,30 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string): st
 	}
 }
 
-export { refuseDrift, sqliteDrift }
+/** How a Postgres baseline reads the database's functions, procedures and triggers: postgres.js unless a test says otherwise */
+type ObjectsCompare = { print(line: string): void; readLive?: LiveRead | undefined; target: PgTarget }
+
+/**
+ * Refuses a database whose functions, procedures or triggers are not, by name, the ones the
+ * migrations of `copy` leave in the target schema, which Atlas OSS leaves out of refuseDrift's
+ * comparison without a word (plan 14's 5.4b); warns once that the bodies of those that match were
+ * not compared
+ */
+async function refuseObjectDrift(options: ObjectsCompare, copy: string): Promise<void> {
+	let history: ExtractedSchema | undefined
+	for (const name of sqlFiles(copy))
+		history = extractSchema(readFileSync(join(copy, name), "utf8"), history, "postgres")
+	const live = await (options.readLive ?? readLiveObjects)(options.target)
+	const { matched, only: differ } = liveDrift(historyFacts(history, options.target.schema), live)
+	if (differ.length > 0) {
+		throw new Error(
+			`the database's functions and triggers are not the ones the migrations leave, so baseline records nothing:\n${differ.join("\n")}`,
+		)
+	}
+	if (matched > 0)
+		options.print(
+			`Warning: the bodies of ${matched} function${matched === 1 ? "" : "s"}, procedures and triggers were not compared: Atlas OSS cannot load them, and comb does not read them`,
+		)
+}
+
+export { type ObjectsCompare, refuseDrift, refuseObjectDrift, sqliteDrift }

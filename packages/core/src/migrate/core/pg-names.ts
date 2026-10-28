@@ -169,4 +169,4 @@ function followNames(type: string, node: Node, facts: Facts): boolean {
 	return true
 }
 
-export { followNames }
+export { followNames, movedKey }

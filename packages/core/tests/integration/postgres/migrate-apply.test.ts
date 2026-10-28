@@ -254,10 +254,12 @@ describe("migrate baseline and status on Postgres", () => {
 				})
 				await expect(applyWithAtlas(command(url))).rejects.toThrow("record them with comb migrate baseline")
 				const baseline = command(url, { devUrl })
-				expect(baselineWithAtlas(baseline)).toEqual(["20260101000000_a.sql", "20260102000000_b.sql"])
+				expect(await baselineWithAtlas(baseline)).toEqual(["20260101000000_a.sql", "20260102000000_b.sql"])
 				expect(await revisions(url)).toEqual(["20260101000000", "20260102000000"])
 				expect(await applyWithAtlas(command(url))).toEqual([])
-				expect(() => baselineWithAtlas(command(url, { devUrl }))).toThrow("the database already records 2 migrations")
+				await expect(baselineWithAtlas(command(url, { devUrl }))).rejects.toThrow(
+					"the database already records 2 migrations",
+				)
 				const status = command(url)
 				statusWithAtlas(status)
 				expect(status.out).toEqual(["Applied: 2 (up to 20260102000000)", "Pending: none"])
@@ -270,7 +272,7 @@ describe("migrate baseline and status on Postgres", () => {
 				migrations({
 					"20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\nCREATE VIEW "v" AS (select 1 as x);\n',
 				})
-				expect(() => baselineWithAtlas(command(url, { devUrl }))).toThrow(
+				await expect(baselineWithAtlas(command(url, { devUrl }))).rejects.toThrow(
 					/^the database's tables are not the ones the migrations leave, so baseline records nothing; the difference:\n[\s\S]*DROP COLUMN "extra"/,
 				)
 				expect(await query(url, "SELECT 1 FROM pg_namespace WHERE nspname = 'atlas_schema_revisions'")).toEqual([])
@@ -316,7 +318,7 @@ describe("migrate baseline on Postgres: a history Atlas splits as it runs it", (
 					mkdirSync(dir)
 					await query(url, history.replace(/^-- atlas:delimiter GO\n\n/, "").replaceAll("\nGO\n", ";\n"))
 					migrations({ "20260101000000_a.sql": history })
-					expect(baselineWithAtlas(command(url, { devUrl }))).toEqual(["20260101000000_a.sql"])
+					expect(await baselineWithAtlas(command(url, { devUrl }))).toEqual(["20260101000000_a.sql"])
 					expect(await revisions(url)).toEqual(["20260101000000"])
 				})
 			}
@@ -360,7 +362,7 @@ describe("migrate apply on Postgres: one history per schema", () => {
 				const refusal =
 					/no shared history row matches this directory's files \(a database made by hand, or another directory's history\)[\s\S]*comb migrate baseline/
 				await expect(applyWithAtlas(command(url, { schema: "tenant_a" }))).rejects.toThrow(refusal)
-				expect(baselineWithAtlas(command(url, { devUrl, schema: "tenant_a" }))).toEqual(["20260101000000_t.sql"])
+				expect(await baselineWithAtlas(command(url, { devUrl, schema: "tenant_a" }))).toEqual(["20260101000000_t.sql"])
 				expect(await applyWithAtlas(command(url, { schema: "tenant_a" }))).toEqual([])
 			})
 		}, 60_000)

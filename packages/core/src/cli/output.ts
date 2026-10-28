@@ -4,6 +4,7 @@
  */
 import { createInterface } from "node:readline/promises"
 import type { Run } from "../migrate/core/process.ts"
+import type { LiveRead } from "../migrate/core/pg-live-types.ts"
 
 /** Where the CLI reads its working directory, writes its output, asks, and starts processes. */
 export type CliIo = {
@@ -11,6 +12,8 @@ export type CliIo = {
 	out(line: string): void
 	err(line: string): void
 	run?: Run | undefined
+	/** How a Postgres baseline reads the database's functions and triggers, postgres.js unless a test fakes it (5.4b) */
+	readPgObjects?: LiveRead | undefined
 	/** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
 	confirm?: ((question: string) => Promise<boolean>) | undefined
 }

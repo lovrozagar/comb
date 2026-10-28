@@ -5,12 +5,15 @@ export { help, runCli } from "./run.ts";
 
 // cli/output.d.ts
 import type { Run } from "../migrate/core/process.ts";
+import type { LiveRead } from "../migrate/core/pg-live-types.ts";
 /** Where the CLI reads its working directory, writes its output, asks, and starts processes. */
 export type CliIo = {
     cwd: string;
     out(line: string): void;
     err(line: string): void;
     run?: Run | undefined;
+    /** How a Postgres baseline reads the database's functions and triggers, postgres.js unless a test fakes it (5.4b) */
+    readPgObjects?: LiveRead | undefined;
     /** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
     confirm?: ((question: string) => Promise<boolean>) | undefined;
 };
@@ -64,3 +67,18 @@ export type RunOptions = {
 export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
 /** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
 export declare const run: Run;
+
+// migrate/core/pg-live-types.d.ts
+/** The shape of a Postgres baseline's catalog read (pg-live-objects.ts), apart so the CLI's io names it without its code. */
+/** What a database holds of what Atlas OSS will not compare: each routine's kind by name, and each table's triggers */
+export type LiveObjects = {
+    routines: Map<string, "function" | "procedure">;
+    triggers: Map<string, Set<string>>;
+};
+/** The database a read reaches, and the schema it reads */
+export type LiveTarget = {
+    schema: string;
+    url: string;
+};
+/** How a baseline reads them: postgres.js, unless a test fakes it */
+export type LiveRead = (target: LiveTarget) => Promise<LiveObjects>;

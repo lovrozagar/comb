@@ -144,7 +144,7 @@ describe("migrate on Postgres: adopting 0.12's shared history in baseline, and a
 			await withScratchDb(async (url) => {
 				const before = await migratedUnder012(url)
 				const baseline = command(url)
-				expect(baselineWithAtlas(baseline)).toEqual(["20260101000000_users.sql"])
+				expect(await baselineWithAtlas(baseline)).toEqual(["20260101000000_users.sql"])
 				expect(await own(url)).toEqual(["20260101000000"])
 				expect(await applyWithAtlas(command(url))).toEqual(["20260102000000_backfill.sql"])
 				expect(await query(url, 'SELECT id FROM app."users" ORDER BY id')).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }])

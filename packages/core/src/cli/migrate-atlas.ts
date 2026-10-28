@@ -31,11 +31,17 @@ export async function migratePostgres(
 		)
 	if (!fs.existsSync(target.migrationsDir)) throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)
 	for (const warning of pgUrlProblems(target.provider, { url: true }).warnings) io.err(`Warning: ${warning}`)
-	const options = { dir: target.migrationsDir, exec: io.run, print: io.out, target: target.provider }
+	const options = {
+		dir: target.migrationsDir,
+		exec: io.run,
+		print: io.out,
+		readLive: io.readPgObjects,
+		target: target.provider,
+	}
 	if (mode === "baseline") {
 		/* baseline replays the history as the statements Postgres runs (M75) */
 		await loadPostgresParser()
-		io.out(`\nBaseline done: ${baselineWithAtlas(options).length} marked`)
+		io.out(`\nBaseline done: ${(await baselineWithAtlas(options)).length} marked`)
 		return { applied: [], pending: [] }
 	}
 	if (mode === "status") return statusWithAtlas(options)
