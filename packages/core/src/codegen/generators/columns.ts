@@ -15,6 +15,7 @@ import { readStaged, type Staged, writeGenFile, writeJsonAtomic } from "../utils
 import { exportKey, type ExportTarget, ownsKey, readExports } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { qualifiedName } from "../utils/table-name.ts"
+import { type ImportStyle, specifierFor } from "../utils/paths.ts"
 
 type ColumnsConfig = {
 	filePrefix?: string | undefined
@@ -34,13 +35,18 @@ function genFileName(filePrefix: string | undefined, stem: string): string {
 }
 
 /** Where one run writes: the output directory and the tables file the sql-cols import */
-type ColumnsOutput = { absoluteOutputDir: string; filePrefix?: string | undefined; tablesFile: string }
+type ColumnsOutput = {
+	absoluteOutputDir: string
+	filePrefix?: string | undefined
+	importStyle: ImportStyle | undefined
+	tablesFile: string
+}
 
 /** Write one table's rqb-cols and sql-cols files */
 function writeEntityCols(table: TableEntry, out: ColumnsOutput, staged: Staged | undefined): void {
 	const rqbEntityDir = path.join(out.absoluteOutputDir, "rqb-cols", table.varName)
 	const sqlEntityDir = path.join(out.absoluteOutputDir, "sql-cols", table.varName)
-	const sqlRelTablesPath = `${path.relative(sqlEntityDir, path.dirname(out.tablesFile))}/${path.basename(out.tablesFile, ".ts")}`
+	const sqlRelTablesPath = specifierFor(sqlEntityDir, out.tablesFile, out.importStyle)
 	const fileName = genFileName(out.filePrefix, table.varName)
 	writeGenFile(path.join(rqbEntityDir, fileName), generateRqbColsFile(table), { generator: "comb", staged })
 	writeGenFile(path.join(sqlEntityDir, fileName), generateSqlColsFile(table, sqlRelTablesPath), {
@@ -54,6 +60,7 @@ export function generateColumns(ctx: GeneratorContext, config: ColumnsConfig): v
 	const out: ColumnsOutput = {
 		absoluteOutputDir: path.resolve(ctx.cwd, config.output),
 		filePrefix: config.filePrefix,
+		importStyle: ctx.importStyle,
 		tablesFile: path.resolve(ctx.cwd, ctx.tablesPath),
 	}
 	const entries: TableEntry[] = ctx.analysis.tables.map((t) => ({

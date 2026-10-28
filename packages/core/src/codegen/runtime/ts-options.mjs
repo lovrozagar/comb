@@ -9,15 +9,15 @@ import path from "node:path"
 import { ts } from "ts-morph"
 
 /**
- * The compiler options of the tsconfig nearest `from`, over the bundler resolution comb reads
- * TypeScript files with; those defaults alone when there is no tsconfig
+ * The compiler options the tsconfig nearest `from` sets, as the consumer wrote them; none when
+ * there is no tsconfig. What the consumer's TypeScript takes of comb's output is read from these
+ * (F53), never from the defaults comb reads files with
  * @param {string} from
  * @returns {import("ts-morph").ts.CompilerOptions}
  */
-export function compilerOptionsFor(from) {
-	const base = { allowImportingTsExtensions: true, moduleResolution: ts.ModuleResolutionKind.Bundler }
+export function tsconfigOptions(from) {
 	const config = ts.findConfigFile(path.dirname(from), (file) => ts.sys.fileExists(file))
-	if (config === undefined) return base
+	if (config === undefined) return {}
 	const host = {
 		...ts.sys,
 		/** @param {import("ts-morph").ts.Diagnostic} diagnostic */
@@ -29,7 +29,21 @@ export function compilerOptionsFor(from) {
 	const parsed = /** @type {import("ts-morph").ts.ParsedCommandLine} */ (
 		ts.getParsedCommandLineOfConfigFile(config, {}, host)
 	)
-	return { ...base, ...parsed.options }
+	return parsed.options
+}
+
+/**
+ * The compiler options of the tsconfig nearest `from`, over the bundler resolution comb reads
+ * TypeScript files with; those defaults alone when there is no tsconfig
+ * @param {string} from
+ * @returns {import("ts-morph").ts.CompilerOptions}
+ */
+export function compilerOptionsFor(from) {
+	return {
+		allowImportingTsExtensions: true,
+		moduleResolution: ts.ModuleResolutionKind.Bundler,
+		...tsconfigOptions(from),
+	}
 }
 
 /**

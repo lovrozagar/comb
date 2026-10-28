@@ -7,6 +7,7 @@ import path from "node:path"
 import { snakeToPascal } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
+import { specifierFor } from "../utils/paths.ts"
 
 type RowsConfig = {
 	output: string
@@ -29,10 +30,7 @@ export function generateRows(ctx: GeneratorContext, config: RowsConfig): void {
 
 	/* Generate import statement */
 	const outputDir = path.dirname(outputPath)
-	let relativePath = path.relative(outputDir, tablesPath).replace(/\.ts$/, "")
-	if (!relativePath.startsWith(".")) {
-		relativePath = `./${relativePath}`
-	}
+	const relativePath = specifierFor(outputDir, tablesPath, ctx.importStyle)
 
 	outputLines.push("import type {")
 	for (const table of tables) {

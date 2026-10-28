@@ -1,5 +1,4 @@
 /** One entity's generated file: its four DTO schemas, the entity stamp and the inferred types. */
-import path from "node:path"
 import type { CombEntityMetaInput } from "../../../meta.ts"
 import type { ImportRef } from "../../analyzer-types.ts"
 import { propertyName, snakeToCamel, snakeToPascal } from "../../utils/case.ts"
@@ -7,6 +6,7 @@ import { byCodeUnit } from "../../utils/order.ts"
 import type { FieldInfo, SchemaType, SharedSchema, TableInfo } from "./dto-types.ts"
 import { BASE_TYPE_ALIASES, rewriteWithShared } from "./shared-schemas.ts"
 import { comboFields, comboOf, type TimestampCombo, timestampNames } from "./timestamps.ts"
+import { type ImportStyle, specifierFor, styled } from "../../utils/paths.ts"
 
 const SUFFIX: Record<SchemaType, string> = {
 	create: "DtoCreate",
@@ -26,6 +26,8 @@ export type EntityFileOptions = {
 	entityDir: string
 	filePrefix?: string | undefined
 	metaImportFrom?: string | undefined
+	/** how the consumer takes a relative import (F53) */
+	importStyle?: ImportStyle | undefined
 	/** the names the entity's schemas use, with where the tables file gets them */
 	schemaImports: ImportRef[]
 	sharedSchemas: Map<string, SharedSchema>
@@ -73,18 +75,15 @@ function renderCombMeta(meta: CombEntityMetaInput): string {
 	].join("\n")
 }
 
-/** The specifier the generated file imports `ref` by: relative to it for a project file, as written for a package. */
-function specifierOf(ref: ImportRef, entityDir: string): string {
-	if (ref.path === null) return ref.from
-	const relative = path.relative(entityDir, ref.path).replace(/\.ts$/, "").split(path.sep).join("/")
-	return relative.startsWith(".") ? relative : `./${relative}`
-}
+/** The specifier the generated file imports `ref` by: relative to it for a project file, in `style`, as written for a package. */
+const specifierOf = (ref: ImportRef, entityDir: string, style: ImportStyle | undefined): string =>
+	ref.path === null ? ref.from : specifierFor(entityDir, ref.path, style)
 
 /** Import lines for the names an entity's schemas use, one per module, in a stable order. */
-export function schemaImportLines(refs: ImportRef[], entityDir: string): string[] {
+export function schemaImportLines(refs: ImportRef[], entityDir: string, style?: ImportStyle | undefined): string[] {
 	const byModule = new Map<string, ImportRef[]>()
 	for (const ref of refs) {
-		const specifier = specifierOf(ref, entityDir)
+		const specifier = specifierOf(ref, entityDir, style)
 		byModule.set(specifier, [...(byModule.get(specifier) ?? []), ref])
 	}
 	return [...byModule.entries()]
@@ -189,10 +188,11 @@ function typeLines(table: TableInfo): string[] {
 function importLines(table: TableInfo, spread: Spread, options: EntityFileOptions): string[] {
 	const lines = [`import * as z from "zod"`]
 	if (table.combMeta) lines.push(`import { combMeta } from "${options.metaImportFrom ?? "@lovrozagar/comb/meta"}"`)
-	lines.push(...schemaImportLines(options.schemaImports, options.entityDir))
+	lines.push(...schemaImportLines(options.schemaImports, options.entityDir, options.importStyle))
 	const shared = sharedImports(table, spread, options.sharedSchemas)
 	if (shared.length > 0) {
-		const from = options.filePrefix ? `../_shared/${options.filePrefix}._shared.gen` : "../_shared/index.gen"
+		const sharedFile = options.filePrefix ? `../_shared/${options.filePrefix}._shared.gen` : "../_shared/index.gen"
+		const from = styled(sharedFile, options.importStyle)
 		lines.push(`import { ${shared.join(", ")} } from "${from}"`)
 	}
 	return [...lines, ""]

@@ -12,6 +12,8 @@ import { type CodegenConfig, type DatabaseCodegen, databaseIn, loadCombConfig, t
 import { CliError, type CliIo } from "./output.ts"
 import { dbIdentifiers } from "../codegen/utils/case.ts"
 import { GENERATORS, type GeneratorName } from "../codegen/config.ts"
+import { tsconfigOptions } from "../codegen/runtime/ts-options.mjs"
+import { importStyleOf } from "../codegen/utils/paths.ts"
 
 type Generator = GeneratorName
 
@@ -208,6 +210,7 @@ async function generate(
 			/* the engine its tables are built for; a database with no table yet generates nothing an engine shapes */
 			dialect: database.db.dialect ?? analysis.dialect ?? "sqlite",
 			exportNamespace: database.exportNamespace,
+			importStyle: importStyleOf(tsconfigOptions(database.tablesPath)),
 			log: io.out,
 			staged: run.staged,
 			tablesPath: database.tablesPath,

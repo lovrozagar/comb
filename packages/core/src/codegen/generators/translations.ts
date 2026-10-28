@@ -7,6 +7,7 @@ import { dbIdentifiers, propertyName, stringLiteral } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { buildConstraintMap, constraintsIn } from "./constraints.ts"
 import type { GeneratorContext } from "./context-types.ts"
+import { type ImportStyle, styled } from "../utils/paths.ts"
 
 type TranslationsConfig = {
 	baseDir: string
@@ -56,7 +57,7 @@ export function generateTranslations(ctx: GeneratorContext, config: Translations
 	}
 
 	const translationsDir = path.join(baseDir, "translations", "error-keys")
-	const file: TranslationFile = { dbName, errorKeys, filePrefix: config.filePrefix }
+	const file: TranslationFile = { dbName, errorKeys, filePrefix: config.filePrefix, importStyle: ctx.importStyle }
 	writeGenFile(path.join(baseDir, `${config.filePrefix}.error-keys.gen.ts`), generateErrorKeysFile(file), {
 		generator: "comb",
 		staged: ctx.staged,
@@ -70,7 +71,12 @@ export function generateTranslations(ctx: GeneratorContext, config: Translations
 	ctx.log(`Error keys: ${errorKeys.length}`)
 }
 
-type TranslationFile = { dbName: string; errorKeys: ErrorKey[]; filePrefix: string }
+type TranslationFile = {
+	dbName: string
+	errorKeys: ErrorKey[]
+	filePrefix: string
+	importStyle: ImportStyle | undefined
+}
 
 const errorKeysConst = (dbName: string) => `${dbIdentifiers(dbName).constant}_DB_ERROR_KEYS`
 
@@ -91,11 +97,11 @@ function generateErrorKeysFile({ dbName, errorKeys }: TranslationFile): string {
 }
 
 /** Generate the en-US translation TypeScript file */
-function generateEnglishFile({ dbName, errorKeys, filePrefix }: TranslationFile): string {
+function generateEnglishFile({ dbName, errorKeys, filePrefix, importStyle }: TranslationFile): string {
 	const constName = errorKeysConst(dbName)
 	const exportName = `${constName}_EN`
 	return [
-		`import type { ${constName} } from "../../${filePrefix}.error-keys.gen"`,
+		`import type { ${constName} } from "${styled(`../../${filePrefix}.error-keys.gen`, importStyle)}"`,
 		"",
 		`const ${exportName}: Record<keyof typeof ${constName}, string> = {`,
 		errorKeys.map((entry) => `\t${propertyName(entry.key)}: ${stringLiteral(englishMessage(entry))}`).join(",\n"),

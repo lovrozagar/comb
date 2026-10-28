@@ -4,7 +4,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
 import { moduleGraph, runtimeSpecifiers } from "./module-graph.ts"
-import { compilerOptionsFor } from "./ts-options.mjs"
+import { compilerOptionsFor, tsconfigOptions } from "./ts-options.mjs"
 
 let dir: string
 
@@ -210,5 +210,19 @@ export const all = [roles, b, c, d, e]
 		})
 		const files = moduleGraph(path.join(dir, "a.ts")).files.map((file) => path.relative(dir, file))
 		expect(files).toEqual(["a.ts", "b.js", "c.mjs", "d.cjs"])
+	})
+})
+
+/* F53: the consumer's own options, which decide what its TypeScript takes of comb's output */
+describe("tsconfigOptions", () => {
+	it("is what the nearest tsconfig sets, and nothing where there is none, never comb's own defaults", () => {
+		expect(tsconfigOptions(path.join(os.tmpdir(), "no-tsconfig-here", "a.ts"))).toEqual({})
+		write({
+			"tsconfig.json": JSON.stringify({ compilerOptions: { moduleResolution: "nodenext", module: "nodenext" } }),
+			"a.ts": "",
+		})
+		expect(tsconfigOptions(path.join(dir, "a.ts"))).toMatchObject({ moduleResolution: 99 })
+		expect(tsconfigOptions(path.join(dir, "a.ts")).allowImportingTsExtensions).toBeUndefined()
+		expect(compilerOptionsFor(path.join(dir, "a.ts")).allowImportingTsExtensions).toBe(true)
 	})
 })

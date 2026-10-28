@@ -22,10 +22,43 @@ export function extractDbName(filePath: string): string {
 	return "db"
 }
 
-/** The module specifier `fromFile` imports `target` by: relative, `./` or `../` first, no `.ts` */
-export function importPathFrom(fromFile: string, target: string): string {
-	const relative = path.relative(path.dirname(fromFile), target).replace(/\.ts$/, "").split(path.sep).join("/")
-	return relative.startsWith(".") ? relative : `./${relative}`
+/**
+ * How the consumer's TypeScript takes a relative import of a TypeScript file (F53): under `node16`
+ * and `nodenext` with its extension, `.js` for `.ts` (the `.ts` itself under
+ * `allowImportingTsExtensions` or `rewriteRelativeImportExtensions`); under `bundler` or the older
+ * resolutions without one, as comb always wrote it
+ */
+export type ImportStyle = "bare" | "js" | "ts"
+
+/** The style the consumer's compiler options take */
+export function importStyleOf(options: {
+	allowImportingTsExtensions?: boolean | undefined
+	moduleResolution?: number | undefined
+	rewriteRelativeImportExtensions?: boolean | undefined
+}): ImportStyle {
+	/* ts.ModuleResolutionKind's Node16 and NodeNext */
+	if (options.moduleResolution !== 3 && options.moduleResolution !== 99) return "bare"
+	return options.allowImportingTsExtensions === true || options.rewriteRelativeImportExtensions === true ? "ts" : "js"
+}
+
+/** `specifier`, which names a TypeScript file of `extension` by its path without it, in `style` (none given: bare) */
+export function styled(specifier: string, style: ImportStyle | undefined, extension = ".ts"): string {
+	if (style === "ts") return `${specifier}${extension}`
+	if (style === "js") return `${specifier}${extension.replace(/ts$/, "js")}`
+	return extension === ".ts" ? specifier : `${specifier}${extension}`
+}
+
+/** The specifier a file in `fromDir` imports `target` by, relative, `./` or `../` first, in `style`; a JavaScript file as it is */
+export function specifierFor(fromDir: string, target: string, style: ImportStyle | undefined): string {
+	const relative = path.relative(fromDir, target).split(path.sep).join("/")
+	const local = relative.startsWith(".") ? relative : `./${relative}`
+	const source = /(?<!\.d)(\.[cm]?ts)$/.exec(local)
+	return source === null ? local : styled(local.slice(0, -(source[1] as string).length), style, source[1])
+}
+
+/** The module specifier `fromFile` imports `target` by, in `style` */
+export function importPathFrom(fromFile: string, target: string, style?: ImportStyle | undefined): string {
+	return specifierFor(path.dirname(fromFile), target, style)
 }
 
 /**

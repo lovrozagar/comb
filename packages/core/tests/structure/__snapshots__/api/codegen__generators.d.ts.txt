@@ -275,10 +275,13 @@ export {};
 // codegen/generators/context-types.d.ts
 /** What every generator works from: the analysis, where it runs, and where its progress lines go. */
 import type { AnalysisResult } from "../analyzer-types.ts";
+import type { ImportStyle } from "../utils/paths.ts";
 export type GeneratorContext = {
     analysis: AnalysisResult;
     /** the directory relative output paths resolve against */
     cwd: string;
+    /** how the consumer's TypeScript takes a relative import, its extension or none (F53); "bare" when unset */
+    importStyle?: ImportStyle | undefined;
     /** the database's engine: what a column type holds, and which drizzle core a file imports from */
     dialect: "postgres" | "sqlite";
     /** a progress line for the person running codegen */
@@ -550,6 +553,37 @@ export type SharedSchema = {
     count: number;
     name: string;
 };
+
+// codegen/utils/paths.d.ts
+/**
+ * Extract database name from tables file path.
+ * Handles both legacy (db.core.tables.ts) and saas ({name}.db.{dbName}.tables.gen.ts) patterns.
+ */
+export declare function extractDbName(filePath: string): string;
+/**
+ * How the consumer's TypeScript takes a relative import of a TypeScript file (F53): under `node16`
+ * and `nodenext` with its extension, `.js` for `.ts` (the `.ts` itself under
+ * `allowImportingTsExtensions` or `rewriteRelativeImportExtensions`); under `bundler` or the older
+ * resolutions without one, as comb always wrote it
+ */
+export type ImportStyle = "bare" | "js" | "ts";
+/** The style the consumer's compiler options take */
+export declare function importStyleOf(options: {
+    allowImportingTsExtensions?: boolean | undefined;
+    moduleResolution?: number | undefined;
+    rewriteRelativeImportExtensions?: boolean | undefined;
+}): ImportStyle;
+/** `specifier`, which names a TypeScript file of `extension` by its path without it, in `style` (none given: bare) */
+export declare function styled(specifier: string, style: ImportStyle | undefined, extension?: string): string;
+/** The specifier a file in `fromDir` imports `target` by, relative, `./` or `../` first, in `style`; a JavaScript file as it is */
+export declare function specifierFor(fromDir: string, target: string, style: ImportStyle | undefined): string;
+/** The module specifier `fromFile` imports `target` by, in `style` */
+export declare function importPathFrom(fromFile: string, target: string, style?: ImportStyle | undefined): string;
+/**
+ * Get the import path for the tables file (without extension), relative to same directory.
+ * e.g. test.db.core.tables.gen.ts -> ./test.db.core.tables.gen
+ */
+export declare function getTablesImportPath(tablesPath: string): string;
 
 // meta/column.d.ts
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { extractDbName, getTablesImportPath, importPathFrom } from "./paths.ts"
+import { extractDbName, getTablesImportPath, importPathFrom, importStyleOf, specifierFor, styled } from "./paths.ts"
 
 describe("extractDbName", () => {
 	it("extracts from db.core.tables.ts pattern", () => {
@@ -61,5 +61,31 @@ describe("importPathFrom", () => {
 	it("imports a sibling with ./, a file elsewhere with ../, never with .ts", () => {
 		expect(importPathFrom("/p/src/gen/orm.gen.ts", "/p/src/gen/db.relations.gen.ts")).toBe("./db.relations.gen")
 		expect(importPathFrom("/p/src/gen/orm.gen.ts", "/p/src/db/db.core.tables.ts")).toBe("../db/db.core.tables")
+	})
+})
+
+/* F53: a relative import in the form the consumer's TypeScript resolves */
+describe("the consumer's import style", () => {
+	it("is an extension under node16 and nodenext, .ts where the consumer imports .ts, and none otherwise", () => {
+		expect(importStyleOf({})).toBe("bare")
+		/* ts.ModuleResolutionKind: Bundler 100, Node10 2 */
+		expect(importStyleOf({ moduleResolution: 100 })).toBe("bare")
+		expect(importStyleOf({ moduleResolution: 2 })).toBe("bare")
+		expect(importStyleOf({ moduleResolution: 3 })).toBe("js")
+		expect(importStyleOf({ moduleResolution: 99 })).toBe("js")
+		expect(importStyleOf({ allowImportingTsExtensions: true, moduleResolution: 99 })).toBe("ts")
+		expect(importStyleOf({ moduleResolution: 99, rewriteRelativeImportExtensions: true })).toBe("ts")
+	})
+
+	it("names a TypeScript file by its extension in the style, and a JavaScript or declaration file as it is", () => {
+		expect(styled("../_shared/index.gen", "bare")).toBe("../_shared/index.gen")
+		expect(styled("../_shared/index.gen", "js")).toBe("../_shared/index.gen.js")
+		expect(styled("../_shared/index.gen", "ts")).toBe("../_shared/index.gen.ts")
+		expect(specifierFor("/p/a", "/p/db/core.tables.mts", "js")).toBe("../db/core.tables.mjs")
+		expect(specifierFor("/p/a", "/p/db/core.tables.cts", "ts")).toBe("../db/core.tables.cts")
+		expect(specifierFor("/p/a", "/p/db/core.tables.mts", "bare")).toBe("../db/core.tables.mts")
+		expect(specifierFor("/p", "/p/schemas.js", "js")).toBe("./schemas.js")
+		expect(specifierFor("/p", "/p/schemas.d.ts", "js")).toBe("./schemas.d.ts")
+		expect(importPathFrom("/p/src/gen/orm.gen.ts", "/p/src/db/db.core.tables.ts", "js")).toBe("../db/db.core.tables.js")
 	})
 })

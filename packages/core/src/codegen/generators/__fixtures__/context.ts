@@ -24,6 +24,7 @@ function testContext(
 		analysis,
 		cwd,
 		dialect,
+		importStyle: "bare",
 		log: (line) => logged.push(line),
 		logged,
 		tablesPath,

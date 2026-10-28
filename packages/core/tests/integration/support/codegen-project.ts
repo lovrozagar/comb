@@ -59,8 +59,11 @@ export const generatedFiles = (dir: string): string[] =>
 		.map((entry) => path.relative(dir, path.join(entry.parentPath, entry.name)))
 		.sort()
 
-/** tsc over every generated file of the project under the strict flags a consumer may set: its imports must resolve */
-export function typecheck(dir: string, extra: readonly string[] = []): string {
+/**
+ * tsc over every generated file of the project under the strict flags a consumer may set, and
+ * `options` over them (a `nodenext` resolution): its imports must resolve
+ */
+export function typecheck(dir: string, extra: readonly string[] = [], options: Record<string, unknown> = {}): string {
 	const generated = fs
 		.readdirSync(dir, { recursive: true, withFileTypes: true })
 		.filter((entry) => entry.isFile() && entry.name.endsWith(".gen.ts"))
@@ -84,6 +87,7 @@ export function typecheck(dir: string, extra: readonly string[] = []): string {
 				strict: true,
 				target: "esnext",
 				verbatimModuleSyntax: true,
+				...options,
 			},
 			files: [...generated, ...extra.map((file) => path.join(dir, file))],
 		}),

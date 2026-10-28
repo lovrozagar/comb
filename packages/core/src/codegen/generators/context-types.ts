@@ -1,10 +1,13 @@
 /** What every generator works from: the analysis, where it runs, and where its progress lines go. */
 import type { AnalysisResult } from "../analyzer-types.ts"
+import type { ImportStyle } from "../utils/paths.ts"
 
 export type GeneratorContext = {
 	analysis: AnalysisResult
 	/** the directory relative output paths resolve against */
 	cwd: string
+	/** how the consumer's TypeScript takes a relative import, its extension or none (F53); "bare" when unset */
+	importStyle?: ImportStyle | undefined
 	/** the database's engine: what a column type holds, and which drizzle core a file imports from */
 	dialect: "postgres" | "sqlite"
 	/** a progress line for the person running codegen */

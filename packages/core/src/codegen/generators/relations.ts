@@ -202,7 +202,7 @@ export function generateRelations(ctx: GeneratorContext, config: RelationsConfig
 	const sortedTableNames = [...new Set(tables.map((t) => t.varName))].sort()
 
 	/* the tables import runs from where the relations file is written to the tables file */
-	const tablesImport = importPathFrom(outputPath, path.resolve(ctx.cwd, ctx.tablesPath))
+	const tablesImport = importPathFrom(outputPath, path.resolve(ctx.cwd, ctx.tablesPath), ctx.importStyle)
 	const body = sortedTableNames.flatMap((tableName) => tableLines(tableName, graph))
 	/* with no relation, no r: an unused parameter fails the noUnusedParameters a consumer may set */
 	const define =

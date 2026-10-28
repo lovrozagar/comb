@@ -216,11 +216,15 @@ export function generateOrm(ctx: GeneratorContext, config: OrmConfig): void {
 	const { dbName } = ctx.analysis
 	const outputPath = path.resolve(ctx.cwd, config.output)
 	/* each import runs from where the client is written */
-	const tablesImport = importPathFrom(outputPath, path.resolve(ctx.cwd, ctx.tablesPath))
+	const tablesImport = importPathFrom(outputPath, path.resolve(ctx.cwd, ctx.tablesPath), ctx.importStyle)
 	const names: OrmNames = {
 		dbName: dbIdentifiers(dbName).camel,
 		pascal: dbIdentifiers(dbName).pascal,
-		relationsImport: importPathFrom(outputPath, path.resolve(ctx.cwd, relationsFileOf(config, outputPath, dbName))),
+		relationsImport: importPathFrom(
+			outputPath,
+			path.resolve(ctx.cwd, relationsFileOf(config, outputPath, dbName)),
+			ctx.importStyle,
+		),
 		schemaImport: `${dbIdentifiers(dbName).camel}DbSchema`,
 		tablesImport,
 	}
