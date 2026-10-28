@@ -528,7 +528,9 @@ learn the shape of the database.
 
 `comb codegen -g manifest` writes `db.<name>.manifest.gen.json` alongside the generated entities.
 Per entity it carries the identity, id prefix, `softDelete`, `tenantColumn`, relations with their
-referential actions, unique indexes and check constraints. Per column it carries the helper that
+referential actions, unique indexes and check constraints. A composite foreign key is one relation
+per column, each carrying the whole key as `key: { columns, refColumns }`, paired by position, so
+a reader joins on every column together rather than on independent pairs. Per column it carries the helper that
 declared it, its declared bounds and enum values, and `generated`, `immutable` and `private`
 flags. Every column that declares a state machine carries it, `transitions` included. The stamp
 publishes the first such column and leaves `transitions` out. Private columns are listed and

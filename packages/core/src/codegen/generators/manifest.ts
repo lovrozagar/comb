@@ -52,6 +52,8 @@ type ManifestColumn = {
 
 type ManifestRelation = {
 	column: string
+	/** the composite key the column is part of, each column paired by position with the one it references; absent on a single-column key */
+	key?: { columns: string[]; refColumns: string[] }
 	table: string
 	refColumn: string
 	onDelete: string | null
@@ -120,6 +122,7 @@ function toEntity(table: TableMeta): ManifestEntity {
 		if (!fk) continue
 		relations.push({
 			column: fk.column,
+			...(fk.key === undefined ? {} : { key: { columns: fk.key.columns, refColumns: fk.key.refColumns } }),
 			onDelete: fk.onDelete ?? null,
 			onUpdate: fk.onUpdate ?? null,
 			refColumn: fk.refColumn,

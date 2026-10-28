@@ -242,6 +242,22 @@ export const team = createTable("team", { id: c.id("tem"), org_id: c.ref("org_id
 	})
 })
 
+describe("entity manifest — a composite foreign key", () => {
+	const { entity } = manifestFixture()
+
+	/* 4.20: a composite key is one key, each column paired by position, not independent pairs */
+	it("states a composite foreign key as one key on each of its columns' relations", () => {
+		const source = `import { foreignKey } from "drizzle-orm/sqlite-core"
+export const member = createTable("member", { org_id: c.text("org_id").notNull(), user_id: c.text("user_id").notNull() }, (t) => [primaryKey({ columns: [t.org_id, t.user_id] })])
+export const grant = createTable("grant", { id: c.id("grt"), org_id: c.text("org_id").notNull(), user_id: c.text("user_id").notNull() }, (t) => [foreignKey({ columns: [t.org_id, t.user_id], foreignColumns: [member.org_id, member.user_id] })])`
+		const key = { columns: ["org_id", "user_id"], refColumns: ["org_id", "user_id"] }
+		expect(entity("grant", source).relations).toEqual([
+			{ column: "org_id", key, onDelete: null, onUpdate: null, refColumn: "org_id", table: "member" },
+			{ column: "user_id", key, onDelete: null, onUpdate: null, refColumn: "user_id", table: "member" },
+		])
+	})
+})
+
 describe("entity manifest — constraints and JSON", () => {
 	const { entity, manifestOf } = manifestFixture()
 
