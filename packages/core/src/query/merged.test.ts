@@ -33,16 +33,17 @@ describe("mergedListOptions", () => {
 describe("paginateMerged", () => {
 	it("orders each storage class as SQLite does: numbers, booleans and dates before text, text before a blob", () => {
 		const shards = [
+			/* each shard's rows in its own order, as its ORDER BY returns them */
 			[
+				{ id: "c", k: 2n },
 				{ id: "a", k: "x" },
 				{ id: "b", k: new Uint8Array([2]) },
-				{ id: "c", k: 2n },
 			],
 			[
-				{ id: "d", k: true },
 				{ id: "e", k: new Date(0) },
-				{ id: "f", k: new Uint8Array([1, 9]) },
+				{ id: "d", k: true },
 				{ id: "g", k: new Uint8Array([1]) },
+				{ id: "f", k: new Uint8Array([1, 9]) },
 			],
 		]
 		expect(ids(shards, { limit: "10", order: "k.asc" })).toEqual(["e", "d", "c", "a", "g", "f", "b"])
@@ -57,7 +58,7 @@ describe("paginateMerged", () => {
 
 	it("orders by the id alone, descending, under an empty sort, as orderByKeys does", () => {
 		const query = { limit: 10, parsedSort: [] }
-		const [rows] = paginateMerged([[{ id: 1 }, { id: 3 }], [{ id: 2 }]], query, SEALED)
+		const [rows] = paginateMerged([[{ id: 3 }, { id: 1 }], [{ id: 2 }]], query, SEALED)
 		expect(rows.map((row) => row.id)).toEqual([3, 2, 1])
 	})
 

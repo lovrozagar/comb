@@ -111,6 +111,27 @@ function compareRows(sort: readonly SortField[], idField: string) {
 }
 
 /**
+ * Each shard's rows come back in its own ORDER BY; one out of the merge's order proves a sort key
+ * that SQLite does not order BINARY (a column declared COLLATE NOCASE or RTRIM, which drizzle never
+ * declares), and a merge by code point would page it wrong. A disagreement only rows on different
+ * shards would show is past seeing here, which is why a merged list's sort keys must be BINARY.
+ */
+function refuseUnmergeable(
+	rowsPerShard: ReadonlyArray<ReadonlyArray<Record<string, unknown>>>,
+	compare: ReturnType<typeof compareRows>,
+): void {
+	for (const [shard, rows] of rowsPerShard.entries()) {
+		const at = rows.findIndex((row, i) => i > 0 && compare(rows[i - 1] as Record<string, unknown>, row) > 0)
+		if (at === -1) continue
+		throw new CombError({
+			cause: `shard ${shard}'s rows came back out of the order paginateMerged merges by, at row ${at}: a merged list's sort keys must use SQLite's default BINARY collation`,
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
+}
+
+/**
  * Rows every shard's filter matches, summed: each shard's offset read carries its own total on
  * its rows (`countExtra`), and one that read none matches none. Null for a cursor page, or once a
  * shard's rows carry no total.
@@ -145,7 +166,9 @@ function paginateMerged<T extends object>(
 ): readonly [T[], z.output<typeof paginationResponseSchema>] {
 	const rows = rowsPerShard.flat() as Array<T & Record<string, unknown>>
 	refuseGoneAnchor(rows)
-	rows.sort(compareRows(query.parsedSort, options.idField ?? CURSOR_TIEBREAK_COLUMN))
+	const compare = compareRows(query.parsedSort, options.idField ?? CURSOR_TIEBREAK_COLUMN)
+	refuseUnmergeable(rowsPerShard as ReadonlyArray<ReadonlyArray<Record<string, unknown>>>, compare)
+	rows.sort(compare)
 	const start = query.cursor ? 0 : ((query.page ?? 1) - 1) * query.limit
 	const window = rows.slice(start, start + query.limit + 1)
 	const hasMore = window.length > query.limit

@@ -47,7 +47,7 @@ let whole: ReturnType<typeof drizzle<typeof relations>>
 
 beforeAll(async () => {
 	mf = new Miniflare({
-		d1Databases: ["S0", "S1", "S2", "WHOLE"],
+		d1Databases: ["NOCASE", "NOCASE2", "S0", "S1", "S2", "WHOLE"],
 		modules: true,
 		script: "export default { fetch() { return new Response(null, { status: 204 }) } }",
 	})
@@ -114,5 +114,44 @@ describe("paginateMerged over three D1 shards (5.5)", () => {
 		const [items, meta] = await page({ limit: "3", order: "name.asc", page: "9" })
 		expect(items).toEqual([])
 		expect(meta).toMatchObject({ count: ROWS.length, hasMore: false, nextCursor: null, page: 9 })
+	})
+})
+
+/*
+ * drizzle declares no collation on a SQLite column, so a sort key is BINARY unless a migration says
+ * otherwise; a NOCASE one orders each shard's rows by its fold, which the merge cannot know
+ */
+/** The NOCASE database holding `rows`, its name column declared COLLATE NOCASE */
+const shardOf = async (rows: Array<[string, string]>, database = "NOCASE") => {
+	const db = (await mf.getD1Database(database)) as unknown as D1Database
+	await db.exec("DROP TABLE IF EXISTS org; CREATE TABLE org (id TEXT PRIMARY KEY, n INTEGER, name TEXT COLLATE NOCASE)")
+	for (const [id, name] of rows) await insert(db, [id, null, name])
+	return drizzle(db, { relations })
+}
+
+describe("paginateMerged and a sort key SQLite does not order BINARY (5.5)", () => {
+	it("refuses a shard whose own rows come back out of the order the merge compares by", async () => {
+		const shard = await shardOf([
+			["o1", "B"],
+			["o2", "a"],
+		])
+		const parsed = schema.parse({ order: "name.asc" })
+		const rows = await shard.query.org.findMany(mergedListOptions(parsed, SEALED) as never)
+		expect(() => paginateMerged([rows as Array<{ id: string }>], parsed, SEALED)).toThrow(
+			expect.objectContaining({ errorKey: "sort_not_wired" }),
+		)
+	})
+
+	/* the known limit: no shard sees the pair out of order, so the merge orders it BINARY, where one NOCASE database folds it */
+	it("orders by code point a case pair that only rows on different shards hold", async () => {
+		const [upper, lower] = [await shardOf([["o1", "B"]]), await shardOf([["o2", "a"]], "NOCASE2")]
+		const parsed = schema.parse({ order: "name.asc" })
+		const options = mergedListOptions(parsed, SEALED)
+		const rowsPerShard = [
+			await upper.query.org.findMany(options as never),
+			await lower.query.org.findMany(options as never),
+		]
+		const [items] = paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, parsed, SEALED)
+		expect(items.map((row) => row.id)).toEqual(["o1", "o2"])
 	})
 })
