@@ -1,8 +1,9 @@
 /// <reference types="bun-types" />
 /**
  * Codegen's loader under Bun, where its child is bun itself (load.ts): the child runs with PATH,
- * HOME and NODE_OPTIONS only, so a secret in the project's dotenv files beside the tables module
- * never reaches the module, nor a preload the project's bunfig.toml names (F41 of the 0.13.0 round).
+ * HOME and NODE_OPTIONS only, in the project's directory, where bun reads its dotenv files and
+ * bunfig.toml, so a secret in them never reaches the module, nor a preload the bunfig names (F41
+ * of the 0.13.0 round); the child runs where comb runs (F58), so the project is the cwd here.
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import fs from "node:fs"
@@ -35,7 +36,7 @@ describe("loadSnapshot on bun with dotenv files beside the tables module (F41)",
 			tables,
 			'const leaked = Object.keys(process.env).filter((name) => name.startsWith("COMB_F41"))\nif (leaked.length > 0) throw new Error(`the module saw ${leaked.join(", ")}`)\nexport {}\n',
 		)
-		expect(loadSnapshot(tables)).toMatchObject({ tables: [] })
+		expect(loadSnapshot(tables, { cwd: dir })).toMatchObject({ tables: [] })
 		expect(JSON.parse(fs.readFileSync(seen, "utf8"))).toEqual([])
 	})
 })
