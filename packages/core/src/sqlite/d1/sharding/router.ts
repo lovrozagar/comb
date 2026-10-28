@@ -98,6 +98,7 @@ class ShardRouter {
 		}
 
 		/* L3: Core D1, unless the primary missed it just now */
+		const readAt = Date.now()
 		const mapping = this.cache.misses.get(orgId) ? undefined : await readLive(deps.coreDb, orgId)
 		if (!mapping) {
 			this.log("shard-router.miss", { orgId })
@@ -106,7 +107,7 @@ class ShardRouter {
 		}
 		this.log("shard-router.hit", { orgId, tier: "d1" })
 		if (this.cache.generationOf(orgId) === generation)
-			this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv })
+			this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv, readAt })
 		return mapping
 	}
 
@@ -124,10 +125,11 @@ class ShardRouter {
 	): Promise<ShardMapping | undefined> {
 		const cached = await this.resolve(orgId, deps, executionCtx)
 		if (!cached || (await deps.present(cached))) return cached
+		const readAt = Date.now()
 		const { mapping } = await readLiveRow(deps.coreDb, orgId, "first-primary")
 		this.log("shard-router.reresolve", { from: cached.shardId, orgId, to: mapping?.shardId })
 		await this.invalidate(orgId, deps.kv)
-		if (mapping) this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv })
+		if (mapping) this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv, readAt })
 		return mapping
 	}
 
@@ -167,9 +169,10 @@ class ShardRouter {
 		assertOrgId(orgId)
 		assertShard(shardId, this.totalShards)
 		const { client, session } = openD1Session(deps.coreDb)
+		const readAt = Date.now()
 		const row = await overwrite(client, placement)
 		await this.invalidate(orgId, deps.kv)
-		return this.settle(row, "move", { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv })
+		return this.settle(row, "move", { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv, readAt })
 	}
 
 	/** Soft-delete an org's mapping and invalidate it here; a later allocate or place revives it on its shard */
@@ -207,8 +210,9 @@ class ShardRouter {
 		executionCtx: WaitUntilCtx,
 	): Promise<ShardMapping> {
 		const { client, session } = openD1Session(deps.coreDb)
+		const readAt = Date.now()
 		const { how, row } = await insertFirst(drizzle(client), orgId, shardId)
-		const targets = { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv }
+		const targets = { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv, readAt }
 		return this.settle(row, how, targets)
 	}
 

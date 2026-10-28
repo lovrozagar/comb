@@ -417,3 +417,40 @@ describe("ShardRouter: move with the app's statements", () => {
 		expect(await primary.prepare("SELECT shard_id FROM presence").first()).toEqual({ shard_id: 1 })
 	})
 })
+
+/*
+ * G2 of plan 14 (U33): a fill that read D1 before another isolate's invalidate lands after it, as
+ * anyrow's shard-routing test found: it must not write the old shard back over the invalidation
+ */
+describe("ShardRouter: a fill that read the core table before an invalidate", () => {
+	it("leaves the invalidation standing, so the next isolate reads the moved shard", async () => {
+		const { primary } = await core([["org-1", 0]])
+		const store = memoryKv()
+		const gated: { release?: () => void } = {}
+		const gate = new Promise<void>((resolve) => (gated.release = resolve))
+		let gets = 0
+		/* the fill's own read of KV, the second get, waits until the move and its invalidate are done */
+		const kv: ShardKv = {
+			...store,
+			get: async (key, type) => {
+				gets++
+				if (gets === 2) await gate
+				return store.get(key, type)
+			},
+		}
+		const fills: Promise<unknown>[] = []
+		const isolateA = { waitUntil: (p: Promise<unknown>) => void fills.push(p) }
+		expect(
+			(await new ShardRouter({ totalShards: 3 }).resolve("org-1", { coreDb: primary, kv }, isolateA))?.shardId,
+		).toBe(0)
+		/* the move a workflow writes by hand, then its invalidate from another isolate */
+		await primary
+			.prepare("UPDATE shard_map SET shard_id = 1, target = '1', updated_at = updated_at + 1 WHERE org_id = 'org-1'")
+			.run()
+		await new ShardRouter({ totalShards: 3 }).invalidate("org-1", kv)
+		gated.release?.()
+		await Promise.all(fills)
+		const next = await new ShardRouter({ totalShards: 3 }).resolve("org-1", { coreDb: primary, kv }, ctx)
+		expect(next?.shardId).toBe(1)
+	})
+})

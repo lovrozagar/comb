@@ -6,12 +6,12 @@
  */
 import { LruCache } from "../../../lru.ts"
 import { DEFAULTS } from "./config.ts"
-import { kvDelete, kvRead, putUnlessNewer } from "./kv-cache.ts"
+import { kvInvalidate, kvRead, putUnlessNewer } from "./kv-cache.ts"
 import { readLive } from "./placement.ts"
 import type { LogFn, ShardKv, ShardMapping, ShardResolverDeps, ShardRouterConfig, WaitUntilCtx } from "./types.ts"
 
-/** Where a resolved mapping is cached: the KV namespace, written off the request path */
-type CacheTargets = { executionCtx: WaitUntilCtx; kv: ShardKv }
+/** Where a resolved mapping is cached, written off the request path, and when its core read began */
+type CacheTargets = { executionCtx: WaitUntilCtx; kv: ShardKv; readAt: number }
 
 class ShardCache {
 	readonly lru: LruCache<string, ShardMapping>
@@ -40,10 +40,10 @@ class ShardCache {
 		return this.generations.get(orgId) ?? 0
 	}
 
-	populate(orgId: string, mapping: ShardMapping, { executionCtx, kv }: CacheTargets): void {
+	populate(orgId: string, mapping: ShardMapping, { executionCtx, kv, readAt }: CacheTargets): void {
 		this.lru.set(orgId, mapping)
-		/* a read that began before a move elsewhere holds the older row: it does not overwrite the newer one (U33) */
-		executionCtx.waitUntil(putUnlessNewer(kv, mapping, { log: this.log, ttlSeconds: this.kvTtlSeconds }))
+		/* a read that began before a move or an invalidate elsewhere does not overwrite what it left (U33) */
+		executionCtx.waitUntil(putUnlessNewer(kv, mapping, { log: this.log, readAt, ttlSeconds: this.kvTtlSeconds }))
 	}
 
 	/** Forget the org in this isolate's tiers and in KV; another isolate's LRU keeps it until it expires */
@@ -51,7 +51,7 @@ class ShardCache {
 		this.generations.set(orgId, this.generationOf(orgId) + 1)
 		this.lru.delete(orgId)
 		this.misses.delete(orgId)
-		await kvDelete(kv, orgId, this.log)
+		await kvInvalidate(kv, orgId, { log: this.log, ttlSeconds: this.kvTtlSeconds })
 	}
 
 	/** One background revalidation per org at a time, however many requests see it stale */
@@ -72,16 +72,17 @@ class ShardCache {
 				if (current()) this.lru.set(orgId, kvValue)
 				return
 			}
+			const readAt = Date.now()
 			const mapping = await readLive(deps.coreDb, orgId)
 			if (!current()) return
 			if (!mapping) {
 				/* the core database has no live row: the org is gone, so the stale entry stops routing it now */
 				this.lru.delete(orgId)
-				await kvDelete(deps.kv, orgId, this.log)
+				await kvInvalidate(deps.kv, orgId, { log: this.log, ttlSeconds: this.kvTtlSeconds })
 				return
 			}
 			this.lru.set(orgId, mapping)
-			await putUnlessNewer(deps.kv, mapping, { log: this.log, ttlSeconds: this.kvTtlSeconds })
+			await putUnlessNewer(deps.kv, mapping, { log: this.log, readAt, ttlSeconds: this.kvTtlSeconds })
 		} catch (e) {
 			this.log("shard-router.revalidate.error", { error: e, orgId })
 		}

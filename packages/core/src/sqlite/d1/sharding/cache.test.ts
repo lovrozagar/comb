@@ -35,17 +35,14 @@ const cacheOf = () => new ShardCache({ totalShards: 3 }, { kvTtlSeconds: 60, log
 describe("ShardCache", () => {
 	it("fills this isolate's LRU and KV, and forgets both on invalidate, counting the generation", async () => {
 		const [cache, kv, { ctx, settle }] = [cacheOf(), memoryKv(), context()]
-		cache.populate("org-1", mapping(1, 10), { executionCtx: ctx, kv })
+		cache.populate("org-1", mapping(1, 10), { executionCtx: ctx, kv, readAt: Date.now() })
 		await settle()
 		expect(cache.lru.getWithMeta("org-1")?.value.shardId).toBe(1)
 		expect((JSON.parse(kv.store.get("shard:org-1") as string) as ShardMapping).shardId).toBe(1)
 		cache.misses.set("org-1", true)
 		await cache.invalidate("org-1", kv)
-		expect([cache.lru.getWithMeta("org-1"), cache.misses.get("org-1"), kv.store.size]).toEqual([
-			undefined,
-			undefined,
-			0,
-		])
+		expect([cache.lru.getWithMeta("org-1"), cache.misses.get("org-1")]).toEqual([undefined, undefined])
+		expect(JSON.parse(kv.store.get("shard:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
 		expect(cache.generationOf("org-1")).toBe(1)
 	})
 
