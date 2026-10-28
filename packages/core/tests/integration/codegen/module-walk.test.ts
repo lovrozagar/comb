@@ -22,7 +22,8 @@ export const user = sqliteTable("user", { id: c.id("usr"), role: c.text("role", 
 		})
 		const { code, err } = await runCodegen(dir, ["--tables", "src/db/db.core.tables.ts"])
 		expect(code, err).toBe(0)
-		expect(read(dir, "src/db/dtos/user/index.gen.ts")).toContain("max(20)")
+		/* the bound, in the core the shared file holds for it (F59) */
+		expect(read(dir, "src/db/dtos/_shared/index.gen.ts")).toContain("max(20)")
 	}, 120_000)
 
 	it("finds a schema in a .js module that has its own .d.ts", async () => {

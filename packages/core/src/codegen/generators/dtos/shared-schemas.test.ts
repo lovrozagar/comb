@@ -35,7 +35,8 @@ const shared = (tables: TableInfo[], external: string[] = []) =>
 	)
 
 describe("buildSharedSchemas", () => {
-	it("shares a base used three times, or twice across tables, with the variants in use", () => {
+	/* F59: sharing turns on the schema alone, never on how often tables use it */
+	it("shares every core that is more than an alias, whatever its use, with the variants in use", () => {
 		const s = "z.string().max(10)"
 		expect(
 			shared([table("a", [s, `${s}.nullable()`, `${s}.nullable().optional()`]), table("b", [`${s}.optional()`])]),
@@ -45,10 +46,9 @@ describe("buildSharedSchemas", () => {
 			[`${s}.nullable().optional()`]: `${n(`${s}.nullable().optional()`)} = ${n(`${s}.nullable()`)}.optional() (1)`,
 			[`${s}.optional()`]: `${n(`${s}.optional()`)} = ${n(s)}.optional() (1)`,
 		})
-		expect(shared([table("a", ["z.number()"]), table("b", ["z.number()"])])).toEqual({
-			"z.number()": `${n("z.number()")} = _num (2)`,
-		})
-		expect(shared([table("a", ["z.number()", "z.number()"])])).toEqual({})
+		expect(shared([table("a", [s])])).toEqual({ [s]: `${n(s)} = _str.max(10) (1)` })
+		/* an alias the shared file already names is used as itself */
+		expect(shared([table("a", ["z.number()", "z.number()"]), table("b", ["z.number()"])])).toEqual({})
 	})
 
 	it("emits a nullable variant needed only by its optional form", () => {
@@ -68,12 +68,9 @@ describe("buildSharedSchemas", () => {
 		expect(result).toEqual({ "z.string().max(5)": `${n("z.string().max(5)")} = _str.max(5) (0)` })
 	})
 
-	it("orders shared bases by use, most used first", () => {
-		const result = shared([
-			table("a", ["z.number()", "z.boolean()", "z.boolean()", "z.boolean()"]),
-			table("b", ["z.number()"]),
-		])
-		expect(Object.values(result)).toEqual([`${n("z.boolean()")} = _bool (3)`, `${n("z.number()")} = _num (2)`])
+	it("orders shared cores by their code, never by use", () => {
+		const result = shared([table("a", ["z.string().max(9)", "z.string().max(10)", "z.string().max(10)"])])
+		expect(Object.keys(result)).toEqual(["z.string().max(10)", "z.string().max(9)"])
 	})
 
 	it("never shares what names an import, matched as a whole identifier", () => {
@@ -113,12 +110,22 @@ describe("rewriteBaseTypes and rewriteWithShared", () => {
 
 describe("shared-schemas: remaining layers", () => {
 	it("chains .nullable() on a shared base that has no shared nullable variant", () => {
-		const s = buildSharedSchemas([table("a", ["z.number()", "z.number()", "z.number()"])], imports())
-		expect(rewriteWithShared("z.number().nullable()", s)).toBe(`${n("z.number()")}.nullable()`)
+		const s = buildSharedSchemas([table("a", ["z.number().max(5)"])], imports())
+		expect(rewriteWithShared("z.number().max(5).nullable()", s)).toBe(`${n("z.number().max(5)")}.nullable()`)
 	})
 
-	it("does not share a structural core only one table uses", () => {
-		expect(shared([table("a", ['z.string().max(5).meta({ examples: ["a"] })'])])).toEqual({})
+	/* F59: a field's own meta, an id's prefixed example among them, stays in its table's file */
+	it("shares the core one table uses, and leaves its meta inline", () => {
+		const withMeta = 'z.string().max(5).meta({ examples: ["a"] })'
+		const s = buildSharedSchemas([table("a", [withMeta])], imports())
+		expect([...s.keys()]).toEqual(["z.string().max(5)"])
+		expect(rewriteWithShared(withMeta, s)).toBe(`${n("z.string().max(5)")}.meta({ examples: ["a"] })`)
+	})
+
+	it("keeps an array whose elements carry the meta whole, never cut at that inner meta", () => {
+		const array = 'z.array(z.string().meta({ examples: ["a"] }).nullable())'
+		const s = buildSharedSchemas([table("a", [array])], imports())
+		expect([...s.keys()]).toEqual([array])
 	})
 })
 

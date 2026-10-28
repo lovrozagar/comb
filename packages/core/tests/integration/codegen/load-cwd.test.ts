@@ -21,6 +21,7 @@ export const user = sqliteTable("user", { id: c.id("usr"), name: c.text("name", 
 		})
 		const { code, err } = await runCodegen(dir, ["--tables", "src/db/db.core.tables.ts"])
 		expect(code, err).toBe(0)
-		expect(read(dir, "src/db/dtos/user/index.gen.ts")).toContain("max(40)")
+		/* the bound, in the core the shared file holds for it (F59) */
+		expect(read(dir, "src/db/dtos/_shared/index.gen.ts")).toContain("max(40)")
 	}, 120_000)
 })

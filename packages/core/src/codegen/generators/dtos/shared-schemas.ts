@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto"
 import type { ImportsMeta } from "../../analyzer-types.ts"
 import type { SharedSchema, TableInfo } from "./dto-types.ts"
+import { byCodeUnit } from "../../utils/order.ts"
 
 /**
  * Base Zod type aliases — each constructor called once in shared, everything chains on it.
@@ -34,14 +35,19 @@ function layersOf(zodType: string): { base: string; nullable: string; optional: 
 	return { base: rest.slice(0, rest.length - nullable.length), nullable, optional }
 }
 
-/** Strip trailing .meta(...) from a zodType, returning [core, metaSuffix] */
+/**
+ * A zodType split into its core and the `.meta(...)` that ends it; the whole zodType and no meta
+ * when it ends otherwise, as an array whose elements carry the meta does: the last `.meta(` in it
+ * is then inside the expression, and cutting there would leave a broken one
+ */
 function stripMeta(zodType: string): [string, string] {
 	const metaIdx = zodType.lastIndexOf(".meta(")
 	if (metaIdx === -1) return [zodType, ""]
 	let depth = 0
 	for (let i = metaIdx + 5; i < zodType.length; i++) {
 		depth += zodType[i] === "(" ? 1 : zodType[i] === ")" ? -1 : 0
-		if (depth === 0) return [zodType.slice(0, metaIdx), zodType.slice(metaIdx, i + 1)]
+		if (depth === 0)
+			return i === zodType.length - 1 ? [zodType.slice(0, metaIdx), zodType.slice(metaIdx)] : [zodType, ""]
 	}
 	return [zodType, ""]
 }
@@ -51,35 +57,29 @@ function canBeShared(zodType: string, external: ReadonlySet<string>): boolean {
 	return [...external].every((id) => !new RegExp(`(?<![\\w$.])${id.replace(/[$]/g, "\\$")}(?![\\w$])`).test(zodType))
 }
 
-type Usage = { counts: Map<string, number>; tablesOf: Map<string, Set<string>> }
+type Usage = { counts: Map<string, number> }
 
-/** How often each shareable zodType occurs, and in which tables. */
+/** How often each shareable zodType occurs: the shared file's use counts */
 function usageOf(tables: TableInfo[], external: ReadonlySet<string>): Usage {
-	const usage: Usage = { counts: new Map(), tablesOf: new Map() }
+	const usage: Usage = { counts: new Map() }
 	for (const table of tables) {
 		for (const { zodType } of table.fields) {
-			if (!canBeShared(zodType, external)) continue
-			usage.counts.set(zodType, (usage.counts.get(zodType) ?? 0) + 1)
-			usage.tablesOf.set(zodType, (usage.tablesOf.get(zodType) ?? new Set()).add(table.name))
+			if (canBeShared(zodType, external)) usage.counts.set(zodType, (usage.counts.get(zodType) ?? 0) + 1)
 		}
 	}
 	return usage
 }
 
-/* Threshold: base total >= 3, OR base in 2+ tables with total >= 2; most used first */
-function sharedBases(usage: Usage): string[] {
-	const groups = new Map<string, { tables: Set<string>; total: number }>()
-	for (const [zodType, count] of usage.counts) {
-		const { base } = layersOf(zodType)
-		const group = groups.get(base) ?? { tables: new Set<string>(), total: 0 }
-		group.total += count
-		for (const table of usage.tablesOf.get(zodType) as Set<string>) group.tables.add(table)
-		groups.set(base, group)
-	}
-	return [...groups.entries()]
-		.filter(([, g]) => g.total >= 3 || (g.tables.size >= 2 && g.total >= 2))
-		.sort((a, b) => b[1].total - a[1].total)
-		.map(([base]) => base)
+/**
+ * The structural core of every base a field uses, its `.meta()` stripped, that is more than a name
+ * the shared file already holds (`_str`, `timestampSchema`). Each is shared by its own code alone,
+ * never by how often tables use it, so a table's file depends only on its own columns (F59), and a
+ * field's own meta, an id's prefixed example among them, stays inline in its table's file. In
+ * code-unit order, so the shared file's order is its content's too.
+ */
+function sharedCores(usage: Usage): string[] {
+	const cores = new Set([...usage.counts.keys()].map((zodType) => stripMeta(layersOf(zodType).base)[0]))
+	return [...cores].filter((core) => !/^[\w$]+$/.test(rewriteBaseTypes(core))).sort(byCodeUnit)
 }
 
 const digestOf = (zodType: string) => createHash("sha256").update(zodType).digest("hex")
@@ -129,20 +129,6 @@ function addVariants(names: SharedNames, base: string, counts: Map<string, numbe
 	if (count(optional) > 0) names.add(optional, `${baseName}.optional()`, count(optional))
 }
 
-/* structural cores (base with .meta stripped) used across 2+ tables, so entities can chain their own .meta */
-function addCores(names: SharedNames, tables: TableInfo[], external: ReadonlySet<string>): void {
-	const coreTables = new Map<string, Set<string>>()
-	for (const table of tables) {
-		for (const { zodType } of table.fields) {
-			if (!canBeShared(zodType, external)) continue
-			const { base } = layersOf(zodType)
-			const [core, meta] = stripMeta(base)
-			if (meta && !names.result.has(core)) coreTables.set(core, (coreTables.get(core) ?? new Set()).add(table.name))
-		}
-	}
-	for (const [core, set] of coreTables) if (set.size >= 2) names.add(core, rewriteBaseTypes(core), 0)
-}
-
 /**
  * Pass 2: compositional dedup.
  * Decomposes zodTypes into base + .nullable() + .optional() wrappers.
@@ -154,8 +140,7 @@ export function buildSharedSchemas(tables: TableInfo[], imports: ImportsMeta): M
 	/* which schemas are shared turns on their use, never on their names: a first pass collects them,
 	   so a colliding pair is named alike in any order */
 	const run = (names: SharedNames) => {
-		for (const base of sharedBases(usage)) addVariants(names, base, usage.counts)
-		addCores(names, tables, external)
+		for (const core of sharedCores(usage)) addVariants(names, core, usage.counts)
 		return names.result
 	}
 	return run(new SharedNames(collidingPrefixes(run(new SharedNames()).keys())))
