@@ -241,13 +241,20 @@ describe("ShardRouter: the cached miss", () => {
 		const { coreDb } = replicated(primary, replica)
 		const log = vi.fn()
 		const router = new ShardRouter({ log, lruTtlMs: 1, totalShards: 3 })
-		await router.resolve("org-1", { coreDb, kv: noKv }, ctx)
-		await new Promise((resolve) => setTimeout(resolve, 5))
-		await router.resolve("org-1", { coreDb, kv: noKv }, ctx)
-		await Promise.all(outstanding.splice(0))
-		log.mockClear()
-		expect((await router.resolve("org-1", { coreDb, kv: noKv }, ctx))?.shardId).toBe(1)
-		expect(log).toHaveBeenCalledWith("shard-router.hit", { orgId: "org-1", stale: false, tier: "lru" })
+		/* the LRU's clock alone is set by hand, so the entry the revalidation leaves is still fresh
+		   when it is read, however long the machine takes in between */
+		vi.useFakeTimers({ toFake: ["Date"] })
+		try {
+			await router.resolve("org-1", { coreDb, kv: noKv }, ctx)
+			vi.setSystemTime(Date.now() + 5)
+			await router.resolve("org-1", { coreDb, kv: noKv }, ctx)
+			await Promise.all(outstanding.splice(0))
+			log.mockClear()
+			expect((await router.resolve("org-1", { coreDb, kv: noKv }, ctx))?.shardId).toBe(1)
+			expect(log).toHaveBeenCalledWith("shard-router.hit", { orgId: "org-1", stale: false, tier: "lru" })
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })
 
