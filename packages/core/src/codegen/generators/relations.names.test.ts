@@ -68,3 +68,27 @@ describe("generateRelations: a key that names its relation (F57)", () => {
 		).toThrow("price: the relation id of price.currency takes the name of the column price.id")
 	})
 })
+
+/** A blog_post table exported as `target`, and the comments that reference it, plain and by a role */
+const blogKeys = (target: string) => `export const ${target} = sqliteTable("blog_post", { id: text("id").primaryKey() })
+export const blog_comment = sqliteTable("blog_comment", {
+	id: text("id").primaryKey(),
+	blog_post_id: text("blog_post_id").references(() => ${target}.id),
+	invited_by_blog_post_id: text("invited_by_blog_post_id").references(() => ${target}.id),
+})`
+
+/* F62: a key's role is compared with its target's export name camelCased, so a snake_case export names its relations as a camelCase one does */
+describe("generateRelations: a snake_case export's relations (F62)", () => {
+	it("names them as a camelCase export's, where 0.13 named them blogCommentsByBlogPost and invitedByBlogPost", () => {
+		const snake = relationsOf(blogKeys("blog_post"))
+		const camel = relationsOf(blogKeys("blogPost"))
+		for (const content of [snake, camel]) {
+			expect(content).toContain("blogPost: r.one.")
+			expect(content).toContain("invitedBy: r.one.")
+			expect(content).toContain("blogComments: r.many.blog_comment(")
+			expect(content).toContain("blogCommentsByInvitedBy: r.many.blog_comment(")
+		}
+		expect(snake).not.toContain("blogCommentsByBlogPost")
+		expect(snake).not.toContain("invitedByBlogPost")
+	})
+})

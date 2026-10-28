@@ -41,9 +41,11 @@ type Named = { name: string; place: string }
  */
 function oneName(sqlColumn: string, refTable: string): string {
 	const whole = roleOf(sqlColumn)
-	const ref = capitalized(refTable)
+	/* the role is camelCase, so it meets the target's export name camelCased: blog_post as blogPost (F62) */
+	const target = toCamelCase(refTable)
+	const ref = capitalized(target)
 	/* invitedByUser toward user: the prefix names the role */
-	return whole !== refTable && whole.endsWith(ref) && whole.length > ref.length ? whole.slice(0, -ref.length) : whole
+	return whole !== target && whole.endsWith(ref) && whole.length > ref.length ? whole.slice(0, -ref.length) : whole
 }
 
 /**
@@ -141,7 +143,7 @@ function buildGraph(tables: TableMeta[]): Graph {
 				targetColumns: refColumns,
 			}
 			push(graph.manys, fk.refTable, back)
-			const plain = relation === null && roleOf(sqlColumn) === fk.refTable
+			const plain = relation === null && roleOf(sqlColumn) === toCamelCase(fk.refTable)
 			push(named, fk.refTable, { name: backName(table, { plain, role }, unique), place, target: back })
 		}
 	}
