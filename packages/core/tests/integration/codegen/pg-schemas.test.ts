@@ -4,8 +4,11 @@
  * is set, and plainly where none is: in validation, the constraint map and its error keys, the
  * published entity names and the diagram outline. The handler's lookup is src/pg/map-table.ts.
  */
+import path from "node:path"
+import pg from "pg"
 import { describe, expect, it } from "vitest"
 import { project, read, runCodegen, useProjects } from "../support/codegen-project.ts"
+import { withScratchDb } from "../support/pg.ts"
 
 useProjects()
 
@@ -40,7 +43,22 @@ describe("comb codegen: one table name in two Postgres schemas (F51)", () => {
 			relations: Array<{ from: string; to: string }>
 		}
 		expect(relations.relations).toMatchObject([{ from: "users.auth_id", to: "auth.users.id" }])
-		/* raw SQL's table names */
+		/* raw SQL's table names, schema-qualified and unquoted, which read the right table spliced into SQL text */
 		expect(read(dir, "src/db/table-names/index.gen.ts")).toContain('authUsers: "auth.users",')
+		const { t } = (await import(path.join(dir, "src/db/table-names/index.gen.ts"))) as { t: Record<string, string> }
+		const ids = await withScratchDb(async (url) => {
+			const client = new pg.Client({ connectionString: url })
+			await client.connect()
+			try {
+				await client.query(
+					"CREATE SCHEMA auth; CREATE TABLE auth.users (id text); CREATE TABLE public.users (id text); INSERT INTO auth.users VALUES ('in-auth'); INSERT INTO public.users VALUES ('in-public')",
+				)
+				const of = async (table: string) => (await client.query(`SELECT id FROM ${table}`)).rows.map((row) => row.id)
+				return { auth: await of(t["authUsers"] as string), app: await of(t["users"] as string) }
+			} finally {
+				await client.end()
+			}
+		})
+		expect(ids).toEqual({ app: ["in-public"], auth: ["in-auth"] })
 	}, 120_000)
 })

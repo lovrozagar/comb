@@ -117,7 +117,11 @@ function generateSqlColsFile(table: TableEntry, relativeTablesPath: string): str
 
 function generateTableNamesFile(tables: TableEntry[]): string {
 	const lines: string[] = [
-		"/** Static table names for raw SQL queries — zero runtime overhead */",
+		"/**",
+		" * Static table names for raw SQL queries — zero runtime overhead. A pgSchema table's name is",
+		" * schema-qualified and unquoted (`auth.users`): splice it into the SQL text, never through",
+		" * sql.identifier(), which would quote it as one name, a table called `auth.users`",
+		" */",
 		"export const t = {",
 	]
 
