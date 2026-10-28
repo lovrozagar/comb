@@ -10,6 +10,18 @@ describe("STRING_LIST", () => {
 	})
 })
 
+/* F60: a bound JSON cannot carry would reach the snapshot as null and drop without a word */
+describe("constraintsOf: a number that is no finite number", () => {
+	it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+		"refuses %s, naming the column and the key",
+		(max) => {
+			expect(() => constraintsOf({ max }, "t.c")).toThrow(
+				`t.c: the constraint max is ${max}, no finite number; a bound read from the environment is NaN in codegen's child, which has none of it`,
+			)
+		},
+	)
+})
+
 describe("constraintsOf", () => {
 	it("keeps every primitive, drops an undefined one, and reads none as empty", () => {
 		expect(constraintsOf({ max: 3, pattern: "/a/", private: true, trim: undefined }, "t.c")).toEqual({

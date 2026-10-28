@@ -11,6 +11,11 @@ function constraintsOf(raw: unknown, at: string): Record<string, boolean | numbe
 		if (value === undefined) continue
 		if (typeof value !== "boolean" && typeof value !== "number" && typeof value !== "string")
 			throw new Error(`${at}: the constraint ${key} is a ${typeof value}; comb reads a boolean, a number or a string`)
+		/* JSON carries no NaN or Infinity: the snapshot would hold null, and the bound would drop without a word (F60) */
+		if (typeof value === "number" && !Number.isFinite(value))
+			throw new Error(
+				`${at}: the constraint ${key} is ${value}, no finite number; a bound read from the environment is NaN in codegen's child, which has none of it`,
+			)
 		constraints[key] = value
 	}
 	return constraints
