@@ -49,6 +49,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [0.14.1](#0141)
 - [Upgrading to 0.14](#upgrading-to-014)
 - [Upgrading to 0.13.1](#upgrading-to-0131)
 - [Upgrading to 0.13](#upgrading-to-013)
@@ -999,6 +1000,10 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 `tests/bun/` is separate because it imports `bun:sqlite` and `bun:test`, which vitest cannot load. It replays a full Atlas-shaped drift migration against an in-memory database to prove the SQLite transforms survive a real commit with foreign keys enforced.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
+
+## 0.14.1
+
+A fix with nothing to change: deploy it over 0.14.0, with no regenerate. The shard router's `invalidate` (and so `move` and `unplace`) leaves its KV tombstone under its own key, `shard:<orgId>:inv`, and deletes the mapping's key, `shard:<orgId>`. 0.14.0 put the tombstone in the mapping's key, where a 0.13.x router sharing the KV during a rolling deploy read it as a mapping with no shard. A tombstone 0.14.0 left there is still a miss, so 0.14.0 and 0.14.1 workers can share one KV namespace.
 
 ## Upgrading to 0.14
 
