@@ -8,7 +8,7 @@ import { globSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { DATE_KEYS, OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "../support/off-utc.ts"
-import { POSIX_SUITES } from "../support/posix.ts"
+import { POSIX_EXCLUDE, POSIX_INTEGRATION, POSIX_UNIT } from "../support/posix.ts"
 
 const ROOT = join(import.meta.dirname, "../../../..")
 const WORKFLOWS = join(ROOT, ".github/workflows")
@@ -170,14 +170,21 @@ describe("ci.yml and verify run the same gates", () => {
 		).toEqual([])
 	})
 
-	it("runs on another runner only a part of a gate, and every suite of it in the unit project on Linux too", () => {
+	it("runs on another runner only a part of a gate, every suite of it in Linux's project of its kind too", () => {
 		const off = jobs.filter((job) => job.runsOn !== "ubuntu-latest")
 		expect(off.map((job) => [job.runsOn, scriptsOf(job.lines)])).toEqual(Object.entries(OFF_LINUX))
 		const CORE = join(ROOT, "packages/core")
-		for (const pattern of POSIX_SUITES) {
-			const files = globSync(pattern, { cwd: CORE })
-			expect(files.length, pattern).toBeGreaterThan(0)
-			for (const file of files) expect(file, pattern).toMatch(/^(?:src\/.+|tests\/structure\/[^/]+)\.test\.ts$/)
+		/* each list's suites are those of the Linux project of its name in vitest.config.ts */
+		for (const [patterns, linux] of [
+			[POSIX_UNIT, /^(?:src\/.+|tests\/structure\/[^/]+)\.test\.ts$/],
+			[POSIX_INTEGRATION, /^tests\/integration\/.+\.test\.ts$/],
+			[POSIX_EXCLUDE, /^tests\/integration\/.+\.test\.ts$/],
+		] as const) {
+			for (const pattern of patterns) {
+				const files = globSync(pattern, { cwd: CORE })
+				expect(files.length, pattern).toBeGreaterThan(0)
+				for (const file of files) expect(file, pattern).toMatch(linux)
+			}
 		}
 	})
 
