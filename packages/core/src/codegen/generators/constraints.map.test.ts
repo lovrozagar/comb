@@ -59,33 +59,81 @@ export const grant = sqliteTable("grant", { id: text("id").primaryKey(), orgId: 
 	})
 })
 
-/* F66: a private name never reaches the document, nor the 409 its constraint answers with */
-describe("buildConstraintMap: a private column's unique constraints", () => {
-	it("give a generic cause and a key by the constraint's own name, never the property's", () => {
-		const map = buildConstraintMap(
-			tablesOf(`${SQLITE}import { uniqueIndex } from "drizzle-orm/sqlite-core"
-export const doc = sqliteTable("doc", { id: text("id").primaryKey(), secret: text("secret").unique("doc_token_key"), owner: text("owner"), pin: text("pin") }, (t) => [uniqueIndex("doc_owner_pin_idx").on(t.owner, t.pin)])
-`).map((table) => ({
-				...table,
-				fields: table.fields.map((field) =>
-					field.name === "secret" || field.name === "pin"
-						? { ...field, constraints: { ...field.constraints, private: true } }
-						: field,
-				),
-			})),
-		)
-		expect(map["doc"]?.unique).toEqual({
-			"owner,pin": {
-				cause: "A record with these values already exists",
-				errorKey: "doc_owner_pin_idx_duplicate",
+/* F66: a private name never reaches the document, nor the error its constraint answers with */
+const USER = `export const user = sqliteTable("user", { id: text("id").primaryKey() })\n`
+/** `source`'s tables, its secret, pin, ownerRef and kind columns private */
+const privately = (source: string) =>
+	tablesOf(source).map((table) => ({
+		...table,
+		fields: table.fields.map((field) =>
+			["secret", "pin", "ownerRef", "kind"].includes(field.name)
+				? { ...field, constraints: { ...field.constraints, private: true } }
+				: field,
+		),
+	}))
+const DOC = `${SQLITE}import { uniqueIndex } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+${USER}export const doc = sqliteTable("doc", {
+id: text("id").primaryKey(),
+email: text("email").unique(),
+secret: text("secret_sql").unique("doc_token_key"),
+owner: text("owner"),
+pin: text("pin_sql"),
+ownerRef: text("owner_ref_sql").references(() => user.id),
+kind: c.enum("kind_sql", ["a", "b"]),
+}, (t) => [
+uniqueIndex("doc_owner_pin_idx").on(t.owner, t.pin),
+uniqueIndex("doc_secret_lower").on(sql\`lower(\${t.secret})\`),
+check("doc_secret_len", sql\`length(\${t.secret}) < 64\`),
+])
+`
+const duplicate = {
+	cause: "A record with these values already exists",
+	errorKey: "doc_duplicate",
+	statusKey: "conflict",
+}
+
+describe("buildConstraintMap: a private column's constraints", () => {
+	it("answer with one key per kind under the table, whatever names the column or the constraint", () => {
+		const doc = buildConstraintMap(privately(DOC))["doc"]
+		expect(doc?.unique).toEqual({
+			doc_secret_lower: duplicate,
+			email: {
+				cause: "A record with this email value already exists",
+				errorKey: "doc_email_duplicate",
 				statusKey: "conflict",
 			},
-			secret: {
-				cause: "A record with these values already exists",
-				errorKey: "doc_token_key_duplicate",
+			"owner,pin_sql": duplicate,
+			secret_sql: duplicate,
+		})
+		expect(doc?.foreignKey).toEqual({
+			owner_ref_sql: {
+				cause: "Referenced record does not exist",
+				errorKey: "doc_reference_not_found",
 				statusKey: "conflict",
 			},
 		})
+		expect(Object.values(doc?.check ?? {})).toEqual([
+			{ cause: "Check constraint violated", errorKey: "doc_check_failed", statusKey: "bad_request" },
+			{ cause: "Invalid enum value", errorKey: "doc_value_invalid", statusKey: "bad_request" },
+		])
+		/* no key or cause of the table names a private column by its property or its SQL name; the map's
+		 * own keys are the names the engine reports, which never reach the client */
+		const sent = JSON.stringify(
+			[doc?.unique, doc?.foreignKey, doc?.check].flatMap((group) => Object.values(group ?? {})),
+		)
+		for (const name of ["secret", "pin", "ownerRef", "owner_ref", "kind", "token"]) expect(sent).not.toContain(name)
+	})
+
+	it("still refuses a key one of them shares with another constraint (F20)", () => {
+		const source = `${SQLITE}import { uniqueIndex } from "drizzle-orm/sqlite-core"
+export const doc = sqliteTable("doc", { id: text("id").primaryKey(), secret: text("secret").unique(), note: text("note") }, (t) => [
+	uniqueIndex("doc").on(sql\`lower(\${t.note})\`),
+])
+`
+		expect(() => buildConstraintMap(privately(source))).toThrow(
+			"the error key doc_duplicate names two constraints: doc.unique.secret and doc.unique.doc; rename a column",
+		)
 	})
 })
 

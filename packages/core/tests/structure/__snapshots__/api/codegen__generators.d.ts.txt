@@ -37,7 +37,8 @@ type ConstraintsConfig = {
  * The constraint map of every table that has a constraint, keyed by SQL table name. An error key
  * two constraints would mint fails codegen, naming both: a client could not tell them apart, and
  * the one translation would name the wrong column for one (F20). Renaming the keys would break
- * every consumer's translations, so a repeat is refused instead.
+ * every consumer's translations, so a repeat is refused instead. The one answer a table's private
+ * constraints share is no repeat: to a client that never sees the column, they mean one thing (F66).
  */
 export declare function buildConstraintMap(tables: readonly TableMeta[], dialect?: Dialect): ConstraintMap;
 /** Every constraint in the map, flattened */
