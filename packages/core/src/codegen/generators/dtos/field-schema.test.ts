@@ -13,7 +13,7 @@ import { generateFieldSchema as generated } from "./field-schema.ts"
 /* every written text and JSON field ends with the F11 rule; the tests below read the other rules, and
  * "the rule no engine stores" reads this one */
 const TEXT_RULE =
-	'.refine((val) => /^[^\\u0000\\uD800-\\uDFFF]*$/u.test(val), { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" })'
+	'.refine(isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" })'
 const JSON_RULE =
 	'.refine((val) => !/\\\\u(?:0000|d[89a-f])/i.test(JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "")), { message: "Must not contain U+0000 or an unpaired surrogate" })'
 const generateFieldSchema = (...args: Parameters<typeof generated>) =>

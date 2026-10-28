@@ -2,17 +2,12 @@
 import type { FieldConstraints } from "../../annotations.ts"
 import type { FieldMeta } from "../../analyzer-types.ts"
 import type { Build } from "./build-types.ts"
+import { STORABLE_TEXT_RULE } from "../../../storable-text.ts"
 import { isMutative } from "./schema-type.ts"
 
-/* how JSON Schema names the text guard, a refine it cannot publish as a rule (F56) */
-export const TEXT_RULE = "no U+0000 or unpaired surrogate"
-
-/*
- * the text guard every written text takes: under u, a lone surrogate is a code point of the range, a
- * pair one code point past it (F11). A refine, not a regex: published as a pattern, Go's and Rust's
- * engines refuse \\u and a surrogate, and a field's own pattern would move into an allOf (F56)
- */
-const TEXT_GUARD = `.refine((val) => /^[^\\u0000\\uD800-\\uDFFF]*$/u.test(val), { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${TEXT_RULE}" })`
+/* the text guard every written text takes: comb's own isStorableText, which the shared file imports (G1), as a
+   refine sits in the structural core F59 shares there */
+const TEXT_GUARD = `.refine(isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${STORABLE_TEXT_RULE}" })`
 
 /* a format bounds what is written; what is read back is whatever the column holds: a password's
  * stored hash, an email or URL a migration or an older rule stored (F12). A written email takes

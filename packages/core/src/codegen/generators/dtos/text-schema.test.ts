@@ -4,7 +4,8 @@ import { parseField } from "../../__fixtures__/runtime.ts"
 import type { FieldMeta } from "../../analyzer-types.ts"
 import type { Build } from "./build-types.ts"
 import type { SchemaType } from "./dto-types.ts"
-import { stated, TEXT_RULE, textBase } from "./text-schema.ts"
+import { isStorableText, STORABLE_TEXT_RULE } from "../../../storable-text.ts"
+import { stated, textBase } from "./text-schema.ts"
 
 type Pin = Partial<FieldMeta> & { dialect?: Build["dialect"] }
 
@@ -20,7 +21,8 @@ function text(raw: string, schemaType: SchemaType, { dialect = "sqlite", ...over
 	})
 }
 
-const parse = (code: string) => new Function("z", `return ${code}`)(z) as z.ZodString
+/* generated code names comb's isStorableText, which the generated file imports */
+const parse = (code: string) => new Function("z", "isStorableText", `return ${code}`)(z, isStorableText) as z.ZodString
 
 /* F65: a read never refuses a stored row; it states the declared bounds and enforces what the engine holds */
 describe("textBase on a read (F65)", () => {
@@ -56,7 +58,7 @@ describe("textBase on a write", () => {
 	it("enforces every declared bound and the text guard", () => {
 		const write = text('c.text("t", { min: 3, max: 10 }).notNull()', "create")
 		expect(write).toBe(
-			`z.string().min(3).max(10).refine((val) => /^[^\\u0000\\uD800-\\uDFFF]*$/u.test(val), { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${TEXT_RULE}" })`,
+			`z.string().min(3).max(10).refine(isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${STORABLE_TEXT_RULE}" })`,
 		)
 		expect(parse(write).safeParse("eleven char").success).toBe(false)
 		expect(text('c.text("t", { email: true, max: 20 })', "update")).toBe(

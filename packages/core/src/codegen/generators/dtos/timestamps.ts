@@ -117,10 +117,9 @@ function keepImported(lines: readonly string[], imported: ReadonlySet<string>): 
 
 const ZOD_IMPORT = `import * as z from "zod"`
 
-function header(combFrom: string): string[] {
+function header(): string[] {
 	return [
 		ZOD_IMPORT,
-		cidrImport(combFrom),
 		"",
 		...BASE_TYPE_ALIASES.map(([expr, alias]) => `export const ${alias} = ${expr}`),
 		"",
@@ -144,8 +143,8 @@ function header(combFrom: string): string[] {
 	]
 }
 
-/** The import of comb's isCidr, from where the generated code imports comb */
-const cidrImport = (combFrom: string) => `import { isCidr } from "${combFrom}"`
+/* what the shared file may take from comb: isCidr for a cidr, isStorableText for the text guard (G1) */
+const COMB_NAMES = ["isCidr", "isStorableText"] as const
 
 /**
  * The shared `_shared/index.gen.ts` content: the combos tables use, the deduped schemas, and of
@@ -156,7 +155,7 @@ export function generateSharedFile(
 	sharedSchemas: Map<string, SharedSchema>,
 	{ combFrom = "@lovrozagar/comb", imported }: { combFrom?: string | undefined; imported: ReadonlySet<string> },
 ): string {
-	const lines = header(combFrom)
+	const lines = header()
 	/* Auto-deduped shared schema constants — must be before timestamp spreads that reference them */
 	if (sharedSchemas.size > 0) {
 		lines.push("/** Auto-deduped schemas — variants chain on shared bases */")
@@ -167,16 +166,18 @@ export function generateSharedFile(
 	}
 	if (used.camelCase.size > 0) lines.push(...timestampVariants(used.camelCase, "camelCase", sharedSchemas))
 	if (used.snakeCase.size > 0) lines.push(...timestampVariants(used.snakeCase, "snake_case", sharedSchemas))
-	return withoutUnusedImports(keepImported(lines, imported), cidrImport(combFrom)).join("\n")
+	return withoutUnusedImports(keepImported(lines, imported), combFrom).join("\n")
 }
 
 /**
- * The lines without the zod import, or comb's, when nothing kept uses it, and an empty module when
- * nothing is kept at all
+ * The lines without the zod import when nothing kept uses it, with comb's import of the names they
+ * use, and an empty module when nothing is kept at all
  */
-function withoutUnusedImports(lines: readonly string[], comb: string): readonly string[] {
-	const uses = (pattern: RegExp) => lines.some((line) => line !== ZOD_IMPORT && line !== comb && pattern.test(line))
-	const unused = new Set([...(uses(/\bz\./) ? [] : [ZOD_IMPORT]), ...(uses(/\bisCidr\b/) ? [] : [comb])])
-	const rest = lines.filter((line) => !unused.has(line))
+function withoutUnusedImports(lines: readonly string[], combFrom: string): readonly string[] {
+	const uses = (pattern: RegExp) => lines.some((line) => line !== ZOD_IMPORT && pattern.test(line))
+	const rest = lines.filter((line) => line !== ZOD_IMPORT || uses(/\bz\./))
+	const named = COMB_NAMES.filter((name) => uses(new RegExp(`\\b${name}\\b`)))
+	if (named.length > 0)
+		rest.splice(rest.indexOf(ZOD_IMPORT) + 1, 0, `import { ${named.join(", ")} } from "${combFrom}"`)
 	return rest.some((line) => line.trim() !== "") ? rest : ["export {}", ""]
 }

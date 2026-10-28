@@ -7,7 +7,8 @@ import type { SchemaType } from "./dto-types.ts"
 import { generateExampleMeta } from "./example-meta.ts"
 import { pgWriteRule } from "./pg-types.ts"
 import { isMutative, isRead } from "./schema-type.ts"
-import { stated, TEXT_RULE, textBase } from "./text-schema.ts"
+import { STORABLE_TEXT_RULE } from "../../../storable-text.ts"
+import { stated, textBase } from "./text-schema.ts"
 
 /* Postgres stores c.integer in int4 */
 const INT4 = { max: 2147483647, min: -2147483648 }
@@ -46,7 +47,7 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 		limit === null
 			? ""
 			: `.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
-	const rules = `.meta({ "x-comb-text": ${JSON.stringify(TEXT_RULE)}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
+	const rules = `.meta({ "x-comb-text": ${JSON.stringify(STORABLE_TEXT_RULE)}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
 	const refined = `${schema}${size}${JSON_NUL_CHECK}`
 	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63) */
 	return field.combKind === "json" ? `z.union([${refined}])${rules}` : `${refined}${rules}`

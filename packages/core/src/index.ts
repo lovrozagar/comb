@@ -1,5 +1,6 @@
 export { isCidr } from "./cidr.ts"
 export { CombError } from "./error.ts"
+export { isStorableText, STORABLE_TEXT_RULE, storableText } from "./storable-text.ts"
 export {
 	carryCombMeta,
 	COMB_FILTER_GRAMMAR,

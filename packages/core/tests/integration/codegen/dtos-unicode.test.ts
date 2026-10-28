@@ -2,9 +2,11 @@
  * The 0.12 codegen review's F11: Postgres refuses a lone UTF-16 surrogate in jsonb and stores one in
  * text as U+FFFD, so a Postgres DTO refuses ill-formed text and JSON as it refuses U+0000
  */
+import fs from "node:fs"
+import path from "node:path"
 import * as z from "zod"
 import { afterAll, describe, expect, it } from "vitest"
-import { cleanGeneratedDtos, generatedDtos } from "../support/dtos.ts"
+import { cleanGeneratedDtos, generatedDir, generatedDtos } from "../support/dtos.ts"
 import { libsqlMemory } from "../support/libsql.ts"
 
 afterAll(() => cleanGeneratedDtos())
@@ -151,5 +153,28 @@ CREATE TABLE plain (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, home_id TEXT, b
 		} finally {
 			close()
 		}
+	})
+})
+
+/*
+ * G1 of the 0.13.1 consumers review: the text guard has one source, comb's isStorableText, which
+ * every generated file that holds text to it imports, where each inlined its own copy of the regex
+ */
+describe("the text guard's one source (G1)", () => {
+	it("is comb's isStorableText, imported by each generated file that refines with it", async () => {
+		const dtos = await generatedDtos(
+			"g1",
+			`export const note = sqliteTable("note", { id: c.id("not"), body: c.text("body").notNull(), title: c.text("title", { max: 80 }) })`,
+		)
+		const files = (fs.readdirSync(generatedDir("g1"), { recursive: true }) as string[])
+			.filter((name) => name.endsWith(".gen.ts"))
+			.map((name) => fs.readFileSync(path.join(generatedDir("g1"), name), "utf8"))
+		const refining = files.filter((source) => source.includes(".refine(isStorableText,"))
+		expect(refining.length).toBeGreaterThan(0)
+		for (const source of refining) expect(source).toContain('import { isStorableText } from "@lovrozagar/comb"')
+		for (const source of files) expect(source).not.toContain("\\u0000\\uD800")
+		const create = dtos["note"]?.["noteDtoCreateSchema"] as z.ZodObject
+		expect(create.safeParse({ body: "a😀b" }).success).toBe(true)
+		expect(create.safeParse({ body: "a\u0000b" }).success).toBe(false)
 	})
 })

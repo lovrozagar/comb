@@ -1,6 +1,7 @@
 // index.d.ts
 export { isCidr } from "./cidr.ts";
 export { CombError } from "./error.ts";
+export { isStorableText, STORABLE_TEXT_RULE, storableText } from "./storable-text.ts";
 export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, readCombEntityMeta, readCombMeta, readCombQueryMeta, } from "./meta.ts";
 export { createUlidFactory, generateId, generateUlid, type UlidFactoryOptions } from "./id.ts";
 export { LruCache, type LruMeta } from "./lru.ts";
@@ -36,6 +37,22 @@ export declare class CombError extends Error {
         table?: string | undefined;
     });
 }
+
+// storable-text.d.ts
+/**
+ * Text every engine stores as sent. No engine does with U+0000 or a lone UTF-16 surrogate: jsonb
+ * refuses both, Postgres text refuses U+0000 and takes a lone surrogate as U+FFFD, libsql cuts at
+ * U+0000, and bun:sqlite reads a lone surrogate back as other text (F11). Generated write DTOs hold
+ * every text to it through `isStorableText`, so the rule has one source; `storableText()` gives an
+ * app's own schema the same rule (G1). A refine, never a pattern: published as one, Go's and Rust's
+ * engines refuse \u and a surrogate, and a field's own pattern would move into an allOf (F56).
+ */
+import * as z from "zod";
+export declare const STORABLE_TEXT_RULE = "no U+0000 or unpaired surrogate";
+/** Whether every engine stores `value` as sent: it holds no U+0000 and no lone surrogate */
+export declare function isStorableText(value: string): boolean;
+/** A string schema that refuses what `isStorableText` refuses, publishing the rule as `x-comb-text` */
+export declare const storableText: () => z.ZodString;
 
 // meta.d.ts
 /**
