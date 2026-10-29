@@ -46,7 +46,7 @@ declare function secondsBound(operator: SecondsOperator, ms: number): "none" | "
     seconds: number;
 };
 /** One condition on one column; null when the operator or value is not one this column can take */
-declare function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL | null;
+declare function conditionToSQL(given: FilterCondition, column: SQLiteColumn): SQL | null;
 /**
  * What a validated filter lowers against. Values arrive typed by `validateFilter` (or the list
  * query schema), so they bind as the field declares.

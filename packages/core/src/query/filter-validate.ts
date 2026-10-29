@@ -4,6 +4,7 @@
  * booleans as booleans, and computed resolvers receive the declared type.
  */
 import { parseFilter } from "./filter-parse.ts"
+import { isoInstant } from "./iso-date.ts"
 import { patternOf } from "./like.ts"
 import type { FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator } from "./types.ts"
 
@@ -90,34 +91,10 @@ function parseFilterNumber(raw: string): { value: number } | { error: string } {
 	return { value }
 }
 
-/* a date, or a date-time with seconds and a fraction optional and an offset required */
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-](\d{2}):(\d{2})))?$/
-
-/* days in each month of a common year */
-const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const
-
-/** Days in `month` (1 to 12) of `year`, by the proleptic Gregorian calendar, where year 0 is a leap year (U35) */
-const daysIn = (year: number, month: number): number =>
-	month === 2 && year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : (MONTH_DAYS[month - 1] as number)
-
-/** An ISO date field's value: an ISO 8601 date or date-time naming a real day and time, as written */
+/** An ISO date field's value: the instant it names, in `toISOString()`'s form (Q5), or why it names none */
 function typedIsoDate(raw: string): Typed {
-	const parts = ISO_DATE.exec(raw)
-		?.slice(1)
-		.map((part) => (part === undefined ? 0 : Number(part)))
-	const [year, month, day, hour, minute, second, offsetHour, offsetMinute] = parts ?? []
-	const real =
-		parts !== undefined &&
-		(month as number) >= 1 &&
-		(month as number) <= 12 &&
-		(day as number) >= 1 &&
-		(day as number) <= daysIn(year as number, month as number) &&
-		(hour as number) < 24 &&
-		(minute as number) < 60 &&
-		(second as number) < 60 &&
-		(offsetHour as number) < 24 &&
-		(offsetMinute as number) < 60
-	return real ? { value: raw } : { error: `expects an ISO 8601 date or date-time, got '${raw}'` }
+	const value = isoInstant(raw)
+	return value === undefined ? { error: `expects an ISO 8601 date or date-time, got '${raw}'` } : { value }
 }
 
 /** A date field's value: epoch milliseconds a JS Date holds */

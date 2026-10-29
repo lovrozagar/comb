@@ -75,17 +75,19 @@ describe("validateFilter: a field's own operators", () => {
 describe("validateFilter: an ISO 8601 date field", () => {
 	const due = { format: "iso", type: "date" } as const
 
-	it("takes a date or a date-time, with Z or an offset, and hands it back as written", () => {
+	/* Q5 of the 0.14.1 review: one instant compares as one, however it is spelled */
+	it("takes a date or a date-time, with Z or an offset, typed as the instant it names in toISOString()'s form", () => {
 		/* U35: year 0 is a leap year in the proleptic Gregorian calendar ISO 8601 counts in */
-		for (const raw of [
-			"0000-02-29",
-			"2000-02-29",
-			"2024-02-29",
-			"2024-01-01T10:20Z",
-			"2024-01-01T10:20:30.123Z",
-			"2024-01-01T00:00+14:00",
+		for (const [raw, instant] of [
+			["0000-02-29", "0000-02-29T00:00:00.000Z"],
+			["0099-12-31T23:59Z", "0099-12-31T23:59:00.000Z"],
+			["2000-02-29", "2000-02-29T00:00:00.000Z"],
+			["2024-01-01T10:20Z", "2024-01-01T10:20:00.000Z"],
+			["2024-01-01T10:20:30.123456789Z", "2024-01-01T10:20:30.123Z"],
+			["2024-01-01T00:00+14:00", "2023-12-31T10:00:00.000Z"],
+			["2024-01-01T00:00:05.5-03:30", "2024-01-01T03:30:05.500Z"],
 		])
-			expect(typed(`due.gte.${raw}`, { due })).toBe(raw)
+			expect(typed(`due.gte.${raw}`, { due }), raw).toBe(instant)
 		expect(typed("due.is.null", { due })).toBeNull()
 	})
 

@@ -206,11 +206,13 @@ describe("filterToSQL — prototype names, subgroups and computed fields", () =>
 	})
 })
 
+/* C13 of the 0.14.1 review: a member of the JSON array the column holds; the live rows are tests/integration/libsql/iso-date-filter.test.ts */
 describe("filterToSQL — contains", () => {
-	it("fails closed on contains, which comb parses but does not run", () => {
-		expect(() => filterToSQL(ast([cond("title", "contains", "x")]), { mainTable: post })).toThrow(
-			expect.objectContaining({ errorKey: "filter_not_wired" }),
-		)
+	it("lowers contains to a json_each lookup, the value bound", () => {
+		const where = filterToSQL(ast([cond("title", "contains", "x")]), { mainTable: post })
+		const query = new SQLiteDialect().sqlToQuery(where as SQL)
+		expect(query.sql).toBe('EXISTS (SELECT 1 FROM json_each("post"."title") WHERE value = ?)')
+		expect(query.params).toEqual(["x"])
 	})
 })
 

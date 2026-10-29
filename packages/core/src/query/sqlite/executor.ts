@@ -26,6 +26,7 @@ import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
 import type { ComputedFilterResolver, FilterAST, FilterCondition, FilterGroup } from "../types.ts"
 import { patternToSQL } from "./pattern.ts"
+import { asStored } from "./stored-value.ts"
 import type { RelationConfig } from "./types.ts"
 
 const COMPUTED_PREFIX = "@"
@@ -136,7 +137,8 @@ const mismatched = (column: SQLiteColumn, { operator, value }: FilterCondition):
 			holds(value, "string")
 
 /** One condition on one column; null when the operator or value is not one this column can take */
-function conditionToSQL(condition: FilterCondition, column: SQLiteColumn): SQL | null {
+function conditionToSQL(given: FilterCondition, column: SQLiteColumn): SQL | null {
+	const condition = asStored(given, column)
 	if (mismatched(column, condition)) return null
 	const { operator } = condition
 	if (inSeconds(column) && (operator === "in" || operator === "nin") && Array.isArray(condition.value))
@@ -173,6 +175,9 @@ function operatorSQL(column: SQLiteColumn, operator: string, value: unknown): SQ
 			return patternToSQL(column, operator, value)
 		case "is":
 			return isToSQL(column, value)
+		/* a member of a JSON array the column holds (C13) */
+		case "contains":
+			return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${value})`
 		default:
 			return null
 	}
