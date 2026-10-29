@@ -69,6 +69,12 @@ type Recorded = {
  * record it wrote says it ran, so a retry reads the history first and runs nothing again (S6)
  */
 export declare function applyRecorded(conn: Connection, migration: Recorded, retry?: RetryOptions): Promise<void>;
+/**
+ * Each of `migrations` applied and recorded in turn, its name printed first. A failure stops the
+ * run as a Refused naming the files that committed before it and the ones still pending, which
+ * it prints as D1's apply does (S2 of the 0.15.0 review)
+ */
+export declare function applyEach(conn: Connection, migrations: readonly Recorded[], print: (line: string) => void): Promise<void>;
 export {};
 
 // migrate/core/d1-history-tables.d.ts
