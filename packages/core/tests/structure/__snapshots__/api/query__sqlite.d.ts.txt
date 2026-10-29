@@ -65,6 +65,8 @@ import type { FilterCondition } from "../types.ts";
  * value bound as validated (a boolean, JSON, or a raw column whose kind was not given)
  */
 type ColumnKind = "as-is" | "date-ms" | "date-s" | "number" | "numeric" | "text";
+/** Every ColumnKind, for a boundary that takes one from JavaScript */
+declare const COLUMN_KINDS: readonly ColumnKind[];
 /** A column a condition lowers onto: what it stores, and the SQL a value compares against */
 type FilterColumn = {
     kind: ColumnKind;
@@ -75,7 +77,7 @@ type FilterColumn = {
 declare function lowerOn(column: FilterColumn, condition: FilterCondition): SQL | null;
 /** One condition on one drizzle column; null when the operator or value is not one this column can take */
 declare const conditionToSQL: (condition: FilterCondition, column: SQLiteColumn) => SQL | null;
-export { type ColumnKind, conditionToSQL, type FilterColumn, lowerOn };
+export { COLUMN_KINDS, type ColumnKind, conditionToSQL, type FilterColumn, lowerOn };
 
 // query/sqlite/filter-sql.d.ts
 /**

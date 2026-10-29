@@ -252,3 +252,15 @@ describe("buildConditionSQL — a date column's unit (R9)", () => {
 		expect(compile(buildConditionSQL(condition("is", null), at("s"))!).sql).toBe('("e"."at" is null)')
 	})
 })
+
+/* the rerun of Q5 on the RC: a mapping in the shape before 0.16, which JavaScript may still pass, is refused by name */
+describe("buildConditionSQL on a mapped column of no kind comb knows", () => {
+	it("throws a TypeError naming the field, where it bound the value as text", () => {
+		const legacy = { columnMap: { at: { column: "at", unit: "s" } as never }, tableAlias: "e" }
+		expect(() => buildConditionSQL({ field: "at", operator: "gt", value: 1500 }, legacy)).toThrow(
+			new TypeError(
+				'buildFilterSQL: columnMap.at has no kind comb knows (text, number, numeric, date-ms, date-s, as-is); `unit: "s"` is `kind: "date-s"` since 0.16',
+			),
+		)
+	})
+})

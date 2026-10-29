@@ -31,6 +31,9 @@ import { patternToSQL } from "./pattern.ts"
  */
 type ColumnKind = "as-is" | "date-ms" | "date-s" | "number" | "numeric" | "text"
 
+/** Every ColumnKind, for a boundary that takes one from JavaScript */
+const COLUMN_KINDS: readonly ColumnKind[] = ["text", "number", "numeric", "date-ms", "date-s", "as-is"]
+
 /** A column a condition lowers onto: what it stores, and the SQL a value compares against */
 type FilterColumn = {
 	kind: ColumnKind
@@ -190,4 +193,4 @@ function lowerOn(column: FilterColumn, condition: FilterCondition): SQL | null {
 const conditionToSQL = (condition: FilterCondition, column: SQLiteColumn): SQL | null =>
 	lowerOn(columnOf(column), condition)
 
-export { type ColumnKind, conditionToSQL, type FilterColumn, lowerOn }
+export { COLUMN_KINDS, type ColumnKind, conditionToSQL, type FilterColumn, lowerOn }

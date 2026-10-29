@@ -9,7 +9,7 @@ import { combErrorKeys } from "../../types.ts"
 
 import type { FilterCondition, FilterGroup } from "../types.ts"
 import { quoteIdent } from "./identifier.ts"
-import { type ColumnKind, lowerOn } from "./condition.ts"
+import { COLUMN_KINDS, type ColumnKind, lowerOn } from "./condition.ts"
 
 /**
  * A mapped column: its name, its values bound as validated, or its name and what it stores, which
@@ -58,6 +58,11 @@ function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig):
 	const mapped = Object.hasOwn(config.columnMap, condition.field) ? config.columnMap[condition.field] : undefined
 	if (mapped === undefined) return null
 	const { column, kind } = typeof mapped === "string" ? { column: mapped, kind: "as-is" as const } : mapped
+	/* a kind comb does not know, as JavaScript may still pass the shape before 0.16, would bind as text: refused */
+	if (!COLUMN_KINDS.includes(kind))
+		throw new TypeError(
+			`buildFilterSQL: columnMap.${condition.field} has no kind comb knows (${COLUMN_KINDS.join(", ")}); \`unit: "s"\` is \`kind: "date-s"\` since 0.16`,
+		)
 	return lowerOn(
 		{ kind, sql: sql`${sql.raw(quoteIdent(config.tableAlias))}.${sql.raw(quoteIdent(column))}` },
 		condition,
