@@ -261,6 +261,32 @@ describe("a plain Postgres column's write DTO, by its data type (F50)", () => {
 		const { rows } = await sessions.pg().query(READ)
 		expect(read.safeParse(rows[0]).success).toBe(true)
 	})
+})
+
+/* what Postgres stores past the write DTO's rule, and what it refuses by any write path */
+describe("a plain Postgres column's stored values and refusals beyond its DTO (F4, F5)", () => {
+	const sessions = usePg()
+	let read: z.ZodObject
+
+	beforeAll(async () => {
+		;({ read } = await kindsDtos())
+	})
+
+	beforeEach(async () => {
+		await sessions.pg().query(DDL)
+	})
+
+	/* F5 of the 0.14.1 review: a real holds the infinities and NaN, which the driver reads as JS numbers. A
+	   read takes the infinities, which JSON writes as null; z.toJSONSchema cannot represent NaN, so a
+	   stored NaN, Postgres's alone (SQLite stores it as NULL), still fails the read DTO */
+	it("reads back a stored Infinity and -Infinity, and refuses a stored NaN", async () => {
+		await sessions
+			.pg()
+			.query("INSERT INTO kinds (id, r) VALUES ('a', 'NaN'), ('b', 'Infinity'), ('c', '-Infinity'), ('d', 1.5)")
+		const { rows } = await sessions.pg().query(READ)
+		expect(rows.map((row) => row.r)).toEqual([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 1.5])
+		expect(rows.map((row) => read.safeParse(row).success)).toEqual([false, true, true, true])
+	})
 
 	/* F4 of the 0.14.1 review: the offset Postgres refuses past 15:59 is the request's value, a 400 by any write path */
 	it("answers an offset past 15:59 with a 400 naming the column, as every other bad value", async () => {

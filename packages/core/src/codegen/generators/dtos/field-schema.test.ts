@@ -212,7 +212,9 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		)
 		expect(schema("at", 'c.createdAt("at")', "read")).toBe("timestampSchema")
 		expect(schema("b", 'c.boolean("b").notNull()', "read")).toBe("z.boolean().meta(_m.boolean)")
-		expect(schema("r", 'c.real("r").notNull()', "read")).toBe("z.number().meta(_m.real)")
+		expect(schema("r", 'c.real("r").notNull()', "read")).toBe(
+			"z.union([z.number(), z.literal([Infinity, -Infinity])]).meta(_m.real)",
+		)
 		/* a plain drizzle column is typed from its data type: a JSON blob takes any JSON value */
 		expect(schema("x", 'blob("x")', "read")).toBe("z.json().nullable()")
 		/* written, it takes the refine with its rule as meta, no $ref to keep plain (F63) */
@@ -241,7 +243,7 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 			/^z\.number\(\)\.min\(-0\.25\)\.meta/,
 		)
 		expect(schema("r", 'c.real("r", { max: 1.5 }).notNull()', "read")).toMatch(
-			/^z\.number\(\)\.meta\(\{"x-comb-maximum":1\.5\}\)\.meta/,
+			/^z\.union\(\[z\.number\(\), z\.literal\(\[Infinity, -Infinity\]\)\]\)\.meta\(\{"x-comb-maximum":1\.5\}\)\.meta/,
 		)
 	})
 })
@@ -351,7 +353,7 @@ describe("generateFieldSchema: a plain drizzle column, typed from its data type 
 			"z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER)",
 		)
 		expect(pg('boolean("n").notNull()')).toBe("z.boolean()")
-		expect(pg('doublePrecision("n").notNull()')).toBe("z.number()")
+		expect(pg('doublePrecision("n").notNull()')).toBe("z.union([z.number(), z.literal([Infinity, -Infinity])])")
 	})
 })
 
