@@ -57,6 +57,16 @@ SELECT 'policy', p.polname, NULL, c.relname, NULL, NULL, NULL
 FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_class c ON c.oid = p.polrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = $1`
 
+/**
+ * What a postgres.js failure says: its message, or, for the AggregateError it throws with none when
+ * every address refuses, each address's answer joined (P15 of the 0.15.0 review)
+ */
+function failureOf(error: unknown): string {
+	const { errors, message } = error as { errors?: unknown; message?: unknown }
+	if (typeof message === "string" && message !== "") return message
+	return Array.isArray(errors) ? errors.map((each) => String((each as { message?: unknown }).message)).join("; ") : ""
+}
+
 /** postgres.js, or the refusal naming it and `why` comb needs it here */
 async function loadPostgres(why: string): Promise<Connect> {
 	const specifier: string = PEER
@@ -99,7 +109,7 @@ async function readLiveObjects(
 		return live
 	} catch (error) {
 		throw new Error(
-			`comb could not read the database's functions, triggers, views, sequences and policies: ${maskSecrets((error as Error).message, [target.url])}`,
+			`comb could not read the database's functions, triggers, views, sequences and policies: ${maskSecrets(failureOf(error), [target.url])}`,
 			{ cause: error },
 		)
 	} finally {
@@ -227,4 +237,4 @@ function routineDrift(
 	return out
 }
 
-export { type Connect, liveDrift, loadPostgres, readLiveObjects }
+export { type Connect, failureOf, liveDrift, loadPostgres, readLiveObjects }

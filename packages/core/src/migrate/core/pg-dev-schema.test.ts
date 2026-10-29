@@ -108,3 +108,13 @@ describe("readyDevSchema: the dev database libpq reads from devUrl", () => {
 		])
 	})
 })
+
+describe("readyDevSchema on a connection every address refused", () => {
+	/* P15 of the 0.15.0 review: an AggregateError's message is empty, its reasons in its errors */
+	it("says what each address answered when the failure's own message is empty", async () => {
+		const refused = new AggregateError([new Error("connect ECONNREFUSED 127.0.0.1:5433")], "")
+		await expect(readyDevSchema(target("app"), fakeConnect(refused).load)).rejects.toThrow(
+			"comb could not create schema app on devUrl, where Atlas replays the migrations: connect ECONNREFUSED 127.0.0.1:5433",
+		)
+	})
+})

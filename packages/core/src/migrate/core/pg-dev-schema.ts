@@ -10,7 +10,7 @@ import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 import type { PgTarget } from "./atlas-target.ts"
 import { ReplayFailed } from "./baseline-compare.ts"
-import { type Connect, loadPostgres } from "./pg-live-objects.ts"
+import { type Connect, failureOf, loadPostgres } from "./pg-live-objects.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
 
 /** How a dev database gets the target schema: comb's own, readyDevSchema, unless a test fakes it */
@@ -31,7 +31,7 @@ async function readyDevSchema(
 		await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(target.schema)}`, [])
 	} catch (error) {
 		throw new ReplayFailed(
-			`comb could not create schema ${target.schema} on devUrl, where Atlas replays the migrations: ${maskSecrets((error as Error).message, [target.devUrl])}`,
+			`comb could not create schema ${target.schema} on devUrl, where Atlas replays the migrations: ${maskSecrets(failureOf(error), [target.devUrl])}`,
 			{ cause: error },
 		)
 	} finally {
