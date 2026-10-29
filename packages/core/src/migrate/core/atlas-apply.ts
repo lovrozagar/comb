@@ -14,7 +14,7 @@ import { join } from "node:path"
 import type { ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
-import { adopted, adopts, sharedPrefix } from "./atlas-adopt.ts"
+import { adopted, adopts, proveAdoption, sharedPrefix } from "./atlas-adopt.ts"
 import { execOrder, type Foreign, foreignRows, ignoredLines, ownHistory } from "./atlas-foreign.ts"
 import { type AtlasFile, type AtlasStatus, checkHistory, fileOf, filesOf, versionOf } from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
@@ -56,8 +56,13 @@ function ownOf(options: AtlasCommand, copy: string, raw: AtlasStatus): { foreign
 	return { foreign, status: ownHistory(raw, foreign, copy) }
 }
 
-/** Record `ran` in the schema's own history, without running it: Atlas writes the rows in one transaction */
-function adopt(options: AtlasCommand, copy: string, ran: readonly string[]): void {
+/** Record `ran` in the schema's own history, without running it, once the schema proves it holds what they leave: Atlas writes the rows in one transaction */
+async function adopt(
+	options: AtlasCommand & Pick<ObjectsCompare, "readLive">,
+	copy: string,
+	ran: readonly string[],
+): Promise<void> {
+	await proveAdoption({ ...options, exec: options.exec ?? run }, copy, ran)
 	const set = atlas(options, copy, ["set", versionOf(ran.at(-1) as string).version])
 	if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)
 	options.print(adopted(ran))
@@ -139,7 +144,7 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 			await approvePending(options, copy, after(copy, ran))
 			return after(copy, ran).map((file) => file.Name)
 		}
-		if (ran.length > 0) adopt(options, copy, ran)
+		if (ran.length > 0) await adopt(options, copy, ran)
 		const { foreign, status } = ownOf(options, copy, ran.length > 0 ? atlasStatus(options, copy) : known(own))
 		const halfway = checkHistory(status, copy, {
 			elsewhere: foreign.elsewhere,
@@ -208,7 +213,7 @@ async function baselineWithAtlas(options: AtlasCommand & Pick<ObjectsCompare, "r
 		/* what 0.12 ran is recorded, and only that: the files after it still run on apply (M77) */
 		const ran = sharedRan(options, copy, status)
 		if (ran.length > 0) {
-			adopt(options, copy, ran)
+			await adopt(options, copy, ran)
 			return ran
 		}
 		const files = sqlFiles(copy)

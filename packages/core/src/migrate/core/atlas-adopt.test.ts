@@ -8,10 +8,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { adopted, adopts, sharedPrefix } from "./atlas-adopt.ts"
+import { adopted, adopts, proveAdoption, sharedPrefix } from "./atlas-adopt.ts"
 import { applyWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
 import { sqlFiles } from "./atlas-dir.ts"
 import type { AtlasRevision, AtlasStatus } from "./atlas-history.ts"
+import type { LiveRead } from "./pg-live-types.ts"
 import type { Run, RunResult } from "./process.ts"
 
 let dir = ""
@@ -72,6 +73,10 @@ const shared = (applied: AtlasRevision[]): AtlasStatus => ({
 	status: "OK",
 })
 
+/* what status and check say of the files 0.12 ran, which they do not prove (P2) */
+const PENDING =
+	"ran under 0.12's shared history; apply would adopt them, pending proof that the schema holds what they leave"
+
 describe("sharedPrefix: the files 0.12's shared history ran", () => {
 	it("takes the rows naming this directory's files as its prefix, and skips another schema's", () => {
 		expect(sharedPrefix(shared([row("0_public.sql"), row("1_a.sql"), row("2_b.sql"), row("9_x.sql")]), dir)).toEqual([
@@ -95,8 +100,8 @@ describe("sharedPrefix: the files 0.12's shared history ran", () => {
 	})
 
 	it("says how many files ran, and which it recorded", () => {
-		expect(adopts(["1_a.sql"])).toBe("1 file ran under 0.12's shared history; apply adopts them")
-		expect(adopts(["1_a.sql", "2_b.sql"])).toBe("2 files ran under 0.12's shared history; apply adopts them")
+		expect(adopts(["1_a.sql"])).toBe(`1 file ${PENDING}`)
+		expect(adopts(["1_a.sql", "2_b.sql"])).toBe(`2 files ${PENDING}`)
 		expect(adopted(["1_a.sql", "2_b.sql"])).toBe("Adopted from 0.12's shared history: 1_a.sql, 2_b.sql")
 	})
 })
@@ -156,7 +161,43 @@ describe("adoption: read once, while the schema's own history is empty", () => {
 			applied: [],
 			pending: [],
 		})
-		expect(out).toEqual(["Applied: 0", "Pending: none", "3 files ran under 0.12's shared history; apply adopts them"])
+		expect(out).toEqual(["Applied: 0", "Pending: none", `3 files ${PENDING}`])
 		expect(calls.map((args) => args[1])).toEqual(["hash", "status", "status"])
+	})
+})
+
+/* P2 of the 0.14.1 review: a matching prefix is adopted only once the schema holds what replaying it leaves */
+/** A database with no function, procedure or trigger */
+const noObjects: LiveRead = async () => ({ routines: new Map(), triggers: new Map() })
+
+/** atlas, its schema diff answering `stdout` and `stderr` */
+const diffing =
+	(stdout: string, stderr = ""): Run =>
+	(_cmd, args) =>
+		args[0] === "schema" ? { code: 0, stderr, stdout } : { code: 0, stderr: "", stdout: "" }
+
+describe("proveAdoption", () => {
+	const target = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "app", url: "postgres://db/db" }
+
+	it("passes a schema that holds what the files leave, passing Atlas's notices on", async () => {
+		const copy = mkdtempSync(join(tmpdir(), "comb-prove-"))
+		writeFileSync(join(copy, "1_a.sql"), 'CREATE TABLE "a" ("id" integer);\n')
+		const out: string[] = []
+		const exec = diffing("Schemas are synced, no changes to be made.", "views are not inspected")
+		await proveAdoption({ exec, print: (line) => out.push(line), readLive: noObjects, target }, copy, ["1_a.sql"])
+		expect(out).toEqual(["Warning: Atlas: views are not inspected"])
+		rmSync(copy, { force: true, recursive: true })
+	})
+
+	it("refuses one that does not, naming the schema and the files, with the difference", async () => {
+		const copy = mkdtempSync(join(tmpdir(), "comb-prove-"))
+		writeFileSync(join(copy, "1_a.sql"), 'CREATE TABLE "a" ("id" integer);\n')
+		const exec = diffing('-- Create "a" table\nCREATE TABLE "a" ("id" integer);')
+		await expect(
+			proveAdoption({ exec, print: () => undefined, readLive: noObjects, target }, copy, ["1_a.sql"]),
+		).rejects.toThrow(
+			"app does not hold what 0.12's shared history ran (1_a.sql), so comb adopts none of it; the difference:\n-- Create",
+		)
+		rmSync(copy, { force: true, recursive: true })
 	})
 })

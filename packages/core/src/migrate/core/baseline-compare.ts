@@ -103,7 +103,7 @@ function replayableHistory(exec: Run, copy: string): string {
  * against the history replayed on the dev database. Atlas OSS inspects no view, policy or
  * sequence, so those are not compared.
  */
-function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string): string[] {
+function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string, refusal?: string): string[] {
 	const plain = replayableHistory(options.exec, copy)
 	try {
 		const ran = withAtlasEnv(options.target, { dev: true, url: true }, (env) => {
@@ -122,7 +122,7 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string): st
 		})
 		if (ran.stdout !== SYNCED) {
 			throw new Error(
-				`the database's tables are not the ones the migrations leave, so baseline records nothing; the difference:\n${ran.shown}`,
+				`${refusal ?? "the database's tables are not the ones the migrations leave, so baseline records nothing"}; the difference:\n${ran.shown}`,
 			)
 		}
 		return ran.notices
@@ -140,7 +140,7 @@ type ObjectsCompare = { print(line: string): void; readLive?: LiveRead | undefin
  * comparison without a word (plan 14's 5.4b); warns once that the bodies of those that match were
  * not compared
  */
-async function refuseObjectDrift(options: ObjectsCompare, copy: string): Promise<void> {
+async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?: string): Promise<void> {
 	let history: ExtractedSchema | undefined
 	for (const name of sqlFiles(copy))
 		history = extractSchema(readFileSync(join(copy, name), "utf8"), history, "postgres")
@@ -148,7 +148,7 @@ async function refuseObjectDrift(options: ObjectsCompare, copy: string): Promise
 	const { matched, only: differ } = liveDrift(historyFacts(history, options.target.schema), live)
 	if (differ.length > 0) {
 		throw new Error(
-			`the database's functions and triggers are not the ones the migrations leave, so baseline records nothing:\n${differ.join("\n")}`,
+			`${refusal ?? "the database's functions and triggers are not the ones the migrations leave, so baseline records nothing"}:\n${differ.join("\n")}`,
 		)
 	}
 	if (matched > 0)

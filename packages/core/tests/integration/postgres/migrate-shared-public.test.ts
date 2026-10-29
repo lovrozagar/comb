@@ -98,10 +98,20 @@ function recordOwn(url: string, dir: string, version: string): void {
 }
 
 /**
+ * A dev database holding schema app, where adopting app's 0.12 rows replays them (P2), and a
+ * target, each a scratch database of its own
+ */
+const withDevAndTarget = (body: (dev: string, url: string) => Promise<void>) =>
+	withScratchDb(async (dev) => {
+		await query(dev, "CREATE SCHEMA app")
+		await withScratchDb((url) => body(dev, url))
+	})
+
+/**
  * The report's database: 0.12 applied public's a and app's b, app's own history records b (adopted
  * by comb, or set by hand from `otherHash`, an edited b), and public added c
  */
-async function reportCase(url: string, otherHash = false): Promise<void> {
+async function reportCase(url: string, dev: string, otherHash = false): Promise<void> {
 	await query(url, "CREATE SCHEMA app")
 	migrations(pub, { "20260101000000_a.sql": 'CREATE TABLE "a" ("id" integer);\n' })
 	applyAs012(url, "public", pub)
@@ -110,15 +120,18 @@ async function reportCase(url: string, otherHash = false): Promise<void> {
 	if (otherHash) {
 		migrations(app, { "20260105000000_b.sql": 'CREATE TABLE "b" ("id" integer, "x" integer);\n' })
 		recordOwn(url, app, "20260105000000")
-	} else await applyWithAtlas(command(url, "app", app))
+	} else {
+		const adopting = command(url, "app", app)
+		await applyWithAtlas({ ...adopting, target: { ...adopting.target, devUrl: dev } })
+	}
 	migrations(pub, { "20260103000000_c.sql": 'CREATE TABLE "c" ("id" integer);\n' })
 }
 
 describe("migrate on Postgres: public's shared history beside another schema's 0.12 rows (M78)", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("ignores app's row, naming it, so status lists c, check classifies it, and apply runs it", async () => {
-			await withScratchDb(async (url) => {
-				await reportCase(url)
+			await withDevAndTarget(async (dev, url) => {
+				await reportCase(url, dev)
 				const status = command(url, "public", pub)
 				expect(statusWithAtlas(status).pending).toEqual(["20260103000000_c.sql"])
 				expect(status.out).toContain(IGNORED)
@@ -134,8 +147,8 @@ describe("migrate on Postgres: public's shared history beside another schema's 0
 		}, 90_000)
 
 		it("applies a later file of public's after c, and refuses one older than public's own latest", async () => {
-			await withScratchDb(async (url) => {
-				await reportCase(url)
+			await withDevAndTarget(async (dev, url) => {
+				await reportCase(url, dev)
 				await applyWithAtlas(command(url, "public", pub))
 				migrations(pub, { "20260110000000_d.sql": 'CREATE TABLE "d" ("id" integer);\n' })
 				expect(await applyWithAtlas(command(url, "public", pub))).toEqual(["20260110000000_d.sql"])
@@ -148,8 +161,8 @@ describe("migrate on Postgres: public's shared history beside another schema's 0
 		}, 90_000)
 
 		it("refuses app's row as M76 does when app's own history records it with another hash", async () => {
-			await withScratchDb(async (url) => {
-				await reportCase(url, true)
+			await withDevAndTarget(async (dev, url) => {
+				await reportCase(url, dev, true)
 				const gone = "20260105000000 was applied, and its file is gone or renamed"
 				await expect(applyWithAtlas(command(url, "public", pub))).rejects.toThrow(gone)
 				expect(await shared(url)).toEqual(["20260101000000", "20260105000000"])
