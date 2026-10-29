@@ -212,7 +212,7 @@ describe("filterToSQL — contains", () => {
 		const where = filterToSQL(ast([cond("title", "contains", "x")]), { mainTable: post })
 		const query = new SQLiteDialect().sqlToQuery(where as SQL)
 		expect(query.sql).toBe(
-			`(json_type("post"."title") = 'array' AND EXISTS (SELECT 1 FROM json_each("post"."title") WHERE value = ?))`,
+			`(CASE WHEN json_valid("post"."title") THEN json_type("post"."title") = 'array' AND EXISTS (SELECT 1 FROM json_each("post"."title") WHERE value = ?) END)`,
 		)
 		expect(query.params).toEqual(["x"])
 	})

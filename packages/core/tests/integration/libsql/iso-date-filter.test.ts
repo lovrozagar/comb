@@ -100,3 +100,27 @@ describe("contains on a JSON array column (C13)", () => {
 		expect(await matched(`rawDay.contains.${MIDNIGHT}`)).toEqual(["midnight"])
 	})
 })
+
+/* 27.15 of plan 15: json_type raises on text that is no JSON, so a row of it is matched by nothing, never a 500 */
+describe("contains on a plain text column some of whose rows hold no JSON", () => {
+	const note = sqliteTable("note", { body: text("body"), name: text("name").primaryKey() })
+
+	it("finds the rows whose JSON array holds the value, and passes over text that is no JSON", async () => {
+		await client.execute("CREATE TABLE note (name TEXT PRIMARY KEY, body TEXT)")
+		for (const [name, body] of [
+			["array", '["red","blue"]'],
+			["prose", "red, but no JSON"],
+			["object", '{"red":1}'],
+			["none", null],
+		])
+			await client.execute({ args: [name, body], sql: "INSERT INTO note VALUES (?, ?)" })
+		const result = validateFilter("body.contains.red", { body: { operators: ["contains"], type: "string" } })
+		if (!result?.valid) throw new Error("invalid")
+		const where = filterToSQL(result.ast, { mainTable: note })
+		const rows = await db
+			.select({ name: note.name })
+			.from(note)
+			.where(where ?? undefined)
+		expect(rows.map((row) => row.name)).toEqual(["array"])
+	})
+})

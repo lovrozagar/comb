@@ -175,9 +175,9 @@ function operatorSQL(column: SQLiteColumn, operator: string, value: unknown): SQ
 			return patternToSQL(column, operator, value)
 		case "is":
 			return isToSQL(column, value)
-		/* a member of a JSON array the column holds, whatever it is declared as, so mismatched() does not apply (C13, 27.8); a scalar JSON value is no set, though json_each reads it as one */
+		/* a member of a JSON array the column holds, whatever it is declared as, so mismatched() does not apply (C13, 27.8); a scalar JSON value is no set, though json_each reads it as one, and text that is no JSON, which json_type raises on, is matched by nothing: a CASE asks json_valid first, in the order SQLite evaluates it (27.15) */
 		case "contains":
-			return sql`(json_type(${column}) = 'array' AND EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${value}))`
+			return sql`(CASE WHEN json_valid(${column}) THEN json_type(${column}) = 'array' AND EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${value}) END)`
 		default:
 			return null
 	}
