@@ -14,6 +14,14 @@ describe("explainAtlasFailure on a database Atlas calls not clean", () => {
 		)
 	})
 
+	/* the rerun of P3 on the RC: migrate diff gives Atlas no target, and Atlas writes no snapshot prefix there */
+	it("names the dev database from a call that reached no other, with no snapshot prefix", () => {
+		const diff = 'Error: sql/migrate: connected database is not clean: found table "leftover" in schema "public"'
+		expect(explainAtlasFailure(diff, kept, { devOnly: true })).toBe(
+			'devUrl must be an empty database, and it holds table "leftover" in schema "public"; point devUrl at an empty database, or empty this one',
+		)
+	})
+
 	it("keeps the target's answer for a target Atlas finds not clean", () => {
 		expect(explainAtlasFailure('Error: sql/migrate: connected database is not clean: found table "t"', kept)).toMatch(
 			/^the database has objects but no migration history/,

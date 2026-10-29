@@ -12,6 +12,7 @@ import pg from "pg"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { baselineWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
+import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-diff.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import { withScratchDb } from "../support/pg.ts"
@@ -220,6 +221,27 @@ describe("a Postgres baseline on a dev database that is not empty", () => {
 			expect(refused).toContain(
 				'devUrl must be an empty database, and it holds table "leftover" in connected schema; point devUrl at an empty database, or empty this one',
 			)
+		})
+	}, 60_000)
+
+	/* the rerun of P3 on the RC: migrate diff reaches only the dev database, and Atlas writes no snapshot prefix there */
+	it("names the dev database from migrate diff too, which reaches no target", async () => {
+		await withScratchDb(async (devUrl) => {
+			await exec(devUrl, 'CREATE TABLE "leftover" ("x" integer);')
+			const history = mkdtempSync(join(tmpdir(), "comb-pg-dirty-dev-"))
+			try {
+				await expect(
+					generateIncrementalMigration({
+						dialect: "postgres",
+						migrationName: "next",
+						migrationsDir: history,
+						target: { devUrl, lockTimeout: "5s", schema: "public", url: "" },
+						targetSchema: TABLE,
+					}),
+				).rejects.toThrow(/devUrl must be an empty database, and it holds table "leftover"/)
+			} finally {
+				rmSync(history, { force: true, recursive: true })
+			}
 		})
 	}, 60_000)
 })
