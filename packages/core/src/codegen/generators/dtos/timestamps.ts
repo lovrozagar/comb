@@ -1,4 +1,5 @@
 /** The `_shared` file: base aliases, example objects, timestamp schemas and their refinements. */
+import { COMB_NAMESPACE, combImport } from "./comb-namespace.ts"
 import type { SharedSchema, TableInfo } from "./dto-types.ts"
 import { SHARED_META_KEYS, SHARED_META_VALUES, SHARED_SCHEMAS } from "./example-meta.ts"
 import { BASE_TYPE_ALIASES, rewriteBaseTypes } from "./shared-schemas.ts"
@@ -132,19 +133,16 @@ function header(): string[] {
 		...Object.entries(SHARED_SCHEMAS).map(([name, schema]) => `export const _s_${name} = ${rewriteBaseTypes(schema)}`),
 		"",
 		"/** Base timestamp field - allows Unix epoch (0) */",
-		`export const timestampSchema = ${rewriteBaseTypes("z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)")}.meta(_m.timestamp)`,
+		`export const timestampSchema = ${rewriteBaseTypes("z.number().int().nonnegative().max(globalThis.Number.MAX_SAFE_INTEGER)")}.meta(_m.timestamp)`,
 		"",
 		"/** Nullable timestamp field */",
-		"export const timestampNullableSchema = _intNN.max(Number.MAX_SAFE_INTEGER).nullable()",
+		"export const timestampNullableSchema = _intNN.max(globalThis.Number.MAX_SAFE_INTEGER).nullable()",
 		"",
 		"/** A Postgres cidr: an address, its prefix length, and no bit set past it (F50) */",
-		'export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(isCidr, { message: "Must be a network with no bit set past its prefix length" })',
+		'export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(comb.isCidr, { message: "Must be a network with no bit set past its prefix length" })',
 		"",
 	]
 }
-
-/* what the shared file may take from comb: isCidr for a cidr, isStorableText for the text guard (G1) */
-const COMB_NAMES = ["isCidr", "isStorableText"] as const
 
 /**
  * The shared `_shared/index.gen.ts` content: the combos tables use, the deduped schemas, and of
@@ -170,14 +168,12 @@ export function generateSharedFile(
 }
 
 /**
- * The lines without the zod import when nothing kept uses it, with comb's import of the names they
- * use, and an empty module when nothing is kept at all
+ * The lines without the zod import when nothing kept uses it, with comb's own predicates under its
+ * namespace when they use one (C2 of r17), and an empty module when nothing is kept at all
  */
 function withoutUnusedImports(lines: readonly string[], combFrom: string): readonly string[] {
 	const uses = (pattern: RegExp) => lines.some((line) => line !== ZOD_IMPORT && pattern.test(line))
 	const rest = lines.filter((line) => line !== ZOD_IMPORT || uses(/\bz\./))
-	const named = COMB_NAMES.filter((name) => uses(new RegExp(`\\b${name}\\b`)))
-	if (named.length > 0)
-		rest.splice(rest.indexOf(ZOD_IMPORT) + 1, 0, `import { ${named.join(", ")} } from "${combFrom}"`)
+	if (uses(COMB_NAMESPACE)) rest.splice(rest.indexOf(ZOD_IMPORT) + 1, 0, combImport(combFrom))
 	return rest.some((line) => line.trim() !== "") ? rest : ["export {}", ""]
 }

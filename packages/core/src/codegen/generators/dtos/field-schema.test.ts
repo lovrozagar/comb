@@ -13,9 +13,9 @@ import { generateFieldSchema as generated } from "./field-schema.ts"
 /* every written text and JSON field ends with the F11 rule; the tests below read the other rules, and
  * "the rule no engine stores" reads this one */
 const TEXT_RULE =
-	'.refine(isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" })'
+	'.refine(comb.isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" })'
 const JSON_RULE =
-	'.refine((val) => !/\\\\u(?:0000|d[89a-f])/i.test(JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "")), { message: "Must not contain U+0000 or an unpaired surrogate" })'
+	'.refine((val) => !/\\\\u(?:0000|d[89a-f])/i.test(globalThis.JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "")), { message: "Must not contain U+0000 or an unpaired surrogate" })'
 const generateFieldSchema = (...args: Parameters<typeof generated>) =>
 	generated(...args)
 		?.replace(TEXT_RULE, "")
@@ -61,7 +61,7 @@ describe("generateFieldSchema: what each schema type includes", () => {
 		const fk = { column: "teamId", refColumn: "id", refTable: "team" }
 		const team = fieldOf("teamId", 'c.integer("team_id").notNull().references(() => team.id)', { foreignKey: fk })
 		expect(generateFieldSchema(team, "create", { imports: imports() })).toMatch(
-			/^z\.number\(\)\.int\(\)\.min\(Number\.MIN_SAFE_INTEGER\)/,
+			/^z\.number\(\)\.int\(\)\.min\(globalThis\.Number\.MIN_SAFE_INTEGER\)/,
 		)
 		expect(generateFieldSchema(team, "read", { imports: imports() })).toMatch(/^z\.number\(\)\.int\(\)/)
 		expect(generateFieldSchema(team, "update", { imports: imports() })).toMatch(/^z\.number\(\)\.int\(\)/)
@@ -151,7 +151,7 @@ describe("generateFieldSchema: JSON", () => {
 				"create",
 				{ imports: imports() },
 			),
-		).toContain("new TextEncoder().encode(JSON.stringify(val)).length <= 100")
+		).toContain("new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val)).length <= 100")
 		expect(() => schema("p", 'c.json("p")', "read")).toThrow(
 			"fixture.p: no module of the project exports the schema its c.json is given",
 		)
@@ -201,19 +201,19 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		/* written and read alike, so what is read back can be sent back (F15) */
 		for (const type of ["read", "readPartial", "create", "update"] as const)
 			expect(schema("n", 'c.integer("n").notNull()', type)).toMatch(
-				/^z\.number\(\)\.int\(\)\.min\(Number\.MIN_SAFE_INTEGER\)\.max\(Number\.MAX_SAFE_INTEGER\)/,
+				/^z\.number\(\)\.int\(\)\.min\(globalThis\.Number\.MIN_SAFE_INTEGER\)\.max\(globalThis\.Number\.MAX_SAFE_INTEGER\)/,
 			)
 		expect(schema("n", 'c.integer("n", { min: 5 }).notNull()', "create")).toContain("z.number().int().min(5)")
 		expect(schema("n", "c.serialId()", "read")).toBe(
-			"z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER).meta(_m.serialId)",
+			"z.number().int().min(globalThis.Number.MIN_SAFE_INTEGER).max(globalThis.Number.MAX_SAFE_INTEGER).meta(_m.serialId)",
 		)
 		expect(schema("at", 'c.timestamp("at").notNull()', "read")).toBe(
-			"z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER).meta(_m.timestamp)",
+			"z.number().int().min(globalThis.Number.MIN_SAFE_INTEGER).max(globalThis.Number.MAX_SAFE_INTEGER).meta(_m.timestamp)",
 		)
 		expect(schema("at", 'c.createdAt("at")', "read")).toBe("timestampSchema")
 		expect(schema("b", 'c.boolean("b").notNull()', "read")).toBe("z.boolean().meta(_m.boolean)")
 		expect(schema("r", 'c.real("r").notNull()', "read")).toBe(
-			'z.union([z.number(), z.literal([Infinity, -Infinity, null]).meta({ enum: undefined, type: "null" })]).meta(_m.real)',
+			'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: undefined, type: "null" })]).meta(_m.real)',
 		)
 		/* a plain drizzle column is typed from its data type: a JSON blob takes any JSON value */
 		expect(schema("x", 'blob("x")', "read")).toBe("z.json().nullable()")
@@ -231,10 +231,10 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 			/^z\.number\(\)\.int\(\)\.min\(-40\)\.max\(60\)/,
 		)
 		expect(schema("t", 'c.integer("t", { min: -40, max: 60 }).notNull()', "read")).toMatch(
-			/^z\.number\(\)\.int\(\)\.min\(Number\.MIN_SAFE_INTEGER\)\.max\(Number\.MAX_SAFE_INTEGER\)\.meta\(\{"x-comb-maximum":60,"x-comb-minimum":-40\}\)/,
+			/^z\.number\(\)\.int\(\)\.min\(globalThis\.Number\.MIN_SAFE_INTEGER\)\.max\(globalThis\.Number\.MAX_SAFE_INTEGER\)\.meta\(\{"x-comb-maximum":60,"x-comb-minimum":-40\}\)/,
 		)
 		expect(schema("c", 'c.integer("c", { max: 9 }).notNull()', "create")).toMatch(
-			/^z\.number\(\)\.int\(\)\.min\(Number\.MIN_SAFE_INTEGER\)\.max\(9\)/,
+			/^z\.number\(\)\.int\(\)\.min\(globalThis\.Number\.MIN_SAFE_INTEGER\)\.max\(9\)/,
 		)
 		expect(schema("l", 'c.real("l", { min: -90.5, max: 90.5 }).notNull()', "create")).toMatch(
 			/^z\.number\(\)\.min\(-90\.5\)\.max\(90\.5\)/,
@@ -243,7 +243,7 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 			/^z\.number\(\)\.min\(-0\.25\)\.meta/,
 		)
 		expect(schema("r", 'c.real("r", { max: 1.5 }).notNull()', "read")).toMatch(
-			/^z\.union\(\[z\.number\(\), z\.literal\(\[Infinity, -Infinity, null\]\)\.meta\(\{ enum: undefined, type: "null" \}\)\]\)\.meta\(\{"x-comb-maximum":1\.5\}\)\.meta/,
+			/^z\.union\(\[z\.number\(\), z\.literal\(\[globalThis\.Infinity, -globalThis\.Infinity, null\]\)\.meta\(\{ enum: undefined, type: "null" \}\)\]\)\.meta\(\{"x-comb-maximum":1\.5\}\)\.meta/,
 		)
 	})
 })
@@ -305,7 +305,7 @@ describe("generateFieldSchema on Postgres (F8)", () => {
 			"z.number().int().min(-2147483648).max(2147483647).meta(_m.integer)",
 		)
 		expect(generateFieldSchema(field, "create", { imports: imports() })).toBe(
-			"z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER).meta(_m.integer)",
+			"z.number().int().min(globalThis.Number.MIN_SAFE_INTEGER).max(globalThis.Number.MAX_SAFE_INTEGER).meta(_m.integer)",
 		)
 	})
 })
@@ -350,11 +350,11 @@ describe("generateFieldSchema: a plain drizzle column, typed from its data type 
 		expect(pg('smallint("n").notNull()')).toBe("z.number().int().min(-32768).max(32767)")
 		expect(pg('integer("n").notNull()')).toBe("z.number().int().min(-2147483648).max(2147483647)")
 		expect(pg('bigint("n", { mode: "number" }).notNull()')).toBe(
-			"z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER)",
+			"z.number().int().min(globalThis.Number.MIN_SAFE_INTEGER).max(globalThis.Number.MAX_SAFE_INTEGER)",
 		)
 		expect(pg('boolean("n").notNull()')).toBe("z.boolean()")
 		expect(pg('doublePrecision("n").notNull()')).toBe(
-			'z.union([z.number(), z.literal([Infinity, -Infinity, null]).meta({ enum: undefined, type: "null" })])',
+			'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: undefined, type: "null" })])',
 		)
 	})
 })

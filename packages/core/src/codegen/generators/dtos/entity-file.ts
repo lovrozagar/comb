@@ -1,4 +1,5 @@
 /** One entity's generated file: its four DTO schemas, the entity stamp and the inferred types. */
+import { COMB_NAMESPACE, combImport } from "./comb-namespace.ts"
 import type { CombEntityMetaInput } from "../../../meta.ts"
 import type { ImportRef } from "../../analyzer-types.ts"
 import { propertyName, snakeToCamel, snakeToPascal } from "../../utils/case.ts"
@@ -26,6 +27,8 @@ export type EntityFileOptions = {
 	entityDir: string
 	filePrefix?: string | undefined
 	metaImportFrom?: string | undefined
+	/** where comb is imported from, for its predicates a local schema names (C2 of r17) */
+	combFrom?: string | undefined
 	/** how the consumer takes a relative import (F53) */
 	importStyle?: ImportStyle | undefined
 	/** the names the entity's schemas use, with where the tables file gets them */
@@ -192,9 +195,15 @@ function typeLines(table: TableInfo): string[] {
 	]
 }
 
-function importLines(table: TableInfo, spread: Spread, options: EntityFileOptions): string[] {
+function importLines(
+	table: TableInfo,
+	{ body, spread }: { body: readonly string[]; spread: Spread },
+	options: EntityFileOptions,
+): string[] {
 	const lines = [`import * as z from "zod"`]
 	if (table.combMeta) lines.push(`import { combMeta } from "${options.metaImportFrom ?? "@lovrozagar/comb/meta"}"`)
+	/* a local schema kept beside a c.json import may name a comb predicate (C2 of r17) */
+	if (body.some((line) => COMB_NAMESPACE.test(line))) lines.push(combImport(options.combFrom ?? "@lovrozagar/comb"))
 	lines.push(...schemaImportLines(options.schemaImports, options.entityDir, options.importStyle))
 	const shared = sharedImports(table, spread, options.sharedSchemas)
 	if (shared.length > 0) {
@@ -219,11 +228,11 @@ export function generateEntityFile(table: TableInfo, options: EntityFileOptions)
 	const localLines = [...locals].map(
 		([zodType, name]) => `const ${name} = ${rewriteWithShared(zodType, options.sharedSchemas)}`,
 	)
-	return [
-		...importLines(table, spread, options),
+	const body = [
 		...localLines,
 		...(localLines.length > 0 ? [""] : []),
 		...SCHEMA_TYPES.flatMap((type) => schemaLines(type, emit)),
 		...typeLines(table),
-	].join("\n")
+	]
+	return [...importLines(table, { body, spread }, options), ...body].join("\n")
 }

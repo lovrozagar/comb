@@ -21,8 +21,8 @@ function text(raw: string, schemaType: SchemaType, { dialect = "sqlite", ...over
 	})
 }
 
-/* generated code names comb's isStorableText, which the generated file imports */
-const parse = (code: string) => new Function("z", "isStorableText", `return ${code}`)(z, isStorableText) as z.ZodString
+/* generated code names comb's isStorableText under comb's namespace, which the generated file imports (C2 of r17) */
+const parse = (code: string) => new Function("z", "comb", `return ${code}`)(z, { isStorableText }) as z.ZodString
 
 /* F65: a read never refuses a stored row; it states the declared bounds and enforces what the engine holds */
 describe("textBase on a read (F65)", () => {
@@ -58,7 +58,7 @@ describe("textBase on a write", () => {
 	it("enforces every declared bound and the text guard", () => {
 		const write = text('c.text("t", { min: 3, max: 10 }).notNull()', "create")
 		expect(write).toBe(
-			`z.string().min(3).max(10).refine(isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${STORABLE_TEXT_RULE}" })`,
+			`z.string().min(3).max(10).refine(comb.isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${STORABLE_TEXT_RULE}" })`,
 		)
 		expect(parse(write).safeParse("eleven char").success).toBe(false)
 		expect(text('c.text("t", { email: true, max: 20 })', "update")).toBe(

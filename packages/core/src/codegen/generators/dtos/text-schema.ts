@@ -7,7 +7,7 @@ import { isMutative } from "./schema-type.ts"
 
 /* the text guard every written text takes: comb's own isStorableText, which the shared file imports (G1), as a
    refine sits in the structural core F59 shares there */
-const TEXT_GUARD = `.refine(isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${STORABLE_TEXT_RULE}" })`
+const TEXT_GUARD = `.refine(comb.isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${STORABLE_TEXT_RULE}" })`
 
 /* a format bounds what is written; what is read back is whatever the column holds: a password's
  * stored hash, an email or URL a migration or an older rule stored (F12). A written email takes

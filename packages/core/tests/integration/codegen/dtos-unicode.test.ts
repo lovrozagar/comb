@@ -169,12 +169,35 @@ describe("the text guard's one source (G1)", () => {
 		const files = (fs.readdirSync(generatedDir("g1"), { recursive: true }) as string[])
 			.filter((name) => name.endsWith(".gen.ts"))
 			.map((name) => fs.readFileSync(path.join(generatedDir("g1"), name), "utf8"))
-		const refining = files.filter((source) => source.includes(".refine(isStorableText,"))
+		const refining = files.filter((source) => source.includes(".refine(comb.isStorableText,"))
 		expect(refining.length).toBeGreaterThan(0)
-		for (const source of refining) expect(source).toContain('import { isStorableText } from "@lovrozagar/comb"')
+		/* under comb's namespace, which no c.json import can take (C2 of r17) */
+		for (const source of refining) expect(source).toContain('import * as comb from "@lovrozagar/comb"')
 		for (const source of files) expect(source).not.toContain("\\u0000\\uD800")
 		const create = dtos["note"]?.["noteDtoCreateSchema"] as z.ZodObject
 		expect(create.safeParse({ body: "a😀b" }).success).toBe(true)
 		expect(create.safeParse({ body: "a\u0000b" }).success).toBe(false)
 	})
+})
+
+/*
+ * C2 of r17: generated code names comb's predicates under one namespace and the globals through
+ * globalThis, so a c.json schema exported under one of their names is the user's alone
+ */
+describe("a c.json schema named as comb's predicate or a global the generated code calls (C2)", () => {
+	it.each(["isStorableText", "isCidr", "TextEncoder", "JSON", "Number", "Infinity"])(
+		"leaves comb's own %s to the generated code",
+		async (name) => {
+			const dtos = await generatedDtos(
+				`c2-${name.toLowerCase()}`,
+				`import * as z from "zod"
+export const ${name} = z.object({ a: z.string() })
+export const one = sqliteTable("one", { id: c.id("one"), title: c.text("title"), doc: c.json("doc", ${name}, { maxBytes: 100 }), n: c.integer("n"), r: c.real("r") })`,
+			)
+			const create = dtos["one"]?.["oneDtoCreateSchema"] as z.ZodObject
+			expect(create.safeParse({ doc: { a: "x" }, n: 1, title: "hello" }).success).toBe(true)
+			expect(create.safeParse({ title: "a\u0000b" }).success).toBe(false)
+			expect(create.safeParse({ doc: { a: "x".repeat(200) } }).success).toBe(false)
+		},
+	)
 })

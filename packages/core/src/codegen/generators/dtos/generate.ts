@@ -83,6 +83,7 @@ function writeEntities(written: Written, config: DtosConfig, ctx: GeneratorConte
 			entityDir,
 			filePrefix: config.filePrefix,
 			importStyle: ctx.importStyle,
+			combFrom: config.importFrom,
 			metaImportFrom: config.importFrom === undefined ? undefined : `${config.importFrom}/meta`,
 			schemaImports: schemaImportsOf(metas.get(table.name) as TableMeta),
 			sharedSchemas: written.sharedSchemas,

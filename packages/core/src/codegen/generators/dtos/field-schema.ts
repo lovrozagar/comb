@@ -28,7 +28,7 @@ function enumBase({ field }: Build): Built {
  * backslash taken out of its JSON, a \u0000 left is the one, and a \ud800-\udfff escape a lone
  * surrogate, as JSON.stringify writes a pair as it is */
 const JSON_NUL_CHECK =
-	'.refine((val) => !/\\\\u(?:0000|d[89a-f])/i.test(JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "")), { message: "Must not contain U+0000 or an unpaired surrogate" })'
+	'.refine((val) => !/\\\\u(?:0000|d[89a-f])/i.test(globalThis.JSON.stringify(val ?? null).replace(/\\\\\\\\/g, "")), { message: "Must not contain U+0000 or an unpaired surrogate" })'
 
 /*
  * a c.json column is its schema, which the runtime reader found exported; a plain json column any
@@ -46,7 +46,7 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const size =
 		limit === null
 			? ""
-			: `.refine((val) => !val || new TextEncoder().encode(JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
+			: `.refine((val) => !val || new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
 	const rules = `.meta({ "x-comb-text": ${JSON.stringify(STORABLE_TEXT_RULE)}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
 	const refined = `${schema}${size}${JSON_NUL_CHECK}`
 	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63) */
@@ -71,7 +71,7 @@ const isNumeric = (field: FieldMeta) =>
 
 /* the integer range each column holds: Postgres's int2 and int4, else a JS number's exact range */
 const INT2 = { max: 32767, min: -32768 }
-const SAFE = { max: "Number.MAX_SAFE_INTEGER", min: "Number.MIN_SAFE_INTEGER" }
+const SAFE = { max: "globalThis.Number.MAX_SAFE_INTEGER", min: "globalThis.Number.MIN_SAFE_INTEGER" }
 
 type Range = { max: number | string; min: number | string }
 
@@ -113,7 +113,7 @@ function integerOf(annotations: FieldConstraints, range: Range, schemaType: Sche
    is sent, typed number | null; NaN, which z.toJSONSchema cannot represent, still fails it (F5 of the
    0.14.1 review, 27.12 and 27.18 of plan 15) */
 const READ_FLOAT =
-	'z.union([z.number(), z.literal([Infinity, -Infinity, null]).meta({ enum: undefined, type: "null" })])'
+	'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: undefined, type: "null" })])'
 
 function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 	if (!isNumeric(field)) return field.dataType === "boolean" ? "z.boolean()" : undefined
