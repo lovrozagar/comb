@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./apply.ts"
+import { applyRecorded, checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./apply.ts"
 import type { Connection } from "../types.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
@@ -75,5 +75,50 @@ describe("checkMigrationHash — hashes recorded before 0.5.0 (S-13)", () => {
 		} finally {
 			await conn.close()
 		}
+	})
+})
+
+/*
+ * S6 of the 0.14.1 review: a batch can commit and its answer still fail ("fetch failed"), and its
+ * statements need not run twice safely; the history it wrote says it ran, so a retry reads that first
+ */
+describe("applyRecorded", () => {
+	const migration = { filename: "1_a.sql", hash: "h1", statements: ["CREATE TABLE a (x)", "INSERT INTO a VALUES (1)"] }
+	const NOW = { baseDelay: 0, maxDelay: 0 }
+
+	it("runs a file's statements and its record once, a retry after a batch that committed running nothing", async () => {
+		const conn = libsqlConnection()
+		await ensureMigrationsTable(conn)
+		let calls = 0
+		const lost: Connection = {
+			...conn,
+			batch: async (statements) => {
+				calls++
+				await conn.batch(statements)
+				if (calls === 1) throw new Error("fetch failed")
+			},
+		}
+		await applyRecorded(lost, migration, NOW)
+		expect(calls).toBe(1)
+		expect((await conn.execute("SELECT count(*) FROM a")).rows[0]?.[0]).toBe(1)
+		expect((await conn.execute("SELECT name FROM __drizzle_migrations")).rows).toEqual([["1_a.sql"]])
+	})
+
+	it("retries a batch that failed before it committed, and passes on a failure that is not transient", async () => {
+		const conn = libsqlConnection()
+		await ensureMigrationsTable(conn)
+		let calls = 0
+		const flaky: Connection = {
+			...conn,
+			batch: async (statements) => {
+				if (++calls === 1) throw new Error("ECONNRESET")
+				await conn.batch(statements)
+			},
+		}
+		await applyRecorded(flaky, migration, NOW)
+		expect(calls).toBe(2)
+		expect((await conn.execute("SELECT count(*) FROM a")).rows[0]?.[0]).toBe(1)
+		const broken: Connection = { ...conn, batch: async () => Promise.reject(new Error("no such table: b")) }
+		await expect(applyRecorded(broken, { ...migration, filename: "2_b.sql" }, NOW)).rejects.toThrow("no such table: b")
 	})
 })

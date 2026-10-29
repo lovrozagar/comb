@@ -103,13 +103,13 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 			"20260102000000_drop.sql": "DROP TABLE post;",
 		})
 		await keep(url("local.db"))
-		/* every pending file is approved before any applies, so a refusal leaves even the first unapplied */
+		/* every pending file is approved before any applies, so a refusal leaves even the first unapplied, and comb's history unmade (S7) */
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], io(dir))).toBe(1)
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "keep"])
+		expect(await tables(url("local.db"))).toEqual(["keep"])
 
 		const declined = io(dir, async () => false)
 		expect(await runCli(["migrate", "apply", "core", "-e", "local"], declined)).toBe(1)
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "keep"])
+		expect(await tables(url("local.db"))).toEqual(["keep"])
 
 		const asked: string[] = []
 		const accepted = io(dir, async (question) => (asked.push(question), true))
@@ -131,7 +131,7 @@ describe("migrate apply through comb.migrate.config.ts (A-H4): destructive and l
 		expect(asked).toHaveLength(1)
 		expect(asked[0]).toContain("DROP TABLE post")
 		expect(declined.errors.join("\n")).toContain("3_drop.sql is unsafe")
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "keep"])
+		expect(await tables(url("local.db"))).toEqual(["keep"])
 		fs.writeFileSync(
 			path.join(dir, "atlas-migrations", "3_drop.sql"),
 			"-- comb:allow-unsafe: post is retired\nDROP TABLE post;",
@@ -206,7 +206,7 @@ describe("migrate baseline", () => {
 		expect(run.errors[0]).toContain("'s schema is not the one its migrations leave, so baseline records nothing")
 		expect(run.errors[0]).toContain("ADD COLUMN `title` text NULL")
 		expect(run.errors[0]).toContain("-- FTS table post_fts: only in the migrations")
-		expect(await tables(url("local.db"))).toEqual(["__drizzle_migrations", "post"])
+		expect(await tables(url("local.db"))).toEqual(["post"])
 	})
 })
 

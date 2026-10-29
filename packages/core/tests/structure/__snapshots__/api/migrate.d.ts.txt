@@ -38,6 +38,7 @@ export declare function loadConfig(configPath?: string, cwd?: string): Promise<L
  * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
  */
 import type { Connection } from "../types.ts";
+import { type RetryOptions } from "./utils.ts";
 /** Whether a unique index of comb's history holds its hash alone, as comb's table did before 0.13 */
 export declare function hashUnique(conn: Connection): Promise<boolean>;
 /**
@@ -56,6 +57,19 @@ export declare function ensureMigrationsTable(conn: Connection, renamed?: Readon
 export declare function checkMigrationHash(conn: Connection, hashes: string | readonly string[]): Promise<boolean>;
 /** Record `hash` as applied, under the file's `name` when given (an unnamed row is named on the next apply) */
 export declare function recordMigrationHash(conn: Connection, hash: string, name?: string): Promise<void>;
+/** A file to apply: its statements, and the hash and name its record holds */
+type Recorded = {
+    filename: string;
+    hash: string;
+    statements: readonly string[];
+};
+/**
+ * `migration`'s statements and its record in one batch, retried while it fails transiently. A
+ * batch can commit and its answer still fail, and its statements need not run twice safely: the
+ * record it wrote says it ran, so a retry reads the history first and runs nothing again (S6)
+ */
+export declare function applyRecorded(conn: Connection, migration: Recorded, retry?: RetryOptions): Promise<void>;
+export {};
 
 // migrate/core/d1-history-tables.d.ts
 /**

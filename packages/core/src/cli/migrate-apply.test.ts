@@ -162,8 +162,8 @@ describe("migrate apply: approving an unsafe migration", () => {
 		const no = io(dir, async (q) => (asked.push(q), false))
 		expect(await runCli(["migrate", "apply", "core", "--yes"], no)).toBe(1)
 		expect(asked[0]).toContain("This affects: core (core-dev)")
-		/* every pending file is approved before any applies, so the refusal left 1_init.sql unapplied too */
-		expect(await tables(url)).toEqual(["__drizzle_migrations", "keep"])
+		/* every pending file is approved before any applies, so the refusal left 1_init.sql unapplied, and comb's history unmade (S7) */
+		expect(await tables(url)).toEqual(["keep"])
 		expect(
 			await runCli(
 				["migrate", "apply", "core"],
@@ -298,9 +298,8 @@ describe("migrate baseline", () => {
 		expect(drift.errors).toEqual([
 			"core (core-dev)'s schema is not the one its migrations leave, so baseline records nothing; the difference:\nCREATE TABLE `post` (`id` text NULL);",
 		])
-		const client = createClient({ url })
-		expect((await client.execute("SELECT count(*) AS n FROM __drizzle_migrations")).rows[0]?.["n"]).toBe(0)
-		client.close()
+		/* a refused baseline writes nothing, comb's history included (S7 of the 0.14.1 review) */
+		expect(await tables(url)).toEqual([])
 	})
 })
 

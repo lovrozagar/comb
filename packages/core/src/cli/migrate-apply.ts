@@ -11,7 +11,7 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import { ensureMigrationsTable, hashUnique, recordMigrationHash } from "../migrate/core/apply.ts"
+import { applyRecorded, ensureMigrationsTable, hashUnique, recordMigrationHash } from "../migrate/core/apply.ts"
 import { approveMigration } from "../migrate/core/approval.ts"
 import { sqlFiles } from "../migrate/core/atlas-dir.ts"
 import { sqliteDrift } from "../migrate/core/baseline-compare.ts"
@@ -27,7 +27,6 @@ import {
 import { migrationHashes } from "../migrate/core/parse.ts"
 import { type Pending, planApply } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
-import { withRetry } from "../migrate/core/utils.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
 import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
@@ -67,16 +66,10 @@ async function configuredTarget(
 	return { conn, migrationsDir: target.migrationsDir, name: target.label }
 }
 
-const RECORD = "INSERT INTO __drizzle_migrations (hash, created_at, name) VALUES (?, ?, ?)"
-
 /** Apply one checked migration: its statements and its record in one batch */
 async function applyPending({ migration }: Pending, target: Target, io: CliIo): Promise<void> {
 	io.out(`Apply: ${migration.filename}`)
-	const statements = [
-		...migration.statements.map((sql) => ({ sql })),
-		{ params: [migration.hash, Date.now(), migration.filename], sql: RECORD },
-	]
-	await withRetry(() => target.conn.batch(statements))
+	await applyRecorded(target.conn, migration)
 }
 
 /** The history `__drizzle_migrations` holds, row by row: nothing when it is missing, which only a write would create */
@@ -155,7 +148,7 @@ async function nameRecorded(conn: Connection, named: ReadonlyArray<{ hash: strin
  */
 async function baseline(
 	target: Target,
-	{ files, matched }: { files: readonly FileHashes[]; matched: Matched },
+	{ files, matched, record }: { files: readonly FileHashes[]; matched: Matched; record: () => Promise<void> },
 	io: CliIo,
 ) {
 	const drift = await sqliteDrift(target.conn, target.migrationsDir, io.run ?? runProcess)
@@ -164,6 +157,7 @@ async function baseline(
 			`${target.name}'s schema is not the one its migrations leave, so baseline records nothing; the difference:\n${drift}`,
 		)
 	}
+	await record()
 	let marked = 0
 	for (const { hashes, name } of files) {
 		if (matched.applied.has(name)) continue
@@ -193,18 +187,20 @@ function fileName(single: string, { cwd, dir }: { cwd: string; dir: string }): s
  * file (history-match.ts): a named row by its name, an unnamed one by its hash.
  */
 async function migrateSqlite({ args, io, mode }: Request, target: Target): Promise<MigrateOutcome> {
-	const writes = mode === "apply" || mode === "baseline"
 	const single = option(args, "file")
 	const dir = target.migrationsDir
 	const relative = single === undefined ? undefined : fileName(single, { cwd: io.cwd, dir })
 	const { renamed, rows } = await readHistory(target.conn, dir)
-	if (writes) await ensureMigrationsTable(target.conn, renamed)
 	const files = hashed(dir, relative === undefined ? sqlFiles(dir) : [relative])
 	const matched = matchHistory(files, rows, single === undefined)
 	refuseUnmatched(matched, { dir, io, mode })
-	if (writes) await nameRecorded(target.conn, matched.named)
+	/* comb's history is written only once nothing refuses the run: its table, and each name a row lacks (S7) */
+	const record = async () => {
+		await ensureMigrationsTable(target.conn, renamed)
+		await nameRecorded(target.conn, matched.named)
+	}
 	if (mode === "baseline") {
-		await baseline(target, { files, matched }, io)
+		await baseline(target, { files, matched, record }, io)
 		return { applied: [], pending: [] }
 	}
 	const names = files.map(({ name }) => name)
@@ -232,6 +228,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 		return { applied: [], pending: pendingNames }
 	}
 	for (const name of names.filter((file) => !pendingNames.includes(file))) io.out(`Skip (already applied): ${name}`)
+	await record()
 	for (const each of pending) await applyPending(each, target, io)
 	io.out(`\nDone: ${pendingNames.length} applied, ${names.length - pendingNames.length} skipped`)
 	return { applied: pendingNames, pending: [] }

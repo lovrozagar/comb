@@ -4,6 +4,7 @@
  * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
  */
 import type { Connection } from "../types.ts"
+import { type RetryOptions, withRetry } from "./utils.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MIGRATIONS TABLE
@@ -103,11 +104,34 @@ export async function checkMigrationHash(conn: Connection, hashes: string | read
 	return result.rows.length > 0
 }
 
+const RECORD = "INSERT INTO __drizzle_migrations (hash, created_at, name) VALUES (?, ?, ?)"
+
 /** Record `hash` as applied, under the file's `name` when given (an unnamed row is named on the next apply) */
 export async function recordMigrationHash(conn: Connection, hash: string, name?: string): Promise<void> {
-	await conn.execute("INSERT INTO __drizzle_migrations (hash, created_at, name) VALUES (?, ?, ?)", [
-		hash,
-		Date.now(),
-		name ?? null,
-	])
+	await conn.execute(RECORD, [hash, Date.now(), name ?? null])
+}
+
+/** A file to apply: its statements, and the hash and name its record holds */
+type Recorded = { filename: string; hash: string; statements: readonly string[] }
+
+/** Whether comb's history records the file `name` */
+const recorded = async (conn: Connection, name: string): Promise<boolean> =>
+	(await conn.execute("SELECT 1 FROM __drizzle_migrations WHERE name = ?", [name])).rows.length > 0
+
+/**
+ * `migration`'s statements and its record in one batch, retried while it fails transiently. A
+ * batch can commit and its answer still fail, and its statements need not run twice safely: the
+ * record it wrote says it ran, so a retry reads the history first and runs nothing again (S6)
+ */
+export async function applyRecorded(conn: Connection, migration: Recorded, retry?: RetryOptions): Promise<void> {
+	const statements = [
+		...migration.statements.map((sql) => ({ sql })),
+		{ params: [migration.hash, Date.now(), migration.filename], sql: RECORD },
+	]
+	let tried = false
+	await withRetry(async () => {
+		if (tried && (await recorded(conn, migration.filename))) return
+		tried = true
+		await conn.batch(statements)
+	}, retry)
 }
