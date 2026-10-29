@@ -109,8 +109,18 @@ describe("createD1Provider: parameters and output", () => {
 	})
 })
 
+/* S8 of the 0.15.0 review: a remote --file goes through D1's import API, which takes the database out of service */
 describe("createD1Provider: batch and close", () => {
-	it("writes the statements to a temp file, runs it, and removes the file", async () => {
+	it("sends the statements as one --command, which D1's query API runs", async () => {
+		const run = fakeRun(() => json([]))
+		const conn = await connect(run, { ...CONFIG, local: false })
+		await conn.batch([{ sql: "CREATE TABLE a (x)" }, { sql: "CREATE TABLE b (y)" }])
+		expect(run.calls.map(({ args }) => args)).toEqual([
+			["d1", "execute", "core-local", "--remote", "--command=CREATE TABLE a (x)\n;\nCREATE TABLE b (y)\n;"],
+		])
+	})
+
+	it("writes a batch too long for one argument to a temp file, runs it, and removes the file", async () => {
 		let file = ""
 		let body = ""
 		const run = fakeRun((call) => {
@@ -119,8 +129,9 @@ describe("createD1Provider: batch and close", () => {
 			return json([])
 		})
 		const conn = await connect(run, { ...CONFIG, local: true })
-		await conn.batch([{ sql: "CREATE TABLE a (x)" }, { sql: "CREATE TABLE b (y)" }])
-		expect(body).toBe("CREATE TABLE a (x)\n;\nCREATE TABLE b (y)\n;")
+		const long = `INSERT INTO t VALUES ('${"x".repeat(100 * 1024)}')`
+		await conn.batch([{ sql: long }])
+		expect(body).toBe(`${long}\n;`)
 		expect(run.calls[0]?.args.slice(0, 4)).toEqual(["d1", "execute", "core-local", "--local"])
 		expect(existsSync(file)).toBe(false)
 	})
@@ -133,7 +144,9 @@ describe("createD1Provider: batch and close", () => {
 				return { code: 1, stderr: "bad sql", stdout: "" }
 			}),
 		)
-		await expect(conn.batch([{ sql: "nope" }])).rejects.toThrow("wrangler failed (exit 1): bad sql")
+		await expect(conn.batch([{ sql: `SELECT '${"x".repeat(100 * 1024)}'` }])).rejects.toThrow(
+			"wrangler failed (exit 1): bad sql",
+		)
 		expect(existsSync(file)).toBe(false)
 	})
 
@@ -148,8 +161,8 @@ describe("createD1Provider: SQL it hands wrangler (S-13)", () => {
 	it("terminates every batch statement so a trailing comment cannot swallow the next one", async () => {
 		let file = ""
 		const run = fakeRun((call) => {
-			const arg = call.args.find((a) => a.startsWith("--file="))
-			if (arg) file = readFileSync(arg.slice("--file=".length), "utf8")
+			const arg = call.args.find((a) => a.startsWith("--command="))
+			if (arg) file = arg.slice("--command=".length)
 			return json([])
 		})
 		const conn = await connect(run)
@@ -168,11 +181,11 @@ describe("createD1Provider: SQL it hands wrangler (S-13)", () => {
 		}
 	})
 
-	it("inlines a batch statement's parameters into the file, since --file binds none", async () => {
+	it("inlines a batch statement's parameters, since a batch binds none", async () => {
 		let file = ""
 		const run = fakeRun((call) => {
-			const arg = call.args.find((a) => a.startsWith("--file="))
-			if (arg) file = readFileSync(arg.slice("--file=".length), "utf8")
+			const arg = call.args.find((a) => a.startsWith("--command="))
+			if (arg) file = arg.slice("--command=".length)
 			return json([])
 		})
 		const conn = await connect(run)

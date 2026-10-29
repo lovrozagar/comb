@@ -92,13 +92,24 @@ function wranglerFlags(config: D1ProviderConfig): string[] {
 	]
 }
 
+/* the longest --command a batch sends: Linux refuses one argument past MAX_ARG_STRLEN, 128 KiB, and
+   macOS the whole argv and environment past 1 MiB */
+const COMMAND_BYTES = 100 * 1024
+
 function createD1Connection(databaseName: string, flags: readonly string[], exec: Run): Connection {
 	return {
 		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
-			/* --file binds no parameters, so they are inlined as literals */
+			/* wrangler binds no parameters in a batch, so they are inlined as literals */
 			const sql = statements
 				.map(({ params, sql: text }) => terminated(params && params.length > 0 ? inlineParams(text, params) : text))
 				.join("\n")
+			/* --command goes through D1's query API; a remote --file through its import API, which takes
+			   the database out of service while it ingests, so --file is only for a batch too long for one
+			   argument (S8 of the 0.15.0 review) */
+			if (Buffer.byteLength(sql) <= COMMAND_BYTES) {
+				runWrangler(exec, ["d1", "execute", databaseName, ...flags, `--command=${sql}`])
+				return
+			}
 			const dir = mkdtempSync(join(tmpdir(), "comb-d1-batch-"))
 			const tmpFile = join(dir, "batch.sql")
 			try {
