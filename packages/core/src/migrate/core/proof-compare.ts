@@ -110,16 +110,31 @@ function compareTable(db: MemoryDb, table: string, { now, was }: { now: Shape; w
 	return out
 }
 
-/** The new table of `after` that holds every column and row of `was`, if one does */
+/**
+ * Where `now` holds each column of `was`: by its name, or under a new one matched by its values as
+ * renamedTo matches it, with the renames; none when a column has no match or the rows differ (C9)
+ */
+function columnMoves(was: Shape, now: Shape): Array<[string, string]> | undefined {
+	const moves: Array<[string, string]> = []
+	const taken = new Set<string>()
+	for (const column of was.columns.filter((each) => !now.columns.includes(each))) {
+		const renamed = renamedTo({ now, was }, column, taken)
+		if (renamed === undefined) return undefined
+		taken.add(renamed)
+		moves.push([column, renamed])
+	}
+	const moved = was.columns.map((column) => moves.find(([from]) => from === column)?.[1] ?? column)
+	return missing(rowKeys(was, was.columns), rowKeys(now, moved)) === 0 ? moves : undefined
+}
+
+/** The new table of `after` that holds every row of `was`, each column by its name or a new one, and the column renames */
 function renamedTable(was: Shape, before: ReadonlyMap<string, Shape>, after: ReadonlyMap<string, Shape>) {
-	const rows = rowKeys(was, was.columns)
-	return [...after].find(
-		([name, now]) =>
-			!before.has(name) &&
-			now.rows.length === was.rows.length &&
-			was.columns.every((column) => now.columns.includes(column)) &&
-			missing(rows, rowKeys(now, was.columns)) === 0,
-	)?.[0]
+	for (const [name, now] of after) {
+		if (before.has(name) || now.rows.length !== was.rows.length) continue
+		const moves = columnMoves(was, now)
+		if (moves !== undefined) return { moves, name }
+	}
+	return undefined
 }
 
 /** What a file did to each table that was there before it */
@@ -128,8 +143,10 @@ function compare(db: MemoryDb, before: ReadonlyMap<string, Shape>, after: Readon
 	for (const [table, was] of before) {
 		const now = after.get(table)
 		const renamed = now === undefined ? renamedTable(was, before, after) : undefined
-		if (renamed !== undefined) out.unsafe.push(`renames ${table} to ${renamed}`)
-		else if (now === undefined) out.unsafe.push(`loses every row of ${table}`)
+		if (renamed !== undefined) {
+			out.unsafe.push(`renames ${table} to ${renamed.name}`)
+			for (const [from, to] of renamed.moves) out.unsafe.push(`renames ${table}.${from} to ${renamed.name}.${to}`)
+		} else if (now === undefined) out.unsafe.push(`loses every row of ${table}`)
 		else {
 			const found = compareTable(db, table, { now, was })
 			out.cautious.push(...found.cautious)

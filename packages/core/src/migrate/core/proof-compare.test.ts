@@ -127,15 +127,16 @@ describe("compare: the NULL allowance and moved values", () => {
 })
 
 /* M22 of the 0.12 round: a rename keeps every value, so the proof says so, still unsafe, rather than call it a loss */
-describe("compare: renames", () => {
-	const users = shape(
-		["id", "email"],
-		[
-			["1", "'a@x'"],
-			["2", "'b@x'"],
-		],
-	)
+/** users with an id and an email, two rows */
+const users = shape(
+	["id", "email"],
+	[
+		["1", "'a@x'"],
+		["2", "'b@x'"],
+	],
+)
 
+describe("compare: renames", () => {
 	it("names a column whose values a new column holds row for row as renamed", async () => {
 		const renamed = shape(["id", "mail"], users.rows)
 		expect(compare(await memory(), new Map([["users", users]]), new Map([["users", renamed]])).unsafe).toEqual([
@@ -174,5 +175,40 @@ describe("compare: renames", () => {
 		expect(compare(db, new Map([["users", users]]), new Map([["accounts", other]])).unsafe).toEqual([
 			"loses every row of users",
 		])
+	})
+})
+
+/* C9 of the 0.14.1 review: a table renamed with a column of it renamed too keeps every row */
+describe("compare on a table renamed with its columns", () => {
+	it("names a table renamed with a column renamed too, matching the column by its values, and each rename", async () => {
+		const db = await memory()
+		const mailed = shape(["id", "mail"], users.rows)
+		expect(compare(db, new Map([["users", users]]), new Map([["accounts", mailed]])).unsafe).toEqual([
+			"renames users to accounts",
+			"renames users.email to accounts.mail",
+		])
+		const swapped = shape(
+			["id", "mail"],
+			users.rows.map(([id, email]) => [email as string, id as string]),
+		)
+		expect(compare(db, new Map([["users", users]]), new Map([["accounts", swapped]])).unsafe).toEqual([
+			"loses every row of users",
+		])
+		/* each column alone matches by its values, yet no row keeps its pair: the rows are not the table's */
+		const was = shape(
+			["a", "b"],
+			[
+				["1", "'x'"],
+				["2", "'y'"],
+			],
+		)
+		const crossed = shape(
+			["c", "d"],
+			[
+				["1", "'y'"],
+				["2", "'x'"],
+			],
+		)
+		expect(compare(db, new Map([["t", was]]), new Map([["u", crossed]])).unsafe).toEqual(["loses every row of t"])
 	})
 })
