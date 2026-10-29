@@ -93,8 +93,10 @@ function userinfoOf(authority: string): { password: string | undefined; user: st
 }
 
 /**
- * The host and port an authority's host part names, libpq's query over it; an empty host is
- * localhost, as Atlas's driver reads it, since libpq's own default socket is no server Atlas reaches
+ * The host and port an authority's host part names, libpq's query over it. An empty host is
+ * localhost over TCP, as Atlas's driver reads it: a deliberate divergence from libpq, whose default
+ * socket would split comb's own reads from the server Atlas migrates. A socket target is spelled
+ * with its directory, `?host=/run/postgresql`.
  */
 function hostOf(hostport: RegExpExecArray, params: ReadonlyMap<string, string>): { host: string; port: string } {
 	const [, bracketed, plain = "", port = ""] = hostport
