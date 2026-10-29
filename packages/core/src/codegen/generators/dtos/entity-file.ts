@@ -8,7 +8,7 @@ import { BASE_TYPE_ALIASES, rewriteWithShared } from "./shared-schemas.ts"
 import { comboFields, comboOf, type TimestampCombo, timestampNames } from "./timestamps.ts"
 import { type ImportStyle, specifierFor, styled } from "../../utils/paths.ts"
 
-const SUFFIX: Record<SchemaType, string> = {
+export const SUFFIX: Record<SchemaType, string> = {
 	create: "DtoCreate",
 	read: "DtoRead",
 	readPartial: "DtoReadPartial",

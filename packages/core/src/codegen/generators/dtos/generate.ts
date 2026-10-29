@@ -15,6 +15,7 @@ import { generateEntityFile, sharedImportsOf } from "./entity-file.ts"
 import { generateExampleMeta } from "./example-meta.ts"
 import { generateFieldSchema } from "./field-schema.ts"
 import { updatePackageJson } from "./package-exports.ts"
+import { aliasSchemaImports } from "./schema-aliases.ts"
 import { buildSharedSchemas } from "./shared-schemas.ts"
 import { collectUsedTimestampCombos, generateSharedFile } from "./timestamps.ts"
 
@@ -96,19 +97,21 @@ function writeEntities(written: Written, config: DtosConfig, ctx: GeneratorConte
  * Generate DTO schemas from analyzed tables
  */
 export function generateDtos(ctx: GeneratorContext, config: DtosConfig): void {
-	const tables = ctx.analysis.tables.map((meta) => tableInfoOf(meta, ctx))
+	/* each c.json schema under a name of its own in every file that imports it (F1, F2) */
+	const named = { ...ctx, analysis: aliasSchemaImports(ctx.analysis) }
+	const tables = named.analysis.tables.map((meta) => tableInfoOf(meta, named))
 	/* Pass 2: auto-deduplicate repeated schemas across all entities */
-	const sharedSchemas = buildSharedSchemas(tables, ctx.analysis.imports)
-	const written: Written = { outputDir: path.resolve(ctx.cwd, config.output), sharedSchemas, tables }
-	writeShared(written, config, ctx)
-	writeEntities(written, config, ctx)
+	const sharedSchemas = buildSharedSchemas(tables, named.analysis.imports)
+	const written: Written = { outputDir: path.resolve(named.cwd, config.output), sharedSchemas, tables }
+	writeShared(written, config, named)
+	writeEntities(written, config, named)
 	if (config.updatePackageJson) {
-		const packageJsonPath = path.join(ctx.cwd, "package.json")
+		const packageJsonPath = path.join(named.cwd, "package.json")
 		if (fs.existsSync(packageJsonPath)) {
-			updatePackageJson(packageJsonPath, { config, ctx, entities: tables.map((t) => t.name) })
+			updatePackageJson(packageJsonPath, { config, ctx: named, entities: tables.map((t) => t.name) })
 		} else {
-			ctx.warn(`package.json not found at ${packageJsonPath}`)
+			named.warn(`package.json not found at ${packageJsonPath}`)
 		}
 	}
-	ctx.log(`\nGenerated ${tables.length} entity DTOs`)
+	named.log(`\nGenerated ${tables.length} entity DTOs`)
 }
