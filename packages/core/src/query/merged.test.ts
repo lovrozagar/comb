@@ -91,7 +91,9 @@ describe("paginateMerged", () => {
 	})
 
 	it("orders by the tiebreak alone, descending, under an empty sort, as orderByKeys does", () => {
-		const [rows] = paginateMerged([read([{ id: 3 }, { id: 1 }]), read([{ id: 2 }])], merged({ limit: "10" }))
+		/* a hand-built query: the schema adds a default order to an empty one */
+		const unsorted = buildListQuery({ ...SEALED, merged: {}, parsed: { limit: 10, parsedSort: [] }, table: t })
+		const [rows] = paginateMerged([read([{ id: 3 }, { id: 1 }]), read([{ id: 2 }])], unsorted)
 		expect(rows.map((row) => row.id)).toEqual([3, 2, 1])
 	})
 
