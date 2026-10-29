@@ -79,6 +79,13 @@ export const listSchema = createListQuerySchema({ sort: ["created_at"] })
 export const retrieveSchema = createRetrieveQuerySchema({ fields: { scalars: ["id"] } })
 `
 
+/** A D1-only project's migrate config, which needs neither @libsql/client nor libpg-query (K2 of r17) */
+export const MIGRATE_CONFIG = `import { defineConfig } from "@lovrozagar/comb/migrate"
+export default defineConfig({
+	databases: { core: { migrationsDir: "migrations", name: "core", provider: { databaseName: "CORE_DB", type: "d1" } } },
+})
+`
+
 const STRICT = {
 	exactOptionalPropertyTypes: true,
 	noPropertyAccessFromIndexSignature: true,
@@ -93,6 +100,7 @@ const STRICT = {
 export const APP: Record<string, string> = {
 	"src/count-eval.ts": COUNT_EVAL,
 	"src/no-eval.ts": NO_EVAL_WORKER,
+	"comb.migrate.config.ts": MIGRATE_CONFIG,
 	"src/schemas.ts": SCHEMAS,
 	"src/types.ts": ALL_TYPES,
 	"src/worker-types.ts": WORKER_TYPES,
@@ -119,6 +127,18 @@ export const APP: Record<string, string> = {
 			rootDir: "src",
 		},
 		include: ["src/types.ts"],
+	}),
+	/* the migrate config alone, Node's types alone: no optional peer's types are needed (K2 of r17) */
+	"tsconfig.migrate.json": JSON.stringify({
+		compilerOptions: {
+			...STRICT,
+			allowImportingTsExtensions: true,
+			module: "esnext",
+			moduleResolution: "bundler",
+			noEmit: true,
+			types: ["node"],
+		},
+		include: ["comb.migrate.config.ts"],
 	}),
 	/* declarations emitted for a module that exports comb's schemas: each type has a public name (K11 of r17) */
 	"tsconfig.declarations.json": JSON.stringify({

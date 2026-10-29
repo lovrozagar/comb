@@ -3,7 +3,6 @@
  * driver lives in bun-sqlite.ts, the one file Bun's APIs may appear in.
  */
 import { existsSync } from "node:fs"
-import type { Client, InValue } from "@libsql/client"
 import * as z from "zod"
 import type {
 	Connection,
@@ -119,6 +118,23 @@ export async function getTursoCredentials(
    LIBSQL CONNECTION WRAPPER
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/*
+ * The surface of @libsql/client comb calls, declared here: the client is an optional peer, loaded by
+ * a string-typed specifier, so a project without it still type-checks /migrate (K2 of r17)
+ */
+type InValue = ArrayBuffer | bigint | boolean | Date | null | number | string | Uint8Array
+type Statement = { args: InValue[]; sql: string }
+type Client = {
+	batch(statements: Statement[]): Promise<unknown>
+	close(): void
+	execute(statement: Statement): Promise<{ columns: string[]; rows: Array<Record<string, unknown>> }>
+}
+type LibsqlModule = { createClient(config: { authToken?: string; url: string }): Client }
+const LIBSQL_CLIENT: string = "@libsql/client"
+
+/** @libsql/client, loaded when a libsql or Turso connection opens */
+const libsql = (): Promise<LibsqlModule> => import(LIBSQL_CLIENT) as Promise<LibsqlModule>
+
 function createLibsqlConnection(client: Client): Connection {
 	return {
 		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
@@ -163,7 +179,7 @@ export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps
 				org,
 				readonly: dbConfig.readonly,
 			})
-			const { createClient } = await import("@libsql/client")
+			const { createClient } = await libsql()
 			const client = createClient({ authToken: creds.authToken, url: creds.url })
 			return createLibsqlConnection(client)
 		},
@@ -198,7 +214,7 @@ export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionPr
 			const file = libsqlFile(config.url)
 			if (dbConfig?.readonly === true && file !== undefined && file !== ":memory:" && !existsSync(file))
 				throw new Error(`${file} does not exist; check and status open a database read-only, and create none`)
-			const { createClient } = await import("@libsql/client")
+			const { createClient } = await libsql()
 			/* `Config` from @libsql/client does not admit an explicit undefined, so omit
 			   the key rather than pass one. */
 			const client = createClient({

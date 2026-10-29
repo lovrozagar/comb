@@ -87,6 +87,13 @@ describe.each([
 		},
 	)
 
+	/* K2 of r17: a D1-only project, without the optional peers, type-checks its migrate config */
+	it("type-checks a migrate config with no optional peer's types", () => {
+		const result = run(app.dir, "npx", ["tsc", "-p", "tsconfig.migrate.json"])
+		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
+		expect(result.status).toBe(0)
+	})
+
 	it
 		.runIf(peers === "all")
 		.each(["tsconfig.bundler.json", "tsconfig.declarations.json", "tsconfig.nodenext.json", "tsconfig.worker.json"])(

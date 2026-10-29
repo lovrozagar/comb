@@ -8,6 +8,9 @@ import { qualifySchemaElements } from "./pg-schema-elts.ts"
 
 type Parser = { parseSync(sql: string): { stmts?: unknown } }
 
+/* an optional peer, named by a string so a consumer without it still type-checks comb (K2 of r17) */
+const LIBPG_QUERY: string = "libpg-query"
+
 // per-process-constant: the parser module, set once by loadPostgresParser
 let parser: Parser | undefined
 
@@ -16,7 +19,7 @@ async function loadPostgresParser(): Promise<void> {
 	if (parser !== undefined) return
 	let lib: Parser & { loadModule(): Promise<void> }
 	try {
-		lib = (await import("libpg-query")) as unknown as Parser & { loadModule(): Promise<void> }
+		lib = (await import(LIBPG_QUERY)) as Parser & { loadModule(): Promise<void> }
 	} catch (error) {
 		throw new Error(
 			`comb reads Postgres migrations with libpg-query: install libpg-query@17.7.4 (${(error as Error).message})`,
