@@ -307,7 +307,7 @@ const partial = (hash: string) =>
 describe("applyWithAtlas: a file Atlas runs outside a transaction that failed halfway", () => {
 	it("refuses to resume when the file changed since, since Atlas resumes by statement count", async () => {
 		await expect(applyWithAtlas(options(fakeAtlas({ status: partial("other=") })))).rejects.toThrow(
-			'2_b.sql ran 2 of its 3 statements before it failed at ALTER TABLE "nope" (pq: relation missing), outside a transaction, and has changed since; restore it, or fix the database by hand and run comb migrate baseline',
+			'2_b.sql ran 2 of its 3 statements before it failed at ALTER TABLE "nope" (pq: relation missing), outside a transaction, and has changed since; restore it: migrate apply resumes at the statement that failed, so fix what made it fail, in the database, first',
 		)
 	})
 

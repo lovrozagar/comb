@@ -85,26 +85,56 @@ type Report = {
 
 /**
  * Refuses an applied file edited since, as comb does on SQLite: Atlas never runs it again, so the
- * database does not hold what the file now says, and later files would be classified against it
+ * database does not hold what the file now says, and later files would be classified against it.
+ * A file Atlas ran halfway, `partial`, is left to resumable.
  */
-function refuseEdited(status: AtlasStatus, copy: string): void {
+function refuseEdited(status: AtlasStatus, copy: string, partial: AtlasRevision | undefined): void {
 	const hashes = sumHashes(copy)
 	for (const revision of status.applied) {
 		const name = fileOf(copy, revision.version)
-		if (!hashes.has(name) || hashes.get(name) === revision.hash) continue
+		if (revision === partial || !hashes.has(name) || hashes.get(name) === revision.hash) continue
 		throw new Error(
 			`${name} was applied, then edited: its hash is not the one Atlas recorded; restore the file, or put the change in a new one`,
 		)
 	}
 }
 
+/** Refuses a file older than the last applied one that Atlas lists as neither pending nor an error */
+function refuseLate(status: AtlasStatus, scrub: Report["scrub"]): void {
+	const recorded = new Set(status.applied.map((revision) => revision.version))
+	const last = status.applied.at(-1)?.version
+	const late = status.available.find((file) => last !== undefined && !recorded.has(file.Version) && file.Version < last)
+	if (late !== undefined)
+		throw new Error(explainAtlasFailure(`migration file ${late.Name} was added out of order`, scrub))
+}
+
+/** Where `partial`, a file Atlas ran halfway, stopped; only Atlas's text is scrubbed, the statement and its error */
+const stoppedAt = (partial: AtlasRevision, copy: string, scrub: Report["scrub"]): string =>
+	`${fileOf(copy, partial.version)} ran ${partial.applied} of its ${partial.total} statements before it failed at ${scrub(partial.errorStmt)} (${scrub(partial.error)})`
+
 /**
- * The history checked against the snapshot. A history Atlas reports no error for may proceed. So
- * may a file Atlas ran halfway outside a transaction, if it is unchanged: Atlas resumes it by
- * statement count, so an edit would shift which statements it skips. Returns where that file
- * stopped, if one did. A renamed, gone or edited applied file is refused, in that order, since
- * Atlas's hashes are cumulative; a gone file is only named when `gone` takes it, as status does,
- * and then no hash is compared, as every one after it reads as changed.
+ * Where `partial`, a file Atlas ran halfway outside a transaction, stopped, refused when the file
+ * changed since: Atlas resumes it by statement count, so an edit would shift which statements it
+ * skips. Restored, it resumes at the statement that failed (P11)
+ */
+function resumable(partial: AtlasRevision, copy: string, scrub: Report["scrub"]): string {
+	const name = fileOf(copy, partial.version)
+	const where = stoppedAt(partial, copy, scrub)
+	if (sumHashes(copy).get(name) !== partial.hash) {
+		throw new Error(
+			`${where}, outside a transaction, and has changed since; restore it: migrate apply resumes at the statement that failed, so fix what made it fail, in the database, first`,
+		)
+	}
+	return where
+}
+
+/**
+ * The history checked against the snapshot. A history Atlas reports no error for may proceed, and
+ * so may a file Atlas ran halfway outside a transaction, if it is unchanged; returns where that
+ * file stopped, if one did. A renamed, gone, late or edited applied file is refused, in that order
+ * and before the half-run file's own change, since Atlas's hashes are cumulative (P11); a gone file
+ * is only named when `gone` takes it, as status does, and then no hash is compared, as every one
+ * after it reads as changed.
  */
 function checkHistory(
 	status: AtlasStatus,
@@ -112,37 +142,20 @@ function checkHistory(
 	{ elsewhere, gone, scrub, unread }: Report,
 ): string | undefined {
 	const partial = status.applied.find((revision) => revision.applied < revision.total && revision.error !== "")
-	if (partial === undefined) {
-		/* a renamed or gone file first: Atlas calls a file older than a gone one out of order, and the gone one is the cause */
-		refuseRenamed(status, copy)
-		const missing = goneFiles(status, copy, { elsewhere, unread })
-		if (missing.length > 0 && gone === undefined) throw new Error(missing.join("; "))
-		/* an error Atlas reports past a gone file is the gone file's doing, so status names that too */
-		if (status.error !== "")
-			throw new Error(
-				missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${explainAtlasFailure(status.error, scrub)}`,
-			)
-		/* Atlas lists a file older than the latest applied one as neither pending nor an error */
-		const recorded = new Set(status.applied.map((revision) => revision.version))
-		const current = /^\d+$/.test(status.current) ? status.current : undefined
-		const late = status.available.find(
-			(file) => current !== undefined && !recorded.has(file.Version) && file.Version < current,
-		)
-		if (late !== undefined)
-			throw new Error(explainAtlasFailure(`migration file ${late.Name} was added out of order`, scrub))
-		for (const line of missing) gone?.(line)
-		if (missing.length === 0) refuseEdited(status, copy)
-		return undefined
-	}
-	const name = fileOf(copy, partial.version)
-	/* only Atlas's text is scrubbed: the statement and its error; comb's words stay as written */
-	const where = `${name} ran ${partial.applied} of its ${partial.total} statements before it failed at ${scrub(partial.errorStmt)} (${scrub(partial.error)})`
-	if (sumHashes(copy).get(name) !== partial.hash) {
+	/* a renamed or gone file first: Atlas calls a file older than a gone one out of order, and the gone one is the cause */
+	refuseRenamed(status, copy)
+	const missing = goneFiles(status, copy, { elsewhere, unread })
+	if (missing.length > 0 && gone === undefined) throw new Error(missing.join("; "))
+	/* the error Atlas reports with a half-run file is that file's; any other past a gone file is the gone file's doing */
+	if (partial === undefined && status.error !== "")
 		throw new Error(
-			`${where}, outside a transaction, and has changed since; restore it, or fix the database by hand and run comb migrate baseline`,
+			missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${explainAtlasFailure(status.error, scrub)}`,
 		)
-	}
-	return where
+	refuseLate(status, scrub)
+	for (const line of missing) gone?.(line)
+	if (missing.length === 0) refuseEdited(status, copy, partial)
+	if (partial === undefined) return undefined
+	return missing.length > 0 ? stoppedAt(partial, copy, scrub) : resumable(partial, copy, scrub)
 }
 
 export { type AtlasFile, type AtlasRevision, type AtlasStatus, checkHistory, fileOf, filesOf, versionOf }

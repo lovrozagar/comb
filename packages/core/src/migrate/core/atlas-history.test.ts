@@ -9,6 +9,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { sqlFiles } from "./atlas-dir.ts"
 import { type AtlasRevision, type AtlasStatus, checkHistory, fileOf } from "./atlas-history.ts"
+import { file } from "../../../tests/support/fake-atlas.ts"
 
 let dir = ""
 /** A scrub that keeps the text: these histories hold no secret */
@@ -154,5 +155,52 @@ describe("an applied file renamed under its version, or edited", () => {
 			"3",
 		])
 		expect(named(history([applied("2_a_b.sql")]))).toEqual([])
+	})
+})
+
+/** `name`, which Atlas ran 1 of its 3 statements of, outside a transaction, recording `hash` */
+const half = (name: string, hash: string): AtlasRevision => ({
+	...applied(name, hash),
+	error: "pq: relation exists",
+	errorStmt: "SELECT 2",
+	total: 3,
+})
+
+/*
+ * P11 of the 0.14.1 review: Atlas's hashes chain, so a change before a file it ran halfway changes
+ * that file's hash too; the earlier file is named for it. Restoring the half-run file resumes it at
+ * the statement that failed, as Atlas v1.3.0 does (.tmp/grunt/r16/p14/probe.log), so that is the remedy.
+ */
+describe("a file Atlas ran halfway, after a change to an earlier file (P11)", () => {
+	const files = { "1_a.sql": "SELECT 1;\n", "2_b.sql": "SELECT 2;\n" }
+
+	it("names an earlier file edited since, not the half-run one", () => {
+		snapshot(files)
+		const status = history([applied("1_a.sql", "other="), half("2_b.sql", "other=")])
+		expect(() => checkHistory(status, dir, { scrub: kept })).toThrow(
+			"1_a.sql was applied, then edited: its hash is not the one Atlas recorded",
+		)
+	})
+
+	it("names an earlier file gone, in status too", () => {
+		snapshot({ "2_b.sql": files["2_b.sql"] })
+		const status = history([applied("1_a.sql"), half("2_b.sql", "other=")])
+		expect(() => checkHistory(status, dir, { scrub: kept })).toThrow(/^1 was applied, and its file is gone or renamed$/)
+		expect(named(status)).toEqual(["1 was applied, and its file is gone or renamed"])
+	})
+
+	it("names an earlier file added since, as one older than a migration applied", () => {
+		snapshot(files)
+		const status = { ...history([half("2_b.sql", "other=")]), available: [file("1_a.sql"), file("2_b.sql")] }
+		expect(() => checkHistory(status, dir, { scrub: kept })).toThrow(
+			"1_a.sql is older than a migration already applied",
+		)
+	})
+
+	it("refuses the half-run file changed since, saying restoring it resumes at the statement that failed", () => {
+		snapshot(files)
+		expect(() => checkHistory(history([applied("1_a.sql"), half("2_b.sql", "other=")]), dir, { scrub: kept })).toThrow(
+			"2_b.sql ran 1 of its 3 statements before it failed at SELECT 2 (pq: relation exists), outside a transaction, and has changed since; restore it: migrate apply resumes at the statement that failed, so fix what made it fail, in the database, first",
+		)
 	})
 })
