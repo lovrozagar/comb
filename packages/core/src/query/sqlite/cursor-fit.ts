@@ -66,8 +66,10 @@ const tableOf = (column: Column): unknown => (column as unknown as { table: unkn
  * anchor: a text column of that table does, and so does an SQL expression over that table's own
  * columns alone, which the read-back evaluates on that row (27.7 of plan 15). A joined table's column
  * reads the anchor's own value back, which paged in a loop (27.14). With no anchor in reach, as on
- * the relational path, whose keys are its table's columns, a text column reads back. The mint and
- * the read both ask it, so no list mints a cursor it then refuses.
+ * the relational path, a text column reads back: there every key is the queried table's own column,
+ * as keysOn (query/drizzle.ts:57-68) takes each sort field as an own property of that table and
+ * refuses any other, so no relation column through `with`, nor an extras SQL, becomes a key. The mint
+ * and the read both ask it, so no list mints a cursor it then refuses.
  */
 function readsBack(column: SQLWrapper, table: object | undefined): boolean {
 	if (is(column, Column))
