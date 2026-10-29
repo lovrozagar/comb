@@ -137,6 +137,9 @@ import { c } from "@lovrozagar/comb/sqlite/columns"
 import { patterns } from "@lovrozagar/comb/sqlite/patterns"
 import * as z from "zod"
 
+/* a c.json schema is exported, so the generated DTOs can import it */
+export const authorSettings = z.object({ digest: z.boolean() })
+
 export const author = sqliteTable(
 	"author",
 	{
@@ -144,7 +147,7 @@ export const author = sqliteTable(
 		email: c.text("email", { max: 254, email: true, lowercase: true, trim: true }),
 		display_name: c.text("display_name", { min: 2, max: 64, trim: true }),
 		locale: c.text("locale", { pattern: patterns.LOCALE }),
-		settings: c.json("settings", z.object({ digest: z.boolean() })),
+		settings: c.json("settings", authorSettings),
 		created_at: c.createdAt("created_at"),
 		updated_at: c.updatedAt("updated_at"),
 		deleted_at: c.deletedAt("deleted_at"),
