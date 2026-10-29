@@ -76,7 +76,9 @@ function platformOutcome(message: string): Outcome {
 			status: "service_unavailable",
 		}
 	}
-	if (lower.includes("size limit") || lower.includes("storage limit")) return STORAGE_FULL
+	/* D1's own words for a database past its size, classed as SQLite's full disk is (N4 of plan 15's rerun) */
+	if (["size limit", "storage limit", "exceeded maximum db size"].some((words) => lower.includes(words)))
+		return STORAGE_FULL
 	return QUERY_FAILED
 }
 

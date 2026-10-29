@@ -118,6 +118,15 @@ describe("d1ErrorHandler on the engine's resource codes (Q-D9)", () => {
 	})
 })
 
+/* N4 of plan 15's rerun: D1's own words for a database past its size, classed as SQLite's full disk is */
+describe("d1ErrorHandler on a database past its size", () => {
+	it("answers D1's 'Exceeded maximum DB size' with the 422 SQLite's full disk gets", () => {
+		const full = { errorKey: "tier_database_limit_reached", status: 422 }
+		expect(thrown(d1("Exceeded maximum DB size"))).toMatchObject(full)
+		expect(thrown(d1("database or disk is full: SQLITE_FULL"))).toMatchObject(full)
+	})
+})
+
 /* C6 and Q4 of the 0.14.1 review */
 describe("d1ErrorHandler on what the server's statement did", () => {
 	it("answers a statement too long for D1 with a 500, the server's to fix", () => {
