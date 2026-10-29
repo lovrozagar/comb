@@ -50,6 +50,7 @@ function listQueryStamp(config: PublishedConfig, limits: ListQueryLimits): CombM
 		maxFilterDepth: limits.maxDepth,
 		maxFilterValues: limits.maxValues,
 		maxInValues: limits.maxInValues,
+		maxPatternBytes: limits.maxPatternBytes,
 		maxLimit: config.pagination?.maxLimit ?? PAGINATION_DEFAULTS.maxLimit,
 		maxPage: config.pagination?.maxPage ?? PAGINATION_DEFAULTS.maxPage,
 		maxFilterBytes: REQUEST_BYTES.filter,

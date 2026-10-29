@@ -156,6 +156,7 @@ type QueryRequired = Omit<
 	| "maxFilterDepth"
 	| "maxFilterValues"
 	| "maxInValues"
+	| "maxPatternBytes"
 	| "maxPage"
 	| "maxFilterBytes"
 	| "maxQueryBytes"
@@ -172,6 +173,7 @@ type QueryOptional = Pick<
 	| "maxFilterDepth"
 	| "maxFilterValues"
 	| "maxInValues"
+	| "maxPatternBytes"
 	| "maxPage"
 	| "maxFilterBytes"
 	| "maxQueryBytes"
@@ -232,6 +234,7 @@ function readQueryOptional(raw: Record<string, unknown>, diagnose: Diagnose): Qu
 		"maxFilterDepth",
 		"maxFilterValues",
 		"maxInValues",
+		"maxPatternBytes",
 		"maxFilterBytes",
 		"maxQueryBytes",
 		"maxSearchBytes",

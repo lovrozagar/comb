@@ -233,7 +233,7 @@ builder no longer emits it.
 ### 6.7 Query facts added within v1
 
 `filterFields` (`{ field, type, ops }[]`), `nulls`, `maxFilterConditions`, `maxFilterDepth`,
-`maxFilterValues` (bound values in all), `maxInValues`, `maxPage` (the last page offset pagination
+`maxFilterValues` (bound values in all), `maxInValues`, `maxPatternBytes` (UTF-8 bytes of a `like` or `ilike` value's escaped pattern, when it has a `*` inside it: a `[` in a `like` counts as the three bytes of `[[]`, never the raw value's characters), `maxPage` (the last page offset pagination
 serves), `maxSearchTerms`, `maxSortKeys`, the byte caps `maxFilterBytes` and `maxSearchBytes` (what `filter`
 and `q` may take however a client encodes them, a space or a mark such as `~` counted as 3), and
 `maxQueryBytes` (the whole accepted query string, 16 KB less a 2 KB path budget) were added after v1 shipped. They are optional in the type and

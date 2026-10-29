@@ -227,6 +227,7 @@ describe("query stamp — search parameters", () => {
 		maxFilterValues: 60,
 		maxInValues: 50,
 		maxLimit: 100,
+		maxPatternBytes: 50,
 		maxFilterBytes: 4608,
 		maxPage: 10_000,
 		maxQueryBytes: 14_336,

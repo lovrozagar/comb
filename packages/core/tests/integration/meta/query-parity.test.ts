@@ -221,3 +221,19 @@ describe("maxFilterBytes and maxSearchBytes match the parser", () => {
 		expect(searched.safeParse({ q: `${q}x` }).success).toBe(false)
 	})
 })
+
+/* Q8 of the 0.14.1 review: the pattern cap a client reads is the one the parser enforces, in UTF-8 bytes of the escaped pattern */
+describe("maxPatternBytes matches the parser", () => {
+	it("accepts a like pattern of the published bytes once escaped, and refuses one byte more", () => {
+		const bytes = meta().maxPatternBytes as number
+		expect(bytes).toBeDefined()
+		/* each [ escapes to the three bytes [[], each 東 is three bytes, and the * stays one */
+		const at = `${"[".repeat((bytes - 2) / 3)}*x`
+		expect(at.length).toBeLessThan(bytes)
+		expect(schema.safeParse({ filter: `title.like.${at}` }).success).toBe(true)
+		expect(schema.safeParse({ filter: `title.like.${at}x` }).success).toBe(false)
+		const wide = `${"東".repeat((bytes - 2) / 3)}*x`
+		expect(schema.safeParse({ filter: `title.like.${wide}` }).success).toBe(true)
+		expect(schema.safeParse({ filter: `title.like.${wide}x` }).success).toBe(false)
+	})
+})
