@@ -10,6 +10,13 @@ const temp = projects()
 const project = temp.make
 afterEach(temp.clean)
 
+/** A project a diff runs in: its drizzle config written, as migrate init writes one */
+function diffProject(): string {
+	const dir = project()
+	writeFileSync(join(dir, "drizzle.config.ts"), "export default {}\n")
+	return dir
+}
+
 const dirArg = (args: readonly string[]) => (args[args.indexOf("--dir") + 1] as string).replace("file://", "")
 
 /**
@@ -143,8 +150,31 @@ describe("comb migrate diff", () => {
 		expect(calls).toEqual([["atlas", "version"]])
 	})
 
-	it("writes the migration Atlas generates, under the name given", async () => {
+	/* K21 of the 0.15.0 review: drizzle-kit's own lookup named a drizzle.config.json init never writes */
+	it("refuses a project with no drizzle config before drizzle-kit runs, and one whose configured file is missing", async () => {
 		const dir = project()
+		const bare = makeIo(
+			dir,
+			fakeAtlas(() => undefined),
+		)
+		expect(await runCli(["migrate", "diff"], bare)).toBe(1)
+		expect(bare.errors).toEqual([
+			`no drizzle config in ${dir} (drizzle.config.ts, .js, .mjs or .json): run comb migrate init, or set drizzleConfigPath on the database in comb.migrate.config.ts`,
+		])
+		writeFileSync(
+			join(dir, "comb.migrate.config.ts"),
+			'export default { databases: { core: { migrationsDir: "./m", drizzleConfigPath: "./gone.ts", name: "core", provider: { type: "libsql", url: "file:x.db" } } } }\n',
+		)
+		const missing = makeIo(
+			dir,
+			fakeAtlas(() => undefined),
+		)
+		expect(await runCli(["migrate", "diff", "core"], missing)).toBe(1)
+		expect(missing.errors).toEqual([`drizzleConfigPath ${join(dir, "gone.ts")} does not exist`])
+	})
+
+	it("writes the migration Atlas generates, under the name given", async () => {
+		const dir = diffProject()
 		const run = fakeAtlas((replayed) =>
 			writeFileSync(join(replayed, "20260101000000_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n"),
 		)
@@ -161,7 +191,7 @@ describe("comb migrate diff: what Atlas says as it succeeds", () => {
 		"Skipped triggers, functions, stored procedures, and other advanced objects. Atlas Pro includes them in the diff."
 
 	it("is a warning, whether Atlas wrote a migration or found the schema in sync", async () => {
-		const dir = project()
+		const dir = diffProject()
 		const wrote = makeIo(
 			dir,
 			fakeAtlas((replayed) => {
@@ -183,7 +213,7 @@ describe("comb migrate diff: what Atlas says as it succeeds", () => {
 
 describe("comb migrate diff --dry-run", () => {
 	it("writes nothing: exit 0 in sync, exit 1 printing the SQL a diff would write", async () => {
-		const dir = project()
+		const dir = diffProject()
 		const run = fakeAtlas((replayed) =>
 			writeFileSync(join(replayed, "20260101000000_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n"),
 		)
@@ -193,7 +223,7 @@ describe("comb migrate diff --dry-run", () => {
 		expect(drift.errors).toEqual([
 			"core has drifted from its migrations: comb migrate diff core would write the SQL above",
 		])
-		expect(readdirSync(dir)).toEqual([])
+		expect(readdirSync(dir)).toEqual(["drizzle.config.ts"])
 		mkdirSync(join(dir, "atlas-migrations"))
 		writeFileSync(join(dir, "atlas-migrations", "1_init.sql"), "SELECT 1;\n")
 		const synced = makeIo(
@@ -206,19 +236,19 @@ describe("comb migrate diff --dry-run", () => {
 	})
 
 	it("with --dry-run and no database named, diffs an empty copy when there is no migrations directory", async () => {
-		const dir = project()
+		const dir = diffProject()
 		const run = fakeAtlas((replayed) => writeFileSync(join(replayed, "20260101000000_x.sql"), "SELECT 1;\n"))
 		const io = makeIo(dir, run)
 		expect(await runCli(["migrate", "diff", "--dry-run"], io)).toBe(1)
 		expect(io.errors).toEqual([
 			"the schema has drifted from the migrations: comb migrate diff would write the SQL above",
 		])
-		expect(readdirSync(dir)).toEqual([])
+		expect(readdirSync(dir)).toEqual(["drizzle.config.ts"])
 	})
 
 	it("says when the schema is already in sync", async () => {
 		const io = makeIo(
-			project(),
+			diffProject(),
 			fakeAtlas(() => undefined),
 		)
 		expect(await runCli(["migrate", "diff"], io)).toBe(0)
@@ -228,7 +258,7 @@ describe("comb migrate diff --dry-run", () => {
 
 describe("comb migrate diff: the config it reads", () => {
 	it("fails migrate diff when the config's FTS cannot be read, instead of diffing without it (S-12)", async () => {
-		const dir = project()
+		const dir = diffProject()
 		writeFileSync(
 			join(dir, "comb.config.ts"),
 			'export default { databases: { core: { fts: { post: { columns: ["title"] } }, tables: "./missing.tables.ts" } } }\n',
@@ -242,7 +272,7 @@ describe("comb migrate diff: the config it reads", () => {
 	})
 
 	it("refuses migrate diff for a database the config does not declare", async () => {
-		const dir = project()
+		const dir = diffProject()
 		writeTables(dir)
 		writeFileSync(
 			join(dir, "comb.config.ts"),
@@ -259,7 +289,7 @@ describe("comb migrate diff: the config it reads", () => {
 
 describe("comb migrate diff: through comb.migrate.config.ts", () => {
 	it("writes into the database's configured migrations directory, relative to the config", async () => {
-		const dir = project()
+		const dir = diffProject()
 		mkdirSync(join(dir, "db", "m"), { recursive: true })
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
@@ -272,9 +302,12 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 		expect(await runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "db", "m", "1_init.sql")}`])
 	})
+})
 
+describe("comb migrate diff: a Postgres database through comb.migrate.config.ts", () => {
 	it("diffs a Postgres database with its drizzle config, scoped to its schema, its dev URL in the environment", async () => {
-		const dir = project()
+		const dir = diffProject()
+		writeFileSync(join(dir, "drizzle.pg.ts"), "export default {}\n")
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
 			'export default { databases: { core: { drizzleConfigPath: "drizzle.pg.ts", migrationsDir: "pg", name: "core", provider: { devUrl: "postgres://dev:Dev-Secret-0451@localhost/dev", schema: "app", type: "postgres", url: "postgres://localhost/app" } } } }\n',
@@ -301,7 +334,7 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 
 	/* M75: a Postgres diff reads its history and the export with Postgres's parser, so it loads it first */
 	it("loads the Postgres parser itself before it reads a Postgres diff", async () => {
-		const dir = project()
+		const dir = diffProject()
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
 			'export default { databases: { core: { migrationsDir: "pg", name: "core", provider: { devUrl: "postgres://localhost/dev", type: "postgres", url: "postgres://localhost/app" } } } }\n',
@@ -324,7 +357,7 @@ const MIGRATE = (codegen: string) =>
 
 describe("comb migrate diff: the name apply and check take (C7)", () => {
 	it("takes a migrate name and reads FTS from the comb.config.ts database it maps to", async () => {
-		const dir = project()
+		const dir = diffProject()
 		mkdirSync(join(dir, "m"), { recursive: true })
 		writeFileSync(join(dir, "comb.migrate.config.ts"), MIGRATE('codegen: "shard", '))
 		writeFileSync(
@@ -341,7 +374,7 @@ describe("comb migrate diff: the name apply and check take (C7)", () => {
 	})
 
 	it("says how to map a migrate name comb.config.ts does not declare", async () => {
-		const dir = project()
+		const dir = diffProject()
 		mkdirSync(join(dir, "m"), { recursive: true })
 		writeFileSync(join(dir, "comb.migrate.config.ts"), MIGRATE(""))
 		writeFileSync(
@@ -365,7 +398,7 @@ describe("comb migrate diff on a D1 database", () => {
 		[{ ".2_b.sql": "CREATE TABLE b (id TEXT);" }, ".2_b.sql starts with a dot"],
 		[{ "9_b.sql": "CREATE TABLE b (id TEXT);", "10_c.sql": "CREATE TABLE c (id TEXT);" }, "10_c.sql runs after"],
 	])("refuses a directory wrangler lists otherwise than Atlas, writing nothing", async (extra, message) => {
-		const dir = project()
+		const dir = diffProject()
 		mkdirSync(join(dir, "m"), { recursive: true })
 		for (const [name, sql] of Object.entries({ "1_init.sql": "CREATE TABLE a (id TEXT);", ...extra }))
 			writeFileSync(join(dir, "m", name), sql)

@@ -116,12 +116,32 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	}
 }
 
+// lookup-table: the drizzle config names a project without a configured one is looked up by, in order
+const DRIZZLE_CONFIGS = ["drizzle.config.ts", "drizzle.config.js", "drizzle.config.mjs", "drizzle.config.json"]
+
+/**
+ * The drizzle config a diff exports with: the database's, which must exist, else the first of
+ * DRIZZLE_CONFIGS in `cwd`; refused before drizzle-kit runs, whose own lookup names a file `init`
+ * never writes (K21 of the 0.15.0 review)
+ */
+function drizzleConfig(configured: string | undefined, cwd: string): string {
+	if (configured !== undefined) {
+		if (!fs.existsSync(configured)) throw new CliError(`drizzleConfigPath ${configured} does not exist`)
+		return configured
+	}
+	const found = DRIZZLE_CONFIGS.map((name) => path.join(cwd, name)).find((file) => fs.existsSync(file))
+	if (found !== undefined) return found
+	throw new CliError(
+		`no drizzle config in ${cwd} (drizzle.config.ts, .js, .mjs or .json): run comb migrate init, or set drizzleConfigPath on the database in comb.migrate.config.ts`,
+	)
+}
+
 /** What a diff of `db` reads: its Postgres provider if it has one, its drizzle export, and its migrations */
 async function diffTarget(db: string | undefined, io: CliIo) {
 	const target = db === undefined ? undefined : await resolveMigrateTarget({ cwd: io.cwd, db, mode: "diff" })
 	const pg = target?.provider.type === "postgres" ? target.provider : undefined
 	const exported = {
-		configPath: target?.drizzleConfigPath,
+		configPath: drizzleConfig(target?.drizzleConfigPath, io.cwd),
 		cwd: io.cwd,
 		dialect: pg === undefined ? "sqlite" : "postgres",
 		run: io.run,
