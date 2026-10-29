@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { ddlFindings } from "./pg-ddl.ts"
+import { historyFacts } from "./pg-history.ts"
 import type { Node } from "./pg-nodes.ts"
 import { loadPostgresParser, postgresParser } from "./pg-parser.ts"
 
@@ -13,7 +14,7 @@ function statementOf(sql: string): [string, Node] {
 }
 
 /** The levels, and any drops or notes, of `sql`'s DDL findings */
-const rated = (sql: string) => ddlFindings(...statementOf(sql))
+const rated = (sql: string) => ddlFindings(...statementOf(sql), historyFacts(undefined, "public"))
 
 describe("ddlFindings: an ALTER TABLE, command by command", () => {
 	it("rates a dropped column, a retype and SET NOT NULL unsafe, the last two with a rewrite", () => {

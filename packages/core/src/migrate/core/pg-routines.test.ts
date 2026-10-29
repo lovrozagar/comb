@@ -6,7 +6,7 @@ import { extractSchema } from "./schema.ts"
 const routines = (sql: string) =>
 	Object.fromEntries(
 		[...historyFacts(extractSchema(sql, undefined, "postgres"), "public").routines].map(
-			([key, { kind, signatures }]) => [key, { kind, signatures: [...signatures].sort() }],
+			([key, { kind, signatures }]) => [key, { kind, signatures: [...signatures.keys()].sort() }],
 		),
 	)
 

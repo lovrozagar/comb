@@ -219,7 +219,7 @@ function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): Finding
 		/^(?:InsertStmt|UpdateStmt|DeleteStmt|MergeStmt)$/.test(type)
 			? writeFindings(type, node, ctx)
 			: [
-					...(ddlFindings(type, node) ?? []),
+					...(ddlFindings(type, node, ctx.facts) ?? []),
 					...(type === "AlterTableStmt" ? constraintIndexWarnings(node, ctx) : []),
 					codeFinding(type, node, ctx),
 				].filter((finding) => finding !== undefined),

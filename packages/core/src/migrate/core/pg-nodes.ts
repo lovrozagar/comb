@@ -11,7 +11,11 @@ type Node = Record<string, unknown>
 type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefined }
 
 /** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
-type Routines = Map<string, { kind: "function" | "procedure"; signatures: Set<string> }>
+/** A routine's volatility, as its CREATE or an ALTER FUNCTION declares it */
+type Volatility = "immutable" | "stable" | "volatile"
+
+/** Each routine by key: its kind, and its signatures, each with its volatility */
+type Routines = Map<string, { kind: "function" | "procedure"; signatures: Map<string, Volatility> }>
 
 /** What the history attached to its tables, keyed as nameKey keys a Postgres name */
 type Facts = {
@@ -82,4 +86,15 @@ function tableOf(relation: unknown, schema: string): { key: string; name: string
 /** A type's key under `schema` */
 const typeOf = (typeName: unknown, schema: string): string => keyOf(names((typeName as Node)["names"]), schema)
 
-export { type EventTrigger, type Facts, keyOf, names, type Node, nodesOf, type Routines, tableOf, typeOf }
+export {
+	type EventTrigger,
+	type Facts,
+	keyOf,
+	names,
+	type Node,
+	nodesOf,
+	type Routines,
+	tableOf,
+	typeOf,
+	type Volatility,
+}

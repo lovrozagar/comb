@@ -18,7 +18,7 @@ import type { FreshContext } from "./pg-fresh.ts"
 import { addColumn, inlineConstraints, REWRITES } from "./pg-column-add.ts"
 import { domainFindings } from "./pg-domain.ts"
 import { attachFindings, maintenanceFindings } from "./pg-maintenance.ts"
-import { names, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
+import { type Facts, names, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
 
 // lookup-table: the ALTER TABLE commands that change which rows a role sees, or what keeps them, and lose no value
 const CAUTIOUS_COMMANDS = /* @__PURE__ */ new Set([
@@ -149,7 +149,7 @@ function always(cmd: Node): Finding[] {
 }
 
 // lookup-table: the commands one rule rates, by subtype; undefined leaves a command to the table's rules
-const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string) => Finding[] | undefined>> = {
+const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, facts: Facts) => Finding[] | undefined>> = {
 	AT_AddColumn: addColumn,
 	AT_AttachPartition: (cmd) => attachFindings(written(((cmd["def"] as Node)["PartitionCmd"] as Node)["name"])),
 	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
@@ -178,9 +178,9 @@ function addConstraint(cmd: Node): Finding[] {
 }
 
 /** A command on one column or constraint: its findings, or undefined for a command on the whole table */
-function columnFindings(cmd: Node, table: string): Finding[] | undefined {
+function columnFindings(cmd: Node, table: string, facts: Facts): Finding[] | undefined {
 	const subtype = String(cmd["subtype"])
-	return subtype === "AT_AddConstraint" ? addConstraint(cmd) : COMMAND_RULES[subtype]?.(cmd, table)
+	return subtype === "AT_AddConstraint" ? addConstraint(cmd) : COMMAND_RULES[subtype]?.(cmd, table, facts)
 }
 
 /** A command on the whole table: its findings; one comb does not list is unsafe, named in words */
@@ -206,16 +206,16 @@ function tableFindings(subtype: string, table: string): Finding[] {
 }
 
 /** One ALTER TABLE command's findings, on `table` as written */
-const commandFindings = (cmd: Node, table: string): Finding[] =>
-	columnFindings(cmd, table) ?? tableFindings(String(cmd["subtype"]), table)
+const commandFindings = (cmd: Node, table: string, facts: Facts): Finding[] =>
+	columnFindings(cmd, table, facts) ?? tableFindings(String(cmd["subtype"]), table)
 
 /** An ALTER of a table or a composite type, command by command; an index, view or sequence changes no value */
-function alterFindings(node: Node): Finding[] {
+function alterFindings(node: Node, facts: Facts): Finding[] {
 	const objtype = node["objtype"]
 	const cmds = (node["cmds"] as Node[]).map((each) => each["AlterTableCmd"] as Node)
 	const table = written(node["relation"])
 	if (objtype === "OBJECT_TABLE" || objtype === "OBJECT_FOREIGN_TABLE")
-		return cmds.flatMap((cmd) => commandFindings(cmd, table))
+		return cmds.flatMap((cmd) => commandFindings(cmd, table, facts))
 	/* a composite type's dropped or retyped attribute loses the values every column of the type holds */
 	if (objtype === "OBJECT_TYPE")
 		return cmds.some((cmd) => cmd["subtype"] === "AT_DropColumn" || cmd["subtype"] === "AT_AlterColumnType")
@@ -240,9 +240,9 @@ function dropFindings(node: Node): Finding[] {
 // lookup-table: the DDL nodes that drop what no file can bring back: a database, a role, what a role owns
 const UNSAFE_NODES = /* @__PURE__ */ new Set(["DropOwnedStmt", "DropRoleStmt", "DropdbStmt"])
 
-/** One DDL node's findings, read from its parse tree; undefined for a node that is not DDL these rules rate */
-function ddlFindings(type: string, node: Node): Finding[] | undefined {
-	if (type === "AlterTableStmt") return alterFindings(node)
+/** One DDL node's findings, read from its parse tree and the history's `facts`; undefined for a node that is not DDL these rules rate */
+function ddlFindings(type: string, node: Node, facts: Facts): Finding[] | undefined {
+	if (type === "AlterTableStmt") return alterFindings(node, facts)
 	if (type === "RenameStmt" || type === "AlterObjectSchemaStmt") {
 		const kind = String(node[type === "RenameStmt" ? "renameType" : "objectType"])
 		if (UNSAFE_RENAMES.has(kind)) return [{ level: "unsafe" }]

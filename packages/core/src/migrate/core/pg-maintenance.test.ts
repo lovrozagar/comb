@@ -4,6 +4,7 @@
  * a REINDEX that is not concurrent, and CLUSTER.
  */
 import { beforeAll, describe, expect, it } from "vitest"
+import { historyFacts } from "./pg-history.ts"
 import { ddlFindings } from "./pg-ddl.ts"
 import type { Node } from "./pg-nodes.ts"
 import { loadPostgresParser, postgresParser } from "./pg-parser.ts"
@@ -14,7 +15,7 @@ beforeAll(() => loadPostgresParser())
 function rated(sql: string) {
 	const [stmt] = postgresParser().parseSync(sql).stmts as Array<{ stmt: Node }>
 	const [type, node] = Object.entries((stmt as { stmt: Node }).stmt)[0] as [string, Node]
-	return ddlFindings(type, node)
+	return ddlFindings(type, node, historyFacts(undefined, "public"))
 }
 
 const LOCKED = [{ level: "lock", note: "holds an exclusive lock while it runs" }]

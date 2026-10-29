@@ -121,7 +121,7 @@ function historyObjects(facts: Facts): LiveObjects {
 		[...facts.routines]
 			.filter(([key]) => !key.includes("."))
 			.map(([key, { kind, signatures }]) => {
-				const flat = new Set([...signatures].map((signature) => signature.replaceAll(/(?:\[\])+/g, "[]")))
+				const flat = new Set([...signatures.keys()].map((signature) => signature.replaceAll(/(?:\[\])+/g, "[]")))
 				return [key, { kind, signatures: flat }] as const
 			}),
 	)

@@ -115,14 +115,16 @@ function drops(type: string, node: Node): boolean {
 }
 
 /** Whether a top-level statement rewrites a table, as table_rewrite takes one: a command M70 warns of */
-const rewrites = (type: string, node: Node): boolean =>
-	(ddlFindings(type, node) ?? []).some((finding) => finding.level === "lock" && finding.note === REWRITES)
+const rewrites = (type: string, node: Node, facts: Facts): boolean =>
+	(ddlFindings(type, node, facts) ?? []).some((finding) => finding.level === "lock" && finding.note === REWRITES)
+
+type Firing = { everyTrigger: boolean; facts: Facts }
 
 /** Whether `trigger`, as the history left it, fires on the top-level statement `type` */
-function fires(trigger: EventTrigger, [type, node]: [string, Node], everyTrigger: boolean): boolean {
+function fires(trigger: EventTrigger, [type, node]: [string, Node], { everyTrigger, facts }: Firing): boolean {
 	if (!trigger.enabled && !everyTrigger) return false
 	if (trigger.event === "sql_drop") return drops(type, node)
-	if (trigger.event === "table_rewrite") return rewrites(type, node)
+	if (trigger.event === "table_rewrite") return rewrites(type, node, facts)
 	const tag = tagOf(type, node)
 	if (tag === undefined) return false
 	return trigger.tags === undefined || tag === UNKNOWN || trigger.tags.includes(tag)
@@ -138,7 +140,7 @@ function eventFindings(
 ): Finding[] {
 	const tops = (stmts as Array<{ stmt: Node }>).map(({ stmt }) => Object.entries(stmt)[0] as [string, Node])
 	return [...facts.eventTriggers].flatMap(([name, trigger]) =>
-		tops.some((top) => fires(trigger, top, everyTrigger === true))
+		tops.some((top) => fires(trigger, top, { everyTrigger: everyTrigger === true, facts }))
 			? [{ level: "unsafe" as const, note: `runs event trigger ${name}, whose function comb does not read` }]
 			: [],
 	)

@@ -1,5 +1,6 @@
 /* P16 of the 0.14.1 review: an ALTER DOMAIN rated as its column twin, through ddlFindings */
 import { beforeAll, describe, expect, it } from "vitest"
+import { historyFacts } from "./pg-history.ts"
 import { ddlFindings } from "./pg-ddl.ts"
 import type { Node } from "./pg-nodes.ts"
 import { loadPostgresParser, postgresParser } from "./pg-parser.ts"
@@ -10,7 +11,7 @@ beforeAll(() => loadPostgresParser())
 function rated(sql: string) {
 	const [stmt] = postgresParser().parseSync(sql).stmts as Array<{ stmt: Node }>
 	const [type, node] = Object.entries((stmt as { stmt: Node }).stmt)[0] as [string, Node]
-	return ddlFindings(type, node)
+	return ddlFindings(type, node, historyFacts(undefined, "public"))
 }
 
 describe("ddlFindings: an ALTER DOMAIN, as its column twin (P16)", () => {
