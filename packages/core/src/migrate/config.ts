@@ -14,7 +14,6 @@ import type {
 	ConnectionProviderConfig,
 	DatabaseConfig,
 	MigrationConfig,
-	MultiTenantConfig,
 	ProviderConfig,
 	ResolvedDatabaseConfig,
 } from "./types.ts"
@@ -157,20 +156,7 @@ export function defineConfig(input: CombMigrateConfig): MigrationConfig {
 		}
 	}
 
-	const multiTenant: MultiTenantConfig | undefined = parsed.multiTenant
-		? {
-				circuitBreaker: {
-					failureThreshold: parsed.multiTenant.circuitBreaker?.failureThreshold ?? 0.1,
-					minSampleSize: parsed.multiTenant.circuitBreaker?.minSampleSize ?? 50,
-				},
-				concurrency: parsed.multiTenant.concurrency,
-				enabled: true,
-				rootDatabase: parsed.multiTenant.rootDatabase,
-				tenantQuery: parsed.multiTenant.tenantQuery,
-			}
-		: undefined
-
-	return { databases, multiTenant }
+	return { databases }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

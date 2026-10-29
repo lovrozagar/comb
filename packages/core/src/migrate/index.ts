@@ -63,7 +63,6 @@ export type {
 	MigrationResult,
 	MigrationSafety,
 	MigrationStatus,
-	MultiTenantConfig,
 	ParsedMigration,
 	PostgresProviderConfig,
 	ProviderConfig,

@@ -98,7 +98,6 @@ export type DatabaseConfig = {
 	environments?: Record<string, EnvironmentConfig> | undefined
 	migrationsDir: string
 	name?: string | undefined
-	promotionOrder?: string[]
 	provider?: ProviderConfig | undefined
 }
 
@@ -113,29 +112,15 @@ export type ResolvedDatabaseConfig = {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   MULTI-TENANT CONFIG
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-export type MultiTenantConfig = {
-	circuitBreaker: { failureThreshold: number; minSampleSize: number }
-	concurrency: number
-	enabled: true
-	rootDatabase: string
-	tenantQuery: string
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
    MIGRATION CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
 export type MigrationConfig = {
 	databases: Record<string, DatabaseConfig>
-	multiTenant?: MultiTenantConfig | undefined
 }
 
 export type ResolvedMigrationConfig = {
 	databases: Record<string, ResolvedDatabaseConfig>
-	multiTenant?: MultiTenantConfig | undefined
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

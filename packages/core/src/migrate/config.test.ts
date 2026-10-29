@@ -263,19 +263,12 @@ describe("defineConfig — the rest of the input", () => {
 		)
 	})
 
-	it("fills in the multi-tenant circuit breaker defaults", () => {
-		const config = defineConfig({
-			databases: {},
-			multiTenant: { concurrency: 5, enabled: true, rootDatabase: "root", tenantQuery: "SELECT 1" },
-		})
-		expect(config.multiTenant).toEqual({
-			circuitBreaker: { failureThreshold: 0.1, minSampleSize: 50 },
-			concurrency: 5,
-			enabled: true,
-			rootDatabase: "root",
-			tenantQuery: "SELECT 1",
-		})
-		expect(defineConfig({ databases: {} }).multiTenant).toBeUndefined()
+	/* C5 of the 0.14.1 review: nothing read either, so a config that sets one is refused, not silently run on one database */
+	it("refuses multiTenant and promotionOrder, which no command reads, by name", () => {
+		const tenants = { enabled: true, rootDatabase: "root", tenantQuery: "SELECT 1" }
+		expect(() => defineConfig({ databases: {}, multiTenant: tenants } as never)).toThrow("multiTenant")
+		const promoted = { core: { migrationsDir: "m", promotionOrder: ["staging", "production"] } }
+		expect(() => defineConfig({ databases: promoted } as never)).toThrow("promotionOrder")
 	})
 })
 

@@ -7,7 +7,7 @@ export { classifyMigration, extractDropStatements, extractSchema, generateMigrat
 export { loadPostgresParser } from "./core/pg-parser.ts";
 export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCircuitBreaker, withRetry, } from "./core/utils.ts";
 export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./drivers/index.ts";
-export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, MultiTenantConfig, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
+export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
 
 // migrate/config.d.ts
 import { type CombMigrateConfig, DEFAULT_PG_DEV_URL } from "./config-schema.ts";
@@ -285,7 +285,6 @@ export type DatabaseConfig = {
     environments?: Record<string, EnvironmentConfig> | undefined;
     migrationsDir: string;
     name?: string | undefined;
-    promotionOrder?: string[];
     provider?: ProviderConfig | undefined;
 };
 export type ResolvedDatabaseConfig = {
@@ -296,23 +295,11 @@ export type ResolvedDatabaseConfig = {
     readonly?: boolean | undefined;
     provider: ConnectionProviderConfig | ResolvedPostgresProviderConfig;
 };
-export type MultiTenantConfig = {
-    circuitBreaker: {
-        failureThreshold: number;
-        minSampleSize: number;
-    };
-    concurrency: number;
-    enabled: true;
-    rootDatabase: string;
-    tenantQuery: string;
-};
 export type MigrationConfig = {
     databases: Record<string, DatabaseConfig>;
-    multiTenant?: MultiTenantConfig | undefined;
 };
 export type ResolvedMigrationConfig = {
     databases: Record<string, ResolvedDatabaseConfig>;
-    multiTenant?: MultiTenantConfig | undefined;
 };
 export type MigrationStatus = "success" | "already_applied" | "repaired" | "failed" | "skipped";
 export type MigrationResult = {
@@ -410,15 +397,12 @@ export type CircuitBreakerState = {
  * Every object is strict, so a misspelled key is refused by name rather than dropped for its default.
  */
 import * as z from "zod";
-import type { DatabaseConfig, MultiTenantConfig } from "./types.ts";
+import type { DatabaseConfig } from "./types.ts";
 /** The empty database Atlas replays Postgres migrations on when a provider names none */
 declare const DEFAULT_PG_DEV_URL = "docker://postgres/17/dev";
-/** What comb.migrate.config.ts declares: the migration config before multi-tenant defaults fill in */
+/** What comb.migrate.config.ts declares */
 type CombMigrateConfig = {
     databases: Record<string, DatabaseConfig>;
-    multiTenant?: (Omit<MultiTenantConfig, "circuitBreaker"> & {
-        circuitBreaker?: MultiTenantConfig["circuitBreaker"] | undefined;
-    }) | undefined;
 };
 declare const configInputSchema: () => z.ZodType<CombMigrateConfig>;
 export { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL };

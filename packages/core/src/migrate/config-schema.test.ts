@@ -69,22 +69,6 @@ const MISSPELLED: Array<[string, unknown, string]> = [
 		},
 		"provder",
 	],
-	[
-		"multiTenant",
-		{
-			databases: {},
-			multiTenant: { enabled: true, rootDatabase: "r", tenantQuery: "q", concurency: 5 },
-		},
-		"concurency",
-	],
-	[
-		"a circuit breaker",
-		{
-			databases: {},
-			multiTenant: { circuitBreaker: { treshold: 0.2 }, enabled: true, rootDatabase: "r", tenantQuery: "q" },
-		},
-		"treshold",
-	],
 	["the top level", { databases: {}, multiTennant: {} }, "multiTennant"],
 ]
 

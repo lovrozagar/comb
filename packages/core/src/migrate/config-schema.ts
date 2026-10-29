@@ -3,7 +3,7 @@
  * Every object is strict, so a misspelled key is refused by name rather than dropped for its default.
  */
 import * as z from "zod"
-import type { DatabaseConfig, MultiTenantConfig } from "./types.ts"
+import type { DatabaseConfig } from "./types.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    CONFIG SCHEMA
@@ -78,35 +78,15 @@ const databaseConfigInputSchema = () =>
 		provider: providerInputSchema().optional(),
 	})
 
-const multiTenantConfigInputSchema = () =>
-	z.strictObject({
-		circuitBreaker: z
-			.strictObject({
-				failureThreshold: z.number().min(0).max(1).default(0.1),
-				minSampleSize: z.number().int().min(1).default(50),
-			})
-			.optional(),
-		concurrency: z.number().int().min(1).max(200).default(50),
-		enabled: z.literal(true),
-		rootDatabase: z.string().min(1),
-		tenantQuery: z.string().min(1),
-	})
-
-/** What comb.migrate.config.ts declares: the migration config before multi-tenant defaults fill in */
+/** What comb.migrate.config.ts declares */
 type CombMigrateConfig = {
 	databases: Record<string, DatabaseConfig>
-	multiTenant?:
-		| (Omit<MultiTenantConfig, "circuitBreaker"> & {
-				circuitBreaker?: MultiTenantConfig["circuitBreaker"] | undefined
-		  })
-		| undefined
 }
 
 /* typed with the declared config, so the schema cannot drift from it */
 const configInputSchema = (): z.ZodType<CombMigrateConfig> =>
 	z.strictObject({
 		databases: z.record(z.string(), databaseConfigInputSchema()),
-		multiTenant: multiTenantConfigInputSchema().optional(),
 	})
 
 export { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL }
