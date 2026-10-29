@@ -154,7 +154,7 @@ function encodeCursor(payload: CursorPayload, options: CursorOptions): string {
 /** The opened payload's cursor, or null when it is not one this version minted */
 function decodePayload(bytes: Uint8Array): DecodedCursor | null {
 	try {
-		const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown
+		const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes)) as unknown
 		if (typeof parsed !== "object" || parsed === null) return null
 		const { i, s, v } = parsed as Partial<Record<keyof CursorPayload, unknown>>
 		const id = decodeId(i)

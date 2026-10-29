@@ -63,6 +63,16 @@ export const ALL_TYPES = `${SUBPATHS.map((spec, i) => `import type * as m${i} fr
 export type All = [${SUBPATHS.map((_, i) => `typeof m${i}`).join(", ")}]
 `
 
+/* the subpaths a Worker imports at runtime: all but the tooling, which runs under Node */
+const RUNTIME = SUBPATHS.filter(
+	(spec) => !/^@lovrozagar\/comb\/(?:cli|codegen|migrate|package\.json)(?:\/|$)/.test(spec),
+)
+
+/** A module that imports the types of every runtime subpath, for a Worker's own lib (K1 of r17) */
+export const WORKER_TYPES = `${RUNTIME.map((spec, i) => `import type * as m${i} from "${spec}"`).join("\n")}
+export type All = [${RUNTIME.map((_, i) => `typeof m${i}`).join(", ")}]
+`
+
 const STRICT = {
 	exactOptionalPropertyTypes: true,
 	noPropertyAccessFromIndexSignature: true,
@@ -78,6 +88,7 @@ export const APP: Record<string, string> = {
 	"src/count-eval.ts": COUNT_EVAL,
 	"src/no-eval.ts": NO_EVAL_WORKER,
 	"src/types.ts": ALL_TYPES,
+	"src/worker-types.ts": WORKER_TYPES,
 	"src/worker.ts": WORKER,
 	/* a bundler project: comb's .ts source compiles as the app's own */
 	"tsconfig.bundler.json": JSON.stringify({
@@ -101,6 +112,19 @@ export const APP: Record<string, string> = {
 			rootDir: "src",
 		},
 		include: ["src/types.ts"],
+	}),
+	/* a stock Worker project: no DOM, workers-types alone, as \`wrangler types\` sets it up (K1 of r17) */
+	"tsconfig.worker.json": JSON.stringify({
+		compilerOptions: {
+			...STRICT,
+			allowImportingTsExtensions: true,
+			lib: ["esnext"],
+			module: "esnext",
+			moduleResolution: "bundler",
+			noEmit: true,
+			types: ["@cloudflare/workers-types"],
+		},
+		include: ["src/worker-types.ts"],
 	}),
 	/* everything bundled, so tooling that leaked into a runtime import would show in the output */
 	"vite.config.mjs": `export default { build: { outDir: "dist-vite" }, ssr: { noExternal: true } }\n`,
