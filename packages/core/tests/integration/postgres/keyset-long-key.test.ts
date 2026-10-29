@@ -13,6 +13,7 @@ import { integer, pgTable, text } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "vitest"
 import { CombError } from "../../../src/error.ts"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
+import { buildDerivedListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { usePg } from "../support/pg.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
@@ -213,5 +214,53 @@ describe("the gone-anchor flag on Postgres (U26)", () => {
 		const lines = plan.rows.map((row: Record<string, string>) => Object.values(row)[0]).join("\n")
 		expect(lines).toMatch(/InitPlan|\$0/)
 		expect(lines).not.toMatch(/SubPlan/)
+	})
+})
+
+/* Q3 of r17: every builder's rows carry the gone-anchor flag its cursor needs, and a page that lacks it is refused */
+describe("a gone anchor on Postgres, whatever builds the list (Q3)", () => {
+	const sessions = usePg()
+	const LONG_A = "a".repeat(9000)
+
+	it("answers invalid_cursor on an anchored derived list's next page, where it started the list again", async () => {
+		await seeded(sessions, ICU, [`${LONG_A}1`, `${LONG_A}2`, "b", "c"])
+		const db = drizzle({ client: sessions.pg() })
+		const page = async (cursor?: string) => {
+			const built = buildDerivedListQuery({
+				...SEALED,
+				anchor: { idColumn: doc.id as never, table: doc as never },
+				parsed: { cursor, limit: 2, parsedSort: [{ direction: "asc", field: "title" }], validated: true },
+				sortColumns: { title: doc.title },
+			})
+			const query = db.select({ id: doc.id, title: doc.title, ...built.extras }).from(doc)
+			const rows = await (built.where === undefined ? query : query.where(built.where))
+				.orderBy(...built.orderBy)
+				.limit(built.limit)
+				.offset(built.offset)
+			return queryHelpers.paginate(rows, built)
+		}
+		const [items, meta] = await page()
+		expect(items.map((row) => row.id)).toEqual([1, 2])
+		await sessions.pg().query("DELETE FROM doc WHERE id = 2")
+		await expect(page(meta.nextCursor as string)).rejects.toThrow(
+			expect.objectContaining({ errorKey: "invalid_cursor", status: 400 }),
+		)
+	})
+
+	it("refuses a listOptions page whose rows lack the flag, rather than read it as there", async () => {
+		await seeded(sessions, ICU, [`${LONG_A}1`, `${LONG_A}2`, "b", "c"])
+		const db = drizzle({ client: sessions.pg(), relations: defineRelations({ doc }) })
+		const first = queryHelpers.listOptions({ ...schema.parse({ order: "title.asc" }), limit: 2 }, SEALED)
+		const [, meta] = queryHelpers.paginate(await db.query.doc.findMany(first as never), first)
+		const next = queryHelpers.listOptions(
+			{ ...schema.parse({ order: "title.asc" }), cursor: meta.nextCursor as string, limit: 2 },
+			SEALED,
+		)
+		const { _combAnchorGone, ...without } = next.extras
+		expect(_combAnchorGone).toBeTypeOf("function")
+		const rows = await db.query.doc.findMany({ ...next, extras: without } as never)
+		expect(() => queryHelpers.paginate(rows, next)).toThrow(
+			expect.objectContaining({ cause: expect.stringContaining("_combAnchorGone"), errorKey: "page_not_wired" }),
+		)
 	})
 })

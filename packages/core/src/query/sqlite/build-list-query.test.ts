@@ -430,10 +430,10 @@ describe("applyListQuery", () => {
 			parsed: { filterAst: null, limit: 2, page: 2, parsedSort: [] },
 			table: organization,
 		})
-		applyListQuery(query, built)
+		applyListQuery(() => query, built)
 		/* an empty sort orders by the tiebreak id alone */
 		expect(calls).toEqual(["orderBy 1", "limit 3", "offset 2"])
-		applyListQuery(query, { ...built, where: sql`1` })
+		applyListQuery(() => query, { ...built, where: sql`1` })
 		expect(calls.at(3)).toBe("where")
 	})
 })

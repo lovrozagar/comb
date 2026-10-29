@@ -9,8 +9,8 @@ import { CursorRef, MAX_CURSOR_LENGTH, mintCursor } from "./cursor.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
 import type { SortField } from "./types.ts"
 
-/** paginate's choice for an overflowing key: by reference on a table, refused on a derived list */
-type KeysetKind = "derived" | "table"
+/** paginate's choice for an overflowing key: by reference on a table, refused on a derived or a merged list */
+type KeysetKind = "derived" | "merged" | "table"
 
 const codePoints = (text: string): string[] => Array.from(text)
 
@@ -32,6 +32,8 @@ function longestFitting(record: Record<string, unknown>, field: string, fits: (r
 function tooLong(fields: string, length: number, kind: KeysetKind | "unread"): CombError {
 	const reasons = {
 		derived: "a derived list reads no row to page by reference, so sort it by a key of bounded length",
+		merged:
+			"a merged list's row is on one shard only, so no reference reads its value back on the others; sort it by a key of bounded length",
 		table: "even carried by reference, the other keys leave no room; sort by fewer long keys",
 		unread:
 			"its long key is a column not of the anchor table, or an expression over one, so no reference reads its value back; sort by a key of bounded length, or by a column of the anchor table",
@@ -73,7 +75,7 @@ function createCursor(
 	const whole = mint(row)
 	if (whole.length <= MAX_CURSOR_LENGTH) return whole
 	const fields = sort.map(({ field }) => field).join(", ")
-	if (options.keyset === "derived") throw tooLong(fields, whole.length, "derived")
+	if (options.keyset === "derived" || options.keyset === "merged") throw tooLong(fields, whole.length, options.keyset)
 	const long = sort
 		.map(({ field }) => field)
 		.filter((field) => typeof row[field] === "string" && (options.byReference?.has(field) ?? true))

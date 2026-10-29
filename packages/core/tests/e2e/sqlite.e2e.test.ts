@@ -3,6 +3,7 @@
  * Atlas, `migrate apply` onto a libsql file, then a list query served through the generated DTOs
  * and constraint map against the migrated database.
  */
+import { getTableColumns } from "drizzle-orm"
 import { join } from "node:path"
 import { createClient } from "@libsql/client"
 import { drizzle } from "drizzle-orm/libsql"
@@ -15,7 +16,6 @@ import { sqliteErrorHandler } from "../../src/sqlite/constraint-handler.ts"
 import type { ConstraintMap } from "../../src/types.ts"
 import { app, BLOG, ok, type App } from "./support/project.ts"
 import { SEALED } from "../../src/query/__fixtures__/cursor-secret.ts"
-import { built } from "../../src/query/__fixtures__/built.ts"
 
 const MIGRATE_CONFIG = `import { defineConfig } from "@lovrozagar/comb/migrate"
 
@@ -71,11 +71,9 @@ describe("comb on SQLite, from tables to a served list", () => {
 
 			const schema = createListQuerySchema({ filter: { minute_read: "number", status: "enum" }, sort: ["title"] })
 			const parsed = schema.parse({ filter: "status.eq.published", limit: "1", order: "title.asc" })
-			const rows = await applyListQuery(
-				db.select().from(post).$dynamic(),
-				buildListQuery({ ...SEALED, parsed, table: post }),
-			)
-			const [items, pagination] = queryHelpers.paginate(rows, built(parsed, SEALED))
+			const list = buildListQuery({ ...SEALED, parsed, table: post })
+			const rows = await applyListQuery((extras) => db.select({ ...getTableColumns(post), ...extras }).from(post), list)
+			const [items, pagination] = queryHelpers.paginate(rows, list)
 			expect(items.map((row) => row.title)).toEqual(["Alpha 2"])
 			expect(pagination).toMatchObject({ hasMore: true, limit: 1 })
 			for (const row of rows) expect(dtos.postDtoReadSchema.safeParse(row).success).toBe(true)

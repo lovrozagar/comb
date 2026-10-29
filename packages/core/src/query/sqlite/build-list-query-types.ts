@@ -17,6 +17,12 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
 	cursorSecret: string
 	/** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL (CursorOptions) */
 	nonFinite?: "exact" | undefined
+	/**
+	 * A list whose rows sit on several D1 shards: every shard reads it with this one query, and
+	 * paginateMerged merges what they read (K5 of r17). A page by number reads every row to its end
+	 * from each shard, past `maxRowsPerShard` (1001) a 400 `page_too_deep`
+	 */
+	merged?: { maxRowsPerShard?: number | undefined } | undefined
 	parsed: ListQueryInput
 	relations?: Record<string, RelationConfig>
 	/** LIKE-based search resolver — use `likeSearch(column)` factory */
@@ -31,8 +37,6 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 	/** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
 	cursorSecret: string
 	filterWhere?: SQL | null
-	/** the field a row's id is in, which paginate mints the next cursor from (default `id`) */
-	idField?: string | undefined
 	parsed: ListQueryInput<TSortField>
 	searchWhere?: SQL | null
 	/** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
@@ -53,10 +57,25 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 	  }
 )
 
+/**
+ * The columns a built list's rows must carry beside the app's own, for `paginate` to read: select
+ * them with the rest (`db.select({ ...cols, ...built.extras })`), and paginate strips them (Q2)
+ */
+type ListExtras = {
+	/** 1 when the cursor's anchor row is gone where no bound is safe, which paginate answers invalid_cursor (U26) */
+	_combAnchorGone?: SQL.Aliased<number>
+	/** the value the list breaks ties on, which the next cursor resumes from; none when no cursor can */
+	_combId?: SQL.Aliased<unknown>
+	/** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
+	_total?: SQL.Aliased<number>
+}
+
 type ListQueryResult = {
+	/** select these beside the row's own columns (ListExtras) */
+	extras: ListExtras
 	limit: number
 	/** How `paginate` pages the rows this query reads (pagination.ts) */
-	pagination: ListPagination
+	pagination: ListPagination & { merged: false }
 	meta: { limit: number; page: number; type: "cursor" | "offset" }
 	offset: number
 	orderBy: SQL[]
@@ -64,4 +83,7 @@ type ListQueryResult = {
 	where: SQL | undefined
 }
 
-export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryResult }
+/** A merged list's query, which every shard reads and paginateMerged alone pages (K8 of r17) */
+type MergedListQueryResult = Omit<ListQueryResult, "pagination"> & { pagination: ListPagination & { merged: true } }
+
+export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListExtras, ListQueryResult, MergedListQueryResult }

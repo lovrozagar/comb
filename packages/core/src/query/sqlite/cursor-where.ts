@@ -10,7 +10,7 @@ import { type CursorId, type CursorOptions, readCursor } from "../cursor.ts"
 import { anchored, assertNoReference } from "../cursor-ref.ts"
 import type { SortField } from "../types.ts"
 import { assertCursorFits, bindable, boundForKeys, exactSeconds, inSeconds } from "./cursor-fit.ts"
-import { keysetSQL, type SortKey } from "./keyset.ts"
+import { anchorGone, keysetSQL, type SortKey } from "./keyset.ts"
 
 /** What resuming after a cursor needs: it, how it was sealed, the sort, the keys, and the table */
 type CursorWhere = {
@@ -22,8 +22,14 @@ type CursorWhere = {
 	tiebreak: SortKey
 }
 
-/** The rows after `cursor`, as a predicate; a 400 for a cursor its keys cannot take */
-function cursorWhere({ cursor: given, keys, options, sort, table, tiebreak }: CursorWhere): SQL {
+/**
+ * The rows after `cursor`, as a predicate, and the flag that says its anchor is gone where no bound
+ * is safe (undefined when no bound can be); a 400 for a cursor its keys cannot take
+ */
+function cursorWhere({ cursor: given, keys, options, sort, table, tiebreak }: CursorWhere): {
+	gone: SQL | undefined
+	where: SQL
+} {
 	const cursor = readCursor(given, sort, options)
 	if (table === undefined) assertNoReference(cursor.values)
 	const columns = keys.map(({ column }) => column)
@@ -35,7 +41,7 @@ function cursorWhere({ cursor: given, keys, options, sort, table, tiebreak }: Cu
 		table === undefined
 			? bound.map((value, i) => (value instanceof Date && inSeconds(columns[i]) ? exactSeconds(value) : value))
 			: anchored(keys, bound, { id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column })
-	return keysetSQL({ id, keys, tiebreak, values })
+	return { gone: anchorGone(values), where: keysetSQL({ id, keys, tiebreak, values }) }
 }
 
 export { cursorWhere }

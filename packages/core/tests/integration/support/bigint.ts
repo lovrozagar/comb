@@ -5,13 +5,12 @@
  * A tiebreak id past 2^53 cannot find its own row, so no cursor is minted from one. No test
  * framework is imported, so vitest and bun:test share it.
  */
-import { defineRelations } from "drizzle-orm"
+import { defineRelations, getTableColumns } from "drizzle-orm"
 import { integer, sqliteTable } from "drizzle-orm/sqlite-core"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
-import { built } from "../../../src/query/__fixtures__/built.ts"
 
 export const big = sqliteTable("big", { id: integer("id").primaryKey(), n: integer("n") })
 export const bigRelations = defineRelations({ big })
@@ -30,7 +29,7 @@ export const EXACTLY = /safeIntegers.*intMode: "bigint".*mode: "bigint".*text id
 /** One page under `order` after `cursor`: its ids and the next cursor */
 export type Page = (order: string, cursor: string | undefined) => Promise<{ ids: number[]; next: string | null }>
 
-type Builder = { select(): { from(table: typeof big): { $dynamic(): never } } }
+type Builder = { select(fields: object): { from(table: typeof big): { $dynamic(): never } } }
 type Relational = { query: { big: { findMany(options: never): Promise<Array<{ id: number }>> } } }
 
 /** A page read through buildListQuery */
@@ -38,11 +37,9 @@ export const viaBuilder =
 	(db: Builder): Page =>
 	async (order, cursor) => {
 		const parsed = schema.parse({ cursor, order })
-		const rows = await applyListQuery(
-			db.select().from(big).$dynamic(),
-			buildListQuery({ ...SEALED, parsed, table: big }),
-		)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(parsed, SEALED))
+		const list = buildListQuery({ ...SEALED, parsed, table: big })
+		const rows = await applyListQuery((extras) => db.select({ ...getTableColumns(big), ...extras }).from(big), list)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, list)
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 
@@ -51,8 +48,9 @@ export const viaRelational =
 	(db: Relational): Page =>
 	async (order, cursor) => {
 		const query = { ...schema.parse({ order }), cursor }
-		const rows = await db.query.big.findMany(queryHelpers.listOptions(query, SEALED) as never)
-		const [items, meta] = queryHelpers.paginate(rows, built(query, SEALED))
+		const listed = queryHelpers.listOptions(query, SEALED)
+		const rows = await db.query.big.findMany(listed as never)
+		const [items, meta] = queryHelpers.paginate(rows, listed)
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 

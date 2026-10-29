@@ -131,8 +131,8 @@ describe("paginate mints a cursor for every last row, whatever its id (Q-M6)", (
 	it("mints one when the last id is 0 or an empty string", () => {
 		for (const id of [0, ""]) {
 			const rows = [
-				{ created_at: 2, id },
-				{ created_at: 1, id: "next" },
+				{ _combId: id, created_at: 2, id },
+				{ _combId: "next", created_at: 1, id: "next" },
 			]
 			const [, pagination] = queryHelpers.paginate(rows, pagedAs({ limit: 1, parsedSort: SORT }, SEALED))
 			expect(pagination.hasMore).toBe(true)
@@ -145,18 +145,17 @@ describe("pagination.count (Q-M5)", () => {
 	const post = sqliteTable("post", { created_at: integer("created_at").notNull(), id: integer("id").primaryKey() })
 	const schema = createListQuerySchema({ filter: { id: "number" }, sort: ["created_at"] })
 
-	/** One page through the documented path: countExtra in the select, paginate on the rows */
+	/** One page through the documented path: the built query's extras in the select, paginate on the rows */
 	async function page(params: Record<string, string>) {
 		const db = await tied()
 		const parsed = schema.parse({ limit: "2", order: "created_at.desc", ...params })
 		const built = buildListQuery({ ...SEALED, parsed, table: post })
-		const query = db
-			.select({ created_at: post.created_at, id: post.id, ...queryHelpers.countExtra(parsed) })
-			.from(post)
-			.$dynamic()
-		const statement = applyListQuery(query, built)
+		const statement = applyListQuery(
+			(extras) => db.select({ created_at: post.created_at, id: post.id, ...extras }).from(post),
+			built,
+		)
 		const rows = await statement
-		const [, pagination] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
+		const [, pagination] = queryHelpers.paginate(rows, built)
 		return { pagination, sql: statement.toSQL().sql.toLowerCase() }
 	}
 
@@ -178,9 +177,15 @@ describe("pagination.count (Q-M5)", () => {
 		expect(first.sql).toMatch(/\bover\s*\(/)
 	})
 
-	it("is null when the query did not select the count", () => {
-		const [, pagination] = queryHelpers.paginate([{ id: 1 }], pagedAs({ limit: 2, parsedSort: SORT }, SEALED))
-		expect(pagination.count).toBeNull()
+	/* Q3 of r17: a count the builder selected and the rows lack is a wiring mistake, never a null count */
+	it("refuses an offset page whose rows lack the count, where it reported null", () => {
+		const built = buildListQuery({ ...SEALED, parsed: schema.parse({ limit: "2" }), table: post })
+		expect(() => queryHelpers.paginate([{ _combId: 1, id: 1 }], built)).toThrow(
+			expect.objectContaining({
+				cause: expect.stringMatching(/^the rows carry no _total: /),
+				errorKey: "page_not_wired",
+			}),
+		)
 	})
 })
 
@@ -200,12 +205,13 @@ describe("queryHelpers.listOptions pages the relational API by cursor (Q-L4)", (
 			const parsed = schema.parse({ limit, order: "created_at.desc", ...(cursor ? { cursor } : {}) })
 			const options = queryHelpers.listOptions(parsed, SEALED)
 			const rows = await db.query.post.findMany({
+				extras: options.extras,
 				limit: options.limit,
 				offset: options.offset,
 				orderBy: options.orderBy,
 				...(options.where ? { where: options.where } : {}),
 			})
-			const [items, pagination] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
+			const [items, pagination] = queryHelpers.paginate(rows, options)
 			pages.push(items.map((row) => row.id))
 			cursor = pagination.nextCursor
 		}

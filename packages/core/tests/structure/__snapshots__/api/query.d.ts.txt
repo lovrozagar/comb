@@ -110,8 +110,8 @@ export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, ef
 // query/cursor-mint.d.ts
 import type { CursorOptions } from "./cursor-seal.ts";
 import type { SortField } from "./types.ts";
-/** paginate's choice for an overflowing key: by reference on a table, refused on a derived list */
-type KeysetKind = "derived" | "table";
+/** paginate's choice for an overflowing key: by reference on a table, refused on a derived or a merged list */
+type KeysetKind = "derived" | "merged" | "table";
 /**
  * Mint the cursor for the row after which the next page starts, as `paginate` does: its longest
  * string values carried by reference while it passes the cap that `readCursor` holds; a 500 on a
@@ -161,10 +161,10 @@ export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CU
  * query-helpers with drizzle's relational query API.
  */
 import { type SQL } from "drizzle-orm";
-import type { CursorOptions } from "./cursor-seal.ts";
+import { type CursorOptions } from "./cursor-seal.ts";
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts";
 import { type ListPagination, paginate } from "./pagination.ts";
-import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
+import type { ListQueryInput, ParsedFields } from "./types.ts";
 /** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
 type RelationalTable = object;
 type DrizzleListOptions = {
@@ -176,33 +176,20 @@ type DrizzleListOptions = {
     where?: {
         RAW: (table: RelationalTable) => SQL;
     };
-    /** Whether the cursor's anchor is gone where no bound is safe, for `findMany({ extras })`: paginate reads it (U26) */
-    extras?: {
-        _combAnchorGone: (table: RelationalTable) => SQL;
+    /**
+     * For `findMany({ extras })`, which paginate reads and refuses a page without (Q3 of r17): the
+     * tiebreak the next cursor resumes from (Q2), an offset page's count, and, on a cursor that
+     * carries a reference, whether its anchor is gone where no bound is safe (U26)
+     */
+    extras: {
+        _combAnchorGone?: (table: RelationalTable) => SQL<number>;
+        _combId: (table: RelationalTable) => SQL;
+        _total?: (table: RelationalTable) => SQL<number>;
     };
     /** How `paginate` pages the rows these options read (pagination.ts) */
-    pagination: ListPagination;
-};
-/**
- * The parsed request, or the `ListQueryResult` built from it: what a service or a repository holds.
- * Closed on purpose: a bare `{ cursor? }` took any object, so a wrong argument compiled and counted.
- */
-type CountQuery = {
-    cursor?: string | null | undefined;
-    limit: number;
-    parsedSort: readonly SortField[];
-} | {
-    meta: {
-        type: "cursor" | "offset";
+    pagination: ListPagination & {
+        merged: false;
     };
-};
-/**
- * The `select` extra that counts every row the filter matches, for `paginate` to report. An
- * offset request gets it; a cursor request gets none, because the window would make the
- * database read every remaining row on each page, which is what keyset pagination avoids.
- */
-declare function countExtra(query: CountQuery): {
-    _total?: SQL.Aliased<number>;
 };
 /**
  * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
@@ -211,9 +198,8 @@ declare function countExtra(query: CountQuery): {
  */
 declare function drizzleListOptions(query: ListQueryInput, options: CursorOptions): DrizzleListOptions;
 declare function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
-/** List-query helpers for drizzle queries: count, options, pagination, projection */
+/** List-query helpers for drizzle queries: options, pagination, projection */
 declare const queryHelpers: {
-    countExtra: typeof countExtra;
     filterValue: typeof extractFilterValue;
     filterValues: typeof extractFilterValues;
     listOptions: typeof drizzleListOptions;
@@ -482,6 +468,10 @@ import { type CursorOptions } from "./cursor-seal.ts";
 import type { paginationResponseSchema } from "./schema.ts";
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
 import type * as z from "zod";
+/** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
+declare const COMB_ID: "_combId";
+/** One column a builder selects for paginate: the tiebreak, the gone-anchor flag, or the count (Q3 of r17) */
+type ListExtra = "_combAnchorGone" | "_combId" | "_total";
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationMeta = z.output<typeof paginationResponseSchema>;
 /** How a built list pages what it fetched */
@@ -491,11 +481,13 @@ type ListPagination = {
     /** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak (Q6) */
     cursorable: boolean;
     cursorScope: string;
-    /** the field a row's tiebreak id is in */
-    idField: string;
+    /** the extras the builder selected, which every row it reads must carry (Q3) */
+    expects: readonly ListExtra[];
     /** how a key too long for a cursor is carried: by reference to its row ("table"), or not at all ("derived") */
     keyset: KeysetKind;
     limit: number;
+    /** read through buildListQuery's `merged`: paged by paginateMerged, never by paginate (K8 of r17) */
+    merged: boolean;
     nonFinite: "exact" | undefined;
     page: number | undefined;
     parsedFields: ParsedFields | null;
@@ -512,13 +504,26 @@ type PaginationFacts = {
     /** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
     byReference?: ReadonlySet<string> | undefined;
     cursorable: boolean;
-    idField?: string | undefined;
+    /** the extras the builder selected, which every row must carry */
+    expects: readonly ListExtra[];
     keyset?: KeysetKind | undefined;
     query: ListQueryInput;
     window: number;
 };
 /** The descriptor a builder hands over: its facts, and the options it seals under closed over, never held */
-declare function paginationOf(options: CursorOptions, facts: PaginationFacts): ListPagination;
+declare function paginationOf<TMerged extends boolean = false>(options: CursorOptions, facts: PaginationFacts & {
+    merged?: TMerged | undefined;
+}): ListPagination & {
+    merged: TMerged;
+};
+/** The count an offset page's row carries, which refuseUnwired holds every such row to */
+declare const totalOf: (row: object) => number;
+/**
+ * Rows that lack an extra their builder selected were read without the built query's extras, and
+ * an absent flag or count would be read as none: a page_not_wired, whether or not the page needs
+ * it yet (Q3 of r17)
+ */
+declare function refuseUnwired(items: readonly object[], pagination: ListPagination): void;
 /** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
 declare function refuseGoneAnchor(items: readonly object[]): void;
 /**
@@ -526,22 +531,29 @@ declare function refuseGoneAnchor(items: readonly object[]): void;
  * public subset. No-op (minus `_total`) when parsedFields is null.
  */
 declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
-/** `built` as paginate takes it, or a 500 naming the call: a parsed query in its place is the call before 0.15 */
-declare function paginationIn(built: {
-    pagination: ListPagination;
-} | undefined): ListPagination;
+/**
+ * `built` as paginate (or, `merged`, paginateMerged) takes it, or a 500 naming the call: a parsed
+ * query in its place is the call before 0.15, and a merged list's pages are paginateMerged's alone
+ */
+declare function paginationIn<TMerged extends boolean>(built: {
+    pagination: ListPagination & {
+        merged: TMerged;
+    };
+} | undefined, merged: TMerged): ListPagination & {
+    merged: TMerged;
+};
 /** More rows than the built query reads are rows of another query: one that applied no limit (C2) */
 declare function refuseOverRead(count: number, pagination: ListPagination): void;
 /**
  * The page of `items`, read with `built`, and its pagination: count, whether there is more, and
  * the next cursor, sealed under the builder's options; none for a list no cursor can resume
  */
-declare function paginate<T extends object>(items: ReadonlyArray<T & {
-    _total?: number;
-}>, built: {
-    pagination: ListPagination;
+declare function paginate<T extends object>(items: readonly T[], built: {
+    pagination: ListPagination & {
+        merged: false;
+    };
 }): readonly [T[], PaginationMeta];
-export { applySelect, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, };
+export { applySelect, COMB_ID, type ListExtra, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/filter-parse.d.ts
 /**

@@ -8,9 +8,10 @@ import { createListQuerySchema, createRetrieveQuerySchema } from "../../src/quer
 import type { ListQueryOutput } from "../../src/query/schema-types.ts"
 import type { FilterAST, ParsedFields, SortField } from "../../src/query/types.ts"
 import type { ListQueryInput } from "../../src/query/index.ts"
-import { applyListQuery, buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
+import { applyListQuery, buildListQuery, type ListExtras } from "../../src/query/sqlite/build-list-query.ts"
 import { keysetSQL, type KeysetPosition } from "../../src/query/sqlite/index.ts"
 import { queryHelpers } from "../../src/query/drizzle.ts"
+import { getTableColumns } from "drizzle-orm"
 import type { DrizzleD1Database } from "drizzle-orm/d1"
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
 import { SEALED } from "../../src/query/__fixtures__/cursor-secret.ts"
@@ -41,7 +42,7 @@ const retrieveSchema = createRetrieveQuerySchema({
 expectTypeOf<z.output<typeof retrieveSchema>["expand"]>().toEqualTypeOf<string | undefined>()
 expectTypeOf<z.output<typeof retrieveSchema>["parsedFields"]>().toEqualTypeOf<ParsedFields | null>()
 
-/* the parsed output feeds buildListQuery, and its result feeds countExtra, with no casts */
+/* the parsed output feeds buildListQuery, and its extras a select, with no casts */
 const post = sqliteTable("post", {
 	created_at: integer("created_at"),
 	id: text("id").primaryKey(),
@@ -49,10 +50,7 @@ const post = sqliteTable("post", {
 })
 declare const parsed: ListOutput
 const built = buildListQuery({ ...SEALED, parsed, table: post })
-expectTypeOf(queryHelpers.countExtra(built)).toEqualTypeOf<ReturnType<typeof queryHelpers.countExtra>>()
-expectTypeOf(queryHelpers.countExtra(parsed)).toEqualTypeOf<ReturnType<typeof queryHelpers.countExtra>>()
-// @ts-expect-error countExtra takes a parsed request or a built query, nothing else
-queryHelpers.countExtra({ unrelated: true })
+expectTypeOf(built.extras).toEqualTypeOf<ListExtras>()
 
 /* an extension whose input and output differ (a coercion) would change between the request and
    the parsed view; the config refuses it */
@@ -107,16 +105,24 @@ const handler = (input: ListOutput) => input.limit
 handler({ ...handBuilt, archived: undefined, parsedSort: [] })
 expectTypeOf<ListOutput["pageBounded"]>().toEqualTypeOf<true | undefined>()
 
-/* C12 of the 0.14.1 review: applyListQuery takes drizzle's select builder as it is, and one made dynamic */
+/* C12 of the 0.14.1 review, K9 of r17: applyListQuery builds drizzle's select as it is, or one made dynamic, over the extras */
 declare const d1: DrizzleD1Database
 const listed = sqliteTable("listed", { id: integer("id").primaryKey(), title: text("title") })
 const listedQuery = buildListQuery({ ...SEALED, parsed: listSchema.parse({}), table: listed })
-expectTypeOf(applyListQuery(d1.select().from(listed), listedQuery)).resolves.toEqualTypeOf<
-	Array<{ id: number; title: string | null }>
->()
-expectTypeOf(applyListQuery(d1.select().from(listed).$dynamic(), listedQuery)).resolves.toEqualTypeOf<
-	Array<{ id: number; title: string | null }>
->()
+type Listed = { _combAnchorGone?: number; _combId?: unknown; _total?: number; id: number; title: string | null }
+expectTypeOf(
+	applyListQuery((extras) => d1.select({ ...getTableColumns(listed), ...extras }).from(listed), listedQuery),
+).resolves.toEqualTypeOf<Listed[]>()
+expectTypeOf(
+	applyListQuery(
+		(extras) =>
+			d1
+				.select({ ...getTableColumns(listed), ...extras })
+				.from(listed)
+				.$dynamic(),
+		listedQuery,
+	),
+).resolves.toEqualTypeOf<Listed[]>()
 
 /*
  * K6 and K10 of r17: every builder takes one exported ListQueryInput, its arrays read only, so the

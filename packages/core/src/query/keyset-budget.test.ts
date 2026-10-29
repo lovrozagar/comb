@@ -42,7 +42,7 @@ const ORDERS = [
 
 /** The order string and the cursor's row for `mix` under `order` */
 function request(mix: readonly Kind[], order: readonly string[]) {
-	const row: Record<string, unknown> = { id: 7, r1: 1, r2: 2, r3: 3, s1: "a", s2: "b", s3: "c" }
+	const row: Record<string, unknown> = { _combId: 7, _total: 2, id: 7, r1: 1, r2: 2, r3: 3, s1: "a", s2: "b", s3: "c" }
 	const fields = mix.map((kind, i) => {
 		const field = kind === "null" ? `r${i + 1}` : kind === "time" ? `d${i + 1}` : `s${i + 1}`
 		row[field] =
@@ -61,7 +61,10 @@ describe("a three-key cursor's parameters, by every mix of keys", () => {
 			(_label, mix) => {
 				const { order: given, row } = request(mix as Kind[], order)
 				const parsed = schema.parse({ order: given })
-				const [, meta] = queryHelpers.paginate([row, { ...row, id: 8 }], queryHelpers.listOptions(parsed, SEALED))
+				const [, meta] = queryHelpers.paginate(
+					[row, { ...row, _combId: 8, id: 8 }],
+					queryHelpers.listOptions(parsed, SEALED),
+				)
 				const cursor = meta.nextCursor as string
 				const keys = parsed.parsedSort.map(({ direction, field, nulls }) => ({
 					column: t[field as (typeof COLUMNS)[number]],
@@ -69,7 +72,7 @@ describe("a three-key cursor's parameters, by every mix of keys", () => {
 					nulls,
 				}))
 				const tiebreak = { column: t.id, direction: parsed.parsedSort[0]?.direction ?? "desc" }
-				const built = cursorWhere({ cursor, keys, options: SEALED, sort: parsed.parsedSort, table: t, tiebreak })
+				const built = cursorWhere({ cursor, keys, options: SEALED, sort: parsed.parsedSort, table: t, tiebreak }).where
 				expect(count(built)).toBeLessThanOrEqual(10)
 				const options = queryHelpers.listOptions(schema.parse({ cursor, order: given }), SEALED)
 				const relational = (options.where as { RAW: (table: typeof t) => SQL }).RAW(t)

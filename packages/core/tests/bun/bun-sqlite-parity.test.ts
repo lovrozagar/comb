@@ -8,7 +8,7 @@
 import { SQL } from "bun"
 import { Database } from "bun:sqlite"
 import { describe, expect, it } from "bun:test"
-import { sql } from "drizzle-orm"
+import { getTableColumns, sql } from "drizzle-orm"
 import { drizzle as bunSqlDrizzle } from "drizzle-orm/bun-sql"
 import { drizzle } from "drizzle-orm/bun-sqlite"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
@@ -50,7 +50,13 @@ function open() {
 
 function vendors(query: Record<string, string>): string[] {
 	const parsed = schema.parse({ limit: "50", ...query })
-	return applyListQuery(open().select().from(item).$dynamic(), buildListQuery({ ...SEALED, parsed, table: item }))
+	return applyListQuery(
+		(extras) =>
+			open()
+				.select({ ...getTableColumns(item), ...extras })
+				.from(item),
+		buildListQuery({ ...SEALED, parsed, table: item }),
+	)
 		.all()
 		.map((row) => row.vendor)
 }
@@ -80,7 +86,7 @@ describe("bun:sqlite with safeIntegers pages by cursor (R3)", () => {
 		for (let guard = 0; guard < 6; guard++) {
 			const parsed = byN.parse({ cursor, order: "n.asc" })
 			const rows = applyListQuery(
-				db.select().from(counted).$dynamic(),
+				(extras) => db.select({ ...getTableColumns(counted), ...extras }).from(counted),
 				buildListQuery({ ...SEALED, parsed, table: counted }),
 			).all()
 			const [items, pagination] = queryHelpers.paginate(rows, built(parsed, SEALED))

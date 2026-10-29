@@ -1,19 +1,21 @@
 /**
  * Plan 14's 5.5 (L2 of the 0.13.0 consumers review): a list one org's rows spread over several D1
- * shards, merged in memory. Each shard reads its part through mergedListOptions, and paginateMerged
+ * shards, merged in memory. Each shard reads its part with buildListQuery's merged query (K5 of
+ * r17), and paginateMerged
  * orders the merge as SQLite's ORDER BY does (text by code point, numbers before text, the null
  * placement the order names, then the id), windows it by page or by cursor, and counts every shard.
  * Read page by page either way, the shards give exactly what one database holding every row gives.
  */
 import type { D1Database } from "@cloudflare/workers-types"
-import { defineRelations } from "drizzle-orm"
+import { defineRelations, getTableColumns, ne, type SQL } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { Miniflare } from "miniflare"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
-import { mergedListOptions, paginateMerged } from "../../../src/sqlite/d1/sharding/index.ts"
+import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
+import { paginateMerged } from "../../../src/sqlite/d1/sharding/index.ts"
 
 const org = sqliteTable("org", { id: text("id").primaryKey(), n: integer("n"), name: text("name") })
 /* Q1 of the 0.14.1 review: four null n over three shards, so a page of 2 ends on a null only one shard holds */
@@ -81,19 +83,30 @@ beforeAll(async () => {
 }, 60_000)
 afterAll(() => mf.dispose())
 
-/** Every id under `order`, as one database orders them all */
-async function oneDatabase(order: string): Promise<string[]> {
-	const parsed = schema.parse({ limit: "3", order })
-	const rows = await whole.query.org.findMany({ orderBy: mergedListOptions(parsed, SEALED).orderBy } as never)
-	return (rows as Array<{ id: string }>).map((row) => row.id)
+type Db = (typeof shards)[number]
+type Table = typeof item | typeof org
+
+/** Every id of `table` under `order`, as one database orders them all */
+async function oneDatabase(order: string, table: Table = org, where?: SQL): Promise<string[]> {
+	const built = buildListQuery({ ...SEALED, baseWhere: where, parsed: schema.parse({ limit: "3", order }), table })
+	const rows = await whole
+		.select({ id: table.id })
+		.from(table)
+		.where(where)
+		.orderBy(...built.orderBy)
+	return rows.map((row) => row.id)
 }
 
-/** One merged page under `params`: what the shards hold of it, merged */
-async function page(params: Record<string, string>) {
-	const parsed = schema.parse(params)
-	const options = mergedListOptions(parsed, SEALED)
-	const rowsPerShard = await Promise.all(shards.map((db) => db.query.org.findMany(options as never)))
-	return paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, mergedListOptions(parsed, SEALED))
+/** One merged page of `table` under `params`: what each shard reads with the merged query, merged */
+async function page(
+	params: Record<string, string>,
+	{ dbs = shards, table = org, where }: { dbs?: readonly Db[]; table?: Table; where?: SQL | undefined } = {},
+) {
+	const built = buildListQuery({ ...SEALED, baseWhere: where, merged: {}, parsed: schema.parse(params), table })
+	const rowsPerShard = await Promise.all(
+		dbs.map((db) => applyListQuery((extras) => db.select({ ...getTableColumns(table), ...extras }).from(table), built)),
+	)
+	return paginateMerged(rowsPerShard, built)
 }
 
 const ORDERS = ["name.asc", "name.desc", "n.asc,name.desc", "n.desc.nullslast,name.asc.nullsfirst", "n.asc.nullsfirst"]
@@ -152,9 +165,7 @@ describe("paginateMerged and a sort key SQLite does not order BINARY (5.5)", () 
 			["o1", "B"],
 			["o2", "a"],
 		])
-		const parsed = schema.parse({ order: "name.asc" })
-		const rows = await shard.query.org.findMany(mergedListOptions(parsed, SEALED) as never)
-		expect(() => paginateMerged([rows as Array<{ id: string }>], mergedListOptions(parsed, SEALED))).toThrow(
+		await expect(page({ order: "name.asc" }, { dbs: [shard] })).rejects.toThrow(
 			expect.objectContaining({ errorKey: "sort_not_wired" }),
 		)
 	})
@@ -162,36 +173,29 @@ describe("paginateMerged and a sort key SQLite does not order BINARY (5.5)", () 
 	/* the known limit: no shard sees the pair out of order, so the merge orders it BINARY, where one NOCASE database folds it */
 	it("orders by code point a case pair that only rows on different shards hold", async () => {
 		const [upper, lower] = [await shardOf([["o1", "B"]]), await shardOf([["o2", "a"]], "NOCASE2")]
-		const parsed = schema.parse({ order: "name.asc" })
-		const options = mergedListOptions(parsed, SEALED)
-		const rowsPerShard = [
-			await upper.query.org.findMany(options as never),
-			await lower.query.org.findMany(options as never),
-		]
-		const [items] = paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, mergedListOptions(parsed, SEALED))
+		const [items] = await page({ order: "name.asc" }, { dbs: [upper, lower] })
 		expect(items.map((row) => row.id)).toEqual(["o1", "o2"])
 	})
 })
 
-describe("paginateMerged by cursor past a page that ends on a null key (Q1)", () => {
-	it.each(["n.asc", "n.desc", "n.asc.nullsfirst", "n.desc.nullslast"])("serves every row of %s once", async (order) => {
-		const oracle = await whole.query.item.findMany({
-			orderBy: mergedListOptions(schema.parse({ limit: "3", order }), SEALED).orderBy,
-		} as never)
-		const seen: string[] = []
-		let cursor: string | undefined
-		for (let n = 0; n < 8; n++) {
-			const parsed = schema.parse({ limit: "2", order, ...(cursor === undefined ? {} : { cursor }) })
-			const options = mergedListOptions(parsed, SEALED)
-			const rowsPerShard = await Promise.all(shards.map((db) => db.query.item.findMany(options as never)))
-			const [items, meta] = paginateMerged(
-				rowsPerShard as Array<Array<{ id: string }>>,
-				mergedListOptions(parsed, SEALED),
-			)
-			seen.push(...items.map((row) => row.id))
-			if (meta.nextCursor === null) break
-			cursor = meta.nextCursor
-		}
-		expect(seen).toEqual((oracle as Array<{ id: string }>).map((row) => row.id))
-	})
+/* Q1 of the 0.14.1 review; K5 of r17: a filtered merged list too, its filter and window one query */
+describe("paginateMerged by cursor past a page that ends on a null key (Q1, K5)", () => {
+	const NULL_ORDERS = ["n.asc", "n.desc", "n.asc.nullsfirst", "n.desc.nullslast"]
+	it.each(NULL_ORDERS.flatMap((order) => [[order, "all"] as const, [order, "filtered"] as const]))(
+		"serves every row of %s once, %s",
+		async (order, filter) => {
+			const where = filter === "all" ? undefined : ne(item.id, "i2")
+			const oracle = await oneDatabase(order, item, where)
+			const seen: string[] = []
+			let cursor: string | undefined
+			for (let n = 0; n < 8; n++) {
+				const params = { limit: "2", order, ...(cursor === undefined ? {} : { cursor }) }
+				const [items, meta] = await page(params, { table: item, where })
+				seen.push(...items.map((row) => row.id))
+				if (meta.nextCursor === null) break
+				cursor = meta.nextCursor
+			}
+			expect(seen).toEqual(oracle)
+		},
+	)
 })

@@ -3,7 +3,7 @@
  * placement and keyset pagination are properties of the SQL SQLite runs, so
  * they are asserted on rows, not on generated text.
  */
-import { asc, sql } from "drizzle-orm"
+import { asc, getTableColumns, sql } from "drizzle-orm"
 import type { LibSQLDatabase } from "drizzle-orm/libsql"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
@@ -15,7 +15,6 @@ import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../
 import type { SortField } from "../../../src/query/types.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
-import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const item = sqliteTable("item", {
 	amount: integer("amount"),
@@ -72,10 +71,25 @@ const label = (row: Pick<Item, "amount" | "vendor">) => `${row.vendor}:${row.amo
 async function listTable(db: LibSQLDatabase, query: Record<string, string>) {
 	const parsed = schema.parse(query)
 	const built = buildListQuery({ ...SEALED, parsed, table: item })
-	const rows = await applyListQuery(db.select().from(item).$dynamic(), built)
-	const [items, pagination] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
-	return { items: items.map(label), nextCursor: pagination.nextCursor }
+	const rows = await applyListQuery((extras) => db.select({ ...getTableColumns(item), ...extras }).from(item), built)
+	const [items, pagination] = queryHelpers.paginate(rows, built)
+	return { count: pagination.count, items: items.map(label), nextCursor: pagination.nextCursor }
 }
+
+/* K9 of r17: applyListQuery selects the built query's extras itself, so the documented path reports its count */
+describe("applyListQuery, as the README calls it", () => {
+	it("reports the count of an offset page, and pages on by cursor", async () => {
+		const db = await seeded([
+			["a", "acme", 1],
+			["b", "acme", 2],
+			["c", "beta", 3],
+		])
+		const first = await listTable(db, { limit: "2", order: "amount.asc" })
+		expect(first).toMatchObject({ count: 3, items: ["acme:1", "acme:2"] })
+		const next = await listTable(db, { cursor: first.nextCursor as string, limit: "2", order: "amount.asc" })
+		expect(next).toEqual({ count: null, items: ["beta:3"], nextCursor: null })
+	})
+})
 
 async function listDerived(db: LibSQLDatabase, parsedSort: SortField<"amount" | "vendor">[], cursor?: string) {
 	const built = buildDerivedListQuery({

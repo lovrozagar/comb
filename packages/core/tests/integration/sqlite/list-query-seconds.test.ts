@@ -4,7 +4,7 @@
  * bound through drizzle's mapper it would floor to the second, and the row would compare greater
  * than its own cursor. Every order pages each row once through both builders.
  */
-import { defineRelations } from "drizzle-orm"
+import { defineRelations, getTableColumns } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
 import { integer, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
@@ -54,7 +54,7 @@ describe("keyset pagination on a seconds-mode timestamp holding fractions (U10)"
 			const built = await pageAll(async (cursor) => {
 				const parsed = schema.parse({ cursor, order })
 				const rows = await applyListQuery(
-					harness.db.select().from(event).$dynamic(),
+					(extras) => harness.db.select({ ...getTableColumns(event), ...extras }).from(event),
 					buildListQuery({ ...SEALED, parsed, table: event }),
 				)
 				const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
@@ -88,7 +88,7 @@ describe("keyset pagination on a seconds-mode timestamp, its cursor row deleted"
 			const seen = await pageAll(async (cursor) => {
 				const parsed = schema.parse({ cursor, order })
 				const rows = await applyListQuery(
-					harness.db.select().from(event).$dynamic(),
+					(extras) => harness.db.select({ ...getTableColumns(event), ...extras }).from(event),
 					buildListQuery({ ...SEALED, parsed, table: event }),
 				)
 				const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
@@ -129,7 +129,7 @@ describe("keyset pagination on a seconds-mode timestamp before 1970, its cursor 
 			const seen = await pageAll(async (cursor) => {
 				const parsed = schema.parse({ cursor, order })
 				const rows = await applyListQuery(
-					harness.db.select().from(event).$dynamic(),
+					(extras) => harness.db.select({ ...getTableColumns(event), ...extras }).from(event),
 					buildListQuery({ ...SEALED, parsed, table: event }),
 				)
 				const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
@@ -158,7 +158,7 @@ describe("keyset pagination on a seconds-mode timestamp at the epoch, its cursor
 			const seen = await pageAll(async (cursor) => {
 				const parsed = schema.parse({ cursor, order })
 				const rows = await applyListQuery(
-					harness.db.select().from(event).$dynamic(),
+					(extras) => harness.db.select({ ...getTableColumns(event), ...extras }).from(event),
 					buildListQuery({ ...SEALED, parsed, table: event }),
 				)
 				const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))

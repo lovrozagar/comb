@@ -4,7 +4,7 @@
  * prefix that fits, and the keyset reads the value from the row itself: exact while the row is
  * there, and, once it is deleted, resumed from the prefix, which may repeat rows and skips none.
  */
-import { defineRelations, type SQLWrapper, sql } from "drizzle-orm"
+import { defineRelations, getTableColumns, sql, type SQLWrapper } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
 import { alias, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
@@ -13,7 +13,6 @@ import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { libsqlMemory } from "../support/libsql.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
-import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const doc = sqliteTable("doc", { id: integer("id").primaryKey(), title: text("title").notNull() })
 const schema = createListQuerySchema({ sort: ["title"], pagination: { defaultLimit: 1, maxLimit: 1 } })
@@ -52,19 +51,21 @@ type Page = (
 
 const BUILDER: Page = async (harness, order, cursor) => {
 	const parsed = schema.parse({ cursor, order })
+	const list = buildListQuery({ ...SEALED, parsed, table: doc })
 	const rows = await applyListQuery(
-		harness.db.select().from(doc).$dynamic(),
-		buildListQuery({ ...SEALED, parsed, table: doc }),
+		(extras) => harness.db.select({ ...getTableColumns(doc), ...extras }).from(doc),
+		list,
 	)
-	const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
+	const [items, meta] = queryHelpers.paginate(rows, list)
 	return { ids: items.map((row) => row.id), next: meta.nextCursor }
 }
 
 const RELATIONAL: Page = async (harness, order, cursor) => {
 	const db = drizzle({ client: harness.client, relations: defineRelations({ doc }) })
 	const query = { ...schema.parse({ order }), cursor }
-	const rows = await db.query.doc.findMany(queryHelpers.listOptions(query, SEALED) as never)
-	const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; title: string }>, pagedAs(query, SEALED))
+	const listed = queryHelpers.listOptions(query, SEALED)
+	const rows = await db.query.doc.findMany(listed as never)
+	const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; title: string }>, listed)
 	return { ids: items.map((row) => row.id), next: meta.nextCursor }
 }
 
@@ -195,7 +196,7 @@ async function derivedPage(
 		parsed: { cursor, limit: 2, parsedSort: [{ direction: "asc" as const, field: "label" }] },
 		sortColumns: { label },
 	})
-	const query = harness.db.select({ id: doc.id, label: doc.title }).from(doc)
+	const query = harness.db.select({ id: doc.id, label: doc.title, ...built.extras }).from(doc)
 	const rows = await (built.where === undefined ? query : query.where(built.where))
 		.orderBy(...built.orderBy)
 		.limit(built.limit)
@@ -316,7 +317,7 @@ describe("an anchored derived list sorted by a joined table's text column, its k
 					sortColumns: { label: remark.body },
 				})
 				const query = harness.db
-					.select({ id: doc.id, label: remark.body })
+					.select({ id: doc.id, label: remark.body, ...built.extras })
 					.from(doc)
 					.innerJoin(remark, sql`${remark.doc_id} = ${doc.id}`)
 				const rows = await (built.where === undefined ? query : query.where(built.where))
@@ -368,7 +369,7 @@ describe("an anchored derived list whose anchor is an alias, its key too long fo
 				sortColumns: { label },
 			})
 			const query = harness.db
-				.select({ id: mine.id, label: mine.title })
+				.select({ id: mine.id, label: mine.title, ...built.extras })
 				.from(mine)
 				.innerJoin(theirs, sql`${theirs.id} = ${mine.id}`)
 			const rows = await (built.where === undefined ? query : query.where(built.where))

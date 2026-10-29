@@ -17,26 +17,19 @@ const dialect = new (SQLiteDialect as unknown as new () => {
 	sqlToQuery: (sql: SQL) => { params: unknown[]; sql: string }
 })()
 
-/** The pagination part of a built ListQueryResult */
-const builtAs = (type: "cursor" | "offset") => ({ limit: 21, meta: { limit: 20, page: 1, type }, offset: 0 })
+/** Hand-made rows as a builder reads them: each row's id selected again as the tiebreak paginate mints from (Q2) */
+const wired = <T extends object>(rows: readonly T[]): T[] =>
+	rows.map((row) => (Object.hasOwn(row, "id") ? { ...row, _combId: (row as { id: unknown }).id } : row))
 
-describe("queryHelpers.countExtra", () => {
-	it("selects the window count for an offset request and nothing for a cursor one", () => {
-		expect(queryHelpers.countExtra({ cursor: "abc", limit: 20, parsedSort: [] })).toEqual({})
-		const result = queryHelpers.countExtra({ cursor: undefined, limit: 20, parsedSort: [] })
-		expect(result._total).toBeDefined()
-	})
-
-	it("takes only a parsed request or a built query: any other object is a type error", () => {
-		// @ts-expect-error an empty object is neither
-		expect(queryHelpers.countExtra({})._total).toBeDefined()
-		// @ts-expect-error an unrelated object is neither
-		expect(queryHelpers.countExtra({ foo: 1 })._total).toBeDefined()
-	})
-
-	it("reads a built ListQueryResult, the query a repository holds, by its pagination mode", () => {
-		expect(queryHelpers.countExtra(builtAs("cursor"))).toEqual({})
-		expect(queryHelpers.countExtra(builtAs("offset"))._total).toBeDefined()
+describe("queryHelpers.listOptions' extras (Q2, Q3 of r17)", () => {
+	it("select the tiebreak and the count on an offset page, and the tiebreak alone on a cursor one", () => {
+		const first = queryHelpers.listOptions({ limit: 1, parsedSort: [] }, SEALED)
+		expect(Object.keys(first.extras).toSorted()).toEqual(["_combId", "_total"])
+		expect(first.pagination.expects.toSorted()).toEqual(["_combId", "_total"])
+		const cursor = createCursor({ id: 2 }, [], SEALED)
+		const next = queryHelpers.listOptions({ cursor, limit: 1, parsedSort: [] }, SEALED)
+		expect(Object.keys(next.extras)).toEqual(["_combId"])
+		expect(dialect.sqlToQuery(next.extras["_combId"](getTableColumns(post))).sql).toBe('"post"."id"')
 	})
 })
 
@@ -105,7 +98,7 @@ describe("queryHelpers.paginate — items and projection", () => {
 			{ _total: 2, id: "1" },
 			{ _total: 2, id: "2" },
 		]
-		const [resultItems, pagination] = queryHelpers.paginate(items, built({ ...defaultQuery, limit: 5 }, SEALED))
+		const [resultItems, pagination] = queryHelpers.paginate(wired(items), built({ ...defaultQuery, limit: 5 }, SEALED))
 
 		expect(pagination.count).toBe(2)
 		expect(pagination.hasMore).toBe(false)
@@ -119,7 +112,7 @@ describe("queryHelpers.paginate — items and projection", () => {
 			{ _total: 2, id: "1", name: "a" },
 			{ _total: 2, id: "2", name: "b" },
 		]
-		const [resultItems, pagination] = queryHelpers.paginate(items, built({ ...defaultQuery, limit: 5 }, SEALED))
+		const [resultItems, pagination] = queryHelpers.paginate(wired(items), built({ ...defaultQuery, limit: 5 }, SEALED))
 
 		expect(pagination.count).toBe(2)
 		expect(resultItems).toEqual([
@@ -140,7 +133,7 @@ describe("queryHelpers.paginate — projection", () => {
 			{ _total: 10, createdAt: "1", email: "e@f.com", id: "3", name: "c" },
 		]
 		const [resultItems, pagination] = queryHelpers.paginate(
-			items,
+			wired(items),
 			built(
 				{
 					...defaultQuery,
@@ -159,7 +152,7 @@ describe("queryHelpers.paginate — projection", () => {
 	it("returns the full public row when parsedFields is null", () => {
 		const items = [{ _total: 1, id: "1", name: "a" }]
 		const [resultItems] = queryHelpers.paginate(
-			items,
+			wired(items),
 			built({ ...defaultQuery, limit: 10, parsedFields: null }, SEALED),
 		)
 
@@ -169,7 +162,7 @@ describe("queryHelpers.paginate — projection", () => {
 
 /** A one-row page of `rows` under the default query, to call later */
 const onePage = (rows: Array<Record<string, unknown>>) => () =>
-	queryHelpers.paginate(rows, built({ ...defaultQuery, limit: 1 }, SEALED))
+	queryHelpers.paginate(wired(rows), built({ ...defaultQuery, limit: 1 }, SEALED))
 
 describe("queryHelpers.paginate — next cursor and hasMore", () => {
 	it("encodes nextCursor from the pre-project last row", () => {
@@ -179,7 +172,7 @@ describe("queryHelpers.paginate — next cursor and hasMore", () => {
 			{ _total: 3, createdAt: "2024-01-01", id: "a", name: "A" },
 		]
 		const [resultItems, pagination] = queryHelpers.paginate(
-			items,
+			wired(items),
 			built(
 				{
 					limit: 2,
@@ -206,7 +199,7 @@ describe("queryHelpers.paginate — next cursor and hasMore", () => {
 			{ _total: 10, createdAt: "2", id: "2" },
 			{ _total: 10, createdAt: "1", id: "3" },
 		]
-		const [resultItems, pagination] = queryHelpers.paginate(items, built({ ...defaultQuery, limit: 2 }, SEALED))
+		const [resultItems, pagination] = queryHelpers.paginate(wired(items), built({ ...defaultQuery, limit: 2 }, SEALED))
 
 		expect(pagination.hasMore).toBe(true)
 		expect(resultItems).toHaveLength(2)
@@ -215,13 +208,15 @@ describe("queryHelpers.paginate — next cursor and hasMore", () => {
 	it("refuses to mint a cursor from rows without a sort key or the id, a wiring mistake (Q-D7)", () => {
 		expect(onePage([{ id: "1" }, { id: "2" }])).toThrow(
 			expect.objectContaining({
-				cause: "paginate mints the next cursor from each row's createdAt; select them",
+				cause: "paginate mints the next cursor from each row's createdAt; select them, and the built query's extras",
 				errorKey: "sort_not_wired",
 				status: 500,
 			}),
 		)
 		expect(onePage([{ createdAt: "2" }, { createdAt: "1" }])).toThrow(
-			expect.objectContaining({ cause: "paginate mints the next cursor from each row's id; select them" }),
+			expect.objectContaining({
+				cause: "paginate mints the next cursor from each row's _combId; select them, and the built query's extras",
+			}),
 		)
 		expect(onePage([{ createdAt: "1", id: "1" }])).not.toThrow()
 	})
@@ -237,9 +232,9 @@ describe("queryHelpers.paginate — an anchor gone where no bound is safe", () =
 	}
 
 	it("answers invalid_cursor before it reads _total, and strips the flag from a page it serves", () => {
-		const gone = () => queryHelpers.paginate([{ _combAnchorGone: 1, _total: 9, id: 1 }], built(query, SEALED))
+		const gone = () => queryHelpers.paginate(wired([{ _combAnchorGone: 1, _total: 9, id: 1 }]), built(query, SEALED))
 		expect(gone).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
-		const [items] = queryHelpers.paginate([{ _combAnchorGone: 0, id: 1 }], built(query, SEALED))
+		const [items] = queryHelpers.paginate(wired([{ _combAnchorGone: 0, id: 1 }]), built(query, SEALED))
 		expect(items).toEqual([{ id: 1 }])
 	})
 })
@@ -247,13 +242,13 @@ describe("queryHelpers.paginate — an anchor gone where no bound is safe", () =
 describe("queryHelpers.paginate — count and page", () => {
 	it("uses _total from first item", () => {
 		const items = [{ _total: 42, id: "1" }]
-		const [, pagination] = queryHelpers.paginate(items, built({ ...defaultQuery, limit: 10 }, SEALED))
+		const [, pagination] = queryHelpers.paginate(wired(items), built({ ...defaultQuery, limit: 10 }, SEALED))
 
 		expect(pagination.count).toBe(42)
 	})
 
 	it("returns 0 count for empty results", () => {
-		const [resultItems, pagination] = queryHelpers.paginate([], built({ ...defaultQuery, limit: 10 }, SEALED))
+		const [resultItems, pagination] = queryHelpers.paginate(wired([]), built({ ...defaultQuery, limit: 10 }, SEALED))
 
 		expect(pagination.count).toBe(0)
 		expect(pagination.hasMore).toBe(false)
@@ -262,13 +257,13 @@ describe("queryHelpers.paginate — count and page", () => {
 
 	it("respects page parameter", () => {
 		const items = [{ _total: 100, id: "1" }]
-		const [, pagination] = queryHelpers.paginate(items, built({ ...defaultQuery, limit: 10, page: 3 }, SEALED))
+		const [, pagination] = queryHelpers.paginate(wired(items), built({ ...defaultQuery, limit: 10, page: 3 }, SEALED))
 
 		expect(pagination.page).toBe(3)
 	})
 
 	it("defaults page to 1", () => {
-		const [, pagination] = queryHelpers.paginate([], built({ ...defaultQuery, limit: 10 }, SEALED))
+		const [, pagination] = queryHelpers.paginate(wired([]), built({ ...defaultQuery, limit: 10 }, SEALED))
 		expect(pagination.page).toBe(1)
 	})
 })
@@ -281,7 +276,7 @@ describe("queryHelpers.paginate — nextCursor and cursor paging", () => {
 			{ _total: 50, createdAt: "2024-01-01", id: "a" },
 		]
 		const [, pagination] = queryHelpers.paginate(
-			items,
+			wired(items),
 			built(
 				{
 					limit: 2,
@@ -302,7 +297,7 @@ describe("queryHelpers.paginate — nextCursor and cursor paging", () => {
 	it("returns page=null when cursor is present in query", () => {
 		const items = [{ _total: 5, id: "1" }]
 		const [, pagination] = queryHelpers.paginate(
-			items,
+			wired(items),
 			built(
 				{
 					cursor: "some-cursor",
@@ -326,7 +321,7 @@ describe("queryHelpers.paginate — nextCursor edge cases", () => {
 			{ _total: 50, createdAt: "2024-01-01", id: "z" },
 		]
 		const [, pagination] = queryHelpers.paginate(
-			items,
+			wired(items),
 			built(
 				{
 					limit: 2,
@@ -345,7 +340,7 @@ describe("queryHelpers.paginate — nextCursor edge cases", () => {
 
 	it("returns nextCursor null and hasMore false for empty results", () => {
 		const [, pagination] = queryHelpers.paginate(
-			[],
+			wired([]),
 			built(
 				{
 					limit: 10,
@@ -382,13 +377,17 @@ describe("queryHelpers.project", () => {
 })
 
 describe("queryHelpers.paginate — count and the default sort", () => {
-	it("reports null past the end, 0 for an empty first page, and null without countExtra", () => {
-		expect(queryHelpers.paginate([], built({ limit: 2, page: 3, parsedSort: [] }, SEALED))[1].count).toBeNull()
-		expect(queryHelpers.paginate([], built({ limit: 2, page: 1, parsedSort: [] }, SEALED))[1].count).toBe(0)
-		expect(queryHelpers.paginate([{ id: "a" }], built({ limit: 2, parsedSort: [] }, SEALED))[1].count).toBeNull()
+	it("reports null past the end, 0 for an empty first page, the count on an offset page, null on a cursor page", () => {
+		expect(queryHelpers.paginate(wired([]), built({ limit: 2, page: 3, parsedSort: [] }, SEALED))[1].count).toBeNull()
+		expect(queryHelpers.paginate(wired([]), built({ limit: 2, page: 1, parsedSort: [] }, SEALED))[1].count).toBe(0)
 		expect(
-			queryHelpers.paginate([{ _total: 4, id: "a" }], built({ cursor: "c", limit: 2, parsedSort: [] }, SEALED))[1]
-				.count,
+			queryHelpers.paginate(wired([{ _total: 4, id: "a" }]), built({ limit: 2, parsedSort: [] }, SEALED))[1].count,
+		).toBe(4)
+		expect(
+			queryHelpers.paginate(
+				wired([{ _total: 4, id: "a" }]),
+				built({ cursor: "c", limit: 2, parsedSort: [] }, SEALED),
+			)[1].count,
 		).toBeNull()
 	})
 
@@ -397,7 +396,7 @@ describe("queryHelpers.paginate — count and the default sort", () => {
 			{ created_at: 2, id: "b" },
 			{ created_at: 1, id: "a" },
 		]
-		const next = queryHelpers.paginate(rows, built({ limit: 1, parsedSort: [] }, SEALED))[1].nextCursor
+		const next = queryHelpers.paginate(wired(rows), built({ limit: 1, parsedSort: [] }, SEALED))[1].nextCursor
 		expect(openCursor(next as string, SEALED)?.sort).toBe("")
 	})
 })
@@ -436,7 +435,7 @@ describe("queryHelpers.listOptions — a cursor and an empty sort (B2, B3)", () 
 			{ created_at: 20, id: 2 },
 			{ created_at: 10, id: 1 },
 		]
-		const next = queryHelpers.paginate(rows, built(parsed, SEALED))[1].nextCursor as string
+		const next = queryHelpers.paginate(wired(rows), built(parsed, SEALED))[1].nextCursor as string
 		const page = schema.safeParse({ cursor: next, limit: "2" })
 		expect(page.success).toBe(true)
 		expect(() => queryHelpers.listOptions(page.data as typeof parsed, SEALED)).not.toThrow()
@@ -449,11 +448,11 @@ describe("queryHelpers.paginate and the cursor length (Q6)", () => {
 	it("carries a key too long for the cap by reference within it, and refuses it on page 1 of a derived list (R8)", () => {
 		const query = schema.parse({ limit: "1", order: "title.asc" })
 		const long = { id: "a", title: "字".repeat(2100) }
-		const [, byReference] = queryHelpers.paginate([long, { id: "b", title: "x" }], built(query, SEALED))
+		const [, byReference] = queryHelpers.paginate(wired([long, { id: "b", title: "x" }]), built(query, SEALED))
 		expect(byReference.nextCursor?.length).toBeLessThanOrEqual(8192)
 		expect(openCursor(byReference.nextCursor as string, SEALED)?.values[0]).toBeInstanceOf(CursorRef)
 		expect(() =>
-			queryHelpers.paginate([long, { id: "b", title: "x" }], built(query, { ...SEALED, keyset: "derived" })),
+			queryHelpers.paginate(wired([long, { id: "b", title: "x" }]), built(query, { ...SEALED, keyset: "derived" })),
 		).toThrow(
 			expect.objectContaining({
 				cause: expect.stringMatching(
@@ -463,10 +462,10 @@ describe("queryHelpers.paginate and the cursor length (Q6)", () => {
 			}),
 		)
 		const [, meta] = queryHelpers.paginate(
-			[
+			wired([
 				{ id: "a", title: "字".repeat(1050) },
 				{ id: "b", title: "x" },
-			],
+			]),
 			built(query, SEALED),
 		)
 		expect(meta.nextCursor?.length).toBeGreaterThan(4096)

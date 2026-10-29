@@ -5,12 +5,12 @@
  * was minted from, the row read only for what the Date cannot hold, so the list resumes where the
  * old value stood. No test framework is imported, so vitest and bun:test share it.
  */
+import { getTableColumns } from "drizzle-orm"
 import { integer, sqliteTable } from "drizzle-orm/sqlite-core"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
-import { built } from "../../../src/query/__fixtures__/built.ts"
 
 export const event = sqliteTable("event", {
 	at: integer("at", { mode: "timestamp" }).notNull(),
@@ -82,7 +82,7 @@ export const ANCHOR_CASES: readonly AnchorCase[] = [
 /** What a case runs on one engine: its SQL, and drizzle's select over it */
 export type AnchorEngine = {
 	exec(statement: string): Promise<void>
-	db: { select(): { from(table: typeof event): { $dynamic(): never } } }
+	db: { select(fields: object): { from(table: typeof event): { $dynamic(): never } } }
 }
 
 /** Every id the list serves on `engine`, seeded with `rows`, `change` run on the anchor once after the first page */
@@ -93,11 +93,12 @@ export async function servedAround(engine: AnchorEngine, { change, order, rows }
 	let cursor: string | undefined
 	for (let page = 0; page < 12; page++) {
 		const parsed = pairs.parse({ cursor, order })
+		const list = buildListQuery({ ...SEALED, parsed, table: event })
 		const found = await applyListQuery(
-			engine.db.select().from(event).$dynamic(),
-			buildListQuery({ ...SEALED, parsed, table: event }),
+			(extras) => engine.db.select({ ...getTableColumns(event), ...extras }).from(event),
+			list,
 		)
-		const [items, meta] = queryHelpers.paginate(found as Array<{ id: number }>, built(parsed, SEALED))
+		const [items, meta] = queryHelpers.paginate(found as Array<{ id: number }>, list)
 		seen.push(...items.map((row) => row.id))
 		if (page === 0) for (const statement of [change(seen.at(-1) as number)].flat()) await engine.exec(statement)
 		if (meta.nextCursor === null) return seen

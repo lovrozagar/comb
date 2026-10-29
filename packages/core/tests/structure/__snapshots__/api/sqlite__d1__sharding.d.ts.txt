@@ -1,48 +1,124 @@
 // sqlite/d1/sharding/index.d.ts
-export { type MergedListOptions, mergedListOptions, paginateMerged } from "../../../query/merged.ts";
+export { paginateMerged } from "../../../query/merged.ts";
+export type { MergedListQueryResult } from "../../../query/sqlite/build-list-query-types.ts";
 export { ShardRouter } from "./router.ts";
 export { shardMap } from "./shard-map.ts";
 export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, } from "./types.ts";
 
 // query/merged.d.ts
-/**
- * A list whose rows sit on several D1 shards, merged in memory (L2 of the 0.13.0 consumers review).
- * Each shard reads its part through `mergedListOptions`: past the cursor, the page's rows and one
- * more, as `listOptions` reads them; by page number, every row up to the page's end, as any shard
- * may hold any of them. `paginateMerged` then orders the merge as SQLite's ORDER BY does, windows
- * it as the request asks, counts what every shard counted, and mints the next cursor from the
- * page's last row, so the merged list pages as one database's would, by number or by cursor.
- */
-import { type SQL } from "drizzle-orm";
-import type { CursorOptions } from "./cursor-seal.ts";
-import { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
 import { type ListPagination, type PaginationMeta } from "./pagination.ts";
-type MergedQuery = Parameters<typeof queryHelpers.listOptions>[0];
-/** listOptions for one shard: its extras may carry the shard's count beside the gone-anchor flag */
-type MergedListOptions = Omit<DrizzleListOptions, "extras"> & {
-    extras?: Record<string, (table: object) => SQL>;
-};
 /**
- * `listOptions` for one shard of a merged list: a cursor page as `listOptions` reads it, an offset
- * page from the list's first row to the page's last and one more, each row carrying the shard's
- * count, so no countExtra is needed. A page whose window passes
- * `maxRowsPerShard` (1001 by default) is `page_too_deep`: every shard would read every row before it
- */
-declare function mergedListOptions(query: MergedQuery, options: CursorOptions & {
-    maxRowsPerShard?: number | undefined;
-}): MergedListOptions;
-/**
- * The page of a list merged from `rowsPerShard`, each shard's rows read with `mergedListOptions`,
+ * The page of a list merged from `rowsPerShard`, each shard's rows read with `built`,
  * and its pagination, as `paginate` gives one database's: ordered as the list orders, windowed by
  * page or cursor, counted across shards, its next cursor sealed under `options`. Ids must be
  * unique across the shards, as a cursor names its row by id
  */
-declare function paginateMerged<T extends object>(rowsPerShard: ReadonlyArray<ReadonlyArray<T & {
-    _total?: number;
-}>>, built: {
-    pagination: ListPagination;
+declare function paginateMerged<T extends object>(rowsPerShard: ReadonlyArray<readonly T[]>, built: {
+    pagination: ListPagination & {
+        merged: true;
+    };
 }): readonly [T[], PaginationMeta];
-export { type MergedListOptions, mergedListOptions, paginateMerged };
+export { paginateMerged };
+
+// query/sqlite/build-list-query-types.d.ts
+/** The options the SQLite list builders take, and the query they build (build-list-query.ts). Declarations only. */
+import type { SQL, SQLWrapper } from "drizzle-orm";
+import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
+import type { ListPagination } from "../pagination.ts";
+import type { ComputedFilterResolver, ComputedSortResolver, ListQueryInput } from "../types.ts";
+import type { LikeSearchResolver } from "./search.ts";
+import type { RelationConfig } from "./types.ts";
+type BuildListQueryOpts<TTable extends SQLiteTable> = {
+    /** Additional WHERE clause ANDed with filter/cursor — for joins, access filters, soft deletes */
+    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
+    computedFilters?: Record<string, ComputedFilterResolver>;
+    computedSorts?: Record<string, ComputedSortResolver>;
+    /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
+    cursorScope: string;
+    /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
+    cursorSecret: string;
+    /** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL (CursorOptions) */
+    nonFinite?: "exact" | undefined;
+    /**
+     * A list whose rows sit on several D1 shards: every shard reads it with this one query, and
+     * paginateMerged merges what they read (K5 of r17). A page by number reads every row to its end
+     * from each shard, past `maxRowsPerShard` (1001) a 400 `page_too_deep`
+     */
+    merged?: {
+        maxRowsPerShard?: number | undefined;
+    } | undefined;
+    parsed: ListQueryInput;
+    relations?: Record<string, RelationConfig>;
+    /** LIKE-based search resolver — use `likeSearch(column)` factory */
+    search?: LikeSearchResolver;
+    table: TTable;
+};
+type BuildDerivedListQueryOpts<TSortField extends string = string> = {
+    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
+    /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
+    cursorScope: string;
+    /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
+    cursorSecret: string;
+    filterWhere?: SQL | null;
+    parsed: ListQueryInput<TSortField>;
+    searchWhere?: SQL | null;
+    /** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
+    sortColumns: Record<TSortField, SQLWrapper | {
+        sql: SQLWrapper;
+        type: "date";
+    }>;
+} & ({
+    /**
+     * the one table the rows are, by its id column: a sort key too long for a cursor is
+     * carried by reference and read back from it, as on a table's own list (C3)
+     */
+    anchor: {
+        idColumn: SQLiteColumn;
+        table: SQLiteTable;
+    };
+    idColumn?: never;
+} | {
+    anchor?: never;
+    /** the id the order breaks ties on; with no table to read a key back from, a key too long for a cursor is a 500 */
+    idColumn: SQLWrapper;
+});
+/**
+ * The columns a built list's rows must carry beside the app's own, for `paginate` to read: select
+ * them with the rest (`db.select({ ...cols, ...built.extras })`), and paginate strips them (Q2)
+ */
+type ListExtras = {
+    /** 1 when the cursor's anchor row is gone where no bound is safe, which paginate answers invalid_cursor (U26) */
+    _combAnchorGone?: SQL.Aliased<number>;
+    /** the value the list breaks ties on, which the next cursor resumes from; none when no cursor can */
+    _combId?: SQL.Aliased<unknown>;
+    /** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
+    _total?: SQL.Aliased<number>;
+};
+type ListQueryResult = {
+    /** select these beside the row's own columns (ListExtras) */
+    extras: ListExtras;
+    limit: number;
+    /** How `paginate` pages the rows this query reads (pagination.ts) */
+    pagination: ListPagination & {
+        merged: false;
+    };
+    meta: {
+        limit: number;
+        page: number;
+        type: "cursor" | "offset";
+    };
+    offset: number;
+    orderBy: SQL[];
+    search: string | null;
+    where: SQL | undefined;
+};
+/** A merged list's query, which every shard reads and paginateMerged alone pages (K8 of r17) */
+type MergedListQueryResult = Omit<ListQueryResult, "pagination"> & {
+    pagination: ListPagination & {
+        merged: true;
+    };
+};
+export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListExtras, ListQueryResult, MergedListQueryResult };
 
 // sqlite/d1/sharding/router.d.ts
 import type { ShardDbHandle, ShardMapping, ShardMove, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
@@ -224,104 +300,6 @@ interface ShardRouterConfig {
 }
 export type { LogFn, ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx, };
 
-// query/cursor-seal.d.ts
-/** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
-type CursorOptions = {
-    cursorScope: string;
-    cursorSecret: string;
-    /**
-     * "exact" when the driver reads a SQLite REAL's ±Infinity back as Infinity (a local libsql file,
-     * bun:sqlite), so a null cursor is a real NULL and a list whose NULL anchor is deleted resumes
-     * right after it. Unset, as on D1, which reads ±Infinity as null, such a list resumes from the
-     * earliest value the null may stand for, repeating rows and skipping none (U24).
-     */
-    nonFinite?: "exact" | undefined;
-};
-/** The shortest secret a cursor is sealed under, in UTF-8 bytes: the key's length */
-declare const MIN_CURSOR_SECRET_BYTES = 32;
-/** The 32-byte key HKDF-SHA256 derives from `secret`, with no salt and comb's info */
-declare function cursorKey(secret: string): Uint8Array;
-/** Throw the 500 sealing throws when `options` cannot seal a cursor */
-declare function assertCursorWired(options: CursorOptions): void;
-/**
- * `plaintext` sealed under `options`, as base64url, padded with spaces up to a multiple of 256
- * bytes first (U9): AEAD hides the bytes, not their count, and a cursor carries a hidden column's
- * value too. openSealed strips them: what seal takes ends in no space of its own.
- */
-declare function seal(plaintext: Uint8Array, options: CursorOptions): string;
-/** Whether `cursor` has a sealed cursor's shape: what a check without the secret can know */
-declare const isSealedShape: (cursor: string) => boolean;
-/** What `cursor` holds, opened under `options`; null when it was not sealed under both */
-declare function openSealed(cursor: string, options: CursorOptions): Uint8Array | null;
-export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CURSOR_SECRET_BYTES, openSealed, seal };
-
-// query/drizzle.d.ts
-/**
- * Drizzle relational query helpers — thin abstraction for using
- * query-helpers with drizzle's relational query API.
- */
-import { type SQL } from "drizzle-orm";
-import type { CursorOptions } from "./cursor-seal.ts";
-import { extractFilterValue, extractFilterValues } from "./filter-values.ts";
-import { type ListPagination, paginate } from "./pagination.ts";
-import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
-/** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
-type RelationalTable = object;
-type DrizzleListOptions = {
-    limit: number;
-    offset: number;
-    /** The sort, its null placement and the id tiebreak, for `findMany({ orderBy })` */
-    orderBy: (table: RelationalTable) => SQL[];
-    /** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
-    where?: {
-        RAW: (table: RelationalTable) => SQL;
-    };
-    /** Whether the cursor's anchor is gone where no bound is safe, for `findMany({ extras })`: paginate reads it (U26) */
-    extras?: {
-        _combAnchorGone: (table: RelationalTable) => SQL;
-    };
-    /** How `paginate` pages the rows these options read (pagination.ts) */
-    pagination: ListPagination;
-};
-/**
- * The parsed request, or the `ListQueryResult` built from it: what a service or a repository holds.
- * Closed on purpose: a bare `{ cursor? }` took any object, so a wrong argument compiled and counted.
- */
-type CountQuery = {
-    cursor?: string | null | undefined;
-    limit: number;
-    parsedSort: readonly SortField[];
-} | {
-    meta: {
-        type: "cursor" | "offset";
-    };
-};
-/**
- * The `select` extra that counts every row the filter matches, for `paginate` to report. An
- * offset request gets it; a cursor request gets none, because the window would make the
- * database read every remaining row on each page, which is what keyset pagination avoids.
- */
-declare function countExtra(query: CountQuery): {
-    _total?: SQL.Aliased<number>;
-};
-/**
- * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
- * list query schema's output, the cursor opened under `options`: the app's secret and the list's
- * scope. The limit is one over the page so `paginate` can tell there is more.
- */
-declare function drizzleListOptions(query: ListQueryInput, options: CursorOptions): DrizzleListOptions;
-declare function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
-/** List-query helpers for drizzle queries: count, options, pagination, projection */
-declare const queryHelpers: {
-    countExtra: typeof countExtra;
-    filterValue: typeof extractFilterValue;
-    filterValues: typeof extractFilterValues;
-    listOptions: typeof drizzleListOptions;
-    paginate: typeof paginate;
-    project: typeof drizzleProject;
-};
-export { type CursorOptions, type DrizzleListOptions, queryHelpers };
-
 // query/pagination.d.ts
 import { type DecodedCursor } from "./cursor.ts";
 import { type KeysetKind } from "./cursor-mint.ts";
@@ -329,6 +307,10 @@ import { type CursorOptions } from "./cursor-seal.ts";
 import type { paginationResponseSchema } from "./schema.ts";
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
 import type * as z from "zod";
+/** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
+declare const COMB_ID: "_combId";
+/** One column a builder selects for paginate: the tiebreak, the gone-anchor flag, or the count (Q3 of r17) */
+type ListExtra = "_combAnchorGone" | "_combId" | "_total";
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationMeta = z.output<typeof paginationResponseSchema>;
 /** How a built list pages what it fetched */
@@ -338,11 +320,13 @@ type ListPagination = {
     /** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak (Q6) */
     cursorable: boolean;
     cursorScope: string;
-    /** the field a row's tiebreak id is in */
-    idField: string;
+    /** the extras the builder selected, which every row it reads must carry (Q3) */
+    expects: readonly ListExtra[];
     /** how a key too long for a cursor is carried: by reference to its row ("table"), or not at all ("derived") */
     keyset: KeysetKind;
     limit: number;
+    /** read through buildListQuery's `merged`: paged by paginateMerged, never by paginate (K8 of r17) */
+    merged: boolean;
     nonFinite: "exact" | undefined;
     page: number | undefined;
     parsedFields: ParsedFields | null;
@@ -359,13 +343,26 @@ type PaginationFacts = {
     /** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
     byReference?: ReadonlySet<string> | undefined;
     cursorable: boolean;
-    idField?: string | undefined;
+    /** the extras the builder selected, which every row must carry */
+    expects: readonly ListExtra[];
     keyset?: KeysetKind | undefined;
     query: ListQueryInput;
     window: number;
 };
 /** The descriptor a builder hands over: its facts, and the options it seals under closed over, never held */
-declare function paginationOf(options: CursorOptions, facts: PaginationFacts): ListPagination;
+declare function paginationOf<TMerged extends boolean = false>(options: CursorOptions, facts: PaginationFacts & {
+    merged?: TMerged | undefined;
+}): ListPagination & {
+    merged: TMerged;
+};
+/** The count an offset page's row carries, which refuseUnwired holds every such row to */
+declare const totalOf: (row: object) => number;
+/**
+ * Rows that lack an extra their builder selected were read without the built query's extras, and
+ * an absent flag or count would be read as none: a page_not_wired, whether or not the page needs
+ * it yet (Q3 of r17)
+ */
+declare function refuseUnwired(items: readonly object[], pagination: ListPagination): void;
 /** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
 declare function refuseGoneAnchor(items: readonly object[]): void;
 /**
@@ -373,64 +370,29 @@ declare function refuseGoneAnchor(items: readonly object[]): void;
  * public subset. No-op (minus `_total`) when parsedFields is null.
  */
 declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
-/** `built` as paginate takes it, or a 500 naming the call: a parsed query in its place is the call before 0.15 */
-declare function paginationIn(built: {
-    pagination: ListPagination;
-} | undefined): ListPagination;
+/**
+ * `built` as paginate (or, `merged`, paginateMerged) takes it, or a 500 naming the call: a parsed
+ * query in its place is the call before 0.15, and a merged list's pages are paginateMerged's alone
+ */
+declare function paginationIn<TMerged extends boolean>(built: {
+    pagination: ListPagination & {
+        merged: TMerged;
+    };
+} | undefined, merged: TMerged): ListPagination & {
+    merged: TMerged;
+};
 /** More rows than the built query reads are rows of another query: one that applied no limit (C2) */
 declare function refuseOverRead(count: number, pagination: ListPagination): void;
 /**
  * The page of `items`, read with `built`, and its pagination: count, whether there is more, and
  * the next cursor, sealed under the builder's options; none for a list no cursor can resume
  */
-declare function paginate<T extends object>(items: ReadonlyArray<T & {
-    _total?: number;
-}>, built: {
-    pagination: ListPagination;
+declare function paginate<T extends object>(items: readonly T[], built: {
+    pagination: ListPagination & {
+        merged: false;
+    };
 }): readonly [T[], PaginationMeta];
-export { applySelect, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, };
-
-// sqlite/columns.d.ts
-/**
- * Unified column factories for SQLite
- *
- * Provides dialect-agnostic column definitions that can be swapped with PostgreSQL
- */
-import { type $Type, type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
-import { type SQLiteBooleanBuilder, type SQLiteIntegerBuilder, type SQLiteRealBuilder, type SQLiteTextBuilder, type SQLiteTextJsonBuilder } from "drizzle-orm/sqlite-core";
-import type * as z from "zod";
-import type { EnumOptions, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "./constraints.ts";
-type Text = SQLiteTextBuilder<[string, ...string[]]>;
-type CreatedAtName = "createdAt" | "created_at";
-type DeletedAtName = "deletedAt" | "deleted_at";
-type UpdatedAtName = "updatedAt" | "updated_at";
-/** What each `c` factory returns: drizzle's own builder types, spelled out for isolated declarations */
-export type SqliteColumns = {
-    boolean: (name: string) => SQLiteBooleanBuilder;
-    createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => HasDefault<NotNull<SQLiteIntegerBuilder>>;
-    deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
-    enum: <T extends readonly string[]>(name: string, _values: T, _options?: EnumOptions<T[number]>) => $Type<Text, T[number]>;
-    id: (_prefix: string) => IsPrimaryKey<Text>;
-    integer: (name: string, _constraints?: IntegerConstraints) => SQLiteIntegerBuilder;
-    json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) => $Type<SQLiteTextJsonBuilder, z.infer<TSchema>>;
-    real: (name: string, _constraints?: IntegerConstraints) => SQLiteRealBuilder;
-    ref: (name: string, _constraints?: TextConstraints) => Text;
-    serialId: () => IsPrimaryKey<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
-    text: (name: string, _constraints?: TextConstraints) => Text;
-    timestamp: (name: string, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
-    updatedAt: (name: UpdatedAtName, _constraints?: TimestampConstraints) => HasDefault<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
-};
-export declare const c: SqliteColumns;
-export {};
-
-// query/filter-values.d.ts
-/** The values a filter names for one field or several: queryHelpers.filterValue and filterValues */
-import type { FilterAST } from "./types.ts";
-/** Extract a single filter value from FilterAST */
-declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
-/** Extract multiple filter values from FilterAST */
-declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
-export { extractFilterValue, extractFilterValues };
+export { applySelect, COMB_ID, type ListExtra, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/types.d.ts
 /**
@@ -501,6 +463,146 @@ type ListQueryCapabilities = {
     sortFields: Set<string>;
 };
 export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ListQueryInput, ParsedFields, SortDirection, SortField, SortNulls, };
+
+// query/sqlite/search.d.ts
+/**
+ * FTS5 + spellfix search helpers for SQLite. User text is bound, never spliced: each term becomes
+ * a quoted prefix phrase (`"term"*`), in which FTS5 reads no syntax, and identifiers go through quoteIdent.
+ */
+import { type SQL } from "drizzle-orm";
+import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
+/**
+ * A search term as its quoted phrase searches it: every word and character kept, as FTS5 reads
+ * none of them as syntax inside the quotes, control characters removed. "" when no letter or digit
+ * is left, as no token matches it. Quotes stay: the phrase builder escapes them where it quotes the term.
+ */
+declare function sanitizeFtsTerm(term: string): string;
+/**
+ * `<fts table> MATCH ?`, every term required; null for an empty query, no row for one only FTS
+ * syntax spells. `folded` when the FTS table indexes a searchText column: each term is folded so
+ */
+declare function buildFtsMatch(ftsTableName: string, query: string | null, { folded }?: {
+    folded?: boolean | undefined;
+}): SQL | null;
+/**
+ * A table and the FTS5 table that indexes it by rowid (external content, `content_rowid` its
+ * rowid or its integer key)
+ */
+type FtsSource = {
+    /**
+     * The FTS table indexes a searchText column (`_search`): each term is folded with searchText as
+     * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it (U16)
+     */
+    folded?: boolean | undefined;
+    ftsTable: string;
+    table: SQLiteTable;
+};
+/**
+ * The rows of `source.table` whose FTS entry matches every term; null for an empty query, no row
+ * for one only FTS syntax spells
+ */
+declare function buildFtsWhere(source: FtsSource, query: string | null): SQL | null;
+/** `highlight()` of one FTS column, its marker tags bound */
+declare function buildFtsHighlight(ftsTableName: string, columnIndex: number, tags: {
+    end: string;
+    start: string;
+}): SQL;
+type SpellfixRow = {
+    word: string;
+};
+type SpellfixDb = {
+    all: (query: SQL) => Promise<Array<SpellfixRow>>;
+};
+type SpellfixSearch = FtsSource & {
+    /** editdist3 bound below which a word counts as a correction (default 300) */
+    maxEditDistance?: number;
+    /** corrections taken per term (default 3) */
+    maxCorrections?: number;
+    spellfixTable: string;
+};
+/**
+ * Like buildFtsWhere, with each term of three or more characters widened by its spellfix1
+ * corrections: every term is required, each matched by itself or any of its corrections.
+ */
+declare function buildFtsWhereWithSpellfix(db: SpellfixDb, search: SpellfixSearch, query: string | null): Promise<SQL | null>;
+/**
+ * Resolver that converts a raw search string into a LIKE WHERE clause.
+ * Returns null when input is empty — callers can skip the clause entirely.
+ */
+type LikeSearchResolver = (q: string) => SQL | null;
+/**
+ * The text a `_search` column stores for `parts`, and what likeSearch folds each term to: the
+ * present parts joined by a space, compatibility forms folded (ＦＩＬＥ, ﬁ), lowercased, Greek final
+ * sigma ς as σ (so a letter folds the same wherever it stands), combining marks removed but those
+ * that make a Cyrillic letter (й, ї, ё), the Latin letters with no decomposition spelled in ASCII
+ * (ß ss, æ ae, œ oe, ø o, ł l, đ and ð d, þ th, ı i, ĸ k, ŋ n, ŧ t, ħ h), then composed again (NFC),
+ * so й and Hangul syllables stay whole. Write the column with it, so the reader and the writer
+ * are one function.
+ */
+declare function searchText(...parts: Array<string | null | undefined>): string;
+/**
+ * Factory for LIKE-based search on a `_search` column that searchText wrote, or any SQL expression
+ * that holds such text. Each whitespace-separated term is folded by searchText and trimmed, and
+ * kept only when it holds a letter or digit, as FTS keeps its terms: a mark alone folds to nothing
+ * or a space, and would match every row. Each term is found with `instr`, both sides already
+ * folded, so no LIKE pattern is built and none meets D1's 50-byte pattern cap (U21); every term is
+ * required. A query whose terms all fold away matches no row, as FTS answers it.
+ */
+declare function likeSearch(column: SQLiteColumn | SQL): LikeSearchResolver;
+export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, likeSearch, type LikeSearchResolver, sanitizeFtsTerm, searchText, type SpellfixDb, type SpellfixSearch, };
+
+// query/sqlite/types.d.ts
+/**
+ * SQLite-specific query types.
+ */
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+/**
+ * A many-to-many relation a filter reaches through a join table: `through.throughSourceKey`
+ * references the main table's `sourceKey` (its primary key unless named), and
+ * `through.throughTargetKey` references `target.targetKey`. Every key is a column's property name.
+ */
+type RelationConfig = {
+    sourceKey?: string | undefined;
+    target: SQLiteTable;
+    targetKey: string;
+    through: SQLiteTable;
+    throughSourceKey: string;
+    throughTargetKey: string;
+};
+export type { RelationConfig };
+
+// sqlite/columns.d.ts
+/**
+ * Unified column factories for SQLite
+ *
+ * Provides dialect-agnostic column definitions that can be swapped with PostgreSQL
+ */
+import { type $Type, type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
+import { type SQLiteBooleanBuilder, type SQLiteIntegerBuilder, type SQLiteRealBuilder, type SQLiteTextBuilder, type SQLiteTextJsonBuilder } from "drizzle-orm/sqlite-core";
+import type * as z from "zod";
+import type { EnumOptions, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "./constraints.ts";
+type Text = SQLiteTextBuilder<[string, ...string[]]>;
+type CreatedAtName = "createdAt" | "created_at";
+type DeletedAtName = "deletedAt" | "deleted_at";
+type UpdatedAtName = "updatedAt" | "updated_at";
+/** What each `c` factory returns: drizzle's own builder types, spelled out for isolated declarations */
+export type SqliteColumns = {
+    boolean: (name: string) => SQLiteBooleanBuilder;
+    createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => HasDefault<NotNull<SQLiteIntegerBuilder>>;
+    deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
+    enum: <T extends readonly string[]>(name: string, _values: T, _options?: EnumOptions<T[number]>) => $Type<Text, T[number]>;
+    id: (_prefix: string) => IsPrimaryKey<Text>;
+    integer: (name: string, _constraints?: IntegerConstraints) => SQLiteIntegerBuilder;
+    json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) => $Type<SQLiteTextJsonBuilder, z.infer<TSchema>>;
+    real: (name: string, _constraints?: IntegerConstraints) => SQLiteRealBuilder;
+    ref: (name: string, _constraints?: TextConstraints) => Text;
+    serialId: () => IsPrimaryKey<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
+    text: (name: string, _constraints?: TextConstraints) => Text;
+    timestamp: (name: string, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
+    updatedAt: (name: UpdatedAtName, _constraints?: TimestampConstraints) => HasDefault<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
+};
+export declare const c: SqliteColumns;
+export {};
 
 // query/cursor.d.ts
 import { type CursorOptions } from "./cursor-seal.ts";
@@ -593,8 +695,8 @@ export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, ef
 // query/cursor-mint.d.ts
 import type { CursorOptions } from "./cursor-seal.ts";
 import type { SortField } from "./types.ts";
-/** paginate's choice for an overflowing key: by reference on a table, refused on a derived list */
-type KeysetKind = "derived" | "table";
+/** paginate's choice for an overflowing key: by reference on a table, refused on a derived or a merged list */
+type KeysetKind = "derived" | "merged" | "table";
 /**
  * Mint the cursor for the row after which the next page starts, as `paginate` does: its longest
  * string values carried by reference while it passes the cap that `readCursor` holds; a 500 on a
@@ -606,6 +708,37 @@ declare function createCursor(row: Record<string, unknown>, sort: readonly SortF
     keyset?: KeysetKind | undefined;
 }): string;
 export { createCursor, type KeysetKind };
+
+// query/cursor-seal.d.ts
+/** What seals and opens the cursors of one list: the app's secret, and the list's scope (route plus tenant) */
+type CursorOptions = {
+    cursorScope: string;
+    cursorSecret: string;
+    /**
+     * "exact" when the driver reads a SQLite REAL's ±Infinity back as Infinity (a local libsql file,
+     * bun:sqlite), so a null cursor is a real NULL and a list whose NULL anchor is deleted resumes
+     * right after it. Unset, as on D1, which reads ±Infinity as null, such a list resumes from the
+     * earliest value the null may stand for, repeating rows and skipping none (U24).
+     */
+    nonFinite?: "exact" | undefined;
+};
+/** The shortest secret a cursor is sealed under, in UTF-8 bytes: the key's length */
+declare const MIN_CURSOR_SECRET_BYTES = 32;
+/** The 32-byte key HKDF-SHA256 derives from `secret`, with no salt and comb's info */
+declare function cursorKey(secret: string): Uint8Array;
+/** Throw the 500 sealing throws when `options` cannot seal a cursor */
+declare function assertCursorWired(options: CursorOptions): void;
+/**
+ * `plaintext` sealed under `options`, as base64url, padded with spaces up to a multiple of 256
+ * bytes first (U9): AEAD hides the bytes, not their count, and a cursor carries a hidden column's
+ * value too. openSealed strips them: what seal takes ends in no space of its own.
+ */
+declare function seal(plaintext: Uint8Array, options: CursorOptions): string;
+/** Whether `cursor` has a sealed cursor's shape: what a check without the secret can know */
+declare const isSealedShape: (cursor: string) => boolean;
+/** What `cursor` holds, opened under `options`; null when it was not sealed under both */
+declare function openSealed(cursor: string, options: CursorOptions): Uint8Array | null;
+export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CURSOR_SECRET_BYTES, openSealed, seal };
 
 // query/schema.d.ts
 /**

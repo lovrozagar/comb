@@ -71,7 +71,7 @@ async function ids(filter: string, computedFilters = { "@score": score }): Promi
 	const db = await seeded()
 	const parsed = schema.parse({ filter, limit: "100", order: "id.asc" })
 	const query = buildListQuery({ ...SEALED, computedFilters, parsed, table: post })
-	const rows = await applyListQuery(db.select({ id: post.id }).from(post).$dynamic(), query)
+	const rows = await applyListQuery((extras) => db.select({ id: post.id, ...extras }).from(post), query)
 	return rows.map((row) => row.id)
 }
 
@@ -198,7 +198,7 @@ INSERT INTO post_tag VALUES (1, 3, 10), (2, 5, 10), (3, 1, 20);${extra}`)
 	const parsed = tagged.parse({ filter, limit: "100", order: "id.asc" })
 	const relations = { tags: relation as never }
 	const query = buildListQuery({ ...SEALED, parsed, relations, table: post })
-	const rows = await applyListQuery(db.select({ id: post.id }).from(post).$dynamic(), query)
+	const rows = await applyListQuery((extras) => db.select({ id: post.id, ...extras }).from(post), query)
 	return rows.map((row) => row.id)
 }
 
@@ -252,7 +252,7 @@ async function eventIds(filter: string): Promise<number[]> {
 INSERT INTO event VALUES (1, 1, 1000, '1970-01-01'), (2, 5, 5000, '1970-01-01'), (3, 9, 9000, '1970-01-01');`)
 	const parsed = events.parse({ filter, limit: "100", order: "id.asc" })
 	const query = buildListQuery({ ...SEALED, parsed, table: event })
-	const rows = await applyListQuery(harness.db.select({ id: event.id }).from(event).$dynamic(), query)
+	const rows = await applyListQuery((extras) => harness.db.select({ id: event.id, ...extras }).from(event), query)
 	return rows.map((row) => row.id)
 }
 
@@ -315,9 +315,9 @@ INSERT INTO link VALUES (1, 2), (3, 1);`)
 		const names = async (filter: string) => {
 			const parsed = linked.parse({ filter, limit: "100", order: "id.asc" })
 			const query = buildListQuery({ ...SEALED, parsed, relations: { related }, table: item })
-			return (await applyListQuery(harness.db.select({ name: item.name }).from(item).$dynamic(), query)).map(
-				(r) => r.name,
-			)
+			return (
+				await applyListQuery((extras) => harness.db.select({ name: item.name, ...extras }).from(item), query)
+			).map((r) => r.name)
 		}
 		expect(await names("related.name.eq.beta")).toEqual(["alpha"])
 		expect(await names("related.name.eq.alpha")).toEqual(["gamma"])

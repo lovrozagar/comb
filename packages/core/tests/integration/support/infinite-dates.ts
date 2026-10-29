@@ -5,13 +5,12 @@
  * infinity, the direction's own end once it is gone. Every order is paged through both builders,
  * one and two rows at a time. No test framework is imported, so vitest and bun:test share it.
  */
-import { defineRelations } from "drizzle-orm"
+import { defineRelations, getTableColumns } from "drizzle-orm"
 import { integer, sqliteTable } from "drizzle-orm/sqlite-core"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
-import { built } from "../../../src/query/__fixtures__/built.ts"
 
 export const moment = sqliteTable("moment", {
 	at: integer("at", { mode: "timestamp" }),
@@ -44,7 +43,7 @@ export type MomentPage = (
 	limit: number,
 ) => Promise<{ ids: number[]; next: string | null }>
 
-type Builder = { select(): { from(table: typeof moment): { $dynamic(): never } } }
+type Builder = { select(fields: object): { from(table: typeof moment): { $dynamic(): never } } }
 type Relational = { query: { moment: { findMany(options: never): Promise<unknown[]> } } }
 
 /** A page read through buildListQuery */
@@ -52,11 +51,12 @@ export const momentsViaBuilder =
 	(db: Builder): MomentPage =>
 	async (order, cursor, limit) => {
 		const parsed = schema.parse({ cursor, limit: String(limit), order })
+		const list = buildListQuery({ ...SEALED, parsed, table: moment })
 		const rows = await applyListQuery(
-			db.select().from(moment).$dynamic(),
-			buildListQuery({ ...SEALED, parsed, table: moment }),
+			(extras) => db.select({ ...getTableColumns(moment), ...extras }).from(moment),
+			list,
 		)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(parsed, SEALED))
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, list)
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 
@@ -65,8 +65,9 @@ export const momentsViaRelational =
 	(db: Relational): MomentPage =>
 	async (order, cursor, limit) => {
 		const query = { ...schema.parse({ limit: String(limit), order }), cursor }
-		const rows = await db.query.moment.findMany(queryHelpers.listOptions(query, SEALED) as never)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(query, SEALED))
+		const listed = queryHelpers.listOptions(query, SEALED)
+		const rows = await db.query.moment.findMany(listed as never)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, listed)
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 

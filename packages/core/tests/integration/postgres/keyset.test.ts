@@ -40,21 +40,13 @@ describe("keyset pagination on a microsecond timestamp (Q2)", () => {
 			for (let page = 0; page < 8; page++) {
 				const options = queryHelpers.listOptions({ ...query, cursor }, SEALED)
 				const rows = await db.query.item.findMany({
+					extras: options.extras,
 					limit: options.limit,
 					offset: options.offset,
 					orderBy: options.orderBy,
 					where: options.where,
 				} as never)
-				const [items, meta] = queryHelpers.paginate(
-					rows as Array<{ created: Date; id: number; name: string }>,
-					pagedAs(
-						{
-							...query,
-							cursor,
-						},
-						SEALED,
-					),
-				)
+				const [items, meta] = queryHelpers.paginate(rows as Array<{ created: Date; id: number; name: string }>, options)
 				seen.push(...items.map((row) => row.name))
 				if (!meta.hasMore || meta.nextCursor === null) break
 				cursor = meta.nextCursor
@@ -85,15 +77,13 @@ describe("keyset pagination on a bigint id (Q5)", () => {
 		for (let page = 0; page < 5; page++) {
 			const options = queryHelpers.listOptions({ ...query, cursor }, SEALED)
 			const rows = await db.query.big.findMany({
+				extras: options.extras,
 				limit: options.limit,
 				offset: options.offset,
 				orderBy: options.orderBy,
 				where: options.where,
 			} as never)
-			const [items, meta] = queryHelpers.paginate(
-				rows as Array<{ id: bigint; name: string }>,
-				pagedAs({ ...query, cursor }, SEALED),
-			)
+			const [items, meta] = queryHelpers.paginate(rows as Array<{ id: bigint; name: string }>, options)
 			seen.push(...items.map((row) => row.id))
 			if (!meta.hasMore || meta.nextCursor === null) break
 			cursor = meta.nextCursor
@@ -123,8 +113,9 @@ describe("keyset pagination on a bigint key past 2^53 read in number mode (U22)"
 		let cursor: string | undefined
 		for (let page = 0; page < 12; page++) {
 			const query = { ...counterSchema.parse({ order }), cursor }
-			const rows = await db.query.counter.findMany(queryHelpers.listOptions(query, SEALED) as never)
-			const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; n: number }>, pagedAs(query, SEALED))
+			const listed = queryHelpers.listOptions(query, SEALED)
+			const rows = await db.query.counter.findMany(listed as never)
+			const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; n: number }>, listed)
 			seen.push(...items.map((row) => row.id))
 			if (meta.nextCursor === null) break
 			cursor = meta.nextCursor

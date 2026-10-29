@@ -2,7 +2,7 @@
 /**
  * @lovrozagar/comb/query/sqlite — SQLite-specific SQL generation.
  */
-export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryResult, } from "./build-list-query.ts";
+export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListExtras, type ListQueryResult, type MergedListQueryResult, } from "./build-list-query.ts";
 export { conditionToSQL, filterToSQL } from "./executor.ts";
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts";
 export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts";
@@ -16,11 +16,16 @@ export type { ListQueryInput } from "../types.ts";
 
 // query/sqlite/build-list-query.d.ts
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
-import type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryResult } from "./build-list-query-types.ts";
-declare function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable>): ListQueryResult;
+import type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListExtras, ListQueryResult, MergedListQueryResult } from "./build-list-query-types.ts";
+declare function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable> & {
+    merged: NonNullable<BuildListQueryOpts<TTable>["merged"]>;
+}): MergedListQueryResult;
+declare function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable> & {
+    merged?: undefined;
+}): ListQueryResult;
 declare function buildDerivedListQuery<TSortField extends string>(opts: BuildDerivedListQueryOpts<TSortField>): ListQueryResult;
 export { applyListQuery } from "./apply-list-query.ts";
-export { buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryResult, };
+export { buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListExtras, type ListQueryResult, type MergedListQueryResult, };
 
 // query/sqlite/executor.d.ts
 /**
@@ -385,6 +390,14 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
     cursorSecret: string;
     /** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL (CursorOptions) */
     nonFinite?: "exact" | undefined;
+    /**
+     * A list whose rows sit on several D1 shards: every shard reads it with this one query, and
+     * paginateMerged merges what they read (K5 of r17). A page by number reads every row to its end
+     * from each shard, past `maxRowsPerShard` (1001) a 400 `page_too_deep`
+     */
+    merged?: {
+        maxRowsPerShard?: number | undefined;
+    } | undefined;
     parsed: ListQueryInput;
     relations?: Record<string, RelationConfig>;
     /** LIKE-based search resolver — use `likeSearch(column)` factory */
@@ -398,8 +411,6 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
     /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
     cursorSecret: string;
     filterWhere?: SQL | null;
-    /** the field a row's id is in, which paginate mints the next cursor from (default `id`) */
-    idField?: string | undefined;
     parsed: ListQueryInput<TSortField>;
     searchWhere?: SQL | null;
     /** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
@@ -422,10 +433,26 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
     /** the id the order breaks ties on; with no table to read a key back from, a key too long for a cursor is a 500 */
     idColumn: SQLWrapper;
 });
+/**
+ * The columns a built list's rows must carry beside the app's own, for `paginate` to read: select
+ * them with the rest (`db.select({ ...cols, ...built.extras })`), and paginate strips them (Q2)
+ */
+type ListExtras = {
+    /** 1 when the cursor's anchor row is gone where no bound is safe, which paginate answers invalid_cursor (U26) */
+    _combAnchorGone?: SQL.Aliased<number>;
+    /** the value the list breaks ties on, which the next cursor resumes from; none when no cursor can */
+    _combId?: SQL.Aliased<unknown>;
+    /** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
+    _total?: SQL.Aliased<number>;
+};
 type ListQueryResult = {
+    /** select these beside the row's own columns (ListExtras) */
+    extras: ListExtras;
     limit: number;
     /** How `paginate` pages the rows this query reads (pagination.ts) */
-    pagination: ListPagination;
+    pagination: ListPagination & {
+        merged: false;
+    };
     meta: {
         limit: number;
         page: number;
@@ -436,12 +463,18 @@ type ListQueryResult = {
     search: string | null;
     where: SQL | undefined;
 };
-export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryResult };
+/** A merged list's query, which every shard reads and paginateMerged alone pages (K8 of r17) */
+type MergedListQueryResult = Omit<ListQueryResult, "pagination"> & {
+    pagination: ListPagination & {
+        merged: true;
+    };
+};
+export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListExtras, ListQueryResult, MergedListQueryResult };
 
 // query/sqlite/apply-list-query.d.ts
-/** The one way a built list query reaches a drizzle select: its WHERE, ORDER BY, LIMIT and OFFSET. */
+/** The one way a built list query reaches a drizzle select: its extras, WHERE, ORDER BY, LIMIT and OFFSET. */
 import type { SQL } from "drizzle-orm";
-import type { ListQueryResult } from "./build-list-query.ts";
+import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts";
 /** A builder whose methods return its own type, as drizzle's select does once made dynamic */
 type ListQueryAppliable<TQuery> = {
     limit: (limit: number) => TQuery;
@@ -449,14 +482,17 @@ type ListQueryAppliable<TQuery> = {
     orderBy: (...orderBy: SQL[]) => TQuery;
     where: (where: SQL) => TQuery;
 };
+/** What a built list, a single database's or a merged one's, reads with: its pagination is paginate's */
+type ListQuery = Pick<ListQueryResult, "extras" | "limit" | "offset" | "orderBy" | "where">;
 /**
- * `query` with the list's WHERE, ORDER BY, LIMIT and OFFSET applied: a builder whose methods return
- * its own type, or drizzle's select as it is, made dynamic here (C12 of the 0.14.1 review)
+ * The select `select` builds over the built query's extras (the tiebreak, the count, the gone-anchor
+ * flag paginate reads, K9 of r17), with the list's WHERE, ORDER BY, LIMIT and OFFSET applied:
+ * drizzle's select as it is, made dynamic here, or a builder whose methods return its own type
  */
-declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult): TQuery;
-declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: {
+declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(select: (extras: ListExtras) => {
     $dynamic(): TQuery;
-}, q: ListQueryResult): TQuery;
+}, q: ListQuery): TQuery;
+declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(select: (extras: ListExtras) => TQuery, q: ListQuery): TQuery;
 export { applyListQuery, type ListQueryAppliable };
 
 // query/pagination.d.ts
@@ -466,6 +502,10 @@ import { type CursorOptions } from "./cursor-seal.ts";
 import type { paginationResponseSchema } from "./schema.ts";
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
 import type * as z from "zod";
+/** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
+declare const COMB_ID: "_combId";
+/** One column a builder selects for paginate: the tiebreak, the gone-anchor flag, or the count (Q3 of r17) */
+type ListExtra = "_combAnchorGone" | "_combId" | "_total";
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationMeta = z.output<typeof paginationResponseSchema>;
 /** How a built list pages what it fetched */
@@ -475,11 +515,13 @@ type ListPagination = {
     /** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak (Q6) */
     cursorable: boolean;
     cursorScope: string;
-    /** the field a row's tiebreak id is in */
-    idField: string;
+    /** the extras the builder selected, which every row it reads must carry (Q3) */
+    expects: readonly ListExtra[];
     /** how a key too long for a cursor is carried: by reference to its row ("table"), or not at all ("derived") */
     keyset: KeysetKind;
     limit: number;
+    /** read through buildListQuery's `merged`: paged by paginateMerged, never by paginate (K8 of r17) */
+    merged: boolean;
     nonFinite: "exact" | undefined;
     page: number | undefined;
     parsedFields: ParsedFields | null;
@@ -496,13 +538,26 @@ type PaginationFacts = {
     /** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
     byReference?: ReadonlySet<string> | undefined;
     cursorable: boolean;
-    idField?: string | undefined;
+    /** the extras the builder selected, which every row must carry */
+    expects: readonly ListExtra[];
     keyset?: KeysetKind | undefined;
     query: ListQueryInput;
     window: number;
 };
 /** The descriptor a builder hands over: its facts, and the options it seals under closed over, never held */
-declare function paginationOf(options: CursorOptions, facts: PaginationFacts): ListPagination;
+declare function paginationOf<TMerged extends boolean = false>(options: CursorOptions, facts: PaginationFacts & {
+    merged?: TMerged | undefined;
+}): ListPagination & {
+    merged: TMerged;
+};
+/** The count an offset page's row carries, which refuseUnwired holds every such row to */
+declare const totalOf: (row: object) => number;
+/**
+ * Rows that lack an extra their builder selected were read without the built query's extras, and
+ * an absent flag or count would be read as none: a page_not_wired, whether or not the page needs
+ * it yet (Q3 of r17)
+ */
+declare function refuseUnwired(items: readonly object[], pagination: ListPagination): void;
 /** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
 declare function refuseGoneAnchor(items: readonly object[]): void;
 /**
@@ -510,22 +565,29 @@ declare function refuseGoneAnchor(items: readonly object[]): void;
  * public subset. No-op (minus `_total`) when parsedFields is null.
  */
 declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
-/** `built` as paginate takes it, or a 500 naming the call: a parsed query in its place is the call before 0.15 */
-declare function paginationIn(built: {
-    pagination: ListPagination;
-} | undefined): ListPagination;
+/**
+ * `built` as paginate (or, `merged`, paginateMerged) takes it, or a 500 naming the call: a parsed
+ * query in its place is the call before 0.15, and a merged list's pages are paginateMerged's alone
+ */
+declare function paginationIn<TMerged extends boolean>(built: {
+    pagination: ListPagination & {
+        merged: TMerged;
+    };
+} | undefined, merged: TMerged): ListPagination & {
+    merged: TMerged;
+};
 /** More rows than the built query reads are rows of another query: one that applied no limit (C2) */
 declare function refuseOverRead(count: number, pagination: ListPagination): void;
 /**
  * The page of `items`, read with `built`, and its pagination: count, whether there is more, and
  * the next cursor, sealed under the builder's options; none for a list no cursor can resume
  */
-declare function paginate<T extends object>(items: ReadonlyArray<T & {
-    _total?: number;
-}>, built: {
-    pagination: ListPagination;
+declare function paginate<T extends object>(items: readonly T[], built: {
+    pagination: ListPagination & {
+        merged: false;
+    };
 }): readonly [T[], PaginationMeta];
-export { applySelect, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, };
+export { applySelect, COMB_ID, type ListExtra, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/cursor.d.ts
 import { type CursorOptions } from "./cursor-seal.ts";
@@ -618,8 +680,8 @@ export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, ef
 // query/cursor-mint.d.ts
 import type { CursorOptions } from "./cursor-seal.ts";
 import type { SortField } from "./types.ts";
-/** paginate's choice for an overflowing key: by reference on a table, refused on a derived list */
-type KeysetKind = "derived" | "table";
+/** paginate's choice for an overflowing key: by reference on a table, refused on a derived or a merged list */
+type KeysetKind = "derived" | "merged" | "table";
 /**
  * Mint the cursor for the row after which the next page starts, as `paginate` does: its longest
  * string values carried by reference while it passes the cap that `readCursor` holds; a 500 on a

@@ -3,6 +3,7 @@
  * whose only `*` are at its ends are fixed texts, found by instr, substr or `=`, which no cap
  * limits; a pattern with an inner `*` over the cap is the client's to shorten, a 400 naming it.
  */
+import { getTableColumns } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
@@ -44,7 +45,8 @@ async function ids(params: Record<string, string>, parse = schema.parse): Promis
 		search: likeSearch(post._search),
 		table: post,
 	})
-	const rows = await applyListQuery(drizzle(harness.CORE).select().from(post).$dynamic(), query)
+	const db = drizzle((harness as NonNullable<typeof harness>).CORE)
+	const rows = await applyListQuery((extras) => db.select({ ...getTableColumns(post), ...extras }).from(post), query)
 	return rows.map((row) => row.id)
 }
 

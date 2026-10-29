@@ -9,7 +9,9 @@ export {
 	buildListQuery,
 	type BuildDerivedListQueryOpts,
 	type BuildListQueryOpts,
+	type ListExtras,
 	type ListQueryResult,
+	type MergedListQueryResult,
 } from "./build-list-query.ts"
 
 /* SQL generation internals (used by buildListQuery, available for advanced use) */

@@ -1,20 +1,23 @@
-import { and, getTableColumns, sql, type SQL } from "drizzle-orm"
+import { getTableColumns, sql, type SQL } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
-import { CURSOR_TIEBREAK_COLUMN, type CursorOptions } from "../cursor.ts"
-import { assertCursorWired } from "../cursor-seal.ts"
-import { paginationOf } from "../pagination.ts"
-import type { ComputedSortResolver, FilterAST, ListQueryInput, SortField } from "../types.ts"
-import { readsBack } from "./cursor-fit.ts"
+import { CURSOR_TIEBREAK_COLUMN } from "../cursor.ts"
+import type { ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
-import { assertPageWithin, assertSchemaParsed } from "../trusted.ts"
+import { assertSchemaParsed } from "../trusted.ts"
 import { DateKey } from "./cursor-fit.ts"
-import { cursorWhere } from "./cursor-where.ts"
 import { orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
+import { finish, type Keyset } from "./list-finish.ts"
 import type { LikeSearchResolver } from "./search.ts"
-import type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryResult } from "./build-list-query-types.ts"
+import type {
+	BuildDerivedListQueryOpts,
+	BuildListQueryOpts,
+	ListExtras,
+	ListQueryResult,
+	MergedListQueryResult,
+} from "./build-list-query-types.ts"
 
 function isFilterAST(v: unknown): v is FilterAST {
 	return typeof v === "object" && v !== null && "root" in v
@@ -34,88 +37,8 @@ function buildFilterWhere(
 	})
 }
 
-function combineWhere(...clauses: (SQL | null | undefined)[]): SQL | undefined {
-	const valid = clauses.filter((c): c is SQL => c !== null && c !== undefined)
-	if (valid.length === 0) return undefined
-	if (valid.length === 1) return valid[0]
-	return and(...valid)
-}
-
 function resolveBaseWhere(baseWhere: BuildListQueryOpts<SQLiteTable>["baseWhere"]): SQL | undefined {
 	return typeof baseWhere === "function" ? baseWhere(sql) : baseWhere
-}
-
-type Keyset = {
-	/** Present only when every key is a real column a predicate can compare. */
-	keys: SortKey[] | null
-	orderBy: SQL[]
-}
-
-type Finish = {
-	cursor: CursorOptions
-	/** the field a row's id is in, for the next cursor */
-	idField?: string | undefined
-	/** the table a cursor's references are read from; none on a derived list */
-	table?: SQLiteTable | undefined
-	keyset: Keyset
-	parsed: ListQueryInput
-	sort: readonly SortField[]
-	/** null when the table has no tiebreak column, so no cursor can be honored */
-	tiebreak: SortKey | null
-	where: Array<SQL | null | undefined>
-}
-
-/**
- * Shared tail of both builders: cursor predicate, pagination mode, result shape.
- * `keys` null means the order includes something keyset cannot express.
- */
-function finish({ cursor: options, idField, keyset, parsed, sort, table, tiebreak, where }: Finish): ListQueryResult {
-	assertCursorWired(options)
-	const search = parsed.q?.trim() || null
-	/* a computed sort, or no tiebreak, leaves nothing a cursor can resume from: the list pages by number (Q6) */
-	const pagination = paginationOf(options, {
-		cursorable: keyset.keys !== null && tiebreak !== null,
-		idField,
-		keyset: table === undefined ? "derived" : "table",
-		/* the sort fields a reference reads back on, by the rule the cursor's read holds (27.7) */
-		byReference: new Set(
-			(keyset.keys ?? []).flatMap(({ column }, i) => (readsBack(column, table) ? [sort[i]?.field as string] : [])),
-		),
-		query: parsed,
-		window: parsed.limit + 1,
-	})
-
-	if (parsed.cursor) {
-		if (!keyset.keys || !tiebreak) {
-			throw new CombError({
-				cause: "Cursor pagination needs every sort key to be a column; use page instead",
-				errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
-				status: "bad_request",
-			})
-		}
-		const after = cursorWhere({ cursor: parsed.cursor, keys: keyset.keys, options, sort, table, tiebreak })
-		return {
-			limit: parsed.limit + 1,
-			meta: { limit: parsed.limit, page: 1, type: "cursor" },
-			offset: 0,
-			orderBy: keyset.orderBy,
-			pagination,
-			search,
-			where: combineWhere(...where, after),
-		}
-	}
-
-	assertPageWithin(parsed)
-	const page = parsed.page ?? 1
-	return {
-		limit: parsed.limit + 1,
-		meta: { limit: parsed.limit, page, type: "offset" },
-		offset: (page - 1) * parsed.limit,
-		orderBy: keyset.orderBy,
-		pagination,
-		search,
-		where: combineWhere(...where),
-	}
 }
 
 /** A sort the schema accepted but this table cannot run is a wiring mistake, not a reason to reorder */
@@ -166,7 +89,15 @@ function searchWhere(q: string | undefined, search: LikeSearchResolver | undefin
 	})
 }
 
-function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable>): ListQueryResult {
+function buildListQuery<TTable extends SQLiteTable>(
+	opts: BuildListQueryOpts<TTable> & { merged: NonNullable<BuildListQueryOpts<TTable>["merged"]> },
+): MergedListQueryResult
+function buildListQuery<TTable extends SQLiteTable>(
+	opts: BuildListQueryOpts<TTable> & { merged?: undefined },
+): ListQueryResult
+function buildListQuery<TTable extends SQLiteTable>(
+	opts: BuildListQueryOpts<TTable>,
+): ListQueryResult | MergedListQueryResult {
 	const { parsed, table } = opts
 	assertSchemaParsed(parsed)
 	const columns = getTableColumns(table) as Record<string, SQLiteColumn>
@@ -191,9 +122,18 @@ function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTa
 		orderBy: tiebreak ? [...planned.orderBy, orderSQL(tiebreak)] : planned.orderBy,
 	}
 
+	/*
+	 * a merged list reads a null anchor as a real NULL (Q1 of the 0.14.1 review): its row is on one
+	 * shard only, so every other reads it as gone, and resuming such a shard at -Infinity would repeat
+	 * its rows. A row D1 reads back as null that holds ±Infinity comes back out of its shard's order,
+	 * which paginateMerged refuses
+	 */
+	const nonFinite = opts.merged === undefined ? opts.nonFinite : "exact"
+	/* finish built the pagination its `merged` says: a merged list's query is paged by paginateMerged alone */
 	return finish({
-		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret, nonFinite: opts.nonFinite },
+		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret, nonFinite },
 		keyset,
+		merged: opts.merged,
 		parsed,
 		table,
 		sort,
@@ -203,7 +143,7 @@ function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTa
 			buildFilterWhere(parsed.filterAst, table, opts),
 			searchWhere(parsed.q?.trim(), opts.search),
 		],
-	})
+	}) as ListQueryResult | MergedListQueryResult
 }
 
 function buildDerivedListQuery<TSortField extends string>(
@@ -223,14 +163,13 @@ function buildDerivedListQuery<TSortField extends string>(
 
 	return finish({
 		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret },
-		idField: opts.idField,
 		keyset: { keys, orderBy },
 		parsed: opts.parsed,
 		sort,
 		table: opts.anchor?.table,
 		tiebreak,
 		where: [resolveBaseWhere(opts.baseWhere), opts.filterWhere, opts.searchWhere],
-	})
+	}) as ListQueryResult
 }
 
 export { applyListQuery } from "./apply-list-query.ts"
@@ -239,5 +178,7 @@ export {
 	buildListQuery,
 	type BuildDerivedListQueryOpts,
 	type BuildListQueryOpts,
+	type ListExtras,
 	type ListQueryResult,
+	type MergedListQueryResult,
 }

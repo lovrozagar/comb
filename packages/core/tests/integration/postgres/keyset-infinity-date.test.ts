@@ -147,9 +147,13 @@ describe("keyset pagination on a date-mode timestamptz or date holding ±infinit
 		const inOrder = await seeded(sessions, INFINITE("tz"))
 		expect(await inOrder("tz.asc")).toHaveLength(8)
 		const query = schema.parse({ order: "tz.asc" })
-		const row = { id: 1, tz: new Date(Number.NaN) }
+		const row = { _combId: 1, id: 1, tz: new Date(Number.NaN) }
 		expect(() => queryHelpers.paginate([row, row], built(query, { ...SEALED, keyset: "derived" }))).toThrow(
-			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
+			expect.objectContaining({
+				cause: expect.stringMatching(/^the sort by tz reads a date no JS Date holds/),
+				errorKey: "sort_not_wired",
+				status: 500,
+			}),
 		)
 	})
 })

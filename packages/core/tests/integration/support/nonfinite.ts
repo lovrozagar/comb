@@ -5,14 +5,13 @@
  * NULL-keyed anchor between pages: deleted, or set to 5, the list resumes from where the NULL stood.
  * No test framework is imported, so vitest and bun:test share it.
  */
-import { defineRelations } from "drizzle-orm"
+import { defineRelations, getTableColumns } from "drizzle-orm"
 import { integer, real, sqliteTable } from "drizzle-orm/sqlite-core"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import type { CursorOptions } from "../../../src/query/cursor-seal.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
-import { built } from "../../../src/query/__fixtures__/built.ts"
 
 export const point = sqliteTable("point", { id: integer("id").primaryKey(), x: real("x") })
 export const pointRelations = defineRelations({ point })
@@ -38,7 +37,7 @@ export type Engine = {
 /** One page under `order` after `cursor`: its ids and the next cursor */
 export type Page = (order: string, cursor: string | undefined) => Promise<{ ids: number[]; next: string | null }>
 
-type Builder = { select(): { from(table: typeof point): { $dynamic(): never } } }
+type Builder = { select(fields: object): { from(table: typeof point): { $dynamic(): never } } }
 type Relational = { query: { point: { findMany(options: never): Promise<unknown[]> } } }
 
 /** A page read through buildListQuery */
@@ -46,11 +45,9 @@ export const viaBuilder =
 	(db: Builder, options: CursorOptions = SEALED): Page =>
 	async (order, cursor) => {
 		const parsed = schema.parse({ cursor, order })
-		const rows = await applyListQuery(
-			db.select().from(point).$dynamic(),
-			buildListQuery({ ...options, parsed, table: point }),
-		)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(parsed, options))
+		const list = buildListQuery({ ...options, parsed, table: point })
+		const rows = await applyListQuery((extras) => db.select({ ...getTableColumns(point), ...extras }).from(point), list)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, list)
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 
@@ -59,8 +56,9 @@ export const viaRelational =
 	(db: Relational, options: CursorOptions = SEALED): Page =>
 	async (order, cursor) => {
 		const query = { ...schema.parse({ order }), cursor }
-		const rows = await db.query.point.findMany(queryHelpers.listOptions(query, options) as never)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(query, options))
+		const listed = queryHelpers.listOptions(query, options)
+		const rows = await db.query.point.findMany(listed as never)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, listed)
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 

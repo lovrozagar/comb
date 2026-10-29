@@ -4,7 +4,7 @@
  * renamed between pages resumes where its old value stood; a deleted one resumes from the prefix.
  */
 import { drizzle } from "drizzle-orm/d1"
-import { defineRelations } from "drizzle-orm"
+import { defineRelations, getTableColumns } from "drizzle-orm"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
@@ -47,7 +47,7 @@ async function seeded(): Promise<{ d1: D1Harness["CORE"]; pages: Record<"buildLi
 			buildListQuery: async (order, cursor) => {
 				const parsed = schema.parse({ cursor, order })
 				const rows = await applyListQuery(
-					db.select().from(doc).$dynamic(),
+					(extras) => db.select({ ...getTableColumns(doc), ...extras }).from(doc),
 					buildListQuery({ ...SEALED, parsed, table: doc }),
 				)
 				const [items, meta] = queryHelpers.paginate(rows, built(parsed, SEALED))

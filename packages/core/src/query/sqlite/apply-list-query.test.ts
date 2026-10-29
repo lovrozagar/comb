@@ -19,6 +19,7 @@ function recorder() {
 }
 
 const query = (where: ListQueryResult["where"]): ListQueryResult => ({
+	extras: {},
 	limit: 3,
 	meta: { limit: 2, page: 1, type: "offset" },
 	offset: 0,
@@ -32,17 +33,25 @@ const query = (where: ListQueryResult["where"]): ListQueryResult => ({
 describe("applyListQuery", () => {
 	it("applies the WHERE, ORDER BY, LIMIT and OFFSET to a builder, the WHERE only when the list has one", () => {
 		const builder = recorder()
-		applyListQuery(builder, query(sql`x = 1`))
+		applyListQuery(() => builder, query(sql`x = 1`))
 		expect(builder.calls).toEqual(["where", "orderBy 2", "limit 3", "offset 0"])
 		const bare = recorder()
-		applyListQuery(bare, query(undefined))
+		applyListQuery(() => bare, query(undefined))
 		expect(bare.calls).toEqual(["orderBy 2", "limit 3", "offset 0"])
 	})
 
 	it("makes a builder dynamic first when it can be", () => {
 		const builder = recorder()
 		const select = { $dynamic: () => (builder.calls.push("$dynamic"), builder) }
-		expect(applyListQuery(select, query(undefined))).toBe(builder)
+		expect(applyListQuery(() => select, query(undefined))).toBe(builder)
 		expect(builder.calls).toEqual(["$dynamic", "orderBy 2", "limit 3", "offset 0"])
+	})
+
+	/* K9 of r17: the select is built over the extras, so the count and the cursor's id cannot be left out */
+	it("builds the select over the built query's extras", () => {
+		const extras = { _total: sql<number>`count(*) over()`.as("_total") }
+		let given: unknown
+		applyListQuery((selected) => ((given = selected), recorder()), { ...query(undefined), extras })
+		expect(given).toBe(extras)
 	})
 })

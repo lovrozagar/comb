@@ -2,7 +2,7 @@
  * D1 binds at most 100 parameters per statement. The largest request the list query schema
  * accepts, by the caps it publishes, must still run there.
  */
-import { inArray, type SQL } from "drizzle-orm"
+import { getTableColumns, inArray, type SQL } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { afterEach, describe, expect, it } from "vitest"
@@ -78,7 +78,9 @@ describe("the worst-case accepted list request runs on D1 (S-11)", () => {
 			table: post,
 		})
 		const db = drizzle(harness.CORE)
-		await expect(applyListQuery(db.select().from(post).$dynamic(), query)).resolves.toEqual([])
+		await expect(
+			applyListQuery((extras) => db.select({ ...getTableColumns(post), ...extras }).from(post), query),
+		).resolves.toEqual([])
 	})
 
 	/* U1 of the 0.12 round: a key the cursor carries by reference keeps within the same budget */
@@ -90,8 +92,11 @@ describe("the worst-case accepted list request runs on D1 (S-11)", () => {
 				"CREATE TABLE post (id integer PRIMARY KEY, title text NOT NULL, minute_read integer NOT NULL, created_at integer NOT NULL, _search text NOT NULL)",
 			)
 			const sort = schema.parse({ order }).parsedSort
-			const row = { created_at: 1, id: 1, minute_read: 1, title: "長".repeat(3000) }
-			const [, meta] = queryHelpers.paginate([row, { ...row, id: 2 }], built({ limit: 1, parsedSort: sort }, SEALED))
+			const row = { _combId: 1, created_at: 1, id: 1, minute_read: 1, title: "長".repeat(3000) }
+			const [, meta] = queryHelpers.paginate(
+				[row, { ...row, _combId: 2, id: 2 }],
+				built({ limit: 1, parsedSort: sort }, SEALED),
+			)
 			const result = schema.safeParse({ cursor: meta.nextCursor, filter: largestFilter(), order, q: longestSearch() })
 			expect(result.success).toBe(true)
 			const query = buildListQuery({
@@ -101,7 +106,9 @@ describe("the worst-case accepted list request runs on D1 (S-11)", () => {
 				table: post,
 			})
 			const db = drizzle(harness.CORE)
-			await expect(applyListQuery(db.select().from(post).$dynamic(), query)).resolves.toEqual([])
+			await expect(
+				applyListQuery((extras) => db.select({ ...getTableColumns(post), ...extras }).from(post), query),
+			).resolves.toEqual([])
 		},
 	)
 })
@@ -142,11 +149,16 @@ describe("the worst accepted list request by prefix and suffix filters (Q2)", ()
 				table: post,
 			})
 		const db = drizzle(harness.CORE)
-		expect(applyListQuery(db.select().from(post).$dynamic(), build()).toSQL().params.length).toBeLessThanOrEqual(80)
+		expect(
+			applyListQuery((extras) => db.select({ ...getTableColumns(post), ...extras }).from(post), build()).toSQL().params
+				.length,
+		).toBeLessThanOrEqual(80)
 		const twenty = inArray(
 			post.minute_read,
 			Array.from({ length: 20 }, (_, i) => i),
 		)
-		await expect(applyListQuery(db.select().from(post).$dynamic(), build(twenty))).resolves.toEqual([])
+		await expect(
+			applyListQuery((extras) => db.select({ ...getTableColumns(post), ...extras }).from(post), build(twenty)),
+		).resolves.toEqual([])
 	})
 })

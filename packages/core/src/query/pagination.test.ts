@@ -4,7 +4,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { SEALED } from "./__fixtures__/cursor-secret.ts"
 import { queryHelpers } from "./drizzle.ts"
-import { mergedListOptions, paginateMerged } from "./merged.ts"
+import { paginateMerged } from "./merged.ts"
 import { paginate } from "./pagination.ts"
 import { createListQuerySchema } from "./schema.ts"
 import { buildDerivedListQuery, buildListQuery } from "./sqlite/build-list-query.ts"
@@ -12,9 +12,9 @@ import { buildDerivedListQuery, buildListQuery } from "./sqlite/build-list-query
 const post = sqliteTable("post", { id: integer("id").primaryKey(), title: text("title") })
 const schema = createListQuerySchema({ pagination: { defaultLimit: 2, maxLimit: 10 }, sort: ["title", "@views"] })
 const rows = [
-	{ id: 1, title: "a" },
-	{ id: 2, title: "b" },
-	{ id: 3, title: "c" },
+	{ _combId: 1, _total: 3, id: 1, title: "a" },
+	{ _combId: 2, _total: 3, id: 2, title: "b" },
+	{ _combId: 3, _total: 3, id: 3, title: "c" },
 ]
 
 /* Q6 of the 0.14.1 review: a computed sort leaves nothing a cursor can resume from */
@@ -49,7 +49,8 @@ describe("paginate on more rows than the built query reads", () => {
 				status: 500,
 			}),
 		)
-		expect(() => paginateMerged([rows], built)).toThrow(expect.objectContaining({ errorKey: "page_not_wired" }))
+		const merged = buildListQuery({ ...SEALED, merged: {}, parsed: schema.parse({ limit: "1" }), table: post })
+		expect(() => paginateMerged([rows], merged)).toThrow(expect.objectContaining({ errorKey: "page_not_wired" }))
 	})
 })
 
@@ -66,7 +67,7 @@ describe("a built query, as a log or a response would show it", () => {
 				sortColumns: { "@views": post.id, title: post.title },
 			}),
 			queryHelpers.listOptions(parsed, SEALED),
-			mergedListOptions(parsed, SEALED),
+			buildListQuery({ ...SEALED, merged: {}, parsed, table: post }),
 		]
 		const secret = SEALED.cursorSecret
 		const parts = [secret, secret.slice(0, 12), secret.slice(-12)]

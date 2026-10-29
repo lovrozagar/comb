@@ -5,7 +5,7 @@
  * every row comes back once, in the order one query gives.
  */
 import { createClient } from "@libsql/client"
-import { sql } from "drizzle-orm"
+import { getTableColumns, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
@@ -13,7 +13,6 @@ import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
-import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const item = sqliteTable("item", {
 	at: integer("at", { mode: "timestamp_ms" }).notNull(),
@@ -59,8 +58,9 @@ async function pageAll(
 	let cursor: string | undefined
 	for (let guard = 0; guard < 6; guard++) {
 		const parsed = schema.parse({ cursor, order })
-		const rows = await applyListQuery(db.select().from(table).$dynamic(), buildListQuery({ ...SEALED, parsed, table }))
-		const [items, pagination] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
+		const list = buildListQuery({ ...SEALED, parsed, table })
+		const rows = await applyListQuery((extras) => db.select({ ...getTableColumns(table), ...extras }).from(table), list)
+		const [items, pagination] = queryHelpers.paginate(rows, list)
 		ids.push(...items.map((row) => String(row.id)))
 		if (pagination.nextCursor === null) return ids
 		cursor = pagination.nextCursor
@@ -105,14 +105,14 @@ describe("a cursor fits what the driver returned (R3)", () => {
 						sortColumns: { latest },
 					})
 					const query = db
-						.select({ id: item.t, latest: sql<number>`max(${item.at})` })
+						.select({ id: item.t, latest: sql<number>`max(${item.at})`, ...built.extras })
 						.from(item)
 						.groupBy(item.t)
 						.$dynamic()
 					const rows = await (built.where ? query.having(built.where) : query)
 						.orderBy(...built.orderBy)
 						.limit(built.limit)
-					const [items, pagination] = queryHelpers.paginate(rows, pagedAs({ limit: 2, parsedSort: sort }, SEALED))
+					const [items, pagination] = queryHelpers.paginate(rows, built)
 					ids.push(...items.map((row) => row.id))
 					if (pagination.nextCursor === null) break
 					cursor = pagination.nextCursor
