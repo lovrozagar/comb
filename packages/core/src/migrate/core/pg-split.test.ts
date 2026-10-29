@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { atlasChunks } from "./atlas-scan.ts"
+import { classifyMigration } from "./classify.ts"
 import { atlasFile, pgRead, pgStatements } from "./pg-split.ts"
 
 describe("pgStatements: a Postgres file as the statements Postgres runs", () => {
@@ -74,5 +75,18 @@ describe("atlasFile: statements written so Atlas sends each one alone", () => {
 		expect(() => atlasFile(["SELECT E'a\\'b'"])).toThrow(
 			`comb cannot write these statements so that Atlas sends each alone: ["SELECT E'a\\\\'b'"]`,
 		)
+	})
+})
+
+/* P1 of the 0.14.1 review: Atlas sends a chunk's text without its lead, and Postgres nests block comments where Atlas does not */
+describe("pgRead: a chunk's leading comments, which Atlas does not send", () => {
+	const file = "/* a /* b */ DELETE FROM users WHERE email <> '*/ SELECT 1 --';\n"
+
+	it("parses the text Postgres runs, not the lead before it", () => {
+		expect(pgRead(file).statements[0]?.tree?.[0]).toHaveProperty("stmt.DeleteStmt")
+	})
+
+	it("rates the statement Postgres runs", () => {
+		expect(classifyMigration(file, { dialect: "postgres" }).safety).toBe("unsafe")
 	})
 })

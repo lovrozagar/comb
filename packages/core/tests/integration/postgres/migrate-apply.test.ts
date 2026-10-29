@@ -134,6 +134,24 @@ describe("migrate apply on Postgres", () => {
 	})
 })
 
+/* P1 of the 0.14.1 review: a leading comment Postgres reads as nested hides the DELETE Atlas sends it */
+describe("migrate apply on Postgres rates what Postgres runs", () => {
+	describe("with Atlas v1.3.0", () => {
+		it("refuses a DELETE a nested leading comment hides, without approval, applying nothing", async () => {
+			await withScratchDb(async (url) => {
+				migrations({
+					"20260101000000_a.sql":
+						"CREATE TABLE users (id int PRIMARY KEY, email text);\nINSERT INTO users VALUES (1, 'a'), (2, 'b');\n",
+				})
+				await applyWithAtlas(command(url))
+				migrations({ "20260102000000_note.sql": "/* a /* b */ DELETE FROM users WHERE email <> '*/ SELECT 1 --';\n" })
+				await expect(applyWithAtlas(command(url))).rejects.toThrow("20260102000000_note.sql is unsafe")
+				expect(await revisions(url)).toEqual(["20260101000000"])
+			})
+		}, 60_000)
+	})
+})
+
 describe("migrate check on Postgres reads only (M11)", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("checks a database with no history without creating Atlas's revisions schema on it", async () => {

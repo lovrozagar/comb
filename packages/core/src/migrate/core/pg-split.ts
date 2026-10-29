@@ -28,11 +28,15 @@ type PgRead = { statements: PgStatement[]; unreadable: Unreadable | undefined }
 /** A migration file as its dialect reads it: a Postgres file always with its one parse (M86) */
 type FileRead = { dialect: "sqlite"; sql: string } | { dialect: "postgres"; read: PgRead; sql: string }
 
-/** The statements Postgres reads in one chunk, the comments before it kept on the first */
+/**
+ * The statements Postgres reads in one chunk, the comments before it kept on the first. Atlas
+ * sends the chunk's text without its lead, and Postgres nests block comments where Atlas's split
+ * does not, so the text alone is parsed: a lead can never hide what runs (P1 of the 0.14.1 review)
+ */
 function readChunk(chunk: Chunk): Read {
 	/* the parser is loaded, or this throws before a chunk is read as unreadable */
 	postgresParser()
-	const source = chunk.lead === "" ? chunk.text : `${chunk.lead}\n${chunk.text}`
+	const source = chunk.text
 	/* an empty chunk, as two delimiters in a row send, is no statement; the parser refuses it */
 	if (source === "") return { statements: [] }
 	let stmts: RawStmt[]
@@ -48,7 +52,10 @@ function readChunk(chunk: Chunk): Read {
 		const text = decoder.decode(bytes.subarray(from, length === 0 ? bytes.length : from + length)).trim()
 		return { text, tree: [stmt] }
 	})
-	return { statements: statements.filter(({ text }) => text !== "") }
+	const read = statements.filter(({ text }) => text !== "")
+	const [first] = read
+	if (first !== undefined && chunk.lead !== "") first.text = `${chunk.lead}\n${first.text}`
+	return { statements: read }
 }
 
 /** A migration file's leading `atlas:` directive lines, with the blank lines after them */
