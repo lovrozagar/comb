@@ -637,7 +637,7 @@ status.in.(draft,sent)  list values
 @computed.eq.1          computed field (resolved by your resolver)
 ```
 
-Operators: `eq`, `ne`/`neq`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`, `like`, `ilike`, `is`. `parseFilter` also reads `contains` for a caller that validates and runs it itself (JSON-array membership, say); no declared field type takes it. `is` takes `null` and `notnull` (any case) on every field, and `true` and `false` on a `boolean` one.
+Operators: `eq`, `ne`/`neq`, `gt`, `gte`, `lt`, `lte`, `in`, `nin`, `like`, `ilike`, `is`. `contains`, membership in a JSON array, is no declared type's default: a field spec lists it (see below), and `filterToSQL` runs it on SQLite. `is` takes `null` and `notnull` (any case) on every field, and `true` and `false` on a `boolean` one.
 
 A value that holds `,`, `(`, `)` or `.` is written in double quotes, PostgREST style: `title.eq."Hello, world"`, `title.in.("a,b",c)`; inside quotes `\"` and `\\` escape. Whitespace around a bare value is trimmed.
 
