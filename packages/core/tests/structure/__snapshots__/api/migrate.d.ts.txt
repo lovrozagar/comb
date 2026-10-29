@@ -836,6 +836,8 @@ declare function preview(stmt: string): string;
  * such a table holds only an index of rows kept elsewhere
  */
 declare function reindexedOf(statements: readonly string[]): Set<string>;
+/** Whether `sql` runs outside a transaction: it starts with `-- atlas:txmode none` and a blank line, which Atlas needs */
+declare const outsideTransaction: (sql: string) => boolean;
 /** A statement as the gate read it: its code, its text, and the dialect it was read as */
 type ReadStatement = {
     code: string;
@@ -844,7 +846,7 @@ type ReadStatement = {
 };
 /** Refuses a statement that cannot run in its file `sql`: no `-- comb:allow-unsafe:` overrides this */
 declare function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): void;
-export { ftsCommandFindings, preview, type ReadStatement, refuseUnrunnable, reindexedOf };
+export { ftsCommandFindings, outsideTransaction, preview, type ReadStatement, refuseUnrunnable, reindexedOf };
 
 // migrate/drivers/bun-sqlite.d.ts
 import type { MemoryDb } from "./memory.ts";

@@ -99,4 +99,4 @@ function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): 
 	}
 }
 
-export { ftsCommandFindings, preview, type ReadStatement, refuseUnrunnable, reindexedOf }
+export { ftsCommandFindings, outsideTransaction, preview, type ReadStatement, refuseUnrunnable, reindexedOf }

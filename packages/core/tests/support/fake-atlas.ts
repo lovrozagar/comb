@@ -9,6 +9,8 @@ import type { Run, RunResult } from "../../src/migrate/core/process.ts"
 
 const ok = (stdout = ""): RunResult => ({ code: 0, stderr: "", stdout })
 const fail = (stderr: string, stdout = ""): RunResult => ({ code: 1, stderr, stdout })
+/** Atlas's apply report when it ran no file */
+const NOTHING: RunResult = ok(JSON.stringify({ applied: null, error: "", target: "" }))
 const file = (name: string) => ({ Description: name.split("_")[1], Name: name, Version: name.split("_")[0] })
 /* a revision as Atlas records one of the fixture's files: 1_a.sql, 2_b.sql */
 const revision = (version: string, more: Record<string, unknown> = {}) => ({
@@ -29,6 +31,8 @@ type Answers = {
 	inspect?: RunResult
 	schemaDiff?: RunResult
 	status?: RunResult
+	/** status once an apply ran, as another apply or a skipped file leaves it; `status` until then */
+	statusAfterApply?: RunResult
 }
 type Fake = Run & {
 	calls: Array<{ args: string[]; env: Readonly<Record<string, string | undefined>> | undefined }>
@@ -40,6 +44,7 @@ type Fake = Run & {
 function fakeAtlas(answers: Answers): Fake {
 	const calls: Fake["calls"] = []
 	const replayed: string[] = []
+	let applied = false
 	const run: Run = (_cmd, args, runOptions) => {
 		calls.push({ args: [...args], env: runOptions?.env })
 		if (args[1] === "hash") {
@@ -52,14 +57,16 @@ function fakeAtlas(answers: Answers): Fake {
 			)
 			return ok()
 		}
-		if (args[1] === "status") return answers.status ?? ok("{}")
+		if (args[1] === "status") return (applied ? answers.statusAfterApply : undefined) ?? answers.status ?? ok("{}")
 		if (args[1] === "inspect") return answers.inspect ?? ok("{}")
 		if (args[0] === "schema") {
 			const to = (args[args.indexOf("--to") + 1] as string).replace("file://", "")
 			replayed.push(...sqlFiles(to).map((name) => readFileSync(join(to, name), "utf8")))
 			return answers.schemaDiff ?? ok("Schemas are synced, no changes to be made.\n")
 		}
-		return args.includes("--dry-run") ? (answers.dryRun ?? ok("{}")) : (answers.apply ?? ok("{}"))
+		if (args.includes("--dry-run")) return answers.dryRun ?? NOTHING
+		applied = true
+		return answers.apply ?? NOTHING
 	}
 	return Object.assign(run, { calls, replayed })
 }

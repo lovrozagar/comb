@@ -16,10 +16,19 @@ import type { Approval } from "./approval.ts"
 import { snapshotDir, sqlFiles } from "./atlas-dir.ts"
 import { adopted, adopts, proveAdoption, sharedPrefix } from "./atlas-adopt.ts"
 import { execOrder, type Foreign, foreignRows, ignoredLines, ownHistory } from "./atlas-foreign.ts"
-import { type AtlasFile, type AtlasStatus, checkHistory, fileOf, filesOf, versionOf } from "./atlas-history.ts"
+import {
+	type AtlasFile,
+	type AtlasRevision,
+	type AtlasStatus,
+	checkHistory,
+	fileOf,
+	filesOf,
+	versionOf,
+} from "./atlas-history.ts"
 import { refuseUnclean } from "./atlas-clean.ts"
-import { explainAtlasFailure, NOT_CLEAN, SHARED_REVISIONS } from "./atlas-target.ts"
-import { atlas, type AtlasCommand, atlasStatus, json, NO_HISTORY, type Ran, scrubbing } from "./atlas-status.ts"
+import { APPLY_FORMAT, reported } from "./atlas-report.ts"
+import { NOT_CLEAN, SHARED_REVISIONS } from "./atlas-target.ts"
+import { atlas, type AtlasCommand, atlasStatus, NO_HISTORY, scrubbing } from "./atlas-status.ts"
 import { type ObjectsCompare, refuseDrift, refuseObjectDrift } from "./baseline-compare.ts"
 import { extractSchema, parseRead } from "./parse.ts"
 import { run } from "./process.ts"
@@ -28,8 +37,6 @@ import { loadPostgresParser } from "./pg-parser.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { pgRead } from "./pg-split.ts"
 import { schemaOfRead } from "./schema.ts"
-
-const APPLY_FORMAT = '{"target":{{ json .Target }},"applied":{{ json .Applied }},"error":{{ json .Error }}}'
 
 type ApplyOptions = AtlasCommand & {
 	/** whether a classified migration may run: approval.ts's rule, asking a person when it must */
@@ -113,24 +120,15 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 	}
 }
 
-type ApplyReport = { applied: Array<{ Error?: { Stmt: string; Text: string }; Name: string }>; error: string }
-
-/** The apply's result: the files it applied, or the file and statement that failed */
-function applied(ran: Ran): string[] {
-	if (ran.stdout.trim() === "") throw new Error(`atlas migrate apply: ${ran.said}`)
-	const report = json<ApplyReport>(ran.stdout, "apply")
-	const failed = report.applied.find((file) => file.Error !== undefined)
-	if (failed?.Error !== undefined) {
-		const { Stmt, Text } = failed.Error
-		throw new Error(
-			`${failed.Name} failed at ${ran.scrub(Stmt)}: ${ran.scrub(Text)}. It was rolled back; the files before it stay applied`,
-		)
+/** After an apply that ran no file and said nothing: done once another apply ran them, refused while any is pending (P8) */
+function ranNothing(options: AtlasCommand, copy: string, foreign: Foreign): string[] {
+	const { pending } = ownHistory(atlasStatus(options, copy), foreign, copy)
+	if (pending.length > 0) {
+		const names = pending.map((file) => file.Name).join(", ")
+		throw new Error(`atlas migrate apply ran nothing and reported no error, yet still pending: ${names}`)
 	}
-	if (ran.code !== 0 || report.error !== "")
-		throw new Error(
-			`atlas migrate apply: ${report.error === "" ? ran.said : explainAtlasFailure(report.error, ran.scrub)}`,
-		)
-	return report.applied.map((file) => file.Name)
+	options.print("No migrations to apply")
+	return []
 }
 
 /** Apply the pending migrations of `options.dir` through Atlas; returns the files applied, or only checked */
@@ -163,11 +161,16 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 			refuseUnclean({ exec: options.exec ?? run, target: options.target })
 		else {
 			const dry = atlas(options, copy, ["apply", "--dry-run", ...execOrder(foreign), "--format", APPLY_FORMAT])
-			if (dry.code !== 0) throw new Error(dry.said)
+			reported(dry, "apply --dry-run", copy)
 		}
 		await approvePending(options, copy, status.pending)
 		if (options.checkOnly === true) return status.pending.map((file) => file.Name)
-		const files = applied(atlas(options, copy, ["apply", ...execOrder(foreign), "--format", APPLY_FORMAT]))
+		const files = reported(
+			atlas(options, copy, ["apply", ...execOrder(foreign), "--format", APPLY_FORMAT]),
+			"apply",
+			copy,
+		)
+		if (files.length === 0) return ranNothing(options, copy, foreign)
 		for (const name of files) options.print(`Apply: ${name}`)
 		return files
 	} finally {
@@ -195,6 +198,9 @@ async function onSnapshotAsync<T>(options: AtlasCommand, body: (copy: string) =>
 	}
 }
 
+/** The version of the last revision `status` records, which Atlas's current is not when it holds its placeholder (P20) */
+const lastVersion = (status: AtlasStatus): string => (status.applied.at(-1) as AtlasRevision).version
+
 const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
 
 /**
@@ -210,7 +216,7 @@ async function baselineWithAtlas(
 		const status = atlasStatus(options, copy, { notClean: true })
 		if (status.applied.length > 0) {
 			throw new Error(
-				`the database already records ${migrations(status.applied.length)} (up to ${status.current}); baseline marks a database that has none`,
+				`the database already records ${migrations(status.applied.length)} (up to ${lastVersion(status)}); baseline marks a database that has none`,
 			)
 		}
 		/* what 0.12 ran is recorded, and only that: the files after it still run on apply (M77) */
@@ -258,7 +264,9 @@ function statusWithAtlas(options: AtlasCommand): { applied: string[]; pending: s
 			unread: foreign.unread,
 			elsewhere: foreign.elsewhere,
 		})
-		options.print(`Applied: ${status.applied.length}${status.applied.length > 0 ? ` (up to ${status.current})` : ""}`)
+		options.print(
+			`Applied: ${status.applied.length}${status.applied.length > 0 ? ` (up to ${lastVersion(status)})` : ""}`,
+		)
 		options.print(`Pending: ${status.pending.map((file) => file.Name).join(", ") || "none"}`)
 		for (const line of missing) options.print(line)
 		if (halfway !== undefined) options.print(`${halfway}; migrate apply resumes after them`)
