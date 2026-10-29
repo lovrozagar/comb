@@ -151,8 +151,11 @@ declare class ShardRouter {
      * Resolve as `resolve` does, then check with `deps.present` that the org's rows are on the shard
      * named: a mapping cached here can predate a `move` in another isolate, since invalidate
      * reaches only this isolate's LRU and KV. When they are not, the primary is read past every
-     * cache and its mapping, or undefined when the org is gone, is cached and returned without a
-     * second probe: when it names the shard just probed, the org's rows may not be there yet.
+     * cache. When it names the shard just probed, the org's rows may not be there yet: that mapping
+     * is returned, and nothing is written or logged (Q13 of r17). When it names another, or none,
+     * the org is invalidated, the primary read again under the tombstone, and that mapping, or
+     * undefined when the org is gone, returned without a second probe; it is cached only while no
+     * invalidate here, a move's among them, came after the tombstone (Q7 of r17).
      */
     resolveVerified(orgId: string, deps: ShardVerifyDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping | undefined>;
     /**

@@ -15,8 +15,10 @@
  * tombstone has expired, could fill the old shard again; D1's replicas lag by seconds, so that is
  * the outer bound, not a case handled.
  *
- * KV is a cache, so a KV call that fails is logged (`shard-router.kv.error`) and is a miss or a
- * skipped write, never a failed request, nor a failed move after its D1 write committed (U34).
+ * KV is a cache, so a KV call that fails is logged (`shard-router.kv.error`) and is a skipped
+ * write, never a failed request, nor a failed move after its D1 write committed (U34). A read that
+ * fails is its own state, never a miss: an unread tombstone may be shadowing the mapping, so the
+ * reader trusts nothing KV holds, reads the primary, and leaves KV as it is (Q6 of r17).
  */
 import type { LogFn, ShardKv, ShardMapping } from "./types.ts"
 
@@ -55,12 +57,28 @@ async function guarded<T>(
  */
 type Stored = ShardMapping & { d1Bookmark?: string; readAt?: number; tag?: string }
 
-/** What KV holds for an org: its mapping and that mapping's tag, or none, and its live tombstone's nonce, if any */
-type KvView = { mapping: ShardMapping | null; nonce: string | null; tag: string | null }
+/**
+ * What KV holds for an org: its mapping and that mapping's tag, or none, and its live tombstone's
+ * nonce, if any; or that a read failed, when it says nothing
+ */
+type KvView =
+	| { failed: true }
+	| { failed: false; mapping: ShardMapping | null; nonce: string | null; tag: string | null }
 
-/** What KV holds at `key`; null when it holds nothing, or fails */
-const kvGet = <T>(kv: ShardKv, key: string, { log, orgId }: { log: LogFn; orgId: string }): Promise<T | null> =>
-	guarded({ log, op: "get", orgId }, async () => (await kv.get(key, "json")) as T | null, null)
+/** Marks a KV read that failed, apart from a key that holds nothing */
+const FAILED: unique symbol = /* @__PURE__ */ Symbol("kv read failed")
+
+/** What KV holds at `key`, null when it holds nothing; FAILED when the read fails */
+const kvGet = <T>(
+	kv: ShardKv,
+	key: string,
+	{ log, orgId }: { log: LogFn; orgId: string },
+): Promise<T | null | typeof FAILED> =>
+	guarded<T | null | typeof FAILED>(
+		{ log, op: "get", orgId },
+		async () => (await kv.get(key, "json")) as T | null,
+		FAILED,
+	)
 
 /** The org's mapping and tombstone in KV, read together; a 0.14.0 tombstone in the mapping's key is no mapping */
 async function kvView(kv: ShardKv, orgId: string, log: LogFn): Promise<KvView> {
@@ -69,10 +87,11 @@ async function kvView(kv: ShardKv, orgId: string, log: LogFn): Promise<KvView> {
 		kvGet<Stored | { invalidatedAt: number }>(kv, kvKey(orgId), at),
 		kvGet<{ nonce: string }>(kv, tombstoneKey(orgId), at),
 	])
+	if (held === FAILED || tombstone === FAILED) return { failed: true }
 	const nonce = tombstone?.nonce ?? null
-	if (held === null || Object.hasOwn(held, "invalidatedAt")) return { mapping: null, nonce, tag: null }
+	if (held === null || Object.hasOwn(held, "invalidatedAt")) return { failed: false, mapping: null, nonce, tag: null }
 	const { d1Bookmark: _bookmark, readAt: _readAt, tag, ...mapping } = held as Stored
-	return { mapping, nonce, tag: tag ?? null }
+	return { failed: false, mapping, nonce, tag: tag ?? null }
 }
 
 /** Put the org's tombstone, carrying `nonce`, then delete its mapping: each failure logged */

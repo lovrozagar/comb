@@ -66,7 +66,7 @@ describe("ShardCache", () => {
 		}
 		const nonce = await cache.invalidate("org-1", kv)
 		store.store.set("shard:org-1", JSON.stringify(mapping(0, 10)))
-		expect(await cache.readKv("org-1", store)).toEqual({ fence: nonce, mapping: null })
+		expect(await cache.readKv("org-1", store)).toEqual({ fence: nonce, kvFailed: false, mapping: null })
 	})
 })
 
@@ -83,32 +83,42 @@ describe("ShardCache.readKv", () => {
 	it("trusts any mapping with no tombstone, a 0.14 fill's readAt left out", async () => {
 		const [cache, kv] = [cacheOf(), memoryKv()]
 		kv.store.set("shard:org-1", JSON.stringify({ ...mapping(1, 10), readAt: 5 }))
-		expect(await cache.readKv("org-1", kv)).toEqual({ fence: null, mapping: mapping(1, 10) })
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: null, kvFailed: false, mapping: mapping(1, 10) })
 	})
 
 	it("trusts, while a tombstone lives, only a mapping tagged with its nonce", async () => {
 		const [cache, kv] = [cacheOf(), memoryKv()]
 		tombstone(kv, "n-1")
 		held(kv)
-		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-1", mapping: null })
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-1", kvFailed: false, mapping: null })
 		held(kv, "n-0")
-		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-1", mapping: null })
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-1", kvFailed: false, mapping: null })
 		held(kv, "n-1")
-		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-1", mapping: mapping(1, 10) })
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-1", kvFailed: false, mapping: mapping(1, 10) })
 	})
 
 	it("trusts none while this isolate's tombstone and KV's differ, fencing by KV's", async () => {
 		const [cache, kv] = [cacheOf(), memoryKv()]
 		const mine = await cache.invalidate("org-1", kv)
 		held(kv, mine)
-		expect(await cache.readKv("org-1", kv)).toEqual({ fence: mine, mapping: mapping(1, 10) })
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: mine, kvFailed: false, mapping: mapping(1, 10) })
 		tombstone(kv, "n-other")
-		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-other", mapping: null })
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-other", kvFailed: false, mapping: null })
+	})
+
+	/* Q6 of r17: a tombstone KV could not read may be shadowing the mapping */
+	it("trusts no mapping when a KV read fails, fencing by this isolate's tombstone if it holds one", async () => {
+		const [cache, kv] = [cacheOf(), memoryKv()]
+		kv.store.set("shard:org-1", JSON.stringify(mapping(1, 10)))
+		const failing: ShardKv = { ...kv, get: async () => Promise.reject(new Error("KV 503")) }
+		expect(await cache.readKv("org-1", failing)).toEqual({ fence: null, kvFailed: true, mapping: null })
+		const mine = await cache.invalidate("org-1", kv)
+		expect(await cache.readKv("org-1", failing)).toEqual({ fence: mine, kvFailed: true, mapping: null })
 	})
 
 	it("is no mapping where 0.14.0 left its tombstone in the mapping's key", async () => {
 		const [cache, kv] = [cacheOf(), memoryKv()]
 		kv.store.set("shard:org-1", JSON.stringify({ invalidatedAt: 5000 }))
-		expect(await cache.readKv("org-1", kv)).toEqual({ fence: null, mapping: null })
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: null, kvFailed: false, mapping: null })
 	})
 })

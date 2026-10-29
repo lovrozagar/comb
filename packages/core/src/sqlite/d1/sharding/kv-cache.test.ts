@@ -57,7 +57,7 @@ describe("kvInvalidate", () => {
 		await kvInvalidate(watched, "org-1", { log, nonce: "n-1", ttlSeconds: 60 })
 		expect(ops).toEqual(["put shard-inv:org-1 180", "delete shard:org-1"])
 		expect(tombstoneTtlSeconds(60)).toBe(180)
-		expect(await kvView(kv, "org-1", log)).toEqual({ mapping: null, nonce: "n-1", tag: null })
+		expect(await kvView(kv, "org-1", log)).toEqual({ failed: false, mapping: null, nonce: "n-1", tag: null })
 	})
 })
 
@@ -75,7 +75,7 @@ describe("an invalidation, as a 0.13 router reads KV", () => {
 	it("is no mapping where 0.14.0 left its tombstone in the mapping key", async () => {
 		const kv = memoryKV()
 		await kv.put(kvKey("org-1"), JSON.stringify({ invalidatedAt: 5000 }))
-		expect(await kvView(kv, "org-1", log)).toEqual({ mapping: null, nonce: null, tag: null })
+		expect(await kvView(kv, "org-1", log)).toEqual({ failed: false, mapping: null, nonce: null, tag: null })
 	})
 })
 
@@ -86,6 +86,6 @@ describe("an org whose id ends in :inv", () => {
 		await kv.put(kvKey("org-1"), JSON.stringify(mapping(1, 1000)))
 		await kv.put(kvKey("org-1:inv"), JSON.stringify({ ...mapping(3, 9000), orgId: "org-1:inv" }))
 		expect(tombstoneKey("org-1")).not.toBe(kvKey("org-1:inv"))
-		expect(await kvView(kv, "org-1", log)).toEqual({ mapping: mapping(1, 1000), nonce: null, tag: null })
+		expect(await kvView(kv, "org-1", log)).toEqual({ failed: false, mapping: mapping(1, 1000), nonce: null, tag: null })
 	})
 })

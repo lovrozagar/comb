@@ -14,10 +14,11 @@ import type { LogFn, ShardKv, ShardMapping, ShardResolverDeps, ShardRouterConfig
 type CacheTargets = { executionCtx: WaitUntilCtx; kv: ShardKv; tag: string | null }
 
 /**
- * What a KV read gives the org: a mapping to trust, or none; and the nonce of a live tombstone,
- * when there is one, which fences the core read: it goes to the primary and tags what it fills
+ * What a KV read gives the org: a mapping to trust, or none; the nonce of a live tombstone, when
+ * there is one, which fences the core read: it goes to the primary and tags what it fills; and
+ * whether a KV read failed, when the core read goes to the primary and fills the LRU alone (Q6)
  */
-type KvLookup = { fence: string | null; mapping: ShardMapping | null }
+type KvLookup = { fence: string | null; kvFailed: boolean; mapping: ShardMapping | null }
 
 class ShardCache {
 	readonly lru: LruCache<string, ShardMapping>
@@ -55,19 +56,37 @@ class ShardCache {
 	 */
 	async readKv(orgId: string, kv: ShardKv): Promise<KvLookup> {
 		const view = await kvView(kv, orgId, this.log)
-		const live = new Set([view.nonce, this.tombstones.get(orgId) ?? null].filter((n) => n !== null))
-		const fence = view.nonce ?? this.tombstones.get(orgId) ?? null
+		const local = this.tombstoneOf(orgId)
+		/* a tombstone KV could not read may be shadowing the mapping: trust none (Q6) */
+		if (view.failed) return { fence: local, kvFailed: true, mapping: null }
+		const live = new Set([view.nonce, local].filter((n) => n !== null))
+		const fence = view.nonce ?? local
 		const trusted = live.size === 0 || (live.size === 1 && view.tag === fence)
-		return { fence, mapping: trusted ? view.mapping : null }
+		return { fence, kvFailed: false, mapping: trusted ? view.mapping : null }
 	}
 
-	/** The org's live mapping in the core database: the primary's when a tombstone fences the read, else as readLive reads it */
+	/**
+	 * The org's live mapping in the core database: the primary's when a tombstone fences the read or
+	 * KV could not be read, else as readLive reads it
+	 */
 	static async readCore(
 		coreDb: ShardResolverDeps["coreDb"],
 		orgId: string,
-		fence: string | null,
+		{ fence, kvFailed }: Pick<KvLookup, "fence" | "kvFailed">,
 	): Promise<ShardMapping | undefined> {
-		return fence === null ? readLive(coreDb, orgId) : (await readLiveRow(coreDb, orgId, "first-primary")).mapping
+		if (fence === null && !kvFailed) return readLive(coreDb, orgId)
+		return (await readLiveRow(coreDb, orgId, "first-primary")).mapping
+	}
+
+	/** The nonce of this isolate's live tombstone for the org, if it holds one */
+	tombstoneOf(orgId: string): string | null {
+		return this.tombstones.get(orgId) ?? null
+	}
+
+	/** Cache a mapping a core read gave: in the LRU, and in KV tagged with its fence unless KV could not be read (Q6) */
+	fill(mapping: ShardMapping, lookup: Pick<KvLookup, "fence" | "kvFailed">, targets: Omit<CacheTargets, "tag">): void {
+		if (lookup.kvFailed) this.lru.set(mapping.orgId, mapping)
+		else this.populate(mapping.orgId, mapping, { ...targets, tag: lookup.fence })
 	}
 
 	generationOf(orgId: string): number {
@@ -106,13 +125,13 @@ class ShardCache {
 		const generation = this.generationOf(orgId)
 		const current = () => this.generationOf(orgId) === generation
 		try {
-			const { fence, mapping: kvValue } = await this.readKv(orgId, deps.kv)
+			const lookup = await this.readKv(orgId, deps.kv)
 			/* readKv takes this isolate's tombstones after its KV read, so an invalidate here during it is a miss */
-			if (kvValue) {
-				this.lru.set(orgId, kvValue)
+			if (lookup.mapping) {
+				this.lru.set(orgId, lookup.mapping)
 				return
 			}
-			const mapping = await ShardCache.readCore(deps.coreDb, orgId, fence)
+			const mapping = await ShardCache.readCore(deps.coreDb, orgId, lookup)
 			if (!current()) return
 			if (!mapping) {
 				/* the core database has no live row: the org is gone, so the stale entry stops routing it now */
@@ -120,7 +139,8 @@ class ShardCache {
 				return
 			}
 			this.lru.set(orgId, mapping)
-			await kvPut(deps.kv, mapping, { log: this.log, tag: fence, ttlSeconds: this.kvTtlSeconds })
+			if (!lookup.kvFailed)
+				await kvPut(deps.kv, mapping, { log: this.log, tag: lookup.fence, ttlSeconds: this.kvTtlSeconds })
 		} catch (e) {
 			this.log("shard-router.revalidate.error", { error: e, orgId })
 		}

@@ -15,6 +15,7 @@ import {
 	softDelete,
 	toMapping,
 } from "./placement.ts"
+import { warnOnError } from "../../../log.ts"
 import { assertOrgId, ORG_ID_MAX_LENGTH, shardMap } from "./shard-map.ts"
 import type {
 	LogFn,
@@ -48,7 +49,8 @@ class ShardRouter {
 		const { kvTtlSeconds, maxOrgsPerShard, totalShards } = routerSettings(config)
 		this.totalShards = totalShards
 		this.pick = config.pick ?? headroomPick(maxOrgsPerShard)
-		this.log = config.log ?? (() => {})
+		/* by default a failure the router absorbs still reaches the console (K15 of r17); pass a log to route or mute it */
+		this.log = config.log ?? warnOnError
 		this.cache = new ShardCache(config, { kvTtlSeconds, log: this.log })
 	}
 
@@ -85,23 +87,22 @@ class ShardRouter {
 
 		/* L2: KV, trusted as its tombstone, if any, says */
 		const generation = this.cache.generationOf(orgId)
-		const { fence, mapping: kvValue } = await this.cache.readKv(orgId, deps.kv)
-		if (kvValue) {
+		const lookup = await this.cache.readKv(orgId, deps.kv)
+		if (lookup.mapping) {
 			this.log("shard-router.hit", { orgId, tier: "kv" })
-			this.cache.lru.set(orgId, kvValue)
-			return kvValue
+			this.cache.lru.set(orgId, lookup.mapping)
+			return lookup.mapping
 		}
 
-		/* L3: Core D1, the primary's when a tombstone fences it, unless the primary missed it just now */
-		const mapping = this.cache.misses.get(orgId) ? undefined : await ShardCache.readCore(deps.coreDb, orgId, fence)
+		/* L3: Core D1, the primary's when a tombstone fences it or KV failed, unless the primary missed it just now */
+		const mapping = this.cache.misses.get(orgId) ? undefined : await ShardCache.readCore(deps.coreDb, orgId, lookup)
 		if (!mapping) {
 			this.log("shard-router.miss", { orgId })
 			if (this.cache.generationOf(orgId) === generation) this.cache.misses.set(orgId, true)
 			return undefined
 		}
 		this.log("shard-router.hit", { orgId, tier: "d1" })
-		if (this.cache.generationOf(orgId) === generation)
-			this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv, tag: fence })
+		if (this.cache.generationOf(orgId) === generation) this.cache.fill(mapping, lookup, { executionCtx, kv: deps.kv })
 		return mapping
 	}
 
@@ -109,8 +110,11 @@ class ShardRouter {
 	 * Resolve as `resolve` does, then check with `deps.present` that the org's rows are on the shard
 	 * named: a mapping cached here can predate a `move` in another isolate, since invalidate
 	 * reaches only this isolate's LRU and KV. When they are not, the primary is read past every
-	 * cache and its mapping, or undefined when the org is gone, is cached and returned without a
-	 * second probe: when it names the shard just probed, the org's rows may not be there yet.
+	 * cache. When it names the shard just probed, the org's rows may not be there yet: that mapping
+	 * is returned, and nothing is written or logged (Q13 of r17). When it names another, or none,
+	 * the org is invalidated, the primary read again under the tombstone, and that mapping, or
+	 * undefined when the org is gone, returned without a second probe; it is cached only while no
+	 * invalidate here, a move's among them, came after the tombstone (Q7 of r17).
 	 */
 	async resolveVerified(
 		orgId: string,
@@ -119,11 +123,15 @@ class ShardRouter {
 	): Promise<ShardMapping | undefined> {
 		const cached = await this.resolve(orgId, deps, executionCtx)
 		if (!cached || (await deps.present(cached))) return cached
-		/* invalidated first, so the primary's mapping is read after the tombstone and tagged with it */
+		const primary = (await readLiveRow(deps.coreDb, orgId, "first-primary")).mapping
+		if (primary?.shardId === cached.shardId) return primary
+		/* the primary's mapping read again after the tombstone, so it is tagged with it */
 		const tag = await this.cache.invalidate(orgId, deps.kv)
+		const generation = this.cache.generationOf(orgId)
 		const { mapping } = await readLiveRow(deps.coreDb, orgId, "first-primary")
 		this.log("shard-router.reresolve", { from: cached.shardId, orgId, to: mapping?.shardId })
-		if (mapping) this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv, tag })
+		if (mapping && this.cache.generationOf(orgId) === generation)
+			this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv, tag })
 		return mapping
 	}
 
@@ -202,7 +210,8 @@ class ShardRouter {
 		executionCtx: WaitUntilCtx,
 	): Promise<ShardMapping> {
 		const { how, row } = await insertFirst(drizzle(openD1Session(deps.coreDb).client), orgId, shardId)
-		return this.settle(row, how, { executionCtx, kv: deps.kv, tag: null })
+		/* written after this isolate's live tombstone, if it holds one, so tagged with it: other isolates trust it (Q17 of r17) */
+		return this.settle(row, how, { executionCtx, kv: deps.kv, tag: this.cache.tombstoneOf(orgId) })
 	}
 
 	/**
