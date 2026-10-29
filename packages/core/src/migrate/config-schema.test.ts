@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { defineConfig } from "./config.ts"
+import { parseConfig } from "./config.ts"
 import { configInputSchema, DEFAULT_PG_DEV_URL } from "./config-schema.ts"
 
 /** A config whose one database is the D1 provider with `provider`'s fields */
 const d1 = (provider: Record<string, unknown>) => () =>
-	defineConfig({
+	parseConfig({
 		databases: {
 			core: { migrationsDir: "./m", name: "core", provider: { databaseName: "core", type: "d1", ...provider } },
 		},
@@ -75,6 +75,6 @@ const MISSPELLED: Array<[string, unknown, string]> = [
 /* M19 of the 0.12 round: a key the config does not know is a typo, refused at load, never dropped for its default */
 describe("migrate/config: an unknown key at any level", () => {
 	it.each(MISSPELLED)("refuses one on %s, by name", (_level, config, key) => {
-		expect(() => defineConfig(config as never)).toThrow(key)
+		expect(() => parseConfig(config as never)).toThrow(key)
 	})
 })

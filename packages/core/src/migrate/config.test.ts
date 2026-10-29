@@ -8,11 +8,19 @@ import {
 	DEFAULT_PG_DEV_URL,
 	defineConfig,
 	findConfigFile,
+	parseConfig,
 	loadConfig,
 	resolveDatabaseConfig,
 } from "./config.ts"
 
 describe("migrate/config: defineConfig", () => {
+	it("returns its input as it is: loadConfig validates it (P11 of the 0.15.0 review)", () => {
+		const input: CombMigrateConfig = {
+			databases: { core: { migrationsDir: "m", name: "core", provider: { databaseName: "core", type: "d1" } } },
+		}
+		expect(defineConfig(input)).toBe(input)
+	})
+
 	it("parses valid config with environments", () => {
 		const input: CombMigrateConfig = {
 			databases: {
@@ -29,7 +37,7 @@ describe("migrate/config: defineConfig", () => {
 				},
 			},
 		}
-		const config = defineConfig(input)
+		const config = parseConfig(input)
 		expect(config.databases.core).toBeDefined()
 		expect(config.databases.core.environments).toBeDefined()
 	})
@@ -47,7 +55,7 @@ describe("migrate/config: defineConfig", () => {
 				},
 			},
 		}
-		const config = defineConfig(input)
+		const config = parseConfig(input)
 		expect(config.databases.core).toBeDefined()
 		expect(config.databases.core.name).toBe("mydb")
 	})
@@ -55,7 +63,7 @@ describe("migrate/config: defineConfig", () => {
 
 describe("migrate/config: resolveDatabaseConfig", () => {
 	it("resolves environment-specific config", () => {
-		const config = defineConfig({
+		const config = parseConfig({
 			databases: {
 				core: {
 					environments: {
@@ -77,7 +85,7 @@ describe("migrate/config: resolveDatabaseConfig", () => {
 	})
 
 	it("falls back to database-level provider when env has none", () => {
-		const config = defineConfig({
+		const config = parseConfig({
 			databases: {
 				core: {
 					environments: {
@@ -97,13 +105,14 @@ describe("migrate/config: resolveDatabaseConfig", () => {
 
 describe("migrate/config: resolveDatabaseConfig refusals", () => {
 	it("throws when env required but not provided", () => {
-		const config = defineConfig({
+		const config = parseConfig({
 			databases: {
 				core: {
 					environments: {
 						local: { name: "local-db" },
 					},
 					migrationsDir: "./migrations",
+					provider: { databaseName: "core", type: "d1" },
 				},
 			},
 		})
@@ -112,13 +121,14 @@ describe("migrate/config: resolveDatabaseConfig refusals", () => {
 	})
 
 	it("throws for unknown environment", () => {
-		const config = defineConfig({
+		const config = parseConfig({
 			databases: {
 				core: {
 					environments: {
 						local: { name: "local-db" },
 					},
 					migrationsDir: "./migrations",
+					provider: { databaseName: "core", type: "d1" },
 				},
 			},
 		})
@@ -135,8 +145,14 @@ describe("migrate/config: resolveDatabaseConfig refusals", () => {
 	})
 
 	it.each(["constructor", "toString", "__proto__"])("finds no environment named %s through the prototype", (env) => {
-		const config = defineConfig({
-			databases: { core: { environments: { local: { name: "local-db" } }, migrationsDir: "./m" } },
+		const config = parseConfig({
+			databases: {
+				core: {
+					environments: { local: { name: "local-db" } },
+					migrationsDir: "./m",
+					provider: { databaseName: "core", type: "d1" },
+				},
+			},
 		})
 		expect(() => resolveDatabaseConfig(config.databases.core, env)).toThrow(`Environment "${env}" not found`)
 	})
@@ -156,14 +172,10 @@ describe("resolveDatabaseConfig and createProvider — every provider", () => {
 		expect(createProvider(provider, { run: () => ({ code: 0, stderr: "", stdout: "[]" }) }).dialect).toBe("sqlite")
 	})
 
-	it("refuses an environment with no provider anywhere, and a legacy config missing name or provider", () => {
+	it("refuses an environment with no provider anywhere", () => {
 		expect(() => resolveDatabaseConfig({ environments: { dev: { name: "d" } }, migrationsDir: "m" }, "dev")).toThrow(
 			'No provider config for environment "dev"',
 		)
-		expect(() => resolveDatabaseConfig({ migrationsDir: "m", provider: PROVIDERS[2] })).toThrow(
-			"either 'name' field or 'environments'",
-		)
-		expect(() => resolveDatabaseConfig({ migrationsDir: "m", name: "core" })).toThrow("must have 'provider'")
 	})
 
 	it("names the environments when none is given", () => {
@@ -180,7 +192,7 @@ const PG_URL = "postgres://app@db.example.com/app?sslmode=verify-full"
 
 describe("defineConfig and resolveDatabaseConfig — a Postgres provider", () => {
 	it("resolves a postgres provider with comb's defaults for what it leaves out", () => {
-		const config = defineConfig({
+		const config = parseConfig({
 			databases: { core: { migrationsDir: "m", name: "core", provider: { type: "postgres", url: PG_URL } } },
 		})
 		expect(resolveDatabaseConfig(config.databases["core"] as never).provider).toEqual({
@@ -201,7 +213,7 @@ describe("defineConfig and resolveDatabaseConfig — a Postgres provider", () =>
 			type: "postgres",
 			url: PG_URL,
 		} as const
-		const config = defineConfig({
+		const config = parseConfig({
 			databases: {
 				core: {
 					environments: {
@@ -225,15 +237,15 @@ describe("defineConfig and resolveDatabaseConfig — a Postgres provider", () =>
 describe("defineConfig and createProvider — Postgres refusals and neighbors", () => {
 	it("refuses neon, which is a postgres URL, and a postgres provider without a url", () => {
 		const neon = { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "neon", url: PG_URL } } } }
-		expect(() => defineConfig(neon as never)).toThrow(
+		expect(() => parseConfig(neon as never)).toThrow(
 			"Neon and Supabase are postgres URLs: use the postgres provider type",
 		)
 		const bare = { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "postgres" } } } }
-		expect(() => defineConfig(bare as never)).toThrow()
+		expect(() => parseConfig(bare as never)).toThrow()
 	})
 
 	it("holds a SQLite and a Postgres database side by side", () => {
-		const config = defineConfig({
+		const config = parseConfig({
 			databases: {
 				analytics: { migrationsDir: "pg", name: "analytics", provider: { type: "postgres", url: PG_URL } },
 				core: { migrationsDir: "m", name: "core", provider: { type: "libsql", url: "file:core.db" } },
@@ -256,19 +268,19 @@ describe("defineConfig and createProvider — Postgres refusals and neighbors", 
 	})
 })
 
-describe("defineConfig — the rest of the input", () => {
-	it("refuses a legacy database without both name and provider", () => {
-		expect(() => defineConfig({ databases: { core: { migrationsDir: "m", name: "core" } } })).toThrow(
-			'Database "core": legacy format requires both',
+describe("parseConfig — the rest of the input", () => {
+	it("refuses a database of one target without its provider", () => {
+		expect(() => parseConfig({ databases: { core: { migrationsDir: "m", name: "core" } } })).toThrow(
+			"a database without environments needs a provider",
 		)
 	})
 
 	/* C5 of the 0.14.1 review: nothing read either, so a config that sets one is refused, not silently run on one database */
 	it("refuses multiTenant and promotionOrder, which no command reads, by name", () => {
 		const tenants = { enabled: true, rootDatabase: "root", tenantQuery: "SELECT 1" }
-		expect(() => defineConfig({ databases: {}, multiTenant: tenants } as never)).toThrow("multiTenant")
+		expect(() => parseConfig({ databases: {}, multiTenant: tenants } as never)).toThrow("multiTenant")
 		const promoted = { core: { migrationsDir: "m", promotionOrder: ["staging", "production"] } }
-		expect(() => defineConfig({ databases: promoted } as never)).toThrow("promotionOrder")
+		expect(() => parseConfig({ databases: promoted } as never)).toThrow("promotionOrder")
 	})
 })
 
@@ -348,12 +360,12 @@ describe("loadConfig validates what the file exports, however it exports it (M12
 		}
 	})
 
-	it("says what defineConfig says of a database with neither a name nor environments", async () => {
+	it("says where a database with neither a name nor environments falls short", async () => {
 		const dir = project()
 		try {
 			writeFileSync(join(dir, "a.config.ts"), 'export default { databases: { a: { migrationsDir: "m" } } }\n')
 			await expect(loadConfig("a.config.ts", dir)).rejects.toThrow(
-				`Database "a": legacy format requires both 'name' and 'provider' fields`,
+				"✖ a database without environments needs a name\n  → at databases.a.name\n✖ a database without environments needs a provider\n  → at databases.a.provider",
 			)
 		} finally {
 			rmSync(dir, { force: true, recursive: true })
@@ -363,7 +375,7 @@ describe("loadConfig validates what the file exports, however it exports it (M12
 	it("takes a config defineConfig already made as it is", async () => {
 		const dir = project()
 		try {
-			const made = defineConfig({
+			const made = parseConfig({
 				databases: { a: { migrationsDir: "m", name: "local", provider: { path: "db.sqlite", type: "bun-sqlite" } } },
 			})
 			writeFileSync(join(dir, "a.config.ts"), `export default ${JSON.stringify(made)}\n`)

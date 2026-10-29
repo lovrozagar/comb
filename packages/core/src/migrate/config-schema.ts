@@ -38,7 +38,8 @@ const providerInputSchema = () =>
 			lockTimeout: z.string().min(1).optional(),
 			schema: z.string().min(1).optional(),
 			type: z.literal("postgres"),
-			url: z.string().min(1),
+			/* checked when a command resolves its environment, so one unset in this shell blocks no other (P5) */
+			url: z.string(),
 		}),
 		/* there is no neon type: a Neon or Supabase database is a postgres URL */
 		/* loose, so a neon provider's url and other keys reach the message that says what to use instead */
@@ -64,19 +65,63 @@ const providerInputSchema = () =>
 
 const environmentConfigInputSchema = () =>
 	z.strictObject({
-		name: z.string().min(1),
-		provider: providerInputSchema().optional(),
-	})
-
-const databaseConfigInputSchema = () =>
-	z.strictObject({
-		codegen: z.string().min(1).optional(),
-		drizzleConfigPath: z.string().optional(),
-		environments: z.record(z.string(), environmentConfigInputSchema()).optional(),
-		migrationsDir: z.string().min(1),
 		name: z.string().min(1).optional(),
 		provider: providerInputSchema().optional(),
 	})
+
+type DatabaseInput = {
+	environments?: Record<string, { provider?: unknown }> | undefined
+	name?: string | undefined
+	provider?: unknown
+}
+
+/** Why a database is of neither shape, each at its path: one target's name and provider, or environments that each resolve a provider (K13) */
+function shapeIssues(db: DatabaseInput): Array<{ message: string; path: string[] }> {
+	if (db.environments === undefined) {
+		return [
+			...(db.name === undefined ? [{ message: "a database without environments needs a name", path: ["name"] }] : []),
+			...(db.provider === undefined
+				? [{ message: "a database without environments needs a provider", path: ["provider"] }]
+				: []),
+		]
+	}
+	const environments = Object.entries(db.environments)
+	return [
+		...(db.name === undefined
+			? []
+			: [{ message: "a database with environments names them by their keys; drop its name", path: ["name"] }]),
+		...(environments.length === 0
+			? [
+					{
+						message: "environments names none; name one, or give the database a name and a provider instead",
+						path: ["environments"],
+					},
+				]
+			: []),
+		...environments
+			.filter(([, env]) => env.provider === undefined && db.provider === undefined)
+			.map(([key]) => ({
+				message: `environment ${key} has no provider, and the database gives none`,
+				path: ["environments", key, "provider"],
+			})),
+	]
+}
+
+const databaseConfigInputSchema = () =>
+	z
+		.strictObject({
+			codegen: z.string().min(1).optional(),
+			drizzleConfigPath: z.string().optional(),
+			environments: z.record(z.string(), environmentConfigInputSchema()).optional(),
+			migrationsDir: z.string().min(1),
+			name: z.string().min(1).optional(),
+			provider: providerInputSchema().optional(),
+		})
+		.superRefine((db, ctx) => {
+			for (const issue of shapeIssues(db)) ctx.addIssue({ code: "custom", ...issue })
+		})
+		/* one of the two shapes, which shapeIssues has just held it to */
+		.transform((db) => db as DatabaseConfig)
 
 /** What comb.migrate.config.ts declares */
 type CombMigrateConfig = {

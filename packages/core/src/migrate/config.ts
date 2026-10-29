@@ -93,7 +93,7 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
 		return {
 			drizzleConfigPath: dbConfig.drizzleConfigPath,
 			migrationsDir: dbConfig.migrationsDir,
-			name: envConfig.name,
+			name: envConfig.name ?? envName,
 			provider: resolveProviderConfig(provider),
 		}
 	}
@@ -101,14 +101,6 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
 	/* Legacy format: no environments, single name */
 	if (envName !== undefined)
 		throw new Error(`the database declares no environments, so -e ${envName} names none; drop -e`)
-	if (!dbConfig.name) {
-		throw new Error("Database config must have either 'name' field or 'environments' object")
-	}
-
-	if (!dbConfig.provider) {
-		throw new Error("Database config must have 'provider' field when using legacy format")
-	}
-
 	return {
 		drizzleConfigPath: dbConfig.drizzleConfigPath,
 		migrationsDir: dbConfig.migrationsDir,
@@ -121,42 +113,14 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
    DEFINE CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export function defineConfig(input: CombMigrateConfig): MigrationConfig {
-	const parsed = configInputSchema().parse(input)
+/** `input`, typed: comb.migrate.config.ts's default export; loadConfig validates it, in one place (P11, K12 of the 0.15.0 review) */
+export function defineConfig(input: CombMigrateConfig): CombMigrateConfig {
+	return input
+}
 
-	const databases: Record<string, DatabaseConfig> = {}
-	for (const [key, dbInput] of Object.entries(parsed.databases)) {
-		/* New format with environments */
-		if (dbInput.environments) {
-			const environments: Record<string, { name: string; provider?: ProviderConfig | undefined }> = {}
-			for (const [envKey, envInput] of Object.entries(dbInput.environments)) {
-				environments[envKey] = { name: envInput.name, provider: envInput.provider }
-			}
-
-			databases[key] = {
-				codegen: dbInput.codegen,
-				drizzleConfigPath: dbInput.drizzleConfigPath,
-				environments,
-				migrationsDir: dbInput.migrationsDir,
-				provider: dbInput.provider,
-			}
-		} else {
-			/* Legacy format */
-			if (!dbInput.name || !dbInput.provider) {
-				throw new Error(`Database "${key}": legacy format requires both 'name' and 'provider' fields`)
-			}
-
-			databases[key] = {
-				codegen: dbInput.codegen,
-				drizzleConfigPath: dbInput.drizzleConfigPath,
-				migrationsDir: dbInput.migrationsDir,
-				name: dbInput.name,
-				provider: dbInput.provider,
-			}
-		}
-	}
-
-	return { databases }
+/** `input` held to the config schema: a typo, or a database of neither shape, throws a ZodError naming where */
+export function parseConfig(input: unknown): MigrationConfig {
+	return configInputSchema().parse(input)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -190,13 +154,12 @@ export async function loadConfig(configPath?: string, cwd: string = process.cwd(
 	}
 	if (!existsSync(resolvedPath)) throw new Error(`Config file not found: ${resolvedPath}`)
 
-	const module = (await import(resolvedPath)) as { default?: unknown }
-	const rawConfig = module.default ?? module
-	/* a function may return the config or a promise of it */
-	const exported: unknown = typeof rawConfig === "function" ? await (rawConfig as () => unknown)() : rawConfig
-	/* a plain object is checked as defineConfig checks its input; defineConfig's own output parses as it is */
 	try {
-		return { config: defineConfig(exported as CombMigrateConfig), configDir: dirname(resolvedPath) }
+		const module = (await import(resolvedPath)) as { default?: unknown }
+		const rawConfig = module.default ?? module
+		/* a function may return the config or a promise of it */
+		const exported: unknown = typeof rawConfig === "function" ? await (rawConfig as () => unknown)() : rawConfig
+		return { config: parseConfig(exported), configDir: dirname(resolvedPath) }
 	} catch (error) {
 		if (!(error instanceof z.ZodError)) throw error
 		throw new Error(`${resolvedPath} is not a valid migrate config:\n${z.prettifyError(error)}`, { cause: error })

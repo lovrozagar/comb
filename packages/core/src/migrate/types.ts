@@ -93,17 +93,33 @@ export type ProviderConfig = ConnectionProviderConfig | PostgresProviderConfig
    ENVIRONMENT AND DATABASE CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export type EnvironmentConfig = { name: string; provider?: ProviderConfig | undefined }
+/** An environment of a database: its name, its key's unless it gives one (K13), and its provider, the database's unless it gives one */
+export type EnvironmentConfig = { name?: string | undefined; provider?: ProviderConfig | undefined }
 
-export type DatabaseConfig = {
+/** What every database declares, whichever shape it has */
+type DatabaseShared = {
 	/** the comb.config.ts database this one's tables and FTS are, when its name there is another (C7) */
 	codegen?: string | undefined
 	drizzleConfigPath?: string | undefined
-	environments?: Record<string, EnvironmentConfig> | undefined
 	migrationsDir: string
-	name?: string | undefined
+}
+
+/** A database of one target: its name and its provider */
+export type SingleDatabaseConfig = DatabaseShared & {
+	environments?: undefined
+	name: string
+	provider: ProviderConfig
+}
+
+/** A database of environments, at least one, each resolving to a provider; a provider here is each one's default */
+export type EnvironmentsDatabaseConfig = DatabaseShared & {
+	environments: Record<string, EnvironmentConfig>
+	name?: undefined
 	provider?: ProviderConfig | undefined
 }
+
+/** A database comb.migrate.config.ts declares: of one target, or of environments, never both (K13 of the 0.15.0 review) */
+export type DatabaseConfig = EnvironmentsDatabaseConfig | SingleDatabaseConfig
 
 /* Resolved database config for a specific environment */
 export type ResolvedDatabaseConfig = {
