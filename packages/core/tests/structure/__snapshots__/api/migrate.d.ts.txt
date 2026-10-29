@@ -1,6 +1,5 @@
 // migrate/index.d.ts
 export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
-export { checkMigrationHash, recordMigrationHash } from "./core/apply.ts";
 export { D1_HASH_TABLE, D1_MIGRATIONS_TABLE, d1HistoryTables, DRIZZLE_HISTORY_TABLE } from "./core/d1-history-tables.ts";
 export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
 export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, parseMigration, splitSqlStatements, } from "./core/parse.ts";
@@ -30,52 +29,6 @@ export type LoadedConfig = {
 export declare function findConfigFile(cwd: string): string | undefined;
 /** Load the migrate config at `configPath`, or the first one `findConfigFile` sees in `cwd` */
 export declare function loadConfig(configPath?: string, cwd?: string): Promise<LoadedConfig>;
-
-// migrate/core/apply.d.ts
-/**
- * comb's own migration record on SQLite: the `__drizzle_migrations` table, the hashes in it and,
- * from 0.11, each file's name beside its hash, so an applied file edited since is told from a new one;
- * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
- */
-import type { Connection } from "../types.ts";
-import { type RetryOptions } from "./utils.ts";
-/** Whether a unique index of comb's history holds its hash alone, as comb's table did before 0.13 */
-export declare function hashUnique(conn: Connection): Promise<boolean>;
-/**
- * comb's history, made where it is missing, named from 0.11, and from a history before 0.13
- * rebuilt in one batch: every row and id kept, each row `renamed` lists taking its new name (M35),
- * and the AUTOINCREMENT counter kept above every id it handed out (M36)
- */
-export declare function ensureMigrationsTable(conn: Connection, renamed?: ReadonlyArray<{
-    id: number;
-    name: string;
-}>): Promise<void>;
-/**
- * Whether a migration is recorded under any of `hashes`; pass `migrationHashes(sql)` so a file
- * recorded under the pre-0.5.0 hash still counts as applied.
- */
-export declare function checkMigrationHash(conn: Connection, hashes: string | readonly string[]): Promise<boolean>;
-/** Record `hash` as applied, under the file's `name` when given (an unnamed row is named on the next apply) */
-export declare function recordMigrationHash(conn: Connection, hash: string, name?: string): Promise<void>;
-/** A file to apply: its statements, and the hash and name its record holds */
-type Recorded = {
-    filename: string;
-    hash: string;
-    statements: readonly string[];
-};
-/**
- * `migration`'s statements and its record in one batch, retried while it fails transiently. A
- * batch can commit and its answer still fail, and its statements need not run twice safely: the
- * record it wrote says it ran, so a retry reads the history first and runs nothing again (S6)
- */
-export declare function applyRecorded(conn: Connection, migration: Recorded, retry?: RetryOptions): Promise<void>;
-/**
- * Each of `migrations` applied and recorded in turn, its name printed first. A failure stops the
- * run as a Refused naming the files that committed before it and the ones still pending, which
- * it prints as D1's apply does (S2 of the 0.15.0 review)
- */
-export declare function applyEach(conn: Connection, migrations: readonly Recorded[], print: (line: string) => void): Promise<void>;
-export {};
 
 // migrate/core/d1-history-tables.d.ts
 /**

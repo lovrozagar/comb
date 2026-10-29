@@ -7,7 +7,6 @@ export {
 	loadConfig,
 	resolveDatabaseConfig,
 } from "./config.ts"
-export { checkMigrationHash, recordMigrationHash } from "./core/apply.ts"
 export { D1_HASH_TABLE, D1_MIGRATIONS_TABLE, d1HistoryTables, DRIZZLE_HISTORY_TABLE } from "./core/d1-history-tables.ts"
 export {
 	applySqliteMigrationTransforms,
