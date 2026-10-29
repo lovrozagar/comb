@@ -143,8 +143,11 @@ function pgUrlProblems(
 		else if (scope !== target.schema)
 			errors.push(`the url's search_path names ${scope}, but schema is ${target.schema}; ${fix}`)
 	}
-	if (!/^(?:0|\d+(?:ms|s|min))$/.test(target.lockTimeout))
-		errors.push("lockTimeout must look like 5s, 1500ms, 1min or 0")
+	/* Postgres's grammar for a time setting: whole milliseconds, or a number with its unit (P14 of the 0.15.0 review) */
+	if (!/^(?:\d+|\d+(?:\.\d+)? ?(?:us|ms|s|min|h|d))$/.test(target.lockTimeout))
+		errors.push(
+			"lockTimeout must be a Postgres duration: a whole number of milliseconds (250, 0 for none), or a number with us, ms, s, min, h or d (1500ms, 1.5s, 1min)",
+		)
 	return { errors, warnings: url.url === undefined ? [] : hostWarnings(url.url) }
 }
 

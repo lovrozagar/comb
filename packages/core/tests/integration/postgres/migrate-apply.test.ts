@@ -125,7 +125,7 @@ describe("migrate apply on Postgres", () => {
 					"20260102000000_bad.sql": 'CREATE TABLE "b" ("id" integer);\nALTER TABLE "nope" ADD COLUMN "x" integer;\n',
 				})
 				await expect(applyWithAtlas(command(url))).rejects.toThrow(
-					'20260102000000_bad.sql failed at ALTER TABLE "nope" ADD COLUMN "x" integer;: pq: relation "nope" does not exist (42P01). It was rolled back',
+					'20260102000000_bad.sql failed at ALTER TABLE "nope" ADD COLUMN "x" integer: pq: relation "nope" does not exist (42P01). It was rolled back',
 				)
 				expect(await tables(url)).toEqual(["a"])
 				expect(await revisions(url)).toEqual(["20260101000000"])

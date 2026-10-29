@@ -263,7 +263,7 @@ describe("applyWithAtlas: what Atlas reports", () => {
 		const failed = { Error: { Stmt: 'DROP TABLE "a";', Text: "pq: table missing (42P01)" }, Name: "2_b.sql" }
 		const apply = fail("x", JSON.stringify({ applied: [{ Name: "1_a.sql" }, failed], error: "boom" }))
 		await expect(applyWithAtlas(options(fakeAtlas({ apply, status: PENDING })))).rejects.toThrow(
-			'2_b.sql failed at DROP TABLE "a";: pq: table missing (42P01). It was rolled back; the files before it stay applied',
+			'2_b.sql failed at DROP TABLE "a": pq: table missing (42P01). It was rolled back; the files before it stay applied',
 		)
 	})
 })

@@ -92,7 +92,7 @@ function failedAt(at: number) {
 describe("applyWithAtlas: a file run outside a transaction that failed (P10)", () => {
 	it("says the statements it ran before the failure stay, and that apply resumes after them", async () => {
 		await expect(applyWithAtlas(options(fakeAtlas({ apply: failedAt(3), status: PENDING })))).rejects.toThrow(
-			'2_b.sql failed at CREATE TABLE "h1" ("id" int);: pq: relation "h1" already exists (42P07). It ran outside a transaction, so the 2 statements it ran before that stay applied, as do the files before it; while the file is unchanged, migrate apply resumes after them',
+			'2_b.sql failed at CREATE TABLE "h1" ("id" int): pq: relation "h1" already exists (42P07). It ran outside a transaction, so the 2 statements it ran before that stay applied, as do the files before it; while the file is unchanged, migrate apply resumes after them',
 		)
 	})
 
@@ -126,7 +126,7 @@ describe("applyWithAtlas: a file run outside a transaction that failed (P10)", (
 
 	it("says nothing of it stays when its first statement failed", async () => {
 		await expect(applyWithAtlas(options(fakeAtlas({ apply: failedAt(1), status: PENDING })))).rejects.toThrow(
-			'2_b.sql failed at CREATE TABLE "h1" ("id" int);: pq: relation "h1" already exists (42P07). It ran outside a transaction and failed at its first statement, so nothing of it stays applied; the files before it do',
+			'2_b.sql failed at CREATE TABLE "h1" ("id" int): pq: relation "h1" already exists (42P07). It ran outside a transaction and failed at its first statement, so nothing of it stays applied; the files before it do',
 		)
 	})
 })

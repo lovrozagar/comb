@@ -38,15 +38,28 @@ describe("pgUrlProblems", () => {
 		])
 	})
 
-	it("refuses a schema that is not a plain name, and a lock timeout it cannot pass on", () => {
+	it("refuses a schema that is not a plain name", () => {
 		expect(pgUrlProblems(target({ schema: "public;drop" })).errors).toEqual([
 			'schema must be a lowercase plain name such as "public"',
 		])
-		expect(pgUrlProblems(target({ lockTimeout: "soon" })).errors).toEqual([
-			"lockTimeout must look like 5s, 1500ms, 1min or 0",
-		])
-		expect(pgUrlProblems(target({ lockTimeout: "1500ms" })).errors).toEqual([])
 	})
+})
+
+describe("pgUrlProblems: the lock timeout, TLS and poolers", () => {
+	it("refuses one Postgres does not take", () => {
+		for (const lockTimeout of ["soon", "5 sec", "-1s", "1.5", "1e3ms", "5S"])
+			expect(pgUrlProblems(target({ lockTimeout })).errors, lockTimeout).toEqual([
+				"lockTimeout must be a Postgres duration: a whole number of milliseconds (250, 0 for none), or a number with us, ms, s, min, h or d (1500ms, 1.5s, 1min)",
+			])
+	})
+
+	/* P14 of the 0.15.0 review: Postgres takes each of these for lock_timeout, and psql set them */
+	it.each(["0", "250", "1500ms", "5s", "1.5s", "500us", "1min", "1h", "1d", "5 s"])(
+		"takes the lock timeout %j, as Postgres does",
+		(lockTimeout) => {
+			expect(pgUrlProblems(target({ lockTimeout })).errors).toEqual([])
+		},
+	)
 
 	it("warns of a remote host that does not verify TLS, and of poolers", () => {
 		const host = "postgres://app:pw@db.example.com/app"

@@ -39,7 +39,9 @@ function reported(ran: Ran, command: string, copy: string): string[] {
 	const failed = files.find((file) => file.Error !== undefined)
 	if (failed?.Error !== undefined) {
 		const { Stmt, Text } = failed.Error
-		throw new Error(`${failed.Name} failed at ${ran.scrub(Stmt)}: ${ran.scrub(Text)}. ${aftermath(copy, failed)}`)
+		/* Atlas keeps the statement's own ;, which reads as part of the sentence before the colon (P17 of the 0.15.0 review) */
+		const statement = ran.scrub(Stmt).replace(/;\s*$/, "")
+		throw new Error(`${failed.Name} failed at ${statement}: ${ran.scrub(Text)}. ${aftermath(copy, failed)}`)
 	}
 	if (ran.code !== 0 || report.error !== "")
 		throw new Error(
