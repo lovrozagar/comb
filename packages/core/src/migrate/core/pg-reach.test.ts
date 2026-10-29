@@ -11,6 +11,8 @@ const FACTS: Facts = {
 	eventTriggers: new Map(),
 	domains: new Map(),
 	operators: new Map([["===", "eq3"]]),
+	policies: new Map(),
+	relations: new Map(),
 	routines: new Map(),
 	schema: "public",
 	tables: new Map(),

@@ -6,6 +6,7 @@ import type { ParsedMigration } from "../types.ts"
 import { applyWithAtlas, type ApplyOptions, baselineWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
 import type { ObjectsCompare } from "./baseline-compare.ts"
 import { sumHashes } from "./atlas-dir.ts"
+import type { LiveRead } from "./pg-live-types.ts"
 import { postgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
 import { fail, type Fake, fakeAtlas, file, ok, revision, status } from "../../../tests/support/fake-atlas.ts"
@@ -27,9 +28,14 @@ const TARGET = {
 	url: "postgres://app:S3cret@db/app?sslmode=require",
 }
 
+/** A database holding `relations`, by name and what each is, and no function, trigger or policy */
+const holding =
+	(...relations: Array<[string, "materialized view" | "sequence" | "view"]>): LiveRead =>
+	async () => ({ policies: new Map(), relations: new Map(relations), routines: new Map(), triggers: new Map() })
+
 function options(
 	exec: Run,
-	more: Partial<ApplyOptions> = {},
+	more: Partial<ApplyOptions & Pick<ObjectsCompare, "readLive">> = {},
 ): ApplyOptions & Pick<ObjectsCompare, "readLive"> & { out: string[]; seen: string[] } {
 	const out: string[] = []
 	const seen: string[] = []
@@ -39,7 +45,7 @@ function options(
 		exec,
 		out,
 		print: (line: string) => out.push(line),
-		readLive: async () => ({ routines: new Map(), triggers: new Map() }),
+		readLive: async () => ({ policies: new Map(), relations: new Map(), routines: new Map(), triggers: new Map() }),
 		seen,
 		target: TARGET,
 		...more,
@@ -345,7 +351,7 @@ describe("baselineWithAtlas", () => {
 			'CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\nCREATE VIEW "v" AS (select 1);\nCREATE ROLE "r";\n',
 		)
 		const atlas = fakeAtlas({ status: status({}) })
-		await baselineWithAtlas(options(atlas))
+		await baselineWithAtlas(options(atlas, { readLive: holding(["n", "sequence"], ["v", "view"]) }))
 		expect(atlas.replayed[0]).toBe('CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\n')
 		const diff = atlas.calls.find((call) => call.args[0] === "schema")
 		expect(diff?.args.slice(0, 4)).toEqual(["schema", "diff", "--from", "env://url"])
@@ -359,7 +365,7 @@ describe("baselineWithAtlas", () => {
 			'-- atlas:delimiter GO\n\nCREATE ROLE "r"; CREATE TABLE "a" ("id" int)\nGO\nCREATE VIEW "v" AS (select 1)\nGO\n',
 		)
 		const atlas = fakeAtlas({ status: status({}) })
-		await baselineWithAtlas(options(atlas))
+		await baselineWithAtlas(options(atlas, { readLive: holding(["v", "view"]) }))
 		expect(atlas.replayed[0]).toBe('CREATE TABLE "a" ("id" int);\n')
 	})
 

@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import { historyFacts } from "./pg-history.ts"
 import { liveDrift, loadPostgres, readLiveObjects } from "./pg-live-objects.ts"
+import type { LiveObjects } from "./pg-live-types.ts"
 import { extractSchema } from "./schema.ts"
 
 const TARGET = { devUrl: "postgres://dev/x", lockTimeout: "5s", schema: "app", url: "postgres://app:s3cret@db/app" }
@@ -27,7 +28,7 @@ function fakeConnect(answer: { error?: Error; rows?: Array<Record<string, unknow
 
 /* plan 14's 5.4b: what the database holds of what Atlas OSS does not compare */
 describe("readLiveObjects", () => {
-	it("reads each routine's overloads and each table's triggers in the target schema, and closes the connection", async () => {
+	it("reads each routine's overloads, each table's triggers and policies, and the views and sequences, and closes the connection", async () => {
 		const { load, seen } = fakeConnect({
 			rows: [
 				{ kind: "function", name: "f", on_table: null, signature: "", what: "routine" },
@@ -35,9 +36,18 @@ describe("readLiveObjects", () => {
 				{ kind: "procedure", name: "p", on_table: null, signature: "other.mood", what: "routine" },
 				{ enabled: true, name: "t_ai", on_table: "t", tgtype: 5, what: "trigger" },
 				{ enabled: false, name: "t_bu", on_table: "t", tgtype: 19, what: "trigger" },
+				{ kind: "view", name: "v", on_table: null, what: "relation" },
+				{ kind: "sequence", name: "s", on_table: null, what: "relation" },
+				{ kind: null, name: "own", on_table: "t", what: "policy" },
+				{ kind: null, name: "mine", on_table: "t", what: "policy" },
 			],
 		})
 		expect(await readLiveObjects(TARGET, load)).toEqual({
+			policies: new Map([["t", new Set(["own", "mine"])]]),
+			relations: new Map([
+				["v", "view"],
+				["s", "sequence"],
+			]),
 			routines: new Map([
 				["f", { kind: "function", signatures: new Set(["", "int4,text[]"]) }],
 				["p", { kind: "procedure", signatures: new Set(["other.mood"]) }],
@@ -62,7 +72,7 @@ describe("readLiveObjects", () => {
 	it("says why it could not read, with the password masked, and closes the connection still", async () => {
 		const { load, seen } = fakeConnect({ error: new Error("password authentication failed for s3cret") })
 		await expect(readLiveObjects(TARGET, load)).rejects.toThrow(
-			/^comb could not read the database's functions and triggers: password authentication failed for (?!s3cret)/,
+			/^comb could not read the database's functions, triggers, views, sequences and policies: password authentication failed for (?!s3cret)/,
 		)
 		expect(seen.ended).toBe(true)
 	})
@@ -87,7 +97,7 @@ describe("loadPostgres", () => {
 			await expect(
 				(await import("./pg-live-objects.ts")).readLiveObjects({ schema: "app", url: "postgres://db/db" }),
 			).rejects.toThrow(
-				"baseline compares the database's functions and triggers, which Atlas OSS does not, through the postgres package; install postgres",
+				"baseline compares the database's functions, triggers, views, sequences and policies, which Atlas OSS does not, through the postgres package; install postgres",
 			)
 		} finally {
 			vi.doUnmock("postgres")
@@ -97,6 +107,9 @@ describe("loadPostgres", () => {
 
 const facts = (sql: string) => historyFacts(extractSchema(sql, undefined, "postgres"), "app")
 const FN = (name: string) => `CREATE FUNCTION ${name}() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;`
+
+/** A database's views, sequences and policies: none */
+const noRelations = (): Pick<LiveObjects, "policies" | "relations"> => ({ policies: new Map(), relations: new Map() })
 
 describe("liveDrift", () => {
 	it("names what only one side has, keyed in the target schema, and counts what both have", () => {
@@ -110,6 +123,7 @@ describe("liveDrift", () => {
 			].join("\n"),
 		)
 		const live = {
+			...noRelations(),
 			routines: new Map([
 				["f", { kind: "function" as const, signatures: new Set([""]) }],
 				["k", { kind: "procedure" as const, signatures: new Set(["int4"]) }],
@@ -125,7 +139,7 @@ describe("liveDrift", () => {
 			]),
 		}
 		expect(liveDrift(history, live)).toEqual({
-			matched: { routines: 1, triggers: 1 },
+			matched: { routines: 1, triggers: 1, views: 0 },
 			only: [
 				"function g(): only in the migrations",
 				"procedure k(int4): only in the database",
@@ -136,6 +150,7 @@ describe("liveDrift", () => {
 
 	it("is a match of kind as well as name", () => {
 		const live = {
+			...noRelations(),
 			routines: new Map([["f", { kind: "procedure" as const, signatures: new Set([""]) }]]),
 			triggers: new Map<string, Map<string, { enabled: boolean; type: number }>>(),
 		}
@@ -148,17 +163,19 @@ describe("liveDrift", () => {
 	/* Postgres keeps no array dimensions in a signature */
 	it("reads a history's int[][] argument as the int4[] the catalog names", () => {
 		const live = {
+			...noRelations(),
 			routines: new Map([["f", { kind: "function" as const, signatures: new Set(["int4[]"]) }]]),
 			triggers: new Map<string, Map<string, { enabled: boolean; type: number }>>(),
 		}
 		const history = facts("CREATE FUNCTION f(a int[][]) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;")
-		expect(liveDrift(history, live)).toEqual({ matched: { routines: 1, triggers: 0 }, only: [] })
+		expect(liveDrift(history, live)).toEqual({ matched: { routines: 1, triggers: 0, views: 0 }, only: [] })
 	})
 })
 
 /* the reviewer's reading of P13: two spellings the history and the catalog give one argument type differently */
 /** A database holding function f with `signatures` */
 const routine = (...signatures: string[]) => ({
+	...noRelations(),
 	routines: new Map([["f", { kind: "function" as const, signatures: new Set(signatures) }]]),
 	triggers: new Map<string, Map<string, { enabled: boolean; type: number }>>(),
 })

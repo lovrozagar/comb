@@ -1,3 +1,4 @@
+import type { LiveObjects } from "./pg-live-types.ts"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -147,7 +148,9 @@ describe("refuseObjectDrift: the warning over the bodies it did not compare", ()
 		]
 		writeFileSync(join(dir, "m", "1_init.sql"), history.join("\n"))
 		const out: string[] = []
-		const readLive = async () => ({
+		const readLive = async (): Promise<LiveObjects> => ({
+			policies: new Map(),
+			relations: new Map(),
 			routines: new Map(functions.map((name) => [name, { kind: "function" as const, signatures: new Set([""]) }])),
 			triggers: new Map(
 				triggers.length === 0 ? [] : [["t", new Map(triggers.map((name) => [name, { enabled: true, type: 5 }]))]],

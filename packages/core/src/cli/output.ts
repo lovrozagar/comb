@@ -12,7 +12,7 @@ export type CliIo = {
 	out(line: string): void
 	err(line: string): void
 	run?: Run | undefined
-	/** How a Postgres baseline reads the database's functions and triggers, postgres.js unless a test fakes it (5.4b) */
+	/** How a Postgres baseline reads the database's functions, triggers, views, sequences and policies, postgres.js unless a test fakes it (5.4b) */
 	readPgObjects?: LiveRead | undefined
 	/** How a diff, baseline or adoption gives the dev database a non-public target schema, comb's own unless a test fakes it (P12) */
 	readyPgDev?: ((target: { devUrl: string; schema: string }) => Promise<void>) | undefined

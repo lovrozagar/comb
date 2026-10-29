@@ -9,7 +9,12 @@ import type { CliIo } from "../output.ts"
 export type TestIo = CliIo & { errors: string[]; outputs: string[] }
 
 /* a Postgres baseline's catalog read reaches no database: its schema holds no function or trigger */
-const readPgObjects = async (): Promise<LiveObjects> => ({ routines: new Map(), triggers: new Map() })
+const readPgObjects = async (): Promise<LiveObjects> => ({
+	policies: new Map(),
+	relations: new Map(),
+	routines: new Map(),
+	triggers: new Map(),
+})
 
 /* nor does the dev database a non-public schema is created on (P12): Atlas, faked, needs none */
 const readyPgDev = async (): Promise<void> => undefined

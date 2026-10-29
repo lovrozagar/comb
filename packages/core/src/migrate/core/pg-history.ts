@@ -12,10 +12,11 @@
  */
 import type { ExtractedSchema } from "../types.ts"
 import { builtinFinding } from "./pg-builtins.ts"
+import { followCatalogObject } from "./pg-catalog-objects.ts"
 import { followEventTrigger } from "./pg-events.ts"
 import { followNames } from "./pg-names.ts"
 import { followRoutine } from "./pg-routines.ts"
-import { type Facts, keyOf, modsOf, names, type Node, nodesOf, tableOf, typed, typeOf } from "./pg-nodes.ts"
+import { emptyFacts, type Facts, keyOf, modsOf, names, type Node, nodesOf, tableOf, typed, typeOf } from "./pg-nodes.ts"
 import { parsePostgres } from "./pg-parser.ts"
 import { historyTrees } from "./pg-split.ts"
 
@@ -237,6 +238,7 @@ function followTree(stmts: unknown, facts: Facts): void {
 	const defined = facts.defined
 	for (const [type, node] of nodesOf(stmts)) {
 		followRoutine(type, node, facts)
+		followCatalogObject(type, node, facts)
 		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"]), facts.schema))
 		else if (followEventTrigger(type, node, facts) || followNames(type, node, facts)) continue
 		else if (type === "CreateStmt") followCreate(node, facts)
@@ -265,21 +267,7 @@ const CACHE = /* @__PURE__ */ new WeakMap<ExtractedSchema, Map<string, Facts>>()
  * own statements then follow
  */
 function historyFacts(before: ExtractedSchema | undefined, schema: string): Facts {
-	const empty: Facts = {
-		casts: new Map(),
-		code: new Map(),
-		columnTypes: new Map(),
-		defined: new Set(),
-		eventTriggers: new Map(),
-		domains: new Map(),
-		operators: new Map(),
-		parents: new Map(),
-		routines: new Map(),
-		schema,
-		tables: new Map(),
-		triggers: new Map(),
-		views: new Map(),
-	}
+	const empty = emptyFacts(schema)
 	if (before === undefined) return empty
 	const read = CACHE.get(before) ?? new Map<string, Facts>()
 	CACHE.set(before, read)

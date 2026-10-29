@@ -63,7 +63,7 @@ describe("a Postgres baseline: the functions, procedures and triggers Atlas OSS 
 			await exec(url, `${TABLE}${TRIGGER}`)
 			const { refused } = await baseline(url, devUrl, TABLE)
 			expect(refused).toBe(
-				"the database's functions and triggers are not the ones the migrations leave, so baseline records nothing:\nfunction touch(): only in the database\ntrigger t_touch on t (before insert, for each row): only in the database",
+				"the database's functions, triggers, views, sequences and policies are not the ones the migrations leave, so baseline records nothing:\nfunction touch(): only in the database\ntrigger t_touch on t (before insert, for each row): only in the database",
 			)
 			const client = new pg.Client({ connectionString: url })
 			await client.connect()
@@ -170,6 +170,42 @@ CREATE TRIGGER events_touch BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTIO
 			await exec(url, history)
 			const { refused } = await baseline(url, devUrl, history)
 			expect(refused).toBeUndefined()
+		})
+	}, 60_000)
+})
+
+/* P9 of the 0.15.0 review: Atlas OSS compares no view, sequence or policy, and baseline recorded a database missing one */
+describe("a Postgres baseline: the views, sequences and policies Atlas OSS does not compare", () => {
+	const OBJECTS = `CREATE TABLE "u" ("id" serial, "n" integer GENERATED ALWAYS AS IDENTITY, "a" boolean);
+CREATE VIEW "active" AS SELECT "id" FROM "u" WHERE "a";
+CREATE MATERIALIZED VIEW "counts" AS SELECT count(*) AS n FROM "u";
+CREATE SEQUENCE "codes";
+CREATE POLICY "own" ON "u" USING (true);
+`
+
+	it("finds the database the history built in sync, a column's own sequences being the column's", async () => {
+		await withDevAndTarget(async (devUrl, url) => {
+			await exec(url, OBJECTS)
+			expect((await baseline(url, devUrl, OBJECTS)).refused).toBeUndefined()
+		})
+	}, 60_000)
+
+	it("refuses a database missing each, naming it", async () => {
+		await withDevAndTarget(async (devUrl, url) => {
+			await exec(url, 'CREATE TABLE "u" ("id" serial, "n" integer GENERATED ALWAYS AS IDENTITY, "a" boolean);')
+			const { refused } = await baseline(url, devUrl, OBJECTS)
+			expect(refused).toBe(
+				"the database's functions, triggers, views, sequences and policies are not the ones the migrations leave, so baseline records nothing:\nmaterialized view counts: only in the migrations\npolicy own on u: only in the migrations\nsequence codes: only in the migrations\nview active: only in the migrations",
+			)
+		})
+	}, 60_000)
+
+	it("refuses a database holding one the history lacks, and follows a drop and a create", async () => {
+		const later = `${OBJECTS}DROP VIEW "active";\nCREATE VIEW "live" AS SELECT "id" FROM "u";\nDROP SEQUENCE "codes";\nDROP POLICY "own" ON "u";\nCREATE POLICY "mine" ON "u" USING (true);\n`
+		await withDevAndTarget(async (devUrl, url) => {
+			await exec(url, `${later}CREATE VIEW "extra" AS SELECT 1 AS one;`)
+			const { refused } = await baseline(url, devUrl, later)
+			expect(refused?.split("\n").slice(1)).toEqual(["view extra: only in the database"])
 		})
 	}, 60_000)
 })

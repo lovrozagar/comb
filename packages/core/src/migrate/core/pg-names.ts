@@ -15,9 +15,17 @@ const EVENTS: ReadonlyArray<[number, TriggerEvent]> = [
 
 /** A table's facts moved to its new key: a rename, or a move to another schema */
 function moveTable(facts: Facts, from: string, to: string): void {
-	for (const map of [facts.code, facts.columnTypes, facts.parents, facts.tables, facts.triggers, facts.views] as Array<
-		Map<string, unknown>
-	>) {
+	const maps = [
+		facts.code,
+		facts.columnTypes,
+		facts.parents,
+		facts.policies,
+		facts.relations,
+		facts.tables,
+		facts.triggers,
+		facts.views,
+	]
+	for (const map of maps as Array<Map<string, unknown>>) {
 		if (!map.has(from)) continue
 		map.set(to, map.get(from))
 		map.delete(from)
@@ -49,6 +57,8 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.domains,
 		facts.operators,
 		facts.parents,
+		facts.policies,
+		facts.relations,
 		facts.tables,
 		facts.triggers,
 		facts.views,
@@ -96,7 +106,13 @@ function followTrigger(type: string, node: Node, facts: Facts): void {
 }
 
 // lookup-table: the relations a rename, a move or a drop follows: a table, and what Postgres writes through as one (M71)
-const RELATIONS = /* @__PURE__ */ new Set(["OBJECT_FOREIGN_TABLE", "OBJECT_MATVIEW", "OBJECT_TABLE", "OBJECT_VIEW"])
+const RELATIONS = /* @__PURE__ */ new Set([
+	"OBJECT_FOREIGN_TABLE",
+	"OBJECT_MATVIEW",
+	"OBJECT_SEQUENCE",
+	"OBJECT_TABLE",
+	"OBJECT_VIEW",
+])
 
 /** A column renamed: a table's column, or a view's, whose base column stays the one it named */
 function renameColumn(node: Node, facts: Facts): void {
@@ -152,7 +168,7 @@ function followName(type: string, node: Node, facts: Facts): void {
 	}
 }
 
-/** A table or view dropped takes its triggers, its columns and its view with it */
+/** A table, view or sequence dropped takes its triggers, columns, view and policies with it */
 function followDrop(node: Node, facts: Facts): void {
 	if (!RELATIONS.has(String(node["removeType"]))) return
 	for (const object of node["objects"] as Node[]) {
@@ -160,6 +176,8 @@ function followDrop(node: Node, facts: Facts): void {
 		facts.triggers.delete(table)
 		facts.tables.delete(table)
 		facts.views.delete(table)
+		facts.relations.delete(table)
+		facts.policies.delete(table)
 	}
 }
 

@@ -229,12 +229,13 @@ async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?
 	const { matched, only: differ } = liveDrift(historyFacts(history, options.target.schema), live)
 	if (differ.length > 0) {
 		throw new Error(
-			`${refusal ?? "the database's functions and triggers are not the ones the migrations leave, so baseline records nothing"}:\n${differ.join("\n")}`,
+			`${refusal ?? "the database's functions, triggers, views, sequences and policies are not the ones the migrations leave, so baseline records nothing"}:\n${differ.join("\n")}`,
 		)
 	}
 	const counted = [
 		...(matched.routines === 0 ? [] : [`${matched.routines} function${matched.routines === 1 ? "" : "s"}`]),
 		...(matched.triggers === 0 ? [] : [`${matched.triggers} trigger${matched.triggers === 1 ? "" : "s"}`]),
+		...(matched.views === 0 ? [] : [`${matched.views} view${matched.views === 1 ? "" : "s"}`]),
 	]
 	if (counted.length > 0)
 		options.print(

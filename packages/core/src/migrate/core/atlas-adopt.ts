@@ -7,7 +7,7 @@
  * another schema's, and stays as it is (M78). A matching prefix is no proof: public's own rows
  * live in that table too, so a schema beside it that shares its directory matches them by version
  * and hash alone. Apply and baseline adopt only once the schema holds what replaying the prefix
- * leaves, its tables and its functions and triggers (P2 of the 0.14.1 review).
+ * leaves, its tables and its functions, triggers, views, sequences and policies (P2 of the 0.14.1 review, P9 of 0.15.0).
  */
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"

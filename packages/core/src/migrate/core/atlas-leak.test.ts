@@ -89,7 +89,12 @@ async function leaks(body: (print: (line: string) => void) => unknown): Promise<
 const approve = async () => ({ ok: true }) as const
 
 /* the catalog read reaches no database: its schema holds no function or trigger */
-const noObjects = async (): Promise<LiveObjects> => ({ routines: new Map(), triggers: new Map() })
+const noObjects = async (): Promise<LiveObjects> => ({
+	policies: new Map(),
+	relations: new Map(),
+	routines: new Map(),
+	triggers: new Map(),
+})
 
 describe("no Atlas path prints the target's password (M79)", () => {
 	it("scrubs every apply and check failure Atlas reports", async () => {

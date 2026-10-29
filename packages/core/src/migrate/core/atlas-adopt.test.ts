@@ -168,7 +168,12 @@ describe("adoption: read once, while the schema's own history is empty", () => {
 
 /* P2 of the 0.14.1 review: a matching prefix is adopted only once the schema holds what replaying it leaves */
 /** A database with no function, procedure or trigger */
-const noObjects: LiveRead = async () => ({ routines: new Map(), triggers: new Map() })
+const noObjects: LiveRead = async () => ({
+	policies: new Map(),
+	relations: new Map(),
+	routines: new Map(),
+	triggers: new Map(),
+})
 
 /** atlas, its schema diff answering `stdout` and `stderr` */
 const diffing =

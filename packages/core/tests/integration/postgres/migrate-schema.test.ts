@@ -73,7 +73,12 @@ async function query(url: string, sql: string): Promise<Array<Record<string, unk
 const USERS = 'CREATE TABLE "users" ("id" integer PRIMARY KEY);\n'
 
 /** A database with no function, procedure or trigger: the baseline here compares its tables */
-const noObjects: LiveRead = async () => ({ routines: new Map(), triggers: new Map() })
+const noObjects: LiveRead = async () => ({
+	policies: new Map(),
+	relations: new Map(),
+	routines: new Map(),
+	triggers: new Map(),
+})
 
 /* P12 of the 0.14.1 review: Atlas inspects the schema its dev URL is scoped to before it replays anything */
 describe("migrate on Postgres: schema app on an empty dev database (P12)", () => {

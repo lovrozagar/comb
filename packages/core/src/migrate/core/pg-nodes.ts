@@ -11,6 +11,28 @@ type Node = Record<string, unknown>
 type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefined }
 
 /** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
+/** What a relation that is no table is: a sequence a column owns is the column's, which no baseline compares on its own */
+type Relation = "materialized view" | "owned sequence" | "sequence" | "view"
+
+/** The facts of a history with nothing in it, its names keyed under `schema` */
+const emptyFacts = (schema: string): Facts => ({
+	casts: new Map(),
+	code: new Map(),
+	columnTypes: new Map(),
+	defined: new Set(),
+	domains: new Map(),
+	eventTriggers: new Map(),
+	operators: new Map(),
+	parents: new Map(),
+	policies: new Map(),
+	relations: new Map(),
+	routines: new Map(),
+	schema,
+	tables: new Map(),
+	triggers: new Map(),
+	views: new Map(),
+})
+
 /** A column's type, keyed as typeOf keys it, and its modifiers, none for one unbounded */
 type ColumnType = { mods: readonly number[]; type: string }
 
@@ -62,6 +84,10 @@ type Facts = {
 	 * (a join, a set operation), and how its columns name the base's, `all` for `*` (M71)
 	 */
 	views: Map<string, { base: string | undefined; columns: Map<string, string> | "all" }>
+	/** the views, materialized views and sequences the history leaves, by key, a column's own sequence marked so (P9) */
+	relations: Map<string, Relation>
+	/** each table's policies, by name (P9) */
+	policies: Map<string, Set<string>>
 	/**
 	 * each table's triggers, with the writes that fire them, and `type` as Postgres's tgtype holds
 	 * when and for what it fires (row, before, instead of, each event's bit) (P13)
@@ -104,6 +130,7 @@ const typeOf = (typeName: unknown, schema: string): string => keyOf(names((typeN
 
 export {
 	type ColumnType,
+	emptyFacts,
 	type EventTrigger,
 	type Facts,
 	keyOf,
@@ -111,6 +138,7 @@ export {
 	names,
 	type Node,
 	nodesOf,
+	type Relation,
 	type Routines,
 	tableOf,
 	typed,
