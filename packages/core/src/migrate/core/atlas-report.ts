@@ -10,8 +10,8 @@ import { outsideTransaction } from "./classify-file.ts"
 
 const APPLY_FORMAT = '{"target":{{ json .Target }},"applied":{{ json .Applied }},"error":{{ json .Error }}}'
 
-/** A file Atlas ran: the statements it ran of it, the one that failed last */
-type AppliedFile = { Applied: string[]; Error?: { Stmt: string; Text: string }; Name: string }
+/** A file Atlas ran: the statements it ran of it, the one that failed last, and those an earlier run applied, which a resume skips */
+type AppliedFile = { Applied: string[]; Error?: { Stmt: string; Text: string }; Name: string; Skipped?: number }
 /** Atlas writes `applied` as null when it ran no file, as when another apply ran them first (P8) */
 type ApplyReport = { applied: AppliedFile[] | null; error: string }
 
@@ -19,8 +19,8 @@ type ApplyReport = { applied: AppliedFile[] | null; error: string }
 function aftermath(copy: string, file: AppliedFile): string {
 	if (!outsideTransaction(readFileSync(join(copy, file.Name), "utf8")))
 		return "It was rolled back; the files before it stay applied"
-	/* Atlas lists the statement that failed last */
-	const ran = file.Applied.length - 1
+	/* Atlas lists the statement that failed last, and counts an earlier run's as Skipped (27.5 of plan 15) */
+	const ran = (file.Skipped ?? 0) + file.Applied.length - 1
 	if (ran === 0)
 		return "It ran outside a transaction and failed at its first statement, so nothing of it stays applied; the files before it do"
 	return `It ran outside a transaction, so ${ran === 1 ? "the statement it ran before that stays" : `the ${ran} statements it ran before that stay`} applied, as do the files before it; while the file is unchanged, migrate apply resumes after them`

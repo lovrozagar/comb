@@ -102,6 +102,24 @@ describe("applyWithAtlas: a file run outside a transaction that failed (P10)", (
 		)
 	})
 
+	/* 27.5 of plan 15: on a resume Atlas lists only this run's statements, and counts the earlier ones as Skipped */
+	it("counts the statements an earlier run applied, which a resume skips", async () => {
+		const statements = NONE.split("\n").filter((line) => line.startsWith("CREATE"))
+		const resumed = {
+			Applied: [statements[1]],
+			Error: { Stmt: statements[1], Text: 'pq: relation "h1" already exists (42P07)' },
+			Name: "2_b.sql",
+			Skipped: 1,
+		}
+		const apply = fail(
+			"",
+			JSON.stringify({ applied: [resumed], error: "sql/migrate: executing statement", target: "2" }),
+		)
+		await expect(applyWithAtlas(options(fakeAtlas({ apply, status: PENDING })))).rejects.toThrow(
+			"It ran outside a transaction, so the statement it ran before that stays applied, as do the files before it",
+		)
+	})
+
 	it("says nothing of it stays when its first statement failed", async () => {
 		await expect(applyWithAtlas(options(fakeAtlas({ apply: failedAt(1), status: PENDING })))).rejects.toThrow(
 			'2_b.sql failed at CREATE TABLE "h1" ("id" int);: pq: relation "h1" already exists (42P07). It ran outside a transaction and failed at its first statement, so nothing of it stays applied; the files before it do',
