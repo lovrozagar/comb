@@ -3,7 +3,8 @@
  * @lovrozagar/comb/query/sqlite — SQLite-specific SQL generation.
  */
 export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListExtras, type ListQueryResult, type MergedListQueryResult, } from "./build-list-query.ts";
-export { conditionToSQL, filterToSQL } from "./executor.ts";
+export { filterToSQL } from "./executor.ts";
+export { type ColumnKind, conditionToSQL } from "./condition.ts";
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts";
 export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts";
 export { patternToSQL } from "./pattern.ts";
@@ -32,28 +33,10 @@ export { buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, 
  * SQLite query executor — Drizzle-native filter/sort/pagination orchestrator.
  */
 import { type SQL } from "drizzle-orm";
-import { type SQLiteColumn, type SQLiteTable } from "drizzle-orm/sqlite-core";
-import type { ComputedFilterResolver, FilterAST, FilterCondition } from "../types.ts";
+import { type SQLiteTable } from "drizzle-orm/sqlite-core";
+import type { ComputedFilterResolver, FilterAST } from "../types.ts";
+import { conditionToSQL } from "./condition.ts";
 import type { RelationConfig } from "./types.ts";
-/**
- * The whole seconds of `members`, epoch milliseconds: what each matches on a seconds column, as
- * secondsBound rounds eq's value; one between two seconds matches no row, and is left out (U25)
- */
-declare const wholeSeconds: (members: readonly unknown[]) => number[];
-/** The operators a date field takes with one number, which a seconds column rounds */
-type SecondsOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "ne" | "neq";
-declare const isSecondsOperator: (operator: string) => operator is SecondsOperator;
-/**
- * How a seconds column compares with epoch milliseconds `ms` under `operator`: the comparison on
- * the whole second that keeps it exact, or, for eq and ne on a value between two seconds, no row
- * ("none") or every row that has a value ("present"). The raw builder binds the seconds as they are.
- */
-declare function secondsBound(operator: SecondsOperator, ms: number): "none" | "present" | {
-    operator: "eq" | "gt" | "gte" | "lt" | "lte" | "ne";
-    seconds: number;
-};
-/** One condition on one column; null when the operator or value is not one this column can take */
-declare function conditionToSQL(given: FilterCondition, column: SQLiteColumn): SQL | null;
 /**
  * What a validated filter lowers against. Values arrive typed by `validateFilter` (or the list
  * query schema), so they bind as the field declares.
@@ -64,22 +47,54 @@ type FilterToSQLConfig = {
     relations?: Record<string, RelationConfig> | undefined;
 };
 declare function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | null;
-export { conditionToSQL, filterToSQL, type FilterToSQLConfig, isSecondsOperator, secondsBound, wholeSeconds };
+export { conditionToSQL, filterToSQL, type FilterToSQLConfig };
+
+// query/sqlite/condition.d.ts
+/**
+ * One filter condition as SQL on one column: the single lowering filterToSQL (drizzle's columns)
+ * and buildFilterSQL (a table alias's columns by name) share, so no operator or value conversion
+ * exists in one and not the other (Q5 of r17). A column is described by what it stores (its kind)
+ * and the SQL its values compare against.
+ */
+import { type SQL, type SQLWrapper } from "drizzle-orm";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
+import type { FilterCondition } from "../types.ts";
+/**
+ * What a column stores, which decides how a validated value binds: text; a number (`numeric`, text
+ * SQLite compares by number affinity); a date as epoch milliseconds or whole seconds; or `as-is`, a
+ * value bound as validated (a boolean, JSON, or a raw column whose kind was not given)
+ */
+type ColumnKind = "as-is" | "date-ms" | "date-s" | "number" | "numeric" | "text";
+/** A column a condition lowers onto: what it stores, and the SQL a value compares against */
+type FilterColumn = {
+    kind: ColumnKind;
+    /** a drizzle column binds a value through its own mapper; any other SQL binds it as it is */
+    sql: SQLWrapper;
+};
+/** One condition on one column; null when the operator or value is not one this column can take */
+declare function lowerOn(column: FilterColumn, condition: FilterCondition): SQL | null;
+/** One condition on one drizzle column; null when the operator or value is not one this column can take */
+declare const conditionToSQL: (condition: FilterCondition, column: SQLiteColumn) => SQL | null;
+export { type ColumnKind, conditionToSQL, type FilterColumn, lowerOn };
 
 // query/sqlite/filter-sql.d.ts
 /**
- * Raw SQL filter builders — table-alias-based SQL generation from FilterAST.
- * Used when building raw SQL queries (not Drizzle relational).
+ * Raw SQL filter builders — table-alias-based SQL generation from FilterAST, for raw SQL queries
+ * (not Drizzle relational). Each condition lowers through condition.ts, as filterToSQL's do.
  */
 import { type SQL } from "drizzle-orm";
 import type { FilterCondition, FilterGroup } from "../types.ts";
-/** A mapped column: its name, and for a date field the unit it stores (milliseconds unless `"s"`) */
+import { type ColumnKind } from "./condition.ts";
+/**
+ * A mapped column: its name, its values bound as validated, or its name and what it stores, which
+ * decides how a value binds as on a drizzle column (`"date-s"` for a date in whole seconds)
+ */
 type MappedColumn = string | {
     column: string;
-    unit: "ms" | "s";
+    kind: ColumnKind;
 };
 type FilterSQLConfig = {
-    /** Column map: API field name -> SQL column name, or `{ column, unit: "s" }` for a date stored in seconds */
+    /** Column map: API field name -> SQL column name, or `{ column, kind }` (condition.ts's ColumnKind) */
     columnMap: Record<string, MappedColumn>;
     /** Table alias used in query (e.g. "pc" for productCollection) */
     tableAlias: string;
@@ -89,7 +104,10 @@ type FilterSQLConfig = {
  * identity of its logic: or() matches nothing, and() everything
  */
 declare function buildFilterSQL(group: FilterGroup, config: FilterSQLConfig): SQL;
-/** One condition as SQL on its mapped column; null when the field is unmapped or the value unusable */
+/**
+ * One condition as SQL on its mapped column, lowered as filterToSQL lowers it (Q5 of r17); null
+ * when the field is unmapped or the column cannot take its operator or value
+ */
 declare function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig): SQL | null;
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig, type MappedColumn };
 

@@ -1,6 +1,6 @@
 /**
- * Raw SQL filter builders — table-alias-based SQL generation from FilterAST.
- * Used when building raw SQL queries (not Drizzle relational).
+ * Raw SQL filter builders — table-alias-based SQL generation from FilterAST, for raw SQL queries
+ * (not Drizzle relational). Each condition lowers through condition.ts, as filterToSQL's do.
  */
 import { type SQL, sql } from "drizzle-orm"
 
@@ -9,14 +9,16 @@ import { combErrorKeys } from "../../types.ts"
 
 import type { FilterCondition, FilterGroup } from "../types.ts"
 import { quoteIdent } from "./identifier.ts"
-import { isSecondsOperator, secondsBound, wholeSeconds } from "./executor.ts"
-import { patternToSQL } from "./pattern.ts"
+import { type ColumnKind, lowerOn } from "./condition.ts"
 
-/** A mapped column: its name, and for a date field the unit it stores (milliseconds unless `"s"`) */
-type MappedColumn = string | { column: string; unit: "ms" | "s" }
+/**
+ * A mapped column: its name, its values bound as validated, or its name and what it stores, which
+ * decides how a value binds as on a drizzle column (`"date-s"` for a date in whole seconds)
+ */
+type MappedColumn = string | { column: string; kind: ColumnKind }
 
 type FilterSQLConfig = {
-	/** Column map: API field name -> SQL column name, or `{ column, unit: "s" }` for a date stored in seconds */
+	/** Column map: API field name -> SQL column name, or `{ column, kind }` (condition.ts's ColumnKind) */
 	columnMap: Record<string, MappedColumn>
 	/** Table alias used in query (e.g. "pc" for productCollection) */
 	tableAlias: string
@@ -48,65 +50,18 @@ function requireConditionSQL(condition: FilterCondition, config: FilterSQLConfig
 	})
 }
 
-/** A list of bound values; an empty in-list matches nothing and an empty nin-list everything */
-function listSQL(column: SQL, value: unknown, negate: boolean): SQL {
-	if (!Array.isArray(value) || value.length === 0) return negate ? sql`1` : sql`0`
-	const placeholders = sql.join(
-		value.map((v) => sql`${v}`),
-		sql`, `,
-	)
-	return negate ? sql`${column} NOT IN (${placeholders})` : sql`${column} IN (${placeholders})`
-}
-
-function isSQL(column: SQL, value: unknown): SQL | null {
-	if (value === null) return sql`${column} IS NULL`
-	if (value === "notnull") return sql`${column} IS NOT NULL`
-	return typeof value === "boolean" ? sql`${column} = ${value}` : null
-}
-
-type Lower = (column: SQL, value: unknown) => SQL | null
-
-// lookup-table: each operator's lowering, so one condition is a single dispatch
-const LOWER: Readonly<Partial<Record<FilterCondition["operator"], Lower>>> = {
-	eq: (column, value) => sql`${column} = ${value}`,
-	gt: (column, value) => sql`${column} > ${value}`,
-	gte: (column, value) => sql`${column} >= ${value}`,
-	ilike: (column, value) => patternToSQL(column, "ilike", value),
-	in: (column, value) => listSQL(column, value, false),
-	is: isSQL,
-	like: (column, value) => patternToSQL(column, "like", value),
-	lt: (column, value) => sql`${column} < ${value}`,
-	lte: (column, value) => sql`${column} <= ${value}`,
-	ne: (column, value) => sql`${column} != ${value}`,
-	neq: (column, value) => sql`${column} != ${value}`,
-	nin: (column, value) => listSQL(column, value, true),
-}
-
-/** A date condition's epoch milliseconds on a column of whole seconds, rounded as the executor rounds them */
-function inSeconds(column: SQL, operator: FilterCondition["operator"], value: unknown): SQL | null {
-	/* each in/nin member as eq or ne takes it, as the executor binds them (U25) */
-	if ((operator === "in" || operator === "nin") && Array.isArray(value)) {
-		const seconds = wholeSeconds(value)
-		if (seconds.length > 0) return listSQL(column, seconds, operator === "nin")
-		return operator === "in" ? sql`0` : sql`${column} IS NOT NULL`
-	}
-	if (!isSecondsOperator(operator) || typeof value !== "number") return null
-	const bound = secondsBound(operator, value)
-	if (bound === "none") return sql`0`
-	if (bound === "present") return sql`${column} IS NOT NULL`
-	return (LOWER[bound.operator] as Lower)(column, bound.seconds)
-}
-
-/** One condition as SQL on its mapped column; null when the field is unmapped or the value unusable */
+/**
+ * One condition as SQL on its mapped column, lowered as filterToSQL lowers it (Q5 of r17); null
+ * when the field is unmapped or the column cannot take its operator or value
+ */
 function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig): SQL | null {
 	const mapped = Object.hasOwn(config.columnMap, condition.field) ? config.columnMap[condition.field] : undefined
-	const lower = Object.hasOwn(LOWER, condition.operator) ? LOWER[condition.operator] : undefined
-	const colName = typeof mapped === "string" ? mapped : mapped?.column
-	if (!colName || !lower) return null
-	const column = sql`${sql.raw(quoteIdent(config.tableAlias))}.${sql.raw(quoteIdent(colName))}`
-	const seconds =
-		typeof mapped === "object" && mapped.unit === "s" ? inSeconds(column, condition.operator, condition.value) : null
-	return seconds ?? lower(column, condition.value)
+	if (mapped === undefined) return null
+	const { column, kind } = typeof mapped === "string" ? { column: mapped, kind: "as-is" as const } : mapped
+	return lowerOn(
+		{ kind, sql: sql`${sql.raw(quoteIdent(config.tableAlias))}.${sql.raw(quoteIdent(column))}` },
+		condition,
+	)
 }
 
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig, type MappedColumn }

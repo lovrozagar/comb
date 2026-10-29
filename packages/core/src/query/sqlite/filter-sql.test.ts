@@ -48,8 +48,8 @@ describe("buildConditionSQL", () => {
 
 	it("matches nothing for in with an empty array, everything for nin", () => {
 		for (const [operator, text] of [
-			["in", "0"],
-			["nin", "1"],
+			["in", "false"],
+			["nin", "true"],
 		] as const) {
 			expect(compile(buildConditionSQL({ field: "role", operator, value: [] }, config) as SQL).sql).toBe(text)
 		}
@@ -213,7 +213,10 @@ describe("buildFilterSQL on an empty group (Q-D1)", () => {
 })
 
 /** A date field `at` mapped to a column of `unit` */
-const at = (unit: "ms" | "s") => ({ columnMap: { at: { column: "at", unit } }, tableAlias: "e" })
+const at = (unit: "ms" | "s") => ({
+	columnMap: { at: { column: "at", kind: `date-${unit}` as const } },
+	tableAlias: "e",
+})
 /** A condition on `at` */
 const condition = (operator: FilterCondition["operator"], value: unknown): FilterCondition => ({
 	field: "at",
@@ -233,7 +236,7 @@ describe("buildConditionSQL — a date column's unit (R9)", () => {
 		expect(compile(buildConditionSQL(condition("gt", 1500), at("s"))!)).toEqual({ params: [1], sql: '"e"."at" > ?' })
 		expect(compile(buildConditionSQL(condition("gte", 1500), at("s"))!)).toEqual({ params: [2], sql: '"e"."at" >= ?' })
 		expect(compile(buildConditionSQL(condition("eq", 1500), at("s"))!).sql).toBe("0")
-		expect(compile(buildConditionSQL(condition("neq", 1500), at("s"))!).sql).toBe('"e"."at" IS NOT NULL')
+		expect(compile(buildConditionSQL(condition("neq", 1500), at("s"))!).sql).toBe('("e"."at" is not null)')
 	})
 
 	/* U25: each in/nin member as eq (in) or ne (nin) takes it, the executor's one rule */
@@ -241,11 +244,11 @@ describe("buildConditionSQL — a date column's unit (R9)", () => {
 		expect(compile(buildConditionSQL(condition("in", [2000, 3500]), at("s"))!).params).toEqual([2])
 		expect(compile(buildConditionSQL(condition("in", [3500]), at("s"))!).sql).toBe("0")
 		expect(compile(buildConditionSQL(condition("nin", [2000, 3500]), at("s"))!).params).toEqual([2])
-		expect(compile(buildConditionSQL(condition("nin", [3500]), at("s"))!).sql).toBe('"e"."at" IS NOT NULL')
+		expect(compile(buildConditionSQL(condition("nin", [3500]), at("s"))!).sql).toBe('("e"."at" is not null)')
 		expect(compile(buildConditionSQL(condition("in", [2000, 3500]), at("ms"))!).params).toEqual([2000, 3500])
 	})
 
 	it("leaves an operator that takes no instant, such as is, as it is on a seconds column", () => {
-		expect(compile(buildConditionSQL(condition("is", null), at("s"))!).sql).toBe('"e"."at" IS NULL')
+		expect(compile(buildConditionSQL(condition("is", null), at("s"))!).sql).toBe('("e"."at" is null)')
 	})
 })

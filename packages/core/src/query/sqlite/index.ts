@@ -15,7 +15,8 @@ export {
 } from "./build-list-query.ts"
 
 /* SQL generation internals (used by buildListQuery, available for advanced use) */
-export { conditionToSQL, filterToSQL } from "./executor.ts"
+export { filterToSQL } from "./executor.ts"
+export { type ColumnKind, conditionToSQL } from "./condition.ts"
 
 /* Raw SQL filter builders */
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts"

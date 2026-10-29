@@ -1,187 +1,17 @@
 /**
  * SQLite query executor — Drizzle-native filter/sort/pagination orchestrator.
  */
-import {
-	and,
-	eq,
-	getTableColumns,
-	getTableName,
-	gt,
-	gte,
-	inArray,
-	isNotNull,
-	isNull,
-	lt,
-	lte,
-	ne,
-	notInArray,
-	or,
-	type SQL,
-	sql,
-} from "drizzle-orm"
+import { and, getTableColumns, getTableName, or, type SQL, sql } from "drizzle-orm"
 import { alias, type SQLiteColumn, type SQLiteTable } from "drizzle-orm/sqlite-core"
 
 import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
 import type { ComputedFilterResolver, FilterAST, FilterCondition, FilterGroup } from "../types.ts"
-import { patternToSQL } from "./pattern.ts"
-import { asStored } from "./stored-value.ts"
+import { conditionToSQL } from "./condition.ts"
 import type { RelationConfig } from "./types.ts"
 
 const COMPUTED_PREFIX = "@"
-
-/** `is`: null and notnull on any column, true and false on a boolean one (as validateFilter types them) */
-function isToSQL(column: SQLiteColumn, value: unknown): SQL | null {
-	if (value === null) return isNull(column)
-	if (value === "notnull") return isNotNull(column)
-	return typeof value === "boolean" ? eq(column, value) : null
-}
-
-/**
- * A validated value as `column` binds it: a date field's epoch milliseconds become a Date on a
- * date column, so drizzle writes them in the unit the column stores (seconds or milliseconds)
- */
-function boundValue(column: SQLiteColumn, value: unknown): unknown {
-	if (column.dataType !== "object date") return value
-	/* an in/nin list's members each as one value is (U25): a date field's are numbers, as validated */
-	if (Array.isArray(value)) return value.map((member) => new Date(member as number))
-	return typeof value === "number" ? new Date(value) : value
-}
-
-/**
- * The whole seconds of `members`, epoch milliseconds: what each matches on a seconds column, as
- * secondsBound rounds eq's value; one between two seconds matches no row, and is left out (U25)
- */
-const wholeSeconds = (members: readonly unknown[]): number[] =>
-	members.flatMap((ms) => (typeof ms === "number" && ms % 1000 === 0 ? [ms / 1000] : []))
-
-/** Whether a date column stores whole seconds: drizzle's integer `timestamp` mode, which binds `floor(ms / 1000)` */
-const inSeconds = (column: SQLiteColumn): boolean =>
-	column.dataType === "object date" && (column as { mode?: unknown }).mode === "timestamp"
-
-/** The operators a date field takes with one number, which a seconds column rounds */
-type SecondsOperator = "eq" | "gt" | "gte" | "lt" | "lte" | "ne" | "neq"
-// lookup-table: the comparison operators secondsCondition rounds
-const SECONDS_OPERATORS: ReadonlySet<SecondsOperator> = /* @__PURE__ */ new Set<SecondsOperator>([
-	"eq",
-	"gt",
-	"gte",
-	"lt",
-	"lte",
-	"ne",
-	"neq",
-])
-const isSecondsOperator = (operator: string): operator is SecondsOperator =>
-	SECONDS_OPERATORS.has(operator as SecondsOperator)
-
-/**
- * A seconds column's condition on epoch milliseconds, each bound rounded the way that keeps it
- * exact: gt and lte on the second at or below, gte and lt on the second at or above; eq and ne on
- * a value between two seconds match no row and every row that has one
- */
-function secondsCondition(column: SQLiteColumn, operator: SecondsOperator, ms: number): SQL {
-	const bound = secondsBound(operator, ms)
-	if (bound === "none") return sql`0`
-	if (bound === "present") return isNotNull(column)
-	const at = new Date(bound.seconds * 1000)
-	const compare = { eq, gt, gte, lt, lte, ne }[bound.operator]
-	return compare(column, at)
-}
-
-/**
- * How a seconds column compares with epoch milliseconds `ms` under `operator`: the comparison on
- * the whole second that keeps it exact, or, for eq and ne on a value between two seconds, no row
- * ("none") or every row that has a value ("present"). The raw builder binds the seconds as they are.
- */
-function secondsBound(
-	operator: SecondsOperator,
-	ms: number,
-): "none" | "present" | { operator: "eq" | "gt" | "gte" | "lt" | "lte" | "ne"; seconds: number } {
-	const below = Math.floor(ms / 1000)
-	const above = Math.ceil(ms / 1000)
-	const whole = ms % 1000 === 0
-	if (operator === "gt" || operator === "lte") return { operator, seconds: below }
-	if (operator === "gte" || operator === "lt") return { operator, seconds: above }
-	if (operator === "eq") return whole ? { operator, seconds: below } : "none"
-	return whole ? { operator: "ne", seconds: below } : "present"
-}
-
-/**
- * A seconds column's in/nin on epoch milliseconds, each member as eq (in) or ne (nin) takes it:
- * a member between two seconds matches no row, so in on none of a whole second matches nothing,
- * and nin of none leaves every row that has a value (U25)
- */
-function secondsList(column: SQLiteColumn, operator: "in" | "nin", members: readonly unknown[]): SQL {
-	const dates = wholeSeconds(members).map((seconds) => new Date(seconds * 1000))
-	if (operator === "in") return dates.length === 0 ? sql`0` : inArray(column, dates)
-	return dates.length === 0 ? isNotNull(column) : notInArray(column, dates)
-}
-
-/** Whether `value` is of `type`, or a list holding one */
-const holds = (value: unknown, type: "number" | "string"): boolean =>
-	typeof value === type || (Array.isArray(value) && value.some((member) => typeof member === type))
-
-/**
- * Whether the condition's value is one `column` cannot compare: a number on a text column, which
- * SQLite would compare as text, or text (an ISO date field's) on a date column, whose mapper takes
- * a Date, or on a number column, which would compare it as text (U35). `numeric()`, "string
- * numeric" to drizzle, compares both as numbers by its affinity (U35b). `is` and the patterns take
- * text on any column.
- */
-const mismatched = (column: SQLiteColumn, { operator, value }: FilterCondition): boolean =>
-	column.dataType.startsWith("string")
-		? column.dataType !== "string numeric" && holds(value, "number")
-		: (column.dataType === "object date" || column.dataType.startsWith("number")) &&
-			!["ilike", "is", "like"].includes(operator) &&
-			holds(value, "string")
-
-/** One condition on one column; null when the operator or value is not one this column can take */
-function conditionToSQL(given: FilterCondition, column: SQLiteColumn): SQL | null {
-	const condition = asStored(given, column)
-	if (condition.operator !== "contains" && mismatched(column, condition)) return null
-	const { operator } = condition
-	if (inSeconds(column) && (operator === "in" || operator === "nin") && Array.isArray(condition.value))
-		return secondsList(column, operator, condition.value)
-	const seconds =
-		inSeconds(column) && isSecondsOperator(operator) && typeof condition.value === "number"
-			? secondsCondition(column, operator, condition.value)
-			: undefined
-	return seconds ?? operatorSQL(column, operator, boundValue(column, condition.value))
-}
-
-/** `operator` on `column` with a value already bound as the column takes it; null for an operator it does not know */
-function operatorSQL(column: SQLiteColumn, operator: string, value: unknown): SQL | null {
-	switch (operator) {
-		case "eq":
-			return eq(column, value)
-		case "ne":
-		case "neq":
-			return ne(column, value)
-		case "gt":
-			return gt(column, value as number | string)
-		case "gte":
-			return gte(column, value as number | string)
-		case "lt":
-			return lt(column, value as number | string)
-		case "lte":
-			return lte(column, value as number | string)
-		case "in":
-			return inArray(column, value as unknown[])
-		case "nin":
-			return notInArray(column, value as unknown[])
-		case "like":
-		case "ilike":
-			return patternToSQL(column, operator, value)
-		case "is":
-			return isToSQL(column, value)
-		/* a member of a JSON array the column holds, whatever it is declared as, so mismatched() does not apply (C13, 27.8); a scalar JSON value is no set, though json_each reads it as one, and text that is no JSON, which json_type raises on, is matched by nothing: a CASE asks json_valid first, in the order SQLite evaluates it (27.15) */
-		case "contains":
-			return sql`(CASE WHEN json_valid(${column}) THEN json_type(${column}) = 'array' AND EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${value}) END)`
-		default:
-			return null
-	}
-}
 
 /**
  * What a validated filter lowers against. Values arrive typed by `validateFilter` (or the list
@@ -297,4 +127,4 @@ function filterToSQL(ast: FilterAST | null, config: FilterToSQLConfig): SQL | nu
 	return ast ? groupToSQL(ast.root, config) : null
 }
 
-export { conditionToSQL, filterToSQL, type FilterToSQLConfig, isSecondsOperator, secondsBound, wholeSeconds }
+export { conditionToSQL, filterToSQL, type FilterToSQLConfig }

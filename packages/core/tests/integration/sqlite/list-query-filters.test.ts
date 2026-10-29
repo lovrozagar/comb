@@ -276,7 +276,7 @@ async function rawIds(filter: string): Promise<number[]> {
 		.executeMultiple(`CREATE TABLE event (id INTEGER PRIMARY KEY, at_s INTEGER, at_ms INTEGER, day TEXT);
 INSERT INTO event VALUES (1, 1, 1000, '1970-01-01'), (2, 5, 5000, '1970-01-01'), (3, 9, 9000, '1970-01-01');`)
 	const ast = events.parse({ filter, limit: "100", order: "id.asc" }).filterAst
-	const where = buildFilterSQL(ast!.root, { columnMap: { at_s: { column: "at_s", unit: "s" } }, tableAlias: "e" })
+	const where = buildFilterSQL(ast!.root, { columnMap: { at_s: { column: "at_s", kind: "date-s" } }, tableAlias: "e" })
 	const rows = await harness.db.all<{ id: number }>(sql`SELECT id FROM event AS "e" WHERE ${where} ORDER BY id`)
 	return rows.map((row) => row.id)
 }
