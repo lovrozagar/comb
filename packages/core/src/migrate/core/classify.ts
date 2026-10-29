@@ -85,7 +85,6 @@ const CREATE_TABLE = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:(?:TEMP|TEMPORARY|UNLOGGED) )?TABLE (?:IF NOT EXISTS )?(${QNAME})`,
 	"i",
 )
-const LOCKING = /^(?:REINDEX (?!.*\bCONCURRENTLY\b)|VACUUM FULL\b|CLUSTER\b)/i
 
 /** The drops a DROP TABLE or DROP INDEX names, one per listed name */
 function dropNames(code: string): string[] {
@@ -142,7 +141,6 @@ function statementFindings(code: string, ctx: FileContext): Finding[] {
 	if (ctx.dialect === "postgres") {
 		const index = indexWarning(code, ctx)
 		if (index !== undefined) findings.push(index)
-		if (LOCKING.test(code)) findings.push({ level: "lock", note: "holds an exclusive lock while it runs" })
 	}
 	return findings
 }

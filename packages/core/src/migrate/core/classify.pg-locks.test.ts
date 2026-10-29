@@ -37,6 +37,17 @@ describe("a constraint that builds its index under an exclusive lock (M81)", () 
 	})
 })
 
+/* P6 of the 0.14.1 review: an added column's inline primary key or unique builds its index as ADD CONSTRAINT does */
+describe("an added column's inline primary key or unique", () => {
+	it("warns of the index it builds on a table the file did not create, and of none on one it does", () => {
+		for (const later of ["ALTER TABLE t ADD COLUMN k serial PRIMARY KEY;", "ALTER TABLE t ADD COLUMN u text UNIQUE;"])
+			expect(rate(later).lockWarnings.join(" "), later).toContain(
+				"locks t against reads and writes while it builds its index",
+			)
+		expect(rate("CREATE TABLE n (id int);\nALTER TABLE n ADD COLUMN u text UNIQUE;").lockWarnings).toEqual([])
+	})
+})
+
 describe("SET EXPRESSION (M81)", () => {
 	it("is cautious, recomputing every stored value of its column, with the rewrite lock warning", () => {
 		const rated = rate("ALTER TABLE t ALTER COLUMN g SET EXPRESSION AS (a * 3);")

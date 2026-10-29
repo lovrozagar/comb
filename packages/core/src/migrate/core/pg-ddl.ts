@@ -15,21 +15,10 @@
  */
 import type { Finding } from "./classify-alter.ts"
 import type { FreshContext } from "./pg-fresh.ts"
+import { addColumn, inlineConstraints, REWRITES } from "./pg-column-add.ts"
+import { domainFindings } from "./pg-domain.ts"
+import { maintenanceFindings } from "./pg-maintenance.ts"
 import { names, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
-
-const REWRITES = "rewrites or scans the table under an exclusive lock"
-
-// lookup-table: the functions a default computes per row, so adding the column rewrites the table
-const VOLATILE = /* @__PURE__ */ new Set([
-	"clock_timestamp",
-	"gen_random_uuid",
-	"nextval",
-	"random",
-	"timeofday",
-	"uuid_generate_v1",
-	"uuid_generate_v1mc",
-	"uuid_generate_v4",
-])
 
 // lookup-table: the ALTER TABLE commands that change which rows a role sees, or what keeps them, and lose no value
 const CAUTIOUS_COMMANDS = /* @__PURE__ */ new Set([
@@ -139,27 +128,32 @@ const RESTART: Finding = {
 const restarts = (options: unknown): boolean =>
 	nodesOf(options).some(([type, node]) => type === "DefElem" && node["defname"] === "restart")
 
-/** An added column's findings: NOT NULL without a default fails on a table with rows; a volatile default rewrites it */
-function addColumn(def: Node): Finding[] {
-	const column = def["ColumnDef"] as Node
-	const constraints = ((column["constraints"] as Node[] | undefined) ?? []).map((each) => each["Constraint"] as Node)
-	const has = (type: string) => constraints.some((each) => each["contype"] === type)
-	const findings: Finding[] = []
-	if (has("CONSTR_NOTNULL") && !has("CONSTR_DEFAULT") && !has("CONSTR_GENERATED") && !has("CONSTR_IDENTITY"))
-		findings.push({ level: "unsafe" })
-	const defaults = constraints.filter((each) => each["contype"] === "CONSTR_DEFAULT")
-	const volatile = nodesOf(defaults.map((each) => each["raw_expr"])).some(
-		([type, node]) => type === "FuncCall" && VOLATILE.has(names(node["funcname"]).at(-1) as string),
-	)
-	if (volatile) findings.push({ level: "lock", note: REWRITES })
-	return findings
+/** An identity made GENERATED ALWAYS, by ADD or SET: a deployed insert that writes the column then fails (P16) */
+function always(cmd: Node): Finding[] {
+	const def = cmd["def"] as Node
+	const made =
+		cmd["subtype"] === "AT_AddIdentity"
+			? (def["Constraint"] as Node)["generated_when"] === "a"
+			: nodesOf(def).some(
+					([type, node]) =>
+						type === "DefElem" &&
+						node["defname"] === "generated" &&
+						((node["arg"] as Node)["Integer"] as Node)["ival"] === "a".charCodeAt(0),
+				)
+	if (!made) return []
+	return [
+		{
+			level: "cautious",
+			note: `makes ${String(cmd["name"])} GENERATED ALWAYS: an insert that writes it then fails unless it says OVERRIDING SYSTEM VALUE`,
+		},
+	]
 }
 
 // lookup-table: the commands one rule rates, by subtype; undefined leaves a command to the table's rules
 const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string) => Finding[] | undefined>> = {
-	AT_AddColumn: (cmd) => addColumn(cmd["def"] as Node),
+	AT_AddColumn: addColumn,
 	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
-	AT_AddIdentity: (cmd) => (restarts(cmd["def"]) ? [RESTART] : undefined),
+	AT_AddIdentity: (cmd) => [...always(cmd), ...(restarts(cmd["def"]) ? [RESTART] : [])],
 	AT_AlterColumnType: () => [{ level: "unsafe" }, { level: "lock", note: REWRITES }],
 	/* a SET DEFAULT changes no stored value; a DROP DEFAULT, with no def, changes what later writes store */
 	AT_ColumnDefault: (cmd) => (cmd["def"] === undefined ? [{ level: "cautious" }] : []),
@@ -172,7 +166,7 @@ const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string) => Findi
 		{ level: "cautious", note: `recomputes every stored value of ${String(cmd["name"])}` },
 		{ level: "lock", note: REWRITES },
 	],
-	AT_SetIdentity: (cmd) => (restarts(cmd["def"]) ? [RESTART] : undefined),
+	AT_SetIdentity: (cmd) => [...always(cmd), ...(restarts(cmd["def"]) ? [RESTART] : [])],
 	AT_SetNotNull: () => [{ level: "unsafe" }, { level: "lock", note: REWRITES }],
 }
 
@@ -258,7 +252,9 @@ function ddlFindings(type: string, node: Node): Finding[] | undefined {
 	if (type === "AlterEnumStmt") return node["oldVal"] === undefined ? [] : [{ level: "unsafe" }]
 	if (type === "AlterSeqStmt") return restarts(node["options"]) ? [RESTART] : []
 	if (type === "DropStmt") return dropFindings(node)
-	return UNSAFE_NODES.has(type) ? [{ level: "unsafe" }] : undefined
+	if (type === "AlterDomainStmt") return domainFindings(node)
+	if (UNSAFE_NODES.has(type)) return [{ level: "unsafe" }]
+	return maintenanceFindings(type, node)
 }
 
 // lookup-table: the constraints an ADD backs with an index it builds in place, under an ACCESS EXCLUSIVE lock
@@ -275,14 +271,24 @@ function constraintIndexWarnings(node: Node, { facts, fresh }: FreshContext): Fi
 	const table = written(node["relation"])
 	return (node["cmds"] as Node[]).flatMap((each): Finding[] => {
 		const cmd = each["AlterTableCmd"] as Node
-		const constraint = cmd["subtype"] === "AT_AddConstraint" ? ((cmd["def"] as Node)["Constraint"] as Node) : undefined
-		if (constraint === undefined || !INDEX_CONSTRAINTS.has(String(constraint["contype"]))) return []
-		if (constraint["indexname"] !== undefined) return []
-		const concurrent =
-			constraint["contype"] === "CONSTR_EXCLUSION"
-				? ""
-				: "; build it first with CREATE UNIQUE INDEX CONCURRENTLY, then ADD … USING INDEX"
-		return [{ level: "lock", note: `locks ${table} against reads and writes while it builds its index${concurrent}` }]
+		/* an added column's inline primary key or unique builds its index as ADD CONSTRAINT does (P6) */
+		const inline = cmd["subtype"] === "AT_AddColumn"
+		const constraints = inline
+			? inlineConstraints(cmd)
+			: cmd["subtype"] === "AT_AddConstraint"
+				? [(cmd["def"] as Node)["Constraint"] as Node]
+				: []
+		return constraints
+			.filter(
+				(constraint) => INDEX_CONSTRAINTS.has(String(constraint["contype"])) && constraint["indexname"] === undefined,
+			)
+			.map((constraint): Finding => {
+				const concurrent =
+					constraint["contype"] === "CONSTR_EXCLUSION"
+						? ""
+						: `; ${inline ? "add the column, then " : ""}build it first with CREATE UNIQUE INDEX CONCURRENTLY, then ADD … USING INDEX`
+				return { level: "lock", note: `locks ${table} against reads and writes while it builds its index${concurrent}` }
+			})
 	})
 }
 
