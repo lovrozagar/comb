@@ -73,9 +73,6 @@ describe("ddlFindings: an ALTER TABLE's constraints, defaults and other commands
 			"ALTER TABLE t SET (fillfactor = 70)",
 		])
 			expect(rated(sql), sql).toEqual([])
-		expect(rated("ALTER TABLE t ENABLE TRIGGER x")).toEqual([
-			{ level: "unsafe", note: "comb does not recognize ALTER TABLE … ENABLE TRIG; approve it in the file" },
-		])
 	})
 
 	it("rates a composite type's attribute dropped or retyped unsafe, and an index's or view's alter nothing", () => {

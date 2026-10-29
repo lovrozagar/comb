@@ -64,7 +64,7 @@ describe("classifyMigration on row level security (M15)", () => {
 	it("rates an ALTER TABLE action comb does not know unsafe, and names it", () => {
 		const rated = classifyMigration("ALTER TABLE post INHERIT base", { dialect: "postgres" })
 		expect(rated.unsafeStatements).toEqual([
-			"ALTER TABLE post INHERIT base (comb does not recognize ALTER TABLE … ADD INHERIT; approve it in the file)",
+			"ALTER TABLE post INHERIT base (comb does not recognize ALTER TABLE … INHERIT; approve it in the file)",
 		])
 	})
 })

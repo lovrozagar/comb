@@ -18,50 +18,8 @@ import type { FreshContext } from "./pg-fresh.ts"
 import { addColumn, inlineConstraints, REWRITES } from "./pg-column-add.ts"
 import { domainFindings } from "./pg-domain.ts"
 import { attachFindings, maintenanceFindings } from "./pg-maintenance.ts"
+import { tableFindings } from "./pg-table-commands.ts"
 import { type Facts, names, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
-
-// lookup-table: the ALTER TABLE commands that change which rows a role sees, or what keeps them, and lose no value
-const CAUTIOUS_COMMANDS = /* @__PURE__ */ new Set([
-	"AT_ChangeOwner",
-	"AT_ColumnDefault",
-	"AT_DetachPartition",
-	"AT_DetachPartitionFinalize",
-	"AT_DisableTrig",
-	"AT_DisableTrigAll",
-	"AT_DisableTrigUser",
-	"AT_DropConstraint",
-	"AT_DropExpression",
-	"AT_DropIdentity",
-])
-
-// lookup-table: the ALTER TABLE commands that rewrite the whole table under an ACCESS EXCLUSIVE lock and lose no value
-const REWRITE_COMMANDS = /* @__PURE__ */ new Set(["AT_SetAccessMethod", "AT_SetTableSpace"])
-
-// lookup-table: the row level security commands, cautious, each saying whose rows it changes
-const SECURITY_COMMANDS = /* @__PURE__ */ new Set([
-	"AT_DisableRowSecurity",
-	"AT_EnableRowSecurity",
-	"AT_ForceRowSecurity",
-	"AT_NoForceRowSecurity",
-])
-
-// lookup-table: the ALTER TABLE commands that change no stored value, rated by nothing
-const QUIET_COMMANDS = /* @__PURE__ */ new Set([
-	"AT_AddIdentity",
-	"AT_AlterConstraint",
-	"AT_ClusterOn",
-	"AT_DropCluster",
-	"AT_DropNotNull",
-	"AT_ResetOptions",
-	"AT_ResetRelOptions",
-	"AT_SetCompression",
-	"AT_SetIdentity",
-	"AT_SetOptions",
-	"AT_SetRelOptions",
-	"AT_SetStatistics",
-	"AT_SetStorage",
-	"AT_ValidateConstraint",
-])
 
 // lookup-table: the kinds a rename or a move to another schema of loses what names them: unsafe
 const UNSAFE_RENAMES = /* @__PURE__ */ new Set([
@@ -183,31 +141,9 @@ function columnFindings(cmd: Node, table: string, facts: Facts): Finding[] | und
 	return subtype === "AT_AddConstraint" ? addConstraint(cmd) : COMMAND_RULES[subtype]?.(cmd, table, facts)
 }
 
-/** A command on the whole table: its findings; one comb does not list is unsafe, named in words */
-function tableFindings(subtype: string, table: string): Finding[] {
-	if (CAUTIOUS_COMMANDS.has(subtype)) return [{ level: "cautious" }]
-	if (REWRITE_COMMANDS.has(subtype)) return [{ level: "lock", note: REWRITES }]
-	/* SET LOGGED and SET UNLOGGED rewrite the table; an unlogged one loses its rows to a crash */
-	if (subtype === "AT_SetLogged") return [{ level: "cautious" }, { level: "lock", note: REWRITES }]
-	if (subtype === "AT_SetUnLogged")
-		return [
-			{ level: "cautious", note: `makes ${table} unlogged: its rows are emptied after a crash and not replicated` },
-			{ level: "lock", note: REWRITES },
-		]
-	if (SECURITY_COMMANDS.has(subtype))
-		return [{ level: "cautious", note: `changes which rows each role sees on ${table}` }]
-	if (QUIET_COMMANDS.has(subtype)) return []
-	/* the parser keeps no text of a command: its subtype in words, AT_AddInherit as ADD INHERIT */
-	const action = subtype
-		.replace(/^AT_/, "")
-		.replace(/([a-z])([A-Z])/g, "$1 $2")
-		.toUpperCase()
-	return [{ level: "unsafe", note: `comb does not recognize ALTER TABLE … ${action}; approve it in the file` }]
-}
-
 /** One ALTER TABLE command's findings, on `table` as written */
 const commandFindings = (cmd: Node, table: string, facts: Facts): Finding[] =>
-	columnFindings(cmd, table, facts) ?? tableFindings(String(cmd["subtype"]), table)
+	columnFindings(cmd, table, facts) ?? tableFindings(cmd, table)
 
 /** An ALTER of a table or a composite type, command by command; an index, view or sequence changes no value */
 function alterFindings(node: Node, facts: Facts): Finding[] {
