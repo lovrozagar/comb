@@ -44,3 +44,20 @@ describe("a SQLite baseline's drift, on Atlas OSS", () => {
 		expect(drift).toContain("CREATE TABLE `new_post`")
 	}, 60_000)
 })
+
+/* S4 of the 0.15.0 review: Litestream keeps two tables in every database it replicates */
+describe("a SQLite baseline's drift on a database Litestream replicates", () => {
+	it("leaves Litestream's tables out, as the schema reader does, and counts a table of the user's", async () => {
+		writeFileSync(join(dir, "m", "1_init.sql"), TABLE)
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple(
+			`${TABLE}CREATE TABLE IF NOT EXISTS _litestream_seq (id INTEGER PRIMARY KEY, seq INTEGER);
+CREATE TABLE IF NOT EXISTS _litestream_lock (id INTEGER);
+`,
+		)
+		expect(await sqliteDrift(conn, join(dir, "m"), run)).toBe("")
+		/* _cf_ is D1's prefix alone: on libsql a _cf_ table is the user's */
+		await conn.client.execute("CREATE TABLE _cf_notes (id INTEGER)")
+		expect(await sqliteDrift(conn, join(dir, "m"), run)).toContain("_cf_notes")
+	}, 60_000)
+})

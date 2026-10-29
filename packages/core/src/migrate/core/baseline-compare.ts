@@ -12,6 +12,7 @@ import { join } from "node:path"
 import { openMemory } from "../drivers/memory.ts"
 import type { Connection, ExtractedSchema } from "../types.ts"
 import { hashDir, sqlFiles } from "./atlas-dir.ts"
+import { HISTORY_TABLES, notEngineTables } from "./engine-tables.ts"
 import { sqliteDevUrl } from "./atlas-env.ts"
 import { atlasNotices, explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { asSql, type FtsState, separate } from "./fts-migration.ts"
@@ -31,14 +32,14 @@ const SYNCED = "Schemas are synced, no changes to be made."
 const SHADOWS = ["config", "content", "data", "docsize", "idx", "node", "parent", "rowid", "segdir", "segments", "stat"]
 
 /**
- * The database's DDL as Atlas OSS reads it: its tables and indexes, not SQLite's own, the shadow
+ * The database's DDL as Atlas OSS reads it: its tables and indexes, not its engine's, the shadow
  * tables of `fts` or the migration histories. Atlas OSS refuses a trigger or a view, so those stay
  * out, and a virtual table is left to `separate` and UNINSPECTED_DDL: objectDrift compares them all
  * (N-S5 of plan 15's rerun)
  */
 async function liveDdl(conn: Connection): Promise<string> {
 	const { rows } = await conn.execute(
-		"SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table', 'index') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT IN ('__drizzle_migrations', 'd1_migrations', '_cf_KV') ORDER BY rowid",
+		`SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table', 'index')${notEngineTables(conn, HISTORY_TABLES)} ORDER BY rowid`,
 	)
 	return asSql(rows.map((row) => String(row[1])))
 }
@@ -47,9 +48,9 @@ async function liveDdl(conn: Connection): Promise<string> {
 const UNINSPECTED_DDL =
 	/^\s*(?:(?:--[^\n]*\n|\/\*[\s\S]*?\*\/)\s*)*(?:CREATE\s+(?:TEMP(?:ORARY)?\s+)?(?:TRIGGER|VIEW|VIRTUAL\s+TABLE)|DROP\s+(?:TRIGGER|VIEW))\b/i
 
-/* the objects Atlas OSS does not inspect on SQLite: triggers, views and virtual tables, FTS5's included (S5) */
-const UNINSPECTED =
-	"SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND (type IN ('trigger', 'view') OR (type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%')) ORDER BY rowid"
+/* the objects Atlas OSS does not inspect on SQLite: triggers, views and virtual tables, FTS5's included (S5), but the engine's */
+const uninspectedOf = (conn: Pick<Connection, "ownedPrefix">): string =>
+	`SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND (type IN ('trigger', 'view') OR (type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'))${notEngineTables(conn)} ORDER BY rowid`
 
 /** Each object Atlas OSS does not inspect, by what it is and its name, with its definition normalized */
 function uninspected(rows: ReadonlyArray<Readonly<Record<string, unknown>>>): Map<string, string> {
@@ -79,7 +80,7 @@ async function replayedObjects(dir: string): Promise<Map<string, string>> {
 				)
 			}
 		}
-		return uninspected(db.all(UNINSPECTED))
+		return uninspected(db.all(uninspectedOf({})))
 	} finally {
 		db.close()
 	}
@@ -90,7 +91,9 @@ async function replayedObjects(dir: string): Promise<Map<string, string>> {
  * leave, by name and normalized definition, as lines of the difference (S5 of the 0.14.1 review)
  */
 async function objectDrift(conn: Connection, dir: string): Promise<string[]> {
-	const live = uninspected((await conn.execute(UNINSPECTED)).rows.map(([type, name, sql]) => ({ name, sql, type })))
+	const live = uninspected(
+		(await conn.execute(uninspectedOf(conn))).rows.map(([type, name, sql]) => ({ name, sql, type })),
+	)
 	const history = await replayedObjects(dir)
 	const lines: string[] = []
 	for (const [key, sql] of live) {

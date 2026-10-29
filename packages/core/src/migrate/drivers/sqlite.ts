@@ -13,6 +13,7 @@ import type {
 	ResolvedDatabaseConfig,
 	TursoProviderConfig,
 } from "../types.ts"
+import { HISTORY_TABLES, notEngineTables } from "../core/engine-tables.ts"
 
 export { createBunSqliteProvider } from "./bun-sqlite.ts"
 
@@ -209,9 +210,6 @@ export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionPr
 
 type MasterRow = { name: string; sql: string; type: string }
 
-/* SQLite's own objects and Litestream's; GLOB, because LIKE reads `_` as any character */
-const OWN_OBJECTS = "name NOT GLOB 'sqlite_*' AND name NOT GLOB '_litestream_*' AND name != '__drizzle_migrations'"
-
 /* only SQLite's own autoindexes, filtered above, have no sql */
 const DEFINED = "sql IS NOT NULL"
 
@@ -244,7 +242,9 @@ function searchIndexObjects(rows: readonly MasterRow[]): (row: MasterRow) => boo
 
 /** The schema objects comb manages: everything but SQLite's own, Litestream's and search indexes */
 async function managedObjects(conn: Connection): Promise<MasterRow[]> {
-	const result = await conn.execute(`SELECT type, name, sql FROM sqlite_master WHERE ${OWN_OBJECTS} AND ${DEFINED}`)
+	const result = await conn.execute(
+		`SELECT type, name, sql FROM sqlite_master WHERE ${DEFINED}${notEngineTables(conn, HISTORY_TABLES)}`,
+	)
 	const rows = result.rows.map(([type, name, sql]) => ({
 		name: name as string,
 		sql: sql as string,
