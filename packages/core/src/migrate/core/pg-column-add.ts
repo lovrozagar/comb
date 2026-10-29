@@ -77,7 +77,7 @@ function steady(parts: readonly string[], facts: Facts): boolean {
 }
 
 /** An added column's findings, from the AT_AddColumn command `cmd`, the functions its default calls read in `facts` */
-function addColumn(cmd: Node, _table: string, facts: Facts): Finding[] {
+function addColumn(cmd: Node, _table: string, { facts }: { facts: Facts }): Finding[] {
 	const column = (cmd["def"] as Node)["ColumnDef"] as Node
 	const constraints = inlineConstraints(cmd)
 	const has = (type: string) => constraints.some((each) => each["contype"] === type)

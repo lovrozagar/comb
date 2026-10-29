@@ -11,6 +11,22 @@ type Node = Record<string, unknown>
 type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefined }
 
 /** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
+/** A column's type, keyed as typeOf keys it, and its modifiers, none for one unbounded */
+type ColumnType = { mods: readonly number[]; type: string }
+
+/** Whether a column of `columns` has the type `type` */
+const typed = (columns: ReadonlyMap<string, ColumnType>, type: string): boolean =>
+	[...columns.values()].some((column) => column.type === type)
+
+/** A type name's modifiers, the integers it is written with: varchar(20) has [20], numeric(12, 2) [12, 2] */
+const modsOf = (typeName: unknown): number[] =>
+	(((typeName as Node)["typmods"] as Node[] | undefined) ?? []).map((mod) =>
+		Number(
+			(((mod["A_Const"] as Node | undefined)?.["ival"] as Node | undefined)?.["ival"] as number | undefined) ??
+				Number.NaN,
+		),
+	)
+
 /** A routine's volatility, as its CREATE or an ALTER FUNCTION declares it */
 type Volatility = "immutable" | "stable" | "volatile"
 
@@ -23,8 +39,8 @@ type Facts = {
 	casts: Map<string, { automatic: boolean; fn: string }>
 	/** why a write to a table runs code: what it runs */
 	code: Map<string, string>
-	/** each table's column types */
-	columnTypes: Map<string, Set<string>>
+	/** each table's columns, each with its type and the type's modifiers, as varchar(20) has [20] (P12 of the 0.15.0 review) */
+	columnTypes: Map<string, Map<string, ColumnType>>
 	/** each event trigger the history made, by name */
 	eventTriggers: Map<string, EventTrigger>
 	/** every function, procedure and aggregate a migration defined, by each key it had */
@@ -87,14 +103,17 @@ function tableOf(relation: unknown, schema: string): { key: string; name: string
 const typeOf = (typeName: unknown, schema: string): string => keyOf(names((typeName as Node)["names"]), schema)
 
 export {
+	type ColumnType,
 	type EventTrigger,
 	type Facts,
 	keyOf,
+	modsOf,
 	names,
 	type Node,
 	nodesOf,
 	type Routines,
 	tableOf,
+	typed,
 	typeOf,
 	type Volatility,
 }

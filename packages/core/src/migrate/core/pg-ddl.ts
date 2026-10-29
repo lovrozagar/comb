@@ -18,6 +18,7 @@ import type { FreshContext } from "./pg-fresh.ts"
 import { addColumn, inlineConstraints, REWRITES } from "./pg-column-add.ts"
 import { domainFindings } from "./pg-domain.ts"
 import { attachFindings, maintenanceFindings } from "./pg-maintenance.ts"
+import { retypeFindings } from "./pg-retype.ts"
 import { tableFindings } from "./pg-table-commands.ts"
 import { type Facts, names, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
 
@@ -107,12 +108,15 @@ function always(cmd: Node): Finding[] {
 }
 
 // lookup-table: the commands one rule rates, by subtype; undefined leaves a command to the table's rules
-const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, facts: Facts) => Finding[] | undefined>> = {
+/** Where a command runs: the history's facts, and the key they hold its table under */
+type On = { facts: Facts; key: string }
+
+const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) => Finding[] | undefined>> = {
 	AT_AddColumn: addColumn,
 	AT_AttachPartition: (cmd) => attachFindings(written(((cmd["def"] as Node)["PartitionCmd"] as Node)["name"])),
 	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
 	AT_AddIdentity: (cmd) => [...always(cmd), ...(restarts(cmd["def"]) ? [RESTART] : [])],
-	AT_AlterColumnType: () => [{ level: "unsafe" }, { level: "lock", note: REWRITES }],
+	AT_AlterColumnType: (cmd, _table, on) => retypeFindings(cmd, on),
 	/* a SET DEFAULT changes no stored value; a DROP DEFAULT, with no def, changes what later writes store */
 	AT_ColumnDefault: (cmd) => (cmd["def"] === undefined ? [{ level: "cautious" }] : []),
 	AT_DropColumn: (cmd, table) => [{ drops: [`DROP COLUMN ${table}.${String(cmd["name"])}`], level: "unsafe" }],
@@ -136,14 +140,14 @@ function addConstraint(cmd: Node): Finding[] {
 }
 
 /** A command on one column or constraint: its findings, or undefined for a command on the whole table */
-function columnFindings(cmd: Node, table: string, facts: Facts): Finding[] | undefined {
+function columnFindings(cmd: Node, table: string, on: On): Finding[] | undefined {
 	const subtype = String(cmd["subtype"])
-	return subtype === "AT_AddConstraint" ? addConstraint(cmd) : COMMAND_RULES[subtype]?.(cmd, table, facts)
+	return subtype === "AT_AddConstraint" ? addConstraint(cmd) : COMMAND_RULES[subtype]?.(cmd, table, on)
 }
 
 /** One ALTER TABLE command's findings, on `table` as written */
-const commandFindings = (cmd: Node, table: string, facts: Facts): Finding[] =>
-	columnFindings(cmd, table, facts) ?? tableFindings(cmd, table)
+const commandFindings = (cmd: Node, table: string, on: On): Finding[] =>
+	columnFindings(cmd, table, on) ?? tableFindings(cmd, table)
 
 /** An ALTER of a table or a composite type, command by command; an index, view or sequence changes no value */
 function alterFindings(node: Node, facts: Facts): Finding[] {
@@ -151,7 +155,9 @@ function alterFindings(node: Node, facts: Facts): Finding[] {
 	const cmds = (node["cmds"] as Node[]).map((each) => each["AlterTableCmd"] as Node)
 	const table = written(node["relation"])
 	if (objtype === "OBJECT_TABLE" || objtype === "OBJECT_FOREIGN_TABLE")
-		return cmds.flatMap((cmd) => commandFindings(cmd, table, facts))
+		return cmds.flatMap((cmd) =>
+			commandFindings(cmd, table, { facts, key: tableOf(node["relation"], facts.schema).key }),
+		)
 	/* a composite type's dropped or retyped attribute loses the values every column of the type holds */
 	if (objtype === "OBJECT_TYPE")
 		return cmds.some((cmd) => cmd["subtype"] === "AT_DropColumn" || cmd["subtype"] === "AT_AlterColumnType")

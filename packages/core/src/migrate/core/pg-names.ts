@@ -104,6 +104,12 @@ function renameColumn(node: Node, facts: Facts): void {
 	const [was, now] = [String(node["subname"]), String(node["newname"])]
 	const columns = facts.tables.get(key)
 	if (columns?.delete(was) === true) columns.add(now)
+	const types = facts.columnTypes.get(key)
+	const type = types?.get(was)
+	if (types !== undefined && type !== undefined) {
+		types.delete(was)
+		types.set(now, type)
+	}
 	const view = facts.views.get(key)
 	const base = view?.columns === "all" ? undefined : view?.columns.get(was)
 	if (base === undefined || view === undefined || view.columns === "all") return

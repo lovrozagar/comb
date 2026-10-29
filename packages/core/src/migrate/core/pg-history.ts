@@ -15,7 +15,7 @@ import { builtinFinding } from "./pg-builtins.ts"
 import { followEventTrigger } from "./pg-events.ts"
 import { followNames } from "./pg-names.ts"
 import { followRoutine } from "./pg-routines.ts"
-import { type Facts, keyOf, names, type Node, nodesOf, tableOf, typeOf } from "./pg-nodes.ts"
+import { type Facts, keyOf, modsOf, names, type Node, nodesOf, tableOf, typed, typeOf } from "./pg-nodes.ts"
 import { parsePostgres } from "./pg-parser.ts"
 import { historyTrees } from "./pg-split.ts"
 
@@ -37,9 +37,15 @@ function callIn(expression: unknown, { defined, schema }: Pick<Facts, "defined" 
 const typeCode = (type: string, facts: Facts): string | undefined =>
 	facts.domains.get(type) ?? (facts.casts.get(type)?.automatic === true ? facts.casts.get(type)?.fn : undefined)
 
-/** A column of `table` of `column.type`, and what it runs: `column.runs` when given, else its type's code */
-function followType(table: string, { runs, type }: { runs?: string | undefined; type: string }, facts: Facts): void {
-	facts.columnTypes.set(table, (facts.columnTypes.get(table) ?? new Set()).add(type))
+type Typed = { column: string; runs?: string | undefined; typeName: unknown }
+
+/** `column` of `table` of `typeName`, and what it runs: `runs` when given, else its type's code */
+function followType(table: string, { column, runs, typeName }: Typed, facts: Facts): void {
+	const type = typeOf(typeName, facts.schema)
+	facts.columnTypes.set(
+		table,
+		(facts.columnTypes.get(table) ?? new Map()).set(column, { mods: modsOf(typeName), type }),
+	)
 	const code = runs ?? typeCode(type, facts)
 	if (code !== undefined && !facts.code.has(table)) facts.code.set(table, code)
 }
@@ -51,7 +57,7 @@ function followColumn(table: string, column: Node, facts: Facts): void {
 	const runs = constraints
 		.map((each) => callIn((each["Constraint"] as Node)["raw_expr"], facts))
 		.find((fn) => fn !== undefined)
-	followType(table, { runs, type: typeOf(column["typeName"], facts.schema) }, facts)
+	followType(table, { column: String(column["colname"]), runs, typeName: column["typeName"] }, facts)
 }
 
 /** A CREATE TABLE: its parents, its columns, its checks, and what a table it is LIKE runs */
@@ -116,10 +122,12 @@ function followAlter(node: Node, facts: Facts): void {
 			])
 		} else if (TRIGGER_STATES[String(cmd["subtype"])] !== undefined) followTriggerState(table, cmd, facts)
 		else if (cmd["subtype"] === "AT_AddColumn") followColumn(table, def["ColumnDef"] as Node, facts)
-		else if (cmd["subtype"] === "AT_DropColumn") facts.tables.get(table)?.delete(String(cmd["name"]))
-		else if (cmd["subtype"] === "AT_AlterColumnType") {
+		else if (cmd["subtype"] === "AT_DropColumn") {
+			facts.tables.get(table)?.delete(String(cmd["name"]))
+			facts.columnTypes.get(table)?.delete(String(cmd["name"]))
+		} else if (cmd["subtype"] === "AT_AlterColumnType") {
 			/* a column retyped to a domain runs the domain's CHECK on every later write (M73) */
-			followType(table, { type: typeOf((def["ColumnDef"] as Node)["typeName"], facts.schema) }, facts)
+			followType(table, { column: String(cmd["name"]), typeName: (def["ColumnDef"] as Node)["typeName"] }, facts)
 		} else {
 			const runs = callIn(def, facts)
 			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
@@ -146,7 +154,7 @@ function followDomain(type: string, node: Node, facts: Facts): boolean {
 	if (runs === undefined) return true
 	if (!facts.domains.has(domain)) facts.domains.set(domain, runs)
 	for (const [table, types] of facts.columnTypes)
-		if (types.has(domain) && !facts.code.has(table)) facts.code.set(table, runs)
+		if (typed(types, domain) && !facts.code.has(table)) facts.code.set(table, runs)
 	return true
 }
 
@@ -171,7 +179,7 @@ function followDefinition(type: string, node: Node, facts: Facts): void {
 		facts.casts.set(target, { automatic, fn })
 		if (!automatic) return
 		for (const [table, types] of facts.columnTypes)
-			if (types.has(target) && !facts.code.has(table)) facts.code.set(table, fn)
+			if (typed(types, target) && !facts.code.has(table)) facts.code.set(table, fn)
 	}
 }
 
