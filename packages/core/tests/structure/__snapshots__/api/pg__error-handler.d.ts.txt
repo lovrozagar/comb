@@ -108,8 +108,10 @@ type PgErrorRead = {
     code: string;
     column: string | undefined;
     constraint: string | undefined;
-    /** the columns in `detail`'s `Key (a, b)=(…)` */
+    /** the columns in `detail`'s `Key (a, b)=(…)`, its expressions left out */
     keyColumns: string[];
+    /** the key holds an expression, an expression index's, which may spell any column (Q3 of the 0.14.1 review) */
+    keyExpression: boolean;
     /** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
     message: string | undefined;
     /** the SQL a wrapper such as drizzle's recorded, when one did */

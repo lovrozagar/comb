@@ -12,6 +12,7 @@ import {
 	own,
 	shown,
 	shownColumn,
+	type TableMap,
 	toCombError,
 } from "../constraint-map.ts"
 import { CombError } from "../error.ts"
@@ -36,10 +37,14 @@ function unique(v: Violation): CombError {
 	/* Postgres names the key for the table alone, its schema apart */
 	if (constraint !== undefined && v.read.table !== undefined && constraint === pkeyOf(v.read.table))
 		return primaryKey(v)
-	/* a composite unique is keyed by its columns together; one column alone would blame half the pair */
-	const visible = shown(v.maps, table, columns)
+	/* a composite unique is keyed by its columns together; one column alone would blame half the pair. An
+	   expression may spell any column, a private one too, so a key holding one names none (Q3), and is
+	   found in the map by the index's name alone */
+	const { keyExpression } = v.read
+	const visible = keyExpression ? [] : shown(v.maps, table, columns)
 	const column = visible.length === 1 ? visible[0] : undefined
-	const entry = lookup(v.maps, table, (t) => own(t.unique, columns.join(",")) ?? own(t.unique, constraint))
+	const byColumns = (t: TableMap) => (keyExpression ? undefined : own(t.unique, columns.join(",")))
+	const entry = lookup(v.maps, table, (t) => byColumns(t) ?? own(t.unique, constraint))
 	const named = visible.map((c) => (table === undefined ? c : `${table}.${c}`)).join(", ")
 	const cause = named === "" ? "Duplicate value detected" : `Duplicate value for ${named}`
 	const fallback = { cause, errorKey: combErrorKeys.UNIQUE_CONSTRAINT_VIOLATION, status: "conflict" } as const

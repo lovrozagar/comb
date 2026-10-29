@@ -20,6 +20,7 @@ describe("readPgError", () => {
 			column: "c",
 			constraint: "k",
 			keyColumns: ["a", "b"],
+			keyExpression: false,
 			message: "server error",
 			referenced: false,
 			table: "t",
@@ -40,7 +41,9 @@ describe("readPgError", () => {
 	it("reads the key's columns as quoted identifiers", () => {
 		expect(keys('Key ("x, y", z)=(1, 2) already exists.')).toEqual(["x, y", "z"])
 		expect(keys('Key ("say ""hi""", "f(x)")=(1, 2) already exists.')).toEqual(['say "hi"', "f(x)"])
-		expect(keys("Key (lower(name::text))=(a) already exists.")).toEqual(["lower(name::text)"])
+		/* Q3 of the 0.14.1 review: an expression is no column, and is marked */
+		const lowered = readPgError(nodePg({ code: "23505", detail: "Key (id, lower(name::text))=(1, a) already exists." }))
+		expect(lowered).toMatchObject({ keyColumns: ["id"], keyExpression: true })
 		expect(keys("no key here")).toEqual([])
 		expect(keys("Key (a, b")).toEqual([])
 	})

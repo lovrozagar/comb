@@ -57,3 +57,28 @@ describe("classifyPgError: a private column (F67)", () => {
 		for (const { e, named } of CASES) expect(classifyPgError(e, doc(false))).toMatchObject(named)
 	})
 })
+
+/* Q3 of the 0.14.1 review: an expression index's key spells the columns it reads, a private one too */
+describe("classifyPgError: a unique index on an expression", () => {
+	const lowered = nodePg({
+		code: "23505",
+		constraint: "doc_secret_lower_key",
+		detail: "Key (lower(secret::text))=(x) already exists.",
+	})
+	const mapped: ConstraintMap[] = [{ doc: { private: ["secret"], unique: { doc_secret_lower_key: ENTRY } } }]
+
+	it("names no column of the key, private or not, in its column or cause", () => {
+		for (const maps of [doc(true), doc(false)]) {
+			const found = classifyPgError(lowered, maps)
+			expect(found).toMatchObject({ cause: "Duplicate value detected", errorKey: "unique_constraint_violation" })
+			expect(found?.column).toBeUndefined()
+			expect(String(found?.cause)).not.toContain("secret")
+		}
+	})
+
+	it("still resolves the map's entry for the index, by its name", () => {
+		const found = classifyPgError(lowered, mapped)
+		expect(found).toMatchObject({ errorKey: "doc_duplicate" })
+		expect(found?.column).toBeUndefined()
+	})
+})

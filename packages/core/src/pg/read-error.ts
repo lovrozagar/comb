@@ -8,8 +8,10 @@ type PgErrorRead = {
 	code: string
 	column: string | undefined
 	constraint: string | undefined
-	/** the columns in `detail`'s `Key (a, b)=(…)` */
+	/** the columns in `detail`'s `Key (a, b)=(…)`, its expressions left out */
 	keyColumns: string[]
+	/** the key holds an expression, an expression index's, which may spell any column (Q3 of the 0.14.1 review) */
+	keyExpression: boolean
 	/** the server's message: read only for P0001, which an app's own RAISE EXCEPTION wrote */
 	message: string | undefined
 	/** the SQL a wrapper such as drizzle's recorded, when one did */
@@ -58,18 +60,28 @@ function sqlstate(error: DriverError): string | undefined {
 // per-process-constant: see above
 const KEY_NAME = /\s*(?:"((?:[^"]|"")*)"|((?:[^,()]|\((?:[^()]|\([^()]*\))*\))+))\s*(,|\)=)/y
 
-/** The columns in `detail`'s `Key (a, "b, c")=(…)`, each read as the identifier Postgres wrote */
-function keyColumns(detail: string | undefined): string[] {
+/* a name Postgres writes unquoted (quote_identifier): an ASCII lower-case letter or `_`, then those or digits, no keyword; it quotes any other */
+// per-process-constant: see above
+const BARE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/
+
+/**
+ * The columns in `detail`'s `Key (a, "b, c")=(…)`, each read as the identifier Postgres wrote, and
+ * whether it holds an expression, such as `lower(email::text)`: unquoted text no identifier spells
+ */
+function keyOf(detail: string | undefined): Pick<PgErrorRead, "keyColumns" | "keyExpression"> {
 	const line = detail ?? ""
-	if (!line.startsWith("Key (")) return []
-	const columns: string[] = []
+	const none = { keyColumns: [], keyExpression: false }
+	if (!line.startsWith("Key (")) return none
+	const key = { keyColumns: [] as string[], keyExpression: false }
 	KEY_NAME.lastIndex = "Key (".length
 	for (let at = KEY_NAME.exec(line); at !== null; at = KEY_NAME.exec(line)) {
 		const [, quoted, bare, end] = at
-		columns.push(quoted === undefined ? (bare as string).trim() : quoted.replaceAll('""', '"'))
-		if (end === ")=") return columns
+		const name = quoted === undefined ? (bare as string).trim() : quoted.replaceAll('""', '"')
+		if (quoted === undefined && !BARE_IDENTIFIER.test(name)) key.keyExpression = true
+		else key.keyColumns.push(name)
+		if (end === ")=") return key
 	}
-	return []
+	return none
 }
 
 /**
@@ -90,7 +102,7 @@ function readPgError(error: unknown): PgErrorRead | null {
 			code,
 			column: text(f.column) ?? text(f.column_name),
 			constraint: text(f.constraint) ?? text(f.constraint_name),
-			keyColumns: keyColumns(text(f.detail)),
+			...keyOf(text(f.detail)),
 			message: text(f.message),
 			/* the outermost wrapper's SQL: the statement as the app sent it */
 			query: chain.map((each) => text(each.query)).find((query) => query !== undefined),
