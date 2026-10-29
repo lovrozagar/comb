@@ -130,6 +130,7 @@ export const APP: Record<string, string> = {
 			module: "esnext",
 			moduleResolution: "bundler",
 			outDir: "decl",
+			rootDir: "src",
 		},
 		include: ["src/schemas.ts"],
 	}),
