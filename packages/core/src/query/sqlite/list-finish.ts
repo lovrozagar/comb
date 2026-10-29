@@ -106,7 +106,8 @@ function finishCursor(list: Finish, cursor: string): Finished {
 			status: "bad_request",
 		})
 	}
-	const after = cursorWhere({ cursor, keys: keyset.keys, options: list.cursor, sort, table, tiebreak })
+	const merged = list.merged !== undefined
+	const after = cursorWhere({ cursor, keys: keyset.keys, merged, options: list.cursor, sort, table, tiebreak })
 	const gone = after.gone === undefined ? {} : { _combAnchorGone: sql<number>`${after.gone}`.as("_combAnchorGone") }
 	return {
 		...withExtras(list, { ...idOf(tiebreak), ...gone }),

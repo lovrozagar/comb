@@ -164,6 +164,19 @@ describe("paginateMerged past a cursor a shard resumed before", () => {
 	})
 })
 
+/* R1 of plan 16's review: a merged list mints no reference, so a cursor that carries one is no cursor of it */
+describe("a merged list given a cursor that carries a reference", () => {
+	it("refuses it as invalid_cursor, though a single database's list under its scope and sort minted it", () => {
+		const long = { _combId: "a", _total: 2, id: "a", k: "x".repeat(9000) }
+		const single = buildListQuery({ ...SEALED, parsed: parse({ limit: "1", order: "k.asc" }), table: t })
+		const [, meta] = paginate([long, { ...long, _combId: "b", id: "b" }], single)
+		const cursor = meta.nextCursor as string
+		expect(() => merged({ cursor, limit: "1", order: "k.asc" })).toThrow(
+			expect.objectContaining({ errorKey: "invalid_cursor", status: 400 }),
+		)
+	})
+})
+
 /* Q10 of the 0.14.1 review: a merged list's ids must be unique across shards, or a cursor's anchor is ambiguous */
 describe("paginateMerged on an id two shards hold", () => {
 	it("refuses the merge", () => {
