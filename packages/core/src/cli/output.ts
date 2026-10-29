@@ -54,10 +54,15 @@ async function ask(terminal: Terminal, question: string): Promise<boolean> {
 	}
 }
 
-/** The IO the comb binary runs with: the console, and questions on the terminal when there is one */
-export function processIo(terminal: Terminal = { input: process.stdin, output: process.stdout }): CliIo {
+/**
+ * The IO the comb binary runs with: the console, and questions on the terminal when there is one,
+ * asked on stderr: a question is a human line, as every other --json sends there, so stdout stays
+ * what the command prints (P4 of the 0.15.0 review)
+ */
+export function processIo({ input = process.stdin, output = process.stderr }: Partial<Terminal> = {}): CliIo {
+	const terminal = { input, output }
 	return {
-		confirm: terminal.input.isTTY === true ? (question) => ask(terminal, question) : undefined,
+		confirm: input.isTTY === true ? (question) => ask(terminal, question) : undefined,
 		cwd: process.cwd(),
 		err: (line) => console.error(line),
 		out: (line) => console.log(line),

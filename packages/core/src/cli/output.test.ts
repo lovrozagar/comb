@@ -35,6 +35,21 @@ describe("processIo", () => {
 		}
 	})
 
+	/* P4 of the 0.15.0 review: the question went to stdout, which --json promises is one JSON object */
+	it("asks on stderr, a human line as every other, leaving stdout to what the command prints", async () => {
+		const tty = terminal("y", true)
+		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
+		const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true)
+		try {
+			const confirm = processIo({ input: tty.input }).confirm as (question: string) => Promise<boolean>
+			expect(await confirm("Apply?")).toBe(true)
+			expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join("")).toContain("Apply? (y/N) ")
+			expect(stdout).not.toHaveBeenCalled()
+		} finally {
+			vi.restoreAllMocks()
+		}
+	})
+
 	it("cannot ask anything without a terminal", () => {
 		expect(processIo(terminal("y", false)).confirm).toBeUndefined()
 	})
