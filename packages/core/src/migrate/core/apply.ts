@@ -155,7 +155,8 @@ export async function applyEach(
 		} catch (error) {
 			const done = names.slice(0, at)
 			if (done.length > 0) print(`Applied before the failure: ${done.join(", ")}`)
-			throw new Refused(error instanceof Error ? error.message : String(error), names.slice(at), done)
+			/* withRetry throws an Error, whatever the batch threw */
+			throw new Refused((error as Error).message, names.slice(at), done)
 		}
 	}
 }
