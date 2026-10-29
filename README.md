@@ -1063,7 +1063,7 @@ What changes for a project on 0.14.1. Before deploying it:
 - **Postgres rating reads what Atlas sends**: a chunk's leading comments no longer hide a statement from the rating.
 - **Secrets in Atlas's output are masked more exactly**: a socket target's password is masked, and a literal secret only where it stands as a token, so a password that is part of a table name leaves the name.
 - **Postgres: a target schema that does not exist** is explained, with the `CREATE SCHEMA` to run once; comb creates a non-public schema on the dev database through the optional `postgres` peer.
-- **Proof run**: a table renamed with a renamed column is named as renamed, and common CHECK shapes are seeded, so such tables are no longer left unproven.
+- **Proof run**: a table renamed with a renamed column is named as renamed, and values a `DEFAULT` of now would exceed, and every nullable column left NULL, are seeded, so such tables are no longer left unproven.
 
 ### Query and errors
 
