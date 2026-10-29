@@ -27,8 +27,8 @@ import { codeOf } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
 const SYNCED = "Schemas are synced, no changes to be made."
-/* the tables SQLite keeps behind every fts5 table */
-const SHADOWS = ["config", "content", "data", "docsize", "idx"]
+/* the tables SQLite keeps behind a virtual table: fts5's, fts3 and fts4's, and rtree's */
+const SHADOWS = ["config", "content", "data", "docsize", "idx", "node", "parent", "rowid", "segdir", "segments", "stat"]
 
 /**
  * The database's DDL as Atlas OSS reads it: its tables and indexes, not SQLite's own, the shadow
@@ -120,7 +120,12 @@ async function sqliteDrift(conn: Connection, dir: string, exec: Run): Promise<st
 		}
 		hashDir(exec, copy)
 		const live = separate(await liveDdl(conn), groups)
-		const shadows = new Set([...groups].flatMap((group) => SHADOWS.map((suffix) => `${group}_${suffix}`)))
+		/* every virtual table's shadows, the database's own included: Atlas would read them as tables (N-S5) */
+		const virtual = await conn.execute(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'",
+		)
+		const owners = [...groups, ...virtual.rows.map((row) => String(row[0]))]
+		const shadows = new Set(owners.flatMap((owner) => SHADOWS.map((suffix) => `${owner}_${suffix}`)))
 		const plain = live.plain.filter((stmt) => {
 			if (UNINSPECTED_DDL.test(stmt)) return false
 			const table = /^\s*CREATE TABLE ['"`[]?(\w+)/i.exec(stmt)?.[1]

@@ -159,3 +159,21 @@ describe("refuseObjectDrift: the warning over the bodies it did not compare", ()
 		])
 	})
 })
+
+/* N-S5 of plan 15's rerun: Atlas OSS refuses what it cannot inspect */
+describe("sqliteDrift: what Atlas OSS is handed", () => {
+	it("hands Atlas neither side's virtual table, which it compares itself", async () => {
+		writeFileSync(
+			join(dir, "m", "1_init.sql"),
+			"CREATE TABLE post (id TEXT);\nCREATE VIRTUAL TABLE spots USING rtree(id, x0, x1);",
+		)
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple(
+			"CREATE TABLE post (id TEXT); CREATE VIRTUAL TABLE spots USING rtree(id, x0, x1);",
+		)
+		const run = atlas("Schemas are synced, no changes to be made.\n")
+		expect(await sqliteDrift(conn, join(dir, "m"), run)).toBe("")
+		expect(run.live.join("")).not.toContain("spots")
+		await conn.close()
+	})
+})
