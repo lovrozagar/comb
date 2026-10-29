@@ -28,8 +28,10 @@ describe("patternToSQL: a pattern with a * inside it", () => {
 describe("patternToSQL: a fixed text", () => {
 	it("finds it anywhere, at the start, at the end, or as the whole value, with no pattern", () => {
 		expect(lowered("like", "*b%c*")).toEqual({ params: ["b%c"], sql: 'instr("post"."title", ?) > 0' })
-		expect(lowered("like", "Ab*")).toEqual({ params: ["Ab", "Ab"], sql: 'substr("post"."title", 1, length(?)) = ?' })
-		expect(lowered("like", "**_c")).toEqual({ params: ["_c", "_c"], sql: 'substr("post"."title", -length(?)) = ?' })
+		/* Q2 of the 0.14.1 review: the text bound once, its length in code points, as SQLite's substr counts */
+		expect(lowered("like", "Ab*")).toEqual({ params: ["Ab"], sql: 'substr("post"."title", 1, 2) = ?' })
+		expect(lowered("like", "**_c")).toEqual({ params: ["_c"], sql: 'substr("post"."title", -2) = ?' })
+		expect(lowered("like", "😀é*")).toEqual({ params: ["😀é"], sql: 'substr("post"."title", 1, 2) = ?' })
 		expect(lowered("like", "Ab")).toEqual({ params: ["Ab"], sql: '"post"."title" = ? COLLATE BINARY' })
 		expect(lowered("like", "")).toEqual({ params: [""], sql: '"post"."title" = ? COLLATE BINARY' })
 	})
@@ -37,6 +39,7 @@ describe("patternToSQL: a fixed text", () => {
 	it("folds both sides through lower() for ilike, and takes stars alone for any text", () => {
 		expect(lowered("ilike", "*AB*")).toEqual({ params: ["AB"], sql: 'instr(lower("post"."title"), lower(?)) > 0' })
 		expect(lowered("ilike", "**")).toEqual({ params: [], sql: '"post"."title" IS NOT NULL' })
+		expect(lowered("ilike", "Ab*")).toEqual({ params: ["Ab"], sql: 'substr(lower("post"."title"), 1, 2) = lower(?)' })
 	})
 
 	it("binds a non-string value as its text", () => {

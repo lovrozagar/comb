@@ -10,6 +10,7 @@
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 
 import { globPattern, likePattern } from "../like.ts"
+import { countLiteral } from "./keyset.ts"
 
 /** A value's stars only at its ends: whether each end is open, and the text between */
 const FIXED = /^(\**)([^*]*)(\**)$/
@@ -31,8 +32,12 @@ function fixedToSQL(column: SQLWrapper, folded: boolean, [, head, text, tail]: R
 	const side = folded ? sql`lower(${column})` : sql`${column}`
 	const find = folded ? sql`lower(${text})` : sql`${text}`
 	if (opensStart && opensEnd) return sql`instr(${side}, ${find}) > 0`
-	if (opensEnd) return sql`substr(${side}, 1, length(${find})) = ${find}`
-	if (opensStart) return sql`substr(${side}, -length(${find})) = ${find}`
+	/* the text bound once, its length written as SQLite's length() counts it, in code points, which
+	   lower()'s ASCII fold keeps: a bound value the budget counts once (Q2 of the 0.14.1 review) */
+	/* FIXED's middle group takes part in every match, an empty text included */
+	const length = countLiteral([...(text as string)].length)
+	if (opensEnd) return sql`substr(${side}, 1, ${length}) = ${find}`
+	if (opensStart) return sql`substr(${side}, -${length}) = ${find}`
 	/* the column's own collation never applies: GLOB compares bytes, and LIKE folds only through lower() here */
 	return sql`${side} = ${find} COLLATE BINARY`
 }

@@ -19,7 +19,9 @@ const schema = createListQuerySchema({ filter: { title: "string" }, search: ["ti
 
 const SLUG = "how-to-run-postgres-17-on-a-laptop-without-docker"
 const CJK = "東京都庁舎東京都庁舎東京都庁舎東京"
-const TITLES: Array<string | null> = [SLUG, CJK, "Ab-cd", null]
+/* astral characters, one code point and two UTF-16 units each, which a prefix's length counts as SQLite does (Q2) */
+const ASTRAL = "😀b😀"
+const TITLES: Array<string | null> = [SLUG, CJK, "Ab-cd", null, ASTRAL]
 
 let harness: D1Harness | undefined
 afterEach(async () => {
@@ -27,7 +29,7 @@ afterEach(async () => {
 	harness = undefined
 })
 
-/** The ids of the rows the list request `params` answers, on a D1 holding TITLES as ids 1 to 4 */
+/** The ids of the rows the list request `params` answers, on a D1 holding TITLES as ids 1 to 5 */
 async function ids(params: Record<string, string>): Promise<number[]> {
 	harness ??= await d1Memory()
 	await harness.CORE.exec("CREATE TABLE IF NOT EXISTS post (id integer PRIMARY KEY, title text, _search text)")
@@ -58,7 +60,7 @@ describe("a fixed text on D1, past its LIKE cap (U21)", () => {
 
 	it("matches each fixed shape as GLOB and LIKE did, a NULL never, like by case and ilike without", async () => {
 		const shapes: Array<[string, number[]]> = [
-			["title.like.*", [1, 2, 3]],
+			["title.like.*", [1, 2, 3, 5]],
 			["title.like.Ab*", [3]],
 			["title.like.ab*", []],
 			["title.ilike.ab*", [3]],
@@ -66,6 +68,11 @@ describe("a fixed text on D1, past its LIKE cap (U21)", () => {
 			["title.like.*o-ru*", [1]],
 			["title.like.Ab-cd", [3]],
 			["title.ilike.AB-CD", [3]],
+			["title.like.東京都*", [2]],
+			["title.like.*庁舎東京", [2]],
+			["title.like.😀b*", [5]],
+			["title.ilike.😀B*", [5]],
+			["title.like.*b😀", [5]],
 		]
 		for (const [filter, expected] of shapes) expect(await ids({ filter }), filter).toEqual(expected)
 	})
