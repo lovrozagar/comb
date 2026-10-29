@@ -23,9 +23,32 @@ export type RetryOptions = {
 	onRetry?: (attempt: number, error: Error, delay: number) => void
 }
 
-const TRANSIENT = ["429", "rate limit", "ECONNRESET", "ETIMEDOUT", "fetch failed"]
+// lookup-table: the codes Node and undici give a connection that failed, timed out or was cut
+const NETWORK_CODES: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"EAI_AGAIN",
+	"ECONNREFUSED",
+	"ECONNRESET",
+	"EPIPE",
+	"ETIMEDOUT",
+	"UND_ERR_BODY_TIMEOUT",
+	"UND_ERR_CONNECT_TIMEOUT",
+	"UND_ERR_HEADERS_TIMEOUT",
+	"UND_ERR_SOCKET",
+])
 
-const isTransient = (error: Error) => TRANSIENT.some((mark) => error.message.includes(mark))
+/**
+ * Whether `error`, or an error it was caused by, failed transiently, read from its structured fields
+ * alone: an HTTP status of 429 or 5xx (hrana's HttpServerError, under libsql's LibsqlError), or a
+ * network code (undici's `fetch failed` carries it in its cause). A SQLite code never is, and no
+ * message is read: a SQL error that quotes "429" is not a rate limit (S7 of the 0.15.0 review).
+ */
+function isTransient(error: unknown): boolean {
+	if (typeof error !== "object" || error === null) return false
+	const { cause, code, status } = error as { cause?: unknown; code?: unknown; status?: unknown }
+	if (typeof code === "string" && code.startsWith("SQLITE_")) return false
+	if (typeof status === "number" && (status === 429 || status >= 500)) return true
+	return (typeof code === "string" && NETWORK_CODES.has(code)) || isTransient(cause)
+}
 
 /** Call `fn`, again after a backoff while it fails transiently, `maxRetries` times at most */
 export function withRetry<T>(fn: () => Promise<T>, options: RetryOptions = EMPTY_OBJ): Promise<T> {
@@ -46,7 +69,7 @@ type Retry<T> = { done: number; fn: () => Promise<T>; options: RetryOptions }
 /** The next attempt after a transient failure, or the failure itself once retrying is over */
 async function retryAfter<T>(err: unknown, { done, fn, options }: Retry<T>): Promise<T> {
 	const error = err instanceof Error ? err : new Error(String(err))
-	if (!isTransient(error) || done >= (options.maxRetries ?? 3)) throw error
+	if (!isTransient(err) || done >= (options.maxRetries ?? 3)) throw error
 	/* exponential backoff with jitter */
 	const backoff = (options.baseDelay ?? 1000) * 2 ** done + Math.random() * 1000
 	const delay = Math.min(backoff, options.maxDelay ?? 30000)

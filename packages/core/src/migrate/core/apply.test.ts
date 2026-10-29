@@ -96,7 +96,8 @@ describe("applyRecorded", () => {
 			batch: async (statements) => {
 				calls++
 				await conn.batch(statements)
-				if (calls === 1) throw new Error("fetch failed")
+				if (calls === 1)
+					throw new TypeError("fetch failed", { cause: Object.assign(new Error("reset"), { code: "ECONNRESET" }) })
 			},
 		}
 		await applyRecorded(lost, migration, NOW)
@@ -112,7 +113,7 @@ describe("applyRecorded", () => {
 		const flaky: Connection = {
 			...conn,
 			batch: async (statements) => {
-				if (++calls === 1) throw new Error("ECONNRESET")
+				if (++calls === 1) throw Object.assign(new Error("ECONNRESET"), { code: "ECONNRESET" })
 				await conn.batch(statements)
 			},
 		}
@@ -126,6 +127,22 @@ describe("applyRecorded", () => {
 
 /** A file to apply, its name standing for its hash */
 const file = (filename: string, sql: string) => ({ filename, hash: filename, statements: [sql] })
+
+/* S7 of the 0.15.0 review: a SQLite error that quotes a 429 was retried three times */
+describe("applyRecorded on a SQLite failure that names a 429", () => {
+	it("passes it on at once, read by its code", async () => {
+		const conn = libsqlConnection()
+		await ensureMigrationsTable(conn)
+		await conn.client.executeMultiple("CREATE TABLE t429 (body TEXT); INSERT INTO t429 VALUES ('a'), ('a');")
+		let calls = 0
+		const counted: Connection = { ...conn, batch: (statements) => (calls++, conn.batch(statements)) }
+		const unique = { filename: "2_u.sql", hash: "h2", statements: ["CREATE UNIQUE INDEX u ON t429 (body)"] }
+		await expect(applyRecorded(counted, unique, { baseDelay: 0, maxDelay: 0 })).rejects.toThrow(
+			"UNIQUE constraint failed: t429.body",
+		)
+		expect(calls).toBe(1)
+	})
+})
 
 describe("applyEach", () => {
 	it("stops at the first file that fails, naming the files that committed and the ones still pending", async () => {

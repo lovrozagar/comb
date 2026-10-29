@@ -23,6 +23,11 @@ describe("sleep", () => {
 	})
 })
 
+/** An error carrying the HTTP status `code`, as hrana's HttpServerError does */
+const httpStatus = (code: number) => Object.assign(new Error(`HTTP ${code}`), { status: code })
+/** An error carrying the network code `code`, as Node's and undici's do */
+const network = (code: string) => Object.assign(new Error("socket hang up"), { code })
+
 describe("withRetry", () => {
 	it("returns the first result when nothing throws", async () => {
 		const fn = vi.fn(async () => "ok")
@@ -30,30 +35,50 @@ describe("withRetry", () => {
 		expect(fn).toHaveBeenCalledTimes(1)
 	})
 
-	const retryable = ["429 Too Many Requests", "rate limit exceeded", "ECONNRESET", "ETIMEDOUT", "fetch failed"]
+	/* S7 of the 0.15.0 review: transience is read from codes and statuses, the error's or its causes' */
+	const retryable: Array<[string, Error]> = [
+		["an HTTP 429", httpStatus(429)],
+		["an HTTP 503", httpStatus(503)],
+		[
+			"libsql's wrap of a 429",
+			Object.assign(new Error("server error"), { cause: httpStatus(429), code: "SERVER_ERROR" }),
+		],
+		["undici's fetch failed over a reset", new TypeError("fetch failed", { cause: network("ECONNRESET") })],
+		["a timed-out connection", network("ETIMEDOUT")],
+		["a socket undici closed", network("UND_ERR_SOCKET")],
+	]
 
-	for (const message of retryable) {
-		it(`retries a ${message.split(" ")[0]} failure and succeeds on the next attempt`, async () => {
-			let calls = 0
-			const result = await withRetry(async () => {
-				calls++
-				if (calls === 1) throw new Error(message)
-				return "recovered"
-			}, fast)
+	it.each(retryable)("retries %s and succeeds on the next attempt", async (_, error) => {
+		let calls = 0
+		const result = await withRetry(async () => {
+			calls++
+			if (calls === 1) throw error
+			return "recovered"
+		}, fast)
+		expect(result).toBe("recovered")
+		expect(calls).toBe(2)
+	})
 
-			expect(result).toBe("recovered")
-			expect(calls).toBe(2)
-		})
-	}
-
-	it("does not retry an error it cannot attribute to transient failure", async () => {
+	it.each([
+		[
+			"a SQLite error quoting 429",
+			Object.assign(new Error("UNIQUE constraint failed: t429.body"), { code: "SQLITE_CONSTRAINT" }),
+		],
+		[
+			"a SQLite error caused by a 503",
+			Object.assign(new Error("x"), { cause: httpStatus(503), code: "SQLITE_BUSY_X" }),
+		],
+		["prose that names a rate limit", new Error("429 rate limit ECONNRESET fetch failed")],
+		["an HTTP 404", httpStatus(404)],
+		["a cause that is no object", new Error("x", { cause: "ECONNRESET" })],
+	])("does not retry %s", async (_, error) => {
 		let calls = 0
 		await expect(
 			withRetry(async () => {
 				calls++
-				throw new Error("syntax error near SELECT")
+				throw error
 			}, fast),
-		).rejects.toThrow("syntax error")
+		).rejects.toBe(error)
 		expect(calls).toBe(1)
 	})
 })
@@ -65,7 +90,7 @@ describe("withRetry: retry limits", () => {
 			withRetry(
 				async () => {
 					calls++
-					throw new Error("ECONNRESET")
+					throw Object.assign(new Error("ECONNRESET"), { code: "ECONNRESET" })
 				},
 				{ ...fast, maxRetries: 2 },
 			),
@@ -79,7 +104,7 @@ describe("withRetry: retry limits", () => {
 		await expect(
 			withRetry(
 				async () => {
-					throw new Error("429")
+					throw Object.assign(new Error("429"), { status: 429 })
 				},
 				{ ...fast, maxRetries: 2, onRetry: (attempt) => seen.push(attempt) },
 			),
@@ -94,7 +119,7 @@ describe("withRetry: backoff delays", () => {
 		await expect(
 			withRetry(
 				async () => {
-					throw new Error("429")
+					throw Object.assign(new Error("429"), { status: 429 })
 				},
 				{ baseDelay: 1000, maxDelay: 5, maxRetries: 3, onRetry: (_a, _e, delay) => delays.push(delay) },
 			),
@@ -108,7 +133,7 @@ describe("withRetry: backoff delays", () => {
 		try {
 			const delays: number[] = []
 			const fn = vi.fn(async () => {
-				throw new Error("429 too many")
+				throw Object.assign(new Error("429 too many"), { status: 429 })
 			})
 			const done = withRetry(fn, { maxRetries: 6, onRetry: (_a, _e, delay) => delays.push(delay) }).catch(
 				(e: Error) => e,
