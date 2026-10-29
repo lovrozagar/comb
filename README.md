@@ -1059,7 +1059,7 @@ What changes for a project on 0.15. Before deploying it:
 
 6. **Check your configs at load.**
    - A migrate config database is either `name` and `provider`, or non-empty `environments` each resolving a provider; an environment's `name` defaults to its key. Both shapes at once, an empty `environments` and an environment with no provider are refused at load, naming the file. A `defineConfig` typo prints the same readable message, with the path, as a plain object's.
-   - `comb.config.ts` is held to a strict schema: an unknown key (an FTS table's `contentTable`, which nothing read, included) is refused, naming the file.
+   - `comb.config.ts` is held to a strict schema: an unknown key (an FTS table's `contentTable`, which nothing read, included) is refused, naming the file. `FtsTableConfig.tokenizer` is typed `string | undefined`.
    - A Postgres `url` may be empty until a command resolves its environment. A URL with no user is the OS user's, its database that user's, as libpq reads it; comb's own reads take no `PGUSER`, `PGDATABASE` or `PGPASSWORD`. `hostaddr` is the address comb connects to and `host` the TLS name; `fallback_application_name` sets `application_name` where the URL names none.
    - The D1 provider connects to its own `databaseName`: `provider.connect(resolveDatabaseConfig(db, env))` no longer opens a D1 named after the environment.
 
@@ -1067,6 +1067,7 @@ What changes for a project on 0.15. Before deploying it:
    - Stricter: a SQLite file's own `BEGIN`, `COMMIT`, `END`, `ROLLBACK` or `START TRANSACTION` is refused, with no override. `ATTACH PARTITION`, `REFRESH MATERIALIZED VIEW` without `CONCURRENTLY` and `LOCK` in `SHARE` mode or stronger carry a lock warning. An added column whose default calls a function carries the rewrite warning unless the function is known IMMUTABLE or STABLE (a listed built-in, or a history routine every overload of which says so).
    - Looser: a retype that only widens, with no `USING`, is safe; `ENABLE TRIGGER` and its forms are cautious.
    - A Postgres baseline compares views, materialized views, sequences and policies as it compares functions and triggers, leaving out a partition's cloned trigger.
+   - On libsql, a `_cf_` table is now the project's own (only D1 owns that prefix), so it appears in `diff`, `baseline` and `status`: a libsql project with `_cf_` tables sees new drift. Litestream's tables are left out on every engine.
    - `apply --file` on a file of the migrations directory refuses while a file before it is pending. A refused D1 or Turso apply or baseline writes nothing. A directory with no `.sql` file and no `atlas.sum` is an empty history; `.sql` files with no sum are refused, naming `comb migrate diff`.
    - `lockTimeout` takes Postgres's duration grammar (`250`, `1.5s`, `500us`, `1h`).
 
@@ -1075,7 +1076,7 @@ What changes for a project on 0.15. Before deploying it:
    - A duplicate rowid, an FTS5 table's included, is a 409 `primary_key_violation`; a bound value that spells D1's "pattern too complex" is no longer a 400.
    - On Postgres, a violation reported on a partition is classified under the statement's own table, and a table no map knows names no column. A composite foreign key names no column. A driver's lost or refused connection (`ECONNREFUSED`, `ECONNRESET`, a pool or connect timeout, Bun's `ERR_POSTGRES_CONNECTION_*`, node-postgres's "Connection terminated unexpectedly") is a 503 `database_unavailable`, where it was unclassified.
 
-9. **Remove what was removed.** `ensureMigrationsTable`, `checkMigrationHash` and `recordMigrationHash` are no longer exported from `/migrate`: comb's own apply creates and upgrades its history table. `withRetry` reads transience from an error's `status` or network `code`, never its message.
+9. **Remove what was removed, and know what was added.** `ensureMigrationsTable`, `checkMigrationHash` and `recordMigrationHash` are no longer exported from `/migrate`: comb's own apply creates and upgrades its history table. `withRetry` reads transience from an error's `status` or network `code`, never its message. `Connection.batch` states its contract per driver: one transaction on SQLite, libsql and bun:sqlite; on D1, its statements in order, with no rollback when one fails, so code that relied on a D1 batch being atomic must not. New exports: `TursoMissing` (`/migrate`), `IsoInstant`, `ListQuerySchema` and `RetrieveQuerySchema` (`/query`), `ListQueryInput` (`/query` and `/query/sqlite`), `ColumnKind` and `MergedListQueryResult` (`/query/sqlite`, the latter also from `/sqlite/d1/sharding`).
 
 10. **Give the shard router a `log`.** With none, `shard-router.kv.error` and `shard-router.revalidate.error` now go to `console.warn`, where they were dropped; pass `log` to route them, or `log: () => {}` to mute them. A KV read that fails trusts nothing in KV: the request reads the primary and caches in its own isolate only. `resolveVerified` writes and logs nothing when the primary names the shard it probed.
 
