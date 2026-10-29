@@ -25,7 +25,7 @@ import {
 	resolveLegacy,
 } from "../migrate/core/history-match.ts"
 import { migrationHashes } from "../migrate/core/parse.ts"
-import { planApply } from "../migrate/core/plan-apply.ts"
+import { planApply, refuseSkipping } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
@@ -185,6 +185,10 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	const dir = target.migrationsDir
 	const relative = single === undefined ? undefined : fileName(single, { cwd: io.cwd, dir })
 	const { renamed, rows } = await readHistory(target.conn, dir)
+	if (relative !== undefined && !relative.startsWith("..")) {
+		const before = sqlFiles(dir).filter((name) => name < relative)
+		refuseSkipping(relative, before, matchHistory(hashed(dir, before), rows, false).applied)
+	}
 	const files = hashed(dir, relative === undefined ? sqlFiles(dir) : [relative])
 	const matched = matchHistory(files, rows, single === undefined)
 	refuseUnmatched(matched, { dir, io, mode })

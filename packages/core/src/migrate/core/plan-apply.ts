@@ -69,6 +69,17 @@ function refuseOutOfOrder(files: readonly string[], applied: ReadonlySet<string>
 }
 
 /**
+ * Refuses applying `file` of the migrations directory on its own while a file that sorts before it,
+ * one of `before`, is pending: the directory would then hold a pending file before an applied one,
+ * which every whole-directory run refuses (S3 of the 0.15.0 review)
+ */
+function refuseSkipping(file: string, before: readonly string[], applied: ReadonlySet<string>): void {
+	const waiting = before.find((name) => !applied.has(name))
+	if (waiting !== undefined)
+		throw new Error(`${waiting} is pending and sorts before ${file}; apply ${waiting} first, or run without --file`)
+}
+
+/**
  * `migration` with its proof joined to its classification: the stricter of the two counts, each
  * finding of the proof listed as `proof run: …`
  */
@@ -179,4 +190,4 @@ async function planApply(options: PlanOptions): Promise<Pending[]> {
 	return approveAll(classified, { empty, options, proofs })
 }
 
-export { type Pending, planApply, type PlanOptions, wranglerOrder }
+export { type Pending, planApply, type PlanOptions, refuseSkipping, wranglerOrder }
