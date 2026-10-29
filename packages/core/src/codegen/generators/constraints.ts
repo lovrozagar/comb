@@ -3,6 +3,7 @@
  *
  * Generates constraint maps from analyzed table metadata for database error handling.
  */
+import { namesColumn } from "../utils/sql-name.ts"
 import path from "node:path"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { pgIdentifier } from "../../identifier.ts"
@@ -47,7 +48,7 @@ const hiddenOf = (table: TableMeta): Hidden => {
 
 /** Whether SQL comb rendered names a private column of the table, as it quotes each by its SQL name */
 const touchesPrivate = (table: TableMeta, expression: string) =>
-	table.fields.some((field) => field.constraints.private && expression.includes(`"${field.sqlName}"`))
+	table.fields.some((field) => field.constraints.private && namesColumn(expression, field.sqlName))
 
 /**
  * The column-level and index-level unique constraints, keyed by the column's SQL name; a

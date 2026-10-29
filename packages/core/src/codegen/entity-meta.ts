@@ -5,6 +5,7 @@
  * directly against the analyzer's view of a table, rather than by grepping
  * generated text. See docs/meta-contract.md.
  */
+import { namesColumn } from "./utils/sql-name.ts"
 import type { CombEntityMetaInput } from "../meta.ts"
 import { isReference } from "./analyze-field.ts"
 import type { FieldMeta, PartialUniqueIndexMeta, TableMeta, UniqueIndexMeta } from "./analyzer-types.ts"
@@ -92,16 +93,17 @@ function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"] {
 	return [...table.uniqueIndexes, ...columns].filter((index) => !index.columns.some((column) => hidden.has(column)))
 }
 
-/** Whether `where` names `column` as a word of its own */
-const names = (where: string, column: string): boolean =>
-	new RegExp(`(?<![\\w$])${column.replace(/[$]/g, "\\$")}(?![\\w$])`).test(where)
-
-/** The partial unique indexes a table publishes: none over a private column, nor whose predicate names one (C7) */
+/**
+ * The partial unique indexes a table publishes: none over a private column, nor whose predicate,
+ * SQL comb rendered, names one by its quoted SQL name (C7 of the 0.14.1 review, C5 of r17)
+ */
 function publishedPartialUniqueIndexes(table: TableMeta): PartialUniqueIndexMeta[] {
-	const hidden = [...hiddenOf(table)]
+	const hidden = hiddenOf(table)
+	const privateSql = table.fields.filter((f) => f.constraints.private).map((f) => f.sqlName)
 	return table.partialUniqueIndexes.filter(
 		(index) =>
-			!index.columns.some((column) => hidden.includes(column)) && !hidden.some((column) => names(index.where, column)),
+			!index.columns.some((column) => hidden.has(column)) &&
+			!privateSql.some((sqlName) => namesColumn(index.where, sqlName)),
 	)
 }
 

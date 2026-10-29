@@ -85,6 +85,31 @@ describe("deriveEntityMeta: partial unique indexes", () => {
 	})
 })
 
+/* C5 of r17: a private column's SQL name is found in a predicate as comb quotes it, never read as a pattern */
+describe("deriveEntityMeta: a private column whose SQL name is regex syntax", () => {
+	it("keeps an index whose predicate does not name it, and drops one that does", () => {
+		const meta = deriveEntityMeta(
+			table(
+				{
+					id: 'c.id("itm")',
+					paren: 'c.text("tok(en", { private: true })',
+					plus: 'c.text("a+b", { private: true })',
+					email: 'c.text("email")',
+				},
+				{
+					partialUniqueIndexes: [
+						{ columns: ["email"], name: "item_email_not_ab", where: "\"email\" <> 'ab'" },
+						{ columns: ["email"], name: "item_email_tok", where: '"tok(en" IS NULL' },
+					],
+				},
+			),
+		)
+		expect(meta?.partialUniqueIndexes).toEqual([
+			{ columns: ["email"], name: "item_email_not_ab", where: "\"email\" <> 'ab'" },
+		])
+	})
+})
+
 describe("deriveEntityMeta: generated", () => {
 	it.each([
 		["c.id(prefix)", 'c.id("itm")', ["id"]],
