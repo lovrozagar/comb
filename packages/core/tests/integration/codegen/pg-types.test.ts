@@ -8,6 +8,7 @@
 import type pg from "pg"
 import type * as z from "zod"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { classifyPgError } from "../../../src/pg/error-handler.ts"
 import { cleanGeneratedDtos, generatedDtos } from "../support/dtos.ts"
 import { usePg } from "../support/pg.ts"
 
@@ -33,9 +34,11 @@ const COLUMNS = `{
 	mac8: macaddr8("mac8"),
 	bits: bit("bits", { dimensions: 3 }),
 	iv: interval("iv"),
+	u: uuid("u"),
+	v: varchar("v", { length: 3 }),
 }`
 const DDL =
-	"CREATE TEMP TABLE kinds (id text PRIMARY KEY, d date, ts timestamp, tz timestamptz, t time, tt timetz, n52 numeric(5,2), n3 numeric(3), nn numeric, nr numeric(5,2), b bigint, r real, ip inet, net cidr, mac macaddr, mac8 macaddr8, bits bit(3), iv interval)"
+	"CREATE TEMP TABLE kinds (id text PRIMARY KEY, d date, ts timestamp, tz timestamptz, t time, tt timetz, n52 numeric(5,2), n3 numeric(3), nn numeric, nr numeric(5,2), b bigint, r real, ip inet, net cidr, mac macaddr, mac8 macaddr8, bits bit(3), iv interval, u uuid, v varchar(3))"
 
 /** [column, value, whether the write DTO takes it, whether Postgres does] */
 type Case = [column: string, value: number | string, dto: boolean, pg: boolean]
@@ -53,6 +56,8 @@ const CASES: Case[] = [
 	/* stricter than Postgres, listed in the 0.14 changelog: a timestamp discards an offset or Z */
 	["ts", "2024-01-01T10:00:00+05:00", false, true],
 	["ts", "2024-01-01T10:00:00Z", false, true],
+	/* stricter than Postgres, listed since 0.15 (F11): the end of a day, which Postgres reads as the next one's start */
+	["ts", "2024-01-01T24:00:00", false, true],
 	["tz", "2024-01-01T10:00:00+02:00", true, true],
 	["tz", "2024-01-01T10:00:00.1234567Z", true, true],
 	["tz", "2024-01-01T25:00:00Z", false, false],
@@ -63,10 +68,19 @@ const CASES: Case[] = [
 	["t", "25:00", false, false],
 	/* stricter than Postgres, listed in the 0.14 changelog */
 	["t", "24:00:00", false, true],
+	/* stricter than Postgres, listed since 0.15 (F11): a leap second, which Postgres reads as the next minute */
+	["t", "23:59:60", false, true],
 	["tt", "10:00:00+02", true, true],
 	["tt", "10:00Z", true, true],
 	["tt", "10:00:00+02:30", true, true],
 	["tt", "10:61:00+02", false, false],
+	/* F4 of the 0.14.1 review: Postgres takes an offset up to 15:59, and refuses one past it with a 22009 */
+	["tt", "10:00:00+15:59", true, true],
+	["tt", "10:00:00+16", false, false],
+	["tt", "10:00:00-23:59", false, false],
+	["tz", "2024-01-01T10:00:00+15:59", true, true],
+	["tz", "2024-01-01T10:00:00+16:00", false, false],
+	["tz", "2024-01-01T10:00:00-23:00", false, false],
 	["n52", "123.45", true, true],
 	["n52", "-999.99", true, true],
 	["n52", "0012.5", true, true],
@@ -159,7 +173,22 @@ const CASES: Case[] = [
 	["iv", "P1.5Y", false, true],
 	["iv", "P0001-02-03T04:05:06", false, true],
 	["iv", "1 day", false, true],
+	/* F3 of the 0.14.1 review: a uuid is z.guid(), the canonical spelling */
+	["u", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", true, true],
+	["u", "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11", true, true],
+	["u", "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a1", false, false],
+	["u", "not-a-uuid", false, false],
+	/* stricter than Postgres, listed since 0.15: braces, and the digits bare */
+	["u", "{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}", false, true],
+	["u", "a0eebc999c0b4ef8bb6d6bb9bd380a11", false, true],
+	["v", "abc", true, true],
+	/* stricter than Postgres, listed since 0.15 (F11): blanks past varchar(n), which Postgres cuts */
+	["v", "abc  ", false, true],
 ]
+
+/* each column as drizzle's string mode reads it, as text */
+const READ =
+	"SELECT id, d::text AS d, ts::text AS ts, tz::text AS tz, t::text AS t, tt::text AS tt, n52::text AS n52, n3::text AS n3, nn::text AS nn, nr::float8 AS nr, b::text AS b, r, ip::text AS ip, net::text AS net, mac::text AS mac, mac8::text AS mac8, bits::text AS bits, iv::text AS iv, u::text AS u, v FROM kinds ORDER BY id"
 
 /** Whether Postgres stores `value` in `column` */
 async function stored(client: pg.Client, [column, value]: [string, number | string]): Promise<boolean> {
@@ -176,7 +205,7 @@ async function stored(client: pg.Client, [column, value]: [string, number | stri
 async function kindsDtos(): Promise<{ create: z.ZodObject; read: z.ZodObject }> {
 	const dtos = await generatedDtos(
 		"f50",
-		`import { bigint, bit, cidr, date, inet, interval, macaddr, macaddr8, numeric, real, text, time, timestamp } from "drizzle-orm/pg-core"\nexport const kinds = pgTable("kinds", ${COLUMNS})`,
+		`import { bigint, bit, cidr, date, inet, interval, macaddr, macaddr8, numeric, real, text, time, timestamp, uuid, varchar } from "drizzle-orm/pg-core"\nexport const kinds = pgTable("kinds", ${COLUMNS})`,
 		{ dialect: "postgres" },
 	)
 	return {
@@ -229,11 +258,17 @@ describe("a plain Postgres column's write DTO, by its data type (F50)", () => {
 				"INSERT INTO kinds VALUES ('k', 'infinity', 'infinity', '-infinity', '24:00', '24:00+00', 'NaN', 7, 'Infinity', 1.5, 1, 1e-45)",
 			)
 		/* as text, as drizzle's string mode reads each of them */
-		const { rows } = await sessions
-			.pg()
-			.query(
-				"SELECT id, d::text AS d, ts::text AS ts, tz::text AS tz, t::text AS t, tt::text AS tt, n52::text AS n52, n3::text AS n3, nn::text AS nn, nr::float8 AS nr, b::text AS b, r, ip::text AS ip, net::text AS net, mac::text AS mac, mac8::text AS mac8, bits::text AS bits, iv::text AS iv FROM kinds",
-			)
+		const { rows } = await sessions.pg().query(READ)
 		expect(read.safeParse(rows[0]).success).toBe(true)
+	})
+
+	/* F4 of the 0.14.1 review: the offset Postgres refuses past 15:59 is the request's value, a 400 by any write path */
+	it("answers an offset past 15:59 with a 400 naming the column, as every other bad value", async () => {
+		const error = await sessions
+			.pg()
+			.query("INSERT INTO kinds (id, tt) VALUES ('k', $1)", ["10:00:00+16"])
+			.catch((caught: unknown) => caught)
+		expect((error as { code?: string }).code).toBe("22009")
+		expect(classifyPgError(error, [])).toMatchObject({ errorKey: "invalid_value", status: 400 })
 	})
 })

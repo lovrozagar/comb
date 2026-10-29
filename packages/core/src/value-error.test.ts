@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { valueError } from "./value-error.ts"
 
 describe("valueError", () => {
-	it.each(["22001", "22003", "22021", "22P02", "SQLITE_CONSTRAINT_DATATYPE", "SQLITE_MISMATCH"])(
+	it.each(["22001", "22003", "22009", "22021", "22P02", "SQLITE_CONSTRAINT_DATATYPE", "SQLITE_MISMATCH"])(
 		"answers %s with a 400 invalid_value that names the column, never the value",
 		(code) => {
 			const source = new Error("raw")

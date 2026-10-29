@@ -6,9 +6,10 @@
  */
 import type { FieldMeta } from "../../analyzer-types.ts"
 
-/* a time with an offset, which z.iso.time does not take: hh:mm[:ss[.f]], then Z, ±hh or ±hh[:]mm */
+/* a time with an offset, which z.iso.time does not take: hh:mm[:ss[.f]], then Z, ±hh or ±hh[:]mm,
+   its hours at most 15, as Postgres holds an offset (F4 of the 0.14.1 review) */
 const TIMETZ =
-	"z.string().regex(/^(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|[+-](?:[01]\\d|2[0-3])(?::?[0-5]\\d)?)$/)"
+	"z.string().regex(/^(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|[+-](?:0\\d|1[0-5])(?::?[0-5]\\d)?)$/)"
 
 /*
  * A timestamp keeps no zone: given an offset or Z it discards it, so the instant is lost. A
@@ -17,7 +18,8 @@ const TIMETZ =
  */
 const TIMESTAMP =
 	'z.iso.datetime({ local: true }).regex(/[^Zz]$/, { message: "Must be a local date-time, with no offset or Z, which timestamp would discard" })'
-const TIMESTAMPTZ = "z.iso.datetime({ offset: true })"
+const TIMESTAMPTZ =
+	'z.iso.datetime({ offset: true }).regex(/(?:Z|[+-](?:0\\d|1[0-5])(?::?[0-5]\\d)?)$/, { message: "Must have an offset of at most 15:59, as Postgres holds one" })'
 
 /** A numeric's declared precision and scale, from drizzle's `numeric(p, s)`; null when it declares none */
 function precisionOf(sqlType: string): { precision: number; scale: number } | null {
@@ -98,6 +100,8 @@ const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> 
 	"string numeric": ({ sqlType }) => numericText(sqlType),
 	"string time": ({ sqlType }) => (sqlType.startsWith("time with time zone") ? TIMETZ : "z.iso.time()"),
 	"string timestamp": ({ sqlType }) => (sqlType.includes("with time zone") ? TIMESTAMPTZ : TIMESTAMP),
+	/* the canonical spelling, as README says (F3 of the 0.14.1 review) */
+	"string uuid": () => "z.guid()",
 }
 
 /** The write rule of a plain Postgres column of `field`'s data type; undefined when the plain type is its rule */

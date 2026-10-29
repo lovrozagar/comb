@@ -23,6 +23,8 @@ const VALUE_ERRORS: Record<string, ValueRule> = {
 	"22021": "invalid",
 	"22P02": "invalid",
 	"22P05": "invalid",
+	/* a time zone offset past what Postgres holds, 15:59 either way (F4 of the 0.14.1 review) */
+	"22009": "invalid",
 	/* a value too large for a btree index row */
 	"54000": "too_large",
 	/* a STRICT table's column given another type */

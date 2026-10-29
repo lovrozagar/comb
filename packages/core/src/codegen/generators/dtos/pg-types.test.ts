@@ -23,8 +23,8 @@ describe("pgWriteRule: a plain Postgres column's write rule by its data type (F5
 		expect(rule('date("v")')).toBe("z.iso.date()")
 		/* each keeps the instant: a timestamp only a local time, a timestamptz only one with its offset */
 		expect(rule('timestamp("v", { mode: "string" })')).toMatch(/^z\.iso\.datetime\(\{ local: true \}\)\.regex\(/)
-		expect(rule('timestamp("v", { mode: "string", withTimezone: true, precision: 3 })')).toBe(
-			"z.iso.datetime({ offset: true })",
+		expect(rule('timestamp("v", { mode: "string", withTimezone: true, precision: 3 })')).toMatch(
+			/^z\.iso\.datetime\(\{ offset: true \}\)\.regex\(/,
 		)
 		expect(rule('time("v")')).toBe("z.iso.time()")
 		expect(rule('time("v", { withTimezone: true })')).toMatch(/^z\.string\(\)\.regex\(.*\(\?:Z\|\[\+-\]/)
