@@ -34,7 +34,7 @@ const namesOf = (result: AnalysisResult) =>
 describe("aliasSchemaImports", () => {
 	it("keeps a name one module gives and nothing generated declares, and imports it once however many columns use it", () => {
 		const profile = project("/app/schemas.ts", "profile")
-		const result = aliasSchemaImports(analysis([["user", [profile, profile]]]))
+		const result = aliasSchemaImports(analysis([["user", [profile, profile]]]), "/app")
 		expect(namesOf(result)).toEqual([
 			[
 				["profile", "profile", "profile"],
@@ -51,12 +51,14 @@ describe("aliasSchemaImports", () => {
 				["a", [home]],
 				["b", [work]],
 			]),
+			"/app",
 		)
 		const backward = aliasSchemaImports(
 			analysis([
 				["b", [work]],
 				["a", [home]],
 			]),
+			"/app",
 		)
 		expect(namesOf(forward)).toEqual([
 			[["profileFromHomeSchemas", "profileFromHomeSchemas", "profile"]],
@@ -74,7 +76,7 @@ describe("aliasSchemaImports", () => {
 			project("/app/x/schemas.ts", "zFromAppSchemas"),
 			{ from: "@acme/shapes", imported: "_str", name: "_str", path: null },
 		]
-		expect(namesOf(aliasSchemaImports(analysis([["user", refs]])))[0]?.map(([name]) => name)).toEqual([
+		expect(namesOf(aliasSchemaImports(analysis([["user", refs]]), "/"))[0]?.map(([name]) => name)).toEqual([
 			"zFromAppSchemas2",
 			"combMetaFromAppSchemas",
 			"schemaFromAppSchemas",
@@ -82,5 +84,21 @@ describe("aliasSchemaImports", () => {
 			"zFromAppSchemas",
 			"strFromAcmeShapes",
 		])
+	})
+})
+
+/* the reviewer's reading of F1: generated output is byte-identical wherever the project is checked out */
+/** One table importing a root module's `profile` and a lib module's, under `root` */
+const layout = (root: string): Array<[string, ImportRef[]]> => [
+	["user", [project(`${root}/schemas.ts`, "profile"), project(`${root}/lib/schemas.ts`, "profile")]],
+]
+
+/** The names the layout's imports take under `root` */
+const names = (root: string) => namesOf(aliasSchemaImports(analysis(layout(root)), root))
+
+describe("aliasSchemaImports from two checkouts", () => {
+	it("names one layout's imports alike under two project roots", () => {
+		expect(names("/home/dev/app")).toEqual(names("/tmp/ci-zz"))
+		expect(names("/home/dev/app")[0]?.map(([name]) => name)).toEqual(["profileFromSchemas", "profileFromLibSchemas"])
 	})
 })

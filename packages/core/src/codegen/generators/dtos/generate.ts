@@ -98,7 +98,7 @@ function writeEntities(written: Written, config: DtosConfig, ctx: GeneratorConte
  */
 export function generateDtos(ctx: GeneratorContext, config: DtosConfig): void {
 	/* each c.json schema under a name of its own in every file that imports it (F1, F2) */
-	const named = { ...ctx, analysis: aliasSchemaImports(ctx.analysis) }
+	const named = { ...ctx, analysis: aliasSchemaImports(ctx.analysis, ctx.cwd) }
 	const tables = named.analysis.tables.map((meta) => tableInfoOf(meta, named))
 	/* Pass 2: auto-deduplicate repeated schemas across all entities */
 	const sharedSchemas = buildSharedSchemas(tables, named.analysis.imports)
