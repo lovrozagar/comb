@@ -157,3 +157,19 @@ CREATE TRIGGER t_seen AFTER INSERT OR DELETE ON t FOR EACH STATEMENT EXECUTE FUN
 		})
 	}, 60_000)
 })
+
+/* P2 of the 0.15.0 review: since Postgres 15 a partitioned table's trigger is cloned onto each partition, tgisinternal false */
+describe("a Postgres baseline of a partitioned table with a row trigger", () => {
+	it("finds the database the history built in sync, the partitions' clones being Postgres's", async () => {
+		const history = `CREATE TABLE "events" ("at" date NOT NULL) PARTITION BY RANGE ("at");
+CREATE TABLE "events_2026" PARTITION OF "events" FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+CREATE FUNCTION touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
+CREATE TRIGGER events_touch BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION touch();
+`
+		await withDevAndTarget(async (devUrl, url) => {
+			await exec(url, history)
+			const { refused } = await baseline(url, devUrl, history)
+			expect(refused).toBeUndefined()
+		})
+	}, 60_000)
+})

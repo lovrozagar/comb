@@ -27,7 +27,8 @@ const RANGE = ">=3.4.9 <4"
  * type name, an array as its element's and [], the schema left out for pg_catalog and the
  * target's), and its tables' triggers but the internal ones a constraint makes, with tgtype and
  * whether they fire: O and A do, D and R (replica only) do not, as the history reads ENABLE and
- * DISABLE (P13)
+ * DISABLE (P13); a partition's clone of its parent's trigger is Postgres's, made from the one the
+ * history defines, so it is left out (tgparentid, P2 of the 0.15.0 review)
  */
 const CATALOG = `SELECT 'routine' AS what, p.proname AS name, CASE p.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END AS kind, NULL AS on_table,
 (SELECT coalesce(string_agg(CASE WHEN tn.nspname IN ('pg_catalog', $1) THEN '' ELSE tn.nspname || '.' END || t.typname || CASE WHEN x.arr THEN '[]' ELSE '' END, ',' ORDER BY a.ord), '')
@@ -43,7 +44,7 @@ AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catal
 UNION ALL
 SELECT 'trigger', t.tgname, NULL, c.relname, NULL, t.tgtype::int, t.tgenabled IN ('O', 'A')
 FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = $1 AND NOT t.tgisinternal`
+WHERE n.nspname = $1 AND NOT t.tgisinternal AND t.tgparentid = 0`
 
 /** postgres.js, or the refusal naming it and `why` comb needs it here */
 async function loadPostgres(why: string): Promise<Connect> {
