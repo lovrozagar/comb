@@ -182,13 +182,14 @@ just missing fields. Every field a later version adds is therefore optional at t
 
 `.meta()` in Zod 4 is a **shallow merge onto a clone**. Verified:
 
-| Sequence                                              | Result                              |
-| ----------------------------------------------------- | ----------------------------------- |
-| comb stamps, user adds `.meta({ description })`       | both present; `x-comb` survives     |
-| comb stamps, user calls `.describe()`                 | both present                        |
-| user stamps their own `x-comb` after comb             | **user wins** — last write, per key |
-| `.optional()` / `.nullable()` around a stamped object | survives                            |
-| **`.extend()` on a stamped object**                   | **`x-comb` is dropped**             |
+| Sequence                                        | Result                                                                                                           |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| comb stamps, user adds `.meta({ description })` | both present; `x-comb` survives                                                                                  |
+| comb stamps, user calls `.describe()`           | both present                                                                                                     |
+| user stamps their own `x-comb` after comb       | **user wins** — last write, per key                                                                              |
+| `.optional()` around a stamped object           | survives                                                                                                         |
+| `.nullable()` around a stamped object           | moved under `anyOf[0]`: `readCombMeta` on the root reads null; the caller unwraps it, as it unwraps `items` (§4) |
+| **`.extend()` on a stamped object**             | **`x-comb` is dropped**                                                                                          |
 
 The last row is the trap. `.extend()` builds a new object type and does not carry the registry
 entry, so a consumer who extends a generated read schema loses the entity facts **silently** —
@@ -250,7 +251,9 @@ the rows its predicate matches, so it is no uniqueness of the column. comb publi
 `where` added to an entry of `uniqueIndexes` would be dropped, and that reader would claim a global
 uniqueness the index does not hold, the very harm leaving partial indexes out avoided. A field of
 its own is skipped whole by such a reader, so it claims nothing. `where` is the predicate as the
-index's SQL holds it. An index over a private column, or whose predicate names one, is left out,
+index's SQL holds it: SQL over the columns' SQL names, each quoted, while `columns` lists property
+names, as every other list of the stamp does. comb publishes no property-name form of the
+predicate; a reader that needs one maps the SQL names through the manifest's columns. An index over a private column, or whose predicate names one, is left out,
 so a private name never reaches the document. The field was added within v1: a payload without it
 reads as `[]`, and one whose entry lacks `where` is malformed.
 
@@ -403,22 +406,12 @@ export const post = sqliteTable("post", {
 
 ```ts
 export const postDtoReadSchema = z
-	.compile(
-		z.object({
-			...timestampsCreatedUpdatedDeletedReadSnakeCase,
-			id: z
-				.string()
-				.min(1)
-				.max(48)
-				.meta({ examples: ["pst_01h5a3g8k9m2n4p6q8r0t2v4x6"] }),
-			status: z.enum(["draft", "published"]).meta({ examples: ["draft"] }),
-			title: z
-				.string()
-				.max(200)
-				.meta({ examples: ["string"] })
-				.nullable(),
-		}),
-	)
+	.object({
+		...timestampsCreatedUpdatedDeletedReadSnakeCase,
+		id: _z_bcefdca8.meta({ examples: ["pst_01h5a3g8k9m2n4p6q8r0t2v4x6"] }),
+		status: _z_7520e2bc.meta({ examples: ["draft"] }),
+		title: _z_06583aa2.meta(_m.string).nullable(),
+	})
 	.meta(
 		combMeta({
 			generated: ["id", "created_at", "updated_at", "deleted_at"],
@@ -426,6 +419,7 @@ export const postDtoReadSchema = z
 			immutable: ["id", "created_at", "updated_at", "deleted_at"],
 			kind: "entity",
 			name: "post",
+			partialUniqueIndexes: [],
 			softDelete: "deleted_at",
 			states: null,
 			tenantColumn: null,
@@ -434,8 +428,11 @@ export const postDtoReadSchema = z
 	)
 ```
 
-The generator hoists repeated expressions into `_shared` (`_str`, `_z4`, …); they are written
-inline here. `title` is nullable because the column is not `.notNull()`. Every generated column is
+This is the generated file's own text (a test reads it from the generator, so it cannot drift).
+The generator hoists repeated expressions into `_shared` under names hashed from their code
+(`_z_bcefdca8` is the id's rules, `_z_06583aa2` the title's); a read states a declared bound as
+`x-comb-maxLength` and enforces only what the column holds. `title` is nullable because the
+column is not `.notNull()`. Every generated column is
 also immutable: the update body has no key, no timestamps and no `deleted_at`. The create body
 leaves out every generated column too, so a client chooses no id and backdates no row, and takes
 `status` as optional, because the column has a database default.
