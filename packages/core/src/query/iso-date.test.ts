@@ -5,7 +5,7 @@ import { isoInstant } from "./iso-date.ts"
 describe("isoInstant", () => {
 	it("reads every spelling of one instant as one, a bare date as midnight UTC", () => {
 		for (const raw of ["2024-01-01", "2024-01-01T00:00Z", "2024-01-01T01:30+01:30", "2023-12-31T19:00:00.000-05:00"])
-			expect(isoInstant(raw), raw).toBe("2024-01-01T00:00:00.000Z")
+			expect(String(isoInstant(raw)), raw).toBe("2024-01-01T00:00:00.000Z")
 	})
 
 	it("names no instant for a day the calendar has not, or text no ISO 8601 date", () => {

@@ -42,6 +42,8 @@ export {
 	validateFilter,
 } from "./filter.ts"
 export { escapeLike, globPattern, likePattern } from "./like.ts"
+/* an ISO date filter's validated value: the instant, by its milliseconds and its text (Q4 of r17) */
+export { IsoInstant } from "./iso-date.ts"
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts"
 
 /* Zod schema builders */

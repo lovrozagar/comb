@@ -5,6 +5,29 @@
  * UTC; a fraction past milliseconds is cut, as a JS Date holds none.
  */
 
+/**
+ * An ISO date filter's value as validateFilter types it (Q4 of r17): the instant, by its epoch
+ * milliseconds and its `toISOString()` text, so a lowering binds the one its column stores and
+ * never reads the text back. It writes itself as its text, in a string and in JSON.
+ */
+class IsoInstant {
+	readonly ms: number
+	readonly text: string
+
+	constructor(ms: number) {
+		this.ms = ms
+		this.text = new Date(ms).toISOString()
+	}
+
+	toJSON(): string {
+		return this.text
+	}
+
+	toString(): string {
+		return this.text
+	}
+}
+
 /* a date, or a date-time with seconds and a fraction optional and an offset required */
 const ISO_DATE =
 	/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:Z|([+-])(\d{2}):(\d{2})))?$/
@@ -43,8 +66,8 @@ const isReal = ({ day, hour, minute, month, offsetHour, offsetMinute, second, ye
 /** A field the match holds, 0 when absent */
 const number = (part: string | undefined): number => (part === undefined ? 0 : Number(part))
 
-/** `raw` as the instant it names, in `toISOString()`'s form; undefined for text that names no real day and time */
-function isoInstant(raw: string): string | undefined {
+/** `raw` as the instant it names; undefined for text that names no real day and time */
+function isoInstant(raw: string): IsoInstant | undefined {
 	const match = ISO_DATE.exec(raw)
 	if (match === null) return undefined
 	const [, year, month, day, hour, minute, second, fraction = "", sign = "+", offsetHour, offsetMinute] = match
@@ -69,7 +92,7 @@ function isoInstant(raw: string): string | undefined {
 		fields.second,
 		Number(fraction.padEnd(3, "0").slice(0, 3)),
 	)
-	return at.toISOString()
+	return new IsoInstant(at.getTime())
 }
 
-export { isoInstant }
+export { IsoInstant, isoInstant }

@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest"
 import { parseFilterNumber, validateFilter } from "./filter-validate.ts"
 import type { FilterField } from "./filter-validate.ts"
+import { IsoInstant } from "./iso-date.ts"
 
 /** The one condition's value a valid filter types, or its errors */
 function typed(filter: string, fields: Record<string, FilterField>): unknown {
@@ -87,9 +88,13 @@ describe("validateFilter: an ISO 8601 date field", () => {
 			["2024-01-01T00:00+14:00", "2023-12-31T10:00:00.000Z"],
 			["2024-01-01T00:00:05.5-03:30", "2024-01-01T03:30:05.500Z"],
 		])
-			expect(typed(`due.gte.${raw}`, { due }), raw).toBe(instant)
+			expect(String(typed(`due.gte.${raw}`, { due })), raw).toBe(instant)
 		expect(typed("due.is.null", { due })).toBeNull()
 	})
+})
+
+describe("validateFilter: an ISO 8601 date field, refused or kept", () => {
+	const due = { format: "iso", type: "date" } as const
 
 	it("refuses a day the calendar has not, a bad time, and epoch milliseconds", () => {
 		for (const raw of [
@@ -114,5 +119,27 @@ describe("validateFilter: an ISO 8601 date field", () => {
 		expect(typed("due.eq.2024-02-29", { due: { type: "date" } })).toMatchObject({
 			errors: [expect.stringContaining("epoch milliseconds")],
 		})
+	})
+})
+
+/* Q4 of r17: the instant carries its milliseconds, and stays in the years toISOString writes in four digits */
+describe("validateFilter: an ISO 8601 date field's instant", () => {
+	const due = { format: "iso", type: "date" } as const
+
+	/* Q4 of r17: the instant carries its milliseconds, so no lowering reads its text back */
+	it("types the value as an IsoInstant, its epoch milliseconds and its text, which JSON writes as the text", () => {
+		const value = typed("due.gte.2024-01-01T01:00+01:00", { due })
+		expect(value).toBeInstanceOf(IsoInstant)
+		expect(value).toMatchObject({ ms: Date.UTC(2024, 0, 1), text: "2024-01-01T00:00:00.000Z" })
+		expect(JSON.stringify({ value })).toBe('{"value":"2024-01-01T00:00:00.000Z"}')
+	})
+
+	/* Q4 of r17: toISOString writes a year past 9999 or before 0000 in its expanded form, which sorts wrong as text */
+	it("refuses an instant its offset moves out of the years 0000 to 9999", () => {
+		for (const raw of ["0000-01-01T00:00+01:00", "9999-12-31T23:30-01:00"])
+			expect(typed(`due.lt.${raw}`, { due })).toEqual({
+				errors: [`Invalid value for 'due': expects an instant in the years 0000 to 9999, got '${raw}'`],
+			})
+		expect(String(typed("due.lt.0000-01-01T02:00+01:00", { due }))).toBe("0000-01-01T01:00:00.000Z")
 	})
 })

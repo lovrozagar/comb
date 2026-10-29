@@ -13,6 +13,7 @@ export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
 export { filterBySelect, parseSelect } from "./fields.ts";
 export { FILTER_LIMITS, FILTER_OPERATORS, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, } from "./filter.ts";
 export { escapeLike, globPattern, likePattern } from "./like.ts";
+export { IsoInstant } from "./iso-date.ts";
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts";
 export { createListQuerySchema, createRetrieveQuerySchema, type FieldsConfig, LIST_QUERY_LIMITS, type ListQueryConfig, type ListQueryLimits, type ListQueryOutput, PAGINATION_DEFAULTS, paginationResponseSchema, type RetrieveQueryConfig, type RetrieveQueryOutput, } from "./schema.ts";
 export { CURSOR_DESCRIPTION, CURSOR_EXAMPLES, filterParamMeta, LANG_DESCRIPTION, LANG_EXAMPLES, LIMIT_DESCRIPTION, LIMIT_EXAMPLES, orderParamMeta, PAGE_DESCRIPTION, PAGE_EXAMPLES, searchParamMeta, SELECT_DESCRIPTION, SELECT_EXAMPLES, } from "./descriptions.ts";
@@ -160,7 +161,7 @@ export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CU
  * Drizzle relational query helpers — thin abstraction for using
  * query-helpers with drizzle's relational query API.
  */
-import { type SQL } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { type CursorOptions } from "./cursor-seal.ts";
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts";
 import { type ListPagination, paginate } from "./pagination.ts";
@@ -280,6 +281,29 @@ declare const FIXED: RegExp;
 /** The pattern SQLite matches `value` with under `operator`, or null for a fixed text, which is found with none (U21) */
 declare const patternOf: (operator: "like" | "ilike", value: string) => string | null;
 export { escapeLike, FIXED, globPattern, likePattern, patternOf };
+
+// query/iso-date.d.ts
+/**
+ * An ISO 8601 date or date-time as an ISO date filter takes it (U35, Q5 of the 0.14.1 review): a
+ * real day and time by the proleptic Gregorian calendar, read as the instant it names in
+ * `toISOString()`'s form, so every spelling of one instant compares as one. A bare date is midnight
+ * UTC; a fraction past milliseconds is cut, as a JS Date holds none.
+ */
+/**
+ * An ISO date filter's value as validateFilter types it (Q4 of r17): the instant, by its epoch
+ * milliseconds and its `toISOString()` text, so a lowering binds the one its column stores and
+ * never reads the text back. It writes itself as its text, in a string and in JSON.
+ */
+declare class IsoInstant {
+    readonly ms: number;
+    readonly text: string;
+    constructor(ms: number);
+    toJSON(): string;
+    toString(): string;
+}
+/** `raw` as the instant it names; undefined for text that names no real day and time */
+declare function isoInstant(raw: string): IsoInstant | undefined;
+export { IsoInstant, isoInstant };
 
 // meta.d.ts
 /**

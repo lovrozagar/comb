@@ -91,10 +91,16 @@ function parseFilterNumber(raw: string): { value: number } | { error: string } {
 	return { value }
 }
 
-/** An ISO date field's value: the instant it names, in `toISOString()`'s form (Q5), or why it names none */
+/**
+ * An ISO date field's value: the instant it names (Q5 of the 0.14.1 review), or why it names none.
+ * One its offset moves out of the years 0000 to 9999 is refused (Q4 of r17): its text would be
+ * toISOString's expanded form, which no stored ISO text sorts beside
+ */
 function typedIsoDate(raw: string): Typed {
 	const value = isoInstant(raw)
-	return value === undefined ? { error: `expects an ISO 8601 date or date-time, got '${raw}'` } : { value }
+	if (value === undefined) return { error: `expects an ISO 8601 date or date-time, got '${raw}'` }
+	const year = new Date(value.ms).getUTCFullYear()
+	return year < 0 || year > 9999 ? { error: `expects an instant in the years 0000 to 9999, got '${raw}'` } : { value }
 }
 
 /** A date field's value: epoch milliseconds a JS Date holds */
