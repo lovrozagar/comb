@@ -167,8 +167,11 @@ function copyOf(dir: string): string {
 export async function cmdMigrate(argv: readonly string[], io: CliIo, help: string): Promise<void> {
 	const [command, ...rest] = argv
 	switch (command) {
+		/* a bare migrate names no command: it fails, with the commands to pick from (K19) */
 		case undefined:
+			throw new CliError(help)
 		case "help":
+		case "-h":
 		case "--help":
 			io.out(help)
 			return

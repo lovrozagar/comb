@@ -62,7 +62,7 @@ describe("runCli", () => {
 		const advertised = [...help.outputs.join("\n").matchAll(/(?:^|\s)(--?[a-z][\w-]*)/gm)].map((m) => m[1] as string)
 		expect(advertised.length).toBeGreaterThan(5)
 		for (const flag of new Set(advertised)) {
-			if (flag === "--help") continue
+			if (flag === "--help" || flag === "-h" || flag === "--version") continue
 			const io = makeIo(dir, () => ({ code: 1, stderr: "stop", stdout: "" }))
 			await runCli(["migrate", "apply", "core", flag, "x"], io)
 			await runCli(["codegen", flag, "x"], io)
@@ -74,6 +74,45 @@ describe("runCli", () => {
 		const { help } = await import("./run.ts")
 		const readme = readFileSync(join(import.meta.dirname, "../../../../README.md"), "utf8")
 		expect(readme).toContain(`\`\`\`\n${help()}\n\`\`\``)
+	})
+})
+
+/* P13 ⊃ K19 of the 0.15.0 review: -h, --version and a command's --help were refused, and a bare migrate exited 0 */
+describe("runCli: help and version", () => {
+	it.each([["-h"], ["--help"]])("prints the help on %j and returns 0", async (flag) => {
+		const { runCli } = await import("./run.ts")
+		const io = makeIo(project())
+		expect(await runCli([flag], io)).toBe(0)
+		expect(io.outputs.join("\n")).toContain("COMMANDS:")
+	})
+
+	it("prints the version on --version", async () => {
+		const { runCli } = await import("./run.ts")
+		const io = makeIo(project())
+		const { version } = JSON.parse(readFileSync(join(import.meta.dirname, "../../package.json"), "utf8")) as {
+			version: string
+		}
+		expect(await runCli(["--version"], io)).toBe(0)
+		expect(io.outputs).toEqual([version])
+	})
+
+	it.each([
+		[["migrate", "apply", "--help"], "Usage: comb migrate apply <database>"],
+		[["migrate", "status", "core", "-h"], "Usage: comb migrate status <database>"],
+		[["codegen", "--help"], "Usage: comb codegen [database...]"],
+	])("prints %j's own usage and returns 0", async (argv, usage) => {
+		const { runCli } = await import("./run.ts")
+		const io = makeIo(project())
+		expect(await runCli(argv, io)).toBe(0)
+		expect(io.outputs.join("\n")).toContain(usage)
+		expect(io.errors).toEqual([])
+	})
+
+	it("refuses a bare migrate with the migrate commands, returning 1", async () => {
+		const { runCli } = await import("./run.ts")
+		const io = makeIo(project())
+		expect(await runCli(["migrate"], io)).toBe(1)
+		expect(io.errors.join("\n")).toContain("migrate apply <db>")
 	})
 })
 

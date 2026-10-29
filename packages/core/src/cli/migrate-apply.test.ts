@@ -53,14 +53,18 @@ describe("migrate apply: arguments", () => {
 		const usage = io(dir)
 		expect(await runCli(["migrate", "apply"], usage)).toBe(1)
 		expect(usage.errors).toEqual([
-			"Usage: comb migrate apply <database> [-e <env>] [--dir <path>] [--file <path>] [--yes] [--local]",
+			"Usage: comb migrate apply <database> [-e <name>] [--dir <path>] [--file <path>] [-y] [--local] [--json]",
 		])
 		const baseline = io(dir)
 		expect(await runCli(["migrate", "baseline"], baseline)).toBe(1)
-		expect(baseline.errors).toEqual(["Usage: comb migrate baseline <database> [-e <env>] [--dir <path>] [--local]"])
+		expect(baseline.errors).toEqual([
+			"Usage: comb migrate baseline <database> [-e <name>] [--dir <path>] [--local] [--hashes]",
+		])
 		const check = io(dir)
 		expect(await runCli(["migrate", "check"], check)).toBe(1)
-		expect(check.errors).toEqual(["Usage: comb migrate check <database> [-e <env>] [--dir <path>] [--yes] [--local]"])
+		expect(check.errors).toEqual([
+			"Usage: comb migrate check <database> [-e <name>] [--dir <path>] [-y] [--local] [--json]",
+		])
 		const extra = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "blog"], extra)).toBe(1)
 		const { dir: configuredDir } = configured({})
@@ -323,6 +327,8 @@ describe("migrate status: comb's own history (M17)", () => {
 		expect(done.outputs).toEqual(["Applied: 1_a.sql, 2_b.sql", "Pending: none"])
 		const usage = io(dir)
 		expect(await runCli(["migrate", "status"], usage)).toBe(1)
-		expect(usage.errors).toEqual(["Usage: comb migrate status <database> [-e <env>] [--dir <path>]"])
+		expect(usage.errors).toEqual([
+			"Usage: comb migrate status <database> [-e <name>] [--dir <path>] [--local] [--json]",
+		])
 	})
 })

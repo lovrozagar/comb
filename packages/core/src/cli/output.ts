@@ -38,6 +38,17 @@ export class CliError extends Error {
 	}
 }
 
+/** A request for help: the CLI prints `text` on out and exits 0, wherever in argv -h or --help came */
+export class ShowHelp extends Error {
+	readonly text: string
+
+	constructor(text: string) {
+		super(text)
+		this.name = "ShowHelp"
+		this.text = text
+	}
+}
+
 type Terminal = {
 	input: NodeJS.ReadableStream & { isTTY?: boolean | undefined }
 	output: NodeJS.WritableStream

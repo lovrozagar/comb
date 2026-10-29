@@ -219,7 +219,8 @@ OPTIONS:
   --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline, migrate check, migrate status]
   --hashes                On D1: record the current hash of each applied file that has none (check the files against git first) [migrate baseline]
   --json                  Print one JSON object (database, applied, pending, refused) as the only stdout [migrate apply, migrate check, migrate status]
-  --help                  Show this help
+  -h, --help              Show this help
+  --version               Print comb's version
 ```
 
 The binary requires Bun — the shebang is `#!/usr/bin/env bun`, and `comb migrate diff` invokes `bun drizzle-kit export`.

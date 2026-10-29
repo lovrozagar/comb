@@ -39,8 +39,15 @@ function fakeAtlas(diff: (dir: string) => RunResult | undefined | void): Run & {
 }
 
 describe("comb migrate", () => {
-	it("prints the help without a subcommand", async () => {
-		for (const argv of [["migrate"], ["migrate", "help"], ["migrate", "--help"]]) {
+	it("prints the help for help or --help, and refuses no subcommand with it", async () => {
+		const bare = makeIo(project())
+		expect(await runCli(["migrate"], bare)).toBe(1)
+		expect(bare.errors).toEqual([help()])
+		for (const argv of [
+			["migrate", "help"],
+			["migrate", "--help"],
+			["migrate", "-h"],
+		]) {
 			const io = makeIo(project())
 			expect(await runCli(argv, io)).toBe(0)
 			expect(io.outputs).toEqual([help()])
@@ -50,7 +57,9 @@ describe("comb migrate", () => {
 	it("hands apply and baseline on, with their own usage", async () => {
 		const io = makeIo(project())
 		expect(await runCli(["migrate", "baseline"], io)).toBe(1)
-		expect(io.errors).toEqual(["Usage: comb migrate baseline <database> [-e <env>] [--dir <path>] [--local]"])
+		expect(io.errors).toEqual([
+			"Usage: comb migrate baseline <database> [-e <name>] [--dir <path>] [--local] [--hashes]",
+		])
 	})
 
 	it("returns 0 once apply or baseline is done", async () => {

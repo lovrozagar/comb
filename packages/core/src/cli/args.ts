@@ -2,7 +2,7 @@
  * The command line: every option comb takes, declared once. The parser reads argv against these
  * declarations and the help prints them, so the two cannot disagree.
  */
-import { CliError } from "./output.ts"
+import { CliError, ShowHelp } from "./output.ts"
 
 export type Command =
 	| "codegen"
@@ -90,6 +90,21 @@ const find = (flag: string) => OPTIONS.find((option) => option.long === flag || 
 
 type Reading = { argv: readonly string[]; at: number; command: Command; parsed: ParsedArgs }
 
+/**
+ * The option `flag` names, for the command `reading` reads: -h or --help shows its help, and one it
+ * does not take, does not know, or was given already is refused (P13, C10 of the 0.15.0 review: a
+ * second -g or --env replaced the first without a word)
+ */
+function optionOf(flag: string, reading: Reading): OptionSpec {
+	if (flag === "-h" || flag === "--help") throw new ShowHelp(commandHelp(reading.command))
+	const option = find(flag)
+	if (!option) throw new CliError(`Unknown option: ${flag}`)
+	if (!option.commands.includes(reading.command)) throw new CliError(`${flag} does not apply to ${reading.command}`)
+	if (Object.hasOwn(reading.parsed.options, option.long.slice(2)))
+		throw new CliError(`${option.long} is given twice; give it once`)
+	return option
+}
+
 /** Read the option at `reading.at`; returns how many arguments it took */
 function readOption(reading: Reading): number {
 	const arg = reading.argv[reading.at] as string
@@ -97,9 +112,7 @@ function readOption(reading: Reading): number {
 		arg.startsWith("--") && arg.includes("=")
 			? [arg.slice(0, arg.indexOf("=")), arg.slice(arg.indexOf("=") + 1)]
 			: [arg, undefined]
-	const option = find(flag as string)
-	if (!option) throw new CliError(`Unknown option: ${flag}`)
-	if (!option.commands.includes(reading.command)) throw new CliError(`${flag} does not apply to ${reading.command}`)
+	const option = optionOf(flag as string, reading)
 	const name = option.long.slice(2)
 	if (option.value === undefined) {
 		/* --yes=false would read as --yes, approving what its writer meant to refuse (P17) */
@@ -135,10 +148,49 @@ export function parseArgs(argv: readonly string[], command: Command): ParsedArgs
 const label = (option: OptionSpec) =>
 	`${option.short ? `${option.short}, ` : ""}${option.long}${option.value ? ` <${option.value}>` : ""}`
 
-/** The OPTIONS section of the help, from the same declarations the parser reads, then --help */
+/** Rows of a help's option table, each name padded to the widest */
+const table = (rows: ReadonlyArray<readonly [string, string]>): string[] => {
+	const width = Math.max(...rows.map(([name]) => name.length)) + 2
+	return rows.map(([name, text]) => `  ${name.padEnd(width)}${text}`)
+}
+
+const HELP_ROW = ["-h, --help", "Show this help"] as const
+
+/** The OPTIONS section of the help, from the same declarations the parser reads, then -h and --version */
 export function optionsHelp(): string[] {
-	const rows = OPTIONS.map((option) => [label(option), `${option.description} [${option.commands.join(", ")}]`])
-	rows.push(["--help", "Show this help"])
-	const width = Math.max(...rows.map(([name]) => (name as string).length)) + 2
-	return rows.map(([name, text]) => `  ${(name as string).padEnd(width)}${text}`)
+	return table([
+		...OPTIONS.map((option) => [label(option), `${option.description} [${option.commands.join(", ")}]`] as const),
+		HELP_ROW,
+		["--version", "Print comb's version"],
+	])
+}
+
+// lookup-table: what each command takes before its options
+const POSITIONALS: Readonly<Record<Command, string>> = {
+	codegen: "[database...]",
+	"migrate apply": "<database>",
+	"migrate baseline": "<database>",
+	"migrate check": "<database>",
+	"migrate diff": "<database> [name]",
+	"migrate init": "",
+	"migrate status": "<database>",
+}
+
+/** The options `command` takes, in the order OPTIONS declares them */
+const optionsOf = (command: Command): OptionSpec[] => OPTIONS.filter((option) => option.commands.includes(command))
+
+/** How a usage line names an option: its shortest spelling, and its value's placeholder */
+const brief = (option: OptionSpec) => `[${option.short ?? option.long}${option.value ? ` <${option.value}>` : ""}]`
+
+/** `command`'s usage line, built from what it takes (P13 of the 0.15.0 review) */
+export function usageOf(command: Command): string {
+	return ["Usage: comb", command, POSITIONALS[command], ...optionsOf(command).map(brief)]
+		.filter((part) => part !== "")
+		.join(" ")
+}
+
+/** `command`'s help: its usage, then each option it takes */
+export function commandHelp(command: Command): string {
+	const rows = optionsOf(command).map((option) => [label(option), option.description] as const)
+	return [usageOf(command), "", "Options:", ...table([...rows, HELP_ROW])].join("\n")
 }

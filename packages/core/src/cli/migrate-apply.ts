@@ -28,7 +28,7 @@ import { migrationHashes } from "../migrate/core/parse.ts"
 import { planApply, refuseSkipping } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import type { Connection } from "../migrate/types.ts"
-import { parseArgs, type ParsedArgs } from "./args.ts"
+import { parseArgs, type ParsedArgs, usageOf } from "./args.ts"
 import { openSqliteTarget, type SqliteTarget } from "./migrate-sqlite-target.ts"
 import { resolveMigrateTarget } from "./migrate-target.ts"
 import { Refused } from "../migrate/core/refused.ts"
@@ -219,17 +219,6 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	return { applied: pendingNames, pending: [] }
 }
 
-/** A mode's usage line: apply takes --file and --yes, check --yes, and every mode but status --local */
-function usage(mode: Mode): string {
-	const flags = {
-		apply: " [--file <path>] [--yes] [--local]",
-		baseline: " [--local]",
-		check: " [--yes] [--local]",
-		status: "",
-	}
-	return `Usage: comb migrate ${mode} <database> [-e <env>] [--dir <path>]${flags[mode]}`
-}
-
 /**
  * `migrate apply|baseline|check|status`. With --json the human lines go to stderr and stdout is
  * one JSON object: the database, the files applied (or found applied) and pending, and what was
@@ -238,7 +227,7 @@ function usage(mode: Mode): string {
 export async function migrateApply(mode: Mode, argv: readonly string[], io: CliIo): Promise<void> {
 	const args = parseArgs(argv, `migrate ${mode}`)
 	const [db] = args.positionals
-	if (db === undefined || args.positionals.length > 1) throw new CliError(usage(mode))
+	if (db === undefined || args.positionals.length > 1) throw new CliError(usageOf(`migrate ${mode}`))
 	if (args.options["json"] !== true) {
 		await runMode({ args, db, io, mode })
 		return

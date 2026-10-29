@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { OPTIONS, optionsHelp, parseArgs } from "./args.ts"
-import { CliError } from "./output.ts"
+import { commandHelp, OPTIONS, optionsHelp, parseArgs, usageOf } from "./args.ts"
+import { CliError, ShowHelp } from "./output.ts"
 
 describe("parseArgs", () => {
 	it("reads positionals, value options in both forms, short aliases and flags", () => {
@@ -38,7 +38,7 @@ describe("parseArgs: a flag given a value", () => {
 describe("optionsHelp", () => {
 	it("lists every declared option with its value, aliases and commands", () => {
 		const lines = optionsHelp()
-		expect(lines).toHaveLength(OPTIONS.length + 1)
+		expect(lines).toHaveLength(OPTIONS.length + 2)
 		expect(lines.find((line) => line.includes("--generator"))).toMatch(
 			/^ {2}-g, --generator <name> +Run one generator only \[codegen\]$/,
 		)
@@ -48,6 +48,41 @@ describe("optionsHelp", () => {
 		const migrating = /\[migrate apply, migrate baseline, migrate check, migrate status\]$/
 		expect(lines.find((line) => line.includes("--env"))).toMatch(migrating)
 		expect(lines.find((line) => line.includes("--dir"))).toMatch(migrating)
-		expect(lines.at(-1)).toMatch(/^ {2}--help +Show this help$/)
+		expect(lines.slice(-2)).toEqual([
+			expect.stringMatching(/^ {2}-h, --help +Show this help$/),
+			expect.stringMatching(/^ {2}--version +Print comb's version$/),
+		])
+	})
+})
+
+/* P13 ⊃ C10 of the 0.15.0 review: a second -g or --env replaced the first without a word */
+describe("parseArgs: an option given twice", () => {
+	it.each([
+		[["-g", "dtos", "-g", "manifest"], "codegen" as const, "--generator"],
+		[["db", "--env", "a", "-e", "b"], "migrate status" as const, "--env"],
+		[["db", "--yes", "-y"], "migrate apply" as const, "--yes"],
+	])("refuses %j, naming the option", (argv, command, option) => {
+		expect(() => parseArgs(argv, command)).toThrow(`${option} is given twice; give it once`)
+	})
+})
+
+/* P13 ⊃ K19: -h and --help at any position print that command's usage, built from OPTIONS */
+describe("parseArgs: -h and --help", () => {
+	it.each([["--help"], ["db", "-h"], ["-e", "x", "--help", "db"]])("shows the command's help for %j", (...argv) => {
+		expect(() => parseArgs(argv, "migrate status")).toThrow(ShowHelp)
+	})
+
+	it("builds a command's usage and options from what it takes", () => {
+		expect(usageOf("migrate status")).toBe(
+			"Usage: comb migrate status <database> [-e <name>] [--dir <path>] [--local] [--json]",
+		)
+		expect(usageOf("migrate diff")).toBe("Usage: comb migrate diff <database> [name] [--dry-run]")
+		expect(commandHelp("migrate init").split("\n")).toEqual([
+			"Usage: comb migrate init [--dialect <name>]",
+			"",
+			"Options:",
+			"  --dialect <name>  The project's dialect: sqlite (default) or postgres",
+			"  -h, --help        Show this help",
+		])
 	})
 })

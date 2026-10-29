@@ -2,10 +2,11 @@
  * Comb CLI: database codegen and the migration toolkit, run in process by `runCli(argv, io)`.
  * The binary (src/bin.ts) hands it the process's argv and IO.
  */
+import { readFileSync } from "node:fs"
 import { optionsHelp } from "./args.ts"
 import { cmdCodegen } from "./codegen.ts"
 import { cmdMigrate } from "./migrate.ts"
-import { CliError, type CliIo } from "./output.ts"
+import { CliError, type CliIo, ShowHelp } from "./output.ts"
 
 const COMMANDS: ReadonlyArray<[string, string]> = [
 	["codegen [db...]", "Run codegen for the databases in comb.config.ts (all, or those named)"],
@@ -30,13 +31,21 @@ export const help = (): string =>
 		...optionsHelp(),
 	].join("\n")
 
+/** comb's version, read from its package.json */
+const version = (): string =>
+	(JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }).version
+
 async function dispatch(argv: readonly string[], io: CliIo): Promise<void> {
 	const [command, ...rest] = argv
 	switch (command) {
 		case undefined:
 		case "help":
+		case "-h":
 		case "--help":
 			io.out(help())
+			return
+		case "--version":
+			io.out(version())
 			return
 		case "codegen":
 			await cmdCodegen(rest, io)
@@ -55,6 +64,10 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 		await dispatch(argv, io)
 		return 0
 	} catch (error) {
+		if (error instanceof ShowHelp) {
+			io.out(error.text)
+			return 0
+		}
 		io.err(error instanceof Error ? error.message : String(error))
 		return error instanceof CliError ? error.exitCode : 1
 	}
