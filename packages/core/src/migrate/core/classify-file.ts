@@ -85,11 +85,21 @@ const outsideTransaction = (sql: string): boolean => {
 /** A statement as the gate read it: its code, its text, and the dialect it was read as */
 type ReadStatement = { code: string; dialect: Dialect; stmt: string }
 
+/** SQLite's transaction control at the top of a file, but a rollback to a savepoint, which nests */
+const SQLITE_TRANSACTION = /^(?:BEGIN|COMMIT|END|START TRANSACTION)\b|^ROLLBACK(?: TRANSACTION)?$/i
+
 /** Refuses a statement that cannot run in its file `sql`: no `-- comb:allow-unsafe:` overrides this */
 function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): void {
 	if (dialect === "sqlite" && /^VACUUM\b/i.test(code)) {
 		throw new Error(
 			`${preview(stmt)}: VACUUM cannot run inside a migration's transaction; run it outside the migrations`,
+		)
+	}
+	/* S1 of the 0.15.0 review: the file's own BEGIN or COMMIT ends the batch that records it, so a
+	   later failure leaves what ran before it committed with no history row, to run again */
+	if (dialect === "sqlite" && SQLITE_TRANSACTION.test(code)) {
+		throw new Error(
+			`${preview(stmt)}: comb runs each file in a transaction of its own; remove the file's BEGIN, COMMIT, END and ROLLBACK (a SAVEPOINT nests inside it)`,
 		)
 	}
 	if (dialect === "postgres" && NO_TRANSACTION.test(code) && !outsideTransaction(sql)) {

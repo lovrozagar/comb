@@ -24,6 +24,29 @@ describe("classifyMigration on a statement that runs only outside a transaction"
 	})
 })
 
+/* S1 of the 0.15.0 review: a file's own transaction control ends the batch that records it */
+describe("classifyMigration on SQLite transaction control", () => {
+	it.each([
+		"INSERT INTO post (body) VALUES ('x');\nCOMMIT;\nBEGIN;\nCREATE UNIQUE INDEX u ON post (body);",
+		"CREATE TABLE z (id INTEGER PRIMARY KEY);\nCOMMIT TRANSACTION;",
+		"END;\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nBEGIN;",
+		"BEGIN IMMEDIATE;\nCREATE TABLE z (id INTEGER PRIMARY KEY);",
+		"CREATE TABLE z (id INTEGER PRIMARY KEY);\nROLLBACK;",
+		"CREATE TABLE z (id INTEGER PRIMARY KEY);\nROLLBACK TRANSACTION;",
+		"START TRANSACTION;\nCREATE TABLE z (id INTEGER PRIMARY KEY);",
+		"-- comb:allow-unsafe: wrapped by hand\nBEGIN TRANSACTION;\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nCOMMIT;",
+	])("refuses %j, whatever the approval", (sql) => {
+		expect(() => lite(sql)).toThrow("comb runs each file in a transaction of its own")
+	})
+
+	it("rates a savepoint, its release and a rollback to it, which nest inside the file's transaction", () => {
+		expect(
+			lite("SAVEPOINT s;\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nROLLBACK TRANSACTION TO SAVEPOINT s;\nRELEASE s;")
+				.safety,
+		).toBe("safe")
+	})
+})
+
 describe("classifyMigration on comb's FTS regroup", () => {
 	it("calls the drop of an external-content FTS index cautious when the file creates it again and rebuilds it", () => {
 		const regroup = `DROP TRIGGER IF EXISTS post_fts_ai;

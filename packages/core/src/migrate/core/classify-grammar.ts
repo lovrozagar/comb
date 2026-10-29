@@ -8,7 +8,7 @@
  * Recognized: tables, indexes, views, virtual tables, schemas, sequences, types, domains,
  * extensions and comments made; ALTER TABLE (its actions read by classify-alter.ts); the drops the
  * rules rate; grants; INSERT, UPDATE, DELETE, REPLACE, MERGE and SELECT; SET and RESET; the two
- * foreign-key pragmas; transaction control; ANALYZE, REINDEX, VACUUM and CLUSTER; CALL; policies
+ * foreign-key pragmas; savepoints, and Postgres's transaction control (SQLite's is refused); ANALYZE, REINDEX, VACUUM and CLUSTER; CALL; policies
  * made, altered or dropped, which are cautious: a policy destroys no value, it changes which rows
  * a role sees, and it can be reversed. Not recognized, so unsafe: triggers, functions, procedures
  * and rules (made, replaced, altered or dropped), DO blocks, and every other pragma. The one trigger shape comb recognizes is
@@ -44,10 +44,13 @@ const RECOGNIZED = [
 	/^(?:INSERT|UPDATE|DELETE|REPLACE|MERGE|SELECT|WITH|VALUES|CALL)\b/i,
 	/^(?:SET|RESET)\b/i,
 	/^PRAGMA (?:main\.)?(?:defer_foreign_keys|foreign_keys) ?= ?(?:on|off|true|false|0|1)$/i,
-	/^(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE|START TRANSACTION)\b/i,
+	/^(?:SAVEPOINT|RELEASE|ROLLBACK(?: TRANSACTION)? TO)\b/i,
 	/^(?:ANALYZE|ANALYSE|REINDEX|VACUUM|CLUSTER)\b/i,
 	/^(?:CREATE|ALTER|DROP) POLICY\b/i,
 ]
+
+/* Postgres's transaction control, which an `-- atlas:txmode none` file runs; SQLite's is refused (classify-file.ts) */
+const PG_TRANSACTION = /^(?:BEGIN|COMMIT|END|ROLLBACK|START TRANSACTION)\b/i
 
 /* recognized, and cautious: an extension's install or upgrade script runs as the migrating role,
    and a new owner bypasses row level security (an ALTER TABLE's OWNER TO is classify-alter.ts's) */
@@ -127,7 +130,8 @@ function kindOf(code: string): string {
 function grammarFindings(statement: string, ctx: GrammarContext): Finding[] {
 	/* an EXPLAIN is the statement it explains (ANALYZE runs it) */
 	const code = statement.replace(/^EXPLAIN (?:\([^)]*\) )?(?:(?:ANALYZE|ANALYSE|VERBOSE) )*/i, "")
-	if (!RECOGNIZED.some((shape) => shape.test(code)) && !isFtsSync(code, ctx))
+	const recognized = ctx.dialect === "postgres" ? [...RECOGNIZED, PG_TRANSACTION] : RECOGNIZED
+	if (!recognized.some((shape) => shape.test(code)) && !isFtsSync(code, ctx))
 		return [{ level: "unsafe", note: `comb does not recognize ${kindOf(code)}; approve it in the file` }]
 	const policy = policyNote(code)
 	/* a policy renamed keeps its roles and its predicate */
