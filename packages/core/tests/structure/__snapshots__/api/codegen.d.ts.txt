@@ -265,13 +265,15 @@ import type { ConstantValue, FieldConstraintsMeta } from "./analyzer-types.ts";
 export type FieldConstraints = FieldConstraintsMeta;
 /**
  * A field's constraints from the record its column helper was given, every key one the column
- * types allow and a pattern one comb can emit; an error at `place` otherwise. `filled` says what
- * fills the column, never its name (F13): comb's own timestamp helpers, or a timestamp's default
- * or update hook; a column named createdAt that nothing fills is the caller's to give
+ * types allow, a pattern one comb can emit and bounds that hold a value; an error at `place`
+ * otherwise. `filled` says what fills the column, never its name (F13): comb's own timestamp
+ * helpers, or a timestamp's default or update hook; a column named createdAt that nothing fills is
+ * the caller's to give. `measure` says whether min and max bound a length (text) or a value
  */
-export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, filled, place }: {
+export declare function fieldConstraintsOf(constraints: Readonly<Record<string, ConstantValue>>, { fieldName, filled, measure, place, }: {
     fieldName: string;
     filled: boolean;
+    measure: "length" | "value";
     place: string;
 }): FieldConstraints;
 

@@ -153,6 +153,16 @@ function combFactsOf(
 	}
 }
 
+/* the c helpers whose values are text, whose min and max bound a length */
+// lookup-table: measuredBy's text kinds
+const TEXT_KINDS: ReadonlySet<CombColumnKind> = /* @__PURE__ */ new Set<CombColumnKind>(["enum", "id", "ref", "text"])
+
+/** Whether a column's min and max bound its length (text, a numeric column's digits aside) or its value */
+const measuredBy = (column: SnapshotColumn, kind: CombColumnKind | null): "length" | "value" =>
+	(kind === null ? column.dataType.startsWith("string") && column.dataType !== "string numeric" : TEXT_KINDS.has(kind))
+		? "length"
+		: "value"
+
 /** One column as FieldMeta; a constraint comb cannot honour, or a column it cannot type, is an error naming it */
 function fieldOf(column: SnapshotColumn, { file, table, tables }: Build): FieldMeta {
 	const kind = (column.comb?.kind ?? null) as CombColumnKind | null
@@ -162,7 +172,12 @@ function fieldOf(column: SnapshotColumn, { file, table, tables }: Build): FieldM
 			`${place}: comb has no rule for a ${column.columnType} column (${column.dataType}); build it with a c helper, or as drizzle ${TYPED_COLUMNS[table.dialect]}`,
 		)
 	const filled = isFilled(column, kind)
-	const constraints = fieldConstraintsOf(column.comb?.constraints ?? {}, { fieldName: column.key, filled, place })
+	const constraints = fieldConstraintsOf(column.comb?.constraints ?? {}, {
+		fieldName: column.key,
+		filled,
+		measure: measuredBy(column, kind),
+		place,
+	})
 	if (constraints.mutable && column.foreignKey === null && kind !== "ref")
 		throw new Error(`${place}: mutable lets a reference move on update, and ${column.key} references nothing`)
 	if (constraints.relation !== null && column.foreignKey === null)

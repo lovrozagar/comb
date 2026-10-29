@@ -137,3 +137,25 @@ describe("parseFieldConstraints: a key's relation", () => {
 			)
 	})
 })
+
+/* C1, C4 of r17: every declared bound is checked once, where it is read, naming the column */
+describe("parseFieldConstraints: bounds", () => {
+	const at = "/fixture/db.core.tables.ts: fixture.f"
+
+	it.each([
+		['c.text("t", { min: 10, max: 2 })', "min 10 is past max 2: no value is both"],
+		['c.real("r", { min: 5, max: 1 })', "min 5 is past max 1: no value is both"],
+		['c.text("t", { min: -1, max: 3 })', "min -1 is no length: a length is a whole number from 0"],
+		['c.text("t", { max: 2.5 })', "max 2.5 is no length: a length is a whole number from 0"],
+		['c.json("j", schema, { maxBytes: -1 })', "maxBytes -1 is no size: it is a whole number from 1"],
+		['c.json("j", schema, { maxBytes: 0.5 })', "maxBytes 0.5 is no size: it is a whole number from 1"],
+	])("refuses %s", (source, reason) => {
+		expect(() => parseFieldConstraints(source)).toThrow(`${at}: ${reason}`)
+	})
+
+	it("takes bounds that hold a value: equal, fractional on a number, a length from 0", () => {
+		expect(parseFieldConstraints('c.text("t", { min: 0, max: 0 })')).toMatchObject({ max: 0, min: 0 })
+		expect(parseFieldConstraints('c.real("r", { min: -1.5, max: 2.5 })')).toMatchObject({ max: 2.5, min: -1.5 })
+		expect(parseFieldConstraints('c.json("j", schema, { maxBytes: 1 })').maxBytes).toBe(1)
+	})
+})
