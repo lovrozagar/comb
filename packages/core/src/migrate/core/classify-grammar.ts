@@ -136,6 +136,8 @@ const DENIED =
  * another reading may describe as well; else that it does not recognize it (S10, P16 of the 0.15.0 review)
  */
 function unrecognized(code: string): string {
+	/* a pragma comb does not write is rated by its own rule too (classify-runtime.ts), never "not recognized" */
+	if (/^PRAGMA\b/i.test(code)) return "comb rates every pragma it does not write unsafe; approve it in the file"
 	const [, family, block] = DENIED.exec(code) ?? []
 	if (block !== undefined) return "comb rates every DO block unsafe; approve it in the file"
 	if (family !== undefined) return `comb rates every ${family.toLowerCase()} change unsafe; approve it in the file`

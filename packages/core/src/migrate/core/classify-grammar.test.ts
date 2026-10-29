@@ -103,6 +103,9 @@ describe("default-deny's rule for triggers and routines, named as the rule", () 
 		["CREATE TRIGGER t AFTER INSERT ON users BEGIN DELETE FROM users; END;", "comb rates every trigger change unsafe"],
 		["CREATE TEMP TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END;", "comb rates every trigger change unsafe"],
 		["DROP TRIGGER t;", "comb rates every trigger change unsafe"],
+		/* the rerun of S10 on the RC: a pragma comb does not write, rated by its own rule too */
+		["PRAGMA writable_schema = ON;", "comb rates every pragma it does not write unsafe"],
+		["PRAGMA journal_mode = WAL;", "comb rates every pragma it does not write unsafe"],
 	])("rates %j unsafe by the rule, on SQLite", (sql, rule) => {
 		const notes = rate(sql, USERS).unsafeStatements.join("\n")
 		expect(notes).toContain(`${rule}; approve it in the file`)
