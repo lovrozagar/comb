@@ -146,9 +146,9 @@ describe("ShardRouter — resolve and invalidate", () => {
 		const router = new ShardRouter({ totalShards: 4 })
 		const kv = mockKV()
 		await router.invalidate("org-1", kv)
-		/* a tombstone for the TTL, which a fill that read the core table before it does not overwrite (U33) */
-		expect(kv.put).toHaveBeenCalledWith("shard-inv:org-1", expect.stringMatching(/^\{"invalidatedAt":\d+\}$/), {
-			expirationTtl: 60,
+		/* a tombstone for 3 × kvTtlSeconds, carrying the nonce a mapping must be tagged with while it lives */
+		expect(kv.put).toHaveBeenCalledWith("shard-inv:org-1", expect.stringMatching(/^\{"nonce":"[0-9a-f-]{36}"\}$/), {
+			expirationTtl: 180,
 		})
 	})
 
@@ -313,8 +313,8 @@ describe("ShardRouter — allocation races and cache priming", () => {
 		/* KV write is handed to waitUntil, not awaited inline */
 		expect(calls.length).toBeGreaterThan(0)
 		await Promise.all(calls)
-		/* KV keeps when the fill read the core table, which the isolate that invalidates reads (U33) */
-		expect(await d.kv.get("shard:org-5", "json")).toEqual({ ...mapping, readAt: expect.any(Number) })
+		/* no tombstone fenced the write, so KV keeps the mapping untagged */
+		expect(await d.kv.get("shard:org-5", "json")).toEqual(mapping)
 		/* the LRU now answers without a new cache write */
 		await router.resolve("org-5", d, ctx)
 		expect(calls).toHaveLength(1)
@@ -331,7 +331,7 @@ describe("ShardRouter — allocation races and cache priming", () => {
 
 		await Promise.all(calls)
 		await router.invalidate("org-6", d.kv)
-		expect(await d.kv.get("shard-inv:org-6", "json")).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(await d.kv.get("shard-inv:org-6", "json")).toEqual({ nonce: expect.any(String) })
 	})
 })
 
@@ -367,7 +367,7 @@ describe("ShardRouter — the core database tier", () => {
 		} as unknown as typeof d.kv
 		expect(await router.resolve("org-d1", { coreDb: d.coreDb, kv }, ctx)).toMatchObject({ shardId: 1 })
 		await Promise.all(calls)
-		expect(await d.kv.get("shard-inv:org-d1", "json")).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(await d.kv.get("shard-inv:org-d1", "json")).toEqual({ nonce: expect.any(String) })
 	})
 
 	it("carries the session bookmark on what it allocates and what it reads, none when D1 has none", async () => {
@@ -428,7 +428,7 @@ describe("ShardRouter — revalidation from the core database", () => {
 		expect(await router.resolve("org-d1", d, ctx)).toMatchObject({ shardId: 1 })
 		await Promise.all(calls.splice(0))
 		expect(await router.resolve("org-d1", d, ctx)).toBeUndefined()
-		expect(await d.kv.get("shard-inv:org-d1", "json")).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(await d.kv.get("shard-inv:org-d1", "json")).toEqual({ nonce: expect.any(String) })
 	})
 })
 

@@ -120,7 +120,8 @@ describe("stale cache hits (SWR)", () => {
 		} as KVNamespace
 		await Promise.all(Array.from({ length: 5 }, () => shared.resolve("org_3", { ...deps, kv: counting }, ctx)))
 		await settle()
-		expect(reads).toBe(1)
+		/* one revalidation: one KV lookup, the mapping's key and the tombstone's read together */
+		expect(reads).toBe(2)
 	})
 })
 

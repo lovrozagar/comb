@@ -10,7 +10,6 @@ import {
 	insertFirst,
 	overwrite,
 	pickShard,
-	readLive,
 	readLiveRow,
 	type ShardRow,
 	softDelete,
@@ -87,19 +86,17 @@ class ShardRouter {
 			return lruResult.value
 		}
 
-		/* L2: KV */
+		/* L2: KV, trusted as its tombstone, if any, says */
 		const generation = this.cache.generationOf(orgId)
-		/* readKv answers only a mapping read from the core table after every invalidate here, one during its read included */
-		const kvValue = await this.cache.readKv(orgId, deps.kv)
+		const { fence, mapping: kvValue } = await this.cache.readKv(orgId, deps.kv)
 		if (kvValue) {
 			this.log("shard-router.hit", { orgId, tier: "kv" })
 			this.cache.lru.set(orgId, kvValue)
 			return kvValue
 		}
 
-		/* L3: Core D1, unless the primary missed it just now */
-		const readAt = Date.now()
-		const mapping = this.cache.misses.get(orgId) ? undefined : await readLive(deps.coreDb, orgId)
+		/* L3: Core D1, the primary's when a tombstone fences it, unless the primary missed it just now */
+		const mapping = this.cache.misses.get(orgId) ? undefined : await ShardCache.readCore(deps.coreDb, orgId, fence)
 		if (!mapping) {
 			this.log("shard-router.miss", { orgId })
 			if (this.cache.generationOf(orgId) === generation) this.cache.misses.set(orgId, true)
@@ -107,7 +104,7 @@ class ShardRouter {
 		}
 		this.log("shard-router.hit", { orgId, tier: "d1" })
 		if (this.cache.generationOf(orgId) === generation)
-			this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv, readAt })
+			this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv, tag: fence })
 		return mapping
 	}
 
@@ -125,11 +122,11 @@ class ShardRouter {
 	): Promise<ShardMapping | undefined> {
 		const cached = await this.resolve(orgId, deps, executionCtx)
 		if (!cached || (await deps.present(cached))) return cached
-		const readAt = Date.now()
+		/* invalidated first, so the primary's mapping is read after the tombstone and tagged with it */
+		const tag = await this.cache.invalidate(orgId, deps.kv)
 		const { mapping } = await readLiveRow(deps.coreDb, orgId, "first-primary")
 		this.log("shard-router.reresolve", { from: cached.shardId, orgId, to: mapping?.shardId })
-		await this.invalidate(orgId, deps.kv)
-		if (mapping) this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv, readAt })
+		if (mapping) this.cache.populate(orgId, mapping, { executionCtx, kv: deps.kv, tag })
 		return mapping
 	}
 
@@ -169,10 +166,10 @@ class ShardRouter {
 		assertOrgId(orgId)
 		assertShard(shardId, this.totalShards)
 		const { client, session } = openD1Session(deps.coreDb)
-		const readAt = Date.now()
 		const row = await overwrite(client, placement)
-		await this.invalidate(orgId, deps.kv)
-		return this.settle(row, "move", { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv, readAt })
+		/* the tombstone after the commit, then the moved row warms KV tagged with it */
+		const tag = await this.cache.invalidate(orgId, deps.kv)
+		return this.settle(row, "move", { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv, tag })
 	}
 
 	/** Soft-delete an org's mapping and invalidate it here; a later allocate or place revives it on its shard */
@@ -210,9 +207,8 @@ class ShardRouter {
 		executionCtx: WaitUntilCtx,
 	): Promise<ShardMapping> {
 		const { client, session } = openD1Session(deps.coreDb)
-		const readAt = Date.now()
 		const { how, row } = await insertFirst(drizzle(client), orgId, shardId)
-		const targets = { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv, readAt }
+		const targets = { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv, tag: null }
 		return this.settle(row, how, targets)
 	}
 

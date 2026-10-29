@@ -336,7 +336,8 @@ describe("ShardRouter: an org id longer than the column", () => {
 		expect(coreDb.withSession).not.toHaveBeenCalled()
 		expect(log).toHaveBeenCalledWith("shard-router.miss", { orgId: "o".repeat(65) })
 		expect(await router.resolve("o".repeat(64), { coreDb, kv }, ctx)).toBeUndefined()
-		expect(kv.get).toHaveBeenCalledTimes(1)
+		/* the mapping's key and the tombstone's, read together */
+		expect(kv.get).toHaveBeenCalledTimes(2)
 	})
 
 	/* a row resolve can never find must not be written: the same bound, in the same UTF-16 units */

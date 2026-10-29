@@ -35,15 +35,15 @@ const cacheOf = () => new ShardCache({ totalShards: 3 }, { kvTtlSeconds: 60, log
 describe("ShardCache", () => {
 	it("fills this isolate's LRU and KV, and forgets both on invalidate, counting the generation", async () => {
 		const [cache, kv, { ctx, settle }] = [cacheOf(), memoryKv(), context()]
-		cache.populate("org-1", mapping(1, 10), { executionCtx: ctx, kv, readAt: Date.now() })
+		cache.populate("org-1", mapping(1, 10), { executionCtx: ctx, kv, tag: null })
 		await settle()
 		expect(cache.lru.getWithMeta("org-1")?.value.shardId).toBe(1)
 		expect((JSON.parse(kv.store.get("shard:org-1") as string) as ShardMapping).shardId).toBe(1)
 		cache.misses.set("org-1", true)
-		await cache.invalidate("org-1", kv)
+		const nonce = await cache.invalidate("org-1", kv)
 		expect([cache.lru.getWithMeta("org-1"), cache.misses.get("org-1")]).toEqual([undefined, undefined])
 		expect(kv.store.has("shard:org-1")).toBe(false)
-		expect(JSON.parse(kv.store.get("shard-inv:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(JSON.parse(kv.store.get("shard-inv:org-1") as string)).toEqual({ nonce })
 		expect(cache.generationOf("org-1")).toBe(1)
 	})
 
@@ -57,43 +57,58 @@ describe("ShardCache", () => {
 		expect(cache.lru.getWithMeta("org-1")?.value.shardId).toBe(2)
 	})
 
-	/* G2 of plan 14: a fill whose KV reads came before this isolate's invalidate landed puts nothing after it */
-	it("puts nothing once the org was invalidated here while its fill read KV", async () => {
-		const [cache, store, { ctx, settle }] = [cacheOf(), memoryKv(), context()]
-		const gated: { release?: () => void } = {}
-		const gate = new Promise<void>((resolve) => (gated.release = resolve))
-		/* the invalidate's tombstone is still in flight while the fill reads both keys empty */
+	/* a fill that read before this isolate's invalidate lands after it, while KV shows the tombstone nowhere yet */
+	it("distrusts here a fill that lands over its own invalidate before KV shows the tombstone", async () => {
+		const [cache, store] = [cacheOf(), memoryKv()]
 		const kv: ShardKv = {
 			...store,
-			put: async (key, value) => {
-				if (key.startsWith("shard-inv:")) await gate
-				await store.put(key, value)
-			},
+			put: async (key, value) => void (key.startsWith("shard:") && store.put(key, value)),
 		}
-		cache.populate("org-1", mapping(1, 10), { executionCtx: ctx, kv, readAt: Date.now() })
-		const invalidating = cache.invalidate("org-1", kv)
-		await settle()
-		expect(store.store.has("shard:org-1")).toBe(false)
-		gated.release?.()
-		await invalidating
-		expect(JSON.parse(store.store.get("shard-inv:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		const nonce = await cache.invalidate("org-1", kv)
+		store.store.set("shard:org-1", JSON.stringify(mapping(0, 10)))
+		expect(await cache.readKv("org-1", store)).toEqual({ fence: nonce, mapping: null })
 	})
 })
 
-/* G2 of plan 14 (U33): the isolate that invalidated an org trusts no KV entry read from the core table before it */
+/* Q7, C1 of the 0.14.1 review: which KV mapping a reader trusts, by the tombstone's nonce and no clock */
+/** KV holding org-1's tombstone, carrying `nonce` */
+const tombstone = (kv: ReturnType<typeof memoryKv>, nonce: string) =>
+	kv.store.set("shard-inv:org-1", JSON.stringify({ nonce }))
+
+/** KV holding org-1's mapping, tagged with `tag` when one is given */
+const held = (kv: ReturnType<typeof memoryKv>, tag?: string) =>
+	kv.store.set("shard:org-1", JSON.stringify({ ...mapping(1, 10), ...(tag === undefined ? {} : { tag }) }))
+
 describe("ShardCache.readKv", () => {
-	it("is a miss for an entry read at or before this isolate's invalidate, and a hit for one read after", async () => {
+	it("trusts any mapping with no tombstone, a 0.14 fill's readAt left out", async () => {
 		const [cache, kv] = [cacheOf(), memoryKv()]
-		const at = (readAt: number) => kv.store.set("shard:org-1", JSON.stringify({ ...mapping(1, 10), readAt }))
-		at(1)
-		expect(await cache.readKv("org-1", kv)).toEqual(mapping(1, 10))
-		await cache.invalidate("org-1", kv)
-		const invalidatedAt = Date.now()
-		at(invalidatedAt - 1)
-		expect(await cache.readKv("org-1", kv)).toBeNull()
-		at(invalidatedAt + 1)
-		expect(await cache.readKv("org-1", kv)).toEqual(mapping(1, 10))
-		kv.store.set("shard:org-1", JSON.stringify(mapping(1, 10)))
-		expect(await cache.readKv("org-1", kv)).toBeNull()
+		kv.store.set("shard:org-1", JSON.stringify({ ...mapping(1, 10), readAt: 5 }))
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: null, mapping: mapping(1, 10) })
+	})
+
+	it("trusts, while a tombstone lives, only a mapping tagged with its nonce", async () => {
+		const [cache, kv] = [cacheOf(), memoryKv()]
+		tombstone(kv, "n-1")
+		held(kv)
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-1", mapping: null })
+		held(kv, "n-0")
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-1", mapping: null })
+		held(kv, "n-1")
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-1", mapping: mapping(1, 10) })
+	})
+
+	it("trusts none while this isolate's tombstone and KV's differ, fencing by KV's", async () => {
+		const [cache, kv] = [cacheOf(), memoryKv()]
+		const mine = await cache.invalidate("org-1", kv)
+		held(kv, mine)
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: mine, mapping: mapping(1, 10) })
+		tombstone(kv, "n-other")
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: "n-other", mapping: null })
+	})
+
+	it("is no mapping where 0.14.0 left its tombstone in the mapping's key", async () => {
+		const [cache, kv] = [cacheOf(), memoryKv()]
+		kv.store.set("shard:org-1", JSON.stringify({ invalidatedAt: 5000 }))
+		expect(await cache.readKv("org-1", kv)).toEqual({ fence: null, mapping: null })
 	})
 })
