@@ -91,6 +91,9 @@ describe("default-deny: the 0.10 review's bypasses are unsafe (M1–M6)", () => 
 		expect(rate("CREATE TEMP FOO x;", USERS).unsafeStatements).toEqual([
 			"CREATE TEMP FOO x (comb does not recognize CREATE FOO; approve it in the file)",
 		])
+		expect(
+			rate("CREATE OR REPLACE AGGREGATE a (int) (SFUNC = f, STYPE = int);", USERS, "postgres").unsafeStatements.join(),
+		).toContain("comb does not recognize CREATE OR REPLACE AGGREGATE; approve it in the file")
 	})
 })
 
