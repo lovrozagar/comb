@@ -73,6 +73,12 @@ export const WORKER_TYPES = `${RUNTIME.map((spec, i) => `import type * as m${i} 
 export type All = [${RUNTIME.map((_, i) => `typeof m${i}`).join(", ")}]
 `
 
+/** A module that exports list and retrieve schemas, their types inferred, as an app's route module does (K11 of r17) */
+export const SCHEMAS = `import { createListQuerySchema, createRetrieveQuerySchema } from "@lovrozagar/comb/query"
+export const listSchema = createListQuerySchema({ sort: ["created_at"] })
+export const retrieveSchema = createRetrieveQuerySchema({ fields: { scalars: ["id"] } })
+`
+
 const STRICT = {
 	exactOptionalPropertyTypes: true,
 	noPropertyAccessFromIndexSignature: true,
@@ -87,6 +93,7 @@ const STRICT = {
 export const APP: Record<string, string> = {
 	"src/count-eval.ts": COUNT_EVAL,
 	"src/no-eval.ts": NO_EVAL_WORKER,
+	"src/schemas.ts": SCHEMAS,
 	"src/types.ts": ALL_TYPES,
 	"src/worker-types.ts": WORKER_TYPES,
 	"src/worker.ts": WORKER,
@@ -112,6 +119,19 @@ export const APP: Record<string, string> = {
 			rootDir: "src",
 		},
 		include: ["src/types.ts"],
+	}),
+	/* declarations emitted for a module that exports comb's schemas: each type has a public name (K11 of r17) */
+	"tsconfig.declarations.json": JSON.stringify({
+		compilerOptions: {
+			...STRICT,
+			allowImportingTsExtensions: true,
+			declaration: true,
+			emitDeclarationOnly: true,
+			module: "esnext",
+			moduleResolution: "bundler",
+			outDir: "decl",
+		},
+		include: ["src/schemas.ts"],
 	}),
 	/* a stock Worker project: no DOM, workers-types alone, as \`wrangler types\` sets it up (K1 of r17) */
 	"tsconfig.worker.json": JSON.stringify({

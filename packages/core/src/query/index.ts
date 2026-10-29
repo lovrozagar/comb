@@ -55,10 +55,12 @@ export {
 	type ListQueryConfig,
 	type ListQueryLimits,
 	type ListQueryOutput,
+	type ListQuerySchema,
 	PAGINATION_DEFAULTS,
 	paginationResponseSchema,
 	type RetrieveQueryConfig,
 	type RetrieveQueryOutput,
+	type RetrieveQuerySchema,
 } from "./schema.ts"
 
 /* OpenAPI description / example constants for reuse by downstream schemas */

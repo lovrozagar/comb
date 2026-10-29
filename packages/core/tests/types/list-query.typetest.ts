@@ -7,7 +7,7 @@ import * as z from "zod"
 import { createListQuerySchema, createRetrieveQuerySchema } from "../../src/query/schema.ts"
 import type { ListQueryOutput } from "../../src/query/schema-types.ts"
 import type { FilterAST, ParsedFields, SortField } from "../../src/query/types.ts"
-import type { ListQueryInput } from "../../src/query/index.ts"
+import type { ListQueryInput, ListQuerySchema, RetrieveQuerySchema } from "../../src/query/index.ts"
 import { applyListQuery, buildListQuery, type ListExtras } from "../../src/query/sqlite/build-list-query.ts"
 import { keysetSQL, type KeysetPosition } from "../../src/query/sqlite/index.ts"
 import { queryHelpers } from "../../src/query/drizzle.ts"
@@ -139,3 +139,11 @@ const schemaInput: ListQueryInput<"created_at" | "title"> = parsed
 const pageByHand = (input: ListQueryInput) => queryHelpers.listOptions(input, SEALED)
 pageByHand(schemaInput)
 expectTypeOf<ListQueryInput["parsedSort"]>().toEqualTypeOf<readonly SortField[]>()
+
+/* K11 of r17: a module that exports a list or retrieve schema names its type, as declaration emit and isolatedDeclarations need */
+export const annotatedList: ListQuerySchema<Record<string, never>, "created_at"> = createListQuerySchema({
+	sort: ["created_at"],
+})
+export const annotatedRetrieve: RetrieveQuerySchema<Record<string, never>> = createRetrieveQuerySchema({
+	fields: { scalars: ["id"] },
+})

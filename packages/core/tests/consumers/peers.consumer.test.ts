@@ -87,7 +87,9 @@ describe.each([
 		},
 	)
 
-	it.runIf(peers === "all").each(["tsconfig.bundler.json", "tsconfig.nodenext.json", "tsconfig.worker.json"])(
+	it
+		.runIf(peers === "all")
+		.each(["tsconfig.bundler.json", "tsconfig.declarations.json", "tsconfig.nodenext.json", "tsconfig.worker.json"])(
 		"type-checks every subpath under strict flags (%s)",
 		(config) => {
 			const result = run(app.dir, "npx", ["tsc", "-p", config])

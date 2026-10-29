@@ -30,8 +30,9 @@ function paginationResponse(): PaginationResponseSchema {
 /** Pagination response meta schema for list endpoints */
 const paginationResponseSchema: PaginationResponseSchema = /* @__PURE__ */ paginationResponse()
 
-export { createListQuerySchema } from "./list-schema.ts"
-export { createRetrieveQuerySchema } from "./retrieve-schema.ts"
+/* the schemas' own types, which a module exporting one names in its declarations (K11 of r17) */
+export { createListQuerySchema, type ListQuerySchema } from "./list-schema.ts"
+export { createRetrieveQuerySchema, type RetrieveQuerySchema } from "./retrieve-schema.ts"
 export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS } from "./schema-limits.ts"
 export type {
 	FieldsConfig,
