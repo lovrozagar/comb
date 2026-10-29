@@ -20,10 +20,15 @@ describe("runtimeFindings", () => {
 		])
 	})
 
-	it("rates a pragma by name: comb's own nothing, writable_schema unsafe, any other cautious", () => {
+	/* R4: every other pragma is unsafe by default-deny's rule alone, never also cautious here */
+	it("rates a pragma by name: comb's own nothing, foreign_keys cautious, writable_schema unsafe, any other nothing", () => {
 		expect(runtimeFindings("PRAGMA main.defer_foreign_keys = on", new Map(), none)).toEqual([])
+		expect(runtimeFindings("PRAGMA foreign_keys = off", new Map(), none)).toEqual([
+			{ level: "cautious", note: "changes how SQLite runs what follows" },
+		])
 		expect(runtimeFindings("PRAGMA WRITABLE_SCHEMA = 1", new Map(), none)[0]?.level).toBe("unsafe")
-		expect(runtimeFindings("PRAGMA recursive_triggers = on", new Map(), none)[0]?.level).toBe("cautious")
+		expect(runtimeFindings("PRAGMA recursive_triggers = on", new Map(), none)).toEqual([])
+		expect(runtimeFindings("PRAGMA journal_mode = WAL", new Map(), none)).toEqual([])
 	})
 })
 

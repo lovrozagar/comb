@@ -2,8 +2,8 @@
  * The destructive-change gate on statements whose effect is what they run at apply time or after: a
  * prepared statement executed later in the file, a rule (an INSTEAD NOTHING one discards writes) and its action, a SQLite trigger's body (run by
  * every later write to its table), a sequence reset through setval, rows loaded by COPY,
- * ownership handed to a role that bypasses row level security, and a SQLite pragma comb does not
- * write itself (writable_schema can corrupt the schema).
+ * ownership handed to a role that bypasses row level security, and SQLite's foreign_keys pragma (writable_schema,
+ * which can corrupt the schema, is unsafe; every other pragma comb does not write is unsafe by default-deny's rule alone).
  */
 import type { Finding } from "./classify-alter.ts"
 import { IDENT, lastPart } from "./sql-code.ts"
@@ -24,8 +24,6 @@ const TRIGGER = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:TEMP |TEMPORARY )?TRIGGER (?:IF NOT EXISTS )?${IDENT}(?: ?\\. ?${IDENT})? .*?\\bON (${IDENT}(?: ?\\. ?${IDENT})?)(.*)$`,
 	"i",
 )
-// per-process-constant: the pragma comb writes into a SQLite rebuild (atlas-env.ts)
-const COMB_PRAGMAS = /* @__PURE__ */ new Set(["defer_foreign_keys"])
 
 /** The statements a file prepares, by name, with the code each runs */
 function preparedOf(codes: readonly string[]): Map<string, string> {
@@ -37,13 +35,12 @@ function preparedOf(codes: readonly string[]): Map<string, string> {
 	return out
 }
 
-/** The findings of a pragma: writable_schema unsafe, any other comb does not write cautious */
+/** The findings of a pragma: foreign_keys cautious, writable_schema unsafe, any other none of its own */
 function pragmaFinding(code: string): Finding | undefined {
 	const name = PRAGMA.exec(code)?.[1]?.toLowerCase()
-	if (name === undefined || COMB_PRAGMAS.has(name)) return undefined
-	return name === "writable_schema"
-		? { level: "unsafe", note: "lets a statement rewrite the schema itself" }
-		: { level: "cautious", note: "changes how SQLite runs what follows" }
+	if (name === "foreign_keys") return { level: "cautious", note: "changes how SQLite runs what follows" }
+	if (name === "writable_schema") return { level: "unsafe", note: "lets a statement rewrite the schema itself" }
+	return undefined
 }
 
 /**

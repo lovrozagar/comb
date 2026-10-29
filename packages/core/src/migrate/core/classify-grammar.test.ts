@@ -112,6 +112,13 @@ describe("default-deny's rule for triggers and routines, named as the rule", () 
 		expect(notes).not.toContain("does not recognize")
 	})
 
+	/* R4: the rule is a pragma's only note, never beside a cautious one that says it merely changes how SQLite runs */
+	it.each(["PRAGMA recursive_triggers = on;", "PRAGMA journal_mode = WAL;"])("gives %j no cautious note", (sql) => {
+		const rated = rate(sql, USERS)
+		expect(rated.cautiousStatements).toEqual([])
+		expect(rated.unsafeStatements.join("\n")).toContain("comb rates every pragma it does not write unsafe")
+	})
+
 	it.each([
 		[
 			"CREATE TRIGGER t2 BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION f();",
