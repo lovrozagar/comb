@@ -9,6 +9,7 @@ import path from "node:path"
 import { approveMigration } from "../migrate/core/approval.ts"
 import { type D1Target, findWranglerConfig, type ReadConfig } from "../migrate/core/d1-binding.ts"
 import { adoptHashesD1, applyD1, baselineD1, statusD1 } from "../migrate/core/d1-history.ts"
+import { Refused } from "../migrate/core/refused.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import { createD1Provider, wranglerFlags } from "../migrate/drivers/d1.ts"
 import type { D1ProviderConfig } from "../migrate/types.ts"
@@ -94,7 +95,14 @@ export async function migrateD1(request: D1Request, resolved: MigrateTarget | un
 	const yes = args.options["yes"] === true
 	const approve = (migration: Parameters<typeof approveMigration>[0]) =>
 		approveMigration(migration, { confirm: io.confirm, target: label, yes })
-	const names = await applyD1(target, { approve, checkOnly: mode === "check", print: io.out, read })
+	const names = await applyD1(target, { approve, checkOnly: mode === "check", print: io.out, read }).catch(
+		(error: unknown) => {
+			/* the files wrangler applied before it stopped are applied, whatever is refused after */
+			if (error instanceof Refused && error.applied.length > 0)
+				io.out(`Applied before the failure: ${error.applied.join(", ")}`)
+			throw error
+		},
+	)
 	if (mode === "check") {
 		io.out(checkPassed(names))
 		return { applied: [], pending: names }

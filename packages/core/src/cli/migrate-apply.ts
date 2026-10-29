@@ -267,8 +267,8 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliI
 		report(await runMode({ args, db, io: { ...io, out: io.err }, mode }), [])
 	} catch (error) {
 		/* a refusal or a failed command is an Error; a user's config can throw anything */
-		const pending = error instanceof Refused ? error.pending : []
-		report({ applied: [], pending }, [error instanceof Error ? error.message : String(error)])
+		const { applied, pending } = error instanceof Refused ? error : { applied: [], pending: [] }
+		report({ applied, pending }, [error instanceof Error ? error.message : String(error)])
 		throw error
 	}
 }

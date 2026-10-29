@@ -349,3 +349,29 @@ describe("comb migrate diff: the name apply and check take (C7)", () => {
 		)
 	})
 })
+
+/* S4, C8 of the 0.14.1 review: a D1 diff writes beside files wrangler would run otherwise than Atlas */
+describe("comb migrate diff on a D1 database", () => {
+	it.each([
+		[{ ".2_b.sql": "CREATE TABLE b (id TEXT);" }, ".2_b.sql starts with a dot"],
+		[{ "9_b.sql": "CREATE TABLE b (id TEXT);", "10_c.sql": "CREATE TABLE c (id TEXT);" }, "10_c.sql runs after"],
+	])("refuses a directory wrangler lists otherwise than Atlas, writing nothing", async (extra, message) => {
+		const dir = project()
+		mkdirSync(join(dir, "m"), { recursive: true })
+		for (const [name, sql] of Object.entries({ "1_init.sql": "CREATE TABLE a (id TEXT);", ...extra }))
+			writeFileSync(join(dir, "m", name), sql)
+		writeSum(join(dir, "m"))
+		writeFileSync(
+			join(dir, "comb.migrate.config.ts"),
+			'export default { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "d1", databaseName: "core", wranglerConfig: "wrangler.toml" } } } }\n',
+		)
+		const before = readdirSync(join(dir, "m")).toSorted()
+		const io = makeIo(
+			dir,
+			fakeAtlas(() => undefined),
+		)
+		expect(await runCli(["migrate", "diff", "core", "next"], io)).toBe(1)
+		expect(io.errors[0]).toContain(message)
+		expect(readdirSync(join(dir, "m")).toSorted()).toEqual(before)
+	})
+})

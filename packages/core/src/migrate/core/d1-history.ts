@@ -8,16 +8,16 @@
  * That table records names only, so comb records each applied file's hash in its own table, and
  * refuses a file applied, then edited, as it does on its other engines.
  */
-import { readdirSync, readFileSync } from "node:fs"
-import { join } from "node:path"
 import type { Connection, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import { executeAll } from "../drivers/d1.ts"
 import { assertLocalExists, type D1Target, type ReadConfig, resolveBinding } from "./d1-binding.ts"
+import { d1Files, refuseSwallowing } from "./d1-files.ts"
 import { D1_HASH_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
 import { orphanMessage } from "./history-match.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
-import { planApply, wranglerOrder } from "./plan-apply.ts"
+import { planApply } from "./plan-apply.ts"
+import { Refused } from "./refused.ts"
 
 const quoteName = (name: string): string => `"${name.replaceAll('"', '""')}"`
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`
@@ -92,15 +92,9 @@ async function recordHashes(conn: Connection, files: ReadonlyArray<{ hash: strin
 const vouched = (sql: string, hash: string, drizzle: ReadonlySet<string> | undefined): boolean =>
 	hash === generateMigrationHash(sql) || (hash === legacyMigrationHash(sql) && drizzle?.has(hash) === true)
 
-/** The migration files of the directory in wrangler's order, with their text */
-function filesOf(dir: string): Array<{ name: string; sql: string }> {
-	const names = wranglerOrder(readdirSync(dir).filter((name) => name.endsWith(".sql")))
-	return names.map((name) => ({ name, sql: readFileSync(join(dir, name), "utf8") }))
-}
-
 /** The files `__drizzle_migrations` records that the migrations table does not */
 function recordedByDrizzle(
-	files: ReturnType<typeof filesOf>,
+	files: ReturnType<typeof d1Files>,
 	hashes: ReadonlySet<string>,
 	applied: ReadonlySet<string>,
 ): string[] {
@@ -122,7 +116,7 @@ async function history(
 	const table = resolveBinding(read, target)
 	if (!create) assertLocalExists(read, target)
 	const { applied, drizzle: hashes, recorded } = readHistory(target, table, create)
-	const files = filesOf(target.migrationsDir)
+	const files = d1Files(target.migrationsDir)
 	const copied = hashes === undefined ? [] : recordedByDrizzle(files, hashes, applied)
 	if (copied.length > 0) {
 		throw new Error(
@@ -151,6 +145,14 @@ async function history(
 	return { applied, orphans, table, unhashed }
 }
 
+/** wrangler's own error lines from a failed run, its colours and banner left out; its whole output when it printed none */
+function wranglerError({ stderr, stdout }: { stderr: string; stdout: string }): string {
+	/* the escape sequences that colour a terminal's text */
+	const output = `${stderr}${stdout}`.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g"), "")
+	const errors = output.split("\n").filter((line) => line.includes("[ERROR]"))
+	return (errors.length > 0 ? errors.map((line) => line.trim()).join("; ") : output).trim()
+}
+
 type D1Apply = {
 	approve(migration: ParsedMigration): Promise<Approval>
 	/** only check: apply nothing */
@@ -162,7 +164,9 @@ type D1Apply = {
 /** Check the pending migrations and, unless only checking, apply them through wrangler; returns them */
 async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	const { applied, table } = await history(options.read, target, { create: options.checkOnly !== true })
-	const files = filesOf(target.migrationsDir).map(({ name }) => name)
+	const listed = d1Files(target.migrationsDir)
+	refuseSwallowing(listed.filter(({ name }) => !applied.has(name)))
+	const files = listed.map(({ name }) => name)
 	const pending = await planApply({
 		applied: (name) => applied.has(name),
 		approve: options.approve,
@@ -182,26 +186,23 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	const after = new Set(
 		(executeAll(target.exec, target, [namesOf(table)])[0] as Rows).map((row) => String(row["name"])),
 	)
-	if (ran.code !== 0) {
-		/* the files wrangler applied before it failed are applied: their hashes are recorded as any other's */
-		const done = pending.filter(({ name }) => after.has(name))
-		if (done.length > 0)
-			await recordHashes(
-				target.conn,
-				done.map(({ migration, name }) => ({ hash: migration.hash, name })),
-			)
-		throw new Error(`wrangler d1 migrations apply failed: ${`${ran.stderr}${ran.stdout}`.trim()}`)
-	}
+	/* every checked file wrangler applied is applied, however it ended: its hash is recorded before anything is refused */
+	const done = pending.filter(({ name }) => after.has(name))
+	if (done.length > 0)
+		await recordHashes(
+			target.conn,
+			done.map(({ migration, name }) => ({ hash: migration.hash, name })),
+		)
+	const [applies, rest] = [done.map(({ name }) => name), names.filter((name) => !after.has(name))]
+	if (ran.code !== 0) throw new Refused(`wrangler d1 migrations apply failed: ${wranglerError(ran)}`, rest, applies)
 	const added = [...after].filter((name) => !applied.has(name))
-	if (added.length !== names.length || names.some((name) => !after.has(name))) {
-		throw new Error(
+	if (added.length !== names.length || rest.length > 0) {
+		throw new Refused(
 			`wrangler recorded ${added.join(", ") || "nothing"} in ${table}, where comb checked ${names.join(", ")}; see the wrangler output above`,
+			rest,
+			applies,
 		)
 	}
-	await recordHashes(
-		target.conn,
-		pending.map(({ migration, name }) => ({ hash: migration.hash, name })),
-	)
 	return names
 }
 
@@ -218,7 +219,7 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
 			`${target.name} has no ${DRIZZLE_HISTORY_TABLE} to copy from; baseline records only what a history shows was applied`,
 		)
 	}
-	const files = filesOf(target.migrationsDir)
+	const files = d1Files(target.migrationsDir)
 	const copied = recordedByDrizzle(files, hashes, applied)
 	if (copied.length > 0) {
 		await target.conn.batch(
@@ -247,7 +248,7 @@ async function baselineD1(target: D1Target, read: ReadConfig, print: (line: stri
  */
 async function adoptHashesD1(target: D1Target, read: ReadConfig, print: (line: string) => void): Promise<string[]> {
 	const { unhashed } = await history(read, target, { create: true })
-	const files = filesOf(target.migrationsDir).filter(({ name }) => unhashed.includes(name))
+	const files = d1Files(target.migrationsDir).filter(({ name }) => unhashed.includes(name))
 	if (files.length > 0)
 		await recordHashes(
 			target.conn,
@@ -265,7 +266,7 @@ async function statusD1(
 ): Promise<{ applied: string[]; pending: string[] }> {
 	const { applied: recorded, orphans, unhashed } = await history(read, target, { create: false, status: true })
 	if (orphans !== "") print(orphans)
-	const files = filesOf(target.migrationsDir).map(({ name }) => name)
+	const files = d1Files(target.migrationsDir).map(({ name }) => name)
 	const applied = files.filter((name) => recorded.has(name))
 	const pending = files.filter((name) => !recorded.has(name))
 	print(`Applied: ${applied.join(", ") || "none"}`)

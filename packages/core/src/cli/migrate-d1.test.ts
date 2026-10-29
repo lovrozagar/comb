@@ -110,15 +110,20 @@ describe("migrate apply on D1 without a migrate config: a failed apply", () => {
 })
 
 describe("migrate apply on D1 without a migrate config: order and refusals", () => {
-	it("checks and applies in wrangler's order, by leading number, when prefixes differ in width", async () => {
+	/* C8 of the 0.14.1 review: wrangler runs these by number, Atlas hashes and diffs them by name */
+	it("refuses, applying nothing, files whose prefixes differ in width so wrangler's order is not Atlas's", async () => {
 		const dir = worker({
 			"20250101000000_rebuild.sql":
 				"CREATE TABLE new_t (id TEXT, a TEXT);\nINSERT INTO new_t (id, a) SELECT id, a FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;",
 			"20261020_init.sql": "CREATE TABLE t (id TEXT, a TEXT);",
 		})
 		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
-		expect(await runCli(["migrate", "apply", "core", "--local", "--yes"], makeIo(dir, d1))).toBe(0)
-		expect(recorded(d1)).toEqual(["20261020_init.sql", "20250101000000_rebuild.sql"])
+		const io = makeIo(dir, d1)
+		expect(await runCli(["migrate", "apply", "core", "--local", "--yes"], io)).toBe(1)
+		expect(io.errors[0]).toContain(
+			"20250101000000_rebuild.sql runs after 20261020_init.sql under wrangler, by number, but before it under Atlas, by name",
+		)
+		expect(recorded(d1)).toEqual([])
 	})
 
 	it("refuses --file, -e, a missing wrangler config, a binding it lacks, and another migrations directory", async () => {
@@ -450,5 +455,33 @@ describe("migrate apply, check and status --json on D1 (C5)", () => {
 			pending: ["20260101000000_init.sql", "20260102000000_drop.sql"],
 		})
 		expect((out["refused"] as string[])[0]).toMatch(/^20260102000000_drop\.sql is unsafe/)
+	})
+})
+
+/* C4 of the 0.14.1 review: a wrangler run that fails partway reports what it applied */
+describe("migrate apply on D1 when wrangler fails partway", () => {
+	const files = {
+		...INIT,
+		"20260102000000_b.sql": "CREATE TABLE b (id TEXT);",
+		"20260103000000_c.sql": "INSERT INTO nope (id) VALUES ('x');",
+	}
+
+	it("puts the files applied before the failure, and those still pending, in --json's object", async () => {
+		const dir = worker(files)
+		const io = makeIo(dir, fakeD1({ dir: join(dir, "atlas-migrations") }))
+		expect(await runCli(["migrate", "apply", "core", "--local", "--yes", "--json"], io)).toBe(1)
+		expect(json(io)).toEqual({
+			applied: ["20260101000000_init.sql", "20260102000000_b.sql"],
+			database: "core",
+			pending: ["20260103000000_c.sql"],
+			refused: [expect.stringContaining("wrangler d1 migrations apply failed: Migration 20260103000000_c.sql failed")],
+		})
+	})
+
+	it("says which files applied before the failure", async () => {
+		const dir = worker(files)
+		const io = makeIo(dir, fakeD1({ dir: join(dir, "atlas-migrations") }))
+		expect(await runCli(["migrate", "apply", "core", "--local", "--yes"], io)).toBe(1)
+		expect(io.outputs).toContain("Applied before the failure: 20260101000000_init.sql, 20260102000000_b.sql")
 	})
 })

@@ -239,3 +239,103 @@ describe("statusD1 on a local database wrangler keeps nowhere comb finds", () =>
 		await expect(statusD1(remote, read, () => undefined)).resolves.toEqual({ applied: [], pending: ["1_init.sql"] })
 	})
 })
+
+/* S1 of the 0.14.1 review: wrangler sends each file with its history INSERT appended on the next line */
+describe("applyD1 on a file whose end would swallow wrangler's history INSERT", () => {
+	it.each([
+		["an open block comment", "CREATE TABLE b (id TEXT);\n/* the rest", "ends inside an open /* comment"],
+		["no final semicolon", "CREATE TABLE b (id TEXT)", "does not end its last statement with ;"],
+		["a string left open", "INSERT INTO post (id) VALUES ('x", "does not end its last statement with ;"],
+	])("refuses in check a pending file ending in %s", async (_, sql, reason) => {
+		const { d1, read } = await target({})
+		writeFileSync(join(d1.migrationsDir, "2_b.sql"), sql)
+		writeSum(d1.migrationsDir)
+		await expect(applyD1(d1, { approve, checkOnly: true, print: () => undefined, read })).rejects.toThrow(
+			`2_b.sql ${reason}`,
+		)
+	})
+
+	it("passes a file ending in a closed comment or a line comment after its semicolon", async () => {
+		const { d1, read } = await target({})
+		writeFileSync(join(d1.migrationsDir, "2_b.sql"), "CREATE TABLE b (id TEXT); /* done */\n-- the end")
+		writeSum(d1.migrationsDir)
+		expect(await applyD1(d1, { approve, checkOnly: true, print: () => undefined, read })).toEqual([
+			"1_init.sql",
+			"2_b.sql",
+		])
+	})
+})
+
+/* S4, C8 of the 0.14.1 review: the files wrangler runs, in its order, must be Atlas's, in its */
+describe("applyD1 on a directory wrangler lists otherwise than Atlas", () => {
+	it("refuses a dot-named file, which wrangler skips and Atlas applies, with a rename", async () => {
+		const { d1, read } = await target({})
+		writeFileSync(join(d1.migrationsDir, ".2_b.sql"), "CREATE TABLE b (id TEXT);")
+		writeSum(d1.migrationsDir)
+		await expect(applyD1(d1, { approve, checkOnly: true, print: () => undefined, read })).rejects.toThrow(
+			".2_b.sql starts with a dot, so wrangler never applies it, while Atlas does; rename it without the dot",
+		)
+	})
+
+	it("refuses files whose number order is not their name order, naming the one to rename", async () => {
+		const { d1, read } = await target({})
+		writeFileSync(join(d1.migrationsDir, "9_b.sql"), "CREATE TABLE b (id TEXT);")
+		writeFileSync(join(d1.migrationsDir, "10_c.sql"), "CREATE TABLE c (id TEXT);")
+		writeSum(d1.migrationsDir)
+		await expect(applyD1(d1, { approve, checkOnly: true, print: () => undefined, read })).rejects.toThrow(
+			"10_c.sql runs after 1_init.sql under wrangler, by number, but before it under Atlas, by name; rename 10_c.sql",
+		)
+	})
+})
+
+/* S3, C4 of the 0.14.1 review: what wrangler applied before it stopped is reported, and its hashes kept */
+/** The files comb recorded a hash for */
+const hashed = async (d1: D1Target) =>
+	(await d1.conn.execute("SELECT name FROM _comb_migration_hashes ORDER BY name")).rows.map((row) => row[0])
+
+describe("applyD1 when wrangler stops short", () => {
+	it("records what wrangler applied and names the rest when it records fewer files than comb checked", async () => {
+		const { d1, read, run } = await target({})
+		/* a wrangler that applies the first pending file only, and exits 0 */
+		const short: typeof d1.exec = (cmd, args, options) => {
+			if (cmd === "wrangler" && args[1] === "migrations") {
+				rmSync(join(d1.migrationsDir, "3_c.sql"))
+				const result = run(cmd, args, options)
+				writeFileSync(join(d1.migrationsDir, "3_c.sql"), "CREATE TABLE c (id TEXT);")
+				return result
+			}
+			return run(cmd, args, options)
+		}
+		writeFileSync(join(d1.migrationsDir, "2_b.sql"), "CREATE TABLE b (id TEXT);")
+		writeFileSync(join(d1.migrationsDir, "3_c.sql"), "CREATE TABLE c (id TEXT);")
+		writeSum(d1.migrationsDir)
+		const error = await applyD1({ ...d1, exec: short }, { approve, print: () => undefined, read }).catch(
+			(e: Error) => e,
+		)
+		expect(error).toMatchObject({ applied: ["1_init.sql", "2_b.sql"], pending: ["3_c.sql"] })
+		expect(await hashed(d1)).toEqual(["1_init.sql", "2_b.sql"])
+	})
+
+	it("reports what wrangler applied before it failed, and its error line without colours or banner", async () => {
+		const { d1, read, run } = await target({})
+		const coloured: typeof d1.exec = (cmd, args, options) => {
+			const result = run(cmd, args, options)
+			if (cmd !== "wrangler" || args[1] !== "migrations" || result.code === 0) return result
+			return {
+				...result,
+				stderr: `\u001b[1m⛅️ wrangler 4.0.0\u001b[0m\n---\n\u001b[31m✘ [ERROR]\u001b[0m ${result.stderr}\n`,
+			}
+		}
+		writeFileSync(join(d1.migrationsDir, "2_b.sql"), "CREATE TABLE b (id TEXT);")
+		writeFileSync(join(d1.migrationsDir, "3_c.sql"), "INSERT INTO nope (id) VALUES ('x');")
+		writeSum(d1.migrationsDir)
+		const error = (await applyD1({ ...d1, exec: coloured }, { approve, print: () => undefined, read }).catch(
+			(e: unknown) => e,
+		)) as Error
+		expect(error).toMatchObject({ applied: ["1_init.sql", "2_b.sql"], pending: ["3_c.sql"] })
+		expect(error.message).toBe(
+			"wrangler d1 migrations apply failed: ✘ [ERROR] Migration 3_c.sql failed: no such table: nope",
+		)
+		expect(await hashed(d1)).toEqual(["1_init.sql", "2_b.sql"])
+	})
+})

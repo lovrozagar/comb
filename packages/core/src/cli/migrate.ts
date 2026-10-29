@@ -86,7 +86,9 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const { checkAtlasInstalled, exportDrizzleSchema, generateIncrementalMigration } =
 		await import("../migrate/core/atlas.ts")
 	if (!checkAtlasInstalled(io.run)) throw new CliError("Atlas not found. Install: https://atlasgo.io/getting-started")
-	const { codegen, exported, migrationsDir, pg } = await diffTarget(db, io)
+	const { codegen, d1, exported, migrationsDir, pg } = await diffTarget(db, io)
+	/* a D1 diff writes beside the files wrangler runs, refused where it would run them otherwise than Atlas (S4, C8) */
+	if (d1 && fs.existsSync(migrationsDir)) (await import("../migrate/core/d1-files.ts")).d1Files(migrationsDir)
 	const dialect = exported.dialect
 	const dryRun = args.options["dry-run"] === true
 	/* a Postgres diff reads the history and the export as the statements Postgres runs (M75) */
@@ -132,7 +134,13 @@ async function diffTarget(db: string | undefined, io: CliIo) {
 				: `Set codegen: "<its comb.config.ts name>" on ${target.database} in comb.migrate.config.ts`,
 		name: target?.codegen ?? db,
 	}
-	return { codegen, exported, migrationsDir: target?.migrationsDir ?? path.resolve(io.cwd, "atlas-migrations"), pg }
+	return {
+		codegen,
+		d1: target?.provider.type === "d1",
+		exported,
+		migrationsDir: target?.migrationsDir ?? path.resolve(io.cwd, "atlas-migrations"),
+		pg,
+	}
 }
 
 /** Print the files a diff would write, and fail: the schema drifted from the migrations */
