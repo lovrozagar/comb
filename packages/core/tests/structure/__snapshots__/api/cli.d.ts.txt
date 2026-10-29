@@ -40,8 +40,12 @@ type Terminal = {
     };
     output: NodeJS.WritableStream;
 };
-/** The IO the comb binary runs with: the console, and questions on the terminal when there is one */
-export declare function processIo(terminal?: Terminal): CliIo;
+/**
+ * The IO the comb binary runs with: the console, and questions on the terminal when there is one,
+ * asked on stderr: a question is a human line, as every other --json sends there, so stdout stays
+ * what the command prints (P4 of the 0.15.0 review)
+ */
+export declare function processIo({ input, output }?: Partial<Terminal>): CliIo;
 export {};
 
 // cli/run.d.ts
