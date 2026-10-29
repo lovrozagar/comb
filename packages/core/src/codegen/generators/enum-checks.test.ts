@@ -115,7 +115,7 @@ describe("generateEnumChecks — the generated checks", () => {
 		expect(content).toContain("usersEnumChecks")
 		expect(content).toContain("users_role_enum")
 		expect(content).toContain("'admin', 'user', 'guest'")
-		expect(content).toContain('import { check } from "drizzle-orm/sqlite-core"')
+		expect(content).toContain('import { check, type CheckBuilder } from "drizzle-orm/sqlite-core"')
 		expect(content).toContain('import { sql } from "drizzle-orm"')
 	})
 
@@ -165,7 +165,7 @@ describe("generateEnumChecks — the dialect (F9)", () => {
 	it("imports check from the dialect's own core, never SQLite's in a Postgres project (F9)", () => {
 		const tables = [enumTable("users", [makeField({ enumValues: ["a", "b"], name: "role" })])]
 		const content = generateIn(tmpDir(), tables, "postgres").content ?? ""
-		expect(content).toContain('import { check } from "drizzle-orm/pg-core"')
+		expect(content).toContain('import { check, type CheckBuilder } from "drizzle-orm/pg-core"')
 		expect(content).not.toContain("sqlite-core")
 	})
 })

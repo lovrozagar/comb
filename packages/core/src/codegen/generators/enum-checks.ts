@@ -86,13 +86,16 @@ export function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConf
 	}
 
 	const lines: string[] = []
-	lines.push(`import { check } from "drizzle-orm/${ctx.dialect === "postgres" ? "pg" : "sqlite"}-core"`)
+	/* the return type annotated, so a consumer's isolatedDeclarations compiles the file (K17 of r17) */
+	lines.push(
+		`import { check, type CheckBuilder } from "drizzle-orm/${ctx.dialect === "postgres" ? "pg" : "sqlite"}-core"`,
+	)
 	lines.push(`import { sql } from "drizzle-orm"`)
 	lines.push("")
 
 	for (const { enumFields, table } of tablesWithEnums) {
 		const fnName = `${toCamelCase(table.varName)}EnumChecks`
-		lines.push(`export function ${fnName}(table: Record<string, unknown>) {`)
+		lines.push(`export function ${fnName}(table: Record<string, unknown>): CheckBuilder[] {`)
 		lines.push("\treturn [")
 
 		for (const ef of enumFields) {

@@ -110,7 +110,8 @@ function generateSqlColsFile(table: TableEntry, relativeTablesPath: string): str
 		`import { ${table.varName} } from "${relativeTablesPath}"`,
 		"",
 		"/** Drizzle column refs — for .returning() and raw SQL */",
-		`export const ${camelName}SqlCols = {`,
+		/* typed as the table's own columns, so a consumer's isolatedDeclarations compiles the file (K17 of r17) */
+		`export const ${camelName}SqlCols: Pick<typeof ${table.varName}, ${table.fields.map((field) => stringLiteral(field)).join(" | ") || "never"}> = {`,
 	]
 
 	for (const field of table.fields) {

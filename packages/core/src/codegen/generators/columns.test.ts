@@ -51,7 +51,9 @@ describe("generateColumns", () => {
 		)
 		const sql = read("sql-cols", "user", "index.gen.ts")
 		expect(sql).toContain('import { user } from "../../../db.test.tables"')
-		expect(sql).toContain("export const userSqlCols = {\n\temail: user.email,")
+		expect(sql).toContain(
+			'export const userSqlCols: Pick<typeof user, "email" | "id" | "name"> = {\n\temail: user.email,',
+		)
 		expect(read("table-names", "index.gen.ts")).toContain('export const t = {\n\tuser: "user",\n} as const')
 		expect(logged).toEqual(["Generated column refs for 1 tables"])
 	})
@@ -69,6 +71,14 @@ describe("generateColumns", () => {
 		const rqb = read("rqb-cols", "user", "index.gen.ts")
 		expect(rqb).toContain("name: true")
 		expect(rqb).not.toContain("_secret")
+	})
+
+	/* K17 of r17: typed as the table's own columns, none when every column is private */
+	it("types the sql-cols record as the table's columns, never when it shows none", () => {
+		generate(`export const vault = createTable("vault", { _key: c.text("_key"), _blob: c.text("_blob") })`)
+		expect(read("sql-cols", "vault", "index.gen.ts")).toContain(
+			"export const vaultSqlCols: Pick<typeof vault, never> = {",
+		)
 	})
 
 	it("names every file by the prefix when one is given", () => {
