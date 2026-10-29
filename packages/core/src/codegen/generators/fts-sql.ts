@@ -9,7 +9,7 @@ import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 
 type FtsTableConfig = {
 	columns: string[]
-	tokenizer?: string
+	tokenizer?: string | undefined
 }
 
 /* combining marks count as word characters (M*): unicode61's default categories split a word at each

@@ -21,7 +21,7 @@ function project(databases: Record<string, unknown>, combConfig?: string): strin
 
 /** A comb.config.ts giving database `db` an FTS5 table */
 const fts = (db: string) =>
-	`export default { databases: { ${db}: { tables: "t.ts", fts: { post_fts: { columns: ["title"], contentTable: "post" } } } } }\n`
+	`export default { databases: { ${db}: { tables: "t.ts", fts: { post_fts: { columns: ["title"] } } } } }\n`
 
 describe("resolveMigrateTarget", () => {
 	it("is undefined in a project without comb.migrate.config.ts", async () => {

@@ -2,10 +2,19 @@
 import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import * as z from "zod"
 import type { CodegenConfig, DatabaseCodegen } from "../codegen/config.ts"
+import { codegenConfigSchema } from "../codegen/config-schema.ts"
 import { CliError, type CliIo } from "./output.ts"
 
 export type { CodegenConfig, DatabaseCodegen }
+
+/** `exported`, the config file `file` exports, held to its schema; a CliError naming the file and each key that is wrong (K14) */
+function parsed(file: string, exported: unknown): CodegenConfig {
+	const result = codegenConfigSchema().safeParse(exported)
+	if (result.success) return result.data
+	throw new CliError(`${file} is not a valid comb config:\n${z.prettifyError(result.error)}`)
+}
 
 /** The project's comb.config.ts (or .js), or undefined when it has none */
 export async function findCombConfig(cwd: string): Promise<CodegenConfig | undefined> {
@@ -14,8 +23,8 @@ export async function findCombConfig(cwd: string): Promise<CodegenConfig | undef
 		if (fs.existsSync(fp)) {
 			/* keyed by its mtime, so a process that runs codegen again after the config changed reads the change */
 			const url = `${pathToFileURL(fp).href}?mtime=${fs.statSync(fp).mtimeMs}`
-			const mod = (await import(url)) as { default?: CodegenConfig }
-			return mod.default ?? (mod as unknown as CodegenConfig)
+			const mod = (await import(url)) as { default?: unknown }
+			return parsed(fp, mod.default ?? { ...mod })
 		}
 	}
 	return undefined

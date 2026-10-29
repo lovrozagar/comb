@@ -70,7 +70,7 @@ export { generateFts };
 import type { TableMeta } from "../analyzer-types.ts";
 type FtsTableConfig = {
     columns: string[];
-    tokenizer?: string;
+    tokenizer?: string | undefined;
 };
 declare const DEFAULT_TOKENIZER = "unicode61 remove_diacritics 2 categories 'L* N* Co M*'";
 /** Deduplicate columns preserving order */

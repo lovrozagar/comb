@@ -27,6 +27,31 @@ describe("findCombConfig and loadCombConfig", () => {
 	})
 })
 
+/* K14 of the 0.15.0 review: a misspelled key fell back to its default, and codegen exited 0 */
+describe("findCombConfig on a config with a key comb does not know", () => {
+	it("refuses it by name, naming the file and where", async () => {
+		const dir = project()
+		writeFileSync(
+			join(dir, "comb.config.ts"),
+			'export default { databases: { core: { tables: "./a.ts", filePrefx: "db.x" } } }\n',
+		)
+		await expect(findCombConfig(dir)).rejects.toThrow(
+			`${join(dir, "comb.config.ts")} is not a valid comb config:\n✖ Unrecognized key: "filePrefx"\n  → at databases.core`,
+		)
+	})
+
+	it("refuses a generator comb does not have, and a driver it does not write", async () => {
+		const dir = project()
+		writeFileSync(
+			join(dir, "comb.config.ts"),
+			'export default { databases: { core: { tables: "./a.ts", generators: ["dto"], driver: "pg" } } }\n',
+		)
+		await expect(findCombConfig(dir)).rejects.toThrow(
+			/→ at databases\.core\.driver[\s\S]*→ at databases\.core\.generators\[0\]|→ at databases\.core\.generators\[0\][\s\S]*→ at databases\.core\.driver/,
+		)
+	})
+})
+
 describe("databaseIn and tablesFile", () => {
 	it("returns the declared database, and names the declared ones when it is not there", () => {
 		const config = { databases: { core: { tables: "t.ts" } } }
