@@ -179,4 +179,28 @@ function postgresOptionsOf(raw: string, field: "devUrl" | "url"): Record<string,
 	return postgresOptions(url)
 }
 
-export { type LibpqUrl, libpqUrl, postgresOptionsOf, queryParams, withParam }
+/** Whether `text` holds a percent-escape no UTF-8 decodes to */
+function undecodable(text: string): boolean {
+	try {
+		decodeURIComponent(text)
+		return false
+	} catch {
+		// reason: the throw is the answer: the text holds such an escape
+		return true
+	}
+}
+
+/**
+ * Why a Postgres URL comb cannot read is refused, by where it goes wrong, never naming its value
+ * (N2, N3 of plan 15's rerun): a bad escape in the query or in the host and database name; a socket
+ * spelled as a percent-encoded host, which libpq reads and Atlas refuses; else the password's
+ */
+function urlProblem(raw: string): "address" | "encoded socket" | "password" | "query" {
+	const [, authority = "", path = "", query = ""] = URI.exec(raw) ?? []
+	const host = authority.slice(authority.lastIndexOf("@") + 1)
+	if (/^%2f/i.test(host)) return "encoded socket"
+	if (undecodable(query)) return "query"
+	return undecodable(host) || undecodable(path) ? "address" : "password"
+}
+
+export { type LibpqUrl, libpqUrl, postgresOptionsOf, queryParams, urlProblem, withParam }

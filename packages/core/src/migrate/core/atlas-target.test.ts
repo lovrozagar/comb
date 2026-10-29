@@ -79,6 +79,27 @@ describe("pgUrlProblems", () => {
 /** What pgUrlProblems refuses in a target with `devUrl` and `url` */
 const refusals = (devUrl: string, url: string) => pgUrlProblems(target({ devUrl, url })).errors
 
+/* N2 and N3 of plan 15's rerun: a refusal says where the URL went wrong, never naming its value */
+describe("pgUrlProblems: where a URL's escape or socket goes wrong", () => {
+	it("names the query, or the host and database, when a bad percent-escape is there and not in the password", () => {
+		expect(
+			pgUrlProblems(target({ url: "postgres://app@db/app?sslmode=require&application_name=50%zz" })).errors,
+		).toEqual(["url is not a postgres:// URL; percent-encode a % in the query's values as %25"])
+		expect(pgUrlProblems(target({ url: "postgres://app@db/a%zzpp?sslmode=require" })).errors).toEqual([
+			"url is not a postgres:// URL; percent-encode a % in the host or database name as %25",
+		])
+		expect(pgUrlProblems(target({ url: "postgres://app:Zq%zz@db/app?sslmode=require" })).errors).toEqual([
+			"url is not a postgres:// URL; percent-encode special characters (#, /, ?, @) in the password",
+		])
+	})
+
+	it("refuses a socket spelled as a percent-encoded host, which Atlas refuses, pointing to ?host=", () => {
+		expect(pgUrlProblems(target({ url: "postgres://app:pw@%2Frun%2Fpostgresql/app" })).errors).toEqual([
+			"url names a Unix socket as a percent-encoded host, which Atlas refuses; give its directory as ?host=, as in postgres://app@/db?host=/run/postgresql",
+		])
+	})
+})
+
 /* P14 and P19 of the 0.14.1 review: libpq and Atlas take a socket target with a password, and send it no password over a network */
 /* P5 of the 0.14.1 review: a password escape that decodes to no UTF-8 is one Atlas would echo a fragment of */
 describe("pgUrlProblems: a password escape that is no UTF-8", () => {
@@ -97,11 +118,7 @@ describe("pgUrlProblems: a password escape that is no UTF-8", () => {
 
 describe("pgUrlProblems: a Unix socket target", () => {
 	it("takes a socket host with a user and password, and warns of no sslmode for it", () => {
-		for (const url of [
-			"postgres://app:pw@/app?host=/run/postgresql",
-			"postgres://app:pw@%2Frun%2Fpostgresql/app",
-			"postgres://app:pw@/app",
-		])
+		for (const url of ["postgres://app:pw@/app?host=/run/postgresql", "postgres://app:pw@/app"])
 			expect(pgUrlProblems(target({ url })), url).toEqual({ errors: [], warnings: [] })
 	})
 

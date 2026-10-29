@@ -12,7 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
 import { RESERVED_SCHEMA_WORDS } from "./pg-keywords.ts"
-import { type LibpqUrl, libpqUrl, queryParams, withParam } from "./pg-url.ts"
+import { type LibpqUrl, libpqUrl, queryParams, urlProblem, withParam } from "./pg-url.ts"
 
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
 type PgTarget = { devUrl: string; lockTimeout: string; schema: string; url: string }
@@ -42,7 +42,12 @@ const LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", 
 // lookup-table: sslmodes that encrypt the connection
 const VERIFIED_SSL = /* @__PURE__ */ new Set(["require", "verify-ca", "verify-full"])
 const PLAIN_SCHEMA = /^[a-z_][a-z0-9_$]*$/
-const ENCODE_HINT = "percent-encode special characters (#, /, ?, @) in the password"
+/* where a URL comb cannot read goes wrong, by the part (N2): the password, unless the part is another */
+const HINTS = {
+	address: "percent-encode a % in the host or database name as %25",
+	password: "percent-encode special characters (#, /, ?, @) in the password",
+	query: "percent-encode a % in the query's values as %25",
+}
 
 /** Whether `raw` is Atlas's own docker:// dev database, such as docker://postgres/17/dev */
 const isDocker = (raw: string): boolean => /^docker:\/\/[^#\s]+$/.test(raw)
@@ -84,9 +89,16 @@ function databaseOf(url: LibpqUrl): string {
 function checkUrl(field: "devUrl" | "url", raw: string): { docker?: true; error?: string; url?: LibpqUrl } {
 	if (raw.trim() === "") return { error: `${field} is empty` }
 	if (field === "devUrl" && isDocker(raw)) return { docker: true }
-	const url = libpqUrl(raw)
 	const accepted = field === "devUrl" ? "a postgres:// or docker://" : "a postgres://"
-	return url === undefined ? { error: `${field} is not ${accepted} URL; ${ENCODE_HINT}` } : { url }
+	const url = libpqUrl(raw)
+	const problem = urlProblem(raw)
+	/* libpq reads a socket in a percent-encoded host, and Atlas refuses one (N3) */
+	if (problem === "encoded socket")
+		return {
+			error: `${field} names a Unix socket as a percent-encoded host, which Atlas refuses; give its directory as ?host=, as in postgres://app@/db?host=/run/postgresql`,
+		}
+	if (url !== undefined) return { url }
+	return { error: `${field} is not ${accepted} URL; ${HINTS[problem]}` }
 }
 
 /**
