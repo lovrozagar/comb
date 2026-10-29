@@ -747,6 +747,10 @@ export type TursoCredentialsRequest = TursoDeps & {
     /** a reader's credentials: a missing database is an error, not created, and the token is read-only */
     readonly?: boolean | undefined;
 };
+/** A reader found no Turso database `name` (`org/db`): a reader creates none */
+export declare class TursoMissing extends Error {
+    constructor(name: string);
+}
 /**
  * The libsql URL and a one-hour token for a Turso database, creating the database when it is
  * missing; for a reader, a read-only token, and a missing database is an error. Turso reads the

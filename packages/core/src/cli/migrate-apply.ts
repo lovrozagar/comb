@@ -27,44 +27,21 @@ import {
 import { migrationHashes } from "../migrate/core/parse.ts"
 import { planApply, refuseSkipping } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
-import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
+import type { Connection } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
-import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
+import { openSqliteTarget, type SqliteTarget } from "./migrate-sqlite-target.ts"
+import { resolveMigrateTarget } from "./migrate-target.ts"
 import { Refused } from "../migrate/core/refused.ts"
 import { checkPassed, CliError, type CliIo, type MigrateOutcome } from "./output.ts"
 
 type Mode = "apply" | "baseline" | "check" | "status"
 
-/** An open database to migrate: its connection, its migrations, and how to name it */
-type Target = { conn: Connection; migrationsDir: string; name: string }
+type Target = SqliteTarget
 
 /** One command: what it was asked, and where it reports */
 type Request = { args: ParsedArgs; db: string; io: CliIo; mode: Mode }
 
 const option = (args: ParsedArgs, name: string) => args.options[name] as string | undefined
-
-/** The SQLite, libsql or Turso database comb.migrate.config.ts resolved, opened; read-only for check and status */
-async function configuredTarget(
-	{ args, io, mode }: Request,
-	target: MigrateTarget & { provider: ConnectionProviderConfig },
-): Promise<Target> {
-	if (args.options["local"]) throw new CliError("--local is for a D1 database; set local: true on its d1 provider")
-	if (args.options["hashes"])
-		throw new CliError(
-			"--hashes is for a D1 database, whose history records names alone: this one records each file's hash as it applies it",
-		)
-	const { createProvider } = await import("../migrate/config.ts")
-	if (option(args, "file") === undefined && !fs.existsSync(target.migrationsDir))
-		throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)
-	const conn = await createProvider(target.provider, { run: io.run }).connect({
-		drizzleConfigPath: target.drizzleConfigPath,
-		migrationsDir: target.migrationsDir,
-		name: target.name,
-		provider: target.provider,
-		readonly: mode === "check" || mode === "status",
-	})
-	return { conn, migrationsDir: target.migrationsDir, name: target.label }
-}
 
 /** The history `__drizzle_migrations` holds, row by row: nothing when it is missing, which only a write would create */
 async function recordedHistory(conn: Connection): Promise<LegacyRow[]> {
@@ -85,17 +62,17 @@ async function recordedHistory(conn: Connection): Promise<LegacyRow[]> {
 
 /**
  * The history, with a history from before 0.13 read as 0.13 names it (history-match.ts
- * resolveLegacy), and those names, which apply's rebuild then records
+ * resolveLegacy), and those names, which apply's rebuild then records; `legacy` while it awaits that rebuild
  */
 async function readHistory(
 	conn: Connection,
 	dir: string,
-): Promise<{ renamed: Array<{ id: number; name: string }>; rows: HistoryRow[] }> {
+): Promise<{ legacy: boolean; renamed: Array<{ id: number; name: string }>; rows: HistoryRow[] }> {
 	const rows = await recordedHistory(conn)
-	if (rows.length === 0 || !(await hashUnique(conn))) return { renamed: [], rows }
+	if (rows.length === 0 || !(await hashUnique(conn))) return { legacy: false, renamed: [], rows }
 	const renamed = resolveLegacy(hashed(dir, sqlFiles(dir)), rows)
 	const names = new Map(renamed.map(({ id, name }) => [id, name]))
-	return { renamed, rows: rows.map((row) => ({ ...row, name: names.get(row.id) ?? row.name })) }
+	return { legacy: true, renamed, rows: rows.map((row) => ({ ...row, name: names.get(row.id) ?? row.name })) }
 }
 
 /** Each of `files`, a file of `dir`, with the hashes its text has */
@@ -152,10 +129,11 @@ async function baseline(
 		)
 	}
 	await record()
+	const conn = await target.write()
 	let marked = 0
 	for (const { hashes, name } of files) {
 		if (matched.applied.has(name)) continue
-		await recordMigrationHash(target.conn, hashes[0] as string, name)
+		await recordMigrationHash(conn, hashes[0] as string, name)
 		io.out(`Marked applied: ${name}`)
 		marked++
 	}
@@ -184,7 +162,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	const single = option(args, "file")
 	const dir = target.migrationsDir
 	const relative = single === undefined ? undefined : fileName(single, { cwd: io.cwd, dir })
-	const { renamed, rows } = await readHistory(target.conn, dir)
+	const { legacy, renamed, rows } = await readHistory(target.conn, dir)
 	if (relative !== undefined && !relative.startsWith("..")) {
 		const before = sqlFiles(dir).filter((name) => name < relative)
 		refuseSkipping(relative, before, matchHistory(hashed(dir, before), rows, false).applied)
@@ -192,13 +170,17 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	const files = hashed(dir, relative === undefined ? sqlFiles(dir) : [relative])
 	const matched = matchHistory(files, rows, single === undefined)
 	refuseUnmatched(matched, { dir, io, mode })
-	/* comb's history is written only once nothing refuses the run: its table, and each name a row lacks (S7) */
-	const record = async () => {
-		await ensureMigrationsTable(target.conn, renamed)
-		await nameRecorded(target.conn, matched.named)
+	/* comb's history is written only once nothing refuses the run: its table, and each name a row lacks
+	   (S7); only when a file applies or the history awaits its rebuild or names, so a Turso database
+	   with nothing to change is never opened for writing (S6 of the 0.15.0 review) */
+	const record = async (applying: boolean) => {
+		if (!applying && !legacy && matched.named.length === 0) return
+		const conn = await target.write()
+		await ensureMigrationsTable(conn, renamed)
+		await nameRecorded(conn, matched.named)
 	}
 	if (mode === "baseline") {
-		await baseline(target, { files, matched, record }, io)
+		await baseline(target, { files, matched, record: () => record(true) }, io)
 		return { applied: [], pending: [] }
 	}
 	const names = files.map(({ name }) => name)
@@ -226,12 +208,13 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 		return { applied: [], pending: pendingNames }
 	}
 	for (const name of names.filter((file) => !pendingNames.includes(file))) io.out(`Skip (already applied): ${name}`)
-	await record()
-	await applyEach(
-		target.conn,
-		pending.map(({ migration }) => migration),
-		io.out,
-	)
+	await record(pending.length > 0)
+	if (pending.length > 0)
+		await applyEach(
+			await target.write(),
+			pending.map(({ migration }) => migration),
+			io.out,
+		)
 	io.out(`\nDone: ${pendingNames.length} applied, ${names.length - pendingNames.length} skipped`)
 	return { applied: pendingNames, pending: [] }
 }
@@ -290,10 +273,10 @@ async function runMode(request: Request): Promise<MigrateOutcome> {
 		const { migrateD1 } = await import("./migrate-d1.ts")
 		return migrateD1(request, resolved)
 	}
-	const target = await configuredTarget(request, { ...resolved, provider: resolved.provider })
+	const target = await openSqliteTarget(request, { ...resolved, provider: resolved.provider })
 	try {
 		return await migrateSqlite(request, target)
 	} finally {
-		await target.conn.close()
+		await target.close()
 	}
 }

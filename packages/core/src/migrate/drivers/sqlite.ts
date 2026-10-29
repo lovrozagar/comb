@@ -47,6 +47,14 @@ export type TursoCredentialsRequest = TursoDeps & {
 	readonly?: boolean | undefined
 }
 
+/** A reader found no Turso database `name` (`org/db`): a reader creates none */
+export class TursoMissing extends Error {
+	constructor(name: string) {
+		super(`Turso database "${name}" does not exist; check and status create none`)
+		this.name = "TursoMissing"
+	}
+}
+
 /** Turso's error message from a failed response, or the HTTP status when its body has none */
 async function failure(res: Response): Promise<string> {
 	const text = await res.text()
@@ -88,8 +96,7 @@ export async function getTursoCredentials(
 	const headers = { Authorization: `Bearer ${apiToken}` }
 
 	let dbRes = await call(baseUrl, { headers })
-	if (dbRes.status === 404 && request.readonly === true)
-		throw new Error(`Turso database "${org}/${dbName}" does not exist; check and status create none`)
+	if (dbRes.status === 404 && request.readonly === true) throw new TursoMissing(`${org}/${dbName}`)
 	if (dbRes.status === 404) {
 		await createTursoDatabase({ ...request, fetch: call, group: request.group ?? "default" })
 		dbRes = await call(baseUrl, { headers })
