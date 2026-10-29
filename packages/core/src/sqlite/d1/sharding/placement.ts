@@ -112,7 +112,7 @@ async function softDelete(db: ShardDb, orgId: string): Promise<void> {
 }
 
 /**
- * The live mapping a session under `constraint` reads, with its bookmark, and the session; no
+ * The live mapping a session under `constraint` reads, and the session; no
  * mapping when the org has no live row there
  */
 async function readLiveRow(
@@ -126,7 +126,7 @@ async function readLiveRow(
 		.from(shardMap)
 		.where(and(eq(shardMap.org_id, orgId), isNull(shardMap.deleted_at)))
 		.get()
-	return { mapping: row ? toMapping(row, session?.getBookmark()) : undefined, session }
+	return { mapping: row ? toMapping(row) : undefined, session }
 }
 
 /** The live mapping in the core database: the nearest replica's, else the primary's */
@@ -137,10 +137,9 @@ async function readLive(coreDb: D1Database, orgId: string): Promise<ShardMapping
 	return (await readLiveRow(coreDb, orgId, "first-primary")).mapping
 }
 
-function toMapping(row: ShardRow, bookmark: string | null | undefined): ShardMapping {
+function toMapping(row: ShardRow): ShardMapping {
 	return {
 		createdAt: row.created_at,
-		d1Bookmark: bookmark ?? undefined,
 		deletedAt: row.deleted_at,
 		driver: row.driver,
 		orgId: row.org_id,

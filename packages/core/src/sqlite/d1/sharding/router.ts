@@ -29,9 +29,6 @@ import type {
 	WaitUntilCtx,
 } from "./types.ts"
 
-/** Where a write's row is cached, and the bookmark of the session that wrote it */
-type SettleTargets = CacheTargets & { bookmark: string | null | undefined }
-
 /** How a write placed an org: on a new row, on its soft-deleted one, over its live one, or not at all, its live row standing */
 type Placement = "allocate" | "move" | "revive" | "standing"
 
@@ -134,8 +131,7 @@ class ShardRouter {
 	 * Allocate a shard for an org: the one `pick` names, told each shard's live count. A
 	 * soft-deleted org is revived on the shard it had, where its data is, without asking pick. The
 	 * count is read before the insert, so two isolates allocating at once can both take a shard's
-	 * last place: maxOrgsPerShard is a soft cap. Writes go to the primary; the bookmark is kept for
-	 * the reads that follow.
+	 * last place: maxOrgsPerShard is a soft cap. Writes go to the primary.
 	 */
 	async allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
 		assertOrgId(orgId)
@@ -165,11 +161,10 @@ class ShardRouter {
 		const { orgId, shardId } = placement
 		assertOrgId(orgId)
 		assertShard(shardId, this.totalShards)
-		const { client, session } = openD1Session(deps.coreDb)
-		const row = await overwrite(client, placement)
+		const row = await overwrite(openD1Session(deps.coreDb).client, placement)
 		/* the tombstone after the commit, then the moved row warms KV tagged with it */
 		const tag = await this.cache.invalidate(orgId, deps.kv)
-		return this.settle(row, "move", { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv, tag })
+		return this.settle(row, "move", { executionCtx, kv: deps.kv, tag })
 	}
 
 	/** Soft-delete an org's mapping and invalidate it here; a later allocate or place revives it on its shard */
@@ -206,18 +201,16 @@ class ShardRouter {
 		deps: ShardResolverDeps,
 		executionCtx: WaitUntilCtx,
 	): Promise<ShardMapping> {
-		const { client, session } = openD1Session(deps.coreDb)
-		const { how, row } = await insertFirst(drizzle(client), orgId, shardId)
-		const targets = { bookmark: session?.getBookmark(), executionCtx, kv: deps.kv, tag: null }
-		return this.settle(row, how, targets)
+		const { how, row } = await insertFirst(drizzle(openD1Session(deps.coreDb).client), orgId, shardId)
+		return this.settle(row, how, { executionCtx, kv: deps.kv, tag: null })
 	}
 
 	/**
 	 * Caches the row a write left standing, this isolate's miss for the org forgotten, and returns
 	 * its mapping; logs the placement only when the write placed it, so the events count rows (U40)
 	 */
-	private settle(row: ShardRow, how: Placement, { bookmark, ...targets }: SettleTargets): ShardMapping {
-		const mapping = toMapping(row, bookmark)
+	private settle(row: ShardRow, how: Placement, targets: CacheTargets): ShardMapping {
+		const mapping = toMapping(row)
 		const data = { orgId: row.org_id, shardId: row.shard_id }
 		if (how !== "standing")
 			this.log(

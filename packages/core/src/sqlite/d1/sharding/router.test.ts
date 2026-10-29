@@ -369,31 +369,6 @@ describe("ShardRouter — the core database tier", () => {
 		await Promise.all(calls)
 		expect(await d.kv.get("shard-inv:org-d1", "json")).toEqual({ nonce: expect.any(String) })
 	})
-
-	it("carries the session bookmark on what it allocates and what it reads, none when D1 has none", async () => {
-		const d = await seeded()
-		/* Miniflare's D1 has no withSession; a session over it reports a bookmark the way D1 does */
-		const sessioned = (bookmark: string | null) => {
-			const session = {
-				batch: (statements: Parameters<D1Database["batch"]>[0]) => d.coreDb.batch(statements),
-				getBookmark: () => bookmark,
-				prepare: (query: string) => d.coreDb.prepare(query),
-			}
-			return { ...session, withSession: () => session } as unknown as D1Database
-		}
-		const { calls, ctx } = mockWaitUntil()
-
-		const marked = { coreDb: sessioned("bk-test"), kv: d.kv }
-		expect((await new ShardRouter({ totalShards: 2 }).resolve("org-d1", marked, ctx))?.d1Bookmark).toBe("bk-test")
-		expect((await new ShardRouter({ totalShards: 2 }).allocate("org-new", marked, ctx)).d1Bookmark).toBe("bk-test")
-		/* the first half cached org-d1 in KV; drop it so the next resolve reads the database again */
-		await Promise.all(calls.splice(0))
-		await d.kv.delete("shard:org-d1")
-		const blank = { coreDb: sessioned(null), kv: d.kv }
-		expect((await new ShardRouter({ totalShards: 2 }).resolve("org-d1", blank, ctx))?.d1Bookmark).toBeUndefined()
-		expect((await new ShardRouter({ totalShards: 2 }).allocate("org-next", blank, ctx)).d1Bookmark).toBeUndefined()
-		await Promise.all(calls)
-	})
 })
 
 describe("ShardRouter — revalidation from the core database", () => {

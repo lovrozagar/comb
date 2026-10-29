@@ -88,8 +88,7 @@ declare class ShardRouter {
      * Allocate a shard for an org: the one `pick` names, told each shard's live count. A
      * soft-deleted org is revived on the shard it had, where its data is, without asking pick. The
      * count is read before the insert, so two isolates allocating at once can both take a shard's
-     * last place: maxOrgsPerShard is a soft cap. Writes go to the primary; the bookmark is kept for
-     * the reads that follow.
+     * last place: maxOrgsPerShard is a soft cap. Writes go to the primary.
      */
     allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping>;
     /**
@@ -162,7 +161,6 @@ import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types"
 type ShardDriver = "d1";
 type ShardMapping = {
     createdAt: number;
-    d1Bookmark?: string | undefined;
     deletedAt: number | null;
     driver: ShardDriver;
     orgId: string;

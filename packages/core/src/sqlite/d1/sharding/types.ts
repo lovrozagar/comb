@@ -3,7 +3,6 @@ type ShardDriver = "d1"
 
 type ShardMapping = {
 	createdAt: number
-	d1Bookmark?: string | undefined
 	deletedAt: number | null
 	driver: ShardDriver
 	orgId: string

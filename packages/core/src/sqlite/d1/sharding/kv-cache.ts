@@ -51,9 +51,9 @@ async function guarded<T>(
 
 /**
  * A mapping as KV holds it: tagged with the nonce of the tombstone its fill read under, if any;
- * a 0.14 fill's `readAt`, which nothing reads now
+ * a 0.14 fill's `readAt` and an older fill's session bookmark, which no reader is handed
  */
-type Stored = ShardMapping & { readAt?: number; tag?: string }
+type Stored = ShardMapping & { d1Bookmark?: string; readAt?: number; tag?: string }
 
 /** What KV holds for an org: its mapping and that mapping's tag, or none, and its live tombstone's nonce, if any */
 type KvView = { mapping: ShardMapping | null; nonce: string | null; tag: string | null }
@@ -71,7 +71,7 @@ async function kvView(kv: ShardKv, orgId: string, log: LogFn): Promise<KvView> {
 	])
 	const nonce = tombstone?.nonce ?? null
 	if (held === null || Object.hasOwn(held, "invalidatedAt")) return { mapping: null, nonce, tag: null }
-	const { readAt: _readAt, tag, ...mapping } = held as Stored
+	const { d1Bookmark: _bookmark, readAt: _readAt, tag, ...mapping } = held as Stored
 	return { mapping, nonce, tag: tag ?? null }
 }
 

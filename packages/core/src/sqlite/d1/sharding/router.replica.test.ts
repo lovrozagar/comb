@@ -186,3 +186,21 @@ describe("ShardRouter: another colo that sees the tombstone late", () => {
 		expect(await shardOf(router(), { coreDb, kv: store })).toBe(1)
 	})
 })
+
+/* C17 of the 0.14.1 review: a fill's session bookmark is no other request's */
+describe("ShardRouter: a cached mapping", () => {
+	it("carries no session bookmark, from the core table, KV or this isolate's LRU, nor one an older fill left in KV", async () => {
+		const { coreDb } = await placed()
+		const kv = memoryKv()
+		const filler = router()
+		const read = await filler.resolve("org-1", { coreDb, kv }, ctx)
+		await settle()
+		const fromLru = await filler.resolve("org-1", { coreDb, kv }, ctx)
+		const fromKv = await router().resolve("org-1", { coreDb, kv }, ctx)
+		const stored = (await kv.get("shard:org-1", "json")) as object
+		await kv.put("shard:org-1", JSON.stringify({ ...stored, d1Bookmark: "bk-of-0.14" }))
+		const fromOldKv = await router().resolve("org-1", { coreDb, kv }, ctx)
+		for (const mapping of [read, fromLru, fromKv, fromOldKv]) expect(mapping).not.toHaveProperty("d1Bookmark")
+		expect(stored).not.toHaveProperty("d1Bookmark")
+	})
+})
