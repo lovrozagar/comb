@@ -9,6 +9,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { openMemory } from "../drivers/memory.ts"
 import type { Connection, ExtractedSchema } from "../types.ts"
 import { hashDir, sqlFiles } from "./atlas-dir.ts"
 import { sqliteDevUrl } from "./atlas-env.ts"
@@ -23,6 +24,7 @@ import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
 import type { Run } from "./process.ts"
 import { extractSchema } from "./schema.ts"
 import { codeOf } from "./sql-code.ts"
+import { normalizeSql } from "./sql-scan.ts"
 
 const SYNCED = "Schemas are synced, no changes to be made."
 /* the tables SQLite keeps behind every fts5 table */
@@ -36,13 +38,59 @@ async function liveDdl(conn: Connection): Promise<string> {
 	return asSql(rows.map((row) => String(row[1])))
 }
 
-/** The FTS objects `a` has and `b` lacks, as lines of the difference */
-const only = (a: FtsState, b: FtsState, where: string): string[] =>
-	[...a.keys()].filter((name) => !b.has(name)).map((name) => `-- FTS ${a.get(name)?.kind} ${name}: only in ${where}`)
+/* the objects Atlas OSS does not inspect on SQLite: triggers, views and virtual tables, FTS5's included (S5) */
+const UNINSPECTED =
+	"SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND (type IN ('trigger', 'view') OR (type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%')) ORDER BY rowid"
 
-/** The FTS objects only one side has, as lines of the difference */
-function ftsDifference(live: FtsState, history: FtsState): string[] {
-	return [...only(live, history, "the database"), ...only(history, live, "the migrations")]
+/** Each object Atlas OSS does not inspect, by what it is and its name, with its definition normalized */
+function uninspected(rows: ReadonlyArray<Readonly<Record<string, unknown>>>): Map<string, string> {
+	return new Map(
+		rows.map((row) => {
+			const sql = String(row["sql"])
+			const kind =
+				row["type"] !== "table" ? String(row["type"]) : /\bUSING\s+fts5\b/i.test(sql) ? "FTS table" : "virtual table"
+			return [`${kind} ${String(row["name"])}`, normalizeSql(sql)]
+		}),
+	)
+}
+
+/** The triggers, views and virtual tables the migrations of `dir` leave, replayed on a private in-memory SQLite */
+async function replayedObjects(dir: string): Promise<Map<string, string>> {
+	const db = await openMemory()
+	try {
+		for (const file of sqlFiles(dir)) {
+			try {
+				db.exec(readFileSync(join(dir, file), "utf8"))
+			} catch (error) {
+				throw new Error(
+					`comb could not replay ${file} to compare its triggers and views: ${(error as Error).message}`,
+					{
+						cause: error,
+					},
+				)
+			}
+		}
+		return uninspected(db.all(UNINSPECTED))
+	} finally {
+		db.close()
+	}
+}
+
+/**
+ * Where the database's triggers, views and virtual tables differ from the ones the migrations
+ * leave, by name and normalized definition, as lines of the difference (S5 of the 0.14.1 review)
+ */
+async function objectDrift(conn: Connection, dir: string): Promise<string[]> {
+	const live = uninspected((await conn.execute(UNINSPECTED)).rows.map(([type, name, sql]) => ({ name, sql, type })))
+	const history = await replayedObjects(dir)
+	const lines: string[] = []
+	for (const [key, sql] of live) {
+		const want = history.get(key)
+		if (want === undefined) lines.push(`-- ${key}: only in the database`)
+		else if (want !== sql) lines.push(`-- ${key}: the database has ${sql}, the migrations ${want}`)
+	}
+	for (const key of history.keys()) if (!live.has(key)) lines.push(`-- ${key}: only in the migrations`)
+	return lines
 }
 
 /**
@@ -73,7 +121,7 @@ async function sqliteDrift(conn: Connection, dir: string, exec: Run): Promise<st
 		const ran = exec("atlas", [...args, "--dev-url", sqliteDevUrl()])
 		if (ran.code !== 0) throw new Error(`atlas schema diff failed: ${`${ran.stderr}${ran.stdout}`.trim()}`)
 		const atlasDiff = ran.stdout.trim() === SYNCED ? [] : [ran.stdout.trim()]
-		return [...atlasDiff, ...ftsDifference(live.state, history)].join("\n")
+		return [...atlasDiff, ...(await objectDrift(conn, dir))].join("\n")
 	} finally {
 		rmSync(work, { force: true, recursive: true })
 	}

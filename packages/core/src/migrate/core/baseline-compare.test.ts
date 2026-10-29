@@ -26,7 +26,7 @@ function atlas(stdout: string, code = 0, notice = ""): Run & { live: string[] } 
 }
 
 describe("sqliteDrift", () => {
-	it("hands Atlas the database without its FTS objects, shadow tables or history, and names an FTS group only one side has", async () => {
+	it("hands Atlas the database without its FTS objects, shadow tables or history, and names each FTS object only one side has", async () => {
 		writeFileSync(join(dir, "m", "1_init.sql"), "CREATE TABLE post (id TEXT, title TEXT);")
 		const conn = libsqlConnection()
 		await conn.client.executeMultiple(
@@ -34,7 +34,7 @@ describe("sqliteDrift", () => {
 		)
 		const run = atlas("Schemas are synced, no changes to be made.\n")
 		expect(await sqliteDrift(conn, join(dir, "m"), run)).toBe(
-			"-- FTS table post_fts: only in the database\n-- FTS trigger post_fts_ai: only in the database",
+			"-- FTS table post_fts: only in the database\n-- trigger post_fts_ai: only in the database",
 		)
 		expect(run.live).toEqual(["CREATE TABLE post (id TEXT, title TEXT);\n"])
 		await expect(sqliteDrift(conn, join(dir, "m"), atlas("", 1))).rejects.toThrow("atlas schema diff failed: boom")
@@ -65,5 +65,50 @@ describe("refuseDrift: the Postgres database against its replayed history", () =
 		expect(() => refuseDrift({ exec: drifted, target: target("synced") }, join(dir, "m"))).toThrow(
 			'the difference:\n-- Modify "a" table: ***\nALTER TABLE "a" ADD COLUMN "x" int;',
 		)
+	})
+})
+
+/* S5 of the 0.14.1 review: Atlas OSS inspects no SQLite trigger or view, and FTS was compared by name alone */
+/** atlas finding the tables in sync */
+const synced = () => atlas("Schemas are synced, no changes to be made.\n")
+
+describe("sqliteDrift: the triggers, views and FTS tables Atlas OSS does not compare", () => {
+	const HISTORY = `CREATE TABLE post (id TEXT, title TEXT, body TEXT);
+CREATE VIRTUAL TABLE post_fts USING fts5(title, body, content='post');
+CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN SELECT 1; END;`
+
+	it("names a trigger only the migrations make, a view only the database has, and an FTS table whose columns differ", async () => {
+		writeFileSync(join(dir, "m", "1_init.sql"), HISTORY)
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple(
+			"CREATE TABLE post (id TEXT, title TEXT, body TEXT); CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post'); CREATE VIEW recent AS SELECT id FROM post;",
+		)
+		expect((await sqliteDrift(conn, join(dir, "m"), synced())).split("\n")).toEqual([
+			"-- FTS table post_fts: the database has CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post'), the migrations CREATE VIRTUAL TABLE post_fts USING fts5(title, body, content='post')",
+			"-- view recent: only in the database",
+			"-- trigger post_audit: only in the migrations",
+		])
+		await conn.close()
+	})
+
+	it("names a virtual table other than FTS5 as one, and refuses a history it cannot replay, naming the file", async () => {
+		writeFileSync(join(dir, "m", "1_init.sql"), "CREATE VIRTUAL TABLE spots USING rtree(id, x0, x1);")
+		const conn = libsqlConnection()
+		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("-- virtual table spots: only in the migrations")
+		writeFileSync(join(dir, "m", "2_bad.sql"), "CREATE TABLE ;")
+		await expect(sqliteDrift(conn, join(dir, "m"), synced())).rejects.toThrow(
+			"comb could not replay 2_bad.sql to compare its triggers and views:",
+		)
+		await conn.close()
+	})
+
+	it("finds the objects the migrations leave, whatever their whitespace and comments, in sync", async () => {
+		writeFileSync(join(dir, "m", "1_init.sql"), HISTORY)
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple(
+			"CREATE TABLE post (id TEXT, title TEXT, body TEXT); CREATE VIRTUAL TABLE post_fts USING fts5(title,   body, content='post'); CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN /* kept */ SELECT 1; END;",
+		)
+		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("")
+		await conn.close()
 	})
 })
