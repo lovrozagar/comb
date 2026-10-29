@@ -17,6 +17,7 @@ import {
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { truncateUtf8 } from "../identifier.ts"
+import { connectionLost } from "./connection-lost.ts"
 import { mapTable } from "./map-table.ts"
 import { type PgErrorRead, readPgError } from "./read-error.ts"
 import { statementTable } from "../statement-head.ts"
@@ -216,37 +217,6 @@ const RESOURCE: Record<string, Fallback> = {
 	"57P03": UNAVAILABLE,
 	"57P05": UNAVAILABLE,
 	"25P03": UNAVAILABLE,
-}
-
-/* the drivers' own codes for a connection refused, lost or timed out, which carry no SQLSTATE (Q14 of r17) */
-// lookup-table: the codes connectionLost reads
-const CONNECTION_CODES: ReadonlySet<string> = /* @__PURE__ */ new Set([
-	"CONNECT_TIMEOUT",
-	"CONNECTION_CLOSED",
-	"CONNECTION_DESTROYED",
-	"CONNECTION_ENDED",
-	"ECONNREFUSED",
-	"ECONNRESET",
-	"EPIPE",
-	"ETIMEDOUT",
-])
-
-/* node-postgres's client once its connection broke, which it throws with no code */
-const PG_BROKEN = "Client has encountered a connection error and is not queryable"
-
-/**
- * Whether `error`, or one under it on `.cause`, is a driver's lost connection: postgres.js's and
- * node's codes, Bun.SQL's ERR_POSTGRES_CONNECTION_*, node-postgres's broken client. The 08xxx
- * SQLSTATEs stay in RESOURCE for a libpq-based driver, which sends them
- */
-function connectionLost(error: unknown): boolean {
-	for (let link = error, depth = 0; link instanceof Error && depth < 8; link = link.cause, depth++) {
-		const { code } = link as { code?: unknown }
-		if (typeof code === "string" && (CONNECTION_CODES.has(code) || code.startsWith("ERR_POSTGRES_CONNECTION_")))
-			return true
-		if (code === undefined && link.message === PG_BROKEN) return true
-	}
-	return false
 }
 
 /**

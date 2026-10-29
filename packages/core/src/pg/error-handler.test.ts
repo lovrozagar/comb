@@ -268,28 +268,3 @@ describe("classifyPgError: what pgErrorHandler would throw, thrown by nobody (C6
 		expect(classifyPgError(error, MAPS)).toEqual(thrownBy((e) => pgErrorHandler(e, MAPS), error))
 	})
 })
-
-/* Q14 of r17: each driver's own words for a connection refused or lost, as the drivers were seen to throw them */
-/** An error as a driver throws it: its message, and its code when it has one */
-const driver = (code: string | undefined, message: string) =>
-	Object.assign(new Error(message), code === undefined ? {} : { code })
-
-describe("classifyPgError on a lost connection", () => {
-	it.each([
-		["postgres.js and pg, refused", driver("ECONNREFUSED", "connect ECONNREFUSED 127.0.0.1:1")],
-		["postgres.js, reset", driver("ECONNRESET", "read ECONNRESET")],
-		["a timeout", driver("ETIMEDOUT", "connect ETIMEDOUT")],
-		["a broken pipe", driver("EPIPE", "write EPIPE")],
-		["postgres.js, closed", driver("CONNECTION_CLOSED", "write CONNECTION_CLOSED 127.0.0.1:5432")],
-		["postgres.js, connect timeout", driver("CONNECT_TIMEOUT", "write CONNECT_TIMEOUT 127.0.0.1:5432")],
-		["Bun.SQL, refused", driver("ERR_POSTGRES_CONNECTION_REFUSED", "Failed to connect")],
-		["pg, its client broken", driver(undefined, "Client has encountered a connection error and is not queryable")],
-	])("answers %s as database_unavailable 503", (_label, error) => {
-		expect(classifyPgError(error, [])).toMatchObject({ errorKey: "database_unavailable", status: 503 })
-	})
-
-	it("answers an error of no driver's connection words as nothing", () => {
-		expect(classifyPgError(driver("ENOENT", "no such file"), [])).toBeUndefined()
-		expect(classifyPgError(driver(undefined, "connection error"), [])).toBeUndefined()
-	})
-})
