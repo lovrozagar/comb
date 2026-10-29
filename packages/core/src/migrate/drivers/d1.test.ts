@@ -42,7 +42,8 @@ describe("executeAll", () => {
 })
 
 describe("createD1Provider: execute", () => {
-	it("runs wrangler against the resolved database name, remote by default, and maps rows to columns", async () => {
+	/* K4 of r17: the provider's databaseName, never the environment's name the resolved config carries */
+	it("runs wrangler against the provider's databaseName, remote by default, and maps rows to columns", async () => {
 		const run = fakeRun(() =>
 			json([
 				{
@@ -65,7 +66,7 @@ describe("createD1Provider: execute", () => {
 		})
 		expect(run.calls).toEqual([
 			{
-				args: ["d1", "execute", "core-local", "--remote", "--json", "--command=SELECT a, b FROM t"],
+				args: ["d1", "execute", "core", "--remote", "--json", "--command=SELECT a, b FROM t"],
 				cmd: "wrangler",
 				options: undefined,
 			},
@@ -76,7 +77,7 @@ describe("createD1Provider: execute", () => {
 		const run = fakeRun(() => json([{ results: [] }]))
 		const conn = await connect(run, { ...CONFIG, local: true })
 		await conn.execute("SELECT 1")
-		expect(run.calls[0]?.args).toEqual(["d1", "execute", "core-local", "--local", "--json", "--command=SELECT 1"])
+		expect(run.calls[0]?.args).toEqual(["d1", "execute", "core", "--local", "--json", "--command=SELECT 1"])
 	})
 })
 
@@ -116,7 +117,7 @@ describe("createD1Provider: batch and close", () => {
 		const conn = await connect(run, { ...CONFIG, local: false })
 		await conn.batch([{ sql: "CREATE TABLE a (x)" }, { sql: "CREATE TABLE b (y)" }])
 		expect(run.calls.map(({ args }) => args)).toEqual([
-			["d1", "execute", "core-local", "--remote", "--command=CREATE TABLE a (x)\n;\nCREATE TABLE b (y)\n;"],
+			["d1", "execute", "core", "--remote", "--command=CREATE TABLE a (x)\n;\nCREATE TABLE b (y)\n;"],
 		])
 	})
 
@@ -132,7 +133,7 @@ describe("createD1Provider: batch and close", () => {
 		const long = `INSERT INTO t VALUES ('${"x".repeat(100 * 1024)}')`
 		await conn.batch([{ sql: long }])
 		expect(body).toBe(`${long}\n;`)
-		expect(run.calls[0]?.args.slice(0, 4)).toEqual(["d1", "execute", "core-local", "--local"])
+		expect(run.calls[0]?.args.slice(0, 4)).toEqual(["d1", "execute", "core", "--local"])
 		expect(existsSync(file)).toBe(false)
 	})
 

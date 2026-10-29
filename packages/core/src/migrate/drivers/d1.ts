@@ -8,7 +8,7 @@ import { join } from "node:path"
 import * as z from "zod"
 import { type Run, run } from "../core/process.ts"
 import { segments } from "../core/sql-scan.ts"
-import type { Connection, ConnectionProvider, D1ProviderConfig, QueryResult, ResolvedDatabaseConfig } from "../types.ts"
+import type { Connection, ConnectionProvider, D1ProviderConfig, QueryResult } from "../types.ts"
 
 /* wrangler JSON output schema for query results, built on use: each command parses it once */
 const wranglerResultSchema = () =>
@@ -155,9 +155,10 @@ export { executeAll, wranglerFlags }
 
 export function createD1Provider(config: D1ProviderConfig, exec: Run = run): ConnectionProvider {
 	return {
-		connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
-			/* Use resolved env name (e.g. csvme-core-local) so each env targets its own D1 db */
-			return Promise.resolve(createD1Connection(dbConfig.name, wranglerFlags(config), exec))
+		/* the D1 database is the provider's databaseName (its binding or database_name), never the
+		   environment's name the resolved config carries, which wrangler knows nothing of (K4 of r17) */
+		connect(): Promise<Connection> {
+			return Promise.resolve(createD1Connection(config.databaseName, wranglerFlags(config), exec))
 		},
 		dialect: "sqlite",
 	}
