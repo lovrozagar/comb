@@ -2,7 +2,7 @@
 /**
  * @lovrozagar/comb/query/sqlite — SQLite-specific SQL generation.
  */
-export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryParsed, type ListQueryResult, } from "./build-list-query.ts";
+export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryResult, } from "./build-list-query.ts";
 export { conditionToSQL, filterToSQL } from "./executor.ts";
 export { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts";
 export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, type Tiebreak } from "./keyset.ts";
@@ -12,14 +12,15 @@ export { likeSearch, type LikeSearchResolver } from "./search.ts";
 export { type Refold, refoldStatements } from "./refold.ts";
 export { SQL_SORT_DIR } from "./sql.ts";
 export type { RelationConfig } from "./types.ts";
+export type { ListQueryInput } from "../types.ts";
 
 // query/sqlite/build-list-query.d.ts
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
-import type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryParsed, ListQueryResult } from "./build-list-query-types.ts";
+import type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryResult } from "./build-list-query-types.ts";
 declare function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable>): ListQueryResult;
 declare function buildDerivedListQuery<TSortField extends string>(opts: BuildDerivedListQueryOpts<TSortField>): ListQueryResult;
 export { applyListQuery } from "./apply-list-query.ts";
-export { buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryParsed, type ListQueryResult, };
+export { buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryResult, };
 
 // query/sqlite/executor.d.ts
 /**
@@ -295,116 +296,6 @@ type RelationConfig = {
 };
 export type { RelationConfig };
 
-// query/sqlite/build-list-query-types.d.ts
-/** The options the SQLite list builders take, and the query they build (build-list-query.ts). Declarations only. */
-import type { SQL, SQLWrapper } from "drizzle-orm";
-import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
-import type { ListPagination } from "../pagination.ts";
-import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts";
-import type { LikeSearchResolver } from "./search.ts";
-import type { RelationConfig } from "./types.ts";
-/**
- * Parsed list query input — matches createListQuerySchema output.
- * Intentionally loose to work with any codegen or manual construction.
- */
-type ListQueryParsed = {
-    cursor?: string | null | undefined;
-    filterAst?: FilterAST | null | unknown;
-    limit: number;
-    page?: number | null | undefined;
-    parsedSort: SortField[];
-    q?: string | null | undefined;
-    /** The list schema sets it; a filter or an order without it is refused (query/trusted.ts) */
-    validated?: true | undefined;
-    [key: string]: unknown;
-};
-type BuildListQueryOpts<TTable extends SQLiteTable> = {
-    /** Additional WHERE clause ANDed with filter/cursor — for joins, access filters, soft deletes */
-    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
-    computedFilters?: Record<string, ComputedFilterResolver>;
-    computedSorts?: Record<string, ComputedSortResolver>;
-    /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
-    cursorScope: string;
-    /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
-    cursorSecret: string;
-    /** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL (CursorOptions) */
-    nonFinite?: "exact" | undefined;
-    parsed: ListQueryParsed;
-    relations?: Record<string, RelationConfig>;
-    /** LIKE-based search resolver — use `likeSearch(column)` factory */
-    search?: LikeSearchResolver;
-    table: TTable;
-};
-type BuildDerivedListQueryOpts<TSortField extends string = string> = {
-    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
-    /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
-    cursorScope: string;
-    /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
-    cursorSecret: string;
-    filterWhere?: SQL | null;
-    /** the field a row's id is in, which paginate mints the next cursor from (default `id`) */
-    idField?: string | undefined;
-    parsed: ListQueryParsed & {
-        parsedSort: SortField<TSortField>[];
-    };
-    searchWhere?: SQL | null;
-    /** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
-    sortColumns: Record<TSortField, SQLWrapper | {
-        sql: SQLWrapper;
-        type: "date";
-    }>;
-} & ({
-    /**
-     * the one table the rows are, by its id column: a sort key too long for a cursor is
-     * carried by reference and read back from it, as on a table's own list (C3)
-     */
-    anchor: {
-        idColumn: SQLiteColumn;
-        table: SQLiteTable;
-    };
-    idColumn?: never;
-} | {
-    anchor?: never;
-    /** the id the order breaks ties on; with no table to read a key back from, a key too long for a cursor is a 500 */
-    idColumn: SQLWrapper;
-});
-type ListQueryResult = {
-    limit: number;
-    /** How `paginate` pages the rows this query reads (pagination.ts) */
-    pagination: ListPagination;
-    meta: {
-        limit: number;
-        page: number;
-        type: "cursor" | "offset";
-    };
-    offset: number;
-    orderBy: SQL[];
-    search: string | null;
-    where: SQL | undefined;
-};
-export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryParsed, ListQueryResult };
-
-// query/sqlite/apply-list-query.d.ts
-/** The one way a built list query reaches a drizzle select: its WHERE, ORDER BY, LIMIT and OFFSET. */
-import type { SQL } from "drizzle-orm";
-import type { ListQueryResult } from "./build-list-query.ts";
-/** A builder whose methods return its own type, as drizzle's select does once made dynamic */
-type ListQueryAppliable<TQuery> = {
-    limit: (limit: number) => TQuery;
-    offset: (offset: number) => TQuery;
-    orderBy: (...orderBy: SQL[]) => TQuery;
-    where: (where: SQL) => TQuery;
-};
-/**
- * `query` with the list's WHERE, ORDER BY, LIMIT and OFFSET applied: a builder whose methods return
- * its own type, or drizzle's select as it is, made dynamic here (C12 of the 0.14.1 review)
- */
-declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult): TQuery;
-declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: {
-    $dynamic(): TQuery;
-}, q: ListQueryResult): TQuery;
-export { applyListQuery, type ListQueryAppliable };
-
 // query/types.d.ts
 /**
  * Query helper types — DB-agnostic.
@@ -442,6 +333,23 @@ type SortField<T extends string = string> = {
     field: T;
     nulls?: SortNulls | undefined;
 };
+/**
+ * What every list builder takes (buildListQuery, buildDerivedListQuery, queryHelpers.listOptions):
+ * the list schema's output, or a query the app builds itself, its arrays read only (K10 of r17)
+ */
+type ListQueryInput<TSortField extends string = string> = {
+    cursor?: string | null | undefined;
+    filterAst?: FilterAST | null | undefined;
+    limit: number;
+    page?: number | null | undefined;
+    /** the schema's own page was checked against its maxPage (query/trusted.ts); absent, the default bounds it */
+    pageBounded?: true | undefined;
+    parsedFields?: ParsedFields | null | undefined;
+    parsedSort: readonly SortField<TSortField>[];
+    q?: string | null | undefined;
+    /** The list schema sets it; a filter or an order without it is refused (query/trusted.ts) */
+    validated?: true | undefined;
+};
 type ComputedFilterResolver = (operator: FilterOperator, value: unknown) => SQL | null;
 type ComputedSortResolver = (direction: SortDirection) => SQL;
 type ListQueryCapabilities = {
@@ -456,14 +364,107 @@ type ListQueryCapabilities = {
     searchFields: Set<string>;
     sortFields: Set<string>;
 };
-export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ParsedFields, SortDirection, SortField, SortNulls, };
+export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ListQueryInput, ParsedFields, SortDirection, SortField, SortNulls, };
+
+// query/sqlite/build-list-query-types.d.ts
+/** The options the SQLite list builders take, and the query they build (build-list-query.ts). Declarations only. */
+import type { SQL, SQLWrapper } from "drizzle-orm";
+import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
+import type { ListPagination } from "../pagination.ts";
+import type { ComputedFilterResolver, ComputedSortResolver, ListQueryInput } from "../types.ts";
+import type { LikeSearchResolver } from "./search.ts";
+import type { RelationConfig } from "./types.ts";
+type BuildListQueryOpts<TTable extends SQLiteTable> = {
+    /** Additional WHERE clause ANDed with filter/cursor — for joins, access filters, soft deletes */
+    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
+    computedFilters?: Record<string, ComputedFilterResolver>;
+    computedSorts?: Record<string, ComputedSortResolver>;
+    /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
+    cursorScope: string;
+    /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
+    cursorSecret: string;
+    /** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL (CursorOptions) */
+    nonFinite?: "exact" | undefined;
+    parsed: ListQueryInput;
+    relations?: Record<string, RelationConfig>;
+    /** LIKE-based search resolver — use `likeSearch(column)` factory */
+    search?: LikeSearchResolver;
+    table: TTable;
+};
+type BuildDerivedListQueryOpts<TSortField extends string = string> = {
+    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
+    /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
+    cursorScope: string;
+    /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
+    cursorSecret: string;
+    filterWhere?: SQL | null;
+    /** the field a row's id is in, which paginate mints the next cursor from (default `id`) */
+    idField?: string | undefined;
+    parsed: ListQueryInput<TSortField>;
+    searchWhere?: SQL | null;
+    /** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
+    sortColumns: Record<TSortField, SQLWrapper | {
+        sql: SQLWrapper;
+        type: "date";
+    }>;
+} & ({
+    /**
+     * the one table the rows are, by its id column: a sort key too long for a cursor is
+     * carried by reference and read back from it, as on a table's own list (C3)
+     */
+    anchor: {
+        idColumn: SQLiteColumn;
+        table: SQLiteTable;
+    };
+    idColumn?: never;
+} | {
+    anchor?: never;
+    /** the id the order breaks ties on; with no table to read a key back from, a key too long for a cursor is a 500 */
+    idColumn: SQLWrapper;
+});
+type ListQueryResult = {
+    limit: number;
+    /** How `paginate` pages the rows this query reads (pagination.ts) */
+    pagination: ListPagination;
+    meta: {
+        limit: number;
+        page: number;
+        type: "cursor" | "offset";
+    };
+    offset: number;
+    orderBy: SQL[];
+    search: string | null;
+    where: SQL | undefined;
+};
+export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryResult };
+
+// query/sqlite/apply-list-query.d.ts
+/** The one way a built list query reaches a drizzle select: its WHERE, ORDER BY, LIMIT and OFFSET. */
+import type { SQL } from "drizzle-orm";
+import type { ListQueryResult } from "./build-list-query.ts";
+/** A builder whose methods return its own type, as drizzle's select does once made dynamic */
+type ListQueryAppliable<TQuery> = {
+    limit: (limit: number) => TQuery;
+    offset: (offset: number) => TQuery;
+    orderBy: (...orderBy: SQL[]) => TQuery;
+    where: (where: SQL) => TQuery;
+};
+/**
+ * `query` with the list's WHERE, ORDER BY, LIMIT and OFFSET applied: a builder whose methods return
+ * its own type, or drizzle's select as it is, made dynamic here (C12 of the 0.14.1 review)
+ */
+declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult): TQuery;
+declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: {
+    $dynamic(): TQuery;
+}, q: ListQueryResult): TQuery;
+export { applyListQuery, type ListQueryAppliable };
 
 // query/pagination.d.ts
 import { type DecodedCursor } from "./cursor.ts";
 import { type KeysetKind } from "./cursor-mint.ts";
 import { type CursorOptions } from "./cursor-seal.ts";
 import type { paginationResponseSchema } from "./schema.ts";
-import type { ParsedFields, SortField } from "./types.ts";
+import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
 import type * as z from "zod";
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationMeta = z.output<typeof paginationResponseSchema>;
@@ -482,7 +483,7 @@ type ListPagination = {
     nonFinite: "exact" | undefined;
     page: number | undefined;
     parsedFields: ParsedFields | null;
-    parsedSort: SortField[];
+    parsedSort: readonly SortField[];
     /** the most rows the built query reads: one past the page, so paginate can tell there is more */
     window: number;
     /** the cursor for the page after `row`, sealed under the builder's options */
@@ -497,13 +498,7 @@ type PaginationFacts = {
     cursorable: boolean;
     idField?: string | undefined;
     keyset?: KeysetKind | undefined;
-    query: {
-        cursor?: string | null | undefined;
-        limit: number;
-        page?: number | null | undefined;
-        parsedFields?: ParsedFields | null | undefined;
-        parsedSort: SortField[];
-    };
+    query: ListQueryInput;
     window: number;
 };
 /** The descriptor a builder hands over: its facts, and the options it seals under closed over, never held */

@@ -90,6 +90,7 @@ export type {
 	FilterGroup,
 	FilterOperator,
 	ListQueryCapabilities,
+	ListQueryInput,
 	ParsedFields,
 	SortDirection,
 	SortField,

@@ -14,7 +14,7 @@ import { createCursor, type KeysetKind } from "./cursor-mint.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
 import { filterBySelect } from "./fields.ts"
 import type { paginationResponseSchema } from "./schema.ts"
-import type { ParsedFields, SortField } from "./types.ts"
+import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
 import type * as z from "zod"
 
 /** The pagination meta paginate returns: the list response's own schema */
@@ -35,7 +35,7 @@ type ListPagination = {
 	nonFinite: "exact" | undefined
 	page: number | undefined
 	parsedFields: ParsedFields | null
-	parsedSort: SortField[]
+	parsedSort: readonly SortField[]
 	/** the most rows the built query reads: one past the page, so paginate can tell there is more */
 	window: number
 	/** the cursor for the page after `row`, sealed under the builder's options */
@@ -51,13 +51,7 @@ type PaginationFacts = {
 	cursorable: boolean
 	idField?: string | undefined
 	keyset?: KeysetKind | undefined
-	query: {
-		cursor?: string | null | undefined
-		limit: number
-		page?: number | null | undefined
-		parsedFields?: ParsedFields | null | undefined
-		parsedSort: SortField[]
-	}
+	query: ListQueryInput
 	window: number
 }
 
@@ -133,7 +127,7 @@ function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: Pa
  */
 function mintFrom(
 	row: object,
-	parsedSort: SortField[],
+	parsedSort: readonly SortField[],
 	options: CursorOptions & { byReference?: ReadonlySet<string> | undefined; idField: string; keyset: KeysetKind },
 ): string {
 	const missing = [...parsedSort.map(({ field }) => field), options.idField].filter((key) => !Object.hasOwn(row, key))

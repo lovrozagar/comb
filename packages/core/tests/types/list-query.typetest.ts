@@ -7,6 +7,7 @@ import * as z from "zod"
 import { createListQuerySchema, createRetrieveQuerySchema } from "../../src/query/schema.ts"
 import type { ListQueryOutput } from "../../src/query/schema-types.ts"
 import type { FilterAST, ParsedFields, SortField } from "../../src/query/types.ts"
+import type { ListQueryInput } from "../../src/query/index.ts"
 import { applyListQuery, buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
 import { keysetSQL, type KeysetPosition } from "../../src/query/sqlite/index.ts"
 import { queryHelpers } from "../../src/query/drizzle.ts"
@@ -116,3 +117,19 @@ expectTypeOf(applyListQuery(d1.select().from(listed), listedQuery)).resolves.toE
 expectTypeOf(applyListQuery(d1.select().from(listed).$dynamic(), listedQuery)).resolves.toEqualTypeOf<
 	Array<{ id: number; title: string | null }>
 >()
+
+/*
+ * K6 and K10 of r17: every builder takes one exported ListQueryInput, its arrays read only, so the
+ * schema's output and the README's hand-built `as const` query both pass, with no sortOrderBy
+ */
+const handParsed = {
+	limit: 20,
+	parsedSort: [{ direction: "desc", field: "created_at" }],
+	validated: true,
+} as const
+queryHelpers.listOptions(handParsed, SEALED)
+buildListQuery({ ...SEALED, parsed: handParsed, table: post })
+const schemaInput: ListQueryInput<"created_at" | "title"> = parsed
+const pageByHand = (input: ListQueryInput) => queryHelpers.listOptions(input, SEALED)
+pageByHand(schemaInput)
+expectTypeOf<ListQueryInput["parsedSort"]>().toEqualTypeOf<readonly SortField[]>()

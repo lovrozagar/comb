@@ -9,12 +9,12 @@ describe("queryHelpers.listOptions on a page no schema validated", () => {
 		[0, "invalid_page"],
 		[1.5, "invalid_page"],
 	])("refuses page %s with %s", (page, errorKey) => {
-		expect(() => queryHelpers.listOptions({ limit: 20, page, parsedSort: [], sortOrderBy: {} }, SEALED)).toThrow(
+		expect(() => queryHelpers.listOptions({ limit: 20, page, parsedSort: [] }, SEALED)).toThrow(
 			expect.objectContaining({ errorKey, status: 400 }),
 		)
 	})
 
 	it("takes a whole page within the cap", () => {
-		expect(queryHelpers.listOptions({ limit: 20, page: 3, parsedSort: [], sortOrderBy: {} }, SEALED).offset).toBe(40)
+		expect(queryHelpers.listOptions({ limit: 20, page: 3, parsedSort: [] }, SEALED).offset).toBe(40)
 	})
 })

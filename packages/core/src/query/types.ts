@@ -56,6 +56,26 @@ type SortField<T extends string = string> = {
 	nulls?: SortNulls | undefined
 }
 
+/**
+ * What every list builder takes (buildListQuery, buildDerivedListQuery, queryHelpers.listOptions):
+ * the list schema's output, or a query the app builds itself, its arrays read only (K10 of r17)
+ */
+type ListQueryInput<TSortField extends string = string> = {
+	/* `| undefined` on each optional field: the list schema's output carries them as undefined, which
+	   exactOptionalPropertyTypes otherwise refuses */
+	cursor?: string | null | undefined
+	filterAst?: FilterAST | null | undefined
+	limit: number
+	page?: number | null | undefined
+	/** the schema's own page was checked against its maxPage (query/trusted.ts); absent, the default bounds it */
+	pageBounded?: true | undefined
+	parsedFields?: ParsedFields | null | undefined
+	parsedSort: readonly SortField<TSortField>[]
+	q?: string | null | undefined
+	/** The list schema sets it; a filter or an order without it is refused (query/trusted.ts) */
+	validated?: true | undefined
+}
+
 type ComputedFilterResolver = (operator: FilterOperator, value: unknown) => SQL | null
 type ComputedSortResolver = (direction: SortDirection) => SQL
 
@@ -82,6 +102,7 @@ export type {
 	FilterGroup,
 	FilterOperator,
 	ListQueryCapabilities,
+	ListQueryInput,
 	ParsedFields,
 	SortDirection,
 	SortField,

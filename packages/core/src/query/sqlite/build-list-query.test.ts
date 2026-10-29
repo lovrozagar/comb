@@ -25,14 +25,12 @@ type ListParsed = Parameters<typeof buildListQuery>[0]["parsed"]
 const offsetPage: ListParsed = {
 	cursor: undefined,
 	filterAst: null,
-	lang: undefined,
 	limit: 20,
 	page: 1,
 	parsedFields: null,
 	parsedSort: [],
 	validated: true as const,
 	q: undefined,
-	sortOrderBy: {},
 }
 
 /** A filter of one condition, status eq active */
@@ -90,7 +88,6 @@ describe("buildListQuery — pagination", () => {
 				page: undefined,
 				validated: true as const,
 				parsedSort: [{ direction: "desc", field: "created_at" }],
-				sortOrderBy: { created_at: "desc" },
 			},
 			table: organization,
 		})
@@ -147,7 +144,6 @@ describe("buildListQuery — sort", () => {
 				...offsetPage,
 				validated: true as const,
 				parsedSort: [{ direction: "desc", field: "created_at" }],
-				sortOrderBy: { created_at: "desc" },
 			},
 			table: organization,
 		})

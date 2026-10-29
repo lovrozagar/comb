@@ -9,7 +9,6 @@ export {
 	buildListQuery,
 	type BuildDerivedListQueryOpts,
 	type BuildListQueryOpts,
-	type ListQueryParsed,
 	type ListQueryResult,
 } from "./build-list-query.ts"
 
@@ -45,3 +44,4 @@ export { SQL_SORT_DIR } from "./sql.ts"
 
 /* Types */
 export type { RelationConfig } from "./types.ts"
+export type { ListQueryInput } from "../types.ts"

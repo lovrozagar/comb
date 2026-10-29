@@ -15,7 +15,7 @@ import { extractFilterValue, extractFilterValues } from "./filter-values.ts"
 import { anchorGone, keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import { applySelect, type ListPagination, paginate, paginationOf } from "./pagination.ts"
 import { assertPageWithin, assertSchemaParsed } from "./trusted.ts"
-import type { ParsedFields, SortField } from "./types.ts"
+import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
 
 /** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
 type RelationalTable = object
@@ -25,8 +25,6 @@ type DrizzleListOptions = {
 	offset: number
 	/** The sort, its null placement and the id tiebreak, for `findMany({ orderBy })` */
 	orderBy: (table: RelationalTable) => SQL[]
-	/** @deprecated by orderBy, which also breaks ties and places nulls */
-	sortOrderBy: Record<string, "asc" | "desc">
 	/** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
 	where?: { RAW: (table: RelationalTable) => SQL }
 	/** Whether the cursor's anchor is gone where no bound is safe, for `findMany({ extras })`: paginate reads it (U26) */
@@ -72,18 +70,7 @@ function keysOn(table: RelationalTable, sort: readonly SortField[]): { keys: Sor
  * list query schema's output, the cursor opened under `options`: the app's secret and the list's
  * scope. The limit is one over the page so `paginate` can tell there is more.
  */
-function drizzleListOptions(
-	query: {
-		cursor?: string | undefined
-		limit: number
-		page?: number | undefined
-		parsedFields?: ParsedFields | null | undefined
-		parsedSort: SortField[]
-		sortOrderBy: Record<string, "asc" | "desc">
-		validated?: true | undefined
-	},
-	options: CursorOptions,
-): DrizzleListOptions {
+function drizzleListOptions(query: ListQueryInput, options: CursorOptions): DrizzleListOptions {
 	assertSchemaParsed(query)
 	/* options that cannot seal are a wiring mistake on page 1 too, not only once a cursor comes back */
 	const pagination = paginationOf(options, { cursorable: true, query, window: query.limit + 1 })
@@ -92,7 +79,7 @@ function drizzleListOptions(
 		const { keys, tiebreak } = keysOn(table, sort)
 		return orderByKeys(keys, tiebreak)
 	}
-	const base = { limit: query.limit + 1, orderBy, pagination, sortOrderBy: query.sortOrderBy }
+	const base = { limit: query.limit + 1, orderBy, pagination }
 	if (!query.cursor) {
 		/* a page no schema bounded is bounded here, as buildListQuery bounds it (U5) */
 		assertPageWithin(query)

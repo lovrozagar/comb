@@ -2,27 +2,9 @@
 import type { SQL, SQLWrapper } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import type { ListPagination } from "../pagination.ts"
-import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
+import type { ComputedFilterResolver, ComputedSortResolver, ListQueryInput } from "../types.ts"
 import type { LikeSearchResolver } from "./search.ts"
 import type { RelationConfig } from "./types.ts"
-
-/**
- * Parsed list query input — matches createListQuerySchema output.
- * Intentionally loose to work with any codegen or manual construction.
- */
-type ListQueryParsed = {
-	/* `| undefined` on each optional field: the list schema's output carries them as undefined, which
-	   exactOptionalPropertyTypes otherwise refuses */
-	cursor?: string | null | undefined
-	filterAst?: FilterAST | null | unknown
-	limit: number
-	page?: number | null | undefined
-	parsedSort: SortField[]
-	q?: string | null | undefined
-	/** The list schema sets it; a filter or an order without it is refused (query/trusted.ts) */
-	validated?: true | undefined
-	[key: string]: unknown
-}
 
 type BuildListQueryOpts<TTable extends SQLiteTable> = {
 	/** Additional WHERE clause ANDed with filter/cursor — for joins, access filters, soft deletes */
@@ -35,7 +17,7 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
 	cursorSecret: string
 	/** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL (CursorOptions) */
 	nonFinite?: "exact" | undefined
-	parsed: ListQueryParsed
+	parsed: ListQueryInput
 	relations?: Record<string, RelationConfig>
 	/** LIKE-based search resolver — use `likeSearch(column)` factory */
 	search?: LikeSearchResolver
@@ -51,9 +33,7 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
 	filterWhere?: SQL | null
 	/** the field a row's id is in, which paginate mints the next cursor from (default `id`) */
 	idField?: string | undefined
-	parsed: ListQueryParsed & {
-		parsedSort: SortField<TSortField>[]
-	}
+	parsed: ListQueryInput<TSortField>
 	searchWhere?: SQL | null
 	/** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
 	sortColumns: Record<TSortField, SQLWrapper | { sql: SQLWrapper; type: "date" }>
@@ -84,4 +64,4 @@ type ListQueryResult = {
 	where: SQL | undefined
 }
 
-export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryParsed, ListQueryResult }
+export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryResult }

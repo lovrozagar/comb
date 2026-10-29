@@ -43,7 +43,6 @@ describe("queryHelpers.countExtra", () => {
 const sortedBy = (field: string, direction: "asc" | "desc" = "desc") => ({
 	validated: true as const,
 	parsedSort: [{ direction, field }],
-	sortOrderBy: { [field]: direction },
 })
 
 describe("queryHelpers.listOptions", () => {
@@ -55,9 +54,8 @@ describe("queryHelpers.listOptions", () => {
 		expect(queryHelpers.listOptions({ limit: 20, page: 3, ...sortedBy("created_at") }, SEALED).offset).toBe(40)
 	})
 
-	it("passes sortOrderBy through and has no where without a cursor", () => {
+	it("has no where without a cursor", () => {
 		const options = queryHelpers.listOptions({ limit: 10, ...sortedBy("name", "asc") }, SEALED)
-		expect(options.sortOrderBy).toEqual({ name: "asc" })
 		expect(options.where).toBeUndefined()
 	})
 
@@ -77,7 +75,7 @@ describe("queryHelpers.listOptions", () => {
 	})
 
 	it("orders by the id alone when there is no sort", () => {
-		const options = queryHelpers.listOptions({ limit: 10, parsedSort: [], sortOrderBy: {} }, SEALED)
+		const options = queryHelpers.listOptions({ limit: 10, parsedSort: [] }, SEALED)
 		expect(dialect.sqlToQuery(sql.join(options.orderBy(getTableColumns(post)), sql`, `)).sql).toBe(
 			'"post"."id" DESC NULLS FIRST',
 		)

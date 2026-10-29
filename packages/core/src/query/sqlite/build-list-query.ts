@@ -6,7 +6,7 @@ import { combErrorKeys } from "../../types.ts"
 import { CURSOR_TIEBREAK_COLUMN, type CursorOptions } from "../cursor.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
 import { paginationOf } from "../pagination.ts"
-import type { ComputedSortResolver, FilterAST, SortField } from "../types.ts"
+import type { ComputedSortResolver, FilterAST, ListQueryInput, SortField } from "../types.ts"
 import { readsBack } from "./cursor-fit.ts"
 import { filterToSQL } from "./executor.ts"
 import { assertPageWithin, assertSchemaParsed } from "../trusted.ts"
@@ -14,12 +14,7 @@ import { DateKey } from "./cursor-fit.ts"
 import { cursorWhere } from "./cursor-where.ts"
 import { orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
 import type { LikeSearchResolver } from "./search.ts"
-import type {
-	BuildDerivedListQueryOpts,
-	BuildListQueryOpts,
-	ListQueryParsed,
-	ListQueryResult,
-} from "./build-list-query-types.ts"
+import type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListQueryResult } from "./build-list-query-types.ts"
 
 function isFilterAST(v: unknown): v is FilterAST {
 	return typeof v === "object" && v !== null && "root" in v
@@ -63,7 +58,7 @@ type Finish = {
 	/** the table a cursor's references are read from; none on a derived list */
 	table?: SQLiteTable | undefined
 	keyset: Keyset
-	parsed: ListQueryParsed
+	parsed: ListQueryInput
 	sort: readonly SortField[]
 	/** null when the table has no tiebreak column, so no cursor can be honored */
 	tiebreak: SortKey | null
@@ -244,6 +239,5 @@ export {
 	buildListQuery,
 	type BuildDerivedListQueryOpts,
 	type BuildListQueryOpts,
-	type ListQueryParsed,
 	type ListQueryResult,
 }
