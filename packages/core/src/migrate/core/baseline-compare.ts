@@ -98,6 +98,14 @@ function replayableHistory(exec: Run, copy: string): string {
 	return plain
 }
 
+/** Atlas could not replay the history on the dev database, or read the target, so nothing was compared */
+class ReplayFailed extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ReplayFailed"
+	}
+}
+
 /**
  * Refuses a database whose tables are not the ones the migrations leave: Atlas diffs the database
  * against the history replayed on the dev database. Atlas OSS inspects no view, policy or
@@ -112,7 +120,7 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string, ref
 			/* compared as Atlas wrote it; scrubbed only in what comb prints (M79) */
 			if (result.code !== 0) {
 				const said = `${explainAtlasFailure(result.stderr, env.scrub)}${env.scrub(result.stdout)}`
-				throw new Error(`atlas schema diff: ${said.trim()}`)
+				throw new ReplayFailed(`atlas schema diff: ${said.trim()}`)
 			}
 			return {
 				notices: atlasNotices(env.scrub(result.stderr)),
@@ -157,4 +165,4 @@ async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?
 		)
 }
 
-export { type ObjectsCompare, refuseDrift, refuseObjectDrift, sqliteDrift }
+export { type ObjectsCompare, refuseDrift, refuseObjectDrift, ReplayFailed, sqliteDrift }

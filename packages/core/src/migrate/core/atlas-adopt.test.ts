@@ -176,6 +176,12 @@ const diffing =
 	(_cmd, args) =>
 		args[0] === "schema" ? { code: 0, stderr, stdout } : { code: 0, stderr: "", stdout: "" }
 
+/** atlas, its schema diff failing to reach the dev database */
+const unreachable: Run = (_cmd, args) =>
+	args[0] === "schema"
+		? { code: 1, stderr: "Error: dial tcp: lookup dev: no such host", stdout: "" }
+		: { code: 0, stderr: "", stdout: "" }
+
 describe("proveAdoption", () => {
 	const target = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "app", url: "postgres://db/db" }
 
@@ -186,6 +192,18 @@ describe("proveAdoption", () => {
 		const exec = diffing("Schemas are synced, no changes to be made.", "views are not inspected")
 		await proveAdoption({ exec, print: (line) => out.push(line), readLive: noObjects, target }, copy, ["1_a.sql"])
 		expect(out).toEqual(["Warning: Atlas: views are not inspected"])
+		rmSync(copy, { force: true, recursive: true })
+	})
+
+	/* a ruling on P2: proof replays on the dev database, so one Atlas cannot reach refuses by its name */
+	it("refuses, naming devUrl, when Atlas cannot replay the files on the dev database", async () => {
+		const copy = mkdtempSync(join(tmpdir(), "comb-prove-"))
+		writeFileSync(join(copy, "1_a.sql"), 'CREATE TABLE "a" ("id" integer);\n')
+		await expect(
+			proveAdoption({ exec: unreachable, print: () => undefined, readLive: noObjects, target }, copy, ["1_a.sql"]),
+		).rejects.toThrow(
+			"adopting 0.12's shared history needs devUrl, an empty Postgres database Atlas can reach, to prove app holds what it ran (1_a.sql); Atlas could not use it: atlas schema diff: Error: dial tcp: lookup dev: no such host",
+		)
 		rmSync(copy, { force: true, recursive: true })
 	})
 

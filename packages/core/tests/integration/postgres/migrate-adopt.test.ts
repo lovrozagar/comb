@@ -273,5 +273,15 @@ describe("migrate on Postgres: an empty schema sharing public's directory and it
 				expect(check.out).toContain(PENDING_PROOF)
 			})
 		}, 90_000)
+
+		it("refuses to adopt, naming devUrl, when the dev database cannot be reached, recording nothing", async () => {
+			await withScratchDb(async (url) => {
+				await migratedUnder012(url)
+				await expect(applyWithAtlas(command(url))).rejects.toThrow(
+					"adopting 0.12's shared history needs devUrl, an empty Postgres database Atlas can reach, to prove app holds what it ran (20260101000000_users.sql)",
+				)
+				expect((await own(url)) ?? []).toEqual([])
+			})
+		}, 60_000)
 	})
 })

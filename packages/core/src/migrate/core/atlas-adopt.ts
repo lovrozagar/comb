@@ -16,7 +16,7 @@ import { sqlFiles, sumHashes } from "./atlas-dir.ts"
 import { type AtlasStatus, versionOf } from "./atlas-history.ts"
 import type { PgTarget } from "./atlas-target.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
-import { type ObjectsCompare, refuseDrift, refuseObjectDrift } from "./baseline-compare.ts"
+import { type ObjectsCompare, refuseDrift, refuseObjectDrift, ReplayFailed } from "./baseline-compare.ts"
 import type { Run } from "./process.ts"
 
 /** The files of the snapshot `copy` that 0.12's `shared` history ran; refused when it ran them otherwise */
@@ -44,6 +44,19 @@ function sharedPrefix(shared: AtlasStatus, copy: string): string[] {
 	return files.slice(0, rows.length)
 }
 
+/** `compare()`, a replay Atlas could not run on the dev database refused by devUrl's name: proof needs one it can reach */
+function replayed<T>(compare: () => T, schema: string, ran: readonly string[]): T {
+	try {
+		return compare()
+	} catch (error) {
+		if (!(error instanceof ReplayFailed)) throw error
+		throw new Error(
+			`adopting 0.12's shared history needs devUrl, an empty Postgres database Atlas can reach, to prove ${schema} holds what it ran (${ran.join(", ")}); Atlas could not use it: ${error.message}`,
+			{ cause: error },
+		)
+	}
+}
+
 /** Refuse to adopt `ran`, the files of the snapshot `copy` 0.12's shared history ran, unless the schema holds what replaying them leaves */
 async function proveAdoption(
 	options: ObjectsCompare & { exec: Run; target: PgTarget },
@@ -55,8 +68,10 @@ async function proveAdoption(
 	const prefix = mkdtempSync(join(tmpdir(), "comb-adopt-"))
 	try {
 		for (const name of ran) copyFileSync(join(copy, name), join(prefix, name))
-		const refusal = `${options.target.schema} does not hold what 0.12's shared history ran (${ran.join(", ")}), so comb adopts none of it`
-		for (const notice of refuseDrift(options, prefix, refusal)) options.print(`Warning: Atlas: ${notice}`)
+		const { schema } = options.target
+		const refusal = `${schema} does not hold what 0.12's shared history ran (${ran.join(", ")}), so comb adopts none of it`
+		for (const notice of replayed(() => refuseDrift(options, prefix, refusal), schema, ran))
+			options.print(`Warning: Atlas: ${notice}`)
 		await refuseObjectDrift(options, prefix, refusal)
 	} finally {
 		rmSync(prefix, { force: true, recursive: true })
