@@ -6,7 +6,7 @@
  */
 import { CURSOR_TIEBREAK_COLUMN } from "../../query/cursor.ts"
 import type { AnalysisResult, FieldMeta, TableMeta } from "../analyzer-types.ts"
-import { camelToKebab, snakeToPascal } from "./case.ts"
+import { snakeToPascal, subpathName } from "./case.ts"
 import { qualifiedName } from "./table-name.ts"
 
 type ValidationResult = {
@@ -15,17 +15,15 @@ type ValidationResult = {
 }
 
 /**
- * A table's generated path segments, its DTO directory (`camelToKebab`) and its rqb-cols and sql-cols
- * directories (its var name, which a case-insensitive file system folds): two tables on one segment
- * would replace each other's files, so both are named
+ * A table's generated path segment, which its DTO, rqb-cols and sql-cols directories all take
+ * (`subpathName`, C20): two tables on one segment would replace each other's files, so both are named
  */
 function checkPaths(varName: string, paths: Map<string, string>, report: ValidationResult): void {
-	for (const segment of new Set([camelToKebab(varName).toLowerCase(), varName.toLowerCase()])) {
-		const taken = paths.get(segment)
-		if (taken !== undefined && taken !== varName)
-			report.errors.push(`Tables ${taken} and ${varName} both generate the path "${segment}"; rename one`)
-		paths.set(segment, taken ?? varName)
-	}
+	const segment = subpathName(varName)
+	const taken = paths.get(segment)
+	if (taken !== undefined && taken !== varName)
+		report.errors.push(`Tables ${taken} and ${varName} both generate the path "${segment}"; rename one`)
+	paths.set(segment, taken ?? varName)
 }
 
 function checkNames(tables: readonly TableMeta[], report: ValidationResult): void {

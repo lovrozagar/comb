@@ -18,6 +18,12 @@ export function camelToKebab(str: string): string {
 	return str.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()
 }
 
+/**
+ * A table variable as every generated subpath of it names it, its DTOs', rqb-cols' and sql-cols'
+ * alike: kebab case, from camelCase and snake_case both, so blogPost and blog_post are blog-post (C20)
+ */
+export const subpathName = (varName: string): string => camelToKebab(varName).replaceAll("_", "-")
+
 /** Convert snake_case/camelCase to SCREAMING_SNAKE_CASE */
 export function toScreamingSnakeCase(str: string): string {
 	return str.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase()

@@ -10,7 +10,7 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import { propertyAccess, propertyName, snakeToCamel, stringLiteral } from "../utils/case.ts"
+import { propertyAccess, propertyName, snakeToCamel, stringLiteral, subpathName } from "../utils/case.ts"
 import { readStaged, type Staged, writeGenFile, writeJsonAtomic } from "../utils/fs.ts"
 import { exportKey, type ExportTarget, ownsKey, readExports } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -44,10 +44,11 @@ type ColumnsOutput = {
 
 /** Write one table's rqb-cols and sql-cols files */
 function writeEntityCols(table: TableEntry, out: ColumnsOutput, staged: Staged | undefined): void {
-	const rqbEntityDir = path.join(out.absoluteOutputDir, "rqb-cols", table.varName)
-	const sqlEntityDir = path.join(out.absoluteOutputDir, "sql-cols", table.varName)
+	const segment = subpathName(table.varName)
+	const rqbEntityDir = path.join(out.absoluteOutputDir, "rqb-cols", segment)
+	const sqlEntityDir = path.join(out.absoluteOutputDir, "sql-cols", segment)
 	const sqlRelTablesPath = specifierFor(sqlEntityDir, out.tablesFile, out.importStyle)
-	const fileName = genFileName(out.filePrefix, table.varName)
+	const fileName = genFileName(out.filePrefix, segment)
 	writeGenFile(path.join(rqbEntityDir, fileName), generateRqbColsFile(table), { generator: "comb", staged })
 	writeGenFile(path.join(sqlEntityDir, fileName), generateSqlColsFile(table, sqlRelTablesPath), {
 		generator: "comb",
@@ -170,11 +171,13 @@ function updatePackageJson(
 
 	/* Add rqb-cols and sql-cols per entity */
 	for (const table of tables) {
-		const colFileName = genFileName(filePrefix, table.varName)
-		newExports[exportKey(namespace, `./rqb-cols/${table.varName}`)] =
-			`${relativeOutputDir}/rqb-cols/${table.varName}/${colFileName}`
-		newExports[exportKey(namespace, `./sql-cols/${table.varName}`)] =
-			`${relativeOutputDir}/sql-cols/${table.varName}/${colFileName}`
+		/* one kebab-case name for every generated subpath, the DTOs' too (C20) */
+		const segment = subpathName(table.varName)
+		const colFileName = genFileName(filePrefix, segment)
+		newExports[exportKey(namespace, `./rqb-cols/${segment}`)] =
+			`${relativeOutputDir}/rqb-cols/${segment}/${colFileName}`
+		newExports[exportKey(namespace, `./sql-cols/${segment}`)] =
+			`${relativeOutputDir}/sql-cols/${segment}/${colFileName}`
 	}
 
 	/* Add table-names */

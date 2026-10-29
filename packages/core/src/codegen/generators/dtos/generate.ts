@@ -7,7 +7,7 @@ import fs from "node:fs"
 import path from "node:path"
 import type { ImportRef, TableMeta } from "../../analyzer-types.ts"
 import { deriveEntityMeta, isExcludedFromUpdate } from "../../entity-meta.ts"
-import { camelToKebab } from "../../utils/case.ts"
+import { subpathName } from "../../utils/case.ts"
 import { writeGenFile } from "../../utils/fs.ts"
 import type { GeneratorContext } from "../context-types.ts"
 import type { DtosConfig, FieldInfo, SchemaType, SharedSchema, TableInfo } from "./dto-types.ts"
@@ -77,7 +77,7 @@ function writeShared(written: Written, config: DtosConfig, ctx: GeneratorContext
 function writeEntities(written: Written, config: DtosConfig, ctx: GeneratorContext): void {
 	const metas = new Map(ctx.analysis.tables.map((meta) => [meta.varName, meta]))
 	for (const table of written.tables) {
-		const kebabName = camelToKebab(table.name)
+		const kebabName = subpathName(table.name)
 		const entityDir = path.join(written.outputDir, kebabName)
 		const content = generateEntityFile(table, {
 			entityDir,

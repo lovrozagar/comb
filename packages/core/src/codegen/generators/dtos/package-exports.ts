@@ -1,6 +1,6 @@
 /** Optional: point the consumer package.json's `exports` at the generated DTOs, tables and relations. */
 import path from "node:path"
-import { camelToKebab } from "../../utils/case.ts"
+import { subpathName } from "../../utils/case.ts"
 import { readStaged, writeJsonAtomic } from "../../utils/fs.ts"
 import { exportKey, type ExportTarget, orderedExports, ownsKey, readExports } from "../../utils/package-json.ts"
 import type { GeneratorContext } from "../context-types.ts"
@@ -31,7 +31,7 @@ function generatedExports(packageDir: string, { config, ctx, entities }: Package
 		"./dtos/_shared": `${outputDir}/_shared/${prefix ? `${prefix}._shared.gen.ts` : "index.gen.ts"}`,
 	}
 	for (const entity of [...entities].sort()) {
-		const kebabName = camelToKebab(entity)
+		const kebabName = subpathName(entity)
 		exports[`./dtos/${kebabName}`] =
 			`${outputDir}/${kebabName}/${prefix ? `${prefix}.${kebabName}.gen.ts` : "index.gen.ts"}`
 	}

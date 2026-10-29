@@ -162,7 +162,7 @@ describe("entity meta matches the generated DTOs", () => {
 	})
 
 	it("emits no stamp and no import when no table has a single identity", () => {
-		expect(generatedFile(analyzeSource(compositeTable), "post_tag")).not.toContain("combMeta")
+		expect(generatedFile(analyzeSource(compositeTable), "post-tag")).not.toContain("combMeta")
 	})
 
 	it("honours a custom importFrom, as the entities generator does", () => {
