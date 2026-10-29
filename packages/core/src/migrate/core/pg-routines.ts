@@ -67,9 +67,9 @@ function put(routines: Routines, key: string, routine: Signatures): void {
 	routines.set(key, at)
 }
 
-/** The volatility `options`, a CREATE's options or an ALTER's actions, set; undefined where they set none */
+/** The volatility `options`, a CREATE's options or an ALTER's actions (each always has some), set; undefined where they set none */
 const volatilityOf = (options: unknown): Volatility | undefined =>
-	((options as Node[] | undefined) ?? [])
+	(options as Node[])
 		.map((each) => each["DefElem"] as Node)
 		.filter((elem) => elem["defname"] === "volatility")
 		.map((elem) => String(((elem["arg"] as Node)["String"] as Node)["sval"]) as Volatility)

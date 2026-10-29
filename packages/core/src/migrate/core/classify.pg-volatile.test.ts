@@ -55,6 +55,15 @@ describe("an added column's default that calls a function", () => {
 		expect(warnings(altered, "ALTER TABLE t ADD COLUMN a int DEFAULT next_code();")).toEqual([])
 	})
 
+	it("gives an ALTER FUNCTION's volatility to the overload it names alone", () => {
+		const overloads = `${fn("")} CREATE FUNCTION next_code(n int) RETURNS int LANGUAGE sql AS 'SELECT n'; ALTER FUNCTION next_code(int) IMMUTABLE;`
+		expect(warnings(overloads, "ALTER TABLE t ADD COLUMN a int DEFAULT next_code();")).toEqual([
+			`ALTER TABLE t ADD COLUMN a int DEFAULT next_code() ${REWRITE}`,
+		])
+		const both = `${overloads} ALTER FUNCTION next_code() STABLE;`
+		expect(warnings(both, "ALTER TABLE t ADD COLUMN a int DEFAULT next_code();")).toEqual([])
+	})
+
 	it("warns for a history function renamed from a steady one only by what the new name's CREATE says", () => {
 		const renamed = `${fn("IMMUTABLE")} ALTER FUNCTION next_code() RENAME TO code;`
 		expect(warnings(renamed, "ALTER TABLE t ADD COLUMN a int DEFAULT code();")).toEqual([])
