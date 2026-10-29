@@ -224,10 +224,30 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
  * one JSON object: the database, the files applied (or found applied) and pending, and what was
  * refused; a refusal still exits 1.
  */
-export async function migrateApply(mode: Mode, argv: readonly string[], io: CliIo): Promise<void> {
+/** `mode`'s argv read: its database and options; refused by usage without one database */
+function readArgv(mode: Mode, argv: readonly string[]): { args: ParsedArgs; db: string } {
 	const args = parseArgs(argv, `migrate ${mode}`)
 	const [db] = args.positionals
 	if (db === undefined || args.positionals.length > 1) throw new CliError(usageOf(`migrate ${mode}`))
+	return { args, db }
+}
+
+/**
+ * `mode`'s argv read, a refusal of it reported, wherever --json is in argv, as the one JSON object
+ * stdout promises, its database null as none was read (K20 of the 0.15.0 review)
+ */
+function argvOf(mode: Mode, argv: readonly string[], io: CliIo): { args: ParsedArgs; db: string } {
+	try {
+		return readArgv(mode, argv)
+	} catch (error) {
+		if (argv.includes("--json") && error instanceof CliError)
+			io.out(JSON.stringify({ applied: [], database: null, pending: [], refused: [error.message] }))
+		throw error
+	}
+}
+
+export async function migrateApply(mode: Mode, argv: readonly string[], io: CliIo): Promise<void> {
+	const { args, db } = argvOf(mode, argv, io)
 	if (args.options["json"] !== true) {
 		await runMode({ args, db, io, mode })
 		return
