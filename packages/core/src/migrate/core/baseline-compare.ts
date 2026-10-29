@@ -30,13 +30,22 @@ const SYNCED = "Schemas are synced, no changes to be made."
 /* the tables SQLite keeps behind every fts5 table */
 const SHADOWS = ["config", "content", "data", "docsize", "idx"]
 
-/** The database's DDL: every object but SQLite's own, the shadow tables of `fts`, and the migration histories */
+/**
+ * The database's DDL as Atlas OSS reads it: its tables and indexes, not SQLite's own, the shadow
+ * tables of `fts` or the migration histories. Atlas OSS refuses a trigger or a view, so those stay
+ * out, and a virtual table is left to `separate` and UNINSPECTED_DDL: objectDrift compares them all
+ * (N-S5 of plan 15's rerun)
+ */
 async function liveDdl(conn: Connection): Promise<string> {
 	const { rows } = await conn.execute(
-		"SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT IN ('__drizzle_migrations', 'd1_migrations', '_cf_KV') ORDER BY rowid",
+		"SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table', 'index') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT IN ('__drizzle_migrations', 'd1_migrations', '_cf_KV') ORDER BY rowid",
 	)
 	return asSql(rows.map((row) => String(row[1])))
 }
+
+/* a history statement that makes or drops what Atlas OSS refuses: a trigger, a view, a virtual table, which objectDrift compares */
+const UNINSPECTED_DDL =
+	/^\s*(?:(?:--[^\n]*\n|\/\*[\s\S]*?\*\/)\s*)*(?:CREATE\s+(?:TEMP(?:ORARY)?\s+)?(?:TRIGGER|VIEW|VIRTUAL\s+TABLE)|DROP\s+(?:TRIGGER|VIEW))\b/i
 
 /* the objects Atlas OSS does not inspect on SQLite: triggers, views and virtual tables, FTS5's included (S5) */
 const UNINSPECTED =
@@ -107,12 +116,13 @@ async function sqliteDrift(conn: Connection, dir: string, exec: Run): Promise<st
 		for (const file of sqlFiles(dir)) {
 			const separated = separate(readFileSync(join(dir, file), "utf8"), groups, history)
 			history = separated.state
-			writeFileSync(join(copy, file), asSql(separated.plain))
+			writeFileSync(join(copy, file), asSql(separated.plain.filter((stmt) => !UNINSPECTED_DDL.test(stmt))))
 		}
 		hashDir(exec, copy)
 		const live = separate(await liveDdl(conn), groups)
 		const shadows = new Set([...groups].flatMap((group) => SHADOWS.map((suffix) => `${group}_${suffix}`)))
 		const plain = live.plain.filter((stmt) => {
+			if (UNINSPECTED_DDL.test(stmt)) return false
 			const table = /^\s*CREATE TABLE ['"`[]?(\w+)/i.exec(stmt)?.[1]
 			return table === undefined || !shadows.has(table)
 		})
