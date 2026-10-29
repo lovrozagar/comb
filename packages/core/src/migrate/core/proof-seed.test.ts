@@ -120,6 +120,11 @@ describe("seedTables on common CHECK shapes (M15)", () => {
 			"an expiry after a creation time its default sets now",
 			"created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), expires_at INTEGER NOT NULL, CHECK (expires_at > created_at)",
 		],
+		/* N6 of plan 15's rerun: both at once, which no attempt of one remedy alone met */
+		[
+			"one of two left NULL and an end after a start its default sets now",
+			"a TEXT, b TEXT, starts_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), ends_at INTEGER NOT NULL, CONSTRAINT two_null CHECK (a IS NULL OR b IS NULL), CHECK (ends_at > starts_at)",
+		],
 	])("seeds a table checked by %s", async (_, column) => {
 		const { rows, unproven } = await seeded({ t: `CREATE TABLE t (id INTEGER PRIMARY KEY, ${column})` })
 		expect(unproven).toEqual(new Map())

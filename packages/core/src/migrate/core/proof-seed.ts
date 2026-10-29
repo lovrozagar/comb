@@ -181,8 +181,9 @@ function insertRow(db: MemoryDb, table: string, values: ReadonlyMap<string, unkn
 
 /**
  * What row `row` tries, in order: its own slot (row 0 with every default), then, for a row the
- * table refuses, every default with each slot, each slot plain, each shape, and last every
- * nullable column NULL, which a CHECK such as `a IS NULL OR b IS NULL` asks for
+ * table refuses, every default with each slot, each slot plain, each shape, then every nullable
+ * column NULL, which a CHECK such as `a IS NULL OR b IS NULL` asks for, alone and with each shape,
+ * as a table that also asks for a time past now does (N6 of plan 15's rerun)
  */
 function attempts(row: number): Attempt[] {
 	const own = slotOf(row)
@@ -201,6 +202,15 @@ function attempts(row: number): Attempt[] {
 			slot: own,
 		})),
 		{ defaults: true, fallback: true, nulls: true, plain: false, row, slot: own },
+		...Array.from({ length: shapeCount() }, (_, shape) => ({
+			defaults: true,
+			fallback: true,
+			nulls: true as const,
+			plain: true,
+			row,
+			shape,
+			slot: own,
+		})),
 	]
 }
 
