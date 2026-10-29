@@ -102,6 +102,24 @@ CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN SELECT 1; END;`
 		await conn.close()
 	})
 
+	/* the negative control: SQLite rewrites sqlite_master's text on a rename, on the database and on the replay alike */
+	it("finds an FTS5 table and its sync triggers in sync after a rename SQLite rewrote their text for", async () => {
+		const files = {
+			"1_init.sql": `CREATE TABLE post (id INTEGER PRIMARY KEY, title TEXT);
+CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id');
+CREATE TRIGGER post_fts_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END;
+CREATE TRIGGER post_fts_ad AFTER DELETE ON post BEGIN INSERT INTO post_fts(post_fts, rowid, title) VALUES ('delete', old.id, old.title); END;`,
+			"2_rename.sql": "ALTER TABLE post RENAME COLUMN id TO post_id;",
+		}
+		const conn = libsqlConnection()
+		for (const [name, sql] of Object.entries(files)) {
+			writeFileSync(join(dir, "m", name), sql)
+			await conn.client.executeMultiple(sql)
+		}
+		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("")
+		await conn.close()
+	})
+
 	it("finds the objects the migrations leave, whatever their whitespace and comments, in sync", async () => {
 		writeFileSync(join(dir, "m", "1_init.sql"), HISTORY)
 		const conn = libsqlConnection()
