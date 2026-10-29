@@ -298,7 +298,11 @@ declare function globPattern(value: string): string;
  * LIKE's own specials `%` and `_` each escaped, so `%${escapeLike(term)}%` finds `term` as written
  */
 declare function escapeLike(text: string): string;
-export { escapeLike, globPattern, likePattern };
+/** A value's stars only at its ends: whether each end is open, and the text between */
+declare const FIXED: RegExp;
+/** The pattern SQLite matches `value` with under `operator`, or null for a fixed text, which is found with none (U21) */
+declare const patternOf: (operator: "like" | "ilike", value: string) => string | null;
+export { escapeLike, FIXED, globPattern, likePattern, patternOf };
 
 // meta.d.ts
 /**
@@ -584,6 +588,8 @@ type FilterLimits = {
     /** Nested or()/and() groups below the top level */
     maxDepth: number;
     maxInValues: number;
+    /** Bytes of a like or ilike pattern, a value with an inner `*`, once escaped: D1 caps a pattern at 50 */
+    maxPatternBytes: number;
     /** Values the whole filter binds, every in/nin member counted: D1 binds at most 100 per statement */
     maxValues: number;
 };

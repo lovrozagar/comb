@@ -64,7 +64,7 @@ function filterParamMeta(
 		`Fields: ${fieldList}.`,
 		"`like` is case-sensitive and `ilike` ignores ASCII case; `*` is the wildcard.",
 		"`in`/`nin` take `(a,b)`; `is` takes `null` or `notnull`, and `true` or `false` on a boolean.",
-		`At most ${limits.maxConditions} conditions, ${limits.maxDepth} nested groups, ${limits.maxInValues} in/nin values per list, ${limits.maxValues} values in all, and at most ${REQUEST_BYTES.filter} bytes however a URL or a form encodes it.`,
+		`At most ${limits.maxConditions} conditions, ${limits.maxDepth} nested groups, ${limits.maxInValues} in/nin values per list, ${limits.maxValues} values in all, ${limits.maxPatternBytes} bytes in a like or ilike pattern once escaped, and at most ${REQUEST_BYTES.filter} bytes however a URL or a form encodes it.`,
 	].join(" ")
 
 	const samples = entries.map(([field, type]) => sampleCondition(field, type))

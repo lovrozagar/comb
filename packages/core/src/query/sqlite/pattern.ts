@@ -9,11 +9,8 @@
  */
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 
-import { globPattern, likePattern } from "../like.ts"
+import { FIXED, globPattern, likePattern } from "../like.ts"
 import { countLiteral } from "./keyset.ts"
-
-/** A value's stars only at its ends: whether each end is open, and the text between */
-const FIXED = /^(\**)([^*]*)(\**)$/
 
 /** `like` → GLOB (case-sensitive). `ilike` → LIKE (ASCII case-insensitive). A fixed text → a search for it. */
 function patternToSQL(column: SQLWrapper, operator: "like" | "ilike", value: unknown): SQL {

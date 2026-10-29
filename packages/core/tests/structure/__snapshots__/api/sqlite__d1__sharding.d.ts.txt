@@ -991,6 +991,8 @@ type FilterLimits = {
     /** Nested or()/and() groups below the top level */
     maxDepth: number;
     maxInValues: number;
+    /** Bytes of a like or ilike pattern, a value with an inner `*`, once escaped: D1 caps a pattern at 50 */
+    maxPatternBytes: number;
     /** Values the whole filter binds, every in/nin member counted: D1 binds at most 100 per statement */
     maxValues: number;
 };

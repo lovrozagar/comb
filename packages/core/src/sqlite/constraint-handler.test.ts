@@ -326,6 +326,11 @@ describe("constraintError: a value the column cannot hold (Q10)", () => {
 			expect.objectContaining({ cause: "Value too large", errorKey: "value_too_large", status: 400 }),
 		)
 	})
+
+	/* C6 of the 0.14.1 review: comb binds every value, so a statement past SQLite's length limit is the server's */
+	it("leaves a statement too long for the engine to the caller, as no value of the request's", () => {
+		expect(classifySqliteError(engine("SQLITE_TOOBIG", "statement too long"), [])).toBeUndefined()
+	})
 })
 
 describe("constraintError: a trigger's RAISE", () => {

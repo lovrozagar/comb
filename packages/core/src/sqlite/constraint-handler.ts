@@ -223,7 +223,7 @@ function constraintError(error: unknown, maps: ConstraintMap[]): CombError | nul
 	const handler = own(CONSTRAINTS, read.code)
 	if (handler !== undefined) return handler({ maps, read, source: error })
 	const at = mismatchAt(read.message, read.query)
-	return valueError(read.code, { column: shownColumn(maps, at.table, at.column), table: at.table }, error) ?? null
+	return valueError(read, { column: shownColumn(maps, at.table, at.column), table: at.table }, error) ?? null
 }
 
 /**

@@ -4,7 +4,7 @@ import { CURSOR_EXAMPLES, filterParamMeta, orderParamMeta, searchParamMeta } fro
 import type { FieldType, FilterOperator } from "./types.ts"
 import { FILTER_LIMITS } from "./filter.ts"
 
-const LIMITS = { maxConditions: 20, maxDepth: 3, maxInValues: 50, maxValues: 60 }
+const LIMITS = { maxConditions: 20, maxDepth: 3, maxInValues: 50, maxPatternBytes: 50, maxValues: 60 }
 const operatorsFor = (type: FieldType): readonly FilterOperator[] => (type === "boolean" ? ["eq", "is"] : ["eq", "in"])
 
 describe("filterParamMeta", () => {
@@ -12,7 +12,7 @@ describe("filterParamMeta", () => {
 		const { description } = filterParamMeta({ active: "boolean", title: "string" }, operatorsFor, LIMITS)
 		expect(description).toContain("Fields: active (boolean: eq, is); title (string: eq, in).")
 		expect(description).toContain(
-			"At most 20 conditions, 3 nested groups, 50 in/nin values per list, 60 values in all, and at most 4608 bytes however a URL or a form encodes it.",
+			"At most 20 conditions, 3 nested groups, 50 in/nin values per list, 60 values in all, 50 bytes in a like or ilike pattern once escaped, and at most 4608 bytes however a URL or a form encodes it.",
 		)
 	})
 

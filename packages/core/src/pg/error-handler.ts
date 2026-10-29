@@ -210,11 +210,7 @@ function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombE
 	const handler = own(CONSTRAINTS, read.code)
 	const table = mapTable(constraintMaps, read)
 	if (handler !== undefined) return handler({ maps: constraintMaps, read, source: error, table })
-	const value = valueError(
-		read.code,
-		{ column: shownColumn(constraintMaps, table, read.column), table: read.table },
-		error,
-	)
+	const value = valueError(read, { column: shownColumn(constraintMaps, table, read.column), table: read.table }, error)
 	if (value !== undefined) return value
 	const resource = own(RESOURCE, read.code)
 	return resource === undefined ? undefined : new CombError({ ...resource, source: error })

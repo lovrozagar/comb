@@ -35,7 +35,7 @@ const QUERY_FAILED: Outcome = {
 
 /* D1 caps a LIKE or GLOB pattern at 50 bytes (SQLITE_LIMIT_LIKE_PATTERN_LENGTH): the request's to shorten (U21) */
 const PATTERN_TOO_LONG: Outcome = {
-	cause: "A like or ilike filter value with a * inside it may be at most 50 bytes on D1.",
+	cause: "A like or ilike filter value with a * inside it may be at most 50 bytes on D1, once escaped.",
 	errorKey: combErrorKeys.INVALID_VALUE,
 	status: "bad_request",
 }
@@ -61,12 +61,9 @@ function platformMessage(error: Error): string | null {
 	return platform?.message ?? null
 }
 
-/** Whether D1 refused a pattern over its LIKE cap, anywhere in the error's chain */
-function tooComplex(error: Error): boolean {
-	for (let current: unknown = error, depth = 0; depth < 8 && current instanceof Error; current = current.cause, depth++)
-		if (current.message.includes("LIKE or GLOB pattern too complex")) return true
-	return false
-}
+/** Whether D1 refused a pattern over its LIKE cap: read from D1's message, never a wrapper's, which quotes bound values (Q4) */
+const tooComplex = (error: Error): boolean =>
+	platformMessage(error)?.includes("LIKE or GLOB pattern too complex") === true
 
 function platformOutcome(message: string): Outcome {
 	/* D1_TYPE_ERROR, D1_EXEC_ERROR and D1_COLUMN_NOTFOUND quote the query or a bound value: always a query error */

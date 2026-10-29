@@ -29,8 +29,8 @@ afterEach(async () => {
 	harness = undefined
 })
 
-/** The ids of the rows the list request `params` answers, on a D1 holding TITLES as ids 1 to 5 */
-async function ids(params: Record<string, string>): Promise<number[]> {
+/** The ids of the rows the list request `params` answers under `parse`, on a D1 holding TITLES as ids 1 to 5 */
+async function ids(params: Record<string, string>, parse = schema.parse): Promise<number[]> {
 	harness ??= await d1Memory()
 	await harness.CORE.exec("CREATE TABLE IF NOT EXISTS post (id integer PRIMARY KEY, title text, _search text)")
 	await harness.CORE.exec("DELETE FROM post")
@@ -40,7 +40,7 @@ async function ids(params: Record<string, string>): Promise<number[]> {
 			.run()
 	const query = buildListQuery({
 		...SEALED,
-		parsed: schema.parse({ order: "id.asc", ...params }) as never,
+		parsed: parse({ order: "id.asc", ...params }) as never,
 		search: likeSearch(post._search),
 		table: post,
 	})
@@ -79,8 +79,20 @@ describe("a fixed text on D1, past its LIKE cap (U21)", () => {
 })
 
 describe("a pattern on D1 past its LIKE cap (U21)", () => {
-	it("answers a 400 that names the cap, where it was a 500", async () => {
-		const error = await ids({ filter: `title.like.how*${SLUG}` }).catch((caught: unknown) => caught)
+	/* Q8 of the 0.14.1 review: the list schema measures the pattern as escaped, so D1 never reads a row of it */
+	it("is refused by the list schema, with its measured size", () => {
+		expect(() => schema.parse({ filter: `title.like.how*${SLUG}` })).toThrow(
+			"Filter pattern too long for 'title': 53 bytes once escaped (max 50)",
+		)
+	})
+
+	it("answers a 400 that names the cap, where it was a 500, under a schema that lets it through", async () => {
+		const lenient = createListQuerySchema({
+			filter: { title: "string" },
+			limits: { maxPatternBytes: 100 },
+			sort: ["id"],
+		})
+		const error = await ids({ filter: `title.like.how*${SLUG}` }, lenient.parse).catch((caught: unknown) => caught)
 		const classified = classifyD1Error(error, [])
 		expect(classified).toBeInstanceOf(CombError)
 		expect([classified?.status, classified?.errorKey]).toEqual([400, "invalid_value"])

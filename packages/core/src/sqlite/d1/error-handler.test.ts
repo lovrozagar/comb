@@ -118,6 +118,27 @@ describe("d1ErrorHandler on the engine's resource codes (Q-D9)", () => {
 	})
 })
 
+/* C6 and Q4 of the 0.14.1 review */
+describe("d1ErrorHandler on what the server's statement did", () => {
+	it("answers a statement too long for D1 with a 500, the server's to fix", () => {
+		expect(thrown(d1("statement too long: SQLITE_TOOBIG"))).toMatchObject({
+			errorKey: "database_io_error",
+			status: 500,
+		})
+	})
+
+	it("reads D1's pattern refusal from D1's message, never from a bound value the query's wrapper quotes", () => {
+		const quoted = wrapped(d1("no such table: post: SQLITE_ERROR"), "select * from post where title = ?")
+		quoted.message += ", LIKE or GLOB pattern too complex"
+		expect(thrown(quoted)).toMatchObject({ errorKey: "database_io_error", status: 500 })
+		const refused = wrapped(
+			d1("LIKE or GLOB pattern too complex: SQLITE_ERROR"),
+			"select * from post where title glob ?",
+		)
+		expect(thrown(refused)).toMatchObject({ errorKey: "invalid_value", status: 400 })
+	})
+})
+
 describe("d1ErrorHandler on a value the column cannot hold (Q10)", () => {
 	it("answers a value over D1's limit and a STRICT type mismatch with a 400, as Postgres does", () => {
 		expect(thrown(d1("string or blob too big: SQLITE_TOOBIG"))).toMatchObject({

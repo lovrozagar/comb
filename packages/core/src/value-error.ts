@@ -10,8 +10,10 @@ import { CombError } from "./error.ts"
 import { combErrorKeys } from "./types.ts"
 
 type ValueProblem = "invalid" | "too_large"
+/** A code that is a value's problem only when the engine's message says so */
+type ValueRule = ValueProblem | { message: RegExp; problem: ValueProblem }
 
-const VALUE_ERRORS: Record<string, ValueProblem> = {
+const VALUE_ERRORS: Record<string, ValueRule> = {
 	/* a string past varchar(n), a number out of range, text that is no number, a NUL byte, a
 	 * character the encoding has not got, a date that does not parse or is out of range */
 	"22001": "invalid",
@@ -26,16 +28,27 @@ const VALUE_ERRORS: Record<string, ValueProblem> = {
 	/* a STRICT table's column given another type */
 	SQLITE_CONSTRAINT_DATATYPE: "invalid",
 	SQLITE_MISMATCH: "invalid",
-	/* a string or blob past the engine's limit (D1's is 2 MB) */
-	SQLITE_TOOBIG: "too_large",
+	/* a string or blob past the engine's limit (D1's is 2 MB); SQLITE_TOOBIG is also a statement past
+	 * its length limit, which the server built, since comb binds every value (C6) */
+	SQLITE_TOOBIG: { message: /\bstring or blob too big\b/i, problem: "too_large" },
 }
+
+/** The engine's error: its code, and the message a code's rule may read */
+type ValueRead = { code: string; message?: string | undefined }
 
 /** Where the engine says the value was, when it says */
 type ValueAt = { column?: string | undefined; table?: string | undefined }
 
-/** The 400 for a value `code` says the column cannot hold, or undefined when `code` is not one */
-function valueError(code: string, { column, table }: ValueAt, source: unknown): CombError | undefined {
-	const problem = own(VALUE_ERRORS, code)
+/** The problem `read` is of a value the column cannot hold, or undefined when it is none */
+function problemOf({ code, message }: ValueRead): ValueProblem | undefined {
+	const rule = own(VALUE_ERRORS, code)
+	if (rule === undefined || typeof rule === "string") return rule
+	return rule.message.test(message ?? "") ? rule.problem : undefined
+}
+
+/** The 400 for a value `read` says the column cannot hold, or undefined when it is not one */
+function valueError(read: ValueRead, { column, table }: ValueAt, source: unknown): CombError | undefined {
+	const problem = problemOf(read)
 	if (problem === undefined) return undefined
 	const [what, errorKey] =
 		problem === "invalid"

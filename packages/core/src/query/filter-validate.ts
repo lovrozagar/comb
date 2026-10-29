@@ -4,6 +4,7 @@
  * booleans as booleans, and computed resolvers receive the declared type.
  */
 import { parseFilter } from "./filter-parse.ts"
+import { patternOf } from "./like.ts"
 import type { FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator } from "./types.ts"
 
 const OPERATORS_BY_TYPE: Record<FieldType, readonly FilterOperator[]> = {
@@ -49,11 +50,19 @@ type FilterLimits = {
 	/** Nested or()/and() groups below the top level */
 	maxDepth: number
 	maxInValues: number
+	/** Bytes of a like or ilike pattern, a value with an inner `*`, once escaped: D1 caps a pattern at 50 */
+	maxPatternBytes: number
 	/** Values the whole filter binds, every in/nin member counted: D1 binds at most 100 per statement */
 	maxValues: number
 }
 
-const FILTER_LIMITS: FilterLimits = { maxConditions: 20, maxDepth: 3, maxInValues: 50, maxValues: 60 }
+const FILTER_LIMITS: FilterLimits = {
+	maxConditions: 20,
+	maxDepth: 3,
+	maxInValues: 50,
+	maxPatternBytes: 50,
+	maxValues: 60,
+}
 
 /** The parameters one condition binds */
 const boundBy = ({ operator, value }: FilterCondition) =>
@@ -179,6 +188,17 @@ function checkedFields(fields: Record<string, FilterField>): Record<string, Chec
 	return checked
 }
 
+/** A like or ilike pattern past maxPatternBytes, as SQLite reads it, escaped: D1 refuses it only once it evaluates a row (Q8) */
+function refuseLongPattern({ field, operator, value }: FilterCondition, check: Check): void {
+	if ((operator !== "like" && operator !== "ilike") || typeof value !== "string") return
+	const pattern = patternOf(operator, value)
+	const bytes = pattern === null ? 0 : new TextEncoder().encode(pattern).length
+	if (bytes > check.limits.maxPatternBytes)
+		check.errors.push(
+			`Filter pattern too long for '${field}': ${bytes} bytes once escaped (max ${check.limits.maxPatternBytes})`,
+		)
+}
+
 function checkCondition(condition: FilterCondition, check: Check): FilterCondition {
 	const { field, operator } = condition
 	if (!Object.hasOwn(check.fields, field)) {
@@ -195,6 +215,7 @@ function checkCondition(condition: FilterCondition, check: Check): FilterConditi
 			`in/nin list too large for '${field}': ${condition.value.length} (max ${check.limits.maxInValues})`,
 		)
 	}
+	refuseLongPattern(condition, check)
 	const typed = typedValue(spec, condition)
 	if ("error" in typed) {
 		check.errors.push(`Invalid value for '${field}': ${typed.error}`)

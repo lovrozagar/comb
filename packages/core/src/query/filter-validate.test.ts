@@ -203,3 +203,26 @@ describe("validateFilter — numbers that are not finite (Q-N1)", () => {
 		expect(validateFilter("n.gt.1e15", { n: "number" })?.valid).toBe(true)
 	})
 })
+
+/* Q8 of the 0.14.1 review: D1 caps a pattern at 50 bytes as SQLite reads it, escaped, and only once it evaluates a row */
+describe("validateFilter on a like or ilike pattern", () => {
+	const fields = { title: "string" } as const
+
+	it("refuses a pattern over 50 bytes once escaped, naming its measured size", () => {
+		expect(errorsOf(validateFilter(`title.like.${"[".repeat(20)}*x`, fields))).toEqual([
+			"Filter pattern too long for 'title': 62 bytes once escaped (max 50)",
+		])
+		expect(errorsOf(validateFilter(`title.ilike.${"_".repeat(30)}*x`, fields))).toEqual([
+			"Filter pattern too long for 'title': 62 bytes once escaped (max 50)",
+		])
+		expect(errorsOf(validateFilter(`title.like.${"東".repeat(17)}*`.replace("東*", "*東"), fields))).toEqual([
+			"Filter pattern too long for 'title': 52 bytes once escaped (max 50)",
+		])
+	})
+
+	it("takes a pattern of 50 bytes, a fixed text of any length, and a larger maxPatternBytes", () => {
+		expect(validateFilter(`title.like.${"[".repeat(16)}*x`, fields)?.valid).toBe(true)
+		expect(validateFilter(`title.ilike.*${"_".repeat(60)}*`, fields)?.valid).toBe(true)
+		expect(validateFilter(`title.like.${"[".repeat(20)}*x`, fields, { maxPatternBytes: 62 })?.valid).toBe(true)
+	})
+})
