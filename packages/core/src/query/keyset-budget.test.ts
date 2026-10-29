@@ -61,7 +61,7 @@ describe("a three-key cursor's parameters, by every mix of keys", () => {
 			(_label, mix) => {
 				const { order: given, row } = request(mix as Kind[], order)
 				const parsed = schema.parse({ order: given })
-				const [, meta] = queryHelpers.paginate([row, { ...row, id: 8 }], parsed, SEALED)
+				const [, meta] = queryHelpers.paginate([row, { ...row, id: 8 }], queryHelpers.listOptions(parsed, SEALED))
 				const cursor = meta.nextCursor as string
 				const keys = parsed.parsedSort.map(({ direction, field, nulls }) => ({
 					column: t[field as (typeof COLUMNS)[number]],

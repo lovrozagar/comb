@@ -15,6 +15,7 @@ import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-
 import { likeSearch } from "../../../src/query/sqlite/search.ts"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built } from "../../../src/query/__fixtures__/built.ts"
 
 const post = sqliteTable("post", {
 	_search: text("_search").notNull(),
@@ -90,7 +91,7 @@ describe("the worst-case accepted list request runs on D1 (S-11)", () => {
 			)
 			const sort = schema.parse({ order }).parsedSort
 			const row = { created_at: 1, id: 1, minute_read: 1, title: "長".repeat(3000) }
-			const [, meta] = queryHelpers.paginate([row, { ...row, id: 2 }], { limit: 1, parsedSort: sort }, SEALED)
+			const [, meta] = queryHelpers.paginate([row, { ...row, id: 2 }], built({ limit: 1, parsedSort: sort }, SEALED))
 			const result = schema.safeParse({ cursor: meta.nextCursor, filter: largestFilter(), order, q: longestSearch() })
 			expect(result.success).toBe(true)
 			const query = buildListQuery({

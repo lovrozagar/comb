@@ -4,7 +4,7 @@
  * prefix that fits, and the keyset reads the value from the row itself: exact while the row is
  * there, and, once it is deleted, resumed from the prefix, which may repeat rows and skips none.
  */
-import { defineRelations, sql } from "drizzle-orm"
+import { defineRelations } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
@@ -13,6 +13,7 @@ import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { libsqlMemory } from "../support/libsql.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const doc = sqliteTable("doc", { id: integer("id").primaryKey(), title: text("title").notNull() })
 const schema = createListQuerySchema({ sort: ["title"], pagination: { defaultLimit: 1, maxLimit: 1 } })
@@ -55,7 +56,7 @@ const BUILDER: Page = async (harness, order, cursor) => {
 		harness.db.select().from(doc).$dynamic(),
 		buildListQuery({ ...SEALED, parsed, table: doc }),
 	)
-	const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+	const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
 	return { ids: items.map((row) => row.id), next: meta.nextCursor }
 }
 
@@ -63,7 +64,7 @@ const RELATIONAL: Page = async (harness, order, cursor) => {
 	const db = drizzle({ client: harness.client, relations: defineRelations({ doc }) })
 	const query = { ...schema.parse({ order }), cursor }
 	const rows = await db.query.doc.findMany(queryHelpers.listOptions(query, SEALED) as never)
-	const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; title: string }>, query, SEALED)
+	const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; title: string }>, pagedAs(query, SEALED))
 	return { ids: items.map((row) => row.id), next: meta.nextCursor }
 }
 
@@ -182,28 +183,47 @@ describe("a sort key too long for a cursor, its row renamed between pages (U2)",
 	}
 })
 
-describe("a derived list's key too long for a cursor (R8)", () => {
-	it("refuses on page 1, naming the field, as a derived list reads no row to page by reference", async () => {
+/** One page of the doc list derived by title as `label`, anchored to doc or keyed by its id alone, `cursor` resuming it */
+async function derivedPage(harness: Harness, anchored: boolean, cursor?: string) {
+	const built = buildDerivedListQuery({
+		...SEALED,
+		...(anchored ? { anchor: { idColumn: doc.id, table: doc } } : { idColumn: doc.id }),
+		parsed: { cursor, limit: 2, parsedSort: [{ direction: "asc" as const, field: "label" }] },
+		sortColumns: { label: doc.title },
+	})
+	const query = harness.db.select({ id: doc.id, label: doc.title }).from(doc)
+	const rows = await (built.where === undefined ? query : query.where(built.where))
+		.orderBy(...built.orderBy)
+		.limit(built.limit)
+	return queryHelpers.paginate(rows, built)
+}
+
+/* C3 of the 0.14.1 review: a derived list whose rows are one table pages a long key as that table's own list does */
+describe("a derived list's key too long for a cursor (R8, C3)", () => {
+	it("pages by reference to the table it names as its anchor, every row once", async () => {
 		const harness = await seeded()
 		try {
-			const sort = [{ direction: "asc" as const, field: "label" }]
-			const built = buildDerivedListQuery({
-				...SEALED,
-				idColumn: doc.id,
-				parsed: { limit: 1, parsedSort: sort },
-				sortColumns: { label: doc.title },
-			})
-			const rows = await harness.db
-				.select({ id: doc.id, label: doc.title })
-				.from(doc)
-				.orderBy(...built.orderBy)
-				.limit(built.limit)
-				.where(sql`length(${doc.title}) > 100`)
-			expect(() =>
-				queryHelpers.paginate(rows, { limit: 1, parsedSort: sort }, { ...SEALED, keyset: "derived" }),
-			).toThrow(
+			const seen: number[] = []
+			let cursor: string | undefined
+			for (let n = 0; n < 6; n++) {
+				const [items, meta] = await derivedPage(harness, true, cursor)
+				seen.push(...items.map((row) => row.id))
+				if (meta.nextCursor === null) break
+				cursor = meta.nextCursor
+			}
+			expect(seen).toEqual([2, 5, 7, 3, 6, 1, 4])
+		} finally {
+			harness.close()
+		}
+	})
+
+	it("refuses on the page that meets the long key, with no anchor to read it back from", async () => {
+		const harness = await seeded()
+		try {
+			const [, first] = await derivedPage(harness, false)
+			await expect(derivedPage(harness, false, first.nextCursor as string)).rejects.toThrow(
 				expect.objectContaining({
-					cause: expect.stringMatching(/^a row's label is too long to page this list by/),
+					cause: expect.stringMatching(/^a row's label is too long to page this list by: .*derived list reads no row/),
 					status: 500,
 				}),
 			)
@@ -212,28 +232,14 @@ describe("a derived list's key too long for a cursor (R8)", () => {
 		}
 	})
 
-	it("says to declare the list derived when paginate minted a reference it cannot read", async () => {
+	it("says to give it an anchor when a cursor by reference reaches a derived list with none", async () => {
 		const harness = await seeded()
 		try {
-			const sort = [{ direction: "asc" as const, field: "label" }]
-			const [, meta] = queryHelpers.paginate(
-				[
-					{ id: 1, label: `${LONG}b` },
-					{ id: 2, label: "zz" },
-				],
-				{ limit: 1, parsedSort: sort },
-				SEALED,
-			)
-			expect(() =>
-				buildDerivedListQuery({
-					...SEALED,
-					idColumn: doc.id,
-					parsed: { cursor: meta.nextCursor as string, limit: 1, parsedSort: sort },
-					sortColumns: { label: doc.title },
-				}),
-			).toThrow(
+			const [, first] = await derivedPage(harness, true)
+			const [, second] = await derivedPage(harness, true, first.nextCursor as string)
+			await expect(derivedPage(harness, false, second.nextCursor as string)).rejects.toThrow(
 				expect.objectContaining({
-					cause: expect.stringContaining("pass { keyset: 'derived' } to paginate"),
+					cause: expect.stringContaining("give buildDerivedListQuery the table its rows are as anchor"),
 					status: 500,
 				}),
 			)

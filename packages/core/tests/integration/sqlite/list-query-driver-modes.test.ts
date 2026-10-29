@@ -13,6 +13,7 @@ import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const item = sqliteTable("item", {
 	at: integer("at", { mode: "timestamp_ms" }).notNull(),
@@ -59,7 +60,7 @@ async function pageAll(
 	for (let guard = 0; guard < 6; guard++) {
 		const parsed = schema.parse({ cursor, order })
 		const rows = await applyListQuery(db.select().from(table).$dynamic(), buildListQuery({ ...SEALED, parsed, table }))
-		const [items, pagination] = queryHelpers.paginate(rows, parsed, SEALED)
+		const [items, pagination] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
 		ids.push(...items.map((row) => String(row.id)))
 		if (pagination.nextCursor === null) return ids
 		cursor = pagination.nextCursor
@@ -111,7 +112,7 @@ describe("a cursor fits what the driver returned (R3)", () => {
 					const rows = await (built.where ? query.having(built.where) : query)
 						.orderBy(...built.orderBy)
 						.limit(built.limit)
-					const [items, pagination] = queryHelpers.paginate(rows, { limit: 2, parsedSort: sort }, SEALED)
+					const [items, pagination] = queryHelpers.paginate(rows, pagedAs({ limit: 2, parsedSort: sort }, SEALED))
 					ids.push(...items.map((row) => row.id))
 					if (pagination.nextCursor === null) break
 					cursor = pagination.nextCursor

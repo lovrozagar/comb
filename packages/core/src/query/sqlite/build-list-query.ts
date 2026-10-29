@@ -1,79 +1,24 @@
-import { and, getTableColumns, sql, type SQL, type SQLWrapper } from "drizzle-orm"
+import { and, getTableColumns, sql, type SQL } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
 import { CURSOR_TIEBREAK_COLUMN, type CursorOptions } from "../cursor.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
-import type { ComputedFilterResolver, ComputedSortResolver, FilterAST, SortField } from "../types.ts"
+import { paginationOf } from "../pagination.ts"
+import type { ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
 import { assertPageWithin, assertSchemaParsed } from "../trusted.ts"
 import { DateKey } from "./cursor-fit.ts"
 import { cursorWhere } from "./cursor-where.ts"
 import { orderByKeys, orderSQL, type SortKey } from "./keyset.ts"
 import type { LikeSearchResolver } from "./search.ts"
-import type { RelationConfig } from "./types.ts"
-
-/**
- * Parsed list query input — matches createListQuerySchema output.
- * Intentionally loose to work with any codegen or manual construction.
- */
-type ListQueryParsed = {
-	/* `| undefined` on each optional field: the list schema's output carries them as undefined, which
-	   exactOptionalPropertyTypes otherwise refuses */
-	cursor?: string | null | undefined
-	filterAst?: FilterAST | null | unknown
-	limit: number
-	page?: number | null | undefined
-	parsedSort: SortField[]
-	q?: string | null | undefined
-	/** The list schema sets it; a filter or an order without it is refused (query/trusted.ts) */
-	validated?: true | undefined
-	[key: string]: unknown
-}
-
-type BuildListQueryOpts<TTable extends SQLiteTable> = {
-	/** Additional WHERE clause ANDed with filter/cursor — for joins, access filters, soft deletes */
-	baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL)
-	computedFilters?: Record<string, ComputedFilterResolver>
-	computedSorts?: Record<string, ComputedSortResolver>
-	/** the list's scope, its route and tenant: a cursor minted in another opens in none here */
-	cursorScope: string
-	/** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
-	cursorSecret: string
-	/** "exact" when the driver reads ±Infinity back as Infinity, so a null cursor is a real NULL (CursorOptions) */
-	nonFinite?: "exact" | undefined
-	parsed: ListQueryParsed
-	relations?: Record<string, RelationConfig>
-	/** LIKE-based search resolver — use `likeSearch(column)` factory */
-	search?: LikeSearchResolver
-	table: TTable
-}
-
-type BuildDerivedListQueryOpts<TSortField extends string = string> = {
-	baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL)
-	/** the list's scope, its route and tenant: a cursor minted in another opens in none here */
-	cursorScope: string
-	/** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
-	cursorSecret: string
-	filterWhere?: SQL | null
-	idColumn: SQLWrapper
-	parsed: ListQueryParsed & {
-		parsedSort: SortField<TSortField>[]
-	}
-	searchWhere?: SQL | null
-	/** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
-	sortColumns: Record<TSortField, SQLWrapper | { sql: SQLWrapper; type: "date" }>
-}
-
-type ListQueryResult = {
-	limit: number
-	meta: { limit: number; page: number; type: "cursor" | "offset" }
-	offset: number
-	orderBy: SQL[]
-	search: string | null
-	where: SQL | undefined
-}
+import type {
+	BuildDerivedListQueryOpts,
+	BuildListQueryOpts,
+	ListQueryParsed,
+	ListQueryResult,
+} from "./build-list-query-types.ts"
 
 function isFilterAST(v: unknown): v is FilterAST {
 	return typeof v === "object" && v !== null && "root" in v
@@ -112,6 +57,8 @@ type Keyset = {
 
 type Finish = {
 	cursor: CursorOptions
+	/** the field a row's id is in, for the next cursor */
+	idField?: string | undefined
 	/** the table a cursor's references are read from; none on a derived list */
 	table?: SQLiteTable | undefined
 	keyset: Keyset
@@ -126,9 +73,17 @@ type Finish = {
  * Shared tail of both builders: cursor predicate, pagination mode, result shape.
  * `keys` null means the order includes something keyset cannot express.
  */
-function finish({ cursor: options, keyset, parsed, sort, table, tiebreak, where }: Finish): ListQueryResult {
+function finish({ cursor: options, idField, keyset, parsed, sort, table, tiebreak, where }: Finish): ListQueryResult {
 	assertCursorWired(options)
 	const search = parsed.q?.trim() || null
+	/* a computed sort, or no tiebreak, leaves nothing a cursor can resume from: the list pages by number (Q6) */
+	const pagination = paginationOf(options, {
+		cursorable: keyset.keys !== null && tiebreak !== null,
+		idField,
+		keyset: table === undefined ? "derived" : "table",
+		query: parsed,
+		window: parsed.limit + 1,
+	})
 
 	if (parsed.cursor) {
 		if (!keyset.keys || !tiebreak) {
@@ -144,6 +99,7 @@ function finish({ cursor: options, keyset, parsed, sort, table, tiebreak, where 
 			meta: { limit: parsed.limit, page: 1, type: "cursor" },
 			offset: 0,
 			orderBy: keyset.orderBy,
+			pagination,
 			search,
 			where: combineWhere(...where, after),
 		}
@@ -156,6 +112,7 @@ function finish({ cursor: options, keyset, parsed, sort, table, tiebreak, where 
 		meta: { limit: parsed.limit, page, type: "offset" },
 		offset: (page - 1) * parsed.limit,
 		orderBy: keyset.orderBy,
+		pagination,
 		search,
 		where: combineWhere(...where),
 	}
@@ -260,14 +217,17 @@ function buildDerivedListQuery<TSortField extends string>(
 		return { column: "type" in column ? new DateKey(column.sql) : column, direction, nulls }
 	})
 
-	const tiebreak: SortKey = { column: opts.idColumn, direction: sort[0]?.direction ?? "desc" }
+	const idColumn = opts.anchor === undefined ? opts.idColumn : opts.anchor.idColumn
+	const tiebreak: SortKey = { column: idColumn, direction: sort[0]?.direction ?? "desc" }
 	const orderBy = orderByKeys(keys, tiebreak)
 
 	return finish({
 		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret },
+		idField: opts.idField,
 		keyset: { keys, orderBy },
 		parsed: opts.parsed,
 		sort,
+		table: opts.anchor?.table,
 		tiebreak,
 		where: [resolveBaseWhere(opts.baseWhere), opts.filterWhere, opts.searchWhere],
 	})

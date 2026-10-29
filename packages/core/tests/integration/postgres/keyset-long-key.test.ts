@@ -16,6 +16,7 @@ import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { usePg } from "../support/pg.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const doc = pgTable("doc", { id: integer("id").primaryKey(), title: text("title").notNull() })
 const schema = createListQuerySchema({ sort: ["title"], pagination: { defaultLimit: 1, maxLimit: 1 } })
@@ -57,7 +58,7 @@ async function pageAll(
 		const rows = await db.query.doc.findMany(queryHelpers.listOptions(query, SEALED) as never)
 		let paged: ReturnType<typeof queryHelpers.paginate<{ id: number; title: string }>>
 		try {
-			paged = queryHelpers.paginate(rows as Array<{ id: number; title: string }>, query, SEALED)
+			paged = queryHelpers.paginate(rows as Array<{ id: number; title: string }>, pagedAs(query, SEALED))
 		} catch (error) {
 			if (error instanceof CombError) return { deleted, refused: error, seen }
 			throw error
@@ -204,8 +205,7 @@ describe("the gone-anchor flag on Postgres (U26)", () => {
 				id: number
 				title: string
 			}>,
-			first,
-			SEALED,
+			pagedAs(first, SEALED),
 		)
 		const query = { ...first, cursor: page[1].nextCursor as string }
 		const built = db.query.doc.findMany(queryHelpers.listOptions(query, SEALED) as never).toSQL()

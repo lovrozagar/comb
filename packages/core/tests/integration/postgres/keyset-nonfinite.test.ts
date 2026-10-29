@@ -13,6 +13,7 @@ import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { usePg } from "../support/pg.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built } from "../../../src/query/__fixtures__/built.ts"
 
 const point = pgTable("point", {
 	at: timestamp("at", { mode: "string", precision: 3 }),
@@ -37,7 +38,7 @@ describe("keyset pagination on keys JSON has no number for (R4)", () => {
 		for (let page = 0; page < 12; page++) {
 			const options = queryHelpers.listOptions({ ...query, cursor }, SEALED)
 			const rows = await db.query.point.findMany(options as never)
-			const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, { ...query, cursor }, SEALED)
+			const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built({ ...query, cursor }, SEALED))
 			seen.push(...items.map((row) => row.id))
 			if (meta.nextCursor === null) return seen
 			cursor = meta.nextCursor

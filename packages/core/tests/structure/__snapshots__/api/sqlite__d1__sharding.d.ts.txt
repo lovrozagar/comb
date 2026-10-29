@@ -15,10 +15,8 @@ export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardMove, Shar
  */
 import { type SQL } from "drizzle-orm";
 import type { CursorOptions } from "./cursor-seal.ts";
-import { type DrizzleListOptions, type PaginateOptions, queryHelpers } from "./drizzle.ts";
-import type { paginationResponseSchema } from "./schema.ts";
-import type { ParsedFields, SortField } from "./types.ts";
-import type * as z from "zod";
+import { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
+import { type ListPagination, type PaginationMeta } from "./pagination.ts";
 type MergedQuery = Parameters<typeof queryHelpers.listOptions>[0];
 /** listOptions for one shard: its extras may carry the shard's count beside the gone-anchor flag */
 type MergedListOptions = Omit<DrizzleListOptions, "extras"> & {
@@ -41,13 +39,9 @@ declare function mergedListOptions(query: MergedQuery, options: CursorOptions & 
  */
 declare function paginateMerged<T extends object>(rowsPerShard: ReadonlyArray<ReadonlyArray<T & {
     _total?: number;
-}>>, query: {
-    cursor?: string | undefined;
-    limit: number;
-    page?: number | undefined;
-    parsedFields?: ParsedFields | null | undefined;
-    parsedSort: SortField[];
-}, options: PaginateOptions): readonly [T[], z.output<typeof paginationResponseSchema>];
+}>>, built: {
+    pagination: ListPagination;
+}): readonly [T[], PaginationMeta];
 export { type MergedListOptions, mergedListOptions, paginateMerged };
 
 // sqlite/d1/sharding/router.d.ts
@@ -267,14 +261,10 @@ export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CU
  * query-helpers with drizzle's relational query API.
  */
 import { type SQL } from "drizzle-orm";
-import { type KeysetKind } from "./cursor-mint.ts";
-import { type CursorOptions } from "./cursor-seal.ts";
+import type { CursorOptions } from "./cursor-seal.ts";
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts";
+import { type ListPagination, paginate } from "./pagination.ts";
 import type { ParsedFields, SortField } from "./types.ts";
-import type { paginationResponseSchema } from "./schema.ts";
-import type * as z from "zod";
-/** The pagination meta paginate returns: the list response's own schema */
-type PaginationMeta = z.output<typeof paginationResponseSchema>;
 /** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
 type RelationalTable = object;
 type DrizzleListOptions = {
@@ -292,6 +282,8 @@ type DrizzleListOptions = {
     extras?: {
         _combAnchorGone: (table: RelationalTable) => SQL;
     };
+    /** How `paginate` pages the rows these options read (pagination.ts) */
+    pagination: ListPagination;
 };
 /**
  * The parsed request, or the `ListQueryResult` built from it: what a service or a repository holds.
@@ -323,46 +315,11 @@ declare function drizzleListOptions(query: {
     cursor?: string | undefined;
     limit: number;
     page?: number | undefined;
+    parsedFields?: ParsedFields | null | undefined;
     parsedSort: SortField[];
     sortOrderBy: Record<string, "asc" | "desc">;
     validated?: true | undefined;
 }, options: CursorOptions): DrizzleListOptions;
-type DrizzleListResult<T> = T & {
-    _total?: number;
-};
-/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
-declare function refuseGoneAnchor(items: readonly object[]): void;
-/**
- * Last mutation of item shape. Query stays fat; the returned object is the
- * public subset. No-op (minus `_total`) when parsedFields is null.
- */
-declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
-/**
- * The next cursor, minted from the last row of the page. A row without a sort key or the id
- * would mint a cursor that repeats or ends the list, so that is a wiring mistake: select them.
- * Any id the row holds, 0 and "" included, carries the next page.
- */
-declare function mintFrom(row: object, parsedSort: SortField[], options: PaginateOptions): string;
-/**
- * paginate's options: the cursor secret and scope, the field a row's tiebreak id is in (default
- * `id`), and `keyset: "derived"` for a buildDerivedListQuery list, whose keys no row holds
- */
-type PaginateOptions = CursorOptions & {
-    idField?: string | undefined;
-    keyset?: KeysetKind | undefined;
-};
-/**
- * Create pagination result from drizzle query results with _total extra, the next cursor sealed
- * under `options` and keyed by `idField`, as buildDerivedListQuery's idColumn keys the page
- */
-declare function drizzlePaginationResult<T extends object>(items: DrizzleListResult<T>[], query: {
-    cursor?: string;
-    limit: number;
-    page?: number;
-    parsedFields?: ParsedFields | null | undefined;
-    parsedSort: SortField[];
-    validated?: true | undefined;
-}, options: PaginateOptions): readonly [T[], PaginationMeta];
 declare function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
 /** List-query helpers for drizzle queries: count, options, pagination, projection */
 declare const queryHelpers: {
@@ -370,31 +327,124 @@ declare const queryHelpers: {
     filterValue: typeof extractFilterValue;
     filterValues: typeof extractFilterValues;
     listOptions: typeof drizzleListOptions;
-    paginate: typeof drizzlePaginationResult;
+    paginate: typeof paginate;
     project: typeof drizzleProject;
 };
-export { applySelect, type CursorOptions, type DrizzleListOptions, mintFrom, type PaginateOptions, queryHelpers, refuseGoneAnchor, };
+export { type CursorOptions, type DrizzleListOptions, queryHelpers };
 
-// query/schema.d.ts
+// query/pagination.d.ts
+import { type DecodedCursor } from "./cursor.ts";
+import { type KeysetKind } from "./cursor-mint.ts";
+import { type CursorOptions } from "./cursor-seal.ts";
+import type { paginationResponseSchema } from "./schema.ts";
+import type { ParsedFields, SortField } from "./types.ts";
+import type * as z from "zod";
+/** The pagination meta paginate returns: the list response's own schema */
+type PaginationMeta = z.output<typeof paginationResponseSchema>;
+/** How a built list pages what it fetched */
+type ListPagination = {
+    /** the cursor the request resumed from; none on a page by number */
+    cursor: string | undefined;
+    /** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak (Q6) */
+    cursorable: boolean;
+    cursorScope: string;
+    /** the field a row's tiebreak id is in */
+    idField: string;
+    /** how a key too long for a cursor is carried: by reference to its row ("table"), or not at all ("derived") */
+    keyset: KeysetKind;
+    limit: number;
+    nonFinite: "exact" | undefined;
+    page: number | undefined;
+    parsedFields: ParsedFields | null;
+    parsedSort: SortField[];
+    /** the most rows the built query reads: one past the page, so paginate can tell there is more */
+    window: number;
+    /** the cursor for the page after `row`, sealed under the builder's options */
+    mint(row: object): string;
+    /** `cursor` opened under the builder's options, for this list's sort; a 400 when it is no cursor of it */
+    read(cursor: string): DecodedCursor;
+};
+/** What a builder knows of its list, beside the request it parsed */
+type PaginationFacts = {
+    cursorable: boolean;
+    idField?: string | undefined;
+    keyset?: KeysetKind | undefined;
+    query: {
+        cursor?: string | null | undefined;
+        limit: number;
+        page?: number | null | undefined;
+        parsedFields?: ParsedFields | null | undefined;
+        parsedSort: SortField[];
+    };
+    window: number;
+};
+/** The descriptor a builder hands over: its facts, and the options it seals under closed over, never held */
+declare function paginationOf(options: CursorOptions, facts: PaginationFacts): ListPagination;
+/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
+declare function refuseGoneAnchor(items: readonly object[]): void;
 /**
- * Zod schema builders for list/retrieve query validation, and the response meta schema.
- * Combines filter, sort, fields, and pagination into validated schemas.
+ * Last mutation of item shape. Query stays fat; the returned object is the
+ * public subset. No-op (minus `_total`) when parsedFields is null.
  */
-import * as z from "zod";
-type PaginationResponseSchema = z.ZodObject<{
-    count: z.ZodNullable<z.ZodNumber>;
-    hasMore: z.ZodBoolean;
-    limit: z.ZodNumber;
-    nextCursor: z.ZodNullable<z.ZodString>;
-    page: z.ZodNullable<z.ZodNumber>;
-}, z.core.$strip>;
-/** Pagination response meta schema for list endpoints */
-declare const paginationResponseSchema: PaginationResponseSchema;
-export { createListQuerySchema } from "./list-schema.ts";
-export { createRetrieveQuerySchema } from "./retrieve-schema.ts";
-export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS } from "./schema-limits.ts";
-export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, RetrieveQueryConfig, RetrieveQueryOutput, } from "./schema-types.ts";
-export { paginationResponseSchema };
+declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
+/** `built` as paginate takes it, or a 500 naming the call: a parsed query in its place is the call before 0.15 */
+declare function paginationIn(built: {
+    pagination: ListPagination;
+} | undefined): ListPagination;
+/** More rows than the built query reads are rows of another query: one that applied no limit (C2) */
+declare function refuseOverRead(count: number, pagination: ListPagination): void;
+/**
+ * The page of `items`, read with `built`, and its pagination: count, whether there is more, and
+ * the next cursor, sealed under the builder's options; none for a list no cursor can resume
+ */
+declare function paginate<T extends object>(items: ReadonlyArray<T & {
+    _total?: number;
+}>, built: {
+    pagination: ListPagination;
+}): readonly [T[], PaginationMeta];
+export { applySelect, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, };
+
+// sqlite/columns.d.ts
+/**
+ * Unified column factories for SQLite
+ *
+ * Provides dialect-agnostic column definitions that can be swapped with PostgreSQL
+ */
+import { type $Type, type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
+import { type SQLiteBooleanBuilder, type SQLiteIntegerBuilder, type SQLiteRealBuilder, type SQLiteTextBuilder, type SQLiteTextJsonBuilder } from "drizzle-orm/sqlite-core";
+import type * as z from "zod";
+import type { EnumStates, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "./constraints.ts";
+type Text = SQLiteTextBuilder<[string, ...string[]]>;
+type CreatedAtName = "createdAt" | "created_at";
+type DeletedAtName = "deletedAt" | "deleted_at";
+type UpdatedAtName = "updatedAt" | "updated_at";
+/** What each `c` factory returns: drizzle's own builder types, spelled out for isolated declarations */
+export type SqliteColumns = {
+    boolean: (name: string) => SQLiteBooleanBuilder;
+    createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => HasDefault<NotNull<SQLiteIntegerBuilder>>;
+    deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
+    enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) => $Type<Text, T[number]>;
+    id: (_prefix: string) => IsPrimaryKey<Text>;
+    integer: (name: string, _constraints?: IntegerConstraints) => SQLiteIntegerBuilder;
+    json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) => $Type<SQLiteTextJsonBuilder, z.infer<TSchema>>;
+    real: (name: string, _constraints?: IntegerConstraints) => SQLiteRealBuilder;
+    ref: (name: string, _constraints?: TextConstraints) => Text;
+    serialId: () => IsPrimaryKey<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
+    text: (name: string, _constraints?: TextConstraints) => Text;
+    timestamp: (name: string, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
+    updatedAt: (name: UpdatedAtName, _constraints?: TimestampConstraints) => HasDefault<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
+};
+export declare const c: SqliteColumns;
+export {};
+
+// query/filter-values.d.ts
+/** The values a filter names for one field or several: queryHelpers.filterValue and filterValues */
+import type { FilterAST } from "./types.ts";
+/** Extract a single filter value from FilterAST */
+declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
+/** Extract multiple filter values from FilterAST */
+declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
+export { extractFilterValue, extractFilterValues };
 
 // query/types.d.ts
 /**
@@ -449,38 +499,93 @@ type ListQueryCapabilities = {
 };
 export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ParsedFields, SortDirection, SortField, SortNulls, };
 
-// sqlite/columns.d.ts
+// query/cursor.d.ts
+import { type CursorOptions } from "./cursor-seal.ts";
+import type { SortDirection, SortField, SortNulls } from "./types.ts";
 /**
- * Unified column factories for SQLite
+ * Column keyset pagination breaks ties on.
  *
- * Provides dialect-agnostic column definitions that can be swapped with PostgreSQL
+ * This is the single source of truth for the tiebreak: the SQL builders resolve
+ * the column by this name, and `createListQuerySchema` publishes it as
+ * `stableTiebreak`. Keeping one constant is what stops the published fact from
+ * drifting away from the query that is actually run.
+ *
+ * A table whose primary-key property is named something else has no cursor
+ * predicate applied at all — rows then duplicate and skip across pages — so
+ * `validateTables()` rejects that shape rather than letting it fail silently.
  */
-import { type $Type, type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
-import { type SQLiteBooleanBuilder, type SQLiteIntegerBuilder, type SQLiteRealBuilder, type SQLiteTextBuilder, type SQLiteTextJsonBuilder } from "drizzle-orm/sqlite-core";
-import type * as z from "zod";
-import type { EnumStates, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "./constraints.ts";
-type Text = SQLiteTextBuilder<[string, ...string[]]>;
-type CreatedAtName = "createdAt" | "created_at";
-type DeletedAtName = "deletedAt" | "deleted_at";
-type UpdatedAtName = "updatedAt" | "updated_at";
-/** What each `c` factory returns: drizzle's own builder types, spelled out for isolated declarations */
-export type SqliteColumns = {
-    boolean: (name: string) => SQLiteBooleanBuilder;
-    createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => HasDefault<NotNull<SQLiteIntegerBuilder>>;
-    deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
-    enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) => $Type<Text, T[number]>;
-    id: (_prefix: string) => IsPrimaryKey<Text>;
-    integer: (name: string, _constraints?: IntegerConstraints) => SQLiteIntegerBuilder;
-    json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) => $Type<SQLiteTextJsonBuilder, z.infer<TSchema>>;
-    real: (name: string, _constraints?: IntegerConstraints) => SQLiteRealBuilder;
-    ref: (name: string, _constraints?: TextConstraints) => Text;
-    serialId: () => IsPrimaryKey<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
-    text: (name: string, _constraints?: TextConstraints) => Text;
-    timestamp: (name: string, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
-    updatedAt: (name: UpdatedAtName, _constraints?: TimestampConstraints) => HasDefault<HasDefault<NotNull<SQLiteIntegerBuilder>>>;
+declare const CURSOR_TIEBREAK_COLUMN = "id";
+/**
+ * The longest cursor a list takes, and so the longest comb mints: it fits a URL. A cursor carries
+ * its sort values, so a long text key could mint one past it, which the next page would refuse.
+ */
+declare const MAX_CURSOR_LENGTH = 8192;
+/**
+ * Wire payload. `s` is the sort signature the cursor was minted under, `v` one
+ * value per sort key in order, `i` the tiebreak id. A cursor is only valid for
+ * the exact sort that produced it.
+ */
+type CursorPayload = {
+    i: CursorId;
+    s: string;
+    v: unknown[];
 };
-export declare const c: SqliteColumns;
-export {};
+/** The tiebreak id as the row held it: a number stays a number, a bigint a bigint, so it compares as one */
+type CursorId = bigint | number | string;
+type DecodedCursor = {
+    id: CursorId;
+    sort: string;
+    values: CursorValue[];
+};
+/**
+ * A sort value carried by reference (cursor-ref.ts): the prefix of it that fit and the whole
+ * value's length, both in code points as SQLite's substr() and Postgres's left() count them; the
+ * rest is read from the row while it still has that prefix and length
+ */
+declare class CursorRef {
+    readonly length: number;
+    readonly prefix: string;
+    constructor(prefix: string, length: number);
+}
+/** What a sort key can hold and its database can compare, or a long one carried by reference */
+type CursorValue = bigint | boolean | CursorRef | Date | number | string | null;
+type PaginationMeta = {
+    /** Rows the filter matches across all pages; null when the response cannot know */
+    count: number | null;
+    hasMore: boolean;
+    limit: number;
+    nextCursor: string | null;
+    page: number | null;
+};
+/** PostgreSQL semantics: nulls sort last ascending and first descending. */
+declare function effectiveNulls(direction: SortDirection, nulls?: SortNulls): SortNulls;
+/** Canonical form of a sort — what a cursor is bound to. */
+declare function sortSignature(parsedSort: readonly SortField[]): string;
+/** A sealed cursor for `payload`, opened only under the same `options` */
+declare function encodeCursor(payload: CursorPayload, options: CursorOptions): string;
+/** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key (U22) */
+declare const lossy: (value: unknown) => value is number;
+/**
+ * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
+ * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37)
+ */
+declare function mintCursor(record: Record<string, unknown>, parsedSort: readonly SortField[], options: CursorOptions & {
+    idField?: string | undefined;
+}): string;
+/**
+ * Why `cursor` cannot be one, or null when its shape can: the list schema's check, a 400 at
+ * validation. What it holds, and the sort it was minted under, only readCursor can open.
+ */
+declare function cursorProblem(cursor: string): string | null;
+/** The cursor sealed under `options`, opened and decoded; null when it was not, or it is no cursor */
+declare function openCursor(cursor: string, options: CursorOptions): DecodedCursor | null;
+/**
+ * Open a cursor under `options` and decode it for this sort, or throw a 400 CombError. A value may
+ * be a CursorRef: a long sort value carried by reference, its prefix and length, which a keyset
+ * of its own must read from the cursor's row (cursor-ref.ts), never bind as it is.
+ */
+declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
+export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
 
 // query/cursor-mint.d.ts
 import type { CursorOptions } from "./cursor-seal.ts";
@@ -498,14 +603,124 @@ declare function createCursor(row: Record<string, unknown>, sort: readonly SortF
 }): string;
 export { createCursor, type KeysetKind };
 
-// query/filter-values.d.ts
-/** The values a filter names for one field or several: queryHelpers.filterValue and filterValues */
-import type { FilterAST } from "./types.ts";
-/** Extract a single filter value from FilterAST */
-declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
-/** Extract multiple filter values from FilterAST */
-declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
-export { extractFilterValue, extractFilterValues };
+// query/schema.d.ts
+/**
+ * Zod schema builders for list/retrieve query validation, and the response meta schema.
+ * Combines filter, sort, fields, and pagination into validated schemas.
+ */
+import * as z from "zod";
+type PaginationResponseSchema = z.ZodObject<{
+    count: z.ZodNullable<z.ZodNumber>;
+    hasMore: z.ZodBoolean;
+    limit: z.ZodNumber;
+    nextCursor: z.ZodNullable<z.ZodString>;
+    page: z.ZodNullable<z.ZodNumber>;
+}, z.core.$strip>;
+/** Pagination response meta schema for list endpoints */
+declare const paginationResponseSchema: PaginationResponseSchema;
+export { createListQuerySchema } from "./list-schema.ts";
+export { createRetrieveQuerySchema } from "./retrieve-schema.ts";
+export { LIST_QUERY_LIMITS, PAGINATION_DEFAULTS } from "./schema-limits.ts";
+export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, RetrieveQueryConfig, RetrieveQueryOutput, } from "./schema-types.ts";
+export { paginationResponseSchema };
+
+// sqlite/constraints.d.ts
+/**
+ * Type-safe column constraint definitions
+ * These exist only in the type system and are completely erased at runtime
+ */
+type BaseConstraints = {
+    /** Field is filled by comb or the database: generated create and update DTOs leave it out */
+    autogenerate?: boolean;
+    /**
+     * A foreign key that may move after creation (a person to another team): generated update DTOs
+     * take it. Every other reference is set once, at creation. Refused on a column that references
+     * nothing, and together with `nomutate`.
+     */
+    mutable?: boolean;
+    /** Field cannot be mutated after creation */
+    nomutate?: boolean;
+    /** Field is never read back: generated read DTOs, the meta stamp and the manifest leave it out */
+    private?: boolean;
+    /** the name this key's relation takes, where its column's role would take the column's own name (F57) */
+    relation?: string;
+    /**
+     * This column scopes rows to a tenant.
+     *
+     * Declared, never inferred: comb can see that a column is a foreign key but
+     * not that the table it points at is the tenant, and a wrong tenant boundary
+     * is worse than a missing one. Saying so here makes it a hand-reviewed fact.
+     * At most one column per table may carry it.
+     */
+    tenant?: boolean;
+};
+type StringTransformConstraints = {
+    /** Apply lowercase transformation */
+    lowercase?: boolean;
+    /** Trim whitespace */
+    trim?: boolean;
+    /** Apply uppercase transformation */
+    uppercase?: boolean;
+};
+type NumericRangeConstraints = {
+    /** Maximum value */
+    max?: number;
+    /** Minimum value */
+    min?: number;
+};
+type StringValidationConstraints = {
+    /** Email validation */
+    email?: boolean;
+    /** Image URI validation (accepts https URLs and data:image/ URIs) */
+    imageUri?: boolean;
+    /** Human/entity name validation (letters, marks, numbers, spaces, punctuation) */
+    name?: boolean;
+    /** Password validation (min 8, max 72, printable ASCII) */
+    password?: boolean;
+    /** Regex pattern validation */
+    pattern?: string;
+    /** URL validation */
+    url?: boolean;
+};
+/**
+ * Text column constraints
+ * Closed record - only these properties allowed
+ */
+export type TextConstraints = BaseConstraints & StringTransformConstraints & NumericRangeConstraints & StringValidationConstraints;
+/**
+ * Integer/numeric column constraints
+ * Closed record - only these properties allowed
+ */
+export type IntegerConstraints = BaseConstraints & NumericRangeConstraints;
+/**
+ * JSON column constraints
+ * Closed record - only these properties allowed
+ */
+export type JsonConstraints = BaseConstraints & {
+    /** Maximum JSON stringified byte length */
+    maxBytes?: number;
+};
+/**
+ * Timestamp column constraints
+ * Closed record - only these properties allowed
+ */
+export type TimestampConstraints = BaseConstraints & NumericRangeConstraints;
+/**
+ * State machine declared alongside an enum column's values.
+ *
+ * Type-level only, like every other constraint here — the analyzer reads it
+ * out of the source. Hold the same object as a const and pass it to both
+ * `c.enum` and `assertTransition`. See docs/state-machines.md.
+ */
+export type EnumStates<TState extends string = string> = {
+    /** The value a row starts at */
+    initial?: TState | undefined;
+    /** Values from which no transition is legal */
+    terminal?: readonly TState[] | undefined;
+    /** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
+    transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined;
+};
+export {};
 
 // query/list-schema.d.ts
 /**
@@ -661,104 +876,6 @@ type RetrieveQueryOutput = {
     parsedFields: ParsedFields | null;
 };
 export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, OutputStableShape, PaginationConfig, RetrieveQueryConfig, RetrieveQueryOutput, };
-
-// sqlite/constraints.d.ts
-/**
- * Type-safe column constraint definitions
- * These exist only in the type system and are completely erased at runtime
- */
-type BaseConstraints = {
-    /** Field is filled by comb or the database: generated create and update DTOs leave it out */
-    autogenerate?: boolean;
-    /**
-     * A foreign key that may move after creation (a person to another team): generated update DTOs
-     * take it. Every other reference is set once, at creation. Refused on a column that references
-     * nothing, and together with `nomutate`.
-     */
-    mutable?: boolean;
-    /** Field cannot be mutated after creation */
-    nomutate?: boolean;
-    /** Field is never read back: generated read DTOs, the meta stamp and the manifest leave it out */
-    private?: boolean;
-    /** the name this key's relation takes, where its column's role would take the column's own name (F57) */
-    relation?: string;
-    /**
-     * This column scopes rows to a tenant.
-     *
-     * Declared, never inferred: comb can see that a column is a foreign key but
-     * not that the table it points at is the tenant, and a wrong tenant boundary
-     * is worse than a missing one. Saying so here makes it a hand-reviewed fact.
-     * At most one column per table may carry it.
-     */
-    tenant?: boolean;
-};
-type StringTransformConstraints = {
-    /** Apply lowercase transformation */
-    lowercase?: boolean;
-    /** Trim whitespace */
-    trim?: boolean;
-    /** Apply uppercase transformation */
-    uppercase?: boolean;
-};
-type NumericRangeConstraints = {
-    /** Maximum value */
-    max?: number;
-    /** Minimum value */
-    min?: number;
-};
-type StringValidationConstraints = {
-    /** Email validation */
-    email?: boolean;
-    /** Image URI validation (accepts https URLs and data:image/ URIs) */
-    imageUri?: boolean;
-    /** Human/entity name validation (letters, marks, numbers, spaces, punctuation) */
-    name?: boolean;
-    /** Password validation (min 8, max 72, printable ASCII) */
-    password?: boolean;
-    /** Regex pattern validation */
-    pattern?: string;
-    /** URL validation */
-    url?: boolean;
-};
-/**
- * Text column constraints
- * Closed record - only these properties allowed
- */
-export type TextConstraints = BaseConstraints & StringTransformConstraints & NumericRangeConstraints & StringValidationConstraints;
-/**
- * Integer/numeric column constraints
- * Closed record - only these properties allowed
- */
-export type IntegerConstraints = BaseConstraints & NumericRangeConstraints;
-/**
- * JSON column constraints
- * Closed record - only these properties allowed
- */
-export type JsonConstraints = BaseConstraints & {
-    /** Maximum JSON stringified byte length */
-    maxBytes?: number;
-};
-/**
- * Timestamp column constraints
- * Closed record - only these properties allowed
- */
-export type TimestampConstraints = BaseConstraints & NumericRangeConstraints;
-/**
- * State machine declared alongside an enum column's values.
- *
- * Type-level only, like every other constraint here — the analyzer reads it
- * out of the source. Hold the same object as a const and pass it to both
- * `c.enum` and `assertTransition`. See docs/state-machines.md.
- */
-export type EnumStates<TState extends string = string> = {
-    /** The value a row starts at */
-    initial?: TState | undefined;
-    /** Values from which no transition is legal */
-    terminal?: readonly TState[] | undefined;
-    /** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
-    transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined;
-};
-export {};
 
 // query/schema-params.d.ts
 /** The zod pieces the list and retrieve query schemas share: request params and parsed outputs. */

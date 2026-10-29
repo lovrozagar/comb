@@ -11,6 +11,7 @@ import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { usePg } from "../support/pg.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const item = pgTable("item", {
 	created: timestamp("created", { precision: 6 }).notNull(),
@@ -46,11 +47,13 @@ describe("keyset pagination on a microsecond timestamp (Q2)", () => {
 				} as never)
 				const [items, meta] = queryHelpers.paginate(
 					rows as Array<{ created: Date; id: number; name: string }>,
-					{
-						...query,
-						cursor,
-					},
-					SEALED,
+					pagedAs(
+						{
+							...query,
+							cursor,
+						},
+						SEALED,
+					),
 				)
 				seen.push(...items.map((row) => row.name))
 				if (!meta.hasMore || meta.nextCursor === null) break
@@ -89,8 +92,7 @@ describe("keyset pagination on a bigint id (Q5)", () => {
 			} as never)
 			const [items, meta] = queryHelpers.paginate(
 				rows as Array<{ id: bigint; name: string }>,
-				{ ...query, cursor },
-				SEALED,
+				pagedAs({ ...query, cursor }, SEALED),
 			)
 			seen.push(...items.map((row) => row.id))
 			if (!meta.hasMore || meta.nextCursor === null) break
@@ -122,7 +124,7 @@ describe("keyset pagination on a bigint key past 2^53 read in number mode (U22)"
 		for (let page = 0; page < 12; page++) {
 			const query = { ...counterSchema.parse({ order }), cursor }
 			const rows = await db.query.counter.findMany(queryHelpers.listOptions(query, SEALED) as never)
-			const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; n: number }>, query, SEALED)
+			const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number; n: number }>, pagedAs(query, SEALED))
 			seen.push(...items.map((row) => row.id))
 			if (meta.nextCursor === null) break
 			cursor = meta.nextCursor
@@ -149,7 +151,10 @@ describe("keyset pagination on a microsecond timestamp served by an index (U27)"
 		const db = drizzle({ client, relations: defineRelations({ item }) })
 		const first = schema.parse({ limit: "2", order })
 		const rows = await db.query.item.findMany(queryHelpers.listOptions(first, SEALED) as never)
-		const [, meta] = queryHelpers.paginate(rows as Array<{ created: Date; id: number; name: string }>, first, SEALED)
+		const [, meta] = queryHelpers.paginate(
+			rows as Array<{ created: Date; id: number; name: string }>,
+			pagedAs(first, SEALED),
+		)
 		const next = { ...first, cursor: meta.nextCursor as string }
 		const built = db.query.item.findMany(queryHelpers.listOptions(next, SEALED) as never).toSQL()
 		const plan = await client.query(`EXPLAIN ${built.sql}`, built.params as unknown[])
@@ -194,7 +199,7 @@ describe("keyset pagination on a microsecond timestamptz (U27)", () => {
 				plan = explained.rows.map((row: Record<string, string>) => Object.values(row)[0]).join("\n")
 			}
 			const rows = await db.query.event.findMany(options as never)
-			const [items, meta] = queryHelpers.paginate(rows as Array<{ at: Date; id: number }>, query, SEALED)
+			const [items, meta] = queryHelpers.paginate(rows as Array<{ at: Date; id: number }>, pagedAs(query, SEALED))
 			seen.push(...items.map((row) => row.id))
 			if (meta.nextCursor === null) break
 			cursor = meta.nextCursor

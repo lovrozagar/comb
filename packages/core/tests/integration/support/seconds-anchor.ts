@@ -10,6 +10,7 @@ import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built } from "../../../src/query/__fixtures__/built.ts"
 
 export const event = sqliteTable("event", {
 	at: integer("at", { mode: "timestamp" }).notNull(),
@@ -96,7 +97,7 @@ export async function servedAround(engine: AnchorEngine, { change, order, rows }
 			engine.db.select().from(event).$dynamic(),
 			buildListQuery({ ...SEALED, parsed, table: event }),
 		)
-		const [items, meta] = queryHelpers.paginate(found as Array<{ id: number }>, parsed, SEALED)
+		const [items, meta] = queryHelpers.paginate(found as Array<{ id: number }>, built(parsed, SEALED))
 		seen.push(...items.map((row) => row.id))
 		if (page === 0) for (const statement of [change(seen.at(-1) as number)].flat()) await engine.exec(statement)
 		if (meta.nextCursor === null) return seen

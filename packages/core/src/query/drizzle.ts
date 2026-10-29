@@ -8,20 +8,14 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 
 import { type CursorId, CursorRef, CURSOR_TIEBREAK_COLUMN, readCursor } from "./cursor.ts"
-import { createCursor, type KeysetKind } from "./cursor-mint.ts"
 import { anchored } from "./cursor-ref.ts"
-import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
+import type { CursorOptions } from "./cursor-seal.ts"
 import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
-import { filterBySelect } from "./fields.ts"
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts"
 import { anchorGone, keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
+import { applySelect, type ListPagination, paginate, paginationOf } from "./pagination.ts"
 import { assertPageWithin, assertSchemaParsed } from "./trusted.ts"
 import type { ParsedFields, SortField } from "./types.ts"
-import type { paginationResponseSchema } from "./schema.ts"
-import type * as z from "zod"
-
-/** The pagination meta paginate returns: the list response's own schema */
-type PaginationMeta = z.output<typeof paginationResponseSchema>
 
 /** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
 type RelationalTable = object
@@ -37,6 +31,8 @@ type DrizzleListOptions = {
 	where?: { RAW: (table: RelationalTable) => SQL }
 	/** Whether the cursor's anchor is gone where no bound is safe, for `findMany({ extras })`: paginate reads it (U26) */
 	extras?: { _combAnchorGone: (table: RelationalTable) => SQL }
+	/** How `paginate` pages the rows these options read (pagination.ts) */
+	pagination: ListPagination
 }
 
 /**
@@ -55,20 +51,6 @@ type CountQuery =
 function countExtra(query: CountQuery): { _total?: SQL.Aliased<number> } {
 	const cursor = "meta" in query ? query.meta.type === "cursor" : Boolean(query.cursor)
 	return cursor ? {} : { _total: sql<number>`cast(count(*) over() as integer)`.as("_total") }
-}
-
-/**
- * Rows the filter matches across all pages, or null when this page cannot know: a cursor page
- * (no count was selected), a page past the end (no row carried it), or a query without countExtra.
- */
-function countOf(
-	items: ReadonlyArray<{ _total?: number }>,
-	query: { cursor?: string | undefined; page?: number | undefined },
-): number | null {
-	if (query.cursor) return null
-	const first = items[0]
-	if (first === undefined) return (query.page ?? 1) === 1 ? 0 : null
-	return first._total ?? null
 }
 
 /** The sort keys and tiebreak against the queried table; a sort field it lacks is a wiring mistake */
@@ -95,6 +77,7 @@ function drizzleListOptions(
 		cursor?: string | undefined
 		limit: number
 		page?: number | undefined
+		parsedFields?: ParsedFields | null | undefined
 		parsedSort: SortField[]
 		sortOrderBy: Record<string, "asc" | "desc">
 		validated?: true | undefined
@@ -103,13 +86,13 @@ function drizzleListOptions(
 ): DrizzleListOptions {
 	assertSchemaParsed(query)
 	/* options that cannot seal are a wiring mistake on page 1 too, not only once a cursor comes back */
-	assertCursorWired(options)
+	const pagination = paginationOf(options, { cursorable: true, query, window: query.limit + 1 })
 	const sort = query.parsedSort
 	const orderBy = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
 		return orderByKeys(keys, tiebreak)
 	}
-	const base = { limit: query.limit + 1, orderBy, sortOrderBy: query.sortOrderBy }
+	const base = { limit: query.limit + 1, orderBy, pagination, sortOrderBy: query.sortOrderBy }
 	if (!query.cursor) {
 		/* a page no schema bounded is bounded here, as buildListQuery bounds it (U5) */
 		assertPageWithin(query)
@@ -136,106 +119,6 @@ function drizzleListOptions(
 	return { ...base, extras: { _combAnchorGone: gone }, offset: 0, where: { RAW: where } }
 }
 
-type DrizzleListResult<T> = T & { _total?: number }
-
-/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
-function refuseGoneAnchor(items: readonly object[]): void {
-	if (items.some((item) => Number((item as Record<string, unknown>)["_combAnchorGone"]) === 1)) {
-		throw new CombError({
-			cause:
-				"the row this cursor resumes from was renamed or deleted, and no bound is safe under its collation; start the list again",
-			errorKey: combErrorKeys.INVALID_CURSOR,
-			status: "bad_request",
-		})
-	}
-}
-
-/** `_total` is a window extra, never a public field. Callers read pagination.count. */
-function stripWindowTotal<T extends Record<string, unknown>>(row: T): T {
-	if (!Object.hasOwn(row, "_total") && !Object.hasOwn(row, "_combAnchorGone")) return row
-	const rest = { ...row }
-	delete rest["_total"]
-	delete rest["_combAnchorGone"]
-	return rest
-}
-
-/**
- * Last mutation of item shape. Query stays fat; the returned object is the
- * public subset. No-op (minus `_total`) when parsedFields is null.
- */
-function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T {
-	const publicRow = stripWindowTotal(row)
-	if (!parsedFields) return publicRow
-	return filterBySelect(publicRow, parsedFields) as T
-}
-
-/**
- * The next cursor, minted from the last row of the page. A row without a sort key or the id
- * would mint a cursor that repeats or ends the list, so that is a wiring mistake: select them.
- * Any id the row holds, 0 and "" included, carries the next page.
- */
-function mintFrom(row: object, parsedSort: SortField[], options: PaginateOptions): string {
-	const { idField } = options
-	const missing = [...parsedSort.map(({ field }) => field), idField ?? CURSOR_TIEBREAK_COLUMN].filter(
-		(key) => !Object.hasOwn(row, key),
-	)
-	if (missing.length > 0) {
-		throw new CombError({
-			cause: `paginate mints the next cursor from each row's ${missing.join(", ")}; select them`,
-			errorKey: combErrorKeys.SORT_NOT_WIRED,
-			status: "internal_server_error",
-		})
-	}
-	/* a key too long for the cap goes by reference; a derived list, which cannot read it, says so on page 1 */
-	return createCursor(row as Record<string, unknown>, parsedSort, options)
-}
-
-/**
- * paginate's options: the cursor secret and scope, the field a row's tiebreak id is in (default
- * `id`), and `keyset: "derived"` for a buildDerivedListQuery list, whose keys no row holds
- */
-type PaginateOptions = CursorOptions & { idField?: string | undefined; keyset?: KeysetKind | undefined }
-
-/**
- * Create pagination result from drizzle query results with _total extra, the next cursor sealed
- * under `options` and keyed by `idField`, as buildDerivedListQuery's idColumn keys the page
- */
-function drizzlePaginationResult<T extends object>(
-	items: DrizzleListResult<T>[],
-	query: {
-		cursor?: string
-		limit: number
-		page?: number
-		parsedFields?: ParsedFields | null | undefined
-		parsedSort: SortField[]
-		validated?: true | undefined
-	},
-	options: PaginateOptions,
-): readonly [T[], PaginationMeta] {
-	assertCursorWired(options)
-	refuseGoneAnchor(items)
-	const hasMore = items.length > query.limit
-	const sliced = hasMore ? items.slice(0, query.limit) : items
-
-	/* Mint from the fat row and the same effective sort buildListQuery ordered
-	   by, so the cursor's signature matches the next request's. */
-	const lastItem = sliced.at(-1)
-	const nextCursor = hasMore && lastItem !== undefined ? mintFrom(lastItem, query.parsedSort, options) : null
-
-	const pagination: PaginationMeta = {
-		count: countOf(items, query),
-		hasMore,
-		limit: query.limit,
-		nextCursor,
-		page: query.cursor ? null : (query.page ?? 1),
-	}
-
-	/* Project after the slice so count / hasMore / cursor still see the fat row. */
-	const projected = sliced.map((item) => applySelect(item as T & Record<string, unknown>, query.parsedFields ?? null))
-
-	return [projected, pagination] as const
-}
-
 function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T {
 	return applySelect(row, parsedFields)
 }
@@ -246,23 +129,15 @@ const queryHelpers: {
 	filterValue: typeof extractFilterValue
 	filterValues: typeof extractFilterValues
 	listOptions: typeof drizzleListOptions
-	paginate: typeof drizzlePaginationResult
+	paginate: typeof paginate
 	project: typeof drizzleProject
 } = {
 	countExtra,
 	filterValue: extractFilterValue,
 	filterValues: extractFilterValues,
 	listOptions: drizzleListOptions,
-	paginate: drizzlePaginationResult,
+	paginate,
 	project: drizzleProject,
 }
 
-export {
-	applySelect,
-	type CursorOptions,
-	type DrizzleListOptions,
-	mintFrom,
-	type PaginateOptions,
-	queryHelpers,
-	refuseGoneAnchor,
-}
+export { type CursorOptions, type DrizzleListOptions, queryHelpers }

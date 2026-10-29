@@ -12,6 +12,7 @@ import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { usePg } from "../support/pg.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built } from "../../../src/query/__fixtures__/built.ts"
 
 const vals = pgTable("vals", {
 	d: date("d", { mode: "date" }),
@@ -44,7 +45,7 @@ async function pageAll(
 	let cursor: string | undefined
 	for (let page = 0; page < 20; page++) {
 		const rows = await db.query.vals.findMany(queryHelpers.listOptions({ ...query, cursor }, SEALED) as never)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, { ...query, cursor }, SEALED)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built({ ...query, cursor }, SEALED))
 		seen.push(...items.map((row) => row.id))
 		if (anchor !== undefined && items.at(-1)?.id === anchor) {
 			await client.query(edit, [anchor])
@@ -147,7 +148,7 @@ describe("keyset pagination on a date-mode timestamptz or date holding ±infinit
 		expect(await inOrder("tz.asc")).toHaveLength(8)
 		const query = schema.parse({ order: "tz.asc" })
 		const row = { id: 1, tz: new Date(Number.NaN) }
-		expect(() => queryHelpers.paginate([row, row], query, { ...SEALED, keyset: "derived" })).toThrow(
+		expect(() => queryHelpers.paginate([row, row], built(query, { ...SEALED, keyset: "derived" }))).toThrow(
 			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
 		)
 	})

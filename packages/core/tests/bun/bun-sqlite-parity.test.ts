@@ -20,6 +20,7 @@ import { applyListQuery, buildListQuery } from "../../src/query/sqlite/build-lis
 import { sqliteErrorHandler } from "../../src/sqlite/constraint-handler.ts"
 import type { ConstraintMap } from "../../src/types.ts"
 import { SEALED } from "../../src/query/__fixtures__/cursor-secret.ts"
+import { built } from "../../src/query/__fixtures__/built.ts"
 
 const item = sqliteTable("item", {
 	amount: integer("amount"),
@@ -82,7 +83,7 @@ describe("bun:sqlite with safeIntegers pages by cursor (R3)", () => {
 				db.select().from(counted).$dynamic(),
 				buildListQuery({ ...SEALED, parsed, table: counted }),
 			).all()
-			const [items, pagination] = queryHelpers.paginate(rows, parsed, SEALED)
+			const [items, pagination] = queryHelpers.paginate(rows, built(parsed, SEALED))
 			ids.push(...items.map((row) => String(row.id)))
 			if (pagination.nextCursor === null) break
 			cursor = pagination.nextCursor

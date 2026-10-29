@@ -17,6 +17,7 @@ import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../
 import type { SortField } from "../../../src/query/types.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const open: LibsqlHarness[] = []
 afterEach(() => {
@@ -133,7 +134,7 @@ describe("paginate mints a cursor for every last row, whatever its id (Q-M6)", (
 				{ created_at: 2, id },
 				{ created_at: 1, id: "next" },
 			]
-			const [, pagination] = queryHelpers.paginate(rows, { limit: 1, parsedSort: SORT }, SEALED)
+			const [, pagination] = queryHelpers.paginate(rows, pagedAs({ limit: 1, parsedSort: SORT }, SEALED))
 			expect(pagination.hasMore).toBe(true)
 			expect(pagination.nextCursor).not.toBeNull()
 		}
@@ -155,7 +156,7 @@ describe("pagination.count (Q-M5)", () => {
 			.$dynamic()
 		const statement = applyListQuery(query, built)
 		const rows = await statement
-		const [, pagination] = queryHelpers.paginate(rows, parsed, SEALED)
+		const [, pagination] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
 		return { pagination, sql: statement.toSQL().sql.toLowerCase() }
 	}
 
@@ -178,7 +179,7 @@ describe("pagination.count (Q-M5)", () => {
 	})
 
 	it("is null when the query did not select the count", () => {
-		const [, pagination] = queryHelpers.paginate([{ id: 1 }], { limit: 2, parsedSort: SORT }, SEALED)
+		const [, pagination] = queryHelpers.paginate([{ id: 1 }], pagedAs({ limit: 2, parsedSort: SORT }, SEALED))
 		expect(pagination.count).toBeNull()
 	})
 })
@@ -204,7 +205,7 @@ describe("queryHelpers.listOptions pages the relational API by cursor (Q-L4)", (
 				orderBy: options.orderBy,
 				...(options.where ? { where: options.where } : {}),
 			})
-			const [items, pagination] = queryHelpers.paginate(rows, parsed, SEALED)
+			const [items, pagination] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
 			pages.push(items.map((row) => row.id))
 			cursor = pagination.nextCursor
 		}

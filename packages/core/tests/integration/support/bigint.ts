@@ -11,6 +11,7 @@ import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built } from "../../../src/query/__fixtures__/built.ts"
 
 export const big = sqliteTable("big", { id: integer("id").primaryKey(), n: integer("n") })
 export const bigRelations = defineRelations({ big })
@@ -41,7 +42,7 @@ export const viaBuilder =
 			db.select().from(big).$dynamic(),
 			buildListQuery({ ...SEALED, parsed, table: big }),
 		)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, parsed, SEALED)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(parsed, SEALED))
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 
@@ -51,7 +52,7 @@ export const viaRelational =
 	async (order, cursor) => {
 		const query = { ...schema.parse({ order }), cursor }
 		const rows = await db.query.big.findMany(queryHelpers.listOptions(query, SEALED) as never)
-		const [items, meta] = queryHelpers.paginate(rows, query, SEALED)
+		const [items, meta] = queryHelpers.paginate(rows, built(query, SEALED))
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 

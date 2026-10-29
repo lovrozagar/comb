@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { built } from "./__fixtures__/built.ts"
 import { SEALED } from "./__fixtures__/cursor-secret.ts"
 import { mergedListOptions, paginateMerged } from "./merged.ts"
 import { createListQuerySchema } from "./schema.ts"
@@ -8,7 +9,7 @@ const parse = (params: Record<string, string>) => schema.parse(params)
 
 /** The ids of the merged page of `shards` under `params` */
 const ids = (shards: Array<Array<Record<string, unknown>>>, params: Record<string, string>) =>
-	paginateMerged(shards, parse(params), SEALED)[0].map((row) => (row as { id: unknown }).id)
+	paginateMerged(shards, mergedListOptions(parse(params), SEALED))[0].map((row) => (row as { id: unknown }).id)
 
 /* plan 14's 5.5: the parts tests/integration/d1/paginate-merged.test.ts does not reach on D1 */
 describe("mergedListOptions", () => {
@@ -58,7 +59,7 @@ describe("paginateMerged", () => {
 
 	it("orders by the id alone, descending, under an empty sort, as orderByKeys does", () => {
 		const query = { limit: 10, parsedSort: [] }
-		const [rows] = paginateMerged([[{ id: 3 }, { id: 1 }], [{ id: 2 }]], query, SEALED)
+		const [rows] = paginateMerged([[{ id: 3 }, { id: 1 }], [{ id: 2 }]], built(query, SEALED))
 		expect(rows.map((row) => row.id)).toEqual([3, 2, 1])
 	})
 
@@ -68,17 +69,17 @@ describe("paginateMerged", () => {
 			[],
 			[{ _total: 1, id: "b", k: 2 }],
 		]
-		expect(paginateMerged(counted, parse({}), SEALED)[1].count).toBe(3)
-		expect(paginateMerged([...counted, [{ id: "c", k: 3 }]], parse({}), SEALED)[1].count).toBeNull()
+		expect(paginateMerged(counted, mergedListOptions(parse({}), SEALED))[1].count).toBe(3)
+		expect(paginateMerged([...counted, [{ id: "c", k: 3 }]], mergedListOptions(parse({}), SEALED))[1].count).toBeNull()
 	})
 
 	it("refuses a page past a gone anchor, and projects each row to the select", () => {
 		const gone = [[{ _combAnchorGone: 1, id: "a", k: 1 }]]
-		expect(() => paginateMerged(gone, parse({}), SEALED)).toThrow(
+		expect(() => paginateMerged(gone, mergedListOptions(parse({}), SEALED))).toThrow(
 			expect.objectContaining({ errorKey: "invalid_cursor" }),
 		)
 		const query = { ...parse({}), parsedFields: { root: { relations: {}, scalars: ["id"] } } }
-		expect(paginateMerged([[{ _total: 1, id: "a", k: 1 }]], query, SEALED)[0]).toEqual([{ id: "a" }])
+		expect(paginateMerged([[{ _total: 1, id: "a", k: 1 }]], mergedListOptions(query, SEALED))[0]).toEqual([{ id: "a" }])
 	})
 })
 
@@ -92,8 +93,7 @@ describe("paginateMerged past a cursor a shard resumed before", () => {
 			[row("a1", 1), row("a2", 3), row("a3", 5)],
 			[row("b1", 2), row("b2", 4), row("b3", 6)],
 		],
-		parse({ limit: "2", order: "k.asc" }),
-		SEALED,
+		mergedListOptions(parse({ limit: "2", order: "k.asc" }), SEALED),
 	)
 	const cursor = first[1].nextCursor as string
 
@@ -104,8 +104,7 @@ describe("paginateMerged past a cursor a shard resumed before", () => {
 				[row("a0", 0), row("a1", 1), row("a2", 3)],
 				[row("b2", 4), row("b3", 6), row("b4", 8)],
 			],
-			parse({ cursor, limit: "2", order: "k.asc" }),
-			SEALED,
+			mergedListOptions(parse({ cursor, limit: "2", order: "k.asc" }), SEALED),
 		)
 		expect(first[0].map(({ id }) => id)).toEqual(["a1", "b1"])
 		expect(items.map(({ id }) => id)).toEqual(["a2"])
@@ -114,9 +113,9 @@ describe("paginateMerged past a cursor a shard resumed before", () => {
 	})
 	it("refuses a shard that read its whole limit at or before the cursor, which could not move the list on", () => {
 		const shards = [[row("a0", 0), row("a1", 1), row("a9", 1.5)], [row("b2", 4)]]
-		expect(() => paginateMerged(shards, parse({ cursor, limit: "2", order: "k.asc" }), SEALED)).toThrow(
-			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
-		)
+		expect(() =>
+			paginateMerged(shards, mergedListOptions(parse({ cursor, limit: "2", order: "k.asc" }), SEALED)),
+		).toThrow(expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }))
 	})
 
 	it("pages past a cursor that carries a long key by reference, which no row's value equals", () => {
@@ -124,13 +123,11 @@ describe("paginateMerged past a cursor a shard resumed before", () => {
 		const text = (id: string, k: string) => ({ id, k: `${long}${k}` })
 		const [, meta] = paginateMerged(
 			[[text("a1", "a"), text("a2", "c")], [text("b1", "b")]],
-			parse({ limit: "1", order: "k.asc" }),
-			SEALED,
+			mergedListOptions(parse({ limit: "1", order: "k.asc" }), SEALED),
 		)
 		const [items] = paginateMerged(
 			[[text("a2", "c")], [text("b1", "b")]],
-			parse({ cursor: meta.nextCursor as string, limit: "1", order: "k.asc" }),
-			SEALED,
+			mergedListOptions(parse({ cursor: meta.nextCursor as string, limit: "1", order: "k.asc" }), SEALED),
 		)
 		expect(items.map(({ id }) => id)).toEqual(["b1"])
 	})

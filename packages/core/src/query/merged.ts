@@ -9,19 +9,19 @@
 import { type SQL, sql } from "drizzle-orm"
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { CURSOR_TIEBREAK_COLUMN, CursorRef, effectiveNulls, readCursor } from "./cursor.ts"
+import { CursorRef, effectiveNulls } from "./cursor.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
+import { type DrizzleListOptions, queryHelpers } from "./drizzle.ts"
 import {
 	applySelect,
-	type DrizzleListOptions,
-	mintFrom,
-	type PaginateOptions,
-	queryHelpers,
+	type ListPagination,
+	type PaginationMeta,
+	paginationIn,
+	paginationOf,
 	refuseGoneAnchor,
-} from "./drizzle.ts"
-import type { paginationResponseSchema } from "./schema.ts"
-import type { ParsedFields, SortField } from "./types.ts"
-import type * as z from "zod"
+	refuseOverRead,
+} from "./pagination.ts"
+import type { SortField } from "./types.ts"
 
 /* the rows a merged page may read from each shard by default: page × limit + 1, as deep as page 10 at 100 */
 const MAX_ROWS_PER_SHARD = 1001
@@ -47,7 +47,8 @@ function mergedListOptions(
 	 * row D1 reads back as null that holds ±Infinity comes back out of its shard's own order, which
 	 * refuseUnmergeable refuses
 	 */
-	const list = queryHelpers.listOptions(query, { ...options, nonFinite: "exact" })
+	const exact = { ...options, nonFinite: "exact" as const }
+	const list = queryHelpers.listOptions(query, exact)
 	if (query.cursor) return list
 	const rows = (query.page ?? 1) * query.limit + 1
 	const max = options.maxRowsPerShard ?? MAX_ROWS_PER_SHARD
@@ -59,7 +60,14 @@ function mergedListOptions(
 		})
 	}
 	/* every shard counts its part, which paginateMerged sums: a merged count needs them all */
-	return { ...list, extras: { _total: () => sql`cast(count(*) over() as integer)` }, limit: rows, offset: 0 }
+	const pagination = paginationOf(exact, { cursorable: true, query, window: rows })
+	return {
+		...list,
+		extras: { _total: () => sql`cast(count(*) over() as integer)` },
+		limit: rows,
+		offset: 0,
+		pagination,
+	}
 }
 
 /** The order SQLite's BINARY collation gives two text values: by code point, as their UTF-8 bytes compare */
@@ -185,11 +193,11 @@ function pastCursor<T extends Record<string, unknown>>(
 }
 
 /** The cursor's row as the merge compares rows: each key's value and the id; none when a value is a reference, which no row's value equals */
-function anchorOf(cursor: string, sort: SortField[], options: PaginateOptions): Record<string, unknown> | undefined {
-	const { id, values } = readCursor(cursor, sort, options)
+function anchorOf(cursor: string, pagination: ListPagination): Record<string, unknown> | undefined {
+	const { id, values } = pagination.read(cursor)
 	if (values.some((value) => value instanceof CursorRef)) return undefined
-	const idField = options.idField ?? CURSOR_TIEBREAK_COLUMN
-	return Object.fromEntries([...sort.map(({ field }, i) => [field, values[i]]), [idField, id]])
+	const keys = pagination.parsedSort.map(({ field }, i) => [field, values[i]])
+	return Object.fromEntries([...keys, [pagination.idField, id]])
 }
 
 /**
@@ -217,40 +225,33 @@ function countOf(rowsPerShard: ReadonlyArray<ReadonlyArray<{ _total?: number }>>
  */
 function paginateMerged<T extends object>(
 	rowsPerShard: ReadonlyArray<ReadonlyArray<T & { _total?: number }>>,
-	query: {
-		cursor?: string | undefined
-		limit: number
-		page?: number | undefined
-		parsedFields?: ParsedFields | null | undefined
-		parsedSort: SortField[]
-	},
-	options: PaginateOptions,
-): readonly [T[], z.output<typeof paginationResponseSchema>] {
+	built: { pagination: ListPagination },
+): readonly [T[], PaginationMeta] {
+	const pagination = paginationIn(built)
+	for (const shard of rowsPerShard) refuseOverRead(shard.length, pagination)
 	const shards = rowsPerShard as ReadonlyArray<ReadonlyArray<T & Record<string, unknown>>>
 	const merged = shards.flat()
 	refuseGoneAnchor(merged)
-	const idField = options.idField ?? CURSOR_TIEBREAK_COLUMN
-	refuseSharedIds(merged, idField)
-	const compare = compareRows(query.parsedSort, idField)
+	refuseSharedIds(merged, pagination.idField)
+	const compare = compareRows(pagination.parsedSort, pagination.idField)
 	refuseUnmergeable(shards, compare)
 	merged.sort(compare)
-	const anchor = query.cursor ? anchorOf(query.cursor, query.parsedSort, options) : undefined
-	const { full, rows } = query.cursor
-		? pastCursor(merged, shards, { anchor, compare, limit: query.limit })
-		: { full: false, rows: merged }
-	const start = query.cursor ? 0 : ((query.page ?? 1) - 1) * query.limit
-	const window = rows.slice(start, start + query.limit + 1)
-	const hasMore = full || window.length > query.limit
-	const page = hasMore ? window.slice(0, query.limit) : window
+	const { cursor, limit } = pagination
+	const anchor = cursor ? anchorOf(cursor, pagination) : undefined
+	const { full, rows } = cursor ? pastCursor(merged, shards, { anchor, compare, limit }) : { full: false, rows: merged }
+	const start = cursor ? 0 : ((pagination.page ?? 1) - 1) * limit
+	const window = rows.slice(start, start + limit + 1)
+	const hasMore = full || window.length > limit
+	const page = hasMore ? window.slice(0, limit) : window
 	const last = page.at(-1)
-	const pagination = {
-		count: countOf(rowsPerShard, query.cursor),
+	const meta: PaginationMeta = {
+		count: countOf(rowsPerShard, cursor),
 		hasMore,
-		limit: query.limit,
-		nextCursor: hasMore && last !== undefined ? mintFrom(last, query.parsedSort, options) : null,
-		page: query.cursor ? null : (query.page ?? 1),
+		limit,
+		nextCursor: hasMore && last !== undefined ? pagination.mint(last) : null,
+		page: cursor ? null : (pagination.page ?? 1),
 	}
-	return [page.map((row) => applySelect(row, query.parsedFields ?? null)), pagination] as const
+	return [page.map((row) => applySelect(row, pagination.parsedFields)), meta] as const
 }
 
 export { type MergedListOptions, mergedListOptions, paginateMerged }

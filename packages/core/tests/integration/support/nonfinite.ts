@@ -12,6 +12,7 @@ import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import type { CursorOptions } from "../../../src/query/cursor-seal.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built } from "../../../src/query/__fixtures__/built.ts"
 
 export const point = sqliteTable("point", { id: integer("id").primaryKey(), x: real("x") })
 export const pointRelations = defineRelations({ point })
@@ -49,7 +50,7 @@ export const viaBuilder =
 			db.select().from(point).$dynamic(),
 			buildListQuery({ ...options, parsed, table: point }),
 		)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, parsed, options)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(parsed, options))
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 
@@ -59,7 +60,7 @@ export const viaRelational =
 	async (order, cursor) => {
 		const query = { ...schema.parse({ order }), cursor }
 		const rows = await db.query.point.findMany(queryHelpers.listOptions(query, options) as never)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, query, options)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(query, options))
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 

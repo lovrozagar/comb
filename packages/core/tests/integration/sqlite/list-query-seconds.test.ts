@@ -14,6 +14,7 @@ import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-
 import { libsqlMemory } from "../support/libsql.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 import { ANCHOR_CASES, servedAround } from "../support/seconds-anchor.ts"
+import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const event = sqliteTable("event", {
 	at: integer("at", { mode: "timestamp" }).notNull(),
@@ -56,7 +57,7 @@ describe("keyset pagination on a seconds-mode timestamp holding fractions (U10)"
 					harness.db.select().from(event).$dynamic(),
 					buildListQuery({ ...SEALED, parsed, table: event }),
 				)
-				const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+				const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
 				return { ids: items.map((row) => row.id), next: meta.nextCursor }
 			})
 			expect(built).toEqual(want)
@@ -64,7 +65,7 @@ describe("keyset pagination on a seconds-mode timestamp holding fractions (U10)"
 			const relational = await pageAll(async (cursor) => {
 				const query = { ...schema.parse({ order }), cursor }
 				const rows = await db.query.event.findMany(queryHelpers.listOptions(query, SEALED) as never)
-				const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, query, SEALED)
+				const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, pagedAs(query, SEALED))
 				return { ids: items.map((row) => row.id), next: meta.nextCursor }
 			})
 			expect(relational).toEqual(want)
@@ -90,7 +91,7 @@ describe("keyset pagination on a seconds-mode timestamp, its cursor row deleted"
 					harness.db.select().from(event).$dynamic(),
 					buildListQuery({ ...SEALED, parsed, table: event }),
 				)
-				const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+				const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
 				/* the first row a page ends on whose fraction no Date holds goes before the next page */
 				const last = items.at(-1)?.id
 				if (!deleted && (last === 5 || last === 6)) {
@@ -131,7 +132,7 @@ describe("keyset pagination on a seconds-mode timestamp before 1970, its cursor 
 					harness.db.select().from(event).$dynamic(),
 					buildListQuery({ ...SEALED, parsed, table: event }),
 				)
-				const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+				const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
 				if (gone !== undefined && items.at(-1)?.id === gone)
 					await harness.client.execute({ args: [gone], sql: "DELETE FROM event WHERE id = ?" })
 				return { ids: items.map((row) => row.id), next: meta.nextCursor }
@@ -160,7 +161,7 @@ describe("keyset pagination on a seconds-mode timestamp at the epoch, its cursor
 					harness.db.select().from(event).$dynamic(),
 					buildListQuery({ ...SEALED, parsed, table: event }),
 				)
-				const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+				const [items, meta] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
 				if (items.at(-1)?.id === gone)
 					await harness.client.execute({ args: [gone], sql: "DELETE FROM event WHERE id = ?" })
 				return { ids: items.map((row) => row.id), next: meta.nextCursor }

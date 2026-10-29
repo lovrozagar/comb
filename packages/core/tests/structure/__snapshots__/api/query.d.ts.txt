@@ -160,14 +160,10 @@ export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CU
  * query-helpers with drizzle's relational query API.
  */
 import { type SQL } from "drizzle-orm";
-import { type KeysetKind } from "./cursor-mint.ts";
-import { type CursorOptions } from "./cursor-seal.ts";
+import type { CursorOptions } from "./cursor-seal.ts";
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts";
+import { type ListPagination, paginate } from "./pagination.ts";
 import type { ParsedFields, SortField } from "./types.ts";
-import type { paginationResponseSchema } from "./schema.ts";
-import type * as z from "zod";
-/** The pagination meta paginate returns: the list response's own schema */
-type PaginationMeta = z.output<typeof paginationResponseSchema>;
 /** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
 type RelationalTable = object;
 type DrizzleListOptions = {
@@ -185,6 +181,8 @@ type DrizzleListOptions = {
     extras?: {
         _combAnchorGone: (table: RelationalTable) => SQL;
     };
+    /** How `paginate` pages the rows these options read (pagination.ts) */
+    pagination: ListPagination;
 };
 /**
  * The parsed request, or the `ListQueryResult` built from it: what a service or a repository holds.
@@ -216,46 +214,11 @@ declare function drizzleListOptions(query: {
     cursor?: string | undefined;
     limit: number;
     page?: number | undefined;
+    parsedFields?: ParsedFields | null | undefined;
     parsedSort: SortField[];
     sortOrderBy: Record<string, "asc" | "desc">;
     validated?: true | undefined;
 }, options: CursorOptions): DrizzleListOptions;
-type DrizzleListResult<T> = T & {
-    _total?: number;
-};
-/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
-declare function refuseGoneAnchor(items: readonly object[]): void;
-/**
- * Last mutation of item shape. Query stays fat; the returned object is the
- * public subset. No-op (minus `_total`) when parsedFields is null.
- */
-declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
-/**
- * The next cursor, minted from the last row of the page. A row without a sort key or the id
- * would mint a cursor that repeats or ends the list, so that is a wiring mistake: select them.
- * Any id the row holds, 0 and "" included, carries the next page.
- */
-declare function mintFrom(row: object, parsedSort: SortField[], options: PaginateOptions): string;
-/**
- * paginate's options: the cursor secret and scope, the field a row's tiebreak id is in (default
- * `id`), and `keyset: "derived"` for a buildDerivedListQuery list, whose keys no row holds
- */
-type PaginateOptions = CursorOptions & {
-    idField?: string | undefined;
-    keyset?: KeysetKind | undefined;
-};
-/**
- * Create pagination result from drizzle query results with _total extra, the next cursor sealed
- * under `options` and keyed by `idField`, as buildDerivedListQuery's idColumn keys the page
- */
-declare function drizzlePaginationResult<T extends object>(items: DrizzleListResult<T>[], query: {
-    cursor?: string;
-    limit: number;
-    page?: number;
-    parsedFields?: ParsedFields | null | undefined;
-    parsedSort: SortField[];
-    validated?: true | undefined;
-}, options: PaginateOptions): readonly [T[], PaginationMeta];
 declare function drizzleProject<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
 /** List-query helpers for drizzle queries: count, options, pagination, projection */
 declare const queryHelpers: {
@@ -263,10 +226,10 @@ declare const queryHelpers: {
     filterValue: typeof extractFilterValue;
     filterValues: typeof extractFilterValues;
     listOptions: typeof drizzleListOptions;
-    paginate: typeof drizzlePaginationResult;
+    paginate: typeof paginate;
     project: typeof drizzleProject;
 };
-export { applySelect, type CursorOptions, type DrizzleListOptions, mintFrom, type PaginateOptions, queryHelpers, refuseGoneAnchor, };
+export { type CursorOptions, type DrizzleListOptions, queryHelpers };
 
 // query/fields.d.ts
 import type { ParsedFields } from "./types.ts";
@@ -499,6 +462,78 @@ declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, fi
 /** Extract multiple filter values from FilterAST */
 declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
 export { extractFilterValue, extractFilterValues };
+
+// query/pagination.d.ts
+import { type DecodedCursor } from "./cursor.ts";
+import { type KeysetKind } from "./cursor-mint.ts";
+import { type CursorOptions } from "./cursor-seal.ts";
+import type { paginationResponseSchema } from "./schema.ts";
+import type { ParsedFields, SortField } from "./types.ts";
+import type * as z from "zod";
+/** The pagination meta paginate returns: the list response's own schema */
+type PaginationMeta = z.output<typeof paginationResponseSchema>;
+/** How a built list pages what it fetched */
+type ListPagination = {
+    /** the cursor the request resumed from; none on a page by number */
+    cursor: string | undefined;
+    /** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak (Q6) */
+    cursorable: boolean;
+    cursorScope: string;
+    /** the field a row's tiebreak id is in */
+    idField: string;
+    /** how a key too long for a cursor is carried: by reference to its row ("table"), or not at all ("derived") */
+    keyset: KeysetKind;
+    limit: number;
+    nonFinite: "exact" | undefined;
+    page: number | undefined;
+    parsedFields: ParsedFields | null;
+    parsedSort: SortField[];
+    /** the most rows the built query reads: one past the page, so paginate can tell there is more */
+    window: number;
+    /** the cursor for the page after `row`, sealed under the builder's options */
+    mint(row: object): string;
+    /** `cursor` opened under the builder's options, for this list's sort; a 400 when it is no cursor of it */
+    read(cursor: string): DecodedCursor;
+};
+/** What a builder knows of its list, beside the request it parsed */
+type PaginationFacts = {
+    cursorable: boolean;
+    idField?: string | undefined;
+    keyset?: KeysetKind | undefined;
+    query: {
+        cursor?: string | null | undefined;
+        limit: number;
+        page?: number | null | undefined;
+        parsedFields?: ParsedFields | null | undefined;
+        parsedSort: SortField[];
+    };
+    window: number;
+};
+/** The descriptor a builder hands over: its facts, and the options it seals under closed over, never held */
+declare function paginationOf(options: CursorOptions, facts: PaginationFacts): ListPagination;
+/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
+declare function refuseGoneAnchor(items: readonly object[]): void;
+/**
+ * Last mutation of item shape. Query stays fat; the returned object is the
+ * public subset. No-op (minus `_total`) when parsedFields is null.
+ */
+declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
+/** `built` as paginate takes it, or a 500 naming the call: a parsed query in its place is the call before 0.15 */
+declare function paginationIn(built: {
+    pagination: ListPagination;
+} | undefined): ListPagination;
+/** More rows than the built query reads are rows of another query: one that applied no limit (C2) */
+declare function refuseOverRead(count: number, pagination: ListPagination): void;
+/**
+ * The page of `items`, read with `built`, and its pagination: count, whether there is more, and
+ * the next cursor, sealed under the builder's options; none for a list no cursor can resume
+ */
+declare function paginate<T extends object>(items: ReadonlyArray<T & {
+    _total?: number;
+}>, built: {
+    pagination: ListPagination;
+}): readonly [T[], PaginationMeta];
+export { applySelect, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, };
 
 // query/filter-parse.d.ts
 /**

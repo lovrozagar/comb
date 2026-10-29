@@ -56,7 +56,7 @@ describe("anchored and assertNoReference", () => {
 		expect(() => assertNoReference(["a", 1, null])).not.toThrow()
 		expect(() => assertNoReference([new CursorRef("a", 1)])).toThrow(
 			expect.objectContaining({
-				cause: expect.stringContaining("pass { keyset: 'derived' } to paginate"),
+				cause: expect.stringContaining("give buildDerivedListQuery the table its rows are as anchor"),
 				status: 500,
 			}),
 		)

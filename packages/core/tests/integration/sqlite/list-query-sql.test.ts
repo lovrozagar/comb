@@ -15,6 +15,7 @@ import { applyListQuery, buildDerivedListQuery, buildListQuery } from "../../../
 import type { SortField } from "../../../src/query/types.ts"
 import { type LibsqlHarness, libsqlMemory } from "../support/libsql.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built as pagedAs } from "../../../src/query/__fixtures__/built.ts"
 
 const item = sqliteTable("item", {
 	amount: integer("amount"),
@@ -72,7 +73,7 @@ async function listTable(db: LibSQLDatabase, query: Record<string, string>) {
 	const parsed = schema.parse(query)
 	const built = buildListQuery({ ...SEALED, parsed, table: item })
 	const rows = await applyListQuery(db.select().from(item).$dynamic(), built)
-	const [items, pagination] = queryHelpers.paginate(rows, parsed, SEALED)
+	const [items, pagination] = queryHelpers.paginate(rows, pagedAs(parsed, SEALED))
 	return { items: items.map(label), nextCursor: pagination.nextCursor }
 }
 

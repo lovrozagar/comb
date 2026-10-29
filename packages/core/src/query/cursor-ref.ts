@@ -192,7 +192,7 @@ function assertNoReference(values: readonly unknown[]): void {
 	if (!values.some((value) => value instanceof CursorRef)) return
 	throw new CombError({
 		cause:
-			"paginate minted this cursor by reference, which a derived list cannot read; pass { keyset: 'derived' } to paginate",
+			"this cursor carries a sort value by reference, which a derived list with no anchor cannot read back; give buildDerivedListQuery the table its rows are as anchor",
 		errorKey: combErrorKeys.SORT_NOT_WIRED,
 		status: "internal_server_error",
 	})

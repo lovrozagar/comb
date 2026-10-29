@@ -93,7 +93,7 @@ async function page(params: Record<string, string>) {
 	const parsed = schema.parse(params)
 	const options = mergedListOptions(parsed, SEALED)
 	const rowsPerShard = await Promise.all(shards.map((db) => db.query.org.findMany(options as never)))
-	return paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, parsed, SEALED)
+	return paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, mergedListOptions(parsed, SEALED))
 }
 
 const ORDERS = ["name.asc", "name.desc", "n.asc,name.desc", "n.desc.nullslast,name.asc.nullsfirst", "n.asc.nullsfirst"]
@@ -154,7 +154,7 @@ describe("paginateMerged and a sort key SQLite does not order BINARY (5.5)", () 
 		])
 		const parsed = schema.parse({ order: "name.asc" })
 		const rows = await shard.query.org.findMany(mergedListOptions(parsed, SEALED) as never)
-		expect(() => paginateMerged([rows as Array<{ id: string }>], parsed, SEALED)).toThrow(
+		expect(() => paginateMerged([rows as Array<{ id: string }>], mergedListOptions(parsed, SEALED))).toThrow(
 			expect.objectContaining({ errorKey: "sort_not_wired" }),
 		)
 	})
@@ -168,7 +168,7 @@ describe("paginateMerged and a sort key SQLite does not order BINARY (5.5)", () 
 			await upper.query.org.findMany(options as never),
 			await lower.query.org.findMany(options as never),
 		]
-		const [items] = paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, parsed, SEALED)
+		const [items] = paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, mergedListOptions(parsed, SEALED))
 		expect(items.map((row) => row.id)).toEqual(["o1", "o2"])
 	})
 })
@@ -184,7 +184,10 @@ describe("paginateMerged by cursor past a page that ends on a null key (Q1)", ()
 			const parsed = schema.parse({ limit: "2", order, ...(cursor === undefined ? {} : { cursor }) })
 			const options = mergedListOptions(parsed, SEALED)
 			const rowsPerShard = await Promise.all(shards.map((db) => db.query.item.findMany(options as never)))
-			const [items, meta] = paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, parsed, SEALED)
+			const [items, meta] = paginateMerged(
+				rowsPerShard as Array<Array<{ id: string }>>,
+				mergedListOptions(parsed, SEALED),
+			)
 			seen.push(...items.map((row) => row.id))
 			if (meta.nextCursor === null) break
 			cursor = meta.nextCursor

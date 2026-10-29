@@ -11,6 +11,7 @@ import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built } from "../../../src/query/__fixtures__/built.ts"
 
 export const moment = sqliteTable("moment", {
 	at: integer("at", { mode: "timestamp" }),
@@ -55,7 +56,7 @@ export const momentsViaBuilder =
 			db.select().from(moment).$dynamic(),
 			buildListQuery({ ...SEALED, parsed, table: moment }),
 		)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, parsed, SEALED)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(parsed, SEALED))
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 
@@ -65,7 +66,7 @@ export const momentsViaRelational =
 	async (order, cursor, limit) => {
 		const query = { ...schema.parse({ limit: String(limit), order }), cursor }
 		const rows = await db.query.moment.findMany(queryHelpers.listOptions(query, SEALED) as never)
-		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, query, SEALED)
+		const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(query, SEALED))
 		return { ids: items.map((row) => row.id), next: meta.nextCursor }
 	}
 

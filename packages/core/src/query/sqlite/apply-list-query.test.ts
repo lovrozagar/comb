@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
+import { built } from "../__fixtures__/built.ts"
+import { SEALED } from "../__fixtures__/cursor-secret.ts"
 import { applyListQuery } from "./apply-list-query.ts"
 import type { ListQueryResult } from "./build-list-query.ts"
 
@@ -21,6 +23,7 @@ const query = (where: ListQueryResult["where"]): ListQueryResult => ({
 	meta: { limit: 2, page: 1, type: "offset" },
 	offset: 0,
 	orderBy: [sql`1`, sql`2`],
+	pagination: built({ limit: 2, parsedSort: [] }, SEALED).pagination,
 	search: null,
 	where,
 })

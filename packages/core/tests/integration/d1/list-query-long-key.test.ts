@@ -12,6 +12,7 @@ import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
+import { built } from "../../../src/query/__fixtures__/built.ts"
 
 const doc = sqliteTable("doc", { id: integer("id").primaryKey(), title: text("title").notNull() })
 const schema = createListQuerySchema({ sort: ["title"], pagination: { defaultLimit: 1, maxLimit: 1 } })
@@ -49,13 +50,13 @@ async function seeded(): Promise<{ d1: D1Harness["CORE"]; pages: Record<"buildLi
 					db.select().from(doc).$dynamic(),
 					buildListQuery({ ...SEALED, parsed, table: doc }),
 				)
-				const [items, meta] = queryHelpers.paginate(rows, parsed, SEALED)
+				const [items, meta] = queryHelpers.paginate(rows, built(parsed, SEALED))
 				return { ids: items.map((row) => row.id), next: meta.nextCursor }
 			},
 			listOptions: async (order, cursor) => {
 				const query = { ...schema.parse({ order }), cursor }
 				const rows = await relational.query.doc.findMany(queryHelpers.listOptions(query, SEALED) as never)
-				const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, query, SEALED)
+				const [items, meta] = queryHelpers.paginate(rows as Array<{ id: number }>, built(query, SEALED))
 				return { ids: items.map((row) => row.id), next: meta.nextCursor }
 			},
 		},
