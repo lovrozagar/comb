@@ -155,3 +155,24 @@ describe("the cursor param takes any string, which readCursor answers (C5)", () 
 		expect(schema.safeParse({ cursor: "A".repeat(9000) }).success).toBe(true)
 	})
 })
+
+/* C3 of r17: a limit the published stamp cannot carry would be read as no stamp at all, so it is refused */
+describe("createListQuerySchema's limits", () => {
+	it.each([
+		["maxPatternBytes", Number.POSITIVE_INFINITY],
+		["maxPatternBytes", 50.5],
+		["maxSortKeys", -1],
+		["maxValues", Number.NaN],
+		["maxFilterLength", 2 ** 53],
+	])("refuses %s %s, naming the key", (key, value) => {
+		expect(() => createListQuerySchema({ limits: { [key]: value }, sort: ["a"] })).toThrow(
+			new TypeError(`createListQuerySchema: limits.${key} must be a whole number from 0; got ${value}`),
+		)
+	})
+
+	it("takes a large whole number for a limit with no cap, and 0", () => {
+		expect(() =>
+			createListQuerySchema({ limits: { maxPatternBytes: 1_000_000, maxSortKeys: 0 }, sort: ["a"] }),
+		).not.toThrow()
+	})
+})
