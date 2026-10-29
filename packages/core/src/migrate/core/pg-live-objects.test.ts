@@ -172,6 +172,14 @@ describe("liveDrift", () => {
 	})
 })
 
+/* P9 of the 0.15.0 review: what the history leaves outside the target schema, or a column owns, is not compared */
+describe("liveDrift: a view outside the target schema and a sequence a column owns", () => {
+	it("leaves both out of what the history holds", () => {
+		const history = facts("CREATE TABLE u (id int); CREATE VIEW other.v AS SELECT 1; CREATE SEQUENCE o OWNED BY u.id;")
+		expect(liveDrift(history, { ...noRelations(), routines: new Map(), triggers: new Map() }).only).toEqual([])
+	})
+})
+
 /* the reviewer's reading of P13: two spellings the history and the catalog give one argument type differently */
 /** A database holding function f with `signatures` */
 const routine = (...signatures: string[]) => ({

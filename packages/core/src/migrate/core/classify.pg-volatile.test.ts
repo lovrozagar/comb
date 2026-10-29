@@ -50,6 +50,11 @@ describe("an added column's default that calls a function", () => {
 		expect(warnings(history, later)).toEqual([])
 	})
 
+	it("follows an ALTER FUNCTION without its arguments, and passes over one that sets no volatility or names no history routine", () => {
+		const altered = `${fn("")} ALTER FUNCTION next_code STABLE; ALTER FUNCTION next_code() SECURITY DEFINER; ALTER FUNCTION ghost() VOLATILE;`
+		expect(warnings(altered, "ALTER TABLE t ADD COLUMN a int DEFAULT next_code();")).toEqual([])
+	})
+
 	it("warns for a history function renamed from a steady one only by what the new name's CREATE says", () => {
 		const renamed = `${fn("IMMUTABLE")} ALTER FUNCTION next_code() RENAME TO code;`
 		expect(warnings(renamed, "ALTER TABLE t ADD COLUMN a int DEFAULT code();")).toEqual([])

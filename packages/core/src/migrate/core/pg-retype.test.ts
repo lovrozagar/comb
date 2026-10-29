@@ -8,7 +8,7 @@ import { classifyMigration } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
 
 const HISTORY =
-	"CREATE TABLE t (id int, name varchar(10), code varchar, body text, amount numeric(10, 2), flags varbit(5), n numeric);"
+	"CREATE TABLE t (id int, name varchar(10), code varchar, body text, amount numeric(10, 2), flags varbit(5), n numeric); CREATE TABLE g (p geometry(Point, 4326));"
 
 /** `later`'s rating after HISTORY and `more`, all read as Postgres */
 function rate(later: string, more = "") {
@@ -50,6 +50,8 @@ describe("a retype that may change a value or rewrite the table", () => {
 		["int to bigint", "ALTER TABLE t ALTER COLUMN id TYPE bigint;"],
 		["a column the history does not know", "ALTER TABLE t ALTER COLUMN ghost TYPE text;"],
 		["a table the history does not know", "ALTER TABLE u ALTER COLUMN name TYPE text;"],
+		/* PostGIS's modifiers are a word and a number */
+		["a type whose modifiers are no numbers", "ALTER TABLE g ALTER COLUMN p TYPE geometry(Point, 4326);"],
 	])("rates %s unsafe, with the rewrite warning", (_, later) => {
 		const rated = rate(later)
 		expect(rated.safety).toBe("unsafe")
