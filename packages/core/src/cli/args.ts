@@ -102,6 +102,8 @@ function readOption(reading: Reading): number {
 	if (!option.commands.includes(reading.command)) throw new CliError(`${flag} does not apply to ${reading.command}`)
 	const name = option.long.slice(2)
 	if (option.value === undefined) {
+		/* --yes=false would read as --yes, approving what its writer meant to refuse (P17) */
+		if (inline !== undefined) throw new CliError(`${flag} is a flag and takes no value; give it alone, or leave it out`)
 		reading.parsed.options[name] = true
 		return 1
 	}

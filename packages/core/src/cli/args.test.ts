@@ -25,6 +25,16 @@ describe("parseArgs", () => {
 	})
 })
 
+/* P17 of the 0.14.1 review: --yes=false read as --yes, approving what its writer meant to refuse */
+describe("parseArgs: a flag given a value", () => {
+	it("refuses it, whatever the value, naming the flag", () => {
+		for (const arg of ["--yes=false", "--yes=no", "--json=0", "--local=true"])
+			expect(() => parseArgs(["core", arg], "migrate apply"), arg).toThrow(
+				new CliError(`${arg.slice(0, arg.indexOf("="))} is a flag and takes no value; give it alone, or leave it out`),
+			)
+	})
+})
+
 describe("optionsHelp", () => {
 	it("lists every declared option with its value, aliases and commands", () => {
 		const lines = optionsHelp()
