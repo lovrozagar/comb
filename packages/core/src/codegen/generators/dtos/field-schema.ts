@@ -154,12 +154,15 @@ function optionalOnCreate(field: FieldMeta, required: boolean, dialect: Build["d
 	return field.constraints.autogenerate || field.hasDefault || field.identity || isRowid(field, dialect)
 }
 
+/* a read float's base takes null already, so a nullable one publishes null once (C6 of r17) */
+const takesNull = (base: string): boolean => base.startsWith(READ_FLOAT)
+
 /** `base` with its OpenAPI example, nullability and the schema type's optionality. */
 function finish({ dialect, field, schemaType }: Build, base: string): string {
 	const example = generateExampleMeta(field)
 	/* a composite key's column is required as a single key is (F7) */
 	const required = field.isPrimaryKey || field.isNotNull || field.inCompositeKey
-	const zodType = `${base}${example?.code ?? ""}${required ? "" : ".nullable()"}`
+	const zodType = `${base}${example?.code ?? ""}${required || takesNull(base) ? "" : ".nullable()"}`
 	if (schemaType === "read") return zodType
 	if (schemaType === "create" && !optionalOnCreate(field, required, dialect)) return zodType
 	return `${zodType}.optional()`
@@ -182,7 +185,7 @@ export function generateFieldSchema(
 	if (dimensions === 0) return finish(build, baseOf(build))
 	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49) */
 	const element = baseOf({ ...build, field: { ...field, dimensions: 0, isNotNull: false } })
-	return finish(build, arrayOf(dimensions, schemaType, `${element}.nullable()`))
+	return finish(build, arrayOf(dimensions, schemaType, takesNull(element) ? element : `${element}.nullable()`))
 }
 
 /** The Zod base of a column of one value: the first builder's that takes it, else text */
