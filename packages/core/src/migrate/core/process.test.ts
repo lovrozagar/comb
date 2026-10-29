@@ -1,5 +1,5 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { devNull, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { run } from "./process.ts"
@@ -80,18 +80,20 @@ describe("run: a process that cannot start", () => {
 
 /** What a child sees of its environment: COMB_A, whether PATH is there, and its PG* names */
 const ENV_OF =
-	"process.stdout.write(JSON.stringify({ a: process.env.COMB_A, path: typeof process.env.PATH, pg: Object.keys(process.env).filter((k) => k.startsWith('PG')) }))"
-type Seen = { a?: string; path: string; pg: string[] }
+	"process.stdout.write(JSON.stringify({ a: process.env.COMB_A, passfile: process.env.PGPASSFILE, path: typeof process.env.PATH, pg: Object.keys(process.env).filter((k) => k.startsWith('PG') && k !== 'PGPASSFILE') }))"
+type Seen = { a?: string; passfile?: string; path: string; pg: string[] }
 const envOf = (env?: Record<string, string | undefined>) =>
 	JSON.parse(run("node", ["-e", ENV_OF], { env }).stdout) as Seen
 
 describe("run: the child's environment", () => {
 	afterEach(() => vi.unstubAllEnvs())
 
-	it("drops every PG* variable, so a config's connection is the only one a child uses", () => {
+	/* the reviewer's reading of P6: libpq's driver reads ~/.pgpass for a URL without a password, a file the config does not name */
+	it("drops every PG* variable, and points the passfile at nothing, so a config's connection is the only one a child uses", () => {
 		vi.stubEnv("PGSSLMODE", "disable")
 		vi.stubEnv("PGPASSWORD", "inherited")
-		expect(envOf()).toEqual({ path: "string", pg: [] })
+		vi.stubEnv("PGPASSFILE", "/home/someone/.pgpass")
+		expect(envOf()).toEqual({ passfile: devNull, path: "string", pg: [] })
 	})
 
 	it("adds env over the rest, and an undefined value removes one", () => {
