@@ -13,9 +13,16 @@ export function snakeToPascal(str: string): string {
 	return camel.charAt(0).toUpperCase() + camel.slice(1)
 }
 
-/** Convert camelCase to kebab-case */
+/**
+ * Convert camelCase to kebab-case, a word starting at each capital after a lowercase letter or a
+ * digit and at an acronym's last capital before a lowercase one: HTTPLog is http-log, oauth2Token
+ * oauth2-token (C12 of r17)
+ */
 export function camelToKebab(str: string): string {
-	return str.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase()
+	return str
+		.replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+		.replace(/([A-Z])([A-Z][a-z])/g, "$1-$2")
+		.toLowerCase()
 }
 
 /**

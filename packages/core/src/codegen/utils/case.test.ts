@@ -9,6 +9,7 @@ import {
 	snakeToPascal,
 	sqlIdentifier,
 	stringLiteral,
+	subpathName,
 	toScreamingSnakeCase,
 } from "./case.ts"
 
@@ -102,5 +103,21 @@ describe("dbIdentifiers (F1)", () => {
 
 	it("throws, naming the database, when no identifier can be made of it", () => {
 		for (const name of ["1db", "", "--"]) expect(() => dbIdentifiers(name)).toThrow(`database "${name}"`)
+	})
+})
+
+/* C12 of r17: a subpath splits at an acronym's end and after a digit, so camel and snake spellings meet */
+describe("subpathName at acronyms and digits", () => {
+	it.each([
+		["HTTPLog", "http-log"],
+		["oauth2Token", "oauth2-token"],
+		["oauth2_token", "oauth2-token"],
+		["apiKeyV2Token", "api-key-v2-token"],
+		["userV2", "user-v2"],
+		["user_v2", "user-v2"],
+		["blogPost", "blog-post"],
+		["ID", "id"],
+	])("names %s %s", (varName, segment) => {
+		expect(subpathName(varName)).toBe(segment)
 	})
 })
