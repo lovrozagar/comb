@@ -19,14 +19,18 @@ const ROUTINE_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"OBJECT_ROUTINE",
 ])
 
-/** A routine's signature: its input arguments' types, each array counting its bounds */
+/**
+ * A routine's signature: its input arguments' types, each array counting its bounds; a `%TYPE`
+ * argument as written, marked so, since the column it names holds the type Postgres stores
+ */
 function signatureOf(parameters: unknown, schema: string): string {
 	return ((parameters as Node[] | undefined) ?? [])
 		.map((parameter) => parameter["FunctionParameter"] as Node)
 		.filter((parameter) => !OUTPUT_MODES.has(String(parameter["mode"])))
 		.map((parameter) => {
 			const type = parameter["argType"] as Node
-			return `${typeOf(type, schema)}${"[]".repeat(((type["arrayBounds"] as unknown[] | undefined) ?? []).length)}`
+			const bounds = "[]".repeat(((type["arrayBounds"] as unknown[] | undefined) ?? []).length)
+			return `${typeOf(type, schema)}${type["pct_type"] === true ? "%TYPE" : ""}${bounds}`
 		})
 		.join(",")
 }

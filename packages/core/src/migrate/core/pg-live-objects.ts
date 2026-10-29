@@ -157,11 +157,12 @@ function liveDrift(
 }
 
 /**
- * Whether the catalog's spelling of an argument type is the history's: the same, or the type name
- * alone where the history left the type to the search path, which the catalog qualifies
+ * Whether the catalog's spelling of an argument type is the history's: the same; the type name
+ * alone where the history left the type to the search path, which the catalog qualifies; or any
+ * type for a `%TYPE`, whose column the history's facts hold no type for
  */
 function argumentMatches(database: string, migrations: string): boolean {
-	if (database === migrations) return true
+	if (migrations.endsWith("%TYPE") || database === migrations) return true
 	return !migrations.includes(".") && database.slice(database.lastIndexOf(".") + 1) === migrations
 }
 

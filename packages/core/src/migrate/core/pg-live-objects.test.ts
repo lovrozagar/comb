@@ -166,4 +166,13 @@ describe("liveDrift: an argument type spelled otherwise by the history", () => {
 			"function f(other.mood): only in the migrations",
 		])
 	})
+
+	it("matches a %TYPE argument, which the catalog holds resolved, by its place, the arity still counted", () => {
+		const typed = facts("CREATE FUNCTION f(e users.email%TYPE, n int) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;")
+		expect(liveDrift(typed, routine("text,int4")).only).toEqual([])
+		expect(liveDrift(typed, routine("text")).only).toEqual([
+			"function f(text): only in the database",
+			"function f(users.email%TYPE,int4): only in the migrations",
+		])
+	})
 })
