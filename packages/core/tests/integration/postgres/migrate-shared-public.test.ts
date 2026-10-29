@@ -97,15 +97,9 @@ function recordOwn(url: string, dir: string, version: string): void {
 	if (ran.status !== 0) throw new Error(`atlas migrate set: ${ran.stderr}${ran.stdout}`)
 }
 
-/**
- * A dev database holding schema app, where adopting app's 0.12 rows replays them (P2), and a
- * target, each a scratch database of its own
- */
+/** A dev database, where adopting app's 0.12 rows replays them (P2), and a target, each a scratch database of its own */
 const withDevAndTarget = (body: (dev: string, url: string) => Promise<void>) =>
-	withScratchDb(async (dev) => {
-		await query(dev, "CREATE SCHEMA app")
-		await withScratchDb((url) => body(dev, url))
-	})
+	withScratchDb((dev) => withScratchDb((url) => body(dev, url)))
 
 /**
  * The report's database: 0.12 applied public's a and app's b, app's own history records b (adopted

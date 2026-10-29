@@ -84,7 +84,7 @@ CREATE TRIGGER IF NOT EXISTS items_fts_ai AFTER INSERT ON items BEGIN
 END;`
 
 describe("generateIncrementalMigration", () => {
-	it("hashes a directory without atlas.sum, then writes the new migration with the SQLite transforms", () => {
+	it("hashes a directory without atlas.sum, then writes the new migration with the SQLite transforms", async () => {
 		const run = fakeAtlas(({ dir: replayed, target }) => {
 			expect(target).toBe("T")
 			writeFileSync(
@@ -93,7 +93,7 @@ describe("generateIncrementalMigration", () => {
 			)
 			return ok()
 		})
-		const result = generateIncrementalMigration(options(run))
+		const result = await generateIncrementalMigration(options(run))
 		expect(result).toEqual({ files: [join(dir, "20261017_add_b.sql")], notices: [], synced: false })
 		expect(readFileSync(join(dir, "20261017_add_b.sql"), "utf8")).toBe(
 			"PRAGMA defer_foreign_keys = on;\nCREATE TABLE b (x);\n",
@@ -109,22 +109,22 @@ describe("generateIncrementalMigration", () => {
 		expect(run.calls[3]).toContain("--dev-url")
 	})
 
-	it("skips the hash when atlas.sum exists and reports synced when nothing new appears", () => {
+	it("skips the hash when atlas.sum exists and reports synced when nothing new appears", async () => {
 		seed("CREATE TABLE a (x);")
 		const run = fakeAtlas(() => ({ code: 0, stderr: "", stdout: NO_CHANGES }))
-		expect(generateIncrementalMigration(options(run))).toEqual({ files: [], notices: [], synced: true })
+		expect(await generateIncrementalMigration(options(run))).toEqual({ files: [], notices: [], synced: true })
 		/* the integrity check and the replayed copy are hashed; the directory itself is not */
 		expect(run.calls.filter((call) => call[1] === "hash")).toHaveLength(2)
 	})
 
-	it("reports synced when atlas exits 0 and writes nothing", () => {
+	it("reports synced when atlas exits 0 and writes nothing", async () => {
 		seed("CREATE TABLE a (x);")
-		expect(generateIncrementalMigration(options(fakeAtlas()))).toEqual({ files: [], notices: [], synced: true })
+		expect(await generateIncrementalMigration(options(fakeAtlas()))).toEqual({ files: [], notices: [], synced: true })
 	})
 
-	it("creates the migrations directory when it is missing", () => {
+	it("creates the migrations directory when it is missing", async () => {
 		const missing = join(dir, "nested", "migrations")
-		expect(generateIncrementalMigration(options(fakeAtlas(), { migrationsDir: missing }))).toEqual({
+		expect(await generateIncrementalMigration(options(fakeAtlas(), { migrationsDir: missing }))).toEqual({
 			files: [],
 			notices: [],
 			synced: true,
@@ -132,20 +132,20 @@ describe("generateIncrementalMigration", () => {
 		expect(existsSync(join(missing, "atlas.sum"))).toBe(true)
 	})
 
-	it("copies every file atlas adds, the first carrying the migration", () => {
+	it("copies every file atlas adds, the first carrying the migration", async () => {
 		const run = fakeAtlas(({ dir: replayed }) => {
 			writeFileSync(join(replayed, "20261017_a.sql"), "CREATE TABLE a (x);\n")
 			writeFileSync(join(replayed, "20261017_b.sql"), "CREATE TABLE b (x);\n")
 			return ok()
 		})
-		const { files } = generateIncrementalMigration(options(run))
+		const { files } = await generateIncrementalMigration(options(run))
 		expect(files).toEqual([join(dir, "20261017_a.sql"), join(dir, "20261017_b.sql")])
 		expect(readFileSync(join(dir, "20261017_b.sql"), "utf8")).toBe("CREATE TABLE b (x);\n")
 	})
 })
 
 describe("generateIncrementalMigration — the names of what atlas adds", () => {
-	it("numbers what atlas adds after the history, when atlas stamps it in the same second or behind (two diffs in one second, a clock behind a teammate's)", () => {
+	it("numbers what atlas adds after the history, when atlas stamps it in the same second or behind (two diffs in one second, a clock behind a teammate's)", async () => {
 		seed("CREATE TABLE a (x);")
 		writeFileSync(join(dir, "20261021073441_step.sql"), "CREATE TABLE s (x);\n")
 		writeFileSync(join(dir, "atlas.sum"), sumOf(dir))
@@ -154,7 +154,7 @@ describe("generateIncrementalMigration — the names of what atlas adds", () => 
 			writeFileSync(join(replayed, "20261021073400_more.sql"), "CREATE TABLE m (x);\n")
 			return ok()
 		})
-		const { files } = generateIncrementalMigration(options(run))
+		const { files } = await generateIncrementalMigration(options(run))
 		expect(files).toEqual([join(dir, "20261021073442_more.sql"), join(dir, "20261021073443_body.sql")])
 		expect(readFileSync(join(dir, "20261021073443_body.sql"), "utf8")).toBe("ALTER TABLE s ADD COLUMN y;\n")
 		expect(existsSync(join(dir, "20261021073441_body.sql"))).toBe(false)
@@ -162,23 +162,23 @@ describe("generateIncrementalMigration — the names of what atlas adds", () => 
 })
 
 describe("generateIncrementalMigration — FTS kept out of what atlas sees (S-12)", () => {
-	it("replays a history with its FTS statements stripped, and diffs a target without them", () => {
+	it("replays a history with its FTS statements stripped, and diffs a target without them", async () => {
 		seed(`CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);\n${FTS}`)
 		const run = fakeAtlas(({ history, target }) => {
 			expect(Object.values(history).join("")).not.toMatch(/fts5|items_fts/)
 			expect(target).toBe("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);")
 			return { code: 0, stderr: "", stdout: NO_CHANGES }
 		})
-		const result = generateIncrementalMigration(
+		const result = await generateIncrementalMigration(
 			options(run, { ftsSql: FTS, targetSchema: "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);" }),
 		)
 		expect(result).toEqual({ files: [], notices: [], synced: true })
 	})
 
-	it("writes a timestamped migration holding only the FTS delta when atlas has no changes", () => {
+	it("writes a timestamped migration holding only the FTS delta when atlas has no changes", async () => {
 		seed("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);")
 		const run = fakeAtlas(() => ({ code: 0, stderr: "", stdout: NO_CHANGES }))
-		const { files, synced } = generateIncrementalMigration(options(run, { ftsSql: FTS }))
+		const { files, synced } = await generateIncrementalMigration(options(run, { ftsSql: FTS }))
 		expect(synced).toBe(false)
 		expect(files).toHaveLength(1)
 		expect(files[0]).toMatch(/\/\d{14}_add_b\.sql$/)
@@ -188,13 +188,13 @@ describe("generateIncrementalMigration — FTS kept out of what atlas sees (S-12
 		expect(readFileSync(join(dir, "atlas.sum"), "utf8")).toBe(sumOf(dir))
 	})
 
-	it("appends the FTS delta after atlas's own SQL", () => {
+	it("appends the FTS delta after atlas's own SQL", async () => {
 		seed("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);")
 		const run = fakeAtlas(({ dir: replayed }) => {
 			writeFileSync(join(replayed, "20261017_add_b.sql"), "ALTER TABLE items ADD COLUMN flag INTEGER;\n")
 			return ok()
 		})
-		const { files } = generateIncrementalMigration(options(run, { ftsSql: FTS }))
+		const { files } = await generateIncrementalMigration(options(run, { ftsSql: FTS }))
 		expect(readFileSync(files[0] as string, "utf8")).toMatch(
 			/^ALTER TABLE items ADD COLUMN flag INTEGER;\n\nCREATE VIRTUAL TABLE/,
 		)
@@ -211,12 +211,12 @@ const target = {
 }
 
 describe("generateIncrementalMigration — postgres", () => {
-	it("diffs through Atlas with the dev database in its environment, scoped to the schema, never in argv", () => {
+	it("diffs through Atlas with the dev database in its environment, scoped to the schema, never in argv", async () => {
 		const added = fakeAtlas(({ dir: replayed }) => {
 			writeFileSync(join(replayed, "20261017_add_b.sql"), "CREATE TABLE b (x int);\n")
 			return ok()
 		})
-		expect(generateIncrementalMigration(options(added, { dialect: "postgres", target }))).toEqual({
+		expect(await generateIncrementalMigration(options(added, { dialect: "postgres", target }))).toEqual({
 			files: [join(dir, "20261017_add_b.sql")],
 			notices: [],
 			synced: false,
@@ -229,7 +229,7 @@ describe("generateIncrementalMigration — postgres", () => {
 			"postgres://dev:Dev-Secret-0451@localhost/dev?sslmode=disable&search_path=public",
 		)
 		expect(
-			generateIncrementalMigration(options(fakeAtlas(), { dialect: "postgres", migrationName: "again", target })),
+			await generateIncrementalMigration(options(fakeAtlas(), { dialect: "postgres", migrationName: "again", target })),
 		).toEqual({
 			files: [],
 			notices: [],
@@ -239,7 +239,7 @@ describe("generateIncrementalMigration — postgres", () => {
 })
 
 describe("generateIncrementalMigration — postgres objects Atlas refuses", () => {
-	it("replays the history without the objects Atlas refuses, keeping its directives, and wraps Atlas's file", () => {
+	it("replays the history without the objects Atlas refuses, keeping its directives, and wraps Atlas's file", async () => {
 		seed(
 			'-- atlas:txmode none\nCREATE TABLE "post" ("title" text);\nCREATE VIEW "v" AS (select "title" from "post");\nCREATE INDEX CONCURRENTLY "i" ON "post" ("title");\n',
 		)
@@ -253,7 +253,7 @@ describe("generateIncrementalMigration — postgres objects Atlas refuses", () =
 			return ok()
 		})
 		const schema = 'CREATE TABLE "post" ("title" varchar(50));\nCREATE VIEW "v" AS (select "title" from "post");\n'
-		const { files } = generateIncrementalMigration(
+		const { files } = await generateIncrementalMigration(
 			options(atlas, { dialect: "postgres", target, targetSchema: schema }),
 		)
 		expect(seen[0]?.history["20260101000000_init.sql"]).toBe(
@@ -266,10 +266,10 @@ describe("generateIncrementalMigration — postgres objects Atlas refuses", () =
 		expect(readFileSync(join(dir, "atlas.sum"), "utf8")).toBe(sumOf(dir))
 	})
 
-	it("writes comb's part alone when only a comb-owned object changed", () => {
+	it("writes comb's part alone when only a comb-owned object changed", async () => {
 		seed('CREATE TABLE "post" ("title" text);\nCREATE VIEW "v" AS (select 1);\n')
 		const schema = 'CREATE TABLE "post" ("title" text);\nCREATE VIEW "v" AS (select 2);\n'
-		const { files, synced } = generateIncrementalMigration(
+		const { files, synced } = await generateIncrementalMigration(
 			options(fakeAtlas(), { dialect: "postgres", target, targetSchema: schema }),
 		)
 		expect(synced).toBe(false)
@@ -281,7 +281,7 @@ describe("generateIncrementalMigration — postgres objects Atlas refuses", () =
 })
 
 describe("generateIncrementalMigration — postgres enums and failures", () => {
-	it("writes the enum values Atlas adds into a file of their own before the one that uses them", () => {
+	it("writes the enum values Atlas adds into a file of their own before the one that uses them", async () => {
 		seed("CREATE TYPE \"status\" AS ENUM ('draft');\n")
 		const atlas = fakeAtlas((call) => {
 			writeFileSync(
@@ -290,7 +290,9 @@ describe("generateIncrementalMigration — postgres enums and failures", () => {
 			)
 			return ok()
 		})
-		const { files } = generateIncrementalMigration(options(atlas, { dialect: "postgres", target, targetSchema: "T" }))
+		const { files } = await generateIncrementalMigration(
+			options(atlas, { dialect: "postgres", target, targetSchema: "T" }),
+		)
 		expect(files).toEqual([
 			join(dir, "20261018000000_archive_enum_values.sql"),
 			join(dir, "20261018000001_archive.sql"),
@@ -304,68 +306,68 @@ describe("generateIncrementalMigration — postgres enums and failures", () => {
 		])
 	})
 
-	it("copies every further file Atlas adds", () => {
+	it("copies every further file Atlas adds", async () => {
 		const atlas = fakeAtlas((call) => {
 			writeFileSync(join(call.dir, "20261018000000_a.sql"), 'CREATE TABLE "a" ("x" int);\n')
 			writeFileSync(join(call.dir, "20261018000001_b.sql"), 'CREATE TABLE "b" ("x" int);\n')
 			return ok()
 		})
-		const { files } = generateIncrementalMigration(options(atlas, { dialect: "postgres", target }))
+		const { files } = await generateIncrementalMigration(options(atlas, { dialect: "postgres", target }))
 		expect(files).toEqual([join(dir, "20261018000000_a.sql"), join(dir, "20261018000001_b.sql")])
 		expect(readFileSync(files[1] as string, "utf8")).toBe('CREATE TABLE "b" ("x" int);\n')
 	})
 })
 
 describe("generateIncrementalMigration — postgres refusals", () => {
-	it("explains Atlas's refusal to drop an enum value", () => {
+	it("explains Atlas's refusal to drop an enum value", async () => {
 		const refusing = fakeAtlas(() => fail('Error: dropping value "b" from enum "mood" is not supported'))
-		expect(() => generateIncrementalMigration(options(refusing, { dialect: "postgres", target }))).toThrow(
+		await expect(generateIncrementalMigration(options(refusing, { dialect: "postgres", target }))).rejects.toThrow(
 			'atlas migrate diff failed: Atlas cannot drop the value "b" of enum "mood"',
 		)
 	})
 
-	it("names a file it writes itself after the directory's latest version, even one in the future", () => {
+	it("names a file it writes itself after the directory's latest version, even one in the future", async () => {
 		writeFileSync(join(dir, "29991231235959_ahead.sql"), 'CREATE VIEW "v" AS (select 1);\n')
 		writeFileSync(join(dir, "atlas.sum"), sumOf(dir))
 		const schema = 'CREATE VIEW "v" AS (select 2);\n'
-		const { files } = generateIncrementalMigration(
+		const { files } = await generateIncrementalMigration(
 			options(fakeAtlas(), { dialect: "postgres", target, targetSchema: schema }),
 		)
 		expect(files).toEqual([join(dir, "30000101000000_add_b.sql")])
 	})
 
-	it("needs the database's target on postgres", () => {
-		expect(() => generateIncrementalMigration(options(fakeAtlas(), { dialect: "postgres" }))).toThrow(
+	it("needs the database's target on postgres", async () => {
+		await expect(generateIncrementalMigration(options(fakeAtlas(), { dialect: "postgres" }))).rejects.toThrow(
 			"a Postgres diff needs the database's target (devUrl and schema)",
 		)
 	})
 
-	it("scrubs the dev database's password from Atlas's failure", () => {
+	it("scrubs the dev database's password from Atlas's failure", async () => {
 		const failing = fakeAtlas(() => fail("dial postgres://dev:pw@localhost/dev: refused"))
-		expect(() => generateIncrementalMigration(options(failing, { dialect: "postgres", target }))).toThrow(
+		await expect(generateIncrementalMigration(options(failing, { dialect: "postgres", target }))).rejects.toThrow(
 			"atlas migrate diff failed: dial postgres://dev:***@localhost/dev: refused",
 		)
 	})
 })
 
 describe("generateIncrementalMigration: failures", () => {
-	it("throws when the hash or the diff fails", () => {
-		expect(() => generateIncrementalMigration(options(fakeAtlas(undefined, () => fail("hash broke"))))).toThrow(
+	it("throws when the hash or the diff fails", async () => {
+		await expect(generateIncrementalMigration(options(fakeAtlas(undefined, () => fail("hash broke"))))).rejects.toThrow(
 			"atlas migrate hash failed: hash broke",
 		)
 		seed("CREATE TABLE a (x);")
-		expect(() => generateIncrementalMigration(options(fakeAtlas(() => fail("diff broke"))))).toThrow(
+		await expect(generateIncrementalMigration(options(fakeAtlas(() => fail("diff broke"))))).rejects.toThrow(
 			"atlas migrate diff failed: diff broke",
 		)
-		expect(() =>
+		await expect(
 			generateIncrementalMigration(options(fakeAtlas(() => ({ code: 1, stderr: "", stdout: " out " })))),
-		).toThrow("atlas migrate diff failed: out")
+		).rejects.toThrow("atlas migrate diff failed: out")
 	})
 
-	it("refuses a history whose atlas.sum does not match its migrations", () => {
+	it("refuses a history whose atlas.sum does not match its migrations", async () => {
 		seed("CREATE TABLE a (x);")
 		writeFileSync(join(dir, "20260101000000_init.sql"), "CREATE TABLE a (edited);")
-		expect(() => generateIncrementalMigration(options(fakeAtlas()))).toThrow(
+		await expect(generateIncrementalMigration(options(fakeAtlas()))).rejects.toThrow(
 			`${dir}/atlas.sum does not match its migrations; if a migration was edited on purpose, run atlas migrate hash`,
 		)
 	})

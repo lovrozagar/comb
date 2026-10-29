@@ -6,13 +6,20 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import pg from "pg"
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
-import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
+import { applyWithAtlas, baselineWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
+import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-diff.ts"
+import type { LiveRead } from "../../../src/migrate/core/pg-live-types.ts"
+import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { withScratchDb } from "../support/pg.ts"
+
+/* a diff and a baseline read Postgres files with Postgres's parser, which their callers load (M75) */
+beforeAll(loadPostgresParser)
 
 let dir = ""
 beforeEach(() => {
@@ -47,6 +54,54 @@ describe("migrate on Postgres: a target schema that does not exist yet (P15)", (
 					await expect(applyWithAtlas(command(url, devUrl))).rejects.toThrow(
 						"schema app does not exist on the target; create it once (CREATE SCHEMA app) before the first apply",
 					)
+				})
+			})
+		}, 60_000)
+	})
+})
+
+async function query(url: string, sql: string): Promise<Array<Record<string, unknown>>> {
+	const client = new pg.Client({ connectionString: url })
+	await client.connect()
+	try {
+		return (await client.query(sql)).rows
+	} finally {
+		await client.end()
+	}
+}
+
+const USERS = 'CREATE TABLE "users" ("id" integer PRIMARY KEY);\n'
+
+/** A database with no function, procedure or trigger: the baseline here compares its tables */
+const noObjects: LiveRead = async () => ({ routines: new Map(), triggers: new Map() })
+
+/* P12 of the 0.14.1 review: Atlas inspects the schema its dev URL is scoped to before it replays anything */
+describe("migrate on Postgres: schema app on an empty dev database (P12)", () => {
+	describe("with Atlas v1.3.0", () => {
+		it("diffs, creating the schema on the dev database", async () => {
+			await withScratchDb(async (devUrl) => {
+				migrations({ "20260101000000_users.sql": USERS })
+				const diffed = await generateIncrementalMigration({
+					dialect: "postgres",
+					migrationName: "posts",
+					migrationsDir: dir,
+					target: { devUrl, lockTimeout: "5s", schema: "app", url: "" },
+					targetSchema: `${USERS}CREATE TABLE "posts" ("id" integer);\n`,
+				})
+				expect(diffed.files).toHaveLength(1)
+				expect(await query(devUrl, "SELECT nspname FROM pg_namespace WHERE nspname = 'app'")).toEqual([
+					{ nspname: "app" },
+				])
+			})
+		}, 60_000)
+
+		it("baselines a target that holds the history's tables", async () => {
+			await withScratchDb(async (devUrl) => {
+				await withScratchDb(async (url) => {
+					await query(url, `CREATE SCHEMA app; SET search_path = app; ${USERS}`)
+					migrations({ "20260101000000_users.sql": USERS })
+					const baseline = { ...command(url, devUrl), readLive: noObjects }
+					expect(await baselineWithAtlas(baseline)).toEqual(["20260101000000_users.sql"])
 				})
 			})
 		}, 60_000)

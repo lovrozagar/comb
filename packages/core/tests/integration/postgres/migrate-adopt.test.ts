@@ -107,15 +107,9 @@ const ADOPTS =
 	"1 file ran under 0.12's shared history; apply would adopt them, pending proof that the schema holds what they leave"
 const PENDING_PROOF = ADOPTS
 
-/**
- * A dev database and a target, each a scratch database of its own: adoption replays what 0.12 ran
- * on the dev database, which holds schema app as it must until P12 (plan 15's 21) creates it there
- */
+/** A dev database and a target, each a scratch database of its own: adoption replays what 0.12 ran on the dev database */
 const withDevAndTarget = (body: (dev: string, url: string) => Promise<void>) =>
-	withScratchDb(async (dev) => {
-		await query(dev, "CREATE SCHEMA app")
-		await withScratchDb((url) => body(dev, url))
-	})
+	withScratchDb((dev) => withScratchDb((url) => body(dev, url)))
 
 describe("migrate on Postgres: a schema migrated under 0.12's shared history (M77)", () => {
 	describe("with Atlas v1.3.0", () => {

@@ -54,7 +54,7 @@ describe("readLiveObjects", () => {
 
 describe("loadPostgres", () => {
 	it("loads postgres.js, the optional peer", async () => {
-		expect(typeof (await loadPostgres())).toBe("function")
+		expect(typeof (await loadPostgres("comb reads it"))).toBe("function")
 	})
 
 	it("refuses, naming the package and its range, when the peer is missing", async () => {
@@ -64,8 +64,14 @@ describe("loadPostgres", () => {
 		vi.resetModules()
 		try {
 			const { loadPostgres: missing } = await import("./pg-live-objects.ts")
-			await expect(missing()).rejects.toThrow(
-				"baseline compares the database's functions and triggers, which Atlas OSS does not, through the postgres package; install postgres (>=3.4.9 <4), an optional peer, and run it again",
+			await expect(missing("comb reads it")).rejects.toThrow(
+				"comb reads it; install postgres (>=3.4.9 <4), an optional peer, and run it again",
+			)
+			/* a baseline's own read says why it needs the peer */
+			await expect(
+				(await import("./pg-live-objects.ts")).readLiveObjects({ schema: "app", url: "postgres://db/db" }),
+			).rejects.toThrow(
+				"baseline compares the database's functions and triggers, which Atlas OSS does not, through the postgres package; install postgres",
 			)
 		} finally {
 			vi.doUnmock("postgres")

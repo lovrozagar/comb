@@ -16,11 +16,11 @@ const AFTER =
 const RETYPED = AFTER.replace("`c` integer", "`c` text")
 
 describe("the classification of Atlas's rebuild copies", () => {
-	it("rates a rebuild that fills new NOT NULL columns with their defaults cautious", () => {
+	it("rates a rebuild that fills new NOT NULL columns with their defaults cautious", async () => {
 		const h = history(undefined, "")
 		try {
-			const earlier = extractSchema(readFileSync(h.diff(BEFORE, "init"), "utf8"))
-			const file = readFileSync(h.diff(AFTER, "defaults"), "utf8")
+			const earlier = extractSchema(readFileSync(await h.diff(BEFORE, "init"), "utf8"))
+			const file = readFileSync(await h.diff(AFTER, "defaults"), "utf8")
 			expect(file).toContain("IFNULL(`a`, (unixepoch() * 1000)) AS `a`")
 			expect(file).toContain("IFNULL(`b`, (CURRENT_TIMESTAMP)) AS `b`")
 			expect(classifyMigration(file, { before: earlier, dialect: "sqlite" })).toMatchObject({
@@ -32,11 +32,11 @@ describe("the classification of Atlas's rebuild copies", () => {
 		}
 	}, 60_000)
 
-	it("rates a rebuild that retypes a column to another affinity unsafe, naming the column (M5)", () => {
+	it("rates a rebuild that retypes a column to another affinity unsafe, naming the column (M5)", async () => {
 		const h = history(undefined, "")
 		try {
-			const earlier = extractSchema(readFileSync(h.diff(BEFORE, "init"), "utf8"))
-			const file = readFileSync(h.diff(RETYPED, "retype"), "utf8")
+			const earlier = extractSchema(readFileSync(await h.diff(BEFORE, "init"), "utf8"))
+			const file = readFileSync(await h.diff(RETYPED, "retype"), "utf8")
 			expect(classifyMigration(file, { before: earlier, dialect: "sqlite" })).toMatchObject({
 				safety: "unsafe",
 				unsafeStatements: [

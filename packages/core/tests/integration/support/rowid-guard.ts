@@ -73,7 +73,7 @@ async function step(
 			.map((file) => readFileSync(file, "utf8"))
 			.join("\n"),
 	)
-	const file = readFileSync(h.diff(target, name), "utf8")
+	const file = readFileSync(await h.diff(target, name), "utf8")
 	await engine.apply(file)
 	const sound = {
 		foreignKeyCheck: await engine.rows("PRAGMA foreign_key_check"),
@@ -85,7 +85,7 @@ async function step(
 
 /** The scenario on `engine` over `h` (made with no FTS): the base and its rows, a rebuild of t, then of w100 */
 export async function runRowidScenario(engine: Engine, h: History): Promise<{ t: RowidOutcome; w100: RowidOutcome }> {
-	await engine.apply(readFileSync(h.diff(schema(false, false), "init"), "utf8"))
+	await engine.apply(readFileSync(await h.diff(schema(false, false), "init"), "utf8"))
 	await engine.run(SEED)
 	const t = await step(engine, h, { name: "rebuild_t", target: schema(true, false) })
 	const w100 = await step(engine, h, { name: "rebuild_w100", target: schema(true, true) })

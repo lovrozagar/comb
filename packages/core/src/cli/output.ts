@@ -14,6 +14,8 @@ export type CliIo = {
 	run?: Run | undefined
 	/** How a Postgres baseline reads the database's functions and triggers, postgres.js unless a test fakes it (5.4b) */
 	readPgObjects?: LiveRead | undefined
+	/** How a diff, baseline or adoption gives the dev database a non-public target schema, comb's own unless a test fakes it (P12) */
+	readyPgDev?: ((target: { devUrl: string; schema: string }) => Promise<void>) | undefined
 	/** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
 	confirm?: ((question: string) => Promise<boolean>) | undefined
 }

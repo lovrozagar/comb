@@ -16,6 +16,7 @@ import { atlasNotices, explainAtlasFailure, type PgTarget, withAtlasEnv } from "
 import { asSql, type FtsState, separate } from "./fts-migration.ts"
 import { historyFacts } from "./pg-history.ts"
 import { liveDrift, readLiveObjects } from "./pg-live-objects.ts"
+import type { ReadyDev } from "./pg-dev-schema.ts"
 import type { LiveRead } from "./pg-live-types.ts"
 import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
 import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
@@ -98,10 +99,10 @@ function replayableHistory(exec: Run, copy: string): string {
 	return plain
 }
 
-/** Atlas could not replay the history on the dev database, or read the target, so nothing was compared */
+/** The dev database could not be readied, or Atlas could not replay the history on it or read the target: nothing was compared */
 class ReplayFailed extends Error {
-	constructor(message: string) {
-		super(message)
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options)
 		this.name = "ReplayFailed"
 	}
 }
@@ -140,7 +141,13 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string, ref
 }
 
 /** How a Postgres baseline reads the database's functions, procedures and triggers: postgres.js unless a test says otherwise */
-type ObjectsCompare = { print(line: string): void; readLive?: LiveRead | undefined; target: PgTarget }
+type ObjectsCompare = {
+	print(line: string): void
+	readLive?: LiveRead | undefined
+	/** how the dev database gets the target schema before a replay: comb's own unless a test says otherwise (P12) */
+	readyDev?: ReadyDev | undefined
+	target: PgTarget
+}
 
 /**
  * Refuses a database whose functions, procedures or triggers are not, by name, the ones the

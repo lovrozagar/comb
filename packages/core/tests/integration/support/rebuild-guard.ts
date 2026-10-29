@@ -90,7 +90,7 @@ export type History = {
 	add(name: string, sql: string): void
 	dir: string
 	/** diff `schema` (with FTS) into the directory; returns the file written */
-	diff(schema: string, name: string): string
+	diff(schema: string, name: string): Promise<string>
 	/** the directory's files in order */
 	files(): string[]
 	dispose(): void
@@ -108,8 +108,8 @@ export function history(dir: string = mkdtempSync(join(tmpdir(), "comb-rebuild-g
 			writeFileSync(join(dir, name), sql)
 			spawnSync("atlas", ["migrate", "hash", "--dir", `file://${dir}`])
 		},
-		diff(schema, name) {
-			const result = generateIncrementalMigration({
+		async diff(schema, name) {
+			const result = await generateIncrementalMigration({
 				dialect: "sqlite",
 				ftsSql: fts,
 				migrationName: name,
@@ -142,7 +142,7 @@ async function rebuild(
 ): Promise<Outcome> {
 	const before = await snapshot(engine)
 	const earlier = extractSchema(h.files().map(read).join("\n"))
-	const file = h.diff(schema, name)
+	const file = await h.diff(schema, name)
 	await engine.apply(read(file))
 	const safety = classifyMigration(read(file), { before: earlier, dialect: "sqlite" }).safety
 	return { after: await snapshot(engine), before, safety, sound: await soundness(engine) }
@@ -150,7 +150,7 @@ async function rebuild(
 
 /** The whole scenario: the base migration and its rows, then a rebuild of u, then of u and post together */
 export async function runScenario(engine: Engine, h: History): Promise<{ both: Outcome; parent: Outcome }> {
-	await engine.apply(read(h.diff(BASE, "init")))
+	await engine.apply(read(await h.diff(BASE, "init")))
 	await engine.run(SEED)
 	const parent = await rebuild(engine, h, { name: "rebuild_u", schema: REBUILD_U })
 	const both = await rebuild(engine, h, { name: "rebuild_both", schema: REBUILD_BOTH })

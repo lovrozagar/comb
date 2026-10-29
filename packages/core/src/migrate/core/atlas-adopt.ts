@@ -15,6 +15,7 @@ import { join } from "node:path"
 import { sqlFiles, sumHashes } from "./atlas-dir.ts"
 import { type AtlasStatus, versionOf } from "./atlas-history.ts"
 import type { PgTarget } from "./atlas-target.ts"
+import { readyDevSchema } from "./pg-dev-schema.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { type ObjectsCompare, refuseDrift, refuseObjectDrift, ReplayFailed } from "./baseline-compare.ts"
 import type { Run } from "./process.ts"
@@ -44,14 +45,14 @@ function sharedPrefix(shared: AtlasStatus, copy: string): string[] {
 	return files.slice(0, rows.length)
 }
 
-/** `compare()`, a replay Atlas could not run on the dev database refused by devUrl's name: proof needs one it can reach */
-function replayed<T>(compare: () => T, schema: string, ran: readonly string[]): T {
+/** `step()`, a dev database that could not be readied or replayed on refused by devUrl's name: proof needs one Atlas can reach */
+async function replayed<T>(step: () => T | Promise<T>, schema: string, ran: readonly string[]): Promise<T> {
 	try {
-		return compare()
+		return await step()
 	} catch (error) {
 		if (!(error instanceof ReplayFailed)) throw error
 		throw new Error(
-			`adopting 0.12's shared history needs devUrl, an empty Postgres database Atlas can reach, to prove ${schema} holds what it ran (${ran.join(", ")}); Atlas could not use it: ${error.message}`,
+			`adopting 0.12's shared history needs devUrl, an empty Postgres database Atlas can reach, to prove ${schema} holds what it ran (${ran.join(", ")}); devUrl could not be used: ${error.message}`,
 			{ cause: error },
 		)
 	}
@@ -63,14 +64,15 @@ async function proveAdoption(
 	copy: string,
 	ran: readonly string[],
 ): Promise<void> {
-	/* the replay reads each file as the statements Postgres runs */
+	/* the replay reads each file as the statements Postgres runs, on a dev database holding the schema (P12) */
 	await loadPostgresParser()
+	const { schema } = options.target
+	await replayed(() => (options.readyDev ?? readyDevSchema)(options.target), schema, ran)
 	const prefix = mkdtempSync(join(tmpdir(), "comb-adopt-"))
 	try {
 		for (const name of ran) copyFileSync(join(copy, name), join(prefix, name))
-		const { schema } = options.target
 		const refusal = `${schema} does not hold what 0.12's shared history ran (${ran.join(", ")}), so comb adopts none of it`
-		for (const notice of replayed(() => refuseDrift(options, prefix, refusal), schema, ran))
+		for (const notice of await replayed(() => refuseDrift(options, prefix, refusal), schema, ran))
 			options.print(`Warning: Atlas: ${notice}`)
 		await refuseObjectDrift(options, prefix, refusal)
 	} finally {

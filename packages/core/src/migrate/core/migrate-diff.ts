@@ -27,6 +27,7 @@ import { atlasNotices, explainAtlasFailure, type PgTarget, withAtlasEnv } from "
 import { asSql, type FtsState, ftsDelta, separate } from "./fts-migration.ts"
 import { splitEnumValues } from "./pg-enum-split.ts"
 import { extractSchema } from "./schema.ts"
+import { readyDevSchema } from "./pg-dev-schema.ts"
 import { devPrelude, emptyPgObjects, pgDelta, separatePgObjects, wrapAtlasFile } from "./pg-objects.ts"
 import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
 import { type Run, run } from "./process.ts"
@@ -42,6 +43,8 @@ export type MigrateDiffOptions = {
 	run?: Run | undefined
 	/** Postgres: the database's dev database and schema Atlas diffs in */
 	target?: PgTarget | undefined
+	/** Postgres: how the dev database gets the target schema, comb's own unless a test fakes it (P12) */
+	readyDev?: ((target: PgTarget) => Promise<void>) | undefined
 }
 
 export type MigrateDiffResult = {
@@ -205,11 +208,13 @@ function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 	}
 }
 
-export function generateIncrementalMigration(options: MigrateDiffOptions): MigrateDiffResult {
+export async function generateIncrementalMigration(options: MigrateDiffOptions): Promise<MigrateDiffResult> {
 	const { dialect, migrationsDir, run: exec = run, target } = options
 	if (dialect === "postgres" && target === undefined) {
 		throw new Error("a Postgres diff needs the database's target (devUrl and schema)")
 	}
+	/* Atlas replays the history on the dev database, inspecting the target schema there first (P12) */
+	if (dialect === "postgres") await (options.readyDev ?? readyDevSchema)(target as PgTarget)
 	const atlas: Atlas = { dialect, exec, notices: [], target: dialect === "postgres" ? target : undefined }
 	if (!existsSync(migrationsDir)) mkdirSync(migrationsDir, { recursive: true })
 	if (!existsSync(join(migrationsDir, "atlas.sum"))) hashDir(atlas.exec, migrationsDir)

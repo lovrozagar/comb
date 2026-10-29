@@ -30,7 +30,7 @@ const STEPS: Array<{ name: string; target: string }> = [
 
 describe("comb's own diff output on SQLite", () => {
 	describe("each file comb writes", () => {
-		it("rates safe or cautious, never unsafe, against the history before it", () => {
+		it("rates safe or cautious, never unsafe, against the history before it", async () => {
 			const h = history(undefined, FTS)
 			try {
 				const ratings: string[] = []
@@ -42,7 +42,7 @@ describe("comb's own diff output on SQLite", () => {
 							.map((file) => readFileSync(file, "utf8"))
 							.join("\n"),
 					)
-					const sql = readFileSync(h.diff(step.target, step.name), "utf8")
+					const sql = readFileSync(await h.diff(step.target, step.name), "utf8")
 					written.set(step.name, sql)
 					const rated = classifyMigration(sql, { before, dialect: "sqlite" })
 					expect(rated.unsafeStatements, step.name).toEqual([])

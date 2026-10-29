@@ -11,6 +11,9 @@ export type TestIo = CliIo & { errors: string[]; outputs: string[] }
 /* a Postgres baseline's catalog read reaches no database: its schema holds no function or trigger */
 const readPgObjects = async (): Promise<LiveObjects> => ({ routines: new Map(), triggers: new Map() })
 
+/* nor does the dev database a non-public schema is created on (P12): Atlas, faked, needs none */
+const readyPgDev = async (): Promise<void> => undefined
+
 export function makeIo(cwd: string, run?: Run, confirm?: CliIo["confirm"]): TestIo {
 	const outputs: string[] = []
 	const errors: string[] = []
@@ -22,6 +25,7 @@ export function makeIo(cwd: string, run?: Run, confirm?: CliIo["confirm"]): Test
 		out: (line) => outputs.push(line),
 		outputs,
 		readPgObjects,
+		readyPgDev,
 		run,
 	}
 }

@@ -44,7 +44,7 @@ describe("comb's own diff output on Postgres", () => {
 					const texts: string[] = []
 					for (const step of STEPS) {
 						const before = extractSchema(texts.join("\n"), undefined, "postgres")
-						const written = generateIncrementalMigration({
+						const written = await generateIncrementalMigration({
 							dialect: "postgres",
 							migrationName: step.name,
 							migrationsDir: dir,

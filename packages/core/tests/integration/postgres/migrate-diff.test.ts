@@ -101,9 +101,9 @@ describe("migrate diff on Postgres: tables, views and policies", () => {
 		it("diffs a first migration, finds the history synced, and adds a column", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
-				expect(diff(dev, POST).files).toHaveLength(1)
-				expect(diff(dev, POST, "again")).toEqual({ files: [], notices: [], synced: true })
-				const [added] = diff(dev, POST.replace("NOT NULL)", 'NOT NULL, "body" text)'), "body").files
+				expect((await diff(dev, POST)).files).toHaveLength(1)
+				expect(await diff(dev, POST, "again")).toEqual({ files: [], notices: [], synced: true })
+				const [added] = (await diff(dev, POST.replace("NOT NULL)", 'NOT NULL, "body" text)'), "body")).files
 				expect(readFileSync(added as string, "utf8")).toContain('ADD COLUMN "body" text')
 				await applyAll(url)
 				expect(
@@ -116,14 +116,14 @@ describe("migrate diff on Postgres: tables, views and policies", () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
 				const view = 'CREATE VIEW "titles" AS (select "title" from "post");\n'
-				diff(dev, POST + view)
-				const [retyped] = diff(dev, POST.replace('"title" text', '"title" varchar(50)') + view, "retype").files
+				await diff(dev, POST + view)
+				const [retyped] = (await diff(dev, POST.replace('"title" text', '"title" varchar(50)') + view, "retype")).files
 				expect(readFileSync(retyped as string, "utf8")).toMatch(
 					/^DROP VIEW IF EXISTS "titles";[\s\S]*TYPE character varying\(50\)[\s\S]*CREATE VIEW "titles"/,
 				)
 				await applyAll(url)
 				expect(await query(url, "SELECT count(*)::int AS n FROM titles")).toEqual([{ n: 0 }])
-				expect(diff(dev, POST.replace('"title" text', '"title" varchar(50)') + view, "again").synced).toBe(true)
+				expect((await diff(dev, POST.replace('"title" text', '"title" varchar(50)') + view, "again")).synced).toBe(true)
 			})
 		}, 60_000)
 
@@ -131,9 +131,9 @@ describe("migrate diff on Postgres: tables, views and policies", () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
 				const rls = `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n`
-				diff(dev, rls + policy("true"))
-				expect(diff(dev, rls + policy("true"), "again").synced).toBe(true)
-				const [changed] = diff(dev, rls + policy('"post"."id" > 0'), "narrow").files
+				await diff(dev, rls + policy("true"))
+				expect((await diff(dev, rls + policy("true"), "again")).synced).toBe(true)
+				const [changed] = (await diff(dev, rls + policy('"post"."id" > 0'), "narrow")).files
 				expect(readFileSync(changed as string, "utf8")).toBe(
 					`DROP POLICY IF EXISTS "own" ON "post";\n\n${policy('"post"."id" > 0').trimEnd()}\n`,
 				)
@@ -142,7 +142,7 @@ describe("migrate diff on Postgres: tables, views and policies", () => {
 					{ polname: "own", qual: "(id > 0)" },
 				])
 				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "post" }])
-				expect(diff(dev, rls + policy('"post"."id" > 0'), "applied").synced).toBe(true)
+				expect((await diff(dev, rls + policy('"post"."id" > 0'), "applied")).synced).toBe(true)
 			})
 		}, 60_000)
 	})
@@ -154,21 +154,21 @@ describe("migrate diff on Postgres: row level security", () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
 				const enabled = `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n`
-				diff(dev, enabled)
-				expect(diff(dev, enabled, "again").synced).toBe(true)
+				await diff(dev, enabled)
+				expect((await diff(dev, enabled, "again")).synced).toBe(true)
 				const forced = `${enabled}ALTER TABLE "post" FORCE ROW LEVEL SECURITY;\n`
-				const [force] = diff(dev, forced, "force").files
+				const [force] = (await diff(dev, forced, "force")).files
 				expect(readFileSync(force as string, "utf8")).toBe('ALTER TABLE "post" FORCE ROW LEVEL SECURITY;\n')
-				expect(diff(dev, forced, "forced").synced).toBe(true)
+				expect((await diff(dev, forced, "forced")).synced).toBe(true)
 				await applyAll(url)
 				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: true, table: "post" }])
-				const [off] = diff(dev, POST, "off").files
+				const [off] = (await diff(dev, POST, "off")).files
 				expect(readFileSync(off as string, "utf8")).toBe(
 					'ALTER TABLE "post" DISABLE ROW LEVEL SECURITY;\n\nALTER TABLE "post" NO FORCE ROW LEVEL SECURITY;\n',
 				)
 				await applyAll(url)
 				expect(await rlsOf(url)).toEqual([{ enabled: false, forced: false, table: "post" }])
-				expect(diff(dev, POST, "plain").synced).toBe(true)
+				expect((await diff(dev, POST, "plain")).synced).toBe(true)
 			})
 		}, 90_000)
 
@@ -177,12 +177,12 @@ describe("migrate diff on Postgres: row level security", () => {
 				const dev = target(devUrl)
 				const team = 'CREATE TABLE "team" ("id" integer PRIMARY KEY);\n'
 				const secured = `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`
-				diff(dev, team + secured)
-				const [dropped] = diff(dev, team, "drop").files
+				await diff(dev, team + secured)
+				const [dropped] = (await diff(dev, team, "drop")).files
 				expect(readFileSync(dropped as string, "utf8")).not.toMatch(/ROW LEVEL SECURITY/)
-				expect(diff(dev, team, "gone").synced).toBe(true)
-				diff(dev, team + secured, "back")
-				expect(diff(dev, team + secured, "again").synced).toBe(true)
+				expect((await diff(dev, team, "gone")).synced).toBe(true)
+				await diff(dev, team + secured, "back")
+				expect((await diff(dev, team + secured, "again")).synced).toBe(true)
 				await applyAll(url)
 				expect(await rlsOf(url)).toEqual([
 					{ enabled: true, forced: false, table: "post" },
@@ -199,11 +199,11 @@ describe("migrate diff on Postgres: row level security across renames and drops"
 		it("secures the table a rename creates, as Atlas writes a rename as a create and a drop", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
-				diff(dev, `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`)
+				await diff(dev, `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`)
 				const article = `${POST.replace('"post"', '"article"')}ALTER TABLE "article" ENABLE ROW LEVEL SECURITY;\n${policy("true").replace('"post"', '"article"')}`
-				const [renamed] = diff(dev, article, "rename").files
+				const [renamed] = (await diff(dev, article, "rename")).files
 				expect(readFileSync(renamed as string, "utf8")).toMatch(/ALTER TABLE "article" ENABLE ROW LEVEL SECURITY;/)
-				expect(diff(dev, article, "again").synced).toBe(true)
+				expect((await diff(dev, article, "again")).synced).toBe(true)
 				await applyAll(url)
 				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "article" }])
 				expect(await query(url, "SELECT polname, polrelid::regclass::text AS rel FROM pg_policy")).toEqual([
@@ -215,13 +215,13 @@ describe("migrate diff on Postgres: row level security across renames and drops"
 		it("follows a hand-written rename of a secured table in the history", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
-				diff(dev, `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`)
+				await diff(dev, `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`)
 				handWritten(
 					"20990101000000_rename.sql",
 					'ALTER TABLE "post" RENAME TO "article";\nALTER TABLE "article" RENAME CONSTRAINT "post_pkey" TO "article_pkey";\n',
 				)
 				const article = `${POST.replace('"post"', '"article"')}ALTER TABLE "article" ENABLE ROW LEVEL SECURITY;\n${policy("true").replace('"post"', '"article"')}`
-				expect(diff(dev, article, "after").synced).toBe(true)
+				expect((await diff(dev, article, "after")).synced).toBe(true)
 				await applyAll(url)
 				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "article" }])
 			})
@@ -231,10 +231,10 @@ describe("migrate diff on Postgres: row level security across renames and drops"
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
 				const secured = `${POST}ALTER TABLE "post" ENABLE ROW LEVEL SECURITY;\n${policy("true")}`
-				diff(dev, secured)
+				await diff(dev, secured)
 				handWritten("20990101000000_drop.sql", 'DROP TABLE "post";\n')
-				diff(dev, secured, "back")
-				expect(diff(dev, secured, "again").synced).toBe(true)
+				await diff(dev, secured, "back")
+				expect((await diff(dev, secured, "again")).synced).toBe(true)
 				await applyAll(url)
 				expect(await rlsOf(url)).toEqual([{ enabled: true, forced: false, table: "post" }])
 				expect(await query(url, "SELECT polname FROM pg_policy")).toEqual([{ polname: "own" }])
@@ -252,8 +252,8 @@ describe("migrate diff on Postgres: extensions, enums and schemas", () => {
 				spawnSync("atlas", ["migrate", "hash", "--dir", `file://${dir}`])
 				const dev = target(devUrl)
 				const schema = 'CREATE TABLE "account" ("email" citext PRIMARY KEY);\n'
-				expect(diff(dev, schema).files).toHaveLength(1)
-				expect(diff(dev, schema, "again").synced).toBe(true)
+				expect((await diff(dev, schema)).files).toHaveLength(1)
+				expect((await diff(dev, schema, "again")).synced).toBe(true)
 				await applyAll(url)
 				expect(await query(url, "SELECT pg_typeof(email)::text AS t FROM (SELECT 'A'::citext AS email) s")).toEqual([
 					{ t: "citext" },
@@ -264,14 +264,14 @@ describe("migrate diff on Postgres: extensions, enums and schemas", () => {
 		it("writes an added enum value into a file before the one whose default uses it, and both apply", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
-				diff(dev, enumSchema("'draft'", "draft"))
-				const files = diff(dev, enumSchema("'draft', 'archived'", "archived"), "archive").files
+				await diff(dev, enumSchema("'draft'", "draft"))
+				const files = (await diff(dev, enumSchema("'draft', 'archived'", "archived"), "archive")).files
 				expect(files.map((file) => file.slice(-30))).toEqual([
 					expect.stringMatching(/_archive_enum_values\.sql$/),
 					expect.stringMatching(/\d_archive\.sql$/),
 				])
 				await applyAll(url)
-				expect(diff(dev, enumSchema("'draft', 'archived'", "archived"), "again").synced).toBe(true)
+				expect((await diff(dev, enumSchema("'draft', 'archived'", "archived"), "again")).synced).toBe(true)
 			})
 		}, 60_000)
 
@@ -279,7 +279,7 @@ describe("migrate diff on Postgres: extensions, enums and schemas", () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				for (const db of [devUrl, url]) await query(db, "CREATE SCHEMA app")
 				const dev = target(devUrl, "app")
-				expect(diff(dev, 'CREATE TABLE "app"."post" ("id" integer PRIMARY KEY);\n').files).toHaveLength(1)
+				expect((await diff(dev, 'CREATE TABLE "app"."post" ("id" integer PRIMARY KEY);\n')).files).toHaveLength(1)
 				await applyAll(url, "app")
 				expect(
 					await query(url, "SELECT table_schema FROM information_schema.tables WHERE table_name = 'post'"),
@@ -337,8 +337,8 @@ describe("migrate diff on Postgres: the default dev database", () => {
 	describe("with Atlas v1.3.0", () => {
 		it.skipIf(!docker)(
 			"diffs on docker://postgres/17/dev, Atlas's own throwaway container",
-			() => {
-				expect(diff(target("docker://postgres/17/dev"), POST).files).toHaveLength(1)
+			async () => {
+				expect((await diff(target("docker://postgres/17/dev"), POST)).files).toHaveLength(1)
 			},
 			180_000,
 		)
@@ -375,9 +375,9 @@ describe("migrate diff on Postgres: sequences a default uses", () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
 				try {
-					diff(dev, exportWithSequence(role))
+					await diff(dev, exportWithSequence(role))
 					await applyAll(url)
-					expect(diff(dev, exportWithSequence(role), "again").synced).toBe(true)
+					expect((await diff(dev, exportWithSequence(role), "again")).synced).toBe(true)
 					await query(url, "INSERT INTO post (id) VALUES (1)")
 					expect(await query(url, "SELECT no FROM post")).toEqual([{ no: "1" }])
 				} finally {
@@ -390,11 +390,11 @@ describe("migrate diff on Postgres: sequences a default uses", () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
 				const orders = `CREATE SEQUENCE "order_no";\nCREATE TABLE "orders" ("id" integer PRIMARY KEY, "no" bigint DEFAULT nextval('order_no') NOT NULL);\n`
-				diff(dev, orders)
-				const [added] = diff(dev, orders.replace("NOT NULL)", 'NOT NULL, "note" text)'), "note").files
+				await diff(dev, orders)
+				const [added] = (await diff(dev, orders.replace("NOT NULL)", 'NOT NULL, "note" text)'), "note")).files
 				expect(readFileSync(added as string, "utf8")).toContain('ADD COLUMN "note" text')
 				await applyAll(url)
-				expect(diff(dev, orders.replace("NOT NULL)", 'NOT NULL, "note" text)'), "again").synced).toBe(true)
+				expect((await diff(dev, orders.replace("NOT NULL)", 'NOT NULL, "note" text)'), "again")).synced).toBe(true)
 			})
 		}, 90_000)
 	})
@@ -409,13 +409,13 @@ describe("migrate diff on Postgres: a policy over another table, and a role anot
 		it("drops and recreates a policy that reads a table Atlas retypes, so the file applies", async () => {
 			await withDevAndTarget(async (devUrl, url) => {
 				const dev = target(devUrl)
-				diff(dev, teamPolicy("integer"))
-				const [retyped] = diff(dev, teamPolicy("bigint"), "retype").files
+				await diff(dev, teamPolicy("integer"))
+				const [retyped] = (await diff(dev, teamPolicy("bigint"), "retype")).files
 				expect(readFileSync(retyped as string, "utf8")).toMatch(
 					/^DROP POLICY IF EXISTS "p" ON "post";[\s\S]*bigint[\s\S]*CREATE POLICY "p"/,
 				)
 				await applyAll(url)
-				expect(diff(dev, teamPolicy("bigint"), "again").synced).toBe(true)
+				expect((await diff(dev, teamPolicy("bigint"), "again")).synced).toBe(true)
 			})
 		}, 90_000)
 
@@ -426,9 +426,9 @@ describe("migrate diff on Postgres: a policy over another table, and a role anot
 				try {
 					const dev = target(devUrl)
 					const schema = `CREATE ROLE "${role}";\n${POST}`
-					diff(dev, schema)
+					await diff(dev, schema)
 					await applyAll(url)
-					expect(diff(dev, schema, "again").synced).toBe(true)
+					expect((await diff(dev, schema, "again")).synced).toBe(true)
 				} finally {
 					await query(url, `DROP ROLE IF EXISTS "${role}"`)
 				}
@@ -476,13 +476,13 @@ describe("migrate diff on Postgres: hand-written statements about comb's objects
 			async ({ check, expected, object, statement }) => {
 				await withDevAndTarget(async (devUrl, url) => {
 					const dev = target(devUrl)
-					diff(dev, POST + object)
+					await diff(dev, POST + object)
 					handWritten("20990101000000_extra.sql", statement)
 					const widened = POST.replace("NOT NULL)", 'NOT NULL, "body" text)') + object
-					diff(dev, widened, "widen")
+					await diff(dev, widened, "widen")
 					await applyAll(url)
 					expect(await query(url, check)).toEqual(expected)
-					expect(diff(dev, widened, "again").synced).toBe(true)
+					expect((await diff(dev, widened, "again")).synced).toBe(true)
 				})
 			},
 			90_000,

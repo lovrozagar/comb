@@ -58,20 +58,30 @@ const diff = (name: string) =>
 	generateIncrementalMigration({ dialect: "sqlite", migrationName: name, migrationsDir: dir, targetSchema: exported() })
 
 describe("the normalized drizzle-kit SQLite export on Atlas v1.3.0", () => {
-	it("diffs as synced against a history whose key columns are NOT NULL", () => {
+	it("diffs as synced against a history whose key columns are NOT NULL", async () => {
 		writeFileSync(join(dir, "20260101000000_init.sql"), SYNCED)
-		generateIncrementalMigration({ dialect: "sqlite", migrationName: "hash", migrationsDir: dir, targetSchema: SYNCED })
-		expect(diff("again")).toEqual({ files: [], notices: [], synced: true })
+		await generateIncrementalMigration({
+			dialect: "sqlite",
+			migrationName: "hash",
+			migrationsDir: dir,
+			targetSchema: SYNCED,
+		})
+		expect(await diff("again")).toEqual({ files: [], notices: [], synced: true })
 	}, 60_000)
 
-	it("rebuilds the text keys of a history comb 0.7 wrote from the raw export once, guarding a referenced one", () => {
+	it("rebuilds the text keys of a history comb 0.7 wrote from the raw export once, guarding a referenced one", async () => {
 		const raw = SYNCED.replace("`id` text NOT NULL, `email`", "`id` text NULL, `email`")
 		writeFileSync(join(dir, "20260101000000_init.sql"), raw)
-		generateIncrementalMigration({ dialect: "sqlite", migrationName: "hash", migrationsDir: dir, targetSchema: raw })
-		const [file] = diff("not_null").files
+		await generateIncrementalMigration({
+			dialect: "sqlite",
+			migrationName: "hash",
+			migrationsDir: dir,
+			targetSchema: raw,
+		})
+		const [file] = (await diff("not_null")).files
 		const sql = readFileSync(file as string, "utf8")
 		expect(sql).toContain("CREATE TABLE `_comb_keep_post` AS SELECT")
 		expect(classifyMigration(sql, { before: extractSchema(raw), dialect: "sqlite" }).safety).toBe("cautious")
-		expect(diff("after").synced).toBe(true)
+		expect((await diff("after")).synced).toBe(true)
 	}, 60_000)
 })

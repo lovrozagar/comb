@@ -540,6 +540,8 @@ export type MigrateDiffOptions = {
     run?: Run | undefined;
     /** Postgres: the database's dev database and schema Atlas diffs in */
     target?: PgTarget | undefined;
+    /** Postgres: how the dev database gets the target schema, comb's own unless a test fakes it (P12) */
+    readyDev?: ((target: PgTarget) => Promise<void>) | undefined;
 };
 export type MigrateDiffResult = {
     files: string[];
@@ -547,7 +549,7 @@ export type MigrateDiffResult = {
     notices: string[];
     synced: boolean;
 };
-export declare function generateIncrementalMigration(options: MigrateDiffOptions): MigrateDiffResult;
+export declare function generateIncrementalMigration(options: MigrateDiffOptions): Promise<MigrateDiffResult>;
 
 // migrate/core/classify.d.ts
 /**

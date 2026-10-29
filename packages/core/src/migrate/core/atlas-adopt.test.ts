@@ -190,7 +190,11 @@ describe("proveAdoption", () => {
 		writeFileSync(join(copy, "1_a.sql"), 'CREATE TABLE "a" ("id" integer);\n')
 		const out: string[] = []
 		const exec = diffing("Schemas are synced, no changes to be made.", "views are not inspected")
-		await proveAdoption({ exec, print: (line) => out.push(line), readLive: noObjects, target }, copy, ["1_a.sql"])
+		await proveAdoption(
+			{ exec, print: (line) => out.push(line), readLive: noObjects, readyDev: async () => undefined, target },
+			copy,
+			["1_a.sql"],
+		)
 		expect(out).toEqual(["Warning: Atlas: views are not inspected"])
 		rmSync(copy, { force: true, recursive: true })
 	})
@@ -200,9 +204,13 @@ describe("proveAdoption", () => {
 		const copy = mkdtempSync(join(tmpdir(), "comb-prove-"))
 		writeFileSync(join(copy, "1_a.sql"), 'CREATE TABLE "a" ("id" integer);\n')
 		await expect(
-			proveAdoption({ exec: unreachable, print: () => undefined, readLive: noObjects, target }, copy, ["1_a.sql"]),
+			proveAdoption(
+				{ exec: unreachable, print: () => undefined, readLive: noObjects, readyDev: async () => undefined, target },
+				copy,
+				["1_a.sql"],
+			),
 		).rejects.toThrow(
-			"adopting 0.12's shared history needs devUrl, an empty Postgres database Atlas can reach, to prove app holds what it ran (1_a.sql); Atlas could not use it: atlas schema diff: Error: dial tcp: lookup dev: no such host",
+			"adopting 0.12's shared history needs devUrl, an empty Postgres database Atlas can reach, to prove app holds what it ran (1_a.sql); devUrl could not be used: atlas schema diff: Error: dial tcp: lookup dev: no such host",
 		)
 		rmSync(copy, { force: true, recursive: true })
 	})
@@ -212,7 +220,11 @@ describe("proveAdoption", () => {
 		writeFileSync(join(copy, "1_a.sql"), 'CREATE TABLE "a" ("id" integer);\n')
 		const exec = diffing('-- Create "a" table\nCREATE TABLE "a" ("id" integer);')
 		await expect(
-			proveAdoption({ exec, print: () => undefined, readLive: noObjects, target }, copy, ["1_a.sql"]),
+			proveAdoption(
+				{ exec, print: () => undefined, readLive: noObjects, readyDev: async () => undefined, target },
+				copy,
+				["1_a.sql"],
+			),
 		).rejects.toThrow(
 			"app does not hold what 0.12's shared history ran (1_a.sql), so comb adopts none of it; the difference:\n-- Create",
 		)

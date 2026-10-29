@@ -73,7 +73,7 @@ async function search(dir: string, term: string): Promise<string[]> {
 describe("atlas migrate diff with FTS5 tables (S-12)", () => {
 	it("diffs a plain change on a history that holds FTS, and the FTS still works after it", async () => {
 		const dir = history(["name"])
-		const result = generateIncrementalMigration({
+		const result = await generateIncrementalMigration({
 			dialect: "sqlite",
 			ftsSql: ftsFor("items", ["name"]),
 			migrationName: "add_flag",
@@ -87,7 +87,7 @@ describe("atlas migrate diff with FTS5 tables (S-12)", () => {
 
 	it("writes the FTS delta itself when the FTS definition changes: drop, create, rebuild", async () => {
 		const dir = history(["name"])
-		const result = generateIncrementalMigration({
+		const result = await generateIncrementalMigration({
 			dialect: "sqlite",
 			ftsSql: ftsFor("items", ["name", "body"]),
 			migrationName: "fts_body",
@@ -101,9 +101,9 @@ describe("atlas migrate diff with FTS5 tables (S-12)", () => {
 		expect(await search(dir, "light")).toEqual(["2"])
 	})
 
-	it("reports synced when neither the tables nor the FTS changed", () => {
+	it("reports synced when neither the tables nor the FTS changed", async () => {
 		const dir = history(["name"])
-		const result = generateIncrementalMigration({
+		const result = await generateIncrementalMigration({
 			dialect: "sqlite",
 			ftsSql: ftsFor("items", ["name"]),
 			migrationName: "noop",
@@ -116,7 +116,7 @@ describe("atlas migrate diff with FTS5 tables (S-12)", () => {
 	it("recreates the FTS triggers when Atlas rewrites their content table", async () => {
 		const dir = history(["name"])
 		/* dropping NOT NULL makes Atlas rebuild items, which drops the triggers on it */
-		const result = generateIncrementalMigration({
+		const result = await generateIncrementalMigration({
 			dialect: "sqlite",
 			ftsSql: ftsFor("items", ["name"]),
 			migrationName: "relax_name",

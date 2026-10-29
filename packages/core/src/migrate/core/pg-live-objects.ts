@@ -12,7 +12,7 @@ import { maskSecrets } from "./atlas-secrets.ts"
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts"
 import type { Facts } from "./pg-nodes.ts"
 
-/** The postgres.js client, as far as this read uses it */
+/** The postgres.js client, as far as comb uses it */
 type Sql = { end(): Promise<void>; unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>> }
 type Connect = (url: string, options: Record<string, unknown>) => Sql
 
@@ -33,21 +33,24 @@ SELECT 'trigger', t.tgname, NULL, c.relname
 FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = $1 AND NOT t.tgisinternal`
 
-/** postgres.js, or the refusal naming it: baseline cannot vouch for the database without it */
-async function loadPostgres(): Promise<Connect> {
+/** postgres.js, or the refusal naming it and `why` comb needs it here */
+async function loadPostgres(why: string): Promise<Connect> {
 	const specifier: string = PEER
 	try {
 		return ((await import(specifier)) as { default: Connect }).default
 	} catch (error) {
-		throw new Error(
-			`baseline compares the database's functions and triggers, which Atlas OSS does not, through the ${PEER} package; install ${PEER} (${RANGE}), an optional peer, and run it again`,
-			{ cause: error },
-		)
+		throw new Error(`${why}; install ${PEER} (${RANGE}), an optional peer, and run it again`, { cause: error })
 	}
 }
 
+/* why a baseline loads it: it cannot vouch for the database without it */
+const COMPARES = `baseline compares the database's functions and triggers, which Atlas OSS does not, through the ${PEER} package`
+
 /** What the target schema of `target`'s database holds of functions, procedures and triggers; it writes nothing */
-async function readLiveObjects(target: LiveTarget, load: () => Promise<Connect> = loadPostgres): Promise<LiveObjects> {
+async function readLiveObjects(
+	target: LiveTarget,
+	load: () => Promise<Connect> = () => loadPostgres(COMPARES),
+): Promise<LiveObjects> {
 	const connect = await load()
 	const sql = connect(target.url, { max: 1 })
 	try {
@@ -106,4 +109,4 @@ function liveDrift(facts: Facts, live: LiveObjects): { matched: number; only: st
 	return { matched: [...database].filter((label) => migrations.has(label)).length, only: only.sort() }
 }
 
-export { liveDrift, loadPostgres, readLiveObjects }
+export { type Connect, liveDrift, loadPostgres, readLiveObjects }

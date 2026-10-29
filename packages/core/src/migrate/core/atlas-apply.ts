@@ -25,6 +25,7 @@ import { extractSchema, parseRead } from "./parse.ts"
 import { run } from "./process.ts"
 import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
+import { readyDevSchema } from "./pg-dev-schema.ts"
 import { pgRead } from "./pg-split.ts"
 import { schemaOfRead } from "./schema.ts"
 
@@ -58,7 +59,7 @@ function ownOf(options: AtlasCommand, copy: string, raw: AtlasStatus): { foreign
 
 /** Record `ran` in the schema's own history, without running it, once the schema proves it holds what they leave: Atlas writes the rows in one transaction */
 async function adopt(
-	options: AtlasCommand & Pick<ObjectsCompare, "readLive">,
+	options: AtlasCommand & Pick<ObjectsCompare, "readLive" | "readyDev">,
 	copy: string,
 	ran: readonly string[],
 ): Promise<void> {
@@ -202,7 +203,9 @@ const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
  * the database already records migrations, and when its tables, functions or triggers are not the
  * ones the migrations leave. Returns the files marked.
  */
-async function baselineWithAtlas(options: AtlasCommand & Pick<ObjectsCompare, "readLive">): Promise<string[]> {
+async function baselineWithAtlas(
+	options: AtlasCommand & Pick<ObjectsCompare, "readLive" | "readyDev">,
+): Promise<string[]> {
 	return onSnapshotAsync(options, async (copy) => {
 		const status = atlasStatus(options, copy, { notClean: true })
 		if (status.applied.length > 0) {
@@ -219,6 +222,8 @@ async function baselineWithAtlas(options: AtlasCommand & Pick<ObjectsCompare, "r
 		const files = sqlFiles(copy)
 		const latest = files.at(-1)
 		if (latest === undefined) throw new Error("there are no migrations to record")
+		/* the replay runs on a dev database holding the schema (P12) */
+		await (options.readyDev ?? readyDevSchema)(options.target)
 		for (const notice of refuseDrift({ exec: options.exec ?? run, target: options.target }, copy))
 			options.print(`Warning: Atlas: ${notice}`)
 		await refuseObjectDrift(options, copy)

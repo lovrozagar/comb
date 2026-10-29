@@ -96,11 +96,12 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	/* a dry run diffs a copy, since a diff writes its file and rehashes atlas.sum */
 	const dir = dryRun ? copyOf(migrationsDir) : migrationsDir
 	try {
-		const { files, notices, synced } = generateIncrementalMigration({
+		const { files, notices, synced } = await generateIncrementalMigration({
 			dialect,
 			ftsSql: pg === undefined ? await configuredFtsSql(io.cwd, codegen, io) : undefined,
 			migrationName: name ?? `migration_${Date.now()}`,
 			migrationsDir: dir,
+			readyDev: io.readyPgDev,
 			run: io.run,
 			target: pg,
 			targetSchema: exportDrizzleSchema(exported),

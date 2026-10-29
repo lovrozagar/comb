@@ -222,12 +222,14 @@ describe("the guard around Atlas's rebuild of a referenced table, on libsql", ()
 		["a table named with the guard's prefix", "CREATE TABLE `_comb_keep_x` (`id` integer);\n", "_comb_keep_x"],
 	])(
 		"refuses to write the rebuild for %s, naming it",
-		(_, sql, name) => {
+		async (_, sql, name) => {
 			const h = history()
 			try {
-				h.diff(BASE, "init")
+				await h.diff(BASE, "init")
 				h.add("20990101000000_extra.sql", sql)
-				expect(() => h.diff(`${REBUILD_U}${sql.startsWith("CREATE TABLE") ? sql : ""}`, "rebuild")).toThrow(name)
+				await expect(h.diff(`${REBUILD_U}${sql.startsWith("CREATE TABLE") ? sql : ""}`, "rebuild")).rejects.toThrow(
+					name,
+				)
 			} finally {
 				h.dispose()
 			}
