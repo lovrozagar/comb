@@ -155,7 +155,7 @@ function valueFor(column: Column, at: Attempt & { variant: number }, listed: rea
  * table refuses, every default with each slot, each slot plain, each shape, then every nullable
  * column NULL, which a CHECK such as `a IS NULL OR b IS NULL` asks for, alone and with each shape,
  * as a table that also asks for a time past now does (N6 of plan 15's rerun), then each of the
- * `nullables` nullable columns set alone, the rest NULL, which "exactly one of them" asks for (27.17)
+ * `nullables` nullable columns set alone, the rest NULL, which "exactly one of them" asks for (27.17), alone and with each shape (27.20)
  */
 function attempts(row: number, nullables: number): Attempt[] {
 	const own = slotOf(row)
@@ -189,6 +189,16 @@ function attempts(row: number, nullables: number): Attempt[] {
 			only,
 			plain: false,
 			row,
+			slot: own,
+		})),
+		/* each of them with each shape too, as a table that also asks for a time past now does (27.20) */
+		...Array.from({ length: nullables * shapeCount() }, (_, n) => ({
+			defaults: true,
+			fallback: true,
+			only: Math.floor(n / shapeCount()),
+			plain: true,
+			row,
+			shape: n % shapeCount(),
 			slot: own,
 		})),
 	]

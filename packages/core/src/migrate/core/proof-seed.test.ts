@@ -131,18 +131,6 @@ describe("seedTables on common CHECK shapes (M15)", () => {
 		expect(rows("t")).toHaveLength(6)
 	})
 
-	/*
-	 * 27.17 of plan 15: one column of several set, the rest NULL, a shape a polymorphic owner takes;
-	 * three nullable columns number in two bits, so the seed takes four rows and two pairs
-	 */
-	it("seeds a table checked by exactly one of three set", async () => {
-		const { rows, unproven } = await seeded({
-			t: "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, b TEXT, c INTEGER, CHECK ((a IS NOT NULL) + (b IS NOT NULL) + (c IS NOT NULL) = 1))",
-		})
-		expect(unproven).toEqual(new Map())
-		expect(rows("t")).toHaveLength(8)
-	})
-
 	/* M47: keys start past 2^40, so a key held to 32 bits takes a fallback counting down from 2^31 - 1 */
 	it("seeds an INTEGER key a CHECK holds to 32 bits", async () => {
 		const { rows, unproven } = await seeded({
@@ -174,5 +162,28 @@ describe("seedTables on a table that fails after a row broke its key", () => {
 		)
 		const unproven = seedTables(db, new Map(Object.entries(schema)), { json: new Set(), variant: 0 })
 		expect(Object.fromEntries(unproven)).toEqual({ kid: "full" })
+	})
+})
+
+/* 27.17 and 27.20 of plan 15: a CHECK that asks for one column of several set, the rest NULL */
+describe("seedTables on a CHECK that asks for exactly one column set", () => {
+	/*
+	 * 27.17 of plan 15: one column of several set, the rest NULL, a shape a polymorphic owner takes;
+	 * three nullable columns number in two bits, so the seed takes four rows and two pairs
+	 */
+	it("seeds a table checked by exactly one of three set", async () => {
+		const { rows, unproven } = await seeded({
+			t: "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, b TEXT, c INTEGER, CHECK ((a IS NOT NULL) + (b IS NOT NULL) + (c IS NOT NULL) = 1))",
+		})
+		expect(unproven).toEqual(new Map())
+		expect(rows("t")).toHaveLength(8)
+	})
+
+	/* 27.20 of plan 15: exactly one set, beside an end after a start its default sets now, as one attempt must give both */
+	it("seeds a table checked by exactly one of three set and by an end after now", async () => {
+		const { unproven } = await seeded({
+			t: "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, b TEXT, c INTEGER, starts_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), ends_at INTEGER NOT NULL, CONSTRAINT one_set CHECK ((a IS NOT NULL) + (b IS NOT NULL) + (c IS NOT NULL) = 1), CHECK (ends_at > starts_at))",
+		})
+		expect(unproven).toEqual(new Map())
 	})
 })
