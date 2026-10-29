@@ -15,6 +15,10 @@ const event = sqliteTable("event", {
 	ms: integer("ms").notNull(),
 	name: text("name").primaryKey(),
 	nums: text("nums", { mode: "json" }),
+	/* a plain text column holding a JSON array, or a scalar JSON value (27.8 of plan 15) */
+	raw: text("raw"),
+	/* the same column, filtered as a date field */
+	rawDay: text("raw"),
 	seconds: integer("seconds", { mode: "timestamp" }).notNull(),
 	stamp: integer("stamp", { mode: "timestamp_ms" }).notNull(),
 	tags: text("tags", { mode: "json" }),
@@ -29,15 +33,15 @@ const db = drizzle({ client })
 
 beforeAll(async () => {
 	await client.execute(
-		"CREATE TABLE event (name TEXT PRIMARY KEY, text TEXT NOT NULL, ms INTEGER NOT NULL, stamp INTEGER NOT NULL, seconds INTEGER NOT NULL, tags TEXT, nums TEXT)",
+		"CREATE TABLE event (name TEXT PRIMARY KEY, text TEXT NOT NULL, ms INTEGER NOT NULL, stamp INTEGER NOT NULL, seconds INTEGER NOT NULL, tags TEXT, nums TEXT, raw TEXT)",
 	)
-	for (const [name, at, tags, nums] of [
-		["midnight", MIDNIGHT, '["red","blue"]', "[1,2]"],
-		["noon", NOON, '["green"]', "[3]"],
+	for (const [name, at, tags, nums, raw] of [
+		["midnight", MIDNIGHT, '["red","blue"]', "[1,2]", `[2.5,${MIDNIGHT}]`],
+		["noon", NOON, '["green"]', "[3]", "2.5"],
 	] as const)
 		await client.execute({
-			args: [name, new Date(at).toISOString(), at, at, at / 1000, tags, nums],
-			sql: "INSERT INTO event VALUES (?, ?, ?, ?, ?, ?, ?)",
+			args: [name, new Date(at).toISOString(), at, at, at / 1000, tags, nums, raw],
+			sql: "INSERT INTO event VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		})
 })
 afterAll(() => client.close())
@@ -46,6 +50,8 @@ const ISO: FilterField = { format: "iso", operators: ["eq", "gte", "lt", "in"], 
 const FIELDS: Record<string, FilterField> = {
 	ms: ISO,
 	nums: { operators: ["contains"], type: "number" },
+	raw: { operators: ["contains"], type: "number" },
+	rawDay: { operators: ["contains"], type: "date" },
 	seconds: ISO,
 	stamp: ISO,
 	tags: { operators: ["contains"], type: "string" },
@@ -86,5 +92,11 @@ describe("contains on a JSON array column (C13)", () => {
 		expect(await matched("tags.contains.purple")).toEqual([])
 		expect(await matched("nums.contains.3")).toEqual(["noon"])
 		expect(await matched("or(tags.contains.green,nums.contains.1)")).toEqual(["midnight", "noon"])
+	})
+
+	/* 27.8 of plan 15: a number or a date on a plain text column holding JSON, and a scalar JSON value is no set */
+	it("finds a number or a date in a plain text column's JSON array, and none in a scalar JSON value", async () => {
+		expect(await matched("raw.contains.2.5")).toEqual(["midnight"])
+		expect(await matched(`rawDay.contains.${MIDNIGHT}`)).toEqual(["midnight"])
 	})
 })

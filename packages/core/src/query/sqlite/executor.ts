@@ -139,7 +139,7 @@ const mismatched = (column: SQLiteColumn, { operator, value }: FilterCondition):
 /** One condition on one column; null when the operator or value is not one this column can take */
 function conditionToSQL(given: FilterCondition, column: SQLiteColumn): SQL | null {
 	const condition = asStored(given, column)
-	if (mismatched(column, condition)) return null
+	if (condition.operator !== "contains" && mismatched(column, condition)) return null
 	const { operator } = condition
 	if (inSeconds(column) && (operator === "in" || operator === "nin") && Array.isArray(condition.value))
 		return secondsList(column, operator, condition.value)
@@ -175,9 +175,9 @@ function operatorSQL(column: SQLiteColumn, operator: string, value: unknown): SQ
 			return patternToSQL(column, operator, value)
 		case "is":
 			return isToSQL(column, value)
-		/* a member of a JSON array the column holds (C13) */
+		/* a member of a JSON array the column holds, whatever it is declared as, so mismatched() does not apply (C13, 27.8); a scalar JSON value is no set, though json_each reads it as one */
 		case "contains":
-			return sql`EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${value})`
+			return sql`(json_type(${column}) = 'array' AND EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ${value}))`
 		default:
 			return null
 	}
