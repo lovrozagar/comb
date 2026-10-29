@@ -9,6 +9,7 @@ export { type KeysetPosition, keysetSQL, orderByKeys, orderSQL, type SortKey, ty
 export { patternToSQL } from "./pattern.ts";
 export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, type SpellfixDb, type SpellfixSearch, sanitizeFtsTerm, searchText, } from "./search.ts";
 export { likeSearch, type LikeSearchResolver } from "./search.ts";
+export { type Refold, refoldStatements } from "./refold.ts";
 export { SQL_SORT_DIR } from "./sql.ts";
 export type { RelationConfig } from "./types.ts";
 
@@ -245,6 +246,27 @@ declare function searchText(...parts: Array<string | null | undefined>): string;
  */
 declare function likeSearch(column: SQLiteColumn | SQL): LikeSearchResolver;
 export { buildFtsHighlight, buildFtsMatch, buildFtsWhere, buildFtsWhereWithSpellfix, likeSearch, type LikeSearchResolver, sanitizeFtsTerm, searchText, type SpellfixDb, type SpellfixSearch, };
+
+// query/sqlite/refold.d.ts
+/**
+ * A `_search` column refolded with searchText (C15 of the 0.14.1 review). searchText folds in JS,
+ * which no SQL can express, so a backfill reads each row and writes its fold back: `select` reads
+ * every row's rowid, its sources and the text it stores, and `updates` turns those rows into one
+ * UPDATE per row whose fold differs from what it stores, so a second run writes nothing and a D1
+ * database pays a row write only where one is due. Both are plain SQL, run on any driver, in
+ * batches of the caller's size. The table needs its rowid, which every table but a WITHOUT ROWID
+ * one has.
+ */
+import { type SQL } from "drizzle-orm";
+import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
+/** The statements of one refold: the read, and the writes its rows call for */
+type Refold = {
+    select: SQL;
+    updates(rows: ReadonlyArray<Record<string, unknown>>): SQL[];
+};
+/** The refold of `column` from `sources`, in that order, on `table` */
+declare function refoldStatements(table: SQLiteTable, column: SQLiteColumn, sources: readonly SQLiteColumn[]): Refold;
+export { type Refold, refoldStatements };
 
 // query/sqlite/sql.d.ts
 declare const SQL_SORT_DIR: {
