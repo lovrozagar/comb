@@ -108,9 +108,10 @@ function integerOf(annotations: FieldConstraints, range: Range, schemaType: Sche
 	return `z.number().int().min(${clamp(annotations.min, range.min, Math.max)}).max(${clamp(annotations.max, range.max, Math.min)})`
 }
 
-/* a stored float may be an infinity, which z.number() refuses, and JSON writes as null; NaN, which
-   z.toJSONSchema cannot represent, still fails it (F5 of the 0.14.1 review) */
-const READ_FLOAT = "z.union([z.number(), z.literal([Infinity, -Infinity])])"
+/* a stored float may be an infinity, which z.number() refuses, and JSON writes as null, so its branch
+   publishes { type: "null" }, the value a client is sent; NaN, which z.toJSONSchema cannot represent,
+   still fails it (F5 of the 0.14.1 review, 27.12 of plan 15) */
+const READ_FLOAT = 'z.union([z.number(), z.literal([Infinity, -Infinity]).meta({ enum: undefined, type: "null" })])'
 
 function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 	if (!isNumeric(field)) return field.dataType === "boolean" ? "z.boolean()" : undefined

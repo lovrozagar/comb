@@ -47,6 +47,16 @@ const dtosOf = (entity: Record<string, z.ZodObject> | undefined): Dtos => ({
 const published = (schema: z.ZodObject) =>
 	(z.toJSONSchema(schema, { io: "output" }) as { properties: Record<string, Record<string, unknown>> }).properties
 
+/** Whether `schema` accepts `value`, by the keywords a read DTO's float publishes: type, enum and anyOf */
+function accepts(schema: Record<string, unknown>, value: unknown): boolean {
+	const branches = schema["anyOf"] as Array<Record<string, unknown>> | undefined
+	if (branches !== undefined) return branches.some((branch) => accepts(branch, value))
+	const type = schema["type"]
+	const typed = type === undefined || (value === null ? type === "null" : typeof value === type)
+	const listed = schema["enum"] === undefined || (schema["enum"] as unknown[]).includes(value)
+	return typed && listed
+}
+
 for (const dialect of ["sqlite", "postgres"] as const) {
 	describe(`a read DTO's declared bounds on ${dialect} (F65)`, () => {
 		const table = dialect === "postgres" ? "pgTable" : "sqliteTable"
@@ -72,6 +82,24 @@ for (const dialect of ["sqlite", "postgres"] as const) {
 				for (const [rule, bound] of Object.entries(meta))
 					expect(properties[key]?.[rule.slice("x-comb-".length)]).not.toBe(bound)
 			}
+		})
+
+		/*
+		 * 27.12 of plan 15: a stored ±Infinity reads back, and JSON writes it as null, so the published
+		 * schema takes the null a client is sent; NaN, which no JSON Schema holds, still fails the read
+		 */
+		it("publishes a float's read as a number or the null JSON writes an infinity as", async () => {
+			const { read } = await load("float", COLUMNS)
+			const ratio = published(read)["ratio"] as Record<string, unknown>
+			expect(ratio["anyOf"]).toEqual([{ type: "number" }, { type: "null" }])
+			expect(accepts(ratio, null)).toBe(true)
+			expect(accepts(ratio, 0.5)).toBe(true)
+			expect(accepts(ratio, "0.5")).toBe(false)
+			const row = { ...STORED, ratio: Number.POSITIVE_INFINITY }
+			expect(read.safeParse(row).success).toBe(true)
+			expect(read.safeParse({ ...row, ratio: Number.NEGATIVE_INFINITY }).success).toBe(true)
+			expect(read.safeParse({ ...row, ratio: Number.NaN }).success).toBe(false)
+			expect(read.safeParse({ ...row, ratio: null }).success).toBe(false)
 		})
 
 		it("refuses each of them on a write", async () => {
