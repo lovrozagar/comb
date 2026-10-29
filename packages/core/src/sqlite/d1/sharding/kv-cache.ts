@@ -17,8 +17,8 @@ import type { LogFn, ShardKv, ShardMapping } from "./types.ts"
 /** The KV key of an org's mapping */
 const kvKey = (orgId: string): string => `shard:${orgId}`
 
-/** The KV key of the tombstone an invalidate of the org left */
-const tombstoneKey = (orgId: string): string => `${kvKey(orgId)}:inv`
+/** The KV key of the tombstone an invalidate of the org left, under a prefix no mapping key reaches */
+const tombstoneKey = (orgId: string): string => `shard-inv:${orgId}`
 
 /** Run one KV call; a failure is logged and answers `fallback` */
 async function guarded<T>(

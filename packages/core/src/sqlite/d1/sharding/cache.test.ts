@@ -43,7 +43,7 @@ describe("ShardCache", () => {
 		await cache.invalidate("org-1", kv)
 		expect([cache.lru.getWithMeta("org-1"), cache.misses.get("org-1")]).toEqual([undefined, undefined])
 		expect(kv.store.has("shard:org-1")).toBe(false)
-		expect(JSON.parse(kv.store.get("shard:org-1:inv") as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(JSON.parse(kv.store.get("shard-inv:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
 		expect(cache.generationOf("org-1")).toBe(1)
 	})
 
@@ -66,7 +66,7 @@ describe("ShardCache", () => {
 		const kv: ShardKv = {
 			...store,
 			put: async (key, value) => {
-				if (key.endsWith(":inv")) await gate
+				if (key.startsWith("shard-inv:")) await gate
 				await store.put(key, value)
 			},
 		}
@@ -76,7 +76,7 @@ describe("ShardCache", () => {
 		expect(store.store.has("shard:org-1")).toBe(false)
 		gated.release?.()
 		await invalidating
-		expect(JSON.parse(store.store.get("shard:org-1:inv") as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(JSON.parse(store.store.get("shard-inv:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
 	})
 })
 

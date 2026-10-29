@@ -76,7 +76,7 @@ describe("an invalidation in KV", () => {
 		}
 		await kv.put(kvKey("org-1"), JSON.stringify(mapping(1, 1000)))
 		await kvInvalidate(watched, "org-1", options)
-		expect(JSON.parse(kv.values.get(`${kvKey("org-1")}:inv`) as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(JSON.parse(kv.values.get("shard-inv:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
 		expect(puts).toEqual([{ ttl: 60 }])
 		expect(await kvRead(kv, "org-1", options.log)).toBeNull()
 	})
@@ -103,7 +103,7 @@ describe("an invalidation, as a 0.13 router reads KV", () => {
 		await kvInvalidate(kv, "org-1", options)
 		/* 0.13.1 parses the mapping key as a mapping: after an invalidate it must find nothing there */
 		expect(kv.values.has(kvKey("org-1"))).toBe(false)
-		expect(JSON.parse(kv.values.get(`${kvKey("org-1")}:inv`) as string)).toEqual({ invalidatedAt: expect.any(Number) })
+		expect(JSON.parse(kv.values.get("shard-inv:org-1") as string)).toEqual({ invalidatedAt: expect.any(Number) })
 		await putUnlessNewer(kv, mapping(1, 1000), { ...options, readAt: 0 })
 		expect(kv.values.has(kvKey("org-1"))).toBe(false)
 		await putUnlessNewer(kv, mapping(2, 2000), { ...options, readAt: Date.now() + 1 })
@@ -114,5 +114,17 @@ describe("an invalidation, as a 0.13 router reads KV", () => {
 		const kv = memoryKV()
 		await kv.put(kvKey("org-1"), JSON.stringify({ invalidatedAt: 5000 }))
 		expect(await kvRead(kv, "org-1", options.log)).toBeNull()
+	})
+})
+
+/* Q9 of the 0.14.1 review: an org's tombstone key lies where no org's mapping key can reach */
+describe("an org whose id ends in :inv", () => {
+	const options = { current: () => true, log: () => undefined, readAt: 0, ttlSeconds: 60 }
+
+	it("does not stop another org's fill through its own mapping", async () => {
+		const kv = memoryKV()
+		await kv.put(kvKey("org-1:inv"), JSON.stringify({ ...mapping(3, 9000), orgId: "org-1:inv" }))
+		await putUnlessNewer(kv, mapping(1, 1000), options)
+		expect(shardIn(kv)).toBe(1)
 	})
 })
