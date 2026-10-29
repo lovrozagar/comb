@@ -34,7 +34,7 @@ function tooLong(fields: string, length: number, kind: KeysetKind | "unread"): C
 		derived: "a derived list reads no row to page by reference, so sort it by a key of bounded length",
 		table: "even carried by reference, the other keys leave no room; sort by fewer long keys",
 		unread:
-			"its long key is an expression over more than its anchor's own columns, so no reference reads it back; sort by a key of bounded length, or an expression over the anchor table",
+			"its long key is a column not of the anchor table, or an expression over one, so no reference reads its value back; sort by a key of bounded length, or by a column of the anchor table",
 	}
 	const reason = reasons[kind]
 	return new CombError({

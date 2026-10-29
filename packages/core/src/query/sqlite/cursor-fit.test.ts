@@ -1,5 +1,5 @@
 import { getTableColumns, sql } from "drizzle-orm"
-import { blob, customType, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { alias, blob, customType, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 
 import { assertCursorFits, bindable, boundForKeys, DateKey, readsBack } from "./cursor-fit.ts"
@@ -107,6 +107,12 @@ describe("readsBack", () => {
 		/* a joined table's text column reads the anchor's own value back (27.14) */
 		expect(readsBack(other.label, doc)).toBe(false)
 		expect(readsBack(other.label, undefined)).toBe(true)
+		/* 27.19: an alias is the table it names; another alias of the same table, or no drizzle table, is not */
+		const mine = alias(doc, "mine")
+		expect(readsBack(mine.notes, mine)).toBe(true)
+		expect(readsBack(alias(doc, "theirs").notes, mine)).toBe(false)
+		expect(readsBack(doc.notes, mine)).toBe(false)
+		expect(readsBack(doc.notes, {})).toBe(false)
 		expect(readsBack(sql`lower(${doc.notes})`, undefined)).toBe(false)
 		expect(readsBack(sql.raw('lower("doc"."notes")'), doc)).toBe(false)
 		expect(readsBack(sql`${doc.notes} || ${other.label}`, doc)).toBe(false)

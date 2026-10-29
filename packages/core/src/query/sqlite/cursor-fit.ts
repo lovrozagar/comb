@@ -4,7 +4,7 @@
  * stale cursor, answered with a 400 before drizzle maps it (a string on a timestamp column would
  * otherwise throw a TypeError, a 500).
  */
-import { Column, is, SQL, type SQLWrapper, sql } from "drizzle-orm"
+import { Column, is, SQL, type SQLWrapper, sql, Table } from "drizzle-orm"
 import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../../error.ts"
@@ -61,6 +61,30 @@ function columnsOf(chunk: unknown): Column[] {
 /* drizzle keeps the table a column is of on it, untyped */
 const tableOf = (column: Column): unknown => (column as unknown as { table: unknown }).table
 
+/* the names drizzle tells one table from another by: an alias's own name over its table's, and its schema */
+const NAME = /* @__PURE__ */ Symbol.for("drizzle:Name")
+const ORIGINAL_NAME = /* @__PURE__ */ Symbol.for("drizzle:OriginalName")
+const SCHEMA = /* @__PURE__ */ Symbol.for("drizzle:Schema")
+
+/** A table's name, its original table's and its schema, as drizzle keys a table in a query */
+const tableKey = (table: Table): unknown[] => {
+	const named = table as unknown as Record<symbol, unknown>
+	return [named[NAME], named[ORIGINAL_NAME], named[SCHEMA]]
+}
+
+/**
+ * Whether `a` and `b` are one table as a query reads it: one object, or two of drizzle's for the same
+ * name, original table and schema. An alias's columns carry a table of their own, which is no alias
+ * object, so identity alone refused an anchor that is an alias (27.19 of plan 15); another alias of
+ * the same table has another name, and stays apart.
+ */
+function sameTable(a: unknown, b: unknown): boolean {
+	if (a === b) return true
+	if (!is(a, Table) || !is(b, Table)) return false
+	const [x, y] = [tableKey(a), tableKey(b)]
+	return x.every((part, i) => part === y[i])
+}
+
 /**
  * Whether a cursor value carried by reference on `column` reads back from `table`'s row, the list's
  * anchor: a text column of that table does, and so does an SQL expression over that table's own
@@ -73,10 +97,10 @@ const tableOf = (column: Column): unknown => (column as unknown as { table: unkn
  */
 function readsBack(column: SQLWrapper, table: object | undefined): boolean {
 	if (is(column, Column))
-		return column.dataType.startsWith("string") && (table === undefined || tableOf(column) === table)
+		return column.dataType.startsWith("string") && (table === undefined || sameTable(tableOf(column), table))
 	if (!is(column, SQL) || table === undefined) return false
 	const read = columnsOf(column)
-	return read.length > 0 && read.every((each) => tableOf(each) === table)
+	return read.length > 0 && read.every((each) => sameTable(tableOf(each), table))
 }
 
 /**

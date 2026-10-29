@@ -6,7 +6,7 @@
  */
 import { defineRelations, type SQLWrapper, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { alias, integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
@@ -282,7 +282,9 @@ describe("an anchored derived list sorted by an SQL expression, its key too long
 		try {
 			await expect(paged(harness, sql.raw('lower("doc"."title")'))).rejects.toThrow(
 				expect.objectContaining({
-					cause: expect.stringMatching(/^a row's label is too long to page this list by: .*no reference reads it back/),
+					cause: expect.stringMatching(
+						/^a row's label is too long to page this list by: .*no reference reads its value back/,
+					),
 					status: 500,
 				}),
 			)
@@ -332,12 +334,72 @@ describe("an anchored derived list sorted by a joined table's text column, its k
 			})()
 			await expect(paging).rejects.toThrow(
 				expect.objectContaining({
-					cause: expect.stringMatching(/^a row's label is too long to page this list by: .*no reference reads it back/),
+					cause: expect.stringMatching(
+						/^a row's label is too long to page this list by: .*no reference reads its value back/,
+					),
 					status: 500,
 				}),
 			)
 			/* the pages before the refusal hold every row once */
 			expect(new Set(seen).size).toBe(seen.length)
+		} finally {
+			harness.close()
+		}
+	})
+})
+
+/*
+ * 27.19 of plan 15: an anchor that is a drizzle alias pages a long key by reference, as its own
+ * columns are its own; another alias of the same table, a self-join, reads none back and is refused
+ */
+describe("an anchored derived list whose anchor is an alias, its key too long for a cursor", () => {
+	const mine = alias(doc, "mine")
+	const theirs = alias(doc, "theirs")
+
+	/** Every id a list over `mine` pages, sorted by `label`, its rows `theirs` joined on the id when it sorts by theirs */
+	async function aliased(harness: Harness, label: SQLWrapper): Promise<number[]> {
+		const seen: number[] = []
+		let cursor: string | undefined
+		for (let n = 0; n < 6; n++) {
+			const built = buildDerivedListQuery({
+				...SEALED,
+				anchor: { idColumn: mine.id, table: mine },
+				parsed: { cursor, limit: 2, parsedSort: [{ direction: "asc" as const, field: "label" }] },
+				sortColumns: { label },
+			})
+			const query = harness.db
+				.select({ id: mine.id, label: mine.title })
+				.from(mine)
+				.innerJoin(theirs, sql`${theirs.id} = ${mine.id}`)
+			const rows = await (built.where === undefined ? query : query.where(built.where))
+				.orderBy(...built.orderBy)
+				.limit(built.limit)
+			const [items, meta] = queryHelpers.paginate(rows, built)
+			seen.push(...items.map((row) => row.id))
+			if (meta.nextCursor === null) break
+			cursor = meta.nextCursor
+		}
+		return seen
+	}
+
+	it("pages its own alias's long key by reference, every row once", async () => {
+		const harness = await seeded()
+		try {
+			expect(await aliased(harness, mine.title)).toEqual([2, 5, 7, 3, 6, 1, 4])
+		} finally {
+			harness.close()
+		}
+	})
+
+	it("refuses another alias of the same table, naming the key and why", async () => {
+		const harness = await seeded()
+		try {
+			await expect(aliased(harness, theirs.title)).rejects.toThrow(
+				expect.objectContaining({
+					cause: expect.stringMatching(/^a row's label is too long to page this list by: .*not of the anchor table/),
+					status: 500,
+				}),
+			)
 		} finally {
 			harness.close()
 		}
