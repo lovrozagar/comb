@@ -32,6 +32,7 @@ export const OFF_UTC_UNIT = [
 	"src/query/merged.test.ts",
 	"src/query/sqlite/build-list-query.derived.test.ts",
 	"src/query/sqlite/build-list-query.test.ts",
+	"src/query/sqlite/condition.test.ts",
 	"src/query/sqlite/cursor-fit.test.ts",
 	"src/query/sqlite/cursor-where.test.ts",
 	"src/query/sqlite/executor.test.ts",
@@ -51,6 +52,7 @@ export const OFF_UTC_INTEGRATION = [
 	"tests/integration/postgres/keyset-infinity-date.test.ts",
 	"tests/integration/postgres/keyset-nonfinite.test.ts",
 	"tests/integration/postgres/keyset.test.ts",
+	"tests/integration/sqlite/filter-parity.test.ts",
 	"tests/integration/sqlite/list-query-filters.test.ts",
 	"tests/integration/sqlite/list-query-seconds.test.ts",
 ]
