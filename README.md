@@ -1040,6 +1040,19 @@ What changes for a project on 0.14.1. Before deploying it:
    + const [items, page] = queryHelpers.paginate(rows, built)
    ```
 
+   A list paged by hand, with no builder, takes its pagination from `queryHelpers.listOptions(parsed, options)` too. A parsed query the app writes itself, not one `schema.parse` returns, is passed with `sortOrderBy` beside `parsedSort`, and with `validated: true`, which says its sort and filter were checked; without it a sort is refused as a 500 `sort_not_wired`:
+
+   ```diff
+   - const [items, page] = queryHelpers.paginate(rows, { limit: 20, parsedSort: [{ direction: "desc", field: "created_at" }] }, sealed)
+   + const parsed = {
+   +   limit: 20,
+   +   parsedSort: [{ direction: "desc", field: "created_at" }],
+   +   sortOrderBy: { created_at: "desc" },
+   +   validated: true,
+   + } as const
+   + const [items, page] = queryHelpers.paginate(rows, queryHelpers.listOptions(parsed, sealed))
+   ```
+
    The call before 0.15 is refused as a 500 `page_not_wired` naming the built query, and so is a page of more rows than the query reads, one whose limit was not applied. A list ordered by a computed sort answers `nextCursor: null`, its next page by number still served. `applyListQuery` takes drizzle's select as it is, so `.$dynamic()` may go.
 
 3. **Check the filters your clients send.**
@@ -1052,7 +1065,7 @@ What changes for a project on 0.14.1. Before deploying it:
 8. **Give the CLI's flags no value.** `--yes=false`, `--yes=no` and `--json=0` meant `--yes` and `--json`; they are now refused, so a script that meant to refuse should leave the flag out.
 9. **Run `comb migrate check <db>` on every database.** More is rated: on Postgres, an added `serial`, identity or stored generated column (a rewrite), an inline `CHECK` or `REFERENCES` (a scan), an inline `PRIMARY KEY` nothing fills per row (unsafe), `SET GENERATED ALWAYS` and an identity added `ALWAYS` (cautious, as a deployed insert that writes the column then fails), `ALTER DOMAIN` as its column twin, and `VACUUM (FULL)`, a `REINDEX` that is not concurrent and `CLUSTER` (a lock), while a `serial NOT NULL` column is no longer unsafe; on SQLite, a rebuild that drops the table's triggers is unsafe; on D1, a dot-named file, files whose leading numbers order otherwise than their names, and a pending file ending inside a comment or without a final `;` are refused. Approve a file meant to do one with `-- comb:allow-unsafe: <reason>`.
 10. **Expect baseline to compare more.** A SQLite baseline compares triggers, views and FTS tables; a Postgres one compares functions by their arguments and triggers by how they fire, and refuses an extra overload, other arguments, another timing or a disabled trigger. Adopting 0.12's shared history now needs proof, replayed on `devUrl`, so `devUrl` must reach its dev database.
-11. **Check Postgres URLs that spell their server in the query.** `?port=`, `?dbname=`, `?host=` and `?user=` are read as libpq and Atlas read them where comb connects itself (baseline's live functions, the dev schema), so a URL that reached another server or failed there now reaches the one Atlas migrates; `sslmode`, `sslrootcert`, `sslcert` and `sslkey` set TLS as libpq does. An empty host is localhost over TCP, as Atlas's driver reads it; a socket is spelled `?host=/run/postgresql`. A password whose `%` escape is no UTF-8 is refused before Atlas runs.
+11. **Check Postgres URLs that spell their server in the query.** `?port=`, `?dbname=`, `?host=` and `?user=` are read as libpq and Atlas read them where comb connects itself (baseline's live functions, the dev schema), so a URL that reached another server or failed there now reaches the one Atlas migrates; `sslmode`, `sslrootcert`, `sslcert` and `sslkey` set TLS as libpq does. An empty host is localhost over TCP, as Atlas's driver reads it; a socket is spelled `?host=/run/postgresql`, and one spelled as a percent-encoded host (`@%2Frun%2Fpostgresql`), which Atlas refuses, is refused before it runs. A password whose `%` escape is no UTF-8 is refused before Atlas runs.
 
 ### Migrate
 
@@ -1060,7 +1073,7 @@ What changes for a project on 0.14.1. Before deploying it:
 - **A file Atlas ran halfway** is no longer blamed for an earlier file's change: an earlier file edited, deleted or added since is named; a changed half-run file is told to restore it and fix what made its statement fail, as Atlas resumes it there.
 - **A refused SQLite apply or baseline writes nothing**, comb's history table included, and **a retried apply runs a file once**: when a batch commits and its answer is lost, the retry finds the file recorded.
 - **D1: a wrangler run that stops short reports what it applied**, recording the hashes of the checked files it ran; `--json` lists them in `applied`.
-- **Postgres rating reads what Atlas sends**: a chunk's leading comments no longer hide a statement from the rating.
+- **Postgres rating reads what Atlas sends**: a chunk's leading comments, a nested block comment among them, no longer hide a statement from the rating or a table it makes from the schema comb follows.
 - **Secrets in Atlas's output are masked more exactly**: a socket target's password is masked, and a literal secret only where it stands as a token, so a password that is part of a table name leaves the name.
 - **Postgres: a target schema that does not exist** is explained, with the `CREATE SCHEMA` to run once; comb creates a non-public schema on the dev database through the optional `postgres` peer.
 - **Proof run**: a table renamed with a renamed column is named as renamed, and values a `DEFAULT` of now would exceed, and every nullable column left NULL, are seeded, so such tables are no longer left unproven.
@@ -1068,8 +1081,9 @@ What changes for a project on 0.14.1. Before deploying it:
 ### Query and errors
 
 - **Merged paging**: a cursor page that ended on a null key no longer repeats rows from other shards, and two shards answering one id is `sort_not_wired`.
+- **An anchored derived list sorted by an SQL expression** pages a long key by reference when the expression reads the anchor table's own columns alone; on any other expression a key too long for a cursor is a 500 on the page that meets it, never a cursor the next page refuses.
 - **D1: a prefix or suffix filter binds its text once**, so the largest accepted request binds at most 80 parameters, as documented.
-- **SQLite's "statement too long" is a query error**, not a 400; D1's pattern refusal is read from D1's own message, never a bound value.
+- **SQLite's "statement too long" is a query error**, not a 400; D1's pattern refusal is read from D1's own message, never a bound value; and D1's "Exceeded maximum DB size" is the 422 storage limit a full disk gets.
 - **A time zone offset past 15:59 is a 400 `invalid_value`**, by every write path, and the `timetz` and `timestamptz` write DTOs refuse it first.
 - **A read DTO takes a stored float's `Infinity` and `-Infinity`**, which JSON writes as `null`, and its published schema takes that `null` (`anyOf: [{ type: number }, { type: null }]`); on Postgres a stored `NaN` still fails it, as JSON Schema cannot represent one.
 - **Postgres: an expression unique index names no column**; `PgErrorRead.keyExpression` says the key held one.
@@ -1084,7 +1098,7 @@ What changes for a project on 0.14.1. Before deploying it:
 
 - `refoldStatements(table, column, sources)`, from `@lovrozagar/comb/query/sqlite`: the backfill of a `_search` column, writing only rows whose fold changed.
 - `combDatabaseErrorKeys` and `CombDatabaseErrorKey`, from the package root: the keys the database classifiers answer with.
-- `contains` runs on SQLite, as a member of the column's JSON array.
+- `contains` runs on SQLite, as a member of the JSON array a column holds, a plain `text()` column's included; a scalar JSON value is no array, and matches nothing.
 - The entity stamp's `partialUniqueIndexes` (meta-contract.md §6.8) and the query stamp's `maxPatternBytes`, optional facts within v1.
 - `page_not_wired`, a new error key.
 
