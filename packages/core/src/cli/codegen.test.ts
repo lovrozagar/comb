@@ -55,7 +55,8 @@ describe("comb codegen: config mode", () => {
 			output: { default: "./gen", rows: "./elsewhere/rows.gen.ts" },
 		})
 		expect(await runCli(["codegen"], makeIo(dir))).toBe(0)
-		expect(readdirSync(dir).filter((file) => file.includes(".gen."))).toEqual([])
+		/* only the run record sits beside the config: every generated file is under output.default */
+		expect(readdirSync(dir).filter((file) => file.includes(".gen."))).toEqual([".comb.codegen.gen.json"])
 		const gen = readdirSync(join(dir, "gen"))
 		for (const file of [
 			"db.core.constraints.gen.ts",
@@ -91,7 +92,7 @@ describe("comb codegen: config mode generator selection", () => {
 		expect(await runCli(["codegen", "core"], makeIo(dir))).toBe(0)
 		/* orm without a dialect and driver, and fts without a config, write nothing */
 		expect(readdirSync(dir).sort()).toEqual([
-			".comb.codegen.json",
+			".comb.codegen.gen.json",
 			"comb.config.ts",
 			"db.core.manifest.gen.json",
 			"db.core.tables.ts",
@@ -103,7 +104,7 @@ describe("comb codegen: config mode generator selection", () => {
 		config(one, {})
 		expect(await runCli(["codegen", "-g", "manifest"], makeIo(one))).toBe(0)
 		expect(readdirSync(one).sort()).toEqual([
-			".comb.codegen.json",
+			".comb.codegen.gen.json",
 			"comb.config.ts",
 			"db.core.manifest.gen.json",
 			"db.core.tables.ts",
@@ -274,7 +275,7 @@ describe("comb codegen: a database named twice (F26)", () => {
 		config(dir, {})
 		expect(await runCli(["codegen"], makeIo(dir))).toBe(0)
 		const entries = () =>
-			(JSON.parse(readFileSync(join(dir, ".comb.codegen.json"), "utf8")) as { databases: Record<string, string[]> })
+			(JSON.parse(readFileSync(join(dir, ".comb.codegen.gen.json"), "utf8")) as { databases: Record<string, string[]> })
 				.databases["core"]?.length
 		const before = entries()
 		const io = makeIo(dir)

@@ -31,7 +31,9 @@ const run = (dir: string, over: Partial<Run> = {}): Run => ({
 	...over,
 })
 const record = (dir: string) =>
-	JSON.parse(fs.readFileSync(path.join(dir, ".comb.codegen.json"), "utf8")) as { databases: Record<string, string[]> }
+	JSON.parse(fs.readFileSync(path.join(dir, ".comb.codegen.gen.json"), "utf8")) as {
+		databases: Record<string, string[]>
+	}
 
 describe("commitRuns", () => {
 	it("writes what it staged, records it by database, and removes what the last run wrote and this one did not", () => {
@@ -129,9 +131,9 @@ describe("commitRuns: the record's own form (F30, F32)", () => {
 	})
 
 	it("says which file is not JSON, and that deleting it is safe", () => {
-		const dir = dirWith({ ".comb.codegen.json": "<<<<<<< HEAD\n{}\n" })
+		const dir = dirWith({ ".comb.codegen.gen.json": "<<<<<<< HEAD\n{}\n" })
 		expect(() => commitRuns(new Map(), [run(dir)], { recordDir: dir })).toThrow(
-			/^\.comb\.codegen\.json is not JSON \(a merge conflict\?\): delete it, and the next run removes nothing stale; /,
+			/^\.comb\.codegen\.gen\.json is not JSON \(a merge conflict\?\): delete it, and the next run removes nothing stale; /,
 		)
 	})
 })
@@ -169,7 +171,7 @@ describe("commitRuns: a path another database's record lists (F20, F21)", () => 
 		fs.writeFileSync(manifest, json)
 		const both = { aux: ["src/shared/manifest.gen.json"], core: ["src/shared/manifest.gen.json"] }
 		fs.writeFileSync(
-			path.join(dir, ".comb.codegen.json"),
+			path.join(dir, ".comb.codegen.gen.json"),
 			JSON.stringify({ _generated: "comb checksum:x", databases: both }),
 		)
 		commitRuns(new Map(), [run(dir)], { recordDir: dir })

@@ -11,9 +11,10 @@ import { CliError } from "./output.ts"
 /*
  * What each database's last run wrote, in one record beside comb.config.ts (beside the tables file in
  * direct mode), keyed by database name, its paths relative to the record: a run after filePrefix or
- * output.default moved still finds the last run's files, wherever they were.
+ * output.default moved still finds the last run's files, wherever they were. Its name keeps the `.gen.`
+ * every formatter config already ignores, so no format pass rewrites what codegen writes (K22 of r17).
  */
-const RECORD = ".comb.codegen.json"
+const RECORD = ".comb.codegen.gen.json"
 
 type RunRecord = { databases: Record<string, string[]> }
 

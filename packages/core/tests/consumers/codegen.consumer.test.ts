@@ -67,7 +67,7 @@ function written(): Record<string, string> {
 	const files = readdirSync(app.dir, { recursive: true, withFileTypes: true })
 		.filter((entry) => entry.isFile() && !entry.parentPath.includes("node_modules"))
 		.map((entry) => join(entry.parentPath, entry.name))
-		.filter((file) => file.includes(".gen.") || file.endsWith(".comb.codegen.json"))
+		.filter((file) => file.includes(".gen."))
 	const out = Object.fromEntries(files.map((file) => [relative(app.dir, file), readFileSync(file, "utf8")]))
 	out["package.json"] = readFileSync(join(app.dir, "package.json"), "utf8")
 	for (const file of files) rmSync(file)
