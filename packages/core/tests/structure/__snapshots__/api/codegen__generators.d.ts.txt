@@ -161,6 +161,12 @@ type ManifestEntity = {
         name: string;
         columns: string[];
     }[];
+    /** each with its predicate, SQL over SQL names, as the stamp publishes them (§6.8; C7 of r17) */
+    partialUniqueIndexes: {
+        name: string;
+        columns: string[];
+        where: string;
+    }[];
     checkConstraints: {
         name: string;
         expression: string;

@@ -286,7 +286,7 @@ export declare function fieldConstraintsOf(constraints: Readonly<Record<string, 
  * generated text. See docs/meta-contract.md.
  */
 import type { CombEntityMetaInput } from "../meta.ts";
-import type { FieldMeta, TableMeta } from "./analyzer-types.ts";
+import type { FieldMeta, PartialUniqueIndexMeta, TableMeta } from "./analyzer-types.ts";
 /**
  * Whether a field is absent from the generated update body.
  *
@@ -298,6 +298,11 @@ import type { FieldMeta, TableMeta } from "./analyzer-types.ts";
  */
 declare function isExcludedFromUpdate(field: FieldMeta): boolean;
 declare function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"];
+/**
+ * The partial unique indexes a table publishes: none over a private column, nor whose predicate,
+ * SQL comb rendered, names one by its quoted SQL name (C7 of the 0.14.1 review, C5 of r17)
+ */
+declare function publishedPartialUniqueIndexes(table: TableMeta): PartialUniqueIndexMeta[];
 /**
  * Whether comb or the database fills `field`: an `autogenerate` column, a generated or identity
  * column (F8), or a key that c.id, c.serialId, AUTOINCREMENT or a default fills; a natural key the
@@ -312,7 +317,7 @@ declare function isGenerated(field: FieldMeta): boolean;
  * anyway. Omitting is the honest outcome; see docs §6.4.
  */
 declare function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>): CombEntityMetaInput | null;
-export { deriveEntityMeta, isExcludedFromUpdate, isGenerated, publishedUniqueIndexes };
+export { deriveEntityMeta, isExcludedFromUpdate, isGenerated, publishedPartialUniqueIndexes, publishedUniqueIndexes };
 
 // codegen/utils/validate.d.ts
 import type { AnalysisResult } from "../analyzer-types.ts";

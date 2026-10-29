@@ -174,6 +174,18 @@ describe("entity manifest — agreement with the schema stamp", () => {
 		}
 	})
 
+	/* C7 of r17: the manifest is a projection of the stamp, partial unique indexes included */
+	it("agrees with the schema stamp on partial unique indexes, a private one left out by both", () => {
+		const source = SCHEMA.replace(
+			`uniqueIndex("idx_post_title").on(t.title),`,
+			`uniqueIndex("idx_post_title").on(t.title),\n\tuniqueIndex("idx_post_title_live").on(t.title).where(sql\`\${t.deleted_at} IS NULL\`),\n\tuniqueIndex("idx_post_secret_live").on(t.secret).where(sql\`\${t.deleted_at} IS NULL\`),`,
+		)
+		const table = analyzed(source).tables.find((t) => t.sqlName === "post")!
+		const meta = deriveEntityMeta(table)!
+		expect(meta.partialUniqueIndexes?.map((index) => index.name)).toEqual(["idx_post_title_live"])
+		expect(entity("post", source).partialUniqueIndexes).toEqual(meta.partialUniqueIndexes)
+	})
+
 	it("leaves out a unique index over a private column, as the stamp does", () => {
 		const source = SCHEMA.replace(
 			`uniqueIndex("idx_post_title").on(t.title),`,

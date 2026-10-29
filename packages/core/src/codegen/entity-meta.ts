@@ -162,4 +162,4 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 	}
 }
 
-export { deriveEntityMeta, isExcludedFromUpdate, isGenerated, publishedUniqueIndexes }
+export { deriveEntityMeta, isExcludedFromUpdate, isGenerated, publishedPartialUniqueIndexes, publishedUniqueIndexes }

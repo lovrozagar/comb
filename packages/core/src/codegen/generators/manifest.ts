@@ -6,7 +6,12 @@
  * a change to one moves the other. See docs/meta-contract.md §8.2.
  */
 import path from "node:path"
-import { deriveEntityMeta, isExcludedFromUpdate, publishedUniqueIndexes } from "../entity-meta.ts"
+import {
+	deriveEntityMeta,
+	isExcludedFromUpdate,
+	publishedPartialUniqueIndexes,
+	publishedUniqueIndexes,
+} from "../entity-meta.ts"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -74,6 +79,8 @@ type ManifestEntity = {
 	columns: ManifestColumn[]
 	relations: ManifestRelation[]
 	uniqueIndexes: { name: string; columns: string[] }[]
+	/** each with its predicate, SQL over SQL names, as the stamp publishes them (§6.8; C7 of r17) */
+	partialUniqueIndexes: { name: string; columns: string[]; where: string }[]
 	checkConstraints: { name: string; expression: string }[]
 }
 
@@ -140,6 +147,11 @@ function toEntity(table: TableMeta): ManifestEntity {
 		relations,
 		softDelete: meta?.softDelete ?? null,
 		tenantColumn: meta?.tenantColumn ?? null,
+		partialUniqueIndexes: publishedPartialUniqueIndexes(table).map((u) => ({
+			columns: u.columns,
+			name: u.name,
+			where: u.where,
+		})),
 		uniqueIndexes: publishedUniqueIndexes(table).map((u) => ({ columns: u.columns, name: u.name })),
 		varName: table.varName,
 	}
