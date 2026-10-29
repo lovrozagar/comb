@@ -118,6 +118,7 @@ type KeysetKind = "derived" | "table";
  * derived list (`keyset: "derived"`), or when no reference makes it fit
  */
 declare function createCursor(row: Record<string, unknown>, sort: readonly SortField[], options: CursorOptions & {
+    byReference?: ReadonlySet<string> | undefined;
     idField?: string | undefined;
     keyset?: KeysetKind | undefined;
 }): string;
@@ -501,6 +502,8 @@ type ListPagination = {
 };
 /** What a builder knows of its list, beside the request it parsed */
 type PaginationFacts = {
+    /** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
+    byReference?: ReadonlySet<string> | undefined;
     cursorable: boolean;
     idField?: string | undefined;
     keyset?: KeysetKind | undefined;

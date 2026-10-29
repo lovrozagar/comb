@@ -29,11 +29,14 @@ function longestFitting(record: Record<string, unknown>, field: string, fits: (r
 }
 
 /** The overflow, as paginate reports it on the page that met it: a 500 naming the field and the cap */
-function tooLong(fields: string, length: number, kind: KeysetKind): CombError {
-	const reason =
-		kind === "derived"
-			? "a derived list reads no row to page by reference, so sort it by a key of bounded length"
-			: "even carried by reference, the other keys leave no room; sort by fewer long keys"
+function tooLong(fields: string, length: number, kind: KeysetKind | "unread"): CombError {
+	const reasons = {
+		derived: "a derived list reads no row to page by reference, so sort it by a key of bounded length",
+		table: "even carried by reference, the other keys leave no room; sort by fewer long keys",
+		unread:
+			"its long key is an expression over more than its anchor's own columns, so no reference reads it back; sort by a key of bounded length, or an expression over the anchor table",
+	}
+	const reason = reasons[kind]
 	return new CombError({
 		cause: `a row's ${fields} is too long to page this list by: its cursor would be ${length} characters, past ${MAX_CURSOR_LENGTH}; ${reason}`,
 		errorKey: combErrorKeys.SORT_NOT_WIRED,
@@ -49,7 +52,12 @@ function tooLong(fields: string, length: number, kind: KeysetKind): CombError {
 function createCursor(
 	row: Record<string, unknown>,
 	sort: readonly SortField[],
-	options: CursorOptions & { idField?: string | undefined; keyset?: KeysetKind | undefined },
+	options: CursorOptions & {
+		/* the sort fields whose keys read a reference back (readsBack); every one when not given */
+		byReference?: ReadonlySet<string> | undefined
+		idField?: string | undefined
+		keyset?: KeysetKind | undefined
+	},
 ): string {
 	/* a date-mode ±infinity is bounded from its row, which a derived list has none of (3.24) */
 	const unheld = sort.find(({ field }) => row[field] instanceof Date && Number.isNaN((row[field] as Date).getTime()))
@@ -68,8 +76,11 @@ function createCursor(
 	if (options.keyset === "derived") throw tooLong(fields, whole.length, "derived")
 	const long = sort
 		.map(({ field }) => field)
-		.filter((field) => typeof row[field] === "string")
+		.filter((field) => typeof row[field] === "string" && (options.byReference?.has(field) ?? true))
 		.sort((a, b) => (row[b] as string).length - (row[a] as string).length)
+	/* a long value no reference reads back is refused here, on the page that meets it, never minted to be refused (27.7) */
+	const unread = sort.some(({ field }) => typeof row[field] === "string" && options.byReference?.has(field) === false)
+	if (long.length === 0 && unread) throw tooLong(fields, whole.length, "unread")
 	let record = row
 	for (const field of long) {
 		const ref = longestFitting(record, field, fits)

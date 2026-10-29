@@ -4,7 +4,7 @@
  * prefix that fits, and the keyset reads the value from the row itself: exact while the row is
  * there, and, once it is deleted, resumed from the prefix, which may repeat rows and skips none.
  */
-import { defineRelations } from "drizzle-orm"
+import { defineRelations, type SQLWrapper, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/libsql"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
@@ -183,13 +183,17 @@ describe("a sort key too long for a cursor, its row renamed between pages (U2)",
 	}
 })
 
-/** One page of the doc list derived by title as `label`, anchored to doc or keyed by its id alone, `cursor` resuming it */
-async function derivedPage(harness: Harness, anchored: boolean, cursor?: string) {
+/** One page of the doc list derived by `label` (title unless given), anchored to doc or keyed by its id alone, `cursor` resuming it */
+async function derivedPage(
+	harness: Harness,
+	anchored: boolean,
+	{ cursor, label = doc.title }: { cursor?: string | undefined; label?: SQLWrapper } = {},
+) {
 	const built = buildDerivedListQuery({
 		...SEALED,
 		...(anchored ? { anchor: { idColumn: doc.id, table: doc } } : { idColumn: doc.id }),
 		parsed: { cursor, limit: 2, parsedSort: [{ direction: "asc" as const, field: "label" }] },
-		sortColumns: { label: doc.title },
+		sortColumns: { label },
 	})
 	const query = harness.db.select({ id: doc.id, label: doc.title }).from(doc)
 	const rows = await (built.where === undefined ? query : query.where(built.where))
@@ -206,7 +210,7 @@ describe("a derived list's key too long for a cursor (R8, C3)", () => {
 			const seen: number[] = []
 			let cursor: string | undefined
 			for (let n = 0; n < 6; n++) {
-				const [items, meta] = await derivedPage(harness, true, cursor)
+				const [items, meta] = await derivedPage(harness, true, { cursor })
 				seen.push(...items.map((row) => row.id))
 				if (meta.nextCursor === null) break
 				cursor = meta.nextCursor
@@ -221,7 +225,7 @@ describe("a derived list's key too long for a cursor (R8, C3)", () => {
 		const harness = await seeded()
 		try {
 			const [, first] = await derivedPage(harness, false)
-			await expect(derivedPage(harness, false, first.nextCursor as string)).rejects.toThrow(
+			await expect(derivedPage(harness, false, { cursor: first.nextCursor as string })).rejects.toThrow(
 				expect.objectContaining({
 					cause: expect.stringMatching(/^a row's label is too long to page this list by: .*derived list reads no row/),
 					status: 500,
@@ -236,10 +240,49 @@ describe("a derived list's key too long for a cursor (R8, C3)", () => {
 		const harness = await seeded()
 		try {
 			const [, first] = await derivedPage(harness, true)
-			const [, second] = await derivedPage(harness, true, first.nextCursor as string)
-			await expect(derivedPage(harness, false, second.nextCursor as string)).rejects.toThrow(
+			const [, second] = await derivedPage(harness, true, { cursor: first.nextCursor as string })
+			await expect(derivedPage(harness, false, { cursor: second.nextCursor as string })).rejects.toThrow(
 				expect.objectContaining({
 					cause: expect.stringContaining("give buildDerivedListQuery the table its rows are as anchor"),
+					status: 500,
+				}),
+			)
+		} finally {
+			harness.close()
+		}
+	})
+})
+
+/** Every id the list pages, `label` its sort, a page's refusal thrown */
+async function paged(harness: Harness, label: SQLWrapper): Promise<number[]> {
+	const seen: number[] = []
+	let cursor: string | undefined
+	for (let n = 0; n < 6; n++) {
+		const [items, meta] = await derivedPage(harness, true, { cursor, label })
+		seen.push(...items.map((row) => row.id))
+		if (meta.nextCursor === null) break
+		cursor = meta.nextCursor
+	}
+	return seen
+}
+
+/* 27.7 of plan 15: an anchored list sorted by an SQL expression, which the sortColumns type takes */
+describe("an anchored derived list sorted by an SQL expression, its key too long for a cursor", () => {
+	it("pages by reference when the expression reads the anchor table's own columns alone", async () => {
+		const harness = await seeded()
+		try {
+			expect(await paged(harness, sql`lower(${doc.title})`)).toEqual([2, 5, 7, 3, 6, 1, 4])
+		} finally {
+			harness.close()
+		}
+	})
+
+	it("refuses on the page that meets the long key when no reference reads it back, never minting a cursor it refuses", async () => {
+		const harness = await seeded()
+		try {
+			await expect(paged(harness, sql.raw('lower("doc"."title")'))).rejects.toThrow(
+				expect.objectContaining({
+					cause: expect.stringMatching(/^a row's label is too long to page this list by: .*no reference reads it back/),
 					status: 500,
 				}),
 			)

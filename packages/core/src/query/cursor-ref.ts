@@ -26,7 +26,7 @@
  * deleted ±Infinity anchor so resumes from the NULLs' place.
  */
 import { getTableName, is, type SQL, type SQLWrapper, sql, type Table } from "drizzle-orm"
-import { SQLiteColumn } from "drizzle-orm/sqlite-core"
+import { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
@@ -38,6 +38,9 @@ import { AnchorBound, countLiteral, type SortKey } from "./sqlite/keyset.ts"
 /* drizzle's own keys for a table's name before any alias, and its schema */
 const ORIGINAL_NAME = /* @__PURE__ */ Symbol.for("drizzle:OriginalName")
 const SCHEMA = /* @__PURE__ */ Symbol.for("drizzle:Schema")
+
+/** Whether a key is read on SQLite: a SQLite column is, and an SQL expression is when its anchor table is SQLite's (27.7) */
+const onSqlite = (column: SQLWrapper, table: object): boolean => is(column, SQLiteColumn) || is(table, SQLiteTable)
 
 /** `table` as a FROM item: its own name, with the alias a relational query gave it reapplied */
 function fromOf(table: object): SQL {
@@ -64,7 +67,7 @@ type Anchor = { id: unknown; nonFinite?: "exact" | undefined; table: object; tie
  */
 function textBound(key: SortKey, ref: CursorRef, at: Anchor): SQL {
 	const { column, direction } = key
-	const sqlite = is(column, SQLiteColumn)
+	const sqlite = onSqlite(column, at.table)
 	const cut = countLiteral(Array.from(ref.prefix).length)
 	const head = sqlite ? sql`substr(${column}, 1, ${cut})` : sql`left(${column}, ${cut})`
 	const size = sqlite ? sql`length(${column})` : sql`char_length(${column})`
@@ -158,7 +161,7 @@ function pgInfinity(column: SQLWrapper, sign: "-" | "+"): SQL {
  * repeating rows and skipping none, as a date-mode `timestamp` does (U17).
  */
 function unheldBound({ column, direction }: SortKey, at: Anchor): SQL {
-	const sqlite = is(column, SQLiteColumn)
+	const sqlite = onSqlite(column, at.table)
 	const infinite = sqlite ? sql`${column} IN (9e999, -9e999)` : sql`NOT isfinite(${column})`
 	const sign = direction === "asc" ? "-" : "+"
 	const end = sqlite ? (sign === "-" ? sql`-9e999` : sql`9e999`) : pgInfinity(column, sign)
@@ -207,7 +210,7 @@ function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anch
 	return values.map((value, i) => {
 		const key = keys[i] as SortKey
 		if (value instanceof CursorRef)
-			return new AnchorBound("row", textBound(key, value, at), !is(key.column, SQLiteColumn))
+			return new AnchorBound("row", textBound(key, value, at), !onSqlite(key.column, at.table))
 		if (value instanceof Date && Number.isNaN(value.getTime())) return new AnchorBound("row", unheldBound(key, at))
 		if (value instanceof Date && inSeconds(key.column)) return new AnchorBound("row", secondsBound(key, value, at))
 		if (value instanceof Date && misreadsInfinity(key.column) && misreadInfinity(value))

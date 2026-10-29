@@ -2,7 +2,7 @@ import { getTableColumns, sql } from "drizzle-orm"
 import { blob, customType, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 
-import { assertCursorFits, bindable, boundForKeys, DateKey } from "./cursor-fit.ts"
+import { assertCursorFits, bindable, boundForKeys, DateKey, readsBack } from "./cursor-fit.ts"
 
 const columns = getTableColumns(
 	sqliteTable("t", {
@@ -85,5 +85,28 @@ describe("assertCursorFits", () => {
 
 	it("checks every position, the tiebreak id last", () => {
 		expect(() => assertCursorFits([columns.name, columns.count], ["a", "x"])).toThrow()
+	})
+})
+
+/* 27.7 of plan 15: the one rule a reference is minted and read by */
+describe("readsBack", () => {
+	const doc = sqliteTable("doc", { id: integer("id"), notes: text("notes"), rank: integer("rank") })
+	const other = sqliteTable("other", { label: text("label") })
+
+	it("takes a text column, and an expression over the anchor table's own columns alone, through any nesting", () => {
+		expect(readsBack(doc.notes, undefined)).toBe(true)
+		expect(readsBack(sql`lower(${doc.notes})`, doc)).toBe(true)
+		expect(readsBack(sql`coalesce(${sql`lower(${doc.notes})`}, ${doc.id})`, doc)).toBe(true)
+		expect(readsBack(sql.join([doc.notes, doc.rank], sql`, `), doc)).toBe(true)
+		/* a list drizzle keeps as one chunk, as `IN (${[...]})` writes it */
+		expect(readsBack(sql`${doc.id} IN (${[doc.notes, doc.rank]})`, doc)).toBe(true)
+	})
+
+	it("refuses a column that holds no text, an expression with no anchor, none over a column, or one over another table", () => {
+		expect(readsBack(doc.rank, doc)).toBe(false)
+		expect(readsBack(sql`lower(${doc.notes})`, undefined)).toBe(false)
+		expect(readsBack(sql.raw('lower("doc"."notes")'), doc)).toBe(false)
+		expect(readsBack(sql`${doc.notes} || ${other.label}`, doc)).toBe(false)
+		expect(readsBack(new DateKey(sql`${doc.rank}`), doc)).toBe(false)
 	})
 })

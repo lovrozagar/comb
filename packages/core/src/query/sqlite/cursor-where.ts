@@ -27,7 +27,7 @@ function cursorWhere({ cursor: given, keys, options, sort, table, tiebreak }: Cu
 	const cursor = readCursor(given, sort, options)
 	if (table === undefined) assertNoReference(cursor.values)
 	const columns = keys.map(({ column }) => column)
-	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id])
+	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id], table)
 	const id = bindable(cursor.id) as CursorId
 	const bound = boundForKeys(columns, cursor.values)
 	/* a list with no table binds a seconds-mode timestamp to the millisecond; one with a table reads it from the row */

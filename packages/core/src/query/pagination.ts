@@ -46,6 +46,8 @@ type ListPagination = {
 
 /** What a builder knows of its list, beside the request it parsed */
 type PaginationFacts = {
+	/** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
+	byReference?: ReadonlySet<string> | undefined
 	cursorable: boolean
 	idField?: string | undefined
 	keyset?: KeysetKind | undefined
@@ -72,7 +74,7 @@ function paginationOf(options: CursorOptions, facts: PaginationFacts): ListPagin
 		idField,
 		keyset,
 		limit: query.limit,
-		mint: (row) => mintFrom(row, query.parsedSort, { ...options, idField, keyset }),
+		mint: (row) => mintFrom(row, query.parsedSort, { ...options, byReference: facts.byReference, idField, keyset }),
 		nonFinite: options.nonFinite,
 		page: query.page ?? undefined,
 		parsedFields: query.parsedFields ?? null,
@@ -132,7 +134,7 @@ function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: Pa
 function mintFrom(
 	row: object,
 	parsedSort: SortField[],
-	options: CursorOptions & { idField: string; keyset: KeysetKind },
+	options: CursorOptions & { byReference?: ReadonlySet<string> | undefined; idField: string; keyset: KeysetKind },
 ): string {
 	const missing = [...parsedSort.map(({ field }) => field), options.idField].filter((key) => !Object.hasOwn(row, key))
 	if (missing.length > 0) {

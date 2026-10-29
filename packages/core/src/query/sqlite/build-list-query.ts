@@ -7,6 +7,7 @@ import { CURSOR_TIEBREAK_COLUMN, type CursorOptions } from "../cursor.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
 import { paginationOf } from "../pagination.ts"
 import type { ComputedSortResolver, FilterAST, SortField } from "../types.ts"
+import { readsBack } from "./cursor-fit.ts"
 import { filterToSQL } from "./executor.ts"
 import { assertPageWithin, assertSchemaParsed } from "../trusted.ts"
 import { DateKey } from "./cursor-fit.ts"
@@ -81,6 +82,10 @@ function finish({ cursor: options, idField, keyset, parsed, sort, table, tiebrea
 		cursorable: keyset.keys !== null && tiebreak !== null,
 		idField,
 		keyset: table === undefined ? "derived" : "table",
+		/* the sort fields a reference reads back on, by the rule the cursor's read holds (27.7) */
+		byReference: new Set(
+			(keyset.keys ?? []).flatMap(({ column }, i) => (readsBack(column, table) ? [sort[i]?.field as string] : [])),
+		),
 		query: parsed,
 		window: parsed.limit + 1,
 	})
