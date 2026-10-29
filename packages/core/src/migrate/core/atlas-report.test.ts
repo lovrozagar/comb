@@ -102,21 +102,25 @@ describe("applyWithAtlas: a file run outside a transaction that failed (P10)", (
 		)
 	})
 
-	/* 27.5 of plan 15: on a resume Atlas lists only this run's statements, and counts the earlier ones as Skipped */
+	/*
+	 * 27.5 of plan 15: on a resume Atlas lists only this run's statements, and counts the earlier run's
+	 * as Skipped, a statement count: 2 after a file ran 2 of its statements and failed at its third
+	 * (Atlas v1.3.0, .tmp/grunt/r16/p14/skipped-probe.log)
+	 */
 	it("counts the statements an earlier run applied, which a resume skips", async () => {
 		const statements = NONE.split("\n").filter((line) => line.startsWith("CREATE"))
 		const resumed = {
-			Applied: [statements[1]],
-			Error: { Stmt: statements[1], Text: 'pq: relation "h1" already exists (42P07)' },
+			Applied: [statements[2]],
+			Error: { Stmt: statements[2], Text: 'pq: relation "h1" already exists (42P07)' },
 			Name: "2_b.sql",
-			Skipped: 1,
+			Skipped: 2,
 		}
 		const apply = fail(
 			"",
 			JSON.stringify({ applied: [resumed], error: "sql/migrate: executing statement", target: "2" }),
 		)
 		await expect(applyWithAtlas(options(fakeAtlas({ apply, status: PENDING })))).rejects.toThrow(
-			"It ran outside a transaction, so the statement it ran before that stays applied, as do the files before it",
+			"It ran outside a transaction, so the 2 statements it ran before that stay applied, as do the files before it",
 		)
 	})
 
