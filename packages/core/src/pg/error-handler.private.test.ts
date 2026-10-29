@@ -82,3 +82,50 @@ describe("classifyPgError: a unique index on an expression", () => {
 		expect(found?.column).toBeUndefined()
 	})
 })
+
+/** A node-postgres error under drizzle's wrapper, which records the statement */
+const underStatement = (fields: Record<string, string>, query: string) =>
+	Object.assign(new Error(`Failed query: ${query}`, { cause: nodePg(fields) }), { name: "DrizzleQueryError", query })
+
+/* Q9 of r17: Postgres reports a partitioned table's violation on the partition, which no map key names */
+describe("classifyPgError on a partition of a mapped table", () => {
+	const maps: ConstraintMap[] = [{ member: { private: ["api_token"] } }]
+
+	it("reads the statement's table, the parent, and keeps its private column private", () => {
+		const insert = 'insert into "member" ("api_token", "region") values ($1, $2)'
+		const duplicate = underStatement(
+			{ code: "23505", detail: "Key (api_token, region)=(t, eu) already exists.", table: "member_eu" },
+			insert,
+		)
+		expect(classifyPgError(duplicate, maps)).toMatchObject({ cause: "Duplicate value detected", table: "member" })
+		const missing = underStatement({ code: "23502", column: "api_token", table: "member_eu" }, insert)
+		expect(classifyPgError(missing, maps)).toMatchObject({ cause: "Required field missing", table: "member" })
+		expect(classifyPgError(missing, maps)?.column).toBeUndefined()
+	})
+
+	it("names no column of a table no map knows, with no statement to find its parent", () => {
+		const missing = nodePg({ code: "23502", column: "api_token", table: "member_eu" })
+		expect(classifyPgError(missing, maps)).toMatchObject({ cause: "Required field missing" })
+		expect(classifyPgError(missing, maps)?.column).toBeUndefined()
+		const duplicate = nodePg({ code: "23505", detail: "Key (api_token)=(t) already exists.", table: "member_eu" })
+		expect(classifyPgError(duplicate, maps)).toMatchObject({ cause: "Duplicate value detected" })
+	})
+})
+
+/* Q18 of r17: a composite foreign key's first column may sit beside a private one */
+describe("classifyPgError on a composite foreign key", () => {
+	it("names no column, and none of a private one in the cause", () => {
+		const maps: ConstraintMap[] = [{ child: { private: ["secret_ref"] } }]
+		const failed = classifyPgError(
+			nodePg({
+				code: "23503",
+				detail: 'Key (org_id, secret_ref)=(o, s) is not present in table "parent".',
+				table: "child",
+			}),
+			maps,
+		)
+		expect(failed).toMatchObject({ errorKey: "foreign_key_violation", table: "child" })
+		expect(failed?.column).toBeUndefined()
+		expect(String(failed?.cause)).not.toContain("secret_ref")
+	})
+})

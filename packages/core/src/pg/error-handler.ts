@@ -11,7 +11,6 @@ import {
 	lookup,
 	own,
 	shown,
-	shownColumn,
 	type TableMap,
 	toCombError,
 } from "../constraint-map.ts"
@@ -23,8 +22,26 @@ import { type PgErrorRead, readPgError } from "./read-error.ts"
 import { statementTable } from "../statement-head.ts"
 import { valueError } from "../value-error.ts"
 
-/** A violation, `table` the violated table's key in the maps: qualified for a pgSchema's (F51) */
-type Violation = { maps: ConstraintMap[]; read: PgErrorRead; source: unknown; table: string | undefined }
+/**
+ * A violation, `table` the violated table's key in the maps: qualified for a pgSchema's (F51);
+ * `known` false when no map knows the table, so none can say which of its columns are private
+ * (Q9 of r17)
+ */
+type Violation = {
+	known: boolean
+	maps: ConstraintMap[]
+	read: PgErrorRead
+	source: unknown
+	table: string | undefined
+}
+
+/** The columns an error may name: as the maps show them, and none of a table no map knows (fail closed) */
+const visible = (v: Violation, columns: readonly string[]): readonly string[] =>
+	v.known ? shown(v.maps, v.table, columns) : []
+
+/** `column`, as visible shows it */
+const visibleColumn = (v: Violation, column: string | undefined): string | undefined =>
+	column === undefined ? undefined : visible(v, [column])[0]
 
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
@@ -41,12 +58,12 @@ function unique(v: Violation): CombError {
 	   expression may spell any column, a private one too, so a key holding one names none (Q3), and is
 	   found in the map by the index's name alone */
 	const { keyExpression } = v.read
-	const visible = keyExpression ? [] : shown(v.maps, table, columns)
-	const column = visible.length === 1 ? visible[0] : undefined
+	const named = keyExpression ? [] : visible(v, columns)
+	const column = named.length === 1 ? named[0] : undefined
 	const byColumns = (t: TableMap) => (keyExpression ? undefined : own(t.unique, columns.join(",")))
 	const entry = lookup(v.maps, table, (t) => byColumns(t) ?? own(t.unique, constraint))
-	const named = visible.map((c) => (table === undefined ? c : `${table}.${c}`)).join(", ")
-	const cause = named === "" ? "Duplicate value detected" : `Duplicate value for ${named}`
+	const listed = named.map((c) => (table === undefined ? c : `${table}.${c}`)).join(", ")
+	const cause = listed === "" ? "Duplicate value detected" : `Duplicate value for ${listed}`
 	const fallback = { cause, errorKey: combErrorKeys.UNIQUE_CONSTRAINT_VIOLATION, status: "conflict" } as const
 	return toError(v, { column, entry, fallback, table })
 }
@@ -77,14 +94,16 @@ function foreignKey(v: Violation): CombError {
 		} as const
 		return toError(v, { entry: undefined, fallback, table: statementTable(v.read.query) })
 	}
-	const column = columns[0]
-	const entry = lookup(v.maps, table, (t) => own(t.foreignKey, column) ?? own(t.foreignKey, constraint))
+	/* a composite key is found in the map by its first column, as codegen writes it, and names no
+	   column: one would blame half the key, and may sit beside a private one (Q18 of r17) */
+	const entry = lookup(v.maps, table, (t) => own(t.foreignKey, columns[0]) ?? own(t.foreignKey, constraint))
 	const fallback = {
 		cause: "Referenced record does not exist or is still in use",
 		errorKey: combErrorKeys.FOREIGN_KEY_VIOLATION,
 		status: "conflict",
 	} as const
-	return toError(v, { column: shownColumn(v.maps, table, column), entry, fallback, table })
+	const column = columns.length === 1 ? visibleColumn(v, columns[0]) : undefined
+	return toError(v, { column, entry, fallback, table })
 }
 
 function check(v: Violation): CombError {
@@ -103,7 +122,7 @@ function check(v: Violation): CombError {
 
 function notNull(v: Violation): CombError {
 	const { table } = v
-	const column = shownColumn(v.maps, table, v.read.column)
+	const column = visibleColumn(v, v.read.column)
 	return new CombError({
 		cause: column === undefined ? "Required field missing" : `Required field missing: ${column}`,
 		column,
@@ -199,6 +218,50 @@ const RESOURCE: Record<string, Fallback> = {
 	"25P03": UNAVAILABLE,
 }
 
+/* the drivers' own codes for a connection refused, lost or timed out, which carry no SQLSTATE (Q14 of r17) */
+// lookup-table: the codes connectionLost reads
+const CONNECTION_CODES: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"CONNECT_TIMEOUT",
+	"CONNECTION_CLOSED",
+	"CONNECTION_DESTROYED",
+	"CONNECTION_ENDED",
+	"ECONNREFUSED",
+	"ECONNRESET",
+	"EPIPE",
+	"ETIMEDOUT",
+])
+
+/* node-postgres's client once its connection broke, which it throws with no code */
+const PG_BROKEN = "Client has encountered a connection error and is not queryable"
+
+/**
+ * Whether `error`, or one under it on `.cause`, is a driver's lost connection: postgres.js's and
+ * node's codes, Bun.SQL's ERR_POSTGRES_CONNECTION_*, node-postgres's broken client. The 08xxx
+ * SQLSTATEs stay in RESOURCE for a libpq-based driver, which sends them
+ */
+function connectionLost(error: unknown): boolean {
+	for (let link = error, depth = 0; link instanceof Error && depth < 8; link = link.cause, depth++) {
+		const { code } = link as { code?: unknown }
+		if (typeof code === "string" && (CONNECTION_CODES.has(code) || code.startsWith("ERR_POSTGRES_CONNECTION_")))
+			return true
+		if (code === undefined && link.message === PG_BROKEN) return true
+	}
+	return false
+}
+
+/**
+ * The violated table's key in the maps: the reported one, or, for a partition, which Postgres
+ * reports in its parent's place, the statement's own table (Q9 of r17). Undefined `known` when the
+ * maps know neither, and so cannot say which of its columns are private
+ */
+function violatedTable(maps: ConstraintMap[], read: PgErrorRead): { known: boolean; table: string | undefined } {
+	const knows = (table: string | undefined) => table !== undefined && maps.some((map) => Object.hasOwn(map, table))
+	const reported = mapTable(maps, read)
+	if (maps.length === 0 || reported === undefined || knows(reported)) return { known: true, table: reported }
+	const parent = mapTable(maps, { schema: read.schema, table: statementTable(read.query) })
+	return knows(parent) ? { known: true, table: parent } : { known: false, table: reported }
+}
+
 /**
  * The CombError a PostgreSQL error is: a constraint violation through the app's maps, a value the
  * column cannot hold as a 400 (value-error.ts), a resource or availability error as its generic
@@ -206,14 +269,16 @@ const RESOURCE: Record<string, Fallback> = {
  */
 function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined {
 	const read = readPgError(error)
-	if (read === null) return undefined
+	if (read === null) return connectionLost(error) ? new CombError({ ...UNAVAILABLE, source: error }) : undefined
+	const { known, table } = violatedTable(constraintMaps, read)
+	const violation: Violation = { known, maps: constraintMaps, read, source: error, table }
 	const handler = own(CONSTRAINTS, read.code)
-	const table = mapTable(constraintMaps, read)
-	if (handler !== undefined) return handler({ maps: constraintMaps, read, source: error, table })
-	const value = valueError(read, { column: shownColumn(constraintMaps, table, read.column), table: read.table }, error)
+	if (handler !== undefined) return handler(violation)
+	const value = valueError(read, { column: visibleColumn(violation, read.column), table: read.table }, error)
 	if (value !== undefined) return value
 	const resource = own(RESOURCE, read.code)
-	return resource === undefined ? undefined : new CombError({ ...resource, source: error })
+	if (resource !== undefined) return new CombError({ ...resource, source: error })
+	return connectionLost(error) ? new CombError({ ...UNAVAILABLE, source: error }) : undefined
 }
 
 /** Throw the CombError classifyPgError finds for `error`; anything else is left for the caller */

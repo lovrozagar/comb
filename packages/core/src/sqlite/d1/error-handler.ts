@@ -1,7 +1,7 @@
 import { CombError } from "../../error.ts"
 import { type ConstraintMap, combErrorKeys, type StatusKey } from "../../types.ts"
 import { constraintError, resourceOutcome } from "../constraint-handler.ts"
-import { readSqliteError } from "../read-error.ts"
+import { readSqliteError, type SqliteErrorRead } from "../read-error.ts"
 
 /* Retryable per developers.cloudflare.com/d1/observability/debug-d1/, plus D1's overload and
  * limit resets. Only a platform message (one with no SQLite result code) is read for these, so
@@ -61,9 +61,12 @@ function platformMessage(error: Error): string | null {
 	return platform?.message ?? null
 }
 
-/** Whether D1 refused a pattern over its LIKE cap: read from D1's message, never a wrapper's, which quotes bound values (Q4) */
-const tooComplex = (error: Error): boolean =>
-	platformMessage(error)?.includes("LIKE or GLOB pattern too complex") === true
+/**
+ * Whether D1 refused a pattern over its LIKE cap: the engine's code and its exact words, never a
+ * phrase found in a message, which a D1_TYPE_ERROR fills with the bound value (Q4, Q10 of r17)
+ */
+const tooComplex = (read: SqliteErrorRead | null): boolean =>
+	read?.code === "SQLITE_ERROR" && read.message === "LIKE or GLOB pattern too complex"
 
 function platformOutcome(message: string): Outcome {
 	/* D1_TYPE_ERROR, D1_EXEC_ERROR and D1_COLUMN_NOTFOUND quote the query or a bound value: always a query error */
@@ -98,8 +101,8 @@ function classifyD1Error(error: unknown, constraintMaps: ConstraintMap[]): CombE
 	if (!(error instanceof Error)) return undefined
 	const constraint = constraintError(error, constraintMaps)
 	if (constraint !== null) return constraint
-	if (tooComplex(error)) return new CombError({ ...PATTERN_TOO_LONG, source: error })
 	const read = readSqliteError(error)
+	if (tooComplex(read)) return new CombError({ ...PATTERN_TOO_LONG, source: error })
 	const platform = read === null ? platformMessage(error) : null
 	if (read === null && platform === null) return undefined
 	const outcome = read === null ? platformOutcome(platform as string) : engineOutcome(read.code)

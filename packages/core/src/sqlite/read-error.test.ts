@@ -107,11 +107,13 @@ describe("readSqliteError: text and cycles", () => {
 })
 
 describe("readSqliteError: a bare SQLITE_CONSTRAINT code", () => {
-	it("is refined from SQLite's wording, and kept when the wording names no kind", () => {
+	it("is refined from SQLite's wording, and kept when the wording is an app's", () => {
 		expect(readSqliteError(bun("SQLITE_CONSTRAINT", "UNIQUE constraint failed: a.b"))?.code).toBe(
 			"SQLITE_CONSTRAINT_UNIQUE",
 		)
-		expect(readSqliteError(bun("SQLITE_CONSTRAINT", "constraint failed"))?.code).toBe("SQLITE_CONSTRAINT")
+		/* Q12 of r17: SQLite's own bare words are a virtual table's key conflict; an app's RAISE wording stays bare */
+		expect(readSqliteError(bun("SQLITE_CONSTRAINT", "constraint failed"))?.code).toBe("SQLITE_CONSTRAINT_PRIMARYKEY")
+		expect(readSqliteError(bun("SQLITE_CONSTRAINT", "qty must be positive"))?.code).toBe("SQLITE_CONSTRAINT")
 	})
 
 	it("reads a STRICT type mismatch from its wording, as libsql names no extended code for it (Q10)", () => {

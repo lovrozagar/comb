@@ -16,6 +16,12 @@ export type SqliteErrorRead = {
 /* D1: `D1_ERROR: <message>: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)` */
 const D1_MESSAGE = /^(?:D1_ERROR: )?([\s\S]*): (SQLITE_[A-Z_]+)(?: \(extended: (SQLITE_[A-Z_]+)\))?$/
 
+/*
+ * D1's exec(): `Error in line N: <the statement>: <message>`, the statement values and all, with
+ * nothing that marks where it ends: no word of it is the engine's own (Q8 of r17)
+ */
+const D1_EXEC = /^(?:D1_EXEC_ERROR: )?Error in line \d+: /
+
 /* libsql: `SQLITE_CONSTRAINT: <message>` */
 const LIBSQL_PREFIX = /^SQLITE_[A-Z_]+: /
 
@@ -36,6 +42,8 @@ const STEMS: Array<[RegExp, string]> = [
 	[/^FOREIGN KEY constraint failed/i, "SQLITE_CONSTRAINT_FOREIGNKEY"],
 	/* a STRICT column given another type, which libsql reports as UNKNOWN_SQLITE_ERROR_3091 */
 	[/^cannot store \w+ value in \w+ column /i, "SQLITE_CONSTRAINT_DATATYPE"],
+	/* SQLite's own words for a virtual table's key conflict, an FTS5 duplicate rowid, which D1 sends with no extended code (Q12 of r17) */
+	[/^constraint failed$/i, "SQLITE_CONSTRAINT_PRIMARYKEY"],
 ]
 
 /** The extended code for `code`: a bare SQLITE_CONSTRAINT is refined from the wording, when it can be. */
@@ -53,7 +61,8 @@ function readOne(error: Error): { code: string; message: string } | null {
 	if (sqliteCode(code)) return refine(code, error.message.replace(LIBSQL_PREFIX, ""))
 	const d1 = D1_MESSAGE.exec(error.message)
 	if (d1 === null) return null
-	return refine(d1[3] ?? (d1[2] as string), d1[1] as string)
+	/* the code alone, past the statement exec() quotes: each handler then answers its generic cause */
+	return refine(d1[3] ?? (d1[2] as string), D1_EXEC.test(error.message) ? "" : (d1[1] as string))
 }
 
 function readLine(line: string): SqliteErrorRead | null {

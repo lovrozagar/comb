@@ -6,7 +6,7 @@ import { sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CombError } from "../../../src/error.ts"
-import { d1ErrorHandler } from "../../../src/sqlite/d1/error-handler.ts"
+import { classifyD1Error, d1ErrorHandler } from "../../../src/sqlite/d1/error-handler.ts"
 import type { ConstraintMap } from "../../../src/types.ts"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
 
@@ -168,5 +168,89 @@ describe("d1ErrorHandler on Miniflare: an UPDATE of a foreign key column the map
 				table,
 			}),
 		)
+	})
+})
+
+/** What classifyD1Error gives for what `run` raises, under `maps` */
+async function classified(run: () => Promise<unknown>, maps: ConstraintMap[] = MAPS) {
+	const failure = await run().then(
+		() => new Error("the statement did not fail"),
+		(error: unknown) => error,
+	)
+	return classifyD1Error(failure, maps)
+}
+
+/* r17's D1 classifier findings, on Miniflare */
+describe("d1ErrorHandler on Miniflare: r17's exec and pattern findings", () => {
+	let harness: D1Harness
+
+	beforeEach(async () => {
+		harness = await d1Memory()
+		for (const statement of DDL) await harness.CORE.prepare(statement).run()
+	})
+	afterEach(() => harness.dispose())
+
+	/* Q8: exec() writes "Error in line N: <the statement>: " before the engine's words, values and all */
+	it("keeps the statement exec() quotes out of the cause, the column and the table", async () => {
+		const maps: ConstraintMap[] = [{ member: { private: ["role"] } }]
+		await harness.CORE.exec(
+			"CREATE TRIGGER no_zero BEFORE INSERT ON member WHEN new.seats = 0 BEGIN SELECT RAISE(ABORT, 'seats must not be zero'); END",
+		)
+		const raised = await classified(
+			() => harness.CORE.exec("INSERT INTO member (id, seats) VALUES ('tok-secret', 0)"),
+			maps,
+		)
+		expect(raised).toMatchObject({ cause: "Constraint violated", errorKey: "constraint_violation", status: 400 })
+		const spelled = await classified(
+			() => harness.CORE.exec("INSERT INTO member (id, email) VALUES ('x constraint failed: member.role', 'reset@x')"),
+			maps,
+		)
+		expect(spelled).toMatchObject({ cause: "Duplicate value detected", errorKey: "unique_constraint_violation" })
+		for (const error of [raised, spelled]) {
+			expect(JSON.stringify({ ...error, cause: String(error?.cause) })).not.toMatch(/tok-secret|INSERT|role|line 1/)
+			expect(error?.column).toBeUndefined()
+		}
+	})
+
+	/* Q10: a bound value that spells D1's pattern refusal is no pattern refusal */
+	it("answers a pattern over D1's cap with the 400, and a bound value spelling its words with no 400", async () => {
+		const long = await classified(() =>
+			harness.CORE.prepare("SELECT 1 WHERE 'a' LIKE ?")
+				.bind(`%${"a".repeat(60)}%`)
+				.all(),
+		)
+		expect(long).toMatchObject({ errorKey: "invalid_value", status: 400 })
+		const spelled = await classified(async () =>
+			harness.CORE.prepare("SELECT ?")
+				.bind(["LIKE or GLOB pattern too complex"] as never)
+				.all(),
+		)
+		expect(spelled).toMatchObject({ errorKey: "database_io_error", status: 500 })
+	})
+})
+
+describe("d1ErrorHandler on Miniflare: r17's rowid findings", () => {
+	let harness: D1Harness
+
+	beforeEach(async () => {
+		harness = await d1Memory()
+	})
+	afterEach(() => harness.dispose())
+
+	/* Q11, Q12: a duplicate rowid, and an FTS5 table's duplicate rowid D1 reports as a bare "constraint failed" */
+	it("answers a duplicate rowid as a primary key violation, on a table and on an FTS5 table", async () => {
+		await harness.CORE.exec("CREATE TABLE note (body TEXT); INSERT INTO note (rowid, body) VALUES (1, 'a')")
+		expect(
+			await classified(() => harness.CORE.prepare("INSERT INTO note (rowid, body) VALUES (1, 'b')").run()),
+		).toMatchObject({
+			errorKey: "primary_key_violation",
+			status: 409,
+		})
+		await harness.CORE.exec(
+			"CREATE VIRTUAL TABLE note_fts USING fts5(body); INSERT INTO note_fts (rowid, body) VALUES (1, 'a')",
+		)
+		expect(
+			await classified(() => harness.CORE.prepare("INSERT INTO note_fts (rowid, body) VALUES (1, 'b')").run()),
+		).toMatchObject({ cause: "Duplicate primary key value", errorKey: "primary_key_violation", status: 409 })
 	})
 })

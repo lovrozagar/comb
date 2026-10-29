@@ -64,3 +64,21 @@ describe("constraintError: a private column (F67)", () => {
 		for (const { e, named } of CASES) expect(error(e, false)).toMatchObject(named)
 	})
 })
+
+/* Q19 of r17: with no SQL recorded, a column whose name holds a dot is split at the table a map knows */
+describe("a private column whose name holds a dot, no statement recorded", () => {
+	it("is found under its table, so it stays private", () => {
+		const maps: ConstraintMap[] = [{ member: { private: ["api.token"] } }]
+		const failed = constraintError(
+			engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: member.api.token"),
+			maps,
+		)
+		expect(failed).toMatchObject({ cause: "Duplicate value detected", table: "member" })
+		expect(failed?.column).toBeUndefined()
+	})
+
+	it("is split on its last dot when no map names a table it starts with", () => {
+		const failed = constraintError(engine("SQLITE_CONSTRAINT_UNIQUE", "UNIQUE constraint failed: member.api.token"), [])
+		expect(failed).toMatchObject({ column: "token", table: "member.api" })
+	})
+})

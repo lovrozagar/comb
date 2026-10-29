@@ -26,10 +26,19 @@ const failedIndex = (message: string): string | undefined => /constraint failed:
 
 /**
  * A `table.column` pair as SQLite writes it, unquoted: split after the statement's own table when the
- * pair starts with it, as a dot may sit in either name (U13); else on its last dot
+ * pair starts with it, as a dot may sit in either name (U13); else after a table a map knows, so a
+ * private column with a dot in its name is found under its table (Q19 of r17); else on its last dot
  */
-function splitPair(pair: string, table: string | undefined): { column: string; table: string } | undefined {
+function splitPair(
+	pair: string,
+	table: string | undefined,
+	maps: ConstraintMap[],
+): { column: string; table: string } | undefined {
 	if (table !== undefined && pair.startsWith(`${table}.`)) return { column: pair.slice(table.length + 1), table }
+	const mapped = [...pair.matchAll(/\./g)]
+		.map(({ index }) => pair.slice(0, index))
+		.find((name) => maps.some((map) => Object.hasOwn(map, name)))
+	if (mapped !== undefined) return { column: pair.slice(mapped.length + 1), table: mapped }
 	const at = /^(.+)\.([^.]+)$/.exec(pair)
 	return at === null ? undefined : { column: at[2] as string, table: at[1] as string }
 }
@@ -39,7 +48,10 @@ function splitPair(pair: string, table: string | undefined): { column: string; t
  * hold any character, a dot or ", " included: with `query`'s table known, each pair starts at
  * ", <table>." (U44) and splits at that table (splitPair); else at each ", ".
  */
-function failedColumns(message: string, query: string | undefined): { columns: string[]; table: string | undefined } {
+function failedColumns(
+	message: string,
+	{ maps, query }: { maps: ConstraintMap[]; query: string | undefined },
+): { columns: string[]; table: string | undefined } {
 	const list = /constraint failed: (.+)$/i.exec(message)?.[1] ?? ""
 	const known = statementTable(query)
 	const raw =
@@ -49,7 +61,7 @@ function failedColumns(message: string, query: string | undefined): { columns: s
 					.split(`, ${known}.`)
 					.map((column) => `${known}.${column}`)
 			: list.split(", ")
-	const pairs = raw.map((pair) => splitPair(pair.trim(), known)).filter((pair) => pair !== undefined)
+	const pairs = raw.map((pair) => splitPair(pair.trim(), known, maps)).filter((pair) => pair !== undefined)
 	return { columns: pairs.map((pair) => pair.column), table: pairs[0]?.table }
 }
 
@@ -73,7 +85,7 @@ function uniqueIndex(v: Violation, index: string): CombError {
 function unique(v: Violation): CombError {
 	const index = failedIndex(v.read.message)
 	if (index !== undefined) return uniqueIndex(v, index)
-	const { columns, table } = failedColumns(v.read.message, v.read.query)
+	const { columns, table } = failedColumns(v.read.message, { maps: v.maps, query: v.read.query })
 	const named = shown(v.maps, table, columns)
 	/* a composite unique is keyed by its columns together; one column alone would blame half the pair */
 	const column = named.length === 1 ? named[0] : undefined
@@ -87,7 +99,7 @@ function unique(v: Violation): CombError {
 }
 
 function primaryKey(v: Violation): CombError {
-	const { columns, table } = failedColumns(v.read.message, v.read.query)
+	const { columns, table } = failedColumns(v.read.message, { maps: v.maps, query: v.read.query })
 	/* a map written before 0.5.0 may list the key column under `unique` */
 	const entry = lookup(v.maps, table, (t) => t.primaryKey ?? own(t.unique, columns[0]))
 	const fallback = {
@@ -115,7 +127,7 @@ function check(v: Violation): CombError {
 }
 
 function notNull(v: Violation): CombError {
-	const { columns, table } = failedColumns(v.read.message, v.read.query)
+	const { columns, table } = failedColumns(v.read.message, { maps: v.maps, query: v.read.query })
 	const column = shownColumn(v.maps, table, columns[0])
 	return new CombError({
 		cause: column === undefined ? "Required field missing" : `Required field missing: ${column}`,
@@ -183,11 +195,12 @@ function foreignKey(v: Violation): CombError {
 /**
  * A rule a trigger enforces with RAISE(ABORT | FAIL | ROLLBACK, message): a 400 whose cause is the
  * message the app wrote for it. A bare SQLITE_CONSTRAINT whose wording names no other kind is one
- * too, as D1 may report it without its extended code.
+ * too, as D1 may report it without its extended code. With no message to show, as when D1's exec()
+ * quoted the statement before it, the cause is generic, as Postgres's is (Q8 of r17).
  */
 const raised = (v: Violation): CombError =>
 	new CombError({
-		cause: v.read.message,
+		cause: v.read.message === "" ? "Constraint violated" : v.read.message,
 		errorKey: combErrorKeys.CONSTRAINT_VIOLATION,
 		source: v.source,
 		status: "bad_request",
@@ -202,14 +215,16 @@ const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
 	SQLITE_CONSTRAINT_FOREIGNKEY: foreignKey,
 	SQLITE_CONSTRAINT_NOTNULL: notNull,
 	SQLITE_CONSTRAINT_PRIMARYKEY: primaryKey,
+	/* a duplicate rowid, a table's own key (Q11 of r17) */
+	SQLITE_CONSTRAINT_ROWID: primaryKey,
 	SQLITE_CONSTRAINT_TRIGGER: raised,
 	SQLITE_CONSTRAINT_UNIQUE: unique,
 }
 
 /** A STRICT mismatch's `cannot store TEXT value in INTEGER column s.n` → s, n */
-const mismatchAt = (message: string, query: string | undefined) => {
+const mismatchAt = (message: string, { maps, query }: { maps: ConstraintMap[]; query: string | undefined }) => {
 	const pair = /\bcolumn (.+)$/.exec(message)?.[1]
-	const at = pair === undefined ? undefined : splitPair(pair, statementTable(query))
+	const at = pair === undefined ? undefined : splitPair(pair, statementTable(query), maps)
 	return { column: at?.column, table: at?.table }
 }
 
@@ -222,7 +237,7 @@ function constraintError(error: unknown, maps: ConstraintMap[]): CombError | nul
 	if (read === null) return null
 	const handler = own(CONSTRAINTS, read.code)
 	if (handler !== undefined) return handler({ maps, read, source: error })
-	const at = mismatchAt(read.message, read.query)
+	const at = mismatchAt(read.message, { maps, query: read.query })
 	return valueError(read, { column: shownColumn(maps, at.table, at.column), table: at.table }, error) ?? null
 }
 
