@@ -147,16 +147,15 @@ export async function applyEach(
 	migrations: readonly Recorded[],
 	print: (line: string) => void,
 ): Promise<void> {
+	const names = migrations.map(({ filename }) => filename)
 	for (const [at, migration] of migrations.entries()) {
 		print(`Apply: ${migration.filename}`)
 		try {
 			await applyRecorded(conn, migration)
 		} catch (error) {
-			const [done, rest] = [migrations.slice(0, at), migrations.slice(at)].map((files) =>
-				files.map(({ filename }) => filename),
-			) as [string[], string[]]
+			const done = names.slice(0, at)
 			if (done.length > 0) print(`Applied before the failure: ${done.join(", ")}`)
-			throw new Refused(error instanceof Error ? error.message : String(error), rest, done)
+			throw new Refused(error instanceof Error ? error.message : String(error), names.slice(at), done)
 		}
 	}
 }
