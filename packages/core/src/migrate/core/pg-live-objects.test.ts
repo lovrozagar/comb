@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import { historyFacts } from "./pg-history.ts"
 import { liveDrift, loadPostgres, readLiveObjects } from "./pg-live-objects.ts"
@@ -7,9 +10,9 @@ const TARGET = { devUrl: "postgres://dev/x", lockTimeout: "5s", schema: "app", u
 
 /** A postgres.js stand-in answering `rows`, or failing with `error`; what it was asked */
 function fakeConnect(answer: { error?: Error; rows?: Array<Record<string, unknown>> }) {
-	const seen = { ended: false, params: [] as unknown[], url: "" }
-	const connect = (url: string) => {
-		seen.url = url
+	const seen = { ended: false, options: {} as Record<string, unknown>, params: [] as unknown[] }
+	const connect = (options: Record<string, unknown>) => {
+		seen.options = options
 		return {
 			end: async () => void (seen.ended = true),
 			unsafe: async (_query: string, params: unknown[]) => {
@@ -49,7 +52,11 @@ describe("readLiveObjects", () => {
 				],
 			]),
 		})
-		expect(seen).toEqual({ ended: true, params: ["app"], url: TARGET.url })
+		expect(seen).toEqual({
+			ended: true,
+			options: { database: "app", host: "db", max: 1, password: "s3cret", port: 5432, ssl: "prefer", username: "app" },
+			params: ["app"],
+		})
 	})
 
 	it("says why it could not read, with the password masked, and closes the connection still", async () => {
@@ -173,6 +180,74 @@ describe("liveDrift: an argument type spelled otherwise by the history", () => {
 		expect(liveDrift(typed, routine("text")).only).toEqual([
 			"function f(text): only in the database",
 			"function f(users.email%TYPE,int4): only in the migrations",
+		])
+	})
+})
+
+/** What postgres.js was called with, by a stand-in that answers nothing */
+function recording() {
+	const calls: unknown[][] = []
+	const connect = (...given: unknown[]) => (calls.push(given), { end: async () => undefined, unsafe: async () => [] })
+	return { calls, load: async () => connect }
+}
+
+/*
+ * P3, P4 and P14 of the 0.14.1 review: postgres.js reads none of libpq's query keys, and sends each
+ * one it does not know to the server as a setting, so comb hands it the server libpq reads
+ */
+describe("readLiveObjects: the server libpq reads from the URL", () => {
+	it("hands postgres.js the host, port, database and TLS libpq reads, and no libpq key as a setting", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-libpq-"))
+		for (const name of ["root.crt", "client.crt", "client.key"]) writeFileSync(join(dir, name), name)
+		const tls = `sslrootcert=${join(dir, "root.crt")}&sslcert=${join(dir, "client.crt")}&sslkey=${join(dir, "client.key")}`
+		const { calls, load } = recording()
+		const url = `postgres://app:s3%2Fcret@db.example.com/x?port=6000&dbname=app&sslmode=verify-full&${tls}&connect_timeout=5&application_name=comb`
+		await readLiveObjects({ ...TARGET, url }, load)
+		expect(calls).toEqual([
+			[
+				{
+					connect_timeout: 5,
+					connection: { application_name: "comb" },
+					database: "app",
+					host: "db.example.com",
+					max: 1,
+					password: "s3/cret",
+					port: 6000,
+					ssl: { ca: "root.crt", cert: "client.crt", key: "client.key", rejectUnauthorized: true },
+					username: "app",
+				},
+			],
+		])
+	})
+
+	it("reaches a Unix socket by its directory, without TLS, and reads verify-ca's server by its certificate alone", async () => {
+		const { calls, load } = recording()
+		await readLiveObjects({ ...TARGET, url: "postgres://app:s3cret@/app?host=/run/postgresql" }, load)
+		await readLiveObjects({ ...TARGET, url: "postgres://app@db:6432?sslmode=verify-ca" }, load)
+		await readLiveObjects({ ...TARGET, url: "postgres://app@db/app?sslmode=disable" }, load)
+		expect(calls).toEqual([
+			[
+				{
+					database: "app",
+					host: "/run/postgresql",
+					max: 1,
+					password: "s3cret",
+					port: 5432,
+					ssl: false,
+					username: "app",
+				},
+			],
+			[
+				{
+					database: "app",
+					host: "db",
+					max: 1,
+					port: 6432,
+					ssl: { checkServerIdentity: expect.any(Function), rejectUnauthorized: true },
+					username: "app",
+				},
+			],
+			[{ database: "app", host: "db", max: 1, port: 5432, ssl: false, username: "app" }],
 		])
 	})
 })

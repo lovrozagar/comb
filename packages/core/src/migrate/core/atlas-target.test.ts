@@ -79,6 +79,25 @@ describe("pgUrlProblems", () => {
 /** What pgUrlProblems refuses in a target with `devUrl` and `url` */
 const refusals = (devUrl: string, url: string) => pgUrlProblems(target({ devUrl, url })).errors
 
+/* P14 and P19 of the 0.14.1 review: libpq and Atlas take a socket target with a password, and send it no password over a network */
+describe("pgUrlProblems: a Unix socket target", () => {
+	it("takes a socket host with a user and password, and warns of no sslmode for it", () => {
+		for (const url of [
+			"postgres://app:pw@/app?host=/run/postgresql",
+			"postgres://app:pw@%2Frun%2Fpostgresql/app",
+			"postgres://app:pw@/app",
+		])
+			expect(pgUrlProblems(target({ url })), url).toEqual({ errors: [], warnings: [] })
+	})
+
+	it("scopes a socket target for Atlas, its host kept", () => {
+		const urls = atlasUrls(target({ url: "postgres://app:pw@/app?host=/run/postgresql" }))
+		expect(urls.url).toBe(
+			"postgres://app:pw@/app?host=/run/postgresql&search_path=public&options=-c%20lock_timeout%3D5s",
+		)
+	})
+})
+
 describe("pgUrlProblems: a dev database that is the target (M89)", () => {
 	const SAME = "url and devUrl are the same database; Atlas empties the dev database, so give it its own"
 
@@ -140,7 +159,7 @@ describe("pgUrlProblems: the schema's name (M87)", () => {
 describe("atlasUrls", () => {
 	it("scopes both URLs to the schema and bounds the target's lock wait", () => {
 		const urls = atlasUrls(target({ url: "postgres://localhost/app?sslmode=disable" }))
-		expect(urls.url).toBe("postgres://localhost/app?sslmode=disable&search_path=public&options=-c+lock_timeout%3D5s")
+		expect(urls.url).toBe("postgres://localhost/app?sslmode=disable&search_path=public&options=-c%20lock_timeout%3D5s")
 		expect(urls.devUrl).toBe("docker://postgres/17/dev?search_path=public")
 	})
 

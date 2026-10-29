@@ -4,9 +4,9 @@ import { readyDevSchema } from "./pg-dev-schema.ts"
 
 /** A postgres.js that records each query and its connection's end, `fails` failing the query */
 function fakeConnect(fails?: Error) {
-	const seen: { ended: boolean; queries: string[]; urls: string[] } = { ended: false, queries: [], urls: [] }
-	const connect = (url: string) => {
-		seen.urls.push(url)
+	const seen = { connections: [] as Array<Record<string, unknown>>, ended: false, queries: [] as string[] }
+	const connect = (options: Record<string, unknown>) => {
+		seen.connections.push(options)
 		return {
 			end: async () => void (seen.ended = true),
 			unsafe: async (query: string) => {
@@ -34,7 +34,18 @@ describe("readyDevSchema", () => {
 		expect(seen).toEqual({
 			ended: true,
 			queries: ['CREATE SCHEMA IF NOT EXISTS "app""x"'],
-			urls: ["postgres://dev:Dev-Secret-0451@localhost/dev"],
+			connections: [
+				{
+					database: "dev",
+					host: "localhost",
+					max: 1,
+					onnotice: expect.any(Function),
+					password: "Dev-Secret-0451",
+					port: 5432,
+					ssl: "prefer",
+					username: "dev",
+				},
+			],
 		})
 	})
 
@@ -42,7 +53,7 @@ describe("readyDevSchema", () => {
 		const { load, seen } = fakeConnect()
 		await readyDevSchema(target("public"), load)
 		await readyDevSchema(target("app", "docker://postgres/17/dev"), load)
-		expect(seen.urls).toEqual([])
+		expect(seen.connections).toEqual([])
 	})
 
 	it("refuses, naming devUrl and its password masked, when the schema cannot be created", async () => {
@@ -69,5 +80,31 @@ describe("readyDevSchema", () => {
 		} finally {
 			vi.doUnmock("postgres")
 		}
+	})
+})
+
+/* 18.3 of plan 15: the dev database is reached as libpq reads devUrl, as the target is (P3, P4) */
+describe("readyDevSchema: the dev database libpq reads from devUrl", () => {
+	it("hands postgres.js devUrl's port and database from its query, and no libpq key as a setting", async () => {
+		const calls: unknown[][] = []
+		const connect = (...given: unknown[]) => (calls.push(given), { end: async () => undefined, unsafe: async () => [] })
+		await readyDevSchema(
+			target("app", "postgres://dev:pw@localhost/x?port=6000&dbname=dev&sslmode=disable&sslrootcert=/nonexistent.pem"),
+			async () => connect,
+		)
+		expect(calls).toEqual([
+			[
+				{
+					database: "dev",
+					host: "localhost",
+					max: 1,
+					onnotice: expect.any(Function),
+					password: "pw",
+					port: 6000,
+					ssl: false,
+					username: "dev",
+				},
+			],
+		])
 	})
 })

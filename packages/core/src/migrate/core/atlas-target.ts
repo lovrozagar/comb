@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
 import { RESERVED_SCHEMA_WORDS } from "./pg-keywords.ts"
+import { type LibpqUrl, libpqUrl, queryParams, withParam } from "./pg-url.ts"
 
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
 type PgTarget = { devUrl: string; lockTimeout: string; schema: string; url: string }
@@ -43,32 +44,24 @@ const VERIFIED_SSL = /* @__PURE__ */ new Set(["require", "verify-ca", "verify-fu
 const PLAIN_SCHEMA = /^[a-z_][a-z0-9_$]*$/
 const ENCODE_HINT = "percent-encode special characters (#, /, ?, @) in the password"
 
-/** `raw` as a URL with one of `schemes`, or undefined */
-function parseUrl(raw: string, schemes: readonly string[]): URL | undefined {
-	try {
-		const url = new URL(raw)
-		return schemes.includes(url.protocol) && url.hash === "" ? url : undefined
-	} catch {
-		// reason: an unparseable URL is reported by its field name, never echoed
-		return undefined
-	}
-}
+/** Whether `raw` is Atlas's own docker:// dev database, such as docker://postgres/17/dev */
+const isDocker = (raw: string): boolean => /^docker:\/\/[^#\s]+$/.test(raw)
 
-/** Warnings for a target that may send its password unprotected, or that goes through a pooler */
-function hostWarnings(url: URL): string[] {
+/** Warnings for a target that may send its password unprotected, or that goes through a pooler; a socket crosses no network (P19) */
+function hostWarnings(url: LibpqUrl): string[] {
 	const warnings: string[] = []
-	const sslmode = url.searchParams.get("sslmode") ?? ""
-	if (!LOCAL_HOSTS.has(url.hostname) && !VERIFIED_SSL.has(sslmode)) {
+	const sslmode = url.params.get("sslmode") ?? ""
+	if (!url.socket && !LOCAL_HOSTS.has(url.host) && !VERIFIED_SSL.has(sslmode)) {
 		warnings.push(
-			`url reaches ${url.hostname} without sslmode=verify-full or require, so the password may cross the network unencrypted or to an unverified server`,
+			`url reaches ${url.host} without sslmode=verify-full or require, so the password may cross the network unencrypted or to an unverified server`,
 		)
 	}
-	if (url.hostname.includes("-pooler.")) {
+	if (url.host.includes("-pooler.")) {
 		warnings.push(
 			"url is a Neon pooled host; migrations need the direct one (drop -pooler), since a pooler drops the lock Atlas holds",
 		)
 	}
-	if (url.port === "6543") {
+	if (url.port === 6543) {
 		warnings.push(
 			"url uses port 6543, Supabase's transaction pooler; migrations need the direct or session connection on 5432",
 		)
@@ -77,25 +70,22 @@ function hostWarnings(url: URL): string[] {
 }
 
 /**
- * The database a Postgres URL reaches, read as libpq reads it, a query parameter over the URI's
- * part: its host without case, localhost for the loopback addresses and for a Unix socket (an empty
- * host or one that is a path), so a local socket and local TCP count as one server; its port,
- * 5432 unnamed; and its database, the user's name unnamed (M89)
+ * The database a Postgres URL reaches, as libpq reads it (pg-url.ts): its host without case,
+ * localhost for the loopback addresses and for a Unix socket, so a local socket and local TCP count
+ * as one server; its port; and its database (M89)
  */
-function databaseOf(url: URL): string {
-	const param = (key: string) => url.searchParams.get(key)
-	const named = (param("host") ?? url.hostname).toLowerCase()
-	const host = named === "" || named.startsWith("/") || LOCAL_HOSTS.has(named) ? "localhost" : named
-	const port = param("port") ?? (url.port === "" ? "5432" : url.port)
-	const database = param("dbname") ?? decodeURIComponent(url.pathname.slice(1))
-	return `${host}:${port}/${database === "" ? (param("user") ?? decodeURIComponent(url.username)) : database}`
+function databaseOf(url: LibpqUrl): string {
+	const named = url.host.toLowerCase()
+	const host = url.socket || LOCAL_HOSTS.has(named) ? "localhost" : named
+	return `${host}:${url.port}/${url.database}`
 }
 
-/** One URL field checked: the parsed URL, or the error that names the field (never its value) */
-function checkUrl(field: "devUrl" | "url", raw: string, schemes: readonly string[]): { error?: string; url?: URL } {
+/** One URL field checked: the URL as libpq reads it, a docker:// dev database, or the error that names the field (never its value) */
+function checkUrl(field: "devUrl" | "url", raw: string): { docker?: true; error?: string; url?: LibpqUrl } {
 	if (raw.trim() === "") return { error: `${field} is empty` }
-	const url = parseUrl(raw, schemes)
-	const accepted = schemes.includes("docker:") ? "a postgres:// or docker://" : "a postgres://"
+	if (field === "devUrl" && isDocker(raw)) return { docker: true }
+	const url = libpqUrl(raw)
+	const accepted = field === "devUrl" ? "a postgres:// or docker://" : "a postgres://"
 	return url === undefined ? { error: `${field} is not ${accepted} URL; ${ENCODE_HINT}` } : { url }
 }
 
@@ -122,18 +112,18 @@ function pgUrlProblems(
 	target: PgTarget,
 	needs: AtlasNeeds = { dev: true, url: true },
 ): { errors: string[]; warnings: string[] } {
-	const url = needs.url ? checkUrl("url", target.url, ["postgres:", "postgresql:"]) : {}
-	const dev = needs.dev ? checkUrl("devUrl", target.devUrl, ["postgres:", "postgresql:", "docker:"]) : {}
+	const url = needs.url ? checkUrl("url", target.url) : {}
+	const dev = needs.dev ? checkUrl("devUrl", target.devUrl) : {}
 	const errors = [url.error, dev.error].filter((error): error is string => error !== undefined)
 	/* the target guarded whenever it is configured, on a call that does not reach it too (M89) */
-	const configured = parseUrl(target.url, ["postgres:", "postgresql:"])
+	const configured = libpqUrl(target.url)
 	if (configured !== undefined && dev.url !== undefined && databaseOf(configured) === databaseOf(dev.url)) {
 		errors.push("url and devUrl are the same database; Atlas empties the dev database, so give it its own")
 	}
 	const named = schemaProblem(target.schema)
 	if (named !== undefined) errors.push(named)
-	const scope = url.url?.searchParams.get("search_path")
-	if (scope !== null && scope !== undefined) {
+	const scope = url.url?.params.get("search_path")
+	if (scope !== undefined) {
 		const fix = "comb migrates one: set schema to it, and drop search_path from the url"
 		if (scope.includes(",")) errors.push(`the url's search_path names more than one schema (${scope}); ${fix}`)
 		else if (scope !== target.schema)
@@ -144,33 +134,25 @@ function pgUrlProblems(
 	return { errors, warnings: url.url === undefined ? [] : hostWarnings(url.url) }
 }
 
-/** `raw` scoped to `schema` unless it names a search_path itself */
-function scoped(raw: string, schema: string): URL {
-	const url = new URL(raw)
-	if (!url.searchParams.has("search_path")) url.searchParams.set("search_path", schema)
-	return url
-}
+/** `raw` scoped to `schema` unless it names a search_path itself; edited as text, which a socket target with a password needs (P14) */
+const scoped = (raw: string, schema: string): string =>
+	queryParams(raw).has("search_path") ? raw : withParam(raw, "search_path", schema)
 
 /** `raw` with no search_path, so Atlas sees every schema of the database */
-function unscoped(raw: string): string {
-	const url = new URL(raw)
-	url.searchParams.delete("search_path")
-	return url.href
-}
+const unscoped = (raw: string): string => withParam(raw, "search_path")
 
 /** The target URL Atlas gets: scoped to the schema, its lock wait bounded unless the URL sets one */
 function atlasTargetUrl(target: PgTarget): string {
 	const url = scoped(target.url, target.schema)
-	const options = url.searchParams.get("options") ?? ""
-	const bounded = url.searchParams.has("lock_timeout") || options.includes("lock_timeout")
-	if (target.lockTimeout !== "0" && !bounded) {
-		url.searchParams.set("options", `${options === "" ? "" : `${options} `}-c lock_timeout=${target.lockTimeout}`)
-	}
-	return url.href
+	const params = queryParams(url)
+	const options = params.get("options") ?? ""
+	const bounded = params.has("lock_timeout") || options.includes("lock_timeout")
+	if (target.lockTimeout === "0" || bounded) return url
+	return withParam(url, "options", `${options === "" ? "" : `${options} `}-c lock_timeout=${target.lockTimeout}`)
 }
 
 /** The dev URL Atlas gets: scoped to the schema like the target, since a scoped target needs a scoped dev database */
-const atlasDevUrl = (target: PgTarget): string => scoped(target.devUrl, target.schema).href
+const atlasDevUrl = (target: PgTarget): string => scoped(target.devUrl, target.schema)
 
 /** The schema Atlas keeps public's history in, as it always has */
 const SHARED_REVISIONS = "atlas_schema_revisions"

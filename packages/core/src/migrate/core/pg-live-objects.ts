@@ -8,13 +8,14 @@
  * comb has no Postgres client of its own; this one read takes postgres.js, an optional peer, loaded
  * only here. Its specifier is a variable, so a project without it still compiles comb's source.
  */
+import { postgresOptionsOf } from "./pg-url.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts"
 import type { Facts } from "./pg-nodes.ts"
 
 /** The postgres.js client, as far as comb uses it */
 type Sql = { end(): Promise<void>; unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>> }
-type Connect = (url: string, options: Record<string, unknown>) => Sql
+type Connect = (options: Record<string, unknown>) => Sql
 
 /* the optional peer and the range comb is tested against */
 const PEER = "postgres"
@@ -63,7 +64,7 @@ async function readLiveObjects(
 	load: () => Promise<Connect> = () => loadPostgres(COMPARES),
 ): Promise<LiveObjects> {
 	const connect = await load()
-	const sql = connect(target.url, { max: 1 })
+	const sql = connect({ ...postgresOptionsOf(target.url, "url"), max: 1 })
 	try {
 		const rows = await sql.unsafe(CATALOG, [target.schema])
 		const live: LiveObjects = { routines: new Map(), triggers: new Map() }

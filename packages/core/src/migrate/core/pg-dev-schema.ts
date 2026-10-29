@@ -11,6 +11,7 @@ import { maskSecrets } from "./atlas-secrets.ts"
 import type { PgTarget } from "./atlas-target.ts"
 import { ReplayFailed } from "./baseline-compare.ts"
 import { type Connect, loadPostgres } from "./pg-live-objects.ts"
+import { postgresOptionsOf } from "./pg-url.ts"
 
 /** How a dev database gets the target schema: comb's own, readyDevSchema, unless a test fakes it */
 type ReadyDev = (target: PgTarget) => Promise<void>
@@ -25,7 +26,7 @@ async function readyDevSchema(
 ): Promise<void> {
 	if (target.schema === "public" || target.devUrl.startsWith("docker:")) return
 	const connect = await load()
-	const sql = connect(target.devUrl, { max: 1, onnotice: () => undefined })
+	const sql = connect({ ...postgresOptionsOf(target.devUrl, "devUrl"), max: 1, onnotice: () => undefined })
 	try {
 		await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(target.schema)}`, [])
 	} catch (error) {
