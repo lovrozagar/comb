@@ -90,8 +90,23 @@ function midpoint(field: FieldMeta, key: keyof typeof SHARED_NUMBER): ExampleRes
 	const whole = key !== "real"
 	const low = min === null || !whole ? min : Math.ceil(min)
 	const high = max === null || !whole ? max : Math.floor(max)
-	if (low !== null && high !== null) return inline(String(whole ? Math.floor((low + high) / 2) : (low + high) / 2))
+	if (low !== null && high !== null)
+		return inline(String(whole ? Math.floor((low + high) / 2) : shortestBetween(low, high)))
 	return inline(String(low ?? high))
+}
+
+/**
+ * The midpoint of `low` and `high` at the fewest significant digits that keep it strictly between
+ * them, so a float's example reads 0.15, never 0.15000000000000002 (C13 of r17); `low` when they meet
+ */
+function shortestBetween(low: number, high: number): number {
+	const mid = (low + high) / 2
+	if (low === high) return low
+	for (let digits = 1; digits < 17; digits++) {
+		const rounded = Number(mid.toPrecision(digits))
+		if (rounded > low && rounded < high) return rounded
+	}
+	return mid
 }
 
 /** `length` characters of the alphanumeric cycle, repeated as far as it takes */

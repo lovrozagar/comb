@@ -71,6 +71,18 @@ describe("generateExampleMeta", () => {
 	})
 })
 
+describe("generateExampleMeta: a real in narrow bounds", () => {
+	/* C13 of r17: a float's example is the shortest decimal inside its bounds, with no floating-point noise */
+	it("takes the shortest decimal inside a real's narrow bounds", () => {
+		expect(code('c.real("f", { min: 0.1, max: 0.2 })')).toBe(".meta({ examples: [0.15] })")
+		expect(code('c.real("f", { min: 1e-9, max: 2e-9 })')).toBe(".meta({ examples: [1.5e-9] })")
+		expect(code('c.real("f", { min: 0.11, max: 0.13 })')).toBe(".meta({ examples: [0.12] })")
+		expect(code('c.real("f", { min: 0.1, max: 0.1 })')).toBe(".meta({ examples: [0.1] })")
+		/* bounds one double apart hold no shorter decimal between them: the midpoint itself */
+		expect(code('c.real("f", { min: 1, max: 1.0000000000000002 })')).toBe(".meta({ examples: [1] })")
+	})
+})
+
 /* a c.timestamp has its own range since F11, so no shared schema brings its example */
 describe("generateExampleMeta: a c.timestamp's range (F11)", () => {
 	it("gives the shared timestamp example its bounds accept, else a value inside them", () => {
