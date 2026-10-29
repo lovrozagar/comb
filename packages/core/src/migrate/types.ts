@@ -20,6 +20,10 @@ export type QueryResult = {
 export type Connection = {
 	dialect: Dialect
 	execute(sql: string, params?: unknown[]): Promise<QueryResult>
+	/**
+	 * `statements` in order, as one transaction on SQLite, libsql and bun:sqlite. On D1 they go in order
+	 * through wrangler, in no transaction, so a caller sends only statements that are safe to run again.
+	 */
 	batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void>
 	close(): Promise<void>
 	/** the prefix of the tables the engine keeps for itself (D1: `_cf_`), which comb never counts or copies */

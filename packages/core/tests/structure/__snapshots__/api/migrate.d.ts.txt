@@ -1,6 +1,6 @@
 // migrate/index.d.ts
 export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
-export { checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./core/apply.ts";
+export { checkMigrationHash, recordMigrationHash } from "./core/apply.ts";
 export { D1_HASH_TABLE, D1_MIGRATIONS_TABLE, d1HistoryTables, DRIZZLE_HISTORY_TABLE } from "./core/d1-history-tables.ts";
 export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
 export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, parseMigration, splitSqlStatements, } from "./core/parse.ts";
@@ -232,6 +232,10 @@ export type QueryResult = {
 export type Connection = {
     dialect: Dialect;
     execute(sql: string, params?: unknown[]): Promise<QueryResult>;
+    /**
+     * `statements` in order, as one transaction on SQLite, libsql and bun:sqlite. On D1 they go in order
+     * through wrangler, in no transaction, so a caller sends only statements that are safe to run again.
+     */
     batch(statements: Array<{
         sql: string;
         params?: unknown[];
