@@ -91,6 +91,10 @@ describe("pgUrlProblems: where a URL's escape or socket goes wrong", () => {
 		expect(pgUrlProblems(target({ url: "postgres://app:Zq%zz@db/app?sslmode=require" })).errors).toEqual([
 			"url is not a postgres:// URL; percent-encode special characters (#, /, ?, @) in the password",
 		])
+		/* 27.16 of plan 15: the user name is userinfo's other part */
+		expect(pgUrlProblems(target({ url: "postgres://a%zzpp:pw@db/app?sslmode=require" })).errors).toEqual([
+			"url is not a postgres:// URL; percent-encode a % in the user name as %25",
+		])
 	})
 
 	it("refuses a socket spelled as a percent-encoded host, which Atlas refuses, pointing to ?host=", () => {

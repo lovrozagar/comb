@@ -193,14 +193,17 @@ function undecodable(text: string): boolean {
 /**
  * Why a Postgres URL comb cannot read is refused, by where it goes wrong, never naming its value
  * (N2, N3 of plan 15's rerun): a bad escape in the query or in the host and database name; a socket
- * spelled as a percent-encoded host, which libpq reads and Atlas refuses; else the password's
+ * spelled as a percent-encoded host, which libpq reads and Atlas refuses; a bad escape in the user
+ * name (27.16); else the password's
  */
-function urlProblem(raw: string): "address" | "encoded socket" | "password" | "query" {
+function urlProblem(raw: string): "address" | "encoded socket" | "password" | "query" | "user" {
 	const [, authority = "", path = "", query = ""] = URI.exec(raw) ?? []
 	const host = authority.slice(authority.lastIndexOf("@") + 1)
 	if (/^%2f/i.test(host)) return "encoded socket"
 	if (undecodable(query)) return "query"
-	return undecodable(host) || undecodable(path) ? "address" : "password"
+	if (undecodable(host) || undecodable(path)) return "address"
+	const userinfo = authority.includes("@") ? authority.slice(0, authority.lastIndexOf("@")) : ""
+	return undecodable(userinfo.split(":")[0] as string) ? "user" : "password"
 }
 
 export { type LibpqUrl, libpqUrl, postgresOptionsOf, queryParams, urlProblem, withParam }

@@ -47,6 +47,7 @@ const HINTS = {
 	address: "percent-encode a % in the host or database name as %25",
 	password: "percent-encode special characters (#, /, ?, @) in the password",
 	query: "percent-encode a % in the query's values as %25",
+	user: "percent-encode a % in the user name as %25",
 }
 
 /** Whether `raw` is Atlas's own docker:// dev database, such as docker://postgres/17/dev */
