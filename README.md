@@ -346,7 +346,7 @@ throw new CombError({
 
 `status` is a `StatusKey`, not a number — `bad_request`, `conflict`, `forbidden`, `unprocessable_entity`, `internal_server_error`, `service_unavailable`. The numeric `.status` is derived from it, so an HTTP layer can read `.status` and a log layer can read `.statusKey`.
 
-Built-in keys (`combErrorKeys`): `CHECK_CONSTRAINT_VIOLATION`, `CONSTRAINT_VIOLATION`, `CURSOR_NOT_WIRED`, `CURSOR_PAGINATION_UNSUPPORTED`, `DATABASE_IO_ERROR`, `DATABASE_READONLY`, `DATABASE_UNAVAILABLE`, `EXCLUSION_CONSTRAINT_VIOLATION`, `FILTER_NOT_WIRED`, `FOREIGN_KEY_VIOLATION`, `INVALID_CURSOR`, `INVALID_PAGE`, `INVALID_SELECT`, `INVALID_STATE_TRANSITION`, `INVALID_VALUE`, `PAGE_NOT_WIRED`, `PAGE_TOO_DEEP`, `PRIMARY_KEY_VIOLATION`, `REQUIRED_FIELD_MISSING`, `SEARCH_NOT_WIRED`, `SHARDS_FULL`, `SORT_NOT_WIRED`, `STORAGE_LIMIT_REACHED`, `UNIQUE_CONSTRAINT_VIOLATION`, `VALUE_TOO_LARGE`.
+Built-in keys (`combErrorKeys`): `CHECK_CONSTRAINT_VIOLATION`, `CONSTRAINT_VIOLATION`, `CURSOR_NOT_WIRED`, `CURSOR_PAGINATION_UNSUPPORTED`, `DATABASE_IO_ERROR`, `DATABASE_READONLY`, `DATABASE_UNAVAILABLE`, `EXCLUSION_CONSTRAINT_VIOLATION`, `FILTER_NOT_WIRED`, `FOREIGN_KEY_VIOLATION`, `INVALID_CURSOR`, `INVALID_PAGE`, `INVALID_SELECT`, `INVALID_STATE_TRANSITION`, `INVALID_VALUE`, `PAGE_NOT_WIRED`, `PAGE_TOO_DEEP`, `PRIMARY_KEY_VIOLATION`, `REQUIRED_FIELD_MISSING`, `SEARCH_NOT_WIRED`, `SHARDS_FULL`, `SORT_NOT_WIRED`, `STORAGE_LIMIT_REACHED`, `UNIQUE_CONSTRAINT_VIOLATION`, `VALUE_TOO_LARGE`. `combDatabaseErrorKeys` lists the subset the database classifiers (`classifyD1Error`, `classifySqliteError`, `classifyPgError`) answer with, for a map of database errors to iterate.
 
 `SHARDS_FULL` (503) means no shard has room for a new organization: provision another D1 database.
 
@@ -1394,7 +1394,7 @@ Fixes that change what a caller sees:
 - **Codegen.** Config mode names a database as the config does (`core`, not `db` for `src/db/core.tables.ts`), which renames its generated maps and diagrams. Generated subpaths are never written into a `package.json` above the project root. Temporary files of atomic writes are named with `randomUUID`.
 - **Meta.** The manifest no longer lists unique indexes over private columns, matching the stamp.
 
-New: `createUlidFactory()` for ULIDs that strictly increase, even through a clock that steps back. `KeysetPosition` is exported from `@lovrozagar/comb/query/sqlite`. The package's declared types are checked under `isolatedDeclarations` and every strict flag a consumer may set.
+New: `createUlidFactory()` for ULIDs that strictly increase, even through a clock that steps back. `KeysetPosition` is exported from `@lovrozagar/comb/query/sqlite`. The package's declared types are checked under `isolatedDeclarations` and every strict flag a consumer may set. That covers comb's own shipped types: the generated files (DTOs, relations, enum checks) and your drizzle tables module are your app's code, which `isolatedDeclarations` would flag for their inferred types, so keep them out of a project that sets it.
 
 ## Upgrading to 0.5.0
 

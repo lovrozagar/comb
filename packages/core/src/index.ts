@@ -24,7 +24,9 @@ export {
 export { createUlidFactory, generateId, generateUlid, type UlidFactoryOptions } from "./id.ts"
 export { LruCache, type LruMeta } from "./lru.ts"
 export {
+	type CombDatabaseErrorKey,
 	type CombErrorKey,
+	combDatabaseErrorKeys,
 	type ConstraintMap,
 	type ConstraintMapEntry,
 	combErrorKeys,

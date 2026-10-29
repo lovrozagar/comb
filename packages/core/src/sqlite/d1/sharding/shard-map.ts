@@ -48,6 +48,8 @@ function defineShardMap(): ShardMapTable {
 			driver: c.enum("driver", SHARD_DRIVERS).notNull().default("d1"),
 			org_id: c.text("org_id", { max: ORG_ID_MAX_LENGTH }).primaryKey(),
 			shard_id: c.integer("shard_id").notNull(),
+			/* the binding the router opens, with `driver` (router.ts): comb writes String(shard_id), so a raw
+			   move of shard_id writes it too, or goes through router.move({ with }), which writes both */
 			target: c.text("target", { max: 128 }).notNull(),
 			updated_at: c.updatedAt("updated_at"),
 		},

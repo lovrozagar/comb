@@ -640,7 +640,10 @@ type BaseConstraints = {
     mutable?: boolean;
     /** Field cannot be mutated after creation */
     nomutate?: boolean;
-    /** Field is never read back: generated read DTOs, the meta stamp and the manifest leave it out */
+    /**
+     * Field is never read back: generated read DTOs and the meta stamp leave it out, and the manifest
+     * lists it flagged `private: true`, on both dialects
+     */
     private?: boolean;
     /** the name this key's relation takes, where its column's role would take the column's own name (F57) */
     relation?: string;

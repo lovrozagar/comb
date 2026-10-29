@@ -5,7 +5,7 @@ export { isStorableText, STORABLE_TEXT_RULE, storableText } from "./storable-tex
 export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, readCombEntityMeta, readCombMeta, readCombQueryMeta, } from "./meta.ts";
 export { createUlidFactory, generateId, generateUlid, type UlidFactoryOptions } from "./id.ts";
 export { LruCache, type LruMeta } from "./lru.ts";
-export { type CombErrorKey, type ConstraintMap, type ConstraintMapEntry, combErrorKeys, type DatabaseErrorHandler, type StatusKey, statusKeyToCode, } from "./types.ts";
+export { type CombDatabaseErrorKey, type CombErrorKey, combDatabaseErrorKeys, type ConstraintMap, type ConstraintMapEntry, combErrorKeys, type DatabaseErrorHandler, type StatusKey, statusKeyToCode, } from "./types.ts";
 
 // cidr.d.ts
 /**
@@ -209,6 +209,14 @@ export declare const combErrorKeys: {
 };
 /** Lowercase error key values from combErrorKeys */
 export type CombErrorKey = (typeof combErrorKeys)[keyof typeof combErrorKeys];
+/** A key a database error classifier answers with: classifyD1Error, classifySqliteError and classifyPgError alike (C21) */
+export type CombDatabaseErrorKey = (typeof combErrorKeys)["CHECK_CONSTRAINT_VIOLATION" | "CONSTRAINT_VIOLATION" | "DATABASE_IO_ERROR" | "DATABASE_READONLY" | "DATABASE_UNAVAILABLE" | "EXCLUSION_CONSTRAINT_VIOLATION" | "FOREIGN_KEY_VIOLATION" | "INVALID_VALUE" | "PRIMARY_KEY_VIOLATION" | "REQUIRED_FIELD_MISSING" | "STORAGE_LIMIT_REACHED" | "UNIQUE_CONSTRAINT_VIOLATION" | "VALUE_TOO_LARGE"];
+/**
+ * The keys comb's database error classifiers answer with: the subset of combErrorKeys a consumer's
+ * map of database errors (a translation, a status) iterates to cover each one (C21). The query and
+ * router keys are not among them.
+ */
+export declare const combDatabaseErrorKeys: readonly CombDatabaseErrorKey[];
 /** Constraint map entry for mapping DB constraint violations to domain errors */
 export type ConstraintMapEntry = {
     cause: string;

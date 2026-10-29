@@ -48,6 +48,43 @@ export const combErrorKeys = {
 /** Lowercase error key values from combErrorKeys */
 export type CombErrorKey = (typeof combErrorKeys)[keyof typeof combErrorKeys]
 
+/** A key a database error classifier answers with: classifyD1Error, classifySqliteError and classifyPgError alike (C21) */
+export type CombDatabaseErrorKey = (typeof combErrorKeys)[
+	| "CHECK_CONSTRAINT_VIOLATION"
+	| "CONSTRAINT_VIOLATION"
+	| "DATABASE_IO_ERROR"
+	| "DATABASE_READONLY"
+	| "DATABASE_UNAVAILABLE"
+	| "EXCLUSION_CONSTRAINT_VIOLATION"
+	| "FOREIGN_KEY_VIOLATION"
+	| "INVALID_VALUE"
+	| "PRIMARY_KEY_VIOLATION"
+	| "REQUIRED_FIELD_MISSING"
+	| "STORAGE_LIMIT_REACHED"
+	| "UNIQUE_CONSTRAINT_VIOLATION"
+	| "VALUE_TOO_LARGE"]
+
+/**
+ * The keys comb's database error classifiers answer with: the subset of combErrorKeys a consumer's
+ * map of database errors (a translation, a status) iterates to cover each one (C21). The query and
+ * router keys are not among them.
+ */
+export const combDatabaseErrorKeys: readonly CombDatabaseErrorKey[] = [
+	combErrorKeys.CHECK_CONSTRAINT_VIOLATION,
+	combErrorKeys.CONSTRAINT_VIOLATION,
+	combErrorKeys.DATABASE_IO_ERROR,
+	combErrorKeys.DATABASE_READONLY,
+	combErrorKeys.DATABASE_UNAVAILABLE,
+	combErrorKeys.EXCLUSION_CONSTRAINT_VIOLATION,
+	combErrorKeys.FOREIGN_KEY_VIOLATION,
+	combErrorKeys.INVALID_VALUE,
+	combErrorKeys.PRIMARY_KEY_VIOLATION,
+	combErrorKeys.REQUIRED_FIELD_MISSING,
+	combErrorKeys.STORAGE_LIMIT_REACHED,
+	combErrorKeys.UNIQUE_CONSTRAINT_VIOLATION,
+	combErrorKeys.VALUE_TOO_LARGE,
+]
+
 /** Constraint map entry for mapping DB constraint violations to domain errors */
 export type ConstraintMapEntry = {
 	cause: string

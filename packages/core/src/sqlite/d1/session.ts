@@ -21,8 +21,9 @@ type SessionOptions = {
  * primary, or on the nearest replica when `constraint` says a read may lag. Falls back to the raw
  * D1Database when withSession is unavailable (miniflare without sessions).
  *
- * Framework-agnostic — consumers wire this into their middleware.
- * Returns client as D1Database so drizzle() produces consistent types.
+ * Framework-agnostic — consumers wire this into their middleware. `client` is the session, or the
+ * raw D1Database where there is none: drizzle() takes either, and a consumer's own helper types it
+ * as drizzle's `AnyD1Database` to take both.
  */
 function openD1Session(d1: D1Database, { bookmark, constraint = "first-primary" }: SessionOptions = {}): SessionHandle {
 	if (typeof d1.withSession !== "function") {
