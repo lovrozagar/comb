@@ -208,6 +208,10 @@ function explainAtlasFailure(stderr: string, scrub: (text: string) => string): s
 		return "another migrate apply is running on this database; run it again once that one finishes"
 	}
 	if (/connected database is not clean/.test(stderr)) return NOT_CLEAN
+	/* Atlas is scoped to the schema and inspects it before anything runs, so no migration can create it (P15) */
+	const missing = scrub(/schema "([^"]+)" was not found/.exec(stderr)?.[1] ?? "")
+	if (missing !== "")
+		return `schema ${missing} does not exist on the target; create it once (CREATE SCHEMA ${missing}) before the first apply`
 	const late = /migration file (\S+) was added out of order/.exec(stderr)?.[1]
 	if (late !== undefined) {
 		return `${scrub(late)} is older than a migration already applied; rename it to a newer version and run atlas migrate hash`

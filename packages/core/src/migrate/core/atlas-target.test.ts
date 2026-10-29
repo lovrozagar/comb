@@ -168,6 +168,13 @@ describe("explainAtlasFailure", () => {
 		expect(explainAtlasFailure("Error: pq: relation missing", kept)).toBe("Error: pq: relation missing")
 	})
 
+	/* P15 of the 0.14.1 review: Atlas inspects the schema it is scoped to before anything runs */
+	it("says to create a target schema that does not exist, once, before the first apply", () => {
+		expect(explainAtlasFailure('Error: postgres: schema "app" was not found', kept)).toBe(
+			"schema app does not exist on the target; create it once (CREATE SCHEMA app) before the first apply",
+		)
+	})
+
 	it("says another migration is running when Atlas cannot take its lock", () => {
 		expect(explainAtlasFailure("Error: acquiring database lock: sql/schema: lock is held by other session", kept)).toBe(
 			"another migrate apply is running on this database; run it again once that one finishes",
