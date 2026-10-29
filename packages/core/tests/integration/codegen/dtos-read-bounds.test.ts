@@ -99,7 +99,8 @@ for (const dialect of ["sqlite", "postgres"] as const) {
 			expect(read.safeParse(row).success).toBe(true)
 			expect(read.safeParse({ ...row, ratio: Number.NEGATIVE_INFINITY }).success).toBe(true)
 			expect(read.safeParse({ ...row, ratio: Number.NaN }).success).toBe(false)
-			expect(read.safeParse({ ...row, ratio: null }).success).toBe(false)
+			/* D1 hands an infinity back as null, so a read takes it (27.18 of plan 15, tests/integration/d1/read-float.test.ts) */
+			expect(read.safeParse({ ...row, ratio: null }).success).toBe(true)
 		})
 
 		it("refuses each of them on a write", async () => {
