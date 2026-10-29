@@ -3,9 +3,9 @@
  *
  * Generates constraint maps from analyzed table metadata for database error handling.
  */
-import { namesColumn } from "../utils/sql-name.ts"
 import path from "node:path"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
+import { namesColumn } from "../utils/sql-name.ts"
 import { pgIdentifier } from "../../identifier.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { errorKeyPrefix, qualifiedName } from "../utils/table-name.ts"

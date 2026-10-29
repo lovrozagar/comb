@@ -278,6 +278,13 @@ export declare function fieldConstraintsOf(constraints: Readonly<Record<string, 
 }): FieldConstraints;
 
 // codegen/entity-meta.d.ts
+/**
+ * Derive the entity half of the meta contract from a table's analysis.
+ *
+ * Kept separate from the DTO generator so the derivation can be tested
+ * directly against the analyzer's view of a table, rather than by grepping
+ * generated text. See docs/meta-contract.md.
+ */
 import type { CombEntityMetaInput } from "../meta.ts";
 import type { FieldMeta, TableMeta } from "./analyzer-types.ts";
 /**

@@ -5,11 +5,11 @@
  * directly against the analyzer's view of a table, rather than by grepping
  * generated text. See docs/meta-contract.md.
  */
-import { namesColumn } from "./utils/sql-name.ts"
 import type { CombEntityMetaInput } from "../meta.ts"
 import { isReference } from "./analyze-field.ts"
 import type { FieldMeta, PartialUniqueIndexMeta, TableMeta, UniqueIndexMeta } from "./analyzer-types.ts"
 import { qualifiedName } from "./utils/table-name.ts"
+import { namesColumn } from "./utils/sql-name.ts"
 
 /**
  * Whether a field is absent from the generated update body.
