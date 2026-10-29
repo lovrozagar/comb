@@ -35,6 +35,13 @@ function sumHashes(dir: string): Map<string, string> {
 
 /** Refuse a directory whose atlas.sum does not match its files: comb hashes an untouched copy and compares */
 function verifySum(exec: Run, dir: string, shown: string = dir): void {
+	/* a directory with no migration and no sum, as `comb migrate init` makes it, is an empty history (S9, K3) */
+	if (!existsSync(join(dir, "atlas.sum"))) {
+		if (sqlFiles(dir).length === 0) return
+		throw new Error(
+			`${shown} has migrations but no atlas.sum; comb migrate diff writes a migration and its sum, and atlas migrate hash --dir file://${shown} hashes ones written by hand`,
+		)
+	}
 	const check = mkdtempSync(join(tmpdir(), "comb-migrate-sum-"))
 	try {
 		for (const file of sqlFiles(dir)) copyFileSync(join(dir, file), join(check, file))
@@ -57,7 +64,8 @@ function verifySum(exec: Run, dir: string, shown: string = dir): void {
 function snapshotDir(exec: Run, dir: string): string {
 	const copy = mkdtempSync(join(tmpdir(), "comb-migrate-snapshot-"))
 	try {
-		for (const file of [...sqlFiles(dir), "atlas.sum"]) copyFileSync(join(dir, file), join(copy, file))
+		const sum = existsSync(join(dir, "atlas.sum")) ? ["atlas.sum"] : []
+		for (const file of [...sqlFiles(dir), ...sum]) copyFileSync(join(dir, file), join(copy, file))
 		verifySum(exec, copy, dir)
 		return copy
 	} catch (error) {

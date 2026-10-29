@@ -57,6 +57,26 @@ describe("hashDir and verifySum", () => {
 	})
 })
 
+/* S9 and K3 of the 0.15.0 review: what `comb migrate init` makes holds no file and no sum */
+describe("verifySum and snapshotDir on a directory without atlas.sum", () => {
+	it("take a directory with no migration as an empty history", () => {
+		expect(() => verifySum(fakeHash, dir)).not.toThrow()
+		const copy = snapshotDir(fakeHash, dir)
+		try {
+			expect(readdirSync(copy)).toEqual([])
+		} finally {
+			rmSync(copy, { force: true, recursive: true })
+		}
+	})
+
+	it("refuse migrations with no sum, naming comb migrate diff", () => {
+		writeFileSync(join(dir, "1_a.sql"), "CREATE TABLE a (x int);")
+		const refusal = `${dir} has migrations but no atlas.sum; comb migrate diff writes a migration and its sum, and atlas migrate hash --dir file://${dir} hashes ones written by hand`
+		expect(() => verifySum(fakeHash, dir)).toThrow(refusal)
+		expect(() => snapshotDir(fakeHash, dir)).toThrow(refusal)
+	})
+})
+
 describe("snapshotDir", () => {
 	it("copies the migrations and atlas.sum into a private directory, checked against the sum", () => {
 		writeFileSync(join(dir, "1_a.sql"), "")
