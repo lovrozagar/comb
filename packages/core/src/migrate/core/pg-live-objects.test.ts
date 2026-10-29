@@ -291,6 +291,12 @@ describe("readLiveObjects: a socket, verify-ca and no TLS, read as libpq reads t
 })
 
 describe("readLiveObjects on a connection every address refused", () => {
+	it("says nothing more than comb's own words for a failure with no message and no errors", async () => {
+		await expect(readLiveObjects(TARGET, fakeConnect({ error: new Error("") }).load)).rejects.toThrow(
+			/^comb could not read the database's functions, triggers, views, sequences and policies: $/,
+		)
+	})
+
 	/* P15 of the 0.15.0 review: postgres.js throws an AggregateError with no message when every address refuses */
 	it("says what each address answered when the failure's own message is empty", async () => {
 		const refused = new AggregateError(
