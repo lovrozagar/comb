@@ -114,6 +114,12 @@ describe("seedTables on common CHECK shapes (M15)", () => {
 		["a type on a nullable column", "n INTEGER CHECK (typeof(n) = 'integer')"],
 		/* M47: text datetime() keeps as written, YYYY-MM-DD HH:MM:SS */
 		["a datetime text", "at TEXT NOT NULL CHECK (at IS datetime(at))"],
+		/* C14 of the 0.14.1 review: shapes anyrow's tables use, which every attempt so far refused */
+		["one of two left NULL", "a TEXT, b TEXT, CHECK (a IS NULL OR b IS NULL)"],
+		[
+			"an expiry after a creation time its default sets now",
+			"created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), expires_at INTEGER NOT NULL, CHECK (expires_at > created_at)",
+		],
 	])("seeds a table checked by %s", async (_, column) => {
 		const { rows, unproven } = await seeded({ t: `CREATE TABLE t (id INTEGER PRIMARY KEY, ${column})` })
 		expect(unproven).toEqual(new Map())

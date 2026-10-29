@@ -132,7 +132,7 @@ function rowOf(db: MemoryDb, seeding: Seeding, at: Attempt): Map<string, unknown
 	const values = new Map<string, unknown>()
 	for (const column of seeding.columns.filter((each) => each.insertable)) {
 		if (at.defaults && column.hasDefault) continue
-		const empty = !at.fallback && nullAt(row, column.nullOrdinal, seeding.variant)
+		const empty = at.nulls === true ? column.nullable : !at.fallback && nullAt(row, column.nullOrdinal, seeding.variant)
 		values.set(column.name, empty ? null : valueOf(seeding, column, at))
 	}
 	for (const key of seeding.keys) if (!keyValues(db, seeding, { key, row, values })) return undefined
@@ -181,7 +181,8 @@ function insertRow(db: MemoryDb, table: string, values: ReadonlyMap<string, unkn
 
 /**
  * What row `row` tries, in order: its own slot (row 0 with every default), then, for a row the
- * table refuses, every default with each slot, each slot plain, and each shape
+ * table refuses, every default with each slot, each slot plain, each shape, and last every
+ * nullable column NULL, which a CHECK such as `a IS NULL OR b IS NULL` asks for
  */
 function attempts(row: number): Attempt[] {
 	const own = slotOf(row)
@@ -199,6 +200,7 @@ function attempts(row: number): Attempt[] {
 			shape,
 			slot: own,
 		})),
+		{ defaults: true, fallback: true, nulls: true, plain: false, row, slot: own },
 	]
 }
 

@@ -5,7 +5,9 @@
  * holds outer whitespace and an empty string, so a trim or a NULLIF shows; BLOB slots are bytes.
  * The shapes a CHECK commonly asks for are each affinity's fallbacks: JSON, an email, a UUID, a
  * hex digest, digits and a datetime() text for text, a ratio in [0, 1] for reals, epoch
- * milliseconds and a 32-bit number counting down from 2^31 - 1 for integers (M47).
+ * milliseconds and a 32-bit number counting down from 2^31 - 1 for integers (M47); and epoch
+ * milliseconds after the seed's own time, for a CHECK that wants one later than a column whose
+ * default reads now (C14 of the 0.14.1 review). A CHECK cannot read now itself: SQLite refuses it.
  */
 import { affinityOf } from "./sqlite-affinity.ts"
 
@@ -52,6 +54,9 @@ const JSON_SHAPE = (row: number, column: number, variant: number): string =>
 	JSON.stringify({ c: column, r: row, v: variant })
 const RATIO = (row: number, column: number, variant: number): number => (row + 1) / 64 + variant / 128 + column / 1e6
 const EPOCH_MS = (row: number, column: number, variant: number): number => 1_700_000_000_000 + tag(row, column, variant)
+/* the start of the year after the seed's: later than any now a default or a CHECK reads as it runs, and one value for every row */
+const nextYear = (): number => Date.UTC(new Date().getUTCFullYear() + 1, 0, 1)
+const FUTURE_MS = (row: number, column: number, variant: number): number => nextYear() + tag(row, column, variant)
 /* a key or a count a CHECK holds to 32 bits: positive, below 2^31 */
 const INT32 = (row: number, column: number, variant: number): number => 2_147_483_647 - tag(row, column, variant)
 /* text as datetime() writes it, YYYY-MM-DD HH:MM:SS, a second per tag */
@@ -61,8 +66,8 @@ type Shape = (row: number, column: number, variant: number) => unknown
 // lookup-table: each affinity's fallback shapes, tried in order
 const SHAPES: Readonly<Record<string, readonly Shape[]>> = {
 	BLOB: [(row, column, variant) => bytes(0xb0, row, column % 256, variant)],
-	INTEGER: [EPOCH_MS, INT32],
-	NUMERIC: [RATIO, EPOCH_MS, (row, column, variant) => bytes(0xb0, row, column % 256, variant)],
+	INTEGER: [EPOCH_MS, INT32, FUTURE_MS],
+	NUMERIC: [RATIO, EPOCH_MS, (row, column, variant) => bytes(0xb0, row, column % 256, variant), FUTURE_MS],
 	REAL: [RATIO],
 	TEXT: [
 		JSON_SHAPE,
@@ -79,11 +84,12 @@ const shapeCount = (): number => Math.max(...Object.values(SHAPES).map((shapes) 
 /**
  * Which values a row tries: its slot; whether every column with a default takes it; whether the
  * slot's values go in plain (without the column's offset); a text shape; whether it is a fallback,
- * where row 4 takes values instead of NULLs
+ * where row 4 takes values instead of NULLs; whether every nullable column is left NULL (C14)
  */
 type Attempt = {
 	defaults: boolean
 	fallback: boolean
+	nulls?: true | undefined
 	plain: boolean
 	row: number
 	shape?: number | undefined
