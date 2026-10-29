@@ -90,6 +90,8 @@ type Attempt = {
 	defaults: boolean
 	fallback: boolean
 	nulls?: true | undefined
+	/** the one nullable column, by its nullOrdinal, that takes a value, every other nullable one NULL (27.17) */
+	only?: number | undefined
 	plain: boolean
 	row: number
 	shape?: number | undefined
@@ -148,4 +150,48 @@ function valueFor(column: Column, at: Attempt & { variant: number }, listed: rea
 	return number < 0 ? number - base : number + base
 }
 
-export { type Attempt, type Column, JSON_SHAPE, listedValues, shapeCount, slotOf, valueFor }
+/**
+ * What row `row` tries, in order: its own slot (row 0 with every default), then, for a row the
+ * table refuses, every default with each slot, each slot plain, each shape, then every nullable
+ * column NULL, which a CHECK such as `a IS NULL OR b IS NULL` asks for, alone and with each shape,
+ * as a table that also asks for a time past now does (N6 of plan 15's rerun), then each of the
+ * `nullables` nullable columns set alone, the rest NULL, which "exactly one of them" asks for (27.17)
+ */
+function attempts(row: number, nullables: number): Attempt[] {
+	const own = slotOf(row)
+	const first = { defaults: row === 0, fallback: false, plain: false, row, slot: own }
+	const slots = [own, ...[0, 1, 2, 3, 4, 5].filter((slot) => slot !== own)]
+	return [
+		first,
+		...slots.map((slot) => ({ defaults: true, fallback: true, plain: false, row, slot })),
+		...slots.map((slot) => ({ defaults: true, fallback: true, plain: true, row, slot })),
+		...Array.from({ length: shapeCount() }, (_, shape) => ({
+			defaults: true,
+			fallback: true,
+			plain: true,
+			row,
+			shape,
+			slot: own,
+		})),
+		{ defaults: true, fallback: true, nulls: true, plain: false, row, slot: own },
+		...Array.from({ length: shapeCount() }, (_, shape) => ({
+			defaults: true,
+			fallback: true,
+			nulls: true as const,
+			plain: true,
+			row,
+			shape,
+			slot: own,
+		})),
+		...Array.from({ length: nullables }, (_, only) => ({
+			defaults: true,
+			fallback: true,
+			only,
+			plain: false,
+			row,
+			slot: own,
+		})),
+	]
+}
+
+export { type Attempt, attempts, type Column, JSON_SHAPE, listedValues, shapeCount, slotOf, valueFor }

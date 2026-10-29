@@ -20,15 +20,7 @@
  */
 import type { MemoryDb } from "../drivers/memory.ts"
 import { affinityOf } from "./sqlite-affinity.ts"
-import {
-	type Attempt,
-	type Column,
-	JSON_SHAPE,
-	listedValues,
-	shapeCount,
-	slotOf,
-	valueFor,
-} from "./proof-seed-values.ts"
+import { type Attempt, attempts, type Column, JSON_SHAPE, listedValues, valueFor } from "./proof-seed-values.ts"
 import { asciiFold } from "./sql-code.ts"
 
 /** A foreign key: its columns, the table they reference, and the referenced columns (none: its primary key) */
@@ -132,7 +124,12 @@ function rowOf(db: MemoryDb, seeding: Seeding, at: Attempt): Map<string, unknown
 	const values = new Map<string, unknown>()
 	for (const column of seeding.columns.filter((each) => each.insertable)) {
 		if (at.defaults && column.hasDefault) continue
-		const empty = at.nulls === true ? column.nullable : !at.fallback && nullAt(row, column.nullOrdinal, seeding.variant)
+		const empty =
+			at.only !== undefined
+				? column.nullable && column.nullOrdinal !== at.only
+				: at.nulls === true
+					? column.nullable
+					: !at.fallback && nullAt(row, column.nullOrdinal, seeding.variant)
 		values.set(column.name, empty ? null : valueOf(seeding, column, at))
 	}
 	for (const key of seeding.keys) if (!keyValues(db, seeding, { key, row, values })) return undefined
@@ -179,48 +176,14 @@ function insertRow(db: MemoryDb, table: string, values: ReadonlyMap<string, unkn
 	}
 }
 
-/**
- * What row `row` tries, in order: its own slot (row 0 with every default), then, for a row the
- * table refuses, every default with each slot, each slot plain, each shape, then every nullable
- * column NULL, which a CHECK such as `a IS NULL OR b IS NULL` asks for, alone and with each shape,
- * as a table that also asks for a time past now does (N6 of plan 15's rerun)
- */
-function attempts(row: number): Attempt[] {
-	const own = slotOf(row)
-	const first = { defaults: row === 0, fallback: false, plain: false, row, slot: own }
-	const slots = [own, ...[0, 1, 2, 3, 4, 5].filter((slot) => slot !== own)]
-	return [
-		first,
-		...slots.map((slot) => ({ defaults: true, fallback: true, plain: false, row, slot })),
-		...slots.map((slot) => ({ defaults: true, fallback: true, plain: true, row, slot })),
-		...Array.from({ length: shapeCount() }, (_, shape) => ({
-			defaults: true,
-			fallback: true,
-			plain: true,
-			row,
-			shape,
-			slot: own,
-		})),
-		{ defaults: true, fallback: true, nulls: true, plain: false, row, slot: own },
-		...Array.from({ length: shapeCount() }, (_, shape) => ({
-			defaults: true,
-			fallback: true,
-			nulls: true as const,
-			plain: true,
-			row,
-			shape,
-			slot: own,
-		})),
-	]
-}
-
 /* why a row cannot go in when a key it may not leave NULL has no parent row to take */
 const NO_PARENT = "a key it may not leave NULL references a table comb could not seed"
 
 /** Insert row `row` of `table` by the first attempt the table takes; or why not, its first refusal */
 function seedRow(db: MemoryDb, seeding: Seeding, row: number): string | undefined {
 	let refusal: string | undefined
-	for (const attempt of attempts(row)) {
+	const nullables = seeding.columns.filter((column) => column.nullOrdinal >= 0).length
+	for (const attempt of attempts(row, nullables)) {
 		const values = rowOf(db, seeding, attempt)
 		if (values === undefined) return NO_PARENT
 		const refused = insertRow(db, seeding.table, values)
