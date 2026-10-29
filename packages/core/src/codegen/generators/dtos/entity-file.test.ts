@@ -134,3 +134,14 @@ describe("generateEntityFile: shared module imports", () => {
 		expect(file(table([field("e", "read", "prefs")]))).not.toContain("_shared")
 	})
 })
+
+/* C2 of r17: an entity file whose own code names comb's predicate imports comb's namespace, from where comb is imported */
+describe("generateEntityFile: comb's namespace", () => {
+	const guarded = table([field("title", "read", "z.string().refine(comb.isStorableText)")])
+
+	it("imports it only when the file names it, from the configured specifier or comb's own", () => {
+		expect(file(guarded, { combFrom: "~/comb" })).toContain('import * as comb from "~/comb"')
+		expect(file(guarded)).toContain('import * as comb from "@lovrozagar/comb"')
+		expect(file(table([field("title", "read", "z.string()")]))).not.toContain("import * as comb")
+	})
+})
