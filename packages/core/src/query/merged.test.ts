@@ -81,3 +81,66 @@ describe("paginateMerged", () => {
 		expect(paginateMerged([[{ _total: 1, id: "a", k: 1 }]], query, SEALED)[0]).toEqual([{ id: "a" }])
 	})
 })
+
+/* Q1 of the 0.14.1 review: a shard that resumed before the cursor, as one reading a gone anchor at -Infinity does */
+/** A row of key `k` */
+const row = (id: string, k: number) => ({ id, k })
+
+describe("paginateMerged past a cursor a shard resumed before", () => {
+	const first = paginateMerged(
+		[
+			[row("a1", 1), row("a2", 3), row("a3", 5)],
+			[row("b1", 2), row("b2", 4), row("b3", 6)],
+		],
+		parse({ limit: "2", order: "k.asc" }),
+		SEALED,
+	)
+	const cursor = first[1].nextCursor as string
+
+	it("serves no row at or before the cursor, and none past a shard's last row it may hold more before", () => {
+		/* shard A resumed at the list's start; it holds a2.5 (k 3.5) too, which its read stopped before */
+		const [items, meta] = paginateMerged(
+			[
+				[row("a0", 0), row("a1", 1), row("a2", 3)],
+				[row("b2", 4), row("b3", 6), row("b4", 8)],
+			],
+			parse({ cursor, limit: "2", order: "k.asc" }),
+			SEALED,
+		)
+		expect(first[0].map(({ id }) => id)).toEqual(["a1", "b1"])
+		expect(items.map(({ id }) => id)).toEqual(["a2"])
+		expect(meta.hasMore).toBe(true)
+		expect(meta.nextCursor).not.toBeNull()
+	})
+	it("refuses a shard that read its whole limit at or before the cursor, which could not move the list on", () => {
+		const shards = [[row("a0", 0), row("a1", 1), row("a9", 1.5)], [row("b2", 4)]]
+		expect(() => paginateMerged(shards, parse({ cursor, limit: "2", order: "k.asc" }), SEALED)).toThrow(
+			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
+		)
+	})
+
+	it("pages past a cursor that carries a long key by reference, which no row's value equals", () => {
+		const long = "x".repeat(9000)
+		const text = (id: string, k: string) => ({ id, k: `${long}${k}` })
+		const [, meta] = paginateMerged(
+			[[text("a1", "a"), text("a2", "c")], [text("b1", "b")]],
+			parse({ limit: "1", order: "k.asc" }),
+			SEALED,
+		)
+		const [items] = paginateMerged(
+			[[text("a2", "c")], [text("b1", "b")]],
+			parse({ cursor: meta.nextCursor as string, limit: "1", order: "k.asc" }),
+			SEALED,
+		)
+		expect(items.map(({ id }) => id)).toEqual(["b1"])
+	})
+})
+
+/* Q10 of the 0.14.1 review: a merged list's ids must be unique across shards, or a cursor's anchor is ambiguous */
+describe("paginateMerged on an id two shards hold", () => {
+	it("refuses the merge", () => {
+		expect(() => ids([[{ id: "x", k: 1 }], [{ id: "x", k: 2 }]], { order: "k.asc" })).toThrow(
+			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
+		)
+	})
+})

@@ -36,7 +36,8 @@ declare function mergedListOptions(query: MergedQuery, options: CursorOptions & 
 /**
  * The page of a list merged from `rowsPerShard`, each shard's rows read with `mergedListOptions`,
  * and its pagination, as `paginate` gives one database's: ordered as the list orders, windowed by
- * page or cursor, counted across shards, its next cursor sealed under `options`
+ * page or cursor, counted across shards, its next cursor sealed under `options`. Ids must be
+ * unique across the shards, as a cursor names its row by id
  */
 declare function paginateMerged<T extends object>(rowsPerShard: ReadonlyArray<ReadonlyArray<T & {
     _total?: number;

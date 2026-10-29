@@ -9,7 +9,7 @@
 import { type SQL, sql } from "drizzle-orm"
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { CURSOR_TIEBREAK_COLUMN, effectiveNulls } from "./cursor.ts"
+import { CURSOR_TIEBREAK_COLUMN, CursorRef, effectiveNulls, readCursor } from "./cursor.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
 import {
 	applySelect,
@@ -41,7 +41,13 @@ function mergedListOptions(
 	query: MergedQuery,
 	options: CursorOptions & { maxRowsPerShard?: number | undefined },
 ): MergedListOptions {
-	const list = queryHelpers.listOptions(query, options)
+	/*
+	 * a null anchor is a real NULL (Q1 of the 0.14.1 review): the anchor row is on one shard only, so
+	 * every other reads it as gone, and resuming such a shard at -Infinity would repeat its rows. A
+	 * row D1 reads back as null that holds ±Infinity comes back out of its shard's own order, which
+	 * refuseUnmergeable refuses
+	 */
+	const list = queryHelpers.listOptions(query, { ...options, nonFinite: "exact" })
 	if (query.cursor) return list
 	const rows = (query.page ?? 1) * query.limit + 1
 	const max = options.maxRowsPerShard ?? MAX_ROWS_PER_SHARD
@@ -131,6 +137,61 @@ function refuseUnmergeable(
 	}
 }
 
+/** A merged list's ids must be unique across shards, or a cursor's anchor names more than one row (Q10) */
+function refuseSharedIds(rows: ReadonlyArray<Record<string, unknown>>, idField: string): void {
+	const seen = new Set<unknown>()
+	for (const row of rows) {
+		const id = row[idField]
+		if (!seen.has(id)) {
+			seen.add(id)
+			continue
+		}
+		throw new CombError({
+			cause: `two shards hold id ${JSON.stringify(id)}: a merged list's ids must be unique across its shards`,
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
+}
+
+/**
+ * The merged rows a cursor page may serve, ordered: none at or before the cursor's row, which a
+ * shard that resumed early read again, and none past the earliest last row of a shard that read
+ * its whole limit + 1, which may hold more before its next read (Q1). A shard that read limit + 1
+ * rows and none past the cursor could not move the list on: refused
+ */
+function pastCursor<T extends Record<string, unknown>>(
+	rows: T[],
+	rowsPerShard: ReadonlyArray<ReadonlyArray<T>>,
+	{
+		anchor,
+		compare,
+		limit,
+	}: { anchor: Record<string, unknown> | undefined; compare: ReturnType<typeof compareRows>; limit: number },
+): { full: boolean; rows: T[] } {
+	const past = anchor === undefined ? rows : rows.filter((row) => compare(row, anchor) > 0)
+	const lasts = rowsPerShard.filter((shard) => shard.length > limit).map((shard) => shard.at(-1) as T)
+	const end = lasts.toSorted(compare)[0]
+	const kept = end === undefined ? past : past.filter((row) => compare(row, end) <= 0)
+	if (end !== undefined && kept.length === 0) {
+		throw new CombError({
+			cause:
+				"a shard read its whole limit and every row it read was at or before the cursor: its read resumed before the cursor's row",
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
+	return { full: end !== undefined, rows: kept }
+}
+
+/** The cursor's row as the merge compares rows: each key's value and the id; none when a value is a reference, which no row's value equals */
+function anchorOf(cursor: string, sort: SortField[], options: PaginateOptions): Record<string, unknown> | undefined {
+	const { id, values } = readCursor(cursor, sort, options)
+	if (values.some((value) => value instanceof CursorRef)) return undefined
+	const idField = options.idField ?? CURSOR_TIEBREAK_COLUMN
+	return Object.fromEntries([...sort.map(({ field }, i) => [field, values[i]]), [idField, id]])
+}
+
 /**
  * Rows every shard's filter matches, summed: each shard's offset read carries its own total on
  * its rows (`countExtra`), and one that read none matches none. Null for a cursor page, or once a
@@ -151,7 +212,8 @@ function countOf(rowsPerShard: ReadonlyArray<ReadonlyArray<{ _total?: number }>>
 /**
  * The page of a list merged from `rowsPerShard`, each shard's rows read with `mergedListOptions`,
  * and its pagination, as `paginate` gives one database's: ordered as the list orders, windowed by
- * page or cursor, counted across shards, its next cursor sealed under `options`
+ * page or cursor, counted across shards, its next cursor sealed under `options`. Ids must be
+ * unique across the shards, as a cursor names its row by id
  */
 function paginateMerged<T extends object>(
 	rowsPerShard: ReadonlyArray<ReadonlyArray<T & { _total?: number }>>,
@@ -164,14 +226,21 @@ function paginateMerged<T extends object>(
 	},
 	options: PaginateOptions,
 ): readonly [T[], z.output<typeof paginationResponseSchema>] {
-	const rows = rowsPerShard.flat() as Array<T & Record<string, unknown>>
-	refuseGoneAnchor(rows)
-	const compare = compareRows(query.parsedSort, options.idField ?? CURSOR_TIEBREAK_COLUMN)
-	refuseUnmergeable(rowsPerShard as ReadonlyArray<ReadonlyArray<Record<string, unknown>>>, compare)
-	rows.sort(compare)
+	const shards = rowsPerShard as ReadonlyArray<ReadonlyArray<T & Record<string, unknown>>>
+	const merged = shards.flat()
+	refuseGoneAnchor(merged)
+	const idField = options.idField ?? CURSOR_TIEBREAK_COLUMN
+	refuseSharedIds(merged, idField)
+	const compare = compareRows(query.parsedSort, idField)
+	refuseUnmergeable(shards, compare)
+	merged.sort(compare)
+	const anchor = query.cursor ? anchorOf(query.cursor, query.parsedSort, options) : undefined
+	const { full, rows } = query.cursor
+		? pastCursor(merged, shards, { anchor, compare, limit: query.limit })
+		: { full: false, rows: merged }
 	const start = query.cursor ? 0 : ((query.page ?? 1) - 1) * query.limit
 	const window = rows.slice(start, start + query.limit + 1)
-	const hasMore = window.length > query.limit
+	const hasMore = full || window.length > query.limit
 	const page = hasMore ? window.slice(0, query.limit) : window
 	const last = page.at(-1)
 	const pagination = {

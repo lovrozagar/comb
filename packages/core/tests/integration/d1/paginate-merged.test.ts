@@ -16,7 +16,19 @@ import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { mergedListOptions, paginateMerged } from "../../../src/sqlite/d1/sharding/index.ts"
 
 const org = sqliteTable("org", { id: text("id").primaryKey(), n: integer("n"), name: text("name") })
-const relations = defineRelations({ org })
+/* Q1 of the 0.14.1 review: four null n over three shards, so a page of 2 ends on a null only one shard holds */
+const item = sqliteTable("item", { id: text("id").primaryKey(), n: integer("n") })
+const relations = defineRelations({ item, org })
+const ITEMS: Array<[string, number | null]> = [
+	["i1", 1],
+	["i2", 2],
+	["i3", 3],
+	["i4", 4],
+	["i5", null],
+	["i6", null],
+	["i7", null],
+	["i8", null],
+]
 const schema = createListQuerySchema({ pagination: { defaultLimit: 2, maxLimit: 3 }, sort: ["n", "name"] })
 
 /*
@@ -53,7 +65,12 @@ beforeAll(async () => {
 	})
 	const dbs = await Promise.all(["S0", "S1", "S2", "WHOLE"].map((name) => mf.getD1Database(name)))
 	for (const db of dbs as unknown as D1Database[])
-		await db.exec("CREATE TABLE org (id TEXT PRIMARY KEY, n INTEGER, name TEXT)")
+		await db.exec(
+			"CREATE TABLE org (id TEXT PRIMARY KEY, n INTEGER, name TEXT); CREATE TABLE item (id TEXT PRIMARY KEY, n INTEGER)",
+		)
+	for (const [i, [id, n]] of ITEMS.entries())
+		for (const db of [dbs[i % 3], dbs[3]] as unknown as D1Database[])
+			await db.prepare("INSERT INTO item (id, n) VALUES (?, ?)").bind(id, n).run()
 	for (const [i, row] of ROWS.entries()) {
 		await insert(dbs[i % 3] as unknown as D1Database, row)
 		await insert(dbs[3] as unknown as D1Database, row)
@@ -153,5 +170,25 @@ describe("paginateMerged and a sort key SQLite does not order BINARY (5.5)", () 
 		]
 		const [items] = paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, parsed, SEALED)
 		expect(items.map((row) => row.id)).toEqual(["o1", "o2"])
+	})
+})
+
+describe("paginateMerged by cursor past a page that ends on a null key (Q1)", () => {
+	it.each(["n.asc", "n.desc", "n.asc.nullsfirst", "n.desc.nullslast"])("serves every row of %s once", async (order) => {
+		const oracle = await whole.query.item.findMany({
+			orderBy: mergedListOptions(schema.parse({ limit: "3", order }), SEALED).orderBy,
+		} as never)
+		const seen: string[] = []
+		let cursor: string | undefined
+		for (let n = 0; n < 8; n++) {
+			const parsed = schema.parse({ limit: "2", order, ...(cursor === undefined ? {} : { cursor }) })
+			const options = mergedListOptions(parsed, SEALED)
+			const rowsPerShard = await Promise.all(shards.map((db) => db.query.item.findMany(options as never)))
+			const [items, meta] = paginateMerged(rowsPerShard as Array<Array<{ id: string }>>, parsed, SEALED)
+			seen.push(...items.map((row) => row.id))
+			if (meta.nextCursor === null) break
+			cursor = meta.nextCursor
+		}
+		expect(seen).toEqual((oracle as Array<{ id: string }>).map((row) => row.id))
 	})
 })
