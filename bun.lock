@@ -18,7 +18,7 @@
     },
     "packages/core": {
       "name": "@lovrozagar/comb",
-      "version": "0.14.1",
+      "version": "0.15.0",
       "bin": {
         "comb": "src/bin.ts",
       },
