@@ -27,7 +27,7 @@ describe("libpqUrl", () => {
 	it("reads an IPv6 address in brackets, a socket's directory, and an empty host as localhost, as Atlas does", () => {
 		expect(libpqUrl("postgres://[::1]:5433/app")).toMatchObject({ host: "::1", port: 5433, socket: false })
 		expect(libpqUrl("postgres://u@%2Frun%2Fpg/app")).toMatchObject({ host: "/run/pg", socket: true })
-		expect(libpqUrl("postgres:///app")).toMatchObject({ database: "app", host: "localhost", port: 5432, user: "" })
+		expect(libpqUrl("postgres:///app")).toMatchObject({ database: "app", host: "localhost", port: 5432 })
 	})
 
 	it("names the user's database when the URL names none, and leaves a password it does not give unset", () => {
@@ -80,10 +80,6 @@ describe("postgresOptionsOf", () => {
 		expect(pinned).toEqual({ ca: "ROOT", checkServerIdentity: expect.any(Function), rejectUnauthorized: true })
 		/* verify-ca checks the certificate's chain and not its host name */
 		expect((pinned["checkServerIdentity"] as () => unknown)()).toBeUndefined()
-	})
-
-	it("leaves the user and database to postgres.js's own default, the OS user's, when the URL names neither, as libpq does", () => {
-		expect(postgresOptionsOf("postgres://db", "url")).toEqual({ host: "db", port: 5432, ssl: "prefer" })
 	})
 
 	it("refuses an sslmode libpq does not take, and a URL libpq cannot read, by the field's name", () => {

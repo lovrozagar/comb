@@ -209,3 +209,17 @@ CREATE POLICY "own" ON "u" USING (true);
 		})
 	}, 60_000)
 })
+
+/* P3 of the 0.15.0 review: Atlas found the dev database not clean, and comb said the target had no history */
+describe("a Postgres baseline on a dev database that is not empty", () => {
+	it("names the dev database and what it holds", async () => {
+		await withDevAndTarget(async (devUrl, url) => {
+			await exec(url, TABLE)
+			await exec(devUrl, 'CREATE TABLE "leftover" ("x" integer);')
+			const { refused } = await baseline(url, devUrl, TABLE)
+			expect(refused).toContain(
+				'devUrl must be an empty database, and it holds table "leftover" in connected schema; point devUrl at an empty database, or empty this one',
+			)
+		})
+	}, 60_000)
+})

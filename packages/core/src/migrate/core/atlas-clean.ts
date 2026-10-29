@@ -4,7 +4,8 @@
  * URL to the target's schema (`search_path`), and Atlas calls a bound target clean while its schema
  * holds no table. Atlas OSS inspects no view or function, so those do not count.
  */
-import { explainAtlasFailure, NOT_CLEAN, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { explainAtlasFailure, NOT_CLEAN } from "./atlas-failure.ts"
+import { type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import type { Run } from "./process.ts"
 
 /** The schemas `atlas schema inspect` reports, by name, with their tables */

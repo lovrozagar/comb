@@ -244,7 +244,9 @@ describe("readLiveObjects: the server libpq reads from the URL", () => {
 			],
 		])
 	})
+})
 
+describe("readLiveObjects: a socket, verify-ca and no TLS, read as libpq reads them", () => {
 	it("reaches a Unix socket by its directory, without TLS, and reads verify-ca's server by its certificate alone", async () => {
 		const { calls, load } = recording()
 		await readLiveObjects({ ...TARGET, url: "postgres://app:s3cret@/app?host=/run/postgresql" }, load)
@@ -267,12 +269,23 @@ describe("readLiveObjects: the server libpq reads from the URL", () => {
 					database: "app",
 					host: "db",
 					max: 1,
+					password: expect.any(Function),
 					port: 6432,
 					ssl: { checkServerIdentity: expect.any(Function), rejectUnauthorized: true },
 					username: "app",
 				},
 			],
-			[{ database: "app", host: "db", max: 1, port: 5432, ssl: false, username: "app" }],
+			[
+				{
+					database: "app",
+					host: "db",
+					max: 1,
+					password: expect.any(Function),
+					port: 5432,
+					ssl: false,
+					username: "app",
+				},
+			],
 		])
 	})
 })

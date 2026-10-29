@@ -4,7 +4,8 @@
  * status read through a template that never selects the URL.
  */
 import type { AtlasStatus } from "./atlas-history.ts"
-import { explainAtlasFailure, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
+import { explainAtlasFailure } from "./atlas-failure.ts"
+import { type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
 import { type Run, type RunResult, run } from "./process.ts"
 

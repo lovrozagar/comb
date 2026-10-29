@@ -17,7 +17,8 @@
 import { readInspect } from "./atlas-clean.ts"
 import { type AtlasStatus, fileOf, filesOf } from "./atlas-history.ts"
 import { atlasStatus, type AtlasCommand } from "./atlas-status.ts"
-import { explainAtlasFailure, type PgTarget, SHARED_REVISIONS, withAtlasEnv } from "./atlas-target.ts"
+import { explainAtlasFailure } from "./atlas-failure.ts"
+import { type PgTarget, SHARED_REVISIONS, withAtlasEnv } from "./atlas-target.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 import { run } from "./process.ts"
 

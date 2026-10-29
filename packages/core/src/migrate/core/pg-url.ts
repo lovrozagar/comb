@@ -7,12 +7,15 @@
  * server as a setting, so neither reads a URL here.
  */
 import { readFileSync } from "node:fs"
+import { userInfo } from "node:os"
 
 /** Where a Postgres URL reaches, and its query, every key decoded */
 type LibpqUrl = {
 	database: string
-	/** a host name or address, or a Unix socket's directory */
+	/** a host name or address, or a Unix socket's directory: the server name TLS checks */
 	host: string
+	/** the address to connect to instead of looking up `host`, as libpq's hostaddr is (P7 of the 0.15.0 review) */
+	hostaddr: string | undefined
 	params: ReadonlyMap<string, string>
 	password: string | undefined
 	port: number
@@ -30,6 +33,7 @@ const LIBPQ_KEYS = /* @__PURE__ */ new Set([
 	"channel_binding",
 	"connect_timeout",
 	"dbname",
+	"fallback_application_name",
 	"gssencmode",
 	"gsslib",
 	"host",
@@ -114,11 +118,13 @@ function libpqUrl(raw: string): LibpqUrl | undefined {
 		const userinfo = userinfoOf(authority)
 		const { host, port } = hostOf(hostport, params)
 		if (!/^\d+$/.test(port)) return undefined
-		const user = params.get("user") ?? userinfo.user
+		/* libpq's user for a URL that names none is the OS user's, never PGUSER's, which Atlas's environment lacks (P6) */
+		const user = (params.get("user") ?? userinfo.user) || userInfo().username
 		const database = params.get("dbname") ?? decodeURIComponent(path.replace(/^\//, ""))
 		return {
 			database: database === "" ? user : database,
 			host,
+			hostaddr: params.get("hostaddr"),
 			params,
 			password: params.get("password") ?? userinfo.password,
 			port: Number(port),
@@ -152,23 +158,39 @@ function sslOf(url: LibpqUrl): unknown {
 	if (mode === "verify-ca" || (mode === "require" && files["ca"] !== undefined))
 		return { ...files, checkServerIdentity: anyHost, rejectUnauthorized: true }
 	if (mode === "require") return "require"
-	if (mode === "verify-full") return { ...files, rejectUnauthorized: true }
+	/* a hostaddr is where comb connects; the certificate still names the host (P7) */
+	if (mode === "verify-full")
+		return { ...files, rejectUnauthorized: true, ...(url.hostaddr === undefined ? {} : { servername: url.host }) }
 	throw new Error(`sslmode ${mode} is none libpq takes: disable, allow, prefer, require, verify-ca or verify-full`)
 }
 
-/** postgres.js's options for the database `url` reaches, as libpq reaches it: libpq's own keys read, the rest sent as settings */
+/** The settings `url` sends the server: every key libpq does not read, application_name from fallback_application_name where it names none (P7) */
+function settingsOf(url: LibpqUrl): Record<string, string> {
+	const settings = Object.fromEntries([...url.params].filter(([key]) => !LIBPQ_KEYS.has(key)))
+	const fallback = url.params.get("fallback_application_name")
+	return settings["application_name"] === undefined && fallback !== undefined
+		? { ...settings, application_name: fallback }
+		: settings
+}
+
+/**
+ * postgres.js's options for the database `url` reaches, as libpq reaches it: libpq's own keys read,
+ * the rest sent as settings. The user, the database and the password are given whole, as postgres.js
+ * fills what it is not given from PGUSER, PGDATABASE and PGPASSWORD, which Atlas never sees (P6 of
+ * the 0.15.0 review); a URL without a password gives postgres.js one to call, so it reads none of its own.
+ */
 function postgresOptions(url: LibpqUrl): Record<string, unknown> {
-	const connection = Object.fromEntries([...url.params].filter(([key]) => !LIBPQ_KEYS.has(key)))
+	const connection = settingsOf(url)
 	const timeout = url.params.get("connect_timeout")
 	return {
 		...(Object.keys(connection).length === 0 ? {} : { connection }),
 		...(timeout === undefined ? {} : { connect_timeout: Number(timeout) }),
-		...(url.database === "" ? {} : { database: url.database }),
-		host: url.host,
-		...(url.password === undefined ? {} : { password: url.password }),
+		database: url.database,
+		host: url.hostaddr ?? url.host,
+		password: url.password ?? (() => ""),
 		port: url.port,
 		ssl: sslOf(url),
-		...(url.user === "" ? {} : { username: url.user }),
+		username: url.user,
 	}
 }
 

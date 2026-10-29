@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { explainAtlasFailure } from "./atlas-target.ts"
+import { explainAtlasFailure } from "./atlas-failure.ts"
 import { json, type Ran } from "./atlas-status.ts"
 import { outsideTransaction } from "./classify-file.ts"
 

@@ -5,7 +5,7 @@
  * or edited is named for what happened to it, checked in that order, before Atlas runs anything.
  */
 import { sqlFiles, sumHashes } from "./atlas-dir.ts"
-import { explainAtlasFailure } from "./atlas-target.ts"
+import { explainAtlasFailure } from "./atlas-failure.ts"
 
 /** A migration file as Atlas lists it */
 type AtlasFile = { Description: string; Name: string; Version: string }

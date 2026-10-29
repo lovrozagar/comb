@@ -1,13 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
-import {
-	atlasUrls,
-	explainAtlasFailure,
-	pgUrlProblems,
-	revisionsSchema,
-	withAtlasEnv,
-	type PgTarget,
-} from "./atlas-target.ts"
+import { atlasUrls, pgUrlProblems, revisionsSchema, withAtlasEnv, type PgTarget } from "./atlas-target.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 
 const target = (over: Partial<PgTarget> = {}): PgTarget => ({
@@ -209,40 +202,6 @@ describe("atlasUrls", () => {
 		expect(new URL(own.url).searchParams.get("options")).toBe("-c lock_timeout=1s")
 		const off = atlasUrls(target({ lockTimeout: "0", url: "postgres://localhost/app" }))
 		expect(new URL(off.url).searchParams.has("options")).toBe(false)
-	})
-})
-
-/** A scrub that keeps the text: these messages hold no secret */
-const kept = (text: string) => text
-
-describe("explainAtlasFailure", () => {
-	it("says to set devUrl when Atlas cannot reach Docker for the default dev database", () => {
-		expect(explainAtlasFailure("Error: docker: Cannot connect to the Docker daemon", kept)).toBe(
-			"Atlas needs Docker for the default devUrl (docker://postgres/17/dev); set devUrl to an empty Postgres database instead",
-		)
-		expect(explainAtlasFailure("Error: pq: relation missing", kept)).toBe("Error: pq: relation missing")
-	})
-
-	/* P15 of the 0.14.1 review: Atlas inspects the schema it is scoped to before anything runs */
-	it("says to create a target schema that does not exist, once, before the first apply", () => {
-		expect(explainAtlasFailure('Error: postgres: schema "app" was not found', kept)).toBe(
-			"schema app does not exist on the target; create it once (CREATE SCHEMA app) before the first apply",
-		)
-	})
-
-	it("says another migration is running when Atlas cannot take its lock", () => {
-		expect(explainAtlasFailure("Error: acquiring database lock: sql/schema: lock is held by other session", kept)).toBe(
-			"another migrate apply is running on this database; run it again once that one finishes",
-		)
-	})
-
-	it("says how to drop an enum value by hand, and what to do with an object Atlas OSS refuses", () => {
-		expect(explainAtlasFailure('Error: dropping value "b" from enum "mood" is not supported', kept)).toBe(
-			'Atlas cannot drop the value "b" of enum "mood": write that migration by hand (a new type without it, the columns moved to it, the old type dropped), then run migrate diff again',
-		)
-		expect(explainAtlasFailure("Error: functions are available to logged-in users only. Use 'atlas login'", kept)).toBe(
-			"Atlas OSS does not diff functions: take them out of the drizzle schema and write their migration by hand, or use Atlas Pro",
-		)
 	})
 })
 
