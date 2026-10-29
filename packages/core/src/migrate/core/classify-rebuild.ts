@@ -1,7 +1,9 @@
 /**
  * The rebuild rule of the destructive-change gate, for SQLite: a drop that Atlas's copy, rename and
  * the history make a table rebuild is lossless when its copy writes every column the table had,
- * into a new table that stores each as the old one did. Anything else loses rows or values.
+ * into a new table that stores each as the old one did, and the file creates again every trigger
+ * the drop took with the table (S2 of the 0.14.1 review). Anything else loses rows, values or
+ * the writes a trigger made.
  */
 import type { Dialect, ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
@@ -12,6 +14,8 @@ import { definitionDrift } from "./sqlite-affinity.ts"
 
 /** What the rebuild rule reads of a file */
 type RebuildContext = {
+	/** the schema the whole file leaves, whose triggers tell which the file created again */
+	after: ExtractedSchema | undefined
 	before: ExtractedSchema | undefined
 	dialect: Dialect
 	/** how names are keyed: SQLite's way, or Postgres's under its schema */
@@ -70,7 +74,29 @@ function copyOutcome(
 	return { drift: was === undefined || next === undefined ? undefined : definitionDrift(was, next, copied), stored }
 }
 
-/** A SQLite drop that is a table rebuild: lossless when it copies every column the table had, as it had it */
+/** The triggers `before` held on `name` that the file, dropping them with the table, does not create again */
+function droppedTriggers(name: string, before: ExtractedSchema, after: ExtractedSchema | undefined): string[] {
+	const again = new Set((after?.triggers ?? []).filter(({ table }) => table === name).map((t) => t.name))
+	return before.triggers
+		.filter(({ name: trigger, table }) => table === name && !again.has(trigger))
+		.map((trigger) => trigger.name)
+		.toSorted()
+}
+
+/** What a rebuild of `name` loses: the columns its copy leaves out, and the triggers the file does not create again */
+function losses(name: string, lost: readonly string[], triggers: readonly string[]): Finding | undefined {
+	if (lost.length === 0 && triggers.length === 0) return undefined
+	const without = lost.length === 0 ? "" : ` without ${lost.join(", ")}`
+	const dropping =
+		triggers.length === 0 ? "" : `, dropping its trigger${triggers.length === 1 ? "" : "s"} ${triggers.join(", ")}`
+	return {
+		...(lost.length === 0 ? {} : { drops: lost.map((column) => `DROP COLUMN ${name}.${column}`) }),
+		level: "unsafe",
+		note: `rebuilds ${name}${without}${dropping}`,
+	}
+}
+
+/** A SQLite drop that is a table rebuild: lossless when it copies every column the table had, as it had it, and keeps its triggers */
 function rebuildFinding(table: string | undefined, ctx: RebuildContext): Finding | undefined {
 	const name = table === undefined ? undefined : nameKey(table, ctx.naming)
 	const rebuilt = name === undefined ? undefined : ctx.rebuilds.get(name)
@@ -84,16 +110,13 @@ function rebuildFinding(table: string | undefined, ctx: RebuildContext): Finding
 	const { drift, stored } = copyOutcome(name, rebuild, ctx.before as ExtractedSchema)
 	if (drift !== undefined) return { level: "unsafe", note: `rebuilds ${name}: its new table ${drift}` }
 	const lost = stored.filter((column) => !rebuild.columns.includes(column))
+	const loss = losses(name, lost, droppedTriggers(name, ctx.before as ExtractedSchema, ctx.after))
+	if (loss !== undefined) return loss
 	const kept = ctx.kept.get(name)
 	const renumbered = (ctx.renumbered.get(name) ?? []).map((note) => `; ${note}`).join("")
-	if (lost.length === 0 && kept !== undefined)
+	if (kept !== undefined)
 		return { level: "cautious", note: `rebuilds ${name}; comb keeps the rows of ${kept.join(", ")}${renumbered}` }
-	if (lost.length === 0) return { level: "cautious", note: `rebuilds ${name}, copying every column${renumbered}` }
-	return {
-		drops: lost.map((column) => `DROP COLUMN ${name}.${column}`),
-		level: "unsafe",
-		note: `rebuilds ${name} without ${lost.join(", ")}`,
-	}
+	return { level: "cautious", note: `rebuilds ${name}, copying every column${renumbered}` }
 }
 
 export { type RebuildContext, rebuildFinding }

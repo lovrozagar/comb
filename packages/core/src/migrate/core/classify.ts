@@ -179,6 +179,7 @@ function readFile(
 	const prepared = preparedOf(codes)
 	const ftsTriggers = ftsTriggersOf(statements, before, naming)
 	const ctx: FileContext = {
+		after: dialect === "sqlite" ? extractSchema(sql, before) : undefined,
 		before,
 		created,
 		dialect,
