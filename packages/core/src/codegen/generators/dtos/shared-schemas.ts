@@ -91,8 +91,12 @@ const digestOf = (zodType: string) => createHash("sha256").update(zodType).diges
  */
 class SharedNames {
 	readonly result = new Map<string, SharedSchema>()
+	/* a field and its assignment, no parameter property, so a consumer's erasableSyntaxOnly takes the file (K18 of r17) */
+	private readonly colliding: ReadonlySet<string>
 
-	constructor(private readonly colliding: ReadonlySet<string> = new Set()) {}
+	constructor(colliding: ReadonlySet<string> = new Set()) {
+		this.colliding = colliding
+	}
 
 	add(zodType: string, code: string, count: number): string {
 		const digest = digestOf(zodType)
