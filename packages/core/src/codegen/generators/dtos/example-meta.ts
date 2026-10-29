@@ -86,9 +86,12 @@ function midpoint(field: FieldMeta, key: keyof typeof SHARED_NUMBER): ExampleRes
 	const { max, min } = field.constraints
 	const fits = (value: number) => (min === null || value >= min) && (max === null || value <= max)
 	if (fits(SHARED_NUMBER[key])) return shared(key)
-	if (min !== null && max !== null)
-		return inline(String(key === "real" ? (min + max) / 2 : Math.floor((min + max) / 2)))
-	return inline(String(min ?? max))
+	/* an integer's example is an integer within its bounds, a fractional bound rounded inward (F8) */
+	const whole = key !== "real"
+	const low = min === null || !whole ? min : Math.ceil(min)
+	const high = max === null || !whole ? max : Math.floor(max)
+	if (low !== null && high !== null) return inline(String(whole ? Math.floor((low + high) / 2) : (low + high) / 2))
+	return inline(String(low ?? high))
 }
 
 /** `length` characters of the alphanumeric cycle, repeated as far as it takes */

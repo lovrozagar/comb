@@ -24,11 +24,11 @@ import {
 	type SetNotNull,
 	text,
 } from "drizzle-orm/pg-core"
-import { withCombColumn } from "../meta/column.ts"
+import { enumMeta, withCombColumn } from "../meta/column.ts"
 /* Constraint types are dialect-agnostic; they live under sqlite/ because that is
    the published export path and moving them would be a breaking change. */
 import type {
-	EnumStates,
+	EnumOptions,
 	IntegerConstraints,
 	JsonConstraints,
 	TextConstraints,
@@ -63,7 +63,7 @@ type PgColumns = {
 	enum: <T extends readonly string[]>(
 		name: string,
 		_values: T,
-		_states?: EnumStates<T[number]>,
+		_options?: EnumOptions<T[number]>,
 	) => Set$Type<Text, T[number]>
 	id: (_prefix: string) => SetIsPrimaryKey<Text>
 	integer: (name: string, _constraints?: IntegerConstraints) => PgIntegerBuilder
@@ -96,8 +96,8 @@ export const c: PgColumns = {
 		withCombColumn(epochMs(name), { constraints, kind: "deletedAt" }),
 
 	/* Enum stored as text with type annotation */
-	enum: <T extends readonly string[]>(name: string, values: T, states?: EnumStates<T[number]>) =>
-		withCombColumn(text(name).$type<T[number]>(), { kind: "enum", states, values }),
+	enum: <T extends readonly string[]>(name: string, values: T, options?: EnumOptions<T[number]>) =>
+		withCombColumn(text(name).$type<T[number]>(), enumMeta(values, options)),
 
 	/* Text primary key — prefix is type-erased metadata for codegen */
 	id: (prefix: string) => {

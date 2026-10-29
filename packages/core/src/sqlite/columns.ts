@@ -16,9 +16,9 @@ import {
 	text,
 } from "drizzle-orm/sqlite-core"
 import type * as z from "zod"
-import { withCombColumn } from "../meta/column.ts"
+import { enumMeta, withCombColumn } from "../meta/column.ts"
 import type {
-	EnumStates,
+	EnumOptions,
 	IntegerConstraints,
 	JsonConstraints,
 	TextConstraints,
@@ -43,7 +43,7 @@ export type SqliteColumns = {
 	enum: <T extends readonly string[]>(
 		name: string,
 		_values: T,
-		_states?: EnumStates<T[number]>,
+		_options?: EnumOptions<T[number]>,
 	) => $Type<Text, T[number]>
 	id: (_prefix: string) => IsPrimaryKey<Text>
 	integer: (name: string, _constraints?: IntegerConstraints) => SQLiteIntegerBuilder
@@ -79,8 +79,8 @@ export const c: SqliteColumns = {
 		withCombColumn(integer(name, { mode: "number" }), { constraints, kind: "deletedAt" }),
 
 	/* Enum stored as text with type annotation */
-	enum: <T extends readonly string[]>(name: string, values: T, states?: EnumStates<T[number]>) =>
-		withCombColumn(text(name).$type<T[number]>(), { kind: "enum", states, values }),
+	enum: <T extends readonly string[]>(name: string, values: T, options?: EnumOptions<T[number]>) =>
+		withCombColumn(text(name).$type<T[number]>(), enumMeta(values, options)),
 
 	/* Text primary key — prefix is type-erased metadata for codegen */
 	id: (prefix: string) => {

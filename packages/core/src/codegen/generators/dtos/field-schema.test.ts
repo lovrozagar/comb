@@ -474,3 +474,21 @@ describe("generateFieldSchema: a Postgres array column (F49)", () => {
 		expect(read.safeParse("a").success).toBe(false)
 	})
 })
+
+/* F8 of the 0.14.1 review: a write DTO of bounds no integer meets refuses every value */
+describe("generateFieldSchema: an integer's bounds that leave no integer", () => {
+	it("fails codegen naming the column, whether the bounds hold no integer or none the column holds", () => {
+		expect(() => schema("n", 'c.integer("n", { min: 1.5, max: 1.7 })', "create")).toThrow(
+			"n: its bounds min 1.5 and max 1.7 leave no integer the column holds; widen them",
+		)
+		expect(() => schema("n", 'c.integer("n", { min: 9007199254740992 })', "create")).toThrow(
+			"n: its bounds min 9007199254740992 and max 9007199254740991 leave no integer the column holds; widen them",
+		)
+	})
+
+	it("takes bounds with an integer between them, a fractional one included", () => {
+		expect(schema("n", 'c.integer("n", { min: 1.5, max: 2.5 })', "create")).toMatch(
+			/^z\.number\(\)\.int\(\)\.min\(1\.5\)\.max\(2\.5\)/,
+		)
+	})
+})

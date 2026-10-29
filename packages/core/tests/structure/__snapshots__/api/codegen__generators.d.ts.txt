@@ -617,7 +617,15 @@ declare function withCombColumn<B>(builder: B, meta: {
 }): B;
 /** The comb metadata a built column (or its builder) carries; undefined for a column no `c` helper built */
 declare function combColumnMeta(column: unknown): CombColumnMeta | undefined;
-export { combColumnMeta, withCombColumn, type CombColumnKind, type CombColumnMeta };
+/** A c.enum's options as its column's record: the flags its constraints, the rest its state machine, none when it names no state (F9) */
+declare function enumMeta(values: readonly string[], options?: {
+    nomutate?: boolean | undefined;
+    private?: boolean | undefined;
+    tenant?: boolean | undefined;
+}): {
+    [K in keyof CombColumnMeta]: CombColumnMeta[K] | undefined;
+};
+export { combColumnMeta, enumMeta, withCombColumn, type CombColumnKind, type CombColumnMeta };
 
 // meta.d.ts
 /**

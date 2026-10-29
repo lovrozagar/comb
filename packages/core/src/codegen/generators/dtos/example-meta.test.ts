@@ -52,6 +52,10 @@ describe("generateExampleMeta", () => {
 		expect(code('c.integer("f")')).toBe(".meta(_m.integer)")
 		expect(code('c.integer("f", { min: 100 })')).toBe(".meta({ examples: [100] })")
 		expect(code('c.integer("f", { max: 7 })')).toBe(".meta({ examples: [7] })")
+		/* F8 of the 0.14.1 review: an integer example is an integer within fractional bounds */
+		expect(code('c.integer("f", { min: 1.2, max: 2.1 })')).toBe(".meta({ examples: [2] })")
+		expect(code('c.integer("f", { min: 100.5 })')).toBe(".meta({ examples: [101] })")
+		expect(code('c.integer("f", { max: -7.5 })')).toBe(".meta({ examples: [-8] })")
 		expect(code('c.real("f", { min: 1, max: 3 })')).toBe(".meta({ examples: [2] })")
 		expect(code('c.real("f", { min: 0, max: 3 })')).toBe(".meta(_m.real)")
 		expect(code('c.real("f", { min: 0, max: 1 })')).toBe(".meta(_m.real)")

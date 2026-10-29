@@ -7,7 +7,7 @@
 import { type $Type, type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
 import { type SQLiteBooleanBuilder, type SQLiteIntegerBuilder, type SQLiteRealBuilder, type SQLiteTextBuilder, type SQLiteTextJsonBuilder } from "drizzle-orm/sqlite-core";
 import type * as z from "zod";
-import type { EnumStates, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "./constraints.ts";
+import type { EnumOptions, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "./constraints.ts";
 type Text = SQLiteTextBuilder<[string, ...string[]]>;
 type CreatedAtName = "createdAt" | "created_at";
 type DeletedAtName = "deletedAt" | "deleted_at";
@@ -17,7 +17,7 @@ export type SqliteColumns = {
     boolean: (name: string) => SQLiteBooleanBuilder;
     createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => HasDefault<NotNull<SQLiteIntegerBuilder>>;
     deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => SQLiteIntegerBuilder;
-    enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) => $Type<Text, T[number]>;
+    enum: <T extends readonly string[]>(name: string, _values: T, _options?: EnumOptions<T[number]>) => $Type<Text, T[number]>;
     id: (_prefix: string) => IsPrimaryKey<Text>;
     integer: (name: string, _constraints?: IntegerConstraints) => SQLiteIntegerBuilder;
     json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) => $Type<SQLiteTextJsonBuilder, z.infer<TSchema>>;
@@ -127,4 +127,6 @@ export type EnumStates<TState extends string = string> = {
     /** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
     transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined;
 };
+/** What c.enum takes beside its values: its state machine, and the flags every c helper takes (F9) */
+export type EnumOptions<TState extends string = string> = EnumStates<TState> & Pick<BaseConstraints, "nomutate" | "private" | "tenant">;
 export {};

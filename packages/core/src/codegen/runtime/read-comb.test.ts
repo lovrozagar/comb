@@ -54,4 +54,11 @@ describe("statesOf", () => {
 		for (const raw of [{ initial: 1 }, { terminal: "b" }, { transitions: { a: "b" } }])
 			expect(() => statesOf(raw, "t.c")).toThrow("t.c: its state machine is not")
 	})
+
+	/* F9 of the 0.14.1 review: a misspelt key would leave its part of the machine unread */
+	it("refuses a key no state machine has, naming the column and the key", () => {
+		expect(() => statesOf({ inital: "a" }, "t.c")).toThrow(
+			"t.c: its state machine has inital, which is none of initial, terminal, transitions and values",
+		)
+	})
 })

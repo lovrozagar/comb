@@ -12,7 +12,7 @@ import {
 	text as sqliteText,
 } from "drizzle-orm/sqlite-core"
 import { c } from "../../sqlite/columns.ts"
-import { analyzeNamespace } from "../__fixtures__/runtime.ts"
+import { analyzeNamespace, parseField } from "../__fixtures__/runtime.ts"
 import { fixtureRoot } from "../__fixtures__/temp.ts"
 import { readTables } from "./child.ts"
 import { exportsHolding, snapshotOf } from "./read-tables.ts"
@@ -261,5 +261,18 @@ describe("snapshotOf: an error the reader did not mean", () => {
 		expect(() => snapshotOf([{ external: false, module: "/p/db.core.tables.ts", namespace: { t } }])).toThrow(
 			"comb could not read table t: chunk.inlineParams is not a function",
 		)
+	})
+})
+
+/* F9 of the 0.14.1 review: c.enum takes the flags every other c helper does, beside its state machine */
+describe("c.enum's options", () => {
+	it("reads private, nomutate and tenant beside the state machine, on both dialects", () => {
+		const source = 'c.enum("s", ["a", "b"], { initial: "a", nomutate: true, private: true, tenant: true })'
+		for (const dialect of ["sqlite", "postgres"] as const) {
+			const field = parseField("s", source, { dialect })
+			expect(field.constraints, dialect).toMatchObject({ nomutate: true, private: true, tenant: true })
+			expect(field.states, dialect).toEqual({ initial: "a", terminal: null, transitions: null })
+		}
+		expect(parseField("s", 'c.enum("s", ["a"], { private: true })').states).toBeNull()
 	})
 })

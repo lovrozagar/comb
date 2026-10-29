@@ -110,3 +110,7 @@ export type EnumStates<TState extends string = string> = {
 	/** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
 	transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined
 }
+
+/** What c.enum takes beside its values: its state machine, and the flags every c helper takes (F9) */
+export type EnumOptions<TState extends string = string> = EnumStates<TState> &
+	Pick<BaseConstraints, "nomutate" | "private" | "tenant">

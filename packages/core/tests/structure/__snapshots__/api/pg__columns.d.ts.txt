@@ -1,6 +1,6 @@
 // pg/columns.d.ts
 import { type PgBigInt53Builder, type PgBooleanBuilder, type PgDoublePrecisionBuilder, type PgIntegerBuilder, type PgJsonbBuilder, type PgSerialBuilder, type PgTextBuilder, type Set$Type, type SetHasDefault, type SetIsPrimaryKey, type SetNotNull } from "drizzle-orm/pg-core";
-import type { EnumStates, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "../sqlite/constraints.ts";
+import type { EnumOptions, IntegerConstraints, JsonConstraints, TextConstraints, TimestampConstraints } from "../sqlite/constraints.ts";
 import type * as z from "zod";
 type Text = PgTextBuilder<[string, ...string[]]>;
 type CreatedAtName = "createdAt" | "created_at";
@@ -15,7 +15,7 @@ type PgColumns = {
     boolean: (name: string) => PgBooleanBuilder;
     createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => SetHasDefault<SetNotNull<PgBigInt53Builder>>;
     deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => PgBigInt53Builder;
-    enum: <T extends readonly string[]>(name: string, _values: T, _states?: EnumStates<T[number]>) => Set$Type<Text, T[number]>;
+    enum: <T extends readonly string[]>(name: string, _values: T, _options?: EnumOptions<T[number]>) => Set$Type<Text, T[number]>;
     id: (_prefix: string) => SetIsPrimaryKey<Text>;
     integer: (name: string, _constraints?: IntegerConstraints) => PgIntegerBuilder;
     json: <TSchema extends z.ZodTypeAny = z.ZodTypeAny>(name: string, _schema: TSchema, _constraints?: JsonConstraints) => Set$Type<PgJsonbBuilder, z.infer<TSchema>>;
@@ -125,4 +125,6 @@ export type EnumStates<TState extends string = string> = {
     /** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
     transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined;
 };
+/** What c.enum takes beside its values: its state machine, and the flags every c helper takes (F9) */
+export type EnumOptions<TState extends string = string> = EnumStates<TState> & Pick<BaseConstraints, "nomutate" | "private" | "tenant">;
 export {};

@@ -21,9 +21,18 @@ function constraintsOf(raw: unknown, at: string): Record<string, boolean | numbe
 	return constraints
 }
 
+/* the keys a c.enum's state machine has; values, which docs/state-machines.md §4 holds in the same const, read from c.enum's second argument */
+const STATE_KEYS = ["initial", "terminal", "transitions", "values"]
+
 /** A c.enum column's state machine as JSON; an error naming the column for one of another shape */
 function statesOf(raw: unknown, at: string): SnapshotComb["states"] {
 	if (raw === undefined) return null
+	/* a misspelt key would leave its part of the machine unread (F9) */
+	const unknown = Object.keys(raw as object).find((key) => !STATE_KEYS.includes(key))
+	if (unknown !== undefined)
+		throw new Error(
+			`${at}: its state machine has ${unknown}, which is none of initial, terminal, transitions and values`,
+		)
 	const { initial, terminal, transitions } = raw as Record<string, unknown>
 	const map = transitions as Record<string, unknown> | undefined
 	const valid =

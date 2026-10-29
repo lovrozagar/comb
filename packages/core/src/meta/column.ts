@@ -45,4 +45,21 @@ function combColumnMeta(column: unknown): CombColumnMeta | undefined {
 	return config?.[COMB_COLUMN] as CombColumnMeta | undefined
 }
 
-export { combColumnMeta, withCombColumn, type CombColumnKind, type CombColumnMeta }
+/** A c.enum's options as its column's record: the flags its constraints, the rest its state machine, none when it names no state (F9) */
+function enumMeta(
+	values: readonly string[],
+	options: { nomutate?: boolean | undefined; private?: boolean | undefined; tenant?: boolean | undefined } = {},
+): { [K in keyof CombColumnMeta]: CombColumnMeta[K] | undefined } {
+	const { nomutate, private: hidden, tenant, ...states } = options
+	const flags = { nomutate, private: hidden, tenant }
+	const flagged = Object.values(flags).some((flag) => flag !== undefined)
+	return {
+		constraints: flagged ? flags : undefined,
+		kind: "enum",
+		/* a machine given alone is kept as the very object passed, as assertTransition takes it too */
+		states: Object.keys(states).length === 0 ? undefined : flagged ? states : options,
+		values,
+	}
+}
+
+export { combColumnMeta, enumMeta, withCombColumn, type CombColumnKind, type CombColumnMeta }

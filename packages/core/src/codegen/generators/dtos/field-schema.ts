@@ -86,6 +86,18 @@ function integerRange(field: FieldMeta, dialect: Build["dialect"]): Range {
 const clamp = (declared: number | null, bound: number | string, pick: (a: number, b: number) => number) =>
 	declared === null ? bound : typeof bound === "number" ? pick(declared, bound) : declared
 
+/** A bound as the number it is: SAFE names a JS number's exact range */
+const numberOf = (bound: number | string): number =>
+	typeof bound === "number" ? bound : bound === SAFE.max ? Number.MAX_SAFE_INTEGER : Number.MIN_SAFE_INTEGER
+
+/** Refuses an integer's bounds, clamped to what the column holds, that leave no integer: every write would be refused (F8) */
+function refuseNoInteger(name: string, annotations: FieldConstraints, range: Range): void {
+	const min = numberOf(clamp(annotations.min, range.min, Math.max))
+	const max = numberOf(clamp(annotations.max, range.max, Math.min))
+	if (Math.ceil(min) > Math.floor(max))
+		throw new Error(`${name}: its bounds min ${min} and max ${max} leave no integer the column holds; widen them`)
+}
+
 /**
  * An integer: written, the declared bounds clamped to what the column holds; read, what the column
  * holds, the declared bounds stated (F65)
@@ -107,9 +119,16 @@ function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 	if (kind === "createdAt" || kind === "updatedAt" || kind === "deletedAt") return "timestampSchema"
 	if (kind === "boolean") return "z.boolean()"
 	/* a date before 1970 is a negative epoch, which both engines store (F11) */
-	if (kind === "timestamp") return integerOf(annotations, SAFE, schemaType)
+	if (kind === "timestamp") {
+		refuseNoInteger(field.name, annotations, SAFE)
+		return integerOf(annotations, SAFE, schemaType)
+	}
 	const integer = kind === null ? field.dataType.startsWith("number int") : kind === "integer" || kind === "serialId"
-	if (integer) return integerOf(annotations, integerRange(field, dialect), schemaType)
+	if (integer) {
+		const range = integerRange(field, dialect)
+		refuseNoInteger(field.name, annotations, range)
+		return integerOf(annotations, range, schemaType)
+	}
 	if (isRead(schemaType)) return `${READ_FLOAT}${stated({ maximum: max, minimum: min })}`
 	return `z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`
 }
