@@ -1,7 +1,7 @@
 import type { SQL } from "drizzle-orm"
 import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
-import { countLiteral, keysetSQL, orderByKeys, orderSQL } from "./keyset.ts"
+import { countLiteral, integerLiteral, keysetSQL, orderByKeys, orderSQL } from "./keyset.ts"
 
 const post = sqliteTable("post", { id: text("id").primaryKey(), score: integer("score"), title: text("title") })
 
@@ -103,5 +103,14 @@ describe("countLiteral", () => {
 		expect(new SQLiteDialect().sqlToQuery(countLiteral(42))).toEqual({ params: [], sql: "42" })
 		for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53])
 			expect(() => countLiteral(bad)).toThrow(RangeError)
+	})
+})
+
+describe("integerLiteral", () => {
+	it("writes an integer past 2^53 as its exact digits, and refuses anything but an integer", () => {
+		const sqlite = new SQLiteDialect()
+		expect(sqlite.sqlToQuery(integerLiteral(2 ** 60))).toEqual({ params: [], sql: "1152921504606846976" })
+		expect(sqlite.sqlToQuery(integerLiteral(-(2 ** 60))).sql).toBe("-1152921504606846976")
+		for (const bad of [1.5, Number.NaN, Number.POSITIVE_INFINITY]) expect(() => integerLiteral(bad)).toThrow(RangeError)
 	})
 })

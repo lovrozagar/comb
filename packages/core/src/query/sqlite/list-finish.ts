@@ -9,7 +9,7 @@ import { combErrorKeys } from "../../types.ts"
 import type { CursorOptions } from "../cursor.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
 import { COMB_ID, type ListExtra, type ListPagination, type PaginationFacts, paginationOf } from "../pagination.ts"
-import { assertPageWithin } from "../trusted.ts"
+import { assertLimitWithin, assertPageWithin } from "../trusted.ts"
 import type { ListQueryInput, SortField } from "../types.ts"
 import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts"
 import { readsBack } from "./cursor-fit.ts"
@@ -145,6 +145,7 @@ function finishOffset(list: Finish): Finished {
  */
 function finish(given: Finish): Finished {
 	assertCursorWired(given.cursor)
+	assertLimitWithin(given.parsed)
 	return given.parsed.cursor ? finishCursor(given, given.parsed.cursor) : finishOffset(given)
 }
 

@@ -15,7 +15,7 @@ import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts"
 import { anchorGone, keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
 import { applySelect, type ListExtra, type ListPagination, paginate, paginationOf } from "./pagination.ts"
-import { assertPageWithin, assertSchemaParsed } from "./trusted.ts"
+import { assertLimitWithin, assertPageWithin, assertSchemaParsed } from "./trusted.ts"
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
 
 /** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
@@ -73,6 +73,7 @@ const countOver = (): SQL<number> => sql<number>`cast(count(*) over() as integer
  */
 function drizzleListOptions(query: ListQueryInput, options: CursorOptions): DrizzleListOptions {
 	assertSchemaParsed(query)
+	assertLimitWithin(query)
 	/* options that cannot seal are a wiring mistake on page 1 too, not only once a cursor comes back */
 	assertCursorWired(options)
 	const sort = query.parsedSort

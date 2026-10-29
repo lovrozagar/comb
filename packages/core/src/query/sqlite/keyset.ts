@@ -43,6 +43,15 @@ function countText(value: number): string {
 /** A count as a SQL literal, where a bound parameter would cost the D1 budget one */
 const countLiteral = (value: number): SQL => sql.raw(countText(value))
 
+/** An integer as SQL text, past 2^53 included, its exact digits: checked, so nothing but a sign and digits reaches sql.raw */
+function integerText(value: number): string {
+	if (!Number.isInteger(value)) throw new RangeError(`not an integer: ${value}`)
+	return BigInt(value).toString()
+}
+
+/** An integer a JS number holds as a SQL literal, where a bound parameter would cost the D1 budget one (Q15 of r17) */
+const integerLiteral = (value: number): SQL => sql.raw(integerText(value))
+
 /**
  * A bound the keyset reads from the cursor's own row (cursor-ref.ts) rather than binds: a long text
  * value carried by reference, or a seconds-mode timestamp, whose fraction no Date holds (`row`); or
@@ -160,6 +169,7 @@ export {
 	AnchorBound,
 	anchorGone,
 	countLiteral,
+	integerLiteral,
 	type KeysetPosition,
 	keysetSQL,
 	orderByKeys,

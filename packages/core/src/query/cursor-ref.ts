@@ -33,7 +33,7 @@ import { combErrorKeys } from "../types.ts"
 import { CursorRef, effectiveNulls, lossy } from "./cursor.ts"
 import { cursorPrecision } from "./cursor-precision.ts"
 import { inSeconds } from "./sqlite/cursor-fit.ts"
-import { AnchorBound, countLiteral, type SortKey } from "./sqlite/keyset.ts"
+import { AnchorBound, countLiteral, integerLiteral, type SortKey } from "./sqlite/keyset.ts"
 
 /* drizzle's own keys for a table's name before any alias, and its schema */
 const ORIGINAL_NAME = /* @__PURE__ */ Symbol.for("drizzle:OriginalName")
@@ -186,9 +186,13 @@ function infiniteBound({ column, direction, nulls }: SortKey, at: Anchor): SQL {
 	return sql`(SELECT CASE WHEN count(*) = 0 THEN ${gone} WHEN max(${column}) IN (9e999, -9e999) THEN max(${column}) END FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id})`
 }
 
-/** A rounded integer key: the row's own exact value, the cursor's once the row is gone */
+/**
+ * A rounded integer key: the row's own exact value, the cursor's once the row is gone. The cursor's
+ * is written as the integer it is, digits only, as secondsBound writes its milliseconds, so the bound
+ * costs the D1 budget the id alone (Q15 of r17)
+ */
 const exactBound = ({ column }: SortKey, value: number, at: Anchor): SQL =>
-	sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${value})`
+	sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${integerLiteral(value)})`
 
 /** A 500 when a list with no table to read from got a reference: paginate was not told the list is derived */
 function assertNoReference(values: readonly unknown[]): void {

@@ -2,12 +2,13 @@ import { srcPath } from "./scope.js"
 
 /* sql.raw is the one injection vector in a parameterized query builder. It stays in the three
  * builders that need it, and what it splices in is fixed text, an identifier quoteIdent quoted, or
- * a count countText checked to be digits. */
+ * a count countText or an integer integerText checked to be digits. */
 const FILES = new Set(["query/sqlite/search.ts", "query/sqlite/keyset.ts", "query/sqlite/filter-sql.ts"])
 
 const PLACE = "sql.raw belongs to query/sqlite/{search,keyset,filter-sql}.ts; build the query with sql``"
-const ARG = "sql.raw takes a string literal, a ternary of string literals, quoteIdent(…) or countText(…)"
-const SANCTIONED = new Set(["countText", "quoteIdent"])
+const ARG =
+	"sql.raw takes a string literal, a ternary of string literals, quoteIdent(…), countText(…) or integerText(…)"
+const SANCTIONED = new Set(["countText", "integerText", "quoteIdent"])
 
 function isFixedText(node) {
 	if (node.type === "Literal") return typeof node.value === "string"

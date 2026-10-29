@@ -52,6 +52,20 @@ function assertPageWithin(parsed: {
 		throw pageTooDeep(page, PAGINATION_DEFAULTS.maxPage)
 }
 
+/**
+ * Throw a 400 for a limit that is not a whole number from 1, which reaches LIMIT and OFFSET as a
+ * page does (Q16 of r17); a schema's own limit is one already. The key is the page's, so an app's
+ * map of error keys needs no new one
+ */
+function assertLimitWithin(parsed: { limit: number }): void {
+	if (Number.isInteger(parsed.limit) && parsed.limit >= 1) return
+	throw new CombError({
+		cause: `limit ${String(parsed.limit)} is not a whole number from 1`,
+		errorKey: combErrorKeys.INVALID_PAGE,
+		status: "bad_request",
+	})
+}
+
 /** The 400 for a page that is no whole number from 1, from a list schema or from a builder (U36) */
 function invalidPage(page: unknown): CombError {
 	return new CombError({
@@ -70,4 +84,4 @@ function pageTooDeep(page: number, maxPage: number): CombError {
 	})
 }
 
-export { assertPageWithin, assertSchemaParsed, invalidPage, pageTooDeep }
+export { assertLimitWithin, assertPageWithin, assertSchemaParsed, invalidPage, pageTooDeep }
