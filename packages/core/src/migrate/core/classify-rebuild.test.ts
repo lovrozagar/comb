@@ -111,7 +111,7 @@ CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN SELECT 1; END;`
 		const rated = classifyMigration(rebuildPost(again), { before: history, dialect: "sqlite" })
 		expect(rated.cautiousStatements).toEqual(["DROP TABLE `post` (rebuilds post, copying every column)"])
 		expect(rated.unsafeStatements).toEqual([
-			"CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN SELECT 1; END (comb does not recognize CREATE TRIGGER; approve it in the file)",
+			"CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN SELECT 1; END (comb rates every trigger change unsafe; approve it in the file)",
 		])
 	})
 })

@@ -58,7 +58,7 @@ describe("classifyMigration lists a statement at its strictest level alone", () 
 			"CREATE OR REPLACE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM t; RETURN NEW; END $$;"
 		const c = classifyMigration(replaced, { before, dialect: "postgres" })
 		expect(c.unsafeStatements).toEqual([
-			expect.stringContaining("comb does not recognize CREATE OR REPLACE FUNCTION"),
+			expect.stringContaining("comb rates every function change unsafe"),
 			expect.stringContaining("creates function f, whose body comb does not read"),
 		])
 		expect(c.cautiousStatements).toEqual([])
@@ -139,8 +139,10 @@ describe("classifyMigration on hand-written Postgres that keeps every row", () =
 		"CREATE FUNCTION f() RETURNS void AS $$ DROP TABLE post $$ LANGUAGE sql",
 		"CREATE OR REPLACE FUNCTION f() RETURNS int AS $$ SELECT 1 $$ LANGUAGE sql",
 		"DO $$ BEGIN EXECUTE format('DROP TABLE %I', 'post'); END $$",
-	])("calls %j unsafe: no shape comb recognizes", (sql) => {
-		expect(pg(sql).unsafeStatements.join("\n")).toMatch(/comb does not recognize/)
+	])("calls %j unsafe: default-deny's rule for triggers and routines", (sql) => {
+		expect(pg(sql).unsafeStatements.join("\n")).toMatch(
+			/comb rates every (?:trigger|function) change unsafe|comb rates every DO block unsafe/,
+		)
 	})
 })
 
@@ -407,7 +409,7 @@ describe("classifyMigration on a call of a routine the file creates (M2)", () =>
 		["CREATE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION wipe();", "a trigger"],
 	])("rates %j unsafe when the routine's body deletes rows (%s)", (call) => {
 		expect(levelOf(`${wipe}${call}`, call)).toBe("unsafe")
-		expect(pg(wipe).unsafeStatements.join("\n")).toMatch(/comb does not recognize CREATE FUNCTION/)
+		expect(pg(wipe).unsafeStatements.join("\n")).toContain("comb rates every function change unsafe")
 	})
 
 	/* a routine's body is code comb does not read, in any language: its creation and every call are unsafe */

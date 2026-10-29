@@ -118,12 +118,28 @@ function policyNote(code: string): string | undefined {
 	return `changes which rows ${who.join(", ")} ${sees} on ${unquote(table)}`
 }
 
-/** The first words of a statement comb does not recognize, as its reason names it */
+/** The first words of a statement comb does not recognize, as its reason names it, a TEMP or TEMPORARY left out */
 function kindOf(code: string): string {
 	return code
+		.replace(/^(CREATE (?:OR REPLACE )?)(?:TEMP|TEMPORARY) /i, "$1")
 		.split(" ")
 		.slice(0, /^(?:CREATE|ALTER|DROP) OR REPLACE\b/i.test(code) ? 4 : 2)
 		.join(" ")
+}
+
+/* the families default-deny rates unsafe by rule, whatever else comb reads of them: made, replaced, altered or dropped */
+const DENIED =
+	/^(?:(?:CREATE (?:OR REPLACE )?(?:(?:TEMP|TEMPORARY) )?(?:CONSTRAINT )?|ALTER |DROP )(TRIGGER|FUNCTION|PROCEDURE|RULE)\b|(DO)\b)/i
+
+/**
+ * Why comb rates an unrecognized statement unsafe: the rule, for a trigger or a routine, which
+ * another reading may describe as well; else that it does not recognize it (S10, P16 of the 0.15.0 review)
+ */
+function unrecognized(code: string): string {
+	const [, family, block] = DENIED.exec(code) ?? []
+	if (block !== undefined) return "comb rates every DO block unsafe; approve it in the file"
+	if (family !== undefined) return `comb rates every ${family.toLowerCase()} change unsafe; approve it in the file`
+	return `comb does not recognize ${kindOf(code)}; approve it in the file`
 }
 
 /** What the grammar makes of one top-level statement: nothing when comb recognizes it as it is */
@@ -132,7 +148,7 @@ function grammarFindings(statement: string, ctx: GrammarContext): Finding[] {
 	const code = statement.replace(/^EXPLAIN (?:\([^)]*\) )?(?:(?:ANALYZE|ANALYSE|VERBOSE) )*/i, "")
 	const recognized = ctx.dialect === "postgres" ? [...RECOGNIZED, PG_TRANSACTION] : RECOGNIZED
 	if (!recognized.some((shape) => shape.test(code)) && !isFtsSync(code, ctx))
-		return [{ level: "unsafe", note: `comb does not recognize ${kindOf(code)}; approve it in the file` }]
+		return [{ level: "unsafe", note: unrecognized(code) }]
 	const policy = policyNote(code)
 	/* a policy renamed keeps its roles and its predicate */
 	if (policy !== undefined)

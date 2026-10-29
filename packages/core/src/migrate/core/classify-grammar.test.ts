@@ -87,9 +87,40 @@ describe("default-deny: the 0.10 review's bypasses are unsafe (M1–M6)", () => 
 		expect(rate(sql, history, "postgres").safety).toBe("unsafe")
 	})
 
-	it("names what it does not recognize, and how to approve it", () => {
-		const rated = rate("CREATE TRIGGER t BEFORE INSERT ON users BEGIN SELECT 1; END;", USERS)
-		expect(rated.unsafeStatements.join("\n")).toMatch(/comb does not recognize .*; approve it in the file/)
+	it("names what it does not recognize, and how to approve it, as written but its TEMP", () => {
+		expect(rate("CREATE TEMP FOO x;", USERS).unsafeStatements).toEqual([
+			"CREATE TEMP FOO x (comb does not recognize CREATE FOO; approve it in the file)",
+		])
+	})
+})
+
+/* S10 and P16 of the 0.15.0 review: a statement comb rates is never also one it "does not recognize" */
+describe("default-deny's rule for triggers and routines, named as the rule", () => {
+	it.each([
+		["CREATE TRIGGER t AFTER INSERT ON users BEGIN DELETE FROM users; END;", "comb rates every trigger change unsafe"],
+		["CREATE TEMP TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END;", "comb rates every trigger change unsafe"],
+		["DROP TRIGGER t;", "comb rates every trigger change unsafe"],
+	])("rates %j unsafe by the rule, on SQLite", (sql, rule) => {
+		const notes = rate(sql, USERS).unsafeStatements.join("\n")
+		expect(notes).toContain(`${rule}; approve it in the file`)
+		expect(notes).not.toContain("does not recognize")
+	})
+
+	it.each([
+		[
+			"CREATE TRIGGER t2 BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION f();",
+			"comb rates every trigger change unsafe",
+		],
+		["DROP FUNCTION dbl(int);", "comb rates every function change unsafe"],
+		["CREATE OR REPLACE PROCEDURE p() LANGUAGE sql AS $$ SELECT 1 $$;", "comb rates every procedure change unsafe"],
+		["CREATE RULE r AS ON INSERT TO users DO INSTEAD NOTHING;", "comb rates every rule change unsafe"],
+		["DO $$ BEGIN PERFORM 1; END $$;", "comb rates every DO block unsafe"],
+	])("rates %j unsafe by the rule, on Postgres", (sql, rule) => {
+		const rated = rate(sql, "CREATE TABLE users (id int);", "postgres")
+		expect(rated.safety).toBe("unsafe")
+		const notes = rated.unsafeStatements.join("\n")
+		expect(notes).toContain(`${rule}; approve it in the file`)
+		expect(notes).not.toContain("does not recognize")
 	})
 })
 
