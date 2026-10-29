@@ -23,26 +23,47 @@ function redactUrl(raw: string): string {
 	return url.href.replaceAll(encodeURIComponent(REDACTED), REDACTED)
 }
 
-/** `text` percent-decoded, or as it is when it holds a `%` that starts no escape */
-const decoded = (text: string): string => (/%(?![0-9a-f]{2})/i.test(text) ? text : decodeURIComponent(text))
-
-/**
- * The secret strings a URL holds, as written and as Atlas may print them: the password is kept
- * percent-encoded by the URL, a query value comes back already decoded
- */
-function secretsOf(raw: string): string[] {
-	const url = URL.canParse(raw) ? new URL(raw) : undefined
-	if (url === undefined) return [raw]
-	const query = [...url.searchParams].filter(([key]) => SECRET_KEY.test(key)).map(([, value]) => value)
-	const secrets = [url.password, decoded(url.password), ...query.flatMap((value) => [value, encodeURIComponent(value)])]
-	return [raw, ...secrets].filter((secret) => secret !== "")
+/** `text` percent-decoded, or as written when an escape in it is malformed or decodes to no UTF-8 (P5) */
+function decoded(text: string): string {
+	try {
+		return decodeURIComponent(text)
+	} catch {
+		// reason: the text as written is still a secret to mask; no decoding of it is
+		return text
+	}
 }
 
-/** `text` with every secret of `urls` masked, the literal strings only: for a line comb prints (M79) */
+/** Each secret as written, decoded, and encoded again, as Atlas may print any of them */
+const spellings = (written: string): string[] => [written, decoded(written), encodeURIComponent(decoded(written))]
+
+/**
+ * The secret strings a URL holds, read from its text, so a URL WHATWG's URL refuses (a socket
+ * target with a password, P14) or cannot decode (P5) still has each masked: the whole URL, its
+ * password, and each secret-looking query value
+ */
+function secretsOf(raw: string): string[] {
+	const match = /^[a-z][\w+.-]*:\/\/([^/?#]*)[^?#]*(?:\?([^#]*))?/i.exec(raw)
+	if (match === null) return [raw]
+	const [, authority = "", query = ""] = match
+	const userinfo = authority.includes("@") ? authority.slice(0, authority.lastIndexOf("@")) : ""
+	const password = userinfo.includes(":") ? userinfo.slice(userinfo.indexOf(":") + 1) : ""
+	const values = query
+		.split("&")
+		.map((pair) => pair.split(/=(.*)/s))
+		.filter(([key = "", value = ""]) => SECRET_KEY.test(decoded(key)) && value !== "")
+		.map(([, value]) => value as string)
+	return [raw, ...[password, ...values].flatMap(spellings)].filter((secret) => secret !== "")
+}
+
+/* a secret masked only where it stands as a token, so a password that is also part of a name leaves the name (P18) */
+const asToken = (secret: string): RegExp =>
+	new RegExp(`(?<![\\p{L}\\p{N}_])${secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_])`, "gu")
+
+/** `text` with every secret of `urls` masked where it stands as a token, the literal strings only: for a line comb prints (M79) */
 function maskSecrets(text: string, urls: readonly string[]): string {
 	const secrets = [...new Set(urls.flatMap(secretsOf))].sort((a, b) => b.length - a.length)
 	let out = text
-	for (const secret of secrets) out = out.replaceAll(secret, REDACTED)
+	for (const secret of secrets) out = out.replace(asToken(secret), REDACTED)
 	return out
 }
 

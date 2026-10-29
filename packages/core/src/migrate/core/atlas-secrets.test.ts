@@ -36,6 +36,7 @@ describe("redactUrl and scrubAtlasOutput", () => {
 	it("masks a URL that does not parse as the whole string", () => {
 		const raw = "postgres://app:ab#cd@db/app"
 		expect(scrubAtlasOutput(`parse open url ${raw}: invalid port`, [raw])).toBe("parse open url ***: invalid port")
+		expect(scrubAtlasOutput("open not-a-url: refused", ["not-a-url"])).toBe("open ***: refused")
 	})
 })
 
@@ -48,5 +49,27 @@ describe("a secret holding a percent sign", () => {
 		)
 		const odd = "postgres://app:a%zz@db.example.com/app?sslmode=require"
 		expect(scrubAtlasOutput("auth a%zz failed", [odd])).toBe("auth *** failed")
+	})
+})
+
+/* P5 and P18 of the 0.14.1 review, and the socket targets libpq and Atlas take (P14) */
+describe("the secrets of a URL WHATWG's URL cannot decode or read", () => {
+	it("scrubs a password whose escape decodes to no UTF-8, without throwing", () => {
+		const url = "postgres://app:Zq%A7X9secret@db.example.com/app?sslmode=require"
+		expect(scrubAtlasOutput("auth Zq%A7X9secret failed", [url])).toBe("auth *** failed")
+	})
+
+	it("masks a socket target's password, which WHATWG's URL refuses with its host empty", () => {
+		const url = "postgres://app:Sock3t%2Fpw@/app?host=/run/postgresql&sslpassword=K1"
+		expect(scrubAtlasOutput("password Sock3t/pw rejected; sslpassword K1", [url])).toBe(
+			"password *** rejected; sslpassword ***",
+		)
+	})
+
+	it("masks a password where it stands as a token, and leaves it inside a longer name", () => {
+		const url = "postgres://comb:comb@db.example.com/comb?sslmode=require"
+		expect(scrubAtlasOutput('relation "comb_jobs" does not exist (database comb)', [url])).toBe(
+			'relation "comb_jobs" does not exist (database ***)',
+		)
 	})
 })

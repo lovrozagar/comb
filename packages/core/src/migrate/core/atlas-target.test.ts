@@ -80,6 +80,21 @@ describe("pgUrlProblems", () => {
 const refusals = (devUrl: string, url: string) => pgUrlProblems(target({ devUrl, url })).errors
 
 /* P14 and P19 of the 0.14.1 review: libpq and Atlas take a socket target with a password, and send it no password over a network */
+/* P5 of the 0.14.1 review: a password escape that decodes to no UTF-8 is one Atlas would echo a fragment of */
+describe("pgUrlProblems: a password escape that is no UTF-8", () => {
+	it("refuses it with the encode hint, never naming it", () => {
+		for (const url of [
+			"postgres://app:Zq%zzX9@db/app?sslmode=require",
+			"postgres://app:Zq%A7X9@db/app?sslmode=require",
+		]) {
+			const { errors } = pgUrlProblems(target({ url }))
+			expect(errors, url).toEqual([
+				"url is not a postgres:// URL; percent-encode special characters (#, /, ?, @) in the password",
+			])
+		}
+	})
+})
+
 describe("pgUrlProblems: a Unix socket target", () => {
 	it("takes a socket host with a user and password, and warns of no sslmode for it", () => {
 		for (const url of [
