@@ -7,7 +7,7 @@
  */
 import type { CombEntityMetaInput } from "../meta.ts"
 import { isReference } from "./analyze-field.ts"
-import type { FieldMeta, TableMeta, UniqueIndexMeta } from "./analyzer-types.ts"
+import type { FieldMeta, PartialUniqueIndexMeta, TableMeta, UniqueIndexMeta } from "./analyzer-types.ts"
 import { qualifiedName } from "./utils/table-name.ts"
 
 /**
@@ -82,10 +82,27 @@ function statesOf(table: TableMeta): CombEntityMetaInput["states"] {
 const columnUnique = (field: FieldMeta): UniqueIndexMeta | null =>
 	field.unique === null ? null : { columns: [field.name], name: field.unique }
 
+/** The names of `table`'s private columns, which never reach the document */
+const hiddenOf = (table: TableMeta): Set<string> =>
+	new Set(table.fields.filter((f) => f.constraints.private).flatMap((f) => [f.name, f.sqlName]))
+
 function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"] {
-	const hidden = new Set(table.fields.filter((f) => f.constraints.private).map((f) => f.name))
+	const hidden = hiddenOf(table)
 	const columns = table.fields.flatMap((field) => columnUnique(field) ?? [])
 	return [...table.uniqueIndexes, ...columns].filter((index) => !index.columns.some((column) => hidden.has(column)))
+}
+
+/** Whether `where` names `column` as a word of its own */
+const names = (where: string, column: string): boolean =>
+	new RegExp(`(?<![\\w$])${column.replace(/[$]/g, "\\$")}(?![\\w$])`).test(where)
+
+/** The partial unique indexes a table publishes: none over a private column, nor whose predicate names one (C7) */
+function publishedPartialUniqueIndexes(table: TableMeta): PartialUniqueIndexMeta[] {
+	const hidden = [...hiddenOf(table)]
+	return table.partialUniqueIndexes.filter(
+		(index) =>
+			!index.columns.some((column) => hidden.includes(column)) && !hidden.some((column) => names(index.where, column)),
+	)
 }
 
 /**
@@ -132,6 +149,7 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 		immutable,
 		kind: "entity",
 		name: qualifiedName(table),
+		partialUniqueIndexes: publishedPartialUniqueIndexes(table),
 		/* a private name never reaches the document (docs/meta-contract.md §8) */
 		softDelete: published.some((f) => f.name === table.timestamps.names.deletedAt)
 			? table.timestamps.names.deletedAt

@@ -85,6 +85,7 @@ kind: c.enum("kind_sql", ["a", "b"]),
 uniqueIndex("doc_owner_pin_idx").on(t.owner, t.pin),
 uniqueIndex("doc_secret_lower").on(sql\`lower(\${t.secret})\`),
 check("doc_secret_len", sql\`length(\${t.secret}) < 64\`),
+check("doc_kind_enum", sql\`\${t.kind} IN ('a', 'b')\`),
 ])
 `
 const duplicate = {
@@ -178,20 +179,26 @@ describe("buildConstraintMap: a CHECK's verdict (F27) and comb's own enum CHECKs
 		expect(check?.["data_integrity"]).toMatchObject({ cause: "Check constraint violated", statusKey: "bad_request" })
 	})
 
-	it("maps each enum column's CHECK under the name the enum-checks generator writes, cut on Postgres", () => {
+	/* C11 of the 0.14.1 review: a CHECK the table does not apply never fires, so it has no entry */
+	it("maps an enum column's CHECK the table applies, under the name the enum-checks generator writes, cut on Postgres", () => {
 		const column = "notificationDeliveryStatus"
-		const enums = (dialect: "postgres" | "sqlite") =>
-			tablesOf(
-				`${dialect === "postgres" ? PG : SQLITE}import { c } from "@lovrozagar/comb/${dialect === "postgres" ? "pg" : "sqlite"}/columns"\nexport const organization_notification = ${dialect === "postgres" ? "pgTable" : "sqliteTable"}("organization_notification", { id: text("id").primaryKey(), ${column}: c.enum("${column}", ["sent", "failed"]) })\n`,
-			)
 		const name = `organization_notification_${column}_enum`
-		expect(buildConstraintMap(enums("sqlite"))["organization_notification"]?.check?.[name]).toEqual({
+		const enums = (dialect: "postgres" | "sqlite", applied: boolean) =>
+			tablesOf(
+				`${dialect === "postgres" ? PG : SQLITE}import { c } from "@lovrozagar/comb/${dialect === "postgres" ? "pg" : "sqlite"}/columns"\nexport const organization_notification = ${dialect === "postgres" ? "pgTable" : "sqliteTable"}("organization_notification", { id: text("id").primaryKey(), ${column}: c.enum("${column}", ["sent", "failed"]) }${applied ? `, (t) => [check("${name}", sql\`\${t.${column}} IN ('sent', 'failed')\`)]` : ""})\n`,
+			)
+		expect(buildConstraintMap(enums("sqlite", true))["organization_notification"]?.check?.[name]).toEqual({
 			cause: "Invalid enum value",
 			errorKey: `organization_notification_${column}_enum_invalid`,
 			statusKey: "bad_request",
 		})
-		const pg = buildConstraintMap(enums("postgres"), "postgres")["organization_notification"]?.check ?? {}
+		const pg = buildConstraintMap(enums("postgres", true), "postgres")["organization_notification"]?.check ?? {}
 		expect(Object.keys(pg)).toEqual([name.slice(0, 63)])
+		for (const dialect of ["sqlite", "postgres"] as const)
+			expect(
+				buildConstraintMap(enums(dialect, false), dialect)["organization_notification"]?.check,
+				dialect,
+			).toBeUndefined()
 	})
 })
 

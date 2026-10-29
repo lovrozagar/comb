@@ -61,6 +61,13 @@ describe("a partial unique index", () => {
 		expect(deriveEntityMeta(table)?.uniqueIndexes).toEqual([])
 	})
 
+	/* C7 of the 0.14.1 review: published apart, so a reader that knows no predicate claims no uniqueness */
+	it("is published apart, with the predicate its uniqueness holds under", () => {
+		expect(deriveEntityMeta(table)?.partialUniqueIndexes).toEqual([
+			{ columns: ["email"], name: "idx_user_email_unique", where: "deleted_at IS NULL" },
+		])
+	})
+
 	it("is in the generated constraint map with its error key", () => {
 		expect(map.user?.unique?.email?.errorKey).toBe("user_email_duplicate")
 	})

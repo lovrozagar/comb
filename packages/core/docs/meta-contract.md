@@ -241,6 +241,19 @@ validated when present, so a v1 reader built before them ignores them — which 
 did not bump `v`. Each value is computed from the config that parses the request, and
 `tests/integration/meta/query-parity.test.ts` drives the parser to prove it.
 
+### 6.8 Partial unique indexes are published apart
+
+A partial unique index (`uniqueIndex().on(...).where(...)`) makes its columns unique only among
+the rows its predicate matches, so it is no uniqueness of the column. comb published none before
+0.15; it publishes them now as `partialUniqueIndexes: [{ columns, name, where }]`, beside
+`uniqueIndexes` and never inside it. A reader built before 0.15 ignores a key it does not know: a
+`where` added to an entry of `uniqueIndexes` would be dropped, and that reader would claim a global
+uniqueness the index does not hold, the very harm leaving partial indexes out avoided. A field of
+its own is skipped whole by such a reader, so it claims nothing. `where` is the predicate as the
+index's SQL holds it. An index over a private column, or whose predicate names one, is left out,
+so a private name never reaches the document. The field was added within v1: a payload without it
+reads as `[]`, and one whose entry lacks `where` is malformed.
+
 ### 6.6 `select=` is advertised only when it can be honored
 
 The query stays fat (sort keys, id, `_total`, join keys). The response gets thin.
@@ -491,8 +504,8 @@ other query check now probes only declared columns.
 
 `internal_note` is in neither the read DTO nor any published list. `private: true`, or a name
 that starts with `_`, removes a column of any kind from the read and read-partial DTOs, and
-`deriveEntityMeta` leaves private columns out of `generated`, `immutable`, `states`, `tenantColumn`
-and `uniqueIndexes`, so a private name never reaches the document. `uniqueIndexes` holds every
+`deriveEntityMeta` leaves private columns out of `generated`, `immutable`, `states`, `tenantColumn`,
+`uniqueIndexes` and `partialUniqueIndexes` (§6.8), so a private name never reaches the document. `uniqueIndexes` holds every
 uniqueness the table declares: a `uniqueIndex()`, drizzle's `unique().on()` constraint, and a
 column's own `.unique()` (under the name it gives, else drizzle's `<table>_<column>_unique`). Private is a read-side rule:
 the create and update bodies still accept `internal_note`.

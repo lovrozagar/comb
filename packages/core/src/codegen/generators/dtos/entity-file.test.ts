@@ -37,6 +37,7 @@ const META: CombEntityMetaInput = {
 	name: "blog_post",
 	softDelete: null,
 	states: { column: "status", initial: null, terminal: ["done"], values: ["open", "done"] },
+	partialUniqueIndexes: [{ columns: ["slug"], name: "post_slug_live", where: "deleted_at IS NULL" }],
 	tenantColumn: null,
 	uniqueIndexes: [{ columns: ["slug"], name: "post_slug" }],
 }
@@ -71,6 +72,10 @@ describe("generateEntityFile", () => {
 		expect(output).toContain("export const blogPostDtoReadSchema = z.object({\n\tid: _str,\n}).meta(combMeta({")
 		expect(output).toContain('\tstates: {\n\t\tcolumn: "status",\n\t\tinitial: null,\n\t\tterminal: ["done"],')
 		expect(output).toContain('\tuniqueIndexes: [{ columns: ["slug"], name: "post_slug" }],')
+		/* C7 of the 0.14.1 review: each partial index with its predicate */
+		expect(output).toContain(
+			'\tpartialUniqueIndexes: [{ columns: ["slug"], name: "post_slug_live", where: "deleted_at IS NULL" }],',
+		)
 		expect(output).toContain("export const blogPostDtoCreateSchema = z.object({\n\tid: _str.optional(),\n})\n")
 		expect(output).not.toContain("blogPostDtoUpdateSchema")
 		expect(output).toContain("export type BlogPostDtoRead = z.infer<typeof blogPostDtoReadSchema>")

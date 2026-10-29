@@ -121,6 +121,7 @@ import { c } from "@lovrozagar/comb/sqlite/columns"
 export const seat = sqliteTable("seat", { id: c.id("set"), kind: c.enum("kind", ["a", "b"]), n: c.integer("n"), note: c.text("note") }, (t) => [
 	check("seat_n_positive", sql\`\${t.n} > 0\`),
 	check("seat_note_size", sql\`length(\${t.note}) <= 2048\`),
+	check("seat_kind_enum", sql\`\${t.kind} IN ('a', 'b')\`),
 ])
 `)
 		const en = english("db.test")
@@ -143,7 +144,7 @@ export const doc = sqliteTable("doc", {
 	secret: c.text("secret", { private: true }).unique(),
 	_owner: c.ref("owner").references(() => user.id),
 	_kind: c.enum("kind", ["a", "b"]),
-}, (t) => [check("doc_secret_len", sql\`length(\${t.secret}) < 64\`)])
+}, (t) => [check("doc_secret_len", sql\`length(\${t.secret}) < 64\`), check("doc__kind_enum", sql\`\${t._kind} IN ('a', 'b')\`)])
 `)
 		const en = english("db.test")
 		expect(en).toContain('doc_duplicate: "A record with these values already exists"')

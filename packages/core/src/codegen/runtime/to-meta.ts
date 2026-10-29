@@ -11,6 +11,7 @@ import type {
 	ImportRef,
 	TableMeta,
 	TimestampsMeta,
+	PartialUniqueIndexMeta,
 	UniqueIndexMeta,
 } from "../analyzer-types.ts"
 import { fieldConstraintsOf } from "../annotations.ts"
@@ -196,12 +197,12 @@ function uniquesOf(
 	table: SnapshotTable,
 ): Pick<TableMeta, "expressionIndexes" | "partialUniqueIndexes" | "uniqueIndexes"> {
 	const uniqueIndexes: UniqueIndexMeta[] = table.uniques.map(({ columns, name }) => ({ columns, name }))
-	const partialUniqueIndexes: UniqueIndexMeta[] = []
+	const partialUniqueIndexes: PartialUniqueIndexMeta[] = []
 	const expressionIndexes: TableMeta["expressionIndexes"] = []
 	for (const index of table.indexes.filter((each) => each.unique)) {
 		if (index.columns === null) expressionIndexes.push({ expression: index.expression, name: index.name })
-		else
-			(index.where === null ? uniqueIndexes : partialUniqueIndexes).push({ columns: index.columns, name: index.name })
+		else if (index.where === null) uniqueIndexes.push({ columns: index.columns, name: index.name })
+		else partialUniqueIndexes.push({ columns: index.columns, name: index.name, where: index.where })
 	}
 	return { expressionIndexes, partialUniqueIndexes, uniqueIndexes }
 }

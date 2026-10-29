@@ -136,6 +136,8 @@ function declaredChecks(table: TableMeta, enums: readonly FieldMeta[]): TableMet
 function checksOf(table: TableMeta, dialect: Dialect, hidden: Hidden): Record<string, Constraint> | undefined {
 	const key = (name: string) => (dialect === "postgres" ? pgIdentifier(name) : name)
 	const enums = table.fields.filter((each) => (each.enumValues?.length ?? 0) > 0)
+	/* an enum CHECK the table does not apply never fires, so it has no entry (C11) */
+	const applied = new Set(table.checkConstraints.map((chk) => chk.name))
 	const entries: Array<[string, string, Constraint]> = declaredChecks(table, enums).map((chk) => [
 		chk.name,
 		key(chk.name),
@@ -145,6 +147,7 @@ function checksOf(table: TableMeta, dialect: Dialect, hidden: Hidden): Record<st
 	])
 	for (const field of enums) {
 		const name = enumCheckName(table, field.name)
+		if (!applied.has(name)) continue
 		entries.push([
 			name,
 			key(name),

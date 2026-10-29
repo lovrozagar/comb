@@ -175,6 +175,11 @@ type UniqueIndexMeta = {
     columns: string[];
     name: string;
 };
+/** A partial (`.where()`) unique index: its columns are unique only among the rows `where` matches (C7) */
+type PartialUniqueIndexMeta = UniqueIndexMeta & {
+    /** the predicate, as the index's SQL holds it */
+    where: string;
+};
 /** A unique index whose keys are not all plain columns, keyed in the constraint map by its name */
 type ExpressionIndexMeta = {
     /** its keys as SQL */
@@ -218,8 +223,8 @@ type TableMeta = {
     sqlName: string;
     /** Detected timestamp fields and style */
     timestamps: TimestampsMeta;
-    /** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, never published as uniqueness */
-    partialUniqueIndexes: UniqueIndexMeta[];
+    /** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, published apart from uniqueness (C7) */
+    partialUniqueIndexes: PartialUniqueIndexMeta[];
     /** Unique indexes from table options */
     uniqueIndexes: UniqueIndexMeta[];
     /** Variable name (export const X = createTable...) */
@@ -247,7 +252,7 @@ type AnalysisResult = {
     /** Relative import path for the tables file */
     tablesImportPath: string;
 };
-export type { ConstantValue, ExpressionIndexMeta, ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, UniqueIndexMeta, };
+export type { ConstantValue, ExpressionIndexMeta, ImportRef, AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMeta, ForeignKeyRef, ImportsMeta, StateMachineMeta, TableMeta, TimestampsMeta, PartialUniqueIndexMeta, UniqueIndexMeta, };
 
 // codegen/annotations.d.ts
 /**
@@ -466,7 +471,7 @@ export type GeneratorContext = {
  * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
  * names is the consumer's job. See docs/meta-contract.md.
  */
-import type { UniqueIndexMeta } from "../codegen/analyzer-types.ts";
+import type { PartialUniqueIndexMeta, UniqueIndexMeta } from "../codegen/analyzer-types.ts";
 /** Reserved key. One collision surface, one version field. */
 declare const COMB_META_KEY = "x-comb";
 /**
@@ -504,10 +509,19 @@ type CombEntityMeta = {
      */
     states: CombStatesMeta | null;
     /**
-     * Unique indexes declared with `uniqueIndex()`, in the order the analyzer
-     * extracted them. Empty when none. Never inferred from PKs or column names.
+     * The uniqueness that holds over every row: a `uniqueIndex()`, a `unique().on()`
+     * constraint and a column's `.unique()`, in the order the analyzer extracted
+     * them. Empty when none. Never inferred from PKs or column names, and never a
+     * partial index, which `partialUniqueIndexes` holds.
      */
     uniqueIndexes: UniqueIndexMeta[];
+    /**
+     * Partial (`.where()`) unique indexes: their columns are unique only among the
+     * rows `where` matches. Apart from `uniqueIndexes`, so a reader that knows no
+     * predicate claims no uniqueness (docs §6.8). Added within v1, so a producer
+     * may leave it out; readCombEntityMeta reads its absence as [].
+     */
+    partialUniqueIndexes?: PartialUniqueIndexMeta[] | undefined;
 };
 /** The published subset of a column state machine — describes a lifecycle, not how to drive it. */
 type CombStatesMeta = {
@@ -577,13 +591,14 @@ type CombMetaInput = CombEntityMetaInput | CombQueryMetaInput;
 type CombMetaStamp<T extends CombMeta = CombMeta> = {
     [COMB_META_KEY]: T;
 };
-export { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, };
+export { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type PartialUniqueIndexMeta, type UniqueIndexMeta, };
 
 // meta/read.d.ts
 /**
  * Reading comb's facts off a JSON Schema. Returns null, never throws: a refused or malformed
  * payload degrades to "no facts", never to a confident wrong answer. See docs/meta-contract.md §4.
  */
+import { isRecord } from "./read-indexes.ts";
 import { type CombEntityMeta, type CombMeta, type CombQueryMeta } from "./contract.ts";
 type ReadOptions = {
     /**
@@ -595,7 +610,6 @@ type ReadOptions = {
     /** Called instead of throwing when a payload is refused or malformed. */
     onDiagnostic?: (message: string) => void;
 };
-declare function isRecord(value: unknown): value is Record<string, unknown>;
 /**
  * Read comb's facts off the ROOT of a JSON Schema.
  *
@@ -643,3 +657,21 @@ export declare function importPathFrom(fromFile: string, target: string, style?:
  * e.g. test.db.core.tables.gen.ts -> ./test.db.core.tables.gen
  */
 export declare function getTablesImportPath(tablesPath: string): string;
+
+// meta/read-indexes.d.ts
+/** The unique indexes an entity payload publishes, read as readCombEntityMeta reads them: absent, none; malformed, refused */
+import type { PartialUniqueIndexMeta, UniqueIndexMeta } from "./contract.ts";
+declare const isRecord: (value: unknown) => value is Record<string, unknown>;
+declare const isStringArray: (value: unknown) => value is string[];
+/**
+ * `uniqueIndexes` arrived in a later comb than the contract's v1, so a payload
+ * without it is normal and reads as [] — absence is not an error, only a
+ * malformed value is.
+ */
+declare function readUniqueIndexes(raw: unknown): UniqueIndexMeta[] | "invalid";
+/**
+ * `partialUniqueIndexes` arrived in 0.15, after `uniqueIndexes`: absent, it reads as []; each needs
+ * its predicate, without which it would read as the uniqueness it is not (C7)
+ */
+declare function readPartialUniqueIndexes(raw: unknown): PartialUniqueIndexMeta[] | "invalid";
+export { isRecord, isStringArray, readPartialUniqueIndexes, readUniqueIndexes };

@@ -73,6 +73,11 @@ const ENTITY_REFUSALS: Array<[string, unknown, string]> = [
 		{ ...ENTITY, uniqueIndexes: [{ columns: [], name: "x" }] },
 		"entity payload has a malformed `uniqueIndexes`",
 	],
+	[
+		"a partial index without its predicate",
+		{ ...ENTITY, partialUniqueIndexes: [{ columns: ["slug"], name: "x" }] },
+		"entity payload has a malformed `partialUniqueIndexes`",
+	],
 ]
 
 describe("readCombMeta: entity payloads", () => {

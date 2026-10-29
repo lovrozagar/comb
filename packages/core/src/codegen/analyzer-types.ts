@@ -121,6 +121,12 @@ type UniqueIndexMeta = {
 	name: string
 }
 
+/** A partial (`.where()`) unique index: its columns are unique only among the rows `where` matches (C7) */
+type PartialUniqueIndexMeta = UniqueIndexMeta & {
+	/** the predicate, as the index's SQL holds it */
+	where: string
+}
+
 /** A unique index whose keys are not all plain columns, keyed in the constraint map by its name */
 type ExpressionIndexMeta = {
 	/** its keys as SQL */
@@ -163,8 +169,8 @@ type TableMeta = {
 	sqlName: string
 	/** Detected timestamp fields and style */
 	timestamps: TimestampsMeta
-	/** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, never published as uniqueness */
-	partialUniqueIndexes: UniqueIndexMeta[]
+	/** Partial (`.where()`) unique indexes on plain columns: mapped as constraints, published apart from uniqueness (C7) */
+	partialUniqueIndexes: PartialUniqueIndexMeta[]
 	/** Unique indexes from table options */
 	uniqueIndexes: UniqueIndexMeta[]
 	/** Variable name (export const X = createTable...) */
@@ -209,5 +215,6 @@ export type {
 	StateMachineMeta,
 	TableMeta,
 	TimestampsMeta,
+	PartialUniqueIndexMeta,
 	UniqueIndexMeta,
 }

@@ -22,6 +22,7 @@ const ENTITY: CombEntityMetaInput = {
 	softDelete: null,
 	states: { column: "status", initial: "draft", terminal: ["live"], values: ["draft", "live"] },
 	tenantColumn: null,
+	partialUniqueIndexes: [],
 	uniqueIndexes: [{ columns: ["slug"], name: "post_slug" }],
 }
 

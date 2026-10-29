@@ -81,7 +81,8 @@ export const item = sqliteTable("item", { id: c.id("itm"), status: c.enum("statu
 			},
 		)
 		expect(read(dir, "src/db/db.core.enum-checks.gen.ts")).toContain("IN ('draft', 'live')")
-		expect(read(dir, "src/db/db.core.constraints.gen.ts")).toContain("item_status_enum")
+		/* the table applies no enum CHECK, so the map holds no entry for one (C11 of the 0.14.1 review) */
+		expect(read(dir, "src/db/db.core.constraints.gen.ts")).not.toContain("item_status_enum")
 	}, 120_000)
 
 	it("checks the values read through a namespace and a default import", async () => {

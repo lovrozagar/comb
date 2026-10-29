@@ -2,6 +2,7 @@
  * Reading comb's facts off a JSON Schema. Returns null, never throws: a refused or malformed
  * payload degrades to "no facts", never to a confident wrong answer. See docs/meta-contract.md §4.
  */
+import { isRecord, isStringArray, readPartialUniqueIndexes, readUniqueIndexes } from "./read-indexes.ts"
 import {
 	COMB_FILTER_GRAMMAR,
 	COMB_META_KEY,
@@ -11,7 +12,6 @@ import {
 	type CombMeta,
 	type CombQueryMeta,
 	type CombStatesMeta,
-	type UniqueIndexMeta,
 } from "./contract.ts"
 
 type ReadOptions = {
@@ -23,14 +23,6 @@ type ReadOptions = {
 	maxVersion?: number
 	/** Called instead of throwing when a payload is refused or malformed. */
 	onDiagnostic?: (message: string) => void
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-function isStringArray(value: unknown): value is string[] {
-	return Array.isArray(value) && value.every((v) => typeof v === "string")
 }
 
 /**
@@ -98,10 +90,24 @@ function readEntity(raw: Record<string, unknown>, v: number, diagnose: (m: strin
 
 	const uniqueIndexes = readUniqueIndexes(raw["uniqueIndexes"])
 	if (uniqueIndexes === "invalid") return diagnose("entity payload has a malformed `uniqueIndexes`")
+	const partialUniqueIndexes = readPartialUniqueIndexes(raw["partialUniqueIndexes"])
+	if (partialUniqueIndexes === "invalid") return diagnose("entity payload has a malformed `partialUniqueIndexes`")
 
 	/* Unknown fields are dropped, not rejected — that is what makes additive
 	   growth free for a producer newer than this reader. */
-	return { generated, identity, immutable, kind: "entity", name, softDelete, states, tenantColumn, uniqueIndexes, v }
+	return {
+		generated,
+		identity,
+		immutable,
+		kind: "entity",
+		name,
+		partialUniqueIndexes,
+		softDelete,
+		states,
+		tenantColumn,
+		uniqueIndexes,
+		v,
+	}
 }
 
 /**
@@ -125,26 +131,6 @@ function readStates(raw: unknown): CombStatesMeta | null | "invalid" {
 	if (!terminal.every((state) => values.includes(state))) return "invalid"
 
 	return { column, initial: initial ?? null, terminal, values }
-}
-
-/**
- * `uniqueIndexes` arrived in a later comb than the contract's v1, so a payload
- * without it is normal and reads as [] — absence is not an error, only a
- * malformed value is.
- */
-function readUniqueIndexes(raw: unknown): UniqueIndexMeta[] | "invalid" {
-	if (raw === undefined) return []
-	if (!Array.isArray(raw)) return "invalid"
-
-	const indexes: UniqueIndexMeta[] = []
-	for (const item of raw) {
-		if (!isRecord(item)) return "invalid"
-		const columns = item["columns"]
-		const name = item["name"]
-		if (!isStringArray(columns) || columns.length === 0 || typeof name !== "string") return "invalid"
-		indexes.push({ columns, name })
-	}
-	return indexes
 }
 
 type Diagnose = (m: string) => null

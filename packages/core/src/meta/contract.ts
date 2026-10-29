@@ -5,7 +5,7 @@
  * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
  * names is the consumer's job. See docs/meta-contract.md.
  */
-import type { UniqueIndexMeta } from "../codegen/analyzer-types.ts"
+import type { PartialUniqueIndexMeta, UniqueIndexMeta } from "../codegen/analyzer-types.ts"
 
 /** Reserved key. One collision surface, one version field. */
 const COMB_META_KEY = "x-comb"
@@ -49,10 +49,19 @@ type CombEntityMeta = {
 	 */
 	states: CombStatesMeta | null
 	/**
-	 * Unique indexes declared with `uniqueIndex()`, in the order the analyzer
-	 * extracted them. Empty when none. Never inferred from PKs or column names.
+	 * The uniqueness that holds over every row: a `uniqueIndex()`, a `unique().on()`
+	 * constraint and a column's `.unique()`, in the order the analyzer extracted
+	 * them. Empty when none. Never inferred from PKs or column names, and never a
+	 * partial index, which `partialUniqueIndexes` holds.
 	 */
 	uniqueIndexes: UniqueIndexMeta[]
+	/**
+	 * Partial (`.where()`) unique indexes: their columns are unique only among the
+	 * rows `where` matches. Apart from `uniqueIndexes`, so a reader that knows no
+	 * predicate claims no uniqueness (docs §6.8). Added within v1, so a producer
+	 * may leave it out; readCombEntityMeta reads its absence as [].
+	 */
+	partialUniqueIndexes?: PartialUniqueIndexMeta[] | undefined
 }
 
 /** The published subset of a column state machine — describes a lifecycle, not how to drive it. */
@@ -142,5 +151,6 @@ export {
 	type CombQueryMeta,
 	type CombQueryMetaInput,
 	type CombStatesMeta,
+	type PartialUniqueIndexMeta,
 	type UniqueIndexMeta,
 }

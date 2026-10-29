@@ -75,6 +75,7 @@ const EXPECTED_ENTITY = {
 	softDelete: "deleted_at",
 	states: null,
 	tenantColumn: null,
+	partialUniqueIndexes: [],
 	uniqueIndexes: [{ columns: ["slug"], name: "idx_article_slug" }],
 	v: 1,
 }

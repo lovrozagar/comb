@@ -56,6 +56,35 @@ describe("deriveEntityMeta: private columns", () => {
 	})
 })
 
+/* C7 of the 0.14.1 review: a partial unique index is published with its predicate, a private name in neither */
+describe("deriveEntityMeta: partial unique indexes", () => {
+	it("publishes each with its predicate, leaving out one over a private column or whose predicate names one", () => {
+		const meta = deriveEntityMeta(
+			table(
+				{
+					id: 'c.id("itm")',
+					hidden: 'c.text("hidden", { private: true })',
+					slug: 'c.text("slug")',
+					deleted_at: 'c.text("deleted_at")',
+				},
+				{
+					partialUniqueIndexes: [
+						{ columns: ["slug"], name: "item_slug_live", where: "deleted_at IS NULL" },
+						{ columns: ["hidden"], name: "item_hidden_live", where: "deleted_at IS NULL" },
+						{ columns: ["slug"], name: "item_slug_shown", where: '"hidden" = 0' },
+						/* hidden_at is no private column's name, though it starts with one */
+						{ columns: ["slug"], name: "item_slug_dated", where: "hidden_at IS NULL" },
+					],
+				},
+			),
+		)
+		expect(meta?.partialUniqueIndexes).toEqual([
+			{ columns: ["slug"], name: "item_slug_live", where: "deleted_at IS NULL" },
+			{ columns: ["slug"], name: "item_slug_dated", where: "hidden_at IS NULL" },
+		])
+	})
+})
+
 describe("deriveEntityMeta: generated", () => {
 	it.each([
 		["c.id(prefix)", 'c.id("itm")', ["id"]],

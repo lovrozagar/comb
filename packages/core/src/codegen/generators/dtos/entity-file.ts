@@ -55,6 +55,12 @@ function renderUniqueIndexes(indexes: CombEntityMetaInput["uniqueIndexes"]): str
 	return `[${indexes.map((idx) => `{ columns: ${list(idx.columns)}, name: ${JSON.stringify(idx.name)} }`).join(", ")}]`
 }
 
+/** Serialize `deriveEntityMeta`'s partialUniqueIndexes, each with its predicate (C7) */
+function renderPartialUniqueIndexes(indexes: CombEntityMetaInput["partialUniqueIndexes"] = []): string {
+	if (indexes.length === 0) return "[]"
+	return `[${indexes.map((idx) => `{ columns: ${list(idx.columns)}, name: ${JSON.stringify(idx.name)}, where: ${JSON.stringify(idx.where)} }`).join(", ")}]`
+}
+
 /**
  * Render entity facts as a TypeScript object literal. Keys are emitted in a fixed order so
  * regenerating an unchanged table produces an identical file and the checksum header stays put.
@@ -67,6 +73,7 @@ function renderCombMeta(meta: CombEntityMetaInput): string {
 		`\timmutable: ${list(meta.immutable)},`,
 		`\tkind: "entity",`,
 		`\tname: ${JSON.stringify(meta.name)},`,
+		`\tpartialUniqueIndexes: ${renderPartialUniqueIndexes(meta.partialUniqueIndexes)},`,
 		`\tsoftDelete: ${nullable(meta.softDelete)},`,
 		`\tstates: ${renderStates(meta.states)},`,
 		`\ttenantColumn: ${nullable(meta.tenantColumn)},`,
