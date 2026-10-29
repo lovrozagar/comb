@@ -69,3 +69,36 @@ describe("SET EXPRESSION (M81)", () => {
 		expect(rated.unsafeStatements.join(" ")).toContain("runs event trigger e")
 	})
 })
+
+/* P1 of the 0.15.0 review: each holds ACCESS EXCLUSIVE on what it reads (probed on Postgres 17, d5-attach-partition-lock.ts) */
+describe("ATTACH PARTITION, REFRESH MATERIALIZED VIEW and LOCK", () => {
+	it("warns that ATTACH PARTITION scans the partition under an exclusive lock, with the NOT VALID CHECK recipe", () => {
+		const rated = rate("ALTER TABLE ev ATTACH PARTITION ev_old FOR VALUES FROM ('2020-01-01') TO ('2021-01-01');")
+		expect(rated.safety).toBe("safe")
+		expect(rated.lockWarnings).toEqual([
+			expect.stringMatching(
+				/^ALTER TABLE ev ATTACH PARTITION ev_old .* \(scans ev_old under an exclusive lock to check its bound; add a CHECK constraint matching the bound NOT VALID, VALIDATE it, then ATTACH\)$/,
+			),
+		])
+	})
+
+	it("warns that a refresh that is not concurrent holds an exclusive lock, and of none for a concurrent one", () => {
+		expect(rate("REFRESH MATERIALIZED VIEW mv;").lockWarnings).toEqual([
+			"REFRESH MATERIALIZED VIEW mv (holds an exclusive lock while it runs)",
+		])
+		expect(rate("REFRESH MATERIALIZED VIEW CONCURRENTLY mv;").lockWarnings).toEqual([])
+	})
+
+	it.each([
+		["LOCK t;", "locks t against reads and writes"],
+		["LOCK TABLE t, s.u IN ACCESS EXCLUSIVE MODE;", "locks t, s.u against reads and writes"],
+		["LOCK TABLE t IN EXCLUSIVE MODE;", "locks t against writes"],
+		["LOCK TABLE t IN SHARE MODE;", "locks t against writes"],
+	])("warns what %j blocks, until the file's transaction ends", (later, blocks) => {
+		expect(rate(later).lockWarnings).toEqual([`${later.slice(0, -1)} (${blocks} until the file's transaction ends)`])
+	})
+
+	it("warns of none for a lock that blocks neither reads nor writes", () => {
+		expect(rate("LOCK TABLE t IN ROW EXCLUSIVE MODE;").lockWarnings).toEqual([])
+	})
+})

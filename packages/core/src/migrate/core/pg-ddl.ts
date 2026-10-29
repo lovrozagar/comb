@@ -17,7 +17,7 @@ import type { Finding } from "./classify-alter.ts"
 import type { FreshContext } from "./pg-fresh.ts"
 import { addColumn, inlineConstraints, REWRITES } from "./pg-column-add.ts"
 import { domainFindings } from "./pg-domain.ts"
-import { maintenanceFindings } from "./pg-maintenance.ts"
+import { attachFindings, maintenanceFindings } from "./pg-maintenance.ts"
 import { names, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
 
 // lookup-table: the ALTER TABLE commands that change which rows a role sees, or what keeps them, and lose no value
@@ -49,7 +49,6 @@ const SECURITY_COMMANDS = /* @__PURE__ */ new Set([
 const QUIET_COMMANDS = /* @__PURE__ */ new Set([
 	"AT_AddIdentity",
 	"AT_AlterConstraint",
-	"AT_AttachPartition",
 	"AT_ClusterOn",
 	"AT_DropCluster",
 	"AT_DropNotNull",
@@ -152,6 +151,7 @@ function always(cmd: Node): Finding[] {
 // lookup-table: the commands one rule rates, by subtype; undefined leaves a command to the table's rules
 const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string) => Finding[] | undefined>> = {
 	AT_AddColumn: addColumn,
+	AT_AttachPartition: (cmd) => attachFindings(written(((cmd["def"] as Node)["PartitionCmd"] as Node)["name"])),
 	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
 	AT_AddIdentity: (cmd) => [...always(cmd), ...(restarts(cmd["def"]) ? [RESTART] : [])],
 	AT_AlterColumnType: () => [{ level: "unsafe" }, { level: "lock", note: REWRITES }],
