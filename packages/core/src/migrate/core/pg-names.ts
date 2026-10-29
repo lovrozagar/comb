@@ -74,8 +74,11 @@ function followTrigger(type: string, node: Node, facts: Facts): void {
 		const table = tableOf(node["relation"], facts.schema).key
 		const name = String(node["trigname"])
 		const events = EVENTS.filter(([bit]) => ((node["events"] as number) & bit) !== 0).map(([, event]) => event)
+		/* tgtype as Postgres builds it: FOR EACH ROW's bit, the timing's (none for AFTER), the events' */
+		const tgtype =
+			(node["row"] === true ? 1 : 0) | ((node["timing"] as number | undefined) ?? 0) | (node["events"] as number)
 		const kept = (facts.triggers.get(table) ?? []).filter((each) => each.name !== name)
-		facts.triggers.set(table, [...kept, { enabled: true, events, name }])
+		facts.triggers.set(table, [...kept, { enabled: true, events, name, type: tgtype }])
 	} else if (type === "RenameStmt" && node["renameType"] === "OBJECT_TRIGGER") {
 		const table = tableOf(node["relation"], facts.schema).key
 		for (const each of facts.triggers.get(table) ?? [])

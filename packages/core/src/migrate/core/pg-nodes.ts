@@ -42,8 +42,11 @@ type Facts = {
 	 * (a join, a set operation), and how its columns name the base's, `all` for `*` (M71)
 	 */
 	views: Map<string, { base: string | undefined; columns: Map<string, string> | "all" }>
-	/** each table's triggers, with the writes that fire them */
-	triggers: Map<string, Array<{ enabled: boolean; events: TriggerEvent[]; name: string }>>
+	/**
+	 * each table's triggers, with the writes that fire them, and `type` as Postgres's tgtype holds
+	 * when and for what it fires (row, before, instead of, each event's bit) (P13)
+	 */
+	triggers: Map<string, Array<{ enabled: boolean; events: TriggerEvent[]; name: string; type: number }>>
 }
 
 /** Every node under `node`, by its type, the type's fields with it */

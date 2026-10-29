@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
-import { refuseDrift, sqliteDrift } from "./baseline-compare.ts"
+import { refuseDrift, refuseObjectDrift, sqliteDrift } from "./baseline-compare.ts"
+import { loadPostgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
 
 let dir = ""
@@ -128,5 +129,33 @@ CREATE TRIGGER post_fts_ad AFTER DELETE ON post BEGIN INSERT INTO post_fts(post_
 		)
 		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("")
 		await conn.close()
+	})
+})
+
+/* P21 of the 0.14.1 review: each kind counted apart, and its noun as many as it counts */
+describe("refuseObjectDrift: the warning over the bodies it did not compare", () => {
+	beforeAll(loadPostgresParser)
+
+	it.each([
+		[["f"], [], "1 function"],
+		[[], ["t_a", "t_b"], "2 triggers"],
+	])("counts %j and %j as %s", async (functions, triggers, counted) => {
+		const history = [
+			'CREATE TABLE t ("id" int);',
+			...functions.map((name) => `CREATE FUNCTION ${name}() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;`),
+			...triggers.map((name) => `CREATE TRIGGER ${name} AFTER INSERT ON t FOR EACH ROW EXECUTE FUNCTION g();`),
+		]
+		writeFileSync(join(dir, "m", "1_init.sql"), history.join("\n"))
+		const out: string[] = []
+		const readLive = async () => ({
+			routines: new Map(functions.map((name) => [name, { kind: "function" as const, signatures: new Set([""]) }])),
+			triggers: new Map(
+				triggers.length === 0 ? [] : [["t", new Map(triggers.map((name) => [name, { enabled: true, type: 5 }]))]],
+			),
+		})
+		await refuseObjectDrift({ print: (line) => out.push(line), readLive, target: target("x") }, join(dir, "m"))
+		expect(out).toEqual([
+			`Warning: the bodies of ${counted} were not compared: Atlas OSS cannot load them, and comb does not read them`,
+		])
 	})
 })

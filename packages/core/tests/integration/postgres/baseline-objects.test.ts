@@ -1,9 +1,9 @@
 /**
  * Plan 14's 5.4b: Atlas OSS compares a live database's tables with the history and leaves its
  * functions, procedures and triggers out without a word, so a database whose triggers differ found
- * itself in sync. A Postgres baseline compares them itself, by name, through postgres.js: a name
- * only one side has refuses the baseline, and names that match leave a warning that their bodies
- * were not compared. An extension's functions are the extension's, never the history's.
+ * itself in sync. A Postgres baseline compares them itself through postgres.js, a function by its
+ * name and arguments, a trigger by its name and how it fires (P13): one only one side has refuses
+ * the baseline, and those that match leave a warning that their bodies were not compared. An extension's functions are the extension's, never the history's.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -63,7 +63,7 @@ describe("a Postgres baseline: the functions, procedures and triggers Atlas OSS 
 			await exec(url, `${TABLE}${TRIGGER}`)
 			const { refused } = await baseline(url, devUrl, TABLE)
 			expect(refused).toBe(
-				"the database's functions and triggers are not the ones the migrations leave, so baseline records nothing:\nfunction touch: only in the database\ntrigger t_touch on t: only in the database",
+				"the database's functions and triggers are not the ones the migrations leave, so baseline records nothing:\nfunction touch(): only in the database\ntrigger t_touch on t (before insert, for each row): only in the database",
 			)
 			const client = new pg.Client({ connectionString: url })
 			await client.connect()
@@ -80,7 +80,7 @@ describe("a Postgres baseline: the functions, procedures and triggers Atlas OSS 
 		await withDevAndTarget(async (devUrl, url) => {
 			await exec(url, TABLE)
 			const { refused } = await baseline(url, devUrl, `${TABLE}${FUNCTION}`)
-			expect(refused).toMatch(/so baseline records nothing:\nfunction f: only in the migrations$/)
+			expect(refused).toMatch(/so baseline records nothing:\nfunction f\(\): only in the migrations$/)
 		})
 	}, 60_000)
 
@@ -90,7 +90,7 @@ describe("a Postgres baseline: the functions, procedures and triggers Atlas OSS 
 			const { out, refused } = await baseline(url, devUrl, `${TABLE}${FUNCTION}${TRIGGER}`)
 			expect(refused).toBeUndefined()
 			expect(out).toEqual([
-				"Warning: the bodies of 3 functions, procedures and triggers were not compared: Atlas OSS cannot load them, and comb does not read them",
+				"Warning: the bodies of 2 functions and 1 trigger were not compared: Atlas OSS cannot load them, and comb does not read them",
 				"Marked applied: 20260101000000_init.sql",
 			])
 		})
@@ -102,6 +102,58 @@ describe("a Postgres baseline: the functions, procedures and triggers Atlas OSS 
 			const { out, refused } = await baseline(url, devUrl, `CREATE EXTENSION IF NOT EXISTS pgcrypto;\n${TABLE}`)
 			expect(refused).toBeUndefined()
 			expect(out).toEqual(["Marked applied: 20260101000000_init.sql"])
+		})
+	}, 60_000)
+})
+
+/* P13 of the 0.14.1 review: a function is its name and its arguments, a trigger its name, when it fires and whether it does */
+/** The lines of a refusal's difference */
+const lines = (refused: string | undefined) => refused?.split("\n").slice(1)
+
+describe("a Postgres baseline: functions by their arguments, triggers by when they fire", () => {
+	it("refuses an overload, or arguments, the history does not make", async () => {
+		await withDevAndTarget(async (devUrl, url) => {
+			const IN = "CREATE FUNCTION f(n integer) RETURNS integer LANGUAGE sql AS $$ SELECT n $$;\n"
+			await exec(url, `${TABLE}${FUNCTION}${IN}CREATE FUNCTION g(t text) RETURNS text LANGUAGE sql AS $$ SELECT t $$;`)
+			const history = `${TABLE}${FUNCTION}CREATE FUNCTION g(n integer) RETURNS integer LANGUAGE sql AS $$ SELECT n $$;\n`
+			expect(lines((await baseline(url, devUrl, history)).refused)).toEqual([
+				"function f(int4): only in the database",
+				"function g(int4): only in the migrations",
+				"function g(text): only in the database",
+			])
+		})
+	}, 60_000)
+
+	it("refuses a trigger that fires at another time, or not at all", async () => {
+		await withDevAndTarget(async (devUrl, url) => {
+			const after = TRIGGER.replace("BEFORE INSERT", "AFTER INSERT")
+			await exec(
+				url,
+				`${TABLE}${after}CREATE TRIGGER t_off BEFORE UPDATE ON t FOR EACH ROW EXECUTE FUNCTION touch();
+ALTER TABLE t DISABLE TRIGGER t_off;`,
+			)
+			const history = `${TABLE}${TRIGGER}CREATE TRIGGER t_off BEFORE UPDATE ON t FOR EACH ROW EXECUTE FUNCTION touch();\n`
+			expect(lines((await baseline(url, devUrl, history)).refused)).toEqual([
+				"trigger t_off on t (before update, for each row): only in the migrations",
+				"trigger t_off on t (before update, for each row, disabled): only in the database",
+				"trigger t_touch on t (after insert, for each row): only in the database",
+				"trigger t_touch on t (before insert, for each row): only in the migrations",
+			])
+		})
+	}, 60_000)
+
+	it("records a history whose arrays, character types and statement triggers the database holds as written", async () => {
+		await withDevAndTarget(async (devUrl, url) => {
+			const both = `${TABLE}CREATE FUNCTION h(a integer[], b character varying, c timestamp with time zone) RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$;
+CREATE FUNCTION touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+CREATE TRIGGER t_seen AFTER INSERT OR DELETE ON t FOR EACH STATEMENT EXECUTE FUNCTION touch();\n`
+			await exec(url, both)
+			const { out, refused } = await baseline(url, devUrl, both)
+			expect(refused).toBeUndefined()
+			expect(out).toEqual([
+				"Warning: the bodies of 2 functions and 1 trigger were not compared: Atlas OSS cannot load them, and comb does not read them",
+				"Marked applied: 20260101000000_init.sql",
+			])
 		})
 	}, 60_000)
 })

@@ -214,9 +214,13 @@ async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?
 			`${refusal ?? "the database's functions and triggers are not the ones the migrations leave, so baseline records nothing"}:\n${differ.join("\n")}`,
 		)
 	}
-	if (matched > 0)
+	const counted = [
+		...(matched.routines === 0 ? [] : [`${matched.routines} function${matched.routines === 1 ? "" : "s"}`]),
+		...(matched.triggers === 0 ? [] : [`${matched.triggers} trigger${matched.triggers === 1 ? "" : "s"}`]),
+	]
+	if (counted.length > 0)
 		options.print(
-			`Warning: the bodies of ${matched} function${matched === 1 ? "" : "s"}, procedures and triggers were not compared: Atlas OSS cannot load them, and comb does not read them`,
+			`Warning: the bodies of ${counted.join(" and ")} were not compared: Atlas OSS cannot load them, and comb does not read them`,
 		)
 }
 

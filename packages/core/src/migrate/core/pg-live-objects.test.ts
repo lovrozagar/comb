@@ -24,21 +24,30 @@ function fakeConnect(answer: { error?: Error; rows?: Array<Record<string, unknow
 
 /* plan 14's 5.4b: what the database holds of what Atlas OSS does not compare */
 describe("readLiveObjects", () => {
-	it("reads each routine's kind and each table's triggers in the target schema, and closes the connection", async () => {
+	it("reads each routine's overloads and each table's triggers in the target schema, and closes the connection", async () => {
 		const { load, seen } = fakeConnect({
 			rows: [
-				{ kind: "function", name: "f", on_table: null, what: "routine" },
-				{ kind: "procedure", name: "p", on_table: null, what: "routine" },
-				{ kind: null, name: "t_ai", on_table: "t", what: "trigger" },
-				{ kind: null, name: "t_bu", on_table: "t", what: "trigger" },
+				{ kind: "function", name: "f", on_table: null, signature: "", what: "routine" },
+				{ kind: "function", name: "f", on_table: null, signature: "int4,text[]", what: "routine" },
+				{ kind: "procedure", name: "p", on_table: null, signature: "other.mood", what: "routine" },
+				{ enabled: true, name: "t_ai", on_table: "t", tgtype: 5, what: "trigger" },
+				{ enabled: false, name: "t_bu", on_table: "t", tgtype: 19, what: "trigger" },
 			],
 		})
 		expect(await readLiveObjects(TARGET, load)).toEqual({
 			routines: new Map([
-				["f", "function"],
-				["p", "procedure"],
+				["f", { kind: "function", signatures: new Set(["", "int4,text[]"]) }],
+				["p", { kind: "procedure", signatures: new Set(["other.mood"]) }],
 			]),
-			triggers: new Map([["t", new Set(["t_ai", "t_bu"])]]),
+			triggers: new Map([
+				[
+					"t",
+					new Map([
+						["t_ai", { enabled: true, type: 5 }],
+						["t_bu", { enabled: false, type: 19 }],
+					]),
+				],
+			]),
 		})
 		expect(seen).toEqual({ ended: true, params: ["app"], url: TARGET.url })
 	})
@@ -95,26 +104,47 @@ describe("liveDrift", () => {
 		)
 		const live = {
 			routines: new Map([
-				["f", "function" as const],
-				["k", "procedure" as const],
+				["f", { kind: "function" as const, signatures: new Set([""]) }],
+				["k", { kind: "procedure" as const, signatures: new Set(["int4"]) }],
 			]),
-			triggers: new Map([["t", new Set(["t_ai", "t_x"])]]),
+			triggers: new Map([
+				[
+					"t",
+					new Map([
+						["t_ai", { enabled: true, type: 5 }],
+						["t_x", { enabled: true, type: 64 | 8 | 32 }],
+					]),
+				],
+			]),
 		}
 		expect(liveDrift(history, live)).toEqual({
-			matched: 2,
+			matched: { routines: 1, triggers: 1 },
 			only: [
-				"function g: only in the migrations",
-				"procedure k: only in the database",
-				"trigger t_x on t: only in the database",
+				"function g(): only in the migrations",
+				"procedure k(int4): only in the database",
+				"trigger t_x on t (instead of delete or truncate, for each statement): only in the database",
 			],
 		})
 	})
 
 	it("is a match of kind as well as name", () => {
-		const live = { routines: new Map([["f", "procedure" as const]]), triggers: new Map<string, Set<string>>() }
+		const live = {
+			routines: new Map([["f", { kind: "procedure" as const, signatures: new Set([""]) }]]),
+			triggers: new Map<string, Map<string, { enabled: boolean; type: number }>>(),
+		}
 		expect(liveDrift(facts(FN("f")), live).only).toEqual([
-			"function f: only in the migrations",
-			"procedure f: only in the database",
+			"function f(): only in the migrations",
+			"procedure f(): only in the database",
 		])
+	})
+
+	/* Postgres keeps no array dimensions in a signature */
+	it("reads a history's int[][] argument as the int4[] the catalog names", () => {
+		const live = {
+			routines: new Map([["f", { kind: "function" as const, signatures: new Set(["int4[]"]) }]]),
+			triggers: new Map<string, Map<string, { enabled: boolean; type: number }>>(),
+		}
+		const history = facts("CREATE FUNCTION f(a int[][]) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;")
+		expect(liveDrift(history, live)).toEqual({ matched: { routines: 1, triggers: 0 }, only: [] })
 	})
 })
