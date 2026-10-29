@@ -146,8 +146,9 @@ function checkHistory(
 	refuseRenamed(status, copy)
 	const missing = goneFiles(status, copy, { elsewhere, unread })
 	if (missing.length > 0 && gone === undefined) throw new Error(missing.join("; "))
-	/* the error Atlas reports with a half-run file is that file's; any other past a gone file is the gone file's doing */
-	if (partial === undefined && status.error !== "")
+	/* the half-run file's own error, which Atlas's status repeats, is no other error; any other is honored, an
+	   out-of-order file's among them (27.6 of plan 15), and one past a gone file is the gone file's doing */
+	if (status.error !== "" && status.error !== partial?.error)
 		throw new Error(
 			missing.length > 0 ? missing.join("; ") : `atlas migrate status: ${explainAtlasFailure(status.error, scrub)}`,
 		)

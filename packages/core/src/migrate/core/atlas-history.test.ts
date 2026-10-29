@@ -189,12 +189,27 @@ describe("a file Atlas ran halfway, after a change to an earlier file (P11)", ()
 		expect(named(status)).toEqual(["1 was applied, and its file is gone or renamed"])
 	})
 
+	/*
+	 * 27.5 of plan 15: as Atlas v1.3.0 reports it (.tmp/grunt/r16/p14/status-probe.log), a late file is
+	 * no file `available` lists, and its out-of-order error stands in the status beside the half-run file's
+	 */
 	it("names an earlier file added since, as one older than a migration applied", () => {
 		snapshot(files)
-		const status = { ...history([half("2_b.sql", "other=")]), available: [file("1_a.sql"), file("2_b.sql")] }
+		const status = {
+			...history([half("2_b.sql", "other=")]),
+			available: [file("2_b.sql")],
+			error: "migration file 1_a.sql was added out of order. See: https://atlasgo.io/versioned/apply#non-linear-error",
+		}
 		expect(() => checkHistory(status, dir, { scrub: kept })).toThrow(
 			"1_a.sql is older than a migration already applied",
 		)
+	})
+
+	it("takes the half-run file's own error, which Atlas's status repeats, as no other error", () => {
+		snapshot(files)
+		const half2 = half("2_b.sql", "7=")
+		const status = { ...history([applied("1_a.sql"), half2]), error: half2.error }
+		expect(checkHistory(status, dir, { scrub: kept })).toContain("2_b.sql ran 1 of its 3 statements")
 	})
 
 	it("refuses the half-run file changed since, saying restoring it resumes at the statement that failed", () => {
