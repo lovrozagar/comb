@@ -4,6 +4,7 @@
  * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
  */
 import type { Connection } from "../types.ts"
+import { Refused } from "./refused.ts"
 import { type RetryOptions, withRetry } from "./utils.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -134,4 +135,28 @@ export async function applyRecorded(conn: Connection, migration: Recorded, retry
 		tried = true
 		await conn.batch(statements)
 	}, retry)
+}
+
+/**
+ * Each of `migrations` applied and recorded in turn, its name printed first. A failure stops the
+ * run as a Refused naming the files that committed before it and the ones still pending, which
+ * it prints as D1's apply does (S2 of the 0.15.0 review)
+ */
+export async function applyEach(
+	conn: Connection,
+	migrations: readonly Recorded[],
+	print: (line: string) => void,
+): Promise<void> {
+	for (const [at, migration] of migrations.entries()) {
+		print(`Apply: ${migration.filename}`)
+		try {
+			await applyRecorded(conn, migration)
+		} catch (error) {
+			const [done, rest] = [migrations.slice(0, at), migrations.slice(at)].map((files) =>
+				files.map(({ filename }) => filename),
+			) as [string[], string[]]
+			if (done.length > 0) print(`Applied before the failure: ${done.join(", ")}`)
+			throw new Refused(error instanceof Error ? error.message : String(error), rest, done)
+		}
+	}
 }

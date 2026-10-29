@@ -11,7 +11,7 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import { applyRecorded, ensureMigrationsTable, hashUnique, recordMigrationHash } from "../migrate/core/apply.ts"
+import { applyEach, ensureMigrationsTable, hashUnique, recordMigrationHash } from "../migrate/core/apply.ts"
 import { approveMigration } from "../migrate/core/approval.ts"
 import { sqlFiles } from "../migrate/core/atlas-dir.ts"
 import { sqliteDrift } from "../migrate/core/baseline-compare.ts"
@@ -25,7 +25,7 @@ import {
 	resolveLegacy,
 } from "../migrate/core/history-match.ts"
 import { migrationHashes } from "../migrate/core/parse.ts"
-import { type Pending, planApply } from "../migrate/core/plan-apply.ts"
+import { planApply } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
@@ -64,12 +64,6 @@ async function configuredTarget(
 		readonly: mode === "check" || mode === "status",
 	})
 	return { conn, migrationsDir: target.migrationsDir, name: target.label }
-}
-
-/** Apply one checked migration: its statements and its record in one batch */
-async function applyPending({ migration }: Pending, target: Target, io: CliIo): Promise<void> {
-	io.out(`Apply: ${migration.filename}`)
-	await applyRecorded(target.conn, migration)
 }
 
 /** The history `__drizzle_migrations` holds, row by row: nothing when it is missing, which only a write would create */
@@ -229,7 +223,11 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	}
 	for (const name of names.filter((file) => !pendingNames.includes(file))) io.out(`Skip (already applied): ${name}`)
 	await record()
-	for (const each of pending) await applyPending(each, target, io)
+	await applyEach(
+		target.conn,
+		pending.map(({ migration }) => migration),
+		io.out,
+	)
 	io.out(`\nDone: ${pendingNames.length} applied, ${names.length - pendingNames.length} skipped`)
 	return { applied: pendingNames, pending: [] }
 }

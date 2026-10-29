@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
-import { applyRecorded, checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./apply.ts"
+import { applyEach, applyRecorded, checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./apply.ts"
 import type { Connection } from "../types.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
+import { Refused } from "./refused.ts"
 
 function mockConnection(overrides: Partial<Connection> = {}): Connection {
 	return {
@@ -120,5 +121,41 @@ describe("applyRecorded", () => {
 		expect((await conn.execute("SELECT count(*) FROM a")).rows[0]?.[0]).toBe(1)
 		const broken: Connection = { ...conn, batch: async () => Promise.reject(new Error("no such table: b")) }
 		await expect(applyRecorded(broken, { ...migration, filename: "2_b.sql" }, NOW)).rejects.toThrow("no such table: b")
+	})
+})
+
+/** A file to apply, its name standing for its hash */
+const file = (filename: string, sql: string) => ({ filename, hash: filename, statements: [sql] })
+
+describe("applyEach", () => {
+	it("stops at the first file that fails, naming the files that committed and the ones still pending", async () => {
+		const conn = libsqlConnection()
+		await ensureMigrationsTable(conn)
+		const lines: string[] = []
+		const files = [
+			file("1_a.sql", "CREATE TABLE a (x)"),
+			file("2_b.sql", "INSERT INTO b VALUES (1)"),
+			file("3_c.sql", "SELECT 1"),
+		]
+		const failure = await applyEach(conn, files, (line) => lines.push(line)).catch((error: unknown) => error)
+		expect(failure).toBeInstanceOf(Refused)
+		const { applied, message, pending } = failure as Refused
+		expect({ applied, message, pending }).toEqual({
+			applied: ["1_a.sql"],
+			message: expect.stringContaining("no such table: b"),
+			pending: ["2_b.sql", "3_c.sql"],
+		})
+		expect(lines).toEqual(["Apply: 1_a.sql", "Apply: 2_b.sql", "Applied before the failure: 1_a.sql"])
+		expect((await conn.execute("SELECT name FROM __drizzle_migrations")).rows).toEqual([["1_a.sql"]])
+	})
+
+	it("prints no applied files when the first fails, whatever it threw", async () => {
+		const lines: string[] = []
+		const conn = mockConnection({ batch: () => Promise.reject("lost") })
+		const failure = await applyEach(conn, [file("1_a.sql", "SELECT 1")], (line) => lines.push(line)).catch(
+			(error: unknown) => error,
+		)
+		expect([(failure as Refused).message, (failure as Refused).applied]).toEqual(["lost", []])
+		expect(lines).toEqual(["Apply: 1_a.sql"])
 	})
 })
