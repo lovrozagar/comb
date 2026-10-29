@@ -223,7 +223,7 @@ function schemaOfRead(
 		triggers: [...from.triggers],
 	}
 	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75) */
-	for (const stmt of read === undefined ? splitSqlStatements(sql) : read.statements.map(({ text }) => text)) {
+	for (const stmt of read === undefined ? splitSqlStatements(sql) : read.statements.map(({ sent }) => sent)) {
 		follow(schema, stmt, naming)
 		schema.statements.push(stmt)
 	}

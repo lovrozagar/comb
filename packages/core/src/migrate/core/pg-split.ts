@@ -14,7 +14,11 @@ import type { Dialect } from "../types.ts"
 type RawStmt = { stmt_len?: number; stmt_location?: number }
 
 /** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
-type PgStatement = { text: string; tree: RawStmt[] | undefined }
+/**
+ * One statement Postgres runs: its text with its chunk's lead, which a file written back keeps; `sent`,
+ * the text Atlas sends without the lead, which every rating reads (N1 of plan 15's rerun); and its tree
+ */
+type PgStatement = { sent: string; text: string; tree: RawStmt[] | undefined }
 
 /** A statement the parser cannot read, with its reason */
 type Unreadable = { error: string; statement: string }
@@ -43,14 +47,15 @@ function readChunk(chunk: Chunk): Read {
 	try {
 		stmts = parsePostgres(source).stmts as RawStmt[]
 	} catch (error) {
-		return { error: (error as Error).message, statements: [{ text: unterminated(chunk), tree: undefined }] }
+		const text = unterminated(chunk)
+		return { error: (error as Error).message, statements: [{ sent: text, text, tree: undefined }] }
 	}
 	const bytes = new TextEncoder().encode(source)
 	const decoder = new TextDecoder()
 	const statements = stmts.map((stmt) => {
 		const { stmt_len: length = 0, stmt_location: from = 0 } = stmt
 		const text = decoder.decode(bytes.subarray(from, length === 0 ? bytes.length : from + length)).trim()
-		return { text, tree: [stmt] }
+		return { sent: text, text, tree: [stmt] }
 	})
 	const read = statements.filter(({ text }) => text !== "")
 	const [first] = read

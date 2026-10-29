@@ -163,7 +163,8 @@ function readFile(
 ): Read[] {
 	const naming = namingOf(dialect, schema)
 	/* on Postgres, the statements Postgres runs: Atlas's chunks read by its parser (M75), each tree kept */
-	const statements = read === undefined ? splitSqlStatements(sql) : read.statements.map(({ text }) => text)
+	/* on Postgres, each as Atlas sends it, its chunk's lead left off: a lead never reaches a rating (N1) */
+	const statements = read === undefined ? splitSqlStatements(sql) : read.statements.map(({ sent }) => sent)
 	const codes = statements.map((stmt) => codeOf(stmt, dialect))
 	const created = new Set(
 		codes.flatMap((code) => {

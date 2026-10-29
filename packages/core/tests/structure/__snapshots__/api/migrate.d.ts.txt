@@ -602,7 +602,12 @@ type RawStmt = {
     stmt_location?: number;
 };
 /** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
+/**
+ * One statement Postgres runs: its text with its chunk's lead, which a file written back keeps; `sent`,
+ * the text Atlas sends without the lead, which every rating reads (N1 of plan 15's rerun); and its tree
+ */
 type PgStatement = {
+    sent: string;
     text: string;
     tree: RawStmt[] | undefined;
 };
