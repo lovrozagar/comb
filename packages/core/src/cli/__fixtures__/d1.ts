@@ -3,7 +3,7 @@
  * directory's files, `atlas schema diff` answers as told. wrangler runs on an in-memory SQLite
  * (node:sqlite) the way the D1 commands comb calls behave: `d1 execute --json --command` returns
  * rows, `--file` runs all-or-nothing, and `d1 migrations apply` runs each unapplied file with its
- * row in the migrations table, in wrangler's order: the INSERT appended on the next line, as
+ * row in the migrations table, made first as wrangler makes it, in wrangler's order: the INSERT appended on the next line, as
  * wrangler appends it, with no `;` of its own before it.
  */
 import { createHash } from "node:crypto"
@@ -63,6 +63,10 @@ export function fakeD1(options: D1Options, atlas: Run = fakeAtlas()): FakeD1 {
 	const calls: string[][] = []
 	const table = options.table ?? "d1_migrations"
 	const migrationsApply = (): RunResult => {
+		/* wrangler makes its table before it reads it, and before it asks */
+		db.exec(
+			`CREATE TABLE IF NOT EXISTS "${table}" (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)`,
+		)
 		if (options.declines === true) return ok("About to apply… continue? no")
 		const applied = new Set(
 			db

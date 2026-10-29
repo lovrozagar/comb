@@ -95,14 +95,21 @@ function localD1Path(configDir: string, d1: WranglerD1): string {
 	return join(configDir, ".wrangler", "state", "v3", "d1", D1_OBJECT, `${id}.sqlite`)
 }
 
+/** Whether `target` is a local database wrangler keeps nowhere yet: its first `d1 execute --local` would create one */
+function localMissing(read: ReadConfig, target: D1Target): boolean {
+	return (
+		target.flags.includes("--local") &&
+		!existsSync(localD1Path(dirname(target.wranglerConfig), bindingOf(read, target).d1))
+	)
+}
+
 /**
  * Refuses a read-only command on a local database wrangler keeps nowhere comb can find: its first
  * `d1 execute --local` would create one
  */
 function assertLocalExists(read: ReadConfig, target: D1Target): void {
-	if (!target.flags.includes("--local")) return
+	if (!localMissing(read, target)) return
 	const path = localD1Path(dirname(target.wranglerConfig), bindingOf(read, target).d1)
-	if (existsSync(path)) return
 	throw new Error(
 		`comb cannot confirm ${target.name}'s local database exists: wrangler 4 keeps it at ${path}, and there is none; check and status open a database read-only, and create none`,
 	)
@@ -113,6 +120,7 @@ export {
 	type D1Target,
 	findWranglerConfig,
 	localD1Path,
+	localMissing,
 	type ReadConfig,
 	resolveBinding,
 	type WranglerConfig,

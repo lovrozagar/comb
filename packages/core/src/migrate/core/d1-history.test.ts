@@ -227,6 +227,23 @@ describe("applyD1 when wrangler fails partway", () => {
 	})
 })
 
+/* S5 of the 0.15.0 review: comb makes no table before wrangler runs, so a failed run may leave none */
+describe("applyD1 when wrangler fails before it makes its table", () => {
+	it("passes on wrangler's own error, not the missing table's", async () => {
+		const { d1, read, run } = await target({})
+		const early: D1Target = {
+			...d1,
+			exec: (cmd, args, options) =>
+				args[1] === "migrations"
+					? { code: 1, stderr: "✘ [ERROR] Authentication error [code: 10000]", stdout: "" }
+					: run(cmd, args, options),
+		}
+		await expect(applyD1(early, { approve, print: () => undefined, read })).rejects.toThrow(
+			"wrangler d1 migrations apply failed: ✘ [ERROR] Authentication error [code: 10000]",
+		)
+	})
+})
+
 /* M33 of the 0.13 review: only a local database can be missing where comb looks for it */
 describe("statusD1 on a local database wrangler keeps nowhere comb finds", () => {
 	it("refuses locally, and reads a remote one with no local file", async () => {

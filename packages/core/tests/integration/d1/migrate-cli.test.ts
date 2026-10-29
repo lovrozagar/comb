@@ -5,9 +5,7 @@
  * `__drizzle_migrations` until `baseline` copies it.
  */
 import { createClient } from "@libsql/client"
-import { spawnSync } from "node:child_process"
 import fs from "node:fs"
-import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -16,62 +14,21 @@ import { localD1Path } from "../../../src/migrate/core/d1-binding.ts"
 import { migrationHashes } from "../../../src/migrate/core/parse.ts"
 import { guardRebuilds } from "../../../src/migrate/core/rebuild-guard.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { run, type Run } from "../../../src/migrate/core/process.ts"
-
-const WRANGLER = path.join(
-	path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json")),
-	"bin/wrangler.js",
-)
+import { d1Column, d1Io, d1Project, wrangler, writeMigrations } from "../support/d1-project.ts"
 
 const dirs: string[] = []
 afterEach(() => {
 	for (const dir of dirs.splice(0)) fs.rmSync(dir, { force: true, recursive: true })
 })
 
-/** A worker project whose wrangler.toml applies ./atlas-migrations, holding `migrations` and their atlas.sum */
+/** A worker project on a local D1, removed after the test */
 function project(migrations: Record<string, string>): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-d1-cli-"))
+	const dir = d1Project(migrations)
 	dirs.push(dir)
-	fs.writeFileSync(
-		path.join(dir, "wrangler.toml"),
-		'name = "probe"\ncompatibility_date = "2026-10-01"\n\n[[d1_databases]]\nbinding = "CORE"\ndatabase_name = "core"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\nmigrations_dir = "atlas-migrations"\n',
-	)
-	fs.mkdirSync(path.join(dir, "atlas-migrations"))
-	write(dir, migrations)
 	return dir
 }
 
-/** Migration files added to the project, with atlas.sum rehashed */
-function write(dir: string, migrations: Record<string, string>): void {
-	for (const [name, sql] of Object.entries(migrations)) fs.writeFileSync(path.join(dir, "atlas-migrations", name), sql)
-	spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
-}
-
-/** wrangler from node_modules, run in the project */
-const wrangler =
-	(dir: string): Run =>
-	(cmd, args, options) =>
-		cmd === "wrangler" ? run(process.execPath, [WRANGLER, ...args], { ...options, cwd: dir }) : run(cmd, args, options)
-
-function io(dir: string) {
-	const out: string[] = []
-	const err: string[] = []
-	return {
-		cwd: dir,
-		err: (line: string) => err.push(line),
-		errors: err,
-		out: (line: string) => out.push(line),
-		outputs: out,
-		run: wrangler(dir),
-	}
-}
-
-/** One column of `sql` on the project's local D1 */
-function column(dir: string, sql: string): unknown[] {
-	const ran = wrangler(dir)("wrangler", ["d1", "execute", "core", "--local", "--json", `--command=${sql}`])
-	const [first] = JSON.parse(ran.stdout) as Array<{ results: Array<Record<string, unknown>> }>
-	return (first?.results ?? []).map((row) => Object.values(row)[0])
-}
+const [write, io, column] = [writeMigrations, d1Io, d1Column]
 
 const INIT = { "20260101000000_init.sql": "CREATE TABLE post (id TEXT PRIMARY KEY);" }
 

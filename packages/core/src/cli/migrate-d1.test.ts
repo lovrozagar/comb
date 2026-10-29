@@ -123,7 +123,8 @@ describe("migrate apply on D1 without a migrate config: order and refusals", () 
 		expect(io.errors[0]).toContain(
 			"20250101000000_rebuild.sql runs after 20261020_init.sql under wrangler, by number, but before it under Atlas, by name",
 		)
-		expect(recorded(d1)).toEqual([])
+		/* a refused apply makes no history table (S5 of the 0.15.0 review) */
+		expect(d1.db.prepare("SELECT name FROM sqlite_master WHERE name = 'd1_migrations'").all()).toEqual([])
 	})
 
 	it("refuses --file, -e, a missing wrangler config, a binding it lacks, and another migrations directory", async () => {
