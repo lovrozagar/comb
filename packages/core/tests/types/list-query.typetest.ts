@@ -7,9 +7,10 @@ import * as z from "zod"
 import { createListQuerySchema, createRetrieveQuerySchema } from "../../src/query/schema.ts"
 import type { ListQueryOutput } from "../../src/query/schema-types.ts"
 import type { FilterAST, ParsedFields, SortField } from "../../src/query/types.ts"
-import { buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
+import { applyListQuery, buildListQuery } from "../../src/query/sqlite/build-list-query.ts"
 import { keysetSQL, type KeysetPosition } from "../../src/query/sqlite/index.ts"
 import { queryHelpers } from "../../src/query/drizzle.ts"
+import type { DrizzleD1Database } from "drizzle-orm/d1"
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
 import { SEALED } from "../../src/query/__fixtures__/cursor-secret.ts"
 
@@ -104,3 +105,14 @@ void handBuilt
 const handler = (input: ListOutput) => input.limit
 handler({ ...handBuilt, archived: undefined, parsedSort: [] })
 expectTypeOf<ListOutput["pageBounded"]>().toEqualTypeOf<true | undefined>()
+
+/* C12 of the 0.14.1 review: applyListQuery takes drizzle's select builder as it is, and one made dynamic */
+declare const d1: DrizzleD1Database
+const listed = sqliteTable("listed", { id: integer("id").primaryKey(), title: text("title") })
+const listedQuery = buildListQuery({ ...SEALED, parsed: listSchema.parse({}), table: listed })
+expectTypeOf(applyListQuery(d1.select().from(listed), listedQuery)).resolves.toEqualTypeOf<
+	Array<{ id: number; title: string | null }>
+>()
+expectTypeOf(applyListQuery(d1.select().from(listed).$dynamic(), listedQuery)).resolves.toEqualTypeOf<
+	Array<{ id: number; title: string | null }>
+>()

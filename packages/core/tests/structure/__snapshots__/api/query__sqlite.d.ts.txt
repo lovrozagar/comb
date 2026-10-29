@@ -80,16 +80,10 @@ type ListQueryResult = {
     search: string | null;
     where: SQL | undefined;
 };
-type ListQueryAppliable<TQuery> = {
-    limit: (limit: number) => TQuery;
-    offset: (offset: number) => TQuery;
-    orderBy: (...orderBy: SQL[]) => TQuery;
-    where: (where: SQL) => TQuery;
-};
 declare function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQueryOpts<TTable>): ListQueryResult;
 declare function buildDerivedListQuery<TSortField extends string>(opts: BuildDerivedListQueryOpts<TSortField>): ListQueryResult;
-declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult): TQuery;
-export { applyListQuery, buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryParsed, type ListQueryResult, };
+export { applyListQuery } from "./apply-list-query.ts";
+export { buildDerivedListQuery, buildListQuery, type BuildDerivedListQueryOpts, type BuildListQueryOpts, type ListQueryParsed, type ListQueryResult, };
 
 // query/sqlite/executor.d.ts
 /**
@@ -396,3 +390,24 @@ type ListQueryCapabilities = {
     sortFields: Set<string>;
 };
 export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ParsedFields, SortDirection, SortField, SortNulls, };
+
+// query/sqlite/apply-list-query.d.ts
+/** The one way a built list query reaches a drizzle select: its WHERE, ORDER BY, LIMIT and OFFSET. */
+import type { SQL } from "drizzle-orm";
+import type { ListQueryResult } from "./build-list-query.ts";
+/** A builder whose methods return its own type, as drizzle's select does once made dynamic */
+type ListQueryAppliable<TQuery> = {
+    limit: (limit: number) => TQuery;
+    offset: (offset: number) => TQuery;
+    orderBy: (...orderBy: SQL[]) => TQuery;
+    where: (where: SQL) => TQuery;
+};
+/**
+ * `query` with the list's WHERE, ORDER BY, LIMIT and OFFSET applied: a builder whose methods return
+ * its own type, or drizzle's select as it is, made dynamic here (C12 of the 0.14.1 review)
+ */
+declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult): TQuery;
+declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: {
+    $dynamic(): TQuery;
+}, q: ListQueryResult): TQuery;
+export { applyListQuery, type ListQueryAppliable };

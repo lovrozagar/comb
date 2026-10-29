@@ -75,13 +75,6 @@ type ListQueryResult = {
 	where: SQL | undefined
 }
 
-type ListQueryAppliable<TQuery> = {
-	limit: (limit: number) => TQuery
-	offset: (offset: number) => TQuery
-	orderBy: (...orderBy: SQL[]) => TQuery
-	where: (where: SQL) => TQuery
-}
-
 function isFilterAST(v: unknown): v is FilterAST {
 	return typeof v === "object" && v !== null && "root" in v
 }
@@ -280,17 +273,8 @@ function buildDerivedListQuery<TSortField extends string>(
 	})
 }
 
-function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(query: TQuery, q: ListQueryResult): TQuery {
-	const withWhere: TQuery = q.where ? query.where(q.where) : query
-
-	return withWhere
-		.orderBy(...q.orderBy)
-		.limit(q.limit)
-		.offset(q.offset)
-}
-
+export { applyListQuery } from "./apply-list-query.ts"
 export {
-	applyListQuery,
 	buildDerivedListQuery,
 	buildListQuery,
 	type BuildDerivedListQueryOpts,

@@ -770,7 +770,7 @@ const result = buildListQuery({
 	computedSorts: { popularity: (dir) => sql`view_count ${sql.raw(dir)}` },
 })
 
-const rows = await applyListQuery(db.select().from(post).$dynamic(), result)
+const rows = await applyListQuery(db.select().from(post), result)
 ```
 
 `parseFilter()` keeps filter values as strings; `validateFilter()` and the list query schema type them, so declared `number` and `date` fields bind as numbers and `boolean` as booleans, and a computed resolver receives the declared type. `buildListQuery()` and `filterToSQL()` expect that validated AST. A condition they cannot run, a computed field without a resolver, a resolver that returns `null`, a relation field with no `relations` entry, throws `filter_not_wired` (500) rather than being dropped, which would answer with more rows than the filter asked for. A sort field the table has no column for, or a computed sort without a resolver, throws `sort_not_wired` (500) the same way.
