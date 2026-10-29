@@ -105,11 +105,9 @@ function fires({ enabled, type }: { enabled: boolean; type: number }): string {
 	return `${timing} ${events.join(" or ")}, for each ${(type & 1) !== 0 ? "row" : "statement"}${enabled ? "" : ", disabled"}`
 }
 
-/** Each routine's label, by kind, name and arguments, `function f(int4)`; and each trigger's, by name, table and how it fires */
-function labels({ routines, triggers }: LiveObjects): { routines: Set<string>; triggers: Set<string> } {
-	const out = { routines: new Set<string>(), triggers: new Set<string>() }
-	for (const [name, { kind, signatures }] of routines)
-		for (const signature of signatures) out.routines.add(`${kind} ${name}(${signature})`)
+/** Each trigger's label, by name, table and how it fires */
+function labels({ triggers }: LiveObjects): { triggers: Set<string> } {
+	const out = { triggers: new Set<string>() }
 	for (const [table, each] of triggers)
 		for (const [name, how] of each) out.triggers.add(`trigger ${name} on ${table} (${fires(how)})`)
 	return out
@@ -145,17 +143,54 @@ function liveDrift(
 	facts: Facts,
 	live: LiveObjects,
 ): { matched: { routines: number; triggers: number }; only: string[] } {
-	const [database, migrations] = [labels(live), labels(historyObjects(facts))]
-	const only: string[] = []
-	const matched = { routines: 0, triggers: 0 }
-	for (const kind of ["routines", "triggers"] as const) {
-		for (const label of database[kind]) {
-			if (migrations[kind].has(label)) matched[kind]++
-			else only.push(`${label}: only in the database`)
-		}
-		for (const label of migrations[kind]) if (!database[kind].has(label)) only.push(`${label}: only in the migrations`)
+	const history = historyObjects(facts)
+	const routines = routineDrift(live.routines, history.routines)
+	const [database, migrations] = [labels(live).triggers, labels(history).triggers]
+	const only = [...routines.only]
+	let triggers = 0
+	for (const label of database) {
+		if (migrations.has(label)) triggers++
+		else only.push(`${label}: only in the database`)
 	}
-	return { matched, only: only.sort() }
+	for (const label of migrations) if (!database.has(label)) only.push(`${label}: only in the migrations`)
+	return { matched: { routines: routines.matched, triggers }, only: only.sort() }
+}
+
+/**
+ * Whether the catalog's spelling of an argument type is the history's: the same, or the type name
+ * alone where the history left the type to the search path, which the catalog qualifies
+ */
+function argumentMatches(database: string, migrations: string): boolean {
+	if (database === migrations) return true
+	return !migrations.includes(".") && database.slice(database.lastIndexOf(".") + 1) === migrations
+}
+
+/** Whether two signatures name one overload: as many arguments, each matching */
+function signatureMatches(database: string, migrations: string): boolean {
+	const [ours, theirs] = [database.split(","), migrations.split(",")]
+	return ours.length === theirs.length && ours.every((each, i) => argumentMatches(each, theirs[i] as string))
+}
+
+/** Each routine's overloads paired across the two sides by kind and signature, as `function f(int4)` labels the rest */
+function routineDrift(
+	database: LiveObjects["routines"],
+	migrations: LiveObjects["routines"],
+): { matched: number; only: string[] } {
+	const out = { matched: 0, only: [] as string[] }
+	for (const name of new Set([...database.keys(), ...migrations.keys()])) {
+		const [ours, theirs] = [database.get(name), migrations.get(name)]
+		const left = ours === undefined ? [] : [...ours.signatures]
+		for (const signature of theirs?.signatures ?? []) {
+			const at = ours?.kind === theirs?.kind ? left.findIndex((each) => signatureMatches(each, signature)) : -1
+			if (at === -1) out.only.push(`${theirs?.kind} ${name}(${signature}): only in the migrations`)
+			else {
+				left.splice(at, 1)
+				out.matched++
+			}
+		}
+		for (const signature of left) out.only.push(`${ours?.kind} ${name}(${signature}): only in the database`)
+	}
+	return out
 }
 
 export { type Connect, liveDrift, loadPostgres, readLiveObjects }

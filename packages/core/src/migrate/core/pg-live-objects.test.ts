@@ -148,3 +148,22 @@ describe("liveDrift", () => {
 		expect(liveDrift(history, live)).toEqual({ matched: { routines: 1, triggers: 0 }, only: [] })
 	})
 })
+
+/* the reviewer's reading of P13: two spellings the history and the catalog give one argument type differently */
+/** A database holding function f with `signatures` */
+const routine = (...signatures: string[]) => ({
+	routines: new Map([["f", { kind: "function" as const, signatures: new Set(signatures) }]]),
+	triggers: new Map<string, Map<string, { enabled: boolean; type: number }>>(),
+})
+
+describe("liveDrift: an argument type spelled otherwise by the history", () => {
+	it("matches a type the history leaves to the search path by its name, and a qualified one exactly", () => {
+		const bare = facts("CREATE FUNCTION f(m mytype) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;")
+		expect(liveDrift(bare, routine("public.mytype")).only).toEqual([])
+		const qualified = facts("CREATE FUNCTION f(m other.mood) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;")
+		expect(liveDrift(qualified, routine("elsewhere.mood")).only).toEqual([
+			"function f(elsewhere.mood): only in the database",
+			"function f(other.mood): only in the migrations",
+		])
+	})
+})
