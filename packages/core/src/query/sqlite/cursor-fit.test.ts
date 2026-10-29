@@ -104,6 +104,9 @@ describe("readsBack", () => {
 
 	it("refuses a column that holds no text, an expression with no anchor, none over a column, or one over another table", () => {
 		expect(readsBack(doc.rank, doc)).toBe(false)
+		/* a joined table's text column reads the anchor's own value back (27.14) */
+		expect(readsBack(other.label, doc)).toBe(false)
+		expect(readsBack(other.label, undefined)).toBe(true)
 		expect(readsBack(sql`lower(${doc.notes})`, undefined)).toBe(false)
 		expect(readsBack(sql.raw('lower("doc"."notes")'), doc)).toBe(false)
 		expect(readsBack(sql`${doc.notes} || ${other.label}`, doc)).toBe(false)

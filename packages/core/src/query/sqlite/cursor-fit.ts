@@ -58,18 +58,23 @@ function columnsOf(chunk: unknown): Column[] {
 	return Array.isArray(chunk) ? chunk.flatMap(columnsOf) : []
 }
 
+/* drizzle keeps the table a column is of on it, untyped */
+const tableOf = (column: Column): unknown => (column as unknown as { table: unknown }).table
+
 /**
  * Whether a cursor value carried by reference on `column` reads back from `table`'s row, the list's
- * anchor: a text column does, and so does an SQL expression over that table's own columns alone,
- * which the read-back evaluates on that row (27.7 of plan 15). The mint and the read both ask it, so
- * no list mints a cursor it then refuses.
+ * anchor: a text column of that table does, and so does an SQL expression over that table's own
+ * columns alone, which the read-back evaluates on that row (27.7 of plan 15). A joined table's column
+ * reads the anchor's own value back, which paged in a loop (27.14). With no anchor in reach, as on
+ * the relational path, whose keys are its table's columns, a text column reads back. The mint and
+ * the read both ask it, so no list mints a cursor it then refuses.
  */
 function readsBack(column: SQLWrapper, table: object | undefined): boolean {
-	if (is(column, Column)) return column.dataType.startsWith("string")
+	if (is(column, Column))
+		return column.dataType.startsWith("string") && (table === undefined || tableOf(column) === table)
 	if (!is(column, SQL) || table === undefined) return false
 	const read = columnsOf(column)
-	/* drizzle keeps the table a column is of on it, untyped */
-	return read.length > 0 && read.every((each) => (each as unknown as { table: unknown }).table === table)
+	return read.length > 0 && read.every((each) => tableOf(each) === table)
 }
 
 /**

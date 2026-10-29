@@ -291,3 +291,55 @@ describe("an anchored derived list sorted by an SQL expression, its key too long
 		}
 	})
 })
+
+/*
+ * 27.14 of plan 15: a text column of a table joined to the anchor reads no reference back from the
+ * anchor's row, so paging by one looped between the first two rows; it is refused instead
+ */
+describe("an anchored derived list sorted by a joined table's text column, its key too long for a cursor", () => {
+	const remark = sqliteTable("remark", { body: text("body").notNull(), doc_id: integer("doc_id").notNull() })
+
+	it("refuses on the page that meets the long key, never minting a cursor that loops", async () => {
+		const harness = await seeded()
+		try {
+			await harness.client.execute("CREATE TABLE remark (doc_id INTEGER NOT NULL, body TEXT NOT NULL)")
+			await harness.client.execute("INSERT INTO remark SELECT id, title FROM doc")
+			const seen: number[] = []
+			let cursor: string | undefined
+			const page = async () => {
+				const built = buildDerivedListQuery({
+					...SEALED,
+					anchor: { idColumn: doc.id, table: doc },
+					parsed: { cursor, limit: 2, parsedSort: [{ direction: "asc" as const, field: "label" }] },
+					sortColumns: { label: remark.body },
+				})
+				const query = harness.db
+					.select({ id: doc.id, label: remark.body })
+					.from(doc)
+					.innerJoin(remark, sql`${remark.doc_id} = ${doc.id}`)
+				const rows = await (built.where === undefined ? query : query.where(built.where))
+					.orderBy(...built.orderBy)
+					.limit(built.limit)
+				return queryHelpers.paginate(rows, built)
+			}
+			const paging = (async () => {
+				for (let n = 0; n < 6; n++) {
+					const [items, meta] = await page()
+					seen.push(...items.map((row) => row.id))
+					if (meta.nextCursor === null) return
+					cursor = meta.nextCursor
+				}
+			})()
+			await expect(paging).rejects.toThrow(
+				expect.objectContaining({
+					cause: expect.stringMatching(/^a row's label is too long to page this list by: .*no reference reads it back/),
+					status: 500,
+				}),
+			)
+			/* the pages before the refusal hold every row once */
+			expect(new Set(seen).size).toBe(seen.length)
+		} finally {
+			harness.close()
+		}
+	})
+})
