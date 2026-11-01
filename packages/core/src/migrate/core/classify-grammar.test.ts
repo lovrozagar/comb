@@ -206,3 +206,38 @@ describe("default-deny keeps the shapes it recognizes (controls)", () => {
 		expect(rate(sql, history).safety).toBe(safety)
 	})
 })
+
+/* r18 P13: a statement a parse-tree rule rates is recognized, whatever node kind it is */
+describe("a Postgres statement its parse tree rates, which the grammar's fallback leaves alone", () => {
+	const HISTORY = "CREATE TABLE t (id int);\nCREATE MATERIALIZED VIEW mv AS SELECT id FROM t;"
+	it.each([
+		["LOCK t;", ["LOCK t (locks t against reads and writes until the file's transaction ends)"]],
+		["LOCK t IN ACCESS SHARE MODE;", []],
+		["REFRESH MATERIALIZED VIEW mv;", ["REFRESH MATERIALIZED VIEW mv (holds an exclusive lock while it runs)"]],
+		["REFRESH MATERIALIZED VIEW CONCURRENTLY mv;", []],
+	])("rates %j by its rule alone, with no note that comb does not recognize it", (sql, locks) => {
+		const rated = rate(sql, HISTORY, "postgres")
+		expect([rated.safety, rated.unsafeStatements, rated.lockWarnings]).toEqual(["safe", [], locks])
+	})
+
+	it("keeps the rule of a family default-deny rates unsafe when the tree rates it too", () => {
+		const rated = rate("DROP FUNCTION f();", HISTORY, "postgres")
+		expect(rated.unsafeStatements.join("\n")).toContain("comb rates every function change unsafe")
+	})
+})
+
+/* r18 S6: one entry per statement, each of its notes once, however many readings name it */
+describe("a statement two readings rate, listed once", () => {
+	it("joins writable_schema's own note and default-deny's rule in one entry per statement", () => {
+		const rated = rate("PRAGMA writable_schema = ON;\nPRAGMA writable_schema = OFF;", USERS)
+		expect(rated.unsafeStatements).toEqual([
+			"PRAGMA writable_schema = ON (lets a statement rewrite the schema itself; comb rates every pragma it does not write unsafe; approve it in the file)",
+			"PRAGMA writable_schema = OFF (lets a statement rewrite the schema itself; comb rates every pragma it does not write unsafe; approve it in the file)",
+		])
+	})
+
+	it("lists a statement with no note by itself, and a note given twice once", () => {
+		const rated = rate("DROP TABLE t CASCADE;", "CREATE TABLE t (id int);", "postgres")
+		expect(rated.unsafeStatements).toEqual(["DROP TABLE t CASCADE"])
+	})
+})

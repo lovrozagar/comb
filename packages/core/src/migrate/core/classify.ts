@@ -155,6 +155,24 @@ function findingsOf(code: string, ctx: FileContext): Finding[] {
 
 type Read = ReadStatement & { findings: Finding[] }
 
+/**
+ * One statement's findings: the rules', then on Postgres the parse tree's, which follows what the
+ * statement makes, and the grammar's, which a whole-statement tree rating stands in for (P13 of r18)
+ */
+function statementReadings(
+	{ code, stmt, tree }: { code: string; stmt: string; tree: unknown },
+	ctx: FileContext,
+	ftsTriggers: ReadonlySet<string>,
+): Finding[] {
+	const rules = findingsOf(code, ctx)
+	if (ctx.dialect === "sqlite") {
+		const writes = [...ftsCommandFindings(stmt), ...sqliteWriteFindings(code, ctx)]
+		return [...rules, ...grammarFindings(code, { ...ctx, ftsTriggers }), ...writes]
+	}
+	const read = pgTreeFindings(stmt, ctx, tree)
+	return [...rules, ...grammarFindings(code, { ...ctx, ftsTriggers, treeRated: read.rated }), ...read.findings]
+}
+
 /** The file read as `dialect` reads it, against `before`, a Postgres name keyed under `schema` */
 function readFile(
 	sql: string,
@@ -201,13 +219,7 @@ function readFile(
 		/* every other statement is rated by the rules, and only as a shape the grammar recognizes */
 		const findings = guards.guarded.has(i)
 			? []
-			: [
-					...findingsOf(codes[i] as string, ctx),
-					...grammarFindings(codes[i] as string, { ...ctx, ftsTriggers }),
-					...(dialect === "sqlite"
-						? [...ftsCommandFindings(stmt), ...sqliteWriteFindings(codes[i] as string, ctx)]
-						: pgTreeFindings(stmt, ctx, read?.statements[i]?.tree)),
-				]
+			: statementReadings({ code: codes[i] as string, stmt, tree: read?.statements[i]?.tree }, ctx, ftsTriggers)
 		/* on Postgres what a statement makes new is followed from its parse tree (pg-ddl.ts) */
 		if (dialect === "sqlite") {
 			followAdds(codes[i] as string, ctx.fresh)
@@ -227,10 +239,14 @@ const readings = (
 	read: PgRead | undefined = dialect === "postgres" ? pgRead(sql) : undefined,
 ): Read[] => readFile(sql, { before, dialect: dialect ?? "sqlite", schema: schema ?? "public" }, read)
 
+/** One entry per statement a kept finding names: the statement once, each of its notes once (S6 of r18) */
 const entries = (reads: readonly Read[], keep: (finding: Finding) => boolean) =>
-	reads.flatMap(({ findings, stmt }) =>
-		findings.filter(keep).map((f) => (f.note === undefined ? preview(stmt) : `${preview(stmt)} (${f.note})`)),
-	)
+	reads.flatMap(({ findings, stmt }) => {
+		const kept = findings.filter(keep)
+		if (kept.length === 0) return []
+		const notes = [...new Set(kept.flatMap(({ note }) => (note === undefined ? [] : [note])))]
+		return [notes.length === 0 ? preview(stmt) : `${preview(stmt)} (${notes.join("; ")})`]
+	})
 const at = (level: Finding["level"]) => (finding: Finding) => finding.level === level
 
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */

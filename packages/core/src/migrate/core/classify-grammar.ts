@@ -29,6 +29,8 @@ type GrammarContext = {
 	dialect: Dialect
 	ftsTriggers: ReadonlySet<string>
 	naming: Naming
+	/** whether a Postgres parse-tree rule rated the whole statement (pg-tree.ts), which then needs no shape here */
+	treeRated?: boolean | undefined
 }
 
 const RECOGNIZED = [
@@ -149,7 +151,8 @@ function grammarFindings(statement: string, ctx: GrammarContext): Finding[] {
 	/* an EXPLAIN is the statement it explains (ANALYZE runs it) */
 	const code = statement.replace(/^EXPLAIN (?:\([^)]*\) )?(?:(?:ANALYZE|ANALYSE|VERBOSE) )*/i, "")
 	const recognized = ctx.dialect === "postgres" ? [...RECOGNIZED, PG_TRANSACTION] : RECOGNIZED
-	if (!recognized.some((shape) => shape.test(code)) && !isFtsSync(code, ctx))
+	/* a statement a parse-tree rule rates whole is recognized by that rule, whatever its kind (P13 of r18) */
+	if (!recognized.some((shape) => shape.test(code)) && !isFtsSync(code, ctx) && ctx.treeRated !== true)
 		return [{ level: "unsafe", note: unrecognized(code) }]
 	const policy = policyNote(code)
 	/* a policy renamed keeps its roles and its predicate */

@@ -57,9 +57,11 @@ describe("classifyMigration lists a statement at its strictest level alone", () 
 		const replaced =
 			"CREATE OR REPLACE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM t; RETURN NEW; END $$;"
 		const c = classifyMigration(replaced, { before, dialect: "postgres" })
+		/* one entry for the statement, both notes in it (S6 of r18) */
 		expect(c.unsafeStatements).toEqual([
-			expect.stringContaining("comb rates every function change unsafe"),
-			expect.stringContaining("creates function f, whose body comb does not read"),
+			expect.stringMatching(
+				/^CREATE OR REPLACE FUNCTION f\(\).* \(comb rates every function change unsafe; approve it in the file; creates function f, whose body comb does not read\)$/,
+			),
 		])
 		expect(c.cautiousStatements).toEqual([])
 	})

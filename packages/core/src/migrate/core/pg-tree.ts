@@ -25,11 +25,15 @@ import { builtinFinding } from "./pg-builtins.ts"
 import { type Facts, followTree, keyOf, names, nodesOf, tableOf } from "./pg-history.ts"
 import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import { constraintIndexWarnings, ddlFindings } from "./pg-ddl.ts"
+import { maintenanceFindings } from "./pg-maintenance.ts"
 import { followFresh } from "./pg-fresh.ts"
 import { eventFindings } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 
 type Node = Record<string, unknown>
+
+/* the statements whose rows writeFindings reads */
+const WRITES = /^(?:InsertStmt|UpdateStmt|DeleteStmt|MergeStmt)$/
 
 /** What the walk reads a statement against: the history, what it and the file so far attached and defined, and what the file made fresh */
 type TreeContext = {
@@ -204,7 +208,13 @@ function shadowFinding(type: string, node: Node, ctx: TreeContext): Finding | un
 }
 
 /** One Postgres statement's findings, read from its parse tree: the one its file's read kept, else parsed here */
-function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): Finding[] {
+/**
+ * A statement's findings from its parse tree, and whether a rule that rates a whole statement
+ * (pg-maintenance.ts) rated each of its statements, a rating of none included, or it failed to parse,
+ * which is unsafe: the grammar then has no shape to recognize (P13 of r18). The DDL rules add to the
+ * grammar's rating, so theirs is not one.
+ */
+function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): { findings: Finding[]; rated: boolean } {
 	/* the parser is loaded, or this throws before the statement is rated */
 	postgresParser()
 	let tree: { stmts?: unknown }
@@ -212,18 +222,18 @@ function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): Finding
 		tree = kept === undefined ? parsePostgres(stmt) : { stmts: kept }
 	} catch (error) {
 		// reason: a statement Postgres cannot parse is the statement's finding, unsafe
-		return [{ level: "unsafe", note: `comb could not parse this as Postgres 17: ${(error as Error).message}` }]
+		const note = `comb could not parse this as Postgres 17: ${(error as Error).message}`
+		return { findings: [{ level: "unsafe", note }], rated: true }
 	}
 	const nodes = nodesOf(tree.stmts)
-	const findings = nodes.flatMap(([type, node]) =>
-		/^(?:InsertStmt|UpdateStmt|DeleteStmt|MergeStmt)$/.test(type)
-			? writeFindings(type, node, ctx)
-			: [
-					...(ddlFindings(type, node, ctx.facts) ?? []),
-					...(type === "AlterTableStmt" ? constraintIndexWarnings(node, ctx) : []),
-					codeFinding(type, node, ctx),
-				].filter((finding) => finding !== undefined),
-	)
+	const findings = nodes.flatMap(([type, node]) => {
+		if (WRITES.test(type)) return writeFindings(type, node, ctx)
+		return [
+			...(ddlFindings(type, node, ctx.facts) ?? []),
+			...(type === "AlterTableStmt" ? constraintIndexWarnings(node, ctx) : []),
+			codeFinding(type, node, ctx),
+		].filter((finding) => finding !== undefined)
+	})
 	/* what the statement made new, attached and reparented counts for the statements after it */
 	for (const [type, node] of nodes) {
 		followFresh(type, node, ctx)
@@ -232,7 +242,9 @@ function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): Finding
 	/* the event triggers the history made run on this statement before what it makes counts */
 	findings.push(...eventFindings(tree.stmts, ctx))
 	followTree(tree.stmts, ctx.facts)
-	return findings
+	const tops = (tree.stmts as Array<{ stmt: Node }>).map((raw) => Object.entries(raw.stmt)[0] as [string, Node])
+	const rated = tops.length > 0 && tops.every(([type, node]) => maintenanceFindings(type, node) !== undefined)
+	return { findings, rated }
 }
 
 export { pgTreeFindings, type TreeContext }
