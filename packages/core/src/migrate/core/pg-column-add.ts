@@ -5,47 +5,14 @@
  * identity or a stored generated column fills every row, which rewrites the table, and an inline
  * check or reference scans it. A default is volatile when it calls a function not known to be
  * otherwise (P8 of the 0.15.0 review): Postgres takes every function as VOLATILE unless it says
- * IMMUTABLE or STABLE, so the rule names the steady ones, not the volatile.
+ * IMMUTABLE or STABLE, so the rule names the steady ones, not the volatile: a history routine by its
+ * own declarations, a built-in by Postgres 17's (pg-steady-builtins.ts, read from pg_proc; P15 of r18).
  */
 import type { Finding } from "./classify-alter.ts"
+import { STEADY_BUILTINS } from "./pg-steady-builtins.ts"
 import { type Facts, functionBehind, keyOf, names, type Node, nodesOf, typeOf } from "./pg-nodes.ts"
 
 const REWRITES = "rewrites or scans the table under an exclusive lock"
-
-// lookup-table: the built-ins Postgres 17 declares IMMUTABLE or STABLE that a default calls: evaluated once, they rewrite nothing
-const STEADY: ReadonlySet<string> = /* @__PURE__ */ new Set([
-	"abs",
-	"btrim",
-	"concat",
-	"concat_ws",
-	"current_setting",
-	"date_part",
-	"date_trunc",
-	"extract",
-	"json_build_array",
-	"json_build_object",
-	"jsonb_build_array",
-	"jsonb_build_object",
-	"length",
-	"lower",
-	"ltrim",
-	"make_date",
-	"make_interval",
-	"make_time",
-	"make_timestamp",
-	"make_timestamptz",
-	"md5",
-	"now",
-	"replace",
-	"round",
-	"rtrim",
-	"statement_timestamp",
-	"to_char",
-	"to_json",
-	"to_jsonb",
-	"transaction_timestamp",
-	"upper",
-])
 
 // lookup-table: the functions a default computes a value of its own for each row with
 const DISTINCT = /* @__PURE__ */ new Set([
@@ -73,7 +40,7 @@ function steady(parts: readonly string[], facts: Facts): boolean {
 	const routine = facts.routines.get(keyOf(parts, facts.schema))
 	if (routine !== undefined) return [...routine.signatures.values()].every((volatility) => volatility !== "volatile")
 	const builtin = parts.length === 1 || (parts.length === 2 && parts[0] === "pg_catalog")
-	return builtin && STEADY.has(parts.at(-1) as string)
+	return builtin && STEADY_BUILTINS.has(parts.at(-1) as string)
 }
 
 /**

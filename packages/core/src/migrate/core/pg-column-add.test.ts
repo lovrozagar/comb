@@ -126,3 +126,25 @@ describe("an added column's default that comes through the history", () => {
 		expect(ratedAfter(history, "ALTER TABLE t ADD COLUMN x int DEFAULT 1 @+@ 2;").lockWarnings).toEqual([])
 	})
 })
+
+/* r18 P15: a default that calls only IMMUTABLE or STABLE built-ins is evaluated once and rewrites nothing */
+describe("an added column's default of built-ins Postgres 17 declares steady", () => {
+	it.each([
+		"ALTER TABLE t ADD COLUMN x timestamp DEFAULT timezone('utc'::text, now())",
+		"ALTER TABLE t ADD COLUMN x timestamp DEFAULT (now() AT TIME ZONE 'utc')",
+		"ALTER TABLE t ADD COLUMN x timestamptz DEFAULT to_timestamp(0)",
+		"ALTER TABLE t ADD COLUMN x int DEFAULT coalesce(greatest(1, 2), 3)",
+		"ALTER TABLE t ADD COLUMN x text DEFAULT pg_catalog.upper('a')",
+	])("warns of no rewrite for %j", (sql) => {
+		expect(rated(sql)).toEqual([])
+	})
+
+	it.each([
+		"ALTER TABLE t ADD COLUMN x int DEFAULT (random() * 10)::int",
+		"ALTER TABLE t ADD COLUMN x timestamptz DEFAULT clock_timestamp()",
+		"ALTER TABLE t ADD COLUMN x int DEFAULT public.upper('a')",
+		"ALTER TABLE t ADD COLUMN x int DEFAULT no_such_builtin()",
+	])("warns of the rewrite for %j", (sql) => {
+		expect(rated(sql)).toEqual([REWRITE])
+	})
+})
