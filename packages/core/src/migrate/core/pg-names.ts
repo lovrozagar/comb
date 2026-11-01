@@ -32,6 +32,14 @@ function moveTable(facts: Facts, from: string, to: string): void {
 	}
 	for (const parents of facts.parents.values()) for (const each of parents) if (each.parent === from) each.parent = to
 	for (const view of facts.views.values()) if (view.base === from) view.base = to
+	moveDefaults(facts, (key) => (key === from ? to : key))
+}
+
+/** Each parent's default partition under the keys `move` gives the parent and the partition */
+function moveDefaults(facts: Facts, move: (key: string) => string): void {
+	const moved = [...facts.defaultPartitions].map(([parent, partition]) => [move(parent), move(partition)] as const)
+	facts.defaultPartitions.clear()
+	for (const [parent, partition] of moved) facts.defaultPartitions.set(parent, partition)
 }
 
 /**
@@ -77,6 +85,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 	for (const cast of facts.casts.values()) cast.fn = move(cast.fn)
 	for (const map of [facts.domains, facts.operators]) for (const [key, fn] of map) map.set(key, move(fn))
 	for (const key of Array.from(facts.defined)) facts.defined.add(move(key))
+	moveDefaults(facts, move)
 }
 
 /** A trigger made, renamed or dropped */
@@ -179,6 +188,9 @@ function followDrop(node: Node, facts: Facts): void {
 		facts.views.delete(table)
 		facts.relations.delete(table)
 		facts.policies.delete(table)
+		facts.defaultPartitions.delete(table)
+		for (const [parent, partition] of Array.from(facts.defaultPartitions))
+			if (partition === table) facts.defaultPartitions.delete(parent)
 	}
 }
 

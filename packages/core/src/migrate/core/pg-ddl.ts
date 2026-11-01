@@ -17,7 +17,7 @@ import type { Finding } from "./classify-alter.ts"
 import type { FreshContext } from "./pg-fresh.ts"
 import { addColumn, inlineConstraints, REWRITES } from "./pg-column-add.ts"
 import { domainFindings } from "./pg-domain.ts"
-import { attachFindings, maintenanceFindings } from "./pg-maintenance.ts"
+import { attachFindings, createFindings, maintenanceFindings } from "./pg-maintenance.ts"
 import { retypeFindings } from "./pg-retype.ts"
 import { REWRITE_COMMANDS, tableFindings } from "./pg-table-commands.ts"
 import { type Facts, names, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
@@ -113,7 +113,11 @@ type On = { facts: Facts; key: string }
 
 const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) => Finding[] | undefined>> = {
 	AT_AddColumn: addColumn,
-	AT_AttachPartition: (cmd) => attachFindings(written(((cmd["def"] as Node)["PartitionCmd"] as Node)["name"])),
+	AT_AttachPartition: (cmd, _table, { facts, key }) => {
+		const partition = (cmd["def"] as Node)["PartitionCmd"] as Node
+		const isDefault = (partition["bound"] as Node | undefined)?.["is_default"] === true
+		return attachFindings(written(partition["name"]), isDefault ? undefined : facts.defaultPartitions.get(key))
+	},
 	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
 	AT_AddIdentity: (cmd) => [...always(cmd), ...(restarts(cmd["def"]) ? [RESTART] : [])],
 	AT_AlterColumnType: (cmd, _table, on) => retypeFindings(cmd, on),
@@ -218,6 +222,7 @@ function ddlFindings(type: string, node: Node, facts: Facts): Finding[] | undefi
 		if (UNSAFE_RENAMES.has(kind)) return [{ level: "unsafe" }]
 		return CAUTIOUS_RENAMES.has(kind) && type === "RenameStmt" ? [{ level: "cautious" }] : []
 	}
+	if (type === "CreateStmt") return createFindings(node, facts)
 	if (UNSAFE_NODES.has(type)) return [{ level: "unsafe" }]
 	return NODE_RULES[type]?.(node) ?? maintenanceFindings(type, node)
 }

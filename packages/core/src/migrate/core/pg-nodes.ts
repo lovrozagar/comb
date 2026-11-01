@@ -20,6 +20,7 @@ const emptyFacts = (schema: string): Facts => ({
 	code: new Map(),
 	columnTypes: new Map(),
 	defined: new Set(),
+	defaultPartitions: new Map(),
 	domainDefaults: new Map(),
 	domains: new Map(),
 	eventTriggers: new Map(),
@@ -80,6 +81,8 @@ type Facts = {
 	domainDefaults: Map<string, unknown>
 	/** each operator a migration defined, with its function */
 	operators: Map<string, string>
+	/** each partitioned table's DEFAULT partition, which a new partition's bound is checked against (P12 of r18) */
+	defaultPartitions: Map<string, string>
 	/** each table's parents, and whether it is their partition */
 	parents: Map<string, Array<{ parent: string; partition: boolean }>>
 	/** the schema an unqualified name resolves in, the one each key leaves out (M72) */

@@ -5,7 +5,7 @@
  * an ATTACH PARTITION, which scans the partition (P1 of the 0.15.0 review).
  */
 import type { Finding } from "./classify-alter.ts"
-import { type Node, nodesOf } from "./pg-nodes.ts"
+import { type Facts, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
 
 const LOCKED: Finding = { level: "lock", note: "holds an exclusive lock while it runs" }
 
@@ -21,13 +21,35 @@ function isOn(arg: unknown): boolean {
 const turnsOn = (options: unknown, name: string): boolean =>
 	nodesOf(options).some(([type, node]) => type === "DefElem" && node["defname"] === name && isOn(node["arg"]))
 
-/** An ATTACH PARTITION's finding: Postgres checks every row of `partition` against its bound under ACCESS EXCLUSIVE */
-const attachFindings = (partition: string): Finding[] => [
-	{
-		level: "lock",
-		note: `scans ${partition} under an exclusive lock to check its bound; add a CHECK constraint matching the bound NOT VALID, VALIDATE it, then ATTACH`,
-	},
-]
+/**
+ * An ATTACH PARTITION's finding: Postgres checks every row of `partition` against its bound under
+ * ACCESS EXCLUSIVE, and every row of the parent's default partition, when it has one, against the
+ * bound too (P12 of r18)
+ */
+function attachFindings(partition: string, defaulted?: string): Finding[] {
+	const note =
+		defaulted === undefined
+			? `scans ${partition} under an exclusive lock to check its bound; add a CHECK constraint matching the bound NOT VALID, VALIDATE it, then ATTACH`
+			: `scans ${partition}, and the default partition ${defaulted}, under an exclusive lock to check their bounds; add a CHECK constraint matching the bound to ${partition} and one excluding it to ${defaulted}, each NOT VALID, VALIDATE them, then ATTACH`
+	return [{ level: "lock", note }]
+}
+
+/** A partition created beside its parent's default partition: Postgres checks no row of the default belongs to it */
+function createFindings(node: Node, facts: Facts): Finding[] {
+	const bound = node["partbound"] as Node | undefined
+	const [parent] = ((node["inhRelations"] as Node[] | undefined) ?? []).map(
+		(each) => tableOf(each["RangeVar"], facts.schema).key,
+	)
+	const defaulted = parent === undefined ? undefined : facts.defaultPartitions.get(parent)
+	if (bound === undefined || bound["is_default"] === true || defaulted === undefined) return []
+	const table = tableOf(node["relation"], facts.schema).key
+	return [
+		{
+			level: "lock",
+			note: `scans the default partition ${defaulted} under an exclusive lock to check no row of it belongs to ${table}; add a CHECK constraint excluding the new bound to ${defaulted} NOT VALID, VALIDATE it, then create the partition`,
+		},
+	]
+}
 
 /* LOCK's modes as the parser numbers them: SHARE and stronger block writes, ACCESS EXCLUSIVE reads too */
 const [SHARE_LOCK, ACCESS_EXCLUSIVE_LOCK] = [5, 8]
@@ -56,4 +78,4 @@ function maintenanceFindings(type: string, node: Node): Finding[] | undefined {
 	return type === "ClusterStmt" ? [LOCKED] : undefined
 }
 
-export { attachFindings, maintenanceFindings }
+export { attachFindings, createFindings, maintenanceFindings }

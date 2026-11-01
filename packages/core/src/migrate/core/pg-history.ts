@@ -57,6 +57,18 @@ function followColumn(table: string, column: Node, facts: Facts): void {
 	followType(table, { def: column, runs }, facts)
 }
 
+/** A partition attached to `table`, which may be its default, or detached from it */
+function followPartition(table: string, cmd: Node, facts: Facts): void {
+	const partition = (cmd["def"] as Node)["PartitionCmd"] as Node
+	const child = tableOf(partition["name"], facts.schema).key
+	if (cmd["subtype"] === "AT_DetachPartition") {
+		if (facts.defaultPartitions.get(table) === child) facts.defaultPartitions.delete(table)
+		return
+	}
+	facts.parents.set(child, [...(facts.parents.get(child) ?? []), { parent: table, partition: true }])
+	if ((partition["bound"] as Node | undefined)?.["is_default"] === true) facts.defaultPartitions.set(table, child)
+}
+
 /** A CREATE TABLE: its parents, its columns, its checks, and what a table it is LIKE runs */
 function followCreate(node: Node, facts: Facts): void {
 	const table = tableOf(node["relation"], facts.schema).key
@@ -69,6 +81,8 @@ function followCreate(node: Node, facts: Facts): void {
 			table,
 			parents.map((parent) => ({ parent, partition: node["partbound"] !== undefined })),
 		)
+	if ((node["partbound"] as Node | undefined)?.["is_default"] === true)
+		facts.defaultPartitions.set(parents[0] as string, table)
 	for (const element of (node["tableElts"] as Node[] | undefined) ?? []) {
 		if (element["ColumnDef"] !== undefined) followColumn(table, element["ColumnDef"] as Node, facts)
 		const check =
@@ -109,9 +123,8 @@ function followAlter(node: Node, facts: Facts): void {
 	for (const each of node["cmds"] as Node[]) {
 		const cmd = each["AlterTableCmd"] as Node
 		const def = cmd["def"] as Node
-		if (cmd["subtype"] === "AT_AttachPartition") {
-			const child = tableOf((def["PartitionCmd"] as Node)["name"], facts.schema).key
-			facts.parents.set(child, [...(facts.parents.get(child) ?? []), { parent: table, partition: true }])
+		if (cmd["subtype"] === "AT_AttachPartition" || cmd["subtype"] === "AT_DetachPartition") {
+			followPartition(table, cmd, facts)
 		} else if (cmd["subtype"] === "AT_AddInherit") {
 			facts.parents.set(table, [
 				...(facts.parents.get(table) ?? []),

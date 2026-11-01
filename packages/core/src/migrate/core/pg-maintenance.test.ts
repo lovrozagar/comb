@@ -4,6 +4,8 @@
  * a REINDEX that is not concurrent, and CLUSTER.
  */
 import { beforeAll, describe, expect, it } from "vitest"
+import { classifyMigration } from "./classify.ts"
+import { extractSchema } from "./schema.ts"
 import { historyFacts } from "./pg-history.ts"
 import { ddlFindings } from "./pg-ddl.ts"
 import type { Node } from "./pg-nodes.ts"
@@ -51,5 +53,46 @@ describe("a maintenance command's lock (P7)", () => {
 			"REINDEX TABLE CONCURRENTLY t",
 		])
 			expect(rated(sql), sql).toEqual([])
+	})
+})
+
+/* r18 P12: a new partition of a parent with a DEFAULT partition makes Postgres scan the default too */
+describe("a partition added beside the parent's default partition", () => {
+	const EV =
+		"CREATE TABLE ev (at date) PARTITION BY RANGE (at); CREATE TABLE ev_2020 PARTITION OF ev FOR VALUES FROM ('2020-01-01') TO ('2021-01-01'); CREATE TABLE ev_def PARTITION OF ev DEFAULT; CREATE TABLE ev_new (at date);"
+	const locks = (later: string, history = EV) =>
+		classifyMigration(later, { before: extractSchema(history, undefined, "postgres"), dialect: "postgres" })
+			.lockWarnings
+	const ATTACH = "ALTER TABLE ev ATTACH PARTITION ev_new FOR VALUES FROM ('2021-01-01') TO ('2022-01-01');"
+	const BOTH =
+		"scans ev_new, and the default partition ev_def, under an exclusive lock to check their bounds; add a CHECK constraint matching the bound to ev_new and one excluding it to ev_def, each NOT VALID, VALIDATE them, then ATTACH"
+
+	it("names the default partition and its own CHECK on an ATTACH", () => {
+		expect(locks(ATTACH)).toEqual([expect.stringMatching(/^ALTER TABLE ev ATTACH PARTITION ev_new .* \((.*)\)$/)])
+		expect(locks(ATTACH)[0]).toContain(`(${BOTH})`)
+	})
+
+	it("names the default partition on a CREATE TABLE … PARTITION OF, which scans it", () => {
+		const create = "CREATE TABLE ev_2022 PARTITION OF ev FOR VALUES FROM ('2022-01-01') TO ('2023-01-01');"
+		const [warning, ...rest] = locks(create)
+		expect([warning?.startsWith("CREATE TABLE ev_2022 PARTITION OF ev"), rest]).toEqual([true, []])
+		expect(warning).toContain(
+			"(scans the default partition ev_def under an exclusive lock to check no row of it belongs to ev_2022; add a CHECK constraint excluding the new bound to ev_def NOT VALID, VALIDATE it, then create the partition)",
+		)
+		expect(locks(create, EV.replace("CREATE TABLE ev_def PARTITION OF ev DEFAULT;", ""))).toEqual([])
+	})
+
+	it("follows the default partition through an ATTACH, a rename, a detach and a drop", () => {
+		const attached = EV.replace(
+			"CREATE TABLE ev_def PARTITION OF ev DEFAULT;",
+			"CREATE TABLE d (at date); ALTER TABLE ev ATTACH PARTITION d DEFAULT;",
+		)
+		expect(locks(ATTACH, attached).join()).toContain("the default partition d,")
+		expect(locks(ATTACH, `${EV} ALTER TABLE ev_def RENAME TO ev_rest;`).join()).toContain(
+			"the default partition ev_rest,",
+		)
+		const alone = "scans ev_new under an exclusive lock to check its bound"
+		expect(locks(ATTACH, `${EV} ALTER TABLE ev DETACH PARTITION ev_def;`).join()).toContain(alone)
+		expect(locks(ATTACH, `${EV} DROP TABLE ev_def;`).join()).toContain(alone)
 	})
 })
