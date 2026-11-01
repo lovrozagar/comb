@@ -15,6 +15,7 @@
  *   with their command, roles and whether they are permissive (P9 of the 0.15.0 review).
  * - Its domains, composite and range types and collations, but an extension's; each table's rules but
  *   a view's own; each table's row level security where it is on; every extension but plpgsql.
+ * - The role the read connects as, which a policy's CURRENT_USER names (R2 of plan 17).
  */
 export const CATALOG = `SELECT 'routine' AS what, p.proname AS name, CASE p.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END AS kind, NULL AS on_table,
 (SELECT coalesce(string_agg(CASE WHEN tn.nspname IN ('pg_catalog', $1) THEN '' ELSE tn.nspname || '.' END || t.typname || CASE WHEN x.arr THEN '[]' ELSE '' END, ',' ORDER BY a.ord), '')
@@ -66,4 +67,6 @@ FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamesp
 WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') AND (c.relrowsecurity OR c.relforcerowsecurity)
 UNION ALL
 SELECT 'extension', e.extname, NULL, NULL, NULL, NULL, NULL, NULL
-FROM pg_catalog.pg_extension e WHERE e.extname <> 'plpgsql'`
+FROM pg_catalog.pg_extension e WHERE e.extname <> 'plpgsql'
+UNION ALL
+SELECT 'user', current_user::text, NULL, NULL, NULL, NULL, NULL, NULL`

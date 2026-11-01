@@ -48,6 +48,7 @@ const ROWS: Array<Record<string, unknown>> = [
 	{ kind: null, name: "keep", on_table: "t", what: "rule" },
 	{ how: "enabled, not forced", kind: null, name: "t", on_table: null, what: "rls" },
 	{ kind: null, name: "citext", on_table: null, what: "extension" },
+	{ kind: null, name: "app", on_table: null, what: "user" },
 ]
 
 /* plan 14's 5.4b: what the database holds of what Atlas OSS does not compare */
@@ -69,6 +70,7 @@ describe("readLiveObjects", () => {
 			rls: new Map([["t", "enabled, not forced"]]),
 			rules: new Map([["t", new Set(["keep"])]]),
 			sequences: new Map([["s", "start 1, increment 1, min 1, max 9, no cycle"]]),
+			user: "app",
 			relations: new Map([
 				["v", "view"],
 				["s", "sequence"],

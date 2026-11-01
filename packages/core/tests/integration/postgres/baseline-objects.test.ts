@@ -307,3 +307,18 @@ describe("a Postgres baseline: the kinds and settings Atlas OSS does not compare
 		})
 	})
 })
+
+/* R2 of plan 17: a policy's CURRENT_USER is the role the migrations ran as, the one baseline connects as */
+describe("a Postgres baseline: a policy to the role that ran the migrations", () => {
+	it.each(["CURRENT_USER", "CURRENT_ROLE", "SESSION_USER"])(
+		"baselines a policy TO %s the history built",
+		async (role) => {
+			await withDevAndTarget(async (devUrl, url) => {
+				const history = `${TABLE}CREATE POLICY p ON t TO ${role} USING (true);\n`
+				await exec(url, history)
+				const { refused } = await baseline(url, devUrl, history)
+				expect(refused).toBeUndefined()
+			})
+		},
+	)
+})

@@ -20,6 +20,17 @@ describe("CATALOG", () => {
 			const first = ((arm["targetList"] as Node[])[0] as Node)["ResTarget"] as Node
 			return (((first["val"] as Node)["A_Const"] as Node)["sval"] as Node)["sval"]
 		})
-		expect(whats).toEqual(["routine", "trigger", "relation", "policy", "kind", "kind", "rule", "rls", "extension"])
+		expect(whats).toEqual([
+			"routine",
+			"trigger",
+			"relation",
+			"policy",
+			"kind",
+			"kind",
+			"rule",
+			"rls",
+			"extension",
+			"user",
+		])
 	})
 })

@@ -113,6 +113,8 @@ export type LiveObjects = {
         enabled: boolean;
         type: number;
     }>>;
+    /** the role the read connects as: the one the migrations ran as, which CURRENT_USER names in a policy (R2 of plan 17) */
+    user: string;
 };
 /** The database a read reaches, and the schema it reads */
 export type LiveTarget = {

@@ -11,6 +11,7 @@ export const noLive = (): LiveObjects => ({
 	rules: new Map(),
 	sequences: new Map(),
 	triggers: new Map(),
+	user: "app",
 })
 
 /** A database holding `relations`, by name and what each is, a sequence as CREATE SEQUENCE leaves it */

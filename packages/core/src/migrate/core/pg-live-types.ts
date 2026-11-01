@@ -23,6 +23,8 @@ export type LiveObjects = {
 	/** each sequence's settings: `start 1, increment 1, min 1, max …, no cycle` (P10 of r18) */
 	sequences: Map<string, string>
 	triggers: Map<string, Map<string, { enabled: boolean; type: number }>>
+	/** the role the read connects as: the one the migrations ran as, which CURRENT_USER names in a policy (R2 of plan 17) */
+	user: string
 }
 
 /** The database a read reaches, and the schema it reads */

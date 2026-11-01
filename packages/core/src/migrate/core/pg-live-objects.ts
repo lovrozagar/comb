@@ -67,6 +67,7 @@ function readRow(row: Record<string, unknown>, live: LiveObjects): void {
 	else if (what === "rule") live.rules.set(table, (live.rules.get(table) ?? new Set()).add(name))
 	else if (what === "rls") live.rls.set(name, how)
 	else if (what === "extension") live.extensions.add(name)
+	else if (what === "user") live.user = name
 	else {
 		const fired = { enabled: row["enabled"] === true, type: Number(row["tgtype"]) }
 		live.triggers.set(table, (live.triggers.get(table) ?? new Map()).set(name, fired))
@@ -92,6 +93,7 @@ async function readLiveObjects(
 			rules: new Map(),
 			sequences: new Map(),
 			triggers: new Map(),
+			user: "",
 		}
 		for (const row of rows) readRow(row, live)
 		return live
@@ -149,7 +151,7 @@ const onlyIn = (database: ReadonlySet<string>, migrations: ReadonlySet<string>):
 const here = <T>(map: Map<string, T>): Array<[string, T]> => [...map].filter(([key]) => !key.includes("."))
 
 /** What the history leaves in the target schema, keyed as the catalog names it: a key with no schema part (M72) */
-function historyObjects(facts: Facts): LiveObjects {
+function historyObjects(facts: Facts, user: string): LiveObjects {
 	/* Postgres keeps no array dimensions in a signature: int[][] is int[] */
 	const routines = new Map(
 		[...facts.routines]
@@ -174,7 +176,9 @@ function historyObjects(facts: Facts): LiveObjects {
 	const policies = new Map(
 		here(facts.policies).map(([table, each]) => [
 			table,
-			new Map([...each].map(([name, { cmd, permissive, roles }]) => [name, policyHow(cmd, roles, permissive)])),
+			new Map(
+				[...each].map(([name, { cmd, permissive, roles }]) => [name, policyHow(cmd, as(roles, user), permissive)]),
+			),
 		]),
 	)
 	const sequences = new Map(
@@ -193,8 +197,16 @@ function historyObjects(facts: Facts): LiveObjects {
 		rules: new Map(here(facts.rules)),
 		sequences,
 		triggers,
+		user,
 	}
 }
+
+// lookup-table: the role keywords a policy may name that stand for the role the migrations ran as
+const RAN_AS: ReadonlySet<string> = /* @__PURE__ */ new Set(["current_role", "current_user", "session_user"])
+
+/** `roles` with CURRENT_USER and its like read as `user`, the role baseline connects as, as Postgres stored it (R2 of plan 17) */
+const as = (roles: readonly string[], user: string): string[] =>
+	[...new Set(roles.map((role) => (RAN_AS.has(role) ? user : role)))].sort()
 
 /** A policy's settings as the catalog read spells them: `for all, to public, permissive` */
 const policyHow = (cmd: string, roles: readonly string[], permissive: boolean): string =>
@@ -213,7 +225,7 @@ function liveDrift(
 	facts: Facts,
 	live: LiveObjects,
 ): { matched: { routines: number; triggers: number; views: number }; only: string[] } {
-	const history = historyObjects(facts)
+	const history = historyObjects(facts, live.user)
 	const routines = routineDrift(live.routines, history.routines)
 	const [database, migrations] = [labels(live), labels(history)]
 	/* an extension the database alone has may be the platform's own: only a missing one refuses */

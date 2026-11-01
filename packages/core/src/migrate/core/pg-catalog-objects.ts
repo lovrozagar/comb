@@ -18,13 +18,19 @@ function ownedBy(options: unknown): boolean | undefined {
 	return !(parts.length === 1 && parts[0]?.toLowerCase() === "none")
 }
 
-/** A policy's roles, as the catalog names them: `public` for PUBLIC, a role by its name */
+// lookup-table: the roles a policy names by keyword, as the history keeps them; a baseline compares CURRENT_USER and its like as the role it connects as (R2 of plan 17)
+const ROLE_WORDS: Readonly<Record<string, string>> = {
+	ROLESPEC_CURRENT_ROLE: "current_role",
+	ROLESPEC_CURRENT_USER: "current_user",
+	ROLESPEC_PUBLIC: "public",
+	ROLESPEC_SESSION_USER: "session_user",
+}
+
+/** A policy's roles: a role by its name, PUBLIC and CURRENT_USER and their like by their keyword */
 const rolesOf = (roles: unknown): string[] =>
 	(roles as Node[])
 		.map((each) => each["RoleSpec"] as Node)
-		.map((role) =>
-			role["roletype"] === "ROLESPEC_PUBLIC" ? "public" : String(role["rolename"] ?? role["roletype"]).toLowerCase(),
-		)
+		.map((role) => ROLE_WORDS[String(role["roletype"])] ?? String(role["rolename"]))
 		.sort()
 
 /** An ALTER POLICY: its new roles, and what its new USING or WITH CHECK reads, joined to what it read */
