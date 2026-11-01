@@ -55,7 +55,8 @@ export type SchemaDiffResult = {
 
 /**
  * Atlas's diff of two schemas, on the dialect's dev database. On Postgres the target's dev schema is
- * made ready first and a failure explained as migrate diff explains one (P8 of r18).
+ * made ready first and a failure explained as migrate diff explains one (P8 of r18). devUrl must be
+ * a scratch database: with no `target.url`, comb cannot tell it from your real one (P2 of r19).
  */
 export async function generateSchemaDiff(options: SchemaDiffOptions): Promise<SchemaDiffResult> {
 	const { dialect, fromSchema, toSchema, run: exec = run, target } = options
