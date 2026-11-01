@@ -44,6 +44,8 @@ type ListPagination = {
 	limit: number
 	/** read through buildListQuery's `merged`: paged by paginateMerged, never by paginate (K8 of r17) */
 	merged: boolean
+	/** the sort fields, and the tiebreak's COMB_ID, whose column holds numbers: the merge compares a driver's decimal string there as the integer (Q2 of r19) */
+	numbers: ReadonlySet<string>
 	nonFinite: "exact" | undefined
 	page: number | undefined
 	parsedFields: ParsedFields | null
@@ -64,6 +66,8 @@ type PaginationFacts = {
 	/** the extras the builder selected, which every row must carry */
 	expects: readonly ListExtra[]
 	keyset?: KeysetKind | undefined
+	/** the sort fields, and COMB_ID, whose column holds numbers; none when not given */
+	numbers?: ReadonlySet<string> | undefined
 	query: ListQueryInput
 	window: number
 }
@@ -86,6 +90,7 @@ function paginationOf<TMerged extends boolean = false>(
 		merged: (facts.merged ?? false) as TMerged,
 		mint: (row) => mintFrom(row, query.parsedSort, { ...options, byReference: facts.byReference, keyset }),
 		nonFinite: options.nonFinite,
+		numbers: facts.numbers ?? new Set(),
 		page: query.page ?? undefined,
 		parsedFields: query.parsedFields ?? null,
 		parsedSort: query.parsedSort,

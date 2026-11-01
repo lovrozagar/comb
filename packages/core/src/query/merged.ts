@@ -9,6 +9,7 @@
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { effectiveNulls } from "./cursor.ts"
+import { INTEGER_TEXT } from "./list-extras.ts"
 import { roundedKey } from "./rounded-key.ts"
 import {
 	applySelect,
@@ -61,11 +62,18 @@ function compareValues(a: unknown, b: unknown): number {
 
 const isNull = (value: unknown) => value === null || value === undefined
 
-/** Two rows in the list's order: each key's direction and null placement, then the id, as orderByKeys orders them */
-function compareRows(sort: readonly SortField[], idField: string) {
+/** `value` of `field` as the merge compares it: a number column's integer a driver read as a decimal string as that integer (Q2 of r19) */
+const keyOf = (numbers: ReadonlySet<string>, field: string, value: unknown): unknown =>
+	numbers.has(field) && typeof value === "string" && INTEGER_TEXT.test(value) ? BigInt(value) : value
+
+/**
+ * Two rows in the list's order: each key's direction and null placement, then the id, as
+ * orderByKeys orders them; a key of a number column compared as a number however the driver read it
+ */
+function compareRows(sort: readonly SortField[], idField: string, numbers: ReadonlySet<string>) {
 	return (a: Record<string, unknown>, b: Record<string, unknown>): number => {
 		for (const { direction, field, nulls } of sort) {
-			const [x, y] = [a[field], b[field]]
+			const [x, y] = [keyOf(numbers, field, a[field]), keyOf(numbers, field, b[field])]
 			if (isNull(x) && isNull(y)) continue
 			const first = effectiveNulls(direction, nulls) === "first"
 			if (isNull(x)) return first ? -1 : 1
@@ -73,7 +81,7 @@ function compareRows(sort: readonly SortField[], idField: string) {
 			const order = compareValues(x, y)
 			if (order !== 0) return direction === "asc" ? order : -order
 		}
-		const order = compareValues(a[idField], b[idField])
+		const order = compareValues(keyOf(numbers, idField, a[idField]), keyOf(numbers, idField, b[idField]))
 		return (sort[0]?.direction ?? "desc") === "asc" ? order : -order
 	}
 }
@@ -204,7 +212,7 @@ function paginateMerged<T extends object>(
 	refuseGoneAnchor(merged)
 	refuseSharedIds(merged, COMB_ID)
 	refuseRounded(merged, pagination.parsedSort)
-	const compare = compareRows(pagination.parsedSort, COMB_ID)
+	const compare = compareRows(pagination.parsedSort, COMB_ID, pagination.numbers)
 	refuseUnmergeable(shards, compare)
 	merged.sort(compare)
 	const { cursor, limit } = pagination

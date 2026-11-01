@@ -77,6 +77,9 @@ function shardWindow(parsed: ListQueryInput, merged: { maxRowsPerShard?: number 
 	})
 }
 
+/** Whether `column` is a column that holds numbers */
+const holdsNumbers = (column: SQLWrapper): boolean => is(column, Column) && column.dataType.startsWith("number")
+
 /** What paginate is told of the list, beside the extras its rows carry */
 function factsOf({ keyset, merged, parsed, sort, table, tiebreak }: Finish) {
 	return {
@@ -89,6 +92,11 @@ function factsOf({ keyset, merged, parsed, sort, table, tiebreak }: Finish) {
 			(keyset.keys ?? []).flatMap(({ column }, i) => (readsBack(column, table) ? [sort[i]?.field as string] : [])),
 		),
 		merged: merged !== undefined,
+		/* the keys, and the tiebreak, whose column holds numbers, which a driver may read as decimal strings (Q2 of r19) */
+		numbers: new Set([
+			...(keyset.keys ?? []).flatMap(({ column }, i) => (holdsNumbers(column) ? [sort[i]?.field as string] : [])),
+			...(tiebreak !== null && holdsNumbers(tiebreak.column) ? [COMB_ID] : []),
+		]),
 		query: parsed,
 		window: parsed.limit + 1,
 	} satisfies Omit<PaginationFacts, "expects"> & { merged: boolean }
