@@ -3,20 +3,13 @@
  * Shared by the libsql, bun:sqlite and D1 handlers: the engine is the same, only the way the
  * driver carries the code differs, and `readSqliteError` absorbs that.
  */
-import {
-	type Fallback,
-	type Found,
-	findNamed,
-	lookup,
-	own,
-	shown,
-	shownColumn,
-	toCombError,
-} from "../constraint-map.ts"
+import { type Found, findNamed, lookup, own, shown, shownColumn, toCombError } from "../constraint-map.ts"
+import { connectionLost, UNAVAILABLE } from "../connection-lost.ts"
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { valueError } from "../value-error.ts"
 import { readSqliteError, type SqliteErrorRead } from "./read-error.ts"
+import { resourceOutcome } from "./resource-outcome.ts"
 import { statementHead, statementTable, updatedColumns, upsertColumns } from "../statement-head.ts"
 
 type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown }
@@ -252,43 +245,17 @@ function handleConstraintViolation(error: unknown, maps: ConstraintMap[]): void 
 	if (mapped !== null) throw mapped
 }
 
-/* the engine's resource codes, which a retry or a bigger plan can fix */
-const RESOURCE: Record<string, Fallback> = {
-	SQLITE_BUSY: {
-		cause: "Database is busy. Please retry shortly.",
-		errorKey: combErrorKeys.DATABASE_UNAVAILABLE,
-		status: "service_unavailable",
-	},
-	SQLITE_FULL: {
-		cause: "The database storage limit has been reached.",
-		errorKey: combErrorKeys.STORAGE_LIMIT_REACHED,
-		status: "unprocessable_entity",
-	},
-	SQLITE_LOCKED: {
-		cause: "Database is busy. Please retry shortly.",
-		errorKey: combErrorKeys.DATABASE_UNAVAILABLE,
-		status: "service_unavailable",
-	},
-	SQLITE_READONLY: {
-		cause: "Database is read-only right now.",
-		errorKey: combErrorKeys.DATABASE_READONLY,
-		status: "service_unavailable",
-	},
-}
-
-/** The outcome of an engine resource code, its extended form read as its primary; undefined for any other */
-const resourceOutcome = (code: string | undefined): Fallback | undefined =>
-	own(RESOURCE, code?.replace(/^(SQLITE_[A-Z]+)_.*$/, "$1"))
-
 /**
- * The CombError a libsql, Turso or bun:sqlite error is: a constraint violation or a resource
- * error; undefined for any other. It throws nothing, so a caller can ask what an error is.
+ * The CombError a libsql, Turso or bun:sqlite error is: a constraint violation, a resource error,
+ * or a lost connection, as on D1 and Postgres (Q11 of r18); undefined for any other. It throws
+ * nothing, so a caller can ask what an error is.
  */
 function classifySqliteError(error: unknown, maps: ConstraintMap[]): CombError | undefined {
 	const constraint = constraintError(error, maps)
 	if (constraint !== null) return constraint
 	const resource = resourceOutcome(readSqliteError(error)?.code)
-	return resource === undefined ? undefined : new CombError({ ...resource, source: error })
+	if (resource !== undefined) return new CombError({ ...resource, source: error })
+	return connectionLost(error) ? new CombError({ ...UNAVAILABLE, source: error }) : undefined
 }
 
 /** The error handler for libsql, Turso and bun:sqlite: throws what classifySqliteError finds; any other error is left for the caller */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { classifyPgError } from "./error-handler.ts"
+import { classifyPgError } from "./pg/error-handler.ts"
+import { classifySqliteError } from "./sqlite/constraint-handler.ts"
 
 /* Q14 of r17: each driver's own words for a connection refused or lost, as the drivers were seen to throw them */
 /** An error as a driver throws it: its message, and its code when it has one */
@@ -40,5 +41,33 @@ describe("classifyPgError on a lost connection", () => {
 		for (const message of ["Client was closed and is not queryable", "Connection terminated", "Query read timeout"])
 			expect(classifyPgError(driver(undefined, message), [])).toBeUndefined()
 		expect(classifyPgError(driver("ENOTFOUND", "getaddrinfo ENOTFOUND db"), [])).toBeUndefined()
+	})
+})
+
+/* Q11 of r18: libsql's words for a lost connection, as @libsql/client throws them: a LibsqlError over Hrana's own */
+/** A LibsqlError of `code`, over the Hrana error it maps */
+const libsql = (code: string, cause?: Error) =>
+	Object.assign(new Error(`${code}: lost`, cause === undefined ? {} : { cause }), { code, name: "LibsqlError" })
+/** Hrana's HttpServerError, its response's status on it */
+const http = (status: number) => Object.assign(new Error(`Server returned HTTP status ${status}`), { status })
+
+describe("classifySqliteError on a lost libsql connection", () => {
+	it.each([
+		["its WebSocket closed", libsql("HRANA_WEBSOCKET_ERROR")],
+		["a stream sqld expired", libsql("STREAM_EXPIRED")],
+		["a server's 503", libsql("SERVER_ERROR", http(503))],
+		["a server's 429", libsql("SERVER_ERROR", http(429))],
+		["a refused connection", driver("ECONNREFUSED", "ECONNREFUSED: Unable to connect")],
+	])("answers %s as database_unavailable 503", (_label, error) => {
+		expect(classifySqliteError(error, [])).toMatchObject({ errorKey: "database_unavailable", status: 503 })
+	})
+
+	it("leaves a request the server refuses, a client the app closed and a missing host unclassified", () => {
+		expect(classifySqliteError(libsql("SERVER_ERROR", http(400)), [])).toBeUndefined()
+		expect(classifySqliteError(libsql("SERVER_ERROR"), [])).toBeUndefined()
+		expect(classifySqliteError(libsql("HRANA_CLOSED_ERROR"), [])).toBeUndefined()
+		expect(classifySqliteError(driver("ENOTFOUND", "getaddrinfo ENOTFOUND db"), [])).toBeUndefined()
+		/* a status on an error no SERVER_ERROR is over is no server's answer */
+		expect(classifySqliteError(http(503), [])).toBeUndefined()
 	})
 })

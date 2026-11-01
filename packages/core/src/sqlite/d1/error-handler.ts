@@ -1,6 +1,7 @@
 import { CombError } from "../../error.ts"
 import { type ConstraintMap, combErrorKeys, type StatusKey } from "../../types.ts"
-import { constraintError, resourceOutcome } from "../constraint-handler.ts"
+import { constraintError } from "../constraint-handler.ts"
+import { resourceOutcome } from "../resource-outcome.ts"
 import { readSqliteError, type SqliteErrorRead } from "../read-error.ts"
 
 /* Retryable per developers.cloudflare.com/d1/observability/debug-d1/, plus D1's overload and

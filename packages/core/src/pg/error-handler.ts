@@ -18,7 +18,7 @@ import {
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
 import { truncateUtf8 } from "../identifier.ts"
-import { connectionLost } from "./connection-lost.ts"
+import { connectionLost, UNAVAILABLE } from "../connection-lost.ts"
 import { mapTable } from "./map-table.ts"
 import { type PgErrorRead, readPgError } from "./read-error.ts"
 import { statementTable } from "../statement-head.ts"
@@ -161,11 +161,6 @@ const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
 	P0001: raised,
 }
 
-const UNAVAILABLE: Fallback = {
-	cause: "Database is temporarily unavailable. Please retry shortly.",
-	errorKey: combErrorKeys.DATABASE_UNAVAILABLE,
-	status: "service_unavailable",
-}
 const READONLY: Fallback = {
 	cause: "Database is currently in maintenance mode. Please retry shortly.",
 	errorKey: combErrorKeys.DATABASE_READONLY,
