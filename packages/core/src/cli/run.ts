@@ -3,6 +3,8 @@
  * The binary (src/bin.ts) hands it the process's argv and IO.
  */
 import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { optionsHelp } from "./args.ts"
 import { cmdCodegen } from "./codegen.ts"
 import { cmdMigrate } from "./migrate.ts"
@@ -31,9 +33,16 @@ export const help = (): string =>
 		...optionsHelp(),
 	].join("\n")
 
-/** comb's version, read from its package.json */
+/**
+ * comb's version, read from its package.json by a path: no global URL, which a project with Workers'
+ * types and Node's but no DOM gives Workers' type of (K1 of r18)
+ */
 const version = (): string =>
-	(JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }).version
+	(
+		JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../package.json"), "utf8")) as {
+			version: string
+		}
+	).version
 
 async function dispatch(argv: readonly string[], io: CliIo): Promise<void> {
 	const [command, ...rest] = argv

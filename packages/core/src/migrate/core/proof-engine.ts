@@ -8,7 +8,7 @@
  * its own cursors. Then the statement runs, and a temp object that took an existing table's name is
  * a shadow. The probes exist only on the copy, between the `EXPLAIN` and the run.
  */
-import { randomBytes } from "node:crypto"
+import { randomUUID } from "node:crypto"
 import type { MemoryDb } from "../drivers/memory.ts"
 import type { ExtractedSchema } from "../types.ts"
 import { preview } from "./classify-file.ts"
@@ -31,7 +31,8 @@ type Step = {
 }
 
 /** A run's probe-name prefix: a token of its own, so no temp trigger a file made can take a probe's name (M46) */
-const probePrefix = (): string => `comb_probe_${randomBytes(8).toString("hex")}_`
+/* a UUID's hex, a string whatever Buffer's type is: Workers' types and Node's both name one (K1 of r18) */
+const probePrefix = (): string => `comb_probe_${randomUUID().replaceAll("-", "").slice(0, 16)}_`
 
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 

@@ -167,6 +167,18 @@ export const APP: Record<string, string> = {
 		},
 		include: ["src/worker-types.ts"],
 	}),
+	/* a nodejs_compat Worker, or a package whose scripts run on Node: no DOM, Workers' and Node's types, every subpath (K1 of r18) */
+	"tsconfig.worker-node.json": JSON.stringify({
+		compilerOptions: {
+			...STRICT,
+			allowImportingTsExtensions: true,
+			lib: ["esnext"],
+			module: "esnext",
+			moduleResolution: "bundler",
+			noEmit: true,
+		},
+		include: ["src/types.ts"],
+	}),
 	/* everything bundled, so tooling that leaked into a runtime import would show in the output */
 	"vite.config.mjs": `export default { build: { outDir: "dist-vite" }, ssr: { noExternal: true } }\n`,
 	"wrangler.toml": 'name = "consumer"\nmain = "src/worker.ts"\ncompatibility_date = "2026-10-01"\n',

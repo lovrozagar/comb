@@ -96,12 +96,15 @@ describe.each([
 
 	it
 		.runIf(peers === "all")
-		.each(["tsconfig.bundler.json", "tsconfig.declarations.json", "tsconfig.nodenext.json", "tsconfig.worker.json"])(
-		"type-checks every subpath under strict flags (%s)",
-		(config) => {
-			const result = run(app.dir, "npx", ["tsc", "-p", config])
-			expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
-			expect(result.status).toBe(0)
-		},
-	)
+		.each([
+			"tsconfig.bundler.json",
+			"tsconfig.declarations.json",
+			"tsconfig.nodenext.json",
+			"tsconfig.worker.json",
+			"tsconfig.worker-node.json",
+		])("type-checks every subpath under strict flags (%s)", (config) => {
+		const result = run(app.dir, "npx", ["tsc", "-p", config])
+		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
+		expect(result.status).toBe(0)
+	})
 })
