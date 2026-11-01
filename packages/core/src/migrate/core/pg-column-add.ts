@@ -63,7 +63,8 @@ function defaultsOf(constraints: readonly Node[], fill: unknown): unknown[] {
 
 /**
  * What fills an added column's rows, from its inline `constraints` and its type, read in `facts`:
- * its domain, if it has one; whether each row gets a value of its own (a sequence, an identity, a
+ * its domain, if it has one; whether a value that fills its rows meets a CHECK of that domain;
+ * whether each row gets a value of its own (a sequence, an identity, a
  * volatile default); whether every row gets one; and whether its default calls code Postgres runs
  * per row, which rewrites the table. With no default of its own, a column of a domain takes the
  * domain's (P2 of r18).
@@ -76,12 +77,26 @@ function fillOf(column: Node, constraints: readonly Node[], facts: Facts) {
 	const volatile = calls.some((parts) => DISTINCT.has(parts.at(-1) as string))
 	const serial = SERIALS.has(names((column["typeName"] as Node)["names"]).at(-1) as string)
 	const distinct = serial || volatile || has("CONSTR_IDENTITY")
+	const filled = distinct || defaults.length > 0 || has("CONSTR_GENERATED")
 	return {
+		/* a value that fills the rows meets a CHECK of the domain on each one */
+		checksDefault: domain?.checked === true && filled,
 		distinct,
 		domain,
-		filled: distinct || defaults.length > 0 || has("CONSTR_GENERATED"),
+		filled,
 		rewrites: calls.some((parts) => !steady(parts, facts)),
 	}
+}
+
+/**
+ * An added column's rewrite warning; where a default fills a column of a domain with a CHECK, it also
+ * says Postgres checks that default on every row, which comb cannot evaluate and an empty dev database
+ * never fails (the reviewer's ruling 1 on 4.1)
+ */
+function rewriteNote(column: Node, checksDefault: boolean, facts: Facts): string {
+	if (!checksDefault) return REWRITES
+	const domain = typeOf(column["typeName"], facts.schema)
+	return `${REWRITES}; Postgres checks the default against ${domain}'s constraints on every existing row, and fails if any row's value breaks one`
 }
 
 /**
@@ -92,12 +107,14 @@ function fillOf(column: Node, constraints: readonly Node[], facts: Facts) {
 function addColumn(cmd: Node, _table: string, { facts }: { facts: Facts }): Finding[] {
 	const constraints = inlineConstraints(cmd)
 	const has = (type: string) => constraints.some((each) => each["contype"] === type)
-	const { distinct, domain, filled, rewrites } = fillOf((cmd["def"] as Node)["ColumnDef"] as Node, constraints, facts)
+	const column = (cmd["def"] as Node)["ColumnDef"] as Node
+	const { checksDefault, distinct, domain, filled, rewrites } = fillOf(column, constraints, facts)
 	const notNull = has("CONSTR_NOTNULL") || domain?.notNull === true
 	const scans = has("CONSTR_CHECK") || has("CONSTR_FOREIGN") || domain?.constrained === true
 	const findings: Finding[] = []
 	if ((notNull && !filled) || (has("CONSTR_PRIMARY") && !distinct)) findings.push({ level: "unsafe" })
-	if (distinct || rewrites || has("CONSTR_GENERATED") || scans) findings.push({ level: "lock", note: REWRITES })
+	if (distinct || rewrites || has("CONSTR_GENERATED") || scans)
+		findings.push({ level: "lock", note: rewriteNote(column, checksDefault, facts) })
 	return findings
 }
 

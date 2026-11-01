@@ -41,16 +41,17 @@ function chainOf(type: string, facts: Facts): Domain[] {
 /**
  * What a value of the domain `type` meets on its way into a column, undefined for a type that is no
  * domain: its default; whether any constraint of its chain applies, so Postgres checks every row an
- * added column fills; whether one is NOT NULL; and the function the first CHECK calls
+ * added column fills; whether one is a CHECK, or NOT NULL; and the function the first CHECK calls
  */
 function domainOf(
 	type: string,
 	facts: Facts,
-): { constrained: boolean; fill: unknown; notNull: boolean; runs: string | undefined } | undefined {
+): { checked: boolean; constrained: boolean; fill: unknown; notNull: boolean; runs: string | undefined } | undefined {
 	const chain = chainOf(type, facts)
 	if (chain.length === 0) return undefined
 	const constraints = chain.flatMap((domain) => [...domain.constraints.values()])
 	return {
+		checked: constraints.some((constraint) => constraint.kind === "check"),
 		constrained: constraints.length > 0,
 		fill: (chain[0] as Domain).fill,
 		notNull: constraints.some((constraint) => constraint.kind === "notnull"),

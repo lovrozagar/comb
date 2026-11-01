@@ -23,6 +23,13 @@ function rated(sql: string) {
 
 const REWRITE = { level: "lock", note: REWRITES }
 
+/** `later`'s lock warnings after a table t and `history`, read as Postgres */
+const warnedAfter = (history: string, later: string) =>
+	classifyMigration(later, {
+		before: extractSchema(`CREATE TABLE t (id int PRIMARY KEY);${history}`, undefined, "postgres"),
+		dialect: "postgres",
+	}).lockWarnings
+
 describe("an added column that fills every row (P6)", () => {
 	it("warns of the rewrite for a serial, an identity and a stored generated column", () => {
 		for (const sql of [
@@ -200,6 +207,23 @@ describe("an added column of a domain, after the history that shaped the domain 
 		expect([rating.safety, rating.lockWarnings.some((warning) => warning.includes(REWRITES))]).toEqual([
 			safety,
 			rewrites,
+		])
+	})
+})
+
+/* the reviewer's ruling 1 on 4.1: a default can break the domain's CHECK on existing rows, which no empty dev shows */
+describe("an added column of a domain with a CHECK, filled by a default", () => {
+	it("says the default is checked against the domain's constraints on every existing row, and only where it has a CHECK", () => {
+		expect(
+			warnedAfter(
+				"CREATE DOMAIN d0 AS int CHECK (VALUE > 0); CREATE DOMAIN d AS d0;",
+				"ALTER TABLE t ADD COLUMN x d DEFAULT -1;",
+			),
+		).toEqual([
+			`ALTER TABLE t ADD COLUMN x d DEFAULT -1 (${REWRITES}; Postgres checks the default against d's constraints on every existing row, and fails if any row's value breaks one)`,
+		])
+		expect(warnedAfter("CREATE DOMAIN d AS int NOT NULL;", "ALTER TABLE t ADD COLUMN x d DEFAULT 0;")).toEqual([
+			`ALTER TABLE t ADD COLUMN x d DEFAULT 0 (${REWRITES})`,
 		])
 	})
 })
