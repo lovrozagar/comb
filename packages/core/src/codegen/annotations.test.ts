@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { fieldOf } from "./__fixtures__/runtime.ts"
+import { fieldConstraintsOf } from "./annotations.ts"
 
 /* the schema the c.json columns below are given, exported beside the table so the reader finds it */
 const schema = z.object({})
@@ -157,5 +158,15 @@ describe("parseFieldConstraints: bounds", () => {
 		expect(parseFieldConstraints('c.text("t", { min: 0, max: 0 })')).toMatchObject({ max: 0, min: 0 })
 		expect(parseFieldConstraints('c.real("r", { min: -1.5, max: 2.5 })')).toMatchObject({ max: 2.5, min: -1.5 })
 		expect(parseFieldConstraints('c.json("j", schema, { maxBytes: 1 })').maxBytes).toBe(1)
+	})
+})
+
+/* r18 K7: measure is required, and a JavaScript caller that leaves it out, or misspells it, is refused */
+describe("fieldConstraintsOf's measure", () => {
+	it.each([undefined, "size"])("refuses a measure of %j", (measure) => {
+		const options = { fieldName: "title", filled: false, measure, place: "post.title" } as unknown as Parameters<
+			typeof fieldConstraintsOf
+		>[1]
+		expect(() => fieldConstraintsOf({}, options)).toThrow('post.title: measure must be "length" or "value"')
 	})
 })

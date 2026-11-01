@@ -63,15 +63,13 @@ function refuseEmptyBounds(
  * helpers, or a timestamp's default or update hook; a column named createdAt that nothing fills is
  * the caller's to give. `measure` says whether min and max bound a length (text) or a value
  */
-export function fieldConstraintsOf(
+/** Refuses what no field can be declared with: an unknown measure or constraint, a contradiction, a bad relation, empty bounds */
+function refuseMalformed(
 	constraints: Readonly<Record<string, ConstantValue>>,
-	{
-		fieldName,
-		filled,
-		measure,
-		place,
-	}: { fieldName: string; filled: boolean; measure: "length" | "value"; place: string },
-): FieldConstraints {
+	{ measure, place }: { measure: "length" | "value"; place: string },
+): void {
+	/* a JavaScript caller's measure reaches here unchecked by tsc (K7 of r18) */
+	if (measure !== "length" && measure !== "value") throw new Error(`${place}: measure must be "length" or "value"`)
 	const unknown = Object.keys(constraints).find((key) => !KNOWN.has(key))
 	if (unknown !== undefined) throw new Error(`${place}: comb reads no constraint named ${unknown}`)
 	if (constraints["mutable"] === true && constraints["nomutate"] === true)
@@ -81,6 +79,19 @@ export function fieldConstraintsOf(
 	if (relation !== undefined && (typeof relation !== "string" || !/^[A-Za-z_$][\w$]*$/.test(relation)))
 		throw new Error(`${place}: relation ${JSON.stringify(relation)} is no name a relation can take`)
 	refuseEmptyBounds(constraints, { measure, place })
+}
+
+export function fieldConstraintsOf(
+	constraints: Readonly<Record<string, ConstantValue>>,
+	{
+		fieldName,
+		filled,
+		measure,
+		place,
+	}: { fieldName: string; filled: boolean; measure: "length" | "value"; place: string },
+): FieldConstraints {
+	refuseMalformed(constraints, { measure, place })
+	const relation = constraints["relation"]
 
 	const autogenerate = filled ? constraints["autogenerate"] !== false : constraints["autogenerate"] === true
 
