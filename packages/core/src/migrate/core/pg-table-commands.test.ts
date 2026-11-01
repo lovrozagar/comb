@@ -34,7 +34,7 @@ describe("an ALTER TABLE's command on the whole table", () => {
 		["ALTER TABLE t NO INHERIT base", "NO INHERIT"],
 		["ALTER TABLE t OF comp", "OF"],
 		["ALTER TABLE t NOT OF", "NOT OF"],
-		["ALTER TABLE t ENABLE ALWAYS RULE r", "ENABLE ALWAYS RULE"],
+		["ALTER FOREIGN TABLE t OPTIONS (ADD a 'b')", "GENERIC OPTIONS"],
 	])("rates %j unsafe, naming the command in the SQL's own words", (sql, words) => {
 		expect(rated(sql)).toEqual([
 			{ level: "unsafe", note: `comb does not recognize ALTER TABLE … ${words}; approve it in the file` },

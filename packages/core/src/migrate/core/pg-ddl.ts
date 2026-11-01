@@ -136,17 +136,29 @@ const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) 
 	AT_SetNotNull: () => [{ level: "unsafe" }, { level: "lock", note: REWRITES }],
 }
 
-/** A constraint ADD's findings: a foreign key or check scans every row unless NOT VALID */
-function addConstraint(cmd: Node): Finding[] {
+/**
+ * A constraint ADD's findings: a foreign key or check scans every row unless NOT VALID. A foreign key
+ * rewrites nothing, and blocks writes to its table and the one it references (P16 of r18).
+ */
+function addConstraint(cmd: Node, table: string): Finding[] {
 	const constraint = (cmd["def"] as Node)["Constraint"] as Node
-	const scans = constraint["contype"] === "CONSTR_FOREIGN" || constraint["contype"] === "CONSTR_CHECK"
-	return scans && constraint["skip_validation"] !== true ? [{ level: "lock", note: REWRITES }] : []
+	if (constraint["skip_validation"] === true) return []
+	if (constraint["contype"] === "CONSTR_CHECK") return [{ level: "lock", note: REWRITES }]
+	if (constraint["contype"] !== "CONSTR_FOREIGN") return []
+	const referenced = written(constraint["pktable"])
+	const blocked = referenced === table ? table : `${table} and ${referenced}`
+	return [
+		{
+			level: "lock",
+			note: `scans ${table}, blocking writes to ${blocked}; add it NOT VALID, then VALIDATE CONSTRAINT`,
+		},
+	]
 }
 
 /** A command on one column or constraint: its findings, or undefined for a command on the whole table */
 function columnFindings(cmd: Node, table: string, on: On): Finding[] | undefined {
 	const subtype = String(cmd["subtype"])
-	return subtype === "AT_AddConstraint" ? addConstraint(cmd) : COMMAND_RULES[subtype]?.(cmd, table, on)
+	return subtype === "AT_AddConstraint" ? addConstraint(cmd, table) : COMMAND_RULES[subtype]?.(cmd, table, on)
 }
 
 /** One ALTER TABLE command's findings, on `table` as written */

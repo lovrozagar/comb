@@ -60,6 +60,14 @@ const ENABLES: Readonly<Record<string, "every" | "one">> = {
 	AT_EnableTrigUser: "every",
 }
 
+// lookup-table: the commands that turn a rule on or off, a rule change default-deny rates by its family's rule (P14 of r18)
+const RULE_COMMANDS = /* @__PURE__ */ new Set([
+	"AT_DisableRule",
+	"AT_EnableAlwaysRule",
+	"AT_EnableReplicaRule",
+	"AT_EnableRule",
+])
+
 // lookup-table: the commands whose subtype, split into words, is not the SQL that writes them
 const SPELLED: Readonly<Record<string, string>> = {
 	AT_AddInherit: "INHERIT",
@@ -101,6 +109,8 @@ function tableFindings(cmd: Node, table: string): Finding[] {
 	if (SECURITY_COMMANDS.has(subtype))
 		return [{ level: "cautious", note: `changes which rows each role sees on ${table}` }]
 	if (QUIET_COMMANDS.has(subtype)) return []
+	if (RULE_COMMANDS.has(subtype))
+		return [{ level: "unsafe", note: "comb rates every rule change unsafe; approve it in the file" }]
 	return [
 		{ level: "unsafe", note: `comb does not recognize ALTER TABLE … ${wordsOf(subtype)}; approve it in the file` },
 	]

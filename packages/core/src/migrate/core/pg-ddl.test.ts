@@ -51,6 +51,26 @@ describe("ddlFindings: an ALTER TABLE's constraints, defaults and other commands
 		expect(rated("ALTER TABLE t ADD PRIMARY KEY (a)")).toEqual([])
 	})
 
+	/* r18 P16: a foreign key scans its table and blocks writes to both tables; it rewrites nothing */
+	it("says what an added foreign key scans and blocks, naming both tables", () => {
+		expect(rated("ALTER TABLE t ADD CONSTRAINT f FOREIGN KEY (a) REFERENCES s.u (id)")).toEqual([
+			{ level: "lock", note: "scans t, blocking writes to t and s.u; add it NOT VALID, then VALIDATE CONSTRAINT" },
+		])
+		expect(rated("ALTER TABLE ONLY t ADD FOREIGN KEY (a) REFERENCES t")).toEqual([
+			{ level: "lock", note: "scans t, blocking writes to t; add it NOT VALID, then VALIDATE CONSTRAINT" },
+		])
+	})
+
+	/* r18 P14: a rule turned on or off is a rule change, rated by its family's rule */
+	it.each(["DISABLE RULE r", "ENABLE RULE r", "ENABLE ALWAYS RULE r", "ENABLE REPLICA RULE r"])(
+		"rates ALTER TABLE t %s by the rule family's rule",
+		(command) => {
+			expect(rated(`ALTER TABLE t ${command}`)).toEqual([
+				{ level: "unsafe", note: "comb rates every rule change unsafe; approve it in the file" },
+			])
+		},
+	)
+
 	it("rates a dropped default, constraint, owner or trigger cautious, and a set default nothing", () => {
 		for (const sql of [
 			"ALTER TABLE t ALTER COLUMN a DROP DEFAULT",
