@@ -31,6 +31,12 @@ const KNOWN = /* @__PURE__ */ new Set([
 	"url",
 ])
 
+/* the keys no field takes together: either would win without a word (C8 of r18 for the casing) */
+const CONTRADICTIONS: ReadonlyArray<readonly [string, string]> = [
+	["mutable", "nomutate"],
+	["lowercase", "uppercase"],
+]
+
 /**
  * Refuses declared bounds that hold no value (C1, C4 of r17): a min past its max, on any column; a
  * length bound, `measure` "length" (a text column's), that is no whole number from 0; a maxBytes
@@ -72,8 +78,8 @@ function refuseMalformed(
 	if (measure !== "length" && measure !== "value") throw new Error(`${place}: measure must be "length" or "value"`)
 	const unknown = Object.keys(constraints).find((key) => !KNOWN.has(key))
 	if (unknown !== undefined) throw new Error(`${place}: comb reads no constraint named ${unknown}`)
-	if (constraints["mutable"] === true && constraints["nomutate"] === true)
-		throw new Error(`${place}: mutable and nomutate contradict; declare one`)
+	const contradiction = CONTRADICTIONS.find(([a, b]) => constraints[a] === true && constraints[b] === true)
+	if (contradiction !== undefined) throw new Error(`${place}: ${contradiction.join(" and ")} contradict; declare one`)
 	const relation = constraints["relation"]
 	/* a relation's name is a property of the generated relations, so it is an identifier (F57) */
 	if (relation !== undefined && (typeof relation !== "string" || !/^[A-Za-z_$][\w$]*$/.test(relation)))

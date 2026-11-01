@@ -120,6 +120,14 @@ describe("parseFieldConstraints: keys that contradict", () => {
 			"/fixture/db.core.tables.ts: fixture.f: mutable and nomutate contradict; declare one",
 		)
 	})
+
+	/* C8 of r18: one casing would win without a word */
+	it("refuses lowercase and uppercase together", () => {
+		expect(() => parseFieldConstraints('c.text("f", { lowercase: true, uppercase: true })')).toThrow(
+			"/fixture/db.core.tables.ts: fixture.f: lowercase and uppercase contradict; declare one",
+		)
+		expect(parseFieldConstraints('c.text("f", { lowercase: true, uppercase: false })').lowercase).toBe(true)
+	})
 })
 
 /* F57: a key may name its relation, as an identifier the generated relations can hold */
