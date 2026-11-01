@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream"
 import { describe, expect, it, vi } from "vitest"
-import { CliError, processIo } from "./output.ts"
+import { CliError, processIo, Reported } from "./output.ts"
 
 describe("CliError", () => {
 	it("carries its message and exit code, 1 unless given", () => {
@@ -64,5 +64,17 @@ describe("processIo", () => {
 		const confirm = processIo(tty).confirm as (question: string) => Promise<boolean>
 		expect(await confirm("Drop it?")).toBe(expected)
 		expect(tty.written.join("")).toContain("Drop it? (y/N) ")
+	})
+})
+
+/* K10 of r18: a failure a command already reported keeps its message and its exit code */
+describe("Reported", () => {
+	it("keeps what failed: a CliError's exit code, any other's 1, and a thrown non-error as text", () => {
+		const reported = [new CliError("refused", 2), new Error("broke"), "plain"].map((error) => new Reported(error))
+		expect(reported.map(({ exitCode, message, name }) => [message, exitCode, name])).toEqual([
+			["refused", 2, "Reported"],
+			["broke", 1, "Reported"],
+			["plain", 1, "Reported"],
+		])
 	})
 })
