@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
@@ -26,35 +26,63 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
+/** A scratch database held from the file's first test to its last: its URL, inside a test */
+function heldScratchDb(): () => string {
+	const held = { release: () => undefined as void, url: "" }
+	let dropped: Promise<void> = Promise.resolve()
+	beforeAll(
+		() =>
+			new Promise<void>((ready) => {
+				dropped = withScratchDb(
+					(url) =>
+						new Promise<void>((release) => {
+							Object.assign(held, { release, url })
+							ready()
+						}),
+				)
+			}),
+	)
+	afterAll(async () => {
+		held.release()
+		await dropped
+	})
+	return () => held.url
+}
+
+/* one dev and one target for every check: the replay rolls back on dev, and a check of a target with no history writes nothing */
+const devUrl = heldScratchDb()
+const targetUrl = heldScratchDb()
+
 const T =
 	"CREATE TABLE t (id int PRIMARY KEY, v varchar(10), w int);\nCREATE TABLE u (id int PRIMARY KEY, v varchar(10));\n"
 const RETYPE = "ALTER TABLE t ALTER COLUMN v TYPE varchar(20);\n"
 
-/** `one` applied to a scratch target, then `two` checked against it with a scratch dev: what check printed, or why it refused */
+/** The options a check of the directory against `target` takes, collecting what it prints in `out` */
+const options = (target: { devUrl: string; url: string }, out: string[]) => ({
+	approve: (m: ParsedMigration) => approveMigration(m, { target: "core", yes: true }),
+	dir,
+	print: (line: string) => out.push(line),
+	target: { ...target, lockTimeout: "5s", schema: "public" },
+})
+
+/** `one` then `two`, written and hashed: a history of `one` with `two` pending, as check replays them */
+function files(one: string, two: string): void {
+	/* CREATE STATISTICS is a kind comb does not rate: the history's own approval lets it pass */
+	writeFileSync(join(dir, "20260101000000_one.sql"), `-- comb:allow-unsafe: the test's history\n${one}`)
+	writeFileSync(join(dir, "20260102000000_two.sql"), two)
+	hashDir(run, dir)
+}
+
+/** `one` then `two` checked on the shared target: what check printed, or why it refused */
 async function checked(one: string, two: string): Promise<{ out: string[]; refused?: string | undefined }> {
-	return withScratchDb((devUrl) =>
-		withScratchDb(async (url) => {
-			const out: string[] = []
-			const options = {
-				approve: (m: ParsedMigration) => approveMigration(m, { target: "core", yes: true }),
-				dir,
-				print: (line: string) => out.push(line),
-				target: { devUrl, lockTimeout: "5s", schema: "public", url },
-			}
-			/* the history is the setup, applied as written: CREATE STATISTICS is a kind comb does not rate */
-			writeFileSync(join(dir, "20260101000000_one.sql"), `-- comb:allow-unsafe: the test's history\n${one}`)
-			hashDir(run, dir)
-			await applyWithAtlas(options)
-			writeFileSync(join(dir, "20260102000000_two.sql"), two)
-			hashDir(run, dir)
-			try {
-				await applyWithAtlas({ ...options, checkOnly: true })
-				return { out }
-			} catch (error) {
-				return { out, refused: (error as Error).message }
-			}
-		}),
-	)
+	files(one, two)
+	const out: string[] = []
+	try {
+		await applyWithAtlas({ ...options({ devUrl: devUrl(), url: targetUrl() }, out), checkOnly: true })
+		return { out }
+	} catch (error) {
+		return { out, refused: (error as Error).message }
+	}
 }
 
 describe("check of a retype Postgres refuses on every database (P13 of r19)", () => {
@@ -106,6 +134,24 @@ describe("check of a retype Postgres refuses on every database (P13 of r19)", ()
 		expect(refused).toBeUndefined()
 		expect(out.join("\n")).not.toContain("Check did not replay")
 	})
+})
+
+describe("check of a pending retype over a history the target has applied", () => {
+	it("replays the applied history before the pending file, and refuses the retype a view blocks", async () => {
+		await withScratchDb((dev) =>
+			withScratchDb(async (url) => {
+				files(`${T}CREATE VIEW x AS SELECT v FROM t;\n`, RETYPE)
+				rmSync(join(dir, "20260102000000_two.sql"))
+				hashDir(run, dir)
+				const out: string[] = []
+				await applyWithAtlas(options({ devUrl: dev, url }, out))
+				files(`${T}CREATE VIEW x AS SELECT v FROM t;\n`, RETYPE)
+				await expect(applyWithAtlas({ ...options({ devUrl: dev, url }, out), checkOnly: true })).rejects.toThrow(
+					/20260102000000_two\.sql: devUrl refused .* cannot alter type of a column used by a view or rule/,
+				)
+			}),
+		)
+	}, 60_000)
 })
 
 describe("check's replay of a statement only a file of its own can run", () => {
