@@ -138,13 +138,18 @@ function systemProblem(field: "devUrl" | "url", url: LibpqUrl): string | undefin
 	return `${field}'s sslmode ${mode} may not be used with sslrootcert=system, which libpq and Atlas's driver refuse; use sslmode=verify-full`
 }
 
-/** Why `url`'s client key cannot reach Atlas: an encrypted sslkey where it is read, or any sslpassword, which lib/pq sends the server */
+/** Why `url`'s client key cannot reach Atlas: where it is read, a certificate without it or an encrypted one; any sslpassword, which lib/pq sends the server */
 function keyProblem(field: "devUrl" | "url", url: LibpqUrl, reads: boolean): string[] {
 	const key = url.params.get("sslkey")
 	const decrypt = `give it an unencrypted key (openssl pkey -in ${key ?? "<sslkey>"} -out unencrypted.key)`
 	if (url.params.has("sslpassword"))
 		return [
 			`${field}'s sslpassword is a passphrase Atlas's driver cannot use: it reads no encrypted sslkey, and sends sslpassword to the server, which refuses it; ${decrypt}, and drop sslpassword`,
+		]
+	const cert = url.params.get("sslcert")
+	if (reads && cert !== undefined && key === undefined)
+		return [
+			`${field}'s sslcert ${cert} has no sslkey; libpq and Atlas's driver refuse a client certificate without its key, so name it with sslkey`,
 		]
 	if (!reads || key === undefined || !ENCRYPTED_KEY.test(readFileSync(key, "utf8"))) return []
 	return [`${field}'s sslkey ${key} is encrypted, which Atlas's driver cannot read; ${decrypt}`]

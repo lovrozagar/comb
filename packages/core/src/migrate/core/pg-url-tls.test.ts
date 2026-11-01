@@ -39,6 +39,10 @@ const encrypted = (key: string) =>
 const passphrase = (key: string) =>
 	`url's sslpassword is a passphrase Atlas's driver cannot use: it reads no encrypted sslkey, and sends sslpassword to the server, which refuses it; give it an unencrypted key (openssl pkey -in ${key} -out unencrypted.key), and drop sslpassword`
 
+/** What pgUrlProblems says of sslcert without sslkey in `field` */
+const keyless = (field: string) =>
+	`${field}'s sslcert ${PLAIN} has no sslkey; libpq and Atlas's driver refuse a client certificate without its key, so name it with sslkey`
+
 /** postgres.js's ssl for db.example with `query` */
 const ssl = (query: string) => postgresOptionsOf(`postgres://db.example/app?${query}`, "url")["ssl"]
 
@@ -121,5 +125,20 @@ describe("postgresOptionsOf: sslrootcert=system", () => {
 		expect(() => postgresOptionsOf("postgres://db/app?sslmode=require&sslrootcert=system", "url")).toThrow(
 			"url's sslmode require may not be used with sslrootcert=system, which libpq and Atlas's driver refuse; use sslmode=verify-full",
 		)
+	})
+})
+
+/* the class sweep on 5.3 (runs/aadc087-probe-p7-cert-no-key-*): libpq and lib/pq refuse a client certificate without its key where they read it */
+describe("pgUrlProblems: sslcert without sslkey", () => {
+	it.each(["require", "verify-ca", "verify-full"])(
+		"refuses it under sslmode=%s, where libpq and Atlas's driver refuse it",
+		(mode) => {
+			expect(refusals(`sslmode=${mode}&sslcert=${PLAIN}`)).toEqual({ dev: [keyless("devUrl")], url: [keyless("url")] })
+		},
+	)
+
+	it("passes it under prefer, and sslkey without sslcert, as both drivers do", () => {
+		expect(refusals(`sslmode=prefer&sslcert=${PLAIN}`)).toEqual({ dev: [], url: [] })
+		expect(refusals(`sslmode=require&sslkey=${PLAIN}`)).toEqual({ dev: [], url: [] })
 	})
 })
