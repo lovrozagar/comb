@@ -86,3 +86,19 @@ describe("parseArgs: -h and --help", () => {
 		])
 	})
 })
+
+/* r18 P17: a positional a command does not read is refused with its usage, never dropped */
+describe("parseArgs: positionals past what a command reads", () => {
+	it.each([
+		[["postgres"], "migrate init" as const, "Usage: comb migrate init"],
+		[["core", "add", "users"], "migrate diff" as const, "Usage: comb migrate diff <database> [name]"],
+		[["core", "prod"], "migrate status" as const, "Usage: comb migrate status <database>"],
+	])("refuses %j on %s", (argv, command, usage) => {
+		expect(() => parseArgs(argv, command)).toThrow(usage)
+	})
+
+	it("takes as many as a command reads, and any number for one that reads a list", () => {
+		expect(parseArgs(["core", "add"], "migrate diff").positionals).toEqual(["core", "add"])
+		expect(parseArgs(["core", "growth", "shard-0"], "codegen").positionals).toEqual(["core", "growth", "shard-0"])
+	})
+})

@@ -141,7 +141,15 @@ export function parseArgs(argv: readonly string[], command: Command): ParsedArgs
 			reading.at++
 		}
 	}
+	/* a positional the command does not read is refused, never dropped (P17 of r18) */
+	if (reading.parsed.positionals.length > mostPositionals(command)) throw new CliError(usageOf(command))
 	return reading.parsed
+}
+
+/** How many positionals `command` reads, as its usage line declares them: any number for a list */
+function mostPositionals(command: Command): number {
+	const declared = POSITIONALS[command].split(" ").filter((part) => part !== "")
+	return declared.some((part) => part.endsWith("...]") || part.endsWith("...>")) ? Infinity : declared.length
 }
 
 /** How the help names an option: its alias, long name and value placeholder */

@@ -228,7 +228,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 function readArgv(mode: Mode, argv: readonly string[]): { args: ParsedArgs; db: string } {
 	const args = parseArgs(argv, `migrate ${mode}`)
 	const [db] = args.positionals
-	if (db === undefined || args.positionals.length > 1) throw new CliError(usageOf(`migrate ${mode}`))
+	if (db === undefined) throw new CliError(usageOf(`migrate ${mode}`))
 	return { args, db }
 }
 
