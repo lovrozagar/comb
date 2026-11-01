@@ -159,6 +159,27 @@ describe("readSqliteError: libsql's batch() and the codes libsql cannot name", (
 	})
 })
 
+/* Q9 of r18: D1's exec() quotes the statement before the engine's words, which are read only at the end */
+/** A D1 exec() error: the statement quoted, then `tail` */
+const exec = (tail: string) => new Error(`D1_EXEC_ERROR: Error in line 1: INSERT INTO t VALUES ('v'): ${tail}`)
+
+describe("readSqliteError on D1's exec(): a virtual table's key conflict", () => {
+	it("reads SQLite's bare words under the bare code as prepare reads them, keeping no text", () => {
+		expect(readSqliteError(exec("constraint failed: SQLITE_CONSTRAINT"))).toMatchObject({
+			code: "SQLITE_CONSTRAINT_PRIMARYKEY",
+			message: "",
+		})
+	})
+
+	it("keeps any other exec() error's code as D1 names it", () => {
+		expect(readSqliteError(exec("x: SQLITE_CONSTRAINT"))?.code).toBe("SQLITE_CONSTRAINT")
+		expect(readSqliteError(exec("constraint failed: SQLITE_BUSY"))?.code).toBe("SQLITE_BUSY")
+		expect(
+			readSqliteError(exec("constraint failed: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)"))?.code,
+		).toBe("SQLITE_CONSTRAINT_TRIGGER")
+	})
+})
+
 /* the crafted params of the 0.7.0 review (spoof.ts): a bound value shaped like an engine message */
 describe("readSqliteError: a bound parameter never decides the classification (C1)", () => {
 	const crafted = "constraint failed: user.email: SQLITE_CONSTRAINT_UNIQUE"

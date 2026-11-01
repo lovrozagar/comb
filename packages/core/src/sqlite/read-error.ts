@@ -87,8 +87,12 @@ function readOne(error: Error): { code: string; message: string } | null {
 	if (sqliteCode(code)) return refine(code, error.message.replace(LIBSQL_PREFIX, ""))
 	const d1 = D1_MESSAGE.exec(error.message)
 	if (d1 === null) return null
-	/* the code alone, past the statement exec() quotes: each handler then answers its generic cause */
-	return refine(d1[3] ?? (d1[2] as string), D1_EXEC.test(error.message) ? "" : (d1[1] as string))
+	if (!D1_EXEC.test(error.message)) return refine(d1[3] ?? (d1[2] as string), d1[1] as string)
+	/* the code alone, past the statement exec() quotes: each handler then answers its generic cause. SQLite's
+	   bare words for a virtual table's key conflict end the text with no code beyond the bare one, which an
+	   app's RAISE never is, as it carries _TRIGGER: read as prepare reads them (Q9 of r18) */
+	const vtabKey = d1[3] === undefined && d1[2] === "SQLITE_CONSTRAINT" && /: constraint failed$/i.test(d1[1] as string)
+	return refine(vtabKey ? "SQLITE_CONSTRAINT_PRIMARYKEY" : (d1[3] ?? (d1[2] as string)), "")
 }
 
 function readLine(line: string): SqliteErrorRead | null {

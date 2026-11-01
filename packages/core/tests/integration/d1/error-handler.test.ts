@@ -253,4 +253,18 @@ describe("d1ErrorHandler on Miniflare: r17's rowid findings", () => {
 			await classified(() => harness.CORE.prepare("INSERT INTO note_fts (rowid, body) VALUES (1, 'b')").run()),
 		).toMatchObject({ cause: "Duplicate primary key value", errorKey: "primary_key_violation", status: 409 })
 	})
+
+	/* Q9 of r18: exec() quotes the statement before the bare words, which prepare and batch read alone */
+	it("answers an FTS5 table's duplicate rowid through exec() as prepare and batch answer it", async () => {
+		await harness.CORE.exec(
+			"CREATE VIRTUAL TABLE note_fts USING fts5(body); INSERT INTO note_fts (rowid, body) VALUES (1, 'a')",
+		)
+		const failure = await classified(() => harness.CORE.exec("INSERT INTO note_fts (rowid, body) VALUES (1, 'secret')"))
+		expect(failure).toMatchObject({
+			cause: "Duplicate primary key value",
+			errorKey: "primary_key_violation",
+			status: 409,
+		})
+		expect(JSON.stringify({ ...failure, cause: String(failure?.cause) })).not.toMatch(/secret|INSERT|line 1/)
+	})
 })
