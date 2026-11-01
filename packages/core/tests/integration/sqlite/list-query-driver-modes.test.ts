@@ -36,13 +36,15 @@ const { at: _at, ...withoutTime } = {
 const itemNoTime = sqliteTable("item", withoutTime)
 const FIELDS = ["at", "big", "n", "ok", "r", "t"] as const
 const schema = createListQuerySchema({ sort: [...FIELDS], pagination: { defaultLimit: 2, maxLimit: 2 } })
-const tableFor = (intMode: "bigint" | "number") => (intMode === "bigint" ? itemNoTime : item)
+type IntMode = "bigint" | "number" | "string"
+/* drizzle's timestamp_ms column reads a number only */
+const tableFor = (intMode: IntMode) => (intMode === "number" ? item : itemNoTime)
 
 /** A database of five rows on libsql in `intMode` */
-async function database(intMode: "bigint" | "number") {
+async function database(intMode: IntMode) {
 	const client = createClient({ intMode, url: ":memory:" })
 	/* past 2^53 only where the driver can return it: number mode refuses such an integer outright */
-	const huge = (offset: number) => (intMode === "bigint" ? `${9007199254740990n + BigInt(offset)}` : `${1000 + offset}`)
+	const huge = (offset: number) => (intMode === "number" ? `${1000 + offset}` : `${9007199254740990n + BigInt(offset)}`)
 	await client.executeMultiple(`CREATE TABLE item (id INTEGER PRIMARY KEY, n INTEGER NOT NULL, r REAL NOT NULL, t TEXT NOT NULL, at INTEGER NOT NULL, ok INTEGER NOT NULL, big INTEGER NOT NULL);
 INSERT INTO item VALUES (1, 30, 1.5, 'c', 1700000000300, 1, ${huge(3)}), (2, 10, 0.5, 'a', 1700000000100, 0, 5), (3, 50, 2.5, 'e', 1700000000500, 1, 7), (4, 20, 9.5, 'b', 1700000000200, 0, ${huge(5)}), (5, 40, 4.5, 'd', 1700000000400, 1, 6);`)
 	return { client, db: drizzle({ client }) }
@@ -69,7 +71,8 @@ async function pageAll(
 }
 
 describe("a cursor fits what the driver returned (R3)", () => {
-	for (const intMode of ["number", "bigint"] as const) {
+	/* Q2 of r19: intMode "string" reads every INTEGER, the extras and the tiebreak id included, as a decimal string */
+	for (const intMode of ["number", "bigint", "string"] as const) {
 		const fields = FIELDS.filter((field) => intMode === "number" || field !== "at")
 		it.each(fields.flatMap((field) => [`${field}.asc`, `${field}.desc`]))(
 			`pages %s on libsql intMode ${intMode}: every row once, in order`,
@@ -88,7 +91,7 @@ describe("a cursor fits what the driver returned (R3)", () => {
 		)
 	}
 
-	it.each(["number", "bigint"] as const)(
+	it.each(["number", "bigint", "string"] as const)(
 		"pages a derived time key selected as sql<number>, on intMode %s",
 		async (intMode) => {
 			const { client, db } = await database(intMode)

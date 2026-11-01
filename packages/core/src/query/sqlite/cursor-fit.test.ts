@@ -45,7 +45,7 @@ describe("assertCursorFits", () => {
 
 	it.each([
 		["name", 1],
-		["count", "1"],
+		["count", "one"],
 		["active", 0],
 		["seen_at", 1],
 		["seen_at", "2024"],
@@ -65,7 +65,7 @@ describe("assertCursorFits", () => {
 		/* a row that selected the key as sql<number> holds a number, or a bigint on libsql's bigint mode */
 		for (const value of [new Date(0), 0, 1700000000000, 1700000000000n])
 			expect(() => assertCursorFits([at], [value])).not.toThrow()
-		for (const value of ["2024", Number.NaN, Number.POSITIVE_INFINITY])
+		for (const value of ["2024-01-01", "07", Number.NaN, Number.POSITIVE_INFINITY])
 			expect(() => assertCursorFits([at], [value])).toThrow()
 		expect(boundForKeys([at, sql`x`], [new Date(5), new Date(6)])).toEqual([5, new Date(6)])
 		expect(at.getSQL()).toBe(at.expression.getSQL())
@@ -117,5 +117,21 @@ describe("readsBack", () => {
 		expect(readsBack(sql.raw('lower("doc"."notes")'), doc)).toBe(false)
 		expect(readsBack(sql`${doc.notes} || ${other.label}`, doc)).toBe(false)
 		expect(readsBack(new DateKey(sql`${doc.rank}`), doc)).toBe(false)
+	})
+})
+
+/* Q2 of r19: libsql's intMode "string" reads an INTEGER as its canonical decimal string */
+describe("assertCursorFits on what libsql's intMode string reads", () => {
+	it("takes a canonical integer string on a number column, and binds it as that integer, exact", () => {
+		for (const value of ["1", "-5", "9007199254740993"]) expect(fits("count", value), value).toBe(true)
+		for (const value of ["01", "1.5", "", "+1"]) expect(fits("count", value), value).toBe(false)
+		expect(boundForKeys([columns.count, sql`x`], ["7", "7"])).toEqual([7, "7"])
+		expect(boundForKeys([columns.count], ["9007199254740993"])).toEqual([9007199254740993n])
+	})
+
+	it("takes a time key's epoch milliseconds as a decimal string, and binds them as that number", () => {
+		const at = new DateKey(sql`max(created_at)`)
+		expect(() => assertCursorFits([at], ["1700000000000"])).not.toThrow()
+		expect(boundForKeys([at], ["1700000000000"])).toEqual([1700000000000])
 	})
 })

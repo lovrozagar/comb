@@ -93,8 +93,8 @@ function paginationOf<TMerged extends boolean = false>(
 	}
 }
 
-/** The count an offset page's row carries, a number or a driver's bigint, which refuseUnwired holds every such row to */
-const totalOf = (row: object): number => Number((row as { _total: bigint | number })._total)
+/** The count an offset page's row carries, in any encoding isCount takes, which refuseUnwired holds every such row to */
+const totalOf = (row: object): number => Number((row as { _total: bigint | number | string })._total)
 
 /**
  * Rows the filter matches across all pages, or null when this page cannot know: a cursor page
@@ -133,11 +133,20 @@ function refuseUnwired(items: readonly object[], pagination: ListPagination): vo
 /** A value as a refusal shows it: a bigint with its n, anything else as JSON */
 const shown = (value: unknown): string => (typeof value === "bigint" ? `${value}n` : JSON.stringify(value))
 
-/** Whether `value` is a count: a safe integer from 0, a number or a driver's bigint */
-const isCount = (value: unknown): boolean =>
-	typeof value === "bigint"
+/* an integer from 0 as a SQLite driver writes it in a string (libsql's intMode "string"): canonical, which no alias is */
+const DECIMAL = /^(?:0|[1-9]\d*)$/
+
+/** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint (Q2 of r19) */
+const unencoded = (value: unknown): unknown =>
+	typeof value === "string" && DECIMAL.test(value) ? BigInt(value) : value
+
+/** Whether `value` is a count: a safe integer from 0, in any encoding a SQLite driver reads one in */
+function isCount(encoded: unknown): boolean {
+	const value = unencoded(encoded)
+	return typeof value === "bigint"
 		? value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
 		: Number.isSafeInteger(value) && (value as number) >= 0
+}
 
 /**
  * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
@@ -147,13 +156,18 @@ function malformed(row: object): string | undefined {
 	const { _combAnchorGone: gone, _combId: id, _total: total } = row as Record<string, unknown>
 	if (Object.hasOwn(row, "_total") && !isCount(total)) return `_total ${shown(total)}`
 	if (Object.hasOwn(row, COMB_ID) && id === COMB_ID) return `${COMB_ID} ${shown(id)}`
-	const flag = gone === 0 || gone === 1 || gone === 0n || gone === 1n || typeof gone === "boolean"
+	const read = unencoded(gone)
+	const flag = read === 0 || read === 1 || read === 0n || read === 1n || typeof read === "boolean"
 	return Object.hasOwn(row, "_combAnchorGone") && !flag ? `_combAnchorGone ${shown(gone)}` : undefined
 }
 
 /** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
 function refuseGoneAnchor(items: readonly object[]): void {
-	if (items.some((item) => [1, 1n, true].includes((item as Record<string, unknown>)["_combAnchorGone"] as never))) {
+	if (
+		items.some((item) =>
+			[1, 1n, true].includes(unencoded((item as Record<string, unknown>)["_combAnchorGone"]) as never),
+		)
+	) {
 		throw new CombError({
 			cause:
 				"the row this cursor resumes from was renamed or deleted, and no bound is safe under its collation; start the list again",

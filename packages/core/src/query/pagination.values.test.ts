@@ -27,6 +27,12 @@ describe("queryHelpers.paginate — an extra's value, as well as its presence", 
 		["_combId as its alias", { _combId: "_combId", _total: 1, id: 1 }],
 		["_combAnchorGone as its alias", { _combAnchorGone: "_combAnchorGone", _combId: 1, _total: 1, id: 1 }],
 		["_combAnchorGone 2", { _combAnchorGone: 2, _combId: 1, _total: 1, id: 1 }],
+		/* Q2 of r19: a digit string is a count only in its canonical decimal form, within 2^53 − 1 */
+		["_total a padded digit string", { _combId: 1, _total: "05", id: 1 }],
+		["_total a signed digit string", { _combId: 1, _total: "-1", id: 1 }],
+		["_total a digit string past 2^53", { _combId: 1, _total: "9007199254740992", id: 1 }],
+		["_total an empty string", { _combId: 1, _total: "", id: 1 }],
+		["_combAnchorGone the string 2", { _combAnchorGone: "2", _combId: 1, _total: 1, id: 1 }],
 	])("refuses %s as page_not_wired, naming the README form", (_, row) => {
 		expect(() => queryHelpers.paginate([row], offset())).toThrow(notWired)
 		expect(() => queryHelpers.paginate([row], offset())).toThrow(
@@ -47,5 +53,18 @@ describe("queryHelpers.paginate — an extra's value, as well as its presence", 
 			expect(() => queryHelpers.paginate([{ _combAnchorGone: flag, _combId: 1, _total: 1, id: 1 }], offset())).toThrow(
 				expect.objectContaining({ errorKey: "invalid_cursor" }),
 			)
+	})
+
+	/* Q2 of r19: libsql's intMode "string" reads every INTEGER, the extras included, as a decimal string */
+	it("takes a count and a flag a driver reads as a decimal string, the count as a number", () => {
+		const [, pagination] = queryHelpers.paginate([{ _combId: "1", _total: "5", id: "1" }], offset())
+		expect(pagination.count).toBe(5)
+		expect(queryHelpers.paginate([{ _combId: "1", _total: "0", id: "1" }], offset())[1].count).toBe(0)
+		expect(queryHelpers.paginate([{ _combAnchorGone: "0", _combId: "1", _total: "1", id: "1" }], offset())[0]).toEqual([
+			{ id: "1" },
+		])
+		expect(() =>
+			queryHelpers.paginate([{ _combAnchorGone: "1", _combId: "1", _total: "1", id: "1" }], offset()),
+		).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
 	})
 })

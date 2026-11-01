@@ -11,7 +11,7 @@ import { combErrorKeys } from "../../types.ts"
 import { type CursorId, type CursorOptions, CursorRef, readCursor } from "../cursor.ts"
 import { anchored, assertNoReference } from "../cursor-ref.ts"
 import type { SortField } from "../types.ts"
-import { assertCursorFits, bindable, boundForKeys, exactSeconds, inSeconds } from "./cursor-fit.ts"
+import { assertCursorFits, bindableAs, boundForKeys, exactSeconds, inSeconds } from "./cursor-fit.ts"
 import { anchorGone, keysetSQL, type SortKey } from "./keyset.ts"
 
 /** What resuming after a cursor needs: it, how it was sealed, the sort, the keys, and the table */
@@ -46,7 +46,7 @@ function cursorWhere({ cursor: given, keys, merged, options, sort, table, tiebre
 	if (table === undefined) assertNoReference(cursor.values)
 	const columns = keys.map(({ column }) => column)
 	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id], table)
-	const id = bindable(cursor.id) as CursorId
+	const id = bindableAs(tiebreak.column, cursor.id) as CursorId
 	const bound = boundForKeys(columns, cursor.values)
 	/* a list with no table binds a seconds-mode timestamp to the millisecond; one with a table reads it from the row */
 	const values =

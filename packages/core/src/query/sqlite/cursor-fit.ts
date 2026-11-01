@@ -11,17 +11,25 @@ import { CombError } from "../../error.ts"
 import { CursorRef } from "../cursor.ts"
 import { combErrorKeys } from "../../types.ts"
 
+/* an integer as a driver writes it in a string (libsql's intMode "string"): canonical, signed */
+const INTEGER_TEXT = /^-?(?:0|[1-9]\d*)$/
+
 /**
  * Whether `value` is what a column of this drizzle `dataType` holds; json and blobs hold nothing a
  * cursor carries. A number column holds a bigint too where the driver returns integers as one
- * (libsql's intMode "bigint", bun:sqlite's safeIntegers), and a cursor minted from its row carries it.
+ * (libsql's intMode "bigint", bun:sqlite's safeIntegers), or as a decimal string (libsql's intMode
+ * "string", Q2 of r19), and a cursor minted from its row carries it.
  */
 function fitsDataType(dataType: string, value: unknown): boolean {
 	switch (dataType.split(" ")[0]) {
 		case "string":
 			return typeof value === "string"
 		case "number":
-			return typeof value === "number" || typeof value === "bigint"
+			return (
+				typeof value === "number" ||
+				typeof value === "bigint" ||
+				(typeof value === "string" && INTEGER_TEXT.test(value))
+			)
 		case "boolean":
 			return typeof value === "boolean"
 		case "bigint":
@@ -49,7 +57,10 @@ class DateKey implements SQLWrapper {
 	}
 }
 
-const isInteger = (value: unknown) => typeof value === "bigint" || (typeof value === "number" && Number.isFinite(value))
+const isInteger = (value: unknown) =>
+	typeof value === "bigint" ||
+	(typeof value === "number" && Number.isFinite(value)) ||
+	(typeof value === "string" && INTEGER_TEXT.test(value))
 
 /** Every column `chunk` reads, through the SQL it nests */
 function columnsOf(chunk: unknown): Column[] {
@@ -143,9 +154,24 @@ const inSeconds = (column: SQLWrapper | undefined): boolean =>
  */
 const exactSeconds = (value: Date): SQL => sql`${value.getTime() / 1000}`
 
+/**
+ * A cursor value as a SQLite key binds it: an integer a number column's or a time key's driver read
+ * as a decimal string as that integer, exact (Q2 of r19), which SQLite would otherwise compare as text
+ */
+const bindableAs = (column: SQLWrapper | undefined, value: unknown): unknown =>
+	bindable(
+		(column instanceof DateKey || (is(column, Column) && column.dataType.startsWith("number"))) &&
+			typeof value === "string" &&
+			INTEGER_TEXT.test(value)
+			? BigInt(value)
+			: value,
+	)
+
 /** The cursor's values as the keys bind them: a Date on a key declared as time as its epoch milliseconds, a safe bigint as a number */
 const boundForKeys = (columns: readonly SQLWrapper[], values: readonly unknown[]): unknown[] =>
-	values.map((value, i) => (columns[i] instanceof DateKey && value instanceof Date ? value.getTime() : bindable(value)))
+	values.map((value, i) =>
+		columns[i] instanceof DateKey && value instanceof Date ? value.getTime() : bindableAs(columns[i], value),
+	)
 
 /** Throw a 400 unless every cursor value, the tiebreak id last, fits its column, a reference read back from `table` */
 function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unknown[], table?: object): void {
@@ -155,6 +181,6 @@ function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unkno
 
 /** A cursor value as `column`'s driver binds it: SQLite's way on a SQLite column, as it is elsewhere (Postgres reads 'Infinity') */
 const bindableOn = (column: SQLWrapper | undefined, value: unknown): unknown =>
-	is(column, SQLiteColumn) ? bindable(value) : value
+	is(column, SQLiteColumn) ? bindableAs(column, value) : value
 
-export { assertCursorFits, bindable, bindableOn, boundForKeys, DateKey, exactSeconds, inSeconds, readsBack }
+export { assertCursorFits, bindable, bindableAs, bindableOn, boundForKeys, DateKey, exactSeconds, inSeconds, readsBack }
