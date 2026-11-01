@@ -5,6 +5,8 @@
  * on a table with rows unless each row gets its own value.
  */
 import { beforeAll, describe, expect, it } from "vitest"
+import { classifyMigration } from "./classify.ts"
+import { extractSchema } from "./schema.ts"
 import { historyFacts } from "./pg-history.ts"
 import { ddlFindings, REWRITES } from "./pg-ddl.ts"
 import type { Node } from "./pg-nodes.ts"
@@ -74,5 +76,53 @@ describe("an added column's inline constraints (P6)", () => {
 
 	it("rates an inline unique nothing here: its index lock is the table's warning", () => {
 		expect(rated("ALTER TABLE t ADD COLUMN n int UNIQUE")).toEqual([])
+	})
+})
+
+/* r18 P2: a domain's default fills a column that has none of its own; an operator or a cast runs its function */
+describe("an added column's default that comes through the history", () => {
+	const T = "CREATE TABLE t (id int PRIMARY KEY);"
+	const ratedAfter = (history: string, later: string) =>
+		classifyMigration(later, { before: extractSchema(`${T}${history}`, undefined, "postgres"), dialect: "postgres" })
+
+	it.each([
+		["CREATE DOMAIN dv AS float8 DEFAULT random();", "ALTER TABLE t ADD COLUMN x dv;"],
+		["CREATE DOMAIN dv AS float8 DEFAULT random();", "ALTER TABLE t ADD COLUMN x dv NOT NULL;"],
+		["CREATE DOMAIN d0 AS float8 DEFAULT random(); CREATE DOMAIN dv AS d0;", "ALTER TABLE t ADD COLUMN x dv;"],
+		["CREATE DOMAIN dv AS float8; ALTER DOMAIN dv SET DEFAULT random();", "ALTER TABLE t ADD COLUMN x dv;"],
+	])("after %j, rates %j safe and warns of the rewrite the domain's default makes", (history, later) => {
+		const rating = ratedAfter(history, later)
+		expect([rating.safety, rating.lockWarnings]).toEqual(["safe", [`${later.slice(0, -1)} (${REWRITES})`]])
+	})
+
+	it("reads a domain's constant default as filling a NOT NULL column, and a dropped one as none", () => {
+		const constant = ratedAfter("CREATE DOMAIN dn AS int DEFAULT 0;", "ALTER TABLE t ADD COLUMN x dn NOT NULL;")
+		expect([constant.safety, constant.lockWarnings]).toEqual(["safe", []])
+		const dropped = ratedAfter(
+			"CREATE DOMAIN dn AS int DEFAULT 0; ALTER DOMAIN dn DROP DEFAULT;",
+			"ALTER TABLE t ADD COLUMN x dn NOT NULL;",
+		)
+		expect(dropped.safety).toBe("unsafe")
+		const own = ratedAfter("CREATE DOMAIN dv AS float8 DEFAULT random();", "ALTER TABLE t ADD COLUMN x dv DEFAULT 1;")
+		expect(own.lockWarnings).toEqual([])
+	})
+
+	it.each([
+		[
+			"CREATE FUNCTION vadd(int, int) RETURNS int LANGUAGE plpgsql VOLATILE AS 'BEGIN RETURN $1 + $2; END'; CREATE OPERATOR @+@ (LEFTARG = int, RIGHTARG = int, FUNCTION = vadd);",
+			"ALTER TABLE t ADD COLUMN x int DEFAULT 1 @+@ 2;",
+		],
+		[
+			"CREATE TYPE mt AS (a int); CREATE FUNCTION vc(int) RETURNS mt LANGUAGE sql VOLATILE AS 'SELECT ROW($1)::mt'; CREATE CAST (int AS mt) WITH FUNCTION vc(int);",
+			"ALTER TABLE t ADD COLUMN x mt DEFAULT 1::mt;",
+		],
+	])("after %j, warns of the rewrite in %j, the function behind it being volatile", (history, later) => {
+		expect(ratedAfter(history, later).lockWarnings.join("\n")).toContain(REWRITES)
+	})
+
+	it("warns of nothing for an operator whose function says IMMUTABLE", () => {
+		const history =
+			"CREATE FUNCTION iadd(int, int) RETURNS int LANGUAGE sql IMMUTABLE AS 'SELECT $1 + $2'; CREATE OPERATOR @+@ (LEFTARG = int, RIGHTARG = int, FUNCTION = iadd);"
+		expect(ratedAfter(history, "ALTER TABLE t ADD COLUMN x int DEFAULT 1 @+@ 2;").lockWarnings).toEqual([])
 	})
 })

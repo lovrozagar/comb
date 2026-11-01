@@ -9,7 +9,8 @@
 import type { ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import type { Fresh } from "./classify-write.ts"
-import { type Facts, keyOf, names, tableOf, typeOf } from "./pg-history.ts"
+import { type Facts, tableOf } from "./pg-history.ts"
+import { functionBehind } from "./pg-nodes.ts"
 
 type Node = Record<string, unknown>
 
@@ -71,24 +72,12 @@ function reachFindings(
 
 /** A use of a migration's operator, or a cast to a type a migration's cast reaches: its finding */
 function useFinding(type: string, node: Node, facts: Facts): Finding | undefined {
-	if (type === "A_Expr" && Array.isArray(node["name"])) {
-		const operator = keyOf(names(node["name"]), facts.schema)
-		/* a bare operator resolves through the search path, so it may be a migration's in any schema */
-		const fn =
-			facts.operators.get(operator) ??
-			(operator.includes(".")
-				? undefined
-				: [...facts.operators].find(([key]) => key.split(".").at(-1) === operator)?.[1])
-		if (fn !== undefined)
-			return { level: "unsafe", note: `uses operator ${operator}, which a migration defined (${fn})` }
-	}
-	if (type === "TypeCast") {
-		const target = typeOf(node["typeName"], facts.schema)
-		const cast = facts.casts.get(target)
-		if (cast !== undefined)
-			return { level: "unsafe", note: `casts to ${target} through ${cast.fn}, which a migration defined` }
-	}
-	return undefined
+	const behind = functionBehind(type, node, facts)
+	if (behind === undefined) return undefined
+	const { fn, kind, name } = behind
+	return kind === "operator"
+		? { level: "unsafe", note: `uses operator ${name}, which a migration defined (${fn})` }
+		: { level: "unsafe", note: `casts to ${name} through ${fn}, which a migration defined` }
 }
 
 /**

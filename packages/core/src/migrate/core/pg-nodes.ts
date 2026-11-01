@@ -20,6 +20,7 @@ const emptyFacts = (schema: string): Facts => ({
 	code: new Map(),
 	columnTypes: new Map(),
 	defined: new Set(),
+	domainDefaults: new Map(),
 	domains: new Map(),
 	eventTriggers: new Map(),
 	operators: new Map(),
@@ -75,6 +76,8 @@ type Facts = {
 	routines: Routines
 	/** each domain whose CHECK calls a function, with the function */
 	domains: Map<string, string>
+	/** each domain with a default, its own or its base domain's, with the default's expression (P2 of r18) */
+	domainDefaults: Map<string, unknown>
 	/** each operator a migration defined, with its function */
 	operators: Map<string, string>
 	/** each table's parents, and whether it is their partition */
@@ -133,6 +136,31 @@ function tableOf(relation: unknown, schema: string): { key: string; name: string
 const typeOf = (typeName: unknown, schema: string): string => keyOf(names((typeName as Node)["names"]), schema)
 
 /**
+ * The migration's function an expression node runs on its way: an operator a migration defined, a
+ * bare one resolved through the search path to a migration's in any schema, or a cast to a type a
+ * migration's cast reaches; undefined for any other node
+ */
+function functionBehind(
+	type: string,
+	node: Node,
+	facts: Facts,
+): { fn: string; kind: "cast" | "operator"; name: string } | undefined {
+	if (type === "A_Expr" && Array.isArray(node["name"])) {
+		const operator = keyOf(names(node["name"]), facts.schema)
+		const fn =
+			facts.operators.get(operator) ??
+			(operator.includes(".")
+				? undefined
+				: [...facts.operators].find(([key]) => key.split(".").at(-1) === operator)?.[1])
+		return fn === undefined ? undefined : { fn, kind: "operator", name: operator }
+	}
+	if (type !== "TypeCast") return undefined
+	const target = typeOf(node["typeName"], facts.schema)
+	const cast = facts.casts.get(target)
+	return cast === undefined ? undefined : { fn: cast.fn, kind: "cast", name: target }
+}
+
+/**
  * A column definition's type under `schema`, as a CREATE TABLE, an ADD COLUMN or an ALTER COLUMN …
  * TYPE leaves it: a definition that names no collation, or `default`, takes its type's default
  */
@@ -154,6 +182,7 @@ export {
 	emptyFacts,
 	type EventTrigger,
 	type Facts,
+	functionBehind,
 	keyOf,
 	modsOf,
 	names,

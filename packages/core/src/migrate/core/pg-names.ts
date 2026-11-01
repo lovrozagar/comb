@@ -54,6 +54,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.casts,
 		facts.code,
 		facts.columnTypes,
+		facts.domainDefaults,
 		facts.domains,
 		facts.operators,
 		facts.parents,

@@ -9,6 +9,7 @@ const FACTS: Facts = {
 	columnTypes: new Map(),
 	defined: new Set(),
 	eventTriggers: new Map(),
+	domainDefaults: new Map(),
 	domains: new Map(),
 	operators: new Map([["===", "eq3"]]),
 	policies: new Map(),

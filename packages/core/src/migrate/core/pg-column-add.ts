@@ -8,7 +8,7 @@
  * IMMUTABLE or STABLE, so the rule names the steady ones, not the volatile.
  */
 import type { Finding } from "./classify-alter.ts"
-import { type Facts, keyOf, names, type Node, nodesOf } from "./pg-nodes.ts"
+import { type Facts, functionBehind, keyOf, names, type Node, nodesOf, typeOf } from "./pg-nodes.ts"
 
 const REWRITES = "rewrites or scans the table under an exclusive lock"
 
@@ -76,21 +76,40 @@ function steady(parts: readonly string[], facts: Facts): boolean {
 	return builtin && STEADY.has(parts.at(-1) as string)
 }
 
-/** An added column's findings, from the AT_AddColumn command `cmd`, the functions its default calls read in `facts` */
+/**
+ * The functions `expr` calls, each by its name's parts: a function call, and the function behind an
+ * operator or a cast a migration defined, which Postgres calls as it would the function (P2 of r18)
+ */
+const callsIn = (expr: unknown, facts: Facts): string[][] =>
+	nodesOf(expr).flatMap(([type, node]) => {
+		if (type === "FuncCall") return [names(node["funcname"])]
+		const behind = functionBehind(type, node, facts)
+		return behind === undefined ? [] : [behind.fn.split(".")]
+	})
+
+/** The default expressions an added column takes: its own, or with none, its domain's (P2 of r18) */
+function defaultsOf(column: Node, constraints: readonly Node[], facts: Facts): unknown[] {
+	const own = constraints.filter((each) => each["contype"] === "CONSTR_DEFAULT").map((each) => each["raw_expr"])
+	const domain = facts.domainDefaults.get(typeOf(column["typeName"], facts.schema))
+	return own.length > 0 || domain === undefined ? own : [domain]
+}
+
+/**
+ * An added column's findings, from the AT_AddColumn command `cmd`, the functions its default calls
+ * read in `facts`; with no default of its own, a column of a domain takes the domain's (P2 of r18)
+ */
 function addColumn(cmd: Node, _table: string, { facts }: { facts: Facts }): Finding[] {
 	const column = (cmd["def"] as Node)["ColumnDef"] as Node
 	const constraints = inlineConstraints(cmd)
 	const has = (type: string) => constraints.some((each) => each["contype"] === type)
-	const defaults = constraints.filter((each) => each["contype"] === "CONSTR_DEFAULT")
-	const calls = nodesOf(defaults.map((each) => each["raw_expr"]))
-		.filter(([type]) => type === "FuncCall")
-		.map(([, node]) => names(node["funcname"]))
+	const defaults = defaultsOf(column, constraints, facts)
+	const calls = callsIn(defaults, facts)
 	const volatile = calls.some((parts) => DISTINCT.has(parts.at(-1) as string))
 	const rewrites = calls.some((parts) => !steady(parts, facts))
 	const serial = SERIALS.has(names((column["typeName"] as Node)["names"]).at(-1) as string)
 	/* a sequence, an identity or a volatile default gives each row a value of its own */
 	const distinct = serial || volatile || has("CONSTR_IDENTITY")
-	const filled = distinct || has("CONSTR_DEFAULT") || has("CONSTR_GENERATED")
+	const filled = distinct || defaults.length > 0 || has("CONSTR_GENERATED")
 	const scans = has("CONSTR_CHECK") || has("CONSTR_FOREIGN")
 	const findings: Finding[] = []
 	if ((has("CONSTR_NOTNULL") && !filled) || (has("CONSTR_PRIMARY") && !distinct)) findings.push({ level: "unsafe" })

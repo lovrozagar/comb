@@ -11,9 +11,9 @@
  * overload leaves others of its name, so a name once defined stays defined.
  */
 import type { ExtractedSchema } from "../types.ts"
-import { builtinFinding } from "./pg-builtins.ts"
 import { followCatalogObject } from "./pg-catalog-objects.ts"
 import { followEventTrigger } from "./pg-events.ts"
+import { callIn, followDomain } from "./pg-domains.ts"
 import { followNames } from "./pg-names.ts"
 import { followRoutine } from "./pg-routines.ts"
 import {
@@ -30,20 +30,6 @@ import {
 } from "./pg-nodes.ts"
 import { parsePostgres } from "./pg-parser.ts"
 import { historyTrees } from "./pg-split.ts"
-
-/**
- * The first function an expression calls whose finding is unsafe, by name: code a write runs that
- * comb cannot read. A cautious call such as a default's nextval, which is what a serial does, is
- * no such code (M83).
- */
-function callIn(expression: unknown, { defined, schema }: Pick<Facts, "defined" | "schema">): string | undefined {
-	for (const [type, node] of nodesOf([expression])) {
-		if (type !== "FuncCall") continue
-		const name = names(node["funcname"])
-		if (builtinFinding(name, { defined, schema })?.level === "unsafe") return keyOf(name, schema)
-	}
-	return undefined
-}
 
 /** What a value of `type` runs on its way into a column: its domain's CHECK, or an implicit or assignment cast */
 const typeCode = (type: string, facts: Facts): string | undefined =>
@@ -144,29 +130,6 @@ function followAlter(node: Node, facts: Facts): void {
 			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
 		}
 	}
-}
-
-/** A domain made or given a CHECK: the function it runs, on every column it types; whether `type` was one */
-function followDomain(type: string, node: Node, facts: Facts): boolean {
-	if (type === "CreateDomainStmt") {
-		/* a domain over a domain runs its base domain's CHECK too (M73) */
-		const runs =
-			((node["constraints"] as Node[] | undefined) ?? [])
-				.map((each) => callIn((each["Constraint"] as Node)["raw_expr"], facts))
-				.find((fn) => fn !== undefined) ?? facts.domains.get(typeOf(node["typeName"], facts.schema))
-		if (runs !== undefined) facts.domains.set(keyOf(names(node["domainname"]), facts.schema), runs)
-		return true
-	}
-	if (type !== "AlterDomainStmt") return false
-	/* a CHECK added later runs on every write to a column the domain already types (M73) */
-	const domain = keyOf(names(node["typeName"]), facts.schema)
-	const added = node["subtype"] === "C" ? ((node["def"] as Node)["Constraint"] as Node)["raw_expr"] : undefined
-	const runs = callIn(added, facts)
-	if (runs === undefined) return true
-	if (!facts.domains.has(domain)) facts.domains.set(domain, runs)
-	for (const [table, types] of facts.columnTypes)
-		if (typed(types, domain) && !facts.code.has(table)) facts.code.set(table, runs)
-	return true
 }
 
 /** An operator, an aggregate or a cast with the function it runs */
