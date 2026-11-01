@@ -3,7 +3,8 @@
  * gate a docker:// dev database is held to: Atlas's own container, which comb cannot reach, so a history
  * that makes any such object is refused naming devUrl (P5 of r19), and one that makes none needs no replay.
  */
-import { type HistoryFile, nodeOf } from "./pg-replay.ts"
+import { nodeOf } from "./pg-outside-transaction.ts"
+import type { HistoryFile } from "./pg-replay.ts"
 import { pgRead } from "./pg-split.ts"
 
 type Node = Record<string, unknown>

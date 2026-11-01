@@ -850,16 +850,18 @@ declare function reindexedOf(statements: readonly string[]): Set<string>;
 /** Whether `sql` runs outside a transaction: it starts with `-- atlas:txmode none` and a blank line, which Atlas needs */
 declare const outsideTransaction: (sql: string) => boolean;
 /** A statement as the gate read it: its code, its text, and the dialect it was read as */
+/** A statement as the gate reads it: its code, its text, and on Postgres its parse tree, undefined where the parser refused it */
 type ReadStatement = {
     code: string;
     dialect: Dialect;
     stmt: string;
+    tree?: unknown;
 };
 /**
  * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
  * `-- comb:allow-unsafe:` overrides this
  */
-declare function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string, d1?: boolean): void;
+declare function refuseUnrunnable({ code, dialect, stmt, tree }: ReadStatement, sql: string, d1?: boolean): void;
 export { ftsCommandFindings, outsideTransaction, preview, type ReadStatement, refuseUnrunnable, reindexedOf };
 
 // migrate/drivers/memory.d.ts

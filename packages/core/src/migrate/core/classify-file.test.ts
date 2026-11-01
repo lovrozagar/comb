@@ -24,6 +24,59 @@ describe("classifyMigration on a statement that runs only outside a transaction"
 	})
 })
 
+/* P8 of r19: read from the parse tree, each as Postgres 17 refused it in a transaction (.tmp/grunt/p18/runs/8954e05-probe-p8-*.log) */
+describe("classifyMigration on every statement Postgres 17 runs only outside a transaction", () => {
+	it.each([
+		["ALTER TABLE ev DETACH PARTITION ev_old CONCURRENTLY", "ALTER TABLE ... DETACH CONCURRENTLY"],
+		["CLUSTER", "CLUSTER"],
+		["VACUUM (ANALYZE) post", "VACUUM"],
+		["REINDEX (CONCURRENTLY) TABLE post", "REINDEX CONCURRENTLY"],
+		["REINDEX SCHEMA public", "REINDEX SCHEMA"],
+		["REINDEX DATABASE app", "REINDEX DATABASE"],
+		["REINDEX SYSTEM", "REINDEX SYSTEM"],
+		["ALTER SYSTEM SET work_mem = '4MB'", "ALTER SYSTEM"],
+		["CREATE DATABASE other", "CREATE DATABASE"],
+		["DROP DATABASE IF EXISTS other", "DROP DATABASE"],
+		["ALTER DATABASE app SET TABLESPACE fast", "ALTER DATABASE SET TABLESPACE"],
+		["CREATE TABLESPACE fast LOCATION '/data'", "CREATE TABLESPACE"],
+		["DROP TABLESPACE IF EXISTS fast", "DROP TABLESPACE"],
+		["DISCARD ALL", "DISCARD ALL"],
+		["COMMIT PREPARED 'x'", "COMMIT PREPARED"],
+		["ROLLBACK PREPARED 'x'", "ROLLBACK PREPARED"],
+		["CREATE SUBSCRIPTION s CONNECTION 'host=p' PUBLICATION p", "CREATE SUBSCRIPTION ... WITH (create_slot = true)"],
+		["CREATE SUBSCRIPTION s CONNECTION 'host=p' PUBLICATION p WITH (create_slot = on)", "CREATE SUBSCRIPTION"],
+		["DROP SUBSCRIPTION s", "DROP SUBSCRIPTION"],
+		["ALTER SUBSCRIPTION s REFRESH PUBLICATION WITH (copy_data = false)", "ALTER SUBSCRIPTION ... REFRESH"],
+		["ALTER SUBSCRIPTION s SET PUBLICATION p", "ALTER SUBSCRIPTION with refresh"],
+		["ALTER SUBSCRIPTION s ADD PUBLICATION p WITH (refresh = true)", "ALTER SUBSCRIPTION with refresh"],
+	])(
+		"refuses %j outside an -- atlas:txmode none file, naming it as Postgres does, and runs it in one",
+		(sql, named) => {
+			expect(() => pg(sql)).toThrow(`Postgres runs ${named}`)
+			expect(() => pg(`-- atlas:txmode none\n\n${sql};`)).not.toThrow()
+		},
+	)
+
+	it.each([
+		"ANALYZE post",
+		"CLUSTER post USING post_pkey",
+		"REINDEX TABLE post",
+		"ALTER TABLE ev DETACH PARTITION ev_old",
+		"ALTER TABLE ev DETACH PARTITION ev_old FINALIZE",
+		"CREATE SUBSCRIPTION s CONNECTION 'host=p' PUBLICATION p WITH (connect = false)",
+		"CREATE SUBSCRIPTION s CONNECTION 'host=p' PUBLICATION p WITH (create_slot = off)",
+		"CREATE SUBSCRIPTION s CONNECTION 'host=p' PUBLICATION p WITH (create_slot = 0)",
+		"ALTER SUBSCRIPTION s SET PUBLICATION p WITH (refresh = false)",
+		"ALTER SUBSCRIPTION s ENABLE",
+		"ALTER DATABASE app SET work_mem = '4MB'",
+		"DISCARD PLANS",
+		"ALTER TYPE mood ADD VALUE 'c'",
+		"COMMENT ON TABLE post IS 'VACUUM; CLUSTER; REINDEX SCHEMA public'",
+	])("lets %j run in a transaction, as Postgres does", (sql) => {
+		expect(() => pg(sql)).not.toThrow()
+	})
+})
+
 /* r18 S2: SQLite will not change the journal mode inside the transaction comb runs each file in */
 describe("classifyMigration on SQLite's journal_mode", () => {
 	it.each([

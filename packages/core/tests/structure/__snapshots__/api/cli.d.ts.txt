@@ -148,8 +148,6 @@ type HistoryFile = {
     name: string;
     sql: string;
 };
-/** A statement's one node: its type and fields */
-declare const nodeOf: (tree: unknown) => [string, Record<string, unknown>];
 /**
  * `sql` without its one CONCURRENTLY keyword: the code tokens are read by comb's scanner, so the word
  * in a string, a comment or a quoted identifier is never touched, and the reparse proves only the flag changed
@@ -198,7 +196,7 @@ declare function replayCatalog(target: PgTarget, { files, targetUser }: {
     files: readonly HistoryFile[];
     targetUser: string;
 }, load?: () => Promise<Connect>): Promise<LiveObjects>;
-export { cutConcurrently, type HistoryFile, nodeOf, onDev, replayCatalog, replayStatements, stepsOf };
+export { cutConcurrently, type HistoryFile, onDev, replayCatalog, replayStatements, stepsOf };
 
 // migrate/core/atlas-target.d.ts
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */

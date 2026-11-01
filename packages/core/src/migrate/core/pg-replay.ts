@@ -20,6 +20,7 @@ import { ReplayFailed } from "./replay-failed.ts"
 import { type Connect, failureOf, loadPostgres, readCatalog } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
 import { parsePostgres } from "./pg-parser.ts"
+import { commandsOf, concurrent, nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
 import { segments } from "./sql-scan.ts"
@@ -32,59 +33,19 @@ type HistoryFile = { name: string; sql: string }
 /* why comb loads postgres.js here */
 const REPLAYS = "baseline replays the history on devUrl, and reads what it leaves, through the `postgres` package"
 
-/**
- * The statements Postgres runs only outside a transaction block, by parse-tree node, which the one
- * replay transaction cannot hold; SKIPPED names those it leaves out instead
- */
-// lookup-table: the node types a transaction block refuses, with what they are
-const OUTSIDE_TRANSACTION: Readonly<Record<string, string>> = {
-	AlterSystemStmt: "ALTER SYSTEM",
-	CreateSubscriptionStmt: "CREATE SUBSCRIPTION",
-	CreateTableSpaceStmt: "CREATE TABLESPACE",
-	CreatedbStmt: "CREATE DATABASE",
-	DropSubscriptionStmt: "DROP SUBSCRIPTION",
-	DropTableSpaceStmt: "DROP TABLESPACE",
-	DropdbStmt: "DROP DATABASE",
-}
+// lookup-table: the statements Postgres runs only outside a transaction that the replay skips, which change no catalog row the read compares
+const SKIPPED_OUTSIDE: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"CLUSTER",
+	"DISCARD ALL",
+	"REINDEX DATABASE",
+	"REINDEX SCHEMA",
+	"REINDEX SYSTEM",
+	"VACUUM",
+])
 
-// lookup-table: the REINDEX kinds that reach every index of a database, which a transaction refuses
-const WHOLE: ReadonlySet<string> = /* @__PURE__ */ new Set(["REINDEX_OBJECT_DATABASE", "REINDEX_OBJECT_SYSTEM"])
-
-/** An ALTER TABLE's commands */
-const commandsOf = (node: Node): Node[] =>
-	(node["cmds"] as Array<{ AlterTableCmd: Node }>).map((cmd) => cmd.AlterTableCmd)
-
-// lookup-table: the statements the replay skips, which change no catalog row the read compares
-const SKIPPED: ReadonlyArray<(type: string, node: Node) => boolean> = [
-	(type, node) => type === "VacuumStmt" && node["is_vacuumcmd"] === true,
-	(type, node) => type === "ClusterStmt" && node["relation"] === undefined,
-	(type, node) => type === "ReindexStmt" && WHOLE.has(String(node["kind"])),
-	/* a CONCURRENTLY detach replays in full, so its FINALIZE has nothing left to finish */
-	(type, node) =>
-		type === "AlterTableStmt" && commandsOf(node).some((cmd) => cmd["subtype"] === "AT_DetachPartitionFinalize"),
-]
-
-/** A statement's one node: its type and fields */
-const nodeOf = (tree: unknown): [string, Record<string, unknown>] => {
-	/* a statement's tree is the parser's one RawStmt, whose stmt holds one node */
-	const [{ stmt }] = tree as [{ stmt: Node }]
-	return Object.entries(stmt)[0] as [string, Node]
-}
-
-/** Whether a node is built CONCURRENTLY, as its parse tree marks it */
-function concurrent(type: string, node: Node): boolean {
-	if (type === "IndexStmt" || type === "DropStmt") return node["concurrent"] === true
-	if (type === "AlterTableStmt")
-		return commandsOf(node).some(
-			(cmd) =>
-				cmd["subtype"] === "AT_DetachPartition" &&
-				((cmd["def"] as Node)["PartitionCmd"] as Node)["concurrent"] === true,
-		)
-	if (type !== "ReindexStmt") return false
-	return ((node["params"] ?? []) as Array<{ DefElem: Node }>).some(
-		({ DefElem }) => DefElem["defname"] === "concurrently",
-	)
-}
+/* a CONCURRENTLY detach replays in full, so its FINALIZE, which a transaction holds, has nothing left to finish */
+const finalizes = (type: string, node: Node): boolean =>
+	type === "AlterTableStmt" && commandsOf(node).some((cmd) => cmd["subtype"] === "AT_DetachPartitionFinalize")
 
 /** `tree` with its flag cleared and every offset left out: what the same statement without CONCURRENTLY parses to */
 function withoutConcurrently(tree: unknown): string {
@@ -147,19 +108,22 @@ function cutConcurrently(sql: string, tree: unknown): string {
 type Step = { send: string } | { skip: true } | { cannot: "cut" | "transaction" | (string & {}) }
 
 /**
- * What the replay does with one history statement. VACUUM, a bare CLUSTER, a REINDEX of a whole
- * database or system, and the FINALIZE of a detach the replay ran in full change no catalog row the
- * read compares, so they are skipped; a CONCURRENTLY build, drop, reindex or detach is sent without
- * the keyword; transaction control and the statements OUTSIDE_TRANSACTION names cannot be held.
+ * What the replay does with one history statement, by pg-outside-transaction.ts's table (P8 of
+ * r19): VACUUM, a bare CLUSTER, a REINDEX of a schema, a database or the system, DISCARD ALL, and the
+ * FINALIZE of a detach the replay ran in full change no catalog row the read compares, so they are
+ * skipped; a CONCURRENTLY build, drop, reindex or detach is sent without the keyword; the file's
+ * transaction control, and every other statement only outside a transaction runs, cannot be held.
  */
 function stepOf(sent: string, tree: unknown): Step {
 	if (tree === undefined) return { send: sent }
 	const [type, node] = nodeOf(tree)
-	if (SKIPPED.some((skipped) => skipped(type, node))) return { skip: true }
-	if (type === "TransactionStmt") return { cannot: "transaction" }
-	const outside = OUTSIDE_TRANSACTION[type]
-	if (outside !== undefined) return { cannot: outside }
-	if (!concurrent(type, node)) return { send: sent }
+	const outside = outsideOnly(type, node)
+	if (outside === undefined) {
+		if (finalizes(type, node)) return { skip: true }
+		return type === "TransactionStmt" ? { cannot: "transaction" } : { send: sent }
+	}
+	if (SKIPPED_OUTSIDE.has(outside)) return { skip: true }
+	if (!concurrent(type, node)) return { cannot: outside }
 	try {
 		return { send: cutConcurrently(sent, tree) }
 	} catch {
@@ -295,4 +259,4 @@ function asTarget(live: LiveObjects, targetUser: string): LiveObjects {
 	return { ...live, policies, user: targetUser }
 }
 
-export { cutConcurrently, type HistoryFile, nodeOf, onDev, replayCatalog, replayStatements, stepsOf }
+export { cutConcurrently, type HistoryFile, onDev, replayCatalog, replayStatements, stepsOf }

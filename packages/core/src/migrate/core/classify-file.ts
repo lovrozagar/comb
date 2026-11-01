@@ -7,13 +7,11 @@
 import type { Dialect } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { INSERT_INTO } from "./classify-sqlite-write.ts"
+import { nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
 import { atlasDirectives } from "./pg-split.ts"
 import { nameKey, type Pragma, pragmaOf, QNAME } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
-/* Postgres runs these only outside a transaction block */
-const NO_TRANSACTION =
-	/^(?:CREATE (?:UNIQUE )?INDEX CONCURRENTLY|DROP INDEX CONCURRENTLY|REINDEX\b.*\bCONCURRENTLY\b|VACUUM\b)/i
 // per-process-constant: a pattern composed from the name grammar, compiled once
 const FTS_TABLE = /* @__PURE__ */ new RegExp(
 	`^CREATE VIRTUAL TABLE (?:IF NOT EXISTS )?(${QNAME}) USING fts5 ?\\((.*)\\)$`,
@@ -83,7 +81,8 @@ const outsideTransaction = (sql: string): boolean => {
 }
 
 /** A statement as the gate read it: its code, its text, and the dialect it was read as */
-type ReadStatement = { code: string; dialect: Dialect; stmt: string }
+/** A statement as the gate reads it: its code, its text, and on Postgres its parse tree, undefined where the parser refused it */
+type ReadStatement = { code: string; dialect: Dialect; stmt: string; tree?: unknown }
 
 /** SQLite's transaction control at the top of a file, but a rollback to a savepoint, which nests */
 const SQLITE_TRANSACTION = /^(?:BEGIN|COMMIT|END|START TRANSACTION)\b|^ROLLBACK(?: TRANSACTION)?$/i
@@ -151,7 +150,7 @@ function pragmaRefusal(pragma: Pragma, d1: boolean): string | undefined {
  * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
  * `-- comb:allow-unsafe:` overrides this
  */
-function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string, d1 = false): void {
+function refuseUnrunnable({ code, dialect, stmt, tree }: ReadStatement, sql: string, d1 = false): void {
 	if (dialect === "sqlite" && /^VACUUM\b/i.test(code)) {
 		throw new Error(
 			`${preview(stmt)}: VACUUM cannot run inside a migration's transaction; run it outside the migrations`,
@@ -168,9 +167,11 @@ function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string, d
 			`${preview(stmt)}: comb runs each file in a transaction of its own; remove the file's BEGIN, COMMIT, END and ROLLBACK (a SAVEPOINT nests inside it)`,
 		)
 	}
-	if (dialect === "postgres" && NO_TRANSACTION.test(code) && !outsideTransaction(sql)) {
+	/* P8 of r19: from the parse tree, so DETACH CONCURRENTLY, a bare CLUSTER and a REINDEX of a schema are caught too */
+	const outside = tree === undefined ? undefined : outsideOnly(...nodeOf(tree))
+	if (outside !== undefined && !outsideTransaction(sql)) {
 		throw new Error(
-			`${preview(stmt)}: Postgres runs this only outside a transaction; put it in a file of its own that starts with "-- atlas:txmode none" and a blank line`,
+			`${preview(stmt)}: Postgres runs ${outside} only outside a transaction; put it in a file of its own that starts with "-- atlas:txmode none" and a blank line`,
 		)
 	}
 }

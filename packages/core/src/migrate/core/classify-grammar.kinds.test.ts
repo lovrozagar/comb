@@ -8,6 +8,9 @@ import type { Dialect, MigrationSafety } from "../types.ts"
 import { classifyMigration } from "./classify.ts"
 import { extractSchema } from "./schema.ts"
 
+/* Postgres runs these only outside a transaction, so check refuses them anywhere but a file of their own (P8 of r19) */
+const NO_TX = "-- atlas:txmode none\n\n"
+
 const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "ABORT", "unsafe"],
 	["postgres", "ALTER AGGREGATE a(int) RENAME TO b", "unsafe"],
@@ -35,7 +38,7 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "ALTER SERVER s OWNER TO r", "unsafe"],
 	["postgres", "ALTER STATISTICS s OWNER TO r", "unsafe"],
 	["postgres", "ALTER SUBSCRIPTION s DISABLE", "unsafe"],
-	["postgres", "ALTER SYSTEM SET x = 1", "unsafe"],
+	["postgres", NO_TX + "ALTER SYSTEM SET x = 1", "unsafe"],
 	["postgres", "ALTER TABLE post ADD COLUMN c int", "safe"],
 	["postgres", "ALTER TABLESPACE t OWNER TO r", "unsafe"],
 	["postgres", "ALTER TEXT SEARCH CONFIGURATION c OWNER TO r", "unsafe"],
@@ -59,7 +62,7 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "CREATE CAST (int AS text) WITH FUNCTION f(int)", "unsafe"],
 	["postgres", "CREATE COLLATION c (locale = 'x')", "unsafe"],
 	["postgres", "CREATE CONVERSION c FOR 'a' TO 'b' FROM f", "unsafe"],
-	["postgres", "CREATE DATABASE d", "unsafe"],
+	["postgres", NO_TX + "CREATE DATABASE d", "unsafe"],
 	["postgres", "CREATE DOMAIN d AS int CHECK (VALUE > 0)", "safe"],
 	["postgres", "CREATE EVENT TRIGGER e ON ddl_command_start EXECUTE FUNCTION f()", "unsafe"],
 	["postgres", "CREATE EXTENSION pgcrypto", "cautious"],
@@ -78,10 +81,10 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "CREATE SEQUENCE s", "safe"],
 	["postgres", "CREATE SERVER s FOREIGN DATA WRAPPER w", "unsafe"],
 	["postgres", "CREATE STATISTICS s ON a, b FROM post", "unsafe"],
-	["postgres", "CREATE SUBSCRIPTION s CONNECTION 'x' PUBLICATION p", "unsafe"],
+	["postgres", NO_TX + "CREATE SUBSCRIPTION s CONNECTION 'x' PUBLICATION p", "unsafe"],
 	["postgres", "CREATE TABLE n (id int)", "safe"],
 	["postgres", "CREATE TABLE n AS SELECT 1", "safe"],
-	["postgres", "CREATE TABLESPACE t LOCATION '/x'", "unsafe"],
+	["postgres", NO_TX + "CREATE TABLESPACE t LOCATION '/x'", "unsafe"],
 	["postgres", "CREATE TEXT SEARCH CONFIGURATION c (COPY = english)", "unsafe"],
 	["postgres", "CREATE TRANSFORM FOR int LANGUAGE l (FROM SQL WITH FUNCTION f(internal))", "unsafe"],
 	["postgres", "CREATE TRIGGER t AFTER INSERT ON post FOR EACH ROW EXECUTE FUNCTION f()", "unsafe"],
@@ -92,11 +95,11 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "DEALLOCATE s", "unsafe"],
 	["postgres", "DECLARE c CURSOR FOR SELECT 1", "unsafe"],
 	["postgres", "DELETE FROM post WHERE id = 1", "unsafe"],
-	["postgres", "DISCARD ALL", "unsafe"],
+	["postgres", NO_TX + "DISCARD ALL", "unsafe"],
 	["postgres", "DO $$ BEGIN END $$", "unsafe"],
 	["postgres", "DROP AGGREGATE a(int)", "unsafe"],
 	["postgres", "DROP CAST (int AS text)", "unsafe"],
-	["postgres", "DROP DATABASE d", "unsafe"],
+	["postgres", NO_TX + "DROP DATABASE d", "unsafe"],
 	["postgres", "DROP DOMAIN d", "unsafe"],
 	["postgres", "DROP EXTENSION e", "unsafe"],
 	["postgres", "DROP FUNCTION f()", "unsafe"],
