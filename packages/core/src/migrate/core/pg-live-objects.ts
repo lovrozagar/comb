@@ -51,7 +51,7 @@ async function loadPostgres(why: string): Promise<Connect> {
 
 /** What a baseline compares itself, as its refusals name it */
 const COMPARED =
-	"functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security"
+	"functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security"
 
 /* why a baseline loads it: it cannot vouch for the database without it */
 const COMPARES = `baseline compares the database's ${COMPARED}, which Atlas OSS does not, through the ${PEER} package`

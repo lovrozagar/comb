@@ -101,7 +101,7 @@ describe("readLiveObjects", () => {
 	it("says why it could not read, with the password masked, and closes the connection still", async () => {
 		const { load, seen } = fakeConnect({ error: new Error("password authentication failed for s3cret") })
 		await expect(readLiveObjects(TARGET, load)).rejects.toThrow(
-			/^comb could not read the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security: password authentication failed for (?!s3cret)/,
+			/^comb could not read the database's functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security: password authentication failed for (?!s3cret)/,
 		)
 		expect(seen.ended).toBe(true)
 	})
@@ -126,7 +126,7 @@ describe("loadPostgres", () => {
 			await expect(
 				(await import("./pg-live-objects.ts")).readLiveObjects({ schema: "app", url: "postgres://db/db" }),
 			).rejects.toThrow(
-				"baseline compares the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security, which Atlas OSS does not, through the postgres package; install postgres",
+				"baseline compares the database's functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security, which Atlas OSS does not, through the postgres package; install postgres",
 			)
 		} finally {
 			vi.doUnmock("postgres")
@@ -298,7 +298,7 @@ describe("readLiveObjects: a socket, verify-ca and no TLS, read as libpq reads t
 describe("readLiveObjects on a connection every address refused", () => {
 	it("says nothing more than comb's own words for a failure with no message and no errors", async () => {
 		await expect(readLiveObjects(TARGET, fakeConnect({ error: new Error("") }).load)).rejects.toThrow(
-			/^comb could not read the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security: $/,
+			/^comb could not read the database's functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security: $/,
 		)
 	})
 
@@ -309,7 +309,7 @@ describe("readLiveObjects on a connection every address refused", () => {
 			"",
 		)
 		await expect(readLiveObjects(TARGET, fakeConnect({ error: refused }).load)).rejects.toThrow(
-			"comb could not read the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security: connect ECONNREFUSED ::1:55433; connect ECONNREFUSED 127.0.0.1:55433",
+			"comb could not read the database's functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security: connect ECONNREFUSED ::1:55433; connect ECONNREFUSED 127.0.0.1:55433",
 		)
 	})
 })

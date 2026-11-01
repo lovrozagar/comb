@@ -246,7 +246,7 @@ declare function failureOf(error: unknown, field?: "devUrl" | "url"): string;
 /** postgres.js, or the refusal naming it and `why` comb needs it here */
 declare function loadPostgres(why: string): Promise<Connect>;
 /** What a baseline compares itself, as its refusals name it */
-declare const COMPARED = "functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security";
+declare const COMPARED = "functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security";
 /**
  * What `schema` holds of what Atlas OSS does not compare, read through `sql` by the one catalog
  * query: the target's read and the dev replay's are this one function (P5 of r19), so the two sides
