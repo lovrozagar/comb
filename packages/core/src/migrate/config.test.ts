@@ -385,3 +385,17 @@ describe("loadConfig validates what the file exports, however it exports it (M12
 		}
 	})
 })
+
+/** A D1 config with its migrations directory under `key`, as a helper builds one where tsc does not look */
+const builtWith = (key: string) => ({
+	databases: { core: { [key]: "./m", name: "local", provider: { databaseName: "CORE", type: "d1" } } },
+})
+
+/* r18 K6: a program that imports its own config module parses it with the one parse loadConfig runs */
+describe("parseConfig, from /migrate", () => {
+	it("is the entry's, and refuses an imported config that tsc's excess-property check never reached", async () => {
+		const migrate = await import("./index.ts")
+		expect(() => migrate.parseConfig(builtWith("migrationDir"))).toThrow("migrationDir")
+		expect(migrate.parseConfig(builtWith("migrationsDir")).databases["core"]?.migrationsDir).toBe("./m")
+	})
+})

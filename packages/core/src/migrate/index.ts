@@ -5,6 +5,7 @@ export {
 	defineConfig,
 	type LoadedConfig,
 	loadConfig,
+	parseConfig,
 	resolveDatabaseConfig,
 } from "./config.ts"
 export { D1_HASH_TABLE, D1_MIGRATIONS_TABLE, d1HistoryTables, DRIZZLE_HISTORY_TABLE } from "./core/d1-history-tables.ts"

@@ -1,5 +1,5 @@
 // migrate/index.d.ts
-export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfig, type LoadedConfig, loadConfig, resolveDatabaseConfig, } from "./config.ts";
+export { type CombMigrateConfig, createProvider, DEFAULT_PG_DEV_URL, defineConfig, type LoadedConfig, loadConfig, parseConfig, resolveDatabaseConfig, } from "./config.ts";
 export { D1_HASH_TABLE, D1_MIGRATIONS_TABLE, d1HistoryTables, DRIZZLE_HISTORY_TABLE } from "./core/d1-history-tables.ts";
 export { applySqliteMigrationTransforms, checkAtlasInstalled, type DrizzleExportOptions, exportDrizzleSchema, generateSchemaDiff, getAtlasVersion, type SchemaDiffOptions, type SchemaDiffResult, } from "./core/atlas.ts";
 export { classifyMigration, extractDropStatements, extractSchema, generateMigrationHash, parseMigration, splitSqlStatements, } from "./core/parse.ts";
