@@ -73,3 +73,26 @@ describe("stated", () => {
 		expect(stated({ maxLength: null })).toBe("")
 	})
 })
+
+/* C1 of r18: comb's own bounds on a text, beside the declared ones, may leave no value: refused by the one effective range */
+describe("textBase: a text's effective bounds that leave no value", () => {
+	it.each([
+		["a password's min past its 72", 'c.text("t", { password: true, min: 80 })', "min 80 and max 72"],
+		[
+			"a password's min past 72 under a wider declared max",
+			'c.text("t", { password: true, min: 100, max: 200 })',
+			"min 100 and max 72",
+		],
+		["a required text's max of 0", 'c.text("t", { max: 0 }).notNull()', "min 1 and max 0"],
+		["a url shorter than https:// and a character", 'c.text("t", { url: true, max: 5 })', "min 9 and max 5"],
+	])("fails codegen naming the column for %s", (_, raw, bounds) => {
+		expect(() => text(raw, "create")).toThrow(`t: its length ${bounds} leave no value; widen them`)
+	})
+
+	it("takes a range that holds a value, comb's own bounds included, and a read of any", () => {
+		expect(text('c.text("t", { password: true, min: 72 })', "create")).toContain(".min(72).max(72)")
+		expect(text('c.text("t", { url: true, max: 9 })', "create")).toContain(".max(9)")
+		expect(text('c.text("t", { max: 1 }).notNull()', "create")).toContain(".min(1).max(1)")
+		expect(text('c.text("t", { max: 0 }).notNull()', "read")).toBe('z.string().meta({"x-comb-maxLength":0})')
+	})
+})
