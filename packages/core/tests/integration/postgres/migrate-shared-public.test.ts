@@ -129,7 +129,8 @@ describe("migrate on Postgres: public's shared history beside another schema's 0
 				const status = command(url, "public", pub)
 				expect(statusWithAtlas(status).pending).toEqual(["20260103000000_c.sql"])
 				expect(status.out).toContain(IGNORED)
-				expect(await applyWithAtlas({ ...command(url, "public", pub), checkOnly: true })).toEqual([
+				const check = command(url, "public", pub)
+				expect(await applyWithAtlas({ ...check, checkOnly: true, target: { ...check.target, devUrl: dev } })).toEqual([
 					"20260103000000_c.sql",
 				])
 				const apply = command(url, "public", pub)

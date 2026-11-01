@@ -1,0 +1,78 @@
+/**
+ * Check lets Postgres decide what no database runs (P13 of r19). On a postgres:// devUrl it replays
+ * the history and the pending files there in one transaction it rolls back, baseline's own replay
+ * (pg-replay.ts), and a statement Postgres refuses stops check with Postgres's message: a retype of
+ * a column a view, a materialized view, a rule, a policy, a trigger's WHEN, a generated column or a
+ * BEGIN ATOMIC function reads, and whatever else Postgres refuses on an empty database, which no
+ * rating of the statement's text can list. Each statement a transaction cannot hold, which apply runs
+ * in a `-- atlas:txmode none` file, is left out, and check names it. A docker:// devUrl is Atlas's
+ * own container, which comb cannot reach, and without the `postgres` package comb cannot connect:
+ * then check says the replay did not run, and rates the files alone.
+ */
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { sqlFiles } from "./atlas-dir.ts"
+import type { PgTarget } from "./atlas-target.ts"
+import { type Connect, loadPostgres } from "./pg-live-objects.ts"
+import { type HistoryFile, onDev, stepsOf } from "./pg-replay.ts"
+
+/* why comb loads postgres.js here */
+const REPLAYS = "check replays the history and the pending files on devUrl through the `postgres` package"
+
+/* the line check prints when it replays nothing, and why */
+const NOT_REPLAYED = "Check did not replay the pending files on devUrl"
+
+// lookup-table: why the replay leaves out a statement it cannot hold
+const LEFT_OUT: Readonly<Record<string, string>> = {
+	cut: "comb could not cut its CONCURRENTLY, which a transaction refuses",
+	transaction: "the replay is one transaction of its own, which the file's transaction control would end",
+}
+
+/**
+ * The history and the pending `files`, in order, replayed on `target`'s dev database in one
+ * transaction rolled back; throws, naming the statement and dev's error, for one dev refuses
+ */
+async function replayPending(
+	{ print, target }: { print(line: string): void; target: PgTarget },
+	files: readonly HistoryFile[],
+	load: () => Promise<Connect> = () => loadPostgres(REPLAYS),
+): Promise<void> {
+	if (target.devUrl.startsWith("docker:")) {
+		print(
+			`${NOT_REPLAYED}: ${target.devUrl} is Atlas's own container, which comb cannot reach, so a statement Postgres refuses on every database is found only when it applies; set devUrl to a postgres:// scratch database comb can connect to`,
+		)
+		return
+	}
+	let connect: Connect
+	try {
+		connect = await load()
+	} catch (error) {
+		// reason: the postgres package is an optional peer; without it check rates the files alone, and says so
+		print(`${NOT_REPLAYED}: ${(error as Error).message}`)
+		return
+	}
+	const statements = stepsOf(files).flatMap(({ file, sent, step }) => {
+		if ("send" in step) return [{ file, sql: step.send }]
+		if ("cannot" in step) {
+			const why = LEFT_OUT[step.cannot] ?? `${step.cannot} runs only outside a transaction`
+			print(`Check left ${JSON.stringify(sent)} in ${file} out of its replay on devUrl: ${why}`)
+		}
+		return []
+	})
+	await onDev(target, statements, {
+		after: async () => undefined,
+		doing: "check replayed the history and the pending files there",
+		load: async () => connect,
+		stops: "check applies nothing",
+	})
+}
+
+/** The snapshot `copy`'s files through the last of `pending`, in order, as check replays them */
+function throughPending(copy: string, pending: readonly string[]): HistoryFile[] {
+	const names = sqlFiles(copy)
+	return names
+		.slice(0, names.indexOf(pending.at(-1) as string) + 1)
+		.map((name) => ({ name, sql: readFileSync(join(copy, name), "utf8") }))
+}
+
+export { replayPending, throughPending }

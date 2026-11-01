@@ -35,6 +35,7 @@ import { extractSchema, parseRead } from "./parse.ts"
 import { run } from "./process.ts"
 import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
+import { replayPending, throughPending } from "./pg-check-replay.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { pgRead } from "./pg-split.ts"
 import { schemaOfRead } from "./schema.ts"
@@ -44,6 +45,8 @@ type ApplyOptions = AtlasCommand & {
 	approve(migration: ParsedMigration): Promise<Approval>
 	/** only check: stop once every pending file is approved, applying nothing */
 	checkOnly?: boolean | undefined
+	/** how check replays the history and the pending files on dev: comb's own (pg-check-replay.ts) unless a test says otherwise */
+	replayPending?: typeof replayPending | undefined
 }
 
 /** The files 0.12's shared history ran, while `own`, the schema's own history, records none (M77) */
@@ -91,11 +94,17 @@ function named<T>(name: string, read: () => T): T {
 
 /**
  * Each pending file read from the snapshot, classified as Postgres against the schema the files
- * before it leave, names keyed under the target's schema, approved, its lock warnings shown
+ * before it leave, names keyed under the target's schema, approved, its lock warnings shown; on a
+ * check, first replayed on dev with the history before it (pg-check-replay.ts)
  */
 async function approvePending(options: ApplyOptions, copy: string, pending: readonly AtlasFile[]): Promise<void> {
 	/* Postgres statements are read from Postgres's parser, loaded once */
 	await loadPostgresParser()
+	/* a check lets Postgres decide what no database runs, before any file is approved (P13 of r19) */
+	if (options.checkOnly === true) {
+		const names = pending.map((file) => file.Name)
+		await (options.replayPending ?? replayPending)(options, throughPending(copy, names))
+	}
 	const waiting = new Set(pending.map((file) => file.Name))
 	/* names are keyed as Postgres resolves them under the URL's search_path, the target's schema (M72) */
 	const readAs = { dialect: "postgres" as const, schema: options.target.schema }

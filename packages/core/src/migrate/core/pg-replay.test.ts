@@ -54,6 +54,16 @@ describe("replayStatements", () => {
 		])
 	})
 
+	/* P13 of r19: check's replay holds what a pending txmode-none file runs, as baseline's holds the history */
+	it("sends a CONCURRENTLY detach without the keyword, and skips its FINALIZE and a REINDEX of a database or the system", () => {
+		const sql =
+			"ALTER TABLE ev DETACH PARTITION ev_old CONCURRENTLY;\nALTER TABLE ev DETACH PARTITION ev_old FINALIZE;\nALTER TABLE ev DETACH PARTITION ev_new;\nREINDEX DATABASE app;\nREINDEX SYSTEM;"
+		expect(replayStatements(file(sql)).map(({ sql: sent }) => sent)).toEqual([
+			"ALTER TABLE ev DETACH PARTITION ev_old ",
+			"ALTER TABLE ev DETACH PARTITION ev_new",
+		])
+	})
+
 	it("sends a REINDEX without options, and a statement the parser cannot read, as written, for dev to judge", () => {
 		expect(replayStatements(file("REINDEX TABLE t;\nREINDEX TABLE CONCURRENTLY t;")).map(({ sql }) => sql)).toEqual([
 			"REINDEX TABLE t",
@@ -69,6 +79,7 @@ describe("replayStatements", () => {
 		["DROP TABLESPACE ts", "DROP TABLESPACE runs only outside a transaction"],
 		["COMMIT", "baseline replays the history in one transaction of its own"],
 		["BEGIN", "baseline replays the history in one transaction of its own"],
+		["REINDEX (CONCURRENTLY) INDEX i", 'comb could not replay "REINDEX (CONCURRENTLY) INDEX i" without CONCURRENTLY'],
 	])("stops on %j, naming it", (sql, said) => {
 		expect(() => replayStatements(file(sql))).toThrow(said)
 	})

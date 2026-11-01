@@ -116,6 +116,8 @@ describe("public's history beside another schema's 0.12 rows (M78)", () => {
 			approve,
 			checkOnly: true,
 			dir,
+			/* check's replay on dev is pg-check-replay.ts's to test */
+			replayPending: async () => undefined,
 			exec: atlas,
 			print: (line) => out.push(line),
 			target,

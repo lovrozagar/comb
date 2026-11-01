@@ -9,7 +9,7 @@ import { sumHashes } from "./atlas-dir.ts"
 import type { LiveRead } from "./pg-live-types.ts"
 import { postgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
-import { fail, type Fake, fakeAtlas, file, ok, revision, status } from "../../../tests/support/fake-atlas.ts"
+import { fail, fakeAtlas, file, ok, revision, status } from "../../../tests/support/fake-atlas.ts"
 import { holdingRelations, noLive } from "../__fixtures__/live-objects.ts"
 import { UNCOMPARED } from "./baseline-compare.ts"
 
@@ -54,6 +54,8 @@ function options(
 		readLive,
 		/* the history's replay on dev, faked: it leaves what the faked database holds (P5 of r19) */
 		readReplay: async (target) => readLive(target),
+		/* check's replay on dev is atlas-apply.check.test.ts's and pg-check-replay.ts's to test */
+		replayPending: async () => undefined,
 		seen,
 		target: TARGET,
 		...more,
@@ -114,36 +116,6 @@ describe("applyWithAtlas", () => {
 		const run = options(atlas, { approve: async () => ({ message: "2_b.sql is unsafe", ok: false }) })
 		await expect(applyWithAtlas(run)).rejects.toThrow("2_b.sql is unsafe")
 		expect(atlas.calls.some((call) => call.args[1] === "apply" && !call.args.includes("--dry-run"))).toBe(false)
-	})
-})
-
-/** The Atlas commands a fake was asked to run, by their first two words */
-const commands = (fake: Fake) => fake.calls.map((call) => call.args.slice(0, 2).join(" "))
-
-describe("applyWithAtlas: a check (M11)", () => {
-	it("inspects a database with no history instead of the dry run, and refuses one holding a table", async () => {
-		const legacy = ok(JSON.stringify({ schemas: [{ name: "public", tables: [{ name: "legacy" }] }] }))
-		const unclean = fakeAtlas({ inspect: legacy, status: PENDING })
-		await expect(applyWithAtlas({ ...options(unclean), checkOnly: true })).rejects.toThrow("comb migrate baseline")
-		const clean = fakeAtlas({ status: PENDING })
-		expect(await applyWithAtlas({ ...options(clean), checkOnly: true })).toEqual(["1_a.sql", "2_b.sql"])
-		expect(commands(clean)).not.toContain("migrate apply")
-		expect(commands(clean)).toContain("schema inspect")
-	})
-
-	it("dry-runs a database with history, and inspects nothing", async () => {
-		const fake = fakeAtlas({
-			status: status({
-				/* the hash atlas.sum records for the file, as Atlas recorded it */
-				applied: [revision("1", { hash: sumHashes(dir).get("1_a.sql") })],
-				available: [file("1_a.sql"), file("2_b.sql")],
-				current: "1",
-				pending: [file("2_b.sql")],
-			}),
-		})
-		expect(await applyWithAtlas({ ...options(fake), checkOnly: true })).toEqual(["2_b.sql"])
-		expect(commands(fake)).toContain("migrate apply")
-		expect(commands(fake)).not.toContain("schema inspect")
 	})
 })
 

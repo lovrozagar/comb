@@ -71,7 +71,11 @@ describe("migrate apply and baseline: a Postgres database, through Atlas", () =>
 		const atlas = pgAtlas(["1_init.sql"])
 		const io = makeIo(dir, atlas)
 		expect(await runCli(["migrate", "check", "core"], io)).toBe(0)
-		expect(io.outputs).toEqual(["\nCheck passed: 1 pending: 1_init.sql"])
+		/* the default devUrl is Atlas's own container, so check says it replayed nothing there (P13 of r19) */
+		expect(io.outputs).toEqual([
+			"Check did not replay the pending files on devUrl: docker://postgres/17/dev is Atlas's own container, which comb cannot reach, so a statement Postgres refuses on every database is found only when it applies; set devUrl to a postgres:// scratch database comb can connect to",
+			"\nCheck passed: 1 pending: 1_init.sql",
+		])
 		expect(atlas.calls.some((call) => call[1] === "apply" && !call.includes("--dry-run"))).toBe(false)
 	})
 

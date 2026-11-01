@@ -155,7 +155,7 @@ describe("migrate apply on Postgres rates what Postgres runs", () => {
 describe("migrate check on Postgres reads only (M11)", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("checks a database with no history without creating Atlas's revisions schema on it", async () => {
-			await withScratchDb(async (url) => {
+			await withDevAndTarget(async (dev, url) => {
 				migrations({ "20260101000000_init.sql": "CREATE TABLE post (id integer PRIMARY KEY);" })
 				const schemas = () =>
 					query<{ nspname: string }>(
@@ -163,7 +163,8 @@ describe("migrate check on Postgres reads only (M11)", () => {
 						"SELECT nspname FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema' ORDER BY 1",
 					)
 				const before = await schemas()
-				expect(await applyWithAtlas({ ...command(url), checkOnly: true })).toEqual(["20260101000000_init.sql"])
+				const checked = await applyWithAtlas({ ...command(url, { devUrl: dev }), checkOnly: true })
+				expect(checked).toEqual(["20260101000000_init.sql"])
 				expect(await schemas()).toEqual(before)
 				expect(await tables(url)).toEqual([])
 			})
@@ -434,7 +435,7 @@ const approveAll = () => Promise.resolve({ ok: true as const })
 describe("migrate check on Postgres under a configured schema", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("refuses a write to a table whose trigger the history named with the schema", async () => {
-			await withScratchDb(async (url) => {
+			await withDevAndTarget(async (dev, url) => {
 				await query(url, "CREATE SCHEMA app")
 				migrations({
 					"20260101000000_t.sql": `CREATE TABLE victim (id int PRIMARY KEY);
@@ -447,9 +448,9 @@ CREATE TRIGGER t AFTER INSERT ON app.users FOR EACH ROW EXECUTE FUNCTION wipe();
 					"20260101000000_t.sql",
 				])
 				migrations({ "20260102000000_seed.sql": "INSERT INTO users VALUES (1);\n" })
-				await expect(applyWithAtlas({ ...command(url, { schema: "app" }), checkOnly: true })).rejects.toThrow(
-					/20260102000000_seed\.sql is unsafe/,
-				)
+				await expect(
+					applyWithAtlas({ ...command(url, { devUrl: dev, schema: "app" }), checkOnly: true }),
+				).rejects.toThrow(/20260102000000_seed\.sql is unsafe/)
 			})
 		}, 60_000)
 	})
@@ -459,11 +460,11 @@ CREATE TRIGGER t AFTER INSERT ON app.users FOR EACH ROW EXECUTE FUNCTION wipe();
 describe("migrate check on Postgres: DDL in any spelling", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("refuses a column dropped with no space after the quoted table name", async () => {
-			await withScratchDb(async (url) => {
+			await withDevAndTarget(async (dev, url) => {
 				migrations({ "20260101000000_t.sql": "CREATE TABLE users (id int PRIMARY KEY, email text);\n" })
 				expect(await applyWithAtlas(command(url, { approve: approveAll }))).toEqual(["20260101000000_t.sql"])
 				migrations({ "20260102000000_drop.sql": 'ALTER TABLE "users"DROP COLUMN email;\n' })
-				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(
+				await expect(applyWithAtlas({ ...command(url, { devUrl: dev }), checkOnly: true })).rejects.toThrow(
 					/20260102000000_drop\.sql is unsafe/,
 				)
 			})
@@ -475,7 +476,7 @@ describe("migrate check on Postgres: DDL in any spelling", () => {
 describe("migrate check on Postgres: a write through a view", () => {
 	describe("with Atlas v1.3.0", () => {
 		it("refuses an insert through a view over a table whose trigger the history made", async () => {
-			await withScratchDb(async (url) => {
+			await withDevAndTarget(async (dev, url) => {
 				migrations({
 					"20260101000000_t.sql": `CREATE TABLE victim (id int PRIMARY KEY);
 CREATE FUNCTION wipe() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM victim; RETURN NEW; END $$;
@@ -486,7 +487,7 @@ CREATE VIEW v AS SELECT * FROM users;
 				})
 				expect(await applyWithAtlas(command(url, { approve: approveAll }))).toEqual(["20260101000000_t.sql"])
 				migrations({ "20260102000000_seed.sql": "INSERT INTO v VALUES (1, 'admin@x');\n" })
-				await expect(applyWithAtlas({ ...command(url), checkOnly: true })).rejects.toThrow(
+				await expect(applyWithAtlas({ ...command(url, { devUrl: dev }), checkOnly: true })).rejects.toThrow(
 					/20260102000000_seed\.sql is unsafe/,
 				)
 			})

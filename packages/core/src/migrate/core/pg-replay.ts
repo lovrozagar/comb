@@ -6,10 +6,12 @@
  * The replay is one transaction, rolled back: nothing commits on dev, so it stays the empty scratch
  * Atlas requires, and nothing outside the target schema (a cast, an event trigger, an extension)
  * leaks there. Postgres refuses a few statements in a transaction block. CONCURRENTLY is cleared
- * from an index build, drop or reindex: the parse tree says the statement has it, comb's scanner
- * cuts that one keyword, and the reparsed tree must equal the original with only the flag cleared.
- * VACUUM and a bare CLUSTER change no catalog row the read compares, so they are skipped. Any other
- * statement Postgres runs only outside a transaction stops the baseline, naming it.
+ * from an index build, drop or reindex and a partition's detach: the parse tree says the statement
+ * has it, comb's scanner cuts that one keyword, and the reparsed tree must equal the original with
+ * only the flag cleared. VACUUM, a bare CLUSTER, a REINDEX of a database or the system, and a
+ * detach's FINALIZE change no catalog row the read compares, so they are skipped. Any other
+ * statement Postgres runs only outside a transaction stops the baseline, naming it; check's replay
+ * of the pending files (pg-check-replay.ts) leaves it out and says so (P13 of r19).
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
@@ -32,7 +34,7 @@ const REPLAYS = "baseline replays the history on devUrl, and reads what it leave
 
 /**
  * The statements Postgres runs only outside a transaction block, by parse-tree node, which the one
- * replay transaction cannot hold; VACUUM and a bare CLUSTER are skipped instead (they leave no catalog row the read compares)
+ * replay transaction cannot hold; SKIPPED names those it leaves out instead
  */
 // lookup-table: the node types a transaction block refuses, with what they are
 const OUTSIDE_TRANSACTION: Readonly<Record<string, string>> = {
@@ -45,6 +47,23 @@ const OUTSIDE_TRANSACTION: Readonly<Record<string, string>> = {
 	DropdbStmt: "DROP DATABASE",
 }
 
+// lookup-table: the REINDEX kinds that reach every index of a database, which a transaction refuses
+const WHOLE: ReadonlySet<string> = /* @__PURE__ */ new Set(["REINDEX_OBJECT_DATABASE", "REINDEX_OBJECT_SYSTEM"])
+
+/** An ALTER TABLE's commands */
+const commandsOf = (node: Node): Node[] =>
+	(node["cmds"] as Array<{ AlterTableCmd: Node }>).map((cmd) => cmd.AlterTableCmd)
+
+// lookup-table: the statements the replay skips, which change no catalog row the read compares
+const SKIPPED: ReadonlyArray<(type: string, node: Node) => boolean> = [
+	(type, node) => type === "VacuumStmt" && node["is_vacuumcmd"] === true,
+	(type, node) => type === "ClusterStmt" && node["relation"] === undefined,
+	(type, node) => type === "ReindexStmt" && WHOLE.has(String(node["kind"])),
+	/* a CONCURRENTLY detach replays in full, so its FINALIZE has nothing left to finish */
+	(type, node) =>
+		type === "AlterTableStmt" && commandsOf(node).some((cmd) => cmd["subtype"] === "AT_DetachPartitionFinalize"),
+]
+
 /** A statement's one node: its type and fields */
 const nodeOf = (tree: unknown): [string, Record<string, unknown>] => {
 	/* a statement's tree is the parser's one RawStmt, whose stmt holds one node */
@@ -55,6 +74,12 @@ const nodeOf = (tree: unknown): [string, Record<string, unknown>] => {
 /** Whether a node is built CONCURRENTLY, as its parse tree marks it */
 function concurrent(type: string, node: Node): boolean {
 	if (type === "IndexStmt" || type === "DropStmt") return node["concurrent"] === true
+	if (type === "AlterTableStmt")
+		return commandsOf(node).some(
+			(cmd) =>
+				cmd["subtype"] === "AT_DetachPartition" &&
+				((cmd["def"] as Node)["PartitionCmd"] as Node)["concurrent"] === true,
+		)
 	if (type !== "ReindexStmt") return false
 	return ((node["params"] ?? []) as Array<{ DefElem: Node }>).some(
 		({ DefElem }) => DefElem["defname"] === "concurrently",
@@ -118,48 +143,77 @@ function cutConcurrently(sql: string, tree: unknown): string {
 	return out
 }
 
-/** What the replay sends for one history statement: as written, without CONCURRENTLY, or nothing; throws for one it cannot hold */
-function replayed(sent: string, tree: unknown): string | undefined {
-	if (tree === undefined) return sent
+/** What the replay does with one statement: sends it (as written, or cut), skips it, or cannot hold it, and why */
+type Step = { send: string } | { skip: true } | { cannot: "cut" | "transaction" | (string & {}) }
+
+/**
+ * What the replay does with one history statement. VACUUM, a bare CLUSTER, a REINDEX of a whole
+ * database or system, and the FINALIZE of a detach the replay ran in full change no catalog row the
+ * read compares, so they are skipped; a CONCURRENTLY build, drop, reindex or detach is sent without
+ * the keyword; transaction control and the statements OUTSIDE_TRANSACTION names cannot be held.
+ */
+function stepOf(sent: string, tree: unknown): Step {
+	if (tree === undefined) return { send: sent }
 	const [type, node] = nodeOf(tree)
-	if (type === "VacuumStmt" && node["is_vacuumcmd"] === true) return undefined
-	if (type === "ClusterStmt" && node["relation"] === undefined) return undefined
-	if (type === "TransactionStmt") {
-		throw new Error(
-			`${JSON.stringify(sent)}: baseline replays the history in one transaction of its own, which the file's transaction control would end; baseline compares nothing`,
-		)
-	}
+	if (SKIPPED.some((skipped) => skipped(type, node))) return { skip: true }
+	if (type === "TransactionStmt") return { cannot: "transaction" }
 	const outside = OUTSIDE_TRANSACTION[type]
-	if (outside !== undefined) {
-		throw new Error(
-			`${JSON.stringify(sent)}: ${outside} runs only outside a transaction, and baseline replays the history in one; baseline compares nothing`,
-		)
+	if (outside !== undefined) return { cannot: outside }
+	if (!concurrent(type, node)) return { send: sent }
+	try {
+		return { send: cutConcurrently(sent, tree) }
+	} catch {
+		// reason: the cut's refusal is the caller's to word, baseline's or check's
+		return { cannot: "cut" }
 	}
-	return concurrent(type, node) ? cutConcurrently(sent, tree) : sent
 }
 
-/** The statements the replay sends for `files`, in order, each with the file it is from */
-function replayStatements(files: readonly HistoryFile[]): Array<{ file: string; sql: string }> {
-	return files.flatMap(({ name, sql }) =>
-		pgRead(sql).statements.flatMap(({ sent, tree }) => {
-			const send = replayed(sent, tree)
-			return send === undefined ? [] : [{ file: name, sql: send }]
-		}),
+/** Each history statement in `files`, in order, with the file it is from and what the replay does with it */
+const stepsOf = (files: readonly HistoryFile[]): Array<{ file: string; sent: string; step: Step }> =>
+	files.flatMap(({ name, sql }) =>
+		pgRead(sql).statements.map(({ sent, tree }) => ({ file: name, sent, step: stepOf(sent, tree) })),
+	)
+
+/** Baseline's refusal of a history statement its one transaction cannot hold */
+function cannotBaseline(sent: string, cannot: string): Error {
+	const statement = JSON.stringify(sent)
+	if (cannot === "cut")
+		return new Error(
+			`comb could not replay ${statement} without CONCURRENTLY, which a transaction refuses; baseline compares nothing`,
+		)
+	if (cannot === "transaction") {
+		return new Error(
+			`${statement}: baseline replays the history in one transaction of its own, which the file's transaction control would end; baseline compares nothing`,
+		)
+	}
+	return new Error(
+		`${statement}: ${cannot} runs only outside a transaction, and baseline replays the history in one; baseline compares nothing`,
 	)
 }
 
+/** The statements baseline's replay sends for `files`, in order, each with the file it is from; throws for one it cannot hold */
+function replayStatements(files: readonly HistoryFile[]): Array<{ file: string; sql: string }> {
+	return stepsOf(files).flatMap(({ file, sent, step }) => {
+		if ("cannot" in step) throw cannotBaseline(sent, step.cannot)
+		return "send" in step ? [{ file, sql: step.send }] : []
+	})
+}
+
 /**
- * The catalog the history `files` leave in `target`'s schema, replayed on its dev database in one
- * transaction that is rolled back, read by the target's own query (readCatalog). The role the replay
- * ran as stands for the target's role wherever the read names it (`targetUser`), as CURRENT_USER
- * names the role each database was built as
+ * `statements` run on `target`'s dev database in one transaction that is rolled back, the schema
+ * made and searched first; then `after` on the same connection, inside it. A statement dev refuses
+ * is named, with dev's error, as what was `doing`, and then what that `stops`
  */
-async function replayCatalog(
+async function onDev<T>(
 	target: PgTarget,
-	{ files, targetUser }: { files: readonly HistoryFile[]; targetUser: string },
-	load: () => Promise<Connect> = () => loadPostgres(REPLAYS),
-): Promise<LiveObjects> {
-	const statements = replayStatements(files)
+	statements: ReadonlyArray<{ file: string; sql: string }>,
+	{
+		after,
+		doing,
+		load,
+		stops,
+	}: { after: (sql: ReturnType<Connect>) => Promise<T>; doing: string; load: () => Promise<Connect>; stops: string },
+): Promise<T> {
 	const connect = await load()
 	const sql = connect({ ...postgresOptionsOf(target.devUrl, "devUrl"), max: 1, onnotice: () => undefined })
 	const scrub = (text: string) => maskSecrets(text, [target.devUrl, target.url])
@@ -174,12 +228,12 @@ async function replayCatalog(
 					await sql.unsafe(statement, [])
 				} catch (error) {
 					throw new ReplayFailed(
-						`${file}: devUrl refused ${JSON.stringify(statement)} as baseline replayed the history there: ${scrub(failureOf(error, "devUrl"))}; baseline compares nothing`,
+						`${file}: devUrl refused ${JSON.stringify(statement)} as ${doing}: ${scrub(failureOf(error, "devUrl"))}; ${stops}`,
 						{ cause: error },
 					)
 				}
 			}
-			return asTarget(await readCatalog(sql, target.schema), targetUser)
+			return await after(sql)
 		} finally {
 			await sql.unsafe("ROLLBACK", [])
 		}
@@ -191,6 +245,25 @@ async function replayCatalog(
 	} finally {
 		await sql.end()
 	}
+}
+
+/**
+ * The catalog the history `files` leave in `target`'s schema, replayed on its dev database in one
+ * transaction that is rolled back, read by the target's own query (readCatalog). The role the replay
+ * ran as stands for the target's role wherever the read names it (`targetUser`), as CURRENT_USER
+ * names the role each database was built as
+ */
+async function replayCatalog(
+	target: PgTarget,
+	{ files, targetUser }: { files: readonly HistoryFile[]; targetUser: string },
+	load: () => Promise<Connect> = () => loadPostgres(REPLAYS),
+): Promise<LiveObjects> {
+	return onDev(target, replayStatements(files), {
+		after: async (sql) => asTarget(await readCatalog(sql, target.schema), targetUser),
+		doing: "baseline replayed the history there",
+		load,
+		stops: "baseline compares nothing",
+	})
 }
 
 /** `live` read on dev, with dev's role named as the target's wherever a policy names it (the reviewer's addition A) */
@@ -222,4 +295,4 @@ function asTarget(live: LiveObjects, targetUser: string): LiveObjects {
 	return { ...live, policies, user: targetUser }
 }
 
-export { cutConcurrently, type HistoryFile, nodeOf, replayCatalog, replayStatements }
+export { cutConcurrently, type HistoryFile, nodeOf, onDev, replayCatalog, replayStatements, stepsOf }

@@ -155,11 +155,39 @@ declare const nodeOf: (tree: unknown) => [string, Record<string, unknown>];
  * in a string, a comment or a quoted identifier is never touched, and the reparse proves only the flag changed
  */
 declare function cutConcurrently(sql: string, tree: unknown): string;
-/** The statements the replay sends for `files`, in order, each with the file it is from */
+/** What the replay does with one statement: sends it (as written, or cut), skips it, or cannot hold it, and why */
+type Step = {
+    send: string;
+} | {
+    skip: true;
+} | {
+    cannot: "cut" | "transaction" | (string & {});
+};
+/** Each history statement in `files`, in order, with the file it is from and what the replay does with it */
+declare const stepsOf: (files: readonly HistoryFile[]) => Array<{
+    file: string;
+    sent: string;
+    step: Step;
+}>;
+/** The statements baseline's replay sends for `files`, in order, each with the file it is from; throws for one it cannot hold */
 declare function replayStatements(files: readonly HistoryFile[]): Array<{
     file: string;
     sql: string;
 }>;
+/**
+ * `statements` run on `target`'s dev database in one transaction that is rolled back, the schema
+ * made and searched first; then `after` on the same connection, inside it. A statement dev refuses
+ * is named, with dev's error, as what was `doing`, and then what that `stops`
+ */
+declare function onDev<T>(target: PgTarget, statements: ReadonlyArray<{
+    file: string;
+    sql: string;
+}>, { after, doing, load, stops, }: {
+    after: (sql: ReturnType<Connect>) => Promise<T>;
+    doing: string;
+    load: () => Promise<Connect>;
+    stops: string;
+}): Promise<T>;
 /**
  * The catalog the history `files` leave in `target`'s schema, replayed on its dev database in one
  * transaction that is rolled back, read by the target's own query (readCatalog). The role the replay
@@ -170,7 +198,7 @@ declare function replayCatalog(target: PgTarget, { files, targetUser }: {
     files: readonly HistoryFile[];
     targetUser: string;
 }, load?: () => Promise<Connect>): Promise<LiveObjects>;
-export { cutConcurrently, type HistoryFile, nodeOf, replayCatalog, replayStatements };
+export { cutConcurrently, type HistoryFile, nodeOf, onDev, replayCatalog, replayStatements, stepsOf };
 
 // migrate/core/atlas-target.d.ts
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
