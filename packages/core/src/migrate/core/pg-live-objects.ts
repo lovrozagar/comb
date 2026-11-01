@@ -9,7 +9,8 @@
  * comb has no Postgres client of its own; these reads take postgres.js, an optional peer, loaded
  * only here. Its specifier is a variable, so a project without it still compiles comb's source.
  */
-import { postgresOptionsOf } from "./pg-url.ts"
+import { systemCas } from "./pg-system-ca.ts"
+import { postgresOptionsOf, queryParams } from "./pg-url.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 import { CATALOG, COMPARED } from "./pg-live-catalog.ts"
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts"
@@ -22,18 +23,30 @@ type Connect = (options: Record<string, unknown>) => Sql
 const PEER = "postgres"
 const RANGE = ">=3.4.9 <4"
 
+// lookup-table: the codes Node gives a server certificate no trusted CA vouches for
+const UNVERIFIED: ReadonlySet<unknown> = /* @__PURE__ */ new Set([
+	"DEPTH_ZERO_SELF_SIGNED_CERT",
+	"SELF_SIGNED_CERT_IN_CHAIN",
+	"UNABLE_TO_GET_ISSUER_CERT",
+	"UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+	"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+])
+
 /**
  * What a postgres.js failure says: its message, or, for the AggregateError it throws with none when
- * every address refuses, each address's answer joined (P15 of the 0.15.0 review)
+ * every address refuses, each address's answer joined (P15 of the 0.15.0 review); for a server
+ * sslrootcert=system cannot verify, where comb's CAs came from (R1 of 5.3)
  */
-function failureOf(error: unknown, field?: "devUrl" | "url"): string {
-	const { errors, message } = error as { errors?: unknown; message?: unknown }
+function failureOf(error: unknown, field?: "devUrl" | "url", raw?: string): string {
+	const { code, errors, message } = error as { code?: unknown; errors?: unknown; message?: unknown }
 	const said =
 		typeof message === "string" && message !== ""
 			? message
 			: Array.isArray(errors)
 				? errors.map((each) => String((each as { message?: unknown }).message)).join("; ")
 				: ""
+	if (UNVERIFIED.has(code) && raw !== undefined && queryParams(raw).get("sslrootcert") === "system")
+		return `${said}; comb verified the server against ${systemCas().source}`
 	/* P19 of r18: a server without TLS ends the handshake comb's require starts */
 	if (field === undefined || !said.includes("before secure TLS connection was established")) return said
 	return `${said}: the server takes no TLS, which comb and Atlas require where ${field} names no sslmode; set sslmode=disable on ${field} for a server without TLS`
@@ -120,7 +133,7 @@ async function readLiveObjects(
 		return await readCatalog(sql, target.schema)
 	} catch (error) {
 		throw new Error(
-			`comb could not read the database's ${COMPARED}: ${maskSecrets(failureOf(error, "url"), [target.url])}`,
+			`comb could not read the database's ${COMPARED}: ${maskSecrets(failureOf(error, "url", target.url), [target.url])}`,
 			{
 				cause: error,
 			},

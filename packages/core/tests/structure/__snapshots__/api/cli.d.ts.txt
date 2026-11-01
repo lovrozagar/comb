@@ -269,9 +269,10 @@ type Sql = {
 type Connect = (options: Record<string, unknown>) => Sql;
 /**
  * What a postgres.js failure says: its message, or, for the AggregateError it throws with none when
- * every address refuses, each address's answer joined (P15 of the 0.15.0 review)
+ * every address refuses, each address's answer joined (P15 of the 0.15.0 review); for a server
+ * sslrootcert=system cannot verify, where comb's CAs came from (R1 of 5.3)
  */
-declare function failureOf(error: unknown, field?: "devUrl" | "url"): string;
+declare function failureOf(error: unknown, field?: "devUrl" | "url", raw?: string): string;
 /** postgres.js, or the refusal naming it and `why` comb needs it here */
 declare function loadPostgres(why: string): Promise<Connect>;
 /**

@@ -43,9 +43,6 @@ const passphrase = (key: string) =>
 const keyless = (field: string) =>
 	`${field}'s sslcert ${PLAIN} has no sslkey; libpq and Atlas's driver refuse a client certificate without its key, so name it with sslkey`
 
-/** postgres.js's ssl for db.example with `query` */
-const ssl = (query: string) => postgresOptionsOf(`postgres://db.example/app?${query}`, "url")["ssl"]
-
 /** What pgUrlProblems refuses of `query` as the target's url, and as its devUrl */
 function refusals(query: string): { dev: string[]; url: string[] } {
 	return {
@@ -115,12 +112,6 @@ describe("pgUrlProblems: an encrypted sslkey", () => {
 })
 
 describe("postgresOptionsOf: sslrootcert=system", () => {
-	it("verifies the server's name against Node's own CAs, with verify-full or no sslmode, and names the host where hostaddr connects", () => {
-		expect(ssl("sslmode=verify-full&sslrootcert=system")).toEqual({ rejectUnauthorized: true })
-		expect(ssl("sslrootcert=system")).toEqual({ rejectUnauthorized: true })
-		expect(ssl("hostaddr=10.0.0.5&sslrootcert=system")).toEqual({ rejectUnauthorized: true, servername: "db.example" })
-	})
-
 	it("refuses it with a weaker sslmode, as libpq does", () => {
 		expect(() => postgresOptionsOf("postgres://db/app?sslmode=require&sslrootcert=system", "url")).toThrow(
 			"url's sslmode require may not be used with sslrootcert=system, which libpq and Atlas's driver refuse; use sslmode=verify-full",

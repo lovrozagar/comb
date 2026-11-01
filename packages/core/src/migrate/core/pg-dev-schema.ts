@@ -36,7 +36,7 @@ async function readyDevSchema(
 		await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(target.schema)}`, [])
 	} catch (error) {
 		throw new ReplayFailed(
-			`comb could not create schema ${target.schema} on devUrl, where Atlas replays the migrations: ${maskSecrets(failureOf(error, "devUrl"), [target.devUrl])}`,
+			`comb could not create schema ${target.schema} on devUrl, where Atlas replays the migrations: ${maskSecrets(failureOf(error, "devUrl", target.devUrl), [target.devUrl])}`,
 			{ cause: error },
 		)
 	} finally {

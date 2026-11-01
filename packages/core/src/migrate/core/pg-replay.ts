@@ -194,7 +194,7 @@ async function onDev<T>(
 					await sql.unsafe(statement, [])
 				} catch (error) {
 					throw new ReplayFailed(
-						`${file}: devUrl refused ${JSON.stringify(statement)} as ${doing}: ${scrub(failureOf(error, "devUrl"))}; ${stops}`,
+						`${file}: devUrl refused ${JSON.stringify(statement)} as ${doing}: ${scrub(failureOf(error, "devUrl", target.devUrl))}; ${stops}`,
 						{ cause: error },
 					)
 				}
@@ -205,9 +205,12 @@ async function onDev<T>(
 		}
 	} catch (error) {
 		if (error instanceof ReplayFailed) throw error
-		throw new ReplayFailed(`comb could not replay the history on devUrl: ${scrub(failureOf(error, "devUrl"))}`, {
-			cause: error,
-		})
+		throw new ReplayFailed(
+			`comb could not replay the history on devUrl: ${scrub(failureOf(error, "devUrl", target.devUrl))}`,
+			{
+				cause: error,
+			},
+		)
 	} finally {
 		await sql?.end()
 	}

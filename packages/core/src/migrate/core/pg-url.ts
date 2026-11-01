@@ -10,6 +10,7 @@ import { accessSync, constants, readFileSync } from "node:fs"
 import { userInfo } from "node:os"
 import { passfilePassword } from "./pg-passfile.ts"
 import { LIBPQ_KEYS } from "./pg-url-keys.ts"
+import { systemCas } from "./pg-system-ca.ts"
 
 /** Where a Postgres URL reaches, and its query, every key decoded */
 type LibpqUrl = {
@@ -193,9 +194,10 @@ function sslOf(url: LibpqUrl, field: "devUrl" | "url"): unknown {
 	const mode = sslmodeOf(url)
 	if (mode === "disable") return false
 	if (mode === "allow" || mode === "prefer") return "prefer"
-	const system = systemProblem(field, url)
-	if (system !== undefined) throw new Error(system)
-	/* system is the OS trust store, which Node's own CAs stand for: no file, no ca */
+	const weak = systemProblem(field, url)
+	if (weak !== undefined) throw new Error(weak)
+	/* system is the store libpq and Atlas's driver verify against, read as they read it (R1 of 5.3) */
+	const system = url.params.get("sslrootcert") === "system" ? systemCas().cas : undefined
 	const files = Object.fromEntries(
 		Object.entries(TLS_FILES)
 			.filter(([option, key]) => url.params.has(key) && !(option === "ca" && url.params.get(key) === "system"))
@@ -207,7 +209,12 @@ function sslOf(url: LibpqUrl, field: "devUrl" | "url"): unknown {
 	if (mode === "require") return "require"
 	/* a hostaddr is where comb connects; the certificate still names the host (P7) */
 	if (mode === "verify-full")
-		return { ...files, rejectUnauthorized: true, ...(url.hostaddr === undefined ? {} : { servername: url.host }) }
+		return {
+			...files,
+			...(system === undefined ? {} : { ca: system }),
+			rejectUnauthorized: true,
+			...(url.hostaddr === undefined ? {} : { servername: url.host }),
+		}
 	throw new Error(`sslmode ${mode} is none libpq takes: disable, allow, prefer, require, verify-ca or verify-full`)
 }
 
