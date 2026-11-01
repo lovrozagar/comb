@@ -15,8 +15,12 @@ export const user = sqliteTable("user", { id: c.id("usr"), name: c.text("name"),
 export const post = sqliteTable("post", { id: c.id("pst"), state: c.enum("state", ["draft", "live"]), "title-x": c.text("title_x") })
 `
 
-/* the generated files whose exports are plain functions and records, which annotate their types */
-const IN_SCOPE = /(?:enum-checks|sql-cols|rqb-cols)[^:]*\.gen\.ts/
+/*
+ * the generated files whose exports are plain functions and records, which annotate their types: the
+ * kinds README and meta-contract §10 name as isolatedDeclarations-clean (C7 = K8 of r18)
+ */
+const IN_SCOPE =
+	/(?:constraints|entities|enum-checks|error-keys|field-names|rows|rqb-cols|sql-cols|table-names)[^:]*\.gen\.ts/
 
 describe("generated functions and records under isolatedDeclarations (K17)", () => {
 	it("compile, each export's type annotated", async () => {
@@ -26,6 +30,8 @@ describe("generated functions and records under isolatedDeclarations (K17)", () 
 		const scoped = output.split("\n").filter((line) => IN_SCOPE.test(line))
 		expect(scoped).toEqual([])
 		/* the files were there to check */
-		expect(generatedFiles(dir).filter((file) => IN_SCOPE.test(file)).length).toBeGreaterThanOrEqual(5)
+		expect(generatedFiles(dir).filter((file) => IN_SCOPE.test(file)).length).toBeGreaterThanOrEqual(9)
+		/* C7 = K8 of r18: _shared's example arrays are literal, so none of its errors is TS9017; its zod values stay inferred */
+		expect(output.split("\n").filter((line) => line.includes("_shared") && line.includes("TS9017"))).toEqual([])
 	}, 240_000)
 })

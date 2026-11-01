@@ -393,7 +393,7 @@ under a lowercase field's `^[a-z]+$`, which the server stores as `"abc"`. comb p
 as `x-comb-transform` (§2.1), written from the one list the generated zod chain is written
 from, so the two cannot drift. A field's published `minLength`, `maxLength`, `pattern` and
 `format` bind the transformed value: a consumer applies the listed transforms, in order, before
-it checks, generates or compares a value. honey and oat do (their half of C2 of r18).
+it checks, generates or compares a value; that is honey's and oat's half of C2 of r18, theirs to ship.
 
 ## 7. `stableTiebreak`, and a bug it surfaced
 
@@ -655,6 +655,18 @@ in CI. `bun run typecheck:strict` does that, and both workflows run it. The mech
 build — then follows from measurement rather than from a guess. comb's exposure turned out to be
 51 errors; honey's is reportedly ~480, dominated by `noUncheckedIndexedAccess`, which comb has
 none of. Same rule, different answers, and that is the point: measure first.
+
+**Generated files under `isolatedDeclarations`.** comb's own source compiles under it; the files
+codegen writes are the app's, and only some do. Clean, each export's type annotated: constraints,
+entities, enum-checks, error-keys, field-names, rows, rqb-cols, sql-cols and table-names
+(`tests/integration/codegen/isolated-declarations.test.ts` holds them to it). Not clean: the DTO
+entity files and `_shared`, whose zod schemas infer their types, `relations.gen.ts`
+(`defineRelations`) and `orm.gen.ts`, whose types drizzle infers from the relations, and the app's
+own tables module, which every generated file imports. Annotating them would emit zod's and
+drizzle's internal generic types, tied to their minor versions, and buy no consumer anything while
+the tables module infers. So they belong to a tsconfig without `isolatedDeclarations`: they are
+imported as source, never through a d.ts. `_shared`'s example arrays are `as const`, so none of its
+errors is an array's (C7 = K8 of r18).
 
 **Export surface.** 20 entry points, down from 21 then up one for `./states`.
 `./codegen/analyze` and `./migrate/drivers` were dropped as redundant —

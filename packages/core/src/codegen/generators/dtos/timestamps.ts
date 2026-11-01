@@ -127,7 +127,8 @@ function header(): string[] {
 		"/** Shared meta example objects for OpenAPI — avoids repeated inline allocations */",
 		"export const _m = {",
 		...SHARED_META_KEYS.map((key) => `\t${key}: ${SHARED_META_VALUES[key]},`),
-		"}",
+		/* literal, so isolatedDeclarations infers its arrays (C7 = K8 of r18) */
+		"} as const",
 		"",
 		"/** Shared complete schemas — identical across all entities */",
 		...Object.entries(SHARED_SCHEMAS).map(([name, schema]) => `export const _s_${name} = ${rewriteBaseTypes(schema)}`),
