@@ -5,7 +5,7 @@ import { SEALED } from "./__fixtures__/cursor-secret.ts"
 import { paginate } from "./pagination.ts"
 import { paginateMerged } from "./merged.ts"
 import { createListQuerySchema } from "./schema.ts"
-import { buildListQuery } from "./sqlite/build-list-query.ts"
+import { buildDerivedListQuery, buildListQuery } from "./sqlite/build-list-query.ts"
 
 const schema = createListQuerySchema({ pagination: { defaultLimit: 2, maxLimit: 10 }, sort: ["k"] })
 const parse = (params: Record<string, string>) => schema.parse(params)
@@ -210,6 +210,46 @@ describe("paginateMerged on an integer sort key past 2^53", () => {
 		expect(paginateMerged(exact, built)[0].map(({ id }) => id)).toEqual(["b", "a"])
 		const safe = [read([{ id: "b", k: 2 ** 53 - 1 }]), read([{ id: "a", k: -(2 ** 53 - 1) }])]
 		expect(paginateMerged(safe, built)[0].map(({ id }) => id)).toEqual(["a", "b"])
+	})
+})
+
+/** A merged derived list under `params`, over rows with an id and a k */
+const derived = (params: Record<string, string>) =>
+	buildDerivedListQuery({
+		...SEALED,
+		idColumn: sql`id`,
+		merged: {},
+		parsed: parse(params),
+		sortColumns: { k: sql`k` },
+	})
+
+/* r18 Q12: a derived list, a union or a join, merged across shards as a table's is */
+describe("buildDerivedListQuery's merged list", () => {
+	it("is a merged list paginateMerged pages: each shard's window and count, the order across shards", () => {
+		const first = derived({ limit: "2", order: "k.asc" })
+		expect([first.pagination.merged, [...first.pagination.expects].sort()]).toEqual([true, ["_combId", "_total"]])
+		const shards = [
+			read([
+				{ id: "a", k: "1" },
+				{ id: "c", k: "3" },
+			]),
+			read([{ id: "b", k: "2" }]),
+		]
+		const [page, meta] = paginateMerged(shards, first)
+		expect([page.map(({ id }) => id), meta.count, meta.hasMore]).toEqual([["a", "b"], 3, true])
+		const next = derived({ cursor: meta.nextCursor as string, limit: "2", order: "k.asc" })
+		const rest = [read([{ id: "c", k: "3" }], null), read([], null)]
+		expect(paginateMerged(rest, next)[0].map(({ id }) => id)).toEqual(["c"])
+	})
+
+	it("refuses a row that carries no sort field, which the merge orders by", () => {
+		const built = derived({ order: "k.asc" })
+		expect(() => paginateMerged([read([{ id: "a" }])], built)).toThrow(
+			expect.objectContaining({
+				cause: "the rows carry no k: a merged list orders by each sort field's value, so select it under its name",
+				errorKey: "sort_not_wired",
+			}),
+		)
 	})
 })
 

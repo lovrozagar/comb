@@ -105,6 +105,14 @@ function refuseUnmergeable(
 function refuseRounded(rows: ReadonlyArray<Record<string, unknown>>, sort: readonly SortField[]): void {
 	for (const row of rows) {
 		for (const { field } of sort) {
+			/* the merge orders by each sort field's value: a row without one would merge by id alone (Q12 of r18) */
+			if (!Object.hasOwn(row, field)) {
+				throw new CombError({
+					cause: `the rows carry no ${field}: a merged list orders by each sort field's value, so select it under its name`,
+					errorKey: combErrorKeys.SORT_NOT_WIRED,
+					status: "internal_server_error",
+				})
+			}
 			const value = row[field]
 			if (typeof value !== "number" || !Number.isInteger(value) || Number.isSafeInteger(value)) continue
 			throw new CombError({

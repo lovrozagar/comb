@@ -60,6 +60,14 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
     /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
     cursorSecret: string;
     filterWhere?: SQL | null;
+    /**
+     * Present when the rows come from several shards, which paginateMerged merges, as on
+     * buildListQuery: each shard reads its window, an offset page its count. A merged derived list
+     * carries no sort key by reference, and its rows carry each sort field under its name (Q12 of r18).
+     */
+    merged?: {
+        maxRowsPerShard?: number | undefined;
+    } | undefined;
     parsed: ListQueryInput<TSortField>;
     searchWhere?: SQL | null;
     /** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */

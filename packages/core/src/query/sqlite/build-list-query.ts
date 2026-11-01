@@ -165,8 +165,16 @@ function buildListQuery<TTable extends SQLiteTable>(
 }
 
 function buildDerivedListQuery<TSortField extends string>(
+	opts: BuildDerivedListQueryOpts<TSortField> & {
+		merged: NonNullable<BuildDerivedListQueryOpts<TSortField>["merged"]>
+	},
+): MergedListQueryResult
+function buildDerivedListQuery<TSortField extends string>(
+	opts: BuildDerivedListQueryOpts<TSortField> & { merged?: undefined },
+): ListQueryResult
+function buildDerivedListQuery<TSortField extends string>(
 	opts: BuildDerivedListQueryOpts<TSortField>,
-): ListQueryResult {
+): ListQueryResult | MergedListQueryResult {
 	const sort = opts.parsed.parsedSort
 	/* a sort the schema accepted must order the rows: one with no column is a wiring mistake */
 	const keys: SortKey[] = sort.map(({ direction, field, nulls }) => {
@@ -179,15 +187,22 @@ function buildDerivedListQuery<TSortField extends string>(
 	const tiebreak: SortKey = { column: idColumn, direction: sort[0]?.direction ?? "desc" }
 	const orderBy = orderByKeys(keys, tiebreak)
 
+	/* a merged list reads no key back by reference, and a null anchor as a real NULL, as buildListQuery's does */
+	const merged = opts.merged !== undefined
 	return finish({
-		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret },
+		cursor: {
+			cursorScope: opts.cursorScope,
+			cursorSecret: opts.cursorSecret,
+			...(merged ? { nonFinite: "exact" as const } : {}),
+		},
 		keyset: { keys, orderBy },
+		merged: opts.merged,
 		parsed: opts.parsed,
 		sort,
-		table: opts.anchor?.table,
+		table: merged ? undefined : opts.anchor?.table,
 		tiebreak,
 		where: [resolveBaseWhere(opts.baseWhere), opts.filterWhere, opts.searchWhere],
-	}) as ListQueryResult
+	}) as ListQueryResult | MergedListQueryResult
 }
 
 export { applyListQuery } from "./apply-list-query.ts"
