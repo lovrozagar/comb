@@ -97,6 +97,25 @@ function refuseUnmergeable(
 	}
 }
 
+/**
+ * A sort key a driver read as an integer number past ±(2^53 − 1) is already rounded: two keys on two
+ * shards that round to one double compare equal here, where one database orders them by their true
+ * values, so the merge refuses one, as it refuses such a tiebreak (Q2 of r18). A bigint compares exactly.
+ */
+function refuseRounded(rows: ReadonlyArray<Record<string, unknown>>, sort: readonly SortField[]): void {
+	for (const row of rows) {
+		for (const { field } of sort) {
+			const value = row[field]
+			if (typeof value !== "number" || !Number.isInteger(value) || Number.isSafeInteger(value)) continue
+			throw new CombError({
+				cause: `${field} ${BigInt(value)} is past ±(2^53 − 1), where the driver rounded it: a merged list's integer sort keys must be within ±(2^53 − 1), or be read as bigint`,
+				errorKey: combErrorKeys.SORT_NOT_WIRED,
+				status: "internal_server_error",
+			})
+		}
+	}
+}
+
 /** A merged list's ids must be unique across shards, or a cursor's anchor names more than one row (Q10) */
 function refuseSharedIds(rows: ReadonlyArray<Record<string, unknown>>, idField: string): void {
 	const seen = new Set<unknown>()
@@ -179,6 +198,7 @@ function paginateMerged<T extends object>(
 	const merged = shards.flat()
 	refuseGoneAnchor(merged)
 	refuseSharedIds(merged, COMB_ID)
+	refuseRounded(merged, pagination.parsedSort)
 	const compare = compareRows(pagination.parsedSort, COMB_ID)
 	refuseUnmergeable(shards, compare)
 	merged.sort(compare)

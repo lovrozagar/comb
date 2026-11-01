@@ -187,3 +187,27 @@ describe("paginateMerged on an id two shards hold", () => {
 		)
 	})
 })
+
+/* r18 Q2: the merge cannot order integer keys the driver already rounded, and one database orders them by their true values */
+describe("paginateMerged on an integer sort key past 2^53", () => {
+	it("refuses a key a driver read as a rounded number, naming the field", () => {
+		const built = merged({ order: "k.asc" })
+		const shards = [read([{ id: "b", k: 2 ** 60 + 256 }]), read([{ id: "a", k: 2 ** 60 + 256 }])]
+		expect(() => paginateMerged(shards, built)).toThrow(
+			expect.objectContaining({
+				cause:
+					"k 1152921504606847232 is past ±(2^53 − 1), where the driver rounded it: a merged list's integer sort keys must be within ±(2^53 − 1), or be read as bigint",
+				errorKey: "sort_not_wired",
+				status: 500,
+			}),
+		)
+	})
+
+	it("merges keys within the bound, and keys a driver read as bigint, by their values", () => {
+		const built = merged({ order: "k.asc" })
+		const exact = [read([{ id: "b", k: 2n ** 60n + 10n }]), read([{ id: "a", k: 2n ** 60n + 20n }])]
+		expect(paginateMerged(exact, built)[0].map(({ id }) => id)).toEqual(["b", "a"])
+		const safe = [read([{ id: "b", k: 2 ** 53 - 1 }]), read([{ id: "a", k: -(2 ** 53 - 1) }])]
+		expect(paginateMerged(safe, built)[0].map(({ id }) => id)).toEqual(["a", "b"])
+	})
+})

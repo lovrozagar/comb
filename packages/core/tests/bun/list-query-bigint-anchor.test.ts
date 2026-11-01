@@ -4,7 +4,8 @@
  * a cursor whose anchor row is gone, as on every shard of a merged list but the anchor's, resumes
  * from the edge of that double's rounding interval toward the rows still to serve. It repeats rows
  * that round to the anchor's value and skips none, whichever way the value rounded. Doubles are 256
- * apart at 2^60: 2^60+200 reads as 2^60+256 (up), and 2^60+50 as 2^60 (down).
+ * apart at 2^60: 2^60+200 reads as 2^60+256 (up), and 2^60+50 as 2^60 (down). A merged list over
+ * such a key is refused, since the merge cannot order what the driver rounded (Q2).
  */
 import { Database } from "bun:sqlite"
 import { describe, expect, it } from "bun:test"
@@ -54,18 +55,12 @@ describe("a cursor over an integer key past 2^53 whose anchor row is gone (Q1 of
 				client.close()
 			})
 
-			it(`pages a merged list as one database would (${order}, rounded ${rounds})`, async () => {
+			/* a merged list cannot order keys the driver rounded, so it refuses them (Q2 of r18) */
+			it(`refuses a merged list over such a key (${order}, rounded ${rounds})`, async () => {
 				const shards = [holding(value, "a"), holding(value, "b")]
-				const seen: string[] = []
-				let cursor: string | undefined
-				for (let page = 0; page < 4; page++) {
-					const built = buildListQuery({ ...SEALED, merged: {}, parsed: parse(order, 1, cursor), table: org })
-					const [items, meta] = paginateMerged(await Promise.all(shards.map(({ db }) => read(db, built))), built)
-					seen.push(...items.map(({ id }) => id))
-					if (meta.nextCursor === null) break
-					cursor = meta.nextCursor
-				}
-				expect(seen).toEqual(order === "score.asc" ? ["a", "b"] : ["b", "a"])
+				const built = buildListQuery({ ...SEALED, merged: {}, parsed: parse(order, 1), table: org })
+				const rows = await Promise.all(shards.map(({ db }) => read(db, built)))
+				expect(() => paginateMerged(rows, built)).toThrow(expect.objectContaining({ errorKey: "sort_not_wired" }))
 				for (const { client } of shards) client.close()
 			})
 		}
