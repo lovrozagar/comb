@@ -53,7 +53,16 @@ describe("openSqliteTarget", () => {
 		await expect(openSqliteTarget(request("apply"), target)).rejects.toThrow("Migrations dir not found: /nowhere/m")
 	})
 
-	/* r18 S3: a refused apply on a file engine created the file, which check and status then read as empty */
+	it("passes on a Turso failure that is not a missing database", async () => {
+		vi.stubGlobal("fetch", async () => Response.json({ error: "boom" }, { status: 500 }))
+		await expect(openSqliteTarget(request("apply"), resolved(TURSO))).rejects.toThrow(
+			'Turso API error for "acme/core": boom',
+		)
+	})
+})
+
+/* r18 S3: a refused apply on a file engine created the file, which check and status then read as empty */
+describe("openSqliteTarget on a database file", () => {
 	it.each([
 		["libsql", (file: string): ConnectionProviderConfig => ({ type: "libsql", url: `file:${file}` })],
 		["bun-sqlite", (file: string): ConnectionProviderConfig => ({ path: file, type: "bun-sqlite" })],
@@ -91,12 +100,12 @@ describe("openSqliteTarget", () => {
 				openSqliteTarget(request(mode), { ...base, provider: { path: file, type: "bun-sqlite" } }),
 			).rejects.toThrow(`${file} does not exist`)
 		expect(fs.existsSync(file)).toBe(false)
-	})
-
-	it("passes on a Turso failure that is not a missing database", async () => {
-		vi.stubGlobal("fetch", async () => Response.json({ error: "boom" }, { status: 500 }))
-		await expect(openSqliteTarget(request("apply"), resolved(TURSO))).rejects.toThrow(
-			'Turso API error for "acme/core": boom',
-		)
+		const url = `file:${file}`
+		const writer = await openSqliteTarget(request("apply"), { ...base, provider: { type: "libsql", url } })
+		await writer.write()
+		await writer.close()
+		const reader = await openSqliteTarget(request("status"), { ...base, provider: { type: "libsql", url } })
+		expect(await reader.write()).toBe(reader.conn)
+		await reader.close()
 	})
 })

@@ -143,6 +143,12 @@ describe("createD1Provider: batch and close", () => {
 		expect(sent.join("\n")).toBe(statements.map(({ sql }) => `${sql}\n;`).join("\n"))
 	})
 
+	it("runs nothing for an empty batch", async () => {
+		const run = fakeRun(() => json([]))
+		await (await connect(run)).batch([])
+		expect(run.calls).toEqual([])
+	})
+
 	it("refuses one statement too long for an argument before wrangler runs", async () => {
 		const run = fakeRun(() => json([]))
 		const conn = await connect(run)
