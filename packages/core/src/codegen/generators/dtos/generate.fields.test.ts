@@ -90,7 +90,8 @@ describe("generated DTOs on comb's own columns", () => {
 		const published = z.toJSONSchema(schema("Create"), { io: "input", unrepresentable: "any" }) as {
 			properties: Record<string, { anyOf?: Array<Record<string, unknown>> }>
 		}
-		expect(published.properties["blob"]?.anyOf?.[0]).toMatchObject({
+		/* one flat union, null its member, the rules beside it (C4 of r18) */
+		expect(published.properties["blob"]).toMatchObject({
 			"x-comb-maxBytes": 20,
 			"x-comb-text": "no U+0000 or unpaired surrogate",
 		})

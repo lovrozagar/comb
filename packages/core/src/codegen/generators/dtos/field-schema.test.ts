@@ -151,7 +151,7 @@ describe("generateFieldSchema: JSON", () => {
 				"create",
 				{ imports: imports() },
 			),
-		).toContain("new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val)).length <= 100")
+		).toContain("new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val)).length > 100")
 		expect(() => schema("p", 'c.json("p")', "read")).toThrow(
 			"fixture.p: no module of the project exports the schema its c.json is given",
 		)
@@ -333,7 +333,7 @@ describe("generateFieldSchema: a JSON column's rules, published (F26)", () => {
 		/* on SQLite too, which stores neither as sent (F11); the refined schema as a union's one option,
 		 * so it publishes anyOf: [$ref] to it (F63) */
 		expect(generateFieldSchema(plain, "create", { dialect: "sqlite", imports: imports() })).toBe(
-			'z.union([blobSchema]).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" }).nullable().optional()',
+			'z.union([blobSchema, z.null()]).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" }).optional()',
 		)
 	})
 })

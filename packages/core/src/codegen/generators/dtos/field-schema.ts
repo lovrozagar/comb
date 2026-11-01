@@ -43,15 +43,26 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 	if (schema === null) return undefined
 	if (!isMutative(schemaType)) return schema
 	const limit = annotations.maxBytes
-	const size =
-		limit === null
-			? ""
-			: `.refine((val) => !val || new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val)).length <= ${limit}, { message: "JSON exceeds ${limit} bytes when serialized" })`
 	const rules = `.meta({ "x-comb-text": ${JSON.stringify(STORABLE_TEXT_RULE)}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
-	const refined = `${schema}${size}${JSON_NUL_CHECK}`
-	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63) */
-	return field.combKind === "json" ? `z.union([${refined}])${rules}` : `${refined}${rules}`
+	const refined = `${schema}${jsonChecks(limit)}`
+	if (field.combKind !== "json") return `${refined}${rules}`
+	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63);
+	   null is its other member when the column takes null, so the field publishes one flat anyOf (C4 of r18) */
+	return `z.union([${refined}${isRequired(field) ? "" : ", z.null()"}])${rules}`
 }
+
+/**
+ * A written JSON value's rules as one check: zod publishes a registered schema under two refines
+ * inline beside its $ref, and under one as the bare $ref (C5 of r18). Each rule broken is its own
+ * issue, with its own message, as two refines gave
+ */
+function jsonChecks(limit: number | null): string {
+	if (limit === null) return JSON_NUL_CHECK
+	return `.superRefine((val, ctx) => { if (val && new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val)).length > ${limit}) ctx.addIssue({ code: "custom", message: "JSON exceeds ${limit} bytes when serialized" }); if (/\\\\u(?:0000|d[89a-f])/i.test(globalThis.JSON.stringify(val ?? null).replace(/\\\\\\\\/g, ""))) ctx.addIssue({ code: "custom", message: "Must not contain U+0000 or an unpaired surrogate" }) })`
+}
+
+/* a composite key's column is required as a single key is (F7) */
+const isRequired = (field: FieldMeta): boolean => field.isPrimaryKey || field.isNotNull || field.inCompositeKey
 
 // lookup-table: the c helpers whose values are numbers or booleans, which numberBase types
 const NUMBER_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set([
@@ -154,15 +165,19 @@ function optionalOnCreate(field: FieldMeta, required: boolean, dialect: Build["d
 	return field.constraints.autogenerate || field.hasDefault || field.identity || isRowid(field, dialect)
 }
 
-/* a read float's base takes null already, so a nullable one publishes null once (C6 of r17) */
-const takesNull = (base: string): boolean => base.startsWith(READ_FLOAT)
+/*
+ * a read float's base takes null already, so a nullable one publishes null once (C6 of r17), and so
+ * does a written c.json's union, null its member when the column takes it (C4 of r18)
+ */
+const takesNull = ({ field, schemaType }: Build, base: string): boolean =>
+	base.startsWith(READ_FLOAT) || (field.combKind === "json" && isMutative(schemaType))
 
 /** `base` with its OpenAPI example, nullability and the schema type's optionality. */
-function finish({ dialect, field, schemaType }: Build, base: string): string {
+function finish(build: Build, base: string): string {
+	const { dialect, field, schemaType } = build
 	const example = generateExampleMeta(field)
-	/* a composite key's column is required as a single key is (F7) */
-	const required = field.isPrimaryKey || field.isNotNull || field.inCompositeKey
-	const zodType = `${base}${example?.code ?? ""}${required || takesNull(base) ? "" : ".nullable()"}`
+	const required = isRequired(field)
+	const zodType = `${base}${example?.code ?? ""}${required || takesNull(build, base) ? "" : ".nullable()"}`
 	if (schemaType === "read") return zodType
 	if (schemaType === "create" && !optionalOnCreate(field, required, dialect)) return zodType
 	return `${zodType}.optional()`
@@ -184,8 +199,9 @@ export function generateFieldSchema(
 	const dimensions = field.dimensions ?? 0
 	if (dimensions === 0) return finish(build, baseOf(build))
 	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49) */
-	const element = baseOf({ ...build, field: { ...field, dimensions: 0, isNotNull: false } })
-	return finish(build, arrayOf(dimensions, schemaType, takesNull(element) ? element : `${element}.nullable()`))
+	const one: Build = { ...build, field: { ...field, dimensions: 0, isNotNull: false } }
+	const element = baseOf(one)
+	return finish(build, arrayOf(dimensions, schemaType, takesNull(one, element) ? element : `${element}.nullable()`))
 }
 
 /** The Zod base of a column of one value: the first builder's that takes it, else text */
