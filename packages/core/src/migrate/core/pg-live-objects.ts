@@ -27,10 +27,17 @@ const RANGE = ">=3.4.9 <4"
  * What a postgres.js failure says: its message, or, for the AggregateError it throws with none when
  * every address refuses, each address's answer joined (P15 of the 0.15.0 review)
  */
-function failureOf(error: unknown): string {
+function failureOf(error: unknown, field?: "devUrl" | "url"): string {
 	const { errors, message } = error as { errors?: unknown; message?: unknown }
-	if (typeof message === "string" && message !== "") return message
-	return Array.isArray(errors) ? errors.map((each) => String((each as { message?: unknown }).message)).join("; ") : ""
+	const said =
+		typeof message === "string" && message !== ""
+			? message
+			: Array.isArray(errors)
+				? errors.map((each) => String((each as { message?: unknown }).message)).join("; ")
+				: ""
+	/* P19 of r18: a server without TLS ends the handshake comb's require starts */
+	if (field === undefined || !said.includes("before secure TLS connection was established")) return said
+	return `${said}: the server takes no TLS, which comb and Atlas require where ${field} names no sslmode; set sslmode=disable on ${field} for a server without TLS`
 }
 
 /** postgres.js, or the refusal naming it and `why` comb needs it here */
@@ -98,9 +105,12 @@ async function readLiveObjects(
 		for (const row of rows) readRow(row, live)
 		return live
 	} catch (error) {
-		throw new Error(`comb could not read the database's ${COMPARED}: ${maskSecrets(failureOf(error), [target.url])}`, {
-			cause: error,
-		})
+		throw new Error(
+			`comb could not read the database's ${COMPARED}: ${maskSecrets(failureOf(error, "url"), [target.url])}`,
+			{
+				cause: error,
+			},
+		)
 	} finally {
 		await sql.end()
 	}

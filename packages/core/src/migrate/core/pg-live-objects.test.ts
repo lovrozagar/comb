@@ -91,7 +91,7 @@ describe("readLiveObjects", () => {
 		})
 		expect(seen).toEqual({
 			ended: true,
-			options: { database: "app", host: "db", max: 1, password: "s3cret", port: 5432, ssl: "prefer", username: "app" },
+			options: { database: "app", host: "db", max: 1, password: "s3cret", port: 5432, ssl: "require", username: "app" },
 			params: ["app"],
 		})
 	})
@@ -355,5 +355,17 @@ describe("liveDrift on a policy's kind and a table's row level security", () => 
 			"row level security on t (disabled, forced): only in the migrations",
 			"row level security on u (enabled, not forced): only in the migrations",
 		])
+	})
+})
+
+/* r18 P19: comb's own read of a server without TLS says what to set, on the field it read */
+describe("readLiveObjects on a server without TLS", () => {
+	it("says to set sslmode=disable on url", async () => {
+		const { load } = fakeConnect({
+			error: new Error("Client network socket disconnected before secure TLS connection was established"),
+		})
+		await expect(readLiveObjects(TARGET, load)).rejects.toThrow(
+			"the server takes no TLS, which comb and Atlas require where url names no sslmode; set sslmode=disable on url for a server without TLS",
+		)
 	})
 })

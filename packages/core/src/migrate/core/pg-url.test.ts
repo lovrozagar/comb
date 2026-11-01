@@ -72,8 +72,9 @@ describe("postgresOptionsOf", () => {
 	const dir = mkdtempSync(join(tmpdir(), "comb-pg-url-"))
 	writeFileSync(join(dir, "root.crt"), "ROOT")
 
-	it("maps libpq's sslmode as libpq connects: prefer unnamed, require checking a root certificate it is given", () => {
-		expect(ssl("")).toBe("prefer")
+	/* r18 P19: an sslmode left unnamed is require, as Atlas's driver reads it, so one URL is read one way */
+	it("maps libpq's sslmode as libpq connects: require unnamed, as Atlas's driver, and require checking a root certificate it is given", () => {
+		expect(ssl("")).toBe("require")
 		expect(ssl("?sslmode=allow")).toBe("prefer")
 		expect(ssl("?sslmode=require")).toBe("require")
 		const pinned = ssl(`?sslmode=require&sslrootcert=${join(dir, "root.crt")}`) as Record<string, unknown>

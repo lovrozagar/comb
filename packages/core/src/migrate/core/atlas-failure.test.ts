@@ -59,3 +59,14 @@ describe("explainAtlasFailure", () => {
 		)
 	})
 })
+
+/* r18 P19: a server without TLS, which comb and Atlas both require where the URL names no sslmode */
+describe("explainAtlasFailure on a server without TLS", () => {
+	it("says to set sslmode=disable for a server without TLS", () => {
+		expect(
+			explainAtlasFailure("Error: postgres: querying system variables: pq: SSL is not enabled on the server", kept),
+		).toBe(
+			"the server takes no TLS, which Atlas and comb require where a URL names no sslmode; set sslmode=disable on the URL of a server without TLS",
+		)
+	})
+})

@@ -150,10 +150,13 @@ const TLS_FILES = { ca: "sslrootcert", cert: "sslcert", key: "sslkey" } as const
 /* verify-ca checks a server's certificate chain, never its host name */
 const anyHost = (): undefined => undefined
 
-/** postgres.js's `ssl` for `url`'s sslmode, its files read: none on a socket, libpq's prefer unnamed */
+/**
+ * postgres.js's `ssl` for `url`'s sslmode, its files read: none on a socket, and require where the URL
+ * names none, as Atlas's driver reads it, so comb and Atlas read one URL one way (P19 of r18)
+ */
 function sslOf(url: LibpqUrl): unknown {
 	if (url.socket) return false
-	const mode = url.params.get("sslmode") ?? "prefer"
+	const mode = url.params.get("sslmode") ?? "require"
 	if (mode === "disable") return false
 	if (mode === "allow" || mode === "prefer") return "prefer"
 	const files = Object.fromEntries(

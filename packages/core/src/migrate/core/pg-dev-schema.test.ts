@@ -42,7 +42,7 @@ describe("readyDevSchema", () => {
 					onnotice: expect.any(Function),
 					password: "Dev-Secret-0451",
 					port: 5432,
-					ssl: "prefer",
+					ssl: "require",
 					username: "dev",
 				},
 			],

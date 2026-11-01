@@ -25,6 +25,23 @@ function notClean(stderr: string, scrub: (text: string) => string, devOnly: bool
 	return /connected database is not clean/.test(stderr) ? NOT_CLEAN : undefined
 }
 
+// lookup-table: what Atlas says where comb's answer names no part of it, and that answer
+const FIXED: ReadonlyArray<readonly [RegExp, string]> = [
+	[
+		/Error: docker:|Cannot connect to the Docker daemon/i,
+		"Atlas needs Docker for the default devUrl (docker://postgres/17/dev); set devUrl to an empty Postgres database instead",
+	],
+	[
+		/lock is held by other session/,
+		"another migrate apply is running on this database; run it again once that one finishes",
+	],
+	/* P19 of r18: Atlas's driver requires TLS where a URL names no sslmode, as comb's own reads now do */
+	[
+		/SSL is not enabled on the server/,
+		"the server takes no TLS, which Atlas and comb require where a URL names no sslmode; set sslmode=disable on the URL of a server without TLS",
+	],
+]
+
 /**
  * Atlas's failure in comb's terms where comb knows the fix, else as Atlas said it; `scrub` takes only
  * the text Atlas wrote, never comb's words. `devOnly` for a call that gave Atlas the dev database
@@ -35,12 +52,8 @@ function explainAtlasFailure(
 	scrub: (text: string) => string,
 	{ devOnly = false }: { devOnly?: boolean } = {},
 ): string {
-	if (/Error: docker:|Cannot connect to the Docker daemon/i.test(stderr)) {
-		return "Atlas needs Docker for the default devUrl (docker://postgres/17/dev); set devUrl to an empty Postgres database instead"
-	}
-	if (/lock is held by other session/.test(stderr)) {
-		return "another migrate apply is running on this database; run it again once that one finishes"
-	}
+	const fixed = FIXED.find(([said]) => said.test(stderr))
+	if (fixed !== undefined) return fixed[1]
 	const unclean = notClean(stderr, scrub, devOnly)
 	if (unclean !== undefined) return unclean
 	/* Atlas is scoped to the schema and inspects it before anything runs, so no migration can create it (P15) */
