@@ -1,9 +1,19 @@
 import { defineConfig } from "vitest/config"
+import { LOAD_TIMEOUT_MS } from "./src/codegen/runtime/load.ts"
 import { OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "./tests/support/off-utc.ts"
 
 /* every test run is in UTC, as CI's runners are, so a local stamp vouches for what CI sees; the
    workers forked after this file is read inherit it (tests/structure/workflows.test.ts holds it) */
 process.env.TZ = "UTC"
+
+/*
+ * A codegen test loads its tables in codegen's own child process, up to three times in one test
+ * (analyzer.test.ts, codegen.test.ts's F12), each bounded by codegen itself: LOAD_TIMEOUT_MS, and
+ * the supervisor's 10 s grace past it. A budget below that fails a test on the machine's load, not
+ * on what codegen does: F12 takes 3.7 s alone and passed 30 s at load 43 (runs/798b98a-p55-gates-
+ * 20261101T220155Z). With this one, a slow load ends in codegen's own error, which the test reads.
+ */
+const CODEGEN_BUDGET_MS = 3 * (LOAD_TIMEOUT_MS + 10_000)
 
 export default defineConfig({
 	test: {
@@ -13,8 +23,7 @@ export default defineConfig({
 					name: "unit",
 					include: ["src/**/*.test.ts", "lint/**/*.test.ts", "tests/structure/**/*.test.ts"],
 					setupFiles: ["tests/support/pg-parser.setup.ts"],
-					/* a codegen test loads its tables in codegen's own child process, a fraction of a second each */
-					testTimeout: 30_000,
+					testTimeout: CODEGEN_BUDGET_MS,
 				},
 			},
 			{
@@ -22,7 +31,7 @@ export default defineConfig({
 					name: "integration",
 					include: ["tests/integration/**/*.test.ts"],
 					globalSetup: ["tests/integration/support/global-setup.ts"],
-					testTimeout: 60_000,
+					testTimeout: CODEGEN_BUDGET_MS,
 					hookTimeout: 60_000,
 				},
 			},
