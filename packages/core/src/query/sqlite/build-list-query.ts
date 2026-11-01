@@ -89,6 +89,23 @@ function searchWhere(q: string | undefined, search: LikeSearchResolver | undefin
 	})
 }
 
+/**
+ * Refuses a merged list paginateMerged cannot order (Q3 of r18): it merges by the values it reads from
+ * the rows, so a computed sort, which no row carries, would merge by id alone; and the id breaks ties
+ * across shards, so a table without one cannot be merged at all
+ */
+function refuseUnmergeable(sort: readonly SortField[], idColumn: SQLiteColumn | undefined): void {
+	const computed = sort.find(({ field }) => field.startsWith("@"))
+	const cause =
+		computed !== undefined
+			? `a merged list orders by values paginateMerged reads from the rows: sort it by columns only, not ${computed.field}`
+			: idColumn === undefined
+				? `a merged list needs an "${CURSOR_TIEBREAK_COLUMN}" column to break ties across shards, and this table has none`
+				: undefined
+	if (cause !== undefined)
+		throw new CombError({ cause, errorKey: combErrorKeys.SORT_NOT_WIRED, status: "internal_server_error" })
+}
+
 function buildListQuery<TTable extends SQLiteTable>(
 	opts: BuildListQueryOpts<TTable> & { merged: NonNullable<BuildListQueryOpts<TTable>["merged"]> },
 ): MergedListQueryResult
@@ -115,6 +132,7 @@ function buildListQuery<TTable extends SQLiteTable>(
 		})
 	}
 
+	if (opts.merged !== undefined) refuseUnmergeable(sort, idColumn)
 	const tiebreak: SortKey | null = idColumn ? { column: idColumn, direction: sort[0]?.direction ?? "desc" } : null
 	const planned = planSort(sort, columns, opts.computedSorts)
 	const keyset: Keyset = {

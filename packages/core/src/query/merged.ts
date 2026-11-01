@@ -215,6 +215,7 @@ function paginateMerged<T extends object>(
 		count: countOf(rowsPerShard, cursor),
 		hasMore,
 		limit,
+		/* a merged list is always cursorable: buildListQuery refuses one sorted by what no row carries (Q3 of r18) */
 		nextCursor: hasMore && last !== undefined ? pagination.mint(last) : null,
 		page: cursor ? null : (pagination.page ?? 1),
 	}

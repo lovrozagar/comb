@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { SEALED } from "./__fixtures__/cursor-secret.ts"
@@ -209,5 +210,37 @@ describe("paginateMerged on an integer sort key past 2^53", () => {
 		expect(paginateMerged(exact, built)[0].map(({ id }) => id)).toEqual(["b", "a"])
 		const safe = [read([{ id: "b", k: 2 ** 53 - 1 }]), read([{ id: "a", k: -(2 ** 53 - 1) }])]
 		expect(paginateMerged(safe, built)[0].map(({ id }) => id)).toEqual(["a", "b"])
+	})
+})
+
+/* r18 Q3: the merge reads its order from the rows, so a merged list orders by columns, and breaks ties by an id */
+describe("buildListQuery's merged list, refused at build", () => {
+	const computed = createListQuerySchema({ sort: ["@len"] })
+	const keyed = sqliteTable("keyed", { k: text("k") })
+
+	it("refuses a computed sort, which no row carries for the merge to read", () => {
+		expect(() =>
+			buildListQuery({
+				...SEALED,
+				computedSorts: { "@len": () => sql`length(k)` },
+				merged: {},
+				parsed: computed.parse({ order: "@len.asc" }),
+				table: t,
+			}),
+		).toThrow(
+			expect.objectContaining({
+				cause: "a merged list orders by values paginateMerged reads from the rows: sort it by columns only, not @len",
+				errorKey: "sort_not_wired",
+			}),
+		)
+	})
+
+	it("refuses a table with no id, which breaks ties across shards", () => {
+		expect(() => buildListQuery({ ...SEALED, merged: {}, parsed: parse({}), table: keyed })).toThrow(
+			expect.objectContaining({
+				cause: 'a merged list needs an "id" column to break ties across shards, and this table has none',
+				errorKey: "sort_not_wired",
+			}),
+		)
 	})
 })
