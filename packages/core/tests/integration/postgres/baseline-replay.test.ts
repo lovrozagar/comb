@@ -15,6 +15,7 @@ import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import { withScratchDb } from "../support/pg.ts"
+import { refuseObjectDrift, UNCOMPARED } from "../../../src/migrate/core/baseline-compare.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -173,5 +174,30 @@ describe("a Postgres baseline whose replay fails on the dev database", () => {
 			}),
 		)
 		expect(refused).toMatch(/CREATE VIEW v AS SELECT nope FROM t.*column "nope" does not exist/s)
+	})
+})
+
+/* R1 of stack 2: the gate that skips comb's replay for a docker:// dev must miss nothing the catalog read compares */
+describe("a Postgres baseline's gate on a docker:// dev database", () => {
+	const DO_FUNCTION = "DO $$ BEGIN EXECUTE 'CREATE FUNCTION f() RETURNS int LANGUAGE sql AS ''select 1'''; END $$;\n"
+
+	it("refuses, naming devUrl, a history that makes a function inside a DO block, and compares it on a postgres:// dev", async () => {
+		const refused = await withScratchDb(async (url) => {
+			await exec(url, DO_FUNCTION)
+			return baseline(url, "docker://postgres/17/dev", [DO_FUNCTION])
+		})
+		expect(refused).toMatch(/docker:\/\/postgres\/17\/dev is Atlas's own container, which comb cannot reach/)
+		expect(await built([DO_FUNCTION])).toBeUndefined()
+	})
+
+	it("compares a serial and identity table's history with no replay, its column-owned sequences being the table's", async () => {
+		const sql = "CREATE TABLE t (id serial PRIMARY KEY, n bigint GENERATED ALWAYS AS IDENTITY);\n"
+		await withScratchDb(async (url) => {
+			await exec(url, sql)
+			writeFileSync(join(dir, "20260101000000_t.sql"), sql)
+			const target = { devUrl: "docker://postgres/17/dev", lockTimeout: "5s", schema: "public", url }
+			const verdict = await refuseObjectDrift({ print: () => undefined, target }, dir)
+			expect(verdict()).toEqual([UNCOMPARED])
+		})
 	})
 })
