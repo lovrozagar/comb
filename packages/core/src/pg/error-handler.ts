@@ -11,6 +11,7 @@ import {
 	lookup,
 	own,
 	shown,
+	shownColumn,
 	type TableMap,
 	toCombError,
 } from "../constraint-map.ts"
@@ -23,26 +24,20 @@ import { type PgErrorRead, readPgError } from "./read-error.ts"
 import { statementTable } from "../statement-head.ts"
 import { valueError } from "../value-error.ts"
 
-/**
- * A violation, `table` the violated table's key in the maps: qualified for a pgSchema's (F51);
- * `known` false when no map knows the table, so none can say which of its columns are private
- * (Q9 of r17)
- */
+/** A violation, `table` the violated table's key in the maps: qualified for a pgSchema's (F51) */
 type Violation = {
-	known: boolean
 	maps: ConstraintMap[]
 	read: PgErrorRead
 	source: unknown
 	table: string | undefined
 }
 
-/** The columns an error may name: as the maps show them, and none of a table no map knows (fail closed) */
-const visible = (v: Violation, columns: readonly string[]): readonly string[] =>
-	v.known ? shown(v.maps, v.table, columns) : []
+/** The columns an error may name: as the maps show them, none of a table they key nowhere (constraint-map.ts) */
+const visible = (v: Violation, columns: readonly string[]): readonly string[] => shown(v.maps, v.table, columns)
 
 /** `column`, as visible shows it */
 const visibleColumn = (v: Violation, column: string | undefined): string | undefined =>
-	column === undefined ? undefined : visible(v, [column])[0]
+	shownColumn(v.maps, v.table, column)
 
 const toError = (v: Violation, found: Found) => toCombError(found, v.source)
 
@@ -220,18 +215,6 @@ const RESOURCE: Record<string, Fallback> = {
 }
 
 /**
- * The violated table's key in the maps: the reported one, or, for a partition its parent's entry
- * lists, the parent's (mapTable). `known` false when the maps key neither, and so cannot say which
- * of its columns are private; never the statement's table, which a trigger or a cascade did not
- * write (Q7 of r18)
- */
-function violatedTable(maps: ConstraintMap[], read: PgErrorRead): { known: boolean; table: string | undefined } {
-	const table = mapTable(maps, read)
-	const known = maps.length === 0 || table === undefined || maps.some((map) => Object.hasOwn(map, table))
-	return { known, table }
-}
-
-/**
  * The CombError a PostgreSQL error is: a constraint violation through the app's maps, a value the
  * column cannot hold as a 400 (value-error.ts), a resource or availability error as its generic
  * key; undefined for anything else. It throws nothing, so a caller can ask what an error is.
@@ -239,8 +222,9 @@ function violatedTable(maps: ConstraintMap[], read: PgErrorRead): { known: boole
 function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined {
 	const read = readPgError(error)
 	if (read === null) return connectionLost(error) ? new CombError({ ...UNAVAILABLE, source: error }) : undefined
-	const { known, table } = violatedTable(constraintMaps, read)
-	const violation: Violation = { known, maps: constraintMaps, read, source: error, table }
+	/* the reported table, or for a partition its parent's entry lists, the parent; never the
+	   statement's table, which a trigger or a cascade did not write (Q7 of r18) */
+	const violation: Violation = { maps: constraintMaps, read, source: error, table: mapTable(constraintMaps, read) }
 	const handler = own(CONSTRAINTS, read.code)
 	if (handler !== undefined) return handler(violation)
 	const value = valueError(read, { column: visibleColumn(violation, read.column), table: read.table }, error)

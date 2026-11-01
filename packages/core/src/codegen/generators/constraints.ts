@@ -250,7 +250,7 @@ export function buildConstraintMap(
 				)
 			owner.set(constraint.errorKey, { constraint, place })
 		}
-		if (Object.keys(entry).length > 0) map[qualifiedName(table)] = entry
+		map[qualifiedName(table)] = entry
 	}
 	return map
 }

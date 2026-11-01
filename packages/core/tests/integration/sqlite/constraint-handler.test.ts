@@ -218,8 +218,9 @@ describe("sqliteErrorHandler on libsql: a delete of a row others still reference
 
 describe("sqliteErrorHandler on libsql: an expression index and a STRICT column (Q9, Q10)", () => {
 	const db = useMemberDb()
+	/* each table keyed, as codegen keys every table with a key: a table the maps key nowhere names no column (Q10 of r18) */
 	const maps: ConstraintMap[] = [
-		{ account: { unique: { u_email_lower: { cause: "Email taken", errorKey: "email_taken" } } } },
+		{ account: { unique: { u_email_lower: { cause: "Email taken", errorKey: "email_taken" } } }, s: {} },
 	]
 	const setup = [
 		"CREATE TABLE account (id TEXT PRIMARY KEY, email TEXT)",

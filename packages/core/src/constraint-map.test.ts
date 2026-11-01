@@ -70,8 +70,14 @@ describe("shown and shownColumn", () => {
 	it("names every column, or none once any map lists one as the table's private column", () => {
 		expect(shown(maps, "a", ["owner", "slug"])).toEqual(["owner", "slug"])
 		expect(shown(maps, "a", ["owner", "pin"])).toEqual([])
-		expect(shown(maps, "b", ["pin"])).toEqual(["pin"])
 		expect(shown(maps, undefined, ["pin"])).toEqual(["pin"])
+	})
+
+	/* Q9 of r17 and Q10 of r18: maps that key no such table cannot say which of its columns are private */
+	it("names no column of a table the maps given key nowhere, and every column when no map is given", () => {
+		expect(shown(maps, "b", ["pin"])).toEqual([])
+		expect(shownColumn(maps, "b", "owner")).toBeUndefined()
+		expect(shown([], "b", ["pin"])).toEqual(["pin"])
 	})
 
 	it("names one column unless it is private, and nothing for no column", () => {

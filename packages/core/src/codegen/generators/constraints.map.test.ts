@@ -278,3 +278,13 @@ describe("buildConstraintMap: a partitioned table's partitions", () => {
 		])
 	})
 })
+
+/* Q10 of r18: a table the maps key nowhere names no column, so every table of the schema is keyed */
+describe("buildConstraintMap: a table with no constraint", () => {
+	it("keys it with an empty entry, so its errors still name their columns", () => {
+		const map = buildConstraintMap(
+			tablesOf(`${SQLITE}export const log = sqliteTable("log", { at: text("at").notNull() })\n`),
+		)
+		expect(map).toEqual({ log: {} })
+	})
+})

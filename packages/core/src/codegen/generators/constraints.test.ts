@@ -103,10 +103,10 @@ export const audit = createTable("audit", { user_id: c.text("user_id").reference
 		expect(logged[1]).toBe("Tables: 2, Total constraints: 3")
 	})
 
-	it("leaves out a table with no constraint", () => {
+	/* Q10 of r18: a table the maps key nowhere names no column, so a table with no constraint is keyed still */
+	it("keys a table with no constraint with an empty entry", () => {
 		const { content } = generate(`export const log = createTable("log", { msg: c.text("msg") })`)
-		expect(content).toContain("TEST_DB_CONSTRAINT_MAP")
-		expect(content).not.toContain("log:")
+		expect(content).toContain("\t/* log table: no constraints */\n\tlog: {}\n} as const")
 	})
 
 	it("stamps a composite primary key", () => {

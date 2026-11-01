@@ -54,10 +54,11 @@ export type Found = {
 export declare const own: <T>(record: Record<string, T> | undefined, key: string | undefined) => T | undefined;
 /**
  * The columns an error may name of those a violation reports: all of them, or none when a map lists
- * one as the table's private column, since naming the rest would point at it (F67)
+ * one as the table's private column, since naming the rest would point at it (F67), or when the
+ * maps given key no such table (fail closed)
  */
 export declare function shown(maps: ConstraintMap[], table: string | undefined, columns: readonly string[]): readonly string[];
-/** `column`, or undefined when a map lists it among `table`'s private columns (F67) */
+/** `column`, or undefined when a map lists it among `table`'s private columns (F67), or shown hides the table's */
 export declare const shownColumn: (maps: ConstraintMap[], table: string | undefined, column: string | undefined) => string | undefined;
 /** The first entry `pick` finds for `table` across `maps`. */
 export declare function lookup(maps: ConstraintMap[], table: string | undefined, pick: (t: TableMap) => ConstraintMapEntry | undefined): ConstraintMapEntry | undefined;

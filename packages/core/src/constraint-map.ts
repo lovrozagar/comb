@@ -28,14 +28,24 @@ const listsPrivate = (maps: ConstraintMap[], table: string | undefined, column: 
 	maps.some((map) => own(map, table)?.private?.includes(column) === true)
 
 /**
+ * Whether the maps can say which of `table`'s columns are private: no map is given, which hides
+ * none, or one keys the table. Maps that key it nowhere cannot, as for a table a trigger writes
+ * outside the schema, so its columns are hidden on every dialect (Q9 of r17, Q10 of r18)
+ */
+const knows = (maps: ConstraintMap[], table: string | undefined) =>
+	maps.length === 0 || table === undefined || maps.some((map) => Object.hasOwn(map, table))
+
+/**
  * The columns an error may name of those a violation reports: all of them, or none when a map lists
- * one as the table's private column, since naming the rest would point at it (F67)
+ * one as the table's private column, since naming the rest would point at it (F67), or when the
+ * maps given key no such table (fail closed)
  */
 export function shown(maps: ConstraintMap[], table: string | undefined, columns: readonly string[]): readonly string[] {
+	if (!knows(maps, table)) return []
 	return columns.some((column) => listsPrivate(maps, table, column)) ? [] : columns
 }
 
-/** `column`, or undefined when a map lists it among `table`'s private columns (F67) */
+/** `column`, or undefined when a map lists it among `table`'s private columns (F67), or shown hides the table's */
 export const shownColumn = (
 	maps: ConstraintMap[],
 	table: string | undefined,

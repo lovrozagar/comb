@@ -78,6 +78,9 @@ export function generateConstraintMapCode(map: ConstraintMap, dbName: string): s
 	const tables = Object.entries(map).sort(byKey)
 	const blocks = tables.map(([tableName, constraints]) => {
 		const groups = Object.entries(constraints).sort(byKey)
+		/* a table with no constraint is keyed still, so the handlers know it is the schema's (Q10 of r18) */
+		if (groups.length === 0)
+			return [`\t/* ${commentText(tableName)} table: no constraints */`, `\t${propertyName(tableName)}: {}`]
 		return [
 			`\t/* ${commentText(tableName)} table constraints */`,
 			`\t${propertyName(tableName)}: {`,
