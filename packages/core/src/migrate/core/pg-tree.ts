@@ -27,6 +27,7 @@ import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import { constraintIndexWarnings, ddlFindings } from "./pg-ddl.ts"
 import { maintenanceFindings } from "./pg-maintenance.ts"
 import { followFresh } from "./pg-fresh.ts"
+import { preview } from "./classify-file.ts"
 import { eventFindings, kindOf } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 
@@ -207,6 +208,15 @@ function shadowFinding(type: string, node: Node, ctx: TreeContext): Finding | un
 	return undefined
 }
 
+/** `rate()`; a refusal it throws names the statement `stmt` first, as check's other refusals do */
+function refusingAs<T>(stmt: string, rate: () => T): T {
+	try {
+		return rate()
+	} catch (error) {
+		throw new Error(`${preview(stmt)}: ${(error as Error).message}`, { cause: error })
+	}
+}
+
 /** One Postgres statement's findings, read from its parse tree: the one its file's read kept, else parsed here */
 /**
  * A statement's findings from its parse tree, and for the grammar its kind (P21 of r19) and whether a rule that rates a whole statement
@@ -235,7 +245,7 @@ function pgTreeFindings(
 	const findings = nodes.flatMap(([type, node]) => {
 		if (WRITES.test(type)) return writeFindings(type, node, ctx)
 		return [
-			...(ddlFindings(type, node, ctx.facts) ?? []),
+			...(refusingAs(stmt, () => ddlFindings(type, node, ctx.facts)) ?? []),
 			...(type === "AlterTableStmt" ? constraintIndexWarnings(node, ctx) : []),
 			codeFinding(type, node, ctx),
 		].filter((finding) => finding !== undefined)

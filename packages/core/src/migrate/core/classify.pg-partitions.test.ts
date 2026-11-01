@@ -48,7 +48,7 @@ describe("a foreign key on a partitioned table (P18 of r19)", () => {
 
 	it("refuses one NOT VALID, which Postgres refuses on every database, naming the recipe", () => {
 		expect(() => rate(NOT_VALID)).toThrow(
-			"Postgres refuses a NOT VALID foreign key on the partitioned table pt: add it NOT VALID to each partition, VALIDATE CONSTRAINT on each, then add it to pt, which then scans nothing",
+			`${NOT_VALID.slice(0, -1)}: Postgres refuses a NOT VALID foreign key on the partitioned table pt: add it NOT VALID to each partition, VALIDATE CONSTRAINT on each, then add it to pt, which then scans nothing`,
 		)
 	})
 
