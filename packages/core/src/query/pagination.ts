@@ -93,8 +93,8 @@ function paginationOf<TMerged extends boolean = false>(
 	}
 }
 
-/** The count an offset page's row carries, which refuseUnwired holds every such row to */
-const totalOf = (row: object): number => (row as { _total: number })._total
+/** The count an offset page's row carries, a number or a driver's bigint, which refuseUnwired holds every such row to */
+const totalOf = (row: object): number => Number((row as { _total: bigint | number })._total)
 
 /**
  * Rows the filter matches across all pages, or null when this page cannot know: a cursor page
@@ -114,17 +114,46 @@ function countOf(items: readonly object[], pagination: ListPagination): number |
  */
 function refuseUnwired(items: readonly object[], pagination: ListPagination): void {
 	const missing = pagination.expects.filter((key) => items.some((item) => !Object.hasOwn(item, key)))
-	if (missing.length === 0) return
+	if (missing.length > 0) {
+		throw new CombError({
+			cause: `the rows carry no ${missing.join(", ")}: select the built query's extras beside your columns (db.select({ ...columns, ...built.extras }), or findMany({ extras: built.extras }))`,
+			errorKey: combErrorKeys.PAGE_NOT_WIRED,
+			status: "internal_server_error",
+		})
+	}
+	const wrong = items.map(malformed).find((what) => what !== undefined)
+	if (wrong === undefined) return
 	throw new CombError({
-		cause: `the rows carry no ${missing.join(", ")}: select the built query's extras beside your columns (db.select({ ...columns, ...built.extras }), or findMany({ extras: built.extras }))`,
+		cause: `the rows carry ${wrong}, no value the built query selects: render each extra into raw SQL as sql\`\${extra.sql} AS \${sql.identifier(extra.fieldAlias)}\`, or select the built query's extras beside your columns`,
 		errorKey: combErrorKeys.PAGE_NOT_WIRED,
 		status: "internal_server_error",
 	})
 }
 
+/** A value as a refusal shows it: a bigint with its n, anything else as JSON */
+const shown = (value: unknown): string => (typeof value === "bigint" ? `${value}n` : JSON.stringify(value))
+
+/** Whether `value` is a count: a safe integer from 0, a number or a driver's bigint */
+const isCount = (value: unknown): boolean =>
+	typeof value === "bigint"
+		? value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
+		: Number.isSafeInteger(value) && (value as number) >= 0
+
+/**
+ * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
+ * kind. An extra rendered by hand as its own alias reads as that string (Q4 of r18).
+ */
+function malformed(row: object): string | undefined {
+	const { _combAnchorGone: gone, _combId: id, _total: total } = row as Record<string, unknown>
+	if (Object.hasOwn(row, "_total") && !isCount(total)) return `_total ${shown(total)}`
+	if (Object.hasOwn(row, COMB_ID) && id === COMB_ID) return `${COMB_ID} ${shown(id)}`
+	const flag = gone === 0 || gone === 1 || gone === 0n || gone === 1n || typeof gone === "boolean"
+	return Object.hasOwn(row, "_combAnchorGone") && !flag ? `_combAnchorGone ${shown(gone)}` : undefined
+}
+
 /** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
 function refuseGoneAnchor(items: readonly object[]): void {
-	if (items.some((item) => Number((item as Record<string, unknown>)["_combAnchorGone"]) === 1)) {
+	if (items.some((item) => [1, 1n, true].includes((item as Record<string, unknown>)["_combAnchorGone"] as never))) {
 		throw new CombError({
 			cause:
 				"the row this cursor resumes from was renamed or deleted, and no bound is safe under its collation; start the list again",

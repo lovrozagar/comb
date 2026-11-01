@@ -572,7 +572,7 @@ declare function paginationOf<TMerged extends boolean = false>(options: CursorOp
 }): ListPagination & {
     merged: TMerged;
 };
-/** The count an offset page's row carries, which refuseUnwired holds every such row to */
+/** The count an offset page's row carries, a number or a driver's bigint, which refuseUnwired holds every such row to */
 declare const totalOf: (row: object) => number;
 /**
  * Rows that lack an extra their builder selected were read without the built query's extras, and
