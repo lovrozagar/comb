@@ -139,7 +139,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 	})
 
 	it("warns of a URL that may send the password unprotected", async () => {
-		const dir = postgresProject({}, "postgres://app:pw@db.example.com/app")
+		const dir = postgresProject({}, "postgres://app:pw@db.example.com/app?sslmode=prefer")
 		const io = makeIo(dir, pgAtlas([]))
 		expect(await runCli(["migrate", "apply", "core"], io)).toBe(0)
 		expect(io.errors).toEqual([

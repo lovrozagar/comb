@@ -63,7 +63,7 @@ describe("pgUrlProblems: the lock timeout, TLS and poolers", () => {
 
 	it("warns of a remote host that does not verify TLS, and of poolers", () => {
 		const host = "postgres://app:pw@db.example.com/app"
-		expect(pgUrlProblems(target({ url: host })).warnings).toEqual([
+		expect(pgUrlProblems(target({ url: `${host}?sslmode=disable` })).warnings).toEqual([
 			"url reaches db.example.com without sslmode=verify-full or require, so the password may cross the network unencrypted or to an unverified server",
 		])
 		expect(pgUrlProblems(target({ url: `${host}?sslmode=prefer` })).warnings).toHaveLength(1)
@@ -381,7 +381,9 @@ describe("pgUrlProblems: a search_path in the url", () => {
 /* r18 P18: the password crosses the network to the address comb and Atlas connect to: hostaddr, when given */
 describe("pgUrlProblems: plaintext warning by the address connected to", () => {
 	it("warns of a remote hostaddr behind host=localhost, and not of a tunnel to 127.0.0.1", () => {
-		const remote = pgUrlProblems(target({ url: "postgres://app:secret@localhost:5432/app?hostaddr=203.0.113.5" }))
+		const remote = pgUrlProblems(
+			target({ url: "postgres://app:secret@localhost:5432/app?hostaddr=203.0.113.5&sslmode=disable" }),
+		)
 		expect(remote.warnings.join()).toContain("url reaches 203.0.113.5 without sslmode=verify-full or require")
 		const tunnel = pgUrlProblems(
 			target({ url: "postgres://app:secret@db.example.com:5432/app?hostaddr=127.0.0.1&sslmode=disable" }),

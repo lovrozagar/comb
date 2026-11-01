@@ -13,6 +13,8 @@ import { join } from "node:path"
 import { blank } from "../../blank.ts"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
 import { RESERVED_SCHEMA_WORDS } from "./pg-keywords.ts"
+import { hostWarnings, namesSeveralHosts } from "./pg-hosts.ts"
+import { passfileErrors } from "./pg-passfile.ts"
 import { libpqUrl, type LibpqUrl, queryParams, tlsProblems, urlProblem, withParam } from "./pg-url.ts"
 import { keyProblems, stripsForAtlas } from "./pg-url-keys.ts"
 import { lockTimeoutMs } from "./pg-lock-timeout.ts"
@@ -42,8 +44,6 @@ type AtlasEnv = {
 
 // lookup-table: hosts a password never leaves the machine for
 const LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "[::1]", "::1"])
-// lookup-table: sslmodes that encrypt the connection
-const VERIFIED_SSL = /* @__PURE__ */ new Set(["require", "verify-ca", "verify-full"])
 const PLAIN_SCHEMA = /^[a-z_][a-z0-9_$]*$/
 /* where a URL comb cannot read goes wrong, by the part (N2): the password, unless the part is another */
 const HINTS = {
@@ -55,31 +55,6 @@ const HINTS = {
 
 /** Whether `raw` is Atlas's own docker:// dev database, such as docker://postgres/17/dev */
 const isDocker = (raw: string): boolean => /^docker:\/\/[^#\s]+$/.test(raw)
-
-/** Warnings for a target that may send its password unprotected, or that goes through a pooler; a socket crosses no network (P19) */
-function hostWarnings(url: LibpqUrl): string[] {
-	const warnings: string[] = []
-	const sslmode = url.params.get("sslmode") ?? ""
-	/* the password goes where comb and Atlas connect: hostaddr when given, which a socket never is (P18 of r18) */
-	const reached = url.hostaddr ?? url.host
-	const local = url.hostaddr === undefined ? url.socket || LOCAL_HOSTS.has(url.host) : LOCAL_HOSTS.has(url.hostaddr)
-	if (!local && !VERIFIED_SSL.has(sslmode)) {
-		warnings.push(
-			`url reaches ${reached} without sslmode=verify-full or require, so the password may cross the network unencrypted or to an unverified server`,
-		)
-	}
-	if (url.host.includes("-pooler.")) {
-		warnings.push(
-			"url is a Neon pooled host; migrations need the direct one (drop -pooler), since a pooler drops the lock Atlas holds",
-		)
-	}
-	if (url.port === 6543) {
-		warnings.push(
-			"url uses port 6543, Supabase's transaction pooler; migrations need the direct or session connection on 5432",
-		)
-	}
-	return warnings
-}
 
 /**
  * The database a Postgres URL reaches, as libpq reads it (pg-url.ts): its host without case,
@@ -97,6 +72,8 @@ function databaseOf(url: LibpqUrl): string {
 function checkUrl(field: "devUrl" | "url", raw: string): { docker?: true; error?: string; url?: LibpqUrl } {
 	if (blank(raw)) return { error: `${field} is empty` }
 	if (field === "devUrl" && isDocker(raw)) return { docker: true }
+	if (namesSeveralHosts(raw))
+		return { error: `${field} names several hosts; comb migrates one database, so name its primary alone` }
 	const accepted = field === "devUrl" ? "a postgres:// or docker://" : "a postgres://"
 	const url = libpqUrl(raw)
 	const problem = urlProblem(raw)
@@ -137,7 +114,11 @@ const fieldErrors = (field: "devUrl" | "url", checked: { error?: string; url?: L
 	checked.error === undefined
 		? checked.url === undefined
 			? []
-			: [...keyProblems(field, checked.url.params), ...tlsProblems(field, checked.url)]
+			: [
+					...keyProblems(field, checked.url.params),
+					...tlsProblems(field, checked.url),
+					...passfileErrors(field, checked.url),
+				]
 		: [checked.error]
 
 /** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */

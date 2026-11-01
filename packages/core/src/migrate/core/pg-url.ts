@@ -283,4 +283,4 @@ function urlProblem(raw: string): "address" | "encoded socket" | "password" | "q
 	return undecodable(userinfo.split(":")[0] as string) ? "user" : "password"
 }
 
-export { type LibpqUrl, libpqUrl, postgresOptionsOf, queryParams, tlsProblems, urlProblem, withParam }
+export { type LibpqUrl, libpqUrl, postgresOptionsOf, queryParams, sslmodeOf, tlsProblems, urlProblem, withParam }

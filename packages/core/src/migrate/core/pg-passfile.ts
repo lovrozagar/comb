@@ -8,7 +8,7 @@
  * read is refused, as libpq ignores it. comb never reads ~/.pgpass or PGPASSFILE: the URL is the
  * connection (README §configuration).
  */
-import { readFileSync, statSync } from "node:fs"
+import { readFileSync, type Stats, statSync } from "node:fs"
 import type { LibpqUrl } from "./pg-url.ts"
 
 /** A line's fields, each as written and unescaped */
@@ -31,15 +31,40 @@ function fieldsOf(line: string): Array<{ any: boolean; text: string }> {
 	return [...out, { any: raw === "*", text }]
 }
 
+/**
+ * Why libpq ignores the passfile `file`: not a plain file (P24 of r19), or readable by others; none
+ * for one it cannot stat, which libpq and Atlas's driver read as no file, silently
+ */
+function passfileProblem(file: string): string | undefined {
+	let stat: Stats
+	try {
+		stat = statSync(file)
+	} catch {
+		// reason: libpq and Atlas's driver read a passfile they cannot stat as none, silently
+		return undefined
+	}
+	if (!stat.isFile()) return `passfile ${file} is not a plain file, so libpq ignores it; name the password file itself`
+	if ((stat.mode & 0o077) !== 0) return `passfile ${file} can be read by others, so libpq ignores it; chmod 600 it`
+	return undefined
+}
+
+/** Why libpq ignores the passfile `url` reads, by field, before Atlas runs (P24 of r19) */
+export function passfileErrors(field: "devUrl" | "url", url: LibpqUrl): string[] {
+	/* libpq reads it only for a URL without a password */
+	const file = url.password === undefined ? url.params.get("passfile") : undefined
+	const problem = file === undefined ? undefined : passfileProblem(file)
+	return problem === undefined ? [] : [`${field}'s ${problem}`]
+}
+
 /** The file's text, or undefined where there is none to read */
 function contentsOf(file: string): string | undefined {
+	const problem = passfileProblem(file)
+	if (problem !== undefined) throw new Error(problem)
 	try {
-		if ((statSync(file).mode & 0o077) !== 0)
-			throw new Error(`passfile ${file} can be read by others, so libpq ignores it; chmod 600 it`)
 		return readFileSync(file, "utf8")
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
-		throw error
+	} catch {
+		// reason: libpq and Atlas's driver read a passfile they cannot open as none, silently
+		return undefined
 	}
 }
 

@@ -4,7 +4,7 @@
  */
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { postgresOptionsOf } from "./pg-url.ts"
 
@@ -68,6 +68,18 @@ describe("postgresOptionsOf with a passfile", () => {
 
 	it("reads no password from a missing file, as libpq reads none", () => {
 		expect(passwordOf("postgres://app@db/app?passfile=/nowhere/pgpass")).toBe("")
+		/* nor from one it cannot stat or open, as libpq and lib/pq read none, silently (P24 of r19) */
+		const file = passfile("*:*:*:*:pw\n")
+		expect(passwordOf(`postgres://app@db/app?passfile=${file}/below`)).toBe("")
+		chmodSync(file, 0o000)
+		expect(passwordOf(`postgres://app@db/app?passfile=${file}`)).toBe("")
+		const closed = passfile("*:*:*:*:pw\n")
+		chmodSync(dirname(closed), 0o000)
+		try {
+			expect(passwordOf(`postgres://app@db/app?passfile=${closed}`)).toBe("")
+		} finally {
+			chmodSync(dirname(closed), 0o700)
+		}
 	})
 
 	it("refuses a file others can read, naming passfile, as libpq ignores one", () => {
