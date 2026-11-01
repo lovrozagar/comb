@@ -172,9 +172,10 @@ function finish({ added, atlas, copy, fts, options, plainDiff, transform }: Fini
 }
 
 /**
- * The Postgres diff: Atlas replays a copy of the history without the objects it refuses (each file
- * keeping its atlas: directives) and diffs it against the target without them; comb wraps the file
- * Atlas writes with those objects' part (pg-objects.ts)
+ * The Postgres diff: Atlas replays a copy of the history without the objects it refuses but the
+ * views, which it runs in place inside DO blocks so their dependents replay (each file keeping its
+ * atlas: directives), and diffs it against the target read the same way; comb wraps the file Atlas
+ * writes with those objects' part (pg-objects.ts)
  */
 function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 	const { migrationName, migrationsDir } = options
@@ -184,7 +185,7 @@ function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 		const history = emptyPgObjects()
 		const plain = sqlFiles(migrationsDir).map((file) => {
 			const sql = readFileSync(join(migrationsDir, file), "utf8")
-			return { file, head: atlasDirectives(sql), plain: separatePgObjects(sql, history, file).plain }
+			return { file, head: atlasDirectives(sql), plain: separatePgObjects(sql, history, file).replay }
 		})
 		const target = separatePgObjects(options.targetSchema)
 		/* the dev database gets the sequences and extensions a table may need first, in the copy's first file and the target */
@@ -193,7 +194,7 @@ function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 		for (const [i, { file, head, plain: kept }] of plain.entries())
 			writeFileSync(join(copy, file), atlasFile([...(i === 0 ? pgStatements(prelude) : []), ...kept], head))
 		hashDir(atlas.exec, copy)
-		const added = atlasDiff(atlas, copy, { name: migrationName, schema: prelude + asSql(target.plain) })
+		const added = atlasDiff(atlas, copy, { name: migrationName, schema: prelude + asSql(target.replay) })
 		const atlasFiles = added.map((file) => readFileSync(join(copy, file), "utf8"))
 		const delta = pgDelta({ atlasSql: atlasFiles.join("\n"), from: history, to: target })
 		if (added.length === 0 && delta.before.length === 0 && delta.after.length === 0) return { files: [], synced: true }

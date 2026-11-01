@@ -352,15 +352,19 @@ describe("baselineWithAtlas", () => {
 		expect(await baselineWithAtlas(options(atlas))).toEqual(["1_a.sql", "2_b.sql", "3.sql"])
 		expect(atlas.calls.find((call) => call.args[1] === "set")?.args.slice(0, 3)).toEqual(["migrate", "set", "3"])
 	})
+})
 
-	it("compares the database with the history replayed without comb's objects but its sequences", async () => {
+describe("baselineWithAtlas: the history Atlas replays", () => {
+	it("compares the database with the history replayed without comb's objects but its sequences and views", async () => {
 		writeFileSync(
 			join(dir, "1_a.sql"),
 			'CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\nCREATE VIEW "v" AS (select 1);\nCREATE ROLE "r";\n',
 		)
 		const atlas = fakeAtlas({ status: status({}) })
 		await baselineWithAtlas(options(atlas, { readLive: holding(["n", "sequence"], ["v", "view"]) }))
-		expect(atlas.replayed[0]).toBe('CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\n')
+		expect(atlas.replayed[0]).toBe(
+			'CREATE SEQUENCE "n";\nCREATE TABLE "a" ("id" int DEFAULT nextval(\'n\'));\nDO $comb$ BEGIN EXECUTE $comb_view$CREATE VIEW "v" AS (select 1)$comb_view$; END $comb$;\n',
+		)
 		const diff = atlas.calls.find((call) => call.args[0] === "schema")
 		expect(diff?.args.slice(0, 4)).toEqual(["schema", "diff", "--from", "env://url"])
 		expect(diff?.env?.["COMB_ATLAS_DEV_URL"]).toBe(`${TARGET.devUrl}?search_path=public`)
@@ -374,7 +378,9 @@ describe("baselineWithAtlas", () => {
 		)
 		const atlas = fakeAtlas({ status: status({}) })
 		await baselineWithAtlas(options(atlas, { readLive: holding(["v", "view"]) }))
-		expect(atlas.replayed[0]).toBe('CREATE TABLE "a" ("id" int);\n')
+		expect(atlas.replayed[0]).toBe(
+			'CREATE TABLE "a" ("id" int);\nDO $comb$ BEGIN EXECUTE $comb_view$CREATE VIEW "v" AS (select 1)$comb_view$; END $comb$;\n',
+		)
 	})
 
 	it("records nothing when the database's tables differ from the history's, naming the difference", async () => {

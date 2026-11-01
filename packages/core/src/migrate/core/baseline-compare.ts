@@ -20,6 +20,7 @@ import { asSql, type FtsState, separate } from "./fts-migration.ts"
 import { COMPARED, liveDrift, readLiveObjects } from "./pg-live-objects.ts"
 import type { ReadyDev } from "./pg-dev-schema.ts"
 import type { LiveObjects, LiveRead } from "./pg-live-types.ts"
+import { extensionReplay, viewReplay } from "./pg-atlas-replay.ts"
 import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
 import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
 import type { Run } from "./process.ts"
@@ -158,9 +159,13 @@ function replayableHistory(exec: Run, copy: string): string {
 		const sql = readFileSync(join(copy, name), "utf8")
 		/* the statements Postgres runs, written back so Atlas sends each alone (M75) */
 		const kept = new Set(separatePgObjects(sql, state, name).plain)
-		const replayed = pgStatements(sql).filter(
-			(stmt) => kept.has(stmt) || /^(?:CREATE|ALTER|DROP) SEQUENCE\b/i.test(codeOf(stmt, "postgres")),
-		)
+		/* a view and an extension replay in place, inside DO blocks, so what depends on them replays too (P4 of r19) */
+		const replayed = pgStatements(sql).flatMap((stmt) => {
+			const code = codeOf(stmt, "postgres")
+			if (kept.has(stmt) || /^(?:CREATE|ALTER|DROP) SEQUENCE\b/i.test(code)) return [stmt]
+			const block = viewReplay(stmt, code) ?? extensionReplay(stmt, code)
+			return block === undefined ? [] : [block]
+		})
 		writeFileSync(join(plain, name), atlasFile(replayed, atlasDirectives(sql)))
 	}
 	hashDir(exec, plain)

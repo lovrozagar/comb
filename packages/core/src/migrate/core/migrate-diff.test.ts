@@ -239,7 +239,7 @@ describe("generateIncrementalMigration — postgres", () => {
 })
 
 describe("generateIncrementalMigration — postgres objects Atlas refuses", () => {
-	it("replays the history without the objects Atlas refuses, keeping its directives, and wraps Atlas's file", async () => {
+	it("replays the history without the objects Atlas refuses but its views, keeping its directives, and wraps Atlas's file", async () => {
 		seed(
 			'-- atlas:txmode none\nCREATE TABLE "post" ("title" text);\nCREATE VIEW "v" AS (select "title" from "post");\nCREATE INDEX CONCURRENTLY "i" ON "post" ("title");\n',
 		)
@@ -256,10 +256,13 @@ describe("generateIncrementalMigration — postgres objects Atlas refuses", () =
 		const { files } = await generateIncrementalMigration(
 			options(atlas, { dialect: "postgres", target, targetSchema: schema }),
 		)
+		/* the view replays in place, in a DO block Atlas does not inspect, so what depends on it replays too (P4 of r19) */
+		const view =
+			'DO $comb$ BEGIN EXECUTE $comb_view$CREATE VIEW "v" AS (select "title" from "post")$comb_view$; END $comb$'
 		expect(seen[0]?.history["20260101000000_init.sql"]).toBe(
-			'-- atlas:txmode none\nCREATE TABLE "post" ("title" text);\nCREATE INDEX CONCURRENTLY "i" ON "post" ("title");\n',
+			`-- atlas:txmode none\nCREATE TABLE "post" ("title" text);\n${view};\nCREATE INDEX CONCURRENTLY "i" ON "post" ("title");\n`,
 		)
-		expect(seen[0]?.target).toBe('CREATE TABLE "post" ("title" varchar(50));\n')
+		expect(seen[0]?.target).toBe(`CREATE TABLE "post" ("title" varchar(50));\n\n${view};\n`)
 		expect(readFileSync(files[0] as string, "utf8")).toBe(
 			'DROP VIEW IF EXISTS "v";\n\nALTER TABLE "post" ALTER COLUMN "title" TYPE varchar(50);\n\nCREATE VIEW "v" AS (select "title" from "post");\n',
 		)

@@ -19,6 +19,7 @@
  */
 import { asSql } from "./fts-migration.ts"
 import { affected, isView, same } from "./pg-dependents.ts"
+import { viewReplay } from "./pg-atlas-replay.ts"
 import { extrasAfter, followExtra } from "./pg-extras.ts"
 import { atlasTables, followRls, type Rls, rlsDelta, type Statement } from "./pg-tables.ts"
 import { codeOf, IDENT, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
@@ -52,7 +53,12 @@ type PgObjects = {
 
 const emptyPgObjects = (): PgObjects => ({ objects: new Map(), rls: new Map() })
 
-type Separated = { objects: PgObject[]; plain: string[]; state: PgObjects }
+/**
+ * A file split: the comb-owned objects it makes, the statements Atlas may see (`plain`), and what Atlas
+ * replays on the dev database (`replay`): the plain statements, with each view's create and drop in
+ * place, handed over in a DO block (P4 of r19)
+ */
+type Separated = { objects: PgObject[]; plain: string[]; replay: string[]; state: PgObjects }
 
 // per-process-constant: the statements that make or drop a comb-owned object, composed once
 const CREATE_VIEW = /* @__PURE__ */ new RegExp(
@@ -174,14 +180,21 @@ function follow(statement: Statement, state: PgObjects, source: string): boolean
 function separatePgObjects(sql: string, state: PgObjects = emptyPgObjects(), source = "the target schema"): Separated {
 	const objects: PgObject[] = []
 	const plain: string[] = []
+	const replay: string[] = []
 	/* the statements Postgres runs, read over the whole file, its delimiter directive in place (M75) */
 	for (const text of pgStatements(sql)) {
 		const code = codeOf(text, "postgres")
 		const made = defined(code, text)
 		if (made !== undefined) objects.push(made)
-		if (!follow({ code, sql: text }, state, source)) plain.push(text)
+		if (!follow({ code, sql: text }, state, source)) {
+			plain.push(text)
+			replay.push(text)
+		} else {
+			const view = viewReplay(text, code)
+			if (view !== undefined) replay.push(view)
+		}
 	}
-	return { objects, plain, state }
+	return { objects, plain, replay, state }
 }
 
 const dropOf = (object: PgObject): string =>
