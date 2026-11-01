@@ -14,6 +14,8 @@ import { sqlFiles } from "./atlas-dir.ts"
 import type { AtlasRevision, AtlasStatus } from "./atlas-history.ts"
 import type { LiveRead } from "./pg-live-types.ts"
 import type { Run, RunResult } from "./process.ts"
+import { noLive } from "../__fixtures__/live-objects.ts"
+import { UNCOMPARED } from "./baseline-compare.ts"
 
 let dir = ""
 /** A print that keeps nothing */
@@ -169,6 +171,7 @@ describe("adoption: read once, while the schema's own history is empty", () => {
 /* P2 of the 0.14.1 review: a matching prefix is adopted only once the schema holds what replaying it leaves */
 /** A database with no function, procedure or trigger */
 const noObjects: LiveRead = async () => ({
+	...noLive(),
 	policies: new Map(),
 	relations: new Map(),
 	routines: new Map(),
@@ -200,7 +203,7 @@ describe("proveAdoption", () => {
 			copy,
 			["1_a.sql"],
 		)
-		expect(out).toEqual(["Warning: Atlas: views are not inspected"])
+		expect(out).toEqual(["Warning: Atlas: views are not inspected", UNCOMPARED])
 		rmSync(copy, { force: true, recursive: true })
 	})
 

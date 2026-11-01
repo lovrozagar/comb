@@ -13,7 +13,7 @@ beforeAll(() => loadPostgresParser())
 function left(sql: string) {
 	const facts = historyFacts(extractSchema(sql, undefined, "postgres"), "public")
 	return {
-		policies: [...facts.policies].flatMap(([table, names]) => [...names].map((name) => `${table}.${name}`)),
+		policies: [...facts.policies].flatMap(([table, each]) => [...each.keys()].map((name) => `${table}.${name}`)),
 		relations: [...facts.relations.keys()],
 		triggers: [...facts.triggers].flatMap(([table, each]) => each.map(({ name }) => `${table}.${name}`)),
 	}

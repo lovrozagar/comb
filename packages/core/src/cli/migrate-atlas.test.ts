@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Run } from "../migrate/core/process.ts"
 import { makeIo, ok, projects } from "./__fixtures__/io.ts"
 import { runCli } from "./run.ts"
+import { UNCOMPARED } from "../migrate/core/baseline-compare.ts"
 
 const temp = projects()
 const project = temp.make
@@ -90,6 +91,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 		expect(await runCli(["migrate", "baseline", "core"], io)).toBe(0)
 		expect(atlas.calls.find((call) => call[1] === "set")?.slice(0, 3)).toEqual(["migrate", "set", "2"])
 		expect(io.outputs).toEqual([
+			UNCOMPARED,
 			"Marked applied: 1_init.sql",
 			"Marked applied: 2_more.sql",
 			"\nBaseline done: 2 marked",

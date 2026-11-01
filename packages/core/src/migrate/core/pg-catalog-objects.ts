@@ -5,7 +5,8 @@
  * identity's or one OWNED BY a column, is its column's, which Atlas compares with the table. A
  * rename, a move or a drop of a relation follows in pg-names.ts.
  */
-import { type Facts, keyOf, names, type Node, tableOf } from "./pg-nodes.ts"
+import { readsOf } from "./pg-cascade.ts"
+import { type Facts, keyOf, names, type Node, type Policy, tableOf } from "./pg-nodes.ts"
 
 /** Whether a sequence's options give it to a column: OWNED BY one, not OWNED BY NONE; undefined where they say nothing */
 function ownedBy(options: unknown): boolean | undefined {
@@ -17,27 +18,50 @@ function ownedBy(options: unknown): boolean | undefined {
 	return !(parts.length === 1 && parts[0]?.toLowerCase() === "none")
 }
 
-/** A policy made, renamed or dropped: `facts.policies` after it */
+/** A policy's roles, as the catalog names them: `public` for PUBLIC, a role by its name */
+const rolesOf = (roles: unknown): string[] =>
+	(roles as Node[])
+		.map((each) => each["RoleSpec"] as Node)
+		.map((role) =>
+			role["roletype"] === "ROLESPEC_PUBLIC" ? "public" : String(role["rolename"] ?? role["roletype"]).toLowerCase(),
+		)
+		.sort()
+
+/** An ALTER POLICY: its new roles, and what its new USING or WITH CHECK reads, joined to what it read */
+function alterPolicy(node: Node, facts: Facts): void {
+	const policy = facts.policies.get(tableOf(node["table"], facts.schema).key)?.get(String(node["policy_name"]))
+	if (policy === undefined) return
+	if (node["roles"] !== undefined) policy.roles = rolesOf(node["roles"])
+	const more = readsOf([node["qual"], node["with_check"]], facts.schema)
+	for (const key of ["functions", "relations"] as const) for (const each of more[key]) policy.reads[key].add(each)
+}
+
+/** A policy renamed, its settings kept */
+function renamePolicy(node: Node, facts: Facts): void {
+	const held = facts.policies.get(tableOf(node["relation"], facts.schema).key)
+	const policy = held?.get(String(node["subname"]))
+	if (held === undefined || policy === undefined) return
+	held.delete(String(node["subname"]))
+	held.set(String(node["newname"]), policy)
+}
+
+/** A policy made, altered, renamed or dropped: `facts.policies` after it */
 function followPolicy(type: string, node: Node, facts: Facts): void {
 	if (type === "CreatePolicyStmt") {
 		const table = tableOf(node["table"], facts.schema).key
-		facts.policies.set(table, (facts.policies.get(table) ?? new Set()).add(String(node["policy_name"])))
-	} else if (type === "RenameStmt" && node["renameType"] === "OBJECT_POLICY") {
-		const table = tableOf(node["relation"], facts.schema).key
-		const held = facts.policies.get(table)
-		if (held?.delete(String(node["subname"])) === true) held.add(String(node["newname"]))
-		const reads = facts.policyReads.get(table)
-		const read = reads?.get(String(node["subname"]))
-		if (reads !== undefined && read !== undefined) {
-			reads.delete(String(node["subname"]))
-			reads.set(String(node["newname"]), read)
+		const policy: Policy = {
+			cmd: String(node["cmd_name"]),
+			permissive: node["permissive"] === true,
+			reads: readsOf([node["qual"], node["with_check"]], facts.schema),
+			roles: rolesOf(node["roles"]),
 		}
-	} else if (type === "DropStmt" && node["removeType"] === "OBJECT_POLICY") {
+		facts.policies.set(table, (facts.policies.get(table) ?? new Map()).set(String(node["policy_name"]), policy))
+	} else if (type === "AlterPolicyStmt") alterPolicy(node, facts)
+	else if (type === "RenameStmt" && node["renameType"] === "OBJECT_POLICY") renamePolicy(node, facts)
+	else if (type === "DropStmt" && node["removeType"] === "OBJECT_POLICY") {
 		for (const object of node["objects"] as Node[]) {
 			const parts = names((object["List"] as Node)["items"])
-			const table = keyOf(parts.slice(0, -1), facts.schema)
-			facts.policies.get(table)?.delete(parts.at(-1) as string)
-			facts.policyReads.get(table)?.delete(parts.at(-1) as string)
+			facts.policies.get(keyOf(parts.slice(0, -1), facts.schema))?.delete(parts.at(-1) as string)
 		}
 	}
 }

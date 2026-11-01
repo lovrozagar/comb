@@ -4,9 +4,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
-import { refuseDrift, refuseObjectDrift, sqliteDrift } from "./baseline-compare.ts"
+import { refuseDrift, refuseObjectDrift, sqliteDrift, UNCOMPARED } from "./baseline-compare.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
+import { noLive } from "../__fixtures__/live-objects.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -149,6 +150,7 @@ describe("refuseObjectDrift: the warning over the bodies it did not compare", ()
 		writeFileSync(join(dir, "m", "1_init.sql"), history.join("\n"))
 		const out: string[] = []
 		const readLive = async (): Promise<LiveObjects> => ({
+			...noLive(),
 			policies: new Map(),
 			relations: new Map(),
 			routines: new Map(functions.map((name) => [name, { kind: "function" as const, signatures: new Set([""]) }])),
@@ -159,6 +161,7 @@ describe("refuseObjectDrift: the warning over the bodies it did not compare", ()
 		await refuseObjectDrift({ print: (line) => out.push(line), readLive, target: target("x") }, join(dir, "m"))
 		expect(out).toEqual([
 			`Warning: the bodies of ${counted} were not compared: Atlas OSS cannot load them, and comb does not read them`,
+			UNCOMPARED,
 		])
 	})
 })

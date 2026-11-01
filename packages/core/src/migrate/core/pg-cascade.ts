@@ -23,20 +23,12 @@ function readsOf(expr: unknown, schema: string): Reads {
 	return reads
 }
 
-/** A view, a materialized view or a policy made: what it reads, recorded */
+/** A view or a materialized view made: what it reads, recorded (a policy's is with it, pg-catalog-objects.ts) */
 function followReads(type: string, node: Node, facts: Facts): void {
 	if (type === "ViewStmt")
 		facts.reads.set(tableOf(node["view"], facts.schema).key, readsOf(node["query"], facts.schema))
 	else if (type === "CreateTableAsStmt" && node["objtype"] === "OBJECT_MATVIEW")
 		facts.reads.set(tableOf((node["into"] as Node)["rel"], facts.schema).key, readsOf(node["query"], facts.schema))
-	else if (type === "CreatePolicyStmt") {
-		const table = tableOf(node["table"], facts.schema).key
-		const held = facts.policyReads.get(table) ?? new Map<string, Reads>()
-		facts.policyReads.set(
-			table,
-			held.set(String(node["policy_name"]), readsOf([node["qual"], node["with_check"]], facts.schema)),
-		)
-	}
 }
 
 /** What a cascade has dropped so far: relations and functions by key, and columns by their table */
@@ -61,7 +53,9 @@ function dropRelation(key: string, facts: Facts): void {
 		facts.tables,
 		facts.triggers,
 		facts.policies,
-		facts.policyReads,
+		facts.rls,
+		facts.rules,
+		facts.sequences,
 		facts.reads,
 		facts.columnTypes,
 	] as Array<Map<string, unknown>>)
@@ -127,11 +121,8 @@ function cascade(gone: Gone, facts: Facts): void {
 	}
 	for (const key of gone.relations) dropRelation(key, facts)
 	dropReaders(gone, facts)
-	for (const [table, policies] of facts.policyReads) {
-		const read = [...policies].filter(([, reads]) => hits(reads, gone)).map(([name]) => name)
-		for (const name of read) policies.delete(name)
-		for (const name of read) facts.policies.get(table)?.delete(name)
-	}
+	for (const policies of facts.policies.values())
+		for (const [name, policy] of Array.from(policies)) if (hits(policy.reads, gone)) policies.delete(name)
 	for (const [table, triggers] of facts.triggers)
 		facts.triggers.set(
 			table,
@@ -154,7 +145,10 @@ function followCascade(type: string, node: Node, facts: Facts): void {
 
 /** Each of `facts`' reads, and its policies' reads, with each relation key passed through `move` */
 function moveReads(facts: Facts, move: (key: string) => string): void {
-	const all = [...facts.reads.values(), ...[...facts.policyReads.values()].flatMap((each) => [...each.values()])]
+	const all = [
+		...facts.reads.values(),
+		...[...facts.policies.values()].flatMap((each) => [...each.values()].map(({ reads }) => reads)),
+	]
 	for (const reads of all) reads.relations = new Set([...reads.relations].map(move))
 }
 

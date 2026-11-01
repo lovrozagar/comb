@@ -18,6 +18,7 @@ import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { withScratchDb } from "../support/pg.ts"
+import { UNCOMPARED } from "../../../src/migrate/core/baseline-compare.ts"
 
 /* baseline replays the history with Postgres's parser, which its caller loads */
 beforeAll(loadPostgresParser)
@@ -132,7 +133,10 @@ describe("migrate on Postgres: a schema migrated under 0.12's shared history (M7
 				const before = await migratedUnder012(url)
 				const apply = command(url, devUrl)
 				expect(await applyWithAtlas(apply)).toEqual(["20260102000000_backfill.sql"])
-				expect(apply.out[0]).toBe("Adopted from 0.12's shared history: 20260101000000_users.sql")
+				expect(apply.out.slice(0, 2)).toEqual([
+					UNCOMPARED,
+					"Adopted from 0.12's shared history: 20260101000000_users.sql",
+				])
 				expect(await query(url, 'SELECT id FROM app."users" ORDER BY id')).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }])
 				expect(await own(url)).toEqual(["20260101000000", "20260102000000"])
 				const again = command(url, devUrl)

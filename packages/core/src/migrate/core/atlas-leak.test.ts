@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { applyWithAtlas, baselineWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
 import { sqlFiles } from "./atlas-dir.ts"
 import type { Run, RunResult } from "./process.ts"
+import { noLive } from "../__fixtures__/live-objects.ts"
 
 const SECRET = "Pw0rd-Secret"
 const target = (schema = "app") => ({
@@ -90,6 +91,7 @@ const approve = async () => ({ ok: true }) as const
 
 /* the catalog read reaches no database: its schema holds no function or trigger */
 const noObjects = async (): Promise<LiveObjects> => ({
+	...noLive(),
 	policies: new Map(),
 	relations: new Map(),
 	routines: new Map(),

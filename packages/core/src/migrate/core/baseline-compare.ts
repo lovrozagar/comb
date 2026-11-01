@@ -18,7 +18,7 @@ import { explainAtlasFailure } from "./atlas-failure.ts"
 import { atlasNotices, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { asSql, type FtsState, separate } from "./fts-migration.ts"
 import { historyFacts } from "./pg-history.ts"
-import { liveDrift, readLiveObjects } from "./pg-live-objects.ts"
+import { COMPARED, liveDrift, readLiveObjects } from "./pg-live-objects.ts"
 import type { ReadyDev } from "./pg-dev-schema.ts"
 import type { LiveRead } from "./pg-live-types.ts"
 import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
@@ -222,6 +222,10 @@ type ObjectsCompare = {
  * comparison without a word (plan 14's 5.4b); warns once that the bodies of those that match were
  * not compared
  */
+/** What neither Atlas nor comb compares, which a baseline says every time */
+const UNCOMPARED =
+	"Warning: views' and policies' queries and checks, and statistics objects, grants and comments are not compared"
+
 async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?: string): Promise<void> {
 	let history: ExtractedSchema | undefined
 	for (const name of sqlFiles(copy))
@@ -230,7 +234,7 @@ async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?
 	const { matched, only: differ } = liveDrift(historyFacts(history, options.target.schema), live)
 	if (differ.length > 0) {
 		throw new Error(
-			`${refusal ?? "the database's functions, triggers, views, sequences and policies are not the ones the migrations leave, so baseline records nothing"}:\n${differ.join("\n")}`,
+			`${refusal ?? `the database's ${COMPARED} are not the ones the migrations leave, so baseline records nothing`}:\n${differ.join("\n")}`,
 		)
 	}
 	const counted = [
@@ -242,6 +246,8 @@ async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?
 		options.print(
 			`Warning: the bodies of ${counted.join(" and ")} were not compared: Atlas OSS cannot load them, and comb does not read them`,
 		)
+	/* P10 of r18: what neither comparison reads, said every time, as a database may differ there unseen */
+	options.print(UNCOMPARED)
 }
 
-export { type ObjectsCompare, refuseDrift, refuseObjectDrift, ReplayFailed, sqliteDrift }
+export { type ObjectsCompare, refuseDrift, refuseObjectDrift, ReplayFailed, sqliteDrift, UNCOMPARED }

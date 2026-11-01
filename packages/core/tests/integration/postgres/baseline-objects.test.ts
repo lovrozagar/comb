@@ -16,6 +16,7 @@ import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import { withScratchDb } from "../support/pg.ts"
+import { UNCOMPARED } from "../../../src/migrate/core/baseline-compare.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -64,7 +65,7 @@ describe("a Postgres baseline: the functions, procedures and triggers Atlas OSS 
 			await exec(url, `${TABLE}${TRIGGER}`)
 			const { refused } = await baseline(url, devUrl, TABLE)
 			expect(refused).toBe(
-				"the database's functions, triggers, views, sequences and policies are not the ones the migrations leave, so baseline records nothing:\nfunction touch(): only in the database\ntrigger t_touch on t (before insert, for each row): only in the database",
+				"the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security are not the ones the migrations leave, so baseline records nothing:\nfunction touch(): only in the database\ntrigger t_touch on t (before insert, for each row): only in the database",
 			)
 			const client = new pg.Client({ connectionString: url })
 			await client.connect()
@@ -92,6 +93,7 @@ describe("a Postgres baseline: the functions, procedures and triggers Atlas OSS 
 			expect(refused).toBeUndefined()
 			expect(out).toEqual([
 				"Warning: the bodies of 2 functions and 1 trigger were not compared: Atlas OSS cannot load them, and comb does not read them",
+				UNCOMPARED,
 				"Marked applied: 20260101000000_init.sql",
 			])
 		})
@@ -102,7 +104,7 @@ describe("a Postgres baseline: the functions, procedures and triggers Atlas OSS 
 			await exec(url, `CREATE EXTENSION pgcrypto;\n${TABLE}`)
 			const { out, refused } = await baseline(url, devUrl, `CREATE EXTENSION IF NOT EXISTS pgcrypto;\n${TABLE}`)
 			expect(refused).toBeUndefined()
-			expect(out).toEqual(["Marked applied: 20260101000000_init.sql"])
+			expect(out).toEqual([UNCOMPARED, "Marked applied: 20260101000000_init.sql"])
 		})
 	}, 60_000)
 })
@@ -153,6 +155,7 @@ CREATE TRIGGER t_seen AFTER INSERT OR DELETE ON t FOR EACH STATEMENT EXECUTE FUN
 			expect(refused).toBeUndefined()
 			expect(out).toEqual([
 				"Warning: the bodies of 2 functions and 1 trigger were not compared: Atlas OSS cannot load them, and comb does not read them",
+				UNCOMPARED,
 				"Marked applied: 20260101000000_init.sql",
 			])
 		})
@@ -196,7 +199,7 @@ CREATE POLICY "own" ON "u" USING (true);
 			await exec(url, 'CREATE TABLE "u" ("id" serial, "n" integer GENERATED ALWAYS AS IDENTITY, "a" boolean);')
 			const { refused } = await baseline(url, devUrl, OBJECTS)
 			expect(refused).toBe(
-				"the database's functions, triggers, views, sequences and policies are not the ones the migrations leave, so baseline records nothing:\nmaterialized view counts: only in the migrations\npolicy own on u: only in the migrations\nsequence codes: only in the migrations\nview active: only in the migrations",
+				"the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security are not the ones the migrations leave, so baseline records nothing:\nmaterialized view counts: only in the migrations\npolicy own on u (for all, to public, permissive): only in the migrations\nsequence codes (start 1, increment 1, min 1, max 9223372036854775807, no cycle): only in the migrations\nview active: only in the migrations",
 			)
 		})
 	}, 60_000)
@@ -244,4 +247,63 @@ describe("a Postgres baseline on a dev database that is not empty", () => {
 			}
 		})
 	}, 60_000)
+})
+
+/* r18 P10: comb takes row level security and extensions out of Atlas's replay, and Atlas OSS compares
+   no domain, composite or range type, rule or collation, nor a policy's or sequence's settings */
+describe("a Postgres baseline: the kinds and settings Atlas OSS does not compare", () => {
+	const PARTS = {
+		collation: 'CREATE COLLATION ci (provider = icu, locale = "und-u-ks-level2", deterministic = false);\n',
+		composite: "CREATE TYPE pair AS (a int, b int);\n",
+		domain: "CREATE DOMAIN positive AS int CHECK (VALUE > 0);\n",
+		extension: "CREATE EXTENSION IF NOT EXISTS citext;\n",
+		policy: "CREATE POLICY own ON t FOR SELECT TO PUBLIC USING (id > 0);\n",
+		range: "CREATE TYPE span AS RANGE (subtype = int4);\n",
+		rls: "ALTER TABLE t ENABLE ROW LEVEL SECURITY;\nALTER TABLE t FORCE ROW LEVEL SECURITY;\n",
+		rule: "CREATE RULE keep AS ON DELETE TO t DO INSTEAD NOTHING;\n",
+		sequence: "CREATE SEQUENCE s START 5 INCREMENT 2 MAXVALUE 1000 CYCLE;\n",
+	}
+	const ALL = `${TABLE}${Object.values(PARTS).join("")}`
+
+	it("baselines a database the history built, and says which kinds it compares by name alone", async () => {
+		await withDevAndTarget(async (devUrl, url) => {
+			await exec(url, ALL)
+			const { out, refused } = await baseline(url, devUrl, ALL)
+			expect(refused).toBeUndefined()
+			expect(out.join("\n")).toContain("statistics objects, grants and comments are not compared")
+		})
+	})
+
+	it.each([
+		["rls", "row level security on t (enabled, forced): only in the migrations"],
+		["extension", "extension citext: only in the migrations"],
+		["domain", "domain positive: only in the migrations"],
+		["composite", "composite type pair: only in the migrations"],
+		["range", "range type span: only in the migrations"],
+		["rule", "rule keep on t: only in the migrations"],
+		["collation", "collation ci: only in the migrations"],
+		["policy", "policy own on t (for select, to public, permissive): only in the migrations"],
+		["sequence", "sequence s (start 5, increment 2, min 1, max 1000, cycle): only in the migrations"],
+	] as const)("refuses a database without the history's %s, naming it", async (part, line) => {
+		await withDevAndTarget(async (devUrl, url) => {
+			await exec(url, ALL.replace(PARTS[part], ""))
+			const { refused } = await baseline(url, devUrl, ALL)
+			expect(refused).toContain(line)
+		})
+	})
+
+	it("refuses a policy or sequence whose settings differ, and keeps an extension only the database has", async () => {
+		await withDevAndTarget(async (devUrl, url) => {
+			await exec(
+				url,
+				`${TABLE}CREATE EXTENSION IF NOT EXISTS citext;\nCREATE POLICY own ON t FOR ALL TO PUBLIC USING (true);\nCREATE SEQUENCE s;\n`,
+			)
+			const { refused } = await baseline(url, devUrl, `${TABLE}${PARTS.policy}${PARTS.sequence}`)
+			expect(refused).toContain("policy own on t (for all, to public, permissive): only in the database")
+			expect(refused).toContain(
+				"sequence s (start 1, increment 1, min 1, max 9223372036854775807, no cycle): only in the database",
+			)
+			expect(refused).not.toContain("citext")
+		})
+	})
 })

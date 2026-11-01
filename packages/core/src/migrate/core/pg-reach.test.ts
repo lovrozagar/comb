@@ -24,7 +24,11 @@ const FACTS: Facts = {
 		["g", [{ parent: "c", partition: true }]],
 	]),
 	triggers: new Map(),
-	policyReads: new Map(),
+	extensions: new Set(),
+	kinds: new Map(),
+	rls: new Map(),
+	rules: new Map(),
+	sequences: new Map(),
 	reads: new Map(),
 }
 

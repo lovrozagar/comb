@@ -10,6 +10,8 @@
  */
 import { postgresOptionsOf } from "./pg-url.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
+import { sequenceLabel } from "./pg-catalog-kinds.ts"
+import { CATALOG } from "./pg-live-catalog.ts"
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts"
 import type { Facts } from "./pg-nodes.ts"
 
@@ -20,42 +22,6 @@ type Connect = (options: Record<string, unknown>) => Sql
 /* the optional peer and the range comb is tested against */
 const PEER = "postgres"
 const RANGE = ">=3.4.9 <4"
-
-/*
- * one round trip: the target schema's functions and procedures but an extension's (a member of it
- * through pg_depend), each with its input argument types as the parser spells them (the catalog's
- * type name, an array as its element's and [], the schema left out for pg_catalog and the
- * target's), and its tables' triggers but the internal ones a constraint makes, with tgtype and
- * whether they fire: O and A do, D and R (replica only) do not, as the history reads ENABLE and
- * DISABLE (P13); a partition's clone of its parent's trigger is Postgres's, made from the one the
- * history defines, so it is left out (tgparentid, P2 of the 0.15.0 review). Then its views,
- * materialized views and sequences, but an extension's and a sequence a column owns (a serial's or
- * an identity's, deptype a or i), and each table's policies (P9 of the 0.15.0 review)
- */
-const CATALOG = `SELECT 'routine' AS what, p.proname AS name, CASE p.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END AS kind, NULL AS on_table,
-(SELECT coalesce(string_agg(CASE WHEN tn.nspname IN ('pg_catalog', $1) THEN '' ELSE tn.nspname || '.' END || t.typname || CASE WHEN x.arr THEN '[]' ELSE '' END, ',' ORDER BY a.ord), '')
- FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY AS a(oid, ord)
- JOIN pg_catalog.pg_type at ON at.oid = a.oid
- CROSS JOIN LATERAL (SELECT at.typcategory = 'A' AND at.typelem <> 0 AS arr) x
- JOIN pg_catalog.pg_type t ON t.oid = CASE WHEN x.arr THEN at.typelem ELSE at.oid END
- JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace) AS signature,
-NULL::int AS tgtype, NULL::boolean AS enabled
-FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
-WHERE n.nspname = $1 AND p.prokind IN ('f', 'p')
-AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
-UNION ALL
-SELECT 'trigger', t.tgname, NULL, c.relname, NULL, t.tgtype::int, t.tgenabled IN ('O', 'A')
-FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = $1 AND NOT t.tgisinternal AND t.tgparentid = 0
-UNION ALL
-SELECT 'relation', c.relname, CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' ELSE 'sequence' END, NULL, NULL, NULL, NULL
-FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = $1 AND c.relkind IN ('v', 'm', 'S')
-AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_class'::regclass AND d.objid = c.oid AND (d.deptype = 'e' OR (c.relkind = 'S' AND d.deptype IN ('a', 'i') AND d.refclassid = 'pg_catalog.pg_class'::regclass)))
-UNION ALL
-SELECT 'policy', p.polname, NULL, c.relname, NULL, NULL, NULL
-FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_class c ON c.oid = p.polrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = $1`
 
 /**
  * What a postgres.js failure says: its message, or, for the AggregateError it throws with none when
@@ -77,10 +43,37 @@ async function loadPostgres(why: string): Promise<Connect> {
 	}
 }
 
-/* why a baseline loads it: it cannot vouch for the database without it */
-const COMPARES = `baseline compares the database's functions, triggers, views, sequences and policies, which Atlas OSS does not, through the ${PEER} package`
+/** What a baseline compares itself, as its refusals name it */
+const COMPARED =
+	"functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security"
 
-/** What the target schema of `target`'s database holds of functions, procedures and triggers; it writes nothing */
+/* why a baseline loads it: it cannot vouch for the database without it */
+const COMPARES = `baseline compares the database's ${COMPARED}, which Atlas OSS does not, through the ${PEER} package`
+
+/** `row` of the catalog read, into `live` */
+function readRow(row: Record<string, unknown>, live: LiveObjects): void {
+	const [name, table, how] = [String(row["name"]), String(row["on_table"]), String(row["how"])]
+	const what = row["what"]
+	if (what === "relation") {
+		live.relations.set(name, row["kind"] as "materialized view" | "sequence" | "view")
+		if (row["kind"] === "sequence") live.sequences.set(name, how)
+	} else if (what === "policy") live.policies.set(table, (live.policies.get(table) ?? new Map()).set(name, how))
+	else if (what === "routine") {
+		const kind = row["kind"] as "function" | "procedure"
+		const routine = live.routines.get(name) ?? { kind, signatures: new Set<string>() }
+		live.routines.set(name, { kind, signatures: routine.signatures.add(String(row["signature"])) })
+	} else if (what === "kind")
+		live.kinds.set(name, row["kind"] as "collation" | "composite type" | "domain" | "range type")
+	else if (what === "rule") live.rules.set(table, (live.rules.get(table) ?? new Set()).add(name))
+	else if (what === "rls") live.rls.set(name, how)
+	else if (what === "extension") live.extensions.add(name)
+	else {
+		const fired = { enabled: row["enabled"] === true, type: Number(row["tgtype"]) }
+		live.triggers.set(table, (live.triggers.get(table) ?? new Map()).set(name, fired))
+	}
+}
+
+/** What the target schema of `target`'s database holds of what Atlas OSS does not compare; it writes nothing */
 async function readLiveObjects(
 	target: LiveTarget,
 	load: () => Promise<Connect> = () => loadPostgres(COMPARES),
@@ -89,29 +82,23 @@ async function readLiveObjects(
 	const sql = connect({ ...postgresOptionsOf(target.url, "url"), max: 1 })
 	try {
 		const rows = await sql.unsafe(CATALOG, [target.schema])
-		const live: LiveObjects = { policies: new Map(), relations: new Map(), routines: new Map(), triggers: new Map() }
-		for (const row of rows) {
-			const name = String(row["name"])
-			if (row["what"] === "relation") live.relations.set(name, row["kind"] as "materialized view" | "sequence" | "view")
-			else if (row["what"] === "policy") {
-				const table = String(row["on_table"])
-				live.policies.set(table, (live.policies.get(table) ?? new Set()).add(name))
-			} else if (row["what"] === "routine") {
-				const kind = row["kind"] as "function" | "procedure"
-				const routine = live.routines.get(name) ?? { kind, signatures: new Set<string>() }
-				live.routines.set(name, { kind, signatures: routine.signatures.add(String(row["signature"])) })
-			} else {
-				const table = String(row["on_table"])
-				const how = { enabled: row["enabled"] === true, type: Number(row["tgtype"]) }
-				live.triggers.set(table, (live.triggers.get(table) ?? new Map()).set(name, how))
-			}
+		const live: LiveObjects = {
+			extensions: new Set(),
+			kinds: new Map(),
+			policies: new Map(),
+			relations: new Map(),
+			rls: new Map(),
+			routines: new Map(),
+			rules: new Map(),
+			sequences: new Map(),
+			triggers: new Map(),
 		}
+		for (const row of rows) readRow(row, live)
 		return live
 	} catch (error) {
-		throw new Error(
-			`comb could not read the database's functions, triggers, views, sequences and policies: ${maskSecrets(failureOf(error), [target.url])}`,
-			{ cause: error },
-		)
+		throw new Error(`comb could not read the database's ${COMPARED}: ${maskSecrets(failureOf(error), [target.url])}`, {
+			cause: error,
+		})
 	} finally {
 		await sql.end()
 	}
@@ -132,13 +119,23 @@ function fires({ enabled, type }: { enabled: boolean; type: number }): string {
 	return `${timing} ${events.join(" or ")}, for each ${(type & 1) !== 0 ? "row" : "statement"}${enabled ? "" : ", disabled"}`
 }
 
-/** Each trigger's label, by name, table and how it fires; each view, sequence and policy's, by what it is and its name */
-function labels({ policies, relations, triggers }: LiveObjects): { objects: Set<string>; triggers: Set<string> } {
+/**
+ * Each trigger's label, by name, table and how it fires; each view, sequence, policy, type, rule and
+ * table's row level security, by what it is, its name, and its settings where comb compares them
+ */
+function labels(live: LiveObjects): { objects: Set<string>; triggers: Set<string> } {
 	const out = { objects: new Set<string>(), triggers: new Set<string>() }
-	for (const [table, each] of triggers)
+	for (const [table, each] of live.triggers)
 		for (const [name, how] of each) out.triggers.add(`trigger ${name} on ${table} (${fires(how)})`)
-	for (const [name, kind] of relations) out.objects.add(`${kind} ${name}`)
-	for (const [table, each] of policies) for (const name of each) out.objects.add(`policy ${name} on ${table}`)
+	for (const [name, kind] of live.relations)
+		out.objects.add(
+			kind === "sequence" ? `sequence ${name} (${live.sequences.get(name) as string})` : `${kind} ${name}`,
+		)
+	for (const [table, each] of live.policies)
+		for (const [name, how] of each) out.objects.add(`policy ${name} on ${table} (${how})`)
+	for (const [name, kind] of live.kinds) out.objects.add(`${kind} ${name}`)
+	for (const [table, each] of live.rules) for (const name of each) out.objects.add(`rule ${name} on ${table}`)
+	for (const [table, how] of live.rls) out.objects.add(`row level security on ${table} (${how})`)
 	return out
 }
 
@@ -147,6 +144,9 @@ const onlyIn = (database: ReadonlySet<string>, migrations: ReadonlySet<string>):
 	...[...database].filter((label) => !migrations.has(label)).map((label) => `${label}: only in the database`),
 	...[...migrations].filter((label) => !database.has(label)).map((label) => `${label}: only in the migrations`),
 ]
+
+/** `map`'s entries keyed in the target schema: a key with no schema part (M72) */
+const here = <T>(map: Map<string, T>): Array<[string, T]> => [...map].filter(([key]) => !key.includes("."))
 
 /** What the history leaves in the target schema, keyed as the catalog names it: a key with no schema part (M72) */
 function historyObjects(facts: Facts): LiveObjects {
@@ -171,9 +171,38 @@ function historyObjects(facts: Facts): LiveObjects {
 			key.includes(".") || kind === "owned sequence" ? [] : [[key, kind] as const],
 		),
 	)
-	const policies = new Map([...facts.policies].filter(([table, each]) => !table.includes(".") && each.size > 0))
-	return { policies, relations, routines, triggers }
+	const policies = new Map(
+		here(facts.policies).map(([table, each]) => [
+			table,
+			new Map([...each].map(([name, { cmd, permissive, roles }]) => [name, policyHow(cmd, roles, permissive)])),
+		]),
+	)
+	const sequences = new Map(
+		here(facts.sequences).flatMap(([key, settings]) =>
+			relations.has(key) ? [[key, sequenceLabel(settings)] as const] : [],
+		),
+	)
+	const rls = new Map(here(facts.rls).map(([table, { enabled, forced }]) => [table, rlsHow(enabled, forced)]))
+	return {
+		extensions: new Set(facts.extensions),
+		kinds: new Map(here(facts.kinds)),
+		policies,
+		relations,
+		rls,
+		routines,
+		rules: new Map(here(facts.rules)),
+		sequences,
+		triggers,
+	}
 }
+
+/** A policy's settings as the catalog read spells them: `for all, to public, permissive` */
+const policyHow = (cmd: string, roles: readonly string[], permissive: boolean): string =>
+	`for ${cmd}, to ${roles.join(", ")}, ${permissive ? "permissive" : "restrictive"}`
+
+/** A table's row level security as the catalog read spells it: `enabled, not forced` */
+const rlsHow = (enabled: boolean, forced: boolean): string =>
+	`${enabled ? "enabled" : "disabled"}, ${forced ? "forced" : "not forced"}`
 
 /**
  * What the database and the history disagree on, by name and signature or how a trigger fires:
@@ -187,10 +216,15 @@ function liveDrift(
 	const history = historyObjects(facts)
 	const routines = routineDrift(live.routines, history.routines)
 	const [database, migrations] = [labels(live), labels(history)]
+	/* an extension the database alone has may be the platform's own: only a missing one refuses */
+	const extensions = [...history.extensions]
+		.filter((name) => !live.extensions.has(name))
+		.map((name) => `extension ${name}: only in the migrations`)
 	const only = [
 		...routines.only,
 		...onlyIn(database.triggers, migrations.triggers),
 		...onlyIn(database.objects, migrations.objects),
+		...extensions,
 	]
 	const triggers = [...database.triggers].filter((label) => migrations.triggers.has(label)).length
 	const views = [...live.relations.entries()].filter(
@@ -237,4 +271,4 @@ function routineDrift(
 	return out
 }
 
-export { type Connect, failureOf, liveDrift, loadPostgres, readLiveObjects }
+export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, readLiveObjects }

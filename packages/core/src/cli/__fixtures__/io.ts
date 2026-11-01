@@ -5,11 +5,13 @@ import { join } from "node:path"
 import type { Run, RunResult } from "../../migrate/core/process.ts"
 import type { LiveObjects } from "../../migrate/core/pg-live-types.ts"
 import type { CliIo } from "../output.ts"
+import { noLive } from "../../migrate/__fixtures__/live-objects.ts"
 
 export type TestIo = CliIo & { errors: string[]; outputs: string[] }
 
 /* a Postgres baseline's catalog read reaches no database: its schema holds no function or trigger */
 const readPgObjects = async (): Promise<LiveObjects> => ({
+	...noLive(),
 	policies: new Map(),
 	relations: new Map(),
 	routines: new Map(),

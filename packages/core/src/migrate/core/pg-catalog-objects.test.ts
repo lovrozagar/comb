@@ -11,7 +11,7 @@ import { extractSchema } from "./schema.ts"
 function left(sql: string) {
 	const facts = historyFacts(extractSchema(sql, undefined, "postgres"), "public")
 	return {
-		policies: Object.fromEntries([...facts.policies].map(([table, each]) => [table, [...each].sort()])),
+		policies: Object.fromEntries([...facts.policies].map(([table, each]) => [table, [...each.keys()].sort()])),
 		relations: Object.fromEntries(facts.relations),
 	}
 }
@@ -50,7 +50,36 @@ ALTER POLICY ghost ON v RENAME TO z;
 DROP POLICY q ON public.u;`),
 		).toEqual({ policies: { u: ["r"] }, relations: { n: "sequence", s: "sequence", t: "owned sequence" } })
 	})
+})
 
+/* P10 of r18: a policy's command, roles and kind, which a baseline compares, through an ALTER */
+describe("a Postgres history's policies, with their settings", () => {
+	it("keeps a policy's command, roles and kind, the roles an ALTER POLICY gives, and what its checks read", () => {
+		const facts = historyFacts(
+			extractSchema(
+				`CREATE TABLE u (id int);
+CREATE POLICY p ON u AS RESTRICTIVE FOR UPDATE TO b, PUBLIC, CURRENT_USER USING (true);
+CREATE POLICY q ON u USING (true);
+ALTER POLICY p ON u TO b, a WITH CHECK (id IN (SELECT id FROM t));
+ALTER POLICY q ON u USING (id > 0);
+ALTER POLICY ghost ON u TO a;`,
+				undefined,
+				"postgres",
+			),
+			"public",
+		)
+		const [p, q] = [facts.policies.get("u")?.get("p"), facts.policies.get("u")?.get("q")]
+		expect([p?.cmd, p?.permissive, p?.roles, [...(p?.reads.relations ?? [])]]).toEqual([
+			"update",
+			false,
+			["a", "b"],
+			["t"],
+		])
+		expect([q?.cmd, q?.permissive, q?.roles]).toEqual(["all", true, ["public"]])
+	})
+})
+
+describe("what a DROP takes", () => {
 	it("drops what a DROP names, and a table's policies with it", () => {
 		expect(
 			left(`CREATE TABLE u (id int);

@@ -6,6 +6,7 @@ import { historyFacts } from "./pg-history.ts"
 import { liveDrift, loadPostgres, readLiveObjects } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
 import { extractSchema } from "./schema.ts"
+import { noLive } from "../__fixtures__/live-objects.ts"
 
 const TARGET = { devUrl: "postgres://dev/x", lockTimeout: "5s", schema: "app", url: "postgres://app:s3cret@db/app" }
 
@@ -26,24 +27,48 @@ function fakeConnect(answer: { error?: Error; rows?: Array<Record<string, unknow
 	return { load: async () => connect, seen }
 }
 
+/** One catalog read: each kind of row it answers with */
+const ROWS: Array<Record<string, unknown>> = [
+	{ kind: "function", name: "f", on_table: null, signature: "", what: "routine" },
+	{ kind: "function", name: "f", on_table: null, signature: "int4,text[]", what: "routine" },
+	{ kind: "procedure", name: "p", on_table: null, signature: "other.mood", what: "routine" },
+	{ enabled: true, name: "t_ai", on_table: "t", tgtype: 5, what: "trigger" },
+	{ enabled: false, name: "t_bu", on_table: "t", tgtype: 19, what: "trigger" },
+	{ kind: "view", name: "v", on_table: null, what: "relation" },
+	{
+		how: "start 1, increment 1, min 1, max 9, no cycle",
+		kind: "sequence",
+		name: "s",
+		on_table: null,
+		what: "relation",
+	},
+	{ how: "for all, to public, permissive", kind: null, name: "own", on_table: "t", what: "policy" },
+	{ how: "for select, to a, b, restrictive", kind: null, name: "mine", on_table: "t", what: "policy" },
+	{ kind: "domain", name: "positive", on_table: null, what: "kind" },
+	{ kind: null, name: "keep", on_table: "t", what: "rule" },
+	{ how: "enabled, not forced", kind: null, name: "t", on_table: null, what: "rls" },
+	{ kind: null, name: "citext", on_table: null, what: "extension" },
+]
+
 /* plan 14's 5.4b: what the database holds of what Atlas OSS does not compare */
 describe("readLiveObjects", () => {
 	it("reads each routine's overloads, each table's triggers and policies, and the views and sequences, and closes the connection", async () => {
-		const { load, seen } = fakeConnect({
-			rows: [
-				{ kind: "function", name: "f", on_table: null, signature: "", what: "routine" },
-				{ kind: "function", name: "f", on_table: null, signature: "int4,text[]", what: "routine" },
-				{ kind: "procedure", name: "p", on_table: null, signature: "other.mood", what: "routine" },
-				{ enabled: true, name: "t_ai", on_table: "t", tgtype: 5, what: "trigger" },
-				{ enabled: false, name: "t_bu", on_table: "t", tgtype: 19, what: "trigger" },
-				{ kind: "view", name: "v", on_table: null, what: "relation" },
-				{ kind: "sequence", name: "s", on_table: null, what: "relation" },
-				{ kind: null, name: "own", on_table: "t", what: "policy" },
-				{ kind: null, name: "mine", on_table: "t", what: "policy" },
-			],
-		})
+		const { load, seen } = fakeConnect({ rows: ROWS })
 		expect(await readLiveObjects(TARGET, load)).toEqual({
-			policies: new Map([["t", new Set(["own", "mine"])]]),
+			extensions: new Set(["citext"]),
+			kinds: new Map([["positive", "domain"]]),
+			policies: new Map([
+				[
+					"t",
+					new Map([
+						["own", "for all, to public, permissive"],
+						["mine", "for select, to a, b, restrictive"],
+					]),
+				],
+			]),
+			rls: new Map([["t", "enabled, not forced"]]),
+			rules: new Map([["t", new Set(["keep"])]]),
+			sequences: new Map([["s", "start 1, increment 1, min 1, max 9, no cycle"]]),
 			relations: new Map([
 				["v", "view"],
 				["s", "sequence"],
@@ -72,7 +97,7 @@ describe("readLiveObjects", () => {
 	it("says why it could not read, with the password masked, and closes the connection still", async () => {
 		const { load, seen } = fakeConnect({ error: new Error("password authentication failed for s3cret") })
 		await expect(readLiveObjects(TARGET, load)).rejects.toThrow(
-			/^comb could not read the database's functions, triggers, views, sequences and policies: password authentication failed for (?!s3cret)/,
+			/^comb could not read the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security: password authentication failed for (?!s3cret)/,
 		)
 		expect(seen.ended).toBe(true)
 	})
@@ -97,7 +122,7 @@ describe("loadPostgres", () => {
 			await expect(
 				(await import("./pg-live-objects.ts")).readLiveObjects({ schema: "app", url: "postgres://db/db" }),
 			).rejects.toThrow(
-				"baseline compares the database's functions, triggers, views, sequences and policies, which Atlas OSS does not, through the postgres package; install postgres",
+				"baseline compares the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security, which Atlas OSS does not, through the postgres package; install postgres",
 			)
 		} finally {
 			vi.doUnmock("postgres")
@@ -109,7 +134,10 @@ const facts = (sql: string) => historyFacts(extractSchema(sql, undefined, "postg
 const FN = (name: string) => `CREATE FUNCTION ${name}() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;`
 
 /** A database's views, sequences and policies: none */
-const noRelations = (): Pick<LiveObjects, "policies" | "relations"> => ({ policies: new Map(), relations: new Map() })
+const noRelations = (): Omit<LiveObjects, "routines" | "triggers"> => {
+	const { routines: _routines, triggers: _triggers, ...rest } = noLive()
+	return rest
+}
 
 describe("liveDrift", () => {
 	it("names what only one side has, keyed in the target schema, and counts what both have", () => {
@@ -293,7 +321,7 @@ describe("readLiveObjects: a socket, verify-ca and no TLS, read as libpq reads t
 describe("readLiveObjects on a connection every address refused", () => {
 	it("says nothing more than comb's own words for a failure with no message and no errors", async () => {
 		await expect(readLiveObjects(TARGET, fakeConnect({ error: new Error("") }).load)).rejects.toThrow(
-			/^comb could not read the database's functions, triggers, views, sequences and policies: $/,
+			/^comb could not read the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security: $/,
 		)
 	})
 
@@ -304,7 +332,26 @@ describe("readLiveObjects on a connection every address refused", () => {
 			"",
 		)
 		await expect(readLiveObjects(TARGET, fakeConnect({ error: refused }).load)).rejects.toThrow(
-			"comb could not read the database's functions, triggers, views, sequences and policies: connect ECONNREFUSED ::1:55433; connect ECONNREFUSED 127.0.0.1:55433",
+			"comb could not read the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security: connect ECONNREFUSED ::1:55433; connect ECONNREFUSED 127.0.0.1:55433",
 		)
+	})
+})
+
+/* P10 of r18: a restrictive policy and row level security forced alone, as the history leaves them */
+describe("liveDrift on a policy's kind and a table's row level security", () => {
+	it("names what the history leaves that the database lacks, as the catalog read spells it", () => {
+		const left = historyFacts(
+			extractSchema(
+				"CREATE TABLE t (id int); CREATE TABLE u (id int); CREATE POLICY p ON t AS RESTRICTIVE USING (true); ALTER TABLE t FORCE ROW LEVEL SECURITY; ALTER TABLE u ENABLE ROW LEVEL SECURITY;",
+				undefined,
+				"postgres",
+			),
+			"public",
+		)
+		expect(liveDrift(left, noLive()).only).toEqual([
+			"policy p on t (for all, to public, restrictive): only in the migrations",
+			"row level security on t (disabled, forced): only in the migrations",
+			"row level security on u (enabled, not forced): only in the migrations",
+		])
 	})
 })

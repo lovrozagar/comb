@@ -10,6 +10,8 @@ import type { LiveRead } from "./pg-live-types.ts"
 import { postgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
 import { fail, type Fake, fakeAtlas, file, ok, revision, status } from "../../../tests/support/fake-atlas.ts"
+import { holdingRelations, noLive } from "../__fixtures__/live-objects.ts"
+import { UNCOMPARED } from "./baseline-compare.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -31,7 +33,8 @@ const TARGET = {
 /** A database holding `relations`, by name and what each is, and no function, trigger or policy */
 const holding =
 	(...relations: Array<[string, "materialized view" | "sequence" | "view"]>): LiveRead =>
-	async () => ({ policies: new Map(), relations: new Map(relations), routines: new Map(), triggers: new Map() })
+	async () =>
+		holdingRelations(...relations)
 
 function options(
 	exec: Run,
@@ -45,7 +48,13 @@ function options(
 		exec,
 		out,
 		print: (line: string) => out.push(line),
-		readLive: async () => ({ policies: new Map(), relations: new Map(), routines: new Map(), triggers: new Map() }),
+		readLive: async () => ({
+			...noLive(),
+			policies: new Map(),
+			relations: new Map(),
+			routines: new Map(),
+			triggers: new Map(),
+		}),
 		seen,
 		target: TARGET,
 		...more,
@@ -333,7 +342,7 @@ describe("baselineWithAtlas", () => {
 		expect(await baselineWithAtlas(run)).toEqual(["1_a.sql", "2_b.sql"])
 		const set = atlas.calls.find((call) => call.args[1] === "set")
 		expect(set?.args.slice(0, 3)).toEqual(["migrate", "set", "2"])
-		expect(run.out).toEqual(["Marked applied: 1_a.sql", "Marked applied: 2_b.sql"])
+		expect(run.out).toEqual([UNCOMPARED, "Marked applied: 1_a.sql", "Marked applied: 2_b.sql"])
 	})
 
 	/* M88: the version as Atlas reads a file name, M76's reader: a file with no description is its version alone */
@@ -391,7 +400,12 @@ describe("baselineWithAtlas: what Atlas says", () => {
 		const said = { code: 0, stderr: "Skipped triggers.\n", stdout: "Schemas are synced, no changes to be made.\n" }
 		const run = options(fakeAtlas({ schemaDiff: said, status: status({}) }))
 		expect(await baselineWithAtlas(run)).toEqual(["1_a.sql", "2_b.sql"])
-		expect(run.out).toEqual(["Warning: Atlas: Skipped triggers.", "Marked applied: 1_a.sql", "Marked applied: 2_b.sql"])
+		expect(run.out).toEqual([
+			"Warning: Atlas: Skipped triggers.",
+			UNCOMPARED,
+			"Marked applied: 1_a.sql",
+			"Marked applied: 2_b.sql",
+		])
 	})
 })
 

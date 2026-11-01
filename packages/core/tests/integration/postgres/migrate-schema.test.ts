@@ -17,6 +17,7 @@ import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { withScratchDb } from "../support/pg.ts"
+import { noLive } from "../../../src/migrate/__fixtures__/live-objects.ts"
 
 /* a diff and a baseline read Postgres files with Postgres's parser, which their callers load (M75) */
 beforeAll(loadPostgresParser)
@@ -74,6 +75,7 @@ const USERS = 'CREATE TABLE "users" ("id" integer PRIMARY KEY);\n'
 
 /** A database with no function, procedure or trigger: the baseline here compares its tables */
 const noObjects: LiveRead = async () => ({
+	...noLive(),
 	policies: new Map(),
 	relations: new Map(),
 	routines: new Map(),
