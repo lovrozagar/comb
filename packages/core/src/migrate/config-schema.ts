@@ -16,17 +16,28 @@ const DEFAULT_PG_DEV_URL = "docker://postgres/17/dev"
 const NEON_IS_POSTGRES =
 	"Neon and Supabase are postgres URLs: use the postgres provider type with the direct connection URL"
 
+/* a connection string's content is checked when a command resolves its environment, so one unset in
+   this shell blocks no other (P5 of r17, P9 of r18) */
+/* the Turso provider, apart so the union stays short to read */
+const tursoProviderSchema = () =>
+	z.strictObject({
+		apiToken: z.string(),
+		/* the provider names its database, as D1's does; an environment's name is a label (K2 of r18) */
+		databaseName: z
+			.string({
+				error:
+					"the turso provider names its database by databaseName: move the Turso database's name there (0.16 read it from the environment's name)",
+			})
+			.min(1),
+		group: z.string().min(1).default("default"),
+		org: z.string().min(1),
+		type: z.literal("turso"),
+	})
+
 /* Built on use: defineConfig runs once per process, and module scope stays free of work */
 const providerInputSchema = () =>
 	z.discriminatedUnion("type", [
-		/* a connection string's content is checked when a command resolves its environment, so one unset in
-		   this shell blocks no other (P5 of r17, P9 of r18) */
-		z.strictObject({
-			apiToken: z.string(),
-			group: z.string().min(1).default("default"),
-			org: z.string().min(1),
-			type: z.literal("turso"),
-		}),
+		tursoProviderSchema(),
 		z.strictObject({
 			authToken: z.string().optional(),
 			type: z.literal("libsql"),

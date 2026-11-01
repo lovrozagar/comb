@@ -38,7 +38,7 @@ const request = (mode: string, options: ParsedArgs["options"] = {}) => ({
 	mode,
 })
 
-const TURSO = { apiToken: "fake", group: "default", org: "acme", type: "turso" as const }
+const TURSO = { apiToken: "fake", databaseName: "core", group: "default", org: "acme", type: "turso" as const }
 
 describe("openSqliteTarget", () => {
 	it.each([

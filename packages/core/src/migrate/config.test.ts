@@ -159,7 +159,7 @@ describe("migrate/config: resolveDatabaseConfig refusals", () => {
 })
 
 const PROVIDERS = [
-	{ apiToken: "t", group: "g", org: "o", type: "turso" },
+	{ apiToken: "t", databaseName: "core", group: "g", org: "o", type: "turso" },
 	{ authToken: "a", type: "libsql", url: "file:x.db" },
 	{ path: "x.db", type: "bun-sqlite" },
 	{ databaseName: "core", local: true, type: "d1" },

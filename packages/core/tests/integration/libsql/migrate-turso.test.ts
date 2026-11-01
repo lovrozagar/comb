@@ -51,7 +51,7 @@ function tursoProject(migrations: Record<string, string>): MigrateProject {
 	fs.writeFileSync(
 		path.join(project.dir, "comb.migrate.config.ts"),
 		`export default { databases: { core: { migrationsDir: "./m", environments: {
-	local: { name: "core", provider: { type: "turso", org: "acme", apiToken: "fake" } },
+	local: { name: "core", provider: { type: "turso", org: "acme", apiToken: "fake", databaseName: "core" } },
 } } } }\n`,
 	)
 	return project

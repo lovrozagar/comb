@@ -87,26 +87,22 @@ describe("getTursoCredentials", () => {
 })
 
 describe("provider factories", () => {
-	it("createTursoProvider connects with the credentials it fetched for the resolved database name", async () => {
+	/* r18 K2: the provider names its database, never the environment's name, which defaults to its key */
+	it("createTursoProvider connects with the credentials it fetched for the provider's databaseName", async () => {
 		const api = fakeTurso([DB_INFO, TOKEN])
-		const provider = createTursoProvider(
-			{ apiToken: "tok", group: "default", org: "acme", type: "turso" },
-			{ fetch: api.fetch },
-		)
+		const turso = { apiToken: "tok", databaseName: "core-prod", group: "default", org: "acme", type: "turso" } as const
+		const provider = createTursoProvider(turso, { fetch: api.fetch })
 		expect(provider.dialect).toBe("sqlite")
-		const conn = await provider.connect({
-			migrationsDir: "m",
-			name: "core-prod",
-			provider: { apiToken: "tok", group: "default", org: "acme", type: "turso" },
-		})
+		const conn = await provider.connect({ migrationsDir: "m", name: "prod", provider: turso })
 		expect(api.requests[0]?.url).toBe("https://api.turso.tech/v1/organizations/acme/databases/core-prod")
 		await conn.close()
 	})
 
 	it("createTursoProvider uses the real fetch when none is injected", () => {
-		expect(createTursoProvider({ apiToken: "tok", group: "default", org: "acme", type: "turso" }).dialect).toBe(
-			"sqlite",
-		)
+		expect(
+			createTursoProvider({ apiToken: "tok", databaseName: "core", group: "default", org: "acme", type: "turso" })
+				.dialect,
+		).toBe("sqlite")
 	})
 
 	it("createLibsqlProvider runs SQL on the database at its URL, with or without a token", async () => {
@@ -221,14 +217,14 @@ describe("Turso for a reader (M9)", () => {
 	it("connects a reader without creating its database", async () => {
 		const reader = fakeTurso([[404, {}]])
 		const readOnly = createTursoProvider(
-			{ apiToken: "tok", group: "default", org: "acme", type: "turso" },
+			{ apiToken: "tok", databaseName: "core", group: "default", org: "acme", type: "turso" },
 			{ fetch: reader.fetch },
 		)
 		await expect(
 			readOnly.connect({
 				migrationsDir: "m",
 				name: "typo-db",
-				provider: { apiToken: "tok", group: "default", org: "acme", type: "turso" },
+				provider: { apiToken: "tok", databaseName: "core", group: "default", org: "acme", type: "turso" },
 				readonly: true,
 			}),
 		).rejects.toThrow("does not exist")

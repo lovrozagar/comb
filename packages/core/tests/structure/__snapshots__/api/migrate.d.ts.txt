@@ -211,8 +211,10 @@ export type ConnectionProvider = {
     dialect: Dialect;
     connect(config: ResolvedDatabaseConfig): Promise<Connection>;
 };
+/** A Turso database: it names its own database, which the environment's name never does (K2 of r18) */
 export type TursoProviderConfig = {
     apiToken: string;
+    databaseName: string;
     group: string;
     org: string;
     type: "turso";

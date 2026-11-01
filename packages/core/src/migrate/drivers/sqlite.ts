@@ -171,11 +171,11 @@ function createLibsqlConnection(client: Client): Connection {
 export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps = {}): ConnectionProvider {
 	return {
 		async connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
-			const { apiToken, group, org } = config
+			const { apiToken, databaseName, group, org } = config
 			const creds = await getTursoCredentials({
 				...deps,
 				apiToken,
-				dbName: dbConfig.name,
+				dbName: databaseName,
 				group,
 				org,
 				readonly: dbConfig.readonly,

@@ -84,7 +84,7 @@ describe("migrateConfigSchema: connection strings empty at load", () => {
 	it.each([
 		["a postgres devUrl", { devUrl: "", type: "postgres", url: "postgres://localhost/app" }],
 		["a libsql url", { type: "libsql", url: "" }],
-		["a turso apiToken", { apiToken: "", org: "o", type: "turso" }],
+		["a turso apiToken", { apiToken: "", databaseName: "core", org: "o", type: "turso" }],
 	])("loads %s that is empty", (_, provider) => {
 		const config = {
 			databases: { core: { environments: { dev: { provider }, prod: { provider } }, migrationsDir: "m" } },
@@ -136,5 +136,22 @@ describe("parseConfig: values refused at load", () => {
 		],
 	])("refuses %j", (config, message) => {
 		expect(() => parseConfig(config)).toThrow(message)
+	})
+})
+
+/* r18 K2: a Turso provider names its own database; the environment's name is a label */
+describe("parseConfig: the turso provider's databaseName", () => {
+	it("refuses a turso provider without it, saying to move the database's name there", () => {
+		const config = {
+			databases: {
+				core: {
+					environments: { prod: { name: "core-prod", provider: { apiToken: "t", org: "o", type: "turso" } } },
+					migrationsDir: "./m",
+				},
+			},
+		}
+		expect(() => parseConfig(config)).toThrow(
+			"the turso provider names its database by databaseName: move the Turso database's name there (0.16 read it from the environment's name)",
+		)
 	})
 })

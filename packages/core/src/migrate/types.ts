@@ -40,7 +40,8 @@ export type ConnectionProvider = {
    PROVIDER CONFIGS — the shapes config.ts validates and resolves to
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export type TursoProviderConfig = { apiToken: string; group: string; org: string; type: "turso" }
+/** A Turso database: it names its own database, which the environment's name never does (K2 of r18) */
+export type TursoProviderConfig = { apiToken: string; databaseName: string; group: string; org: string; type: "turso" }
 
 export type LibsqlProviderConfig = { authToken?: string | undefined; type: "libsql"; url: string }
 
