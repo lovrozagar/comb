@@ -18,8 +18,10 @@ const NEON_IS_POSTGRES =
 /* Built on use: defineConfig runs once per process, and module scope stays free of work */
 const providerInputSchema = () =>
 	z.discriminatedUnion("type", [
+		/* a connection string's content is checked when a command resolves its environment, so one unset in
+		   this shell blocks no other (P5 of r17, P9 of r18) */
 		z.strictObject({
-			apiToken: z.string().min(1),
+			apiToken: z.string(),
 			group: z.string().min(1).default("default"),
 			org: z.string().min(1),
 			type: z.literal("turso"),
@@ -27,14 +29,14 @@ const providerInputSchema = () =>
 		z.strictObject({
 			authToken: z.string().optional(),
 			type: z.literal("libsql"),
-			url: z.string().min(1),
+			url: z.string(),
 		}),
 		z.strictObject({
 			path: z.string().min(1),
 			type: z.literal("bun-sqlite"),
 		}),
 		z.strictObject({
-			devUrl: z.string().min(1).optional(),
+			devUrl: z.string().optional(),
 			lockTimeout: z.string().min(1).optional(),
 			schema: z.string().min(1).optional(),
 			type: z.literal("postgres"),

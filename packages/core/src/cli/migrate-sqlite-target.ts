@@ -35,6 +35,15 @@ async function readOrAbsent(connect: (readonly: boolean) => Promise<Connection>,
 	}
 }
 
+/** Why the provider cannot connect as given: a libsql url or a turso apiToken left empty, which loads (P9 of r18) */
+function emptyCredential(provider: ConnectionProviderConfig): string | undefined {
+	if (provider.type === "libsql" && provider.url === "")
+		return "url is empty: set the libsql provider's url for this database"
+	if (provider.type === "turso" && provider.apiToken === "")
+		return "apiToken is empty: set the turso provider's apiToken for this database"
+	return undefined
+}
+
 /** `target` opened for `request.mode`; refuses the flags only a D1 database takes */
 export async function openSqliteTarget(
 	{ args, io, mode }: OpenRequest,
@@ -45,6 +54,8 @@ export async function openSqliteTarget(
 		throw new CliError(
 			"--hashes is for a D1 database, whose history records names alone: this one records each file's hash as it applies it",
 		)
+	const empty = emptyCredential(target.provider)
+	if (empty !== undefined) throw new CliError(empty)
 	if (args.options["file"] === undefined && !fs.existsSync(target.migrationsDir))
 		throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)
 	const { createProvider } = await import("../migrate/config.ts")

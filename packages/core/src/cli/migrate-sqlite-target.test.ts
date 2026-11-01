@@ -109,3 +109,13 @@ describe("openSqliteTarget on a database file", () => {
 		await reader.close()
 	})
 })
+
+/* r18 P9: an empty libsql url or turso apiToken loads, and is refused by the command that would use it */
+describe("openSqliteTarget on a connection string that is empty", () => {
+	it.each([
+		[{ type: "libsql" as const, url: "" }, "url is empty: set the libsql provider's url for this database"],
+		[{ ...TURSO, apiToken: "" }, "apiToken is empty: set the turso provider's apiToken for this database"],
+	])("refuses %j, naming the field", async (provider, message) => {
+		await expect(openSqliteTarget(request("status"), resolved(provider))).rejects.toThrow(message)
+	})
+})

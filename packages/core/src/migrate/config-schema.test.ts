@@ -78,3 +78,17 @@ describe("migrate/config: an unknown key at any level", () => {
 		expect(() => parseConfig(config as never)).toThrow(key)
 	})
 })
+
+/* r18 P9: a connection string's content is checked when a command resolves its environment, so one unset in this shell blocks no other */
+describe("migrateConfigSchema: connection strings empty at load", () => {
+	it.each([
+		["a postgres devUrl", { devUrl: "", type: "postgres", url: "postgres://localhost/app" }],
+		["a libsql url", { type: "libsql", url: "" }],
+		["a turso apiToken", { apiToken: "", org: "o", type: "turso" }],
+	])("loads %s that is empty", (_, provider) => {
+		const config = {
+			databases: { core: { environments: { dev: { provider }, prod: { provider } }, migrationsDir: "m" } },
+		}
+		expect(() => parseConfig(config)).not.toThrow()
+	})
+})
