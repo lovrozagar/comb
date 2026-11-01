@@ -32,7 +32,7 @@ import { parseArgs, type ParsedArgs, usageOf } from "./args.ts"
 import { openSqliteTarget, type SqliteTarget } from "./migrate-sqlite-target.ts"
 import { resolveMigrateTarget } from "./migrate-target.ts"
 import { Refused } from "../migrate/core/refused.ts"
-import { checkPassed, CliError, type CliIo, type MigrateOutcome } from "./output.ts"
+import { checkPassed, CliError, type CliIo, type MigrateOutcome, Reported } from "./output.ts"
 
 type Mode = "apply" | "baseline" | "check" | "status"
 
@@ -232,22 +232,8 @@ function readArgv(mode: Mode, argv: readonly string[]): { args: ParsedArgs; db: 
 	return { args, db }
 }
 
-/**
- * `mode`'s argv read, a refusal of it reported, wherever --json is in argv, as the one JSON object
- * stdout promises, its database null as none was read (K20 of the 0.15.0 review)
- */
-function argvOf(mode: Mode, argv: readonly string[], io: CliIo): { args: ParsedArgs; db: string } {
-	try {
-		return readArgv(mode, argv)
-	} catch (error) {
-		if (argv.includes("--json") && error instanceof CliError)
-			io.out(JSON.stringify({ applied: [], database: null, pending: [], refused: [error.message] }))
-		throw error
-	}
-}
-
 export async function migrateApply(mode: Mode, argv: readonly string[], io: CliIo): Promise<void> {
-	const { args, db } = argvOf(mode, argv, io)
+	const { args, db } = readArgv(mode, argv)
 	if (args.options["json"] !== true) {
 		await runMode({ args, db, io, mode })
 		return
@@ -260,7 +246,7 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliI
 		/* a refusal or a failed command is an Error; a user's config can throw anything */
 		const { applied, pending } = error instanceof Refused ? error : { applied: [], pending: [] }
 		report({ applied, pending }, [error instanceof Error ? error.message : String(error)])
-		throw error
+		throw new Reported(error)
 	}
 }
 

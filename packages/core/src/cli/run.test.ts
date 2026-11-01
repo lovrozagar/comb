@@ -136,3 +136,19 @@ describe("runCli: failures", () => {
 		expect(thrown.errors).toEqual(["bad runner"])
 	})
 })
+
+/* r18 K10: one --json rule: wherever --json is in argv, a refusal is the one JSON object stdout promises */
+describe("runCli with --json on a command that does not take it", () => {
+	it.each([
+		[["migrate", "diff", "core", "--json"], "--json does not apply to migrate diff"],
+		[["codegen", "--json"], "--json does not apply to codegen"],
+		[["migrate", "init", "--json"], "--json does not apply to migrate init"],
+	])("prints %j's refusal as one JSON object, and exits 1", async (argv, refused) => {
+		const { runCli } = await import("./run.ts")
+		const io = makeIo(project())
+		expect(await runCli(argv, io)).toBe(1)
+		expect(io.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
+			{ applied: [], database: null, pending: [], refused: [refused] },
+		])
+	})
+})

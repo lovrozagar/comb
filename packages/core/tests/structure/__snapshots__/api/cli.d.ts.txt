@@ -34,6 +34,10 @@ export declare class CliError extends Error {
     readonly exitCode: number;
     constructor(message: string, exitCode?: number);
 }
+/** A failure a command already reported as its --json object: printed on stderr, never as a second object (K10 of r18) */
+export declare class Reported extends CliError {
+    constructor(error: unknown);
+}
 /** A request for help: the CLI prints `text` on out and exits 0, wherever in argv -h or --help came */
 export declare class ShowHelp extends Error {
     readonly text: string;

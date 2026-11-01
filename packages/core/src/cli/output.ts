@@ -38,6 +38,14 @@ export class CliError extends Error {
 	}
 }
 
+/** A failure a command already reported as its --json object: printed on stderr, never as a second object (K10 of r18) */
+export class Reported extends CliError {
+	constructor(error: unknown) {
+		super(error instanceof Error ? error.message : String(error), error instanceof CliError ? error.exitCode : 1)
+		this.name = "Reported"
+	}
+}
+
 /** A request for help: the CLI prints `text` on out and exits 0, wherever in argv -h or --help came */
 export class ShowHelp extends Error {
 	readonly text: string

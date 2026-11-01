@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs"
 import { optionsHelp } from "./args.ts"
 import { cmdCodegen } from "./codegen.ts"
 import { cmdMigrate } from "./migrate.ts"
-import { CliError, type CliIo, ShowHelp } from "./output.ts"
+import { CliError, type CliIo, Reported, ShowHelp } from "./output.ts"
 
 const COMMANDS: ReadonlyArray<[string, string]> = [
 	["codegen [db...]", "Run codegen for the databases in comb.config.ts (all, or those named)"],
@@ -68,6 +68,9 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 			io.out(error.text)
 			return 0
 		}
+		/* one --json rule for every command: a refusal no command reported is the one JSON object stdout promises */
+		if (argv.includes("--json") && error instanceof CliError && !(error instanceof Reported))
+			io.out(JSON.stringify({ applied: [], database: null, pending: [], refused: [error.message] }))
 		io.err(error instanceof Error ? error.message : String(error))
 		return error instanceof CliError ? error.exitCode : 1
 	}
