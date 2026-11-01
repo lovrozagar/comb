@@ -1,19 +1,18 @@
 /**
- * The functions, procedures and triggers a Postgres baseline compares itself, which Atlas OSS leaves
- * out of its comparison without a word (plan 14's 5.4b, probe 4): read from the database's catalog
- * by name, in the target schema, and set against those the history leaves (pg-routines.ts,
- * Facts.triggers). Their bodies are compared by neither: Atlas OSS cannot load them, and comb does
- * not read them.
+ * What a Postgres baseline compares itself, which Atlas OSS leaves out of its comparison without a
+ * word (plan 14's 5.4b, probe 4): the functions, triggers, views, sequences, policies, types, rules,
+ * collations, extensions and row level security of the target schema, read from the catalog by one
+ * query, readCatalog, on the target and on the history's replay on dev (pg-replay.ts, P5 of r19), and
+ * set against each other. Their bodies are compared by neither: Atlas OSS cannot load them, and comb
+ * does not read them.
  *
- * comb has no Postgres client of its own; this one read takes postgres.js, an optional peer, loaded
+ * comb has no Postgres client of its own; these reads take postgres.js, an optional peer, loaded
  * only here. Its specifier is a variable, so a project without it still compiles comb's source.
  */
 import { postgresOptionsOf } from "./pg-url.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
-import { sequenceLabel } from "./pg-catalog-kinds.ts"
 import { CATALOG } from "./pg-live-catalog.ts"
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts"
-import type { Facts } from "./pg-nodes.ts"
 
 /** The postgres.js client, as far as comb uses it */
 type Sql = { end(): Promise<void>; unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>> }
@@ -81,6 +80,29 @@ function readRow(row: Record<string, unknown>, live: LiveObjects): void {
 	}
 }
 
+/**
+ * What `schema` holds of what Atlas OSS does not compare, read through `sql` by the one catalog
+ * query: the target's read and the dev replay's are this one function (P5 of r19), so the two sides
+ * cannot be read two ways
+ */
+async function readCatalog(sql: Pick<Sql, "unsafe">, schema: string): Promise<LiveObjects> {
+	const rows = await sql.unsafe(CATALOG, [schema])
+	const live: LiveObjects = {
+		extensions: new Set(),
+		kinds: new Map(),
+		policies: new Map(),
+		relations: new Map(),
+		rls: new Map(),
+		routines: new Map(),
+		rules: new Map(),
+		sequences: new Map(),
+		triggers: new Map(),
+		user: "",
+	}
+	for (const row of rows) readRow(row, live)
+	return live
+}
+
 /** What the target schema of `target`'s database holds of what Atlas OSS does not compare; it writes nothing */
 async function readLiveObjects(
 	target: LiveTarget,
@@ -89,21 +111,7 @@ async function readLiveObjects(
 	const connect = await load()
 	const sql = connect({ ...postgresOptionsOf(target.url, "url"), max: 1 })
 	try {
-		const rows = await sql.unsafe(CATALOG, [target.schema])
-		const live: LiveObjects = {
-			extensions: new Set(),
-			kinds: new Map(),
-			policies: new Map(),
-			relations: new Map(),
-			rls: new Map(),
-			routines: new Map(),
-			rules: new Map(),
-			sequences: new Map(),
-			triggers: new Map(),
-			user: "",
-		}
-		for (const row of rows) readRow(row, live)
-		return live
+		return await readCatalog(sql, target.schema)
 	} catch (error) {
 		throw new Error(
 			`comb could not read the database's ${COMPARED}: ${maskSecrets(failureOf(error, "url"), [target.url])}`,
@@ -157,85 +165,15 @@ const onlyIn = (database: ReadonlySet<string>, migrations: ReadonlySet<string>):
 	...[...migrations].filter((label) => !database.has(label)).map((label) => `${label}: only in the migrations`),
 ]
 
-/** `map`'s entries keyed in the target schema: a key with no schema part (M72) */
-const here = <T>(map: Map<string, T>): Array<[string, T]> => [...map].filter(([key]) => !key.includes("."))
-
-/** What the history leaves in the target schema, keyed as the catalog names it: a key with no schema part (M72) */
-function historyObjects(facts: Facts, user: string): LiveObjects {
-	/* Postgres keeps no array dimensions in a signature: int[][] is int[] */
-	const routines = new Map(
-		[...facts.routines]
-			.filter(([key]) => !key.includes("."))
-			.map(([key, { kind, signatures }]) => {
-				const flat = new Set([...signatures.keys()].map((signature) => signature.replaceAll(/(?:\[\])+/g, "[]")))
-				return [key, { kind, signatures: flat }] as const
-			}),
-	)
-	const triggers = new Map(
-		[...facts.triggers]
-			.filter(([table, each]) => !table.includes(".") && each.length > 0)
-			.map(
-				([table, each]) => [table, new Map(each.map(({ enabled, name, type }) => [name, { enabled, type }]))] as const,
-			),
-	)
-	const relations = new Map(
-		[...facts.relations].flatMap(([key, kind]) =>
-			key.includes(".") || kind === "owned sequence" ? [] : [[key, kind] as const],
-		),
-	)
-	const policies = new Map(
-		here(facts.policies).map(([table, each]) => [
-			table,
-			new Map(
-				[...each].map(([name, { cmd, permissive, roles }]) => [name, policyHow(cmd, as(roles, user), permissive)]),
-			),
-		]),
-	)
-	const sequences = new Map(
-		here(facts.sequences).flatMap(([key, settings]) =>
-			relations.has(key) ? [[key, sequenceLabel(settings)] as const] : [],
-		),
-	)
-	const rls = new Map(here(facts.rls).map(([table, { enabled, forced }]) => [table, rlsHow(enabled, forced)]))
-	return {
-		extensions: new Set(facts.extensions),
-		kinds: new Map(here(facts.kinds)),
-		policies,
-		relations,
-		rls,
-		routines,
-		rules: new Map(here(facts.rules)),
-		sequences,
-		triggers,
-		user,
-	}
-}
-
-// lookup-table: the role keywords a policy may name that stand for the role the migrations ran as
-const RAN_AS: ReadonlySet<string> = /* @__PURE__ */ new Set(["current_role", "current_user", "session_user"])
-
-/** `roles` with CURRENT_USER and its like read as `user`, the role baseline connects as, as Postgres stored it (R2 of plan 17) */
-const as = (roles: readonly string[], user: string): string[] =>
-	[...new Set(roles.map((role) => (RAN_AS.has(role) ? user : role)))].sort()
-
-/** A policy's settings as the catalog read spells them: `for all, to public, permissive` */
-const policyHow = (cmd: string, roles: readonly string[], permissive: boolean): string =>
-	`for ${cmd}, to ${roles.join(", ")}, ${permissive ? "permissive" : "restrictive"}`
-
-/** A table's row level security as the catalog read spells it: `enabled, not forced` */
-const rlsHow = (enabled: boolean, forced: boolean): string =>
-	`${enabled ? "enabled" : "disabled"}, ${forced ? "forced" : "not forced"}`
-
 /**
- * What the database and the history disagree on, by name and signature or how a trigger fires:
- * each object only one of them has, and how many of each kind they share, whose bodies neither
- * comparison read
+ * What the database and the history disagree on, both read by readCatalog (P5 of r19), the history's
+ * from its replay on dev: each object only one of them has, by name and signature or how a trigger
+ * fires, and how many of each kind they share, whose bodies neither read
  */
 function liveDrift(
-	facts: Facts,
+	history: LiveObjects,
 	live: LiveObjects,
 ): { matched: { routines: number; triggers: number; views: number }; only: string[] } {
-	const history = historyObjects(facts, live.user)
 	const routines = routineDrift(live.routines, history.routines)
 	const [database, migrations] = [labels(live), labels(history)]
 	/* an extension the database alone has may be the platform's own: only a missing one refuses */
@@ -255,22 +193,6 @@ function liveDrift(
 	return { matched: { routines: routines.matched, triggers, views }, only: only.sort() }
 }
 
-/**
- * Whether the catalog's spelling of an argument type is the history's: the same; the type name
- * alone where the history left the type to the search path, which the catalog qualifies; or any
- * type for a `%TYPE`, whose column the history's facts hold no type for
- */
-function argumentMatches(database: string, migrations: string): boolean {
-	if (migrations.endsWith("%TYPE") || database === migrations) return true
-	return !migrations.includes(".") && database.slice(database.lastIndexOf(".") + 1) === migrations
-}
-
-/** Whether two signatures name one overload: as many arguments, each matching */
-function signatureMatches(database: string, migrations: string): boolean {
-	const [ours, theirs] = [database.split(","), migrations.split(",")]
-	return ours.length === theirs.length && ours.every((each, i) => argumentMatches(each, theirs[i] as string))
-}
-
 /** Each routine's overloads paired across the two sides by kind and signature, as `function f(int4)` labels the rest */
 function routineDrift(
 	database: LiveObjects["routines"],
@@ -281,7 +203,7 @@ function routineDrift(
 		const [ours, theirs] = [database.get(name), migrations.get(name)]
 		const left = ours === undefined ? [] : [...ours.signatures]
 		for (const signature of theirs?.signatures ?? []) {
-			const at = ours?.kind === theirs?.kind ? left.findIndex((each) => signatureMatches(each, signature)) : -1
+			const at = ours?.kind === theirs?.kind ? left.indexOf(signature) : -1
 			if (at === -1) out.only.push(`${theirs?.kind} ${name}(${signature}): only in the migrations`)
 			else {
 				left.splice(at, 1)
@@ -293,4 +215,4 @@ function routineDrift(
 	return out
 }
 
-export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, readLiveObjects }
+export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, readCatalog, readLiveObjects }

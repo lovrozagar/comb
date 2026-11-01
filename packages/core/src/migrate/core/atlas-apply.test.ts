@@ -39,22 +39,21 @@ const holding =
 function options(
 	exec: Run,
 	more: Partial<ApplyOptions & Pick<ObjectsCompare, "readLive">> = {},
-): ApplyOptions & Pick<ObjectsCompare, "readLive"> & { out: string[]; seen: string[] } {
+): ApplyOptions & Pick<ObjectsCompare, "readLive" | "readReplay"> & { out: string[]; seen: string[] } {
 	const out: string[] = []
 	const seen: string[] = []
+	const readLive =
+		more.readLive ??
+		(async () => ({ ...noLive(), policies: new Map(), relations: new Map(), routines: new Map(), triggers: new Map() }))
 	return {
 		approve: async (migration: ParsedMigration) => (seen.push(migration.filename), { ok: true }),
 		dir,
 		exec,
 		out,
 		print: (line: string) => out.push(line),
-		readLive: async () => ({
-			...noLive(),
-			policies: new Map(),
-			relations: new Map(),
-			routines: new Map(),
-			triggers: new Map(),
-		}),
+		readLive,
+		/* the history's replay on dev, faked: it leaves what the faked database holds (P5 of r19) */
+		readReplay: async (target) => readLive(target),
 		seen,
 		target: TARGET,
 		...more,

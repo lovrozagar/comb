@@ -155,7 +155,7 @@ function follow(statement: Statement, state: PgObjects, source: string): boolean
 		objects.set(stateKey(made.kind, made.key), { ...made, extras })
 		return true
 	}
-	if (followRls(statement, state.rls, source)) return true
+	if (followRls(statement, state.rls)) return true
 	const [, sequence, clauses] = ALTER_SEQUENCE.exec(code) ?? []
 	const known = sequence === undefined ? undefined : objects.get(stateKey("sequence", lastPart(sequence)))
 	if (known !== undefined) {

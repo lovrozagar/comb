@@ -11,30 +11,11 @@ type Node = Record<string, unknown>
 type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefined }
 
 /** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
-/** What a relation that is no table is: a sequence a column owns is the column's, which no baseline compares on its own */
-type Relation = "materialized view" | "owned sequence" | "sequence" | "view"
-
 /**
- * What a view's query or a policy's expressions read: the relations and functions they name, by key,
- * and the column names they read, `all` for a `*` (P4 of r18)
+ * What a view's or materialized view's query reads: the relations and functions it names, by key,
+ * and the column names it reads, `all` for a `*` (P4 of r18)
  */
 type Reads = { columns: Set<string> | "all"; functions: Set<string>; relations: Set<string> }
-
-/** A policy: its command, its roles (`public` for PUBLIC), whether it is permissive, and what it reads (P10 of r18) */
-type Policy = { cmd: string; permissive: boolean; reads: Reads; roles: string[] }
-
-/** A sequence's settings as its CREATE and ALTERs give them, each left out where Postgres defaults it (P10 of r18) */
-type SequenceSettings = {
-	as: string
-	cycle: boolean
-	increment: string
-	max: string | undefined
-	min: string | undefined
-	start: string | undefined
-}
-
-/** The kinds of object a baseline compares by name in the target schema, which Atlas OSS does not (P10 of r18) */
-type CatalogKind = "collation" | "composite type" | "domain" | "range type"
 
 /** The facts of a history with nothing in it, its names keyed under `schema` */
 const emptyFacts = (schema: string): Facts => ({
@@ -43,19 +24,12 @@ const emptyFacts = (schema: string): Facts => ({
 	columnTypes: new Map(),
 	defined: new Set(),
 	defaultPartitions: new Map(),
-	extensions: new Set(),
-	kinds: new Map(),
 	domainDefaults: new Map(),
 	domains: new Map(),
 	eventTriggers: new Map(),
 	operators: new Map(),
 	parents: new Map(),
-	policies: new Map(),
 	reads: new Map(),
-	rls: new Map(),
-	rules: new Map(),
-	sequences: new Map(),
-	relations: new Map(),
 	routines: new Map(),
 	schema,
 	tables: new Map(),
@@ -122,10 +96,6 @@ type Facts = {
 	 * (a join, a set operation), and how its columns name the base's, `all` for `*` (M71)
 	 */
 	views: Map<string, { base: string | undefined; columns: Map<string, string> | "all" }>
-	/** the views, materialized views and sequences the history leaves, by key, a column's own sequence marked so (P9) */
-	relations: Map<string, Relation>
-	/** each table's policies, by name, with their settings and what they read (P9, P10 of r18) */
-	policies: Map<string, Map<string, Policy>>
 	/**
 	 * each table's triggers, with the writes that fire them, and `type` as Postgres's tgtype holds
 	 * when and for what it fires (row, before, instead of, each event's bit) (P13)
@@ -133,16 +103,6 @@ type Facts = {
 	triggers: Map<string, Array<{ enabled: boolean; events: TriggerEvent[]; fn: string; name: string; type: number }>>
 	/** what each view and materialized view reads, by its key, for a CASCADE drop to follow (P4 of r18) */
 	reads: Map<string, Reads>
-	/** each extension the history creates, by name (P10 of r18) */
-	extensions: Set<string>
-	/** each domain, composite and range type and collation, by key, with its kind (P10 of r18) */
-	kinds: Map<string, CatalogKind>
-	/** each table's row level security, enabled and forced, where either is on (P10 of r18) */
-	rls: Map<string, { enabled: boolean; forced: boolean }>
-	/** each table's rules, by name (P10 of r18) */
-	rules: Map<string, Set<string>>
-	/** each sequence's settings, by key (P10 of r18) */
-	sequences: Map<string, SequenceSettings>
 }
 
 /** Every node under `node`, by its type, the type's fields with it */
@@ -220,7 +180,6 @@ function columnTypeOf(def: Node, schema: string): ColumnType {
 }
 
 export {
-	type CatalogKind,
 	columnTypeOf,
 	type ColumnType,
 	emptyFacts,
@@ -232,11 +191,8 @@ export {
 	names,
 	type Node,
 	nodesOf,
-	type Policy,
 	type Reads,
-	type Relation,
 	type Routines,
-	type SequenceSettings,
 	tableOf,
 	typed,
 	typeOf,

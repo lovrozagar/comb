@@ -9,7 +9,7 @@
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 import type { PgTarget } from "./atlas-target.ts"
-import { ReplayFailed } from "./baseline-compare.ts"
+import { ReplayFailed } from "./replay-failed.ts"
 import { type Connect, failureOf, loadPostgres } from "./pg-live-objects.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { ReplayFailed } from "./baseline-compare.ts"
+import { ReplayFailed } from "./replay-failed.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 
 /** A postgres.js that records each query and its connection's end, `fails` failing the query */

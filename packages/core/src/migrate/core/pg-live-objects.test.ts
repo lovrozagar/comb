@@ -2,10 +2,8 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
-import { historyFacts } from "./pg-history.ts"
 import { liveDrift, loadPostgres, readLiveObjects } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
-import { extractSchema } from "./schema.ts"
 import { noLive } from "../__fixtures__/live-objects.ts"
 
 const TARGET = { devUrl: "postgres://dev/x", lockTimeout: "5s", schema: "app", url: "postgres://app:s3cret@db/app" }
@@ -132,28 +130,26 @@ describe("loadPostgres", () => {
 	})
 })
 
-const facts = (sql: string) => historyFacts(extractSchema(sql, undefined, "postgres"), "app")
-const FN = (name: string) => `CREATE FUNCTION ${name}() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;`
+/* P5 of r19: both sides are one catalog read, the history's from its replay on dev */
+/** A catalog read holding `more` */
+const read = (more: Partial<LiveObjects> = {}): LiveObjects => ({ ...noLive(), ...more })
 
-/** A database's views, sequences and policies: none */
-const noRelations = (): Omit<LiveObjects, "routines" | "triggers"> => {
-	const { routines: _routines, triggers: _triggers, ...rest } = noLive()
-	return rest
-}
+/** A catalog read holding one routine f of `kind`, with `signature` */
+const fn = (kind: "function" | "procedure", signature: string) =>
+	read({ routines: new Map([["f", { kind, signatures: new Set([signature]) }]]) })
 
-describe("liveDrift", () => {
-	it("names what only one side has, keyed in the target schema, and counts what both have", () => {
-		const history = facts(
-			[
-				'CREATE TABLE t ("id" int);',
-				FN("f"),
-				FN("app.g"),
-				FN("other.h"),
-				"CREATE TRIGGER t_ai AFTER INSERT ON t FOR EACH ROW EXECUTE FUNCTION f();",
-			].join("\n"),
-		)
-		const live = {
-			...noRelations(),
+describe("liveDrift between two catalog reads", () => {
+	it("names what only one side has, and counts what both have", () => {
+		const history = read({
+			relations: new Map([["v", "view" as const]]),
+			routines: new Map([
+				["f", { kind: "function" as const, signatures: new Set([""]) }],
+				["g", { kind: "function" as const, signatures: new Set(["int4"]) }],
+			]),
+			triggers: new Map([["t", new Map([["t_ai", { enabled: true, type: 5 }]])]]),
+		})
+		const live = read({
+			relations: new Map([["v", "view" as const]]),
 			routines: new Map([
 				["f", { kind: "function" as const, signatures: new Set([""]) }],
 				["k", { kind: "procedure" as const, signatures: new Set(["int4"]) }],
@@ -167,74 +163,49 @@ describe("liveDrift", () => {
 					]),
 				],
 			]),
-		}
+		})
 		expect(liveDrift(history, live)).toEqual({
-			matched: { routines: 1, triggers: 1, views: 0 },
+			matched: { routines: 1, triggers: 1, views: 1 },
 			only: [
-				"function g(): only in the migrations",
+				"function g(int4): only in the migrations",
 				"procedure k(int4): only in the database",
 				"trigger t_x on t (instead of delete or truncate, for each statement): only in the database",
 			],
 		})
 	})
 
-	it("is a match of kind as well as name", () => {
-		const live = {
-			...noRelations(),
-			routines: new Map([["f", { kind: "procedure" as const, signatures: new Set([""]) }]]),
-			triggers: new Map<string, Map<string, { enabled: boolean; type: number }>>(),
-		}
-		expect(liveDrift(facts(FN("f")), live).only).toEqual([
+	it("is a match of kind as well as name, and of the signature as the catalog spells both", () => {
+		expect(liveDrift(fn("function", ""), fn("procedure", "")).only).toEqual([
 			"function f(): only in the migrations",
 			"procedure f(): only in the database",
 		])
-	})
-
-	/* Postgres keeps no array dimensions in a signature */
-	it("reads a history's int[][] argument as the int4[] the catalog names", () => {
-		const live = {
-			...noRelations(),
-			routines: new Map([["f", { kind: "function" as const, signatures: new Set(["int4[]"]) }]]),
-			triggers: new Map<string, Map<string, { enabled: boolean; type: number }>>(),
-		}
-		const history = facts("CREATE FUNCTION f(a int[][]) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;")
-		expect(liveDrift(history, live)).toEqual({ matched: { routines: 1, triggers: 0, views: 0 }, only: [] })
-	})
-})
-
-/* P9 of the 0.15.0 review: what the history leaves outside the target schema, or a column owns, is not compared */
-describe("liveDrift: a view outside the target schema and a sequence a column owns", () => {
-	it("leaves both out of what the history holds", () => {
-		const history = facts("CREATE TABLE u (id int); CREATE VIEW other.v AS SELECT 1; CREATE SEQUENCE o OWNED BY u.id;")
-		expect(liveDrift(history, { ...noRelations(), routines: new Map(), triggers: new Map() }).only).toEqual([])
-	})
-})
-
-/* the reviewer's reading of P13: two spellings the history and the catalog give one argument type differently */
-/** A database holding function f with `signatures` */
-const routine = (...signatures: string[]) => ({
-	...noRelations(),
-	routines: new Map([["f", { kind: "function" as const, signatures: new Set(signatures) }]]),
-	triggers: new Map<string, Map<string, { enabled: boolean; type: number }>>(),
-})
-
-describe("liveDrift: an argument type spelled otherwise by the history", () => {
-	it("matches a type the history leaves to the search path by its name, and a qualified one exactly", () => {
-		const bare = facts("CREATE FUNCTION f(m mytype) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;")
-		expect(liveDrift(bare, routine("public.mytype")).only).toEqual([])
-		const qualified = facts("CREATE FUNCTION f(m other.mood) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;")
-		expect(liveDrift(qualified, routine("elsewhere.mood")).only).toEqual([
-			"function f(elsewhere.mood): only in the database",
-			"function f(other.mood): only in the migrations",
+		expect(liveDrift(fn("function", "int4[]"), fn("function", "int4")).only).toEqual([
+			"function f(int4): only in the database",
+			"function f(int4[]): only in the migrations",
 		])
 	})
+})
 
-	it("matches a %TYPE argument, which the catalog holds resolved, by its place, the arity still counted", () => {
-		const typed = facts("CREATE FUNCTION f(e users.email%TYPE, n int) RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;")
-		expect(liveDrift(typed, routine("text,int4")).only).toEqual([])
-		expect(liveDrift(typed, routine("text")).only).toEqual([
-			"function f(text): only in the database",
-			"function f(users.email%TYPE,int4): only in the migrations",
+describe("liveDrift on settings and extensions", () => {
+	it("names a policy, row level security and a sequence by their settings, and refuses only a missing extension", () => {
+		const history = read({
+			extensions: new Set(["citext"]),
+			policies: new Map([["t", new Map([["p", "for all, to public, restrictive"]])]]),
+			relations: new Map([["s", "sequence" as const]]),
+			rls: new Map([["t", "disabled, forced"]]),
+			sequences: new Map([["s", "start 1, increment 1, min 1, max 9, no cycle"]]),
+		})
+		const live = read({
+			extensions: new Set(["pg_stat_statements"]),
+			relations: new Map([["s", "sequence" as const]]),
+			sequences: new Map([["s", "start 1, increment 2, min 1, max 9, no cycle"]]),
+		})
+		expect(liveDrift(history, live).only).toEqual([
+			"extension citext: only in the migrations",
+			"policy p on t (for all, to public, restrictive): only in the migrations",
+			"row level security on t (disabled, forced): only in the migrations",
+			"sequence s (start 1, increment 1, min 1, max 9, no cycle): only in the migrations",
+			"sequence s (start 1, increment 2, min 1, max 9, no cycle): only in the database",
 		])
 	})
 })
@@ -336,25 +307,6 @@ describe("readLiveObjects on a connection every address refused", () => {
 		await expect(readLiveObjects(TARGET, fakeConnect({ error: refused }).load)).rejects.toThrow(
 			"comb could not read the database's functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security: connect ECONNREFUSED ::1:55433; connect ECONNREFUSED 127.0.0.1:55433",
 		)
-	})
-})
-
-/* P10 of r18: a restrictive policy and row level security forced alone, as the history leaves them */
-describe("liveDrift on a policy's kind and a table's row level security", () => {
-	it("names what the history leaves that the database lacks, as the catalog read spells it", () => {
-		const left = historyFacts(
-			extractSchema(
-				"CREATE TABLE t (id int); CREATE TABLE u (id int); CREATE POLICY p ON t AS RESTRICTIVE USING (true); ALTER TABLE t FORCE ROW LEVEL SECURITY; ALTER TABLE u ENABLE ROW LEVEL SECURITY;",
-				undefined,
-				"postgres",
-			),
-			"public",
-		)
-		expect(liveDrift(left, noLive()).only).toEqual([
-			"policy p on t (for all, to public, restrictive): only in the migrations",
-			"row level security on t (disabled, forced): only in the migrations",
-			"row level security on u (enabled, not forced): only in the migrations",
-		])
 	})
 })
 

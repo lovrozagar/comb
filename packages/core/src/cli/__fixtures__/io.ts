@@ -18,6 +18,12 @@ const readPgObjects = async (): Promise<LiveObjects> => ({
 	triggers: new Map(),
 })
 
+/* nor does the history's replay on dev (P5 of r19): it leaves what the faked database holds */
+const replayPgHistory = async (_target: unknown, { targetUser }: { targetUser: string }): Promise<LiveObjects> => ({
+	...(await readPgObjects()),
+	user: targetUser,
+})
+
 /* nor does the dev database a non-public schema is created on (P12): Atlas, faked, needs none */
 const readyPgDev = async (): Promise<void> => undefined
 
@@ -33,6 +39,7 @@ export function makeIo(cwd: string, run?: Run, confirm?: CliIo["confirm"]): Test
 		outputs,
 		readPgObjects,
 		readyPgDev,
+		replayPgHistory,
 		run,
 	}
 }

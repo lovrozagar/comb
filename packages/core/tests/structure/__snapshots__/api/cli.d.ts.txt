@@ -6,6 +6,7 @@ export { help, runCli } from "./run.ts";
 // cli/output.d.ts
 import type { Run } from "../migrate/core/process.ts";
 import type { LiveRead } from "../migrate/core/pg-live-types.ts";
+import type { replayCatalog } from "../migrate/core/pg-replay.ts";
 /** Where the CLI reads its working directory, writes its output, asks, and starts processes. */
 export type CliIo = {
     cwd: string;
@@ -14,6 +15,8 @@ export type CliIo = {
     run?: Run | undefined;
     /** How a Postgres baseline reads the database's catalog of what Atlas OSS does not compare, postgres.js unless a test fakes it (5.4b) */
     readPgObjects?: LiveRead | undefined;
+    /** How a Postgres baseline reads the history replayed on its dev database, comb's own (pg-replay.ts) unless a test fakes it (P5 of r19) */
+    replayPgHistory?: typeof replayCatalog | undefined;
     /** How a diff, baseline or adoption gives the dev database a non-public target schema, comb's own unless a test fakes it (P12) */
     readyPgDev?: ((target: {
         devUrl: string;
@@ -127,3 +130,137 @@ export type LiveTarget = {
 };
 /** How a baseline reads them: postgres.js, unless a test fakes it */
 export type LiveRead = (target: LiveTarget) => Promise<LiveObjects>;
+
+// migrate/core/pg-replay.d.ts
+import type { PgTarget } from "./atlas-target.ts";
+import { type Connect } from "./pg-live-objects.ts";
+import type { LiveObjects } from "./pg-live-types.ts";
+/** A history file as baseline reads it */
+type HistoryFile = {
+    name: string;
+    sql: string;
+};
+/**
+ * `sql` without its one CONCURRENTLY keyword: the code tokens are read by comb's scanner, so the word
+ * in a string, a comment or a quoted identifier is never touched, and the reparse proves only the flag changed
+ */
+declare function cutConcurrently(sql: string, tree: unknown): string;
+/** The statements the replay sends for `files`, in order, each with the file it is from */
+declare function replayStatements(files: readonly HistoryFile[]): Array<{
+    file: string;
+    sql: string;
+}>;
+/**
+ * The catalog the history `files` leave in `target`'s schema, replayed on its dev database in one
+ * transaction that is rolled back, read by the target's own query (readCatalog). The role the replay
+ * ran as stands for the target's role wherever the read names it (`targetUser`), as CURRENT_USER
+ * names the role each database was built as
+ */
+declare function replayCatalog(target: PgTarget, { files, targetUser }: {
+    files: readonly HistoryFile[];
+    targetUser: string;
+}, load?: () => Promise<Connect>): Promise<LiveObjects>;
+/**
+ * Whether `files` make anything the catalog read compares, which a docker:// dev database, Atlas's
+ * own container, keeps out of comb's reach: by parse-tree node, read once
+ */
+declare function makesCompared(files: readonly HistoryFile[]): boolean;
+export { cutConcurrently, type HistoryFile, makesCompared, replayCatalog, replayStatements };
+
+// migrate/core/atlas-target.d.ts
+/** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
+type PgTarget = {
+    devUrl: string;
+    lockTimeout: string;
+    schema: string;
+    url: string;
+};
+/** What an Atlas call reads from its config: the target, the dev database, the migrations dir, and whose history */
+type AtlasNeeds = {
+    dev?: boolean | undefined;
+    dir?: string | undefined;
+    /** the target unscoped, for the one call that lists the database's schemas (M78) */
+    allSchemas?: boolean | undefined;
+    /** a history other than the target's own, by its schema: the shared one 0.12 kept every schema's in (M77), or another schema's own (M78) */
+    revisions?: string | undefined;
+    url?: boolean | undefined;
+};
+/** The flags and environment an Atlas call runs with, its scratch directory, and the scrubber for its output */
+type AtlasEnv = {
+    args: readonly string[];
+    dir: string;
+    env: Readonly<Record<string, string>>;
+    /** free text: the call's secrets, and any other URL's password or secret query value, masked */
+    scrub(text: string): string;
+};
+/** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */
+declare function pgUrlProblems(target: PgTarget, needs?: AtlasNeeds): {
+    errors: string[];
+    warnings: string[];
+};
+/** The schema Atlas keeps public's history in, as it always has */
+declare const SHARED_REVISIONS = "atlas_schema_revisions";
+/**
+ * The schema Atlas keeps `target`'s history in: the shared one for public, and one of its own for
+ * any other scope, so two schemas of one database never read each other's history. Postgres cuts a
+ * name at 63 bytes, so a scope too long, or not a plain lower-case name, is named by its hash.
+ */
+declare function revisionsSchema(target: PgTarget): string;
+/** Both URLs as Atlas gets them */
+declare const atlasUrls: (target: PgTarget) => {
+    devUrl: string;
+    url: string;
+};
+/** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to `revisions` */
+declare function atlasConfig(needs: AtlasNeeds, revisions: string): string;
+/**
+ * Run `body` with an Atlas config for `target` and `needs` in a fresh 0700 directory, removed
+ * afterwards however `body` ends. A target with errors is refused before anything is written.
+ */
+declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T;
+/**
+ * What Atlas said on stderr as it succeeded, a line each: comb passes each on as a warning, as Atlas
+ * OSS may say it left part of a schema out of what it compared (plan 14's 5.4)
+ */
+declare const atlasNotices: (stderr: string) => string[];
+export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasNotices, atlasUrls, pgUrlProblems, type PgTarget, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
+
+// migrate/core/pg-live-objects.d.ts
+import type { LiveObjects, LiveTarget } from "./pg-live-types.ts";
+/** The postgres.js client, as far as comb uses it */
+type Sql = {
+    end(): Promise<void>;
+    unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>>;
+};
+type Connect = (options: Record<string, unknown>) => Sql;
+/**
+ * What a postgres.js failure says: its message, or, for the AggregateError it throws with none when
+ * every address refuses, each address's answer joined (P15 of the 0.15.0 review)
+ */
+declare function failureOf(error: unknown, field?: "devUrl" | "url"): string;
+/** postgres.js, or the refusal naming it and `why` comb needs it here */
+declare function loadPostgres(why: string): Promise<Connect>;
+/** What a baseline compares itself, as its refusals name it */
+declare const COMPARED = "functions, triggers, views, sequences, policies, types, rules, collations, extensions and row level security";
+/**
+ * What `schema` holds of what Atlas OSS does not compare, read through `sql` by the one catalog
+ * query: the target's read and the dev replay's are this one function (P5 of r19), so the two sides
+ * cannot be read two ways
+ */
+declare function readCatalog(sql: Pick<Sql, "unsafe">, schema: string): Promise<LiveObjects>;
+/** What the target schema of `target`'s database holds of what Atlas OSS does not compare; it writes nothing */
+declare function readLiveObjects(target: LiveTarget, load?: () => Promise<Connect>): Promise<LiveObjects>;
+/**
+ * What the database and the history disagree on, both read by readCatalog (P5 of r19), the history's
+ * from its replay on dev: each object only one of them has, by name and signature or how a trigger
+ * fires, and how many of each kind they share, whose bodies neither read
+ */
+declare function liveDrift(history: LiveObjects, live: LiveObjects): {
+    matched: {
+        routines: number;
+        triggers: number;
+        views: number;
+    };
+    only: string[];
+};
+export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, readCatalog, readLiveObjects };

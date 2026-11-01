@@ -25,6 +25,15 @@ describe("a Postgres history's triggers and routines, by name", () => {
 			),
 		).toEqual([{ enabled: true, events: ["insert"], fn: "f", name: "t", type: 5 }])
 	})
+})
+
+describe("a Postgres history's statement triggers", () => {
+	it("keeps a statement trigger's tgtype without the row bit, as Postgres builds it", () => {
+		const statement = "CREATE TRIGGER s BEFORE UPDATE ON users EXECUTE FUNCTION f();"
+		expect(facts(statement).triggers.get("users")).toEqual([
+			{ enabled: true, events: ["update"], fn: "f", name: "s", type: 2 | 16 },
+		])
+	})
 
 	it("moves what the history attached to a renamed table, and the tables that name it a parent", () => {
 		const read = facts(

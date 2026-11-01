@@ -36,6 +36,7 @@ export async function migratePostgres(
 		exec: io.run,
 		print: io.out,
 		readLive: io.readPgObjects,
+		readReplay: io.replayPgHistory,
 		readyDev: io.readyPgDev,
 		target: target.provider,
 	}

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it } from "vitest"
+import { loadPostgresParser } from "./pg-parser.ts"
 import { emptyPgObjects, pgDelta, separatePgObjects } from "./pg-objects.ts"
 import { atlasTables } from "./pg-tables.ts"
+
+beforeAll(loadPostgresParser)
 
 /* a secured table with a policy, as drizzle-kit 1.0.0-rc.4 exports it */
 const from = separatePgObjects(`CREATE TABLE "post" ("id" integer);
@@ -40,16 +43,28 @@ ALTER TABLE "team" DISABLE ROW LEVEL SECURITY;`,
 		])
 	})
 
-	it("refuses a change of row level security among other actions, naming the file", () => {
-		expect(() =>
-			separatePgObjects(
-				'ALTER TABLE "post" ADD COLUMN "x" text, ENABLE ROW LEVEL SECURITY;',
-				emptyPgObjects(),
-				"20260101000000_x.sql",
-			),
-		).toThrow(
-			'20260101000000_x.sql: change row level security in an ALTER TABLE of its own, as comb writes that state itself: ALTER TABLE "post" ADD COLUMN "x" text, ENABLE ROW LEVEL SECURITY',
+	/* P14 of r19: the commands are read from the parse tree, any number per ALTER and among others */
+	it("follows each row level security command an ALTER combines, and keeps one that does more for Atlas", () => {
+		const { plain, state } = separatePgObjects(
+			'ALTER TABLE "post" ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;\nALTER TABLE "team" ADD COLUMN "x" text, ENABLE ROW LEVEL SECURITY, NO FORCE ROW LEVEL SECURITY;',
+			emptyPgObjects(),
+			"20260101000000_x.sql",
 		)
+		expect(plain).toEqual([
+			'ALTER TABLE "team" ADD COLUMN "x" text, ENABLE ROW LEVEL SECURITY, NO FORCE ROW LEVEL SECURITY',
+		])
+		expect([...state.rls]).toEqual([
+			["post", { enabled: true, forced: true, name: '"post"' }],
+			["team", { enabled: true, forced: false, name: '"team"' }],
+		])
+	})
+
+	it("leaves an ALTER TABLE with no row level security command, or a table's other words for it, to Atlas", () => {
+		const sql = 'ALTER TABLE "post" ADD COLUMN "row level security" text;\nALTER TABLE "post" RENAME TO "article";'
+		expect(separatePgObjects(sql).plain).toEqual([
+			'ALTER TABLE "post" ADD COLUMN "row level security" text',
+			'ALTER TABLE "post" RENAME TO "article"',
+		])
 	})
 
 	it("secures a table Atlas creates as the target says, a rename's included, and writes nothing for one it drops", () => {

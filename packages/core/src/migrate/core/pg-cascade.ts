@@ -1,10 +1,9 @@
 /**
- * What a CASCADE drop in a Postgres history takes with it (P4 of r18): Postgres drops each view and
- * materialized view that reads a dropped relation, column or function, each view over those, each
- * policy that reads one, and each trigger that runs a dropped function; a dropped type takes the
- * columns of it, and a dropped schema everything in it. The facts follow, so baseline compares a
- * database apply built from the same files as equal. What each object reads is recorded from its
- * parse tree as it is made (pg-history.ts), as the history holds no other text of it.
+ * What a CASCADE drop in a Postgres history takes with it, as rating reads the facts after it (P4
+ * of r18): Postgres drops each view and materialized view that reads a dropped relation, column or
+ * function, each view over those, and each trigger that runs a dropped function; a dropped type
+ * takes the columns of it, and a dropped schema everything in it. Rating alone reads this: baseline
+ * reads what a cascade leaves from Postgres itself, on its replay of the history (P5 of r19).
  */
 import { type Facts, keyOf, names, type Node, nodesOf, type Reads, tableOf } from "./pg-nodes.ts"
 
@@ -23,7 +22,7 @@ function readsOf(expr: unknown, schema: string): Reads {
 	return reads
 }
 
-/** A view or a materialized view made: what it reads, recorded (a policy's is with it, pg-catalog-objects.ts) */
+/** A view or a materialized view made: what it reads, recorded */
 function followReads(type: string, node: Node, facts: Facts): void {
 	if (type === "ViewStmt")
 		facts.reads.set(tableOf(node["view"], facts.schema).key, readsOf(node["query"], facts.schema))
@@ -47,18 +46,9 @@ function hits(reads: Reads, gone: Gone): boolean {
 
 /** A relation and everything the facts hold on it, gone */
 function dropRelation(key: string, facts: Facts): void {
-	for (const map of [
-		facts.relations,
-		facts.views,
-		facts.tables,
-		facts.triggers,
-		facts.policies,
-		facts.rls,
-		facts.rules,
-		facts.sequences,
-		facts.reads,
-		facts.columnTypes,
-	] as Array<Map<string, unknown>>)
+	for (const map of [facts.views, facts.tables, facts.triggers, facts.reads, facts.columnTypes] as Array<
+		Map<string, unknown>
+	>)
 		map.delete(key)
 }
 
@@ -66,9 +56,9 @@ function dropRelation(key: string, facts: Facts): void {
 const inSchema = (key: string, schema: string, facts: Facts): boolean =>
 	schema === facts.schema ? !key.includes(".") : key.startsWith(`${schema}.`)
 
-/** A schema's contents, gone into `gone`: its tables and relations, and its routines */
+/** A schema's contents, gone into `gone`: its tables, views and materialized views, and its routines */
 function dropSchema(schema: string, gone: Gone, facts: Facts): void {
-	for (const key of [...facts.tables.keys(), ...facts.relations.keys()])
+	for (const key of [...facts.tables.keys(), ...facts.reads.keys()])
 		if (inSchema(key, schema, facts)) gone.relations.add(key)
 	for (const key of facts.routines.keys()) if (inSchema(key, schema, facts)) gone.functions.add(key)
 }
@@ -121,8 +111,6 @@ function cascade(gone: Gone, facts: Facts): void {
 	}
 	for (const key of gone.relations) dropRelation(key, facts)
 	dropReaders(gone, facts)
-	for (const policies of facts.policies.values())
-		for (const [name, policy] of Array.from(policies)) if (hits(policy.reads, gone)) policies.delete(name)
 	for (const [table, triggers] of facts.triggers)
 		facts.triggers.set(
 			table,
@@ -143,13 +131,9 @@ function followCascade(type: string, node: Node, facts: Facts): void {
 		cascade({ columns: new Map([[table, new Set(columns)]]), functions: new Set(), relations: new Set() }, facts)
 }
 
-/** Each of `facts`' reads, and its policies' reads, with each relation key passed through `move` */
+/** Each of `facts`' reads with each relation key passed through `move` */
 function moveReads(facts: Facts, move: (key: string) => string): void {
-	const all = [
-		...facts.reads.values(),
-		...[...facts.policies.values()].flatMap((each) => [...each.values()].map(({ reads }) => reads)),
-	]
-	for (const reads of all) reads.relations = new Set([...reads.relations].map(move))
+	for (const reads of facts.reads.values()) reads.relations = new Set([...reads.relations].map(move))
 }
 
 export { followCascade, followReads, moveReads, readsOf }

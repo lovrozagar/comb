@@ -5,6 +5,7 @@
 import { createInterface } from "node:readline/promises"
 import type { Run } from "../migrate/core/process.ts"
 import type { LiveRead } from "../migrate/core/pg-live-types.ts"
+import type { replayCatalog } from "../migrate/core/pg-replay.ts"
 
 /** Where the CLI reads its working directory, writes its output, asks, and starts processes. */
 export type CliIo = {
@@ -14,6 +15,8 @@ export type CliIo = {
 	run?: Run | undefined
 	/** How a Postgres baseline reads the database's catalog of what Atlas OSS does not compare, postgres.js unless a test fakes it (5.4b) */
 	readPgObjects?: LiveRead | undefined
+	/** How a Postgres baseline reads the history replayed on its dev database, comb's own (pg-replay.ts) unless a test fakes it (P5 of r19) */
+	replayPgHistory?: typeof replayCatalog | undefined
 	/** How a diff, baseline or adoption gives the dev database a non-public target schema, comb's own unless a test fakes it (P12) */
 	readyPgDev?: ((target: { devUrl: string; schema: string }) => Promise<void>) | undefined
 	/** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */

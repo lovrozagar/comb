@@ -10,23 +10,24 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { openMemory } from "../drivers/memory.ts"
-import type { Connection, ExtractedSchema } from "../types.ts"
+import type { Connection } from "../types.ts"
 import { hashDir, sqlFiles } from "./atlas-dir.ts"
 import { HISTORY_TABLES, notEngineTables } from "./engine-tables.ts"
 import { sqliteDevUrl } from "./atlas-env.ts"
 import { explainAtlasFailure } from "./atlas-failure.ts"
 import { atlasNotices, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { asSql, type FtsState, separate } from "./fts-migration.ts"
-import { historyFacts } from "./pg-history.ts"
 import { COMPARED, liveDrift, readLiveObjects } from "./pg-live-objects.ts"
 import type { ReadyDev } from "./pg-dev-schema.ts"
-import type { LiveRead } from "./pg-live-types.ts"
+import type { LiveObjects, LiveRead } from "./pg-live-types.ts"
 import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
 import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
 import type { Run } from "./process.ts"
-import { extractSchema } from "./schema.ts"
 import { codeOf } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
+import { loadPostgresParser } from "./pg-parser.ts"
+import { type HistoryFile, makesCompared, replayCatalog } from "./pg-replay.ts"
+import { ReplayFailed } from "./replay-failed.ts"
 
 const SYNCED = "Schemas are synced, no changes to be made."
 /* the tables SQLite keeps behind a virtual table: fts5's, fts3 and fts4's, and rtree's */
@@ -166,14 +167,6 @@ function replayableHistory(exec: Run, copy: string): string {
 	return plain
 }
 
-/** The dev database could not be readied, or Atlas could not replay the history on it or read the target: nothing was compared */
-class ReplayFailed extends Error {
-	constructor(message: string, options?: ErrorOptions) {
-		super(message, options)
-		this.name = "ReplayFailed"
-	}
-}
-
 /**
  * Refuses a database whose tables are not the ones the migrations leave: Atlas diffs the database
  * against the history replayed on the dev database. Atlas OSS inspects no view, policy or
@@ -211,6 +204,8 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string, ref
 type ObjectsCompare = {
 	print(line: string): void
 	readLive?: LiveRead | undefined
+	/** how the history's replay on dev is read: comb's own (pg-replay.ts) unless a test says otherwise */
+	readReplay?: typeof replayCatalog | undefined
 	/** how the dev database gets the target schema before a replay: comb's own unless a test says otherwise (P12) */
 	readyDev?: ReadyDev | undefined
 	target: PgTarget
@@ -219,35 +214,76 @@ type ObjectsCompare = {
 /**
  * Refuses a database whose functions, procedures or triggers are not, by name, the ones the
  * migrations of `copy` leave in the target schema, which Atlas OSS leaves out of refuseDrift's
- * comparison without a word (plan 14's 5.4b); warns once that the bodies of those that match were
- * not compared
+ * comparison without a word (plan 14's 5.4b). It replays and reads before Atlas runs on dev, and
+ * returns its verdict for after Atlas's comparison, so a table's difference is still named first:
+ * the warnings to print (the bodies of those that match were not compared), or the refusal
  */
+/**
+ * What the history `files` leave of what the catalog read compares, read from their replay on dev
+ * (P5 of r19). A docker:// dev is Atlas's own container, which comb cannot reach: a history that
+ * makes nothing compared leaves nothing, and any other is refused naming devUrl
+ */
+async function historyCatalog(
+	options: ObjectsCompare,
+	files: readonly HistoryFile[],
+	user: string,
+): Promise<LiveObjects> {
+	if (!options.target.devUrl.startsWith("docker:"))
+		return (options.readReplay ?? replayCatalog)(options.target, { files, targetUser: user })
+	if (makesCompared(files)) {
+		throw new ReplayFailed(
+			`baseline compares the database's ${COMPARED} with the history replayed on devUrl, which comb reads itself, and ${options.target.devUrl} is Atlas's own container, which comb cannot reach: set devUrl to a postgres:// scratch database comb can connect to (it replays the history there in one transaction and rolls it back)`,
+		)
+	}
+	return { ...emptyCatalog(), user }
+}
+
+/** What the catalog read finds in a schema the history leaves nothing in */
+const emptyCatalog = (): LiveObjects => ({
+	extensions: new Set(),
+	kinds: new Map(),
+	policies: new Map(),
+	relations: new Map(),
+	rls: new Map(),
+	routines: new Map(),
+	rules: new Map(),
+	sequences: new Map(),
+	triggers: new Map(),
+	user: "",
+})
+
 /** What neither Atlas nor comb compares, which a baseline says every time */
 const UNCOMPARED =
 	"Warning: views' and policies' queries and checks, and statistics objects, grants and comments are not compared"
 
-async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?: string): Promise<void> {
-	let history: ExtractedSchema | undefined
-	for (const name of sqlFiles(copy))
-		history = extractSchema(readFileSync(join(copy, name), "utf8"), history, "postgres")
+async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?: string): Promise<() => string[]> {
+	/* the replay reads each file as Postgres's parser does */
+	await loadPostgresParser()
+	const files = sqlFiles(copy).map((name) => ({ name, sql: readFileSync(join(copy, name), "utf8") }))
 	const live = await (options.readLive ?? readLiveObjects)(options.target)
-	const { matched, only: differ } = liveDrift(historyFacts(history, options.target.schema), live)
+	const { matched, only: differ } = liveDrift(await historyCatalog(options, files, live.user), live)
 	if (differ.length > 0) {
-		throw new Error(
+		const refused = new Error(
 			`${refusal ?? `the database's ${COMPARED} are not the ones the migrations leave, so baseline records nothing`}:\n${differ.join("\n")}`,
 		)
+		return () => {
+			throw refused
+		}
 	}
 	const counted = [
 		...(matched.routines === 0 ? [] : [`${matched.routines} function${matched.routines === 1 ? "" : "s"}`]),
 		...(matched.triggers === 0 ? [] : [`${matched.triggers} trigger${matched.triggers === 1 ? "" : "s"}`]),
 		...(matched.views === 0 ? [] : [`${matched.views} view${matched.views === 1 ? "" : "s"}`]),
 	]
-	if (counted.length > 0)
-		options.print(
-			`Warning: the bodies of ${counted.join(" and ")} were not compared: Atlas OSS cannot load them, and comb does not read them`,
-		)
 	/* P10 of r18: what neither comparison reads, said every time, as a database may differ there unseen */
-	options.print(UNCOMPARED)
+	return () => [
+		...(counted.length === 0
+			? []
+			: [
+					`Warning: the bodies of ${counted.join(" and ")} were not compared: Atlas OSS cannot load them, and comb does not read them`,
+				]),
+		UNCOMPARED,
+	]
 }
 
 export { type ObjectsCompare, refuseDrift, refuseObjectDrift, ReplayFailed, sqliteDrift, UNCOMPARED }

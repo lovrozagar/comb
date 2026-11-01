@@ -7,6 +7,7 @@
  * delta after Atlas's statements.
  */
 import { codeOf, lastPart, QNAME, splitTopLevel } from "./sql-code.ts"
+import { parsePostgres } from "./pg-parser.ts"
 import { pgStatements } from "./pg-split.ts"
 
 /** A table's row level security as a migration leaves it */
@@ -50,30 +51,40 @@ function atlasTables(atlasSql: string): AtlasTables {
 	return { altered, created, dropped }
 }
 
-// per-process-constant: a change of a table's row level security, composed once
-const ROW_SECURITY = /* @__PURE__ */ new RegExp(
-	`^ALTER TABLE (?:IF EXISTS )?(?:ONLY )?(${QNAME}) (ENABLE|DISABLE|FORCE|NO FORCE) ROW LEVEL SECURITY$`,
-	"i",
-)
+// per-process-constant: the table an ALTER TABLE names, as written, composed once
+const ALTERED = /* @__PURE__ */ new RegExp(`^ALTER TABLE (?:IF EXISTS )?(?:ONLY )?(${QNAME})`, "i")
 const OFF = { enabled: false, forced: false }
 
-/** Whether a statement changes row level security, which comb owns: true when it does, refused when it also does more */
-function followRls({ code, sql }: Statement, rls: Map<string, Rls>, source: string): boolean {
-	const [, table, action] = ROW_SECURITY.exec(code) ?? []
-	if (table === undefined || action === undefined) {
-		if (/^ALTER TABLE\b/i.test(code) && /\bROW LEVEL SECURITY\b/i.test(code)) {
-			throw new Error(
-				`${source}: change row level security in an ALTER TABLE of its own, as comb writes that state itself: ${sql}`,
-			)
-		}
-		return false
-	}
+// lookup-table: each row level security command of an ALTER TABLE, by its parse-tree subtype, and the flag it sets
+const RLS_COMMANDS: Readonly<Record<string, Partial<Pick<Rls, "enabled" | "forced">>>> = {
+	AT_DisableRowSecurity: { enabled: false },
+	AT_EnableRowSecurity: { enabled: true },
+	AT_ForceRowSecurity: { forced: true },
+	AT_NoForceRowSecurity: { forced: false },
+}
+
+/**
+ * Whether a statement changes row level security, which comb owns, following each table's flags: read
+ * from its parse tree, so any number of the commands, among others, set them (P14 of r19). It is
+ * comb's whole, out of Atlas's history, only when every command is one; a statement that does more
+ * stays in it, where Atlas runs it and leaves the flags to comb
+ */
+function followRls({ code, sql }: Statement, rls: Map<string, Rls>): boolean {
+	const [, table] = ALTERED.exec(code) ?? []
+	if (table === undefined) return false
+	/* the parser's one RawStmt: an ALTER TABLE's commands, each with its subtype */
+	const [{ stmt }] = parsePostgres(sql).stmts as [
+		{ stmt: { AlterTableStmt?: { cmds: Array<{ AlterTableCmd: { subtype: string } }> } } },
+	]
+	const commands = (stmt.AlterTableStmt?.cmds ?? []).map(({ AlterTableCmd }) => AlterTableCmd.subtype)
+	const flags = commands.flatMap((subtype) => {
+		const set = RLS_COMMANDS[subtype]
+		return set === undefined ? [] : [set]
+	})
+	if (flags.length === 0) return false
 	const key = lastPart(table)
-	const was = rls.get(key) ?? OFF
-	const verb = action.toUpperCase()
-	const set = verb === "ENABLE" || verb === "DISABLE" ? { enabled: verb === "ENABLE" } : { forced: verb === "FORCE" }
-	rls.set(key, { ...was, ...set, name: table })
-	return true
+	rls.set(key, { ...(rls.get(key) ?? OFF), ...Object.assign({}, ...flags), name: table })
+	return flags.length === commands.length
 }
 
 /**

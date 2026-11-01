@@ -67,7 +67,7 @@ function ownOf(options: AtlasCommand, copy: string, raw: AtlasStatus): { foreign
 
 /** Record `ran` in the schema's own history, without running it, once the schema proves it holds what they leave: Atlas writes the rows in one transaction */
 async function adopt(
-	options: AtlasCommand & Pick<ObjectsCompare, "readLive" | "readyDev">,
+	options: AtlasCommand & Pick<ObjectsCompare, "readLive" | "readReplay" | "readyDev">,
 	copy: string,
 	ran: readonly string[],
 ): Promise<void> {
@@ -212,7 +212,7 @@ const migrations = (n: number) => `${n} migration${n === 1 ? "" : "s"}`
  * ones the migrations leave. Returns the files marked.
  */
 async function baselineWithAtlas(
-	options: AtlasCommand & Pick<ObjectsCompare, "readLive" | "readyDev">,
+	options: AtlasCommand & Pick<ObjectsCompare, "readLive" | "readReplay" | "readyDev">,
 ): Promise<string[]> {
 	return onSnapshotAsync(options, async (copy) => {
 		const status = atlasStatus(options, copy, { notClean: true })
@@ -232,9 +232,11 @@ async function baselineWithAtlas(
 		if (latest === undefined) throw new Error("there are no migrations to record")
 		/* the replay runs on a dev database holding the schema (P12) */
 		await (options.readyDev ?? readyDevSchema)(options.target)
+		/* comb's replay first: it rolls back and leaves dev as it found it, where Atlas's leaves what Atlas does not inspect (P5 of r19) */
+		const warnings = await refuseObjectDrift(options, copy)
 		for (const notice of refuseDrift({ exec: options.exec ?? run, target: options.target }, copy))
 			options.print(`Warning: Atlas: ${notice}`)
-		await refuseObjectDrift(options, copy)
+		for (const warning of warnings()) options.print(warning)
 		/* the version as Atlas reads the name, the reader status and adoption use (M76, M88) */
 		const set = atlas(options, copy, ["set", versionOf(latest).version])
 		if (set.code !== 0) throw new Error(`atlas migrate set: ${set.said}`)

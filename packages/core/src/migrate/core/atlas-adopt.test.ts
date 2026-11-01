@@ -190,30 +190,44 @@ const unreachable: Run = (_cmd, args) =>
 		? { code: 1, stderr: "Error: dial tcp: lookup dev: no such host", stdout: "" }
 		: { code: 0, stderr: "", stdout: "" }
 
-describe("proveAdoption", () => {
-	const target = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "app", url: "postgres://db/db" }
+const target = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "app", url: "postgres://db/db" }
+/* the catalog reads and the dev schema, faked: the database and the history's replay hold nothing (P5 of r19) */
+const fakes = { readLive: noObjects, readReplay: noObjects, readyDev: async () => undefined }
 
+describe("proveAdoption", () => {
 	it("passes a schema that holds what the files leave, passing Atlas's notices on", async () => {
 		const copy = mkdtempSync(join(tmpdir(), "comb-prove-"))
 		writeFileSync(join(copy, "1_a.sql"), 'CREATE TABLE "a" ("id" integer);\n')
 		const out: string[] = []
 		const exec = diffing("Schemas are synced, no changes to be made.", "views are not inspected")
 		await proveAdoption(
-			{ exec, print: (line) => out.push(line), readLive: noObjects, readyDev: async () => undefined, target },
+			{
+				exec,
+				print: (line) => out.push(line),
+				...fakes,
+				target,
+			},
 			copy,
 			["1_a.sql"],
 		)
 		expect(out).toEqual(["Warning: Atlas: views are not inspected", UNCOMPARED])
 		rmSync(copy, { force: true, recursive: true })
 	})
+})
 
+describe("proveAdoption: what it refuses", () => {
 	/* a ruling on P2: proof replays on the dev database, so one Atlas cannot reach refuses by its name */
 	it("refuses, naming devUrl, when Atlas cannot replay the files on the dev database", async () => {
 		const copy = mkdtempSync(join(tmpdir(), "comb-prove-"))
 		writeFileSync(join(copy, "1_a.sql"), 'CREATE TABLE "a" ("id" integer);\n')
 		await expect(
 			proveAdoption(
-				{ exec: unreachable, print: () => undefined, readLive: noObjects, readyDev: async () => undefined, target },
+				{
+					exec: unreachable,
+					print: () => undefined,
+					...fakes,
+					target,
+				},
 				copy,
 				["1_a.sql"],
 			),
@@ -229,7 +243,12 @@ describe("proveAdoption", () => {
 		const exec = diffing('-- Create "a" table\nCREATE TABLE "a" ("id" integer);')
 		await expect(
 			proveAdoption(
-				{ exec, print: () => undefined, readLive: noObjects, readyDev: async () => undefined, target },
+				{
+					exec,
+					print: () => undefined,
+					...fakes,
+					target,
+				},
 				copy,
 				["1_a.sql"],
 			),

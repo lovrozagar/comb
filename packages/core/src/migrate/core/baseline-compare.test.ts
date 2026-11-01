@@ -148,7 +148,6 @@ describe("refuseObjectDrift: the warning over the bodies it did not compare", ()
 			...triggers.map((name) => `CREATE TRIGGER ${name} AFTER INSERT ON t FOR EACH ROW EXECUTE FUNCTION g();`),
 		]
 		writeFileSync(join(dir, "m", "1_init.sql"), history.join("\n"))
-		const out: string[] = []
 		const readLive = async (): Promise<LiveObjects> => ({
 			...noLive(),
 			policies: new Map(),
@@ -158,11 +157,55 @@ describe("refuseObjectDrift: the warning over the bodies it did not compare", ()
 				triggers.length === 0 ? [] : [["t", new Map(triggers.map((name) => [name, { enabled: true, type: 5 }]))]],
 			),
 		})
-		await refuseObjectDrift({ print: (line) => out.push(line), readLive, target: target("x") }, join(dir, "m"))
-		expect(out).toEqual([
+		const verdict = await refuseObjectDrift(
+			{ print: () => undefined, readLive, readReplay: readLive, target: target("x") },
+			join(dir, "m"),
+		)
+		expect(verdict()).toEqual([
 			`Warning: the bodies of ${counted} were not compared: Atlas OSS cannot load them, and comb does not read them`,
 			UNCOMPARED,
 		])
+	})
+})
+
+/** A replay read a docker:// dev must never reach */
+const unreachable = async (): Promise<LiveObjects> => {
+	throw new Error("the replay reached for docker://")
+}
+/** A database holding view v */
+const holding = async (): Promise<LiveObjects> => ({ ...noLive(), relations: new Map([["v", "view" as const]]) })
+
+/* P5 of r19: Atlas's docker:// dev is out of comb's reach, so a history with something the catalog read compares is refused */
+describe("refuseObjectDrift on a docker:// dev database", () => {
+	beforeAll(loadPostgresParser)
+	const docker = { ...target("x"), devUrl: "docker://postgres/17/dev" }
+
+	it.each([
+		"CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;",
+		"CREATE TABLE t (id int);\nALTER TABLE t ENABLE ROW LEVEL SECURITY;",
+		"CREATE TABLE t (id int);\nCREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
+		"CREATE EXTENSION citext;",
+	])("refuses %j, naming devUrl and the postgres:// fix", async (sql) => {
+		writeFileSync(join(dir, "m", "1_init.sql"), sql)
+		await expect(
+			refuseObjectDrift(
+				{ print: () => undefined, readLive: async () => noLive(), readReplay: unreachable, target: docker },
+				join(dir, "m"),
+			),
+		).rejects.toThrow(
+			/docker:\/\/postgres\/17\/dev is Atlas's own container, which comb cannot reach: set devUrl to a postgres:\/\/ scratch database/,
+		)
+	})
+
+	it("compares a history of plain tables with the database without a replay, naming what only the database has", async () => {
+		writeFileSync(join(dir, "m", "1_init.sql"), "CREATE TABLE t (id int);\nCREATE INDEX t_id ON t (id);")
+		const options = { print: () => undefined, readReplay: unreachable, target: docker }
+		expect((await refuseObjectDrift({ ...options, readLive: async () => noLive() }, join(dir, "m")))()).toEqual([
+			UNCOMPARED,
+		])
+		expect(await refuseObjectDrift({ ...options, readLive: holding }, join(dir, "m"))).toThrow(
+			"view v: only in the database",
+		)
 	})
 })
 
