@@ -34,10 +34,11 @@ const emptyFacts = (schema: string): Facts => ({
 })
 
 /**
- * A column's type, keyed as typeOf keys it: its modifiers, none for one unbounded, and its array
- * dimensions, 0 for a scalar (`int[]` and `int ARRAY` have 1)
+ * A column's type, keyed as typeOf keys it: its modifiers, none for one unbounded, its array
+ * dimensions, 0 for a scalar (`int[]` and `int ARRAY` have 1), and its collation, undefined for its
+ * type's default
  */
-type ColumnType = { dims: number; mods: readonly number[]; type: string }
+type ColumnType = { collation: string | undefined; dims: number; mods: readonly number[]; type: string }
 
 /** Whether a column of `columns` has the type `type` */
 const typed = (columns: ReadonlyMap<string, ColumnType>, type: string): boolean =>
@@ -131,12 +132,21 @@ function tableOf(relation: unknown, schema: string): { key: string; name: string
 /** A type's key under `schema` */
 const typeOf = (typeName: unknown, schema: string): string => keyOf(names((typeName as Node)["names"]), schema)
 
-/** A type name as a column's type under `schema`: its key, its modifiers and its array dimensions */
-const columnTypeOf = (typeName: unknown, schema: string): ColumnType => ({
-	dims: (((typeName as Node)["arrayBounds"] as unknown[] | undefined) ?? []).length,
-	mods: modsOf(typeName),
-	type: typeOf(typeName, schema),
-})
+/**
+ * A column definition's type under `schema`, as a CREATE TABLE, an ADD COLUMN or an ALTER COLUMN …
+ * TYPE leaves it: a definition that names no collation, or `default`, takes its type's default
+ */
+function columnTypeOf(def: Node, schema: string): ColumnType {
+	const typeName = def["typeName"] as Node
+	const clause = def["collClause"] as Node | undefined
+	const collation = clause === undefined ? undefined : keyOf(names(clause["collname"]), schema)
+	return {
+		collation: collation === "default" ? undefined : collation,
+		dims: ((typeName["arrayBounds"] as unknown[] | undefined) ?? []).length,
+		mods: modsOf(typeName),
+		type: typeOf(typeName, schema),
+	}
+}
 
 export {
 	columnTypeOf,

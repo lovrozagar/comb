@@ -80,3 +80,33 @@ describe("a retype on either side of an array", () => {
 		expect(rate("ALTER TABLE a ALTER COLUMN labels TYPE varchar(20)[];", more).safety).toBe("unsafe")
 	})
 })
+
+/* r18 P3: a retype sets the column's collation, its type's default when it names none, and a change rebuilds its indexes */
+describe("a widening retype and the column's collation", () => {
+	const COLLATED = 'CREATE TABLE c (plain varchar(10), coded varchar(10) COLLATE "C");'
+	it.each([
+		'ALTER TABLE c ALTER COLUMN plain TYPE text COLLATE "C";',
+		'ALTER TABLE c ALTER COLUMN plain TYPE varchar(20) COLLATE "en-x-icu";',
+		"ALTER TABLE c ALTER COLUMN coded TYPE varchar(20);",
+		'ALTER TABLE c ALTER COLUMN coded TYPE text COLLATE "POSIX";',
+	])("rates %j unsafe, warning that the column's indexes are rebuilt", (later) => {
+		const rated = rate(later, COLLATED)
+		expect(rated.safety).toBe("unsafe")
+		expect(rated.lockWarnings.join("\n")).toContain("rebuilds every index on the column")
+	})
+
+	it.each([
+		'ALTER TABLE c ALTER COLUMN coded TYPE varchar(20) COLLATE "C";',
+		'ALTER TABLE c ALTER COLUMN coded TYPE text COLLATE pg_catalog."C";',
+		'ALTER TABLE c ALTER COLUMN plain TYPE text COLLATE "default";',
+		"ALTER TABLE c ALTER COLUMN plain TYPE varchar(20);",
+	])("rates %j safe, as the collation it ends with is the one the column had", (later) => {
+		const rated = rate(later, COLLATED)
+		expect([rated.safety, rated.lockWarnings]).toEqual(["safe", []])
+	})
+
+	it("reads the collation an earlier retype left", () => {
+		const more = `${COLLATED} ALTER TABLE c ALTER COLUMN plain TYPE varchar(10) COLLATE "C";`
+		expect(rate('ALTER TABLE c ALTER COLUMN plain TYPE varchar(30) COLLATE "C";', more).safety).toBe("safe")
+	})
+})

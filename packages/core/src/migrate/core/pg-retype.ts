@@ -4,7 +4,9 @@
  * USING that only widens, read against the column's type in the history (P12 of the 0.15.0 review).
  * Widening is a longer or unbounded varchar, or text; a numeric of more or unbounded precision at
  * the same scale; a longer or unbounded varbit. A retype to or from an array never widens: Postgres
- * rewrites every array retype, and one to a scalar changes what the column holds (P1 of r18).
+ * rewrites every array retype, and one to a scalar changes what the column holds (P1 of r18). A
+ * widening that changes the column's collation, as one that names none resets an explicit one, keeps
+ * the rows but rebuilds every index on the column, and changes how it compares (P3 of r18).
  */
 import type { Finding } from "./classify-alter.ts"
 import { REWRITES } from "./pg-column-add.ts"
@@ -28,13 +30,18 @@ function widens(from: ColumnType, to: ColumnType): boolean {
 	return wider >= bound && (was !== "numeric" || kept === scale)
 }
 
+/* the lock warning of a widening whose collation changes: Postgres keeps the rows and rebuilds the indexes */
+const REBUILDS =
+	"rebuilds every index on the column under an ACCESS EXCLUSIVE lock, and its comparisons follow the new collation"
+
 /** An ALTER COLUMN … TYPE's findings, on the table `key` names in `facts` */
 function retypeFindings(cmd: Node, { facts, key }: { facts: Facts; key: string }): Finding[] {
 	const def = (cmd["def"] as Node)["ColumnDef"] as Node
 	const from = facts.columnTypes.get(key)?.get(String(cmd["name"]))
-	const to = columnTypeOf(def["typeName"], facts.schema)
-	if (def["raw_default"] === undefined && from !== undefined && widens(from, to)) return []
-	return [{ level: "unsafe" }, { level: "lock", note: REWRITES }]
+	const to = columnTypeOf(def, facts.schema)
+	if (def["raw_default"] !== undefined || from === undefined || !widens(from, to))
+		return [{ level: "unsafe" }, { level: "lock", note: REWRITES }]
+	return from.collation === to.collation ? [] : [{ level: "unsafe" }, { level: "lock", note: REBUILDS }]
 }
 
 export { retypeFindings }

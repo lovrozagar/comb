@@ -49,11 +49,13 @@ function callIn(expression: unknown, { defined, schema }: Pick<Facts, "defined" 
 const typeCode = (type: string, facts: Facts): string | undefined =>
 	facts.domains.get(type) ?? (facts.casts.get(type)?.automatic === true ? facts.casts.get(type)?.fn : undefined)
 
-type Typed = { column: string; runs?: string | undefined; typeName: unknown }
+/** A column's definition, and what a write to it runs when its own constraints say */
+type Typed = { def: Node; runs?: string | undefined }
 
-/** `column` of `table` of `typeName`, and what it runs: `runs` when given, else its type's code */
-function followType(table: string, { column, runs, typeName }: Typed, facts: Facts): void {
-	const columnType = columnTypeOf(typeName, facts.schema)
+/** The column `def` defines on `table`, and what it runs: `runs` when given, else its type's code */
+function followType(table: string, { def, runs }: Typed, facts: Facts): void {
+	const column = String(def["colname"] ?? "")
+	const columnType = columnTypeOf(def, facts.schema)
 	facts.columnTypes.set(table, (facts.columnTypes.get(table) ?? new Map()).set(column, columnType))
 	const code = runs ?? typeCode(columnType.type, facts)
 	if (code !== undefined && !facts.code.has(table)) facts.code.set(table, code)
@@ -66,7 +68,7 @@ function followColumn(table: string, column: Node, facts: Facts): void {
 	const runs = constraints
 		.map((each) => callIn((each["Constraint"] as Node)["raw_expr"], facts))
 		.find((fn) => fn !== undefined)
-	followType(table, { column: String(column["colname"]), runs, typeName: column["typeName"] }, facts)
+	followType(table, { def: column, runs }, facts)
 }
 
 /** A CREATE TABLE: its parents, its columns, its checks, and what a table it is LIKE runs */
@@ -136,7 +138,7 @@ function followAlter(node: Node, facts: Facts): void {
 			facts.columnTypes.get(table)?.delete(String(cmd["name"]))
 		} else if (cmd["subtype"] === "AT_AlterColumnType") {
 			/* a column retyped to a domain runs the domain's CHECK on every later write (M73) */
-			followType(table, { column: String(cmd["name"]), typeName: (def["ColumnDef"] as Node)["typeName"] }, facts)
+			followType(table, { def: { ...(def["ColumnDef"] as Node), colname: cmd["name"] } }, facts)
 		} else {
 			const runs = callIn(def, facts)
 			if (runs !== undefined && !facts.code.has(table)) facts.code.set(table, runs)
