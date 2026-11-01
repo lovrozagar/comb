@@ -69,7 +69,10 @@ export function createBunSqliteProvider(config: BunSqliteProviderConfig): Connec
 			const { Database } = (await import(BUN_SQLITE)) as {
 				Database: new (path: string, options?: { readonly?: boolean }) => BunDatabase
 			}
-			return bunSqliteConnection(readonly ? new Database(config.path, { readonly }) : new Database(config.path))
+			const db = readonly ? new Database(config.path, { readonly }) : new Database(config.path)
+			/* SQLite opens with foreign keys off; the proof run, libsql and D1 apply with them on */
+			db.run("PRAGMA foreign_keys = ON")
+			return bunSqliteConnection(db)
 		},
 		dialect: "sqlite",
 	}

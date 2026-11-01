@@ -31,6 +31,25 @@ describe("createBunSqliteProvider on bun:sqlite", () => {
 	})
 })
 
+describe("createBunSqliteProvider with foreign keys on, as the proof run rates a file (r18 S1)", () => {
+	it("cascades a parent's delete into its children, and refuses a child with no parent", async () => {
+		const conn = await createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" }).connect(DB)
+		await conn.batch([
+			{ sql: "CREATE TABLE parent (id INTEGER PRIMARY KEY)" },
+			{
+				sql: "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent (id) ON DELETE CASCADE)",
+			},
+			{ sql: "INSERT INTO parent VALUES (1), (2)" },
+			{ sql: "INSERT INTO child VALUES (10, 1), (11, 1), (12, 2)" },
+		])
+		await conn.batch([{ sql: "DELETE FROM parent WHERE id = 1" }])
+		expect((await conn.execute("SELECT id, parent_id FROM child ORDER BY id")).rows).toEqual([[12, 2]])
+		await expect(conn.batch([{ sql: "INSERT INTO child VALUES (13, 9)" }])).rejects.toThrow(/FOREIGN KEY/)
+		expect((await conn.execute("PRAGMA foreign_key_check")).rows).toEqual([])
+		await conn.close()
+	})
+})
+
 describe("createBunSqliteProvider read-only, as check and status open it (M10)", () => {
 	it("refuses a missing file without creating it, and refuses a write to an existing one", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "comb-bun-ro-"))
