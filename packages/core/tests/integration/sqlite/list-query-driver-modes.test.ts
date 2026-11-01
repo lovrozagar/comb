@@ -127,3 +127,46 @@ describe("a cursor fits what the driver returned (R3)", () => {
 		},
 	)
 })
+
+describe("a derived list keyed by an undeclared integer expression (Q2 of r19, part 4)", () => {
+	/* Q2 of r19, part 4: under intMode "string" an integer expression reads as a string, as a text one does, so the engine's typeof says which */
+	it.each(["number", "bigint", "string"] as const)(
+		"pages a derived list keyed by an undeclared integer expression, count(*), on intMode %s",
+		async (intMode) => {
+			const { client, db } = await database(intMode)
+			try {
+				await client.execute(
+					"INSERT INTO item VALUES (6, 60, 0.1, 'c', 1700000000600, 1, 8), (7, 70, 0.2, 'c', 1700000000700, 1, 9), (8, 80, 0.3, 'e', 1700000000800, 0, 10)",
+				)
+				for (const direction of ["asc", "desc"] as const) {
+					const ids: string[] = []
+					let cursor: string | undefined
+					for (let guard = 0; guard < 8; guard++) {
+						const built = buildDerivedListQuery({
+							...SEALED,
+							idColumn: item.t,
+							parsed: { cursor, limit: 2, parsedSort: [{ direction, field: "k" }] },
+							sortColumns: { k: sql`count(*)` },
+						})
+						const query = db
+							.select({ id: item.t, k: sql<number>`count(*)`, ...built.extras })
+							.from(item)
+							.groupBy(item.t)
+							.$dynamic()
+						const rows = await (built.where ? query.having(built.where) : query)
+							.orderBy(...built.orderBy)
+							.limit(built.limit)
+						const [items, pagination] = queryHelpers.paginate(rows, built)
+						ids.push(...items.map((row) => row.id))
+						if (pagination.nextCursor === null) break
+						cursor = pagination.nextCursor
+					}
+					/* counts a 1, b 1, c 3, d 1, e 2: ties broken by the id in the sort's direction */
+					expect(ids, direction).toEqual(direction === "asc" ? ["a", "b", "d", "e", "c"] : ["c", "e", "d", "b", "a"])
+				}
+			} finally {
+				client.close()
+			}
+		},
+	)
+})

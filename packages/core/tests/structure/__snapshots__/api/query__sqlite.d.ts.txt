@@ -480,6 +480,8 @@ type ListExtras = {
     _combAnchorGone?: SQL.Aliased<number>;
     /** the value the list breaks ties on, which the next cursor resumes from; none when no cursor can */
     _combId?: SQL.Aliased<unknown>;
+    /** SQLite's storage class of each sort key, comma-joined, where one is an undeclared expression (Q2 of r19) */
+    _combKeyTypes?: SQL.Aliased<string>;
     /** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
     _total?: SQL.Aliased<number>;
 };
@@ -537,13 +539,15 @@ export { applyListQuery, type ListQueryAppliable };
 import { type DecodedCursor } from "./cursor.ts";
 import { type KeysetKind } from "./cursor-mint.ts";
 import { type CursorOptions } from "./cursor-seal.ts";
+import { COMB_ID } from "./list-extras.ts";
 import type { paginationResponseSchema } from "./schema.ts";
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
 import type * as z from "zod";
-/** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
-declare const COMB_ID: "_combId";
-/** One column a builder selects for paginate: the tiebreak, the gone-anchor flag, or the count (Q3 of r17) */
-type ListExtra = "_combAnchorGone" | "_combId" | "_total";
+/**
+ * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
+ * r17), or the storage class of each sort key (Q2 of r19)
+ */
+type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total";
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationMeta = z.output<typeof paginationResponseSchema>;
 /** How a built list pages what it fetched */
@@ -763,6 +767,31 @@ declare const isSealedShape: (cursor: string) => boolean;
 /** What `cursor` holds, opened under `options`; null when it was not sealed under both */
 declare function openSealed(cursor: string, options: CursorOptions): Uint8Array | null;
 export { assertCursorWired, cursorKey, type CursorOptions, isSealedShape, MIN_CURSOR_SECRET_BYTES, openSealed, seal };
+
+// query/list-extras.d.ts
+/**
+ * The values of the extras a builder selects for paginate, as a SQLite or Postgres driver reads them:
+ * a number, a bigint, or a decimal string (libsql's intMode "string", Q2 of r19). An extra rendered
+ * by hand as its own alias reads as that string, which no value of it is (Q4 of r18).
+ */
+import type { SortField } from "./types.ts";
+/** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
+declare const COMB_ID: "_combId";
+declare const INTEGER_TEXT: RegExp;
+/** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint (Q2 of r19) */
+declare const unencoded: (value: unknown) => unknown;
+/**
+ * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
+ * kind. An extra rendered by hand as its own alias reads as that string (Q4 of r18).
+ */
+declare function malformed(row: object, sort: readonly SortField[]): string | undefined;
+/**
+ * `row` with each sort key SQLite stored as an integer, which the driver read as a decimal string, as
+ * that integer, so a cursor minted from it compares as one: a string binds as text, which SQLite
+ * orders after every integer (Q2 of r19). A text key that looks like a number stays text.
+ */
+declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
+export { COMB_ID, INTEGER_TEXT, malformed, typedKeys, unencoded };
 
 // query/schema.d.ts
 /**

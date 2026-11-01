@@ -12,19 +12,20 @@ import { combErrorKeys } from "../types.ts"
 import { type DecodedCursor, readCursor } from "./cursor.ts"
 import { createCursor, type KeysetKind } from "./cursor-mint.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
+import { COMB_ID, malformed, typedKeys, unencoded } from "./list-extras.ts"
 import { filterBySelect } from "./fields.ts"
 import type { paginationResponseSchema } from "./schema.ts"
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
 import type * as z from "zod"
 
-/** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
-const COMB_ID = "_combId" as const
-
-/** One column a builder selects for paginate: the tiebreak, the gone-anchor flag, or the count (Q3 of r17) */
-type ListExtra = "_combAnchorGone" | "_combId" | "_total"
+/**
+ * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
+ * r17), or the storage class of each sort key (Q2 of r19)
+ */
+type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total"
 
 /** The columns a builder selects for paginate alone, stripped from every row it returns */
-const EXTRAS: readonly ListExtra[] = [COMB_ID, "_combAnchorGone", "_total"]
+const EXTRAS: readonly ListExtra[] = [COMB_ID, "_combAnchorGone", "_combKeyTypes", "_total"]
 
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationMeta = z.output<typeof paginationResponseSchema>
@@ -121,44 +122,13 @@ function refuseUnwired(items: readonly object[], pagination: ListPagination): vo
 			status: "internal_server_error",
 		})
 	}
-	const wrong = items.map(malformed).find((what) => what !== undefined)
+	const wrong = items.map((item) => malformed(item, pagination.parsedSort)).find((what) => what !== undefined)
 	if (wrong === undefined) return
 	throw new CombError({
 		cause: `the rows carry ${wrong}, no value the built query selects: render each extra into raw SQL as sql\`\${extra.sql} AS \${sql.identifier(extra.fieldAlias)}\`, or select the built query's extras beside your columns`,
 		errorKey: combErrorKeys.PAGE_NOT_WIRED,
 		status: "internal_server_error",
 	})
-}
-
-/** A value as a refusal shows it: a bigint with its n, anything else as JSON */
-const shown = (value: unknown): string => (typeof value === "bigint" ? `${value}n` : JSON.stringify(value))
-
-/* an integer from 0 as a SQLite driver writes it in a string (libsql's intMode "string"): canonical, which no alias is */
-const DECIMAL = /^(?:0|[1-9]\d*)$/
-
-/** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint (Q2 of r19) */
-const unencoded = (value: unknown): unknown =>
-	typeof value === "string" && DECIMAL.test(value) ? BigInt(value) : value
-
-/** Whether `value` is a count: a safe integer from 0, in any encoding a SQLite driver reads one in */
-function isCount(encoded: unknown): boolean {
-	const value = unencoded(encoded)
-	return typeof value === "bigint"
-		? value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
-		: Number.isSafeInteger(value) && (value as number) >= 0
-}
-
-/**
- * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
- * kind. An extra rendered by hand as its own alias reads as that string (Q4 of r18).
- */
-function malformed(row: object): string | undefined {
-	const { _combAnchorGone: gone, _combId: id, _total: total } = row as Record<string, unknown>
-	if (Object.hasOwn(row, "_total") && !isCount(total)) return `_total ${shown(total)}`
-	if (Object.hasOwn(row, COMB_ID) && id === COMB_ID) return `${COMB_ID} ${shown(id)}`
-	const read = unencoded(gone)
-	const flag = read === 0 || read === 1 || read === 0n || read === 1n || typeof read === "boolean"
-	return Object.hasOwn(row, "_combAnchorGone") && !flag ? `_combAnchorGone ${shown(gone)}` : undefined
 }
 
 /** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
@@ -214,7 +184,10 @@ function mintFrom(
 		})
 	}
 	/* a key too long for the cap goes by reference; a derived list, which cannot read it, says so on page 1 */
-	return createCursor(row as Record<string, unknown>, parsedSort, { ...options, idField: COMB_ID })
+	return createCursor(typedKeys(row as Record<string, unknown>, parsedSort), parsedSort, {
+		...options,
+		idField: COMB_ID,
+	})
 }
 
 /**

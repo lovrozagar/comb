@@ -72,6 +72,8 @@ type ListExtras = {
 	_combAnchorGone?: SQL.Aliased<number>
 	/** the value the list breaks ties on, which the next cursor resumes from; none when no cursor can */
 	_combId?: SQL.Aliased<unknown>
+	/** SQLite's storage class of each sort key, comma-joined, where one is an undeclared expression (Q2 of r19) */
+	_combKeyTypes?: SQL.Aliased<string>
 	/** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
 	_total?: SQL.Aliased<number>
 }

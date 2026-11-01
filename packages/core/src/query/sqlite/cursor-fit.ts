@@ -10,9 +10,7 @@ import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 import { CombError } from "../../error.ts"
 import { CursorRef } from "../cursor.ts"
 import { combErrorKeys } from "../../types.ts"
-
-/* an integer as a driver writes it in a string (libsql's intMode "string"): canonical, signed */
-const INTEGER_TEXT = /^-?(?:0|[1-9]\d*)$/
+import { INTEGER_TEXT } from "../list-extras.ts"
 
 /**
  * Whether `value` is what a column of this drizzle `dataType` holds; json and blobs hold nothing a

@@ -68,3 +68,21 @@ describe("queryHelpers.paginate — an extra's value, as well as its presence", 
 		).toThrow(expect.objectContaining({ errorKey: "invalid_cursor" }))
 	})
 })
+
+describe("queryHelpers.paginate — the storage class of each sort key (Q2 of r19)", () => {
+	/* Q2 of r19, part 4: a derived list's rows carry the storage class of each sort key, which a hand-wired select must keep */
+	it("refuses a page whose rows lack _combKeyTypes where the builder selected it, as page_not_wired", () => {
+		const keyed = built(
+			{ limit: 10, parsedSort: [{ direction: "desc" as const, field: "k" }], validated: true as const },
+			{ ...SEALED, expects: ["_combId", "_combKeyTypes", "_total"] },
+		)
+		expect(() => queryHelpers.paginate([{ _combId: "a", _total: 1, k: "3" }], keyed)).toThrow(
+			expect.objectContaining({
+				cause: expect.stringContaining("the rows carry no _combKeyTypes"),
+				errorKey: "page_not_wired",
+			}),
+		)
+		const [rows] = queryHelpers.paginate([{ _combId: "a", _combKeyTypes: "integer", _total: 1, k: "3" }], keyed)
+		expect(rows).toEqual([{ k: "3" }])
+	})
+})

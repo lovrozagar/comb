@@ -110,7 +110,14 @@ expectTypeOf<ListOutput["pageBounded"]>().toEqualTypeOf<true | undefined>()
 declare const d1: DrizzleD1Database
 const listed = sqliteTable("listed", { id: integer("id").primaryKey(), title: text("title") })
 const listedQuery = buildListQuery({ ...SEALED, parsed: listSchema.parse({}), table: listed })
-type Listed = { _combAnchorGone?: number; _combId?: unknown; _total?: number; id: number; title: string | null }
+type Listed = {
+	_combAnchorGone?: number
+	_combId?: unknown
+	_combKeyTypes?: string
+	_total?: number
+	id: number
+	title: string | null
+}
 expectTypeOf(
 	applyListQuery((extras) => d1.select({ ...getTableColumns(listed), ...extras }).from(listed), listedQuery),
 ).resolves.toEqualTypeOf<Listed[]>()

@@ -3,7 +3,7 @@
  * window, the extras every row carries for paginate, and the pagination descriptor that reads them.
  */
 import { and, Column, is, type SQL, type SQLWrapper, sql } from "drizzle-orm"
-import type { SQLiteTable } from "drizzle-orm/sqlite-core"
+import { SQLiteColumn, type SQLiteTable } from "drizzle-orm/sqlite-core"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
 import type { CursorOptions } from "../cursor.ts"
@@ -12,7 +12,7 @@ import { COMB_ID, type ListExtra, type ListPagination, type PaginationFacts, pag
 import { assertLimitWithin, assertPageWithin } from "../trusted.ts"
 import type { ListQueryInput, SortField } from "../types.ts"
 import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts"
-import { readsBack } from "./cursor-fit.ts"
+import { DateKey, readsBack } from "./cursor-fit.ts"
 import { cursorWhere } from "./cursor-where.ts"
 import type { SortKey } from "./keyset.ts"
 
@@ -103,6 +103,22 @@ function withExtras(list: Finish, extras: ListExtras, window = list.parsed.limit
 /* the id a cursor resumes from is the tiebreak itself, so no row's own id can stand in for it (Q2) */
 const idOf = (tiebreak: SortKey | null): ListExtras => (tiebreak === null ? {} : { _combId: combId(tiebreak.column) })
 
+/**
+ * SQLite's storage class of each sort key, where one is an undeclared expression: libsql's intMode
+ * "string" reads an integer as a decimal string, as it reads a text, so paginate mints such a key
+ * as the integer SQLite stored (Q2 of r19). A Postgres list types the cursor's value by its operand.
+ */
+function keyTypesOf({ keyset, tiebreak }: Finish): ListExtras {
+	const keys = keyset.keys
+	if (keys === null || tiebreak === null || !is(tiebreak.column, SQLiteColumn)) return {}
+	if (keys.every(({ column }) => is(column, Column) || column instanceof DateKey)) return {}
+	const types = sql.join(
+		keys.map(({ column }) => sql`typeof(${column})`),
+		sql` || ',' || `,
+	)
+	return { _combKeyTypes: sql<string>`${types}`.as("_combKeyTypes") }
+}
+
 /** A cursor page: the rows past the cursor and one more, and the flag that says its anchor is gone */
 function finishCursor(list: Finish, cursor: string): Finished {
 	const { keyset, parsed, sort, table, tiebreak } = list
@@ -117,7 +133,7 @@ function finishCursor(list: Finish, cursor: string): Finished {
 	const after = cursorWhere({ cursor, keys: keyset.keys, merged, options: list.cursor, sort, table, tiebreak })
 	const gone = after.gone === undefined ? {} : { _combAnchorGone: sql<number>`${after.gone}`.as("_combAnchorGone") }
 	return {
-		...withExtras(list, { ...idOf(tiebreak), ...gone }),
+		...withExtras(list, { ...idOf(tiebreak), ...keyTypesOf(list), ...gone }),
 		limit: parsed.limit + 1,
 		meta: { limit: parsed.limit, page: 1, type: "cursor" },
 		offset: 0,
@@ -136,7 +152,7 @@ function finishOffset(list: Finish): Finished {
 	/* each shard reads the merged page's every row before it, and counts its part, which paginateMerged sums */
 	const window = merged === undefined ? parsed.limit + 1 : shardWindow(parsed, merged)
 	return {
-		...withExtras(list, { ...idOf(tiebreak), ...total }, window),
+		...withExtras(list, { ...idOf(tiebreak), ...keyTypesOf(list), ...total }, window),
 		limit: window,
 		meta: { limit: parsed.limit, page, type: "offset" },
 		offset: merged === undefined ? (page - 1) * parsed.limit : 0,
