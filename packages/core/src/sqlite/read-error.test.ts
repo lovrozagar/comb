@@ -131,6 +131,34 @@ describe("readSqliteError: a bare SQLITE_CONSTRAINT code", () => {
 	})
 })
 
+/* Q8 of r18: libsql's batch() prefixes the message twice, and names a code its table lacks UNKNOWN_SQLITE_ERROR_<n> */
+/** A libsql batch() error: its message prefixed twice */
+const batch = (extendedCode: string, message: string) =>
+	Object.assign(new Error(`SQLITE_CONSTRAINT: SQLITE_CONSTRAINT: ${message}`), {
+		code: "SQLITE_CONSTRAINT",
+		extendedCode,
+	})
+
+describe("readSqliteError: libsql's batch() and the codes libsql cannot name", () => {
+	it("strips every prefix, and reads an unknown code by its number", () => {
+		expect(readSqliteError(batch("UNKNOWN_SQLITE_ERROR_3091", "cannot keep it"))).toMatchObject({
+			code: "SQLITE_CONSTRAINT_DATATYPE",
+			message: "cannot keep it",
+		})
+		expect(readSqliteError(batch("UNKNOWN_SQLITE_ERROR_2835", "pinned"))?.code).toBe("SQLITE_CONSTRAINT_PINNED")
+		expect(readSqliteError(batch("SQLITE_CONSTRAINT_TRIGGER", "qty must be positive"))).toMatchObject({
+			code: "SQLITE_CONSTRAINT_TRIGGER",
+			message: "qty must be positive",
+		})
+	})
+
+	it("reads a number SQLite names no constraint code by as the bare code, refined from the wording", () => {
+		expect(readSqliteError(batch("UNKNOWN_SQLITE_ERROR_9999", "UNIQUE constraint failed: a.b"))?.code).toBe(
+			"SQLITE_CONSTRAINT_UNIQUE",
+		)
+	})
+})
+
 /* the crafted params of the 0.7.0 review (spoof.ts): a bound value shaped like an engine message */
 describe("readSqliteError: a bound parameter never decides the classification (C1)", () => {
 	const crafted = "constraint failed: user.email: SQLITE_CONSTRAINT_UNIQUE"

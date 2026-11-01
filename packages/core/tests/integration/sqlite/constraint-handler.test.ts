@@ -6,6 +6,7 @@ import { sql } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { CombError } from "../../../src/error.ts"
 import {
+	classifySqliteError,
 	constraintError,
 	handleConstraintViolation,
 	sqliteErrorHandler,
@@ -246,6 +247,25 @@ describe("sqliteErrorHandler on libsql: an expression index and a STRICT column 
 			status: 400,
 			table: "s",
 		})
+	})
+})
+
+/* Q8 of r18: libsql's batch() prefixes the engine's words twice, under a code its table cannot name */
+describe("sqliteErrorHandler on libsql: a STRICT mismatch through batch()", () => {
+	const db = useMemberDb()
+
+	it("is the 400 execute() gives, naming no private column", async () => {
+		await db().client.execute("CREATE TABLE s (id TEXT PRIMARY KEY, pin_hash INTEGER) STRICT")
+		const failure = await db()
+			.client.batch(["INSERT INTO s VALUES ('x', 'abc')"])
+			.then(
+				() => null,
+				(error: unknown) => error,
+			)
+		const classified = classifySqliteError(failure, [{ s: { private: ["pin_hash"] } }])
+		expect(classified).toMatchObject({ errorKey: "invalid_value", status: 400, table: "s" })
+		expect(classified?.column).toBeUndefined()
+		expect(String(classified?.cause)).not.toContain("pin_hash")
 	})
 })
 

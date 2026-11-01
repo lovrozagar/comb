@@ -194,13 +194,15 @@ function foreignKey(v: Violation): CombError {
 
 /**
  * A rule a trigger enforces with RAISE(ABORT | FAIL | ROLLBACK, message): a 400 whose cause is the
- * message the app wrote for it. A bare SQLITE_CONSTRAINT whose wording names no other kind is one
- * too, as D1 may report it without its extended code. With no message to show, as when D1's exec()
- * quoted the statement before it, the cause is generic, as Postgres's is (Q8 of r17).
+ * message the app wrote for it, which every driver reports under SQLITE_CONSTRAINT_TRIGGER. A bare
+ * SQLITE_CONSTRAINT whose wording names no kind is a 400 too, with the generic cause: its words
+ * may be the engine's, a column's name among them (Q8 of r18), as is a RAISE with no message to
+ * show, when D1's exec() quoted the statement before it (Q8 of r17).
  */
 const raised = (v: Violation): CombError =>
 	new CombError({
-		cause: v.read.message === "" ? "Constraint violated" : v.read.message,
+		cause:
+			v.read.code !== "SQLITE_CONSTRAINT_TRIGGER" || v.read.message === "" ? "Constraint violated" : v.read.message,
 		errorKey: combErrorKeys.CONSTRAINT_VIOLATION,
 		source: v.source,
 		status: "bad_request",

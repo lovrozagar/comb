@@ -334,10 +334,16 @@ describe("constraintError: a value the column cannot hold (Q10)", () => {
 })
 
 describe("constraintError: a trigger's RAISE", () => {
-	it("is a 400 constraint_violation with the trigger's message, under its code or a bare SQLITE_CONSTRAINT", () => {
+	it("is a 400 constraint_violation with the trigger's message under its own code", () => {
 		const raised = { cause: "qty must be positive", errorKey: "constraint_violation", status: 400 }
 		expect(thrown(engine("SQLITE_CONSTRAINT_TRIGGER", "qty must be positive"), [])).toMatchObject(raised)
-		expect(thrown(engine("SQLITE_CONSTRAINT", "qty must be positive"), [])).toMatchObject(raised)
+	})
+
+	/* Q8 of r18: only a RAISE carries _TRIGGER on every driver; a bare code's words may be the engine's, a column's name in them */
+	it("shows no words under a bare SQLITE_CONSTRAINT whose wording names no kind", () => {
+		expect(
+			thrown(engine("SQLITE_CONSTRAINT", "SQLITE_CONSTRAINT: cannot keep member.pin_hash as given"), []),
+		).toMatchObject({ cause: "Constraint violated", errorKey: "constraint_violation", status: 400 })
 	})
 })
 

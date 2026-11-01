@@ -3,6 +3,7 @@
  * own (extended) result code, found by walking `.cause` past wrappers such as drizzle's
  * `DrizzleQueryError`, and never the wrapper's text, which holds the SQL and its parameters.
  */
+import { own } from "../constraint-map.ts"
 
 export type SqliteErrorRead = {
 	/** The extended result code when the driver reports one, e.g. `SQLITE_CONSTRAINT_UNIQUE`. */
@@ -22,8 +23,33 @@ const D1_MESSAGE = /^(?:D1_ERROR: )?([\s\S]*): (SQLITE_[A-Z_]+)(?: \(extended: (
  */
 const D1_EXEC = /^(?:D1_EXEC_ERROR: )?Error in line \d+: /
 
-/* libsql: `SQLITE_CONSTRAINT: <message>` */
-const LIBSQL_PREFIX = /^SQLITE_[A-Z_]+: /
+/* libsql: `SQLITE_CONSTRAINT: <message>`, the prefix twice from batch() (Q8 of r18) */
+const LIBSQL_PREFIX = /^(?:SQLITE_[A-Z_]+: )+/
+
+/*
+ * SQLite's extended constraint codes by number, which libsql names `UNKNOWN_SQLITE_ERROR_<n>` when
+ * its own table lacks them (3091 and 2835, newer than it); https://sqlite.org/rescode.html
+ */
+const CONSTRAINT_CODES: Record<string, string> = {
+	275: "SQLITE_CONSTRAINT_CHECK",
+	531: "SQLITE_CONSTRAINT_COMMITHOOK",
+	787: "SQLITE_CONSTRAINT_FOREIGNKEY",
+	1043: "SQLITE_CONSTRAINT_FUNCTION",
+	1299: "SQLITE_CONSTRAINT_NOTNULL",
+	1555: "SQLITE_CONSTRAINT_PRIMARYKEY",
+	1811: "SQLITE_CONSTRAINT_TRIGGER",
+	2067: "SQLITE_CONSTRAINT_UNIQUE",
+	2323: "SQLITE_CONSTRAINT_VTAB",
+	2579: "SQLITE_CONSTRAINT_ROWID",
+	2835: "SQLITE_CONSTRAINT_PINNED",
+	3091: "SQLITE_CONSTRAINT_DATATYPE",
+}
+
+/** libsql's extended code as SQLite names it: `UNKNOWN_SQLITE_ERROR_3091` is SQLITE_CONSTRAINT_DATATYPE */
+const named = (code: unknown): unknown =>
+	typeof code === "string" && code.startsWith("UNKNOWN_SQLITE_ERROR_")
+		? own(CONSTRAINT_CODES, code.slice("UNKNOWN_SQLITE_ERROR_".length))
+		: code
 
 const MAX_DEPTH = 8
 
@@ -55,7 +81,7 @@ function refine(code: string, message: string): { code: string; message: string 
 
 /** The code and message one error in the chain carries, or null. */
 function readOne(error: Error): { code: string; message: string } | null {
-	const extended = field(error, "extendedCode")
+	const extended = named(field(error, "extendedCode"))
 	if (sqliteCode(extended)) return refine(extended, error.message.replace(LIBSQL_PREFIX, ""))
 	const code = field(error, "code")
 	if (sqliteCode(code)) return refine(code, error.message.replace(LIBSQL_PREFIX, ""))
