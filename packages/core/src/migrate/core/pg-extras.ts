@@ -1,7 +1,8 @@
 /**
  * Statements about an object comb owns on Postgres (pg-objects.ts): a comment, a grant, an
- * `ALTER POLICY`, an `ALTER VIEW … SET`, an index on a materialized view, a role granted to
- * another. Atlas replays the history without comb's objects, so it would run such a statement
+ * `ALTER POLICY`, an `ALTER VIEW … SET`, an index on a materialized view, a trigger on a view, a
+ * role granted to another. A statement is about the object it names, whatever its keyword: an
+ * `ALTER TABLE` naming a view is read as the `ALTER VIEW` it is (P5 of r18). Atlas replays the history without comb's objects, so it would run such a statement
  * against an object that is not there; comb takes each out of what Atlas sees, keeps it with its
  * object, and writes it again after the object is created again. Any other statement that names
  * an object comb owns is refused, since comb could not keep it.
@@ -51,7 +52,24 @@ const ALTER_OWNED = /* @__PURE__ */ new RegExp(
 	"i",
 )
 
+// per-process-constant: see above
+const TRIGGER_ON = /* @__PURE__ */ new RegExp(
+	`^CREATE (?:OR REPLACE )?(?:CONSTRAINT )?TRIGGER (${IDENT}) .*?\\bON (${QNAME}) `,
+	"i",
+)
+// per-process-constant: see above
+const DROP_TRIGGER = /* @__PURE__ */ new RegExp(`^DROP TRIGGER (?:IF EXISTS )?(${IDENT}) ON (${QNAME})`, "i")
+// per-process-constant: see above
+const ALTER_TABLE = /* @__PURE__ */ new RegExp(`^ALTER TABLE (?:IF EXISTS )?(?:ONLY )?(${QNAME}) (.+)$`, "i")
+
+/* what comb keeps of an ALTER VIEW: a setting, an owner, a column's default; a rename or move it cannot keep */
+const KEPT_VIEW_ACTION = /^(?:SET|RESET|OWNER TO|ALTER (?:COLUMN )?\S+ (?:SET|DROP) DEFAULT)\b/i
+
 const kindOf = (word: string): string => word.toLowerCase()
+
+/** The view or materialized view comb owns by `name`, as a list of none or one */
+const viewNamed = (name: string, owners: Owners): Owned[] =>
+	["view", "materialized view"].flatMap((kind) => owners.get(`${kind} ${lastPart(name)}`) ?? [])
 
 /** The owned objects `names` lists, and whether the list names anything else too */
 function ownersOf(names: string, owners: Owners, kinds: readonly string[]): { mixed: boolean; owned: Owned[] } {
@@ -70,18 +88,25 @@ function about(code: string, owners: Owners): { keep: boolean; owned: Owned[] } 
 		const owned = [owners.get(`policy ${lastPart(policy)} on ${lastPart(on as string)}`) ?? []].flat()
 		return { keep: !/^RENAME\b/i.test(rest ?? ""), owned }
 	}
+	return viewAbout(code, owners) ?? grantAbout(code, owners)
+}
+
+/** A statement on a view or materialized view: an ALTER VIEW, an ALTER TABLE naming one, a trigger on one, an index */
+function viewAbout(code: string, owners: Owners): { keep: boolean; owned: Owned[] } | undefined {
 	const [, viewKind, view, action] = ALTER_VIEW.exec(code) ?? []
 	if (view !== undefined) {
 		const owned = [owners.get(`${kindOf(viewKind as string)} ${lastPart(view)}`) ?? []].flat()
-		return {
-			keep: /^(?:SET|RESET|OWNER TO|ALTER (?:COLUMN )?\S+ (?:SET|DROP) DEFAULT)\b/i.test(action as string),
-			owned,
-		}
+		return { keep: KEPT_VIEW_ACTION.test(action as string), owned }
 	}
+	const [, table, tableAction] = ALTER_TABLE.exec(code) ?? []
+	const altered = table === undefined ? [] : viewNamed(table, owners)
+	if (altered.length > 0) return { keep: KEPT_VIEW_ACTION.test(tableAction as string), owned: altered }
+	const [, , triggered] = TRIGGER_ON.exec(code) ?? []
+	const fired = triggered === undefined ? [] : viewNamed(triggered, owners)
+	if (fired.length > 0) return { keep: true, owned: fired }
 	const [, , indexed] = INDEX.exec(code) ?? []
-	if (indexed !== undefined)
-		return { keep: true, owned: [owners.get(`materialized view ${lastPart(indexed)}`) ?? []].flat() }
-	return grantAbout(code, owners)
+	if (indexed === undefined) return undefined
+	return { keep: true, owned: [owners.get(`materialized view ${lastPart(indexed)}`) ?? []].flat() }
 }
 
 /** A grant or revoke: of a privilege on views, materialized views or sequences, or of roles comb owns */
@@ -111,12 +136,24 @@ function dropsKeptIndex(code: string, owners: Owners): boolean {
 	return found
 }
 
+/** A trigger comb keeps with a view, dropped: taken off it; true when it was one */
+function dropsKeptTrigger(code: string, owners: Owners): boolean {
+	const [, trigger, on] = DROP_TRIGGER.exec(code) ?? []
+	if (trigger === undefined || on === undefined) return false
+	const owner = viewNamed(on, owners)[0]
+	if (owner === undefined) return false
+	owner.extras = owner.extras.filter(
+		(sql) => lastPart(TRIGGER_ON.exec(codeOf(sql, "postgres"))?.[1] ?? "") !== lastPart(trigger),
+	)
+	return true
+}
+
 /**
  * Keep a statement about an owned object with that object: true when it was kept (so Atlas must
  * not see it), refused when it names an owned object comb cannot keep it with
  */
 function followExtra({ code, sql }: Said, owners: Owners, source: string): boolean {
-	if (dropsKeptIndex(code, owners)) return true
+	if (dropsKeptIndex(code, owners) || dropsKeptTrigger(code, owners)) return true
 	const found = about(code, owners)
 	const named = found !== undefined && found.owned.length > 0
 	const other = !named && ALTER_OWNED.exec(code)

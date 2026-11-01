@@ -211,3 +211,30 @@ describe("roles and policies over other tables", () => {
 		expect(delta.before).toEqual(['DROP POLICY IF EXISTS "p" ON "post"'])
 	})
 })
+
+/* r18 P5: a statement is about the object it names, whatever its keyword, so a replay that leaves out a view leaves it out too */
+describe("separatePgObjects on a statement about a view by another keyword", () => {
+	const VIEW = "CREATE TABLE t (id int);\nCREATE VIEW v AS SELECT id FROM t;\n"
+	const TRIGGER = "CREATE TRIGGER tr INSTEAD OF INSERT ON v FOR EACH ROW EXECUTE FUNCTION f();"
+
+	it("keeps a trigger on a view with the view, and takes it off with DROP TRIGGER", () => {
+		const made = separatePgObjects(`${VIEW}${TRIGGER}`)
+		expect(made.plain).toEqual(["CREATE TABLE t (id int)"])
+		expect(made.state.objects.get("view v")?.extras).toEqual([TRIGGER.slice(0, -1)])
+		separatePgObjects("DROP TRIGGER IF EXISTS tr ON v;", made.state)
+		expect(made.state.objects.get("view v")?.extras).toEqual([])
+		expect(
+			separatePgObjects("CREATE TRIGGER tr AFTER INSERT ON t EXECUTE FUNCTION f();", made.state).plain,
+		).toHaveLength(1)
+	})
+
+	it("reads ALTER TABLE on a view as ALTER VIEW: a SET kept with it, a RENAME refused as comb's own", () => {
+		const { state } = separatePgObjects(VIEW)
+		expect(separatePgObjects("ALTER TABLE v SET (security_barrier = true);", state).plain).toEqual([])
+		expect(state.objects.get("view v")?.extras).toEqual(["ALTER TABLE v SET (security_barrier = true)"])
+		expect(() => separatePgObjects("ALTER TABLE v RENAME TO w;", state, "1_v.sql")).toThrow(
+			"1_v.sql: ALTER TABLE v RENAME TO w changes an object comb writes itself",
+		)
+		expect(separatePgObjects("ALTER TABLE t RENAME TO t2;", state).plain).toHaveLength(1)
+	})
+})
