@@ -44,6 +44,14 @@ describe("postgresOptionsOf with a passfile", () => {
 		expect(passwordOf(`postgres://app:mine@db/app?passfile=${file}`)).toBe("mine")
 	})
 
+	/* R3 of plan 17: libpq's host field is the host given, else the hostaddr given, else localhost */
+	it("matches a hostaddr-only URL by its hostaddr, and a URL with both by its host", () => {
+		const file = passfile("localhost:5432:app:app:local\n10.0.0.5:5432:app:app:addr\ndb:5432:app:app:named\n")
+		expect(passwordOf(`postgres://app@/app?hostaddr=10.0.0.5&passfile=${file}`)).toBe("addr")
+		expect(passwordOf(`postgres://app@db/app?hostaddr=10.0.0.5&passfile=${file}`)).toBe("named")
+		expect(passwordOf(`postgres://app@/app?passfile=${file}`)).toBe("local")
+	})
+
 	it("reads no password from a missing file, as libpq reads none", () => {
 		expect(passwordOf("postgres://app@db/app?passfile=/nowhere/pgpass")).toBe("")
 	})

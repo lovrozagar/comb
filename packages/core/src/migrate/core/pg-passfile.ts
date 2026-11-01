@@ -2,7 +2,7 @@
  * The password a Postgres URL's `passfile` gives, read as libpq reads its password file (P7 of r18):
  * lines of `host:port:database:user:password`, `#` comments and blank lines skipped, `\` escaping
  * the next character, a field of `*` alone matching anything, the first line that matches winning.
- * A socket target matches as `localhost`. A missing file gives none, as libpq's does; one others can
+ * The host field matches the host given, else the hostaddr given, else `localhost`, as a socket does. A missing file gives none, as libpq's does; one others can
  * read is refused, as libpq ignores it. comb never reads ~/.pgpass or PGPASSFILE: the URL is the
  * connection (README §configuration).
  */
@@ -46,7 +46,8 @@ export function passfilePassword(url: LibpqUrl): string | undefined {
 	const file = url.params.get("passfile")
 	const text = file === undefined ? undefined : contentsOf(file)
 	if (text === undefined) return undefined
-	const wanted = [url.socket ? "localhost" : url.host, String(url.port), url.database, url.user]
+	const host = url.socket ? "localhost" : url.hostGiven ? url.host : (url.hostaddr ?? "localhost")
+	const wanted = [host, String(url.port), url.database, url.user]
 	for (const line of text.split(/\r?\n/)) {
 		if (line === "" || line.startsWith("#")) continue
 		const fields = fieldsOf(line)

@@ -13,8 +13,10 @@ import { passfilePassword } from "./pg-passfile.ts"
 /** Where a Postgres URL reaches, and its query, every key decoded */
 type LibpqUrl = {
 	database: string
-	/** a host name or address, or a Unix socket's directory: the server name TLS checks */
+	/** a host name or address, or a Unix socket's directory: the server name TLS checks; localhost when none is given */
 	host: string
+	/** whether the URL gives a host, which a password file is matched on before its hostaddr (R3 of plan 17) */
+	hostGiven: boolean
 	/** the address to connect to instead of looking up `host`, as libpq's hostaddr is (P7 of the 0.15.0 review) */
 	hostaddr: string | undefined
 	params: ReadonlyMap<string, string>
@@ -103,10 +105,13 @@ function userinfoOf(authority: string): { password: string | undefined; user: st
  * socket would split comb's own reads from the server Atlas migrates. A socket target is spelled
  * with its directory, `?host=/run/postgresql`.
  */
-function hostOf(hostport: RegExpExecArray, params: ReadonlyMap<string, string>): { host: string; port: string } {
+function hostOf(
+	hostport: RegExpExecArray,
+	params: ReadonlyMap<string, string>,
+): { host: string; hostGiven: boolean; port: string } {
 	const [, bracketed, plain = "", port = ""] = hostport
-	const host = (params.get("host") ?? bracketed ?? decodeURIComponent(plain)) || "localhost"
-	return { host, port: params.get("port") ?? (port || "5432") }
+	const given = params.get("host") ?? bracketed ?? decodeURIComponent(plain)
+	return { host: given || "localhost", hostGiven: given !== "", port: params.get("port") ?? (port || "5432") }
 }
 
 /** `raw` read as libpq reads it, or undefined for one it cannot read, a percent-escape that is no UTF-8 included */
@@ -117,7 +122,7 @@ function libpqUrl(raw: string): LibpqUrl | undefined {
 	try {
 		const params = queryParams(`?${query}`)
 		const userinfo = userinfoOf(authority)
-		const { host, port } = hostOf(hostport, params)
+		const { host, hostGiven, port } = hostOf(hostport, params)
 		if (!/^\d+$/.test(port)) return undefined
 		/* libpq's user for a URL that names none is the OS user's, never PGUSER's, which Atlas's environment lacks (P6) */
 		const user = (params.get("user") ?? userinfo.user) || userInfo().username
@@ -125,6 +130,7 @@ function libpqUrl(raw: string): LibpqUrl | undefined {
 		return {
 			database: database === "" ? user : database,
 			host,
+			hostGiven,
 			hostaddr: params.get("hostaddr"),
 			params,
 			password: params.get("password") ?? userinfo.password,
