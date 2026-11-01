@@ -14,7 +14,9 @@ import {
 	IDS,
 	KEYS,
 	pageAll,
+	ROUNDED,
 	viaBuilder,
+	viaDerived,
 	viaRelational,
 } from "../support/bigint.ts"
 import { type D1Harness, d1Memory } from "../support/d1.ts"
@@ -51,4 +53,26 @@ describe("keyset pagination over an integer key past 2^53, on D1 (U22)", () => {
 		expect((refused as CombError).errorKey).toBe("sort_not_wired")
 		expect(String((refused as CombError).cause)).toMatch(EXACTLY)
 	})
+})
+
+/* Q1 of r19: D1 reads every INTEGER as a JS number, so a derived list with no anchor table cannot page such a key */
+describe("a derived list over an integer key past 2^53, on D1", () => {
+	it.each(Object.keys(EXPECTED))(
+		"refuses the page whose cursor would carry a rounded key under %s, where it skipped rows or repeated one",
+		async (order) => {
+			const database = await d1(KEYS)
+			const refused = await pageAll(viaDerived(drizzle(database) as never), order).catch((error: unknown) => error)
+			expect(refused).toBeInstanceOf(CombError)
+			expect((refused as CombError).errorKey).toBe("sort_not_wired")
+			expect(String((refused as CombError).cause)).toMatch(ROUNDED)
+		},
+	)
+
+	it.each(Object.keys(EXPECTED))(
+		"pages %s every row once with an anchor table, which it reads the exact key back from",
+		async (order) => {
+			const database = await d1(KEYS)
+			expect(await pageAll(viaDerived(drizzle(database) as never, true), order)).toEqual(EXPECTED[order])
+		},
+	)
 })

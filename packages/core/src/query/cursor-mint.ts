@@ -7,6 +7,7 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { CursorRef, MAX_CURSOR_LENGTH, mintCursor } from "./cursor.ts"
 import type { CursorOptions } from "./cursor-seal.ts"
+import { roundedKey } from "./rounded-key.ts"
 import type { SortField } from "./types.ts"
 
 /** paginate's choice for an overflowing key: by reference on a table, refused on a derived or a merged list */
@@ -49,7 +50,8 @@ function tooLong(fields: string, length: number, kind: KeysetKind | "unread"): C
 /**
  * Mint the cursor for the row after which the next page starts, as `paginate` does: its longest
  * string values carried by reference while it passes the cap that `readCursor` holds; a 500 on a
- * derived list (`keyset: "derived"`), or when no reference makes it fit
+ * derived list (`keyset: "derived"`), or when no reference makes it fit; a 500 on a derived list's
+ * integer key past ±(2^53 − 1), which it binds as the driver rounded it
  */
 function createCursor(
 	row: Record<string, unknown>,
@@ -70,6 +72,9 @@ function createCursor(
 			status: "internal_server_error",
 		})
 	}
+	/* a derived list binds the key as the driver read it, so a rounded one skips rows or repeats one (Q1 of r19) */
+	const rounded = options?.keyset === "derived" ? roundedKey(row, sort, "derived") : undefined
+	if (rounded !== undefined) throw rounded
 	const mint = (record: Record<string, unknown>) => mintCursor(record, sort, options)
 	const fits = (record: Record<string, unknown>) => mint(record).length <= MAX_CURSOR_LENGTH
 	const whole = mint(row)

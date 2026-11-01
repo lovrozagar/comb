@@ -715,7 +715,8 @@ type KeysetKind = "derived" | "merged" | "table";
 /**
  * Mint the cursor for the row after which the next page starts, as `paginate` does: its longest
  * string values carried by reference while it passes the cap that `readCursor` holds; a 500 on a
- * derived list (`keyset: "derived"`), or when no reference makes it fit
+ * derived list (`keyset: "derived"`), or when no reference makes it fit; a 500 on a derived list's
+ * integer key past ±(2^53 − 1), which it binds as the driver rounded it
  */
 declare function createCursor(row: Record<string, unknown>, sort: readonly SortField[], options: CursorOptions & {
     byReference?: ReadonlySet<string> | undefined;

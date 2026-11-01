@@ -16,7 +16,9 @@ import {
 	IDS,
 	KEYS,
 	pageAll,
+	ROUNDED,
 	viaBuilder,
+	viaDerived,
 	viaRelational,
 } from "../integration/support/bigint.ts"
 
@@ -50,4 +52,33 @@ describe("keyset pagination over an integer key past 2^53, on bun:sqlite (U22)",
 		expect(String((refused as CombError).cause)).toMatch(EXACTLY)
 		client.close()
 	})
+})
+
+/* Q1 of r19: a derived list with no anchor table binds the key as the driver read it */
+describe("a derived list over an integer key past 2^53, on bun:sqlite", () => {
+	for (const order of Object.keys(EXPECTED)) {
+		it(`refuses the page whose cursor would carry a rounded key under ${order}, where it skipped rows or repeated one`, async () => {
+			const client = seeded(KEYS)
+			const refused = await pageAll(viaDerived(drizzle({ client }) as never), order).catch((error: unknown) => error)
+			expect(refused).toBeInstanceOf(CombError)
+			expect((refused as CombError).errorKey).toBe("sort_not_wired")
+			expect(String((refused as CombError).cause)).toMatch(ROUNDED)
+			client.close()
+		})
+
+		it(`pages ${order} every row once with an anchor table, which it reads the exact key back from`, async () => {
+			const client = seeded(KEYS)
+			expect(await pageAll(viaDerived(drizzle({ client }) as never, true), order)).toEqual(EXPECTED[order] as number[])
+			client.close()
+		})
+
+		it(`pages ${order} every row once where the keys are read as bigint (safeIntegers)`, async () => {
+			const client = new Database(":memory:", { safeIntegers: true })
+			client.run(CREATE)
+			client.run(KEYS)
+			const ids = await pageAll(viaDerived(drizzle({ client }) as never), order)
+			expect(ids.map(Number)).toEqual(EXPECTED[order] as number[])
+			client.close()
+		})
+	}
 })

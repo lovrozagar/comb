@@ -9,6 +9,7 @@
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { effectiveNulls } from "./cursor.ts"
+import { roundedKey } from "./rounded-key.ts"
 import {
 	applySelect,
 	COMB_ID,
@@ -114,14 +115,9 @@ function refuseRounded(rows: ReadonlyArray<Record<string, unknown>>, sort: reado
 					status: "internal_server_error",
 				})
 			}
-			const value = row[field]
-			if (typeof value !== "number" || !Number.isInteger(value) || Number.isSafeInteger(value)) continue
-			throw new CombError({
-				cause: `${field} ${BigInt(value)} is past ±(2^53 − 1), where the driver rounded it: a merged list's integer sort keys must be within ±(2^53 − 1), or be read as bigint`,
-				errorKey: combErrorKeys.SORT_NOT_WIRED,
-				status: "internal_server_error",
-			})
 		}
+		const rounded = roundedKey(row, sort, "merged")
+		if (rounded !== undefined) throw rounded
 	}
 }
 

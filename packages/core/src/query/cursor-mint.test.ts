@@ -78,3 +78,30 @@ describe("the public createCursor: a value too long for a cursor", () => {
 		expect(readCursor(cursor, BY_TITLE, SEALED)).toMatchObject({ id: "d1", values: ["a"] })
 	})
 })
+
+/* Q1 of r19: a derived list binds its cursor's keys as the driver read them, so a rounded integer is refused where it is minted */
+describe("createCursor on an integer key past ±(2^53 − 1)", () => {
+	const BY_SCORE: SortField[] = [{ direction: "asc", field: "score" }]
+	const rounded = 2 ** 60 + 256
+	it("refuses a derived list's rounded key, naming it and how to page it, through the public createCursor too", () => {
+		for (const mint of [createCursor, publicCreateCursor])
+			expect(() =>
+				mint({ _id: "a", score: rounded }, BY_SCORE, { ...SEALED, idField: "_id", keyset: "derived" }),
+			).toThrow(
+				expect.objectContaining({
+					cause:
+						"score 1152921504606847232 is past ±(2^53 − 1), where the driver rounded it: a derived list has no row to read the exact key back from, so its integer sort keys must be within ±(2^53 − 1), or be read as bigint",
+					errorKey: "sort_not_wired",
+					status: 500,
+				}),
+			)
+	})
+
+	it("mints the key read as bigint, a safe integer and a fraction, and a table list's rounded key, which it reads back from the row", () => {
+		const derived = { ...SEALED, idField: "_id", keyset: "derived" as const }
+		for (const score of [2n ** 60n + 200n, Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER, 0.5])
+			expect(readCursor(createCursor({ _id: "a", score }, BY_SCORE, derived), BY_SCORE, SEALED)?.id).toBe("a")
+		const table = { ...SEALED, idField: "_id", keyset: "table" as const }
+		expect(readCursor(createCursor({ _id: "a", score: rounded }, BY_SCORE, table), BY_SCORE, SEALED)?.id).toBe("a")
+	})
+})
