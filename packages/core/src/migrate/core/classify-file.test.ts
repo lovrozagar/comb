@@ -24,6 +24,24 @@ describe("classifyMigration on a statement that runs only outside a transaction"
 	})
 })
 
+/* r18 S2: SQLite will not change the journal mode inside the transaction comb runs each file in */
+describe("classifyMigration on SQLite's journal_mode", () => {
+	it.each([
+		"PRAGMA journal_mode = WAL",
+		"PRAGMA main.journal_mode=wal",
+		'PRAGMA "main" . JOURNAL_MODE = DELETE',
+		"PRAGMA journal_mode",
+		"-- comb:allow-unsafe: needed\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nPRAGMA journal_mode = WAL;",
+	])("refuses %j, whatever the approval", (sql) => {
+		expect(() => lite(sql)).toThrow("journal_mode is the database's setting")
+	})
+
+	it("rates a statement that only reads the mode, or names a table after it, as any other", () => {
+		expect(lite("SELECT journal_mode FROM pragma_journal_mode").safety).toBe("safe")
+		expect(lite("CREATE TABLE journal_mode_log (id INTEGER PRIMARY KEY)").safety).toBe("safe")
+	})
+})
+
 /* S1 of the 0.15.0 review: a file's own transaction control ends the batch that records it */
 describe("classifyMigration on SQLite transaction control", () => {
 	it.each([

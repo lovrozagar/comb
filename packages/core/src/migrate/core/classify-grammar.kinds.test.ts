@@ -146,7 +146,7 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["sqlite", "ATTACH DATABASE 'x' AS y", "unsafe"],
 	["sqlite", "DETACH DATABASE y", "unsafe"],
 	["sqlite", "PRAGMA defer_foreign_keys = on", "safe"],
-	["sqlite", "PRAGMA journal_mode = wal", "unsafe"],
+	["sqlite", "PRAGMA cache_size = 1000", "unsafe"],
 	/* unsafe, pending the proof run's read of what it writes (classify-sqlite-write.ts) */
 	["sqlite", "REPLACE INTO post (id) VALUES (1)", "unsafe"],
 	["sqlite", "CREATE VIRTUAL TABLE f USING fts5(a)", "safe"],

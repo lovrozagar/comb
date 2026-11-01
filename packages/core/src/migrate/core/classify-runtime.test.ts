@@ -24,7 +24,10 @@ describe("runtimeFindings", () => {
 	it("rates a pragma by name: comb's own nothing, foreign_keys cautious, writable_schema unsafe, any other nothing", () => {
 		expect(runtimeFindings("PRAGMA main.defer_foreign_keys = on", new Map(), none)).toEqual([])
 		expect(runtimeFindings("PRAGMA foreign_keys = off", new Map(), none)).toEqual([
-			{ level: "cautious", note: "changes how SQLite runs what follows" },
+			{
+				level: "cautious",
+				note: "does nothing inside the transaction comb runs each file in: foreign keys stay on, and comb migrate diff writes defer_foreign_keys instead",
+			},
 		])
 		expect(runtimeFindings("PRAGMA WRITABLE_SCHEMA = 1", new Map(), none)[0]?.level).toBe("unsafe")
 		expect(runtimeFindings("PRAGMA recursive_triggers = on", new Map(), none)).toEqual([])

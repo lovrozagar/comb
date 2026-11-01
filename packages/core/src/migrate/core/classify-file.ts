@@ -8,7 +8,7 @@ import type { Dialect } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { INSERT_INTO } from "./classify-sqlite-write.ts"
 import { atlasDirectives } from "./pg-split.ts"
-import { nameKey, QNAME } from "./sql-code.ts"
+import { IDENT, nameKey, QNAME } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
 /* Postgres runs these only outside a transaction block */
@@ -88,11 +88,20 @@ type ReadStatement = { code: string; dialect: Dialect; stmt: string }
 /** SQLite's transaction control at the top of a file, but a rollback to a savepoint, which nests */
 const SQLITE_TRANSACTION = /^(?:BEGIN|COMMIT|END|START TRANSACTION)\b|^ROLLBACK(?: TRANSACTION)?$/i
 
+// per-process-constant: a pragma on SQLite's journal mode, in any schema, composed from the name grammar once
+const JOURNAL_MODE = /* @__PURE__ */ new RegExp(`^PRAGMA (?:${IDENT} ?\\. ?)?journal_mode\\b`, "i")
+
 /** Refuses a statement that cannot run in its file `sql`: no `-- comb:allow-unsafe:` overrides this */
 function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): void {
 	if (dialect === "sqlite" && /^VACUUM\b/i.test(code)) {
 		throw new Error(
 			`${preview(stmt)}: VACUUM cannot run inside a migration's transaction; run it outside the migrations`,
+		)
+	}
+	/* r18 S2: SQLite refuses a change into WAL inside a transaction, so such a file could never apply */
+	if (dialect === "sqlite" && JOURNAL_MODE.test(code)) {
+		throw new Error(
+			`${preview(stmt)}: journal_mode is the database's setting, and SQLite will not change it inside the transaction comb runs each file in; set it outside the migrations`,
 		)
 	}
 	/* S1 of the 0.15.0 review: the file's own BEGIN or COMMIT ends the batch that records it, so a

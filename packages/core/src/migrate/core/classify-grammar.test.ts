@@ -105,7 +105,7 @@ describe("default-deny's rule for triggers and routines, named as the rule", () 
 		["DROP TRIGGER t;", "comb rates every trigger change unsafe"],
 		/* the rerun of S10 on the RC: a pragma comb does not write, rated by its own rule too */
 		["PRAGMA writable_schema = ON;", "comb rates every pragma it does not write unsafe"],
-		["PRAGMA journal_mode = WAL;", "comb rates every pragma it does not write unsafe"],
+		["PRAGMA cache_size = 1000;", "comb rates every pragma it does not write unsafe"],
 	])("rates %j unsafe by the rule, on SQLite", (sql, rule) => {
 		const notes = rate(sql, USERS).unsafeStatements.join("\n")
 		expect(notes).toContain(`${rule}; approve it in the file`)
@@ -113,7 +113,7 @@ describe("default-deny's rule for triggers and routines, named as the rule", () 
 	})
 
 	/* R4: the rule is a pragma's only note, never beside a cautious one that says it merely changes how SQLite runs */
-	it.each(["PRAGMA recursive_triggers = on;", "PRAGMA journal_mode = WAL;"])("gives %j no cautious note", (sql) => {
+	it.each(["PRAGMA recursive_triggers = on;", "PRAGMA cache_size = 1000;"])("gives %j no cautious note", (sql) => {
 		const rated = rate(sql, USERS)
 		expect(rated.cautiousStatements).toEqual([])
 		expect(rated.unsafeStatements.join("\n")).toContain("comb rates every pragma it does not write unsafe")
