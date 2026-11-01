@@ -60,12 +60,28 @@ function stringKind(annotations: FieldConstraints, range: TextRange, mutative: b
 	return annotations.url ? "z.url()" : "z.string()"
 }
 
-/* transforms first (normalize input), then validation (check bounds) */
+/** A rewrite a written text takes before its checks, by its published name */
+type Transform = "lowercase" | "trim" | "uppercase"
+
+const CHAIN: Record<Transform, string> = { lowercase: ".toLowerCase()", trim: ".trim()", uppercase: ".toUpperCase()" }
+
+/** A written text's transforms, in the order the chain applies them: an email's are comb's own normalization */
+function transformsOf(annotations: FieldConstraints, mutative: boolean): Transform[] {
+	if (!mutative || annotations.password || annotations.url) return []
+	if (annotations.email) return ["trim", "lowercase"]
+	const casing: Transform[] = annotations.lowercase ? ["lowercase"] : annotations.uppercase ? ["uppercase"] : []
+	return [...(annotations.trim ? (["trim"] as const) : []), ...casing]
+}
+
+/**
+ * Transforms first (normalize input), then validation (check bounds), so the published bounds bind
+ * the rewritten value. zod publishes no overwrite, so the list is published as `x-comb-transform`,
+ * from the one list the chain is written from (C2 of r18)
+ */
 function transforms(annotations: FieldConstraints, mutative: boolean): string {
-	if (!mutative || annotations.password || annotations.email || annotations.url) return ""
-	const trim = annotations.trim ? ".trim()" : ""
-	const casing = annotations.lowercase ? ".toLowerCase()" : annotations.uppercase ? ".toUpperCase()" : ""
-	return trim + casing
+	const list = transformsOf(annotations, mutative)
+	if (list.length === 0) return ""
+	return `${list.map((transform) => CHAIN[transform]).join("")}.meta(${JSON.stringify({ "x-comb-transform": list })})`
 }
 
 /** A range's bounds as zod checks */
@@ -140,6 +156,6 @@ export function textBase(build: Build): string {
 	/* an email is normalized first, then validated: z.email() would refuse the padded input. Checks
 	 * run in chain order, and unlike a pipe the chain still publishes the email format and bounds */
 	if (annotations.email && mutative)
-		return `z.string().trim().toLowerCase().check(z.email())${textBounds(build, range)}`
+		return `z.string()${transforms(annotations, mutative)}.check(z.email())${textBounds(build, range)}`
 	return stringKind(annotations, range, mutative) + transforms(annotations, mutative) + textBounds(build, range)
 }

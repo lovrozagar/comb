@@ -62,7 +62,7 @@ describe("textBase on a write", () => {
 		)
 		expect(parse(write).safeParse("eleven char").success).toBe(false)
 		expect(text('c.text("t", { email: true, max: 20 })', "update")).toBe(
-			"z.string().trim().toLowerCase().check(z.email()).max(20)",
+			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).max(20)',
 		)
 	})
 })
@@ -94,5 +94,23 @@ describe("textBase: a text's effective bounds that leave no value", () => {
 		expect(text('c.text("t", { url: true, max: 9 })', "create")).toContain(".max(9)")
 		expect(text('c.text("t", { max: 1 }).notNull()', "create")).toContain(".min(1).max(1)")
 		expect(text('c.text("t", { max: 0 }).notNull()', "read")).toBe('z.string().meta({"x-comb-maxLength":0})')
+	})
+})
+
+/** The transforms the JSON Schema of `code` publishes */
+const transforms = (code: string) => z.toJSONSchema(parse(code), { io: "input" })["x-comb-transform"]
+
+/* C2 of r18: a written text's transforms rewrite the value, so its schema publishes them, in order, from the one list that writes the chain */
+describe("textBase: a written text's transforms", () => {
+	it("publishes each one in the order the chain applies it", () => {
+		expect(transforms(text('c.text("t", { trim: true, lowercase: true })', "create"))).toEqual(["trim", "lowercase"])
+		expect(transforms(text('c.text("t", { uppercase: true })', "update"))).toEqual(["uppercase"])
+		expect(transforms(text('c.text("t", { email: true })', "create"))).toEqual(["trim", "lowercase"])
+	})
+
+	it("publishes none on a text that takes none, or on a read", () => {
+		expect(transforms(text('c.text("t", { max: 5 })', "create"))).toBeUndefined()
+		expect(transforms(text('c.text("t", { trim: true })', "read"))).toBeUndefined()
+		expect(transforms(text('c.text("t", { password: true, trim: true })', "create"))).toBeUndefined()
 	})
 })

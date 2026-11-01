@@ -87,6 +87,19 @@ a legal extension rather than an invalid key. It is also greppable across all th
 `v` and `kind` are flat rather than wrapping a nested `meta` object so that consumers get an
 ordinary discriminated union: `if (m.kind === "entity")` narrows, with no extra hop.
 
+### 2.1 Field keys
+
+Beside `x-comb` on the object, a field's own JSON Schema may carry flat `x-comb-*` keys for rules
+JSON Schema cannot state. Each sits on the field's value schema: for a nullable field, on the
+`anyOf` branch that is not `{ "type": "null" }`, beside the bounds it qualifies.
+
+- `x-comb-transform`: the rewrites a written text takes before any check, in the order applied,
+  each one of `"trim"`, `"lowercase"` and `"uppercase"`; an email's is `["trim", "lowercase"]`.
+  A read publishes none. See §6.9 for what the published bounds then mean.
+- `x-comb-text`, `x-comb-maxBytes`, and on a read `x-comb-minLength`, `x-comb-maxLength`,
+  `x-comb-minimum`, `x-comb-maximum`: the storable-text rule, a JSON byte limit, and the declared
+  bounds a read states without enforcing them.
+
 ## 3. Producer API
 
 ```ts
@@ -230,6 +243,18 @@ resolver, so a schema that promises search cannot silently answer with the unfil
 
 `null` stays valid on the wire for producers that genuinely cannot know; comb's own schema
 builder no longer emits it.
+
+### 6.9 A written text's transforms are published, and the bounds bind their result
+
+zod publishes no overwrite: `.trim()` and `.toLowerCase()` leave no trace in `z.toJSONSchema`, so
+a client reading the spec could not learn that `"  Ann@Example.COM "` is stored as
+`"ann@example.com"`, and a validator built from it disagreed with the server both ways. It
+accepted `"   "` for a trimmed required text, which the server refuses, and refused `"ABC"`
+under a lowercase field's `^[a-z]+$`, which the server stores as `"abc"`. comb publishes the list
+as `x-comb-transform` (§2.1), written from the one list the generated zod chain is written
+from, so the two cannot drift. A field's published `minLength`, `maxLength`, `pattern` and
+`format` bind the transformed value: a consumer applies the listed transforms, in order, before
+it checks, generates or compares a value. honey and oat do (their half of C2 of r18).
 
 ### 6.7 Query facts added within v1
 

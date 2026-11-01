@@ -162,7 +162,7 @@ describe("generateFieldSchema: JSON", () => {
 			"z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)",
 		)
 		expect(schema("e", 'c.text("e", { email: true, min: 3, max: 50 }).notNull()', "create")).toBe(
-			"z.string().trim().toLowerCase().check(z.email()).min(3).max(50).meta(_m.email)",
+			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).min(3).max(50).meta(_m.email)',
 		)
 		expect(
 			generateFieldSchema(fieldOf("e", 'c.text("e", { email: true }, 80).notNull()', { length: 80 }), "read", {
@@ -173,11 +173,11 @@ describe("generateFieldSchema: JSON", () => {
 			'z.url().regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" }).meta({ format: "uri" }).meta(_m.url)',
 		)
 		expect(schema("n", 'c.text("n", { trim: true, lowercase: true, max: 20 }).notNull()', "update")).toBe(
-			"z.string().trim().toLowerCase().min(1).max(20).meta(_m.string).optional()",
+			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).min(1).max(20).meta(_m.string).optional()',
 		)
 		expect(schema("n", 'c.text("n", { uppercase: true, pattern: "/^[A-Z]+$/" }).notNull()', "create")).toBe(
 			/* a pattern decides what the value looks like, so it gets no example (F18) */
-			"z.string().toUpperCase().min(1).regex(/^[A-Z]+$/)",
+			'z.string().toUpperCase().meta({"x-comb-transform":["uppercase"]}).min(1).regex(/^[A-Z]+$/)',
 		)
 		expect(
 			generateFieldSchema(fieldOf("n", 'c.text("n", { min: 2 }, 10).notNull()', { length: 10 }), "read", {
@@ -263,7 +263,7 @@ describe("generateFieldSchema: what the 0.8.0 codegen review found (F1, F2, F15,
 
 	it("normalizes an email before validating it, on create and update (F15)", () => {
 		expect(schema("e", 'c.text("e", { email: true }).notNull()', "update")).toBe(
-			"z.string().trim().toLowerCase().check(z.email()).meta(_m.email).optional()",
+			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).meta(_m.email).optional()',
 		)
 	})
 
@@ -413,7 +413,7 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "create")).toBe(
 			/* a pattern decides what the value looks like, so it gets no example (F18) */
-			"z.string().trim().toLowerCase().check(z.email()).regex(/@corp\\.io$/)",
+			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).regex(/@corp\\.io$/)',
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "read")).toBe("z.string()")
 	})
