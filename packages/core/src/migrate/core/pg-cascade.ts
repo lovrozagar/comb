@@ -158,4 +158,4 @@ function moveReads(facts: Facts, move: (key: string) => string): void {
 	for (const reads of all) reads.relations = new Set([...reads.relations].map(move))
 }
 
-export { followCascade, followReads, moveReads }
+export { followCascade, followReads, moveReads, readsOf }

@@ -4,17 +4,25 @@
  * refuses to retype a column a view or policy reads, with every view over a view that goes.
  */
 import type { PgObject } from "./pg-objects.ts"
-import { codeOf, lastPart } from "./sql-code.ts"
+import { readsOf } from "./pg-cascade.ts"
+import type { Node } from "./pg-nodes.ts"
+import { parsePostgres } from "./pg-parser.ts"
+import { lastPart } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
-/** Whether a view's definition, or a policy's USING or WITH CHECK, reads the relation `name` */
-function reads(object: PgObject, name: string): boolean {
-	const code = codeOf(object.sql, "postgres")
-	const at = object.kind === "policy" ? code.search(/\b(?:USING|WITH CHECK)\b/i) : code.search(/ AS /i)
-	const body = at === -1 ? "" : code.slice(at)
-	const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-	return new RegExp(`(?:^|[^\\w$"])"?${escaped}"?(?=[^\\w$"]|$)`).test(body)
+/**
+ * The relations a view's or materialized view's query, or a policy's USING and WITH CHECK, read, by
+ * their bare names, from its parse tree, as a CASCADE drop reads them (pg-cascade.ts, R1 of plan 17)
+ */
+function relationsOf(object: PgObject): Set<string> {
+	const [stmt] = (parsePostgres(object.sql) as { stmts: Array<{ stmt: Node }> }).stmts
+	const [type, node] = Object.entries((stmt as { stmt: Node }).stmt)[0] as [string, Node]
+	const read = type === "CreatePolicyStmt" ? [node["qual"], node["with_check"]] : node["query"]
+	return new Set([...readsOf(read, "").relations].map((key) => key.slice(key.lastIndexOf(".") + 1)))
 }
+
+/** Whether a view's definition, or a policy's USING or WITH CHECK, reads the relation `name` */
+const reads = (object: PgObject, name: string): boolean => relationsOf(object).has(name)
 
 const isView = (object: PgObject): boolean => object.kind === "view" || object.kind === "materialized view"
 /** Whether two objects are defined alike, layout and comments aside */
@@ -25,10 +33,11 @@ const same = (a: PgObject | undefined, b: PgObject | undefined): boolean =>
 function affected(from: Map<string, PgObject>, to: Map<string, PgObject>, tables: ReadonlySet<string>): Set<string> {
 	const out = new Set<string>()
 	for (const [key, object] of from) {
-		if ((isView(object) || object.kind === "policy") && !same(object, to.get(key))) out.add(key)
+		if (!isView(object) && object.kind !== "policy") continue
+		if (!same(object, to.get(key))) out.add(key)
 		if (object.kind === "policy" && tables.has(lastPart(object.on as string))) out.add(key)
-		if (object.kind === "policy" && [...tables].some((table) => reads(object, table))) out.add(key)
-		if (isView(object) && [...tables].some((table) => reads(object, table))) out.add(key)
+		const read = relationsOf(object)
+		if ([...tables].some((table) => read.has(table))) out.add(key)
 	}
 	return withDependentViews(from, out)
 }
