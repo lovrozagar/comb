@@ -20,6 +20,7 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "ALTER FOREIGN TABLE f ADD COLUMN c int", "unsafe"],
 	["postgres", "ALTER FUNCTION f() OWNER TO r", "unsafe"],
 	["postgres", "ALTER INDEX i SET TABLESPACE t", "safe"],
+	["postgres", "ALTER TABLE ALL IN TABLESPACE a SET TABLESPACE b", "safe"],
 	["postgres", "ALTER LANGUAGE l OWNER TO r", "unsafe"],
 	["postgres", "ALTER MATERIALIZED VIEW m OWNER TO r", "cautious"],
 	["postgres", "ALTER OPERATOR + (int, int) OWNER TO r", "unsafe"],

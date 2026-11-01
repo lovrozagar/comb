@@ -91,6 +91,24 @@ describe("ddlFindings: an ALTER TABLE that rewrites the table", () => {
 			expect(rated(sql), sql).toEqual([{ level: "lock", note: "rewrites or scans the table under an exclusive lock" }])
 	})
 
+	/* r18 P11: an index or a materialized view moved, or a whole tablespace's relations, is rewritten too */
+	it("warns of the rewrite for an index or materialized view moved, and for every relation of a tablespace", () => {
+		const REWRITE = [{ level: "lock", note: "rewrites or scans the table under an exclusive lock" }]
+		for (const sql of [
+			"ALTER INDEX t_v SET TABLESPACE fast",
+			"ALTER MATERIALIZED VIEW mv SET TABLESPACE fast",
+			"ALTER MATERIALIZED VIEW mv SET ACCESS METHOD heap",
+		])
+			expect(rated(sql), sql).toEqual(REWRITE)
+		expect(rated("ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE fast")).toEqual([
+			{ level: "lock", note: "moves every table in tablespace pg_default, each rewritten under an exclusive lock" },
+		])
+		expect(rated("ALTER INDEX ALL IN TABLESPACE slow OWNED BY r SET TABLESPACE fast")).toEqual([
+			{ level: "lock", note: "moves every index in tablespace slow, each rewritten under an exclusive lock" },
+		])
+		expect(rated("ALTER INDEX t_v SET (fillfactor = 70)")).toEqual([])
+	})
+
 	it("rates SET LOGGED and SET UNLOGGED cautious, with the rewrite, and says what UNLOGGED loses", () => {
 		expect(rated("ALTER TABLE t SET LOGGED")).toEqual([
 			{ level: "cautious" },

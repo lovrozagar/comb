@@ -19,7 +19,7 @@ import { addColumn, inlineConstraints, REWRITES } from "./pg-column-add.ts"
 import { domainFindings } from "./pg-domain.ts"
 import { attachFindings, maintenanceFindings } from "./pg-maintenance.ts"
 import { retypeFindings } from "./pg-retype.ts"
-import { tableFindings } from "./pg-table-commands.ts"
+import { REWRITE_COMMANDS, tableFindings } from "./pg-table-commands.ts"
 import { type Facts, names, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
 
 // lookup-table: the kinds a rename or a move to another schema of loses what names them: unsafe
@@ -149,7 +149,13 @@ function columnFindings(cmd: Node, table: string, on: On): Finding[] | undefined
 const commandFindings = (cmd: Node, table: string, on: On): Finding[] =>
 	columnFindings(cmd, table, on) ?? tableFindings(cmd, table)
 
-/** An ALTER of a table or a composite type, command by command; an index, view or sequence changes no value */
+// lookup-table: the relations a move to another tablespace rewrites, besides a table: an index, a materialized view (P11 of r18)
+const MOVED = /* @__PURE__ */ new Set(["OBJECT_INDEX", "OBJECT_MATVIEW"])
+
+/**
+ * An ALTER of a table or a composite type, command by command; of an index or a materialized view,
+ * the move that rewrites it; a view or a sequence changes no value
+ */
 function alterFindings(node: Node, facts: Facts): Finding[] {
 	const objtype = node["objtype"]
 	const cmds = (node["cmds"] as Node[]).map((each) => each["AlterTableCmd"] as Node)
@@ -163,7 +169,19 @@ function alterFindings(node: Node, facts: Facts): Finding[] {
 		return cmds.some((cmd) => cmd["subtype"] === "AT_DropColumn" || cmd["subtype"] === "AT_AlterColumnType")
 			? [{ level: "unsafe" }]
 			: []
-	return []
+	return MOVED.has(String(objtype)) && cmds.some((cmd) => REWRITE_COMMANDS.has(String(cmd["subtype"])))
+		? [{ level: "lock", note: REWRITES }]
+		: []
+}
+
+/** An ALTER … ALL IN TABLESPACE: every relation of its kind there moves, and each is rewritten (P11 of r18) */
+function moveAllFindings(node: Node): Finding[] {
+	const kind = String(node["objtype"])
+		.replace(/^OBJECT_/, "")
+		.replace("MATVIEW", "materialized view")
+		.toLowerCase()
+	const from = String(node["orig_tablespacename"])
+	return [{ level: "lock", note: `moves every ${kind} in tablespace ${from}, each rewritten under an exclusive lock` }]
 }
 
 /** A drop's findings: its level by kind, and the tables and indexes it names */
@@ -182,6 +200,16 @@ function dropFindings(node: Node): Finding[] {
 // lookup-table: the DDL nodes that drop what no file can bring back: a database, a role, what a role owns
 const UNSAFE_NODES = /* @__PURE__ */ new Set(["DropOwnedStmt", "DropRoleStmt", "DropdbStmt"])
 
+// lookup-table: the DDL nodes one rule rates from the node alone, by type
+const NODE_RULES: Readonly<Record<string, (node: Node) => Finding[]>> = {
+	AlterDomainStmt: domainFindings,
+	/* a renamed enum value no longer matches what stored rows and the deployed code name */
+	AlterEnumStmt: (node) => (node["oldVal"] === undefined ? [] : [{ level: "unsafe" }]),
+	AlterSeqStmt: (node) => (restarts(node["options"]) ? [RESTART] : []),
+	AlterTableMoveAllStmt: moveAllFindings,
+	DropStmt: dropFindings,
+}
+
 /** One DDL node's findings, read from its parse tree and the history's `facts`; undefined for a node that is not DDL these rules rate */
 function ddlFindings(type: string, node: Node, facts: Facts): Finding[] | undefined {
 	if (type === "AlterTableStmt") return alterFindings(node, facts)
@@ -190,13 +218,8 @@ function ddlFindings(type: string, node: Node, facts: Facts): Finding[] | undefi
 		if (UNSAFE_RENAMES.has(kind)) return [{ level: "unsafe" }]
 		return CAUTIOUS_RENAMES.has(kind) && type === "RenameStmt" ? [{ level: "cautious" }] : []
 	}
-	/* a renamed enum value no longer matches what stored rows and the deployed code name */
-	if (type === "AlterEnumStmt") return node["oldVal"] === undefined ? [] : [{ level: "unsafe" }]
-	if (type === "AlterSeqStmt") return restarts(node["options"]) ? [RESTART] : []
-	if (type === "DropStmt") return dropFindings(node)
-	if (type === "AlterDomainStmt") return domainFindings(node)
 	if (UNSAFE_NODES.has(type)) return [{ level: "unsafe" }]
-	return maintenanceFindings(type, node)
+	return NODE_RULES[type]?.(node) ?? maintenanceFindings(type, node)
 }
 
 // lookup-table: the constraints an ADD backs with an index it builds in place, under an ACCESS EXCLUSIVE lock

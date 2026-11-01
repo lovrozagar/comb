@@ -22,8 +22,8 @@ const CAUTIOUS_COMMANDS = /* @__PURE__ */ new Set([
 	"AT_DropIdentity",
 ])
 
-// lookup-table: the ALTER TABLE commands that rewrite the whole table under an ACCESS EXCLUSIVE lock and lose no value
-const REWRITE_COMMANDS = /* @__PURE__ */ new Set(["AT_SetAccessMethod", "AT_SetTableSpace"])
+// lookup-table: the ALTER commands that rewrite the whole relation under an ACCESS EXCLUSIVE lock and lose no value: a table's, an index's or a materialized view's
+const REWRITE_COMMANDS: ReadonlySet<string> = /* @__PURE__ */ new Set(["AT_SetAccessMethod", "AT_SetTableSpace"])
 
 // lookup-table: the row level security commands, cautious, each saying whose rows it changes
 const SECURITY_COMMANDS = /* @__PURE__ */ new Set([
@@ -106,4 +106,4 @@ function tableFindings(cmd: Node, table: string): Finding[] {
 	]
 }
 
-export { tableFindings }
+export { REWRITE_COMMANDS, tableFindings }
