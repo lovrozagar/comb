@@ -93,13 +93,20 @@ describe("the query entry point", () => {
 const roundsTo = (n: bigint, value: number) => Number(n) === value
 
 describe("roundingEdge", () => {
-	it.each([2 ** 60 + 256, 2 ** 60, 2 ** 53, 2 ** 53 + 2, -(2 ** 60), -(2 ** 53), Number.MAX_VALUE, -(2 ** 60 + 256)])(
-		"bounds %d by the least and greatest integer that read as it, less and plus one",
-		(value) => {
-			const below = roundingEdge(value, "asc")
-			const above = roundingEdge(value, "desc")
-			expect([roundsTo(below, value), roundsTo(below + 1n, value)]).toEqual([false, true])
-			expect([roundsTo(above, value), roundsTo(above - 1n, value)]).toEqual([false, true])
-		},
-	)
+	it.each([
+		2 ** 60 + 256,
+		2 ** 60,
+		2 ** 53,
+		2 ** 53 + 2,
+		-(2 ** 60),
+		-(2 ** 53),
+		Number.MAX_VALUE,
+		-Number.MAX_VALUE,
+		-(2 ** 60 + 256),
+	])("bounds %d by the least and greatest integer that read as it, less and plus one", (value) => {
+		const below = roundingEdge(value, "asc")
+		const above = roundingEdge(value, "desc")
+		expect([roundsTo(below, value), roundsTo(below + 1n, value)]).toEqual([false, true])
+		expect([roundsTo(above, value), roundsTo(above - 1n, value)]).toEqual([false, true])
+	})
 })
