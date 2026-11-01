@@ -185,6 +185,23 @@ describe("comb migrate diff", () => {
 	})
 })
 
+describe("comb migrate diff on a configured drizzle config", () => {
+	/* r18 S5: a directory exists too, and drizzle-kit fails on it with words that name no field */
+	it("refuses a configured drizzleConfigPath that is a directory", async () => {
+		const dir = diffProject()
+		writeFileSync(
+			join(dir, "comb.migrate.config.ts"),
+			'export default { databases: { core: { migrationsDir: "./m", drizzleConfigPath: ".", name: "core", provider: { type: "libsql", url: "file:x.db" } } } }\n',
+		)
+		const folder = makeIo(
+			dir,
+			fakeAtlas(() => undefined),
+		)
+		expect(await runCli(["migrate", "diff", "core"], folder)).toBe(1)
+		expect(folder.errors).toEqual([`drizzleConfigPath ${dir} is a directory, not a drizzle config`])
+	})
+})
+
 /* plan 14's 5.4: Atlas OSS leaves out the triggers, functions and procedures a schema holds, and says so on stderr */
 describe("comb migrate diff: what Atlas says as it succeeds", () => {
 	const SKIPPED =

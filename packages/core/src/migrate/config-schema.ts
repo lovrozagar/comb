@@ -4,6 +4,7 @@
  */
 import * as z from "zod"
 import type { DatabaseConfig } from "./types.ts"
+import { lockTimeoutMs } from "./core/pg-lock-timeout.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    CONFIG SCHEMA
@@ -37,7 +38,14 @@ const providerInputSchema = () =>
 		}),
 		z.strictObject({
 			devUrl: z.string().optional(),
-			lockTimeout: z.string().min(1).optional(),
+			/* a literal of the config, so its grammar is held at load, as Postgres reads lock_timeout (K4 of r18) */
+			lockTimeout: z
+				.string()
+				.superRefine((text, ctx) => {
+					const ms = lockTimeoutMs(text)
+					if (typeof ms === "string") ctx.addIssue({ code: "custom", message: ms })
+				})
+				.optional(),
 			schema: z.string().min(1).optional(),
 			type: z.literal("postgres"),
 			/* checked when a command resolves its environment, so one unset in this shell blocks no other (P5) */
@@ -113,8 +121,18 @@ const databaseConfigInputSchema = () =>
 	z
 		.strictObject({
 			codegen: z.string().min(1).optional(),
-			drizzleConfigPath: z.string().optional(),
-			environments: z.record(z.string(), environmentConfigInputSchema()).optional(),
+			drizzleConfigPath: z
+				.string()
+				.refine((path) => path.trim() !== "", {
+					message: "drizzleConfigPath is empty; remove it to use the project's drizzle.config.ts, or name the file",
+				})
+				.optional(),
+			environments: z
+				.record(
+					z.string().min(1, { message: "an environment needs a name: -e cannot choose one keyed by the empty string" }),
+					environmentConfigInputSchema(),
+				)
+				.optional(),
 			migrationsDir: z.string().min(1),
 			name: z.string().min(1).optional(),
 			provider: providerInputSchema().optional(),
@@ -133,7 +151,9 @@ type CombMigrateConfig = {
 /* typed with the declared config, so the schema cannot drift from it */
 const configInputSchema = (): z.ZodType<CombMigrateConfig> =>
 	z.strictObject({
-		databases: z.record(z.string(), databaseConfigInputSchema()),
+		databases: z
+			.record(z.string(), databaseConfigInputSchema())
+			.refine((databases) => Object.keys(databases).length > 0, { message: "databases declares no database" }),
 	})
 
 export { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL }

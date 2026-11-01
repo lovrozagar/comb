@@ -92,3 +92,49 @@ describe("migrateConfigSchema: connection strings empty at load", () => {
 		expect(() => parseConfig(config)).not.toThrow()
 	})
 })
+
+/* r18 K4 ⊃ S5: what a config states in itself is refused at load, naming the key */
+/** A config of one bun:sqlite database, with `extra` on it */
+const coreWith = (extra: Record<string, unknown>) => ({
+	databases: { core: { migrationsDir: "./m", name: "core", provider: { path: "x.db", type: "bun-sqlite" }, ...extra } },
+})
+
+describe("parseConfig: values refused at load", () => {
+	it.each([
+		[
+			coreWith({ drizzleConfigPath: "" }),
+			"drizzleConfigPath is empty; remove it to use the project's drizzle.config.ts, or name the file",
+		],
+		[
+			coreWith({ drizzleConfigPath: "   " }),
+			"drizzleConfigPath is empty; remove it to use the project's drizzle.config.ts, or name the file",
+		],
+		[{ databases: {} }, "databases declares no database"],
+		[
+			{
+				databases: {
+					core: { environments: { "": { provider: { path: "x.db", type: "bun-sqlite" } } }, migrationsDir: "./m" },
+				},
+			},
+			"an environment needs a name: -e cannot choose one keyed by the empty string",
+		],
+		[
+			{
+				databases: {
+					core: { migrationsDir: "./m", name: "core", provider: { lockTimeout: "5 sec", type: "postgres", url: "" } },
+				},
+			},
+			"lockTimeout must be a Postgres duration",
+		],
+		[
+			{
+				databases: {
+					core: { migrationsDir: "./m", name: "core", provider: { lockTimeout: "25d", type: "postgres", url: "" } },
+				},
+			},
+			"lockTimeout 25d is longer than Postgres's lock_timeout takes",
+		],
+	])("refuses %j", (config, message) => {
+		expect(() => parseConfig(config)).toThrow(message)
+	})
+})
