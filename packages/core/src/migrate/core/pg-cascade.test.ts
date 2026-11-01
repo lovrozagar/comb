@@ -4,7 +4,7 @@
  */
 import { beforeAll, describe, expect, it } from "vitest"
 import { historyFacts } from "./pg-history.ts"
-import { loadPostgresParser } from "./pg-parser.ts"
+import { loadPostgresParser, parsePostgres } from "./pg-parser.ts"
 import { extractSchema } from "./schema.ts"
 
 beforeAll(() => loadPostgresParser())
@@ -79,5 +79,63 @@ CREATE VIEW w AS SELECT id FROM t; DROP TYPE mood CASCADE;`
 		const two = `CREATE TYPE a AS ENUM ('x'); CREATE TYPE b AS ENUM ('y'); CREATE TABLE plain (id int); CREATE TABLE t (id int, ca a, cb b);
 CREATE VIEW va AS SELECT ca FROM t; CREATE VIEW vb AS SELECT cb FROM t; CREATE VIEW w AS SELECT id FROM t; DROP TYPE a, b CASCADE;`
 		expect(left(two).views).toEqual(["w"])
+	})
+})
+
+/*
+ * P1 of r19: a DROP … CASCADE of a kind the cascade does not model crashed rating for every later file. Each
+ * kind is read from its own node shape through one table, and every other kind names nothing it can follow.
+ * The class: every kind Postgres's DROP takes with CASCADE, each parsed and followed (pg-cascade.ts DROPS).
+ */
+const DROP_KINDS = [
+	"DROP ACCESS METHOD am CASCADE",
+	"DROP AGGREGATE agg(int) CASCADE",
+	"DROP CAST (int AS text) CASCADE",
+	"DROP COLLATION c CASCADE",
+	"DROP CONVERSION cv CASCADE",
+	"DROP DOMAIN d CASCADE",
+	"DROP EVENT TRIGGER e CASCADE",
+	"DROP EXTENSION pg_trgm CASCADE",
+	"DROP FOREIGN DATA WRAPPER w CASCADE",
+	"DROP FOREIGN TABLE ft CASCADE",
+	"DROP FUNCTION f() CASCADE",
+	"DROP INDEX i CASCADE",
+	"DROP LANGUAGE plperl CASCADE",
+	"DROP MATERIALIZED VIEW m CASCADE",
+	"DROP OPERATOR @@ (int, int) CASCADE",
+	"DROP OPERATOR CLASS oc USING btree CASCADE",
+	"DROP OPERATOR FAMILY of USING btree CASCADE",
+	"DROP POLICY p ON t CASCADE",
+	"DROP PROCEDURE pr() CASCADE",
+	"DROP PUBLICATION pub CASCADE",
+	"DROP ROUTINE r() CASCADE",
+	"DROP RULE ru ON t CASCADE",
+	"DROP SCHEMA s CASCADE",
+	"DROP SEQUENCE sq CASCADE",
+	"DROP SERVER sv CASCADE",
+	"DROP STATISTICS st CASCADE",
+	"DROP TABLE t CASCADE",
+	"DROP TEXT SEARCH CONFIGURATION tc CASCADE",
+	"DROP TEXT SEARCH DICTIONARY td CASCADE",
+	"DROP TEXT SEARCH PARSER tp CASCADE",
+	"DROP TEXT SEARCH TEMPLATE tt CASCADE",
+	"DROP TRANSFORM FOR int LANGUAGE sql CASCADE",
+	"DROP TRIGGER tr ON t CASCADE",
+	"DROP TYPE ty CASCADE",
+	"DROP VIEW v CASCADE",
+]
+
+describe("a CASCADE drop of every kind in the history (P1 of r19)", () => {
+	it.each(DROP_KINDS)("follows %j without throwing, and rates the next file", (drop) => {
+		const history = `${BASE} CREATE VIEW keep AS SELECT id FROM u; ${drop};`
+		expect(left(history).views).toContain("keep")
+	})
+
+	it("covers every kind Postgres's DROP takes: each parses to its own removeType, and none is left out", () => {
+		const kinds = DROP_KINDS.map((drop) => {
+			const [{ stmt }] = parsePostgres(drop).stmts as [{ stmt: { DropStmt: { removeType: string } } }]
+			return stmt.DropStmt.removeType
+		})
+		expect(new Set(kinds).size).toBe(DROP_KINDS.length)
 	})
 })

@@ -71,21 +71,44 @@ function dropType(type: string, gone: Gone, facts: Facts): void {
 	}
 }
 
-// lookup-table: the routine kinds a DROP names by their signature
-const ROUTINES = /* @__PURE__ */ new Set(["OBJECT_AGGREGATE", "OBJECT_FUNCTION", "OBJECT_PROCEDURE"])
+/** What one object a DROP … CASCADE names drops itself, read from the node shape its kind gives it */
+type Drops = (object: Node, gone: Gone, facts: Facts) => void
+
+const routine: Drops = (object, gone, facts) =>
+	void gone.functions.add(keyOf(names((object["ObjectWithArgs"] as Node)["objname"]), facts.schema))
+const relation: Drops = (object, gone, facts) =>
+	void gone.relations.add(keyOf(names((object["List"] as Node)["items"]), facts.schema))
+const typed: Drops = (object, gone, facts) =>
+	dropType(keyOf(names((object["TypeName"] as Node)["names"]), facts.schema), gone, facts)
+
+/**
+ * What each kind's DROP … CASCADE drops itself, by removeType, each read from its own node shape (P1
+ * of r19). Every other kind (an extension, a cast, a language, an operator, a publication, a trigger,
+ * a policy, …) names nothing the facts follow, so it adds nothing and cannot throw; the structure
+ * test parses every kind Postgres's DROP takes
+ */
+// lookup-table: removeType to what it drops
+const DROPS: Readonly<Record<string, Drops>> = {
+	OBJECT_AGGREGATE: routine,
+	OBJECT_DOMAIN: typed,
+	OBJECT_FOREIGN_TABLE: relation,
+	OBJECT_FUNCTION: routine,
+	OBJECT_INDEX: relation,
+	OBJECT_MATVIEW: relation,
+	OBJECT_PROCEDURE: routine,
+	OBJECT_ROUTINE: routine,
+	OBJECT_SCHEMA: (object, gone, facts) => dropSchema(String((object["String"] as Node)["sval"]), gone, facts),
+	OBJECT_SEQUENCE: relation,
+	OBJECT_TABLE: relation,
+	OBJECT_TYPE: typed,
+	OBJECT_VIEW: relation,
+}
 
 /** What a DROP … CASCADE drops itself: its relations, functions, a type's columns, a schema's contents */
 function droppedBy(node: Node, facts: Facts): Gone {
 	const gone: Gone = { columns: new Map(), functions: new Set(), relations: new Set() }
-	const kind = String(node["removeType"])
-	for (const object of node["objects"] as Node[]) {
-		if (ROUTINES.has(kind))
-			gone.functions.add(keyOf(names((object["ObjectWithArgs"] as Node)["objname"]), facts.schema))
-		else if (kind === "OBJECT_SCHEMA") dropSchema(String((object["String"] as Node)["sval"]), gone, facts)
-		else if (kind === "OBJECT_TYPE" || kind === "OBJECT_DOMAIN")
-			dropType(keyOf(names((object["TypeName"] as Node)["names"]), facts.schema), gone, facts)
-		else gone.relations.add(keyOf(names((object["List"] as Node)["items"]), facts.schema))
-	}
+	const drops = DROPS[String(node["removeType"])]
+	if (drops !== undefined) for (const object of node["objects"] as Node[]) drops(object, gone, facts)
 	return gone
 }
 
