@@ -1008,6 +1008,10 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
 
+## Upgrading to 0.17
+
+1. **Know what was added.** New exports: `parseConfig`, `DatabaseMissing` and `TursoMissing` (`/migrate`).
+
 ## Upgrading to 0.16
 
 What changes for a project on 0.15. Before deploying it:
@@ -1076,7 +1080,7 @@ What changes for a project on 0.15. Before deploying it:
    - A duplicate rowid, an FTS5 table's included, is a 409 `primary_key_violation`; a bound value that spells D1's "pattern too complex" is no longer a 400.
    - On Postgres, a violation reported on a partition is classified under the statement's own table, and a table no map knows names no column. A composite foreign key names no column. A driver's lost or refused connection (`ECONNREFUSED`, `ECONNRESET`, a pool or connect timeout, Bun's `ERR_POSTGRES_CONNECTION_*`, node-postgres's "Connection terminated unexpectedly") is a 503 `database_unavailable`, where it was unclassified.
 
-9. **Remove what was removed, and know what was added.** `ensureMigrationsTable`, `checkMigrationHash` and `recordMigrationHash` are no longer exported from `/migrate`: comb's own apply creates and upgrades its history table. `withRetry` reads transience from an error's `status` or network `code`, never its message. `Connection.batch` states its contract per driver: one transaction on SQLite, libsql and bun:sqlite; on D1, its statements in order, with no rollback when one fails, so code that relied on a D1 batch being atomic must not. New exports: `TursoMissing` (`/migrate`), `IsoInstant`, `ListQuerySchema` and `RetrieveQuerySchema` (`/query`), `ListQueryInput` (`/query` and `/query/sqlite`), `ColumnKind` and `MergedListQueryResult` (`/query/sqlite`, the latter also from `/sqlite/d1/sharding`).
+9. **Remove what was removed, and know what was added.** `ensureMigrationsTable`, `checkMigrationHash` and `recordMigrationHash` are no longer exported from `/migrate`: comb's own apply creates and upgrades its history table. `withRetry` reads transience from an error's `status` or network `code`, never its message. `Connection.batch` states its contract per driver: one transaction on SQLite, libsql and bun:sqlite; on D1, its statements in order, with no rollback when one fails, so code that relied on a D1 batch being atomic must not. New exports: `IsoInstant`, `ListQuerySchema` and `RetrieveQuerySchema` (`/query`), `ListQueryInput` (`/query` and `/query/sqlite`), `ColumnKind`, `ListExtras` and `MergedListQueryResult` (`/query/sqlite`, the latter also from `/sqlite/d1/sharding`). (`TursoMissing` was listed here, but `/migrate` exports it from 0.17.)
 
 10. **Give the shard router a `log`.** With none, `shard-router.kv.error` and `shard-router.revalidate.error` now go to `console.warn`, where they were dropped; pass `log` to route them, or `log: () => {}` to mute them. A KV read that fails trusts nothing in KV: the request reads the primary and caches in its own isolate only. `resolveVerified` writes and logs nothing when the primary names the shard it probed.
 

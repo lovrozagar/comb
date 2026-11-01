@@ -6,6 +6,8 @@ export { classifyMigration, extractDropStatements, extractSchema, generateMigrat
 export { loadPostgresParser } from "./core/pg-parser.ts";
 export { checkCircuitBreaker, createCircuitBreaker, type RetryOptions, updateCircuitBreaker, withRetry, } from "./core/utils.ts";
 export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./drivers/index.ts";
+export { DatabaseMissing } from "./drivers/missing.ts";
+export { TursoMissing } from "./drivers/sqlite.ts";
 export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
 
 // migrate/config.d.ts
@@ -181,6 +183,57 @@ export declare function dropsQuestion(drops: readonly string[], target: string):
 // migrate/drivers/index.d.ts
 export { createD1Provider } from "./d1.ts";
 export { createBunSqliteProvider, createLibsqlProvider, createTursoProvider, getSqliteColumns, getSqliteIndexes, getSqliteTables, getTursoCredentials, introspectSqliteSchema, } from "./sqlite.ts";
+
+// migrate/drivers/missing.d.ts
+/** A reader found no database to open: a read-only connect creates none (S3 of the r18 review) */
+export declare class DatabaseMissing extends Error {
+    constructor(message: string);
+}
+
+// migrate/drivers/sqlite.d.ts
+import type { Connection, ConnectionProvider, LibsqlProviderConfig, TursoProviderConfig } from "../types.ts";
+import { DatabaseMissing } from "./missing.ts";
+export { createBunSqliteProvider } from "./bun-sqlite.ts";
+/** How the Turso calls reach the API and report progress: injectable, quiet by default */
+export type TursoDeps = {
+    fetch?: typeof fetch;
+    /** A progress line, such as the database being created; no output when omitted */
+    log?: (line: string) => void;
+};
+export type TursoCredentialsRequest = TursoDeps & {
+    apiToken: string;
+    dbName: string;
+    /** The placement group a database created on demand joins (default "default") */
+    group?: string | undefined;
+    org: string;
+    /** a reader's credentials: a missing database is an error, not created, and the token is read-only */
+    readonly?: boolean | undefined;
+};
+/** A reader found no Turso database `name` (`org/db`): a reader creates none */
+export declare class TursoMissing extends DatabaseMissing {
+    constructor(name: string);
+}
+/**
+ * The libsql URL and a one-hour token for a Turso database, creating the database when it is
+ * missing; for a reader, a read-only token, and a missing database is an error. Turso reads the
+ * token's expiration and authorization from the query (a body is ignored, and the default never expires).
+ */
+export declare function getTursoCredentials(request: TursoCredentialsRequest): Promise<{
+    url: string;
+    authToken: string;
+}>;
+export declare function createTursoProvider(config: TursoProviderConfig, deps?: TursoDeps): ConnectionProvider;
+/**
+ * The file a libsql `file:` URL opens, read as @libsql/core's parseUri reads it (M80): the scheme in
+ * any case, an optional `//authority`, and the path up to `?` or `#`, percent-decoded. Undefined for
+ * another scheme, or a path libsql itself refuses to decode.
+ */
+export declare function libsqlFile(url: string): string | undefined;
+export declare function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider;
+export declare function introspectSqliteSchema(conn: Connection): Promise<string>;
+export declare function getSqliteTables(conn: Connection): Promise<string[]>;
+export declare function getSqliteColumns(conn: Connection, table: string): Promise<string[]>;
+export declare function getSqliteIndexes(conn: Connection): Promise<string[]>;
 
 // migrate/types.d.ts
 /**
@@ -708,50 +761,13 @@ declare function executeAll(exec: Run, { flags, name }: {
 export { executeAll, wranglerFlags };
 export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): ConnectionProvider;
 
-// migrate/drivers/sqlite.d.ts
-import type { Connection, ConnectionProvider, LibsqlProviderConfig, TursoProviderConfig } from "../types.ts";
-import { DatabaseMissing } from "./missing.ts";
-export { createBunSqliteProvider } from "./bun-sqlite.ts";
-/** How the Turso calls reach the API and report progress: injectable, quiet by default */
-export type TursoDeps = {
-    fetch?: typeof fetch;
-    /** A progress line, such as the database being created; no output when omitted */
-    log?: (line: string) => void;
-};
-export type TursoCredentialsRequest = TursoDeps & {
-    apiToken: string;
-    dbName: string;
-    /** The placement group a database created on demand joins (default "default") */
-    group?: string | undefined;
-    org: string;
-    /** a reader's credentials: a missing database is an error, not created, and the token is read-only */
-    readonly?: boolean | undefined;
-};
-/** A reader found no Turso database `name` (`org/db`): a reader creates none */
-export declare class TursoMissing extends DatabaseMissing {
-    constructor(name: string);
-}
-/**
- * The libsql URL and a one-hour token for a Turso database, creating the database when it is
- * missing; for a reader, a read-only token, and a missing database is an error. Turso reads the
- * token's expiration and authorization from the query (a body is ignored, and the default never expires).
- */
-export declare function getTursoCredentials(request: TursoCredentialsRequest): Promise<{
-    url: string;
-    authToken: string;
-}>;
-export declare function createTursoProvider(config: TursoProviderConfig, deps?: TursoDeps): ConnectionProvider;
-/**
- * The file a libsql `file:` URL opens, read as @libsql/core's parseUri reads it (M80): the scheme in
- * any case, an optional `//authority`, and the path up to `?` or `#`, percent-decoded. Undefined for
- * another scheme, or a path libsql itself refuses to decode.
- */
-export declare function libsqlFile(url: string): string | undefined;
-export declare function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionProvider;
-export declare function introspectSqliteSchema(conn: Connection): Promise<string>;
-export declare function getSqliteTables(conn: Connection): Promise<string[]>;
-export declare function getSqliteColumns(conn: Connection, table: string): Promise<string[]>;
-export declare function getSqliteIndexes(conn: Connection): Promise<string[]>;
+// migrate/drivers/bun-sqlite.d.ts
+import type { MemoryDb } from "./memory.ts";
+import type { BunSqliteProviderConfig, ConnectionProvider } from "../types.ts";
+export declare function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider;
+/** A private in-memory bun:sqlite database, for the proof run (memory.ts) */
+declare function openBunMemory(): Promise<MemoryDb>;
+export { openBunMemory };
 
 // migrate/core/fts-migration.d.ts
 /** One FTS object as a migration leaves it: its normalized DDL and the group it belongs to */
@@ -840,20 +856,6 @@ type ReadStatement = {
 /** Refuses a statement that cannot run in its file `sql`: no `-- comb:allow-unsafe:` overrides this */
 declare function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): void;
 export { ftsCommandFindings, outsideTransaction, preview, type ReadStatement, refuseUnrunnable, reindexedOf };
-
-// migrate/drivers/missing.d.ts
-/** A reader found no database to open: a read-only connect creates none (S3 of the r18 review) */
-export declare class DatabaseMissing extends Error {
-    constructor(message: string);
-}
-
-// migrate/drivers/bun-sqlite.d.ts
-import type { MemoryDb } from "./memory.ts";
-import type { BunSqliteProviderConfig, ConnectionProvider } from "../types.ts";
-export declare function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider;
-/** A private in-memory bun:sqlite database, for the proof run (memory.ts) */
-declare function openBunMemory(): Promise<MemoryDb>;
-export { openBunMemory };
 
 // migrate/drivers/memory.d.ts
 /**
