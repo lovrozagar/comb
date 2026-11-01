@@ -14,7 +14,10 @@ const databaseSchema = () =>
 		driver: z.enum(["bun-sqlite", "d1", "libsql", "neon", "turso"]).optional(),
 		filePrefix: z.string().min(1).optional(),
 		fts: z
-			.record(z.string(), z.strictObject({ columns: z.array(z.string().min(1)), tokenizer: z.string().optional() }))
+			.record(
+				z.string(),
+				z.strictObject({ columns: z.array(z.string().min(1)).min(1), tokenizer: z.string().optional() }),
+			)
 			.optional(),
 		generators: z.array(z.enum(GENERATORS)).optional(),
 		output: z.partialRecord(z.enum([...GENERATORS, "default"]), z.string().min(1)).optional(),

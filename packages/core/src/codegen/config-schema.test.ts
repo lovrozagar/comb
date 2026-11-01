@@ -27,6 +27,12 @@ describe("codegenConfigSchema (K14 of the 0.15.0 review)", () => {
 			["databases", "core", "fts", "post"],
 		],
 		["a dialect comb does not write", { dialect: "mysql" }, ["databases", "core", "dialect"]],
+		/* r18 K5: an FTS table of no column generates SQL SQLite refuses */
+		[
+			"an FTS table with no column",
+			{ fts: { post: { columns: [] } } },
+			["databases", "core", "fts", "post", "columns"],
+		],
 		["no tables", { tables: undefined }, ["databases", "core", "tables"]],
 	])("refuses %s, at its path", (_, more, path) => {
 		const result = codegenConfigSchema().safeParse({ databases: { core: { tables: "./t.ts", ...more } } })
