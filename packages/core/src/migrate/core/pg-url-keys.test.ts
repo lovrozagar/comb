@@ -17,8 +17,8 @@ const DRIVER = "Atlas's driver does not do: it sends the key to the server, whic
 /*
  * P15 of r19, probed on Atlas v1.3.0 and Postgres 17 (runs/1da9682-probe-p15-keys-*): lib/pq sends each of
  * these libpq keys to the server as a setting, which fails every Atlas call. A key that only tunes the
- * connection is stripped from Atlas's URL; one that asks for a check is refused by name. sslpassword is
- * the class sweep's sibling: the record's list missed it, and it carries a secret.
+ * connection is stripped from Atlas's URL; one that asks for a check is refused by name. sslpassword,
+ * the class sweep's sibling the record's list missed, is refused with the TLS files (pg-url-tls.test.ts).
  */
 describe("pgUrlProblems: libpq keys Atlas's driver sends to the server", () => {
 	it.each([
@@ -28,12 +28,10 @@ describe("pgUrlProblems: libpq keys Atlas's driver sends to the server", () => {
 		["requirepeer=postgres", "url asks for the server process's user (requirepeer), which"],
 		["sslcrl=/etc/ssl/root.crl", "url asks for a certificate revocation check (sslcrl), which"],
 		["sslcrldir=/etc/ssl/crl", "url asks for a certificate revocation check (sslcrldir), which"],
-		["sslpassword=Key-Secret-77", "url asks for an encrypted sslkey's passphrase (sslpassword), which"],
-	])("refuses %s on url and devUrl, naming the key and never a secret", (pair, said) => {
+	])("refuses %s on url and devUrl, naming the key", (pair, said) => {
 		expect(pgUrlProblems(target({ url: `${BASE}&${pair}` })).errors).toEqual([`${said} ${DRIVER}`])
 		const dev = pgUrlProblems(target({ devUrl: `postgres://dev@localhost/dev?${pair}` })).errors
 		expect(dev).toEqual([`${said.replace(/^url/, "devUrl")} ${DRIVER}`])
-		expect(dev.join()).not.toContain("Key-Secret-77")
 	})
 
 	/* P6 of r19: Atlas reads the service file's host, dbname and user over the URL's, comb reads the URL */

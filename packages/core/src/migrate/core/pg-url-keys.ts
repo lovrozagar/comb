@@ -6,8 +6,11 @@
  * only tunes the connection, and refuses it, by name, when it asks for something Atlas cannot do.
  */
 
-/** What comb does with a libpq key: leave it to Atlas, strip it from Atlas's URLs, or refuse it unless its value is one of `unless` */
-type KeyRule = "atlas" | "strip" | { refuse: string; unless?: readonly string[] }
+/**
+ * What comb does with a libpq key: leave it to Atlas, strip it from Atlas's URLs, refuse it unless its
+ * value is one of `unless`, or refuse it with the TLS files it belongs to (pg-url.ts's tlsProblems)
+ */
+type KeyRule = "atlas" | "strip" | "tls" | { refuse: string; unless?: readonly string[] }
 
 // lookup-table: each libpq key, and what comb does with it; a refusal names what the key asks for
 const KEYS: Readonly<Record<string, KeyRule>> = {
@@ -41,8 +44,8 @@ const KEYS: Readonly<Record<string, KeyRule>> = {
 	sslkey: "atlas",
 	sslmode: "atlas",
 	sslnegotiation: "atlas",
-	/* a secret: lib/pq would send it to the server in the clear of its startup packet */
-	sslpassword: { refuse: "an encrypted sslkey's passphrase" },
+	/* a secret lib/pq sends the server, for a key it cannot read: refused with sslkey (5.3) */
+	sslpassword: "tls",
 	sslrootcert: "atlas",
 	sslsni: "atlas",
 	target_session_attrs: "atlas",

@@ -119,15 +119,52 @@ const SSL_MODES: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"verify-full",
 ])
 
-/** Why `url`, which `field` names, cannot connect as its TLS options say: an sslmode libpq refuses, a file that cannot be read (P20 of r18) */
+// lookup-table: the sslmodes under which libpq, Atlas's driver and comb read no TLS file, falling back to no TLS (5.3)
+const READS_NO_FILES: ReadonlySet<string> = /* @__PURE__ */ new Set(["disable", "allow", "prefer"])
+/* a PKCS#8 or a legacy PEM key that needs a passphrase, which Atlas's driver cannot read */
+const ENCRYPTED_KEY = /-----BEGIN ENCRYPTED PRIVATE KEY-----|^Proc-Type: 4,ENCRYPTED$/m
+
+/**
+ * The sslmode `url` connects with: its own, else verify-full for sslrootcert=system, as libpq 16+ and
+ * Atlas's driver read it (P7 of r19), else require, as Atlas's driver reads none (P19 of r18)
+ */
+const sslmodeOf = (url: LibpqUrl): string =>
+	url.params.get("sslmode") ?? (url.params.get("sslrootcert") === "system" ? "verify-full" : "require")
+
+/** Why sslrootcert=system cannot go with `url`'s sslmode, as libpq and Atlas's driver refuse it */
+function systemProblem(field: "devUrl" | "url", url: LibpqUrl): string | undefined {
+	const mode = sslmodeOf(url)
+	if (url.params.get("sslrootcert") !== "system" || mode === "verify-full") return undefined
+	return `${field}'s sslmode ${mode} may not be used with sslrootcert=system, which libpq and Atlas's driver refuse; use sslmode=verify-full`
+}
+
+/** Why `url`'s client key cannot reach Atlas: an encrypted sslkey where it is read, or any sslpassword, which lib/pq sends the server */
+function keyProblem(field: "devUrl" | "url", url: LibpqUrl, reads: boolean): string[] {
+	const key = url.params.get("sslkey")
+	const decrypt = `give it an unencrypted key (openssl pkey -in ${key ?? "<sslkey>"} -out unencrypted.key)`
+	if (url.params.has("sslpassword"))
+		return [
+			`${field}'s sslpassword is a passphrase Atlas's driver cannot use: it reads no encrypted sslkey, and sends sslpassword to the server, which refuses it; ${decrypt}, and drop sslpassword`,
+		]
+	if (!reads || key === undefined || !ENCRYPTED_KEY.test(readFileSync(key, "utf8"))) return []
+	return [`${field}'s sslkey ${key} is encrypted, which Atlas's driver cannot read; ${decrypt}`]
+}
+
+/**
+ * Why `url`, which `field` names, cannot connect as its TLS options say: an sslmode libpq refuses, or
+ * sslrootcert=system with one weaker than verify-full; where a file is read, one that cannot be (P20
+ * of r18) or an encrypted key; and any sslpassword
+ */
 function tlsProblems(field: "devUrl" | "url", url: LibpqUrl): string[] {
 	const mode = url.params.get("sslmode")
 	if (mode !== undefined && !SSL_MODES.has(mode))
 		return [`${field}'s sslmode ${mode} is none libpq takes: disable, allow, prefer, require, verify-ca or verify-full`]
-	if (url.socket) return []
-	return Object.values(TLS_FILES).flatMap((key) => {
+	const system = systemProblem(field, url)
+	if (system !== undefined) return [system]
+	const reads = !url.socket && !READS_NO_FILES.has(sslmodeOf(url))
+	const unread = Object.values(TLS_FILES).flatMap((key) => {
 		const file = url.params.get(key)
-		if (file === undefined) return []
+		if (!reads || file === undefined || (key === "sslrootcert" && file === "system")) return []
 		try {
 			accessSync(file, constants.R_OK)
 			return []
@@ -136,6 +173,7 @@ function tlsProblems(field: "devUrl" | "url", url: LibpqUrl): string[] {
 			return [`${field}'s ${key} ${file} cannot be read`]
 		}
 	})
+	return unread.length > 0 ? unread : keyProblem(field, url, reads)
 }
 
 /* verify-ca checks a server's certificate chain, never its host name */
@@ -145,14 +183,17 @@ const anyHost = (): undefined => undefined
  * postgres.js's `ssl` for `url`'s sslmode, its files read: none on a socket, and require where the URL
  * names none, as Atlas's driver reads it, so comb and Atlas read one URL one way (P19 of r18)
  */
-function sslOf(url: LibpqUrl): unknown {
+function sslOf(url: LibpqUrl, field: "devUrl" | "url"): unknown {
 	if (url.socket) return false
-	const mode = url.params.get("sslmode") ?? "require"
+	const mode = sslmodeOf(url)
 	if (mode === "disable") return false
 	if (mode === "allow" || mode === "prefer") return "prefer"
+	const system = systemProblem(field, url)
+	if (system !== undefined) throw new Error(system)
+	/* system is the OS trust store, which Node's own CAs stand for: no file, no ca */
 	const files = Object.fromEntries(
 		Object.entries(TLS_FILES)
-			.filter(([, key]) => url.params.has(key))
+			.filter(([option, key]) => url.params.has(key) && !(option === "ca" && url.params.get(key) === "system"))
 			.map(([option, key]) => [option, readFileSync(url.params.get(key) as string, "utf8")]),
 	)
 	/* libpq verifies a require's server against a root certificate it is given, as verify-ca does */
@@ -181,7 +222,7 @@ function settingsOf(url: LibpqUrl): Record<string, string> {
  * the 0.15.0 review); a URL without a password takes its passfile's, as libpq does (P7 of r18), else gives
  * postgres.js one to call, so it reads none of its own.
  */
-function postgresOptions(url: LibpqUrl): Record<string, unknown> {
+function postgresOptions(url: LibpqUrl, field: "devUrl" | "url"): Record<string, unknown> {
 	const connection = settingsOf(url)
 	const timeout = url.params.get("connect_timeout")
 	return {
@@ -191,7 +232,7 @@ function postgresOptions(url: LibpqUrl): Record<string, unknown> {
 		host: url.hostaddr ?? url.host,
 		password: url.password ?? passfilePassword(url) ?? (() => ""),
 		port: url.port,
-		ssl: sslOf(url),
+		ssl: sslOf(url, field),
 		username: url.user,
 	}
 }
@@ -200,7 +241,7 @@ function postgresOptions(url: LibpqUrl): Record<string, unknown> {
 function postgresOptionsOf(raw: string, field: "devUrl" | "url"): Record<string, unknown> {
 	const url = libpqUrl(raw)
 	if (url === undefined) throw new Error(`${field} is not a postgres:// URL libpq can read`)
-	return postgresOptions(url)
+	return postgresOptions(url, field)
 }
 
 /** Whether `text` holds a percent-escape no UTF-8 decodes to */
