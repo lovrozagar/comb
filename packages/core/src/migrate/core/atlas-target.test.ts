@@ -54,7 +54,7 @@ describe("pgUrlProblems: the lock timeout, TLS and poolers", () => {
 	})
 
 	/* P14 of the 0.15.0 review: Postgres takes each of these for lock_timeout, and psql set them */
-	it.each(["0", "250", "1500ms", "5s", "1.5s", "500us", "1min", "1h", "1d", "5 s"])(
+	it.each(["0", "250", "1500ms", "5s", "1.5s", "1500us", "1min", "1h", "1d", "5 s"])(
 		"takes the lock timeout %j, as Postgres does",
 		(lockTimeout) => {
 			expect(pgUrlProblems(target({ lockTimeout })).errors).toEqual([])
@@ -79,6 +79,42 @@ describe("pgUrlProblems: the lock timeout, TLS and poolers", () => {
 		).toEqual([
 			"url uses port 6543, Supabase's transaction pooler; migrations need the direct or session connection on 5432",
 		])
+	})
+})
+
+/* r18 P6: one reading of lockTimeout, in milliseconds, inside Postgres's range, written with no space */
+describe("pgUrlProblems and atlasUrls: the lock timeout as Postgres reads it", () => {
+	it("refuses a lock timeout past Postgres's range for lock_timeout, naming it", () => {
+		for (const lockTimeout of ["2147483648", "2147484s", "25d"])
+			expect(pgUrlProblems(target({ lockTimeout })).errors, lockTimeout).toEqual([
+				`lockTimeout ${lockTimeout} is longer than Postgres's lock_timeout takes: at most 2147483647ms (about 24.8 days)`,
+			])
+		expect(pgUrlProblems(target({ lockTimeout: "2147483647" })).errors).toEqual([])
+	})
+
+	/* Postgres rounds to the nearest millisecond, half to even, and 0 turns lock_timeout off */
+	it("refuses a lock timeout Postgres would round to 0, which turns the bound off", () => {
+		expect(pgUrlProblems(target({ lockTimeout: "500us" })).errors).toEqual([
+			"lockTimeout 500us rounds to 0ms, which turns lock_timeout off; give at least 1ms, or 0 for none",
+		])
+	})
+
+	it.each([
+		["5 s", "5000ms"],
+		["1.5s", "1500ms"],
+		["1500us", "2ms"],
+		["2500us", "2ms"],
+		["1min", "60000ms"],
+		["250", "250ms"],
+		["1d", "86400000ms"],
+	])("writes the lock timeout %j into Atlas's options as %s", (lockTimeout, written) => {
+		const url = new URL(atlasUrls(target({ lockTimeout, url: "postgres://localhost/app" })).url)
+		expect(url.searchParams.get("options")).toBe(`-c lock_timeout=${written}`)
+	})
+
+	it("sets no lock timeout for one of 0 in any unit", () => {
+		const url = new URL(atlasUrls(target({ lockTimeout: "0s", url: "postgres://localhost/app" })).url)
+		expect(url.searchParams.get("options")).toBeNull()
 	})
 })
 
@@ -135,7 +171,7 @@ describe("pgUrlProblems: a Unix socket target", () => {
 	it("scopes a socket target for Atlas, its host kept", () => {
 		const urls = atlasUrls(target({ url: "postgres://app:pw@/app?host=/run/postgresql" }))
 		expect(urls.url).toBe(
-			"postgres://app:pw@/app?host=/run/postgresql&search_path=public&options=-c%20lock_timeout%3D5s",
+			"postgres://app:pw@/app?host=/run/postgresql&search_path=public&options=-c%20lock_timeout%3D5000ms",
 		)
 	})
 })
@@ -201,7 +237,9 @@ describe("pgUrlProblems: the schema's name (M87)", () => {
 describe("atlasUrls", () => {
 	it("scopes both URLs to the schema and bounds the target's lock wait", () => {
 		const urls = atlasUrls(target({ url: "postgres://localhost/app?sslmode=disable" }))
-		expect(urls.url).toBe("postgres://localhost/app?sslmode=disable&search_path=public&options=-c%20lock_timeout%3D5s")
+		expect(urls.url).toBe(
+			"postgres://localhost/app?sslmode=disable&search_path=public&options=-c%20lock_timeout%3D5000ms",
+		)
 		expect(urls.devUrl).toBe("docker://postgres/17/dev?search_path=public")
 	})
 
@@ -210,7 +248,7 @@ describe("atlasUrls", () => {
 			target({ url: "postgres://localhost/app?search_path=app&options=-c%20statement_timeout%3D0" }),
 		)
 		expect(new URL(set.url).searchParams.get("search_path")).toBe("app")
-		expect(new URL(set.url).searchParams.get("options")).toBe("-c statement_timeout=0 -c lock_timeout=5s")
+		expect(new URL(set.url).searchParams.get("options")).toBe("-c statement_timeout=0 -c lock_timeout=5000ms")
 		const own = atlasUrls(target({ url: "postgres://localhost/app?options=-c%20lock_timeout%3D1s" }))
 		expect(new URL(own.url).searchParams.get("options")).toBe("-c lock_timeout=1s")
 		const off = atlasUrls(target({ lockTimeout: "0", url: "postgres://localhost/app" }))

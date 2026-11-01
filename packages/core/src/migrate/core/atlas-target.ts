@@ -13,6 +13,7 @@ import { join } from "node:path"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
 import { RESERVED_SCHEMA_WORDS } from "./pg-keywords.ts"
 import { type LibpqUrl, libpqUrl, queryParams, urlProblem, withParam } from "./pg-url.ts"
+import { lockTimeoutMs } from "./pg-lock-timeout.ts"
 
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
 type PgTarget = { devUrl: string; lockTimeout: string; schema: string; url: string }
@@ -143,11 +144,8 @@ function pgUrlProblems(
 		else if (scope !== target.schema)
 			errors.push(`the url's search_path names ${scope}, but schema is ${target.schema}; ${fix}`)
 	}
-	/* Postgres's grammar for a time setting: whole milliseconds, or a number with its unit (P14 of the 0.15.0 review) */
-	if (!/^(?:\d+|\d+(?:\.\d+)? ?(?:us|ms|s|min|h|d))$/.test(target.lockTimeout))
-		errors.push(
-			"lockTimeout must be a Postgres duration: a whole number of milliseconds (250, 0 for none), or a number with us, ms, s, min, h or d (1500ms, 1.5s, 1min)",
-		)
+	const timeout = lockTimeoutMs(target.lockTimeout)
+	if (typeof timeout === "string") errors.push(timeout)
 	return { errors, warnings: url.url === undefined ? [] : hostWarnings(url.url) }
 }
 
@@ -164,8 +162,10 @@ function atlasTargetUrl(target: PgTarget): string {
 	const params = queryParams(url)
 	const options = params.get("options") ?? ""
 	const bounded = params.has("lock_timeout") || options.includes("lock_timeout")
-	if (target.lockTimeout === "0" || bounded) return url
-	return withParam(url, "options", `${options === "" ? "" : `${options} `}-c lock_timeout=${target.lockTimeout}`)
+	/* a lockTimeout pgUrlProblems refused never reaches here; 0 is none */
+	const ms = lockTimeoutMs(target.lockTimeout)
+	if (ms === 0 || bounded) return url
+	return withParam(url, "options", `${options === "" ? "" : `${options} `}-c lock_timeout=${ms}ms`)
 }
 
 /** The dev URL Atlas gets: scoped to the schema like the target, since a scoped target needs a scoped dev database */
