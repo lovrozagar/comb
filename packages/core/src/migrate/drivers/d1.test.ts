@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from "node:fs"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { describe, expect, it } from "vitest"
 import type { Run, RunOptions, RunResult } from "../core/process.ts"
@@ -110,6 +109,9 @@ describe("createD1Provider: parameters and output", () => {
 	})
 })
 
+/** The name of the `i`th migration, as long as a real one */
+const migrationName = (i: number) => `${String(i).padStart(14, "0")}_add_some_table.sql`
+
 /* S8 of the 0.15.0 review: a remote --file goes through D1's import API, which takes the database out of service */
 describe("createD1Provider: batch and close", () => {
 	it("sends the statements as one --command, which D1's query API runs", async () => {
@@ -121,34 +123,33 @@ describe("createD1Provider: batch and close", () => {
 		])
 	})
 
-	it("writes a batch too long for one argument to a temp file, runs it, and removes the file", async () => {
-		let file = ""
-		let body = ""
-		const run = fakeRun((call) => {
-			file = (call.args.at(-1) as string).replace(/^--file=/, "")
-			body = readFileSync(file, "utf8")
-			return json([])
-		})
-		const conn = await connect(run, { ...CONFIG, local: true })
-		const long = `INSERT INTO t VALUES ('${"x".repeat(100 * 1024)}')`
-		await conn.batch([{ sql: long }])
-		expect(body).toBe(`${long}\n;`)
-		expect(run.calls[0]?.args.slice(0, 4)).toEqual(["d1", "execute", "core", "--local"])
-		expect(existsSync(file)).toBe(false)
+	/* r18 S4: a batch past one argument went through --file, D1's import API, on the run that adopts a long history */
+	it("splits a batch too long for one argument into consecutive --command calls, in order", async () => {
+		const run = fakeRun(() => json([]))
+		const conn = await connect(run, { ...CONFIG, local: false })
+		/* a hash row as recordHashes writes it, 173 bytes with its terminator, so 590 pass the 100 KiB cap */
+		const statements = Array.from({ length: 590 }, (_, i) => ({
+			sql: `INSERT OR REPLACE INTO _comb_migration_hashes (name, hash) VALUES ('${migrationName(i)}', '${"h".repeat(64)}')`,
+		}))
+		await conn.batch(statements)
+		const commands = run.calls.map(({ args }) => args.at(-1) as string)
+		expect(run.calls.map(({ args }) => args.slice(0, 4))).toEqual([
+			["d1", "execute", "core", "--remote"],
+			["d1", "execute", "core", "--remote"],
+		])
+		expect(commands.every((arg) => arg.startsWith("--command="))).toBe(true)
+		const sent = commands.map((arg) => arg.slice("--command=".length))
+		expect(sent.every((sql) => Buffer.byteLength(sql) <= 100 * 1024)).toBe(true)
+		expect(sent.join("\n")).toBe(statements.map(({ sql }) => `${sql}\n;`).join("\n"))
 	})
 
-	it("removes the temp file when wrangler fails", async () => {
-		let file = ""
-		const conn = await connect(
-			fakeRun((call) => {
-				file = (call.args.at(-1) as string).replace(/^--file=/, "")
-				return { code: 1, stderr: "bad sql", stdout: "" }
-			}),
-		)
+	it("refuses one statement too long for an argument before wrangler runs", async () => {
+		const run = fakeRun(() => json([]))
+		const conn = await connect(run)
 		await expect(conn.batch([{ sql: `SELECT '${"x".repeat(100 * 1024)}'` }])).rejects.toThrow(
-			"wrangler failed (exit 1): bad sql",
+			"is longer than one wrangler argument takes",
 		)
-		expect(existsSync(file)).toBe(false)
+		expect(run.calls).toEqual([])
 	})
 
 	it("close resolves without running anything", async () => {

@@ -2,9 +2,6 @@
  * Cloudflare D1 driver — shells out to `wrangler d1 execute`
  * since D1 has no HTTP API for external access.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import * as z from "zod"
 import { type Run, run } from "../core/process.ts"
 import { segments } from "../core/sql-scan.ts"
@@ -96,28 +93,40 @@ function wranglerFlags(config: D1ProviderConfig): string[] {
    macOS the whole argv and environment past 1 MiB */
 const COMMAND_BYTES = 100 * 1024
 
+/**
+ * `statements` in order, as the fewest runs of consecutive statements that each fit one --command.
+ * --command goes through D1's query API; a remote --file goes through its import API, which takes the
+ * database out of service while it ingests (S8 of the 0.15.0 review), so a long batch is split, never
+ * written to a file (S4 of r18). wrangler runs no --command as one transaction either.
+ */
+function commands(statements: readonly string[]): string[] {
+	const out: string[] = []
+	let chunk = ""
+	for (const statement of statements) {
+		const bytes = Buffer.byteLength(statement)
+		if (bytes > COMMAND_BYTES) {
+			throw new Error(
+				`a batch statement of ${bytes} bytes is longer than one wrangler argument takes (${COMMAND_BYTES}): ${statement.slice(0, 80)}`,
+			)
+		}
+		if (chunk !== "" && Buffer.byteLength(chunk) + 1 + bytes > COMMAND_BYTES) {
+			out.push(chunk)
+			chunk = ""
+		}
+		chunk = chunk === "" ? statement : `${chunk}\n${statement}`
+	}
+	return chunk === "" ? out : [...out, chunk]
+}
+
 function createD1Connection(databaseName: string, flags: readonly string[], exec: Run): Connection {
 	return {
 		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
 			/* wrangler binds no parameters in a batch, so they are inlined as literals */
-			const sql = statements
-				.map(({ params, sql: text }) => terminated(params && params.length > 0 ? inlineParams(text, params) : text))
-				.join("\n")
-			/* --command goes through D1's query API; a remote --file through its import API, which takes
-			   the database out of service while it ingests, so --file is only for a batch too long for one
-			   argument (S8 of the 0.15.0 review) */
-			if (Buffer.byteLength(sql) <= COMMAND_BYTES) {
-				runWrangler(exec, ["d1", "execute", databaseName, ...flags, `--command=${sql}`])
-				return
-			}
-			const dir = mkdtempSync(join(tmpdir(), "comb-d1-batch-"))
-			const tmpFile = join(dir, "batch.sql")
-			try {
-				writeFileSync(tmpFile, sql)
-				runWrangler(exec, ["d1", "execute", databaseName, ...flags, `--file=${tmpFile}`])
-			} finally {
-				rmSync(dir, { force: true, recursive: true })
-			}
+			const sql = statements.map(({ params, sql: text }) =>
+				terminated(params && params.length > 0 ? inlineParams(text, params) : text),
+			)
+			for (const command of commands(sql))
+				runWrangler(exec, ["d1", "execute", databaseName, ...flags, `--command=${command}`])
 		},
 
 		close(): Promise<void> {
