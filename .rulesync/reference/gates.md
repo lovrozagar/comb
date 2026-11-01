@@ -24,7 +24,7 @@ Every repo has these `package.json` scripts. Hooks, `verify` and CI call only th
 
 ## verify and the stamp
 
-`bun run verify` refuses a dirty tree, runs every gate, and on success writes `standards-verified/<sha>` in the common git dir. Worktrees share it, so a commit verified in a worktree pushes from the main checkout. Nothing commits the stamp. Push and CI are the full gate: only the pushed tip needs a stamp, and the commits under it ride on its verify, so a stack of commits costs one verify, not one each.
+`bun run verify` refuses a dirty tree, and a run missing an environment variable the repo lists in `standards.env` (package.json, set per repo in standards.json; comb lists `COMB_TEST_PG_URL`), naming it before any gate starts. Then it runs every gate, and on success writes `standards-verified/<sha>` in the common git dir. Worktrees share it, so a commit verified in a worktree pushes from the main checkout. Nothing commits the stamp. Push and CI are the full gate: only the pushed tip needs a stamp, and the commits under it ride on its verify, so a stack of commits costs one verify, not one each.
 
 ## Standards sync
 

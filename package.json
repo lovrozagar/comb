@@ -91,6 +91,9 @@
 			"test:bun",
 			"test:e2e",
 			"test:consumers"
+		],
+		"env": [
+			"COMB_TEST_PG_URL"
 		]
 	}
 }
