@@ -254,8 +254,9 @@ describe("pgErrorHandler on Bun.SQL, raw and through drizzle", () => {
 })
 
 describe("bun:sqlite maps an expression index and a STRICT mismatch as libsql does (Q9, Q10)", () => {
+	/* each table keyed, as codegen keys every table: a table the maps key nowhere names no column (Q10 of r18) */
 	const maps: ConstraintMap[] = [
-		{ account: { unique: { u_email_lower: { cause: "Email taken", errorKey: "email_taken" } } } },
+		{ account: { unique: { u_email_lower: { cause: "Email taken", errorKey: "email_taken" } } }, s: {} },
 	]
 
 	/** What sqliteErrorHandler throws for `statement` on a database with an expression index and a STRICT table */
