@@ -403,6 +403,8 @@ try {
 }
 ```
 
+Build the maps you pass once, at module load, with `defineConstraintMaps(...maps)` (from `@lovrozagar/comb`): it refuses, as a TypeError naming the key, a prefix pattern with its `*` anywhere but the end (`"ut_*_rows"`), so a typo fails at startup and in tests, never at the first violation. A handler given maps not built with it still answers each violation with its well-formed keys, and warns once (`comb.constraint-maps.error`, on `console.warn`) of each malformed key, which matches no table.
+
 - `sqliteErrorHandler` — libsql, Turso and `bun:sqlite`. Classifies by SQLite's extended result code: the primary key by `SQLITE_CONSTRAINT_PRIMARYKEY`, a CHECK by its constraint name (in the statement's table first), a composite unique by its columns together, naming no one column, NOT NULL with its column. A duplicate rowid, an FTS5 table's included, is a primary key violation (409). It also maps `SQLITE_FULL` (422) and `SQLITE_BUSY` / `SQLITE_LOCKED` / `SQLITE_READONLY` (503).
 - `d1ErrorHandler` — Cloudflare D1. Constraint violations go through the same SQLite mapping. Other errors with an SQLite code are query errors (500); a D1 platform failure without one is transient (503) or a storage limit (422).
 - `pgErrorHandler` — PostgreSQL on node-postgres, postgres.js and Bun.SQL. Classifies by SQLSTATE (read from `code`, or Bun.SQL's `errno`) and reads `table`/`table_name`, `constraint`/`constraint_name` and `column`/`column_name` alike. The primary key is a 23505 on `<table>_pkey`.
@@ -1016,7 +1018,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun
 
 What changes for a project on 0.17. Before deploying it:
 
-1. **Know what was added.** New exports: `ListRow` and `ListExtra` (`/query`). `paginate` and `paginateMerged` return `Array<ListRow<T>>`, which drops the extras from each member of a union row type on its own, so narrowing on a discriminant reaches each variant's fields again; 0.17's `Omit<T, ListExtra>` kept only the keys every member shares.
+1. **Know what was added.** New exports: `ListRow` and `ListExtra` (`/query`), and `defineConstraintMaps` (the package root), which checks the constraint maps an app passes its error handlers where it builds them; the handlers take the maps as `readonly ConstraintMap[]`. `paginate` and `paginateMerged` return `Array<ListRow<T>>`, which drops the extras from each member of a union row type on its own, so narrowing on a discriminant reaches each variant's fields again; 0.17's `Omit<T, ListExtra>` kept only the keys every member shares.
 
 ## Upgrading to 0.17
 

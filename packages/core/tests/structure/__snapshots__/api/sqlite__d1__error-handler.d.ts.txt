@@ -8,9 +8,9 @@ import { type ConstraintMap } from "../../types.ts";
  * error is (a unique violation it expects, say) without catching. The CombError's `cause` is safe
  * for clients; the original error, which holds the SQL and its bound values, is on `source`.
  */
-declare function classifyD1Error(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined;
+declare function classifyD1Error(error: unknown, constraintMaps: readonly ConstraintMap[]): CombError | undefined;
 /** Throw the CombError classifyD1Error finds for `error`; return when it finds none */
-declare function d1ErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void;
+declare function d1ErrorHandler(error: unknown, constraintMaps: readonly ConstraintMap[]): void;
 export { classifyD1Error, d1ErrorHandler };
 
 // error.d.ts
@@ -112,4 +112,4 @@ export type ConstraintMap = {
     };
 };
 /** Function signature for database error handlers */
-export type DatabaseErrorHandler = (error: unknown, constraintMaps: ConstraintMap[]) => void;
+export type DatabaseErrorHandler = (error: unknown, constraintMaps: readonly ConstraintMap[]) => void;

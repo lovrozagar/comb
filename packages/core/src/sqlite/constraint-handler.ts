@@ -3,7 +3,17 @@
  * Shared by the libsql, bun:sqlite and D1 handlers: the engine is the same, only the way the
  * driver carries the code differs, and `readSqliteError` absorbs that.
  */
-import { entryOf, type Found, findNamed, lookup, own, shown, shownColumn, toCombError } from "../constraint-map.ts"
+import {
+	checkedOnce,
+	entryOf,
+	type Found,
+	findNamed,
+	lookup,
+	own,
+	shown,
+	shownColumn,
+	toCombError,
+} from "../constraint-map.ts"
 import { connectionLost, UNAVAILABLE } from "../connection-lost.ts"
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
@@ -12,7 +22,7 @@ import { readSqliteError, type SqliteErrorRead } from "./read-error.ts"
 import { resourceOutcome } from "./resource-outcome.ts"
 import { statementHead, statementTable, updatedColumns, upsertColumns } from "../statement-head.ts"
 
-type Violation = { maps: ConstraintMap[]; read: SqliteErrorRead; source: unknown }
+type Violation = { maps: readonly ConstraintMap[]; read: SqliteErrorRead; source: unknown }
 
 /** The index a UNIQUE violation names instead of columns, when it is on an expression: `index 'u_email_lower'` */
 const failedIndex = (message: string): string | undefined => /constraint failed: index '([^']+)'$/i.exec(message)?.[1]
@@ -25,7 +35,7 @@ const failedIndex = (message: string): string | undefined => /constraint failed:
 function splitPair(
 	pair: string,
 	table: string | undefined,
-	maps: ConstraintMap[],
+	maps: readonly ConstraintMap[],
 ): { column: string; table: string } | undefined {
 	if (table !== undefined && pair.startsWith(`${table}.`)) return { column: pair.slice(table.length + 1), table }
 	const mapped = [...pair.matchAll(/\./g)]
@@ -43,7 +53,7 @@ function splitPair(
  */
 function failedColumns(
 	message: string,
-	{ maps, query }: { maps: ConstraintMap[]; query: string | undefined },
+	{ maps, query }: { maps: readonly ConstraintMap[]; query: string | undefined },
 ): { columns: string[]; table: string | undefined } {
 	const list = /constraint failed: (.+)$/i.exec(message)?.[1] ?? ""
 	const known = statementTable(query)
@@ -217,7 +227,10 @@ const CONSTRAINTS: Record<string, (v: Violation) => CombError> = {
 }
 
 /** A STRICT mismatch's `cannot store TEXT value in INTEGER column s.n` → s, n */
-const mismatchAt = (message: string, { maps, query }: { maps: ConstraintMap[]; query: string | undefined }) => {
+const mismatchAt = (
+	message: string,
+	{ maps, query }: { maps: readonly ConstraintMap[]; query: string | undefined },
+) => {
 	const pair = /\bcolumn (.+)$/.exec(message)?.[1]
 	const at = pair === undefined ? undefined : splitPair(pair, statementTable(query), maps)
 	return { column: at?.column, table: at?.table }
@@ -227,7 +240,8 @@ const mismatchAt = (message: string, { maps, query }: { maps: ConstraintMap[]; q
  * The CombError for an SQLite constraint violation inside `error`, or for a value its column
  * cannot hold (value-error.ts); null when it is neither.
  */
-function constraintError(error: unknown, maps: ConstraintMap[]): CombError | null {
+function constraintError(error: unknown, given: readonly ConstraintMap[]): CombError | null {
+	const maps = checkedOnce(given)
 	const read = readSqliteError(error)
 	if (read === null) return null
 	const handler = own(CONSTRAINTS, read.code)
@@ -240,7 +254,7 @@ function constraintError(error: unknown, maps: ConstraintMap[]): CombError | nul
  * Throws the mapped CombError when `error` is an SQLite constraint violation; otherwise returns.
  * `error` is the thrown error, wrapper and all, or an engine message given as text.
  */
-function handleConstraintViolation(error: unknown, maps: ConstraintMap[]): void {
+function handleConstraintViolation(error: unknown, maps: readonly ConstraintMap[]): void {
 	const mapped = constraintError(error, maps)
 	if (mapped !== null) throw mapped
 }
@@ -250,7 +264,7 @@ function handleConstraintViolation(error: unknown, maps: ConstraintMap[]): void 
  * or a lost connection, as on D1 and Postgres (Q11 of r18); undefined for any other. It throws
  * nothing, so a caller can ask what an error is.
  */
-function classifySqliteError(error: unknown, maps: ConstraintMap[]): CombError | undefined {
+function classifySqliteError(error: unknown, maps: readonly ConstraintMap[]): CombError | undefined {
 	const constraint = constraintError(error, maps)
 	if (constraint !== null) return constraint
 	const resource = resourceOutcome(readSqliteError(error)?.code)
@@ -259,7 +273,7 @@ function classifySqliteError(error: unknown, maps: ConstraintMap[]): CombError |
 }
 
 /** The error handler for libsql, Turso and bun:sqlite: throws what classifySqliteError finds; any other error is left for the caller */
-function sqliteErrorHandler(error: unknown, maps: ConstraintMap[]): void {
+function sqliteErrorHandler(error: unknown, maps: readonly ConstraintMap[]): void {
 	const classified = classifySqliteError(error, maps)
 	if (classified !== undefined) throw classified
 }

@@ -5,6 +5,7 @@
  * https://www.postgresql.org/docs/current/errcodes-appendix.html
  */
 import {
+	checkedOnce,
 	type Fallback,
 	type Found,
 	findNamed,
@@ -26,7 +27,7 @@ import { valueError } from "../value-error.ts"
 
 /** A violation, `table` the violated table's key in the maps: qualified for a pgSchema's (F51) */
 type Violation = {
-	maps: ConstraintMap[]
+	maps: readonly ConstraintMap[]
 	read: PgErrorRead
 	source: unknown
 	table: string | undefined
@@ -214,7 +215,8 @@ const RESOURCE: Record<string, Fallback> = {
  * column cannot hold as a 400 (value-error.ts), a resource or availability error as its generic
  * key; undefined for anything else. It throws nothing, so a caller can ask what an error is.
  */
-function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined {
+function classifyPgError(error: unknown, given: readonly ConstraintMap[]): CombError | undefined {
+	const constraintMaps = checkedOnce(given)
 	const read = readPgError(error)
 	if (read === null) return connectionLost(error) ? new CombError({ ...UNAVAILABLE, source: error }) : undefined
 	/* the reported table, or for a partition its parent's entry lists, the parent; never the
@@ -230,7 +232,7 @@ function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombE
 }
 
 /** Throw the CombError classifyPgError finds for `error`; anything else is left for the caller */
-function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
+function pgErrorHandler(error: unknown, constraintMaps: readonly ConstraintMap[]): void {
 	const classified = classifyPgError(error, constraintMaps)
 	if (classified !== undefined) throw classified
 }

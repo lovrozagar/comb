@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest"
-import { entryOf, findNamed, lookup, own, shown, shownColumn, type TableMap, toCombError } from "./constraint-map.ts"
+import {
+	defineConstraintMaps,
+	entryOf,
+	findNamed,
+	lookup,
+	own,
+	shown,
+	shownColumn,
+	type TableMap,
+	toCombError,
+} from "./constraint-map.ts"
 import type { ConstraintMap } from "./types.ts"
 
 const MAPS: ConstraintMap[] = [
@@ -101,12 +111,12 @@ describe("entryOf", () => {
 		expect(entryOf(maps, undefined)).toBeUndefined()
 	})
 
-	it("refuses a key with a `*` anywhere but its end, whatever table is asked for", () => {
+	/* Q4 of r19: a malformed key never throws in place of the database error; defineConstraintMaps refuses it at load */
+	it("skips a key with a `*` anywhere but its end, whatever table is asked for", () => {
 		const bad: ConstraintMap = { "u*t": {}, users: {} }
-		for (const table of ["users", "ut"])
-			expect(() => entryOf(bad, table)).toThrow(
-				new TypeError('constraint map key "u*t": a "*" may only end a key, as a prefix pattern such as "ut_*"'),
-			)
+		expect(entryOf(bad, "users")).toBe(bad.users)
+		expect(entryOf(bad, "ut")).toBeUndefined()
+		expect(entryOf(bad, "uxt")).toBeUndefined()
 	})
 
 	it("finds a pattern's named constraint through the violated table, never as a table of its own", () => {
@@ -120,5 +130,22 @@ describe("entryOf", () => {
 		expect(shown(patterned, "ut_abc", ["title"])).toEqual(["title"])
 		expect(shown(patterned, "ut_abc", ["secret"])).toEqual([])
 		expect(shown([{ users: {} }], "ut_abc", ["title"])).toEqual([])
+	})
+})
+
+/* Q4 of r19: the maps an app builds are checked where it builds them, at module load, never at a violation */
+describe("defineConstraintMaps", () => {
+	it("refuses a key with a `*` anywhere but its end when it is called, naming the key and the rule", () => {
+		expect(() => defineConstraintMaps({ users: {} }, { "ut_*_rows": {} })).toThrow(
+			new TypeError('constraint map key "ut_*_rows": a "*" may only end a key, as a prefix pattern such as "ut_*"'),
+		)
+	})
+
+	it("returns the maps it was given, frozen", () => {
+		const users: ConstraintMap = { users: {} }
+		const patterned: ConstraintMap = { "ut_*": {} }
+		const maps = defineConstraintMaps(users, patterned)
+		expect(maps).toEqual([users, patterned])
+		expect(Object.isFrozen(maps)).toBe(true)
 	})
 })

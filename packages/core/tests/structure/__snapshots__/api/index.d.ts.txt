@@ -5,6 +5,7 @@ export { isStorableText, STORABLE_TEXT_RULE, storableText } from "./storable-tex
 export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, readCombEntityMeta, readCombMeta, readCombQueryMeta, } from "./meta.ts";
 export { createUlidFactory, generateId, generateUlid, type UlidFactoryOptions } from "./id.ts";
 export { LruCache, type LruMeta } from "./lru.ts";
+export { defineConstraintMaps } from "./constraint-map.ts";
 export { type CombDatabaseErrorKey, type CombErrorKey, combDatabaseErrorKeys, type ConstraintMap, type ConstraintMapEntry, combErrorKeys, type DatabaseErrorHandler, type StatusKey, statusKeyToCode, } from "./types.ts";
 
 // cidr.d.ts
@@ -175,6 +176,66 @@ declare class LruCache<K, V> {
 }
 export { LruCache, type LruMeta };
 
+// constraint-map.d.ts
+/**
+ * Looking a constraint violation up in the app's ConstraintMaps, shared by the SQLite and the
+ * Postgres handlers: each dialect finds the table, column or constraint name its own way, and
+ * both turn what they found into the same CombError.
+ */
+import { CombError } from "./error.ts";
+import type { ConstraintMap, ConstraintMapEntry, StatusKey } from "./types.ts";
+export type TableMap = NonNullable<ConstraintMap[string]>;
+/** The generic error for a kind of violation, used when no map entry matches. */
+export type Fallback = {
+    cause: string;
+    errorKey: string;
+    status: StatusKey;
+};
+/** What a handler found: the map entry, if any, the generic error otherwise, and where. */
+export type Found = {
+    column?: string | undefined;
+    entry: ConstraintMapEntry | undefined;
+    fallback: Fallback;
+    table?: string | undefined;
+};
+/** `record[key]` when `key` is the record's own (never an inherited name such as `constructor`). */
+export declare const own: <T>(record: Record<string, T> | undefined, key: string | undefined) => T | undefined;
+/**
+ * The entry `map` holds for `table`: its own key's, else that of the longest prefix pattern it
+ * starts with, a key ending in `*` (`"ut_*"`), which keys the tables an app makes at run time and
+ * no generated map can name (R5 of plan 17). A key with a `*` anywhere else matches nothing
+ */
+export declare function entryOf(map: ConstraintMap, table: string | undefined): TableMap | undefined;
+/**
+ * The maps an app passes its error handlers, every key checked where it builds them, at module load:
+ * a TypeError naming a key with a `*` anywhere but its end, never a lookup at the first violation
+ * (Q4 of r19). The array comes back frozen, and no handler checks it again.
+ */
+export declare function defineConstraintMaps(...maps: ConstraintMap[]): readonly ConstraintMap[];
+/**
+ * `maps`, a handler's first look at them reporting each malformed key once to the operator, through
+ * the warn sink: the violation is still classified with the well-formed keys, as the client's answer
+ * must not change, nor say anything of the app's configuration (Q4 of r19)
+ */
+export declare function checkedOnce(maps: readonly ConstraintMap[]): readonly ConstraintMap[];
+/**
+ * The columns an error may name of those a violation reports: all of them, or none when a map lists
+ * one as the table's private column, since naming the rest would point at it (F67), or when the
+ * maps given key no such table (fail closed)
+ */
+export declare function shown(maps: readonly ConstraintMap[], table: string | undefined, columns: readonly string[]): readonly string[];
+/** `column`, or undefined when a map lists it among `table`'s private columns (F67), or shown hides the table's */
+export declare const shownColumn: (maps: readonly ConstraintMap[], table: string | undefined, column: string | undefined) => string | undefined;
+/** The first entry `pick` finds for `table` across `maps`. */
+export declare function lookup(maps: readonly ConstraintMap[], table: string | undefined, pick: (t: TableMap) => ConstraintMapEntry | undefined): ConstraintMapEntry | undefined;
+/** The `kind` entry named `name` (a CHECK, or a unique index) in any table, with that table. */
+export declare function findNamed(maps: readonly ConstraintMap[], kind: "check" | "unique", name: string | undefined): {
+    entry: ConstraintMapEntry;
+    table: string;
+} | undefined;
+/** The CombError for what a handler found; `source` is the original error, kept for logs. */
+export declare function toCombError({ column, entry, fallback, table }: Found, source: unknown): CombError;
+
 // types.d.ts
 /** Database-relevant HTTP status keys */
 export type StatusKey = "bad_request" | "conflict" | "forbidden" | "internal_server_error" | "service_unavailable" | "unprocessable_entity";
@@ -252,7 +313,7 @@ export type ConstraintMap = {
     };
 };
 /** Function signature for database error handlers */
-export type DatabaseErrorHandler = (error: unknown, constraintMaps: ConstraintMap[]) => void;
+export type DatabaseErrorHandler = (error: unknown, constraintMaps: readonly ConstraintMap[]) => void;
 
 // meta/contract.d.ts
 /**

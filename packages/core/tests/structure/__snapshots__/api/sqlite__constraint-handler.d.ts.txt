@@ -6,20 +6,20 @@ import { resourceOutcome } from "./resource-outcome.ts";
  * The CombError for an SQLite constraint violation inside `error`, or for a value its column
  * cannot hold (value-error.ts); null when it is neither.
  */
-declare function constraintError(error: unknown, maps: ConstraintMap[]): CombError | null;
+declare function constraintError(error: unknown, given: readonly ConstraintMap[]): CombError | null;
 /**
  * Throws the mapped CombError when `error` is an SQLite constraint violation; otherwise returns.
  * `error` is the thrown error, wrapper and all, or an engine message given as text.
  */
-declare function handleConstraintViolation(error: unknown, maps: ConstraintMap[]): void;
+declare function handleConstraintViolation(error: unknown, maps: readonly ConstraintMap[]): void;
 /**
  * The CombError a libsql, Turso or bun:sqlite error is: a constraint violation, a resource error,
  * or a lost connection, as on D1 and Postgres (Q11 of r18); undefined for any other. It throws
  * nothing, so a caller can ask what an error is.
  */
-declare function classifySqliteError(error: unknown, maps: ConstraintMap[]): CombError | undefined;
+declare function classifySqliteError(error: unknown, maps: readonly ConstraintMap[]): CombError | undefined;
 /** The error handler for libsql, Turso and bun:sqlite: throws what classifySqliteError finds; any other error is left for the caller */
-declare function sqliteErrorHandler(error: unknown, maps: ConstraintMap[]): void;
+declare function sqliteErrorHandler(error: unknown, maps: readonly ConstraintMap[]): void;
 export { classifySqliteError, constraintError, handleConstraintViolation, resourceOutcome, sqliteErrorHandler };
 
 // error.d.ts
@@ -121,7 +121,7 @@ export type ConstraintMap = {
     };
 };
 /** Function signature for database error handlers */
-export type DatabaseErrorHandler = (error: unknown, constraintMaps: ConstraintMap[]) => void;
+export type DatabaseErrorHandler = (error: unknown, constraintMaps: readonly ConstraintMap[]) => void;
 
 // sqlite/resource-outcome.d.ts
 /**
@@ -159,22 +159,33 @@ export declare const own: <T>(record: Record<string, T> | undefined, key: string
 /**
  * The entry `map` holds for `table`: its own key's, else that of the longest prefix pattern it
  * starts with, a key ending in `*` (`"ut_*"`), which keys the tables an app makes at run time and
- * no generated map can name (R5 of plan 17). A `*` anywhere else in a key is refused, as the map is
- * the app's wiring: a TypeError
+ * no generated map can name (R5 of plan 17). A key with a `*` anywhere else matches nothing
  */
 export declare function entryOf(map: ConstraintMap, table: string | undefined): TableMap | undefined;
+/**
+ * The maps an app passes its error handlers, every key checked where it builds them, at module load:
+ * a TypeError naming a key with a `*` anywhere but its end, never a lookup at the first violation
+ * (Q4 of r19). The array comes back frozen, and no handler checks it again.
+ */
+export declare function defineConstraintMaps(...maps: ConstraintMap[]): readonly ConstraintMap[];
+/**
+ * `maps`, a handler's first look at them reporting each malformed key once to the operator, through
+ * the warn sink: the violation is still classified with the well-formed keys, as the client's answer
+ * must not change, nor say anything of the app's configuration (Q4 of r19)
+ */
+export declare function checkedOnce(maps: readonly ConstraintMap[]): readonly ConstraintMap[];
 /**
  * The columns an error may name of those a violation reports: all of them, or none when a map lists
  * one as the table's private column, since naming the rest would point at it (F67), or when the
  * maps given key no such table (fail closed)
  */
-export declare function shown(maps: ConstraintMap[], table: string | undefined, columns: readonly string[]): readonly string[];
+export declare function shown(maps: readonly ConstraintMap[], table: string | undefined, columns: readonly string[]): readonly string[];
 /** `column`, or undefined when a map lists it among `table`'s private columns (F67), or shown hides the table's */
-export declare const shownColumn: (maps: ConstraintMap[], table: string | undefined, column: string | undefined) => string | undefined;
+export declare const shownColumn: (maps: readonly ConstraintMap[], table: string | undefined, column: string | undefined) => string | undefined;
 /** The first entry `pick` finds for `table` across `maps`. */
-export declare function lookup(maps: ConstraintMap[], table: string | undefined, pick: (t: TableMap) => ConstraintMapEntry | undefined): ConstraintMapEntry | undefined;
+export declare function lookup(maps: readonly ConstraintMap[], table: string | undefined, pick: (t: TableMap) => ConstraintMapEntry | undefined): ConstraintMapEntry | undefined;
 /** The `kind` entry named `name` (a CHECK, or a unique index) in any table, with that table. */
-export declare function findNamed(maps: ConstraintMap[], kind: "check" | "unique", name: string | undefined): {
+export declare function findNamed(maps: readonly ConstraintMap[], kind: "check" | "unique", name: string | undefined): {
     entry: ConstraintMapEntry;
     table: string;
 } | undefined;

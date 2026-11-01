@@ -7,9 +7,9 @@ import { type PgErrorRead, readPgError } from "./read-error.ts";
  * column cannot hold as a 400 (value-error.ts), a resource or availability error as its generic
  * key; undefined for anything else. It throws nothing, so a caller can ask what an error is.
  */
-declare function classifyPgError(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined;
+declare function classifyPgError(error: unknown, given: readonly ConstraintMap[]): CombError | undefined;
 /** Throw the CombError classifyPgError finds for `error`; anything else is left for the caller */
-declare function pgErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void;
+declare function pgErrorHandler(error: unknown, constraintMaps: readonly ConstraintMap[]): void;
 export { classifyPgError, pgErrorHandler, type PgErrorRead, readPgError };
 
 // error.d.ts
@@ -111,7 +111,7 @@ export type ConstraintMap = {
     };
 };
 /** Function signature for database error handlers */
-export type DatabaseErrorHandler = (error: unknown, constraintMaps: ConstraintMap[]) => void;
+export type DatabaseErrorHandler = (error: unknown, constraintMaps: readonly ConstraintMap[]) => void;
 
 // pg/read-error.d.ts
 /**

@@ -122,4 +122,4 @@ export type ConstraintMap = {
 }
 
 /** Function signature for database error handlers */
-export type DatabaseErrorHandler = (error: unknown, constraintMaps: ConstraintMap[]) => void
+export type DatabaseErrorHandler = (error: unknown, constraintMaps: readonly ConstraintMap[]) => void

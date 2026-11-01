@@ -98,7 +98,7 @@ function engineOutcome(code: string): Outcome {
  * error is (a unique violation it expects, say) without catching. The CombError's `cause` is safe
  * for clients; the original error, which holds the SQL and its bound values, is on `source`.
  */
-function classifyD1Error(error: unknown, constraintMaps: ConstraintMap[]): CombError | undefined {
+function classifyD1Error(error: unknown, constraintMaps: readonly ConstraintMap[]): CombError | undefined {
 	if (!(error instanceof Error)) return undefined
 	const constraint = constraintError(error, constraintMaps)
 	if (constraint !== null) return constraint
@@ -111,7 +111,7 @@ function classifyD1Error(error: unknown, constraintMaps: ConstraintMap[]): CombE
 }
 
 /** Throw the CombError classifyD1Error finds for `error`; return when it finds none */
-function d1ErrorHandler(error: unknown, constraintMaps: ConstraintMap[]): void {
+function d1ErrorHandler(error: unknown, constraintMaps: readonly ConstraintMap[]): void {
 	const classified = classifyD1Error(error, constraintMaps)
 	if (classified !== undefined) throw classified
 }

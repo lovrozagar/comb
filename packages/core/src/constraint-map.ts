@@ -4,6 +4,7 @@
  * both turn what they found into the same CombError.
  */
 import { CombError } from "./error.ts"
+import { warnOnError } from "./log.ts"
 import type { ConstraintMap, ConstraintMapEntry, StatusKey } from "./types.ts"
 
 export type TableMap = NonNullable<ConstraintMap[string]>
@@ -26,24 +27,60 @@ export const own = <T>(record: Record<string, T> | undefined, key: string | unde
 /**
  * The entry `map` holds for `table`: its own key's, else that of the longest prefix pattern it
  * starts with, a key ending in `*` (`"ut_*"`), which keys the tables an app makes at run time and
- * no generated map can name (R5 of plan 17). A `*` anywhere else in a key is refused, as the map is
- * the app's wiring: a TypeError
+ * no generated map can name (R5 of plan 17). A key with a `*` anywhere else matches nothing
  */
 export function entryOf(map: ConstraintMap, table: string | undefined): TableMap | undefined {
 	let pattern: string | undefined
 	for (const key of Object.keys(map)) {
-		const star = key.indexOf("*")
-		if (star === -1) continue
-		if (star !== key.length - 1)
-			throw new TypeError(`constraint map key "${key}": a "*" may only end a key, as a prefix pattern such as "ut_*"`)
+		/* a malformed key matches nothing: defineConstraintMaps refuses it at load, and checkedOnce reports it (Q4 of r19) */
+		if (!key.endsWith("*") || malformed(key)) continue
 		if (table?.startsWith(key.slice(0, -1)) === true && key.length > (pattern?.length ?? 0)) pattern = key
 	}
 	if (table !== undefined && Object.hasOwn(map, table)) return map[table]
 	return pattern === undefined ? undefined : map[pattern]
 }
 
+/** Whether `key` holds a `*` anywhere but its end, which no prefix pattern does */
+const malformed = (key: string): boolean => key.includes("*") && key.indexOf("*") !== key.length - 1
+
+/** Why `key` is no key a map may hold */
+const ruleOf = (key: string): string =>
+	`constraint map key "${key}": a "*" may only end a key, as a prefix pattern such as "ut_*"`
+
+// lookup-table: the maps arrays defineConstraintMaps checked, or whose malformed keys were reported once
+const CHECKED: WeakSet<object> = /* @__PURE__ */ new WeakSet()
+
+/**
+ * The maps an app passes its error handlers, every key checked where it builds them, at module load:
+ * a TypeError naming a key with a `*` anywhere but its end, never a lookup at the first violation
+ * (Q4 of r19). The array comes back frozen, and no handler checks it again.
+ */
+export function defineConstraintMaps(...maps: ConstraintMap[]): readonly ConstraintMap[] {
+	const bad = maps.flatMap((map) => Object.keys(map)).find(malformed)
+	if (bad !== undefined) throw new TypeError(ruleOf(bad))
+	const checked = Object.freeze(maps)
+	CHECKED.add(checked)
+	return checked
+}
+
+/**
+ * `maps`, a handler's first look at them reporting each malformed key once to the operator, through
+ * the warn sink: the violation is still classified with the well-formed keys, as the client's answer
+ * must not change, nor say anything of the app's configuration (Q4 of r19)
+ */
+export function checkedOnce(maps: readonly ConstraintMap[]): readonly ConstraintMap[] {
+	if (CHECKED.has(maps)) return maps
+	CHECKED.add(maps)
+	for (const key of maps.flatMap((map) => Object.keys(map)).filter(malformed))
+		warnOnError("comb.constraint-maps.error", {
+			key,
+			message: `${ruleOf(key)}; it matches no table. Build the maps with defineConstraintMaps, which refuses such a key at load`,
+		})
+	return maps
+}
+
 /** Whether a map lists `column` among `table`'s private columns */
-const listsPrivate = (maps: ConstraintMap[], table: string | undefined, column: string) =>
+const listsPrivate = (maps: readonly ConstraintMap[], table: string | undefined, column: string) =>
 	maps.some((map) => entryOf(map, table)?.private?.includes(column) === true)
 
 /**
@@ -51,7 +88,7 @@ const listsPrivate = (maps: ConstraintMap[], table: string | undefined, column: 
  * none, or one keys the table. Maps that key it nowhere cannot, as for a table a trigger writes
  * outside the schema, so its columns are hidden on every dialect (Q9 of r17, Q10 of r18)
  */
-const knows = (maps: ConstraintMap[], table: string | undefined) =>
+const knows = (maps: readonly ConstraintMap[], table: string | undefined) =>
 	maps.length === 0 || table === undefined || maps.some((map) => entryOf(map, table) !== undefined)
 
 /**
@@ -59,21 +96,25 @@ const knows = (maps: ConstraintMap[], table: string | undefined) =>
  * one as the table's private column, since naming the rest would point at it (F67), or when the
  * maps given key no such table (fail closed)
  */
-export function shown(maps: ConstraintMap[], table: string | undefined, columns: readonly string[]): readonly string[] {
+export function shown(
+	maps: readonly ConstraintMap[],
+	table: string | undefined,
+	columns: readonly string[],
+): readonly string[] {
 	if (!knows(maps, table)) return []
 	return columns.some((column) => listsPrivate(maps, table, column)) ? [] : columns
 }
 
 /** `column`, or undefined when a map lists it among `table`'s private columns (F67), or shown hides the table's */
 export const shownColumn = (
-	maps: ConstraintMap[],
+	maps: readonly ConstraintMap[],
 	table: string | undefined,
 	column: string | undefined,
 ): string | undefined => (column === undefined ? undefined : shown(maps, table, [column])[0])
 
 /** The first entry `pick` finds for `table` across `maps`. */
 export function lookup(
-	maps: ConstraintMap[],
+	maps: readonly ConstraintMap[],
 	table: string | undefined,
 	pick: (t: TableMap) => ConstraintMapEntry | undefined,
 ): ConstraintMapEntry | undefined {
@@ -87,7 +128,7 @@ export function lookup(
 
 /** The `kind` entry named `name` (a CHECK, or a unique index) in any table, with that table. */
 export function findNamed(
-	maps: ConstraintMap[],
+	maps: readonly ConstraintMap[],
 	kind: "check" | "unique",
 	name: string | undefined,
 ): { entry: ConstraintMapEntry; table: string } | undefined {
