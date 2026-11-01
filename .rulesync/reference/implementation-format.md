@@ -62,7 +62,7 @@ No other `##` headings.
 
 Write under `.tmp/grunt/implementations/` (any filename in that dir). Grok `orchestrate-parent.js` runs `.rulesync/scripts/persist-implementation.mjs` on create (`IMPL_NAME:`): serial/slug from the name, injects frontmatter, rewrites path + content. Updates to an existing file keep the path; full-body writes are validated in place. Invalid create/update denies — fix the body, do not retry elsewhere.
 
-Host without that hook: name the file per **Path**, or pipe the body to `node .rulesync/scripts/persist-implementation.mjs --workspace {repo}` and use its `path`.
+Host without that hook: name the file per **Path**, or pipe the body to `node .rulesync/scripts/persist-implementation.mjs --workspace {repo}` and use its `absPath`.
 
 Never allocate a new serial to log a leaf. Append Log, update Files/Done, flip the plan box.
 

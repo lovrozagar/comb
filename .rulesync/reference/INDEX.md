@@ -57,13 +57,14 @@ Upgrade copies the current package trees and product scripts (to `.rulesync/scri
 | principle-subtract-before-you-add | grunt | Apply when sequencing an addition, refactor, or rewrite. Remove dead code, redundant validators, and stub references fi… |  |  |  |
 | principle-test-behavior-not-implementation | grunt | Apply when you write, change, or keep a test. Assert what the code's users can observe, so that the test fails when tha… |  |  |  |
 | principle-type-system-discipline | grunt | Apply when designing types, reviewing a function signature, or writing code in any statically-typed language. Make ille… |  |  |  |
+| review-plan | grunt | Review a plan in a fresh agent before approval. Use for /review-plan. |  |  |  |
 | su | grunt | Short status update: done, next, and blockers or on-track ETA. |  |  |  |
 | teach | grunt | Explain a body of work plainly so a person actually understands it. Dig into how it works and why it is that way, then… |  |  |  |
 | tmp | grunt | Dump a one-off convo artifact under .tmp/grunt/. |  |  |  |
 | typescript-best-practices | grunt | TypeScript best practices. Use when reading or editing any .ts or .tsx file, or for /typescript-best-practices. |  |  |  |
 | unslop | grunt | Cut AI tells from any writing. Use for /unslop. |  |  |  |
 | write-plan | grunt | Write a local checklist under .tmp/grunt/plans/. Then /implement-plan {n}. |  |  |  |
-| write-roadmap | grunt | Write an ordered program of plans under docs/roadmaps/. Use for /write-roadmap. Stops for lock. Does not implement. |  |  |  |
+| write-roadmap | grunt | Write an ordered program of plans under .tmp/grunt/roadmaps/. Use for /write-roadmap. Stops for lock. Does not implemen… |  |  |  |
 
 # Refs
 
@@ -76,8 +77,9 @@ Upgrade copies the current package trees and product scripts (to `.rulesync/scri
 | .rulesync/reference/implementation-format.md | Implementation format (SSOT) |  | Local session journal for `/implement-plan`. Not a plan, handoff, or git commit. |
 | .rulesync/reference/jev.md | Jev | jev | Closed external decision. The source text is already saved. The question is a yes/no or a named choice. One call. Not o… |
 | .rulesync/reference/law.md | Law |  | Protocol stays overview; domain fills this. |
+| .rulesync/reference/lessons.md | Lessons | lessons | Mistakes that outlive one task. One committed file per mistake under `.rulesync/lessons/`, with a generated index. Not… |
 | .rulesync/reference/map.md | Map | map | Cheap outline. Not a file dump. |
-| .rulesync/reference/output.md | Output | output | en-US unless asked. Examples are a class. |
+| .rulesync/reference/output.md | Output | output | en-US default. Detail behind the reply rules in `overview.md`, which stays the source for voice and shape. |
 | .rulesync/reference/plan-format.md | Plan format (SSOT) |  | Local session checklist. Not a design doc, PR stack, or DAG. |
 | .rulesync/reference/roadmap-format.md | Roadmap format (SSOT) |  | Ordered program of child plans. Not a plan, a handoff, or a design doc. |
 | .rulesync/reference/rtk.md | RTK | rtk | Shell stdout compression. PreToolUse: Bash → `rtk <cmd>`. Not Read/Grep/Glob/prompts/images. |

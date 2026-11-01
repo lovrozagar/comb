@@ -15,7 +15,7 @@ Accept `locked` or `in-progress`. Set `in-progress` when you start. Same session
 For each open slice, in order:
 
 1. If `Location` is absent, run `/write-plan` from that slice's Title, Goal, and Why. The lock is the approval: do not stop for plan approval. `/write-plan` picks the type and the `commit:` subject. If it hits a plan-shaping question, stop and leave the roadmap `locked` or `in-progress`.
-2. Set `Location` to the plan path persist returned (`.tmp/grunt/plans/{file}`) or to that path made absolute. Do not write a second plan when Location is already set.
+2. Set `Location` to the absolute plan path `/write-plan` reported. Do not write a second plan when Location is already set.
 3. Run `/implement-plan` on that plan. Do not stop between slices.
 4. Mark the slice `[x]` only after that plan's Verify is done.
 

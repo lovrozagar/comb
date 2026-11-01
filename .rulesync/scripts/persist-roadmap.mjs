@@ -1,17 +1,18 @@
 #!/usr/bin/env node
-/** Allocate/validate/write a roadmap under docs/roadmaps/. Updates keep the file. */
+/** Allocate/validate/write a roadmap under .tmp/grunt/roadmaps/. Updates keep the file. */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   compactCreatedStamp,
+  ensureGitignore,
   FILENAME_RE,
   PLAN_DIR,
   slugify,
   utcDateTime,
 } from "./persist-plan.mjs";
 
-export const ROADMAP_DIR = "docs/roadmaps";
+export const ROADMAP_DIR = ".tmp/grunt/roadmaps";
 export const ROADMAP_FILENAME_RE =
   /^[0-9]+-[a-z0-9]+(-[a-z0-9]+)*-\d{8}T\d{6}Z\.md$/;
 const STATUS_RE = /^(draft|locked|in-progress|done|blocked)$/;
@@ -268,6 +269,7 @@ export function persistRoadmap({
   const full = render(serial, slug, pre.status || "draft", createdAt, sourceOf(pre, slug), pre.body);
   const errors = validateRoadmap(filename, full, { fresh: true });
   if (errors.length) return { ok: false, error: errors.join("; "), errors };
+  ensureGitignore(ws);
   fs.writeFileSync(dest, full);
   return {
     ok: true,
@@ -307,7 +309,7 @@ function main() {
       process.stderr.write((result.error || "invalid roadmap") + "\n");
       return 1;
     }
-    process.stdout.write(JSON.stringify({ serial: result.serial, path: result.path }) + "\n");
+    process.stdout.write(JSON.stringify({ serial: result.serial, path: result.path, absPath: path.resolve(workspaceRoot, result.path) }) + "\n");
     return 0;
   } catch (err) {
     process.stderr.write(String(err && err.message ? err.message : err) + "\n");

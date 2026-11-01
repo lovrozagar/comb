@@ -4,7 +4,7 @@ description: Dump a one-off convo artifact under .tmp/grunt/.
 ---
 # tmp
 
-One turn. Author from this session (email/script/note). Write once. Recap path. Stop.
+One turn. Author from this session (email/script/note). Write once. Recap the absolute path. Stop.
 
 ## Invocation
 
@@ -33,16 +33,16 @@ TMP_EXT: md
 <artifact only>
 ```
 
-`TMP_EXT` optional. Write any root filename under `.tmp/grunt/` (not `plans|handoffs|implementations|browser|orchestrator-logs`). Grok `orchestrate-parent.js` runs `.rulesync/scripts/persist-tmp.mjs`: serial/slug/ext from `TMP_*`, strips those lines, no YAML frontmatter, rewrites path + content. Write outside that root or missing `TMP_NAME:` is denied.
+`TMP_EXT` optional. Write any root filename under `.tmp/grunt/` (not `plans|roadmaps|handoffs|implementations|browser|orchestrator-logs|stash|sessions`). Grok `orchestrate-parent.js` runs `.rulesync/scripts/persist-tmp.mjs`: serial/slug/ext from `TMP_*`, strips those lines, no YAML frontmatter, rewrites path + content. Write outside that root or missing `TMP_NAME:` is denied.
 
-Host without that hook: name the file per **Path** yourself, or pipe the body to `node .rulesync/scripts/persist-tmp.mjs --workspace {repo}` and use its `path`.
+Host without that hook: name the file per **Path** yourself, or pipe the body to `node .rulesync/scripts/persist-tmp.mjs --workspace {repo}` and use its `absPath`.
 
 Never rewrite an existing dump; new serial. Artifact file content after hook = artifact only (no TMP_* lines no YAML frontmatter).
 
 ## Report
 
 ```
-[tmp]: serial={int} path=.tmp/grunt/{serial}-{slug}-{stamp}.{ext}
+[tmp]: serial={int} path={abs}/.tmp/grunt/{serial}-{slug}-{stamp}.{ext}
 ```
 
 Do not dump the body.

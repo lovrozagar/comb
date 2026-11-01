@@ -12,7 +12,9 @@ In `sessionGate=ask`, parent Stop on `end_turn` blocks unless the recap asks (`?
 
 Claude / Codex / Antigravity PreToolUse still run `../../.rulesync/scripts/scrub-spawn-prompt.mjs` and `../../.rulesync/scripts/gate-fat-tools.mjs`. Grok spawn/fat rewrite is `../../.grok/hooks/orchestrate-parent.js`. RTK stays `../../.grok/hooks/rtk.json`.
 
-Session agent tools are on. Fat Read/Grep/Glob/Bash still gate. Writes under `.tmp/grunt/plans/`, `.tmp/grunt/handoffs/`, `.tmp/grunt/implementations/`, `.tmp/grunt/` root files, and `docs/roadmaps/` persist via `../../.rulesync/scripts/persist-plan.mjs` / `persist-handoff.mjs` / `persist-implementation.mjs` / `persist-tmp.mjs` / `persist-roadmap.mjs`. Invalid body denies.
+Session agent tools are on. Fat Read/Grep/Glob/Bash still gate. Writes under `.tmp/grunt/plans/`, `.tmp/grunt/handoffs/`, `.tmp/grunt/implementations/`, `.tmp/grunt/roadmaps/`, and `.tmp/grunt/` root files persist via `../../.rulesync/scripts/persist-plan.mjs` / `persist-handoff.mjs` / `persist-implementation.mjs` / `persist-tmp.mjs` / `persist-roadmap.mjs`. The hook hands the host the absolute path of the saved file. Invalid body denies. A Write of a saved plan updates that file in place (same serial); an Edit of a saved plan is checked against the text it would produce, and a valid one runs as sent. `## Previous mistakes` entries are append-only on both.
+
+Writes under `.rulesync/lessons/` go through `../../.rulesync/scripts/lessons.mjs`: a lesson Write is validated, saved, and reindexed (`INDEX.md`); an Edit of a lesson is denied with the Write and `lessons.mjs hit` routes. On any other Write or Edit, PreToolUse adds `additionalContext` for lessons whose globs match the file, each once per session (`.tmp/grunt/sessions/<sid>/lessons-seen.json`). It reads only `INDEX.md` and fails open.
 
 SubagentStop (and child Stop with `subagentType`) intercepts a parseable `need:` whose jobs are all `search|exec|slice|fetch` (cap 4): runs grunt-job in-hook and continues the child with concatenated facts. Mixed/web/test, parse fail, FALLBACK, `stopHookActive`, or more than 3 intercepts per child session → empty stdout (allow stop).
 

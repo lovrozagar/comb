@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-/** Emit INDEX (aggregate) + skills-map/refs-map slices from one skills+refs scan; law.md is a hand slice. */
+/** Emit INDEX (aggregate) + skills-map/refs-map slices from one skills+refs scan; law.md is a hand slice. Also the lessons index when lessons exist. */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { splitFrontmatter } from "./emit-agent-shell-tools.mjs";
+import { LESSONS_DIR, checkLessons, writeIndex } from "./lessons.mjs";
 
 export const INDEX_REL = ".rulesync/reference/INDEX.md";
 export const SKILLS_MAP_REL = ".rulesync/reference/skills-map.md";
@@ -373,6 +374,7 @@ export function emitMaps({ workspaceRoot, check = false } = {}) {
     return { ok: false, check, error: desired.error };
   }
   const files = desired.files;
+  const hasLessons = fs.existsSync(path.join(ws, LESSONS_DIR));
   if (check) {
     const drift = [];
     for (const f of files) {
@@ -382,6 +384,10 @@ export function emitMaps({ workspaceRoot, check = false } = {}) {
     if (drift.length) {
       return { ok: false, check: true, error: `drift: ${drift.join(", ")}`, drift };
     }
+    const lessonErrors = hasLessons ? checkLessons({ workspaceRoot: ws }) : [];
+    if (lessonErrors.length) {
+      return { ok: false, check: true, error: lessonErrors.join("\n"), drift: [] };
+    }
     return { ok: true, check: true, drift: [] };
   }
 
@@ -390,6 +396,8 @@ export function emitMaps({ workspaceRoot, check = false } = {}) {
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, f.text);
   }
+  // The lessons index rides the maps step: a new pipeline command would be seeded as skipped on upgrade.
+  if (hasLessons) writeIndex({ workspaceRoot: ws });
   return { ok: true, check: false };
 }
 

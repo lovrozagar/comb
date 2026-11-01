@@ -15,8 +15,10 @@ import {
   fatHookOutput,
   processFatTools,
   rewriteGruntScratchPath,
+  WRITE_PATH_FIELDS,
 } from "../../.rulesync/scripts/gate-fat-tools.mjs";
-import { persistPlan } from "../../.rulesync/scripts/persist-plan.mjs";
+import { LESSONS_DIR, matchLessons, persistLesson } from "../../.rulesync/scripts/lessons.mjs";
+import { persistPlan, preparePlanUpdate, validatePlan } from "../../.rulesync/scripts/persist-plan.mjs";
 import { isFullRoadmapBody, persistRoadmap } from "../../.rulesync/scripts/persist-roadmap.mjs";
 import { persistHandoff } from "../../.rulesync/scripts/persist-handoff.mjs";
 import { persistImplementation, isFullImplementationBody, validateImplementation } from "../../.rulesync/scripts/persist-implementation.mjs";
@@ -97,6 +99,79 @@ function preToolUse(data) {
   }
   const fatCode = emitFat(data);
   if (fatCode !== null) return fatCode;
+  if (WRITE_TOOLS.has(toolKey)) lessonNotice(data, toolInput);
+  return 0;
+}
+
+function writeTarget(toolInput) {
+  if (!toolInput || typeof toolInput !== "object") return "";
+  return toolInput.file_path || toolInput.filePath || toolInput.path || toolInput.target_file || "";
+}
+
+export function isLessonFile(filePath, workspaceRoot) {
+  return isUnderDir(filePath, workspaceRoot, LESSONS_DIR.split("/"));
+}
+
+// Lessons that match a file this session edits, each shown once per session. Fails open.
+function lessonNotice(data, toolInput) {
+  try {
+    const ws = workspaceRootOf(data);
+    const target = writeTarget(toolInput);
+    if (!target || isLessonFile(target, ws) || isUnderDir(target, ws, [".tmp", "grunt"])) return;
+    const abs = path.resolve(ws, target);
+    const rows = matchLessons({ workspaceRoot: ws, files: [abs] });
+    if (!rows.length) return;
+    const sid = sessionIdOf(data);
+    const seenFile = sid ? path.join(ws, ".tmp", "grunt", "sessions", sid, "lessons-seen.json") : "";
+    let seen = [];
+    if (seenFile) {
+      try {
+        seen = JSON.parse(fs.readFileSync(seenFile, "utf8"));
+      } catch {
+        seen = [];
+      }
+    }
+    const fresh = rows.filter((r) => !seen.includes(r.file));
+    if (!fresh.length) return;
+    if (seenFile) {
+      fs.mkdirSync(path.dirname(seenFile), { recursive: true });
+      fs.writeFileSync(seenFile, JSON.stringify([...seen, ...fresh.map((r) => r.file)]));
+    }
+    const rel = path.relative(ws, abs).split(path.sep).join("/");
+    const lines = fresh.map((r) => `- ${r.file} (hits ${r.hits}): ${r.summary}`);
+    emit({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: `Recorded lessons match ${rel}:\n${lines.join("\n")}`,
+      },
+    });
+  } catch {
+    // A lessons read error never blocks an edit.
+  }
+}
+
+// A lesson Write is validated, rendered, and reindexed here, and the host saves it; an Edit cannot be reindexed before it lands.
+function lessonWrite(ws, rawPath, toolInput) {
+  const abs = path.resolve(ws, rawPath);
+  if (typeof toolInput.content !== "string") {
+    emit(
+      denyResponse(
+        "Edit is not allowed on lesson files. Write the full lesson (60 lines max) or run node .rulesync/scripts/lessons.mjs hit <slug> --evidence <text>",
+      ),
+    );
+    return 0;
+  }
+  const result = persistLesson({ workspaceRoot: ws, filePath: abs, content: toolInput.content });
+  if (!result.ok) {
+    emit(denyResponse(result.error));
+    return 0;
+  }
+  emit({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      updatedInput: Object.assign(withPath(toolInput, abs), { content: result.content }),
+    },
+  });
   return 0;
 }
 
@@ -133,7 +208,7 @@ export function isUnderPlans(filePath, workspaceRoot) {
 }
 
 export function isUnderRoadmaps(filePath, workspaceRoot) {
-  return isUnderDir(filePath, workspaceRoot, ["docs", "roadmaps"]);
+  return isUnderDir(filePath, workspaceRoot, [".tmp", "grunt", "roadmaps"]);
 }
 
 export function isUnderHandoffs(filePath, workspaceRoot) {
@@ -146,6 +221,7 @@ export function isUnderImplementations(filePath, workspaceRoot) {
 
 export const TMP_RESERVED_DIRS = new Set([
   "plans",
+  "roadmaps",
   "handoffs",
   "implementations",
   "browser",
@@ -164,6 +240,38 @@ export function isUnderTmp(filePath, workspaceRoot) {
   return !TMP_RESERVED_DIRS.has(path.basename(abs));
 }
 
+// Hosts name the target differently; point every key the host sent at the absolute file.
+function withPath(toolInput, abs) {
+  const next = Object.assign({}, toolInput);
+  const keys = WRITE_PATH_FIELDS.filter((key) => typeof next[key] === "string" && next[key]);
+  for (const key of keys.length ? keys : ["file_path"]) next[key] = abs;
+  return next;
+}
+
+/** Apply the host's search/replace to `text`; null when an old string is missing (the host then fails the edit). */
+export function projectEdit(text, toolInput) {
+  const edits = Array.isArray(toolInput.edits) ? toolInput.edits : [toolInput];
+  let next = text;
+  for (const e of edits) {
+    const oldStr = typeof e.old_string === "string" ? e.old_string : e.oldString;
+    const newStr = typeof e.new_string === "string" ? e.new_string : e.newString;
+    if (typeof oldStr !== "string" || typeof newStr !== "string" || !next.includes(oldStr)) return null;
+    next = e.replace_all || e.replaceAll ? next.split(oldStr).join(newStr) : next.replace(oldStr, () => newStr);
+  }
+  return next;
+}
+
+// An Edit of a saved plan is checked against the text it would produce; a valid one runs as sent.
+function planEdit(abs, toolInput) {
+  const previous = fs.readFileSync(abs, "utf8");
+  const next = projectEdit(previous, toolInput);
+  if (next == null) return null;
+  const errors = validatePlan(path.basename(abs), next, { fresh: false, previous });
+  if (!errors.length) return null;
+  emit(denyResponse(errors.join("; ")));
+  return 0;
+}
+
 function parentWrite(data, toolInput) {
   if (!toolInput || typeof toolInput !== "object" || Array.isArray(toolInput)) {
     emit(denyResponse(DENY_REASON));
@@ -180,8 +288,17 @@ function parentWrite(data, toolInput) {
   if (rewritten) rawPath = rewritten;
   let persist;
   let invalid = "invalid plan";
+  if (isLessonFile(rawPath, ws)) return lessonWrite(ws, rawPath, toolInput);
   if (isUnderPlans(rawPath, ws)) {
-    persist = persistPlan;
+    const abs = path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(ws, rawPath);
+    let exists = false;
+    try {
+      exists = fs.statSync(abs).isFile();
+    } catch {
+      exists = false;
+    }
+    if (exists && typeof toolInput.content !== "string") return planEdit(abs, toolInput);
+    persist = exists ? (args) => preparePlanUpdate({ ...args, filePath: abs }) : persistPlan;
     invalid = "invalid plan";
   } else if (isUnderRoadmaps(rawPath, ws)) {
     const roadmapPath = path.isAbsolute(rawPath)
@@ -221,10 +338,7 @@ function parentWrite(data, toolInput) {
         emit(denyResponse(errors.join("; ") || invalid));
         return 0;
       }
-      const next = Object.assign({}, toolInput, {
-        file_path: path.relative(ws, abs).replace(/\\/g, "/"),
-        content,
-      });
+      const next = Object.assign(withPath(toolInput, abs), { content });
       emit({
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
@@ -245,8 +359,7 @@ function parentWrite(data, toolInput) {
     emit(denyResponse(result.error || invalid));
     return 0;
   }
-  const next = Object.assign({}, toolInput, {
-    file_path: result.path,
+  const next = Object.assign(withPath(toolInput, path.resolve(ws, result.path)), {
     content: result.content,
   });
   emit({

@@ -114,6 +114,7 @@ function main() {
       JSON.stringify({
         serial: result.serial,
         path: result.path,
+        absPath: path.resolve(workspaceRoot, result.path),
         filename: result.filename,
       }) + "\n",
     );

@@ -1,12 +1,12 @@
 ---
 name: write-roadmap
 description: >-
-  Write an ordered program of plans under docs/roadmaps/. Use for
+  Write an ordered program of plans under .tmp/grunt/roadmaps/. Use for
   /write-roadmap. Stops for lock. Does not implement.
 ---
 # write-roadmap
 
-You author the roadmap. First read `principle-sequence-verifiable-units` and follow it. Persist under `docs/roadmaps/` via Write (hook runs `.rulesync/scripts/persist-roadmap.mjs`). Copy the shape below. All boxes `[ ]`. Status stays `draft` until the user locks it.
+You author the roadmap. First read `principle-sequence-verifiable-units` and follow it. Persist under `.tmp/grunt/roadmaps/` via Write (hook runs `.rulesync/scripts/persist-roadmap.mjs`). Copy the shape below. All boxes `[ ]`. Status stays `draft` until the user locks it.
 
 Before you ask the user, read `principle-never-block-on-the-human`. Ask only when the user alone can answer.
 
@@ -16,7 +16,7 @@ Research until every slice is defensible. Ask only what changes the program. The
 
 On lock, set `status: locked` on the same file and stop. Do not run `/write-plan` or `/implement-plan` from this skill.
 
-Report the serial, the path, the slice titles in order, and the top risk. Stop for the lock.
+Report the serial, the absolute path, the slice titles in order, and the top risk. Stop for the lock.
 
 ## Shape
 
@@ -60,6 +60,6 @@ Ship auth as two plans. The second plan waits on the first. Names stay reserved.
 - Each slice is `N [ ] Title: {2–6 words}` then indented `Goal:` and `Why:`. Those lines are not checkboxes.
 - Slice Goal is one sentence: what that plan ships.
 - Slice Why is one or two sentences: why this slot, and what it unlocks.
-- Omit `Location` on a draft. `/implement-roadmap` fills it with the plan path (`.tmp/grunt/plans/{file}` or absolute).
+- Omit `Location` on a draft. `/implement-roadmap` fills it with the absolute plan path.
 - No Type. No Commit. Those go on the child plan.
 - Verify is 1–5 leaves, `N.M [ ]`, same grammar as a plan.

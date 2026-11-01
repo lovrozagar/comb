@@ -47,12 +47,15 @@ Collision: if target path exists, increment and retry (max 5).
 serial: 1
 name: add-auth
 status: ready          # ready | in-progress | done | blocked
+reviews: 0             # settled /review-plan rounds; never lowered or removed
 created: 2026-08-26T14:30:00Z    # UTC ISO-8601 seconds + Z; no milliseconds
 source: "<≤120 chars of user task>"
 ---
 ```
 
 `name` is the slug only (no datetime). `source` ≤120 chars.
+
+`reviews` counts the `/review-plan` rounds whose findings the writer settled: a whole number with no sign or leading zero, `0` on a new plan. The writer bumps it in the same save that applies a round's findings, even a round with no findings. It never goes down, and once present it cannot be removed, so every Write that sends full frontmatter carries the current `reviews`. The count proves a round ran and was settled, not that the review was good.
 
 `created` for **new writes:** `new Date().toISOString()` with milliseconds stripped (`.\d{3}Z` → `Z`), e.g. `2026-08-26T14:30:00Z`. Existing files may still have `created: YYYY-MM-DD`.
 
@@ -61,16 +64,29 @@ source: "<≤120 chars of user task>"
 `ready` → `in-progress` → `done` | `blocked`
 
 - Fresh write: `ready`
-- Implement start: `in-progress`
+- Implement start: `in-progress`, only with `reviews` ≥ 1. The save denies the move with `reviews: 0`, and a missing `reviews` counts as 0. A plan already `in-progress` without the key stays editable
 - All boxes `[x]`: `done`
 - Cannot finish: `blocked` (leave remaining `[ ]`)
 
 ## Body headings (this order only)
 
-`# {slug}`, `## Goal`, `## Context`, `## Constraints`, `## Watch-outs`, `## Steps`, `## Verify`
+`# {slug}`, `## Goal`, `## Context`, `## Constraints`, `## Watch-outs`, `## Steps`, `## Verify`, `## Previous mistakes`
 
-No other `##` headings. No PR Plan, Key Decisions, or DAG.
+No other `##` headings. A plan saved before `## Previous mistakes` existed stays valid without it. No PR Plan, Key Decisions, or DAG.
 No required Why heading. Optional why footnote only (not a `##`). Pick2 file plan stays how-first; missing Why heading does not block.
+
+## Previous mistakes
+
+This plan's own log of what went wrong. Last heading, after Verify, no checkboxes. A new plan writes `(none)`.
+
+- Entry: `- {source}: {what was wrong} → {what changed}`, optionally ending ` (lesson: {slug})`.
+- `source`: `feedback` (the user sent the plan back), `verify` (a Verify or test failed after a fix), `review` (an accepted `/review-plan` finding), `premise` (an assumption turned out wrong).
+- Append-only. A save that edits or drops an existing entry is denied and names the entry.
+- An entry that will happen again on other tasks also becomes a lesson: `.rulesync/reference/lessons.md`.
+
+## Revisions
+
+A Write of a saved plan updates that file: same path, serial, and `created`. The given `status` and `[x]` boxes are kept. A body without frontmatter keeps the saved frontmatter. An Edit of a saved plan is checked against the text it would produce and runs as sent when valid. Never save a revision as a new plan.
 
 ## Checkbox grammar
 
@@ -90,7 +106,7 @@ No required Why heading. Optional why footnote only (not a `##`). Pick2 file pla
 | Section | Amount |
 |---|---|
 | Goal | 1–3 sentences. What “done” means. |
-| Context / Constraints / Watch-outs | bullets only. Watch-outs: non-obvious footguns; empty allowed (`(none)`). Context includes `Task type:`, `Named checks:` from `.rulesync/reference/scope.md` ## Types, and a skip-with-reason when a named check is dropped. |
+| Context / Constraints / Watch-outs | bullets only. Watch-outs: non-obvious footguns; empty allowed (`(none)`). A new plan that names a file a lesson matches cites that lesson path in Watch-outs, or the save is denied. Context includes `Task type:`, `Named checks:` from `.rulesync/reference/scope.md` ## Types, and a skip-with-reason when a named check is dropped. |
 | Steps | bulk of the file; each leaf = one coherent edit or one file-level action |
 | Verify | 1–5 runnable leaves (cmd or observable) |
 
@@ -102,9 +118,129 @@ Thinker cites **absolute paths**. Leaves must be implementable without re-planni
 
 - filename matches new stamped regex or legacy unstamped; new writes unpadded + stamp (`1-foo-20260826T143000Z.md` not `0001-foo.md`); serial int equals leading digits; `name` equals slug after stripping optional trailing `-\d{8}T\d{6}Z`
 - frontmatter `serial` line matches `^serial: [1-9][0-9]*$` (unpadded decimal ≥ 1; reject `0001`, `"0001"`, `0`, `01`)
-- frontmatter keys: `serial`, `name`, `status`, `created`, `source`. Optional `commit:` is a Conventional Commits subject (`type(scope): subject`, scope optional, imperative lowercase, no trailing period). A new plan includes it. A plan with no `commit` key stays valid. A present `commit` that is not that subject is invalid
+- frontmatter keys: `serial`, `name`, `status`, `reviews`, `created`, `source`. `reviews` matches `^(0|[1-9][0-9]*)# Plan format (SSOT)
+
+Local session checklist. Not a design doc, PR stack, or DAG.
+
+## Path
+
+`.tmp/grunt/plans/{serial}-{slug}-{YYYYMMDDTHHMMSSZ}.md`
+
+- **serial:** unpadded decimal int only (`1`, `12`, `10000`). **Never** `0001`, never quoted `"0001"` / `"1"`. Serial ≥ 1.
+- **filename:** unpadded serial, slug, UTC datetime stamp (`6-sync-global-settings-20260826T143000Z.md`, not `0001-slug.md`). Stamp is `created` with `-` and `:` dropped (keep `T` and `Z`).
+- **lookup:** integer equality on leading digits (`1` matches `1-foo-20260826T143000Z.md` and legacy `1-foo.md`; also `0001-foo.md` if an old padded file still exists).
+- **valid filename (new):** `^[0-9]+-[a-z0-9]+(-[a-z0-9]+)*-\d{8}T\d{6}Z\.md$`
+- **valid filename (legacy):** `^[0-9]+-[a-z0-9]+(-[a-z0-9]+)*\.md$` (no stamp; still accepted for existing files)
+- Frontmatter line must match `^serial: [1-9][0-9]*$`. Leading zeros are invalid (YAML octal / VS Code warning).
+- **New writes** always use the stamped filename. Collision: increment serial, rebuild filename, same stamp.
+
+## Slugify (`PLAN_NAME`)
+
+1. lower
+2. non `[a-z0-9]` → `-`
+3. collapse `-`, strip edges
+4. trim to 50 chars; if cut on `-`, strip trailing `-`
+5. empty → `unnamed`
+6. strip trailing `.lock` if any
+
+## Allocate next serial (grunt, bash)
+
+```bash
+mkdir -p .tmp/grunt/plans
+next=1
+for f in .tmp/grunt/plans/*; do
+  [ -f "$f" ] || continue
+  b=$(basename "$f")
+  case "$b" in
+    [0-9]*.md) n=${b%%-*}; n=$((10#$n)); [ "$n" -ge "$next" ] && next=$((n+1));;
+  esac
+done
+# filename prefix: unpadded decimal "$next" (1, 12, 10000)
+```
+
+Collision: if target path exists, increment and retry (max 5).
+
+## Frontmatter (required)
+
+```yaml
+---
+serial: 1
+name: add-auth
+status: ready          # ready | in-progress | done | blocked
+reviews: 0             # settled /review-plan rounds; never lowered or removed
+created: 2026-08-26T14:30:00Z    # UTC ISO-8601 seconds + Z; no milliseconds
+source: "<≤120 chars of user task>"
+---
+```
+
+`name` is the slug only (no datetime). `source` ≤120 chars.
+
+`reviews` counts the `/review-plan` rounds whose findings the writer settled: a whole number with no sign or leading zero, `0` on a new plan. The writer bumps it in the same save that applies a round's findings, even a round with no findings. It never goes down, and once present it cannot be removed, so every Write that sends full frontmatter carries the current `reviews`. The count proves a round ran and was settled, not that the review was good.
+
+`created` for **new writes:** `new Date().toISOString()` with milliseconds stripped (`.\d{3}Z` → `Z`), e.g. `2026-08-26T14:30:00Z`. Existing files may still have `created: YYYY-MM-DD`.
+
+### Status machine
+
+`ready` → `in-progress` → `done` | `blocked`
+
+- Fresh write: `ready`
+- Implement start: `in-progress`, only with `reviews` ≥ 1. The save denies the move with `reviews: 0`, and a missing `reviews` counts as 0. A plan already `in-progress` without the key stays editable
+- All boxes `[x]`: `done`
+- Cannot finish: `blocked` (leave remaining `[ ]`)
+
+## Body headings (this order only)
+
+`# {slug}`, `## Goal`, `## Context`, `## Constraints`, `## Watch-outs`, `## Steps`, `## Verify`, `## Previous mistakes`
+
+No other `##` headings. A plan saved before `## Previous mistakes` existed stays valid without it. No PR Plan, Key Decisions, or DAG.
+No required Why heading. Optional why footnote only (not a `##`). Pick2 file plan stays how-first; missing Why heading does not block.
+
+## Previous mistakes
+
+This plan's own log of what went wrong. Last heading, after Verify, no checkboxes. A new plan writes `(none)`.
+
+- Entry: `- {source}: {what was wrong} → {what changed}`, optionally ending ` (lesson: {slug})`.
+- `source`: `feedback` (the user sent the plan back), `verify` (a Verify or test failed after a fix), `review` (an accepted `/review-plan` finding), `premise` (an assumption turned out wrong).
+- Append-only. A save that edits or drops an existing entry is denied and names the entry.
+- An entry that will happen again on other tasks also becomes a lesson: `.rulesync/reference/lessons.md`.
+
+## Revisions
+
+A Write of a saved plan updates that file: same path, serial, and `created`. The given `status` and `[x]` boxes are kept. A body without frontmatter keeps the saved frontmatter. An Edit of a saved plan is checked against the text it would produce and runs as sent when valid. Never save a revision as a new plan.
+
+## Checkbox grammar
+
+- Open: `[ ]` (space in box required)
+- Done: `[x]` (accept `[X]`, write `[x]`)
+- Line: `^{id} [ ] {text}$` with optional 0–2 space indent
+- `{id}` = `N` / `N.M` / `N.M.K` (digits + dots). **Not** `1. [ ]`. **Not** GitHub `- [ ]`
+- Fresh plans: all `[ ]`, never `[x]`
+- Marking done: only flip the box. No renumber, delete, or rewrite leaf text
+- Depth 2 default (`N` phase + `N.M` leaf). 3rd level only if a leaf would itself be a mini-plan
+- Every phase `N` has ≥1 leaf `N.M`. The session agent **executes leaves**. Roll up: all children `[x]` ⇒ parent `[x]`
+- Verify = last numbered phase, same grammar
+- Done plan: every checkbox `[x]`, `status: done`
+
+## Prose vs steps
+
+| Section | Amount |
+|---|---|
+| Goal | 1–3 sentences. What “done” means. |
+| Context / Constraints / Watch-outs | bullets only. Watch-outs: non-obvious footguns; empty allowed (`(none)`). A new plan that names a file a lesson matches cites that lesson path in Watch-outs, or the save is denied. Context includes `Task type:`, `Named checks:` from `.rulesync/reference/scope.md` ## Types, and a skip-with-reason when a named check is dropped. |
+| Steps | bulk of the file; each leaf = one coherent edit or one file-level action |
+| Verify | 1–5 runnable leaves (cmd or observable) |
+
+Tests live in Steps (not a new heading). New behavior or a bug: a failing test leaf before the impl leaf. Other behavior change: a test leaf immediately after the impl leaf. Docs, rename-only, config-only, generated: no test leaf. Verify is the end gate (project cmd or named subset), not a substitute for those leaves. Do not re-run the whole suite after every leaf unless it is cheap.
+
+Thinker cites **absolute paths**. Leaves must be implementable without re-planning. Product fork → pick the narrowest default, state it under Constraints, still emit steps.
+
+## Validation checklist
+
+- filename matches new stamped regex or legacy unstamped; new writes unpadded + stamp (`1-foo-20260826T143000Z.md` not `0001-foo.md`); serial int equals leading digits; `name` equals slug after stripping optional trailing `-\d{8}T\d{6}Z`
+- frontmatter `serial` line matches `^serial: [1-9][0-9]*$` (unpadded decimal ≥ 1; reject `0001`, `"0001"`, `0`, `01`)
+, is `0` on a fresh write, is not lowered or removed on an update, and is ≥ 1 for a change into `in-progress`; a legacy plan without it stays valid. Optional `commit:` is a Conventional Commits subject (`type(scope): subject`, scope optional, imperative lowercase, no trailing period). A new plan includes it. A plan with no `commit` key stays valid. A present `commit` that is not that subject is invalid
 - `status` ∈ `ready` | `in-progress` | `done` | `blocked`; `created` `YYYY-MM-DDTHH:MM:SSZ` (new writes) or legacy `YYYY-MM-DD`; `source` ≤120
-- headings in order only; no extra `##`; no required Why heading (optional footnote only)
+- headings in order only; no extra `##`; `## Previous mistakes` last and required on a fresh write, entries valid and append-only on an update; fresh write cites every matched lesson in Watch-outs; no required Why heading (optional footnote only)
 - ≥1 `N.M [ ]` leaf; every phase has ≥1 leaf; Verify is last numbered phase
 - checkbox grammar (`N [ ]` / `N.M [ ]` / `N.M.K [ ]`); no `- [ ]`; no `1. [ ]`
 - fresh write: zero `[x]` / `[X]`; Goal 1–3 sentences; Context/Constraints/Watch-outs bullets; Context includes `Task type:`, `Named checks:`, and a skip-with-reason when a named check is dropped; frontmatter includes `commit:`; Verify 1–5 leaves
@@ -118,6 +254,7 @@ File: `.tmp/grunt/plans/1-add-tmp-ignore-20260826T143000Z.md`
 serial: 1
 name: add-tmp-ignore
 status: ready
+reviews: 0
 created: 2026-08-26T14:30:00Z
 source: "gitignore .tmp so local plans stay untracked"
 commit: chore: ignore .tmp
@@ -162,4 +299,7 @@ Repo `.gitignore` ignores `.tmp/` so files under `.tmp/grunt/plans/` stay untrac
 4 [ ] Verify
 4.1 [ ] `git check-ignore -v .tmp/grunt/plans` reports ignored
 4.2 [ ] `git status --short -- .gitignore` shows only the ignore edit
+
+## Previous mistakes
+(none)
 ```

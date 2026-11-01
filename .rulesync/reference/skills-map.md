@@ -45,10 +45,11 @@
 | principle-subtract-before-you-add | grunt | Apply when sequencing an addition, refactor, or rewrite. Remove dead code, redundant validators, and stub references fi… |  |  |  |
 | principle-test-behavior-not-implementation | grunt | Apply when you write, change, or keep a test. Assert what the code's users can observe, so that the test fails when tha… |  |  |  |
 | principle-type-system-discipline | grunt | Apply when designing types, reviewing a function signature, or writing code in any statically-typed language. Make ille… |  |  |  |
+| review-plan | grunt | Review a plan in a fresh agent before approval. Use for /review-plan. |  |  |  |
 | su | grunt | Short status update: done, next, and blockers or on-track ETA. |  |  |  |
 | teach | grunt | Explain a body of work plainly so a person actually understands it. Dig into how it works and why it is that way, then… |  |  |  |
 | tmp | grunt | Dump a one-off convo artifact under .tmp/grunt/. |  |  |  |
 | typescript-best-practices | grunt | TypeScript best practices. Use when reading or editing any .ts or .tsx file, or for /typescript-best-practices. |  |  |  |
 | unslop | grunt | Cut AI tells from any writing. Use for /unslop. |  |  |  |
 | write-plan | grunt | Write a local checklist under .tmp/grunt/plans/. Then /implement-plan {n}. |  |  |  |
-| write-roadmap | grunt | Write an ordered program of plans under docs/roadmaps/. Use for /write-roadmap. Stops for lock. Does not implement. |  |  |  |
+| write-roadmap | grunt | Write an ordered program of plans under .tmp/grunt/roadmaps/. Use for /write-roadmap. Stops for lock. Does not implemen… |  |  |  |

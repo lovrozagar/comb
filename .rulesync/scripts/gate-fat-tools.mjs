@@ -43,7 +43,7 @@ const GREP_TOOLS = new Set(["grep", "grepsearch"]);
 const GLOB_TOOLS = new Set(["glob", "listdir"]);
 const BASH_TOOLS = new Set(["bash", "runterminalcommand"]);
 const WRITE_TOOLS = new Set(["write", "edit", "searchreplace"]);
-const WRITE_PATH_FIELDS = [
+export const WRITE_PATH_FIELDS = [
   "path",
   "file_path",
   "filePath",

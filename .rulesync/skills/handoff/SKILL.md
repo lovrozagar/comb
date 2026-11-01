@@ -4,7 +4,7 @@ description: "Write a session handoff under .tmp/grunt/handoffs/. Continue with 
 ---
 # handoff
 
-One turn. Author from this session. Write once, report path, stop.
+One turn. Author from this session. Write once, report the absolute path, stop.
 
 ## Invocation
 
@@ -58,12 +58,12 @@ Line 1 of the body: `HANDOFF_NAME: <3-6 word name>`, then the body only.
 
 Write under `.tmp/grunt/handoffs/` (any filename in that dir). Grok `orchestrate-parent.js` runs `.rulesync/scripts/persist-handoff.mjs`: serial/slug from `HANDOFF_NAME:` / heading, injects frontmatter, rewrites path + content. Invalid handoff or a write outside that dir is denied — fix the body, do not retry elsewhere.
 
-Host without that hook: name the file per **Path** yourself, or pipe the body to `node .rulesync/scripts/persist-handoff.mjs --workspace {repo}` and use its `path`.
+Host without that hook: name the file per **Path** yourself, or pipe the body to `node .rulesync/scripts/persist-handoff.mjs --workspace {repo}` and use its `absPath`.
 
 ## Report
 
 ```
-[handoff]: serial={int} path=.tmp/grunt/handoffs/{serial}-{slug}-{stamp}.md
+[handoff]: serial={int} path={abs}/.tmp/grunt/handoffs/{serial}-{slug}-{stamp}.md
 next: start a new session; `/pickup {serial}`
 ```
 

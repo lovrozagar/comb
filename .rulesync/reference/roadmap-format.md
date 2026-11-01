@@ -4,7 +4,7 @@ Ordered program of child plans. Not a plan, a handoff, or a design doc.
 
 ## Path
 
-`docs/roadmaps/{serial}-{slug}-{YYYYMMDDTHHMMSSZ}.md`
+`.tmp/grunt/roadmaps/{serial}-{slug}-{YYYYMMDDTHHMMSSZ}.md`
 
 - **serial:** unpadded decimal int ≥ 1. Never `0001`.
 - **filename:** `^[0-9]+-[a-z0-9]+(-[a-z0-9]+)*-\d{8}T\d{6}Z\.md$`
@@ -51,7 +51,7 @@ Under each slice, indented, not checkboxes:
 
 - **Goal:** one sentence. What that slice's plan ships.
 - **Why:** one or two sentences. Why this slot, and what it unlocks.
-- **Location:** omit in a draft. When present, the plan path `/write-plan` returns (`.tmp/grunt/plans/{file}`) or that path made absolute. A slice that already has Location does not get a second plan.
+- **Location:** omit in a draft. When present, the absolute plan path `/write-plan` reported. A slice that already has Location does not get a second plan.
 - `[x]` only after that child plan's Verify is done.
 
 A roadmap has at least two slices. One slice is `/write-plan`.
@@ -63,6 +63,6 @@ A roadmap has at least two slices. One slice is `/write-plan`.
 - headings in order; no extra `##`
 - Goal 1–3 sentences; Context, Decisions, Watch-outs are bullets
 - ≥2 slices; each has Title (2–6 words), one-sentence Goal, and Why (1–2 sentences)
-- Location, when present, is `.tmp/grunt/plans/{file}` or absolute
+- Location, when present, is the absolute plan path (a relative `.tmp/grunt/plans/{file}` in an older roadmap still resolves)
 - Verify has 1–5 leaves
 - a fresh create is `draft` and has no `[x]`
