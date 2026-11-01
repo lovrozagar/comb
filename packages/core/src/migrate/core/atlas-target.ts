@@ -58,9 +58,12 @@ const isDocker = (raw: string): boolean => /^docker:\/\/[^#\s]+$/.test(raw)
 function hostWarnings(url: LibpqUrl): string[] {
 	const warnings: string[] = []
 	const sslmode = url.params.get("sslmode") ?? ""
-	if (!url.socket && !LOCAL_HOSTS.has(url.host) && !VERIFIED_SSL.has(sslmode)) {
+	/* the password goes where comb and Atlas connect: hostaddr when given, which a socket never is (P18 of r18) */
+	const reached = url.hostaddr ?? url.host
+	const local = url.hostaddr === undefined ? url.socket || LOCAL_HOSTS.has(url.host) : LOCAL_HOSTS.has(url.hostaddr)
+	if (!local && !VERIFIED_SSL.has(sslmode)) {
 		warnings.push(
-			`url reaches ${url.host} without sslmode=verify-full or require, so the password may cross the network unencrypted or to an unverified server`,
+			`url reaches ${reached} without sslmode=verify-full or require, so the password may cross the network unencrypted or to an unverified server`,
 		)
 	}
 	if (url.host.includes("-pooler.")) {

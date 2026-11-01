@@ -377,3 +377,15 @@ describe("pgUrlProblems: a search_path in the url", () => {
 		expect(pgUrlProblems(target({ schema: "tenant_a", url: `${base}?search_path=tenant_a` })).errors).toEqual([])
 	})
 })
+
+/* r18 P18: the password crosses the network to the address comb and Atlas connect to: hostaddr, when given */
+describe("pgUrlProblems: plaintext warning by the address connected to", () => {
+	it("warns of a remote hostaddr behind host=localhost, and not of a tunnel to 127.0.0.1", () => {
+		const remote = pgUrlProblems(target({ url: "postgres://app:secret@localhost:5432/app?hostaddr=203.0.113.5" }))
+		expect(remote.warnings.join()).toContain("url reaches 203.0.113.5 without sslmode=verify-full or require")
+		const tunnel = pgUrlProblems(
+			target({ url: "postgres://app:secret@db.example.com:5432/app?hostaddr=127.0.0.1&sslmode=disable" }),
+		)
+		expect(tunnel.warnings).toEqual([])
+	})
+})
