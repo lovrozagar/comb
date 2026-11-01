@@ -40,7 +40,7 @@ type Typed = { def: Node; runs?: string | undefined }
 
 /** The column `def` defines on `table`, and what it runs: `runs` when given, else its type's code */
 function followType(table: string, { def, runs }: Typed, facts: Facts): void {
-	const column = String(def["colname"] ?? "")
+	const column = String(def["colname"])
 	const columnType = columnTypeOf(def, facts.schema)
 	facts.columnTypes.set(table, (facts.columnTypes.get(table) ?? new Map()).set(column, columnType))
 	const code = runs ?? typeCode(columnType.type, facts)

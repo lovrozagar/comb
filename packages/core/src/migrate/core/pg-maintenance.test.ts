@@ -95,4 +95,12 @@ describe("a partition added beside the parent's default partition", () => {
 		expect(locks(ATTACH, `${EV} ALTER TABLE ev DETACH PARTITION ev_def;`).join()).toContain(alone)
 		expect(locks(ATTACH, `${EV} DROP TABLE ev_def;`).join()).toContain(alone)
 	})
+
+	it("keeps the default partition through a detach or drop of another, and names none when the default is attached", () => {
+		const kept = "the default partition ev_def,"
+		expect(locks(ATTACH, `${EV} ALTER TABLE ev DETACH PARTITION ev_2020;`).join()).toContain(kept)
+		expect(locks(ATTACH, `${EV} DROP TABLE ev_2020;`).join()).toContain(kept)
+		const second = "ALTER TABLE ev ATTACH PARTITION ev_new DEFAULT;"
+		expect(locks(second).join()).toContain("(scans ev_new under an exclusive lock to check its bound;")
+	})
 })
