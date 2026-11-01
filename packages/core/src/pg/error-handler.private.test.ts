@@ -87,28 +87,34 @@ describe("classifyPgError: a unique index on an expression", () => {
 const underStatement = (fields: Record<string, string>, query: string) =>
 	Object.assign(new Error(`Failed query: ${query}`, { cause: nodePg(fields) }), { name: "DrizzleQueryError", query })
 
-/* Q9 of r17: Postgres reports a partitioned table's violation on the partition, which no map key names */
+/* Q9 of r17 and Q7 of r18: Postgres reports a partitioned table's violation on the partition, which its parent's entry lists */
 describe("classifyPgError on a partition of a mapped table", () => {
-	const maps: ConstraintMap[] = [{ member: { private: ["api_token"] } }]
+	const maps: ConstraintMap[] = [{ member: { partitions: ["member_eu"], private: ["api_token"] } }]
 
-	it("reads the statement's table, the parent, and keeps its private column private", () => {
-		const insert = 'insert into "member" ("api_token", "region") values ($1, $2)'
-		const duplicate = underStatement(
-			{ code: "23505", detail: "Key (api_token, region)=(t, eu) already exists.", table: "member_eu" },
-			insert,
-		)
+	it("reads a listed partition as its parent, and keeps the parent's private column private", () => {
+		const duplicate = nodePg({
+			code: "23505",
+			detail: "Key (api_token, region)=(t, eu) already exists.",
+			table: "member_eu",
+		})
 		expect(classifyPgError(duplicate, maps)).toMatchObject({ cause: "Duplicate value detected", table: "member" })
-		const missing = underStatement({ code: "23502", column: "api_token", table: "member_eu" }, insert)
+		const missing = nodePg({ code: "23502", column: "api_token", table: "member_eu" })
 		expect(classifyPgError(missing, maps)).toMatchObject({ cause: "Required field missing", table: "member" })
 		expect(classifyPgError(missing, maps)?.column).toBeUndefined()
 	})
 
-	it("names no column of a table no map knows, with no statement to find its parent", () => {
-		const missing = nodePg({ code: "23502", column: "api_token", table: "member_eu" })
-		expect(classifyPgError(missing, maps)).toMatchObject({ cause: "Required field missing" })
-		expect(classifyPgError(missing, maps)?.column).toBeUndefined()
-		const duplicate = nodePg({ code: "23505", detail: "Key (api_token)=(t) already exists.", table: "member_eu" })
-		expect(classifyPgError(duplicate, maps)).toMatchObject({ cause: "Duplicate value detected" })
+	it("names no column of a table no map knows, however the statement names a mapped one", () => {
+		const insert = 'insert into "orders" ("id") values ($1)'
+		/* orders' trigger writes audit, through a partition its entry does not list */
+		const known: ConstraintMap[] = [{ audit: { private: ["actor_token"] }, orders: { private: [] } }]
+		const missing = underStatement({ code: "23502", column: "actor_token", table: "audit_2026" }, insert)
+		expect(classifyPgError(missing, known)).toMatchObject({ cause: "Required field missing", table: "audit_2026" })
+		expect(classifyPgError(missing, known)?.column).toBeUndefined()
+		const duplicate = underStatement(
+			{ code: "23505", detail: "Key (actor_token)=(t) already exists.", table: "audit_2026" },
+			insert,
+		)
+		expect(classifyPgError(duplicate, known)).toMatchObject({ cause: "Duplicate value detected", table: "audit_2026" })
 	})
 })
 

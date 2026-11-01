@@ -72,6 +72,22 @@ describe("comb codegen: config mode", () => {
 	})
 })
 
+/* Q7 of r18: comb.config.ts's partitions reach the constraint map, on the parent's entry */
+describe("comb codegen: a Postgres database's partitions", () => {
+	it("writes each on its parent's entry in the constraint map", async () => {
+		const dir = project()
+		writeFileSync(
+			join(dir, "db.core.tables.ts"),
+			`import { pgTable, text } from "drizzle-orm/pg-core"\nexport const audit = pgTable("audit", { id: text("id").primaryKey() })\n`,
+		)
+		config(dir, { dialect: "postgres", generators: ["constraints"], partitions: { audit: ["audit_2026"] } })
+		expect(await runCli(["codegen"], makeIo(dir))).toBe(0)
+		expect(readFileSync(join(dir, "db.core.constraints.gen.ts"), "utf8")).toContain(
+			'\t\t/* partitions, whose violations Postgres reports in this table\'s place */\n\t\tpartitions: ["audit_2026"]',
+		)
+	})
+})
+
 describe("comb codegen: config mode names", () => {
 	it("names the database as the config does, whatever its tables file is called", async () => {
 		const dir = project()

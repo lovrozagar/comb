@@ -62,3 +62,21 @@ describe("mapTable: the map key of a violated Postgres table (F51)", () => {
 		).toBe("auth")
 	})
 })
+
+/* Q7 of r18: a partition is its parent's key when the parent's entry lists it, as codegen keys it */
+describe("mapTable: a partition its parent's entry lists", () => {
+	const PARTITIONED: ConstraintMap[] = [
+		{ "auth.users": { partitions: ["auth.users_eu"] }, events: { partitions: ["events_2026"] } },
+	]
+
+	it("is its parent's key, a schema'd one by its qualified name", () => {
+		expect(mapTable(PARTITIONED, { schema: "public", table: "events_2026" })).toBe("events")
+		expect(mapTable(PARTITIONED, { schema: undefined, table: "events_2026" })).toBe("events")
+		expect(mapTable(PARTITIONED, { schema: "auth", table: "users_eu" })).toBe("auth.users")
+	})
+
+	it("is its own key when no entry lists it, or another schema's table shares its name", () => {
+		expect(mapTable(PARTITIONED, { schema: "public", table: "events_2027" })).toBe("events_2027")
+		expect(mapTable(PARTITIONED, { schema: "public", table: "users_eu" })).toBe("users_eu")
+	})
+})

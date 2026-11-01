@@ -10,6 +10,7 @@ import { pgIdentifier } from "../../identifier.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import { errorKeyPrefix, qualifiedName } from "../utils/table-name.ts"
 import { enumCheckName } from "./enum-checks.ts"
+import { partitionsOf } from "./constraints-partitions.ts"
 import {
 	type Constraint,
 	type ConstraintMap,
@@ -22,6 +23,8 @@ type Dialect = "postgres" | "sqlite"
 
 type ConstraintsConfig = {
 	output: string
+	/** comb.config.ts's `partitions`: each partitioned table's partitions, keyed as the map keys it */
+	partitions?: Readonly<Record<string, readonly string[]>> | undefined
 }
 
 const conflict = (cause: string, errorKey: string): Constraint => ({ cause, errorKey, statusKey: "conflict" })
@@ -223,14 +226,21 @@ function referencedColumns(tables: readonly TableMeta[]): Map<string, string[]> 
  * every consumer's translations, so a repeat is refused instead. The one answer a table's private
  * constraints share is no repeat: to a client that never sees the column, they mean one thing (F66).
  */
-export function buildConstraintMap(tables: readonly TableMeta[], dialect: Dialect = "sqlite"): ConstraintMap {
+export function buildConstraintMap(
+	tables: readonly TableMeta[],
+	dialect: Dialect = "sqlite",
+	partitions: Readonly<Record<string, readonly string[]>> = {},
+): ConstraintMap {
 	const map: ConstraintMap = {}
 	const owner = new Map<string, { constraint: Constraint; place: string }>()
 	const referenced = referencedColumns(tables)
+	const partitioned = partitionsOf(tables, dialect, partitions)
 	for (const table of tables) {
 		const entry = constraintsOf(table, dialect)
 		const columns = referenced.get(qualifiedName(table))
 		if (columns !== undefined) entry.referenced = columns
+		const listed = partitioned.get(qualifiedName(table))
+		if (listed !== undefined) entry.partitions = listed
 		for (const [place, constraint] of placed(qualifiedName(table), entry)) {
 			const first = owner.get(constraint.errorKey)
 			if (first?.constraint === constraint) continue
@@ -277,7 +287,7 @@ function countConstraints(map: ConstraintMap): number {
 export function generateConstraints(ctx: GeneratorContext, config: ConstraintsConfig): void {
 	const { dbName, tables } = ctx.analysis
 	const outputPath = path.resolve(ctx.cwd, config.output)
-	const constraintMap = buildConstraintMap(tables, ctx.dialect)
+	const constraintMap = buildConstraintMap(tables, ctx.dialect, config.partitions)
 
 	writeGenFile(outputPath, generateConstraintMapCode(constraintMap, dbName), { generator: "comb", staged: ctx.staged })
 

@@ -12,6 +12,7 @@ describe("codegenConfigSchema (K14 of the 0.15.0 review)", () => {
 					fts: { post: { columns: ["title", "body"], tokenizer: "porter" } },
 					generators: ["dtos", "orm"],
 					output: { default: "./src/gen", dtos: "./src/dtos" },
+					partitions: { audit: ["audit_2026"] },
 					tables: "./tables.ts",
 				},
 			},
@@ -33,6 +34,13 @@ describe("codegenConfigSchema (K14 of the 0.15.0 review)", () => {
 			{ fts: { post: { columns: [] } } },
 			["databases", "core", "fts", "post", "columns"],
 		],
+		/* Q7 of r18: a partitioned table of no partition, or one of no name, lists nothing a map can read */
+		[
+			"a partitioned table with no partition",
+			{ partitions: { audit: [] } },
+			["databases", "core", "partitions", "audit"],
+		],
+		["a partition of no name", { partitions: { audit: [""] } }, ["databases", "core", "partitions", "audit", 0]],
 		["no tables", { tables: undefined }, ["databases", "core", "tables"]],
 	])("refuses %s, at its path", (_, more, path) => {
 		const result = codegenConfigSchema().safeParse({ databases: { core: { tables: "./t.ts", ...more } } })

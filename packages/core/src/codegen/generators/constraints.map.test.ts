@@ -257,3 +257,24 @@ export const t = pgTable("t", { id: text("id").primaryKey(), status: c.enum("sta
 		}
 	})
 })
+
+/* Q7 of r18: Postgres reports a partition's violation on the partition, so its parent's entry lists it */
+const AUDIT = `${PG}import { pgSchema } from "drizzle-orm/pg-core"
+export const audit = pgTable("audit", { id: text("id").primaryKey() })
+export const orders = pgTable("orders", { id: text("id").primaryKey() })
+export const app = pgSchema("app")
+export const ledger = app.table("ledger", { id: text("id").primaryKey() })
+`
+
+describe("buildConstraintMap: a partitioned table's partitions", () => {
+	it("lists them on the parent's entry, sorted, in its schema when it has one", () => {
+		const map = buildConstraintMap(tablesOf(AUDIT), "postgres", {
+			"app.ledger": ["ledger_eu"],
+			audit: ["audit_2027", "audit_2026"],
+		})
+		expect([map.audit?.partitions, map["app.ledger"]?.partitions]).toEqual([
+			["audit_2026", "audit_2027"],
+			["app.ledger_eu"],
+		])
+	})
+})

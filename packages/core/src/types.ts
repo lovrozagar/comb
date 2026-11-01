@@ -99,6 +99,12 @@ export type ConstraintMap = {
 		/** Postgres EXCLUDE constraints, by name */
 		exclusion?: Record<string, ConstraintMapEntry>
 		foreignKey?: Record<string, ConstraintMapEntry>
+		/**
+		 * The partitions of this Postgres table, keyed as the map keys a table: Postgres reports a
+		 * violation on the partition, which is read as this table's (Q7 of r18). Codegen writes it
+		 * from comb.config.ts's `partitions`; a table no entry lists or keys names no column.
+		 */
+		partitions?: readonly string[]
 		primaryKey?: ConstraintMapEntry
 		/**
 		 * The columns of this table the client never sees, by SQL name: an error names none of them,

@@ -383,3 +383,69 @@ describe("pgErrorHandler on a real server: values a request can send (Q8)", () =
 		).toMatchObject({ errorKey: "room_booked", status: 409, table: "booking" })
 	})
 })
+
+/* Q7 of r18: a partitioned audit table, and orders, whose trigger writes it through its partition */
+const PARTITIONED = `
+	CREATE TEMP TABLE audit (at date NOT NULL, actor_token text NOT NULL, kind text NOT NULL) PARTITION BY RANGE (at);
+	CREATE TEMP TABLE audit_2026 PARTITION OF audit FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+	CREATE TEMP TABLE orders (id text PRIMARY KEY, actor text);
+	CREATE FUNCTION pg_temp.orders_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN INSERT INTO audit (at, actor_token, kind) VALUES ('2026-10-30', NEW.actor, 'order'); RETURN NEW; END $$;
+	CREATE TRIGGER orders_audit AFTER INSERT ON orders FOR EACH ROW EXECUTE FUNCTION pg_temp.orders_audit();
+`
+
+/** What pgErrorHandler throws, under `maps`, for the error `statement` raises over PARTITIONED */
+async function partitioned(
+	sessions: PgSessions,
+	runner: Runner,
+	{ maps, statement }: { maps: ConstraintMap[]; statement: string },
+) {
+	await sessions.sql().unsafe(PARTITIONED)
+	await sessions.pg().query(PARTITIONED)
+	const failure = await runner(sessions, statement).then(
+		() => new Error("the statement did not fail"),
+		(error: unknown) => error,
+	)
+	return (() => {
+		try {
+			pgErrorHandler(failure, maps)
+		} catch (thrown) {
+			return thrown as CombError
+		}
+		return undefined
+	})()
+}
+
+describe("pgErrorHandler on a real server: a partitioned table", () => {
+	const sessions = usePg()
+	const listed: ConstraintMap[] = [{ audit: { partitions: ["audit_2026"], private: ["actor_token"] }, orders: {} }]
+	const unlisted: ConstraintMap[] = [{ audit: { private: ["actor_token"] }, orders: {} }]
+
+	for (const [driver, runner] of Object.entries(RUNNERS)) {
+		it(`${driver}: reads a violation on a listed partition as its parent's, naming its column`, async () => {
+			const kind = await partitioned(sessions, runner, {
+				maps: listed,
+				statement: "INSERT INTO audit VALUES ('2026-10-30', 't', NULL)",
+			})
+			expect(kind).toMatchObject({ cause: "Required field missing: kind", column: "kind", table: "audit" })
+		})
+
+		it(`${driver}: keeps the parent's private column private on a listed partition`, async () => {
+			const token = await partitioned(sessions, runner, {
+				maps: listed,
+				statement: "INSERT INTO audit VALUES ('2026-10-30', NULL, 'k')",
+			})
+			expect(token).toMatchObject({ cause: "Required field missing", table: "audit" })
+			expect(token?.column).toBeUndefined()
+		})
+
+		it(`${driver}: names no column of a partition no entry lists, a trigger's write under a mapped statement`, async () => {
+			const thrown = await partitioned(sessions, runner, {
+				maps: unlisted,
+				statement: "INSERT INTO orders (id) VALUES ('o1')",
+			})
+			expect(thrown).toMatchObject({ cause: "Required field missing", table: "audit_2026" })
+			expect(thrown?.column).toBeUndefined()
+		})
+	}
+})

@@ -32,6 +32,8 @@ import type { GeneratorContext } from "./context-types.ts";
 type Dialect = "postgres" | "sqlite";
 type ConstraintsConfig = {
     output: string;
+    /** comb.config.ts's `partitions`: each partitioned table's partitions, keyed as the map keys it */
+    partitions?: Readonly<Record<string, readonly string[]>> | undefined;
 };
 /**
  * The constraint map of every table that has a constraint, keyed by SQL table name. An error key
@@ -40,7 +42,7 @@ type ConstraintsConfig = {
  * every consumer's translations, so a repeat is refused instead. The one answer a table's private
  * constraints share is no repeat: to a client that never sees the column, they mean one thing (F66).
  */
-export declare function buildConstraintMap(tables: readonly TableMeta[], dialect?: Dialect): ConstraintMap;
+export declare function buildConstraintMap(tables: readonly TableMeta[], dialect?: Dialect, partitions?: Readonly<Record<string, readonly string[]>>): ConstraintMap;
 /** Every constraint in the map, flattened */
 export declare function constraintsIn(map: ConstraintMap): Constraint[];
 /** Generate constraint map from analyzed tables */
@@ -519,6 +521,7 @@ export type Constraint = {
 export type TableConstraints = {
     check?: Record<string, Constraint>;
     foreignKey?: Record<string, Constraint>;
+    partitions?: string[];
     primaryKey?: Constraint;
     private?: string[];
     referenced?: string[];

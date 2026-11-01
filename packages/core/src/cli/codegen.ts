@@ -54,7 +54,10 @@ const STEPS: Readonly<Record<Generator, (plan: Plan) => Promise<void>>> = {
 	},
 	constraints: async (plan) => {
 		const { generateConstraints } = await import("../codegen/generators/constraints.ts")
-		generateConstraints(plan.ctx, { output: out(plan, "constraints", beside(plan, "constraints.gen.ts")) })
+		generateConstraints(plan.ctx, {
+			output: out(plan, "constraints", beside(plan, "constraints.gen.ts")),
+			partitions: plan.db.partitions,
+		})
 	},
 	diagrams: async (plan) => {
 		const { generateDiagrams } = await import("../codegen/generators/diagrams.ts")

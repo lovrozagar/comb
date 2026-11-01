@@ -14,6 +14,7 @@ export type Constraint = {
 export type TableConstraints = {
 	check?: Record<string, Constraint>
 	foreignKey?: Record<string, Constraint>
+	partitions?: string[]
 	primaryKey?: Constraint
 	private?: string[]
 	referenced?: string[]
@@ -47,6 +48,7 @@ function joined(blocks: string[][]): string[] {
 
 /* what each list of a table's columns is */
 const LIST_LABELS: Record<string, string> = {
+	partitions: "partitions, whose violations Postgres reports in this table's place",
 	private: "private columns, which no error names",
 	referenced: "columns other tables' foreign keys reference",
 }

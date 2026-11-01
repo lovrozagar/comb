@@ -220,16 +220,15 @@ const RESOURCE: Record<string, Fallback> = {
 }
 
 /**
- * The violated table's key in the maps: the reported one, or, for a partition, which Postgres
- * reports in its parent's place, the statement's own table (Q9 of r17). Undefined `known` when the
- * maps know neither, and so cannot say which of its columns are private
+ * The violated table's key in the maps: the reported one, or, for a partition its parent's entry
+ * lists, the parent's (mapTable). `known` false when the maps key neither, and so cannot say which
+ * of its columns are private; never the statement's table, which a trigger or a cascade did not
+ * write (Q7 of r18)
  */
 function violatedTable(maps: ConstraintMap[], read: PgErrorRead): { known: boolean; table: string | undefined } {
-	const knows = (table: string | undefined) => table !== undefined && maps.some((map) => Object.hasOwn(map, table))
-	const reported = mapTable(maps, read)
-	if (maps.length === 0 || reported === undefined || knows(reported)) return { known: true, table: reported }
-	const parent = mapTable(maps, { schema: read.schema, table: statementTable(read.query) })
-	return knows(parent) ? { known: true, table: parent } : { known: false, table: reported }
+	const table = mapTable(maps, read)
+	const known = maps.length === 0 || table === undefined || maps.some((map) => Object.hasOwn(map, table))
+	return { known, table }
 }
 
 /**

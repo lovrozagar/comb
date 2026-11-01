@@ -46,6 +46,12 @@ export type DatabaseCodegen = {
     generators?: readonly GeneratorName[] | undefined;
     /** Where each generator writes; `default` is the directory for every one not named */
     output?: Partial<Record<GeneratorName | "default", string>> | undefined;
+    /**
+     * Postgres only: each partitioned table, keyed as its constraint map keys it, to its partitions'
+     * names, which live in its schema. Postgres reports a violation on the partition, and the map
+     * reads it as the parent's; a table it does not know names no column (Q7 of r18)
+     */
+    partitions?: Record<string, readonly string[]> | undefined;
     /** The tables file, relative to comb.config.ts */
     tables: string;
 };

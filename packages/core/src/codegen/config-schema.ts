@@ -21,6 +21,7 @@ const databaseSchema = () =>
 			.optional(),
 		generators: z.array(z.enum(GENERATORS)).optional(),
 		output: z.partialRecord(z.enum([...GENERATORS, "default"]), z.string().min(1)).optional(),
+		partitions: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
 		tables: z.string().min(1),
 	})
 
