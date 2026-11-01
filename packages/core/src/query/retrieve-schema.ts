@@ -22,7 +22,7 @@ type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<
 // lookup-table: the names an extension may not take
 const RESERVED = /* @__PURE__ */ Object.freeze(["lang", "parsedFields", "select"])
 
-function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<string, never>>(
+function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never>>(
 	config: RetrieveQueryConfig<T>,
 ): RetrieveQuerySchema<T> {
 	const { extend: extendFields, fields: fieldsConfig } = config

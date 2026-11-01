@@ -147,3 +147,25 @@ export const annotatedList: ListQuerySchema<Record<string, never>, "created_at">
 export const annotatedRetrieve: RetrieveQuerySchema<Record<string, never>> = createRetrieveQuerySchema({
 	fields: { scalars: ["id"] },
 })
+
+/* a schema with no `extend` adds no keys: its output is ListQueryOutput itself, so a hand-built one (a test's, a
+   service's) is assignable. The default used to be Record<string, never>, an index signature of never that no
+   object could satisfy */
+const plainList = createListQuerySchema({ sort: ["created_at"] })
+const builtList: z.output<typeof plainList> = {
+	cursor: undefined,
+	filterAst: null,
+	lang: undefined,
+	limit: 20,
+	page: undefined,
+	parsedFields: null,
+	parsedSort: [],
+	q: undefined,
+	sortOrderBy: {},
+	validated: true,
+}
+expectTypeOf<ListQueryOutput<"created_at">>().toExtend<z.output<typeof plainList>>()
+expectTypeOf(builtList).toHaveProperty("validated")
+const plainRetrieve = createRetrieveQuerySchema({ fields: { scalars: ["id"] } })
+const builtRetrieve: z.output<typeof plainRetrieve> = { lang: undefined, parsedFields: null }
+expectTypeOf(builtRetrieve).toHaveProperty("parsedFields")

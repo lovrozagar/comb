@@ -44,7 +44,7 @@ type ReservedListKey =
 type ReservedRetrieveKey = "lang" | "parsedFields" | "select"
 
 type ListQueryConfig<
-	T extends OutputStableShape<T> = Record<string, never>,
+	T extends OutputStableShape<T> = Record<never, never>,
 	TSortFields extends readonly string[] = readonly string[],
 > = {
 	/** Extra params, validated and returned as they are; a name the schema owns is refused */

@@ -149,7 +149,7 @@ function limitsOf(given: Partial<ListQueryLimits> | undefined): ListQueryLimits 
 }
 
 function createListQuerySchema<
-	T extends OutputStableShape<T> = Record<string, never>,
+	T extends OutputStableShape<T> = Record<never, never>,
 	const TSortFields extends readonly string[] = readonly string[],
 >(config: ListQueryConfig<T, TSortFields>): ListQuerySchema<T, TSortFields[number]> {
 	type TSortField = TSortFields[number]
