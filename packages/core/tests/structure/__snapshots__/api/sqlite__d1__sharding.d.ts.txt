@@ -892,7 +892,7 @@ type ListQueryInput = z.ZodObject<ListQueryShape, z.core.$strict>;
 type ListQuerySchema<T extends OutputStableShape<T>, TSortField extends string> = z.ZodPipe<ListQueryInput, z.ZodTransform<Awaited<ListQueryOutput<TSortField> & {
     [K in keyof T]: z.infer<T[K]>;
 }>, z.output<ListQueryInput>>>;
-declare function createListQuerySchema<T extends OutputStableShape<T> = Record<string, never>, const TSortFields extends readonly string[] = readonly string[]>(config: ListQueryConfig<T, TSortFields>): ListQuerySchema<T, TSortFields[number]>;
+declare function createListQuerySchema<T extends OutputStableShape<T> = Record<never, never>, const TSortFields extends readonly string[] = readonly string[]>(config: ListQueryConfig<T, TSortFields>): ListQuerySchema<T, TSortFields[number]>;
 export { createListQuerySchema, type ListQuerySchema };
 
 // query/retrieve-schema.d.ts
@@ -912,7 +912,7 @@ type RetrieveInput = z.ZodObject<RetrieveShape, z.core.$strict>;
 type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveInput, z.ZodTransform<Awaited<RetrieveQueryOutput & {
     [K in keyof T]: z.infer<T[K]>;
 }>, z.output<RetrieveInput>>>;
-declare function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<string, never>>(config: RetrieveQueryConfig<T>): RetrieveQuerySchema<T>;
+declare function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never>>(config: RetrieveQueryConfig<T>): RetrieveQuerySchema<T>;
 export { createRetrieveQuerySchema, type RetrieveQuerySchema };
 
 // query/schema-limits.d.ts
@@ -968,7 +968,7 @@ type PaginationConfig = {
 };
 type ReservedListKey = "cursor" | "filter" | "filterAst" | "lang" | "limit" | "order" | "page" | "parsedFields" | "parsedSort" | "q" | "select" | "sortOrderBy" | "validated";
 type ReservedRetrieveKey = "lang" | "parsedFields" | "select";
-type ListQueryConfig<T extends OutputStableShape<T> = Record<string, never>, TSortFields extends readonly string[] = readonly string[]> = {
+type ListQueryConfig<T extends OutputStableShape<T> = Record<never, never>, TSortFields extends readonly string[] = readonly string[]> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
     extend?: T & {
         [K in ReservedListKey]?: never;
