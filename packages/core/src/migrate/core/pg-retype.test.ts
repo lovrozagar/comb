@@ -58,3 +58,25 @@ describe("a retype that may change a value or rewrite the table", () => {
 		expect(rated.lockWarnings.join(" ")).toContain("rewrites or scans the table under an exclusive lock")
 	})
 })
+
+/* r18 P1: Postgres rewrites an array retype, and an array to a scalar changes what the column holds */
+describe("a retype on either side of an array", () => {
+	const ARRAYS = "CREATE TABLE a (tags varchar(10)[], grid int[][], label varchar(10));"
+	it.each([
+		"ALTER TABLE a ALTER COLUMN tags TYPE text;",
+		"ALTER TABLE a ALTER COLUMN tags TYPE varchar(20)[];",
+		"ALTER TABLE a ALTER COLUMN tags TYPE text[];",
+		"ALTER TABLE a ALTER COLUMN tags TYPE varchar(10)[];",
+		"ALTER TABLE a ALTER COLUMN label TYPE varchar(20)[];",
+		"ALTER TABLE a ALTER COLUMN label TYPE text ARRAY;",
+		"ALTER TABLE a ALTER COLUMN grid TYPE bigint[][];",
+	])("rates %j unsafe, with the rewrite warning", (later) => {
+		const rated = rate(later, ARRAYS)
+		expect([rated.safety, rated.lockWarnings.length]).toEqual(["unsafe", 1])
+	})
+
+	it("reads an array column's type as recorded after a rename", () => {
+		const more = `${ARRAYS} ALTER TABLE a RENAME COLUMN tags TO labels;`
+		expect(rate("ALTER TABLE a ALTER COLUMN labels TYPE varchar(20)[];", more).safety).toBe("unsafe")
+	})
+})

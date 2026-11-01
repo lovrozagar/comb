@@ -3,11 +3,12 @@
  * rewrites the table, but for one Postgres does in place, which changes no value: a retype with no
  * USING that only widens, read against the column's type in the history (P12 of the 0.15.0 review).
  * Widening is a longer or unbounded varchar, or text; a numeric of more or unbounded precision at
- * the same scale; a longer or unbounded varbit.
+ * the same scale; a longer or unbounded varbit. A retype to or from an array never widens: Postgres
+ * rewrites every array retype, and one to a scalar changes what the column holds (P1 of r18).
  */
 import type { Finding } from "./classify-alter.ts"
 import { REWRITES } from "./pg-column-add.ts"
-import { type ColumnType, type Facts, modsOf, type Node, typeOf } from "./pg-nodes.ts"
+import { columnTypeOf, type ColumnType, type Facts, type Node } from "./pg-nodes.ts"
 
 // lookup-table: the types whose modifier bounds a value's length or precision, so a larger one only widens
 const BOUNDED: ReadonlySet<string> = /* @__PURE__ */ new Set(["numeric", "varbit", "varchar"])
@@ -17,6 +18,7 @@ const bare = (type: string): string => type.replace(/^pg_catalog\./, "")
 
 /** Whether a column of type `from` retyped to `to` keeps every value as it is */
 function widens(from: ColumnType, to: ColumnType): boolean {
+	if (from.dims > 0 || to.dims > 0) return false
 	const [was, now] = [bare(from.type), bare(to.type)]
 	if (was === "varchar" && now === "text") return true
 	if (was !== now || !BOUNDED.has(was)) return false
@@ -30,7 +32,7 @@ function widens(from: ColumnType, to: ColumnType): boolean {
 function retypeFindings(cmd: Node, { facts, key }: { facts: Facts; key: string }): Finding[] {
 	const def = (cmd["def"] as Node)["ColumnDef"] as Node
 	const from = facts.columnTypes.get(key)?.get(String(cmd["name"]))
-	const to = { mods: modsOf(def["typeName"]), type: typeOf(def["typeName"], facts.schema) }
+	const to = columnTypeOf(def["typeName"], facts.schema)
 	if (def["raw_default"] === undefined && from !== undefined && widens(from, to)) return []
 	return [{ level: "unsafe" }, { level: "lock", note: REWRITES }]
 }

@@ -16,7 +16,18 @@ import { followCatalogObject } from "./pg-catalog-objects.ts"
 import { followEventTrigger } from "./pg-events.ts"
 import { followNames } from "./pg-names.ts"
 import { followRoutine } from "./pg-routines.ts"
-import { emptyFacts, type Facts, keyOf, modsOf, names, type Node, nodesOf, tableOf, typed, typeOf } from "./pg-nodes.ts"
+import {
+	columnTypeOf,
+	emptyFacts,
+	type Facts,
+	keyOf,
+	names,
+	type Node,
+	nodesOf,
+	tableOf,
+	typed,
+	typeOf,
+} from "./pg-nodes.ts"
 import { parsePostgres } from "./pg-parser.ts"
 import { historyTrees } from "./pg-split.ts"
 
@@ -42,12 +53,9 @@ type Typed = { column: string; runs?: string | undefined; typeName: unknown }
 
 /** `column` of `table` of `typeName`, and what it runs: `runs` when given, else its type's code */
 function followType(table: string, { column, runs, typeName }: Typed, facts: Facts): void {
-	const type = typeOf(typeName, facts.schema)
-	facts.columnTypes.set(
-		table,
-		(facts.columnTypes.get(table) ?? new Map()).set(column, { mods: modsOf(typeName), type }),
-	)
-	const code = runs ?? typeCode(type, facts)
+	const columnType = columnTypeOf(typeName, facts.schema)
+	facts.columnTypes.set(table, (facts.columnTypes.get(table) ?? new Map()).set(column, columnType))
+	const code = runs ?? typeCode(columnType.type, facts)
 	if (code !== undefined && !facts.code.has(table)) facts.code.set(table, code)
 }
 

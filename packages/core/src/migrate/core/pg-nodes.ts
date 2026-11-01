@@ -33,8 +33,11 @@ const emptyFacts = (schema: string): Facts => ({
 	views: new Map(),
 })
 
-/** A column's type, keyed as typeOf keys it, and its modifiers, none for one unbounded */
-type ColumnType = { mods: readonly number[]; type: string }
+/**
+ * A column's type, keyed as typeOf keys it: its modifiers, none for one unbounded, and its array
+ * dimensions, 0 for a scalar (`int[]` and `int ARRAY` have 1)
+ */
+type ColumnType = { dims: number; mods: readonly number[]; type: string }
 
 /** Whether a column of `columns` has the type `type` */
 const typed = (columns: ReadonlyMap<string, ColumnType>, type: string): boolean =>
@@ -128,7 +131,15 @@ function tableOf(relation: unknown, schema: string): { key: string; name: string
 /** A type's key under `schema` */
 const typeOf = (typeName: unknown, schema: string): string => keyOf(names((typeName as Node)["names"]), schema)
 
+/** A type name as a column's type under `schema`: its key, its modifiers and its array dimensions */
+const columnTypeOf = (typeName: unknown, schema: string): ColumnType => ({
+	dims: (((typeName as Node)["arrayBounds"] as unknown[] | undefined) ?? []).length,
+	mods: modsOf(typeName),
+	type: typeOf(typeName, schema),
+})
+
 export {
+	columnTypeOf,
 	type ColumnType,
 	emptyFacts,
 	type EventTrigger,
