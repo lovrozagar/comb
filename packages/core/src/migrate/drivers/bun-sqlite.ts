@@ -4,6 +4,7 @@
  */
 import { existsSync } from "node:fs"
 import type { MemoryDb } from "./memory.ts"
+import { DatabaseMissing } from "./missing.ts"
 import type {
 	BunSqliteProviderConfig,
 	Connection,
@@ -64,7 +65,9 @@ export function createBunSqliteProvider(config: BunSqliteProviderConfig): Connec
 			/* an in-memory database holds nothing to protect, and bun opens none read-only */
 			const readonly = dbConfig?.readonly === true && config.path !== ":memory:"
 			if (readonly && !existsSync(config.path))
-				throw new Error(`${config.path} does not exist; check and status open a database read-only, and create none`)
+				throw new DatabaseMissing(
+					`${config.path} does not exist; check and status open a database read-only, and create none`,
+				)
 			/* a specifier TypeScript does not resolve: a Node consumer compiles this without bun-types */
 			const { Database } = (await import(BUN_SQLITE)) as {
 				Database: new (path: string, options?: { readonly?: boolean }) => BunDatabase

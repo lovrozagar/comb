@@ -6,6 +6,8 @@ import type { ConnectionProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import { openSqliteTarget } from "./migrate-sqlite-target.ts"
 
+vi.mock("bun:sqlite", () => import("../migrate/__fixtures__/bun-sqlite-node.ts"))
+
 const dirs: string[] = []
 afterEach(() => {
 	vi.unstubAllGlobals()
@@ -51,10 +53,44 @@ describe("openSqliteTarget", () => {
 		await expect(openSqliteTarget(request("apply"), target)).rejects.toThrow("Migrations dir not found: /nowhere/m")
 	})
 
-	it("writes through the connection it reads on, for an engine other than Turso", async () => {
-		const target = await openSqliteTarget(request("apply"), resolved({ type: "libsql", url: ":memory:" }))
-		expect(await target.write()).toBe(target.conn)
+	/* r18 S3: a refused apply on a file engine created the file, which check and status then read as empty */
+	it.each([
+		["libsql", (file: string): ConnectionProviderConfig => ({ type: "libsql", url: `file:${file}` })],
+		["bun-sqlite", (file: string): ConnectionProviderConfig => ({ path: file, type: "bun-sqlite" })],
+	])("reads a missing %s file as the empty database, and creates it only to write", async (_, provider) => {
+		const base = resolved({ type: "libsql", url: ":memory:" })
+		const file = path.join(base.configDir, "core.db")
+		const target = await openSqliteTarget(request("apply"), { ...base, provider: provider(file) })
+		expect((await target.conn.execute("SELECT count(*) AS n FROM sqlite_master")).rows).toEqual([[0]])
+		await expect(target.conn.batch([{ sql: "CREATE TABLE t (a)" }])).rejects.toThrow("does not exist yet")
+		expect(fs.existsSync(file)).toBe(false)
+		const writer = await target.write()
+		expect(await target.write()).toBe(writer)
+		await writer.batch([{ sql: "CREATE TABLE t (a)" }])
 		await target.close()
+		expect(fs.existsSync(file)).toBe(true)
+	})
+
+	it("reads an existing file on a connection of its own, and writes through another", async () => {
+		const base = resolved({ type: "libsql", url: ":memory:" })
+		const url = `file:${path.join(base.configDir, "core.db")}`
+		const first = await openSqliteTarget(request("apply"), { ...base, provider: { type: "libsql", url } })
+		await (await first.write()).batch([{ sql: "CREATE TABLE t (a)" }])
+		await first.close()
+		const target = await openSqliteTarget(request("baseline"), { ...base, provider: { type: "libsql", url } })
+		expect((await target.conn.execute("SELECT name FROM sqlite_master")).rows).toEqual([["t"]])
+		expect(await target.write()).not.toBe(target.conn)
+		await target.close()
+	})
+
+	it("refuses a missing file on check and status, which create none", async () => {
+		const base = resolved({ type: "libsql", url: ":memory:" })
+		const file = path.join(base.configDir, "core.db")
+		for (const mode of ["check", "status"])
+			await expect(
+				openSqliteTarget(request(mode), { ...base, provider: { path: file, type: "bun-sqlite" } }),
+			).rejects.toThrow(`${file} does not exist`)
+		expect(fs.existsSync(file)).toBe(false)
 	})
 
 	it("passes on a Turso failure that is not a missing database", async () => {

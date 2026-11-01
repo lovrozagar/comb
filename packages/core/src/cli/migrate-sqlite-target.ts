@@ -1,11 +1,13 @@
 /**
  * The SQLite, libsql or Turso database comb.migrate.config.ts resolved, opened for a migrate command:
- * read-only for check and status. A Turso apply or baseline checks on a read-only connection too, a
- * missing database read as the empty one it is, and creates the database and mints a full-access
- * token only to write (S6 of the 0.15.0 review); another engine opens once, as the command needs.
+ * read-only for check and status, which refuse a missing database. An apply or baseline checks on a
+ * read-only connection too, a missing database read as the empty one it is, and opens the writable
+ * connection only to write, so a refused run creates no file and no Turso database, and mints no
+ * full-access token (S6 of the 0.15.0 review, S3 of r18).
  */
 import fs from "node:fs"
 import { absentDatabase } from "../migrate/drivers/absent.ts"
+import { DatabaseMissing } from "../migrate/drivers/missing.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
@@ -23,13 +25,12 @@ export type SqliteTarget = {
 
 type OpenRequest = { args: ParsedArgs; io: CliIo; mode: string }
 
-/** Turso's database read-only, or the empty database a missing one is */
-async function readTurso(connect: (readonly: boolean) => Promise<Connection>, name: string): Promise<Connection> {
+/** The database read-only, or the empty database a missing one is */
+async function readOrAbsent(connect: (readonly: boolean) => Promise<Connection>, name: string): Promise<Connection> {
 	try {
 		return await connect(true)
 	} catch (error) {
-		const { TursoMissing } = await import("../migrate/drivers/sqlite.ts")
-		if (error instanceof TursoMissing) return absentDatabase(name)
+		if (error instanceof DatabaseMissing) return absentDatabase(name)
 		throw error
 	}
 }
@@ -50,12 +51,11 @@ export async function openSqliteTarget(
 	const { drizzleConfigPath, migrationsDir, name, provider } = target
 	const connect = (readonly: boolean) =>
 		createProvider(provider, { run: io.run }).connect({ drizzleConfigPath, migrationsDir, name, provider, readonly })
-	const reads = mode === "check" || mode === "status"
-	if (reads || provider.type !== "turso") {
-		const conn = await connect(reads)
+	if (mode === "check" || mode === "status") {
+		const conn = await connect(true)
 		return { close: () => conn.close(), conn, migrationsDir, name: target.label, write: () => Promise.resolve(conn) }
 	}
-	const conn = await readTurso(connect, target.label)
+	const conn = await readOrAbsent(connect, target.label)
 	let writer: Connection | undefined
 	return {
 		close: async () => {

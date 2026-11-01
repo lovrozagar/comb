@@ -13,6 +13,7 @@ import type {
 	TursoProviderConfig,
 } from "../types.ts"
 import { HISTORY_TABLES, notEngineTables } from "../core/engine-tables.ts"
+import { DatabaseMissing } from "./missing.ts"
 
 export { createBunSqliteProvider } from "./bun-sqlite.ts"
 
@@ -47,7 +48,7 @@ export type TursoCredentialsRequest = TursoDeps & {
 }
 
 /** A reader found no Turso database `name` (`org/db`): a reader creates none */
-export class TursoMissing extends Error {
+export class TursoMissing extends DatabaseMissing {
 	constructor(name: string) {
 		super(`Turso database "${name}" does not exist; check and status create none`)
 		this.name = "TursoMissing"
@@ -213,7 +214,7 @@ export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionPr
 			/* libsql has no read-only mode for a file, and creates a missing one on connect */
 			const file = libsqlFile(config.url)
 			if (dbConfig?.readonly === true && file !== undefined && file !== ":memory:" && !existsSync(file))
-				throw new Error(`${file} does not exist; check and status open a database read-only, and create none`)
+				throw new DatabaseMissing(`${file} does not exist; check and status open a database read-only, and create none`)
 			const { createClient } = await libsql()
 			/* `Config` from @libsql/client does not admit an explicit undefined, so omit
 			   the key rather than pass one. */

@@ -1,7 +1,7 @@
 /**
  * The bun:sqlite driver under vitest, which runs on Node and cannot load bun:sqlite: the module
- * is replaced by Node's own SQLite with the three methods bun's Database adds (run, transaction,
- * close), so the driver's SQL still runs on a real engine. tests/bun/bun-sqlite-driver.test.ts
+ * is replaced by Node's own SQLite (__fixtures__/bun-sqlite-node.ts), so the driver's SQL still
+ * runs on a real engine. tests/bun/bun-sqlite-driver.test.ts
  * runs the same driver on bun:sqlite itself.
  */
 import { describe, expect, it, vi } from "vitest"
@@ -10,33 +10,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createBunSqliteProvider, openBunMemory } from "./bun-sqlite.ts"
 
-vi.mock("bun:sqlite", async () => {
-	const { DatabaseSync } = await import("node:sqlite")
-	class Database extends DatabaseSync {
-		run(sql: string, params: unknown[] = []) {
-			return this.prepare(sql).run(...(params as never[]))
-		}
-
-		/* bun's statements hold their table until finalized; Node's have nothing to free */
-		override prepare(sql: string) {
-			return Object.assign(super.prepare(sql), { finalize: () => undefined })
-		}
-
-		transaction(work: () => void) {
-			return () => {
-				this.exec("BEGIN")
-				try {
-					work()
-					this.exec("COMMIT")
-				} catch (error) {
-					this.exec("ROLLBACK")
-					throw error
-				}
-			}
-		}
-	}
-	return { Database }
-})
+vi.mock("bun:sqlite", () => import("../__fixtures__/bun-sqlite-node.ts"))
 
 const DB = { migrationsDir: "m", name: "local", provider: { path: ":memory:", type: "bun-sqlite" as const } }
 

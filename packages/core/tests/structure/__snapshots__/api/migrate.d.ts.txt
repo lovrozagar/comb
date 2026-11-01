@@ -701,6 +701,7 @@ export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): 
 
 // migrate/drivers/sqlite.d.ts
 import type { Connection, ConnectionProvider, LibsqlProviderConfig, TursoProviderConfig } from "../types.ts";
+import { DatabaseMissing } from "./missing.ts";
 export { createBunSqliteProvider } from "./bun-sqlite.ts";
 /** How the Turso calls reach the API and report progress: injectable, quiet by default */
 export type TursoDeps = {
@@ -718,7 +719,7 @@ export type TursoCredentialsRequest = TursoDeps & {
     readonly?: boolean | undefined;
 };
 /** A reader found no Turso database `name` (`org/db`): a reader creates none */
-export declare class TursoMissing extends Error {
+export declare class TursoMissing extends DatabaseMissing {
     constructor(name: string);
 }
 /**
@@ -830,6 +831,12 @@ type ReadStatement = {
 /** Refuses a statement that cannot run in its file `sql`: no `-- comb:allow-unsafe:` overrides this */
 declare function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): void;
 export { ftsCommandFindings, outsideTransaction, preview, type ReadStatement, refuseUnrunnable, reindexedOf };
+
+// migrate/drivers/missing.d.ts
+/** A reader found no database to open: a read-only connect creates none (S3 of the r18 review) */
+export declare class DatabaseMissing extends Error {
+    constructor(message: string);
+}
 
 // migrate/drivers/bun-sqlite.d.ts
 import type { MemoryDb } from "./memory.ts";
