@@ -12,13 +12,13 @@ import { quoteIdent } from "./identifier.ts"
 import { COLUMN_KINDS, type ColumnKind, lowerOn } from "./condition.ts"
 
 /**
- * A mapped column: its name, its values bound as validated, or its name and what it stores, which
- * decides how a value binds as on a drizzle column (`"date-s"` for a date in whole seconds)
+ * A mapped column: its name and what it stores, which decides how a value binds as on a drizzle
+ * column (`"date-s"` for a date in whole seconds, `"as-is"` for its values bound as validated)
  */
-type MappedColumn = string | { column: string; kind: ColumnKind }
+type MappedColumn = { column: string; kind: ColumnKind }
 
 type FilterSQLConfig = {
-	/** Column map: API field name -> SQL column name, or `{ column, kind }` (condition.ts's ColumnKind) */
+	/** Column map: API field name -> `{ column, kind }`, its SQL column and condition.ts's ColumnKind */
 	columnMap: Record<string, MappedColumn>
 	/** Table alias used in query (e.g. "pc" for productCollection) */
 	tableAlias: string
@@ -57,7 +57,12 @@ function requireConditionSQL(condition: FilterCondition, config: FilterSQLConfig
 function buildConditionSQL(condition: FilterCondition, config: FilterSQLConfig): SQL | null {
 	const mapped = Object.hasOwn(config.columnMap, condition.field) ? config.columnMap[condition.field] : undefined
 	if (mapped === undefined) return null
-	const { column, kind } = typeof mapped === "string" ? { column: mapped, kind: "as-is" as const } : mapped
+	/* a bare column name, the string form before 0.17, which JavaScript may still pass, is refused (Q5 of r18) */
+	if (typeof mapped === "string")
+		throw new TypeError(
+			`buildFilterSQL: columnMap.${condition.field} is a bare column name; \`${JSON.stringify(mapped)}\` is \`{ column: ${JSON.stringify(mapped)}, kind: "as-is" }\` since 0.17`,
+		)
+	const { column, kind } = mapped
 	/* a kind comb does not know, as JavaScript may still pass the shape before 0.16, would bind as text: refused */
 	if (!COLUMN_KINDS.includes(kind))
 		throw new TypeError(

@@ -3,7 +3,7 @@ import { SQLiteDialect } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { CombError } from "../../error.ts"
 import { parseFilter } from "../filter.ts"
-import { buildConditionSQL, buildFilterSQL } from "./filter-sql.ts"
+import { buildConditionSQL, buildFilterSQL, type FilterSQLConfig } from "./filter-sql.ts"
 import type { FilterCondition, FilterGroup } from "../types.ts"
 
 const dialect = new (SQLiteDialect as unknown as new () => {
@@ -11,8 +11,12 @@ const dialect = new (SQLiteDialect as unknown as new () => {
 })()
 const compile = (built: SQL) => dialect.sqlToQuery(built)
 
-const config = {
-	columnMap: { name: "name", role: "role", status: "status" },
+const config: FilterSQLConfig = {
+	columnMap: {
+		name: { column: "name", kind: "as-is" },
+		role: { column: "role", kind: "as-is" },
+		status: { column: "status", kind: "as-is" },
+	},
 	tableAlias: "u",
 }
 
@@ -196,7 +200,7 @@ describe("buildConditionSQL — identifiers (plan 3.9)", () => {
 	it("quotes the alias and the column, so neither is read as SQL", () => {
 		const built = buildConditionSQL(
 			{ field: "name", operator: "eq", value: "x" },
-			{ columnMap: { name: 'na"me; --' }, tableAlias: "u" },
+			{ columnMap: { name: { column: 'na"me; --', kind: "as-is" } }, tableAlias: "u" },
 		)
 		expect(built && compile(built).sql).toBe('"u"."na""me; --" = ?')
 	})
@@ -260,6 +264,16 @@ describe("buildConditionSQL on a mapped column of no kind comb knows", () => {
 		expect(() => buildConditionSQL({ field: "at", operator: "gt", value: 1500 }, legacy)).toThrow(
 			new TypeError(
 				'buildFilterSQL: columnMap.at has no kind comb knows (text, number, numeric, date-ms, date-s, as-is); `unit: "s"` is `kind: "date-s"` since 0.16',
+			),
+		)
+	})
+
+	/* Q5 of r18: the string form is gone from the type; JavaScript that still passes one is refused by name */
+	it("throws a TypeError naming the field for a bare column name, where it bound the value as-is", () => {
+		const named = { columnMap: { name: "name" as never }, tableAlias: "u" }
+		expect(() => buildConditionSQL({ field: "name", operator: "eq", value: "x" }, named)).toThrow(
+			new TypeError(
+				'buildFilterSQL: columnMap.name is a bare column name; `"name"` is `{ column: "name", kind: "as-is" }` since 0.17',
 			),
 		)
 	})

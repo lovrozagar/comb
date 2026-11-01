@@ -94,15 +94,15 @@ import { type SQL } from "drizzle-orm";
 import type { FilterCondition, FilterGroup } from "../types.ts";
 import { type ColumnKind } from "./condition.ts";
 /**
- * A mapped column: its name, its values bound as validated, or its name and what it stores, which
- * decides how a value binds as on a drizzle column (`"date-s"` for a date in whole seconds)
+ * A mapped column: its name and what it stores, which decides how a value binds as on a drizzle
+ * column (`"date-s"` for a date in whole seconds, `"as-is"` for its values bound as validated)
  */
-type MappedColumn = string | {
+type MappedColumn = {
     column: string;
     kind: ColumnKind;
 };
 type FilterSQLConfig = {
-    /** Column map: API field name -> SQL column name, or `{ column, kind }` (condition.ts's ColumnKind) */
+    /** Column map: API field name -> `{ column, kind }`, its SQL column and condition.ts's ColumnKind */
     columnMap: Record<string, MappedColumn>;
     /** Table alias used in query (e.g. "pc" for productCollection) */
     tableAlias: string;
