@@ -24,6 +24,12 @@ import type * as z from "zod"
  */
 type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total"
 
+/**
+ * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
+ * row type on its own, so narrowing on its discriminant still reaches each variant's fields (Q3 of r19)
+ */
+type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never
+
 /** The columns a builder selects for paginate alone, stripped from every row it returns */
 const EXTRAS: readonly ListExtra[] = [COMB_ID, "_combAnchorGone", "_combKeyTypes", "_total"]
 
@@ -239,7 +245,7 @@ function refuseOverRead(count: number, pagination: ListPagination): void {
 function paginate<T extends object>(
 	items: readonly T[],
 	built: { pagination: ListPagination & { merged: false } },
-): readonly [Array<Omit<T, ListExtra>>, PaginationMeta] {
+): readonly [Array<ListRow<T>>, PaginationMeta] {
 	const pagination = paginationIn(built, false)
 	refuseOverRead(items.length, pagination)
 	refuseUnwired(items, pagination)
@@ -258,7 +264,7 @@ function paginate<T extends object>(
 	/* projected after the slice, so count, hasMore and the cursor still see the fat row */
 	const page = sliced.map((item) => applySelect(item as T & Record<string, unknown>, pagination.parsedFields))
 	/* the extras are stripped, so the rows are typed without them (Q15 of r18) */
-	return [page as Array<Omit<T, ListExtra>>, meta] as const
+	return [page as unknown as Array<ListRow<T>>, meta] as const
 }
 
 export {
@@ -266,6 +272,7 @@ export {
 	COMB_ID,
 	type ListExtra,
 	type ListPagination,
+	type ListRow,
 	paginate,
 	type PaginationFacts,
 	type PaginationMeta,

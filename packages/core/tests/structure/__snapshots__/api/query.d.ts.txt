@@ -7,6 +7,7 @@
  */
 export { CursorRef, CURSOR_TIEBREAK_COLUMN, cursorProblem, effectiveNulls, MAX_CURSOR_LENGTH, readCursor, sortSignature, } from "./cursor.ts";
 export type { CursorOptions, CursorPayload, CursorValue, DecodedCursor, PaginationMeta } from "./cursor.ts";
+export type { ListExtra, ListRow } from "./pagination.ts";
 export { createCursor } from "./cursor-mint.ts";
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts";
 export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
@@ -107,6 +108,111 @@ declare function openCursor(cursor: string, options: CursorOptions): DecodedCurs
  */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
 export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
+
+// query/pagination.d.ts
+import { type DecodedCursor } from "./cursor.ts";
+import { type KeysetKind } from "./cursor-mint.ts";
+import { type CursorOptions } from "./cursor-seal.ts";
+import { COMB_ID } from "./list-extras.ts";
+import type { paginationResponseSchema } from "./schema.ts";
+import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
+import type * as z from "zod";
+/**
+ * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
+ * r17), or the storage class of each sort key (Q2 of r19)
+ */
+type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total";
+/**
+ * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
+ * row type on its own, so narrowing on its discriminant still reaches each variant's fields (Q3 of r19)
+ */
+type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never;
+/** The pagination meta paginate returns: the list response's own schema */
+type PaginationMeta = z.output<typeof paginationResponseSchema>;
+/** How a built list pages what it fetched */
+type ListPagination = {
+    /** the cursor the request resumed from; none on a page by number */
+    cursor: string | undefined;
+    /** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak (Q6) */
+    cursorable: boolean;
+    cursorScope: string;
+    /** the extras the builder selected, which every row it reads must carry (Q3) */
+    expects: readonly ListExtra[];
+    /** how a key too long for a cursor is carried: by reference to its row ("table"), or not at all ("derived") */
+    keyset: KeysetKind;
+    limit: number;
+    /** read through buildListQuery's `merged`: paged by paginateMerged, never by paginate (K8 of r17) */
+    merged: boolean;
+    /** the sort fields, and the tiebreak's COMB_ID, whose column holds numbers: the merge compares a driver's decimal string there as the integer (Q2 of r19) */
+    numbers: ReadonlySet<string>;
+    nonFinite: "exact" | undefined;
+    page: number | undefined;
+    parsedFields: ParsedFields | null;
+    parsedSort: readonly SortField[];
+    /** the most rows the built query reads: one past the page, so paginate can tell there is more */
+    window: number;
+    /** the cursor for the page after `row`, sealed under the builder's options */
+    mint(row: object): string;
+    /** `cursor` opened under the builder's options, for this list's sort; a 400 when it is no cursor of it */
+    read(cursor: string): DecodedCursor;
+};
+/** What a builder knows of its list, beside the request it parsed */
+type PaginationFacts = {
+    /** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
+    byReference?: ReadonlySet<string> | undefined;
+    cursorable: boolean;
+    /** the extras the builder selected, which every row must carry */
+    expects: readonly ListExtra[];
+    keyset?: KeysetKind | undefined;
+    /** the sort fields, and COMB_ID, whose column holds numbers; none when not given */
+    numbers?: ReadonlySet<string> | undefined;
+    query: ListQueryInput;
+    window: number;
+};
+/** The descriptor a builder hands over: its facts, and the options it seals under closed over, never held */
+declare function paginationOf<TMerged extends boolean = false>(options: CursorOptions, facts: PaginationFacts & {
+    merged?: TMerged | undefined;
+}): ListPagination & {
+    merged: TMerged;
+};
+/** The count an offset page's row carries, in any encoding isCount takes, which refuseUnwired holds every such row to */
+declare const totalOf: (row: object) => number;
+/**
+ * Rows that lack an extra their builder selected were read without the built query's extras, and
+ * an absent flag or count would be read as none: a page_not_wired, whether or not the page needs
+ * it yet (Q3 of r17)
+ */
+declare function refuseUnwired(items: readonly object[], pagination: ListPagination): void;
+/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
+declare function refuseGoneAnchor(items: readonly object[]): void;
+/**
+ * Last mutation of item shape. Query stays fat; the returned object is the
+ * public subset. No-op (minus `_total`) when parsedFields is null.
+ */
+declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
+/**
+ * `built` as paginate (or, `merged`, paginateMerged) takes it, or a 500 naming the call: a parsed
+ * query in its place is the call before 0.15, and a merged list's pages are paginateMerged's alone
+ */
+declare function paginationIn<TMerged extends boolean>(built: {
+    pagination: ListPagination & {
+        merged: TMerged;
+    };
+} | undefined, merged: TMerged): ListPagination & {
+    merged: TMerged;
+};
+/** More rows than the built query reads are rows of another query: one that applied no limit (C2) */
+declare function refuseOverRead(count: number, pagination: ListPagination): void;
+/**
+ * The page of `items`, read with `built`, and its pagination: count, whether there is more, and
+ * the next cursor, sealed under the builder's options; none for a list no cursor can resume
+ */
+declare function paginate<T extends object>(items: readonly T[], built: {
+    pagination: ListPagination & {
+        merged: false;
+    };
+}): readonly [Array<ListRow<T>>, PaginationMeta];
+export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/cursor-mint.d.ts
 import type { CursorOptions } from "./cursor-seal.ts";
@@ -479,6 +585,31 @@ type ListQueryCapabilities = {
 };
 export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ListQueryInput, ParsedFields, SortDirection, SortField, SortNulls, };
 
+// query/list-extras.d.ts
+/**
+ * The values of the extras a builder selects for paginate, as a SQLite or Postgres driver reads them:
+ * a number, a bigint, or a decimal string (libsql's intMode "string", Q2 of r19). An extra rendered
+ * by hand as its own alias reads as that string, which no value of it is (Q4 of r18).
+ */
+import type { SortField } from "./types.ts";
+/** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
+declare const COMB_ID: "_combId";
+declare const INTEGER_TEXT: RegExp;
+/** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint (Q2 of r19) */
+declare const unencoded: (value: unknown) => unknown;
+/**
+ * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
+ * kind. An extra rendered by hand as its own alias reads as that string (Q4 of r18).
+ */
+declare function malformed(row: object, sort: readonly SortField[]): string | undefined;
+/**
+ * `row` with each sort key SQLite stored as an integer, which the driver read as a decimal string, as
+ * that integer, so a cursor minted from it compares as one: a string binds as text, which SQLite
+ * orders after every integer (Q2 of r19). A text key that looks like a number stays text.
+ */
+declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
+export { COMB_ID, INTEGER_TEXT, malformed, typedKeys, unencoded };
+
 // query/filter-values.d.ts
 /** The values a filter names for one field or several: queryHelpers.filterValue and filterValues */
 import type { FilterAST } from "./types.ts";
@@ -487,106 +618,6 @@ declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, fi
 /** Extract multiple filter values from FilterAST */
 declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
 export { extractFilterValue, extractFilterValues };
-
-// query/pagination.d.ts
-import { type DecodedCursor } from "./cursor.ts";
-import { type KeysetKind } from "./cursor-mint.ts";
-import { type CursorOptions } from "./cursor-seal.ts";
-import { COMB_ID } from "./list-extras.ts";
-import type { paginationResponseSchema } from "./schema.ts";
-import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
-import type * as z from "zod";
-/**
- * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
- * r17), or the storage class of each sort key (Q2 of r19)
- */
-type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total";
-/** The pagination meta paginate returns: the list response's own schema */
-type PaginationMeta = z.output<typeof paginationResponseSchema>;
-/** How a built list pages what it fetched */
-type ListPagination = {
-    /** the cursor the request resumed from; none on a page by number */
-    cursor: string | undefined;
-    /** false when no cursor can resume the list: its order holds a computed sort, or it has no tiebreak (Q6) */
-    cursorable: boolean;
-    cursorScope: string;
-    /** the extras the builder selected, which every row it reads must carry (Q3) */
-    expects: readonly ListExtra[];
-    /** how a key too long for a cursor is carried: by reference to its row ("table"), or not at all ("derived") */
-    keyset: KeysetKind;
-    limit: number;
-    /** read through buildListQuery's `merged`: paged by paginateMerged, never by paginate (K8 of r17) */
-    merged: boolean;
-    /** the sort fields, and the tiebreak's COMB_ID, whose column holds numbers: the merge compares a driver's decimal string there as the integer (Q2 of r19) */
-    numbers: ReadonlySet<string>;
-    nonFinite: "exact" | undefined;
-    page: number | undefined;
-    parsedFields: ParsedFields | null;
-    parsedSort: readonly SortField[];
-    /** the most rows the built query reads: one past the page, so paginate can tell there is more */
-    window: number;
-    /** the cursor for the page after `row`, sealed under the builder's options */
-    mint(row: object): string;
-    /** `cursor` opened under the builder's options, for this list's sort; a 400 when it is no cursor of it */
-    read(cursor: string): DecodedCursor;
-};
-/** What a builder knows of its list, beside the request it parsed */
-type PaginationFacts = {
-    /** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
-    byReference?: ReadonlySet<string> | undefined;
-    cursorable: boolean;
-    /** the extras the builder selected, which every row must carry */
-    expects: readonly ListExtra[];
-    keyset?: KeysetKind | undefined;
-    /** the sort fields, and COMB_ID, whose column holds numbers; none when not given */
-    numbers?: ReadonlySet<string> | undefined;
-    query: ListQueryInput;
-    window: number;
-};
-/** The descriptor a builder hands over: its facts, and the options it seals under closed over, never held */
-declare function paginationOf<TMerged extends boolean = false>(options: CursorOptions, facts: PaginationFacts & {
-    merged?: TMerged | undefined;
-}): ListPagination & {
-    merged: TMerged;
-};
-/** The count an offset page's row carries, in any encoding isCount takes, which refuseUnwired holds every such row to */
-declare const totalOf: (row: object) => number;
-/**
- * Rows that lack an extra their builder selected were read without the built query's extras, and
- * an absent flag or count would be read as none: a page_not_wired, whether or not the page needs
- * it yet (Q3 of r17)
- */
-declare function refuseUnwired(items: readonly object[], pagination: ListPagination): void;
-/** Read before anything else, _total included: a list past a gone anchor is no page of it (U26) */
-declare function refuseGoneAnchor(items: readonly object[]): void;
-/**
- * Last mutation of item shape. Query stays fat; the returned object is the
- * public subset. No-op (minus `_total`) when parsedFields is null.
- */
-declare function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: ParsedFields | null): T;
-/**
- * `built` as paginate (or, `merged`, paginateMerged) takes it, or a 500 naming the call: a parsed
- * query in its place is the call before 0.15, and a merged list's pages are paginateMerged's alone
- */
-declare function paginationIn<TMerged extends boolean>(built: {
-    pagination: ListPagination & {
-        merged: TMerged;
-    };
-} | undefined, merged: TMerged): ListPagination & {
-    merged: TMerged;
-};
-/** More rows than the built query reads are rows of another query: one that applied no limit (C2) */
-declare function refuseOverRead(count: number, pagination: ListPagination): void;
-/**
- * The page of `items`, read with `built`, and its pagination: count, whether there is more, and
- * the next cursor, sealed under the builder's options; none for a list no cursor can resume
- */
-declare function paginate<T extends object>(items: readonly T[], built: {
-    pagination: ListPagination & {
-        merged: false;
-    };
-}): readonly [Array<Omit<T, ListExtra>>, PaginationMeta];
-export { applySelect, COMB_ID, type ListExtra, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/filter-parse.d.ts
 /**
@@ -981,31 +1012,6 @@ type RetrieveQueryOutput = {
     parsedFields: ParsedFields | null;
 };
 export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, OutputStableShape, PaginationConfig, RetrieveQueryConfig, RetrieveQueryOutput, };
-
-// query/list-extras.d.ts
-/**
- * The values of the extras a builder selects for paginate, as a SQLite or Postgres driver reads them:
- * a number, a bigint, or a decimal string (libsql's intMode "string", Q2 of r19). An extra rendered
- * by hand as its own alias reads as that string, which no value of it is (Q4 of r18).
- */
-import type { SortField } from "./types.ts";
-/** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
-declare const COMB_ID: "_combId";
-declare const INTEGER_TEXT: RegExp;
-/** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint (Q2 of r19) */
-declare const unencoded: (value: unknown) => unknown;
-/**
- * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
- * kind. An extra rendered by hand as its own alias reads as that string (Q4 of r18).
- */
-declare function malformed(row: object, sort: readonly SortField[]): string | undefined;
-/**
- * `row` with each sort key SQLite stored as an integer, which the driver read as a decimal string, as
- * that integer, so a cursor minted from it compares as one: a string binds as text, which SQLite
- * orders after every integer (Q2 of r19). A text key that looks like a number stays text.
- */
-declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
-export { COMB_ID, INTEGER_TEXT, malformed, typedKeys, unencoded };
 
 // codegen/analyzer-types.d.ts
 import type { CombColumnKind } from "../meta/column.ts";

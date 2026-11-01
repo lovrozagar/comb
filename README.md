@@ -1012,6 +1012,12 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
 
+## Upgrading to 0.18
+
+What changes for a project on 0.17. Before deploying it:
+
+1. **Know what was added.** New exports: `ListRow` and `ListExtra` (`/query`). `paginate` and `paginateMerged` return `Array<ListRow<T>>`, which drops the extras from each member of a union row type on its own, so narrowing on a discriminant reaches each variant's fields again; 0.17's `Omit<T, ListExtra>` kept only the keys every member shares.
+
 ## Upgrading to 0.17
 
 What changes for a project on 0.16. Before deploying it:

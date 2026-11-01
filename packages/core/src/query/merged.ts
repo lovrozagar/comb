@@ -14,8 +14,8 @@ import { roundedKey } from "./rounded-key.ts"
 import {
 	applySelect,
 	COMB_ID,
-	type ListExtra,
 	type ListPagination,
+	type ListRow,
 	type PaginationMeta,
 	paginationIn,
 	refuseGoneAnchor,
@@ -201,7 +201,7 @@ function countOf(rowsPerShard: ReadonlyArray<readonly object[]>, cursor: string 
 function paginateMerged<T extends object>(
 	rowsPerShard: ReadonlyArray<readonly T[]>,
 	built: { pagination: ListPagination & { merged: true } },
-): readonly [Array<Omit<T, ListExtra>>, PaginationMeta] {
+): readonly [Array<ListRow<T>>, PaginationMeta] {
 	const pagination = paginationIn(built, true)
 	for (const shard of rowsPerShard) {
 		refuseOverRead(shard.length, pagination)
@@ -233,7 +233,7 @@ function paginateMerged<T extends object>(
 		page: cursor ? null : (pagination.page ?? 1),
 	}
 	/* the extras are stripped, so the rows are typed without them (Q15 of r18) */
-	return [page.map((row) => applySelect(row, pagination.parsedFields)) as Array<Omit<T, ListExtra>>, meta] as const
+	return [page.map((row) => applySelect(row, pagination.parsedFields)) as unknown as Array<ListRow<T>>, meta] as const
 }
 
 export { paginateMerged }

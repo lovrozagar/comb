@@ -16,6 +16,7 @@ export {
 	sortSignature,
 } from "./cursor.ts"
 export type { CursorOptions, CursorPayload, CursorValue, DecodedCursor, PaginationMeta } from "./cursor.ts"
+export type { ListExtra, ListRow } from "./pagination.ts"
 export { createCursor } from "./cursor-mint.ts"
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts"
 

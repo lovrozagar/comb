@@ -548,6 +548,11 @@ import type * as z from "zod";
  * r17), or the storage class of each sort key (Q2 of r19)
  */
 type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total";
+/**
+ * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
+ * row type on its own, so narrowing on its discriminant still reaches each variant's fields (Q3 of r19)
+ */
+type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never;
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationMeta = z.output<typeof paginationResponseSchema>;
 /** How a built list pages what it fetched */
@@ -632,8 +637,8 @@ declare function paginate<T extends object>(items: readonly T[], built: {
     pagination: ListPagination & {
         merged: false;
     };
-}): readonly [Array<Omit<T, ListExtra>>, PaginationMeta];
-export { applySelect, COMB_ID, type ListExtra, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
+}): readonly [Array<ListRow<T>>, PaginationMeta];
+export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/cursor.d.ts
 import { type CursorOptions } from "./cursor-seal.ts";

@@ -11,6 +11,8 @@ import type { ListQueryInput, ListQuerySchema, RetrieveQuerySchema } from "../..
 import { applyListQuery, buildListQuery, type ListExtras } from "../../src/query/sqlite/build-list-query.ts"
 import { keysetSQL, type KeysetPosition } from "../../src/query/sqlite/index.ts"
 import { queryHelpers } from "../../src/query/drizzle.ts"
+import { paginateMerged } from "../../src/query/merged.ts"
+import type { ListRow } from "../../src/query/index.ts"
 import { getTableColumns } from "drizzle-orm"
 import type { DrizzleD1Database } from "drizzle-orm/d1"
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
@@ -191,3 +193,23 @@ const paged = queryHelpers.paginate(
 	buildListQuery({ ...SEALED, parsed: listSchema.parse({}), table: listed }),
 )
 expectTypeOf(paged[0][0]!).toEqualTypeOf<{ id: number; title: string }>()
+
+/* Q3 of r19: a union row type keeps each variant's own fields through both paginators, so narrowing reaches them */
+type OrgInvite = { _combId: string; created_at: number; organization_name: string; type: "org" }
+type ProjectInvite = {
+	_combId: string
+	collaborator: number
+	created_at: number
+	project_name: string
+	type: "project"
+}
+type Invite = OrgInvite | ProjectInvite
+declare const onePage: ReturnType<typeof queryHelpers.paginate<Invite>>[0]
+declare const mergedPage: ReturnType<typeof paginateMerged<Invite>>[0]
+for (const invite of [...onePage, ...mergedPage]) {
+	if (invite.type === "project") expectTypeOf(invite.collaborator).toEqualTypeOf<number>()
+	else expectTypeOf(invite.organization_name).toEqualTypeOf<string>()
+	/* the extras are gone from every variant */
+	expectTypeOf(invite).not.toHaveProperty("_combId")
+}
+expectTypeOf<ListRow<Invite>>().toEqualTypeOf<Omit<OrgInvite, "_combId"> | Omit<ProjectInvite, "_combId">>()

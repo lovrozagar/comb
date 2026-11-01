@@ -6,7 +6,7 @@ export { shardMap } from "./shard-map.ts";
 export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, } from "./types.ts";
 
 // query/merged.d.ts
-import { type ListExtra, type ListPagination, type PaginationMeta } from "./pagination.ts";
+import { type ListPagination, type ListRow, type PaginationMeta } from "./pagination.ts";
 /**
  * The page of a list merged from `rowsPerShard`, each shard's rows read with `built`,
  * and its pagination, as `paginate` gives one database's: ordered as the list orders, windowed by
@@ -17,7 +17,7 @@ declare function paginateMerged<T extends object>(rowsPerShard: ReadonlyArray<re
     pagination: ListPagination & {
         merged: true;
     };
-}): readonly [Array<Omit<T, ListExtra>>, PaginationMeta];
+}): readonly [Array<ListRow<T>>, PaginationMeta];
 export { paginateMerged };
 
 // query/sqlite/build-list-query-types.d.ts
@@ -328,6 +328,11 @@ import type * as z from "zod";
  * r17), or the storage class of each sort key (Q2 of r19)
  */
 type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total";
+/**
+ * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
+ * row type on its own, so narrowing on its discriminant still reaches each variant's fields (Q3 of r19)
+ */
+type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never;
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationMeta = z.output<typeof paginationResponseSchema>;
 /** How a built list pages what it fetched */
@@ -412,8 +417,8 @@ declare function paginate<T extends object>(items: readonly T[], built: {
     pagination: ListPagination & {
         merged: false;
     };
-}): readonly [Array<Omit<T, ListExtra>>, PaginationMeta];
-export { applySelect, COMB_ID, type ListExtra, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
+}): readonly [Array<ListRow<T>>, PaginationMeta];
+export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/types.d.ts
 /**
