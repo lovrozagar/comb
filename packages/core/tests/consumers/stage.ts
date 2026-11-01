@@ -72,6 +72,15 @@ export function pack(): string {
 
 export type Stage = { dir: string; dispose(): void }
 
+const WORKERS_TYPES = "@cloudflare/workers-types"
+
+/** The lowest version a `>=x <y` range admits */
+export function floorOf(range: string): string {
+	const floor = /^>=(\S+)/.exec(range)?.[1]
+	if (floor === undefined) throw new Error(`${range} names no floor`)
+	return floor
+}
+
 /** A fresh consumer with comb from `tarball`, its required peers, the optional ones when `all`, and the tools */
 export function stage(tarball: string, peers: "all" | "required", files: Record<string, string> = {}): Stage {
 	const dir = mkdtempSync(join(tmpdir(), `comb-consumer-${peers}-`))
@@ -92,6 +101,11 @@ export function stage(tarball: string, peers: "all" | "required", files: Record<
 		writeFileSync(join(dir, path), text)
 	}
 	ok(run(dir, "npm", ["install", "--no-audit", "--no-fund", "--loglevel=error"]), "npm install")
+	/* the floor of comb's workers-types range beside it, alone, for the cell that types against it (R4 of plan 17) */
+	if (wanted.includes(WORKERS_TYPES)) {
+		const floor = `${WORKERS_TYPES}@${floorOf(manifest.peerDependencies[WORKERS_TYPES] as string)}`
+		ok(run(dir, "npm", ["install", "--prefix", "floor", "--no-audit", "--no-fund", "--loglevel=error", floor]), floor)
+	}
 	return { dir, dispose: () => rmSync(dir, { force: true, recursive: true }) }
 }
 

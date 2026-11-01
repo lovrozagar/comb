@@ -102,6 +102,7 @@ describe.each([
 			"tsconfig.nodenext.json",
 			"tsconfig.worker.json",
 			"tsconfig.worker-node.json",
+			"tsconfig.worker-node-floor.json",
 		])("type-checks every subpath under strict flags (%s)", (config) => {
 		const result = run(app.dir, "npx", ["tsc", "-p", config])
 		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])

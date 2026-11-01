@@ -86,6 +86,9 @@ export default defineConfig({
 })
 `
 
+/* where the stage installs the floor of comb's workers-types range, apart from the app's own */
+const FLOOR = "floor/node_modules"
+
 const STRICT = {
 	exactOptionalPropertyTypes: true,
 	noPropertyAccessFromIndexSignature: true,
@@ -176,6 +179,21 @@ export const APP: Record<string, string> = {
 			module: "esnext",
 			moduleResolution: "bundler",
 			noEmit: true,
+		},
+		include: ["src/types.ts"],
+	}),
+	/* the same, at the floor of comb's workers-types range, which the stage installs beside the app (R4 of plan 17) */
+	"tsconfig.worker-node-floor.json": JSON.stringify({
+		compilerOptions: {
+			...STRICT,
+			allowImportingTsExtensions: true,
+			lib: ["esnext"],
+			module: "esnext",
+			moduleResolution: "bundler",
+			noEmit: true,
+			paths: { "@cloudflare/workers-types": [`./${FLOOR}/@cloudflare/workers-types`] },
+			typeRoots: [`./${FLOOR}/@cloudflare`, "./node_modules/@types"],
+			types: ["workers-types", "node"],
 		},
 		include: ["src/types.ts"],
 	}),
