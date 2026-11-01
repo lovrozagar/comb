@@ -66,6 +66,8 @@ export type SchemaDiffOptions = {
     run?: Run | undefined;
     /** Postgres: the dev database and schema Atlas diffs in */
     target?: PgTarget | undefined;
+    /** Postgres: makes the target's dev schema exist before Atlas diffs in it; tests pass a fake */
+    readyDev?: ((target: PgTarget) => Promise<void>) | undefined;
 };
 export type SchemaDiffResult = {
     diff: string | null;
@@ -73,7 +75,11 @@ export type SchemaDiffResult = {
     notices: string[];
     synced: boolean;
 };
-export declare function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult;
+/**
+ * Atlas's diff of two schemas, on the dialect's dev database. On Postgres the target's dev schema is
+ * made ready first and a failure explained as migrate diff explains one (P8 of r18).
+ */
+export declare function generateSchemaDiff(options: SchemaDiffOptions): Promise<SchemaDiffResult>;
 export type DrizzleExportOptions = {
     /** The drizzle config to export, when it is not drizzle-kit's default in cwd */
     configPath?: string | undefined;

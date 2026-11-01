@@ -6,9 +6,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
 import { normalizeSqliteExport, sqliteDevUrl } from "./atlas-env.ts"
+import { explainAtlasFailure } from "./atlas-failure.ts"
 import { atlasNotices, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import { type Run, run } from "./process.ts"
 import { codeOf, IDENT, QNAME, unquote } from "./sql-code.ts"
+import { readyDevSchema } from "./pg-dev-schema.ts"
 import { atlasFile, pgStatements } from "./pg-split.ts"
 
 export { applySqliteMigrationTransforms } from "./atlas-env.ts"
@@ -40,6 +42,8 @@ export type SchemaDiffOptions = {
 	run?: Run | undefined
 	/** Postgres: the dev database and schema Atlas diffs in */
 	target?: PgTarget | undefined
+	/** Postgres: makes the target's dev schema exist before Atlas diffs in it; tests pass a fake */
+	readyDev?: ((target: PgTarget) => Promise<void>) | undefined
 }
 
 export type SchemaDiffResult = {
@@ -49,10 +53,15 @@ export type SchemaDiffResult = {
 	synced: boolean
 }
 
-export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult {
+/**
+ * Atlas's diff of two schemas, on the dialect's dev database. On Postgres the target's dev schema is
+ * made ready first and a failure explained as migrate diff explains one (P8 of r18).
+ */
+export async function generateSchemaDiff(options: SchemaDiffOptions): Promise<SchemaDiffResult> {
 	const { dialect, fromSchema, toSchema, run: exec = run, target } = options
 	if (dialect === "postgres" && target === undefined)
 		throw new Error("a Postgres diff needs a target (devUrl and schema)")
+	if (dialect === "postgres") await (options.readyDev ?? readyDevSchema)(target as PgTarget)
 
 	const tmpDir = mkdtempSync(join(tmpdir(), "comb-schema-diff-"))
 
@@ -69,7 +78,7 @@ export function generateSchemaDiff(options: SchemaDiffOptions): SchemaDiffResult
 				? exec("atlas", [...args, "--dev-url", sqliteDevUrl()])
 				: withAtlasEnv(target, { dev: true }, (env) => {
 						const ran = exec("atlas", [...args, ...env.args], { env: env.env })
-						return { ...ran, stderr: env.scrub(ran.stderr) }
+						return { ...ran, stderr: explainAtlasFailure(ran.stderr, env.scrub, { devOnly: true }) }
 					})
 
 		if (result.code !== 0) throw new Error(`Atlas diff failed: ${result.stderr}`)

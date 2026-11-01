@@ -11,6 +11,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas, baselineWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
+import { generateSchemaDiff } from "../../../src/migrate/core/atlas.ts"
 import { generateIncrementalMigration } from "../../../src/migrate/core/migrate-diff.ts"
 import type { LiveRead } from "../../../src/migrate/core/pg-live-types.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
@@ -112,5 +113,21 @@ describe("migrate on Postgres: schema app on an empty dev database (P12)", () =>
 				})
 			})
 		}, 60_000)
+	})
+})
+
+/* r18 P8: the exported diff on a schema other than public, on a fresh dev database, as migrate diff readies one */
+describe("generateSchemaDiff on a Postgres schema the dev database lacks", () => {
+	it("makes the dev schema, then diffs in it", async () => {
+		await withScratchDb(async (devUrl) => {
+			const target = { devUrl, lockTimeout: "5s", schema: "app", url: "" }
+			const result = await generateSchemaDiff({
+				dialect: "postgres",
+				fromSchema: "",
+				target,
+				toSchema: 'CREATE TABLE "t" ("id" integer);',
+			})
+			expect([result.synced, result.diff]).toEqual([false, expect.stringContaining('CREATE TABLE "t"')])
+		})
 	})
 })

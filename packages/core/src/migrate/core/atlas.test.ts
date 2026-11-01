@@ -28,7 +28,6 @@ const fileArg = (args: readonly string[], flag: string) => {
 
 const diffWith = (result: RunResult) =>
 	generateSchemaDiff({ dialect: "sqlite", fromSchema: "", run: fakeRun(result), toSchema: "" })
-
 describe("atlas availability", () => {
 	it("checkAtlasInstalled is true when `atlas version` exits 0", () => {
 		const run = fakeRun(ok("atlas version v1.3.0"))
@@ -51,13 +50,13 @@ describe("atlas availability", () => {
 })
 
 describe("generateSchemaDiff", () => {
-	it("diffs the two schemas through files against the dialect's dev database", () => {
+	it("diffs the two schemas through files against the dialect's dev database", async () => {
 		const seen: string[] = []
 		const run = fakeRun((call) => {
 			seen.push(readFileSync(fileArg(call.args, "--from"), "utf8"), readFileSync(fileArg(call.args, "--to"), "utf8"))
 			return ok("ALTER TABLE `a` ADD COLUMN `b` text;\n")
 		})
-		const result = generateSchemaDiff({ dialect: "sqlite", fromSchema: "FROM", run, toSchema: "TO" })
+		const result = await generateSchemaDiff({ dialect: "sqlite", fromSchema: "FROM", run, toSchema: "TO" })
 		expect(result).toEqual({ diff: "ALTER TABLE `a` ADD COLUMN `b` text;", notices: [], synced: false })
 		expect(seen).toEqual(["FROM", "TO"])
 		const [call] = run.calls
@@ -67,36 +66,62 @@ describe("generateSchemaDiff", () => {
 		expect(existsSync(fileArg(call?.args ?? [], "--from"))).toBe(false)
 	})
 
-	it("diffs Postgres in the target's scoped dev database, passed in the environment", () => {
-		const run = fakeRun(ok("Schemas are synced, no changes to be made."))
-		const target = { devUrl: "postgres://localhost/dev", lockTimeout: "5s", schema: "app", url: "" }
-		generateSchemaDiff({ dialect: "postgres", fromSchema: "", run, target, toSchema: "" })
-		expect(run.calls[0]?.args).toContain("--config")
-		expect(run.calls[0]?.options?.env).toEqual({ COMB_ATLAS_DEV_URL: "postgres://localhost/dev?search_path=app" })
-		expect(() => generateSchemaDiff({ dialect: "postgres", fromSchema: "", run, toSchema: "" })).toThrow(
-			"a Postgres diff needs a target (devUrl and schema)",
-		)
-	})
-
-	it("reports synced schemas", () => {
+	it("reports synced schemas", async () => {
 		const synced = { diff: null, notices: [], synced: true }
-		expect(diffWith(ok("Schemas are synced, no changes to be made.\n"))).toEqual(synced)
+		expect(await diffWith(ok("Schemas are synced, no changes to be made.\n"))).toEqual(synced)
 	})
 
 	/* plan 14's 5.4: Atlas OSS may say on stderr, as it succeeds, that it left part of a schema out */
-	it("returns what Atlas said as it succeeded, a line each", () => {
+	it("returns what Atlas said as it succeeded, a line each", async () => {
 		const said = {
 			code: 0,
 			stderr: "Skipped triggers.\n\n  Atlas Pro includes them.\n",
 			stdout: "Schemas are synced, no changes to be made.\n",
 		}
-		expect(diffWith(said).notices).toEqual(["Skipped triggers.", "Atlas Pro includes them."])
+		expect((await diffWith(said)).notices).toEqual(["Skipped triggers.", "Atlas Pro includes them."])
 	})
 
-	it("throws atlas's stderr when the diff fails", () => {
+	it("throws atlas's stderr when the diff fails", async () => {
 		const run = fakeRun(fail('Error: near "CREATE": syntax error'))
-		expect(() => generateSchemaDiff({ dialect: "sqlite", fromSchema: "", run, toSchema: "x" })).toThrow(
+		await expect(generateSchemaDiff({ dialect: "sqlite", fromSchema: "", run, toSchema: "x" })).rejects.toThrow(
 			'Atlas diff failed: Error: near "CREATE": syntax error',
+		)
+	})
+})
+
+/* r18 P8: the exported diff readies the dev schema first, as migrate diff does, and explains a failure */
+describe("generateSchemaDiff on Postgres", () => {
+	it("diffs Postgres in the target's scoped dev database, made ready first, passed in the environment", async () => {
+		const run = fakeRun(ok("Schemas are synced, no changes to be made."))
+		const target = { devUrl: "postgres://localhost/dev", lockTimeout: "5s", schema: "app", url: "" }
+		const readied: unknown[] = []
+		const readyDev = async (each: unknown) => void readied.push(each)
+		await generateSchemaDiff({ dialect: "postgres", fromSchema: "", readyDev, run, target, toSchema: "" })
+		expect(readied).toEqual([target])
+		expect(run.calls[0]?.args).toContain("--config")
+		expect(run.calls[0]?.options?.env).toEqual({ COMB_ATLAS_DEV_URL: "postgres://localhost/dev?search_path=app" })
+		await expect(generateSchemaDiff({ dialect: "postgres", fromSchema: "", run, toSchema: "" })).rejects.toThrow(
+			"a Postgres diff needs a target (devUrl and schema)",
+		)
+	})
+
+	it("explains a Postgres dev database that is not empty, as migrate diff does", async () => {
+		const run = fakeRun(
+			fail(
+				'Error: sql/sqlimport: taking database snapshot: connected database is not clean: found table "leftover" in connected schema',
+			),
+		)
+		const target = { devUrl: "postgres://localhost/dev", lockTimeout: "5s", schema: "app", url: "" }
+		const diffed = generateSchemaDiff({
+			dialect: "postgres",
+			fromSchema: "",
+			readyDev: async () => undefined,
+			run,
+			target,
+			toSchema: "",
+		})
+		await expect(diffed).rejects.toThrow(
+			/^Atlas diff failed: devUrl must be an empty database, and it holds table "leftover"/,
 		)
 	})
 })
