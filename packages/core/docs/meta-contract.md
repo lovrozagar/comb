@@ -128,7 +128,10 @@ Two call sites inside comb produce it automatically:
 | Producer                                               | Stamps                                  | Source of truth               |
 | ------------------------------------------------------ | --------------------------------------- | ----------------------------- |
 | `generateDtos` (`codegen/generators/dtos/generate.ts`) | `CombEntityMeta` on the **read** schema | `TableMeta` from the analyzer |
-| `createListQuerySchema` (`query/schema.ts`)            | `CombQueryMeta` on the returned schema  | its own `config` argument     |
+| `createListQuerySchema` (`query/list-schema.ts`)       | `CombQueryMeta` on the returned schema  | its own `config` argument     |
+
+`createListQuerySchema` builds its stamp with `listQueryStamp` (`query/list-meta.ts`); `query/schema.ts`
+only re-exports it.
 
 ### 3.1 Stamp the schema you return, not the one you build from
 
@@ -244,53 +247,6 @@ resolver, so a schema that promises search cannot silently answer with the unfil
 `null` stays valid on the wire for producers that genuinely cannot know; comb's own schema
 builder no longer emits it.
 
-### 6.9 A written text's transforms are published, and the bounds bind their result
-
-zod publishes no overwrite: `.trim()` and `.toLowerCase()` leave no trace in `z.toJSONSchema`, so
-a client reading the spec could not learn that `"  Ann@Example.COM "` is stored as
-`"ann@example.com"`, and a validator built from it disagreed with the server both ways. It
-accepted `"   "` for a trimmed required text, which the server refuses, and refused `"ABC"`
-under a lowercase field's `^[a-z]+$`, which the server stores as `"abc"`. comb publishes the list
-as `x-comb-transform` (§2.1), written from the one list the generated zod chain is written
-from, so the two cannot drift. A field's published `minLength`, `maxLength`, `pattern` and
-`format` bind the transformed value: a consumer applies the listed transforms, in order, before
-it checks, generates or compares a value. honey and oat do (their half of C2 of r18).
-
-### 6.7 Query facts added within v1
-
-`filterFields` (`{ field, type, ops }[]`), `nulls`, `maxFilterConditions`, `maxFilterDepth`,
-`maxFilterValues` (bound values in all), `maxInValues`, `maxPatternBytes` (UTF-8 bytes of a `like` or `ilike` value's escaped pattern, when it has a `*` inside it: a `[` in a `like` counts as the three bytes of `[[]`, never the raw value's characters), `maxPage` (the last page offset pagination
-serves), `maxSearchTerms`, `maxSortKeys`, the byte caps `maxFilterBytes` and `maxSearchBytes` (what `filter`
-and `q` may take however a client encodes them, a space or a mark such as `~` counted as 3), and
-`maxQueryBytes` (the whole accepted query string, 16 KB less a 2 KB path budget) were added after v1 shipped. They are optional in the type and
-validated when present, so a v1 reader built before them ignores them — which is why adding them
-did not bump `v`. Each value is computed from the config that parses the request, and
-`tests/integration/meta/query-parity.test.ts` drives the parser to prove it.
-
-### 6.8 Partial unique indexes are published apart
-
-A partial unique index (`uniqueIndex().on(...).where(...)`) makes its columns unique only among
-the rows its predicate matches, so it is no uniqueness of the column. comb published none before
-0.15; it publishes them now as `partialUniqueIndexes: [{ columns, name, where }]`, beside
-`uniqueIndexes` and never inside it. A reader built before 0.15 ignores a key it does not know: a
-`where` added to an entry of `uniqueIndexes` would be dropped, and that reader would claim a global
-uniqueness the index does not hold, the very harm leaving partial indexes out avoided. A field of
-its own is skipped whole by such a reader, so it claims nothing. `where` is the predicate as the
-index's SQL holds it: SQL over the columns' SQL names, each quoted, while `columns` lists property
-names, as every other list of the stamp does. comb publishes no property-name form of the
-predicate; a reader that needs one maps the SQL names through the manifest's columns. An index over a private column, or whose predicate names one, is left out,
-so a private name never reaches the document. The field was added within v1: a payload without it
-reads as `[]`, and one whose entry lacks `where` is malformed.
-
-### 6.6 `select=` is advertised only when it can be honored
-
-The query stays fat (sort keys, id, `_total`, join keys). The response gets thin.
-`createListQuerySchema({ fields })` is what puts `select` on the wire and `selectable` on
-`x-comb`. Without `fields`, both are absent — so a contract tester cannot report "accepted but
-ignored". `queryHelpers.paginate` / `queryHelpers.project` is what honors `parsedFields`, as the last
-mutation of item shape. Do not apply `select=` in the HTTP framework: the output schema is the
-full entity, and a runtime subset would fail a consumer that validates the body as that schema.
-
 ### 6.2 Foreign keys are immutable, and nearly went unpublished
 
 The first draft derived `immutable` from `nomutate` alone, as the brief described. The parity test
@@ -391,6 +347,53 @@ artifact is for tools that operate on the model, not for a black-box tester.
 
 At most one machine per table. A second declaring column is warned and dropped.
 See `docs/state-machines.md`.
+
+### 6.6 `select=` is advertised only when it can be honored
+
+The query stays fat (sort keys, id, `_total`, join keys). The response gets thin.
+`createListQuerySchema({ fields })` is what puts `select` on the wire and `selectable` on
+`x-comb`. Without `fields`, both are absent — so a contract tester cannot report "accepted but
+ignored". `queryHelpers.paginate` / `queryHelpers.project` is what honors `parsedFields`, as the last
+mutation of item shape. Do not apply `select=` in the HTTP framework: the output schema is the
+full entity, and a runtime subset would fail a consumer that validates the body as that schema.
+
+### 6.7 Query facts added within v1
+
+`filterFields` (`{ field, type, ops }[]`), `nulls`, `maxFilterConditions`, `maxFilterDepth`,
+`maxFilterValues` (bound values in all), `maxInValues`, `maxPatternBytes` (UTF-8 bytes of a `like` or `ilike` value's escaped pattern, when it has a `*` inside it: a `[` in a `like` counts as the three bytes of `[[]`, never the raw value's characters), `maxPage` (the last page offset pagination
+serves), `maxSearchTerms`, `maxSortKeys`, the byte caps `maxFilterBytes` and `maxSearchBytes` (what `filter`
+and `q` may take however a client encodes them, a space or a mark such as `~` counted as 3), and
+`maxQueryBytes` (the whole accepted query string, 16 KB less a 2 KB path budget) were added after v1 shipped. They are optional in the type and
+validated when present, so a v1 reader built before them ignores them — which is why adding them
+did not bump `v`. Each value is computed from the config that parses the request, and
+`tests/integration/meta/query-parity.test.ts` drives the parser to prove it.
+
+### 6.8 Partial unique indexes are published apart
+
+A partial unique index (`uniqueIndex().on(...).where(...)`) makes its columns unique only among
+the rows its predicate matches, so it is no uniqueness of the column. comb published none before
+0.15; it publishes them now as `partialUniqueIndexes: [{ columns, name, where }]`, beside
+`uniqueIndexes` and never inside it. A reader built before 0.15 ignores a key it does not know: a
+`where` added to an entry of `uniqueIndexes` would be dropped, and that reader would claim a global
+uniqueness the index does not hold, the very harm leaving partial indexes out avoided. A field of
+its own is skipped whole by such a reader, so it claims nothing. `where` is the predicate as the
+index's SQL holds it: SQL over the columns' SQL names, each quoted, while `columns` lists property
+names, as every other list of the stamp does. comb publishes no property-name form of the
+predicate; a reader that needs one maps the SQL names through the manifest's columns. An index over a private column, or whose predicate names one, is left out,
+so a private name never reaches the document. The field was added within v1: a payload without it
+reads as `[]`, and one whose entry lacks `where` is malformed.
+
+### 6.9 A written text's transforms are published, and the bounds bind their result
+
+zod publishes no overwrite: `.trim()` and `.toLowerCase()` leave no trace in `z.toJSONSchema`, so
+a client reading the spec could not learn that `"  Ann@Example.COM "` is stored as
+`"ann@example.com"`, and a validator built from it disagreed with the server both ways. It
+accepted `"   "` for a trimmed required text, which the server refuses, and refused `"ABC"`
+under a lowercase field's `^[a-z]+$`, which the server stores as `"abc"`. comb publishes the list
+as `x-comb-transform` (§2.1), written from the one list the generated zod chain is written
+from, so the two cannot drift. A field's published `minLength`, `maxLength`, `pattern` and
+`format` bind the transformed value: a consumer applies the listed transforms, in order, before
+it checks, generates or compares a value. honey and oat do (their half of C2 of r18).
 
 ## 7. `stableTiebreak`, and a bug it surfaced
 
@@ -563,7 +566,8 @@ learn the shape of the database.
 
 `comb codegen -g manifest` writes `db.<name>.manifest.gen.json` alongside the generated entities.
 Per entity it carries the identity, id prefix, `softDelete`, `tenantColumn`, relations with their
-referential actions, unique indexes and check constraints. A composite foreign key is one relation
+referential actions, unique indexes, partial unique indexes (`partialUniqueIndexes`, each with its
+`where`) and check constraints. A composite foreign key is one relation
 per column, each carrying the whole key as `key: { columns, refColumns }`, paired by position, so
 a reader joins on every column together rather than on independent pairs. Per column it carries the helper that
 declared it, its declared bounds and enum values, and `generated`, `immutable` and `private`
@@ -573,7 +577,8 @@ flagged rather than omitted.
 
 It is a **projection**, not a second derivation. `identity`, `softDelete`, `tenantColumn` and the
 per-column `generated` and `immutable` flags come from `deriveEntityMeta`, the function the schema
-stamp uses, and `uniqueIndexes` from `publishedUniqueIndexes`, the filter it applies, so the manifest cannot claim a fact the document contradicts —
+stamp uses, `uniqueIndexes` from `publishedUniqueIndexes` and `partialUniqueIndexes` from
+`publishedPartialUniqueIndexes`, the filters it applies, so the manifest cannot claim a fact the document contradicts —
 the rule §6.2 was written to enforce, applied to a second output. Because the stamp publishes
 nothing about a private column, a private column's `generated` and `immutable` flags are `false`,
 and a unique index over one is left out of both. The manifest has no generator output to hand, so
