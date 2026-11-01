@@ -148,3 +148,58 @@ describe("an added column's default of built-ins Postgres 17 declares steady", (
 		expect(rated(sql)).toEqual([REWRITE])
 	})
 })
+
+/*
+ * P3 and P10 of r19: a domain's constraints and its default, followed through its chain, ALTER DOMAIN,
+ * RENAME, SET SCHEMA and DROP, as Postgres 17 adds a column of it to a table with a row (probed by
+ * .tmp/grunt/p18/runs/c457d3b-probe-p3-20261101T165229Z.log): a NOT NULL with nothing to fill it fails,
+ * and any constraint, or a volatile default, rewrites the table
+ */
+describe("an added column of a domain, after the history that shaped the domain (P3, P10 of r19)", () => {
+	const T = "CREATE TABLE t (id int PRIMARY KEY);"
+	/* a NOT NULL is a constraint Postgres checks each row against, as a CHECK is: the rewrite warning stands beside it */
+	const FAILS = ["unsafe", true] as const
+	const REWRITTEN = ["safe", true] as const
+	const NEITHER = ["safe", false] as const
+	it.each([
+		["CREATE DOMAIN d AS int NOT NULL;", "d", FAILS],
+		["CREATE DOMAIN d AS int; ALTER DOMAIN d SET NOT NULL;", "d", FAILS],
+		["CREATE DOMAIN d0 AS int NOT NULL; CREATE DOMAIN d AS d0;", "d", FAILS],
+		["CREATE DOMAIN d0 AS int; CREATE DOMAIN d AS d0; ALTER DOMAIN d0 SET NOT NULL;", "d", FAILS],
+		["CREATE DOMAIN d AS int CHECK (VALUE > 0);", "d", REWRITTEN],
+		["CREATE DOMAIN d AS int; ALTER DOMAIN d ADD CHECK (VALUE > 0);", "d", REWRITTEN],
+		["CREATE DOMAIN d0 AS int CHECK (VALUE > 0); CREATE DOMAIN d AS d0;", "d", REWRITTEN],
+		["CREATE DOMAIN d AS int NOT NULL DEFAULT 0;", "d", REWRITTEN],
+		["CREATE DOMAIN d AS int DEFAULT 0;", "d", NEITHER],
+		["CREATE DOMAIN d AS int CONSTRAINT nn NOT NULL; ALTER DOMAIN d DROP CONSTRAINT nn;", "d", NEITHER],
+		["CREATE DOMAIN d AS int; ALTER DOMAIN d SET NOT NULL; ALTER DOMAIN d DROP NOT NULL;", "d", NEITHER],
+		["CREATE DOMAIN d AS int CHECK (VALUE > 0); ALTER DOMAIN d DROP CONSTRAINT d_check;", "d", NEITHER],
+		[
+			"CREATE DOMAIN d AS int CHECK (VALUE > 0); ALTER DOMAIN d RENAME CONSTRAINT d_check TO c; ALTER DOMAIN d DROP CONSTRAINT c;",
+			"d",
+			NEITHER,
+		],
+		[
+			"CREATE DOMAIN d AS int CHECK (VALUE > 0) CHECK (VALUE < 9); ALTER DOMAIN d DROP CONSTRAINT d_check;",
+			"d",
+			REWRITTEN,
+		],
+		["CREATE DOMAIN d AS int NOT NULL; ALTER DOMAIN d DROP CONSTRAINT d_not_null;", "d", NEITHER],
+		["CREATE DOMAIN dv AS float8 DEFAULT random(); ALTER DOMAIN dv RENAME TO d;", "d", REWRITTEN],
+		["CREATE SCHEMA s; CREATE DOMAIN d AS float8 DEFAULT random(); ALTER DOMAIN d SET SCHEMA s;", "s.d", REWRITTEN],
+		["CREATE DOMAIN d AS float8 DEFAULT random(); DROP DOMAIN d; CREATE DOMAIN d AS float8;", "d", NEITHER],
+		["CREATE DOMAIN d AS float8 DEFAULT random(); DROP TYPE d; CREATE DOMAIN d AS float8;", "d", NEITHER],
+		["CREATE DOMAIN d AS int NOT NULL; ALTER DOMAIN d RENAME TO e; CREATE DOMAIN d AS int;", "d", NEITHER],
+		["CREATE DOMAIN d AS int NOT NULL; ALTER DOMAIN d RENAME TO e;", "e", FAILS],
+	] as const)("after %j, rates adding a column of %s as Postgres runs it", (history, type, [safety, rewrites]) => {
+		const later = `ALTER TABLE t ADD COLUMN x ${type};`
+		const rating = classifyMigration(later, {
+			before: extractSchema(`${T}${history}`, undefined, "postgres"),
+			dialect: "postgres",
+		})
+		expect([rating.safety, rating.lockWarnings.some((warning) => warning.includes(REWRITES))]).toEqual([
+			safety,
+			rewrites,
+		])
+	})
+})

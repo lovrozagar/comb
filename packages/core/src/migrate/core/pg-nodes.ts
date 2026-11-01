@@ -10,6 +10,17 @@ type Node = Record<string, unknown>
 /** An event trigger the history made: the event it runs on, its `WHEN TAG IN` list, and whether it is enabled (M73) */
 type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefined }
 
+/**
+ * A domain the history leaves (P3, P10 of r19): the domain it is over, if any; its default, its own
+ * or, as CREATE DOMAIN copies it, its base's; and its constraints by the name Postgres gives them, a
+ * CHECK with the function it calls. A base's constraints apply to it too, read through `base`.
+ */
+type Domain = {
+	base: string | undefined
+	constraints: Map<string, { kind: "check" | "notnull"; runs: string | undefined }>
+	fill: unknown
+}
+
 /** The functions and procedures a history leaves: each key's kind and its signatures, the input argument types */
 /**
  * What a view's or materialized view's query reads: the relations and functions it names, by key,
@@ -24,7 +35,6 @@ const emptyFacts = (schema: string): Facts => ({
 	columnTypes: new Map(),
 	defined: new Set(),
 	defaultPartitions: new Map(),
-	domainDefaults: new Map(),
 	domains: new Map(),
 	eventTriggers: new Map(),
 	operators: new Map(),
@@ -77,10 +87,8 @@ type Facts = {
 	defined: Set<string>
 	/** the functions and procedures the history leaves, by key, with their signatures (pg-routines.ts) */
 	routines: Routines
-	/** each domain whose CHECK calls a function, with the function */
-	domains: Map<string, string>
-	/** each domain with a default, its own or its base domain's, with the default's expression (P2 of r18) */
-	domainDefaults: Map<string, unknown>
+	/** each domain, with its base, its default and its constraints (P2 of r18, P3 and P10 of r19) */
+	domains: Map<string, Domain>
 	/** each operator a migration defined, with its function */
 	operators: Map<string, string>
 	/** each partitioned table's DEFAULT partition, which a new partition's bound is checked against (P12 of r18) */
@@ -182,6 +190,7 @@ function columnTypeOf(def: Node, schema: string): ColumnType {
 export {
 	columnTypeOf,
 	type ColumnType,
+	type Domain,
 	emptyFacts,
 	type EventTrigger,
 	type Facts,

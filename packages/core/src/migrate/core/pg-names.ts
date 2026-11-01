@@ -5,6 +5,7 @@
  */
 import type { TriggerEvent } from "../types.ts"
 import { moveReads } from "./pg-cascade.ts"
+import { moveDomains } from "./pg-domains.ts"
 import { type Facts, keyOf, names, type Node, tableOf } from "./pg-nodes.ts"
 
 // lookup-table: the bits of a trigger's events, as pg_trigger numbers them
@@ -55,7 +56,6 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.casts,
 		facts.code,
 		facts.columnTypes,
-		facts.domainDefaults,
 		facts.domains,
 		facts.operators,
 		facts.parents,
@@ -75,7 +75,8 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 	for (const parents of facts.parents.values()) for (const each of parents) each.parent = move(each.parent)
 	for (const view of facts.views.values()) if (view.base !== undefined) view.base = move(view.base)
 	for (const cast of facts.casts.values()) cast.fn = move(cast.fn)
-	for (const map of [facts.domains, facts.operators]) for (const [key, fn] of map) map.set(key, move(fn))
+	for (const [key, fn] of facts.operators) facts.operators.set(key, move(fn))
+	moveDomains(facts, move)
 	for (const key of Array.from(facts.defined)) facts.defined.add(move(key))
 	moveDefaults(facts, move)
 	moveReads(facts, move)

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { domainOf } from "./pg-domains.ts"
 import { historyFacts } from "./pg-history.ts"
 import { extractSchema } from "./schema.ts"
 
@@ -87,9 +88,9 @@ describe("a Postgres history's names under a renamed schema", () => {
 		expect([...read.parents.keys()]).toEqual(["app2.c"])
 		expect(read.defined).toEqual(new Set(["app.g", "app2.g"]))
 		const code = facts(
-			"CREATE SCHEMA app;\nCREATE FUNCTION app.f(int) RETURNS boolean LANGUAGE sql AS 'SELECT true';\nCREATE DOMAIN app.d AS int CHECK (app.f(VALUE));\nCREATE OPERATOR app.=== (LEFTARG = int, RIGHTARG = int, FUNCTION = app.f2);\nCREATE TYPE app.t AS (x int);\nCREATE CAST (app.t AS int) WITH FUNCTION app.tf(app.t) AS IMPLICIT;\nALTER SCHEMA app RENAME TO app2;",
+			"CREATE SCHEMA app;\nCREATE FUNCTION app.f(int) RETURNS boolean LANGUAGE sql AS 'SELECT true';\nCREATE DOMAIN app.d AS int CHECK (app.f(VALUE));\nCREATE DOMAIN app.e AS app.d CHECK (VALUE > 0);\nCREATE OPERATOR app.=== (LEFTARG = int, RIGHTARG = int, FUNCTION = app.f2);\nCREATE TYPE app.t AS (x int);\nCREATE CAST (app.t AS int) WITH FUNCTION app.tf(app.t) AS IMPLICIT;\nALTER SCHEMA app RENAME TO app2;",
 		)
-		expect(code.domains).toEqual(new Map([["app2.d", "app2.f"]]))
+		expect([[...code.domains.keys()], domainOf("app2.e", code)?.runs]).toEqual([["app2.d", "app2.e"], "app2.f"])
 		expect(code.operators).toEqual(new Map([["app2.===", "app2.f2"]]))
 		expect(code.casts).toEqual(new Map([["int4", { automatic: true, fn: "app2.tf" }]]))
 	})

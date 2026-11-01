@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { classifyMigration } from "./classify.ts"
+import { domainOf } from "./pg-domains.ts"
 import { historyFacts } from "./pg-history.ts"
 import { extractSchema } from "./schema.ts"
 
 const facts = (sql: string) => historyFacts(extractSchema(sql, undefined, "postgres"), "public")
+/** The function the CHECK of the domain `d` that `sql` makes calls */
+const runs = (sql: string) => domainOf("d", facts(sql))?.runs
 
 /* T5 and T6 of the 2.3 review: what the history attached to its tables, read from its parse trees */
 describe("what a Postgres history attached to its tables", () => {
@@ -84,10 +87,10 @@ describe("what a Postgres history's parents, casts, operators and domains are", 
 		).toEqual(new Map([["t", "f"]]))
 	})
 
-	it("reads a domain only when its CHECK calls a function", () => {
-		expect(facts("CREATE DOMAIN plain AS int;").domains).toEqual(new Map())
-		expect(facts("CREATE DOMAIN pos AS int CHECK (VALUE > 0);").domains).toEqual(new Map())
-		expect(facts("CREATE DOMAIN pos AS int CHECK (VALUE > f());").domains).toEqual(new Map([["pos", "f"]]))
+	it("reads a domain's CHECK as code only when it calls a function", () => {
+		expect(runs("CREATE DOMAIN d AS int;")).toBeUndefined()
+		expect(runs("CREATE DOMAIN d AS int CHECK (VALUE > 0);")).toBeUndefined()
+		expect(runs("CREATE DOMAIN d AS int CHECK (VALUE > f());")).toBe("f")
 	})
 })
 

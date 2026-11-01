@@ -13,7 +13,7 @@
 import type { ExtractedSchema } from "../types.ts"
 import { followEventTrigger } from "./pg-events.ts"
 import { followCascade, followReads } from "./pg-cascade.ts"
-import { callIn, followDomain } from "./pg-domains.ts"
+import { callIn, domainOf, followDomain, followDomainName } from "./pg-domains.ts"
 import { followNames } from "./pg-names.ts"
 import { followRoutine } from "./pg-routines.ts"
 import {
@@ -33,7 +33,7 @@ import { historyTrees } from "./pg-split.ts"
 
 /** What a value of `type` runs on its way into a column: its domain's CHECK, or an implicit or assignment cast */
 const typeCode = (type: string, facts: Facts): string | undefined =>
-	facts.domains.get(type) ?? (facts.casts.get(type)?.automatic === true ? facts.casts.get(type)?.fn : undefined)
+	domainOf(type, facts)?.runs ?? (facts.casts.get(type)?.automatic === true ? facts.casts.get(type)?.fn : undefined)
 
 /** A column's definition, and what a write to it runs when its own constraints say */
 type Typed = { def: Node; runs?: string | undefined }
@@ -225,6 +225,7 @@ function followTree(stmts: unknown, facts: Facts): void {
 	for (const [type, node] of nodesOf(stmts)) {
 		followCascade(type, node, facts)
 		followReads(type, node, facts)
+		followDomainName(type, node, facts)
 		followRoutine(type, node, facts)
 		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"]), facts.schema))
 		else if (followEventTrigger(type, node, facts) || followNames(type, node, facts)) continue

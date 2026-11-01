@@ -10,7 +10,6 @@ const FACTS: Facts = {
 	defined: new Set(),
 	eventTriggers: new Map(),
 	defaultPartitions: new Map(),
-	domainDefaults: new Map(),
 	domains: new Map(),
 	operators: new Map([["===", "eq3"]]),
 	routines: new Map(),

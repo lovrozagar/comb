@@ -9,6 +9,7 @@
  * own declarations, a built-in by Postgres 17's (pg-steady-builtins.ts, read from pg_proc; P15 of r18).
  */
 import type { Finding } from "./classify-alter.ts"
+import { domainOf } from "./pg-domains.ts"
 import { STEADY_BUILTINS } from "./pg-steady-builtins.ts"
 import { type Facts, functionBehind, keyOf, names, type Node, nodesOf, typeOf } from "./pg-nodes.ts"
 
@@ -54,32 +55,48 @@ const callsIn = (expr: unknown, facts: Facts): string[][] =>
 		return behind === undefined ? [] : [behind.fn.split(".")]
 	})
 
-/** The default expressions an added column takes: its own, or with none, its domain's (P2 of r18) */
-function defaultsOf(column: Node, constraints: readonly Node[], facts: Facts): unknown[] {
+/** The default expressions an added column takes: its own, or with none, its domain's `fill` (P2 of r18) */
+function defaultsOf(constraints: readonly Node[], fill: unknown): unknown[] {
 	const own = constraints.filter((each) => each["contype"] === "CONSTR_DEFAULT").map((each) => each["raw_expr"])
-	const domain = facts.domainDefaults.get(typeOf(column["typeName"], facts.schema))
-	return own.length > 0 || domain === undefined ? own : [domain]
+	return own.length > 0 || fill === undefined ? own : [fill]
 }
 
 /**
- * An added column's findings, from the AT_AddColumn command `cmd`, the functions its default calls
- * read in `facts`; with no default of its own, a column of a domain takes the domain's (P2 of r18)
+ * What fills an added column's rows, from its inline `constraints` and its type, read in `facts`:
+ * its domain, if it has one; whether each row gets a value of its own (a sequence, an identity, a
+ * volatile default); whether every row gets one; and whether its default calls code Postgres runs
+ * per row, which rewrites the table. With no default of its own, a column of a domain takes the
+ * domain's (P2 of r18).
  */
-function addColumn(cmd: Node, _table: string, { facts }: { facts: Facts }): Finding[] {
-	const column = (cmd["def"] as Node)["ColumnDef"] as Node
-	const constraints = inlineConstraints(cmd)
+function fillOf(column: Node, constraints: readonly Node[], facts: Facts) {
 	const has = (type: string) => constraints.some((each) => each["contype"] === type)
-	const defaults = defaultsOf(column, constraints, facts)
+	const domain = domainOf(typeOf(column["typeName"], facts.schema), facts)
+	const defaults = defaultsOf(constraints, domain?.fill)
 	const calls = callsIn(defaults, facts)
 	const volatile = calls.some((parts) => DISTINCT.has(parts.at(-1) as string))
-	const rewrites = calls.some((parts) => !steady(parts, facts))
 	const serial = SERIALS.has(names((column["typeName"] as Node)["names"]).at(-1) as string)
-	/* a sequence, an identity or a volatile default gives each row a value of its own */
 	const distinct = serial || volatile || has("CONSTR_IDENTITY")
-	const filled = distinct || defaults.length > 0 || has("CONSTR_GENERATED")
-	const scans = has("CONSTR_CHECK") || has("CONSTR_FOREIGN")
+	return {
+		distinct,
+		domain,
+		filled: distinct || defaults.length > 0 || has("CONSTR_GENERATED"),
+		rewrites: calls.some((parts) => !steady(parts, facts)),
+	}
+}
+
+/**
+ * An added column's findings, from the AT_AddColumn command `cmd`. A domain's NOT NULL is the
+ * column's, and with any constraint of the domain's Postgres checks each row, which rewrites the
+ * table, default or none (P3 of r19).
+ */
+function addColumn(cmd: Node, _table: string, { facts }: { facts: Facts }): Finding[] {
+	const constraints = inlineConstraints(cmd)
+	const has = (type: string) => constraints.some((each) => each["contype"] === type)
+	const { distinct, domain, filled, rewrites } = fillOf((cmd["def"] as Node)["ColumnDef"] as Node, constraints, facts)
+	const notNull = has("CONSTR_NOTNULL") || domain?.notNull === true
+	const scans = has("CONSTR_CHECK") || has("CONSTR_FOREIGN") || domain?.constrained === true
 	const findings: Finding[] = []
-	if ((has("CONSTR_NOTNULL") && !filled) || (has("CONSTR_PRIMARY") && !distinct)) findings.push({ level: "unsafe" })
+	if ((notNull && !filled) || (has("CONSTR_PRIMARY") && !distinct)) findings.push({ level: "unsafe" })
 	if (distinct || rewrites || has("CONSTR_GENERATED") || scans) findings.push({ level: "lock", note: REWRITES })
 	return findings
 }
