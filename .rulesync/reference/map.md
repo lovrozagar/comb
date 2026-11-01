@@ -85,5 +85,5 @@ Cheap outline. Not a file dump.
 - `.codex/config.toml` `mcp_servers` (absent when allow empty)
 - `.agents/mcp_config.json`
 - `GEMINI.md` — `@AGENTS.md` pointer (`emit-gemini.mjs`)
-- `.gemini/agents/{orchestrator,grunt}/agent.md`
+- `.gemini/agents/grunt/agent.md`
 - `.gemini/settings.json` — `mcpServers` from policy allow only
