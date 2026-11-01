@@ -42,8 +42,8 @@ export const REQUIRED_H2 = [
 ];
 /** Last heading: this plan's own log of mistakes. Required on new plans, append-only on updates. */
 export const MISTAKES_H2 = "Previous mistakes";
-const MISTAKE_RE =
-  /^- (feedback|verify|review|premise): (.+?) → (.+?)(?: \(lesson: ([a-z0-9]+(?:-[a-z0-9]+)*)\))?$/;
+/** Entry kinds a plan logs. A roadmap adds its own. */
+export const PLAN_MISTAKE_SOURCES = ["feedback", "verify", "review", "premise"];
 const BOX_RE = /^( {0,2})(\d+(?:\.\d+){0,2}) \[([ xX])\] (.+)$/;
 const LEAF_ID_RE = /^\d+\.\d+(?:\.\d+)?$/;
 
@@ -216,8 +216,11 @@ const REVIEWS_RE = /^(0|[1-9][0-9]*)$/;
 /** Statuses a plan may enter only after that many settled `/review-plan` rounds. */
 const REVIEWS_TO_ENTER = { "in-progress": 1 };
 
-/** `reviews` counts settled review rounds: well-formed, never removed or lowered, and gating entry to a status. */
-function reviewErrors(map, prev) {
+/**
+ * `reviews` counts settled review rounds: well-formed, never removed or lowered, and gating entry to
+ * a status. `gates` maps a status to the rounds it needs; `review` is the command the deny names.
+ */
+export function reviewErrors(map, prev, { gates, review }) {
   const has = Object.prototype.hasOwnProperty.call(map, "reviews");
   if (has && !REVIEWS_RE.test(String(map.reviews))) {
     return ["reviews must be a whole number with no sign or leading zero, e.g. reviews: 1"];
@@ -228,17 +231,20 @@ function reviewErrors(map, prev) {
     if (!has) errors.push(`keep reviews: ${prev.reviews} in the frontmatter; the review count cannot be removed`);
     else if (count < Number(prev.reviews)) errors.push(`reviews cannot go down (saved ${prev.reviews}, got ${count})`);
   }
-  const need = REVIEWS_TO_ENTER[map.status];
+  const need = gates[map.status];
   if (need && (!prev || prev.status !== map.status) && count < need) {
     errors.push(
-      `status ${map.status} needs reviews: ${need} or more; run /review-plan {n}, settle its findings, and bump reviews in that save`,
+      `status ${map.status} needs reviews: ${need} or more; run ${review}, settle its findings, and bump reviews in that save`,
     );
   }
   return errors;
 }
 
 /** `(none)` or one `- {source}: {what was wrong} → {what changed}` line per entry. */
-export function parseMistakes(sectionText) {
+export function parseMistakes(sectionText, sources) {
+  const re = new RegExp(
+    `^- (${sources.join("|")}): (.+?) → (.+?)(?: \\(lesson: ([a-z0-9]+(?:-[a-z0-9]+)*)\\))?$`,
+  );
   const lines = String(sectionText ?? "")
     .split("\n")
     .map((l) => l.trim())
@@ -248,10 +254,10 @@ export function parseMistakes(sectionText) {
   const entries = [];
   const errors = [];
   for (const line of lines) {
-    const m = line.match(MISTAKE_RE);
+    const m = line.match(re);
     if (!m) {
       errors.push(
-        `Previous mistakes entry must be "- {feedback|verify|review|premise}: {what was wrong} → {what changed}": ${line}`,
+        `Previous mistakes entry must be "- {${sources.join("|")}}: {what was wrong} → {what changed}": ${line}`,
       );
       continue;
     }
@@ -260,9 +266,31 @@ export function parseMistakes(sectionText) {
   return { entries, errors };
 }
 
-function mistakesOf(text) {
-  const { order, bodies } = sectionBodies(stripFrontmatter(text));
-  return order.includes(MISTAKES_H2) ? parseMistakes(bodies[MISTAKES_H2]).entries : [];
+/**
+ * Errors in a `## Previous mistakes` log given a document's heading order and section bodies:
+ * last and once, required when `fresh`, well-formed, and append-only against `previous` (the saved
+ * document's order and bodies). `kind` names the document in the deny.
+ */
+export function mistakeLogErrors(order, bodies, { fresh, previous, sources, kind }) {
+  const errors = [];
+  const at = order.indexOf(MISTAKES_H2);
+  if (at !== -1 && (at !== order.length - 1 || order.lastIndexOf(MISTAKES_H2) !== at)) {
+    errors.push("## Previous mistakes must be the last heading, once");
+  }
+  if (at === -1 && fresh) {
+    errors.push(`missing ## Previous mistakes; end a new ${kind} with it and (none)`);
+  }
+  const mistakes = at === -1 ? { entries: [], errors: [] } : parseMistakes(bodies[MISTAKES_H2], sources);
+  errors.push(...mistakes.errors);
+  if (previous && previous.order.includes(MISTAKES_H2)) {
+    const current = mistakes.entries.map((e) => e.line);
+    parseMistakes(previous.bodies[MISTAKES_H2], sources).entries.forEach((e, i) => {
+      if (current[i] !== e.line) {
+        errors.push(`Previous mistakes is append-only; keep this entry unchanged: ${e.line}`);
+      }
+    });
+  }
+  return errors;
 }
 
 /**
@@ -300,29 +328,25 @@ export function validatePlan(filename, text, { fresh = true, previous } = {}) {
   }
   if (!body.trim().startsWith(`# ${slugFromName}`)) errors.push("h1 slug");
   const prevFm = previous == null ? null : parseFrontmatter(previous);
-  errors.push(...reviewErrors(map, prevFm && !prevFm.error ? prevFm.map : null));
+  errors.push(
+    ...reviewErrors(map, prevFm && !prevFm.error ? prevFm.map : null, {
+      gates: REVIEWS_TO_ENTER,
+      review: "/review-plan {n}",
+    }),
+  );
   const fileSerial = filename.match(/^(\d+)-/);
   if (fileSerial && map.serial && Number(map.serial) !== Number(fileSerial[1])) {
     errors.push("serial/filename");
   }
   const { order: allOrder, bodies } = sectionBodies(body);
-  const mistakesAt = allOrder.indexOf(MISTAKES_H2);
-  if (mistakesAt !== -1 && (mistakesAt !== allOrder.length - 1 || allOrder.lastIndexOf(MISTAKES_H2) !== mistakesAt)) {
-    errors.push("## Previous mistakes must be the last heading, once");
-  }
-  if (mistakesAt === -1 && fresh) {
-    errors.push("missing ## Previous mistakes; end a new plan with it and (none)");
-  }
-  const mistakes = mistakesAt === -1 ? { entries: [], errors: [] } : parseMistakes(bodies[MISTAKES_H2]);
-  errors.push(...mistakes.errors);
-  if (previous != null) {
-    const current = mistakes.entries.map((e) => e.line);
-    mistakesOf(previous).forEach((e, i) => {
-      if (current[i] !== e.line) {
-        errors.push(`Previous mistakes is append-only; keep this entry unchanged: ${e.line}`);
-      }
-    });
-  }
+  errors.push(
+    ...mistakeLogErrors(allOrder, bodies, {
+      fresh,
+      previous: previous == null ? null : sectionBodies(stripFrontmatter(previous)),
+      sources: PLAN_MISTAKE_SOURCES,
+      kind: "plan",
+    }),
+  );
   const order = allOrder.filter((h) => h !== MISTAKES_H2);
   const firstSix = order.slice(0, REQUIRED_H2.length);
   if (REQUIRED_H2.some((h, i) => firstSix[i] !== h)) errors.push("heading order");

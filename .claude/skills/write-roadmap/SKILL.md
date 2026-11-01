@@ -14,9 +14,13 @@ Two or more slices. One slice is `/write-plan`: say so and stop. Do not write a 
 
 Research until every slice is defensible. Ask only what changes the program. Then write the draft and stop.
 
-On lock, set `status: locked` on the same file and stop. Do not run `/write-plan` or `/implement-plan` from this skill.
+After each save, spawn a fresh host agent whose prompt is only `/review-roadmap {n}` and the roadmap's absolute path (on Claude Code the `claude` agent type; grunt is not the reviewer). Accept or reject each finding with a reason. Apply accepted ones to the same file and add one `- review: …` entry each to `## Previous mistakes`. Bump `reviews` by one in the save that settles the round, even with no findings: send a bare `reviews: {n}` line above `ROADMAP_NAME:`. The save denies a lower count.
 
-Report the serial, the absolute path, the slice titles in order, and the top risk. Stop for the lock.
+On feedback, revise the same file (a Write of the saved path updates it in place), add a `- feedback: …` entry for what the user rejected and what changed, and run `/review-roadmap` again. Never edit or drop an earlier entry.
+
+On lock, set `status: locked` on the same file and stop. The save denies the lock while `reviews` is 0. Do not run `/write-plan` or `/implement-plan` from this skill.
+
+Report the serial, the absolute path, the slice titles in order, the top risk, and the review findings you rejected with why. Stop for the lock.
 
 ## Shape
 
@@ -50,11 +54,15 @@ Ship auth as two plans. The second plan waits on the first. Names stay reserved.
 ## Verify
 3 [ ] Verify
 3.1 [ ] both child plans have finished Verify
+
+## Previous mistakes
+(none)
 ```
 
 ## Row rules
 
-- Headings, this order only: Goal, Context, Decisions, Order, Watch-outs, Verify. No other `##`.
+- Headings, this order only: Goal, Context, Decisions, Order, Watch-outs, Verify, Previous mistakes. No other `##`.
+- Previous mistakes is `(none)` on a new roadmap, then one `- {feedback|verify|review|premise|slice}: {what was wrong} → {what changed}` line per entry, optional ` (lesson: {slug})`. Append-only.
 - Goal is 1–3 sentences.
 - Context, Decisions, and Watch-outs are bullets. Each decision names the rejected alternative.
 - Each slice is `N [ ] Title: {2–6 words}` then indented `Goal:` and `Why:`. Those lines are not checkboxes.

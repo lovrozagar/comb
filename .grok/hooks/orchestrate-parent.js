@@ -19,7 +19,7 @@ import {
 } from "../../.rulesync/scripts/gate-fat-tools.mjs";
 import { LESSONS_DIR, matchLessons, persistLesson } from "../../.rulesync/scripts/lessons.mjs";
 import { persistPlan, preparePlanUpdate, validatePlan } from "../../.rulesync/scripts/persist-plan.mjs";
-import { isFullRoadmapBody, persistRoadmap } from "../../.rulesync/scripts/persist-roadmap.mjs";
+import { persistRoadmap, prepareRoadmapUpdate, validateRoadmap } from "../../.rulesync/scripts/persist-roadmap.mjs";
 import { persistHandoff } from "../../.rulesync/scripts/persist-handoff.mjs";
 import { persistImplementation, isFullImplementationBody, validateImplementation } from "../../.rulesync/scripts/persist-implementation.mjs";
 import { persistTmp } from "../../.rulesync/scripts/persist-tmp.mjs";
@@ -272,6 +272,17 @@ function planEdit(abs, toolInput) {
   return 0;
 }
 
+// An Edit of a saved roadmap is checked the same way.
+function roadmapEdit(abs, toolInput) {
+  const previous = fs.readFileSync(abs, "utf8");
+  const next = projectEdit(previous, toolInput);
+  if (next == null) return null;
+  const errors = validateRoadmap(path.basename(abs), next, { fresh: false, previous });
+  if (!errors.length) return null;
+  emit(denyResponse(errors.join("; ")));
+  return 0;
+}
+
 function parentWrite(data, toolInput) {
   if (!toolInput || typeof toolInput !== "object" || Array.isArray(toolInput)) {
     emit(denyResponse(DENY_REASON));
@@ -304,15 +315,14 @@ function parentWrite(data, toolInput) {
     const roadmapPath = path.isAbsolute(rawPath)
       ? path.resolve(rawPath)
       : path.resolve(ws, rawPath);
-    const content = typeof toolInput.content === "string" ? toolInput.content : "";
     let exists = false;
     try {
       exists = fs.statSync(roadmapPath).isFile();
     } catch {
       exists = false;
     }
-    if (exists && !isFullRoadmapBody(content)) return null;
-    persist = (args) => persistRoadmap({ ...args, filePath: roadmapPath });
+    if (exists && typeof toolInput.content !== "string") return roadmapEdit(roadmapPath, toolInput);
+    persist = exists ? (args) => prepareRoadmapUpdate({ ...args, filePath: roadmapPath }) : persistRoadmap;
     invalid = "invalid roadmap";
   } else if (isUnderHandoffs(rawPath, ws)) {
     persist = persistHandoff;

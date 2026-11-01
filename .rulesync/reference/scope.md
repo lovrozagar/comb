@@ -40,7 +40,7 @@ One type per plan. Pick the strongest match. A feature that crosses an ownership
 
 `/write-plan` copies the row into Steps or Verify, including a Read leaf for each named principle. `/implement-plan` reads that skill and follows it.
 
-A slice is one child plan, not a phase. Two or more ordered slices are a roadmap (`/write-roadmap`, then `/implement-roadmap`), not one plan. Format: `.rulesync/reference/roadmap-format.md`.
+A slice is one child plan, not a phase. Two or more ordered slices are a roadmap (`/write-roadmap`, then `/implement-roadmap`), not one plan. `/write-roadmap` runs `/review-roadmap {n}` in a fresh agent after each save, the same way plans are reviewed, and a roadmap with `reviews: 0` cannot be locked. Format: `.rulesync/reference/roadmap-format.md`.
 
 | type | checks |
 | --- | --- |

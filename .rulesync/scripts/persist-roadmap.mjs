@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Allocate/validate/write a roadmap under .tmp/grunt/roadmaps/. Updates keep the file. */
+/** Allocate/validate/write a new roadmap under .tmp/grunt/roadmaps/; validate an update of a saved one. */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -7,7 +7,11 @@ import {
   compactCreatedStamp,
   ensureGitignore,
   FILENAME_RE,
+  MISTAKES_H2,
+  mistakeLogErrors,
   PLAN_DIR,
+  PLAN_MISTAKE_SOURCES,
+  reviewErrors,
   slugify,
   utcDateTime,
 } from "./persist-plan.mjs";
@@ -25,6 +29,10 @@ const REQUIRED_H2 = [
   "Watch-outs",
   "Verify",
 ];
+/** A roadmap also logs `slice`: what a child plan found that changed the program. */
+const ROADMAP_MISTAKE_SOURCES = [...PLAN_MISTAKE_SOURCES, "slice"];
+/** Statuses a roadmap may enter only after that many settled `/review-roadmap` rounds. */
+const REVIEWS_TO_ENTER = { locked: 1 };
 const SLICE_RE = /^(?: {0,2})(\d+) \[([ xX])\] Title: (.+)$/;
 const KEY_RE = /^ {2,8}(Goal|Why|Location): (.*)$/;
 const BOX_RE = /^(?: {0,2})(\d+(?:\.\d+){0,2}) \[([ xX])\] (.+)$/;
@@ -71,6 +79,7 @@ function preamble(raw) {
   const stripped = stripFrontmatter(raw);
   let text = stripped.body.replace(/^\s+/, "");
   let status = stripped.map.status || "";
+  let reviews = stripped.map.reviews;
   const nameMatch = text.match(/^ROADMAP_NAME:\s*(.+)\s*$/m);
   text = text.replace(/^ROADMAP_NAME:\s*.+\n/m, "");
   const statusLine = text.match(/^status:\s*(\S+)\s*$/m);
@@ -78,21 +87,20 @@ function preamble(raw) {
     if (!status) status = statusLine[1];
     text = text.replace(/^status:\s*\S+\s*\n/m, "");
   }
+  const reviewsLine = text.match(/^reviews:\s*(\S+)\s*$/m);
+  if (reviewsLine) {
+    if (reviews == null) reviews = reviewsLine[1];
+    text = text.replace(/^reviews:\s*\S+\s*\n/m, "");
+  }
   const h1 = text.match(/^#\s+(.+)\s*$/m);
   return {
     body: text,
     status,
+    reviews,
+    // A sent frontmatter is the whole frontmatter: a missing key there is dropped, not kept.
+    fullFrontmatter: stripped.body !== String(raw).replace(/^\uFEFF/, ""),
     name: nameMatch ? nameMatch[1].trim() : h1 ? h1[1].trim() : "",
   };
-}
-
-/** A Write of a roadmap. An edit that sends no full body is not one. */
-export function isFullRoadmapBody(content) {
-  const text = String(content || "");
-  if (/^ROADMAP_NAME:\s*\S/m.test(text)) return true;
-  return ["Goal", "Context", "Decisions", "Order", "Watch-outs", "Verify"].every(
-    (h) => new RegExp(`^## ${h}$`, "m").test(text),
-  );
 }
 
 function sectionBodies(text) {
@@ -145,7 +153,7 @@ function parseSlices(orderBody) {
   return slices;
 }
 
-export function validateRoadmap(filename, text, { fresh = false } = {}) {
+export function validateRoadmap(filename, text, { fresh = false, previous } = {}) {
   const errors = [];
   if (!ROADMAP_FILENAME_RE.test(filename)) errors.push("filename");
   const { body, map } = stripFrontmatter(text);
@@ -153,13 +161,24 @@ export function validateRoadmap(filename, text, { fresh = false } = {}) {
     errors.push("frontmatter");
   }
   if (map.status && !STATUS_RE.test(map.status)) errors.push("status");
+  const prev = previous == null ? null : stripFrontmatter(previous);
+  errors.push(...reviewErrors(map, prev && prev.map, { gates: REVIEWS_TO_ENTER, review: "/review-roadmap {n}" }));
   const slug = String(filename)
     .replace(/\.md$/, "")
     .replace(/^[0-9]+-/, "")
     .replace(/-\d{8}T\d{6}Z$/, "");
   if (map.name && map.name !== slug) errors.push("name");
   if (!body.trim().startsWith(`# ${slug}`)) errors.push("h1");
-  const { order, bodies } = sectionBodies(body);
+  const { order: allOrder, bodies } = sectionBodies(body);
+  errors.push(
+    ...mistakeLogErrors(allOrder, bodies, {
+      fresh,
+      previous: prev && sectionBodies(prev.body),
+      sources: ROADMAP_MISTAKE_SOURCES,
+      kind: "roadmap",
+    }),
+  );
+  const order = allOrder.filter((h) => h !== MISTAKES_H2);
   if (REQUIRED_H2.some((h, i) => order[i] !== h)) errors.push("heading order");
   if (order.some((h) => !REQUIRED_H2.includes(h))) errors.push("extra h2");
   const goalN = sentences(bodies.Goal || "");
@@ -198,7 +217,7 @@ export function validateRoadmap(filename, text, { fresh = false } = {}) {
   return [...new Set(errors)];
 }
 
-function render(serial, slug, status, created, source, body) {
+function render(serial, slug, status, reviews, created, source, body) {
   let rest = body.replace(/^\s+/, "");
   if (!rest.startsWith("# ")) rest = `# ${slug}\n\n${rest}`;
   else rest = rest.replace(/^# .+/, `# ${slug}`);
@@ -206,7 +225,7 @@ function render(serial, slug, status, created, source, body) {
 serial: ${serial}
 name: ${slug}
 status: ${status}
-created: ${created}
+${reviews == null ? "" : `reviews: ${reviews}\n`}created: ${created}
 source: ${JSON.stringify(String(source).slice(0, 120))}
 ---
 
@@ -220,40 +239,40 @@ function sourceOf(pre, slug) {
   ).slice(0, 120);
 }
 
-export function persistRoadmap({
-  workspaceRoot,
-  content,
-  created,
-  filePath,
-} = {}) {
+/**
+ * Rewrite of a saved roadmap: same file and serial, saved frontmatter kept unless sent.
+ * Validates only. The host writes `content`: a write here first makes Claude Code refuse the
+ * Write as modified since read.
+ */
+export function prepareRoadmapUpdate({ workspaceRoot, filePath, content }) {
+  const ws = workspaceRoot || process.cwd();
+  const abs = path.resolve(ws, filePath);
+  const filename = path.basename(abs);
+  const previous = fs.readFileSync(abs, "utf8");
+  const pre = preamble(String(content || ""));
+  const prev = stripFrontmatter(previous).map;
+  const serial = parseInt(filename.split("-")[0], 10);
+  const slug = slugFromFile(filename);
+  const createdAt = prev.created && DATETIME_RE.test(prev.created) ? prev.created : utcDateTime();
+  const reviews = pre.reviews ?? (pre.fullFrontmatter ? undefined : prev.reviews);
+  const full = render(serial, slug, pre.status || prev.status || "draft", reviews, createdAt, prev.source || sourceOf(pre, slug), pre.body);
+  const errors = validateRoadmap(filename, full, { fresh: false, previous });
+  if (errors.length) return { ok: false, error: errors.join("; "), errors };
+  return {
+    ok: true,
+    path: path.relative(ws, abs).split(path.sep).join("/"),
+    serial,
+    filename,
+    content: full,
+  };
+}
+
+export function persistRoadmap({ workspaceRoot, content, created } = {}) {
   const ws = workspaceRoot || process.cwd();
   const dir = path.join(ws, ROADMAP_DIR);
   fs.mkdirSync(dir, { recursive: true });
-  const raw = String(content || "");
-  const pre = preamble(raw);
+  const pre = preamble(String(content || ""));
   const slug = slugify(pre.name);
-  let abs = "";
-  if (filePath) {
-    abs = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(ws, filePath);
-  }
-  const exists = abs && fs.existsSync(abs) && fs.statSync(abs).isFile();
-  if (exists) {
-    const filename = path.basename(abs);
-    const serial = parseInt(filename.split("-")[0], 10);
-    const prev = stripFrontmatter(fs.readFileSync(abs, "utf8")).map;
-    const createdAt = prev.created && DATETIME_RE.test(prev.created) ? prev.created : utcDateTime();
-    const full = render(serial, slugFromFile(filename), pre.status || prev.status || "draft", createdAt, prev.source || sourceOf(pre, slug), pre.body);
-    const errors = validateRoadmap(filename, full, { fresh: false });
-    if (errors.length) return { ok: false, error: errors.join("; "), errors };
-    fs.writeFileSync(abs, full);
-    return {
-      ok: true,
-      path: path.relative(ws, abs).replace(/\\/g, "/"),
-      serial,
-      filename,
-      content: full,
-    };
-  }
   const createdAt = created && DATETIME_RE.test(created) ? created : utcDateTime();
   const stamp = compactCreatedStamp(createdAt);
   let serial = nextSerial(dir);
@@ -266,7 +285,7 @@ export function persistRoadmap({
     dest = path.join(dir, filename);
     tries += 1;
   }
-  const full = render(serial, slug, pre.status || "draft", createdAt, sourceOf(pre, slug), pre.body);
+  const full = render(serial, slug, pre.status || "draft", 0, createdAt, sourceOf(pre, slug), pre.body);
   const errors = validateRoadmap(filename, full, { fresh: true });
   if (errors.length) return { ok: false, error: errors.join("; "), errors };
   ensureGitignore(ws);
