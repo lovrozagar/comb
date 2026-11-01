@@ -357,3 +357,25 @@ describe("applyD1 when wrangler stops short", () => {
 		expect(await hashed(d1)).toEqual(["1_init.sql", "2_b.sql", "3_c.sql"])
 	})
 })
+
+/* S1 of r19: D1 runs only the pragmas it authorizes, even --local, so an approved other pragma could never apply */
+describe("applyD1 on a pragma D1 does not authorize", () => {
+	it.each(["PRAGMA temp_store = MEMORY", 'PRAGMA "cache_size" = 10', "PRAGMA main.secure_delete = 1"])(
+		"refuses %j in check and apply before wrangler runs, whatever the approval, and passes a pragma D1 runs",
+		async (pragma) => {
+			const { d1, read, run } = await target({})
+			await applyD1(d1, { approve, print: () => undefined, read })
+			writeFileSync(join(d1.migrationsDir, "2_p.sql"), `-- comb:allow-unsafe: needed\n${pragma};\n`)
+			writeSum(d1.migrationsDir)
+			run.calls.length = 0
+			for (const checkOnly of [true, false])
+				await expect(applyD1(d1, { approve, checkOnly, print: () => undefined, read })).rejects.toThrow(
+					/D1 runs only the pragmas it authorizes/,
+				)
+			expect(run.calls.some((call) => call[2] === "migrations")).toBe(false)
+			writeFileSync(join(d1.migrationsDir, "2_p.sql"), "PRAGMA defer_foreign_keys = on;\nCREATE TABLE p (id TEXT);\n")
+			writeSum(d1.migrationsDir)
+			expect(await applyD1(d1, { approve, print: () => undefined, read })).toEqual(["2_p.sql"])
+		},
+	)
+})

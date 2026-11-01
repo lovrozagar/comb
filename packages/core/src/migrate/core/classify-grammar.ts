@@ -19,7 +19,7 @@
  */
 import type { Dialect, ExtractedSchema } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
-import { nameKey, type Naming, QNAME, unquote } from "./sql-code.ts"
+import { nameKey, type Naming, pragmaOf, QNAME, unquote } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 import { SYNC_TRIGGER, syncTriggerOf } from "./fts-sync.ts"
 
@@ -45,7 +45,6 @@ const RECOGNIZED = [
 	/^(?:GRANT|REVOKE|TRUNCATE)\b/i,
 	/^(?:INSERT|UPDATE|DELETE|REPLACE|MERGE|SELECT|WITH|VALUES|CALL)\b/i,
 	/^(?:SET|RESET)\b/i,
-	/^PRAGMA (?:main\.)?(?:defer_foreign_keys|foreign_keys) ?= ?(?:on|off|true|false|0|1)$/i,
 	/^(?:SAVEPOINT|RELEASE|ROLLBACK(?: TRANSACTION)? TO)\b/i,
 	/^(?:ANALYZE|ANALYSE|REINDEX|VACUUM|CLUSTER)\b/i,
 	/^(?:CREATE|ALTER|DROP) POLICY\b/i,
@@ -146,13 +145,29 @@ function unrecognized(code: string): string {
 	return `comb does not recognize ${kindOf(code)}; approve it in the file`
 }
 
+/** Whether `code` sets one of the foreign-key pragmas comb writes, on the main schema, however the name is spelled */
+function foreignKeyPragma(code: string): boolean {
+	const pragma = pragmaOf(code)
+	return (
+		pragma !== undefined &&
+		(pragma.name === "defer_foreign_keys" || pragma.name === "foreign_keys") &&
+		(pragma.schema === undefined || pragma.schema === "main") &&
+		/^(?:on|off|true|false|0|1)$/i.test(pragma.value ?? "")
+	)
+}
+
 /** What the grammar makes of one top-level statement: nothing when comb recognizes it as it is */
 function grammarFindings(statement: string, ctx: GrammarContext): Finding[] {
 	/* an EXPLAIN is the statement it explains (ANALYZE runs it) */
 	const code = statement.replace(/^EXPLAIN (?:\([^)]*\) )?(?:(?:ANALYZE|ANALYSE|VERBOSE) )*/i, "")
 	const recognized = ctx.dialect === "postgres" ? [...RECOGNIZED, PG_TRANSACTION] : RECOGNIZED
 	/* a statement a parse-tree rule rates whole is recognized by that rule, whatever its kind (P13 of r18) */
-	if (!recognized.some((shape) => shape.test(code)) && !isFtsSync(code, ctx) && ctx.treeRated !== true)
+	if (
+		!recognized.some((shape) => shape.test(code)) &&
+		!foreignKeyPragma(code) &&
+		!isFtsSync(code, ctx) &&
+		ctx.treeRated !== true
+	)
 		return [{ level: "unsafe", note: unrecognized(code) }]
 	const policy = policyNote(code)
 	/* a policy renamed keeps its roles and its predicate */

@@ -125,7 +125,7 @@ export declare function parseMigration(sql: string, filename: string, options?: 
 /** parseMigration of a file its caller has read: on Postgres its one parse (M86) */
 export declare function parseRead(file: FileRead & {
     filename: string;
-}, { before, schema }: Omit<ClassifyOptions, "dialect">): ParsedMigration;
+}, { before, d1, schema }: Omit<ClassifyOptions, "dialect">): ParsedMigration;
 
 // migrate/core/pg-parser.d.ts
 /**
@@ -610,6 +610,8 @@ import { type PgRead } from "./pg-split.ts";
 type ClassifyOptions = {
     /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
     before?: ExtractedSchema | undefined;
+    /** whether the target is a D1 database, whose authorizer runs only the pragmas Cloudflare lists (S1 of r19) */
+    d1?: boolean | undefined;
     /** how the file is read; unnamed, as SQLite, the CLI's default */
     dialect?: Dialect | undefined;
     /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
@@ -630,7 +632,7 @@ declare const dropsOf: (reads: readonly Read[]) => string[];
 /** How destructive a migration is, which statements make it so, and which block a Postgres table */
 declare function classifyMigration(sql: string, options?: ClassifyOptions): MigrationClassification;
 /** classifyMigration of the readings of `sql` */
-declare function classificationOf(reads: readonly Read[], sql: string): MigrationClassification;
+declare function classificationOf(reads: readonly Read[], sql: string, { d1 }?: Pick<ClassifyOptions, "d1">): MigrationClassification;
 export { classificationOf, classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings };
 
 // migrate/core/pg-split.d.ts
@@ -853,8 +855,11 @@ type ReadStatement = {
     dialect: Dialect;
     stmt: string;
 };
-/** Refuses a statement that cannot run in its file `sql`: no `-- comb:allow-unsafe:` overrides this */
-declare function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): void;
+/**
+ * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
+ * `-- comb:allow-unsafe:` overrides this
+ */
+declare function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string, d1?: boolean): void;
 export { ftsCommandFindings, outsideTransaction, preview, type ReadStatement, refuseUnrunnable, reindexedOf };
 
 // migrate/drivers/memory.d.ts

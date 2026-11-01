@@ -37,6 +37,8 @@ type PlanOptions = {
 	whole?: boolean | undefined
 	/** the database, whose own foreign keys and triggers a guarded rebuild is checked against */
 	conn?: Connection | undefined
+	/** whether the target is a D1 database, which refuses the pragmas its authorizer does not list (S1 of r19) */
+	d1?: boolean | undefined
 	/** the tables the target's migration history lives in, which an empty target may hold (default: comb's and wrangler's) */
 	historyTables?: readonly string[] | undefined
 }
@@ -113,7 +115,11 @@ function unprovenLines(proofs: ReadonlyMap<string, Proof>): string[] {
 }
 
 /** Each unapplied file, classified against the schema the files before it leave */
-function classifyPending(files: readonly string[], texts: readonly string[], applied: ReadonlySet<string>): Pending[] {
+function classifyPending(
+	files: readonly string[],
+	texts: readonly string[],
+	{ applied, d1 }: { applied: ReadonlySet<string>; d1: boolean },
+): Pending[] {
 	const pending: Pending[] = []
 	let schema = extractSchema("")
 	for (const [i, name] of files.entries()) {
@@ -121,7 +127,7 @@ function classifyPending(files: readonly string[], texts: readonly string[], app
 		const before = schema
 		schema = extractSchema(sql, before)
 		if (!applied.has(name))
-			pending.push({ before, migration: parseMigration(sql, name, { before, dialect: "sqlite" }), name, sql })
+			pending.push({ before, migration: parseMigration(sql, name, { before, d1, dialect: "sqlite" }), name, sql })
 	}
 	return pending
 }
@@ -174,7 +180,7 @@ async function planApply(options: PlanOptions): Promise<Pending[]> {
 	const texts = files.map((name) => readFileSync(join(dir, name), "utf8"))
 	const applied = new Set(files.filter((name, i) => options.applied(name, texts[i] as string)))
 	if (options.whole !== false) refuseOutOfOrder(files, applied)
-	const classified = classifyPending(files, texts, applied)
+	const classified = classifyPending(files, texts, { applied, d1: options.d1 === true })
 	/* the live guard refuses outright and names the cause, so it runs before the proof and approval (M17) */
 	if (conn !== undefined) await refuseUnseenReach(conn, classified)
 	const proofs =

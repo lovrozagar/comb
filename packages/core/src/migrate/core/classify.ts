@@ -33,6 +33,8 @@ import { splitSqlStatements } from "./sql-scan.ts"
 type ClassifyOptions = {
 	/** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
 	before?: ExtractedSchema | undefined
+	/** whether the target is a D1 database, whose authorizer runs only the pragmas Cloudflare lists (S1 of r19) */
+	d1?: boolean | undefined
 	/** how the file is read; unnamed, as SQLite, the CLI's default */
 	dialect?: Dialect | undefined
 	/** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
@@ -261,12 +263,16 @@ const dropsOf = (reads: readonly Read[]): string[] => [
 
 /** How destructive a migration is, which statements make it so, and which block a Postgres table */
 function classifyMigration(sql: string, options: ClassifyOptions = {}): MigrationClassification {
-	return classificationOf(readings(sql, options), sql)
+	return classificationOf(readings(sql, options), sql, options)
 }
 
 /** classifyMigration of the readings of `sql` */
-function classificationOf(reads: readonly Read[], sql: string): MigrationClassification {
-	for (const read of reads) refuseUnrunnable(read, sql)
+function classificationOf(
+	reads: readonly Read[],
+	sql: string,
+	{ d1 = false }: Pick<ClassifyOptions, "d1"> = {},
+): MigrationClassification {
+	for (const read of reads) refuseUnrunnable(read, sql, d1)
 	const unsafeStatements = [...new Set(entries(reads, at("unsafe")))]
 	/* a statement is listed once, at the strictest level any reading gives it, whatever each finding's note */
 	const unsafe = new Set(

@@ -144,6 +144,7 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		applied: (name) => applied.has(name),
 		approve: options.approve,
 		conn,
+		d1: true,
 		dir: target.migrationsDir,
 		exec: target.exec,
 		files,

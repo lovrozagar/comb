@@ -42,6 +42,84 @@ describe("classifyMigration on SQLite's journal_mode", () => {
 	})
 })
 
+/*
+ * S1 of r19: a pragma's name read once, quoted or not, against a table of what each target refuses, with no override:
+ * SQLite inside the transaction comb runs each file in, and D1's authorizer (wrangler --local, .tmp/grunt/p18/d1-pragma-probe.log)
+ */
+const d1 = (sql: string) => classifyMigration(sql, { d1: true, dialect: "sqlite" } as never)
+describe("classifyMigration on a pragma SQLite refuses inside a transaction, however its name is spelled", () => {
+	it.each([
+		'PRAGMA "journal_mode" = WAL',
+		"PRAGMA [journal_mode] = WAL",
+		"PRAGMA `journal_mode` = WAL",
+		'PRAGMA main."journal_mode" = WAL',
+		"PRAGMA journal_mode(WAL)",
+		"PRAGMA synchronous = OFF",
+		'PRAGMA "synchronous" = NORMAL',
+		"PRAGMA main.synchronous(0)",
+		"PRAGMA query_only = 1",
+		"PRAGMA [query_only] = ON",
+		"PRAGMA wal_checkpoint",
+		"PRAGMA wal_checkpoint(TRUNCATE)",
+		"-- comb:allow-unsafe: needed\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nPRAGMA synchronous = OFF;",
+	])("refuses %j, whatever the approval, on every SQLite target", (sql) => {
+		expect(() => lite(sql)).toThrow(/inside the transaction comb runs each file in/)
+		expect(() => d1(sql)).toThrow()
+	})
+
+	it.each(["PRAGMA synchronous", "PRAGMA query_only = 0", "PRAGMA query_only", 'PRAGMA "temp_store" = MEMORY'])(
+		"rates %j, which SQLite runs inside one, as any other pragma",
+		(sql) => {
+			expect(lite(sql).safety).toBe("unsafe")
+		},
+	)
+})
+
+describe("classifyMigration on the foreign-key pragmas comb writes, however their names are spelled", () => {
+	it.each([
+		"PRAGMA defer_foreign_keys = on",
+		'PRAGMA "defer_foreign_keys" = 1',
+		"PRAGMA main.[defer_foreign_keys] = true",
+	])("rates %j safe, as comb writes it", (sql) => {
+		expect(lite(sql).safety).toBe("safe")
+	})
+
+	it.each(["PRAGMA defer_foreign_keys", "PRAGMA temp.defer_foreign_keys = on", "PRAGMA defer_foreign_keys = 2"])(
+		"rates %j, which comb does not write, as any other pragma",
+		(sql) => {
+			expect(lite(sql).safety).toBe("unsafe")
+		},
+	)
+})
+
+describe("classifyMigration on a pragma D1 does not authorize", () => {
+	it.each([
+		"PRAGMA temp_store = MEMORY",
+		'PRAGMA "cache_size" = 10',
+		"PRAGMA main.secure_delete = 1",
+		"PRAGMA [user_version] = 3",
+		"PRAGMA page_size = 8192",
+		"PRAGMA integrity_check",
+		"-- comb:allow-unsafe: needed\nPRAGMA busy_timeout = 100;",
+	])("refuses %j, whatever the approval, naming D1's list", (sql) => {
+		expect(() => d1(sql)).toThrow(/D1 runs only the pragmas it authorizes/)
+		expect(() => lite(sql)).not.toThrow()
+	})
+
+	it.each([
+		"PRAGMA defer_foreign_keys = on",
+		'PRAGMA "foreign_keys" = OFF',
+		'PRAGMA table_info("post")',
+		"PRAGMA main.index_list(post)",
+		"PRAGMA optimize",
+		"PRAGMA page_size",
+		"PRAGMA data_version",
+		"PRAGMA legacy_alter_table = 1",
+	])("lets %j, which D1 authorizes, through to its rating", (sql) => {
+		expect(() => d1(sql)).not.toThrow()
+	})
+})
+
 /* S1 of the 0.15.0 review: a file's own transaction control ends the batch that records it */
 describe("classifyMigration on SQLite transaction control", () => {
 	it.each([

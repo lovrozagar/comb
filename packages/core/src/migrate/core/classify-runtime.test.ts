@@ -21,6 +21,20 @@ describe("runtimeFindings", () => {
 	})
 
 	/* R4: every other pragma is unsafe by default-deny's rule alone, never also cautious here */
+	/* S1 of r19: the name is read unquoted, as SQLite reads it */
+	it.each(['PRAGMA "foreign_keys" = off', "PRAGMA [Foreign_Keys] = 0", "PRAGMA main.`foreign_keys` = false"])(
+		"rates %j as foreign_keys, cautious, quoted or not",
+		(sql) => {
+			expect(runtimeFindings(sql, new Map(), none).map((finding) => finding.level)).toEqual(["cautious"])
+		},
+	)
+
+	it("rates a quoted writable_schema unsafe", () => {
+		expect(runtimeFindings('PRAGMA "writable_schema" = 1', new Map(), none).map((finding) => finding.level)).toEqual([
+			"unsafe",
+		])
+	})
+
 	it("rates a pragma by name: comb's own nothing, foreign_keys cautious, writable_schema unsafe, any other nothing", () => {
 		expect(runtimeFindings("PRAGMA main.defer_foreign_keys = on", new Map(), none)).toEqual([])
 		expect(runtimeFindings("PRAGMA foreign_keys = off", new Map(), none)).toEqual([

@@ -78,12 +78,12 @@ export function parseMigration(sql: string, filename: string, options: ClassifyO
 /** parseMigration of a file its caller has read: on Postgres its one parse (M86) */
 export function parseRead(
 	file: FileRead & { filename: string },
-	{ before, schema }: Omit<ClassifyOptions, "dialect">,
+	{ before, d1, schema }: Omit<ClassifyOptions, "dialect">,
 ): ParsedMigration {
 	const { dialect, filename, sql } = file
 	const reads = readings(sql, { before, dialect, schema }, dialect === "postgres" ? file.read : undefined)
 	return {
-		classification: classificationOf(reads, sql),
+		classification: classificationOf(reads, sql, { d1 }),
 		drops: dropsOf(reads),
 		expected: schemaOfRead(file, schema),
 		filename,

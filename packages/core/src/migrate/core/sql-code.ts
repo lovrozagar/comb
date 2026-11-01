@@ -65,6 +65,27 @@ function partKey(part: string, dialect: Dialect): string {
 	return dialect === "sqlite" || bare === part ? asciiFold(bare) : bare
 }
 
+/** A pragma statement as SQLite reads it: its name and schema unquoted and folded, and the value or argument it gives */
+type Pragma = { name: string; schema: string | undefined; value: string | undefined }
+
+// per-process-constant: a pragma's schema, its name, and the value after its = or in its parentheses, composed once
+const PRAGMA_HEAD = /* @__PURE__ */ new RegExp(
+	`^PRAGMA (?:(${IDENT}) ?\\. ?)?(${IDENT})(?: ?= ?(.*?)| ?\\( ?(.*?) ?\\))?;?$`,
+	"i",
+)
+
+/** The pragma `code` runs (S1 of r19: read once, so a quoted name is the name), or undefined for any other statement */
+function pragmaOf(code: string): Pragma | undefined {
+	const [, schema, name, set, argument] = PRAGMA_HEAD.exec(code) ?? []
+	if (name === undefined) return undefined
+	const value = set ?? argument
+	return {
+		name: partKey(name, "sqlite"),
+		schema: schema === undefined ? undefined : partKey(schema, "sqlite"),
+		value: value === undefined ? undefined : unquotePart(value),
+	}
+}
+
 /** A whole name as SQLite resolves it, each part folded, with the schema it was written with (`main."Post"` is `main.post`) */
 const qualifiedKey = (name: string): string =>
 	[...name.matchAll(PARTS)].map((match) => partKey(match[0], "sqlite")).join(".")
@@ -130,6 +151,8 @@ export {
 	nameKey,
 	type Naming,
 	namingOf,
+	type Pragma,
+	pragmaOf,
 	QNAME,
 	qualifiedKey,
 	splitTopLevel,

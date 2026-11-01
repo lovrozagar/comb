@@ -6,7 +6,7 @@
  * which can corrupt the schema, is unsafe; every other pragma comb does not write is unsafe by default-deny's rule alone).
  */
 import type { Finding } from "./classify-alter.ts"
-import { IDENT, lastPart } from "./sql-code.ts"
+import { IDENT, lastPart, pragmaOf } from "./sql-code.ts"
 
 // per-process-constant: patterns composed from the name grammar, compiled once
 const PREPARE = /* @__PURE__ */ new RegExp(`^PREPARE (${IDENT})(?: ?\\([^)]*\\))? AS (.+)$`, "i")
@@ -18,7 +18,6 @@ const RULE = /* @__PURE__ */ new RegExp(
 	"i",
 )
 const SETVAL = /\b(?:pg_catalog ?\. ?)?setval ?\(/i
-const PRAGMA = /^PRAGMA (?:\w+ ?\. ?)?(\w+)/i
 // per-process-constant: a SQLite trigger, its table, and its BEGIN … END body
 const TRIGGER = /* @__PURE__ */ new RegExp(
 	`^CREATE (?:TEMP |TEMPORARY )?TRIGGER (?:IF NOT EXISTS )?${IDENT}(?: ?\\. ?${IDENT})? .*?\\bON (${IDENT}(?: ?\\. ?${IDENT})?)(.*)$`,
@@ -37,7 +36,7 @@ function preparedOf(codes: readonly string[]): Map<string, string> {
 
 /** The findings of a pragma: foreign_keys cautious, writable_schema unsafe, any other none of its own */
 function pragmaFinding(code: string): Finding | undefined {
-	const name = PRAGMA.exec(code)?.[1]?.toLowerCase()
+	const name = pragmaOf(code)?.name
 	/* SQLite ignores it inside a transaction, so the file's own off never turns a cascade or a check off */
 	if (name === "foreign_keys") {
 		return {

@@ -8,7 +8,7 @@ import type { Dialect } from "../types.ts"
 import type { Finding } from "./classify-alter.ts"
 import { INSERT_INTO } from "./classify-sqlite-write.ts"
 import { atlasDirectives } from "./pg-split.ts"
-import { IDENT, nameKey, QNAME } from "./sql-code.ts"
+import { nameKey, type Pragma, pragmaOf, QNAME } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
 /* Postgres runs these only outside a transaction block */
@@ -88,22 +88,79 @@ type ReadStatement = { code: string; dialect: Dialect; stmt: string }
 /** SQLite's transaction control at the top of a file, but a rollback to a savepoint, which nests */
 const SQLITE_TRANSACTION = /^(?:BEGIN|COMMIT|END|START TRANSACTION)\b|^ROLLBACK(?: TRANSACTION)?$/i
 
-// per-process-constant: a pragma on SQLite's journal mode, in any schema, composed from the name grammar once
-const JOURNAL_MODE = /* @__PURE__ */ new RegExp(`^PRAGMA (?:${IDENT} ?\\. ?)?journal_mode\\b`, "i")
+/** A truthy pragma value, as SQLite reads a boolean */
+const ON = /^(?:on|true|yes|[1-9]\d*)$/i
 
-/** Refuses a statement that cannot run in its file `sql`: no `-- comb:allow-unsafe:` overrides this */
-function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string): void {
+/**
+ * The pragmas SQLite refuses inside the transaction comb runs each file in, on every SQLite target
+ * (bun:sqlite and libsql, .tmp/grunt/p18/tx-pragma-probe.log): which forms, and why
+ */
+const IN_TRANSACTION: Readonly<Record<string, { refuses: (pragma: Pragma) => boolean; why: string }>> = {
+	journal_mode: {
+		refuses: () => true,
+		why: "journal_mode is the database's setting, and SQLite will not change it inside the transaction comb runs each file in; set it outside the migrations",
+	},
+	query_only: {
+		refuses: ({ value }) => value !== undefined && ON.test(value),
+		why: "query_only on makes the database read-only inside the transaction comb runs each file in, so the rest of the file and its history row fail; leave it out of the migrations",
+	},
+	synchronous: {
+		refuses: ({ value }) => value !== undefined,
+		why: "SQLite will not change the safety level inside the transaction comb runs each file in; set synchronous on the connection",
+	},
+	wal_checkpoint: {
+		refuses: () => true,
+		why: "a checkpoint cannot run inside the transaction comb runs each file in (libsql refuses it as locked); run it outside the migrations",
+	},
+}
+
+/** The pragmas D1's authorizer runs in any form: Cloudflare's list (developers.cloudflare.com/d1/sql-api/sql-statements) */
+// lookup-table: the names D1 authorizes, read on every pragma a D1 file runs
+const D1_PRAGMAS: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"case_sensitive_like",
+	"defer_foreign_keys",
+	"foreign_key_check",
+	"foreign_key_list",
+	"foreign_keys",
+	"ignore_check_constraints",
+	"index_info",
+	"index_list",
+	"index_xinfo",
+	"legacy_alter_table",
+	"quick_check",
+	"recursive_triggers",
+	"reverse_unordered_selects",
+	"table_info",
+	"table_list",
+	"table_xinfo",
+])
+
+/** The pragmas D1 runs only as a read: optimize (Cloudflare refuses an argument), page_size and data_version (wrangler --local) */
+// lookup-table: the names D1 runs as a read only
+const D1_READS: ReadonlySet<string> = /* @__PURE__ */ new Set(["data_version", "optimize", "page_size"])
+
+/** Why the target refuses `pragma` outright, or undefined when it runs it; on D1, also what D1 does not authorize */
+function pragmaRefusal(pragma: Pragma, d1: boolean): string | undefined {
+	const rule = IN_TRANSACTION[pragma.name]
+	if (rule?.refuses(pragma) === true) return rule.why
+	if (!d1 || D1_PRAGMAS.has(pragma.name) || (D1_READS.has(pragma.name) && pragma.value === undefined)) return undefined
+	return `D1 runs only the pragmas it authorizes (developers.cloudflare.com/d1/sql-api/sql-statements), and wrangler's apply fails on this one with not authorized: SQLITE_AUTH; leave it out of the migrations`
+}
+
+/**
+ * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
+ * `-- comb:allow-unsafe:` overrides this
+ */
+function refuseUnrunnable({ code, dialect, stmt }: ReadStatement, sql: string, d1 = false): void {
 	if (dialect === "sqlite" && /^VACUUM\b/i.test(code)) {
 		throw new Error(
 			`${preview(stmt)}: VACUUM cannot run inside a migration's transaction; run it outside the migrations`,
 		)
 	}
-	/* r18 S2: SQLite refuses a change into WAL inside a transaction, so such a file could never apply */
-	if (dialect === "sqlite" && JOURNAL_MODE.test(code)) {
-		throw new Error(
-			`${preview(stmt)}: journal_mode is the database's setting, and SQLite will not change it inside the transaction comb runs each file in; set it outside the migrations`,
-		)
-	}
+	/* r18 S2 and r19 S1: a pragma the transaction or D1 refuses could never apply, so no approval clears it */
+	const pragma = dialect === "sqlite" ? pragmaOf(code) : undefined
+	const refusal = pragma === undefined ? undefined : pragmaRefusal(pragma, d1)
+	if (refusal !== undefined) throw new Error(`${preview(stmt)}: ${refusal}`)
 	/* S1 of the 0.15.0 review: the file's own BEGIN or COMMIT ends the batch that records it, so a
 	   later failure leaves what ran before it committed with no history row, to run again */
 	if (dialect === "sqlite" && SQLITE_TRANSACTION.test(code)) {
