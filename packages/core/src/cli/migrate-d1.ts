@@ -89,7 +89,9 @@ export async function migrateD1(request: D1Request, resolved: MigrateTarget | un
 		return { applied: [], pending: [] }
 	}
 	if (mode === "baseline") {
-		io.out(`\nBaseline done: ${(await baselineD1(target, read, io.out)).length} marked`)
+		const { hashed, marked } = await baselineD1(target, read, io.out)
+		const healed = hashed.length === 0 ? "" : `, ${hashed.length} hash${hashed.length === 1 ? "" : "es"} recorded`
+		io.out(`\nBaseline done: ${marked.length} marked${healed}`)
 		return { applied: [], pending: [] }
 	}
 	const yes = args.options["yes"] === true
