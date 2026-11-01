@@ -297,3 +297,27 @@ describe("buildListQuery's merged list, refused at build", () => {
 		)
 	})
 })
+
+/* r18 Q16: a limit no schema bounded is held to the default cap, and maxRowsPerShard to a whole number from 1 */
+describe("the bounds a list is made under", () => {
+	it("refuses a hand-made limit past the default maxLimit, and takes the schema's own", () => {
+		const parsed = { ...parse({}), limit: 1_000_000_000, limitBounded: undefined }
+		expect(() => buildListQuery({ ...SEALED, parsed, table: t })).toThrow(
+			expect.objectContaining({
+				cause: "limit 1000000000 is past 100; page by cursor, or bound it in the list schema",
+				status: 400,
+			}),
+		)
+		const wide = createListQuerySchema({ pagination: { maxLimit: 500 }, sort: ["k"] }).parse({ limit: "500" })
+		expect(() => buildListQuery({ ...SEALED, parsed: wide, table: t })).not.toThrow()
+	})
+
+	it.each([Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY])(
+		"refuses maxRowsPerShard %d when the list is made",
+		(max) => {
+			expect(() => merged({ order: "k.asc" }, max)).toThrow(
+				new TypeError(`merged.maxRowsPerShard ${max} is not a whole number from 1`),
+			)
+		},
+	)
+})

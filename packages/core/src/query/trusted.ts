@@ -57,10 +57,18 @@ function assertPageWithin(parsed: {
  * page does (Q16 of r17); a schema's own limit is one already. The key is the page's, so an app's
  * map of error keys needs no new one
  */
-function assertLimitWithin(parsed: { limit: number }): void {
-	if (Number.isInteger(parsed.limit) && parsed.limit >= 1) return
+function assertLimitWithin(parsed: { limit: number; limitBounded?: true | undefined }): void {
+	if (!Number.isInteger(parsed.limit) || parsed.limit < 1) {
+		throw new CombError({
+			cause: `limit ${String(parsed.limit)} is not a whole number from 1`,
+			errorKey: combErrorKeys.INVALID_PAGE,
+			status: "bad_request",
+		})
+	}
+	/* a limit no schema bounded is held to the default maxLimit, as such a page is to maxPage (Q16 of r18) */
+	if (parsed.limitBounded === true || parsed.limit <= PAGINATION_DEFAULTS.maxLimit) return
 	throw new CombError({
-		cause: `limit ${String(parsed.limit)} is not a whole number from 1`,
+		cause: `limit ${parsed.limit} is past ${PAGINATION_DEFAULTS.maxLimit}; page by cursor, or bound it in the list schema`,
 		errorKey: combErrorKeys.INVALID_PAGE,
 		status: "bad_request",
 	})

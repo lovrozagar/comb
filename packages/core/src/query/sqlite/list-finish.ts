@@ -55,6 +55,13 @@ function combId(tiebreak: SQLWrapper): SQL.Aliased<unknown> {
 	return (is(tiebreak, Column) ? value.mapWith(tiebreak) : value).as(COMB_ID)
 }
 
+/** Refuses a maxRowsPerShard that is no whole number from 1: the app's configuration, so a TypeError, never a 400 (Q16 of r18) */
+function assertMaxRows(merged: { maxRowsPerShard?: number | undefined }): void {
+	const max = merged.maxRowsPerShard
+	if (max !== undefined && (!Number.isInteger(max) || max < 1))
+		throw new TypeError(`merged.maxRowsPerShard ${max} is not a whole number from 1`)
+}
+
 /**
  * The rows each shard of a merged list reads by page number: from the list's first row to the
  * page's end and one more, as any shard may hold any of them; past `maxRowsPerShard` a 400
@@ -146,6 +153,7 @@ function finishOffset(list: Finish): Finished {
 function finish(given: Finish): Finished {
 	assertCursorWired(given.cursor)
 	assertLimitWithin(given.parsed)
+	if (given.merged !== undefined) assertMaxRows(given.merged)
 	return given.parsed.cursor ? finishCursor(given, given.parsed.cursor) : finishOffset(given)
 }
 

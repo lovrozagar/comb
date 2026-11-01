@@ -89,6 +89,8 @@ type ListQueryOutput<TSortField extends string = string> = {
 	 * maxPage where it is read
 	 */
 	pageBounded?: true | undefined
+	/** the schema bounded the limit under its own maxLimit; a hand-built one is held to the default (Q16 of r18) */
+	limitBounded?: true | undefined
 	/** Always true: the filter and the order were checked against the endpoint's fields (query/trusted.ts) */
 	validated: true
 }

@@ -130,6 +130,8 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 		sortOrderBy: z.partialRecord(sortFieldSchema, sortDirectionEnum),
 		/* set on every parse; optional, as ListQueryOutput types it, so a handler's input takes a hand-built object (U29) */
 		pageBounded: z.literal(true).optional(),
+		/* the limit's brand, as the page's: one the schema bounded under its own maxLimit (Q16 of r18) */
+		limitBounded: z.literal(true).optional(),
 		validated: z.literal(true),
 		...extendFields,
 	})
@@ -188,6 +190,7 @@ function createListQuerySchema<
 			q: optional.q,
 			sortOrderBy: sortOrderByOf(parsedSort),
 			pageBounded: true as const,
+			limitBounded: true as const,
 			validated: true as const,
 			...(pickExtended(extensions, data) as { [K in keyof T]: z.infer<T[K]> }),
 		}

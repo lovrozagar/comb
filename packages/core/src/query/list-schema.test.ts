@@ -460,6 +460,7 @@ describe("the parsed cursor (Q7)", () => {
 			"filterAst",
 			"lang",
 			"limit",
+			"limitBounded",
 			"page",
 			"pageBounded",
 			"parsedFields",

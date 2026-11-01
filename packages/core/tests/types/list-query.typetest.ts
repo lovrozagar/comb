@@ -67,6 +67,7 @@ expectTypeOf<keyof ListQueryOutput<"created_at">>().toEqualTypeOf<
 	| "filterAst"
 	| "lang"
 	| "limit"
+	| "limitBounded"
 	| "page"
 	| "pageBounded"
 	| "parsedFields"
