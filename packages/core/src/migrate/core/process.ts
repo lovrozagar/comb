@@ -29,11 +29,12 @@ const DEFAULT_MAX_BUFFER = 256 * 1024 * 1024
 /**
  * The child's environment: the parent's without any PG* variable, so libpq-style defaults a shell
  * happens to export (PGSSLMODE=disable, PGPASSWORD) never change a connection comb configured, and
- * PGPASSFILE pointed at nothing, so libpq's driver reads no ~/.pgpass the config does not name, as
- * comb's own reads read none (P6 of the 0.15.0 review); then `env` over it.
+ * PGPASSFILE and PGSERVICEFILE pointed at nothing, so libpq's driver reads no ~/.pgpass or
+ * ~/.pg_service.conf the config does not name, as comb's own reads read none (P6 of the 0.15.0
+ * review, P6 of r19); then `env` over it.
  */
 function childEnv(env: RunOptions["env"]): NodeJS.ProcessEnv {
-	const out: NodeJS.ProcessEnv = { PGPASSFILE: devNull }
+	const out: NodeJS.ProcessEnv = { PGPASSFILE: devNull, PGSERVICEFILE: devNull }
 	for (const [name, value] of Object.entries<string | undefined>(process.env))
 		if (!name.startsWith("PG")) out[name] = value
 	for (const [name, value] of Object.entries(env ?? {})) {

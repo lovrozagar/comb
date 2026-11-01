@@ -9,6 +9,7 @@
 import { accessSync, constants, readFileSync } from "node:fs"
 import { userInfo } from "node:os"
 import { passfilePassword } from "./pg-passfile.ts"
+import { LIBPQ_KEYS } from "./pg-url-keys.ts"
 
 /** Where a Postgres URL reaches, and its query, every key decoded */
 type LibpqUrl = {
@@ -30,45 +31,6 @@ type LibpqUrl = {
 const URI = /^postgres(?:ql)?:\/\/([^/?#]*)([^?#]*)(?:\?([^#]*))?$/
 /* a host in brackets (an IPv6 address) or bare, then its port */
 const HOST_PORT = /^(?:\[([^\]]*)\]|([^:[\]]*))(?::(\d*))?$/
-
-// lookup-table: the keys libpq reads itself, which no server takes as a setting
-const LIBPQ_KEYS = /* @__PURE__ */ new Set([
-	"channel_binding",
-	"connect_timeout",
-	"dbname",
-	"fallback_application_name",
-	"gssencmode",
-	"gsslib",
-	"host",
-	"hostaddr",
-	"keepalives",
-	"keepalives_count",
-	"keepalives_idle",
-	"keepalives_interval",
-	"krbsrvname",
-	"load_balance_hosts",
-	"passfile",
-	"password",
-	"port",
-	"require_auth",
-	"requirepeer",
-	"service",
-	"ssl_max_protocol_version",
-	"ssl_min_protocol_version",
-	"sslcert",
-	"sslcompression",
-	"sslcrl",
-	"sslcrldir",
-	"sslkey",
-	"sslnegotiation",
-	"sslmode",
-	"sslpassword",
-	"sslrootcert",
-	"sslsni",
-	"target_session_attrs",
-	"tcp_user_timeout",
-	"user",
-])
 
 /** A URL's query as libpq reads it: each key and value percent-decoded, a `+` kept as written */
 function queryParams(raw: string): Map<string, string> {

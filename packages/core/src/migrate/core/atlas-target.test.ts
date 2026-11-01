@@ -257,11 +257,11 @@ describe("atlasUrls", () => {
 })
 
 describe("a secret holding a percent sign", () => {
-	const url = "postgres://app@db.example.com/app?sslmode=require&sslpassword=50%25off"
+	const url = "postgres://app:50%25off@db.example.com/app?sslmode=require"
 	const percent: PgTarget = { devUrl: "postgres://localhost/dev", lockTimeout: "5s", schema: "public", url }
 
 	it("runs Atlas with the URL in its environment", () => {
-		expect(withAtlasEnv(percent, { url: true }, (env) => env.env["COMB_ATLAS_URL"])).toContain("sslpassword=50%25off")
+		expect(withAtlasEnv(percent, { url: true }, (env) => env.env["COMB_ATLAS_URL"])).toContain("app:50%25off@")
 	})
 })
 

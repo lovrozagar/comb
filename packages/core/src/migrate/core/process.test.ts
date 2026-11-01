@@ -80,8 +80,8 @@ describe("run: a process that cannot start", () => {
 
 /** What a child sees of its environment: COMB_A, whether PATH is there, and its PG* names */
 const ENV_OF =
-	"process.stdout.write(JSON.stringify({ a: process.env.COMB_A, passfile: process.env.PGPASSFILE, path: typeof process.env.PATH, pg: Object.keys(process.env).filter((k) => k.startsWith('PG') && k !== 'PGPASSFILE') }))"
-type Seen = { a?: string; passfile?: string; path: string; pg: string[] }
+	"process.stdout.write(JSON.stringify({ a: process.env.COMB_A, passfile: process.env.PGPASSFILE, path: typeof process.env.PATH, pg: Object.keys(process.env).filter((k) => k.startsWith('PG') && k !== 'PGPASSFILE' && k !== 'PGSERVICEFILE'), servicefile: process.env.PGSERVICEFILE }))"
+type Seen = { a?: string; passfile?: string; path: string; pg: string[]; servicefile?: string }
 const envOf = (env?: Record<string, string | undefined>) =>
 	JSON.parse(run("node", ["-e", ENV_OF], { env }).stdout) as Seen
 
@@ -89,11 +89,13 @@ describe("run: the child's environment", () => {
 	afterEach(() => vi.unstubAllEnvs())
 
 	/* the reviewer's reading of P6: libpq's driver reads ~/.pgpass for a URL without a password, a file the config does not name */
-	it("drops every PG* variable, and points the passfile at nothing, so a config's connection is the only one a child uses", () => {
+	/* P6 of r19: lib/pq reads ~/.pg_service.conf as it reads ~/.pgpass, so the service file points at nothing too */
+	it("drops every PG* variable, and points the passfile and service file at nothing, so a config's connection is the only one a child uses", () => {
 		vi.stubEnv("PGSSLMODE", "disable")
 		vi.stubEnv("PGPASSWORD", "inherited")
 		vi.stubEnv("PGPASSFILE", "/home/someone/.pgpass")
-		expect(envOf()).toEqual({ passfile: devNull, path: "string", pg: [] })
+		vi.stubEnv("PGSERVICEFILE", "/home/someone/.pg_service.conf")
+		expect(envOf()).toEqual({ passfile: devNull, path: "string", pg: [], servicefile: devNull })
 	})
 
 	it("adds env over the rest, and an undefined value removes one", () => {

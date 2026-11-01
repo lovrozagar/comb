@@ -14,6 +14,7 @@ import { blank } from "../../blank.ts"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
 import { RESERVED_SCHEMA_WORDS } from "./pg-keywords.ts"
 import { libpqUrl, type LibpqUrl, queryParams, tlsProblems, urlProblem, withParam } from "./pg-url.ts"
+import { keyProblems, stripsForAtlas } from "./pg-url-keys.ts"
 import { lockTimeoutMs } from "./pg-lock-timeout.ts"
 
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
@@ -104,6 +105,11 @@ function checkUrl(field: "devUrl" | "url", raw: string): { docker?: true; error?
 		return {
 			error: `${field} names a Unix socket as a percent-encoded host, which Atlas refuses; give its directory as ?host=, as in postgres://app@/db?host=/run/postgresql`,
 		}
+	/* lib/pq takes a service file's host, dbname and user over the URL's, where comb reads the URL (P6 of r19) */
+	if (url?.params.has("service") === true)
+		return {
+			error: `${field} names a libpq service, which Atlas reads from ~/.pg_service.conf and comb does not; write its host, port, dbname and user into the URL`,
+		}
 	if (url !== undefined) return { url }
 	return { error: `${field} is not ${accepted} URL; ${HINTS[problem]}` }
 }
@@ -128,7 +134,11 @@ function schemaProblem(schema: string): string | undefined {
 
 /** A checked URL field's errors: why it cannot be read, else why it cannot connect as its TLS options say */
 const fieldErrors = (field: "devUrl" | "url", checked: { error?: string; url?: LibpqUrl }): string[] =>
-	checked.error === undefined ? (checked.url === undefined ? [] : tlsProblems(field, checked.url)) : [checked.error]
+	checked.error === undefined
+		? checked.url === undefined
+			? []
+			: [...keyProblems(field, checked.url.params), ...tlsProblems(field, checked.url)]
+		: [checked.error]
 
 /** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */
 function pgUrlProblems(
@@ -157,12 +167,16 @@ function pgUrlProblems(
 	return { errors, warnings: url.url === undefined ? [] : hostWarnings(url.url) }
 }
 
+/** `raw` without the libpq keys that only tune the connection, which Atlas's driver would send the server as settings (P15 of r19) */
+const forAtlas = (raw: string): string =>
+	[...queryParams(raw)].reduce((url, [key, value]) => (stripsForAtlas(key, value) ? withParam(url, key) : url), raw)
+
 /** `raw` scoped to `schema` unless it names a search_path itself; edited as text, which a socket target with a password needs (P14) */
 const scoped = (raw: string, schema: string): string =>
-	queryParams(raw).has("search_path") ? raw : withParam(raw, "search_path", schema)
+	queryParams(raw).has("search_path") ? forAtlas(raw) : withParam(forAtlas(raw), "search_path", schema)
 
 /** `raw` with no search_path, so Atlas sees every schema of the database */
-const unscoped = (raw: string): string => withParam(raw, "search_path")
+const unscoped = (raw: string): string => withParam(forAtlas(raw), "search_path")
 
 /** The target URL Atlas gets: scoped to the schema, its lock wait bounded unless the URL sets one */
 function atlasTargetUrl(target: PgTarget): string {
