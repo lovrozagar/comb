@@ -14,6 +14,12 @@ type EventTrigger = { enabled: boolean; event: string; tags: string[] | undefine
 /** What a relation that is no table is: a sequence a column owns is the column's, which no baseline compares on its own */
 type Relation = "materialized view" | "owned sequence" | "sequence" | "view"
 
+/**
+ * What a view's query or a policy's expressions read: the relations and functions they name, by key,
+ * and the column names they read, `all` for a `*` (P4 of r18)
+ */
+type Reads = { columns: Set<string> | "all"; functions: Set<string>; relations: Set<string> }
+
 /** The facts of a history with nothing in it, its names keyed under `schema` */
 const emptyFacts = (schema: string): Facts => ({
 	casts: new Map(),
@@ -26,7 +32,9 @@ const emptyFacts = (schema: string): Facts => ({
 	eventTriggers: new Map(),
 	operators: new Map(),
 	parents: new Map(),
+	policyReads: new Map(),
 	policies: new Map(),
+	reads: new Map(),
 	relations: new Map(),
 	routines: new Map(),
 	schema,
@@ -102,7 +110,11 @@ type Facts = {
 	 * each table's triggers, with the writes that fire them, and `type` as Postgres's tgtype holds
 	 * when and for what it fires (row, before, instead of, each event's bit) (P13)
 	 */
-	triggers: Map<string, Array<{ enabled: boolean; events: TriggerEvent[]; name: string; type: number }>>
+	triggers: Map<string, Array<{ enabled: boolean; events: TriggerEvent[]; fn: string; name: string; type: number }>>
+	/** what each view and materialized view reads, by its key, for a CASCADE drop to follow (P4 of r18) */
+	reads: Map<string, Reads>
+	/** what each table's policies read, by policy name, for a CASCADE drop to follow (P4 of r18) */
+	policyReads: Map<string, Map<string, Reads>>
 }
 
 /** Every node under `node`, by its type, the type's fields with it */
@@ -191,6 +203,7 @@ export {
 	names,
 	type Node,
 	nodesOf,
+	type Reads,
 	type Relation,
 	type Routines,
 	tableOf,

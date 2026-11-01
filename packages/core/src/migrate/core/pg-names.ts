@@ -4,6 +4,7 @@
  * function, procedure and aggregate a migration defined, under each name it ever had.
  */
 import type { TriggerEvent } from "../types.ts"
+import { moveReads } from "./pg-cascade.ts"
 import { type Facts, keyOf, names, type Node, tableOf } from "./pg-nodes.ts"
 
 // lookup-table: the bits of a trigger's events, as pg_trigger numbers them
@@ -20,6 +21,8 @@ function moveTable(facts: Facts, from: string, to: string): void {
 		facts.columnTypes,
 		facts.parents,
 		facts.policies,
+		facts.policyReads,
+		facts.reads,
 		facts.relations,
 		facts.tables,
 		facts.triggers,
@@ -33,6 +36,7 @@ function moveTable(facts: Facts, from: string, to: string): void {
 	for (const parents of facts.parents.values()) for (const each of parents) if (each.parent === from) each.parent = to
 	for (const view of facts.views.values()) if (view.base === from) view.base = to
 	moveDefaults(facts, (key) => (key === from ? to : key))
+	moveReads(facts, (key) => (key === from ? to : key))
 }
 
 /** Each parent's default partition under the keys `move` gives the parent and the partition */
@@ -67,6 +71,8 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.operators,
 		facts.parents,
 		facts.policies,
+		facts.policyReads,
+		facts.reads,
 		facts.relations,
 		facts.tables,
 		facts.triggers,
@@ -86,6 +92,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 	for (const map of [facts.domains, facts.operators]) for (const [key, fn] of map) map.set(key, move(fn))
 	for (const key of Array.from(facts.defined)) facts.defined.add(move(key))
 	moveDefaults(facts, move)
+	moveReads(facts, move)
 }
 
 /** A trigger made, renamed or dropped */
@@ -98,7 +105,8 @@ function followTrigger(type: string, node: Node, facts: Facts): void {
 		const tgtype =
 			(node["row"] === true ? 1 : 0) | ((node["timing"] as number | undefined) ?? 0) | (node["events"] as number)
 		const kept = (facts.triggers.get(table) ?? []).filter((each) => each.name !== name)
-		facts.triggers.set(table, [...kept, { enabled: true, events, name, type: tgtype }])
+		const fn = keyOf(names(node["funcname"]), facts.schema)
+		facts.triggers.set(table, [...kept, { enabled: true, events, fn, name, type: tgtype }])
 	} else if (type === "RenameStmt" && node["renameType"] === "OBJECT_TRIGGER") {
 		const table = tableOf(node["relation"], facts.schema).key
 		for (const each of facts.triggers.get(table) ?? [])
@@ -188,6 +196,8 @@ function followDrop(node: Node, facts: Facts): void {
 		facts.views.delete(table)
 		facts.relations.delete(table)
 		facts.policies.delete(table)
+		facts.policyReads.delete(table)
+		facts.reads.delete(table)
 		facts.defaultPartitions.delete(table)
 		for (const [parent, partition] of Array.from(facts.defaultPartitions))
 			if (partition === table) facts.defaultPartitions.delete(parent)

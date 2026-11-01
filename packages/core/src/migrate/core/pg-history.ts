@@ -13,6 +13,7 @@
 import type { ExtractedSchema } from "../types.ts"
 import { followCatalogObject } from "./pg-catalog-objects.ts"
 import { followEventTrigger } from "./pg-events.ts"
+import { followCascade, followReads } from "./pg-cascade.ts"
 import { callIn, followDomain } from "./pg-domains.ts"
 import { followNames } from "./pg-names.ts"
 import { followRoutine } from "./pg-routines.ts"
@@ -223,6 +224,8 @@ function followRelation(type: string, node: Node, facts: Facts): boolean {
 function followTree(stmts: unknown, facts: Facts): void {
 	const defined = facts.defined
 	for (const [type, node] of nodesOf(stmts)) {
+		followCascade(type, node, facts)
+		followReads(type, node, facts)
 		followRoutine(type, node, facts)
 		followCatalogObject(type, node, facts)
 		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"]), facts.schema))

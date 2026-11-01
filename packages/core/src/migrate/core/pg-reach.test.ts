@@ -24,6 +24,8 @@ const FACTS: Facts = {
 		["g", [{ parent: "c", partition: true }]],
 	]),
 	triggers: new Map(),
+	policyReads: new Map(),
+	reads: new Map(),
 }
 
 const notes = (key: string, inh: boolean) =>

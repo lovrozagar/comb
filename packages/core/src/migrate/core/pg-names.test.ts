@@ -9,10 +9,10 @@ const ON = "CREATE TRIGGER t AFTER DELETE ON users FOR EACH ROW EXECUTE FUNCTION
 describe("a Postgres history's triggers and routines, by name", () => {
 	it("keeps a trigger's events, follows its rename and its table's rename, move and drop", () => {
 		expect(facts(ON).triggers).toEqual(
-			new Map([["users", [{ enabled: true, events: ["delete"], name: "t", type: 9 }]]]),
+			new Map([["users", [{ enabled: true, events: ["delete"], fn: "f", name: "t", type: 9 }]]]),
 		)
 		expect(facts(`${ON}ALTER TRIGGER t ON users RENAME TO u;`).triggers.get("users")).toEqual([
-			{ enabled: true, events: ["delete"], name: "u", type: 9 },
+			{ enabled: true, events: ["delete"], fn: "f", name: "u", type: 9 },
 		])
 		expect([...facts(`CREATE SCHEMA app;\n${ON}ALTER TABLE users SET SCHEMA app;`).triggers.keys()]).toEqual([
 			"app.users",
@@ -23,7 +23,7 @@ describe("a Postgres history's triggers and routines, by name", () => {
 			facts(`${ON}CREATE OR REPLACE TRIGGER t AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION f();`).triggers.get(
 				"users",
 			),
-		).toEqual([{ enabled: true, events: ["insert"], name: "t", type: 5 }])
+		).toEqual([{ enabled: true, events: ["insert"], fn: "f", name: "t", type: 5 }])
 	})
 
 	it("moves what the history attached to a renamed table, and the tables that name it a parent", () => {
@@ -47,8 +47,8 @@ describe("a Postgres history's triggers and routines, by name", () => {
 				[
 					"app.members",
 					[
-						{ enabled: true, events: ["delete"], name: "u", type: 9 },
-						{ enabled: true, events: ["delete"], name: "v", type: 9 },
+						{ enabled: true, events: ["delete"], fn: "f", name: "u", type: 9 },
+						{ enabled: true, events: ["delete"], fn: "f", name: "v", type: 9 },
 					],
 				],
 			]),

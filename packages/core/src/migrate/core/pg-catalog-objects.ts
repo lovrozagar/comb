@@ -23,12 +23,21 @@ function followPolicy(type: string, node: Node, facts: Facts): void {
 		const table = tableOf(node["table"], facts.schema).key
 		facts.policies.set(table, (facts.policies.get(table) ?? new Set()).add(String(node["policy_name"])))
 	} else if (type === "RenameStmt" && node["renameType"] === "OBJECT_POLICY") {
-		const held = facts.policies.get(tableOf(node["relation"], facts.schema).key)
+		const table = tableOf(node["relation"], facts.schema).key
+		const held = facts.policies.get(table)
 		if (held?.delete(String(node["subname"])) === true) held.add(String(node["newname"]))
+		const reads = facts.policyReads.get(table)
+		const read = reads?.get(String(node["subname"]))
+		if (reads !== undefined && read !== undefined) {
+			reads.delete(String(node["subname"]))
+			reads.set(String(node["newname"]), read)
+		}
 	} else if (type === "DropStmt" && node["removeType"] === "OBJECT_POLICY") {
 		for (const object of node["objects"] as Node[]) {
 			const parts = names((object["List"] as Node)["items"])
-			facts.policies.get(keyOf(parts.slice(0, -1), facts.schema))?.delete(parts.at(-1) as string)
+			const table = keyOf(parts.slice(0, -1), facts.schema)
+			facts.policies.get(table)?.delete(parts.at(-1) as string)
+			facts.policyReads.get(table)?.delete(parts.at(-1) as string)
 		}
 	}
 }
