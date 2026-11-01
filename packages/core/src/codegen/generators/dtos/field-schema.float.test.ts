@@ -15,7 +15,7 @@ const evaluate = (code: string) => new Function("z", "_m", `return ${code}`)(z, 
 /* C6 of r17: a read float's base already takes null (JSON writes ±Infinity as null), so null is published once */
 describe("generateFieldSchema: a nullable read float", () => {
 	const READ_FLOAT =
-		'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: undefined, type: "null" })])'
+		'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: void 0, type: "null" })])'
 
 	it("appends no second null to a column or an array element, and parses as before", () => {
 		expect(schema("r", 'c.real("r")', "read")).toBe(`${READ_FLOAT}.meta(_m.real)`)

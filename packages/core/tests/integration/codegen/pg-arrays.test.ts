@@ -106,3 +106,32 @@ describe("a Postgres array column, stored and read back (F49)", () => {
 		).rejects.toThrow(/matching dimensions/)
 	})
 })
+
+/* C3 of r18: a schema exported as Array or Set, which a c.json imports, takes no global's place in the generated code */
+describe("a grid beside c.json schemas exported as Array and Set", () => {
+	it("refuses a ragged grid and takes a rectangular one", async () => {
+		const dtos = await generatedDtos(
+			"c3",
+			`import * as z from "zod"
+import { integer } from "drizzle-orm/pg-core"
+export const Array = z.object({ a: z.string() })
+export const Set = z.object({ b: z.string() })
+export const grid = pgTable("grid", { id: c.id("grd"), one: c.json("one", Array), two: c.json("two", Set), cells: integer("cells").array("[][]").notNull() })`,
+			{ dialect: "postgres" },
+		)
+		const create = dtos["grid"]?.["gridDtoCreateSchema"] as z.ZodObject
+		const body = { one: { a: "x" }, two: { b: "y" } }
+		expect(
+			create.safeParse({
+				...body,
+				cells: [
+					[1, 2],
+					[3, 4],
+				],
+			}).success,
+		).toBe(true)
+		expect(create.safeParse({ ...body, cells: [[1, 2], [3]] }).error?.issues[0]?.message).toBe(
+			"Must be a rectangular array: every sub-array of a level the same length",
+		)
+	}, 120_000)
+})

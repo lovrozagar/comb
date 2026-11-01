@@ -113,7 +113,7 @@ function integerOf(annotations: FieldConstraints, range: Range, schemaType: Sche
    is sent, typed number | null; NaN, which z.toJSONSchema cannot represent, still fails it (F5 of the
    0.14.1 review, 27.12 and 27.18 of plan 15) */
 const READ_FLOAT =
-	'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: undefined, type: "null" })])'
+	'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: void 0, type: "null" })])'
 
 function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 	if (!isNumeric(field)) return field.dataType === "boolean" ? "z.boolean()" : undefined
@@ -202,7 +202,7 @@ const MAX_DIMENSIONS = 6
 
 /* Postgres refuses a ragged multidimensional array: each level's sub-arrays must share one shape */
 const RECTANGULAR =
-	'.refine((value) => { const shape = (part: unknown): string => (Array.isArray(part) ? `${part.length}[${[...new Set(part.map(shape))].join("|")}]` : ""); return !shape(value).includes("|") }, { message: "Must be a rectangular array: every sub-array of a level the same length" })'
+	'.refine((value) => { const shape = (part: unknown): string => (globalThis.Array.isArray(part) ? `${part.length}[${[...new globalThis.Set(part.map(shape))].join("|")}]` : ""); return !shape(value).includes("|") }, { message: "Must be a rectangular array: every sub-array of a level the same length" })'
 
 /**
  * An array column of `item`s: written, in exactly its declared dimensions, rectangular past one; read,
