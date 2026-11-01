@@ -166,6 +166,7 @@ function buildListQuery<TTable extends SQLiteTable>(
 
 function buildDerivedListQuery<TSortField extends string>(
 	opts: BuildDerivedListQueryOpts<TSortField> & {
+		anchor?: never
 		merged: NonNullable<BuildDerivedListQueryOpts<TSortField>["merged"]>
 	},
 ): MergedListQueryResult
@@ -189,6 +190,8 @@ function buildDerivedListQuery<TSortField extends string>(
 
 	/* a merged list reads no key back by reference, and a null anchor as a real NULL, as buildListQuery's does */
 	const merged = opts.merged !== undefined
+	if (merged && opts.anchor !== undefined)
+		throw new TypeError("a merged derived list reads no key by reference: give it idColumn, not anchor")
 	return finish({
 		cursor: {
 			cursorScope: opts.cursorScope,

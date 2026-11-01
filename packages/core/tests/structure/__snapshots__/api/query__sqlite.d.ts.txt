@@ -25,6 +25,7 @@ declare function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQuery
     merged?: undefined;
 }): ListQueryResult;
 declare function buildDerivedListQuery<TSortField extends string>(opts: BuildDerivedListQueryOpts<TSortField> & {
+    anchor?: never;
     merged: NonNullable<BuildDerivedListQueryOpts<TSortField>["merged"]>;
 }): MergedListQueryResult;
 declare function buildDerivedListQuery<TSortField extends string>(opts: BuildDerivedListQueryOpts<TSortField> & {

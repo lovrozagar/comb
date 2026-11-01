@@ -242,6 +242,19 @@ describe("buildDerivedListQuery's merged list", () => {
 		expect(paginateMerged(rest, next)[0].map(({ id }) => id)).toEqual(["c"])
 	})
 
+	it("refuses an anchor, which a merged list never reads a key back from", () => {
+		const opts = {
+			...SEALED,
+			anchor: { idColumn: t.id, table: t },
+			merged: {},
+			parsed: parse({}),
+			sortColumns: { k: t.k },
+		}
+		expect(() => buildDerivedListQuery(opts as never)).toThrow(
+			new TypeError("a merged derived list reads no key by reference: give it idColumn, not anchor"),
+		)
+	})
+
 	it("refuses a row that carries no sort field, which the merge orders by", () => {
 		const built = derived({ order: "k.asc" })
 		expect(() => paginateMerged([read([{ id: "a" }])], built)).toThrow(
