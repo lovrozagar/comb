@@ -220,13 +220,18 @@ function atlasConfig(needs: AtlasNeeds, revisions: string): string {
 	return lines.join("\n")
 }
 
+/** Refuse `target` as pgUrlProblems does for `needs`, before anything reaches a database (P2 of r19) */
+function refuseUrlProblems(target: PgTarget, needs: AtlasNeeds): void {
+	const { errors } = pgUrlProblems(target, needs)
+	if (errors.length > 0) throw new Error(errors.join("; "))
+}
+
 /**
  * Run `body` with an Atlas config for `target` and `needs` in a fresh 0700 directory, removed
  * afterwards however `body` ends. A target with errors is refused before anything is written.
  */
 function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T {
-	const { errors } = pgUrlProblems(target, needs)
-	if (errors.length > 0) throw new Error(errors.join("; "))
+	refuseUrlProblems(target, needs)
 	const dir = mkdtempSync(join(tmpdir(), "comb-atlas-"))
 	const remove = () => rmSync(dir, { force: true, recursive: true })
 	let pending = false
@@ -268,6 +273,7 @@ export {
 	atlasUrls,
 	pgUrlProblems,
 	type PgTarget,
+	refuseUrlProblems,
 	revisionsSchema,
 	SHARED_REVISIONS,
 	withAtlasEnv,

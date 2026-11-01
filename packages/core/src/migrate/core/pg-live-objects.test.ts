@@ -325,3 +325,19 @@ describe("readLiveObjects on a server without TLS", () => {
 		)
 	})
 })
+
+/* P2 of r19: the connection is built inside the read's try, so a TLS file it cannot open is named as the read's failure */
+describe("readLiveObjects on a TLS file it cannot open", () => {
+	it("says comb could not read the database, naming the file, never a bare ENOENT", async () => {
+		const { load, seen } = fakeConnect({ rows: [] })
+		await expect(
+			readLiveObjects(
+				{ ...TARGET, url: "postgres://app@db/app?sslmode=verify-ca&sslrootcert=/nonexistent/root.crt" },
+				load,
+			),
+		).rejects.toThrow(
+			/^comb could not read the database's .*: ENOENT: no such file or directory, open '\/nonexistent\/root\.crt'$/,
+		)
+		expect(seen.ended).toBe(false)
+	})
+})

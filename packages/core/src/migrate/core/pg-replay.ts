@@ -15,7 +15,7 @@
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
-import type { PgTarget } from "./atlas-target.ts"
+import { type PgTarget, refuseUrlProblems } from "./atlas-target.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import { type Connect, failureOf, loadPostgres, readCatalog } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
@@ -178,10 +178,12 @@ async function onDev<T>(
 		stops,
 	}: { after: (sql: ReturnType<Connect>) => Promise<T>; doing: string; load: () => Promise<Connect>; stops: string },
 ): Promise<T> {
+	refuseUrlProblems(target, { dev: true })
 	const connect = await load()
-	const sql = connect({ ...postgresOptionsOf(target.devUrl, "devUrl"), max: 1, onnotice: () => undefined })
 	const scrub = (text: string) => maskSecrets(text, [target.devUrl, target.url])
+	let sql: ReturnType<Connect> | undefined
 	try {
+		sql = connect({ ...postgresOptionsOf(target.devUrl, "devUrl"), max: 1, onnotice: () => undefined })
 		await sql.unsafe("BEGIN", [])
 		try {
 			if (target.schema !== "public")
@@ -207,7 +209,7 @@ async function onDev<T>(
 			cause: error,
 		})
 	} finally {
-		await sql.end()
+		await sql?.end()
 	}
 }
 

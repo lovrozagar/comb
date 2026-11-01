@@ -176,3 +176,19 @@ describe("replayCatalog on what dev refuses", () => {
 		await expect(replay).rejects.not.toThrow(/hunter2/)
 	})
 })
+
+/* P2 of r19, the replay's sibling: a devUrl pgUrlProblems refuses never reaches a connection */
+describe("replayCatalog on a devUrl comb refuses", () => {
+	it.each([
+		[TARGET.url, "url and devUrl are the same database; Atlas empties the dev database, so give it its own"],
+		[
+			"postgres://dev/dev?sslmode=verify-ca&sslrootcert=/nonexistent/root.crt",
+			"devUrl's sslrootcert /nonexistent/root.crt cannot be read",
+		],
+	])("refuses %s before connecting", async (devUrl, said) => {
+		const dev = fake([])
+		const replay = replayCatalog({ ...TARGET, devUrl }, { files: file("SELECT 1;"), targetUser: "u" }, dev.load)
+		await expect(replay).rejects.toThrow(said)
+		expect(dev.given).toEqual([])
+	})
+})

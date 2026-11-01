@@ -114,8 +114,9 @@ async function readLiveObjects(
 	load: () => Promise<Connect> = () => loadPostgres(COMPARES),
 ): Promise<LiveObjects> {
 	const connect = await load()
-	const sql = connect({ ...postgresOptionsOf(target.url, "url"), max: 1 })
+	let sql: ReturnType<Connect> | undefined
 	try {
+		sql = connect({ ...postgresOptionsOf(target.url, "url"), max: 1 })
 		return await readCatalog(sql, target.schema)
 	} catch (error) {
 		throw new Error(
@@ -125,7 +126,7 @@ async function readLiveObjects(
 			},
 		)
 	} finally {
-		await sql.end()
+		await sql?.end()
 	}
 }
 

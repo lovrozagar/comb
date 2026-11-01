@@ -140,7 +140,7 @@ export type LiveTarget = {
 export type LiveRead = (target: LiveTarget) => Promise<LiveObjects>;
 
 // migrate/core/pg-replay.d.ts
-import type { PgTarget } from "./atlas-target.ts";
+import { type PgTarget } from "./atlas-target.ts";
 import { type Connect } from "./pg-live-objects.ts";
 import type { LiveObjects } from "./pg-live-types.ts";
 /** A history file as baseline reads it */
@@ -244,6 +244,8 @@ declare const atlasUrls: (target: PgTarget) => {
 };
 /** The atlas.hcl for `needs`: getenv for each URL, and the history pinned to `revisions` */
 declare function atlasConfig(needs: AtlasNeeds, revisions: string): string;
+/** Refuse `target` as pgUrlProblems does for `needs`, before anything reaches a database (P2 of r19) */
+declare function refuseUrlProblems(target: PgTarget, needs: AtlasNeeds): void;
 /**
  * Run `body` with an Atlas config for `target` and `needs` in a fresh 0700 directory, removed
  * afterwards however `body` ends. A target with errors is refused before anything is written.
@@ -254,7 +256,7 @@ declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atl
  * OSS may say it left part of a schema out of what it compared (plan 14's 5.4)
  */
 declare const atlasNotices: (stderr: string) => string[];
-export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasNotices, atlasUrls, pgUrlProblems, type PgTarget, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
+export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasNotices, atlasUrls, pgUrlProblems, type PgTarget, refuseUrlProblems, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
 
 // migrate/core/pg-live-objects.d.ts
 import { COMPARED } from "./pg-live-catalog.ts";

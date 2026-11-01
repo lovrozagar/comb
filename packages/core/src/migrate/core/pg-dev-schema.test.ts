@@ -30,10 +30,10 @@ const target = (schema: string, devUrl = "postgres://dev:Dev-Secret-0451@localho
 describe("readyDevSchema", () => {
 	it("creates the schema on the dev database, its name quoted, and closes the connection", async () => {
 		const { load, seen } = fakeConnect()
-		await readyDevSchema(target('app"x'), load)
+		await readyDevSchema(target("app"), load)
 		expect(seen).toEqual({
 			ended: true,
-			queries: ['CREATE SCHEMA IF NOT EXISTS "app""x"'],
+			queries: ['CREATE SCHEMA IF NOT EXISTS "app"'],
 			connections: [
 				{
 					database: "dev",
@@ -89,7 +89,10 @@ describe("readyDevSchema: the dev database libpq reads from devUrl", () => {
 		const calls: unknown[][] = []
 		const connect = (...given: unknown[]) => (calls.push(given), { end: async () => undefined, unsafe: async () => [] })
 		await readyDevSchema(
-			target("app", "postgres://dev:pw@localhost/x?port=6000&dbname=dev&sslmode=disable&sslrootcert=/nonexistent.pem"),
+			target(
+				"app",
+				`postgres://dev:pw@localhost/x?port=6000&dbname=dev&sslmode=disable&sslrootcert=${import.meta.filename}`,
+			),
 			async () => connect,
 		)
 		expect(calls).toEqual([
@@ -116,5 +119,33 @@ describe("readyDevSchema on a connection every address refused", () => {
 		await expect(readyDevSchema(target("app"), fakeConnect(refused).load)).rejects.toThrow(
 			"comb could not create schema app on devUrl, where Atlas replays the migrations: connect ECONNREFUSED 127.0.0.1:5433",
 		)
+	})
+})
+
+/* P2 of r19: a devUrl pgUrlProblems refuses is refused before comb connects to anything, whatever the schema */
+describe("readyDevSchema: devUrl checked before any connection", () => {
+	const url = "postgres://app@db.example/app?sslmode=require"
+	it.each([
+		[
+			"the target itself",
+			url,
+			"url and devUrl are the same database; Atlas empties the dev database, so give it its own",
+		],
+		[
+			"a root certificate it cannot read",
+			"postgres://dev@localhost/dev?sslmode=verify-ca&sslrootcert=/nonexistent/root.crt",
+			"devUrl's sslrootcert /nonexistent/root.crt cannot be read",
+		],
+		[
+			"an sslmode libpq does not take",
+			"postgres://dev@localhost/dev?sslmode=verify_full",
+			"devUrl's sslmode verify_full is none libpq takes: disable, allow, prefer, require, verify-ca or verify-full",
+		],
+	])("refuses a devUrl that is %s, on schema app and public alike, connecting to nothing", async (_, devUrl, said) => {
+		for (const schema of ["app", "public"]) {
+			const { load, seen } = fakeConnect()
+			await expect(readyDevSchema({ devUrl, lockTimeout: "5s", schema, url }, load), schema).rejects.toThrow(said)
+			expect(seen.connections, schema).toEqual([])
+		}
 	})
 })

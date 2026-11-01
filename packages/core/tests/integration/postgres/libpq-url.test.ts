@@ -46,7 +46,7 @@ function spellings(url: string): Record<string, string> {
 	return {
 		dbname: `postgres://${userinfo}${at.host}/?dbname=${database}&sslmode=disable`,
 		port: `postgres://${userinfo}${at.hostname}/${database}?port=${at.port}&sslmode=disable`,
-		sslrootcert: `postgres://${userinfo}${at.host}/${database}?sslmode=disable&sslrootcert=/nonexistent.pem`,
+		sslrootcert: `postgres://${userinfo}${at.host}/${database}?sslmode=disable&sslrootcert=${import.meta.filename}`,
 	}
 }
 
