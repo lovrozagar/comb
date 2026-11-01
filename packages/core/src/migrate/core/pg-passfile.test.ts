@@ -28,6 +28,9 @@ const passwordOf = (url: string) => {
 	return typeof password === "function" ? (password as () => string)() : password
 }
 
+/** The password a socket target in /srv/pg takes from `file` */
+const socket = (file: string) => passwordOf(`postgres://app@/app?host=/srv/pg&passfile=${file}`)
+
 describe("postgresOptionsOf with a passfile", () => {
 	it("reads the first line that matches host, port, database and user, wildcards and escapes as libpq reads them", () => {
 		const file = passfile(
@@ -44,12 +47,23 @@ describe("postgresOptionsOf with a passfile", () => {
 		expect(passwordOf(`postgres://app:mine@db/app?passfile=${file}`)).toBe("mine")
 	})
 
-	/* R3 of plan 17: libpq's host field is the host given, else the hostaddr given, else localhost */
-	it("matches a hostaddr-only URL by its hostaddr, and a URL with both by its host", () => {
-		const file = passfile("localhost:5432:app:app:local\n10.0.0.5:5432:app:app:addr\ndb:5432:app:app:named\n")
-		expect(passwordOf(`postgres://app@/app?hostaddr=10.0.0.5&passfile=${file}`)).toBe("addr")
+	/*
+	 * P11 of r19, ruled: the host rule of Atlas's driver, lib/pq, where it and libpq differ, so comb and
+	 * Atlas take one password from one file (runs/2840532-probe-p11-passfile-*): no host is localhost
+	 * whatever the hostaddr, and a socket matches its directory or localhost, the first line either way
+	 */
+	it("matches a hostaddr-only URL as localhost, never by its hostaddr, and a URL with both by its host", () => {
+		const file = passfile("10.0.0.5:5432:app:app:addr\nlocalhost:5432:app:app:local\ndb:5432:app:app:named\n")
+		expect(passwordOf(`postgres://app@/app?hostaddr=10.0.0.5&passfile=${file}`)).toBe("local")
 		expect(passwordOf(`postgres://app@db/app?hostaddr=10.0.0.5&passfile=${file}`)).toBe("named")
 		expect(passwordOf(`postgres://app@/app?passfile=${file}`)).toBe("local")
+	})
+
+	it("matches a socket by its directory or localhost, whichever line comes first", () => {
+		expect(socket(passfile("/srv/pg:5432:app:app:path\n"))).toBe("path")
+		expect(socket(passfile("localhost:5432:app:app:local\n/srv/pg:5432:app:app:path\n"))).toBe("local")
+		expect(socket(passfile("/srv/pg:5432:app:app:path\nlocalhost:5432:app:app:local\n"))).toBe("path")
+		expect(socket(passfile("/run/postgresql:5432:app:app:other\n"))).toBe("")
 	})
 
 	it("reads no password from a missing file, as libpq reads none", () => {
