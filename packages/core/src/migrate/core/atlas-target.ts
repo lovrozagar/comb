@@ -10,6 +10,7 @@ import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { blank } from "../../blank.ts"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
 import { RESERVED_SCHEMA_WORDS } from "./pg-keywords.ts"
 import { libpqUrl, type LibpqUrl, queryParams, tlsProblems, urlProblem, withParam } from "./pg-url.ts"
@@ -93,7 +94,7 @@ function databaseOf(url: LibpqUrl): string {
 
 /** One URL field checked: the URL as libpq reads it, a docker:// dev database, or the error that names the field (never its value) */
 function checkUrl(field: "devUrl" | "url", raw: string): { docker?: true; error?: string; url?: LibpqUrl } {
-	if (raw.trim() === "") return { error: `${field} is empty` }
+	if (blank(raw)) return { error: `${field} is empty` }
 	if (field === "devUrl" && isDocker(raw)) return { docker: true }
 	const accepted = field === "devUrl" ? "a postgres:// or docker://" : "a postgres://"
 	const url = libpqUrl(raw)

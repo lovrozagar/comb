@@ -6,6 +6,7 @@
  * full-access token (S6 of the 0.15.0 review, S3 of r18).
  */
 import fs from "node:fs"
+import { blank } from "../blank.ts"
 import { absentDatabase } from "../migrate/drivers/absent.ts"
 import { DatabaseMissing } from "../migrate/drivers/missing.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
@@ -35,11 +36,11 @@ async function readOrAbsent(connect: (readonly: boolean) => Promise<Connection>,
 	}
 }
 
-/** Why the provider cannot connect as given: a libsql url or a turso apiToken left empty, which loads (P9 of r18) */
+/** Why the provider cannot connect as given: a libsql url or a turso apiToken left blank, which loads (P9 of r18, S5 of r19) */
 function emptyCredential(provider: ConnectionProviderConfig): string | undefined {
-	if (provider.type === "libsql" && provider.url === "")
+	if (provider.type === "libsql" && blank(provider.url))
 		return "url is empty: set the libsql provider's url for this database"
-	if (provider.type === "turso" && provider.apiToken === "")
+	if (provider.type === "turso" && blank(provider.apiToken))
 		return "apiToken is empty: set the turso provider's apiToken for this database"
 	return undefined
 }

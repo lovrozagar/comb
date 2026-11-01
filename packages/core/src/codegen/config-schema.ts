@@ -5,6 +5,7 @@
  * cannot drift.
  */
 import * as z from "zod"
+import { nonBlank } from "../blank.ts"
 import { type CodegenConfig, GENERATORS } from "./config.ts"
 
 /* built on use, as the migrate config's schema is: module scope stays free of work */
@@ -12,21 +13,23 @@ const databaseSchema = () =>
 	z.strictObject({
 		dialect: z.enum(["postgres", "sqlite"]).optional(),
 		driver: z.enum(["bun-sqlite", "d1", "libsql", "neon", "turso"]).optional(),
-		filePrefix: z.string().min(1).optional(),
+		filePrefix: nonBlank().optional(),
 		fts: z
-			.record(
-				z.string(),
-				z.strictObject({ columns: z.array(z.string().min(1)).min(1), tokenizer: z.string().optional() }),
-			)
+			.record(nonBlank(), z.strictObject({ columns: z.array(nonBlank()).min(1), tokenizer: z.string().optional() }))
 			.optional(),
 		generators: z.array(z.enum(GENERATORS)).optional(),
-		output: z.partialRecord(z.enum([...GENERATORS, "default"]), z.string().min(1)).optional(),
-		partitions: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
-		tables: z.string().min(1),
+		output: z.partialRecord(z.enum([...GENERATORS, "default"]), nonBlank()).optional(),
+		partitions: z.record(nonBlank(), z.array(nonBlank()).min(1)).optional(),
+		tables: nonBlank(),
 	})
 
 /** comb.config.ts's schema */
 const codegenConfigSchema = (): z.ZodType<CodegenConfig> =>
-	z.strictObject({ databases: z.record(z.string(), databaseSchema()) })
+	z.strictObject({
+		/* S6 of r19: an empty map generates nothing, and CI would pass on stale files, as comb.migrate.config.ts refuses */
+		databases: z
+			.record(nonBlank(), databaseSchema())
+			.refine((databases) => Object.keys(databases).length > 0, { message: "databases declares no database" }),
+	})
 
 export { codegenConfigSchema }

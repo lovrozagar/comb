@@ -115,6 +115,9 @@ describe("openSqliteTarget on a connection string that is empty", () => {
 	it.each([
 		[{ type: "libsql" as const, url: "" }, "url is empty: set the libsql provider's url for this database"],
 		[{ ...TURSO, apiToken: "" }, "apiToken is empty: set the turso provider's apiToken for this database"],
+		/* S5 of r19: blank is empty, as Postgres's URL check reads it */
+		[{ type: "libsql" as const, url: "  " }, "url is empty: set the libsql provider's url for this database"],
+		[{ ...TURSO, apiToken: " \t" }, "apiToken is empty: set the turso provider's apiToken for this database"],
 	])("refuses %j, naming the field", async (provider, message) => {
 		await expect(openSqliteTarget(request("status"), resolved(provider))).rejects.toThrow(message)
 	})

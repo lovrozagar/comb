@@ -3,6 +3,7 @@
  * Every object is strict, so a misspelled key is refused by name rather than dropped for its default.
  */
 import * as z from "zod"
+import { nonBlank } from "../blank.ts"
 import type { DatabaseConfig } from "./types.ts"
 import { lockTimeoutMs } from "./core/pg-lock-timeout.ts"
 
@@ -23,14 +24,12 @@ const tursoProviderSchema = () =>
 	z.strictObject({
 		apiToken: z.string(),
 		/* the provider names its database, as D1's does; an environment's name is a label (K2 of r18) */
-		databaseName: z
-			.string({
-				error:
-					"the turso provider names its database by databaseName: move the Turso database's name there (0.16 read it from the environment's name)",
-			})
-			.min(1),
-		group: z.string().min(1).default("default"),
-		org: z.string().min(1),
+		databaseName: nonBlank(
+			undefined,
+			"the turso provider names its database by databaseName: move the Turso database's name there (0.16 read it from the environment's name)",
+		),
+		group: nonBlank().default("default"),
+		org: nonBlank(),
 		type: z.literal("turso"),
 	})
 
@@ -44,7 +43,7 @@ const providerInputSchema = () =>
 			url: z.string(),
 		}),
 		z.strictObject({
-			path: z.string().min(1),
+			path: nonBlank(),
 			type: z.literal("bun-sqlite"),
 		}),
 		z.strictObject({
@@ -57,7 +56,7 @@ const providerInputSchema = () =>
 					if (typeof ms === "string") ctx.addIssue({ code: "custom", message: ms })
 				})
 				.optional(),
-			schema: z.string().min(1).optional(),
+			schema: nonBlank().optional(),
 			type: z.literal("postgres"),
 			/* checked when a command resolves its environment, so one unset in this shell blocks no other (P5) */
 			url: z.string(),
@@ -76,17 +75,17 @@ const providerInputSchema = () =>
 						"databaseId is gone: wrangler finds the database by databaseName and the wrangler config's database_id",
 				})
 				.optional(),
-			databaseName: z.string().min(1),
+			databaseName: nonBlank(),
 			local: z.boolean().optional(),
 			type: z.literal("d1"),
-			wranglerConfig: z.string().min(1).optional(),
-			wranglerEnv: z.string().min(1).optional(),
+			wranglerConfig: nonBlank().optional(),
+			wranglerEnv: nonBlank().optional(),
 		}),
 	])
 
 const environmentConfigInputSchema = () =>
 	z.strictObject({
-		name: z.string().min(1).optional(),
+		name: nonBlank().optional(),
 		provider: providerInputSchema().optional(),
 	})
 
@@ -131,21 +130,18 @@ function shapeIssues(db: DatabaseInput): Array<{ message: string; path: string[]
 const databaseConfigInputSchema = () =>
 	z
 		.strictObject({
-			codegen: z.string().min(1).optional(),
-			drizzleConfigPath: z
-				.string()
-				.refine((path) => path.trim() !== "", {
-					message: "drizzleConfigPath is empty; remove it to use the project's drizzle.config.ts, or name the file",
-				})
-				.optional(),
+			codegen: nonBlank().optional(),
+			drizzleConfigPath: nonBlank(
+				"drizzleConfigPath is empty; remove it to use the project's drizzle.config.ts, or name the file",
+			).optional(),
 			environments: z
 				.record(
-					z.string().min(1, { message: "an environment needs a name: -e cannot choose one keyed by the empty string" }),
+					nonBlank("an environment needs a name: -e cannot choose one keyed by a blank string"),
 					environmentConfigInputSchema(),
 				)
 				.optional(),
-			migrationsDir: z.string().min(1),
-			name: z.string().min(1).optional(),
+			migrationsDir: nonBlank(),
+			name: nonBlank().optional(),
 			provider: providerInputSchema().optional(),
 		})
 		.superRefine((db, ctx) => {

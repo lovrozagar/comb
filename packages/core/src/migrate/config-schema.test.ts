@@ -116,7 +116,7 @@ describe("parseConfig: values refused at load", () => {
 					core: { environments: { "": { provider: { path: "x.db", type: "bun-sqlite" } } }, migrationsDir: "./m" },
 				},
 			},
-			"an environment needs a name: -e cannot choose one keyed by the empty string",
+			"an environment needs a name: -e cannot choose one keyed by a blank string",
 		],
 		[
 			{
@@ -152,6 +152,39 @@ describe("parseConfig: the turso provider's databaseName", () => {
 		}
 		expect(() => parseConfig(config)).toThrow(
 			"the turso provider names its database by databaseName: move the Turso database's name there (0.16 read it from the environment's name)",
+		)
+	})
+})
+
+/* K7 of r19 (K4's siblings): every name and path a config states is held to one rule, non-blank, at load */
+/** A provider of each kind with `extra` on it */
+const d1With = (extra: Record<string, unknown>) => ({ databaseName: "core", type: "d1", ...extra })
+const tursoWith = (extra: Record<string, unknown>) => ({
+	apiToken: "t",
+	databaseName: "core",
+	org: "acme",
+	type: "turso",
+	...extra,
+})
+const pgWith = (extra: Record<string, unknown>) => ({ type: "postgres", url: "", ...extra })
+
+describe("parseConfig: a blank name or path, wherever the config states one", () => {
+	it.each([
+		["migrationsDir", { databases: { core: { migrationsDir: "  ", provider: { path: "x.db", type: "bun-sqlite" } } } }],
+		["name", coreWith({ name: " " })],
+		["codegen", coreWith({ codegen: "\t" })],
+		["path", coreWith({ provider: { path: "  ", type: "bun-sqlite" } })],
+		["databaseName", coreWith({ provider: d1With({ databaseName: "   " }) })],
+		["wranglerConfig", coreWith({ provider: d1With({ wranglerConfig: " " }) })],
+		["wranglerEnv", coreWith({ provider: d1With({ wranglerEnv: " " }) })],
+		["databaseName", coreWith({ provider: tursoWith({ databaseName: "  " }) })],
+		["org", coreWith({ provider: tursoWith({ org: " " }) })],
+		["group", coreWith({ provider: tursoWith({ group: " " }) })],
+		["schema", coreWith({ provider: pgWith({ schema: "  " }) })],
+		["environments", coreWith({ environments: { "  ": { provider: { path: "x.db", type: "bun-sqlite" } } } })],
+	])("refuses a blank %s, naming it", (field, config) => {
+		expect(() => parseConfig(config)).toThrow(
+			new RegExp(`${field}.*blank|blank.*${field}|an environment needs a name`, "s"),
 		)
 	})
 })

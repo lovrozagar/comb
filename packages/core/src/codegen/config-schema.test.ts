@@ -48,3 +48,24 @@ describe("codegenConfigSchema (K14 of the 0.15.0 review)", () => {
 		expect(result.error?.issues.map((issue) => issue.path)).toContainEqual(path)
 	})
 })
+
+/* S6 of r19 (K4's sibling in comb.config.ts), and the blank names and paths beside it */
+describe("codegenConfigSchema on what it declares empty or blank", () => {
+	it("refuses a config that declares no database, as comb.migrate.config.ts's schema does", () => {
+		const result = codegenConfigSchema().safeParse({ databases: {} })
+		expect(result.error?.issues.map((issue) => issue.message)).toEqual(["databases declares no database"])
+	})
+
+	it.each([
+		["tables", { tables: "  " }],
+		["filePrefix", { filePrefix: " ", tables: "./t.ts" }],
+		["output", { output: { dtos: "\t" }, tables: "./t.ts" }],
+		["fts", { fts: { post: { columns: [" "] } }, tables: "./t.ts" }],
+		["partitions", { partitions: { audit: ["  "] }, tables: "./t.ts" }],
+	])("refuses a blank %s", (field, database) => {
+		const result = codegenConfigSchema().safeParse({ databases: { core: database } })
+		expect(result.error?.issues.map((issue) => [issue.path[2], issue.message])).toEqual([
+			[field, expect.stringMatching(/blank/)],
+		])
+	})
+})
