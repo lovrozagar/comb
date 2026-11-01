@@ -34,17 +34,18 @@ function preparedOf(codes: readonly string[]): Map<string, string> {
 	return out
 }
 
-/** The findings of a pragma: foreign_keys cautious, writable_schema unsafe, any other none of its own */
+/** The findings of a pragma: foreign_keys off cautious, writable_schema unsafe, any other none of its own */
 function pragmaFinding(code: string): Finding | undefined {
-	const name = pragmaOf(code)?.name
-	/* SQLite ignores it inside a transaction, so the file's own off never turns a cascade or a check off */
-	if (name === "foreign_keys") {
+	const pragma = pragmaOf(code)
+	/* SQLite ignores it inside a transaction, so the file's own off never turns a cascade or a check off; on is
+	   the state the transaction keeps anyway, so it carries no note (S4 of r19) */
+	if (pragma?.name === "foreign_keys" && /^(?:off|false|no|0)$/i.test(pragma.value ?? "")) {
 		return {
 			level: "cautious",
 			note: "does nothing inside the transaction comb runs each file in: foreign keys stay on, and comb migrate diff writes defer_foreign_keys instead",
 		}
 	}
-	if (name === "writable_schema") return { level: "unsafe", note: "lets a statement rewrite the schema itself" }
+	if (pragma?.name === "writable_schema") return { level: "unsafe", note: "lets a statement rewrite the schema itself" }
 	return undefined
 }
 

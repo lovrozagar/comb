@@ -24,8 +24,13 @@ type ApprovalOptions = {
 	yes: boolean
 }
 
-/** May run, with the in-file approval to report when that is what let it; or refused, and why */
-type Approval = { approvedBy?: string | undefined; ok: true } | { message: string; ok: false }
+/**
+ * May run, with the in-file approval to report when that is what let it, and the cautious statements to print when
+ * nobody was asked about them (S4 of r19); or refused, and why
+ */
+type Approval =
+	| { approvedBy?: string | undefined; cautions?: string[] | undefined; ok: true }
+	| { message: string; ok: false }
 
 const ALLOW_UNSAFE = /^--[ \t]*comb:allow-unsafe:[ \t]*(\S.*?)[ \t]*$/
 const MARKER = '"-- comb:allow-unsafe: <reason>"'
@@ -52,19 +57,24 @@ async function approveMigration(migration: Reviewed, options: ApprovalOptions): 
 	const dialect = options.dialect ?? "sqlite"
 	const unsafe = c.safety === "unsafe"
 	const approvedBy = unsafe ? inFileApproval(migration.sql, dialect) : undefined
-	if (approvedBy !== undefined) return { approvedBy, ok: true }
-	if (!unsafe && options.yes) return { ok: true }
+	/* a file that runs unasked still shows its cautious notes, as one refused or asked about does */
+	const cautions = c.cautiousStatements.length > 0 ? { cautions: [...c.cautiousStatements] } : {}
+	if (approvedBy !== undefined) return { approvedBy, ok: true, ...cautions }
+	if (!unsafe && options.yes) return { ok: true, ...cautions }
 	const statements = unsafe ? c.unsafeStatements : c.cautiousStatements
 	/* a drop a listed statement already shows is not named twice: each is read for what it drops */
 	const shown = new Set(statements.flatMap((stmt) => extractDropStatements(stmt, { dialect })))
 	const drops = migration.drops.filter((drop) => !shown.has(drop))
 	const listed = [...new Set([...drops, ...statements])]
-	if (options.confirm !== undefined && (await options.confirm(dropsQuestion(listed, options.target))))
-		return { ok: true }
+	/* an unsafe file's cautious statements follow its unsafe ones, so a note on them is read where it matters */
+	const also = unsafe ? c.cautiousStatements : []
+	const question = dropsQuestion([...listed, ...also.map((stmt) => `cautious: ${stmt}`)], options.target)
+	if (options.confirm !== undefined && (await options.confirm(question))) return { ok: true }
 	const how = unsafe
 		? `confirm it on a terminal, or approve it in the file with a line ${MARKER}`
 		: "pass --yes or confirm it on a terminal"
-	return { message: `${migration.filename} is ${c.safety} (${listed.join("; ")}); ${how}`, ok: false }
+	const cautious = also.length > 0 ? `; also cautious: (${also.join("; ")})` : ""
+	return { message: `${migration.filename} is ${c.safety} (${listed.join("; ")})${cautious}; ${how}`, ok: false }
 }
 
 export { type Approval, type ApprovalOptions, approveMigration, inFileApproval }

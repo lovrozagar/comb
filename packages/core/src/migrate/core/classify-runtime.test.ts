@@ -29,6 +29,14 @@ describe("runtimeFindings", () => {
 		},
 	)
 
+	/* S4 of r19: on is the state comb's transaction keeps anyway, and a read changes nothing, so neither carries the note */
+	it.each(["PRAGMA foreign_keys = on", "PRAGMA foreign_keys(1)", "PRAGMA foreign_keys"])(
+		"gives %j no finding of its own",
+		(sql) => {
+			expect(runtimeFindings(sql, new Map(), none)).toEqual([])
+		},
+	)
+
 	it("rates a quoted writable_schema unsafe", () => {
 		expect(runtimeFindings('PRAGMA "writable_schema" = 1', new Map(), none).map((finding) => finding.level)).toEqual([
 			"unsafe",

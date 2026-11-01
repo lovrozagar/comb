@@ -40,7 +40,7 @@ describe("approveMigration", () => {
 
 	it("lets --yes cover a cautious file and not an unsafe one", async () => {
 		const yes = { target: "core", yes: true }
-		expect(await approveMigration(reviewed("DROP INDEX i;"), yes)).toEqual({ ok: true })
+		expect(await approveMigration(reviewed("DROP INDEX i;"), yes)).toEqual({ cautions: ["DROP INDEX i"], ok: true })
 		expect(await approveMigration(reviewed("DROP TABLE post;"), yes)).toMatchObject({ ok: false })
 	})
 
@@ -96,5 +96,55 @@ describe("approveMigration: what the refusal names", () => {
 		const shown = { ...reviewed("DROP TABLE bb;"), drops: ["DROP TABLE b", "DROP TABLE bb"] }
 		const approval = await approveMigration(shown, nobody)
 		expect(approval.ok === false && approval.message).toMatch(/^2_x\.sql is unsafe \(DROP TABLE b; DROP TABLE bb\);/)
+	})
+})
+
+/*
+ * S4 of r19: a cautious note is shown wherever the file runs or is refused: beside an unsafe file's statements, under its
+ * in-file approval, and when --yes runs a cautious file, so the note on a foreign_keys pragma reaches the author it is for
+ */
+describe("approveMigration's cautious notes, on every path a file takes", () => {
+	const KEEP_CHILDREN = "PRAGMA foreign_keys = off;\nDROP TABLE parent;\nPRAGMA foreign_keys = on;"
+	const note = /PRAGMA foreign_keys = off \(does nothing inside the transaction comb runs each file in/
+
+	it("lists an unsafe file's cautious statements after its unsafe ones, each once", async () => {
+		const refused = await approveMigration(reviewed(KEEP_CHILDREN), nobody)
+		expect(refused.ok).toBe(false)
+		const message = (refused as { message: string }).message
+		expect(message).toMatch(
+			/^2_x\.sql is unsafe \(DROP TABLE parent.*\); also cautious: \(PRAGMA foreign_keys = off \(/,
+		)
+		expect(message.match(new RegExp(note.source, "g"))).toHaveLength(1)
+	})
+
+	it("asks a person about the cautious statements too", async () => {
+		const asked: string[] = []
+		const confirm = (question: string) => {
+			asked.push(question)
+			return Promise.resolve(true)
+		}
+		expect(await approveMigration(reviewed(KEEP_CHILDREN), { ...nobody, confirm })).toEqual({ ok: true })
+		expect(asked.join("\n")).toMatch(note)
+	})
+
+	it.each([
+		["approved in the file", `-- comb:allow-unsafe: keep the children\n${KEEP_CHILDREN}`, nobody],
+		[
+			"cautious, run with --yes",
+			"PRAGMA foreign_keys = off;\nCREATE TABLE t (id INTEGER PRIMARY KEY);",
+			{ ...nobody, yes: true },
+		],
+	])("returns the cautious statements of a file %s, to print", async (_, sql, options) => {
+		const approval = await approveMigration(reviewed(sql), options)
+		expect(approval).toMatchObject({ ok: true })
+		expect((approval as { cautions: string[] }).cautions).toEqual([expect.stringMatching(note)])
+	})
+
+	it("rates foreign_keys on, SQLite's own state inside comb's transaction, safe, so only off carries the note", () => {
+		expect(classifyMigration("PRAGMA foreign_keys = on;", { dialect: "sqlite" }).safety).toBe("safe")
+		expect(
+			classifyMigration('PRAGMA foreign_keys = ON;\nPRAGMA "foreign_keys" = 1;', { dialect: "sqlite" }).safety,
+		).toBe("safe")
+		expect(classifyMigration("PRAGMA foreign_keys = off;", { dialect: "sqlite" }).cautiousStatements).toHaveLength(1)
 	})
 })

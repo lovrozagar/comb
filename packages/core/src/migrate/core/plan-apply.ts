@@ -168,6 +168,7 @@ async function approveAll(
 				classified.map(({ name }) => name),
 			)
 		if (approval.approvedBy !== undefined) print(`Approved in ${each.name}: ${approval.approvedBy}`)
+		for (const caution of approval.cautions ?? []) print(`Cautious in ${each.name}: ${caution}`)
 		pending.push({ ...each, migration })
 	}
 	return pending

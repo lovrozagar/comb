@@ -183,3 +183,24 @@ describe("planApply on a database holding only its migration history", () => {
 		await conn.close()
 	})
 })
+
+/* S4 of r19: the note on a file's foreign_keys pragma is printed on every run that lets it through, once */
+describe("planApply on an approved file with a cautious statement", () => {
+	it.each([
+		[
+			"approved in the file",
+			"-- comb:allow-unsafe: remove parent 1, keep its children\nPRAGMA foreign_keys = off;\nDROP TABLE parent;\nPRAGMA foreign_keys = on;",
+		],
+		[
+			"cautious, under --yes",
+			"PRAGMA foreign_keys = off;\nCREATE TABLE parent (id INTEGER PRIMARY KEY);\nPRAGMA foreign_keys = on;",
+		],
+	])("prints its note when %s", async (_, sql) => {
+		const { out, run } = plan({ "1_x.sql": sql })
+		await run()
+		const cautious = out.filter((line) => line.startsWith("Cautious in 1_x.sql: "))
+		expect(cautious).toEqual([
+			expect.stringMatching(/^Cautious in 1_x\.sql: PRAGMA foreign_keys = off \(does nothing inside/),
+		])
+	})
+})
