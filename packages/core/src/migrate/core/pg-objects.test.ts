@@ -221,8 +221,10 @@ describe("separatePgObjects on a statement about a view by another keyword", () 
 		const made = separatePgObjects(`${VIEW}${TRIGGER}`)
 		expect(made.plain).toEqual(["CREATE TABLE t (id int)"])
 		expect(made.state.objects.get("view v")?.extras).toEqual([TRIGGER.slice(0, -1)])
+		separatePgObjects("COMMENT ON VIEW v IS 'x';", made.state)
 		separatePgObjects("DROP TRIGGER IF EXISTS tr ON v;", made.state)
-		expect(made.state.objects.get("view v")?.extras).toEqual([])
+		expect(made.state.objects.get("view v")?.extras).toEqual(["COMMENT ON VIEW v IS 'x'"])
+		expect(separatePgObjects("DROP TRIGGER tr ON t;", made.state).plain).toEqual(["DROP TRIGGER tr ON t"])
 		expect(
 			separatePgObjects("CREATE TRIGGER tr AFTER INSERT ON t EXECUTE FUNCTION f();", made.state).plain,
 		).toHaveLength(1)

@@ -55,9 +55,24 @@ CREATE VIEW s.vb AS SELECT id FROM u; CREATE POLICY p ON u USING (id IN (SELECT 
 		expect([left(schema).relations, left(schema).policies]).toEqual([[], []])
 	})
 
+	it("takes a view that reads every column, whatever it names after the *, and keeps a policy that reads another", () => {
+		const sql = `${BASE} CREATE VIEW star AS SELECT *, id AS again FROM t; CREATE POLICY p ON u USING (id IN (SELECT id FROM t));
+ALTER TABLE u RENAME TO u2; ALTER TABLE t DROP COLUMN d CASCADE;`
+		expect([left(sql).relations, left(sql).policies]).toEqual([[], ["u2.p"]])
+	})
+
+	it("takes everything in the history's own schema, routines too, when that schema is dropped", () => {
+		const sql = `${BASE} CREATE VIEW v AS SELECT id FROM t; CREATE SCHEMA s; CREATE FUNCTION s.g() RETURNS int LANGUAGE sql AS 'SELECT 1';
+CREATE TABLE s.k (id int); CREATE TRIGGER tr BEFORE INSERT ON s.k FOR EACH ROW EXECUTE FUNCTION s.g(); DROP SCHEMA s CASCADE; DROP SCHEMA public CASCADE;`
+		expect(left(sql)).toEqual({ policies: [], relations: [], triggers: [] })
+	})
+
 	it("takes the views that read a column of a dropped type", () => {
 		const sql = `CREATE TYPE mood AS ENUM ('ok'); CREATE TABLE t (id int, m mood); CREATE VIEW v AS SELECT m FROM t;
 CREATE VIEW w AS SELECT id FROM t; DROP TYPE mood CASCADE;`
 		expect(left(sql).relations).toEqual(["w"])
+		const two = `CREATE TYPE a AS ENUM ('x'); CREATE TYPE b AS ENUM ('y'); CREATE TABLE plain (id int); CREATE TABLE t (id int, ca a, cb b);
+CREATE VIEW va AS SELECT ca FROM t; CREATE VIEW vb AS SELECT cb FROM t; CREATE VIEW w AS SELECT id FROM t; DROP TYPE a, b CASCADE;`
+		expect(left(two).relations).toEqual(["w"])
 	})
 })
