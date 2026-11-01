@@ -247,7 +247,7 @@ function refuseOverRead(count: number, pagination: ListPagination): void {
 function paginate<T extends object>(
 	items: readonly T[],
 	built: { pagination: ListPagination & { merged: false } },
-): readonly [T[], PaginationMeta] {
+): readonly [Array<Omit<T, ListExtra>>, PaginationMeta] {
 	const pagination = paginationIn(built, false)
 	refuseOverRead(items.length, pagination)
 	refuseUnwired(items, pagination)
@@ -265,7 +265,8 @@ function paginate<T extends object>(
 	}
 	/* projected after the slice, so count, hasMore and the cursor still see the fat row */
 	const page = sliced.map((item) => applySelect(item as T & Record<string, unknown>, pagination.parsedFields))
-	return [page, meta] as const
+	/* the extras are stripped, so the rows are typed without them (Q15 of r18) */
+	return [page as Array<Omit<T, ListExtra>>, meta] as const
 }
 
 export {

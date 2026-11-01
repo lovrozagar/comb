@@ -12,6 +12,7 @@ import { effectiveNulls } from "./cursor.ts"
 import {
 	applySelect,
 	COMB_ID,
+	type ListExtra,
 	type ListPagination,
 	type PaginationMeta,
 	paginationIn,
@@ -196,7 +197,7 @@ function countOf(rowsPerShard: ReadonlyArray<readonly object[]>, cursor: string 
 function paginateMerged<T extends object>(
 	rowsPerShard: ReadonlyArray<readonly T[]>,
 	built: { pagination: ListPagination & { merged: true } },
-): readonly [T[], PaginationMeta] {
+): readonly [Array<Omit<T, ListExtra>>, PaginationMeta] {
 	const pagination = paginationIn(built, true)
 	for (const shard of rowsPerShard) {
 		refuseOverRead(shard.length, pagination)
@@ -227,7 +228,8 @@ function paginateMerged<T extends object>(
 		nextCursor: hasMore && last !== undefined ? pagination.mint(last) : null,
 		page: cursor ? null : (pagination.page ?? 1),
 	}
-	return [page.map((row) => applySelect(row, pagination.parsedFields)), meta] as const
+	/* the extras are stripped, so the rows are typed without them (Q15 of r18) */
+	return [page.map((row) => applySelect(row, pagination.parsedFields)) as Array<Omit<T, ListExtra>>, meta] as const
 }
 
 export { paginateMerged }

@@ -169,3 +169,17 @@ expectTypeOf(builtList).toHaveProperty("validated")
 const plainRetrieve = createRetrieveQuerySchema({ fields: { scalars: ["id"] } })
 const builtRetrieve: z.output<typeof plainRetrieve> = { lang: undefined, parsedFields: null }
 expectTypeOf(builtRetrieve).toHaveProperty("parsedFields")
+
+/* r18 Q15: the paginators strip the extras the builder selected, so the rows they return are typed without them */
+declare const wiredRows: Array<{
+	_combAnchorGone?: number
+	_combId: unknown
+	_total?: number
+	id: number
+	title: string
+}>
+const paged = queryHelpers.paginate(
+	wiredRows,
+	buildListQuery({ ...SEALED, parsed: listSchema.parse({}), table: listed }),
+)
+expectTypeOf(paged[0][0]!).toEqualTypeOf<{ id: number; title: string }>()

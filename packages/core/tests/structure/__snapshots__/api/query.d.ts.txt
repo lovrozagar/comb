@@ -576,7 +576,7 @@ declare function paginate<T extends object>(items: readonly T[], built: {
     pagination: ListPagination & {
         merged: false;
     };
-}): readonly [T[], PaginationMeta];
+}): readonly [Array<Omit<T, ListExtra>>, PaginationMeta];
 export { applySelect, COMB_ID, type ListExtra, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/filter-parse.d.ts

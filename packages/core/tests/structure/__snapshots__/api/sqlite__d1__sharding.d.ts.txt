@@ -6,7 +6,7 @@ export { shardMap } from "./shard-map.ts";
 export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, } from "./types.ts";
 
 // query/merged.d.ts
-import { type ListPagination, type PaginationMeta } from "./pagination.ts";
+import { type ListExtra, type ListPagination, type PaginationMeta } from "./pagination.ts";
 /**
  * The page of a list merged from `rowsPerShard`, each shard's rows read with `built`,
  * and its pagination, as `paginate` gives one database's: ordered as the list orders, windowed by
@@ -17,7 +17,7 @@ declare function paginateMerged<T extends object>(rowsPerShard: ReadonlyArray<re
     pagination: ListPagination & {
         merged: true;
     };
-}): readonly [T[], PaginationMeta];
+}): readonly [Array<Omit<T, ListExtra>>, PaginationMeta];
 export { paginateMerged };
 
 // query/sqlite/build-list-query-types.d.ts
@@ -402,7 +402,7 @@ declare function paginate<T extends object>(items: readonly T[], built: {
     pagination: ListPagination & {
         merged: false;
     };
-}): readonly [T[], PaginationMeta];
+}): readonly [Array<Omit<T, ListExtra>>, PaginationMeta];
 export { applySelect, COMB_ID, type ListExtra, type ListPagination, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/types.d.ts
