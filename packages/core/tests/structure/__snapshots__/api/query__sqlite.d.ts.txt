@@ -138,8 +138,8 @@ declare function orderSQL(key: SortKey): SQL;
 declare function orderByKeys(keys: readonly SortKey[], tiebreak: Tiebreak): SQL[];
 /** A count as a SQL literal, where a bound parameter would cost the D1 budget one */
 declare const countLiteral: (value: number) => SQL;
-/** An integer a JS number holds as a SQL literal, where a bound parameter would cost the D1 budget one (Q15 of r17) */
-declare const integerLiteral: (value: number) => SQL;
+/** An integer, a JS number's or a bigint's, as a SQL literal, where a bound parameter would cost the D1 budget one (Q15 of r17) */
+declare const integerLiteral: (value: bigint | number) => SQL;
 /**
  * A bound the keyset reads from the cursor's own row (cursor-ref.ts) rather than binds: a long text
  * value carried by reference, or a seconds-mode timestamp, whose fraction no Date holds (`row`); or

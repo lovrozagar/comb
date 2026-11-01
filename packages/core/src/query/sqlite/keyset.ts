@@ -44,13 +44,13 @@ function countText(value: number): string {
 const countLiteral = (value: number): SQL => sql.raw(countText(value))
 
 /** An integer as SQL text, past 2^53 included, its exact digits: checked, so nothing but a sign and digits reaches sql.raw */
-function integerText(value: number): string {
-	if (!Number.isInteger(value)) throw new RangeError(`not an integer: ${value}`)
+function integerText(value: bigint | number): string {
+	if (typeof value === "number" && !Number.isInteger(value)) throw new RangeError(`not an integer: ${value}`)
 	return BigInt(value).toString()
 }
 
-/** An integer a JS number holds as a SQL literal, where a bound parameter would cost the D1 budget one (Q15 of r17) */
-const integerLiteral = (value: number): SQL => sql.raw(integerText(value))
+/** An integer, a JS number's or a bigint's, as a SQL literal, where a bound parameter would cost the D1 budget one (Q15 of r17) */
+const integerLiteral = (value: bigint | number): SQL => sql.raw(integerText(value))
 
 /**
  * A bound the keyset reads from the cursor's own row (cursor-ref.ts) rather than binds: a long text

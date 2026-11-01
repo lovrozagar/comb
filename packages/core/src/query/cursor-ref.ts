@@ -186,13 +186,46 @@ function infiniteBound({ column, direction, nulls }: SortKey, at: Anchor): SQL {
 	return sql`(SELECT CASE WHEN count(*) = 0 THEN ${gone} WHEN max(${column}) IN (9e999, -9e999) THEN max(${column}) END FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id})`
 }
 
+/** The doubles either side of the finite, non-zero `value`, as exact integers, and whether its mantissa is odd */
+function neighbours(value: number): { down: bigint; odd: boolean; up: bigint } {
+	const view = new DataView(new ArrayBuffer(8))
+	view.setFloat64(0, value)
+	const bits = view.getBigUint64(0)
+	/* one bit more is one step away from zero, whatever the sign; past the largest double is Infinity,
+	   which integers reach at the midpoint to 2^1024, as if that were the next double */
+	const at = (step: bigint): bigint => {
+		view.setBigUint64(0, bits + step)
+		const next = view.getFloat64(0)
+		return Number.isFinite(next) ? BigInt(next) : (value > 0 ? 1n : -1n) * 2n ** 1024n
+	}
+	const [toZero, fromZero] = [at(-1n), at(1n)]
+	return { down: value > 0 ? toZero : fromZero, odd: (bits & 1n) === 1n, up: value > 0 ? fromZero : toZero }
+}
+
 /**
- * A rounded integer key: the row's own exact value, the cursor's once the row is gone. The cursor's
- * is written as the integer it is, digits only, as secondsBound writes its milliseconds, so the bound
- * costs the D1 budget the id alone (Q15 of r17)
+ * The integer just outside the rounding interval of the double `value`, toward the rows still to
+ * serve: ascending, the least integer that rounds to `value`, less one; descending, the greatest,
+ * plus one. Ties round to the even mantissa, so an odd one keeps neither midpoint (Q1 of r18).
  */
-const exactBound = ({ column }: SortKey, value: number, at: Anchor): SQL =>
-	sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${integerLiteral(value)})`
+function roundingEdge(value: number, direction: "asc" | "desc"): bigint {
+	const exact = BigInt(value)
+	const { down, odd, up } = neighbours(value)
+	/* twice the midpoint to the neighbour: odd where the gap is 1, at a power of two, so no integer ties */
+	const twice = exact + (direction === "asc" ? down : up)
+	const tie = twice % 2n === 0n
+	if (direction === "asc") return (tie ? twice / 2n + (odd ? 1n : 0n) : (twice + 1n) / 2n) - 1n
+	return (tie ? twice / 2n - (odd ? 1n : 0n) : (twice - 1n) / 2n) + 1n
+}
+
+/**
+ * A rounded integer key: the row's own exact value; once the row is gone, as on every shard of a
+ * merged list but its own, the edge of the rounding interval of the cursor's double toward the rows
+ * still to serve, which repeats the rows that round to it and skips none (Q1 of r18). Written as the
+ * integer it is, digits only, as secondsBound writes its milliseconds, so the bound costs the D1
+ * budget the id alone (Q15 of r17)
+ */
+const exactBound = ({ column, direction }: SortKey, value: number, at: Anchor): SQL =>
+	sql`coalesce((SELECT ${column} FROM ${fromOf(at.table)} WHERE ${at.tiebreak} = ${at.id}), ${integerLiteral(roundingEdge(value, direction))})`
 
 /** A 500 when a list with no table to read from got a reference: paginate was not told the list is derived */
 function assertNoReference(values: readonly unknown[]): void {
@@ -226,4 +259,4 @@ function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anch
 	})
 }
 
-export { anchored, assertNoReference, fromOf }
+export { anchored, assertNoReference, fromOf, roundingEdge }

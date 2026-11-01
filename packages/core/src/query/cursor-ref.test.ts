@@ -2,7 +2,7 @@ import { PgDialect, integer as pgInteger, pgTable, text as pgText } from "drizzl
 import { alias, integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { CursorRef } from "./cursor.ts"
-import { anchored, assertNoReference, fromOf } from "./cursor-ref.ts"
+import { anchored, assertNoReference, fromOf, roundingEdge } from "./cursor-ref.ts"
 import { AnchorBound } from "./sqlite/keyset.ts"
 
 const doc = sqliteTable("doc", { id: integer("id").primaryKey(), title: text("title") })
@@ -86,4 +86,20 @@ describe("the query entry point", () => {
 		const query = await import("./index.ts")
 		expect(query.CursorRef).toBe(CursorRef)
 	})
+})
+
+/* Q1 of r18: the integer just outside a double's rounding interval, toward the rows still to serve */
+/** Whether the integer `n` reads as the double `value` */
+const roundsTo = (n: bigint, value: number) => Number(n) === value
+
+describe("roundingEdge", () => {
+	it.each([2 ** 60 + 256, 2 ** 60, 2 ** 53, 2 ** 53 + 2, -(2 ** 60), -(2 ** 53), Number.MAX_VALUE, -(2 ** 60 + 256)])(
+		"bounds %d by the least and greatest integer that read as it, less and plus one",
+		(value) => {
+			const below = roundingEdge(value, "asc")
+			const above = roundingEdge(value, "desc")
+			expect([roundsTo(below, value), roundsTo(below + 1n, value)]).toEqual([false, true])
+			expect([roundsTo(above, value), roundsTo(above - 1n, value)]).toEqual([false, true])
+		},
+	)
 })
