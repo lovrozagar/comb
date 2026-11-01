@@ -4,6 +4,8 @@ import type { LiveObjects } from "../core/pg-live-types.ts"
 export const noLive = (): LiveObjects => ({
 	extensions: new Set(),
 	kinds: new Map(),
+	others: new Set(),
+	platform: new Set(),
 	policies: new Map(),
 	relations: new Map(),
 	rls: new Map(),

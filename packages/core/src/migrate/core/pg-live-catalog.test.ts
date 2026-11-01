@@ -30,6 +30,16 @@ describe("CATALOG", () => {
 			"rule",
 			"rls",
 			"extension",
+			/* P12 of r19: aggregates, SECURITY DEFINER, operators, casts, view options, matview indexes, replica identity */
+			"other",
+			"other",
+			"other",
+			"other",
+			"other",
+			"other",
+			"other",
+			"platform",
+			"platform",
 			"user",
 		])
 	})

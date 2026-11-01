@@ -102,6 +102,14 @@ export type LiveObjects = {
     extensions: Set<string>;
     /** each domain, composite and range type and collation, by name, with what it is (P10 of r18) */
     kinds: Map<string, "collation" | "composite type" | "domain" | "range type">;
+    /**
+     * what the read names by one label each, in the target schema (P12 of r19): `aggregate f(int4)`,
+     * `function f(int4) security definer`, `operator @@(none, int4)`, `cast (pair as int4)`, `view v
+     * (security_invoker=true)`, `index i on m`, `replica identity on t (full)`
+     */
+    others: Set<string>;
+    /** what the read names database-wide, which a platform may hold of its own: `event trigger e`, `publication p` (P12 of r19) */
+    platform: Set<string>;
     /** each table's policies, by name, with their command, roles and kind: `for all, to public, permissive` (P9, P10) */
     policies: Map<string, Map<string, string>>;
     /** each view, materialized view and sequence no column owns, by name, with what it is (P9) */
@@ -135,12 +143,13 @@ export type LiveRead = (target: LiveTarget) => Promise<LiveObjects>;
 import type { PgTarget } from "./atlas-target.ts";
 import { type Connect } from "./pg-live-objects.ts";
 import type { LiveObjects } from "./pg-live-types.ts";
-type Node = Record<string, unknown>;
 /** A history file as baseline reads it */
 type HistoryFile = {
     name: string;
     sql: string;
 };
+/** A statement's one node: its type and fields */
+declare const nodeOf: (tree: unknown) => [string, Record<string, unknown>];
 /**
  * `sql` without its one CONCURRENTLY keyword: the code tokens are read by comb's scanner, so the word
  * in a string, a comment or a quoted identifier is never touched, and the reparse proves only the flag changed
@@ -161,28 +170,7 @@ declare function replayCatalog(target: PgTarget, { files, targetUser }: {
     files: readonly HistoryFile[];
     targetUser: string;
 }, load?: () => Promise<Connect>): Promise<LiveObjects>;
-/** Whether a statement's node makes what a catalog arm reads */
-type Makes = (node: Node) => boolean;
-/**
- * Each arm of the catalog read (pg-live-catalog.ts), by its `what`, with the statement nodes that make
- * what it reads, held to the read's arms by a structure test so an arm cannot be added without its
- * gate (R1 of plan 18's stack 2). `user` is the role the read connects as, which nothing makes. A
- * sequence a column owns (serial, identity) is the table's, left out of the read, so no arm needs it
- */
-declare const ARM_MAKERS: Readonly<Record<string, Readonly<Record<string, Makes>>>>;
-/**
- * The statements whose effect the tree cannot see, which may make anything (R1 of stack 2): a DO
- * block, a procedure CALL, a prepared statement's EXECUTE
- */
-declare const UNSEEN: ReadonlySet<string>;
-/**
- * Whether `files` make anything the catalog read compares, which a docker:// dev database, Atlas's
- * own container, keeps out of comb's reach: by parse-tree node, read once. A statement the tree cannot
- * see the effect of counts; a function the history defines, which a later call may run DDL through, is
- * itself compared, so its CREATE already counts
- */
-declare function makesCompared(files: readonly HistoryFile[]): boolean;
-export { ARM_MAKERS, cutConcurrently, type HistoryFile, makesCompared, replayCatalog, replayStatements, UNSEEN };
+export { cutConcurrently, type HistoryFile, nodeOf, replayCatalog, replayStatements };
 
 // migrate/core/atlas-target.d.ts
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */

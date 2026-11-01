@@ -270,7 +270,9 @@ describe("a Postgres baseline: the kinds and settings Atlas OSS does not compare
 			await exec(url, ALL)
 			const { out, refused } = await baseline(url, devUrl, ALL)
 			expect(refused).toBeUndefined()
-			expect(out.join("\n")).toContain("statistics objects, grants and comments are not compared")
+			expect(out.join("\n")).toContain(
+				"statistics objects, text search configurations and dictionaries, foreign data wrappers, servers and user mappings, grants and comments are not compared",
+			)
 		})
 	})
 

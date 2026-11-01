@@ -27,7 +27,9 @@ import type { Run } from "./process.ts"
 import { codeOf } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
-import { type HistoryFile, makesCompared, replayCatalog } from "./pg-replay.ts"
+import { type HistoryFile, replayCatalog } from "./pg-replay.ts"
+import { makesCompared } from "./pg-replay-gate.ts"
+import { UNCOMPARED } from "./baseline-uncompared.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
 const SYNCED = "Schemas are synced, no changes to be made."
@@ -247,6 +249,8 @@ async function historyCatalog(
 const emptyCatalog = (): LiveObjects => ({
 	extensions: new Set(),
 	kinds: new Map(),
+	others: new Set(),
+	platform: new Set(),
 	policies: new Map(),
 	relations: new Map(),
 	rls: new Map(),
@@ -256,10 +260,6 @@ const emptyCatalog = (): LiveObjects => ({
 	triggers: new Map(),
 	user: "",
 })
-
-/** What neither Atlas nor comb compares, which a baseline says every time */
-const UNCOMPARED =
-	"Warning: views' and policies' queries and checks, and statistics objects, grants and comments are not compared"
 
 async function refuseObjectDrift(options: ObjectsCompare, copy: string, refusal?: string): Promise<() => string[]> {
 	/* the replay reads each file as Postgres's parser does */

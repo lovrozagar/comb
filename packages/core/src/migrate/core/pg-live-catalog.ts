@@ -16,14 +16,22 @@
  * - Its domains, composite and range types and collations, but an extension's; each table's rules but
  *   a view's own; each table's row level security where it is on; every extension but plpgsql.
  * - The role the read connects as, which a policy's CURRENT_USER names (R2 of plan 17).
+ * - P12 of r19, as `other` labels: its aggregates; each function or procedure that is SECURITY DEFINER;
+ *   its operators; each cast over one of its types or functions; each view's and materialized view's
+ *   options (security_invoker, security_barrier, check_option); each materialized view's indexes; each
+ *   table's replica identity where it is not the default. As `platform` labels, database-wide, which a
+ *   platform may hold of its own: event triggers and publications. Each but an extension's.
  */
-export const CATALOG = `SELECT 'routine' AS what, p.proname AS name, CASE p.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END AS kind, NULL AS on_table,
-(SELECT coalesce(string_agg(CASE WHEN tn.nspname IN ('pg_catalog', $1) THEN '' ELSE tn.nspname || '.' END || t.typname || CASE WHEN x.arr THEN '[]' ELSE '' END, ',' ORDER BY a.ord), '')
+/** The input argument types of a routine `p`, as the parser spells them (see the routine arm) */
+const SIGNATURE = `(SELECT coalesce(string_agg(CASE WHEN tn.nspname IN ('pg_catalog', $1) THEN '' ELSE tn.nspname || '.' END || t.typname || CASE WHEN x.arr THEN '[]' ELSE '' END, ',' ORDER BY a.ord), '')
  FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY AS a(oid, ord)
  JOIN pg_catalog.pg_type at ON at.oid = a.oid
  CROSS JOIN LATERAL (SELECT at.typcategory = 'A' AND at.typelem <> 0 AS arr) x
  JOIN pg_catalog.pg_type t ON t.oid = CASE WHEN x.arr THEN at.typelem ELSE at.oid END
- JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace) AS signature,
+ JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace)`
+
+export const CATALOG: string = `SELECT 'routine' AS what, p.proname AS name, CASE p.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END AS kind, NULL AS on_table,
+${SIGNATURE} AS signature,
 NULL::int AS tgtype, NULL::boolean AS enabled, NULL::text AS how
 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = $1 AND p.prokind IN ('f', 'p')
@@ -68,5 +76,43 @@ WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') AND (c.relrowsecurity OR c.relf
 UNION ALL
 SELECT 'extension', e.extname, NULL, NULL, NULL, NULL, NULL, NULL
 FROM pg_catalog.pg_extension e WHERE e.extname <> 'plpgsql'
+UNION ALL
+SELECT 'other', 'aggregate ' || p.proname || '(' || ${SIGNATURE} || ')', NULL, NULL, NULL, NULL, NULL, NULL
+FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = $1 AND p.prokind = 'a' AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+UNION ALL
+SELECT 'other', CASE p.prokind WHEN 'p' THEN 'procedure ' ELSE 'function ' END || p.proname || '(' || ${SIGNATURE} || ') security definer', NULL, NULL, NULL, NULL, NULL, NULL
+FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = $1 AND p.prokind IN ('f', 'p') AND p.prosecdef AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+UNION ALL
+SELECT 'other', 'operator ' || o.oprname || '(' || coalesce(lt.typname, 'none') || ', ' || coalesce(rt.typname, 'none') || ')', NULL, NULL, NULL, NULL, NULL, NULL
+FROM pg_catalog.pg_operator o JOIN pg_catalog.pg_namespace n ON n.oid = o.oprnamespace
+LEFT JOIN pg_catalog.pg_type lt ON lt.oid = o.oprleft LEFT JOIN pg_catalog.pg_type rt ON rt.oid = o.oprright
+WHERE n.nspname = $1 AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_operator'::regclass AND d.objid = o.oid AND d.deptype = 'e')
+UNION ALL
+SELECT 'other', 'cast (' || st.typname || ' as ' || tt.typname || ')', NULL, NULL, NULL, NULL, NULL, NULL
+FROM pg_catalog.pg_cast c JOIN pg_catalog.pg_type st ON st.oid = c.castsource JOIN pg_catalog.pg_type tt ON tt.oid = c.casttarget
+LEFT JOIN pg_catalog.pg_proc cf ON cf.oid = c.castfunc
+WHERE c.oid >= 16384 AND (st.typnamespace = $1::regnamespace OR tt.typnamespace = $1::regnamespace OR cf.pronamespace = $1::regnamespace)
+AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_cast'::regclass AND d.objid = c.oid AND d.deptype = 'e')
+UNION ALL
+SELECT 'other', CASE c.relkind WHEN 'v' THEN 'view ' ELSE 'materialized view ' END || c.relname || ' (' || array_to_string(c.reloptions, ', ') || ')', NULL, NULL, NULL, NULL, NULL, NULL
+FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = $1 AND c.relkind IN ('v', 'm') AND c.reloptions IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
+UNION ALL
+SELECT 'other', 'index ' || ic.relname || ' on ' || mc.relname, NULL, NULL, NULL, NULL, NULL, NULL
+FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class ic ON ic.oid = i.indexrelid JOIN pg_catalog.pg_class mc ON mc.oid = i.indrelid
+JOIN pg_catalog.pg_namespace n ON n.oid = mc.relnamespace
+WHERE n.nspname = $1 AND mc.relkind = 'm'
+UNION ALL
+SELECT 'other', 'replica identity on ' || c.relname || ' (' || CASE c.relreplident WHEN 'f' THEN 'full' WHEN 'n' THEN 'nothing' ELSE 'index' END || ')', NULL, NULL, NULL, NULL, NULL, NULL
+FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') AND c.relreplident <> 'd'
+UNION ALL
+SELECT 'platform', 'event trigger ' || e.evtname, NULL, NULL, NULL, NULL, NULL, NULL
+FROM pg_catalog.pg_event_trigger e WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid = 'pg_catalog.pg_event_trigger'::regclass AND d.objid = e.oid AND d.deptype = 'e')
+UNION ALL
+SELECT 'platform', 'publication ' || pb.pubname, NULL, NULL, NULL, NULL, NULL, NULL
+FROM pg_catalog.pg_publication pb
 UNION ALL
 SELECT 'user', current_user::text, NULL, NULL, NULL, NULL, NULL, NULL`

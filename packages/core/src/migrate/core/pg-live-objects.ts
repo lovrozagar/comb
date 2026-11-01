@@ -56,6 +56,13 @@ const COMPARED =
 /* why a baseline loads it: it cannot vouch for the database without it */
 const COMPARES = `baseline compares the database's ${COMPARED}, which Atlas OSS does not, through the ${PEER} package`
 
+// lookup-table: the catalog arms that name a kind by one label each, and the set each goes into
+const NAMED: Readonly<Record<string, "extensions" | "others" | "platform">> = {
+	extension: "extensions",
+	other: "others",
+	platform: "platform",
+}
+
 /** `row` of the catalog read, into `live` */
 function readRow(row: Record<string, unknown>, live: LiveObjects): void {
 	const [name, table, how] = [String(row["name"]), String(row["on_table"]), String(row["how"])]
@@ -72,7 +79,7 @@ function readRow(row: Record<string, unknown>, live: LiveObjects): void {
 		live.kinds.set(name, row["kind"] as "collation" | "composite type" | "domain" | "range type")
 	else if (what === "rule") live.rules.set(table, (live.rules.get(table) ?? new Set()).add(name))
 	else if (what === "rls") live.rls.set(name, how)
-	else if (what === "extension") live.extensions.add(name)
+	else if (typeof what === "string" && what in NAMED) live[NAMED[what] as "extensions"].add(name)
 	else if (what === "user") live.user = name
 	else {
 		const fired = { enabled: row["enabled"] === true, type: Number(row["tgtype"]) }
@@ -90,6 +97,8 @@ async function readCatalog(sql: Pick<Sql, "unsafe">, schema: string): Promise<Li
 	const live: LiveObjects = {
 		extensions: new Set(),
 		kinds: new Map(),
+		others: new Set(),
+		platform: new Set(),
 		policies: new Map(),
 		relations: new Map(),
 		rls: new Map(),
@@ -156,6 +165,7 @@ function labels(live: LiveObjects): { objects: Set<string>; triggers: Set<string
 	for (const [name, kind] of live.kinds) out.objects.add(`${kind} ${name}`)
 	for (const [table, each] of live.rules) for (const name of each) out.objects.add(`rule ${name} on ${table}`)
 	for (const [table, how] of live.rls) out.objects.add(`row level security on ${table} (${how})`)
+	for (const label of live.others) out.objects.add(label)
 	return out
 }
 
@@ -176,10 +186,11 @@ function liveDrift(
 ): { matched: { routines: number; triggers: number; views: number }; only: string[] } {
 	const routines = routineDrift(live.routines, history.routines)
 	const [database, migrations] = [labels(live), labels(history)]
-	/* an extension the database alone has may be the platform's own: only a missing one refuses */
-	const extensions = [...history.extensions]
-		.filter((name) => !live.extensions.has(name))
-		.map((name) => `extension ${name}: only in the migrations`)
+	/* an extension, event trigger or publication the database alone has may be the platform's own: only a missing one refuses */
+	const extensions = [
+		...[...history.extensions].filter((name) => !live.extensions.has(name)).map((name) => `extension ${name}`),
+		...[...history.platform].filter((label) => !live.platform.has(label)),
+	].map((label) => `${label}: only in the migrations`)
 	const only = [
 		...routines.only,
 		...onlyIn(database.triggers, migrations.triggers),

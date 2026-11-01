@@ -46,6 +46,8 @@ const ROWS: Array<Record<string, unknown>> = [
 	{ kind: null, name: "keep", on_table: "t", what: "rule" },
 	{ how: "enabled, not forced", kind: null, name: "t", on_table: null, what: "rls" },
 	{ kind: null, name: "citext", on_table: null, what: "extension" },
+	{ kind: null, name: "operator @@@(none, int4)", on_table: null, what: "other" },
+	{ kind: null, name: "publication pub", on_table: null, what: "platform" },
 	{ kind: null, name: "app", on_table: null, what: "user" },
 ]
 
@@ -56,6 +58,8 @@ describe("readLiveObjects", () => {
 		expect(await readLiveObjects(TARGET, load)).toEqual({
 			extensions: new Set(["citext"]),
 			kinds: new Map([["positive", "domain"]]),
+			others: new Set(["operator @@@(none, int4)"]),
+			platform: new Set(["publication pub"]),
 			policies: new Map([
 				[
 					"t",

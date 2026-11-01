@@ -11,6 +11,14 @@ export type LiveObjects = {
 	extensions: Set<string>
 	/** each domain, composite and range type and collation, by name, with what it is (P10 of r18) */
 	kinds: Map<string, "collation" | "composite type" | "domain" | "range type">
+	/**
+	 * what the read names by one label each, in the target schema (P12 of r19): `aggregate f(int4)`,
+	 * `function f(int4) security definer`, `operator @@(none, int4)`, `cast (pair as int4)`, `view v
+	 * (security_invoker=true)`, `index i on m`, `replica identity on t (full)`
+	 */
+	others: Set<string>
+	/** what the read names database-wide, which a platform may hold of its own: `event trigger e`, `publication p` (P12 of r19) */
+	platform: Set<string>
 	/** each table's policies, by name, with their command, roles and kind: `for all, to public, permissive` (P9, P10) */
 	policies: Map<string, Map<string, string>>
 	/** each view, materialized view and sequence no column owns, by name, with what it is (P9) */
