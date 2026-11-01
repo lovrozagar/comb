@@ -55,8 +55,9 @@ Postgres and Atlas suites. On this machine a user-level PostgreSQL 17 serves
 `COMB_TEST_PG_URL='postgres://lovro:comb@localhost:55432/postgres?sslmode=disable'`;
 `node ~/.cache/pg17-embedded/start.mjs` starts it after a reboot. Do not bind
 55432 from docker here. Elsewhere, a `postgres:17` container on that port serves
-the same URL where docker is set up. Trust auth ignores the password, but keep
-it: CI's URL has one, and only with one does a local run mask what CI masks.
+the same URL where docker is set up. The local server checks passwords over TCP
+(scram-sha-256, `lovro`'s is `comb`), as CI's does, so a test that depends on a
+password fails here as it fails there; only its Unix socket trusts.
 
 `typecheck:strict` exists because comb ships TypeScript source, so a consumer's
 strict flags apply to it. Must stay at zero — see
