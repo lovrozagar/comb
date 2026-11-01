@@ -59,6 +59,15 @@ describe("the functions and procedures a Postgres history leaves", () => {
 		})
 	})
 
+	/* a %TYPE argument's signature is as written on CREATE and DROP alike, so the drop names the overload the create made */
+	it("keeps a %TYPE argument as written, and drops that overload by the same spelling, its sibling kept", () => {
+		const made = `CREATE TABLE users (email text);\n${FN("f", "e users.email%TYPE")}\n${FN("f", "n int")}`
+		expect(routines(made)).toEqual({ f: { kind: "function", signatures: ["int4", "users.email%TYPE"] } })
+		expect(routines(`${made}\nDROP FUNCTION f(users.email%TYPE);`)).toEqual({
+			f: { kind: "function", signatures: ["int4"] },
+		})
+	})
+
 	it("is no aggregate, whose CREATE AGGREGATE defines no function or procedure", () => {
 		expect(routines("CREATE AGGREGATE agg (int) (sfunc = int4pl, stype = int);")).toEqual({})
 	})
