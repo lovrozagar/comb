@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findNamed, lookup, own, shown, shownColumn, toCombError } from "./constraint-map.ts"
+import { entryOf, findNamed, lookup, own, shown, shownColumn, type TableMap, toCombError } from "./constraint-map.ts"
 import type { ConstraintMap } from "./types.ts"
 
 const MAPS: ConstraintMap[] = [
@@ -84,5 +84,41 @@ describe("shown and shownColumn", () => {
 		expect(shownColumn(maps, "a", "owner")).toBe("owner")
 		expect(shownColumn(maps, "a", "pin")).toBeUndefined()
 		expect(shownColumn(maps, "a", undefined)).toBeUndefined()
+	})
+})
+
+/* R5 of plan 17: a key ending in `*` is a prefix pattern, for runtime tables no generated map can name */
+describe("entryOf", () => {
+	const ut: TableMap = { private: ["secret"] }
+	const longer: TableMap = {}
+	const maps: ConstraintMap = { "ut_*": ut, "ut_x*": longer, users: {} }
+
+	it("takes the table's own key first, then the longest prefix pattern it starts with", () => {
+		expect(entryOf(maps, "users")).toBe(maps.users)
+		expect(entryOf(maps, "ut_abc")).toBe(ut)
+		expect(entryOf(maps, "ut_xyz")).toBe(longer)
+		expect(entryOf(maps, "other")).toBeUndefined()
+		expect(entryOf(maps, undefined)).toBeUndefined()
+	})
+
+	it("refuses a key with a `*` anywhere but its end, whatever table is asked for", () => {
+		const bad: ConstraintMap = { "u*t": {}, users: {} }
+		for (const table of ["users", "ut"])
+			expect(() => entryOf(bad, table)).toThrow(
+				new TypeError('constraint map key "u*t": a "*" may only end a key, as a prefix pattern such as "ut_*"'),
+			)
+	})
+
+	it("finds a pattern's named constraint through the violated table, never as a table of its own", () => {
+		const named: ConstraintMap[] = [{ "ut_*": { check: { ut_n_check: { cause: "n", errorKey: "ut_n_invalid" } } } }]
+		expect(findNamed(named, "check", "ut_n_check")).toBeUndefined()
+		expect(lookup(named, "ut_abc", (t) => own(t.check, "ut_n_check"))).toMatchObject({ errorKey: "ut_n_invalid" })
+	})
+
+	it("makes a pattern's tables known, its private columns hidden and the rest named", () => {
+		const patterned: ConstraintMap[] = [{ "ut_*": { private: ["secret"] }, users: {} }]
+		expect(shown(patterned, "ut_abc", ["title"])).toEqual(["title"])
+		expect(shown(patterned, "ut_abc", ["secret"])).toEqual([])
+		expect(shown([{ users: {} }], "ut_abc", ["title"])).toEqual([])
 	})
 })

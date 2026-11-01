@@ -80,3 +80,23 @@ describe("mapTable: a partition its parent's entry lists", () => {
 		expect(mapTable(PARTITIONED, { schema: "public", table: "users_eu" })).toBe("users_eu")
 	})
 })
+
+/* R5 of plan 17: a prefix pattern knows a runtime table, which keeps its own name */
+describe("mapTable: a table a prefix pattern keys", () => {
+	it("is its own name, in the pattern's schema when the pattern is qualified", () => {
+		const patterned: ConstraintMap[] = [{ "app.ut_*": {}, users: {} }]
+		expect(mapTable(patterned, { schema: "app", table: "ut_abc" })).toBe("app.ut_abc")
+		expect(mapTable([{ "ut_*": {} }], { schema: "public", table: "ut_abc" })).toBe("ut_abc")
+	})
+
+	it("names the column of a violation on it, as of a table its own key names", () => {
+		const missing = Object.assign(new Error("server error"), {
+			code: "23502",
+			column: "title",
+			schema: "public",
+			table: "ut_abc",
+		})
+		expect(classifyPgError(missing, [{ users: {} }])?.column).toBeUndefined()
+		expect(classifyPgError(missing, [{ users: {}, "ut_*": {} }])).toMatchObject({ column: "title", table: "ut_abc" })
+	})
+})

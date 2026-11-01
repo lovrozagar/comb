@@ -49,3 +49,28 @@ describe("classifySqliteError on a table no map keys, a trigger's write", () => 
 		}
 	})
 })
+
+/** What a NOT NULL violation on ut_abc's title classifies as under `maps` */
+async function missingTitle(maps: ConstraintMap[]) {
+	harness = libsqlMemory()
+	await harness.client.execute("CREATE TABLE ut_abc (id TEXT PRIMARY KEY, title TEXT NOT NULL)")
+	const failure = await caught(() => harness!.db.run(sql.raw("INSERT INTO ut_abc (id) VALUES ('r1')")))
+	return classifySqliteError(failure, maps)
+}
+
+/* R5 of plan 17: a runtime table no generated map can key, such as anyrow's ut_<id>, is known by a prefix pattern */
+describe("classifySqliteError on a runtime table a prefix pattern keys", () => {
+	it("names no column of it when no key covers it", async () => {
+		const classified = await missingTitle([{ users: {} }])
+		expect(classified).toMatchObject({ cause: "Required field missing", table: "ut_abc" })
+		expect(classified?.column).toBeUndefined()
+	})
+
+	it("names its column under a `ut_*` key, as before the fail-closed rule", async () => {
+		expect(await missingTitle([{ users: {}, "ut_*": {} }])).toMatchObject({
+			cause: "Required field missing: title",
+			column: "title",
+			table: "ut_abc",
+		})
+	})
+})

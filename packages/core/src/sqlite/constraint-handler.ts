@@ -3,7 +3,7 @@
  * Shared by the libsql, bun:sqlite and D1 handlers: the engine is the same, only the way the
  * driver carries the code differs, and `readSqliteError` absorbs that.
  */
-import { type Found, findNamed, lookup, own, shown, shownColumn, toCombError } from "../constraint-map.ts"
+import { entryOf, type Found, findNamed, lookup, own, shown, shownColumn, toCombError } from "../constraint-map.ts"
 import { connectionLost, UNAVAILABLE } from "../connection-lost.ts"
 import { CombError } from "../error.ts"
 import { type ConstraintMap, combErrorKeys } from "../types.ts"
@@ -30,7 +30,7 @@ function splitPair(
 	if (table !== undefined && pair.startsWith(`${table}.`)) return { column: pair.slice(table.length + 1), table }
 	const mapped = [...pair.matchAll(/\./g)]
 		.map(({ index }) => pair.slice(0, index))
-		.find((name) => maps.some((map) => Object.hasOwn(map, name)))
+		.find((name) => maps.some((map) => entryOf(map, name) !== undefined))
 	if (mapped !== undefined) return { column: pair.slice(mapped.length + 1), table: mapped }
 	const at = /^(.+)\.([^.]+)$/.exec(pair)
 	return at === null ? undefined : { column: at[2] as string, table: at[1] as string }
@@ -159,7 +159,7 @@ function foreignKey(v: Violation): CombError {
 	const unlisted = assigned !== undefined && !assigned.some((name) => folded.has(asciiFolded(name)))
 	/* a statement that changes a key other tables reference may have failed on a row that references
 	   the old value, its own key valid: which side failed is unknown (U43) */
-	const referenced = new Set(v.maps.flatMap((map) => own(map, table)?.referenced ?? []).map(asciiFolded))
+	const referenced = new Set(v.maps.flatMap((map) => entryOf(map, table)?.referenced ?? []).map(asciiFolded))
 	const changesReferenced = (assigned ?? upsertColumns(v.read.query) ?? []).some((name) =>
 		referenced.has(asciiFolded(name)),
 	)

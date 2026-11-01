@@ -7,6 +7,7 @@
  * key's schema is what stands before its first dot. A partition, which Postgres reports in its
  * parent's place, is its parent's key when the parent's entry lists it (Q7 of r18).
  */
+import { entryOf } from "../constraint-map.ts"
 import type { ConstraintMap } from "../types.ts"
 
 /** The key the reported table itself has, by the rule above */
@@ -25,7 +26,7 @@ export function mapTable(
 ): string | undefined {
 	if (table === undefined) return undefined
 	const key = keyOf(maps, schema, table)
-	if (maps.some((map) => Object.hasOwn(map, key))) return key
+	if (maps.some((map) => entryOf(map, key) !== undefined)) return key
 	const parent = maps.flatMap((map) => Object.entries(map)).find(([, entry]) => entry.partitions?.includes(key))
 	return parent?.[0] ?? key
 }

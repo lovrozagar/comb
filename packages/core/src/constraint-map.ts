@@ -23,9 +23,28 @@ export type Found = {
 export const own = <T>(record: Record<string, T> | undefined, key: string | undefined): T | undefined =>
 	record !== undefined && key !== undefined && Object.hasOwn(record, key) ? record[key] : undefined
 
+/**
+ * The entry `map` holds for `table`: its own key's, else that of the longest prefix pattern it
+ * starts with, a key ending in `*` (`"ut_*"`), which keys the tables an app makes at run time and
+ * no generated map can name (R5 of plan 17). A `*` anywhere else in a key is refused, as the map is
+ * the app's wiring: a TypeError
+ */
+export function entryOf(map: ConstraintMap, table: string | undefined): TableMap | undefined {
+	let pattern: string | undefined
+	for (const key of Object.keys(map)) {
+		const star = key.indexOf("*")
+		if (star === -1) continue
+		if (star !== key.length - 1)
+			throw new TypeError(`constraint map key "${key}": a "*" may only end a key, as a prefix pattern such as "ut_*"`)
+		if (table?.startsWith(key.slice(0, -1)) === true && key.length > (pattern?.length ?? 0)) pattern = key
+	}
+	if (table !== undefined && Object.hasOwn(map, table)) return map[table]
+	return pattern === undefined ? undefined : map[pattern]
+}
+
 /** Whether a map lists `column` among `table`'s private columns */
 const listsPrivate = (maps: ConstraintMap[], table: string | undefined, column: string) =>
-	maps.some((map) => own(map, table)?.private?.includes(column) === true)
+	maps.some((map) => entryOf(map, table)?.private?.includes(column) === true)
 
 /**
  * Whether the maps can say which of `table`'s columns are private: no map is given, which hides
@@ -33,7 +52,7 @@ const listsPrivate = (maps: ConstraintMap[], table: string | undefined, column: 
  * outside the schema, so its columns are hidden on every dialect (Q9 of r17, Q10 of r18)
  */
 const knows = (maps: ConstraintMap[], table: string | undefined) =>
-	maps.length === 0 || table === undefined || maps.some((map) => Object.hasOwn(map, table))
+	maps.length === 0 || table === undefined || maps.some((map) => entryOf(map, table) !== undefined)
 
 /**
  * The columns an error may name of those a violation reports: all of them, or none when a map lists
@@ -59,7 +78,7 @@ export function lookup(
 	pick: (t: TableMap) => ConstraintMapEntry | undefined,
 ): ConstraintMapEntry | undefined {
 	for (const map of maps) {
-		const t = own(map, table)
+		const t = entryOf(map, table)
 		const entry = t === undefined ? undefined : pick(t)
 		if (entry !== undefined) return entry
 	}
@@ -74,6 +93,8 @@ export function findNamed(
 ): { entry: ConstraintMapEntry; table: string } | undefined {
 	for (const map of maps) {
 		for (const [table, t] of Object.entries(map)) {
+			/* a pattern names no one table: its constraints are found through the violated table's */
+			if (table.endsWith("*")) continue
 			const entry = own(t[kind], name)
 			if (entry !== undefined) return { entry, table }
 		}

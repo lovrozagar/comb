@@ -157,6 +157,13 @@ export type Found = {
 /** `record[key]` when `key` is the record's own (never an inherited name such as `constructor`). */
 export declare const own: <T>(record: Record<string, T> | undefined, key: string | undefined) => T | undefined;
 /**
+ * The entry `map` holds for `table`: its own key's, else that of the longest prefix pattern it
+ * starts with, a key ending in `*` (`"ut_*"`), which keys the tables an app makes at run time and
+ * no generated map can name (R5 of plan 17). A `*` anywhere else in a key is refused, as the map is
+ * the app's wiring: a TypeError
+ */
+export declare function entryOf(map: ConstraintMap, table: string | undefined): TableMap | undefined;
+/**
  * The columns an error may name of those a violation reports: all of them, or none when a map lists
  * one as the table's private column, since naming the rest would point at it (F67), or when the
  * maps given key no such table (fail closed)
