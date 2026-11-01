@@ -8,6 +8,7 @@
  */
 import { readFileSync } from "node:fs"
 import { userInfo } from "node:os"
+import { passfilePassword } from "./pg-passfile.ts"
 
 /** Where a Postgres URL reaches, and its query, every key decoded */
 type LibpqUrl = {
@@ -177,7 +178,8 @@ function settingsOf(url: LibpqUrl): Record<string, string> {
  * postgres.js's options for the database `url` reaches, as libpq reaches it: libpq's own keys read,
  * the rest sent as settings. The user, the database and the password are given whole, as postgres.js
  * fills what it is not given from PGUSER, PGDATABASE and PGPASSWORD, which Atlas never sees (P6 of
- * the 0.15.0 review); a URL without a password gives postgres.js one to call, so it reads none of its own.
+ * the 0.15.0 review); a URL without a password takes its passfile's, as libpq does (P7 of r18), else gives
+ * postgres.js one to call, so it reads none of its own.
  */
 function postgresOptions(url: LibpqUrl): Record<string, unknown> {
 	const connection = settingsOf(url)
@@ -187,7 +189,7 @@ function postgresOptions(url: LibpqUrl): Record<string, unknown> {
 		...(timeout === undefined ? {} : { connect_timeout: Number(timeout) }),
 		database: url.database,
 		host: url.hostaddr ?? url.host,
-		password: url.password ?? (() => ""),
+		password: url.password ?? passfilePassword(url) ?? (() => ""),
 		port: url.port,
 		ssl: sslOf(url),
 		username: url.user,
