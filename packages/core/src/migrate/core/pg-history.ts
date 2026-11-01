@@ -15,6 +15,7 @@ import { followEventTrigger } from "./pg-events.ts"
 import { followCascade, followReads } from "./pg-cascade.ts"
 import { callIn, domainOf, followDomain, followDomainName } from "./pg-domains.ts"
 import { followNames } from "./pg-names.ts"
+import { followPartitioned } from "./pg-partitioned.ts"
 import { followRoutine } from "./pg-routines.ts"
 import {
 	columnTypeOf,
@@ -226,6 +227,7 @@ function followTree(stmts: unknown, facts: Facts): void {
 		followCascade(type, node, facts)
 		followReads(type, node, facts)
 		followDomainName(type, node, facts)
+		followPartitioned(type, node, facts)
 		followRoutine(type, node, facts)
 		if (type === "CreateFunctionStmt") defined.add(keyOf(names(node["funcname"]), facts.schema))
 		else if (followEventTrigger(type, node, facts) || followNames(type, node, facts)) continue

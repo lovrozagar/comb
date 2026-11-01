@@ -17,9 +17,33 @@ const UNKNOWN = "?"
 // lookup-table: an object kind's word in a command tag, where it is not the kind's own name
 const WORDS: Readonly<Record<string, string>> = {
 	OBJECT_ATTRIBUTE: "TYPE",
+	OBJECT_FDW: "FOREIGN DATA WRAPPER",
+	OBJECT_FOREIGN_SERVER: "SERVER",
 	OBJECT_FOREIGN_TABLE: "FOREIGN TABLE",
+	OBJECT_LARGEOBJECT: "LARGE OBJECT",
 	OBJECT_MATVIEW: "MATERIALIZED VIEW",
 	OBJECT_TABCONSTRAINT: "TABLE",
+	OBJECT_TSCONFIGURATION: "TEXT SEARCH CONFIGURATION",
+	OBJECT_TSDICTIONARY: "TEXT SEARCH DICTIONARY",
+	OBJECT_TSPARSER: "TEXT SEARCH PARSER",
+	OBJECT_TSTEMPLATE: "TEXT SEARCH TEMPLATE",
+}
+
+// lookup-table: the command tags of the statements this module does not tag for an event trigger, as Postgres names them
+const LABELS: Readonly<Record<string, string>> = {
+	AlterDefaultPrivilegesStmt: "ALTER DEFAULT PRIVILEGES",
+	AlterRoleSetStmt: "ALTER ROLE",
+	AlterTSConfigurationStmt: "ALTER TEXT SEARCH CONFIGURATION",
+	AlterTSDictionaryStmt: "ALTER TEXT SEARCH DICTIONARY",
+	CheckPointStmt: "CHECKPOINT",
+	CreateAmStmt: "CREATE ACCESS METHOD",
+	CreatePLangStmt: "CREATE LANGUAGE",
+	CreateStatsStmt: "CREATE STATISTICS",
+	CreateUserMappingStmt: "CREATE USER MAPPING",
+	CreatedbStmt: "CREATE DATABASE",
+	DropdbStmt: "DROP DATABASE",
+	ImportForeignSchemaStmt: "IMPORT FOREIGN SCHEMA",
+	ReassignOwnedStmt: "REASSIGN OWNED",
 }
 
 // lookup-table: the tags of the statements a node type is, one per type
@@ -103,6 +127,23 @@ function tagOf(type: string, node: Node): string | undefined {
 	return /^(?:Create|Alter|Drop)/.test(type) ? UNKNOWN : undefined
 }
 
+/**
+ * What a top-level statement is, as Postgres's command tag names it, for a reason that names its kind
+ * (P21 of r19): its event tag, else its tag in LABELS, else its node type's own words (PrepareStmt is
+ * PREPARE)
+ */
+function kindOf(type: string, node: Node): string {
+	const tag = tagOf(type, node)
+	if (tag !== undefined && tag !== UNKNOWN) return tag
+	return (
+		LABELS[type] ??
+		type
+			.replace(/Stmt$/, "")
+			.replaceAll(/([a-z])([A-Z])/g, "$1 $2")
+			.toUpperCase()
+	)
+}
+
 /** Whether a top-level statement drops an object, as sql_drop takes one */
 function drops(type: string, node: Node): boolean {
 	if (type === "DropStmt") return node["removeType"] !== "OBJECT_EVENT_TRIGGER"
@@ -175,4 +216,4 @@ function followEventTrigger(type: string, node: Node, facts: Facts): boolean {
 	return true
 }
 
-export { eventFindings, followEventTrigger, tagOf }
+export { eventFindings, followEventTrigger, kindOf, tagOf }

@@ -172,7 +172,7 @@ function statementReadings(
 		return [...rules, ...grammarFindings(code, { ...ctx, ftsTriggers }), ...writes]
 	}
 	const read = pgTreeFindings(stmt, ctx, tree)
-	return [...rules, ...grammarFindings(code, { ...ctx, ftsTriggers, treeRated: read.rated }), ...read.findings]
+	return [...rules, ...grammarFindings(code, { ...ctx, ftsTriggers, ...read.grammar }), ...read.findings]
 }
 
 /** The file read as `dialect` reads it, against `before`, a Postgres name keyed under `schema` */

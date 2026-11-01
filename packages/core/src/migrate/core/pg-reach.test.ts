@@ -16,6 +16,8 @@ const FACTS: Facts = {
 	schema: "public",
 	tables: new Map(),
 	views: new Map(),
+	partitioned: new Set(),
+	partitionedIndexes: new Map(),
 	parents: new Map([
 		["c", [{ parent: "p", partition: true }]],
 		["g", [{ parent: "c", partition: true }]],

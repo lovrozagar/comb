@@ -48,7 +48,7 @@ describe("classifyMigration on a write the G1 review found rated low", () => {
 		["PREPARE s AS DELETE FROM t; EXECUTE s;", "unsafe", "an EXECUTE of a statement the file prepares"],
 		["PREPARE s (int) AS UPDATE t SET x = 1 WHERE id = $1; EXECUTE s(1);", "unsafe", "a filtered prepared write"],
 		["EXECUTE stmt;", "unsafe", "an EXECUTE, no shape comb recognizes"],
-		["PREPARE s AS SELECT 1;", "unsafe", "a PREPARE, no shape comb recognizes"],
+		["PREPARE s AS SELECT 1;", "cautious", "a PREPARE, which runs nothing until an EXECUTE (P21 of r19)"],
 		["SELECT setval('s', 1);", "cautious", "setval"],
 		["SELECT pg_catalog.setval('s', 1, false);", "cautious", "a qualified setval"],
 		["CREATE RULE r AS ON INSERT TO t DO INSTEAD DELETE FROM t;", "unsafe", "an unfiltered rule action"],

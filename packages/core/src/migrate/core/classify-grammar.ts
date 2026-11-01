@@ -31,6 +31,8 @@ type GrammarContext = {
 	naming: Naming
 	/** whether a Postgres parse-tree rule rated the whole statement (pg-tree.ts), which then needs no shape here */
 	treeRated?: boolean | undefined
+	/** on Postgres, the statement's kind as its parse tree's command tag names it (P21 of r19) */
+	kind?: string | undefined
 }
 
 const RECOGNIZED = [
@@ -119,12 +121,15 @@ function policyNote(code: string): string | undefined {
 	return `changes which rows ${who.join(", ")} ${sees} on ${unquote(table)}`
 }
 
-/** The first words of a statement comb does not recognize, as its reason names it, a TEMP or TEMPORARY left out */
+/**
+ * The first two words of a SQLite statement comb does not recognize, as its reason names it, a TEMP
+ * or TEMPORARY left out; a Postgres statement is named by its parse tree's command tag (P21 of r19)
+ */
 function kindOf(code: string): string {
 	return code
-		.replace(/^(CREATE (?:OR REPLACE )?)(?:TEMP|TEMPORARY) /i, "$1")
+		.replace(/^(CREATE )(?:TEMP|TEMPORARY) /i, "$1")
 		.split(" ")
-		.slice(0, /^(?:CREATE|ALTER|DROP) OR REPLACE\b/i.test(code) ? 4 : 2)
+		.slice(0, 2)
 		.join(" ")
 }
 
@@ -136,13 +141,13 @@ const DENIED =
  * Why comb rates an unrecognized statement unsafe: the rule, for a trigger or a routine, which
  * another reading may describe as well; else that it does not recognize it (S10, P16 of the 0.15.0 review)
  */
-function unrecognized(code: string): string {
+function unrecognized(code: string, kind = kindOf(code)): string {
 	/* a pragma comb does not write is rated by its own rule too (classify-runtime.ts), never "not recognized" */
 	if (/^PRAGMA\b/i.test(code)) return "comb rates every pragma it does not write unsafe; approve it in the file"
 	const [, family, block] = DENIED.exec(code) ?? []
 	if (block !== undefined) return "comb rates every DO block unsafe; approve it in the file"
 	if (family !== undefined) return `comb rates every ${family.toLowerCase()} change unsafe; approve it in the file`
-	return `comb does not recognize ${kindOf(code)}; approve it in the file`
+	return `comb does not recognize ${kind}; approve it in the file`
 }
 
 /** Whether `code` sets one of the foreign-key pragmas comb writes, on the main schema, however the name is spelled */
@@ -168,7 +173,7 @@ function grammarFindings(statement: string, ctx: GrammarContext): Finding[] {
 		!isFtsSync(code, ctx) &&
 		ctx.treeRated !== true
 	)
-		return [{ level: "unsafe", note: unrecognized(code) }]
+		return [{ level: "unsafe", note: unrecognized(code, ctx.kind) }]
 	const policy = policyNote(code)
 	/* a policy renamed keeps its roles and its predicate */
 	if (policy !== undefined)

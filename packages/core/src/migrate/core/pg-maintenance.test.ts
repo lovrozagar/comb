@@ -101,6 +101,9 @@ describe("a partition added beside the parent's default partition", () => {
 		expect(locks(ATTACH, `${EV} ALTER TABLE ev DETACH PARTITION ev_2020;`).join()).toContain(kept)
 		expect(locks(ATTACH, `${EV} DROP TABLE ev_2020;`).join()).toContain(kept)
 		const second = "ALTER TABLE ev ATTACH PARTITION ev_new DEFAULT;"
-		expect(locks(second).join()).toContain("(scans ev_new under an exclusive lock to check its bound;")
+		/* a default has no bound of its own: Postgres checks its rows against every other's (P20 of r19) */
+		expect(locks(second).join()).toContain(
+			"(scans ev_new under an exclusive lock for rows another partition's bound takes;",
+		)
 	})
 })

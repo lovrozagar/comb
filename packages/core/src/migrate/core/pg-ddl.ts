@@ -15,12 +15,12 @@
  */
 import type { Finding } from "./classify-alter.ts"
 import type { FreshContext } from "./pg-fresh.ts"
-import { addColumn, inlineConstraints, REWRITES } from "./pg-column-add.ts"
+import { addColumn, foreignScan, inlineConstraints, REWRITES } from "./pg-column-add.ts"
 import { domainFindings } from "./pg-domain.ts"
 import { attachFindings, createFindings, maintenanceFindings } from "./pg-maintenance.ts"
 import { retypeFindings } from "./pg-retype.ts"
 import { REWRITE_COMMANDS, tableFindings } from "./pg-table-commands.ts"
-import { type Facts, names, type Node, nodesOf, tableOf } from "./pg-nodes.ts"
+import { type Facts, names, type Node, nodesOf, tableOf, written } from "./pg-nodes.ts"
 
 // lookup-table: the kinds a rename or a move to another schema of loses what names them: unsafe
 const UNSAFE_RENAMES = /* @__PURE__ */ new Set([
@@ -63,12 +63,6 @@ const UNSAFE_DROPS = /* @__PURE__ */ new Set([
 
 // lookup-table: the drops whose objects are named in the drop list, by the word the list writes
 const NAMED_DROPS: Readonly<Record<string, string>> = { OBJECT_INDEX: "INDEX", OBJECT_TABLE: "TABLE" }
-
-/** A RangeVar as written, its schema with it */
-const written = (relation: unknown): string => {
-	const rel = relation as { relname: string; schemaname?: string }
-	return rel.schemaname === undefined ? rel.relname : `${rel.schemaname}.${rel.relname}`
-}
 
 /** A table left with no replica identity: a publication's UPDATE and DELETE on it fail (M84) */
 const NO_IDENTITY: Finding = {
@@ -116,7 +110,7 @@ const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) 
 	AT_AttachPartition: (cmd, _table, { facts, key }) => {
 		const partition = (cmd["def"] as Node)["PartitionCmd"] as Node
 		const isDefault = (partition["bound"] as Node | undefined)?.["is_default"] === true
-		return attachFindings(written(partition["name"]), isDefault ? undefined : facts.defaultPartitions.get(key))
+		return attachFindings(written(partition["name"]), isDefault ? "default" : facts.defaultPartitions.get(key))
 	},
 	/* an identity's RESTART resets its sequence, so the next insert may reuse an id (M82) */
 	AT_AddIdentity: (cmd) => [...always(cmd), ...(restarts(cmd["def"]) ? [RESTART] : [])],
@@ -136,29 +130,38 @@ const COMMAND_RULES: Readonly<Record<string, (cmd: Node, table: string, on: On) 
 	AT_SetNotNull: () => [{ level: "unsafe" }, { level: "lock", note: REWRITES }],
 }
 
+/** The recipe for a foreign key on the partitioned table `table`, whose ADD then attaches each partition's and scans nothing (P18 of r19) */
+const partitionsFirst = (table: string): string =>
+	`add it NOT VALID to each partition, VALIDATE CONSTRAINT on each, then add it to ${table}, which then scans nothing`
+
 /**
  * A constraint ADD's findings: a foreign key or check scans every row unless NOT VALID. A foreign key
- * rewrites nothing, and blocks writes to its table and the one it references (P16 of r18).
+ * rewrites nothing, and blocks writes to its table and the one it references (P16 of r18). On a
+ * partitioned table Postgres refuses a NOT VALID one, and a valid one scans every partition (P18 of r19).
  */
-function addConstraint(cmd: Node, table: string): Finding[] {
+function addConstraint(cmd: Node, table: string, { facts, key }: On): Finding[] {
 	const constraint = (cmd["def"] as Node)["Constraint"] as Node
-	if (constraint["skip_validation"] === true) return []
+	const partitioned = constraint["contype"] === "CONSTR_FOREIGN" && facts.partitioned.has(key)
+	if (constraint["skip_validation"] === true) {
+		if (!partitioned) return []
+		throw new Error(
+			`Postgres refuses a NOT VALID foreign key on the partitioned table ${table}: ${partitionsFirst(table)}`,
+		)
+	}
 	if (constraint["contype"] === "CONSTR_CHECK") return [{ level: "lock", note: REWRITES }]
 	if (constraint["contype"] !== "CONSTR_FOREIGN") return []
 	const referenced = written(constraint["pktable"])
-	const blocked = referenced === table ? table : `${table} and ${referenced}`
-	return [
-		{
-			level: "lock",
-			note: `scans ${table}, blocking writes to ${blocked}; add it NOT VALID, then VALIDATE CONSTRAINT`,
-		},
-	]
+	if (partitioned) {
+		const note = `scans every partition of ${table}, blocking writes to them and ${referenced}; ${partitionsFirst(table)}`
+		return [{ level: "lock", note }]
+	}
+	return [{ level: "lock", note: `${foreignScan(table, referenced)}; add it NOT VALID, then VALIDATE CONSTRAINT` }]
 }
 
 /** A command on one column or constraint: its findings, or undefined for a command on the whole table */
 function columnFindings(cmd: Node, table: string, on: On): Finding[] | undefined {
 	const subtype = String(cmd["subtype"])
-	return subtype === "AT_AddConstraint" ? addConstraint(cmd, table) : COMMAND_RULES[subtype]?.(cmd, table, on)
+	return subtype === "AT_AddConstraint" ? addConstraint(cmd, table, on) : COMMAND_RULES[subtype]?.(cmd, table, on)
 }
 
 /** One ALTER TABLE command's findings, on `table` as written */
@@ -185,7 +188,10 @@ function alterFindings(node: Node, facts: Facts): Finding[] {
 		return cmds.some((cmd) => cmd["subtype"] === "AT_DropColumn" || cmd["subtype"] === "AT_AlterColumnType")
 			? [{ level: "unsafe" }]
 			: []
-	return MOVED.has(String(objtype)) && cmds.some((cmd) => REWRITE_COMMANDS.has(String(cmd["subtype"])))
+	/* a partitioned index has no storage: its move changes only where its partitions' indexes go next (P19 of r19) */
+	const storageless =
+		objtype === "OBJECT_INDEX" && facts.partitionedIndexes.has(tableOf(node["relation"], facts.schema).key)
+	return MOVED.has(String(objtype)) && !storageless && cmds.some((cmd) => REWRITE_COMMANDS.has(String(cmd["subtype"])))
 		? [{ level: "lock", note: REWRITES }]
 		: []
 }

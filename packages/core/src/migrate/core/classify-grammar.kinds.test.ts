@@ -129,7 +129,8 @@ const KINDS: ReadonlyArray<[Dialect, string, MigrationSafety]> = [
 	["postgres", "MERGE INTO post USING s ON post.id = s.id WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)", "cautious"],
 	["postgres", "MOVE c", "unsafe"],
 	["postgres", "NOTIFY x", "unsafe"],
-	["postgres", "PREPARE s AS SELECT 1", "unsafe"],
+	/* a PREPARE runs nothing itself; the EXECUTE is rated by what it runs (P21 of r19) */
+	["postgres", "PREPARE s AS SELECT 1", "cautious"],
 	["postgres", "REASSIGN OWNED BY a TO b", "unsafe"],
 	["postgres", "REFRESH MATERIALIZED VIEW m", "safe"],
 	["postgres", "REINDEX TABLE post", "safe"],

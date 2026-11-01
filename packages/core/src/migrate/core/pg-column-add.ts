@@ -11,9 +11,35 @@
 import type { Finding } from "./classify-alter.ts"
 import { domainOf } from "./pg-domains.ts"
 import { STEADY_BUILTINS } from "./pg-steady-builtins.ts"
-import { type Facts, functionBehind, keyOf, names, type Node, nodesOf, typeOf } from "./pg-nodes.ts"
+import {
+	columnTypeOf,
+	type Facts,
+	functionBehind,
+	keyOf,
+	names,
+	type Node,
+	nodesOf,
+	typeOf,
+	written,
+} from "./pg-nodes.ts"
 
 const REWRITES = "rewrites or scans the table under an exclusive lock"
+
+/** What a foreign key on `table` referencing `referenced` checks, as rating names it (P16 of r18) */
+const foreignScan = (table: string, referenced: string): string =>
+	`scans ${table}, blocking writes to ${referenced === table ? table : `${table} and ${referenced}`}`
+
+/**
+ * An added column's inline foreign key: Postgres checks it against no row while the column is NULL,
+ * and scans both tables once a value fills it (P18 of r19)
+ */
+function inlineKey(constraints: readonly Node[], table: string, filled: boolean): Finding[] {
+	const key = constraints.find((each) => each["contype"] === "CONSTR_FOREIGN")
+	if (key === undefined || !filled) return []
+	const referenced = written(key["pktable"])
+	const note = `${foreignScan(table, referenced)}; add the column, then the foreign key NOT VALID, then VALIDATE CONSTRAINT`
+	return [{ level: "lock", note }]
+}
 
 // lookup-table: the functions a default computes a value of its own for each row with
 const DISTINCT = /* @__PURE__ */ new Set([
@@ -71,7 +97,11 @@ function defaultsOf(constraints: readonly Node[], fill: unknown): unknown[] {
  */
 function fillOf(column: Node, constraints: readonly Node[], facts: Facts) {
 	const has = (type: string) => constraints.some((each) => each["contype"] === type)
-	const domain = domainOf(typeOf(column["typeName"], facts.schema), facts)
+	/* an array of a domain takes no default, and meets no constraint, of its element's domain (P19 of r19) */
+	const domain =
+		columnTypeOf(column, facts.schema).dims === 0
+			? domainOf(typeOf(column["typeName"], facts.schema), facts)
+			: undefined
 	const defaults = defaultsOf(constraints, domain?.fill)
 	const calls = callsIn(defaults, facts)
 	const volatile = calls.some((parts) => DISTINCT.has(parts.at(-1) as string))
@@ -104,18 +134,18 @@ function rewriteNote(column: Node, checksDefault: boolean, facts: Facts): string
  * column's, and with any constraint of the domain's Postgres checks each row, which rewrites the
  * table, default or none (P3 of r19).
  */
-function addColumn(cmd: Node, _table: string, { facts }: { facts: Facts }): Finding[] {
+function addColumn(cmd: Node, table: string, { facts }: { facts: Facts }): Finding[] {
 	const constraints = inlineConstraints(cmd)
 	const has = (type: string) => constraints.some((each) => each["contype"] === type)
 	const column = (cmd["def"] as Node)["ColumnDef"] as Node
 	const { checksDefault, distinct, domain, filled, rewrites } = fillOf(column, constraints, facts)
 	const notNull = has("CONSTR_NOTNULL") || domain?.notNull === true
-	const scans = has("CONSTR_CHECK") || has("CONSTR_FOREIGN") || domain?.constrained === true
+	const scans = has("CONSTR_CHECK") || domain?.constrained === true
 	const findings: Finding[] = []
 	if ((notNull && !filled) || (has("CONSTR_PRIMARY") && !distinct)) findings.push({ level: "unsafe" })
 	if (distinct || rewrites || has("CONSTR_GENERATED") || scans)
 		findings.push({ level: "lock", note: rewriteNote(column, checksDefault, facts) })
-	return findings
+	return [...findings, ...inlineKey(constraints, table, filled)]
 }
 
-export { addColumn, inlineConstraints, REWRITES }
+export { addColumn, foreignScan, inlineConstraints, REWRITES }

@@ -93,7 +93,8 @@ describe("default-deny: the 0.10 review's bypasses are unsafe (M1–M6)", () => 
 		])
 		expect(
 			rate("CREATE OR REPLACE AGGREGATE a (int) (SFUNC = f, STYPE = int);", USERS, "postgres").unsafeStatements.join(),
-		).toContain("comb does not recognize CREATE OR REPLACE AGGREGATE; approve it in the file")
+			/* named as Postgres tags it, CREATE OR REPLACE AGGREGATE as CREATE AGGREGATE (P21 of r19) */
+		).toContain("comb does not recognize CREATE AGGREGATE; approve it in the file")
 	})
 })
 

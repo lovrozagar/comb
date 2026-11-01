@@ -24,14 +24,21 @@ const turnsOn = (options: unknown, name: string): boolean =>
 /**
  * An ATTACH PARTITION's finding: Postgres checks every row of `partition` against its bound under
  * ACCESS EXCLUSIVE, and every row of the parent's default partition, when it has one, against the
- * bound too (P12 of r18)
+ * bound too (P12 of r18); a default partition's rows against every other bound (P20 of r19). `defaulted`
+ * names the parent's default partition, or is "default" when `partition` attaches as it
  */
 function attachFindings(partition: string, defaulted?: string): Finding[] {
-	const note =
-		defaulted === undefined
-			? `scans ${partition} under an exclusive lock to check its bound; add a CHECK constraint matching the bound NOT VALID, VALIDATE it, then ATTACH`
-			: `scans ${partition}, and the default partition ${defaulted}, under an exclusive lock to check their bounds; add a CHECK constraint matching the bound to ${partition} and one excluding it to ${defaulted}, each NOT VALID, VALIDATE them, then ATTACH`
-	return [{ level: "lock", note }]
+	return [{ level: "lock", note: attachNote(partition, defaulted) }]
+}
+
+/** What an ATTACH of `partition` scans, and how to have it scan nothing; `defaulted` is "default" when it attaches as the default */
+function attachNote(partition: string, defaulted: string | undefined): string {
+	/* a default partition has no bound: Postgres checks that no row of it falls in another partition's (P20 of r19) */
+	if (defaulted === "default")
+		return `scans ${partition} under an exclusive lock for rows another partition's bound takes; add a CHECK constraint to ${partition} that excludes every other partition's bound NOT VALID, VALIDATE it, then ATTACH`
+	if (defaulted === undefined)
+		return `scans ${partition} under an exclusive lock to check its bound; add a CHECK constraint matching the bound NOT VALID, VALIDATE it, then ATTACH`
+	return `scans ${partition}, and the default partition ${defaulted}, under an exclusive lock to check their bounds; add a CHECK constraint matching the bound to ${partition} and one excluding it to ${defaulted}, each NOT VALID, VALIDATE them, then ATTACH`
 }
 
 /** A partition created beside its parent's default partition: Postgres checks no row of the default belongs to it */
@@ -65,6 +72,12 @@ function lockFindings(node: Node): Finding[] {
 	return [{ level: "lock", note: `locks ${tables.join(", ")} against ${blocks} until the file's transaction ends` }]
 }
 
+/* a PREPARE's finding: what it holds runs only when an EXECUTE runs it */
+const PREPARES: Finding = {
+	level: "cautious",
+	note: "prepares a statement for an EXECUTE, which comb rates by the statement it runs",
+}
+
 /**
  * A maintenance or locking statement's lock finding; undefined for a statement that is none. A
  * REFRESH MATERIALIZED VIEW that is not concurrent holds ACCESS EXCLUSIVE on its view, and a LOCK
@@ -75,6 +88,8 @@ function maintenanceFindings(type: string, node: Node): Finding[] | undefined {
 	if (type === "ReindexStmt") return turnsOn(node["params"], "concurrently") ? [] : [LOCKED]
 	if (type === "RefreshMatViewStmt") return node["concurrent"] === true ? [] : [LOCKED]
 	if (type === "LockStmt") return lockFindings(node)
+	/* a PREPARE runs nothing itself: the EXECUTE that runs it is rated by what it runs (P21 of r19) */
+	if (type === "PrepareStmt") return [PREPARES]
 	return type === "ClusterStmt" ? [LOCKED] : undefined
 }
 

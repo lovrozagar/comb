@@ -27,7 +27,7 @@ import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import { constraintIndexWarnings, ddlFindings } from "./pg-ddl.ts"
 import { maintenanceFindings } from "./pg-maintenance.ts"
 import { followFresh } from "./pg-fresh.ts"
-import { eventFindings } from "./pg-events.ts"
+import { eventFindings, kindOf } from "./pg-events.ts"
 import { followParentage, reachFindings, useFinding } from "./pg-reach.ts"
 
 type Node = Record<string, unknown>
@@ -209,12 +209,16 @@ function shadowFinding(type: string, node: Node, ctx: TreeContext): Finding | un
 
 /** One Postgres statement's findings, read from its parse tree: the one its file's read kept, else parsed here */
 /**
- * A statement's findings from its parse tree, and whether a rule that rates a whole statement
+ * A statement's findings from its parse tree, and for the grammar its kind (P21 of r19) and whether a rule that rates a whole statement
  * (pg-maintenance.ts) rated each of its statements, a rating of none included, or it failed to parse,
  * which is unsafe: the grammar then has no shape to recognize (P13 of r18). The DDL rules add to the
  * grammar's rating, so theirs is not one.
  */
-function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): { findings: Finding[]; rated: boolean } {
+function pgTreeFindings(
+	stmt: string,
+	ctx: TreeContext,
+	kept?: unknown,
+): { findings: Finding[]; grammar: { kind?: string | undefined; treeRated: boolean } } {
 	/* the parser is loaded, or this throws before the statement is rated */
 	postgresParser()
 	let tree: { stmts?: unknown }
@@ -223,9 +227,11 @@ function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): { findi
 	} catch (error) {
 		// reason: a statement Postgres cannot parse is the statement's finding, unsafe
 		const note = `comb could not parse this as Postgres 17: ${(error as Error).message}`
-		return { findings: [{ level: "unsafe", note }], rated: true }
+		return { findings: [{ level: "unsafe", note }], grammar: { treeRated: true } }
 	}
-	const nodes = nodesOf(tree.stmts)
+	/* a PREPARE is rated as itself, never as the statement it holds (P21 of r19) */
+	const raws = tree.stmts as Array<{ stmt: Node }>
+	const nodes = nodesOf(raws.map((raw) => ("PrepareStmt" in raw.stmt ? { stmt: { PrepareStmt: {} } } : raw)))
 	const findings = nodes.flatMap(([type, node]) => {
 		if (WRITES.test(type)) return writeFindings(type, node, ctx)
 		return [
@@ -242,9 +248,13 @@ function pgTreeFindings(stmt: string, ctx: TreeContext, kept?: unknown): { findi
 	/* the event triggers the history made run on this statement before what it makes counts */
 	findings.push(...eventFindings(tree.stmts, ctx))
 	followTree(tree.stmts, ctx.facts)
-	const tops = (tree.stmts as Array<{ stmt: Node }>).map((raw) => Object.entries(raw.stmt)[0] as [string, Node])
-	const rated = tops.length > 0 && tops.every(([type, node]) => maintenanceFindings(type, node) !== undefined)
-	return { findings, rated }
+	const tops = raws.map((raw) => Object.entries(raw.stmt)[0] as [string, Node])
+	const treeRated = tops.length > 0 && tops.every(([type, node]) => maintenanceFindings(type, node) !== undefined)
+	return {
+		findings,
+		/* a read statement is one parse tree's one statement (pg-split.ts) */
+		grammar: { kind: kindOf(...(tops[0] as [string, Node])), treeRated },
+	}
 }
 
 export { pgTreeFindings, type TreeContext }

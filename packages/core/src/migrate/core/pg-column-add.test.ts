@@ -51,13 +51,13 @@ describe("an added column that fills every row (P6)", () => {
 })
 
 describe("an added column's inline constraints (P6)", () => {
-	it("warns of the scan of an inline check or reference, as ADD CONSTRAINT does", () => {
+	it("warns of the scan of an inline check, as ADD CONSTRAINT does, and of none for a reference no value fills (P18 of r19)", () => {
+		expect(rated("ALTER TABLE t ADD COLUMN n int CHECK (n > 0)")).toEqual([REWRITE])
 		for (const sql of [
-			"ALTER TABLE t ADD COLUMN n int CHECK (n > 0)",
 			"ALTER TABLE t ADD COLUMN n int REFERENCES u (id)",
 			"ALTER TABLE t ADD COLUMN n int CONSTRAINT f REFERENCES u",
 		])
-			expect(rated(sql), sql).toEqual([REWRITE])
+			expect(rated(sql), sql).toEqual([])
 	})
 
 	it("rates an inline primary key unsafe, unless each row gets its own value", () => {

@@ -59,6 +59,7 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 		facts.domains,
 		facts.operators,
 		facts.parents,
+		facts.partitionedIndexes,
 		facts.reads,
 		facts.tables,
 		facts.triggers,
@@ -78,6 +79,11 @@ function moveSchema(facts: Facts, from: string, to: string): void {
 	for (const [key, fn] of facts.operators) facts.operators.set(key, move(fn))
 	moveDomains(facts, move)
 	for (const key of Array.from(facts.defined)) facts.defined.add(move(key))
+	for (const key of Array.from(facts.partitioned)) {
+		facts.partitioned.delete(key)
+		facts.partitioned.add(move(key))
+	}
+	for (const [index, table] of facts.partitionedIndexes) facts.partitionedIndexes.set(index, move(table))
 	moveDefaults(facts, move)
 	moveReads(facts, move)
 }

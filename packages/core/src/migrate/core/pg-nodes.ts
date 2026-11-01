@@ -28,6 +28,12 @@ type Domain = {
  */
 type Reads = { columns: Set<string> | "all"; functions: Set<string>; relations: Set<string> }
 
+/** A RangeVar as written, its schema with it */
+const written = (relation: unknown): string => {
+	const rel = relation as { relname: string; schemaname?: string }
+	return rel.schemaname === undefined ? rel.relname : `${rel.schemaname}.${rel.relname}`
+}
+
 /** The facts of a history with nothing in it, its names keyed under `schema` */
 const emptyFacts = (schema: string): Facts => ({
 	casts: new Map(),
@@ -39,6 +45,8 @@ const emptyFacts = (schema: string): Facts => ({
 	eventTriggers: new Map(),
 	operators: new Map(),
 	parents: new Map(),
+	partitioned: new Set(),
+	partitionedIndexes: new Map(),
 	reads: new Map(),
 	routines: new Map(),
 	schema,
@@ -93,6 +101,10 @@ type Facts = {
 	operators: Map<string, string>
 	/** each partitioned table's DEFAULT partition, which a new partition's bound is checked against (P12 of r18) */
 	defaultPartitions: Map<string, string>
+	/** each partitioned table, by key (P18 of r19) */
+	partitioned: Set<string>
+	/** each index on a partitioned table, which has no storage of its own, with its table (P19 of r19) */
+	partitionedIndexes: Map<string, string>
 	/** each table's parents, and whether it is their partition */
 	parents: Map<string, Array<{ parent: string; partition: boolean }>>
 	/** the schema an unqualified name resolves in, the one each key leaves out (M72) */
@@ -204,6 +216,7 @@ export {
 	type Routines,
 	tableOf,
 	typed,
+	written,
 	typeOf,
 	type Volatility,
 }
