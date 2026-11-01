@@ -141,7 +141,12 @@ describe("a Postgres baseline whose dev database is reached as another role (rev
 		const role = "comb_r19_dev"
 		await withScratchDb((dev) =>
 			withScratchDb(async (url) => {
-				await exec(dev, `DO $$ BEGIN CREATE ROLE ${role} LOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$`)
+				/* the role logs in with the URL's own password: CI's server checks passwords, a trust server ignores it */
+				const password = decodeURIComponent(new URL(dev).password).replaceAll("'", "''")
+				await exec(
+					dev,
+					`DO $$ BEGIN CREATE ROLE ${role} LOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$; ALTER ROLE ${role} PASSWORD '${password}'`,
+				)
 				const database = new URL(dev).pathname.slice(1)
 				await exec(dev, `GRANT ALL ON DATABASE "${database}" TO ${role}; GRANT ALL ON SCHEMA public TO ${role};`)
 				const sql = "CREATE TABLE t (id int PRIMARY KEY);\nCREATE POLICY p ON t TO CURRENT_USER USING (true);\n"
