@@ -111,7 +111,13 @@ type SpellfixSearch = FtsSource & {
 	spellfixTable: string
 }
 
-/** Words spellfix1 offers for `term`; none when the extension or its table is unavailable */
+/* what SQLite says when spellfix1 is not loaded: its module, or the editdist3 function it brings */
+const NO_SPELLFIX = /no such (?:module: spellfix1|function: editdist3)\b/
+
+/**
+ * Words spellfix1 offers for `term`; none when the extension is not loaded. Any other failure, a
+ * table misspelled or a transient D1 error, is the caller's to see (K9 of r18)
+ */
 async function corrections(db: SpellfixDb, term: string, search: SpellfixSearch): Promise<string[]> {
 	const { maxCorrections = 3, maxEditDistance = 300, spellfixTable } = search
 	try {
@@ -119,9 +125,10 @@ async function corrections(db: SpellfixDb, term: string, search: SpellfixSearch)
 			sql`SELECT word FROM ${ident(spellfixTable)} WHERE word MATCH ${`${term}*`} AND editdist3(word, ${term}) < ${maxEditDistance} LIMIT ${maxCorrections}`,
 		)
 		return rows.map((row) => row.word).filter(Boolean)
-	} catch {
-		// reason: spellfix1 is an optional extension; without it the search runs on the terms as typed
-		return []
+	} catch (error) {
+		/* spellfix1 is an optional extension; without it the search runs on the terms as typed */
+		if (NO_SPELLFIX.test(error instanceof Error ? error.message : String(error))) return []
+		throw error
 	}
 }
 

@@ -224,21 +224,6 @@ describe("buildFtsWhereWithSpellfix — corrections, fallback and binding", () =
 		expect(String(params[0])).toBe('"hello"*')
 	})
 
-	it("degrades to the plain term when the spellfix table is missing", async () => {
-		const db = {
-			all: async () => {
-				throw new Error("no such table: spellfix")
-			},
-		}
-		const built = await buildFtsWhereWithSpellfix(
-			db,
-			{ ftsTable: "item_fts", table: item, spellfixTable: "sp" },
-			"hello",
-		)
-		expect(built).not.toBeNull()
-		expect(String(compile(built!).params[0])).toBe('"hello"*')
-	})
-
 	it("binds the term to spellfix as typed, with no escaping a bound value does not need (S-4)", async () => {
 		const seen: unknown[][] = []
 		const db = { all: async (query: SQL) => (seen.push(compile(query).params), []) }
@@ -255,6 +240,48 @@ describe("buildFtsWhereWithSpellfix — corrections, fallback and binding", () =
 		const { params, sql } = compile(built!)
 		expect(sql).not.toContain("hello")
 		expect(params).toContain('"hello"*')
+	})
+})
+
+describe("buildFtsWhereWithSpellfix when spellfix fails", () => {
+	/* r18 K9: only spellfix1 itself missing degrades; a misspelled table or a transient failure is the caller's to see */
+	it.each(["no such module: spellfix1", "SQLITE_ERROR: no such function: editdist3"])(
+		"degrades to the plain term when SQLite says %j",
+		async (message) => {
+			const db = {
+				all: async () => {
+					throw new Error(message)
+				},
+			}
+			const built = await buildFtsWhereWithSpellfix(
+				db,
+				{ ftsTable: "item_fts", table: item, spellfixTable: "sp" },
+				"hello",
+			)
+			expect(String(compile(built!).params[0])).toBe('"hello"*')
+		},
+	)
+
+	it("rethrows what a driver throws that is no Error, read as its text", async () => {
+		const db = {
+			all: async () => {
+				throw "no such table: wrods"
+			},
+		}
+		await expect(
+			buildFtsWhereWithSpellfix(db, { ftsTable: "item_fts", table: item, spellfixTable: "wrods" }, "hello"),
+		).rejects.toBe("no such table: wrods")
+	})
+
+	it.each(["no such table: wrods", "D1_ERROR: Network connection lost."])("rethrows %j", async (message) => {
+		const db = {
+			all: async () => {
+				throw new Error(message)
+			},
+		}
+		await expect(
+			buildFtsWhereWithSpellfix(db, { ftsTable: "item_fts", table: item, spellfixTable: "wrods" }, "hello"),
+		).rejects.toThrow(message)
 	})
 })
 
