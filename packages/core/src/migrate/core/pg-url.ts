@@ -6,7 +6,7 @@
  * and postgres.js reads none of libpq's query keys and sends each one it does not know to the
  * server as a setting, so neither reads a URL here.
  */
-import { readFileSync } from "node:fs"
+import { accessSync, constants, readFileSync } from "node:fs"
 import { userInfo } from "node:os"
 import { passfilePassword } from "./pg-passfile.ts"
 
@@ -147,6 +147,35 @@ function libpqUrl(raw: string): LibpqUrl | undefined {
 /* a client file each TLS option reads, by the libpq key that names it */
 const TLS_FILES = { ca: "sslrootcert", cert: "sslcert", key: "sslkey" } as const
 
+// lookup-table: the sslmodes libpq takes
+const SSL_MODES: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"disable",
+	"allow",
+	"prefer",
+	"require",
+	"verify-ca",
+	"verify-full",
+])
+
+/** Why `url`, which `field` names, cannot connect as its TLS options say: an sslmode libpq refuses, a file that cannot be read (P20 of r18) */
+function tlsProblems(field: "devUrl" | "url", url: LibpqUrl): string[] {
+	const mode = url.params.get("sslmode")
+	if (mode !== undefined && !SSL_MODES.has(mode))
+		return [`${field}'s sslmode ${mode} is none libpq takes: disable, allow, prefer, require, verify-ca or verify-full`]
+	if (url.socket) return []
+	return Object.values(TLS_FILES).flatMap((key) => {
+		const file = url.params.get(key)
+		if (file === undefined) return []
+		try {
+			accessSync(file, constants.R_OK)
+			return []
+		} catch {
+			// reason: the throw is the answer: the file cannot be read
+			return [`${field}'s ${key} ${file} cannot be read`]
+		}
+	})
+}
+
 /* verify-ca checks a server's certificate chain, never its host name */
 const anyHost = (): undefined => undefined
 
@@ -239,4 +268,4 @@ function urlProblem(raw: string): "address" | "encoded socket" | "password" | "q
 	return undecodable(userinfo.split(":")[0] as string) ? "user" : "password"
 }
 
-export { type LibpqUrl, libpqUrl, postgresOptionsOf, queryParams, urlProblem, withParam }
+export { type LibpqUrl, libpqUrl, postgresOptionsOf, queryParams, tlsProblems, urlProblem, withParam }

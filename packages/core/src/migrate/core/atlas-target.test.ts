@@ -389,3 +389,24 @@ describe("pgUrlProblems: plaintext warning by the address connected to", () => {
 		expect(tunnel.warnings).toEqual([])
 	})
 })
+
+/* r18 P20: a TLS option comb cannot use is refused by the field that holds it, before anything connects */
+describe("pgUrlProblems: TLS options, per field", () => {
+	it("refuses an sslmode libpq does not take, naming the field", () => {
+		expect(pgUrlProblems(target({ url: "postgres://localhost/app?sslmode=verify_full" })).errors).toEqual([
+			"url's sslmode verify_full is none libpq takes: disable, allow, prefer, require, verify-ca or verify-full",
+		])
+	})
+
+	it("refuses a TLS file that cannot be read, naming the field and the key", () => {
+		const dev = "postgres://localhost/dev?sslmode=verify-full&sslrootcert=/nonexistent/root.crt"
+		expect(pgUrlProblems(target({ devUrl: dev })).errors).toEqual([
+			"devUrl's sslrootcert /nonexistent/root.crt cannot be read",
+		])
+		const key = "postgres://localhost/app?sslmode=require&sslkey=/nonexistent/key&sslcert=/nonexistent/cert"
+		expect(pgUrlProblems(target({ url: key })).errors).toEqual([
+			"url's sslcert /nonexistent/cert cannot be read",
+			"url's sslkey /nonexistent/key cannot be read",
+		])
+	})
+})

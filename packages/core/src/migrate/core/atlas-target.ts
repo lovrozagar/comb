@@ -12,7 +12,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
 import { RESERVED_SCHEMA_WORDS } from "./pg-keywords.ts"
-import { type LibpqUrl, libpqUrl, queryParams, urlProblem, withParam } from "./pg-url.ts"
+import { libpqUrl, type LibpqUrl, queryParams, tlsProblems, urlProblem, withParam } from "./pg-url.ts"
 import { lockTimeoutMs } from "./pg-lock-timeout.ts"
 
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
@@ -125,6 +125,10 @@ function schemaProblem(schema: string): string | undefined {
 	return undefined
 }
 
+/** A checked URL field's errors: why it cannot be read, else why it cannot connect as its TLS options say */
+const fieldErrors = (field: "devUrl" | "url", checked: { error?: string; url?: LibpqUrl }): string[] =>
+	checked.error === undefined ? (checked.url === undefined ? [] : tlsProblems(field, checked.url)) : [checked.error]
+
 /** What is wrong with the URLs `needs` names before Atlas runs: errors refuse it, warnings are printed */
 function pgUrlProblems(
 	target: PgTarget,
@@ -132,7 +136,7 @@ function pgUrlProblems(
 ): { errors: string[]; warnings: string[] } {
 	const url = needs.url ? checkUrl("url", target.url) : {}
 	const dev = needs.dev ? checkUrl("devUrl", target.devUrl) : {}
-	const errors = [url.error, dev.error].filter((error): error is string => error !== undefined)
+	const errors = [...fieldErrors("url", url), ...fieldErrors("devUrl", dev)]
 	/* the target guarded whenever it is configured, on a call that does not reach it too (M89) */
 	const configured = libpqUrl(target.url)
 	if (configured !== undefined && dev.url !== undefined && databaseOf(configured) === databaseOf(dev.url)) {
