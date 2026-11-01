@@ -32,17 +32,22 @@ describe("the newest upgrade section's exports", () => {
 	const now = exportsOf(ROOT)
 	const { section, version } = newestUpgrade()
 
-	it("upgrades from the release the exports are checked in from", () => {
-		const [major, minor] = version.split(".").map(Number)
-		const [wasMajor, wasMinor] = RELEASED.version.split(".").map(Number)
-		expect([major, minor], `Upgrading to ${version} from ${RELEASED.version}`).not.toEqual([wasMajor, wasMinor])
-		expect(major === wasMajor ? (minor as number) - (wasMinor as number) : 1).toBe(1)
+	/* right after a release the newest section is the release's own, and the snapshot is regenerated from its tag */
+	const [major, minor] = version.split(".").map(Number)
+	const [wasMajor, wasMinor] = RELEASED.version.split(".").map(Number)
+	const released = major === wasMajor && minor === wasMinor
+	const since = [...changed(RELEASED.exports, now), ...changed(now, RELEASED.exports)]
+
+	it("upgrades from the release the exports are checked in from, or is that release's own", () => {
+		expect(
+			released || (major === wasMajor ? (minor as number) - (wasMinor as number) : 1) === 1,
+			`Upgrading to ${version} from ${RELEASED.version}`,
+		).toBe(true)
 	})
 
-	it("names each export added or removed since then", () => {
-		const unnamed = [...changed(RELEASED.exports, now), ...changed(now, RELEASED.exports)].filter(
-			(name) => !section.includes(`\`${name}\``),
-		)
-		expect([...new Set(unnamed)]).toEqual([])
+	it("names each export added or removed since then; none, while the section is the release's own", () => {
+		/* an export changed after the release opens the next version's section, which names it */
+		const unnamed = released ? since : since.filter((name) => !section.includes(`\`${name}\``))
+		expect([...new Set(unnamed)], `changed since ${RELEASED.version}, unnamed in "Upgrading to ${version}"`).toEqual([])
 	})
 })

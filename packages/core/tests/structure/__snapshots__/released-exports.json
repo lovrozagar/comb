@@ -121,6 +121,7 @@
 			"DEFAULT_PG_DEV_URL",
 			"DRIZZLE_HISTORY_TABLE",
 			"DatabaseConfig",
+			"DatabaseMissing",
 			"Dialect",
 			"DrizzleExportOptions",
 			"EnvironmentConfig",
@@ -142,6 +143,7 @@
 			"RetryOptions",
 			"SchemaDiffOptions",
 			"SchemaDiffResult",
+			"TursoMissing",
 			"TursoProviderConfig",
 			"applySqliteMigrationTransforms",
 			"checkAtlasInstalled",
@@ -168,6 +170,7 @@
 			"introspectSqliteSchema",
 			"loadConfig",
 			"loadPostgresParser",
+			"parseConfig",
 			"parseMigration",
 			"resolveDatabaseConfig",
 			"splitSqlStatements",
@@ -351,5 +354,5 @@
 			"statusKeyToCode"
 		]
 	},
-	"version": "0.16.1"
+	"version": "0.17.0"
 }
