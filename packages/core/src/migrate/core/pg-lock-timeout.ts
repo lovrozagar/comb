@@ -21,14 +21,14 @@ const halfEven = (value: number): number => {
 }
 
 /**
- * `lockTimeout` in whole milliseconds, as Postgres reads lock_timeout (P6 of r18): whole
- * milliseconds, or a number, an optional space and its unit, rounded half to even; or why it is
+ * `lockTimeout` in whole milliseconds, as Postgres reads lock_timeout (P6 of r18): a number, an
+ * optional space and an optional unit (milliseconds when none), rounded half to even; or why it is
  * none Postgres takes. Read once, so what Atlas is handed is the same value written with no space.
  */
 function lockTimeoutMs(text: string): number | string {
 	const [, digits, unit] = /^(\d+(?:\.\d+)?) ?(us|ms|s|min|h|d)?$/.exec(text) ?? []
-	if (digits === undefined || (unit === undefined && digits.includes(".")))
-		return "lockTimeout must be a Postgres duration: a whole number of milliseconds (250, 0 for none), or a number with us, ms, s, min, h or d (1500ms, 1.5s, 1min)"
+	if (digits === undefined)
+		return "lockTimeout must be a Postgres duration: a number of milliseconds (250, 0 for none), or a number with us, ms, s, min, h or d (1500ms, 1.5s, 1min)"
 	const ms = halfEven(Number(digits) * (UNIT_MS[unit ?? "ms"] as number))
 	if (ms > INT_MAX)
 		return `lockTimeout ${text} is longer than Postgres's lock_timeout takes: at most ${INT_MAX}ms (about 24.8 days)`

@@ -47,9 +47,9 @@ describe("pgUrlProblems", () => {
 
 describe("pgUrlProblems: the lock timeout, TLS and poolers", () => {
 	it("refuses one Postgres does not take", () => {
-		for (const lockTimeout of ["soon", "5 sec", "-1s", "1.5", "1e3ms", "5S"])
+		for (const lockTimeout of ["soon", "5 sec", "-1s", "1e3ms", "5S"])
 			expect(pgUrlProblems(target({ lockTimeout })).errors, lockTimeout).toEqual([
-				"lockTimeout must be a Postgres duration: a whole number of milliseconds (250, 0 for none), or a number with us, ms, s, min, h or d (1500ms, 1.5s, 1min)",
+				"lockTimeout must be a Postgres duration: a number of milliseconds (250, 0 for none), or a number with us, ms, s, min, h or d (1500ms, 1.5s, 1min)",
 			])
 	})
 
