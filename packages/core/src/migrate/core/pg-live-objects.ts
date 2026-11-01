@@ -11,7 +11,7 @@
  */
 import { postgresOptionsOf } from "./pg-url.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
-import { CATALOG } from "./pg-live-catalog.ts"
+import { CATALOG, COMPARED } from "./pg-live-catalog.ts"
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts"
 
 /** The postgres.js client, as far as comb uses it */
@@ -48,10 +48,6 @@ async function loadPostgres(why: string): Promise<Connect> {
 		throw new Error(`${why}; install ${PEER} (${RANGE}), an optional peer, and run it again`, { cause: error })
 	}
 }
-
-/** What a baseline compares itself, as its refusals name it */
-const COMPARED =
-	"functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security"
 
 /* why a baseline loads it: it cannot vouch for the database without it */
 const COMPARES = `baseline compares the database's ${COMPARED}, which Atlas OSS does not, through the ${PEER} package`

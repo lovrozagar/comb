@@ -65,7 +65,7 @@ describe("a Postgres baseline: the functions, procedures and triggers Atlas OSS 
 			await exec(url, `${TABLE}${TRIGGER}`)
 			const { refused } = await baseline(url, devUrl, TABLE)
 			expect(refused).toBe(
-				"the database's functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security are not the ones the migrations leave, so baseline records nothing:\nfunction touch(): only in the database\ntrigger t_touch on t (before insert, for each row): only in the database",
+				"the database's functions, procedures, triggers, views, materialized views, sequences, policies, domains, composite types, range types, collations, rules, row level security, extensions, aggregates, SECURITY DEFINER, operators, casts, views' options, materialized views' indexes, replica identity, event triggers and publications are not the ones the migrations leave, so baseline records nothing:\nfunction touch(): only in the database\ntrigger t_touch on t (before insert, for each row): only in the database",
 			)
 			const client = new pg.Client({ connectionString: url })
 			await client.connect()
@@ -199,7 +199,7 @@ CREATE POLICY "own" ON "u" USING (true);
 			await exec(url, 'CREATE TABLE "u" ("id" serial, "n" integer GENERATED ALWAYS AS IDENTITY, "a" boolean);')
 			const { refused } = await baseline(url, devUrl, OBJECTS)
 			expect(refused).toBe(
-				"the database's functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security are not the ones the migrations leave, so baseline records nothing:\nmaterialized view counts: only in the migrations\npolicy own on u (for all, to public, permissive): only in the migrations\nsequence codes (start 1, increment 1, min 1, max 9223372036854775807, no cycle): only in the migrations\nview active: only in the migrations",
+				"the database's functions, procedures, triggers, views, materialized views, sequences, policies, domains, composite types, range types, collations, rules, row level security, extensions, aggregates, SECURITY DEFINER, operators, casts, views' options, materialized views' indexes, replica identity, event triggers and publications are not the ones the migrations leave, so baseline records nothing:\nmaterialized view counts: only in the migrations\npolicy own on u (for all, to public, permissive): only in the migrations\nsequence codes (start 1, increment 1, min 1, max 9223372036854775807, no cycle): only in the migrations\nview active: only in the migrations",
 			)
 		})
 	}, 60_000)

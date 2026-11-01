@@ -231,6 +231,7 @@ declare const atlasNotices: (stderr: string) => string[];
 export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasNotices, atlasUrls, pgUrlProblems, type PgTarget, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
 
 // migrate/core/pg-live-objects.d.ts
+import { COMPARED } from "./pg-live-catalog.ts";
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts";
 /** The postgres.js client, as far as comb uses it */
 type Sql = {
@@ -245,8 +246,6 @@ type Connect = (options: Record<string, unknown>) => Sql;
 declare function failureOf(error: unknown, field?: "devUrl" | "url"): string;
 /** postgres.js, or the refusal naming it and `why` comb needs it here */
 declare function loadPostgres(why: string): Promise<Connect>;
-/** What a baseline compares itself, as its refusals name it */
-declare const COMPARED = "functions, aggregates, triggers, views, sequences, policies, types, rules, collations, operators, casts, extensions, event triggers, publications, replica identity and row level security";
 /**
  * What `schema` holds of what Atlas OSS does not compare, read through `sql` by the one catalog
  * query: the target's read and the dev replay's are this one function (P5 of r19), so the two sides
@@ -269,3 +268,13 @@ declare function liveDrift(history: LiveObjects, live: LiveObjects): {
     only: string[];
 };
 export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, readCatalog, readLiveObjects };
+
+// migrate/core/pg-live-catalog.d.ts
+export declare const CATALOG: string;
+/**
+ * What each arm of CATALOG compares, in the arms' order, as a refusal names it: the one list COMPARED
+ * is written from, held to CATALOG's arms by its test, so an arm cannot go unnamed
+ */
+export declare const ARM_KINDS: ReadonlyArray<readonly [what: string, kinds: readonly string[]]>;
+/** What a baseline compares itself, as its refusals name it */
+export declare const COMPARED: string;

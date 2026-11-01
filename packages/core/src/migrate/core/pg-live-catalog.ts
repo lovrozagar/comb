@@ -116,3 +116,35 @@ SELECT 'platform', 'publication ' || pb.pubname, NULL, NULL, NULL, NULL, NULL, N
 FROM pg_catalog.pg_publication pb
 UNION ALL
 SELECT 'user', current_user::text, NULL, NULL, NULL, NULL, NULL, NULL`
+
+/**
+ * What each arm of CATALOG compares, in the arms' order, as a refusal names it: the one list COMPARED
+ * is written from, held to CATALOG's arms by its test, so an arm cannot go unnamed
+ */
+export const ARM_KINDS: ReadonlyArray<readonly [what: string, kinds: readonly string[]]> = [
+	["routine", ["functions", "procedures"]],
+	["trigger", ["triggers"]],
+	["relation", ["views", "materialized views", "sequences"]],
+	["policy", ["policies"]],
+	["kind", ["domains", "composite types", "range types"]],
+	["kind", ["collations"]],
+	["rule", ["rules"]],
+	["rls", ["row level security"]],
+	["extension", ["extensions"]],
+	["other", ["aggregates"]],
+	["other", ["SECURITY DEFINER"]],
+	["other", ["operators"]],
+	["other", ["casts"]],
+	["other", ["views' options"]],
+	["other", ["materialized views' indexes"]],
+	["other", ["replica identity"]],
+	["platform", ["event triggers"]],
+	["platform", ["publications"]],
+	["user", []],
+]
+
+/** What a baseline compares itself, as its refusals name it */
+export const COMPARED: string = /* @__PURE__ */ (() => {
+	const kinds = ARM_KINDS.flatMap(([, named]) => named)
+	return `${kinds.slice(0, -1).join(", ")} and ${kinds.at(-1) as string}`
+})()
