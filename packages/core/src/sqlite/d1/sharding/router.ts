@@ -126,8 +126,7 @@ class ShardRouter {
 		const primary = (await readLiveRow(deps.coreDb, orgId, "first-primary")).mapping
 		if (primary?.shardId === cached.shardId) return primary
 		/* the primary's mapping read again after the tombstone, so it is tagged with it */
-		const tag = await this.cache.invalidate(orgId, deps.kv)
-		const generation = this.cache.generationOf(orgId)
+		const { generation, nonce: tag } = await this.cache.invalidate(orgId, deps.kv)
 		const { mapping } = await readLiveRow(deps.coreDb, orgId, "first-primary")
 		this.log("shard-router.reresolve", { from: cached.shardId, orgId, to: mapping?.shardId })
 		if (mapping && this.cache.generationOf(orgId) === generation)
@@ -171,8 +170,8 @@ class ShardRouter {
 		assertShard(shardId, this.totalShards)
 		const row = await overwrite(openD1Session(deps.coreDb).client, placement)
 		/* the tombstone after the commit, then the moved row warms KV tagged with it */
-		const tag = await this.cache.invalidate(orgId, deps.kv)
-		return this.settle(row, "move", { executionCtx, kv: deps.kv, tag })
+		const { generation, nonce: tag } = await this.cache.invalidate(orgId, deps.kv)
+		return this.settle(row, "move", { executionCtx, generation, kv: deps.kv, tag })
 	}
 
 	/** Soft-delete an org's mapping and invalidate it here; a later allocate or place revives it on its shard */
@@ -209,16 +208,25 @@ class ShardRouter {
 		deps: ShardResolverDeps,
 		executionCtx: WaitUntilCtx,
 	): Promise<ShardMapping> {
+		/* read before the write, so a tombstone that came after its read never tags its row (Q6 of r18) */
+		const generation = this.cache.generationOf(orgId)
+		const tag = this.cache.tombstoneOf(orgId)
 		const { how, row } = await insertFirst(drizzle(openD1Session(deps.coreDb).client), orgId, shardId)
 		/* written after this isolate's live tombstone, if it holds one, so tagged with it: other isolates trust it (Q17 of r17) */
-		return this.settle(row, how, { executionCtx, kv: deps.kv, tag: this.cache.tombstoneOf(orgId) })
+		return this.settle(row, how, { executionCtx, generation, kv: deps.kv, tag })
 	}
 
 	/**
 	 * Caches the row a write left standing, this isolate's miss for the org forgotten, and returns
-	 * its mapping; logs the placement only when the write placed it, so the events count rows (U40)
+	 * its mapping; logs the placement only when the write placed it, so the events count rows (U40).
+	 * Cached only while no invalidate here came after `generation`, which was taken before the
+	 * write read the row: one that did, a move's among them, may have remapped it (Q6 of r18)
 	 */
-	private settle(row: ShardRow, how: Placement, targets: CacheTargets): ShardMapping {
+	private settle(
+		row: ShardRow,
+		how: Placement,
+		{ generation, ...targets }: CacheTargets & { generation: number },
+	): ShardMapping {
 		const mapping = toMapping(row)
 		const data = { orgId: row.org_id, shardId: row.shard_id }
 		if (how !== "standing")
@@ -226,6 +234,7 @@ class ShardRouter {
 				`shard-router.${how === "move" ? "move" : "allocate"}`,
 				how === "revive" ? { ...data, revived: true } : data,
 			)
+		if (this.cache.generationOf(row.org_id) !== generation) return mapping
 		this.cache.misses.delete(row.org_id)
 		this.cache.populate(row.org_id, mapping, targets)
 		return mapping

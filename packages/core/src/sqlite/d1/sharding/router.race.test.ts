@@ -6,7 +6,7 @@
  */
 import type { Miniflare } from "miniflare"
 import { afterEach, describe, expect, it } from "vitest"
-import { memoryKv, openCore, readThenWait } from "../../../../tests/support/shard-core.ts"
+import { batchesThenWait, memoryKv, openCore, readThenWait } from "../../../../tests/support/shard-core.ts"
 import { ShardRouter } from "./router.ts"
 
 let mf: Miniflare | undefined
@@ -44,5 +44,65 @@ describe("ShardRouter: a fill and an invalidate in one isolate, or across two", 
 		expect(
 			(await new ShardRouter({ totalShards: 3 }).resolve("org-1", { coreDb: primary, kv: store }, ctx))?.shardId,
 		).toBe(1)
+	})
+})
+
+/** A place of org-1 on shard 2 whose write read its row on shard 0, then org-1 moved to 1, then the place returned */
+async function placedAcrossMove() {
+	const { primary } = await core([["org-1", 0]])
+	const kv = memoryKv()
+	const gate: { open: () => void } = { open: () => undefined }
+	const { answered, coreDb } = batchesThenWait(primary, new Promise<void>((resolve) => (gate.open = resolve)))
+	const router = new ShardRouter({ totalShards: 3 })
+	const placing = router.place({ orgId: "org-1", shardId: 2 }, { coreDb, kv }, ctx)
+	await answered
+	await router.move({ orgId: "org-1", shardId: 1 }, { coreDb, kv }, ctx)
+	await Promise.all(outstanding.splice(0))
+	gate.open()
+	const placed = await placing
+	await Promise.all(outstanding.splice(0))
+	return { kv, placed, primary, router }
+}
+
+/* Q6 of r18: a place's write read the standing row, then a move in the same isolate committed and invalidated */
+describe("ShardRouter: a place that read before a move in its isolate, settling after it", () => {
+	it("returns the row its write read, and leaves the move's mapping for this isolate", async () => {
+		const { kv, placed, primary, router } = await placedAcrossMove()
+		expect(placed.shardId).toBe(0)
+		expect((await router.resolve("org-1", { coreDb: primary, kv }, ctx))?.shardId).toBe(1)
+	})
+
+	it("caches nothing another isolate trusts as the org's shard", async () => {
+		const { kv, primary } = await placedAcrossMove()
+		const other = new ShardRouter({ totalShards: 3 })
+		expect((await other.resolve("org-1", { coreDb: primary, kv }, ctx))?.shardId).toBe(1)
+	})
+})
+
+/* the same rule for a move: an invalidate here during its own tombstone write is another's, which may have remapped */
+describe("ShardRouter: a move whose tombstone write waits while another move runs", () => {
+	it("leaves the later move's mapping for this isolate", async () => {
+		const { primary } = await core([["org-1", 0]])
+		const store = memoryKv()
+		const gate: { open: () => void } = { open: () => undefined }
+		const opened = new Promise<void>((resolve) => (gate.open = resolve))
+		let held = true
+		const kv = {
+			...store,
+			put: async (key: string, value: string, options?: { expirationTtl?: number }) => {
+				await store.put(key, value, options)
+				if (!held || !key.startsWith("shard-inv:")) return
+				held = false
+				await opened
+			},
+		}
+		const router = new ShardRouter({ totalShards: 3 })
+		const first = router.move({ orgId: "org-1", shardId: 1 }, { coreDb: primary, kv }, ctx)
+		await expect.poll(() => held).toBe(false)
+		await router.move({ orgId: "org-1", shardId: 2 }, { coreDb: primary, kv }, ctx)
+		gate.open()
+		await first
+		await Promise.all(outstanding.splice(0))
+		expect((await router.resolve("org-1", { coreDb: primary, kv }, ctx))?.shardId).toBe(2)
 	})
 })

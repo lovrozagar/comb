@@ -40,7 +40,7 @@ describe("ShardCache", () => {
 		expect(cache.lru.getWithMeta("org-1")?.value.shardId).toBe(1)
 		expect((JSON.parse(kv.store.get("shard:org-1") as string) as ShardMapping).shardId).toBe(1)
 		cache.misses.set("org-1", true)
-		const nonce = await cache.invalidate("org-1", kv)
+		const { nonce } = await cache.invalidate("org-1", kv)
 		expect([cache.lru.getWithMeta("org-1"), cache.misses.get("org-1")]).toEqual([undefined, undefined])
 		expect(kv.store.has("shard:org-1")).toBe(false)
 		expect(JSON.parse(kv.store.get("shard-inv:org-1") as string)).toEqual({ nonce })
@@ -64,7 +64,7 @@ describe("ShardCache", () => {
 			...store,
 			put: async (key, value) => void (key.startsWith("shard:") && store.put(key, value)),
 		}
-		const nonce = await cache.invalidate("org-1", kv)
+		const { nonce } = await cache.invalidate("org-1", kv)
 		store.store.set("shard:org-1", JSON.stringify(mapping(0, 10)))
 		expect(await cache.readKv("org-1", store)).toEqual({ fence: nonce, kvFailed: false, mapping: null })
 	})
@@ -99,7 +99,7 @@ describe("ShardCache.readKv", () => {
 
 	it("trusts none while this isolate's tombstone and KV's differ, fencing by KV's", async () => {
 		const [cache, kv] = [cacheOf(), memoryKv()]
-		const mine = await cache.invalidate("org-1", kv)
+		const { nonce: mine } = await cache.invalidate("org-1", kv)
 		held(kv, mine)
 		expect(await cache.readKv("org-1", kv)).toEqual({ fence: mine, kvFailed: false, mapping: mapping(1, 10) })
 		tombstone(kv, "n-other")
@@ -112,7 +112,7 @@ describe("ShardCache.readKv", () => {
 		kv.store.set("shard:org-1", JSON.stringify(mapping(1, 10)))
 		const failing: ShardKv = { ...kv, get: async () => Promise.reject(new Error("KV 503")) }
 		expect(await cache.readKv("org-1", failing)).toEqual({ fence: null, kvFailed: true, mapping: null })
-		const mine = await cache.invalidate("org-1", kv)
+		const { nonce: mine } = await cache.invalidate("org-1", kv)
 		expect(await cache.readKv("org-1", failing)).toEqual({ fence: mine, kvFailed: true, mapping: null })
 	})
 

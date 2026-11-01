@@ -201,7 +201,9 @@ declare class ShardRouter {
     private placeFirst;
     /**
      * Caches the row a write left standing, this isolate's miss for the org forgotten, and returns
-     * its mapping; logs the placement only when the write placed it, so the events count rows (U40)
+     * its mapping; logs the placement only when the write placed it, so the events count rows (U40).
+     * Cached only while no invalidate here came after `generation`, which was taken before the
+     * write read the row: one that did, a move's among them, may have remapped it (Q6 of r18)
      */
     private settle;
 }

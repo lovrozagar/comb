@@ -100,16 +100,18 @@ class ShardCache {
 
 	/**
 	 * Forget the org in this isolate's tiers and in KV, leaving a tombstone; another isolate's LRU
-	 * keeps it until it expires. Returns the tombstone's nonce, for a mapping read after the remap
+	 * keeps it until it expires. Returns the tombstone's nonce, for a mapping read after the remap,
+	 * and the generation it set, which an invalidate here during its KV write moves on (Q6 of r18)
 	 */
-	async invalidate(orgId: string, kv: ShardKv): Promise<string> {
+	async invalidate(orgId: string, kv: ShardKv): Promise<{ generation: number; nonce: string }> {
 		const nonce = crypto.randomUUID()
-		this.generations.set(orgId, this.generationOf(orgId) + 1)
+		const generation = this.generationOf(orgId) + 1
+		this.generations.set(orgId, generation)
 		this.lru.delete(orgId)
 		this.misses.delete(orgId)
 		this.tombstones.set(orgId, nonce)
 		await kvInvalidate(kv, orgId, { log: this.log, nonce, ttlSeconds: this.kvTtlSeconds })
-		return nonce
+		return { generation, nonce }
 	}
 
 	/** One background revalidation per org at a time, however many requests see it stale */

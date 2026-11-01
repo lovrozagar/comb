@@ -96,3 +96,27 @@ export function readsThenWaits(db: D1Database, gate: Promise<void>): { coreDb: D
 	} as unknown as D1Database
 	return { answered, coreDb }
 }
+
+/**
+ * `db` whose first batch answers, then waits for `gate`: a place whose write read the standing row
+ * before a remap and returns after it; later batches, the remap's own, run through
+ */
+export function batchesThenWait(db: D1Database, gate: Promise<void>): { coreDb: D1Database; answered: Promise<void> } {
+	const signal: { answer: () => void } = { answer: () => undefined }
+	const answered = new Promise<void>((resolve) => (signal.answer = resolve))
+	let held = true
+	const session = {
+		batch: async (statements: unknown) => {
+			const result = await db.batch(statements as never)
+			if (!held) return result
+			held = false
+			signal.answer()
+			await gate
+			return result
+		},
+		getBookmark: () => "bk",
+		prepare: (query: string) => db.prepare(query),
+	}
+	const coreDb = { ...session, withSession: () => session } as unknown as D1Database
+	return { answered, coreDb }
+}
