@@ -17,7 +17,7 @@ import { postgresOptionsOf } from "./pg-url.ts"
 type ReadyDev = (target: PgTarget) => Promise<void>
 
 /* why comb loads postgres.js here */
-const CREATES = "a non-public schema needs the `postgres` package to create it on devUrl"
+const CREATES = "create a non-public schema on devUrl"
 
 /**
  * Create `target`'s schema on its dev database, unless it is public or the dev is Atlas's docker

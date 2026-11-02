@@ -28,7 +28,7 @@ import { postgresOptionsOf } from "./pg-url.ts"
 type HistoryFile = { name: string; sql: string }
 
 /* why comb loads postgres.js here */
-const REPLAYS = "baseline replays the history on devUrl, and reads what it leaves, through the `postgres` package"
+const REPLAYS = "replay the history on devUrl, and read what it leaves, in a baseline"
 
 /** How the replay words what it does, and where it says what it left out */
 type Replay = {

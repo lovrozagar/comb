@@ -10,6 +10,7 @@ import { approveMigration } from "../migrate/core/approval.ts"
 import { type D1Target, findWranglerConfig, type ReadConfig } from "../migrate/core/d1-binding.ts"
 import { adoptHashesD1, applyD1, baselineD1, statusD1 } from "../migrate/core/d1-history.ts"
 import { Refused } from "../migrate/core/refused.ts"
+import { optionalPeer } from "../migrate/core/optional-peer.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import { createD1Provider, wranglerFlags } from "../migrate/drivers/d1.ts"
 import type { D1ProviderConfig } from "../migrate/types.ts"
@@ -27,15 +28,12 @@ const WRANGLER = "wrangler"
 
 /** wrangler's config reader, or the package to install when wrangler is missing; `specifier` is for tests */
 async function wranglerReader(specifier: string = WRANGLER): Promise<ReadConfig> {
-	try {
-		const wrangler = (await import(specifier)) as { unstable_readConfig: ReadConfig }
-		return (args) => wrangler.unstable_readConfig(args)
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ERR_MODULE_NOT_FOUND") throw error
-		throw new CliError(
-			"comb needs wrangler (>=4.147.0 <5) to migrate a D1 database; run comb through a package script, or install wrangler",
-		)
-	}
+	const wrangler = await optionalPeer(
+		"wrangler",
+		"migrate a D1 database",
+		() => import(specifier) as Promise<{ unstable_readConfig: ReadConfig }>,
+	)
+	return (args) => wrangler.unstable_readConfig(args)
 }
 
 /** The D1 database comb.migrate.config.ts resolved, or the binding named on the command line */

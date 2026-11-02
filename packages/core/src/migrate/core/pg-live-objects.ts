@@ -14,14 +14,14 @@ import { postgresOptionsOf, queryParams } from "./pg-url.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 import { CATALOG, COMPARED } from "./pg-live-catalog.ts"
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts"
+import { optionalPeer } from "./optional-peer.ts"
 
 /** The postgres.js client, as far as comb uses it */
 type Sql = { end(): Promise<void>; unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>> }
 type Connect = (options: Record<string, unknown>) => Sql
 
-/* the optional peer and the range comb is tested against */
-const PEER = "postgres"
-const RANGE = ">=3.4.9 <4"
+/* the optional peer, named by a string so a consumer without it still type-checks comb */
+const PEER: string = "postgres"
 
 // lookup-table: the codes Node gives a server certificate no trusted CA vouches for
 const UNVERIFIED: ReadonlySet<unknown> = /* @__PURE__ */ new Set([
@@ -52,18 +52,13 @@ function failureOf(error: unknown, field?: "devUrl" | "url", raw?: string): stri
 	return `${said}: the server takes no TLS, which comb and Atlas require where ${field} names no sslmode; set sslmode=disable on ${field} for a server without TLS`
 }
 
-/** postgres.js, or the refusal naming it and `why` comb needs it here */
+/** postgres.js, or the refusal naming it, its range and `why` comb needs it here */
 async function loadPostgres(why: string): Promise<Connect> {
-	const specifier: string = PEER
-	try {
-		return ((await import(specifier)) as { default: Connect }).default
-	} catch (error) {
-		throw new Error(`${why}; install ${PEER} (${RANGE}), an optional peer, and run it again`, { cause: error })
-	}
+	return (await optionalPeer("postgres", why, async () => (await import(PEER)) as { default: Connect })).default
 }
 
 /* why a baseline loads it: it cannot vouch for the database without it */
-const COMPARES = `baseline compares the database's ${COMPARED}, which Atlas OSS does not, through the ${PEER} package`
+const COMPARES = `compare the database's ${COMPARED}, which Atlas OSS does not, in a baseline`
 
 // lookup-table: the catalog arms that name a kind by one label each, and the set each goes into
 const NAMED: Readonly<Record<string, "extensions" | "others" | "platform">> = {

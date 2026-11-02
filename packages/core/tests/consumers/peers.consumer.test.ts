@@ -4,7 +4,7 @@
  * node_modules); a Vite build and a wrangler bundle carry no tooling; tsc compiles every subpath
  * under strict flags in a bundler project and in a nodenext project.
  */
-import { readdirSync, readFileSync } from "node:fs"
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { Miniflare } from "miniflare"
 import semver from "semver"
@@ -17,6 +17,8 @@ import {
 	installedVersion,
 	ok,
 	pack,
+	peerRange,
+	removePackage,
 	REQUIRED_PEERS,
 	run,
 	type Stage,
@@ -152,6 +154,78 @@ describe.each(admittedOf("drizzle-orm"))("a consumer on drizzle %s", (version) =
 		const result = run(app.dir, "npx", ["tsc", "-p", "tsconfig.bundler.json"])
 		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
 		expect(result.status).toBe(0)
+	})
+})
+
+/* K7 of r20: a command whose optional peer is missing names the package, the range comb takes and the install */
+describe("a consumer missing each optional peer", () => {
+	const TABLES = `import { sqliteTable } from "drizzle-orm/sqlite-core"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }), title: c.text("title", { max: 200 }) })
+`
+	const configOf = (provider: string) =>
+		`export default { databases: { core: { migrationsDir: "m", name: "core", provider: ${provider} } } }\n`
+	const PG = JSON.stringify(process.env["COMB_TEST_PG_URL"])
+	/* the preconditions each command meets before it needs the peer: tables, a drizzle and a wrangler config, a database file */
+	const PROJECT = {
+		"drizzle.config.ts": `export default { dialect: "sqlite", out: "./m", schema: "./post.tables.ts" }\n`,
+		"m/20260101000000_init.sql": "CREATE TABLE a (id integer);\n",
+		"post.tables.ts": TABLES,
+		"wrangler.jsonc": JSON.stringify({
+			compatibility_date: "2025-01-01",
+			d1_databases: [{ binding: "CORE", database_id: "00000000-0000-0000-0000-000000000000", database_name: "core" }],
+			name: "w",
+		}),
+		"x.db": "",
+	}
+	const CASES = [
+		{ argv: ["codegen", "--tables", "post.tables.ts"], config: undefined, peer: "ts-morph" },
+		{ argv: ["migrate", "diff", "core", "--dry-run"], config: undefined, peer: "drizzle-kit" },
+		{
+			argv: ["migrate", "check", "core", "--json"],
+			config: configOf(`{ type: "libsql", url: "file:x.db" }`),
+			peer: "@libsql/client",
+		},
+		{
+			argv: ["migrate", "check", "core", "--json"],
+			config: configOf(`{ type: "d1", databaseName: "CORE", local: true }`),
+			peer: "wrangler",
+		},
+		{
+			argv: ["migrate", "check", "core", "--json"],
+			config: configOf(`{ type: "postgres", url: ${PG}, devUrl: ${PG} }`),
+			peer: "libpg-query",
+		},
+	]
+	let app: Stage
+	beforeAll(() => {
+		app = stage(tarball, "required")
+		/* wrangler is one of the stage's tools; this consumer has none */
+		removePackage(app.dir, "wrangler")
+	})
+	afterAll(() => app?.dispose())
+
+	it.each(CASES)("comb $argv.0 $argv.1 without $peer names it, its range and the install", ({ argv, config, peer }) => {
+		const dir = join(app.dir, "cases", peer.replace(/\W+/g, "-"))
+		const files: Record<string, string> = {
+			...PROJECT,
+			...(config === undefined ? {} : { "comb.migrate.config.ts": config }),
+		}
+		for (const [file, text] of Object.entries(files)) {
+			mkdirSync(dirname(join(dir, file)), { recursive: true })
+			writeFileSync(join(dir, file), text)
+		}
+		ok(run(dir, "atlas", ["migrate", "hash", "--dir", `file://${join(dir, "m")}`]), "atlas migrate hash")
+		const result = run(dir, join(app.dir, "node_modules", ".bin", "comb"), argv)
+		expect(result.status).not.toBe(0)
+		expect(result.output).toContain(`comb needs ${peer} (${peerRange(peer)}) to `)
+		expect(result.output).toContain(`install ${peer}`)
+		/* no resolver text from comb's own source, and no blame on the tables module */
+		expect(result.output).not.toContain("@lovrozagar/comb/src/")
+		expect(result.output).not.toContain("could not load")
+		/* a refusal under --json is the one JSON object stdout promises (K5 of r19) */
+		if (argv.includes("--json"))
+			expect(result.output).toContain(`{"applied":[],"database":"core","pending":[],"refused":["comb needs ${peer} (`)
 	})
 })
 

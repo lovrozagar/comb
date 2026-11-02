@@ -8,6 +8,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { resolvePeer } from "../../migrate/core/optional-peer.ts"
 import { type Run, run as defaultRun } from "../../migrate/core/process.ts"
 import type { Snapshot } from "./snapshot-types.ts"
 
@@ -84,6 +85,9 @@ type LoadOptions = {
 
 /** The snapshot of every table `tablesPath` exports; an error naming the file when it cannot be loaded */
 function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
+	/* the child reads the module's imports with ts-morph, an optional peer (under node its hooks load it
+	   first): resolved here, so a project without it is told so, not that its tables file failed (K7 of r20) */
+	resolvePeer("ts-morph", "read the modules a tables file imports", () => import.meta.resolve("ts-morph"))
 	const runtime = options.runtime ?? (process.versions["bun"] === undefined ? "node" : "bun")
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-codegen-"))
 	try {

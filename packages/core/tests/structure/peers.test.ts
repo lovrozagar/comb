@@ -10,10 +10,12 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import semver from "semver"
 import { describe, expect, it } from "vitest"
+import { OPTIONAL_PEER_RANGES } from "../../src/migrate/core/optional-peer.ts"
 
 const CORE = join(import.meta.dirname, "../..")
-const { peerDependencies } = JSON.parse(readFileSync(join(CORE, "package.json"), "utf8")) as {
+const { peerDependencies, peerDependenciesMeta } = JSON.parse(readFileSync(join(CORE, "package.json"), "utf8")) as {
 	peerDependencies: Record<string, string>
+	peerDependenciesMeta: Record<string, { optional?: boolean }>
 }
 const { catalog } = (
 	JSON.parse(readFileSync(join(CORE, "../../package.json"), "utf8")) as {
@@ -66,5 +68,13 @@ describe("the README's install lines", () => {
 			expect(pin, line).toBe(catalog["drizzle-orm"])
 			expect(semver.satisfies(pin as string, peerDependencies["drizzle-orm"] as string), line).toBe(true)
 		}
+	})
+})
+
+/* K7 of r20: the range a missing peer's refusal names is the one package.json states */
+describe("comb's refusal for a missing optional peer", () => {
+	it("names each optional peer with its range in package.json", () => {
+		const optional = Object.keys(peerDependenciesMeta).filter((name) => peerDependenciesMeta[name]?.optional === true)
+		expect(OPTIONAL_PEER_RANGES).toEqual(Object.fromEntries(optional.map((name) => [name, peerDependencies[name]])))
 	})
 })

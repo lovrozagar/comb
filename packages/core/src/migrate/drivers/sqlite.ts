@@ -13,6 +13,7 @@ import type {
 	TursoProviderConfig,
 } from "../types.ts"
 import { HISTORY_TABLES, notEngineTables } from "../core/engine-tables.ts"
+import { type Client, type InValue, libsql } from "./libsql-client.ts"
 import { DatabaseMissing } from "./missing.ts"
 
 export { createBunSqliteProvider } from "./bun-sqlite.ts"
@@ -118,23 +119,6 @@ export async function getTursoCredentials(
 /* ═══════════════════════════════════════════════════════════════════════════
    LIBSQL CONNECTION WRAPPER
    ═══════════════════════════════════════════════════════════════════════════ */
-
-/*
- * The surface of @libsql/client comb calls, declared here: the client is an optional peer, loaded by
- * a string-typed specifier, so a project without it still type-checks /migrate (K2 of r17)
- */
-type InValue = ArrayBuffer | bigint | boolean | Date | null | number | string | Uint8Array
-type Statement = { args: InValue[]; sql: string }
-type Client = {
-	batch(statements: Statement[]): Promise<unknown>
-	close(): void
-	execute(statement: Statement): Promise<{ columns: string[]; rows: Array<Record<string, unknown>> }>
-}
-type LibsqlModule = { createClient(config: { authToken?: string; url: string }): Client }
-const LIBSQL_CLIENT: string = "@libsql/client"
-
-/** @libsql/client, loaded when a libsql or Turso connection opens */
-const libsql = (): Promise<LibsqlModule> => import(LIBSQL_CLIENT) as Promise<LibsqlModule>
 
 function createLibsqlConnection(client: Client): Connection {
 	return {

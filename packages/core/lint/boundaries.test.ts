@@ -113,8 +113,8 @@ describe("comb/boundaries: packages", () => {
 			"packages/core/src/sqlite/d1/session.ts":
 				'import type { D1Database } from "@cloudflare/workers-types"\nimport type { Miniflare } from "miniflare"\nimport { sql } from "drizzle-orm"\nimport { sqliteTable } from "drizzle-orm/sqlite-core"\n',
 			"packages/core/src/codegen/utils/ts-morph.ts":
-				'import { Project } from "ts-morph"\nimport pluralize from "pluralize"\n',
-			"packages/core/src/migrate/drivers/sqlite.ts": 'import { createClient } from "@libsql/client/http"\n',
+				'import type { Project } from "ts-morph"\nimport pluralize from "pluralize"\n',
+			"packages/core/src/migrate/drivers/sqlite.ts": 'import type { Client } from "@libsql/client/http"\n',
 			"packages/core/src/migrate/types.ts": 'import { z } from "zod"\nimport { x } from "vitest"\n',
 		}
 		expect(reportsOf(rule, fixture)).toEqual([
@@ -197,14 +197,14 @@ describe("comb/boundaries: import() takes a URL or a package name", () => {
 		const fixture = {
 			"packages/core/src/migrate/a.ts": [
 				'import { pathToFileURL } from "node:url"',
-				'const PEER = "postgres"',
+				'const PEER = "drizzle-orm"',
 				"export const a = (file: string) => import(pathToFileURL(file).href)",
 				"export const b = (url: URL) => import(url.href)",
 				"export const c = (file: string, at: number) => import(`${pathToFileURL(file).href}?mtime=${at}`)",
 				"export const d = (specifier: string = PEER) => import(specifier)",
 				"export async function e() {\n\tconst specifier: string = PEER\n\treturn import(specifier)\n}",
 				'export const f = () => import("./b.ts")',
-				"export const g = () => import(`postgres`)",
+				"export const g = () => import(`drizzle-orm`)",
 				'const NAME = "zod"',
 				"export const h = () => import(NAME as string)",
 				"export const i = () => import(NAME!)",
@@ -213,5 +213,50 @@ describe("comb/boundaries: import() takes a URL or a package name", () => {
 			"packages/core/src/migrate/b.ts": "export {}\n",
 		}
 		expect(reportsOf(rule, fixture)).toEqual([])
+	})
+})
+
+/* K7 of r20 */
+describe("comb/boundaries: optional peers", () => {
+	const PEER =
+		"an optional peer loads through optionalPeer(name, why, () => import(…)) from src/migrate/core/optional-peer.ts, so a project without it is told the package, its range and the install"
+
+	it("loads an optional peer only inside the load optionalPeer is handed", () => {
+		const fixture = {
+			"packages/core/src/migrate/a.ts": [
+				'import { optionalPeer } from "./core/optional-peer.ts"',
+				'const LIBSQL: string = "@libsql/client"',
+				'export const a = () => optionalPeer("postgres", "read", () => import("postgres"))',
+				'export const b = () => optionalPeer("@libsql/client", "open", async () => await import(LIBSQL))',
+				'export const c = () => import("postgres")',
+				"export const d = () => import(LIBSQL)",
+				'export const e = () => wrap(() => import("libpg-query"))',
+				'export const f = () => import("drizzle-orm")',
+			].join("\n"),
+		}
+		expect(reportsOf(rule, fixture)).toEqual([
+			{ file: "packages/core/src/migrate/a.ts", message: PEER },
+			{ file: "packages/core/src/migrate/a.ts", message: PEER },
+			{ file: "packages/core/src/migrate/a.ts", message: PEER },
+		])
+	})
+
+	it("refuses a value import of an optional peer outside the modules that load after it resolved", () => {
+		const fixture = {
+			"packages/core/src/migrate/a.ts": [
+				'import postgres from "postgres"',
+				'import type { Sql } from "postgres"',
+				'import { type Project } from "ts-morph"',
+				'export { createClient } from "@libsql/client"',
+				'export * from "libpg-query"',
+				'import { sql } from "drizzle-orm"',
+			].join("\n"),
+			"packages/core/src/codegen/runtime/module-graph.ts": 'import { Project } from "ts-morph"\n',
+		}
+		expect(reportsOf(rule, fixture)).toEqual([
+			{ file: "packages/core/src/migrate/a.ts", message: PEER },
+			{ file: "packages/core/src/migrate/a.ts", message: PEER },
+			{ file: "packages/core/src/migrate/a.ts", message: PEER },
+		])
 	})
 })

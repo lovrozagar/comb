@@ -32,8 +32,43 @@ const MESSAGES = {
 	escape: "an import stays inside packages/core/src",
 	nodePrefix: "import node builtins with the node: prefix",
 	shared: "shared roots (error, types, lru, id, states) import only each other",
+	/* K7 of r20 */
+	peer: "an optional peer loads through optionalPeer(name, why, () => import(…)) from src/migrate/core/optional-peer.ts, so a project without it is told the package, its range and the install",
 	/* K5 of r20 */
 	url: "import() takes a URL or a package name: Node reads a bare path as a URL (%20 decodes, # starts a fragment), so pass pathToFileURL(path).href",
+}
+
+const OPTIONAL_PEERS = new Set(
+	Object.entries(manifest.peerDependenciesMeta)
+		.filter(([, meta]) => meta.optional === true)
+		.map(([name]) => name),
+)
+
+/* modules that import an optional peer by name: the codegen child's ts-morph readers, which run only
+ * after codegen/runtime/load.ts resolved ts-morph through resolvePeer, and a test fixture */
+const PEER_MODULES = new Set([
+	"codegen/runtime/module-graph.ts",
+	"codegen/runtime/node-hooks.mjs",
+	"codegen/runtime/ts-options.mjs",
+	"migrate/__fixtures__/libsql-connection.ts",
+])
+
+/** The strings `node` can be, a literal or a name bound to one */
+function valuesOf(node, bindings, seen = new Set()) {
+	if (node?.type === "Literal") return typeof node.value === "string" ? [node.value] : []
+	if (node?.type === "Identifier" && !seen.has(node.name)) {
+		const next = new Set([...seen, node.name])
+		return (bindings.get(node.name) ?? []).flatMap((value) => valuesOf(value, bindings, next))
+	}
+	return node?.type?.startsWith("TS") === true ? valuesOf(node.expression, bindings, seen) : []
+}
+
+/* `node` is inside the load an optionalPeer(name, why, load) call is handed */
+function inOptionalPeer(node) {
+	let at = node.parent
+	while (at && at.type !== "ArrowFunctionExpression" && at.type !== "FunctionExpression") at = at.parent
+	const call = at?.parent
+	return call?.type === "CallExpression" && call.callee.name === "optionalPeer" && call.arguments.includes(at)
 }
 
 /** Each name the file binds, with what it is bound to: a variable's init, a parameter's default, or null */
@@ -144,20 +179,28 @@ export const rule = {
 			const problem = problemOf(rel, spec, node)
 			if (problem !== null) context.report({ message: problem, node })
 		}
+		const checkStatic = (node) => {
+			checkSource(node)
+			const spec = node.source?.value
+			const peer = typeof spec === "string" && OPTIONAL_PEERS.has(packageName(spec))
+			if (peer && !typeOnly(node) && !PEER_MODULES.has(rel)) context.report({ message: MESSAGES.peer, node })
+		}
 		let bindings
 		const checkImport = (node) => {
 			checkSource(node)
 			bindings ??= bindingsOf(programOf(node))
 			if (!isSpecifier(node.source, bindings)) context.report({ message: MESSAGES.url, node })
+			const peer = valuesOf(node.source, bindings).some((value) => OPTIONAL_PEERS.has(packageName(value)))
+			if (peer && !inOptionalPeer(node)) context.report({ message: MESSAGES.peer, node })
 		}
 		const checkBun = (node, identifier) => {
 			if (identifier?.type !== "Identifier" || identifier.name !== "Bun" || BUN_FILES.has(rel)) return
 			context.report({ message: MESSAGES.bun, node })
 		}
 		return {
-			ExportAllDeclaration: checkSource,
-			ExportNamedDeclaration: checkSource,
-			ImportDeclaration: checkSource,
+			ExportAllDeclaration: checkStatic,
+			ExportNamedDeclaration: checkStatic,
+			ImportDeclaration: checkStatic,
 			ImportExpression: checkImport,
 			MemberExpression: (node) => checkBun(node, node.object),
 			UnaryExpression: (node) => node.operator === "typeof" && checkBun(node, node.argument),

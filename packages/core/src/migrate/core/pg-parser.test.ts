@@ -8,7 +8,9 @@ describe("loading the Postgres parser", () => {
 			throw new Error("Cannot find package 'libpg-query'")
 		})
 		const fresh = await import("./pg-parser.ts")
-		await expect(fresh.loadPostgresParser()).rejects.toThrow(/install libpg-query@17\.7\.4/)
+		await expect(fresh.loadPostgresParser()).rejects.toThrow(
+			"comb needs libpg-query (>=17.7.4 <18) to read Postgres migrations; install libpg-query",
+		)
 		vi.doUnmock("libpg-query")
 	})
 

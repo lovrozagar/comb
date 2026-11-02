@@ -4,6 +4,7 @@
  * awaits it first, and a caller of `classifyMigration` on Postgres does too.
  */
 
+import { optionalPeer } from "./optional-peer.ts"
 import { qualifySchemaElements } from "./pg-schema-elts.ts"
 
 type Parser = { parseSync(sql: string): { stmts?: unknown } }
@@ -17,15 +18,11 @@ let parser: Parser | undefined
 /** Load libpg-query, comb's Postgres parser, once; a Postgres file is classified only after it */
 async function loadPostgresParser(): Promise<void> {
 	if (parser !== undefined) return
-	let lib: Parser & { loadModule(): Promise<void> }
-	try {
-		lib = (await import(LIBPG_QUERY)) as Parser & { loadModule(): Promise<void> }
-	} catch (error) {
-		throw new Error(
-			`comb reads Postgres migrations with libpg-query: install libpg-query@17.7.4 (${(error as Error).message})`,
-			{ cause: error },
-		)
-	}
+	const lib = await optionalPeer(
+		"libpg-query",
+		"read Postgres migrations",
+		async () => (await import(LIBPG_QUERY)) as Parser & { loadModule(): Promise<void> },
+	)
 	await lib.loadModule()
 	parser = lib
 }

@@ -119,14 +119,12 @@ describe("loadPostgres", () => {
 		vi.resetModules()
 		try {
 			const { loadPostgres: missing } = await import("./pg-live-objects.ts")
-			await expect(missing("comb reads it")).rejects.toThrow(
-				"comb reads it; install postgres (>=3.4.9 <4), an optional peer, and run it again",
-			)
+			await expect(missing("read it")).rejects.toThrow("comb needs postgres (>=3.4.9 <4) to read it; install postgres")
 			/* a baseline's own read says why it needs the peer */
 			await expect(
 				(await import("./pg-live-objects.ts")).readLiveObjects({ schema: "app", url: "postgres://db/db" }),
 			).rejects.toThrow(
-				"baseline compares the database's functions, procedures, triggers, views, materialized views, sequences, policies, domains, composite types, range types, collations, rules, row level security, extensions, aggregates, SECURITY DEFINER, operators, casts, views' options, materialized views' indexes, replica identity, event triggers and publications, which Atlas OSS does not, through the postgres package; install postgres",
+				"comb needs postgres (>=3.4.9 <4) to compare the database's functions, procedures, triggers, views, materialized views, sequences, policies, domains, composite types, range types, collations, rules, row level security, extensions, aggregates, SECURITY DEFINER, operators, casts, views' options, materialized views' indexes, replica identity, event triggers and publications, which Atlas OSS does not, in a baseline; install postgres",
 			)
 		} finally {
 			vi.doUnmock("postgres")

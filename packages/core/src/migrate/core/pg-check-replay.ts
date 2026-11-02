@@ -17,7 +17,7 @@ import { type Connect, loadPostgres } from "./pg-live-objects.ts"
 import { type HistoryFile, onDev } from "./pg-replay.ts"
 
 /* why comb loads postgres.js here */
-const REPLAYS = "check replays the history and the pending files on devUrl through the `postgres` package"
+const REPLAYS = "replay the history and the pending files on devUrl in a check"
 
 /* the line check prints when it replays nothing, and why */
 const NOT_REPLAYED = "Check did not replay the pending files on devUrl"

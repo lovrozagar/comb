@@ -4,6 +4,7 @@
  */
 import { spawnSync } from "node:child_process"
 import { constants, devNull } from "node:os"
+import { missingPeer, type OptionalPeer } from "./optional-peer.ts"
 
 export type RunResult = { code: number; stdout: string; stderr: string }
 
@@ -44,14 +45,14 @@ function childEnv(env: RunOptions["env"]): NodeJS.ProcessEnv {
 	return out
 }
 
-/* the packages comb runs that a project installs (optional peers), with the range comb is tested against */
-const PEERS: Readonly<Record<string, string>> = { "drizzle-kit": ">=1.0.0-rc.4 <2", wrangler: ">=4.147.0 <5" }
+// lookup-table: the optional peers comb runs as a command, and what it runs each for
+const RUNS: Readonly<Record<string, readonly [OptionalPeer, string]>> = {
+	"drizzle-kit": ["drizzle-kit", "export the drizzle schema for comb migrate diff"],
+	wrangler: ["wrangler", "migrate a D1 database"],
+}
 
-/** What to do when the package `name` cannot start, for a package comb knows; "" otherwise */
-const installHint = (name: string): string =>
-	Object.hasOwn(PEERS, name)
-		? `; run comb through a package script, so node_modules/.bin is on PATH, or install ${name} (${PEERS[name]})`
-		: ""
+/** What to do when the package `name` cannot start, for a peer comb runs; "" otherwise */
+const installHint = (name: string): string => (Object.hasOwn(RUNS, name) ? `; ${missingPeer(...RUNS[name]!)}` : "")
 
 /** How a process the OS could not run (or had to stop) is reported: POSIX shell codes where they exist. */
 function startFailure(cmd: string, error: NodeJS.ErrnoException, options: RunOptions): RunResult {

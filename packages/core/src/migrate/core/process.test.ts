@@ -40,12 +40,14 @@ describe("run: a process that cannot start", () => {
 		const wrangler = run("wrangler", ["--version"], { env: { PATH: "/nonexistent" } })
 		expect(wrangler).toEqual({
 			code: 127,
-			stderr: `wrangler: command not found; ${hint} wrangler (>=4.147.0 <5)`,
+			stderr: `wrangler: command not found; comb needs wrangler (>=4.147.0 <5) to migrate a D1 database; ${hint} wrangler`,
 			stdout: "",
 		})
 		const kit = run("bun", ["drizzle-kit", "export"], { cwd: tmpdir() })
 		expect(kit.code).toBe(1)
-		expect(kit.stderr).toContain(`${hint} drizzle-kit (>=1.0.0-rc.4 <2)`)
+		expect(kit.stderr).toContain(
+			`comb needs drizzle-kit (1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0) to export the drizzle schema for comb migrate diff; ${hint} drizzle-kit`,
+		)
 	})
 
 	it("reports a file the OS refuses to execute as exit 126 with the reason", () => {

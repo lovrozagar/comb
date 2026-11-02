@@ -157,6 +157,15 @@ export function stageLine(tarball: string, line: string): Stage {
 export const installedVersion = (dir: string, name: string): string =>
 	(JSON.parse(readFileSync(join(dir, "node_modules", name, "package.json"), "utf8")) as { version: string }).version
 
+/** comb's range for the peer `name` */
+export const peerRange = (name: string): string => manifest.peerDependencies[name] as string
+
+/** `name` taken out of the consumer in `dir`, its bin with it, as a project that never installed it */
+export function removePackage(dir: string, name: string): void {
+	rmSync(join(dir, "node_modules", name), { force: true, recursive: true })
+	rmSync(join(dir, "node_modules", ".bin", name), { force: true })
+}
+
 /** comb's range for each of its required peers */
 export const REQUIRED_PEERS: Record<string, string> = Object.fromEntries(
 	Object.entries(manifest.peerDependencies).filter(([name]) => !OPTIONAL_PEERS.includes(name)),

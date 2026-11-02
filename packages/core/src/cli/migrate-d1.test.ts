@@ -180,9 +180,13 @@ async function migratedBy07(dir: string, d1: FakeD1): Promise<void> {
 describe("migrate on D1: wrangler itself", () => {
 	it("names the package to install when wrangler is missing, and passes any other failure on", async () => {
 		const { wranglerReader } = await import("./migrate-d1.ts")
-		await expect(wranglerReader("comb-no-such-package")).rejects.toThrow(
-			"comb needs wrangler (>=4.147.0 <5) to migrate a D1 database; run comb through a package script, or install wrangler",
+		/* the resolver's own words, as Node gives them for a package the project lacks */
+		const missing = `data:text/javascript,throw new Error("Cannot find package 'wrangler' imported from /p/x.js")`
+		await expect(wranglerReader(missing)).rejects.toThrow(
+			"comb needs wrangler (>=4.147.0 <5) to migrate a D1 database; run comb through a package script, so node_modules/.bin is on PATH, or install wrangler",
 		)
+		/* another package's absence is that package's failure, not wrangler's */
+		await expect(wranglerReader("comb-no-such-package")).rejects.toThrow("Cannot find package 'comb-no-such-package'")
 		await expect(wranglerReader("data:text/javascript,throw new Error('boom')")).rejects.toThrow("boom")
 	})
 
