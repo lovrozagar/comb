@@ -5,7 +5,7 @@ import type { FieldInfo, TableInfo } from "./dto-types.ts"
 import { buildSharedSchemas, rewriteBaseTypes, rewriteWithShared } from "./shared-schemas.ts"
 
 function table(name: string, zodTypes: string[]): TableInfo {
-	const fields: FieldInfo[] = zodTypes.map((zodType, i) => ({ key: `f${i}`, type: "read", zodType }))
+	const fields: FieldInfo[] = zodTypes.map((zodType, i) => ({ key: `f${i}`, type: "read", uses: [], zodType }))
 	return {
 		combMeta: null,
 		fields,

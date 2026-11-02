@@ -64,6 +64,9 @@ const INT64_TEXT =
 const REAL =
 	'z.number().min(-3.4028235e38).max(3.4028235e38).refine((val) => val === 0 || globalThis.Math.abs(val) > 7.006492321624085e-46, { message: "Must be zero or above 2^-150 in magnitude, which real would round to zero" })'
 
+/** The shared schema a cidr's rule is, which the entity file imports */
+export const CIDR = "cidrSchema"
+
 /* an inet holds a host address, its netmask optional; a cidr is the shared cidrSchema, which also
    refuses a bit set past its prefix length, through comb's own isCidr */
 const INET = "z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()])"
@@ -90,7 +93,7 @@ const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> 
 	number: ({ sqlType }) => numericNumber(sqlType),
 	"number float": () => REAL,
 	"string binary": ({ sqlType }) => bitString(sqlType),
-	"string cidr": () => "cidrSchema",
+	"string cidr": () => CIDR,
 	"string date": () => "z.iso.date()",
 	"string inet": () => INET,
 	"string interval": () => "z.iso.duration()",

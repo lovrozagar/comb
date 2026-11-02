@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { CombEntityMetaInput } from "../../../meta.ts"
 import type { ImportRef } from "../../analyzer-types.ts"
-import type { FieldInfo, SharedSchema, TableInfo } from "./dto-types.ts"
+import type { FieldInfo, SharedName, SharedSchema, TableInfo } from "./dto-types.ts"
 import { type EntityFileOptions, generateEntityFile, schemaImportLines } from "./entity-file.ts"
 
 const NONE = { createdAt: false, deletedAt: false, updatedAt: false }
@@ -18,7 +18,10 @@ function table(fields: FieldInfo[], overrides: Partial<TableInfo> = {}): TableIn
 	}
 }
 
-const field = (key: string, type: FieldInfo["type"], zodType: string): FieldInfo => ({ key, type, zodType })
+const field = (key: string, type: FieldInfo["type"], zodType: string): FieldInfo => ({ key, type, uses: [], zodType })
+
+/** `info`, its builder saying it names `uses` */
+const using = (info: FieldInfo, ...uses: SharedName[]): FieldInfo => ({ ...info, uses })
 
 function file(t: TableInfo, options: Partial<EntityFileOptions> = {}): string {
 	return generateEntityFile(t, {
@@ -41,6 +44,24 @@ const META: CombEntityMetaInput = {
 	tenantColumn: null,
 	uniqueIndexes: [{ columns: ["slug"], name: "post_slug" }],
 }
+
+/* C4 of r20: the builder says which shared names a field uses; a schema of the app's own named like one is not one */
+/** The entity file's import from `_shared`, or "" for none */
+const sharedImportOf = (fields: FieldInfo[]) =>
+	file(table(fields))
+		.split("\n")
+		.find((line) => line.includes("_shared")) ?? ""
+
+describe("generateEntityFile's shared imports", () => {
+	it("imports what the builder says it uses, and no name the code merely contains", () => {
+		const own = ["jsonValueSchemaStrict", "cidrSchemaDoc", "timestampSchemaDoc"].map((name) =>
+			field(name, "read", `${name}.nullable()`),
+		)
+		expect(sharedImportOf(own)).toBe("")
+		const used = using(field("doc", "create", "jsonValueSchema.nullable()"), "jsonValueSchema")
+		expect(sharedImportOf([...own, used])).toContain("{ jsonValueSchema }")
+	})
+})
 
 describe("schemaImportLines", () => {
 	it("imports each name from its module, relative to the entity file for project files", () => {
@@ -100,7 +121,7 @@ describe("generateEntityFile: shared module imports", () => {
 		const fields = [
 			field("title", "read", "z.string()"),
 			field("created_at", "read", "timestampSchema"),
-			field("created_at", "update", "timestampSchema.optional()"),
+			using(field("created_at", "update", "timestampSchema.optional()"), "timestampSchema"),
 			field("title", "update", "z.string().optional()"),
 		]
 		const output = file(table(fields, { hasTimestamps: { createdAt: true, deletedAt: false, updatedAt: true } }), {

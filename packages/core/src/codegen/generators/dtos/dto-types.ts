@@ -3,9 +3,14 @@ import type { CombEntityMetaInput } from "../../../meta.ts"
 
 export type SchemaType = "read" | "readPartial" | "create" | "update"
 
+/** A schema the shared file defines that a field's code may name, which the entity file then imports */
+export type SharedName = "cidrSchema" | "jsonValueSchema" | "timestampSchema"
+
 export type FieldInfo = {
 	key: string
 	type: SchemaType
+	/** The shared schemas the field's code names, as its builder says (C4 of r20) */
+	uses: readonly SharedName[]
 	zodType: string
 }
 

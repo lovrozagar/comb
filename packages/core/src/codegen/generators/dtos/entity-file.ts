@@ -139,8 +139,7 @@ function sharedImports(table: TableInfo, spread: Spread, shared: Map<string, Sha
 			names.push(sharedName)
 			continue
 		}
-		for (const name of ["timestampSchema", "cidrSchema", "jsonValueSchema"])
-			if (field.zodType.includes(name)) names.push(name)
+		names.push(...field.uses)
 		const resolved = rewriteWithShared(field.zodType, shared)
 		names.push(...(resolved.match(/_z_[0-9a-f]{8,16}/g) ?? []))
 		const alias = BASE_TYPE_ALIASES.find(([, a]) => resolved.startsWith(a))?.[1]

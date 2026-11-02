@@ -3,6 +3,8 @@
  * app's schema module may export a value named `Array`, `Set` or any other, which the generated file
  * then imports in the global's place. Every value a generated file names must be its own: declared
  * in it, imported by it, or `globalThis`. A bare global fails here, before it ships.
+ * C4 of r20: and it imports nothing it never names, which a consumer's noUnusedLocals refuses, a
+ * schema named as a shared one is (`jsonValueSchemaStrict`) among them.
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -17,14 +19,19 @@ const CONFIG = `export default { databases: { core: { tables: "./src/db/db.core.
 /* a column of every kind a builder writes code for: arrays of several dimensions, JSON, enums, a state machine */
 const TABLES = {
 	postgres: `import * as z from "zod"
-import { integer, pgTable } from "drizzle-orm/pg-core"
+import { cidr, integer, pgTable } from "drizzle-orm/pg-core"
 import { c } from "@lovrozagar/comb/pg/columns"
 export const docSchema = z.object({ a: z.string() })
+export const jsonValueSchemaStrict = z.object({ b: z.string() })
+export const cidrSchemaDoc = z.object({ c: z.string() })
+export const timestampSchemaDoc = z.object({ d: z.string() })
 export const grid = pgTable("grid", {
 	id: c.id("grd"),
 	cells: integer("cells").array("[][]"),
 	tags: c.text("tags").array(),
 	doc: c.json("doc", docSchema, { maxBytes: 1024 }),
+	strict: c.json("strict", jsonValueSchemaStrict),
+	net: cidr("net"),
 	state: c.enum("state", ["draft", "live", "gone"], { initial: "draft", terminal: ["gone"], transitions: { draft: ["live"], live: ["gone"] } }).notNull(),
 	pw: c.text("pw", { password: true }),
 	email: c.text("email", { email: true, trim: true }),
@@ -41,9 +48,13 @@ export const grid = pgTable("grid", {
 import { sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const docSchema = z.object({ a: z.string() })
+export const cidrSchemaDoc = z.object({ c: z.string() })
+export const timestampSchemaDoc = z.object({ d: z.string() })
 export const item = sqliteTable("item", {
 	id: c.id("itm"),
 	doc: c.json("doc", docSchema),
+	cidrDoc: c.json("cidr_doc", cidrSchemaDoc),
+	stampDoc: c.json("stamp_doc", timestampSchemaDoc).notNull(),
 	state: c.enum("state", ["draft", "live"]).notNull(),
 	name: c.text("name", { name: true, lowercase: true }),
 	flag: c.boolean("flag"),
@@ -96,7 +107,7 @@ function isValueReference(id: ts.Identifier): boolean {
 	return !NAMING.some((names) => names(parent) && (parent as ts.NamedDeclaration).name === id)
 }
 
-describe("generated code names every global through globalThis", () => {
+describe("generated code names every global through globalThis, and imports only what it names", () => {
 	it.each(Object.entries(TABLES))(
 		"on %s, in every generated file",
 		async (_, tables) => {
@@ -110,6 +121,7 @@ describe("generated code names every global through globalThis", () => {
 				module: ts.ModuleKind.Preserve,
 				moduleResolution: ts.ModuleResolutionKind.Bundler,
 				noEmit: true,
+				noUnusedLocals: true,
 				skipLibCheck: true,
 				strict: true,
 				target: ts.ScriptTarget.ESNext,
@@ -119,6 +131,15 @@ describe("generated code names every global through globalThis", () => {
 				return freeValues(program, file).map((at) => `${path.relative(dir, name)}: ${at}`)
 			})
 			expect(free).toEqual([])
+			/* TS6133 and TS6192: an import nothing reads, as a consumer's noUnusedLocals reports it */
+			const unused = program
+				.getSemanticDiagnostics()
+				.filter(({ code }) => code === 6133 || code === 6192)
+				.map(
+					({ file, messageText }) =>
+						`${path.relative(dir, file?.fileName ?? "")}: ${ts.flattenDiagnosticMessageText(messageText, " ")}`,
+				)
+			expect(unused).toEqual([])
 		},
 		120_000,
 	)

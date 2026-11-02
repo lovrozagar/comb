@@ -3,9 +3,9 @@ import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { FieldConstraints } from "../../annotations.ts"
 import { isGenerated } from "../../entity-meta.ts"
 import { type Base, type Build, plain } from "./build-types.ts"
-import type { SchemaType } from "./dto-types.ts"
+import type { SchemaType, SharedName } from "./dto-types.ts"
 import { generateExampleMeta } from "./example-meta.ts"
-import { pgWriteRule } from "./pg-types.ts"
+import { CIDR, pgWriteRule } from "./pg-types.ts"
 import { isMutative, isRead } from "./schema-type.ts"
 import { STORABLE_TEXT_RULE } from "../../../storable-text.ts"
 import {
@@ -61,7 +61,8 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63);
 	   null is its other member when the column takes null, so the field publishes one flat anyOf (C4 of r18) */
 	const nullable = !isRequired(field)
-	return { code: `z.union([${refined}${nullable ? ", z.null()" : ""}])`, keys, takesNull: nullable }
+	const uses: SharedName[] = declared ? [] : ["jsonValueSchema"]
+	return { code: `z.union([${refined}${nullable ? ", z.null()" : ""}])`, keys, takesNull: nullable, uses }
 }
 
 /**
@@ -103,7 +104,8 @@ function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 	if (!isNumeric(field)) return field.dataType === "boolean" ? plain("z.boolean()") : undefined
 	const { max, min } = annotations
 	const kind = field.combKind
-	if (kind === "createdAt" || kind === "updatedAt" || kind === "deletedAt") return plain("timestampSchema")
+	if (kind === "createdAt" || kind === "updatedAt" || kind === "deletedAt")
+		return plain("timestampSchema", {}, ["timestampSchema"])
 	if (kind === "boolean") return plain("z.boolean()")
 	/* a date before 1970 is a negative epoch, which both engines store (F11) */
 	if (kind === "timestamp") {
@@ -116,7 +118,8 @@ function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 		return integerOf(annotations, range, schemaType)
 	}
 	/* a read float's base takes null already, so a nullable one publishes null once (C6 of r17) */
-	if (isRead(schemaType)) return { code: READ_FLOAT, keys: stated({ maximum: max, minimum: min }), takesNull: true }
+	if (isRead(schemaType))
+		return { code: READ_FLOAT, keys: stated({ maximum: max, minimum: min }), takesNull: true, uses: [] }
 	return plain(`z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`)
 }
 
@@ -124,7 +127,7 @@ function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 function pgTypeBase({ dialect, field, schemaType }: Build): Built {
 	const rule =
 		dialect === "postgres" && field.combKind === null && isMutative(schemaType) ? pgWriteRule(field) : undefined
-	return rule === undefined ? undefined : plain(rule)
+	return rule === undefined ? undefined : plain(rule, {}, rule === CIDR ? ["cidrSchema"] : [])
 }
 
 const BUILDERS = [enumBase, jsonBase, pgTypeBase, numberBase]
@@ -163,27 +166,39 @@ function finish(build: Build, base: Base): string {
 	return `${zodType}.optional()`
 }
 
+type FieldSchemaOptions = { dialect?: "postgres" | "sqlite" | undefined; imports: ImportsMeta }
+
 /**
- * The Zod expression for `field` in a `schemaType` DTO, or null when the column has no place in
- * it: a private column is never read back, a reference is never updated, and what comb or the
- * database generates is never written.
+ * The Zod expression for `field` in a `schemaType` DTO and the shared schemas it names, or null
+ * when the column has no place in it: a private column is never read back, a reference is never
+ * updated, and what comb or the database generates is never written.
  */
-export function generateFieldSchema(
+export function fieldSchemaOf(
 	field: FieldMeta,
 	schemaType: SchemaType,
-	{ dialect = "sqlite", imports }: { dialect?: "postgres" | "sqlite" | undefined; imports: ImportsMeta },
-): string | null {
+	{ dialect = "sqlite", imports }: FieldSchemaOptions,
+): { code: string; uses: readonly SharedName[] } | null {
 	if (field.constraints.private && isRead(schemaType)) return null
 	if (isMutative(schemaType) && isGenerated(field)) return null
 	const build: Build = { annotations: field.constraints, dialect, field, imports, schemaType }
 	const dimensions = field.dimensions ?? 0
-	if (dimensions === 0) return finish(build, baseOf(build))
+	if (dimensions === 0) {
+		const base = baseOf(build)
+		return { code: finish(build, base), uses: base.uses }
+	}
 	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49) */
 	const one: Build = { ...build, field: { ...field, dimensions: 0, isNotNull: false } }
 	const element = baseOf(one)
 	/* the array takes null by its own column alone, whatever its elements take */
-	return finish(build, plain(arrayOf(dimensions, schemaType, element)))
+	return { code: finish(build, plain(arrayOf(dimensions, schemaType, element))), uses: element.uses }
 }
+
+/** The Zod expression for `field` in a `schemaType` DTO, as fieldSchemaOf gives it, or null */
+export const generateFieldSchema = (
+	field: FieldMeta,
+	schemaType: SchemaType,
+	options: FieldSchemaOptions,
+): string | null => fieldSchemaOf(field, schemaType, options)?.code ?? null
 
 /** An array's element: nullable, its keys on it, which publish on `items` */
 const elementOf = (element: Base): string => keyed(element.code, element.keys, element.takesNull)

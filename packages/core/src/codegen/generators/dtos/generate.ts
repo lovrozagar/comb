@@ -13,7 +13,7 @@ import type { GeneratorContext } from "../context-types.ts"
 import type { DtosConfig, FieldInfo, SchemaType, SharedSchema, TableInfo } from "./dto-types.ts"
 import { generateEntityFile, sharedImportsOf } from "./entity-file.ts"
 import { generateExampleMeta } from "./example-meta.ts"
-import { generateFieldSchema } from "./field-schema.ts"
+import { fieldSchemaOf } from "./field-schema.ts"
 import { updatePackageJson } from "./package-exports.ts"
 import { aliasSchemaImports } from "./schema-aliases.ts"
 import { buildSharedSchemas } from "./shared-schemas.ts"
@@ -28,8 +28,8 @@ function fieldInfosOf(meta: TableMeta, ctx: GeneratorContext): FieldInfo[] {
 		for (const type of SCHEMA_TYPES) {
 			/* Shared with the published `immutable` list so the two cannot disagree */
 			if (type === "update" && isExcludedFromUpdate(field)) continue
-			const zodType = generateFieldSchema(field, type, { dialect: ctx.dialect, imports: ctx.analysis.imports })
-			if (zodType !== null) fields.push({ key: field.name, type, zodType })
+			const schema = fieldSchemaOf(field, type, { dialect: ctx.dialect, imports: ctx.analysis.imports })
+			if (schema !== null) fields.push({ key: field.name, type, uses: schema.uses, zodType: schema.code })
 		}
 	}
 	return fields
