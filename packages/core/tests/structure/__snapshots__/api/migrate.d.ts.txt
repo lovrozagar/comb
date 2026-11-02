@@ -24,11 +24,14 @@ export declare function createProvider(config: ConnectionProviderConfig, deps?: 
 export declare function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string): ResolvedDatabaseConfig;
 /**
  * `input`, typed: comb.migrate.config.ts's default export, an object or a function, sync or async,
- * that returns one (K9 of r20); loadConfig validates it, in one place (P11, K12 of the 0.15.0 review)
+ * that returns one (K9 of r20); loadConfig validates it, in one place (P11, K12 of the 0.15.0 review).
+ * The function form comes first: TypeScript types an arrow's body once, against the first overload it
+ * tries, so an object overload ahead of it widens an inline `type: "d1"` to string. A generic object
+ * form would skip the excess-property check on an object written inline. NoInfer keeps an annotated
+ * target, `() => Promise<CombMigrateConfig>`, from inferring R ahead of the arrow's own body
  */
+export declare function defineConfig<R extends CombMigrateConfig | Promise<CombMigrateConfig>>(input: () => R): () => NoInfer<R>;
 export declare function defineConfig(input: CombMigrateConfig): CombMigrateConfig;
-export declare function defineConfig(input: () => CombMigrateConfig): () => CombMigrateConfig;
-export declare function defineConfig(input: () => Promise<CombMigrateConfig>): () => Promise<CombMigrateConfig>;
 /**
  * What a config module exports, held to the config schema: an object, or a function that returns one
  * or a promise of one (K8 of r19). A typo, or a database of neither shape, rejects with a ZodError

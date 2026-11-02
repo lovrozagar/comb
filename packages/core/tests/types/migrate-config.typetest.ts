@@ -1,4 +1,5 @@
 /* C5 of the 0.14.1 review: the config types offer no key that no command reads */
+import { expectTypeOf } from "vitest"
 import {
 	type CombMigrateConfig,
 	type DatabaseConfig,
@@ -35,5 +36,47 @@ export const forms: [CombMigrateConfig, () => CombMigrateConfig, () => Promise<C
 	defineConfig(async () => CORE),
 ]
 
-// @ts-expect-error a typo inside an async config is caught
-export const typo = defineConfig(async () => ({ databses: {} }))
+/* the README's own spelling: literals written inline, which no `as const` keeps narrow, so each form's `type` takes
+   its contextual type from defineConfig */
+export const inline: [CombMigrateConfig, () => CombMigrateConfig, () => Promise<CombMigrateConfig>] = [
+	defineConfig({
+		databases: { core: { migrationsDir: "m", name: "core", provider: { databaseName: "CORE", type: "d1" } } },
+	}),
+	defineConfig(() => ({
+		databases: { core: { migrationsDir: "m", name: "core", provider: { databaseName: "CORE", type: "d1" } } },
+	})),
+	defineConfig(async () => ({
+		databases: {
+			core: { migrationsDir: "m", name: "core", provider: { databaseName: process.env["DB"] ?? "CORE", type: "d1" } },
+		},
+	})),
+]
+
+/* a target typed ahead of the call infers nothing ahead of the arrow's body */
+export const annotated: () => Promise<CombMigrateConfig> = defineConfig(async () => ({
+	databases: { core: { migrationsDir: "m", name: "core", provider: { databaseName: "CORE", type: "d1" } } },
+}))
+
+/* it returns what it was given */
+declare const object: CombMigrateConfig
+declare const sync: () => CombMigrateConfig
+declare const async: () => Promise<CombMigrateConfig>
+expectTypeOf(defineConfig(object)).toEqualTypeOf<CombMigrateConfig>()
+expectTypeOf(defineConfig(sync)).toEqualTypeOf<() => CombMigrateConfig>()
+expectTypeOf(defineConfig(async)).toEqualTypeOf<() => Promise<CombMigrateConfig>>()
+expectTypeOf(defineConfig(async () => ({ databases: {} }))).toEqualTypeOf<() => Promise<{ databases: {} }>>()
+
+/* a typo in each form: a misspelled key every config needs fails all three; an object written inline is also held to
+   its known keys, which TypeScript checks on no literal a function returns, so comb's load refuses those by name */
+// @ts-expect-error a typo in an object config is caught
+export const typoObject = defineConfig({ databses: {} })
+// @ts-expect-error a typo in a sync config is caught
+export const typoSync = defineConfig(() => ({ databses: {} }))
+// @ts-expect-error a typo in an async config is caught
+export const typoAsync = defineConfig(async () => ({ databses: {} }))
+export const typoOptional = defineConfig({
+	databases: {
+		// @ts-expect-error a misspelled optional key in an object config is caught
+		core: { drizzleConfigPth: "d", migrationsDir: "m", name: "core", provider: { databaseName: "CORE", type: "d1" } },
+	},
+})

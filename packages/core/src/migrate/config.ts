@@ -116,14 +116,17 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
 
 /**
  * `input`, typed: comb.migrate.config.ts's default export, an object or a function, sync or async,
- * that returns one (K9 of r20); loadConfig validates it, in one place (P11, K12 of the 0.15.0 review)
+ * that returns one (K9 of r20); loadConfig validates it, in one place (P11, K12 of the 0.15.0 review).
+ * The function form comes first: TypeScript types an arrow's body once, against the first overload it
+ * tries, so an object overload ahead of it widens an inline `type: "d1"` to string. A generic object
+ * form would skip the excess-property check on an object written inline. NoInfer keeps an annotated
+ * target, `() => Promise<CombMigrateConfig>`, from inferring R ahead of the arrow's own body
  */
+export function defineConfig<R extends CombMigrateConfig | Promise<CombMigrateConfig>>(input: () => R): () => NoInfer<R>
 export function defineConfig(input: CombMigrateConfig): CombMigrateConfig
-export function defineConfig(input: () => CombMigrateConfig): () => CombMigrateConfig
-export function defineConfig(input: () => Promise<CombMigrateConfig>): () => Promise<CombMigrateConfig>
-export function defineConfig<T extends CombMigrateConfig | (() => CombMigrateConfig | Promise<CombMigrateConfig>)>(
-	input: T,
-): T {
+export function defineConfig(
+	input: CombMigrateConfig | (() => CombMigrateConfig | Promise<CombMigrateConfig>),
+): CombMigrateConfig | (() => CombMigrateConfig | Promise<CombMigrateConfig>) {
 	return input
 }
 

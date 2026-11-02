@@ -63,6 +63,29 @@ describe("README code", () => {
 		expect(tsc.stdout.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
 		expect(tsc.status).toBe(0)
 	}, 120_000)
+
+	it("names each fence's language, and compiles every ts fence or says why its language is not compiled", () => {
+		/* the languages left out, each with why; a fence of another language, or of none, fails here */
+		const notCompiled: Record<string, string> = {
+			bash: "shell commands",
+			diff: "an upgrade step: a before and an after line of a caller's code, a fragment with no module around it",
+			text: "program output, a directory tree, or the list query's syntax",
+		}
+		const fences: { indent: string; language: string; line: number }[] = []
+		let open = false
+		for (const [at, line] of README.split("\n").entries()) {
+			const fence = /^( *)```(\S*)/.exec(line)
+			if (fence === null) continue
+			if (!open) fences.push({ indent: fence[1] as string, language: fence[2] as string, line: at + 1 })
+			open = !open
+		}
+		expect(open).toBe(false)
+		const ts = fences.filter(({ language }) => language === "ts")
+		expect(fences.filter(({ language }) => language !== "ts" && !(language in notCompiled))).toEqual([])
+		/* blocks() reads a fence at the line's start, so an indented ts fence would go uncompiled */
+		expect(ts.filter(({ indent }) => indent !== "")).toEqual([])
+		expect(blocks(README).map(({ line }) => line - 1)).toEqual(ts.map(({ line }) => line))
+	})
 })
 
 /** GitHub's anchor for a heading */
