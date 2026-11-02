@@ -1,31 +1,28 @@
 /**
- * The history replayed on the dev database, comb's objects and all, then read with the target's own
+ * The history replayed on devUrl's server, comb's objects and all, then read with the target's own
  * catalog query (P5 of r19): Postgres, not a model of it, decides what a cascade, a rename or a move
  * leaves, and the two sides compare as one read of two databases.
  *
- * The replay is one transaction, rolled back: nothing commits on dev, so it stays the empty scratch
- * Atlas requires, and nothing outside the target schema (a cast, an event trigger, an extension)
- * leaks there. Postgres refuses a few statements in a transaction block. CONCURRENTLY is cleared
- * from an index build, drop or reindex and a partition's detach: the parse tree says the statement
- * has it, comb's scanner cuts that one keyword, and the reparsed tree must equal the original with
- * only the flag cleared. VACUUM, a bare CLUSTER, a REINDEX of a database or the system, and a
- * detach's FINALIZE change no catalog row the read compares, so they are skipped. Any other
- * statement Postgres runs only outside a transaction stops the baseline, naming it; check's replay
- * of the pending files (pg-check-replay.ts) leaves it out and says so (P13 of r19).
+ * The replay runs as Atlas applies (P1 ⊃ P2 of r20): each file in a transaction of its own, a
+ * `-- atlas:txmode none` file statement by statement, committed, in a database made for it and
+ * dropped after (pg-replay-database.ts). One transaction for the whole history filled Postgres's
+ * lock table and left a seed's deferred trigger events pending, and devUrl's own database lent the
+ * history what it held. Committed, a statement whose scope is the server or another database would
+ * outlive the replay on devUrl's server, the target's own when they share one, so the replay runs
+ * none (pg-outside-transaction.ts) and says which it left out; a CREATE ROLE runs, as a policy needs
+ * its role, and comb drops each role it made.
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { maskSecrets } from "./atlas-secrets.ts"
 import { type PgTarget, refuseUrlProblems } from "./atlas-target.ts"
+import { outsideTransaction } from "./classify-file.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import { type Connect, failureOf, loadPostgres, readCatalog } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
-import { parsePostgres } from "./pg-parser.ts"
-import { commandsOf, concurrent, nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
+import { beyondDatabase, nodeOf } from "./pg-outside-transaction.ts"
+import { copyExtensions, createRole, dropRole, makeDatabase, type Sql, sweep } from "./pg-replay-database.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
-import { segments } from "./sql-scan.ts"
-
-type Node = Record<string, unknown>
 
 /** A history file as baseline reads it */
 type HistoryFile = { name: string; sql: string }
@@ -33,175 +30,98 @@ type HistoryFile = { name: string; sql: string }
 /* why comb loads postgres.js here */
 const REPLAYS = "baseline replays the history on devUrl, and reads what it leaves, through the `postgres` package"
 
-// lookup-table: the statements Postgres runs only outside a transaction that the replay skips, which change no catalog row the read compares
-const SKIPPED_OUTSIDE: ReadonlySet<string> = /* @__PURE__ */ new Set([
-	"CLUSTER",
-	"DISCARD ALL",
-	"REINDEX DATABASE",
-	"REINDEX SCHEMA",
-	"REINDEX SYSTEM",
-	"VACUUM",
-])
-
-/* a CONCURRENTLY detach replays in full, so its FINALIZE, which a transaction holds, has nothing left to finish */
-const finalizes = (type: string, node: Node): boolean =>
-	type === "AlterTableStmt" && commandsOf(node).some((cmd) => cmd["subtype"] === "AT_DetachPartitionFinalize")
-
-/** `tree` with its flag cleared and every offset left out: what the same statement without CONCURRENTLY parses to */
-function withoutConcurrently(tree: unknown): string {
-	const strip = (value: unknown): unknown => {
-		if (Array.isArray(value)) return value.map(strip).filter((each) => each !== undefined)
-		if (value === null || typeof value !== "object") return value
-		/* REINDEX's flag is a param of its own */
-		if (((value as Node)["DefElem"] as Node | undefined)?.["defname"] === "concurrently") return undefined
-		const out: Node = {}
-		for (const [key, field] of Object.entries(value as Node)) {
-			if (key === "location" || key === "stmt_location" || key === "stmt_len" || key === "concurrent") continue
-			const kept = strip(field)
-			/* a REINDEX whose one param was the flag has none */
-			if (!(Array.isArray(kept) && kept.length === 0 && key === "params")) out[key] = kept
-		}
-		return out
-	}
-	return JSON.stringify(strip(tree))
+/** How the replay words what it does, and where it says what it left out */
+type Replay = {
+	/** what the replay was doing, as a refusal names it */
+	doing: string
+	/** a statement left out, from `file`, and what it is */
+	leftOut(file: string, sent: string, what: string): void
+	/** what a refusal stops */
+	stops: string
 }
 
-/** `sql`'s parse tree, or undefined where the cut left what the parser refuses (a REINDEX's option list left empty) */
-function reparse(sql: string): unknown {
-	try {
-		return parsePostgres(sql).stmts
-	} catch {
-		// reason: a cut the parser refuses proves nothing, and the caller refuses the statement
-		return undefined
-	}
-}
+/** One replay's state: its connection, its database, when it started and the roles it made */
+type Run = { created: string[]; database: string; sql: Sql; started: number }
 
-/**
- * `sql` without its one CONCURRENTLY keyword: the code tokens are read by comb's scanner, so the word
- * in a string, a comment or a quoted identifier is never touched, and the reparse proves only the flag changed
- */
-function cutConcurrently(sql: string, tree: unknown): string {
-	let out = ""
-	let cut = false
-	for (const { kind, text } of segments(sql, "postgres")) {
-		if (kind !== "code" || cut) {
-			out += text
+/** `file` run as Atlas applies it: in a transaction of its own unless `-- atlas:txmode none` gives it up */
+async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Replay & { refused: Refuse }) {
+	const inFile = !outsideTransaction(text)
+	if (inFile) await run.sql.unsafe("BEGIN", [])
+	for (const { sent, tree } of pgRead(text).statements) {
+		const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
+		const beyond = beyondDatabase(type, node)
+		if (beyond !== undefined) {
+			replay.leftOut(name, sent, beyond)
 			continue
 		}
-		const match = /\bCONCURRENTLY\b\s*/i.exec(text)
-		if (match === null) out += text
-		else {
-			out += text.slice(0, match.index) + text.slice(match.index + match[0].length)
-			cut = true
+		try {
+			if (type !== "CreateRoleStmt") await run.sql.unsafe(sent, [])
+			else {
+				const role = String(node["role"])
+				if (await createRole(run.sql, { ...run, inFile, role, sent })) run.created.push(role)
+			}
+		} catch (error) {
+			throw replay.refused(`${name}: devUrl refused ${JSON.stringify(sent)} as ${replay.doing}`, error)
 		}
 	}
-	const reparsed = cut ? reparse(out) : undefined
-	if (reparsed === undefined || withoutConcurrently(reparsed) !== withoutConcurrently(tree)) {
-		throw new Error(
-			`comb could not replay ${JSON.stringify(sql)} without CONCURRENTLY, which a transaction refuses; baseline compares nothing`,
-		)
-	}
-	return out
+	if (inFile) await run.sql.unsafe("COMMIT", [])
 }
 
-/** What the replay does with one statement: sends it (as written, or cut), skips it, or cannot hold it, and why */
-type Step = { send: string } | { skip: true } | { cannot: "cut" | "transaction" | (string & {}) }
+/* why a replay stops on a devUrl role that cannot make the database it replays in */
+const NO_CREATEDB =
+	"devUrl's role cannot create a database (CREATEDB), and comb replays the history file by file, as Atlas applies it, in a database of its own on devUrl's server; grant the role CREATEDB, or point devUrl at a server where it has it"
+
+/** A refusal: what failed, with devUrl's error, and what that stops */
+type Refuse = (what: string, error: unknown) => ReplayFailed
 
 /**
- * What the replay does with one history statement, by pg-outside-transaction.ts's table (P8 of
- * r19): VACUUM, a bare CLUSTER, a REINDEX of a schema, a database or the system, DISCARD ALL, and the
- * FINALIZE of a detach the replay ran in full change no catalog row the read compares, so they are
- * skipped; a CONCURRENTLY build, drop, reindex or detach is sent without the keyword; the file's
- * transaction control, and every other statement only outside a transaction runs, cannot be held.
- */
-function stepOf(sent: string, tree: unknown): Step {
-	if (tree === undefined) return { send: sent }
-	const [type, node] = nodeOf(tree)
-	const outside = outsideOnly(type, node)
-	if (outside === undefined) {
-		if (finalizes(type, node)) return { skip: true }
-		return type === "TransactionStmt" ? { cannot: "transaction" } : { send: sent }
-	}
-	if (SKIPPED_OUTSIDE.has(outside)) return { skip: true }
-	if (!concurrent(type, node)) return { cannot: outside }
-	try {
-		return { send: cutConcurrently(sent, tree) }
-	} catch {
-		// reason: the cut's refusal is the caller's to word, baseline's or check's
-		return { cannot: "cut" }
-	}
-}
-
-/** Each history statement in `files`, in order, with the file it is from and what the replay does with it */
-const stepsOf = (files: readonly HistoryFile[]): Array<{ file: string; sent: string; step: Step }> =>
-	files.flatMap(({ name, sql }) =>
-		pgRead(sql).statements.map(({ sent, tree }) => ({ file: name, sent, step: stepOf(sent, tree) })),
-	)
-
-/** Baseline's refusal of a history statement its one transaction cannot hold */
-function cannotBaseline(sent: string, cannot: string): Error {
-	const statement = JSON.stringify(sent)
-	if (cannot === "cut")
-		return new Error(
-			`comb could not replay ${statement} without CONCURRENTLY, which a transaction refuses; baseline compares nothing`,
-		)
-	if (cannot === "transaction") {
-		return new Error(
-			`${statement}: baseline replays the history in one transaction of its own, which the file's transaction control would end; baseline compares nothing`,
-		)
-	}
-	return new Error(
-		`${statement}: ${cannot} runs only outside a transaction, and baseline replays the history in one; baseline compares nothing`,
-	)
-}
-
-/** The statements baseline's replay sends for `files`, in order, each with the file it is from; throws for one it cannot hold */
-function replayStatements(files: readonly HistoryFile[]): Array<{ file: string; sql: string }> {
-	return stepsOf(files).flatMap(({ file, sent, step }) => {
-		if ("cannot" in step) throw cannotBaseline(sent, step.cannot)
-		return "send" in step ? [{ file, sql: step.send }] : []
-	})
-}
-
-/**
- * `statements` run on `target`'s dev database in one transaction that is rolled back, the schema
- * made and searched first; then `after` on the same connection, inside it. A statement dev refuses
- * is named, with dev's error, as what was `doing`, and then what that `stops`
+ * `files` replayed on `target`'s dev server in a database of their own, the schema made and searched
+ * first; then `after` on its connection. A statement dev refuses is named, with dev's error, as what
+ * was `doing`, and then what that `stops`
  */
 async function onDev<T>(
 	target: PgTarget,
-	statements: ReadonlyArray<{ file: string; sql: string }>,
+	files: readonly HistoryFile[],
 	{
 		after,
-		doing,
 		load,
-		stops,
-	}: { after: (sql: ReturnType<Connect>) => Promise<T>; doing: string; load: () => Promise<Connect>; stops: string },
+		...replay
+	}: Omit<Replay, "leftOut"> & {
+		after: (sql: Sql) => Promise<T>
+		leftOut?: Replay["leftOut"] | undefined
+		load: () => Promise<Connect>
+	},
 ): Promise<T> {
 	refuseUrlProblems(target, { dev: true })
 	const connect = await load()
 	const scrub = (text: string) => maskSecrets(text, [target.devUrl, target.url])
-	let sql: ReturnType<Connect> | undefined
+	const refused: Refuse = (what, error) =>
+		new ReplayFailed(`${what}: ${scrub(failureOf(error, "devUrl", target.devUrl))}; ${replay.stops}`, { cause: error })
+	const options = { ...postgresOptionsOf(target.devUrl, "devUrl"), max: 1, onnotice: () => undefined }
+	const started = Date.now()
+	let admin: Sql | undefined
 	try {
-		sql = connect({ ...postgresOptionsOf(target.devUrl, "devUrl"), max: 1, onnotice: () => undefined })
-		await sql.unsafe("BEGIN", [])
+		admin = connect(options)
+		await sweep(admin, started)
+		const database = await makeDatabase(admin, started, () => new ReplayFailed(`${NO_CREATEDB}; ${replay.stops}`))
+		const run: Run = { created: [], database, sql: connect({ ...options, database }), started }
 		try {
+			await copyExtensions(admin, run.sql, (name, error) =>
+				refused(
+					`devUrl's database holds the extension ${name}, which comb could not make in the database it replays the history in`,
+					error,
+				),
+			)
 			if (target.schema !== "public")
-				await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(target.schema)}`, [])
-			await sql.unsafe(`SET LOCAL search_path TO ${sqlIdentifier(target.schema)}`, [])
-			for (const { file, sql: statement } of statements) {
-				try {
-					await sql.unsafe(statement, [])
-				} catch (error) {
-					throw new ReplayFailed(
-						`${file}: devUrl refused ${JSON.stringify(statement)} as ${doing}: ${scrub(failureOf(error, "devUrl", target.devUrl))}; ${stops}`,
-						{ cause: error },
-					)
-				}
-			}
-			return await after(sql)
+				await run.sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(target.schema)}`, [])
+			await run.sql.unsafe(`SET search_path TO ${sqlIdentifier(target.schema)}`, [])
+			for (const file of files)
+				await replayFile(run, file, { ...replay, leftOut: replay.leftOut ?? (() => undefined), refused })
+			return await after(run.sql)
 		} finally {
-			await sql.unsafe("ROLLBACK", [])
+			await run.sql.end()
+			await admin.unsafe(`DROP DATABASE IF EXISTS ${database}`, [])
+			for (const role of run.created) await dropRole(admin, role)
 		}
 	} catch (error) {
 		if (error instanceof ReplayFailed) throw error
@@ -212,13 +132,13 @@ async function onDev<T>(
 			},
 		)
 	} finally {
-		await sql?.end()
+		await admin?.end()
 	}
 }
 
 /**
- * The catalog the history `files` leave in `target`'s schema, replayed on its dev database in one
- * transaction that is rolled back, read by the target's own query (readCatalog). The role the replay
+ * The catalog the history `files` leave in `target`'s schema, replayed on its dev server as Atlas
+ * applied them (onDev), read by the target's own query (readCatalog). The role the replay
  * ran as stands for the target's role wherever the read names it (`targetUser`), as CURRENT_USER
  * names the role each database was built as
  */
@@ -227,7 +147,7 @@ async function replayCatalog(
 	{ files, targetUser }: { files: readonly HistoryFile[]; targetUser: string },
 	load: () => Promise<Connect> = () => loadPostgres(REPLAYS),
 ): Promise<LiveObjects> {
-	return onDev(target, replayStatements(files), {
+	return onDev(target, files, {
 		after: async (sql) => asTarget(await readCatalog(sql, target.schema), targetUser),
 		doing: "baseline replayed the history there",
 		load,
@@ -264,4 +184,4 @@ function asTarget(live: LiveObjects, targetUser: string): LiveObjects {
 	return { ...live, policies, user: targetUser }
 }
 
-export { cutConcurrently, type HistoryFile, onDev, replayCatalog, replayStatements, stepsOf }
+export { type HistoryFile, onDev, replayCatalog }

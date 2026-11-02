@@ -2,90 +2,18 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { readLiveObjects } from "./pg-live-objects.ts"
 import { CATALOG } from "./pg-live-catalog.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
-import { cutConcurrently, replayCatalog, replayStatements } from "./pg-replay.ts"
-import { makesCompared } from "./pg-replay-gate.ts"
-import { parsePostgres } from "./pg-parser.ts"
+import { replayCatalog } from "./pg-replay.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
 beforeAll(loadPostgresParser)
 
-const tree = (sql: string) => parsePostgres(sql).stmts
 const file = (sql: string) => [{ name: "1_a.sql", sql }]
 const TARGET = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "public", url: "postgres://app/app" }
 
-describe("cutConcurrently (P5 of r19, ruled: the tree decides, the scanner cuts, the reparse proves)", () => {
-	it.each([
-		[
-			"CREATE INDEX CONCURRENTLY \"concurrently\" ON t (a) WHERE b <> 'concurrently' /* concurrently */",
-			"CREATE INDEX \"concurrently\" ON t (a) WHERE b <> 'concurrently' /* concurrently */",
-		],
-		[
-			"-- build concurrently\nCREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS i ON t (a)",
-			"-- build concurrently\nCREATE UNIQUE INDEX IF NOT EXISTS i ON t (a)",
-		],
-		["DROP INDEX CONCURRENTLY IF EXISTS i", "DROP INDEX IF EXISTS i"],
-		["REINDEX TABLE CONCURRENTLY t", "REINDEX TABLE t"],
-	])("cuts only the keyword of %j", (sql, want) => {
-		expect(cutConcurrently(sql, tree(sql))).toBe(want)
-	})
+/* the replay's database, named for the run's start and a random suffix */
+const DATABASE = /comb_replay_\d{13}_[0-9a-f]{8}/g
 
-	it("refuses a REINDEX whose option list the cut would leave empty, which the parser refuses: loud, never guessed", () => {
-		const sql = "REINDEX (CONCURRENTLY) INDEX i"
-		expect(() => cutConcurrently(sql, tree(sql))).toThrow(/comb could not replay .* without CONCURRENTLY/)
-	})
-
-	it("refuses when the tree names the flag and the code holds no CONCURRENTLY to cut, only quoted and literal ones", () => {
-		const sql = "CREATE INDEX \"concurrently\" ON t (a) WHERE b <> 'concurrently'"
-		const flagged = tree(sql) as Array<{ stmt: { IndexStmt: Record<string, unknown> } }>
-		;(flagged[0] as { stmt: { IndexStmt: Record<string, unknown> } }).stmt.IndexStmt["concurrent"] = true
-		expect(() => cutConcurrently(sql, flagged)).toThrow(/without CONCURRENTLY/)
-	})
-})
-
-describe("replayStatements", () => {
-	it("sends each statement as written, an index built CONCURRENTLY without it, and skips VACUUM and a bare CLUSTER", () => {
-		const sql =
-			"CREATE TABLE t (a int);\nCREATE INDEX CONCURRENTLY i ON t (a);\nVACUUM t;\nANALYZE t;\nCLUSTER;\nCLUSTER t USING i;"
-		expect(replayStatements(file(sql)).map(({ sql: sent }) => sent)).toEqual([
-			"CREATE TABLE t (a int)",
-			"CREATE INDEX i ON t (a)",
-			"ANALYZE t",
-			"CLUSTER t USING i",
-		])
-	})
-
-	/* P13 of r19: check's replay holds what a pending txmode-none file runs, as baseline's holds the history */
-	it("sends a CONCURRENTLY detach without the keyword, and skips its FINALIZE and a REINDEX of a database or the system", () => {
-		const sql =
-			"ALTER TABLE ev DETACH PARTITION ev_old CONCURRENTLY;\nALTER TABLE ev DETACH PARTITION ev_old FINALIZE;\nALTER TABLE ev DETACH PARTITION ev_new;\nREINDEX DATABASE app;\nREINDEX SYSTEM;"
-		expect(replayStatements(file(sql)).map(({ sql: sent }) => sent)).toEqual([
-			"ALTER TABLE ev DETACH PARTITION ev_old ",
-			"ALTER TABLE ev DETACH PARTITION ev_new",
-		])
-	})
-
-	it("sends a REINDEX without options, and a statement the parser cannot read, as written, for dev to judge", () => {
-		expect(replayStatements(file("REINDEX TABLE t;\nREINDEX TABLE CONCURRENTLY t;")).map(({ sql }) => sql)).toEqual([
-			"REINDEX TABLE t",
-			"REINDEX TABLE t",
-		])
-		expect(replayStatements(file("SELEC 1;")).map(({ sql }) => sql)).toEqual(["SELEC 1"])
-		expect(makesCompared(file("SELEC 1;"))).toBe(false)
-	})
-
-	it.each([
-		["ALTER SYSTEM SET work_mem = '4MB'", "ALTER SYSTEM runs only outside a transaction"],
-		["CREATE DATABASE other", "CREATE DATABASE runs only outside a transaction"],
-		["DROP TABLESPACE ts", "DROP TABLESPACE runs only outside a transaction"],
-		["COMMIT", "baseline replays the history in one transaction of its own"],
-		["BEGIN", "baseline replays the history in one transaction of its own"],
-		["REINDEX (CONCURRENTLY) INDEX i", 'comb could not replay "REINDEX (CONCURRENTLY) INDEX i" without CONCURRENTLY'],
-	])("stops on %j, naming it", (sql, said) => {
-		expect(() => replayStatements(file(sql))).toThrow(said)
-	})
-})
-
-/** A postgres.js stand-in: each query it was sent, answering `rows` to the catalog read and nothing else */
+/** A postgres.js stand-in on every connection: each query it was sent, the replay's database as <db>, answering `rows` to the catalog read */
 function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) => Error | undefined) {
 	const sent: Array<[string, unknown[]]> = []
 	const given: Array<Record<string, unknown>> = []
@@ -94,38 +22,57 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 		{
 			end: async () => undefined,
 			unsafe: async (query: string, params: unknown[]) => {
-				sent.push([query, params])
+				sent.push([query.replaceAll(DATABASE, "<db>"), params])
 				const error = fail?.(query)
 				if (error !== undefined) throw error
 				return query === CATALOG ? rows : []
 			},
 		}
 	)
-	return { given, load: async () => connect, sent }
+	return { given, load: async () => connect, queries: () => sent.map(([query]) => query), sent }
 }
 
+/* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
+const SWEEP = [expect.stringMatching(/^SELECT datname FROM pg_database/), expect.stringMatching(/^SELECT r\.rolname/)]
+const MADE = ["CREATE DATABASE <db> TEMPLATE template0", expect.stringMatching(/^SELECT e\.extname/)]
+const DROPPED = "DROP DATABASE IF EXISTS <db>"
+
 describe("replayCatalog", () => {
-	it("replays in one transaction it rolls back, reading with the target's own query (the reviewer's addition B)", async () => {
+	it("replays each file in a transaction of its own in a database of its own, reading with the target's own query (addition B)", async () => {
 		const dev = fake([{ name: "dev_user", what: "user" }])
 		await replayCatalog(
 			{ ...TARGET, schema: "app" },
-			{ files: file("CREATE TABLE t (a int);"), targetUser: "app_user" },
+			{
+				files: [
+					{ name: "1_a.sql", sql: "CREATE TABLE t (a int);\nALTER SYSTEM SET work_mem = '4MB';" },
+					{ name: "2_b.sql", sql: "-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY i ON t (a);" },
+				],
+				targetUser: "app_user",
+			},
 			dev.load,
 		)
 		const target = fake([{ name: "app_user", what: "user" }])
 		await readLiveObjects({ schema: "app", url: TARGET.url }, target.load)
-		expect(dev.sent.map(([query]) => query)).toEqual([
-			"BEGIN",
+		expect(dev.queries()).toEqual([
+			...SWEEP,
+			...MADE,
 			'CREATE SCHEMA IF NOT EXISTS "app"',
-			'SET LOCAL search_path TO "app"',
+			'SET search_path TO "app"',
+			"BEGIN",
 			"CREATE TABLE t (a int)",
+			"COMMIT",
+			"CREATE INDEX CONCURRENTLY i ON t (a)",
 			CATALOG,
-			"ROLLBACK",
+			DROPPED,
 		])
 		expect(dev.sent.find(([query]) => query === CATALOG)).toEqual(target.sent[0])
-		/* one connection, so the transaction holds every statement, and dev's notices kept off the terminal */
-		const [options] = dev.given as [{ max: number; onnotice: () => unknown }]
-		expect([options.max, options.onnotice()]).toEqual([1, undefined])
+		/* one connection each, to devUrl's database and then to the replay's, dev's notices kept off the terminal */
+		const [admin, replay] = dev.given as [
+			{ database: string; max: number; onnotice: () => unknown },
+			{ database: string },
+		]
+		expect([admin.max, admin.onnotice(), admin.database]).toEqual([1, undefined, "dev"])
+		expect(replay.database).toMatch(/^comb_replay_\d{13}_[0-9a-f]{8}$/)
 	})
 
 	it("names dev's role as the target's in a policy, so CURRENT_USER compares as each database was built (addition A)", async () => {
@@ -150,7 +97,7 @@ describe("replayCatalog", () => {
 })
 
 describe("replayCatalog on what dev refuses", () => {
-	it("refuses a statement dev refuses, naming the file, the statement and dev's error, and still rolls back", async () => {
+	it("refuses a statement dev refuses, naming the file, the statement and dev's error, and still drops its database", async () => {
 		const dev = fake([], (query) =>
 			query.startsWith("CREATE VIEW") ? new Error('column "nope" does not exist') : undefined,
 		)
@@ -163,7 +110,15 @@ describe("replayCatalog on what dev refuses", () => {
 			'1_a.sql: devUrl refused "CREATE VIEW v AS SELECT nope FROM t" as baseline replayed the history there: column "nope" does not exist; baseline compares nothing',
 		)
 		await expect(replay).rejects.toBeInstanceOf(ReplayFailed)
-		expect(dev.sent.at(-1)?.[0]).toBe("ROLLBACK")
+		expect(dev.sent.at(-1)?.[0]).toBe(DROPPED)
+	})
+
+	it("sends a statement comb's parser cannot read as written, for dev to refuse", async () => {
+		const dev = fake([], (query) =>
+			query.startsWith("SELEC ") ? new Error('syntax error at or near "SELEC"') : undefined,
+		)
+		const replay = replayCatalog(TARGET, { files: file("SELEC 1;"), targetUser: "u" }, dev.load)
+		await expect(replay).rejects.toThrow('1_a.sql: devUrl refused "SELEC 1" as baseline replayed the history there')
 	})
 
 	it("says comb could not replay when dev itself fails, never naming its password", async () => {
@@ -190,5 +145,28 @@ describe("replayCatalog on a devUrl comb refuses", () => {
 		const replay = replayCatalog({ ...TARGET, devUrl }, { files: file("SELECT 1;"), targetUser: "u" }, dev.load)
 		await expect(replay).rejects.toThrow(said)
 		expect(dev.given).toEqual([])
+	})
+})
+
+/* P1 of r20: the replay's own database needs CREATEDB, and holds devUrl's extensions */
+describe("replayCatalog's database", () => {
+	const denied = Object.assign(new Error("permission denied to create database"), { code: "42501" })
+
+	it("refuses a role without CREATEDB, naming the privilege, and makes nothing", async () => {
+		const dev = fake([], (query) => (query.startsWith("CREATE DATABASE") ? denied : undefined))
+		const replay = replayCatalog(TARGET, { files: file("SELECT 1;"), targetUser: "u" }, dev.load)
+		await expect(replay).rejects.toThrow(
+			/^devUrl's role cannot create a database \(CREATEDB\).*; baseline compares nothing$/,
+		)
+		await expect(replay).rejects.toBeInstanceOf(ReplayFailed)
+		expect(dev.queries().at(-1)).toBe("CREATE DATABASE <db> TEMPLATE template0")
+	})
+
+	it("says comb could not replay when making the database fails for another reason", async () => {
+		const full = Object.assign(new Error("could not write to file"), { code: "53100" })
+		const dev = fake([], (query) => (query.startsWith("CREATE DATABASE") ? full : undefined))
+		await expect(replayCatalog(TARGET, { files: file("SELECT 1;"), targetUser: "u" }, dev.load)).rejects.toThrow(
+			"comb could not replay the history on devUrl: could not write to file",
+		)
 	})
 })

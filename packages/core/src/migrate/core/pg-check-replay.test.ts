@@ -11,13 +11,28 @@ beforeAll(loadPostgresParser)
 const TARGET = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "public", url: "postgres://app/app" }
 const file = (sql: string) => [{ name: "1_a.sql", sql }]
 
-/** A postgres.js stand-in: each query it was sent, failing those `fail` names */
+/* the replay's database, named for the run's start and a random suffix */
+const DATABASE = /comb_replay_\d{13}_[0-9a-f]{8}/g
+
+/* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
+const AROUND = {
+	after: ["DROP DATABASE IF EXISTS <db>"],
+	before: [
+		expect.stringMatching(/^SELECT datname FROM pg_database/),
+		expect.stringMatching(/^SELECT r\.rolname/),
+		"CREATE DATABASE <db> TEMPLATE template0",
+		expect.stringMatching(/^SELECT e\.extname/),
+		'SET search_path TO "public"',
+	],
+}
+
+/** A postgres.js stand-in on every connection: each query it was sent, the replay's database as <db>, failing those `fail` names */
 function fake(fail?: (query: string) => Error | undefined) {
 	const sent: string[] = []
 	const connect = () => ({
 		end: async () => undefined,
 		unsafe: async (query: string) => {
-			sent.push(query)
+			sent.push(query.replaceAll(DATABASE, "<db>"))
 			const error = fail?.(query)
 			if (error !== undefined) throw error
 			return []
@@ -41,10 +56,10 @@ async function replayed(sql: string, more: { devUrl?: string; load?: () => Promi
 }
 
 describe("replayPending (P13 of r19)", () => {
-	it("replays the files in one transaction it rolls back, printing nothing", async () => {
+	it("replays each file in a transaction of its own in a database of its own, printing nothing", async () => {
 		expect(await replayed("CREATE TABLE t (a int);")).toEqual({
 			out: [],
-			sent: ["BEGIN", 'SET LOCAL search_path TO "public"', "CREATE TABLE t (a int)", "ROLLBACK"],
+			sent: [...AROUND.before, "BEGIN", "CREATE TABLE t (a int)", "COMMIT", ...AROUND.after],
 		})
 	})
 
@@ -63,16 +78,17 @@ describe("replayPending (P13 of r19)", () => {
 		])
 	})
 
-	it("leaves out each statement one transaction cannot hold, naming it and why, skips VACUUM quietly, and replays the rest", async () => {
+	it("leaves out each statement whose scope is the server or another database, naming it, and replays the rest", async () => {
 		const { out, sent } = await replayed(
-			"CREATE TABLE t (a int);\nBEGIN;\nALTER SYSTEM SET work_mem = '4MB';\nREINDEX (CONCURRENTLY) INDEX i;\nVACUUM t;",
+			"CREATE TABLE t (a int);\nALTER SYSTEM SET work_mem = '4MB';\nALTER DATABASE app SET work_mem = '4MB';",
 		)
 		expect(out).toEqual([
-			'Check left "BEGIN" in 1_a.sql out of its replay on devUrl: the replay is one transaction of its own, which the file\'s transaction control would end',
-			"Check left \"ALTER SYSTEM SET work_mem = '4MB'\" in 1_a.sql out of its replay on devUrl: ALTER SYSTEM runs only outside a transaction",
-			'Check left "REINDEX (CONCURRENTLY) INDEX i" in 1_a.sql out of its replay on devUrl: comb could not cut its CONCURRENTLY, which a transaction refuses',
+			"Check left \"ALTER SYSTEM SET work_mem = '4MB'\" in 1_a.sql out of its replay on devUrl: ALTER SYSTEM reaches past the database the replay runs in, so apply alone runs it",
+			expect.stringMatching(
+				/^Check left "ALTER DATABASE app SET work_mem = '4MB'" in 1_a\.sql out of its replay on devUrl: /,
+			),
 		])
-		expect(sent).toEqual(["BEGIN", 'SET LOCAL search_path TO "public"', "CREATE TABLE t (a int)", "ROLLBACK"])
+		expect(sent).toEqual([...AROUND.before, "BEGIN", "CREATE TABLE t (a int)", "COMMIT", ...AROUND.after])
 	})
 
 	it("refuses a statement dev refuses, naming the file, the statement and Postgres's message", async () => {

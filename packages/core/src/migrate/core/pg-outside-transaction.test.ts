@@ -1,11 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest"
-import { nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
+import { beyondDatabase, nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
 import { loadPostgresParser, parsePostgres } from "./pg-parser.ts"
 
 beforeAll(loadPostgresParser)
 
 /** What `sql`'s one statement is when Postgres runs it only outside a transaction */
 const outside = (sql: string) => outsideOnly(...nodeOf(parsePostgres(sql).stmts))
+
+/** What `sql`'s one statement is when its scope is the server or another database */
+const beyond = (sql: string) => beyondDatabase(...nodeOf(parsePostgres(sql).stmts))
 
 /** A CREATE SUBSCRIPTION with `options`, as outsideOnly reads it */
 const create = (options: string) => outside(`CREATE SUBSCRIPTION s CONNECTION 'x' PUBLICATION p${options}`)
@@ -54,5 +57,66 @@ describe("outsideOnly", () => {
 				"ALTER SUBSCRIPTION s DISABLE",
 			].map(outside),
 		).toEqual(Array(10).fill(undefined))
+	})
+})
+
+/* P1 of r20: what the dev replay leaves out, as it would outlive the replay's database on devUrl's server */
+describe("beyondDatabase", () => {
+	it.each([
+		["ALTER DATABASE app SET work_mem = '4MB'", "ALTER DATABASE"],
+		["ALTER DATABASE app REFRESH COLLATION VERSION", "ALTER DATABASE"],
+		["ALTER DATABASE app CONNECTION LIMIT 5", "ALTER DATABASE"],
+		["ALTER DATABASE app OWNER TO r", "ALTER OWNER of a database"],
+		["ALTER ROLE r PASSWORD 'x'", "ALTER ROLE"],
+		["ALTER ROLE r SET work_mem = '4MB'", "ALTER ROLE"],
+		["ALTER SUBSCRIPTION s DISABLE", "ALTER SUBSCRIPTION"],
+		["ALTER SYSTEM SET work_mem = '4MB'", "ALTER SYSTEM"],
+		["ALTER TABLESPACE ts SET (seq_page_cost = 1)", "ALTER TABLESPACE"],
+		["CHECKPOINT", "CHECKPOINT"],
+		["COMMENT ON ROLE r IS 'x'", "COMMENT on a role"],
+		["COMMENT ON DATABASE app IS 'x'", "COMMENT on a database"],
+		["COPY t TO '/tmp/t.csv'", "COPY with a server file or program"],
+		["COPY t FROM PROGRAM 'cat t.csv'", "COPY with a server file or program"],
+		["CREATE SUBSCRIPTION s CONNECTION 'x' PUBLICATION p WITH (connect = false)", "CREATE SUBSCRIPTION"],
+		["CREATE TABLESPACE ts LOCATION '/x'", "CREATE TABLESPACE"],
+		["CREATE DATABASE other", "CREATE DATABASE"],
+		["DROP OWNED BY r", "DROP OWNED"],
+		["DROP ROLE r", "DROP ROLE"],
+		["DROP SUBSCRIPTION s", "DROP SUBSCRIPTION"],
+		["DROP TABLESPACE ts", "DROP TABLESPACE"],
+		["DROP DATABASE other", "DROP DATABASE"],
+		["GRANT r TO s", "GRANT or REVOKE of a role"],
+		["GRANT CONNECT ON DATABASE app TO r", "GRANT or REVOKE on a database"],
+		["GRANT SET ON PARAMETER work_mem TO r", "GRANT or REVOKE on a server parameter"],
+		["REVOKE CREATE ON TABLESPACE ts FROM r", "GRANT or REVOKE on a tablespace"],
+		["REASSIGN OWNED BY r TO s", "REASSIGN OWNED"],
+		["REINDEX DATABASE app", "REINDEX DATABASE"],
+		["REINDEX SYSTEM app", "REINDEX SYSTEM"],
+		["ALTER ROLE r RENAME TO s", "RENAME of a role"],
+		["SECURITY LABEL ON ROLE r IS 'x'", "SECURITY LABEL on a role"],
+		["PREPARE TRANSACTION 'x'", "PREPARE TRANSACTION"],
+		["COMMIT PREPARED 'x'", "COMMIT PREPARED"],
+		["ROLLBACK PREPARED 'x'", "ROLLBACK PREPARED"],
+	])("names %j", (sql, named) => {
+		expect(beyond(sql)).toBe(named)
+	})
+
+	it("leaves what the replay's database holds to it: its own objects, a COPY of the client's, a narrower REINDEX, a transaction", () => {
+		expect(
+			[
+				"CREATE TABLE t (a int)",
+				"ALTER TABLE t OWNER TO r",
+				"COMMENT ON TABLE t IS 'x'",
+				"GRANT SELECT ON t TO r",
+				"ALTER TABLE t RENAME TO u",
+				"SECURITY LABEL ON TABLE t IS 'x'",
+				"COPY t FROM '/tmp/t.csv'",
+				"COPY t FROM STDIN",
+				"COPY t TO STDOUT",
+				"REINDEX TABLE t",
+				"BEGIN",
+				"COMMIT",
+			].map(beyond),
+		).toEqual(Array(12).fill(undefined))
 	})
 })

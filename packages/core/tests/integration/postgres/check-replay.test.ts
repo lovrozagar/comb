@@ -9,6 +9,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import pg from "pg"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { approveMigration } from "../../../src/migrate/core/approval.ts"
 import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
@@ -25,6 +26,17 @@ beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "comb-pg-check-replay-"))
 })
 afterEach(() => rmSync(dir, { force: true, recursive: true }))
+
+/** Run `sql` on the database at `url` */
+async function exec(url: string, sql: string): Promise<void> {
+	const client = new pg.Client({ connectionString: url })
+	await client.connect()
+	try {
+		await client.query(sql)
+	} finally {
+		await client.end()
+	}
+}
 
 /** A scratch database held from the file's first test to its last: its URL, inside a test */
 function heldScratchDb(): () => string {
@@ -155,14 +167,95 @@ describe("check of a pending retype over a history the target has applied", () =
 })
 
 describe("check's replay of a statement only a file of its own can run", () => {
-	it("replays a CONCURRENTLY detach without the keyword, and passes it", async () => {
-		const one =
-			"CREATE TABLE ev (id int, at date) PARTITION BY RANGE (at);\nCREATE TABLE ev_def PARTITION OF ev DEFAULT;\n"
+	const one =
+		"CREATE TABLE ev (id int, at date) PARTITION BY RANGE (at);\nCREATE TABLE ev_2026 PARTITION OF ev FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');\n"
+
+	it("runs a CONCURRENTLY detach in its txmode none file as written, and passes it", async () => {
 		const { out, refused } = await checked(
 			one,
-			"-- atlas:txmode none\n\nALTER TABLE ev DETACH PARTITION ev_def CONCURRENTLY;\n",
+			"-- atlas:txmode none\n\nALTER TABLE ev DETACH PARTITION ev_2026 CONCURRENTLY;\n",
 		)
 		expect(refused).toBeUndefined()
 		expect(out.join("\n")).not.toContain("Check left")
 	})
+
+	/* P1 of r20: 0.18's replay cut the keyword to fit its one transaction, and passed what apply refuses */
+	it("refuses a CONCURRENTLY detach Postgres refuses, as apply would", async () => {
+		const { refused } = await checked(
+			`${one}CREATE TABLE ev_def PARTITION OF ev DEFAULT;\n`,
+			"-- atlas:txmode none\n\nALTER TABLE ev DETACH PARTITION ev_2026 CONCURRENTLY;\n",
+		)
+		expect(refused).toContain("cannot detach partitions concurrently when a default partition exists")
+	})
+})
+
+/** The `i`th file's name, in order */
+const nameOf = (i: number) => `20260101${String(i).padStart(6, "0")}_f${i}.sql`
+
+/** Every file of `history` then `pending`, named in order and hashed; the history's files approved */
+function writeAll(history: readonly string[], pending: string): void {
+	history.forEach((sql, i) => writeFileSync(join(dir, nameOf(i)), `-- comb:allow-unsafe: the test's history\n${sql}`))
+	writeFileSync(join(dir, nameOf(history.length)), pending)
+	hashDir(run, dir)
+}
+
+/** A check of every file in the directory against an empty target on `devUrl`: why it refused, or undefined */
+async function checkAll(dev: string): Promise<string | undefined> {
+	return withScratchDb(async (url) => {
+		try {
+			await applyWithAtlas({ ...options({ devUrl: dev, url }, []), checkOnly: true })
+			return undefined
+		} catch (error) {
+			return (error as Error).message
+		}
+	})
+}
+
+/** The `f`th file of a history of 150 tables a file */
+const tablesOf = (f: number) =>
+	Array.from({ length: 150 }, (_, t) => `CREATE TABLE t${f}_${t} (id bigint PRIMARY KEY, body text);`).join("\n")
+
+/* P1 of r20: Atlas applies each file in its own transaction, so check's replay does too, in a database of its own */
+describe("check replays file by file, as Atlas applies", () => {
+	it("passes a history whose relations outgrow one transaction's lock table", async () => {
+		writeAll(
+			Array.from({ length: 40 }, (_, f) => tablesOf(f)),
+			"CREATE TABLE after_all (id int PRIMARY KEY);\n",
+		)
+		expect(await checkAll(devUrl())).toBeUndefined()
+	}, 300_000)
+
+	it("passes a change to a table whose seed rows left deferred trigger events in an earlier file", async () => {
+		writeAll(
+			[
+				"CREATE TABLE kind (id int PRIMARY KEY, name text);\nCREATE TABLE item (id int PRIMARY KEY, kind_id int REFERENCES kind (id) DEFERRABLE INITIALLY DEFERRED);\nINSERT INTO kind VALUES (1, 'a');\nINSERT INTO item VALUES (1, 1);\n",
+			],
+			"ALTER TABLE item ADD COLUMN note text;\n",
+		)
+		expect(await checkAll(devUrl())).toBeUndefined()
+	}, 60_000)
+})
+
+/* P2 of r20: what devUrl's own database holds never changes check's verdict */
+describe("check on a devUrl whose database holds objects of its own", () => {
+	it("refuses a view of a function only dev holds, as apply refuses it on the target", async () => {
+		const refused = await withScratchDb(async (dev) => {
+			await exec(dev, "CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'SELECT 1';")
+			writeAll(
+				["CREATE TABLE t (id int PRIMARY KEY);\n"],
+				"-- comb:allow-unsafe: the test's view\nCREATE VIEW v AS SELECT f() AS x;\n",
+			)
+			return checkAll(dev)
+		})
+		expect(refused).toMatch(/devUrl refused "CREATE VIEW v AS SELECT f\(\) AS x" .*function f\(\) does not exist/)
+	}, 60_000)
+
+	it("passes a history that makes a table dev already holds", async () => {
+		const refused = await withScratchDb(async (dev) => {
+			await exec(dev, "CREATE TABLE t (id int);")
+			writeAll(["CREATE TABLE t (id int PRIMARY KEY);\n"], "ALTER TABLE t ADD COLUMN v text;\n")
+			return checkAll(dev)
+		})
+		expect(refused).toBeUndefined()
+	}, 60_000)
 })

@@ -141,11 +141,12 @@ describe("a Postgres baseline whose dev database is reached as another role (rev
 		const role = "comb_r19_dev"
 		await withScratchDb((dev) =>
 			withScratchDb(async (url) => {
-				/* the role logs in with the URL's own password: CI's server checks passwords, a trust server ignores it */
+				/* the role logs in with the URL's own password: CI's server checks passwords, a trust server ignores it;
+				   it makes the database the replay runs in (P1 of r20) */
 				const password = decodeURIComponent(new URL(dev).password).replaceAll("'", "''")
 				await exec(
 					dev,
-					`DO $$ BEGIN CREATE ROLE ${role} LOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$; ALTER ROLE ${role} PASSWORD '${password}'`,
+					`DO $$ BEGIN CREATE ROLE ${role} LOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$; ALTER ROLE ${role} CREATEDB PASSWORD '${password}'`,
 				)
 				const database = new URL(dev).pathname.slice(1)
 				await exec(dev, `GRANT ALL ON DATABASE "${database}" TO ${role}; GRANT ALL ON SCHEMA public TO ${role};`)
@@ -160,10 +161,21 @@ describe("a Postgres baseline whose dev database is reached as another role (rev
 })
 
 describe("a Postgres baseline of a history that holds an index built CONCURRENTLY", () => {
-	it("replays it in the one transaction as the index it makes", async () => {
+	it("replays it as written in its txmode none file, as the index it makes", async () => {
 		const files = [
 			"CREATE TABLE t (id int PRIMARY KEY, a int);\nCREATE VIEW v AS SELECT a FROM t;\n",
 			"-- atlas:txmode none\n\nCREATE INDEX CONCURRENTLY t_a ON t (a);\n",
+		]
+		expect(await built(files)).toBeUndefined()
+	})
+})
+
+/* P1 of r20: baseline replays each file in its own transaction, as Atlas applied them to the target */
+describe("a Postgres baseline of a history whose seed rows leave deferred trigger events", () => {
+	it("baselines the database those files built", async () => {
+		const files = [
+			"CREATE TABLE kind (id int PRIMARY KEY, name text);\nCREATE TABLE item (id int PRIMARY KEY, kind_id int REFERENCES kind (id) DEFERRABLE INITIALLY DEFERRED);\nINSERT INTO kind VALUES (1, 'a');\nINSERT INTO item VALUES (1, 1);\n",
+			"ALTER TABLE item ADD COLUMN note text;\n",
 		]
 		expect(await built(files)).toBeUndefined()
 	})

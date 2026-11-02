@@ -143,52 +143,34 @@ export type LiveRead = (target: LiveTarget) => Promise<LiveObjects>;
 import { type PgTarget } from "./atlas-target.ts";
 import { type Connect } from "./pg-live-objects.ts";
 import type { LiveObjects } from "./pg-live-types.ts";
+import { type Sql } from "./pg-replay-database.ts";
 /** A history file as baseline reads it */
 type HistoryFile = {
     name: string;
     sql: string;
 };
-/**
- * `sql` without its one CONCURRENTLY keyword: the code tokens are read by comb's scanner, so the word
- * in a string, a comment or a quoted identifier is never touched, and the reparse proves only the flag changed
- */
-declare function cutConcurrently(sql: string, tree: unknown): string;
-/** What the replay does with one statement: sends it (as written, or cut), skips it, or cannot hold it, and why */
-type Step = {
-    send: string;
-} | {
-    skip: true;
-} | {
-    cannot: "cut" | "transaction" | (string & {});
-};
-/** Each history statement in `files`, in order, with the file it is from and what the replay does with it */
-declare const stepsOf: (files: readonly HistoryFile[]) => Array<{
-    file: string;
-    sent: string;
-    step: Step;
-}>;
-/** The statements baseline's replay sends for `files`, in order, each with the file it is from; throws for one it cannot hold */
-declare function replayStatements(files: readonly HistoryFile[]): Array<{
-    file: string;
-    sql: string;
-}>;
-/**
- * `statements` run on `target`'s dev database in one transaction that is rolled back, the schema
- * made and searched first; then `after` on the same connection, inside it. A statement dev refuses
- * is named, with dev's error, as what was `doing`, and then what that `stops`
- */
-declare function onDev<T>(target: PgTarget, statements: ReadonlyArray<{
-    file: string;
-    sql: string;
-}>, { after, doing, load, stops, }: {
-    after: (sql: ReturnType<Connect>) => Promise<T>;
+/** How the replay words what it does, and where it says what it left out */
+type Replay = {
+    /** what the replay was doing, as a refusal names it */
     doing: string;
-    load: () => Promise<Connect>;
+    /** a statement left out, from `file`, and what it is */
+    leftOut(file: string, sent: string, what: string): void;
+    /** what a refusal stops */
     stops: string;
+};
+/**
+ * `files` replayed on `target`'s dev server in a database of their own, the schema made and searched
+ * first; then `after` on its connection. A statement dev refuses is named, with dev's error, as what
+ * was `doing`, and then what that `stops`
+ */
+declare function onDev<T>(target: PgTarget, files: readonly HistoryFile[], { after, load, ...replay }: Omit<Replay, "leftOut"> & {
+    after: (sql: Sql) => Promise<T>;
+    leftOut?: Replay["leftOut"] | undefined;
+    load: () => Promise<Connect>;
 }): Promise<T>;
 /**
- * The catalog the history `files` leave in `target`'s schema, replayed on its dev database in one
- * transaction that is rolled back, read by the target's own query (readCatalog). The role the replay
+ * The catalog the history `files` leave in `target`'s schema, replayed on its dev server as Atlas
+ * applied them (onDev), read by the target's own query (readCatalog). The role the replay
  * ran as stands for the target's role wherever the read names it (`targetUser`), as CURRENT_USER
  * names the role each database was built as
  */
@@ -196,7 +178,7 @@ declare function replayCatalog(target: PgTarget, { files, targetUser }: {
     files: readonly HistoryFile[];
     targetUser: string;
 }, load?: () => Promise<Connect>): Promise<LiveObjects>;
-export { cutConcurrently, type HistoryFile, onDev, replayCatalog, replayStatements, stepsOf };
+export { type HistoryFile, onDev, replayCatalog };
 
 // migrate/core/atlas-target.d.ts
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
@@ -297,6 +279,39 @@ declare function liveDrift(history: LiveObjects, live: LiveObjects): {
     only: string[];
 };
 export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, readCatalog, readLiveObjects };
+
+// migrate/core/pg-replay-database.d.ts
+import type { Connect } from "./pg-live-objects.ts";
+type Sql = ReturnType<Connect>;
+declare const STALE_MS: number;
+/**
+ * Drop `role`, unless something still depends on it or it is not this role's to drop: a later sweep
+ * takes it. Two sessions dropping one role race in Postgres's catalog, and the loser fails without
+ * a SQLSTATE of its own (XX000, "could not find tuple for role"), so a role gone after any failure
+ * is dropped
+ */
+declare function dropRole(admin: Sql, role: string): Promise<void>;
+/** Drop the replay databases this role made and the tagged roles a killed run left, each over an hour old at `now` */
+declare function sweep(admin: Sql, now: number): Promise<void>;
+/** A new replay database on `admin`'s server, named for `started`; a role without CREATEDB is `refused` */
+declare function makeDatabase(admin: Sql, started: number, refused: () => Error): Promise<string>;
+/** Every extension `from` holds made in `to`, in its schema at its version; one `to` cannot make is `refused` */
+declare function copyExtensions(from: Sql, to: Sql, refused: (name: string, error: unknown) => Error): Promise<void>;
+/**
+ * A history's CREATE ROLE `sent` of `role`, run in the replay's `database`: an existing role is used
+ * and held, any other made by `sent` and tagged; whether the role is a replay's, which the replay
+ * then drops, so whichever of two replays using one role ends last drops it. Within a file's
+ * transaction each try is a savepoint, so a role another replay made or dropped since the read is
+ * read again
+ */
+declare function createRole(sql: Sql, { database, inFile, role, sent, started, }: {
+    database: string;
+    inFile: boolean;
+    role: string;
+    sent: string;
+    started: number;
+}): Promise<boolean>;
+export { copyExtensions, createRole, dropRole, makeDatabase, STALE_MS, sweep, type Sql };
 
 // migrate/core/pg-live-catalog.d.ts
 export declare const CATALOG: string;

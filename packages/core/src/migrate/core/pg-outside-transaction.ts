@@ -9,6 +9,12 @@
  * `connect` or `create_slot` is false), DROP SUBSCRIPTION (whose slot comb cannot see), and ALTER
  * SUBSCRIPTION's REFRESH and a publication change that refreshes (its default). A plain CLUSTER, a
  * REINDEX of one table or index, a detach's FINALIZE and the rest run in one.
+ *
+ * Beside it, the statements whose scope is the server or another database (P1 of r20, amended):
+ * the dev replay runs each history file as Atlas applies it, committed, in a database of its own,
+ * so a statement that reaches past that database would change devUrl's server for good, the
+ * target's own when they share one. A structure test holds every statement node type of the parser
+ * to this table or to the ones ruled database-scoped.
  */
 type Node = Record<string, unknown>
 
@@ -112,4 +118,69 @@ function outsideOnly(type: string, node: Node): string | undefined {
 	return OUTSIDE[type]?.(node)
 }
 
-export { commandsOf, concurrent, nodeOf, outsideOnly }
+// lookup-table: the shared objects a statement names by its object type, which every database of the server sees
+const SHARED: Readonly<Record<string, string>> = {
+	OBJECT_DATABASE: "a database",
+	OBJECT_PARAMETER_ACL: "a server parameter",
+	OBJECT_ROLE: "a role",
+	OBJECT_TABLESPACE: "a tablespace",
+}
+
+/** What a statement that names a shared object by `field` is, `what` it does to it; undefined for any other object */
+const onShared =
+	(what: string, field: string) =>
+	(node: Node): string | undefined => {
+		const object = SHARED[String(node[field])]
+		return object === undefined ? undefined : `${what} ${object}`
+	}
+
+// lookup-table: the TRANSACTION kinds that make or end a prepared transaction, which outlives the session
+const PREPARED: Readonly<Record<string, string>> = {
+	TRANS_STMT_COMMIT_PREPARED: "COMMIT PREPARED",
+	TRANS_STMT_PREPARE: "PREPARE TRANSACTION",
+	TRANS_STMT_ROLLBACK_PREPARED: "ROLLBACK PREPARED",
+}
+
+// lookup-table: each statement whose scope is the server or another database, by node type, with what it is when it is
+const BEYOND: Readonly<Record<string, (node: Node) => string | undefined>> = {
+	AlterDatabaseRefreshCollStmt: () => "ALTER DATABASE",
+	AlterDatabaseSetStmt: () => "ALTER DATABASE",
+	AlterDatabaseStmt: () => "ALTER DATABASE",
+	AlterOwnerStmt: /* @__PURE__ */ onShared("ALTER OWNER of", "objectType"),
+	AlterRoleSetStmt: () => "ALTER ROLE",
+	AlterRoleStmt: () => "ALTER ROLE",
+	AlterSubscriptionStmt: () => "ALTER SUBSCRIPTION",
+	AlterSystemStmt: () => "ALTER SYSTEM",
+	AlterTableSpaceOptionsStmt: () => "ALTER TABLESPACE",
+	CheckPointStmt: () => "CHECKPOINT",
+	CommentStmt: /* @__PURE__ */ onShared("COMMENT on", "objtype"),
+	/* the server's own files and programs */
+	CopyStmt: (node) =>
+		node["filename"] !== undefined && (node["is_program"] === true || node["is_from"] !== true)
+			? "COPY with a server file or program"
+			: undefined,
+	CreateSubscriptionStmt: () => "CREATE SUBSCRIPTION",
+	CreateTableSpaceStmt: () => "CREATE TABLESPACE",
+	CreatedbStmt: () => "CREATE DATABASE",
+	/* each also revokes what the role holds on the server's databases and tablespaces */
+	DropOwnedStmt: () => "DROP OWNED",
+	DropRoleStmt: () => "DROP ROLE",
+	DropSubscriptionStmt: () => "DROP SUBSCRIPTION",
+	DropTableSpaceStmt: () => "DROP TABLESPACE",
+	DropdbStmt: () => "DROP DATABASE",
+	GrantRoleStmt: () => "GRANT or REVOKE of a role",
+	GrantStmt: /* @__PURE__ */ onShared("GRANT or REVOKE on", "objtype"),
+	ReassignOwnedStmt: () => "REASSIGN OWNED",
+	ReindexStmt: (node) =>
+		node["kind"] === "REINDEX_OBJECT_DATABASE" || node["kind"] === "REINDEX_OBJECT_SYSTEM"
+			? (WIDE_REINDEX[String(node["kind"])] as string)
+			: undefined,
+	RenameStmt: /* @__PURE__ */ onShared("RENAME of", "renameType"),
+	SecLabelStmt: /* @__PURE__ */ onShared("SECURITY LABEL on", "objtype"),
+	TransactionStmt: (node) => PREPARED[String(node["kind"])],
+}
+
+/** What a statement is, by its parse tree's node `type`, when its scope is the server or another database; undefined when it is its database's */
+const beyondDatabase = (type: string, node: Node): string | undefined => BEYOND[type]?.(node)
+
+export { BEYOND, beyondDatabase, nodeOf, outsideOnly }

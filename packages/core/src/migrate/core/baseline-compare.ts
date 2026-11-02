@@ -22,7 +22,8 @@ import type { ReadyDev } from "./pg-dev-schema.ts"
 import type { LiveObjects, LiveRead } from "./pg-live-types.ts"
 import { extensionReplay, viewReplay } from "./pg-atlas-replay.ts"
 import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
-import { atlasDirectives, atlasFile, pgStatements } from "./pg-split.ts"
+import { beyondDatabase, nodeOf } from "./pg-outside-transaction.ts"
+import { atlasDirectives, atlasFile, pgRead } from "./pg-split.ts"
 import type { Run } from "./process.ts"
 import { codeOf } from "./sql-code.ts"
 import { normalizeSql } from "./sql-scan.ts"
@@ -152,7 +153,8 @@ async function sqliteDrift(conn: Connection, dir: string, exec: Run): Promise<st
 
 /**
  * The snapshot's history as Atlas can replay it on the dev database: without the objects comb
- * owns but its sequences, which a table's default may use and Atlas never inspects
+ * owns but its sequences, which a table's default may use and Atlas never inspects, and without a
+ * statement whose scope is the server or another database
  */
 function replayableHistory(exec: Run, copy: string): string {
 	const plain = mkdtempSync(join(tmpdir(), "comb-baseline-history-"))
@@ -162,7 +164,9 @@ function replayableHistory(exec: Run, copy: string): string {
 		/* the statements Postgres runs, written back so Atlas sends each alone (M75) */
 		const kept = new Set(separatePgObjects(sql, state, name).plain)
 		/* a view and an extension replay in place, inside DO blocks, so what depends on them replays too (P4 of r19) */
-		const replayed = pgStatements(sql).flatMap((stmt) => {
+		const replayed = pgRead(sql).statements.flatMap(({ text: stmt, tree }) => {
+			/* Atlas commits what it replays on devUrl's server: nothing past the database it replays in (P1 of r20) */
+			if (tree !== undefined && beyondDatabase(...nodeOf(tree)) !== undefined) return []
 			const code = codeOf(stmt, "postgres")
 			if (kept.has(stmt) || /^(?:CREATE|ALTER|DROP) SEQUENCE\b/i.test(code)) return [stmt]
 			const block = viewReplay(stmt, code) ?? extensionReplay(stmt, code)
@@ -239,7 +243,7 @@ async function historyCatalog(
 		return (options.readReplay ?? replayCatalog)(options.target, { files, targetUser: user })
 	if (makesCompared(files)) {
 		throw new ReplayFailed(
-			`baseline compares the database's ${COMPARED} with the history replayed on devUrl, which comb reads itself, and ${options.target.devUrl} is Atlas's own container, which comb cannot reach: set devUrl to a postgres:// scratch database comb can connect to (it replays the history there in one transaction and rolls it back)`,
+			`baseline compares the database's ${COMPARED} with the history replayed on devUrl, which comb reads itself, and ${options.target.devUrl} is Atlas's own container, which comb cannot reach: set devUrl to a postgres:// scratch database comb can connect to (it replays the history there file by file, in a database of its own)`,
 		)
 	}
 	return { ...emptyCatalog(), user }

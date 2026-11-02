@@ -1,11 +1,11 @@
 /**
  * Check lets Postgres decide what no database runs (P13 of r19). On a postgres:// devUrl it replays
- * the history and the pending files there in one transaction it rolls back, baseline's own replay
+ * the history and the pending files on its server as Atlas applies them, baseline's own replay
  * (pg-replay.ts), and a statement Postgres refuses stops check with Postgres's message: a retype of
  * a column a view, a materialized view, a rule, a policy, a trigger's WHEN, a generated column or a
  * BEGIN ATOMIC function reads, and whatever else Postgres refuses on an empty database, which no
- * rating of the statement's text can list. Each statement a transaction cannot hold, which apply runs
- * in a `-- atlas:txmode none` file, is left out, and check names it. A docker:// devUrl is Atlas's
+ * rating of the statement's text can list. Each statement whose scope is the server or another
+ * database is left out, and check names it. A docker:// devUrl is Atlas's
  * own container, which comb cannot reach, and without the `postgres` package comb cannot connect:
  * then check says the replay did not run, and rates the files alone.
  */
@@ -14,7 +14,7 @@ import { join } from "node:path"
 import { sqlFiles } from "./atlas-dir.ts"
 import type { PgTarget } from "./atlas-target.ts"
 import { type Connect, loadPostgres } from "./pg-live-objects.ts"
-import { type HistoryFile, onDev, stepsOf } from "./pg-replay.ts"
+import { type HistoryFile, onDev } from "./pg-replay.ts"
 
 /* why comb loads postgres.js here */
 const REPLAYS = "check replays the history and the pending files on devUrl through the `postgres` package"
@@ -22,15 +22,9 @@ const REPLAYS = "check replays the history and the pending files on devUrl throu
 /* the line check prints when it replays nothing, and why */
 const NOT_REPLAYED = "Check did not replay the pending files on devUrl"
 
-// lookup-table: why the replay leaves out a statement it cannot hold
-const LEFT_OUT: Readonly<Record<string, string>> = {
-	cut: "comb could not cut its CONCURRENTLY, which a transaction refuses",
-	transaction: "the replay is one transaction of its own, which the file's transaction control would end",
-}
-
 /**
- * The history and the pending `files`, in order, replayed on `target`'s dev database in one
- * transaction rolled back; throws, naming the statement and dev's error, for one dev refuses
+ * The history and the pending `files`, in order, replayed on `target`'s dev server as Atlas applies
+ * them; throws, naming the statement and dev's error, for one dev refuses
  */
 async function replayPending(
 	{ print, target }: { print(line: string): void; target: PgTarget },
@@ -51,17 +45,13 @@ async function replayPending(
 		print(`${NOT_REPLAYED}: ${(error as Error).message}`)
 		return
 	}
-	const statements = stepsOf(files).flatMap(({ file, sent, step }) => {
-		if ("send" in step) return [{ file, sql: step.send }]
-		if ("cannot" in step) {
-			const why = LEFT_OUT[step.cannot] ?? `${step.cannot} runs only outside a transaction`
-			print(`Check left ${JSON.stringify(sent)} in ${file} out of its replay on devUrl: ${why}`)
-		}
-		return []
-	})
-	await onDev(target, statements, {
+	await onDev(target, files, {
 		after: async () => undefined,
 		doing: "check replayed the history and the pending files there",
+		leftOut: (file, sent, what) =>
+			print(
+				`Check left ${JSON.stringify(sent)} in ${file} out of its replay on devUrl: ${what} reaches past the database the replay runs in, so apply alone runs it`,
+			),
 		load: async () => connect,
 		stops: "check applies nothing",
 	})
