@@ -61,7 +61,7 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
  */
 function jsonChecks(limit: number | null): string {
 	if (limit === null) return JSON_NUL_CHECK
-	return `.superRefine((val, ctx) => { if (val && new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val)).length > ${limit}) ctx.addIssue({ code: "custom", message: "JSON exceeds ${limit} bytes when serialized" }); if (/\\\\u(?:0000|d[89a-f])/i.test(globalThis.JSON.stringify(val ?? null).replace(/\\\\\\\\/g, ""))) ctx.addIssue({ code: "custom", message: "Must not contain U+0000 or an unpaired surrogate" }) })`
+	return `.superRefine((val, ctx) => { if (new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val ?? null)).length > ${limit}) ctx.addIssue({ code: "custom", message: "JSON exceeds ${limit} bytes when serialized" }); if (/\\\\u(?:0000|d[89a-f])/i.test(globalThis.JSON.stringify(val ?? null).replace(/\\\\\\\\/g, ""))) ctx.addIssue({ code: "custom", message: "Must not contain U+0000 or an unpaired surrogate" }) })`
 }
 
 /* a composite key's column is required as a single key is (F7) */

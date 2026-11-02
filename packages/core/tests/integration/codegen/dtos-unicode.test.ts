@@ -203,3 +203,24 @@ export const one = sqliteTable("one", { id: c.id("one"), title: c.text("title"),
 		},
 	)
 })
+
+/* C11 of r19: the published x-comb-maxBytes holds every value, a falsy one's JSON being as long as it is */
+describe("a c.json maxBytes", () => {
+	it.each([
+		["sqlite", "sqliteTable"],
+		["postgres", "pgTable"],
+	] as const)("measures every value on %s, as the limit it publishes says", async (dialect, table) => {
+		const dtos = await generatedDtos(
+			`c11-${dialect}`,
+			`import * as z from "zod"
+export const anyValue = z.union([z.boolean(), z.number(), z.string(), z.null()])
+export const one = ${table}("one", { id: c.id("one"), v: c.json("v", anyValue, { maxBytes: 3 }).notNull() })`,
+			{ dialect },
+		)
+		const v = dtos["one"]?.["oneDtoCreateSchema"]?.shape["v"] as z.ZodType
+		for (const fits of [0, "", "a", 123]) expect(v.safeParse(fits).success).toBe(true)
+		for (const past of [false, true, null, 1234, "ab"]) {
+			expect(v.safeParse(past).error?.issues[0]?.message).toBe("JSON exceeds 3 bytes when serialized")
+		}
+	})
+})

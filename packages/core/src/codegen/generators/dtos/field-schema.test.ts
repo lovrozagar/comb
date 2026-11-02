@@ -153,7 +153,7 @@ describe("generateFieldSchema: JSON", () => {
 				"create",
 				{ imports: imports() },
 			),
-		).toContain("new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val)).length > 100")
+		).toContain("new globalThis.TextEncoder().encode(globalThis.JSON.stringify(val ?? null)).length > 100")
 		expect(() => schema("p", 'c.json("p")', "read")).toThrow(
 			"fixture.p: no module of the project exports the schema its c.json is given",
 		)
