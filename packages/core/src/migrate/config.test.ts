@@ -1,3 +1,4 @@
+import * as z from "zod"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -21,7 +22,7 @@ describe("migrate/config: defineConfig", () => {
 		expect(defineConfig(input)).toBe(input)
 	})
 
-	it("parses valid config with environments", () => {
+	it("parses valid config with environments", async () => {
 		const input: CombMigrateConfig = {
 			databases: {
 				core: {
@@ -37,12 +38,12 @@ describe("migrate/config: defineConfig", () => {
 				},
 			},
 		}
-		const config = parseConfig(input)
+		const config = await parseConfig(input)
 		expect(config.databases.core).toBeDefined()
 		expect(config.databases.core.environments).toBeDefined()
 	})
 
-	it("parses config with legacy name+provider format", () => {
+	it("parses config with legacy name+provider format", async () => {
 		const input: CombMigrateConfig = {
 			databases: {
 				core: {
@@ -55,15 +56,15 @@ describe("migrate/config: defineConfig", () => {
 				},
 			},
 		}
-		const config = parseConfig(input)
+		const config = await parseConfig(input)
 		expect(config.databases.core).toBeDefined()
 		expect(config.databases.core.name).toBe("mydb")
 	})
 })
 
 describe("migrate/config: resolveDatabaseConfig", () => {
-	it("resolves environment-specific config", () => {
-		const config = parseConfig({
+	it("resolves environment-specific config", async () => {
+		const config = await parseConfig({
 			databases: {
 				core: {
 					environments: {
@@ -84,8 +85,8 @@ describe("migrate/config: resolveDatabaseConfig", () => {
 		expect(resolved.provider.type).toBe("d1")
 	})
 
-	it("falls back to database-level provider when env has none", () => {
-		const config = parseConfig({
+	it("falls back to database-level provider when env has none", async () => {
+		const config = await parseConfig({
 			databases: {
 				core: {
 					environments: {
@@ -104,8 +105,8 @@ describe("migrate/config: resolveDatabaseConfig", () => {
 })
 
 describe("migrate/config: resolveDatabaseConfig refusals", () => {
-	it("throws when env required but not provided", () => {
-		const config = parseConfig({
+	it("throws when env required but not provided", async () => {
+		const config = await parseConfig({
 			databases: {
 				core: {
 					environments: {
@@ -120,8 +121,8 @@ describe("migrate/config: resolveDatabaseConfig refusals", () => {
 		expect(() => resolveDatabaseConfig(config.databases.core)).toThrow("--env")
 	})
 
-	it("throws for unknown environment", () => {
-		const config = parseConfig({
+	it("throws for unknown environment", async () => {
+		const config = await parseConfig({
 			databases: {
 				core: {
 					environments: {
@@ -144,18 +145,21 @@ describe("migrate/config: resolveDatabaseConfig refusals", () => {
 		)
 	})
 
-	it.each(["constructor", "toString", "__proto__"])("finds no environment named %s through the prototype", (env) => {
-		const config = parseConfig({
-			databases: {
-				core: {
-					environments: { local: { name: "local-db" } },
-					migrationsDir: "./m",
-					provider: { databaseName: "core", type: "d1" },
+	it.each(["constructor", "toString", "__proto__"])(
+		"finds no environment named %s through the prototype",
+		async (env) => {
+			const config = await parseConfig({
+				databases: {
+					core: {
+						environments: { local: { name: "local-db" } },
+						migrationsDir: "./m",
+						provider: { databaseName: "core", type: "d1" },
+					},
 				},
-			},
-		})
-		expect(() => resolveDatabaseConfig(config.databases.core, env)).toThrow(`Environment "${env}" not found`)
-	})
+			})
+			expect(() => resolveDatabaseConfig(config.databases.core, env)).toThrow(`Environment "${env}" not found`)
+		},
+	)
 })
 
 const PROVIDERS = [
@@ -177,8 +181,8 @@ describe("a turso provider without a group", () => {
 		},
 	})
 
-	it("compiles through defineConfig, and loads with the default", () => {
-		expect(parseConfig(config).databases.core?.provider).toMatchObject({ group: "default" })
+	it("compiles through defineConfig, and loads with the default", async () => {
+		expect((await parseConfig(config)).databases.core?.provider).toMatchObject({ group: "default" })
 	})
 })
 
@@ -208,8 +212,8 @@ describe("resolveDatabaseConfig and createProvider — every provider", () => {
 const PG_URL = "postgres://app@db.example.com/app?sslmode=verify-full"
 
 describe("defineConfig and resolveDatabaseConfig — a Postgres provider", () => {
-	it("resolves a postgres provider with comb's defaults for what it leaves out", () => {
-		const config = parseConfig({
+	it("resolves a postgres provider with comb's defaults for what it leaves out", async () => {
+		const config = await parseConfig({
 			databases: { core: { migrationsDir: "m", name: "core", provider: { type: "postgres", url: PG_URL } } },
 		})
 		expect(resolveDatabaseConfig(config.databases["core"] as never).provider).toEqual({
@@ -222,7 +226,7 @@ describe("defineConfig and resolveDatabaseConfig — a Postgres provider", () =>
 		expect(DEFAULT_PG_DEV_URL).toBe("docker://postgres/17/dev")
 	})
 
-	it("keeps what each environment sets, and takes the database-level provider for the rest", () => {
+	it("keeps what each environment sets, and takes the database-level provider for the rest", async () => {
 		const provider = {
 			devUrl: "postgres://localhost/dev",
 			lockTimeout: "2s",
@@ -230,7 +234,7 @@ describe("defineConfig and resolveDatabaseConfig — a Postgres provider", () =>
 			type: "postgres",
 			url: PG_URL,
 		} as const
-		const config = parseConfig({
+		const config = await parseConfig({
 			databases: {
 				core: {
 					environments: {
@@ -252,17 +256,17 @@ describe("defineConfig and resolveDatabaseConfig — a Postgres provider", () =>
 })
 
 describe("defineConfig and createProvider — Postgres refusals and neighbors", () => {
-	it("refuses neon, which is a postgres URL, and a postgres provider without a url", () => {
+	it("refuses neon, which is a postgres URL, and a postgres provider without a url", async () => {
 		const neon = { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "neon", url: PG_URL } } } }
-		expect(() => parseConfig(neon as never)).toThrow(
+		await expect(parseConfig(neon as never)).rejects.toThrow(
 			"Neon and Supabase are postgres URLs: use the postgres provider type",
 		)
 		const bare = { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "postgres" } } } }
-		expect(() => parseConfig(bare as never)).toThrow()
+		await expect(parseConfig(bare as never)).rejects.toThrow()
 	})
 
-	it("holds a SQLite and a Postgres database side by side", () => {
-		const config = parseConfig({
+	it("holds a SQLite and a Postgres database side by side", async () => {
+		const config = await parseConfig({
 			databases: {
 				analytics: { migrationsDir: "pg", name: "analytics", provider: { type: "postgres", url: PG_URL } },
 				core: { migrationsDir: "m", name: "core", provider: { type: "libsql", url: "file:core.db" } },
@@ -286,18 +290,18 @@ describe("defineConfig and createProvider — Postgres refusals and neighbors", 
 })
 
 describe("parseConfig — the rest of the input", () => {
-	it("refuses a database of one target without its provider", () => {
-		expect(() => parseConfig({ databases: { core: { migrationsDir: "m", name: "core" } } })).toThrow(
+	it("refuses a database of one target without its provider", async () => {
+		await expect(parseConfig({ databases: { core: { migrationsDir: "m", name: "core" } } })).rejects.toThrow(
 			"a database without environments needs a provider",
 		)
 	})
 
 	/* C5 of the 0.14.1 review: nothing read either, so a config that sets one is refused, not silently run on one database */
-	it("refuses multiTenant and promotionOrder, which no command reads, by name", () => {
+	it("refuses multiTenant and promotionOrder, which no command reads, by name", async () => {
 		const tenants = { enabled: true, rootDatabase: "root", tenantQuery: "SELECT 1" }
-		expect(() => parseConfig({ databases: {}, multiTenant: tenants } as never)).toThrow("multiTenant")
+		await expect(parseConfig({ databases: {}, multiTenant: tenants } as never)).rejects.toThrow("multiTenant")
 		const promoted = { core: { migrationsDir: "m", promotionOrder: ["staging", "production"] } }
-		expect(() => parseConfig({ databases: promoted } as never)).toThrow("promotionOrder")
+		await expect(parseConfig({ databases: promoted } as never)).rejects.toThrow("promotionOrder")
 	})
 })
 
@@ -389,10 +393,20 @@ describe("loadConfig validates what the file exports, however it exports it (M12
 		}
 	})
 
+	it("passes on what a config function throws, which is no invalid config", async () => {
+		const dir = project()
+		try {
+			writeFileSync(join(dir, "a.config.ts"), 'export default () => { throw new RangeError("no secret here") }\n')
+			await expect(loadConfig("a.config.ts", dir)).rejects.toThrow(new RangeError("no secret here"))
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
 	it("takes a config defineConfig already made as it is", async () => {
 		const dir = project()
 		try {
-			const made = parseConfig({
+			const made = await parseConfig({
 				databases: { a: { migrationsDir: "m", name: "local", provider: { path: "db.sqlite", type: "bun-sqlite" } } },
 			})
 			writeFileSync(join(dir, "a.config.ts"), `export default ${JSON.stringify(made)}\n`)
@@ -408,11 +422,36 @@ const builtWith = (key: string) => ({
 	databases: { core: { [key]: "./m", name: "local", provider: { databaseName: "CORE", type: "d1" } } },
 })
 
+/* K8 of r19: a config module may export a function, sync or async, and parseConfig refused the form loadConfig takes */
+describe("parseConfig: every form a config module exports", () => {
+	const core = { migrationsDir: "./m", name: "core", provider: { path: "x.db", type: "bun-sqlite" } }
+	const valid = { databases: { core } }
+
+	it.each([
+		["an object", valid],
+		["a function", () => valid],
+		["an async function", async () => valid],
+	])("reads %s", async (_form, exported) => {
+		await expect(parseConfig(exported)).resolves.toMatchObject({ databases: { core: { migrationsDir: "./m" } } })
+	})
+
+	it("refuses what a function returns as it refuses an object, and passes on what it throws", async () => {
+		await expect(parseConfig(async () => ({ databases: { core: { name: "core" } } }))).rejects.toBeInstanceOf(
+			z.ZodError,
+		)
+		await expect(
+			parseConfig(() => {
+				throw new RangeError("no config here")
+			}),
+		).rejects.toThrow(new RangeError("no config here"))
+	})
+})
+
 /* r18 K6: a program that imports its own config module parses it with the one parse loadConfig runs */
 describe("parseConfig, from /migrate", () => {
 	it("is the entry's, and refuses an imported config that tsc's excess-property check never reached", async () => {
 		const migrate = await import("./index.ts")
-		expect(() => migrate.parseConfig(builtWith("migrationDir"))).toThrow("migrationDir")
-		expect(migrate.parseConfig(builtWith("migrationsDir")).databases["core"]?.migrationsDir).toBe("./m")
+		await expect(migrate.parseConfig(builtWith("migrationDir"))).rejects.toThrow("migrationDir")
+		expect((await migrate.parseConfig(builtWith("migrationsDir"))).databases["core"]?.migrationsDir).toBe("./m")
 	})
 })

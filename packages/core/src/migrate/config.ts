@@ -118,9 +118,14 @@ export function defineConfig(input: CombMigrateConfig): CombMigrateConfig {
 	return input
 }
 
-/** `input` held to the config schema: a typo, or a database of neither shape, throws a ZodError naming where */
-export function parseConfig(input: unknown): MigrationConfig {
-	return configInputSchema().parse(input)
+/**
+ * What a config module exports, held to the config schema: an object, or a function that returns one
+ * or a promise of one (K8 of r19). A typo, or a database of neither shape, rejects with a ZodError
+ * naming where
+ */
+export async function parseConfig(input: unknown): Promise<MigrationConfig> {
+	const exported: unknown = typeof input === "function" ? await (input as () => unknown)() : input
+	return configInputSchema().parse(exported)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -156,10 +161,7 @@ export async function loadConfig(configPath?: string, cwd: string = process.cwd(
 
 	try {
 		const module = (await import(resolvedPath)) as { default?: unknown }
-		const rawConfig = module.default ?? module
-		/* a function may return the config or a promise of it */
-		const exported: unknown = typeof rawConfig === "function" ? await (rawConfig as () => unknown)() : rawConfig
-		return { config: parseConfig(exported), configDir: dirname(resolvedPath) }
+		return { config: await parseConfig(module.default ?? module), configDir: dirname(resolvedPath) }
 	} catch (error) {
 		if (!(error instanceof z.ZodError)) throw error
 		throw new Error(`${resolvedPath} is not a valid migrate config:\n${z.prettifyError(error)}`, { cause: error })

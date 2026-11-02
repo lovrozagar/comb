@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { parseConfig } from "./config.ts"
 import { configInputSchema, DEFAULT_PG_DEV_URL } from "./config-schema.ts"
 
 /** A config whose one database is the D1 provider with `provider`'s fields */
 const d1 = (provider: Record<string, unknown>) => () =>
-	parseConfig({
+	configInputSchema().parse({
 		databases: {
 			core: { migrationsDir: "./m", name: "core", provider: { databaseName: "core", type: "d1", ...provider } },
 		},
@@ -75,7 +74,7 @@ const MISSPELLED: Array<[string, unknown, string]> = [
 /* M19 of the 0.12 round: a key the config does not know is a typo, refused at load, never dropped for its default */
 describe("migrate/config: an unknown key at any level", () => {
 	it.each(MISSPELLED)("refuses one on %s, by name", (_level, config, key) => {
-		expect(() => parseConfig(config as never)).toThrow(key)
+		expect(() => configInputSchema().parse(config as never)).toThrow(key)
 	})
 })
 
@@ -89,7 +88,7 @@ describe("migrateConfigSchema: connection strings empty at load", () => {
 		const config = {
 			databases: { core: { environments: { dev: { provider }, prod: { provider } }, migrationsDir: "m" } },
 		}
-		expect(() => parseConfig(config)).not.toThrow()
+		expect(() => configInputSchema().parse(config)).not.toThrow()
 	})
 })
 
@@ -135,7 +134,7 @@ describe("parseConfig: values refused at load", () => {
 			"lockTimeout 25d is longer than Postgres's lock_timeout takes",
 		],
 	])("refuses %j", (config, message) => {
-		expect(() => parseConfig(config)).toThrow(message)
+		expect(() => configInputSchema().parse(config)).toThrow(message)
 	})
 })
 
@@ -150,7 +149,7 @@ describe("parseConfig: the turso provider's databaseName", () => {
 				},
 			},
 		}
-		expect(() => parseConfig(config)).toThrow(
+		expect(() => configInputSchema().parse(config)).toThrow(
 			"the turso provider names its database by databaseName: move the Turso database's name there (0.16 read it from the environment's name)",
 		)
 	})
@@ -183,7 +182,7 @@ describe("parseConfig: a blank name or path, wherever the config states one", ()
 		["schema", coreWith({ provider: pgWith({ schema: "  " }) })],
 		["environments", coreWith({ environments: { "  ": { provider: { path: "x.db", type: "bun-sqlite" } } } })],
 	])("refuses a blank %s, naming it", (field, config) => {
-		expect(() => parseConfig(config)).toThrow(
+		expect(() => configInputSchema().parse(config)).toThrow(
 			new RegExp(`${field}.*blank|blank.*${field}|an environment needs a name`, "s"),
 		)
 	})

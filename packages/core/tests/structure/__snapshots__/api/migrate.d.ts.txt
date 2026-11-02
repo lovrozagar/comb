@@ -24,8 +24,12 @@ export declare function createProvider(config: ConnectionProviderConfig, deps?: 
 export declare function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string): ResolvedDatabaseConfig;
 /** `input`, typed: comb.migrate.config.ts's default export; loadConfig validates it, in one place (P11, K12 of the 0.15.0 review) */
 export declare function defineConfig(input: CombMigrateConfig): CombMigrateConfig;
-/** `input` held to the config schema: a typo, or a database of neither shape, throws a ZodError naming where */
-export declare function parseConfig(input: unknown): MigrationConfig;
+/**
+ * What a config module exports, held to the config schema: an object, or a function that returns one
+ * or a promise of one (K8 of r19). A typo, or a database of neither shape, rejects with a ZodError
+ * naming where
+ */
+export declare function parseConfig(input: unknown): Promise<MigrationConfig>;
 export type LoadedConfig = {
     config: MigrationConfig;
     configDir: string;
