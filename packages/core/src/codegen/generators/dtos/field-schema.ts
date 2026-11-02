@@ -53,7 +53,9 @@ const isJson = (field: FieldMeta): boolean => field.combKind === "json" || field
 function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const declared = field.combKind === "json"
 	if (!isJson(field)) return undefined
-	if (!isMutative(schemaType)) return plain(declared ? (field.jsonSchemaName as string) : "z.json()")
+	/* z.json() takes null itself, as a NOT NULL jsonb holds 'null'::jsonb, so a nullable one adds no second null (C6 of r20) */
+	if (!isMutative(schemaType))
+		return declared ? plain(field.jsonSchemaName as string) : { ...plain("z.json()"), takesNull: true }
 	const schema = declared ? field.jsonSchemaName : "jsonValueSchema"
 	const limit = annotations.maxBytes
 	const keys = { "x-comb-text": STORABLE_TEXT_RULE, ...(limit === null ? {} : { "x-comb-maxBytes": limit }) }

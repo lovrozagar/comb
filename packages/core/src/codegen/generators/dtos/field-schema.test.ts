@@ -216,7 +216,7 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 			'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: void 0, type: "null" })]).meta(_m.real)',
 		)
 		/* a plain drizzle column is typed from its data type: a JSON blob takes any JSON value */
-		expect(schema("x", 'blob("x")', "read")).toBe("z.json().nullable()")
+		expect(schema("x", 'blob("x")', "read")).toBe("z.json()")
 		/* written, it takes the refine in one union with null, as a c.json does, its rule as meta (F63, C5 of r19) */
 		expect(schema("x", 'blob("x")', "create")).toBe("z.union([jsonValueSchema, z.null()]).optional()")
 		expect(() => schema("x", 'blob("x", { mode: "buffer" })', "read")).toThrow(

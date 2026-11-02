@@ -1039,6 +1039,7 @@ What changes for a project on 0.18. Before deploying it:
    - The manifest is `v` 2: each column's `min` and `max` are the bounds the create DTO enforces, not the declared ones (a password's 8 to 72, a required text's 1, a format's floor, an id's 1 to 48, an integer's clamped to the column), `patterns` lists every regex it checks, the kind's own beside the declared one, in place of `pattern`, and `maxBytes` is a `c.json` column's byte limit. A reader of `v` 1 refuses it; read `patterns`, then regenerate committed manifests (meta-contract §8.2).
    - A Postgres read array of a bounded text, integer or real states its element's `x-comb-*` bounds on every level's `items`, where 0.18 left them inside the first `anyOf` member of each, as meta-contract §2.1 says. A reader of `items["x-comb-*"]` finds them; regenerate.
    - An entity file imports `jsonValueSchema`, `cidrSchema` or `timestampSchema` only where a field uses it. 0.18 imported one whenever a field's code contained the name, so a `c.json` schema exported as `jsonValueSchemaStrict`, `cidrSchemaDoc` or `timestampSchemaDoc` made the file fail a consumer's `noUnusedLocals`; regenerate.
+   - A nullable plain json or jsonb column's read publishes null once: `z.json()` holds null, and 0.18 added a second `{ type: "null" }` beside it. The type is unchanged; regenerate.
    - A password's declared `max` past 72, bcrypt's limit, fails codegen naming the column; 0.18 held the column to 72 whatever it declared. **Fix:** declare 72 or less, or drop the `max`.
 
 ## Upgrading to 0.18

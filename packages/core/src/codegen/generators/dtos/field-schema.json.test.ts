@@ -99,3 +99,22 @@ describe("a written nullable c.json array (C1)", () => {
 		expect([written.safeParse(null).success, written.safeParse([null]).success]).toEqual([false, true])
 	})
 })
+
+/** What a read of `raw`, a Postgres column, publishes */
+function plainRead(raw: string): Record<string, unknown> {
+	const field = fieldOf("p", raw, { dialect: "postgres" })
+	const code = generateFieldSchema(field, "read", {
+		dialect: "postgres",
+		imports: { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() },
+	}) as string
+	return published(new Function("z", `return ${code}`)(z) as z.ZodType).p
+}
+
+/* C6 of r20: z.json() takes null itself, so a nullable plain json read publishes no second null beside it */
+describe("a plain json column's read", () => {
+	it.each(["json", "jsonb"])("takes null once, nullable or not, on %s", (type) => {
+		const nullable = plainRead(`${type}("p")`)
+		expect(nullable).toEqual(plainRead(`${type}("p").notNull()`))
+		expect(JSON.stringify(nullable)).not.toContain('{"type":"null"}')
+	})
+})
