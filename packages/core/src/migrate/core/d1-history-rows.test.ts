@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { fakeD1, localD1 } from "../../cli/__fixtures__/d1.ts"
 import { createD1Provider } from "../drivers/d1.ts"
 import type { D1Target, ReadConfig } from "./d1-binding.ts"
-import { hashStatements, historyTable, readHistory, recordHashes } from "./d1-history-rows.ts"
+import { hashStatements, historyTable, intentStatements, readHistory } from "./d1-history-rows.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -33,24 +33,29 @@ async function target(): Promise<D1Target & { db: ReturnType<typeof fakeD1>["db"
 }
 
 describe("readHistory", () => {
-	it("reads a database with none of the history tables as nothing applied, recorded or copied", async () => {
+	it("reads a database with none of the history tables as nothing applied, recorded, intended or copied", async () => {
 		expect(readHistory(read, await target(), "d1_migrations")).toEqual({
 			applied: new Set(),
 			drizzle: undefined,
+			intents: undefined,
 			recorded: new Map(),
 		})
 	})
 
-	it("reads wrangler's names, comb's hashes and the pre-0.8 record, a quote in a name kept", async () => {
+	it("reads wrangler's names, comb's hashes and intents and the pre-0.8 record, a quote in a name kept", async () => {
 		const d1 = await target()
 		d1.db.exec(historyTable('my "history"'))
 		d1.db.exec(`INSERT INTO "my ""history""" (name) VALUES ('1_it''s.sql')`)
 		d1.db.exec("CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT, created_at INTEGER)")
 		d1.db.exec("INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('h0', 1)")
-		await recordHashes(d1.conn, [{ hash: "h1", name: "1_it's.sql" }])
+		await d1.conn.batch([
+			...hashStatements([{ hash: "h1", name: "1_it's.sql" }]),
+			...intentStatements([{ hash: "h2", name: "2_it's.sql" }]),
+		])
 		expect(readHistory(read, d1, 'my "history"')).toEqual({
 			applied: new Set(["1_it's.sql"]),
 			drizzle: new Set(["h0"]),
+			intents: new Map([["2_it's.sql", "h2"]]),
 			recorded: new Map([["1_it's.sql", "h1"]]),
 		})
 	})

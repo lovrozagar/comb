@@ -14,7 +14,7 @@ import { localD1Path } from "../../../src/migrate/core/d1-binding.ts"
 import { migrationHashes } from "../../../src/migrate/core/parse.ts"
 import { guardRebuilds } from "../../../src/migrate/core/rebuild-guard.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
-import { d1Column, d1Io, d1Project, wrangler, writeMigrations } from "../support/d1-project.ts"
+import { combProcess, d1Column, d1Io, d1Project, wrangler, writeMigrations } from "../support/d1-project.ts"
 
 const dirs: string[] = []
 afterEach(() => {
@@ -167,4 +167,57 @@ describe("comb migrate on D1 --local never runs a file that reaches outside its 
 		read.close()
 		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
 	}, 120_000)
+})
+
+/* S1 of r20: apply writes each pending file's hash as an intent before wrangler runs it, and only
+   wrangler's table naming the file makes it proof of what ran */
+describe("comb migrate on D1 --local: a pre-recorded hash is an intent until wrangler applies its file (S1)", () => {
+	const HISTORY = ["d1_migrations", "_comb_migration_hashes", "_comb_migration_hash_intents"]
+	const tables = (dir: string) =>
+		column(
+			dir,
+			`SELECT name FROM sqlite_master WHERE name IN (${HISTORY.map((name) => `'${name}'`).join(", ")}) ORDER BY name`,
+		)
+
+	it("a failed apply, the file fixed and applied by wrangler alone end in the warning --hashes clears", async () => {
+		const dir = project({ "20260101000000_bad.sql": "CREATE TABLE post (id TEXT);\nINSERT INTO missing VALUES (1);" })
+		expect(await runCli(["migrate", "apply", "core", "--local"], io(dir))).toBe(1)
+		/* wrangler ran nothing, so comb holds no hash for the file, only its emptied intent table */
+		expect(tables(dir)).toEqual(["_comb_migration_hash_intents", "d1_migrations"])
+		expect(column(dir, "SELECT name FROM _comb_migration_hash_intents")).toEqual([])
+		write(dir, { "20260101000000_bad.sql": "CREATE TABLE post (id TEXT);" })
+		expect(wrangler(dir)("wrangler", ["d1", "migrations", "apply", "core", "--local"], { input: "" }).code).toBe(0)
+		const status = io(dir)
+		expect(await runCli(["migrate", "status", "core", "--local"], status), status.errors.join("\n")).toBe(0)
+		expect([...status.outputs, ...status.errors]).toContain(
+			"No hash recorded for 20260101000000_bad.sql, applied before comb recorded them: comb cannot tell whether it was edited since",
+		)
+		const adopt = io(dir)
+		expect(await runCli(["migrate", "baseline", "core", "--local", "--hashes"], adopt), adopt.errors.join("\n")).toBe(0)
+		expect(adopt.outputs).toContain("Hash recorded: 20260101000000_bad.sql")
+		const clean = io(dir)
+		expect(await runCli(["migrate", "status", "core", "--local"], clean)).toBe(0)
+		expect(clean.outputs).toEqual(["Applied: 20260101000000_bad.sql", "Pending: none"])
+		expect(column(dir, "SELECT name FROM _comb_migration_hashes")).toEqual(["20260101000000_bad.sql"])
+	}, 180_000)
+
+	/* miniflare's local D1 takes one writer: of two applies at once, the one that loses fails on
+	   SQLITE_BUSY or on the table the other made, as wrangler reads what is pending before it writes */
+	it("of two applies at once, a loser fails as a refused run, and a rerun converges with no intent left", async () => {
+		const dir = project(INIT)
+		const both = await Promise.all([0, 1].map(() => combProcess(dir, ["migrate", "apply", "core", "--local"])))
+		expect(both.map((ran) => ran.code)).toContain(1)
+		for (const ran of both.filter((each) => each.code !== 0)) {
+			expect(ran.code).toBe(1)
+			expect(ran.stderr.trimStart()).toMatch(/^wrangler (?:d1 migrations apply )?failed/)
+		}
+		const rerun = io(dir)
+		expect(await runCli(["migrate", "apply", "core", "--local"], rerun), rerun.errors.join("\n")).toBe(0)
+		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_init.sql"])
+		expect(column(dir, "SELECT name FROM _comb_migration_hashes")).toEqual(["20260101000000_init.sql"])
+		expect(column(dir, "SELECT name FROM _comb_migration_hash_intents")).toEqual([])
+		const status = io(dir)
+		expect(await runCli(["migrate", "status", "core", "--local"], status)).toBe(0)
+		expect(status.outputs).toEqual(["Applied: 20260101000000_init.sql", "Pending: none"])
+	}, 180_000)
 })

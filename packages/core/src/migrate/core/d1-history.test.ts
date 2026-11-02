@@ -62,10 +62,10 @@ const executes = (run: { calls: string[][] }) =>
 
 /* R1: every wrangler call is a process of its own, so comb reads its history in one */
 describe("applyD1 and statusD1: wrangler calls", () => {
-	it("reads the history in one call, the schema in two, and the result and hashes in one each", async () => {
+	it("reads the history in one call, the schema in two, and writes the intents, reads the result and moves the hashes in one each", async () => {
 		const { apply, d1, read, run } = await target({})
 		expect(await apply()).toEqual(["1_init.sql"])
-		expect(executes(run)).toBe(5)
+		expect(executes(run)).toBe(6)
 		run.calls.length = 0
 		await statusD1(d1, read, () => undefined)
 		expect(executes(run)).toBe(2)
@@ -205,10 +205,11 @@ describe("applyD1 and statusD1 on an applied file renamed or deleted", () => {
 	})
 })
 
-/* M32 of the 0.13 review, and S3 of r19: every checked file's hash is recorded before wrangler runs, so one it
-   applied before it failed keeps its hash, and one it did not holds an inert row a rerun replaces */
+/* M32 of the 0.13 review, S3 of r19 and S1 of r20: every checked file's hash is recorded as an intent before
+   wrangler runs, so one it applied before it failed keeps its hash, and one it did not keeps none */
 describe("applyD1 when wrangler fails partway", () => {
-	it("records the hash of every checked file before wrangler applies any, then throws", async () => {
+	/* S1 of r20: the files wrangler did not run keep no hash, as one may be fixed before it does */
+	it("records the hash of every file wrangler applied, and of none it did not, then throws", async () => {
 		const { d1, read } = await target({})
 		writeFileSync(join(d1.migrationsDir, "2_u.sql"), "CREATE TABLE u (x TEXT UNIQUE);")
 		writeSum(d1.migrationsDir)
@@ -221,7 +222,8 @@ describe("applyD1 when wrangler fails partway", () => {
 			/wrangler d1 migrations apply failed/,
 		)
 		const hashes = await d1.conn.execute("SELECT name FROM _comb_migration_hashes ORDER BY name")
-		expect(hashes.rows.map((row) => row[0])).toEqual(["1_init.sql", "2_u.sql", "3_b.sql", "4_c.sql"])
+		expect(hashes.rows.map((row) => row[0])).toEqual(["1_init.sql", "2_u.sql", "3_b.sql"])
+		expect((await d1.conn.execute("SELECT name FROM _comb_migration_hash_intents")).rows).toEqual([])
 		const lines: string[] = []
 		await statusD1(d1, read, (line) => lines.push(line))
 		expect(lines.join("\n")).not.toContain("No hash recorded")
@@ -312,7 +314,7 @@ const hashed = async (d1: D1Target) =>
 	(await d1.conn.execute("SELECT name FROM _comb_migration_hashes ORDER BY name")).rows.map((row) => row[0])
 
 describe("applyD1 when wrangler stops short", () => {
-	it("names what wrangler applied and the rest when it records fewer files than comb checked, every hash recorded first", async () => {
+	it("names what wrangler applied and the rest when it records fewer files than comb checked, the hash of each it applied recorded", async () => {
 		const { d1, read, run } = await target({})
 		/* a wrangler that applies the first pending file only, and exits 0 */
 		const short: typeof d1.exec = (cmd, args, options) => {
@@ -331,7 +333,7 @@ describe("applyD1 when wrangler stops short", () => {
 			(e: Error) => e,
 		)
 		expect(error).toMatchObject({ applied: ["1_init.sql", "2_b.sql"], pending: ["3_c.sql"] })
-		expect(await hashed(d1)).toEqual(["1_init.sql", "2_b.sql", "3_c.sql"])
+		expect(await hashed(d1)).toEqual(["1_init.sql", "2_b.sql"])
 	})
 
 	it("reports what wrangler applied before it failed, and its error line without colours or banner", async () => {
@@ -354,7 +356,7 @@ describe("applyD1 when wrangler stops short", () => {
 		expect(error.message).toBe(
 			"wrangler d1 migrations apply failed: ✘ [ERROR] Migration 3_c.sql failed: no such table: nope",
 		)
-		expect(await hashed(d1)).toEqual(["1_init.sql", "2_b.sql", "3_c.sql"])
+		expect(await hashed(d1)).toEqual(["1_init.sql", "2_b.sql"])
 	})
 })
 

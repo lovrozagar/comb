@@ -1,5 +1,5 @@
 /** A worker project on a local D1 through the real wrangler, and the CLI run on it: the D1 migrate suites' harness */
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import fs from "node:fs"
 import { createRequire } from "node:module"
 import os from "node:os"
@@ -10,6 +10,8 @@ const WRANGLER = path.join(
 	path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json")),
 	"bin/wrangler.js",
 )
+
+const BIN = path.resolve(import.meta.dirname, "../../../src/bin.ts")
 
 /** A worker project whose wrangler.toml applies ./atlas-migrations, holding `migrations` and their atlas.sum */
 export function d1Project(migrations: Record<string, string>): string {
@@ -27,6 +29,20 @@ export function d1Project(migrations: Record<string, string>): string {
 export function writeMigrations(dir: string, migrations: Record<string, string>): void {
 	for (const [name, sql] of Object.entries(migrations)) fs.writeFileSync(path.join(dir, "atlas-migrations", name), sql)
 	spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
+}
+
+/** The CLI as a process of its own in the project, as a user runs it, with wrangler's bin directory on PATH */
+export function combProcess(dir: string, args: readonly string[]): Promise<{ code: number | null; stderr: string }> {
+	const bin = path.join(path.dirname(WRANGLER), "../../.bin")
+	const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env["PATH"] ?? ""}` }
+	return new Promise((done) => {
+		const child = spawn("bun", [BIN, ...args], { cwd: dir, env, stdio: ["ignore", "ignore", "pipe"] })
+		let stderr = ""
+		child.stderr.on("data", (chunk: Buffer) => {
+			stderr += chunk.toString()
+		})
+		child.on("close", (code) => done({ code, stderr }))
+	})
 }
 
 /** wrangler from node_modules, run in the project */

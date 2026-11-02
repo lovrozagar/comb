@@ -6,10 +6,15 @@
  * of the 0.15.0 review).
  */
 import type { Connection } from "../types.ts"
-import { D1_HASH_TABLE, D1_MIGRATIONS_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
+import { D1_HASH_INTENT_TABLE, D1_HASH_TABLE, D1_MIGRATIONS_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
 
 /** The history tables comb and wrangler keep, under their default names */
-const HISTORY_TABLES: readonly string[] = [DRIZZLE_HISTORY_TABLE, D1_MIGRATIONS_TABLE, D1_HASH_TABLE]
+const HISTORY_TABLES: readonly string[] = [
+	DRIZZLE_HISTORY_TABLE,
+	D1_MIGRATIONS_TABLE,
+	D1_HASH_TABLE,
+	D1_HASH_INTENT_TABLE,
+]
 
 /** `text` as a LIKE pattern that matches it alone, escaped with `\` */
 const literal = (text: string): string =>

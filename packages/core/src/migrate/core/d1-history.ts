@@ -14,16 +14,20 @@ import { absentDatabase } from "../drivers/absent.ts"
 import { executeAll } from "../drivers/d1.ts"
 import { assertLocalExists, type D1Target, localMissing, type ReadConfig, resolveBinding } from "./d1-binding.ts"
 import { d1Files, refuseSwallowing } from "./d1-files.ts"
-import { D1_HASH_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
+import { D1_HASH_INTENT_TABLE, D1_HASH_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
 import {
+	type Hashed,
 	hashStatements,
 	historyTable,
+	intentStatements,
 	literal,
+	moveIntents,
 	namesOf,
 	quoteName,
 	readHistory,
-	recordHashes,
 	type Rows,
+	settled,
+	settleStatements,
 } from "./d1-history-rows.ts"
 import { orphanMessage } from "./history-match.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
@@ -59,10 +63,18 @@ async function history(
 	read: ReadConfig,
 	target: D1Target,
 	{ status = false, writes }: { status?: boolean; writes: boolean },
-): Promise<{ applied: Set<string>; orphans: string; table: string; unhashed: string[] }> {
+): Promise<{
+	applied: Set<string>
+	hasIntents: boolean
+	orphans: string
+	settle: Hashed
+	table: string
+	unhashed: string[]
+}> {
 	const table = resolveBinding(read, target)
 	if (!writes) assertLocalExists(read, target)
-	const { applied, drizzle: hashes, recorded } = readHistory(read, target, table)
+	const rows = readHistory(read, target, table)
+	const { applied, drizzle: hashes, recorded } = rows
 	const files = d1Files(target.migrationsDir)
 	const copied = hashes === undefined ? [] : recordedByDrizzle(files, hashes, applied)
 	if (copied.length > 0) {
@@ -78,7 +90,9 @@ async function history(
 			`${edited.name} was applied, then edited: its hash is not the one comb recorded; restore the file, or put the change in a new one`,
 		)
 	}
-	const unhashed = files.filter(({ name }) => applied.has(name) && !recorded.has(name)).map(({ name }) => name)
+	const { hasIntents, settle } = settled(files, rows)
+	const hashed = new Set([...recorded.keys(), ...settle.map(({ name }) => name)])
+	const unhashed = files.filter(({ name }) => applied.has(name) && !hashed.has(name)).map(({ name }) => name)
 	const named = new Set(files.map(({ name }) => name))
 	const gone = [...applied].filter((name) => !named.has(name))
 	const orphans =
@@ -89,7 +103,7 @@ async function history(
 					target.migrationsDir,
 				)
 	if (orphans !== "" && !status) throw new Error(orphans)
-	return { applied, orphans, table, unhashed }
+	return { applied, hasIntents, orphans, settle, table, unhashed }
 }
 
 /** wrangler's own error lines from a failed run, its colours and banner left out; its whole output when it printed none */
@@ -132,7 +146,9 @@ type D1Apply = {
 
 /** Check the pending migrations and, unless only checking, apply them through wrangler; returns them */
 async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
-	const { applied, table } = await history(options.read, target, { writes: options.checkOnly !== true })
+	const { applied, hasIntents, settle, table } = await history(options.read, target, {
+		writes: options.checkOnly !== true,
+	})
 	const listed = d1Files(target.migrationsDir)
 	refuseSwallowing(listed.filter(({ name }) => !applied.has(name)))
 	const files = listed.map(({ name }) => name)
@@ -148,21 +164,28 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		dir: target.migrationsDir,
 		exec: target.exec,
 		files,
-		/* the binding's own history table, and comb's record of hashes */
-		historyTables: [table, D1_HASH_TABLE],
+		/* the binding's own history table, and comb's records of hashes and intents */
+		historyTables: [table, D1_HASH_TABLE, D1_HASH_INTENT_TABLE],
 		print: options.print,
 	})
 	const names = pending.map(({ name }) => name)
-	if (names.length === 0 || options.checkOnly === true) return names
-	/* the hashes go first (S3 of r19): a lost record then fails before wrangler applies anything */
-	await recordHashes(
-		target.conn,
-		pending.map(({ migration, name }) => ({ hash: migration.hash, name })),
-	)
+	if (options.checkOnly === true) return names
+	/* what a lost move left is recorded now (S1 of r20), and with nothing to apply, that is all */
+	if (names.length === 0) {
+		if (hasIntents) await target.conn.batch(settleStatements(settle, true))
+		return names
+	}
+	/* the intents go first (S3 of r19): a lost record then fails before wrangler applies anything */
+	const hashed = pending.map(({ migration, name }) => ({ hash: migration.hash, name }))
+	await target.conn.batch([...settleStatements(settle, hasIntents), ...intentStatements(hashed)])
 	for (const name of names) options.print(`Apply: ${name}`)
 	const ran = target.exec("wrangler", ["d1", "migrations", "apply", target.name, ...target.flags], { input: "" })
 	const after = appliedAfter(target, options.read, { names, ok: ran.code === 0, table })
 	const [applies, rest] = [names.filter((name) => after.has(name)), names.filter((name) => !after.has(name))]
+	const moved = await moveIntents(
+		target.conn,
+		hashed.filter(({ name }) => after.has(name)),
+	)
 	if (ran.code !== 0) throw new Refused(`wrangler d1 migrations apply failed: ${wranglerError(ran)}`, rest, applies)
 	const added = [...after].filter((name) => !applied.has(name))
 	if (added.length !== names.length || rest.length > 0) {
@@ -170,6 +193,13 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 			`wrangler recorded ${added.join(", ") || "nothing"} in ${table}, where comb checked ${names.join(", ")}; see the wrangler output above`,
 			rest,
 			applies,
+		)
+	}
+	if (moved !== undefined) {
+		throw new Refused(
+			`wrangler applied ${names.join(", ")}, then recording their hashes failed: ${moved}; comb migrate status reads them as recorded, and the next apply or baseline records them`,
+			[],
+			names,
 		)
 	}
 	return names
@@ -222,16 +252,14 @@ async function baselineD1(
  * Record the current hash of each applied file comb has none for, as applied before comb recorded
  * hashes (M1), and print each; returns them. The operator vouches that the files are what was
  * applied, having checked them against git; the history's own checks run first, so a pre-0.8
- * record to copy, an applied file edited since, or a name no file has refuses it.
+ * record to copy, an applied file edited since, or a name no file has refuses it. What a lost move
+ * left is recorded with them (S1 of r20).
  */
 async function adoptHashesD1(target: D1Target, read: ReadConfig, print: (line: string) => void): Promise<string[]> {
-	const { unhashed } = await history(read, target, { writes: true })
+	const { hasIntents, settle, unhashed } = await history(read, target, { writes: true })
 	const files = d1Files(target.migrationsDir).filter(({ name }) => unhashed.includes(name))
-	if (files.length > 0)
-		await recordHashes(
-			target.conn,
-			files.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), name })),
-		)
+	const hashed = [...settle, ...files.map(({ name, sql }) => ({ hash: generateMigrationHash(sql), name }))]
+	if (hashed.length > 0 || hasIntents) await target.conn.batch(settleStatements(hashed, hasIntents))
 	for (const { name } of files) print(`Hash recorded: ${name}`)
 	return unhashed
 }
