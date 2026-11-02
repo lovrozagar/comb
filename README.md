@@ -109,6 +109,8 @@ Comb ships TypeScript source, not a build. Your bundler or runtime compiles it.
 
 The consumer suite (`bun run test:consumers`) checks each supported row in CI: it installs the packed tarball, imports every subpath under Bun and `tsx`, builds with Vite and Wrangler, and compiles every subpath with `tsc` under strict flags in a `bundler` and a `nodenext` project.
 
+The runtime subpaths (all but `cli`, `codegen` and `migrate`) type-check at `lib` ES2022, the floor create-cloudflare's templates give; the tooling subpaths, which run under Bun or Node, need ES2023.
+
 Peer dependencies:
 
 | Package                     | Range               | Required                                                                   |

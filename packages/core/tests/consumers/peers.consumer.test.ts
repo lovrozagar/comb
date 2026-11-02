@@ -101,6 +101,7 @@ describe.each([
 			"tsconfig.declarations.json",
 			"tsconfig.nodenext.json",
 			"tsconfig.worker.json",
+			"tsconfig.worker-es2022.json",
 			"tsconfig.worker-node.json",
 			"tsconfig.worker-node-floor.json",
 		])("type-checks every subpath under strict flags (%s)", (config) => {

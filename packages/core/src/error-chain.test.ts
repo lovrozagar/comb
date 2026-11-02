@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { causeChain, errorTexts } from "./error-chain.ts"
+import { causeChain, errorTexts, innermostFirst } from "./error-chain.ts"
 
 /* K1 of r19: drizzle keeps SQLite's own words only on its DrizzleQueryError's cause */
 const wrapped = new Error("Failed query: SELECT 1", {
@@ -35,5 +35,13 @@ describe("errorTexts", () => {
 	it("gives a thrown string as itself, and skips a code that is no string", () => {
 		expect(errorTexts("no such function: editdist3")).toEqual(["no such function: editdist3"])
 		expect(errorTexts(Object.assign(new Error("m"), { code: 5 }))).toEqual(["m"])
+	})
+})
+
+describe("innermostFirst", () => {
+	it("gives the chain innermost first, as a copy", () => {
+		const chain = causeChain(wrapped)
+		expect(innermostFirst(chain)).toEqual([wrapped.cause, wrapped])
+		expect(chain).toEqual([wrapped, wrapped.cause])
 	})
 })

@@ -18,6 +18,17 @@ function causeChain(error: unknown): object[] {
 	return chain
 }
 
+/**
+ * `chain`, a cause chain or a mapping of one, innermost first: the deepest link is the driver's or
+ * the engine's own error. Built by a loop, not `toReversed`, as the runtime subpaths keep to lib
+ * ES2022 (K2 of r20)
+ */
+function innermostFirst<T>(chain: readonly T[]): T[] {
+	const reversed: T[] = []
+	for (const link of chain) reversed.unshift(link)
+	return reversed
+}
+
 /** The texts a classifier reads from `error`: each link's message and string code, outermost first; a thrown string as itself */
 function errorTexts(error: unknown): string[] {
 	if (typeof error === "string") return [error]
@@ -27,4 +38,4 @@ function errorTexts(error: unknown): string[] {
 	})
 }
 
-export { causeChain, errorTexts }
+export { causeChain, errorTexts, innermostFirst }

@@ -3,7 +3,7 @@ import { type ConstraintMap, combErrorKeys, type StatusKey } from "../../types.t
 import { constraintError } from "../constraint-handler.ts"
 import { resourceOutcome } from "../resource-outcome.ts"
 import { readSqliteError, type SqliteErrorRead } from "../read-error.ts"
-import { causeChain } from "../../error-chain.ts"
+import { causeChain, innermostFirst } from "../../error-chain.ts"
 
 /* Retryable per developers.cloudflare.com/d1/observability/debug-d1/, plus D1's overload and
  * limit resets. Only a platform message (one with no SQLite result code) is read for these, so
@@ -53,9 +53,8 @@ const STORAGE_FULL: Outcome = {
  * and a wrapper's message (drizzle's carries the SQL and its params) never decides the outcome.
  */
 function platformMessage(error: Error): string | null {
-	const platform = causeChain(error)
+	const platform = innermostFirst(causeChain(error))
 		.filter((link): link is Error => link instanceof Error)
-		.toReversed()
 		.find((link) => typeof (link as { query?: unknown }).query !== "string" && D1_PREFIX.test(link.message))
 	return platform?.message ?? null
 }

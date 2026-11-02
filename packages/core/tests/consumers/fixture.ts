@@ -170,6 +170,20 @@ export const APP: Record<string, string> = {
 		},
 		include: ["src/worker-types.ts"],
 	}),
+	/* the Workers side of create-cloudflare's React Router template: lib ES2022, the floor comb's runtime subpaths keep to (K2 of r20) */
+	"tsconfig.worker-es2022.json": JSON.stringify({
+		compilerOptions: {
+			...STRICT,
+			allowImportingTsExtensions: true,
+			lib: ["DOM", "DOM.Iterable", "ES2022"],
+			module: "esnext",
+			moduleResolution: "bundler",
+			noEmit: true,
+			target: "es2022",
+			types: ["@cloudflare/workers-types"],
+		},
+		include: ["src/worker-types.ts"],
+	}),
 	/* a nodejs_compat Worker, or a package whose scripts run on Node: no DOM, Workers' and Node's types, every subpath (K1 of r18) */
 	"tsconfig.worker-node.json": JSON.stringify({
 		compilerOptions: {

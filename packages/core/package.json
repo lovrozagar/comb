@@ -72,7 +72,7 @@
 		"test:all": "vitest run && bun test tests/bun",
 		"test:watch": "vitest",
 		"type:check": "tsc --noEmit",
-		"type:check:strict": "tsc --noEmit -p tsconfig.strict.json"
+		"type:check:strict": "tsc --noEmit -p tsconfig.strict.json && tsc --noEmit -p tsconfig.es2022.json"
 	},
 	"dependencies": {
 		"@types/pluralize": "0.0.33",

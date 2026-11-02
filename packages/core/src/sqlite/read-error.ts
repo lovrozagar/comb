@@ -4,7 +4,7 @@
  * `DrizzleQueryError`, and never the wrapper's text, which holds the SQL and its parameters.
  */
 import { own } from "../constraint-map.ts"
-import { causeChain } from "../error-chain.ts"
+import { causeChain, innermostFirst } from "../error-chain.ts"
 
 export type SqliteErrorRead = {
 	/** The extended result code when the driver reports one, e.g. `SQLITE_CONSTRAINT_UNIQUE`. */
@@ -111,7 +111,7 @@ function readLine(line: string): SqliteErrorRead | null {
 export function readSqliteMessage(text: string): SqliteErrorRead | null {
 	const lines = text.split("\n").map((line) => line.trim())
 	if (lines.some((line) => /^params:/i.test(line))) return null
-	const last = lines.findLast((line) => line !== "")
+	const last = lines.filter((line) => line !== "").at(-1)
 	return last === undefined ? null : readLine(last)
 }
 
@@ -129,7 +129,7 @@ export function readSqliteError(error: unknown): SqliteErrorRead | null {
 	const query = chain.map((link) => field(link, "query")).find((recorded) => typeof recorded === "string") as
 		| string
 		| undefined
-	for (const link of chain.toReversed()) {
+	for (const link of innermostFirst(chain)) {
 		/* a link that records its query is drizzle's wrapper: its message ends with the params */
 		if (typeof field(link, "query") === "string") continue
 		const read = readOne(link)

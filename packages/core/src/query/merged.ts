@@ -166,7 +166,11 @@ function pastCursor<T extends Record<string, unknown>>(
 ): { full: boolean; rows: T[] } {
 	const past = rows.filter((row) => compare(row, anchor) > 0)
 	const lasts = rowsPerShard.filter((shard) => shard.length > limit).map((shard) => shard.at(-1) as T)
-	const end = lasts.toSorted(compare)[0]
+	/* the least of them, the first on a tie, as a stable sort's head */
+	const end = lasts.reduce<T | undefined>(
+		(least, row) => (least === undefined || compare(row, least) < 0 ? row : least),
+		undefined,
+	)
 	const kept = end === undefined ? past : past.filter((row) => compare(row, end) <= 0)
 	if (end !== undefined && kept.length === 0) {
 		throw new CombError({

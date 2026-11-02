@@ -1,0 +1,26 @@
+{
+	"extends": "./tsconfig.strict.json",
+	"compilerOptions": {
+		"lib": ["es2022"],
+		"target": "es2022"
+	},
+	"include": [],
+	"files": [
+		"./src/index.ts",
+		"./src/meta.ts",
+		"./src/pg/columns.ts",
+		"./src/pg/error-handler.ts",
+		"./src/query/index.ts",
+		"./src/query/sqlite/index.ts",
+		"./src/sqlite/columns.ts",
+		"./src/sqlite/constraint-handler.ts",
+		"./src/sqlite/constraints.ts",
+		"./src/sqlite/d1/bookmark.ts",
+		"./src/sqlite/d1/error-handler.ts",
+		"./src/sqlite/d1/session.ts",
+		"./src/sqlite/d1/sharding/index.ts",
+		"./src/sqlite/patterns.ts",
+		"./src/states.ts",
+		"./src/types.ts"
+	]
+}
