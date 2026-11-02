@@ -82,25 +82,47 @@ export function floorOf(range: string): string {
 	return floor.version
 }
 
+/* every version each peer range admits, as tests/structure/peers.test.ts holds it to the ranges */
+const REGISTRY = JSON.parse(
+	readFileSync(join(CORE, "tests/structure/__snapshots__/peer-registry.json"), "utf8"),
+) as Record<string, { admitted: string[] }>
+
+/** Every version comb's range for `name` admits, oldest first, as the registry was recorded */
+export const admittedOf = (name: string): string[] => REGISTRY[name]?.admitted ?? []
+
+/**
+ * Which version of each peer a stage installs: the newest its range admits, the range's floor
+ * (K8 of r20), or the newest but for the exact versions `pin` names. Each is an exact version, never
+ * a range npm resolves: drizzle's `1.0.0-rc.N-<hash>` branch builds rank above its tagged rcs.
+ */
+export type Versions = "floor" | "newest" | { pin: Record<string, string> }
+
+function versionOf(name: string, versions: Versions): string {
+	if (versions === "floor") return floorOf(manifest.peerDependencies[name] as string)
+	const pinned = versions === "newest" ? undefined : versions.pin[name]
+	const newest = pinned ?? admittedOf(name).at(-1)
+	if (newest === undefined) throw new Error(`the recorded registry admits no ${name}`)
+	return newest
+}
+
 /**
  * A fresh consumer with comb from `tarball`, its required peers, the optional ones when `all`, and
- * the tools: each peer by comb's own range, as a consumer's install resolves it, the newest it
- * admits; or each pinned at the range's floor, as comb's own suites run them (K8 of r20)
+ * the tools, each peer at the exact version `versions` picks
  */
 export function stage(
 	tarball: string,
 	peers: "all" | "required",
 	files: Record<string, string> = {},
-	at: "floor" | "newest" = "newest",
+	versions: Versions = "newest",
 ): Stage {
-	const dir = mkdtempSync(join(tmpdir(), `comb-consumer-${peers}-${at}-`))
+	const label = typeof versions === "string" ? versions : "pinned"
+	const dir = mkdtempSync(join(tmpdir(), `comb-consumer-${peers}-${label}-`))
 	const wanted = Object.keys(manifest.peerDependencies).filter(
 		(name) => peers === "all" || !OPTIONAL_PEERS.includes(name),
 	)
-	const rangeOf = (name: string) => manifest.peerDependencies[name] as string
 	const dependencies = Object.fromEntries([
 		["@lovrozagar/comb", `file:${tarball}`],
-		...wanted.map((name) => [name, at === "floor" ? floorOf(rangeOf(name)) : rangeOf(name)]),
+		...wanted.map((name) => [name, versionOf(name, versions)]),
 	])
 	writeFileSync(
 		join(dir, "package.json"),

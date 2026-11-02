@@ -1,5 +1,5 @@
-import { type BuildColumns, type HasDefault, type IsPrimaryKey, type NotNull, sql } from "drizzle-orm"
-import { sqliteTable as createTable, index, type SQLiteTableWithColumns } from "drizzle-orm/sqlite-core"
+import { type HasDefault, type IsPrimaryKey, type NotNull, sql } from "drizzle-orm"
+import { sqliteTable as createTable, index } from "drizzle-orm/sqlite-core"
 import { c, type SqliteColumns } from "../../columns.ts"
 import type { ShardDriver } from "./types.ts"
 
@@ -31,12 +31,8 @@ type ShardMapColumns = {
 	updated_at: ReturnType<SqliteColumns["updatedAt"]>
 }
 
-type ShardMapTable = SQLiteTableWithColumns<{
-	name: "shard_map"
-	schema: undefined
-	columns: BuildColumns<"shard_map", ShardMapColumns, "sqlite">
-	dialect: "sqlite"
-}>
+/* drizzle's own table type for these columns, so it follows each drizzle the peer range admits (rc.5 added `isAlias`) */
+type ShardMapTable = ReturnType<typeof createTable<"shard_map", ShardMapColumns>>
 
 /* the table is built in a function so module scope runs one call, marked pure */
 function defineShardMap(): ShardMapTable {

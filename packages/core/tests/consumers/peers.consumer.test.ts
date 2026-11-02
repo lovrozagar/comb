@@ -11,6 +11,7 @@ import semver from "semver"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { APP } from "./fixture.ts"
 import {
+	admittedOf,
 	failures,
 	IMPORT_ALL,
 	installedVersion,
@@ -132,6 +133,22 @@ describe("a consumer at comb's peer floors", () => {
 	afterAll(() => app?.dispose())
 
 	it("type-checks every subpath under strict flags", () => {
+		const result = run(app.dir, "npx", ["tsc", "-p", "tsconfig.bundler.json"])
+		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
+		expect(result.status).toBe(0)
+	})
+})
+
+/* every tagged drizzle the range names, each by its exact version: 0.18 admitted the tagged rc.5, which failed the sharding types */
+describe.each(admittedOf("drizzle-orm"))("a consumer on drizzle %s", (version) => {
+	let app: Stage
+	beforeAll(() => {
+		app = stage(tarball, "all", APP, { pin: { "drizzle-kit": version, "drizzle-orm": version } })
+	})
+	afterAll(() => app?.dispose())
+
+	it("type-checks every subpath under strict flags", () => {
+		expect(installedVersion(app.dir, "drizzle-orm")).toBe(version)
 		const result = run(app.dir, "npx", ["tsc", "-p", "tsconfig.bundler.json"])
 		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
 		expect(result.status).toBe(0)

@@ -52,12 +52,12 @@
 		"range": ">=2.0.0 <3"
 	},
 	"drizzle-kit": {
-		"admitted": ["1.0.0-rc.4"],
+		"admitted": ["1.0.0-rc.4", "1.0.0-rc.5"],
 		"floorPeers": {},
-		"range": "1.0.0-rc.4 || ^1.0.0"
+		"range": "1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"
 	},
 	"drizzle-orm": {
-		"admitted": ["1.0.0-rc.4"],
+		"admitted": ["1.0.0-rc.4", "1.0.0-rc.5"],
 		"floorPeers": {
 			"pg": ">=8",
 			"zod": "^3.25.0 || ^4.0.0",
@@ -107,7 +107,7 @@
 			"@tursodatabase/database-wasm": ">=0.6.0-pre.28 || >=0.6.0",
 			"@tursodatabase/database-common": ">=0.6.0-pre.28 || >=0.6.0"
 		},
-		"range": "1.0.0-rc.4 || ^1.0.0"
+		"range": "1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"
 	},
 	"libpg-query": {
 		"admitted": ["17.7.4", "17.8.0", "17.8.1", "17.8.2"],

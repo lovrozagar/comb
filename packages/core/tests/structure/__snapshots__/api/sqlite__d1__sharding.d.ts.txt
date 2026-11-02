@@ -212,8 +212,8 @@ declare class ShardRouter {
 export { ShardRouter };
 
 // sqlite/d1/sharding/shard-map.d.ts
-import { type BuildColumns, type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
-import { type SQLiteTableWithColumns } from "drizzle-orm/sqlite-core";
+import { type HasDefault, type IsPrimaryKey, type NotNull } from "drizzle-orm";
+import { sqliteTable as createTable } from "drizzle-orm/sqlite-core";
 import { c, type SqliteColumns } from "../../columns.ts";
 /** The longest org id `shard_map.org_id` holds; a longer one is no org's */
 export declare const ORG_ID_MAX_LENGTH = 64;
@@ -233,12 +233,7 @@ type ShardMapColumns = {
     target: NotNull<ReturnType<SqliteColumns["text"]>>;
     updated_at: ReturnType<SqliteColumns["updatedAt"]>;
 };
-type ShardMapTable = SQLiteTableWithColumns<{
-    name: "shard_map";
-    schema: undefined;
-    columns: BuildColumns<"shard_map", ShardMapColumns, "sqlite">;
-    dialect: "sqlite";
-}>;
+type ShardMapTable = ReturnType<typeof createTable<"shard_map", ShardMapColumns>>;
 export declare const shardMap: ShardMapTable;
 export {};
 
