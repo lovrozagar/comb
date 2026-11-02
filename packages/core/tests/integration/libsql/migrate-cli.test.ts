@@ -295,12 +295,12 @@ describe("migrate apply and check --json on libsql (C5)", () => {
 		const check = io(dir)
 		expect(await runCli(["migrate", "check", "core", "-e", "local", "--json"], check)).toBe(0)
 		expect(check.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
-			{ applied: [], database: "core", pending: ["20260101000000_init.sql"], refused: [] },
+			{ applied: [], database: "core", pending: ["20260101000000_init.sql"], refused: [], unknown: [] },
 		])
 		const apply = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "-e", "local", "--json"], apply)).toBe(0)
 		expect(apply.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
-			{ applied: ["20260101000000_init.sql"], database: "core", pending: [], refused: [] },
+			{ applied: ["20260101000000_init.sql"], database: "core", pending: [], refused: [], unknown: [] },
 		])
 		expect(apply.errors).toContain("Apply: 20260101000000_init.sql")
 	})
@@ -324,7 +324,7 @@ describe("migrate apply and check --json on libsql (C5)", () => {
 		const status = io(dir)
 		expect(await runCli(["migrate", "status", "core", "--json"], status)).toBe(1)
 		expect(status.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
-			{ applied: [], database: "core", pending: [], refused: ["plain string from config"] },
+			{ applied: [], database: "core", pending: [], refused: ["plain string from config"], unknown: [] },
 		])
 	})
 })

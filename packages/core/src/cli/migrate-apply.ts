@@ -213,7 +213,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 		await applyEach(
 			await target.write(),
 			pending.map(({ migration }) => migration),
-			io.out,
+			{ print: io.out },
 		)
 	io.out(`\nDone: ${pendingNames.length} applied, ${names.length - pendingNames.length} skipped`)
 	return { applied: pendingNames, pending: [] }
@@ -221,8 +221,8 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 
 /**
  * `migrate apply|baseline|check|status`. With --json the human lines go to stderr and stdout is
- * one JSON object: the database, the files applied (or found applied) and pending, and what was
- * refused; a refusal still exits 1.
+ * one JSON object: the database, the files applied (or found applied) and pending, what was
+ * refused, and the files whose answer was lost, which may have committed; a refusal still exits 1.
  */
 /** `mode`'s argv read: its database and options; refused by usage without one database */
 function readArgv(mode: Mode, argv: readonly string[]): { args: ParsedArgs; db: string } {
@@ -238,14 +238,14 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliI
 		await runMode({ args, db, io, mode })
 		return
 	}
-	const report = (outcome: MigrateOutcome, refused: string[]) =>
-		io.out(JSON.stringify({ applied: outcome.applied, database: db, pending: outcome.pending, refused }))
+	const report = (outcome: MigrateOutcome, refused: string[], unknown: string[] = []) =>
+		io.out(JSON.stringify({ applied: outcome.applied, database: db, pending: outcome.pending, refused, unknown }))
 	try {
 		report(await runMode({ args, db, io: { ...io, out: io.err }, mode }), [])
 	} catch (error) {
 		/* a refusal or a failed command is an Error; a user's config can throw anything */
-		const { applied, pending } = error instanceof Refused ? error : { applied: [], pending: [] }
-		report({ applied, pending }, [error instanceof Error ? error.message : String(error)])
+		const { applied, pending, unknown } = error instanceof Refused ? error : { applied: [], pending: [], unknown: [] }
+		report({ applied, pending }, [error instanceof Error ? error.message : String(error)], unknown)
 		throw new Reported(error)
 	}
 }

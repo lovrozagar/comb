@@ -117,7 +117,7 @@ function wranglerError({ stderr, stdout }: { stderr: string; stdout: string }): 
 /**
  * What wrangler recorded once its apply of `names` ran, read back from the table, never from its output; a run
  * that failed may have made no table. Once wrangler has run, a read that fails is a Refused that says so: which of
- * `names` committed is then unknown, and status reads it
+ * `names` committed is then unknown, its `unknown` (S3 of r20), and status reads it
  */
 function appliedAfter(
 	target: D1Target,
@@ -131,7 +131,7 @@ function appliedAfter(
 	} catch (error) {
 		throw new Refused(
 			`wrangler d1 migrations apply ${ok ? "ran" : "failed"}, then reading back what it recorded in ${table} failed: ${(error as Error).message}; comb migrate status says which of the files it applied`,
-			names,
+			{ pending: [], unknown: names },
 		)
 	}
 }
@@ -186,20 +186,19 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		target.conn,
 		hashed.filter(({ name }) => after.has(name)),
 	)
-	if (ran.code !== 0) throw new Refused(`wrangler d1 migrations apply failed: ${wranglerError(ran)}`, rest, applies)
+	if (ran.code !== 0)
+		throw new Refused(`wrangler d1 migrations apply failed: ${wranglerError(ran)}`, { applied: applies, pending: rest })
 	const added = [...after].filter((name) => !applied.has(name))
 	if (added.length !== names.length || rest.length > 0) {
 		throw new Refused(
 			`wrangler recorded ${added.join(", ") || "nothing"} in ${table}, where comb checked ${names.join(", ")}; see the wrangler output above`,
-			rest,
-			applies,
+			{ applied: applies, pending: rest },
 		)
 	}
 	if (moved !== undefined) {
 		throw new Refused(
 			`wrangler applied ${names.join(", ")}, then recording their hashes failed: ${moved}; comb migrate status reads them as recorded, and the next apply or baseline records them`,
-			[],
-			names,
+			{ applied: names, pending: [] },
 		)
 	}
 	return names

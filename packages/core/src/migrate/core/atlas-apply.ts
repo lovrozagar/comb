@@ -125,7 +125,7 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 		const migration = parseRead({ ...file, filename: Name }, { before, schema: readAs.schema })
 		for (const warning of migration.classification.lockWarnings) options.print(`Lock warning in ${Name}: ${warning}`)
 		const approval = await options.approve(migration)
-		if (!approval.ok) throw new Refused(approval.message, [...waiting])
+		if (!approval.ok) throw new Refused(approval.message, { pending: [...waiting] })
 		if (approval.approvedBy !== undefined) options.print(`Approved in ${Name}: ${approval.approvedBy}`)
 		for (const caution of approval.cautions ?? []) options.print(`Cautious in ${Name}: ${caution}`)
 	}

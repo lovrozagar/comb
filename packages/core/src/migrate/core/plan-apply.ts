@@ -162,11 +162,7 @@ async function approveAll(
 		const migration = proof === undefined ? each.migration : withProof(each.migration, proof)
 		if (proof?.failed !== undefined) print(`Proof run: ${each.name}: ${proof.failed}`)
 		const approval = empty ? { ok: true as const } : await options.approve(migration)
-		if (!approval.ok)
-			throw new Refused(
-				approval.message,
-				classified.map(({ name }) => name),
-			)
+		if (!approval.ok) throw new Refused(approval.message, { pending: classified.map(({ name }) => name) })
 		if (approval.approvedBy !== undefined) print(`Approved in ${each.name}: ${approval.approvedBy}`)
 		for (const caution of approval.cautions ?? []) print(`Cautious in ${each.name}: ${caution}`)
 		pending.push({ ...each, migration })

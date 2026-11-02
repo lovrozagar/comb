@@ -29,7 +29,7 @@ describe("migrate apply, check and status --json on an argv comb refuses", () =>
 		const io = makeIo(temp.make())
 		expect(await runCli(argv, io)).toBe(1)
 		expect(io.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
-			{ applied: [], database: null, pending: [], refused: [refusal] },
+			{ applied: [], database: null, pending: [], refused: [refusal], unknown: [] },
 		])
 		expect(io.errors).toEqual([refusal])
 	})

@@ -319,7 +319,7 @@ describe("migrate status: comb's own history (M17)", () => {
 		const after = io(dir)
 		expect(await runCli(["migrate", "status", "core", "--json"], after)).toBe(0)
 		expect(after.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
-			{ applied: ["1_a.sql"], database: "core", pending: ["2_b.sql"], refused: [] },
+			{ applied: ["1_a.sql"], database: "core", pending: ["2_b.sql"], refused: [], unknown: [] },
 		])
 		expect(await runCli(["migrate", "apply", "core"], io(dir))).toBe(0)
 		const done = io(dir)

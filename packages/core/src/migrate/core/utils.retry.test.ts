@@ -23,11 +23,6 @@ describe("sleep", () => {
 	})
 })
 
-/** An error carrying the HTTP status `code`, as hrana's HttpServerError does */
-const httpStatus = (code: number) => Object.assign(new Error(`HTTP ${code}`), { status: code })
-/** An error carrying the network code `code`, as Node's and undici's do */
-const network = (code: string) => Object.assign(new Error("socket hang up"), { code })
-
 describe("withRetry", () => {
 	it("returns the first result when nothing throws", async () => {
 		const fn = vi.fn(async () => "ok")
@@ -35,17 +30,12 @@ describe("withRetry", () => {
 		expect(fn).toHaveBeenCalledTimes(1)
 	})
 
-	/* S7 of the 0.15.0 review: transience is read from codes and statuses, the error's or its causes' */
+	/* which failures are transient is transient.test.ts's; withRetry retries one and passes the other on */
 	const retryable: Array<[string, Error]> = [
-		["an HTTP 429", httpStatus(429)],
-		["an HTTP 503", httpStatus(503)],
 		[
-			"libsql's wrap of a 429",
-			Object.assign(new Error("server error"), { cause: httpStatus(429), code: "SERVER_ERROR" }),
+			"undici's fetch failed over a reset",
+			new TypeError("fetch failed", { cause: Object.assign(new Error("x"), { code: "ECONNRESET" }) }),
 		],
-		["undici's fetch failed over a reset", new TypeError("fetch failed", { cause: network("ECONNRESET") })],
-		["a timed-out connection", network("ETIMEDOUT")],
-		["a socket undici closed", network("UND_ERR_SOCKET")],
 	]
 
 	it.each(retryable)("retries %s and succeeds on the next attempt", async (_, error) => {
@@ -64,13 +54,6 @@ describe("withRetry", () => {
 			"a SQLite error quoting 429",
 			Object.assign(new Error("UNIQUE constraint failed: t429.body"), { code: "SQLITE_CONSTRAINT" }),
 		],
-		[
-			"a SQLite error caused by a 503",
-			Object.assign(new Error("x"), { cause: httpStatus(503), code: "SQLITE_BUSY_X" }),
-		],
-		["prose that names a rate limit", new Error("429 rate limit ECONNRESET fetch failed")],
-		["an HTTP 404", httpStatus(404)],
-		["a cause that is no object", new Error("x", { cause: "ECONNRESET" })],
 	])("does not retry %s", async (_, error) => {
 		let calls = 0
 		await expect(

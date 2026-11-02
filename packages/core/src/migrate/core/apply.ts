@@ -3,8 +3,10 @@
  * from 0.11, each file's name beside its hash, so an applied file edited since is told from a new one;
  * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
  */
+import { causeChain } from "../../error-chain.ts"
 import type { Connection } from "../types.ts"
 import { Refused } from "./refused.ts"
+import { isTransient } from "./transient.ts"
 import { type RetryOptions, withRetry } from "./utils.ts"
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -119,10 +121,21 @@ type Recorded = { filename: string; hash: string; statements: readonly string[] 
 const recorded = async (conn: Connection, name: string): Promise<boolean> =>
 	(await conn.execute("SELECT 1 FROM __drizzle_migrations WHERE name = ?", [name])).rows.length > 0
 
+/** A batch that failed transiently with no read of the history answering after it: whether it committed is unknown */
+class Unconfirmed extends Error {}
+
+/** `error`'s message and each under it on `.cause`, as `fetch failed: read ECONNRESET` */
+const chainText = (error: unknown): string =>
+	causeChain(error)
+		.map((link) => (link as { message?: unknown }).message)
+		.filter((message): message is string => typeof message === "string" && message !== "")
+		.join(": ")
+
 /**
  * `migration`'s statements and its record in one batch, retried while it fails transiently. A
  * batch can commit and its answer still fail, and its statements need not run twice safely: the
- * record it wrote says it ran, so a retry reads the history first and runs nothing again (S6)
+ * record it wrote says it ran, so a retry reads the history first and runs nothing again (S6).
+ * When no read answers after a batch that failed transiently, the failure is an Unconfirmed (S3 of r20)
  */
 export async function applyRecorded(conn: Connection, migration: Recorded, retry?: RetryOptions): Promise<void> {
 	const statements = [
@@ -130,33 +143,52 @@ export async function applyRecorded(conn: Connection, migration: Recorded, retry
 		{ params: [migration.hash, Date.now(), migration.filename], sql: RECORD },
 	]
 	let tried = false
-	await withRetry(async () => {
-		if (tried && (await recorded(conn, migration.filename))) return
-		tried = true
-		await conn.batch(statements)
-	}, retry)
+	let lost: unknown
+	try {
+		await withRetry(async () => {
+			if (tried) {
+				if (await recorded(conn, migration.filename)) return
+				lost = undefined
+			}
+			tried = true
+			await conn.batch(statements).catch((error: unknown) => {
+				if (isTransient(error)) lost = error
+				throw error
+			})
+		}, retry)
+	} catch (error) {
+		if (lost === undefined) throw error
+		throw new Unconfirmed(
+			`${migration.filename} may have committed: its batch failed with ${chainText(lost)}, and no read of comb's history answered after it; comb migrate status says whether it applied`,
+			{ cause: error },
+		)
+	}
 }
 
 /**
  * Each of `migrations` applied and recorded in turn, its name printed first. A failure stops the
  * run as a Refused naming the files that committed before it and the ones still pending, which
- * it prints as D1's apply does (S2 of the 0.15.0 review)
+ * it prints as D1's apply does (S2 of the 0.15.0 review); a file whose answer was lost is in
+ * neither, but unknown
  */
 export async function applyEach(
 	conn: Connection,
 	migrations: readonly Recorded[],
-	print: (line: string) => void,
+	{ print, retry }: { print: (line: string) => void; retry?: RetryOptions },
 ): Promise<void> {
 	const names = migrations.map(({ filename }) => filename)
 	for (const [at, migration] of migrations.entries()) {
 		print(`Apply: ${migration.filename}`)
 		try {
-			await applyRecorded(conn, migration)
+			await applyRecorded(conn, migration, retry)
 		} catch (error) {
 			const done = names.slice(0, at)
 			if (done.length > 0) print(`Applied before the failure: ${done.join(", ")}`)
 			/* withRetry throws an Error, whatever the batch threw */
-			throw new Refused((error as Error).message, names.slice(at), done)
+			const message = (error as Error).message
+			if (error instanceof Unconfirmed)
+				throw new Refused(message, { applied: done, pending: names.slice(at + 1), unknown: [migration.filename] })
+			throw new Refused(message, { applied: done, pending: names.slice(at) })
 		}
 	}
 }

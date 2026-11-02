@@ -165,7 +165,7 @@ describe("runCli with --json on a command that does not take it", () => {
 		const io = makeIo(project())
 		expect(await runCli(argv, io)).toBe(1)
 		expect(io.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
-			{ applied: [], database: null, pending: [], refused: [refused] },
+			{ applied: [], database: null, pending: [], refused: [refused], unknown: [] },
 		])
 	})
 })

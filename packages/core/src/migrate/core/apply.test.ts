@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
+import { createBunSqliteProvider } from "../drivers/bun-sqlite.ts"
 import { applyEach, applyRecorded, checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./apply.ts"
 import type { Connection } from "../types.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
 import { Refused } from "./refused.ts"
+
+vi.mock("bun:sqlite", () => import("../__fixtures__/bun-sqlite-node.ts"))
 
 function mockConnection(overrides: Partial<Connection> = {}): Connection {
 	return {
@@ -154,7 +157,7 @@ describe("applyEach", () => {
 			file("2_b.sql", "INSERT INTO b VALUES (1)"),
 			file("3_c.sql", "SELECT 1"),
 		]
-		const failure = await applyEach(conn, files, (line) => lines.push(line)).catch((error: unknown) => error)
+		const failure = await applyEach(conn, files, { print: (line) => lines.push(line) }).catch((error: unknown) => error)
 		expect(failure).toBeInstanceOf(Refused)
 		const { applied, message, pending } = failure as Refused
 		expect({ applied, message, pending }).toEqual({
@@ -169,10 +172,90 @@ describe("applyEach", () => {
 	it("prints no applied files when the first fails, whatever it threw", async () => {
 		const lines: string[] = []
 		const conn = mockConnection({ batch: () => Promise.reject("lost") })
-		const failure = await applyEach(conn, [file("1_a.sql", "SELECT 1")], (line) => lines.push(line)).catch(
+		const failure = await applyEach(conn, [file("1_a.sql", "SELECT 1")], { print: (line) => lines.push(line) }).catch(
 			(error: unknown) => error,
 		)
 		expect([(failure as Refused).message, (failure as Refused).applied]).toEqual(["lost", []])
 		expect(lines).toEqual(["Apply: 1_a.sql"])
+	})
+})
+
+/** A lost connection as undici reports it: fetch failed, read ECONNRESET under it */
+const reset = () =>
+	new TypeError("fetch failed", { cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }) })
+
+/** `conn` once `lost` names a batch: that batch commits, then every call fails as a lost connection */
+function losing(conn: Connection, lost: string): Connection {
+	let down = false
+	return {
+		...conn,
+		batch: async (statements) => {
+			if (down) throw reset()
+			await conn.batch(statements)
+			down = statements.some(({ params }) => params?.includes(lost) === true)
+			if (down) throw reset()
+		},
+		execute: async (sql, params) => (down ? Promise.reject(reset()) : conn.execute(sql, params)),
+	}
+}
+
+const LOST_FILES = [
+	file("0001_t1.sql", "CREATE TABLE t1 (a)"),
+	file("0002_t2.sql", "CREATE TABLE t2 (a)"),
+	file("0003_t3.sql", "CREATE TABLE t3 (a)"),
+]
+const NO_WAIT = { baseDelay: 0, maxDelay: 0 }
+
+/* S3 of r20: r19 S3's sibling on libsql, Turso and bun:sqlite, which plan 18 fixed on D1 only */
+/** A bun:sqlite connection, on Node's SQLite under vitest (tests/bun/ runs bun's own) */
+const bunConnection = () =>
+	createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" }).connect({
+		migrationsDir: "m",
+		name: "local",
+		provider: { path: ":memory:", type: "bun-sqlite" },
+	})
+
+describe("applyEach on a batch whose answer is lost", () => {
+	it.each([
+		["libsql", async (): Promise<Connection> => libsqlConnection()],
+		["bun:sqlite", bunConnection],
+	])("a committed batch with a lost answer is unknown, not pending, on %s", async (_, open) => {
+		const conn = await open()
+		await ensureMigrationsTable(conn)
+		const failure = await applyEach(losing(conn, "0002_t2.sql"), LOST_FILES, { print: () => {}, retry: NO_WAIT }).catch(
+			(error: unknown) => error,
+		)
+		expect(failure).toBeInstanceOf(Refused)
+		const { applied, message, pending, unknown } = failure as Refused
+		expect({ applied, pending, unknown }).toEqual({
+			applied: ["0001_t1.sql"],
+			pending: ["0003_t3.sql"],
+			unknown: ["0002_t2.sql"],
+		})
+		expect(message).toBe(
+			"0002_t2.sql may have committed: its batch failed with fetch failed: read ECONNRESET, and no read of comb's history answered after it; comb migrate status says whether it applied",
+		)
+		expect((await conn.execute("SELECT name FROM __drizzle_migrations")).rows).toEqual([
+			["0001_t1.sql"],
+			["0002_t2.sql"],
+		])
+	})
+
+	it("a lost batch the history then reads as not run is pending, as any failure before it commits", async () => {
+		const conn = libsqlConnection()
+		await ensureMigrationsTable(conn)
+		let calls = 0
+		const refusing: Connection = {
+			...conn,
+			batch: async () => Promise.reject(++calls === 1 ? reset() : new Error("no such table: b")),
+		}
+		const failure = (await applyEach(refusing, LOST_FILES, { print: () => {}, retry: NO_WAIT }).catch(
+			(error: unknown) => error,
+		)) as Refused
+		expect([failure.message, failure.pending, failure.unknown]).toEqual([
+			"no such table: b",
+			["0001_t1.sql", "0002_t2.sql", "0003_t3.sql"],
+			[],
+		])
 	})
 })

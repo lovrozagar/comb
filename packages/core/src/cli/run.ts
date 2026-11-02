@@ -86,7 +86,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 		}
 		/* one --json rule for every command: a refusal no command reported is the one JSON object stdout promises */
 		if (asksJson(argv) && error instanceof CliError && !(error instanceof Reported))
-			io.out(JSON.stringify({ applied: [], database: null, pending: [], refused: [error.message] }))
+			io.out(JSON.stringify({ applied: [], database: null, pending: [], refused: [error.message], unknown: [] }))
 		io.err(error instanceof Error ? error.message : String(error))
 		return error instanceof CliError ? error.exitCode : 1
 	}

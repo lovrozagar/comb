@@ -78,7 +78,7 @@ export const OPTIONS: readonly OptionSpec[] = [
 	},
 	{
 		commands: ["migrate apply", "migrate check", "migrate status"],
-		description: "Print one JSON object (database, applied, pending, refused) as the only stdout",
+		description: "Print one JSON object (database, applied, pending, refused, unknown) as the only stdout",
 		long: "--json",
 	},
 ]

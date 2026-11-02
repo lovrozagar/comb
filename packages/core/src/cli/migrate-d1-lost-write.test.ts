@@ -166,8 +166,11 @@ describe("migrate apply on D1 after a lost read-back", () => {
 				applied: string[]
 				pending: string[]
 				refused: string[]
+				unknown: string[]
 			}
-			expect([report.applied, report.pending[0], report.refused]).toEqual([
+			/* S3 of r20: which committed is unknown, so none is pending, as on SQLite */
+			expect([report.applied, report.pending, report.unknown[0], report.refused]).toEqual([
+				[],
 				[],
 				"20260101000000_init.sql",
 				[

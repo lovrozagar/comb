@@ -225,7 +225,7 @@ OPTIONS:
   -y, --yes               Approve cautious changes without asking (not unsafe ones) [migrate apply, migrate check]
   --local                 Without a migrate config: the local D1 (wrangler --local) [migrate apply, migrate baseline, migrate check, migrate status]
   --hashes                On D1: record the current hash of each applied file that has none (check the files against git first) [migrate baseline]
-  --json                  Print one JSON object (database, applied, pending, refused) as the only stdout [migrate apply, migrate check, migrate status]
+  --json                  Print one JSON object (database, applied, pending, refused, unknown) as the only stdout [migrate apply, migrate check, migrate status]
   -h, --help              Show this help
   --version               Print comb's version
 ```
@@ -1055,6 +1055,8 @@ What changes for a project on 0.18. Before deploying it:
 6. **Move an `ALTER SUBSCRIPTION … SET (failover)` into a `-- atlas:txmode none` file.** Postgres 17 runs it only outside a transaction block, and `check` now refuses it anywhere else, naming it as Postgres does. 0.18 rated it a statement comb does not recognize, to approve in the file, and Atlas's file transaction then refused it at apply.
 
 7. **Take `PRAGMA query_only` out of a SQLite or D1 migration.** `check` refuses it with any value, however it is written (`'1'`, `01`, `"on"`, `0`). 0.18 refused only the values it read as on, so `'1'` and `01` passed `check` and the file failed read-only at apply. Off does nothing on a connection comb opens, so no file loses anything. A pragma's single-quoted value is read as SQLite reads it, so `PRAGMA foreign_keys = 'off'` gets the same note as `off`, and `PRAGMA defer_foreign_keys = 'on'` is rated as comb writes it.
+
+8. **Read `unknown` in a `--json` report.** Every `migrate apply`, `check` and `status` object gains `unknown`, the files that may have committed, `[]` when none. On libsql, Turso and bun:sqlite, a file whose batch committed while its answer was lost, the connection staying down through every retry, is in `unknown`, in neither `applied` nor `pending`, and its refusal names the file and the cause (`fetch failed: read ECONNRESET`) and says to run `comb migrate status`; 0.18 listed it as pending. On D1, a read-back that fails after wrangler's apply puts the files it ran in `unknown` too, where 0.18 listed them as pending.
 
 ## Upgrading to 0.18
 

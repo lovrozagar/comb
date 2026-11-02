@@ -166,8 +166,26 @@ describe("migrate apply, check and status --json on Postgres (C5)", () => {
 			expect(io.outputs).toHaveLength(1)
 			return JSON.parse(io.outputs[0] as string) as unknown
 		}
-		expect(await run("status")).toEqual({ applied: [], database: "core", pending: ["1_init.sql"], refused: [] })
-		expect(await run("check")).toEqual({ applied: [], database: "core", pending: ["1_init.sql"], refused: [] })
-		expect(await run("apply")).toEqual({ applied: ["1_init.sql"], database: "core", pending: [], refused: [] })
+		expect(await run("status")).toEqual({
+			applied: [],
+			database: "core",
+			pending: ["1_init.sql"],
+			refused: [],
+			unknown: [],
+		})
+		expect(await run("check")).toEqual({
+			applied: [],
+			database: "core",
+			pending: ["1_init.sql"],
+			refused: [],
+			unknown: [],
+		})
+		expect(await run("apply")).toEqual({
+			applied: ["1_init.sql"],
+			database: "core",
+			pending: [],
+			refused: [],
+			unknown: [],
+		})
 	})
 })

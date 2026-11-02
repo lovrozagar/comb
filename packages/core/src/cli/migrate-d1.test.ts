@@ -430,19 +430,22 @@ function json(io: { outputs: string[] }): Record<string, unknown> {
 	return JSON.parse(io.outputs[0] as string) as Record<string, unknown>
 }
 
+/** The JSON object of a run on core, with `files` set */
+const report = (files: object) => ({ applied: [], database: "core", pending: [], refused: [], unknown: [], ...files })
+
 describe("migrate apply, check and status --json on D1 (C5)", () => {
 	it("prints one JSON object as the only stdout, the human lines on stderr", async () => {
 		const dir = worker(INIT)
 		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
 		const status = makeIo(dir, d1)
 		expect(await runCli(["migrate", "status", "core", "--local", "--json"], status)).toBe(0)
-		expect(json(status)).toEqual({ applied: [], database: "core", pending: ["20260101000000_init.sql"], refused: [] })
+		expect(json(status)).toEqual(report({ pending: ["20260101000000_init.sql"] }))
 		const check = makeIo(dir, d1)
 		expect(await runCli(["migrate", "check", "core", "--local", "--json"], check)).toBe(0)
-		expect(json(check)).toEqual({ applied: [], database: "core", pending: ["20260101000000_init.sql"], refused: [] })
+		expect(json(check)).toEqual(report({ pending: ["20260101000000_init.sql"] }))
 		const apply = makeIo(dir, d1)
 		expect(await runCli(["migrate", "apply", "core", "--local", "--json"], apply)).toBe(0)
-		expect(json(apply)).toEqual({ applied: ["20260101000000_init.sql"], database: "core", pending: [], refused: [] })
+		expect(json(apply)).toEqual(report({ applied: ["20260101000000_init.sql"] }))
 		expect(apply.errors).toContain("Apply: 20260101000000_init.sql")
 	})
 
@@ -475,12 +478,15 @@ describe("migrate apply on D1 when wrangler fails partway", () => {
 		const dir = worker(files)
 		const io = makeIo(dir, fakeD1({ dir: join(dir, "atlas-migrations") }))
 		expect(await runCli(["migrate", "apply", "core", "--local", "--yes", "--json"], io)).toBe(1)
-		expect(json(io)).toEqual({
-			applied: ["20260101000000_init.sql", "20260102000000_b.sql"],
-			database: "core",
-			pending: ["20260103000000_c.sql"],
-			refused: [expect.stringContaining("wrangler d1 migrations apply failed: Migration 20260103000000_c.sql failed")],
-		})
+		expect(json(io)).toEqual(
+			report({
+				applied: ["20260101000000_init.sql", "20260102000000_b.sql"],
+				pending: ["20260103000000_c.sql"],
+				refused: [
+					expect.stringContaining("wrangler d1 migrations apply failed: Migration 20260103000000_c.sql failed"),
+				],
+			}),
+		)
 	})
 
 	it("says which files applied before the failure", async () => {
