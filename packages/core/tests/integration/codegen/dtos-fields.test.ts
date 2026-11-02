@@ -207,6 +207,6 @@ describe("an email column's DTO (F15)", () => {
 		})
 		expect(create.safeParse({ email: "nope" }).success).toBe(false)
 		const published = z.toJSONSchema(create, { io: "input" }) as { properties: Record<string, Record<string, unknown>> }
-		expect(published.properties["email"]).toMatchObject({ format: "email", maxLength: 254, minLength: 5 })
+		expect(published.properties["email"]).toMatchObject({ format: "email", maxLength: 254, minLength: 6 })
 	})
 })

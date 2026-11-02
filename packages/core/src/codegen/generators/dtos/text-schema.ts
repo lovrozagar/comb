@@ -26,28 +26,33 @@ function isIdText(annotations: FieldConstraints, field: FieldMeta): boolean {
 	return (field.combKind === "id" || field.foreignKey?.toId === true || untargetedRef) && !declares
 }
 
+/* the shortest value each format admits, measured from its check in a test (C3 of r19): an address
+   such as a@b.cc, and https:// with one character after it, or alone as an imageUri's prefix */
+export const TEXT_FLOORS: { email: number; imageUri: number; url: number } = { email: 6, imageUri: 8, url: 9 }
+
+/** The shortest value `annotations`' format admits; 0 for a text of no format */
+const floorOf = ({ email, imageUri, url }: FieldConstraints): number =>
+	url ? TEXT_FLOORS.url : email ? TEXT_FLOORS.email : imageUri ? TEXT_FLOORS.imageUri : 0
+
 /**
  * A written text's effective range, the one every emitter reads (C1 of r18): a password's own
- * [8, 72] under its declared bounds, bcrypt's 72 bytes the most; an id's 1 to 48; an email's
- * declared bounds; any other text's declared bounds, the column's length its max, and 1 its min
- * when it is required and no url
+ * [8, 72] under its declared bounds, bcrypt's 72 bytes the most; an id's 1 to 48; any other text's
+ * declared bounds, the column's length its max, its min at least its format's floor (C3 of r19),
+ * and 1 when it is required and of no format
  */
 function textRange(annotations: FieldConstraints, field: FieldMeta): TextRange {
 	if (annotations.password) return { max: Math.min(annotations.max ?? 72, 72), min: annotations.min ?? 8 }
 	if (isIdText(annotations, field)) return { max: ID_LENGTH.maxLength, min: ID_LENGTH.minLength }
 	const max = annotations.max ?? field.length
-	if (annotations.email) return { max, min: annotations.min }
-	return { max, min: annotations.min ?? (field.isNotNull && !annotations.url ? 1 : null) }
+	const floor = floorOf(annotations)
+	if (floor > 0) return { max, min: Math.max(annotations.min ?? 0, floor) }
+	return { max, min: annotations.min ?? (field.isNotNull ? 1 : null) }
 }
 
-/* the shortest value a url's https scheme admits: the scheme and one character */
-const URL_FLOOR = "https://".length + 1
-
-/** Refuses a range no value meets, an https URL's floor counted: the generated module would throw on import, or refuse every write */
-function refuseEmptyRange(annotations: FieldConstraints, field: FieldMeta, { max, min }: TextRange): void {
-	const floor = Math.max(min ?? 0, annotations.url ? URL_FLOOR : 0)
-	if (max !== null && floor > max)
-		throw new Error(`${field.name}: its length min ${floor} and max ${max} leave no value; widen them`)
+/** Refuses a range no value meets: the generated module would throw on import, or refuse every write */
+function refuseEmptyRange(field: FieldMeta, { max, min }: TextRange): void {
+	if (max !== null && min !== null && min > max)
+		throw new Error(`${field.name}: its length min ${min} and max ${max} leave no value; widen them`)
 }
 
 /* a format bounds what is written; what is read back is whatever the column holds: a password's
@@ -160,7 +165,7 @@ export function textBase(build: Build): string {
 	const { annotations, field, schemaType } = build
 	const mutative = isMutative(schemaType)
 	const range = textRange(annotations, field)
-	if (mutative) refuseEmptyRange(annotations, field, range)
+	if (mutative) refuseEmptyRange(field, range)
 	/* an email or a url is normalized first, then validated: z.email() would refuse the padded input,
 	 * and z.url() trims it unpublished. Checks run in chain order, and unlike a pipe the chain still
 	 * publishes the format and bounds */

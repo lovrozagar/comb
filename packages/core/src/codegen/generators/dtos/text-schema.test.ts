@@ -62,7 +62,7 @@ describe("textBase on a write", () => {
 		)
 		expect(parse(write).safeParse("eleven char").success).toBe(false)
 		expect(text('c.text("t", { email: true, max: 20 })', "update")).toBe(
-			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).max(20)',
+			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).min(6).max(20)',
 		)
 	})
 })

@@ -162,7 +162,7 @@ describe("generateFieldSchema: JSON", () => {
 			"z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)",
 		)
 		expect(schema("e", 'c.text("e", { email: true, min: 3, max: 50 }).notNull()', "create")).toBe(
-			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).min(3).max(50).meta(_m.email)',
+			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).min(6).max(50).meta(_m.email)',
 		)
 		expect(
 			generateFieldSchema(fieldOf("e", 'c.text("e", { email: true }, 80).notNull()', { length: 80 }), "read", {
@@ -170,7 +170,7 @@ describe("generateFieldSchema: JSON", () => {
 			}),
 		).toBe('z.string().meta({"x-comb-maxLength":80}).meta(_m.email)')
 		expect(schema("u", 'c.text("u", { url: true }).notNull()', "create")).toBe(
-			'z.string().trim().meta({"x-comb-transform":["trim"]}).check(z.url()).regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" }).meta({ format: "uri" }).meta(_m.url)',
+			'z.string().trim().meta({"x-comb-transform":["trim"]}).check(z.url()).min(9).regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" }).meta({ format: "uri" }).meta(_m.url)',
 		)
 		expect(schema("n", 'c.text("n", { trim: true, lowercase: true, max: 20 }).notNull()', "update")).toBe(
 			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).min(1).max(20).meta(_m.string).optional()',
@@ -263,7 +263,7 @@ describe("generateFieldSchema: what the 0.8.0 codegen review found (F1, F2, F15,
 
 	it("normalizes an email before validating it, on create and update (F15)", () => {
 		expect(schema("e", 'c.text("e", { email: true }).notNull()', "update")).toBe(
-			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).meta(_m.email).optional()',
+			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).min(6).meta(_m.email).optional()',
 		)
 	})
 
@@ -283,7 +283,7 @@ describe("generateFieldSchema: name and imageUri (F3)", () => {
 			'z.string().min(1).regex(/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" }).meta(_m.string)',
 		)
 		expect(schema("a", 'c.text("a", { imageUri: true })', "update")).toBe(
-			'z.string().regex(/^(?:https:\\/\\/|data:image\\/)/, { message: "Must be an HTTPS URL or a data:image/ URI" }).meta({ examples: ["https://example.com/a.png"] }).nullable().optional()',
+			'z.string().min(8).regex(/^(?:https:\\/\\/|data:image\\/)/, { message: "Must be an HTTPS URL or a data:image/ URI" }).meta({ examples: ["https://example.com/a.png"] }).nullable().optional()',
 		)
 		expect(schema("a", 'c.text("a", { imageUri: true })', "read")).toBe(
 			'z.string().meta({ examples: ["https://example.com/a.png"] }).nullable()',
@@ -413,7 +413,7 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "create")).toBe(
 			/* a pattern decides what the value looks like, so it gets no example (F18) */
-			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).regex(/@corp\\.io$/)',
+			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).min(6).regex(/@corp\\.io$/)',
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "read")).toBe("z.string()")
 	})
