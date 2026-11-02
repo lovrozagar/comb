@@ -71,6 +71,9 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<void> {
 	}
 }
 
+/** Whether `argv` asks for the one JSON object, in either spelling the parser reads as --json (K5 of r19) */
+const asksJson = (argv: readonly string[]): boolean => argv.some((arg) => arg === "--json" || arg.startsWith("--json="))
+
 /** Runs the comb CLI on `argv` (the arguments after the script) and returns its exit code. */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
 	try {
@@ -82,7 +85,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 			return 0
 		}
 		/* one --json rule for every command: a refusal no command reported is the one JSON object stdout promises */
-		if (argv.includes("--json") && error instanceof CliError && !(error instanceof Reported))
+		if (asksJson(argv) && error instanceof CliError && !(error instanceof Reported))
 			io.out(JSON.stringify({ applied: [], database: null, pending: [], refused: [error.message] }))
 		io.err(error instanceof Error ? error.message : String(error))
 		return error instanceof CliError ? error.exitCode : 1

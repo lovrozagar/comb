@@ -22,6 +22,9 @@ describe("migrate apply, check and status --json on an argv comb refuses", () =>
 			"--yes is a flag and takes no value; give it alone, or leave it out",
 		],
 		[["migrate", "baseline", "core", "--json"], "--json does not apply to migrate baseline"],
+		/* K5 of r19: the inline spelling asks for the object as the bare one does */
+		[["migrate", "status", "core", "--json=1"], "--json is a flag and takes no value; give it alone, or leave it out"],
+		[["migrate", "status", "core", "--json="], "--json is a flag and takes no value; give it alone, or leave it out"],
 	])("prints %j's refusal as the one JSON object on stdout, exiting 1", async (argv, refusal) => {
 		const io = makeIo(temp.make())
 		expect(await runCli(argv, io)).toBe(1)
