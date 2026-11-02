@@ -73,3 +73,33 @@ describe("pgWriteRule: a plain Postgres column's write rule by its data type (F5
 		expect(pgSchema('c.text("v")', "create")).not.toContain("z.iso")
 	})
 })
+
+type Schema = { anyOf?: Schema[]; items?: Schema } & Record<string, unknown>
+
+/** Each level's `items` of a read array `source`, down to the element alone: Postgres holds 6 */
+function levels(source: string): Schema[] {
+	const code = pgSchema(source, "read") as string
+	const property = z.toJSONSchema(new Function("z", `return ${code}`)(z) as z.ZodType, { io: "output" }) as Schema
+	const array = (schema: Schema | undefined): Schema | undefined =>
+		schema?.type === "array" ? schema : schema?.anyOf?.find((member) => member.type === "array")
+	const found: Schema[] = []
+	for (let at = array(property); at?.items !== undefined; at = array(at.items)) found.push(at.items)
+	return found
+}
+
+const xComb = (schema: Schema) =>
+	Object.fromEntries(Object.entries(schema).filter(([key]) => key.startsWith("x-comb-")))
+
+/* C3 of r20: §2.1 puts an array element's keys on `items` beside its anyOf, at every depth a reader stops at */
+describe("a Postgres read array's stated bounds", () => {
+	it.each([
+		['c.text("v", { max: 5 }).array()', { "x-comb-maxLength": 5 }],
+		['c.text("v", { max: 5 }).array().notNull()', { "x-comb-maxLength": 5 }],
+		['c.integer("v", { min: 1, max: 9 }).array()', { "x-comb-maximum": 9, "x-comb-minimum": 1 }],
+		['c.real("v", { min: 0, max: 1 }).array().notNull()', { "x-comb-maximum": 1, "x-comb-minimum": 0 }],
+	])("sit on items at every depth: %s", (source, keys) => {
+		const found = levels(source)
+		expect(found).toHaveLength(6)
+		expect(found.map(xComb)).toEqual(found.map(() => keys))
+	})
+})

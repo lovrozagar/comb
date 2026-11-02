@@ -27,6 +27,10 @@ export const row = pgTable("row", {
 	raw: jsonb("raw"),
 	rawn: jsonb("rawn").notNull(),
 	tags: text("tags").array(),
+	short: c.text("short", { max: 5 }).array(),
+	shortReq: c.text("short_req", { max: 5 }).array().notNull(),
+	nums: c.integer("nums", { max: 9, min: 1 }).array(),
+	ratios: c.real("ratios", { max: 1, min: 0 }).array().notNull(),
 })`
 
 type Schema = { anyOf?: Schema[]; items?: Schema } & Record<string, unknown>

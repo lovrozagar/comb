@@ -182,7 +182,7 @@ export function generateFieldSchema(
 	const one: Build = { ...build, field: { ...field, dimensions: 0, isNotNull: false } }
 	const element = baseOf(one)
 	/* the array takes null by its own column alone, whatever its elements take */
-	return finish(build, plain(arrayOf(dimensions, schemaType, elementOf(element))))
+	return finish(build, plain(arrayOf(dimensions, schemaType, element)))
 }
 
 /** An array's element: nullable, its keys on it, which publish on `items` */
@@ -205,14 +205,17 @@ const RECTANGULAR =
 	'.refine((value) => { const shape = (part: unknown): string => (globalThis.Array.isArray(part) ? `${part.length}[${[...new globalThis.Set(part.map(shape))].join("|")}]` : ""); return !shape(value).includes("|") }, { message: "Must be a rectangular array: every sub-array of a level the same length" })'
 
 /**
- * An array column of `item`s: written, in exactly its declared dimensions, rectangular past one; read,
- * in any depth Postgres holds, as it keeps no declared dimensions and a read never refuses a stored
- * row (F49)
+ * An array column of `element`s: written, in exactly its declared dimensions, rectangular past one;
+ * read, in any depth Postgres holds, as it keeps no declared dimensions and a read never refuses a
+ * stored row (F49). A read level's items is the element or a deeper array, a union that carries the
+ * element's keys, so every level's `items` states them and no anyOf member alone does (C3 of r20)
  */
-function arrayOf(dimensions: number, schemaType: SchemaType, item: string): string {
-	let nested = `z.array(${item})`
+function arrayOf(dimensions: number, schemaType: SchemaType, element: Base): string {
+	let nested = `z.array(${elementOf(element)})`
 	if (!isMutative(schemaType)) {
-		for (let depth = 1; depth < MAX_DIMENSIONS; depth++) nested = `z.array(z.union([${item}, ${nested}]))`
+		const bare = element.takesNull ? element.code : `${element.code}.nullable()`
+		for (let depth = 1; depth < MAX_DIMENSIONS; depth++)
+			nested = `z.array(z.union([${bare}, ${nested}])${metaOf(element.keys)})`
 		return nested
 	}
 	for (let depth = 1; depth < dimensions; depth++) nested = `z.array(${nested})`
