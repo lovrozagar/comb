@@ -40,7 +40,7 @@ export type VerifyDeps = {
 	getenv?: (name: string) => string | undefined
 	// package.json's `packageManager`, and the version of the bun running verify; a pin of another manager is not checked.
 	packageManager?: string | undefined
-	bunVersion?: string
+	bunVersion?: string | undefined
 	// The command's exit code, its output going to the terminal.
 	run: (command: readonly string[]) => number
 	git: (args: readonly string[]) => string
@@ -96,12 +96,12 @@ if (import.meta.main) {
 		verify({
 			gates: gates(
 				pkg.standards?.gates ?? [],
-				idle({ ci: process.env.CI === "true", has: (bin) => Bun.which(bin) !== null }),
+				idle({ ci: process.env["CI"] === "true", has: (bin) => spawnSync("which", [bin]).status === 0 }),
 			),
 			env: pkg.standards?.env ?? [],
 			getenv: (name) => process.env[name],
 			packageManager: pkg.packageManager,
-			bunVersion: Bun.version,
+			bunVersion: process.versions["bun"],
 			run: (command) => spawnSync(command[0]!, command.slice(1), { stdio: "inherit" }).status ?? 1,
 			git: (args) => spawnSync("git", args, { encoding: "utf8" }).stdout,
 			stamp: (path, body) => {
