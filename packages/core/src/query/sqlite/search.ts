@@ -102,6 +102,8 @@ type SpellfixRow = { word: string }
 
 type SpellfixDb = {
 	all: (query: SQL) => Promise<Array<SpellfixRow>>
+	/** the client drizzle's wrapper holds (d1, libsql, bun:sqlite), which keys the spellfix1 probe */
+	$client?: unknown
 }
 
 type SpellfixSearch = FtsSource & {
@@ -109,36 +111,42 @@ type SpellfixSearch = FtsSource & {
 	maxEditDistance?: number
 	/** corrections taken per term (default 3) */
 	maxCorrections?: number
+	/** false where spellfix1 is never loaded (D1): the terms are searched as typed and nothing is probed (Q4 of r20) */
+	spellfix?: boolean | undefined
 	spellfixTable: string
 }
 
 /* SQLite's words for a function no extension registered: spellfix1 registers editdist3 */
 const NO_EDITDIST3 = /\bno such function: editdist3\b/
 
-// lookup-table: whether each database has spellfix1 loaded, asked once, a failure to ask never kept
+// lookup-table: whether each database client has spellfix1 loaded, asked once, a failure to ask never kept
 const LOADED: WeakMap<object, Promise<boolean>> = /* @__PURE__ */ new WeakMap()
 
+/** What a probe's answer is kept under: the client a drizzle wrapper holds, so a wrapper per request asks once (Q4 of r20), else `db` */
+const clientOf = (db: SpellfixDb): object => (typeof db.$client === "object" && db.$client !== null ? db.$client : db)
+
 /**
- * Whether `db` has spellfix1 loaded, asked once per database before any spellfix query: editdist3,
+ * Whether `db` has spellfix1 loaded, asked once per client before any spellfix query: editdist3,
  * the function it registers, reads no table, so its absence is never a misspelled vocabulary
  * table (K1 of r19). D1's authorizer refuses pragma_module_list. Any other failure is thrown.
  */
 function spellfixLoaded(db: SpellfixDb): Promise<boolean> {
-	const known = LOADED.get(db)
+	const key = clientOf(db)
+	const known = LOADED.get(key)
 	if (known !== undefined) return known
 	/* in an async function, so a driver that throws as it prepares (drizzle's bun:sqlite) rejects as the others do */
 	const asked = (async () => db.all(sql`SELECT editdist3('a', 'b') AS d`))().then(
 		() => true,
 		(error: unknown) => {
-			LOADED.delete(db)
+			LOADED.delete(key)
 			if (errorTexts(error).some((text) => NO_EDITDIST3.test(text))) {
-				LOADED.set(db, Promise.resolve(false))
+				LOADED.set(key, Promise.resolve(false))
 				return false
 			}
 			throw error
 		},
 	)
-	LOADED.set(db, asked)
+	LOADED.set(key, asked)
 	return asked
 }
 
@@ -166,7 +174,7 @@ async function buildFtsWhereWithSpellfix(
 	const terms = ftsTerms(query, search.folded)
 	if (terms.length === 0) return termless(query)
 	/* without spellfix1 the terms are searched as typed (README §Search) */
-	const loaded = terms.some((term) => term.length >= 3) && (await spellfixLoaded(db))
+	const loaded = search.spellfix !== false && terms.some((term) => term.length >= 3) && (await spellfixLoaded(db))
 	const groups: string[] = []
 	for (const term of terms) {
 		const found = loaded && term.length >= 3 ? await corrections(db, term, search) : []

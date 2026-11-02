@@ -242,12 +242,16 @@ type SpellfixRow = {
 };
 type SpellfixDb = {
     all: (query: SQL) => Promise<Array<SpellfixRow>>;
+    /** the client drizzle's wrapper holds (d1, libsql, bun:sqlite), which keys the spellfix1 probe */
+    $client?: unknown;
 };
 type SpellfixSearch = FtsSource & {
     /** editdist3 bound below which a word counts as a correction (default 300) */
     maxEditDistance?: number;
     /** corrections taken per term (default 3) */
     maxCorrections?: number;
+    /** false where spellfix1 is never loaded (D1): the terms are searched as typed and nothing is probed (Q4 of r20) */
+    spellfix?: boolean | undefined;
     spellfixTable: string;
 };
 /**

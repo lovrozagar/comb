@@ -299,6 +299,24 @@ describe("buildFtsWhereWithSpellfix when spellfix1 is not loaded (K1 of r19)", (
 		expect(flaky.calls).toEqual(["probe", "probe", "query"])
 	})
 
+	/* Q4 of r20: a Worker builds drizzle(env.DB) per request, each wrapper over the one client */
+	it("probes once per client, not per wrapper", async () => {
+		const { calls, db } = probed(() => {
+			throw wrapped("no such function: editdist3")
+		})
+		const client = {}
+		await buildFtsWhereWithSpellfix({ ...db, $client: client }, SOURCE, "hello")
+		await buildFtsWhereWithSpellfix({ ...db, $client: client }, SOURCE, "world")
+		expect(calls).toEqual(["probe"])
+	})
+
+	it("spellfix: false runs no probe and no spellfix query, searching the terms as typed", async () => {
+		const { calls, db } = probed(() => [])
+		const where = await buildFtsWhereWithSpellfix(db, { ...SOURCE, spellfix: false }, "hello")
+		expect(String(compile(where as SQL).params[0])).toBe('"hello"*')
+		expect(calls).toEqual([])
+	})
+
 	it("asks nothing for terms too short to correct", async () => {
 		const { calls, db } = probed(() => [])
 		await buildFtsWhereWithSpellfix(db, SOURCE, "a ab")
