@@ -13,12 +13,19 @@ import { stated, textBase } from "./text-schema.ts"
 /* Postgres stores c.integer in int4 */
 const INT4 = { max: 2147483647, min: -2147483648 }
 
-/** A builder's answer: the Zod base, or `undefined` when the column is not its kind. */
-type Built = string | undefined
+/**
+ * A builder's answer: the Zod base and whether it takes null itself (a read float, a written c.json's
+ * union), so a nullable column adds no second null; `undefined` when the column is not its kind (C1 of r19)
+ */
+type Base = { code: string; takesNull: boolean }
+type Built = Base | undefined
+
+/** A base that takes no null of its own */
+const plain = (code: string): Base => ({ code, takesNull: false })
 
 /** A c.enum, a pgEnum or an enum text column, its values read at runtime and written out */
 function enumBase({ field }: Build): Built {
-	return field.enumValues === null ? undefined : `z.enum(${JSON.stringify(field.enumValues)})`
+	return field.enumValues === null ? undefined : plain(`z.enum(${JSON.stringify(field.enumValues)})`)
 }
 
 /* no engine stores U+0000 or a lone UTF-16 surrogate as sent: jsonb refuses both, Postgres text
@@ -41,14 +48,15 @@ const JSON_NUL_CHECK =
 function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const schema = field.combKind === "json" ? field.jsonSchemaName : field.dataType === "object json" ? "z.json()" : null
 	if (schema === null) return undefined
-	if (!isMutative(schemaType)) return schema
+	if (!isMutative(schemaType)) return plain(schema)
 	const limit = annotations.maxBytes
 	const rules = `.meta({ "x-comb-text": ${JSON.stringify(STORABLE_TEXT_RULE)}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
 	const refined = `${schema}${jsonChecks(limit)}`
-	if (field.combKind !== "json") return `${refined}${rules}`
+	if (field.combKind !== "json") return plain(`${refined}${rules}`)
 	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63);
 	   null is its other member when the column takes null, so the field publishes one flat anyOf (C4 of r18) */
-	return `z.union([${refined}${isRequired(field) ? "" : ", z.null()"}])${rules}`
+	const nullable = !isRequired(field)
+	return { code: `z.union([${refined}${nullable ? ", z.null()" : ""}])${rules}`, takesNull: nullable }
 }
 
 /**
@@ -126,7 +134,15 @@ function integerOf(annotations: FieldConstraints, range: Range, schemaType: Sche
 const READ_FLOAT =
 	'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: void 0, type: "null" })])'
 
-function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
+function numberBase(build: Build): Built {
+	const code = numberCode(build)
+	if (code === undefined) return undefined
+	/* a read float's base takes null already, so a nullable one publishes null once (C6 of r17) */
+	return { code, takesNull: code.startsWith(READ_FLOAT) }
+}
+
+/** numberBase's Zod code */
+function numberCode({ annotations, dialect, field, schemaType }: Build): string | undefined {
 	if (!isNumeric(field)) return field.dataType === "boolean" ? "z.boolean()" : undefined
 	const { max, min } = annotations
 	const kind = field.combKind
@@ -148,8 +164,11 @@ function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 }
 
 /** A plain Postgres column's write rule by its data type (F50); a read keeps the plain type (F65) */
-const pgTypeBase = ({ dialect, field, schemaType }: Build): Built =>
-	dialect === "postgres" && field.combKind === null && isMutative(schemaType) ? pgWriteRule(field) : undefined
+function pgTypeBase({ dialect, field, schemaType }: Build): Built {
+	const rule =
+		dialect === "postgres" && field.combKind === null && isMutative(schemaType) ? pgWriteRule(field) : undefined
+	return rule === undefined ? undefined : plain(rule)
+}
 
 const BUILDERS = [enumBase, jsonBase, pgTypeBase, numberBase]
 
@@ -165,19 +184,12 @@ function optionalOnCreate(field: FieldMeta, required: boolean, dialect: Build["d
 	return field.constraints.autogenerate || field.hasDefault || field.identity || isRowid(field, dialect)
 }
 
-/*
- * a read float's base takes null already, so a nullable one publishes null once (C6 of r17), and so
- * does a written c.json's union, null its member when the column takes it (C4 of r18)
- */
-const takesNull = ({ field, schemaType }: Build, base: string): boolean =>
-	base.startsWith(READ_FLOAT) || (field.combKind === "json" && isMutative(schemaType))
-
-/** `base` with its OpenAPI example, nullability and the schema type's optionality. */
-function finish(build: Build, base: string): string {
+/** `base` with its OpenAPI example, nullability unless the base takes null itself, and the schema type's optionality. */
+function finish(build: Build, base: Base): string {
 	const { dialect, field, schemaType } = build
 	const example = generateExampleMeta(field)
 	const required = isRequired(field)
-	const zodType = `${base}${example?.code ?? ""}${required || takesNull(build, base) ? "" : ".nullable()"}`
+	const zodType = `${base.code}${example?.code ?? ""}${required || base.takesNull ? "" : ".nullable()"}`
 	if (schemaType === "read") return zodType
 	if (schemaType === "create" && !optionalOnCreate(field, required, dialect)) return zodType
 	return `${zodType}.optional()`
@@ -201,16 +213,20 @@ export function generateFieldSchema(
 	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49) */
 	const one: Build = { ...build, field: { ...field, dimensions: 0, isNotNull: false } }
 	const element = baseOf(one)
-	return finish(build, arrayOf(dimensions, schemaType, takesNull(one, element) ? element : `${element}.nullable()`))
+	/* the array takes null by its own column alone, whatever its elements take */
+	return finish(
+		build,
+		plain(arrayOf(dimensions, schemaType, element.takesNull ? element.code : `${element.code}.nullable()`)),
+	)
 }
 
 /** The Zod base of a column of one value: the first builder's that takes it, else text */
-function baseOf(build: Build): string {
+function baseOf(build: Build): Base {
 	for (const builder of BUILDERS) {
 		const base = builder(build)
 		if (base !== undefined) return base
 	}
-	return textBase(build)
+	return plain(textBase(build))
 }
 
 /* Postgres keeps at most 6 dimensions (MAXDIM) */

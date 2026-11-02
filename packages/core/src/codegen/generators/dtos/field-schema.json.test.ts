@@ -2,6 +2,7 @@
  * C4 and C5 of r18: a written c.json publishes one flat union, null in it when the column takes null,
  * and a registered schema stays a bare `$ref` whatever rules it takes, its rules in x- keys beside it.
  */
+import { ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { fieldOf } from "../../__fixtures__/runtime.ts"
@@ -65,5 +66,36 @@ describe("a written c.json's rules", () => {
 			"Must not contain U+0000 or an unpaired surrogate",
 		])
 		expect(messages({ bio: 1 })).not.toEqual([])
+	})
+})
+
+/** The generated Postgres schema of a c.json array column of Profile written as `raw`, evaluated */
+function profiles(raw: string, schemaType: SchemaType): z.ZodType {
+	const field = { ...fieldOf("p", raw, { dialect: "postgres", scope: { Profile } }), jsonSchemaName: "Profile" }
+	const code = generateFieldSchema(field, schemaType, {
+		dialect: "postgres",
+		imports: { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() },
+	}) as string
+	/* the generated refine of a grid is TypeScript, typed for a consumer's noImplicitAny */
+	return new Function("z", "Profile", ts.transpile(`return ${code}`))(z, Profile) as z.ZodType
+}
+
+/* C1 of r19: an array's element takes null as Postgres stores it, and the array takes null by its own column alone */
+describe("a written nullable c.json array (C1)", () => {
+	it.each([
+		["one dimension", 'c.json("p", Profile).array()', [{ bio: "a" }, null]],
+		["two dimensions", 'c.json("p", Profile).array("[][]")', [[{ bio: "a" }, null]]],
+	])("takes null for the column on create and update, in %s, and publishes it beside the array", (_, raw, value) => {
+		for (const type of ["create", "update"] as const) {
+			const written = profiles(raw, type)
+			expect([written.safeParse(null).success, written.safeParse(value).success], type).toEqual([true, true])
+			const { p } = published(written)
+			expect(p["anyOf"], type).toEqual([expect.objectContaining({ type: "array" }), { type: "null" }])
+		}
+	})
+
+	it("refuses null for a NOT NULL array, its elements still taking null", () => {
+		const written = profiles('c.json("p", Profile).array().notNull()', "create")
+		expect([written.safeParse(null).success, written.safeParse([null]).success]).toEqual([false, true])
 	})
 })

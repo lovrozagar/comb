@@ -27,4 +27,12 @@ describe("generateFieldSchema: a nullable read float", () => {
 		expect(nullable.safeParse(Number.NaN).success).toBe(false)
 		expect(array('real("a").array().notNull()', "read")).not.toContain(".nullable()")
 	})
+
+	/* C1 of r19: an array of read floats takes null by its own column, its elements' null never standing for it */
+	it("takes null for a nullable array of read floats, and refuses it for a NOT NULL one", () => {
+		const nullable = evaluate(array('real("a").array()', "read") as string)
+		expect([nullable.safeParse(null).success, nullable.safeParse([null, 1.5]).success]).toEqual([true, true])
+		const required = evaluate(array('real("a").array().notNull()', "read") as string)
+		expect([required.safeParse(null).success, required.safeParse([null]).success]).toEqual([false, true])
+	})
 })
