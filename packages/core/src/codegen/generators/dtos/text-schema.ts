@@ -1,13 +1,16 @@
 /** The Zod expression of a text column: its kind, transforms and bounds, by schema type. */
 import type { FieldConstraints } from "../../annotations.ts"
 import type { FieldMeta } from "../../analyzer-types.ts"
-import type { Build } from "./build-types.ts"
+import { type Base, type Build, plain } from "./build-types.ts"
 import { STORABLE_TEXT_RULE } from "../../../storable-text.ts"
 import { isMutative } from "./schema-type.ts"
 
 /* the text guard every written text takes: comb's own isStorableText, which the shared file imports (G1), as a
    refine sits in the structural core F59 shares there */
-const TEXT_GUARD = `.refine(comb.isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${STORABLE_TEXT_RULE}" })`
+const TEXT_GUARD = `.refine(comb.isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" })`
+
+/* the key that says what TEXT_GUARD refuses */
+const GUARD_KEY = { "x-comb-text": STORABLE_TEXT_RULE }
 
 /** A written text's length bounds as comb holds them, declared and its own together; null where none */
 type TextRange = { max: number | null; min: number | null }
@@ -86,15 +89,16 @@ export function transformsOf(annotations: FieldConstraints, mutative: boolean): 
 	return [...(annotations.trim ? (["trim"] as const) : []), ...casing]
 }
 
-/**
- * Transforms first (normalize input), then validation (check bounds), so the published bounds bind
- * the rewritten value. zod publishes no overwrite, so the list is published as `x-comb-transform`,
- * from the one list the chain is written from (C2 of r18)
- */
-function transforms(annotations: FieldConstraints, mutative: boolean): string {
+/** Transforms first (normalize input), then validation (check bounds), so the published bounds bind the rewritten value */
+const transforms = (annotations: FieldConstraints, mutative: boolean): string =>
+	transformsOf(annotations, mutative)
+		.map((transform) => CHAIN[transform])
+		.join("")
+
+/** zod publishes no overwrite, so the list is published as `x-comb-transform`, from the one list the chain is written from (C2 of r18) */
+function transformKey(annotations: FieldConstraints, mutative: boolean): Record<string, unknown> {
 	const list = transformsOf(annotations, mutative)
-	if (list.length === 0) return ""
-	return `${list.map((transform) => CHAIN[transform]).join("")}.meta(${JSON.stringify({ "x-comb-transform": list })})`
+	return list.length === 0 ? {} : { "x-comb-transform": list }
 }
 
 /** A range's bounds as zod checks */
@@ -111,17 +115,32 @@ function emailBounds(annotations: FieldConstraints, range: TextRange): string {
  * Bounds a read states and never enforces, as `x-comb-*` meta: a read never refuses a stored row,
  * which an older rule, a migration or an import may have stored past them (F65)
  */
-export function stated(bounds: Record<string, number | null>): string {
-	const entries = Object.entries(bounds).filter(([, bound]) => bound !== null)
-	if (entries.length === 0) return ""
-	return `.meta(${JSON.stringify(Object.fromEntries(entries.map(([rule, bound]) => [`x-comb-${rule}`, bound])))})`
+export const stated = (bounds: Record<string, number | null>): Record<string, unknown> =>
+	Object.fromEntries(
+		Object.entries(bounds)
+			.filter(([, bound]) => bound !== null)
+			.map(([rule, bound]) => [`x-comb-${rule}`, bound]),
+	)
+
+/* the length a Postgres column holds a read text to */
+const heldLength = ({ dialect, field }: Build): number | null => (dialect === "postgres" ? field.length : null)
+
+/* a read text's stated bounds: each declared one, a length no column holds it to among them (F65) */
+function readKeys(build: Build): Record<string, unknown> {
+	const { annotations, field } = build
+	const max = annotations.max ?? (heldLength(build) === null ? field.length : null)
+	return stated({ maxLength: max, minLength: annotations.min })
 }
 
-/* a read text's bounds: a Postgres length the column holds it to, else each declared one stated (F65) */
-function readBounds({ annotations, dialect, field }: Build): string {
-	const held = dialect === "postgres" ? field.length : null
-	const max = annotations.max ?? (held === null ? field.length : null)
-	return (held === null ? "" : `.max(${held})`) + stated({ maxLength: max, minLength: annotations.min })
+/** The `x-comb-*` keys a text publishes, which finish writes on the property itself (C4 of r19) */
+function textKeys(build: Build): Record<string, unknown> {
+	const { annotations, field, schemaType } = build
+	const mutative = isMutative(schemaType)
+	const transform = transformKey(annotations, mutative)
+	if (annotations.password) return {}
+	if (isIdText(annotations, field)) return mutative ? { ...transform, ...GUARD_KEY } : stated(ID_LENGTH)
+	if (!mutative) return readKeys(build)
+	return annotations.email ? transform : { ...transform, ...GUARD_KEY }
 }
 
 /** The checks a name or an image URI takes on a write; what is read back is whatever the column holds */
@@ -141,8 +160,11 @@ function textBounds(build: Build, range: TextRange): string {
 	const mutative = isMutative(schemaType)
 	if (annotations.password) return mutative && annotations.pattern !== null ? `.regex(${annotations.pattern})` : ""
 	/* \S matches U+0000 and either half of a pair, so a written id takes the text guard after it (F48) */
-	if (isIdText(annotations, field)) return mutative ? `.regex(/^\\S{1,48}$/)${TEXT_GUARD}` : stated(ID_LENGTH)
-	if (!mutative) return readBounds(build)
+	if (isIdText(annotations, field)) return mutative ? `.regex(/^\\S{1,48}$/)${TEXT_GUARD}` : ""
+	if (!mutative) {
+		const held = heldLength(build)
+		return held === null ? "" : `.max(${held})`
+	}
 	if (annotations.email) return emailBounds(annotations, range)
 	return rangeChecks(range) + writeChecks(annotations)
 }
@@ -161,7 +183,7 @@ function writeChecks(annotations: FieldConstraints): string {
 }
 
 /** A c.text or c.id column, or any other string column: what every builder before it left */
-export function textBase(build: Build): string {
+export function textBase(build: Build): Base {
 	const { annotations, field, schemaType } = build
 	const mutative = isMutative(schemaType)
 	const range = textRange(annotations, field)
@@ -171,7 +193,13 @@ export function textBase(build: Build): string {
 	 * publishes the format and bounds */
 	if ((annotations.email || annotations.url) && mutative) {
 		const format = annotations.email ? "z.email()" : "z.url()"
-		return `z.string()${transforms(annotations, mutative)}.check(${format})${textBounds(build, range)}`
+		return plain(
+			`z.string()${transforms(annotations, mutative)}.check(${format})${textBounds(build, range)}`,
+			textKeys(build),
+		)
 	}
-	return stringKind(annotations, range, mutative) + transforms(annotations, mutative) + textBounds(build, range)
+	return plain(
+		stringKind(annotations, range, mutative) + transforms(annotations, mutative) + textBounds(build, range),
+		textKeys(build),
+	)
 }

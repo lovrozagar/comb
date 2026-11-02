@@ -90,8 +90,9 @@ ordinary discriminated union: `if (m.kind === "entity")` narrows, with no extra 
 ### 2.1 Field keys
 
 Beside `x-comb` on the object, a field's own JSON Schema may carry flat `x-comb-*` keys for rules
-JSON Schema cannot state. Each sits on the field's value schema: for a nullable field, on the
-`anyOf` branch that is not `{ "type": "null" }`, beside the bounds it qualifies.
+JSON Schema cannot state. Every one sits in one place, the property's own schema, beside the
+`anyOf` of a nullable field and never inside one of its members, so a reader finds it at
+`properties[name]["x-comb-*"]`; an array element's rules sit on `items` the same way.
 
 - `x-comb-transform`: the rewrites a written text takes before any check, in the order applied;
   an email's is `["trim", "lowercase"]`, a url's `["trim"]`. A read publishes none. See §6.9 for
@@ -457,9 +458,11 @@ export const post = sqliteTable("post", {
 export const postDtoReadSchema = z
 	.object({
 		...timestampsCreatedUpdatedDeletedReadSnakeCase,
-		id: _z_bcefdca8.meta({ examples: ["pst_01h5a3g8k9m2n4p6q8r0t2v4x6"] }),
+		id: _str
+			.meta({ examples: ["pst_01h5a3g8k9m2n4p6q8r0t2v4x6"] })
+			.meta({ "x-comb-maxLength": 48, "x-comb-minLength": 1 }),
 		status: _z_7520e2bc.meta({ examples: ["draft"] }),
-		title: _z_06583aa2.meta(_m.string).nullable(),
+		title: _str.meta(_m.string).nullable().meta({ "x-comb-maxLength": 200 }),
 	})
 	.meta(
 		combMeta({
@@ -479,8 +482,8 @@ export const postDtoReadSchema = z
 
 This is the generated file's own text (a test reads it from the generator, so it cannot drift).
 The generator hoists repeated expressions into `_shared` under names hashed from their code
-(`_z_bcefdca8` is the id's rules, `_z_06583aa2` the title's); a read states a declared bound as
-`x-comb-maxLength` and enforces only what the column holds. `title` is nullable because the
+(`_z_7520e2bc` is the status's rules); a read states a declared bound as `x-comb-maxLength`, on
+the property itself (§2.1), and enforces only what the column holds. `title` is nullable because the
 column is not `.notNull()`. Every generated column is
 also immutable: the update body has no key, no timestamps and no `deleted_at`. The create body
 leaves out every generated column too, so a client chooses no id and backdates no row, and takes

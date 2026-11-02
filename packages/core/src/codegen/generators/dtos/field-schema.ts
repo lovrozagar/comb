@@ -2,7 +2,7 @@
 import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { FieldConstraints } from "../../annotations.ts"
 import { isGenerated } from "../../entity-meta.ts"
-import type { Build } from "./build-types.ts"
+import { type Base, type Build, plain } from "./build-types.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { generateExampleMeta } from "./example-meta.ts"
 import { pgWriteRule } from "./pg-types.ts"
@@ -13,15 +13,8 @@ import { stated, textBase } from "./text-schema.ts"
 /* Postgres stores c.integer in int4 */
 const INT4 = { max: 2147483647, min: -2147483648 }
 
-/**
- * A builder's answer: the Zod base and whether it takes null itself (a read float, a written c.json's
- * union), so a nullable column adds no second null; `undefined` when the column is not its kind (C1 of r19)
- */
-type Base = { code: string; takesNull: boolean }
+/** A builder's answer: its base, or `undefined` when the column is not its kind */
 type Built = Base | undefined
-
-/** A base that takes no null of its own */
-const plain = (code: string): Base => ({ code, takesNull: false })
 
 /** A c.enum, a pgEnum or an enum text column, its values read at runtime and written out */
 function enumBase({ field }: Build): Built {
@@ -53,12 +46,12 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 	if (!isMutative(schemaType)) return plain(declared ? (field.jsonSchemaName as string) : "z.json()")
 	const schema = declared ? field.jsonSchemaName : "jsonValueSchema"
 	const limit = annotations.maxBytes
-	const rules = `.meta({ "x-comb-text": ${JSON.stringify(STORABLE_TEXT_RULE)}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
+	const keys = { "x-comb-text": STORABLE_TEXT_RULE, ...(limit === null ? {} : { "x-comb-maxBytes": limit }) }
 	const refined = `${schema}${jsonChecks(limit)}`
 	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63);
 	   null is its other member when the column takes null, so the field publishes one flat anyOf (C4 of r18) */
 	const nullable = !isRequired(field)
-	return { code: `z.union([${refined}${nullable ? ", z.null()" : ""}])${rules}`, takesNull: nullable }
+	return { code: `z.union([${refined}${nullable ? ", z.null()" : ""}])`, keys, takesNull: nullable }
 }
 
 /**
@@ -123,10 +116,15 @@ function refuseNoInteger(name: string, annotations: FieldConstraints, range: Ran
  * An integer: written, the declared bounds clamped to what the column holds; read, what the column
  * holds, the declared bounds stated (F65)
  */
-function integerOf(annotations: FieldConstraints, range: Range, schemaType: SchemaType): string {
+function integerOf(annotations: FieldConstraints, range: Range, schemaType: SchemaType): Base {
 	if (isRead(schemaType))
-		return `z.number().int().min(${range.min}).max(${range.max})${stated({ maximum: annotations.max, minimum: annotations.min })}`
-	return `z.number().int().min(${clamp(annotations.min, range.min, Math.max)}).max(${clamp(annotations.max, range.max, Math.min)})`
+		return plain(
+			`z.number().int().min(${range.min}).max(${range.max})`,
+			stated({ maximum: annotations.max, minimum: annotations.min }),
+		)
+	return plain(
+		`z.number().int().min(${clamp(annotations.min, range.min, Math.max)}).max(${clamp(annotations.max, range.max, Math.min)})`,
+	)
 }
 
 /* a stored float may be an infinity, which z.number() refuses, which JSON writes as null, and which D1
@@ -145,16 +143,16 @@ function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 	/* a date before 1970 is a negative epoch, which both engines store (F11) */
 	if (kind === "timestamp") {
 		refuseNoInteger(field.name, annotations, SAFE)
-		return plain(integerOf(annotations, SAFE, schemaType))
+		return integerOf(annotations, SAFE, schemaType)
 	}
 	const integer = kind === null ? field.dataType.startsWith("number int") : kind === "integer" || kind === "serialId"
 	if (integer) {
 		const range = integerRange(field, dialect)
 		refuseNoInteger(field.name, annotations, range)
-		return plain(integerOf(annotations, range, schemaType))
+		return integerOf(annotations, range, schemaType)
 	}
 	/* a read float's base takes null already, so a nullable one publishes null once (C6 of r17) */
-	if (isRead(schemaType)) return { code: `${READ_FLOAT}${stated({ maximum: max, minimum: min })}`, takesNull: true }
+	if (isRead(schemaType)) return { code: READ_FLOAT, keys: stated({ maximum: max, minimum: min }), takesNull: true }
 	return plain(`z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`)
 }
 
@@ -179,12 +177,16 @@ function optionalOnCreate(field: FieldMeta, required: boolean, dialect: Build["d
 	return field.constraints.autogenerate || field.hasDefault || field.identity || isRowid(field, dialect)
 }
 
-/** `base` with its OpenAPI example, nullability unless the base takes null itself, and the schema type's optionality. */
+/** The `.meta` that puts `keys` on the schema it follows; nothing for none */
+const metaOf = (keys: Record<string, unknown>): string =>
+	Object.keys(keys).length === 0 ? "" : `.meta(${JSON.stringify(keys)})`
+
+/** `base` with its OpenAPI example, nullability unless the base takes null itself, its keys after it (C4 of r19), and the schema type's optionality. */
 function finish(build: Build, base: Base): string {
 	const { dialect, field, schemaType } = build
 	const example = generateExampleMeta(field)
 	const required = isRequired(field)
-	const zodType = `${base.code}${example?.code ?? ""}${required || base.takesNull ? "" : ".nullable()"}`
+	const zodType = `${base.code}${example?.code ?? ""}${required || base.takesNull ? "" : ".nullable()"}${metaOf(base.keys)}`
 	if (schemaType === "read") return zodType
 	if (schemaType === "create" && !optionalOnCreate(field, required, dialect)) return zodType
 	return `${zodType}.optional()`
@@ -209,11 +211,12 @@ export function generateFieldSchema(
 	const one: Build = { ...build, field: { ...field, dimensions: 0, isNotNull: false } }
 	const element = baseOf(one)
 	/* the array takes null by its own column alone, whatever its elements take */
-	return finish(
-		build,
-		plain(arrayOf(dimensions, schemaType, element.takesNull ? element.code : `${element.code}.nullable()`)),
-	)
+	return finish(build, plain(arrayOf(dimensions, schemaType, elementOf(element))))
 }
+
+/** An array's element: nullable, its keys on it, which publish on `items` */
+const elementOf = (element: Base): string =>
+	`${element.code}${element.takesNull ? "" : ".nullable()"}${metaOf(element.keys)}`
 
 /** The Zod base of a column of one value: the first builder's that takes it, else text */
 function baseOf(build: Build): Base {
@@ -221,7 +224,7 @@ function baseOf(build: Build): Base {
 		const base = builder(build)
 		if (base !== undefined) return base
 	}
-	return plain(textBase(build))
+	return textBase(build)
 }
 
 /* Postgres keeps at most 6 dimensions (MAXDIM) */

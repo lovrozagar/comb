@@ -27,14 +27,6 @@ export function rewriteBaseTypes(zodType: string): string {
 	return alias === undefined ? zodType : alias[1] + zodType.slice(alias[0].length)
 }
 
-/** `zodType` split into its layers: the base, then `.nullable()`, then `.optional()`. */
-function layersOf(zodType: string): { base: string; nullable: string; optional: string } {
-	const optional = zodType.endsWith(".optional()") ? ".optional()" : ""
-	const rest = zodType.slice(0, zodType.length - optional.length)
-	const nullable = rest.endsWith(".nullable()") ? ".nullable()" : ""
-	return { base: rest.slice(0, rest.length - nullable.length), nullable, optional }
-}
-
 /**
  * A zodType split into its core and the `.meta(...)` that ends it; the whole zodType and no meta
  * when it ends otherwise, as an array whose elements carry the meta does: the last `.meta(` in it
@@ -52,6 +44,20 @@ function stripMeta(zodType: string): [string, string] {
 	return [zodType, ""]
 }
 
+/**
+ * `zodType` split into its layers: the base, `.nullable()`, the `x-comb-*` keys, which finish writes
+ * after it so they publish beside the anyOf (C4 of r19), then `.optional()`. The keys stay with the
+ * field, so a core is shared whatever keys its columns publish
+ */
+function layersOf(zodType: string): { base: string; keys: string; nullable: string; optional: string } {
+	const optional = zodType.endsWith(".optional()") ? ".optional()" : ""
+	const [before, last] = stripMeta(zodType.slice(0, zodType.length - optional.length))
+	const keys = last.startsWith('.meta({"x-comb-') ? last : ""
+	const rest = keys === "" ? zodType.slice(0, zodType.length - optional.length) : before
+	const nullable = rest.endsWith(".nullable()") ? ".nullable()" : ""
+	return { base: rest.slice(0, rest.length - nullable.length), keys, nullable, optional }
+}
+
 /** Whether `zodType` names none of the identifiers the shared file cannot import (enum consts, schemas). */
 function canBeShared(zodType: string, external: ReadonlySet<string>): boolean {
 	return [...external].every((id) => !new RegExp(`(?<![\\w$.])${id.replace(/[$]/g, "\\$")}(?![\\w$])`).test(zodType))
@@ -64,7 +70,11 @@ function usageOf(tables: TableInfo[], external: ReadonlySet<string>): Usage {
 	const usage: Usage = { counts: new Map() }
 	for (const table of tables) {
 		for (const { zodType } of table.fields) {
-			if (canBeShared(zodType, external)) usage.counts.set(zodType, (usage.counts.get(zodType) ?? 0) + 1)
+			if (!canBeShared(zodType, external)) continue
+			/* a field's keys stay with it, so what it counts toward is its shape without them */
+			const { base, nullable, optional } = layersOf(zodType)
+			const shape = base + nullable + optional
+			usage.counts.set(shape, (usage.counts.get(shape) ?? 0) + 1)
 		}
 	}
 	return usage
@@ -152,19 +162,19 @@ export function buildSharedSchemas(tables: TableInfo[], imports: ImportsMeta): M
 
 /**
  * Rewrite an inline zodType to reference shared _z* constants where possible.
- * Decomposes into core + .meta() + .nullable() + .optional(), then checks if
+ * Decomposes into core + .meta() + .nullable() + keys + .optional(), then checks if
  * the core (or core+meta, or core+meta+nullable) matches a shared constant.
  */
 export function rewriteWithShared(zodType: string, sharedSchemas: Map<string, SharedSchema>): string {
 	const full = sharedSchemas.get(zodType)
 	if (full) return full.name
-	const { base, nullable, optional } = layersOf(zodType)
+	const { base, keys, nullable, optional } = layersOf(zodType)
 	const withNullable = sharedSchemas.get(base + nullable)
-	if (withNullable) return withNullable.name + optional
+	if (withNullable) return withNullable.name + keys + optional
 	const shared = sharedSchemas.get(base)
-	if (shared) return shared.name + nullable + optional
+	if (shared) return shared.name + nullable + keys + optional
 	const [core, meta] = stripMeta(base)
 	const sharedCore = meta ? sharedSchemas.get(core) : undefined
-	if (sharedCore) return sharedCore.name + meta + nullable + optional
+	if (sharedCore) return sharedCore.name + meta + nullable + keys + optional
 	return rewriteBaseTypes(zodType)
 }

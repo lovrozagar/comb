@@ -20,10 +20,6 @@ export const member = sqliteTable("member", {
 })
 `
 
-/* a nullable field publishes its value's schema, the transforms beside its bounds, as anyOf's non-null branch */
-const value = (field: Record<string, unknown>) =>
-	(field["anyOf"] as Array<Record<string, unknown>> | undefined)?.find((branch) => branch["type"] !== "null") ?? field
-
 describe("a generated DTO's written text transforms", () => {
 	it("are published in order on the create and update schemas, and on no read", async () => {
 		const dir = project({
@@ -36,9 +32,7 @@ describe("a generated DTO's written text transforms", () => {
 			const { properties } = z.toJSONSchema(dtos[name] as z.ZodType, { io: "input" }) as {
 				properties: Record<string, Record<string, unknown>>
 			}
-			return Object.fromEntries(
-				Object.entries(properties).map(([key, field]) => [key, value(field)["x-comb-transform"]]),
-			)
+			return Object.fromEntries(Object.entries(properties).map(([key, field]) => [key, field["x-comb-transform"]]))
 		}
 		for (const name of ["memberDtoCreateSchema", "memberDtoUpdateSchema"])
 			expect(published(name)).toMatchObject({

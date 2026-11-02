@@ -12,13 +12,15 @@ type Pin = Partial<FieldMeta> & { dialect?: Build["dialect"] }
 /** The text schema of `raw` in a `schemaType` DTO on a dialect (SQLite by default), the column's own facts pinned over it */
 function text(raw: string, schemaType: SchemaType, { dialect = "sqlite", ...over }: Pin = {}) {
 	const field = { ...parseField("t", raw), ...over }
-	return textBase({
+	const { code, keys } = textBase({
 		annotations: field.constraints,
 		dialect,
 		field,
 		imports: { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() },
 		schemaType,
 	})
+	/* as finish writes it, the keys after the code */
+	return Object.keys(keys).length === 0 ? code : `${code}.meta(${JSON.stringify(keys)})`
 }
 
 /* generated code names comb's isStorableText under comb's namespace, which the generated file imports (C2 of r17) */
@@ -58,19 +60,19 @@ describe("textBase on a write", () => {
 	it("enforces every declared bound and the text guard", () => {
 		const write = text('c.text("t", { min: 3, max: 10 }).notNull()', "create")
 		expect(write).toBe(
-			`z.string().min(3).max(10).refine(comb.isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({ "x-comb-text": "${STORABLE_TEXT_RULE}" })`,
+			`z.string().min(3).max(10).refine(comb.isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" }).meta({"x-comb-text":"${STORABLE_TEXT_RULE}"})`,
 		)
 		expect(parse(write).safeParse("eleven char").success).toBe(false)
 		expect(text('c.text("t", { email: true, max: 20 })', "update")).toBe(
-			'z.string().trim().toLowerCase().meta({"x-comb-transform":["trim","lowercase"]}).check(z.email()).min(6).max(20)',
+			'z.string().trim().toLowerCase().check(z.email()).min(6).max(20).meta({"x-comb-transform":["trim","lowercase"]})',
 		)
 	})
 })
 
 describe("stated", () => {
 	it("names each bound given as x-comb meta, and is empty with none", () => {
-		expect(stated({ maximum: 1, minimum: null })).toBe('.meta({"x-comb-maximum":1})')
-		expect(stated({ maxLength: null })).toBe("")
+		expect(stated({ maximum: 1, minimum: null })).toEqual({ "x-comb-maximum": 1 })
+		expect(stated({ maxLength: null })).toEqual({})
 	})
 })
 
