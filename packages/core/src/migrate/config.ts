@@ -114,8 +114,16 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
    DEFINE CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/** `input`, typed: comb.migrate.config.ts's default export; loadConfig validates it, in one place (P11, K12 of the 0.15.0 review) */
-export function defineConfig(input: CombMigrateConfig): CombMigrateConfig {
+/**
+ * `input`, typed: comb.migrate.config.ts's default export, an object or a function, sync or async,
+ * that returns one (K9 of r20); loadConfig validates it, in one place (P11, K12 of the 0.15.0 review)
+ */
+export function defineConfig(input: CombMigrateConfig): CombMigrateConfig
+export function defineConfig(input: () => CombMigrateConfig): () => CombMigrateConfig
+export function defineConfig(input: () => Promise<CombMigrateConfig>): () => Promise<CombMigrateConfig>
+export function defineConfig<T extends CombMigrateConfig | (() => CombMigrateConfig | Promise<CombMigrateConfig>)>(
+	input: T,
+): T {
 	return input
 }
 

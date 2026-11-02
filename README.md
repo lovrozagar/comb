@@ -1033,9 +1033,9 @@ What changes for a project on 0.18. Before deploying it:
 
    Removed: none.
 
-   Changed: `MANIFEST_VERSION`, `ManifestColumn`, `buildManifest`.
+   Changed: `MANIFEST_VERSION`, `ManifestColumn`, `buildManifest`, `defineConfig`.
 
-   `buildManifest(tables, dbName, dialect)` takes the dialect, which decides what a column holds, as the DTO's does.
+   `buildManifest(tables, dbName, dialect)` takes the dialect, which decides what a column holds, as the DTO's does. `defineConfig` also takes a function, sync or async, that returns the config, and returns what it was given, so a config that reads its secrets asynchronously is typed too; an object passes as before.
 
 2. **Regenerate, and widen what codegen refuses.**
    - The manifest is `v` 2: each column's `min` and `max` are the bounds the create DTO enforces, not the declared ones (a password's 8 to 72, a required text's 1, a format's floor, an id's 1 to 48, an integer's clamped to the column), `patterns` lists every regex it checks, the kind's own beside the declared one, in place of `pattern`, and `maxBytes` is a `c.json` column's byte limit. A reader of `v` 1 refuses it; read `patterns`, then regenerate committed manifests (meta-contract §8.2).
