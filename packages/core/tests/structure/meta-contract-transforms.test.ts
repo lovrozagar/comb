@@ -6,8 +6,14 @@
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
+import * as z from "zod"
+import { parseField } from "../../src/codegen/__fixtures__/runtime.ts"
+import { SHARED_META_KEYS, SHARED_META_VALUES } from "../../src/codegen/generators/dtos/example-meta.ts"
+import { generateFieldSchema } from "../../src/codegen/generators/dtos/field-schema.ts"
 import { TRANSFORMS } from "../../src/codegen/generators/dtos/text-schema.ts"
+import { isStorableText } from "../../src/storable-text.ts"
 
 const CONTRACT = readFileSync(join(import.meta.dirname, "../../docs/meta-contract.md"), "utf8")
 const FIELD_KEYS = CONTRACT.slice(CONTRACT.indexOf("### 2.1 Field keys"), CONTRACT.indexOf("## 3. Producer API"))
@@ -56,5 +62,37 @@ describe("meta-contract §2.1's transforms", () => {
 		for (const { expect: want, input, transform } of fixtures)
 			expect(operations[transform]?.(input), `${transform} ${JSON.stringify(input)}`).toBe(want)
 		expect(new Set(fixtures.map(({ transform }) => transform))).toEqual(new Set(TRANSFORMS))
+	})
+})
+
+/* the shared file's example meta, as the generated module imports it */
+const META = new Function(`return {${SHARED_META_KEYS.map((key) => `${key}: ${SHARED_META_VALUES[key]}`).join(",")}}`)()
+
+/** The property codegen publishes for the nullable create field `raw` */
+function publishedProperty(raw: string): unknown {
+	const code = generateFieldSchema(parseField("t", raw), "create", {
+		imports: { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() },
+	}) as string
+	const field = new Function("z", "comb", "_m", ts.transpile(`return ${code}`))(
+		z,
+		{ isStorableText },
+		META,
+	) as z.ZodType
+	const document = z.toJSONSchema(z.object({ t: field }), { io: "input" }) as unknown as {
+		properties: { t: unknown }
+	}
+	return document.properties.t
+}
+
+const xComb = (schema: Record<string, unknown>) => Object.keys(schema).filter((key) => key.startsWith("x-comb-"))
+
+/* C1 of r20: a nullable field's keys sit on the property and on its non-null member alike */
+describe("meta-contract §2.1's placement", () => {
+	it("shows a nullable field's property as codegen publishes it, the keys at both levels", () => {
+		const blocks = [...FIELD_KEYS.matchAll(/```json\n([\s\S]*?)\n```/g)].map(([, body]) => JSON.parse(body as string))
+		const shown = blocks.find((block) => !Array.isArray(block)) as { anyOf: Array<Record<string, unknown>> }
+		expect(shown, "§2.1 shows a nullable property").toBeDefined()
+		expect(shown).toEqual(publishedProperty('c.text("t", { max: 9, trim: true })'))
+		expect(xComb(shown.anyOf[0] as Record<string, unknown>)).toEqual(xComb(shown as never))
 	})
 })

@@ -45,16 +45,18 @@ function stripMeta(zodType: string): [string, string] {
 }
 
 /**
- * `zodType` split into its layers: the base, `.nullable()`, the `x-comb-*` keys, which finish writes
- * after it so they publish beside the anyOf (C4 of r19), then `.optional()`. The keys stay with the
- * field, so a core is shared whatever keys its columns publish
+ * `zodType` split into its layers: the base, `.nullable()` (the keys before it, on its member, so
+ * `.unwrap()` keeps them: C1 of r20), the `x-comb-*` keys, which finish writes after it so they
+ * publish beside the anyOf (C4 of r19), then `.optional()`. The keys stay with the field, so a core
+ * is shared whatever keys its columns publish
  */
 function layersOf(zodType: string): { base: string; keys: string; nullable: string; optional: string } {
 	const optional = zodType.endsWith(".optional()") ? ".optional()" : ""
 	const [before, last] = stripMeta(zodType.slice(0, zodType.length - optional.length))
 	const keys = last.startsWith('.meta({"x-comb-') ? last : ""
 	const rest = keys === "" ? zodType.slice(0, zodType.length - optional.length) : before
-	const nullable = rest.endsWith(".nullable()") ? ".nullable()" : ""
+	const wrapper = `${keys}.nullable()`
+	const nullable = keys !== "" && rest.endsWith(wrapper) ? wrapper : rest.endsWith(".nullable()") ? ".nullable()" : ""
 	return { base: rest.slice(0, rest.length - nullable.length), keys, nullable, optional }
 }
 
@@ -73,7 +75,8 @@ function usageOf(tables: TableInfo[], external: ReadonlySet<string>): Usage {
 			if (!canBeShared(zodType, external)) continue
 			/* a field's keys stay with it, so what it counts toward is its shape without them */
 			const { base, nullable, optional } = layersOf(zodType)
-			const shape = base + nullable + optional
+			/* one whose keys sit on its member too uses the base's shared name, never a variant */
+			const shape = nullable.startsWith(".meta(") ? base : base + nullable + optional
 			usage.counts.set(shape, (usage.counts.get(shape) ?? 0) + 1)
 		}
 	}

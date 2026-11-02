@@ -122,6 +122,20 @@ describe("shared-schemas: remaining layers", () => {
 		expect(rewriteWithShared(withMeta, s)).toBe(`${n("z.string().max(5)")}.meta({ examples: ["a"] })`)
 	})
 
+	/* C1 of r20: a nullable field's keys sit on its member and on the nullable, so `.unwrap()` keeps them */
+	it("shares the core of a field whose keys sit on its member too, and no variant it never uses", () => {
+		const keys = '.meta({"x-comb-maxLength":5})'
+		const field = `z.string().max(5)${keys}.nullable()${keys}`
+		const s = buildSharedSchemas([table("a", [field, `${field}.optional()`])], imports())
+		expect([...s.keys()]).toEqual(["z.string().max(5)"])
+		expect(rewriteWithShared(field, s)).toBe(`${n("z.string().max(5)")}${keys}.nullable()${keys}`)
+		expect(rewriteWithShared(`${field}.optional()`, s)).toBe(
+			`${n("z.string().max(5)")}${keys}.nullable()${keys}.optional()`,
+		)
+		const example = `z.string().max(5).meta(_m.string)${keys}.nullable()${keys}`
+		expect(rewriteWithShared(example, s)).toBe(`${n("z.string().max(5)")}.meta(_m.string)${keys}.nullable()${keys}`)
+	})
+
 	it("keeps an array whose elements carry the meta whole, never cut at that inner meta", () => {
 		const array = 'z.array(z.string().meta({ examples: ["a"] }).nullable())'
 		const s = buildSharedSchemas([table("a", [array])], imports())

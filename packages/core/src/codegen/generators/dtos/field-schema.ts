@@ -181,12 +181,19 @@ function optionalOnCreate(field: FieldMeta, required: boolean, dialect: Build["d
 const metaOf = (keys: Record<string, unknown>): string =>
 	Object.keys(keys).length === 0 ? "" : `.meta(${JSON.stringify(keys)})`
 
-/** `base` with its OpenAPI example, nullability unless the base takes null itself, its keys after it (C4 of r19), and the schema type's optionality. */
+/**
+ * `code` with `keys` on it, nullable unless `takesNull`: the keys then sit on the nullable, so they
+ * publish beside its anyOf (C4 of r19), and on its member too, so `.unwrap()` keeps them (C1 of r20)
+ */
+const keyed = (code: string, keys: Record<string, unknown>, takesNull: boolean): string =>
+	`${code}${takesNull ? "" : `${metaOf(keys)}.nullable()`}${metaOf(keys)}`
+
+/** `base` with its OpenAPI example, nullability unless the base takes null itself, its keys, and the schema type's optionality. */
 function finish(build: Build, base: Base): string {
 	const { dialect, field, schemaType } = build
 	const example = generateExampleMeta(field)
 	const required = isRequired(field)
-	const zodType = `${base.code}${example?.code ?? ""}${required || base.takesNull ? "" : ".nullable()"}${metaOf(base.keys)}`
+	const zodType = keyed(`${base.code}${example?.code ?? ""}`, base.keys, required || base.takesNull)
 	if (schemaType === "read") return zodType
 	if (schemaType === "create" && !optionalOnCreate(field, required, dialect)) return zodType
 	return `${zodType}.optional()`
@@ -215,8 +222,7 @@ export function generateFieldSchema(
 }
 
 /** An array's element: nullable, its keys on it, which publish on `items` */
-const elementOf = (element: Base): string =>
-	`${element.code}${element.takesNull ? "" : ".nullable()"}${metaOf(element.keys)}`
+const elementOf = (element: Base): string => keyed(element.code, element.keys, element.takesNull)
 
 /** The Zod base of a column of one value: the first builder's that takes it, else text */
 function baseOf(build: Build): Base {

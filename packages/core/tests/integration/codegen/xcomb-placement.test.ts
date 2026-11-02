@@ -1,6 +1,7 @@
 /**
- * C4 of r19: every `x-comb-*` key sits in one place, the property's own schema (`items` for an array
- * element's), beside the `anyOf` of a nullable field, so a reader finds it with no `anyOf` walk.
+ * C4 of r19: every `x-comb-*` key sits on the property's own schema (`items` for an array element's),
+ * beside the `anyOf` of a nullable field, so a reader finds it with no `anyOf` walk; a nullable
+ * field's non-null member repeats them, and holds no other (C1 of r20).
  * The walk covers each DTO of a table holding every kind that publishes one.
  */
 import * as z from "zod"
@@ -32,10 +33,16 @@ type Schema = { anyOf?: Schema[]; items?: Schema } & Record<string, unknown>
 
 const xComb = (schema: Schema): string[] => Object.keys(schema).filter((key) => key.startsWith("x-comb-"))
 
-/** Each `x-comb-*` key inside an `anyOf` member of `schema`, by the path to it */
+/**
+ * Each `x-comb-*` key inside an `anyOf` member of `schema` that `schema` itself does not carry with
+ * the same value, by the path to it: a nullable field's member repeats the property's keys, so
+ * `.unwrap()` keeps them (C1 of r20), and holds no other
+ */
 function misplaced(schema: Schema, at: string): string[] {
 	const members = (schema.anyOf ?? []).flatMap((member, i) => [
-		...xComb(member).map((key) => `${at}.anyOf[${i}].${key}`),
+		...xComb(member)
+			.filter((key) => JSON.stringify(member[key]) !== JSON.stringify(schema[key]))
+			.map((key) => `${at}.anyOf[${i}].${key}`),
 		...misplaced(member, `${at}.anyOf[${i}]`),
 	])
 	return schema.items === undefined ? members : [...members, ...misplaced(schema.items, `${at}.items`)]
@@ -55,7 +62,7 @@ async function documents(): Promise<Array<[string, { properties: Record<string, 
 }
 
 describe("where a field's x-comb-* keys sit", () => {
-	it("is never inside an anyOf member, in any DTO", async () => {
+	it("is never inside an anyOf member alone, in any DTO", async () => {
 		for (const [name, { properties }] of await documents())
 			expect(Object.entries(properties).flatMap(([key, schema]) => misplaced(schema, `${name}.${key}`))).toEqual([])
 	})

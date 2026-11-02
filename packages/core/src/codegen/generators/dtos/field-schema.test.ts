@@ -20,8 +20,8 @@ const generateFieldSchema = (...args: Parameters<typeof generated>) =>
 	generated(...args)
 		?.replace(TEXT_RULE, "")
 		.replace(JSON_RULE, "")
-		.replace(`.meta({${TEXT_KEY}})`, "")
-		.replace(`,${TEXT_KEY}`, "") ?? null
+		.replaceAll(`.meta({${TEXT_KEY}})`, "")
+		.replaceAll(`,${TEXT_KEY}`, "") ?? null
 
 const imports = (): ImportsMeta => ({
 	enumImports: new Map(),
@@ -89,7 +89,7 @@ describe("generateFieldSchema: what each schema type includes", () => {
 			"z.string().regex(/^\\S{1,48}$/).nullable().optional()",
 		)
 		expect(schema("owner_id", 'c.ref("owner_id")', "read")).toBe(
-			'z.string().nullable().meta({"x-comb-maxLength":48,"x-comb-minLength":1})',
+			'z.string().meta({"x-comb-maxLength":48,"x-comb-minLength":1}).nullable().meta({"x-comb-maxLength":48,"x-comb-minLength":1})',
 		)
 	})
 })
@@ -270,7 +270,7 @@ describe("generateFieldSchema: what the 0.8.0 codegen review found (F1, F2, F15,
 			'z.string().min(10).meta({ examples: ["a1b2c3d4e5"] }).nullable().optional()',
 		)
 		expect(schema("externalId", 'c.text("external_id", { max: 60 })', "read")).toBe(
-			'z.string().meta(_m.string).nullable().meta({"x-comb-maxLength":60})',
+			'z.string().meta(_m.string).meta({"x-comb-maxLength":60}).nullable().meta({"x-comb-maxLength":60})',
 		)
 	})
 })
@@ -421,7 +421,7 @@ describe("generateFieldSchema: the rule no engine stores", () => {
 		for (const dialect of ["sqlite", "postgres"] as const) {
 			const textField = parseField("n", 'c.text("n")', { dialect })
 			expect(generated(textField, "create", { dialect, imports: imports() })).toBe(
-				`z.string()${TEXT_RULE}.meta(_m.string).nullable().meta({${TEXT_KEY}}).optional()`,
+				`z.string()${TEXT_RULE}.meta(_m.string).meta({${TEXT_KEY}}).nullable().meta({${TEXT_KEY}}).optional()`,
 			)
 			expect(generated(textField, "read", { dialect, imports: imports() })).not.toContain(TEXT_RULE)
 			const json = { ...parseField("b", 'c.json("b", blobSchema)', { dialect }), jsonSchemaName: "blobSchema" }
