@@ -114,11 +114,6 @@ export type ConstraintMap = {
 export type DatabaseErrorHandler = (error: unknown, constraintMaps: readonly ConstraintMap[]) => void;
 
 // pg/read-error.d.ts
-/**
- * A Postgres server error as the three drivers hand it over, read into one shape: node-postgres,
- * postgres.js and Bun.SQL name its fields differently, and a wrapper such as drizzle's may carry
- * the SQL it ran. error-handler.ts maps what this reads to a CombError.
- */
 type PgErrorRead = {
     code: string;
     column: string | undefined;

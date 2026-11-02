@@ -4,6 +4,7 @@
  * `DrizzleQueryError`, and never the wrapper's text, which holds the SQL and its parameters.
  */
 import { own } from "../constraint-map.ts"
+import { causeChain } from "../error-chain.ts"
 
 export type SqliteErrorRead = {
 	/** The extended result code when the driver reports one, e.g. `SQLITE_CONSTRAINT_UNIQUE`. */
@@ -50,8 +51,6 @@ const named = (code: unknown): unknown =>
 	typeof code === "string" && code.startsWith("UNKNOWN_SQLITE_ERROR_")
 		? own(CONSTRAINT_CODES, code.slice("UNKNOWN_SQLITE_ERROR_".length))
 		: code
-
-const MAX_DEPTH = 8
 
 function field(error: Error, name: string): unknown {
 	return (error as unknown as Record<string, unknown>)[name]
@@ -116,14 +115,8 @@ export function readSqliteMessage(text: string): SqliteErrorRead | null {
 	return last === undefined ? null : readLine(last)
 }
 
-/** `error` and the errors under it on `.cause`, outermost first */
-function chainOf(error: unknown): Error[] {
-	const chain: Error[] = []
-	for (let current = error; chain.length < MAX_DEPTH && current instanceof Error; current = current.cause) {
-		chain.push(current)
-	}
-	return chain
-}
+/** `error` and the errors under it on `.cause`, outermost first (error-chain.ts) */
+const chainOf = (error: unknown): Error[] => causeChain(error).filter((link): link is Error => link instanceof Error)
 
 /**
  * The SQLite engine error inside `error` (or the engine message `error` is), or null when there is none.

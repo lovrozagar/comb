@@ -4,6 +4,7 @@
  * SQLite handlers answer it as the 503 a retry may fix.
  */
 import type { Fallback } from "./constraint-map.ts"
+import { causeChain } from "./error-chain.ts"
 import { combErrorKeys } from "./types.ts"
 
 /** What a lost connection is answered with, on every dialect */
@@ -60,7 +61,7 @@ const CONNECTION_MESSAGES: ReadonlySet<string> = /* @__PURE__ */ new Set([
  */
 export function connectionLost(error: unknown): boolean {
 	let serverError = false
-	for (let link = error, depth = 0; link instanceof Error && depth < 8; link = link.cause, depth++) {
+	for (const link of causeChain(error).filter((each): each is Error => each instanceof Error)) {
 		const { code, status } = link as { code?: unknown; status?: unknown }
 		if (typeof code === "string" && (CONNECTION_CODES.has(code) || code.startsWith("ERR_POSTGRES_CONNECTION_")))
 			return true

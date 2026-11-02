@@ -1,0 +1,30 @@
+/**
+ * An error and the ones under it on `.cause`, past wrappers such as drizzle's DrizzleQueryError,
+ * which keeps the engine's own words only on its cause: the one walk every classifier that reads a
+ * driver's error takes (K1 of r19), outermost first and at most MAX_DEPTH deep, as a cause chain a
+ * driver builds is never deeper.
+ */
+
+/* how deep a chain is read: past every wrapper comb meets, and short of any cycle */
+const MAX_DEPTH = 8
+
+/** `error` and each object under it on `.cause`, outermost first */
+function causeChain(error: unknown): object[] {
+	const chain: object[] = []
+	for (let link = error; chain.length < MAX_DEPTH && typeof link === "object" && link !== null;) {
+		chain.push(link)
+		link = (link as { cause?: unknown }).cause
+	}
+	return chain
+}
+
+/** The texts a classifier reads from `error`: each link's message and string code, outermost first; a thrown string as itself */
+function errorTexts(error: unknown): string[] {
+	if (typeof error === "string") return [error]
+	return causeChain(error).flatMap((link) => {
+		const { code, message } = link as { code?: unknown; message?: unknown }
+		return [message, code].filter((text): text is string => typeof text === "string")
+	})
+}
+
+export { causeChain, errorTexts }

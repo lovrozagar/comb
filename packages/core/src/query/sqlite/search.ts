@@ -5,6 +5,7 @@
 import { type SQL, sql } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 
+import { errorTexts } from "../../error-chain.ts"
 import { quoteIdent } from "./identifier.ts"
 
 /* control characters: a NUL ends the C string FTS5 parses, mid-phrase */
@@ -111,25 +112,46 @@ type SpellfixSearch = FtsSource & {
 	spellfixTable: string
 }
 
-/* what SQLite says when spellfix1 is not loaded: its module, or the editdist3 function it brings */
-const NO_SPELLFIX = /no such (?:module: spellfix1|function: editdist3)\b/
+/* SQLite's words for a function no extension registered: spellfix1 registers editdist3 */
+const NO_EDITDIST3 = /\bno such function: editdist3\b/
+
+// lookup-table: whether each database has spellfix1 loaded, asked once, a failure to ask never kept
+const LOADED: WeakMap<object, Promise<boolean>> = /* @__PURE__ */ new WeakMap()
 
 /**
- * Words spellfix1 offers for `term`; none when the extension is not loaded. Any other failure, a
- * table misspelled or a transient D1 error, is the caller's to see (K9 of r18)
+ * Whether `db` has spellfix1 loaded, asked once per database before any spellfix query: editdist3,
+ * the function it registers, reads no table, so its absence is never a misspelled vocabulary
+ * table (K1 of r19). D1's authorizer refuses pragma_module_list. Any other failure is thrown.
+ */
+function spellfixLoaded(db: SpellfixDb): Promise<boolean> {
+	const known = LOADED.get(db)
+	if (known !== undefined) return known
+	/* in an async function, so a driver that throws as it prepares (drizzle's bun:sqlite) rejects as the others do */
+	const asked = (async () => db.all(sql`SELECT editdist3('a', 'b') AS d`))().then(
+		() => true,
+		(error: unknown) => {
+			LOADED.delete(db)
+			if (errorTexts(error).some((text) => NO_EDITDIST3.test(text))) {
+				LOADED.set(db, Promise.resolve(false))
+				return false
+			}
+			throw error
+		},
+	)
+	LOADED.set(db, asked)
+	return asked
+}
+
+/**
+ * Words spellfix1 offers for `term`. Any failure, a vocabulary table misspelled or a transient D1
+ * error, is the caller's to see (K9 of r18): spellfixLoaded said the extension is there
  */
 async function corrections(db: SpellfixDb, term: string, search: SpellfixSearch): Promise<string[]> {
 	const { maxCorrections = 3, maxEditDistance = 300, spellfixTable } = search
-	try {
-		const rows = await db.all(
-			sql`SELECT word FROM ${ident(spellfixTable)} WHERE word MATCH ${`${term}*`} AND editdist3(word, ${term}) < ${maxEditDistance} LIMIT ${maxCorrections}`,
-		)
-		return rows.map((row) => row.word).filter(Boolean)
-	} catch (error) {
-		/* spellfix1 is an optional extension; without it the search runs on the terms as typed */
-		if (NO_SPELLFIX.test(error instanceof Error ? error.message : String(error))) return []
-		throw error
-	}
+	const rows = await db.all(
+		sql`SELECT word FROM ${ident(spellfixTable)} WHERE word MATCH ${`${term}*`} AND editdist3(word, ${term}) < ${maxEditDistance} LIMIT ${maxCorrections}`,
+	)
+	return rows.map((row) => row.word).filter(Boolean)
 }
 
 /**
@@ -143,9 +165,11 @@ async function buildFtsWhereWithSpellfix(
 ): Promise<SQL | null> {
 	const terms = ftsTerms(query, search.folded)
 	if (terms.length === 0) return termless(query)
+	/* without spellfix1 the terms are searched as typed (README §Search) */
+	const loaded = terms.some((term) => term.length >= 3) && (await spellfixLoaded(db))
 	const groups: string[] = []
 	for (const term of terms) {
-		const found = term.length >= 3 ? await corrections(db, term, search) : []
+		const found = loaded && term.length >= 3 ? await corrections(db, term, search) : []
 		const variants = [...new Set([term, ...found].map((variant) => variant.toLowerCase()))]
 		groups.push(variants.length === 1 ? matchQuery(variants, "OR") : `(${matchQuery(variants, "OR")})`)
 	}

@@ -228,7 +228,8 @@ describe("buildFtsWhereWithSpellfix — corrections, fallback and binding", () =
 		const seen: unknown[][] = []
 		const db = { all: async (query: SQL) => (seen.push(compile(query).params), []) }
 		await buildFtsWhereWithSpellfix(db, { ftsTable: "item_fts", table: item, spellfixTable: "sp" }, "o'reilly")
-		expect(seen).toEqual([["o'reilly*", "o'reilly", 300, 3]])
+		/* the probe of spellfix1 first, which binds nothing */
+		expect(seen).toEqual([[], ["o'reilly*", "o'reilly", 300, 3]])
 	})
 
 	it("binds the MATCH query rather than inlining it", async () => {
@@ -243,45 +244,74 @@ describe("buildFtsWhereWithSpellfix — corrections, fallback and binding", () =
 	})
 })
 
-describe("buildFtsWhereWithSpellfix when spellfix fails", () => {
-	/* r18 K9: only spellfix1 itself missing degrades; a misspelled table or a transient failure is the caller's to see */
-	it.each(["no such module: spellfix1", "SQLITE_ERROR: no such function: editdist3"])(
-		"degrades to the plain term when SQLite says %j",
-		async (message) => {
-			const db = {
-				all: async () => {
-					throw new Error(message)
-				},
-			}
-			const built = await buildFtsWhereWithSpellfix(
-				db,
-				{ ftsTable: "item_fts", table: item, spellfixTable: "sp" },
-				"hello",
-			)
-			expect(String(compile(built!).params[0])).toBe('"hello"*')
+/** A database whose editdist3 probe answers `probe` and whose spellfix query answers `query`, each call counted */
+function probed(probe: () => unknown, query: () => unknown = () => []) {
+	const calls: string[] = []
+	const db = {
+		all: async (built: SQL) => {
+			const isProbe = compile(built).sql.includes("editdist3('a', 'b')")
+			calls.push(isProbe ? "probe" : "query")
+			return (isProbe ? probe : query)() as never
 		},
-	)
+	}
+	return { calls, db }
+}
 
-	it("rethrows what a driver throws that is no Error, read as its text", async () => {
-		const db = {
-			all: async () => {
-				throw "no such table: wrods"
-			},
-		}
-		await expect(
-			buildFtsWhereWithSpellfix(db, { ftsTable: "item_fts", table: item, spellfixTable: "wrods" }, "hello"),
-		).rejects.toBe("no such table: wrods")
+/** An error as drizzle wraps one: its own message the SQL, SQLite's words on its cause */
+const wrapped = (message: string) =>
+	new Error("Failed query: SELECT editdist3('a', 'b')", { cause: new Error(message) })
+
+const SOURCE = { ftsTable: "item_fts", table: item, spellfixTable: "wrods" }
+
+describe("buildFtsWhereWithSpellfix when spellfix1 is not loaded (K1 of r19)", () => {
+	it.each([
+		["as SQLite says it", () => new Error("no such function: editdist3")],
+		["under drizzle's DrizzleQueryError", () => wrapped("SQLITE_ERROR: no such function: editdist3")],
+		["as D1 says it, wrapped", () => wrapped("D1_ERROR: no such function: editdist3 at offset 7: SQLITE_ERROR")],
+		["thrown as text", () => "no such function: editdist3"],
+	])("searches the terms as typed when the probe answers %s, and runs no spellfix query", async (_, failure) => {
+		const { calls, db } = probed(() => {
+			throw failure()
+		})
+		expect(String(compile((await buildFtsWhereWithSpellfix(db, SOURCE, "hello")) as SQL).params[0])).toBe('"hello"*')
+		expect(calls).toEqual(["probe"])
 	})
 
+	it("asks once per database, and again after a failure that was no answer", async () => {
+		const { calls, db } = probed(() => {
+			throw wrapped("no such function: editdist3")
+		})
+		await buildFtsWhereWithSpellfix(db, SOURCE, "hello")
+		await buildFtsWhereWithSpellfix(db, SOURCE, "world")
+		expect(calls).toEqual(["probe"])
+		let transient = true
+		const flaky = probed(() => {
+			if (transient) throw new Error("D1_ERROR: Network connection lost.")
+			return []
+		})
+		await expect(buildFtsWhereWithSpellfix(flaky.db, SOURCE, "hello")).rejects.toThrow("Network connection lost")
+		transient = false
+		await buildFtsWhereWithSpellfix(flaky.db, SOURCE, "hello")
+		expect(flaky.calls).toEqual(["probe", "probe", "query"])
+	})
+
+	it("asks nothing for terms too short to correct", async () => {
+		const { calls, db } = probed(() => [])
+		await buildFtsWhereWithSpellfix(db, SOURCE, "a ab")
+		expect(calls).toEqual([])
+	})
+})
+
+describe("buildFtsWhereWithSpellfix when spellfix1 is loaded and its query fails", () => {
+	/* r18 K9: a misspelled vocabulary table or a transient failure is the caller's to see */
 	it.each(["no such table: wrods", "D1_ERROR: Network connection lost."])("rethrows %j", async (message) => {
-		const db = {
-			all: async () => {
-				throw new Error(message)
+		const { db } = probed(
+			() => [{ d: 1 }],
+			() => {
+				throw wrapped(message)
 			},
-		}
-		await expect(
-			buildFtsWhereWithSpellfix(db, { ftsTable: "item_fts", table: item, spellfixTable: "wrods" }, "hello"),
-		).rejects.toThrow(message)
+		)
+		await expect(buildFtsWhereWithSpellfix(db, SOURCE, "hello")).rejects.toThrow("Failed query")
 	})
 })
 

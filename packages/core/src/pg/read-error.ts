@@ -3,6 +3,7 @@
  * postgres.js and Bun.SQL name its fields differently, and a wrapper such as drizzle's may carry
  * the SQL it ran. error-handler.ts maps what this reads to a CombError.
  */
+import { causeChain } from "../error-chain.ts"
 
 type PgErrorRead = {
 	code: string
@@ -89,12 +90,7 @@ function keyOf(detail: string | undefined): Pick<PgErrorRead, "keyColumns" | "ke
  * first: the driver's error is the deepest, and a wrapper's own `code` never wins over it.
  */
 function readPgError(error: unknown): PgErrorRead | null {
-	const chain: DriverError[] = []
-	for (let current: unknown = error; chain.length < 8 && typeof current === "object" && current !== null;) {
-		const f = fields(current)
-		chain.push(f)
-		current = f.cause
-	}
+	const chain = causeChain(error).map(fields)
 	for (const f of chain.toReversed()) {
 		const code = sqlstate(f)
 		if (code === undefined) continue
