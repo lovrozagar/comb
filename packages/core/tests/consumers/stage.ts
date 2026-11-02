@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import semver from "semver"
 
 const CORE = join(import.meta.dirname, "../..")
 const ROOT = join(CORE, "../..")
@@ -74,23 +75,32 @@ export type Stage = { dir: string; dispose(): void }
 
 const WORKERS_TYPES = "@cloudflare/workers-types"
 
-/** The lowest version a `>=x <y` range admits */
+/** The lowest version `range` admits */
 export function floorOf(range: string): string {
-	const floor = /^>=(\S+)/.exec(range)?.[1]
-	if (floor === undefined) throw new Error(`${range} names no floor`)
-	return floor
+	const floor = semver.minVersion(range)
+	if (floor === null) throw new Error(`${range} admits no version`)
+	return floor.version
 }
 
-/** A fresh consumer with comb from `tarball`, its required peers, the optional ones when `all`, and the tools */
-export function stage(tarball: string, peers: "all" | "required", files: Record<string, string> = {}): Stage {
-	const dir = mkdtempSync(join(tmpdir(), `comb-consumer-${peers}-`))
+/**
+ * A fresh consumer with comb from `tarball`, its required peers, the optional ones when `all`, and
+ * the tools: each peer by comb's own range, as a consumer's install resolves it, the newest it
+ * admits; or each pinned at the range's floor, as comb's own suites run them (K8 of r20)
+ */
+export function stage(
+	tarball: string,
+	peers: "all" | "required",
+	files: Record<string, string> = {},
+	at: "floor" | "newest" = "newest",
+): Stage {
+	const dir = mkdtempSync(join(tmpdir(), `comb-consumer-${peers}-${at}-`))
 	const wanted = Object.keys(manifest.peerDependencies).filter(
 		(name) => peers === "all" || !OPTIONAL_PEERS.includes(name),
 	)
+	const rangeOf = (name: string) => manifest.peerDependencies[name] as string
 	const dependencies = Object.fromEntries([
 		["@lovrozagar/comb", `file:${tarball}`],
-		/* each peer by comb's own range, as a consumer's install resolves it: the newest it admits */
-		...wanted.map((name) => [name, manifest.peerDependencies[name] as string]),
+		...wanted.map((name) => [name, at === "floor" ? floorOf(rangeOf(name)) : rangeOf(name)]),
 	])
 	writeFileSync(
 		join(dir, "package.json"),
@@ -108,6 +118,27 @@ export function stage(tarball: string, peers: "all" | "required", files: Record<
 	}
 	return { dir, dispose: () => rmSync(dir, { force: true, recursive: true }) }
 }
+
+/**
+ * A fresh project that runs `line`, a README install line, verbatim but for comb itself, which is
+ * `tarball` (K3 of r20): the README's line, not comb's ranges, decides each peer's version
+ */
+export function stageLine(tarball: string, line: string): Stage {
+	const dir = mkdtempSync(join(tmpdir(), "comb-consumer-readme-"))
+	writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "comb-consumer", private: true, type: "module" }))
+	const [cmd, ...args] = line.split(" ").map((word) => (word === "@lovrozagar/comb" ? tarball : word))
+	ok(run(dir, cmd as string, args), line)
+	return { dir, dispose: () => rmSync(dir, { force: true, recursive: true }) }
+}
+
+/** The version of `name` installed in `dir` */
+export const installedVersion = (dir: string, name: string): string =>
+	(JSON.parse(readFileSync(join(dir, "node_modules", name, "package.json"), "utf8")) as { version: string }).version
+
+/** comb's range for each of its required peers */
+export const REQUIRED_PEERS: Record<string, string> = Object.fromEntries(
+	Object.entries(manifest.peerDependencies).filter(([name]) => !OPTIONAL_PEERS.includes(name)),
+)
 
 /** A script that imports every subpath and prints `OK <spec>` or `FAIL <spec> <reason>` for each */
 export const IMPORT_ALL = `const specs = ${JSON.stringify(SUBPATHS)}

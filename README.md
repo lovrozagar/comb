@@ -86,15 +86,15 @@ Every layer is usable on its own. Nothing here requires an HTTP framework.
 ## Install
 
 ```bash
-bun add @lovrozagar/comb drizzle-orm zod @noble/ciphers @noble/hashes
+bun add @lovrozagar/comb drizzle-orm@1.0.0-rc.4 zod @noble/ciphers @noble/hashes
 ```
 
 ```bash
-npm install @lovrozagar/comb drizzle-orm zod @noble/ciphers @noble/hashes
+npm install @lovrozagar/comb drizzle-orm@1.0.0-rc.4 zod @noble/ciphers @noble/hashes
 ```
 
 ```bash
-pnpm add @lovrozagar/comb drizzle-orm zod @noble/ciphers @noble/hashes
+pnpm add @lovrozagar/comb drizzle-orm@1.0.0-rc.4 zod @noble/ciphers @noble/hashes
 ```
 
 Comb ships TypeScript source, not a build. Your bundler or runtime compiles it.
@@ -113,21 +113,21 @@ The runtime subpaths (all but `cli`, `codegen` and `migrate`) type-check at `lib
 
 Peer dependencies:
 
-| Package                     | Range               | Required                                                                   |
-| --------------------------- | ------------------- | -------------------------------------------------------------------------- |
-| `drizzle-orm`               | `>=1.0.0-rc.4 <2`   | yes — the relational API (`defineRelations`) is v1-only                    |
-| `zod`                       | `>=4.5.4 <5`        | yes — every schema module builds on it                                     |
-| `@noble/ciphers`            | `>=2.0.0 <3`        | yes — cursors are sealed with its XChaCha20-Poly1305                       |
-| `@noble/hashes`             | `>=2.0.0 <3`        | yes — the cursor key is derived with its HKDF-SHA256                       |
-| `ts-morph`                  | `>=28.0.0 <29`      | only for codegen (resolves imports, and loads TypeScript under node)       |
-| `@libsql/client`            | `>=0.17.4 <0.18`    | only for the libsql/Turso migration providers                              |
-| `@cloudflare/workers-types` | `>=5.20260815.1 <6` | only for the D1 modules' types (`sqlite/d1/*`)                             |
-| `drizzle-kit`               | `>=1.0.0-rc.4 <2`   | only for `comb migrate diff`, which runs `drizzle-kit export`              |
-| `wrangler`                  | `>=4.147.0 <5`      | only to migrate a D1 database, which wrangler applies                      |
-| `libpg-query`               | `>=17.7.4 <18`      | only to migrate Postgres: comb reads each statement with it                |
-| `postgres`                  | `>=3.4.9 <4`        | only to baseline a Postgres database: comb reads what Atlas OSS leaves out |
+| Package                     | Range                    | Required                                                                   |
+| --------------------------- | ------------------------ | -------------------------------------------------------------------------- |
+| `drizzle-orm`               | `1.0.0-rc.4 \|\| ^1.0.0` | yes — the relational API (`defineRelations`) is v1-only                    |
+| `zod`                       | `>=4.5.4 <5`             | yes — every schema module builds on it                                     |
+| `@noble/ciphers`            | `>=2.0.0 <3`             | yes — cursors are sealed with its XChaCha20-Poly1305                       |
+| `@noble/hashes`             | `>=2.0.0 <3`             | yes — the cursor key is derived with its HKDF-SHA256                       |
+| `ts-morph`                  | `>=28.0.0 <29`           | only for codegen (resolves imports, and loads TypeScript under node)       |
+| `@libsql/client`            | `>=0.17.4 <0.18`         | only for the libsql/Turso migration providers                              |
+| `@cloudflare/workers-types` | `>=5.20261001.1 <6`      | only for the D1 modules' types (`sqlite/d1/*`)                             |
+| `drizzle-kit`               | `1.0.0-rc.4 \|\| ^1.0.0` | only for `comb migrate diff`, which runs `drizzle-kit export`              |
+| `wrangler`                  | `>=4.147.0 <5`           | only to migrate a D1 database, which wrangler applies                      |
+| `libpg-query`               | `>=17.7.4 <18`           | only to migrate Postgres: comb reads each statement with it                |
+| `postgres`                  | `>=3.4.9 <4`             | only to baseline a Postgres database: comb reads what Atlas OSS leaves out |
 
-Each range stops before the next breaking release, so an install never pairs comb with a major it was not tested against.
+Each range stops before the next breaking release, so an install never pairs comb with a major it was not tested against. Drizzle's ranges name the one release candidate comb's suites run, 1.0.0-rc.4 (rc.5 fails comb's D1 shard map types), then `^1.0.0`, not a `>=` range: drizzle also publishes a `1.0.0-rc.N-<hash>` build of every branch, which a `>=1.0.0-rc.4` range admits and ranks above the tagged one, and its `latest` tag is still 0.x, so the install lines pin `drizzle-orm@1.0.0-rc.4`.
 
 Comb's schemas are plain Zod; none is compiled. A Worker refuses the code a compiled schema builds (`new Function`), so there the compiler only added to the bundle. A Node or Bun app that wants compiled parsing opts in with `import "zod/compile"` as the first import of its entry: every schema built after it, comb's included, compiles on its first parse, and one the compiler cannot take keeps Zod's own parser. Zod 4.5.4 is the first release with that import.
 
@@ -1043,6 +1043,10 @@ What changes for a project on 0.18. Before deploying it:
    - An entity file imports `jsonValueSchema`, `cidrSchema` or `timestampSchema` only where a field uses it. 0.18 imported one whenever a field's code contained the name, so a `c.json` schema exported as `jsonValueSchemaStrict`, `cidrSchemaDoc` or `timestampSchemaDoc` made the file fail a consumer's `noUnusedLocals`; regenerate.
    - A nullable plain json or jsonb column's read publishes null once: `z.json()` holds null, and 0.18 added a second `{ type: "null" }` beside it. The type is unchanged; regenerate.
    - A password's declared `max` past 72, bcrypt's limit, fails codegen naming the column; 0.18 held the column to 72 whatever it declared. **Fix:** declare 72 or less, or drop the `max`.
+
+3. **Move the peers inside the new ranges.**
+   - `drizzle-orm` and `drizzle-kit` admit `1.0.0-rc.4 || ^1.0.0`, and not 1.0.0-rc.5, drizzle's `rc` tag, which comb's D1 shard map does not type-check against. 0.18's `>=1.0.0-rc.4 <2` also admitted drizzle's `1.0.0-rc.N-<hash>` branch builds, which rank above the tagged rc, and the README's install line resolved drizzle-orm's `latest` tag, 0.x, outside the range. **Fix:** pin `drizzle-orm@1.0.0-rc.4` (and `drizzle-kit@1.0.0-rc.4` where installed) unless a later tagged release is in the range.
+   - `@cloudflare/workers-types` starts at `5.20261001.1`, the floor wrangler 4.147.0, comb's wrangler floor, peers on; 0.18's floor of `5.20260815.1` could not install beside it. **Fix:** move to `5.20261001.1` or later.
 
 ## Upgrading to 0.18
 

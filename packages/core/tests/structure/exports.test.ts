@@ -6,6 +6,7 @@
 import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import semver from "semver"
 import { beforeAll, describe, expect, it } from "vitest"
 
 const CORE = join(import.meta.dirname, "../..")
@@ -72,7 +73,7 @@ describe("package exports", () => {
 		const drift = Object.entries(peerDependencies).flatMap(([name, range]) => {
 			const dev = devDependencies[name]
 			const pin = dev === "catalog:" ? pins[name] : dev
-			const floor = /^>=\s*([^\s<]+)/.exec(range)?.[1]
+			const floor = semver.minVersion(range)?.version
 			return floor === pin ? [] : [`${name}: peer ${range}, tested ${pin ?? "never"}`]
 		})
 		expect(drift).toEqual([])

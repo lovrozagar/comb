@@ -7,9 +7,21 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { Miniflare } from "miniflare"
+import semver from "semver"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { APP } from "./fixture.ts"
-import { failures, IMPORT_ALL, ok, pack, run, type Stage, stage } from "./stage.ts"
+import {
+	failures,
+	IMPORT_ALL,
+	installedVersion,
+	ok,
+	pack,
+	REQUIRED_PEERS,
+	run,
+	type Stage,
+	stage,
+	stageLine,
+} from "./stage.ts"
 
 let tarball: string
 beforeAll(() => {
@@ -108,5 +120,36 @@ describe.each([
 		const result = run(app.dir, "npx", ["tsc", "-p", config])
 		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
 		expect(result.status).toBe(0)
+	})
+})
+
+/* K8 of r20: every peer at the floor comb states installs, and comb type-checks against it */
+describe("a consumer at comb's peer floors", () => {
+	let app: Stage
+	beforeAll(() => {
+		app = stage(tarball, "all", APP, "floor")
+	})
+	afterAll(() => app?.dispose())
+
+	it("type-checks every subpath under strict flags", () => {
+		const result = run(app.dir, "npx", ["tsc", "-p", "tsconfig.bundler.json"])
+		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
+		expect(result.status).toBe(0)
+	})
+})
+
+/* K3 of r20: the README's own line installs each required peer inside comb's range */
+describe("a consumer installed by the README's bun add line", () => {
+	let app: Stage
+	beforeAll(() => {
+		const readme = readFileSync(join(import.meta.dirname, "../../../../README.md"), "utf8")
+		const line = readme.split("\n").find((text) => text.startsWith("bun add "))
+		if (line === undefined) throw new Error("the README has no bun add line")
+		app = stageLine(tarball, line)
+	})
+	afterAll(() => app?.dispose())
+
+	it.each(Object.entries(REQUIRED_PEERS))("installs %s inside comb's range %s", (name, range) => {
+		expect(semver.satisfies(installedVersion(app.dir, name), range)).toBe(true)
 	})
 })
