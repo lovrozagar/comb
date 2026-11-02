@@ -1,13 +1,14 @@
 /**
  * The statements Postgres runs only outside a transaction block, read from their parse trees (P8 of
  * r19), the one table check's refusal and the dev replays (pg-replay.ts) both read. Each is named as
- * Postgres's refusal names it. Probed on Postgres 17 (.tmp/grunt/p18/runs/8954e05-probe-p8-*.log):
+ * Postgres's refusal names it. Probed on Postgres 17 (.tmp/grunt/p18/runs/8954e05-probe-p8-*.log, and
+ * f761199-probe-p8-*.log for failover):
  * VACUUM (never ANALYZE alone), a bare CLUSTER, every CONCURRENTLY build, drop, reindex and partition
  * detach, a REINDEX of a schema, a database or the system, ALTER SYSTEM, CREATE and DROP DATABASE,
  * ALTER DATABASE SET TABLESPACE, CREATE and DROP TABLESPACE, DISCARD ALL, COMMIT and ROLLBACK
  * PREPARED, and a subscription's slot work: CREATE SUBSCRIPTION making a slot (its default unless
  * `connect` or `create_slot` is false), DROP SUBSCRIPTION (whose slot comb cannot see), and ALTER
- * SUBSCRIPTION's REFRESH and a publication change that refreshes (its default). A plain CLUSTER, a
+ * SUBSCRIPTION's REFRESH, a publication change that refreshes (its default) and a SET of failover. A plain CLUSTER, a
  * REINDEX of one table or index, a detach's FINALIZE and the rest run in one.
  *
  * Beside it, the statements whose scope is the server or another database (P1 of r20, amended):
@@ -80,6 +81,9 @@ const OUTSIDE: Readonly<Record<string, (node: Node) => string | undefined>> = {
 	AlterDatabaseStmt: (node) => (optionsOf(node).has("tablespace") ? "ALTER DATABASE SET TABLESPACE" : undefined),
 	AlterSubscriptionStmt: (node) => {
 		if (node["kind"] === "ALTER_SUBSCRIPTION_REFRESH") return "ALTER SUBSCRIPTION ... REFRESH"
+		/* P4 of r20: Postgres 17 refuses any failover value in a transaction, beside other options or alone */
+		if (node["kind"] === "ALTER_SUBSCRIPTION_OPTIONS" && optionsOf(node).has("failover"))
+			return "ALTER SUBSCRIPTION ... SET (failover)"
 		const refreshes = PUBLICATION_CHANGES.has(node["kind"]) && !isOff(optionsOf(node).get("refresh"))
 		return refreshes ? "ALTER SUBSCRIPTION with refresh" : undefined
 	},

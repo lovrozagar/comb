@@ -22,6 +22,9 @@ describe("outsideOnly", () => {
 		["ALTER TABLE ev DETACH PARTITION ev_old CONCURRENTLY", "ALTER TABLE ... DETACH CONCURRENTLY"],
 		["VACUUM", "VACUUM"],
 		["REINDEX SCHEMA s", "REINDEX SCHEMA"],
+		/* P4 of r20: any failover value, beside other options or alone (.tmp/grunt/p18/runs/f761199-probe-p8-20261102T153735Z.log) */
+		["ALTER SUBSCRIPTION s SET (failover = true)", "ALTER SUBSCRIPTION ... SET (failover)"],
+		["ALTER SUBSCRIPTION s SET (failover = false, synchronous_commit = off)", "ALTER SUBSCRIPTION ... SET (failover)"],
 	])("names %j as Postgres's refusal does", (sql, named) => {
 		expect(outside(sql)).toBe(named)
 	})
@@ -55,8 +58,10 @@ describe("outsideOnly", () => {
 				"ALTER DATABASE d WITH CONNECTION LIMIT 5",
 				"ALTER SUBSCRIPTION s DROP PUBLICATION p WITH (refresh = false)",
 				"ALTER SUBSCRIPTION s DISABLE",
+				"ALTER SUBSCRIPTION s SET (synchronous_commit = off)",
+				"ALTER SUBSCRIPTION s SET (disable_on_error = true)",
 			].map(outside),
-		).toEqual(Array(10).fill(undefined))
+		).toEqual(Array(12).fill(undefined))
 	})
 })
 
