@@ -39,20 +39,22 @@ const JSON_NUL_CHECK =
 
 /*
  * a c.json column is its schema, which the runtime reader found exported; a plain json column any
- * JSON value. A written c.json value is its refined schema as the one option of a union: meta on the
- * refined copy itself would publish the schema inline beside its $ref, while the union publishes
- * `anyOf: [$ref]`, the schema's own description kept, with the refines' rules in x- keys beside it
- * (F26, F63). A union, not a pipe from the schema into its copy: a pipe needs the copy's input to be
- * the schema's output, which TypeScript refuses for a schema with a default or a transform
+ * JSON value, written as the shared schema that holds no null of its own, as z.json() does, so null
+ * is the column's to take (C5 of r19). A written JSON value is its refined schema as the one option
+ * of a union: meta on the refined copy itself would publish the schema inline beside its $ref,
+ * while the union publishes `anyOf: [$ref]`, the schema's own description kept, with the refines'
+ * rules in x- keys beside it (F26, F63). A union, not a pipe from the schema into its copy: a pipe
+ * needs the copy's input to be the schema's output, which TypeScript refuses for a schema with a
+ * default or a transform
  */
 function jsonBase({ annotations, field, schemaType }: Build): Built {
-	const schema = field.combKind === "json" ? field.jsonSchemaName : field.dataType === "object json" ? "z.json()" : null
-	if (schema === null) return undefined
-	if (!isMutative(schemaType)) return plain(schema)
+	const declared = field.combKind === "json"
+	if (!declared && field.dataType !== "object json") return undefined
+	if (!isMutative(schemaType)) return plain(declared ? (field.jsonSchemaName as string) : "z.json()")
+	const schema = declared ? field.jsonSchemaName : "jsonValueSchema"
 	const limit = annotations.maxBytes
 	const rules = `.meta({ "x-comb-text": ${JSON.stringify(STORABLE_TEXT_RULE)}${limit === null ? "" : `, "x-comb-maxBytes": ${limit}`} })`
 	const refined = `${schema}${jsonChecks(limit)}`
-	if (field.combKind !== "json") return plain(`${refined}${rules}`)
 	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63);
 	   null is its other member when the column takes null, so the field publishes one flat anyOf (C4 of r18) */
 	const nullable = !isRequired(field)

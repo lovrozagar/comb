@@ -14,7 +14,7 @@ import { SUFFIX } from "./entity-file.ts"
 
 /* the names a generated entity or shared file declares or imports itself, whatever the tables: comb's
    predicates live under `comb`, and the globals it calls are named through `globalThis` (C2 of r17) */
-const GENERATED = /^(?:z|comb|combMeta|globalThis|timestampSchema|cidrSchema|_.*|timestamps.*)$/
+const GENERATED = /^(?:z|comb|combMeta|globalThis|timestampSchema|cidrSchema|jsonValueSchema|_.*|timestamps.*)$/
 
 /** A module as the project names it: a package by its specifier, a project file by its path from `root` */
 const moduleOf = (ref: ImportRef, root: string): string =>

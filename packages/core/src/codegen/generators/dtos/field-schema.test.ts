@@ -217,9 +217,9 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		)
 		/* a plain drizzle column is typed from its data type: a JSON blob takes any JSON value */
 		expect(schema("x", 'blob("x")', "read")).toBe("z.json().nullable()")
-		/* written, it takes the refine with its rule as meta, no $ref to keep plain (F63) */
+		/* written, it takes the refine in one union with null, as a c.json does, its rule as meta (F63, C5 of r19) */
 		expect(schema("x", 'blob("x")', "create")).toBe(
-			'z.json().meta({ "x-comb-text": "no U+0000 or unpaired surrogate" }).nullable().optional()',
+			'z.union([jsonValueSchema, z.null()]).meta({ "x-comb-text": "no U+0000 or unpaired surrogate" }).optional()',
 		)
 		expect(() => schema("x", 'blob("x", { mode: "buffer" })', "read")).toThrow(
 			"fixture.x: comb has no rule for a SQLiteBlobBuffer column (object buffer)",
