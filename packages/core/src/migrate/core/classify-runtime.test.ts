@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite"
 import { describe, expect, it } from "vitest"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 
@@ -58,6 +59,97 @@ describe("runtimeFindings", () => {
 })
 
 const rated = (code: string) => runtimeFindings(code, new Map(), none)
+
+/* SQLite reads a value it does not know as off, and a number by its leading int32, so off's note goes exactly
+   where SQLite itself reads foreign_keys off: node:sqlite is the oracle */
+const VALUES = [
+	"on",
+	"ON",
+	"yes",
+	"TRUE",
+	"'on'",
+	"'True'",
+	'"on"',
+	"[on]",
+	"`yes`",
+	"1",
+	"2",
+	"01",
+	"10",
+	"+1",
+	"+ 1",
+	"1.5",
+	"1e3",
+	"'1x'",
+	"'2'",
+	"255",
+	"257",
+	"2147483647",
+	"0xff",
+	"0X00ff",
+	"0x7fffffff",
+	"off",
+	"no",
+	"nO",
+	"false",
+	"0",
+	"00",
+	"'0'",
+	"+0",
+	"-0",
+	"-1",
+	"'-1'",
+	"'+1'",
+	"' 1'",
+	"''",
+	"'+'",
+	"nope",
+	"'nope'",
+	'"nope"',
+	"full",
+	"extra",
+	"none",
+	"'x1'",
+	"0.5",
+	"'0.5'",
+	"0x0",
+	"'0x'",
+	"'0xg'",
+	"'0x1'",
+	"0x80000000",
+	"0x100000000",
+	"0x0000000001",
+	"2147483648",
+	"4294967297",
+	"99999999999",
+	"00000000000001",
+	"000000000001",
+]
+
+describe("runtimeFindings on foreign_keys's value, as SQLite reads it (S2 of r20)", () => {
+	it.each(VALUES)("gives foreign_keys = %s off's note exactly where SQLite reads it off", (value) => {
+		const db = new DatabaseSync(":memory:")
+		db.exec(`PRAGMA foreign_keys = 0; PRAGMA foreign_keys = ${value}`)
+		const off = (db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys === 0
+		db.close()
+		for (const sql of [`PRAGMA foreign_keys = ${value}`, `PRAGMA foreign_keys(${value})`]) {
+			expect(
+				runtimeFindings(sql, new Map(), none).map((finding) => finding.level),
+				sql,
+			).toEqual(off ? ["cautious"] : [])
+		}
+	})
+
+	/* SQLite 3.53 (bun:sqlite) reads an int32 by its low byte, so these are off there and on in 3.54 (node:sqlite) */
+	it.each(["256", "512", "'256'", "0x100", "0x0200"])(
+		"gives foreign_keys = %s off's note, off on SQLite 3.53",
+		(value) => {
+			expect(
+				runtimeFindings(`PRAGMA foreign_keys = ${value}`, new Map(), none).map((finding) => finding.level),
+			).toEqual(["cautious"])
+		},
+	)
+})
 
 describe("runtimeFindings on a trigger (M1)", () => {
 	it("reads a SQLite trigger's body as writes that run on every later write to its table", () => {

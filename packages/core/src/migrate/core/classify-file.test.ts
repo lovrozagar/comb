@@ -146,10 +146,24 @@ describe("classifyMigration on the foreign-key pragmas comb writes, however thei
 		expect(lite(sql).safety).toBe("safe")
 	})
 
-	/* S2 of r20: SQLite reads a single-quoted value as the value, so every rule reads it unquoted */
-	it.each(["PRAGMA foreign_keys = 'off'", "PRAGMA foreign_keys = 'false'"])("reads %j off, as SQLite does", (sql) => {
-		expect(lite(sql).cautiousStatements).toHaveLength(1)
+	/* S2 of r20: SQLite reads a single-quoted value as the value, so every rule reads it unquoted, and a value it
+	   does not know as off; inside comb's transaction each is a no-op, so off's note is its only finding */
+	it.each([
+		"PRAGMA foreign_keys = 'off'",
+		"PRAGMA foreign_keys = 'false'",
+		"PRAGMA foreign_keys = 'nope'",
+		"PRAGMA foreign_keys = full",
+		"PRAGMA foreign_keys = 256",
+	])("reads %j off, as SQLite does", (sql) => {
+		expect([lite(sql).safety, lite(sql).cautiousStatements.length]).toEqual(["cautious", 1])
 	})
+
+	it.each(["PRAGMA foreign_keys = 2", "PRAGMA foreign_keys = +1", "PRAGMA foreign_keys = 'yes'"])(
+		"rates %j, which SQLite reads on, safe",
+		(sql) => {
+			expect(lite(sql).safety).toBe("safe")
+		},
+	)
 
 	it.each(["PRAGMA defer_foreign_keys", "PRAGMA temp.defer_foreign_keys = on", "PRAGMA defer_foreign_keys = 2"])(
 		"rates %j, which comb does not write, as any other pragma",

@@ -102,9 +102,8 @@ async function copyExtensions(from: Sql, to: Sql, refused: (name: string, error:
  * A history's CREATE ROLE `sent` of `role`, run in the replay's `database`: an existing role is used,
  * any other made by `sent` and tagged, and either held by a grant on `database`; whether the role
  * is a replay's, which the replay then drops, so whichever of two replays using one role ends last
- * drops it. Within a file's
- * transaction each try is a savepoint, so a role another replay made or dropped since the read is
- * read again
+ * drops it. Within a file's transaction each try is a savepoint, so a role another replay made or
+ * dropped since the read is read again
  */
 async function createRole(
 	sql: Sql,

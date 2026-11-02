@@ -150,14 +150,17 @@ function unrecognized(code: string, kind = kindOf(code)): string {
 	return `comb does not recognize ${kind}; approve it in the file`
 }
 
-/** Whether `code` sets one of the foreign-key pragmas comb writes, on the main schema, however the name is spelled */
+/**
+ * Whether `code` sets one of the foreign-key pragmas comb writes, on the main schema, however the name is spelled:
+ * defer_foreign_keys as comb writes it, foreign_keys with any value, since each is a no-op inside the transaction
+ * comb runs a file in (classify-runtime.ts notes the ones SQLite reads off)
+ */
 function foreignKeyPragma(code: string): boolean {
 	const pragma = pragmaOf(code)
+	if (pragma?.value === undefined || (pragma.schema !== undefined && pragma.schema !== "main")) return false
 	return (
-		pragma !== undefined &&
-		(pragma.name === "defer_foreign_keys" || pragma.name === "foreign_keys") &&
-		(pragma.schema === undefined || pragma.schema === "main") &&
-		/^(?:on|off|true|false|0|1)$/i.test(pragma.value ?? "")
+		pragma.name === "foreign_keys" ||
+		(pragma.name === "defer_foreign_keys" && /^(?:on|off|true|false|0|1)$/i.test(pragma.value))
 	)
 }
 

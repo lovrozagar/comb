@@ -74,9 +74,12 @@ const PRAGMA_HEAD = /* @__PURE__ */ new RegExp(
 	"i",
 )
 
-/** A pragma's value as SQLite reads it: a single-quoted string is its text (S2 of r20), a quoted name its name */
+/**
+ * A pragma's value as SQLite reads it: a single-quoted string is its text (S2 of r20), a quoted name its name, and
+ * a number's unary plus is dropped, as SQLite's grammar drops it (`+1` is `1`, `'+1'` stays `+1`)
+ */
 const pragmaValue = (value: string): string =>
-	value.startsWith("'") ? value.slice(1, -1).replaceAll("''", "'") : unquotePart(value)
+	value.startsWith("'") ? value.slice(1, -1).replaceAll("''", "'") : unquotePart(value.replace(/^\+ ?(?=[\d.])/, ""))
 
 /** The pragma `code` runs (S1 of r19: read once, so a quoted name is the name), or undefined for any other statement */
 function pragmaOf(code: string): Pragma | undefined {

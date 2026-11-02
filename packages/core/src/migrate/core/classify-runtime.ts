@@ -34,12 +34,34 @@ function preparedOf(codes: readonly string[]): Map<string, string> {
 	return out
 }
 
+/**
+ * sqlite3Atoi of a value that starts with a digit: its leading 0x hex or decimal int32, 0 when that overflows.
+ * A hex value takes at most 8 digits after its leading zeros, a decimal one at most 10.
+ */
+function atoi(value: string): number {
+	const hex = /^0x(?=[\da-f])0*([\da-f]{0,8})([\da-f]?)/i.exec(value)
+	if (hex !== null) {
+		const int = Number.parseInt(hex[1] || "0", 16)
+		return hex[2] === "" && int <= 0x7fffffff ? int : 0
+	}
+	const digits = /^0*(\d{0,11})/.exec(value)?.[1] as string
+	const int = Number(digits)
+	return digits.length <= 10 && int <= 0x7fffffff ? int : 0
+}
+
+/**
+ * Whether every SQLite comb targets reads `PRAGMA foreign_keys = value` as on: on, yes or true in any case, or a
+ * value starting with a digit whose int32 is not 0. Anything else, a word SQLite does not know too, is off. SQLite
+ * 3.53 keeps only the int32's low byte (256 is off) and 3.54 the whole of it, so a low byte of 0 is off here.
+ */
+const readsOn = (value: string): boolean => /^(?:on|yes|true)$/i.test(value) || (atoi(value) & 0xff) !== 0
+
 /** The findings of a pragma: foreign_keys off cautious, writable_schema unsafe, any other none of its own */
 function pragmaFinding(code: string): Finding | undefined {
 	const pragma = pragmaOf(code)
 	/* SQLite ignores it inside a transaction, so the file's own off never turns a cascade or a check off; on is
 	   the state the transaction keeps anyway, so it carries no note (S4 of r19) */
-	if (pragma?.name === "foreign_keys" && /^(?:off|false|no|0)$/i.test(pragma.value ?? "")) {
+	if (pragma?.name === "foreign_keys" && pragma.value !== undefined && !readsOn(pragma.value)) {
 		return {
 			level: "cautious",
 			note: "does nothing inside the transaction comb runs each file in: foreign keys stay on, and comb migrate diff writes defer_foreign_keys instead",
