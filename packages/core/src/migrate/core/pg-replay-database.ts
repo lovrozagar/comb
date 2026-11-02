@@ -99,9 +99,10 @@ async function copyExtensions(from: Sql, to: Sql, refused: (name: string, error:
 }
 
 /**
- * A history's CREATE ROLE `sent` of `role`, run in the replay's `database`: an existing role is used
- * and held, any other made by `sent` and tagged; whether the role is a replay's, which the replay
- * then drops, so whichever of two replays using one role ends last drops it. Within a file's
+ * A history's CREATE ROLE `sent` of `role`, run in the replay's `database`: an existing role is used,
+ * any other made by `sent` and tagged, and either held by a grant on `database`; whether the role
+ * is a replay's, which the replay then drops, so whichever of two replays using one role ends last
+ * drops it. Within a file's
  * transaction each try is a savepoint, so a role another replay made or dropped since the read is
  * read again
  */
@@ -126,11 +127,12 @@ async function createRole(
 		const exists = found !== undefined
 		await mark("SAVEPOINT comb_role")
 		try {
-			if (exists) await sql.unsafe(`GRANT CONNECT ON DATABASE ${database} TO ${sqlIdentifier(role)}`, [])
-			else {
+			if (!exists) {
 				await sql.unsafe(sent, [])
 				await sql.unsafe(`COMMENT ON ROLE ${sqlIdentifier(role)} IS ${literal(`${TAG} ${started}`)}`, [])
 			}
+			/* the replay that made the role holds it too, so whichever replay using it ends last drops it */
+			await sql.unsafe(`GRANT CONNECT ON DATABASE ${database} TO ${sqlIdentifier(role)}`, [])
 			await mark("RELEASE SAVEPOINT comb_role")
 			return !exists || String(found["description"]).startsWith(`${TAG} `)
 		} catch (error) {

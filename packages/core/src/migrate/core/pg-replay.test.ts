@@ -121,6 +121,23 @@ describe("replayCatalog on what dev refuses", () => {
 		await expect(replay).rejects.toThrow('1_a.sql: devUrl refused "SELEC 1" as baseline replayed the history there')
 	})
 
+	it("keeps the refusal when cleaning up fails, and still tries every cleanup step (R2 of the P1 review)", async () => {
+		const dev = fake([], (query) =>
+			query.startsWith("CREATE VIEW") || query.startsWith("DROP DATABASE")
+				? new Error("database is being accessed by other users")
+				: undefined,
+		)
+		const replay = replayCatalog(
+			TARGET,
+			{ files: file("CREATE ROLE r;\nCREATE VIEW v AS SELECT nope;"), targetUser: "u" },
+			dev.load,
+		)
+		await expect(replay).rejects.toThrow(
+			/^1_a\.sql: devUrl refused "CREATE VIEW v AS SELECT nope" as baseline replayed/,
+		)
+		expect(dev.queries().slice(-2)).toEqual([DROPPED, 'DROP ROLE IF EXISTS "r"'])
+	})
+
 	it("says comb could not replay when dev itself fails, never naming its password", async () => {
 		const dev = fake([], (query) =>
 			query === "BEGIN" ? new Error("password authentication failed for postgres://u:hunter2@dev/dev") : undefined,

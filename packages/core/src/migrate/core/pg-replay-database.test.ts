@@ -121,13 +121,14 @@ const found = (description: string | null) => [{ description }]
 describe("createRole", () => {
 	const made = { database: "comb_replay_1_x", role: "r", sent: "CREATE ROLE r", started: 7 }
 
-	it("makes and tags a role that does not exist, in a savepoint within a file, and owns it", async () => {
+	it("makes, tags and holds a role that does not exist, in a savepoint within a file, and owns it", async () => {
 		const sql = fake()
 		expect(await createRole(sql.sql, { ...made, inFile: true })).toBe(true)
 		expect(sql.sent.slice(1)).toEqual([
 			"SAVEPOINT comb_role",
 			"CREATE ROLE r",
 			`COMMENT ON ROLE "r" IS 'comb_replay 7'`,
+			'GRANT CONNECT ON DATABASE comb_replay_1_x TO "r"',
 			"RELEASE SAVEPOINT comb_role",
 		])
 	})
@@ -143,11 +144,11 @@ describe("createRole", () => {
 	it("reads the role again when another replay made it or dropped it since the read", async () => {
 		/* made by another (42710), then dropped (42704), then made in the catalog's race (23505), then free */
 		const reads = [[], found("comb_replay 3"), [], []]
-		const raced = ["42710", "23505"]
+		const [raced, dropped] = [["42710", "23505"], ["42704"]]
 		const sql = fake((query) => {
 			if (query.startsWith("SELECT")) return reads.shift() ?? []
 			if (query === "CREATE ROLE r") return raced.length > 0 ? coded(raced.shift() ?? "") : []
-			if (query.startsWith("GRANT")) return coded("42704")
+			if (query.startsWith("GRANT") && dropped.length > 0) return coded(dropped.shift() ?? "")
 			return []
 		})
 		expect(await createRole(sql.sql, { ...made, inFile: true })).toBe(true)

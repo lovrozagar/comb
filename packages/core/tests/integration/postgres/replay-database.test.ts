@@ -47,20 +47,20 @@ async function onServer(...statements: string[]): Promise<void> {
 /** A name no other test or run holds */
 const unique = (prefix: string) => `${prefix}_${randomBytes(4).toString("hex")}`
 
-/** The files, named in order and hashed */
-function write(files: readonly string[]): void {
-	files.forEach((sql, i) => writeFileSync(join(dir, `20260101${String(i).padStart(6, "0")}_f${i}.sql`), sql))
-	hashDir(run, dir)
+/** The files, named in order and hashed, in `at` */
+function write(files: readonly string[], at = dir): void {
+	files.forEach((sql, i) => writeFileSync(join(at, `20260101${String(i).padStart(6, "0")}_f${i}.sql`), sql))
+	hashDir(run, at)
 }
 
 /** A check of every file against the empty target at `url`: what it printed, and why it refused */
-async function check(devUrl: string, url: string): Promise<{ out: string[]; refused?: string | undefined }> {
+async function check(devUrl: string, url: string, at = dir): Promise<{ out: string[]; refused?: string | undefined }> {
 	const out: string[] = []
 	try {
 		await applyWithAtlas({
 			approve: (m: ParsedMigration) => approveMigration(m, { target: "core", yes: true }),
 			checkOnly: true,
-			dir,
+			dir: at,
 			print: (line) => out.push(line),
 			target: { devUrl, lockTimeout: "5s", schema: "public", url },
 		})
@@ -80,6 +80,14 @@ async function asRole(devUrl: string, role: string, attributes: string): Promise
 }
 
 const dropRoles = (...roles: string[]) => query(pgUrl(), `DROP ROLE IF EXISTS ${roles.join(", ")}`)
+
+/** Resolves once `role` exists on the server */
+async function untilRole(role: string): Promise<void> {
+	for (;;) {
+		if ((await roleOf(role)).length > 0) return
+		await new Promise((resolve) => setTimeout(resolve, 20))
+	}
+}
 
 /** The settings an ALTER DATABASE left on `target` */
 const settingsOf = (target: string) =>
@@ -252,4 +260,34 @@ describe("the replay's database", () => {
 			await dropRoles(role)
 		}
 	}, 60_000)
+})
+
+/* R1 of the P1 review: a replay that made a role holds it as one that reused it does, so a shorter
+   replay ending first never drops the role from under a later file of the longer one */
+describe("two replays at once, one paused between the file making a role and the file using it", () => {
+	it("passes both, and drops the role after both", async () => {
+		const [made, resume] = [unique("comb_t_made"), unique("comb_t_resume")]
+		const other = mkdtempSync(join(tmpdir(), "comb-pg-replay-db-b-"))
+		try {
+			await withScratchDb((dev) =>
+				withScratchDb(async (url) => {
+					const policy = `CREATE TABLE t (id int PRIMARY KEY);\nALTER TABLE t ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON t TO ${made} USING (true);\n`
+					const unsafe = "-- comb:allow-unsafe: the test's history\n"
+					/* the role is the server's, so the paused replay sees the test make the one it waits for */
+					const pause = `DO $$ BEGIN FOR i IN 1..1200 LOOP EXIT WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${resume}'); PERFORM pg_sleep(0.05); END LOOP; END $$;\n`
+					write([`${unsafe}CREATE ROLE ${made};\n`, `${unsafe}${pause}`, `${unsafe}${policy}`])
+					write([`${unsafe}CREATE ROLE ${made};\n${policy}`], other)
+					const long = check(dev, url)
+					await untilRole(made)
+					const short = await check(dev, url, other)
+					await onServer(`CREATE ROLE ${resume}`)
+					expect([short.refused, (await long).refused]).toEqual([undefined, undefined])
+					expect(await roleOf(made)).toEqual([])
+				}),
+			)
+		} finally {
+			rmSync(other, { force: true, recursive: true })
+			await dropRoles(made, resume)
+		}
+	}, 120_000)
 })

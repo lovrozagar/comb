@@ -71,6 +71,15 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 const NO_CREATEDB =
 	"devUrl's role cannot create a database (CREATEDB), and comb replays the history file by file, as Atlas applies it, in a database of its own on devUrl's server; grant the role CREATEDB, or point devUrl at a server where it has it"
 
+/** `step` run, its failure left to the next run's sweep: cleaning up never replaces the replay's verdict */
+async function settle(step: () => Promise<unknown>): Promise<void> {
+	try {
+		await step()
+	} catch {
+		// reason: a database or role left behind is the sweep's an hour on; the verdict is the replay's
+	}
+}
+
 /** A refusal: what failed, with devUrl's error, and what that stops */
 type Refuse = (what: string, error: unknown) => ReplayFailed
 
@@ -119,9 +128,10 @@ async function onDev<T>(
 				await replayFile(run, file, { ...replay, leftOut: replay.leftOut ?? (() => undefined), refused })
 			return await after(run.sql)
 		} finally {
-			await run.sql.end()
-			await admin.unsafe(`DROP DATABASE IF EXISTS ${database}`, [])
-			for (const role of run.created) await dropRole(admin, role)
+			const cleanup = admin
+			await settle(() => run.sql.end())
+			await settle(() => cleanup.unsafe(`DROP DATABASE IF EXISTS ${database}`, []))
+			for (const role of run.created) await settle(() => dropRole(cleanup, role))
 		}
 	} catch (error) {
 		if (error instanceof ReplayFailed) throw error
