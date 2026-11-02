@@ -73,7 +73,7 @@ describe("runCli", () => {
 	it("is the help the README shows", async () => {
 		const { help } = await import("./run.ts")
 		const readme = readFileSync(join(import.meta.dirname, "../../../../README.md"), "utf8")
-		expect(readme).toContain(`\`\`\`\n${help()}\n\`\`\``)
+		expect(readme).toContain(`\`\`\`text\n${help()}\n\`\`\``)
 	})
 })
 
