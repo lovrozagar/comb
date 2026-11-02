@@ -14,6 +14,8 @@ export type Command =
 	| "migrate status"
 
 export type OptionSpec = {
+	/** It replaces the command's positionals, so a word beside it would be dropped */
+	alone?: true | undefined
 	/** The commands that take it */
 	commands: readonly Command[]
 	description: string
@@ -26,6 +28,7 @@ export type OptionSpec = {
 export const OPTIONS: readonly OptionSpec[] = [
 	{ commands: ["codegen"], description: "Run one generator only", long: "--generator", short: "-g", value: "name" },
 	{
+		alone: true,
 		commands: ["codegen"],
 		description: "Analyze this tables file directly, no comb.config.ts",
 		long: "--tables",
@@ -141,9 +144,18 @@ export function parseArgs(argv: readonly string[], command: Command): ParsedArgs
 			reading.at++
 		}
 	}
-	/* a positional the command does not read is refused, never dropped (P17 of r18) */
-	if (reading.parsed.positionals.length > mostPositionals(command)) throw new CliError(usageOf(command))
+	/* a positional the command does not read is refused, never dropped (P17 of r18, K2 of r19) */
+	const alone = optionsOf(command).find(
+		(option) => option.alone === true && Object.hasOwn(reading.parsed.options, option.long.slice(2)),
+	)
+	if (reading.parsed.positionals.length > (alone ? 0 : mostPositionals(command)))
+		throw new CliError(usageOf(command, alone))
 	return reading.parsed
+}
+
+/** Refuses a word after `usage`, a form that reads none, with that usage (K2 of r19) */
+export function refuseFurther(rest: readonly string[], usage: string): void {
+	if (rest.length > 0) throw new CliError(`Usage: comb ${usage}`)
 }
 
 /** How many positionals `command` reads, as its usage line declares them: any number for a list */
@@ -190,11 +202,11 @@ const optionsOf = (command: Command): OptionSpec[] => OPTIONS.filter((option) =>
 /** How a usage line names an option: its shortest spelling, and its value's placeholder */
 const brief = (option: OptionSpec) => `[${option.short ?? option.long}${option.value ? ` <${option.value}>` : ""}]`
 
-/** `command`'s usage line, built from what it takes (P13 of the 0.15.0 review) */
-export function usageOf(command: Command): string {
-	return ["Usage: comb", command, POSITIONALS[command], ...optionsOf(command).map(brief)]
-		.filter((part) => part !== "")
-		.join(" ")
+/** `command`'s usage line, built from what it takes, in the form `alone` makes it if given (P13 of the 0.15.0 review) */
+export function usageOf(command: Command, alone?: OptionSpec): string {
+	const takes = alone === undefined ? POSITIONALS[command] : `${alone.long} <${alone.value}>`
+	const others = optionsOf(command).filter((option) => option !== alone && (alone === undefined || !option.alone))
+	return ["Usage: comb", command, takes, ...others.map(brief)].filter((part) => part !== "").join(" ")
 }
 
 /** `command`'s help: its usage, then each option it takes */

@@ -13,6 +13,17 @@ describe("parseArgs", () => {
 		expect(parseArgs(["-"], "codegen").positionals).toEqual(["-"])
 	})
 
+	it("takes an option that stands alone with no positional, and any other beside one", () => {
+		expect(parseArgs(["--tables", "t.ts", "-g", "dtos"], "codegen").options).toEqual({
+			generator: "dtos",
+			tables: "t.ts",
+		})
+		expect(parseArgs(["core", "-g", "dtos"], "codegen").positionals).toEqual(["core"])
+		expect(() => parseArgs(["core", "--tables=t.ts"], "codegen")).toThrow(
+			new CliError("Usage: comb codegen --tables <path> [-g <name>]"),
+		)
+	})
+
 	it.each([
 		[["--nope"], "Unknown option: --nope"],
 		[["-x"], "Unknown option: -x"],

@@ -156,6 +156,20 @@ describe("comb codegen: direct mode", () => {
 		expect(files).not.toContain("db.core.field-names.gen.ts")
 	})
 
+	/* K2 of r19: a database named beside --tables was dropped, and direct mode wrote its files anyway */
+	it.each([
+		[["codegen", "core", "--tables", "db.core.tables.ts"]],
+		[["codegen", "--tables", "db.core.tables.ts", "nonexistent-db", "another"]],
+	])("refuses a database beside --tables, %j, writing nothing", async (argv) => {
+		const dir = project()
+		writeTables(dir)
+		const before = readdirSync(dir)
+		const io = makeIo(dir)
+		expect(await runCli(argv, io)).toBe(1)
+		expect(io.errors).toEqual(["Usage: comb codegen --tables <path> [-g <name>]"])
+		expect(readdirSync(dir)).toEqual(before)
+	})
+
 	it("reports a missing tables file in direct codegen mode, relative to cwd", async () => {
 		const dir = project()
 		const io = makeIo(dir)

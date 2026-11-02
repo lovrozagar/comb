@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { optionsHelp } from "./args.ts"
+import { optionsHelp, refuseFurther } from "./args.ts"
 import { cmdCodegen } from "./codegen.ts"
 import { cmdMigrate } from "./migrate.ts"
 import { CliError, type CliIo, Reported, ShowHelp } from "./output.ts"
@@ -48,12 +48,16 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<void> {
 	const [command, ...rest] = argv
 	switch (command) {
 		case undefined:
+			io.out(help())
+			return
 		case "help":
 		case "-h":
 		case "--help":
+			refuseFurther(rest, command)
 			io.out(help())
 			return
 		case "--version":
+			refuseFurther(rest, command)
 			io.out(version())
 			return
 		case "codegen":

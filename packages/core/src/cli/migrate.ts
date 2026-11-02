@@ -2,7 +2,7 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { parseArgs } from "./args.ts"
+import { parseArgs, refuseFurther } from "./args.ts"
 import { configuredFtsSql } from "./comb-config.ts"
 import { migrateApply } from "./migrate-apply.ts"
 import { resolveMigrateTarget } from "./migrate-target.ts"
@@ -195,6 +195,7 @@ export async function cmdMigrate(argv: readonly string[], io: CliIo, help: strin
 		case "help":
 		case "-h":
 		case "--help":
+			refuseFurther(rest, `migrate ${command}`)
 			io.out(help)
 			return
 		case "init":

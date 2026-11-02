@@ -108,6 +108,23 @@ describe("runCli: help and version", () => {
 		expect(io.errors).toEqual([])
 	})
 
+	/* K2 of r19: a word after help or version was dropped, and the run exited 0 */
+	it.each([
+		[["help", "migrate"], "Usage: comb help"],
+		[["-h", "extra"], "Usage: comb -h"],
+		[["--help", "extra"], "Usage: comb --help"],
+		[["--version", "extra"], "Usage: comb --version"],
+		[["migrate", "help", "extra"], "Usage: comb migrate help"],
+		[["migrate", "-h", "extra"], "Usage: comb migrate -h"],
+		[["migrate", "--help", "extra"], "Usage: comb migrate --help"],
+	])("refuses %j with its usage, returning 1", async (argv, usage) => {
+		const { runCli } = await import("./run.ts")
+		const io = makeIo(project())
+		expect(await runCli(argv, io)).toBe(1)
+		expect(io.errors).toEqual([usage])
+		expect(io.outputs).toEqual([])
+	})
+
 	it("refuses a bare migrate with the migrate commands, returning 1", async () => {
 		const { runCli } = await import("./run.ts")
 		const io = makeIo(project())
