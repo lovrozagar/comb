@@ -268,6 +268,10 @@ describe("buildFtsWhereWithSpellfix when spellfix1 is not loaded (K1 of r19)", (
 		["as SQLite says it", () => new Error("no such function: editdist3")],
 		["under drizzle's DrizzleQueryError", () => wrapped("SQLITE_ERROR: no such function: editdist3")],
 		["as D1 says it, wrapped", () => wrapped("D1_ERROR: no such function: editdist3 at offset 7: SQLITE_ERROR")],
+		[
+			"as Cloudflare's D1 answered S8",
+			() => wrapped("no such function: editdist3 at offset 7: SQLITE_ERROR [code: 7500]"),
+		],
 		["thrown as text", () => "no such function: editdist3"],
 	])("searches the terms as typed when the probe answers %s, and runs no spellfix query", async (_, failure) => {
 		const { calls, db } = probed(() => {
