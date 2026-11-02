@@ -11,14 +11,15 @@ import { listQueryStamp } from "./list-meta.ts"
 import { filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
 import { encodedMessage, LIST_QUERY_LIMITS, PAGINATION_DEFAULTS, REQUEST_BYTES, withinBytes } from "./schema-limits.ts"
 import {
+	assertNotReserved,
 	baseListQueryShape,
 	filterAstSchema,
 	langQueryField,
-	assertNotReserved,
 	limitSchemaFor,
 	pageSchemaFor,
 	parsedFieldsSchema,
 	pickExtended,
+	RESERVED_LIST_KEYS,
 	selectQueryField,
 	sortDirectionEnum,
 } from "./schema-params.ts"
@@ -44,23 +45,6 @@ type ListQueryShape = typeof baseListQueryShape &
 		page: z.ZodOptional<z.ZodCoercedNumber<unknown>>
 	}
 
-/* the params and output keys the schema owns; ReservedListKey in schema-types.ts is their type */
-// lookup-table: the names an extension may not take
-const RESERVED = /* @__PURE__ */ Object.freeze([
-	"cursor",
-	"filter",
-	"filterAst",
-	"lang",
-	"limit",
-	"order",
-	"page",
-	"parsedFields",
-	"parsedSort",
-	"q",
-	"select",
-	"sortOrderBy",
-	"validated",
-])
 type ListQueryInput = z.ZodObject<ListQueryShape, z.core.$strict>
 
 /** What createListQuerySchema returns: the strict request object piped into its parsed output */
@@ -129,9 +113,9 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 		q: z.string().optional(),
 		sortOrderBy: z.partialRecord(sortFieldSchema, sortDirectionEnum),
 		/* set on every parse; optional, as ListQueryOutput types it, so a handler's input takes a hand-built object (U29) */
-		pageBounded: z.literal(true).optional(),
-		/* the limit's brand, as the page's: one the schema bounded under its own maxLimit (Q16 of r18) */
-		limitBounded: z.literal(true).optional(),
+		pageBound: z.number().optional(),
+		/* the limit's bound, as the page's: the schema's own maxLimit (Q16 of r18) */
+		limitBound: z.number().optional(),
 		validated: z.literal(true),
 		...extendFields,
 	})
@@ -159,7 +143,7 @@ function createListQuerySchema<
 	const { extend: extendFields, fields: fieldsConfig, filter: filterConfig = EMPTY_OBJ, sort: sortConfig } = config
 	const limits = limitsOf(config.limits)
 	const extensions = extendFields as Record<string, z.ZodType> | undefined
-	assertNotReserved("createListQuerySchema", extensions, RESERVED)
+	assertNotReserved("createListQuerySchema", extensions, RESERVED_LIST_KEYS)
 
 	const shape = {
 		...baseListQueryShape,
@@ -170,6 +154,7 @@ function createListQuerySchema<
 	const schema = extendFields ? z.strictObject({ ...shape, ...extendFields }) : z.strictObject(shape)
 	const outputSchema = outputSchemaFor(sortConfig, extensions)
 
+	const maxLimit = config.pagination?.maxLimit ?? PAGINATION_DEFAULTS.maxLimit
 	const maxPage = config.pagination?.maxPage ?? PAGINATION_DEFAULTS.maxPage
 	const piped = schema.transform((data, ctx): ExtendedOutput => {
 		if (data.page !== undefined && data.page > maxPage) throw pageTooDeep(data.page, maxPage)
@@ -189,8 +174,8 @@ function createListQuerySchema<
 			parsedSort,
 			q: optional.q,
 			sortOrderBy: sortOrderByOf(parsedSort),
-			pageBounded: true as const,
-			limitBounded: true as const,
+			pageBound: maxPage,
+			limitBound: maxLimit,
 			validated: true as const,
 			...(pickExtended(extensions, data) as { [K in keyof T]: z.infer<T[K]> }),
 		}

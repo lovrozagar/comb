@@ -375,10 +375,10 @@ type ListQueryInput<TSortField extends string = string> = {
     filterAst?: FilterAST | null | undefined;
     limit: number;
     page?: number | null | undefined;
-    /** the schema's own page was checked against its maxPage (query/trusted.ts); absent, the default bounds it */
-    pageBounded?: true | undefined;
-    /** the schema bounded the limit under its own maxLimit; a hand-built one is held to the default (Q16 of r18) */
-    limitBounded?: true | undefined;
+    /** the deepest page this query may read (query/trusted.ts); absent, the default maxPage */
+    pageBound?: number | undefined;
+    /** the largest limit this query may take; absent, the default maxLimit (Q16 of r18) */
+    limitBound?: number | undefined;
     parsedFields?: ParsedFields | null | undefined;
     parsedSort: readonly SortField<TSortField>[];
     q?: string | null | undefined;
@@ -901,6 +901,7 @@ export { encodedBytes, encodedMessage, LIST_QUERY_LIMITS, MAX_QUERY_BYTES, PAGIN
 /** The configs and outputs of the list and retrieve query schemas. Declaration-only. */
 import type * as z from "zod";
 import type { FilterLimits } from "./filter.ts";
+import type { RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS } from "./schema-params.ts";
 import type { FieldType, FilterAST, ParsedFields, SortDirection, SortField } from "./types.ts";
 type FieldsConfig = {
     relations?: readonly string[];
@@ -922,8 +923,8 @@ type PaginationConfig = {
     /** The last page offset pagination serves; past it, a client pages by cursor. Default 10 000. */
     maxPage?: number;
 };
-type ReservedListKey = "cursor" | "filter" | "filterAst" | "lang" | "limit" | "order" | "page" | "parsedFields" | "parsedSort" | "q" | "select" | "sortOrderBy" | "validated";
-type ReservedRetrieveKey = "lang" | "parsedFields" | "select";
+type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number];
+type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number];
 type ListQueryConfig<T extends OutputStableShape<T> = Record<never, never>, TSortFields extends readonly string[] = readonly string[]> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
     extend?: T & {
@@ -964,13 +965,13 @@ type ListQueryOutput<TSortField extends string = string> = {
     q: string | undefined;
     sortOrderBy: Partial<Record<TSortField, SortDirection>>;
     /**
-     * True on the schema's own output: the page was checked against its maxPage (query/trusted.ts,
-     * U29). A parsed object built by hand leaves it out, and its page is checked against the default
-     * maxPage where it is read
+     * The schema's own maxPage on its output, which holds the page wherever it is read, a spread of
+     * this object included (C7 of r19). A parsed object built by hand leaves it out for the default
+     * maxPage, or states the bound it means (query/trusted.ts, U29)
      */
-    pageBounded?: true | undefined;
-    /** the schema bounded the limit under its own maxLimit; a hand-built one is held to the default (Q16 of r18) */
-    limitBounded?: true | undefined;
+    pageBound?: number | undefined;
+    /** The schema's own maxLimit, which holds the limit as `pageBound` holds the page (Q16 of r18, C7 of r19) */
+    limitBound?: number | undefined;
     /** Always true: the filter and the order were checked against the endpoint's fields (query/trusted.ts) */
     validated: true;
 };
@@ -1005,13 +1006,15 @@ declare function limitSchemaFor(pagination: PaginationConfig | undefined): z.Zod
  * maxPage whose last offset passes 2^53 - 1 is refused: SQLite fails on an OFFSET past int64.
  */
 declare function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<CountParam>;
+declare const RESERVED_LIST_KEYS: readonly ["cursor", "filter", "filterAst", "lang", "limit", "limitBound", "order", "page", "pageBound", "parsedFields", "parsedSort", "q", "select", "sortOrderBy", "validated"];
+declare const RESERVED_RETRIEVE_KEYS: readonly ["lang", "parsedFields", "select"];
 /** Throw when `extendFields` names a key of `reserved`, which the schema owns */
 declare function assertNotReserved(builder: string, extendFields: Record<string, unknown> | undefined, reserved: readonly string[]): void;
 /** The values of `extendFields`' keys in `data`; `{}` without extensions */
 declare function pickExtended<T extends Record<string, z.ZodType>>(extendFields: T | undefined, data: Record<string, unknown>): {
     [K in keyof T]: z.infer<T[K]>;
 };
-export { assertNotReserved, baseListQueryShape, filterAstSchema, langQueryField, limitSchemaFor, pageSchemaFor, parsedFieldsSchema, pickExtended, selectQueryField, sortDirectionEnum, };
+export { assertNotReserved, baseListQueryShape, filterAstSchema, langQueryField, limitSchemaFor, pageSchemaFor, parsedFieldsSchema, pickExtended, RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS, selectQueryField, sortDirectionEnum, };
 
 // query/filter.d.ts
 /**

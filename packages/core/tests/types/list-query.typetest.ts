@@ -69,9 +69,9 @@ expectTypeOf<keyof ListQueryOutput<"created_at">>().toEqualTypeOf<
 	| "filterAst"
 	| "lang"
 	| "limit"
-	| "limitBounded"
+	| "limitBound"
 	| "page"
-	| "pageBounded"
+	| "pageBound"
 	| "parsedFields"
 	| "parsedSort"
 	| "q"
@@ -84,7 +84,7 @@ expectTypeOf<z.output<ReturnType<typeof createListQuerySchema<Record<string, nev
 
 /*
  * U29's type: a parsed object built by hand, as a handler that checks its own filter builds it,
- * compiles without `pageBounded`, which absent means checked against the default maxPage
+ * compiles without `pageBound`, which absent means checked against the default maxPage
  */
 const handBuilt: ListQueryOutput = {
 	cursor: undefined,
@@ -106,7 +106,7 @@ void handBuilt
  */
 const handler = (input: ListOutput) => input.limit
 handler({ ...handBuilt, archived: undefined, parsedSort: [] })
-expectTypeOf<ListOutput["pageBounded"]>().toEqualTypeOf<true | undefined>()
+expectTypeOf<ListOutput["pageBound"]>().toEqualTypeOf<number | undefined>()
 
 /* C12 of the 0.14.1 review, K9 of r17: applyListQuery builds drizzle's select as it is, or one made dynamic, over the extras */
 declare const d1: DrizzleD1Database

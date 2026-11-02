@@ -250,10 +250,11 @@ describe("a gone anchor on Postgres, whatever builds the list (Q3)", () => {
 	it("refuses a listOptions page whose rows lack the flag, rather than read it as there", async () => {
 		await seeded(sessions, ICU, [`${LONG_A}1`, `${LONG_A}2`, "b", "c"])
 		const db = drizzle({ client: sessions.pg(), relations: defineRelations({ doc }) })
-		const first = queryHelpers.listOptions({ ...schema.parse({ order: "title.asc" }), limit: 2 }, SEALED)
+		const twoAPage = createListQuerySchema({ sort: ["title"], pagination: { defaultLimit: 2, maxLimit: 2 } })
+		const first = queryHelpers.listOptions(twoAPage.parse({ order: "title.asc" }), SEALED)
 		const [, meta] = queryHelpers.paginate(await db.query.doc.findMany(first as never), first)
 		const next = queryHelpers.listOptions(
-			{ ...schema.parse({ order: "title.asc" }), cursor: meta.nextCursor as string, limit: 2 },
+			{ ...twoAPage.parse({ order: "title.asc" }), cursor: meta.nextCursor as string },
 			SEALED,
 		)
 		const { _combAnchorGone, ...without } = next.extras

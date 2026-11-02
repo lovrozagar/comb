@@ -36,8 +36,14 @@ describe("assertPageWithin: a page no schema bounded (C4)", () => {
 		expect(() => assertPageWithin({ page: 10_001 })).toThrow(
 			expect.objectContaining({ errorKey: "page_too_deep", status: 400 }),
 		)
-		/* a schema configured with a deeper maxPage checked the page already, and brands it so (U29) */
-		expect(() => assertPageWithin({ page: 50_000, pageBounded: true })).not.toThrow()
+		/* a schema configured with a deeper maxPage says so with its bound, which holds the page (C7 of r19) */
+		expect(() => assertPageWithin({ page: 50_000, pageBound: 50_000 })).not.toThrow()
+		expect(() => assertPageWithin({ page: 50_001, pageBound: 50_000 })).toThrow(
+			expect.objectContaining({ errorKey: "page_too_deep", status: 400 }),
+		)
+		expect(() => assertPageWithin({ page: 1, pageBound: Number.NaN })).toThrow(
+			expect.objectContaining({ errorKey: "page_too_deep" }),
+		)
 		expect(() => assertPageWithin({})).not.toThrow()
 	})
 })
@@ -49,7 +55,7 @@ describe("assertPageWithin: a page on a filter its caller checked itself", () =>
 		expect(() => assertPageWithin({ page, validated: true })).toThrow(
 			expect.objectContaining({ errorKey: "invalid_page" }),
 		)
-		expect(() => assertPageWithin({ page, pageBounded: true })).toThrow(
+		expect(() => assertPageWithin({ page, pageBound: 50_000 })).toThrow(
 			expect.objectContaining({ errorKey: "invalid_page" }),
 		)
 	})

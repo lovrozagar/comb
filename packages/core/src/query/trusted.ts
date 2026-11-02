@@ -36,20 +36,20 @@ function assertSchemaParsed(parsed: Parsed): void {
 /**
  * Throw a 400 for a page that is not a whole number from 1 (U5), which would bind a negative or
  * fractional offset, or that passes the default maxPage: an offset that deep makes the database
- * skip every row before it, which a list schema refuses (C4). Only a schema's own page, branded
- * `pageBounded` under whatever maxPage it was built with, skips that comparison; `validated` says
- * the filter and the order were checked, never the page (U29).
+ * skip every row before it, which a list schema refuses (C4). A schema's output states its own
+ * maxPage as `pageBound`, which replaces the default here, so a spread of it stays held to that
+ * number (C7 of r19); `validated` says the filter and the order were checked, never the page (U29).
  */
 function assertPageWithin(parsed: {
 	page?: number | null | undefined
-	pageBounded?: true | undefined
+	pageBound?: number | undefined
 	/** the filter's and the order's check, which says nothing of the page: not read here */
 	validated?: true | undefined
 }): void {
 	const page = parsed.page ?? 1
 	if (!Number.isInteger(page) || page < 1) throw invalidPage(page)
-	if (parsed.pageBounded !== true && page > PAGINATION_DEFAULTS.maxPage)
-		throw pageTooDeep(page, PAGINATION_DEFAULTS.maxPage)
+	const bound = parsed.pageBound ?? PAGINATION_DEFAULTS.maxPage
+	if (!(page <= bound)) throw pageTooDeep(page, bound)
 }
 
 /**
@@ -57,7 +57,7 @@ function assertPageWithin(parsed: {
  * page does (Q16 of r17); a schema's own limit is one already. The key is the page's, so an app's
  * map of error keys needs no new one
  */
-function assertLimitWithin(parsed: { limit: number; limitBounded?: true | undefined }): void {
+function assertLimitWithin(parsed: { limit: number; limitBound?: number | undefined }): void {
 	if (!Number.isInteger(parsed.limit) || parsed.limit < 1) {
 		throw new CombError({
 			cause: `limit ${String(parsed.limit)} is not a whole number from 1`,
@@ -66,9 +66,10 @@ function assertLimitWithin(parsed: { limit: number; limitBounded?: true | undefi
 		})
 	}
 	/* a limit no schema bounded is held to the default maxLimit, as such a page is to maxPage (Q16 of r18) */
-	if (parsed.limitBounded === true || parsed.limit <= PAGINATION_DEFAULTS.maxLimit) return
+	const bound = parsed.limitBound ?? PAGINATION_DEFAULTS.maxLimit
+	if (parsed.limit <= bound) return
 	throw new CombError({
-		cause: `limit ${parsed.limit} is past ${PAGINATION_DEFAULTS.maxLimit}; page by cursor, or bound it in the list schema`,
+		cause: `limit ${parsed.limit} is past ${bound}; page by cursor, or bound it in the list schema`,
 		errorKey: combErrorKeys.INVALID_PAGE,
 		status: "bad_request",
 	})

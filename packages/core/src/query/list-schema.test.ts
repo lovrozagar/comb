@@ -460,9 +460,9 @@ describe("the parsed cursor (Q7)", () => {
 			"filterAst",
 			"lang",
 			"limit",
-			"limitBounded",
+			"limitBound",
 			"page",
-			"pageBounded",
+			"pageBound",
 			"parsedFields",
 			"parsedSort",
 			"q",
@@ -473,15 +473,17 @@ describe("the parsed cursor (Q7)", () => {
 })
 
 /*
- * G2 of plan 14 (U29): pageBounded is optional wherever it is typed, the published output included,
+ * G2 of plan 14 (U29): pageBound is optional wherever it is typed, the published output included,
  * so a generated handler takes a parsed object built by hand; every parse still sets it
  */
-describe("pageBounded in the output", () => {
+describe("pageBound in the output", () => {
 	it("is set on every parse, and is no required key of the published output", () => {
 		const schema = createListQuerySchema({ sort: ["title"] })
-		expect(schema.parse({}).pageBounded).toBe(true)
+		expect(schema.parse({}).pageBound).toBe(10_000)
+		expect(schema.parse({}).limitBound).toBe(100)
 		const out = z.toJSONSchema(schema, { io: "output", unrepresentable: "any" }) as { required?: string[] }
 		expect(out.required).toContain("validated")
-		expect(out.required).not.toContain("pageBounded")
+		expect(out.required).not.toContain("pageBound")
+		expect(out.required).not.toContain("limitBound")
 	})
 })

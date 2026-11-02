@@ -298,10 +298,13 @@ describe("buildListQuery's merged list, refused at build", () => {
 	})
 })
 
+const past = (cause: string): unknown => expect.objectContaining({ cause, status: 400 })
+
 /* r18 Q16: a limit no schema bounded is held to the default cap, and maxRowsPerShard to a whole number from 1 */
 describe("the bounds a list is made under", () => {
 	it("refuses a hand-made limit past the default maxLimit, and takes the schema's own", () => {
-		const parsed = { ...parse({}), limit: 1_000_000_000, limitBounded: undefined }
+		const { limitBound: _dropped, ...unbranded } = parse({})
+		const parsed = { ...unbranded, limit: 1_000_000_000 }
 		expect(() => buildListQuery({ ...SEALED, parsed, table: t })).toThrow(
 			expect.objectContaining({
 				cause: "limit 1000000000 is past 100; page by cursor, or bound it in the list schema",
@@ -310,6 +313,31 @@ describe("the bounds a list is made under", () => {
 		)
 		const wide = createListQuerySchema({ pagination: { maxLimit: 500 }, sort: ["k"] }).parse({ limit: "500" })
 		expect(() => buildListQuery({ ...SEALED, parsed: wide, table: t })).not.toThrow()
+	})
+
+	/* C7 of r19: the brand is the bound itself, so a parsed query with a field changed is held to it */
+	it("holds a spread or a mutated parsed query to the bound of the schema that parsed it", () => {
+		expect(() => buildListQuery({ ...SEALED, parsed: { ...parse({}), limit: 1e9 }, table: t })).toThrow(
+			past("limit 1000000000 is past 10; page by cursor, or bound it in the list schema"),
+		)
+		const wide = createListQuerySchema({ pagination: { maxLimit: 500 }, sort: ["k"] }).parse({})
+		expect(() => buildListQuery({ ...SEALED, parsed: { ...wide, limit: 300 }, table: t })).not.toThrow()
+		expect(() => buildListQuery({ ...SEALED, parsed: { ...wide, limit: 501 }, table: t })).toThrow(
+			past("limit 501 is past 500; page by cursor, or bound it in the list schema"),
+		)
+		const mutated = parse({})
+		mutated.limit = 11
+		expect(() => buildListQuery({ ...SEALED, parsed: mutated, table: t })).toThrow(
+			past("limit 11 is past 10; page by cursor, or bound it in the list schema"),
+		)
+		expect(() => buildListQuery({ ...SEALED, parsed: { ...parse({}), page: 1e7 }, table: t })).toThrow(
+			expect.objectContaining({ errorKey: "page_too_deep", status: 400 }),
+		)
+		const deep = createListQuerySchema({ pagination: { maxPage: 20_000 }, sort: ["k"] }).parse({})
+		expect(() => buildListQuery({ ...SEALED, parsed: { ...deep, page: 20_000 }, table: t })).not.toThrow()
+		expect(() => buildListQuery({ ...SEALED, parsed: { ...deep, page: 20_001 }, table: t })).toThrow(
+			expect.objectContaining({ cause: "page 20001 is past 20000; page further by cursor" }),
+		)
 	})
 
 	it.each([Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY])(

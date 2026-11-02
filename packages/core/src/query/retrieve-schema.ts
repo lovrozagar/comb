@@ -5,7 +5,13 @@
  */
 import * as z from "zod"
 
-import { assertNotReserved, langQueryField, pickExtended, selectQueryField } from "./schema-params.ts"
+import {
+	assertNotReserved,
+	langQueryField,
+	pickExtended,
+	RESERVED_RETRIEVE_KEYS,
+	selectQueryField,
+} from "./schema-params.ts"
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts"
 import { validateSelectWithConfig } from "./select-validate.ts"
 
@@ -18,16 +24,12 @@ type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<
 	z.ZodTransform<Awaited<RetrieveQueryOutput & { [K in keyof T]: z.infer<T[K]> }>, z.output<RetrieveInput>>
 >
 
-/* the params and output keys the schema owns; ReservedRetrieveKey in schema-types.ts is their type */
-// lookup-table: the names an extension may not take
-const RESERVED = /* @__PURE__ */ Object.freeze(["lang", "parsedFields", "select"])
-
 function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never>>(
 	config: RetrieveQueryConfig<T>,
 ): RetrieveQuerySchema<T> {
 	const { extend: extendFields, fields: fieldsConfig } = config
 	const extensions = extendFields as Record<string, z.ZodType> | undefined
-	assertNotReserved("createRetrieveQuerySchema", extensions, RESERVED)
+	assertNotReserved("createRetrieveQuerySchema", extensions, RESERVED_RETRIEVE_KEYS)
 
 	const shape: RetrieveShape = { select: selectQueryField, ...(config.lang ? { lang: langQueryField } : {}) }
 	const schema = z.strictObject({ ...shape, ...extensions })

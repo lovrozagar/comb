@@ -2,6 +2,7 @@
 import type * as z from "zod"
 
 import type { FilterLimits } from "./filter.ts"
+import type { RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS } from "./schema-params.ts"
 import type { FieldType, FilterAST, ParsedFields, SortDirection, SortField } from "./types.ts"
 
 type FieldsConfig = {
@@ -24,24 +25,9 @@ type PaginationConfig = {
 	maxPage?: number
 }
 
-/* the params and output keys a list query schema owns: an extension under one would replace a checked value */
-type ReservedListKey =
-	| "cursor"
-	| "filter"
-	| "filterAst"
-	| "lang"
-	| "limit"
-	| "order"
-	| "page"
-	| "parsedFields"
-	| "parsedSort"
-	| "q"
-	| "select"
-	| "sortOrderBy"
-	| "validated"
+type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number]
 
-/* the same for a retrieve query schema */
-type ReservedRetrieveKey = "lang" | "parsedFields" | "select"
+type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number]
 
 type ListQueryConfig<
 	T extends OutputStableShape<T> = Record<never, never>,
@@ -84,13 +70,13 @@ type ListQueryOutput<TSortField extends string = string> = {
 	q: string | undefined
 	sortOrderBy: Partial<Record<TSortField, SortDirection>>
 	/**
-	 * True on the schema's own output: the page was checked against its maxPage (query/trusted.ts,
-	 * U29). A parsed object built by hand leaves it out, and its page is checked against the default
-	 * maxPage where it is read
+	 * The schema's own maxPage on its output, which holds the page wherever it is read, a spread of
+	 * this object included (C7 of r19). A parsed object built by hand leaves it out for the default
+	 * maxPage, or states the bound it means (query/trusted.ts, U29)
 	 */
-	pageBounded?: true | undefined
-	/** the schema bounded the limit under its own maxLimit; a hand-built one is held to the default (Q16 of r18) */
-	limitBounded?: true | undefined
+	pageBound?: number | undefined
+	/** The schema's own maxLimit, which holds the limit as `pageBound` holds the page (Q16 of r18, C7 of r19) */
+	limitBound?: number | undefined
 	/** Always true: the filter and the order were checked against the endpoint's fields (query/trusted.ts) */
 	validated: true
 }

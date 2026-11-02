@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { createListQuerySchema } from "./list-schema.ts"
+import { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 import { MAX_CURSOR_LENGTH } from "./cursor.ts"
 import { MAX_QUERY_BYTES, PAGINATION_DEFAULTS, REQUEST_BYTES } from "./schema-limits.ts"
 
@@ -11,8 +12,10 @@ const RESERVED = [
 	"filterAst",
 	"lang",
 	"limit",
+	"limitBound",
 	"order",
 	"page",
+	"pageBound",
 	"parsedFields",
 	"parsedSort",
 	"q",
@@ -31,8 +34,25 @@ describe("an extension named like a param or an output key (Q12)", () => {
 	it("refuses one at the type level too, and takes any other name", () => {
 		// @ts-expect-error filterAst is reserved
 		expect(() => createListQuerySchema({ extend: { filterAst: z.any() }, sort: ["id"] })).toThrow(TypeError)
+		// @ts-expect-error limitBound is reserved
+		expect(() => createListQuerySchema({ extend: { limitBound: z.any() }, sort: ["id"] })).toThrow(TypeError)
+		// @ts-expect-error pageBound is reserved
+		expect(() => createListQuerySchema({ extend: { pageBound: z.any() }, sort: ["id"] })).toThrow(TypeError)
 		const schema = createListQuerySchema({ extend: { archived: z.enum(["yes"]).optional() }, sort: ["id"] })
 		expect(schema.parse({ archived: "yes" }).archived).toBe("yes")
+	})
+})
+
+/* the bounds come from the config alone: a client that names one is an unknown param (C7 of r19) */
+describe("a request naming a bound", () => {
+	it.each(["limitBound", "pageBound"])("refuses %s as it refuses any unknown param, and the schema's stands", (key) => {
+		const schema = createListQuerySchema({ sort: ["id"] })
+		const refused = schema.safeParse({ [key]: "1000000" })
+		expect(refused.success).toBe(false)
+		expect(refused.error?.issues).toEqual([expect.objectContaining({ code: "unrecognized_keys", keys: [key] })])
+		const retrieve = createRetrieveQuerySchema({ fields: { scalars: ["id"] } })
+		expect(retrieve.safeParse({ [key]: "1000000" }).success).toBe(false)
+		expect(schema.parse({})).toMatchObject({ limitBound: 100, pageBound: 10_000 })
 	})
 })
 

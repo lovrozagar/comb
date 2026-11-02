@@ -144,6 +144,30 @@ function pageSchemaFor(pagination: PaginationConfig | undefined): z.ZodOptional<
 	return maxPage === PAGINATION_DEFAULTS.maxPage ? defaultPageSchema : pageSchema(maxPage)
 }
 
+/* the params and output keys a list query schema owns: an extension under one would replace a checked value */
+// lookup-table: the names an extension may not take, the type's source too
+const RESERVED_LIST_KEYS = [
+	"cursor",
+	"filter",
+	"filterAst",
+	"lang",
+	"limit",
+	"limitBound",
+	"order",
+	"page",
+	"pageBound",
+	"parsedFields",
+	"parsedSort",
+	"q",
+	"select",
+	"sortOrderBy",
+	"validated",
+] as const
+
+/* the same for a retrieve query schema */
+// lookup-table: the names an extension may not take, the type's source too
+const RESERVED_RETRIEVE_KEYS = ["lang", "parsedFields", "select"] as const
+
 /** Throw when `extendFields` names a key of `reserved`, which the schema owns */
 function assertNotReserved(
 	builder: string,
@@ -172,6 +196,8 @@ export {
 	pageSchemaFor,
 	parsedFieldsSchema,
 	pickExtended,
+	RESERVED_LIST_KEYS,
+	RESERVED_RETRIEVE_KEYS,
 	selectQueryField,
 	sortDirectionEnum,
 }

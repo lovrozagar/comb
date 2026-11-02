@@ -67,10 +67,10 @@ type ListQueryInput<TSortField extends string = string> = {
 	filterAst?: FilterAST | null | undefined
 	limit: number
 	page?: number | null | undefined
-	/** the schema's own page was checked against its maxPage (query/trusted.ts); absent, the default bounds it */
-	pageBounded?: true | undefined
-	/** the schema bounded the limit under its own maxLimit; a hand-built one is held to the default (Q16 of r18) */
-	limitBounded?: true | undefined
+	/** the deepest page this query may read (query/trusted.ts); absent, the default maxPage */
+	pageBound?: number | undefined
+	/** the largest limit this query may take; absent, the default maxLimit (Q16 of r18) */
+	limitBound?: number | undefined
 	parsedFields?: ParsedFields | null | undefined
 	parsedSort: readonly SortField<TSortField>[]
 	q?: string | null | undefined
