@@ -208,6 +208,24 @@ describe("ci.yml and verify run the same gates", () => {
 	})
 })
 
+/* 0.19's consumers job ran K7's missing-peer cells, which run atlas and reach Postgres, with neither */
+describe("ci.yml's suite jobs", () => {
+	it("give every Linux job that runs a suite Atlas, a Postgres 17 service and COMB_TEST_PG_URL", () => {
+		const needs = [
+			"- name: install atlas v1.3.0",
+			"image: postgres:17",
+			"COMB_TEST_PG_URL: postgres://comb:comb@localhost:5432/comb?sslmode=disable",
+		]
+		const suites = ciJobs(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8")).filter(
+			(job) => job.runsOn === "ubuntu-latest" && scriptsOf(job.lines).some((script) => script.startsWith("test")),
+		)
+		expect(suites.map((job) => job.name)).toContain("consumers")
+		expect(
+			suites.flatMap((job) => needs.filter((need) => !job.lines.includes(need)).map((need) => `${job.name}: ${need}`)),
+		).toEqual([])
+	})
+})
+
 /*
  * CI's runners are in UTC, so every local test run is too: a time-zone-dependent expectation that
  * passed in another zone passed verify and failed CI (U20's row 8). The vitest configs pin TZ before

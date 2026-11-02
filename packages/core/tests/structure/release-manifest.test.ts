@@ -126,6 +126,24 @@ describe("the published package (P2)", () => {
 	})
 })
 
+/* bun 1.3.11, which CI and the release pin, runs a pack script with no node_modules/.bin on PATH:
+   21c5726's prepack called tsc bare and the release dry run failed with "tsc: command not found" */
+describe("the pack scripts", () => {
+	it("run no installed bin bare, only through bun run", () => {
+		const scripts = manifestOf(join(ROOT, "packages/core"))["scripts"] as Record<string, string>
+		const bins = readdirSync(join(ROOT, "node_modules", ".bin"))
+		const bare = ["prepack", "postpack"].flatMap((name) =>
+			(scripts[name] ?? "")
+				.split(/&&|\|\||;|\|/)
+				.map((command) => command.trim().split(/\s+/)[0] as string)
+				.filter((command) => bins.includes(command))
+				.map((command) => `${name}: ${command}`),
+		)
+		expect(bins).toContain("tsc")
+		expect(bare).toEqual([])
+	})
+})
+
 /** Every file under `dir`, relative to it */
 const filesUnder = (dir: string): string[] =>
 	readdirSync(dir, { recursive: true, withFileTypes: true })

@@ -123,7 +123,7 @@
 		"access": "public"
 	},
 	"scripts": {
-		"prepack": "rm -rf types && cp ../../README.md ../../LICENSE . && tsc -p tsconfig.types.json",
+		"prepack": "rm -rf types && cp ../../README.md ../../LICENSE . && bun run types:emit",
 		"postpack": "rm -rf types README.md LICENSE",
 		"test": "vitest run",
 		"test:bun": "bun test tests/bun",
@@ -134,7 +134,8 @@
 		"test:all": "vitest run && bun test tests/bun",
 		"test:watch": "vitest",
 		"type:check": "tsc --noEmit",
-		"type:check:strict": "tsc --noEmit -p tsconfig.strict.json && tsc --noEmit -p tsconfig.es2022.json"
+		"type:check:strict": "tsc --noEmit -p tsconfig.strict.json && tsc --noEmit -p tsconfig.es2022.json",
+		"types:emit": "tsc -p tsconfig.types.json"
 	},
 	"dependencies": {
 		"@types/pluralize": "0.0.33",
