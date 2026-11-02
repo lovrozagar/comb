@@ -59,9 +59,10 @@ describe("runtimeFindings", () => {
 })
 
 const rated = (code: string) => runtimeFindings(code, new Map(), none)
+const levels = (code: string) => rated(code).map((finding) => finding.level)
 
-/* SQLite reads a value it does not know as off, and a number by its leading int32, so off's note goes exactly
-   where SQLite itself reads foreign_keys off: node:sqlite is the oracle */
+/* SQLite reads a value it does not know as off, and SQLite versions read numbers apart, so no value SQLite reads
+   off may pass without the note: node:sqlite is the oracle */
 const VALUES = [
 	"on",
 	"ON",
@@ -126,27 +127,44 @@ const VALUES = [
 	"000000000001",
 ]
 
-describe("runtimeFindings on foreign_keys's value, as SQLite reads it (S2 of r20)", () => {
-	it.each(VALUES)("gives foreign_keys = %s off's note exactly where SQLite reads it off", (value) => {
+describe("runtimeFindings on foreign_keys's value (S2 of r20)", () => {
+	it.each(VALUES)("gives foreign_keys = %s the note wherever SQLite reads it off", (value) => {
 		const db = new DatabaseSync(":memory:")
 		db.exec(`PRAGMA foreign_keys = 0; PRAGMA foreign_keys = ${value}`)
 		const off = (db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys === 0
 		db.close()
 		for (const sql of [`PRAGMA foreign_keys = ${value}`, `PRAGMA foreign_keys(${value})`]) {
-			expect(
-				runtimeFindings(sql, new Map(), none).map((finding) => finding.level),
-				sql,
-			).toEqual(off ? ["cautious"] : [])
+			expect(off ? levels(sql) : ["cautious"], sql).toEqual(["cautious"])
 		}
 	})
 
-	/* SQLite 3.53 (bun:sqlite) reads an int32 by its low byte, so these are off there and on in 3.54 (node:sqlite) */
-	it.each(["256", "512", "'256'", "0x100", "0x0200"])(
-		"gives foreign_keys = %s off's note, off on SQLite 3.53",
+	/* on, yes, true and 1, in any case, quoted or not, and 1 behind a unary plus, which SQLite's grammar drops */
+	it.each([
+		"on",
+		"ON",
+		"'on'",
+		'"on"',
+		"[on]",
+		"yes",
+		"`Yes`",
+		"'yes'",
+		"true",
+		"TRUE",
+		"'True'",
+		"1",
+		"'1'",
+		"+1",
+		"+ 1",
+	])("gives foreign_keys = %s, which comb writes as on, no note", (value) => {
+		expect(levels(`PRAGMA foreign_keys = ${value}`)).toEqual([])
+		expect(levels(`PRAGMA foreign_keys(${value})`)).toEqual([])
+	})
+
+	/* any other value is noted however SQLite reads it: 256 is off on 3.53 (bun:sqlite) and on on 3.54 (node:sqlite) */
+	it.each(["2", "+2", "01", "10", "0x1", "1.5", "'2'", "256", "'256'", "0x100", "'nope'", "full", "off", "0"])(
+		"gives foreign_keys = %s the note",
 		(value) => {
-			expect(
-				runtimeFindings(`PRAGMA foreign_keys = ${value}`, new Map(), none).map((finding) => finding.level),
-			).toEqual(["cautious"])
+			expect(levels(`PRAGMA foreign_keys = ${value}`)).toEqual(["cautious"])
 		},
 	)
 })
