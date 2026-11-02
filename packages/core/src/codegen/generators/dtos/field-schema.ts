@@ -134,33 +134,26 @@ function integerOf(annotations: FieldConstraints, range: Range, schemaType: Sche
 const READ_FLOAT =
 	'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: void 0, type: "null" })])'
 
-function numberBase(build: Build): Built {
-	const code = numberCode(build)
-	if (code === undefined) return undefined
-	/* a read float's base takes null already, so a nullable one publishes null once (C6 of r17) */
-	return { code, takesNull: code.startsWith(READ_FLOAT) }
-}
-
-/** numberBase's Zod code */
-function numberCode({ annotations, dialect, field, schemaType }: Build): string | undefined {
-	if (!isNumeric(field)) return field.dataType === "boolean" ? "z.boolean()" : undefined
+function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
+	if (!isNumeric(field)) return field.dataType === "boolean" ? plain("z.boolean()") : undefined
 	const { max, min } = annotations
 	const kind = field.combKind
-	if (kind === "createdAt" || kind === "updatedAt" || kind === "deletedAt") return "timestampSchema"
-	if (kind === "boolean") return "z.boolean()"
+	if (kind === "createdAt" || kind === "updatedAt" || kind === "deletedAt") return plain("timestampSchema")
+	if (kind === "boolean") return plain("z.boolean()")
 	/* a date before 1970 is a negative epoch, which both engines store (F11) */
 	if (kind === "timestamp") {
 		refuseNoInteger(field.name, annotations, SAFE)
-		return integerOf(annotations, SAFE, schemaType)
+		return plain(integerOf(annotations, SAFE, schemaType))
 	}
 	const integer = kind === null ? field.dataType.startsWith("number int") : kind === "integer" || kind === "serialId"
 	if (integer) {
 		const range = integerRange(field, dialect)
 		refuseNoInteger(field.name, annotations, range)
-		return integerOf(annotations, range, schemaType)
+		return plain(integerOf(annotations, range, schemaType))
 	}
-	if (isRead(schemaType)) return `${READ_FLOAT}${stated({ maximum: max, minimum: min })}`
-	return `z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`
+	/* a read float's base takes null already, so a nullable one publishes null once (C6 of r17) */
+	if (isRead(schemaType)) return { code: `${READ_FLOAT}${stated({ maximum: max, minimum: min })}`, takesNull: true }
+	return plain(`z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`)
 }
 
 /** A plain Postgres column's write rule by its data type (F50); a read keeps the plain type (F65) */
