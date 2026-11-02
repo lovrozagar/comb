@@ -115,6 +115,10 @@ type ManifestColumn = {
     min: number | null;
     /** Regex source where one was declared */
     pattern: string | null;
+    /** A text column's format, null for any other (C8 of r19) */
+    textKind: "email" | "imageUri" | "name" | "password" | "url" | null;
+    /** The rewrites a written value takes before `min`, `max` and `pattern` bind it, in order: the DTO's own list (meta-contract §2.1) */
+    transform: string[];
     /** Server-assigned; absent from create bodies */
     generated: boolean;
     /** Absent from update bodies */

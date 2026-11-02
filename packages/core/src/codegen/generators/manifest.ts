@@ -16,6 +16,7 @@ import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { qualifiedName } from "../utils/table-name.ts"
+import { transformsOf } from "./dtos/text-schema.ts"
 
 /**
  * Manifest format version.
@@ -39,6 +40,10 @@ type ManifestColumn = {
 	min: number | null
 	/** Regex source where one was declared */
 	pattern: string | null
+	/** A text column's format, null for any other (C8 of r19) */
+	textKind: "email" | "imageUri" | "name" | "password" | "url" | null
+	/** The rewrites a written value takes before `min`, `max` and `pattern` bind it, in order: the DTO's own list (meta-contract §2.1) */
+	transform: string[]
 	/** Server-assigned; absent from create bodies */
 	generated: boolean
 	/** Absent from update bodies */
@@ -95,6 +100,10 @@ type ManifestConfig = {
 	output: string
 }
 
+/** The format a text column declares, the one the DTO checks */
+const textKindOf = (constraints: FieldMeta["constraints"]): ManifestColumn["textKind"] =>
+	(["email", "url", "imageUri", "password", "name"] as const).find((kind) => constraints[kind]) ?? null
+
 function toColumn(field: FieldMeta, entityMeta: ReturnType<typeof deriveEntityMeta>): ManifestColumn {
 	const { constraints } = field
 	return {
@@ -108,6 +117,8 @@ function toColumn(field: FieldMeta, entityMeta: ReturnType<typeof deriveEntityMe
 		notNull: field.isNotNull,
 		pattern: constraints.pattern,
 		primaryKey: field.isPrimaryKey,
+		textKind: textKindOf(constraints),
+		transform: transformsOf(constraints, true),
 		private: constraints.private,
 		states: field.states
 			? {

@@ -57,17 +57,25 @@ function stringKind(annotations: FieldConstraints, range: TextRange, mutative: b
 	if (!mutative) return "z.string()"
 	/* its own rule, printable ASCII within bcrypt's 72 bytes, under the bounds it declares (F9) */
 	if (annotations.password) return `z.string().min(${range.min}).max(${range.max}).regex(/^[\\x20-\\x7E]+$/)`
-	return annotations.url ? "z.url()" : "z.string()"
+	return "z.string()"
 }
 
+/** Every transform codegen can emit, each defined in meta-contract §2.1, which a test holds them to */
+export const TRANSFORMS = ["lowercase", "trim", "uppercase"] as const
+
 /** A rewrite a written text takes before its checks, by its published name */
-type Transform = "lowercase" | "trim" | "uppercase"
+type Transform = (typeof TRANSFORMS)[number]
 
 const CHAIN: Record<Transform, string> = { lowercase: ".toLowerCase()", trim: ".trim()", uppercase: ".toUpperCase()" }
 
-/** A written text's transforms, in the order the chain applies them: an email's are comb's own normalization */
-function transformsOf(annotations: FieldConstraints, mutative: boolean): Transform[] {
-	if (!mutative || annotations.password || annotations.url) return []
+/**
+ * A written text's transforms, in the order the chain applies them: an email's and a url's are
+ * comb's own normalization, the url's the trim z.url() would do unpublished (C2 of r19). The
+ * manifest projects this list too (C8), so the channels cannot disagree
+ */
+export function transformsOf(annotations: FieldConstraints, mutative: boolean): Transform[] {
+	if (!mutative || annotations.password) return []
+	if (annotations.url) return ["trim"]
 	if (annotations.email) return ["trim", "lowercase"]
 	const casing: Transform[] = annotations.lowercase ? ["lowercase"] : annotations.uppercase ? ["uppercase"] : []
 	return [...(annotations.trim ? (["trim"] as const) : []), ...casing]
@@ -153,9 +161,12 @@ export function textBase(build: Build): string {
 	const mutative = isMutative(schemaType)
 	const range = textRange(annotations, field)
 	if (mutative) refuseEmptyRange(annotations, field, range)
-	/* an email is normalized first, then validated: z.email() would refuse the padded input. Checks
-	 * run in chain order, and unlike a pipe the chain still publishes the email format and bounds */
-	if (annotations.email && mutative)
-		return `z.string()${transforms(annotations, mutative)}.check(z.email())${textBounds(build, range)}`
+	/* an email or a url is normalized first, then validated: z.email() would refuse the padded input,
+	 * and z.url() trims it unpublished. Checks run in chain order, and unlike a pipe the chain still
+	 * publishes the format and bounds */
+	if ((annotations.email || annotations.url) && mutative) {
+		const format = annotations.email ? "z.email()" : "z.url()"
+		return `z.string()${transforms(annotations, mutative)}.check(${format})${textBounds(build, range)}`
+	}
 	return stringKind(annotations, range, mutative) + transforms(annotations, mutative) + textBounds(build, range)
 }

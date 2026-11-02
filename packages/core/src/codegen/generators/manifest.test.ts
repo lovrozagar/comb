@@ -140,6 +140,29 @@ describe("entity manifest — columns", () => {
 	})
 })
 
+/* C8 of r19: a reader that runs no TypeScript learns a column's format and rewrites, from the DTO's own list */
+describe("entity manifest — a text column's kind and transforms", () => {
+	const { entity } = manifestFixture()
+
+	it("publishes each format and the rewrites the DTO publishes, in order", () => {
+		const body =
+			'email: c.text("email", { email: true }), site: c.text("site", { url: true }), pic: c.text("pic", { imageUri: true }), pass: c.text("pass", { password: true }), who: c.text("who", { name: true, trim: true }), tag: c.text("tag", { lowercase: true, trim: true }), n: c.integer("n")'
+		const columns = entity("item", `export const item = createTable("item", { id: c.id("itm"), ${body} })`).columns
+		const facts = columns
+			.filter(({ name }) => name !== "id")
+			.map(({ name, textKind, transform }) => [name, textKind, transform])
+		expect(facts).toEqual([
+			["email", "email", ["trim", "lowercase"]],
+			["site", "url", ["trim"]],
+			["pic", "imageUri", []],
+			["pass", "password", []],
+			["who", "name", ["trim"]],
+			["tag", null, ["trim", "lowercase"]],
+			["n", null, []],
+		])
+	})
+})
+
 describe("entity manifest — agreement with the schema stamp", () => {
 	const { analyzed, entity } = manifestFixture()
 

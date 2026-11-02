@@ -93,9 +93,30 @@ Beside `x-comb` on the object, a field's own JSON Schema may carry flat `x-comb-
 JSON Schema cannot state. Each sits on the field's value schema: for a nullable field, on the
 `anyOf` branch that is not `{ "type": "null" }`, beside the bounds it qualifies.
 
-- `x-comb-transform`: the rewrites a written text takes before any check, in the order applied,
-  each one of `"trim"`, `"lowercase"` and `"uppercase"`; an email's is `["trim", "lowercase"]`.
-  A read publishes none. See §6.9 for what the published bounds then mean.
+- `x-comb-transform`: the rewrites a written text takes before any check, in the order applied;
+  an email's is `["trim", "lowercase"]`, a url's `["trim"]`. A read publishes none. See §6.9 for
+  what the published bounds then mean. Each value is one exact operation, which a reader in any
+  language applies as written here, as its own `strip()` or `TrimSpace` differs:
+  - `"trim"`: ECMAScript's `String.prototype.trim`: it removes, from both ends, these 25 code points
+    of WhiteSpace and LineTerminator, and no other: U+0009–U+000D, U+0020, U+00A0, U+1680,
+    U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000 and U+FEFF.
+  - `"lowercase"`: ECMAScript's `String.prototype.toLowerCase`: Unicode's default full case
+    mapping, locale-independent, with Final_Sigma. It may change a value's length.
+  - `"uppercase"`: ECMAScript's `String.prototype.toUpperCase`: the same, to upper case.
+
+  Fixtures for a reader's tests, each `input` with one `transform` applied:
+
+  ```json
+  [
+  	{ "transform": "trim", "input": "\ufeffann\u3000", "expect": "ann" },
+  	{ "transform": "trim", "input": "\u0085ann", "expect": "\u0085ann" },
+  	{ "transform": "trim", "input": "\u001cann", "expect": "\u001cann" },
+  	{ "transform": "lowercase", "input": "\u0130stanbul", "expect": "i\u0307stanbul" },
+  	{ "transform": "lowercase", "input": "\u03a3\u0391\u03a3", "expect": "\u03c3\u03b1\u03c2" },
+  	{ "transform": "uppercase", "input": "stra\u00dfe", "expect": "STRASSE" }
+  ]
+  ```
+
 - `x-comb-text`, `x-comb-maxBytes`, and on a read `x-comb-minLength`, `x-comb-maxLength`,
   `x-comb-minimum`, `x-comb-maximum`: the storable-text rule, a JSON byte limit, and the declared
   bounds a read states without enforcing them.
@@ -570,8 +591,10 @@ referential actions, unique indexes, partial unique indexes (`partialUniqueIndex
 `where`) and check constraints. A composite foreign key is one relation
 per column, each carrying the whole key as `key: { columns, refColumns }`, paired by position, so
 a reader joins on every column together rather than on independent pairs. Per column it carries the helper that
-declared it, its declared bounds and enum values, and `generated`, `immutable` and `private`
-flags. Every column that declares a state machine carries it, `transitions` included. The stamp
+declared it, its declared bounds and enum values, `textKind` (`"email"`, `"url"`, `"imageUri"`,
+`"password"`, `"name"`, or null), `transform`, the list the DTO publishes as `x-comb-transform`
+(§2.1), and `generated`, `immutable` and `private` flags. `min`, `max` and `pattern` bind a value
+after its `transform`, as §6.9 says of the document. Every column that declares a state machine carries it, `transitions` included. The stamp
 publishes the first such column and leaves `transitions` out. Private columns are listed and
 flagged rather than omitted.
 
