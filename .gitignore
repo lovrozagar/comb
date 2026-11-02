@@ -11,6 +11,8 @@ node_modules
 # testing
 **/coverage/
 **/test-results/
+# e2e scratch apps (tests/e2e/support/project.ts)
+packages/core/.e2e-*/
 
 # generated + migration scratch
 **/_gen/

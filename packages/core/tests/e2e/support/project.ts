@@ -4,7 +4,7 @@
  * in it the way a user runs it (bun on src/bin.ts).
  */
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { afterAll } from "vitest"
@@ -24,6 +24,19 @@ export type App = {
 	write(files: Record<string, string>): void
 }
 
+/** An app this old outlived its run: a whole e2e run takes about 30 s, one test at most 240 s */
+export const STALE_MS = 60 * 60_000
+
+/** Remove the apps killed runs left behind; a live run's are younger than STALE_MS */
+export function sweep(): void {
+	for (const name of readdirSync(CORE)) {
+		const dir = join(CORE, name)
+		if (name.startsWith(".e2e-") && Date.now() - statSync(dir).mtimeMs > STALE_MS)
+			rmSync(dir, { force: true, recursive: true })
+	}
+}
+
+sweep()
 const made: string[] = []
 afterAll(() => {
 	for (const dir of made.splice(0)) rmSync(dir, { force: true, recursive: true })
