@@ -72,12 +72,12 @@
 			"validateTables": "98c8c6821a175d86"
 		},
 		"./codegen/generators": {
-			"MANIFEST_VERSION": "23e4932d7e2a021f",
+			"MANIFEST_VERSION": "59cb6d40f6c4facc",
 			"Manifest": "61ce3bfe46bb800e",
-			"ManifestColumn": "c4de541e2236f6d7",
+			"ManifestColumn": "537ce33c2f04648f",
 			"ManifestEntity": "5f0de1e6553d0594",
 			"ManifestRelation": "bf57e74ae94f8e0c",
-			"buildManifest": "7b4e7e3a5fd04dff",
+			"buildManifest": "500286ac638664c6",
 			"generateColumns": "62f026a12ca49193",
 			"generateConstraints": "6e52289a81e5f0f6",
 			"generateDiagrams": "71626a272079a523",
@@ -163,7 +163,7 @@
 			"createProvider": "0655c47693427dfc",
 			"createTursoProvider": "637d72525c079441",
 			"d1HistoryTables": "2483bf3d3f24864e",
-			"defineConfig": "a7e0845ddca73e48",
+			"defineConfig": "f7eee955116c6790",
 			"exportDrizzleSchema": "b1ba2959c9529d93",
 			"extractDropStatements": "0f26674aba75d0c4",
 			"extractSchema": "99f41c9ee4f45f6c",
@@ -289,8 +289,8 @@
 			"RelationConfig": "815c4e6476479d68",
 			"SQL_SORT_DIR": "5bb1516b166efa96",
 			"SortKey": "d3aa55ebe0689470",
-			"SpellfixDb": "b3794cb62f13fef5",
-			"SpellfixSearch": "2e5b882267e5a28a",
+			"SpellfixDb": "b2692175474b8f36",
+			"SpellfixSearch": "9387f5c9b9bec441",
 			"Tiebreak": "5e4fc93255c13feb",
 			"applyListQuery": "a4ac4985a5f263ab",
 			"buildConditionSQL": "aceac9b8f73ec40e",
@@ -386,5 +386,5 @@
 			"statusKeyToCode": "18f7317f8cea18ce"
 		}
 	},
-	"version": "0.18.0"
+	"version": "0.19.0"
 }
