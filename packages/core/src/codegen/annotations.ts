@@ -37,6 +37,25 @@ const CONTRADICTIONS: ReadonlyArray<readonly [string, string]> = [
 	["lowercase", "uppercase"],
 ]
 
+/* a text's kinds: one rule each, so a second would drop the first's without a word (C6 of r19) */
+const KINDS = ["email", "imageUri", "name", "password", "url"] as const
+
+// lookup-table: the keys a kind would drop without a word, and what it does instead; any other it holds
+const DROPPED: Readonly<Record<string, { keys: readonly string[]; said: string; what: string }>> = {
+	email: { keys: ["uppercase"], said: "it is lowercased", what: "an email" },
+	password: { keys: ["lowercase", "trim", "uppercase"], said: "it is kept as written", what: "a password" },
+	url: { keys: ["lowercase", "uppercase"], said: "it is kept as written, but for its trim", what: "a url" },
+}
+
+/** Refuses a second kind, or a key the one declared would drop, each of which a reader of the tables file believes holds */
+function refuseKinds(constraints: Readonly<Record<string, ConstantValue>>, place: string): void {
+	const [kind, second] = KINDS.filter((each) => constraints[each] === true)
+	if (second !== undefined) throw new Error(`${place}: ${kind} and ${second} contradict; declare one`)
+	const dropped = DROPPED[kind as string]
+	const key = dropped?.keys.find((each) => constraints[each] === true)
+	if (key !== undefined) throw new Error(`${place}: ${dropped?.what} takes no ${key}: ${dropped?.said}`)
+}
+
 /**
  * Refuses declared bounds that hold no value (C1, C4 of r17): a min past its max, on any column; a
  * length bound, `measure` "length" (a text column's), that is no whole number from 0; a maxBytes
@@ -80,6 +99,7 @@ function refuseMalformed(
 	if (unknown !== undefined) throw new Error(`${place}: comb reads no constraint named ${unknown}`)
 	const contradiction = CONTRADICTIONS.find(([a, b]) => constraints[a] === true && constraints[b] === true)
 	if (contradiction !== undefined) throw new Error(`${place}: ${contradiction.join(" and ")} contradict; declare one`)
+	refuseKinds(constraints, place)
 	const relation = constraints["relation"]
 	/* a relation's name is a property of the generated relations, so it is an identifier (F57) */
 	if (relation !== undefined && (typeof relation !== "string" || !/^[A-Za-z_$][\w$]*$/.test(relation)))

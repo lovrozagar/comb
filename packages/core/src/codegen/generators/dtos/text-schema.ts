@@ -82,7 +82,7 @@ const CHAIN: Record<Transform, string> = { lowercase: ".toLowerCase()", trim: ".
  * manifest projects this list too (C8), so the channels cannot disagree
  */
 export function transformsOf(annotations: FieldConstraints, mutative: boolean): Transform[] {
-	if (!mutative || annotations.password) return []
+	if (!mutative) return []
 	if (annotations.url) return ["trim"]
 	if (annotations.email) return ["trim", "lowercase"]
 	const casing: Transform[] = annotations.lowercase ? ["lowercase"] : annotations.uppercase ? ["uppercase"] : []

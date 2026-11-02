@@ -178,3 +178,42 @@ describe("fieldConstraintsOf's measure", () => {
 		expect(() => fieldConstraintsOf({}, options)).toThrow('post.title: measure must be "length" or "value"')
 	})
 })
+
+/** A thunk that reads a text column declared with `options` */
+const parsed = (options: string) => () => parseFieldConstraints(`c.text("f", ${options})`)
+
+/* C6 of r19: a text takes one kind, and a kind no key it would drop: each held silently for what the DTO then ignored */
+describe("parseFieldConstraints: a text's kind", () => {
+	const at = "/fixture/db.core.tables.ts: fixture.f"
+	it.each([
+		["{ email: true, url: true }", "email and url contradict; declare one"],
+		["{ email: true, password: true }", "email and password contradict; declare one"],
+		["{ imageUri: true, url: true }", "imageUri and url contradict; declare one"],
+		["{ name: true, password: true }", "name and password contradict; declare one"],
+	])("refuses a second kind: %s", (options, said) => {
+		expect(parsed(options)).toThrow(`${at}: ${said}`)
+	})
+
+	it.each([
+		["{ email: true, uppercase: true }", "an email takes no uppercase: it is lowercased"],
+		["{ password: true, trim: true }", "a password takes no trim: it is kept as written"],
+		["{ lowercase: true, password: true }", "a password takes no lowercase: it is kept as written"],
+		["{ password: true, uppercase: true }", "a password takes no uppercase: it is kept as written"],
+		["{ lowercase: true, url: true }", "a url takes no lowercase: it is kept as written, but for its trim"],
+		["{ uppercase: true, url: true }", "a url takes no uppercase: it is kept as written, but for its trim"],
+	])("refuses a key the kind drops: %s", (options, said) => {
+		expect(parsed(options)).toThrow(`${at}: ${said}`)
+	})
+
+	it.each([
+		"{ email: true, lowercase: true, trim: true }",
+		'{ email: true, max: 90, min: 8, pattern: "/@corp/" }',
+		"{ trim: true, url: true }",
+		'{ max: 90, password: true, pattern: "/x/", private: true }',
+		"{ imageUri: true, lowercase: true, trim: true }",
+		"{ name: true, trim: true, uppercase: true }",
+		"{ email: false, url: true }",
+	])("takes what a kind does hold: %s", (options) => {
+		expect(parsed(options)).not.toThrow()
+	})
+})

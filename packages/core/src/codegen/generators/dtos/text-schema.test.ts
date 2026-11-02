@@ -113,6 +113,6 @@ describe("textBase: a written text's transforms", () => {
 	it("publishes none on a text that takes none, or on a read", () => {
 		expect(transforms(text('c.text("t", { max: 5 })', "create"))).toBeUndefined()
 		expect(transforms(text('c.text("t", { trim: true })', "read"))).toBeUndefined()
-		expect(transforms(text('c.text("t", { password: true, trim: true })', "create"))).toBeUndefined()
+		expect(transforms(text('c.text("t", { password: true })', "create"))).toBeUndefined()
 	})
 })
