@@ -5,7 +5,7 @@
  * suites run the catalog's exact floor).
  */
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import semver from "semver"
@@ -59,13 +59,56 @@ export function ok(result: Run, what: string): string {
 	return result.output
 }
 
-/** comb packed by the release's own script (K1 of r20: the tarball it publishes), and the tarball's path */
+/* what a pack reads: the workspace's manifest and lockfile (catalog: resolves through them), the base tsconfig,
+   and the README and LICENSE prepack copies in; then the package's manifest, tsconfigs, src and docs */
+const ROOT_FILES = ["package.json", "bun.lock", "tsconfig.base.json", "README.md", "LICENSE"]
+const CORE_FILES = ["package.json", "tsconfig.json", "tsconfig.strict.json", "tsconfig.types.json", "src", "docs"]
+const MODULES = ["node_", "modules"].join("")
+
+/**
+ * comb packed by the release's own script (K1 of r20: the tarball it publishes), and the directory it
+ * printed, under the OS temp dir. It packs a copy: bun pm pack walks every directory of the package, so
+ * packing the live tree fails when a test removes its scratch directory mid-walk, and prepack would write
+ * types/, README.md and LICENSE where other tests read. The copy is a workspace of the files git would
+ * commit, as the release's checkout holds them, borrowing the repo's installed modules
+ */
+export function packedDir(): string {
+	const copy = mkdtempSync(join(ROOT, ".tmp-pack-"))
+	try {
+		const listed = spawnSync(
+			"git",
+			[
+				"ls-files",
+				"-co",
+				"--exclude-standard",
+				"--",
+				...ROOT_FILES,
+				...CORE_FILES.map((file) => `packages/core/${file}`),
+			],
+			{ cwd: ROOT, encoding: "utf8" },
+		)
+		if (listed.status !== 0) throw new Error(`git ls-files exited ${listed.status}\n${listed.stderr}`)
+		for (const file of listed.stdout.split("\n").filter((line) => line !== "")) {
+			mkdirSync(dirname(join(copy, file)), { recursive: true })
+			cpSync(join(ROOT, file), join(copy, file))
+		}
+		symlinkSync(join(ROOT, MODULES), join(copy, MODULES))
+		symlinkSync(join(CORE, MODULES), join(copy, "packages/core", MODULES))
+		const script = join(ROOT, ".github/scripts/pack-for-publish.sh")
+		/* its stdout alone: bun echoes each pack script to stderr, after the directory the script prints */
+		const packed = spawnSync("bash", [script, join(copy, "packages/core")], { cwd: copy, encoding: "utf8" })
+		if (packed.status !== 0) {
+			throw new Error(`pack-for-publish exited ${packed.status}\n${packed.stdout}${packed.stderr}`)
+		}
+		return packed.stdout.trim().split("\n").at(-1) as string
+	} finally {
+		rmSync(copy, { force: true, recursive: true })
+	}
+}
+
+/** The tarball packedDir's pack wrote, beside the directory; remove its parent when done */
 export function pack(): string {
-	const script = join(ROOT, ".github/scripts/pack-for-publish.sh")
-	/* its stdout alone: bun echoes each pack script to stderr, after the directory the script prints */
-	const packed = spawnSync("bash", [script, CORE], { cwd: ROOT, encoding: "utf8" })
-	if (packed.status !== 0) throw new Error(`pack-for-publish exited ${packed.status}\n${packed.stdout}${packed.stderr}`)
-	const out = dirname(packed.stdout.trim())
+	const out = dirname(packedDir())
 	const tarball = readdirSync(out).find((file) => file.endsWith(".tgz"))
 	if (tarball === undefined) throw new Error("bun pm pack wrote no tarball")
 	return join(out, tarball)

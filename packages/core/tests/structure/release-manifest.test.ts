@@ -4,13 +4,12 @@
  * 0.9.0's release failed in both publish steps, and its manifest would have lost the comb bin.
  */
 import { spawnSync } from "node:child_process"
-import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { pack as packForConsumers } from "../consumers/stage.ts"
+import { pack as packForConsumers, packedDir } from "../consumers/stage.ts"
 
 const ROOT = join(import.meta.dirname, "../../../..")
-const SCRIPT = join(ROOT, ".github/scripts/pack-for-publish.sh")
 const RELEASE = readFileSync(join(ROOT, ".github/workflows/release.yml"), "utf8")
 const CI = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8")
 
@@ -25,9 +24,7 @@ const versionsOf = (manifest: Record<string, unknown>) =>
 
 /** Pack the package as the release does, run `check` on the packed directory, then remove it */
 function withPacked(check: (dir: string) => void): void {
-	const packed = spawnSync("bash", [SCRIPT, join(ROOT, "packages/core")], { encoding: "utf8" })
-	expect(packed.status).toBe(0)
-	const dir = packed.stdout.trim().split("\n").at(-1) as string
+	const dir = packedDir()
 	try {
 		check(dir)
 	} finally {
@@ -74,6 +71,24 @@ function dryRun(dir: string, line: string): { status: number | null; stderr: str
 		.filter((text) => !/^npm warn publish This command requires you to be logged in to \S+ \(dry-run\)$/.test(text))
 	return { status: run.status, stderr: run.stderr, warnings }
 }
+
+/* every suite packs while others write scratch into packages/core: d7c28e0's verify failed when bun pm pack, walking
+   the live tree, opened a directory a test had just removed. A directory it cannot open stands in for that one */
+describe("a pack", () => {
+	it("reads a copy, so a directory a test holds in the package never reaches it, and leaves the package as it was", () => {
+		const core = join(ROOT, "packages/core")
+		const held = mkdtempSync(join(core, ".tmp-held-"))
+		chmodSync(held, 0o000)
+		try {
+			const dir = packedDir()
+			rmSync(dirname(dir), { force: true, recursive: true })
+			expect(["types", "README.md", "LICENSE"].filter((file) => existsSync(join(core, file)))).toEqual([])
+		} finally {
+			chmodSync(held, 0o700)
+			rmSync(held, { force: true, recursive: true })
+		}
+	}, 120_000)
+})
 
 describe("the published package (P2)", () => {
 	it("is packed with every catalog: and workspace: version resolved", () => {
@@ -183,16 +198,13 @@ function wrongSources(dir: string, files: string[], maps: string[]): string[] {
 /*
  * K1 of r20: a consumer's tsc reads comb's declarations, emitted at pack under types/, and never
  * loads comb's .ts. Every check reads the package the release publishes, never the working tree,
- * where types/ exists only while a pack runs. One pack serves them all: prepack writes types/ and
- * postpack removes it, so two packs at once in this tree would race.
+ * where types/ never exists: each pack runs on its own copy of the package (packedDir).
  */
 describe("the published declarations (K1 of r20)", () => {
 	let dir: string
 	let files: string[]
 	beforeAll(() => {
-		const packed = spawnSync("bash", [SCRIPT, join(ROOT, "packages/core")], { encoding: "utf8" })
-		expect(packed.status, packed.stderr).toBe(0)
-		dir = packed.stdout.trim().split("\n").at(-1) as string
+		dir = packedDir()
 		files = filesUnder(dir)
 	}, 120_000)
 	afterAll(() => rmSync(dirname(dir), { force: true, recursive: true }))
