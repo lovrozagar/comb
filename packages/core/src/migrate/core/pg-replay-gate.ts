@@ -1,7 +1,9 @@
 /**
- * Whether a Postgres history makes anything baseline's catalog read compares (pg-live-catalog.ts), the
- * gate a docker:// dev database is held to: Atlas's own container, which comb cannot reach, so a history
- * that makes any such object is refused naming devUrl (P5 of r19), and one that makes none needs no replay.
+ * Whether a Postgres history may make anything baseline's catalog read compares (pg-live-catalog.ts),
+ * the gate a docker:// dev database is held to: Atlas's own container, which comb cannot reach, so a
+ * history that may make any such object is refused naming devUrl (P5 of r19), and one that makes none
+ * needs no replay. It fails closed (P3 of r20): a statement passes only when its node is one proved to
+ * make nothing the read compares, so a statement no one thought of is refused, not let through.
  */
 import { nodeOf } from "./pg-outside-transaction.ts"
 import type { HistoryFile } from "./pg-replay.ts"
@@ -9,81 +11,101 @@ import { pgRead } from "./pg-split.ts"
 
 type Node = Record<string, unknown>
 
-/** Whether a statement's node makes what a catalog arm reads */
-type Makes = (node: Node) => boolean
+/** Whether a statement's node, of a type the gate knows, makes nothing the catalog read compares */
+type Inert = (node: Node) => boolean
 
-const always: Makes = () => true
+const always: Inert = () => true
 
 /**
- * Each arm of the catalog read (pg-live-catalog.ts), by its `what`, with the statement nodes that make
- * what it reads, held to the read's arms by a structure test so an arm cannot be added without its
- * gate (R1 of plan 18's stack 2). `user` is the role the read connects as, which nothing makes. A
- * sequence a column owns (serial, identity) is the table's, left out of the read, so no arm needs it
+ * The ALTER TABLE commands on a table's columns, constraints, partitions and storage options, which
+ * make nothing the read compares: a column's serial or identity sequence is the column's, left out of
+ * the read, and a constraint's triggers are internal
  */
-// lookup-table: catalog arm to the nodes that make what it reads
-const ARM_MAKERS: Readonly<Record<string, Readonly<Record<string, Makes>>>> = {
-	extension: { CreateExtensionStmt: always },
-	kind: {
-		CompositeTypeStmt: always,
-		CreateDomainStmt: always,
-		CreateRangeStmt: always,
-		/* CREATE COLLATION is a DefineStmt of kind OBJECT_COLLATION in the parser's tree */
-		DefineStmt: (node) => node["kind"] === "OBJECT_COLLATION",
-	},
-	policy: { CreatePolicyStmt: always },
-	relation: {
-		CreateSeqStmt: always,
-		CreateTableAsStmt: (node) => node["objtype"] === "OBJECT_MATVIEW",
-		ViewStmt: always,
-	},
-	rls: {
-		AlterTableStmt: (node) =>
-			(node["cmds"] as Array<{ AlterTableCmd: Node }>).some(({ AlterTableCmd }) =>
-				String(AlterTableCmd["subtype"]).endsWith("RowSecurity"),
+// lookup-table: the ALTER TABLE subtypes proved inert on a table
+const TABLE_COMMANDS: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"AT_AddColumn",
+	"AT_AddConstraint",
+	"AT_AddIdentity",
+	"AT_AlterColumnType",
+	"AT_AlterConstraint",
+	"AT_AttachPartition",
+	"AT_ColumnDefault",
+	"AT_DetachPartition",
+	"AT_DropColumn",
+	"AT_DropConstraint",
+	"AT_DropIdentity",
+	"AT_DropNotNull",
+	"AT_ResetRelOptions",
+	"AT_SetIdentity",
+	"AT_SetNotNull",
+	"AT_SetRelOptions",
+	"AT_ValidateConstraint",
+])
+
+/* an OWNED BY NONE frees a column's sequence into what the read compares; any other option leaves it the column's */
+const OWNED_BY_NONE = '{"List":{"items":[{"String":{"sval":"none"}}]}}'
+const freesSequence = (node: Node): boolean =>
+	(node["options"] as Array<{ DefElem: Node }>).some(
+		({ DefElem }) => DefElem["defname"] === "owned_by" && JSON.stringify(DefElem["arg"]) === OWNED_BY_NONE,
+	)
+
+/**
+ * Each statement node proved to make nothing the catalog read compares, with what it must hold to be;
+ * tests/integration/postgres/replay-gate.test.ts runs one of each on Postgres and reads the catalog
+ * after, so an arm the read gains is checked against every entry. A table, an index, an enum, a schema
+ * without elements, a plain CREATE TABLE AS, data, a session setting, a comment, a grant, a rename or a
+ * drop. Every node not here, a DO block, a CALL and an EXECUTE among them, may make anything
+ */
+// lookup-table: statement node to the condition under which it is inert
+const INERT: ReadonlyMap<string, Inert> = /* @__PURE__ */ new Map<string, Inert>([
+	["AlterEnumStmt", always],
+	["AlterSeqStmt", (node) => !freesSequence(node)],
+	[
+		"AlterTableStmt",
+		(node) =>
+			node["objtype"] === "OBJECT_TABLE" &&
+			(node["cmds"] as Array<{ AlterTableCmd: Node }>).every(({ AlterTableCmd }) =>
+				TABLE_COMMANDS.has(String(AlterTableCmd["subtype"])),
 			),
-	},
-	/* P12 of r19: aggregates, SECURITY DEFINER, operators, casts, view options, matview indexes, replica identity */
-	other: {
-		AlterFunctionStmt: always,
-		/* a replica identity on any table; options on a view or matview, as a table's own Atlas compares */
-		AlterTableStmt: (node) =>
-			(node["cmds"] as Array<{ AlterTableCmd: Node }>).some(({ AlterTableCmd }) => {
-				const subtype = String(AlterTableCmd["subtype"])
-				return (
-					subtype === "AT_ReplicaIdentity" || (subtype === "AT_SetRelOptions" && node["objtype"] !== "OBJECT_TABLE")
-				)
-			}),
-		CreateCastStmt: always,
-		DefineStmt: (node) => node["kind"] === "OBJECT_AGGREGATE" || node["kind"] === "OBJECT_OPERATOR",
-	},
-	/* database-wide, which a platform may hold of its own */
-	platform: { CreateEventTrigStmt: always, CreatePublicationStmt: always },
-	routine: { CreateFunctionStmt: always },
-	rule: { RuleStmt: always },
-	trigger: { CreateTrigStmt: always },
-}
+	],
+	["AlterTSConfigurationStmt", always],
+	["CommentStmt", always],
+	["CreateEnumStmt", always],
+	["CreateSchemaStmt", (node) => node["schemaElts"] === undefined],
+	["CreateStmt", always],
+	["CreateTableAsStmt", (node) => node["objtype"] === "OBJECT_TABLE"],
+	/* CREATE TEXT SEARCH CONFIGURATION, which Atlas compares itself */
+	["DefineStmt", (node) => node["kind"] === "OBJECT_TSCONFIGURATION"],
+	["DeleteStmt", always],
+	["DropStmt", always],
+	["GrantStmt", always],
+	["IndexStmt", always],
+	["InsertStmt", always],
+	["LockStmt", always],
+	["MergeStmt", always],
+	["RenameStmt", always],
+	/* a call of a function no history file defines: one it defines is refused at its CREATE */
+	["SelectStmt", always],
+	["TransactionStmt", always],
+	["TruncateStmt", always],
+	["UpdateStmt", always],
+	["VariableSetStmt", always],
+])
 
 /**
- * The statements whose effect the tree cannot see, which may make anything (R1 of stack 2): a DO
- * block, a procedure CALL, a prepared statement's EXECUTE
- */
-// lookup-table: the node types counted as making something compared, whatever they hold
-const UNSEEN: ReadonlySet<string> = /* @__PURE__ */ new Set(["CallStmt", "DoStmt", "ExecuteStmt"])
-
-/**
- * Whether `files` make anything the catalog read compares, which a docker:// dev database, Atlas's
- * own container, keeps out of comb's reach: by parse-tree node, read once. A statement the tree cannot
- * see the effect of counts; a function the history defines, which a later call may run DDL through, is
- * itself compared, so its CREATE already counts
+ * Whether `files` may make anything the catalog read compares, which a docker:// dev database, Atlas's
+ * own container, keeps out of comb's reach: by parse-tree node, read once, any statement INERT does not
+ * prove inert counting, one the parser cannot read among them
  */
 function makesCompared(files: readonly HistoryFile[]): boolean {
-	const trees = files.flatMap(({ sql }) =>
-		pgRead(sql).statements.flatMap(({ tree }) => (tree === undefined ? [] : [tree])),
-	)
-	return trees.some((tree) => {
-		const [type, node] = nodeOf(tree)
-		return UNSEEN.has(type) || Object.values(ARM_MAKERS).some((makers) => makers[type]?.(node) === true)
-	})
+	return files
+		.flatMap(({ sql }) => pgRead(sql).statements)
+		.some(({ tree }) => {
+			if (tree === undefined) return true
+			const [type, node] = nodeOf(tree)
+			const inert = INERT.get(type)
+			return inert === undefined || !inert(node)
+		})
 }
 
-export { ARM_MAKERS, makesCompared, UNSEEN }
+export { INERT, makesCompared, TABLE_COMMANDS }

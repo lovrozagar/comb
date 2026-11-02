@@ -185,6 +185,14 @@ describe("refuseObjectDrift on a docker:// dev database", () => {
 		"CREATE TABLE t (id int);\nALTER TABLE t ENABLE ROW LEVEL SECURITY;",
 		"CREATE TABLE t (id int);\nCREATE MATERIALIZED VIEW m AS SELECT id FROM t;",
 		"CREATE EXTENSION citext;",
+		/* P3 of r20: the gate fails closed, so a statement it has not proved inert is refused, as OWNED BY NONE, which frees
+		   a serial's sequence into what the read compares, showed the makers list must */
+		"CREATE TABLE t (id serial PRIMARY KEY);\nALTER SEQUENCE t_id_seq OWNED BY NONE;",
+		"CREATE TABLE t (id int);\nALTER TABLE t SET SCHEMA s;",
+		"CREATE TYPE e AS ENUM ('a');\nALTER TYPE e OWNER TO app;",
+		"ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO app;",
+		"CREATE TABLE t (a int, b int);\nCREATE STATISTICS s ON a, b FROM t;",
+		"CREATE TABLE t (id int);\nALTER TABLE t OWNER TO app;",
 	])("refuses %j, naming devUrl and the postgres:// fix", async (sql) => {
 		writeFileSync(join(dir, "m", "1_init.sql"), sql)
 		await expect(

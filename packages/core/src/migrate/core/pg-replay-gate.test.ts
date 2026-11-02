@@ -1,7 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest"
-import { CATALOG } from "./pg-live-catalog.ts"
-import { loadPostgresParser } from "./pg-parser.ts"
-import { ARM_MAKERS, makesCompared, UNSEEN } from "./pg-replay-gate.ts"
+import { COMMAND_SAMPLES, NODE_SAMPLES, SETUP } from "../__fixtures__/inert-statements.ts"
+import { nodeOf } from "./pg-outside-transaction.ts"
+import { loadPostgresParser, postgresParser } from "./pg-parser.ts"
+import { INERT, makesCompared, TABLE_COMMANDS } from "./pg-replay-gate.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -41,54 +42,43 @@ describe("makesCompared", () => {
 		["CREATE AGGREGATE s(int) (SFUNC = add2, STYPE = int)", true],
 		["ALTER TABLE t SET (fillfactor = 70)", false],
 		["CREATE TEXT SEARCH CONFIGURATION ts (COPY = english)", false],
+		/* P3 of r20: it fails closed, a node or command it has not proved inert counting */
+		["CREATE TABLE t (id serial PRIMARY KEY);\nALTER SEQUENCE t_id_seq OWNED BY NONE", true],
+		["ALTER SEQUENCE t_id_seq OWNED BY t.id", false],
+		["ALTER TABLE t OWNER TO app", true],
+		["ALTER TABLE t ENABLE TRIGGER ALL", true],
+		["CREATE SCHEMA s CREATE VIEW v AS SELECT 1", true],
+		["CREATE MATERIALIZED VIEW m AS SELECT 1", true],
+		["CREATE TEXT SEARCH DICTIONARY d (TEMPLATE = simple)", true],
+		["CREATE STATISTICS s ON a, b FROM t", true],
+		["CREATE TABLE t (id int);\nCREATE TABEL u (id int)", true],
 	])("reads %j as making something compared: %s", (sql, want) => {
 		expect(makesCompared(file(sql))).toBe(want)
 	})
 })
 
 /*
- * R1 of stack 2: the gate is held to the catalog read. Each arm the read has names the statements that make what it
- * reads, and each of those has a statement here that makes it, so an arm added to CATALOG without its gate fails
+ * P3 of r20: each entry of the inert list has a statement in __fixtures__/inert-statements.ts, which
+ * tests/integration/postgres/replay-gate.test.ts runs on Postgres, reading the catalog after
  */
-describe("makesCompared's makers, held to CATALOG's arms", () => {
-	// lookup-table: one statement per maker node, making what its arm reads
-	const MADE_BY: Record<string, string> = {
-		AlterFunctionStmt: "ALTER FUNCTION f(int) SECURITY DEFINER",
-		AlterTableStmt: "ALTER TABLE t ENABLE ROW LEVEL SECURITY",
-		CallStmt: "CALL p()",
-		DefineStmt: "CREATE COLLATION c (provider = icu, locale = 'und')",
-		CompositeTypeStmt: "CREATE TYPE c AS (a int)",
-		CreateCastStmt: "CREATE CAST (pair AS int) WITH FUNCTION pi(pair)",
-		CreateDomainStmt: "CREATE DOMAIN d AS int",
-		CreateEventTrigStmt: "CREATE EVENT TRIGGER e ON ddl_command_start EXECUTE FUNCTION et()",
-		CreateExtensionStmt: "CREATE EXTENSION citext",
-		CreateFunctionStmt: "CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'select 1'",
-		CreatePolicyStmt: "CREATE POLICY p ON t USING (true)",
-		CreatePublicationStmt: "CREATE PUBLICATION pub FOR TABLE t",
-		CreateRangeStmt: "CREATE TYPE r AS RANGE (subtype = int4)",
-		CreateSeqStmt: "CREATE SEQUENCE s",
-		CreateTableAsStmt: "CREATE MATERIALIZED VIEW m AS SELECT 1",
-		CreateTrigStmt: "CREATE TRIGGER tr BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f()",
-		DoStmt: "DO $$ BEGIN NULL; END $$",
-		ExecuteStmt: "EXECUTE p",
-		RuleStmt: "CREATE RULE r AS ON INSERT TO t DO NOTHING",
-		ViewStmt: "CREATE VIEW v AS SELECT 1",
-	}
+/** The node of `sql`'s one statement: its type and fields */
+const parsed = (sql: string) => nodeOf(postgresParser().parseSync(sql).stmts)
 
-	it("gates every arm the catalog read has, and nothing it lacks; the connecting role is made by no statement", () => {
-		const arms = new Set([...CATALOG.matchAll(/SELECT '([a-z]+)'/g)].map((match) => match[1] as string))
-		expect([...arms].sort()).toEqual([...Object.keys(ARM_MAKERS), "user"].sort())
+describe("makesCompared's inert list, each entry with its proof", () => {
+	it("has a statement for each inert node and ALTER TABLE command, and none beside them", () => {
+		expect(Object.keys(NODE_SAMPLES).sort()).toEqual([...INERT.keys()].sort())
+		expect(Object.keys(COMMAND_SAMPLES).sort()).toEqual([...TABLE_COMMANDS].sort())
 	})
 
-	it.each(Object.entries(ARM_MAKERS).flatMap(([arm, makers]) => Object.keys(makers).map((node) => [arm, node])))(
-		"has the %s arm's %s make it",
-		(_, node) => {
-			const sql = MADE_BY[node] as string
-			expect([sql !== undefined && makesCompared(file(`${sql};`))]).toEqual([true])
-		},
-	)
+	it.each(Object.entries(NODE_SAMPLES))("reads its %s, %j, as that node and inert", (node, sql) => {
+		expect(parsed(sql)[0]).toBe(node)
+		expect(makesCompared(file([...SETUP, sql].join(";\n")))).toBe(false)
+	})
 
-	it.each([...UNSEEN])("counts %s, whose effect the tree cannot see", (node) => {
-		expect(makesCompared(file(`${MADE_BY[node] as string};`))).toBe(true)
+	it.each(Object.entries(COMMAND_SAMPLES))("reads its %s, %j, as that command and inert", (subtype, sql) => {
+		const [type, node] = parsed(sql)
+		const cmds = node["cmds"] as Array<{ AlterTableCmd: { subtype: string } }>
+		expect([type, ...cmds.map(({ AlterTableCmd }) => AlterTableCmd.subtype)]).toEqual(["AlterTableStmt", subtype])
+		expect(makesCompared(file(sql))).toBe(false)
 	})
 })
