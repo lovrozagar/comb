@@ -7,7 +7,6 @@
  * container, left alone: whether Atlas makes the schema there is unverified (p15-summary).
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
-import { maskSecrets } from "./atlas-secrets.ts"
 import { type PgTarget, refuseUrlProblems } from "./atlas-target.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import { type Connect, failureOf, loadPostgres } from "./pg-live-objects.ts"
@@ -36,7 +35,7 @@ async function readyDevSchema(
 		await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(target.schema)}`, [])
 	} catch (error) {
 		throw new ReplayFailed(
-			`comb could not create schema ${target.schema} on devUrl, where Atlas replays the migrations: ${maskSecrets(failureOf(error, "devUrl", target.devUrl), [target.devUrl])}`,
+			`comb could not create schema ${target.schema} on devUrl, where Atlas replays the migrations: ${failureOf(error, { field: "devUrl", url: target.devUrl, urls: [target.devUrl] })}`,
 			{ cause: error },
 		)
 	} finally {

@@ -13,7 +13,6 @@
  * its role, and comb drops each role it made.
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
-import { maskSecrets } from "./atlas-secrets.ts"
 import { type PgTarget, refuseUrlProblems } from "./atlas-target.ts"
 import { outsideTransaction } from "./classify-file.ts"
 import { ReplayFailed } from "./replay-failed.ts"
@@ -103,9 +102,9 @@ async function onDev<T>(
 ): Promise<T> {
 	refuseUrlProblems(target, { dev: true })
 	const connect = await load()
-	const scrub = (text: string) => maskSecrets(text, [target.devUrl, target.url])
+	const failed = { field: "devUrl", url: target.devUrl, urls: [target.devUrl, target.url] } as const
 	const refused: Refuse = (what, error) =>
-		new ReplayFailed(`${what}: ${scrub(failureOf(error, "devUrl", target.devUrl))}; ${replay.stops}`, { cause: error })
+		new ReplayFailed(`${what}: ${failureOf(error, failed)}; ${replay.stops}`, { cause: error })
 	const options = { ...postgresOptionsOf(target.devUrl, "devUrl"), max: 1, onnotice: () => undefined }
 	const started = Date.now()
 	let admin: Sql | undefined
@@ -135,12 +134,9 @@ async function onDev<T>(
 		}
 	} catch (error) {
 		if (error instanceof ReplayFailed) throw error
-		throw new ReplayFailed(
-			`comb could not replay the history on devUrl: ${scrub(failureOf(error, "devUrl", target.devUrl))}`,
-			{
-				cause: error,
-			},
-		)
+		throw new ReplayFailed(`comb could not replay the history on devUrl: ${failureOf(error, failed)}`, {
+			cause: error,
+		})
 	} finally {
 		await admin?.end()
 	}

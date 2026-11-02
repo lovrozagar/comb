@@ -149,6 +149,25 @@ describe("replayCatalog on what dev refuses", () => {
 	})
 })
 
+/* P5 of r20: a password that is a word of comb's own hint masks the driver's text only */
+describe("replayCatalog on a devUrl password comb's hint also says", () => {
+	it("masks a password in what dev said, never in comb's own words", async () => {
+		const tls = "Client network socket disconnected before secure TLS connection was established for comb@dev"
+		const hint =
+			"the server takes no TLS, which comb and Atlas require where devUrl names no sslmode; set sslmode=disable on devUrl for a server without TLS"
+		const secret = { ...TARGET, devUrl: "postgres://u:comb@dev/dev" }
+		const failing = (at: string) => fake([], (query) => (query.startsWith(at) ? new Error(tls) : undefined)).load
+		await expect(
+			replayCatalog(secret, { files: file("SELECT 1;"), targetUser: "u" }, failing("SELECT datname")),
+		).rejects.toThrow(
+			`comb could not replay the history on devUrl: Client network socket disconnected before secure TLS connection was established for ***@dev: ${hint}`,
+		)
+		await expect(
+			replayCatalog(secret, { files: file("CREATE TABLE t (a int);"), targetUser: "u" }, failing("CREATE TABLE")),
+		).rejects.toThrow(`for ***@dev: ${hint}; baseline compares nothing`)
+	})
+})
+
 /* P2 of r19, the replay's sibling: a devUrl pgUrlProblems refuses never reaches a connection */
 describe("replayCatalog on a devUrl comb refuses", () => {
 	it.each([

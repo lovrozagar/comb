@@ -32,24 +32,30 @@ const UNVERIFIED: ReadonlySet<unknown> = /* @__PURE__ */ new Set([
 	"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
 ])
 
+/** Where a postgres.js failure came from: the field whose URL comb connected to, and every URL whose secrets it may hold */
+type FailedAt = { field: "devUrl" | "url"; url: string; urls: readonly string[] }
+
 /**
- * What a postgres.js failure says: its message, or, for the AggregateError it throws with none when
- * every address refuses, each address's answer joined (P15 of the 0.15.0 review); for a server
- * sslrootcert=system cannot verify, where comb's CAs came from (R1 of 5.3)
+ * What a postgres.js failure on `at.field` says: its message, or, for the AggregateError it throws
+ * with none when every address refuses, each address's answer joined (P15 of the 0.15.0 review), each
+ * secret of `at.urls` masked; for a server sslrootcert=system cannot verify, where comb's CAs came from
+ * (R1 of 5.3). comb's own words follow the mask, so a password that is one of them stays out of them
+ * (P5 of r20)
  */
-function failureOf(error: unknown, field?: "devUrl" | "url", raw?: string): string {
+function failureOf(error: unknown, at: FailedAt): string {
 	const { code, errors, message } = error as { code?: unknown; errors?: unknown; message?: unknown }
-	const said =
+	const raw =
 		typeof message === "string" && message !== ""
 			? message
 			: Array.isArray(errors)
 				? errors.map((each) => String((each as { message?: unknown }).message)).join("; ")
 				: ""
-	if (UNVERIFIED.has(code) && raw !== undefined && queryParams(raw).get("sslrootcert") === "system")
+	const said = maskSecrets(raw, at.urls)
+	if (UNVERIFIED.has(code) && queryParams(at.url).get("sslrootcert") === "system")
 		return `${said}; comb verified the server against ${systemCas().source}`
 	/* P19 of r18: a server without TLS ends the handshake comb's require starts */
-	if (field === undefined || !said.includes("before secure TLS connection was established")) return said
-	return `${said}: the server takes no TLS, which comb and Atlas require where ${field} names no sslmode; set sslmode=disable on ${field} for a server without TLS`
+	if (!raw.includes("before secure TLS connection was established")) return said
+	return `${said}: the server takes no TLS, which comb and Atlas require where ${at.field} names no sslmode; set sslmode=disable on ${at.field} for a server without TLS`
 }
 
 /** postgres.js, or the refusal naming it, its range and `why` comb needs it here */
@@ -128,7 +134,7 @@ async function readLiveObjects(
 		return await readCatalog(sql, target.schema)
 	} catch (error) {
 		throw new Error(
-			`comb could not read the database's ${COMPARED}: ${maskSecrets(failureOf(error, "url", target.url), [target.url])}`,
+			`comb could not read the database's ${COMPARED}: ${failureOf(error, { field: "url", url: target.url, urls: [target.url] })}`,
 			{
 				cause: error,
 			},
