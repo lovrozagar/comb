@@ -165,6 +165,23 @@ const PROVIDERS = [
 	{ databaseName: "core", local: true, type: "d1" },
 ] as const
 
+/* K6 of r19: the type required the group the schema and the driver default, so defineConfig refused the default */
+describe("a turso provider without a group", () => {
+	const config = defineConfig({
+		databases: {
+			core: {
+				migrationsDir: "m",
+				name: "core",
+				provider: { apiToken: "t", databaseName: "core", org: "o", type: "turso" },
+			},
+		},
+	})
+
+	it("compiles through defineConfig, and loads with the default", () => {
+		expect(parseConfig(config).databases.core?.provider).toMatchObject({ group: "default" })
+	})
+})
+
 describe("resolveDatabaseConfig and createProvider — every provider", () => {
 	it.each(PROVIDERS)("resolves and creates $type with its dialect", (provider) => {
 		const resolved = resolveDatabaseConfig({ migrationsDir: "m", name: "core", provider })

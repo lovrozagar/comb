@@ -269,7 +269,8 @@ export type ConnectionProvider = {
 export type TursoProviderConfig = {
     apiToken: string;
     databaseName: string;
-    group: string;
+    /** The placement group a database created on demand joins (default "default") */
+    group?: string | undefined;
     org: string;
     type: "turso";
 };

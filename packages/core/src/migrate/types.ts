@@ -41,7 +41,14 @@ export type ConnectionProvider = {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /** A Turso database: it names its own database, which the environment's name never does (K2 of r18) */
-export type TursoProviderConfig = { apiToken: string; databaseName: string; group: string; org: string; type: "turso" }
+export type TursoProviderConfig = {
+	apiToken: string
+	databaseName: string
+	/** The placement group a database created on demand joins (default "default") */
+	group?: string | undefined
+	org: string
+	type: "turso"
+}
 
 export type LibsqlProviderConfig = { authToken?: string | undefined; type: "libsql"; url: string }
 
