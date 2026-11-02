@@ -169,9 +169,9 @@ export declare function entryOf(map: ConstraintMap, table: string | undefined): 
  */
 export declare function defineConstraintMaps(...maps: ConstraintMap[]): readonly ConstraintMap[];
 /**
- * `maps`, a handler's first look at them reporting each malformed key once to the operator, through
- * the warn sink: the violation is still classified with the well-formed keys, as the client's answer
- * must not change, nor say anything of the app's configuration (Q4 of r19)
+ * `maps`, a handler's first look at each map reporting its malformed keys once to the operator, through
+ * the warn sink, however many arrays carry it: the violation is still classified with the well-formed
+ * keys, as the client's answer must not change, nor say anything of the app's configuration (Q4 of r19)
  */
 export declare function checkedOnce(maps: readonly ConstraintMap[]): readonly ConstraintMap[];
 /**

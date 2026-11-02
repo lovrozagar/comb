@@ -390,7 +390,7 @@ export const authorConstraints: ConstraintMap = {
 
 ### Handlers
 
-Three handlers, one signature — `(error: unknown, constraintMaps: ConstraintMap[]) => void`. Each walks the error's `cause` chain past wrappers such as drizzle's `DrizzleQueryError`, reads the engine's own code, finds the matching map entry, and throws a `CombError`. If nothing matches, they return and let the original error propagate.
+Three handlers, one signature — `(error: unknown, constraintMaps: readonly ConstraintMap[]) => void`. Each walks the error's `cause` chain past wrappers such as drizzle's `DrizzleQueryError`, reads the engine's own code, finds the matching map entry, and throws a `CombError`. If nothing matches, they return and let the original error propagate.
 
 <!-- ts-context
 declare const db: { insert(table: unknown): { values(row: unknown): Promise<unknown> } }
@@ -400,19 +400,23 @@ declare const authorConstraints: import("@lovrozagar/comb/types").ConstraintMap
 -->
 
 ```ts
+import { defineConstraintMaps } from "@lovrozagar/comb"
 import { d1ErrorHandler } from "@lovrozagar/comb/sqlite/d1/error-handler"
 import { pgErrorHandler } from "@lovrozagar/comb/pg/error-handler"
 import { sqliteErrorHandler } from "@lovrozagar/comb/sqlite/constraint-handler"
 
+/* once, at module load: a malformed key fails here, not at the first violation */
+const MAPS = defineConstraintMaps(authorConstraints)
+
 try {
 	await db.insert(author).values(input)
 } catch (error) {
-	d1ErrorHandler(error, [authorConstraints])
+	d1ErrorHandler(error, MAPS)
 	throw error
 }
 ```
 
-Build the maps you pass once, at module load, with `defineConstraintMaps(...maps)` (from `@lovrozagar/comb`): it refuses, as a TypeError naming the key, a prefix pattern with its `*` anywhere but the end (`"ut_*_rows"`), so a typo fails at startup and in tests, never at the first violation. A handler given maps not built with it still answers each violation with its well-formed keys, and warns once (`comb.constraint-maps.error`, on `console.warn`) of each malformed key, which matches no table.
+Build the maps you pass once, at module load, with `defineConstraintMaps(...maps)` (from `@lovrozagar/comb`): it refuses, as a TypeError naming the key, a prefix pattern with its `*` anywhere but the end (`"ut_*_rows"`), so a typo fails at startup and in tests, never at the first violation. A handler given maps not built with it still answers each violation with its well-formed keys, and warns once per map (`comb.constraint-maps.error`, on `console.warn`) of each malformed key, which matches no table, however many arrays pass that map.
 
 - `sqliteErrorHandler` — libsql, Turso and `bun:sqlite`. Classifies by SQLite's extended result code: the primary key by `SQLITE_CONSTRAINT_PRIMARYKEY`, a CHECK by its constraint name (in the statement's table first), a composite unique by its columns together, naming no one column, NOT NULL with its column. A duplicate rowid, an FTS5 table's included, is a primary key violation (409). It also maps `SQLITE_FULL` (422) and `SQLITE_BUSY` / `SQLITE_LOCKED` / `SQLITE_READONLY` (503).
 - `d1ErrorHandler` — Cloudflare D1. Constraint violations go through the same SQLite mapping. Other errors with an SQLite code are query errors (500); a D1 platform failure without one is transient (503) or a storage limit (422).
@@ -1141,7 +1145,8 @@ What changes for a project on 0.16. Before deploying it:
 
    ```diff
    - onError: (error) => sqliteErrorHandler(error, [DB_CONSTRAINT_MAP])
-   + onError: (error) => sqliteErrorHandler(error, [{ ...DB_CONSTRAINT_MAP, "ut_*": {} }])
+   + const MAPS = defineConstraintMaps({ ...DB_CONSTRAINT_MAP, "ut_*": {} })
+   + onError: (error) => sqliteErrorHandler(error, MAPS)
    ```
 
    A key ending in `*` keys the tables it prefixes, the longest pattern winning and a table's own key over any; a `*` anywhere else is a `TypeError`. On Postgres, a violation reported on a partition is read as its parent's only when the parent's entry lists it under `partitions`; 0.16 read any table no map knew as the statement's own, which named a private column under the wrong table when a trigger wrote it. A partitioned table lists its partitions in `comb.config.ts` (or a hand-written map adds `partitions: [...]` to the parent's entry), or its partitions' violations name no column.

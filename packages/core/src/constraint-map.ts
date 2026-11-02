@@ -47,8 +47,8 @@ const malformed = (key: string): boolean => key.includes("*") && key.indexOf("*"
 const ruleOf = (key: string): string =>
 	`constraint map key "${key}": a "*" may only end a key, as a prefix pattern such as "ut_*"`
 
-// lookup-table: the maps arrays defineConstraintMaps checked, or whose malformed keys were reported once
-const CHECKED: WeakSet<object> = /* @__PURE__ */ new WeakSet()
+// lookup-table: the maps defineConstraintMaps checked, or whose malformed keys were reported once: each map, not its array, which an app may build per call (Q5 of r20)
+const CHECKED: WeakSet<ConstraintMap> = /* @__PURE__ */ new WeakSet()
 
 /**
  * The maps an app passes its error handlers, every key checked where it builds them, at module load:
@@ -58,24 +58,25 @@ const CHECKED: WeakSet<object> = /* @__PURE__ */ new WeakSet()
 export function defineConstraintMaps(...maps: ConstraintMap[]): readonly ConstraintMap[] {
 	const bad = maps.flatMap((map) => Object.keys(map)).find(malformed)
 	if (bad !== undefined) throw new TypeError(ruleOf(bad))
-	const checked = Object.freeze(maps)
-	CHECKED.add(checked)
-	return checked
+	for (const map of maps) CHECKED.add(map)
+	return Object.freeze(maps)
 }
 
 /**
- * `maps`, a handler's first look at them reporting each malformed key once to the operator, through
- * the warn sink: the violation is still classified with the well-formed keys, as the client's answer
- * must not change, nor say anything of the app's configuration (Q4 of r19)
+ * `maps`, a handler's first look at each map reporting its malformed keys once to the operator, through
+ * the warn sink, however many arrays carry it: the violation is still classified with the well-formed
+ * keys, as the client's answer must not change, nor say anything of the app's configuration (Q4 of r19)
  */
 export function checkedOnce(maps: readonly ConstraintMap[]): readonly ConstraintMap[] {
-	if (CHECKED.has(maps)) return maps
-	CHECKED.add(maps)
-	for (const key of maps.flatMap((map) => Object.keys(map)).filter(malformed))
-		warnOnError("comb.constraint-maps.error", {
-			key,
-			message: `${ruleOf(key)}; it matches no table. Build the maps with defineConstraintMaps, which refuses such a key at load`,
-		})
+	for (const map of maps) {
+		if (CHECKED.has(map)) continue
+		CHECKED.add(map)
+		for (const key of Object.keys(map).filter(malformed))
+			warnOnError("comb.constraint-maps.error", {
+				key,
+				message: `${ruleOf(key)}; it matches no table. Build the maps with defineConstraintMaps, which refuses such a key at load`,
+			})
+	}
 	return maps
 }
 

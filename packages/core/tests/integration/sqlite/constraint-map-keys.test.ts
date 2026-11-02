@@ -1,8 +1,9 @@
 /**
  * Q4 of r19: a malformed prefix-pattern key in the maps an app passes never replaces the database
  * error. The violation is classified with the well-formed keys, the 409 the client would get with a
- * well-formed map, and the operator is told once per maps array, through the shared warn sink, to
- * build the maps with defineConstraintMaps, which refuses such a key at load.
+ * well-formed map, and the operator is told once per map, however many arrays carry it (Q5 of r20),
+ * through the shared warn sink, to build the maps with defineConstraintMaps, which refuses such a
+ * key at load.
  */
 import { createClient } from "@libsql/client"
 import pg from "pg"
@@ -56,7 +57,7 @@ describe.each([
 	["libsql", sqliteViolation, classifySqliteError],
 	["Postgres", pgViolation, classifyPgError],
 ] as const)("a malformed map key beside the violation's table, on %s", (_, violation, classify) => {
-	it("classifies the violation as with well-formed maps, and tells the operator once per maps array", async () => {
+	it("classifies the violation as with well-formed maps, and tells the operator once per map", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 		const error = await violation()
 		const maps = typoed()

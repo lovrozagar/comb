@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
+	checkedOnce,
 	defineConstraintMaps,
 	entryOf,
 	findNamed,
@@ -147,5 +148,26 @@ describe("defineConstraintMaps", () => {
 		const maps = defineConstraintMaps(users, patterned)
 		expect(maps).toEqual([users, patterned])
 		expect(Object.isFrozen(maps)).toBe(true)
+	})
+})
+
+/* Q5 of r20: the README's handler builds its maps array inline, a fresh one per violation */
+describe("checkedOnce on an inline maps array per violation", () => {
+	it("warns once per malformed key, however many arrays carry its map", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+		const typoed: ConstraintMap = { "ut_*_rows": {}, "x_*_y": {}, users: {} }
+		for (let violation = 0; violation < 3; violation++) checkedOnce([typoed])
+		checkedOnce([{ users: {} }, typoed])
+		expect(warn.mock.calls.map(([, fields]) => (fields as { key: string }).key)).toEqual(["ut_*_rows", "x_*_y"])
+		warn.mockRestore()
+	})
+
+	it("says nothing of a map defineConstraintMaps checked, passed in an array of its own", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+		const checked: ConstraintMap = { "ut_*": {} }
+		defineConstraintMaps(checked)
+		checkedOnce([checked])
+		expect(warn).not.toHaveBeenCalled()
+		warn.mockRestore()
 	})
 })
