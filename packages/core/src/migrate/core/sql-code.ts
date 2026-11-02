@@ -74,6 +74,10 @@ const PRAGMA_HEAD = /* @__PURE__ */ new RegExp(
 	"i",
 )
 
+/** A pragma's value as SQLite reads it: a single-quoted string is its text (S2 of r20), a quoted name its name */
+const pragmaValue = (value: string): string =>
+	value.startsWith("'") ? value.slice(1, -1).replaceAll("''", "'") : unquotePart(value)
+
 /** The pragma `code` runs (S1 of r19: read once, so a quoted name is the name), or undefined for any other statement */
 function pragmaOf(code: string): Pragma | undefined {
 	const [, schema, name, set, argument] = PRAGMA_HEAD.exec(code) ?? []
@@ -82,7 +86,7 @@ function pragmaOf(code: string): Pragma | undefined {
 	return {
 		name: partKey(name, "sqlite"),
 		schema: schema === undefined ? undefined : partKey(schema, "sqlite"),
-		value: value === undefined ? undefined : unquotePart(value),
+		value: value === undefined ? undefined : pragmaValue(value),
 	}
 }
 
@@ -98,19 +102,25 @@ function bodyText(text: string): string {
 		: text.slice(tag.length)
 }
 
-/**
- * A statement's code: identifiers kept, a DO body read as code itself, strings and comments one
- * space, whitespace collapsed
- */
-function codeOf(stmt: string, dialect: Dialect): string {
+/** `stmt`'s segments joined: identifiers kept, a DO body read as code itself, comments one space, strings kept or one space */
+function joined(stmt: string, dialect: Dialect, strings: boolean): string {
 	return segments(stmt, dialect)
 		.map(({ kind, text }) => {
-			if (kind === "code" || kind === "identifier") return text
+			if (kind === "code" || kind === "identifier" || (strings && kind === "literal")) return text
 			return kind === "body" ? ` ${codeOf(bodyText(text), dialect)} ` : " "
 		})
 		.join("")
 		.replace(/\s+/g, " ")
 		.trim()
+}
+
+/**
+ * A statement's code: identifiers kept, a DO body read as code itself, strings and comments one
+ * space, whitespace collapsed; a SQLite pragma keeps a quoted value, its operand (S2 of r20)
+ */
+function codeOf(stmt: string, dialect: Dialect): string {
+	const code = joined(stmt, dialect, false)
+	return dialect === "sqlite" && /^PRAGMA\b/i.test(code) ? joined(stmt, dialect, true) : code
 }
 
 /** `code` split at the commas outside parentheses, each part trimmed */

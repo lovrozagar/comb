@@ -1054,6 +1054,8 @@ What changes for a project on 0.18. Before deploying it:
 
 6. **Move an `ALTER SUBSCRIPTION … SET (failover)` into a `-- atlas:txmode none` file.** Postgres 17 runs it only outside a transaction block, and `check` now refuses it anywhere else, naming it as Postgres does. 0.18 rated it a statement comb does not recognize, to approve in the file, and Atlas's file transaction then refused it at apply.
 
+7. **Take `PRAGMA query_only` out of a SQLite or D1 migration.** `check` refuses it with any value, however it is written (`'1'`, `01`, `"on"`, `0`). 0.18 refused only the values it read as on, so `'1'` and `01` passed `check` and the file failed read-only at apply. Off does nothing on a connection comb opens, so no file loses anything. A pragma's single-quoted value is read as SQLite reads it, so `PRAGMA foreign_keys = 'off'` gets the same note as `off`, and `PRAGMA defer_foreign_keys = 'on'` is rated as comb writes it.
+
 ## Upgrading to 0.18
 
 What changes for a project on 0.17. Before deploying it:

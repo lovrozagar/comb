@@ -87,9 +87,6 @@ type ReadStatement = { code: string; dialect: Dialect; stmt: string; tree?: unkn
 /** SQLite's transaction control at the top of a file, but a rollback to a savepoint, which nests */
 const SQLITE_TRANSACTION = /^(?:BEGIN|COMMIT|END|START TRANSACTION)\b|^ROLLBACK(?: TRANSACTION)?$/i
 
-/** A truthy pragma value, as SQLite reads a boolean */
-const ON = /^(?:on|true|yes|[1-9]\d*)$/i
-
 /**
  * The pragmas SQLite refuses inside the transaction comb runs each file in, on every SQLite target
  * (bun:sqlite and libsql, .tmp/grunt/p18/tx-pragma-probe.log): which forms, and why
@@ -100,8 +97,8 @@ const IN_TRANSACTION: Readonly<Record<string, { refuses: (pragma: Pragma) => boo
 		why: "journal_mode is the database's setting, and SQLite will not change it inside the transaction comb runs each file in; set it outside the migrations",
 	},
 	query_only: {
-		refuses: ({ value }) => value !== undefined && ON.test(value),
-		why: "query_only on makes the database read-only inside the transaction comb runs each file in, so the rest of the file and its history row fail; leave it out of the migrations",
+		refuses: ({ value }) => value !== undefined,
+		why: "query_only on makes the database read-only inside the transaction comb runs each file in, so the rest of the file and its history row fail, and off does nothing on a connection comb opens; leave it out of the migrations",
 	},
 	synchronous: {
 		refuses: ({ value }) => value !== undefined,

@@ -112,6 +112,14 @@ describe("classifyMigration on a pragma SQLite refuses inside a transaction, how
 		"PRAGMA main.synchronous(0)",
 		"PRAGMA query_only = 1",
 		"PRAGMA [query_only] = ON",
+		/* S2 of r20: query_only with a value in any form, as SQLite reads it, off included */
+		"PRAGMA query_only = '1'",
+		"PRAGMA query_only = 01",
+		'PRAGMA query_only = "on"',
+		"PRAGMA query_only = 'on'",
+		"PRAGMA query_only(yes)",
+		"PRAGMA query_only = 0",
+		"PRAGMA query_only = 'off'",
 		"PRAGMA wal_checkpoint",
 		"PRAGMA wal_checkpoint(TRUNCATE)",
 		"-- comb:allow-unsafe: needed\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nPRAGMA synchronous = OFF;",
@@ -120,7 +128,7 @@ describe("classifyMigration on a pragma SQLite refuses inside a transaction, how
 		expect(() => d1(sql)).toThrow()
 	})
 
-	it.each(["PRAGMA synchronous", "PRAGMA query_only = 0", "PRAGMA query_only", 'PRAGMA "temp_store" = MEMORY'])(
+	it.each(["PRAGMA synchronous", "PRAGMA query_only", 'PRAGMA "temp_store" = MEMORY'])(
 		"rates %j, which SQLite runs inside one, as any other pragma",
 		(sql) => {
 			expect(lite(sql).safety).toBe("unsafe")
@@ -133,8 +141,14 @@ describe("classifyMigration on the foreign-key pragmas comb writes, however thei
 		"PRAGMA defer_foreign_keys = on",
 		'PRAGMA "defer_foreign_keys" = 1',
 		"PRAGMA main.[defer_foreign_keys] = true",
+		"PRAGMA defer_foreign_keys = 'on'",
 	])("rates %j safe, as comb writes it", (sql) => {
 		expect(lite(sql).safety).toBe("safe")
+	})
+
+	/* S2 of r20: SQLite reads a single-quoted value as the value, so every rule reads it unquoted */
+	it.each(["PRAGMA foreign_keys = 'off'", "PRAGMA foreign_keys = 'false'"])("reads %j off, as SQLite does", (sql) => {
+		expect(lite(sql).cautiousStatements).toHaveLength(1)
 	})
 
 	it.each(["PRAGMA defer_foreign_keys", "PRAGMA temp.defer_foreign_keys = on", "PRAGMA defer_foreign_keys = 2"])(
