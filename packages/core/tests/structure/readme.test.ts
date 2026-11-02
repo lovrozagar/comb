@@ -85,6 +85,20 @@ describe("README package exports table", () => {
 	})
 })
 
+/* K9 of r19: the table stopped at 0.14, and the three newest upgrade sections, read first, had no entry */
+describe("README table of contents", () => {
+	it("lists every section, in the order the README has them", () => {
+		const prose = README.replaceAll(/^```[\s\S]*?^```$/gm, "")
+		const sections = [...prose.matchAll(/^## (.+)$/gm)].map((match) => match[1] as string)
+		const start = prose.indexOf("## Table of contents")
+		const table = prose.slice(start, prose.indexOf("\n## ", start + 1))
+		const listed = [...table.matchAll(/^- \[(.+)\]\(#(.+)\)$/gm)].map((match) => [match[1], match[2]])
+		expect(listed).toEqual(
+			sections.filter((heading) => heading !== "Table of contents").map((heading) => [heading, slug(heading)]),
+		)
+	})
+})
+
 describe("README links", () => {
 	const links = [...README.matchAll(/\]\(([^)\s]+)\)/g)].map((match) => match[1] as string)
 	const anchors = new Set([...README.matchAll(/^#{1,6} (.+)$/gm)].map((match) => slug(match[1] as string)))
