@@ -19,7 +19,7 @@
 			"CombQueryMetaInput": "b9cce7ffe0927922",
 			"ConstraintMap": "0ac299d3b436b17a",
 			"ConstraintMapEntry": "6389631092f79c46",
-			"DatabaseErrorHandler": "4667ffe5b67fb3cc",
+			"DatabaseErrorHandler": "0ff3450b1552c669",
 			"LruCache": "1ffc396d99a0ddb0",
 			"LruMeta": "265e803716e70003",
 			"STORABLE_TEXT_RULE": "d2056690b5dd99c5",
@@ -30,6 +30,7 @@
 			"combErrorKeys": "96140ce1411963c1",
 			"combMeta": "7fcb0baa4175ae17",
 			"createUlidFactory": "775172b444812d36",
+			"defineConstraintMaps": "da2e5f3179feabcc",
 			"generateId": "8ac553375be4f654",
 			"generateUlid": "c4c5caea43718b8e",
 			"isCidr": "5d86ce2dd1cad5b5",
@@ -42,7 +43,7 @@
 		},
 		"./cli": {
 			"CliError": "e5a2097eb3b21fe6",
-			"CliIo": "6b5584211394c413",
+			"CliIo": "f73e66475353e7cf",
 			"help": "77edce798c615285",
 			"processIo": "1ca3e00171d8d17e",
 			"runCli": "685844a09304bf61"
@@ -73,7 +74,7 @@
 		"./codegen/generators": {
 			"MANIFEST_VERSION": "23e4932d7e2a021f",
 			"Manifest": "61ce3bfe46bb800e",
-			"ManifestColumn": "df92984b0e44add9",
+			"ManifestColumn": "c4de541e2236f6d7",
 			"ManifestEntity": "5f0de1e6553d0594",
 			"ManifestRelation": "bf57e74ae94f8e0c",
 			"buildManifest": "7b4e7e3a5fd04dff",
@@ -150,7 +151,7 @@
 			"SchemaDiffOptions": "9de1fc99d4490615",
 			"SchemaDiffResult": "67c5ec3f688fb808",
 			"TursoMissing": "0179215dc4ff1d9a",
-			"TursoProviderConfig": "08a60088b2fe70f1",
+			"TursoProviderConfig": "faf34df972f17c3d",
 			"applySqliteMigrationTransforms": "efcc2e95ab000427",
 			"checkAtlasInstalled": "ddc702e79177d18f",
 			"checkCircuitBreaker": "96e6c1e08114d24c",
@@ -176,7 +177,7 @@
 			"introspectSqliteSchema": "12ccefb65903afba",
 			"loadConfig": "82a73dec697bf8ab",
 			"loadPostgresParser": "4e587f4f12becbeb",
-			"parseConfig": "2965b835fd96ee96",
+			"parseConfig": "3a7a8c62e098f5f7",
 			"parseMigration": "2152700fd8064134",
 			"resolveDatabaseConfig": "831bfabf32c3bb23",
 			"splitSqlStatements": "afc0d6e9e46052b2",
@@ -188,8 +189,8 @@
 		},
 		"./pg/error-handler": {
 			"PgErrorRead": "59303f7d873d4def",
-			"classifyPgError": "c73ae91d7f629b0e",
-			"pgErrorHandler": "8808560c39ee2291",
+			"classifyPgError": "fa9c6b8b0c0ed427",
+			"pgErrorHandler": "f5173d25454648ad",
 			"readPgError": "6bfe69976fa6a242"
 		},
 		"./query": {
@@ -225,12 +226,14 @@
 			"LIMIT_DESCRIPTION": "3fbfc298a94ee7ac",
 			"LIMIT_EXAMPLES": "7461c7b3552a4f5f",
 			"LIST_QUERY_LIMITS": "8a103479b0e2f869",
+			"ListExtra": "3af2bd075e8b61c2",
 			"ListQueryCapabilities": "93d7fca4dd920a7b",
 			"ListQueryConfig": "69d2da0f5e3564d9",
-			"ListQueryInput": "117c1bb6a67e3e3a",
+			"ListQueryInput": "14da01ae22ee4998",
 			"ListQueryLimits": "074210ba0ec79ade",
-			"ListQueryOutput": "2cb238a384fce821",
+			"ListQueryOutput": "f0e06ab262a23d99",
 			"ListQuerySchema": "82bcc14515bcc453",
+			"ListRow": "c7e9382f66066e2b",
 			"MAX_CURSOR_LENGTH": "a087f69f22ff5a0b",
 			"MIN_CURSOR_SECRET_BYTES": "fb6a7449e5a7909c",
 			"OPERATORS_BY_TYPE": "9194bd06c253b40b",
@@ -278,8 +281,8 @@
 			"FilterSQLConfig": "deaf9b06a6046e2c",
 			"KeysetPosition": "e9a326a88956c986",
 			"LikeSearchResolver": "fae2bcd28cdbb15f",
-			"ListExtras": "0f18b3343a82cfcc",
-			"ListQueryInput": "117c1bb6a67e3e3a",
+			"ListExtras": "324118ee08354df9",
+			"ListQueryInput": "14da01ae22ee4998",
 			"ListQueryResult": "9dbf1474e5471b7d",
 			"MergedListQueryResult": "d402ffa90be4cb64",
 			"Refold": "f5c0b255dff36b6f",
@@ -314,11 +317,11 @@
 			"c": "ce8ed26c9fd169b1"
 		},
 		"./sqlite/constraint-handler": {
-			"classifySqliteError": "be017f1f6e1d8422",
-			"constraintError": "805f041f493032ab",
-			"handleConstraintViolation": "eafce24c4fe2e55c",
+			"classifySqliteError": "d7359da9ca91bbbf",
+			"constraintError": "bf4cc61fb60affe2",
+			"handleConstraintViolation": "34a2bc34ce342ad0",
 			"resourceOutcome": "dbd7178e7239daa5",
-			"sqliteErrorHandler": "1f107bece2aa2c78"
+			"sqliteErrorHandler": "385a2a647ca5f269"
 		},
 		"./sqlite/constraints": {
 			"EnumOptions": "42cea4996d72cf01",
@@ -333,8 +336,8 @@
 			"TaggedBookmark": "52c34868d994c1a4"
 		},
 		"./sqlite/d1/error-handler": {
-			"classifyD1Error": "525452be6d7e5540",
-			"d1ErrorHandler": "5d06526eddad6767"
+			"classifyD1Error": "92dac09f30240c86",
+			"d1ErrorHandler": "7dd905cd0f16e7ce"
 		},
 		"./sqlite/d1/session": {
 			"SessionConstraint": "012230f5822d85cb",
@@ -356,7 +359,7 @@
 			"ShardRouter": "9a242248541f24ad",
 			"ShardRouterConfig": "7b9991cc8a40d18c",
 			"ShardVerifyDeps": "8cea6e93311e6648",
-			"paginateMerged": "c32a9d12dfb67bc0",
+			"paginateMerged": "1d4a09538dec9250",
 			"shardMap": "771fb1e1a35982c0"
 		},
 		"./sqlite/patterns": {
@@ -376,12 +379,12 @@
 			"CombErrorKey": "bb4902ee49a71449",
 			"ConstraintMap": "0ac299d3b436b17a",
 			"ConstraintMapEntry": "6389631092f79c46",
-			"DatabaseErrorHandler": "4667ffe5b67fb3cc",
+			"DatabaseErrorHandler": "0ff3450b1552c669",
 			"StatusKey": "c6e4d1aeb2e0eeb2",
 			"combDatabaseErrorKeys": "f20bfad0a208f070",
 			"combErrorKeys": "96140ce1411963c1",
 			"statusKeyToCode": "18f7317f8cea18ce"
 		}
 	},
-	"version": "0.17.0"
+	"version": "0.18.0"
 }
