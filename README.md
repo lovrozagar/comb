@@ -1024,7 +1024,15 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun
 
 What changes for a project on 0.17. Before deploying it:
 
-1. **Know what was added.** New exports: `ListRow` and `ListExtra` (`/query`), and `defineConstraintMaps` (the package root), which checks the constraint maps an app passes its error handlers where it builds them; the handlers take the maps as `readonly ConstraintMap[]`. `paginate` and `paginateMerged` return `Array<ListRow<T>>`, which drops the extras from each member of a union row type on its own, so narrowing on a discriminant reaches each variant's fields again; 0.17's `Omit<T, ListExtra>` kept only the keys every member shares.
+1. **Know what changed in the API.** A test holds these three lists to the exports themselves.
+
+   New exports: `ListExtra`, `ListRow`, `defineConstraintMaps`.
+
+   Removed: none.
+
+   Changed: `CliIo`, `DatabaseErrorHandler`, `ListExtras`, `ListQueryInput`, `ListQueryOutput`, `ManifestColumn`, `TursoProviderConfig`, `classifyD1Error`, `classifyPgError`, `classifySqliteError`, `constraintError`, `d1ErrorHandler`, `handleConstraintViolation`, `paginateMerged`, `parseConfig`, `pgErrorHandler`, `sqliteErrorHandler`.
+
+   `ListRow` and `ListExtra` are `/query`'s, and `defineConstraintMaps` is the package root's: it checks the constraint maps an app passes its error handlers where it builds them, and the handlers take the maps as `readonly ConstraintMap[]`. `parseConfig` is async, and takes what a config module exports, an object or a function, sync or async, that returns one: `parseConfig(imported)` becomes `await parseConfig(imported)`, and a refusal rejects with the same ZodError. `TursoProviderConfig.group` is optional, as it always defaulted to `default`. `paginate` and `paginateMerged` return `Array<ListRow<T>>`, which drops the extras from each member of a union row type on its own, so narrowing on a discriminant reaches each variant's fields again; 0.17's `Omit<T, ListExtra>` kept only the keys every member shares.
 
 ## Upgrading to 0.17
 
