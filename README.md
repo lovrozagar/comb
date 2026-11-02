@@ -49,6 +49,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.19](#upgrading-to-019)
 - [Upgrading to 0.18](#upgrading-to-018)
 - [Upgrading to 0.17](#upgrading-to-017)
 - [Upgrading to 0.16](#upgrading-to-016)
@@ -1019,6 +1020,24 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 `tests/bun/` is separate because it imports `bun:sqlite` and `bun:test`, which vitest cannot load. It replays a full Atlas-shaped drift migration against an in-memory database to prove the SQLite transforms survive a real commit with foreign keys enforced.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
+
+## Upgrading to 0.19
+
+What changes for a project on 0.18. Before deploying it:
+
+1. **Know what changed in the API.** A test holds these three lists to the exports themselves.
+
+   New exports: none.
+
+   Removed: none.
+
+   Changed: `MANIFEST_VERSION`, `ManifestColumn`, `buildManifest`.
+
+   `buildManifest(tables, dbName, dialect)` takes the dialect, which decides what a column holds, as the DTO's does.
+
+2. **Regenerate, and widen what codegen refuses.**
+   - The manifest is `v` 2: each column's `min` and `max` are the bounds the create DTO enforces, not the declared ones (a password's 8 to 72, a required text's 1, a format's floor, an id's 1 to 48, an integer's clamped to the column), `patterns` lists every regex it checks, the kind's own beside the declared one, in place of `pattern`, and `maxBytes` is a `c.json` column's byte limit. A reader of `v` 1 refuses it; read `patterns`, then regenerate committed manifests (meta-contract §8.2).
+   - A password's declared `max` past 72, bcrypt's limit, fails codegen naming the column; 0.18 held the column to 72 whatever it declared. **Fix:** declare 72 or less, or drop the `max`.
 
 ## Upgrading to 0.18
 

@@ -19,6 +19,7 @@ export const OFF_UTC_UNIT = [
 	"src/codegen/generators/dtos/example-meta.test.ts",
 	"src/codegen/generators/dtos/field-schema.test.ts",
 	"src/codegen/generators/dtos/generate.fields.test.ts",
+	"src/codegen/generators/dtos/number-range.test.ts",
 	"src/codegen/generators/dtos/pg-types.test.ts",
 	"src/migrate/core/atlas-dir.test.ts",
 	"src/migrate/drivers/d1.test.ts",

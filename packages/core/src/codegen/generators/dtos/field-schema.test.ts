@@ -404,8 +404,8 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 		expect(of("pw", 'c.text("pw", { password: true, min: 12, pattern: "/\\\\d/" }).notNull()', "create")).toBe(
 			"z.string().min(12).max(72).regex(/^[\\x20-\\x7E]+$/).regex(/\\d/)",
 		)
-		expect(of("pw", 'c.text("pw", { password: true, max: 200 }).notNull()', "create")).toBe(
-			"z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)",
+		expect(of("pw", 'c.text("pw", { password: true, max: 50 }).notNull()', "create")).toBe(
+			"z.string().min(8).max(50).regex(/^[\\x20-\\x7E]+$/)",
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "create")).toBe(
 			/* a pattern decides what the value looks like, so it gets no example (F18) */

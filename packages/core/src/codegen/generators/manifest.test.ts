@@ -56,7 +56,7 @@ function manifestFixture() {
 	}
 	const manifestOf = (source = SCHEMA) => {
 		const analysis = analyzed(source)
-		return buildManifest(analysis.tables, analysis.dbName)
+		return buildManifest(analysis.tables, analysis.dbName, "sqlite")
 	}
 	const entity = (name: string, source = SCHEMA) => manifestOf(source).entities.find((e) => e.name === name)!
 	return { analyzed, entity, manifestOf, tmpDir }
@@ -79,7 +79,9 @@ describe("entity manifest — entities and identity", () => {
 
 	it("keeps declaration order between entities sharing a name", () => {
 		const [first] = analyzed().tables
-		const names = buildManifest([first!, { ...first!, varName: "twin" }], "test").entities.map((e) => e.varName)
+		const names = buildManifest([first!, { ...first!, varName: "twin" }], "test", "sqlite").entities.map(
+			(e) => e.varName,
+		)
 		expect(names).toEqual([first!.varName, "twin"])
 	})
 

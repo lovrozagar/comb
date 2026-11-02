@@ -615,10 +615,21 @@ referential actions, unique indexes, partial unique indexes (`partialUniqueIndex
 `where`) and check constraints. A composite foreign key is one relation
 per column, each carrying the whole key as `key: { columns, refColumns }`, paired by position, so
 a reader joins on every column together rather than on independent pairs. Per column it carries the helper that
-declared it, its declared bounds and enum values, `textKind` (`"email"`, `"url"`, `"imageUri"`,
+declared it, the bounds a write takes and enum values, `textKind` (`"email"`, `"url"`, `"imageUri"`,
 `"password"`, `"name"`, or null), `transform`, the list the DTO publishes as `x-comb-transform`
-(§2.1), and `generated`, `immutable` and `private` flags. `min`, `max` and `pattern` bind a value
-after its `transform`, as §6.9 says of the document. Every column that declares a state machine carries it, `transitions` included. The stamp
+(§2.1), and `generated`, `immutable` and `private` flags. `min`, `max`, `patterns` and `maxBytes`
+are what the create DTO enforces, not what the column declares, from `writeRules`, which reads
+the rules the DTO's builders read: a text's declared bounds with comb's own (a password's 8 to 72, a
+required text's 1, a format's floor, an id's 1 to 48), an integer's clamped to what the column
+holds on the dialect, a timestamp's to a JS number's exact range, and none on a boolean, an enum
+or a timestamp comb fills. A plain Postgres column whose type has a write rule of its own (a uuid, a date, an inet, a real, a numeric with a precision) states none either: its
+rule is its type's, which `kind` names, as an inet's union of formats or a numeric's exclusive
+bounds fit no `min`, `max` or pattern; a reader applies the type's own check. `patterns` lists every regex the value must match, the declared one and
+the kind's own (a password's printable ASCII, an id's, a url's https, a name's, an image URI's), as
+regex literals in the order the chain checks them; an email's own check is its format, which
+`textKind` names. `maxBytes` is a `c.json` column's byte limit. A test holds each column's values to
+the JSON Schema the create DTO publishes, on both dialects. All of them bind a value after its
+`transform`, as §6.9 says of the document. Every column that declares a state machine carries it, `transitions` included. The stamp
 publishes the first such column and leaves `transitions` out. Private columns are listed and
 flagged rather than omitted.
 
@@ -635,7 +646,8 @@ asserts the two agree field by field.
 
 Entities are sorted by name and the file carries a checksum header, so regenerating an unchanged
 schema is a no-op and a real change is a readable diff. `v` follows the same rule as the contract:
-additive fields never bump it.
+additive fields never bump it. `v` 2 (comb 0.19) changed what `min` and `max` mean, from declared
+to enforced, and replaced `pattern` with `patterns`, so a reader of `v` 1 refuses it.
 
 This is also the substrate for the deferred query-tap work — a committed artifact a reviewer reads
 in a pull request, which is the only shape that work may take.

@@ -16,6 +16,7 @@ import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { qualifiedName } from "../utils/table-name.ts"
+import { writeRules } from "./dtos/field-schema.ts"
 import { transformsOf } from "./dtos/text-schema.ts"
 
 /**
@@ -25,7 +26,7 @@ import { transformsOf } from "./dtos/text-schema.ts"
  * changes meaning. Adding a field never bumps it, so a reader that ignores what
  * it does not recognise keeps working across comb releases.
  */
-const MANIFEST_VERSION = 1
+const MANIFEST_VERSION = 2
 
 type ManifestColumn = {
 	name: string
@@ -35,14 +36,21 @@ type ManifestColumn = {
 	primaryKey: boolean
 	/** Declared values for an enum column, or null when not an enum or the list is a const reference */
 	enumValues: string[] | null
-	/** Length or numeric bound where one was declared */
+	/**
+	 * The bounds a written value is held to, as the write DTO enforces them (C2 of r20): a text's
+	 * length, its kind's and the declared together, a number's value, clamped to what the column
+	 * holds; an array's are each element's. Null where none, and on a plain Postgres column whose
+	 * type has a rule of its own (a uuid, an inet, a real), which `kind` names
+	 */
 	max: number | null
+	/** The most bytes a written JSON value takes serialized, null for none and for any other column */
+	maxBytes: number | null
 	min: number | null
-	/** Regex source where one was declared */
-	pattern: string | null
+	/** Every regex a written text must match, its kind's and the declared one, as JavaScript regex literals; a plain Postgres type's rule is its `kind`'s */
+	patterns: string[]
 	/** A text column's format, null for any other (C8 of r19) */
 	textKind: "email" | "imageUri" | "name" | "password" | "url" | null
-	/** The rewrites a written value takes before `min`, `max` and `pattern` bind it, in order: the DTO's own list (meta-contract §2.1) */
+	/** The rewrites a written value takes before `min`, `max` and `patterns` bind it, in order: the DTO's own list (meta-contract §2.1) */
 	transform: string[]
 	/** Server-assigned; absent from create bodies */
 	generated: boolean
@@ -104,18 +112,24 @@ type ManifestConfig = {
 const textKindOf = (constraints: FieldMeta["constraints"]): ManifestColumn["textKind"] =>
 	(["email", "url", "imageUri", "password", "name"] as const).find((kind) => constraints[kind]) ?? null
 
-function toColumn(field: FieldMeta, entityMeta: ReturnType<typeof deriveEntityMeta>): ManifestColumn {
+function toColumn(
+	field: FieldMeta,
+	entityMeta: ReturnType<typeof deriveEntityMeta>,
+	dialect: GeneratorContext["dialect"],
+): ManifestColumn {
 	const { constraints } = field
+	const { max, maxBytes, min, patterns } = writeRules(field, dialect)
 	return {
 		enumValues: field.enumValues,
 		generated: entityMeta ? entityMeta.generated.includes(field.name) : constraints.autogenerate,
 		immutable: entityMeta ? entityMeta.immutable.includes(field.name) : isExcludedFromUpdate(field),
 		kind: field.drizzleHelper,
-		max: constraints.max ?? field.length,
-		min: constraints.min,
+		max,
+		maxBytes,
+		min,
 		name: field.name,
 		notNull: field.isNotNull,
-		pattern: constraints.pattern,
+		patterns,
 		primaryKey: field.isPrimaryKey,
 		textKind: textKindOf(constraints),
 		transform: transformsOf(constraints, true),
@@ -130,7 +144,7 @@ function toColumn(field: FieldMeta, entityMeta: ReturnType<typeof deriveEntityMe
 	}
 }
 
-function toEntity(table: TableMeta): ManifestEntity {
+function toEntity(table: TableMeta, dialect: GeneratorContext["dialect"]): ManifestEntity {
 	/* The same derivation the schema stamp uses, so the two cannot disagree. */
 	const meta = deriveEntityMeta(table)
 
@@ -150,7 +164,7 @@ function toEntity(table: TableMeta): ManifestEntity {
 
 	return {
 		checkConstraints: table.checkConstraints.map((c) => ({ expression: c.expression, name: c.name })),
-		columns: table.fields.map((f) => toColumn(f, meta)),
+		columns: table.fields.map((f) => toColumn(f, meta, dialect)),
 		compositePrimaryKey: table.hasCompositePrimaryKey,
 		identity: meta?.identity ?? null,
 		idPrefix: table.idPrefix,
@@ -170,15 +184,17 @@ function toEntity(table: TableMeta): ManifestEntity {
 
 /**
  * Build the manifest without writing it — useful to a caller assembling its own
- * artifact, and the unit under test.
+ * artifact, and the unit under test. `dialect` decides what a column holds, as the DTO's does.
  *
  * Entities are sorted by SQL name so regenerating an unchanged schema produces
  * an identical file regardless of declaration order.
  */
-function buildManifest(tables: TableMeta[], dbName: string): Manifest {
+function buildManifest(tables: TableMeta[], dbName: string, dialect: GeneratorContext["dialect"]): Manifest {
 	return {
 		database: dbName,
-		entities: tables.map(toEntity).sort((a, b) => Number(a.name > b.name) - Number(a.name < b.name)),
+		entities: tables
+			.map((table) => toEntity(table, dialect))
+			.sort((a, b) => Number(a.name > b.name) - Number(a.name < b.name)),
 		v: MANIFEST_VERSION,
 	}
 }
@@ -188,7 +204,7 @@ function generateManifest(ctx: GeneratorContext, config: ManifestConfig): void {
 	const { dbName, tables } = ctx.analysis
 	const { cwd } = ctx
 	const outputPath = path.resolve(cwd, config.output)
-	const manifest = buildManifest(tables, dbName)
+	const manifest = buildManifest(tables, dbName, ctx.dialect)
 
 	writeGenJsonFile(outputPath, manifest, { generator: "comb", staged: ctx.staged })
 	ctx.log(`  manifest: ${outputPath} (${manifest.entities.length} entities)`)

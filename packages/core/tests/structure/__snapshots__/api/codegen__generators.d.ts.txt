@@ -101,7 +101,7 @@ import type { GeneratorContext } from "./context-types.ts";
  * changes meaning. Adding a field never bumps it, so a reader that ignores what
  * it does not recognise keeps working across comb releases.
  */
-declare const MANIFEST_VERSION = 1;
+declare const MANIFEST_VERSION = 2;
 type ManifestColumn = {
     name: string;
     /** The `c.*` helper that declared it — text, integer, enum, json, ref, … */
@@ -110,14 +110,21 @@ type ManifestColumn = {
     primaryKey: boolean;
     /** Declared values for an enum column, or null when not an enum or the list is a const reference */
     enumValues: string[] | null;
-    /** Length or numeric bound where one was declared */
+    /**
+     * The bounds a written value is held to, as the write DTO enforces them (C2 of r20): a text's
+     * length, its kind's and the declared together, a number's value, clamped to what the column
+     * holds; an array's are each element's. Null where none, and on a plain Postgres column whose
+     * type has a rule of its own (a uuid, an inet, a real), which `kind` names
+     */
     max: number | null;
+    /** The most bytes a written JSON value takes serialized, null for none and for any other column */
+    maxBytes: number | null;
     min: number | null;
-    /** Regex source where one was declared */
-    pattern: string | null;
+    /** Every regex a written text must match, its kind's and the declared one, as JavaScript regex literals; a plain Postgres type's rule is its `kind`'s */
+    patterns: string[];
     /** A text column's format, null for any other (C8 of r19) */
     textKind: "email" | "imageUri" | "name" | "password" | "url" | null;
-    /** The rewrites a written value takes before `min`, `max` and `pattern` bind it, in order: the DTO's own list (meta-contract §2.1) */
+    /** The rewrites a written value takes before `min`, `max` and `patterns` bind it, in order: the DTO's own list (meta-contract §2.1) */
     transform: string[];
     /** Server-assigned; absent from create bodies */
     generated: boolean;
@@ -189,12 +196,12 @@ type ManifestConfig = {
 };
 /**
  * Build the manifest without writing it — useful to a caller assembling its own
- * artifact, and the unit under test.
+ * artifact, and the unit under test. `dialect` decides what a column holds, as the DTO's does.
  *
  * Entities are sorted by SQL name so regenerating an unchanged schema produces
  * an identical file regardless of declaration order.
  */
-declare function buildManifest(tables: TableMeta[], dbName: string): Manifest;
+declare function buildManifest(tables: TableMeta[], dbName: string, dialect: GeneratorContext["dialect"]): Manifest;
 /** Write the manifest alongside the generated entities. */
 declare function generateManifest(ctx: GeneratorContext, config: ManifestConfig): void;
 export { buildManifest, generateManifest, type Manifest, type ManifestColumn, type ManifestConfig, type ManifestEntity, type ManifestRelation, MANIFEST_VERSION, };

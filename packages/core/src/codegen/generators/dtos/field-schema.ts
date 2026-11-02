@@ -8,10 +8,17 @@ import { generateExampleMeta } from "./example-meta.ts"
 import { pgWriteRule } from "./pg-types.ts"
 import { isMutative, isRead } from "./schema-type.ts"
 import { STORABLE_TEXT_RULE } from "../../../storable-text.ts"
-import { stated, textBase } from "./text-schema.ts"
-
-/* Postgres stores c.integer in int4 */
-const INT4 = { max: 2147483647, min: -2147483648 }
+import {
+	clamp,
+	integerRange,
+	isInteger,
+	isNumeric,
+	numberRules,
+	refuseNoInteger,
+	type Range,
+	SAFE,
+} from "./number-range.ts"
+import { stated, textBase, textRules } from "./text-schema.ts"
 
 /** A builder's answer: its base, or `undefined` when the column is not its kind */
 type Built = Base | undefined
@@ -40,9 +47,12 @@ const JSON_NUL_CHECK =
  * needs the copy's input to be the schema's output, which TypeScript refuses for a schema with a
  * default or a transform
  */
+/** Whether a column holds JSON: a c.json column, or a drizzle one whose data type is JSON */
+const isJson = (field: FieldMeta): boolean => field.combKind === "json" || field.dataType === "object json"
+
 function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const declared = field.combKind === "json"
-	if (!declared && field.dataType !== "object json") return undefined
+	if (!isJson(field)) return undefined
 	if (!isMutative(schemaType)) return plain(declared ? (field.jsonSchemaName as string) : "z.json()")
 	const schema = declared ? field.jsonSchemaName : "jsonValueSchema"
 	const limit = annotations.maxBytes
@@ -66,51 +76,6 @@ function jsonChecks(limit: number | null): string {
 
 /* a composite key's column is required as a single key is (F7) */
 const isRequired = (field: FieldMeta): boolean => field.isPrimaryKey || field.isNotNull || field.inCompositeKey
-
-// lookup-table: the c helpers whose values are numbers or booleans, which numberBase types
-const NUMBER_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set([
-	"boolean",
-	"createdAt",
-	"deletedAt",
-	"integer",
-	"real",
-	"serialId",
-	"timestamp",
-	"updatedAt",
-])
-
-/** Whether a column holds numbers: a comb number helper, or a drizzle column whose data type is one */
-const isNumeric = (field: FieldMeta) =>
-	field.combKind === null ? field.dataType.startsWith("number") : NUMBER_KINDS.has(field.combKind)
-
-/* the integer range each column holds: Postgres's int2 and int4, else a JS number's exact range */
-const INT2 = { max: 32767, min: -32768 }
-const SAFE = { max: "globalThis.Number.MAX_SAFE_INTEGER", min: "globalThis.Number.MIN_SAFE_INTEGER" }
-
-type Range = { max: number | string; min: number | string }
-
-/** The range an integer column holds, by what the dialect stores it in */
-function integerRange(field: FieldMeta, dialect: Build["dialect"]): Range {
-	if (dialect === "sqlite") return SAFE
-	if (field.combKind === "integer" || field.combKind === "serialId" || field.dataType === "number int32") return INT4
-	return field.dataType === "number int16" ? INT2 : SAFE
-}
-
-/** A declared bound clamped to the column's, which a numeric bound is and a safe-integer name is not */
-const clamp = (declared: number | null, bound: number | string, pick: (a: number, b: number) => number) =>
-	declared === null ? bound : typeof bound === "number" ? pick(declared, bound) : declared
-
-/** A bound as the number it is: SAFE names a JS number's exact range */
-const numberOf = (bound: number | string): number =>
-	typeof bound === "number" ? bound : bound === SAFE.max ? Number.MAX_SAFE_INTEGER : Number.MIN_SAFE_INTEGER
-
-/** Refuses an integer's bounds, clamped to what the column holds, that leave no integer: every write would be refused (F8) */
-function refuseNoInteger(name: string, annotations: FieldConstraints, range: Range): void {
-	const min = numberOf(clamp(annotations.min, range.min, Math.max))
-	const max = numberOf(clamp(annotations.max, range.max, Math.min))
-	if (Math.ceil(min) > Math.floor(max))
-		throw new Error(`${name}: its bounds min ${min} and max ${max} leave no integer the column holds; widen them`)
-}
 
 /**
  * An integer: written, the declared bounds clamped to what the column holds; read, what the column
@@ -145,8 +110,7 @@ function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 		refuseNoInteger(field.name, annotations, SAFE)
 		return integerOf(annotations, SAFE, schemaType)
 	}
-	const integer = kind === null ? field.dataType.startsWith("number int") : kind === "integer" || kind === "serialId"
-	if (integer) {
+	if (isInteger(field)) {
 		const range = integerRange(field, dialect)
 		refuseNoInteger(field.name, annotations, range)
 		return integerOf(annotations, range, schemaType)
@@ -253,4 +217,27 @@ function arrayOf(dimensions: number, schemaType: SchemaType, item: string): stri
 	}
 	for (let depth = 1; depth < dimensions; depth++) nested = `z.array(${nested})`
 	return dimensions > 1 ? `${nested}${RECTANGULAR}` : nested
+}
+
+/** What a written value of a column is held to: its bounds and the regexes it must match */
+export type WriteRules = { max: number | null; maxBytes: number | null; min: number | null; patterns: string[] }
+
+/* a column the builder that takes it bounds by no number and no regex */
+const UNBOUNDED: WriteRules = { max: null, maxBytes: null, min: null, patterns: [] }
+
+/**
+ * What a written value of `field` is held to, as the manifest states it (C2 of r20): the rules of
+ * the builder baseOf picks for it, in its order, an array's for each element, as the DTO builds one.
+ * A plain Postgres column's type rule (F50) is its type's, which the manifest's `kind` names, so
+ * none here: an inet's union of formats or a numeric's exclusive bounds fit no min, max or pattern
+ */
+export function writeRules(field: FieldMeta, dialect: Build["dialect"]): WriteRules {
+	const one = !field.dimensions ? field : { ...field, dimensions: 0, isNotNull: false }
+	if (one.enumValues !== null) return UNBOUNDED
+	if (isJson(one)) return { ...UNBOUNDED, maxBytes: one.constraints.maxBytes }
+	if (dialect === "postgres" && one.combKind === null && pgWriteRule(one) !== undefined) return UNBOUNDED
+	if (isNumeric(one)) return { ...UNBOUNDED, ...numberRules(one, dialect) }
+	if (one.dataType === "boolean") return UNBOUNDED
+	const { max, min, patterns } = textRules(one.constraints, one)
+	return { max, maxBytes: null, min, patterns }
 }

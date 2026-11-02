@@ -15,6 +15,13 @@ const GUARD_KEY = { "x-comb-text": STORABLE_TEXT_RULE }
 /** A written text's length bounds as comb holds them, declared and its own together; null where none */
 type TextRange = { max: number | null; min: number | null }
 
+/* the regexes a kind holds a written text to, as the chain writes each */
+const PRINTABLE = "/^[\\x20-\\x7E]+$/"
+const ID_PATTERN = "/^\\S{1,48}$/"
+const HTTPS = "/^https:\\/\\//"
+const NAME = "/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u"
+const IMAGE = "/^(?:https:\\/\\/|data:image\\/)/"
+
 /* the length comb's ids keep to, which a read states: an imported or older id may not (F65) */
 const ID_LENGTH = { maxLength: 48, minLength: 1 }
 
@@ -39,12 +46,13 @@ const floorOf = ({ email, imageUri, url }: FieldConstraints): number =>
 
 /**
  * A written text's effective range, the one every emitter reads (C1 of r18): a password's own
- * [8, 72] under its declared bounds, bcrypt's 72 bytes the most; an id's 1 to 48; any other text's
+ * [8, 72] under its declared bounds, bcrypt's 72 bytes the most, which a declared max past is
+ * refused (C5 of r20); an id's 1 to 48; any other text's
  * declared bounds, the column's length its max, its min at least its format's floor (C3 of r19),
  * and 1 when it is required and of no format
  */
 function textRange(annotations: FieldConstraints, field: FieldMeta): TextRange {
-	if (annotations.password) return { max: Math.min(annotations.max ?? 72, 72), min: annotations.min ?? 8 }
+	if (annotations.password) return { max: annotations.max ?? 72, min: annotations.min ?? 8 }
 	if (isIdText(annotations, field)) return { max: ID_LENGTH.maxLength, min: ID_LENGTH.minLength }
 	const max = annotations.max ?? field.length
 	const floor = floorOf(annotations)
@@ -64,7 +72,7 @@ function refuseEmptyRange(field: FieldMeta, { max, min }: TextRange): void {
 function stringKind(annotations: FieldConstraints, range: TextRange, mutative: boolean): string {
 	if (!mutative) return "z.string()"
 	/* its own rule, printable ASCII within bcrypt's 72 bytes, under the bounds it declares (F9) */
-	if (annotations.password) return `z.string().min(${range.min}).max(${range.max}).regex(/^[\\x20-\\x7E]+$/)`
+	if (annotations.password) return `z.string().min(${range.min}).max(${range.max}).regex(${PRINTABLE})`
 	return "z.string()"
 }
 
@@ -146,12 +154,10 @@ function textKeys(build: Build): Record<string, unknown> {
 /** The checks a name or an image URI takes on a write; what is read back is whatever the column holds */
 function kindChecks(annotations: FieldConstraints): string {
 	const name = annotations.name
-		? '.regex(/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" })'
+		? `.regex(${NAME}, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" })`
 		: ""
 	/* a regex, not a refine: JSON Schema publishes it as the pattern, so a client sees the rule */
-	const image = annotations.imageUri
-		? '.regex(/^(?:https:\\/\\/|data:image\\/)/, { message: "Must be an HTTPS URL or a data:image/ URI" })'
-		: ""
+	const image = annotations.imageUri ? `.regex(${IMAGE}, { message: "Must be an HTTPS URL or a data:image/ URI" })` : ""
 	return name + image
 }
 
@@ -160,7 +166,7 @@ function textBounds(build: Build, range: TextRange): string {
 	const mutative = isMutative(schemaType)
 	if (annotations.password) return mutative && annotations.pattern !== null ? `.regex(${annotations.pattern})` : ""
 	/* \S matches U+0000 and either half of a pair, so a written id takes the text guard after it (F48) */
-	if (isIdText(annotations, field)) return mutative ? `.regex(/^\\S{1,48}$/)${TEXT_GUARD}` : ""
+	if (isIdText(annotations, field)) return mutative ? `.regex(${ID_PATTERN})${TEXT_GUARD}` : ""
 	if (!mutative) {
 		const held = heldLength(build)
 		return held === null ? "" : `.max(${held})`
@@ -176,7 +182,7 @@ function textBounds(build: Build, range: TextRange): string {
  */
 function writeChecks(annotations: FieldConstraints): string {
 	const pattern = annotations.pattern === null ? "" : `.regex(${annotations.pattern})`
-	const https = annotations.url ? `.regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" })` : ""
+	const https = annotations.url ? `.regex(${HTTPS}, { message: "Must be an HTTPS URL" })` : ""
 	/* zod drops a url's format once a regex follows it; published again, a client refuses what z.url() does (F25) */
 	const format = annotations.url ? '.meta({ format: "uri" })' : ""
 	return pattern + https + kindChecks(annotations) + TEXT_GUARD + format
@@ -186,7 +192,8 @@ function writeChecks(annotations: FieldConstraints): string {
 export function textBase(build: Build): Base {
 	const { annotations, field, schemaType } = build
 	const mutative = isMutative(schemaType)
-	const range = textRange(annotations, field)
+	/* the rules the manifest states, so the two channels cannot drift (C2 of r20) */
+	const range = textRules(annotations, field)
 	if (mutative) refuseEmptyRange(field, range)
 	/* an email or a url is normalized first, then validated: z.email() would refuse the padded input,
 	 * and z.url() trims it unpublished. Checks run in chain order, and unlike a pipe the chain still
@@ -202,4 +209,21 @@ export function textBase(build: Build): Base {
 		stringKind(annotations, range, mutative) + transforms(annotations, mutative) + textBounds(build, range),
 		textKeys(build),
 	)
+}
+
+/** What a written text is held to: its effective range and each regex it must match, in the chain's order */
+export type TextRules = TextRange & { patterns: string[] }
+
+/**
+ * A written text's rules as the DTO's chain checks them, which the manifest states (C2 of r20): the
+ * range textBase enforces, and the kind's regexes beside the declared one, in the order it checks
+ * them. An email's own check is its format, which the manifest's textKind names
+ */
+export function textRules(annotations: FieldConstraints, field: FieldMeta): TextRules {
+	const range = textRange(annotations, field)
+	const declared = annotations.pattern === null ? [] : [annotations.pattern]
+	if (annotations.password) return { ...range, patterns: [PRINTABLE, ...declared] }
+	if (isIdText(annotations, field)) return { ...range, patterns: [ID_PATTERN] }
+	const kind = [annotations.url ? HTTPS : null, annotations.name ? NAME : null, annotations.imageUri ? IMAGE : null]
+	return { ...range, patterns: [...declared, ...kind.filter((each) => each !== null)] }
 }

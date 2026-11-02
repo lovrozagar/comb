@@ -199,9 +199,10 @@ describe("parseFieldConstraints: a text's kind", () => {
 		["{ password: true, trim: true }", "a password takes no trim: it is kept as written"],
 		["{ lowercase: true, password: true }", "a password takes no lowercase: it is kept as written"],
 		["{ password: true, uppercase: true }", "a password takes no uppercase: it is kept as written"],
+		["{ max: 100, password: true }", "a password's max is at most 72: bcrypt's limit"],
 		["{ lowercase: true, url: true }", "a url takes no lowercase: it is kept as written, but for its trim"],
 		["{ uppercase: true, url: true }", "a url takes no uppercase: it is kept as written, but for its trim"],
-	])("refuses a key the kind drops: %s", (options, said) => {
+	])("refuses a key the kind drops or a bound it overrides: %s", (options, said) => {
 		expect(parsed(options)).toThrow(`${at}: ${said}`)
 	})
 
@@ -209,7 +210,7 @@ describe("parseFieldConstraints: a text's kind", () => {
 		"{ email: true, lowercase: true, trim: true }",
 		'{ email: true, max: 90, min: 8, pattern: "/@corp/" }',
 		"{ trim: true, url: true }",
-		'{ max: 90, password: true, pattern: "/x/", private: true }',
+		'{ max: 72, password: true, pattern: "/x/", private: true }',
 		"{ imageUri: true, lowercase: true, trim: true }",
 		"{ name: true, trim: true, uppercase: true }",
 		"{ email: false, url: true }",

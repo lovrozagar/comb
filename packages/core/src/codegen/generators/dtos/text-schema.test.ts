@@ -80,11 +80,6 @@ describe("stated", () => {
 describe("textBase: a text's effective bounds that leave no value", () => {
 	it.each([
 		["a password's min past its 72", 'c.text("t", { password: true, min: 80 })', "min 80 and max 72"],
-		[
-			"a password's min past 72 under a wider declared max",
-			'c.text("t", { password: true, min: 100, max: 200 })',
-			"min 100 and max 72",
-		],
 		["a required text's max of 0", 'c.text("t", { max: 0 }).notNull()', "min 1 and max 0"],
 		["a url shorter than https:// and a character", 'c.text("t", { url: true, max: 5 })', "min 9 and max 5"],
 	])("fails codegen naming the column for %s", (_, raw, bounds) => {
