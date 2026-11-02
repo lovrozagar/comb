@@ -24,4 +24,13 @@ describe("roundedKey", () => {
 		for (const a of [2n ** 60n, Number.MAX_SAFE_INTEGER, 1.5, "9007199254740993", null, Number.POSITIVE_INFINITY])
 			expect(roundedKey({ a, b: 1 }, SORT, "derived"), String(a)).toBeUndefined()
 	})
+
+	/* Q1 of r20: SQLite's storage class, which the builder selects as _combKeyTypes, says which number is rounded */
+	it("a REAL past 2^53 is exact, an INTEGER read as a double is rounded", () => {
+		for (const a of [1e20, -(2 ** 60), 2 ** 53, 2 ** 53 + 2])
+			expect(roundedKey({ _combKeyTypes: "real,integer,text", a, b: 1 }, SORT, "derived"), String(a)).toBeUndefined()
+		expect(roundedKey({ _combKeyTypes: "real,integer,text", a: 1e20, b: 2 ** 60 }, SORT, "merged")?.cause).toBe(
+			"b 1152921504606846976 is past ±(2^53 − 1), where the driver rounded it: a merged list's integer sort keys must be within ±(2^53 − 1), or be read as bigint",
+		)
+	})
 })

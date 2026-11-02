@@ -174,6 +174,19 @@ const lossy = (value: unknown): value is number =>
 	typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)
 
 /**
+ * Throw a 500 for a tiebreak id a JS number rounds, which cannot find its own row, so the keyset
+ * would repeat or skip it (U22), and two unique ids may read as one (Q6 of r20)
+ */
+function refuseRoundedId(record: Record<string, unknown>, idField: string): void {
+	if (!lossy(record[idField])) return
+	throw new CombError({
+		cause: `the tiebreak id ${idField} reads ${String(record[idField])}, past 2^53, where a JS number rounds it, so no cursor can find its row; read it exactly (bun:sqlite safeIntegers, libsql intMode: "bigint", drizzle's mode: "bigint" on Postgres), or on D1 key the table by a text id`,
+		errorKey: combErrorKeys.SORT_NOT_WIRED,
+		status: "internal_server_error",
+	})
+}
+
+/**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
  * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37)
  */
@@ -183,14 +196,7 @@ function mintCursor(
 	options: CursorOptions & { idField?: string | undefined },
 ): string {
 	const idField = options?.idField ?? CURSOR_TIEBREAK_COLUMN
-	/* a tiebreak id a JS number rounds cannot find its own row, so the keyset would repeat or skip it (U22) */
-	if (lossy(record[idField])) {
-		throw new CombError({
-			cause: `the tiebreak id ${idField} reads ${String(record[idField])}, past 2^53, where a JS number rounds it, so no cursor can find its row; read it exactly (bun:sqlite safeIntegers, libsql intMode: "bigint", drizzle's mode: "bigint" on Postgres), or on D1 key the table by a text id`,
-			errorKey: combErrorKeys.SORT_NOT_WIRED,
-			status: "internal_server_error",
-		})
-	}
+	refuseRoundedId(record, idField)
 	return encodeCursor(
 		{ i: record[idField] as CursorId, s: sortSignature(parsedSort), v: parsedSort.map(({ field }) => record[field]) },
 		options,
@@ -241,6 +247,7 @@ export {
 	lossy,
 	mintCursor,
 	readCursor,
+	refuseRoundedId,
 	sortSignature,
 	type CursorId,
 	type CursorOptions,

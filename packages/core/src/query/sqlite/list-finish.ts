@@ -77,9 +77,6 @@ function shardWindow(parsed: ListQueryInput, merged: { maxRowsPerShard?: number 
 	})
 }
 
-/** Whether `column` is a column that holds numbers */
-const holdsNumbers = (column: SQLWrapper): boolean => is(column, Column) && column.dataType.startsWith("number")
-
 /** What paginate is told of the list, beside the extras its rows carry */
 function factsOf({ keyset, merged, parsed, sort, table, tiebreak }: Finish) {
 	return {
@@ -92,11 +89,6 @@ function factsOf({ keyset, merged, parsed, sort, table, tiebreak }: Finish) {
 			(keyset.keys ?? []).flatMap(({ column }, i) => (readsBack(column, table) ? [sort[i]?.field as string] : [])),
 		),
 		merged: merged !== undefined,
-		/* the keys, and the tiebreak, whose column holds numbers, which a driver may read as decimal strings (Q2 of r19) */
-		numbers: new Set([
-			...(keyset.keys ?? []).flatMap(({ column }, i) => (holdsNumbers(column) ? [sort[i]?.field as string] : [])),
-			...(tiebreak !== null && holdsNumbers(tiebreak.column) ? [COMB_ID] : []),
-		]),
 		query: parsed,
 		window: parsed.limit + 1,
 	} satisfies Omit<PaginationFacts, "expects"> & { merged: boolean }
@@ -111,17 +103,34 @@ function withExtras(list: Finish, extras: ListExtras, window = list.parsed.limit
 /* the id a cursor resumes from is the tiebreak itself, so no row's own id can stand in for it (Q2) */
 const idOf = (tiebreak: SortKey | null): ListExtras => (tiebreak === null ? {} : { _combId: combId(tiebreak.column) })
 
+/** Whether `column` is a Postgres column, whose type, not a storage class, says what a value is */
+const isPg = (column: SQLWrapper): boolean => String((column as { columnType?: unknown }).columnType).startsWith("Pg")
+
 /**
- * SQLite's storage class of each sort key, where one is an undeclared expression: libsql's intMode
- * "string" reads an integer as a decimal string, as it reads a text, so paginate mints such a key
- * as the integer SQLite stored (Q2 of r19). A Postgres list types the cursor's value by its operand.
+ * The storage class SQLite holds a key in, a REAL ±Infinity as `+inf` or `-inf`, which D1's JSON
+ * transport reads as null (Q3 of r20)
  */
-function keyTypesOf({ keyset, tiebreak }: Finish): ListExtras {
+const storageOf = (column: SQLWrapper): SQL =>
+	sql`case typeof(${column}) when 'real' then case ${column} when 9e999 then '+inf' when -9e999 then '-inf' else 'real' end else typeof(${column}) end`
+
+/**
+ * SQLite's storage class of each sort key and of the tiebreak, which paginate and paginateMerged
+ * read each key by. A list that binds its keys as read (a derived list with no anchor, and a merged
+ * list) needs it for every key: a REAL past 2^53 is exact where an INTEGER read as a double is
+ * rounded (Q1 of r20), the merge compares an integer libsql's intMode "string" reads as a decimal
+ * string as that integer (Q2 of r20), and D1 reads a REAL ±Infinity as null (Q3 of r20). A table
+ * list reads its keys back from the anchor row, so it needs it only for a key that is no declared
+ * column (Q2 of r19). A Postgres list types the cursor's value by its operand.
+ */
+function keyTypesOf({ keyset, merged, table, tiebreak }: Finish): ListExtras {
 	const keys = keyset.keys
-	if (keys === null || tiebreak === null || !is(tiebreak.column, SQLiteColumn)) return {}
-	if (keys.every(({ column }) => is(column, Column) || column instanceof DateKey)) return {}
+	if (keys === null || tiebreak === null) return {}
+	if ([tiebreak.column, ...keys.map(({ column }) => column)].some(isPg)) return {}
+	const asRead = merged !== undefined || table === undefined
+	const declared = keys.every(({ column }) => is(column, Column) || column instanceof DateKey)
+	if (!asRead && (declared || !is(tiebreak.column, SQLiteColumn))) return {}
 	const types = sql.join(
-		keys.map(({ column }) => sql`typeof(${column})`),
+		[...keys.map(({ column }) => storageOf(column)), sql`typeof(${tiebreak.column})`],
 		sql` || ',' || `,
 	)
 	return { _combKeyTypes: sql<string>`${types}`.as("_combKeyTypes") }

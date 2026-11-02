@@ -8,8 +8,8 @@
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
-import { effectiveNulls } from "./cursor.ts"
-import { INTEGER_TEXT } from "./list-extras.ts"
+import { effectiveNulls, refuseRoundedId } from "./cursor.ts"
+import { typedKeys } from "./list-extras.ts"
 import { roundedKey } from "./rounded-key.ts"
 import {
 	applySelect,
@@ -62,18 +62,17 @@ function compareValues(a: unknown, b: unknown): number {
 
 const isNull = (value: unknown) => value === null || value === undefined
 
-/** `value` of `field` as the merge compares it: a number column's integer a driver read as a decimal string as that integer (Q2 of r19) */
-const keyOf = (numbers: ReadonlySet<string>, field: string, value: unknown): unknown =>
-	numbers.has(field) && typeof value === "string" && INTEGER_TEXT.test(value) ? BigInt(value) : value
-
 /**
  * Two rows in the list's order: each key's direction and null placement, then the id, as
- * orderByKeys orders them; a key of a number column compared as a number however the driver read it
+ * orderByKeys orders them, each read through `typed` as SQLite stored it (Q2 of r20); the cursor's
+ * anchor, decoded as it was minted, is compared as it is
  */
-function compareRows(sort: readonly SortField[], idField: string, numbers: ReadonlySet<string>) {
-	return (a: Record<string, unknown>, b: Record<string, unknown>): number => {
+function compareRows(sort: readonly SortField[], idField: string, typed: ReadonlyMap<object, Record<string, unknown>>) {
+	const keysOf = (row: Record<string, unknown>) => typed.get(row) ?? row
+	return (left: Record<string, unknown>, right: Record<string, unknown>): number => {
+		const [a, b] = [keysOf(left), keysOf(right)]
 		for (const { direction, field, nulls } of sort) {
-			const [x, y] = [keyOf(numbers, field, a[field]), keyOf(numbers, field, b[field])]
+			const [x, y] = [a[field], b[field]]
 			if (isNull(x) && isNull(y)) continue
 			const first = effectiveNulls(direction, nulls) === "first"
 			if (isNull(x)) return first ? -1 : 1
@@ -81,7 +80,7 @@ function compareRows(sort: readonly SortField[], idField: string, numbers: Reado
 			const order = compareValues(x, y)
 			if (order !== 0) return direction === "asc" ? order : -order
 		}
-		const order = compareValues(keyOf(numbers, idField, a[idField]), keyOf(numbers, idField, b[idField]))
+		const order = compareValues(a[idField], b[idField])
 		return (sort[0]?.direction ?? "desc") === "asc" ? order : -order
 	}
 }
@@ -129,8 +128,12 @@ function refuseRounded(rows: ReadonlyArray<Record<string, unknown>>, sort: reado
 	}
 }
 
-/** A merged list's ids must be unique across shards, or a cursor's anchor names more than one row (Q10) */
+/**
+ * A merged list's ids must be unique across shards, or a cursor's anchor names more than one row
+ * (Q10). An id a JS number rounded is refused as rounded first, as two unique ids may read as one (Q6 of r20)
+ */
 function refuseSharedIds(rows: ReadonlyArray<Record<string, unknown>>, idField: string): void {
+	for (const row of rows) refuseRoundedId(row, idField)
 	const seen = new Set<unknown>()
 	for (const row of rows) {
 		const id = row[idField]
@@ -210,9 +213,13 @@ function paginateMerged<T extends object>(
 	const shards = rowsPerShard as ReadonlyArray<ReadonlyArray<T & Record<string, unknown>>>
 	const merged = shards.flat()
 	refuseGoneAnchor(merged)
-	refuseSharedIds(merged, COMB_ID)
+	/* each row's keys and id as SQLite stored them, which the merge compares; the rows served stay as read */
+	const typed = new Map<object, Record<string, unknown>>(
+		merged.map((row) => [row, typedKeys(row, pagination.parsedSort)]),
+	)
+	refuseSharedIds([...typed.values()], COMB_ID)
 	refuseRounded(merged, pagination.parsedSort)
-	const compare = compareRows(pagination.parsedSort, COMB_ID, pagination.numbers)
+	const compare = compareRows(pagination.parsedSort, COMB_ID, typed)
 	refuseUnmergeable(shards, compare)
 	merged.sort(compare)
 	const { cursor, limit } = pagination

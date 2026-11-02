@@ -2,9 +2,12 @@
  * An integer sort key a driver read as a number past ±(2^53 − 1) is already rounded. A list that binds
  * the key as read cannot page it: a derived list with no anchor row to read the exact key back from
  * (Q1 of r19), and a merged list, whose shards' keys that round to one double compare equal (Q2 of r18).
+ * A REAL is a double on disk, so a REAL past 2^53 is exact: SQLite's storage class, which the builder
+ * selects as `_combKeyTypes`, decides, and only where none was selected does the value alone (Q1 of r20).
  */
 import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
+import { storedClasses } from "./list-extras.ts"
 import type { SortField } from "./types.ts"
 
 // lookup-table: why a list cannot page an integer sort key the driver rounded, by the list
@@ -16,16 +19,19 @@ const ROUNDED: Readonly<Record<"derived" | "merged", string>> = {
 
 /**
  * The 500 for `row`'s first integer sort key past ±(2^53 − 1), which the driver rounded, on a list
- * that cannot page it (Q2 of r18, Q1 of r19); none where every key is exact. A bigint is exact.
+ * that cannot page it (Q2 of r18, Q1 of r19); none where every key is exact. A bigint is exact, and
+ * so is a number SQLite stored as a REAL (Q1 of r20).
  */
 function roundedKey(
 	row: Record<string, unknown>,
 	sort: readonly SortField[],
 	kind: "derived" | "merged",
 ): CombError | undefined {
-	const rounded = sort.find(({ field }) => {
+	const stored = storedClasses(row)
+	const rounded = sort.find(({ field }, i) => {
 		const value = row[field]
-		return typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)
+		const integer = stored === undefined || stored[i] === "integer"
+		return integer && typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)
 	})
 	if (rounded === undefined) return undefined
 	return new CombError({

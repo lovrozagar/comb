@@ -11,11 +11,19 @@ import { defineRelations, getTableColumns, ne, type SQL } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/d1"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { Miniflare } from "miniflare"
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 import { createListQuerySchema } from "../../../src/query/schema.ts"
 import { applyListQuery, buildListQuery } from "../../../src/query/sqlite/build-list-query.ts"
 import { paginateMerged } from "../../../src/sqlite/d1/sharding/index.ts"
+import {
+	CREATE as CREATE_POINT,
+	INFINITE,
+	inserts,
+	ORDERS as REAL_ORDERS,
+	pageAll as pageReals,
+	truthQuery,
+} from "../support/real-keys.ts"
 
 const org = sqliteTable("org", { id: text("id").primaryKey(), n: integer("n"), name: text("name") })
 /* Q1 of the 0.14.1 review: four null n over three shards, so a page of 2 ends on a null only one shard holds */
@@ -198,4 +206,35 @@ describe("paginateMerged by cursor past a page that ends on a null key (Q1, K5)"
 			expect(seen).toEqual(oracle)
 		},
 	)
+})
+
+/* Q3 of r20: D1's JSON transport reads a REAL ±Infinity as null, so the merge reads each key's stored class to restore it */
+describe("a merged list over a REAL key holding ±Infinity, on D1 shards", () => {
+	let reals: Miniflare | undefined
+	afterEach(async () => {
+		await reals?.dispose()
+		reals = undefined
+	})
+
+	for (const kind of ["merged column", "merged expression"] as const)
+		it.each(REAL_ORDERS)(`pages %s through a ${kind} list every row once, by cursor and by page`, async (order) => {
+			reals = new Miniflare({
+				d1Databases: ["S0", "S1", "ONE"],
+				modules: true,
+				script: "export default { fetch() { return new Response(null, { status: 204 }) } }",
+			})
+			const [s0, s1, one] = (await Promise.all(
+				["S0", "S1", "ONE"].map((name) => reals?.getD1Database(name)),
+			)) as unknown as D1Database[]
+			for (const db of [s0, s1, one]) await db?.prepare(CREATE_POINT).run()
+			for (const [shard, statement] of inserts(INFINITE))
+				for (const db of [[s0, s1][shard], one]) await db?.prepare(statement).run()
+			const truth = (await one?.prepare(truthQuery(order)).all<{ id: number }>())?.results.map(({ id }) => id)
+			const dbs = {
+				one: drizzle(one as D1Database) as never,
+				shards: [drizzle(s0 as D1Database), drizzle(s1 as D1Database)] as never,
+			}
+			for (const mode of ["cursor", "page"] as const)
+				expect(await pageReals(kind, { ...dbs, mode, order }), mode).toEqual(truth)
+		})
 })

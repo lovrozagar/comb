@@ -82,7 +82,7 @@ describe("queryHelpers.paginate — the storage class of each sort key (Q2 of r1
 				errorKey: "page_not_wired",
 			}),
 		)
-		const [rows] = queryHelpers.paginate([{ _combId: "a", _combKeyTypes: "integer", _total: 1, k: "3" }], keyed)
+		const [rows] = queryHelpers.paginate([{ _combId: "a", _combKeyTypes: "integer,text", _total: 1, k: "3" }], keyed)
 		expect(rows).toEqual([{ k: "3" }])
 	})
 })

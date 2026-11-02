@@ -16,9 +16,27 @@ const numbered = sqliteTable("numbered", { id: text("id").primaryKey(), k: integ
 const merged = (params: Record<string, string>, maxRowsPerShard?: number, table: typeof t | typeof numbered = t) =>
 	buildListQuery({ ...SEALED, merged: { maxRowsPerShard }, parsed: parse(params), table })
 
-/** Hand-made rows as a shard reads them through the merged builder: the tiebreak, and each row's shard count on an offset page */
-const read = <T extends { id: unknown }>(rows: readonly T[], total: number | null = rows.length) =>
-	rows.map((row) => ({ ...row, _combId: row.id, ...(total === null ? {} : { _total: total }) }))
+/** The storage class SQLite holds `value` in, as the builder's typeof() answers for a value a driver read so */
+function stored(value: unknown): string {
+	if (value === null || value === undefined) return "null"
+	if (typeof value === "string") return "text"
+	if (value instanceof Uint8Array) return "blob"
+	if (value === Number.POSITIVE_INFINITY) return "+inf"
+	if (value === Number.NEGATIVE_INFINITY) return "-inf"
+	return typeof value === "number" && !Number.isInteger(value) ? "real" : "integer"
+}
+
+/**
+ * Hand-made rows as a shard reads them through the merged builder: the tiebreak, the storage class
+ * of each of `sort`'s keys and of the id, and each row's shard count on an offset page
+ */
+const read = <T extends { id: unknown }>(rows: readonly T[], total: number | null = rows.length, sort = ["k"]) =>
+	rows.map((row) => ({
+		...row,
+		_combId: row.id,
+		_combKeyTypes: [...sort.map((field) => stored((row as Record<string, unknown>)[field])), stored(row.id)].join(","),
+		...(total === null ? {} : { _total: total }),
+	}))
 
 /** The ids of the merged page of `shards` under `params` */
 const ids = (shards: Array<Array<{ id: unknown; k?: unknown }>>, params: Record<string, string>) =>
@@ -32,7 +50,7 @@ describe("buildListQuery's merged list", () => {
 	it("reads every row to the page's end and one more from each shard, counting them", () => {
 		const options = merged({ limit: "3", page: "4" })
 		expect(options).toMatchObject({ limit: 13, offset: 0 })
-		expect(Object.keys(options.extras).toSorted()).toEqual(["_combId", "_total"])
+		expect(Object.keys(options.extras).toSorted()).toEqual(["_combId", "_combKeyTypes", "_total"])
 		expect(merged({ limit: "3" })).toMatchObject({ limit: 4, offset: 0 })
 	})
 
@@ -94,7 +112,7 @@ describe("paginateMerged", () => {
 	it("orders by the tiebreak alone, descending, under an empty sort, as orderByKeys does", () => {
 		/* a hand-built query: the schema adds a default order to an empty one */
 		const unsorted = buildListQuery({ ...SEALED, merged: {}, parsed: { limit: 10, parsedSort: [] }, table: t })
-		const [rows] = paginateMerged([read([{ id: 3 }, { id: 1 }]), read([{ id: 2 }])], unsorted)
+		const [rows] = paginateMerged([read([{ id: 3 }, { id: 1 }], 2, []), read([{ id: 2 }], 1, [])], unsorted)
 		expect(rows.map((row) => row.id)).toEqual([3, 2, 1])
 	})
 
@@ -117,8 +135,8 @@ describe("paginateMerged", () => {
 })
 
 /* Q1 of the 0.14.1 review: a shard that resumed before the cursor, as one reading a gone anchor at -Infinity does */
-/** A row of key `k` */
-const row = (id: string, k: number) => ({ _combId: id, id, k })
+/** A row of key `k`, with its storage class and its text id's */
+const row = (id: string, k: number) => ({ _combId: id, _combKeyTypes: `${stored(k)},text`, id, k })
 
 describe("paginateMerged past a cursor a shard resumed before", () => {
 	const first = paginateMerged(
@@ -187,6 +205,19 @@ describe("paginateMerged on an id two shards hold", () => {
 			expect.objectContaining({ errorKey: "sort_not_wired", status: 500 }),
 		)
 	})
+
+	/* Q6 of r20: unique INTEGER ids past 2^53 that a driver rounded onto one double are rounded, not shared */
+	it("refuses ids a driver read rounded onto one number as rounded, naming how to read them exactly", () => {
+		const rounded = 2 ** 60 + 256
+		expect(() => ids([[{ id: rounded, k: 1 }], [{ id: rounded, k: 2 }]], { order: "k.asc" })).toThrow(
+			expect.objectContaining({
+				cause: expect.stringMatching(
+					/^the tiebreak id _combId reads 1152921504606847200, past 2\^53, where a JS number rounds it/,
+				),
+				errorKey: "sort_not_wired",
+			}),
+		)
+	})
 })
 
 /* r18 Q2: the merge cannot order integer keys the driver already rounded, and one database orders them by their true values */
@@ -227,7 +258,10 @@ const derived = (params: Record<string, string>) =>
 describe("buildDerivedListQuery's merged list", () => {
 	it("is a merged list paginateMerged pages: each shard's window and count, the order across shards", () => {
 		const first = derived({ limit: "2", order: "k.asc" })
-		expect([first.pagination.merged, [...first.pagination.expects].sort()]).toEqual([true, ["_combId", "_total"]])
+		expect([first.pagination.merged, [...first.pagination.expects].sort()]).toEqual([
+			true,
+			["_combId", "_combKeyTypes", "_total"],
+		])
 		const shards = [
 			read([
 				{ id: "a", k: "1" },

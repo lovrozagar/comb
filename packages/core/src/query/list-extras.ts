@@ -12,8 +12,19 @@ const COMB_ID = "_combId" as const
 const DECIMAL: RegExp = /^(?:0|[1-9]\d*)$/
 /* an integer as a SQLite driver writes it in a string: canonical, signed */
 const INTEGER_TEXT: RegExp = /^-?(?:0|[1-9]\d*)$/
-// lookup-table: the storage classes SQLite's typeof() answers with
-const STORAGE: ReadonlySet<string> = /* @__PURE__ */ new Set(["blob", "integer", "null", "real", "text"])
+// lookup-table: the storage classes SQLite's typeof() answers with, a REAL ±Infinity as its own (Q3 of r20)
+const STORAGE: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"+inf",
+	"-inf",
+	"blob",
+	"integer",
+	"null",
+	"real",
+	"text",
+])
+
+/** SQLite's storage class of a list's sort key or tiebreak, as `_combKeyTypes` carries it */
+type StorageClass = "+inf" | "-inf" | "blob" | "integer" | "null" | "real" | "text"
 
 /** A value as a refusal shows it: a bigint with its n, anything else as JSON */
 const shown = (value: unknown): string => (typeof value === "bigint" ? `${value}n` : JSON.stringify(value))
@@ -30,11 +41,27 @@ function isCount(encoded: unknown): boolean {
 		: Number.isSafeInteger(value) && (value as number) >= 0
 }
 
-/** Whether `value` is the storage class of each of `sort`'s keys, comma-joined, as the builder selects it */
+/** Whether `value` is the storage class of each of `sort`'s keys and of the tiebreak, comma-joined, as the builder selects it */
 const isKeyTypes = (value: unknown, sort: readonly SortField[]): boolean =>
 	typeof value === "string" &&
-	value.split(",").length === sort.length &&
+	value.split(",").length === sort.length + 1 &&
 	value.split(",").every((each) => STORAGE.has(each))
+
+/**
+ * The storage class SQLite holds each of `sort`'s keys in, then the tiebreak's, from the row's
+ * `_combKeyTypes`; none where the builder selected none (a Postgres list, or a table list over columns)
+ */
+function storedClasses(row: Record<string, unknown>): readonly StorageClass[] | undefined {
+	const types = row["_combKeyTypes"]
+	return typeof types === "string" ? (types.split(",") as StorageClass[]) : undefined
+}
+
+/** `value` as SQLite stored it under `stored`: an integer read as a decimal string as that integer, a ±Infinity read as null (D1) as itself */
+function storedValue(value: unknown, stored: StorageClass | undefined): unknown {
+	if (stored === "+inf") return Number.POSITIVE_INFINITY
+	if (stored === "-inf") return Number.NEGATIVE_INFINITY
+	return stored === "integer" && typeof value === "string" && INTEGER_TEXT.test(value) ? BigInt(value) : value
+}
 
 /**
  * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
@@ -51,21 +78,19 @@ function malformed(row: object, sort: readonly SortField[]): string | undefined 
 }
 
 /**
- * `row` with each sort key SQLite stored as an integer, which the driver read as a decimal string, as
- * that integer, so a cursor minted from it compares as one: a string binds as text, which SQLite
- * orders after every integer (Q2 of r19). A text key that looks like a number stays text.
+ * `row` with each sort key, and the tiebreak, as SQLite stored it, by the class `_combKeyTypes`
+ * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
+ * minted from it compares as one, a string binding as text, which SQLite orders after every
+ * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20). A text key that
+ * looks like a number stays text. The merge compares rows through it (Q2 of r20).
  */
 function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown> {
-	const types = row["_combKeyTypes"]
-	if (typeof types !== "string") return row
-	const stored = types.split(",")
-	const integers = sort.filter(({ field }, i) => {
-		const value = row[field]
-		return stored[i] === "integer" && typeof value === "string" && INTEGER_TEXT.test(value)
-	})
-	return integers.length === 0
-		? row
-		: { ...row, ...Object.fromEntries(integers.map(({ field }) => [field, BigInt(row[field] as string)])) }
+	const stored = storedClasses(row)
+	if (stored === undefined) return row
+	const typed = [...sort.map(({ field }) => field), COMB_ID]
+		.map((field, i) => [field, storedValue(row[field], stored[i])] as const)
+		.filter(([field, value]) => value !== row[field])
+	return typed.length === 0 ? row : { ...row, ...Object.fromEntries(typed) }
 }
 
-export { COMB_ID, INTEGER_TEXT, malformed, typedKeys, unencoded }
+export { COMB_ID, INTEGER_TEXT, malformed, type StorageClass, storedClasses, typedKeys, unencoded }

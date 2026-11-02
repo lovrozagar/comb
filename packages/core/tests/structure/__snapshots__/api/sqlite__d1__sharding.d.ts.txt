@@ -349,8 +349,6 @@ type ListPagination = {
     limit: number;
     /** read through buildListQuery's `merged`: paged by paginateMerged, never by paginate (K8 of r17) */
     merged: boolean;
-    /** the sort fields, and the tiebreak's COMB_ID, whose column holds numbers: the merge compares a driver's decimal string there as the integer (Q2 of r19) */
-    numbers: ReadonlySet<string>;
     nonFinite: "exact" | undefined;
     page: number | undefined;
     parsedFields: ParsedFields | null;
@@ -370,8 +368,6 @@ type PaginationFacts = {
     /** the extras the builder selected, which every row must carry */
     expects: readonly ListExtra[];
     keyset?: KeysetKind | undefined;
-    /** the sort fields, and COMB_ID, whose column holds numbers; none when not given */
-    numbers?: ReadonlySet<string> | undefined;
     query: ListQueryInput;
     window: number;
 };
@@ -699,6 +695,11 @@ declare function encodeCursor(payload: CursorPayload, options: CursorOptions): s
 /** Whether `value` is an integer a JS number rounds: past ±(2^53 − 1), a lossy read of the row's key (U22) */
 declare const lossy: (value: unknown) => value is number;
 /**
+ * Throw a 500 for a tiebreak id a JS number rounds, which cannot find its own row, so the keyset
+ * would repeat or skip it (U22), and two unique ids may read as one (Q6 of r20)
+ */
+declare function refuseRoundedId(record: Record<string, unknown>, idField: string): void;
+/**
  * Mint the cursor for the row after which the next page starts, sealed under `options` and keyed
  * by `idField`, whole: the public `createCursor` (cursor-mint.ts) keeps it within the cap (U37)
  */
@@ -718,7 +719,7 @@ declare function openCursor(cursor: string, options: CursorOptions): DecodedCurs
  * of its own must read from the cursor's row (cursor-ref.ts), never bind as it is.
  */
 declare function readCursor(cursor: string, parsedSort: readonly SortField[], options: CursorOptions): DecodedCursor;
-export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, readCursor, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
+export { CursorRef, CURSOR_TIEBREAK_COLUMN, MAX_CURSOR_LENGTH, cursorProblem, effectiveNulls, encodeCursor, lossy, mintCursor, readCursor, refuseRoundedId, sortSignature, type CursorId, type CursorOptions, type CursorPayload, type CursorValue, type DecodedCursor, openCursor, type PaginationMeta, };
 
 // query/cursor-mint.d.ts
 import type { CursorOptions } from "./cursor-seal.ts";
@@ -779,20 +780,29 @@ import type { SortField } from "./types.ts";
 /** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
 declare const COMB_ID: "_combId";
 declare const INTEGER_TEXT: RegExp;
+/** SQLite's storage class of a list's sort key or tiebreak, as `_combKeyTypes` carries it */
+type StorageClass = "+inf" | "-inf" | "blob" | "integer" | "null" | "real" | "text";
 /** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint (Q2 of r19) */
 declare const unencoded: (value: unknown) => unknown;
+/**
+ * The storage class SQLite holds each of `sort`'s keys in, then the tiebreak's, from the row's
+ * `_combKeyTypes`; none where the builder selected none (a Postgres list, or a table list over columns)
+ */
+declare function storedClasses(row: Record<string, unknown>): readonly StorageClass[] | undefined;
 /**
  * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
  * kind. An extra rendered by hand as its own alias reads as that string (Q4 of r18).
  */
 declare function malformed(row: object, sort: readonly SortField[]): string | undefined;
 /**
- * `row` with each sort key SQLite stored as an integer, which the driver read as a decimal string, as
- * that integer, so a cursor minted from it compares as one: a string binds as text, which SQLite
- * orders after every integer (Q2 of r19). A text key that looks like a number stays text.
+ * `row` with each sort key, and the tiebreak, as SQLite stored it, by the class `_combKeyTypes`
+ * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
+ * minted from it compares as one, a string binding as text, which SQLite orders after every
+ * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20). A text key that
+ * looks like a number stays text. The merge compares rows through it (Q2 of r20).
  */
 declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
-export { COMB_ID, INTEGER_TEXT, malformed, typedKeys, unencoded };
+export { COMB_ID, INTEGER_TEXT, malformed, type StorageClass, storedClasses, typedKeys, unencoded };
 
 // query/schema.d.ts
 /**
