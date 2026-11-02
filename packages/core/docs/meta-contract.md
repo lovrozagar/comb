@@ -684,36 +684,69 @@ That shape has already paid twice: it caught the foreign-key omission in §6.2, 
 is a 400; only `select=author(name)` parses). Both were wrong in the first implementation, and
 neither would have been caught by a test that restated the rule.
 
-## 10. Publishing: source, not a build
+## 10. Publishing: source, with declarations
 
-comb ships TypeScript source (`"files": ["src"]`). A source-shipping package inherits the
-**consumer's** strict flags, and `skipLibCheck` does not help, because it only covers `.d.ts`.
+comb ships its TypeScript source for runtimes and bundlers, and from 0.19 the declarations a type
+checker reads. `prepack` emits them, with declaration maps, under `types/` from
+`tsconfig.types.json` (which extends `tsconfig.strict.json`), and each export names them first:
+`{ "types": "./types/x.d.ts", "default": "./src/x.ts" }`. Bun, `tsx`, Vite and Wrangler take
+`default` and compile the source; a consumer's `tsc` takes `types` and never loads comb's `.ts`.
+The order is the contract: the first condition that matches wins, and `default` always matches.
 
-Measured, per flag, over `src/**`:
+**Why.** A source-shipping package inherits the consumer's compiler settings, and `skipLibCheck`
+does not help, because it only covers `.d.ts`. Up to 0.18 that meant two costs. First, every
+relative specifier in comb ends in `.ts`, so a project without `allowImportingTsExtensions`
+failed with TS5097: the stock create-cloudflare Worker, comb's main audience, gave 218 errors.
+Second, the consumer's strict flags applied to comb's internals, which is why comb holds its
+source to the union of them (below). Measured on 0.19's source with tsc 7.0.2 (plan 19, leaf
+1.6; `.tmp/grunt/r20-premise/k1-*`), six packs, each in a fresh consumer:
 
-| Flag                                 | Errors before | After |
-| ------------------------------------ | ------------- | ----- |
-| `noUncheckedIndexedAccess`           | 0             | 0     |
-| `noPropertyAccessFromIndexSignature` | 19            | 0     |
-| `exactOptionalPropertyTypes`         | 32            | 0     |
+| Pack                                  | create-cloudflare tsconfig | every subpath, bundler or nodenext | comb `.ts` tsc loads | consumer `tsc` | tarball gz, files |
+| ------------------------------------- | -------------------------- | ---------------------------------- | -------------------- | -------------- | ----------------- |
+| source only (0.18)                    | 218 TS5097                 | 761 TS5097                         | 279                  | 290 ms         | 582.5 KiB, 306    |
+| specifiers rewritten to `.js`         | 0                          | 0                                  | 279                  | 228 ms         | 582.7 KiB, 306    |
+| declarations beside the source        | 150 TS5097                 | 663 TS5097                         | 259                  | 217 ms         | 703.6 KiB, 874    |
+| declarations under `types/` (shipped) | 0                          | 0                                  | 0                    | 65 ms          | 783.1 KiB, 874    |
+| `.js` and declarations beside         | 0                          | 0                                  | 259                  | 224 ms         | 703.6 KiB, 874    |
+| `.js` and declarations under `types/` | 0                          | 0                                  | 0                    | 62 ms          | 783.3 KiB, 874    |
 
-All 51 were mechanical: dot access on index-signature types became bracket access, and optional
-properties were widened from `p?: T` to `p?: T | undefined` — behavior-neutral, and more honest
-about what the API already accepted. One call site into `@libsql/client` omits a key rather than
-passing an explicit `undefined`, since that type is not ours to widen.
+Bun, `tsx`, Wrangler and Vite (with `@cloudflare/vite-plugin`, and `--ssr` with `ssr.noExternal`)
+behaved the same on all six. Beside the source, a declaration's `./x.ts` or `./x.js` resolves to
+the source next to it, so tsc loads it anyway. Under `types/`, the emitted `./x.ts` resolves to
+the sibling `x.d.ts` under `bundler` and `nodenext`, and a `.d.ts` raises no TS5097, so no
+specifier needs rewriting. The `.js` rewrite adds nothing a consumer's tsc sees once it reads
+declarations, and would cost a codemod over about 2,500 specifiers and a lint rule.
 
-**Why fix the source rather than add a build.** Publishing declarations would hide these from
-consumers while leaving comb's own internals loose, and it costs a real pipeline: 19 subpath
-exports, `allowImportingTsExtensions` meaning every internal specifier ends in `.ts` and would
-need rewriting, and a CLI whose shebang is `#!/usr/bin/env bun` running `.ts` directly. The
-codegen path also benefits from consumers being able to read the source that produced their files.
+**What it costs.** +200 KiB gzipped and +568 files (284 declarations, 284 maps). The maps stay:
+with them, go-to-definition opens comb's source; without them, it lands in the declaration. Nothing
+is committed or kept in sync by hand: `types/` is gitignored, emitted at each pack and removed by
+`postpack`, and `tests/structure/api.test.ts` snapshots the same emit. `release-manifest.test.ts`
+reads the tarball the release publishes, the one the consumer suite installs: each export names
+its declaration first, every declaration and map ships, and every map's `sources` is inside the
+package.
+
+**Where declarations are missing.** An install that never ran `prepack` (a `file:` or link install
+of the repository, a git dependency) has no `types/`. tsc then takes `default`, comb's source,
+exactly as before 0.19, and a consumer cell holds that. Plain Node still refuses TypeScript under
+the dependency folder (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), whatever the pack; run comb
+through `tsx` or a bundler.
+
+**Why 0.18 rejected declarations, and what changed.** It held that declarations would hide comb's
+strict errors from consumers while leaving its internals loose, that every `.ts` specifier would
+need rewriting, and that the bun-shebang CLI runs `.ts` directly. The first never applied:
+`typecheck:strict` stays a gate, and `isolatedDeclarations`, which keeps the emit faithful to the
+source, needs it. The second is measured false above. The third is unchanged, since the runtime
+is still the source. The cost 0.18 feared, a pipeline across 20 exports, is one `tsc` call in
+`prepack` and a condition object per export.
 
 **The durable rule, which is the part worth sharing with honey and flare:** a package that ships
 source must compile under the union of the strict flags its consumers might set, and must prove it
-in CI. `bun run typecheck:strict` does that, and both workflows run it. The mechanism — fix or
-build — then follows from measurement rather than from a guess. comb's exposure turned out to be
-51 errors; honey's is reportedly ~480, dominated by `noUncheckedIndexedAccess`, which comb has
-none of. Same rule, different answers, and that is the point: measure first.
+in CI. `bun run typecheck:strict` does that, and both workflows run it. comb's exposure turned out
+to be 51 errors, all mechanical: dot access on index-signature types became bracket access, and
+optional properties were widened from `p?: T` to `p?: T | undefined`. honey's is reportedly ~480,
+dominated by `noUncheckedIndexedAccess`, which comb has none of. Shipping declarations then takes
+the consumer's flags off the package's internals altogether; the rule still holds, because the
+declarations are only as honest as the source they come from. Measure first.
 
 **Generated files under `isolatedDeclarations`.** comb's own source compiles under it; the files
 codegen writes are the app's, and only some do. Clean, each export's type annotated: constraints,

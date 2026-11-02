@@ -4,9 +4,10 @@
  * 0.9.0's release failed in both publish steps, and its manifest would have lost the comb bin.
  */
 import { spawnSync } from "node:child_process"
-import { readFileSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { pack as packForConsumers } from "../consumers/stage.ts"
 
 const ROOT = join(import.meta.dirname, "../../../..")
 const SCRIPT = join(ROOT, ".github/scripts/pack-for-publish.sh")
@@ -123,4 +124,99 @@ describe("the published package (P2)", () => {
 			RELEASE.match(/packed="\$\("\$\{GITHUB_WORKSPACE\}\/\.github\/scripts\/pack-for-publish\.sh"/g),
 		).toHaveLength(2)
 	})
+})
+
+/** Every file under `dir`, relative to it */
+const filesUnder = (dir: string): string[] =>
+	readdirSync(dir, { recursive: true, withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => relative(dir, join(entry.parentPath, entry.name)))
+		.sort()
+
+/** Each export of the packed `dir` that is not `{ types, default }` with its declaration under types/, or whose files `files` lacks */
+function wrongExports(dir: string, files: string[]): string[] {
+	return Object.entries(manifestOf(dir)["exports"] as Record<string, unknown>).flatMap(([subpath, target]) => {
+		if (subpath === "./package.json")
+			return target === "./package.json" ? [] : [`${subpath}: ${JSON.stringify(target)}`]
+		const { default: source, types } = (target ?? {}) as { default?: string; types?: string }
+		const expected = { types: source?.replace(/^\.\/src\//, "./types/").replace(/\.ts$/, ".d.ts"), default: source }
+		if (JSON.stringify(target) !== JSON.stringify(expected)) return [`${subpath}: ${JSON.stringify(target)}`]
+		return [types, source]
+			.filter((file) => !files.includes((file as string).slice(2)))
+			.map((file) => `${subpath}: ${file} not packed`)
+	})
+}
+
+/** Each `sources` entry of a packed map that is absolute, leaves the package, or names a file `files` lacks */
+function wrongSources(dir: string, files: string[], maps: string[]): string[] {
+	return maps.flatMap((map) => {
+		const { sourceRoot = "", sources } = JSON.parse(readFileSync(join(dir, map), "utf8")) as {
+			sourceRoot?: string
+			sources: string[]
+		}
+		return sources.flatMap((source) => {
+			const target = relative(dir, resolve(dir, dirname(map), sourceRoot, source))
+			if (isAbsolute(sourceRoot) || isAbsolute(source) || target.startsWith("..")) return [`${map}: ${source}`]
+			return files.includes(target) ? [] : [`${map}: ${source} not packed`]
+		})
+	})
+}
+
+/*
+ * K1 of r20: a consumer's tsc reads comb's declarations, emitted at pack under types/, and never
+ * loads comb's .ts. Every check reads the package the release publishes, never the working tree,
+ * where types/ exists only while a pack runs. One pack serves them all: prepack writes types/ and
+ * postpack removes it, so two packs at once in this tree would race.
+ */
+describe("the published declarations (K1 of r20)", () => {
+	let dir: string
+	let files: string[]
+	beforeAll(() => {
+		const packed = spawnSync("bash", [SCRIPT, join(ROOT, "packages/core")], { encoding: "utf8" })
+		expect(packed.status, packed.stderr).toBe(0)
+		dir = packed.stdout.trim().split("\n").at(-1) as string
+		files = filesUnder(dir)
+	}, 120_000)
+	afterAll(() => rmSync(dirname(dir), { force: true, recursive: true }))
+
+	/* the first condition that matches wins, and `default` always matches: `{ default, types }` hid every declaration in 1.6's first run */
+	it("names each export's declaration first, under types/, and ships both targets", () => {
+		expect(wrongExports(dir, files)).toEqual([])
+		expect(Object.keys(manifestOf(dir)["exports"] as object).length).toBeGreaterThan(15)
+	})
+
+	/* anyrow bug #11's class: a map that names a path outside the package sends go-to-definition nowhere */
+	it("maps each declaration to a source inside the package, and the source ships", () => {
+		const declarations = files.filter((file) => file.startsWith("types/") && file.endsWith(".d.ts"))
+		const maps = files.filter((file) => file.endsWith(".d.ts.map"))
+		expect(declarations.length).toBeGreaterThan(15)
+		expect(maps.toSorted()).toEqual(declarations.map((file) => `${file}.map`).toSorted())
+		expect(wrongSources(dir, files, maps)).toEqual([])
+	})
+
+	/* type-references.test.ts holds the source to it; the emit could still add one, and a consumer's tsc reads these */
+	it("reference no types package with a triple-slash directive", () => {
+		const declarations = files.filter((file) => file.endsWith(".d.ts"))
+		const referencing = declarations.filter((file) =>
+			/^\/\/\/\s*<reference\s+types=/m.test(readFileSync(join(dir, file), "utf8")),
+		)
+		expect(declarations.length).toBeGreaterThan(15)
+		expect(referencing).toEqual([])
+	})
+
+	/* the consumer cells prove the tarball the release publishes, declarations and all, not a pack of their own */
+	it("is the tarball the consumer suite installs", () => {
+		const tarball = packForConsumers()
+		try {
+			const listed = spawnSync("tar", ["-tzf", tarball], { encoding: "utf8" })
+				.stdout.split("\n")
+				.filter((line) => line !== "" && !line.endsWith("/"))
+				.map((line) => line.replace(/^package\//, ""))
+				.sort()
+			expect(listed).toEqual(files)
+			expect(listed).toContain("types/index.d.ts")
+		} finally {
+			rmSync(dirname(tarball), { force: true, recursive: true })
+		}
+	}, 120_000)
 })

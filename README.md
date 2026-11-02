@@ -97,7 +97,7 @@ npm install @lovrozagar/comb drizzle-orm@1.0.0-rc.4 zod @noble/ciphers @noble/ha
 pnpm add @lovrozagar/comb drizzle-orm@1.0.0-rc.4 zod @noble/ciphers @noble/hashes
 ```
 
-Comb ships TypeScript source, not a build. Your bundler or runtime compiles it.
+Comb ships TypeScript source, not a build, and the declarations a type checker reads. Your bundler or runtime compiles the source; your `tsc` and editor read the declarations under `types/`, so your project needs no tsconfig flag for comb, and your strict flags check your code, not comb's. Go-to-definition still opens comb's source, through the declarations' maps.
 
 | Runtime or tool | Supported | How                                                                                                                                  |
 | --------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -105,9 +105,10 @@ Comb ships TypeScript source, not a build. Your bundler or runtime compiles it.
 | `tsx`           | yes       | runs the source on Node                                                                                                              |
 | Vite            | yes       | bundles it; set `ssr.noExternal` for an SSR or Worker build                                                                          |
 | Wrangler        | yes       | bundles it into the Worker                                                                                                           |
+| `tsc`, editors  | yes       | read the declarations under `types/`, any `moduleResolution` that reads `exports` (`bundler`, `node16`, `nodenext`)                  |
 | plain Node      | no        | type stripping refuses TypeScript in dependencies (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`); run it through `tsx` or a bundler |
 
-The consumer suite (`bun run test:consumers`) checks each supported row in CI: it installs the packed tarball, imports every subpath under Bun and `tsx`, builds with Vite and Wrangler, and compiles every subpath with `tsc` under strict flags in a `bundler` and a `nodenext` project.
+The consumer suite (`bun run test:consumers`) checks each supported row in CI: it installs the packed tarball, imports every subpath under Bun and `tsx`, builds with Vite and Wrangler, compiles every subpath with `tsc` under strict flags in a `bundler` and a `nodenext` project, and type-checks a stock create-cloudflare Worker, its tsconfig verbatim, from the declarations alone. An install that skipped packing, such as a `file:` or link install of this repository or a git dependency, has no `types/`; `tsc` then reads the source, as before 0.19, which needs `allowImportingTsExtensions`.
 
 The runtime subpaths (all but `cli`, `codegen` and `migrate`) type-check at `lib` ES2022, the floor create-cloudflare's templates give; the tooling subpaths, which run under Bun or Node, need ES2023.
 
@@ -1061,6 +1062,8 @@ What changes for a project on 0.18. Before deploying it:
 7. **Take `PRAGMA query_only` out of a SQLite or D1 migration.** `check` refuses it with any value, however it is written (`'1'`, `01`, `"on"`, `0`). 0.18 refused only the values it read as on, so `'1'` and `01` passed `check` and the file failed read-only at apply. Off does nothing on a connection comb opens, so no file loses anything. A pragma's single-quoted value is read as SQLite reads it, so `PRAGMA foreign_keys = 'off'` gets the same note as `off`, and `PRAGMA defer_foreign_keys = 'on'` is rated as comb writes it.
 
 8. **Read `unknown` in a `--json` report.** Every `migrate apply`, `check` and `status` object gains `unknown`, the files that may have committed, `[]` when none. On libsql, Turso and bun:sqlite, a file whose batch committed while its answer was lost, the connection staying down through every retry, is in `unknown`, in neither `applied` nor `pending`, and its refusal names the file and the cause (`fetch failed: read ECONNRESET`) and says to run `comb migrate status`; 0.18 listed it as pending. On D1, a read-back that fails after wrangler's apply puts the files it ran in `unknown` too, where 0.18 listed them as pending.
+
+9. **Drop a tsconfig mapping into comb's source.** A consumer's `tsc` now reads comb's declarations, so it needs no flag and no longer checks comb's internals. A `paths` entry or a `customConditions` mapping that sends `@lovrozagar/comb` to its `src` bypasses them and keeps the 0.18 behavior, `allowImportingTsExtensions` and all. **Fix:** remove the mapping; `allowImportingTsExtensions` can go too, unless your own imports end in `.ts`.
 
 ## Upgrading to 0.18
 

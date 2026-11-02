@@ -40,7 +40,8 @@ packages/core/.e2e-*/
 .temp
 .cache/
 
-# copied in from the repo root at pack time (see the prepack script)
+# copied in from the repo root at pack time, and the declarations emitted then (see the prepack script)
 packages/core/README.md
 packages/core/LICENSE
+packages/core/types/
 .tmp/

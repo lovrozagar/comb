@@ -30,39 +30,101 @@
 	"files": [
 		"docs",
 		"src",
+		"types",
 		"!src/**/*.test.ts",
 		"!src/**/__fixtures__/**"
 	],
 	"type": "module",
 	"sideEffects": false,
 	"exports": {
-		".": "./src/index.ts",
-		"./cli": "./src/cli/index.ts",
-		"./codegen": "./src/codegen/index.ts",
-		"./codegen/generators": "./src/codegen/generators/index.ts",
-		"./meta": "./src/meta.ts",
-		"./migrate": "./src/migrate/index.ts",
+		".": {
+			"types": "./types/index.d.ts",
+			"default": "./src/index.ts"
+		},
+		"./cli": {
+			"types": "./types/cli/index.d.ts",
+			"default": "./src/cli/index.ts"
+		},
+		"./codegen": {
+			"types": "./types/codegen/index.d.ts",
+			"default": "./src/codegen/index.ts"
+		},
+		"./codegen/generators": {
+			"types": "./types/codegen/generators/index.d.ts",
+			"default": "./src/codegen/generators/index.ts"
+		},
+		"./meta": {
+			"types": "./types/meta.d.ts",
+			"default": "./src/meta.ts"
+		},
+		"./migrate": {
+			"types": "./types/migrate/index.d.ts",
+			"default": "./src/migrate/index.ts"
+		},
 		"./package.json": "./package.json",
-		"./pg/columns": "./src/pg/columns.ts",
-		"./pg/error-handler": "./src/pg/error-handler.ts",
-		"./query": "./src/query/index.ts",
-		"./query/sqlite": "./src/query/sqlite/index.ts",
-		"./sqlite/columns": "./src/sqlite/columns.ts",
-		"./sqlite/constraint-handler": "./src/sqlite/constraint-handler.ts",
-		"./sqlite/constraints": "./src/sqlite/constraints.ts",
-		"./sqlite/d1/bookmark": "./src/sqlite/d1/bookmark.ts",
-		"./sqlite/d1/error-handler": "./src/sqlite/d1/error-handler.ts",
-		"./sqlite/d1/session": "./src/sqlite/d1/session.ts",
-		"./sqlite/d1/sharding": "./src/sqlite/d1/sharding/index.ts",
-		"./sqlite/patterns": "./src/sqlite/patterns.ts",
-		"./states": "./src/states.ts",
-		"./types": "./src/types.ts"
+		"./pg/columns": {
+			"types": "./types/pg/columns.d.ts",
+			"default": "./src/pg/columns.ts"
+		},
+		"./pg/error-handler": {
+			"types": "./types/pg/error-handler.d.ts",
+			"default": "./src/pg/error-handler.ts"
+		},
+		"./query": {
+			"types": "./types/query/index.d.ts",
+			"default": "./src/query/index.ts"
+		},
+		"./query/sqlite": {
+			"types": "./types/query/sqlite/index.d.ts",
+			"default": "./src/query/sqlite/index.ts"
+		},
+		"./sqlite/columns": {
+			"types": "./types/sqlite/columns.d.ts",
+			"default": "./src/sqlite/columns.ts"
+		},
+		"./sqlite/constraint-handler": {
+			"types": "./types/sqlite/constraint-handler.d.ts",
+			"default": "./src/sqlite/constraint-handler.ts"
+		},
+		"./sqlite/constraints": {
+			"types": "./types/sqlite/constraints.d.ts",
+			"default": "./src/sqlite/constraints.ts"
+		},
+		"./sqlite/d1/bookmark": {
+			"types": "./types/sqlite/d1/bookmark.d.ts",
+			"default": "./src/sqlite/d1/bookmark.ts"
+		},
+		"./sqlite/d1/error-handler": {
+			"types": "./types/sqlite/d1/error-handler.d.ts",
+			"default": "./src/sqlite/d1/error-handler.ts"
+		},
+		"./sqlite/d1/session": {
+			"types": "./types/sqlite/d1/session.d.ts",
+			"default": "./src/sqlite/d1/session.ts"
+		},
+		"./sqlite/d1/sharding": {
+			"types": "./types/sqlite/d1/sharding/index.d.ts",
+			"default": "./src/sqlite/d1/sharding/index.ts"
+		},
+		"./sqlite/patterns": {
+			"types": "./types/sqlite/patterns.d.ts",
+			"default": "./src/sqlite/patterns.ts"
+		},
+		"./states": {
+			"types": "./types/states.d.ts",
+			"default": "./src/states.ts"
+		},
+		"./types": {
+			"types": "./types/types.d.ts",
+			"default": "./src/types.ts"
+		}
 	},
 	"publishConfig": {
 		"access": "public"
 	},
 	"scripts": {
-		"prepack": "cp ../../README.md ../../LICENSE .",
+		"prepack": "rm -rf types && cp ../../README.md ../../LICENSE . && tsc -p tsconfig.types.json",
+		"postpack": "rm -rf types README.md LICENSE",
 		"test": "vitest run",
 		"test:bun": "bun test tests/bun",
 		"test:coverage": "vitest run --coverage",

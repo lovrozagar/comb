@@ -4,7 +4,7 @@
  * node_modules); a Vite build and a wrangler bundle carry no tooling; tsc compiles every subpath
  * under strict flags in a bundler project and in a nodenext project.
  */
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { Miniflare } from "miniflare"
 import semver from "semver"
@@ -30,6 +30,15 @@ let tarball: string
 beforeAll(() => {
 	tarball = pack()
 })
+
+/** comb's files in a `tsc --listFiles` run: its declarations, and any of its source tsc loaded */
+function combFiles(output: string): { declarations: string[]; source: string[] } {
+	const files = output.split("\n").filter((line) => line.includes("node_modules/@lovrozagar/comb/"))
+	return {
+		declarations: files.filter((file) => file.endsWith(".d.ts")),
+		source: files.filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts")),
+	}
+}
 
 /* every subpath loads without ts-morph: codegen loads it in the child that reads the tables (codegen/runtime/load.ts) */
 const NEEDS_TS_MORPH: string[] = []
@@ -109,6 +118,18 @@ describe.each([
 		expect(result.status).toBe(0)
 	})
 
+	/* K1 of r20: 0.18.0 gave 218 TS5097 here, one per `./x.ts` specifier of comb's source the Worker reached; the Worker's globals come from workers-types, an optional peer */
+	it.runIf(peers === "all").each(["c3/tsconfig.json", "c3/tsconfig.strict.json"])(
+		"type-checks a stock create-cloudflare Worker from comb's declarations alone (%s)",
+		(config) => {
+			const result = run(app.dir, "npx", ["tsc", "-p", config, "--listFiles"])
+			expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
+			expect(result.status).toBe(0)
+			expect(combFiles(result.output).source).toEqual([])
+			expect(combFiles(result.output).declarations.length).toBeGreaterThan(0)
+		},
+	)
+
 	it
 		.runIf(peers === "all")
 		.each([
@@ -123,6 +144,22 @@ describe.each([
 		const result = run(app.dir, "npx", ["tsc", "-p", config])
 		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
 		expect(result.status).toBe(0)
+	})
+
+	/*
+	 * An install that never ran prepack (a `file:` or link install of the tree, a git dependency) has
+	 * no types/: tsc then takes the `default` condition, comb's source, as every release before 0.19
+	 * did. Last in its describe, since it takes types/ out of the installed comb.
+	 */
+	it.runIf(peers === "all")("falls back to comb's source where its declarations were never emitted", () => {
+		const packed = run(app.dir, "npx", ["tsc", "-p", "tsconfig.bundler.json", "--listFiles"])
+		expect(combFiles(packed.output)).toMatchObject({ source: [] })
+		rmSync(join(app.dir, "node_modules/@lovrozagar/comb/types"), { force: true, recursive: true })
+		const unpacked = run(app.dir, "npx", ["tsc", "-p", "tsconfig.bundler.json", "--listFiles"])
+		expect(unpacked.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
+		expect(unpacked.status).toBe(0)
+		expect(combFiles(unpacked.output).declarations).toEqual([])
+		expect(combFiles(unpacked.output).source.length).toBeGreaterThan(0)
 	})
 })
 

@@ -8,13 +8,14 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import semver from "semver"
 import { beforeAll, describe, expect, it } from "vitest"
+import { type ExportTarget, sourceOf } from "./support/exports-of.ts"
 
 const CORE = join(import.meta.dirname, "../..")
 const ROOT = join(CORE, "../..")
 
 type Manifest = {
 	bin: Record<string, string>
-	exports: Record<string, string>
+	exports: Record<string, ExportTarget>
 	peerDependencies: Record<string, string>
 	devDependencies: Record<string, string>
 	scripts: Record<string, string>
@@ -41,9 +42,10 @@ describe("package exports", () => {
 		packed = (pack?.files ?? []).map((file) => file.path)
 	}, 60_000)
 
-	it("every exports target and the bin exist and are in the tarball", () => {
+	/* the declarations are emitted at pack, so release-manifest.test.ts checks them in the packed tarball */
+	it("every exports source and the bin exist and are in the tarball", () => {
 		const { bin, exports } = manifest()
-		const targets = [...Object.values(exports), ...Object.values(bin)].map(strip)
+		const targets = [...Object.values(exports).map(sourceOf), ...Object.values(bin)].map(strip)
 		expect(targets.filter((target) => !existsSync(join(CORE, target)))).toEqual([])
 		expect(targets.filter((target) => !packed.includes(target))).toEqual([])
 	})
@@ -98,8 +100,9 @@ describe("public entry points", () => {
 		const { exports } = manifest()
 		const leaked: string[] = []
 		for (const [subpath, target] of Object.entries(exports)) {
-			if (!target.endsWith(".ts") || subpath === "./cli") continue
-			const mod = (await import(join(CORE, target))) as Record<string, unknown>
+			const source = sourceOf(target)
+			if (!source.endsWith(".ts") || subpath === "./cli") continue
+			const mod = (await import(join(CORE, source))) as Record<string, unknown>
 			for (const name of INTERNAL) if (Object.hasOwn(mod, name)) leaked.push(`${subpath}: ${name}`)
 		}
 		expect(leaked).toEqual([])

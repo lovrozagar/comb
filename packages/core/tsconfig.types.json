@@ -1,0 +1,10 @@
+{
+	"extends": "./tsconfig.strict.json",
+	"compilerOptions": {
+		"declarationMap": true,
+		"emitDeclarationOnly": true,
+		"noEmit": false,
+		"outDir": "./types",
+		"rootDir": "./src"
+	}
+}

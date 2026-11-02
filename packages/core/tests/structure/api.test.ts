@@ -1,8 +1,8 @@
 /**
  * The API a consumer compiles against, one snapshot per export subpath: the entry's emitted
- * declarations and every local declaration file they reach. comb ships TypeScript source, so the
- * declarations are emitted here from tsconfig.strict.json (isolatedDeclarations keeps them
- * faithful to the source). A change to a snapshot is an API change and belongs in a commit of
+ * declarations and every local declaration file they reach. The pack emits them under types/ from
+ * tsconfig.types.json, which extends tsconfig.strict.json; they are emitted here from the same
+ * tsconfig.strict.json (isolatedDeclarations keeps them faithful to the source). A change to a snapshot is an API change and belongs in a commit of
  * its own; `vitest -u` rewrites them.
  */
 import { spawnSync } from "node:child_process"
@@ -11,10 +11,13 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join, relative, resolve } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { type ExportTarget, sourceOf } from "./support/exports-of.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
 const TSC = join(dirname(createRequire(import.meta.url).resolve("typescript/package.json")), "bin", "tsc")
-const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { exports: Record<string, string> }
+const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+	exports: Record<string, ExportTarget>
+}
 
 let out: string
 
@@ -61,9 +64,9 @@ function surface(entry: string): string {
 	return parts.join("\n")
 }
 
-const entries = Object.entries(manifest.exports).filter(
-	([key, value]) => key !== "./package.json" && value.endsWith(".ts"),
-)
+const entries = Object.entries(manifest.exports)
+	.map(([key, target]) => [key, sourceOf(target)] as const)
+	.filter(([key, value]) => key !== "./package.json" && value.endsWith(".ts"))
 
 describe("public API declarations", () => {
 	it("covers every TypeScript export subpath", () => {

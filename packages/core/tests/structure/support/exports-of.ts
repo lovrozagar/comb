@@ -11,6 +11,12 @@ import { type ExportedDeclarations, Project, type SourceFile } from "ts-morph"
 
 export type Exports = Record<string, Record<string, string>>
 
+/** An exports entry: a file, or from 0.19 the declaration a consumer's tsc reads and the source that runs (K1 of r20) */
+export type ExportTarget = string | { types: string; default: string }
+
+/** The source file an exports entry runs, in a release before 0.19 or after */
+export const sourceOf = (target: ExportTarget): string => (typeof target === "string" ? target : target.default)
+
 /** The declaration file `source` emits, read in `into`, each source's once */
 function emitter(into: Project): (source: SourceFile) => SourceFile {
 	const emitted = new Map<string, SourceFile>()
@@ -38,7 +44,9 @@ function hashOf(name: string, declarations: ExportedDeclarations[], emit: Return
 }
 
 export function exportsOf(root: string): Exports {
-	const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { exports: Record<string, string> }
+	const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+		exports: Record<string, ExportTarget>
+	}
 	const project = new Project({
 		compilerOptions: { declaration: true, emitDeclarationOnly: true, noEmit: false, removeComments: true },
 		skipAddingFilesFromTsConfig: true,
@@ -47,6 +55,7 @@ export function exportsOf(root: string): Exports {
 	const emit = emitter(new Project({ skipAddingFilesFromTsConfig: true, useInMemoryFileSystem: true }))
 	return Object.fromEntries(
 		Object.entries(manifest.exports)
+			.map(([subpath, target]) => [subpath, sourceOf(target)] as const)
 			.filter(([subpath, file]) => subpath !== "./package.json" && file.endsWith(".ts"))
 			.map(([subpath, file]) => {
 				const exported = [...project.addSourceFileAtPath(join(root, file)).getExportedDeclarations()]

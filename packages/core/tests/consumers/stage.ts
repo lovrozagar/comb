@@ -59,13 +59,13 @@ export function ok(result: Run, what: string): string {
 	return result.output
 }
 
-/** comb packed into a fresh directory, and the tarball's path */
+/** comb packed by the release's own script (K1 of r20: the tarball it publishes), and the tarball's path */
 export function pack(): string {
-	const out = mkdtempSync(join(tmpdir(), "comb-pack-"))
-	ok(run(CORE, "bun", ["pm", "pack", "--destination", out]), "bun pm pack")
-	/* prepack copied these in for the tarball; the tree keeps none */
-	rmSync(join(CORE, "README.md"), { force: true })
-	rmSync(join(CORE, "LICENSE"), { force: true })
+	const script = join(ROOT, ".github/scripts/pack-for-publish.sh")
+	/* its stdout alone: bun echoes each pack script to stderr, after the directory the script prints */
+	const packed = spawnSync("bash", [script, CORE], { cwd: ROOT, encoding: "utf8" })
+	if (packed.status !== 0) throw new Error(`pack-for-publish exited ${packed.status}\n${packed.stdout}${packed.stderr}`)
+	const out = dirname(packed.stdout.trim())
 	const tarball = readdirSync(out).find((file) => file.endsWith(".tgz"))
 	if (tarball === undefined) throw new Error("bun pm pack wrote no tarball")
 	return join(out, tarball)
