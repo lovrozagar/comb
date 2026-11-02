@@ -1,6 +1,6 @@
 import { builtinModules } from "node:module"
 import manifest from "../package.json" with { type: "json" }
-import { srcPath } from "./scope.js"
+import { children, srcPath } from "./scope.js"
 
 /* comb ships TypeScript source, so every import in src/ is resolved by the consumer: a package
  * must be one they install (a dependency or a peer), a builtin carries the node: prefix that Bun,
@@ -32,7 +32,58 @@ const MESSAGES = {
 	escape: "an import stays inside packages/core/src",
 	nodePrefix: "import node builtins with the node: prefix",
 	shared: "shared roots (error, types, lru, id, states) import only each other",
+	/* K5 of r20 */
+	url: "import() takes a URL or a package name: Node reads a bare path as a URL (%20 decodes, # starts a fragment), so pass pathToFileURL(path).href",
 }
+
+/** Each name the file binds, with what it is bound to: a variable's init, a parameter's default, or null */
+function bindingsOf(program) {
+	const bindings = new Map()
+	const bind = (name, value) => bindings.set(name, [...(bindings.get(name) ?? []), value])
+	const visit = (node) => {
+		if (node.type === "VariableDeclarator" && node.id.type === "Identifier") bind(node.id.name, node.init)
+		for (const param of node.params ?? []) {
+			if (param.type === "Identifier") bind(param.name, null)
+			if (param.type === "AssignmentPattern" && param.left.type === "Identifier") bind(param.left.name, param.right)
+		}
+		for (const child of children(node)) visit(child)
+	}
+	visit(program)
+	return bindings
+}
+
+/* what import() may take: a literal, a URL's href, or a name every binding of which is one; an import binds a name to nothing it can read */
+function isSpecifier(node, bindings, seen = new Set()) {
+	switch (node?.type) {
+		case "Literal":
+			return typeof node.value === "string"
+		case "TemplateLiteral":
+			/* text after a URL stays in it: `${url.href}?mtime=…` */
+			return (
+				node.expressions.length === 0 ||
+				(node.quasis[0].value.raw === "" && isSpecifier(node.expressions[0], bindings, seen))
+			)
+		case "MemberExpression":
+			return !node.computed && node.property.name === "href"
+		case "TSAsExpression":
+		case "TSNonNullExpression":
+		case "TSSatisfiesExpression":
+			return isSpecifier(node.expression, bindings, seen)
+		case "Identifier":
+			return isBoundToSpecifier(node.name, bindings, seen)
+		default:
+			return false
+	}
+}
+
+function isBoundToSpecifier(name, bindings, seen) {
+	const bound = bindings.get(name) ?? []
+	if (bound.length === 0 || seen.has(name)) return false
+	const next = new Set([...seen, name])
+	return bound.every((value) => isSpecifier(value, bindings, next))
+}
+
+const programOf = (node) => (node.parent ? programOf(node.parent) : node)
 
 /** The src-relative path `spec` points at from `rel`, or null when it climbs out of src. */
 function resolveRel(rel, spec) {
@@ -93,6 +144,12 @@ export const rule = {
 			const problem = problemOf(rel, spec, node)
 			if (problem !== null) context.report({ message: problem, node })
 		}
+		let bindings
+		const checkImport = (node) => {
+			checkSource(node)
+			bindings ??= bindingsOf(programOf(node))
+			if (!isSpecifier(node.source, bindings)) context.report({ message: MESSAGES.url, node })
+		}
 		const checkBun = (node, identifier) => {
 			if (identifier?.type !== "Identifier" || identifier.name !== "Bun" || BUN_FILES.has(rel)) return
 			context.report({ message: MESSAGES.bun, node })
@@ -101,7 +158,7 @@ export const rule = {
 			ExportAllDeclaration: checkSource,
 			ExportNamedDeclaration: checkSource,
 			ImportDeclaration: checkSource,
-			ImportExpression: checkSource,
+			ImportExpression: checkImport,
 			MemberExpression: (node) => checkBun(node, node.object),
 			UnaryExpression: (node) => node.operator === "typeof" && checkBun(node, node.argument),
 		}

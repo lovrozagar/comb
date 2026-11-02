@@ -4,6 +4,7 @@
  */
 import { existsSync } from "node:fs"
 import { dirname, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 import * as z from "zod"
 import { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL } from "./config-schema.ts"
 import type { Run } from "./core/process.ts"
@@ -160,7 +161,7 @@ export async function loadConfig(configPath?: string, cwd: string = process.cwd(
 	if (!existsSync(resolvedPath)) throw new Error(`Config file not found: ${resolvedPath}`)
 
 	try {
-		const module = (await import(resolvedPath)) as { default?: unknown }
+		const module = (await import(pathToFileURL(resolvedPath).href)) as { default?: unknown }
 		return { config: await parseConfig(module.default ?? module), configDir: dirname(resolvedPath) }
 	} catch (error) {
 		if (!(error instanceof z.ZodError)) throw error

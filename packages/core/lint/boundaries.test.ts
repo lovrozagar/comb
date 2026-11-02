@@ -166,3 +166,52 @@ describe("comb/boundaries: Bun", () => {
 		])
 	})
 })
+
+/* K5 of r20: Node reads an import specifier as a URL, so a bare path with `%20` or `#` loads another file */
+const BARE_PATH =
+	"import() takes a URL or a package name: Node reads a bare path as a URL (%20 decodes, # starts a fragment), so pass pathToFileURL(path).href"
+
+describe("comb/boundaries: import() takes a URL or a package name", () => {
+	it("refuses a path, however it reaches import()", () => {
+		const fixture = {
+			"packages/core/src/migrate/a.ts":
+				'import { resolve } from "node:path"\nconst file = resolve("x.ts")\nexport const a = () => import(file)\n',
+			"packages/core/src/migrate/b.ts":
+				'import { resolve } from "node:path"\nexport const b = () => import(resolve("x.ts"))\n',
+			"packages/core/src/migrate/c.ts": "export const c = (path: string) => import(path)\n",
+			"packages/core/src/migrate/d.ts": "export const d = (dir: string) => import(`${dir}/x.ts`)\n",
+			"packages/core/src/migrate/e.ts": 'import { SPEC } from "./spec.ts"\nexport const e = () => import(SPEC)\n',
+			"packages/core/src/migrate/f.ts": 'export const f = (url: URL) => import(url["href"])\n',
+			"packages/core/src/migrate/g.ts": "const a = b\nconst b = a\nexport const g = () => import(a)\n",
+			"packages/core/src/migrate/h.ts": "// @ts-expect-error a number\nexport const h = () => import(1)\n",
+		}
+		expect(reportsOf(rule, fixture)).toEqual(
+			["a", "b", "c", "d", "e", "f", "g", "h"].map((name) => ({
+				file: `packages/core/src/migrate/${name}.ts`,
+				message: BARE_PATH,
+			})),
+		)
+	})
+
+	it("takes a literal, a URL's href, and a name or default bound to one", () => {
+		const fixture = {
+			"packages/core/src/migrate/a.ts": [
+				'import { pathToFileURL } from "node:url"',
+				'const PEER = "postgres"',
+				"export const a = (file: string) => import(pathToFileURL(file).href)",
+				"export const b = (url: URL) => import(url.href)",
+				"export const c = (file: string, at: number) => import(`${pathToFileURL(file).href}?mtime=${at}`)",
+				"export const d = (specifier: string = PEER) => import(specifier)",
+				"export async function e() {\n\tconst specifier: string = PEER\n\treturn import(specifier)\n}",
+				'export const f = () => import("./b.ts")',
+				"export const g = () => import(`postgres`)",
+				'const NAME = "zod"',
+				"export const h = () => import(NAME as string)",
+				"export const i = () => import(NAME!)",
+				"export const j = () => import(NAME satisfies string)",
+			].join("\n"),
+			"packages/core/src/migrate/b.ts": "export {}\n",
+		}
+		expect(reportsOf(rule, fixture)).toEqual([])
+	})
+})

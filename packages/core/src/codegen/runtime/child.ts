@@ -19,7 +19,10 @@ type Importer = (url: string) => Promise<unknown>
  * or a package, each as the file importing it resolves it) that does not load on its own is skipped,
  * and named only when a schema it might have held is then found nowhere.
  */
-async function readTables(tablesPath: string, importer: Importer = (url) => import(url)): Promise<Snapshot> {
+async function readTables(
+	tablesPath: string,
+	importer: Importer = (url) => import(new URL(url).href),
+): Promise<Snapshot> {
 	const graph = moduleGraph(tablesPath)
 	const [first, ...rest] = graph.files as [string, ...string[]]
 	const loaded: Loaded[] = [
