@@ -223,4 +223,30 @@ export const one = ${table}("one", { id: c.id("one"), v: c.json("v", anyValue, {
 			expect(v.safeParse(past).error?.issues[0]?.message).toBe("JSON exceeds 3 bytes when serialized")
 		}
 	})
+
+	/* a JSON null is 4 bytes and the limit holds it; a nullable column's null is no value, and the union's own member takes it */
+	it.each([
+		["sqlite", "sqliteTable"],
+		["postgres", "pgTable"],
+	] as const)(
+		"leaves a nullable column's null to the column on %s, however small the limit",
+		async (dialect, table) => {
+			const dtos = await generatedDtos(
+				`c11-null-${dialect}`,
+				`import * as z from "zod"
+export const anyValue = z.union([z.boolean(), z.number(), z.string(), z.null()])
+export const one = ${table}("one", {
+	id: c.id("one"),
+	nullable: c.json("nullable", anyValue, { maxBytes: 3 }),
+	required: c.json("required", anyValue, { maxBytes: 3 }).notNull(),
+})`,
+				{ dialect },
+			)
+			const shape = dtos["one"]?.["oneDtoCreateSchema"]?.shape
+			const [nullable, required] = [shape?.["nullable"], shape?.["required"]] as [z.ZodType, z.ZodType]
+			expect(nullable.safeParse(null).success).toBe(true)
+			expect(nullable.safeParse(false).error?.issues[0]?.message).toBe("JSON exceeds 3 bytes when serialized")
+			expect(required.safeParse(null).error?.issues[0]?.message).toBe("JSON exceeds 3 bytes when serialized")
+		},
+	)
 })
