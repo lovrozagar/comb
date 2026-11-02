@@ -34,11 +34,14 @@ class MissingPeerError extends Error {
 }
 
 /* `peer` itself did not resolve, as Node and Bun word it, or as a loader that wraps the resolver's error (vitest's,
-   vite-node's) passes it on as the cause; a module that loaded and failed inside is no missing peer */
-const isMissing = (error: unknown, peer: string): boolean =>
-	error instanceof Error &&
-	([`Cannot find package '${peer}'`, `Cannot find module '${peer}'`].some((said) => error.message.includes(said)) ||
-		isMissing(error.cause, peer))
+   vite-node's) passes it on as the cause; a module that loaded and failed inside is no missing peer. Bun 1.3 throws
+   the resolver's error as a ResolveMessage that is no Error, so any object's message counts */
+function isMissing(error: unknown, peer: string): boolean {
+	if (typeof error !== "object" || error === null) return false
+	const { cause, message } = error as { cause?: unknown; message?: unknown }
+	const said = [`Cannot find package '${peer}'`, `Cannot find module '${peer}'`]
+	return (typeof message === "string" && said.some((text) => message.includes(text))) || isMissing(cause, peer)
+}
 
 /* the failure of loading `peer`, as comb reports it: the refusal for a missing peer, any other as it is */
 function refusalOf(error: unknown, peer: OptionalPeer, why: string): unknown {

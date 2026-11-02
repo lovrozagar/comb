@@ -37,6 +37,19 @@ describe("optionalPeer", () => {
 		await expect(bun).rejects.toThrow("comb needs ts-morph (>=28.0.0 <29) to read; install ts-morph")
 	})
 
+	/* bun 1.3 throws a failed import as a ResolveMessage that is no Error (bun 1.4's is): CI's consumers, on 1.3.11 */
+	it("refuses a missing peer bun 1.3 throws as a ResolveMessage, which is no Error", async () => {
+		class ResolveMessage {
+			readonly code = "ERR_MODULE_NOT_FOUND"
+			readonly name = "ResolveMessage"
+			constructor(readonly message: string) {}
+		}
+		const cause = new ResolveMessage("Cannot find package 'wrangler' from '/p/src/cli/migrate-d1.ts'")
+		const bun = optionalPeer("wrangler", "run D1", () => Promise.reject(cause))
+		await expect(bun).rejects.toThrow("comb needs wrangler (>=4.147.0 <5) to run D1; ")
+		await expect(bun).rejects.toMatchObject({ cause, name: "MissingPeerError" })
+	})
+
 	it("refuses a missing peer a loader passes on as the cause of its own error", async () => {
 		const wrapped = new Error("there was an error when mocking a module", { cause: notFound("libpg-query") })
 		await expect(optionalPeer("libpg-query", "parse", () => Promise.reject(wrapped))).rejects.toThrow(
