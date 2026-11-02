@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config"
 import { LOAD_TIMEOUT_MS } from "./src/codegen/runtime/load.ts"
 import { OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "./tests/support/off-utc.ts"
+import { MAX_WORKERS } from "./tests/support/workers.ts"
 
 /* every test run is in UTC, as CI's runners are, so a local stamp vouches for what CI sees; the
    workers forked after this file is read inherit it (tests/structure/workflows.test.ts holds it) */
@@ -17,6 +18,7 @@ const CODEGEN_BUDGET_MS = 3 * (LOAD_TIMEOUT_MS + 10_000)
 
 export default defineConfig({
 	test: {
+		maxWorkers: MAX_WORKERS,
 		projects: [
 			{
 				test: {

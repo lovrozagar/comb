@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config"
+import { MAX_WORKERS } from "./tests/support/workers.ts"
 
 /* every test run is in UTC, as CI's runners are, so a local stamp vouches for what CI sees; the
    workers forked after this file is read inherit it (tests/structure/workflows.test.ts holds it) */
@@ -10,6 +11,7 @@ process.env.TZ = "UTC"
  * time. */
 export default defineConfig({
 	test: {
+		maxWorkers: MAX_WORKERS,
 		fileParallelism: false,
 		hookTimeout: 900_000,
 		include: ["tests/consumers/**/*.consumer.test.ts"],

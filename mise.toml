@@ -1,0 +1,4 @@
+# The bun this repo runs is package.json's packageManager pin, the one CI installs (setup-bun reads it by file).
+# mise reads it from there too, so no version is named here.
+[settings]
+idiomatic_version_file_enable_tools = ["bun"]

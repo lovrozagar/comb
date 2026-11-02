@@ -5,10 +5,12 @@
  */
 import { execFileSync } from "node:child_process"
 import { globSync, readdirSync, readFileSync } from "node:fs"
+import { availableParallelism } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { DATE_KEYS, OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "../support/off-utc.ts"
 import { POSIX_EXCLUDE, POSIX_INTEGRATION, POSIX_UNIT } from "../support/posix.ts"
+import { workers } from "../support/workers.ts"
 
 const ROOT = join(import.meta.dirname, "../../../..")
 const WORKFLOWS = join(ROOT, ".github/workflows")
@@ -290,5 +292,47 @@ describe("the pass of the Date-key suites off UTC", () => {
 		expect(config.match(/env: \{ TZ: OFF_UTC_ZONE \}/g)).toHaveLength(2)
 		expect(config).toContain("include: OFF_UTC_UNIT")
 		expect(config).toContain("include: OFF_UTC_INTEGRATION")
+	})
+})
+
+/*
+ * CI installs the bun package.json's packageManager pins, and verify refuses another (scripts/verify.ts): a stamp
+ * from 1.4.4 passed a pack script and a failed import that 1.3.11 fails. The pin is the one source: every setup-bun
+ * step reads it by file, and mise reads it here through mise.toml, which names no version of its own.
+ */
+describe("the bun every run uses", () => {
+	it("is package.json's packageManager pin, which every setup-bun step reads by file and mise reads here", () => {
+		const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { packageManager?: string }
+		expect(pkg.packageManager).toMatch(/^bun@\d+\.\d+\.\d+$/)
+		for (const name of readdirSync(WORKFLOWS).filter((file) => /\.ya?ml$/.test(file))) {
+			const yaml = readFileSync(join(WORKFLOWS, name), "utf8")
+			expect(yaml, name).not.toMatch(/BUN_VERSION|bun-version:/)
+			const steps = yaml.match(/uses: oven-sh\/setup-bun@.*/g) ?? []
+			const byFile = yaml.match(/uses: oven-sh\/setup-bun@.*\n\s+with:\n\s+bun-version-file: package\.json\n/g) ?? []
+			expect(byFile.length, name).toBe(steps.length)
+		}
+		const mise = readFileSync(join(ROOT, "mise.toml"), "utf8")
+		expect(mise).toMatch(/^idiomatic_version_file_enable_tools = \["bun"\]$/m)
+		expect(mise).not.toMatch(/^\[tools\]|^bun\b/m)
+	})
+})
+
+/* A local run leaves the machine usable: vitest takes half its cores, at least one; CI's runner is the job's alone */
+describe("the vitest workers a run uses", () => {
+	it("are half the cores off CI, at least one, and vitest's own default on CI", () => {
+		expect(workers({}, 16)).toBe(8)
+		expect(workers({ CI: "false" }, 7)).toBe(3)
+		expect(workers({}, 1)).toBe(1)
+		expect(workers({ CI: "true" }, 16)).toBeUndefined()
+	})
+
+	it("are capped so in every vitest config", async () => {
+		const CORE = join(ROOT, "packages/core")
+		const configs = readdirSync(CORE).filter((name) => /^vitest(\..+)?\.config\.ts$/.test(name))
+		expect(configs.length).toBeGreaterThanOrEqual(4)
+		for (const name of configs) {
+			const config = ((await import(join(CORE, name))) as { default: { test?: { maxWorkers?: number } } }).default
+			expect(config.test?.maxWorkers, name).toBe(workers(process.env, availableParallelism()))
+		}
 	})
 })
