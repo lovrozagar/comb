@@ -203,11 +203,10 @@ describe("comb migrate on D1 --local: a pre-recorded hash is an intent until wra
 
 	/* miniflare's local D1 takes one writer: of two applies that overlap, the one that loses fails on
 	   SQLITE_BUSY or on the table the other made, as wrangler reads what is pending before it writes;
-	   two that do not overlap both apply, the second finding nothing pending */
+	   two that do not overlap both apply, and both can lose, workerd failing to start on the lock */
 	it("of two applies at once, each applies or fails as a refused run, and a rerun converges with no intent left", async () => {
 		const dir = project(INIT)
 		const both = await Promise.all([0, 1].map(() => combProcess(dir, ["migrate", "apply", "core", "--local"])))
-		expect(both.map((ran) => ran.code)).toContain(0)
 		for (const ran of both.filter((each) => each.code !== 0)) {
 			expect(ran.code).toBe(1)
 			expect(ran.stderr.trimStart()).toMatch(/^wrangler (?:d1 migrations apply )?failed/)
