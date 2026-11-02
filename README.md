@@ -1048,6 +1048,8 @@ What changes for a project on 0.18. Before deploying it:
    - `drizzle-orm` and `drizzle-kit` admit `1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0`. 0.18's `>=1.0.0-rc.4 <2` admitted the tagged 1.0.0-rc.5, drizzle's `rc` tag, which failed strict `tsc` in comb's D1 sharding types; 0.19 type-checks on rc.4 and rc.5 both. It also admitted drizzle's `1.0.0-rc.N-<hash>` branch builds, which rank above the tagged rc, and the README's install line resolved drizzle-orm's `latest` tag, 0.x, outside the range. **Fix:** install a tagged release inside the range: `drizzle-orm@1.0.0-rc.4` or `@1.0.0-rc.5`, and `drizzle-kit` at the same version where installed.
    - `@cloudflare/workers-types` starts at `5.20261001.1`, the floor wrangler 4.147.0, comb's wrangler floor, peers on; 0.18's floor of `5.20260815.1` could not install beside it. **Fix:** move to `5.20261001.1` or later.
 
+4. **Rename a migrate config by a retired name.** comb reads only `comb.migrate.config.ts` and `comb.migrate.config.js`. 0.18 also read `db-migration.config.ts`, `migration.config.ts` and their `.js` twins, names other migration tools use, and ran such a file as code. A project with one of those and no comb config now fails every `comb migrate` command without running it, naming the file. **Fix:** rename it to `comb.migrate.config.ts` if it is comb's; if it is another tool's, add a `comb.migrate.config.ts` beside it.
+
 ## Upgrading to 0.18
 
 What changes for a project on 0.17. Before deploying it:

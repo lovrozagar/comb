@@ -34,7 +34,12 @@ export type LoadedConfig = {
     config: MigrationConfig;
     configDir: string;
 };
-/** The migrate config file in `cwd`, by the names comb looks for in order; undefined when there is none */
+/**
+ * The migrate config file in `cwd`, by the names comb looks for in order; undefined when there is
+ * none. A file by a name comb read before 0.19, with no comb config beside it, is refused unrun:
+ * without a config comb reads the database name as a D1 binding, so ignoring it could migrate
+ * another database.
+ */
 export declare function findConfigFile(cwd: string): string | undefined;
 /** Load the migrate config at `configPath`, or the first one `findConfigFile` sees in `cwd` */
 export declare function loadConfig(configPath?: string, cwd?: string): Promise<LoadedConfig>;

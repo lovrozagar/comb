@@ -355,7 +355,7 @@ describe("findConfigFile and loadConfig", () => {
 				`Config file not found: ${join(dir, "nope.config.ts")}`,
 			)
 			await expect(loadConfig(undefined, dir)).rejects.toThrow(
-				"No config file found. Create one of: comb.migrate.config.ts",
+				"No config file found. Create comb.migrate.config.ts (or comb.migrate.config.js)",
 			)
 		} finally {
 			rmSync(dir, { force: true, recursive: true })

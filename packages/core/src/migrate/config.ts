@@ -133,9 +133,10 @@ export async function parseConfig(input: unknown): Promise<MigrationConfig> {
    LOAD CONFIG
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const CONFIG_FILE_NAMES = [
-	"comb.migrate.config.ts",
-	"comb.migrate.config.js",
+const CONFIG_FILE_NAMES = ["comb.migrate.config.ts", "comb.migrate.config.js"]
+
+/* names comb read before 0.19, which other migration tools use too: refused, never run (K6 of r20) */
+const RETIRED_FILE_NAMES = [
 	"db-migration.config.ts",
 	"db-migration.config.js",
 	"migration.config.ts",
@@ -147,16 +148,28 @@ export type LoadedConfig = {
 	configDir: string
 }
 
-/** The migrate config file in `cwd`, by the names comb looks for in order; undefined when there is none */
+/**
+ * The migrate config file in `cwd`, by the names comb looks for in order; undefined when there is
+ * none. A file by a name comb read before 0.19, with no comb config beside it, is refused unrun:
+ * without a config comb reads the database name as a D1 binding, so ignoring it could migrate
+ * another database.
+ */
 export function findConfigFile(cwd: string): string | undefined {
-	return CONFIG_FILE_NAMES.map((name) => resolve(cwd, name)).find((candidate) => existsSync(candidate))
+	const found = CONFIG_FILE_NAMES.map((name) => resolve(cwd, name)).find((candidate) => existsSync(candidate))
+	if (found !== undefined) return found
+	const retired = RETIRED_FILE_NAMES.find((name) => existsSync(resolve(cwd, name)))
+	if (retired !== undefined)
+		throw new Error(
+			`comb no longer reads ${retired}, and did not run it: rename it to comb.migrate.config.ts if it is comb's migrate config, or add a comb.migrate.config.ts beside it if it is another tool's`,
+		)
+	return undefined
 }
 
 /** Load the migrate config at `configPath`, or the first one `findConfigFile` sees in `cwd` */
 export async function loadConfig(configPath?: string, cwd: string = process.cwd()): Promise<LoadedConfig> {
 	const resolvedPath = configPath === undefined ? findConfigFile(cwd) : resolve(cwd, configPath)
 	if (resolvedPath === undefined) {
-		throw new Error(`No config file found. Create one of: ${CONFIG_FILE_NAMES.join(", ")}`)
+		throw new Error("No config file found. Create comb.migrate.config.ts (or comb.migrate.config.js)")
 	}
 	if (!existsSync(resolvedPath)) throw new Error(`Config file not found: ${resolvedPath}`)
 
