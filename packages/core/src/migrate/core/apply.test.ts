@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { describe, expect, it, vi } from "vitest"
+import { beforeAll, describe, expect, it, vi } from "vitest"
 import { BREAKS_CHECK, IGNORE_CHECKS } from "../__fixtures__/pragma-scope.ts"
 import { createBunSqliteProvider } from "../drivers/bun-sqlite.ts"
 import { createLibsqlProvider } from "../drivers/sqlite.ts"
@@ -9,6 +9,7 @@ import { splitSqlStatements } from "./sql-scan.ts"
 import { applyEach, applyRecorded, checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./apply.ts"
 import type { Connection } from "../types.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
+import { lostRequest } from "../__fixtures__/libsql-stubs.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
 import { Refused } from "./refused.ts"
 
@@ -246,18 +247,18 @@ describe("applyEach on a libsql file: a file's pragmas end with the file (S1 of 
 const reset = () =>
 	new TypeError("fetch failed", { cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }) })
 
-/** `conn` once `lost` names a batch: that batch commits, then every call fails as a lost connection */
-function losing(conn: Connection, lost: string): Connection {
+/** `conn` once `lost` names a batch: that batch commits, then every call fails with `cut`, a lost connection */
+function losing(conn: Connection, lost: string, cut: () => unknown = reset): Connection {
 	let down = false
 	return {
 		...conn,
 		batch: async (statements) => {
-			if (down) throw reset()
+			if (down) throw cut()
 			await conn.batch(statements)
 			down = statements.some(({ params }) => params?.includes(lost) === true)
-			if (down) throw reset()
+			if (down) throw cut()
 		},
-		execute: async (sql, params) => (down ? Promise.reject(reset()) : conn.execute(sql, params)),
+		execute: async (sql, params) => (down ? Promise.reject(cut()) : conn.execute(sql, params)),
 	}
 }
 
@@ -320,5 +321,28 @@ describe("applyEach on a batch whose answer is lost", () => {
 			["0001_t1.sql", "0002_t2.sql", "0003_t3.sql"],
 			[],
 		])
+	})
+})
+
+describe("applyEach on a batch whose answer is lost over a WebSocket", () => {
+	/* S3 of r21: the real client's error for a WebSocket closed mid-request, which carries no network code */
+	let closed: unknown
+	beforeAll(async () => {
+		closed = await lostRequest("ws", "upgraded, then closed")
+	})
+
+	it("a committed batch whose WebSocket closed is unknown, not pending, on libsql over ws://", async () => {
+		const conn = libsqlConnection()
+		await ensureMigrationsTable(conn)
+		const failure = (await applyEach(kept(losing(conn, "0002_t2.sql", () => closed)), LOST_FILES, {
+			print: () => {},
+			retry: NO_WAIT,
+		}).catch((error: unknown) => error)) as Refused
+		expect({ applied: failure.applied, pending: failure.pending, unknown: failure.unknown }).toEqual({
+			applied: ["0001_t1.sql"],
+			pending: ["0003_t3.sql"],
+			unknown: ["0002_t2.sql"],
+		})
+		expect(failure.message).toMatch(/^0002_t2\.sql may have committed: its batch failed with HRANA_WEBSOCKET_ERROR: /)
 	})
 })

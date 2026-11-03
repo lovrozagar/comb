@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { closedClient, lostRequest } from "../__fixtures__/libsql-stubs.ts"
 import { isTransient } from "./transient.ts"
 
 /** An error carrying the HTTP status `code`, as hrana's HttpServerError does */
@@ -38,5 +39,31 @@ describe("isTransient", () => {
 		["null", null],
 	])("holds %s not transient", (_, error) => {
 		expect(isTransient(error)).toBe(false)
+	})
+})
+
+/*
+ * S3 of r21: the errors the real @libsql/client throws for a lost connection, on each transport,
+ * from local servers that lose the request as a network does; a client upgrade that renames a
+ * code fails here
+ */
+describe("isTransient on @libsql/client's own errors", () => {
+	it.each([
+		["http", "refused"],
+		["http", "closed"],
+		["http", 502],
+		["http", 503],
+		["http", 429],
+		["ws", "refused"],
+		["ws", "closed"],
+		["ws", "upgraded, then closed"],
+	] as const)("holds a %s:// request %s transient", async (scheme, answer) => {
+		expect(isTransient(await lostRequest(scheme, answer))).toBe(true)
+	})
+
+	it("holds a request the server refuses, and one on a client comb closed, not transient", async () => {
+		expect(isTransient(await lostRequest("http", 400))).toBe(false)
+		expect(isTransient(await closedClient("http"))).toBe(false)
+		expect(isTransient(await closedClient("ws"))).toBe(false)
 	})
 })
