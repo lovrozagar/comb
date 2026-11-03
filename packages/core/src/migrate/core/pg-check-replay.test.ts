@@ -52,7 +52,7 @@ function fake(fail?: (query: string) => Error | undefined) {
 /** A load of postgres.js where it is not installed */
 const noPeer = async (): Promise<never> => {
 	throw new Error(
-		"comb needs postgres (>=3.4.9 <4) to replay the history and the pending files on devUrl in a check; install postgres",
+		`comb needs postgres (>=3.4.9 <4) to replay the history and the pending files on devUrl in a check; install "postgres@>=3.4.9 <4"`,
 	)
 }
 
@@ -84,7 +84,7 @@ describe("replayPending (P13 of r19)", () => {
 	it("says it replayed nothing without the postgres package, naming why", async () => {
 		const { out } = await replayed("CREATE TABLE t (a int);", { load: noPeer })
 		expect(out).toEqual([
-			"Check did not replay the pending files on devUrl: comb needs postgres (>=3.4.9 <4) to replay the history and the pending files on devUrl in a check; install postgres",
+			`Check did not replay the pending files on devUrl: comb needs postgres (>=3.4.9 <4) to replay the history and the pending files on devUrl in a check; install "postgres@>=3.4.9 <4"`,
 		])
 	})
 

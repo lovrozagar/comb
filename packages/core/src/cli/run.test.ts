@@ -1,5 +1,5 @@
 import { fixtureRoot } from "../codegen/__fixtures__/temp.ts"
-import { readFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { makeIo, projects, writeTables } from "./__fixtures__/io.ts"
@@ -145,6 +145,7 @@ describe("runCli: failures", () => {
 	it("reports a failure that is not a CliError as its message, with exit code 1", async () => {
 		const { runCli } = await import("./run.ts")
 		const dir = project()
+		writeFileSync(join(dir, "drizzle.config.ts"), "export default {}\n")
 		const io = makeIo(dir, throwsText)
 		expect(await runCli(["migrate", "diff"], io)).toBe(1)
 		expect(io.errors).toEqual(["spawn exploded"])

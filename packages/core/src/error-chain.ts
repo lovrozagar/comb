@@ -38,4 +38,11 @@ function errorTexts(error: unknown): string[] {
 	})
 }
 
-export { causeChain, errorTexts, innermostFirst }
+/** `error`'s message and each under it on `.cause`, as `fetch failed: read ECONNRESET` */
+const chainText = (error: unknown): string =>
+	causeChain(error)
+		.map((link) => (link as { message?: unknown }).message)
+		.filter((message): message is string => typeof message === "string" && message !== "")
+		.join(": ")
+
+export { causeChain, chainText, errorTexts, innermostFirst }

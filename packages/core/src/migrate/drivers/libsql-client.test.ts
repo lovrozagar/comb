@@ -14,7 +14,7 @@ describe("libsql", () => {
 		try {
 			const { libsql: missing } = await import("./libsql-client.ts")
 			await expect(missing()).rejects.toThrow(
-				"comb needs @libsql/client (>=0.17.4 <0.18) to open a libsql or Turso database; install @libsql/client",
+				`comb needs @libsql/client (>=0.17.4 <0.18) to open a libsql or Turso database; install "@libsql/client@>=0.17.4 <0.18"`,
 			)
 		} finally {
 			vi.doUnmock("@libsql/client")

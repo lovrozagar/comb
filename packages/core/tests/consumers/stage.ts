@@ -44,11 +44,14 @@ export const SUBPATHS: string[] = Object.keys(manifest.exports)
 
 export type Run = { output: string; status: number }
 
-/** `cmd args` in `cwd`, with a consumer's environment: none of the runner's vitest variables */
-export function run(cwd: string, cmd: string, args: readonly string[]): Run {
-	const env = Object.fromEntries(
-		Object.entries(process.env).filter(([name]) => name !== "NODE_ENV" && !name.startsWith("VITEST")),
-	)
+/** `cmd args` in `cwd`, with a consumer's environment: none of the runner's vitest variables, `set` over it */
+export function run(cwd: string, cmd: string, args: readonly string[], set: Record<string, string> = {}): Run {
+	const env = {
+		...Object.fromEntries(
+			Object.entries(process.env).filter(([name]) => name !== "NODE_ENV" && !name.startsWith("VITEST")),
+		),
+		...set,
+	}
 	const result = spawnSync(cmd, args, { cwd, encoding: "utf8", env, maxBuffer: 64 * 1024 * 1024 })
 	return { output: `${result.stdout}${result.stderr}`, status: result.status ?? 1 }
 }

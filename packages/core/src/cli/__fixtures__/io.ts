@@ -24,6 +24,9 @@ const replayPgHistory = async (_target: unknown, { targetUser }: { targetUser: s
 	user: targetUser,
 })
 
+/* every optional peer is comb's own devDependency, found as comb resolves it, wherever the project is */
+const locatePeer = (peer: string): string => import.meta.resolve(peer)
+
 /* nor does the dev database a non-public schema is created on (P12): Atlas, faked, needs none */
 const readyPgDev = async (): Promise<void> => undefined
 
@@ -35,6 +38,7 @@ export function makeIo(cwd: string, run?: Run, confirm?: CliIo["confirm"]): Test
 		cwd,
 		err: (line) => errors.push(line),
 		errors,
+		locatePeer,
 		out: (line) => outputs.push(line),
 		outputs,
 		readPgObjects,

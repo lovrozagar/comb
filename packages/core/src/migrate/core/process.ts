@@ -4,7 +4,7 @@
  */
 import { spawnSync } from "node:child_process"
 import { constants, devNull } from "node:os"
-import { missingPeer, type OptionalPeer } from "./optional-peer.ts"
+import { DIFF, missingPeer, type Need, WRANGLER } from "./optional-peer.ts"
 
 export type RunResult = { code: number; stdout: string; stderr: string }
 
@@ -46,13 +46,10 @@ function childEnv(env: RunOptions["env"]): NodeJS.ProcessEnv {
 }
 
 // lookup-table: the optional peers comb runs as a command, and what it runs each for
-const RUNS: Readonly<Record<string, readonly [OptionalPeer, string]>> = {
-	"drizzle-kit": ["drizzle-kit", "export the drizzle schema for comb migrate diff"],
-	wrangler: ["wrangler", "migrate a D1 database"],
-}
+const RUNS: Readonly<Record<string, Need>> = { "drizzle-kit": DIFF, wrangler: WRANGLER }
 
 /** What to do when the package `name` cannot start, for a peer comb runs; "" otherwise */
-const installHint = (name: string): string => (Object.hasOwn(RUNS, name) ? `; ${missingPeer(...RUNS[name]!)}` : "")
+const installHint = (name: string): string => (Object.hasOwn(RUNS, name) ? `; ${missingPeer(RUNS[name]!)}` : "")
 
 /** How a process the OS could not run (or had to stop) is reported: POSIX shell codes where they exist. */
 function startFailure(cmd: string, error: NodeJS.ErrnoException, options: RunOptions): RunResult {

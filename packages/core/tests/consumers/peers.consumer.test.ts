@@ -4,11 +4,12 @@
  * node_modules); a Vite build and a wrangler bundle carry no tooling; tsc compiles every subpath
  * under strict flags in a bundler project and in a nodenext project.
  */
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { Miniflare } from "miniflare"
 import semver from "semver"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import { PEERS } from "../../src/migrate/core/optional-peer.ts"
 import { APP } from "./fixture.ts"
 import {
 	admittedOf,
@@ -242,27 +243,101 @@ export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }), ti
 	})
 	afterAll(() => app?.dispose())
 
-	it.each(CASES)("comb $argv.0 $argv.1 without $peer names it, its range and the install", ({ argv, config, peer }) => {
-		const dir = join(app.dir, "cases", peer.replace(/\W+/g, "-"))
-		const files: Record<string, string> = {
-			...PROJECT,
-			...(config === undefined ? {} : { "comb.migrate.config.ts": config }),
-		}
+	/** `files` written under `dir` */
+	const write = (dir: string, files: Record<string, string>) => {
 		for (const [file, text] of Object.entries(files)) {
 			mkdirSync(dirname(join(dir, file)), { recursive: true })
 			writeFileSync(join(dir, file), text)
 		}
+	}
+
+	it.each(CASES)("comb $argv.0 $argv.1 without $peer names it, its range and the install", ({ argv, config, peer }) => {
+		const dir = join(app.dir, "cases", peer.replace(/\W+/g, "-"))
+		write(dir, { ...PROJECT, ...(config === undefined ? {} : { "comb.migrate.config.ts": config }) })
 		ok(run(dir, "atlas", ["migrate", "hash", "--dir", `file://${join(dir, "m")}`]), "atlas migrate hash")
 		const result = run(dir, join(app.dir, "node_modules", ".bin", "comb"), argv)
 		expect(result.status).not.toBe(0)
 		expect(result.output).toContain(`comb needs ${peer} (${peerRange(peer)}) to `)
-		expect(result.output).toContain(`install ${peer}`)
+		expect(result.output).toContain(`install "${peer}@${peerRange(peer)}"`)
 		/* no resolver text from comb's own source, and no blame on the tables module */
 		expect(result.output).not.toContain("@lovrozagar/comb/src/")
 		expect(result.output).not.toContain("could not load")
 		/* a refusal under --json is the one JSON object stdout promises (K5 of r19) */
 		if (argv.includes("--json"))
 			expect(result.output).toContain(`{"applied":[],"database":"core","pending":[],"refused":["comb needs ${peer} (`)
+	})
+
+	/* K1, P8 and S2 of r21: every (command, provider) PEERS gives peers to, with each absent and the endpoint dead */
+	const DEAD = "postgres://u:p@127.0.0.1:9/core?sslmode=disable"
+	// lookup-table: a provider of each type whose endpoint no call reaches
+	const PROVIDERS: Record<string, string> = {
+		"bun-sqlite": `{ type: "bun-sqlite", path: "x.db" }`,
+		d1: `{ type: "d1", databaseName: "core" }`,
+		libsql: `{ type: "libsql", url: "http://127.0.0.1:9" }`,
+		postgres: `{ type: "postgres", url: "${DEAD}", devUrl: "${DEAD}" }`,
+		turso: `{ type: "turso", apiToken: "tok", databaseName: "core", org: "org" }`,
+	}
+	const CELLS = Object.entries(PEERS).flatMap(([provider, commands]) =>
+		Object.entries(commands).flatMap(([command, needs = []]) => {
+			const required = needs.filter((need) => need.optional !== true)
+			return required.length === 0 ? [] : [{ command, needs: required, provider }]
+		}),
+	)
+	/* what records a call: atlas and wrangler on PATH, and fetch inside comb's process, each appending to the log */
+	const RECORDERS = {
+		"bin/atlas": `#!/bin/sh\necho "atlas $*" >> "$COMB_CALLS"\nexit 1\n`,
+		"bin/wrangler": `#!/bin/sh\necho "wrangler $*" >> "$COMB_CALLS"\nexit 1\n`,
+		"record-fetch.ts": `import { appendFileSync } from "node:fs"
+globalThis.fetch = (async (input: string | URL | Request) => {
+	appendFileSync(process.env["COMB_CALLS"] as string, \`fetch \${input instanceof Request ? input.url : String(input)}\\n\`)
+	throw new TypeError("fetch failed")
+}) as typeof fetch
+`,
+	}
+	/** comb migrate `command` core in the cell for `provider`, as a project would run it, and every call it made */
+	const runCell = (provider: string, command: string) => {
+		const dir = join(app.dir, "cells", `${provider}-${command}`)
+		write(dir, { ...PROJECT, ...RECORDERS, "comb.migrate.config.ts": configOf(PROVIDERS[provider] as string) })
+		for (const bin of ["atlas", "wrangler"]) chmodSync(join(dir, "bin", bin), 0o755)
+		const calls = join(dir, "calls.log")
+		writeFileSync(calls, "")
+		const comb = join(app.dir, "node_modules", ".bin", "comb")
+		const result = run(dir, "bun", ["--preload", "./record-fetch.ts", comb, "migrate", command, "core"], {
+			COMB_CALLS: calls,
+			PATH: `${join(dir, "bin")}:${process.env["PATH"] ?? ""}`,
+		})
+		return { calls: readFileSync(calls, "utf8"), result }
+	}
+
+	it.each(CELLS)(
+		"comb migrate $command on $provider names every peer it needs before any I/O",
+		({ command, needs, provider }) => {
+			const { calls, result } = runCell(provider, command)
+			expect(result.status).not.toBe(0)
+			const each = needs.map(({ peer, why }) => `${peer} (${peerRange(peer)}) to ${why}`)
+			expect(result.output).toContain(`comb needs ${each.join(", and ")}; `)
+			expect(result.output).toContain(`install ${needs.map(({ peer }) => `"${peer}@${peerRange(peer)}"`).join(" ")}`)
+			/* no connect, fetch, spawn or Atlas call: the Turso create and token mint among them */
+			expect(calls).toBe("")
+			expect(result.output).not.toMatch(/ECONNREFUSED|dial tcp|fetch failed|Script not found/)
+		},
+	)
+
+	/* K2 of r21: `bun add <peer>` took a major outside comb's range; the refusal's own words land inside it */
+	it.each([
+		["postgres", "baseline"],
+		["turso", "check"],
+	])("installs inside comb's range by the words the %s %s refusal gives", (provider, command) => {
+		const { result } = runCell(provider, command)
+		const words = /; install ((?:"[^"]+" ?)+)/.exec(result.output)?.[1] ?? ""
+		const dir = join(app.dir, "installs", provider)
+		write(dir, { "package.json": JSON.stringify({ name: "install", private: true }) })
+		ok(run(dir, "sh", ["-c", `bun add ${words}`]), `bun add ${words}`)
+		/* each word is "<peer>@<range>", and no range holds an @ */
+		const installed = [...words.matchAll(/"([^"]+)"/g)].map(([, word]) => (word as string).replace(/@[^@]*$/, ""))
+		expect(installed.length).toBeGreaterThan(0)
+		for (const peer of installed)
+			expect(semver.satisfies(installedVersion(dir, peer), peerRange(peer)), peer).toBe(true)
 	})
 })
 

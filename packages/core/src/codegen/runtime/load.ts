@@ -87,7 +87,9 @@ type LoadOptions = {
 function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
 	/* the child reads the module's imports with ts-morph, an optional peer (under node its hooks load it
 	   first): resolved here, so a project without it is told so, not that its tables file failed (K7 of r20) */
-	resolvePeer("ts-morph", "read the modules a tables file imports", () => import.meta.resolve("ts-morph"))
+	resolvePeer({ peer: "ts-morph", why: "read the modules a tables file imports" }, () =>
+		import.meta.resolve("ts-morph"),
+	)
 	const runtime = options.runtime ?? (process.versions["bun"] === undefined ? "node" : "bun")
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-codegen-"))
 	try {

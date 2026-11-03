@@ -156,6 +156,48 @@ describe("createTursoProvider across a command's connections", () => {
 	})
 })
 
+/* S2 of r21: the client loads before Turso's API is called, so a project without it creates and mints nothing */
+describe("createTursoProvider before its API", () => {
+	const turso = { apiToken: "tok", databaseName: "core", group: "default", org: "acme", type: "turso" } as const
+
+	it.each([true, false])("makes no call without @libsql/client (readonly %s)", async (readonly) => {
+		vi.doMock("@libsql/client", () => {
+			throw new Error("Cannot find package '@libsql/client'")
+		})
+		vi.resetModules()
+		try {
+			const { createTursoProvider: missing } = await import("./sqlite.ts")
+			const api = fakeTurso([[404, {}], DB_INFO, TOKEN])
+			const connecting = missing(turso, { fetch: api.fetch }).connect({
+				migrationsDir: "m",
+				name: "core",
+				provider: turso,
+				readonly,
+			})
+			await expect(connecting).rejects.toMatchObject({ name: "MissingPeerError" })
+			expect(api.requests).toEqual([])
+		} finally {
+			vi.doUnmock("@libsql/client")
+		}
+	})
+
+	it("names the cause of an API it cannot reach", async () => {
+		const refused = new TypeError("fetch failed", {
+			cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), { code: "ECONNREFUSED" }),
+		})
+		const down = (() => Promise.reject(refused)) as unknown as typeof fetch
+		const connecting = createTursoProvider(turso, { fetch: down }).connect({
+			migrationsDir: "m",
+			name: "core",
+			provider: turso,
+		})
+		await expect(connecting).rejects.toThrow(
+			'comb could not reach the Turso API for "acme/core": fetch failed: connect ECONNREFUSED 127.0.0.1:443',
+		)
+		await expect(connecting).rejects.toMatchObject({ cause: refused })
+	})
+})
+
 /* introspection is SQL sqlite_master answers, so it runs on SQLite */
 async function withSchema<T>(ddl: string, read: (conn: LibsqlConnection) => Promise<T>): Promise<T> {
 	const conn = libsqlConnection()

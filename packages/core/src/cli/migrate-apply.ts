@@ -25,6 +25,7 @@ import {
 	resolveLegacy,
 } from "../migrate/core/history-match.ts"
 import { migrationHashes } from "../migrate/core/parse.ts"
+import { requirePeers } from "../migrate/core/optional-peer.ts"
 import { planApply, refuseSkipping } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import type { Connection } from "../migrate/types.ts"
@@ -260,6 +261,9 @@ async function runMode(request: Request): Promise<MigrateOutcome> {
 		env: option(args, "env"),
 		mode: "apply",
 	})
+	/* every peer the command needs, before it connects, fetches, spawns or asks Atlas anything (K1 of r21); a
+	   project without comb.migrate.config.ts names a D1 binding */
+	requirePeers(mode, resolved?.provider.type ?? "d1", { cwd: io.cwd, locate: io.locatePeer })
 	if (resolved?.provider.type === "postgres") {
 		const { migratePostgres } = await import("./migrate-atlas.ts")
 		return migratePostgres(mode, { ...resolved, provider: resolved.provider }, { args, io })

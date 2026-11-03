@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
+import { PEERS } from "../../src/migrate/core/optional-peer.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
 const REPO = join(ROOT, "../..")
@@ -105,6 +106,72 @@ describe("README package exports table", () => {
 		const section = README.slice(README.indexOf("## Package exports"), README.indexOf("## Repository layout"))
 		const listed = [...section.matchAll(/^\| `(@lovrozagar\/comb[^`]*)`/gm)].map((match) => match[1])
 		expect(listed.toSorted()).toEqual(subpaths.toSorted())
+	})
+})
+
+/* K5 of r21: the table said postgres was for baseline alone, while check replays with it; the Required column is PEERS's */
+// lookup-table: how the README names each provider
+const NAMES: Record<string, string> = {
+	"bun-sqlite": "bun:sqlite",
+	d1: "D1",
+	libsql: "libsql",
+	postgres: "Postgres",
+	turso: "Turso",
+}
+/** "`a`, `b` and `c`" */
+const inWords = (words: readonly string[]): string =>
+	words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`
+/** What the Required cell of `peer` opens with: the commands that need it, on the providers they need it on */
+function required(peer: string): string {
+	const on = new Map<string, string[]>()
+	for (const [provider, commands] of Object.entries(PEERS))
+		for (const [command, needs = []] of Object.entries(commands))
+			if (needs.some((need) => need.peer === peer && need.optional !== true))
+				on.set(provider, [...(on.get(provider) ?? []), command])
+	const sets = new Map<string, string[]>()
+	for (const [provider, commands] of on) {
+		const key = inWords(
+			commands.toSorted().map((command, at) => (at === 0 ? `\`comb migrate ${command}\`` : `\`${command}\``)),
+		)
+		sets.set(key, [...(sets.get(key) ?? []), provider])
+	}
+	const phrases = [...sets].map(([commands, providers]) =>
+		providers.length === Object.keys(PEERS).length
+			? commands
+			: `${commands} on ${inWords(providers.map((provider) => NAMES[provider] as string))}`,
+	)
+	return `only for ${phrases.join("; ")}`
+}
+
+describe("README peer dependencies table", () => {
+	const ROWS = new Map(
+		[...README.matchAll(/^\| `([^`]+)` +\|.*?(?<!\\)\| (.+?) +\|$/gm)].map((match) => [
+			match[1] as string,
+			match[2] as string,
+		]),
+	)
+	const PEERED = [
+		...new Set(
+			Object.values(PEERS).flatMap((commands) =>
+				Object.values(commands)
+					.flat()
+					.map((need) => need?.peer as string),
+			),
+		),
+	]
+
+	it.each(PEERED)("opens %s's Required cell with what PEERS says needs it", (peer) => {
+		expect(ROWS.get(peer)).toMatch(new RegExp(`^${required(peer).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[,:;. ]|$)`))
+	})
+
+	it.each(
+		Object.values(PEERS)
+			.flatMap((commands) => Object.entries(commands))
+			.flatMap(([command, needs = []]) =>
+				needs.filter((need) => need.optional === true).map((need) => [need.peer, command, need.why]),
+			),
+	)("names %s for %s, which runs without it, to %s", (peer, command, why) => {
+		expect(ROWS.get(peer)).toContain(`\`${command}\` to ${why}`)
 	})
 })
 

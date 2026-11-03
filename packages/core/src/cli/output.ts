@@ -19,6 +19,8 @@ export type CliIo = {
 	replayPgHistory?: typeof replayCatalog | undefined
 	/** How a diff, baseline or adoption gives the dev database a non-public target schema, comb's own unless a test fakes it (P12) */
 	readyPgDev?: ((target: { devUrl: string; schema: string }) => Promise<void>) | undefined
+	/** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it (K1 of r21) */
+	locatePeer?: ((peer: string) => string) | undefined
 	/** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
 	confirm?: ((question: string) => Promise<boolean>) | undefined
 }

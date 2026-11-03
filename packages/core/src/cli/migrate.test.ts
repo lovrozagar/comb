@@ -144,7 +144,10 @@ describe("comb migrate diff", () => {
 			calls.push([cmd, ...args])
 			return { code: 127, stderr: "atlas: command not found", stdout: "" }
 		}
-		const io = makeIo(project(), run)
+		const dir = project()
+		/* a diff refuses a project without a drizzle config first, which reads a file and starts nothing */
+		writeFileSync(join(dir, "drizzle.config.ts"), "export default {}\n")
+		const io = makeIo(dir, run)
 		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
 		expect(io.errors).toEqual(["Atlas not found. Install: https://atlasgo.io/getting-started"])
 		expect(calls).toEqual([["atlas", "version"]])

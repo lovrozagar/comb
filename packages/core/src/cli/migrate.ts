@@ -3,9 +3,10 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { parseArgs, refuseFurther } from "./args.ts"
+import { requirePeers } from "../migrate/core/optional-peer.ts"
 import { configuredFtsSql } from "./comb-config.ts"
 import { migrateApply } from "./migrate-apply.ts"
-import { resolveMigrateTarget } from "./migrate-target.ts"
+import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliIo } from "./output.ts"
 
 const DRIZZLE_CONFIG = `import { defineConfig } from "drizzle-kit"
@@ -83,10 +84,12 @@ function migrateInit(argv: readonly string[], io: CliIo): void {
 async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const args = parseArgs(argv, "migrate diff")
 	const [db, name] = args.positionals
+	const { codegen, d1, exported, migrationsDir, pg, provider } = await diffTarget(db, io)
+	/* every peer the diff needs, before Atlas or drizzle-kit runs (K1 of r21) */
+	requirePeers("diff", provider, { cwd: io.cwd, locate: io.locatePeer })
 	const { checkAtlasInstalled, exportDrizzleSchema, generateIncrementalMigration } =
 		await import("../migrate/core/atlas.ts")
 	if (!checkAtlasInstalled(io.run)) throw new CliError("Atlas not found. Install: https://atlasgo.io/getting-started")
-	const { codegen, d1, exported, migrationsDir, pg } = await diffTarget(db, io)
 	/* a D1 diff writes beside the files wrangler runs, refused where it would run them otherwise than Atlas (S4, C8) */
 	if (d1 && fs.existsSync(migrationsDir)) (await import("../migrate/core/d1-files.ts")).d1Files(migrationsDir)
 	const dialect = exported.dialect
@@ -138,6 +141,9 @@ function drizzleConfig(configured: string | undefined, cwd: string): string {
 	)
 }
 
+/* without comb.migrate.config.ts the migrations are SQLite's, whose diff needs what a D1 one does */
+const providerOf = (target: MigrateTarget | undefined) => target?.provider.type ?? "d1"
+
 /** What a diff of `db` reads: its Postgres provider if it has one, its drizzle export, and its migrations */
 async function diffTarget(db: string | undefined, io: CliIo) {
 	const target = db === undefined ? undefined : await resolveMigrateTarget({ cwd: io.cwd, db, mode: "diff" })
@@ -163,6 +169,7 @@ async function diffTarget(db: string | undefined, io: CliIo) {
 		exported,
 		migrationsDir: target?.migrationsDir ?? path.resolve(io.cwd, "atlas-migrations"),
 		pg,
+		provider: providerOf(target),
 	}
 }
 

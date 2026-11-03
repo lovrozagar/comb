@@ -75,7 +75,7 @@ describe("readyDevSchema", () => {
 		try {
 			const { readyDevSchema: fresh } = await import("./pg-dev-schema.ts")
 			await expect(fresh(target("app"))).rejects.toThrow(
-				"comb needs postgres (>=3.4.9 <4) to create a non-public schema on devUrl; install postgres",
+				`comb needs postgres (>=3.4.9 <4) to create a non-public schema on devUrl; install "postgres@>=3.4.9 <4"`,
 			)
 		} finally {
 			vi.doUnmock("postgres")

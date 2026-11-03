@@ -3,7 +3,7 @@
  * from 0.11, each file's name beside its hash, so an applied file edited since is told from a new one;
  * from 0.13 the name, not the hash, is unique, so two files of one text are recorded apart
  */
-import { causeChain } from "../../error-chain.ts"
+import { chainText } from "../../error-chain.ts"
 import type { Connection } from "../types.ts"
 import { Refused } from "./refused.ts"
 import { isTransient } from "./transient.ts"
@@ -123,13 +123,6 @@ const recorded = async (conn: Connection, name: string): Promise<boolean> =>
 
 /** A batch that failed transiently with no read of the history answering after it: whether it committed is unknown */
 class Unconfirmed extends Error {}
-
-/** `error`'s message and each under it on `.cause`, as `fetch failed: read ECONNRESET` */
-const chainText = (error: unknown): string =>
-	causeChain(error)
-		.map((link) => (link as { message?: unknown }).message)
-		.filter((message): message is string => typeof message === "string" && message !== "")
-		.join(": ")
 
 /**
  * `migration`'s statements and its record in one batch, retried while it fails transiently. A

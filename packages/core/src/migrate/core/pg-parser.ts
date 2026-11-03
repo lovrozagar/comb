@@ -4,7 +4,7 @@
  * awaits it first, and a caller of `classifyMigration` on Postgres does too.
  */
 
-import { optionalPeer } from "./optional-peer.ts"
+import { optionalPeer, PARSE } from "./optional-peer.ts"
 import { qualifySchemaElements } from "./pg-schema-elts.ts"
 
 type Parser = { parseSync(sql: string): { stmts?: unknown } }
@@ -19,8 +19,7 @@ let parser: Parser | undefined
 async function loadPostgresParser(): Promise<void> {
 	if (parser !== undefined) return
 	const lib = await optionalPeer(
-		"libpg-query",
-		"read Postgres migrations",
+		PARSE,
 		async () => (await import(LIBPG_QUERY)) as Parser & { loadModule(): Promise<void> },
 	)
 	await lib.loadModule()

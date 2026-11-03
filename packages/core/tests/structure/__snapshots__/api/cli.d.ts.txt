@@ -22,6 +22,8 @@ export type CliIo = {
         devUrl: string;
         schema: string;
     }) => Promise<void>) | undefined;
+    /** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it (K1 of r21) */
+    locatePeer?: ((peer: string) => string) | undefined;
     /** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
     confirm?: ((question: string) => Promise<boolean>) | undefined;
 };

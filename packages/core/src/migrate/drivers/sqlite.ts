@@ -4,6 +4,7 @@
  */
 import { existsSync } from "node:fs"
 import * as z from "zod"
+import { chainText } from "../../error-chain.ts"
 import type {
 	Connection,
 	ConnectionProvider,
@@ -83,6 +84,13 @@ async function createTursoDatabase(
 	log(`Created "${dbName}"`)
 }
 
+/** `call`, its failure to reach the API at all said with each cause under it, as `fetch failed: connect ECONNREFUSED …` (S2 of r21) */
+const reaching = (call: typeof fetch, name: string): typeof fetch =>
+	((...args: Parameters<typeof fetch>) =>
+		call(...args).catch((error: unknown) => {
+			throw new Error(`comb could not reach the Turso API for "${name}": ${chainText(error)}`, { cause: error })
+		})) as typeof fetch
+
 /**
  * The libsql URL and a one-hour token for a Turso database, creating the database when it is
  * missing; for a reader, a read-only token, and a missing database is an error. Turso reads the
@@ -92,7 +100,7 @@ export async function getTursoCredentials(
 	request: TursoCredentialsRequest,
 ): Promise<{ url: string; authToken: string }> {
 	const { apiToken, dbName, org } = request
-	const call = request.fetch ?? fetch
+	const call = reaching(request.fetch ?? fetch, `${org}/${dbName}`)
 	const baseUrl = `https://api.turso.tech/v1/organizations/${org}/databases/${dbName}`
 	const headers = { Authorization: `Bearer ${apiToken}` }
 
@@ -168,8 +176,9 @@ export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps
 	}
 	return {
 		async connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
-			const creds = await credentials(dbConfig.readonly === true)
+			/* the client first: a project without it is refused before Turso creates a database or mints a token (S2 of r21) */
 			const { createClient } = await libsql()
+			const creds = await credentials(dbConfig.readonly === true)
 			const client = createClient({ authToken: creds.authToken, url: creds.url })
 			return createLibsqlConnection(client)
 		},

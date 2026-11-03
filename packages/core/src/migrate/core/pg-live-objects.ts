@@ -60,7 +60,8 @@ function failureOf(error: unknown, at: FailedAt): string {
 
 /** postgres.js, or the refusal naming it, its range and `why` comb needs it here */
 async function loadPostgres(why: string): Promise<Connect> {
-	return (await optionalPeer("postgres", why, async () => (await import(PEER)) as { default: Connect })).default
+	return (await optionalPeer({ peer: "postgres", why }, async () => (await import(PEER)) as { default: Connect }))
+		.default
 }
 
 /* why a baseline loads it: it cannot vouch for the database without it */
