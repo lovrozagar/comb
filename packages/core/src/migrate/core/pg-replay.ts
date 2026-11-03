@@ -106,6 +106,11 @@ async function ownRole(run: Run, role: string, sent: string): Promise<void> {
  * database: in `name`, by `sent` when the transaction is that one statement's
  */
 async function commit(run: Run, replay: Replay, { name, sent }: { name: string; sent?: string }): Promise<void> {
+	/* a superuser's file can turn the counts off for its transaction or its session (P1a of r21) */
+	if (!(await counting(run.sql)))
+		throw new ReplayFailed(
+			`${name}: the file turned track_counts off, so devUrl's server counted nothing it changed past the database the replay runs in, and comb rolled it back and refuses the file; leave track_counts on; ${replay.stops}`,
+		)
 	const counted = writesSince(await sharedWrites(run.sql), run.ours.writes)
 	if (counted.size > 0) {
 		const changes = await namedChanges({ sql: run.sql, was: run.admin }, counted, run.ours.rows)
@@ -148,10 +153,13 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 const NO_CREATEDB =
 	"devUrl's role cannot create a database (CREATEDB), and comb replays the history file by file, as Atlas applies it, in a database of its own on devUrl's server; grant the role CREATEDB, or point devUrl at a server where it has it"
 
+/** Whether the server counts this backend's writes: with `track_counts` off they read as none */
+const counting = async (sql: Sql): Promise<boolean> =>
+	(await sql.unsafe("SELECT current_setting('track_counts') AS on", []))[0]?.["on"] === "on"
+
 /** Refuses a devUrl whose server keeps no counts for its role: the replay would read every file's writes as none */
 async function refuseUncounted(sql: Sql, stops: string): Promise<void> {
-	const [setting] = await sql.unsafe("SELECT current_setting('track_counts') AS on", [])
-	if (setting?.["on"] === "on") return
+	if (await counting(sql)) return
 	throw new ReplayFailed(
 		`devUrl's server keeps no counts for its role (track_counts is off), and comb reads from them what a history file changes past its database; set track_counts on for devUrl's role or server; ${stops}`,
 	)

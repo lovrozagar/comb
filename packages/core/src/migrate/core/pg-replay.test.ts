@@ -17,6 +17,9 @@ const DATABASE = /comb_replay_\d{13}_[0-9a-f]{8}/g
 const COUNTED = "SELECT current_setting('track_counts') AS on"
 const WRITES = expect.stringMatching(/^SELECT s\.relname, s\.n_tup_ins/)
 
+/** What a replayed transaction of `statements` sends: its counts read at BEGIN and again before COMMIT */
+const inTransaction = (...statements: unknown[]) => ["BEGIN", WRITES, ...statements, COUNTED, WRITES, "COMMIT"]
+
 /** A postgres.js stand-in on every connection: each query it was sent, the replay's database as <db>, answering `rows` to the catalog read */
 function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) => Error | undefined) {
 	const sent: Array<[string, unknown[]]> = []
@@ -63,11 +66,7 @@ describe("replayCatalog", () => {
 			...MADE,
 			'CREATE SCHEMA IF NOT EXISTS "app"',
 			'SET search_path TO "app"',
-			"BEGIN",
-			WRITES,
-			"CREATE TABLE t (a int)",
-			WRITES,
-			"COMMIT",
+			...inTransaction("CREATE TABLE t (a int)"),
 			"CREATE INDEX CONCURRENTLY i ON t (a)",
 			CATALOG,
 			DROPPED,

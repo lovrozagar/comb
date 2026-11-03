@@ -322,16 +322,34 @@ describe("check of a file that changes the server from inside a statement the re
 })
 
 describe("check on a devUrl whose server keeps no counts for its role", () => {
-	const quiet = unique("comb_t_quiet")
+	const [quiet, made] = [unique("comb_t_quiet"), unique("comb_t_p1a")]
 	const dev = { quiet: "" }
 	beforeAll(async () => {
 		dev.quiet = await asRole(devUrl(), quiet, "CREATEDB")
 		await query(pgUrl(), `ALTER ROLE ${quiet} SET track_counts = off`)
 	})
-	afterAll(() => dropRoles(quiet))
+	afterAll(() => dropRoles(quiet, made))
 
 	it("refuses it, naming track_counts", async () => {
 		const { refused } = await checked(T, RETYPE, dev.quiet)
 		expect(refused).toContain("track_counts is off")
 	}, 60_000)
+
+	/* P1a of r21: a superuser's file can stop the counts for its own transaction, or for the session */
+	it.each([
+		["SET LOCAL", "SET LOCAL track_counts = off;\n"],
+		["a session SET", "SET track_counts = off;\n"],
+		["set_config inside DO", "DO $$ BEGIN PERFORM set_config('track_counts', 'off', true); END $$;\n"],
+	])(
+		"refuses a file that turns the counts off with %s, naming the file, the change never made",
+		async (_how, off) => {
+			const { refused } = await checked(
+				T,
+				`-- comb:allow-unsafe: the test's change\n${off}DO $$ BEGIN CREATE ROLE ${made}; END $$;\n`,
+			)
+			expect(refused).toContain("20260102000000_two.sql: the file turned track_counts off")
+			expect(await roleOf(made)).toEqual([])
+		},
+		60_000,
+	)
 })

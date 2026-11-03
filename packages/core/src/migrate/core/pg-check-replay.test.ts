@@ -18,6 +18,9 @@ const DATABASE = /comb_replay_\d{13}_[0-9a-f]{8}/g
 const COUNTED = "SELECT current_setting('track_counts') AS on"
 const WRITES = expect.stringMatching(/^SELECT s\.relname, s\.n_tup_ins/)
 
+/** What a replayed transaction of `statements` sends: its counts read at BEGIN and again before COMMIT */
+const inTransaction = (...statements: unknown[]) => ["BEGIN", WRITES, ...statements, COUNTED, WRITES, "COMMIT"]
+
 /* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
 const AROUND = {
 	after: ["DROP DATABASE IF EXISTS <db>"],
@@ -66,7 +69,7 @@ describe("replayPending (P13 of r19)", () => {
 	it("replays each file in a transaction of its own in a database of its own, printing nothing", async () => {
 		expect(await replayed("CREATE TABLE t (a int);")).toEqual({
 			out: [],
-			sent: [...AROUND.before, "BEGIN", WRITES, "CREATE TABLE t (a int)", WRITES, "COMMIT", ...AROUND.after],
+			sent: [...AROUND.before, ...inTransaction("CREATE TABLE t (a int)"), ...AROUND.after],
 		})
 	})
 
@@ -95,15 +98,7 @@ describe("replayPending (P13 of r19)", () => {
 				/^Check left "ALTER DATABASE app SET work_mem = '4MB'" in 1_a\.sql out of its replay on devUrl: /,
 			),
 		])
-		expect(sent).toEqual([
-			...AROUND.before,
-			"BEGIN",
-			WRITES,
-			"CREATE TABLE t (a int)",
-			WRITES,
-			"COMMIT",
-			...AROUND.after,
-		])
+		expect(sent).toEqual([...AROUND.before, ...inTransaction("CREATE TABLE t (a int)"), ...AROUND.after])
 	})
 
 	it("refuses a statement dev refuses, naming the file, the statement and Postgres's message", async () => {
