@@ -22,8 +22,11 @@
 			"DatabaseErrorHandler": "0ff3450b1552c669",
 			"LruCache": "1ffc396d99a0ddb0",
 			"LruMeta": "265e803716e70003",
+			"PasswordHash": "ab3164975c0cf53e",
+			"PasswordTextOptions": "7d2c0c5140161e81",
 			"STORABLE_TEXT_RULE": "d2056690b5dd99c5",
 			"StatusKey": "c6e4d1aeb2e0eeb2",
+			"TypedPasswordOptions": "b2bdfea686b8420a",
 			"UlidFactoryOptions": "41311d7f30a060fc",
 			"carryCombMeta": "6ad90efe41aed43e",
 			"combDatabaseErrorKeys": "f20bfad0a208f070",
@@ -35,6 +38,7 @@
 			"generateUlid": "c4c5caea43718b8e",
 			"isCidr": "5d86ce2dd1cad5b5",
 			"isStorableText": "69dc790008c79061",
+			"passwordText": "cd9a965c7318ce22",
 			"readCombEntityMeta": "e50da15d068a4fcf",
 			"readCombMeta": "f5b048939d361e23",
 			"readCombQueryMeta": "3f5ea7069b06d51b",
@@ -43,7 +47,7 @@
 		},
 		"./cli": {
 			"CliError": "e5a2097eb3b21fe6",
-			"CliIo": "f73e66475353e7cf",
+			"CliIo": "533116daa7b35057",
 			"help": "77edce798c615285",
 			"processIo": "1ca3e00171d8d17e",
 			"runCli": "685844a09304bf61"
@@ -163,7 +167,7 @@
 			"createProvider": "0655c47693427dfc",
 			"createTursoProvider": "637d72525c079441",
 			"d1HistoryTables": "2483bf3d3f24864e",
-			"defineConfig": "f7eee955116c6790",
+			"defineConfig": "a7e0845ddca73e48",
 			"exportDrizzleSchema": "b1ba2959c9529d93",
 			"extractDropStatements": "0f26674aba75d0c4",
 			"extractSchema": "99f41c9ee4f45f6c",
@@ -275,7 +279,7 @@
 			"validateFilter": "6479dbfc05f03da5"
 		},
 		"./query/sqlite": {
-			"BuildDerivedListQueryOpts": "dc40d3b8269feb09",
+			"BuildDerivedListQueryOpts": "daa8df5c2fd48720",
 			"BuildListQueryOpts": "15ec6314012c2936",
 			"ColumnKind": "f0b3ea0fb7152cf8",
 			"FilterSQLConfig": "deaf9b06a6046e2c",
@@ -332,7 +336,7 @@
 			"TimestampConstraints": "a9b5b0a28557695b"
 		},
 		"./sqlite/d1/bookmark": {
-			"BookmarkTracker": "c2329396ad1606e7",
+			"BookmarkTracker": "af3c0ea68e738de5",
 			"TaggedBookmark": "52c34868d994c1a4"
 		},
 		"./sqlite/d1/error-handler": {
@@ -341,22 +345,22 @@
 		},
 		"./sqlite/d1/session": {
 			"SessionConstraint": "012230f5822d85cb",
-			"SessionHandle": "ed180912e4206738",
+			"SessionHandle": "dbc3cd9eb05d81bf",
 			"SessionOptions": "c5035557c1cf9699",
-			"openD1Session": "720308764ced4275"
+			"openD1Session": "f99032a229c50116"
 		},
 		"./sqlite/d1/sharding": {
 			"MergedListQueryResult": "d402ffa90be4cb64",
-			"ShardDbHandle": "284b6a0ff087a98d",
+			"ShardDbHandle": "fe0b076be5c706d6",
 			"ShardDriver": "240506c2d7e4ecb2",
 			"ShardKv": "b8318d5b91933984",
 			"ShardMapping": "fd3db5ae912ffb97",
-			"ShardMove": "87d43c3147a12cae",
+			"ShardMove": "dbbcdf1a9246a94c",
 			"ShardPick": "bc1de1aee6a82fc7",
 			"ShardPickInput": "cb0f5be3e3f067bd",
 			"ShardPlacement": "7e562b94ba7f0f2a",
-			"ShardResolverDeps": "ec37c3ea83025896",
-			"ShardRouter": "9a242248541f24ad",
+			"ShardResolverDeps": "faab6a76d7b28400",
+			"ShardRouter": "f4cdf5a1e40739d0",
 			"ShardRouterConfig": "7b9991cc8a40d18c",
 			"ShardVerifyDeps": "8cea6e93311e6648",
 			"paginateMerged": "1d4a09538dec9250",
@@ -386,5 +390,5 @@
 			"statusKeyToCode": "18f7317f8cea18ce"
 		}
 	},
-	"version": "0.19.0"
+	"version": "0.20.0"
 }
