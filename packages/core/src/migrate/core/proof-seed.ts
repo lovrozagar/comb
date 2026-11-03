@@ -213,7 +213,7 @@ function seedOne(
 	db: LocalDb,
 	context: Context,
 	{ later, table }: { later: ReadonlySet<string>; table: string },
-): Seeding & { failed?: string } {
+): Seeding & { failed?: string | undefined } {
 	const seeding = {
 		columns: columnsOf(db, table),
 		json: context.json,
@@ -237,7 +237,7 @@ function seedCycle(db: LocalDb, context: Context, group: readonly string[]): voi
 	const { unproven } = context
 	db.exec("BEGIN")
 	db.exec("PRAGMA defer_foreign_keys = ON")
-	const seeded: Array<Seeding & { failed?: string }> = []
+	const seeded: Array<Seeding & { failed?: string | undefined }> = []
 	try {
 		for (const [i, table] of group.entries())
 			seeded.push(seedOne(db, context, { later: new Set(group.slice(i + 1).map(asciiFold)), table }))
