@@ -26,6 +26,8 @@ coveragePathIgnorePatterns = [
 	"src/migrate/drivers/index.ts",
 	"src/migrate/drivers/absent.ts",
 	"src/migrate/drivers/libsql-client.ts",
+	"src/migrate/drivers/libsql-file.ts",
+	"src/migrate/drivers/libsql-local.ts",
 	"src/migrate/drivers/missing.ts",
 	# the config a suite writes to a temp directory, which the CLI it runs imports
 	"**/comb.migrate.config.ts",
