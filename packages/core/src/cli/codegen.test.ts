@@ -185,7 +185,10 @@ describe("comb codegen: direct mode", () => {
 		)
 		const failed = makeIo(dir)
 		expect(await runCli(["codegen", "--tables", "bad.tables.ts"], failed)).toBe(1)
-		expect(failed.errors[0]).toMatch(/^Validation errors:\n {2}/)
+		expect(failed.errors.slice(0, 2)).toEqual([
+			"Nothing was written: codegen writes every database's files once all of them succeed",
+			expect.stringMatching(/^Validation errors:\n {2}/),
+		])
 		/* the analyzer reads the whole directory, so the warning case gets its own */
 		const other = project()
 		writeFileSync(
@@ -242,6 +245,28 @@ describe("comb codegen: what a run leaves on disk (F12, F19)", () => {
 		expect(await runCli(["codegen"], io)).toBe(1)
 		expect(existsSync(join(dir, "gen"))).toBe(false)
 		expect(filesUnder(dir).filter((file) => file.endsWith(".tmp"))).toEqual([])
+	})
+
+	/* KC10 of r22b: a run that failed printed "Generated … at:" for the files of the database before the broken one */
+	it("prints what it generated only once it is written, and that nothing was when a database fails", async () => {
+		const dir = project()
+		writeTables(dir, "a.tables.ts")
+		writeFileSync(
+			join(dir, "b.tables.ts"),
+			`${HEAD}${POST}export const bad = sqliteTable("bad", { id: c.id("bad"), s: c.enum("s", valuesOf()) })\n`,
+		)
+		const both =
+			'{ a: { tables: "./a.tables.ts", output: { default: "./gen/a" } }, b: { tables: "./b.tables.ts", output: { default: "./gen/b" } } }'
+		writeFileSync(join(dir, "comb.config.ts"), `export default { databases: ${both} }\n`)
+		const io = makeIo(dir)
+		expect(await runCli(["codegen"], io)).toBe(1)
+		expect(io.outputs).toEqual([])
+		expect(io.errors).toContain("Nothing was written: codegen writes every database's files once all of them succeed")
+		expect(existsSync(join(dir, "gen"))).toBe(false)
+		const good = makeIo(dir)
+		expect(await runCli(["codegen", "a"], good)).toBe(0)
+		expect(good.outputs.slice(0, 2)).toEqual(["\nCodegen: a", "  1 tables"])
+		expect(good.outputs).toContain(`Generated rows at: ${join(dir, "gen/a/db.a.rows.gen.ts")}`)
 	})
 
 	it("deletes the files of a table that is gone, and of a generator that writes nothing now, but no file it did not write (F12)", async () => {

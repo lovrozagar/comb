@@ -6,7 +6,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { commitStaged, isGeneratedContent, type Staged, writeGenJsonFile } from "../codegen/utils/fs.ts"
 import { byCodeUnit } from "../codegen/utils/order.ts"
-import { CliError } from "./output.ts"
+import { CliError, type CliIo } from "./output.ts"
 
 /*
  * What each database's last run wrote, in one record beside comb.config.ts (beside the tables file in
@@ -151,4 +151,10 @@ function refuseShared(runs: readonly Run[], { record, recordDir }: { record: Run
 			owner.set(file, run.name)
 		}
 	}
+}
+
+/** Say on `io` that a run that failed before its write wrote nothing, then fail with its error (KC10 of r22b) */
+export function nothingWritten(io: Pick<CliIo, "err">, error: unknown): never {
+	io.err("Nothing was written: codegen writes every database's files once all of them succeed")
+	throw error
 }
