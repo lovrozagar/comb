@@ -9,6 +9,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
+import { LIVE_NOT_JSON, READS_LIVE_JSON } from "../../../src/cli/__fixtures__/d1.ts"
 import { runCli } from "../../../src/cli/index.ts"
 import { localD1Path } from "../../../src/migrate/core/d1-binding.ts"
 import { migrationHashes } from "../../../src/migrate/core/parse.ts"
@@ -50,11 +51,13 @@ describe("comb migrate on D1 through wrangler, --local", () => {
 	}, 120_000)
 
 	it("applies none of a file that fails partway, records nothing, and applies it once fixed", async () => {
-		const dir = project({ "20260101000000_bad.sql": "CREATE TABLE post (id TEXT);\nINSERT INTO missing VALUES (1);" })
+		const dir = project({ "20260101000000_bad.sql": READS_LIVE_JSON })
+		/* the live row the file fails on, which the proof and D1's engine do not hold */
+		column(dir, LIVE_NOT_JSON)
 		expect(await runCli(["migrate", "apply", "core", "--local"], io(dir))).toBe(1)
 		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual([])
-		expect(column(dir, "SELECT name FROM sqlite_master WHERE name = 'post'")).toEqual([])
-		write(dir, { "20260101000000_bad.sql": "CREATE TABLE post (id TEXT);" })
+		expect(column(dir, "SELECT name FROM sqlite_master WHERE name = 'got'")).toEqual([])
+		write(dir, { "20260101000000_bad.sql": "CREATE TABLE got (v TEXT);" })
 		const fixed = io(dir)
 		expect(await runCli(["migrate", "apply", "core", "--local"], fixed), fixed.errors.join("\n")).toBe(0)
 		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["20260101000000_bad.sql"])
@@ -181,12 +184,13 @@ describe("comb migrate on D1 --local: a pre-recorded hash is an intent until wra
 		)
 
 	it("a failed apply, the file fixed and applied by wrangler alone end in the warning --hashes clears", async () => {
-		const dir = project({ "20260101000000_bad.sql": "CREATE TABLE post (id TEXT);\nINSERT INTO missing VALUES (1);" })
+		const dir = project({ "20260101000000_bad.sql": READS_LIVE_JSON })
+		column(dir, LIVE_NOT_JSON)
 		expect(await runCli(["migrate", "apply", "core", "--local"], io(dir))).toBe(1)
 		/* wrangler ran nothing, so comb holds no hash for the file, only its emptied intent table */
 		expect(tables(dir)).toEqual(["_comb_migration_hash_intents", "d1_migrations"])
 		expect(column(dir, "SELECT name FROM _comb_migration_hash_intents")).toEqual([])
-		write(dir, { "20260101000000_bad.sql": "CREATE TABLE post (id TEXT);" })
+		write(dir, { "20260101000000_bad.sql": "CREATE TABLE got (v TEXT);" })
 		expect(wrangler(dir)("wrangler", ["d1", "migrations", "apply", "core", "--local"], { input: "" }).code).toBe(0)
 		const status = io(dir)
 		expect(await runCli(["migrate", "status", "core", "--local"], status), status.errors.join("\n")).toBe(0)

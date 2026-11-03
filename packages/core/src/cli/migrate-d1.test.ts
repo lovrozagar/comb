@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { type FakeD1, fakeD1, localD1, writeSum } from "./__fixtures__/d1.ts"
+import { type FakeD1, fakeD1, LIVE_NOT_JSON, localD1, READS_LIVE_JSON, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, projects } from "./__fixtures__/io.ts"
 import { runCli } from "./run.ts"
 
@@ -94,8 +94,9 @@ describe("migrate apply on D1 without a migrate config", () => {
 
 describe("migrate apply on D1 without a migrate config: a failed apply", () => {
 	it("fails when a file fails, which leaves no row for it, and when wrangler applies nothing", async () => {
-		const dir = worker({ "20260101000000_bad.sql": "CREATE TABLE post (id TEXT);\nINSERT INTO missing VALUES (1);" })
+		const dir = worker({ "20260101000000_bad.sql": READS_LIVE_JSON })
 		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
+		d1.db.exec(LIVE_NOT_JSON)
 		const io = makeIo(dir, d1)
 		expect(await runCli(["migrate", "apply", "core", "--local"], io)).toBe(1)
 		expect(io.errors[0]).toMatch(/^wrangler d1 migrations apply failed: Migration 20260101000000_bad\.sql failed/)
@@ -454,17 +455,24 @@ describe("migrate apply, check and status --json on D1 (C5)", () => {
 	})
 })
 
+/** wrangler on a database holding the live row READS_LIVE_JSON fails on */
+function liveD1(dir: string): FakeD1 {
+	const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
+	d1.db.exec(LIVE_NOT_JSON)
+	return d1
+}
+
 /* C4 of the 0.14.1 review: a wrangler run that fails partway reports what it applied */
 describe("migrate apply on D1 when wrangler fails partway", () => {
 	const files = {
 		...INIT,
 		"20260102000000_b.sql": "CREATE TABLE b (id TEXT);",
-		"20260103000000_c.sql": "INSERT INTO nope (id) VALUES ('x');",
+		"20260103000000_c.sql": READS_LIVE_JSON,
 	}
 
 	it("puts the files applied before the failure, and those still pending, in --json's object", async () => {
 		const dir = worker(files)
-		const io = makeIo(dir, fakeD1({ dir: join(dir, "atlas-migrations") }))
+		const io = makeIo(dir, liveD1(dir))
 		expect(await runCli(["migrate", "apply", "core", "--local", "--yes", "--json"], io)).toBe(1)
 		expect(json(io)).toEqual(
 			report({
@@ -479,7 +487,7 @@ describe("migrate apply on D1 when wrangler fails partway", () => {
 
 	it("says which files applied before the failure", async () => {
 		const dir = worker(files)
-		const io = makeIo(dir, fakeD1({ dir: join(dir, "atlas-migrations") }))
+		const io = makeIo(dir, liveD1(dir))
 		expect(await runCli(["migrate", "apply", "core", "--local", "--yes"], io)).toBe(1)
 		expect(io.outputs).toContain("Applied before the failure: 20260101000000_init.sql, 20260102000000_b.sql")
 	})

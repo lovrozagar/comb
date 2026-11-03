@@ -135,3 +135,11 @@ export function fakeD1(options: D1Options, atlas: Run = fakeAtlas()): FakeD1 {
 	}
 	return Object.assign(run, { calls, db })
 }
+
+/*
+ * A file D1 fails only on the live database's rows, the one failure the proof and D1's engine cannot
+ * see (SD1 of r22): it reads a live column as JSON, which the proof's copy seeds as JSON, and the
+ * live row is not. LIVE_NOT_JSON runs on the database first, outside any migration.
+ */
+export const LIVE_NOT_JSON = "CREATE TABLE note (body TEXT); INSERT INTO note VALUES ('not json');"
+export const READS_LIVE_JSON = "CREATE TABLE got (v TEXT);\nINSERT INTO got SELECT json_extract(body, '$.v') FROM note;"

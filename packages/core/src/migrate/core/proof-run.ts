@@ -13,13 +13,14 @@
  * delete, a trigger fired or a temp shadow is unsafe whichever rows it meets, and a backfill of the
  * file's own columns is cautious. A file the copy cannot run is unproven, and unproven is unsafe.
  */
-import { isMirror, mirrorFindings, mirrorRows, seedMirrors } from "./proof-mirror.ts"
-import { type LocalDb, openScratch, type ScratchDb } from "../drivers/local-db.ts"
+import { isMirror, mirrorFindings, mirrorRows } from "./proof-mirror.ts"
+import { type LocalDb, openScratch } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { compare, type Shape } from "./proof-compare.ts"
+import { type Copy, copyOf, buildCopy, creatable, jsonColumns, type LiveObject, liveObjects } from "./proof-copy.ts"
 import { applyToCopy, engineFindings } from "./proof-engine.ts"
-import { quote, seedTables } from "./proof-seed.ts"
+import { quote } from "./proof-seed.ts"
 import { asciiFold } from "./sql-code.ts"
 
 /** What the proof run found for one file */
@@ -30,107 +31,6 @@ type Proof = {
 	/** the tables comb could not seed, which nothing here proves, each with why */
 	unproven: Array<{ table: string; why: string }>
 	unsafe: string[]
-}
-
-/** One object of the live schema, and the table it belongs to (sqlite_master's tbl_name) */
-type LiveObject = { name: string; sql: string; table: string; type: string }
-
-// lookup-table: the shadow tables each module makes beside its virtual table, which creating it makes again
-const SHADOWS: Readonly<Record<string, readonly string[]>> = {
-	fts3: ["content", "docsize", "segdir", "segments", "stat"],
-	fts4: ["content", "docsize", "segdir", "segments", "stat"],
-	fts5: ["config", "content", "data", "docsize", "idx"],
-	geopoly: ["node", "parent", "rowid"],
-	rtree: ["node", "parent", "rowid"],
-	rtree_i32: ["node", "parent", "rowid"],
-	spellfix1: ["vocab"],
-}
-
-/** The target's schema, read in one SELECT: SQLite's and D1's own objects left out */
-async function liveObjects(conn: Connection, engine: string): Promise<LiveObject[]> {
-	const { columns, rows } = await conn.execute(
-		`SELECT type, name, sql, tbl_name FROM sqlite_master WHERE sql IS NOT NULL${engine} ORDER BY rowid`,
-	)
-	const at = (name: string) => columns.indexOf(name)
-	return rows.map((row) => ({
-		name: String(row[at("name")]),
-		sql: String(row[at("sql")]),
-		table: String(row[at("tbl_name")]),
-		type: String(row[at("type")]),
-	}))
-}
-
-const isVirtual = (object: LiveObject) => /^CREATE VIRTUAL TABLE\b/i.test(object.sql)
-
-/** The objects the copy creates: every one but a virtual table's own module's shadow tables */
-function creatable(objects: readonly LiveObject[]): LiveObject[] {
-	const shadows = new Set(
-		objects.filter(isVirtual).flatMap((object) => {
-			/* a CREATE VIRTUAL TABLE names its module */
-			const module = (/\bUSING\s+(\w+)/i.exec(object.sql) as RegExpExecArray)[1]?.toLowerCase() as string
-			return (SHADOWS[module] ?? []).map((suffix) => asciiFold(`${object.name}_${suffix}`))
-		}),
-	)
-	return objects.filter((object) => !(object.type === "table" && shadows.has(asciiFold(object.name))))
-}
-
-/** The columns, by lower-case name, a pending file reads with a `json_*` function: the seed holds JSON there */
-function jsonColumns(files: ReadonlyArray<{ sql: string }>): Set<string> {
-	/* a json_* function's first argument, or the column before a -> or ->> */
-	const call = /\bjson\w*\s*\(\s*(?:["`[]?\w+["`\]]?\s*\.\s*)?["`[]?(\w+)/gi
-	const arrow = /(?:["`[]?\w+["`\]]?\s*\.\s*)?["`[]?(\w+)["`\]]?\s*->>?/g
-	return new Set(
-		files.flatMap(({ sql }) =>
-			[...sql.matchAll(call), ...sql.matchAll(arrow)].map((match) => asciiFold(match[1] as string)),
-		),
-	)
-}
-
-/** Why a table is unproven when the copy cannot create `object`: none for a view, which holds no rows */
-function uncreated(object: LiveObject, message: string): [table: string, why: string] | undefined {
-	if (object.type === "view") return undefined
-	if (object.type === "trigger")
-		return [asciiFold(object.table), `its trigger ${object.name} could not be created: ${message}`]
-	return [asciiFold(object.table), `comb could not create it in the copy: ${message}`]
-}
-
-/** How a copy is seeded: which seed, and the columns pending files read as JSON; none for a copy of the schema alone */
-type Seed = { json: ReadonlySet<string>; variant: number } | undefined
-
-/**
- * The copy: tables and indexes, then the seed, then triggers and views, as the database has them;
- * returns the tables it could not create or seed, or whose trigger it could not create, with why
- */
-function buildCopy(db: LocalDb, objects: readonly LiveObject[], seed: Seed): Map<string, string> {
-	const unproven = new Map<string, string>()
-	const make = (object: LiveObject) => {
-		try {
-			db.exec(object.sql)
-		} catch (error) {
-			// reason: what the copy cannot create, nothing proves; its table is listed unproven with why
-			const [table, why] = uncreated(object, (error as Error).message) ?? []
-			if (table !== undefined && why !== undefined && !unproven.has(table)) unproven.set(table, why)
-		}
-	}
-	const tables = objects.filter((each) => each.type === "table")
-	for (const object of [...tables, ...objects.filter((each) => each.type === "index")]) make(object)
-	if (seed === undefined) {
-		for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
-		return unproven
-	}
-	const seedable = tables.filter(
-		(object) =>
-			!unproven.has(asciiFold(object.name)) &&
-			(!isVirtual(object) || /\busing fts5\b/i.test(object.sql)) &&
-			!isMirror(object),
-	)
-	for (const object of tables.filter((each) => isVirtual(each) && !seedable.includes(each) && !isMirror(each)))
-		unproven.set(asciiFold(object.name), "a virtual table comb does not seed")
-	const definitions = new Map(seedable.map((object) => [object.name, object.sql]))
-	for (const [table, why] of [...seedTables(db, definitions, seed), ...seedMirrors(db, tables.filter(isMirror))])
-		unproven.set(table, why)
-	for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
-	return unproven
 }
 
 /** Every table of the copy but a mirror FTS table, each with its stored columns and rows (each value as SQLite quotes it) */
@@ -168,15 +68,6 @@ function snapshot(db: LocalDb): Map<string, Shape> {
 		})
 	}
 	return out
-}
-
-/** One copy of the target: its database, and the tables comb could not seed in it, with why */
-type Copy = { db: ScratchDb; unproven: Map<string, string> }
-
-/** A copy of `objects`, seeded as `seed` */
-async function copyOf(objects: readonly LiveObject[], seed: NonNullable<Seed>): Promise<Copy> {
-	const db = await openScratch()
-	return { db, unproven: buildCopy(db, objects, seed) }
 }
 
 /**
@@ -229,16 +120,18 @@ async function schemaAfter(
  * returns each file's proof by name. A file the copy refuses is tried once more on a reseeded copy
  * (a seed's value can meet a file's unique index or explicit id); a file refused both ways is
  * unproven, and so unsafe. The later files are proven on the schema it leaves, seeded fresh; when
- * it fails even on a copy with no rows, they are unproven too.
+ * it fails even on a copy with no rows, they are unproven too. `live` is the schema the caller read
+ * already (plan-apply.ts), which this reads otherwise. The engine's own tables are left out of every
+ * read of a schema, the target's and the copy's (P4).
  */
 async function provePending(
 	conn: Connection,
 	files: ReadonlyArray<{ name: string; sql: string }>,
+	live?: readonly LiveObject[],
 ): Promise<Map<string, Proof>> {
 	const json = jsonColumns(files)
-	/* the engine's own tables, left out of every read of a schema: the target's and the copy's (P4) */
 	const engineTables = notEngineTables(conn)
-	let objects = creatable(await liveObjects(conn, engineTables))
+	let objects = live === undefined ? creatable(await liveObjects(conn, engineTables)) : [...live]
 	let copy = await copyOf(objects, { json, variant: 0 })
 	const proofs = new Map<string, Proof>()
 	let applied: string[] = []

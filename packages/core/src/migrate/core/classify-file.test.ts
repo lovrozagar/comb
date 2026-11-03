@@ -224,31 +224,20 @@ describe("classifyMigration on the foreign-key pragmas comb writes, however thei
 	)
 })
 
-describe("classifyMigration on a pragma D1 does not authorize", () => {
+/* SD1 of r22: D1's rule is its engine's, which check runs each pending file on (d1-engine.ts), not a list here */
+describe("classifyMigration on a pragma for D1, whose engine decides (SD1 of r22)", () => {
 	it.each([
 		"PRAGMA temp_store = MEMORY",
 		'PRAGMA "cache_size" = 10',
 		"PRAGMA main.secure_delete = 1",
-		"PRAGMA [user_version] = 3",
 		"PRAGMA page_size = 8192",
-		"PRAGMA integrity_check",
-		"-- comb:allow-unsafe: needed\nPRAGMA busy_timeout = 100;",
-	])("refuses %j, whatever the approval, naming D1's list", (sql) => {
-		expect(() => d1(sql)).toThrow(/D1 runs only the pragmas it authorizes/)
-		expect(() => lite(sql)).not.toThrow()
-	})
-
-	it.each([
+		"PRAGMA optimize(65538)",
+		"PRAGMA writable_schema = 1",
 		"PRAGMA defer_foreign_keys = on",
-		'PRAGMA "foreign_keys" = OFF',
 		'PRAGMA table_info("post")',
-		"PRAGMA main.index_list(post)",
-		"PRAGMA optimize",
-		"PRAGMA page_size",
-		"PRAGMA data_version",
-		"PRAGMA legacy_alter_table = 1",
-	])("lets %j, which D1 authorizes, through to its rating", (sql) => {
+	])("lets %j through to its rating, as on a local file", (sql) => {
 		expect(() => d1(sql)).not.toThrow()
+		expect(d1(sql).safety).toBe(lite(sql).safety)
 	})
 })
 
@@ -400,16 +389,12 @@ describe("classifyMigration by target kind: what the libsql server (sqld) refuse
 		expect(() => on("local")(sql)).not.toThrow()
 	})
 
-	it.each(["PRAGMA ignore_check_constraints = ON", "PRAGMA legacy_alter_table = ON", "PRAGMA optimize"])(
-		"keeps D1's own list, which runs %j",
+	it.each(["PRAGMA ignore_check_constraints = ON", "PRAGMA legacy_alter_table = ON", "PRAGMA writable_schema = 1"])(
+		"leaves %j on D1 to D1's engine, which check runs it on",
 		(sql) => {
 			expect(() => on("d1")(sql)).not.toThrow()
 		},
 	)
-
-	it("keeps D1's own list, which refuses writable_schema", () => {
-		expect(() => on("d1")("PRAGMA writable_schema = 1")).toThrow(/D1 runs only the pragmas it authorizes/)
-	})
 })
 
 describe("classifyMigration by target kind: what the libsql server (sqld) runs (S1 of r22)", () => {

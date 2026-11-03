@@ -1,35 +1,11 @@
 /**
  * What each kind of SQLite target runs, which check holds a file to before anything applies (S1 of r19,
- * S1 of r22): a local SQLite file runs what SQLite does, a D1 database what its authorizer lists, and a
- * libsql server (sqld) what its parser and authorizer let through. No `-- comb:allow-unsafe:` clears a
- * refusal here: the target would fail the file at apply.
+ * S1 of r22): a local SQLite file runs what SQLite does, and a libsql server (sqld) what its parser and
+ * authorizer let through. A D1 database runs what its own engine does, which check asks it (d1-engine.ts,
+ * SD1 of r22), so no list here. No `-- comb:allow-unsafe:` clears a refusal here: the target would fail
+ * the file at apply.
  */
 import type { Pragma } from "./sql-code.ts"
-
-/** The pragmas D1's authorizer runs in any form: Cloudflare's list (developers.cloudflare.com/d1/sql-api/sql-statements) */
-// lookup-table: the names D1 authorizes, read on every pragma a D1 file runs
-const D1_PRAGMAS: ReadonlySet<string> = /* @__PURE__ */ new Set([
-	"case_sensitive_like",
-	"defer_foreign_keys",
-	"foreign_key_check",
-	"foreign_key_list",
-	"foreign_keys",
-	"ignore_check_constraints",
-	"index_info",
-	"index_list",
-	"index_xinfo",
-	"legacy_alter_table",
-	"quick_check",
-	"recursive_triggers",
-	"reverse_unordered_selects",
-	"table_info",
-	"table_list",
-	"table_xinfo",
-])
-
-/** The pragmas D1 runs only as a read: optimize (Cloudflare refuses an argument), page_size and data_version (wrangler --local) */
-// lookup-table: the names D1 runs as a read only
-const D1_READS: ReadonlySet<string> = /* @__PURE__ */ new Set(["data_version", "optimize", "page_size"])
 
 /**
  * Where a SQLite-family file applies, resolved once by the CLI from its provider (S1 of r22): `local` a SQLite file
@@ -160,16 +136,9 @@ function sqldRefusal(code: string, pragma: Pragma | undefined): string | undefin
 	return what === undefined ? undefined : sqldRefuses(what)
 }
 
-/** Why D1 refuses `pragma`, or undefined when its authorizer runs it */
-const d1Refusal = (pragma: Pragma): string | undefined =>
-	D1_PRAGMAS.has(pragma.name) || (D1_READS.has(pragma.name) && pragma.value === undefined)
-		? undefined
-		: `D1 runs only the pragmas it authorizes (developers.cloudflare.com/d1/sql-api/sql-statements), and wrangler's apply fails on this one with not authorized: SQLITE_AUTH; leave it out of the migrations`
-
 /** Why a target of `kind` refuses the statement `code` (the pragma it runs, if one), or undefined when it runs it */
 function targetRefusal(code: string, pragma: Pragma | undefined, kind: TargetKind): string | undefined {
-	if (kind === "sqld") return sqldRefusal(code, pragma)
-	return kind === "d1" && pragma !== undefined ? d1Refusal(pragma) : undefined
+	return kind === "sqld" ? sqldRefusal(code, pragma) : undefined
 }
 
 export { type TargetKind, targetRefusal }

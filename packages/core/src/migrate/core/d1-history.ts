@@ -31,6 +31,7 @@ import {
 } from "./d1-history-rows.ts"
 import { orphanMessage } from "./history-match.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
+import { proveOnD1 } from "./d1-engine.ts"
 import { planApply } from "./plan-apply.ts"
 import { runPeer } from "./process.ts"
 import { Refused } from "./refused.ts"
@@ -164,6 +165,7 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		dir: target.migrationsDir,
 		exec: target.exec,
 		files,
+		engine: (proving, live) => proveOnD1(live, proving, { bin: target.wrangler, table }),
 		kind: "d1",
 		/* the binding's own history table, and comb's records of hashes and intents */
 		historyTables: [table, D1_HASH_TABLE, D1_HASH_INTENT_TABLE],

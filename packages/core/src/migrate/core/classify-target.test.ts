@@ -32,20 +32,11 @@ describe("targetRefusal by target kind (S1 of r22; sibling: D1's list, r19 S1)",
 		expect(refusal(sql, "sqld")).toBeUndefined()
 	})
 
-	it.each([
-		["PRAGMA cache_size = 10", true],
-		["PRAGMA page_size = 4096", true],
-		["PRAGMA page_size", false],
-		["PRAGMA recursive_triggers = 1", false],
-		["ANALYZE", false],
-	] as const)("holds %j on D1 to its authorizer's list", (sql, refused) => {
-		expect(refusal(sql, "d1") !== undefined).toBe(refused)
-	})
-
 	it.each(["PRAGMA cache_size = 10", "ANALYZE", "ATTACH 'x.db' AS x", "CREATE TEMP TABLE t (a)"])(
-		"refuses nothing of %j on a local file, whose own SQLite decides",
+		"refuses nothing of %j on a local file or D1, whose own engine decides (SD1 of r22)",
 		(sql) => {
 			expect(refusal(sql, "local")).toBeUndefined()
+			expect(refusal(sql, "d1")).toBeUndefined()
 		},
 	)
 })

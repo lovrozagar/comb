@@ -3,7 +3,8 @@
  * runs: the directory matches its atlas.sum, no pending file sorts before an applied one, and each
  * pending file is classified against the schema the files before it leave, proven on a seeded
  * in-memory copy of the database's own schema (proof-run.ts), and approved as the stricter of the
- * two needs (approval.ts). A target with no tables of its own and no applied history holds nothing
+ * two needs (approval.ts); a target with an engine of its own (D1) then runs them there, and what it refuses
+ * is refused (SD1 of r22). A target with no tables of its own and no applied history holds nothing
  * a file could lose, so its files skip the approval, and the output says "empty target". It reads
  * the database, and applies nothing to it.
  */
@@ -16,6 +17,7 @@ import { verifySum } from "./atlas-dir.ts"
 import { HISTORY_TABLES, notEngineTables } from "./engine-tables.ts"
 import { refuseUnseenReach } from "./live-guard.ts"
 import { parseMigration } from "./parse.ts"
+import { creatable, type LiveObject, liveObjects } from "./proof-copy.ts"
 import { type Proof, provePending } from "./proof-run.ts"
 import { Refused } from "./refused.ts"
 import type { Run } from "./process.ts"
@@ -42,6 +44,10 @@ type PlanOptions = {
 	kind?: TargetKind | undefined
 	/** the tables the target's migration history lives in, which an empty target may hold (default: comb's and wrangler's) */
 	historyTables?: readonly string[] | undefined
+	/** the target's own engine, run after the proof: it runs the pending files as the target would, and throws what it refuses (D1, SD1 of r22) */
+	engine?:
+		| ((files: ReadonlyArray<{ name: string; sql: string }>, live: readonly LiveObject[]) => Promise<void>)
+		| undefined
 }
 
 /** The leading number of a migration file name: `20260101000000_x.sql` is 20260101000000 */
@@ -181,8 +187,14 @@ async function planApply(options: PlanOptions): Promise<Pending[]> {
 	const classified = classifyPending(files, texts, { applied, kind: options.kind ?? "local" })
 	/* the live guard refuses outright and names the cause, so it runs before the proof and approval (M17) */
 	if (conn !== undefined) await refuseUnseenReach(conn, classified)
+	/* the live schema, read once for the proof and the target's engine */
+	const live =
+		conn === undefined || classified.length === 0
+			? undefined
+			: creatable(await liveObjects(conn, notEngineTables(conn)))
 	const proofs =
-		conn === undefined || classified.length === 0 ? new Map<string, Proof>() : await provePending(conn, classified)
+		conn === undefined || live === undefined ? new Map<string, Proof>() : await provePending(conn, classified, live)
+	if (live !== undefined) await options.engine?.(classified, live)
 	const histories = options.historyTables ?? HISTORY_TABLES
 	const empty =
 		conn !== undefined && applied.size === 0 && classified.length > 0 && (await isEmptyTarget(conn, histories))

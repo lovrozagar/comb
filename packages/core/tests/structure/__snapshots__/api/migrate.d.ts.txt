@@ -529,9 +529,10 @@ export { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements
 // migrate/core/classify-target.d.ts
 /**
  * What each kind of SQLite target runs, which check holds a file to before anything applies (S1 of r19,
- * S1 of r22): a local SQLite file runs what SQLite does, a D1 database what its authorizer lists, and a
- * libsql server (sqld) what its parser and authorizer let through. No `-- comb:allow-unsafe:` clears a
- * refusal here: the target would fail the file at apply.
+ * S1 of r22): a local SQLite file runs what SQLite does, and a libsql server (sqld) what its parser and
+ * authorizer let through. A D1 database runs what its own engine does, which check asks it (d1-engine.ts,
+ * SD1 of r22), so no list here. No `-- comb:allow-unsafe:` clears a refusal here: the target would fail
+ * the file at apply.
  */
 import type { Pragma } from "./sql-code.ts";
 /**

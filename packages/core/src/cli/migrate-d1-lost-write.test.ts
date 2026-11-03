@@ -7,7 +7,15 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { Run } from "../migrate/core/process.ts"
-import { asWrangler, type FakeD1, fakeD1, localD1, writeSum } from "./__fixtures__/d1.ts"
+import {
+	asWrangler,
+	type FakeD1,
+	fakeD1,
+	LIVE_NOT_JSON,
+	localD1,
+	READS_LIVE_JSON,
+	writeSum,
+} from "./__fixtures__/d1.ts"
 import { makeIo, projects } from "./__fixtures__/io.ts"
 import { runCli } from "./run.ts"
 
@@ -151,9 +159,10 @@ describe("migrate apply on D1 after a lost read-back", () => {
 	it.each(["ran", "failed"])(
 		"is refused after wrangler %s, naming the files and telling status to say which committed",
 		async (how) => {
-			const bad = { "20260102000000_bad.sql": "INSERT INTO nope (id) VALUES ('x');" }
+			const bad = { "20260102000000_bad.sql": READS_LIVE_JSON }
 			const dir = worker(how === "ran" ? INIT : { ...INIT, ...bad })
 			const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
+			d1.db.exec(LIVE_NOT_JSON)
 			let ran = false
 			const blind: Run = asWrangler((cmd, args, options) => {
 				if (args[1] === "migrations") ran = true

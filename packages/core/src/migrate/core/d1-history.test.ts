@@ -2,7 +2,15 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { asWrangler, fakeD1, localD1, wranglerBin, writeSum } from "../../cli/__fixtures__/d1.ts"
+import {
+	asWrangler,
+	fakeD1,
+	LIVE_NOT_JSON,
+	localD1,
+	READS_LIVE_JSON,
+	wranglerBin,
+	writeSum,
+} from "../../cli/__fixtures__/d1.ts"
 import { createD1Provider } from "../drivers/d1.ts"
 import { approveMigration } from "./approval.ts"
 import { type D1Target, findWranglerConfig, type ReadConfig } from "./d1-binding.ts"
@@ -349,20 +357,22 @@ describe("applyD1 when wrangler stops short", () => {
 			}
 		})
 		writeFileSync(join(d1.migrationsDir, "2_b.sql"), "CREATE TABLE b (id TEXT);")
-		writeFileSync(join(d1.migrationsDir, "3_c.sql"), "INSERT INTO nope (id) VALUES ('x');")
+		writeFileSync(join(d1.migrationsDir, "3_c.sql"), READS_LIVE_JSON)
 		writeSum(d1.migrationsDir)
+		run.db.exec(LIVE_NOT_JSON)
 		const error = (await applyD1({ ...d1, exec: coloured }, { approve, print: () => undefined, read }).catch(
 			(e: unknown) => e,
 		)) as Error
 		expect(error).toMatchObject({ applied: ["1_init.sql", "2_b.sql"], pending: ["3_c.sql"] })
 		expect(error.message).toBe(
-			"wrangler d1 migrations apply failed: ✘ [ERROR] Migration 3_c.sql failed: no such table: nope",
+			"wrangler d1 migrations apply failed: ✘ [ERROR] Migration 3_c.sql failed: malformed JSON",
 		)
 		expect(await hashed(d1)).toEqual(["1_init.sql", "2_b.sql"])
 	})
 })
 
-/* S1 of r19: D1 runs only the pragmas it authorizes, even --local, so an approved other pragma could never apply */
+/* S1 of r19, SD1 of r22: D1 runs only the pragmas it authorizes, even --local, so an approved other pragma could
+   never apply; check asks D1's own engine, the checked wrangler's, which names its refusal */
 describe("applyD1 on a pragma D1 does not authorize", () => {
 	it.each(["PRAGMA temp_store = MEMORY", 'PRAGMA "cache_size" = 10', "PRAGMA main.secure_delete = 1"])(
 		"refuses %j in check and apply before wrangler runs, whatever the approval, and passes a pragma D1 runs",
@@ -374,7 +384,7 @@ describe("applyD1 on a pragma D1 does not authorize", () => {
 			run.calls.length = 0
 			for (const checkOnly of [true, false])
 				await expect(applyD1(d1, { approve, checkOnly, print: () => undefined, read })).rejects.toThrow(
-					/D1 runs only the pragmas it authorizes/,
+					/2_p\.sql: D1 refuses this file on its own engine, as wrangler's apply would: .*not authorized/,
 				)
 			expect(run.calls.some((call) => call[2] === "migrations")).toBe(false)
 			writeFileSync(join(d1.migrationsDir, "2_p.sql"), "PRAGMA defer_foreign_keys = on;\nCREATE TABLE p (id TEXT);\n")
