@@ -12,6 +12,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 	symlinkSync,
 	writeFileSync,
@@ -81,6 +82,36 @@ const CORE_FILES = ["package.json", "tsconfig.json", "tsconfig.strict.json", "ts
 const MODULES = ["node_", "modules"].join("")
 
 /**
+ * The files a pack reads at `root` that git would commit. HN1 of plan 21: a copy of the tree that is no
+ * repository of its own lists the enclosing one's files, or none where it ignores the copy, so it is refused
+ */
+export function packFiles(root: string): string[] {
+	const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8" })
+	const repository = top.status === 0 ? realpathSync(top.stdout.trim()) : "none"
+	if (repository !== realpathSync(root)) {
+		throw new Error(
+			`${root} is not the top of its git repository (${repository}); pack from a checkout or a worktree of comb`,
+		)
+	}
+	const listed = spawnSync(
+		"git",
+		[
+			"ls-files",
+			"-co",
+			"--exclude-standard",
+			"--",
+			...ROOT_FILES,
+			...CORE_FILES.map((file) => `packages/core/${file}`),
+		],
+		{ cwd: root, encoding: "utf8" },
+	)
+	if (listed.status !== 0) throw new Error(`git ls-files exited ${listed.status}\n${listed.stderr}`)
+	const files = listed.stdout.split("\n").filter((line) => line !== "")
+	if (files.length === 0) throw new Error(`git lists none of the files a pack reads at ${root}`)
+	return files
+}
+
+/**
  * comb packed by the release's own script (K1 of r20: the tarball it publishes), and the directory it
  * printed, under the OS temp dir. It packs a copy: bun pm pack walks every directory of the package, so
  * packing the live tree fails when a test removes its scratch directory mid-walk, and prepack would write
@@ -88,22 +119,10 @@ const MODULES = ["node_", "modules"].join("")
  * commit, as the release's checkout holds them, borrowing the repo's installed modules
  */
 export function packedDir(): string {
+	const files = packFiles(ROOT)
 	const copy = mkdtempSync(join(ROOT, ".tmp-pack-"))
 	try {
-		const listed = spawnSync(
-			"git",
-			[
-				"ls-files",
-				"-co",
-				"--exclude-standard",
-				"--",
-				...ROOT_FILES,
-				...CORE_FILES.map((file) => `packages/core/${file}`),
-			],
-			{ cwd: ROOT, encoding: "utf8" },
-		)
-		if (listed.status !== 0) throw new Error(`git ls-files exited ${listed.status}\n${listed.stderr}`)
-		for (const file of listed.stdout.split("\n").filter((line) => line !== "")) {
+		for (const file of files) {
 			mkdirSync(dirname(join(copy, file)), { recursive: true })
 			cpSync(join(ROOT, file), join(copy, file))
 		}
