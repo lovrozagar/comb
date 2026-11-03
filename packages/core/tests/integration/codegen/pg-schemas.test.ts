@@ -62,3 +62,37 @@ describe("comb codegen: one table name in two Postgres schemas (F51)", () => {
 		expect(ids).toEqual({ app: ["in-public"], auth: ["in-auth"] })
 	}, 120_000)
 })
+
+/* CS5 of r22b: the manifest's audience reads no TypeScript, so a relation names its target as the entity does */
+const NAMED = `import { pgSchema, pgTable, text } from "drizzle-orm/pg-core"
+export const app = pgSchema("app")
+export const org = app.table("org", { id: text("id").primaryKey() })
+export const userAccount = pgTable("user_account", { id: text("id").primaryKey() })
+export const member = pgTable("member", {
+	id: text("id").primaryKey(),
+	orgId: text("org_id").references(() => org.id),
+	accountId: text("account_id").references(() => userAccount.id),
+})
+`
+
+type Relation = { column: string; refColumn: string; table: string }
+type Entity = { columns: Array<{ name: string }>; name: string; relations: Relation[] }
+
+describe("the manifest's relations (CS5; siblings: a pgSchema table and a camelCase variable)", () => {
+	it("each name the target entity by its name, and their columns by the entities' column names, at v 3", async () => {
+		const dir = project({ "src/db/db.core.tables.ts": NAMED })
+		const { code, err } = await runCodegen(dir, ["--tables", "src/db/db.core.tables.ts"])
+		expect(code, err).toBe(0)
+		const manifest = JSON.parse(read(dir, "src/db/db.core.manifest.gen.json")) as { entities: Entity[]; v: number }
+		expect(manifest.v).toBe(3)
+		const byName = new Map(manifest.entities.map((entity) => [entity.name, entity]))
+		const relations = manifest.entities.flatMap((entity) => entity.relations.map((relation) => ({ entity, relation })))
+		expect(relations.map(({ relation }) => relation.table).toSorted()).toEqual(["app.org", "user_account"])
+		for (const { entity, relation } of relations) {
+			const target = byName.get(relation.table)
+			expect(target, relation.table).toBeDefined()
+			expect(target?.columns.map(({ name }) => name)).toContain(relation.refColumn)
+			expect(entity.columns.map(({ name }) => name)).toContain(relation.column)
+		}
+	}, 120_000)
+})

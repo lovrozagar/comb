@@ -21,7 +21,7 @@ import { transformsOf } from "./dtos/text-schema.ts"
  * changes meaning. Adding a field never bumps it, so a reader that ignores what
  * it does not recognise keeps working across comb releases.
  */
-const MANIFEST_VERSION = 2
+const MANIFEST_VERSION = 3
 
 type ManifestColumn = {
 	name: string
@@ -64,10 +64,13 @@ type ManifestColumn = {
 }
 
 type ManifestRelation = {
+	/** the referencing column, by its name among this entity's `columns` */
 	column: string
 	/** the composite key the column is part of, each column paired by position with the one it references; absent on a single-column key */
 	key?: { columns: string[]; refColumns: string[] } | undefined
+	/** the referenced entity, by its `name`: schema-qualified on Postgres, never the TypeScript variable (CS5 of r22b; v 3) */
 	table: string
+	/** the referenced column, by its name among that entity's `columns` */
 	refColumn: string
 	onDelete: string | null
 	onUpdate: string | null
@@ -136,7 +139,11 @@ function toColumn(field: FieldMeta, dialect: GeneratorContext["dialect"]): Manif
 	}
 }
 
-function toEntity(table: TableMeta, dialect: GeneratorContext["dialect"]): ManifestEntity {
+/** Each table's entity name, by the variable a foreign key names its target with */
+const entityNames = (tables: TableMeta[]): Map<string, string> =>
+	new Map(tables.map((table) => [table.varName, qualifiedName(table)]))
+
+function toEntity(table: TableMeta, dialect: GeneratorContext["dialect"], names: Map<string, string>): ManifestEntity {
 	/* The same derivation the schema stamp uses, so the two cannot disagree. */
 	const meta = deriveEntityMeta(table)
 
@@ -150,7 +157,7 @@ function toEntity(table: TableMeta, dialect: GeneratorContext["dialect"]): Manif
 			onDelete: fk.onDelete ?? null,
 			onUpdate: fk.onUpdate ?? null,
 			refColumn: fk.refColumn,
-			table: fk.refTable,
+			table: names.get(fk.refTable) as string,
 		})
 	}
 
@@ -182,10 +189,11 @@ function toEntity(table: TableMeta, dialect: GeneratorContext["dialect"]): Manif
  * an identical file regardless of declaration order.
  */
 function buildManifest(tables: TableMeta[], dbName: string, dialect: GeneratorContext["dialect"]): Manifest {
+	const names = entityNames(tables)
 	return {
 		database: dbName,
 		entities: tables
-			.map((table) => toEntity(table, dialect))
+			.map((table) => toEntity(table, dialect, names))
 			.sort((a, b) => Number(a.name > b.name) - Number(a.name < b.name)),
 		v: MANIFEST_VERSION,
 	}

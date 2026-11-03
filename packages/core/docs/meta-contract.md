@@ -630,7 +630,9 @@ learn the shape of the database.
 `comb codegen -g manifest` writes `db.<name>.manifest.gen.json` alongside the generated entities.
 Per entity it carries the identity, id prefix, `softDelete`, `tenantColumn`, relations with their
 referential actions, unique indexes, partial unique indexes (`partialUniqueIndexes`, each with its
-`where`) and check constraints. A composite foreign key is one relation
+`where`) and check constraints. A relation names its target in `table` by that entity's `name`, schema-qualified on Postgres as
+every entity is, and its `column` and `refColumn` by their names among each entity's `columns`, so a
+reader joins through the manifest alone. A composite foreign key is one relation
 per column, each carrying the whole key as `key: { columns, refColumns }`, paired by position, so
 a reader joins on every column together rather than on independent pairs. Per column it carries the helper that
 declared it, the bounds a write takes and enum values, `textKind` (`"email"`, `"url"`, `"imageUri"`,
@@ -671,7 +673,9 @@ manifest to the bodies field by field.
 Entities are sorted by name and the file carries a checksum header, so regenerating an unchanged
 schema is a no-op and a real change is a readable diff. `v` follows the same rule as the contract:
 additive fields never bump it. `v` 2 (comb 0.19) changed what `min` and `max` mean, from declared
-to enforced, and replaced `pattern` with `patterns`, so a reader of `v` 1 refuses it.
+to enforced, and replaced `pattern` with `patterns`, so a reader of `v` 1 refuses it. `v` 3 (comb
+0.21) changed what a relation's `table` means, from the target's TypeScript variable to its
+entity name, so a reader of `v` 2 refuses it.
 
 This is also the substrate for the deferred query-tap work — a committed artifact a reviewer reads
 in a pull request, which is the only shape that work may take.
