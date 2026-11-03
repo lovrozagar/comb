@@ -4,7 +4,7 @@ import { parseField } from "../../__fixtures__/runtime.ts"
 import type { ImportsMeta } from "../../analyzer-types.ts"
 import type { SchemaType } from "./dto-types.ts"
 import { generateFieldSchema } from "./field-schema.ts"
-import { pgWriteRule } from "./pg-types.ts"
+import { pgModifierOf, pgWriteRule } from "./pg-types.ts"
 
 const imports = (): ImportsMeta => ({ enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() })
 
@@ -101,5 +101,103 @@ describe("a Postgres read array's stated bounds", () => {
 		const found = levels(source)
 		expect(found).toHaveLength(6)
 		expect(found.map(xComb)).toEqual(found.map(() => keys))
+	})
+})
+
+/** Whether the rule of a Postgres column written as `source` takes each of `values` */
+const takes = (source: string, values: string[]) => {
+	const schema = new Function("z", `return ${rule(source)}`)(z) as z.ZodType
+	return values.map((value) => schema.safeParse(value).success)
+}
+
+/* CD5, CD6 of r22b: the PG17 suite (pg-typmods) holds each rule to Postgres; these hold the parse and each branch */
+describe("a Postgres type modifier is parsed once (CD5, CD6; sibling: numeric's scale bound)", () => {
+	it.each([
+		["time", { base: "time", precision: null, withTimeZone: false }],
+		["time(3) with time zone", { base: "time", precision: 3, withTimeZone: true }],
+		["timestamp (0)", { base: "timestamp", precision: 0, withTimeZone: false }],
+		["timestamp(6) with time zone", { base: "timestamp", precision: 6, withTimeZone: true }],
+		["numeric", { base: "numeric", precision: null, scale: 0 }],
+		["numeric(3)", { base: "numeric", precision: 3, scale: 0 }],
+		["numeric(2, 5)", { base: "numeric", precision: 2, scale: 5 }],
+		["numeric(3, -2)", { base: "numeric", precision: 3, scale: -2 }],
+		["interval", { base: "interval", field: null, precision: null }],
+		["interval(3)", { base: "interval", field: null, precision: 3 }],
+		["interval day", { base: "interval", field: "day", precision: null }],
+		["interval year to month", { base: "interval", field: "month", precision: null }],
+		["interval day to second(3)", { base: "interval", field: "second", precision: 3 }],
+		["bit(3)", { base: "bit", length: 3 }],
+		["text", { base: "other" }],
+	] as const)("reads %s", (sqlType, modifier) => {
+		expect(pgModifierOf(sqlType)).toEqual(modifier)
+	})
+})
+
+describe("a time's rules read the parsed modifier (CD5, CD6; sibling: a timestamp's precision)", () => {
+	it("holds a time's fraction to its precision, local or with an offset", () => {
+		expect(takes('time("v", { precision: 0 })', ["10:00", "10:00:01", "10:00:01.5"])).toEqual([true, true, false])
+		expect(takes('time("v", { precision: 2 })', ["10:00:01.25", "10:00:01.255"])).toEqual([true, false])
+		expect(takes('time("v")', ["10:00:01.123456789"])).toEqual([true])
+		expect(takes('time("v", { precision: 0, withTimezone: true })', ["10:00:01Z", "10:00:01.5Z"])).toEqual([
+			true,
+			false,
+		])
+		expect(takes('time("v", { precision: 2, withTimezone: true })', ["10:00:01.25+02", "10:00:01.255+02"])).toEqual([
+			true,
+			false,
+		])
+		expect(takes('time("v", { withTimezone: true })', ["10:00:01.123456+02:00", "10:00:01"])).toEqual([true, false])
+	})
+
+	it("holds a timestamp's fraction to its precision, local or with an offset", () => {
+		expect(
+			takes('timestamp("v", { mode: "string", precision: 0 })', ["2024-01-01T10:00:00", "2024-01-01T10:00:00.5"]),
+		).toEqual([true, false])
+		expect(
+			takes('timestamp("v", { mode: "string", precision: 2, withTimezone: true })', [
+				"2024-01-01T10:00:00.12+02:00",
+				"2024-01-01T10:00:00.123Z",
+			]),
+		).toEqual([true, false])
+		expect(
+			takes('timestamp("v", { mode: "string", precision: 0, withTimezone: true })', ["2024-01-01T10:00:00.1Z"]),
+		).toEqual([false])
+	})
+})
+
+describe("an interval's and a numeric's rules read the parsed modifier (CD5, CD6; sibling: numeric's scale bound)", () => {
+	it("keeps an interval's parts at and above its last field, and its fraction to its precision", () => {
+		expect(takes('interval("v", { fields: "year" })', ["P2Y", "P2Y1M"])).toEqual([true, false])
+		expect(takes('interval("v", { fields: "minute" })', ["P1DT1H1M", "PT1M1S"])).toEqual([true, false])
+		expect(takes('interval("v", { fields: "second" })', ["P1DT1.25S"])).toEqual([true])
+		expect(takes('interval("v", { fields: "hour to second", precision: 2 })', ["PT1.25S", "PT1.255S"])).toEqual([
+			true,
+			false,
+		])
+		expect(takes('interval("v")', ["P1Y2M3DT4H5M6.789S"])).toEqual([true])
+	})
+
+	it("bounds a numeric by a scale past its precision, or below 0", () => {
+		expect(
+			takes('numeric("v", { precision: 1, scale: 3 })', ["0.009", "0.001", "0.01", "0.0091", "0.000", "-0.003"]),
+		).toEqual([true, true, false, false, true, true])
+		expect(takes('numeric("v", { precision: 2, scale: -3 })', ["99000", "1000", "100000", "1500", "0"])).toEqual([
+			true,
+			true,
+			false,
+			false,
+			true,
+		])
+		const bound = new Function("z", `return ${rule('numeric("v", { mode: "number", precision: 3, scale: -2 })')}`)(
+			z,
+		) as z.ZodType
+		expect([99_949, 99_950].map((value) => bound.safeParse(value).success)).toEqual([true, false])
+	})
+
+	it("refuses a data type whose SQL type holds no modifier of its kind", () => {
+		const field = parseField("v", 'time("v")', { dialect: "postgres" })
+		expect(() => pgWriteRule({ ...field, sqlType: "time zone" })).toThrow(
+			new TypeError("comb reads no time modifier in time zone"),
+		)
 	})
 })
