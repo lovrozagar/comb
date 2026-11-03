@@ -1,7 +1,7 @@
 /** The Zod expression one column gets in each of the read, readPartial, create and update DTOs. */
 import type { FieldMeta, ImportsMeta } from "../../analyzer-types.ts"
 import type { FieldConstraints } from "../../annotations.ts"
-import { isGenerated } from "../../entity-meta.ts"
+import { writesOf } from "../../entity-meta.ts"
 import { type Base, type Build, plain } from "./build-types.ts"
 import type { SchemaType, SharedName } from "./dto-types.ts"
 import { generateExampleMeta } from "./example-meta.ts"
@@ -190,7 +190,7 @@ export function fieldSchemaOf(
 	{ dialect = "sqlite", imports }: FieldSchemaOptions,
 ): { code: string; uses: readonly SharedName[] } | null {
 	if (field.constraints.private && isRead(schemaType)) return null
-	if (isMutative(schemaType) && isGenerated(field)) return null
+	if ((schemaType === "create" || schemaType === "update") && !writesOf(field)[schemaType]) return null
 	const build: Build = { annotations: field.constraints, dialect, field, imports, schemaType }
 	const dimensions = field.dimensions ?? 0
 	if (dimensions === 0) {

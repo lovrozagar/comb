@@ -6,7 +6,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import type { ImportRef, TableMeta } from "../../analyzer-types.ts"
-import { deriveEntityMeta, isExcludedFromUpdate } from "../../entity-meta.ts"
+import { deriveEntityMeta } from "../../entity-meta.ts"
 import { subpathName } from "../../utils/case.ts"
 import { writeGenFile } from "../../utils/fs.ts"
 import type { GeneratorContext } from "../context-types.ts"
@@ -26,8 +26,6 @@ function fieldInfosOf(meta: TableMeta, ctx: GeneratorContext): FieldInfo[] {
 	const fields: FieldInfo[] = []
 	for (const field of meta.fields) {
 		for (const type of SCHEMA_TYPES) {
-			/* Shared with the published `immutable` list so the two cannot disagree */
-			if (type === "update" && isExcludedFromUpdate(field)) continue
 			const schema = fieldSchemaOf(field, type, { dialect: ctx.dialect, imports: ctx.analysis.imports })
 			if (schema !== null) fields.push({ key: field.name, type, uses: schema.uses, zodType: schema.code })
 		}
@@ -36,13 +34,10 @@ function fieldInfosOf(meta: TableMeta, ctx: GeneratorContext): FieldInfo[] {
 }
 
 function tableInfoOf(meta: TableMeta, ctx: GeneratorContext): TableInfo {
-	const fields = fieldInfosOf(meta, ctx)
-	/* The set the generator actually emitted — not a restatement of the rules that produced
-	   it, so `immutable` cannot drift from the update DTO. */
-	const updateFields = new Set(fields.filter((f) => f.type === "update").map((f) => f.key))
 	return {
-		combMeta: deriveEntityMeta(meta, updateFields),
-		fields,
+		/* the stamp reads the rule fieldSchemaOf drops a write field by, writesOf, so it states what the DTOs take */
+		combMeta: deriveEntityMeta(meta),
+		fields: fieldInfosOf(meta, ctx),
 		hasTimestamps: {
 			createdAt: meta.timestamps.createdAt,
 			deletedAt: meta.timestamps.deletedAt,

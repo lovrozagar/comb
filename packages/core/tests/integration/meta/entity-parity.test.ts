@@ -426,10 +426,10 @@ export const post = sqliteTable("post", { id: c.id("pst"), orgId: ${column}, tit
 					TABLES[dialect](column),
 					{ dialect, entity: "post" },
 				)
-				expect(channels.stamp.tenantColumn).toBe("orgId")
+				expect(channels.stamp?.tenantColumn).toBe("orgId")
 				expect(channels.create).toContain("orgId")
 				expect(channels.update).not.toContain("orgId")
-				expect(channels.stamp.immutable).toContain("orgId")
+				expect(channels.stamp?.immutable).toContain("orgId")
 				expect(channels.manifest["orgId"]?.immutable).toBe(true)
 				expect(disagreements(channels)).toEqual([])
 			})
@@ -455,5 +455,44 @@ export const post = sqliteTable("post", { id: c.id("pst"), orgId: ${column}, tit
 				{ dialect: "sqlite", entity: "post" },
 			),
 		).rejects.toThrow(/mutable and nomutate contradict/)
+	})
+})
+
+/* CD7, CS4 and CS6 of r22b: three predicates decided whether the database fills a column, so a
+   non-key identity was out of both bodies yet not `generated`, and the manifest's flags, read off
+   the predicate, contradicted the stamp, read off the emitted update body, and left a private
+   column's flags false whatever the bodies did */
+describe("the stamp and the manifest state what the bodies take (CD7, CS4, CS6; sibling: the tenant, 8.12)", () => {
+	afterAll(() => cleanGeneratedDtos())
+
+	const PG = `import { integer, primaryKey, serial, text } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
+export const owner = pgTable("owner", { id: c.id("own") })
+export const ticket = pgTable("ticket", {
+	id: c.id("tkt"),
+	seq: integer("seq").generatedAlwaysAsIdentity(),
+	byDefault: integer("by_default").generatedByDefaultAsIdentity(),
+	total: integer("total").generatedAlwaysAs(sql\`1\`),
+	ser: serial("ser"),
+	_ownerId: c.ref("owner_id").notNull().references(() => owner.id),
+	_token: c.text("token", { autogenerate: true }),
+	title: c.text("title"),
+})
+export const member = pgTable("member", { orgId: text("org_id").notNull(), userId: text("user_id").notNull(), seq: integer("seq").generatedAlwaysAsIdentity(), role: c.text("role") }, (t) => [primaryKey({ columns: [t.orgId, t.userId] })])`
+
+	it("on an identity of both kinds, a generated column, a serial and private columns, field by field", async () => {
+		const channels = await entityChannels("cs4-ticket", PG, { dialect: "postgres", entity: "ticket" })
+		expect(channels.create.toSorted()).toEqual(["_ownerId", "ser", "title"])
+		expect(channels.stamp?.generated.toSorted()).toEqual(["byDefault", "id", "seq", "total"])
+		expect(channels.manifest["_ownerId"]).toMatchObject({ generated: false, immutable: true, private: true })
+		expect(channels.manifest["_token"]).toMatchObject({ generated: true, immutable: true, private: true })
+		expect(disagreements(channels)).toEqual([])
+	})
+
+	it("on a composite key, which publishes no stamp, the manifest against the bodies", async () => {
+		const channels = await entityChannels("cs4-member", PG, { dialect: "postgres", entity: "member" })
+		expect(channels.stamp).toBeNull()
+		expect(channels.manifest["seq"]).toMatchObject({ generated: true, immutable: true })
+		expect(disagreements(channels)).toEqual([])
 	})
 })

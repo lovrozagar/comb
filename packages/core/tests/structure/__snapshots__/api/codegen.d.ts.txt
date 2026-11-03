@@ -292,15 +292,19 @@ export declare function fieldConstraintsOf(constraints: Readonly<Record<string, 
  */
 import type { CombEntityMetaInput } from "../meta.ts";
 import type { FieldMeta, PartialUniqueIndexMeta, TableMeta } from "./analyzer-types.ts";
+/** Which write bodies take a field */
+type Writes = {
+    create: boolean;
+    update: boolean;
+};
 /**
- * Whether a field is absent from the generated update body.
- *
- * The DTO generator skips these fields when it builds the update body, and
- * `deriveEntityMeta` falls back to it when called without generator output, as
- * the manifest calls it. The schema stamp reads the field set the generator
- * actually emitted instead, so a rule `generateFieldSchema` adds on its own
- * still reaches `immutable`.
+ * Which write bodies take `field`: what comb or the database fills neither, what a body sets once
+ * the create body alone. The one rule the DTO generator, the stamp's `generated` and `immutable`
+ * and the manifest's flags all read, a private column's included, so no channel can state a fact
+ * another contradicts (CD7, CS4 and CS6 of r22b, meta-contract §8.2)
  */
+declare function writesOf(field: FieldMeta): Writes;
+/** Whether a field is absent from the generated update body, by writesOf */
 declare function isExcludedFromUpdate(field: FieldMeta): boolean;
 declare function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueIndexes"];
 /**
@@ -309,20 +313,14 @@ declare function publishedUniqueIndexes(table: TableMeta): TableMeta["uniqueInde
  */
 declare function publishedPartialUniqueIndexes(table: TableMeta): PartialUniqueIndexMeta[];
 /**
- * Whether comb or the database fills `field`: an `autogenerate` column, a generated or identity
- * column (F8), or a key that c.id, c.serialId, AUTOINCREMENT or a default fills; a natural key the
- * caller supplies is not generated
- */
-declare function isGenerated(field: FieldMeta): boolean;
-/**
  * Build entity facts, or null when the table has no single identity to publish.
  *
  * A composite primary key has no one identifier, and picking a column would be
  * a guess — the downstream item-route checks do not apply to such an entity
  * anyway. Omitting is the honest outcome; see docs §6.4.
  */
-declare function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>): CombEntityMetaInput | null;
-export { deriveEntityMeta, isExcludedFromUpdate, isGenerated, publishedPartialUniqueIndexes, publishedUniqueIndexes };
+declare function deriveEntityMeta(table: TableMeta): CombEntityMetaInput | null;
+export { deriveEntityMeta, isExcludedFromUpdate, publishedPartialUniqueIndexes, publishedUniqueIndexes, writesOf };
 
 // codegen/utils/validate.d.ts
 import type { AnalysisResult } from "../analyzer-types.ts";

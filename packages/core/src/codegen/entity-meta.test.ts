@@ -45,7 +45,6 @@ describe("deriveEntityMeta: private columns", () => {
 					],
 				},
 			),
-			new Set(["slug", "_secret"]),
 		)
 		expect(meta).toMatchObject({
 			generated: ["id"],

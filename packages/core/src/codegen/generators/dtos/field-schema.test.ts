@@ -66,7 +66,8 @@ describe("generateFieldSchema: what each schema type includes", () => {
 			/^z\.number\(\)\.int\(\)\.min\(globalThis\.Number\.MIN_SAFE_INTEGER\)/,
 		)
 		expect(generateFieldSchema(team, "read", { imports: imports() })).toMatch(/^z\.number\(\)\.int\(\)/)
-		expect(generateFieldSchema(team, "update", { imports: imports() })).toMatch(/^z\.number\(\)\.int\(\)/)
+		/* a reference is set once, so the update body has none (F25, writesOf in entity-meta.ts) */
+		expect(generateFieldSchema(team, "update", { imports: imports() })).toBeNull()
 		/* a text reference to a c.id key takes the id bounds; to any other column, its own (F5, F10) */
 		const owner = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.id)', {
 			foreignKey: { ...fk, toId: true },
@@ -80,9 +81,10 @@ describe("generateFieldSchema: what each schema type includes", () => {
 		expect(generateFieldSchema(slug, "create", { imports: imports() })).toBe("z.string().min(1).max(200)")
 	})
 
-	/* whether a reference enters the update DTO is isExcludedFromUpdate's (entity-meta.ts); this renders its rules */
+	/* whether a body takes a reference is writesOf's (entity-meta.ts): a mutable one enters update */
 	it("renders a reference's rules for every schema type: a c.ref that names no target, the id rules", () => {
-		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBe(
+		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBeNull()
+		expect(schema("owner_id", 'c.ref("owner_id", { mutable: true })', "update")).toBe(
 			"z.string().regex(/^\\S{1,48}$/).nullable().optional()",
 		)
 		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe(

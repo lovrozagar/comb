@@ -17,8 +17,8 @@ export type EntityChannels = {
 	create: string[]
 	/** the manifest's column of each field, by name */
 	manifest: Record<string, ManifestColumn>
-	/** the stamp on the generated read schema */
-	stamp: CombEntityMeta
+	/** the stamp on the generated read schema; null where it carries none, as for a composite key */
+	stamp: CombEntityMeta | null
 	/** the keys the generated update DTO takes */
 	update: string[]
 }
@@ -37,7 +37,6 @@ export async function entityChannels(
 	const module = dtos[kebab] as Record<string, unknown>
 	const published = z.toJSONSchema(module[`${entity}DtoReadSchema`] as z.ZodType, { unrepresentable: "any" })
 	const stamp = readCombEntityMeta(published)
-	if (stamp === null) throw new Error(`${entity}'s read schema carries no stamp`)
 	const analysis = analyze(path.join(generatedDir(name), "db.x.tables.ts"))
 	const manifest = buildManifest(analysis.tables, "x", options.dialect).entities.find((each) => each.varName === entity)
 	if (manifest === undefined) throw new Error(`the manifest holds no ${entity}`)
@@ -50,23 +49,33 @@ export async function entityChannels(
 }
 
 /**
- * Each disagreement between the channels, as `<field>: <what>`: a field the stamp calls generated
- * that the create DTO takes, or immutable that the update DTO takes, and back; and the manifest's
- * flags against the stamp's lists
+ * Each disagreement between the channels, as `<field>: <what>`: the manifest's `generated` against
+ * the create body and its `immutable` against the update body, for every column, a private one
+ * included (CS6 of r22b); and, for a published column, the stamp's lists against both, both ways
+ * (CS4). A private column is in neither of the stamp's lists, whose names stay out of the document
  */
 export function disagreements({ create, manifest, stamp, update }: EntityChannels): string[] {
 	return Object.values(manifest).flatMap(({ generated, immutable, name, private: hidden }) => {
-		if (hidden) return []
-		const said = { generated: stamp.generated.includes(name), immutable: stamp.immutable.includes(name) }
+		const body = { generated: !create.includes(name), immutable: !update.includes(name) }
+		const said = {
+			generated: stamp?.generated.includes(name) ?? body.generated,
+			immutable: stamp?.immutable.includes(name) ?? body.immutable,
+		}
+		const listed = hidden && stamp !== null && (said.generated || said.immutable)
 		return [
-			...(said.generated === create.includes(name)
-				? [`${name}: stamp generated ${said.generated}, create takes it ${create.includes(name)}`]
-				: []),
-			...(said.immutable === update.includes(name)
-				? [`${name}: stamp immutable ${said.immutable}, update takes it ${update.includes(name)}`]
-				: []),
-			...(generated === said.generated ? [] : [`${name}: manifest generated ${generated}, stamp ${said.generated}`]),
-			...(immutable === said.immutable ? [] : [`${name}: manifest immutable ${immutable}, stamp ${said.immutable}`]),
+			...(generated === body.generated
+				? []
+				: [`${name}: manifest generated ${generated}, create takes it ${!body.generated}`]),
+			...(immutable === body.immutable
+				? []
+				: [`${name}: manifest immutable ${immutable}, update takes it ${!body.immutable}`]),
+			...(listed ? [`${name}: private, yet in the stamp's lists`] : []),
+			...(hidden || said.generated === body.generated
+				? []
+				: [`${name}: stamp generated ${said.generated}, create takes it ${!body.generated}`]),
+			...(hidden || said.immutable === body.immutable
+				? []
+				: [`${name}: stamp immutable ${said.immutable}, update takes it ${!body.immutable}`]),
 		]
 	})
 }

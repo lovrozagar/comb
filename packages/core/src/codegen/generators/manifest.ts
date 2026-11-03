@@ -6,12 +6,7 @@
  * a change to one moves the other. See docs/meta-contract.md §8.2.
  */
 import path from "node:path"
-import {
-	deriveEntityMeta,
-	isExcludedFromUpdate,
-	publishedPartialUniqueIndexes,
-	publishedUniqueIndexes,
-} from "../entity-meta.ts"
+import { deriveEntityMeta, publishedPartialUniqueIndexes, publishedUniqueIndexes, writesOf } from "../entity-meta.ts"
 import type { FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { writeGenJsonFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
@@ -112,17 +107,14 @@ type ManifestConfig = {
 const textKindOf = (constraints: FieldMeta["constraints"]): ManifestColumn["textKind"] =>
 	(["email", "url", "imageUri", "password", "name"] as const).find((kind) => constraints[kind]) ?? null
 
-function toColumn(
-	field: FieldMeta,
-	entityMeta: ReturnType<typeof deriveEntityMeta>,
-	dialect: GeneratorContext["dialect"],
-): ManifestColumn {
+function toColumn(field: FieldMeta, dialect: GeneratorContext["dialect"]): ManifestColumn {
 	const { constraints } = field
 	const { max, maxBytes, min, patterns } = writeRules(field, dialect)
 	return {
 		enumValues: field.enumValues,
-		generated: entityMeta ? entityMeta.generated.includes(field.name) : constraints.autogenerate,
-		immutable: entityMeta ? entityMeta.immutable.includes(field.name) : isExcludedFromUpdate(field),
+		/* what the write bodies do, read off the rule the DTOs and the stamp read, a private column's too (CS4, CS6 of r22b) */
+		generated: !writesOf(field).create,
+		immutable: !writesOf(field).update,
 		kind: field.drizzleHelper,
 		max,
 		maxBytes,
@@ -164,7 +156,7 @@ function toEntity(table: TableMeta, dialect: GeneratorContext["dialect"]): Manif
 
 	return {
 		checkConstraints: table.checkConstraints.map((c) => ({ expression: c.expression, name: c.name })),
-		columns: table.fields.map((f) => toColumn(f, meta, dialect)),
+		columns: table.fields.map((f) => toColumn(f, dialect)),
 		compositePrimaryKey: table.hasCompositePrimaryKey,
 		identity: meta?.identity ?? null,
 		idPrefix: table.idPrefix,

@@ -652,16 +652,21 @@ the JSON Schema the create DTO publishes, on both dialects. All of them bind a v
 publishes the first such column and leaves `transitions` out. Private columns are listed and
 flagged rather than omitted.
 
-It is a **projection**, not a second derivation. `identity`, `softDelete`, `tenantColumn` and the
-per-column `generated` and `immutable` flags come from `deriveEntityMeta`, the function the schema
-stamp uses, `uniqueIndexes` from `publishedUniqueIndexes` and `partialUniqueIndexes` from
-`publishedPartialUniqueIndexes`, the filters it applies, so the manifest cannot claim a fact the document contradicts —
-the rule §6.2 was written to enforce, applied to a second output. Because the stamp publishes
-nothing about a private column, a private column's `generated` and `immutable` flags are `false`,
-and a unique index over one is left out of both. The manifest has no generator output to hand, so
-its `immutable` flags come from `isExcludedFromUpdate` (§6.2). A table with a composite key has no
-stamp; its flags fall back to the column's own `autogenerate` annotation and to `isExcludedFromUpdate`. A test
-asserts the two agree field by field.
+It is a **projection**, not a second derivation. `identity`, `softDelete` and `tenantColumn` come
+from `deriveEntityMeta`, the function the schema stamp uses, `uniqueIndexes` from
+`publishedUniqueIndexes` and `partialUniqueIndexes` from `publishedPartialUniqueIndexes`, the
+filters it applies, so the manifest cannot claim a fact the document contradicts — the rule §6.2
+was written to enforce, applied to a second output. Each column's `generated` and `immutable` flags
+come from `writesOf`, the one rule that decides which write bodies take a column, which the create
+and update DTOs and the stamp's `generated` and `immutable` read too: a column comb or the database
+fills (`autogenerate`, a generated or identity column, a key that `c.id`, `c.serialId`,
+AUTOINCREMENT or a default fills) is in neither body, and is `generated` and `immutable`; a column a
+body sets once (a key, a composite key's column, `nomutate`, a tenant, a reference not declared
+`mutable`) is in the create body alone, and is `immutable`. A private column's flags state what the
+bodies do, as any column's; the stamp leaves its name out of both lists, and a unique index over
+one is left out of both. A table with a composite key has no stamp; its flags come from the same
+rule. A test generates the DTOs, reads the stamp off the emitted read schema and holds it and the
+manifest to the bodies field by field.
 
 Entities are sorted by name and the file carries a checksum header, so regenerating an unchanged
 schema is a no-op and a real change is a readable diff. `v` follows the same rule as the contract:

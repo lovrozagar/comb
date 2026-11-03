@@ -12,29 +12,35 @@ import { qualifiedName } from "./utils/table-name.ts"
 import { namesColumn } from "./utils/sql-name.ts"
 
 /**
- * Whether a field is absent from the generated update body.
- *
- * The DTO generator skips these fields when it builds the update body, and
- * `deriveEntityMeta` falls back to it when called without generator output, as
- * the manifest calls it. The schema stamp reads the field set the generator
- * actually emitted instead, so a rule `generateFieldSchema` adds on its own
- * still reaches `immutable`.
+ * Whether a body sets `field` once, at creation, and never updates it: a key, as a composite key's
+ * column is too (F7), a `nomutate` column, a tenant (CD1 of r22b, §6.3), and a reference that does
+ * not declare `mutable` (F25), as an ownership key a body could move would move the row to another
+ * tenant
  */
+const isSetOnce = (field: FieldMeta): boolean =>
+	field.isPrimaryKey ||
+	field.inCompositeKey ||
+	field.constraints.nomutate ||
+	field.constraints.tenant ||
+	(isReference(field) && !field.constraints.mutable)
+
+/** Which write bodies take a field */
+type Writes = { create: boolean; update: boolean }
+
+/**
+ * Which write bodies take `field`: what comb or the database fills neither, what a body sets once
+ * the create body alone. The one rule the DTO generator, the stamp's `generated` and `immutable`
+ * and the manifest's flags all read, a private column's included, so no channel can state a fact
+ * another contradicts (CD7, CS4 and CS6 of r22b, meta-contract §8.2)
+ */
+function writesOf(field: FieldMeta): Writes {
+	const filled = isGenerated(field)
+	return { create: !filled, update: !filled && !isSetOnce(field) }
+}
+
+/** Whether a field is absent from the generated update body, by writesOf */
 function isExcludedFromUpdate(field: FieldMeta): boolean {
-	return (
-		field.isPrimaryKey ||
-		/* a composite key's column is the row's identity too (F7) */
-		field.inCompositeKey ||
-		/* the database writes a generated column and refuses a value for it (F8) */
-		field.generated ||
-		field.constraints.nomutate ||
-		field.constraints.autogenerate ||
-		/* a tenant column is set once, whatever it references, if anything (CD1 of r22b, §6.3) */
-		field.constraints.tenant ||
-		/* a reference is set once, at creation, unless it declares mutable (F25): an ownership key
-		   (organization, project) that a body could move would move the row to another tenant */
-		(isReference(field) && !field.constraints.mutable)
-	)
+	return !writesOf(field).update
 }
 
 /**
@@ -127,25 +133,16 @@ function isGenerated(field: FieldMeta): boolean {
  * a guess — the downstream item-route checks do not apply to such an entity
  * anyway. Omitting is the honest outcome; see docs §6.4.
  */
-function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>): CombEntityMetaInput | null {
+function deriveEntityMeta(table: TableMeta): CombEntityMetaInput | null {
 	if (table.hasCompositePrimaryKey) return null
 
 	const primaryKey = table.fields.find((f) => f.isPrimaryKey)
 	if (!primaryKey) return null
 
-	/* `autogenerate` already defaults to true on the timestamp factories, so
-	   the parsed constraints cover both the explicit and the implied cases. */
 	/* a private column is absent from every published list (docs/meta-contract.md §8) */
 	const published = table.fields.filter((f) => !f.constraints.private)
-	const generated = published.filter((f) => f.constraints.autogenerate || f.generated).map((f) => f.name)
-	if (isGenerated(primaryKey) && !generated.includes(primaryKey.name)) generated.unshift(primaryKey.name)
-
-	/* Prefer the field set the generator actually emitted: whatever is missing
-	   from the update body is, by construction, immutable. Falling back to the
-	   predicate is for callers who have no generator output to hand. */
-	const immutable = updateFields
-		? published.filter((f) => !updateFields.has(f.name)).map((f) => f.name)
-		: published.filter(isExcludedFromUpdate).map((f) => f.name)
+	const generated = published.filter((f) => !writesOf(f).create).map((f) => f.name)
+	const immutable = published.filter((f) => !writesOf(f).update).map((f) => f.name)
 
 	return {
 		generated,
@@ -164,4 +161,4 @@ function deriveEntityMeta(table: TableMeta, updateFields?: ReadonlySet<string>):
 	}
 }
 
-export { deriveEntityMeta, isExcludedFromUpdate, isGenerated, publishedPartialUniqueIndexes, publishedUniqueIndexes }
+export { deriveEntityMeta, isExcludedFromUpdate, publishedPartialUniqueIndexes, publishedUniqueIndexes, writesOf }
