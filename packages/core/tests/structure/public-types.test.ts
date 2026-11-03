@@ -28,14 +28,6 @@ const ALLOWED: Record<string, string> = {
 		"the timestamp names PgColumns' deletedAt takes, which a consumer writes as literals",
 	"DeletedAtName (sqlite/columns.d.ts)":
 		"the timestamp names SqliteColumns' deletedAt takes, which a consumer writes as literals",
-	"drizzleListOptions (query/drizzle.d.ts)":
-		"a helper queryHelpers() returns, named through typeof; a consumer calls it through queryHelpers()",
-	"drizzleProject (query/drizzle.d.ts)":
-		"a helper queryHelpers() returns, named through typeof; a consumer calls it through queryHelpers()",
-	"extractFilterValue (query/filter-values.d.ts)":
-		"a helper queryHelpers() returns, named through typeof; a consumer calls it through queryHelpers()",
-	"extractFilterValues (query/filter-values.d.ts)":
-		"a helper queryHelpers() returns, named through typeof; a consumer calls it through queryHelpers()",
 	"HistoryFile (migrate/core/pg-replay.d.ts)":
 		"a test seam on CliIo, which KT7 of r22b (plan 21's 14.5) takes off the public type",
 	"LiveObjects (migrate/core/pg-live-types.d.ts)":
@@ -47,8 +39,6 @@ const ALLOWED: Record<string, string> = {
 	"NumericRangeConstraints (sqlite/constraints.d.ts)":
 		"a fragment TextConstraints composes; a consumer names TextConstraints, as the column factories take it",
 	"OptionalShape (query/list-schema.d.ts)": "the optional half of ListQueryShape; a consumer names ListQueryShape",
-	"paginate (query/pagination.d.ts)":
-		"a helper queryHelpers() returns, named through typeof; a consumer calls it through queryHelpers()",
 	"replayCatalog (migrate/core/pg-replay.d.ts)":
 		"a test seam on CliIo, which KT7 of r22b (plan 21's 14.5) takes off the public type",
 	"RESERVED_LIST_KEYS (query/schema-params.d.ts)":

@@ -74,6 +74,24 @@ export type All = [${RUNTIME.map((_, i) => `typeof m${i}`).join(", ")}]
 `
 
 /**
+ * A script that writes src/reexport.ts, re-exporting every value export of every subpath as a
+ * constant of its own, `<subpath>$<name>`, and prints how many (KT4 of r22b): a project that emits
+ * declarations names each one's type, which a type exported from no subpath leaves unnameable (TS2742)
+ */
+export const REEXPORT_ALL = `import { writeFileSync } from "node:fs"
+const specs = ${JSON.stringify(SUBPATHS)}
+const lines = []
+for (const [i, spec] of specs.entries()) {
+	const names = Object.keys(await import(spec)).sort()
+	const slug = spec === "@lovrozagar/comb" ? "root" : spec.slice("@lovrozagar/comb/".length).replaceAll(/[^a-z0-9]/gi, "_")
+	if (names.length > 0) lines.push("import * as m" + i + " from " + JSON.stringify(spec))
+	for (const name of names) lines.push("export const " + slug + "$" + name + " = m" + i + "." + name)
+}
+writeFileSync("src/reexport.ts", lines.join("\\n") + "\\n")
+console.log(lines.filter((line) => line.startsWith("export ")).length)
+`
+
+/**
  * A module of the two checks a TypeScript below 5.7 dropped with no error under skipLibCheck (KT2
  * of r22b): each must stay an error at comb's floor, and below it the named imports fail instead
  */
@@ -268,6 +286,20 @@ export const APP: Record<string, string> = {
 			rootDir: "src",
 		},
 		include: ["src/schemas.ts"],
+	}),
+	/* declarations emitted for a module that re-exports every value comb exports: each type has a public name (KT4 of r22b) */
+	"tsconfig.reexport.json": JSON.stringify({
+		compilerOptions: {
+			...STRICT,
+			allowImportingTsExtensions: true,
+			declaration: true,
+			emitDeclarationOnly: true,
+			module: "esnext",
+			moduleResolution: "bundler",
+			outDir: "decl-reexport",
+			rootDir: "src",
+		},
+		include: ["src/reexport.ts"],
 	}),
 	/* a stock Worker project: no DOM, workers-types alone, as \`wrangler types\` sets it up (K1 of r17) */
 	"tsconfig.worker.json": JSON.stringify({

@@ -139,4 +139,4 @@ const queryHelpers: {
 	project: drizzleProject,
 }
 
-export { type CursorOptions, type DrizzleListOptions, queryHelpers }
+export { type CursorOptions, drizzleListOptions, type DrizzleListOptions, drizzleProject, queryHelpers }

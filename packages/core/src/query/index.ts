@@ -16,12 +16,13 @@ export {
 	sortSignature,
 } from "./cursor.ts"
 export type { CursorOptions, CursorPayload, CursorValue, DecodedCursor, PaginationMeta } from "./cursor.ts"
-export type { ListExtra, ListRow } from "./pagination.ts"
+export { type ListExtra, type ListRow, paginate } from "./pagination.ts"
 export { createCursor } from "./cursor-mint.ts"
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts"
 
-/* Drizzle relational helpers */
-export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts"
+/* Drizzle relational helpers, and each function queryHelpers groups (KT4 of r22b) */
+export { drizzleListOptions, type DrizzleListOptions, drizzleProject, queryHelpers } from "./drizzle.ts"
+export { extractFilterValue, extractFilterValues } from "./filter-values.ts"
 
 /* Sparse fieldset parser (PostgREST select) */
 export { filterBySelect, parseSelect } from "./fields.ts"

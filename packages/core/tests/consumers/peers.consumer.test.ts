@@ -10,7 +10,7 @@ import { Miniflare } from "miniflare"
 import semver from "semver"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { PEERS } from "../../src/migrate/core/peer-needs.ts"
-import { APP } from "./fixture.ts"
+import { APP, REEXPORT_ALL } from "./fixture.ts"
 import {
 	admittedOf,
 	failures,
@@ -51,7 +51,7 @@ describe.each([
 ] as const)("a consumer with %s peers", (peers, unavailable) => {
 	let app: Stage
 	beforeAll(() => {
-		app = stage(tarball, peers, { ...APP, "import-all.mjs": IMPORT_ALL })
+		app = stage(tarball, peers, { ...APP, "import-all.mjs": IMPORT_ALL, "reexport-all.mjs": REEXPORT_ALL })
 	})
 	afterAll(() => app?.dispose())
 
@@ -149,6 +149,15 @@ describe.each([
 			"tsconfig.worker-node.json",
 		])("type-checks every subpath under strict flags (%s)", (config) => {
 		const result = run(app.dir, "npx", ["tsc", "-p", config])
+		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
+		expect(result.status).toBe(0)
+	})
+
+	/* KT4 of r22b: 0.20.1's queryHelpers and resourceOutcome named types no subpath exports, and a project emitting declarations failed with TS2742 */
+	it.runIf(peers === "all")("emits declarations for a module re-exporting every value comb exports", () => {
+		const count = Number(ok(run(app.dir, "bun", ["reexport-all.mjs"]), "reexport-all").trim())
+		expect(count).toBeGreaterThan(180)
+		const result = run(app.dir, "npx", ["tsc", "-p", "tsconfig.reexport.json"])
 		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
 		expect(result.status).toBe(0)
 	})

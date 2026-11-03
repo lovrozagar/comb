@@ -7,10 +7,11 @@
  */
 export { CursorRef, CURSOR_TIEBREAK_COLUMN, cursorProblem, effectiveNulls, MAX_CURSOR_LENGTH, readCursor, sortSignature, } from "./cursor.ts";
 export type { CursorOptions, CursorPayload, CursorValue, DecodedCursor, PaginationMeta } from "./cursor.ts";
-export type { ListExtra, ListRow } from "./pagination.ts";
+export { type ListExtra, type ListRow, paginate } from "./pagination.ts";
 export { createCursor } from "./cursor-mint.ts";
 export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts";
-export { type DrizzleListOptions, queryHelpers } from "./drizzle.ts";
+export { drizzleListOptions, type DrizzleListOptions, drizzleProject, queryHelpers } from "./drizzle.ts";
+export { extractFilterValue, extractFilterValues } from "./filter-values.ts";
 export { filterBySelect, parseSelect } from "./fields.ts";
 export { FILTER_LIMITS, FILTER_OPERATORS, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, } from "./filter.ts";
 export { escapeLike, globPattern, likePattern } from "./like.ts";
@@ -324,7 +325,16 @@ declare const queryHelpers: {
     paginate: typeof paginate;
     project: typeof drizzleProject;
 };
-export { type CursorOptions, type DrizzleListOptions, queryHelpers };
+export { type CursorOptions, drizzleListOptions, type DrizzleListOptions, drizzleProject, queryHelpers };
+
+// query/filter-values.d.ts
+/** The values a filter names for one field or several: queryHelpers.filterValue and filterValues */
+import type { FilterAST } from "./types.ts";
+/** Extract a single filter value from FilterAST */
+declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
+/** Extract multiple filter values from FilterAST */
+declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
+export { extractFilterValue, extractFilterValues };
 
 // query/fields.d.ts
 import type { ParsedFields } from "./types.ts";
@@ -764,15 +774,6 @@ declare function malformed(row: object, sort: readonly SortField[]): string | un
  */
 declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
 export { COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKeys, unencoded };
-
-// query/filter-values.d.ts
-/** The values a filter names for one field or several: queryHelpers.filterValue and filterValues */
-import type { FilterAST } from "./types.ts";
-/** Extract a single filter value from FilterAST */
-declare function extractFilterValue<T = unknown>(filterAst: FilterAST | null, field: string): T | undefined;
-/** Extract multiple filter values from FilterAST */
-declare function extractFilterValues<T extends Record<string, unknown>>(filterAst: FilterAST | null, fields: (keyof T)[]): Partial<T>;
-export { extractFilterValue, extractFilterValues };
 
 // query/filter-parse.d.ts
 /**
