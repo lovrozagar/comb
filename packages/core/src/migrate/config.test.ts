@@ -445,6 +445,15 @@ describe("parseConfig: every form a config module exports", () => {
 			}),
 		).rejects.toThrow(new RangeError("no config here"))
 	})
+
+	/* K4 of r21: 0.19's `defineConfig(async () => …)` inside a function export returns a function, which no config is */
+	it("refuses a function a function export returned, naming the form that types the config", async () => {
+		const refused = parseConfig(async () => async () => valid)
+		await expect(refused).rejects.toBeInstanceOf(z.ZodError)
+		await expect(refused).rejects.toThrow(
+			"a config function returned a function: export the config as `export default async () => defineConfig({…})`",
+		)
+	})
 })
 
 /* r18 K6: a program that imports its own config module parses it with the one parse loadConfig runs */

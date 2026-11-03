@@ -25,15 +25,16 @@ export const tenants: MigrationConfig = {
 	},
 }
 
-/* K9 of r20: defineConfig types each form the loader takes, an object or a function, sync or async, that returns one */
+/* K4 of r21: defineConfig takes an object, and a config that reads its secrets wraps the call, so TypeScript holds
+   the object to its known keys in each form; 0.19's function overload let a typo through a returned literal */
 const CORE = {
 	databases: { core: { migrationsDir: "m", name: "core", provider: { databaseName: "core", type: "d1" } } },
 } as const
 
 export const forms: [CombMigrateConfig, () => CombMigrateConfig, () => Promise<CombMigrateConfig>] = [
 	defineConfig(CORE),
-	defineConfig(() => CORE),
-	defineConfig(async () => CORE),
+	() => defineConfig(CORE),
+	async () => defineConfig(CORE),
 ]
 
 /* the README's own spelling: literals written inline, which no `as const` keeps narrow, so each form's `type` takes
@@ -42,38 +43,59 @@ export const inline: [CombMigrateConfig, () => CombMigrateConfig, () => Promise<
 	defineConfig({
 		databases: { core: { migrationsDir: "m", name: "core", provider: { databaseName: "CORE", type: "d1" } } },
 	}),
-	defineConfig(() => ({
-		databases: { core: { migrationsDir: "m", name: "core", provider: { databaseName: "CORE", type: "d1" } } },
-	})),
-	defineConfig(async () => ({
-		databases: {
-			core: { migrationsDir: "m", name: "core", provider: { databaseName: process.env["DB"] ?? "CORE", type: "d1" } },
-		},
-	})),
+	() =>
+		defineConfig({
+			databases: { core: { migrationsDir: "m", name: "core", provider: { databaseName: "CORE", type: "d1" } } },
+		}),
+	async () =>
+		defineConfig({
+			databases: {
+				core: { migrationsDir: "m", name: "core", provider: { databaseName: process.env["DB"] ?? "CORE", type: "d1" } },
+			},
+		}),
 ]
-
-/* a target typed ahead of the call infers nothing ahead of the arrow's body */
-export const annotated: () => Promise<CombMigrateConfig> = defineConfig(async () => ({
-	databases: { core: { migrationsDir: "m", name: "core", provider: { databaseName: "CORE", type: "d1" } } },
-}))
 
 /* it returns what it was given */
 declare const object: CombMigrateConfig
-declare const sync: () => CombMigrateConfig
-declare const async: () => Promise<CombMigrateConfig>
 expectTypeOf(defineConfig(object)).toEqualTypeOf<CombMigrateConfig>()
-expectTypeOf(defineConfig(sync)).toEqualTypeOf<() => CombMigrateConfig>()
-expectTypeOf(defineConfig(async)).toEqualTypeOf<() => Promise<CombMigrateConfig>>()
-expectTypeOf(defineConfig(async () => ({ databases: {} }))).toEqualTypeOf<() => Promise<{ databases: {} }>>()
 
-/* a typo in each form: a misspelled key every config needs fails all three; an object written inline is also held to
-   its known keys, which TypeScript checks on no literal a function returns, so comb's load refuses those by name */
+/* 0.19's form, a function passed to defineConfig, is refused (TS2345); the rewrite moves the call inside it */
+// @ts-expect-error defineConfig takes no function
+export const wrappedSync = defineConfig(() => CORE)
+// @ts-expect-error defineConfig takes no async function
+export const wrappedAsync = defineConfig(async () => ({ databases: {} }))
+
+/* a misspelled `local` (`lcoal`) or `migrationsDir`, refused in each form, an arrow's body or a block's */
 // @ts-expect-error a typo in an object config is caught
 export const typoObject = defineConfig({ databses: {} })
-// @ts-expect-error a typo in a sync config is caught
-export const typoSync = defineConfig(() => ({ databses: {} }))
-// @ts-expect-error a typo in an async config is caught
-export const typoAsync = defineConfig(async () => ({ databses: {} }))
+export const typoSync = () =>
+	defineConfig({
+		databases: {
+			// @ts-expect-error a misspelled optional key in a sync config is caught
+			core: { migrationDir: "m", name: "core", provider: { databaseName: "CORE", type: "d1" } },
+		},
+	})
+export const typoAsync = async () =>
+	defineConfig({
+		databases: {
+			// @ts-expect-error a misspelled provider key in an async config is caught
+			core: { migrationsDir: "m", name: "core", provider: { databaseName: "CORE", lcoal: true, type: "d1" } },
+		},
+	})
+export const typoBlock = async () => {
+	const token = await Promise.resolve("t")
+	return defineConfig({
+		databases: {
+			core: {
+				migrationsDir: "m",
+				// @ts-expect-error a misspelled optional key in a block-bodied async config is caught
+				migrationDir: token,
+				name: "core",
+				provider: { databaseName: "CORE", type: "d1" },
+			},
+		},
+	})
+}
 export const typoOptional = defineConfig({
 	databases: {
 		// @ts-expect-error a misspelled optional key in an object config is caught

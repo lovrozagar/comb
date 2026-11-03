@@ -115,28 +115,32 @@ export function resolveDatabaseConfig(dbConfig: DatabaseConfig, envName?: string
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /**
- * `input`, typed: comb.migrate.config.ts's default export, an object or a function, sync or async,
- * that returns one (K9 of r20); loadConfig validates it, in one place (P11, K12 of the 0.15.0 review).
- * The function form comes first: TypeScript types an arrow's body once, against the first overload it
- * tries, so an object overload ahead of it widens an inline `type: "d1"` to string. A generic object
- * form would skip the excess-property check on an object written inline. NoInfer keeps an annotated
- * target, `() => Promise<CombMigrateConfig>`, from inferring R ahead of the arrow's own body
+ * `input`, typed: comb.migrate.config.ts's default export, or what a function export returns, as in
+ * `export default async () => defineConfig({…})`, so TypeScript holds an object written inline to its
+ * known keys in either form (K4 of r21); loadConfig validates it, in one place (P11, K12 of the 0.15.0 review)
  */
-export function defineConfig<R extends CombMigrateConfig | Promise<CombMigrateConfig>>(input: () => R): () => NoInfer<R>
-export function defineConfig(input: CombMigrateConfig): CombMigrateConfig
-export function defineConfig(
-	input: CombMigrateConfig | (() => CombMigrateConfig | Promise<CombMigrateConfig>),
-): CombMigrateConfig | (() => CombMigrateConfig | Promise<CombMigrateConfig>) {
+export function defineConfig(input: CombMigrateConfig): CombMigrateConfig {
 	return input
 }
 
 /**
  * What a config module exports, held to the config schema: an object, or a function that returns one
- * or a promise of one (K8 of r19). A typo, or a database of neither shape, rejects with a ZodError
- * naming where
+ * or a promise of one (K8 of r19). A typo, a database of neither shape, or a function a function
+ * returned rejects with a ZodError naming where
  */
 export async function parseConfig(input: unknown): Promise<MigrationConfig> {
 	const exported: unknown = typeof input === "function" ? await (input as () => unknown)() : input
+	/* 0.19's `defineConfig(async () => …)` inside a function export; an untyped config gets the advice tsc gives (K4 of r21) */
+	if (typeof exported === "function")
+		throw new z.ZodError([
+			{
+				code: "custom",
+				input: exported,
+				message:
+					"a config function returned a function: export the config as `export default async () => defineConfig({…})`",
+				path: [],
+			},
+		])
 	return configInputSchema().parse(exported)
 }
 

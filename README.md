@@ -550,28 +550,29 @@ export default defineConfig({
 })
 ```
 
-The config is Zod-validated when comb loads it, so a typo fails at load rather than at apply, with one message that names the file and the key, whether it is exported through `defineConfig` (which only types it), as a plain object, or as a function, sync or async, that returns one (a program that imports its config module instead calls `await parseConfig(imported)`, on either form, the one parse `loadConfig(path)` runs, since `defineConfig` checks nothing at run time): every object is strict, and a key comb does not know is refused by name. `diff`, `apply`, `check` and `status` all take a database by its name here; a database whose tables and FTS live under another name in `comb.config.ts`, as two shards of one schema do, says so with `codegen: "shard"`, and `diff shard-0` reads that database's FTS. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`databaseName`, the Turso database's own name, `org`, `apiToken`, and `group`, default `default`), `d1` (`databaseName`, the wrangler config's `database_name` or binding; wrangler finds the database through its config), `postgres` (`url`, with `devUrl`, `schema` and `lockTimeout` defaulting to `docker://postgres/17/dev`, `public` and `5s`). There is no `neon` type: a Neon or Supabase database is a `postgres` URL. A database is one of two shapes, held at load: one target, with its `name` and `provider`, or `environments`, at least one, chosen by `-e`, each named by its key unless it gives a `name` and taking the database's `provider` unless it gives its own; a database with both a `name` and `environments`, or an environment with no provider at either level, is refused. Every environment of a database has its dialect, and `-e` on a database that declares no environments is refused. A `postgres` `url` is checked when a command resolves its environment, not at load, so a production URL unset in this shell blocks no command on `-e dev`, and `diff`, which reaches only `devUrl`, needs none. `migrationsDir` and `drizzleConfigPath` are read relative to the config file, by `diff` as by `apply`.
+The config is Zod-validated when comb loads it, so a typo fails at load rather than at apply, with one message that names the file and the key, whether it is exported through `defineConfig` (which only types it), as a plain object, or as a function, sync or async, that returns one; a function that returns a function is refused, naming the form below (a program that imports its config module instead calls `await parseConfig(imported)`, on either form, the one parse `loadConfig(path)` runs, since `defineConfig` checks nothing at run time): every object is strict, and a key comb does not know is refused by name. `diff`, `apply`, `check` and `status` all take a database by its name here; a database whose tables and FTS live under another name in `comb.config.ts`, as two shards of one schema do, says so with `codegen: "shard"`, and `diff shard-0` reads that database's FTS. Each `provider` is a discriminated union on `type`: `bun-sqlite` (`path`), `libsql` (`url`, `authToken?`), `turso` (`databaseName`, the Turso database's own name, `org`, `apiToken`, and `group`, default `default`), `d1` (`databaseName`, the wrangler config's `database_name` or binding; wrangler finds the database through its config), `postgres` (`url`, with `devUrl`, `schema` and `lockTimeout` defaulting to `docker://postgres/17/dev`, `public` and `5s`). There is no `neon` type: a Neon or Supabase database is a `postgres` URL. A database is one of two shapes, held at load: one target, with its `name` and `provider`, or `environments`, at least one, chosen by `-e`, each named by its key unless it gives a `name` and taking the database's `provider` unless it gives its own; a database with both a `name` and `environments`, or an environment with no provider at either level, is refused. Every environment of a database has its dialect, and `-e` on a database that declares no environments is refused. A `postgres` `url` is checked when a command resolves its environment, not at load, so a production URL unset in this shell blocks no command on `-e dev`, and `diff`, which reaches only `devUrl`, needs none. `migrationsDir` and `drizzleConfigPath` are read relative to the config file, by `diff` as by `apply`.
 
-The function form, for a config that reads its secrets when comb loads it. TypeScript checks the keys of an object passed to `defineConfig` inline, but not those of an object a function returns, so a misspelled optional key there type-checks; comb's load refuses it by name:
+The function form, for a config that reads its secrets when comb loads it: the function calls `defineConfig`, so TypeScript holds the object written inline to its known keys here too, and a misspelled `local` or `migrationsDir` fails to compile. `defineConfig` takes no function:
 
 ```ts
 /* comb.migrate.config.ts */
 import { readFile } from "node:fs/promises"
 import { defineConfig } from "@lovrozagar/comb/migrate"
 
-export default defineConfig(async () => ({
-	databases: {
-		core: {
-			migrationsDir: "./atlas-migrations",
-			name: "core",
-			provider: {
-				type: "libsql",
-				url: "libsql://core.turso.io",
-				authToken: (await readFile("./.secrets/core-token", "utf8")).trim(),
+export default async () =>
+	defineConfig({
+		databases: {
+			core: {
+				migrationsDir: "./atlas-migrations",
+				name: "core",
+				provider: {
+					type: "libsql",
+					url: "libsql://core.turso.io",
+					authToken: (await readFile("./.secrets/core-token", "utf8")).trim(),
+				},
 			},
 		},
-	},
-}))
+	})
 ```
 
 A Postgres database is a URL, with the dev database Atlas replays migrations on beside it:
@@ -1076,7 +1077,7 @@ What changes for a project on 0.19. Before deploying it:
 
    Removed: none.
 
-   Changed: `BookmarkTracker`, `BuildDerivedListQueryOpts`, `CliIo`, `SessionHandle`, `ShardDbHandle`, `ShardMove`, `ShardResolverDeps`, `ShardRouter`, `openD1Session`.
+   Changed: `BookmarkTracker`, `BuildDerivedListQueryOpts`, `CliIo`, `SessionHandle`, `ShardDbHandle`, `ShardMove`, `ShardResolverDeps`, `ShardRouter`, `defineConfig`, `openD1Session`.
 
    `BuildDerivedListQueryOpts` takes `dialect`, `"postgres"` or `"sqlite"`, for a derived list whose id and keys hold no column.
 
@@ -1097,6 +1098,8 @@ What changes for a project on 0.19. Before deploying it:
 7. **Validate a password before it is hashed, not after.** A `password` column's DTO now holds the hash the column stores, any storable text under its declared `max` and `pattern`, where 0.19 held it to 8 to 72 printable ASCII characters and refused a declared `max` past 72: a 91-character PBKDF2 hash or a 106-character argon2id one failed the create DTO, while a plaintext passed it. A declared `pattern` now applies to the hash. **Fix:** a project that writes the hash through the DTO needs nothing; drop a `max` it declared to fit under 72 if its hashes are longer, and validate the plaintext in the request body with `passwordText()` (15 characters at least) and the sign-in body with `passwordText.typed()`. anyrow's column declares no `max`, so it drops nothing.
 
 8. **Name the binding type a shard handle is, if you pass it on.** `@cloudflare/workers-types` is no longer a peer of comb, so a Worker typed by `wrangler types` installs nothing for comb's D1 modules, and a Worker typed by `@cloudflare/workers-types` keeps it as its own dependency. 0.19 required it: a project on `wrangler types` installed it only for comb, and its globals and the package's declared `D1Database` twice. `ShardRouter.getHandle()` now types its handle structurally; one passed to `drizzle()` or a function typed by `D1Database` fails to compile (TS2345). **Fix:** call `getHandle<D1Database>(mapping, env)`; remove `@cloudflare/workers-types` if comb was the only reason it was installed.
+
+9. **Call `defineConfig` inside a config function, not around it.** `defineConfig` takes an object only, so `defineConfig(async () => ({…}))` fails to compile with TS2345 (`Argument of type '() => Promise<…>' is not assignable to parameter of type 'CombMigrateConfig'`). 0.19 took the function, and TypeScript checked no key of the object it returned, so a misspelled `local` or `migrationsDir` there compiled. At load, a function export that returns a function, as an untyped config of the old form wrapped in another function does, is refused naming the form. **Fix:** `export default async () => defineConfig({…})` in place of `export default defineConfig(async () => ({…}))`; an object config needs nothing. anyrow's configs need no change.
 
 ## Upgrading to 0.19
 
