@@ -131,6 +131,9 @@ const unseen = (catalog: string): string =>
 /** Rows by subject, each as JSON: what comb's own CREATE ROLE left them */
 type Rows = Map<string, string>
 
+/** Whether a change to `subject`, of `fields` when the row changed, is the replay's own, none when added or removed */
+type Own = (subject: string, fields: readonly string[]) => boolean
+
 /** The rows of the catalogs `written` that `mine` names, as the open transaction on `sql` reads them */
 async function subjectRows(sql: Sql, written: Writes, mine: (subject: string) => boolean): Promise<Rows> {
 	const out: Rows = new Map()
@@ -143,12 +146,28 @@ async function subjectRows(sql: Sql, written: Writes, mine: (subject: string) =>
 	return out
 }
 
+/** What one row's change is, `subject` from `from` to `to`, with the fields that changed; undefined when none did */
+function changeOf(
+	subject: string,
+	from: Record<string, unknown> | undefined,
+	to: Record<string, unknown> | undefined,
+): { fields: string[]; said: string } | undefined {
+	if (from === undefined) return { fields: [], said: `${subject} added` }
+	if (to === undefined) return { fields: [], said: `${subject} removed` }
+	const fields = changedFields(from, to)
+	return fields.length === 0 ? undefined : { fields, said: `${subject} changed (${fields.join(", ")})` }
+}
+
 /**
  * What the `counted` writes changed, as the open transaction on `sql` sees the server against the
  * committed server `was` reads, one change per row; a row still as comb's own CREATE ROLE left it
- * (`ours`) is comb's, which the change leaves out
+ * (`ours`) is comb's, and a change `own` rates the replay's, which the changes leave out
  */
-async function namedChanges({ sql, was }: { sql: Sql; was: Sql }, counted: Writes, ours: Rows): Promise<string[]> {
+async function namedChanges(
+	{ own, sql, was }: { own: Own; sql: Sql; was: Sql },
+	counted: Writes,
+	ours: Rows,
+): Promise<string[]> {
 	const changes: string[] = []
 	for (const catalog of [...counted.keys()].sort()) {
 		const read = CATALOGS[catalog]
@@ -158,18 +177,18 @@ async function namedChanges({ sql, was }: { sql: Sql; was: Sql }, counted: Write
 		}
 		const [before, after] = [await rowsOf(was, read.query), await rowsOf(sql, read.query)]
 		const named: string[] = []
+		let mine = false
 		for (const key of [...new Set([...before.keys(), ...after.keys()])].sort()) {
 			const [from, to] = [before.get(key), after.get(key)]
 			const subject = `${read.noun} ${key}`
-			if (to !== undefined && ours.get(subject) === JSON.stringify(to)) continue
-			if (from === undefined) named.push(`${subject} added`)
-			else if (to === undefined) named.push(`${subject} removed`)
-			else {
-				const fields = changedFields(from, to)
-				if (fields.length > 0) named.push(`${subject} changed (${fields.join(", ")})`)
-			}
+			const change =
+				to !== undefined && ours.get(subject) === JSON.stringify(to) ? undefined : changeOf(subject, from, to)
+			if (change === undefined) continue
+			if (own(subject, change.fields)) mine = true
+			else named.push(change.said)
 		}
-		changes.push(...(named.length > 0 ? named : [unseen(catalog)]))
+		/* a catalog whose every change is the replay's own counted no other */
+		if (named.length > 0 || !mine) changes.push(...(named.length > 0 ? named : [unseen(catalog)]))
 	}
 	return changes
 }
@@ -189,6 +208,7 @@ export {
 	counts,
 	namedChanges,
 	refuseUncounted,
+	type Own,
 	type Rows,
 	subjectRows,
 	type Writes,

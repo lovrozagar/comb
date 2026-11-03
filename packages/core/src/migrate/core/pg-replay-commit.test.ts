@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type At, begin, commit, guarded, window } from "./pg-replay-commit.ts"
+import { type At, begin, commit, guarded, ownOf, window } from "./pg-replay-commit.ts"
 import type { Run } from "./pg-replay-roles.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
@@ -161,5 +161,27 @@ describe("guarded", () => {
 		const { send, tried } = sends("42P01")
 		expect(await refusal(guarded(run, at([]), send))).toBe("devUrl refused it")
 		expect({ control: control(sent), tried: tried.times }).toEqual({ control: ["BEGIN"], tried: 1 })
+	})
+})
+
+/* P3 of r22: the replay's database is dropped after it, so a change to it outlives nothing */
+describe("ownOf", () => {
+	const own = ownOf({ ...runOf({}).run, created: ["made"], database: "comb_replay_1" })
+	it.each([
+		["database comb_replay_1", ["datacl"], true],
+		["database comb_replay_1", ["datacl", "datistemplate"], false],
+		["database comb_replay_1", ["datdba"], false],
+		["database comb_replay_1", [], false],
+		["database other", ["datacl"], false],
+		["setting comb_replay_1 for every role", [], true],
+		["setting comb_replay_1 for made", [], true],
+		["setting comb_replay_1 for theirs", [], false],
+		["setting other for every role", [], false],
+		["comment on database comb_replay_1", [], true],
+		["comment on database other", [], false],
+		["security label on database comb_replay_1 by selinux", [], true],
+		["security label on database other by selinux", [], false],
+	])("rates a change to %s of %j as the replay's own: %s", (subject, fields, mine) => {
+		expect(own(subject, fields)).toBe(mine)
 	})
 })

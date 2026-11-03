@@ -49,6 +49,13 @@ describe("counts, writesSince and addWrites", () => {
 	})
 })
 
+/* no change is the replay's own */
+const none = (): boolean => false
+
+/* the replay owns kept's connection limit */
+const own = (subject: string, fields: readonly string[]): boolean =>
+	subject === "role kept" && fields.includes("rolconnlimit")
+
 describe("namedChanges", () => {
 	it("names each row added, removed or changed, leaves out comb's own, and names a write it cannot see", async () => {
 		const was = server({
@@ -73,7 +80,7 @@ describe("namedChanges", () => {
 			["pg_authid", 3],
 		])
 		const ours = new Map([["role ours", JSON.stringify({ rolconnlimit: -1 })]])
-		expect(await namedChanges({ sql, was }, counted, ours)).toEqual([
+		expect(await namedChanges({ own: none, sql, was }, counted, ours)).toEqual([
 			"role gone removed",
 			"role kept changed (rolconnlimit)",
 			"role new added",
@@ -81,8 +88,32 @@ describe("namedChanges", () => {
 			"pg_future, in a row devUrl's role cannot read",
 		])
 		/* a role's write pg_roles does not show, such as a password */
-		expect(await namedChanges({ sql: was, was }, new Map([["pg_authid", 1]]), new Map())).toEqual([
+		expect(await namedChanges({ own: none, sql: was, was }, new Map([["pg_authid", 1]]), new Map())).toEqual([
 			"pg_authid, in a column pg_roles does not show, such as a password",
+		])
+	})
+})
+
+/* P3 of r22: a change to the replay's own database is no other's, and a catalog with only those counted none */
+describe("namedChanges of the replay's own", () => {
+	it("leaves out a change the replay owns, by subject and fields, naming the rest", async () => {
+		const was = server({
+			pg_roles: [
+				["kept", { rolconnlimit: -1 }],
+				["other", { rolconnlimit: -1 }],
+			],
+		})
+		const counted = new Map([["pg_authid", 1]])
+		const changed = (other: number) =>
+			server({
+				pg_roles: [
+					["kept", { rolconnlimit: 5 }],
+					["other", { rolconnlimit: other }],
+				],
+			})
+		expect(await namedChanges({ own, sql: changed(-1), was }, counted, new Map())).toEqual([])
+		expect(await namedChanges({ own, sql: changed(3), was }, counted, new Map())).toEqual([
+			"role other changed (rolconnlimit)",
 		])
 	})
 })

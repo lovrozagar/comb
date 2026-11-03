@@ -8,7 +8,7 @@
  */
 import type { Run } from "./pg-replay-roles.ts"
 import { added, type Snapshot, snapshot, snapshotChanges } from "./pg-server-snapshot.ts"
-import { counts, namedChanges, writesSince } from "./pg-server-writes.ts"
+import { counts, namedChanges, type Own, writesSince } from "./pg-server-writes.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
 /**
@@ -62,6 +62,27 @@ async function window(run: Run, { name, names, sent, stops }: At, read?: Snapsho
 	)
 }
 
+// lookup-table: the fields of a database's row whose change keeps the cleanup from dropping it: a template, another owner
+const UNDROPPABLE: ReadonlySet<string> = /* @__PURE__ */ new Set(["datdba", "datistemplate"])
+
+/**
+ * Which changes are the replay's own (P3 of r22): to the database it runs in, which it drops after
+ * it, so nothing outlives the check: its row, but a field that keeps the cleanup from dropping it,
+ * its settings for every role and for a role the replay made, and its comment and security labels
+ */
+function ownOf(run: Run): Own {
+	const database = `database ${run.database}`
+	const settings = new Set([
+		`setting ${run.database} for every role`,
+		...run.created.map((role) => `setting ${run.database} for ${role}`),
+	])
+	return (subject, fields) =>
+		(subject === database && fields.length > 0 && !fields.some((field) => UNDROPPABLE.has(field))) ||
+		settings.has(subject) ||
+		subject === `comment on ${database}` ||
+		subject.startsWith(`security label on ${database} by `)
+}
+
 /**
  * The open transaction committed, or refused, with nothing committed, when it wrote past its
  * database, by its own counts or the server's catalogs: in `name`, by `sent` when the transaction is
@@ -69,16 +90,19 @@ async function window(run: Run, { name, names, sent, stops }: At, read?: Snapsho
  */
 async function commit(run: Run, at: At): Promise<void> {
 	const { name, sent, stops } = at
-	/* a superuser's file can turn the counts off for its transaction or its session (P1a of r21) */
 	/* two connections, one moment before COMMIT: the counts on the replay's, the committed catalogs on admin's, a round trip saved */
 	const [now, read] = await Promise.all([counts(run.sql), snapshot(run.admin)])
+	/* a superuser's file can turn the counts off for its transaction or its session (P1a of r21) */
 	if (!now.on)
 		throw new ReplayFailed(
 			`${name}: the file turned track_counts off, so devUrl's server counted nothing it changed past the database the replay runs in, and comb rolled it back and refuses the file; leave track_counts on; ${stops}`,
 		)
 	const counted = writesSince(now.writes, run.ours.writes)
-	if (counted.size > 0) {
-		const changes = await namedChanges({ sql: run.sql, was: run.admin }, counted, run.ours.rows)
+	const changes =
+		counted.size === 0
+			? []
+			: await namedChanges({ own: ownOf(run), sql: run.sql, was: run.admin }, counted, run.ours.rows)
+	if (changes.length > 0) {
 		const by = sent === undefined ? "" : `, made by ${JSON.stringify(sent)}`
 		throw new ReplayFailed(
 			`${name}: devUrl's server counted a change past the database the replay runs in${by}: ${changes.join(", ")}. It came from inside a statement the replay cannot leave out (a DO block, a function, EXECUTE or CALL), and apply would make it on the target's server, so comb rolled it back and refuses the file; write the change as a statement of its own, which the replay leaves out and apply runs; ${stops}`,
@@ -111,4 +135,4 @@ async function guarded(run: Run, at: At, send: () => Promise<void>): Promise<voi
 	return window(run, at)
 }
 
-export { type At, begin, commit, guarded, window }
+export { type At, begin, commit, guarded, ownOf, window }
