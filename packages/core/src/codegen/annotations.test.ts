@@ -35,7 +35,7 @@ describe("parseFieldConstraints: validation constraints", () => {
 
 	it("extracts pattern string", () => {
 		const result = parseFieldConstraints('c.text("phone", { pattern: "/^\\\\+[1-9]/" })')
-		expect(result.pattern).toBe("/^\\+[1-9]/")
+		expect(result.pattern).toBe("/^\\+[1-9]/u")
 	})
 })
 

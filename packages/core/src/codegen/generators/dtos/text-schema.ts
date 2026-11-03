@@ -15,11 +15,11 @@ const GUARD_KEY = { "x-comb-text": STORABLE_TEXT_RULE }
 /** A written text's length bounds as comb holds them, declared and its own together; null where none */
 type TextRange = { max: number | null; min: number | null }
 
-/* the regexes a kind holds a written text to, as the chain writes each */
-const ID_PATTERN = "/^\\S{1,48}$/"
-const HTTPS = "/^https:\\/\\//"
+/* the regexes a kind holds a written text to, as the chain writes each: under u, as JSON Schema reads them (CS1 of r22b) */
+const ID_PATTERN = "/^\\S{1,48}$/u"
+const HTTPS = "/^https:\\/\\//u"
 const NAME = "/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u"
-const IMAGE = "/^(?:https:\\/\\/|data:image\\/)/"
+const IMAGE = "/^(?:https:\\/\\/|data:image\\/)/u"
 
 /* the length comb's ids keep to, which a read states: an imported or older id may not (F65) */
 const ID_LENGTH = { maxLength: 48, minLength: 1 }

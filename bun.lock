@@ -37,6 +37,7 @@
         "@types/pg": "catalog:",
         "@types/semver": "catalog:",
         "@vitest/coverage-v8": "catalog:",
+        "ajv": "catalog:",
         "bun-types": "catalog:",
         "drizzle-kit": "catalog:",
         "drizzle-orm": "catalog:",
@@ -46,6 +47,7 @@
         "oxc-parser": "catalog:",
         "pg": "catalog:",
         "postgres": "catalog:",
+        "re2js": "catalog:",
         "semver": "catalog:",
         "ts-morph": "catalog:",
         "typescript": "catalog:",
@@ -64,7 +66,7 @@
         "ts-morph": ">=28.0.0 <29",
         "typescript": ">=5.7.2",
         "wrangler": ">=4.147.0 <5",
-        "zod": ">=4.5.4 <5",
+        "zod": ">=4.6.0 <5",
       },
       "optionalPeers": [
         "@libsql/client",
@@ -89,6 +91,7 @@
     "@types/pluralize": "0.0.33",
     "@types/semver": "7.8.0",
     "@vitest/coverage-v8": "4.1.10",
+    "ajv": "8.20.0",
     "bun-types": "1.3.14",
     "drizzle-kit": "1.0.0-rc.4",
     "drizzle-orm": "1.0.0-rc.4",
@@ -99,12 +102,13 @@
     "pg": "8.23.1",
     "pluralize": "8.0.0",
     "postgres": "3.4.9",
+    "re2js": "2.8.8",
     "semver": "7.8.5",
     "ts-morph": "28.0.0",
     "typescript": "7.0.2",
     "vitest": "4.1.10",
     "wrangler": "4.147.0",
-    "zod": "4.5.4",
+    "zod": "4.6.0",
   },
   "packages": {
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
@@ -1145,6 +1149,8 @@
 
     "raw-body": ["raw-body@3.0.2", "", { "dependencies": { "bytes": "~3.1.2", "http-errors": "~2.0.1", "iconv-lite": "~0.7.0", "unpipe": "~1.0.0" } }, "sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA=="],
 
+    "re2js": ["re2js@2.8.8", "", {}, "sha512-E2FVgqD2mzJ+ZmMSHLnkOvZ7PiZ4FgMdfVCA3YsJWs9gtyoaKmUMxyVPCXS1yK209/mz3XkdT7kr3OlMWW2Fww=="],
+
     "require-from-string": ["require-from-string@2.0.2", "", {}, "sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw=="],
 
     "resolve-from": ["resolve-from@5.0.0", "", {}, "sha512-qYg9KP24dD5qka9J47d0aVky0N+b4fTU89LN9iDnjB5waksiC49rvMB0PrUJQGoTmH50XPiqOvAjDfaijGxYZw=="],
@@ -1307,7 +1313,7 @@
 
     "youch-core": ["youch-core@0.3.3", "", { "dependencies": { "@poppinss/exception": "^1.2.2", "error-stack-parser-es": "^1.0.5" } }, "sha512-ho7XuGjLaJ2hWHoK8yFnsUGy2Y5uDpqSTq1FkHLK4/oqKtyUU1AFbOOxY4IpC9f0fTLjwYbslUz0Po5BpD1wrA=="],
 
-    "zod": ["zod@4.5.4", "", {}, "sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA=="],
+    "zod": ["zod@4.6.0", "", {}, "sha512-iIvwyDnebKYpww2ta0DjaNOL8RnVLmPMhgWyOzlW9y0EIIxv5gl+H6Y0ONpt83HqjGqkk78uWp6xWtpxzZdPbw=="],
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
 

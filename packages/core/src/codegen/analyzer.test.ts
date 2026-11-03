@@ -61,7 +61,9 @@ import { PATTERNS } from "./patterns"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const post = sqliteTable("post", { id: text("id").primaryKey(), slug: c.text("slug", { pattern: PATTERNS.SLUG }) })
 `)
-		expect(analyze(fp).tables[0]?.fields.find((field) => field.name === "slug")?.constraints.pattern).toBe("/^[a-z]+$/")
+		expect(analyze(fp).tables[0]?.fields.find((field) => field.name === "slug")?.constraints.pattern).toBe(
+			"/^[a-z]+$/u",
+		)
 	})
 
 	it("loads the tables module and what it imports, never another file beside it", () => {

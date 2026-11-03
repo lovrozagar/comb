@@ -5,8 +5,9 @@
  * (F5). JSON Schema's `pattern` has no flags, so `i`, `m` and `s`, which change what matches, would
  * publish another rule than the server applies; `g` and `y` mean nothing to one test (F6). JSON
  * Schema compiles a pattern under `u`, as Ajv does, where a `v` source (set subtraction) does not
- * compile (the 0.12 review's F5). So a pattern is `/source/flags` with `u` at most, and a source
- * the engine compiles.
+ * compile (the 0.12 review's F5). And a source read without `u` means another rule: `\p{L}` is a
+ * literal `p{L}`, `.` and `[^x]` match a UTF-16 unit, not a code point (CS1 of r22b). So a pattern
+ * is `/source/flags` with `u` at most, compiled and emitted under `u` whether it was written or not.
  */
 
 /** The regex literal comb emits for `pattern`, the constraint at `place`; an error naming why it cannot */
@@ -23,13 +24,16 @@ function patternLiteral(pattern: string, place: string): string {
 	}
 	let compiled: RegExp
 	try {
-		compiled = RegExp(source, flags)
+		compiled = new RegExp(source, "u")
 	} catch (error) {
-		throw new Error(`${place}: pattern ${pattern} does not compile: ${(error as Error).message}`, { cause: error })
+		throw new Error(
+			`${place}: pattern ${pattern} does not compile under u, the mode JSON Schema reads a pattern in: ${(error as Error).message}`,
+			{ cause: error },
+		)
 	}
 	/* the engine's own source, the text a regex literal holds: a slash escaped outside a class only, a
 	 * line terminator as its escape, so the pattern publishes as the regex in the tables file would */
-	return `/${compiled.source}/${flags}`
+	return `/${compiled.source}/u`
 }
 
 export { patternLiteral }

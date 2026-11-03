@@ -54,7 +54,7 @@ describe("pgWriteRule: a plain Postgres column's write rule by its data type (F5
 			/fixture\.v: comb has no rule for a PgSparseVector column \(string sparsevec\); build it with a c helper, or as drizzle text, varchar, char, uuid, .*inet, cidr, macaddr, macaddr8, bit/,
 		)
 		expect(rule('bit("v", { dimensions: 3 })')).toBe(
-			'z.string().regex(/^[01]{3}$/, { message: "Must be exactly 3 bits" })',
+			'z.string().regex(/^[01]{3}$/u, { message: "Must be exactly 3 bits" })',
 		)
 	})
 

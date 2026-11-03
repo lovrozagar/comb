@@ -172,6 +172,7 @@
 		"@types/pg": "catalog:",
 		"@types/semver": "catalog:",
 		"@vitest/coverage-v8": "catalog:",
+		"ajv": "catalog:",
 		"bun-types": "catalog:",
 		"drizzle-kit": "catalog:",
 		"drizzle-orm": "catalog:",
@@ -181,6 +182,7 @@
 		"oxc-parser": "catalog:",
 		"pg": "catalog:",
 		"postgres": "catalog:",
+		"re2js": "catalog:",
 		"semver": "catalog:",
 		"ts-morph": "catalog:",
 		"typescript": "catalog:",
@@ -199,7 +201,7 @@
 		"ts-morph": ">=28.0.0 <29",
 		"typescript": ">=5.7.2",
 		"wrangler": ">=4.147.0 <5",
-		"zod": ">=4.5.4 <5"
+		"zod": ">=4.6.0 <5"
 	},
 	"peerDependenciesMeta": {
 		"@libsql/client": {

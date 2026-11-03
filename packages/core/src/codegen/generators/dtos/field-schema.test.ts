@@ -72,7 +72,7 @@ describe("generateFieldSchema: what each schema type includes", () => {
 		const owner = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.id)', {
 			foreignKey: { ...fk, toId: true },
 		})
-		expect(generateFieldSchema(owner, "create", { imports: imports() })).toBe("z.string().regex(/^\\S{1,48}$/)")
+		expect(generateFieldSchema(owner, "create", { imports: imports() })).toBe("z.string().regex(/^\\S{1,48}$/u)")
 		const named = fieldOf("ownerId", 'c.text("owner_id").notNull().references(() => user.email)', { foreignKey: fk })
 		expect(generateFieldSchema(named, "create", { imports: imports() })).toBe("z.string().min(1)")
 		const slug = fieldOf("pageSlug", 'c.text("page_slug", { max: 200 }).notNull().references(() => page.slug)', {
@@ -85,10 +85,10 @@ describe("generateFieldSchema: what each schema type includes", () => {
 	it("renders a reference's rules for every schema type: a c.ref that names no target, the id rules", () => {
 		expect(schema("owner_id", 'c.ref("owner_id")', "update")).toBeNull()
 		expect(schema("owner_id", 'c.ref("owner_id", { mutable: true })', "update")).toBe(
-			"z.string().regex(/^\\S{1,48}$/).nullable().optional()",
+			"z.string().regex(/^\\S{1,48}$/u).nullable().optional()",
 		)
 		expect(schema("owner_id", 'c.ref("owner_id")', "create")).toBe(
-			"z.string().regex(/^\\S{1,48}$/).nullable().optional()",
+			"z.string().regex(/^\\S{1,48}$/u).nullable().optional()",
 		)
 		expect(schema("owner_id", 'c.ref("owner_id")', "read")).toBe(
 			'z.string().meta({"x-comb-maxLength":48,"x-comb-minLength":1}).nullable().meta({"x-comb-maxLength":48,"x-comb-minLength":1})',
@@ -173,14 +173,14 @@ describe("generateFieldSchema: JSON", () => {
 			}),
 		).toBe('z.string().meta(_m.email).meta({"x-comb-maxLength":80})')
 		expect(schema("u", 'c.text("u", { url: true }).notNull()', "create")).toBe(
-			'z.string().trim().check(z.url()).min(9).regex(/^https:\\/\\//, { message: "Must be an HTTPS URL" }).meta({ format: "uri" }).meta(_m.url).meta({"x-comb-transform":["trim"]})',
+			'z.string().trim().check(z.url()).min(9).regex(/^https:\\/\\//u, { message: "Must be an HTTPS URL" }).meta({ format: "uri" }).meta(_m.url).meta({"x-comb-transform":["trim"]})',
 		)
 		expect(schema("n", 'c.text("n", { trim: true, lowercase: true, max: 20 }).notNull()', "update")).toBe(
 			'z.string().trim().toLowerCase().min(1).max(20).meta(_m.string).meta({"x-comb-transform":["trim","lowercase"]}).optional()',
 		)
 		expect(schema("n", 'c.text("n", { uppercase: true, pattern: "/^[A-Z]+$/" }).notNull()', "create")).toBe(
 			/* a pattern decides what the value looks like, so it gets no example (F18) */
-			'z.string().toUpperCase().min(1).regex(/^[A-Z]+$/).meta({"x-comb-transform":["uppercase"]})',
+			'z.string().toUpperCase().min(1).regex(/^[A-Z]+$/u).meta({"x-comb-transform":["uppercase"]})',
 		)
 		expect(
 			generateFieldSchema(fieldOf("n", 'c.text("n", { min: 2 }, 10).notNull()', { length: 10 }), "read", {
@@ -280,7 +280,7 @@ describe("generateFieldSchema: name and imageUri (F3)", () => {
 			'z.string().min(1).regex(/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u, { message: "Must be a name: letters, marks, numbers, spaces and punctuation" }).meta(_m.string)',
 		)
 		expect(schema("a", 'c.text("a", { imageUri: true })', "update")).toBe(
-			'z.string().min(8).regex(/^(?:https:\\/\\/|data:image\\/)/, { message: "Must be an HTTPS URL or a data:image/ URI" }).meta({ examples: ["https://example.com/a.png"] }).nullable().optional()',
+			'z.string().min(8).regex(/^(?:https:\\/\\/|data:image\\/)/u, { message: "Must be an HTTPS URL or a data:image/ URI" }).meta({ examples: ["https://example.com/a.png"] }).nullable().optional()',
 		)
 		expect(schema("a", 'c.text("a", { imageUri: true })', "read")).toBe(
 			'z.string().meta({ examples: ["https://example.com/a.png"] }).nullable()',
@@ -366,17 +366,17 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 	it("gives a c.ref to a natural key its own text rules, and the id rules only to a c.id key", () => {
 		const country =
 			'c.ref("country_code", { max: 64, pattern: "/^[A-Z-]+$/" }).notNull().references(() => country.code)'
-		expect(of("countryCode", country, "create")).toBe("z.string().min(1).max(64).regex(/^[A-Z-]+$/)")
+		expect(of("countryCode", country, "create")).toBe("z.string().min(1).max(64).regex(/^[A-Z-]+$/u)")
 		expect(of("countryCode", country, "read")).toBe('z.string().meta({"x-comb-maxLength":64})')
 		expect(of("ownerId", 'c.ref("owner_id").notNull().references(() => user.id)', "create")).toBe(
-			"z.string().regex(/^\\S{1,48}$/)",
+			"z.string().regex(/^\\S{1,48}$/u)",
 		)
 	})
 
 	/* a ref to a table in another database, as a shard's user_id to core's user, names no target */
 	it("gives a c.ref that names no target the id rules, unless it declares its own", () => {
 		const write = of("userId", 'c.ref("user_id").notNull()', "create")
-		expect(write).toBe("z.string().regex(/^\\S{1,48}$/)")
+		expect(write).toBe("z.string().regex(/^\\S{1,48}$/u)")
 		expect(of("userId", 'c.ref("user_id").notNull()', "read")).toBe(
 			'z.string().meta({"x-comb-maxLength":48,"x-comb-minLength":1})',
 		)
@@ -401,14 +401,14 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 
 	it("applies a password hash's declared bounds and pattern, with no rule of comb's, and an email's pattern after the format", () => {
 		expect(of("pw", 'c.text("pw", { password: true, min: 12, pattern: "/\\\\d/" }).notNull()', "create")).toBe(
-			"z.string().min(12).regex(/\\d/)",
+			"z.string().min(12).regex(/\\d/u)",
 		)
 		expect(of("pw", 'c.text("pw", { password: true, max: 255 }).notNull()', "create")).toBe(
 			"z.string().min(1).max(255)",
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "create")).toBe(
 			/* a pattern decides what the value looks like, so it gets no example (F18) */
-			'z.string().trim().toLowerCase().check(z.email()).min(6).regex(/@corp\\.io$/).meta({"x-comb-transform":["trim","lowercase"]})',
+			'z.string().trim().toLowerCase().check(z.email()).min(6).regex(/@corp\\.io$/u).meta({"x-comb-transform":["trim","lowercase"]})',
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "read")).toBe("z.string()")
 	})
