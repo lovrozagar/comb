@@ -49,6 +49,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.20.1](#upgrading-to-0201)
 - [Upgrading to 0.20](#upgrading-to-020)
 - [Upgrading to 0.19](#upgrading-to-019)
 - [Upgrading to 0.18](#upgrading-to-018)
@@ -1067,6 +1068,12 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
 
+## Upgrading to 0.20.1
+
+What changes for a project on 0.20.0. Before deploying it:
+
+1. **Regenerate for a written JSON field's published shape.** A written `c.json`, `json`, `jsonb` or SQLite `text({ mode: "json" })` field publishes its schema itself, its `x-comb-*` keys on it: a registered schema is `{ "$ref": …, "x-comb-*" }`, and a nullable field is `anyOf: [<schema with its keys>, { type: "null" }]`, the keys on the property too. 0.20.0 published a one-member `anyOf` around the schema, which a generator that does not flatten one types as any JSON: Go and Rust clients typed such a field `json.RawMessage` or `serde_json::Value`, and a generated CLI dropped its flag. What a DTO accepts, its TypeScript type and `.unwrap()`'s keys are unchanged. **Fix:** regenerate.
+
 ## Upgrading to 0.20
 
 What changes for a project on 0.19. Before deploying it:
@@ -1091,7 +1098,7 @@ What changes for a project on 0.19. Before deploying it:
 
 4. **Write a change to the server as a statement of its own, on Postgres.** `check` and baseline refuse a history file whose `DO` block, function, `EXECUTE` or `CALL` changes a role, a membership, a database, a setting, a comment or anything else the server's databases share, naming the file and the change, and roll it back on devUrl. 0.19 ran such a file as written and committed it, so a `DO $$ BEGIN CREATE ROLE app; END $$` made the role on devUrl's server for good, the target's own when they share one, and the next check stopped on Atlas's "role already exists". A devUrl whose role has `track_counts` off is refused, naming the setting. **Fix:** write the change as a plain statement (`CREATE ROLE app;`, `ALTER ROLE app CONNECTION LIMIT 5;`), which the replay leaves out or runs as before and apply runs; set `track_counts` on for devUrl's role if it is off.
 
-5. **Regenerate for a nullable written JSON field's shape.** A nullable `c.json`, `json`, `jsonb` or SQLite `text({ mode: "json" })` field in a create or update DTO is its schema's one-member union, nullable as every other field is, so `.unwrap()` takes it as a required input and keeps its `x-comb-text` and `x-comb-maxBytes`; it publishes `anyOf: [{ anyOf: [<schema>], "x-comb-*" }, { type: "null" }]`, the keys on the property as before. 0.19 built it as one union with null, so `.unwrap()` did not exist on it (TS2339) and its published non-null member carried no keys. A nullable real's read repeats its stated bounds on its number member the same way. A reader of the property's keys sees no change. **Fix:** regenerate.
+5. **Regenerate for a nullable written JSON field's shape.** A nullable `c.json`, `json`, `jsonb` or SQLite `text({ mode: "json" })` field in a create or update DTO is its schema behind `z.lazy`, nullable as every other field is, so `.unwrap()` takes it as a required input and keeps its `x-comb-text` and `x-comb-maxBytes`; it publishes `anyOf: [{ <schema>, "x-comb-*" }, { type: "null" }]` (since 0.20.1; 0.20.0 nested the schema in a one-member `anyOf`), the keys on the property as before. 0.19 built it as one union with null, so `.unwrap()` did not exist on it (TS2339) and its published non-null member carried no keys. A nullable real's read repeats its stated bounds on its number member the same way. A reader of the property's keys sees no change. **Fix:** regenerate.
 
 6. **Install each optional peer inside comb's range.** comb now refuses an optional peer whose version is outside the range it states, naming the version found, where 0.19 ran it: `bun add libpg-query`, `bun add @libsql/client` and `bun add postgres` take 18.x, 0.18.x and 4.x today, which comb was never tested against. Install by the words the refusal gives, quoted for the shell, such as `bun add "libpg-query@>=17.7.4 <18"`. Each `comb migrate` command checks its peers before its first connection, request, process or Atlas call, so a Turso `apply` without `@libsql/client` no longer creates the database and mints a token before it refuses.
 
@@ -1533,7 +1540,7 @@ What changes for a project on 0.13.0. Before deploying it:
 - **A composite foreign key joins on every column pair.** Its relation is `from: [r.grant.orgId, r.grant.userId], to: [r.member.orgId, r.member.userId]`, named for the table it references, so `with:` serves the row the whole key references; its way back is `one()` only when the key's columns are unique together on their table, else `many()`. The constraint map lists each column, each is out of the update DTO, and the diagram DDL writes one table-level `FOREIGN KEY`. `ForeignKeyRef` gains `key?: { columns; refColumns }`, an additive type change.
 - **A Postgres array column is an array of its element.** A write takes exactly its declared dimensions, each element nullable as Postgres stores it, and refuses a ragged multidimensional value Postgres refuses; a read takes any depth up to Postgres's six, as Postgres keeps no declared dimensions, so no stored row is refused. `FieldMeta` gains an optional `dimensions`, an additive type change.
 - **Applied enum CHECKs map once.** A table that spreads the generated `…EnumChecks(t)` regenerates: a CHECK under comb's enum name that checks what comb writes is comb's, mapped once as `_enum_invalid`. One under that name that checks something else fails, saying so; two CHECKs of one name fail as such.
-- **The text guard is a refine, published as `x-comb-text`, never a pattern.** Go's and Rust's validators compile every comb document; a field's own `pattern` stays its `pattern`, with no `allOf`; a written `c.json` field is `anyOf: [$ref]` to its schema, its own description kept, with `x-comb-text` and `x-comb-maxBytes` beside it. A JSON field's rules leave its description. A reference under the id rule, and a written `c.id`, take the guard after `^\S{1,48}$`, so U+0000 and a lone surrogate are refused there too.
+- **The text guard is a refine, published as `x-comb-text`, never a pattern.** Go's and Rust's validators compile every comb document; a field's own `pattern` stays its `pattern`, with no `allOf`; a written `c.json` field is its schema's `$ref`, its own description kept, with `x-comb-text` and `x-comb-maxBytes` beside it. A JSON field's rules leave its description. A reference under the id rule, and a written `c.id`, take the guard after `^\S{1,48}$`, so U+0000 and a lone surrogate are refused there too.
 
 ## Upgrading to 0.13
 
