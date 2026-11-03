@@ -2,7 +2,8 @@
  * C4 of r19: every `x-comb-*` key sits on the property's own schema (`items` for an array element's),
  * beside the `anyOf` of a nullable field, so a reader finds it with no `anyOf` walk; a nullable
  * field's non-null member repeats them, and holds no other (C1 of r20); every one of them, a written
- * JSON value's included (C2 of r21).
+ * JSON value's included (C2 of r21). No schema is a one-member `anyOf`, `oneOf` or `allOf`, a wrapper
+ * every reader of the spec would have to flatten (C2a of the 0.20.0 G3).
  * The walk covers each DTO of a table holding every kind that publishes one.
  */
 import * as z from "zod"
@@ -14,6 +15,7 @@ afterAll(() => cleanGeneratedDtos())
 const TABLE = `import { json, jsonb, text } from "drizzle-orm/pg-core"
 import * as z from "zod"
 export const Doc = z.object({ a: z.string() })
+export const Reg = z.object({ b: z.string() }).meta({ id: "XcombReg" })
 export const row = pgTable("row", {
 	id: c.id("row"),
 	title: c.text("title", { max: 50, min: 2, trim: true }),
@@ -25,6 +27,9 @@ export const row = pgTable("row", {
 	count: c.integer("count", { max: 9, min: 1 }),
 	doc: c.json("doc", Doc, { maxBytes: 64 }),
 	docs: c.json("docs", Doc).array(),
+	reg: c.json("reg", Reg),
+	regReq: c.json("reg_req", Reg).notNull(),
+	docReq: c.json("doc_req", Doc).notNull(),
 	raw: jsonb("raw"),
 	rawn: jsonb("rawn").notNull(),
 	plain: json("plain"),
@@ -33,6 +38,20 @@ export const row = pgTable("row", {
 	shortReq: c.text("short_req", { max: 5 }).array().notNull(),
 	nums: c.integer("nums", { max: 9, min: 1 }).array(),
 	ratios: c.real("ratios", { max: 1, min: 0 }).array().notNull(),
+})`
+
+/* SQLite's JSON kinds, for the wrapper walk: a c.json column, registered or not, and a drizzle JSON text */
+const SQLITE_TABLE = `import { text } from "drizzle-orm/sqlite-core"
+import * as z from "zod"
+export const Doc = z.object({ a: z.string() })
+export const Reg = z.object({ b: z.string() }).meta({ id: "XcombRegLite" })
+export const row = sqliteTable("row", {
+	id: c.id("row"),
+	title: c.text("title", { max: 50, min: 2, trim: true }),
+	doc: c.json("doc", Doc, { maxBytes: 64 }),
+	docReq: c.json("doc_req", Doc).notNull(),
+	reg: c.json("reg", Reg),
+	raw: text("raw", { mode: "json" }),
 })`
 
 type Schema = { anyOf?: Schema[]; items?: Schema } & Record<string, unknown>
@@ -71,9 +90,26 @@ function unkept(schema: Schema, at: string): string[] {
 	return schema.items === undefined ? missing : [...missing, ...unkept(schema.items, `${at}.items`)]
 }
 
+/**
+ * Each `anyOf`, `oneOf` or `allOf` of one member anywhere in `node`, by the path to it: a wrapper
+ * that says nothing its member does not, which a generator that does not flatten it types as any JSON
+ */
+function wrappers(node: unknown, at: string): string[] {
+	if (Array.isArray(node)) return node.flatMap((child, i) => wrappers(child, `${at}[${i}]`))
+	if (node === null || typeof node !== "object") return []
+	return Object.entries(node).flatMap(([key, child]) => [
+		...(["allOf", "anyOf", "oneOf"].includes(key) && Array.isArray(child) && child.length === 1
+			? [`${at}.${key}`]
+			: []),
+		...wrappers(child, `${at}.${key}`),
+	])
+}
+
 /** The JSON Schema of each of `row`'s DTOs */
-async function documents(): Promise<Array<[string, { properties: Record<string, Schema> }]>> {
-	const dtos = await generatedDtos("c4", TABLE, { dialect: "postgres" })
+async function documents(
+	dialect: "postgres" | "sqlite" = "postgres",
+): Promise<Array<[string, { properties: Record<string, Schema> }]>> {
+	const dtos = await generatedDtos(`c4-${dialect}`, dialect === "postgres" ? TABLE : SQLITE_TABLE, { dialect })
 	const row = dtos["row"] as Record<string, z.ZodObject>
 	return ["rowDtoCreateSchema", "rowDtoUpdateSchema", "rowDtoReadSchema"].map((name) => [
 		name,
@@ -83,6 +119,41 @@ async function documents(): Promise<Array<[string, { properties: Record<string, 
 		}) as never,
 	])
 }
+
+describe("a DTO's published schema (C2a of the 0.20.0 G3)", () => {
+	it("holds no one-member anyOf, oneOf or allOf, on either dialect, a registered schema's included", async () => {
+		for (const dialect of ["postgres", "sqlite"] as const)
+			for (const [name, document] of await documents(dialect))
+				expect(wrappers(document, `${dialect}.${name}`)).toEqual([])
+	})
+
+	it("publishes a nullable written JSON value as its schema beside null, the keys on the schema itself", async () => {
+		const [[, create]] = (await documents()) as Array<[string, { properties: Record<string, Schema> }]> as [
+			[string, { properties: Record<string, Schema> }],
+		]
+		expect(create.properties["doc"]).toEqual({
+			anyOf: [
+				expect.objectContaining({
+					type: "object",
+					"x-comb-maxBytes": 64,
+					"x-comb-text": "no U+0000 or unpaired surrogate",
+				}),
+				{ type: "null" },
+			],
+			"x-comb-maxBytes": 64,
+			"x-comb-text": "no U+0000 or unpaired surrogate",
+		})
+		/* a registered schema is its $ref with the keys beside it, its body published once under its id */
+		expect(create.properties["reg"]?.anyOf?.[0]).toEqual({
+			$ref: expect.stringContaining("XcombReg"),
+			"x-comb-text": "no U+0000 or unpaired surrogate",
+		})
+		expect(create.properties["regReq"]).toEqual({
+			$ref: expect.stringContaining("XcombReg"),
+			"x-comb-text": "no U+0000 or unpaired surrogate",
+		})
+	})
+})
 
 describe("where a field's x-comb-* keys sit", () => {
 	it("is never inside an anyOf member alone, in any DTO", async () => {

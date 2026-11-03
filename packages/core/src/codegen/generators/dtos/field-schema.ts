@@ -40,12 +40,12 @@ const JSON_NUL_CHECK =
 /*
  * a c.json column is its schema, which the runtime reader found exported; a plain json column any
  * JSON value, written as the shared schema that holds no null of its own, as z.json() does, so null
- * is the column's to take (C5 of r19). A written JSON value is its refined schema as the one option
- * of a union: meta on the refined copy itself would publish the schema inline beside its $ref,
- * while the union publishes `anyOf: [$ref]`, the schema's own description kept, with the refines'
- * rules in x- keys beside it (F26, F63). A union, not a pipe from the schema into its copy: a pipe
- * needs the copy's input to be the schema's output, which TypeScript refuses for a schema with a
- * default or a transform
+ * is the column's to take (C5 of r19). A written JSON value is its refined schema behind z.lazy: meta
+ * on the refined copy itself would publish the schema inline beside its $ref, while the lazy publishes
+ * the $ref, or the schema where none is registered, with the refines' rules in x- keys beside it
+ * (F26, F63), and no one-member anyOf a spec reader has to flatten, as a union of one did (C2a of the
+ * 0.20.0 G3). A lazy, not a pipe from the schema into its copy: a pipe needs the copy's input to be
+ * the schema's output, which TypeScript refuses for a schema with a default or a transform
  */
 /** Whether a column holds JSON: a c.json column, or a drizzle one whose data type is JSON */
 const isJson = (field: FieldMeta): boolean => field.combKind === "json" || field.dataType === "object json"
@@ -60,10 +60,10 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const limit = annotations.maxBytes
 	const keys = { "x-comb-text": STORABLE_TEXT_RULE, ...(limit === null ? {} : { "x-comb-maxBytes": limit }) }
 	const refined = `${schema}${jsonChecks(limit)}`
-	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63);
+	/* keep the lazy: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63);
 	   a nullable column wraps it as every nullable base is, so `.unwrap()` keeps the keys (C2 of r21) */
 	const uses: SharedName[] = declared ? [] : ["jsonValueSchema"]
-	return { code: `z.union([${refined}])`, keys, takesNull: false, uses }
+	return { code: `z.lazy(() => ${refined})`, keys, takesNull: false, uses }
 }
 
 /**

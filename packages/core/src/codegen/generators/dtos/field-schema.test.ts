@@ -216,8 +216,8 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		)
 		/* a plain drizzle column is typed from its data type: a JSON blob takes any JSON value */
 		expect(schema("x", 'blob("x")', "read")).toBe("z.json()")
-		/* written, it takes the refine as a union's one option, nullable as any field is, its rule as meta (F63, C5 of r19, C2 of r21) */
-		expect(schema("x", 'blob("x")', "create")).toBe("z.union([jsonValueSchema]).nullable().optional()")
+		/* written, it takes the refine behind z.lazy, nullable as any field is, its rule as meta (F63, C5 of r19, C2 of r21, C2a) */
+		expect(schema("x", 'blob("x")', "create")).toBe("z.lazy(() => jsonValueSchema).nullable().optional()")
 		expect(() => schema("x", 'blob("x", { mode: "buffer" })', "read")).toThrow(
 			"fixture.x: comb has no rule for a SQLiteBlobBuffer column (object buffer)",
 		)
@@ -323,10 +323,10 @@ describe("generateFieldSchema: a JSON column's rules, published (F26)", () => {
 		expect(pg).toContain(`.meta({${TEXT_KEY},"x-comb-maxBytes":20})`)
 		const plain = fieldOf("b", 'c.json("b", blobSchema)', { jsonSchemaName: "blobSchema" })
 		expect(generated(plain, "create", { dialect: "postgres", imports: imports() })).toContain(`.meta({${TEXT_KEY}})`)
-		/* on SQLite too, which stores neither as sent (F11); the refined schema as a union's one option,
-		 * so it publishes anyOf: [$ref] to it (F63) */
+		/* on SQLite too, which stores neither as sent (F11); the refined schema behind z.lazy, so it
+		 * publishes its $ref (F63), with no one-member anyOf around it (C2a) */
 		expect(generateFieldSchema(plain, "create", { dialect: "sqlite", imports: imports() })).toBe(
-			"z.union([blobSchema]).nullable().optional()",
+			"z.lazy(() => blobSchema).nullable().optional()",
 		)
 	})
 })

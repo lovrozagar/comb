@@ -320,18 +320,20 @@ const property = (schema: z.ZodType) =>
 /** The generated create DTO's `notes` */
 const notes = () => generated.articleDtoCreateSchema.shape["notes"] as z.ZodType
 
-/* C2 of r21: a nullable written JSON value nests its schema's union beside null, its keys on both */
+/* C2 of r21: a nullable written JSON value is its schema beside null, its keys on both; the schema
+   itself, not a one-member union of it (C2a of the 0.20.0 G3) */
 describe("a nullable written JSON field's keys, as honey searches them", () => {
 	const RULE = "no U+0000 or unpaired surrogate"
 
-	it("publishes the union beside null, the rule on the property and on its non-null member", () => {
-		expect(property(notes())).toEqual({
-			anyOf: [
-				{ anyOf: [expect.objectContaining({ anyOf: expect.any(Array) })], "x-comb-text": RULE },
-				{ type: "null" },
-			],
-			"x-comb-text": RULE,
-		})
+	it("publishes the schema beside null, the rule on the property and on its non-null member", () => {
+		const { anyOf, ...keys } = property(notes()) as { anyOf: Array<Record<string, unknown>> }
+		expect(keys).toEqual({ "x-comb-text": RULE })
+		expect(anyOf).toEqual([
+			expect.objectContaining({ anyOf: expect.any(Array), "x-comb-text": RULE }),
+			{ type: "null" },
+		])
+		const members = anyOf[0]?.["anyOf"] as unknown[] | undefined
+		expect(members?.length).toBeGreaterThan(1)
 	})
 
 	it("is found at the property by honey's search, one value however deep it repeats", () => {

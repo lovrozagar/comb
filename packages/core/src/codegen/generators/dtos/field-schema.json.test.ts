@@ -1,7 +1,8 @@
 /**
- * C4 and C5 of r18: a written c.json publishes its schema as a union's one option, so a registered
- * schema stays a bare `$ref` whatever rules it takes, its rules in x- keys beside it. A nullable one
- * wraps that union with null, as every nullable field is built, so `.unwrap()` keeps the keys (C2 of r21).
+ * C4 and C5 of r18: a written c.json publishes its schema behind z.lazy, so a registered schema stays
+ * a bare `$ref` whatever rules it takes, its rules in x- keys beside it, with no one-member anyOf around
+ * it (C2a of the 0.20.0 G3). A nullable one wraps it with null, as every nullable field is built, so
+ * `.unwrap()` keeps the keys (C2 of r21).
  */
 import { ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
@@ -34,11 +35,11 @@ function published(schema: z.ZodType) {
 const RULE = { "x-comb-text": "no U+0000 or unpaired surrogate" }
 
 describe("a written c.json's published schema (C4, C5)", () => {
-	it("is its schema's union beside null when the column takes null, the rules on both", () => {
+	it("is its schema's $ref beside null when the column takes null, the rules on both", () => {
 		for (const type of ["create", "update"] as const)
 			expect(published(profile('c.json("p", Profile)', type))).toEqual({
 				defs: ["C4Profile"],
-				p: { anyOf: [{ anyOf: [{ $ref: "#/$defs/C4Profile" }], ...RULE }, { type: "null" }], ...RULE },
+				p: { anyOf: [{ $ref: "#/$defs/C4Profile", ...RULE }, { type: "null" }], ...RULE },
 			})
 	})
 
@@ -46,14 +47,14 @@ describe("a written c.json's published schema (C4, C5)", () => {
 		expect(published(profile('c.json("p", Profile, { maxBytes: 64 })', "create"))).toEqual({
 			defs: ["C4Profile"],
 			p: {
-				anyOf: [{ anyOf: [{ $ref: "#/$defs/C4Profile" }], ...RULE, "x-comb-maxBytes": 64 }, { type: "null" }],
+				anyOf: [{ $ref: "#/$defs/C4Profile", ...RULE, "x-comb-maxBytes": 64 }, { type: "null" }],
 				...RULE,
 				"x-comb-maxBytes": 64,
 			},
 		})
 		expect(published(profile('c.json("p", Profile, { maxBytes: 64 }).notNull()', "create"))).toEqual({
 			defs: ["C4Profile"],
-			p: { anyOf: [{ $ref: "#/$defs/C4Profile" }], ...RULE, "x-comb-maxBytes": 64 },
+			p: { $ref: "#/$defs/C4Profile", ...RULE, "x-comb-maxBytes": 64 },
 		})
 	})
 })
