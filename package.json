@@ -84,7 +84,7 @@
 		"rulesync": "16.17.0",
 		"smol-toml": "^1.8.0"
 	},
-	"packageManager": "bun@1.3.11",
+	"packageManager": "bun@1.4.4",
 	"standards": {
 		"repo": "comb",
 		"gates": [

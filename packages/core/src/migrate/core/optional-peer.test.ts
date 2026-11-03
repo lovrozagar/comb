@@ -37,7 +37,7 @@ describe("optionalPeer", () => {
 		await expect(bun).rejects.toThrow("comb needs ts-morph (>=28.0.0 <29) to read; install ts-morph")
 	})
 
-	/* bun 1.3 throws a failed import as a ResolveMessage that is no Error (bun 1.4's is): CI's consumers, on 1.3.11 */
+	/* bun 1.3 throws a failed import as a ResolveMessage that is no Error (bun 1.4's is): a consumer may run 1.3 */
 	it("refuses a missing peer bun 1.3 throws as a ResolveMessage, which is no Error", async () => {
 		class ResolveMessage {
 			readonly code = "ERR_MODULE_NOT_FOUND"
