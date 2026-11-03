@@ -20,7 +20,8 @@ afterAll(() => rmSync(dirname(tarball), { force: true, recursive: true }))
  * in a workspace the check spoke for another package than the one that ran. Bun workspaces, comb
  * hoisted to the root, each bin peer at one version in the root and another in the workspace `db`.
  * Every peer is a fake whose bin logs its version, the runtime it runs on and its argv, and exits 1;
- * wrangler's module logs the config read
+ * wrangler's module logs the config read, and the platform proxy the D1 proof starts, which fails,
+ * with the runtime that starts it (bun says process.release.name is node)
  */
 describe("comb runs the bin it checked (K1; sibling: drizzle-kit's resolution)", () => {
 	const IN = { "drizzle-kit": "1.0.0-rc.5", wrangler: "4.150.0" } as const
@@ -39,14 +40,22 @@ process.exit(1)
 	${log}"readConfig\\n")
 	return { d1_databases: [{ binding: "CORE", database_id: "00000000-0000-0000-0000-000000000000", database_name: "core", migrations_dir: "m" }] }
 }
+exports.getPlatformProxy = async () => {
+	${log}"getPlatformProxy " + (process.versions.bun === undefined ? "node" : "bun") + "\\n")
+	throw new Error(${JSON.stringify(`fake ${peer} ${version} proxy`)})
+}
 `,
 			"package.json": JSON.stringify({ bin: { [peer]: "bin/run-fake.js" }, main: "index.js", name: peer, version }),
 		}
 	}
 	const DB = {
-		"comb.migrate.config.ts": `export default { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "d1", databaseName: "core" } } } }\n`,
+		/* local: the same database as wrangler keeps it locally, where none is yet: apply reads no history and goes to the proof */
+		"comb.migrate.config.ts": `export default { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "d1", databaseName: "core" } }, local: { migrationsDir: "m", name: "local", provider: { type: "d1", databaseName: "core", local: true } } } }\n`,
 		"drizzle.config.ts": `export default { dialect: "sqlite", out: "./m", schema: "./post.tables.ts" }\n`,
 		"m/20260101000000_init.sql": "CREATE TABLE a (id integer);\n",
+		/* the sum atlas migrate hash writes for it, which apply checks before the proof */
+		"m/atlas.sum":
+			"h1:49rgkc+5rAlkUINyqIrGhzKe7Sec5arvFN+yPbLgUKo=\n20260101000000_init.sql h1:RQHt4SOaDsBNzXQ/whJf0fie4LxTmkJ3zg0glyracF0=\n",
 		"post.tables.ts": `import { sqliteTable } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }) })
@@ -67,6 +76,8 @@ export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }) })
 	const COMB = join("..", ["node_", "modules"].join(""), "@lovrozagar/comb/src/bin.ts")
 	/* each command under bun (comb's own shebang) and under node (through tsx), as a package script runs it */
 	const SCRIPTS = {
+		"apply:bun": "comb migrate apply local --yes",
+		"apply:node": `tsx ${COMB} migrate apply local --yes`,
 		"diff:bun": "comb migrate diff core --dry-run",
 		"diff:node": `tsx ${COMB} migrate diff core --dry-run`,
 		"status:bun": "comb migrate status core",
@@ -154,6 +165,26 @@ export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }) })
 				expect(spawned[0]?.split(" ")[2]).toBe(runtime)
 			},
 		)
+	})
+
+	/*
+	 * AD6 of the area D review: the D1 proof starts the platform proxy of the wrangler the command
+	 * checked, the third use of the one package K1 names, never the one comb's own import resolves
+	 */
+	describe("the D1 proof's wrangler (AD6)", () => {
+		let db: string
+		beforeAll(() => {
+			db = workspace(OUT, IN)
+		})
+
+		it.each(["bun", "node"] as const)("starts the proxy of the wrangler it checked (comb on %s)", (comb) => {
+			const { ran, result } = script(db, `apply:${comb}`)
+			/* the version on each line, whichever process starts the proxy (SD1r moves the proof into a node child) */
+			expect(result.status).not.toBe(0)
+			const proxies = ran.filter((line) => line.includes(" getPlatformProxy "))
+			expect(proxies, `${result.output}\n${ran.join("\n")}`).toHaveLength(1)
+			for (const line of ran) expect(line.startsWith(`wrangler ${IN.wrangler} `), line).toBe(true)
+		})
 	})
 
 	describe("the root's peer in range, the workspace's own out of it", () => {
