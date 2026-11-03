@@ -3,8 +3,10 @@
  * statement changed, which no transaction counts, and what a second connection committed, which this
  * backend's counts never see (pg-server-writes.ts). The read is the server's, another session's work
  * in it too, so each row carries the names of the objects it is about, and a change is a file's only
- * when one is a name the file spells (namesIn in sql-code.ts). A replay's own rows are left out.
- * Beside the catalogs, the server's replication slots (PR2 of r22b), which no catalog holds.
+ * when one is a name the file spells (namesIn in sql-code.ts). A replay's own rows are left out, but
+ * for the fields of its own database's row that keep the cleanup from dropping it, which only that
+ * replay changes. Beside the catalogs, the server's replication slots (PR2 of r22b), which no catalog
+ * holds.
  */
 import type { Sql } from "./pg-replay-database.ts"
 import { CATALOGS, changedFields } from "./pg-server-writes.ts"
@@ -45,6 +47,14 @@ const BESIDE: Readonly<Record<string, { names: string; noun: string; query: stri
 }
 
 /**
+ * The replay's own database's row, filtered from pg_database's above, by the fields whose change
+ * keeps the cleanup from dropping it: a template, another owner. A committing DO runs bare, which no
+ * count sees, so the snapshot reads them, keyed as pg_database's row and so named alike
+ */
+const ownDatabase = (database: string): string =>
+	`SELECT 'database' AS noun, d.datname::text AS key, jsonb_build_object('datdba', d.datdba, 'datistemplate', d.datistemplate) AS row, ARRAY[d.datname::text] AS names FROM pg_database d WHERE d.datname = ${literalOf(database)}`
+
+/**
  * Every shared catalog's committed rows in one read, a replay's own left out: each catalog's query
  * with the rows a replay makes filtered where it reads them, and the names each row is about
  */
@@ -75,11 +85,11 @@ function literalOf(text: string): string {
 type Snapshot = Map<string, { names: readonly string[]; row: Record<string, unknown> }>
 
 /**
- * The read prepared on `admin` for snapshot: planning it is half its time, and a replay reads it
- * around every file and bare statement
+ * The read prepared on `admin` for snapshot, with the replay's own `database`'s row: planning it is
+ * half its time, and a replay reads it around every file and bare statement
  */
-async function prepareSnapshot(admin: Sql): Promise<void> {
-	await admin.unsafe(`PREPARE comb_snapshot AS ${SNAPSHOT}`, [])
+async function prepareSnapshot(admin: Sql, database: string): Promise<void> {
+	await admin.unsafe(`PREPARE comb_snapshot AS ${SNAPSHOT} UNION ALL ${ownDatabase(database)}`, [])
 }
 
 /** The shared catalogs as `admin`, a connection with no transaction open that prepareSnapshot prepared, reads them committed */

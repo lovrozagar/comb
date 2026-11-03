@@ -58,6 +58,7 @@ const SWEEP = [
 ]
 const MADE = ["CREATE DATABASE <db> TEMPLATE template0", COUNTED, expect.stringMatching(/^SELECT e\.extname/)]
 const DROPPED = "DROP DATABASE IF EXISTS <db>"
+const UNTEMPLATED = "ALTER DATABASE <db> IS_TEMPLATE false"
 /* the replay's connection closed, and any backend still in its database ended, before the drop */
 const ENDED = expect.stringMatching(/^SELECT pg_terminate_backend\(pid\)/)
 
@@ -102,6 +103,7 @@ describe("replayCatalog", () => {
 			SNAPSHOT,
 			CATALOG,
 			ENDED,
+			UNTEMPLATED,
 			DROPPED,
 		])
 		expect(dev.sent.find(([query]) => query === CATALOG)).toEqual(target.sent[0])

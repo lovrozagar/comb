@@ -29,7 +29,11 @@ const inTransaction = (...statements: unknown[]) => ["BEGIN", COUNTED, ...statem
 
 /* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
 const AROUND = {
-	after: [expect.stringMatching(/^SELECT pg_terminate_backend\(pid\)/), "DROP DATABASE IF EXISTS <db>"],
+	after: [
+		expect.stringMatching(/^SELECT pg_terminate_backend\(pid\)/),
+		"ALTER DATABASE <db> IS_TEMPLATE false",
+		"DROP DATABASE IF EXISTS <db>",
+	],
 	before: [
 		expect.stringMatching(/^SELECT pid, datname, .* FROM pg_stat_activity$/),
 		expect.stringMatching(/^SELECT datname FROM pg_database/),

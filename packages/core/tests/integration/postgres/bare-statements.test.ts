@@ -82,7 +82,7 @@ describe("the statements a txmode none replay runs bare (P1 of r21)", () => {
 			const admin = connect({ ...postgresOptionsOf(url, "devUrl"), max: 1, onnotice: () => undefined })
 			try {
 				await sql.unsafe(SETUP, [])
-				await prepareSnapshot(admin)
+				await prepareSnapshot(admin, new URL(url).pathname.slice(1))
 				for (const statement of BARE) {
 					const before = await snapshot(admin)
 					await sql.unsafe(statement, [])

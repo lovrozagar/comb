@@ -51,3 +51,29 @@ describe("what the replay's database needs to be dropped, and another role, stay
 		60_000,
 	)
 })
+
+/** A txmode none DO block that runs `statement` with `%I` as the database it runs in, and commits */
+const committing = (statement: string) =>
+	`-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's change\nDO $$ BEGIN EXECUTE format('${statement}', current_database()); COMMIT; END $$;\n`
+
+describe("a committing DO that makes the replay's database undroppable is refused bare (P3's constraint; sibling: the guarded path above)", () => {
+	const pre = unique("comb_t_owner")
+	afterEach(() => dropRoles(pre))
+
+	it.each([
+		["IS_TEMPLATE", () => "ALTER DATABASE %I IS_TEMPLATE true", "datistemplate"],
+		["OWNER TO", () => `ALTER DATABASE %I OWNER TO ${pre}`, "datdba"],
+	])(
+		"refuses %s set by a DO that commits, naming the field, and leaves no replay database",
+		async (_, statement, field) => {
+			await query(pgUrl(), `CREATE ROLE ${pre}`)
+			const { refused } = await checked(T, committing(statement()))
+			expect(refused).toContain(`changed (${field})`)
+			expect(refused).toContain("comb drops the database it replays in")
+			const database = /database (comb_replay_\w+) changed/.exec(String(refused))?.[1]
+			expect(database).toBeDefined()
+			expect(await query(pgUrl(), `SELECT 1 FROM pg_database WHERE datname = '${database}'`)).toEqual([])
+		},
+		60_000,
+	)
+})

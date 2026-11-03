@@ -31,31 +31,35 @@ type At = { name: string; names: ReadonlySet<string>; sent: string | undefined; 
 /**
  * The server's shared catalogs read as committed against the last read: a change since to an object
  * the file `name` names (`names`), while `sent` or the whole file ran, is refused, and a role or
- * database it added is the cleanup's; a change to any other is another session's (P2 of r22). `read`
- * is that read when the caller took it
+ * database it added is the cleanup's; a change to any other is another session's (P2 of r22). The
+ * replay's own database is the file's whatever it spells, as only this replay runs in it, and is
+ * the cleanup's too. `read` is that read when the caller took it
  */
 async function window(run: Run, { name, names, sent, stops }: At, read?: Snapshot): Promise<void> {
 	const now = read ?? (await snapshot(run.admin))
-	const changes = snapshotChanges(run.seen, now, names)
-	const { databases, roles, slots } = added(run.seen, now, names)
+	const its = new Set([...names, run.database])
+	const changes = snapshotChanges(run.seen, now, its)
+	const { databases, roles, slots } = added(run.seen, now, its)
 	run.seen = now
 	if (changes.length === 0) return
 	run.strays.databases.push(...databases)
 	run.strays.roles.push(...roles)
 	run.strays.slots.push(...slots)
+	const own = `database ${run.database} `
 	const strays = [
 		...roles.map((role) => `role ${role}`),
 		...databases.map((database) => `database ${database} unless a session is in it`),
 		...slots.map((slot) => `replication slot ${slot} unless a session holds it`),
 	]
-	const dropped = strays.length === 0 ? "" : `; comb drops ${strays.join(", ")}, which the file added`
+	const replays = changes.some((change) => change.startsWith(own)) ? "; comb drops the database it replays in" : ""
+	const dropped = `${strays.length === 0 ? "" : `; comb drops ${strays.join(", ")}, which the file added`}${replays}`
 	/* the read is committed, so a change it shows to an object the file did not add stays */
 	const dropping = new Set([
 		...roles.map((role) => `role ${role} added`),
 		...databases.map((d) => `database ${d} added`),
 		...slots.map((slot) => `replication slot ${slot} added`),
 	])
-	const kept = changes.filter((change) => !dropping.has(change))
+	const kept = changes.filter((change) => !dropping.has(change) && !change.startsWith(own))
 	const left = kept.length === 0 ? "" : `; devUrl's server keeps ${kept.join(", ")}, which comb cannot undo`
 	throw new ReplayFailed(
 		`${name}: devUrl's server changed past the database the replay runs in while ${sent === undefined ? "the file" : JSON.stringify(sent)} ran: ${changes.join(", ")}. A change made there, from inside a DO block, a function, EXECUTE or CALL, or over a second connection such as dblink's, apply would make on the target's server, so comb refuses the file; write the change as a statement of its own, which the replay leaves out and apply runs${dropped}${left}; ${stops}`,
