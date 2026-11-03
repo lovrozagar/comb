@@ -56,9 +56,14 @@ interface StagingEnv {
 declare const staging: StagingEnv
 expectTypeOf(router.getHandle(mapping, staging).handle).toEqualTypeOf<D1Database>()
 
-/* an env typed by a string index signature names no binding, so the handle is the structural one */
+/* an env typed by a string index signature of no binding names none, so the handle is the structural one */
 declare const indexed: Record<string, unknown>
 expectTypeOf(router.getHandle(mapping, indexed).handle).toEqualTypeOf<D1DatabaseLike>()
+/* one whose index holds D1 bindings names their type (AD14 of the area D review) */
+declare const bindings: Record<string, D1Database>
+expectTypeOf(router.getHandle(mapping, bindings).handle).toEqualTypeOf<D1Database>()
+declare const some: Partial<Record<string, D1Database>>
+expectTypeOf(router.getHandle(mapping, some).handle).toEqualTypeOf<D1Database>()
 
 /* an env whose known keys hold no shard binding, or a shard key holding what is no D1 binding, is refused */
 interface NoShards {

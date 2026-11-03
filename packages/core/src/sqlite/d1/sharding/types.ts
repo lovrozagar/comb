@@ -18,11 +18,15 @@ type ShardDbHandle<D extends D1DatabaseLike = D1DatabaseLike> = { driver: "d1"; 
 /**
  * The binding getHandle hands back for an env of type `E` (K2 of r22): the type its `SHARD_DB_*`
  * keys hold, as `wrangler types` writes them, a key bound in only some environments among them
- * (AD1); an env with a string index signature names no binding's type, and gives the structural
- * D1DatabaseLike
+ * (AD1); an env with a string index signature gives the D1 binding its index holds (AD14), and
+ * the structural D1DatabaseLike when it holds none
  */
 type ShardBindingOf<E> = string extends keyof E
-	? D1DatabaseLike
+	? Extract<NonNullable<E[string & keyof E]>, D1DatabaseLike> extends infer D extends D1DatabaseLike
+		? [D] extends [never]
+			? D1DatabaseLike
+			: D
+		: never
 	: Extract<NonNullable<E[Extract<keyof E, `SHARD_DB_${string}`>]>, D1DatabaseLike>
 
 /**
