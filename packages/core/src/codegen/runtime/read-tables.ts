@@ -10,7 +10,7 @@ import { getTableConfig as sqliteConfig, SQLiteDialect, SQLiteTable } from "driz
 import { pgObjectName } from "../../identifier.ts"
 import { byCodeUnit } from "../utils/order.ts"
 import { combColumnMeta } from "../../meta/column.ts"
-import { constraintsOf, statesOf, STRING_LIST } from "./read-comb.ts"
+import { constraintsOf, refuseJsonDocument, statesOf, STRING_LIST } from "./read-comb.ts"
 import type {
 	ModuleExport,
 	Snapshot,
@@ -62,6 +62,8 @@ function combOf(column: Column, at: string, context: Context): SnapshotComb | nu
 			`${at}: no module of the project exports the schema its c.json is given${skipped}; export it, so the generated DTOs can import it`,
 		)
 	}
+	/* a Postgres array of documents holds null elements whatever the column's own NOT NULL */
+	if (meta.kind === "json") refuseJsonDocument(meta.schema, at, column.notNull && !(column as ReadColumn).dimensions)
 	return {
 		constraints: constraintsOf(meta.constraints, at),
 		kind: meta.kind,

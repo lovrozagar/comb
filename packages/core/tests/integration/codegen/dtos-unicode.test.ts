@@ -213,13 +213,13 @@ describe("a c.json maxBytes", () => {
 		const dtos = await generatedDtos(
 			`c11-${dialect}`,
 			`import * as z from "zod"
-export const anyValue = z.union([z.boolean(), z.number(), z.string(), z.null()])
-export const one = ${table}("one", { id: c.id("one"), v: c.json("v", anyValue, { maxBytes: 3 }).notNull() })`,
+export const scalar = z.union([z.boolean(), z.number(), z.string()])
+export const one = ${table}("one", { id: c.id("one"), v: c.json("v", scalar, { maxBytes: 3 }).notNull() })`,
 			{ dialect },
 		)
 		const v = dtos["one"]?.["oneDtoCreateSchema"]?.shape["v"] as z.ZodType
 		for (const fits of [0, "", "a", 123]) expect(v.safeParse(fits).success).toBe(true)
-		for (const past of [false, true, null, 1234, "ab"]) {
+		for (const past of [false, true, 1234, "ab"]) {
 			expect(v.safeParse(past).error?.issues[0]?.message).toBe("JSON exceeds 3 bytes when serialized")
 		}
 	})
@@ -235,10 +235,11 @@ export const one = ${table}("one", { id: c.id("one"), v: c.json("v", anyValue, {
 				`c11-null-${dialect}`,
 				`import * as z from "zod"
 export const anyValue = z.union([z.boolean(), z.number(), z.string(), z.null()])
+export const scalar = z.union([z.boolean(), z.number(), z.string()])
 export const one = ${table}("one", {
 	id: c.id("one"),
 	nullable: c.json("nullable", anyValue, { maxBytes: 3 }),
-	required: c.json("required", anyValue, { maxBytes: 3 }).notNull(),
+	required: c.json("required", scalar, { maxBytes: 3 }).notNull(),
 })`,
 				{ dialect },
 			)
@@ -246,7 +247,9 @@ export const one = ${table}("one", {
 			const [nullable, required] = [shape?.["nullable"], shape?.["required"]] as [z.ZodType, z.ZodType]
 			expect(nullable.safeParse(null).success).toBe(true)
 			expect(nullable.safeParse(false).error?.issues[0]?.message).toBe("JSON exceeds 3 bytes when serialized")
-			expect(required.safeParse(null).error?.issues[0]?.message).toBe("JSON exceeds 3 bytes when serialized")
+			/* a NOT NULL column's schema takes no null (CD3 of r22b), so its write refuses one by the schema itself */
+			expect(required.safeParse(null).success).toBe(false)
+			expect(required.safeParse(false).error?.issues[0]?.message).toBe("JSON exceeds 3 bytes when serialized")
 		},
 	)
 })

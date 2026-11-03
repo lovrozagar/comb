@@ -47,4 +47,56 @@ function statesOf(raw: unknown, at: string): SnapshotComb["states"] {
 	}
 }
 
-export { constraintsOf, statesOf, STRING_LIST }
+/** A zod schema as its public definition reads: a kind, and the schemas it holds among its other entries; a check has none */
+type ZodNode = { def: Record<string, unknown> & { type: string } }
+
+const isZodNode = (value: unknown): value is ZodNode =>
+	typeof value === "object" && value !== null && typeof (value as Partial<ZodNode>).def?.type === "string"
+
+/** The values a definition entry holds: an array's items, a shape's fields, or the entry itself */
+const heldBy = (entry: unknown): unknown[] => {
+	if (Array.isArray(entry)) return entry
+	if (typeof entry === "object" && entry !== null && Object.getPrototypeOf(entry) === Object.prototype)
+		return Object.values(entry)
+	return [entry]
+}
+
+/**
+ * Whether `schema` holds, anywhere in it, a part whose output is another value than its input: a
+ * transform, a pipe, which `.transform()`, `z.preprocess()` and a codec each build. An overwrite
+ * (`.trim()`, `.toLowerCase()`), a default and a coerce hand on what the same part parses again
+ */
+function changesValue(schema: unknown): boolean {
+	const seen = new Set<unknown>()
+	const pending = [schema]
+	while (pending.length > 0) {
+		const node = pending.pop()
+		if (!isZodNode(node) || seen.has(node)) continue
+		seen.add(node)
+		const { def } = node
+		if (def.type === "pipe" || def.type === "transform") return true
+		/* a lazy holds its schema behind a function, called once, as a recursive schema meets itself again */
+		if (def.type === "lazy") pending.push((def as unknown as { getter: () => unknown }).getter())
+		for (const entry of Object.values(def)) pending.push(...heldBy(entry))
+	}
+	return false
+}
+
+/**
+ * A c.json column's schema is the stored document: the write DTOs store its output and the read DTO
+ * parses the stored row with it (CD2 of r22b), so one whose output its input refuses is an error
+ * naming the column; and a NOT NULL column of one value refuses a schema that takes null, whose
+ * write DTO would take a body the insert fails (CD3, the sibling of r19 C5)
+ */
+function refuseJsonDocument(schema: unknown, at: string, notNull: boolean): void {
+	if (changesValue(schema))
+		throw new Error(
+			`${at}: a c.json schema is the stored document; its transform's output is what gets stored, and the read DTO could not parse it. Move the transform to the request body's schema.`,
+		)
+	if (notNull && (schema as { safeParse(value: unknown): { success: boolean } }).safeParse(null).success)
+		throw new Error(
+			`${at}: its schema takes null and the column is NOT NULL: make the column nullable, or pass the schema's non-null form`,
+		)
+}
+
+export { constraintsOf, refuseJsonDocument, statesOf, STRING_LIST }

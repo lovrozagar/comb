@@ -150,7 +150,8 @@ import { c } from "@lovrozagar/comb/sqlite/columns"
 import { patterns } from "@lovrozagar/comb/sqlite/patterns"
 import * as z from "zod"
 
-/* a c.json schema is exported, so the generated DTOs can import it */
+/* a c.json schema is exported, so the generated DTOs can import it, and is the stored document:
+   no transform, pipe or preprocess, and no null on a NOT NULL column */
 export const authorSettings = z.object({ digest: z.boolean() })
 
 export const author = sqliteTable(
@@ -1133,6 +1134,8 @@ What changes for a project on 0.20. Before deploying it:
 20. **Expect `likeSearch` on a raw column to fold ASCII case again.** `likeSearch(post.title)` on a column `searchText` didn't write found no title holding a capital since 0.14: it compared the folded term with the raw text, so `Hello` missed `Hello World` and `postgres` missed `Postgres Tips`. It now matches the expression's `lower()`, as 0.13's LIKE did; a `_search` column matches as before. Accents still match only in a `_search` column. **Fix:** none; to match accents, search a column `searchText` wrote.
 
 21. **Read a filter limit set to `undefined` as its default.** `validateFilter(filter, fields, { maxConditions: undefined })` turned that cap off, so a filter could bind past D1's 100 parameters, and `createListQuerySchema({ limits: { maxSortKeys: undefined } })` threw. Both now keep the default for a key set to `undefined`, and `validateFilter` throws a `TypeError` for a limit that is `NaN`, negative, fractional or past a safe integer, as `createListQuerySchema` did. **Fix:** a `validateFilter` call that passed such a number passes a whole number from 0.
+
+22. **Give `c.json` the schema of the stored document.** Codegen refuses a `c.json` schema holding a transform, a pipe or a preprocess, naming the column: the write DTOs store the schema's output and the read DTO parses the stored row with the same schema, so 0.20 took the body, stored its output, and then refused every read of that row. Move the transform to the request body's schema. An overwrite (`.trim()`, `.toLowerCase()`), a default and a coerce stay, as their output parses again. Codegen also refuses a NOT NULL `c.json` column whose schema takes null, which 0.20 let the create DTO take and the insert fail: make the column nullable, or pass the schema's non-null form.
 
 ## Upgrading to 0.20.1
 
