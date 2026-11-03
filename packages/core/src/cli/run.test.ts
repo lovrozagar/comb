@@ -70,6 +70,14 @@ describe("runCli", () => {
 		}
 	})
 
+	/* KC9 of r22b: status serves bun:sqlite, libsql and Turso too, and the help said Postgres or D1 */
+	it("says status shows any database's migrations, as the README's prose does", async () => {
+		const { help } = await import("./run.ts")
+		expect(help()).toContain("  migrate status <db>       Show a database's applied and pending migrations\n")
+		const readme = readFileSync(join(import.meta.dirname, "../../../../README.md"), "utf8")
+		expect(readme).toContain("`status` lists a database's applied and pending migrations.")
+	})
+
 	it("is the help the README shows", async () => {
 		const { help } = await import("./run.ts")
 		const readme = readFileSync(join(import.meta.dirname, "../../../../README.md"), "utf8")

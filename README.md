@@ -218,7 +218,7 @@ COMMANDS:
   migrate check <db>        Check and approve the pending migrations, applying nothing
   migrate apply <db>        Apply pending migrations: approve drops, apply and record each at once
   migrate baseline <db>     Record the migrations a database already reflects as applied
-  migrate status <db>       Show a Postgres or D1 database's applied and pending migrations
+  migrate status <db>       Show a database's applied and pending migrations
 
 OPTIONS:
   -g, --generator <name>  Run one generator only [codegen]
@@ -276,7 +276,7 @@ Config mode reads `comb.config.ts` (or `.js`) from the working directory. Direct
 | D1                               | Atlas on an in-memory SQLite, plus comb's FTS5 part                                         | comb checks, then `wrangler d1 migrations apply` applies and records in the binding's `d1_migrations` |
 | Postgres (plain, Neon, Supabase) | Atlas on the dev database, plus comb's part for what Atlas OSS refuses (views, policies, …) | Atlas, after comb snapshots, classifies and approves each file; recorded in `atlas_schema_revisions`  |
 
-`init` scaffolds `drizzle.config.ts` and `atlas-migrations/`, and no `atlas.hcl`: comb runs Atlas with a config of its own, and comb's unsafe gate, not an Atlas `skip` block, is what stops a drop. Delete an `atlas.hcl` an earlier `init` wrote; `init --dialect postgres` adds a `comb.migrate.config.ts` whose URL comes from `DATABASE_URL`, and no file holds a credential. `check` runs the check every apply runs first and applies nothing; it reads the database's history, so it needs the database. `baseline` adopts a database that already has the schema: it records the migrations as applied without running any, but only once the database's schema is the one they leave (on D1, only the files comb 0.7's `__drizzle_migrations` records). `status` lists a Postgres or D1 database's applied and pending migrations. `diff --dry-run` writes nothing: it exits 0 when the schema is in sync, and 1 printing the migration a diff would write.
+`init` scaffolds `drizzle.config.ts` and `atlas-migrations/`, and no `atlas.hcl`: comb runs Atlas with a config of its own, and comb's unsafe gate, not an Atlas `skip` block, is what stops a drop. Delete an `atlas.hcl` an earlier `init` wrote; `init --dialect postgres` adds a `comb.migrate.config.ts` whose URL comes from `DATABASE_URL`, and no file holds a credential. `check` runs the check every apply runs first and applies nothing; it reads the database's history, so it needs the database. `baseline` adopts a database that already has the schema: it records the migrations as applied without running any, but only once the database's schema is the one they leave (on D1, only the files comb 0.7's `__drizzle_migrations` records). `status` lists a database's applied and pending migrations. `diff --dry-run` writes nothing: it exits 0 when the schema is in sync, and 1 printing the migration a diff would write.
 
 ## Columns
 

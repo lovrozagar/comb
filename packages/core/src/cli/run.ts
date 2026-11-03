@@ -18,7 +18,7 @@ const COMMANDS: ReadonlyArray<[string, string]> = [
 	["migrate check <db>", "Check and approve the pending migrations, applying nothing"],
 	["migrate apply <db>", "Apply pending migrations: approve drops, apply and record each at once"],
 	["migrate baseline <db>", "Record the migrations a database already reflects as applied"],
-	["migrate status <db>", "Show a Postgres or D1 database's applied and pending migrations"],
+	["migrate status <db>", "Show a database's applied and pending migrations"],
 ]
 
 /** The help, from the declarations the commands parse with */
