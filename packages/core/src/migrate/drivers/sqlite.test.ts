@@ -133,6 +133,29 @@ describe("provider factories", () => {
 	})
 })
 
+describe("createTursoProvider across a command's connections", () => {
+	/* S1 of r21: a client per migration file, and one token of each kind per command */
+	it("createTursoProvider opens a new client per connect, minting one token for the reader and one for the writer", async () => {
+		const api = fakeTurso([DB_INFO, TOKEN, DB_INFO, [200, { jwt: "jwt-2" }]])
+		const turso = { apiToken: "tok", databaseName: "core", group: "default", org: "acme", type: "turso" } as const
+		const provider = createTursoProvider(turso, { fetch: api.fetch })
+		const config = { migrationsDir: "m", name: "prod", provider: turso }
+		const [reader, writer, again] = [
+			await provider.connect({ ...config, readonly: true }),
+			await provider.connect(config),
+			await provider.connect(config),
+		]
+		expect(writer).not.toBe(again)
+		expect(api.requests.map(({ url }) => url.split("?")[1] ?? "")).toEqual([
+			"",
+			"expiration=1h&authorization=read-only",
+			"",
+			"expiration=1h&authorization=full-access",
+		])
+		for (const conn of [reader, writer, again]) await conn.close()
+	})
+})
+
 /* introspection is SQL sqlite_master answers, so it runs on SQLite */
 async function withSchema<T>(ddl: string, read: (conn: LibsqlConnection) => Promise<T>): Promise<T> {
 	const conn = libsqlConnection()

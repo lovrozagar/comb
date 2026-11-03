@@ -3,7 +3,7 @@
  * bun:sqlite is imported on connect, so the module loads under Node too.
  */
 import { existsSync } from "node:fs"
-import type { MemoryDb } from "./memory.ts"
+import type { LocalDb } from "./local-db.ts"
 import { DatabaseMissing } from "./missing.ts"
 import type {
 	BunSqliteProviderConfig,
@@ -17,8 +17,8 @@ const BUN_SQLITE = "bun:sqlite"
 
 type SqliteParam = string | number | bigint | boolean | null | Uint8Array
 
-/** The part of bun:sqlite's Database the proof run's in-memory copy uses */
-type BunMemory = {
+/** The part of bun:sqlite's Database a private database uses */
+type BunLocal = {
 	close(): void
 	exec(sql: string): unknown
 	prepare(sql: string): {
@@ -82,7 +82,7 @@ export function createBunSqliteProvider(config: BunSqliteProviderConfig): Connec
 }
 
 /** `use` on `sql` prepared, the statement finalized whatever `use` does */
-function once<T>(db: BunMemory, sql: string, use: (stmt: ReturnType<BunMemory["prepare"]>) => T): T {
+function once<T>(db: BunLocal, sql: string, use: (stmt: ReturnType<BunLocal["prepare"]>) => T): T {
 	const stmt = db.prepare(sql)
 	try {
 		return use(stmt)
@@ -91,18 +91,20 @@ function once<T>(db: BunMemory, sql: string, use: (stmt: ReturnType<BunMemory["p
 	}
 }
 
-/** A private in-memory bun:sqlite database, for the proof run (memory.ts) */
-async function openBunMemory(): Promise<MemoryDb> {
-	const { Database } = (await import(BUN_SQLITE)) as { Database: new (path: string) => BunMemory }
-	const db = new Database(":memory:")
-	return {
-		/* each statement finalized at once: one left open (an EXPLAIN DROP TABLE among them) keeps its table locked */
-		all: (sql, params = []) =>
-			once(db, sql, (stmt) => stmt.all(...(params as SqliteParam[]))) as Array<Record<string, unknown>>,
-		close: () => db.close(),
-		exec: (sql) => void db.exec(sql),
-		run: (sql, params = []) => void once(db, sql, (stmt) => stmt.run(...(params as SqliteParam[]))),
+/** How bun:sqlite opens a private database file, or `:memory:` (local-db.ts) */
+async function bunLocal(): Promise<(file: string) => LocalDb> {
+	const { Database } = (await import(BUN_SQLITE)) as { Database: new (path: string) => BunLocal }
+	return (file) => {
+		const db = new Database(file)
+		return {
+			/* each statement finalized at once: one left open (an EXPLAIN DROP TABLE among them) keeps its table locked */
+			all: (sql, params = []) =>
+				once(db, sql, (stmt) => stmt.all(...(params as SqliteParam[]))) as Array<Record<string, unknown>>,
+			close: () => db.close(),
+			exec: (sql) => void db.exec(sql),
+			run: (sql, params = []) => void once(db, sql, (stmt) => stmt.run(...(params as SqliteParam[]))),
+		}
 	}
 }
 
-export { openBunMemory }
+export { bunLocal }

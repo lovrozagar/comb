@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { type MemoryDb, openMemory } from "../drivers/memory.ts"
+import { type LocalDb, openMemory } from "../drivers/local-db.ts"
 import { quote, seedTables } from "./proof-seed.ts"
 
-const open: MemoryDb[] = []
+const open: LocalDb[] = []
 afterEach(() => {
 	for (const db of open.splice(0)) db.close()
 })

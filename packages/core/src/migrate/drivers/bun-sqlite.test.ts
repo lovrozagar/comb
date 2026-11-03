@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createBunSqliteProvider, openBunMemory } from "./bun-sqlite.ts"
+import { bunLocal, createBunSqliteProvider } from "./bun-sqlite.ts"
 
 vi.mock("bun:sqlite", () => import("../__fixtures__/bun-sqlite-node.ts"))
 
@@ -63,8 +63,8 @@ describe("createBunSqliteProvider read-only, and the proof run's memory database
 		}
 	})
 
-	it("gives the proof run a memory database that runs statements and reads rows", async () => {
-		const db = await openBunMemory()
+	it("opens a private database that runs statements and reads rows", async () => {
+		const db = (await bunLocal())(":memory:")
 		db.exec("CREATE TABLE t (a TEXT)")
 		db.run("INSERT INTO t VALUES (?)", ["007"])
 		db.run("INSERT INTO t VALUES ('x')")

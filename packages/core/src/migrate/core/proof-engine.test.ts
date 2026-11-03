@@ -5,7 +5,7 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 import { FILE, type Read, START, stateOf } from "../__fixtures__/apply-parity.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
-import { openMemory } from "../drivers/memory.ts"
+import { openScratch } from "../drivers/local-db.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
 import { applyToCopy, engineFindings, writtenTables } from "./proof-engine.ts"
 import { provePending } from "./proof-run.ts"
@@ -23,7 +23,7 @@ describe("the proof's engine pass leaves the copy as the target's own apply leav
 		const target = libsqlConnection()
 		await target.client.executeMultiple(START)
 		await target.batch(splitSqlStatements(FILE).map((sql) => ({ sql })))
-		const copy = await openMemory()
+		const copy = await openScratch()
 		copy.exec(START)
 		expect(applyToCopy(copy, FILE).error).toBeUndefined()
 		expect(await stateOf(async (sql) => copy.all(sql))).toEqual(await stateOf(readOf(target)))
@@ -52,7 +52,7 @@ CREATE VIRTUAL TABLE notes USING fts5 (body);`
 
 /** The unsafe notes the engine pass gives `sql` on a copy of TABLES that holds no row */
 async function unsafeOf(sql: string): Promise<string[]> {
-	const db = await openMemory()
+	const db = await openScratch()
 	db.exec(TABLES)
 	const run = applyToCopy(db, sql)
 	db.close()
@@ -115,7 +115,7 @@ ${Array.from({ length: 40 }, (_, i) => `CREATE TABLE idle_${i} (id INTEGER PRIMA
  * can open one
  */
 async function probed(sql: string, { unknownRoot = false } = {}) {
-	const db = await openMemory()
+	const db = await openScratch()
 	db.exec(PROBED_SCHEMA)
 	const placed: string[] = []
 	const counting = {
@@ -255,7 +255,7 @@ describe("the engine pass never lets a statement reach outside the copy", () => 
 		["a load_extension call", (dir: string) => `SELECT load_extension('${path.join(dir, "ext")}')`, "load_extension"],
 	])("refuses %s before it runs, and leaves no file behind", async (_, statement, named) => {
 		const dir = scratch()
-		const db = await openMemory()
+		const db = await openScratch()
 		db.exec(TABLES)
 		expect(() => applyToCopy(db, statement(dir))).toThrow(
 			`comb never runs ${named} in a migration: it reaches outside the database the migration applies to`,
@@ -267,7 +267,7 @@ describe("the engine pass never lets a statement reach outside the copy", () => 
 
 	/* SQLite marks load_extension direct-only: a trigger that calls it cannot prepare, so it never runs */
 	it("never runs a write that fires a trigger calling load_extension: SQLite refuses to prepare it", async () => {
-		const db = await openMemory()
+		const db = await openScratch()
 		db.exec(TABLES)
 		const file =
 			"CREATE TRIGGER k_load AFTER INSERT ON k BEGIN SELECT load_extension('x'); END;\nINSERT INTO k (a) VALUES ('a');"
@@ -292,7 +292,7 @@ describe("the engine pass never lets a statement reach outside the copy", () => 
 	})
 
 	it("runs a statement calling an ordinary function, which reaches nothing outside", async () => {
-		const db = await openMemory()
+		const db = await openScratch()
 		db.exec(TABLES)
 		expect(applyToCopy(db, "UPDATE k SET a = upper(a)").error).toBeUndefined()
 		db.close()
@@ -311,7 +311,7 @@ CREATE TABLE wr (k TEXT PRIMARY KEY, n INTEGER) WITHOUT ROWID;`
 
 	/** The unsafe and cautious notes the engine pass gives `sql` on a copy of REPLACING */
 	async function findingsOf(sql: string): Promise<{ cautious: string[]; unsafe: string[] }> {
-		const db = await openMemory()
+		const db = await openScratch()
 		db.exec(REPLACING)
 		const run = applyToCopy(db, sql)
 		db.close()
@@ -365,13 +365,13 @@ describe("the engine pass on a write that fires a trigger running an FTS5 comman
 		const history = `CREATE TABLE post (id INTEGER PRIMARY KEY, title TEXT);
 CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post', content_rowid='id');
 CREATE TRIGGER post_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(post_fts) VALUES ('delete-all'); INSERT INTO post_fts(rowid, title) VALUES (new.id, new.title); END;`
-		const db = await openMemory()
+		const db = await openScratch()
 		db.exec(history)
 		const run = applyToCopy(db, "INSERT INTO post (id, title) VALUES (10, 'fresh');")
 		expect(run.error).toBeUndefined()
 		expect(engineFindings(run.steps, run.start).unsafe.join("\n")).toContain("fires trigger post_ai")
 		db.close()
-		const synced = await openMemory()
+		const synced = await openScratch()
 		synced.exec(history.replace(/INSERT INTO post_fts\(post_fts\) VALUES \('delete-all'\); /, ""))
 		const clean = applyToCopy(synced, "INSERT INTO post (id, title) VALUES (10, 'fresh');")
 		expect(engineFindings(clean.steps, clean.start).unsafe).toEqual([])

@@ -110,6 +110,23 @@ const IN_TRANSACTION: Readonly<Record<string, { refuses: (pragma: Pragma) => boo
 	},
 }
 
+/**
+ * The pragmas whose setting is the process's, not the connection's: every connection reads it, other
+ * databases' included, so the fresh connection each file applies on cannot end it, and it outlasts
+ * the migration (.tmp/grunt/r21-premise/s1-heap.*.log; tests/structure/pragma-scope.test.ts asks the
+ * running engines). A read of one is any other pragma.
+ */
+// lookup-table: the pragma names, fixed
+const PROCESS_PRAGMAS: ReadonlySet<string> = /* @__PURE__ */ new Set([
+	"hard_heap_limit",
+	"soft_heap_limit",
+	"temp_store_directory",
+])
+
+/** Why a file may not set a process's pragma */
+const processWide = (name: string) =>
+	`${name} is the process's setting: it reaches every connection, other databases' included, and outlives the file; set it where the application opens SQLite, outside the migrations`
+
 /** The pragmas D1's authorizer runs in any form: Cloudflare's list (developers.cloudflare.com/d1/sql-api/sql-statements) */
 // lookup-table: the names D1 authorizes, read on every pragma a D1 file runs
 const D1_PRAGMAS: ReadonlySet<string> = /* @__PURE__ */ new Set([
@@ -139,6 +156,7 @@ const D1_READS: ReadonlySet<string> = /* @__PURE__ */ new Set(["data_version", "
 function pragmaRefusal(pragma: Pragma, d1: boolean): string | undefined {
 	const rule = IN_TRANSACTION[pragma.name]
 	if (rule?.refuses(pragma) === true) return rule.why
+	if (PROCESS_PRAGMAS.has(pragma.name) && pragma.value !== undefined) return processWide(pragma.name)
 	if (!d1 || D1_PRAGMAS.has(pragma.name) || (D1_READS.has(pragma.name) && pragma.value === undefined)) return undefined
 	return `D1 runs only the pragmas it authorizes (developers.cloudflare.com/d1/sql-api/sql-statements), and wrangler's apply fails on this one with not authorized: SQLITE_AUTH; leave it out of the migrations`
 }
@@ -173,4 +191,12 @@ function refuseUnrunnable({ code, dialect, stmt, tree }: ReadStatement, sql: str
 	}
 }
 
-export { ftsCommandFindings, outsideTransaction, preview, type ReadStatement, refuseUnrunnable, reindexedOf }
+export {
+	ftsCommandFindings,
+	outsideTransaction,
+	preview,
+	PROCESS_PRAGMAS,
+	type ReadStatement,
+	refuseUnrunnable,
+	reindexedOf,
+}

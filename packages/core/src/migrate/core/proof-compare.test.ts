@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { type MemoryDb, openMemory } from "../drivers/memory.ts"
+import { type LocalDb, openMemory } from "../drivers/local-db.ts"
 import { compare, type Shape } from "./proof-compare.ts"
 
-const open: MemoryDb[] = []
+const open: LocalDb[] = []
 afterEach(() => {
 	for (const db of open.splice(0)) db.close()
 })

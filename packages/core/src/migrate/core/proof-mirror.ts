@@ -7,7 +7,7 @@
  * spelling. An fts4 mirror kept with matchinfo=fts3 has neither and is not counted: fts4 refuses
  * a delete-all command.
  */
-import type { MemoryDb } from "../drivers/memory.ts"
+import type { LocalDb } from "../drivers/local-db.ts"
 import { asciiFold } from "./sql-code.ts"
 
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
@@ -20,7 +20,7 @@ const isMirror = (object: { sql: string }): boolean =>
 const SEEDED = 3
 
 /** Build each mirror's index in the copy; returns the mirrors it could not build, with why */
-function seedMirrors(db: MemoryDb, mirrors: ReadonlyArray<{ name: string; sql: string }>): Array<[string, string]> {
+function seedMirrors(db: LocalDb, mirrors: ReadonlyArray<{ name: string; sql: string }>): Array<[string, string]> {
 	const failed: Array<[string, string]> = []
 	for (const { name, sql } of mirrors) {
 		try {
@@ -38,7 +38,7 @@ function seedMirrors(db: MemoryDb, mirrors: ReadonlyArray<{ name: string; sql: s
 }
 
 /** Seed a contentless mirror with documents of its own, each column a text of its row's */
-function seedOwnRows(db: MemoryDb, name: string): void {
+function seedOwnRows(db: LocalDb, name: string): void {
 	const columns = db.all(`PRAGMA main.table_info(${quote(name)})`).map((info) => quote(String(info["name"])))
 	const marks = columns.map(() => "?").join(", ")
 	for (let doc = 1; doc <= SEEDED; doc++)
@@ -49,7 +49,7 @@ function seedOwnRows(db: MemoryDb, name: string): void {
 }
 
 /** Each mirror's index rows in the copy, by table */
-function mirrorRows(db: MemoryDb): Map<string, number> {
+function mirrorRows(db: LocalDb): Map<string, number> {
 	const tables = db
 		.all("SELECT name, sql FROM main.sqlite_master WHERE type = 'table'")
 		.map((row) => ({ name: String(row["name"]), sql: String(row["sql"]) }))

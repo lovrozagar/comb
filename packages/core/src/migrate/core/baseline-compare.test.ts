@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { createClient } from "@libsql/client"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
+import { createLibsqlProvider } from "../drivers/sqlite.ts"
 import { refuseDrift, refuseObjectDrift, sqliteDrift, UNCOMPARED } from "./baseline-compare.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import type { Run } from "./process.ts"
@@ -129,6 +131,31 @@ CREATE TRIGGER post_fts_ad AFTER DELETE ON post BEGIN INSERT INTO post_fts(post_
 		await conn.client.executeMultiple(
 			"CREATE TABLE post (id TEXT, title TEXT, body TEXT); CREATE VIRTUAL TABLE post_fts USING fts5(title,   body, content='post'); CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN /* kept */ SELECT 1; END;",
 		)
+		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("")
+		await conn.close()
+	})
+})
+
+describe("sqliteDrift: the replay of the history", () => {
+	/* S1 of r21: each file applied on a fresh connection, so 0001's legacy_alter_table never reached 0002's
+	   rename, which rewrote the view; the replay runs each file on a fresh connection too */
+	it("replays each file on a fresh connection, so a pragma one file set never reaches the next (S1 of r21)", async () => {
+		const files = {
+			"1_init.sql": "CREATE TABLE a (x INTEGER);\nCREATE VIEW v AS SELECT x FROM a;\nPRAGMA legacy_alter_table = 1;\n",
+			"2_rename.sql": "ALTER TABLE a RENAME TO b;\n",
+		}
+		const url = `file:${join(dir, "live.db")}`
+		for (const [name, sql] of Object.entries(files)) {
+			writeFileSync(join(dir, "m", name), sql)
+			const each = createClient({ url })
+			await each.executeMultiple(sql)
+			each.close()
+		}
+		const conn = await createLibsqlProvider({ type: "libsql", url }).connect({
+			migrationsDir: "m",
+			name: "live",
+			provider: { type: "libsql", url },
+		})
 		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("")
 		await conn.close()
 	})

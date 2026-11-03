@@ -1,5 +1,11 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
+import { BREAKS_CHECK, IGNORE_CHECKS } from "../__fixtures__/pragma-scope.ts"
 import { createBunSqliteProvider } from "../drivers/bun-sqlite.ts"
+import { createLibsqlProvider } from "../drivers/sqlite.ts"
+import { splitSqlStatements } from "./sql-scan.ts"
 import { applyEach, applyRecorded, checkMigrationHash, ensureMigrationsTable, recordMigrationHash } from "./apply.ts"
 import type { Connection } from "../types.ts"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
@@ -147,6 +153,9 @@ describe("applyRecorded on a SQLite failure that names a 429", () => {
 	})
 })
 
+/** Every file on `conn` itself, which the test reads after: closing it is left to the test */
+const kept = (conn: Connection) => () => Promise.resolve({ ...conn, close: () => Promise.resolve() })
+
 describe("applyEach", () => {
 	it("stops at the first file that fails, naming the files that committed and the ones still pending", async () => {
 		const conn = libsqlConnection()
@@ -157,7 +166,9 @@ describe("applyEach", () => {
 			file("2_b.sql", "INSERT INTO b VALUES (1)"),
 			file("3_c.sql", "SELECT 1"),
 		]
-		const failure = await applyEach(conn, files, { print: (line) => lines.push(line) }).catch((error: unknown) => error)
+		const failure = await applyEach(kept(conn), files, { print: (line) => lines.push(line) }).catch(
+			(error: unknown) => error,
+		)
 		expect(failure).toBeInstanceOf(Refused)
 		const { applied, message, pending } = failure as Refused
 		expect({ applied, message, pending }).toEqual({
@@ -172,11 +183,62 @@ describe("applyEach", () => {
 	it("prints no applied files when the first fails, whatever it threw", async () => {
 		const lines: string[] = []
 		const conn = mockConnection({ batch: () => Promise.reject("lost") })
-		const failure = await applyEach(conn, [file("1_a.sql", "SELECT 1")], { print: (line) => lines.push(line) }).catch(
-			(error: unknown) => error,
-		)
+		const failure = await applyEach(kept(conn), [file("1_a.sql", "SELECT 1")], {
+			print: (line) => lines.push(line),
+		}).catch((error: unknown) => error)
 		expect([(failure as Refused).message, (failure as Refused).applied]).toEqual(["lost", []])
 		expect(lines).toEqual(["Apply: 1_a.sql"])
+	})
+
+	it("applies each file on a connection opened for it and closed after it, and stops where one will not open", async () => {
+		const opened: Connection[] = []
+		const open = async () => {
+			if (opened.length === 2) throw new Error("SQLITE_CANTOPEN: unable to open database file")
+			const conn = mockConnection()
+			opened.push(conn)
+			return conn
+		}
+		const files = [file("1_a.sql", "SELECT 1"), file("2_b.sql", "SELECT 2"), file("3_c.sql", "SELECT 3")]
+		const failure = (await applyEach(open, files, { print: () => {} }).catch((error: unknown) => error)) as Refused
+		expect([failure.message, failure.applied, failure.pending]).toEqual([
+			"SQLITE_CANTOPEN: unable to open database file",
+			["1_a.sql", "2_b.sql"],
+			["3_c.sql"],
+		])
+		expect(
+			opened.map((conn) => [vi.mocked(conn.batch).mock.calls.length, vi.mocked(conn.close).mock.calls.length]),
+		).toEqual([
+			[1, 1],
+			[1, 1],
+		])
+	})
+})
+
+/* S1 of r21: a pragma 0001 approved for itself never reaches 0002, which is refused together as apart */
+describe("applyEach on a libsql file: a file's pragmas end with the file (S1 of r21; siblings in tests/integration/libsql/migrate-pragma-scope.test.ts)", () => {
+	it("refuses 0002's CHECK-breaking insert after the 0001 that set ignore_check_constraints", async () => {
+		const dir = mkdtempSync(path.join(tmpdir(), "comb-apply-scope-"))
+		const url = `file:${path.join(dir, "core.db")}`
+		const open = () =>
+			createLibsqlProvider({ type: "libsql", url }).connect({
+				migrationsDir: "m",
+				name: "core",
+				provider: { type: "libsql", url },
+			})
+		try {
+			const setup = await open()
+			await ensureMigrationsTable(setup)
+			await setup.close()
+			const files = [file("0001_t.sql", IGNORE_CHECKS), file("0002_bad.sql", BREAKS_CHECK)].map((one) => ({
+				...one,
+				statements: splitSqlStatements(one.statements.join("\n")),
+			}))
+			const failure = (await applyEach(open, files, { print: () => {} }).catch((error: unknown) => error)) as Refused
+			expect([failure.applied, failure.pending]).toEqual([["0001_t.sql"], ["0002_bad.sql"]])
+			expect(failure.message).toContain("CHECK constraint failed")
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
 	})
 })
 
@@ -222,9 +284,10 @@ describe("applyEach on a batch whose answer is lost", () => {
 	])("a committed batch with a lost answer is unknown, not pending, on %s", async (_, open) => {
 		const conn = await open()
 		await ensureMigrationsTable(conn)
-		const failure = await applyEach(losing(conn, "0002_t2.sql"), LOST_FILES, { print: () => {}, retry: NO_WAIT }).catch(
-			(error: unknown) => error,
-		)
+		const failure = await applyEach(kept(losing(conn, "0002_t2.sql")), LOST_FILES, {
+			print: () => {},
+			retry: NO_WAIT,
+		}).catch((error: unknown) => error)
 		expect(failure).toBeInstanceOf(Refused)
 		const { applied, message, pending, unknown } = failure as Refused
 		expect({ applied, pending, unknown }).toEqual({
@@ -249,7 +312,7 @@ describe("applyEach on a batch whose answer is lost", () => {
 			...conn,
 			batch: async () => Promise.reject(++calls === 1 ? reset() : new Error("no such table: b")),
 		}
-		const failure = (await applyEach(refusing, LOST_FILES, { print: () => {}, retry: NO_WAIT }).catch(
+		const failure = (await applyEach(kept(refusing), LOST_FILES, { print: () => {}, retry: NO_WAIT }).catch(
 			(error: unknown) => error,
 		)) as Refused
 		expect([failure.message, failure.pending, failure.unknown]).toEqual([

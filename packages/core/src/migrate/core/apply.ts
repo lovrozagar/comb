@@ -166,13 +166,14 @@ export async function applyRecorded(conn: Connection, migration: Recorded, retry
 }
 
 /**
- * Each of `migrations` applied and recorded in turn, its name printed first. A failure stops the
- * run as a Refused naming the files that committed before it and the ones still pending, which
- * it prints as D1's apply does (S2 of the 0.15.0 review); a file whose answer was lost is in
- * neither, but unknown
+ * Each of `migrations` applied and recorded in turn, its name printed first, each on a connection
+ * `open` makes for it alone and closed after it, so what one file sets on its connection ends with
+ * that file, as wrangler runs each file on D1 (S1 of r21). A failure stops the run as a Refused
+ * naming the files that committed before it and the ones still pending, which it prints as D1's
+ * apply does (S2 of the 0.15.0 review); a file whose answer was lost is in neither, but unknown
  */
 export async function applyEach(
-	conn: Connection,
+	open: () => Promise<Connection>,
 	migrations: readonly Recorded[],
 	{ print, retry }: { print: (line: string) => void; retry?: RetryOptions },
 ): Promise<void> {
@@ -180,11 +181,16 @@ export async function applyEach(
 	for (const [at, migration] of migrations.entries()) {
 		print(`Apply: ${migration.filename}`)
 		try {
-			await applyRecorded(conn, migration, retry)
+			const conn = await open()
+			try {
+				await applyRecorded(conn, migration, retry)
+			} finally {
+				await conn.close()
+			}
 		} catch (error) {
 			const done = names.slice(0, at)
 			if (done.length > 0) print(`Applied before the failure: ${done.join(", ")}`)
-			/* withRetry throws an Error, whatever the batch threw */
+			/* withRetry throws an Error, whatever the batch threw; so does a connection that would not open */
 			const message = (error as Error).message
 			if (error instanceof Unconfirmed)
 				throw new Refused(message, { applied: done, pending: names.slice(at + 1), unknown: [migration.filename] })

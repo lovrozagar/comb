@@ -18,7 +18,7 @@
  * a NULL row takes values where its NULLs are refused. A table whose rows do not all go in is
  * unproven: a partial seed could hide a loss.
  */
-import type { MemoryDb } from "../drivers/memory.ts"
+import type { LocalDb } from "../drivers/local-db.ts"
 import { affinityOf } from "./sqlite-affinity.ts"
 import { type Attempt, attempts, type Column, JSON_SHAPE, listedValues, valueFor } from "./proof-seed-values.ts"
 import { asciiFold } from "./sql-code.ts"
@@ -35,7 +35,7 @@ function rowCount(columns: readonly Column[]): number {
 const quote = (name: string): string => `"${name.replaceAll('"', '""')}"`
 
 /** The columns of a table's primary key and UNIQUE indexes */
-function uniqueColumns(db: MemoryDb, table: string): Set<string> {
+function uniqueColumns(db: LocalDb, table: string): Set<string> {
 	const out = new Set<string>()
 	for (const index of db.all(`PRAGMA index_list(${quote(table)})`).filter((row) => row["unique"] === 1)) {
 		for (const column of db.all(`PRAGMA index_info(${quote(String(index["name"]))})`)) out.add(String(column["name"]))
@@ -44,7 +44,7 @@ function uniqueColumns(db: MemoryDb, table: string): Set<string> {
 }
 
 /** The columns a table declares, by PRAGMA table_xinfo: a generated or hidden column takes no value */
-function columnsOf(db: MemoryDb, table: string): Column[] {
+function columnsOf(db: LocalDb, table: string): Column[] {
 	const unique = uniqueColumns(db, table)
 	let ordinal = 0
 	return db.all(`PRAGMA table_xinfo(${quote(table)})`).map((row, index) => {
@@ -65,7 +65,7 @@ function columnsOf(db: MemoryDb, table: string): Column[] {
 }
 
 /** A table's foreign keys, each column group of PRAGMA foreign_key_list together */
-function keysOf(db: MemoryDb, table: string): Key[] {
+function keysOf(db: LocalDb, table: string): Key[] {
 	const keys = new Map<number, Key>()
 	for (const row of db.all(`PRAGMA foreign_key_list(${quote(table)})`)) {
 		const id = Number(row["id"])
@@ -78,7 +78,7 @@ function keysOf(db: MemoryDb, table: string): Key[] {
 }
 
 /** The primary key columns of a parent, for a key that names none */
-const primaryKeyOf = (db: MemoryDb, table: string): string[] =>
+const primaryKeyOf = (db: LocalDb, table: string): string[] =>
 	db
 		.all(`PRAGMA table_info(${quote(table)})`)
 		.filter((row) => Number(row["pk"]) > 0)
@@ -119,7 +119,7 @@ function valueOf(seeding: Seeding, column: Column, at: Attempt): unknown {
 }
 
 /** Row `row` of a table: each column's value, a key's columns from a parent row, or nothing where a default fills it */
-function rowOf(db: MemoryDb, seeding: Seeding, at: Attempt): Map<string, unknown> | undefined {
+function rowOf(db: LocalDb, seeding: Seeding, at: Attempt): Map<string, unknown> | undefined {
 	const { row } = at
 	const values = new Map<string, unknown>()
 	for (const column of seeding.columns.filter((each) => each.insertable)) {
@@ -142,7 +142,7 @@ function rowOf(db: MemoryDb, seeding: Seeding, at: Attempt): Map<string, unknown
  * the key may not be NULL
  */
 function keyValues(
-	db: MemoryDb,
+	db: LocalDb,
 	seeding: Seeding,
 	at: { key: Key; row: number; values: Map<string, unknown> },
 ): boolean {
@@ -162,7 +162,7 @@ function keyValues(
 }
 
 /** Insert one row of `table`, or say why it would not go in */
-function insertRow(db: MemoryDb, table: string, values: ReadonlyMap<string, unknown>): string | undefined {
+function insertRow(db: LocalDb, table: string, values: ReadonlyMap<string, unknown>): string | undefined {
 	const names = [...values.keys()]
 	const sql =
 		names.length === 0
@@ -180,7 +180,7 @@ function insertRow(db: MemoryDb, table: string, values: ReadonlyMap<string, unkn
 const NO_PARENT = "a key it may not leave NULL references a table comb could not seed"
 
 /** Insert row `row` of `table` by the first attempt the table takes; or why not, its first refusal */
-function seedRow(db: MemoryDb, seeding: Seeding, row: number): string | undefined {
+function seedRow(db: LocalDb, seeding: Seeding, row: number): string | undefined {
 	let refusal: string | undefined
 	const nullables = seeding.columns.filter((column) => column.nullOrdinal >= 0).length
 	for (const attempt of attempts(row, nullables)) {
@@ -195,7 +195,7 @@ function seedRow(db: MemoryDb, seeding: Seeding, row: number): string | undefine
 }
 
 /** Seed `table`: its rows, or why a row would not go in */
-function seedTable(db: MemoryDb, seeding: Seeding): string | undefined {
+function seedTable(db: LocalDb, seeding: Seeding): string | undefined {
 	for (let row = 0; row < rowCount(seeding.columns); row++) {
 		const failed = seedRow(db, seeding, row)
 		if (failed !== undefined) return failed
@@ -207,7 +207,7 @@ function seedTable(db: MemoryDb, seeding: Seeding): string | undefined {
  * Tables in an order that puts each parent before its children, compared by folded name as SQLite
  * resolves them; a cycle keeps the order it was given
  */
-function parentsFirst(db: MemoryDb, tables: readonly string[]): string[] {
+function parentsFirst(db: LocalDb, tables: readonly string[]): string[] {
 	const written = new Map(tables.map((table) => [asciiFold(table), table]))
 	const parentsOf = new Map(tables.map((table) => [asciiFold(table), keysOf(db, table).map((key) => key.table)]))
 	const done: string[] = []
@@ -227,7 +227,7 @@ function parentsFirst(db: MemoryDb, tables: readonly string[]): string[] {
  * checked against them: a table whose rows break a key is unproven too.
  */
 function seedTables(
-	db: MemoryDb,
+	db: LocalDb,
 	tables: ReadonlyMap<string, string>,
 	{ json, variant }: { json: ReadonlySet<string>; variant: number },
 ): Map<string, string> {

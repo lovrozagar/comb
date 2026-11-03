@@ -106,8 +106,50 @@ describe("openSqliteTarget on a database file", () => {
 		await writer.close()
 		const reader = await openSqliteTarget(request("status"), { ...base, provider: { type: "libsql", url } })
 		expect(await reader.write()).toBe(reader.conn)
+		expect(await reader.fresh()).toBe(reader.conn)
 		await reader.close()
 	})
+})
+
+/* S1 of r21: each file applies on a connection of its own, so what it sets on the connection ends with it */
+describe("openSqliteTarget: a connection per file", () => {
+	it.each([
+		["libsql", (file: string): ConnectionProviderConfig => ({ type: "libsql", url: `file:${file}` })],
+		["bun-sqlite", (file: string): ConnectionProviderConfig => ({ path: file, type: "bun-sqlite" })],
+	])(
+		"opens a new %s connection for each file, apart from the writer, which sees what each committed",
+		async (_, provider) => {
+			const base = resolved({ type: "libsql", url: ":memory:" })
+			const target = await openSqliteTarget(request("apply"), {
+				...base,
+				provider: provider(path.join(base.configDir, "core.db")),
+			})
+			const [writer, one, two] = [await target.write(), await target.fresh(), await target.fresh()]
+			expect(new Set([writer, one, two]).size).toBe(3)
+			await one.batch([{ sql: "PRAGMA recursive_triggers = 1" }, { sql: "CREATE TABLE t (a)" }])
+			await one.close()
+			expect((await two.execute("SELECT recursive_triggers FROM pragma_recursive_triggers")).rows).toEqual([[0]])
+			expect((await writer.execute("SELECT name FROM sqlite_master")).rows).toEqual([["t"]])
+			await two.close()
+			await target.close()
+		},
+	)
+
+	it.each([
+		["libsql", { type: "libsql", url: ":memory:" } as const],
+		["libsql file:", { type: "libsql", url: "file::memory:" } as const],
+		["bun-sqlite", { path: ":memory:", type: "bun-sqlite" } as const],
+	])(
+		"applies every file of an in-memory %s database through its one writer, which a file's close leaves open",
+		async (_, provider) => {
+			const target = await openSqliteTarget(request("apply"), { ...resolved(provider), provider })
+			const file = await target.fresh()
+			await file.batch([{ sql: "CREATE TABLE t (a)" }])
+			await file.close()
+			expect((await (await target.write()).execute("SELECT name FROM sqlite_master")).rows).toEqual([["t"]])
+			await target.close()
+		},
+	)
 })
 
 /* r18 P9: an empty libsql url or turso apiToken loads, and is refused by the command that would use it */

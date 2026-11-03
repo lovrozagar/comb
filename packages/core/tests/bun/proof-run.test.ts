@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 /**
- * The proof run under Bun, where its in-memory copy is bun:sqlite (memory.ts picks it): the target
+ * The proof run under Bun, where its scratch copy is bun:sqlite (local-db.ts picks it): the target
  * is a bun:sqlite database too, read only for its schema.
  */
 import { Database } from "bun:sqlite"
@@ -12,7 +12,8 @@ import { FILE, START, stateOf } from "../../src/migrate/__fixtures__/apply-parit
 import { applyToCopy } from "../../src/migrate/core/proof-engine.ts"
 import { provePending } from "../../src/migrate/core/proof-run.ts"
 import { splitSqlStatements } from "../../src/migrate/core/sql-scan.ts"
-import { createBunSqliteProvider, openBunMemory } from "../../src/migrate/drivers/bun-sqlite.ts"
+import { createBunSqliteProvider } from "../../src/migrate/drivers/bun-sqlite.ts"
+import { openScratch } from "../../src/migrate/drivers/local-db.ts"
 
 const DB = { migrationsDir: "m", name: "local", provider: { path: ":memory:", type: "bun-sqlite" as const } }
 
@@ -37,7 +38,7 @@ describe("the proof's engine pass on bun:sqlite", () => {
 		const target = await createBunSqliteProvider({ path: ":memory:", type: "bun-sqlite" }).connect(DB)
 		await target.batch(splitSqlStatements(START).map((sql) => ({ sql })))
 		await target.batch(splitSqlStatements(FILE).map((sql) => ({ sql })))
-		const copy = await openBunMemory()
+		const copy = await openScratch()
 		copy.exec(START)
 		expect(applyToCopy(copy, FILE).error).toBeUndefined()
 		const read = async (sql: string) => {
@@ -73,7 +74,7 @@ describe("the proof's copy on bun:sqlite never reaches outside itself", () => {
 
 	it("refuses a VACUUM INTO before it runs, and writes no file", async () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-outside-bun-"))
-		const copy = await openBunMemory()
+		const copy = await openScratch()
 		copy.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)")
 		expect(() => applyToCopy(copy, `VACUUM INTO '${path.join(dir, "copy.db")}'`)).toThrow("comb never runs VACUUM INTO")
 		copy.close()

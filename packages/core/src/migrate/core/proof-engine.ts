@@ -1,6 +1,6 @@
 /**
  * What each statement of a pending file does to the tables that were there before the file, read
- * from SQLite itself on the proof's in-memory copy (proof-run.ts), never from the statement's text:
+ * from SQLite itself on the proof's scratch copy (proof-run.ts), never from the statement's text:
  * `EXPLAIN` lists the cursors it opens for writing, by root page, and the opcodes it runs on them; a
  * temporary `BEFORE UPDATE OF` trigger per existing column, whose marker shows in `EXPLAIN` when the
  * statement assigns that column, names the columns an update writes. Each trigger the statement can
@@ -9,7 +9,7 @@
  * a shadow. The probes exist only on the copy, between the `EXPLAIN` and the run.
  */
 import { randomUUID } from "node:crypto"
-import type { MemoryDb } from "../drivers/memory.ts"
+import type { LocalDb, ScratchDb } from "../drivers/local-db.ts"
 import type { ExtractedSchema } from "../types.ts"
 import { preview } from "./classify-file.ts"
 import { readGuards } from "./guard-read.ts"
@@ -37,7 +37,7 @@ const probePrefix = (): string => `comb_probe_${randomUUID().replaceAll("-", "")
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`
 
 /** Main's root pages: the table each stores, an index's root its table's, and which are tables' own */
-function rootsOf(db: MemoryDb): Pick<Context, "main" | "tables"> {
+function rootsOf(db: LocalDb): Pick<Context, "main" | "tables"> {
 	const main = new Map<number, string>()
 	const tables = new Set<number>()
 	for (const row of db.all("SELECT type, rootpage, tbl_name FROM main.sqlite_schema WHERE rootpage > 0")) {
@@ -54,7 +54,7 @@ function rootsOf(db: MemoryDb): Pick<Context, "main" | "tables"> {
  * table itself.
  */
 function placeProbes(
-	db: MemoryDb,
+	db: LocalDb,
 	{ prefix, probed }: { prefix: string; probed: ReadonlySet<string> },
 ): Array<{ column: string; table: string }> {
 	const probes: Array<{ column: string; table: string }> = []
@@ -74,7 +74,7 @@ function placeProbes(
 }
 
 /** The schema main holds now, read the way the classifier reads a history */
-function schemaOf(db: MemoryDb): ExtractedSchema {
+function schemaOf(db: LocalDb): ExtractedSchema {
 	return extractSchema(
 		db
 			.all("SELECT sql FROM main.sqlite_schema WHERE sql IS NOT NULL ORDER BY rowid")
@@ -87,7 +87,7 @@ function schemaOf(db: MemoryDb): ExtractedSchema {
  * The triggers whose firing makes a write unsafe, by lower-case name: those on existing tables,
  * comb's FTS sync triggers aside, main's and temp's alike
  */
-function watching(db: MemoryDb, existing: ReadonlySet<string>): Set<string> {
+function watching(db: LocalDb, existing: ReadonlySet<string>): Set<string> {
 	/* an FTS sync trigger is read from its body and the external-content FTS tables before it: the
 	   rest of the schema, read again for every statement, cost a schema of thousands of tables seconds */
 	const ftsAndTriggers = db
@@ -149,7 +149,7 @@ function writtenTables(
  * the first does not write cannot be assigned, and a probe on every column of a schema of
  * thousands cost seconds a statement.
  */
-function explainStatement(db: MemoryDb, sql: string, existing: ReadonlySet<string>): Effects | string {
+function explainStatement(db: LocalDb, sql: string, existing: ReadonlySet<string>): Effects | string {
 	let ops: Array<Record<string, unknown>>
 	try {
 		ops = db.all(`EXPLAIN ${sql}`)
@@ -181,7 +181,7 @@ function explainStatement(db: MemoryDb, sql: string, existing: ReadonlySet<strin
 }
 
 /** The temp objects that answer for an existing table's name */
-function shadowsOf(db: MemoryDb, existing: ReadonlySet<string>): Array<{ name: string; type: string }> {
+function shadowsOf(db: LocalDb, existing: ReadonlySet<string>): Array<{ name: string; type: string }> {
 	return db
 		.all("SELECT name, type FROM temp.sqlite_schema WHERE type IN ('table', 'view')")
 		.map((row) => ({ name: asciiFold(String(row["name"])), type: String(row["type"]) }))
@@ -189,7 +189,7 @@ function shadowsOf(db: MemoryDb, existing: ReadonlySet<string>): Array<{ name: s
 }
 
 /** The existing tables of the copy, by lower-case name, each with its columns */
-function tablesOf(db: MemoryDb): Map<string, Set<string>> {
+function tablesOf(db: LocalDb): Map<string, Set<string>> {
 	const out = new Map<string, Set<string>>()
 	for (const row of db.all(
 		"SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
@@ -219,12 +219,12 @@ function classifiedOf(statements: readonly string[], before: ExtractedSchema): S
 }
 
 /**
- * Apply one file to the copy as the target would, foreign keys on and the file in one transaction,
- * one statement at a time (a multi-statement exec under Bun skips a failing statement but the last,
- * M9): each statement's effects on the tables there before the file are read before it runs.
- * Returns them, with the columns those tables had, or why a statement could not prepare or run.
+ * Apply one file to the copy as the target does: on a fresh connection (S1 of r21), foreign keys on, in one transaction,
+ * a statement at a time (Bun's multi-statement exec skips a failing statement but the last, M9). Returns each statement's
+ * effects on the tables there before the file, read before it runs, those tables' columns, or why a statement failed.
  */
-function applyToCopy(db: MemoryDb, sql: string): { error?: string; start: Map<string, Set<string>>; steps: Step[] } {
+function applyToCopy(db: ScratchDb, sql: string): { error?: string; start: Map<string, Set<string>>; steps: Step[] } {
+	db.reopen()
 	const start = tablesOf(db)
 	const existing = new Set(start.keys())
 	const statements = splitSqlStatements(sql)

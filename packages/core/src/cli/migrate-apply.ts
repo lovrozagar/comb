@@ -211,7 +211,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 	await record(pending.length > 0)
 	if (pending.length > 0)
 		await applyEach(
-			await target.write(),
+			() => target.fresh(),
 			pending.map(({ migration }) => migration),
 			{ print: io.out },
 		)

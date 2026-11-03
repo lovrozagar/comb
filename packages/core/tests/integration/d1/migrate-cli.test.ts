@@ -14,6 +14,7 @@ import { localD1Path } from "../../../src/migrate/core/d1-binding.ts"
 import { migrationHashes } from "../../../src/migrate/core/parse.ts"
 import { guardRebuilds } from "../../../src/migrate/core/rebuild-guard.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
+import { BREAKS_CHECK, IGNORE_CHECKS, KEEP } from "../../../src/migrate/__fixtures__/pragma-scope.ts"
 import { combProcess, d1Column, d1Io, d1Project, wrangler, writeMigrations } from "../support/d1-project.ts"
 
 const dirs: string[] = []
@@ -220,4 +221,19 @@ describe("comb migrate on D1 --local: a pre-recorded hash is an intent until wra
 		expect(await runCli(["migrate", "status", "core", "--local"], status)).toBe(0)
 		expect(status.outputs).toEqual(["Applied: 20260101000000_init.sql", "Pending: none"])
 	}, 180_000)
+})
+
+/* S1 of r21: wrangler runs each file alone, so comb's proof does too; a pragma 0001 approved never
+   reaches 0002, and check refuses the insert wrangler would fail on */
+describe("comb migrate check on D1 --local proves each file as wrangler runs it, alone (S1 of r21)", () => {
+	it("refuses 0002's CHECK-breaking insert though 0001 approved ignore_check_constraints, and applies nothing", async () => {
+		const dir = project(KEEP)
+		expect(await runCli(["migrate", "apply", "core", "--local"], io(dir))).toBe(0)
+		write(dir, { "0001_t.sql": IGNORE_CHECKS, "0002_bad.sql": BREAKS_CHECK })
+		const check = io(dir)
+		expect(await runCli(["migrate", "check", "core", "--local", "--yes"], check)).toBe(1)
+		expect(check.errors.join("\n")).toContain("CHECK constraint failed")
+		expect(await runCli(["migrate", "apply", "core", "--local", "--yes"], io(dir))).toBe(1)
+		expect(column(dir, "SELECT name FROM d1_migrations")).toEqual(["0000_keep.sql"])
+	}, 120_000)
 })

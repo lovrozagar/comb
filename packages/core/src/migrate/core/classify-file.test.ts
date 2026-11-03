@@ -136,6 +136,28 @@ describe("classifyMigration on a pragma SQLite refuses inside a transaction, how
 	)
 })
 
+/* S1 of r21: a heap limit belongs to the process, so a fresh connection per file cannot end it
+   (.tmp/grunt/r21-premise/s1-heap.*.log); tests/structure/pragma-scope.test.ts reruns that probe */
+describe("classifyMigration on a pragma whose setting is the process's, not the file's (S1 of r21; siblings soft_heap_limit, temp_store_directory)", () => {
+	it.each([
+		"PRAGMA hard_heap_limit = 50000000",
+		"PRAGMA temp_store_directory = '/var/tmp'",
+		"PRAGMA soft_heap_limit = 50000000",
+		'PRAGMA "soft_heap_limit"(1)',
+		"-- comb:allow-unsafe: needed\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nPRAGMA main.hard_heap_limit = 0;",
+	])("refuses %j, whatever the approval, on every SQLite target", (sql) => {
+		expect(() => lite(sql)).toThrow(/the process's.*every connection/)
+		expect(() => d1(sql)).toThrow()
+	})
+
+	it.each(["PRAGMA hard_heap_limit", "PRAGMA soft_heap_limit", "PRAGMA temp_store_directory"])(
+		"rates the read %j as any other pragma",
+		(sql) => {
+			expect(lite(sql).safety).toBe("unsafe")
+		},
+	)
+})
+
 describe("classifyMigration on the foreign-key pragmas comb writes, however their names are spelled", () => {
 	it.each([
 		"PRAGMA defer_foreign_keys = on",

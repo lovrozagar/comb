@@ -34,9 +34,10 @@ describe("applyEach on bun:sqlite when a committed batch's answer is lost", () =
 			execute: async (sql, params) => (down ? Promise.reject(reset()) : conn.execute(sql, params)),
 		}
 		const files = ["0001_t1.sql", "0002_t2.sql", "0003_t3.sql"].map(file)
-		const failure = await applyEach(losing, files, { print: () => {}, retry: { baseDelay: 0, maxDelay: 0 } }).catch(
-			(error: unknown) => error,
-		)
+		const failure = await applyEach(() => Promise.resolve({ ...losing, close: () => Promise.resolve() }), files, {
+			print: () => {},
+			retry: { baseDelay: 0, maxDelay: 0 },
+		}).catch((error: unknown) => error)
 		expect(failure).toBeInstanceOf(Refused)
 		const { applied, pending, unknown } = failure as Refused
 		expect({ applied, pending, unknown }).toEqual({

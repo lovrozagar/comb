@@ -9,7 +9,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { openMemory } from "../drivers/memory.ts"
+import { openScratch } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
 import { hashDir, sqlFiles } from "./atlas-dir.ts"
 import { HISTORY_TABLES, notEngineTables } from "./engine-tables.ts"
@@ -70,11 +70,12 @@ function uninspected(rows: ReadonlyArray<Readonly<Record<string, unknown>>>): Ma
 	)
 }
 
-/** The triggers, views and virtual tables the migrations of `dir` leave, replayed on a private in-memory SQLite */
+/** The triggers, views and virtual tables the migrations of `dir` leave, replayed a file per connection (S1 of r21) */
 async function replayedObjects(dir: string): Promise<Map<string, string>> {
-	const db = await openMemory()
+	const db = await openScratch()
 	try {
 		for (const file of sqlFiles(dir)) {
+			db.reopen()
 			try {
 				db.exec(readFileSync(join(dir, file), "utf8"))
 			} catch (error) {

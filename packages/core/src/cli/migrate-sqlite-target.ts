@@ -3,7 +3,8 @@
  * read-only for check and status, which refuse a missing database. An apply or baseline checks on a
  * read-only connection too, a missing database read as the empty one it is, and opens the writable
  * connection only to write, so a refused run creates no file and no Turso database, and mints no
- * full-access token (S6 of the 0.15.0 review, S3 of r18).
+ * full-access token (S6 of the 0.15.0 review, S3 of r18). Each file applies on a connection of its
+ * own, so its connection settings end with it (S1 of r21).
  */
 import fs from "node:fs"
 import { blank } from "../blank.ts"
@@ -20,8 +21,10 @@ export type SqliteTarget = {
 	conn: Connection
 	migrationsDir: string
 	name: string
-	/** the connection to write through, opened on first use */
+	/** the connection to write comb's history through, opened on first use */
 	write(): Promise<Connection>
+	/** a new connection for one file's apply, which the caller closes; an in-memory database's is its writer, which only the target closes */
+	fresh(): Promise<Connection>
 }
 
 type OpenRequest = { args: ParsedArgs; io: CliIo; mode: string }
@@ -34,6 +37,13 @@ async function readOrAbsent(connect: (readonly: boolean) => Promise<Connection>,
 		if (error instanceof DatabaseMissing) return absentDatabase(name)
 		throw error
 	}
+}
+
+/** Whether the database lives in the one connection that opened it, so no other connection reaches it */
+async function inMemory(provider: ConnectionProviderConfig): Promise<boolean> {
+	if (provider.type === "bun-sqlite") return provider.path === ":memory:"
+	const { libsqlFile } = await import("../migrate/drivers/sqlite.ts")
+	return provider.type === "libsql" && (provider.url === ":memory:" || libsqlFile(provider.url) === ":memory:")
 }
 
 /** Why the provider cannot connect as given: a libsql url or a turso apiToken left blank, which loads (P9 of r18, S5 of r19) */
@@ -61,22 +71,28 @@ export async function openSqliteTarget(
 		throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)
 	const { createProvider } = await import("../migrate/config.ts")
 	const { drizzleConfigPath, migrationsDir, name, provider } = target
-	const connect = (readonly: boolean) =>
-		createProvider(provider, { run: io.run }).connect({ drizzleConfigPath, migrationsDir, name, provider, readonly })
+	/* one provider for the command: a Turso one mints its token once, however many connections it opens */
+	const opener = createProvider(provider, { run: io.run })
+	const connect = (readonly: boolean) => opener.connect({ drizzleConfigPath, migrationsDir, name, provider, readonly })
 	if (mode === "check" || mode === "status") {
 		const conn = await connect(true)
-		return { close: () => conn.close(), conn, migrationsDir, name: target.label, write: () => Promise.resolve(conn) }
+		const same = () => Promise.resolve(conn)
+		return { close: () => conn.close(), conn, fresh: same, migrationsDir, name: target.label, write: same }
 	}
 	const conn = await readOrAbsent(connect, target.label)
 	let writer: Connection | undefined
+	const write = async () => (writer ??= await connect(false))
 	return {
 		close: async () => {
 			await conn.close()
 			await writer?.close()
 		},
 		conn,
+		fresh: (await inMemory(provider))
+			? async () => ({ ...(await write()), close: () => Promise.resolve() })
+			: () => connect(false),
 		migrationsDir,
 		name: target.label,
-		write: async () => (writer ??= await connect(false)),
+		write,
 	}
 }

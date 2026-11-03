@@ -152,18 +152,23 @@ function createLibsqlConnection(client: Client): Connection {
    TURSO PROVIDER
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/**
+ * A Turso database's provider. Each connect opens a new client, so each migration file has a
+ * connection of its own (S1 of r21); the credentials are fetched once per provider for a reader and
+ * once for a writer, so a command mints one token of each kind it needs, however many files it applies.
+ */
 export function createTursoProvider(config: TursoProviderConfig, deps: TursoDeps = {}): ConnectionProvider {
+	const minted = new Map<boolean, Promise<{ authToken: string; url: string }>>()
+	const credentials = (readonly: boolean) => {
+		const { apiToken, databaseName, group, org } = config
+		const known =
+			minted.get(readonly) ?? getTursoCredentials({ ...deps, apiToken, dbName: databaseName, group, org, readonly })
+		minted.set(readonly, known)
+		return known
+	}
 	return {
 		async connect(dbConfig: ResolvedDatabaseConfig): Promise<Connection> {
-			const { apiToken, databaseName, group, org } = config
-			const creds = await getTursoCredentials({
-				...deps,
-				apiToken,
-				dbName: databaseName,
-				group,
-				org,
-				readonly: dbConfig.readonly,
-			})
+			const creds = await credentials(dbConfig.readonly === true)
 			const { createClient } = await libsql()
 			const client = createClient({ authToken: creds.authToken, url: creds.url })
 			return createLibsqlConnection(client)

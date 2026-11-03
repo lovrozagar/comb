@@ -246,6 +246,11 @@ export declare function getTursoCredentials(request: TursoCredentialsRequest): P
     url: string;
     authToken: string;
 }>;
+/**
+ * A Turso database's provider. Each connect opens a new client, so each migration file has a
+ * connection of its own (S1 of r21); the credentials are fetched once per provider for a reader and
+ * once for a writer, so a command mints one token of each kind it needs, however many files it applies.
+ */
 export declare function createTursoProvider(config: TursoProviderConfig, deps?: TursoDeps): ConnectionProvider;
 /**
  * The file a libsql `file:` URL opens, read as @libsql/core's parseUri reads it (M80): the scheme in
@@ -791,12 +796,12 @@ export { executeAll, wranglerFlags };
 export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): ConnectionProvider;
 
 // migrate/drivers/bun-sqlite.d.ts
-import type { MemoryDb } from "./memory.ts";
+import type { LocalDb } from "./local-db.ts";
 import type { BunSqliteProviderConfig, ConnectionProvider } from "../types.ts";
 export declare function createBunSqliteProvider(config: BunSqliteProviderConfig): ConnectionProvider;
-/** A private in-memory bun:sqlite database, for the proof run (memory.ts) */
-declare function openBunMemory(): Promise<MemoryDb>;
-export { openBunMemory };
+/** How bun:sqlite opens a private database file, or `:memory:` (local-db.ts) */
+declare function bunLocal(): Promise<(file: string) => LocalDb>;
+export { bunLocal };
 
 // migrate/core/fts-migration.d.ts
 /** One FTS object as a migration leaves it: its normalized DDL and the group it belongs to */
@@ -885,19 +890,22 @@ type ReadStatement = {
     tree?: unknown;
 };
 /**
+ * The pragmas whose setting is the process's, not the connection's: every connection reads it, other
+ * databases' included, so the fresh connection each file applies on cannot end it, and it outlasts
+ * the migration (.tmp/grunt/r21-premise/s1-heap.*.log; tests/structure/pragma-scope.test.ts asks the
+ * running engines). A read of one is any other pragma.
+ */
+declare const PROCESS_PRAGMAS: ReadonlySet<string>;
+/**
  * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
  * `-- comb:allow-unsafe:` overrides this
  */
 declare function refuseUnrunnable({ code, dialect, stmt, tree }: ReadStatement, sql: string, d1?: boolean): void;
-export { ftsCommandFindings, outsideTransaction, preview, type ReadStatement, refuseUnrunnable, reindexedOf };
+export { ftsCommandFindings, outsideTransaction, preview, PROCESS_PRAGMAS, type ReadStatement, refuseUnrunnable, reindexedOf, };
 
-// migrate/drivers/memory.d.ts
-/**
- * A private in-memory SQLite database, for the proof run (migrate/core/proof-run.ts): bun:sqlite
- * under Bun, node:sqlite under Node. Nothing in it reaches a target database.
- */
-/** What the proof run does with an in-memory database */
-export type MemoryDb = {
+// migrate/drivers/local-db.d.ts
+/** What comb does with a private database */
+export type LocalDb = {
     /** each row a statement returns, by column */
     all(sql: string, params?: readonly unknown[]): Array<Record<string, unknown>>;
     close(): void;
@@ -906,5 +914,20 @@ export type MemoryDb = {
     /** run one statement with parameters */
     run(sql: string, params?: readonly unknown[]): void;
 };
+/** A scratch database: a file only this user can open, removed on close */
+export type ScratchDb = LocalDb & {
+    /** close this connection and open a fresh one to the same file: what it holds stays, what the connection set does not */
+    reopen(): void;
+};
 /** A new in-memory database on the runtime comb runs on */
-export declare function openMemory(): Promise<MemoryDb>;
+export declare function openMemory(): Promise<LocalDb>;
+/** How old a scratch directory is before a later run reads it as one a killed run left: no run holds one this long */
+export declare const SCRATCH_STALE_MS: number;
+/** Remove the scratch directories killed runs of this user left in `dir`; one another user owns, or one in use, stays */
+export declare function sweepScratch(dir?: string, now?: number): void;
+/**
+ * A new scratch database: a file in a directory of its own that only this user can open (0700),
+ * removed with it on close. The first one a process opens sweeps what killed runs left, so a run
+ * killed before its close leaves its directory only until a later run's sweep.
+ */
+export declare function openScratch(): Promise<ScratchDb>;

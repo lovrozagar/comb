@@ -6,7 +6,7 @@
  * every value a new one holds, row for row, is named as renamed: still unsafe, since code that
  * reads the old name breaks.
  */
-import type { MemoryDb } from "../drivers/memory.ts"
+import type { LocalDb } from "../drivers/local-db.ts"
 
 /** One table as the proof compares it: its stored columns, whether each may hold NULL, its default, and its rows */
 type Shape = { columns: string[]; defaults: Map<string, string | null>; nullable: Set<string>; rows: string[][] }
@@ -31,7 +31,7 @@ function missing(before: readonly string[], after: readonly string[]): number {
  * The one allowance: each column the file made NOT NULL with a DEFAULT, which was nullable, with
  * that default as SQLite quotes it. Atlas's "make NOT NULL with a default" rebuild fills its NULLs so.
  */
-function allowedDefaults(db: MemoryDb, { now, was }: { now: Shape; was: Shape }): Map<string, string> {
+function allowedDefaults(db: LocalDb, { now, was }: { now: Shape; was: Shape }): Map<string, string> {
 	const out = new Map<string, string>()
 	for (const column of was.columns) {
 		const fresh = now.defaults.get(column)
@@ -79,7 +79,7 @@ function renamedTo({ now, was }: { now: Shape; was: Shape }, lost: string, taken
  * What a file did to one table that was there before it, compared as a multiset of whole rows over
  * the columns it had: so a value copied, swapped or moved between rows shows, not only one lost
  */
-function compareTable(db: MemoryDb, table: string, { now, was }: { now: Shape; was: Shape }): Findings {
+function compareTable(db: LocalDb, table: string, { now, was }: { now: Shape; was: Shape }): Findings {
 	const out: Findings = { cautious: [], unsafe: [] }
 	const taken = new Set<string>()
 	for (const column of was.columns.filter((each) => !now.columns.includes(each))) {
@@ -138,7 +138,7 @@ function renamedTable(was: Shape, before: ReadonlyMap<string, Shape>, after: Rea
 }
 
 /** What a file did to each table that was there before it */
-function compare(db: MemoryDb, before: ReadonlyMap<string, Shape>, after: ReadonlyMap<string, Shape>): Findings {
+function compare(db: LocalDb, before: ReadonlyMap<string, Shape>, after: ReadonlyMap<string, Shape>): Findings {
 	const out: Findings = { cautious: [], unsafe: [] }
 	for (const [table, was] of before) {
 		const now = after.get(table)

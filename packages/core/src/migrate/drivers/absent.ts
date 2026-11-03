@@ -5,7 +5,7 @@
  * the 0.15.0 review).
  */
 import type { Connection } from "../types.ts"
-import { openMemory } from "./memory.ts"
+import { openMemory } from "./local-db.ts"
 
 /** The missing database `name`, read as an empty SQLite; `ownedPrefix` is its engine's, as the real one's */
 export async function absentDatabase(name: string, ownedPrefix?: string): Promise<Connection> {

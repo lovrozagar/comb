@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { type MemoryDb, openMemory } from "../drivers/memory.ts"
+import { type LocalDb, openMemory } from "../drivers/local-db.ts"
 import { HISTORY_TABLES, notEngineTables } from "./engine-tables.ts"
 
-let db: MemoryDb
+let db: LocalDb
 beforeAll(async () => {
 	db = await openMemory()
 	db.exec(`CREATE TABLE post (id INTEGER PRIMARY KEY AUTOINCREMENT);

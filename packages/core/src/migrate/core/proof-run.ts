@@ -1,6 +1,6 @@
 /**
  * The proof run, on the SQLite family (bun:sqlite, libsql, D1): before a check or an apply, each
- * pending file runs on a private in-memory copy of the target's live schema, seeded with rows that
+ * pending file runs on a private scratch copy of the target's live schema, seeded with rows that
  * show any change (proof-seed.ts), and every table that was there before is compared, row for row,
  * on the columns it had, as a multiset of whole rows. A lost row, a lost column or a changed value
  * makes the file unsafe, and the reason names the table and column. One allowance: a NULL that
@@ -14,7 +14,7 @@
  * file's own columns is cautious. A file the copy cannot run is unproven, and unproven is unsafe.
  */
 import { isMirror, mirrorFindings, mirrorRows, seedMirrors } from "./proof-mirror.ts"
-import { openMemory, type MemoryDb } from "../drivers/memory.ts"
+import { type LocalDb, openScratch, type ScratchDb } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { compare, type Shape } from "./proof-compare.ts"
@@ -101,7 +101,7 @@ type Seed = { json: ReadonlySet<string>; variant: number } | undefined
  * The copy: tables and indexes, then the seed, then triggers and views, as the database has them;
  * returns the tables it could not create or seed, or whose trigger it could not create, with why
  */
-function buildCopy(db: MemoryDb, objects: readonly LiveObject[], seed: Seed): Map<string, string> {
+function buildCopy(db: LocalDb, objects: readonly LiveObject[], seed: Seed): Map<string, string> {
 	const unproven = new Map<string, string>()
 	const make = (object: LiveObject) => {
 		try {
@@ -134,7 +134,7 @@ function buildCopy(db: MemoryDb, objects: readonly LiveObject[], seed: Seed): Ma
 }
 
 /** Every table of the copy but a mirror FTS table, each with its stored columns and rows (each value as SQLite quotes it) */
-function snapshot(db: MemoryDb): Map<string, Shape> {
+function snapshot(db: LocalDb): Map<string, Shape> {
 	const out = new Map<string, Shape>()
 	/* main's own: a temp table of the same name would answer for a bare name (M12) */
 	const tables = db.all(
@@ -171,11 +171,11 @@ function snapshot(db: MemoryDb): Map<string, Shape> {
 }
 
 /** One copy of the target: its database, and the tables comb could not seed in it, with why */
-type Copy = { db: MemoryDb; unproven: Map<string, string> }
+type Copy = { db: ScratchDb; unproven: Map<string, string> }
 
 /** A copy of `objects`, seeded as `seed` */
 async function copyOf(objects: readonly LiveObject[], seed: NonNullable<Seed>): Promise<Copy> {
-	const db = await openMemory()
+	const db = await openScratch()
 	return { db, unproven: buildCopy(db, objects, seed) }
 }
 
@@ -205,7 +205,7 @@ async function schemaAfter(
 	files: readonly string[],
 	engine: string,
 ): Promise<LiveObject[] | undefined> {
-	const db = await openMemory()
+	const db = await openScratch()
 	try {
 		buildCopy(db, objects, undefined)
 		if (!files.every((sql) => applyToCopy(db, sql).error === undefined)) return undefined
@@ -225,7 +225,7 @@ async function schemaAfter(
 }
 
 /**
- * Prove each pending file, in order, on a seeded in-memory copy of the database `conn` reaches;
+ * Prove each pending file, in order, on a seeded scratch copy of the database `conn` reaches;
  * returns each file's proof by name. A file the copy refuses is tried once more on a reseeded copy
  * (a seed's value can meet a file's unique index or explicit id); a file refused both ways is
  * unproven, and so unsafe. The later files are proven on the schema it leaves, seeded fresh; when
