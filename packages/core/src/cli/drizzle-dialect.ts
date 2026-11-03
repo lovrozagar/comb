@@ -3,9 +3,7 @@
  * none of the other dialect's tables, so a diff with a config of the other dialect would write a
  * DROP TABLE for each.
  */
-import fs from "node:fs"
-import path from "node:path"
-import { pathToFileURL } from "node:url"
+import { loadModule } from "./comb-config.ts"
 import { CliError } from "./output.ts"
 
 export type Dialect = "postgres" | "sqlite"
@@ -19,12 +17,9 @@ export const DIALECT_NAMES: Record<Dialect, string> = { postgres: "Postgres", sq
 /** What a config must state: its dialect, the clause naming who needs it, and any other fix */
 export type Expected = { but: string; dialect: Dialect; otherwise?: string | undefined }
 
-/** The `dialect` the drizzle config `file` exports: imported, keyed by its mtime, or read as JSON */
+/** The `dialect` the drizzle config `file` exports, loaded as comb loads its own configs, its failure naming the file */
 export async function statedDialect(file: string): Promise<unknown> {
-	if (path.extname(file) === ".json")
-		return (JSON.parse(fs.readFileSync(file, "utf8")) as { dialect?: unknown }).dialect
-	const url = `${pathToFileURL(file).href}?mtime=${fs.statSync(file).mtimeMs}`
-	const config = ((await import(url)) as { default?: { dialect?: unknown } | undefined }).default
+	const config = (await loadModule(file)).default as { dialect?: unknown } | undefined
 	return config?.dialect
 }
 

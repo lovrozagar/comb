@@ -17,9 +17,14 @@ function parsed(file: string, exported: unknown): CodegenConfig {
 	throw new CliError(`${file} is not a valid comb config:\n${z.prettifyError(result.error)}`)
 }
 
-/** The config module at `url`; a syntax error or a throw names `file`, the error as its cause (KC7 of r22b) */
-async function loadModule(file: string): Promise<{ default?: unknown }> {
+/**
+ * The config module `file`, a .json one parsed as its default export; a syntax error or a throw names
+ * `file`, the error as its cause (KC7 of r22b), for comb.config.ts and the drizzle config alike (AD8 of
+ * the area D review)
+ */
+export async function loadModule(file: string): Promise<{ default?: unknown }> {
 	try {
+		if (path.extname(file) === ".json") return { default: JSON.parse(fs.readFileSync(file, "utf8")) as unknown }
 		/* keyed by its mtime, so a process that runs codegen again after the config changed reads the change */
 		return (await import(`${pathToFileURL(file).href}?mtime=${fs.statSync(file).mtimeMs}`)) as { default?: unknown }
 	} catch (error) {

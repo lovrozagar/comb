@@ -108,6 +108,19 @@ describe("the dialect a drizzle config states", () => {
 		expect(await statedDialect(join(dir, "drizzle.config.mjs"))).toBeUndefined()
 	})
 
+	/* AD8 of the area D review: comb loads the drizzle config itself since KC1, so it names the file, as KC7 does for comb's own configs */
+	it.each([
+		{ name: "drizzle.config.ts", says: "NOPE_URL is not set", source: 'throw new Error("NOPE_URL is not set")\n' },
+		{ name: "drizzle.config.json", says: "JSON", source: '{ "dialect": ' },
+	])("names $name when it fails to load, its error the cause", async ({ name, says, source }) => {
+		const dir = project()
+		writeFileSync(join(dir, name), source)
+		const loading = statedDialect(join(dir, name))
+		await expect(loading).rejects.toThrow(`${join(dir, name)} failed to load: `)
+		await expect(loading).rejects.toThrow(says)
+		await expect(loading).rejects.toHaveProperty("cause", expect.any(Error))
+	})
+
 	it("reads a literal dialect from the source init finds, and none from one that computes it", () => {
 		expect(literalDialect('defineConfig({\n\tdialect: "postgresql",\n})')).toBe("postgresql")
 		expect(literalDialect("export default { dialect: 'sqlite' }")).toBe("sqlite")
