@@ -5,7 +5,7 @@
  * libsql's own. libsql's Database is the one the @libsql/client comb resolves loads (libsql-file.ts).
  */
 import { segments } from "../core/sql-scan.ts"
-import { libsqlDatabase } from "./libsql-file.ts"
+import { bound, libsqlDatabase } from "./libsql-file.ts"
 import type { LocalDb } from "./local-db.ts"
 
 /**
@@ -43,18 +43,18 @@ async function libsqlLocal(): Promise<(file: string) => LocalDb> {
 		}
 		return {
 			all: (sql, params = []) => {
-				const statement = db.prepare(sql)
-				const rows = statement.all(...params) as Array<Record<string, unknown>>
+				const statement = db.prepare(bound(sql, params))
+				const rows = statement.all() as Array<Record<string, unknown>>
 				/* libsql holds a statement `all` read active until it is collected, and an EXPLAIN of a write held
 				   so refuses the COMMIT after it (.tmp/grunt/p21/areas/sqlite/sl3/stmt-probe.log); `get` steps it
 				   once and resets it, which a read, all `all` is given, allows */
-				statement.get(...params)
+				statement.get()
 				return rows
 			},
 			close: () => db.close(),
 			exec: (sql) => db.exec(sql),
 			firstStatement: (sql) => firstCompiled(sql, compiles),
-			run: (sql, params = []) => void db.prepare(sql).run(...params),
+			run: (sql, params = []) => db.exec(bound(sql, params)),
 		}
 	}
 }

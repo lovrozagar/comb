@@ -95,7 +95,7 @@ describe("openLibsqlFile on a failure (SL1 of r22)", () => {
 		const conn = await openLibsqlFile(file)
 		try {
 			await expect(conn.batch([{ sql: "CREATE TABLE a (x)" }, { params: [{}], sql: "SELECT ?" }])).rejects.toThrow(
-				"comb binds no object into a migration's statement",
+				"comb binds no object as a SQL literal",
 			)
 			await expect(conn.batch([{ params: [Number.NaN], sql: "SELECT ?" }])).rejects.toThrow("binds no number")
 			await expect(conn.batch([{ params: [1, 2], sql: "SELECT ?" }])).rejects.toThrow(

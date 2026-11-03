@@ -9,6 +9,7 @@ import { createRequire } from "node:module"
 import { BUSY_TIMEOUT, type FileConnection } from "../core/apply.ts"
 import { optionalPeer } from "../core/optional-peer.ts"
 import { LIBSQL } from "../core/peer-needs.ts"
+import { segments } from "../core/sql-scan.ts"
 import { LIBSQL_CLIENT } from "./libsql-client.ts"
 
 /** The surface of libsql's Database comb calls: `prepare` only on a scratch (libsql-local.ts), never on a target */
@@ -30,21 +31,29 @@ const libsqlDatabase = (): Promise<DatabaseClass> =>
 		Promise.resolve(createRequire(import.meta.resolve(LIBSQL_CLIENT))("libsql") as DatabaseClass),
 	)
 
-/** `value` as a SQL literal: the history row's hash, time and name, which `exec` takes with no parameters */
+/**
+ * `value` as a SQL literal: the history row's hash, time and name, which `exec` takes with no
+ * parameters, and the proof's seed, a blob among it, which libsql's Database panics binding
+ * (.tmp/grunt/p21/areas/sqlite/sl3/bind-probe.log)
+ */
 function literal(value: unknown): string {
 	if (value === null) return "NULL"
 	if (typeof value === "string") return `'${value.replaceAll("'", "''")}'`
 	if (typeof value === "bigint" || (typeof value === "number" && Number.isFinite(value))) return String(value)
-	throw new TypeError(`comb binds no ${typeof value} into a migration's statement`)
+	if (value instanceof Uint8Array) return `X'${Buffer.from(value).toString("hex")}'`
+	throw new TypeError(`comb binds no ${typeof value} as a SQL literal`)
 }
 
-/** `sql` with each `?` its parameter as a literal; a statement with none is sent as written */
+/** `sql` with each `?` in its code, not in a string, a name or a comment, its parameter as a literal; a statement with none is sent as written */
 function bound(sql: string, params: readonly unknown[] = []): string {
 	if (params.length === 0) return sql
-	const marks = sql.split("?")
-	if (marks.length - 1 !== params.length)
-		throw new TypeError(`${params.length} parameters for ${marks.length - 1} placeholders in ${sql}`)
-	return marks.reduce((text, part, at) => `${text}${literal(params[at - 1])}${part}`)
+	const parts = segments(sql, "sqlite")
+	const marks = parts.reduce((count, { kind, text }) => count + (kind === "code" ? text.split("?").length - 1 : 0), 0)
+	if (marks !== params.length) throw new TypeError(`${params.length} parameters for ${marks} placeholders in ${sql}`)
+	let at = 0
+	return parts
+		.map(({ kind, text }) => (kind === "code" ? text.replaceAll("?", () => literal(params[at++])) : text))
+		.join("")
 }
 
 /** libsql's error as @libsql/client words it, `CODE: message`, so a file's failure reads the same on either; one with no code as it came */
@@ -82,4 +91,4 @@ async function openLibsqlFile(file: string): Promise<FileConnection> {
 	}
 }
 
-export { libsqlDatabase, openLibsqlFile }
+export { bound, libsqlDatabase, openLibsqlFile }

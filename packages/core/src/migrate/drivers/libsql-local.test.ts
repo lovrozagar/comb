@@ -33,6 +33,15 @@ describe("libsqlLocal (SL3 of r22)", () => {
 		db.close()
 	})
 
+	it("takes a blob and a ? in a string or a name as written, which libsql's binding panics on or miscounts", async () => {
+		const db = (await libsqlLocal())(":memory:")
+		db.exec('CREATE TABLE t ("a?" , b)')
+		db.run("INSERT INTO t (\"a?\", b) VALUES (?, '?')", [Uint8Array.from([0xb0, 1])])
+		expect(db.all('SELECT hex("a?") AS a, b FROM t WHERE typeof("a?") = ?', ["blob"])).toEqual([{ a: "B001", b: "?" }])
+		expect(() => db.run("INSERT INTO t (b) VALUES (?)", [true])).toThrow("comb binds no boolean as a SQL literal")
+		db.close()
+	})
+
 	it("commits after an EXPLAIN of a write it read, which libsql would hold active", async () => {
 		const db = (await libsqlLocal())(":memory:")
 		db.exec("CREATE TABLE t (v INTEGER)")
