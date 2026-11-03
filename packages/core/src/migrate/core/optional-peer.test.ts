@@ -379,7 +379,7 @@ describe("Atlas is a row of the peer table (PA5, KC6 + PA22; sibling: K3's PATH-
 				}),
 			).toThrow(`comb needs ${ATLAS}; install ${INSTALL}`)
 		expect(() => requirePeers("diff", "d1", { atlas: says("", 1), cwd: ROOT, locate: only("drizzle-kit") })).toThrow(
-			`atlas (${ATLAS_RANGE}, found no version)`,
+			`atlas (${ATLAS_RANGE}, found no version, as atlas version exited 1)`,
 		)
 	})
 
@@ -400,6 +400,23 @@ describe("Atlas is a row of the peer table (PA5, KC6 + PA22; sibling: K3's PATH-
 		requirePeers("status", "libsql", { atlas: counted, cwd: ROOT, locate: only("@libsql/client") })
 		requirePeers("status", "turso", { atlas: counted, cwd: ROOT, locate: only("@libsql/client") })
 		expect(reads).toBe(1)
+	})
+})
+
+/* AD11 of the area D review: a version manager's shim with no version set exits 1, and says why on stderr */
+const shim = (): RunResult => ({
+	code: 1,
+	stderr: "\nmise ERROR No version is set for shim: atlas\nSet a global default version\n",
+	stdout: "",
+})
+
+describe("an Atlas that exits otherwise than found or missing (AD11)", () => {
+	it("keeps the first line it says on stderr, as the reason it found no version", () => {
+		expect(() => requirePeers("check", "postgres", { atlas: shim, cwd: ROOT, locate: only("libpg-query") })).toThrow(
+			new MissingPeerError(
+				`comb needs atlas (${ATLAS_RANGE}, found no version, as atlas version exited 1: mise ERROR No version is set for shim: atlas) to hash, diff and apply migrations; install atlas from https://atlasgo.io/getting-started`,
+			),
+		)
 	})
 })
 

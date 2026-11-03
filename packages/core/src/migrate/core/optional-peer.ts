@@ -138,12 +138,19 @@ function resolvePeer(need: Need, resolve: () => string): string {
 /**
  * The problem with the Atlas `read` finds, which reads `atlas version`: missing from PATH, saying
  * no version, or one outside ATLAS_RANGE; undefined when it is in range. An official build and a
- * community one say the version alike, after "version v".
+ * community one say the version alike, after "version v". One that exits otherwise, as a version
+ * manager's shim with no version set does, keeps its code and the first line it said on stderr
+ * (AD11 of the area D review).
  */
 function atlasProblem(read: () => RunResult): Problem | undefined {
 	const said = read()
 	if (said.code === 127) return ATLAS
-	const found = said.code === 0 ? /\bversion v(\d+\.\d+\.\d+)/.exec(said.stdout)?.[1] : undefined
+	if (said.code !== 0) {
+		const first = said.stderr.split("\n").find((line) => line.trim() !== "")
+		const why = first === undefined ? "" : `: ${first.trim()}`
+		return { ...ATLAS, found: `no version, as atlas version exited ${said.code}${why}` }
+	}
+	const found = /\bversion v(\d+\.\d+\.\d+)/.exec(said.stdout)?.[1]
 	if (found !== undefined && admits(ATLAS_RANGE, found)) return undefined
 	return { ...ATLAS, found: found ?? "no version" }
 }
