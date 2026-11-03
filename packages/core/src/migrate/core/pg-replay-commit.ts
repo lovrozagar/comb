@@ -35,8 +35,15 @@ type At = { name: string; names: ReadonlySet<string>; sent: string | undefined; 
  * replay's own database is the file's whatever it spells, as only this replay runs in it, and is
  * the cleanup's too. `read` is that read when the caller took it
  */
-async function window(run: Run, { name, names, sent, stops }: At, read?: Snapshot): Promise<void> {
-	const now = read ?? (await snapshot(run.admin))
+async function window(run: Run, at: At, read?: Snapshot): Promise<void> {
+	strayed(run, at, read ?? (await snapshot(run.admin)))
+}
+
+/**
+ * window's verdict on `now`, the server's shared catalogs as committed after the file or `sent`,
+ * against the last read; kept apart from window's await, as v8 miscounts a branch after an await
+ */
+function strayed(run: Run, { name, names, sent, stops }: At, now: Snapshot): void {
 	const its = new Set([...names, run.database])
 	const changes = snapshotChanges(run.seen, now, its)
 	const { databases, roles, slots } = added(run.seen, now, its)
