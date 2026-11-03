@@ -14,6 +14,7 @@ import { APP } from "./fixture.ts"
 import {
 	admittedOf,
 	failures,
+	floorOf,
 	IMPORT_ALL,
 	installedVersion,
 	ok,
@@ -177,10 +178,55 @@ describe("a consumer at comb's peer floors", () => {
 	})
 	afterAll(() => app?.dispose())
 
-	it("type-checks every subpath under strict flags", () => {
+	it("type-checks every subpath under strict flags, on the TypeScript at comb's floor", () => {
+		expect(installedVersion(app.dir, "typescript")).toBe(floorOf(peerRange("typescript")))
 		const result = run(app.dir, "npx", ["tsc", "-p", "tsconfig.bundler.json"])
 		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])
 		expect(result.status).toBe(0)
+		/* KT2's sibling: the floor reads comb's declarations themselves without an error, NoInfer and Uint8Array<ArrayBuffer> among them */
+		const checked = tscErrors(app.dir, false)
+		expect(checked.filter((line) => line.includes("/@lovrozagar/comb/"))).toEqual([])
+	})
+})
+
+/** The `error TS` lines of the bundler project's tsc in `dir`, with `skipLibCheck` as given */
+const tscErrors = (dir: string, skipLibCheck: boolean): string[] =>
+	run(dir, "npx", ["tsc", "-p", "tsconfig.bundler.json", "--skipLibCheck", String(skipLibCheck)])
+		.output.split("\n")
+		.filter((line) => line.includes("error TS"))
+
+/* KT2 of r22b: below 5.7 tsc read comb's NoInfer and Uint8Array<ArrayBuffer> as any, and a typo compiled */
+describe("a consumer on TypeScript 5.6.3, below comb's floor", () => {
+	let app: Stage
+	beforeAll(() => {
+		app = stage(tarball, "all", APP, { pin: { typescript: "5.6.3" } })
+	})
+	afterAll(() => app?.dispose())
+
+	it.each([true, false])("fails at each import of comb, in the project's own file, with skipLibCheck %s", (skip) => {
+		expect(installedVersion(app.dir, "typescript")).toBe("5.6.3")
+		const errors = tscErrors(app.dir, skip)
+		/* each import of every subpath names the floor, whose comment says to upgrade */
+		const floor = join(app.dir, "node_modules/@lovrozagar/comb/types/typescript-floor-types.d.ts")
+		expect(
+			errors.filter((line) => line.endsWith(`error TS2306: File '${floor}' is not a module.`)).length,
+		).toBeGreaterThan(20)
+		/* the two checks it lost now fail too: their imports are any, so each @ts-expect-error is unused */
+		const lines = errors.filter((line) => line.startsWith("src/floor.ts("))
+		expect(lines.map((line) => line.replace(/^src\/floor\.ts\((\d+),\d+\): error (TS\d+).*$/, "$1 $2"))).toEqual([
+			"1 TS2306",
+			"2 TS2306",
+			"7 TS2578",
+			"12 TS2578",
+		])
+		/* and nothing inside comb's declarations is read */
+		expect(errors.filter((line) => line.includes("/@lovrozagar/comb/") && !line.includes("TS2306"))).toEqual([])
+	})
+
+	it("is refused by npm", () => {
+		const refused = run(app.dir, "npm", ["install", "--no-audit", "--no-fund", "--loglevel=error"])
+		expect(refused.status).not.toBe(0)
+		expect(refused.output).toContain(`peerOptional typescript@"${peerRange("typescript")}" from @lovrozagar/comb`)
 	})
 })
 

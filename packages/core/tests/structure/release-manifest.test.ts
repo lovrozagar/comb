@@ -148,15 +148,23 @@ const filesUnder = (dir: string): string[] =>
 		.map((entry) => relative(dir, join(entry.parentPath, entry.name)))
 		.sort()
 
-/** Each export of the packed `dir` that is not `{ types, default }` with its declaration under types/, or whose files `files` lacks */
+/* what a TypeScript below 5.7 reads for every subpath: nothing, so its import fails in the project's own file (KT2 of r22b) */
+const FLOOR = "./types/typescript-floor-types.d.ts"
+
+/**
+ * Each export of the packed `dir` that is not `{ "types@>=5.7", types, default }`, in that order: its
+ * declaration under types/ for TypeScript 5.7 and later, the floor for any older one, and its
+ * source; or whose files `files` lacks
+ */
 function wrongExports(dir: string, files: string[]): string[] {
 	return Object.entries(manifestOf(dir)["exports"] as Record<string, unknown>).flatMap(([subpath, target]) => {
 		if (subpath === "./package.json")
 			return target === "./package.json" ? [] : [`${subpath}: ${JSON.stringify(target)}`]
-		const { default: source, types } = (target ?? {}) as { default?: string; types?: string }
-		const expected = { types: source?.replace(/^\.\/src\//, "./types/").replace(/\.ts$/, ".d.ts"), default: source }
+		const { default: source } = (target ?? {}) as { default?: string }
+		const declaration = source?.replace(/^\.\/src\//, "./types/").replace(/\.ts$/, ".d.ts")
+		const expected = { "types@>=5.7": declaration, types: FLOOR, default: source }
 		if (JSON.stringify(target) !== JSON.stringify(expected)) return [`${subpath}: ${JSON.stringify(target)}`]
-		return [types, source]
+		return [declaration, FLOOR, source]
 			.filter((file) => !files.includes((file as string).slice(2)))
 			.map((file) => `${subpath}: ${file} not packed`)
 	})

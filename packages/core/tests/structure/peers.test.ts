@@ -73,8 +73,11 @@ describe("the README's install lines", () => {
 
 /* K7 of r20: the range a missing peer's refusal names is the one package.json states */
 describe("comb's refusal for a missing optional peer", () => {
-	it("names each optional peer with its range in package.json", () => {
-		const optional = Object.keys(peerDependenciesMeta).filter((name) => peerDependenciesMeta[name]?.optional === true)
+	it("names each optional peer a command needs with its range in package.json", () => {
+		/* typescript is a peer for comb's declarations alone (KT2 of r22b): no command runs it */
+		const optional = Object.keys(peerDependenciesMeta).filter(
+			(name) => peerDependenciesMeta[name]?.optional === true && name !== "typescript",
+		)
 		expect(OPTIONAL_PEER_RANGES).toEqual(Object.fromEntries(optional.map((name) => [name, peerDependencies[name]])))
 	})
 })

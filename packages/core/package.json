@@ -38,84 +38,104 @@
 	"sideEffects": false,
 	"exports": {
 		".": {
-			"types": "./types/index.d.ts",
+			"types@>=5.7": "./types/index.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/index.ts"
 		},
 		"./cli": {
-			"types": "./types/cli/index.d.ts",
+			"types@>=5.7": "./types/cli/index.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/cli/index.ts"
 		},
 		"./codegen": {
-			"types": "./types/codegen/index.d.ts",
+			"types@>=5.7": "./types/codegen/index.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/codegen/index.ts"
 		},
 		"./codegen/generators": {
-			"types": "./types/codegen/generators/index.d.ts",
+			"types@>=5.7": "./types/codegen/generators/index.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/codegen/generators/index.ts"
 		},
 		"./meta": {
-			"types": "./types/meta.d.ts",
+			"types@>=5.7": "./types/meta.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/meta.ts"
 		},
 		"./migrate": {
-			"types": "./types/migrate/index.d.ts",
+			"types@>=5.7": "./types/migrate/index.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/migrate/index.ts"
 		},
 		"./package.json": "./package.json",
 		"./pg/columns": {
-			"types": "./types/pg/columns.d.ts",
+			"types@>=5.7": "./types/pg/columns.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/pg/columns.ts"
 		},
 		"./pg/error-handler": {
-			"types": "./types/pg/error-handler.d.ts",
+			"types@>=5.7": "./types/pg/error-handler.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/pg/error-handler.ts"
 		},
 		"./query": {
-			"types": "./types/query/index.d.ts",
+			"types@>=5.7": "./types/query/index.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/query/index.ts"
 		},
 		"./query/sqlite": {
-			"types": "./types/query/sqlite/index.d.ts",
+			"types@>=5.7": "./types/query/sqlite/index.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/query/sqlite/index.ts"
 		},
 		"./sqlite/columns": {
-			"types": "./types/sqlite/columns.d.ts",
+			"types@>=5.7": "./types/sqlite/columns.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/sqlite/columns.ts"
 		},
 		"./sqlite/constraint-handler": {
-			"types": "./types/sqlite/constraint-handler.d.ts",
+			"types@>=5.7": "./types/sqlite/constraint-handler.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/sqlite/constraint-handler.ts"
 		},
 		"./sqlite/constraints": {
-			"types": "./types/sqlite/constraints.d.ts",
+			"types@>=5.7": "./types/sqlite/constraints.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/sqlite/constraints.ts"
 		},
 		"./sqlite/d1/bookmark": {
-			"types": "./types/sqlite/d1/bookmark.d.ts",
+			"types@>=5.7": "./types/sqlite/d1/bookmark.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/sqlite/d1/bookmark.ts"
 		},
 		"./sqlite/d1/error-handler": {
-			"types": "./types/sqlite/d1/error-handler.d.ts",
+			"types@>=5.7": "./types/sqlite/d1/error-handler.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/sqlite/d1/error-handler.ts"
 		},
 		"./sqlite/d1/session": {
-			"types": "./types/sqlite/d1/session.d.ts",
+			"types@>=5.7": "./types/sqlite/d1/session.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/sqlite/d1/session.ts"
 		},
 		"./sqlite/d1/sharding": {
-			"types": "./types/sqlite/d1/sharding/index.d.ts",
+			"types@>=5.7": "./types/sqlite/d1/sharding/index.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/sqlite/d1/sharding/index.ts"
 		},
 		"./sqlite/patterns": {
-			"types": "./types/sqlite/patterns.d.ts",
+			"types@>=5.7": "./types/sqlite/patterns.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/sqlite/patterns.ts"
 		},
 		"./states": {
-			"types": "./types/states.d.ts",
+			"types@>=5.7": "./types/states.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/states.ts"
 		},
 		"./types": {
-			"types": "./types/types.d.ts",
+			"types@>=5.7": "./types/types.d.ts",
+			"types": "./types/typescript-floor-types.d.ts",
 			"default": "./src/types.ts"
 		}
 	},
@@ -177,6 +197,7 @@
 		"libpg-query": ">=17.7.4 <18",
 		"postgres": ">=3.4.9 <4",
 		"ts-morph": ">=28.0.0 <29",
+		"typescript": ">=5.7.2",
 		"wrangler": ">=4.147.0 <5",
 		"zod": ">=4.5.4 <5"
 	},
@@ -194,6 +215,9 @@
 			"optional": true
 		},
 		"ts-morph": {
+			"optional": true
+		},
+		"typescript": {
 			"optional": true
 		},
 		"wrangler": {

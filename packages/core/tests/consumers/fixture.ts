@@ -73,6 +73,25 @@ export const WORKER_TYPES = `${RUNTIME.map((spec, i) => `import type * as m${i} 
 export type All = [${RUNTIME.map((_, i) => `typeof m${i}`).join(", ")}]
 `
 
+/**
+ * A module of the two checks a TypeScript below 5.7 dropped with no error under skipLibCheck (KT2
+ * of r22b): each must stay an error at comb's floor, and below it the named imports fail instead
+ */
+export const FLOOR = `import { createUlidFactory } from "@lovrozagar/comb"
+import { defineStateMachine } from "@lovrozagar/comb/states"
+export const post = defineStateMachine({
+	initial: "draft",
+	transitions: {
+		draft: ["live"],
+		// @ts-expect-error "archivd" is no declared value
+		live: ["archivd"],
+	},
+	values: ["draft", "live", "archived"],
+})
+// @ts-expect-error random fills bytes, not a string
+export const ids = createUlidFactory({ random: (bytes: string) => void bytes.toUpperCase() })
+`
+
 /** A module that exports list and retrieve schemas, their types inferred, as an app's route module does (K11 of r17) */
 export const SCHEMAS = `import { createListQuerySchema, createRetrieveQuerySchema } from "@lovrozagar/comb/query"
 export const listSchema = createListQuerySchema({ sort: ["created_at"] })
@@ -194,6 +213,7 @@ export async function routed(env: Env, ctx: ExecutionContext, bookmark: string |
 /** The files every staged consumer holds: the Worker, the types module, two tsconfigs, wrangler and vite config */
 export const APP: Record<string, string> = {
 	"src/count-eval.ts": COUNT_EVAL,
+	"src/floor.ts": FLOOR,
 	"src/no-eval.ts": NO_EVAL_WORKER,
 	"comb.migrate.config.ts": MIGRATE_CONFIG,
 	"src/schemas.ts": SCHEMAS,
@@ -209,7 +229,7 @@ export const APP: Record<string, string> = {
 			moduleResolution: "bundler",
 			noEmit: true,
 		},
-		include: ["src/types.ts"],
+		include: ["src/types.ts", "src/floor.ts"],
 	}),
 	/* a Node project: nodenext, emitting, with the .ts imports rewritten to .js */
 	"tsconfig.nodenext.json": JSON.stringify({

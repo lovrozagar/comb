@@ -167,7 +167,7 @@ export const admittedOf = (name: string): string[] => REGISTRY[name]?.admitted ?
 
 /**
  * Which version of each peer a stage installs: the newest its range admits, the range's floor
- * (K8 of r20), or the newest but for the exact versions `pin` names. Each is an exact version, never
+ * (K8 of r20), or the newest but for the exact versions `pin` names, a tool's among them. Each is an exact version, never
  * a range npm resolves: drizzle's `1.0.0-rc.N-<hash>` branch builds rank above its tagged rcs.
  */
 export type Versions = "floor" | "newest" | { pin: Record<string, string> }
@@ -199,15 +199,27 @@ export function stage(
 		["@lovrozagar/comb", `file:${tarball}`],
 		...wanted.map((name) => [name, versionOf(name, versions)]),
 	])
+	/* a tool comb also peers on, typescript, installs at the version picked for the peer; a pin names a tool's too */
+	const pins = typeof versions === "string" ? {} : versions.pin
+	const devDependencies = Object.fromEntries(
+		Object.entries(TOOLS)
+			.filter(([name]) => !(name in dependencies))
+			.map(([name, version]) => [name, pins[name] ?? version]),
+	)
 	writeFileSync(
 		join(dir, "package.json"),
-		JSON.stringify({ dependencies, devDependencies: TOOLS, name: "comb-consumer", private: true, type: "module" }),
+		JSON.stringify({ dependencies, devDependencies, name: "comb-consumer", private: true, type: "module" }),
 	)
 	for (const [path, text] of Object.entries(files)) {
 		mkdirSync(dirname(join(dir, path)), { recursive: true })
 		writeFileSync(join(dir, path), text)
 	}
-	ok(run(dir, "npm", ["install", "--no-audit", "--no-fund", "--loglevel=error"]), "npm install")
+	/* npm refuses a peer outside comb's range (ERESOLVE); a project that overrides it installs this way */
+	const outside = wanted.some(
+		(name) => !semver.satisfies(dependencies[name], manifest.peerDependencies[name] as string),
+	)
+	const install = ["install", "--no-audit", "--no-fund", "--loglevel=error", ...(outside ? ["--legacy-peer-deps"] : [])]
+	ok(run(dir, "npm", install), "npm install")
 	/* the globals `wrangler types` writes for the create-cloudflare project, from its bindings (K3 of r21) */
 	if (existsSync(join(dir, "c3/wrangler.jsonc")))
 		ok(run(join(dir, "c3"), "npx", ["wrangler", "types"]), "wrangler types")

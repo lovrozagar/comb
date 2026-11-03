@@ -72,12 +72,16 @@ describe("package exports", () => {
 	it("floors every peer at the version the suite runs", () => {
 		const { devDependencies, peerDependencies } = manifest()
 		const pins = catalog()
-		const drift = Object.entries(peerDependencies).flatMap(([name, range]) => {
-			const dev = devDependencies[name]
-			const pin = dev === "catalog:" ? pins[name] : dev
-			const floor = semver.minVersion(range)?.version
-			return floor === pin ? [] : [`${name}: peer ${range}, tested ${pin ?? "never"}`]
-		})
+		/* the compiler the repo runs is the catalog's; the consumer floor cell type-checks comb on typescript's floor (KT2 of r22b) */
+		const atFloorInConsumers = ["typescript"]
+		const drift = Object.entries(peerDependencies)
+			.filter(([name]) => !atFloorInConsumers.includes(name))
+			.flatMap(([name, range]) => {
+				const dev = devDependencies[name]
+				const pin = dev === "catalog:" ? pins[name] : dev
+				const floor = semver.minVersion(range)?.version
+				return floor === pin ? [] : [`${name}: peer ${range}, tested ${pin ?? "never"}`]
+			})
 		expect(drift).toEqual([])
 	})
 })
