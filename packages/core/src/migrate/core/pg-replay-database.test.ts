@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { copyExtensions, createRole, dropRole, makeDatabase, STALE_MS, sweep } from "./pg-replay-database.ts"
+import { copyExtensions, dropRole, makeDatabase, ownerOf, STALE_MS, sweep, sweepDev } from "./pg-replay-database.ts"
 
 const coded = (code: string, message = code) => Object.assign(new Error(message), { code })
 
@@ -48,44 +48,118 @@ describe("sweep", () => {
 	const now = 10 * STALE_MS
 	const old = now - STALE_MS - 1
 	const young = now - STALE_MS
+	/* the server's backends: 5 a live replay's, 6 another role's whose start this role cannot read, 7 one that reused a dead replay's pid */
+	const SESSIONS = [
+		{ datname: "dev", pid: 5, start: "222" },
+		{ datname: "dev", pid: 6, start: null },
+		{ datname: "dev", pid: 7, start: "999" },
+		{ datname: "comb_replay_9_555_eeeeeeee", pid: 8, start: "1" },
+	]
 
-	it("drops this role's replay databases and the tagged roles over an hour old, and keeps the rest", async () => {
+	/** What a sweep at `now` dropped of these databases and tagged roles, the drops of those `fail` names failing */
+	async function swept(fail: (query: string) => boolean = () => false) {
 		const admin = fake((query) => {
+			if (query.startsWith("SELECT pid")) return SESSIONS
 			if (query.startsWith("SELECT datname"))
 				return [
-					{ datname: `comb_replay_${old}_00000000` },
-					{ datname: `comb_replay_${young}_00000000` },
-					{ datname: "comb_replay_other" },
-				]
+					`comb_replay_${old}_00000000`,
+					`comb_replay_${young}_00000000`,
+					"comb_replay_other",
+					"comb_replay_9_111_aaaaaaaa",
+					"comb_replay_5_222_bbbbbbbb",
+					"comb_replay_6_333_cccccccc",
+					"comb_replay_7_444_dddddddd",
+					"comb_replay_9_555_eeeeeeee",
+				].map((datname) => ({ datname }))
 			if (query.startsWith("SELECT r.rolname"))
 				return [
 					{ description: `comb_replay ${old}`, rolname: "stale" },
 					{ description: `comb_replay ${young}`, rolname: "fresh" },
 					{ description: "comb_replay by hand", rolname: "kept" },
+					{ description: "comb_replay 9_111", rolname: "dead" },
+					{ description: "comb_replay 5_222", rolname: "live" },
 				]
+			if (fail(query)) return new Error("database is being accessed by other users")
 			return []
 		})
 		await sweep(admin.sql, now)
-		expect(admin.sent.filter((query) => query.startsWith("DROP"))).toEqual([
+		return admin.sent.filter((query) => query.startsWith("DROP"))
+	}
+
+	it("drops what a replay whose backend is gone made, and what 0.19 made over an hour ago, and keeps the rest", async () => {
+		expect(await swept()).toEqual([
 			`DROP DATABASE IF EXISTS "comb_replay_${old}_00000000"`,
+			'DROP DATABASE IF EXISTS "comb_replay_9_111_aaaaaaaa"',
+			'DROP DATABASE IF EXISTS "comb_replay_7_444_dddddddd"',
 			'DROP ROLE IF EXISTS "stale"',
+			'DROP ROLE IF EXISTS "dead"',
 		])
+	})
+
+	it("goes on past a drop that fails, which the next run takes", async () => {
+		const dropped = await swept((query) => query.includes("9_111"))
+		expect(dropped).toContain('DROP DATABASE IF EXISTS "comb_replay_7_444_dddddddd"')
+		expect(dropped).toContain('DROP ROLE IF EXISTS "dead"')
+	})
+})
+
+describe("ownerOf", () => {
+	it("names the backend a connection runs on by its pid and its start", async () => {
+		const admin = fake(() => [{ pid: 41, start: "1793680844883080" }])
+		expect(await ownerOf(admin.sql)).toBe("41_1793680844883080")
+		expect(admin.sent).toEqual([expect.stringMatching(/FROM pg_stat_activity WHERE pid = pg_backend_pid\(\)$/)])
+	})
+})
+
+describe("sweepDev, before an apply", () => {
+	const TARGET = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "public", url: "postgres://app/app" }
+
+	it("sweeps devUrl's server on a connection of its own, and closes it", async () => {
+		const admin = fake()
+		let ended = 0
+		const given: Array<Record<string, unknown>> = []
+		await sweepDev(TARGET, async () => (options) => {
+			given.push(options)
+			return { ...admin.sql, end: async () => void ended++ }
+		})
+		expect(admin.sent[0]).toMatch(/FROM pg_stat_activity$/)
+		expect([given[0]?.["database"], given[0]?.["max"], ended]).toEqual(["dev", 1, 1])
+	})
+
+	it("sweeps nothing on Atlas's docker:// container, and stops no apply when it cannot", async () => {
+		let loaded = 0
+		await sweepDev({ ...TARGET, devUrl: "docker://postgres/17/dev" }, async () => {
+			loaded++
+			return () => fake().sql
+		})
+		expect(loaded).toBe(0)
+		await expect(
+			sweepDev(TARGET, async () => {
+				throw new Error("comb needs postgres")
+			}),
+		).resolves.toBeUndefined()
+		let ended = 0
+		const down = fake(() => new Error("connection refused"))
+		await expect(
+			sweepDev(TARGET, async () => () => ({ ...down.sql, end: async () => void ended++ })),
+		).resolves.toBeUndefined()
+		expect(ended).toBe(1)
 	})
 })
 
 describe("makeDatabase", () => {
-	it("makes a database named for the run's start, from template0", async () => {
+	it("makes a database named for the backend that owns it, from template0", async () => {
 		const admin = fake()
-		const name = await makeDatabase(admin.sql, 1234, () => new Error("refused"))
-		expect(name).toMatch(/^comb_replay_1234_[0-9a-f]{8}$/)
+		const name = await makeDatabase(admin.sql, "41_1234", () => new Error("refused"))
+		expect(name).toMatch(/^comb_replay_41_1234_[0-9a-f]{8}$/)
 		expect(admin.sent).toEqual([`CREATE DATABASE ${name} TEMPLATE template0`])
 	})
 
 	it("refuses a role without CREATEDB, and throws any other failure", async () => {
 		const denied = fake(() => coded("42501"))
-		await expect(makeDatabase(denied.sql, 1, () => new Error("no CREATEDB"))).rejects.toThrow("no CREATEDB")
+		await expect(makeDatabase(denied.sql, "1_1", () => new Error("no CREATEDB"))).rejects.toThrow("no CREATEDB")
 		const full = fake(() => coded("53100", "disk full"))
-		await expect(makeDatabase(full.sql, 1, () => new Error("no CREATEDB"))).rejects.toThrow("disk full")
+		await expect(makeDatabase(full.sql, "1_1", () => new Error("no CREATEDB"))).rejects.toThrow("disk full")
 	})
 })
 
@@ -127,54 +201,3 @@ describe("copyExtensions", () => {
 })
 
 /** A role's row as createRole reads it, with its comment */
-const found = (description: string | null) => [{ description }]
-
-describe("createRole", () => {
-	const made = { database: "comb_replay_1_x", role: "r", sent: "CREATE ROLE r", started: 7 }
-
-	it("makes, tags and holds a role that does not exist, in a savepoint, and owns it", async () => {
-		const sql = fake()
-		expect(await createRole(sql.sql, made)).toBe(true)
-		expect(sql.sent.slice(1)).toEqual([
-			"SAVEPOINT comb_role",
-			"CREATE ROLE r",
-			`COMMENT ON ROLE "r" IS 'comb_replay 7'`,
-			'GRANT CONNECT ON DATABASE comb_replay_1_x TO "r"',
-			"RELEASE SAVEPOINT comb_role",
-		])
-	})
-
-	it("holds a role that exists, owning it only when a replay tagged it", async () => {
-		const untagged = fake((query) => (query.startsWith("SELECT") ? found(null) : []))
-		expect(await createRole(untagged.sql, made)).toBe(false)
-		expect(untagged.sent.slice(1)).toEqual([
-			"SAVEPOINT comb_role",
-			'GRANT CONNECT ON DATABASE comb_replay_1_x TO "r"',
-			"RELEASE SAVEPOINT comb_role",
-		])
-		const tagged = fake((query) => (query.startsWith("SELECT") ? found("comb_replay 3") : []))
-		expect(await createRole(tagged.sql, made)).toBe(true)
-	})
-
-	it("reads the role again when another replay made it or dropped it since the read", async () => {
-		/* made by another (42710), then dropped (42704), then made in the catalog's race (23505), then free */
-		const reads = [[], found("comb_replay 3"), [], []]
-		const [raced, dropped] = [["42710", "23505"], ["42704"]]
-		const sql = fake((query) => {
-			if (query.startsWith("SELECT")) return reads.shift() ?? []
-			if (query === "CREATE ROLE r") return raced.length > 0 ? coded(raced.shift() ?? "") : []
-			if (query.startsWith("GRANT") && dropped.length > 0) return coded(dropped.shift() ?? "")
-			return []
-		})
-		expect(await createRole(sql.sql, made)).toBe(true)
-		expect(sql.sent.filter((query) => query.startsWith("ROLLBACK"))).toHaveLength(3)
-		expect(reads).toEqual([])
-	})
-
-	it("throws what is not a race, for a role that exists and one it makes", async () => {
-		const sql = fake((query) => (query.startsWith("SELECT") ? found(null) : coded("42501", "denied")))
-		await expect(createRole(sql.sql, made)).rejects.toThrow("denied")
-		const making = fake((query) => (query === "CREATE ROLE r" ? coded("42501", "no CREATEROLE") : []))
-		await expect(createRole(making.sql, made)).rejects.toThrow("no CREATEROLE")
-	})
-})

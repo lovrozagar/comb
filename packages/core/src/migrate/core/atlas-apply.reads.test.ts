@@ -39,6 +39,7 @@ describe("applyWithAtlas: each pending file read once (M86)", () => {
 			dir,
 			/* check's replay on dev is pg-check-replay.ts's to test */
 			replayPending: async () => undefined,
+			sweepDev: async () => undefined,
 			exec: atlas,
 			print: () => {},
 			target,

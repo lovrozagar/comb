@@ -56,6 +56,7 @@ function options(
 		readReplay: async (target) => readLive(target),
 		/* check's replay on dev is atlas-apply.check.test.ts's and pg-check-replay.ts's to test */
 		replayPending: async () => undefined,
+		sweepDev: async () => undefined,
 		seen,
 		target: TARGET,
 		...more,

@@ -20,7 +20,7 @@ import type { PgTarget } from "./atlas-target.ts"
 import { type Connect, failureOf, loadPostgres } from "./pg-live-objects.ts"
 import { nodeOf } from "./pg-outside-transaction.ts"
 import { type HistoryFile, onDev } from "./pg-replay.ts"
-import { heldRoles } from "./pg-replay-database.ts"
+import { heldRoles } from "./pg-replay-roles.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
 import { ReplayFailed } from "./replay-failed.ts"
@@ -121,6 +121,10 @@ async function replayPending(
 				`Check left ${JSON.stringify(sent)} in ${file} out of its replay on devUrl: ${what} reaches past the database the replay runs in, so apply alone runs it`,
 			),
 		load: async () => connect,
+		madeBare: (file, sent) =>
+			print(
+				`Check made the role of ${JSON.stringify(sent)} in ${file} NOLOGIN NOSUPERUSER NOREPLICATION NOBYPASSRLS, in no role the replay did not make, on devUrl: the replay needs only its name, so apply alone gives it the rest`,
+			),
 		stops: STOPS,
 	})
 }

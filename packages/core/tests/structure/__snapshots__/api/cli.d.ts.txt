@@ -157,6 +157,8 @@ type Replay = {
     doing: string;
     /** a statement left out, from `file`, and what it is */
     leftOut(file: string, sent: string, what: string): void;
+    /** a CREATE ROLE `sent` from `file` the replay ran without some of what it says */
+    madeBare?: ((file: string, sent: string) => void) | undefined;
     /** what a refusal stops */
     stops: string;
 };
@@ -247,7 +249,9 @@ import { COMPARED } from "./pg-live-catalog.ts";
 import type { LiveObjects, LiveTarget } from "./pg-live-types.ts";
 /** The postgres.js client, as far as comb uses it */
 type Sql = {
-    end(): Promise<void>;
+    end(options?: {
+        timeout?: number;
+    }): Promise<void>;
     unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>>;
 };
 type Connect = (options: Record<string, unknown>) => Sql;
@@ -291,9 +295,16 @@ declare function liveDrift(history: LiveObjects, live: LiveObjects): {
 export { COMPARED, type Connect, failureOf, liveDrift, loadPostgres, readCatalog, readLiveObjects };
 
 // migrate/core/pg-replay-database.d.ts
-import type { Connect } from "./pg-live-objects.ts";
+import type { PgTarget } from "./atlas-target.ts";
+import { type Connect } from "./pg-live-objects.ts";
 type Sql = ReturnType<Connect>;
+declare const TAG = "comb_replay";
 declare const STALE_MS: number;
+/** A Postgres error's SQLSTATE */
+declare const codeOf: (error: unknown) => unknown;
+declare const literal: (text: string) => string;
+/** `step` run, its failure left to the next run's sweep: cleaning up never replaces the replay's verdict */
+declare function settle(step: () => Promise<unknown>): Promise<void>;
 /**
  * Drop `role`, unless something still depends on it or it is not this role's to drop: a later sweep
  * takes it. Two sessions dropping one role race in Postgres's catalog, and the loser fails without
@@ -301,10 +312,19 @@ declare const STALE_MS: number;
  * is dropped
  */
 declare function dropRole(admin: Sql, role: string): Promise<void>;
-/** Drop the replay databases this role made and the tagged roles a killed run left, each over an hour old at `now` */
+/** The backend `admin` runs on, as a replay's database name and role tag carry it: `<pid>_<start>` */
+declare function ownerOf(admin: Sql): Promise<string>;
+/** Drop the replay databases this role made and the tagged roles whose replay is over at `now`, each drop settled */
 declare function sweep(admin: Sql, now: number): Promise<void>;
-/** A new replay database on `admin`'s server, named for `started`; a role without CREATEDB is `refused` */
-declare function makeDatabase(admin: Sql, started: number, refused: () => Error): Promise<string>;
+/**
+ * The sweep, run on `target`'s dev server before an apply (P2 of r21): a check killed past its
+ * cleanup leaves a role there, which apply's CREATE ROLE of it stops at where dev and target share
+ * a server. Housekeeping never stops an apply, so without the postgres package, on Atlas's docker://
+ * container or on a devUrl it cannot reach, it sweeps nothing
+ */
+declare function sweepDev(target: PgTarget, load?: () => Promise<Connect>): Promise<void>;
+/** A new replay database on `admin`'s server, named for its `owner`; a role without CREATEDB is `refused` */
+declare function makeDatabase(admin: Sql, owner: string, refused: () => Error): Promise<string>;
 /** The extensions the history `texts` create, which the replay leaves them to make */
 declare const extensionsOf: (texts: readonly string[]) => Set<string>;
 /**
@@ -315,22 +335,7 @@ declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
     makes: ReadonlySet<string>;
     refused: (name: string, error: unknown) => Error;
 }): Promise<void>;
-/**
- * A history's CREATE ROLE `sent` of `role`, run in the replay's `database`: an existing role is used,
- * any other made by `sent` and tagged, and either held by a grant on `database`; whether the role
- * is a replay's, which the replay then drops, so whichever of two replays using one role ends last
- * drops it. It runs in a transaction, as every statement a transaction allows does (P1 of r21), and
- * each try is a savepoint, so a role another replay made or dropped since the read is read again
- */
-declare function createRole(sql: Sql, { database, role, sent, started }: {
-    database: string;
-    role: string;
-    sent: string;
-    started: number;
-}): Promise<boolean>;
-/** Which of `roles` the server holds, a replay's own left out: another replay's role is gone once it ends */
-declare function heldRoles(sql: Sql, roles: readonly string[]): Promise<Set<string>>;
-export { copyExtensions, createRole, dropRole, extensionsOf, heldRoles, makeDatabase, STALE_MS, sweep, type Sql };
+export { codeOf, copyExtensions, dropRole, extensionsOf, literal, makeDatabase, ownerOf, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
 
 // migrate/core/pg-live-catalog.d.ts
 /**

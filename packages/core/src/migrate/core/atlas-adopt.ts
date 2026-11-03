@@ -73,7 +73,7 @@ async function proveAdoption(
 	try {
 		for (const name of ran) copyFileSync(join(copy, name), join(prefix, name))
 		const refusal = `${schema} does not hold what 0.12's shared history ran (${ran.join(", ")}), so comb adopts none of it`
-		/* comb's replay first: it rolls back and leaves dev as it found it, where Atlas's leaves what Atlas does not inspect (P5 of r19) */
+		/* comb's replay first: it runs in a database of its own, dropped after it, and refuses a file that reaches past it (P1 of r21) */
 		const warnings = await refuseObjectDrift(options, prefix, refusal)
 		for (const notice of await replayed(() => refuseDrift(options, prefix, refusal), schema, ran))
 			options.print(`Warning: Atlas: ${notice}`)

@@ -36,6 +36,7 @@ import { run } from "./process.ts"
 import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { replayPending, throughPending } from "./pg-check-replay.ts"
+import { sweepDev } from "./pg-replay-database.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { pgRead } from "./pg-split.ts"
 import { schemaOfRead } from "./schema.ts"
@@ -47,6 +48,7 @@ type ApplyOptions = AtlasCommand & {
 	checkOnly?: boolean | undefined
 	/** how check replays the history and the pending files on dev: comb's own (pg-check-replay.ts) unless a test says otherwise */
 	replayPending?: typeof replayPending | undefined
+	sweepDev?: typeof sweepDev | undefined
 }
 
 /** The files 0.12's shared history ran, while `own`, the schema's own history, records none (M77) */
@@ -176,6 +178,8 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 		}
 		await approvePending(options, copy, status.pending)
 		if (options.checkOnly === true) return status.pending.map((file) => file.Name)
+		/* a check killed past its cleanup left a role on devUrl's server, which a CREATE ROLE here would stop at (P2 of r21) */
+		await (options.sweepDev ?? sweepDev)(options.target)
 		const files = reported(
 			atlas(options, copy, ["apply", ...execOrder(foreign), "--format", APPLY_FORMAT]),
 			"apply",
@@ -241,7 +245,7 @@ async function baselineWithAtlas(
 		if (latest === undefined) throw new Error("there are no migrations to record")
 		/* the replay runs on a dev database holding the schema (P12) */
 		await (options.readyDev ?? readyDevSchema)(options.target)
-		/* comb's replay first: it rolls back and leaves dev as it found it, where Atlas's leaves what Atlas does not inspect (P5 of r19) */
+		/* comb's replay first: it runs in a database of its own, dropped after it, and refuses a file that reaches past it (P1 of r21) */
 		const warnings = await refuseObjectDrift(options, copy)
 		for (const notice of refuseDrift({ exec: options.exec ?? run, target: options.target }, copy))
 			options.print(`Warning: Atlas: ${notice}`)

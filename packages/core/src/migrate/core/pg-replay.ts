@@ -9,8 +9,8 @@
  * lock table and left a seed's deferred trigger events pending, and devUrl's own database lent the
  * history what it held. Committed, a statement whose scope is the server or another database would
  * outlive the replay on devUrl's server, the target's own when they share one, so the replay runs
- * none (pg-outside-transaction.ts) and says which it left out; a CREATE ROLE runs, as a policy needs
- * its role, and comb drops each role it made.
+ * none (pg-outside-transaction.ts) and says which it left out; a CREATE ROLE runs bare, as a policy
+ * needs its role, and comb drops each role it made (pg-replay-roles.ts).
  *
  * A DO block, a function, EXECUTE and CALL hide such a change from the parse tree, so Postgres
  * decides (P1 of r21): each transaction's writes to the shared catalogs are counted before its COMMIT
@@ -21,6 +21,10 @@
  * (tests/integration/postgres/bare-statements.test.ts). The counts are this backend's own, so
  * another session's work never trips them, and with `track_counts` off they read zero, so the
  * replay refuses a server that keeps none.
+ *
+ * A SIGINT or a SIGTERM, a Ctrl-C or a cancelled CI job, skips a `finally`, so either runs the
+ * replay's cleanup first, once, and then ends the process as the signal would (P2 of r21); a run
+ * killed past it is swept by the next replay or apply on the server.
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { type PgTarget, refuseUrlProblems } from "./atlas-target.ts"
@@ -32,24 +36,16 @@ import type { LiveObjects } from "./pg-live-types.ts"
 import { beyondDatabase, nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
 import {
 	copyExtensions,
-	createRole,
 	dropRole,
 	extensionsOf,
 	makeDatabase,
+	ownerOf,
+	settle,
 	type Sql,
 	sweep,
 } from "./pg-replay-database.ts"
-import {
-	addWrites,
-	counting,
-	namedChanges,
-	refuseUncounted,
-	type Rows,
-	sharedWrites,
-	subjectRows,
-	type Writes,
-	writesSince,
-} from "./pg-server-writes.ts"
+import { grantsMade, ownGrant, ownRole, type Run } from "./pg-replay-roles.ts"
+import { counting, namedChanges, refuseUncounted, sharedWrites, writesSince } from "./pg-server-writes.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
 
@@ -65,22 +61,10 @@ type Replay = {
 	doing: string
 	/** a statement left out, from `file`, and what it is */
 	leftOut(file: string, sent: string, what: string): void
+	/** a CREATE ROLE `sent` from `file` the replay ran without some of what it says */
+	madeBare?: ((file: string, sent: string) => void) | undefined
 	/** what a refusal stops */
 	stops: string
-}
-
-/**
- * One replay's state: its connection, the server as committed (`admin`), its database, when it
- * started and the roles it made; and the open transaction's own writes, comb's CREATE ROLEs', with
- * the rows they left
- */
-type Run = {
-	admin: Sql
-	created: string[]
-	database: string
-	ours: { rows: Rows; writes: Writes }
-	sql: Sql
-	started: number
 }
 
 /**
@@ -92,47 +76,6 @@ async function begin(run: Run): Promise<void> {
 	await run.sql.unsafe("BEGIN", [])
 	run.ours = { rows: new Map(), writes: await sharedWrites(run.sql) }
 }
-
-/** `act` run, its writes to the shared catalogs counted as comb's own, with the rows of them that are `mine` */
-async function own(run: Run, act: () => Promise<void>, mine: (subject: string) => boolean): Promise<void> {
-	const before = await sharedWrites(run.sql)
-	await act()
-	const written = writesSince(await sharedWrites(run.sql), before)
-	addWrites(run.ours.writes, written)
-	for (const [subject, row] of await subjectRows(run.sql, written, mine)) run.ours.rows.set(subject, row)
-}
-
-/** A history CREATE ROLE run: the role, its tag, the membership its maker gets and the grant on the replay's database */
-const ownRole = (run: Run, role: string, sent: string): Promise<void> =>
-	own(
-		run,
-		async () => {
-			if (await createRole(run.sql, { ...run, role, sent })) run.created.push(role)
-		},
-		(subject) =>
-			subject === `role ${role}` ||
-			subject === `comment on role ${role}` ||
-			subject.startsWith(`membership ${role} to `) ||
-			subject === `database ${run.database}`,
-	)
-
-/* the roles a GRANT or REVOKE of a role names; a membership in one the replay made dies with it (P6 of r21) */
-const grantedOf = (node: Record<string, unknown>): string[] =>
-	(node["granted_roles"] as Array<{ AccessPriv: { priv_name: string } }>).map(({ AccessPriv }) => AccessPriv.priv_name)
-
-/** Whether `type` is a GRANT or REVOKE of roles this replay made alone, which it runs, as their drop undoes it */
-const grantsMade = (run: Run, type: string, node: Record<string, unknown>): boolean =>
-	type === "GrantRoleStmt" && grantedOf(node).every((role) => run.created.includes(role))
-
-/** A history GRANT or REVOKE of roles this replay made: the memberships in them are comb's own */
-const ownGrant = (run: Run, node: Record<string, unknown>, sent: string): Promise<void> =>
-	own(
-		run,
-		async () => {
-			await run.sql.unsafe(sent, [])
-		},
-		(subject) => grantedOf(node).some((role) => subject.startsWith(`membership ${role} to `)),
-	)
 
 /**
  * The open transaction committed, or refused, with nothing committed, when it wrote past its
@@ -172,8 +115,9 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 		const alone = !inFile && outsideOnly(type, node) === undefined
 		if (alone) await begin(run)
 		try {
-			if (type === "CreateRoleStmt") await ownRole(run, String(node["role"]), sent)
-			else if (type === "GrantRoleStmt") await ownGrant(run, node, sent)
+			if (type === "CreateRoleStmt") {
+				if (await ownRole(run, node)) replay.madeBare?.(name, sent)
+			} else if (type === "GrantRoleStmt") await ownGrant(run, node, sent)
 			else await run.sql.unsafe(sent, [])
 		} catch (error) {
 			throw replay.refused(`${name}: devUrl refused ${JSON.stringify(sent)} as ${replay.doing}`, error)
@@ -206,12 +150,56 @@ async function prepare(
 	await run.sql.unsafe(`SET search_path TO ${sqlIdentifier(schema)}`, [])
 }
 
-/** `step` run, its failure left to the next run's sweep: cleaning up never replaces the replay's verdict */
-async function settle(step: () => Promise<unknown>): Promise<void> {
+/**
+ * `run`'s cleanup, each step settled: its connection closed, a query in flight with it, any backend
+ * still in its database ended, the database dropped, and each role it made
+ */
+async function cleanUp(run: Run): Promise<void> {
+	await settle(() => run.sql.end({ timeout: 0 }))
+	await settle(() =>
+		run.admin.unsafe(
+			"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()",
+			[run.database],
+		),
+	)
+	await settle(() => run.admin.unsafe(`DROP DATABASE IF EXISTS ${run.database}`, []))
+	for (const role of run.created) await settle(() => dropRole(run.admin, role))
+}
+
+/* the cleanup of a replay that has made nothing yet */
+const NOTHING = async (): Promise<void> => undefined
+
+/**
+ * A cleanup whose step runs at most once, set once there is something to clean: a signal before
+ * that cleans nothing, and the step set after it still runs
+ */
+function onceCleanup(): { run: () => Promise<void>; set: (step: () => Promise<void>) => void } {
+	let step = NOTHING
+	let ran: Promise<void> | undefined
+	return {
+		run: () => (ran ??= step()),
+		set: (next) => {
+			step = next
+			ran = undefined
+		},
+	}
+}
+
+/**
+ * `body`, while SIGINT and SIGTERM run `cleanup` and then end the process as the signal would: by
+ * the signal again, unless the host listens for it too and so ends it its own way
+ */
+async function onSignals<T>(cleanup: () => Promise<void>, body: () => Promise<T>): Promise<T> {
+	const stop = (signal: NodeJS.Signals) => {
+		void cleanup().finally(() => {
+			if (process.listenerCount(signal) === 0) process.kill(process.pid, signal)
+		})
+	}
+	process.once("SIGINT", stop).once("SIGTERM", stop)
 	try {
-		await step()
-	} catch {
-		// reason: a database or role left behind is the sweep's an hour on; the verdict is the replay's
+		return await body()
+	} finally {
+		process.off("SIGINT", stop).off("SIGTERM", stop)
 	}
 }
 
@@ -242,31 +230,32 @@ async function onDev<T>(
 	const refused: Refuse = (what, error) =>
 		new ReplayFailed(`${what}: ${failureOf(error, failed)}; ${replay.stops}`, { cause: error })
 	const options = { ...postgresOptionsOf(target.devUrl, "devUrl"), max: 1, onnotice: () => undefined }
-	const started = Date.now()
 	let admin: Sql | undefined
 	try {
-		admin = connect(options)
-		await sweep(admin, started)
-		const database = await makeDatabase(admin, started, () => new ReplayFailed(`${NO_CREATEDB}; ${replay.stops}`))
-		const run: Run = {
-			admin,
-			created: [],
-			database,
-			ours: { rows: new Map(), writes: new Map() },
-			sql: connect({ ...options, database }),
-			started,
-		}
-		try {
-			await prepare(run, target.schema, { files, refused, stops: replay.stops })
-			for (const file of files)
-				await replayFile(run, file, { ...replay, leftOut: replay.leftOut ?? (() => undefined), refused })
-			return await after(run.sql)
-		} finally {
-			const cleanup = admin
-			await settle(() => run.sql.end())
-			await settle(() => cleanup.unsafe(`DROP DATABASE IF EXISTS ${database}`, []))
-			for (const role of run.created) await settle(() => dropRole(cleanup, role))
-		}
+		const cleanup = onceCleanup()
+		return await onSignals(cleanup.run, async () => {
+			admin = connect(options)
+			await sweep(admin, Date.now())
+			const owner = await ownerOf(admin)
+			const database = await makeDatabase(admin, owner, () => new ReplayFailed(`${NO_CREATEDB}; ${replay.stops}`))
+			const run: Run = {
+				admin,
+				created: [],
+				database,
+				ours: { rows: new Map(), writes: new Map() },
+				owner,
+				sql: connect({ ...options, database }),
+			}
+			cleanup.set(() => cleanUp(run))
+			try {
+				await prepare(run, target.schema, { files, refused, stops: replay.stops })
+				for (const file of files)
+					await replayFile(run, file, { ...replay, leftOut: replay.leftOut ?? (() => undefined), refused })
+				return await after(run.sql)
+			} finally {
+				await cleanup.run()
+			}
+		})
 	} catch (error) {
 		if (error instanceof ReplayFailed) throw error
 		throw new ReplayFailed(`comb could not replay the history on devUrl: ${failureOf(error, failed)}`, {

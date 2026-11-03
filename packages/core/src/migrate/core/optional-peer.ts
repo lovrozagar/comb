@@ -143,7 +143,11 @@ const PEERS: Readonly<Record<Provider, Partial<Record<Command, readonly Need[]>>
 	d1: /* @__PURE__ */ connecting(WRANGLER),
 	libsql: /* @__PURE__ */ connecting(LIBSQL),
 	postgres: {
-		apply: [PARSE],
+		apply: [
+			PARSE,
+			/* without it apply sweeps nothing a killed check left on devUrl's server (pg-replay-database.ts) */
+			{ optional: true, peer: "postgres", why: "sweep what a killed check left on a postgres:// devUrl's server" },
+		],
 		baseline: [PARSE, { peer: "postgres", why: "read what Atlas OSS leaves out of a baseline's compare" }],
 		check: [
 			PARSE,

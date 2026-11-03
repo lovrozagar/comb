@@ -36,6 +36,7 @@ function options(exec: Run, more: Partial<ApplyOptions> = {}): ApplyOptions & { 
 			replayed.push(files.map((each) => each.name))
 		},
 		replayed,
+		sweepDev: async () => undefined,
 		target: TARGET,
 		...more,
 	}

@@ -17,7 +17,10 @@ import type { LiveObjects, LiveTarget } from "./pg-live-types.ts"
 import { optionalPeer } from "./optional-peer.ts"
 
 /** The postgres.js client, as far as comb uses it */
-type Sql = { end(): Promise<void>; unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>> }
+type Sql = {
+	end(options?: { timeout?: number }): Promise<void>
+	unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>>
+}
 type Connect = (options: Record<string, unknown>) => Sql
 
 /* the optional peer, named by a string so a consumer without it still type-checks comb */

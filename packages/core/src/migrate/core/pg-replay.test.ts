@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest"
+import { beforeAll, describe, expect, it, vi } from "vitest"
 import { readLiveObjects } from "./pg-live-objects.ts"
 import { CATALOG } from "./pg-live-catalog.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
@@ -10,8 +10,11 @@ beforeAll(loadPostgresParser)
 const file = (sql: string) => [{ name: "1_a.sql", sql }]
 const TARGET = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "public", url: "postgres://app/app" }
 
-/* the replay's database, named for the run's start and a random suffix */
-const DATABASE = /comb_replay_\d{13}_[0-9a-f]{8}/g
+/* the replay's database, named for the backend that made it and a random suffix */
+const DATABASE = /comb_replay_\d+_\d+_[0-9a-f]{8}/g
+
+/* the backend a replay runs on, which names its database and tags its roles */
+const OWNER = [{ pid: 7, start: "9" }]
 
 /* the server's counts: whether it keeps them, and a transaction's writes to the shared catalogs */
 const COUNTED = "SELECT current_setting('track_counts') AS on"
@@ -33,6 +36,7 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 				const error = fail?.(query)
 				if (error !== undefined) throw error
 				if (query === COUNTED) return [{ on: "on" }]
+				if (query.endsWith("WHERE pid = pg_backend_pid()")) return OWNER
 				return query === CATALOG ? rows : []
 			},
 		}
@@ -41,9 +45,17 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 }
 
 /* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
-const SWEEP = [expect.stringMatching(/^SELECT datname FROM pg_database/), expect.stringMatching(/^SELECT r\.rolname/)]
+const SESSIONS = expect.stringMatching(/^SELECT pid, datname, .* FROM pg_stat_activity$/)
+const SWEEP = [
+	SESSIONS,
+	expect.stringMatching(/^SELECT datname FROM pg_database/),
+	expect.stringMatching(/^SELECT r\.rolname/),
+	expect.stringMatching(/^SELECT pid, .* WHERE pid = pg_backend_pid\(\)$/),
+]
 const MADE = ["CREATE DATABASE <db> TEMPLATE template0", COUNTED, expect.stringMatching(/^SELECT e\.extname/)]
 const DROPPED = "DROP DATABASE IF EXISTS <db>"
+/* the replay's connection closed, and any backend still in its database ended, before the drop */
+const ENDED = expect.stringMatching(/^SELECT pg_terminate_backend\(pid\)/)
 
 describe("replayCatalog", () => {
 	it("replays each file in a transaction of its own in a database of its own, reading with the target's own query (addition B)", async () => {
@@ -69,6 +81,7 @@ describe("replayCatalog", () => {
 			...inTransaction("CREATE TABLE t (a int)"),
 			"CREATE INDEX CONCURRENTLY i ON t (a)",
 			CATALOG,
+			ENDED,
 			DROPPED,
 		])
 		expect(dev.sent.find(([query]) => query === CATALOG)).toEqual(target.sent[0])
@@ -78,7 +91,7 @@ describe("replayCatalog", () => {
 			{ database: string },
 		]
 		expect([admin.max, admin.onnotice(), admin.database]).toEqual([1, undefined, "dev"])
-		expect(replay.database).toMatch(/^comb_replay_\d{13}_[0-9a-f]{8}$/)
+		expect(replay.database).toMatch(/^comb_replay_7_9_[0-9a-f]{8}$/)
 	})
 
 	it("names dev's role as the target's in a policy, so CURRENT_USER compares as each database was built (addition A)", async () => {
@@ -210,5 +223,72 @@ describe("replayCatalog's database", () => {
 		await expect(replayCatalog(TARGET, { files: file("SELECT 1;"), targetUser: "u" }, dev.load)).rejects.toThrow(
 			"comb could not replay the history on devUrl: could not write to file",
 		)
+	})
+})
+
+/** `body` run with the host's own `signal` listeners off, `host` listening instead when given, and process.kill stubbed */
+async function signalled(signal: NodeJS.Signals, host: (() => void) | undefined, body: () => Promise<void>) {
+	const listeners = process.listeners(signal)
+	process.removeAllListeners(signal)
+	if (host !== undefined) process.on(signal, host)
+	const kill = vi.spyOn(process, "kill").mockImplementation(() => true)
+	try {
+		await body()
+		/* the handler's kill follows its cleanup, a turn after the replay's own */
+		await new Promise((done) => setImmediate(done))
+		return kill.mock.calls
+	} finally {
+		kill.mockRestore()
+		process.removeAllListeners(signal)
+		for (const listener of listeners) process.on(signal, listener)
+	}
+}
+
+/* P2 of r21: a check stopped mid-replay cleans up once, then ends by the signal; the child-process cases are tests/integration/postgres/replay-sweep.test.ts */
+describe("replayCatalog stopped by a signal", () => {
+	it.each([["SIGINT"], ["SIGTERM"]] as const)("cleans up once on %s, then ends by it again", async (signal) => {
+		const dev = fake([], (query) => {
+			if (query.startsWith("CREATE TABLE")) process.emit(signal, signal)
+			return undefined
+		})
+		const killed = await signalled(signal, undefined, () =>
+			replayCatalog(TARGET, { files: file("CREATE TABLE t (a int);"), targetUser: "u" }, dev.load).then(
+				() => undefined,
+			),
+		)
+		expect(killed).toEqual([[process.pid, signal]])
+		expect(dev.queries().filter((query) => query === DROPPED)).toHaveLength(1)
+	})
+
+	it("leaves the end to a host that listens for the signal itself", async () => {
+		let heard = 0
+		const dev = fake([], (query) => {
+			if (query.startsWith("CREATE TABLE")) process.emit("SIGTERM", "SIGTERM")
+			return undefined
+		})
+		const killed = await signalled(
+			"SIGTERM",
+			() => void heard++,
+			() =>
+				replayCatalog(TARGET, { files: file("CREATE TABLE t (a int);"), targetUser: "u" }, dev.load).then(
+					() => undefined,
+				),
+		)
+		expect([killed, heard]).toEqual([[], 1])
+		expect(dev.queries().filter((query) => query === DROPPED)).toHaveLength(1)
+	})
+
+	it("drops the database a replay made after a signal that came before it, the host keeping the process", async () => {
+		const dev = fake([], (query) => {
+			if (query.startsWith("SELECT datname FROM pg_database")) process.emit("SIGINT", "SIGINT")
+			return undefined
+		})
+		const killed = await signalled(
+			"SIGINT",
+			() => undefined,
+			() => replayCatalog(TARGET, { files: file("SELECT 1;"), targetUser: "u" }, dev.load).then(() => undefined),
+		)
+		expect(killed).toEqual([])
+		expect(dev.queries().filter((query) => query === DROPPED)).toHaveLength(1)
 	})
 })

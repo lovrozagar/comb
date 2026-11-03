@@ -192,9 +192,13 @@ describe("baseline's replay, and two at once, on a server dev and target share",
 })
 
 describe("the replay's sweep", () => {
-	it("drops what a killed run left an hour ago, and keeps a younger run's and every untagged role", async () => {
+	it("drops what a killed 0.19 run left an hour ago, and keeps a younger run's and every untagged role", async () => {
 		const hourAgo = Date.now() - 61 * 60_000
-		const [leaked, young] = [`comb_replay_${hourAgo}_${unique("t")}`, `comb_replay_${Date.now()}_${unique("t")}`]
+		/* 0.19 named a replay database for its run's start and eight hex digits */
+		const [leaked, young] = [
+			`comb_replay_${hourAgo}_${unique("t").slice(-8)}`,
+			`comb_replay_${Date.now()}_${unique("t").slice(-8)}`,
+		]
 		const [stale, fresh, untagged] = [unique("comb_t_stale"), unique("comb_t_fresh"), unique("comb_replay_untagged")]
 		await onServer(
 			`CREATE DATABASE ${leaked}`,
