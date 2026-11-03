@@ -9,7 +9,7 @@ import type { AnalysisResult, FieldMeta, TableMeta } from "../analyzer-types.ts"
 import { snakeToPascal, subpathName } from "./case.ts"
 import { qualifiedName } from "./table-name.ts"
 
-type ValidationResult = {
+export type ValidationResult = {
 	errors: string[]
 	warnings: string[]
 }

@@ -1078,13 +1078,13 @@ What changes for a project on 0.20. Before deploying it:
 
 1. **Know what changed in the API.** A test holds these three lists to the exports themselves.
 
-   New exports: `ShardBindingOf`, `ShardEnv`.
+   New exports: `BinPeer`, `ClassifyOptions`, `ColumnsConfig`, `CombColumnKind`, `ConstantValue`, `ConstraintsConfig`, `CursorId`, `D1AnswerLike`, `D1DatabaseLike`, `D1SessionLike`, `D1StatementLike`, `DatabaseShared`, `DiagramsConfig`, `DtosConfig`, `EntitiesConfig`, `EnumChecksConfig`, `EnvironmentsDatabaseConfig`, `ExpressionIndexMeta`, `Fallback`, `FieldNamesConfig`, `FilterToSQLConfig`, `ForeignKey`, `FtsGeneratorConfig`, `FtsObject`, `FtsSource`, `FtsState`, `GeneratorContext`, `ImportRef`, `ImportStyle`, `KeysetKind`, `ListPagination`, `ListQuery`, `ListQueryAppliable`, `ListQueryRequest`, `ListQueryShape`, `LogFn`, `ManifestConfig`, `MappedColumn`, `MetaCarrier`, `OrmConfig`, `OrmDialect`, `OutputStableShape`, `PaginationConfig`, `PaginationResponse`, `PaginationResponseSchema`, `ParamMeta`, `PartialUniqueIndexMeta`, `PgColumns`, `PgTarget`, `PostgresDriver`, `ProviderDeps`, `ReadOptions`, `RelationalTable`, `RelationsConfig`, `ReservedListKey`, `ReservedRetrieveKey`, `RetrieveRequest`, `RetrieveShape`, `RowsConfig`, `Run`, `RunOptions`, `RunResult`, `SessionOf`, `ShardBindingOf`, `ShardEnv`, `ShardMapColumns`, `ShardMapTable`, `SingleDatabaseConfig`, `SpellfixRow`, `SqliteDriver`, `StateMachineMeta`, `TableInfo`, `TargetKind`, `Terminal`, `TranslationsConfig`, `TriggerEvent`, `TursoCredentialsRequest`, `TursoDeps`, `ValidationResult`, `WaitUntilCtx`.
 
    Removed: none.
 
-   Changed: `CliIo`, `ShardRouter`.
+   Changed: `CliIo`, `ListQuerySchema`, `RetrieveQuerySchema`, `ShardRouter`, `paginateMerged`.
 
-   `CliIo` gains an optional field that reads Atlas's version, which a test fakes as it fakes `run`.
+   `CliIo` gains an optional field that reads Atlas's version, which a test fakes as it fakes `run`. Every type a public declaration names is now one you can import, from the subpath whose function or type names it, so a helper typed around comb's API names what it takes and returns; a test holds the few kept internal to a list with each one's reason. `ListQuerySchema`, `RetrieveQuerySchema` and `paginateMerged` changed only in the names their declarations give types they reach: `ListQueryRequest`, `RetrieveRequest` and `PaginationResponse`, exported under those names.
 
 2. **Install `wrangler` and `drizzle-kit` in the project that runs comb.** comb now finds each in the project, from the working folder up, checks that package's version and runs its own bin by path: `wrangler` on `node`, `drizzle-kit` on `bun`. 0.20 checked the `wrangler` comb's own install resolved and then ran whichever `wrangler` was first on `PATH`, so in a workspace the version comb checked could differ from the one it ran. `PATH` no longer counts: a `wrangler` or `drizzle-kit` installed only globally, or reached only through `node_modules/.bin`, is refused with the range and the install, and a workspace runs the copy it installed itself. `comb migrate diff` now runs `drizzle-kit` on `bun` by its bin path, where 0.20's `bun drizzle-kit` followed the bin's `node` shebang.
 

@@ -48,3 +48,7 @@ export { SQL_SORT_DIR } from "./sql.ts"
 /* Types */
 export type { RelationConfig } from "./types.ts"
 export type { ListQueryInput } from "../types.ts"
+export type { FilterToSQLConfig } from "./executor.ts"
+export type { MappedColumn } from "./filter-sql.ts"
+export type { FtsSource, SpellfixRow } from "./search.ts"
+export type { ListQuery, ListQueryAppliable } from "./apply-list-query.ts"

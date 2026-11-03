@@ -9,6 +9,14 @@ export { createBunSqliteProvider, createD1Provider, createLibsqlProvider, create
 export { DatabaseMissing } from "./drivers/missing.ts";
 export { TursoMissing } from "./drivers/sqlite.ts";
 export type { BunSqliteProviderConfig, CircuitBreakerState, Connection, ConnectionProvider, ConnectionProviderConfig, D1ProviderConfig, DatabaseConfig, Dialect, EnvironmentConfig, ExtractedSchema, LibsqlProviderConfig, MigrationClassification, MigrationConfig, MigrationResult, MigrationSafety, MigrationStatus, ParsedMigration, PostgresProviderConfig, ProviderConfig, QueryResult, ResolvedDatabaseConfig, ResolvedMigrationConfig, ResolvedPostgresProviderConfig, TursoProviderConfig, } from "./types.ts";
+export type { ClassifyOptions } from "./core/classify.ts";
+export type { TargetKind } from "./core/classify-target.ts";
+export type { DatabaseShared, EnvironmentsDatabaseConfig, ForeignKey, SingleDatabaseConfig, TableInfo, TriggerEvent, } from "./types.ts";
+export type { FtsObject, FtsState } from "./core/fts-migration.ts";
+export type { ProviderDeps } from "./config.ts";
+export type { PgTarget } from "./core/atlas-target.ts";
+export type { BinPeer, Run, RunOptions, RunResult } from "./core/process.ts";
+export type { TursoCredentialsRequest, TursoDeps } from "./drivers/sqlite.ts";
 
 // migrate/config.d.ts
 import { type CombMigrateConfig, DEFAULT_PG_DEV_URL } from "./config-schema.ts";
@@ -350,7 +358,7 @@ export type EnvironmentConfig = {
     provider?: ProviderConfig | undefined;
 };
 /** What every database declares, whichever shape it has */
-type DatabaseShared = {
+export type DatabaseShared = {
     /** the comb.config.ts database this one's tables and FTS are, when its name there is another (C7) */
     codegen?: string | undefined;
     drizzleConfigPath?: string | undefined;
@@ -473,69 +481,103 @@ export type CircuitBreakerState = {
     tripped: boolean;
     tripReason?: string;
 };
-export {};
 
-// migrate/config-schema.d.ts
+// migrate/core/classify.d.ts
 /**
- * The Zod schema comb.migrate.config.ts is validated against: a typo fails at load, not at apply.
- * Every object is strict, so a misspelled key is refused by name rather than dropped for its default.
+ * The destructive-change gate. Each statement's code (sql-code.ts) is read per action, so a drop
+ * after an `ADD` in one `ALTER TABLE` counts, and a name may be quoted or schema-qualified.
+ *
+ * unsafe: loses data or breaks deployed code by name (table, column, schema, type, sequence,
+ * role drops; CASCADE; retypes; SET NOT NULL; a NOT NULL column without a default; renames;
+ * TRUNCATE; a statement comb does not recognize, a trigger or routine made or dropped among them).
+ * cautious: drops nothing a row holds (indexes, constraints, views, policies, defaults), a grant, or
+ * a file Atlas runs outside a transaction. A lock warning names a
+ * statement that blocks a Postgres table while it runs. What a statement writes is read from the
+ * engine: on SQLite by the proof run (proof-engine.ts), on Postgres from its parse tree
+ * (pg-tree.ts), which also rates the code a statement runs: DO blocks, routines and function
+ * calls. A statement Postgres refuses inside a transaction is refused outright unless its file
+ * runs outside one, and one it refuses outside a block is refused in a file that does, but within
+ * the file's own BEGIN.
  */
-import * as z from "zod";
-import type { DatabaseConfig } from "./types.ts";
-/** The empty database Atlas replays Postgres migrations on when a provider names none */
-declare const DEFAULT_PG_DEV_URL = "docker://postgres/17/dev";
-/** What comb.migrate.config.ts declares */
-type CombMigrateConfig = {
-    databases: Record<string, DatabaseConfig>;
+import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
+import type { TargetKind } from "./classify-target.ts";
+import { type Read } from "./classify-verdict.ts";
+import { type PgRead } from "./pg-split.ts";
+type ClassifyOptions = {
+    /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
+    before?: ExtractedSchema | undefined;
+    /** where a SQLite file applies, whose own rule of what it runs check holds it to (S1 of r19, S1 of r22); local unnamed */
+    kind?: TargetKind | undefined;
+    /** how the file is read; unnamed, as SQLite, the CLI's default */
+    dialect?: Dialect | undefined;
+    /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
+    schema?: string | undefined;
 };
-declare const configInputSchema: () => z.ZodType<CombMigrateConfig>;
-export { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL };
+/**
+ * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
+ * Postgres `read` is the file's one parse, its caller's when it holds one (M86)
+ */
+declare const readings: (sql: string, { before, dialect, schema }: ClassifyOptions, read?: PgRead | undefined) => Read[];
+/** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
+declare function extractDropStatements(sql: string, options?: ClassifyOptions): string[];
+/** The drops the readings of a file find */
+declare const dropsOf: (reads: readonly Read[]) => string[];
+/** How destructive a migration is, which statements make it so, and which block a Postgres table */
+declare function classifyMigration(sql: string, options?: ClassifyOptions): MigrationClassification;
+export { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings };
 
-// migrate/core/process.d.ts
-/** An optional peer comb spawns rather than imports */
-export type BinPeer = "drizzle-kit" | "wrangler";
-/** A bin peer as the project holds it: its package.json, the bin file it names for the peer, and the runtime that runs it */
-export type ProjectBin = {
-    bin: string;
-    manifest: string;
-    peer: BinPeer;
-    runtime: "bun" | "node";
+// migrate/core/classify-target.d.ts
+/**
+ * What each kind of SQLite target runs, which check holds a file to before anything applies (S1 of r19,
+ * S1 of r22): a local SQLite file runs what SQLite does, a D1 database what its authorizer lists, and a
+ * libsql server (sqld) what its parser and authorizer let through. No `-- comb:allow-unsafe:` clears a
+ * refusal here: the target would fail the file at apply.
+ */
+import type { Pragma } from "./sql-code.ts";
+/**
+ * Where a SQLite-family file applies, resolved once by the CLI from its provider (S1 of r22): `local` a SQLite file
+ * comb opens itself (bun:sqlite, a libsql `file:` or `:memory:`), `sqld` a libsql server (a libsql URL of any other
+ * scheme, and Turso, which runs one), `d1` a D1 database through wrangler. Each kind has its own rule of what it runs.
+ */
+type TargetKind = "d1" | "local" | "sqld";
+/** Why a target of `kind` refuses the statement `code` (the pragma it runs, if one), or undefined when it runs it */
+declare function targetRefusal(code: string, pragma: Pragma | undefined, kind: TargetKind): string | undefined;
+export { type TargetKind, targetRefusal };
+
+// migrate/core/fts-migration.d.ts
+/** One FTS object as a migration leaves it: its normalized DDL and the group it belongs to */
+export type FtsObject = {
+    group: string;
+    kind: "table" | "trigger";
+    sql: string;
 };
-export type RunResult = {
-    code: number;
-    stdout: string;
-    stderr: string;
+/** The FTS objects a sequence of migrations leaves, by name */
+type FtsState = Map<string, FtsObject>;
+type Separated = {
+    fts: string[];
+    plain: string[];
+    state: FtsState;
 };
 /**
- * The Atlas releases comb runs on, which comb reads from `atlas version` before a command's first
- * I/O and refuses outside it (PA5 of r22): the floor is the oldest release comb's integration suite
- * passes on, and the next major may change what comb reads from Atlas
+ * `sql`'s statements split into those Atlas may see and the FTS state they leave, continuing
+ * from `state` with the FTS tables `groups` already names.
  */
-export declare const ATLAS_RANGE = ">=1.2.0 <2";
-/** Where Atlas, which no package ships, is installed from */
-export declare const ATLAS_INSTALL = "https://atlasgo.io/getting-started";
-export type RunOptions = {
-    cwd?: string | undefined;
-    /** Variables set over the parent's environment for the child; an undefined value removes one. */
-    env?: Readonly<Record<string, string | undefined>> | undefined;
-    /** The child's whole environment, none of the parent's, in place of `env` */
-    exactEnv?: Readonly<Record<string, string>> | undefined;
-    input?: string | undefined;
-    /** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
-    maxBuffer?: number | undefined;
-    /** The bin peer the process runs, whose runtime a failure to start names */
-    peer?: BinPeer | undefined;
-    /** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
-    timeoutMs?: number | undefined;
+declare function separate(sql: string, groups: Set<string>, state?: FtsState): Separated;
+/** Statements joined back into a migration file's text */
+declare const asSql: (statements: readonly string[]) => string;
+type FtsDelta = {
+    /** The FTS state the migration history leaves */
+    from: FtsState;
+    /** The plain SQL Atlas generated for this migration, to see which tables it rewrites */
+    plainDiff: string;
+    /** The FTS state the target declares */
+    to: FtsState;
+    /** The target's FTS statements as written, in order (`separate(...).fts`) */
+    toStatements: readonly string[];
 };
-export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
-/** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
-export declare const run: Run;
-/**
- * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
- * holds, the one comb checked (K1 of r22), never a name looked up on PATH
- */
-export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => RunResult;
+/** The FTS statements a migration needs after its plain part; "" when it needs none */
+declare function ftsDelta({ from, plainDiff, to, toStatements }: FtsDelta): string;
+export { asSql, ftsDelta, separate, type FtsState };
 
 // migrate/core/atlas-target.d.ts
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
@@ -597,6 +639,68 @@ declare function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atl
 declare const atlasNotices: (stderr: string) => string[];
 export { atlasConfig, type AtlasEnv, type AtlasNeeds, atlasNotices, atlasUrls, pgUrlProblems, type PgTarget, refuseUrlProblems, revisionsSchema, SHARED_REVISIONS, withAtlasEnv, };
 
+// migrate/core/process.d.ts
+/** An optional peer comb spawns rather than imports */
+export type BinPeer = "drizzle-kit" | "wrangler";
+/** A bin peer as the project holds it: its package.json, the bin file it names for the peer, and the runtime that runs it */
+export type ProjectBin = {
+    bin: string;
+    manifest: string;
+    peer: BinPeer;
+    runtime: "bun" | "node";
+};
+export type RunResult = {
+    code: number;
+    stdout: string;
+    stderr: string;
+};
+/**
+ * The Atlas releases comb runs on, which comb reads from `atlas version` before a command's first
+ * I/O and refuses outside it (PA5 of r22): the floor is the oldest release comb's integration suite
+ * passes on, and the next major may change what comb reads from Atlas
+ */
+export declare const ATLAS_RANGE = ">=1.2.0 <2";
+/** Where Atlas, which no package ships, is installed from */
+export declare const ATLAS_INSTALL = "https://atlasgo.io/getting-started";
+export type RunOptions = {
+    cwd?: string | undefined;
+    /** Variables set over the parent's environment for the child; an undefined value removes one. */
+    env?: Readonly<Record<string, string | undefined>> | undefined;
+    /** The child's whole environment, none of the parent's, in place of `env` */
+    exactEnv?: Readonly<Record<string, string>> | undefined;
+    input?: string | undefined;
+    /** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
+    maxBuffer?: number | undefined;
+    /** The bin peer the process runs, whose runtime a failure to start names */
+    peer?: BinPeer | undefined;
+    /** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
+    timeoutMs?: number | undefined;
+};
+export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
+/** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
+export declare const run: Run;
+/**
+ * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
+ * holds, the one comb checked (K1 of r22), never a name looked up on PATH
+ */
+export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => RunResult;
+
+// migrate/config-schema.d.ts
+/**
+ * The Zod schema comb.migrate.config.ts is validated against: a typo fails at load, not at apply.
+ * Every object is strict, so a misspelled key is refused by name rather than dropped for its default.
+ */
+import * as z from "zod";
+import type { DatabaseConfig } from "./types.ts";
+/** The empty database Atlas replays Postgres migrations on when a provider names none */
+declare const DEFAULT_PG_DEV_URL = "docker://postgres/17/dev";
+/** What comb.migrate.config.ts declares */
+type CombMigrateConfig = {
+    databases: Record<string, DatabaseConfig>;
+};
+declare const configInputSchema: () => z.ZodType<CombMigrateConfig>;
+export { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL };
+
 // migrate/core/atlas-env.d.ts
 import type { ExtractedSchema } from "../types.ts";
 import type { FtsState } from "./fts-migration.ts";
@@ -640,50 +744,6 @@ export type MigrateDiffResult = {
     synced: boolean;
 };
 export declare function generateIncrementalMigration(options: MigrateDiffOptions): Promise<MigrateDiffResult>;
-
-// migrate/core/classify.d.ts
-/**
- * The destructive-change gate. Each statement's code (sql-code.ts) is read per action, so a drop
- * after an `ADD` in one `ALTER TABLE` counts, and a name may be quoted or schema-qualified.
- *
- * unsafe: loses data or breaks deployed code by name (table, column, schema, type, sequence,
- * role drops; CASCADE; retypes; SET NOT NULL; a NOT NULL column without a default; renames;
- * TRUNCATE; a statement comb does not recognize, a trigger or routine made or dropped among them).
- * cautious: drops nothing a row holds (indexes, constraints, views, policies, defaults), a grant, or
- * a file Atlas runs outside a transaction. A lock warning names a
- * statement that blocks a Postgres table while it runs. What a statement writes is read from the
- * engine: on SQLite by the proof run (proof-engine.ts), on Postgres from its parse tree
- * (pg-tree.ts), which also rates the code a statement runs: DO blocks, routines and function
- * calls. A statement Postgres refuses inside a transaction is refused outright unless its file
- * runs outside one, and one it refuses outside a block is refused in a file that does, but within
- * the file's own BEGIN.
- */
-import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
-import type { TargetKind } from "./classify-target.ts";
-import { type Read } from "./classify-verdict.ts";
-import { type PgRead } from "./pg-split.ts";
-type ClassifyOptions = {
-    /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
-    before?: ExtractedSchema | undefined;
-    /** where a SQLite file applies, whose own rule of what it runs check holds it to (S1 of r19, S1 of r22); local unnamed */
-    kind?: TargetKind | undefined;
-    /** how the file is read; unnamed, as SQLite, the CLI's default */
-    dialect?: Dialect | undefined;
-    /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
-    schema?: string | undefined;
-};
-/**
- * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
- * Postgres `read` is the file's one parse, its caller's when it holds one (M86)
- */
-declare const readings: (sql: string, { before, dialect, schema }: ClassifyOptions, read?: PgRead | undefined) => Read[];
-/** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
-declare function extractDropStatements(sql: string, options?: ClassifyOptions): string[];
-/** The drops the readings of a file find */
-declare const dropsOf: (reads: readonly Read[]) => string[];
-/** How destructive a migration is, which statements make it so, and which block a Postgres table */
-declare function classifyMigration(sql: string, options?: ClassifyOptions): MigrationClassification;
-export { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings };
 
 // migrate/core/pg-split.d.ts
 import type { Dialect } from "../types.ts";
@@ -829,59 +889,6 @@ export declare function createBunSqliteProvider(config: BunSqliteProviderConfig)
 declare function bunLocal(): Promise<(file: string) => LocalDb>;
 export { bunLocal };
 
-// migrate/core/fts-migration.d.ts
-/** One FTS object as a migration leaves it: its normalized DDL and the group it belongs to */
-type FtsObject = {
-    group: string;
-    kind: "table" | "trigger";
-    sql: string;
-};
-/** The FTS objects a sequence of migrations leaves, by name */
-type FtsState = Map<string, FtsObject>;
-type Separated = {
-    fts: string[];
-    plain: string[];
-    state: FtsState;
-};
-/**
- * `sql`'s statements split into those Atlas may see and the FTS state they leave, continuing
- * from `state` with the FTS tables `groups` already names.
- */
-declare function separate(sql: string, groups: Set<string>, state?: FtsState): Separated;
-/** Statements joined back into a migration file's text */
-declare const asSql: (statements: readonly string[]) => string;
-type FtsDelta = {
-    /** The FTS state the migration history leaves */
-    from: FtsState;
-    /** The plain SQL Atlas generated for this migration, to see which tables it rewrites */
-    plainDiff: string;
-    /** The FTS state the target declares */
-    to: FtsState;
-    /** The target's FTS statements as written, in order (`separate(...).fts`) */
-    toStatements: readonly string[];
-};
-/** The FTS statements a migration needs after its plain part; "" when it needs none */
-declare function ftsDelta({ from, plainDiff, to, toStatements }: FtsDelta): string;
-export { asSql, ftsDelta, separate, type FtsState };
-
-// migrate/core/classify-target.d.ts
-/**
- * What each kind of SQLite target runs, which check holds a file to before anything applies (S1 of r19,
- * S1 of r22): a local SQLite file runs what SQLite does, a D1 database what its authorizer lists, and a
- * libsql server (sqld) what its parser and authorizer let through. No `-- comb:allow-unsafe:` clears a
- * refusal here: the target would fail the file at apply.
- */
-import type { Pragma } from "./sql-code.ts";
-/**
- * Where a SQLite-family file applies, resolved once by the CLI from its provider (S1 of r22): `local` a SQLite file
- * comb opens itself (bun:sqlite, a libsql `file:` or `:memory:`), `sqld` a libsql server (a libsql URL of any other
- * scheme, and Turso, which runs one), `d1` a D1 database through wrangler. Each kind has its own rule of what it runs.
- */
-type TargetKind = "d1" | "local" | "sqld";
-/** Why a target of `kind` refuses the statement `code` (the pragma it runs, if one), or undefined when it runs it */
-declare function targetRefusal(code: string, pragma: Pragma | undefined, kind: TargetKind): string | undefined;
-export { type TargetKind, targetRefusal };
-
 // migrate/core/classify-verdict.d.ts
 /**
  * A file's verdict from its statements' readings (classify.ts): each statement Postgres or D1
@@ -902,35 +909,6 @@ declare function classificationOf(reads: readonly Read[], sql: string, { kind }?
     kind?: TargetKind | undefined;
 }): MigrationClassification;
 export { classificationOf, type Read };
-
-// migrate/drivers/local-db.d.ts
-/** What comb does with a private database */
-export type LocalDb = {
-    /** each row a statement returns, by column */
-    all(sql: string, params?: readonly unknown[]): Array<Record<string, unknown>>;
-    close(): void;
-    /** run statements, several at once */
-    exec(sql: string): void;
-    /** run one statement with parameters */
-    run(sql: string, params?: readonly unknown[]): void;
-};
-/** A scratch database: a file only this user can open, removed on close */
-export type ScratchDb = LocalDb & {
-    /** close this connection and open a fresh one to the same file: what it holds stays, what the connection set does not */
-    reopen(): void;
-};
-/** A new in-memory database on the runtime comb runs on */
-export declare function openMemory(): Promise<LocalDb>;
-/** How old a scratch directory is before a later run reads it as one a killed run left: no run holds one this long */
-export declare const SCRATCH_STALE_MS: number;
-/** Remove the scratch directories killed runs of this user left in `dir`; one another user owns, or one in use, stays */
-export declare function sweepScratch(dir?: string, now?: number): void;
-/**
- * A new scratch database: a file in a directory of its own that only this user can open (0700),
- * removed with it on close. The first one a process opens sweeps what killed runs left, so a run
- * killed before its close leaves its directory only until a later run's sweep.
- */
-export declare function openScratch(): Promise<ScratchDb>;
 
 // migrate/core/sql-code.d.ts
 /**
@@ -1002,6 +980,35 @@ declare function splitTopLevel(code: string): string[];
 /** `code` with every parenthesized group blanked, so a word left in it is top-level */
 declare function topLevel(code: string): string;
 export { asciiFold, bodyText, codeOf, dialectOf, IDENT, lastPart, nameKey, namesIn, type Naming, namingOf, type Pragma, pragmaOf, QNAME, qualifiedKey, splitTopLevel, topLevel, unquote, };
+
+// migrate/drivers/local-db.d.ts
+/** What comb does with a private database */
+export type LocalDb = {
+    /** each row a statement returns, by column */
+    all(sql: string, params?: readonly unknown[]): Array<Record<string, unknown>>;
+    close(): void;
+    /** run statements, several at once */
+    exec(sql: string): void;
+    /** run one statement with parameters */
+    run(sql: string, params?: readonly unknown[]): void;
+};
+/** A scratch database: a file only this user can open, removed on close */
+export type ScratchDb = LocalDb & {
+    /** close this connection and open a fresh one to the same file: what it holds stays, what the connection set does not */
+    reopen(): void;
+};
+/** A new in-memory database on the runtime comb runs on */
+export declare function openMemory(): Promise<LocalDb>;
+/** How old a scratch directory is before a later run reads it as one a killed run left: no run holds one this long */
+export declare const SCRATCH_STALE_MS: number;
+/** Remove the scratch directories killed runs of this user left in `dir`; one another user owns, or one in use, stays */
+export declare function sweepScratch(dir?: string, now?: number): void;
+/**
+ * A new scratch database: a file in a directory of its own that only this user can open (0700),
+ * removed with it on close. The first one a process opens sweeps what killed runs left, so a run
+ * killed before its close leaves its directory only until a later run's sweep.
+ */
+export declare function openScratch(): Promise<ScratchDb>;
 
 // migrate/core/classify-alter.d.ts
 /** What one statement or action makes of the migration: its level, the drops it names, and why */

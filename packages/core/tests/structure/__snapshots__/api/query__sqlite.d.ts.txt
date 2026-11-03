@@ -14,6 +14,10 @@ export { type Refold, refoldStatements } from "./refold.ts";
 export { SQL_SORT_DIR } from "./sql.ts";
 export type { RelationConfig } from "./types.ts";
 export type { ListQueryInput } from "../types.ts";
+export type { FilterToSQLConfig } from "./executor.ts";
+export type { MappedColumn } from "./filter-sql.ts";
+export type { FtsSource, SpellfixRow } from "./search.ts";
+export type { ListQuery, ListQueryAppliable } from "./apply-list-query.ts";
 
 // query/sqlite/build-list-query.d.ts
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
@@ -218,7 +222,7 @@ declare function buildFtsMatch(ftsTableName: string, query: string | null, { fol
  * A table and the FTS5 table that indexes it by rowid (external content, `content_rowid` its
  * rowid or its integer key)
  */
-type FtsSource = {
+export type FtsSource = {
     /**
      * The FTS table indexes a searchText column (`_search`): each term is folded with searchText as
      * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it (U16)
@@ -237,7 +241,7 @@ declare function buildFtsHighlight(ftsTableName: string, columnIndex: number, ta
     end: string;
     start: string;
 }): SQL;
-type SpellfixRow = {
+export type SpellfixRow = {
     word: string;
 };
 type SpellfixDb = {
@@ -405,6 +409,30 @@ type ListQueryCapabilities = {
 };
 export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, FieldType, FilterAST, FilterCondition, FilterGroup, FilterOperator, ListQueryCapabilities, ListQueryInput, ParsedFields, SortDirection, SortField, SortNulls, };
 
+// query/sqlite/apply-list-query.d.ts
+/** The one way a built list query reaches a drizzle select: its extras, WHERE, ORDER BY, LIMIT and OFFSET. */
+import type { SQL } from "drizzle-orm";
+import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts";
+/** A builder whose methods return its own type, as drizzle's select does once made dynamic */
+type ListQueryAppliable<TQuery> = {
+    limit: (limit: number) => TQuery;
+    offset: (offset: number) => TQuery;
+    orderBy: (...orderBy: SQL[]) => TQuery;
+    where: (where: SQL) => TQuery;
+};
+/** What a built list, a single database's or a merged one's, reads with: its pagination is paginate's */
+export type ListQuery = Pick<ListQueryResult, "extras" | "limit" | "offset" | "orderBy" | "where">;
+/**
+ * The select `select` builds over the built query's extras (the tiebreak, the count, the gone-anchor
+ * flag paginate reads, K9 of r17), with the list's WHERE, ORDER BY, LIMIT and OFFSET applied:
+ * drizzle's select as it is, made dynamic here, or a builder whose methods return its own type
+ */
+declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(select: (extras: ListExtras) => {
+    $dynamic(): TQuery;
+}, q: ListQuery): TQuery;
+declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(select: (extras: ListExtras) => TQuery, q: ListQuery): TQuery;
+export { applyListQuery, type ListQueryAppliable };
+
 // query/sqlite/build-list-query-types.d.ts
 /** The options the SQLite list builders take, and the query they build (build-list-query.ts). Declarations only. */
 import type { SQL, SQLWrapper } from "drizzle-orm";
@@ -520,30 +548,6 @@ type MergedListQueryResult = Omit<ListQueryResult, "pagination"> & {
 };
 export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListExtras, ListQueryResult, MergedListQueryResult };
 
-// query/sqlite/apply-list-query.d.ts
-/** The one way a built list query reaches a drizzle select: its extras, WHERE, ORDER BY, LIMIT and OFFSET. */
-import type { SQL } from "drizzle-orm";
-import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts";
-/** A builder whose methods return its own type, as drizzle's select does once made dynamic */
-type ListQueryAppliable<TQuery> = {
-    limit: (limit: number) => TQuery;
-    offset: (offset: number) => TQuery;
-    orderBy: (...orderBy: SQL[]) => TQuery;
-    where: (where: SQL) => TQuery;
-};
-/** What a built list, a single database's or a merged one's, reads with: its pagination is paginate's */
-type ListQuery = Pick<ListQueryResult, "extras" | "limit" | "offset" | "orderBy" | "where">;
-/**
- * The select `select` builds over the built query's extras (the tiebreak, the count, the gone-anchor
- * flag paginate reads, K9 of r17), with the list's WHERE, ORDER BY, LIMIT and OFFSET applied:
- * drizzle's select as it is, made dynamic here, or a builder whose methods return its own type
- */
-declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(select: (extras: ListExtras) => {
-    $dynamic(): TQuery;
-}, q: ListQuery): TQuery;
-declare function applyListQuery<TQuery extends ListQueryAppliable<TQuery>>(select: (extras: ListExtras) => TQuery, q: ListQuery): TQuery;
-export { applyListQuery, type ListQueryAppliable };
-
 // query/pagination.d.ts
 import { type DecodedCursor } from "./cursor.ts";
 import { type KeysetKind } from "./cursor-mint.ts";
@@ -563,7 +567,7 @@ type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total";
  */
 type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never;
 /** The pagination meta paginate returns: the list response's own schema */
-type PaginationMeta = z.output<typeof paginationResponseSchema>;
+type PaginationResponse = z.output<typeof paginationResponseSchema>;
 /** How a built list pages what it fetched */
 type ListPagination = {
     /** the cursor the request resumed from; none on a page by number */
@@ -642,8 +646,8 @@ declare function paginate<T extends object>(items: readonly T[], built: {
     pagination: ListPagination & {
         merged: false;
     };
-}): readonly [Array<ListRow<T>>, PaginationMeta];
-export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
+}): readonly [Array<ListRow<T>>, PaginationResponse];
+export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationResponse, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/cursor.d.ts
 import { type CursorOptions } from "./cursor-seal.ts";
@@ -830,7 +834,7 @@ export { COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKe
  * Combines filter, sort, fields, and pagination into validated schemas.
  */
 import * as z from "zod";
-type PaginationResponseSchema = z.ZodObject<{
+export type PaginationResponseSchema = z.ZodObject<{
     count: z.ZodNullable<z.ZodNumber>;
     hasMore: z.ZodBoolean;
     limit: z.ZodNumber;
@@ -861,15 +865,15 @@ type OptionalShape = {
     lang?: z.ZodOptional<z.ZodString>;
     select?: z.ZodOptional<z.ZodString>;
 };
-type ListQueryShape = typeof baseListQueryShape & OptionalShape & {
+export type ListQueryShape = typeof baseListQueryShape & OptionalShape & {
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     page: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
 };
-type ListQueryInput = z.ZodObject<ListQueryShape, z.core.$strict>;
+export type ListQueryRequest = z.ZodObject<ListQueryShape, z.core.$strict>;
 /** What createListQuerySchema returns: the strict request object piped into its parsed output */
-type ListQuerySchema<T extends OutputStableShape<T>, TSortField extends string> = z.ZodPipe<ListQueryInput, z.ZodTransform<Awaited<ListQueryOutput<TSortField> & {
+type ListQuerySchema<T extends OutputStableShape<T>, TSortField extends string> = z.ZodPipe<ListQueryRequest, z.ZodTransform<Awaited<ListQueryOutput<TSortField> & {
     [K in keyof T]: z.infer<T[K]>;
-}>, z.output<ListQueryInput>>>;
+}>, z.output<ListQueryRequest>>>;
 declare function createListQuerySchema<T extends OutputStableShape<T> = Record<never, never>, const TSortFields extends readonly string[] = readonly string[]>(config: ListQueryConfig<T, TSortFields>): ListQuerySchema<T, TSortFields[number]>;
 export { createListQuerySchema, type ListQuerySchema };
 
@@ -881,15 +885,15 @@ export { createListQuerySchema, type ListQuerySchema };
  */
 import * as z from "zod";
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts";
-type RetrieveShape = {
+export type RetrieveShape = {
     lang?: z.ZodOptional<z.ZodString>;
     select: z.ZodOptional<z.ZodString>;
 };
-type RetrieveInput = z.ZodObject<RetrieveShape, z.core.$strict>;
+export type RetrieveRequest = z.ZodObject<RetrieveShape, z.core.$strict>;
 /** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
-type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveInput, z.ZodTransform<Awaited<RetrieveQueryOutput & {
+type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveRequest, z.ZodTransform<Awaited<RetrieveQueryOutput & {
     [K in keyof T]: z.infer<T[K]>;
-}>, z.output<RetrieveInput>>>;
+}>, z.output<RetrieveRequest>>>;
 declare function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never>>(config: RetrieveQueryConfig<T>): RetrieveQuerySchema<T>;
 export { createRetrieveQuerySchema, type RetrieveQuerySchema };
 
@@ -945,8 +949,8 @@ type PaginationConfig = {
     /** The last page offset pagination serves; past it, a client pages by cursor. Default 10 000. */
     maxPage?: number;
 };
-type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number];
-type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number];
+export type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number];
+export type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number];
 type ListQueryConfig<T extends OutputStableShape<T> = Record<never, never>, TSortFields extends readonly string[] = readonly string[]> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
     extend?: T & {

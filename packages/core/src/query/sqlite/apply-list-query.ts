@@ -11,7 +11,7 @@ type ListQueryAppliable<TQuery> = {
 }
 
 /** What a built list, a single database's or a merged one's, reads with: its pagination is paginate's */
-type ListQuery = Pick<ListQueryResult, "extras" | "limit" | "offset" | "orderBy" | "where">
+export type ListQuery = Pick<ListQueryResult, "extras" | "limit" | "offset" | "orderBy" | "where">
 
 /**
  * The select `select` builds over the built query's extras (the tiebreak, the count, the gone-anchor

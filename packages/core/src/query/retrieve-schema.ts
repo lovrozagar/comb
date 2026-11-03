@@ -15,13 +15,13 @@ import {
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts"
 import { validateSelectWithConfig } from "./select-validate.ts"
 
-type RetrieveShape = { lang?: z.ZodOptional<z.ZodString>; select: z.ZodOptional<z.ZodString> }
-type RetrieveInput = z.ZodObject<RetrieveShape, z.core.$strict>
+export type RetrieveShape = { lang?: z.ZodOptional<z.ZodString>; select: z.ZodOptional<z.ZodString> }
+export type RetrieveRequest = z.ZodObject<RetrieveShape, z.core.$strict>
 
 /** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
 type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<
-	RetrieveInput,
-	z.ZodTransform<Awaited<RetrieveQueryOutput & { [K in keyof T]: z.infer<T[K]> }>, z.output<RetrieveInput>>
+	RetrieveRequest,
+	z.ZodTransform<Awaited<RetrieveQueryOutput & { [K in keyof T]: z.infer<T[K]> }>, z.output<RetrieveRequest>>
 >
 
 function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never>>(

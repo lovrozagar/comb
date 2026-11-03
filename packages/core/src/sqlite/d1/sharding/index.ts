@@ -17,3 +17,6 @@ export type {
 	ShardRouterConfig,
 	ShardVerifyDeps,
 } from "./types.ts"
+export type { LogFn, WaitUntilCtx } from "./types.ts"
+export type { ShardMapColumns, ShardMapTable } from "./shard-map.ts"
+export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf } from "../d1-types.ts"

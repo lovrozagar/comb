@@ -10,7 +10,7 @@ import { writeGenFile } from "../utils/fs.ts"
 import { findNearestPackageJson, setPackageExport } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
-type EntitiesConfig = {
+export type EntitiesConfig = {
 	importFrom?: string | undefined
 	output: string
 	updatePackageJson?: boolean

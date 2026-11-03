@@ -5,6 +5,10 @@ export type { AnalysisResult, CheckConstraintMeta, FieldConstraintsMeta, FieldMe
 export { type FieldConstraints, fieldConstraintsOf } from "./annotations.ts";
 export { deriveEntityMeta, isExcludedFromUpdate } from "./entity-meta.ts";
 export { validateTables } from "./utils/validate.ts";
+export type { OrmConfig } from "./config.ts";
+export type { CombColumnKind } from "../meta/column.ts";
+export type { ConstantValue, ExpressionIndexMeta, ImportRef, PartialUniqueIndexMeta, StateMachineMeta, } from "./analyzer-types.ts";
+export type { ValidationResult } from "./utils/validate.ts";
 
 // codegen/analyzer.d.ts
 /**
@@ -35,7 +39,7 @@ export type { FtsTableConfig };
 /** Every generator, in the order codegen runs them */
 export declare const GENERATORS: readonly ["constraints", "rows", "relations", "diagrams", "columns", "dtos", "entities", "manifest", "field-names", "orm", "enum-checks", "translations", "fts"];
 export type GeneratorName = (typeof GENERATORS)[number];
-type OrmConfig = Parameters<typeof generateOrm>[1];
+export type OrmConfig = Parameters<typeof generateOrm>[1];
 export type DatabaseCodegen = {
     dialect?: OrmConfig["dialect"] | undefined;
     driver?: OrmConfig["driver"] | undefined;
@@ -320,7 +324,7 @@ export { deriveEntityMeta, isExcludedFromUpdate, isGenerated, publishedPartialUn
 
 // codegen/utils/validate.d.ts
 import type { AnalysisResult } from "../analyzer-types.ts";
-type ValidationResult = {
+export type ValidationResult = {
     errors: string[];
     warnings: string[];
 };
@@ -329,53 +333,6 @@ type ValidationResult = {
  * Hard errors should abort generation. Warnings are informational.
  */
 export declare function validateTables(analysis: AnalysisResult): ValidationResult;
-export {};
-
-// codegen/generators/fts-sql.d.ts
-/**
- * FTS5 SQL generator — pure function that produces CREATE VIRTUAL TABLE + trigger DDL.
- *
- * Shared between:
- * - codegen generator (writes .gen.sql reference files)
- * - migrate diff (appends to migration files)
- */
-import type { TableMeta } from "../analyzer-types.ts";
-type FtsTableConfig = {
-    columns: string[];
-    tokenizer?: string | undefined;
-};
-declare const DEFAULT_TOKENIZER = "unicode61 remove_diacritics 2 categories 'L* N* Co M*'";
-/** Deduplicate columns preserving order */
-declare function dedup(columns: string[]): string[];
-/** Generate FTS5 SQL for all configured tables. Returns empty string if nothing to generate. */
-declare function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
-/**
- * The FTS SQL a person applies by hand: each configured index's triggers and table dropped, made
- * again, and rebuilt from its content table, so applying it after a column change replaces the
- * old index rather than leaving it in place. `comb migrate diff` takes generateFtsSql, and writes
- * a changed index this way itself.
- */
-declare function ftsReferenceSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
-/** The SQL columns of an FTS index configured on `table` as `columns`, each once */
-declare const ftsColumns: (table: TableMeta, columns: readonly string[]) => string[];
-export { dedup, DEFAULT_TOKENIZER, ftsColumns, ftsReferenceSql, generateFtsSql };
-export type { FtsTableConfig };
-
-// codegen/generators/orm.d.ts
-import type { GeneratorContext } from "./context-types.ts";
-type OrmDialect = "sqlite" | "postgres";
-type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso";
-type PostgresDriver = "neon";
-type OrmConfig = {
-    dialect: OrmDialect;
-    driver: SqliteDriver | PostgresDriver;
-    filePrefix?: string | undefined;
-    output: string;
-    relationsOutput?: string;
-};
-/** Generate ORM client file based on config */
-export declare function generateOrm(ctx: GeneratorContext, config: OrmConfig): void;
-export {};
 
 // meta/column.d.ts
 /**
@@ -410,6 +367,51 @@ declare function enumMeta(values: readonly string[], options?: {
 };
 export { combColumnMeta, enumMeta, withCombColumn, type CombColumnKind, type CombColumnMeta };
 
+// codegen/generators/fts-sql.d.ts
+/**
+ * FTS5 SQL generator — pure function that produces CREATE VIRTUAL TABLE + trigger DDL.
+ *
+ * Shared between:
+ * - codegen generator (writes .gen.sql reference files)
+ * - migrate diff (appends to migration files)
+ */
+import type { TableMeta } from "../analyzer-types.ts";
+type FtsTableConfig = {
+    columns: string[];
+    tokenizer?: string | undefined;
+};
+declare const DEFAULT_TOKENIZER = "unicode61 remove_diacritics 2 categories 'L* N* Co M*'";
+/** Deduplicate columns preserving order */
+declare function dedup(columns: string[]): string[];
+/** Generate FTS5 SQL for all configured tables. Returns empty string if nothing to generate. */
+declare function generateFtsSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
+/**
+ * The FTS SQL a person applies by hand: each configured index's triggers and table dropped, made
+ * again, and rebuilt from its content table, so applying it after a column change replaces the
+ * old index rather than leaving it in place. `comb migrate diff` takes generateFtsSql, and writes
+ * a changed index this way itself.
+ */
+declare function ftsReferenceSql(tables: TableMeta[], ftsConfig: Record<string, FtsTableConfig>, warn: (line: string) => void): string;
+/** The SQL columns of an FTS index configured on `table` as `columns`, each once */
+declare const ftsColumns: (table: TableMeta, columns: readonly string[]) => string[];
+export { dedup, DEFAULT_TOKENIZER, ftsColumns, ftsReferenceSql, generateFtsSql };
+export type { FtsTableConfig };
+
+// codegen/generators/orm.d.ts
+import type { GeneratorContext } from "./context-types.ts";
+export type OrmDialect = "sqlite" | "postgres";
+export type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso";
+export type PostgresDriver = "neon";
+export type OrmConfig = {
+    dialect: OrmDialect;
+    driver: SqliteDriver | PostgresDriver;
+    filePrefix?: string | undefined;
+    output: string;
+    relationsOutput?: string;
+};
+/** Generate ORM client file based on config */
+export declare function generateOrm(ctx: GeneratorContext, config: OrmConfig): void;
+
 // meta.d.ts
 /**
  * The comb meta contract — facts about tables and queries, stamped onto Zod
@@ -429,7 +431,7 @@ import { readCombEntityMeta, readCombMeta, readCombQueryMeta } from "./meta/read
 declare function combMeta(meta: CombEntityMetaInput): CombMetaStamp<CombEntityMeta>;
 declare function combMeta(meta: CombQueryMetaInput): CombMetaStamp<CombQueryMeta>;
 /** Minimal shape of a Zod schema, so this module needs no zod import. */
-type MetaCarrier<T> = {
+export type MetaCarrier<T> = {
     meta: (m: Record<string, unknown>) => T;
 };
 /**
@@ -441,6 +443,7 @@ type MetaCarrier<T> = {
  */
 declare function carryCombMeta<T>(from: unknown, to: MetaCarrier<T>): T | null;
 export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, readCombEntityMeta, readCombMeta, readCombQueryMeta, };
+export type { ReadOptions } from "./meta/read.ts";
 
 // codegen/generators/context-types.d.ts
 /** What every generator works from: the analysis, where it runs, and where its progress lines go. */

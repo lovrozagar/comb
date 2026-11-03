@@ -21,6 +21,7 @@ declare function classifySqliteError(error: unknown, maps: readonly ConstraintMa
 /** The error handler for libsql, Turso and bun:sqlite: throws what classifySqliteError finds; any other error is left for the caller */
 declare function sqliteErrorHandler(error: unknown, maps: readonly ConstraintMap[]): void;
 export { classifySqliteError, constraintError, handleConstraintViolation, resourceOutcome, sqliteErrorHandler };
+export type { Fallback } from "../constraint-map.ts";
 
 // error.d.ts
 import type { StatusKey } from "./types.ts";

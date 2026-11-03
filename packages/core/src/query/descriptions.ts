@@ -34,7 +34,7 @@ const SELECT_DESCRIPTION =
 	"PostgREST-style sparse fieldset. Scalars comma-separated; relations embedded as name(fields); wildcard * selects all scalars. Docs: https://docs.postgrest.org/en/stable/references/api/resource_embedding.html"
 const SELECT_EXAMPLES: string[] = ["id,name,email", "id,author(name)", "id,author(name,posts(title))", "*"]
 
-type ParamMeta = { description: string; examples: string[] }
+export type ParamMeta = { description: string; examples: string[] }
 
 /* One value per type that every operator in the example accepts. */
 function sampleCondition(field: string, type: FieldType): string {

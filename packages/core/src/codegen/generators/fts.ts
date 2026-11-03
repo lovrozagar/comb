@@ -12,7 +12,7 @@ import { ftsColumns, ftsReferenceSql, type FtsTableConfig } from "./fts-sql.ts"
 import type { TableMeta } from "../analyzer-types.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
-type FtsGeneratorConfig = {
+export type FtsGeneratorConfig = {
 	/** file name stem; defaults to `db.<dbName>` */
 	filePrefix?: string | undefined
 	fts: Record<string, FtsTableConfig>

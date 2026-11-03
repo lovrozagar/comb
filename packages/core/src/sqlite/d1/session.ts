@@ -40,3 +40,4 @@ function openD1Session<D extends D1DatabaseLike>(
 }
 
 export { openD1Session, type SessionConstraint, type SessionHandle, type SessionOptions }
+export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf } from "./d1-types.ts"

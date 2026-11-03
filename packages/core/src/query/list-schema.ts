@@ -39,18 +39,18 @@ type OptionalShape = {
 	select?: z.ZodOptional<z.ZodString>
 }
 
-type ListQueryShape = typeof baseListQueryShape &
+export type ListQueryShape = typeof baseListQueryShape &
 	OptionalShape & {
 		limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>
 		page: z.ZodOptional<z.ZodCoercedNumber<unknown>>
 	}
 
-type ListQueryInput = z.ZodObject<ListQueryShape, z.core.$strict>
+export type ListQueryRequest = z.ZodObject<ListQueryShape, z.core.$strict>
 
 /** What createListQuerySchema returns: the strict request object piped into its parsed output */
 type ListQuerySchema<T extends OutputStableShape<T>, TSortField extends string> = z.ZodPipe<
-	ListQueryInput,
-	z.ZodTransform<Awaited<ListQueryOutput<TSortField> & { [K in keyof T]: z.infer<T[K]> }>, z.output<ListQueryInput>>
+	ListQueryRequest,
+	z.ZodTransform<Awaited<ListQueryOutput<TSortField> & { [K in keyof T]: z.infer<T[K]> }>, z.output<ListQueryRequest>>
 >
 
 /**

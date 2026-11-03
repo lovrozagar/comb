@@ -16,7 +16,7 @@ import {
 	COMB_ID,
 	type ListPagination,
 	type ListRow,
-	type PaginationMeta,
+	type PaginationResponse,
 	paginationIn,
 	refuseGoneAnchor,
 	refuseOverRead,
@@ -208,7 +208,7 @@ function countOf(rowsPerShard: ReadonlyArray<readonly object[]>, cursor: string 
 function paginateMerged<T extends object>(
 	rowsPerShard: ReadonlyArray<readonly T[]>,
 	built: { pagination: ListPagination & { merged: true } },
-): readonly [Array<ListRow<T>>, PaginationMeta] {
+): readonly [Array<ListRow<T>>, PaginationResponse] {
 	const pagination = paginationIn(built, true)
 	for (const shard of rowsPerShard) {
 		refuseOverRead(shard.length, pagination)
@@ -235,7 +235,7 @@ function paginateMerged<T extends object>(
 	const hasMore = full || window.length > limit
 	const page = hasMore ? window.slice(0, limit) : window
 	const last = page.at(-1)
-	const meta: PaginationMeta = {
+	const meta: PaginationResponse = {
 		count: countOf(rowsPerShard, cursor),
 		hasMore,
 		limit,

@@ -20,7 +20,7 @@ import { stringLiteral } from "../utils/case.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
-type EnumChecksConfig = {
+export type EnumChecksConfig = {
 	output: string
 }
 

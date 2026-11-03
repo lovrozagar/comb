@@ -11,7 +11,7 @@ import { writeGenFile } from "../utils/fs.ts"
 import { findNearestPackageJson, setPackageExport } from "../utils/package-json.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
-type FieldNamesConfig = {
+export type FieldNamesConfig = {
 	output: string
 	updatePackageJson?: boolean
 }

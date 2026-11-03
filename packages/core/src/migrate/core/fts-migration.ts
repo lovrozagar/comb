@@ -21,7 +21,7 @@ const DROP_TABLE = /^DROP TABLE (?:IF EXISTS )?[`"[]?(\w+)[`"\]]?/i
 const RENAME_TO = /^ALTER TABLE [`"[]?\w+[`"\]]? RENAME TO [`"[]?(\w+)[`"\]]?$/i
 
 /** One FTS object as a migration leaves it: its normalized DDL and the group it belongs to */
-type FtsObject = { group: string; kind: "table" | "trigger"; sql: string }
+export type FtsObject = { group: string; kind: "table" | "trigger"; sql: string }
 
 /** The FTS objects a sequence of migrations leaves, by name */
 type FtsState = Map<string, FtsObject>

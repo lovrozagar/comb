@@ -17,7 +17,7 @@ import type { GeneratorContext } from "./context-types.ts"
 import { qualifiedName } from "../utils/table-name.ts"
 import { type ImportStyle, specifierFor } from "../utils/paths.ts"
 
-type ColumnsConfig = {
+export type ColumnsConfig = {
 	filePrefix?: string | undefined
 	output: string
 	updatePackageJson?: boolean

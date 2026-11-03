@@ -4,9 +4,12 @@ export type { MergedListQueryResult } from "../../../query/sqlite/build-list-que
 export { ShardRouter } from "./router.ts";
 export { shardMap } from "./shard-map.ts";
 export type { ShardBindingOf, ShardDbHandle, ShardDriver, ShardEnv, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, } from "./types.ts";
+export type { LogFn, WaitUntilCtx } from "./types.ts";
+export type { ShardMapColumns, ShardMapTable } from "./shard-map.ts";
+export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf } from "../d1-types.ts";
 
 // query/merged.d.ts
-import { type ListPagination, type ListRow, type PaginationMeta } from "./pagination.ts";
+import { type ListPagination, type ListRow, type PaginationResponse } from "./pagination.ts";
 /**
  * The page of a list merged from `rowsPerShard`, each shard's rows read with `built`,
  * and its pagination, as `paginate` gives one database's: ordered as the list orders, windowed by
@@ -17,7 +20,7 @@ declare function paginateMerged<T extends object>(rowsPerShard: ReadonlyArray<re
     pagination: ListPagination & {
         merged: true;
     };
-}): readonly [Array<ListRow<T>>, PaginationMeta];
+}): readonly [Array<ListRow<T>>, PaginationResponse];
 export { paginateMerged };
 
 // query/sqlite/build-list-query-types.d.ts
@@ -230,7 +233,7 @@ export declare const ORG_ID_MAX_LENGTH = 64;
  */
 export declare function assertOrgId(orgId: string): void;
 /** Each column's builder, from the `c` factory that makes it */
-type ShardMapColumns = {
+export type ShardMapColumns = {
     created_at: ReturnType<SqliteColumns["createdAt"]>;
     deleted_at: ReturnType<SqliteColumns["deletedAt"]>;
     driver: HasDefault<NotNull<ReturnType<typeof c.enum<readonly ["d1"]>>>>;
@@ -239,9 +242,8 @@ type ShardMapColumns = {
     target: NotNull<ReturnType<SqliteColumns["text"]>>;
     updated_at: ReturnType<SqliteColumns["updatedAt"]>;
 };
-type ShardMapTable = ReturnType<typeof createTable<"shard_map", ShardMapColumns>>;
+export type ShardMapTable = ReturnType<typeof createTable<"shard_map", ShardMapColumns>>;
 export declare const shardMap: ShardMapTable;
-export {};
 
 // sqlite/d1/sharding/types.d.ts
 import type { D1DatabaseLike, D1StatementLike } from "../d1-types.ts";
@@ -330,6 +332,39 @@ interface ShardRouterConfig {
 }
 export type { LogFn, ShardBindingOf, ShardDbHandle, ShardDriver, ShardEnv, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx, };
 
+// sqlite/d1/d1-types.d.ts
+/**
+ * The D1 surface comb calls, as structural types of its own (K3 of r21), as the router's KV is: a
+ * Worker typed by `wrangler types`, whose globals declare D1, and one typed by
+ * `@cloudflare/workers-types` both fit them, so comb's D1 modules are typed in either and need
+ * neither installed. Where comb hands a client on, it hands the caller's own type back.
+ */
+/** A prepared statement as comb uses one: bound, then batched */
+type D1StatementLike = {
+    bind(...values: unknown[]): D1StatementLike;
+};
+/** One statement's answer in a batch: the rows comb reads */
+type D1AnswerLike<T> = {
+    results: T[];
+};
+/** A D1 session: what comb prepares and batches on, and the bookmark it hands on */
+type D1SessionLike = {
+    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
+    getBookmark(): string | null;
+    prepare(query: string): D1StatementLike;
+};
+/** A D1 database binding; one with no `withSession` is a runtime without sessions (an older Miniflare) */
+type D1DatabaseLike = {
+    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
+    prepare(query: string): D1StatementLike;
+    withSession?(constraintOrBookmark?: string): D1SessionLike;
+};
+/** The session type `D`'s `withSession` opens: the caller's own, so drizzle() takes it as it takes `D`; a D1 session where `D` names none */
+type SessionOf<D extends D1DatabaseLike> = D extends {
+    withSession(...args: never[]): infer S;
+} ? S : D1SessionLike;
+export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf };
+
 // query/pagination.d.ts
 import { type DecodedCursor } from "./cursor.ts";
 import { type KeysetKind } from "./cursor-mint.ts";
@@ -349,7 +384,7 @@ type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total";
  */
 type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never;
 /** The pagination meta paginate returns: the list response's own schema */
-type PaginationMeta = z.output<typeof paginationResponseSchema>;
+type PaginationResponse = z.output<typeof paginationResponseSchema>;
 /** How a built list pages what it fetched */
 type ListPagination = {
     /** the cursor the request resumed from; none on a page by number */
@@ -428,8 +463,8 @@ declare function paginate<T extends object>(items: readonly T[], built: {
     pagination: ListPagination & {
         merged: false;
     };
-}): readonly [Array<ListRow<T>>, PaginationMeta];
-export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationMeta, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
+}): readonly [Array<ListRow<T>>, PaginationResponse];
+export { applySelect, COMB_ID, type ListExtra, type ListPagination, type ListRow, paginate, type PaginationFacts, type PaginationResponse, paginationOf, paginationIn, refuseGoneAnchor, refuseOverRead, refuseUnwired, totalOf, };
 
 // query/types.d.ts
 /**
@@ -527,7 +562,7 @@ declare function buildFtsMatch(ftsTableName: string, query: string | null, { fol
  * A table and the FTS5 table that indexes it by rowid (external content, `content_rowid` its
  * rowid or its integer key)
  */
-type FtsSource = {
+export type FtsSource = {
     /**
      * The FTS table indexes a searchText column (`_search`): each term is folded with searchText as
      * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it (U16)
@@ -546,7 +581,7 @@ declare function buildFtsHighlight(ftsTableName: string, columnIndex: number, ta
     end: string;
     start: string;
 }): SQL;
-type SpellfixRow = {
+export type SpellfixRow = {
     word: string;
 };
 type SpellfixDb = {
@@ -646,39 +681,6 @@ export type SqliteColumns = {
 };
 export declare const c: SqliteColumns;
 export {};
-
-// sqlite/d1/d1-types.d.ts
-/**
- * The D1 surface comb calls, as structural types of its own (K3 of r21), as the router's KV is: a
- * Worker typed by `wrangler types`, whose globals declare D1, and one typed by
- * `@cloudflare/workers-types` both fit them, so comb's D1 modules are typed in either and need
- * neither installed. Where comb hands a client on, it hands the caller's own type back.
- */
-/** A prepared statement as comb uses one: bound, then batched */
-type D1StatementLike = {
-    bind(...values: unknown[]): D1StatementLike;
-};
-/** One statement's answer in a batch: the rows comb reads */
-type D1AnswerLike<T> = {
-    results: T[];
-};
-/** A D1 session: what comb prepares and batches on, and the bookmark it hands on */
-type D1SessionLike = {
-    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
-    getBookmark(): string | null;
-    prepare(query: string): D1StatementLike;
-};
-/** A D1 database binding; one with no `withSession` is a runtime without sessions (an older Miniflare) */
-type D1DatabaseLike = {
-    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
-    prepare(query: string): D1StatementLike;
-    withSession?(constraintOrBookmark?: string): D1SessionLike;
-};
-/** The session type `D`'s `withSession` opens: the caller's own, so drizzle() takes it as it takes `D`; a D1 session where `D` names none */
-type SessionOf<D extends D1DatabaseLike> = D extends {
-    withSession(...args: never[]): infer S;
-} ? S : D1SessionLike;
-export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf };
 
 // query/cursor.d.ts
 import { type CursorOptions } from "./cursor-seal.ts";
@@ -865,7 +867,7 @@ export { COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKe
  * Combines filter, sort, fields, and pagination into validated schemas.
  */
 import * as z from "zod";
-type PaginationResponseSchema = z.ZodObject<{
+export type PaginationResponseSchema = z.ZodObject<{
     count: z.ZodNullable<z.ZodNumber>;
     hasMore: z.ZodBoolean;
     limit: z.ZodNumber;
@@ -999,15 +1001,15 @@ type OptionalShape = {
     lang?: z.ZodOptional<z.ZodString>;
     select?: z.ZodOptional<z.ZodString>;
 };
-type ListQueryShape = typeof baseListQueryShape & OptionalShape & {
+export type ListQueryShape = typeof baseListQueryShape & OptionalShape & {
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     page: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
 };
-type ListQueryInput = z.ZodObject<ListQueryShape, z.core.$strict>;
+export type ListQueryRequest = z.ZodObject<ListQueryShape, z.core.$strict>;
 /** What createListQuerySchema returns: the strict request object piped into its parsed output */
-type ListQuerySchema<T extends OutputStableShape<T>, TSortField extends string> = z.ZodPipe<ListQueryInput, z.ZodTransform<Awaited<ListQueryOutput<TSortField> & {
+type ListQuerySchema<T extends OutputStableShape<T>, TSortField extends string> = z.ZodPipe<ListQueryRequest, z.ZodTransform<Awaited<ListQueryOutput<TSortField> & {
     [K in keyof T]: z.infer<T[K]>;
-}>, z.output<ListQueryInput>>>;
+}>, z.output<ListQueryRequest>>>;
 declare function createListQuerySchema<T extends OutputStableShape<T> = Record<never, never>, const TSortFields extends readonly string[] = readonly string[]>(config: ListQueryConfig<T, TSortFields>): ListQuerySchema<T, TSortFields[number]>;
 export { createListQuerySchema, type ListQuerySchema };
 
@@ -1019,15 +1021,15 @@ export { createListQuerySchema, type ListQuerySchema };
  */
 import * as z from "zod";
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts";
-type RetrieveShape = {
+export type RetrieveShape = {
     lang?: z.ZodOptional<z.ZodString>;
     select: z.ZodOptional<z.ZodString>;
 };
-type RetrieveInput = z.ZodObject<RetrieveShape, z.core.$strict>;
+export type RetrieveRequest = z.ZodObject<RetrieveShape, z.core.$strict>;
 /** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
-type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveInput, z.ZodTransform<Awaited<RetrieveQueryOutput & {
+type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveRequest, z.ZodTransform<Awaited<RetrieveQueryOutput & {
     [K in keyof T]: z.infer<T[K]>;
-}>, z.output<RetrieveInput>>>;
+}>, z.output<RetrieveRequest>>>;
 declare function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never>>(config: RetrieveQueryConfig<T>): RetrieveQuerySchema<T>;
 export { createRetrieveQuerySchema, type RetrieveQuerySchema };
 
@@ -1083,8 +1085,8 @@ type PaginationConfig = {
     /** The last page offset pagination serves; past it, a client pages by cursor. Default 10 000. */
     maxPage?: number;
 };
-type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number];
-type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number];
+export type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number];
+export type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number];
 type ListQueryConfig<T extends OutputStableShape<T> = Record<never, never>, TSortFields extends readonly string[] = readonly string[]> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
     extend?: T & {

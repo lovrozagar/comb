@@ -26,7 +26,7 @@ export const GENERATORS = [
 
 export type GeneratorName = (typeof GENERATORS)[number]
 
-type OrmConfig = Parameters<typeof generateOrm>[1]
+export type OrmConfig = Parameters<typeof generateOrm>[1]
 
 export type DatabaseCodegen = {
 	dialect?: OrmConfig["dialect"] | undefined

@@ -25,9 +25,9 @@ type PaginationConfig = {
 	maxPage?: number
 }
 
-type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number]
+export type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number]
 
-type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number]
+export type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number]
 
 type ListQueryConfig<
 	T extends OutputStableShape<T> = Record<never, never>,

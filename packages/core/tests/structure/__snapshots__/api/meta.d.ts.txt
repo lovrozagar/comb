@@ -17,7 +17,7 @@ import { readCombEntityMeta, readCombMeta, readCombQueryMeta } from "./meta/read
 declare function combMeta(meta: CombEntityMetaInput): CombMetaStamp<CombEntityMeta>;
 declare function combMeta(meta: CombQueryMetaInput): CombMetaStamp<CombQueryMeta>;
 /** Minimal shape of a Zod schema, so this module needs no zod import. */
-type MetaCarrier<T> = {
+export type MetaCarrier<T> = {
     meta: (m: Record<string, unknown>) => T;
 };
 /**
@@ -29,6 +29,7 @@ type MetaCarrier<T> = {
  */
 declare function carryCombMeta<T>(from: unknown, to: MetaCarrier<T>): T | null;
 export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, readCombEntityMeta, readCombMeta, readCombQueryMeta, };
+export type { ReadOptions } from "./meta/read.ts";
 
 // meta/contract.d.ts
 /**

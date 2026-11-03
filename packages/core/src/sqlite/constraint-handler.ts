@@ -279,3 +279,4 @@ function sqliteErrorHandler(error: unknown, maps: readonly ConstraintMap[]): voi
 }
 
 export { classifySqliteError, constraintError, handleConstraintViolation, resourceOutcome, sqliteErrorHandler }
+export type { Fallback } from "../constraint-map.ts"

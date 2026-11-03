@@ -9,6 +9,8 @@ import { expectTypeOf } from "vitest"
 import { BookmarkTracker } from "../../src/sqlite/d1/bookmark.ts"
 import type { D1DatabaseLike, D1SessionLike } from "../../src/sqlite/d1/d1-types.ts"
 import { openD1Session } from "../../src/sqlite/d1/session.ts"
+import type { D1DatabaseLike as SessionBound, SessionOf } from "../../src/sqlite/d1/session.ts"
+import type { D1DatabaseLike as ShardBound } from "../../src/sqlite/d1/sharding/index.ts"
 import { ShardRouter } from "../../src/sqlite/d1/sharding/router.ts"
 import type { ShardKv, ShardMapping } from "../../src/sqlite/d1/sharding/types.ts"
 
@@ -59,3 +61,10 @@ declare const noShards: NoShards
 router.getHandle(mapping, noShards)
 // @ts-expect-error a shard key holds a D1 binding
 router.getHandle(mapping, { KV: {} as KVNamespace, SHARD_DB_0: "core" })
+
+/* K4 of r22: a consumer's helper names comb's D1 bound from the subpath it calls, and returns the binding's own session type */
+function sessionOf<D extends SessionBound>(binding: D): SessionOf<D> | undefined {
+	return openD1Session(binding).session
+}
+expectTypeOf(sessionOf(db)).toEqualTypeOf<D1DatabaseSession | undefined>()
+expectTypeOf<ShardBound>().toEqualTypeOf<SessionBound>()

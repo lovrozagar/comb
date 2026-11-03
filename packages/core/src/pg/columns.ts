@@ -56,7 +56,7 @@ type UpdatedAtName = "updatedAt" | "updated_at"
  * declarations. The parameters are SQLite's, so one tables file compiles under either dialect;
  * the constraints are read by codegen and erased at runtime.
  */
-type PgColumns = {
+export type PgColumns = {
 	boolean: (name: string) => PgBooleanBuilder
 	createdAt: (name: CreatedAtName, _constraints?: TimestampConstraints) => SetHasDefault<SetNotNull<PgBigInt53Builder>>
 	deletedAt: (name: DeletedAtName, _constraints?: TimestampConstraints) => PgBigInt53Builder

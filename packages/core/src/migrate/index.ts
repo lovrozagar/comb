@@ -75,3 +75,18 @@ export type {
 	ResolvedPostgresProviderConfig,
 	TursoProviderConfig,
 } from "./types.ts"
+export type { ClassifyOptions } from "./core/classify.ts"
+export type { TargetKind } from "./core/classify-target.ts"
+export type {
+	DatabaseShared,
+	EnvironmentsDatabaseConfig,
+	ForeignKey,
+	SingleDatabaseConfig,
+	TableInfo,
+	TriggerEvent,
+} from "./types.ts"
+export type { FtsObject, FtsState } from "./core/fts-migration.ts"
+export type { ProviderDeps } from "./config.ts"
+export type { PgTarget } from "./core/atlas-target.ts"
+export type { BinPeer, Run, RunOptions, RunResult } from "./core/process.ts"
+export type { TursoCredentialsRequest, TursoDeps } from "./drivers/sqlite.ts"

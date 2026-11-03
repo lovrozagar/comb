@@ -37,7 +37,7 @@ function combMeta(meta: CombMetaInput): CombMetaStamp {
 }
 
 /** Minimal shape of a Zod schema, so this module needs no zod import. */
-type MetaCarrier<T> = { meta: (m: Record<string, unknown>) => T }
+export type MetaCarrier<T> = { meta: (m: Record<string, unknown>) => T }
 
 /**
  * Re-stamp `to` with the facts `from` carries.
@@ -84,3 +84,4 @@ export {
 	readCombMeta,
 	readCombQueryMeta,
 }
+export type { ReadOptions } from "./meta/read.ts"

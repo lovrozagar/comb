@@ -34,7 +34,7 @@ type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never
 const EXTRAS: readonly ListExtra[] = [COMB_ID, "_combAnchorGone", "_combKeyTypes", "_total"]
 
 /** The pagination meta paginate returns: the list response's own schema */
-type PaginationMeta = z.output<typeof paginationResponseSchema>
+type PaginationResponse = z.output<typeof paginationResponseSchema>
 
 /** How a built list pages what it fetched */
 type ListPagination = {
@@ -240,7 +240,7 @@ function refuseOverRead(count: number, pagination: ListPagination): void {
 function paginate<T extends object>(
 	items: readonly T[],
 	built: { pagination: ListPagination & { merged: false } },
-): readonly [Array<ListRow<T>>, PaginationMeta] {
+): readonly [Array<ListRow<T>>, PaginationResponse] {
 	const pagination = paginationIn(built, false)
 	refuseOverRead(items.length, pagination)
 	refuseUnwired(items, pagination)
@@ -249,7 +249,7 @@ function paginate<T extends object>(
 	const sliced = hasMore ? items.slice(0, pagination.limit) : items
 	/* minted from the fat row, under the sort the builder ordered by, so the next request's signature matches */
 	const last = sliced.at(-1)
-	const meta: PaginationMeta = {
+	const meta: PaginationResponse = {
 		count: countOf(items, pagination),
 		hasMore,
 		limit: pagination.limit,
@@ -270,7 +270,7 @@ export {
 	type ListRow,
 	paginate,
 	type PaginationFacts,
-	type PaginationMeta,
+	type PaginationResponse,
 	paginationOf,
 	paginationIn,
 	refuseGoneAnchor,

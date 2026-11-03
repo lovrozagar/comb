@@ -2,6 +2,7 @@
 /** @lovrozagar/comb/cli: run the comb CLI in process. */
 export { CliError, type CliIo, processIo } from "./output.ts";
 export { help, runCli } from "./run.ts";
+export type { Terminal } from "./output.ts";
 
 // cli/output.d.ts
 import type { Run, RunResult } from "../migrate/core/process.ts";
@@ -50,7 +51,7 @@ export declare class ShowHelp extends Error {
     readonly text: string;
     constructor(text: string);
 }
-type Terminal = {
+export type Terminal = {
     input: NodeJS.ReadableStream & {
         isTTY?: boolean | undefined;
     };
@@ -62,7 +63,6 @@ type Terminal = {
  * what the command prints (P4 of the 0.15.0 review)
  */
 export declare function processIo({ input, output }?: Partial<Terminal>): CliIo;
-export {};
 
 // cli/run.d.ts
 import { type CliIo } from "./output.ts";

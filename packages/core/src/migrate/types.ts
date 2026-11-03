@@ -106,7 +106,7 @@ export type ProviderConfig = ConnectionProviderConfig | PostgresProviderConfig
 export type EnvironmentConfig = { name?: string | undefined; provider?: ProviderConfig | undefined }
 
 /** What every database declares, whichever shape it has */
-type DatabaseShared = {
+export type DatabaseShared = {
 	/** the comb.config.ts database this one's tables and FTS are, when its name there is another (C7) */
 	codegen?: string | undefined
 	drizzleConfigPath?: string | undefined

@@ -13,7 +13,7 @@ import type { TableMeta } from "../analyzer-types.ts"
 import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 
-type RelationsConfig = {
+export type RelationsConfig = {
 	output: string
 }
 

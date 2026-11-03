@@ -21,7 +21,7 @@ import type { GeneratorContext } from "./context-types.ts"
 
 type Dialect = "postgres" | "sqlite"
 
-type ConstraintsConfig = {
+export type ConstraintsConfig = {
 	output: string
 	/** comb.config.ts's `partitions`: each partitioned table's partitions, keyed as the map keys it */
 	partitions?: Readonly<Record<string, readonly string[]>> | undefined

@@ -9,7 +9,7 @@ import { writeGenFile } from "../utils/fs.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { specifierFor } from "../utils/paths.ts"
 
-type RowsConfig = {
+export type RowsConfig = {
 	output: string
 }
 

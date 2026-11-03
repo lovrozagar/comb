@@ -21,7 +21,7 @@ export function assertOrgId(orgId: string): void {
 }
 
 /** Each column's builder, from the `c` factory that makes it */
-type ShardMapColumns = {
+export type ShardMapColumns = {
 	created_at: ReturnType<SqliteColumns["createdAt"]>
 	deleted_at: ReturnType<SqliteColumns["deletedAt"]>
 	driver: HasDefault<NotNull<ReturnType<typeof c.enum<readonly ["d1"]>>>>
@@ -32,7 +32,7 @@ type ShardMapColumns = {
 }
 
 /* drizzle's own table type for these columns, so it follows each drizzle the peer range admits (rc.5 added `isAlias`) */
-type ShardMapTable = ReturnType<typeof createTable<"shard_map", ShardMapColumns>>
+export type ShardMapTable = ReturnType<typeof createTable<"shard_map", ShardMapColumns>>
 
 /* the table is built in a function so module scope runs one call, marked pure */
 function defineShardMap(): ShardMapTable {

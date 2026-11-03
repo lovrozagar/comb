@@ -9,7 +9,7 @@ import { buildConstraintMap, constraintsIn } from "./constraints.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { type ImportStyle, styled } from "../utils/paths.ts"
 
-type TranslationsConfig = {
+export type TranslationsConfig = {
 	baseDir: string
 	/** file name stem, the one the constraints file uses */
 	filePrefix: string

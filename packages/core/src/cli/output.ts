@@ -64,7 +64,7 @@ export class ShowHelp extends Error {
 	}
 }
 
-type Terminal = {
+export type Terminal = {
 	input: NodeJS.ReadableStream & { isTTY?: boolean | undefined }
 	output: NodeJS.WritableStream
 }

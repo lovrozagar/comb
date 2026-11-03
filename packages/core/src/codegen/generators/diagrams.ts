@@ -217,7 +217,7 @@ function generateRelationsJSON(tables: Table[], relations: Relation[]): Record<s
 	}
 }
 
-type DiagramsConfig = {
+export type DiagramsConfig = {
 	output: string
 }
 

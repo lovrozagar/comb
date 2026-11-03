@@ -65,7 +65,7 @@ function buildFtsMatch(
  * A table and the FTS5 table that indexes it by rowid (external content, `content_rowid` its
  * rowid or its integer key)
  */
-type FtsSource = {
+export type FtsSource = {
 	/**
 	 * The FTS table indexes a searchText column (`_search`): each term is folded with searchText as
 	 * the column was, so ß, æ, a ligature or a Greek accent typed as written finds it (U16)
@@ -98,7 +98,7 @@ function buildFtsHighlight(ftsTableName: string, columnIndex: number, tags: { en
 	return sql`highlight(${ident(ftsTableName)}, ${columnIndex}, ${tags.start}, ${tags.end})`
 }
 
-type SpellfixRow = { word: string }
+export type SpellfixRow = { word: string }
 
 type SpellfixDb = {
 	all: (query: SQL) => Promise<Array<SpellfixRow>>

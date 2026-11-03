@@ -21,3 +21,13 @@ export type {
 export { type FieldConstraints, fieldConstraintsOf } from "./annotations.ts"
 export { deriveEntityMeta, isExcludedFromUpdate } from "./entity-meta.ts"
 export { validateTables } from "./utils/validate.ts"
+export type { OrmConfig } from "./config.ts"
+export type { CombColumnKind } from "../meta/column.ts"
+export type {
+	ConstantValue,
+	ExpressionIndexMeta,
+	ImportRef,
+	PartialUniqueIndexMeta,
+	StateMachineMeta,
+} from "./analyzer-types.ts"
+export type { ValidationResult } from "./utils/validate.ts"

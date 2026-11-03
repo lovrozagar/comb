@@ -13,24 +13,38 @@ export { generateOrm } from "./orm.ts";
 export { generateRelations } from "./relations.ts";
 export { generateRows } from "./rows.ts";
 export { generateTranslations } from "./translations.ts";
+export type { ColumnsConfig } from "./columns.ts";
+export type { ConstraintsConfig } from "./constraints.ts";
+export type { DiagramsConfig } from "./diagrams.ts";
+export type { DtosConfig } from "./dtos/dto-types.ts";
+export type { EntitiesConfig } from "./entities.ts";
+export type { EnumChecksConfig } from "./enum-checks.ts";
+export type { FieldNamesConfig } from "./field-names.ts";
+export type { FtsGeneratorConfig } from "./fts.ts";
+export type { ManifestConfig } from "./manifest.ts";
+export type { RelationsConfig } from "./relations.ts";
+export type { RowsConfig } from "./rows.ts";
+export type { TranslationsConfig } from "./translations.ts";
+export type { OrmConfig, OrmDialect, PostgresDriver, SqliteDriver } from "./orm.ts";
+export type { GeneratorContext } from "./context-types.ts";
+export type { ImportStyle } from "../utils/paths.ts";
 
 // codegen/generators/columns.d.ts
 import type { GeneratorContext } from "./context-types.ts";
-type ColumnsConfig = {
+export type ColumnsConfig = {
     filePrefix?: string | undefined;
     output: string;
     updatePackageJson?: boolean;
 };
 /** Generate column refs and table names from analyzed tables */
 export declare function generateColumns(ctx: GeneratorContext, config: ColumnsConfig): void;
-export {};
 
 // codegen/generators/constraints.d.ts
 import type { TableMeta } from "../analyzer-types.ts";
 import { type Constraint, type ConstraintMap } from "./constraints-code.ts";
 import type { GeneratorContext } from "./context-types.ts";
 type Dialect = "postgres" | "sqlite";
-type ConstraintsConfig = {
+export type ConstraintsConfig = {
     output: string;
     /** comb.config.ts's `partitions`: each partitioned table's partitions, keyed as the map keys it */
     partitions?: Readonly<Record<string, readonly string[]>> | undefined;
@@ -52,7 +66,7 @@ export {};
 // codegen/generators/fts.d.ts
 import { type FtsTableConfig } from "./fts-sql.ts";
 import type { GeneratorContext } from "./context-types.ts";
-type FtsGeneratorConfig = {
+export type FtsGeneratorConfig = {
     /** file name stem; defaults to `db.<dbName>` */
     filePrefix?: string | undefined;
     fts: Record<string, FtsTableConfig>;
@@ -208,11 +222,10 @@ export { buildManifest, generateManifest, type Manifest, type ManifestColumn, ty
 
 // codegen/generators/diagrams.d.ts
 import type { GeneratorContext } from "./context-types.ts";
-type DiagramsConfig = {
+export type DiagramsConfig = {
     output: string;
 };
 export declare function generateDiagrams(ctx: GeneratorContext, config: DiagramsConfig): void;
-export {};
 
 // codegen/generators/dtos/index.d.ts
 export { generateDtos } from "./generate.ts";
@@ -220,7 +233,7 @@ export type { DtosConfig } from "./dto-types.ts";
 
 // codegen/generators/entities.d.ts
 import type { GeneratorContext } from "./context-types.ts";
-type EntitiesConfig = {
+export type EntitiesConfig = {
     importFrom?: string | undefined;
     output: string;
     updatePackageJson?: boolean;
@@ -232,17 +245,16 @@ export { generateEntities };
 // codegen/generators/enum-checks.d.ts
 import type { TableMeta } from "../analyzer-types.ts";
 import type { GeneratorContext } from "./context-types.ts";
-type EnumChecksConfig = {
+export type EnumChecksConfig = {
     output: string;
 };
 /** The name of the CHECK comb writes for an enum column; the constraint map keys its entry by it */
 export declare const enumCheckName: (table: Pick<TableMeta, "sqlName">, fieldName: string) => string;
 export declare function generateEnumChecks(ctx: GeneratorContext, config: EnumChecksConfig): void;
-export {};
 
 // codegen/generators/field-names.d.ts
 import type { GeneratorContext } from "./context-types.ts";
-type FieldNamesConfig = {
+export type FieldNamesConfig = {
     output: string;
     updatePackageJson?: boolean;
 };
@@ -252,10 +264,10 @@ export { generateFieldNames };
 
 // codegen/generators/orm.d.ts
 import type { GeneratorContext } from "./context-types.ts";
-type OrmDialect = "sqlite" | "postgres";
-type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso";
-type PostgresDriver = "neon";
-type OrmConfig = {
+export type OrmDialect = "sqlite" | "postgres";
+export type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso";
+export type PostgresDriver = "neon";
+export type OrmConfig = {
     dialect: OrmDialect;
     driver: SqliteDriver | PostgresDriver;
     filePrefix?: string | undefined;
@@ -264,38 +276,76 @@ type OrmConfig = {
 };
 /** Generate ORM client file based on config */
 export declare function generateOrm(ctx: GeneratorContext, config: OrmConfig): void;
-export {};
 
 // codegen/generators/relations.d.ts
 import type { GeneratorContext } from "./context-types.ts";
-type RelationsConfig = {
+export type RelationsConfig = {
     output: string;
 };
 /** Build the relations graph and generate code from analyzed tables */
 export declare function generateRelations(ctx: GeneratorContext, config: RelationsConfig): void;
-export {};
 
 // codegen/generators/rows.d.ts
 import type { GeneratorContext } from "./context-types.ts";
-type RowsConfig = {
+export type RowsConfig = {
     output: string;
 };
 /**
  * Generate row types from analyzed tables
  */
 export declare function generateRows(ctx: GeneratorContext, config: RowsConfig): void;
-export {};
 
 // codegen/generators/translations.d.ts
 import type { GeneratorContext } from "./context-types.ts";
-type TranslationsConfig = {
+export type TranslationsConfig = {
     baseDir: string;
     /** file name stem, the one the constraints file uses */
     filePrefix: string;
 };
 /** Generate the error keys and their en-US messages from the analyzed tables */
 export declare function generateTranslations(ctx: GeneratorContext, config: TranslationsConfig): void;
-export {};
+
+// codegen/generators/dtos/dto-types.d.ts
+/** Types the DTO generator's modules share. */
+import type { CombEntityMetaInput } from "../../../meta.ts";
+export type SchemaType = "read" | "readPartial" | "create" | "update";
+/** A schema the shared file defines that a field's code may name, which the entity file then imports */
+export type SharedName = "cidrSchema" | "jsonValueSchema" | "timestampSchema";
+export type FieldInfo = {
+    key: string;
+    type: SchemaType;
+    /** The shared schemas the field's code names, as its builder says (C4 of r20) */
+    uses: readonly SharedName[];
+    zodType: string;
+};
+export type TableInfo = {
+    /** Entity facts stamped on the read schema; null when there is no single identity */
+    combMeta: CombEntityMetaInput | null;
+    fields: FieldInfo[];
+    hasTimestamps: {
+        createdAt: boolean;
+        deletedAt: boolean;
+        updatedAt: boolean;
+    };
+    name: string;
+    needsSharedMeta: boolean;
+    timestampStyle: "camelCase" | "mixed" | "snake_case";
+};
+export type DtosConfig = {
+    filePrefix?: string | undefined;
+    /** Package the generated meta stamp imports from. Matches EntitiesConfig. */
+    importFrom?: string | undefined;
+    output: string;
+    /** where the relations generator writes, which the `./relations` export points at */
+    relationsOutput?: string | undefined;
+    updatePackageJson?: boolean;
+};
+/** Emitted code for a shared schema constant */
+export type SharedSchema = {
+    code: string;
+    count: number;
+    name: string;
+};
 
 // codegen/generators/context-types.d.ts
 /** What every generator works from: the analysis, where it runs, and where its progress lines go. */
@@ -323,6 +373,37 @@ export type GeneratorContext = {
     /** a line the person running codegen should act on */
     warn: (line: string) => void;
 };
+
+// codegen/utils/paths.d.ts
+/**
+ * Extract database name from tables file path.
+ * Handles both legacy (db.core.tables.ts) and saas ({name}.db.{dbName}.tables.gen.ts) patterns.
+ */
+export declare function extractDbName(filePath: string): string;
+/**
+ * How the consumer's TypeScript takes a relative import of a TypeScript file (F53): under `node16`
+ * and `nodenext` with its extension, `.js` for `.ts` (the `.ts` itself under
+ * `allowImportingTsExtensions` or `rewriteRelativeImportExtensions`); under `bundler` or the older
+ * resolutions without one, as comb always wrote it
+ */
+export type ImportStyle = "bare" | "js" | "ts";
+/** The style the consumer's compiler options take */
+export declare function importStyleOf(options: {
+    allowImportingTsExtensions?: boolean | undefined;
+    moduleResolution?: number | undefined;
+    rewriteRelativeImportExtensions?: boolean | undefined;
+}): ImportStyle;
+/** `specifier`, which names a TypeScript file of `extension` by its path without it, in `style` (none given: bare) */
+export declare function styled(specifier: string, style: ImportStyle | undefined, extension?: string): string;
+/** The specifier a file in `fromDir` imports `target` by, relative, `./` or `../` first, in `style`; a JavaScript file as it is */
+export declare function specifierFor(fromDir: string, target: string, style: ImportStyle | undefined): string;
+/** The module specifier `fromFile` imports `target` by, in `style` */
+export declare function importPathFrom(fromFile: string, target: string, style?: ImportStyle | undefined): string;
+/**
+ * Get the import path for the tables file (without extension), relative to same directory.
+ * e.g. test.db.core.tables.gen.ts -> ./test.db.core.tables.gen
+ */
+export declare function getTablesImportPath(tablesPath: string): string;
 
 // codegen/analyzer-types.d.ts
 import type { CombColumnKind } from "../meta/column.ts";
@@ -550,78 +631,38 @@ import type { DtosConfig } from "./dto-types.ts";
  */
 export declare function generateDtos(ctx: GeneratorContext, config: DtosConfig): void;
 
-// codegen/generators/dtos/dto-types.d.ts
-/** Types the DTO generator's modules share. */
-import type { CombEntityMetaInput } from "../../../meta.ts";
-export type SchemaType = "read" | "readPartial" | "create" | "update";
-/** A schema the shared file defines that a field's code may name, which the entity file then imports */
-export type SharedName = "cidrSchema" | "jsonValueSchema" | "timestampSchema";
-export type FieldInfo = {
-    key: string;
-    type: SchemaType;
-    /** The shared schemas the field's code names, as its builder says (C4 of r20) */
-    uses: readonly SharedName[];
-    zodType: string;
-};
-export type TableInfo = {
-    /** Entity facts stamped on the read schema; null when there is no single identity */
-    combMeta: CombEntityMetaInput | null;
-    fields: FieldInfo[];
-    hasTimestamps: {
-        createdAt: boolean;
-        deletedAt: boolean;
-        updatedAt: boolean;
-    };
-    name: string;
-    needsSharedMeta: boolean;
-    timestampStyle: "camelCase" | "mixed" | "snake_case";
-};
-export type DtosConfig = {
-    filePrefix?: string | undefined;
-    /** Package the generated meta stamp imports from. Matches EntitiesConfig. */
-    importFrom?: string | undefined;
-    output: string;
-    /** where the relations generator writes, which the `./relations` export points at */
-    relationsOutput?: string | undefined;
-    updatePackageJson?: boolean;
-};
-/** Emitted code for a shared schema constant */
-export type SharedSchema = {
-    code: string;
-    count: number;
-    name: string;
-};
-
-// codegen/utils/paths.d.ts
+// meta.d.ts
 /**
- * Extract database name from tables file path.
- * Handles both legacy (db.core.tables.ts) and saas ({name}.db.{dbName}.tables.gen.ts) patterns.
+ * The comb meta contract — facts about tables and queries, stamped onto Zod
+ * schemas so they survive the trip to JSON Schema and into an OpenAPI document.
+ *
+ * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
+ * names is the consumer's job. See docs/meta-contract.md.
  */
-export declare function extractDbName(filePath: string): string;
+import { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta } from "./meta/contract.ts";
+import { readCombEntityMeta, readCombMeta, readCombQueryMeta } from "./meta/read.ts";
 /**
- * How the consumer's TypeScript takes a relative import of a TypeScript file (F53): under `node16`
- * and `nodenext` with its extension, `.js` for `.ts` (the `.ts` itself under
- * `allowImportingTsExtensions` or `rewriteRelativeImportExtensions`); under `bundler` or the older
- * resolutions without one, as comb always wrote it
+ * Build the stamp for a Zod `.meta()` call.
+ *
+ * Stamp the schema you RETURN, not the one you build from — a transform/pipe
+ * does not forward the base's metadata to the output view. See docs §3.1.
  */
-export type ImportStyle = "bare" | "js" | "ts";
-/** The style the consumer's compiler options take */
-export declare function importStyleOf(options: {
-    allowImportingTsExtensions?: boolean | undefined;
-    moduleResolution?: number | undefined;
-    rewriteRelativeImportExtensions?: boolean | undefined;
-}): ImportStyle;
-/** `specifier`, which names a TypeScript file of `extension` by its path without it, in `style` (none given: bare) */
-export declare function styled(specifier: string, style: ImportStyle | undefined, extension?: string): string;
-/** The specifier a file in `fromDir` imports `target` by, relative, `./` or `../` first, in `style`; a JavaScript file as it is */
-export declare function specifierFor(fromDir: string, target: string, style: ImportStyle | undefined): string;
-/** The module specifier `fromFile` imports `target` by, in `style` */
-export declare function importPathFrom(fromFile: string, target: string, style?: ImportStyle | undefined): string;
+declare function combMeta(meta: CombEntityMetaInput): CombMetaStamp<CombEntityMeta>;
+declare function combMeta(meta: CombQueryMetaInput): CombMetaStamp<CombQueryMeta>;
+/** Minimal shape of a Zod schema, so this module needs no zod import. */
+export type MetaCarrier<T> = {
+    meta: (m: Record<string, unknown>) => T;
+};
 /**
- * Get the import path for the tables file (without extension), relative to same directory.
- * e.g. test.db.core.tables.gen.ts -> ./test.db.core.tables.gen
+ * Re-stamp `to` with the facts `from` carries.
+ *
+ * `.extend()` drops registry metadata silently (docs §5), so a consumer who
+ * extends a generated read schema loses the entity facts with no diagnostic.
+ * This is the recovery path.
  */
-export declare function getTablesImportPath(tablesPath: string): string;
+declare function carryCombMeta<T>(from: unknown, to: MetaCarrier<T>): T | null;
+export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, readCombEntityMeta, readCombMeta, readCombQueryMeta, };
+export type { ReadOptions } from "./meta/read.ts";
 
 // meta/column.d.ts
 /**
@@ -655,38 +696,6 @@ declare function enumMeta(values: readonly string[], options?: {
     [K in keyof CombColumnMeta]: CombColumnMeta[K] | undefined;
 };
 export { combColumnMeta, enumMeta, withCombColumn, type CombColumnKind, type CombColumnMeta };
-
-// meta.d.ts
-/**
- * The comb meta contract — facts about tables and queries, stamped onto Zod
- * schemas so they survive the trip to JSON Schema and into an OpenAPI document.
- *
- * comb publishes facts in comb's vocabulary. Mapping them to a consumer's tag
- * names is the consumer's job. See docs/meta-contract.md.
- */
-import { COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, type CombEntityMeta, type CombEntityMetaInput, type CombFilterField, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta } from "./meta/contract.ts";
-import { readCombEntityMeta, readCombMeta, readCombQueryMeta } from "./meta/read.ts";
-/**
- * Build the stamp for a Zod `.meta()` call.
- *
- * Stamp the schema you RETURN, not the one you build from — a transform/pipe
- * does not forward the base's metadata to the output view. See docs §3.1.
- */
-declare function combMeta(meta: CombEntityMetaInput): CombMetaStamp<CombEntityMeta>;
-declare function combMeta(meta: CombQueryMetaInput): CombMetaStamp<CombQueryMeta>;
-/** Minimal shape of a Zod schema, so this module needs no zod import. */
-type MetaCarrier<T> = {
-    meta: (m: Record<string, unknown>) => T;
-};
-/**
- * Re-stamp `to` with the facts `from` carries.
- *
- * `.extend()` drops registry metadata silently (docs §5), so a consumer who
- * extends a generated read schema loses the entity facts with no diagnostic.
- * This is the recovery path.
- */
-declare function carryCombMeta<T>(from: unknown, to: MetaCarrier<T>): T | null;
-export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, type CombStatesMeta, type UniqueIndexMeta, readCombEntityMeta, readCombMeta, readCombQueryMeta, };
 
 // meta/contract.d.ts
 /**

@@ -19,7 +19,7 @@ import { assertLimitWithin, assertPageWithin, assertSchemaParsed } from "./trust
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
 
 /** A table as drizzle's relational callbacks hand it over, holding its columns as own properties */
-type RelationalTable = object
+export type RelationalTable = object
 
 type DrizzleListOptions = {
 	limit: number

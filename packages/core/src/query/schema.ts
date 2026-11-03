@@ -4,7 +4,7 @@
  */
 import * as z from "zod"
 
-type PaginationResponseSchema = z.ZodObject<
+export type PaginationResponseSchema = z.ZodObject<
 	{
 		count: z.ZodNullable<z.ZodNumber>
 		hasMore: z.ZodBoolean

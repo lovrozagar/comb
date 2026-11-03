@@ -9,11 +9,11 @@ import { importPathFrom } from "../utils/paths.ts"
 import type { GeneratorContext } from "./context-types.ts"
 import { dbIdentifiers } from "../utils/case.ts"
 
-type OrmDialect = "sqlite" | "postgres"
-type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso"
-type PostgresDriver = "neon"
+export type OrmDialect = "sqlite" | "postgres"
+export type SqliteDriver = "bun-sqlite" | "d1" | "libsql" | "turso"
+export type PostgresDriver = "neon"
 
-type OrmConfig = {
+export type OrmConfig = {
 	dialect: OrmDialect
 	driver: SqliteDriver | PostgresDriver
 	filePrefix?: string | undefined
