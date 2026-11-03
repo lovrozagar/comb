@@ -20,16 +20,19 @@ function terminal(answer: string, isTTY: boolean) {
 }
 
 describe("processIo", () => {
-	it("writes to the console and works in the process's directory", () => {
+	/* KC11 of r22b: Bun's console.error colors a line red on a terminal, so every --json progress line read as an error */
+	it("writes out to the console and err as plain text to stderr, and works in the process's directory", () => {
 		const log = vi.spyOn(console, "log").mockImplementation(() => undefined)
 		const error = vi.spyOn(console, "error").mockImplementation(() => undefined)
+		const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true)
 		try {
 			const io = processIo()
 			io.out("to out")
 			io.err("to err")
 			expect(io.cwd).toBe(process.cwd())
 			expect(log).toHaveBeenCalledWith("to out")
-			expect(error).toHaveBeenCalledWith("to err")
+			expect(stderr.mock.calls).toEqual([["to err\n"]])
+			expect(error).not.toHaveBeenCalled()
 		} finally {
 			vi.restoreAllMocks()
 		}

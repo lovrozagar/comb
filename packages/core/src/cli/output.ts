@@ -90,7 +90,8 @@ export function processIo({ input = process.stdin, output = process.stderr }: Pa
 	return {
 		confirm: input.isTTY === true ? (question) => ask(terminal, question) : undefined,
 		cwd: process.cwd(),
-		err: (line) => console.error(line),
+		/* plain text on every runtime: Bun's console.error colors a line red on a terminal (KC11 of r22b) */
+		err: (line) => void process.stderr.write(`${line}\n`),
 		out: (line) => console.log(line),
 	}
 }
