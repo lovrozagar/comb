@@ -221,3 +221,21 @@ describe("readSqliteError: a bound parameter never decides the classification (C
 		).toMatchObject({ code: "SQLITE_CONSTRAINT_UNIQUE" })
 	})
 })
+
+/* QE1 of r22: sqld's Hrana error, as remote libsql and Turso raise it, wrapped by the client's */
+const hrana = (message: string) => {
+	const inner = Object.assign(new Error(`SQLite error: ${message}`), { code: "SQLITE_CONSTRAINT" })
+	return Object.assign(new Error(`SQLITE_CONSTRAINT: SQLite error: ${message}`, { cause: inner }), {
+		code: "SQLITE_CONSTRAINT",
+	})
+}
+
+describe("readSqliteError on sqld: a bare code and SQLite's words behind `SQLite error: `", () => {
+	it("refines the code from SQLite's words and keeps them without the prefix", () => {
+		expect(readSqliteError(hrana("UNIQUE constraint failed: t.e"))).toMatchObject({
+			code: "SQLITE_CONSTRAINT_UNIQUE",
+			message: "UNIQUE constraint failed: t.e",
+		})
+		expect(readSqliteError("SQLite error: FOREIGN KEY constraint failed")?.code).toBe("SQLITE_CONSTRAINT_FOREIGNKEY")
+	})
+})

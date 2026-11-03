@@ -24,8 +24,12 @@ const D1_MESSAGE = /^(?:D1_ERROR: )?([\s\S]*): (SQLITE_[A-Z_]+)(?: \(extended: (
  */
 const D1_EXEC = /^(?:D1_EXEC_ERROR: )?Error in line \d+: /
 
-/* libsql: `SQLITE_CONSTRAINT: <message>`, the prefix twice from batch() (Q8 of r18) */
-const LIBSQL_PREFIX = /^(?:SQLITE_[A-Z_]+: )+/
+/*
+ * libsql: `SQLITE_CONSTRAINT: <message>`, the prefix twice from batch() (Q8 of r18). sqld, remote libsql
+ * and Turso prefix SQLite's own words with `SQLite error: `, which the Hrana error under the client's
+ * wrapper carries with no code prefix at all (QE1 of r22)
+ */
+const LIBSQL_PREFIX = /^(?:SQLITE_[A-Z_]+: )*(?:SQLite error: )?/
 
 /*
  * SQLite's extended constraint codes by number, which libsql names `UNKNOWN_SQLITE_ERROR_<n>` when
