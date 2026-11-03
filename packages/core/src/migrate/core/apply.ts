@@ -109,6 +109,13 @@ export async function checkMigrationHash(conn: Connection, hashes: string | read
 
 const RECORD = "INSERT INTO __drizzle_migrations (hash, created_at, name) VALUES (?, ?, ?)"
 
+/**
+ * Set on every connection comb opens to a local file (SL4 of r22): a write lock the app serving the
+ * file holds, or a second runner, is waited for up to 5 s, as SQLite's own busy handler waits, where
+ * SQLite fails at once. It retries no statement that failed, so a `SQLITE_` code is still never retried
+ */
+export const BUSY_TIMEOUT = "PRAGMA busy_timeout = 5000"
+
 /** Record `hash` as applied, under the file's `name` when given (an unnamed row is named on the next apply) */
 export async function recordMigrationHash(conn: Connection, hash: string, name?: string): Promise<void> {
 	await conn.execute(RECORD, [hash, Date.now(), name ?? null])
@@ -134,19 +141,22 @@ const recorded = async (conn: Pick<Connection, "execute">, name: string): Promis
 class Unconfirmed extends Error {}
 
 /**
- * `migration`'s statements and its record in one batch, retried while it fails transiently. A
+ * `migration`'s record and its statements in one batch, retried while it fails transiently. A
  * batch can commit and its answer still fail, and its statements need not run twice safely: the
  * record it wrote says it ran, so a retry reads the history first and runs nothing again (S6).
- * When no read of `history` answers after a batch that failed transiently, the failure is an Unconfirmed (S3 of r20)
+ * When no read of `history` answers after a batch that failed transiently, the failure is an Unconfirmed (S3 of r20).
+ * The record goes first, so a batch whose file another run recorded while it waited for the lock
+ * fails on the name at once and runs nothing; the history then says so, and it is that run's
+ * (SL4 of r22). Returns who applied it.
  */
 export async function applyRecorded(
 	conn: Pick<Connection, "batch">,
 	migration: Recorded,
 	{ history, retry }: ApplyOptions,
-): Promise<void> {
+): Promise<"this run" | "another run"> {
 	const statements = [
-		...migration.statements.map((sql) => ({ sql })),
 		{ params: [migration.hash, Date.now(), migration.filename], sql: RECORD },
+		...migration.statements.map((sql) => ({ sql })),
 	]
 	let tried = false
 	let lost: unknown
@@ -162,8 +172,16 @@ export async function applyRecorded(
 				throw error
 			})
 		}, retry)
+		return "this run"
 	} catch (error) {
-		if (lost === undefined) throw error
+		if (lost === undefined) {
+			const elsewhere = await recorded(history, migration.filename).catch(() => {
+				// reason: with the history unread, the batch's own failure is the one to report
+				return false
+			})
+			if (elsewhere) return "another run"
+			throw error
+		}
 		throw new Unconfirmed(
 			`${migration.filename} may have committed: its batch failed with ${chainText(lost)}, and no read of comb's history answered after it; comb migrate status says whether it applied`,
 			{ cause: error },
@@ -189,7 +207,8 @@ export async function applyEach(
 		try {
 			const conn = await open()
 			try {
-				await applyRecorded(conn, migration, { history, retry })
+				if ((await applyRecorded(conn, migration, { history, retry })) === "another run")
+					print(`Skip (applied by another run): ${migration.filename}`)
 			} finally {
 				await conn.close()
 			}

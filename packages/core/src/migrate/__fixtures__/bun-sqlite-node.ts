@@ -17,9 +17,10 @@ export class Database extends DatabaseSync {
 		return Object.assign(stmt, { finalize: () => undefined, toString: () => stmt.sourceSQL })
 	}
 
+	/* bun's transaction is a function that begins deferred, with `immediate` to begin IMMEDIATE */
 	transaction(work: () => void) {
-		return () => {
-			this.exec("BEGIN")
+		const begun = (begin: string) => () => {
+			this.exec(begin)
 			try {
 				work()
 				this.exec("COMMIT")
@@ -28,5 +29,6 @@ export class Database extends DatabaseSync {
 				throw error
 			}
 		}
+		return Object.assign(begun("BEGIN"), { immediate: begun("BEGIN IMMEDIATE") })
 	}
 }

@@ -3,6 +3,7 @@
  * bun:sqlite is imported on connect, so the module loads under Node too.
  */
 import { existsSync } from "node:fs"
+import { BUSY_TIMEOUT } from "../core/apply.ts"
 import type { LocalDb } from "./local-db.ts"
 import { DatabaseMissing } from "./missing.ts"
 import type {
@@ -35,17 +36,17 @@ type BunDatabase = {
 	close(): void
 	prepare(sql: string): { all(...params: SqliteParam[]): unknown[] }
 	run(sql: string, params?: SqliteParam[]): unknown
-	transaction(run: () => void): () => void
+	transaction(run: () => void): { immediate(): void }
 }
 
 function bunSqliteConnection(db: BunDatabase): Connection {
 	return {
 		/* async, so a failing statement rejects the promise instead of throwing past it */
 		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
-			/* one transaction: every statement applies, or none does */
+			/* one transaction: every statement applies, or none does; it takes the write lock as it begins (SL4 of r22) */
 			db.transaction(() => {
 				for (const { params, sql } of statements) db.run(sql, (params ?? []) as SqliteParam[])
-			})()
+			}).immediate()
 		},
 
 		async close(): Promise<void> {
@@ -77,6 +78,7 @@ export function createBunSqliteProvider(config: BunSqliteProviderConfig): Connec
 			const db = readonly ? new Database(config.path, { readonly }) : new Database(config.path)
 			/* SQLite opens with foreign keys off; the proof run, libsql and D1 apply with them on */
 			db.run("PRAGMA foreign_keys = ON")
+			db.run(BUSY_TIMEOUT)
 			return bunSqliteConnection(db)
 		},
 		dialect: "sqlite",

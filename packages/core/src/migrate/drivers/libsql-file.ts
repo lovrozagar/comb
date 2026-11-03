@@ -6,7 +6,7 @@
  * `exec` keeps no statement past its call, and `close` lets go of the file.
  */
 import { createRequire } from "node:module"
-import type { FileConnection } from "../core/apply.ts"
+import { BUSY_TIMEOUT, type FileConnection } from "../core/apply.ts"
 import { optionalPeer } from "../core/optional-peer.ts"
 import { LIBSQL } from "../core/peer-needs.ts"
 import { LIBSQL_CLIENT } from "./libsql-client.ts"
@@ -51,13 +51,15 @@ async function openLibsqlFile(file: string): Promise<FileConnection> {
 	let db: Database
 	try {
 		db = new Database(file)
+		db.exec(BUSY_TIMEOUT)
 	} catch (error) {
 		throw asClient(error)
 	}
 	return {
 		batch: async (statements) => {
 			try {
-				db.exec("BEGIN")
+				/* the write lock taken as the batch begins, so a lock another process holds is waited for (SL4 of r22) */
+				db.exec("BEGIN IMMEDIATE")
 				for (const { params, sql } of statements) db.exec(bound(sql, params))
 				db.exec("COMMIT")
 			} catch (error) {

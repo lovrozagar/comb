@@ -225,6 +225,42 @@ describe("applyEach", () => {
 	})
 })
 
+/** The batch of a file another run recorded first: it fails on the name */
+const duplicate = () => Promise.reject(new Error("UNIQUE constraint failed: __drizzle_migrations.name"))
+
+/* SL4 of r22 (sibling: tests/integration/libsql/busy.test.ts and tests/bun/busy.test.ts, two real processes) */
+describe("applyEach on a file another run applied while this one waited for the lock", () => {
+	it("records the file before its statements, so such a batch fails on the name and runs nothing, then skips it", async () => {
+		const lines: string[] = []
+		const conn = mockConnection({ batch: vi.fn(duplicate) })
+		const history = mockConnection({ execute: () => Promise.resolve({ columns: ["1"], rows: [[1]] }) })
+		const files = [file("1_a.sql", "CREATE TABLE a (x)"), file("2_b.sql", "SELECT 2")]
+		await applyEach(kept(conn), files, { history, print: (line) => lines.push(line) })
+		expect(vi.mocked(conn.batch).mock.calls[0]?.[0].map(({ sql }) => sql)).toEqual([
+			"INSERT INTO __drizzle_migrations (hash, created_at, name) VALUES (?, ?, ?)",
+			"CREATE TABLE a (x)",
+		])
+		expect(lines).toEqual([
+			"Apply: 1_a.sql",
+			"Skip (applied by another run): 1_a.sql",
+			"Apply: 2_b.sql",
+			"Skip (applied by another run): 2_b.sql",
+		])
+	})
+
+	it("reports the batch's own failure when the history cannot be read after it", async () => {
+		const conn = mockConnection({ batch: duplicate })
+		const history = mockConnection({ execute: () => Promise.reject(new Error("SQLITE_BUSY: database is locked")) })
+		const failure = (await applyEach(kept(conn), [file("1_a.sql", "SELECT 1")], { history, print: () => {} }).catch(
+			(error: unknown) => error,
+		)) as Refused
+		expect([failure.message, failure.pending]).toEqual([
+			"UNIQUE constraint failed: __drizzle_migrations.name",
+			["1_a.sql"],
+		])
+	})
+})
+
 /* S1 of r21: a pragma 0001 approved for itself never reaches 0002, which is refused together as apart */
 describe("applyEach on a libsql file: a file's pragmas end with the file (S1 of r21; siblings in tests/integration/libsql/migrate-pragma-scope.test.ts)", () => {
 	it("refuses 0002's CHECK-breaking insert after the 0001 that set ignore_check_constraints", async () => {

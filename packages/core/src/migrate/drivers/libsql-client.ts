@@ -9,7 +9,8 @@ import { LIBSQL } from "../core/peer-needs.ts"
 type InValue = ArrayBuffer | bigint | boolean | Date | null | number | string | Uint8Array
 type Statement = { args: InValue[]; sql: string }
 type Client = {
-	batch(statements: Statement[]): Promise<unknown>
+	/** `"write"` begins the batch IMMEDIATE, where the default begins it DEFERRED */
+	batch(statements: Statement[], mode: "write"): Promise<unknown>
 	close(): void
 	execute(statement: Statement): Promise<{ columns: string[]; rows: Array<Record<string, unknown>> }>
 }

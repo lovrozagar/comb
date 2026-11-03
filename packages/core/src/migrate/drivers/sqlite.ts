@@ -13,6 +13,7 @@ import type {
 	ResolvedDatabaseConfig,
 	TursoProviderConfig,
 } from "../types.ts"
+import { BUSY_TIMEOUT } from "../core/apply.ts"
 import { HISTORY_TABLES, notEngineTables } from "../core/engine-tables.ts"
 import { type Client, type InValue, libsql } from "./libsql-client.ts"
 import { DatabaseMissing } from "./missing.ts"
@@ -131,12 +132,9 @@ export async function getTursoCredentials(
 function createLibsqlConnection(client: Client): Connection {
 	return {
 		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
-			await client.batch(
-				statements.map((stmt) => ({
-					args: (stmt.params ?? []) as InValue[],
-					sql: stmt.sql,
-				})),
-			)
+			const batch = statements.map(({ params, sql }) => ({ args: (params ?? []) as InValue[], sql }))
+			/* "write" begins it IMMEDIATE: the write lock is taken, or waited for, before any statement (SL4 of r22) */
+			await client.batch(batch, "write")
 		},
 
 		close(): Promise<void> {
@@ -214,12 +212,13 @@ export function createLibsqlProvider(config: LibsqlProviderConfig): ConnectionPr
 			if (dbConfig?.readonly === true && file !== undefined && file !== ":memory:" && !existsSync(file))
 				throw new DatabaseMissing(`${file} does not exist; check and status open a database read-only, and create none`)
 			const { createClient } = await libsql()
-			/* `Config` from @libsql/client does not admit an explicit undefined, so omit
-			   the key rather than pass one. */
+			/* `Config` from @libsql/client admits no explicit undefined, so the key is left out */
 			const client = createClient({
 				...(config.authToken === undefined ? {} : { authToken: config.authToken }),
 				url: config.url,
 			})
+			/* a file waits for a lock another process holds (SL4 of r22); a server refuses every pragma (S1 of r22) */
+			if (file !== undefined) await client.execute({ args: [], sql: BUSY_TIMEOUT })
 			return createLibsqlConnection(client)
 		},
 		dialect: "sqlite",
