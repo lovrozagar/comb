@@ -228,7 +228,7 @@ const boundForKeys = (columns: readonly SQLWrapper[], values: readonly unknown[]
 function assertCursorFits(
 	columns: readonly SQLWrapper[],
 	values: readonly unknown[],
-	at: { asRead?: (index: number) => boolean; table?: object | undefined } = {},
+	at: { asRead?: ((index: number) => boolean) | undefined; table?: object | undefined } = {},
 ): void {
 	const { asRead = () => false, table } = at
 	if (columns.every((column, index) => fits(column, values[index], { asRead: asRead(index), table }))) return
