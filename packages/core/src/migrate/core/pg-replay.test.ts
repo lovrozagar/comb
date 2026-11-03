@@ -21,7 +21,19 @@ const COUNTED = "SELECT current_setting('track_counts') AS on"
 const WRITES = expect.stringMatching(/^SELECT s\.relname, s\.n_tup_ins/)
 
 /** What a replayed transaction of `statements` sends: its counts read at BEGIN and again before COMMIT */
-const inTransaction = (...statements: unknown[]) => ["BEGIN", WRITES, ...statements, COUNTED, WRITES, "COMMIT"]
+/* the server's shared catalogs read as committed, around every file and bare statement (P1 and P2 of r22) */
+const SNAPSHOT = "EXECUTE comb_snapshot"
+/* the read prepared on the connection that makes it, once */
+const PREPARE = expect.stringMatching(/^PREPARE comb_snapshot AS SELECT 'membership' AS noun, .* UNION ALL /)
+const inTransaction = (...statements: unknown[]) => [
+	"BEGIN",
+	WRITES,
+	...statements,
+	COUNTED,
+	WRITES,
+	SNAPSHOT,
+	"COMMIT",
+]
 
 /** A postgres.js stand-in on every connection: each query it was sent, the replay's database as <db>, answering `rows` to the catalog read */
 function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) => Error | undefined) {
@@ -78,8 +90,11 @@ describe("replayCatalog", () => {
 			...MADE,
 			'CREATE SCHEMA IF NOT EXISTS "app"',
 			'SET search_path TO "app"',
+			PREPARE,
+			SNAPSHOT,
 			...inTransaction("CREATE TABLE t (a int)"),
 			"CREATE INDEX CONCURRENTLY i ON t (a)",
+			SNAPSHOT,
 			CATALOG,
 			ENDED,
 			DROPPED,

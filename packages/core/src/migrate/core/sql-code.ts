@@ -126,6 +126,36 @@ function codeOf(stmt: string, dialect: Dialect): string {
 	return dialect === "sqlite" && /^PRAGMA\b/i.test(code) ? joined(stmt, dialect, true) : code
 }
 
+/* a bare word in Postgres code, which may be a name */
+const WORD = /[A-Za-z_\u0080-￿][\w$\u0080-￿]*/g
+/* the bytes of a name Postgres keeps (NAMEDATALEN − 1) */
+const NAME_BYTES = 63
+
+/** `name` as Postgres stores it: cut at a character to the bytes it keeps */
+function stored(name: string): string {
+	const chars = [...name]
+	while (Buffer.byteLength(chars.join("")) > NAME_BYTES) chars.pop()
+	return chars.join("")
+}
+
+/**
+ * Every name Postgres text can spell (P2 of r22): an unquoted word folded, a quoted one exact, and a
+ * string, single or dollar-quoted, as its exact contents and as the SQL it may be, which a DO body,
+ * dblink_exec or format() runs; never a comment's words
+ */
+function namesIn(text: string, into: Set<string> = new Set()): Set<string> {
+	for (const { kind, text: part } of segments(text, "postgres")) {
+		if (kind === "code") for (const [word] of part.matchAll(WORD)) into.add(stored(asciiFold(word)))
+		else if (kind === "identifier") into.add(stored(unquotePart(part)))
+		else if (kind !== "comment") {
+			const inner = part.startsWith("$") ? bodyText(part) : part.slice(1, -1).replaceAll("''", "'")
+			into.add(stored(inner))
+			namesIn(inner, into)
+		}
+	}
+	return into
+}
+
 /** `code` split at the commas outside parentheses, each part trimmed */
 function splitTopLevel(code: string): string[] {
 	const parts: string[] = []
@@ -162,6 +192,7 @@ export {
 	IDENT,
 	lastPart,
 	nameKey,
+	namesIn,
 	type Naming,
 	namingOf,
 	type Pragma,

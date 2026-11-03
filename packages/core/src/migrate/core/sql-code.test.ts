@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { codeOf, lastPart, splitTopLevel, topLevel, unquote } from "./sql-code.ts"
+import { codeOf, lastPart, namesIn, splitTopLevel, topLevel, unquote } from "./sql-code.ts"
 
 describe("unquote and lastPart", () => {
 	it.each([
@@ -37,5 +37,31 @@ describe("splitTopLevel and topLevel", () => {
 
 	it("blanks every parenthesized group", () => {
 		expect(topLevel("DELETE FROM t USING (SELECT 1 WHERE (x)) s")).toBe("DELETE FROM t USING                      s")
+	})
+})
+
+/* P2 of r22: the names a file spells, which a change past its database must name to be the file's */
+describe("namesIn", () => {
+	it("folds an unquoted name as Postgres does and keeps a quoted one exact", () => {
+		expect(namesIn("CREATE ROLE Svc")).toContain("svc")
+		expect(namesIn("CREATE ROLE Svc")).not.toContain("Svc")
+		expect(namesIn('CREATE ROLE "Svc"')).toContain("Svc")
+		expect(namesIn('CREATE ROLE "Svc"')).not.toContain("svc")
+	})
+
+	it("reads a string as its exact contents and as the SQL it may be, through every quote", () => {
+		const dblink = namesIn("SELECT dblink_exec('dbname=x', 'CREATE ROLE Svc')")
+		expect(dblink).toContain("svc")
+		expect(dblink).toContain("CREATE ROLE Svc")
+		expect(namesIn("DO $$ BEGIN EXECUTE format('CREATE ROLE %I', 'x'); END $$")).toContain("x")
+		expect(namesIn('SELECT f($b$CREATE DATABASE "Big"$b$)')).toContain("Big")
+		expect(namesIn("SELECT dblink_exec('', 'CREATE ROLE ''Odd''')")).toContain("Odd")
+	})
+
+	it("cuts a name to the 63 bytes Postgres keeps, at a character, and reads no comment", () => {
+		expect(namesIn(`CREATE ROLE ${"a".repeat(70)}`)).toContain("a".repeat(63))
+		expect(namesIn(`CREATE ROLE "${"é".repeat(40)}"`)).toContain("é".repeat(31))
+		expect(namesIn("SELECT 1 -- ghost\n/* spook */")).not.toContain("ghost")
+		expect(namesIn("SELECT 1 /* spook */")).not.toContain("spook")
 	})
 })

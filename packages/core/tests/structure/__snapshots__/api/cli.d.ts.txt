@@ -325,11 +325,6 @@ declare function sweep(admin: Sql, now: number): Promise<void>;
 declare function sweepDev(target: PgTarget, load?: () => Promise<Connect>): Promise<void>;
 /** A new replay database on `admin`'s server, named for its `owner`; a role without CREATEDB is `refused` */
 declare function makeDatabase(admin: Sql, owner: string, refused: () => Error): Promise<string>;
-/**
- * Whether the table or index a statement names, where outsideOnly asks, is partitioned in the
- * replay's database as the history left it so far (P9 of r21); a statement that names none asks nothing
- */
-declare function partitionedOn(sql: Sql, type: string, node: Record<string, unknown>): Promise<boolean>;
 /** The extensions the history `texts` create, which the replay leaves them to make */
 declare const extensionsOf: (texts: readonly string[]) => Set<string>;
 /**
@@ -340,7 +335,7 @@ declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
     makes: ReadonlySet<string>;
     refused: (name: string, error: unknown) => Error;
 }): Promise<void>;
-export { codeOf, copyExtensions, dropRole, extensionsOf, literal, makeDatabase, ownerOf, partitionedOn, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
+export { codeOf, copyExtensions, dropRole, extensionsOf, literal, makeDatabase, ownerOf, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
 
 // migrate/core/pg-live-catalog.d.ts
 /**

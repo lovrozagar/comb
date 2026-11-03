@@ -253,3 +253,22 @@ describe("a Postgres baseline of a history that changes the server from inside a
 		)
 	})
 })
+
+/* P1 of r22: the replay sent a txmode none file's statements each in BEGIN/COMMIT, which a batched backfill's COMMIT fails */
+describe("a Postgres baseline of a txmode none file that commits per batch (P1 of r22)", () => {
+	const HEAD =
+		"CREATE TABLE t (id int PRIMARY KEY, w int);\nINSERT INTO t (id) SELECT g FROM generate_series(1, 2500) g;\nCREATE PROCEDURE backfill() LANGUAGE plpgsql AS $$ BEGIN LOOP UPDATE t SET w = 1 WHERE id IN (SELECT id FROM t WHERE w IS NULL LIMIT 1000); EXIT WHEN NOT FOUND; COMMIT; END LOOP; END $$;\n"
+	it.each([
+		[
+			"a DO block",
+			"DO $$ BEGIN LOOP UPDATE t SET w = 2 WHERE id IN (SELECT id FROM t WHERE w IS DISTINCT FROM 2 LIMIT 1000); EXIT WHEN NOT FOUND; COMMIT; END LOOP; END $$;\n",
+		],
+		["a CALL", "CALL backfill();\n"],
+	])(
+		"baselines the database %s built, as apply ran it",
+		async (_, body) => {
+			expect(await built([HEAD, `-- atlas:txmode none\n\n${body}`])).toBeUndefined()
+		},
+		60_000,
+	)
+})

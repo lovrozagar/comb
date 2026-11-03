@@ -11,11 +11,13 @@
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { codeOf, literal, type Sql, TAG } from "./pg-replay-database.ts"
 import { addWrites, type Rows, sharedWrites, subjectRows, type Writes, writesSince } from "./pg-server-writes.ts"
+import type { Snapshot } from "./pg-server-snapshot.ts"
 
 /**
  * One replay's state: its connection, the server as committed (`admin`), its database, the backend
- * that owns it and the roles it made; and the open transaction's own writes, comb's CREATE ROLEs',
- * with the rows they left
+ * that owns it and the roles it made; the open transaction's own writes, comb's CREATE ROLEs', with
+ * the rows they left; the shared catalogs as last read committed (`seen`), and the roles and
+ * databases a refused window added (`strays`), which the cleanup drops
  */
 type Run = {
 	admin: Sql
@@ -23,7 +25,9 @@ type Run = {
 	database: string
 	ours: { rows: Rows; writes: Writes }
 	owner: string
+	seen: Snapshot
 	sql: Sql
+	strays: { databases: string[]; roles: string[] }
 }
 
 /** `act` run, its writes to the shared catalogs counted as comb's own, with the rows of them that are `mine` */

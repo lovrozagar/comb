@@ -43,48 +43,63 @@ function addWrites(into: Writes, more: Writes): void {
 const ROLE_NAME = "(SELECT rolname FROM pg_roles WHERE oid = objoid)"
 const SUBJECT = `CASE classoid WHEN 'pg_authid'::regclass THEN 'role ' || ${ROLE_NAME} WHEN 'pg_database'::regclass THEN 'database ' || (SELECT datname FROM pg_database WHERE oid = objoid) WHEN 'pg_tablespace'::regclass THEN 'tablespace ' || (SELECT spcname FROM pg_tablespace WHERE oid = objoid) ELSE classoid::regclass || ' ' || objoid END`
 
-// lookup-table: how each shared catalog's rows read to a role that is not a superuser, each by a key the change names, and what a row is
-const CATALOGS: Readonly<Record<string, { noun: string; query: string }>> = {
+/* the name of the role or database a shared comment or security label is on, as stored */
+const OBJECT_NAME = `CASE classoid WHEN 'pg_authid'::regclass THEN ${ROLE_NAME} WHEN 'pg_database'::regclass THEN (SELECT datname FROM pg_database WHERE oid = objoid) WHEN 'pg_tablespace'::regclass THEN (SELECT spcname FROM pg_tablespace WHERE oid = objoid) END`
+
+// lookup-table: how each shared catalog's rows read to a role that is not a superuser, each by a key the change names, what a row is, and the names it is about as stored
+const CATALOGS: Readonly<Record<string, { names: string; noun: string; query: string }>> = {
 	pg_auth_members: {
+		names:
+			"ARRAY[(SELECT rolname FROM pg_roles WHERE oid = m.roleid), (SELECT rolname FROM pg_roles WHERE oid = m.member)]",
 		noun: "membership",
 		query:
 			"SELECT roleid::regrole || ' to ' || member::regrole || ' by ' || grantor::regrole AS key, to_jsonb(m) - 'oid' - 'roleid' - 'member' - 'grantor' AS row FROM pg_auth_members m",
 	},
 	pg_authid: {
+		names: "ARRAY[r.rolname]",
 		noun: "role",
 		query: "SELECT rolname AS key, to_jsonb(r) - 'oid' - 'rolpassword' AS row FROM pg_roles r",
 	},
 	pg_database: {
+		names: "ARRAY[d.datname]",
 		noun: "database",
 		query: "SELECT datname AS key, to_jsonb(d) - 'oid' - 'datfrozenxid' - 'datminmxid' AS row FROM pg_database d",
 	},
 	pg_db_role_setting: {
+		names:
+			"ARRAY[(SELECT datname FROM pg_database WHERE oid = setdatabase), (SELECT rolname FROM pg_roles WHERE oid = setrole)]",
 		noun: "setting",
 		query:
 			"SELECT coalesce((SELECT datname FROM pg_database WHERE oid = setdatabase), 'every database') || ' for ' || CASE WHEN setrole = 0 THEN 'every role' ELSE setrole::regrole::text END AS key, to_jsonb(setconfig) AS row FROM pg_db_role_setting",
 	},
 	pg_parameter_acl: {
+		names: "ARRAY[parname]",
 		noun: "privilege on parameter",
 		query: "SELECT parname AS key, to_jsonb(paracl) AS row FROM pg_parameter_acl",
 	},
 	pg_replication_origin: {
+		names: "ARRAY[roname]",
 		noun: "replication origin",
 		query: "SELECT roname AS key, '{}'::jsonb AS row FROM pg_replication_origin",
 	},
 	pg_shdescription: {
+		names: `ARRAY[${OBJECT_NAME}]`,
 		noun: "comment on",
 		query: `SELECT ${SUBJECT} AS key, to_jsonb(description) AS row FROM pg_shdescription`,
 	},
 	pg_shseclabel: {
+		names: `ARRAY[${OBJECT_NAME}]`,
 		noun: "security label on",
 		query: `SELECT ${SUBJECT} || ' by ' || provider AS key, to_jsonb(label) AS row FROM pg_shseclabel`,
 	},
 	pg_subscription: {
+		names: "ARRAY[subname]",
 		noun: "subscription",
 		query:
 			"SELECT subname AS key, jsonb_build_object('owner', subowner::regrole, 'enabled', subenabled, 'database', subdbid) AS row FROM pg_subscription",
 	},
 	pg_tablespace: {
+		names: "ARRAY[t.spcname]",
 		noun: "tablespace",
 		query: "SELECT spcname AS key, to_jsonb(t) - 'oid' AS row FROM pg_tablespace t",
 	},
@@ -168,6 +183,8 @@ async function refuseUncounted(sql: Sql, stops: string): Promise<void> {
 
 export {
 	addWrites,
+	CATALOGS,
+	changedFields,
 	counting,
 	namedChanges,
 	refuseUncounted,

@@ -1,13 +1,9 @@
 /**
- * P1 of r21: in a `-- atlas:txmode none` file the dev replay runs each statement a transaction allows
- * in one of its own, and reads its writes to the shared catalogs before COMMIT (pg-replay.ts). Only a
- * statement Postgres runs outside a transaction block runs bare, its writes unread: each such kind
- * the replay does not leave out as beyond its database is run here, and none writes a shared
- * catalog. A backend keeps a committed or bare statement's counts in its next read until it flushes
- * them (.tmp/grunt/r21-premise/p1-carry.log), so a read before and after each one counts it. A
- * comment on the scratch database, written first, stays counted only while nothing flushed, so a
- * flush between the reads fails the test instead of reading as no write. The counts are the
- * backend's own: another suite's work on the server never reaches them.
+ * The statements Postgres runs only outside a transaction block (P1 of r21): each kind a
+ * `-- atlas:txmode none` file holds is run bare, as Atlas sends it, or left out as beyond its
+ * database. The replay reads the server's committed shared catalogs around each bare statement (P1
+ * and P2 of r22), so each kind it runs is run here between two reads, and none reads as a change
+ * past its database: such a statement in a history file never trips the check.
  */
 import { beforeAll, describe, expect, it } from "vitest"
 import {
@@ -19,7 +15,8 @@ import {
 } from "../../../src/migrate/core/pg-outside-transaction.ts"
 import { loadPostgres } from "../../../src/migrate/core/pg-live-objects.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
-import { sharedWrites } from "../../../src/migrate/core/pg-server-writes.ts"
+import { prepareSnapshot, snapshot, snapshotChanges } from "../../../src/migrate/core/pg-server-snapshot.ts"
+import { namesIn } from "../../../src/migrate/core/sql-code.ts"
 import { pgRead } from "../../../src/migrate/core/pg-split.ts"
 import { postgresOptionsOf } from "../../../src/migrate/core/pg-url.ts"
 import { withScratchDb } from "../support/pg.ts"
@@ -77,28 +74,24 @@ describe("the statements a txmode none replay runs bare (P1 of r21)", () => {
 		for (const sql of LEFT_OUT) expect(beyondDatabase(...parsed(sql)), sql).toBeDefined()
 	})
 
-	it("writes no shared catalog in any it runs bare, as a superuser", async () => {
+	it("changes no shared catalog row in any it runs bare, read as the replay reads them, as a superuser", async () => {
 		await withScratchDb(async (url) => {
-			/* the connection the replay opens, through comb's own load */
+			/* the connections the replay opens, through comb's own load: one in the database, one beside it */
 			const connect = await loadPostgres("the test replays on Postgres")
 			const sql = connect({ ...postgresOptionsOf(url, "devUrl"), max: 1, onnotice: () => undefined })
+			const admin = connect({ ...postgresOptionsOf(url, "devUrl"), max: 1, onnotice: () => undefined })
 			try {
 				await sql.unsafe(SETUP, [])
-				const sentinel = `COMMENT ON DATABASE ${new URL(url).pathname.slice(1)} IS 'counted'`
+				await prepareSnapshot(admin)
 				for (const statement of BARE) {
-					/* the counts are the backend's pending ones, which it flushes when idle, at most once a second unless
-					   forced: flushed now, none lands before the reads below, and the sentinel shows one that did */
-					await sql.unsafe("SELECT pg_stat_force_next_flush()", [])
-					await sql.unsafe(sentinel, [])
-					const before = await sharedWrites(sql)
-					expect(before.get("pg_shdescription"), statement).toBe(1)
+					const before = await snapshot(admin)
 					await sql.unsafe(statement, [])
-					const after = await sharedWrites(sql)
-					expect(after.get("pg_shdescription"), `${statement}: the counts were flushed mid-read`).toBe(1)
-					expect(after, statement).toEqual(before)
+					/* other sessions change the server too: the replay reads a change as a statement's by the names it spells */
+					expect(snapshotChanges(before, await snapshot(admin), namesIn(statement)), statement).toEqual([])
 				}
 			} finally {
 				await sql.end()
+				await admin.end()
 			}
 		})
 	}, 120_000)

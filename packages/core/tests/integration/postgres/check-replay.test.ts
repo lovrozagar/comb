@@ -6,27 +6,18 @@
  * message, each it found allowing it passes, and a statement only `-- atlas:txmode none` can run is
  * left out of the replay and named.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import pg from "pg"
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
-import { approveMigration } from "../../../src/migrate/core/approval.ts"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
-import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
-import type { ParsedMigration } from "../../../src/migrate/types.ts"
+import { pgCheck, T } from "../support/pg-check.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
 import { asRole, dropRoles, heldRole, hiddenWrites, query, roleOf, shapeRoles, unique } from "../support/pg-roles.ts"
 
-beforeAll(loadPostgresParser)
-
-let dir = ""
-beforeEach(() => {
-	dir = mkdtempSync(join(tmpdir(), "comb-pg-check-replay-"))
-})
-afterEach(() => rmSync(dir, { force: true, recursive: true }))
+const { checked, devUrl, dir, files, options } = pgCheck()
 
 /** Run `sql` on the database at `url` */
 async function exec(url: string, sql: string): Promise<void> {
@@ -39,68 +30,7 @@ async function exec(url: string, sql: string): Promise<void> {
 	}
 }
 
-/** A scratch database held from the file's first test to its last: its URL, inside a test */
-function heldScratchDb(): () => string {
-	const held = { release: () => undefined as void, url: "" }
-	let dropped: Promise<void> = Promise.resolve()
-	beforeAll(
-		() =>
-			new Promise<void>((ready) => {
-				dropped = withScratchDb(
-					(url) =>
-						new Promise<void>((release) => {
-							Object.assign(held, { release, url })
-							ready()
-						}),
-				)
-			}),
-	)
-	afterAll(async () => {
-		held.release()
-		await dropped
-	})
-	return () => held.url
-}
-
-/* one dev and one target for every check: the replay rolls back on dev, and a check of a target with no history writes nothing */
-const devUrl = heldScratchDb()
-const targetUrl = heldScratchDb()
-
-const T =
-	"CREATE TABLE t (id int PRIMARY KEY, v varchar(10), w int);\nCREATE TABLE u (id int PRIMARY KEY, v varchar(10));\n"
 const RETYPE = "ALTER TABLE t ALTER COLUMN v TYPE varchar(20);\n"
-
-/** The options a check of the directory against `target` takes, collecting what it prints in `out` */
-const options = (target: { devUrl: string; url: string }, out: string[]) => ({
-	approve: (m: ParsedMigration) => approveMigration(m, { target: "core", yes: true }),
-	dir,
-	print: (line: string) => out.push(line),
-	target: { ...target, lockTimeout: "5s", schema: "public" },
-})
-
-/** `one` then `two`, written and hashed: a history of `one` with `two` pending, as check replays them */
-function files(one: string, two: string): void {
-	/* CREATE STATISTICS is a kind comb does not rate: the history's own approval lets it pass */
-	writeFileSync(join(dir, "20260101000000_one.sql"), `-- comb:allow-unsafe: the test's history\n${one}`)
-	writeFileSync(join(dir, "20260102000000_two.sql"), two)
-	hashDir(run, dir)
-}
-
-/** `one` then `two` checked on the shared target, replayed on `dev`: what check printed, or why it refused */
-async function checked(
-	one: string,
-	two: string,
-	dev = devUrl(),
-): Promise<{ out: string[]; refused?: string | undefined }> {
-	files(one, two)
-	const out: string[] = []
-	try {
-		await applyWithAtlas({ ...options({ devUrl: dev, url: targetUrl() }, out), checkOnly: true })
-		return { out }
-	} catch (error) {
-		return { out, refused: (error as Error).message }
-	}
-}
 
 describe("check of a retype Postgres refuses on every database (P13 of r19)", () => {
 	it.each([
@@ -158,8 +88,8 @@ describe("check of a pending retype over a history the target has applied", () =
 		await withScratchDb((dev) =>
 			withScratchDb(async (url) => {
 				files(`${T}CREATE VIEW x AS SELECT v FROM t;\n`, RETYPE)
-				rmSync(join(dir, "20260102000000_two.sql"))
-				hashDir(run, dir)
+				rmSync(join(dir(), "20260102000000_two.sql"))
+				hashDir(run, dir())
 				const out: string[] = []
 				await applyWithAtlas(options({ devUrl: dev, url }, out))
 				files(`${T}CREATE VIEW x AS SELECT v FROM t;\n`, RETYPE)
@@ -208,9 +138,9 @@ const nameOf = (i: number) => `20260101${String(i).padStart(6, "0")}_f${i}.sql`
 
 /** Every file of `history` then `pending`, named in order and hashed; the history's files approved */
 function writeAll(history: readonly string[], pending: string): void {
-	history.forEach((sql, i) => writeFileSync(join(dir, nameOf(i)), `-- comb:allow-unsafe: the test's history\n${sql}`))
-	writeFileSync(join(dir, nameOf(history.length)), pending)
-	hashDir(run, dir)
+	history.forEach((sql, i) => writeFileSync(join(dir(), nameOf(i)), `-- comb:allow-unsafe: the test's history\n${sql}`))
+	writeFileSync(join(dir(), nameOf(history.length)), pending)
+	hashDir(run, dir())
 }
 
 /** A check of every file in the directory against an empty target on `devUrl`: why it refused, or undefined */
@@ -314,18 +244,22 @@ describe("check of a file that changes the server from inside a statement the re
 			expect(await roleOf(made)).toEqual([])
 		}, 60_000)
 
-		it("refuses a txmode none file's statement that changes the server, naming it", async () => {
-			const held = await roles()
-			const { refused } = await checked(
-				T,
-				`-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's change\nCREATE TABLE x (id int);\nDO $$ BEGIN ALTER ROLE ${pre} CONNECTION LIMIT 5; END $$;\n`,
-				url(),
-			)
-			expect(refused).toContain(
-				`20260102000000_two.sql: devUrl's server counted a change past the database the replay runs in, made by "DO $$ BEGIN ALTER ROLE ${pre} CONNECTION LIMIT 5; END $$"`,
-			)
-			expect(refused).toContain(`role ${pre} changed (rolconnlimit)`)
-			expect(await roles()).toEqual(held)
+		/* bare, as Atlas sends it, the change commits: the refusal names it as one devUrl's server keeps (P1 of r22) */
+		it("refuses a txmode none file's bare statement that changes the server, naming what devUrl's server keeps", async () => {
+			const sent = `DO $$ BEGIN ALTER ROLE ${pre} CONNECTION LIMIT 5; END $$`
+			try {
+				const { refused } = await checked(
+					T,
+					`-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's change\nCREATE TABLE x (id int);\n${sent};\n`,
+					url(),
+				)
+				expect(refused).toContain(
+					`20260102000000_two.sql: devUrl's server changed past the database the replay runs in while ${JSON.stringify(sent)} ran: role ${pre} changed (rolconnlimit).`,
+				)
+				expect(refused).toContain(`devUrl's server keeps role ${pre} changed (rolconnlimit), which comb cannot undo`)
+			} finally {
+				await query(pgUrl(), `ALTER ROLE ${pre} CONNECTION LIMIT -1`)
+			}
 		}, 60_000)
 	})
 })
@@ -387,8 +321,8 @@ describe("check of a pending CREATE ROLE of a role the target's server already h
 	it("passes a pending file using a role the target's own history made, which the replay reuses", async () => {
 		await withScratchDb(async (url) => {
 			files(make, "")
-			rmSync(join(dir, "20260102000000_two.sql"))
-			hashDir(run, dir)
+			rmSync(join(dir(), "20260102000000_two.sql"))
+			hashDir(run, dir())
 			await applyWithAtlas(options({ devUrl: devUrl(), url }, []))
 			files(make, `CREATE TABLE s (id int PRIMARY KEY);\nGRANT SELECT ON s TO ${role};\n`)
 			await applyWithAtlas({ ...options({ devUrl: devUrl(), url }, []), checkOnly: true })
