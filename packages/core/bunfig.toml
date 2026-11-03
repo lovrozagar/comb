@@ -12,7 +12,7 @@ coveragePathIgnorePatterns = [
 	"src/*.ts",
 	"src/cli/**",
 	"src/migrate/*.ts",
-	"src/migrate/__fixtures__/**",
+	"src/**/__fixtures__/**",
 	"src/codegen/**",
 	"src/meta/**",
 	"src/pg/**",
