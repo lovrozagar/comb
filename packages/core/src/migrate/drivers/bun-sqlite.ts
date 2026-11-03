@@ -42,7 +42,7 @@ type BunDatabase = {
 function bunSqliteConnection(db: BunDatabase): Connection {
 	return {
 		/* async, so a failing statement rejects the promise instead of throwing past it */
-		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
+		async batch(statements: Array<{ sql: string; params?: unknown[] | undefined }>): Promise<void> {
 			/* one transaction: every statement applies, or none does; it takes the write lock as it begins (SL4 of r22) */
 			db.transaction(() => {
 				for (const { params, sql } of statements) db.run(sql, (params ?? []) as SqliteParam[])
@@ -73,7 +73,7 @@ export function createBunSqliteProvider(config: BunSqliteProviderConfig): Connec
 				)
 			/* a specifier TypeScript does not resolve: a Node consumer compiles this without bun-types */
 			const { Database } = (await import(BUN_SQLITE)) as {
-				Database: new (path: string, options?: { readonly?: boolean }) => BunDatabase
+				Database: new (path: string, options?: { readonly?: boolean | undefined }) => BunDatabase
 			}
 			const db = readonly ? new Database(config.path, { readonly }) : new Database(config.path)
 			/* SQLite opens with foreign keys off; the proof run, libsql and D1 apply with them on */

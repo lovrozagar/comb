@@ -18,7 +18,7 @@ export type OrmConfig = {
 	driver: SqliteDriver | PostgresDriver
 	filePrefix?: string | undefined
 	output: string
-	relationsOutput?: string
+	relationsOutput?: string | undefined
 }
 
 /** The names every client file is built from */

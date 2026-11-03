@@ -291,7 +291,7 @@ import type { LiveObjects, LiveTarget } from "./pg-live-types.ts";
 /** The postgres.js client, as far as comb uses it */
 type Sql = {
     end(options?: {
-        timeout?: number;
+        timeout?: number | undefined;
     }): Promise<void>;
     unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>>;
 };

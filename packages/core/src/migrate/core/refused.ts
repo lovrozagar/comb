@@ -1,5 +1,9 @@
 /** The files a stopped run names: still pending, applied before it stopped, and unknown, whose answer was lost */
-type Files = { applied?: readonly string[]; pending: readonly string[]; unknown?: readonly string[] }
+type Files = {
+	applied?: readonly string[] | undefined
+	pending: readonly string[]
+	unknown?: readonly string[] | undefined
+}
 
 /**
  * A migration run stopped: the reason, the files still pending, the files that applied before it

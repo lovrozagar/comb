@@ -14,7 +14,7 @@ type Client = {
 	close(): void
 	execute(statement: Statement): Promise<{ columns: string[]; rows: Array<Record<string, unknown>> }>
 }
-type LibsqlModule = { createClient(config: { authToken?: string; url: string }): Client }
+type LibsqlModule = { createClient(config: { authToken?: string | undefined; url: string }): Client }
 const LIBSQL_CLIENT: string = "@libsql/client"
 
 /** @libsql/client, loaded when a libsql or Turso connection opens */

@@ -253,7 +253,7 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliC
 export function needPeers(
 	io: CliContext,
 	command: Command,
-	{ fts, provider }: { fts?: boolean; provider: Provider },
+	{ fts, provider }: { fts?: boolean | undefined; provider: Provider },
 ): Peers {
 	const atlas = io.readAtlasVersion ?? (() => (io.run ?? runProcess)("atlas", ["version"]))
 	return requirePeers(command, provider, { atlas, cwd: io.cwd, fts, locate: io.locatePeer })

@@ -35,9 +35,9 @@ const tursoAuthTokenSchema = () => z.object({ jwt: z.string().min(1) })
 
 /** How the Turso calls reach the API and report progress: injectable, quiet by default */
 export type TursoDeps = {
-	fetch?: typeof fetch
+	fetch?: typeof fetch | undefined
 	/** A progress line, such as the database being created; no output when omitted */
-	log?: (line: string) => void
+	log?: ((line: string) => void) | undefined
 }
 
 export type TursoCredentialsRequest = TursoDeps & {
@@ -131,7 +131,7 @@ export async function getTursoCredentials(
 
 function createLibsqlConnection(client: Client): Connection {
 	return {
-		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
+		async batch(statements: Array<{ sql: string; params?: unknown[] | undefined }>): Promise<void> {
 			const batch = statements.map(({ params, sql }) => ({ args: (params ?? []) as InValue[], sql }))
 			/* "write" begins it IMMEDIATE: the write lock is taken, or waited for, before any statement (SL4 of r22) */
 			await client.batch(batch, "write")

@@ -41,7 +41,7 @@ type ShardEnv<E> = string extends keyof E
 type ShardKv = {
 	delete(key: string): Promise<void>
 	get(key: string, type: "json"): Promise<unknown>
-	put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>
+	put(key: string, value: string, options?: { expirationTtl?: number | undefined }): Promise<void>
 }
 
 type ShardResolverDeps = {
@@ -71,16 +71,16 @@ type ShardMove = ShardPlacement & { with?: readonly D1StatementLike[] | undefine
 type ShardVerifyDeps = ShardResolverDeps & { present: (mapping: ShardMapping) => Promise<boolean> }
 
 interface ShardRouterConfig {
-	kvTtlSeconds?: number
-	log?: LogFn
-	lruHardTtlMs?: number
-	lruMaxSize?: number
-	lruTtlMs?: number
-	maxOrgsPerShard?: number
+	kvTtlSeconds?: number | undefined
+	log?: LogFn | undefined
+	lruHardTtlMs?: number | undefined
+	lruMaxSize?: number | undefined
+	lruTtlMs?: number | undefined
+	maxOrgsPerShard?: number | undefined
 	/** How long this isolate remembers that the primary has no mapping for an org */
-	missTtlMs?: number
+	missTtlMs?: number | undefined
 	/** The shard a new org goes to; the default takes the one with the most headroom under maxOrgsPerShard */
-	pick?: ShardPick
+	pick?: ShardPick | undefined
 	totalShards: number
 }
 

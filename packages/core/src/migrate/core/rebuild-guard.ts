@@ -50,7 +50,7 @@ const RENAME = /* @__PURE__ */ new RegExp(`^ALTER TABLE (${QNAME}) RENAME TO (${
 
 /** The rebuilds among a file's statements and their codes: a copy of `T` into `temp`, a drop of `T`, `temp` renamed to `T` */
 function locateRebuilds(statements: readonly string[], codes: readonly string[]): Located[] {
-	const copies = new Map<string, { copy: number; drop?: number; table: string }>()
+	const copies = new Map<string, { copy: number; drop?: number | undefined; table: string }>()
 	const out: Located[] = []
 	for (const [i, code] of codes.entries()) {
 		const read = /^INSERT INTO\b/i.test(code) ? readCopy(statements[i] as string, () => "") : undefined
@@ -122,7 +122,7 @@ function childrenFirst(closure: readonly string[], schema: ExtractedSchema): str
 function guardOf(
 	{ table, temp }: Rebuild,
 	schema: ExtractedSchema,
-	{ deferred = false, legacy = false }: { deferred?: boolean; legacy?: boolean } = {},
+	{ deferred = false, legacy = false }: { deferred?: boolean | undefined; legacy?: boolean | undefined } = {},
 ): Guard | undefined {
 	const closure = reached(table, schema)
 	if (closure.length === 0) return undefined

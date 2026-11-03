@@ -13,7 +13,7 @@ import type { GeneratorContext } from "./context-types.ts"
 export type EntitiesConfig = {
 	importFrom?: string | undefined
 	output: string
-	updatePackageJson?: boolean
+	updatePackageJson?: boolean | undefined
 }
 
 function generateEntities(ctx: GeneratorContext, config: EntitiesConfig): void {

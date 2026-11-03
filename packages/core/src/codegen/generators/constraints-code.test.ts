@@ -43,4 +43,14 @@ describe("generateConstraintMapCode", () => {
 } as const
 `)
 	})
+
+	/* KT8 of r22b: every optional key takes undefined, which reads as the key left out */
+	it("writes a group set to undefined as it writes one left out", () => {
+		const primaryKey = { cause: "Taken", errorKey: "user_id_duplicate", statusKey: "conflict" } as const
+		const unset = { check: undefined, private: undefined, referenced: undefined, unique: undefined }
+		expect(generateConstraintMapCode({ user: { primaryKey, ...unset } }, "test")).toBe(
+			generateConstraintMapCode({ user: { primaryKey } }, "test"),
+		)
+		expect(generateConstraintMapCode({ user: unset }, "test")).toBe(generateConstraintMapCode({ user: {} }, "test"))
+	})
 })

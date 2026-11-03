@@ -12,7 +12,7 @@ const LOCKED: Finding = { level: "lock", note: "holds an exclusive lock while it
 /** Whether an option's argument is on, as Postgres reads a boolean: given bare, a nonzero number, or true, on or yes */
 function isOn(arg: unknown): boolean {
 	if (arg === undefined) return true
-	const value = arg as { Integer?: { ival?: number }; String?: { sval: string } }
+	const value = arg as { Integer?: { ival?: number | undefined } | undefined; String?: { sval: string } | undefined }
 	if (value.Integer !== undefined) return (value.Integer.ival ?? 0) !== 0
 	return /^(?:true|on|yes)$/i.test(value.String?.sval ?? "")
 }

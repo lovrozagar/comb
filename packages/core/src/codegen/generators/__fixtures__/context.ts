@@ -4,7 +4,12 @@ import type { GeneratorContext } from "../context-types.ts"
 
 type TestContext = GeneratorContext & { logged: string[]; warned: string[] }
 
-type ContextOptions = { cwd: string; dbName?: string; dialect?: GeneratorContext["dialect"]; tablesPath?: string }
+type ContextOptions = {
+	cwd: string
+	dbName?: string | undefined
+	dialect?: GeneratorContext["dialect"] | undefined
+	tablesPath?: string | undefined
+}
 
 function emptyImports(): AnalysisResult["imports"] {
 	return { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() }

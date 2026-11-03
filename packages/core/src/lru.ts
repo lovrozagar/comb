@@ -16,7 +16,15 @@ const isPositive = (value: number | undefined) => value === undefined || (Number
  * A size that bounds the cache, and TTLs that expire: NaN or 0 would make it unbounded or
  * never-expiring, and a hard TTL under the soft one would have get() and getWithMeta() disagree.
  */
-function checkOptions({ hardTtlMs, maxSize, ttlMs }: { hardTtlMs?: number; maxSize: number; ttlMs?: number }): void {
+function checkOptions({
+	hardTtlMs,
+	maxSize,
+	ttlMs,
+}: {
+	hardTtlMs?: number | undefined
+	maxSize: number
+	ttlMs?: number | undefined
+}): void {
 	if (!Number.isInteger(maxSize) || maxSize < 1) {
 		throw new RangeError(`LruCache maxSize must be a positive integer, got ${maxSize}`)
 	}
@@ -38,7 +46,7 @@ class LruCache<K, V> {
 	 * @param ttlMs - Soft TTL: entry considered stale after this (used by get())
 	 * @param hardTtlMs - Hard TTL: entry fully evicted after this (used by getWithMeta())
 	 */
-	constructor(options: { hardTtlMs?: number; maxSize: number; ttlMs?: number }) {
+	constructor(options: { hardTtlMs?: number | undefined; maxSize: number; ttlMs?: number | undefined }) {
 		checkOptions(options)
 		this.maxSize = options.maxSize
 		this.ttlMs = options.ttlMs

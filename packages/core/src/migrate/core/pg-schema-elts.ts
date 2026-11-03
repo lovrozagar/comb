@@ -37,14 +37,14 @@ const created = (elements: readonly Record<string, Record<string, RangeVar>>[]):
 	)
 
 type CreateSchema = {
-	authrole?: { rolename?: string }
-	schemaElts?: Array<Record<string, Record<string, RangeVar>>>
-	schemaname?: string
+	authrole?: { rolename?: string | undefined } | undefined
+	schemaElts?: Array<Record<string, Record<string, RangeVar>>> | undefined
+	schemaname?: string | undefined
 }
 
 /** Qualify, in the fresh parse tree `stmts`, each unqualified relation a CREATE SCHEMA element names that the statement creates */
 function qualifySchemaElements(stmts: unknown): void {
-	for (const raw of (stmts ?? []) as Array<{ stmt?: { CreateSchemaStmt?: CreateSchema } }>) {
+	for (const raw of (stmts ?? []) as Array<{ stmt?: { CreateSchemaStmt?: CreateSchema | undefined } | undefined }>) {
 		const schema = raw.stmt?.CreateSchemaStmt
 		const elements = schema?.schemaElts ?? []
 		const name = schema?.schemaname ?? schema?.authrole?.rolename

@@ -96,7 +96,7 @@ function writeFindings(type: string, node: Node, ctx: TreeContext): Finding[] {
 		return [{ level: "unsafe", note: `writes through the view ${named.key}, which comb cannot follow to one table` }]
 	const table = { key: base.key, name: named.name }
 	/* a write without ONLY reaches the table's partitions and inheritance children */
-	const target = { inh: (node["relation"] as { inh?: boolean }).inh === true, key: named.key }
+	const target = { inh: (node["relation"] as { inh?: boolean | undefined }).inh === true, key: named.key }
 	if (type === "DeleteStmt")
 		return [{ level: "unsafe", note: `deletes rows of ${table.key}` }, ...reachFindings(target, ["delete"], ctx)]
 	if (type === "UpdateStmt")

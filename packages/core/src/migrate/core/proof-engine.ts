@@ -184,8 +184,11 @@ function shadowsOf(db: LocalDb, existing: ReadonlySet<string>): Array<{ name: st
 		.filter(({ name }) => existing.has(name))
 }
 
+/** The copy's existing tables, by lower-case name, each with its columns */
+type Tables = ReadonlyMap<string, Set<string>>
+
 /** The existing tables of the copy, by lower-case name, each with its columns */
-function tablesOf(db: LocalDb): Map<string, Set<string>> {
+function tablesOf(db: LocalDb): Tables {
 	const out = new Map<string, Set<string>>()
 	for (const row of db.all(
 		"SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
@@ -219,7 +222,7 @@ function classifiedOf(statements: readonly string[], before: ExtractedSchema): S
  * a statement at a time (Bun's multi-statement exec skips a failing statement but the last, M9). Returns each statement's
  * effects on the tables there before the file, read before it runs, those tables' columns, or why a statement failed.
  */
-function applyToCopy(db: ScratchDb, sql: string): { error?: string; start: Map<string, Set<string>>; steps: Step[] } {
+function applyToCopy(db: ScratchDb, sql: string): { error?: string | undefined; start: Tables; steps: Step[] } {
 	db.reopen()
 	const start = tablesOf(db)
 	const existing = new Set(start.keys())
@@ -259,10 +262,7 @@ function applyToCopy(db: ScratchDb, sql: string): { error?: string; start: Map<s
  * it, cautious for a backfill of only the columns it added, with no trigger fired. A trigger's WHEN
  * is not evaluated: a trigger SQLite compiles for the write counts as fired.
  */
-function engineFindings(
-	steps: readonly Step[],
-	start: ReadonlyMap<string, Set<string>>,
-): { cautious: string[]; unsafe: string[] } {
+function engineFindings(steps: readonly Step[], start: Tables): { cautious: string[]; unsafe: string[] } {
 	const unsafe: string[] = []
 	const cautious: string[] = []
 	const shadowed = new Set<string>()

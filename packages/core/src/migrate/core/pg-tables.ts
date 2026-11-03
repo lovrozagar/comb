@@ -74,7 +74,7 @@ function followRls({ code, sql }: Statement, rls: Map<string, Rls>): boolean {
 	if (table === undefined) return false
 	/* the parser's one RawStmt: an ALTER TABLE's commands, each with its subtype */
 	const [{ stmt }] = parsePostgres(sql).stmts as [
-		{ stmt: { AlterTableStmt?: { cmds: Array<{ AlterTableCmd: { subtype: string } }> } } },
+		{ stmt: { AlterTableStmt?: { cmds: Array<{ AlterTableCmd: { subtype: string } }> } | undefined } },
 	]
 	const commands = (stmt.AlterTableStmt?.cmds ?? []).map(({ AlterTableCmd }) => AlterTableCmd.subtype)
 	const flags = commands.flatMap((subtype) => {

@@ -157,7 +157,7 @@ function followName(type: string, node: Node, facts: Facts): void {
 		moveSchema(facts, String(node["subname"]), String(node["newname"]))
 	else if (kind === "OBJECT_COLUMN" && type === "RenameStmt") renameColumn(node, facts)
 	else if (RELATIONS.has(kind)) {
-		const rel = node["relation"] as { relname: string; schemaname?: string }
+		const rel = node["relation"] as { relname: string; schemaname?: string | undefined }
 		const to =
 			type === "RenameStmt"
 				? keyOf(

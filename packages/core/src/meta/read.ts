@@ -20,9 +20,9 @@ type ReadOptions = {
 	 * this is refused rather than partially read — see docs §4.2.
 	 * Defaults to the version of the comb build doing the reading.
 	 */
-	maxVersion?: number
+	maxVersion?: number | undefined
 	/** Called instead of throwing when a payload is refused or malformed. */
-	onDiagnostic?: (message: string) => void
+	onDiagnostic?: ((message: string) => void) | undefined
 }
 
 /**

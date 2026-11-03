@@ -204,7 +204,8 @@ function paginationIn<TMerged extends boolean>(
 	built: { pagination: ListPagination & { merged: TMerged } } | undefined,
 	merged: TMerged,
 ): ListPagination & { merged: TMerged } {
-	const pagination = (built as { pagination?: ListPagination & { merged: TMerged } } | undefined)?.pagination
+	const pagination = (built as { pagination?: (ListPagination & { merged: TMerged }) | undefined } | undefined)
+		?.pagination
 	if (pagination === undefined) {
 		throw new CombError({
 			cause:

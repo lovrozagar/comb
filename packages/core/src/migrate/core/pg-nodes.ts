@@ -30,7 +30,7 @@ type Reads = { columns: Set<string> | "all"; functions: Set<string>; relations: 
 
 /** A RangeVar as written, its schema with it */
 const written = (relation: unknown): string => {
-	const rel = relation as { relname: string; schemaname?: string }
+	const rel = relation as { relname: string; schemaname?: string | undefined }
 	return rel.schemaname === undefined ? rel.relname : `${rel.schemaname}.${rel.relname}`
 }
 
@@ -150,7 +150,7 @@ const keyOf = (parts: readonly string[], schema: string): string =>
 
 /** A RangeVar's table under `schema`: its bare name, its key, and whether it is temporary */
 function tableOf(relation: unknown, schema: string): { key: string; name: string; temp: boolean } {
-	const rel = relation as { relname: string; relpersistence: string; schemaname?: string }
+	const rel = relation as { relname: string; relpersistence: string; schemaname?: string | undefined }
 	const key = keyOf(rel.schemaname === undefined ? [rel.relname] : [rel.schemaname, rel.relname], schema)
 	return { key, name: rel.relname, temp: rel.relpersistence === "t" || rel.schemaname === "pg_temp" }
 }

@@ -55,7 +55,7 @@ async function guarded<T>(
  * A mapping as KV holds it: tagged with the nonce of the tombstone its fill read under, if any;
  * a 0.14 fill's `readAt` and an older fill's session bookmark, which no reader is handed
  */
-type Stored = ShardMapping & { d1Bookmark?: string; readAt?: number; tag?: string }
+type Stored = ShardMapping & { d1Bookmark?: string | undefined; readAt?: number | undefined; tag?: string | undefined }
 
 /**
  * What KV holds for an org: its mapping and that mapping's tag, or none, and its live tombstone's

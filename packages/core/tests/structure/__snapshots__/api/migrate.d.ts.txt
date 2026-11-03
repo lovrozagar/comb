@@ -210,18 +210,18 @@ export { loadPostgresParser, parsePostgres, postgresParser };
 import type { CircuitBreakerState, MigrationResult } from "../types.ts";
 export declare function sleep(ms: number): Promise<void>;
 export type RetryOptions = {
-    maxRetries?: number;
-    baseDelay?: number;
-    maxDelay?: number;
-    onRetry?: (attempt: number, error: Error, delay: number) => void;
+    maxRetries?: number | undefined;
+    baseDelay?: number | undefined;
+    maxDelay?: number | undefined;
+    onRetry?: ((attempt: number, error: Error, delay: number) => void) | undefined;
 };
 /** Call `fn`, again after a backoff while it fails transiently, `maxRetries` times at most */
 export declare function withRetry<T>(fn: () => Promise<T>, options?: RetryOptions): Promise<T>;
 export declare function createCircuitBreaker(): CircuitBreakerState;
 export declare function updateCircuitBreaker(state: CircuitBreakerState, success: boolean): CircuitBreakerState;
 export declare function checkCircuitBreaker(state: CircuitBreakerState, options?: {
-    failureThreshold?: number;
-    minSampleSize?: number;
+    failureThreshold?: number | undefined;
+    minSampleSize?: number | undefined;
 }): CircuitBreakerState;
 export declare function aggregateErrors(errors: Array<{
     database: string;
@@ -248,9 +248,9 @@ import { DatabaseMissing } from "./missing.ts";
 export { createBunSqliteProvider } from "./bun-sqlite.ts";
 /** How the Turso calls reach the API and report progress: injectable, quiet by default */
 export type TursoDeps = {
-    fetch?: typeof fetch;
+    fetch?: typeof fetch | undefined;
     /** A progress line, such as the database being created; no output when omitted */
-    log?: (line: string) => void;
+    log?: ((line: string) => void) | undefined;
 };
 export type TursoCredentialsRequest = TursoDeps & {
     apiToken: string;
@@ -311,7 +311,7 @@ export type Connection = {
      */
     batch(statements: Array<{
         sql: string;
-        params?: unknown[];
+        params?: unknown[] | undefined;
     }>): Promise<void>;
     close(): Promise<void>;
     /** the prefix of the tables the engine keeps for itself (D1: `_cf_`), which comb never counts or copies */
@@ -418,8 +418,8 @@ export type MigrationStatus = "success" | "already_applied" | "repaired" | "fail
 export type MigrationResult = {
     database: string;
     status: MigrationStatus;
-    tablesVerified?: number;
-    error?: string;
+    tablesVerified?: number | undefined;
+    error?: string | undefined;
 };
 /** A foreign key as a migration declares it; an empty `parentColumns` is the parent's primary key */
 export type ForeignKey = {
@@ -501,7 +501,7 @@ export type CircuitBreakerState = {
     totalProcessed: number;
     failures: number;
     tripped: boolean;
-    tripReason?: string;
+    tripReason?: string | undefined;
 };
 
 // migrate/core/classify.d.ts
@@ -771,8 +771,8 @@ export declare function generateIncrementalMigration(options: MigrateDiffOptions
 // migrate/core/pg-split.d.ts
 import type { Dialect } from "../types.ts";
 type RawStmt = {
-    stmt_len?: number;
-    stmt_location?: number;
+    stmt_len?: number | undefined;
+    stmt_location?: number | undefined;
 };
 /** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
 /**
@@ -1049,7 +1049,7 @@ type Finding = {
     level: "cautious" | "lock" | "unsafe";
     note?: string | undefined;
     /** a SQLite write the classifier leaves to the proof run's engine read (classify-sqlite-write.ts) */
-    pending?: true;
+    pending?: true | undefined;
 };
 /** What the rules need from the file: the SQLite rebuilds it makes */
 type AlterContext = {

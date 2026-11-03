@@ -57,7 +57,7 @@ function recordedByDrizzle(
 async function history(
 	read: ReadConfig,
 	target: D1Target,
-	{ status = false, writes }: { status?: boolean; writes: boolean },
+	{ status = false, writes }: { status?: boolean | undefined; writes: boolean },
 ): Promise<{
 	applied: Set<string>
 	hasIntents: boolean

@@ -71,7 +71,7 @@ type ManifestColumn = {
 type ManifestRelation = {
 	column: string
 	/** the composite key the column is part of, each column paired by position with the one it references; absent on a single-column key */
-	key?: { columns: string[]; refColumns: string[] }
+	key?: { columns: string[]; refColumns: string[] } | undefined
 	table: string
 	refColumn: string
 	onDelete: string | null

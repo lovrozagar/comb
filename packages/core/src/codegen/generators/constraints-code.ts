@@ -12,13 +12,13 @@ export type Constraint = {
 }
 
 export type TableConstraints = {
-	check?: Record<string, Constraint>
-	foreignKey?: Record<string, Constraint>
-	partitions?: string[]
-	primaryKey?: Constraint
-	private?: string[]
-	referenced?: string[]
-	unique?: Record<string, Constraint>
+	check?: Record<string, Constraint> | undefined
+	foreignKey?: Record<string, Constraint> | undefined
+	partitions?: string[] | undefined
+	primaryKey?: Constraint | undefined
+	private?: string[] | undefined
+	referenced?: string[] | undefined
+	unique?: Record<string, Constraint> | undefined
 }
 
 export type ConstraintMap = Record<string, TableConstraints>
@@ -77,7 +77,12 @@ function groupLines(type: string, group: Constraint | Record<string, Constraint>
 export function generateConstraintMapCode(map: ConstraintMap, dbName: string): string {
 	const tables = Object.entries(map).sort(byKey)
 	const blocks = tables.map(([tableName, constraints]) => {
-		const groups = Object.entries(constraints).sort(byKey)
+		/* a group set to undefined is one left out (KT8 of r22b) */
+		const groups = Object.entries(constraints)
+			.filter(
+				(entry): entry is [string, NonNullable<TableConstraints[keyof TableConstraints]>] => entry[1] !== undefined,
+			)
+			.sort(byKey)
 		/* a table with no constraint is keyed still, so the handlers know it is the schema's (Q10 of r18) */
 		if (groups.length === 0)
 			return [`\t/* ${commentText(tableName)} table: no constraints */`, `\t${propertyName(tableName)}: {}`]

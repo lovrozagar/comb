@@ -89,36 +89,36 @@ type CombQueryMeta = {
 	kind: "query"
 	filterable: string[]
 	/** `filterable` with types and operators */
-	filterFields?: CombFilterField[]
+	filterFields?: CombFilterField[] | undefined
 	sortable: string[]
 	/** Null placements every sortable field accepts */
-	nulls?: Array<"first" | "last">
-	maxFilterConditions?: number
-	maxFilterDepth?: number
+	nulls?: Array<"first" | "last"> | undefined
+	maxFilterConditions?: number | undefined
+	maxFilterDepth?: number | undefined
 	/** Values one filter binds in all, every in/nin member counted */
-	maxFilterValues?: number
-	maxInValues?: number
+	maxFilterValues?: number | undefined
+	maxInValues?: number | undefined
 	/**
 	 * UTF-8 bytes of the escaped pattern of a `like` or `ilike` value with a `*` inside it, as SQLite
 	 * reads it: a `[` in a `like` is the three bytes `[[]`, a `%` or `_` in an `ilike` two. A value whose
 	 * only `*` are at its ends is no pattern and takes no cap. Not the raw value's characters (Q8)
 	 */
-	maxPatternBytes?: number
+	maxPatternBytes?: number | undefined
 	/** Bytes one `filter` may take however a client encodes it (U28), beside its character cap */
-	maxFilterBytes?: number
+	maxFilterBytes?: number | undefined
 	/** Bytes the whole query string comb accepts takes at most, however a client encodes it: 16 KB less a 2 KB path budget */
-	maxQueryBytes?: number
+	maxQueryBytes?: number | undefined
 	/** Whitespace-separated words one `q` may hold */
-	maxSearchTerms?: number
+	maxSearchTerms?: number | undefined
 	/** Bytes one `q` may take however a client encodes it */
-	maxSearchBytes?: number
-	maxSortKeys?: number
+	maxSearchBytes?: number | undefined
+	maxSortKeys?: number | undefined
 	/** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */
 	searchable: string[] | null
 	selectable: string[]
 	maxLimit: number
 	/** The last page offset pagination serves; past it, a client pages by cursor */
-	maxPage?: number
+	maxPage?: number | undefined
 	/** e.g. "created_at.desc" — the order applied when the request names none */
 	defaultOrder: string
 	/** Tiebreak column for keyset pagination */

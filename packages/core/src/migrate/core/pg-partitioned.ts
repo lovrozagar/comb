@@ -36,7 +36,7 @@ const TABLES: ReadonlySet<unknown> = /* @__PURE__ */ new Set(["OBJECT_TABLE"])
 /** A rename or SET SCHEMA of a table or an index, followed */
 function followName(type: string, node: Node, facts: Facts): void {
 	const kind = node[type === "RenameStmt" ? "renameType" : "objectType"]
-	const rel = node["relation"] as { relname: string; schemaname?: string } | undefined
+	const rel = node["relation"] as { relname: string; schemaname?: string | undefined } | undefined
 	if (rel === undefined) return
 	const from = tableOf(rel, facts.schema).key
 	if (type === "RenameStmt" && kind === "OBJECT_INDEX") {

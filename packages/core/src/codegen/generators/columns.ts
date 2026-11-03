@@ -20,7 +20,7 @@ import { type ImportStyle, specifierFor } from "../utils/paths.ts"
 export type ColumnsConfig = {
 	filePrefix?: string | undefined
 	output: string
-	updatePackageJson?: boolean
+	updatePackageJson?: boolean | undefined
 }
 
 type TableEntry = {

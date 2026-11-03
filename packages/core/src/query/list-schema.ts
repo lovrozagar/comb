@@ -30,14 +30,17 @@ import type { FieldType } from "./types.ts"
 
 type AdvertisedConfig = Pick<ListQueryConfig, "fields" | "filter" | "lang" | "search" | "sort">
 
-/** The optional params beside cursor, page and limit; each key exists only when advertised */
-type OptionalShape = {
-	order: z.ZodOptional<z.ZodString>
-	filter?: z.ZodOptional<z.ZodString>
-	q?: z.ZodOptional<z.ZodString>
-	lang?: z.ZodOptional<z.ZodString>
-	select?: z.ZodOptional<z.ZodString>
-}
+/**
+ * The optional params beside cursor, page and limit; each key exists only when advertised. A zod
+ * shape's key is absent or a schema, never undefined, which zod's shape refuses: Partial says so
+ * under exactOptionalPropertyTypes, where `?:` on an input bag takes undefined (KT8 of r22b)
+ */
+type OptionalShape = { order: z.ZodOptional<z.ZodString> } & Partial<{
+	filter: z.ZodOptional<z.ZodString>
+	q: z.ZodOptional<z.ZodString>
+	lang: z.ZodOptional<z.ZodString>
+	select: z.ZodOptional<z.ZodString>
+}>
 
 export type ListQueryShape = typeof baseListQueryShape &
 	OptionalShape & {
@@ -159,7 +162,12 @@ function createListQuerySchema<
 	const piped = schema.transform((data, ctx): ExtendedOutput => {
 		if (data.page !== undefined && data.page > maxPage) throw pageTooDeep(data.page, maxPage)
 		/* Optional params exist on `data` only when advertised above. */
-		const optional = data as { filter?: string; lang?: string; q?: string; select?: unknown }
+		const optional = data as {
+			filter?: string | undefined
+			lang?: string | undefined
+			q?: string | undefined
+			select?: unknown
+		}
 		const filterAst = filterAstOf(optional.filter, { fields: filterConfig, limits }, ctx)
 		const parsedSort = parsedSortOf<TSortField>(data.order, { maxSortKeys: limits.maxSortKeys, sort: sortConfig }, ctx)
 		/* cursor takes precedence over page — both accepted gracefully */

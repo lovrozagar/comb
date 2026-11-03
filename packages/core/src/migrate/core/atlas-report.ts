@@ -11,7 +11,12 @@ import { outsideTransaction } from "./classify-file.ts"
 const APPLY_FORMAT = '{"target":{{ json .Target }},"applied":{{ json .Applied }},"error":{{ json .Error }}}'
 
 /** A file Atlas ran: the statements it ran of it, the one that failed last, and those an earlier run applied, which a resume skips */
-type AppliedFile = { Applied: string[]; Error?: { Stmt: string; Text: string }; Name: string; Skipped?: number }
+type AppliedFile = {
+	Applied: string[]
+	Error?: { Stmt: string; Text: string } | undefined
+	Name: string
+	Skipped?: number | undefined
+}
 /** Atlas writes `applied` as null when it ran no file, as when another apply ran them first (P8) */
 type ApplyReport = { applied: AppliedFile[] | null; error: string }
 

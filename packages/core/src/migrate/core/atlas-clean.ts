@@ -9,7 +9,7 @@ import { type PgTarget, withAtlasEnv } from "./atlas-target.ts"
 import type { Run } from "./process.ts"
 
 /** The schemas `atlas schema inspect` reports, by name, with their tables */
-type Inspected = { schemas?: Array<{ name?: string; tables?: unknown[] }> }
+type Inspected = { schemas?: Array<{ name?: string | undefined; tables?: unknown[] | undefined }> | undefined }
 
 /**
  * Atlas's inspect JSON `stdout`, parsed as Atlas wrote it and never scrubbed (M79): its names are

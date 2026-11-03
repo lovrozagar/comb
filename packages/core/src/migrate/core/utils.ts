@@ -18,10 +18,10 @@ export function sleep(ms: number): Promise<void> {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 export type RetryOptions = {
-	maxRetries?: number
-	baseDelay?: number
-	maxDelay?: number
-	onRetry?: (attempt: number, error: Error, delay: number) => void
+	maxRetries?: number | undefined
+	baseDelay?: number | undefined
+	maxDelay?: number | undefined
+	onRetry?: ((attempt: number, error: Error, delay: number) => void) | undefined
 }
 
 /** Call `fn`, again after a backoff while it fails transiently, `maxRetries` times at most */
@@ -70,7 +70,7 @@ export function updateCircuitBreaker(state: CircuitBreakerState, success: boolea
 
 export function checkCircuitBreaker(
 	state: CircuitBreakerState,
-	options: { failureThreshold?: number; minSampleSize?: number } = EMPTY_OBJ,
+	options: { failureThreshold?: number | undefined; minSampleSize?: number | undefined } = EMPTY_OBJ,
 ): CircuitBreakerState {
 	const failureThreshold = options.failureThreshold ?? 0.1
 	const minSampleSize = options.minSampleSize ?? 50

@@ -73,16 +73,16 @@ function combOf(column: Column, at: string, context: Context): SnapshotComb | nu
 }
 
 type ReadColumn = Column & {
-	autoIncrement?: boolean
+	autoIncrement?: boolean | undefined
 	defaultFn?: unknown
-	dimensions?: number | null
+	dimensions?: number | null | undefined
 	generated?: unknown
 	generatedIdentity?: unknown
-	isUnique?: boolean
-	length?: number
+	isUnique?: boolean | undefined
+	length?: number | undefined
 	onUpdateFn?: unknown
 	table: Table
-	uniqueName?: string
+	uniqueName?: string | undefined
 }
 
 /**

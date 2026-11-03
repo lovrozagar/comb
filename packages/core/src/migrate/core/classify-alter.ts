@@ -12,7 +12,7 @@ type Finding = {
 	level: "cautious" | "lock" | "unsafe"
 	note?: string | undefined
 	/** a SQLite write the classifier leaves to the proof run's engine read (classify-sqlite-write.ts) */
-	pending?: true
+	pending?: true | undefined
 }
 
 /** What the rules need from the file: the SQLite rebuilds it makes */

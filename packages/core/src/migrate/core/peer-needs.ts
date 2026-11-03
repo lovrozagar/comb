@@ -9,7 +9,7 @@ import type { OptionalPeer } from "./optional-peer.ts"
 import type { BinPeer } from "./process.ts"
 
 /** An npm peer comb needs, and why; an `optional` one a command runs without, saying what it left out */
-type Need = { optional?: true; peer: OptionalPeer; why: string }
+type Need = { optional?: true | undefined; peer: OptionalPeer; why: string }
 
 /** Atlas, as a command needs it: never optional */
 type AtlasNeed = { optional?: undefined; peer: "atlas"; why: string }

@@ -168,7 +168,7 @@ function buildListQuery<TTable extends SQLiteTable>(
 
 function buildDerivedListQuery<TSortField extends string>(
 	opts: BuildDerivedListQueryOpts<TSortField> & {
-		anchor?: never
+		anchor?: never | undefined
 		merged: NonNullable<BuildDerivedListQueryOpts<TSortField>["merged"]>
 	},
 ): MergedListQueryResult

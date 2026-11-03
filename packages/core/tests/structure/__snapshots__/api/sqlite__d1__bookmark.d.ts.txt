@@ -50,7 +50,7 @@ type D1SessionLike = {
 type D1DatabaseLike = {
     batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
     prepare(query: string): D1StatementLike;
-    withSession?(constraintOrBookmark?: string): D1SessionLike;
+    withSession?: ((constraintOrBookmark?: string) => D1SessionLike) | undefined;
 };
 /** The session type `D`'s `withSession` opens: the caller's own, so drizzle() takes it as it takes `D`; a D1 session where `D` names none */
 type SessionOf<D extends D1DatabaseLike> = D extends {

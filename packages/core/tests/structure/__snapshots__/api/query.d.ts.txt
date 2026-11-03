@@ -291,25 +291,27 @@ type DrizzleListOptions = {
     offset: number;
     /** The sort, its null placement and the id tiebreak, for `findMany({ orderBy })` */
     orderBy: (table: RelationalTable) => SQL[];
-    /** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
-    where?: {
-        RAW: (table: RelationalTable) => SQL;
-    };
     /**
      * For `findMany({ extras })`, which paginate reads and refuses a page without (Q3 of r17): the
      * tiebreak the next cursor resumes from (Q2), an offset page's count, and, on a cursor that
      * carries a reference, whether its anchor is gone where no bound is safe (U26)
      */
     extras: {
-        _combAnchorGone?: (table: RelationalTable) => SQL<number>;
         _combId: (table: RelationalTable) => SQL;
-        _total?: (table: RelationalTable) => SQL<number>;
-    };
+    } & Partial<{
+        _combAnchorGone: (table: RelationalTable) => SQL<number>;
+        _total: (table: RelationalTable) => SQL<number>;
+    }>;
     /** How `paginate` pages the rows these options read (pagination.ts) */
     pagination: ListPagination & {
         merged: false;
     };
-};
+} & Partial<{
+    /** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
+    where: {
+        RAW: (table: RelationalTable) => SQL;
+    };
+}>;
 /**
  * limit, offset, order and the cursor predicate for drizzle's relational `findMany`, from the
  * list query schema's output, the cursor opened under `options`: the app's secret and the list's
@@ -528,7 +530,7 @@ type TranslationResolverInput<T extends Record<string, unknown>> = {
     defaultLang: string;
     fields: string[] | null;
     lang: string;
-    languageCodeKey?: string;
+    languageCodeKey?: string | undefined;
     translations: T[];
 };
 declare function resolveTranslation<T extends Record<string, unknown>>(input: TranslationResolverInput<T>): Partial<T> | null;
@@ -613,8 +615,8 @@ import type { FilterLimits } from "./filter.ts";
 import type { RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS } from "./schema-params.ts";
 import type { FieldType, FilterAST, ParsedFields, SortDirection, SortField } from "./types.ts";
 type FieldsConfig = {
-    relations?: readonly string[];
-    relationFields?: Record<string, readonly string[]>;
+    relations?: readonly string[] | undefined;
+    relationFields?: Record<string, readonly string[]> | undefined;
     scalars: readonly string[];
 };
 type OutputStableShape<T extends z.ZodRawShape = z.ZodRawShape> = {
@@ -627,41 +629,41 @@ type ListQueryLimits = FilterLimits & {
     maxSortKeys: number;
 };
 type PaginationConfig = {
-    defaultLimit?: number;
-    maxLimit?: number;
+    defaultLimit?: number | undefined;
+    maxLimit?: number | undefined;
     /** The last page offset pagination serves; past it, a client pages by cursor. Default 10 000. */
-    maxPage?: number;
+    maxPage?: number | undefined;
 };
 export type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number];
 export type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number];
 type ListQueryConfig<T extends OutputStableShape<T> = Record<never, never>, TSortFields extends readonly string[] = readonly string[]> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
-    extend?: T & {
+    extend?: (T & {
         [K in ReservedListKey]?: never;
-    };
-    fields?: FieldsConfig;
+    }) | undefined;
+    fields?: FieldsConfig | undefined;
     /** Fields `filter` may name. Omitted or empty: the endpoint takes no `filter`. */
-    filter?: Record<string, FieldType>;
+    filter?: Record<string, FieldType> | undefined;
     /** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
-    lang?: true;
-    limits?: Partial<ListQueryLimits>;
+    lang?: true | undefined;
+    limits?: Partial<ListQueryLimits> | undefined;
     /**
      * Fields `q` searches, as published. Omitted: the endpoint takes no `q`.
      * Declaring it obliges the handler to pass a search resolver to buildListQuery,
      * which refuses a `q` it cannot apply.
      */
-    search?: readonly string[];
-    pagination?: PaginationConfig;
+    search?: readonly string[] | undefined;
+    pagination?: PaginationConfig | undefined;
     sort: TSortFields;
 };
 type RetrieveQueryConfig<T extends z.ZodRawShape = z.ZodRawShape> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
-    extend?: T & {
+    extend?: (T & {
         [K in ReservedRetrieveKey]?: never;
-    };
+    }) | undefined;
     fields: FieldsConfig;
     /** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
-    lang?: true;
+    lang?: true | undefined;
 };
 type ListQueryOutput<TSortField extends string = string> = {
     cursor: string | undefined;
@@ -698,14 +700,19 @@ export type { FieldsConfig, ListQueryConfig, ListQueryLimits, ListQueryOutput, O
 import * as z from "zod";
 import { baseListQueryShape } from "./schema-params.ts";
 import type { ListQueryConfig, ListQueryOutput, OutputStableShape } from "./schema-types.ts";
-/** The optional params beside cursor, page and limit; each key exists only when advertised */
+/**
+ * The optional params beside cursor, page and limit; each key exists only when advertised. A zod
+ * shape's key is absent or a schema, never undefined, which zod's shape refuses: Partial says so
+ * under exactOptionalPropertyTypes, where `?:` on an input bag takes undefined (KT8 of r22b)
+ */
 type OptionalShape = {
     order: z.ZodOptional<z.ZodString>;
-    filter?: z.ZodOptional<z.ZodString>;
-    q?: z.ZodOptional<z.ZodString>;
-    lang?: z.ZodOptional<z.ZodString>;
-    select?: z.ZodOptional<z.ZodString>;
-};
+} & Partial<{
+    filter: z.ZodOptional<z.ZodString>;
+    q: z.ZodOptional<z.ZodString>;
+    lang: z.ZodOptional<z.ZodString>;
+    select: z.ZodOptional<z.ZodString>;
+}>;
 export type ListQueryShape = typeof baseListQueryShape & OptionalShape & {
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     page: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
@@ -727,9 +734,10 @@ export { createListQuerySchema, type ListQuerySchema };
 import * as z from "zod";
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts";
 export type RetrieveShape = {
-    lang?: z.ZodOptional<z.ZodString>;
     select: z.ZodOptional<z.ZodString>;
-};
+} & Partial<{
+    lang: z.ZodOptional<z.ZodString>;
+}>;
 export type RetrieveRequest = z.ZodObject<RetrieveShape, z.core.$strict>;
 /** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
 type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveRequest, z.ZodTransform<Awaited<RetrieveQueryOutput & {
@@ -931,36 +939,36 @@ type CombQueryMeta = {
     kind: "query";
     filterable: string[];
     /** `filterable` with types and operators */
-    filterFields?: CombFilterField[];
+    filterFields?: CombFilterField[] | undefined;
     sortable: string[];
     /** Null placements every sortable field accepts */
-    nulls?: Array<"first" | "last">;
-    maxFilterConditions?: number;
-    maxFilterDepth?: number;
+    nulls?: Array<"first" | "last"> | undefined;
+    maxFilterConditions?: number | undefined;
+    maxFilterDepth?: number | undefined;
     /** Values one filter binds in all, every in/nin member counted */
-    maxFilterValues?: number;
-    maxInValues?: number;
+    maxFilterValues?: number | undefined;
+    maxInValues?: number | undefined;
     /**
      * UTF-8 bytes of the escaped pattern of a `like` or `ilike` value with a `*` inside it, as SQLite
      * reads it: a `[` in a `like` is the three bytes `[[]`, a `%` or `_` in an `ilike` two. A value whose
      * only `*` are at its ends is no pattern and takes no cap. Not the raw value's characters (Q8)
      */
-    maxPatternBytes?: number;
+    maxPatternBytes?: number | undefined;
     /** Bytes one `filter` may take however a client encodes it (U28), beside its character cap */
-    maxFilterBytes?: number;
+    maxFilterBytes?: number | undefined;
     /** Bytes the whole query string comb accepts takes at most, however a client encodes it: 16 KB less a 2 KB path budget */
-    maxQueryBytes?: number;
+    maxQueryBytes?: number | undefined;
     /** Whitespace-separated words one `q` may hold */
-    maxSearchTerms?: number;
+    maxSearchTerms?: number | undefined;
     /** Bytes one `q` may take however a client encodes it */
-    maxSearchBytes?: number;
-    maxSortKeys?: number;
+    maxSearchBytes?: number | undefined;
+    maxSortKeys?: number | undefined;
     /** null = not knowable at this layer, which is not the same as "none" (docs §6.1) */
     searchable: string[] | null;
     selectable: string[];
     maxLimit: number;
     /** The last page offset pagination serves; past it, a client pages by cursor */
-    maxPage?: number;
+    maxPage?: number | undefined;
     /** e.g. "created_at.desc" — the order applied when the request names none */
     defaultOrder: string;
     /** Tiebreak column for keyset pagination */
@@ -991,9 +999,9 @@ type ReadOptions = {
      * this is refused rather than partially read — see docs §4.2.
      * Defaults to the version of the comb build doing the reading.
      */
-    maxVersion?: number;
+    maxVersion?: number | undefined;
     /** Called instead of throwing when a payload is refused or malformed. */
-    onDiagnostic?: (message: string) => void;
+    onDiagnostic?: ((message: string) => void) | undefined;
 };
 /**
  * Read comb's facts off the ROOT of a JSON Schema.
@@ -1300,12 +1308,12 @@ export { isRecord, isStringArray, readPartialUniqueIndexes, readUniqueIndexes };
 type CombColumnKind = "boolean" | "createdAt" | "deletedAt" | "enum" | "id" | "integer" | "json" | "real" | "ref" | "serialId" | "text" | "timestamp" | "updatedAt";
 /** A column's comb metadata: its helper, and the constraints, enum values, states, schema or prefix it took */
 type CombColumnMeta = {
-    constraints?: Readonly<Record<string, unknown>>;
+    constraints?: Readonly<Record<string, unknown>> | undefined;
     kind: CombColumnKind;
-    prefix?: string;
+    prefix?: string | undefined;
     schema?: unknown;
     states?: unknown;
-    values?: readonly string[];
+    values?: readonly string[] | undefined;
 };
 /** `builder` with `meta` recorded on its config; the options a helper was not given are left out */
 declare function withCombColumn<B>(builder: B, meta: {

@@ -18,7 +18,7 @@ import { optionalPeer } from "./optional-peer.ts"
 
 /** The postgres.js client, as far as comb uses it */
 type Sql = {
-	end(options?: { timeout?: number }): Promise<void>
+	end(options?: { timeout?: number | undefined }): Promise<void>
 	unsafe(query: string, params: unknown[]): Promise<Array<Record<string, unknown>>>
 }
 type Connect = (options: Record<string, unknown>) => Sql

@@ -24,7 +24,7 @@ export async function statedDialect(file: string): Promise<unknown> {
 	if (path.extname(file) === ".json")
 		return (JSON.parse(fs.readFileSync(file, "utf8")) as { dialect?: unknown }).dialect
 	const url = `${pathToFileURL(file).href}?mtime=${fs.statSync(file).mtimeMs}`
-	const config = ((await import(url)) as { default?: { dialect?: unknown } }).default
+	const config = ((await import(url)) as { default?: { dialect?: unknown } | undefined }).default
 	return config?.dialect
 }
 

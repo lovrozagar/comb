@@ -28,7 +28,7 @@ type SnapshotForeignKey = {
 	/** the referenced table's export name in the tables module */
 	table: string
 	/** a composite key's columns, each paired by position with the referenced one; null for a one-column key */
-	key?: { columns: string[]; refColumns: string[] } | null
+	key?: { columns: string[]; refColumns: string[] } | null | undefined
 }
 
 type SnapshotColumn = {

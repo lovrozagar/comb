@@ -44,34 +44,34 @@ export declare const combDatabaseErrorKeys: readonly CombDatabaseErrorKey[];
 export type ConstraintMapEntry = {
     cause: string;
     errorKey: string;
-    statusKey?: "bad_request" | "conflict" | "forbidden";
+    statusKey?: "bad_request" | "conflict" | "forbidden" | undefined;
 };
 /** Per-table constraint violation mappings */
 export type ConstraintMap = {
     [table: string]: {
-        check?: Record<string, ConstraintMapEntry>;
+        check?: Record<string, ConstraintMapEntry> | undefined;
         /** Postgres EXCLUDE constraints, by name */
-        exclusion?: Record<string, ConstraintMapEntry>;
-        foreignKey?: Record<string, ConstraintMapEntry>;
+        exclusion?: Record<string, ConstraintMapEntry> | undefined;
+        foreignKey?: Record<string, ConstraintMapEntry> | undefined;
         /**
          * The partitions of this Postgres table, keyed as the map keys a table: Postgres reports a
          * violation on the partition, which is read as this table's (Q7 of r18). Codegen writes it
          * from comb.config.ts's `partitions`; a table no entry lists or keys names no column.
          */
-        partitions?: readonly string[];
-        primaryKey?: ConstraintMapEntry;
+        partitions?: readonly string[] | undefined;
+        primaryKey?: ConstraintMapEntry | undefined;
         /**
          * The columns of this table the client never sees, by SQL name: an error names none of them,
          * in its `column` or its cause (F67). Codegen writes it; a map without it names every column.
          */
-        private?: readonly string[];
+        private?: readonly string[] | undefined;
         /**
          * The columns of this table some foreign key points at, by SQL name: an UPDATE, or an
          * upsert's DO UPDATE, that assigns one may have failed on a row referencing the old value,
          * so SQLite's handler answers it with the neutral cause (U43). Codegen writes it.
          */
-        referenced?: readonly string[];
-        unique?: Record<string, ConstraintMapEntry>;
+        referenced?: readonly string[] | undefined;
+        unique?: Record<string, ConstraintMapEntry> | undefined;
     };
 };
 /** Function signature for database error handlers */

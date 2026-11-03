@@ -108,9 +108,9 @@ type SpellfixDb = {
 
 type SpellfixSearch = FtsSource & {
 	/** editdist3 bound below which a word counts as a correction (default 300) */
-	maxEditDistance?: number
+	maxEditDistance?: number | undefined
 	/** corrections taken per term (default 3) */
-	maxCorrections?: number
+	maxCorrections?: number | undefined
 	/** false where spellfix1 is never loaded: the terms are searched as typed and nothing is probed (Q4 of r20); a D1 client is known without it (Q3 of r21) */
 	spellfix?: boolean | undefined
 	spellfixTable: string

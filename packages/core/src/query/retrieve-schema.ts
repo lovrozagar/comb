@@ -15,7 +15,8 @@ import {
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts"
 import { validateSelectWithConfig } from "./select-validate.ts"
 
-export type RetrieveShape = { lang?: z.ZodOptional<z.ZodString>; select: z.ZodOptional<z.ZodString> }
+/* a zod shape: `lang` is absent or a schema, never undefined, as list-schema.ts's OptionalShape says */
+export type RetrieveShape = { select: z.ZodOptional<z.ZodString> } & Partial<{ lang: z.ZodOptional<z.ZodString> }>
 export type RetrieveRequest = z.ZodObject<RetrieveShape, z.core.$strict>
 
 /** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
@@ -39,7 +40,7 @@ function createRetrieveQuerySchema<T extends z.ZodRawShape = Record<never, never
 	}
 
 	const parsed = schema.transform((data, ctx): ExtendedOutput => ({
-		lang: (data as { lang?: string }).lang,
+		lang: (data as { lang?: string | undefined }).lang,
 		parsedFields: validateSelectWithConfig(data.select, fieldsConfig, ctx),
 		...(pickExtended(extensions, data) as { [K in keyof T]: z.infer<T[K]> }),
 	}))

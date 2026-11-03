@@ -24,7 +24,7 @@ export type Build = {
 	annotations: FieldConstraints
 	dialect: "postgres" | "sqlite"
 	/** whether the base is an array's element, whose read level states its keys on `items` alone (C3 of r20) */
-	element?: boolean
+	element?: boolean | undefined
 	field: FieldMeta
 	imports: ImportsMeta
 	schemaType: SchemaType

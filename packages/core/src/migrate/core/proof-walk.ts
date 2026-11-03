@@ -55,7 +55,7 @@ type Walk = {
 	emptied: Set<string>
 	fired: Set<string>
 	rewrites: Set<string>
-	trigger?: string
+	trigger?: string | undefined
 }
 
 /* OPFLAG_ISUPDATE (0x04): a Delete that is an update's own rewrite of its row, not a deletion (M41) */

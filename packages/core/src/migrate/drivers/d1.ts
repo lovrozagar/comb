@@ -125,7 +125,7 @@ function commands(statements: readonly string[]): string[] {
 
 function createD1Connection(databaseName: string, flags: readonly string[], spawn: Wrangler): Connection {
 	return {
-		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
+		async batch(statements: Array<{ sql: string; params?: unknown[] | undefined }>): Promise<void> {
 			/* wrangler binds no parameters in a batch, so they are inlined as literals */
 			const sql = statements.map(({ params, sql: text }) =>
 				terminated(params && params.length > 0 ? inlineParams(text, params) : text),

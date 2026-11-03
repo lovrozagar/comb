@@ -133,7 +133,7 @@ async function guarded(run: Run, at: At, send: () => Promise<void>): Promise<voi
 		(error: unknown) => error,
 	)
 	if (refused === undefined) return commit(run, at)
-	if (!BARE_ONLY.has((refused as { cause?: { code?: unknown } }).cause?.code)) throw refused
+	if (!BARE_ONLY.has((refused as { cause?: { code?: unknown } | undefined }).cause?.code)) throw refused
 	await run.sql.unsafe("ROLLBACK", [])
 	await send()
 	return window(run, at)

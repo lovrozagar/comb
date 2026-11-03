@@ -20,9 +20,9 @@ const PREFIX_PATTERN = /^[a-z][a-z0-9]{1,9}$/
 
 type UlidFactoryOptions = {
 	/** The clock, ms since epoch; `Date.now` by default */
-	now?: () => number
+	now?: (() => number) | undefined
 	/** Fills the bytes with randomness; `crypto.getRandomValues` by default */
-	random?: (bytes: Uint8Array<ArrayBuffer>) => void
+	random?: ((bytes: Uint8Array<ArrayBuffer>) => void) | undefined
 }
 
 /** 10 base32 chars of a 48-bit timestamp */

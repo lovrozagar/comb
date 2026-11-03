@@ -66,7 +66,7 @@ const NO_HISTORY: AtlasStatus = { applied: [], available: [], current: "", error
 function atlasStatus(
 	options: AtlasCommand,
 	copy: string,
-	{ notClean = false }: { notClean?: boolean } = {},
+	{ notClean = false }: { notClean?: boolean | undefined } = {},
 ): AtlasStatus {
 	const ran = atlas(options, copy, ["status", "--format", STATUS_FORMAT])
 	if (ran.code !== 0 && notClean && /connected database is not clean/.test(ran.stderr)) return NO_HISTORY

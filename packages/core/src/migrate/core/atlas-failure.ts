@@ -50,7 +50,7 @@ const FIXED: ReadonlyArray<readonly [RegExp, string]> = [
 function explainAtlasFailure(
 	stderr: string,
 	scrub: (text: string) => string,
-	{ devOnly = false }: { devOnly?: boolean } = {},
+	{ devOnly = false }: { devOnly?: boolean | undefined } = {},
 ): string {
 	const fixed = FIXED.find(([said]) => said.test(stderr))
 	if (fixed !== undefined) return fixed[1]

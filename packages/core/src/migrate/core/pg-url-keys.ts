@@ -10,7 +10,7 @@
  * What comb does with a libpq key: leave it to Atlas, strip it from Atlas's URLs, refuse it unless its
  * value is one of `unless`, or refuse it with the TLS files it belongs to (pg-url.ts's tlsProblems)
  */
-type KeyRule = "atlas" | "strip" | "tls" | { refuse: string; unless?: readonly string[] }
+type KeyRule = "atlas" | "strip" | "tls" | { refuse: string; unless?: readonly string[] | undefined }
 
 // lookup-table: each libpq key, and what comb does with it; a refusal names what the key asks for
 const KEYS: Readonly<Record<string, KeyRule>> = {

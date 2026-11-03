@@ -25,7 +25,7 @@ export type Connection = {
 	 * through wrangler, in no transaction and in as many `--command` calls as one argument's length
 	 * needs, so a caller sends only statements that are safe to run again.
 	 */
-	batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void>
+	batch(statements: Array<{ sql: string; params?: unknown[] | undefined }>): Promise<void>
 	close(): Promise<void>
 	/** the prefix of the tables the engine keeps for itself (D1: `_cf_`), which comb never counts or copies */
 	ownedPrefix?: string | undefined
@@ -161,8 +161,8 @@ export type MigrationStatus = "success" | "already_applied" | "repaired" | "fail
 export type MigrationResult = {
 	database: string
 	status: MigrationStatus
-	tablesVerified?: number
-	error?: string
+	tablesVerified?: number | undefined
+	error?: string | undefined
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -255,5 +255,5 @@ export type CircuitBreakerState = {
 	totalProcessed: number
 	failures: number
 	tripped: boolean
-	tripReason?: string
+	tripReason?: string | undefined
 }

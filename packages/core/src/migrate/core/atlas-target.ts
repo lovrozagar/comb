@@ -69,7 +69,10 @@ function databaseOf(url: LibpqUrl): string {
 }
 
 /** One URL field checked: the URL as libpq reads it, a docker:// dev database, or the error that names the field (never its value) */
-function checkUrl(field: "devUrl" | "url", raw: string): { docker?: true; error?: string; url?: LibpqUrl } {
+function checkUrl(
+	field: "devUrl" | "url",
+	raw: string,
+): { docker?: true | undefined; error?: string | undefined; url?: LibpqUrl | undefined } {
 	if (blank(raw)) return { error: `${field} is empty` }
 	if (field === "devUrl" && isDocker(raw)) return { docker: true }
 	if (namesSeveralHosts(raw))
@@ -110,7 +113,10 @@ function schemaProblem(schema: string): string | undefined {
 }
 
 /** A checked URL field's errors: why it cannot be read, else why it cannot connect as its TLS options say */
-const fieldErrors = (field: "devUrl" | "url", checked: { error?: string; url?: LibpqUrl }): string[] =>
+const fieldErrors = (
+	field: "devUrl" | "url",
+	checked: { error?: string | undefined; url?: LibpqUrl | undefined },
+): string[] =>
 	checked.error === undefined
 		? checked.url === undefined
 			? []

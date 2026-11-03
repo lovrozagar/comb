@@ -84,7 +84,7 @@ function keyOf(
 	meta: TableMeta,
 	field: FieldMeta,
 	byVar: ReadonlyMap<string, TableMeta>,
-): { reference?: Column["reference"]; relation?: Relation; tableKey?: TableKey } {
+): { reference?: Column["reference"] | undefined; relation?: Relation | undefined; tableKey?: TableKey | undefined } {
 	const fk = field.foreignKey
 	if (!fk || (fk.key !== undefined && fk.key.columns[0] !== field.name)) return {}
 	const { onDelete, onUpdate } = fk

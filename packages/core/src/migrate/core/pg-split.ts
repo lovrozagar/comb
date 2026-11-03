@@ -11,7 +11,7 @@ import { atlasChunks, type Chunk, unterminated } from "./atlas-scan.ts"
 import { parsePostgres, postgresParser } from "./pg-parser.ts"
 import type { Dialect } from "../types.ts"
 
-type RawStmt = { stmt_len?: number; stmt_location?: number }
+type RawStmt = { stmt_len?: number | undefined; stmt_location?: number | undefined }
 
 /** A statement Postgres runs, with its parse tree (the parser's one RawStmt), none when the parser cannot read it */
 /**
@@ -24,7 +24,7 @@ type PgStatement = { sent: string; text: string; tree: RawStmt[] | undefined }
 type Unreadable = { error: string; statement: string }
 
 /** A chunk's statements, or the chunk whole with the parser's reason when it cannot read it */
-type Read = { error?: string; statements: PgStatement[] }
+type Read = { error?: string | undefined; statements: PgStatement[] }
 
 /** A Postgres file read: its statements in order, and the first the parser cannot read */
 type PgRead = { statements: PgStatement[]; unreadable: Unreadable | undefined }

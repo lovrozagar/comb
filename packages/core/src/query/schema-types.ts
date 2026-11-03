@@ -6,8 +6,8 @@ import type { RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS } from "./schema-params
 import type { FieldType, FilterAST, ParsedFields, SortDirection, SortField } from "./types.ts"
 
 type FieldsConfig = {
-	relations?: readonly string[]
-	relationFields?: Record<string, readonly string[]>
+	relations?: readonly string[] | undefined
+	relationFields?: Record<string, readonly string[]> | undefined
 	scalars: readonly string[]
 }
 
@@ -19,10 +19,10 @@ type OutputStableShape<T extends z.ZodRawShape = z.ZodRawShape> = {
 type ListQueryLimits = FilterLimits & { maxFilterLength: number; maxSearchTerms: number; maxSortKeys: number }
 
 type PaginationConfig = {
-	defaultLimit?: number
-	maxLimit?: number
+	defaultLimit?: number | undefined
+	maxLimit?: number | undefined
 	/** The last page offset pagination serves; past it, a client pages by cursor. Default 10 000. */
-	maxPage?: number
+	maxPage?: number | undefined
 }
 
 export type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number]
@@ -34,29 +34,29 @@ type ListQueryConfig<
 	TSortFields extends readonly string[] = readonly string[],
 > = {
 	/** Extra params, validated and returned as they are; a name the schema owns is refused */
-	extend?: T & { [K in ReservedListKey]?: never }
-	fields?: FieldsConfig
+	extend?: (T & { [K in ReservedListKey]?: never }) | undefined
+	fields?: FieldsConfig | undefined
 	/** Fields `filter` may name. Omitted or empty: the endpoint takes no `filter`. */
-	filter?: Record<string, FieldType>
+	filter?: Record<string, FieldType> | undefined
 	/** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
-	lang?: true
-	limits?: Partial<ListQueryLimits>
+	lang?: true | undefined
+	limits?: Partial<ListQueryLimits> | undefined
 	/**
 	 * Fields `q` searches, as published. Omitted: the endpoint takes no `q`.
 	 * Declaring it obliges the handler to pass a search resolver to buildListQuery,
 	 * which refuses a `q` it cannot apply.
 	 */
-	search?: readonly string[]
-	pagination?: PaginationConfig
+	search?: readonly string[] | undefined
+	pagination?: PaginationConfig | undefined
 	sort: TSortFields
 }
 
 type RetrieveQueryConfig<T extends z.ZodRawShape = z.ZodRawShape> = {
 	/** Extra params, validated and returned as they are; a name the schema owns is refused */
-	extend?: T & { [K in ReservedRetrieveKey]?: never }
+	extend?: (T & { [K in ReservedRetrieveKey]?: never }) | undefined
 	fields: FieldsConfig
 	/** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
-	lang?: true
+	lang?: true | undefined
 }
 
 type ListQueryOutput<TSortField extends string = string> = {

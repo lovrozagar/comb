@@ -37,7 +37,7 @@ export function evaluate(source: string, dialect: Dialect = "sqlite", scope: Rec
 	return new Function(...Object.keys(names), `return (${source})`)(...Object.values(names))
 }
 
-type FieldOptions = { dialect?: Dialect; scope?: Record<string, unknown> }
+type FieldOptions = { dialect?: Dialect | undefined; scope?: Record<string, unknown> | undefined }
 
 /** The names fixture sources reference without defining: tables a key points at, and schemas a column is given */
 function defaultScope(dialect: Dialect): Record<string, unknown> {

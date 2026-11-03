@@ -54,7 +54,8 @@ const SERVER_CALLS: ReadonlySet<string> = /* @__PURE__ */ new Set([
 /** The first function in the parse tree `tree` that acts on the server, by its name, as written */
 function serverCallIn(tree: unknown): string | undefined {
 	if (tree === null || typeof tree !== "object") return undefined
-	const call = (tree as { FuncCall?: { funcname: Array<{ String?: { sval: string } }> } }).FuncCall
+	const call = (tree as { FuncCall?: { funcname: Array<{ String?: { sval: string } | undefined }> } | undefined })
+		.FuncCall
 	const name = call?.funcname.at(-1)?.String?.sval
 	if (name !== undefined && (SERVER_CALLS.has(name) || name === "dblink" || name.startsWith("dblink_"))) return name
 	for (const value of Object.values(tree)) {

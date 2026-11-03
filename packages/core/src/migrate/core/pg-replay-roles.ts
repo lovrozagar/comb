@@ -53,8 +53,15 @@ const BARE = "NOLOGIN NOSUPERUSER NOREPLICATION NOBYPASSRLS"
 // lookup-table: the options BARE already says, each spelled as the parse tree holds it
 const SAID: ReadonlySet<string> = /* @__PURE__ */ new Set(["bypassrls", "canlogin", "isreplication", "superuser"])
 
-type Option = { DefElem: { arg?: { Boolean?: { boolval?: boolean }; List?: { items: RoleSpec[] } }; defname: string } }
-type RoleSpec = { RoleSpec: { rolename?: string; roletype: string } }
+type Option = {
+	DefElem: {
+		arg?:
+			| { Boolean?: { boolval?: boolean | undefined } | undefined; List?: { items: RoleSpec[] } | undefined }
+			| undefined
+		defname: string
+	}
+}
+type RoleSpec = { RoleSpec: { rolename?: string | undefined; roletype: string } }
 
 /**
  * The CREATE ROLE a replay runs for a history's `node`: the role with BARE's attributes and the

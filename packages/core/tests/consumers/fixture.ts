@@ -110,6 +110,33 @@ export const post = defineStateMachine({
 export const ids = createUlidFactory({ random: (bytes: string) => void bytes.toUpperCase() })
 `
 
+/**
+ * A module that forwards values that may be unset into comb's option bags under
+ * exactOptionalPropertyTypes (KT8 of r22b): comb reads an optional key set to undefined as the key
+ * left out, so each optional property it reads takes undefined, and 0.20.1 refused these with
+ * TS2379; what comb hands back keeps each optional key absent, never undefined
+ */
+export const UNSET = `import { createUlidFactory, LruCache } from "@lovrozagar/comb"
+import { createListQuerySchema, createRetrieveQuerySchema, type DrizzleListOptions } from "@lovrozagar/comb/query"
+import type { ListExtras } from "@lovrozagar/comb/query/sqlite"
+import { c } from "@lovrozagar/comb/sqlite/columns"
+import { ShardRouter } from "@lovrozagar/comb/sqlite/d1/sharding"
+declare const env: { MAX?: number; NOW?: () => number; LANG?: true; TTL?: number; LOG?: (event: string) => void }
+export const ids = () => createUlidFactory({ now: env.NOW })
+export const cache = () => new LruCache<string, string>({ hardTtlMs: env.TTL, maxSize: 10, ttlMs: env.TTL })
+export const list = () =>
+	createListQuerySchema({ lang: env.LANG, pagination: { defaultLimit: env.MAX, maxLimit: env.MAX, maxPage: env.MAX }, sort: ["id"] })
+export const retrieve = () => createRetrieveQuerySchema({ fields: { scalars: ["id"] }, lang: env.LANG })
+export const title = () => c.text("title", { max: env.MAX, min: env.MAX, pattern: undefined })
+export const state = () => c.enum("state", ["draft", "live"], { initial: undefined, nomutate: undefined })
+export const router = () => new ShardRouter({ kvTtlSeconds: env.TTL, log: env.LOG, lruMaxSize: env.MAX, totalShards: 4 })
+/* what comb hands back keeps a key absent, never undefined, so it goes on to drizzle's select and findMany as it is */
+type Defined<T> = { [K in keyof T]?: Exclude<T[K], undefined> }
+declare const built: { extras: ListExtras; options: DrizzleListOptions }
+export const selected: Defined<ListExtras> = built.extras
+export const options: Defined<Pick<DrizzleListOptions, "where">> & { extras: Defined<DrizzleListOptions["extras"]> } = built.options
+`
+
 /** A module that exports list and retrieve schemas, their types inferred, as an app's route module does (K11 of r17) */
 export const SCHEMAS = `import { createListQuerySchema, createRetrieveQuerySchema } from "@lovrozagar/comb/query"
 export const listSchema = createListQuerySchema({ sort: ["created_at"] })
@@ -236,6 +263,7 @@ export const APP: Record<string, string> = {
 	"comb.migrate.config.ts": MIGRATE_CONFIG,
 	"src/schemas.ts": SCHEMAS,
 	"src/types.ts": ALL_TYPES,
+	"src/unset.ts": UNSET,
 	"src/worker-types.ts": WORKER_TYPES,
 	"src/worker.ts": WORKER,
 	/* a bundler project: comb's .ts source compiles as the app's own */
@@ -247,7 +275,7 @@ export const APP: Record<string, string> = {
 			moduleResolution: "bundler",
 			noEmit: true,
 		},
-		include: ["src/types.ts", "src/floor.ts"],
+		include: ["src/types.ts", "src/floor.ts", "src/unset.ts"],
 	}),
 	/* a Node project: nodenext, emitting, with the .ts imports rewritten to .js */
 	"tsconfig.nodenext.json": JSON.stringify({
@@ -259,7 +287,7 @@ export const APP: Record<string, string> = {
 			rewriteRelativeImportExtensions: true,
 			rootDir: "src",
 		},
-		include: ["src/types.ts"],
+		include: ["src/types.ts", "src/unset.ts"],
 	}),
 	/* the migrate config alone, Node's types alone: no optional peer's types are needed (K2 of r17) */
 	"tsconfig.migrate.json": JSON.stringify({

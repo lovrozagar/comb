@@ -3,12 +3,14 @@ export interface Column {
 	name: string
 	nullable: boolean
 	primaryKey: boolean
-	reference?: {
-		column: string
-		onDelete?: string | undefined
-		onUpdate?: string | undefined
-		table: string
-	}
+	reference?:
+		| {
+				column: string
+				onDelete?: string | undefined
+				onUpdate?: string | undefined
+				table: string
+		  }
+		| undefined
 	type: string
 }
 

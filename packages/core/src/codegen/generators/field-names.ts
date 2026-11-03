@@ -13,7 +13,7 @@ import type { GeneratorContext } from "./context-types.ts"
 
 export type FieldNamesConfig = {
 	output: string
-	updatePackageJson?: boolean
+	updatePackageJson?: boolean | undefined
 }
 
 /** Convert snake_case field name to human label */

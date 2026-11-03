@@ -29,7 +29,7 @@ declare function buildListQuery<TTable extends SQLiteTable>(opts: BuildListQuery
     merged?: undefined;
 }): ListQueryResult;
 declare function buildDerivedListQuery<TSortField extends string>(opts: BuildDerivedListQueryOpts<TSortField> & {
-    anchor?: never;
+    anchor?: never | undefined;
     merged: NonNullable<BuildDerivedListQueryOpts<TSortField>["merged"]>;
 }): MergedListQueryResult;
 declare function buildDerivedListQuery<TSortField extends string>(opts: BuildDerivedListQueryOpts<TSortField> & {
@@ -251,9 +251,9 @@ type SpellfixDb = {
 };
 type SpellfixSearch = FtsSource & {
     /** editdist3 bound below which a word counts as a correction (default 300) */
-    maxEditDistance?: number;
+    maxEditDistance?: number | undefined;
     /** corrections taken per term (default 3) */
-    maxCorrections?: number;
+    maxCorrections?: number | undefined;
     /** false where spellfix1 is never loaded: the terms are searched as typed and nothing is probed (Q4 of r20); a D1 client is known without it (Q3 of r21) */
     spellfix?: boolean | undefined;
     spellfixTable: string;
@@ -443,9 +443,9 @@ import type { LikeSearchResolver } from "./search.ts";
 import type { RelationConfig } from "./types.ts";
 type BuildListQueryOpts<TTable extends SQLiteTable> = {
     /** Additional WHERE clause ANDed with filter/cursor — for joins, access filters, soft deletes */
-    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
-    computedFilters?: Record<string, ComputedFilterResolver>;
-    computedSorts?: Record<string, ComputedSortResolver>;
+    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL) | undefined;
+    computedFilters?: Record<string, ComputedFilterResolver> | undefined;
+    computedSorts?: Record<string, ComputedSortResolver> | undefined;
     /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
     cursorScope: string;
     /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
@@ -461,13 +461,13 @@ type BuildListQueryOpts<TTable extends SQLiteTable> = {
         maxRowsPerShard?: number | undefined;
     } | undefined;
     parsed: ListQueryInput;
-    relations?: Record<string, RelationConfig>;
+    relations?: Record<string, RelationConfig> | undefined;
     /** LIKE-based search resolver — use `likeSearch(column)` factory */
-    search?: LikeSearchResolver;
+    search?: LikeSearchResolver | undefined;
     table: TTable;
 };
 type BuildDerivedListQueryOpts<TSortField extends string = string> = {
-    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL);
+    baseWhere?: SQL | ((sql: (strings: TemplateStringsArray, ...values: unknown[]) => SQL) => SQL) | undefined;
     /** the list's scope, its route and tenant: a cursor minted in another opens in none here */
     cursorScope: string;
     /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
@@ -477,7 +477,7 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
      * wherever it sits, and a list of SQL expressions alone (a union, say) cannot (Q1 of r21)
      */
     dialect?: "postgres" | "sqlite" | undefined;
-    filterWhere?: SQL | null;
+    filterWhere?: SQL | null | undefined;
     /**
      * Present when the rows come from several shards, which paginateMerged merges, as on
      * buildListQuery: each shard reads its window, an offset page its count. A merged derived list
@@ -487,7 +487,7 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
         maxRowsPerShard?: number | undefined;
     } | undefined;
     parsed: ListQueryInput<TSortField>;
-    searchWhere?: SQL | null;
+    searchWhere?: SQL | null | undefined;
     /** each sort field's expression; one that yields epoch milliseconds is `{ sql, type: "date" }`, and its cursor value a Date */
     sortColumns: Record<TSortField, SQLWrapper | {
         sql: SQLWrapper;
@@ -502,9 +502,9 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
         idColumn: SQLiteColumn;
         table: SQLiteTable;
     };
-    idColumn?: never;
+    idColumn?: never | undefined;
 } | {
-    anchor?: never;
+    anchor?: never | undefined;
     /** the id the order breaks ties on; with no table to read a key back from, a key too long for a cursor is a 500 */
     idColumn: SQLWrapper;
 });
@@ -512,16 +512,16 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
  * The columns a built list's rows must carry beside the app's own, for `paginate` to read: select
  * them with the rest (`db.select({ ...cols, ...built.extras })`), and paginate strips them (Q2)
  */
-type ListExtras = {
+type ListExtras = Partial<{
     /** 1 when the cursor's anchor row is gone where no bound is safe, which paginate answers invalid_cursor (U26) */
-    _combAnchorGone?: SQL.Aliased<number>;
+    _combAnchorGone: SQL.Aliased<number>;
     /** the value the list breaks ties on, which the next cursor resumes from; none when no cursor can */
-    _combId?: SQL.Aliased<unknown>;
+    _combId: SQL.Aliased<unknown>;
     /** the class of each sort key and the tiebreak, comma-joined, where the list binds them as read or one is an undeclared SQLite expression (Q2 of r19, Q2 of r21) */
-    _combKeyTypes?: SQL.Aliased<string>;
+    _combKeyTypes: SQL.Aliased<string>;
     /** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
-    _total?: SQL.Aliased<number>;
-};
+    _total: SQL.Aliased<number>;
+}>;
 type ListQueryResult = {
     /** select these beside the row's own columns (ListExtras) */
     extras: ListExtras;
@@ -857,14 +857,19 @@ export { paginationResponseSchema };
 import * as z from "zod";
 import { baseListQueryShape } from "./schema-params.ts";
 import type { ListQueryConfig, ListQueryOutput, OutputStableShape } from "./schema-types.ts";
-/** The optional params beside cursor, page and limit; each key exists only when advertised */
+/**
+ * The optional params beside cursor, page and limit; each key exists only when advertised. A zod
+ * shape's key is absent or a schema, never undefined, which zod's shape refuses: Partial says so
+ * under exactOptionalPropertyTypes, where `?:` on an input bag takes undefined (KT8 of r22b)
+ */
 type OptionalShape = {
     order: z.ZodOptional<z.ZodString>;
-    filter?: z.ZodOptional<z.ZodString>;
-    q?: z.ZodOptional<z.ZodString>;
-    lang?: z.ZodOptional<z.ZodString>;
-    select?: z.ZodOptional<z.ZodString>;
-};
+} & Partial<{
+    filter: z.ZodOptional<z.ZodString>;
+    q: z.ZodOptional<z.ZodString>;
+    lang: z.ZodOptional<z.ZodString>;
+    select: z.ZodOptional<z.ZodString>;
+}>;
 export type ListQueryShape = typeof baseListQueryShape & OptionalShape & {
     limit: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     page: z.ZodOptional<z.ZodCoercedNumber<unknown>>;
@@ -886,9 +891,10 @@ export { createListQuerySchema, type ListQuerySchema };
 import * as z from "zod";
 import type { RetrieveQueryConfig, RetrieveQueryOutput } from "./schema-types.ts";
 export type RetrieveShape = {
-    lang?: z.ZodOptional<z.ZodString>;
     select: z.ZodOptional<z.ZodString>;
-};
+} & Partial<{
+    lang: z.ZodOptional<z.ZodString>;
+}>;
 export type RetrieveRequest = z.ZodObject<RetrieveShape, z.core.$strict>;
 /** What createRetrieveQuerySchema returns: the request object piped into its parsed output */
 type RetrieveQuerySchema<T extends z.ZodRawShape> = z.ZodPipe<RetrieveRequest, z.ZodTransform<Awaited<RetrieveQueryOutput & {
@@ -930,8 +936,8 @@ import type { FilterLimits } from "./filter.ts";
 import type { RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS } from "./schema-params.ts";
 import type { FieldType, FilterAST, ParsedFields, SortDirection, SortField } from "./types.ts";
 type FieldsConfig = {
-    relations?: readonly string[];
-    relationFields?: Record<string, readonly string[]>;
+    relations?: readonly string[] | undefined;
+    relationFields?: Record<string, readonly string[]> | undefined;
     scalars: readonly string[];
 };
 type OutputStableShape<T extends z.ZodRawShape = z.ZodRawShape> = {
@@ -944,41 +950,41 @@ type ListQueryLimits = FilterLimits & {
     maxSortKeys: number;
 };
 type PaginationConfig = {
-    defaultLimit?: number;
-    maxLimit?: number;
+    defaultLimit?: number | undefined;
+    maxLimit?: number | undefined;
     /** The last page offset pagination serves; past it, a client pages by cursor. Default 10 000. */
-    maxPage?: number;
+    maxPage?: number | undefined;
 };
 export type ReservedListKey = (typeof RESERVED_LIST_KEYS)[number];
 export type ReservedRetrieveKey = (typeof RESERVED_RETRIEVE_KEYS)[number];
 type ListQueryConfig<T extends OutputStableShape<T> = Record<never, never>, TSortFields extends readonly string[] = readonly string[]> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
-    extend?: T & {
+    extend?: (T & {
         [K in ReservedListKey]?: never;
-    };
-    fields?: FieldsConfig;
+    }) | undefined;
+    fields?: FieldsConfig | undefined;
     /** Fields `filter` may name. Omitted or empty: the endpoint takes no `filter`. */
-    filter?: Record<string, FieldType>;
+    filter?: Record<string, FieldType> | undefined;
     /** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
-    lang?: true;
-    limits?: Partial<ListQueryLimits>;
+    lang?: true | undefined;
+    limits?: Partial<ListQueryLimits> | undefined;
     /**
      * Fields `q` searches, as published. Omitted: the endpoint takes no `q`.
      * Declaring it obliges the handler to pass a search resolver to buildListQuery,
      * which refuses a `q` it cannot apply.
      */
-    search?: readonly string[];
-    pagination?: PaginationConfig;
+    search?: readonly string[] | undefined;
+    pagination?: PaginationConfig | undefined;
     sort: TSortFields;
 };
 type RetrieveQueryConfig<T extends z.ZodRawShape = z.ZodRawShape> = {
     /** Extra params, validated and returned as they are; a name the schema owns is refused */
-    extend?: T & {
+    extend?: (T & {
         [K in ReservedRetrieveKey]?: never;
-    };
+    }) | undefined;
     fields: FieldsConfig;
     /** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
-    lang?: true;
+    lang?: true | undefined;
 };
 type ListQueryOutput<TSortField extends string = string> = {
     cursor: string | undefined;

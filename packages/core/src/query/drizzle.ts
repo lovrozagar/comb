@@ -26,21 +26,21 @@ type DrizzleListOptions = {
 	offset: number
 	/** The sort, its null placement and the id tiebreak, for `findMany({ orderBy })` */
 	orderBy: (table: RelationalTable) => SQL[]
-	/** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
-	where?: { RAW: (table: RelationalTable) => SQL }
 	/**
 	 * For `findMany({ extras })`, which paginate reads and refuses a page without (Q3 of r17): the
 	 * tiebreak the next cursor resumes from (Q2), an offset page's count, and, on a cursor that
 	 * carries a reference, whether its anchor is gone where no bound is safe (U26)
 	 */
-	extras: {
-		_combAnchorGone?: (table: RelationalTable) => SQL<number>
-		_combId: (table: RelationalTable) => SQL
-		_total?: (table: RelationalTable) => SQL<number>
-	}
+	extras: { _combId: (table: RelationalTable) => SQL } & Partial<{
+		_combAnchorGone: (table: RelationalTable) => SQL<number>
+		_total: (table: RelationalTable) => SQL<number>
+	}>
 	/** How `paginate` pages the rows these options read (pagination.ts) */
 	pagination: ListPagination & { merged: false }
-}
+} & Partial<{
+	/** The keyset predicate of a cursor request, for `findMany({ where })` (AND it with your own) */
+	where: { RAW: (table: RelationalTable) => SQL }
+}>
 
 /** The sort keys and tiebreak against the queried table; a sort field it lacks is a wiring mistake */
 function keysOn(table: RelationalTable, sort: readonly SortField[]): { keys: SortKey[]; tiebreak: SortKey } {

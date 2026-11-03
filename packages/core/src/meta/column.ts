@@ -22,12 +22,12 @@ type CombColumnKind =
 
 /** A column's comb metadata: its helper, and the constraints, enum values, states, schema or prefix it took */
 type CombColumnMeta = {
-	constraints?: Readonly<Record<string, unknown>>
+	constraints?: Readonly<Record<string, unknown>> | undefined
 	kind: CombColumnKind
-	prefix?: string
+	prefix?: string | undefined
 	schema?: unknown
 	states?: unknown
-	values?: readonly string[]
+	values?: readonly string[] | undefined
 }
 
 const COMB_COLUMN: unique symbol = /* @__PURE__ */ Symbol.for("comb.column")
@@ -41,7 +41,7 @@ function withCombColumn<B>(builder: B, meta: { [K in keyof CombColumnMeta]: Comb
 
 /** The comb metadata a built column (or its builder) carries; undefined for a column no `c` helper built */
 function combColumnMeta(column: unknown): CombColumnMeta | undefined {
-	const config = (column as { config?: Record<symbol, unknown> } | null | undefined)?.config
+	const config = (column as { config?: Record<symbol, unknown> | undefined } | null | undefined)?.config
 	return config?.[COMB_COLUMN] as CombColumnMeta | undefined
 }
 
@@ -50,14 +50,17 @@ function enumMeta(
 	values: readonly string[],
 	options: { nomutate?: boolean | undefined; private?: boolean | undefined; tenant?: boolean | undefined } = {},
 ): { [K in keyof CombColumnMeta]: CombColumnMeta[K] | undefined } {
-	const { nomutate, private: hidden, tenant, ...states } = options
+	const { nomutate, private: hidden, tenant, ...given } = options
 	const flags = { nomutate, private: hidden, tenant }
 	const flagged = Object.values(flags).some((flag) => flag !== undefined)
+	/* a state set to undefined is one left out (KT8 of r22b) */
+	const states = Object.fromEntries(Object.entries(given).filter(([, value]) => value !== undefined))
+	const whole = !flagged && Object.keys(states).length === Object.keys(options).length
 	return {
 		constraints: flagged ? flags : undefined,
 		kind: "enum",
 		/* a machine given alone is kept as the very object passed, as assertTransition takes it too */
-		states: Object.keys(states).length === 0 ? undefined : flagged ? states : options,
+		states: Object.keys(states).length === 0 ? undefined : whole ? options : states,
 		values,
 	}
 }

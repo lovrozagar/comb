@@ -5,22 +5,22 @@
  */
 type BaseConstraints = {
     /** Field is filled by comb or the database: generated create and update DTOs leave it out */
-    autogenerate?: boolean;
+    autogenerate?: boolean | undefined;
     /**
      * A foreign key that may move after creation (a person to another team): generated update DTOs
      * take it. Every other reference is set once, at creation. Refused on a column that references
      * nothing, and together with `nomutate`.
      */
-    mutable?: boolean;
+    mutable?: boolean | undefined;
     /** Field cannot be mutated after creation */
-    nomutate?: boolean;
+    nomutate?: boolean | undefined;
     /**
      * Field is never read back: generated read DTOs and the meta stamp leave it out, and the manifest
      * lists it flagged `private: true`, on both dialects
      */
-    private?: boolean;
+    private?: boolean | undefined;
     /** the name this key's relation takes, where its column's role would take the column's own name (F57) */
-    relation?: string;
+    relation?: string | undefined;
     /**
      * This column scopes rows to a tenant.
      *
@@ -29,35 +29,35 @@ type BaseConstraints = {
      * is worse than a missing one. Saying so here makes it a hand-reviewed fact.
      * At most one column per table may carry it.
      */
-    tenant?: boolean;
+    tenant?: boolean | undefined;
 };
 type StringTransformConstraints = {
     /** Apply lowercase transformation */
-    lowercase?: boolean;
+    lowercase?: boolean | undefined;
     /** Trim whitespace */
-    trim?: boolean;
+    trim?: boolean | undefined;
     /** Apply uppercase transformation */
-    uppercase?: boolean;
+    uppercase?: boolean | undefined;
 };
 type NumericRangeConstraints = {
     /** Maximum value */
-    max?: number;
+    max?: number | undefined;
     /** Minimum value */
-    min?: number;
+    min?: number | undefined;
 };
 type StringValidationConstraints = {
     /** Email validation */
-    email?: boolean;
+    email?: boolean | undefined;
     /** Image URI validation (accepts https URLs and data:image/ URIs) */
-    imageUri?: boolean;
+    imageUri?: boolean | undefined;
     /** Human/entity name validation (letters, marks, numbers, spaces, punctuation) */
-    name?: boolean;
+    name?: boolean | undefined;
     /** A stored password hash: kept as written, held to the declared bounds and pattern alone; validate the plaintext with `passwordText()` */
-    password?: boolean;
+    password?: boolean | undefined;
     /** Regex pattern validation */
-    pattern?: string;
+    pattern?: string | undefined;
     /** URL validation */
-    url?: boolean;
+    url?: boolean | undefined;
 };
 /**
  * Text column constraints
@@ -75,7 +75,7 @@ export type IntegerConstraints = BaseConstraints & NumericRangeConstraints;
  */
 export type JsonConstraints = BaseConstraints & {
     /** Maximum JSON stringified byte length */
-    maxBytes?: number;
+    maxBytes?: number | undefined;
 };
 /**
  * Timestamp column constraints

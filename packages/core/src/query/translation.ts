@@ -7,7 +7,7 @@ type TranslationResolverInput<T extends Record<string, unknown>> = {
 	defaultLang: string
 	fields: string[] | null
 	lang: string
-	languageCodeKey?: string
+	languageCodeKey?: string | undefined
 	translations: T[]
 }
 
