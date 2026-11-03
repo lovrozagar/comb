@@ -49,6 +49,26 @@ describe("a call that acts on the server is left out and named (PR2; sibling: BE
 		},
 		60_000,
 	)
+})
+
+describe("a dblink connection's every call is left out with it (PR2; sibling: a slot's making)", () => {
+	it("leaves a dblink session's every call out, names each, and apply runs them", async () => {
+		const sent = [
+			`SELECT dblink_connect('comb_t_link', ${LOOPBACK})`,
+			"SELECT dblink_open('comb_t_link', 'cur', 'SELECT 1')",
+			"SELECT * FROM dblink_fetch('comb_t_link', 'cur', 1) AS r(n int)",
+			"SELECT dblink_disconnect('comb_t_link')",
+		]
+		const history = `${T}-- comb:allow-unsafe: the test's history\nCREATE EXTENSION IF NOT EXISTS dblink;\n`
+		const out: string[] = []
+		const ran = await checkThenApply(history, `${NONE}${sent.join(";\n")};\n`, out)
+		expect(ran).toEqual({ apply: undefined, check: undefined })
+		expect(out.filter((line) => line.startsWith("Check left"))).toEqual(
+			sent.map((line, i) =>
+				left(line, ["dblink_connect", "dblink_open", "dblink_fetch", "dblink_disconnect"][i] as string),
+			),
+		)
+	}, 60_000)
 
 	it("leaves dblink_exec's CREATE ROLE out, names it, and apply runs it", async () => {
 		const role = unique("comb_t_call")

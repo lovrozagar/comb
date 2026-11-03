@@ -21,6 +21,8 @@ describe("beyondDatabase of a call that acts on the server (PR2; sibling: BEYOND
 		["ALTER TABLE t ADD COLUMN b bool DEFAULT pg_reload_conf()", "pg_reload_conf"],
 		["COPY (SELECT pg_rotate_logfile()) TO STDOUT", "pg_rotate_logfile"],
 		["SELECT * FROM dblink('dbname=x', 'SELECT 1') AS r(n int)", "dblink"],
+		["SELECT dblink_open('c', 'cur', 'SELECT 1')", "dblink_open"],
+		["SELECT * FROM dblink_get_result('c') AS r(n int)", "dblink_get_result"],
 	])("names %j as a call of %s", (sql, call) => {
 		expect(beyond(sql)).toBe(`a call of ${call}`)
 	})
@@ -39,6 +41,7 @@ describe("beyondDatabase of a call that acts on the server (PR2; sibling: BEYOND
 		"CREATE TABLE t (b bool DEFAULT pg_reload_conf())",
 		"CREATE TABLE x AS SELECT pg_switch_wal() WITH NO DATA",
 		"SELECT pg_read_file('postgresql.conf')",
+		"SELECT dblinker()",
 		'SELECT "PG_RELOAD_CONF"()',
 	])("leaves %j to its database: a definition, a plan, or a call that only reads", (sql) => {
 		expect(beyond(sql)).toBeUndefined()

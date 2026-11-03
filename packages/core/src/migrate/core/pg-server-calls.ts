@@ -5,16 +5,12 @@
  * function Postgres 17 revokes from PUBLIC that does more than read, which a test holds it to
  * against pg_proc, and the ones it grants by role instead: a backend's signals and a replication
  * slot's work. dblink's are named whatever schema holds them, as a second connection's work is
- * whatever it sends.
+ * whatever it sends, and as a family, by the prefix: a connection left out leaves its cursor's open,
+ * fetch and close, and its disconnect, nothing to reach, so each is left out with it.
  */
 
-// lookup-table: each function that acts on the server or past the database, by its name
+// lookup-table: each pg_catalog function that acts on the server or past the database, by its name
 const SERVER_CALLS: ReadonlySet<string> = /* @__PURE__ */ new Set([
-	"dblink",
-	"dblink_connect",
-	"dblink_connect_u",
-	"dblink_exec",
-	"dblink_send_query",
 	"lo_export",
 	"pg_backup_start",
 	"pg_backup_stop",
@@ -60,7 +56,7 @@ function serverCallIn(tree: unknown): string | undefined {
 	if (tree === null || typeof tree !== "object") return undefined
 	const call = (tree as { FuncCall?: { funcname: Array<{ String?: { sval: string } }> } }).FuncCall
 	const name = call?.funcname.at(-1)?.String?.sval
-	if (name !== undefined && SERVER_CALLS.has(name)) return name
+	if (name !== undefined && (SERVER_CALLS.has(name) || name === "dblink" || name.startsWith("dblink_"))) return name
 	for (const value of Object.values(tree)) {
 		const found = serverCallIn(value)
 		if (found !== undefined) return found
