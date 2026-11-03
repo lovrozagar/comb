@@ -1,4 +1,5 @@
-import { sql } from "drizzle-orm"
+import { type SQL, sql } from "drizzle-orm"
+import { bigint, numeric, pgTable, text as pgText } from "drizzle-orm/pg-core"
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { SEALED } from "./__fixtures__/cursor-secret.ts"
@@ -298,6 +299,51 @@ describe("buildDerivedListQuery's merged list", () => {
 				errorKey: "sort_not_wired",
 			}),
 		)
+	})
+})
+
+/* r22 Q2: paginateMerged orders as SQLite does; a Postgres server orders numeric strings and text its own way */
+describe("a merged derived list over Postgres is refused at build (Q2; sibling: a SQLite merged derived list)", () => {
+	const item = pgTable("item", {
+		id: pgText("id").primaryKey(),
+		k: bigint("k", { mode: "bigint" }).notNull(),
+		n: numeric("n").notNull(),
+	})
+	const refusal = new TypeError(
+		"a merged derived list is merged in memory as SQLite orders, but Postgres orders numeric text and collated text on the server, which no in-memory merge can know: merge a SQLite list, or page this one on its server",
+	)
+	const build = (sortColumns: Record<string, SQL>, extra: { dialect?: "postgres" } = {}) =>
+		buildDerivedListQuery({
+			...SEALED,
+			...extra,
+			idColumn: sql`${item.id}`,
+			merged: {},
+			parsed: parse({ order: "k.asc" }),
+			sortColumns: sortColumns as never,
+		})
+
+	it.each([
+		["a numeric column", { k: sql`${item.n}` }],
+		["a bigint read through an expression", { k: sql`${item.k}` }],
+	])("refuses %s", (_label, sortColumns) => {
+		expect(() => build(sortColumns)).toThrow(refusal)
+	})
+
+	it("refuses a list of expressions stated as Postgres", () => {
+		expect(() =>
+			buildDerivedListQuery({
+				...SEALED,
+				dialect: "postgres",
+				idColumn: sql`id`,
+				merged: {},
+				parsed: parse({}),
+				sortColumns: { k: sql`k` },
+			}),
+		).toThrow(refusal)
+	})
+
+	it("still builds a SQLite merged derived list", () => {
+		expect(derived({ order: "k.asc" }).pagination.merged).toBe(true)
 	})
 })
 
