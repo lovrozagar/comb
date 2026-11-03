@@ -31,10 +31,12 @@ const KNOWN = /* @__PURE__ */ new Set([
 	"url",
 ])
 
-/* the keys no field takes together: either would win without a word (C8 of r18 for the casing) */
-const CONTRADICTIONS: ReadonlyArray<readonly [string, string]> = [
-	["mutable", "nomutate"],
-	["lowercase", "uppercase"],
+/* the keys no field takes together, and why: either would win without a word (C8 of r18 for the
+   casing); a tenant column moving on update would move the row to another tenant (CD1 of r22b) */
+const CONTRADICTIONS: ReadonlyArray<readonly [string, string, string]> = [
+	["mutable", "nomutate", "declare one"],
+	["lowercase", "uppercase", "declare one"],
+	["tenant", "mutable", "a tenant column is set once; a row does not move between tenants"],
 ]
 
 /* a text's kinds: one rule each, so a second would drop the first's without a word (C6 of r19) */
@@ -98,7 +100,10 @@ function refuseMalformed(
 	const unknown = Object.keys(constraints).find((key) => !KNOWN.has(key))
 	if (unknown !== undefined) throw new Error(`${place}: comb reads no constraint named ${unknown}`)
 	const contradiction = CONTRADICTIONS.find(([a, b]) => constraints[a] === true && constraints[b] === true)
-	if (contradiction !== undefined) throw new Error(`${place}: ${contradiction.join(" and ")} contradict; declare one`)
+	if (contradiction !== undefined) {
+		const [a, b, why] = contradiction
+		throw new Error(`${place}: ${a} and ${b} contradict; ${why}`)
+	}
 	refuseKinds(constraints, place)
 	const relation = constraints["relation"]
 	/* a relation's name is a property of the generated relations, so it is an identifier (F57) */

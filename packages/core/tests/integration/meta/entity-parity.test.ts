@@ -9,12 +9,14 @@ import { fixtureRoot } from "../../../src/codegen/__fixtures__/temp.ts"
  */
 import fs from "node:fs"
 import path from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest"
 import { analyze } from "../../../src/codegen/analyzer.ts"
 import { deriveEntityMeta } from "../../../src/codegen/entity-meta.ts"
 import { generateDtos } from "../../../src/codegen/generators/dtos/index.ts"
 import { validateTables } from "../../../src/codegen/utils/validate.ts"
 import { testContext } from "../../../src/codegen/generators/__fixtures__/context.ts"
+import { cleanGeneratedDtos } from "../support/dtos.ts"
+import { disagreements, entityChannels } from "../support/entity-channels.ts"
 
 const PRELUDE = `
 import { sqliteTable as createTable, text, integer, primaryKey, uniqueIndex } from "drizzle-orm/sqlite-core"
@@ -394,5 +396,64 @@ export const post = createTable("post", {
 		expect(generated.match(/combMeta\(\{/g)).toHaveLength(1)
 		expect(generated).not.toMatch(/postDtoCreateSchema[\s\S]*?\.meta\(combMeta/)
 		expect(generated).not.toMatch(/postDtoUpdateSchema[\s\S]*?\.meta\(combMeta/)
+	})
+})
+
+/* CD1 of r22b: §6.2 keeps an ownership key out of update so a body cannot move a row to another
+   tenant, and §6.3 calls the tenant column the contract's highest-value field */
+describe("a tenant column is set once (CD1; sibling: `mutable` with `nomutate`)", () => {
+	afterAll(() => cleanGeneratedDtos())
+
+	const TABLES = {
+		postgres: (column: string) => `export const org = pgTable("org", { id: c.id("org") })
+export const post = pgTable("post", { id: c.id("pst"), orgId: ${column}, title: c.text("title") })`,
+		sqlite: (column: string) => `export const org = sqliteTable("org", { id: c.id("org") })
+export const post = sqliteTable("post", { id: c.id("pst"), orgId: ${column}, title: c.text("title") })`,
+	}
+
+	const SHAPES = {
+		"c.integer": 'c.integer("org_id", { tenant: true }).notNull()',
+		"c.ref, no reference": 'c.ref("org_id", { tenant: true }).notNull()',
+		"c.ref to org": 'c.ref("org_id", { tenant: true }).notNull().references(() => org.id)',
+		"c.text": 'c.text("org_id", { tenant: true }).notNull()',
+	}
+
+	for (const dialect of ["postgres", "sqlite"] as const)
+		for (const [shape, column] of Object.entries(SHAPES))
+			it(`keeps a ${shape} tenant out of update, immutable in the stamp and the manifest, on ${dialect}`, async () => {
+				const channels = await entityChannels(
+					`cd1-${dialect}-${shape.replaceAll(/\W/g, "")}`,
+					TABLES[dialect](column),
+					{ dialect, entity: "post" },
+				)
+				expect(channels.stamp.tenantColumn).toBe("orgId")
+				expect(channels.create).toContain("orgId")
+				expect(channels.update).not.toContain("orgId")
+				expect(channels.stamp.immutable).toContain("orgId")
+				expect(channels.manifest["orgId"]?.immutable).toBe(true)
+				expect(disagreements(channels)).toEqual([])
+			})
+
+	it.each(["postgres", "sqlite"] as const)(
+		"refuses tenant with mutable at codegen, naming the column, on %s",
+		async (dialect) => {
+			await expect(
+				entityChannels(
+					`cd1-mutable-${dialect}`,
+					TABLES[dialect]('c.ref("org_id", { mutable: true, tenant: true }).references(() => org.id)'),
+					{ dialect, entity: "post" },
+				),
+			).rejects.toThrow(/orgId.*a tenant column is set once; a row does not move between tenants/s)
+		},
+	)
+
+	it("sibling: still refuses mutable with nomutate", async () => {
+		await expect(
+			entityChannels(
+				"cd1-nomutate",
+				TABLES.sqlite('c.ref("org_id", { mutable: true, nomutate: true }).references(() => org.id)'),
+				{ dialect: "sqlite", entity: "post" },
+			),
+		).rejects.toThrow(/mutable and nomutate contradict/)
 	})
 })

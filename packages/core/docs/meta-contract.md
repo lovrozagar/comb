@@ -371,6 +371,12 @@ boundary. Missing is recoverable, wrong is not.
 `{ tenant: true }` is a different kind of fact: someone wrote it, a reviewer read it, and it sits
 in the same file as the column. That is the provenance the whole contract depends on (§1).
 
+**A tenant column is set once.** Whatever it references, a `c.ref` to the tenant table, one to a
+table in another database, or a plain `c.text` or `c.integer`, it is out of the update DTO and in
+`immutable`, in the stamp and the manifest alike, as §6.2 keeps an ownership key: a body that could
+move it would move the row to another tenant. `{ tenant: true, mutable: true }` fails codegen,
+naming the column.
+
 **Two declarations yield null**, and `validateTables` rejects the table. A table scopes to one
 tenant or none; with two there is no safe resolution, and publishing either would be a coin flip
 presented as a fact.

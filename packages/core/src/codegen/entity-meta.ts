@@ -29,6 +29,8 @@ function isExcludedFromUpdate(field: FieldMeta): boolean {
 		field.generated ||
 		field.constraints.nomutate ||
 		field.constraints.autogenerate ||
+		/* a tenant column is set once, whatever it references, if anything (CD1 of r22b, §6.3) */
+		field.constraints.tenant ||
 		/* a reference is set once, at creation, unless it declares mutable (F25): an ownership key
 		   (organization, project) that a body could move would move the row to another tenant */
 		(isReference(field) && !field.constraints.mutable)
