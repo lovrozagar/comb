@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { fakeD1, localD1 } from "../../cli/__fixtures__/d1.ts"
+import { fakeD1, localD1, wranglerBin } from "../../cli/__fixtures__/d1.ts"
 import { createD1Provider } from "../drivers/d1.ts"
 import type { D1Target, ReadConfig } from "./d1-binding.ts"
 import { hashStatements, historyTable, intentStatements, readHistory } from "./d1-history-rows.ts"
@@ -28,6 +28,7 @@ async function target(): Promise<D1Target & { db: ReturnType<typeof fakeD1>["db"
 		flags: ["--local"],
 		migrationsDir: dir,
 		name: "CORE",
+		wrangler: wranglerBin(),
 		wranglerConfig: join(dir, "wrangler.toml"),
 	}
 }

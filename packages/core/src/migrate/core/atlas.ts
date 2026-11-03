@@ -8,7 +8,8 @@ import type { Dialect } from "../types.ts"
 import { normalizeSqliteExport, sqliteDevUrl } from "./atlas-env.ts"
 import { explainAtlasFailure } from "./atlas-failure.ts"
 import { atlasNotices, type PgTarget, withAtlasEnv } from "./atlas-target.ts"
-import { type Run, run } from "./process.ts"
+import { DIFF, projectBin } from "./optional-peer.ts"
+import { type ProjectBin, type Run, run, runPeer } from "./process.ts"
 import { codeOf, IDENT, QNAME, unquote } from "./sql-code.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { atlasFile, pgStatements } from "./pg-split.ts"
@@ -154,10 +155,15 @@ function scopeExport(sql: string, schema: string): string {
  * database's schema and read as the statements Postgres runs, so `loadPostgresParser()` first
  */
 export function exportDrizzleSchema(options: DrizzleExportOptions): string {
+	return exportWith(projectBin(DIFF, options.cwd), options)
+}
+
+/** exportDrizzleSchema through `drizzleKit`, the bin the command checked: its runtime on the project's bin (K1 of r22) */
+export function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): string {
 	const { configPath, cwd, dialect, run: exec = run } = options
 
 	const config = configPath === undefined ? [] : ["--config", configPath]
-	const result = exec("bun", ["drizzle-kit", "export", ...config], { cwd })
+	const result = runPeer(exec, drizzleKit)(["export", ...config], { cwd })
 
 	if (result.code !== 0) {
 		throw new Error(`drizzle-kit export failed: ${result.stderr.trim()}`)

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { fakeD1, localD1, writeSum } from "../../cli/__fixtures__/d1.ts"
+import { asWrangler, fakeD1, localD1, wranglerBin, writeSum } from "../../cli/__fixtures__/d1.ts"
 import { createD1Provider } from "../drivers/d1.ts"
 import { approveMigration } from "./approval.ts"
 import { type D1Target, findWranglerConfig, type ReadConfig } from "./d1-binding.ts"
@@ -51,6 +51,7 @@ async function target(binding: Record<string, string>) {
 		flags: ["--local"],
 		migrationsDir: migrations,
 		name: "CORE",
+		wrangler: wranglerBin(),
 		wranglerConfig: join(dir, "wrangler.toml"),
 	}
 	return { apply: () => applyD1(d1, { approve, print: () => undefined, read }), d1, read, run }
@@ -236,10 +237,11 @@ describe("applyD1 when wrangler fails before it makes its table", () => {
 		const { d1, read, run } = await target({})
 		const early: D1Target = {
 			...d1,
-			exec: (cmd, args, options) =>
+			exec: asWrangler((cmd, args, options) =>
 				args[1] === "migrations"
 					? { code: 1, stderr: "✘ [ERROR] Authentication error [code: 10000]", stdout: "" }
 					: run(cmd, args, options),
+			),
 		}
 		await expect(applyD1(early, { approve, print: () => undefined, read })).rejects.toThrow(
 			"wrangler d1 migrations apply failed: ✘ [ERROR] Authentication error [code: 10000]",
@@ -317,7 +319,7 @@ describe("applyD1 when wrangler stops short", () => {
 	it("names what wrangler applied and the rest when it records fewer files than comb checked, the hash of each it applied recorded", async () => {
 		const { d1, read, run } = await target({})
 		/* a wrangler that applies the first pending file only, and exits 0 */
-		const short: typeof d1.exec = (cmd, args, options) => {
+		const short: typeof d1.exec = asWrangler((cmd, args, options) => {
 			if (cmd === "wrangler" && args[1] === "migrations") {
 				rmSync(join(d1.migrationsDir, "3_c.sql"))
 				const result = run(cmd, args, options)
@@ -325,7 +327,7 @@ describe("applyD1 when wrangler stops short", () => {
 				return result
 			}
 			return run(cmd, args, options)
-		}
+		})
 		writeFileSync(join(d1.migrationsDir, "2_b.sql"), "CREATE TABLE b (id TEXT);")
 		writeFileSync(join(d1.migrationsDir, "3_c.sql"), "CREATE TABLE c (id TEXT);")
 		writeSum(d1.migrationsDir)
@@ -338,14 +340,14 @@ describe("applyD1 when wrangler stops short", () => {
 
 	it("reports what wrangler applied before it failed, and its error line without colours or banner", async () => {
 		const { d1, read, run } = await target({})
-		const coloured: typeof d1.exec = (cmd, args, options) => {
+		const coloured: typeof d1.exec = asWrangler((cmd, args, options) => {
 			const result = run(cmd, args, options)
 			if (cmd !== "wrangler" || args[1] !== "migrations" || result.code === 0) return result
 			return {
 				...result,
 				stderr: `\u001b[1m⛅️ wrangler 4.0.0\u001b[0m\n---\n\u001b[31m✘ [ERROR]\u001b[0m ${result.stderr}\n`,
 			}
-		}
+		})
 		writeFileSync(join(d1.migrationsDir, "2_b.sql"), "CREATE TABLE b (id TEXT);")
 		writeFileSync(join(d1.migrationsDir, "3_c.sql"), "INSERT INTO nope (id) VALUES ('x');")
 		writeSum(d1.migrationsDir)

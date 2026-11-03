@@ -4,7 +4,11 @@
  */
 import { spawnSync } from "node:child_process"
 import { constants, devNull } from "node:os"
-import { DIFF, missingPeer, type Need, WRANGLER } from "./optional-peer.ts"
+/** An optional peer comb spawns rather than imports */
+export type BinPeer = "drizzle-kit" | "wrangler"
+
+/** A bin peer as the project holds it: its package.json, the bin file it names for the peer, and the runtime that runs it */
+export type ProjectBin = { bin: string; manifest: string; peer: BinPeer; runtime: "bun" | "node" }
 
 export type RunResult = { code: number; stdout: string; stderr: string }
 
@@ -17,6 +21,8 @@ export type RunOptions = {
 	input?: string | undefined
 	/** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
 	maxBuffer?: number | undefined
+	/** The bin peer the process runs, whose runtime a failure to start names */
+	peer?: BinPeer | undefined
 	/** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
 	timeoutMs?: number | undefined
 }
@@ -45,18 +51,25 @@ function childEnv(env: RunOptions["env"]): NodeJS.ProcessEnv {
 	return out
 }
 
-// lookup-table: the optional peers comb runs as a command, and what it runs each for
-const RUNS: Readonly<Record<string, Need>> = { "drizzle-kit": DIFF, wrangler: WRANGLER }
+// lookup-table: each runtime a bin peer runs on, and where it is installed from
+const RUNTIMES: Readonly<Record<ProjectBin["runtime"], string>> = {
+	bun: "Bun (https://bun.sh)",
+	node: "Node.js (https://nodejs.org)",
+}
 
-/** What to do when the package `name` cannot start, for a peer comb runs; "" otherwise */
-const installHint = (name: string): string => (Object.hasOwn(RUNS, name) ? `; ${missingPeer(RUNS[name]!)}` : "")
+/** What to do when `cmd` cannot start: for a bin peer's runtime, install it; "" for any other command */
+function installHint(cmd: string, peer: BinPeer | undefined): string {
+	if (peer === undefined || !Object.hasOwn(RUNTIMES, cmd)) return ""
+	return `; comb runs ${peer} on ${cmd}, and finds no ${cmd} on PATH: install ${RUNTIMES[cmd as ProjectBin["runtime"]]}`
+}
 
 /** How a process the OS could not run (or had to stop) is reported: POSIX shell codes where they exist. */
 function startFailure(cmd: string, error: NodeJS.ErrnoException, options: RunOptions): RunResult {
 	const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER
 	if (error.code === "ETIMEDOUT")
 		return { code: 124, stderr: `${cmd}: stopped after ${options.timeoutMs} ms`, stdout: "" }
-	if (error.code === "ENOENT") return { code: 127, stderr: `${cmd}: command not found${installHint(cmd)}`, stdout: "" }
+	if (error.code === "ENOENT")
+		return { code: 127, stderr: `${cmd}: command not found${installHint(cmd, options.peer)}`, stdout: "" }
 	if (error.code === "ENOBUFS") return { code: 1, stderr: `${cmd}: output exceeded ${maxBuffer} bytes`, stdout: "" }
 	return { code: 126, stderr: `${cmd}: ${error.message}`, stdout: "" }
 }
@@ -69,10 +82,17 @@ export const run: Run = (cmd, args, options = {}) => {
 	const result = spawnSync(cmd, args, { cwd, encoding: "utf8", env, input, maxBuffer, timeout })
 	if (result.error !== undefined) return startFailure(cmd, result.error as NodeJS.ErrnoException, options)
 	const signal = result.signal === null ? 0 : 128 + constants.signals[result.signal]
-	/* `bun <package>` with the package missing says only that the script is not found */
-	const missing = cmd === "bun" && result.stderr.includes(`Script not found "${args[0]}"`)
-	const said = missing ? `${result.stderr.trimEnd()}${installHint(args[0] as string)}` : result.stderr
 	/* a process a signal stopped before it said anything would fail with an empty reason: name the signal */
-	const stderr = result.signal !== null && said === "" ? `${cmd} was stopped by ${result.signal}` : said
+	const stderr =
+		result.signal !== null && result.stderr === "" ? `${cmd} was stopped by ${result.signal}` : result.stderr
 	return { code: result.status ?? signal, stderr, stdout: result.stdout }
 }
+
+/**
+ * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
+ * holds, the one comb checked (K1 of r22), never a name looked up on PATH
+ */
+export const runPeer =
+	(exec: Run, bin: ProjectBin) =>
+	(args: readonly string[], options: RunOptions = {}): RunResult =>
+		exec(bin.runtime, [bin.bin, ...args], { ...options, peer: bin.peer })

@@ -7,7 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { Run } from "../migrate/core/process.ts"
-import { type FakeD1, fakeD1, localD1, writeSum } from "./__fixtures__/d1.ts"
+import { asWrangler, type FakeD1, fakeD1, localD1, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, projects } from "./__fixtures__/io.ts"
 import { runCli } from "./run.ts"
 
@@ -53,11 +53,11 @@ const longName = (i: number) =>
  */
 function losing(d1: FakeD1, at: number): FakeD1 {
 	let writes = 0
-	const run: Run = (cmd, args, options) => {
+	const run: Run = asWrangler((cmd, args, options) => {
 		const write = cmd === "wrangler" && args.some((arg) => arg.startsWith("--command=")) && !args.includes("--json")
 		if (write && ++writes === at) return { code: 1, stderr: "fetch failed: ECONNRESET", stdout: "" }
 		return d1(cmd, args, options)
-	}
+	})
 	return Object.assign(run, { calls: d1.calls, db: d1.db })
 }
 
@@ -155,11 +155,11 @@ describe("migrate apply on D1 after a lost read-back", () => {
 			const dir = worker(how === "ran" ? INIT : { ...INIT, ...bad })
 			const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
 			let ran = false
-			const blind: Run = (cmd, args, options) => {
+			const blind: Run = asWrangler((cmd, args, options) => {
 				if (args[1] === "migrations") ran = true
 				else if (ran && args.includes("--json")) return { code: 1, stderr: "fetch failed: ECONNRESET", stdout: "" }
 				return d1(cmd, args, options)
-			}
+			})
 			const io = makeIo(dir, Object.assign(blind, { calls: d1.calls, db: d1.db }))
 			expect(await runCli(["migrate", "apply", "core", "--local", "--json"], io)).toBe(1)
 			const report = JSON.parse(io.outputs.at(-1) as string) as {

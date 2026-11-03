@@ -10,9 +10,9 @@ import { approveMigration } from "../migrate/core/approval.ts"
 import { type D1Target, findWranglerConfig, type ReadConfig } from "../migrate/core/d1-binding.ts"
 import { adoptHashesD1, applyD1, baselineD1, statusD1 } from "../migrate/core/d1-history.ts"
 import { Refused } from "../migrate/core/refused.ts"
-import { optionalPeer, WRANGLER as NEED } from "../migrate/core/optional-peer.ts"
-import { run as runProcess } from "../migrate/core/process.ts"
-import { createD1Provider, wranglerFlags } from "../migrate/drivers/d1.ts"
+import { importBin } from "../migrate/core/optional-peer.ts"
+import { type ProjectBin, run as runProcess } from "../migrate/core/process.ts"
+import { connectD1, wranglerFlags } from "../migrate/drivers/d1.ts"
 import type { D1ProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
@@ -23,12 +23,9 @@ type D1Mode = "apply" | "baseline" | "check" | "status"
 /** One D1 command: what it was asked, and where it reports */
 type D1Request = { args: ParsedArgs; db: string; io: CliIo; mode: D1Mode }
 
-/* a variable, so a consumer's tsc never resolves wrangler, an optional peer */
-const WRANGLER = "wrangler"
-
-/** wrangler's config reader, or the package to install when wrangler is missing; `specifier` is for tests */
-async function wranglerReader(specifier: string = WRANGLER): Promise<ReadConfig> {
-	const wrangler = await optionalPeer(NEED, () => import(specifier) as Promise<{ unstable_readConfig: ReadConfig }>)
+/** The config reader of `bin`'s wrangler, the one the command checked and spawns (K1 of r22) */
+async function wranglerReader(bin: ProjectBin): Promise<ReadConfig> {
+	const wrangler = await importBin<{ unstable_readConfig: ReadConfig }>(bin)
 	return (args) => wrangler.unstable_readConfig(args)
 }
 
@@ -55,7 +52,11 @@ function d1Config(request: D1Request, resolved: MigrateTarget | undefined): { co
 /** Run `request.mode` on the D1 database `resolved` names, or `request.db` when the project has no migrate config */
 export { wranglerReader }
 
-export async function migrateD1(request: D1Request, resolved: MigrateTarget | undefined): Promise<MigrateOutcome> {
+export async function migrateD1(
+	request: D1Request,
+	resolved: MigrateTarget | undefined,
+	wrangler: ProjectBin,
+): Promise<MigrateOutcome> {
 	const { args, io, mode } = request
 	if (args.options["file"] !== undefined)
 		throw new CliError("--file does not apply to a D1 database: wrangler applies its migrations directory")
@@ -64,17 +65,18 @@ export async function migrateD1(request: D1Request, resolved: MigrateTarget | un
 	/* the provider's databaseName, the D1 database its connection reaches whatever the environment is called (K4 of r17) */
 	const name = config.databaseName
 	const exec = io.run ?? runProcess
-	const conn = await createD1Provider(config, exec).connect({ migrationsDir: dir, name, provider: config })
+	const conn = connectD1(config, exec, wrangler)
 	const target: D1Target = {
 		conn,
 		exec,
 		flags: wranglerFlags(config),
 		migrationsDir: dir,
 		name,
+		wrangler,
 		wranglerConfig: config.wranglerConfig as string,
 		wranglerEnv: config.wranglerEnv,
 	}
-	const read = await wranglerReader()
+	const read = await wranglerReader(wrangler)
 	const label = resolved?.label ?? name
 	if (mode === "status") return statusD1(target, read, io.out)
 	if (mode === "baseline" && args.options["hashes"] === true) {

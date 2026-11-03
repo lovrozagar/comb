@@ -3,7 +3,8 @@
  * since D1 has no HTTP API for external access.
  */
 import * as z from "zod"
-import { type Run, run } from "../core/process.ts"
+import { projectBin, WRANGLER } from "../core/optional-peer.ts"
+import { type ProjectBin, type Run, run, runPeer } from "../core/process.ts"
 import { segments } from "../core/sql-scan.ts"
 import type { Connection, ConnectionProvider, D1ProviderConfig, QueryResult } from "../types.ts"
 
@@ -33,8 +34,11 @@ function asQueryResult(results: Array<Record<string, unknown>>): QueryResult {
 	return { columns, rows: results.map((row) => columns.map((col) => row[col])) }
 }
 
-function runWrangler(exec: Run, args: string[]): string {
-	const { code, stderr, stdout } = exec("wrangler", args)
+/** wrangler as the D1 commands run it: the project's bin, the one comb checked, through `exec` (K1 of r22) */
+type Wrangler = { exec: Run; wrangler: ProjectBin }
+
+function runWrangler({ exec, wrangler }: Wrangler, args: string[]): string {
+	const { code, stderr, stdout } = runPeer(exec, wrangler)(args)
 	if (code !== 0) {
 		throw new Error(`wrangler failed (exit ${code}): ${stderr.trim() || stdout.trim()}`)
 	}
@@ -118,7 +122,7 @@ function commands(statements: readonly string[]): string[] {
 	return chunk === "" ? out : [...out, chunk]
 }
 
-function createD1Connection(databaseName: string, flags: readonly string[], exec: Run): Connection {
+function createD1Connection(databaseName: string, flags: readonly string[], spawn: Wrangler): Connection {
 	return {
 		async batch(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void> {
 			/* wrangler binds no parameters in a batch, so they are inlined as literals */
@@ -126,7 +130,7 @@ function createD1Connection(databaseName: string, flags: readonly string[], exec
 				terminated(params && params.length > 0 ? inlineParams(text, params) : text),
 			)
 			for (const command of commands(sql))
-				runWrangler(exec, ["d1", "execute", databaseName, ...flags, `--command=${command}`])
+				runWrangler(spawn, ["d1", "execute", databaseName, ...flags, `--command=${command}`])
 		},
 
 		close(): Promise<void> {
@@ -138,7 +142,7 @@ function createD1Connection(databaseName: string, flags: readonly string[], exec
 
 		async execute(sql: string, params?: unknown[]): Promise<QueryResult> {
 			const finalSql = params && params.length > 0 ? inlineParams(sql, params) : sql
-			const stdout = runWrangler(exec, ["d1", "execute", databaseName, ...flags, "--json", `--command=${finalSql}`])
+			const stdout = runWrangler(spawn, ["d1", "execute", databaseName, ...flags, "--json", `--command=${finalSql}`])
 			return asQueryResult(readResults(stdout))
 		},
 	}
@@ -150,10 +154,11 @@ function createD1Connection(databaseName: string, flags: readonly string[], exec
  */
 function executeAll(
 	exec: Run,
-	{ flags, name }: { flags: readonly string[]; name: string },
+	{ flags, name, wrangler }: { flags: readonly string[]; name: string; wrangler: ProjectBin },
 	statements: readonly string[],
 ): Array<Array<Record<string, unknown>>> {
-	const stdout = runWrangler(exec, ["d1", "execute", name, ...flags, "--json", `--command=${statements.join(";\n")}`])
+	const args = ["d1", "execute", name, ...flags, "--json", `--command=${statements.join(";\n")}`]
+	const stdout = runWrangler({ exec, wrangler }, args)
 	const results = readAllResults(stdout)
 	if (results.length !== statements.length)
 		throw new Error(`wrangler answered ${results.length} results for ${statements.length} statements`)
@@ -162,12 +167,20 @@ function executeAll(
 
 export { executeAll, wranglerFlags }
 
+/**
+ * The connection to the D1 database `config` names, through `wrangler`, the bin the command
+ * resolved: the D1 database is the provider's databaseName (its binding or database_name), never
+ * the environment's name the resolved config carries, which wrangler knows nothing of (K4 of r17)
+ */
+export function connectD1(config: D1ProviderConfig, exec: Run, wrangler: ProjectBin): Connection {
+	return createD1Connection(config.databaseName, wranglerFlags(config), { exec, wrangler })
+}
+
+/** A D1 provider whose connection runs the wrangler the project at the working folder holds, checked on connect */
 export function createD1Provider(config: D1ProviderConfig, exec: Run = run): ConnectionProvider {
 	return {
-		/* the D1 database is the provider's databaseName (its binding or database_name), never the
-		   environment's name the resolved config carries, which wrangler knows nothing of (K4 of r17) */
 		connect(): Promise<Connection> {
-			return Promise.resolve(createD1Connection(config.databaseName, wranglerFlags(config), exec))
+			return Promise.resolve().then(() => connectD1(config, exec, projectBin(WRANGLER, process.cwd())))
 		},
 		dialect: "sqlite",
 	}

@@ -74,7 +74,7 @@ export declare const d1HistoryTables: (migrationsTable?: string) => string[];
 // migrate/core/atlas.d.ts
 import type { Dialect } from "../types.ts";
 import { type PgTarget } from "./atlas-target.ts";
-import { type Run } from "./process.ts";
+import { type ProjectBin, type Run } from "./process.ts";
 export { applySqliteMigrationTransforms } from "./atlas-env.ts";
 export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiffResult } from "./migrate-diff.ts";
 export declare function checkAtlasInstalled(exec?: Run): boolean;
@@ -117,6 +117,8 @@ export type DrizzleExportOptions = {
  * database's schema and read as the statements Postgres runs, so `loadPostgresParser()` first
  */
 export declare function exportDrizzleSchema(options: DrizzleExportOptions): string;
+/** exportDrizzleSchema through `drizzleKit`, the bin the command checked: its runtime on the project's bin (K1 of r22) */
+export declare function exportWith(drizzleKit: ProjectBin, options: DrizzleExportOptions): string;
 
 // migrate/core/parse.d.ts
 import { classifyMigration, type ClassifyOptions, extractDropStatements } from "./classify.ts";
@@ -490,6 +492,15 @@ declare const configInputSchema: () => z.ZodType<CombMigrateConfig>;
 export { type CombMigrateConfig, configInputSchema, DEFAULT_PG_DEV_URL };
 
 // migrate/core/process.d.ts
+/** An optional peer comb spawns rather than imports */
+export type BinPeer = "drizzle-kit" | "wrangler";
+/** A bin peer as the project holds it: its package.json, the bin file it names for the peer, and the runtime that runs it */
+export type ProjectBin = {
+    bin: string;
+    manifest: string;
+    peer: BinPeer;
+    runtime: "bun" | "node";
+};
 export type RunResult = {
     code: number;
     stdout: string;
@@ -504,12 +515,19 @@ export type RunOptions = {
     input?: string | undefined;
     /** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
     maxBuffer?: number | undefined;
+    /** The bin peer the process runs, whose runtime a failure to start names */
+    peer?: BinPeer | undefined;
     /** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
     timeoutMs?: number | undefined;
 };
 export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
 /** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
 export declare const run: Run;
+/**
+ * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
+ * holds, the one comb checked (K1 of r22), never a name looked up on PATH
+ */
+export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => RunResult;
 
 // migrate/core/atlas-target.d.ts
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
@@ -771,19 +789,27 @@ declare function normalizeSql(sql: string): string;
 export { normalizeSql, segments, splitSqlStatements, type Segment };
 
 // migrate/drivers/d1.d.ts
-import { type Run } from "../core/process.ts";
-import type { ConnectionProvider, D1ProviderConfig } from "../types.ts";
+import { type ProjectBin, type Run } from "../core/process.ts";
+import type { Connection, ConnectionProvider, D1ProviderConfig } from "../types.ts";
 /** What every wrangler command on the database takes: --local or --remote, then its config and environment */
 declare function wranglerFlags(config: D1ProviderConfig): string[];
 /**
  * Each of `statements`' rows from one `wrangler d1 execute --json --command`, one wrangler process
  * for them all: wrangler answers a result per statement, and one that fails fails the call (R1)
  */
-declare function executeAll(exec: Run, { flags, name }: {
+declare function executeAll(exec: Run, { flags, name, wrangler }: {
     flags: readonly string[];
     name: string;
+    wrangler: ProjectBin;
 }, statements: readonly string[]): Array<Array<Record<string, unknown>>>;
 export { executeAll, wranglerFlags };
+/**
+ * The connection to the D1 database `config` names, through `wrangler`, the bin the command
+ * resolved: the D1 database is the provider's databaseName (its binding or database_name), never
+ * the environment's name the resolved config carries, which wrangler knows nothing of (K4 of r17)
+ */
+export declare function connectD1(config: D1ProviderConfig, exec: Run, wrangler: ProjectBin): Connection;
+/** A D1 provider whose connection runs the wrangler the project at the working folder holds, checked on connect */
 export declare function createD1Provider(config: D1ProviderConfig, exec?: Run): ConnectionProvider;
 
 // migrate/drivers/bun-sqlite.d.ts

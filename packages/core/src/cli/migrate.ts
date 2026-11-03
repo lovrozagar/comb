@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { parseArgs, refuseFurther } from "./args.ts"
-import { requirePeers } from "../migrate/core/optional-peer.ts"
+import { binOf, requirePeers } from "../migrate/core/optional-peer.ts"
 import { configuredFtsSql } from "./comb-config.ts"
 import { migrateApply } from "./migrate-apply.ts"
 import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
@@ -86,9 +86,8 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const [db, name] = args.positionals
 	const { codegen, d1, exported, migrationsDir, pg, provider } = await diffTarget(db, io)
 	/* every peer the diff needs, before Atlas or drizzle-kit runs (K1 of r21) */
-	requirePeers("diff", provider, { cwd: io.cwd, locate: io.locatePeer })
-	const { checkAtlasInstalled, exportDrizzleSchema, generateIncrementalMigration } =
-		await import("../migrate/core/atlas.ts")
+	const peers = requirePeers("diff", provider, { cwd: io.cwd, locate: io.locatePeer })
+	const { checkAtlasInstalled, exportWith, generateIncrementalMigration } = await import("../migrate/core/atlas.ts")
 	if (!checkAtlasInstalled(io.run)) throw new CliError("Atlas not found. Install: https://atlasgo.io/getting-started")
 	/* a D1 diff writes beside the files wrangler runs, refused where it would run them otherwise than Atlas (S4, C8) */
 	if (d1 && fs.existsSync(migrationsDir)) (await import("../migrate/core/d1-files.ts")).d1Files(migrationsDir)
@@ -107,7 +106,7 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 			readyDev: io.readyPgDev,
 			run: io.run,
 			target: pg,
-			targetSchema: exportDrizzleSchema(exported),
+			targetSchema: exportWith(binOf(peers, "drizzle-kit"), exported),
 		})
 		/* Atlas OSS may say it left part of the schema out of the diff (plan 14's 5.4) */
 		for (const notice of notices) io.err(`Warning: Atlas: ${notice}`)

@@ -35,7 +35,7 @@ const catalog = (
 ).workspaces.catalog
 
 /** The tools a consumer builds with, pinned */
-const TOOLS = {
+export const TOOLS = {
 	/* a Worker's own types, which comb no longer peers on (K3 of r21) */
 	"@cloudflare/workers-types": catalog["@cloudflare/workers-types"] as string,
 	"@types/node": catalog["@types/node"] as string,

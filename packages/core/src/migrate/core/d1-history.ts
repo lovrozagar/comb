@@ -32,6 +32,7 @@ import {
 import { orphanMessage } from "./history-match.ts"
 import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
 import { planApply } from "./plan-apply.ts"
+import { runPeer } from "./process.ts"
 import { Refused } from "./refused.ts"
 
 /**
@@ -179,7 +180,8 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	const hashed = pending.map(({ migration, name }) => ({ hash: migration.hash, name }))
 	await target.conn.batch([...settleStatements(settle, hasIntents), ...intentStatements(hashed)])
 	for (const name of names) options.print(`Apply: ${name}`)
-	const ran = target.exec("wrangler", ["d1", "migrations", "apply", target.name, ...target.flags], { input: "" })
+	const apply = ["d1", "migrations", "apply", target.name, ...target.flags]
+	const ran = runPeer(target.exec, target.wrangler)(apply, { input: "" })
 	const after = appliedAfter(target, options.read, { names, ok: ran.code === 0, table })
 	const [applies, rest] = [names.filter((name) => after.has(name)), names.filter((name) => !after.has(name))]
 	const moved = await moveIntents(

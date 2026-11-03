@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { fakeD1, localD1, writeSum } from "../../cli/__fixtures__/d1.ts"
+import { asWrangler, fakeD1, localD1, wranglerBin, writeSum } from "../../cli/__fixtures__/d1.ts"
 import { createD1Provider } from "../drivers/d1.ts"
 import { introspectSqliteSchema } from "../drivers/sqlite.ts"
 import { approveMigration } from "./approval.ts"
@@ -63,12 +63,12 @@ async function target() {
 	const fake = fakeD1({ dir: migrations })
 	const state: { lose: Lose } = { lose: () => false }
 	const run = Object.assign(
-		(cmd: string, args: readonly string[], options?: Parameters<typeof fake>[2]) => {
+		asWrangler((cmd, args, options) => {
 			const lose = cmd === "wrangler" && state.lose(args)
 			if (lose === false) return fake(cmd, [...args], options)
 			if (typeof lose === "string") fake(cmd, cut(args, lose), options)
 			return RESET
-		},
+		}),
 		{ calls: fake.calls, db: fake.db },
 	)
 	const config = { databaseName: "core", local: true, type: "d1" as const }
@@ -84,6 +84,7 @@ async function target() {
 		flags: ["--local"],
 		migrationsDir: migrations,
 		name: "CORE",
+		wrangler: wranglerBin(),
 		wranglerConfig: join(dir, "wrangler.toml"),
 	}
 	const file = (name: string, sql: string) => {

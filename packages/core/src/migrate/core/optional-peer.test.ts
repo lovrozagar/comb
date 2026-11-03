@@ -11,8 +11,12 @@ import {
 	type OptionalPeer,
 	optionalPeer,
 	PEERS,
+	binOf,
+	importBin,
+	projectBin,
 	requirePeers,
 	resolvePeer,
+	WRANGLER,
 } from "./optional-peer.ts"
 
 /** The error Node's resolver gives for a package the project lacks */
@@ -54,10 +58,19 @@ describe("missingPeer", () => {
 		)
 	})
 
-	it("tells a global comb where a peer it runs as a command is found", () => {
-		expect(missingPeer({ peer: "drizzle-kit", why: "export the schema" })).toBe(
-			`comb needs drizzle-kit (1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0) to export the schema; run comb through a package script, so node_modules/.bin is on PATH, or install "drizzle-kit@1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"`,
+	/* K3 of r22: comb finds a bin peer in the project and never on PATH, so the refusal sends no one there */
+	it("gives a peer comb spawns the range and the install alone, as the --json refusal carries it (K3)", () => {
+		const refusal = missingPeer({ peer: "drizzle-kit", why: "export the schema" })
+		expect(refusal).toBe(
+			`comb needs drizzle-kit (1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0) to export the schema; install "drizzle-kit@1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"`,
 		)
+		expect(() => requirePeers("status", "d1", { cwd: ROOT, locate: only() })).toThrow(
+			new MissingPeerError(
+				`comb needs wrangler (>=4.147.0 <5) to migrate a D1 database; install "wrangler@>=4.147.0 <5"`,
+			),
+		)
+		expect(JSON.parse(JSON.stringify({ refused: [refusal] }))).toEqual({ refused: [refusal] })
+		expect(refusal).not.toContain("PATH")
 	})
 })
 
@@ -220,18 +233,94 @@ describe("requirePeers, on what a command needs", () => {
 	})
 })
 
-describe("requirePeers, finding a peer", () => {
-	it("finds drizzle-kit as `bun drizzle-kit` runs it: in the project, from its folder up", () => {
-		const entry = installed("drizzle-kit", "1.0.0-rc.4")
-		const project = join(entry, "../../../..", "app", "src")
-		mkdirSync(project, { recursive: true })
-		expect(() => requirePeers("diff", "d1", { cwd: project })).not.toThrow()
+/** A package `name` at `version` in `dir`'s node_modules, its bin `bin` as its package.json gives it */
+function inFolder(dir: string, { bin, name, version }: { bin: unknown; name: string; version: string }): string {
+	const pkg = join(dir, ["node_", "modules"].join(""), name)
+	mkdirSync(pkg, { recursive: true })
+	writeFileSync(join(pkg, "package.json"), JSON.stringify({ bin, main: "index.js", name, version }))
+	writeFileSync(join(pkg, "index.js"), "exports.answer = 42\n")
+	return join(pkg, "package.json")
+}
+
+describe("requirePeers, finding a peer comb spawns (K1; sibling: drizzle-kit's resolution)", () => {
+	/* a workspace: the root's packages, and the app's own nearer its folder */
+	const root = join(ROOT, "workspace")
+	const app = join(root, "app")
+	const rootWrangler = inFolder(root, { bin: { wrangler: "bin/wrangler.js" }, name: "wrangler", version: "3.99.0" })
+	const appWrangler = inFolder(app, {
+		bin: { "cf-wrangler": "x.js", wrangler: "cli/run.js" },
+		name: "wrangler",
+		version: "4.150.0",
+	})
+	const rootKit = inFolder(root, { bin: "./bin.cjs", name: "drizzle-kit", version: "1.0.0-rc.5" })
+	const src = join(app, "src")
+	mkdirSync(src, { recursive: true })
+
+	it("resolves wrangler from cwd up, the nearest package, its bin as its package.json names it, on node", () => {
+		expect(requirePeers("status", "d1", { cwd: src })).toEqual({
+			wrangler: { bin: join(appWrangler, "../cli/run.js"), manifest: appWrangler, peer: "wrangler", runtime: "node" },
+		})
+	})
+
+	it("refuses the wrangler cwd reaches, naming the version comb would run", () => {
+		expect(() => requirePeers("check", "d1", { cwd: root })).toThrow(
+			`comb needs wrangler (>=4.147.0 <5, found 3.99.0) to migrate a D1 database; install "wrangler@>=4.147.0 <5"`,
+		)
+		expect(rootWrangler).toContain(root)
+	})
+
+	it("resolves drizzle-kit the same way, its bin a string, on bun", () => {
+		expect(requirePeers("diff", "d1", { cwd: src })).toEqual({
+			"drizzle-kit": { bin: join(rootKit, "../bin.cjs"), manifest: rootKit, peer: "drizzle-kit", runtime: "bun" },
+		})
 		expect(() => requirePeers("diff", "d1", { cwd: tmpdir() })).toThrow(
-			"comb needs drizzle-kit (1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0) to export the drizzle schema for comb migrate diff; run comb through a package script",
+			`comb needs drizzle-kit (1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0) to export the drizzle schema for comb migrate diff; install "drizzle-kit@1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"`,
 		)
 	})
 
-	it("finds a peer comb imports as comb resolves it", () => {
-		expect(() => requirePeers("check", "libsql", { cwd: tmpdir() })).not.toThrow()
+	it("finds a bin peer from the entry a locator gives, and refuses a package that names no bin for it", () => {
+		const entry = join(appWrangler, "../index.js")
+		expect(requirePeers("status", "d1", { cwd: tmpdir(), locate: () => entry }).wrangler?.manifest).toBe(appWrangler)
+		const bare = inFolder(join(ROOT, "bare"), { bin: { "cf-wrangler": "x.js" }, name: "wrangler", version: "4.150.0" })
+		expect(() => requirePeers("status", "d1", { cwd: join(bare, "../../..") })).toThrow(`${bare} names no wrangler bin`)
+	})
+
+	it("finds a peer comb imports as comb resolves it, and gives no bin for it", () => {
+		expect(requirePeers("check", "libsql", { cwd: tmpdir() })).toEqual({})
+	})
+})
+
+describe("projectBin and binOf", () => {
+	it("resolves one bin peer from a folder, and refuses it missing or out of range", () => {
+		const dir = join(ROOT, "one")
+		const manifest = inFolder(dir, { bin: { wrangler: "w.js" }, name: "wrangler", version: "4.150.0" })
+		expect(projectBin(WRANGLER, dir)).toEqual({
+			bin: join(manifest, "../w.js"),
+			manifest,
+			peer: "wrangler",
+			runtime: "node",
+		})
+		expect(() => projectBin(WRANGLER, tmpdir())).toThrow(`comb needs wrangler (>=4.147.0 <5) to migrate a D1 database`)
+		inFolder(join(ROOT, "old"), { bin: { wrangler: "w.js" }, name: "wrangler", version: "3.0.0" })
+		expect(() => projectBin(WRANGLER, join(ROOT, "old"))).toThrow("found 3.0.0")
+	})
+
+	it("is the bin requirePeers resolved, and an error for one it did not", () => {
+		const bin = { bin: "/w.js", manifest: "/package.json", peer: "wrangler", runtime: "node" } as const
+		expect(binOf({ wrangler: bin }, "wrangler")).toBe(bin)
+		expect(() => binOf({}, "drizzle-kit")).toThrow("comb resolved no drizzle-kit for this command")
+	})
+
+	it("imports the package a bin peer resolved to, by its entry", async () => {
+		const manifest = inFolder(join(ROOT, "imports"), {
+			bin: { wrangler: "w.js" },
+			name: "wrangler",
+			version: "4.150.0",
+		})
+		const bin = { bin: join(manifest, "../w.js"), manifest, peer: "wrangler", runtime: "node" } as const
+		await expect(importBin<{ answer: number }>(bin)).resolves.toMatchObject({ answer: 42 })
+		const broken = inFolder(join(ROOT, "broken"), { bin: { wrangler: "w.js" }, name: "wrangler", version: "4.150.0" })
+		writeFileSync(join(broken, "../index.js"), "throw new Error('boom')\n")
+		await expect(importBin({ ...bin, manifest: broken })).rejects.toThrow("boom")
 	})
 })

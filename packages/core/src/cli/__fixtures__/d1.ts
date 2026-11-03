@@ -11,10 +11,31 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { localD1Path } from "../../migrate/core/d1-binding.ts"
+import { projectBin, WRANGLER } from "../../migrate/core/optional-peer.ts"
 import { wranglerOrder } from "../../migrate/core/plan-apply.ts"
-import type { Run, RunResult } from "../../migrate/core/process.ts"
+import type { ProjectBin, Run, RunResult } from "../../migrate/core/process.ts"
 
 const ok = (stdout = ""): RunResult => ({ code: 0, stderr: "", stdout })
+
+/** The wrangler a D1 test's target runs: comb's own, resolved from the package as a command resolves it */
+export const wranglerBin = (): ProjectBin => projectBin(WRANGLER, import.meta.dirname)
+
+/**
+ * A call as a fake reads it: a bin peer's spawn (its runtime, then its bin path) as the peer's name
+ * and its own arguments, any other as it is
+ */
+export function asCalled(cmd: string, args: readonly string[], peer: string | undefined): [string, readonly string[]] {
+	return peer === undefined ? [cmd, args] : [peer, args.slice(1)]
+}
+
+/** A runner for a test that reads each call as asCalled gives it, a bin peer's spawn as `wrangler d1 …` */
+export function asWrangler(inner: Run): Run {
+	return (cmd, args, options) => {
+		if (options?.peer === undefined) return inner(cmd, args, options)
+		const { peer, ...rest } = options
+		return inner(...asCalled(cmd, args, peer), rest)
+	}
+}
 const fail = (stderr: string): RunResult => ({ code: 1, stderr, stdout: "" })
 
 /** The atlas.sum the fake writes: one hash over every .sql file's name and text */
@@ -87,7 +108,8 @@ export function fakeD1(options: D1Options, atlas: Run = fakeAtlas()): FakeD1 {
 		}
 		return ok()
 	}
-	const run: Run = (cmd, args) => {
+	const run: Run = (spawned, argv, spawnOptions) => {
+		const [cmd, args] = asCalled(spawned, argv, spawnOptions?.peer)
 		calls.push([cmd, ...args])
 		if (cmd === "atlas") return atlas(cmd, args)
 		if (args[1] === "migrations") return migrationsApply()

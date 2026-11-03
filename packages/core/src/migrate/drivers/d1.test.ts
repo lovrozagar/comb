@@ -3,17 +3,22 @@ import { describe, expect, it } from "vitest"
 import type { Run, RunOptions, RunResult } from "../core/process.ts"
 import type { D1ProviderConfig, ResolvedDatabaseConfig } from "../types.ts"
 import { createD1Provider, executeAll } from "./d1.ts"
+import { asCalled, wranglerBin } from "../../cli/__fixtures__/d1.ts"
 
 type Call = { cmd: string; args: readonly string[]; options: RunOptions | undefined }
 
-function fakeRun(answer: (call: Call) => RunResult): Run & { calls: Call[] } {
+/** A runner that answers each call, recording a wrangler spawn as `wrangler` and its own arguments; `spawns` keeps them raw */
+function fakeRun(answer: (call: Call) => RunResult): Run & { calls: Call[]; spawns: Call[] } {
 	const calls: Call[] = []
-	const fake = (cmd: string, args: readonly string[], options?: RunOptions) => {
+	const spawns: Call[] = []
+	const fake = (spawned: string, argv: readonly string[], options?: RunOptions) => {
+		spawns.push({ args: argv, cmd: spawned, options })
+		const [cmd, args] = asCalled(spawned, argv, options?.peer)
 		const call = { args, cmd, options }
 		calls.push(call)
 		return answer(call)
 	}
-	return Object.assign(fake, { calls })
+	return Object.assign(fake, { calls, spawns })
 }
 
 const json = (value: unknown): RunResult => ({ code: 0, stderr: "", stdout: JSON.stringify(value) })
@@ -29,14 +34,16 @@ async function connect(run: Run, config: D1ProviderConfig = CONFIG) {
 describe("executeAll", () => {
 	it("runs every statement in one wrangler call, and refuses an answer that leaves one out", () => {
 		const two = fakeRun(() => json([{ results: [{ n: 1 }] }, { results: [] }]))
-		expect(executeAll(two, { flags: ["--local"], name: "core" }, ["SELECT 1 AS n", "CREATE TABLE t (x)"])).toEqual([
-			[{ n: 1 }],
-			[],
-		])
+		expect(
+			executeAll(two, { flags: ["--local"], name: "core", wrangler: wranglerBin() }, [
+				"SELECT 1 AS n",
+				"CREATE TABLE t (x)",
+			]),
+		).toEqual([[{ n: 1 }], []])
 		const one = fakeRun(() => json([{ results: [] }]))
-		expect(() => executeAll(one, { flags: [], name: "core" }, ["SELECT 1", "SELECT 2"])).toThrow(
-			"wrangler answered 1 results for 2 statements",
-		)
+		expect(() =>
+			executeAll(one, { flags: [], name: "core", wrangler: wranglerBin() }, ["SELECT 1", "SELECT 2"]),
+		).toThrow("wrangler answered 1 results for 2 statements")
 	})
 })
 
@@ -67,9 +74,12 @@ describe("createD1Provider: execute", () => {
 			{
 				args: ["d1", "execute", "core", "--remote", "--json", "--command=SELECT a, b FROM t"],
 				cmd: "wrangler",
-				options: undefined,
+				options: { peer: "wrangler" },
 			},
 		])
+		/* K1 of r22: the wrangler the working folder's project holds, its bin on node, never a name on PATH */
+		expect(run.spawns[0]?.cmd).toBe("node")
+		expect(run.spawns[0]?.args.slice(0, 3)).toEqual([wranglerBin().bin, "d1", "execute"])
 	})
 
 	it("targets the local database when local is set", async () => {

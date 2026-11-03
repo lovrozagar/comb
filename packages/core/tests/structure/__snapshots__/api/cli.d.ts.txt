@@ -70,6 +70,15 @@ export declare const help: () => string;
 export declare function runCli(argv: readonly string[], io: CliIo): Promise<number>;
 
 // migrate/core/process.d.ts
+/** An optional peer comb spawns rather than imports */
+export type BinPeer = "drizzle-kit" | "wrangler";
+/** A bin peer as the project holds it: its package.json, the bin file it names for the peer, and the runtime that runs it */
+export type ProjectBin = {
+    bin: string;
+    manifest: string;
+    peer: BinPeer;
+    runtime: "bun" | "node";
+};
 export type RunResult = {
     code: number;
     stdout: string;
@@ -84,12 +93,19 @@ export type RunOptions = {
     input?: string | undefined;
     /** Bytes of stdout or stderr kept before the process is stopped; default 256 MiB. */
     maxBuffer?: number | undefined;
+    /** The bin peer the process runs, whose runtime a failure to start names */
+    peer?: BinPeer | undefined;
     /** Milliseconds before the process is stopped, which answers 124 as timeout(1) does; default none */
     timeoutMs?: number | undefined;
 };
 export type Run = (cmd: string, args: readonly string[], options?: RunOptions) => RunResult;
 /** Runs `cmd` synchronously and reports how it ended; it never throws for a failed command. */
 export declare const run: Run;
+/**
+ * What runs `bin`'s peer through `exec`: its runtime on the bin file of the package the project
+ * holds, the one comb checked (K1 of r22), never a name looked up on PATH
+ */
+export declare const runPeer: (exec: Run, bin: ProjectBin) => (args: readonly string[], options?: RunOptions) => RunResult;
 
 // migrate/core/pg-live-types.d.ts
 /** The shape of a Postgres baseline's catalog read (pg-live-objects.ts), apart so the CLI's io names it without its code. */

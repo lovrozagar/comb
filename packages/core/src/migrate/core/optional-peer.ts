@@ -5,12 +5,16 @@
  * needs it here, and an install that lands in range. A peer outside its range is refused as one
  * missing, naming the version found (K2 of r21). PEERS is what each migrate command needs on each
  * provider, which the CLI resolves before any connect, fetch, spawn or Atlas call (K1, P8, S2 of
- * r21), and which the README's peer table states (K5).
+ * r21), and which the README's peer table states (K5). A peer comb spawns is resolved from the
+ * project, cwd up, and that one package is checked, read and run (K1 and K3 of r22): PATH never counts.
  */
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
+import { pathToFileURL } from "node:url"
 import type { ProviderConfig } from "../types.ts"
-import { admits, installedVersion } from "./peer-version.ts"
+import { admits, installedVersion, manifestOf } from "./peer-version.ts"
+import type { BinPeer, ProjectBin } from "./process.ts"
 
 // lookup-table: each optional peer and the range comb is tested against
 const OPTIONAL_PEER_RANGES = {
@@ -24,9 +28,15 @@ const OPTIONAL_PEER_RANGES = {
 
 type OptionalPeer = keyof typeof OPTIONAL_PEER_RANGES
 
-/* the peers comb runs as a command: a global comb finds them only on a project's PATH */
-// lookup-table: the optional peers comb spawns rather than imports
-const BINS: ReadonlySet<OptionalPeer> = /* @__PURE__ */ new Set<OptionalPeer>(["drizzle-kit", "wrangler"])
+/* the peers comb spawns rather than imports, each on the runtime the ruling of r22 keeps for it: wrangler's bin is
+   a Node program that starts workerd, which comb under bun must not move onto bun */
+// lookup-table: each optional peer comb spawns, and the runtime that runs its bin
+const BIN_PEERS: Readonly<Record<BinPeer, ProjectBin["runtime"]>> = { "drizzle-kit": "bun", wrangler: "node" }
+
+/** The bin peers a command resolved, each the one package it checked and runs */
+type Peers = { readonly [P in BinPeer]?: ProjectBin }
+
+const isBinPeer = (peer: OptionalPeer): peer is BinPeer => Object.hasOwn(BIN_PEERS, peer)
 
 /** A peer comb needs, and why; an `optional` one a command runs without, saying what it left out */
 type Need = { optional?: true; peer: OptionalPeer; why: string }
@@ -40,11 +50,9 @@ function refusal(problems: readonly Problem[]): string {
 		const range = OPTIONAL_PEER_RANGES[peer]
 		return `${peer} (${found === undefined ? range : `${range}, found ${found}`}) to ${why}`
 	})
-	const bin = problems.some(({ found, peer }) => found === undefined && BINS.has(peer))
-	const path = bin ? "run comb through a package script, so node_modules/.bin is on PATH, or " : ""
 	/* quoted, so a shell passes each range whole: bun, npm and pnpm each install its newest admitted version */
 	const install = problems.map(({ peer }) => `"${peer}@${OPTIONAL_PEER_RANGES[peer]}"`).join(" ")
-	return `comb needs ${needs.join(", and ")}; ${path}install ${install}`
+	return `comb needs ${needs.join(", and ")}; install ${install}`
 }
 
 /** What comb says when the peer `need` names is missing */
@@ -122,10 +130,13 @@ function resolvePeer(need: Need, resolve: () => string): string {
 type Command = "apply" | "baseline" | "check" | "diff" | "status"
 type Provider = ProviderConfig["type"]
 
-const DIFF: Need = { peer: "drizzle-kit", why: "export the drizzle schema for comb migrate diff" }
+/** What a bin peer is needed for */
+type BinNeed = Need & { peer: BinPeer }
+
+const DIFF: BinNeed = { peer: "drizzle-kit", why: "export the drizzle schema for comb migrate diff" }
 const LIBSQL: Need = { peer: "@libsql/client", why: "open a libsql or Turso database" }
 const PARSE: Need = { peer: "libpg-query", why: "read Postgres migrations" }
-const WRANGLER: Need = { peer: "wrangler", why: "migrate a D1 database" }
+const WRANGLER: BinNeed = { peer: "wrangler", why: "migrate a D1 database" }
 
 /** The peers of a provider whose every command but diff connects through `need` */
 const connecting = (need: Need): Partial<Record<Command, readonly Need[]>> => ({
@@ -158,11 +169,7 @@ const PEERS: Readonly<Record<Provider, Partial<Record<Command, readonly Need[]>>
 	turso: /* @__PURE__ */ connecting(LIBSQL),
 }
 
-/* the peers `bun <peer>` runs, which it finds in the project's node_modules, from its folder up, and nowhere else */
-// lookup-table: the optional peers comb runs through `bun`, so finds as the project holds them
-const FROM_PROJECT: ReadonlySet<OptionalPeer> = /* @__PURE__ */ new Set<OptionalPeer>(["drizzle-kit"])
-
-/** `peer`'s package.json in the project at `cwd`, from its folder up, as `bun <peer>` finds the peer */
+/** `peer`'s package.json in the project at `cwd`: the first node_modules from its folder up that holds it */
 function inProject(peer: OptionalPeer, cwd: string): string {
 	for (let dir = cwd; ; dir = dirname(dir)) {
 		const file = join(dir, "node_modules", peer, "package.json")
@@ -171,24 +178,46 @@ function inProject(peer: OptionalPeer, cwd: string): string {
 	}
 }
 
+/** The bin peer whose file `entry` is, as comb spawns it: the bin its package.json names for it, on its runtime */
+function binAt(peer: BinPeer, entry: string): ProjectBin {
+	const manifest = manifestOf(peer, entry) as string
+	const { bin } = JSON.parse(readFileSync(manifest, "utf8")) as { bin?: unknown }
+	/* a string bin is the package's one bin, named as the package (manifestOf found it by that name) */
+	const path = typeof bin === "string" ? bin : (bin as Record<string, unknown> | undefined)?.[peer]
+	if (typeof path !== "string") throw new Error(`${manifest} names no ${peer} bin`)
+	return { bin: join(dirname(manifest), path), manifest, peer, runtime: BIN_PEERS[peer] }
+}
+
+/** The bin `need` names in the project at `cwd`, from its folder up; refused as requirePeers refuses it */
+function projectBin(need: BinNeed, cwd: string): ProjectBin {
+	return binAt(
+		need.peer,
+		resolvePeer(need, () => inProject(need.peer, cwd)),
+	)
+}
+
 /**
  * Refuses `command` on `provider` unless each peer it needs is there and in range, naming every
- * one that is not in one refusal, with one install. `locate` finds a peer's entry: by default as
- * `bun` runs it from `cwd` for a peer comb runs that way, else as comb's own imports resolve it.
+ * one that is not in one refusal, with one install, and gives each bin peer it found. `locate`
+ * finds a peer's entry: by default a bin peer in the project from `cwd` up, any other as comb's
+ * own imports resolve it.
  */
 function requirePeers(
 	command: Command,
 	provider: Provider,
 	{ cwd, locate }: { cwd: string; locate?: ((peer: OptionalPeer) => string) | undefined },
-): void {
-	const find = locate ?? ((peer) => (FROM_PROJECT.has(peer) ? inProject(peer, cwd) : resolved(peer)))
+): Peers {
+	const find = locate ?? ((peer) => (isBinPeer(peer) ? inProject(peer, cwd) : resolved(peer)))
 	const problems: Problem[] = []
+	const peers: { [P in BinPeer]?: ProjectBin } = {}
 	let cause: unknown
 	for (const need of PEERS[provider][command] ?? []) {
 		if (need.optional === true) continue
 		try {
-			const problem = outOfRange(need, find(need.peer))
+			const entry = find(need.peer)
+			const problem = outOfRange(need, entry)
 			if (problem !== undefined) problems.push(problem)
+			else if (isBinPeer(need.peer)) peers[need.peer] = binAt(need.peer, entry)
 		} catch (error) {
 			if (!isMissing(error, need.peer)) throw error
 			// reason: a missing peer is one more the refusal after the loop names, with the first one's error as its cause
@@ -197,11 +226,27 @@ function requirePeers(
 		}
 	}
 	if (problems.length > 0) throw new MissingPeerError(refusal(problems), { cause })
+	return peers
+}
+
+/** The bin requirePeers resolved for `peer`, for a command whose row needs it */
+function binOf(peers: Peers, peer: BinPeer): ProjectBin {
+	const bin = peers[peer]
+	if (bin === undefined) throw new Error(`comb resolved no ${peer} for this command`)
+	return bin
+}
+
+/** The module of the package `bin` is from, by its entry: the one package comb checked and spawns */
+async function importBin<T>(bin: ProjectBin): Promise<T> {
+	const entry = createRequire(bin.manifest).resolve(dirname(bin.manifest))
+	return (await import(pathToFileURL(entry).href)) as T
 }
 
 export {
+	binOf,
 	type Command,
 	DIFF,
+	importBin,
 	LIBSQL,
 	MissingPeerError,
 	missingPeer,
@@ -210,7 +255,9 @@ export {
 	type OptionalPeer,
 	optionalPeer,
 	PARSE,
+	type Peers,
 	PEERS,
+	projectBin,
 	requirePeers,
 	resolvePeer,
 	WRANGLER,

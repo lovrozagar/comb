@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { describe, expect, it } from "vitest"
-import { checkAtlasInstalled, exportDrizzleSchema, generateSchemaDiff, getAtlasVersion } from "./atlas.ts"
+import { checkAtlasInstalled, exportDrizzleSchema, exportWith, generateSchemaDiff, getAtlasVersion } from "./atlas.ts"
+import { OPTIONAL_PEER_RANGES } from "./optional-peer.ts"
+
+/** A drizzle-kit as a command resolves it, for a fake runner */
+const KIT = { bin: "/kit/bin.cjs", manifest: "/kit/package.json", peer: "drizzle-kit", runtime: "bun" } as const
 import type { Run, RunOptions, RunResult } from "./process.ts"
 
 type Call = { cmd: string; args: readonly string[]; options: RunOptions | undefined }
@@ -131,24 +136,39 @@ describe("exportDrizzleSchema", () => {
 		const run = fakeRun(
 			ok("PRAGMA foreign_keys=OFF;\nCREATE TABLE t (a integer DEFAULT true, b integer DEFAULT false);"),
 		)
-		expect(exportDrizzleSchema({ cwd: "/work", dialect: "sqlite", run })).toBe(
+		expect(exportWith(KIT, { cwd: "/work", dialect: "sqlite", run })).toBe(
 			"CREATE TABLE t (a integer DEFAULT 1, b integer DEFAULT 0);",
 		)
-		expect(run.calls).toEqual([{ args: ["drizzle-kit", "export"], cmd: "bun", options: { cwd: "/work" } }])
+		expect(run.calls).toEqual([
+			{ args: ["/kit/bin.cjs", "export"], cmd: "bun", options: { cwd: "/work", peer: "drizzle-kit" } },
+		])
+	})
+
+	/* K1 of r22: the drizzle-kit the project at cwd holds, its bin as its package.json names it, on bun */
+	it("runs the drizzle-kit the project at cwd holds, and refuses a cwd that holds none", () => {
+		const run = fakeRun(ok("CREATE TABLE t (a integer);"))
+		expect(exportDrizzleSchema({ cwd: import.meta.dirname, dialect: "sqlite", run })).toBe(
+			"CREATE TABLE t (a integer);",
+		)
+		expect(run.calls[0]?.cmd).toBe("bun")
+		expect(run.calls[0]?.args[0]).toMatch(/\/drizzle-kit\/bin\.cjs$/)
+		expect(() => exportDrizzleSchema({ cwd: tmpdir(), dialect: "sqlite", run })).toThrow(
+			`comb needs drizzle-kit (${OPTIONAL_PEER_RANGES["drizzle-kit"]}) to export the drizzle schema for comb migrate diff`,
+		)
 	})
 
 	it("gives each SQLite primary key column drizzle-kit leaves nullable its NOT NULL", () => {
 		const run = fakeRun(ok("CREATE TABLE `a` (\n\t`id` text PRIMARY KEY\n);\n"))
-		expect(exportDrizzleSchema({ cwd: "/w", dialect: "sqlite", run })).toBe(
+		expect(exportWith(KIT, { cwd: "/w", dialect: "sqlite", run })).toBe(
 			"CREATE TABLE `a` (\n\t`id` text NOT NULL PRIMARY KEY\n);\n",
 		)
 	})
 
 	it("returns Postgres output as is and throws stderr on failure", () => {
-		expect(exportDrizzleSchema({ cwd: "/w", dialect: "postgres", run: fakeRun(ok("PRAGMA x;\nDEFAULT true")) })).toBe(
+		expect(exportWith(KIT, { cwd: "/w", dialect: "postgres", run: fakeRun(ok("PRAGMA x;\nDEFAULT true")) })).toBe(
 			"PRAGMA x;\nDEFAULT true",
 		)
-		expect(() => exportDrizzleSchema({ cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config\n")) })).toThrow(
+		expect(() => exportWith(KIT, { cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config\n")) })).toThrow(
 			new Error("drizzle-kit export failed: no config"),
 		)
 	})
@@ -156,13 +176,13 @@ describe("exportDrizzleSchema", () => {
 
 /** drizzle-kit's Postgres export of `stdout`, scoped to `schema` */
 const pg = (stdout: string, schema?: string) =>
-	exportDrizzleSchema({ cwd: "/w", dialect: "postgres", run: fakeRun(ok(stdout)), schema })
+	exportWith(KIT, { cwd: "/w", dialect: "postgres", run: fakeRun(ok(stdout)), schema })
 
 describe("exportDrizzleSchema on Postgres", () => {
 	it("passes the database's drizzle config to drizzle-kit", () => {
 		const run = fakeRun(ok(""))
-		exportDrizzleSchema({ configPath: "/w/drizzle.pg.ts", cwd: "/w", dialect: "postgres", run })
-		expect(run.calls[0]?.args).toEqual(["drizzle-kit", "export", "--config", "/w/drizzle.pg.ts"])
+		exportWith(KIT, { configPath: "/w/drizzle.pg.ts", cwd: "/w", dialect: "postgres", run })
+		expect(run.calls[0]?.args).toEqual(["/kit/bin.cjs", "export", "--config", "/w/drizzle.pg.ts"])
 	})
 
 	it("drops the CREATE SCHEMA of the schema comb migrates, which Atlas's scoped run already has", () => {

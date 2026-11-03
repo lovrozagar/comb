@@ -49,6 +49,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.21](#upgrading-to-021)
 - [Upgrading to 0.20.1](#upgrading-to-0201)
 - [Upgrading to 0.20](#upgrading-to-020)
 - [Upgrading to 0.19](#upgrading-to-019)
@@ -131,11 +132,11 @@ Peer dependencies:
 
 The D1 modules (`sqlite/d1/*`) take a D1 binding, or a session of one, by the methods they call, and hand a session back in the binding's own type, so a Worker typed by `wrangler types` and one typed by `@cloudflare/workers-types` both use them, and comb needs neither.
 
-Each range stops before the next breaking release, and comb refuses an optional peer outside its range, naming the version it found, so comb never runs on a major it was not tested against. Each `comb migrate` command names every optional peer it needs and lacks before it connects, fetches, starts a process or asks Atlas anything, with one install line whose quoted ranges land inside comb's (`bun add <peer>` alone takes the newest release, which may be the next major). Drizzle's ranges name each tagged release candidate, 1.0.0-rc.4 and 1.0.0-rc.5, which the consumer suite type-checks comb against one by one, then `^1.0.0`, not a `>=` range: drizzle also publishes a `1.0.0-rc.N-<hash>` build of every branch, which a `>=1.0.0-rc.4` range admits and ranks above the tagged one, and its `latest` tag is still 0.x, so the install lines pin `drizzle-orm@1.0.0-rc.4`.
+Each range stops before the next breaking release, and comb refuses an optional peer outside its range, naming the version it found, so comb never runs on a major it was not tested against. comb finds `wrangler` and `drizzle-kit` in the project, from the working folder up, the way Node finds a package, and runs the one it checked by its own bin path: `wrangler` on `node` and `drizzle-kit` on `bun`, so neither needs to be on `PATH`, and in a workspace comb runs the copy the workspace itself installed. Each `comb migrate` command names every optional peer it needs and lacks before it connects, fetches, starts a process or asks Atlas anything, with one install line whose quoted ranges land inside comb's (`bun add <peer>` alone takes the newest release, which may be the next major). Drizzle's ranges name each tagged release candidate, 1.0.0-rc.4 and 1.0.0-rc.5, which the consumer suite type-checks comb against one by one, then `^1.0.0`, not a `>=` range: drizzle also publishes a `1.0.0-rc.N-<hash>` build of every branch, which a `>=1.0.0-rc.4` range admits and ranks above the tagged one, and its `latest` tag is still 0.x, so the install lines pin `drizzle-orm@1.0.0-rc.4`.
 
 Comb's schemas are plain Zod; none is compiled. A Worker refuses the code a compiled schema builds (`new Function`), so there the compiler only added to the bundle. A Node or Bun app that wants compiled parsing opts in with `import "zod/compile"` as the first import of its entry: every schema built after it, comb's included, compiles on its first parse, and one the compiler cannot take keeps Zod's own parser. Zod 4.5.4 is the first release with that import.
 
-The migration toolkit also shells out to [Atlas](https://atlasgo.io), which no package ships: `comb migrate diff`, `check`, `apply` and `baseline` need it on `PATH`. When `drizzle-kit` or `wrangler` cannot start, comb names the package and says to run comb through a package script (so `node_modules/.bin` is on `PATH`) or install it.
+The migration toolkit also shells out to [Atlas](https://atlasgo.io), which no package ships: `comb migrate diff`, `check`, `apply` and `baseline` need it on `PATH`. When the project has no `drizzle-kit` or `wrangler` in range, comb names the package, its range and the install; when `node` or `bun` is missing to run one, comb names that runtime.
 
 ## First schema
 
@@ -1067,6 +1068,20 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 `tests/bun/` is separate because it imports `bun:sqlite` and `bun:test`, which vitest cannot load. It replays a full Atlas-shaped drift migration against an in-memory database to prove the SQLite transforms survive a real commit with foreign keys enforced.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
+
+## Upgrading to 0.21
+
+What changes for a project on 0.20. Before deploying it:
+
+1. **Know what changed in the API.** A test holds these three lists to the exports themselves.
+
+   New exports: none.
+
+   Removed: none.
+
+   Changed: none.
+
+2. **Install `wrangler` and `drizzle-kit` in the project that runs comb.** comb now finds each in the project, from the working folder up, checks that package's version and runs its own bin by path: `wrangler` on `node`, `drizzle-kit` on `bun`. 0.20 checked the `wrangler` comb's own install resolved and then ran whichever `wrangler` was first on `PATH`, so in a workspace the version comb checked could differ from the one it ran. `PATH` no longer counts: a `wrangler` or `drizzle-kit` installed only globally, or reached only through `node_modules/.bin`, is refused with the range and the install, and a workspace runs the copy it installed itself. `comb migrate diff` now runs `drizzle-kit` on `bun` by its bin path, where 0.20's `bun drizzle-kit` followed the bin's `node` shebang.
 
 ## Upgrading to 0.20.1
 

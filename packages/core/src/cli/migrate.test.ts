@@ -340,9 +340,10 @@ describe("comb migrate diff: a Postgres database through comb.migrate.config.ts"
 		const io = makeIo(dir, run)
 		expect(await runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "pg", "1_init.sql")}`])
+		/* the drizzle-kit the command checked, its bin on bun (K1 of r22): comb's own here, as io.locatePeer finds it */
 		expect(atlas.calls.find((call) => call[0] === "bun")).toEqual([
 			"bun",
-			"drizzle-kit",
+			expect.stringMatching(/\/drizzle-kit\/bin\.cjs$/),
 			"export",
 			"--config",
 			join(dir, "drizzle.pg.ts"),

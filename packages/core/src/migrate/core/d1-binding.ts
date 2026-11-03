@@ -7,7 +7,7 @@ import { createHash, createHmac } from "node:crypto"
 import { existsSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import type { Connection } from "../types.ts"
-import type { Run } from "./process.ts"
+import type { ProjectBin, Run } from "./process.ts"
 import { D1_MIGRATIONS_TABLE } from "./d1-history-tables.ts"
 
 /** A D1 binding as wrangler's config reader returns it, for the environment asked */
@@ -37,6 +37,8 @@ type D1Target = {
 	migrationsDir: string
 	/** the binding's name or database_name, as every wrangler command takes it */
 	name: string
+	/** the wrangler the command checked, which every wrangler command of the target runs */
+	wrangler: ProjectBin
 	/** the wrangler config file */
 	wranglerConfig: string
 	wranglerEnv?: string | undefined

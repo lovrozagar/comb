@@ -6,16 +6,20 @@ import os from "node:os"
 import path from "node:path"
 import { run, type Run } from "../../../src/migrate/core/process.ts"
 
-const WRANGLER = path.join(
-	path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json")),
-	"bin/wrangler.js",
-)
+/* the wrangler package comb tests against, which each project installs as a link */
+const WRANGLER_PACKAGE = path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json"))
+const WRANGLER = path.join(WRANGLER_PACKAGE, "bin/wrangler.js")
 
 const BIN = path.resolve(import.meta.dirname, "../../../src/bin.ts")
 
-/** A worker project whose wrangler.toml applies ./atlas-migrations, holding `migrations` and their atlas.sum */
+/**
+ * A worker project whose wrangler.toml applies ./atlas-migrations, holding `migrations` and their
+ * atlas.sum, with wrangler installed in it, where comb finds the wrangler it runs (K1 of r22)
+ */
 export function d1Project(migrations: Record<string, string>): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-d1-cli-"))
+	fs.mkdirSync(path.join(dir, "node_modules"))
+	fs.symlinkSync(WRANGLER_PACKAGE, path.join(dir, "node_modules", "wrangler"))
 	fs.writeFileSync(
 		path.join(dir, "wrangler.toml"),
 		'name = "probe"\ncompatibility_date = "2026-10-01"\n\n[[d1_databases]]\nbinding = "CORE"\ndatabase_name = "core"\ndatabase_id = "00000000-0000-0000-0000-000000000000"\nmigrations_dir = "atlas-migrations"\n',
@@ -31,12 +35,10 @@ export function writeMigrations(dir: string, migrations: Record<string, string>)
 	spawnSync("atlas", ["migrate", "hash", "--dir", `file://${path.join(dir, "atlas-migrations")}`])
 }
 
-/** The CLI as a process of its own in the project, as a user runs it, with wrangler's bin directory on PATH */
+/** The CLI as a process of its own in the project, as a user runs it: the project's wrangler, nothing on PATH for it */
 export function combProcess(dir: string, args: readonly string[]): Promise<{ code: number | null; stderr: string }> {
-	const bin = path.join(path.dirname(WRANGLER), "../../.bin")
-	const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env["PATH"] ?? ""}` }
 	return new Promise((done) => {
-		const child = spawn("bun", [BIN, ...args], { cwd: dir, env, stdio: ["ignore", "ignore", "pipe"] })
+		const child = spawn("bun", [BIN, ...args], { cwd: dir, stdio: ["ignore", "ignore", "pipe"] })
 		let stderr = ""
 		child.stderr.on("data", (chunk: Buffer) => {
 			stderr += chunk.toString()
@@ -45,11 +47,13 @@ export function combProcess(dir: string, args: readonly string[]): Promise<{ cod
 	})
 }
 
-/** wrangler from node_modules, run in the project */
+/** wrangler run in the project: the one the CLI resolved, or, called as `wrangler`, the one the tests pin */
 export const wrangler =
 	(dir: string): Run =>
-	(cmd, args, options) =>
-		cmd === "wrangler" ? run(process.execPath, [WRANGLER, ...args], { ...options, cwd: dir }) : run(cmd, args, options)
+	(cmd, args, options) => {
+		if (options?.peer === "wrangler") return run(cmd, args, { ...options, cwd: dir })
+		return cmd === "wrangler" ? run("node", [WRANGLER, ...args], { ...options, cwd: dir }) : run(cmd, args, options)
+	}
 
 /** The CLI's io for a run in the project, wrangler from node_modules, its lines kept */
 export function d1Io(dir: string) {

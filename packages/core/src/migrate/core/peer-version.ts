@@ -88,17 +88,25 @@ function admits(range: string, version: string): boolean {
 	})
 }
 
-/** The version of `peer` whose file `entry` (a path or a file: URL) is: its package.json's, the first up from it that names it */
-function installedVersion(peer: string, entry: string): string | undefined {
+/** The package.json of `peer` whose file `entry` (a path or a file: URL) is: the first up from it that names it */
+function manifestOf(peer: string, entry: string): string | undefined {
 	let dir = dirname(entry.startsWith("file:") ? fileURLToPath(entry) : entry)
 	for (;;) {
 		const file = join(dir, "package.json")
-		const manifest = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {}
-		if (manifest["name"] === peer) return typeof manifest["version"] === "string" ? manifest["version"] : undefined
+		if (existsSync(file) && (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>)["name"] === peer)
+			return file
 		const up = dirname(dir)
 		if (up === dir) return undefined
 		dir = up
 	}
 }
 
-export { admits, installedVersion }
+/** The version of `peer` whose file `entry` (a path or a file: URL) is: its package.json's, the first up from it that names it */
+function installedVersion(peer: string, entry: string): string | undefined {
+	const file = manifestOf(peer, entry)
+	if (file === undefined) return undefined
+	const { version } = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>
+	return typeof version === "string" ? version : undefined
+}
+
+export { admits, installedVersion, manifestOf }

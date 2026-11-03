@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { devNull, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { run } from "./process.ts"
+import { run, runPeer } from "./process.ts"
 
 describe("run", () => {
 	it("returns the exit code and both streams", () => {
@@ -35,21 +35,6 @@ describe("run", () => {
 })
 
 describe("run: a process that cannot start", () => {
-	it("names the package to install when wrangler or drizzle-kit cannot start", () => {
-		const hint = "run comb through a package script, so node_modules/.bin is on PATH, or install"
-		const wrangler = run("wrangler", ["--version"], { env: { PATH: "/nonexistent" } })
-		expect(wrangler).toEqual({
-			code: 127,
-			stderr: `wrangler: command not found; comb needs wrangler (>=4.147.0 <5) to migrate a D1 database; ${hint} "wrangler@>=4.147.0 <5"`,
-			stdout: "",
-		})
-		const kit = run("bun", ["drizzle-kit", "export"], { cwd: tmpdir() })
-		expect(kit.code).toBe(1)
-		expect(kit.stderr).toContain(
-			`comb needs drizzle-kit (1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0) to export the drizzle schema for comb migrate diff; ${hint} "drizzle-kit@1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"`,
-		)
-	})
-
 	it("reports a file the OS refuses to execute as exit 126 with the reason", () => {
 		const dir = mkdtempSync(join(tmpdir(), "comb-process-"))
 		try {
@@ -138,5 +123,41 @@ describe("run: an exact environment and a timeout", () => {
 	it("stops a child past timeoutMs and answers 124, naming the limit", () => {
 		const result = run(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { timeoutMs: 200 })
 		expect(result).toEqual({ code: 124, stderr: `${process.execPath}: stopped after 200 ms`, stdout: "" })
+	})
+})
+
+describe("runPeer (K1 of r22)", () => {
+	/* a bin peer runs on its runtime and the bin the project's package names, never from PATH */
+	it("runs a bin peer on its runtime, and names the runtime when it cannot start", () => {
+		const dir = mkdtempSync(join(tmpdir(), "comb-process-"))
+		try {
+			const bin = join(dir, "w.js")
+			writeFileSync(bin, "process.stdout.write(process.argv.slice(2).join(' '))")
+			const wrangler = { bin, manifest: join(dir, "package.json"), peer: "wrangler", runtime: "node" } as const
+			expect(runPeer(run, wrangler)(["d1", "list"])).toEqual({ code: 0, stderr: "", stdout: "d1 list" })
+			expect(runPeer(run, wrangler)(["d1"], { env: { PATH: "/nonexistent" } })).toEqual({
+				code: 127,
+				stderr:
+					"node: command not found; comb runs wrangler on node, and finds no node on PATH: install Node.js (https://nodejs.org)",
+				stdout: "",
+			})
+			const kit = { ...wrangler, peer: "drizzle-kit", runtime: "bun" } as const
+			expect(runPeer(run, kit)(["export"], { env: { PATH: "/nonexistent" } }).stderr).toBe(
+				"bun: command not found; comb runs drizzle-kit on bun, and finds no bun on PATH: install Bun (https://bun.sh)",
+			)
+		} finally {
+			rmSync(dir, { force: true, recursive: true })
+		}
+	})
+
+	it("passes the peer it runs to the runner with the spawn", () => {
+		const calls: unknown[] = []
+		const fake = (cmd: string, args: readonly string[], options?: unknown) => {
+			calls.push([cmd, args, options])
+			return { code: 0, stderr: "", stdout: "" }
+		}
+		const kit = { bin: "/k/bin.cjs", manifest: "/k/package.json", peer: "drizzle-kit", runtime: "bun" } as const
+		runPeer(fake, kit)(["export"], { cwd: "/w" })
+		expect(calls).toEqual([["bun", ["/k/bin.cjs", "export"], { cwd: "/w", peer: "drizzle-kit" }]])
 	})
 })
