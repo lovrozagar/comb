@@ -18,22 +18,14 @@ const DATABASE = /comb_replay_\d+_\d+_[0-9a-f]{8}/g
 const OWNER = [{ pid: 7, start: "9" }]
 
 /* the server's counts: whether it keeps them, and a transaction's writes to the shared catalogs */
-const COUNTED = "SELECT current_setting('track_counts') AS on"
-const WRITES = expect.stringMatching(/^SELECT s\.relname, s\.n_tup_ins/)
+const COUNTS = "SELECT current_setting('track_counts') AS on, coalesce("
+const COUNTED = expect.stringMatching(/^SELECT current_setting\('track_counts'\) AS on, coalesce\(/)
 
 /* the server's shared catalogs read as committed, around every file and bare statement (P1 and P2 of r22) */
 const SNAPSHOT = "EXECUTE comb_snapshot"
 
 /** What a replayed transaction of `statements` sends: its counts read at BEGIN and again, with the server's catalogs, before COMMIT */
-const inTransaction = (...statements: unknown[]) => [
-	"BEGIN",
-	WRITES,
-	...statements,
-	COUNTED,
-	WRITES,
-	SNAPSHOT,
-	"COMMIT",
-]
+const inTransaction = (...statements: unknown[]) => ["BEGIN", COUNTED, ...statements, COUNTED, SNAPSHOT, "COMMIT"]
 
 /* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
 const AROUND = {
@@ -72,7 +64,7 @@ function fake(fail?: (query: string) => Error | undefined, roles: readonly strin
 			if (ROLES.test(query))
 				return roles.filter((role) => (params[0] as string[]).includes(role)).map((rolname) => ({ rolname }))
 			if (query.endsWith("WHERE pid = pg_backend_pid()")) return OWNER
-			return query === COUNTED ? [{ on: "on" }] : []
+			return query.startsWith(COUNTS) ? [{ on: "on", writes: {} }] : []
 		},
 	})
 	return { load: async () => connect, sent }

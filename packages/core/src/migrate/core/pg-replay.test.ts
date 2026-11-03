@@ -17,23 +17,15 @@ const DATABASE = /comb_replay_\d+_\d+_[0-9a-f]{8}/g
 const OWNER = [{ pid: 7, start: "9" }]
 
 /* the server's counts: whether it keeps them, and a transaction's writes to the shared catalogs */
-const COUNTED = "SELECT current_setting('track_counts') AS on"
-const WRITES = expect.stringMatching(/^SELECT s\.relname, s\.n_tup_ins/)
+const COUNTS = "SELECT current_setting('track_counts') AS on, coalesce("
+const COUNTED = expect.stringMatching(/^SELECT current_setting\('track_counts'\) AS on, coalesce\(/)
 
 /** What a replayed transaction of `statements` sends: its counts read at BEGIN and again before COMMIT */
 /* the server's shared catalogs read as committed, around every file and bare statement (P1 and P2 of r22) */
 const SNAPSHOT = "EXECUTE comb_snapshot"
 /* the read prepared on the connection that makes it, once */
 const PREPARE = expect.stringMatching(/^PREPARE comb_snapshot AS SELECT 'membership' AS noun, .* UNION ALL /)
-const inTransaction = (...statements: unknown[]) => [
-	"BEGIN",
-	WRITES,
-	...statements,
-	COUNTED,
-	WRITES,
-	SNAPSHOT,
-	"COMMIT",
-]
+const inTransaction = (...statements: unknown[]) => ["BEGIN", COUNTED, ...statements, COUNTED, SNAPSHOT, "COMMIT"]
 
 /** A postgres.js stand-in on every connection: each query it was sent, the replay's database as <db>, answering `rows` to the catalog read */
 function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) => Error | undefined) {
@@ -47,7 +39,7 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 				sent.push([query.replaceAll(DATABASE, "<db>"), params])
 				const error = fail?.(query)
 				if (error !== undefined) throw error
-				if (query === COUNTED) return [{ on: "on" }]
+				if (query.startsWith(COUNTS)) return [{ on: "on", writes: {} }]
 				if (query.endsWith("WHERE pid = pg_backend_pid()")) return OWNER
 				return query === CATALOG ? rows : []
 			},
@@ -103,7 +95,7 @@ describe("replayCatalog", () => {
 			SNAPSHOT,
 			...inTransaction("CREATE TABLE t (a int)"),
 			"BEGIN",
-			WRITES,
+			COUNTED,
 			"CREATE INDEX CONCURRENTLY i ON t (a)",
 			"ROLLBACK",
 			"CREATE INDEX CONCURRENTLY i ON t (a)",

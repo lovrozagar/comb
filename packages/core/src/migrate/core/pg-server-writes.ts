@@ -15,13 +15,18 @@ import { ReplayFailed } from "./replay-failed.ts"
 /** Writes by shared catalog: how many rows the open transaction inserted, updated or deleted in each */
 type Writes = Map<string, number>
 
-/** The open transaction's writes to each shared catalog, pg_shdepend aside */
-async function sharedWrites(sql: Sql): Promise<Writes> {
-	const rows = await sql.unsafe(
-		"SELECT s.relname, s.n_tup_ins + s.n_tup_upd + s.n_tup_del AS n FROM pg_stat_xact_sys_tables s JOIN pg_class c ON c.oid = s.relid WHERE c.relisshared AND c.relkind = 'r' AND s.relname <> 'pg_shdepend'",
-		[],
-	)
-	return new Map(rows.map((row) => [String(row["relname"]), Number(row["n"])]))
+/* the counts in one read, a round trip each guarded statement and file saves: track_counts, and the open transaction's writes by shared catalog */
+const COUNTS =
+	"SELECT current_setting('track_counts') AS on, coalesce((SELECT json_object_agg(s.relname, s.n_tup_ins + s.n_tup_upd + s.n_tup_del) FROM pg_stat_xact_sys_tables s JOIN pg_class c ON c.oid = s.relid WHERE c.relisshared AND c.relkind = 'r' AND s.relname <> 'pg_shdepend'), '{}') AS writes"
+
+/**
+ * Whether the server counts this backend's writes, which with `track_counts` off read as none, and
+ * the open transaction's writes to each shared catalog, pg_shdepend aside
+ */
+async function counts(sql: Sql): Promise<{ on: boolean; writes: Writes }> {
+	const [row] = await sql.unsafe(COUNTS, [])
+	const writes = (row?.["writes"] ?? {}) as Record<string, number>
+	return { on: row?.["on"] === "on", writes: new Map(Object.entries(writes).map(([name, n]) => [name, Number(n)])) }
 }
 
 /** The writes in `after` that `before` does not account for, by catalog */
@@ -169,13 +174,9 @@ async function namedChanges({ sql, was }: { sql: Sql; was: Sql }, counted: Write
 	return changes
 }
 
-/** Whether the server counts this backend's writes: with `track_counts` off they read as none */
-const counting = async (sql: Sql): Promise<boolean> =>
-	(await sql.unsafe("SELECT current_setting('track_counts') AS on", []))[0]?.["on"] === "on"
-
 /** Refuses a devUrl whose server keeps no counts for its role: the replay would read every file's writes as none */
 async function refuseUncounted(sql: Sql, stops: string): Promise<void> {
-	if (await counting(sql)) return
+	if ((await counts(sql)).on) return
 	throw new ReplayFailed(
 		`devUrl's server keeps no counts for its role (track_counts is off), and comb reads from them what a history file changes past its database; set track_counts on for devUrl's role or server; ${stops}`,
 	)
@@ -185,11 +186,10 @@ export {
 	addWrites,
 	CATALOGS,
 	changedFields,
-	counting,
+	counts,
 	namedChanges,
 	refuseUncounted,
 	type Rows,
-	sharedWrites,
 	subjectRows,
 	type Writes,
 	writesSince,

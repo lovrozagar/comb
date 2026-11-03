@@ -3,7 +3,7 @@ import { type At, begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import type { Run } from "./pg-replay-roles.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
-const COUNTED = "SELECT current_setting('track_counts') AS on"
+const COUNTS = "SELECT current_setting('track_counts') AS on, coalesce("
 
 /* a snapshot row: its subject's noun and key, the names it is about, and the row */
 type Row = [noun: string, key: string, names: string[], row: Record<string, unknown>]
@@ -19,8 +19,8 @@ function runOf(server: { counts?: number[]; on?: string; snapshot?: Row[] }): { 
 		end: async () => undefined,
 		unsafe: async (query: string) => {
 			sent.push(query)
-			if (query === COUNTED) return [{ on: server.on ?? "on" }]
-			if (query.startsWith("SELECT s.relname")) return [{ n: String(counts.shift() ?? 0), relname: "pg_authid" }]
+			if (query.startsWith(COUNTS))
+				return [{ on: server.on ?? "on", writes: { pg_authid: String(counts.shift() ?? 0) } }]
 			return []
 		},
 	}

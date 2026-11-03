@@ -8,7 +8,7 @@
  */
 import type { Run } from "./pg-replay-roles.ts"
 import { added, snapshot, snapshotChanges } from "./pg-server-snapshot.ts"
-import { counting, namedChanges, sharedWrites, writesSince } from "./pg-server-writes.ts"
+import { counts, namedChanges, writesSince } from "./pg-server-writes.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
 /**
@@ -17,8 +17,9 @@ import { ReplayFailed } from "./replay-failed.ts"
  * never does inside a transaction (.tmp/grunt/r21-premise/p1-carry.log)
  */
 async function begin(run: Run): Promise<void> {
-	await run.sql.unsafe("BEGIN", [])
-	run.ours = { rows: new Map(), writes: await sharedWrites(run.sql) }
+	/* pipelined on the one connection: the read runs in the transaction BEGIN opens, a round trip saved */
+	const [, now] = await Promise.all([run.sql.unsafe("BEGIN", []), counts(run.sql)])
+	run.ours = { rows: new Map(), writes: now.writes }
 }
 
 /**
@@ -65,11 +66,12 @@ async function window(run: Run, { name, names, sent, stops }: At): Promise<void>
 async function commit(run: Run, at: At): Promise<void> {
 	const { name, sent, stops } = at
 	/* a superuser's file can turn the counts off for its transaction or its session (P1a of r21) */
-	if (!(await counting(run.sql)))
+	const now = await counts(run.sql)
+	if (!now.on)
 		throw new ReplayFailed(
 			`${name}: the file turned track_counts off, so devUrl's server counted nothing it changed past the database the replay runs in, and comb rolled it back and refuses the file; leave track_counts on; ${stops}`,
 		)
-	const counted = writesSince(await sharedWrites(run.sql), run.ours.writes)
+	const counted = writesSince(now.writes, run.ours.writes)
 	if (counted.size > 0) {
 		const changes = await namedChanges({ sql: run.sql, was: run.admin }, counted, run.ours.rows)
 		const by = sent === undefined ? "" : `, made by ${JSON.stringify(sent)}`

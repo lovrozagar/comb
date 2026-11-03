@@ -10,7 +10,7 @@
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { codeOf, literal, type Sql, TAG } from "./pg-replay-database.ts"
-import { addWrites, type Rows, sharedWrites, subjectRows, type Writes, writesSince } from "./pg-server-writes.ts"
+import { addWrites, counts, type Rows, subjectRows, type Writes, writesSince } from "./pg-server-writes.ts"
 import type { Snapshot } from "./pg-server-snapshot.ts"
 
 /**
@@ -32,9 +32,9 @@ type Run = {
 
 /** `act` run, its writes to the shared catalogs counted as comb's own, with the rows of them that are `mine` */
 async function own(run: Run, act: () => Promise<void>, mine: (subject: string) => boolean): Promise<void> {
-	const before = await sharedWrites(run.sql)
+	const before = (await counts(run.sql)).writes
 	await act()
-	const written = writesSince(await sharedWrites(run.sql), before)
+	const written = writesSince((await counts(run.sql)).writes, before)
 	addWrites(run.ours.writes, written)
 	for (const [subject, row] of await subjectRows(run.sql, written, mine)) run.ours.rows.set(subject, row)
 }

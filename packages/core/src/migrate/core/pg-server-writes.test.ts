@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Sql } from "./pg-replay-database.ts"
-import { addWrites, namedChanges, sharedWrites, subjectRows, writesSince } from "./pg-server-writes.ts"
+import { addWrites, counts, namedChanges, refuseUncounted, subjectRows, writesSince } from "./pg-server-writes.ts"
 
 /** A postgres.js stand-in answering each catalog read by the relation it reads, as `key` and `row` pairs */
 function server(catalogs: Record<string, Array<[string, Record<string, unknown>]>>): Sql {
@@ -13,22 +13,22 @@ function server(catalogs: Record<string, Array<[string, Record<string, unknown>]
 	}
 }
 
-describe("sharedWrites, writesSince and addWrites", () => {
-	it("reads each catalog's writes, takes only what grew since, and adds them up", async () => {
-		const sql = {
-			end: async () => undefined,
-			unsafe: async () => [
-				{ n: "2", relname: "pg_authid" },
-				{ n: "0", relname: "pg_database" },
-			],
-		}
-		const writes = await sharedWrites(sql)
-		expect(writes).toEqual(
-			new Map([
+/** A connection answering the counts read with `row` */
+const countsOf = (row?: Record<string, unknown>) => ({
+	end: async () => undefined,
+	unsafe: async () => (row === undefined ? [] : [row]),
+})
+
+describe("counts, writesSince and addWrites", () => {
+	it("reads track_counts and each catalog's writes in one row, takes only what grew since, and adds them up", async () => {
+		const { on, writes } = await counts(countsOf({ on: "on", writes: { pg_authid: "2", pg_database: 0 } }))
+		expect({ on, writes }).toEqual({
+			on: true,
+			writes: new Map([
 				["pg_authid", 2],
 				["pg_database", 0],
 			]),
-		)
+		})
 		/* a count that fell, as after a flush, is no write */
 		expect(writesSince(writes, new Map([["pg_authid", 3]]))).toEqual(new Map())
 		expect(writesSince(writes, new Map([["pg_authid", 1]]))).toEqual(new Map([["pg_authid", 1]]))
@@ -37,6 +37,15 @@ describe("sharedWrites, writesSince and addWrites", () => {
 		addWrites(writes, new Map([["pg_authid", 1]]))
 		expect(writes.get("pg_authid")).toBe(3)
 		expect(writes.get("pg_tablespace")).toBe(1)
+	})
+
+	it("reads track_counts off, and no row as off with no writes", async () => {
+		expect(await counts(countsOf({ on: "off", writes: {} }))).toEqual({ on: false, writes: new Map() })
+		expect(await counts(countsOf())).toEqual({ on: false, writes: new Map() })
+		await expect(refuseUncounted(countsOf({ on: "off", writes: {} }), "check stops")).rejects.toThrow(
+			/track_counts is off.*; check stops$/,
+		)
+		await expect(refuseUncounted(countsOf({ on: "on", writes: {} }), "check stops")).resolves.toBeUndefined()
 	})
 })
 
