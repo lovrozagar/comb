@@ -15,7 +15,7 @@ import {
 } from "./drizzle-dialect.ts"
 import { migrateApply, needPeers } from "./migrate-apply.ts"
 import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
-import { CliError, type CliIo } from "./output.ts"
+import { CliError, type CliContext } from "./output.ts"
 
 const DRIZZLE_CONFIG = `import { defineConfig } from "drizzle-kit"
 
@@ -70,7 +70,7 @@ function starterFiles(dialect: Dialect): ReadonlyArray<readonly [string, string]
  * Write each starter file of the dialect --dialect names that does not exist yet, refused when the
  * drizzle config already there states the other dialect (KC1 of r22b)
  */
-function migrateInit(argv: readonly string[], io: CliIo): void {
+function migrateInit(argv: readonly string[], io: CliContext): void {
 	const option = parseArgs(argv, "migrate init").options["dialect"] ?? "sqlite"
 	if (option !== "sqlite" && option !== "postgres")
 		throw new CliError(`Unknown --dialect "${String(option)}": use sqlite or postgres`)
@@ -100,7 +100,7 @@ function migrateInit(argv: readonly string[], io: CliIo): void {
  * database's dialect, directory and drizzle config come from it; without, it is SQLite in
  * ./atlas-migrations.
  */
-async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
+async function migrateDiff(argv: readonly string[], io: CliContext): Promise<void> {
 	const args = parseArgs(argv, "migrate diff")
 	/* parseArgs refuses a diff that names no database (KC2 of r22b) */
 	const [db, name] = args.positionals as [string, string?]
@@ -166,7 +166,7 @@ function drizzleConfig(configured: string | undefined, cwd: string): string {
 const providerOf = (target: MigrateTarget | undefined) => target?.provider.type ?? "d1"
 
 /** What a diff of `db` reads: its Postgres provider if it has one, its drizzle export, the FTS it declares, and its migrations */
-async function diffTarget(db: string, env: string | undefined, io: CliIo) {
+async function diffTarget(db: string, env: string | undefined, io: CliContext) {
 	const target = await resolveMigrateTarget({ cwd: io.cwd, db, env, mode: "diff" })
 	const pg = target?.provider.type === "postgres" ? target.provider : undefined
 	const exported = {
@@ -207,7 +207,7 @@ async function diffTarget(db: string, env: string | undefined, io: CliIo) {
 }
 
 /** Print the files a diff would write, and fail: the schema drifted from the migrations */
-function reportDrift(db: string, files: readonly string[], io: CliIo): never {
+function reportDrift(db: string, files: readonly string[], io: CliContext): never {
 	for (const file of files) {
 		io.out(`-- ${path.basename(file)}`)
 		io.out(fs.readFileSync(file, "utf8"))
@@ -222,7 +222,7 @@ function copyOf(dir: string): string {
 	return copy
 }
 
-export async function cmdMigrate(argv: readonly string[], io: CliIo, help: string): Promise<void> {
+export async function cmdMigrate(argv: readonly string[], io: CliContext, help: string): Promise<void> {
 	const [command, ...rest] = argv
 	switch (command) {
 		/* a bare migrate names no command: it fails, with the commands to pick from (K19) */

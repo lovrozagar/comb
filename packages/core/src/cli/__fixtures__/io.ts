@@ -4,10 +4,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Run, RunResult } from "../../migrate/core/process.ts"
 import type { LiveObjects } from "../../migrate/core/pg-live-types.ts"
-import type { CliIo } from "../output.ts"
+import type { CliContext, CliIo } from "../output.ts"
 import { noLive } from "../../migrate/__fixtures__/live-objects.ts"
 
-export type TestIo = CliIo & { errors: string[]; outputs: string[] }
+/** An io that records the lines, with the seams comb fakes in its tests */
+export type TestIo = CliContext & { errors: string[]; outputs: string[] }
 
 /* a Postgres baseline's catalog read reaches no database: its schema holds no function or trigger */
 const readPgObjects = async (): Promise<LiveObjects> => ({
@@ -33,6 +34,15 @@ const readAtlasVersion = (): RunResult =>
 
 /* nor does the dev database a non-public schema is created on (P12): Atlas, faked, needs none */
 const readyPgDev = async (): Promise<void> => undefined
+
+/**
+ * The CLI on `argv` with `io`, and the seams `io` carries in place of comb's own (KT7 of r22b).
+ * It loads the CLI when called, so importing this fixture runs none of it.
+ */
+export async function runCliWithFakes(argv: readonly string[], io: TestIo): Promise<number> {
+	const { runCliWith } = await import("../run.ts")
+	return runCliWith(argv, io, io)
+}
 
 export function makeIo(cwd: string, run?: Run, confirm?: CliIo["confirm"]): TestIo {
 	const outputs: string[] = []

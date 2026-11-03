@@ -19,7 +19,7 @@ import type { ScratchEngine } from "../migrate/drivers/local-db.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
-import { CliError, type CliIo } from "./output.ts"
+import { CliError, type CliContext } from "./output.ts"
 
 /** An open database to migrate: the connection its checks read, the one its writes go to, and how to name it */
 export type SqliteTarget = {
@@ -37,7 +37,7 @@ export type SqliteTarget = {
 	fresh(): Promise<FileConnection>
 }
 
-type OpenRequest = { args: ParsedArgs; io: CliIo; mode: string }
+type OpenRequest = { args: ParsedArgs; io: CliContext; mode: string }
 
 /** The database read-only, or the empty database a missing one is */
 async function readOrAbsent(connect: (readonly: boolean) => Promise<Connection>, name: string): Promise<Connection> {

@@ -2,3 +2,4 @@
 export { CliError, type CliIo, processIo } from "./output.ts"
 export { help, runCli } from "./run.ts"
 export type { Terminal } from "./output.ts"
+export type { Run, RunOptions, RunResult } from "../migrate/core/process.ts"

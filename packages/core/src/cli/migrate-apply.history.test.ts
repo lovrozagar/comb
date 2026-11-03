@@ -8,8 +8,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { generateMigrationHash } from "../migrate/core/parse.ts"
 import { fakeAtlas, writeSum } from "./__fixtures__/d1.ts"
-import { makeIo, projects } from "./__fixtures__/io.ts"
-import { runCli } from "./run.ts"
+import { makeIo, projects, runCliWithFakes } from "./__fixtures__/io.ts"
 
 const temp = projects()
 afterEach(temp.clean)
@@ -47,7 +46,7 @@ const INIT = "CREATE TABLE plans (id INTEGER PRIMARY KEY, name TEXT);"
 describe("comb's SQLite history and an applied file edited since (M10)", () => {
 	it("records each file's name, and refuses an applied file edited since, in apply, check and status", async () => {
 		const { dir, url, write } = configured({ "1_init.sql": INIT, "2_seed.sql": SEED })
-		expect(await runCli(["migrate", "apply", "core", "--yes"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--yes"], makeIo(dir, fakeAtlas()))).toBe(0)
 		expect(await rows(url, "SELECT name FROM __drizzle_migrations ORDER BY id")).toEqual([
 			["1_init.sql"],
 			["2_seed.sql"],
@@ -55,7 +54,7 @@ describe("comb's SQLite history and an applied file edited since (M10)", () => {
 		write({ "2_seed.sql": SEED.replace("'pro'", "'Pro'") })
 		for (const mode of ["apply", "check", "status"]) {
 			const io = makeIo(dir, fakeAtlas())
-			expect(await runCli(["migrate", mode, "core", ...(mode === "apply" ? ["--yes"] : [])], io)).toBe(1)
+			expect(await runCliWithFakes(["migrate", mode, "core", ...(mode === "apply" ? ["--yes"] : [])], io)).toBe(1)
 			expect(io.errors.join("\n")).toMatch(/2_seed\.sql was applied, then edited: its hash is not the one recorded/)
 		}
 		expect(await rows(url, "SELECT name FROM plans")).toEqual([["pro"]])
@@ -72,7 +71,7 @@ describe("comb's SQLite history and an applied file edited since (M10)", () => {
 			sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
 		})
 		client.close()
-		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
 		expect(await rows(url, "SELECT name FROM __drizzle_migrations")).toEqual([["1_init.sql"]])
 	})
 })
@@ -99,27 +98,27 @@ describe("comb's SQLite history and a row that matches no file, or a file whose 
 		write({ "2_seed.sql": SEED.replace("'pro'", "'Pro'") })
 		for (const mode of ["apply", "check"]) {
 			const io = makeIo(dir, fakeAtlas())
-			expect(await runCli(["migrate", mode, "core", ...(mode === "apply" ? ["--yes"] : [])], io)).toBe(1)
+			expect(await runCliWithFakes(["migrate", mode, "core", ...(mode === "apply" ? ["--yes"] : [])], io)).toBe(1)
 			expect(io.errors.join("\n")).toMatch(
 				/1 applied migration matches no file in .*: one was edited or renamed after it was applied/,
 			)
 		}
 		const status = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "status", "core"], status)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "status", "core"], status)).toBe(0)
 		expect(status.outputs.join("\n")).toMatch(/1 applied migration matches no file/)
 		expect(await rows(url, "SELECT name FROM plans")).toEqual([["pro"]])
 	})
 
 	it("refuses a named row whose file was renamed and edited (M15)", async () => {
 		const { dir, url } = configured({ "1_init.sql": INIT, "2_seed.sql": SEED })
-		expect(await runCli(["migrate", "apply", "core", "--yes"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--yes"], makeIo(dir, fakeAtlas()))).toBe(0)
 		const moved = join(dir, "m")
 		const { renameSync, writeFileSync: write } = await import("node:fs")
 		renameSync(join(moved, "2_seed.sql"), join(moved, "2_seed_v2.sql"))
 		write(join(moved, "2_seed_v2.sql"), SEED.replace("'pro'", "'Pro'"))
 		writeSum(moved)
 		const io = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "apply", "core", "--yes"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--yes"], io)).toBe(1)
 		expect(io.errors.join("\n")).toMatch(/matches no file in .*\(2_seed\.sql\)/)
 		expect(await rows(url, "SELECT name FROM plans")).toEqual([["pro"]])
 	})
@@ -133,12 +132,12 @@ describe("comb's SQLite history and two files of one text (M16)", () => {
 			"2_index.sql": index,
 			"3_drop.sql": "DROP INDEX plans_name;",
 		})
-		expect(await runCli(["migrate", "apply", "core", "--yes"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--yes"], makeIo(dir, fakeAtlas()))).toBe(0)
 		write({ "4_readd.sql": `-- the index is needed again\n${index}` })
 		const status = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "status", "core"], status)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "status", "core"], status)).toBe(0)
 		expect(status.outputs.join("\n")).toContain("Pending: 4_readd.sql")
-		expect(await runCli(["migrate", "apply", "core", "--yes"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--yes"], makeIo(dir, fakeAtlas()))).toBe(0)
 		expect(await rows(url, "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'plans_name'")).toEqual([
 			["plans_name"],
 		])
@@ -186,11 +185,11 @@ describe("comb's SQLite history from 0.12, its named rows resolved (M35)", () =>
 			],
 			setup: `${A}\n${LONE}`,
 		})
-		expect(await runCli(["migrate", "check", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "check", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
 		const status = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "status", "core"], status)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "status", "core"], status)).toBe(0)
 		expect(status.outputs).toEqual(["Applied: 1_a.sql", "Pending: none"])
-		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
 		expect(await names(url)).toEqual(["1_a.sql", "../lone.sql"])
 	})
 
@@ -204,10 +203,10 @@ describe("comb's SQLite history from 0.12, its named rows resolved (M35)", () =>
 			setup: `${A}\n${B}`,
 		})
 		const check = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "check", "core"], check), check.errors.join("\n")).toBe(0)
+		expect(await runCliWithFakes(["migrate", "check", "core"], check), check.errors.join("\n")).toBe(0)
 		expect(check.outputs.at(-1)).toBe("\nCheck passed: 0 pending")
 		const apply = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "apply", "core"], apply)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], apply)).toBe(0)
 		expect(apply.outputs.filter((line) => line.startsWith("Apply:"))).toEqual([])
 		expect(await names(url)).toEqual(["1_a.sql", "2_b_renamed.sql"])
 	})
@@ -221,7 +220,7 @@ describe("comb's SQLite history from 0.12, its named rows resolved (M35)", () =>
 			],
 			setup: `${A}\n${B}`,
 		})
-		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
 		expect(await names(url)).toEqual(["1_a.sql", "../2_gone.sql"])
 	})
 })
@@ -238,7 +237,7 @@ describe("comb's SQLite history from 0.12: what stays refused (M35)", () => {
 		})
 		for (const mode of ["check", "status", "apply"]) {
 			const io = makeIo(dir, fakeAtlas())
-			expect(await runCli(["migrate", mode, "core"], io)).toBe(1)
+			expect(await runCliWithFakes(["migrate", mode, "core"], io)).toBe(1)
 			expect(io.errors.join("\n")).toMatch(/2_b\.sql.*2_x\.sql, 3_y\.sql/)
 		}
 	})
@@ -246,11 +245,11 @@ describe("comb's SQLite history from 0.12: what stays refused (M35)", () => {
 	it("holds every row strictly once 0.13 rebuilt the history: a file renamed after is refused", async () => {
 		const { dir, url, write } = configured({ "1_a.sql": A })
 		await history012(url, { recorded: [[1, A, "1_a.sql"]], setup: A })
-		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
 		rmSync(join(dir, "m", "1_a.sql"))
 		write({ "1_a_renamed.sql": A })
 		const check = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "check", "core"], check)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "check", "core"], check)).toBe(1)
 		expect(check.errors.join("\n")).toMatch(/matches no file in .* \(1_a\.sql\)/)
 	})
 })
@@ -260,7 +259,7 @@ describe("comb's SQLite history from 0.12, rebuilt (M36)", () => {
 	it("keeps the AUTOINCREMENT counter above every id it handed out", async () => {
 		const { dir, url } = configured({ "1_a.sql": A })
 		await history012(url, { recorded: [[1, A, "1_a.sql"]], setup: A, seq: 7 })
-		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
 		expect(await rows(url, "SELECT seq FROM sqlite_sequence WHERE name = '__drizzle_migrations'")).toEqual([[7]])
 	})
 
@@ -271,7 +270,7 @@ describe("comb's SQLite history from 0.12, rebuilt (M36)", () => {
 			`${A}\nCREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, name TEXT);\nINSERT INTO __drizzle_migrations VALUES (4, '${generateMigrationHash(A)}', 1, '1_a.sql');`,
 		)
 		client.close()
-		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
 		expect(await rows(url, "SELECT seq FROM sqlite_sequence WHERE name = '__drizzle_migrations'")).toEqual([[4]])
 	})
 })
@@ -283,7 +282,7 @@ describe("migrate apply --file in a subdirectory of the migrations directory (M3
 		mkdirSync(join(dir, "m", "manual"))
 		writeFileSync(join(dir, "m", "manual", "fix.sql"), B)
 		const io = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "apply", "core", "--file", "m/manual/fix.sql"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--file", "m/manual/fix.sql"], io)).toBe(1)
 		expect(io.errors.join("\n")).toMatch(
 			/m\/manual\/fix\.sql is in a subdirectory of .*\/m, which a whole-directory run does not read/,
 		)
@@ -306,7 +305,7 @@ describe("comb's SQLite history from 0.12 with a view and a trigger over it, reb
 		client.close()
 		write({ "2_b.sql": B })
 		const apply = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "apply", "core"], apply), apply.errors.join("\n")).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], apply), apply.errors.join("\n")).toBe(0)
 		expect(await rows(url, "SELECT name FROM last_migration")).toEqual([["2_b.sql"]])
 		expect(await rows(url, "SELECT name FROM seen")).toEqual([["2_b.sql"]])
 	})
@@ -317,7 +316,7 @@ describe("comb's SQLite history from 0.12 with a view and a trigger over it, reb
 		const client = createClient({ url })
 		await client.execute("CREATE INDEX by_created ON __drizzle_migrations (created_at)")
 		client.close()
-		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
 		expect(await rows(url, "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'by_created'")).toEqual([
 			["by_created"],
 		])
@@ -332,7 +331,7 @@ describe("comb's SQLite history from 0.12 with a view and a trigger over it, reb
 		client.close()
 		write({ "2_b.sql": B })
 		const apply = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "apply", "core"], apply)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], apply)).toBe(1)
 		expect(apply.errors.join("\n")).toMatch(
 			/could not rebuild __drizzle_migrations for 0\.13 with the view notes over it, and changed nothing/,
 		)

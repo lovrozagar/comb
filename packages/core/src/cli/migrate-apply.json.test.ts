@@ -4,8 +4,7 @@
  * argv itself is reported as that object too, its database null as none was read.
  */
 import { afterEach, describe, expect, it } from "vitest"
-import { makeIo, projects } from "./__fixtures__/io.ts"
-import { runCli } from "./run.ts"
+import { makeIo, projects, runCliWithFakes } from "./__fixtures__/io.ts"
 
 const temp = projects()
 afterEach(temp.clean)
@@ -27,7 +26,7 @@ describe("migrate apply, check and status --json on an argv comb refuses", () =>
 		[["migrate", "status", "core", "--json="], "--json is a flag and takes no value; give it alone, or leave it out"],
 	])("prints %j's refusal as the one JSON object on stdout, exiting 1", async (argv, refusal) => {
 		const io = makeIo(temp.make())
-		expect(await runCli(argv, io)).toBe(1)
+		expect(await runCliWithFakes(argv, io)).toBe(1)
 		expect(io.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
 			{ applied: [], database: null, pending: [], refused: [refusal], unknown: [] },
 		])
@@ -36,7 +35,7 @@ describe("migrate apply, check and status --json on an argv comb refuses", () =>
 
 	it("prints the help, not JSON, for --help beside --json", async () => {
 		const io = makeIo(temp.make())
-		expect(await runCli(["migrate", "status", "--json", "--help"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "status", "--json", "--help"], io)).toBe(0)
 		expect(io.outputs.join("\n")).toMatch(/^Usage: comb migrate status/)
 	})
 })

@@ -12,7 +12,7 @@ import { loadPostgresParser } from "../migrate/core/pg-parser.ts"
 import type { ResolvedPostgresProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
-import { checkPassed, CliError, type CliIo, type MigrateOutcome } from "./output.ts"
+import { checkPassed, CliError, type CliContext, type MigrateOutcome } from "./output.ts"
 
 type PostgresTarget = MigrateTarget & { provider: ResolvedPostgresProviderConfig }
 
@@ -20,7 +20,7 @@ type PostgresTarget = MigrateTarget & { provider: ResolvedPostgresProviderConfig
 export async function migratePostgres(
 	mode: "apply" | "baseline" | "check" | "status",
 	target: PostgresTarget,
-	{ args, io }: { args: ParsedArgs; io: CliIo },
+	{ args, io }: { args: ParsedArgs; io: CliContext },
 ): Promise<MigrateOutcome> {
 	for (const flag of ["file", "local"]) {
 		if (args.options[flag] !== undefined)

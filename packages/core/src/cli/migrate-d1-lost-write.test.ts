@@ -16,8 +16,7 @@ import {
 	READS_LIVE_JSON,
 	writeSum,
 } from "./__fixtures__/d1.ts"
-import { makeIo, projects } from "./__fixtures__/io.ts"
-import { runCli } from "./run.ts"
+import { makeIo, projects, runCliWithFakes } from "./__fixtures__/io.ts"
 
 const temp = projects()
 afterEach(temp.clean)
@@ -97,26 +96,26 @@ describe("migrate baseline on D1 after a lost write: whichever call is lost, and
 	it("baseline: the copy takes several calls, and a rerun after losing any one of them records every name and hash", async () => {
 		const files = 600
 		const probe = await history07(files)
-		expect(await runCli(["migrate", "baseline", "core", "--local"], makeIo(probe.dir, probe.d1))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "baseline", "core", "--local"], makeIo(probe.dir, probe.d1))).toBe(0)
 		const calls = writes(probe.d1)
 		expect(calls).toBeGreaterThan(1)
 		for (let at = 1; at <= calls; at++) {
 			const { d1, dir } = await history07(files)
-			expect(await runCli(["migrate", "baseline", "core", "--local"], makeIo(dir, losing(d1, at)))).toBe(1)
-			expect(await runCli(["migrate", "baseline", "core", "--local"], makeIo(dir, d1))).toBe(0)
+			expect(await runCliWithFakes(["migrate", "baseline", "core", "--local"], makeIo(dir, losing(d1, at)))).toBe(1)
+			expect(await runCliWithFakes(["migrate", "baseline", "core", "--local"], makeIo(dir, d1))).toBe(0)
 			expect([at, count(d1, "d1_migrations"), count(d1, "_comb_migration_hashes")]).toEqual([at, files, files])
 			const status = makeIo(dir, d1)
-			expect(await runCli(["migrate", "status", "core", "--local"], status)).toBe(0)
+			expect(await runCliWithFakes(["migrate", "status", "core", "--local"], status)).toBe(0)
 			expect(status.outputs.join("\n")).not.toContain("No hash recorded")
 		}
 	})
 
 	it("baseline: a database 0.17.0 left with wrangler's rows and no hashes gets the hashes __drizzle_migrations vouches for", async () => {
 		const { d1, dir } = await history07(3)
-		expect(await runCli(["migrate", "baseline", "core", "--local"], makeIo(dir, d1))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "baseline", "core", "--local"], makeIo(dir, d1))).toBe(0)
 		d1.db.exec("DELETE FROM _comb_migration_hashes WHERE name LIKE '%_1.sql' OR name LIKE '%_2.sql'")
 		const io = makeIo(dir, d1)
-		expect(await runCli(["migrate", "baseline", "core", "--local"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "baseline", "core", "--local"], io)).toBe(0)
 		expect(io.outputs).toEqual([
 			"Hash recorded: 20261028000001_a_migration_with_a_long_descriptive_name_1.sql",
 			"Hash recorded: 20261028000002_a_migration_with_a_long_descriptive_name_2.sql",
@@ -125,7 +124,7 @@ describe("migrate baseline on D1 after a lost write: whichever call is lost, and
 		expect(count(d1, "_comb_migration_hashes")).toBe(3)
 		d1.db.exec("DELETE FROM _comb_migration_hashes WHERE name LIKE '%_0.sql'")
 		const one = makeIo(dir, d1)
-		expect(await runCli(["migrate", "baseline", "core", "--local"], one)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "baseline", "core", "--local"], one)).toBe(0)
 		expect(one.outputs.at(-1)).toBe("\nBaseline done: 0 marked, 1 hash recorded")
 	})
 })
@@ -135,21 +134,21 @@ describe("migrate apply on D1 after a lost hash record", () => {
 		const dir = worker({ ...INIT, "20260102000000_more.sql": "CREATE TABLE tag (id TEXT);" })
 		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
 		const lost = makeIo(dir, losing(d1, 1))
-		expect(await runCli(["migrate", "apply", "core", "--local", "--json"], lost)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--local", "--json"], lost)).toBe(1)
 		const reported = JSON.parse(lost.outputs.at(-1) as string) as { applied: string[] }
 		const status = makeIo(dir, d1)
-		expect(await runCli(["migrate", "status", "core", "--local", "--json"], status)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "status", "core", "--local", "--json"], status)).toBe(0)
 		/* what --json says committed is what wrangler's table holds */
 		expect(reported.applied).toEqual((JSON.parse(status.outputs.at(-1) as string) as { applied: string[] }).applied)
-		expect(await runCli(["migrate", "apply", "core", "--local"], makeIo(dir, d1))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--local"], makeIo(dir, d1))).toBe(0)
 		expect(recorded(d1)).toEqual(["20260101000000_init.sql", "20260102000000_more.sql"])
 		const after = makeIo(dir, d1)
-		expect(await runCli(["migrate", "status", "core", "--local"], after)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "status", "core", "--local"], after)).toBe(0)
 		expect(after.outputs).toEqual(["Applied: 20260101000000_init.sql, 20260102000000_more.sql", "Pending: none"])
 		writeFileSync(join(dir, "atlas-migrations", "20260101000000_init.sql"), "CREATE TABLE post (id TEXT, x TEXT);")
 		writeSum(join(dir, "atlas-migrations"))
 		const check = makeIo(dir, d1)
-		expect(await runCli(["migrate", "check", "core", "--local"], check)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "check", "core", "--local"], check)).toBe(1)
 		expect(check.errors[0]).toMatch(/^20260101000000_init.sql was applied, then edited/)
 	})
 })
@@ -170,7 +169,7 @@ describe("migrate apply on D1 after a lost read-back", () => {
 				return d1(cmd, args, options)
 			})
 			const io = makeIo(dir, Object.assign(blind, { calls: d1.calls, db: d1.db }))
-			expect(await runCli(["migrate", "apply", "core", "--local", "--json"], io)).toBe(1)
+			expect(await runCliWithFakes(["migrate", "apply", "core", "--local", "--json"], io)).toBe(1)
 			const report = JSON.parse(io.outputs.at(-1) as string) as {
 				applied: string[]
 				pending: string[]
@@ -205,7 +204,7 @@ describe("migrate apply on D1 when wrangler applies a file comb never checked", 
 			return d1(cmd, args, options)
 		})
 		const io = makeIo(dir, Object.assign(late, { calls: d1.calls, db: d1.db }))
-		expect(await runCli(["migrate", "apply", "core", "--local", "--json"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--local", "--json"], io)).toBe(1)
 		expect(io.errors.join("\n")).toContain(
 			"wrangler also applied 20260102000000_late.sql, which comb never checked and holds no hash for: check each against git, then run comb migrate baseline <db> --hashes",
 		)

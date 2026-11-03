@@ -3,8 +3,8 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ATLAS_RANGE, type Run, type RunResult } from "../migrate/core/process.ts"
 import { fakeAtlas as hashingAtlas, writeSum } from "./__fixtures__/d1.ts"
-import { makeIo, ok, projects, writeTables } from "./__fixtures__/io.ts"
-import { help, runCli } from "./run.ts"
+import { makeIo, ok, projects, runCliWithFakes, writeTables } from "./__fixtures__/io.ts"
+import { help } from "./run.ts"
 
 const temp = projects()
 const project = temp.make
@@ -48,7 +48,7 @@ function fakeAtlas(diff: (dir: string) => RunResult | undefined | void): Run & {
 describe("comb migrate", () => {
 	it("prints the help for help or --help, and refuses no subcommand with it", async () => {
 		const bare = makeIo(project())
-		expect(await runCli(["migrate"], bare)).toBe(1)
+		expect(await runCliWithFakes(["migrate"], bare)).toBe(1)
 		expect(bare.errors).toEqual([help()])
 		for (const argv of [
 			["migrate", "help"],
@@ -56,14 +56,14 @@ describe("comb migrate", () => {
 			["migrate", "-h"],
 		]) {
 			const io = makeIo(project())
-			expect(await runCli(argv, io)).toBe(0)
+			expect(await runCliWithFakes(argv, io)).toBe(0)
 			expect(io.outputs).toEqual([help()])
 		}
 	})
 
 	it("hands apply and baseline on, with their own usage", async () => {
 		const io = makeIo(project())
-		expect(await runCli(["migrate", "baseline"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "baseline"], io)).toBe(1)
 		expect(io.errors).toEqual([
 			"Usage: comb migrate baseline <database> [-e <name>] [--dir <path>] [--local] [--hashes]",
 		])
@@ -78,16 +78,16 @@ describe("comb migrate", () => {
 		)
 		writeSum(join(dir, "m"))
 		const io = makeIo(dir, hashingAtlas())
-		expect(await runCli(["migrate", "baseline", "core"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "baseline", "core"], io)).toBe(0)
 		expect(io.outputs).toEqual(["\nBaseline done: 0 marked, 0 already tracked"])
 		const applied = makeIo(dir, hashingAtlas())
-		expect(await runCli(["migrate", "apply", "core"], applied)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], applied)).toBe(0)
 		expect(applied.outputs).toEqual(["\nDone: 0 applied, 0 skipped"])
 	})
 
 	it("rejects an unknown migrate command", async () => {
 		const io = makeIo(project())
-		expect(await runCli(["migrate", "nope"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "nope"], io)).toBe(1)
 		expect(io.errors).toEqual(["Unknown migrate command: nope"])
 	})
 })
@@ -96,19 +96,19 @@ describe("comb migrate init", () => {
 	it("creates the migrate init files in cwd", async () => {
 		const dir = project()
 		const io = makeIo(dir)
-		expect(await runCli(["migrate", "init"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "init"], io)).toBe(0)
 		/* no atlas.hcl: comb runs Atlas with a config of its own, so a scaffolded one would promise a guard nothing reads (C11) */
 		expect(io.outputs).toEqual(["Created: drizzle.config.ts", "Created: atlas-migrations/"])
 		expect(existsSync(join(dir, "atlas.hcl"))).toBe(false)
 		const again = makeIo(dir)
-		expect(await runCli(["migrate", "init"], again)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "init"], again)).toBe(0)
 		expect(again.outputs).toEqual([])
 	})
 
 	it("creates a Postgres project with --dialect postgres: no credential in any file, and no atlas.hcl", async () => {
 		const dir = project()
 		const io = makeIo(dir)
-		expect(await runCli(["migrate", "init", "--dialect", "postgres"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "init", "--dialect", "postgres"], io)).toBe(0)
 		expect(io.outputs).toEqual([
 			"Created: drizzle.config.ts",
 			"Created: comb.migrate.config.ts",
@@ -128,11 +128,11 @@ describe("comb migrate init", () => {
 		const dir = project()
 		writeFileSync(join(dir, "comb.migrate.config.ts"), "export default {}\n")
 		const io = makeIo(dir)
-		expect(await runCli(["migrate", "init", "--dialect", "postgres"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "init", "--dialect", "postgres"], io)).toBe(0)
 		expect(io.outputs).not.toContain("Created: comb.migrate.config.ts")
 		expect(readFileSync(join(dir, "comb.migrate.config.ts"), "utf8")).toBe("export default {}\n")
 		const unknown = makeIo(dir)
-		expect(await runCli(["migrate", "init", "--dialect", "mysql"], unknown)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "init", "--dialect", "mysql"], unknown)).toBe(1)
 		expect(unknown.errors).toEqual(['Unknown --dialect "mysql": use sqlite or postgres'])
 	})
 })
@@ -149,7 +149,7 @@ describe("comb migrate diff", () => {
 		/* a diff refuses a project without a drizzle config first, which reads a file and starts nothing */
 		writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "sqlite" }\n')
 		const io = { ...makeIo(dir, run), readAtlasVersion: undefined }
-		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core"], io)).toBe(1)
 		expect(io.errors).toEqual([
 			`comb needs atlas (${ATLAS_RANGE}) to hash, diff and apply migrations; install atlas from https://atlasgo.io/getting-started`,
 		])
@@ -163,7 +163,7 @@ describe("comb migrate diff", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "core"], bare)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core"], bare)).toBe(1)
 		expect(bare.errors).toEqual([
 			`no drizzle config in ${dir} (drizzle.config.ts, .js, .mjs or .json): run comb migrate init, or set drizzleConfigPath on the database in comb.migrate.config.ts`,
 		])
@@ -175,7 +175,7 @@ describe("comb migrate diff", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "core"], missing)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core"], missing)).toBe(1)
 		expect(missing.errors).toEqual([`drizzleConfigPath ${join(dir, "gone.ts")} does not exist`])
 	})
 
@@ -185,7 +185,7 @@ describe("comb migrate diff", () => {
 			writeFileSync(join(replayed, "20260101000000_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n"),
 		)
 		const io = makeIo(dir, run)
-		expect(await runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "init"], io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "atlas-migrations", "20260101000000_init.sql")}`])
 		expect(run.calls.find((call) => call[2] === "diff")?.[3]).toBe("init")
 	})
@@ -203,7 +203,7 @@ describe("comb migrate diff on a configured drizzle config", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "core"], folder)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core"], folder)).toBe(1)
 		expect(folder.errors).toEqual([`drizzleConfigPath ${dir} is a directory, not a drizzle config`])
 	})
 })
@@ -222,13 +222,13 @@ describe("comb migrate diff: what Atlas says as it succeeds", () => {
 				return { code: 0, stderr: `${SKIPPED}\n`, stdout: "" }
 			}),
 		)
-		expect(await runCli(["migrate", "diff", "core", "init"], wrote)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "init"], wrote)).toBe(0)
 		expect(wrote.errors).toEqual([`Warning: Atlas: ${SKIPPED}`])
 		const synced = makeIo(
 			dir,
 			fakeAtlas(() => ({ code: 0, stderr: SKIPPED, stdout: "" })),
 		)
-		expect(await runCli(["migrate", "diff", "core", "--dry-run"], synced)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "--dry-run"], synced)).toBe(0)
 		expect(synced.outputs).toEqual(["Schema is already in sync — no migration needed"])
 		expect(synced.errors).toEqual([`Warning: Atlas: ${SKIPPED}`])
 	})
@@ -241,7 +241,7 @@ describe("comb migrate diff --dry-run", () => {
 			writeFileSync(join(replayed, "20260101000000_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n"),
 		)
 		const drift = makeIo(dir, run)
-		expect(await runCli(["migrate", "diff", "core", "--dry-run"], drift)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "--dry-run"], drift)).toBe(1)
 		expect(drift.outputs).toEqual(["-- 20260101000000_init.sql", "CREATE TABLE post (id TEXT PRIMARY KEY);\n"])
 		expect(drift.errors).toEqual([
 			"core has drifted from its migrations: comb migrate diff core would write the SQL above",
@@ -253,7 +253,7 @@ describe("comb migrate diff --dry-run", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "core", "--dry-run"], synced)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "--dry-run"], synced)).toBe(0)
 		expect(synced.outputs).toEqual(["Schema is already in sync — no migration needed"])
 		expect(readdirSync(join(dir, "atlas-migrations"))).toEqual(["1_init.sql"])
 	})
@@ -263,7 +263,7 @@ describe("comb migrate diff --dry-run", () => {
 		const dir = diffProject()
 		const run = fakeAtlas((replayed) => writeFileSync(join(replayed, "20260101000000_x.sql"), "SELECT 1;\n"))
 		const io = makeIo(dir, run)
-		expect(await runCli(["migrate", "diff", "--dry-run"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "--dry-run"], io)).toBe(1)
 		expect(io.errors).toEqual(["Usage: comb migrate diff <database> [name] [-e <name>] [--dry-run]"])
 		expect({ calls: run.calls, files: readdirSync(dir) }).toEqual({ calls: [], files: ["drizzle.config.ts"] })
 	})
@@ -272,7 +272,7 @@ describe("comb migrate diff --dry-run", () => {
 		const dir = diffProject()
 		const run = fakeAtlas((replayed) => writeFileSync(join(replayed, "20260101000000_x.sql"), "SELECT 1;\n"))
 		const io = makeIo(dir, run)
-		expect(await runCli(["migrate", "diff", "core", "--dry-run"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "--dry-run"], io)).toBe(1)
 		expect(io.errors).toEqual([
 			"core has drifted from its migrations: comb migrate diff core would write the SQL above",
 		])
@@ -284,7 +284,7 @@ describe("comb migrate diff --dry-run", () => {
 			diffProject(),
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "core"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "diff", "core"], io)).toBe(0)
 		expect(io.outputs).toEqual(["Schema is already in sync — no migration needed"])
 	})
 })
@@ -300,7 +300,7 @@ describe("comb migrate diff: the config it reads", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core"], io)).toBe(1)
 		expect(io.errors.join("\n")).toMatch(/missing\.tables\.ts/)
 	})
 
@@ -315,7 +315,7 @@ describe("comb migrate diff: the config it reads", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "nope"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "nope"], io)).toBe(1)
 		expect(io.errors.join("\n")).toContain('comb.config.ts declares no database "nope"')
 	})
 })
@@ -332,7 +332,7 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 			writeFileSync(join(replayed, "1_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n"),
 		)
 		const io = makeIo(dir, run)
-		expect(await runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "init"], io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "db", "m", "1_init.sql")}`])
 	})
 })
@@ -351,7 +351,7 @@ describe("comb migrate diff: a Postgres database through comb.migrate.config.ts"
 		)
 		const run: Run = (cmd, args, options) => (envs.push(options?.env), atlas(cmd, args, options))
 		const io = makeIo(dir, run)
-		expect(await runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "init"], io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "pg", "1_init.sql")}`])
 		/* the drizzle-kit the command checked, its bin on bun (K1 of r22): comb's own here, as io.locatePeer finds it */
 		expect(atlas.calls.find((call) => call[0] === "bun")).toEqual([
@@ -381,7 +381,7 @@ describe("comb migrate diff: a Postgres database through comb.migrate.config.ts"
 		vi.resetModules()
 		const fresh = await import("./run.ts")
 		const io = makeIo(dir, atlas)
-		expect(await fresh.runCli(["migrate", "diff", "core", "init"], io)).toBe(0)
+		expect(await fresh.runCliWith(["migrate", "diff", "core", "init"], io, io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "pg", "1_init.sql")}`])
 	})
 })
@@ -403,7 +403,7 @@ describe("comb migrate diff: the name apply and check take (C7)", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "shard-0"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "shard-0"], io)).toBe(1)
 		/* the FTS lookup reached shard's tables file: the mapping held */
 		expect(io.errors.join("\n")).toMatch(/missing\.tables\.ts/)
 	})
@@ -420,7 +420,7 @@ describe("comb migrate diff: the name apply and check take (C7)", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "shard-0"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "shard-0"], io)).toBe(1)
 		expect(io.errors.join("\n")).toContain(
 			'comb.config.ts declares no database "shard-0". Available: shard. Set codegen: "<its comb.config.ts name>" on shard-0 in comb.migrate.config.ts',
 		)
@@ -447,7 +447,7 @@ describe("comb migrate diff on a D1 database", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff", "core", "next"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "next"], io)).toBe(1)
 		expect(io.errors[0]).toContain(message)
 		expect(readdirSync(join(dir, "m")).toSorted()).toEqual(before)
 	})

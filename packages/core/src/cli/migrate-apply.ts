@@ -34,14 +34,14 @@ import { parseArgs, type ParsedArgs } from "./args.ts"
 import { fileName, openSqliteTarget, type SqliteTarget } from "./migrate-sqlite-target.ts"
 import { resolveMigrateTarget } from "./migrate-target.ts"
 import { Refused } from "../migrate/core/refused.ts"
-import { checkPassed, CliError, type CliIo, type MigrateOutcome, Reported } from "./output.ts"
+import { checkPassed, CliError, type CliContext, type MigrateOutcome, Reported } from "./output.ts"
 
 type Mode = "apply" | "baseline" | "check" | "status"
 
 type Target = SqliteTarget
 
 /** One command: what it was asked, and where it reports */
-type Request = { args: ParsedArgs; db: string; io: CliIo; mode: Mode }
+type Request = { args: ParsedArgs; db: string; io: CliContext; mode: Mode }
 
 const option = (args: ParsedArgs, name: string) => args.options[name] as string | undefined
 
@@ -85,7 +85,7 @@ const hashed = (dir: string, files: readonly string[]): FileHashes[] =>
  * Refuses what the history cannot vouch for: a file applied, then edited, in every mode; a row no
  * file matches (edited or renamed after it was applied) in every mode but status, which names it
  */
-function refuseUnmatched(matched: Matched, { dir, io, mode }: { dir: string; io: CliIo; mode: Mode }): void {
+function refuseUnmatched(matched: Matched, { dir, io, mode }: { dir: string; io: CliContext; mode: Mode }): void {
 	const [edited] = matched.edited
 	if (edited !== undefined)
 		throw new CliError(
@@ -122,7 +122,7 @@ async function nameRecorded(conn: Connection, named: ReadonlyArray<{ hash: strin
 async function baseline(
 	target: Target,
 	{ files, matched, record }: { files: readonly FileHashes[]; matched: Matched; record: () => Promise<void> },
-	io: CliIo,
+	io: CliContext,
 ) {
 	const drift = await sqliteDrift(target.conn, target.migrationsDir, {
 		engine: target.engine,
@@ -146,7 +146,7 @@ async function baseline(
 }
 
 /** status's lines and outcome: each of `names` applied or pending, as comb's history records it */
-function statusOf(names: readonly string[], applied: ReadonlySet<string>, io: CliIo): MigrateOutcome {
+function statusOf(names: readonly string[], applied: ReadonlySet<string>, io: CliContext): MigrateOutcome {
 	const done = names.filter((name) => applied.has(name))
 	const unapplied = names.filter((name) => !applied.has(name))
 	io.out(`Applied: ${done.join(", ") || "none"}`)
@@ -228,7 +228,7 @@ function readArgv(mode: Mode, argv: readonly string[]): { args: ParsedArgs; db: 
 	return { args, db: args.positionals[0] as string }
 }
 
-export async function migrateApply(mode: Mode, argv: readonly string[], io: CliIo): Promise<void> {
+export async function migrateApply(mode: Mode, argv: readonly string[], io: CliContext): Promise<void> {
 	const { args, db } = readArgv(mode, argv)
 	if (args.options["json"] !== true) {
 		await runMode({ args, db, io, mode })
@@ -251,7 +251,7 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliI
  * before the command connects, fetches, spawns or asks Atlas anything (K1 of r21, PA5 of r22)
  */
 export function needPeers(
-	io: CliIo,
+	io: CliContext,
 	command: Command,
 	{ fts, provider }: { fts?: boolean; provider: Provider },
 ): Peers {

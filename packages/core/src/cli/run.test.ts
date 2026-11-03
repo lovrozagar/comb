@@ -2,6 +2,7 @@ import { fixtureRoot } from "../codegen/__fixtures__/temp.ts"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { ATLAS_RANGE, type Run } from "../migrate/core/process.ts"
 import { makeIo, projects, writeTables } from "./__fixtures__/io.ts"
 
 const temp = projects(fixtureRoot())
@@ -176,5 +177,30 @@ describe("runCli with --json on a command that does not take it", () => {
 		expect(io.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
 			{ applied: [], database: null, pending: [], refused: [refused], unknown: [] },
 		])
+	})
+})
+
+/* a seam that fails the run it is read in */
+const seam = (): never => {
+	throw new Error("a seam was read")
+}
+
+/* KT7 of r22b: runCli takes the documented io alone; the seams comb's own tests fake reach the CLI only through runCliWith */
+describe("runCli reads only the io it documents", () => {
+	it("runs Atlas's version through run, not through a seam an io happens to carry", async () => {
+		const calls: string[][] = []
+		const run: Run = (cmd, args) => {
+			calls.push([cmd, ...args])
+			return { code: 127, stderr: "atlas: command not found", stdout: "" }
+		}
+		const dir = project()
+		writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "sqlite" }\n')
+		const io = { ...makeIo(dir, run), readAtlasVersion: seam }
+		const { runCli } = await import("./run.ts")
+		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
+		expect(io.errors).toEqual([
+			`comb needs atlas (${ATLAS_RANGE}) to hash, diff and apply migrations; install atlas from https://atlasgo.io/getting-started`,
+		])
+		expect(calls).toEqual([["atlas", "version"]])
 	})
 })

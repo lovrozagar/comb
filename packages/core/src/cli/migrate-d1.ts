@@ -16,12 +16,12 @@ import { connectD1, wranglerFlags } from "../migrate/drivers/d1.ts"
 import type { D1ProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
-import { checkPassed, CliError, type CliIo, type MigrateOutcome } from "./output.ts"
+import { checkPassed, CliError, type CliContext, type MigrateOutcome } from "./output.ts"
 
 type D1Mode = "apply" | "baseline" | "check" | "status"
 
 /** One D1 command: what it was asked, and where it reports */
-type D1Request = { args: ParsedArgs; db: string; io: CliIo; mode: D1Mode }
+type D1Request = { args: ParsedArgs; db: string; io: CliContext; mode: D1Mode }
 
 /** The config reader of `bin`'s wrangler, the one the command checked and spawns (K1 of r22) */
 async function wranglerReader(bin: ProjectBin): Promise<ReadConfig> {

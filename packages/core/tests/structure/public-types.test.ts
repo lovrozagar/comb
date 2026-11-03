@@ -18,8 +18,6 @@ const ALLOWED: Record<string, string> = {
 		"a fragment TextConstraints composes; a consumer names TextConstraints, as the column factories take it",
 	"baseListQueryShape (query/schema-params.d.ts)":
 		"the zod shape ListQueryShape is built from, named through typeof; a consumer names ListQueryShape",
-	"Connect (migrate/core/pg-live-objects.d.ts)":
-		"a test seam on CliIo, which KT7 of r22b (plan 21's 14.5) takes off the public type",
 	"CreatedAtName (pg/columns.d.ts)":
 		"the timestamp names PgColumns' createdAt takes, which a consumer writes as literals",
 	"CreatedAtName (sqlite/columns.d.ts)":
@@ -28,27 +26,15 @@ const ALLOWED: Record<string, string> = {
 		"the timestamp names PgColumns' deletedAt takes, which a consumer writes as literals",
 	"DeletedAtName (sqlite/columns.d.ts)":
 		"the timestamp names SqliteColumns' deletedAt takes, which a consumer writes as literals",
-	"HistoryFile (migrate/core/pg-replay.d.ts)":
-		"a test seam on CliIo, which KT7 of r22b (plan 21's 14.5) takes off the public type",
-	"LiveObjects (migrate/core/pg-live-types.d.ts)":
-		"a test seam on CliIo, which KT7 of r22b (plan 21's 14.5) takes off the public type",
-	"LiveRead (migrate/core/pg-live-types.d.ts)":
-		"a test seam on CliIo, which KT7 of r22b (plan 21's 14.5) takes off the public type",
-	"LiveTarget (migrate/core/pg-live-types.d.ts)":
-		"a test seam on CliIo, which KT7 of r22b (plan 21's 14.5) takes off the public type",
 	"NumericRangeConstraints (sqlite/constraints.d.ts)":
 		"a fragment TextConstraints composes; a consumer names TextConstraints, as the column factories take it",
 	"OptionalShape (query/list-schema.d.ts)": "the optional half of ListQueryShape; a consumer names ListQueryShape",
-	"replayCatalog (migrate/core/pg-replay.d.ts)":
-		"a test seam on CliIo, which KT7 of r22b (plan 21's 14.5) takes off the public type",
 	"RESERVED_LIST_KEYS (query/schema-params.d.ts)":
 		"the array ReservedListKey is read from; a consumer names the keys as ReservedListKey",
 	"RESERVED_RETRIEVE_KEYS (query/schema-params.d.ts)":
 		"the array ReservedRetrieveKey is read from; a consumer names the keys as ReservedRetrieveKey",
 	"set (password-text.d.ts)":
 		"passwordText.set, named through typeof on passwordText; a consumer calls it as passwordText.set",
-	"Sql (migrate/core/pg-live-objects.d.ts)":
-		"a test seam on CliIo, which KT7 of r22b (plan 21's 14.5) takes off the public type",
 	"StringTransformConstraints (sqlite/constraints.d.ts)":
 		"a fragment TextConstraints composes; a consumer names TextConstraints, as the column factories take it",
 	"StringValidationConstraints (sqlite/constraints.d.ts)":

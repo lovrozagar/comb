@@ -12,8 +12,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { lostRequest } from "../migrate/__fixtures__/libsql-stubs.ts"
 import { fakeAtlas, writeSum } from "./__fixtures__/d1.ts"
-import { makeIo, projects } from "./__fixtures__/io.ts"
-import { runCli } from "./run.ts"
+import { makeIo, projects, runCliWithFakes } from "./__fixtures__/io.ts"
 
 /* the batch whose answer is lost once it commits, the error the link then fails each call with, and the file serving the server */
 const lose: { db?: string; error?: unknown; file?: string } = {}
@@ -81,7 +80,7 @@ function configured(): string {
 /** `migrate <mode> core --json` in `dir`: its exit and its report */
 async function run(dir: string, mode: "apply" | "status"): Promise<[number, unknown]> {
 	const io = makeIo(dir, fakeAtlas())
-	const exit = await runCli(["migrate", mode, "core", "--json", ...(mode === "apply" ? ["--yes"] : [])], io)
+	const exit = await runCliWithFakes(["migrate", mode, "core", "--json", ...(mode === "apply" ? ["--yes"] : [])], io)
 	return [exit, JSON.parse(io.outputs.at(-1) as string)]
 }
 

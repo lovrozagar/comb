@@ -12,7 +12,17 @@ export type CliIo = {
 	cwd: string
 	out(line: string): void
 	err(line: string): void
+	/** How the CLI starts a process (atlas, wrangler, drizzle-kit), spawnSync unless the embedder supplies one */
 	run?: Run | undefined
+	/** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
+	confirm?: ((question: string) => Promise<boolean>) | undefined
+}
+
+/**
+ * What a command reads besides its io, comb's own unless its tests fake one (KT7 of r22b): typed by
+ * comb's internals, so they stay off the public CliIo and reach the CLI through runCliWith alone.
+ */
+export type CliDeps = {
 	/** How a Postgres baseline reads the database's catalog of what Atlas OSS does not compare, postgres.js unless a test fakes it (5.4b) */
 	readPgObjects?: LiveRead | undefined
 	/** How a Postgres baseline reads the history replayed on its dev database, comb's own (pg-replay.ts) unless a test fakes it (P5 of r19) */
@@ -23,9 +33,10 @@ export type CliIo = {
 	locatePeer?: ((peer: string) => string) | undefined
 	/** How a migrate command reads Atlas's version before its first I/O, `atlas version` through `run` unless a test fakes it (PA5 of r22) */
 	readAtlasVersion?: (() => RunResult) | undefined
-	/** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
-	confirm?: ((question: string) => Promise<boolean>) | undefined
 }
+
+/** The io a command runs on, with the seams runCliWith was given */
+export type CliContext = CliIo & CliDeps
 
 /** What `comb migrate check` reports once every pending migration is approved */
 /** What a migrate apply, check or status found: the files it applied, or found applied, and those pending */

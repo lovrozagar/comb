@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url"
 import { optionsHelp, refuseFurther } from "./args.ts"
 import { cmdCodegen } from "./codegen.ts"
 import { cmdMigrate } from "./migrate.ts"
-import { CliError, type CliIo, Reported, ShowHelp } from "./output.ts"
+import { CliError, type CliContext, type CliDeps, type CliIo, Reported, ShowHelp } from "./output.ts"
 
 const COMMANDS: ReadonlyArray<[string, string]> = [
 	["codegen [db...]", "Run codegen for the databases in comb.config.ts (all, or those named)"],
@@ -44,7 +44,7 @@ const version = (): string =>
 		}
 	).version
 
-async function dispatch(argv: readonly string[], io: CliIo): Promise<void> {
+async function dispatch(argv: readonly string[], io: CliContext): Promise<void> {
 	const [command, ...rest] = argv
 	switch (command) {
 		case undefined:
@@ -74,20 +74,36 @@ async function dispatch(argv: readonly string[], io: CliIo): Promise<void> {
 /** Whether `argv` asks for the one JSON object, in either spelling the parser reads as --json (K5 of r19) */
 const asksJson = (argv: readonly string[]): boolean => argv.some((arg) => arg === "--json" || arg.startsWith("--json="))
 
-/** Runs the comb CLI on `argv` (the arguments after the script) and returns its exit code. */
-export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
+/**
+ * Runs the comb CLI on `argv` with `deps` in place of comb's own seams, for comb's tests (KT7 of
+ * r22b). Of `io` it reads the documented fields alone, so a seam an io carries is never read.
+ */
+export async function runCliWith(argv: readonly string[], io: CliIo, deps: CliDeps): Promise<number> {
+	const context: CliContext = {
+		...deps,
+		confirm: io.confirm,
+		cwd: io.cwd,
+		err: (line) => io.err(line),
+		out: (line) => io.out(line),
+		run: io.run,
+	}
 	try {
-		await dispatch(argv, io)
+		await dispatch(argv, context)
 		return 0
 	} catch (error) {
 		if (error instanceof ShowHelp) {
-			io.out(error.text)
+			context.out(error.text)
 			return 0
 		}
 		/* one --json rule for every command: a refusal no command reported is the one JSON object stdout promises */
 		if (asksJson(argv) && error instanceof CliError && !(error instanceof Reported))
-			io.out(JSON.stringify({ applied: [], database: null, pending: [], refused: [error.message], unknown: [] }))
-		io.err(error instanceof Error ? error.message : String(error))
+			context.out(JSON.stringify({ applied: [], database: null, pending: [], refused: [error.message], unknown: [] }))
+		context.err(error instanceof Error ? error.message : String(error))
 		return error instanceof CliError ? error.exitCode : 1
 	}
+}
+
+/** Runs the comb CLI on `argv` (the arguments after the script) and returns its exit code. */
+export function runCli(argv: readonly string[], io: CliIo): Promise<number> {
+	return runCliWith(argv, io, {})
 }

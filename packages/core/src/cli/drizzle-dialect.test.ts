@@ -3,9 +3,8 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import type { Run } from "../migrate/core/process.ts"
 import { fakeAtlas as syncedAtlas } from "./__fixtures__/d1.ts"
-import { makeIo, projects } from "./__fixtures__/io.ts"
+import { makeIo, projects, runCliWithFakes } from "./__fixtures__/io.ts"
 import { checkDialect, literalDialect, statedDialect } from "./drizzle-dialect.ts"
-import { runCli } from "./run.ts"
 
 const temp = projects()
 const project = temp.make
@@ -36,7 +35,7 @@ async function diffWith(config: string, dialect: string | undefined) {
 	writeFileSync(join(dir, "comb.migrate.config.ts"), config)
 	const atlas = fakeAtlas()
 	const io = makeIo(dir, atlas)
-	const code = await runCli(["migrate", "diff", "core", "next"], io)
+	const code = await runCliWithFakes(["migrate", "diff", "core", "next"], io)
 	return {
 		code,
 		dir,
@@ -75,7 +74,7 @@ describe("diff refuses a drizzle config of the other dialect (KC1; sibling: init
 		const dir = project()
 		writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "postgresql" }\n')
 		const bare = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "diff", "core"], bare)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core"], bare)).toBe(1)
 		expect(bare.errors).toEqual([
 			`${join(dir, "drizzle.config.ts")} states dialect "postgresql", but a diff with no comb.migrate.config.ts is SQLite: set dialect: "sqlite" in it`,
 		])
@@ -83,17 +82,17 @@ describe("diff refuses a drizzle config of the other dialect (KC1; sibling: init
 
 	it("refuses init --dialect postgres over a SQLite init, and the reverse, naming the file and writing nothing", async () => {
 		const dir = project()
-		expect(await runCli(["migrate", "init"], makeIo(dir))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "init"], makeIo(dir))).toBe(0)
 		const pg = makeIo(dir)
-		expect(await runCli(["migrate", "init", "--dialect", "postgres"], pg)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "init", "--dialect", "postgres"], pg)).toBe(1)
 		expect(pg.errors).toEqual([
 			`${join(dir, "drizzle.config.ts")} states dialect "sqlite", but migrate init --dialect postgres writes a Postgres project: set dialect: "postgresql" in it, or remove it and run init again`,
 		])
 		expect(readdirSync(dir).sort()).toEqual(["atlas-migrations", "drizzle.config.ts"])
 		const other = project()
-		expect(await runCli(["migrate", "init", "--dialect", "postgres"], makeIo(other))).toBe(0)
+		expect(await runCliWithFakes(["migrate", "init", "--dialect", "postgres"], makeIo(other))).toBe(0)
 		const sqlite = makeIo(other)
-		expect(await runCli(["migrate", "init"], sqlite)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "init"], sqlite)).toBe(1)
 		expect(sqlite.errors).toEqual([
 			`${join(other, "drizzle.config.ts")} states dialect "postgresql", but migrate init --dialect sqlite writes a SQLite project: set dialect: "sqlite" in it, or remove it and run init again`,
 		])

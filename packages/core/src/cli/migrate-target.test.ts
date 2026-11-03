@@ -2,10 +2,9 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { fakeAtlas } from "./__fixtures__/d1.ts"
-import { makeIo, projects } from "./__fixtures__/io.ts"
+import { makeIo, projects, runCliWithFakes } from "./__fixtures__/io.ts"
 import { parseArgs } from "./args.ts"
 import { resolveMigrateTarget } from "./migrate-target.ts"
-import { runCli } from "./run.ts"
 
 const temp = projects()
 afterEach(temp.clean)
@@ -168,10 +167,10 @@ describe("diff reads the environment it is told (KC4; sibling: the D1 environmen
 		const cwd = project({ core: { environments: envs(["local", "ci"], libsqlOrD1), migrationsDir: "m" } })
 		writeFileSync(join(cwd, "drizzle.config.ts"), 'export default { dialect: "sqlite" }\n')
 		const told = makeIo(cwd, fakeAtlas())
-		expect(await runCli(["migrate", "diff", "core", "-e", "ci"], told)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "-e", "ci"], told)).toBe(0)
 		expect(told.errors).toEqual([])
 		const bare = makeIo(cwd, fakeAtlas())
-		expect(await runCli(["migrate", "diff", "core"], bare)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "diff", "core"], bare)).toBe(1)
 		expect(bare.errors).toEqual([
 			'database "core"\'s environments differ in whether it is D1, which a diff reads: pass -e/--env with one of: local, ci',
 		])

@@ -2,8 +2,7 @@ import { mkdirSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ATLAS_RANGE, type Run, run as runProcess } from "../migrate/core/process.ts"
-import { makeIo, ok, projects } from "./__fixtures__/io.ts"
-import { runCli } from "./run.ts"
+import { makeIo, ok, projects, runCliWithFakes } from "./__fixtures__/io.ts"
 import { UNCOMPARED } from "../migrate/core/baseline-compare.ts"
 
 const temp = projects()
@@ -63,7 +62,7 @@ describe("a Postgres database with a blank url", () => {
 		for (const mode of ["status", "check", "apply"]) {
 			const atlas = pgAtlas([])
 			const io = makeIo(dir, atlas)
-			expect(await runCli(["migrate", mode, "core"], io)).toBe(1)
+			expect(await runCliWithFakes(["migrate", mode, "core"], io)).toBe(1)
 			expect(io.errors).toEqual([
 				"url is empty: set the postgres provider's url for core (core); init's starter reads it from DATABASE_URL",
 			])
@@ -77,7 +76,7 @@ describe("migrate apply and baseline: a Postgres database, through Atlas", () =>
 		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
 		const atlas = pgAtlas(["1_init.sql"])
 		const io = makeIo(dir, atlas)
-		expect(await runCli(["migrate", "apply", "core"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], io)).toBe(0)
 		expect(io.outputs).toEqual(["Apply: 1_init.sql", "\nDone: 1 applied"])
 		expect(atlas.calls.map((call) => call.join(" ")).join("\n")).not.toContain("pw@")
 	})
@@ -86,7 +85,7 @@ describe("migrate apply and baseline: a Postgres database, through Atlas", () =>
 		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
 		const atlas = pgAtlas(["1_init.sql"])
 		const io = makeIo(dir, atlas)
-		expect(await runCli(["migrate", "check", "core"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "check", "core"], io)).toBe(0)
 		/* the default devUrl is Atlas's own container, so check says it replayed nothing there (P13 of r19) */
 		expect(io.outputs).toEqual([
 			"Check did not replay the pending files on devUrl: docker://postgres/17/dev is Atlas's own container, which comb cannot reach, so a statement Postgres refuses on every database is found only when it applies; set devUrl to a postgres:// scratch database comb can connect to",
@@ -98,7 +97,7 @@ describe("migrate apply and baseline: a Postgres database, through Atlas", () =>
 	it("asks before an unsafe file, and takes no --yes for it", async () => {
 		const dir = postgresProject({ "1_drop.sql": 'DROP TABLE "post";\n' })
 		const io = makeIo(dir, pgAtlas(["1_drop.sql"]))
-		expect(await runCli(["migrate", "apply", "core", "--yes"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--yes"], io)).toBe(1)
 		expect(io.errors[0]).toContain('1_drop.sql is unsafe (DROP TABLE "post");')
 	})
 })
@@ -108,7 +107,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 		const dir = postgresProject({ "1_init.sql": "SELECT 1;\n", "2_more.sql": "SELECT 2;\n" })
 		const atlas = pgAtlas([])
 		const io = makeIo(dir, atlas)
-		expect(await runCli(["migrate", "baseline", "core"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "baseline", "core"], io)).toBe(0)
 		expect(atlas.calls.find((call) => call[1] === "set")?.slice(0, 3)).toEqual(["migrate", "set", "2"])
 		expect(io.outputs).toEqual([
 			UNCOMPARED,
@@ -125,7 +124,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 		vi.resetModules()
 		const fresh = await import("./run.ts")
 		const io = makeIo(dir, pgAtlas([]))
-		expect(await fresh.runCli(["migrate", "baseline", "core"], io)).toBe(0)
+		expect(await fresh.runCliWith(["migrate", "baseline", "core"], io, io)).toBe(0)
 		expect(io.outputs.at(-1)).toBe("\nBaseline done: 1 marked")
 	})
 
@@ -133,7 +132,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 		const dir = postgresProject({})
 		for (const flag of [["--file", "x.sql"], ["--local"]]) {
 			const io = makeIo(dir, pgAtlas([]))
-			expect(await runCli(["migrate", "apply", "core", ...flag], io)).toBe(1)
+			expect(await runCliWithFakes(["migrate", "apply", "core", ...flag], io)).toBe(1)
 			expect(io.errors[0]).toContain(`${flag[0]} does not apply to a Postgres database`)
 		}
 	})
@@ -141,7 +140,7 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 	/* M1: only D1's history records names apart from hashes */
 	it("refuses baseline --hashes, as Atlas records each file's hash in its revisions", async () => {
 		const io = makeIo(postgresProject({}), pgAtlas([]))
-		expect(await runCli(["migrate", "baseline", "core", "--hashes"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "baseline", "core", "--hashes"], io)).toBe(1)
 		expect(io.errors).toEqual([
 			"--hashes is for a D1 database, whose history records names alone: Atlas records each file's hash as it applies it",
 		])
@@ -150,14 +149,14 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 	it("refuses a migrations directory that does not exist", async () => {
 		const dir = postgresProject({})
 		const io = makeIo(dir, pgAtlas([]))
-		expect(await runCli(["migrate", "apply", "core", "--dir", "nowhere"], io)).toBe(1)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--dir", "nowhere"], io)).toBe(1)
 		expect(io.errors).toEqual([`Migrations dir not found: ${join(dir, "nowhere")}`])
 	})
 
 	it("warns of a URL that may send the password unprotected", async () => {
 		const dir = postgresProject({}, "postgres://app:pw@db.example.com/app?sslmode=prefer")
 		const io = makeIo(dir, pgAtlas([]))
-		expect(await runCli(["migrate", "apply", "core"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "apply", "core"], io)).toBe(0)
 		expect(io.errors).toEqual([
 			expect.stringContaining("Warning: url reaches db.example.com without sslmode=verify-full or require"),
 		])
@@ -168,7 +167,7 @@ describe("migrate status", () => {
 	it("lists a Postgres database's applied and pending migrations", async () => {
 		const dir = postgresProject({ "1_init.sql": "SELECT 1;\n" })
 		const io = makeIo(dir, pgAtlas(["1_init.sql"]))
-		expect(await runCli(["migrate", "status", "core"], io)).toBe(0)
+		expect(await runCliWithFakes(["migrate", "status", "core"], io)).toBe(0)
 		expect(io.outputs).toEqual(["Applied: 0", "Pending: 1_init.sql"])
 	})
 })
@@ -178,7 +177,7 @@ describe("migrate apply, check and status --json on Postgres (C5)", () => {
 		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
 		const run = async (mode: string) => {
 			const io = makeIo(dir, pgAtlas(["1_init.sql"]))
-			expect(await runCli(["migrate", mode, "core", "--json"], io)).toBe(0)
+			expect(await runCliWithFakes(["migrate", mode, "core", "--json"], io)).toBe(0)
 			expect(io.outputs).toHaveLength(1)
 			return JSON.parse(io.outputs[0] as string) as unknown
 		}
@@ -214,7 +213,7 @@ describe("migrate apply, check and status --json on Postgres (C5)", () => {
 			const refused: Run = (cmd, args, options) =>
 				args[1] === "status" ? { code: 1, stderr: said, stdout: "" } : atlas(cmd, args, options)
 			const io = makeIo(dir, refused)
-			expect(await runCli(["migrate", mode, "core", "--json"], io)).toBe(1)
+			expect(await runCliWithFakes(["migrate", mode, "core", "--json"], io)).toBe(1)
 			expect((JSON.parse(io.outputs[0] as string) as { refused: string[] }).refused).toEqual([
 				`atlas migrate status: ${said.trim()}`,
 			])
@@ -235,7 +234,7 @@ describe("no Atlas on PATH: every Postgres command names it (KC6 + PA22; sibling
 				return runProcess(cmd, args, { ...options, env: { ...options?.env, PATH: "/nonexistent" } })
 			}
 			const io = { ...makeIo(dir, noAtlas), readAtlasVersion: undefined }
-			expect(await runCli(["migrate", mode, "core"], io)).toBe(1)
+			expect(await runCliWithFakes(["migrate", mode, "core"], io)).toBe(1)
 			const said = io.errors.join("\n")
 			expect(said).toContain(`comb needs atlas (${ATLAS_RANGE}) to hash, diff and apply migrations`)
 			expect(said).toContain("install atlas from https://atlasgo.io/getting-started")
