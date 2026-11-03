@@ -264,7 +264,7 @@ describe("comb migrate diff --dry-run", () => {
 		const run = fakeAtlas((replayed) => writeFileSync(join(replayed, "20260101000000_x.sql"), "SELECT 1;\n"))
 		const io = makeIo(dir, run)
 		expect(await runCli(["migrate", "diff", "--dry-run"], io)).toBe(1)
-		expect(io.errors).toEqual(["Usage: comb migrate diff <database> [name] [--dry-run]"])
+		expect(io.errors).toEqual(["Usage: comb migrate diff <database> [name] [-e <name>] [--dry-run]"])
 		expect({ calls: run.calls, files: readdirSync(dir) }).toEqual({ calls: [], files: ["drizzle.config.ts"] })
 	})
 

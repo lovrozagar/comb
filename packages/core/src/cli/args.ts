@@ -35,7 +35,7 @@ export const OPTIONS: readonly OptionSpec[] = [
 		value: "path",
 	},
 	{
-		commands: ["migrate apply", "migrate baseline", "migrate check", "migrate status"],
+		commands: ["migrate apply", "migrate baseline", "migrate check", "migrate diff", "migrate status"],
 		description: "Environment from comb.migrate.config.ts",
 		long: "--env",
 		short: "-e",

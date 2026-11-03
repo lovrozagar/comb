@@ -104,7 +104,8 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const args = parseArgs(argv, "migrate diff")
 	/* parseArgs refuses a diff that names no database (KC2 of r22b) */
 	const [db, name] = args.positionals as [string, string?]
-	const { d1, expected, exported, fts, migrationsDir, pg, provider } = await diffTarget(db, io)
+	const env = args.options["env"] as string | undefined
+	const { d1, expected, exported, fts, migrationsDir, pg, provider } = await diffTarget(db, env, io)
 	/* every peer the diff needs, Atlas and a declared FTS's ts-morph among them, before Atlas or drizzle-kit runs (K1 of r21, KC3 of r22) */
 	const peers = needPeers(io, "diff", { fts: fts !== undefined, provider })
 	/* after the peers, since a drizzle config imports drizzle-kit; before drizzle-kit exports none of the other dialect's tables (KC1 of r22b) */
@@ -165,8 +166,8 @@ function drizzleConfig(configured: string | undefined, cwd: string): string {
 const providerOf = (target: MigrateTarget | undefined) => target?.provider.type ?? "d1"
 
 /** What a diff of `db` reads: its Postgres provider if it has one, its drizzle export, the FTS it declares, and its migrations */
-async function diffTarget(db: string, io: CliIo) {
-	const target = await resolveMigrateTarget({ cwd: io.cwd, db, mode: "diff" })
+async function diffTarget(db: string, env: string | undefined, io: CliIo) {
+	const target = await resolveMigrateTarget({ cwd: io.cwd, db, env, mode: "diff" })
 	const pg = target?.provider.type === "postgres" ? target.provider : undefined
 	const exported = {
 		configPath: drizzleConfig(target?.drizzleConfigPath, io.cwd),

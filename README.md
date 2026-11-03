@@ -223,7 +223,7 @@ COMMANDS:
 OPTIONS:
   -g, --generator <name>  Run one generator only [codegen]
   --tables <path>         Analyze this tables file directly, no comb.config.ts [codegen]
-  -e, --env <name>        Environment from comb.migrate.config.ts [migrate apply, migrate baseline, migrate check, migrate status]
+  -e, --env <name>        Environment from comb.migrate.config.ts [migrate apply, migrate baseline, migrate check, migrate diff, migrate status]
   --dir <path>            Migrations directory (default: the config's, else ./atlas-migrations) [migrate apply, migrate baseline, migrate check, migrate status]
   --dialect <name>        The project's dialect: sqlite (default) or postgres [migrate init]
   --dry-run               Write nothing: exit 1 printing the migration a diff would write, 0 in sync [migrate diff]
@@ -1103,6 +1103,8 @@ What changes for a project on 0.20. Before deploying it:
 9. **State the database's dialect in the drizzle config a diff reads.** `comb migrate diff` now imports the drizzle config before drizzle-kit runs and refuses one whose `dialect` is not the database's (`postgresql` for Postgres; `sqlite` or `turso` for SQLite, libsql, Turso and D1), or that states none, naming the file, its dialect and the database's. 0.20 ran `drizzle-kit export` with the config's dialect, which exports none of the other dialect's tables, so the diff wrote a `DROP TABLE` for each and exited 0. `comb migrate init --dialect` likewise refuses a `drizzle.config.ts` already there whose `dialect` is the other one, where 0.20 kept it silently. **Fix:** set `dialect` in each drizzle config, or point the database's `drizzleConfigPath` in comb.migrate.config.ts at one of its dialect.
 
 10. **Name the database on every `comb migrate diff`.** Each command now requires the positionals its usage line marks `<…>`, as it already refused more than its `[…]` parts allow, so `comb migrate diff` with no database is refused with `Usage: comb migrate diff <database> [name]`. 0.20 took a bare diff as a project with no comb.migrate.config.ts: it diffed into a new `./atlas-migrations` against no history, writing the whole schema again beside the database's real migrations and skipping comb.config.ts's FTS, while `status` showed nothing pending. **Fix:** run `comb migrate diff <database>`. Without a comb.migrate.config.ts, the name is the comb.config.ts database whose FTS the diff writes, and the migrations stay in `./atlas-migrations`.
+
+11. **Pass `-e` to a diff whose environments differ in what it reads.** `comb migrate diff` now takes `-e`/`--env`. Without it, a diff reads the database's own provider when it has one, else its environments' when they agree on what a diff reads: whether the database is D1 and, on Postgres, `devUrl` and `schema`. Environments that differ in one are refused, naming them. 0.20 refused `-e` on diff and read the first environment, so the key order in comb.migrate.config.ts chose the `devUrl` and `schema` it diffed on; a database with its own provider beside environments now diffs on that provider, where 0.20 took the first environment's. **Fix:** pass `-e <environment>` to such a diff. Environments that agree, as several D1 environments of one database do, need nothing.
 
 ## Upgrading to 0.20.1
 

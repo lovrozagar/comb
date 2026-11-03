@@ -1,8 +1,8 @@
 /**
  * The database a `comb migrate` command works on, from comb.migrate.config.ts: its provider, its
- * dialect, and its paths resolved against the config file. `diff` needs no environment (the
- * schema and dialect are the database's, not an environment's); `apply` needs one when the
- * database declares them.
+ * dialect, and its paths resolved against the config file. `apply` needs an environment when the
+ * database declares them; `diff` takes one, and without it reads the database's own provider, or
+ * environments that agree on what a diff reads (KC4 of r22b).
  */
 import path from "node:path"
 import type { CombMigrateConfig } from "../migrate/config.ts"
@@ -38,9 +38,35 @@ type MigrateTarget = {
 
 const dialectOf = (type: string): Dialect => (type === "postgres" ? "postgres" : "sqlite")
 
-/** The environment a diff reads the provider from: the database's own provider, or its first environment's */
-function diffEnvironment(db: DatabaseConfig): string | undefined {
-	return db.environments === undefined ? undefined : Object.keys(db.environments)[0]
+type Resolve = (db: DatabaseConfig, env?: string) => ResolvedDatabaseConfig
+
+/** What a diff reads of a provider beside its dialect: Postgres's dev database and schema, or whether SQLite's is D1 */
+const diffReads = (provider: ResolvedDatabaseConfig["provider"]): Record<string, unknown> =>
+	provider.type === "postgres"
+		? { devUrl: provider.devUrl, schema: provider.schema }
+		: { "whether it is D1": provider.type === "d1" }
+
+/**
+ * What a diff named no environment reads: the database's own provider when it has one, else its
+ * environments' when they agree on what a diff reads, never one picked by key order
+ */
+function diffConfig(name: string, db: DatabaseConfig, resolve: Resolve): ResolvedDatabaseConfig {
+	if (db.environments === undefined) return resolve(db)
+	const shared = { drizzleConfigPath: db.drizzleConfigPath, migrationsDir: db.migrationsDir, name }
+	if (db.provider !== undefined) return resolve({ ...shared, provider: db.provider })
+	/* the config's schema refuses a database whose environments name none (K13) */
+	const [first, ...others] = Object.keys(db.environments).map((env) => resolve(db, env)) as [
+		ResolvedDatabaseConfig,
+		...ResolvedDatabaseConfig[],
+	]
+	const reads = diffReads(first.provider)
+	const differ = Object.keys(reads).filter((key) =>
+		others.some((other) => diffReads(other.provider)[key] !== reads[key]),
+	)
+	if (differ.length === 0) return first
+	throw new CliError(
+		`database "${name}"'s environments differ in ${differ.join(" and ")}, which a diff reads: pass -e/--env with one of: ${Object.keys(db.environments).join(", ")}`,
+	)
 }
 
 /** A database is one dialect, so every environment's provider must agree */
@@ -76,8 +102,10 @@ async function resolveMigrateTarget(request: TargetRequest): Promise<MigrateTarg
 	const { config, configDir } = await loadConfig(configFile, request.cwd)
 	const db = databaseIn(config, configFile, request.db)
 	assertOneDialect(request.db, db)
-	const env = request.env ?? (request.mode === "diff" ? diffEnvironment(db) : undefined)
-	const resolved = resolveDatabaseConfig(db, env)
+	const resolved =
+		request.mode === "diff" && request.env === undefined
+			? diffConfig(request.db, db, resolveDatabaseConfig)
+			: resolveDatabaseConfig(db, request.env)
 	const dialect = dialectOf(resolved.provider.type)
 	const codegen = db.codegen ?? request.db
 	if (dialect === "postgres") await assertNoFts(request.cwd, codegen)

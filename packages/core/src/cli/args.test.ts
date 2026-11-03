@@ -57,7 +57,9 @@ describe("optionsHelp", () => {
 			/^ {2}--local +.*\[migrate apply, migrate baseline, migrate check, migrate status\]$/,
 		)
 		const migrating = /\[migrate apply, migrate baseline, migrate check, migrate status\]$/
-		expect(lines.find((line) => line.includes("--env"))).toMatch(migrating)
+		expect(lines.find((line) => line.includes("--env"))).toMatch(
+			/\[migrate apply, migrate baseline, migrate check, migrate diff, migrate status\]$/,
+		)
 		expect(lines.find((line) => line.includes("--dir"))).toMatch(migrating)
 		expect(lines.slice(-2)).toEqual([
 			expect.stringMatching(/^ {2}-h, --help +Show this help$/),
@@ -87,7 +89,7 @@ describe("parseArgs: -h and --help", () => {
 		expect(usageOf("migrate status")).toBe(
 			"Usage: comb migrate status <database> [-e <name>] [--dir <path>] [--local] [--json]",
 		)
-		expect(usageOf("migrate diff")).toBe("Usage: comb migrate diff <database> [name] [--dry-run]")
+		expect(usageOf("migrate diff")).toBe("Usage: comb migrate diff <database> [name] [-e <name>] [--dry-run]")
 		expect(commandHelp("migrate init").split("\n")).toEqual([
 			"Usage: comb migrate init [--dialect <name>]",
 			"",
