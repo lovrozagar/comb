@@ -7,7 +7,7 @@
  * Postgres runs it outside a block alone.
  */
 import type { Run } from "./pg-replay-roles.ts"
-import { added, snapshot, snapshotChanges } from "./pg-server-snapshot.ts"
+import { added, type Snapshot, snapshot, snapshotChanges } from "./pg-server-snapshot.ts"
 import { counts, namedChanges, writesSince } from "./pg-server-writes.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
@@ -31,10 +31,11 @@ type At = { name: string; names: ReadonlySet<string>; sent: string | undefined; 
 /**
  * The server's shared catalogs read as committed against the last read: a change since to an object
  * the file `name` names (`names`), while `sent` or the whole file ran, is refused, and a role or
- * database it added is the cleanup's; a change to any other is another session's (P2 of r22)
+ * database it added is the cleanup's; a change to any other is another session's (P2 of r22). `read`
+ * is that read when the caller took it
  */
-async function window(run: Run, { name, names, sent, stops }: At): Promise<void> {
-	const now = await snapshot(run.admin)
+async function window(run: Run, { name, names, sent, stops }: At, read?: Snapshot): Promise<void> {
+	const now = read ?? (await snapshot(run.admin))
 	const changes = snapshotChanges(run.seen, now, names)
 	const { databases, roles, slots } = added(run.seen, now, names)
 	run.seen = now
@@ -69,7 +70,8 @@ async function window(run: Run, { name, names, sent, stops }: At): Promise<void>
 async function commit(run: Run, at: At): Promise<void> {
 	const { name, sent, stops } = at
 	/* a superuser's file can turn the counts off for its transaction or its session (P1a of r21) */
-	const now = await counts(run.sql)
+	/* two connections, one moment before COMMIT: the counts on the replay's, the committed catalogs on admin's, a round trip saved */
+	const [now, read] = await Promise.all([counts(run.sql), snapshot(run.admin)])
 	if (!now.on)
 		throw new ReplayFailed(
 			`${name}: the file turned track_counts off, so devUrl's server counted nothing it changed past the database the replay runs in, and comb rolled it back and refuses the file; leave track_counts on; ${stops}`,
@@ -82,7 +84,7 @@ async function commit(run: Run, at: At): Promise<void> {
 			`${name}: devUrl's server counted a change past the database the replay runs in${by}: ${changes.join(", ")}. It came from inside a statement the replay cannot leave out (a DO block, a function, EXECUTE or CALL), and apply would make it on the target's server, so comb rolled it back and refuses the file; write the change as a statement of its own, which the replay leaves out and apply runs; ${stops}`,
 		)
 	}
-	await window(run, at)
+	await window(run, at, read)
 	await run.sql.unsafe("COMMIT", [])
 }
 
