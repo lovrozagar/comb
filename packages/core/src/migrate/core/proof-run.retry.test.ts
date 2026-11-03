@@ -45,7 +45,7 @@ describe("provePending after a file the copy refuses (M7)", () => {
 			LOSSY,
 		])
 		expect(proofs.get("1_parent.sql")?.failed).toMatch(
-			/^comb could not run this in the proof copy: .*FOREIGN KEY constraint failed/,
+			/^comb could not run this in the proof copy on SQLite \d+\.\d+\.\d+: .*FOREIGN KEY constraint failed/,
 		)
 		expect(proofs.get("2_lossy.sql")?.failed).toMatch(/an earlier pending file, 1_parent\.sql, could not run/)
 	})
@@ -68,7 +68,7 @@ describe("provePending after a file the copy refuses (M7)", () => {
 		])
 		expect(proofs.get("1_meets_reseed.sql")?.failed).toBeUndefined()
 		expect(proofs.get("2_parent.sql")?.failed).toMatch(
-			/could not run this in the proof copy: .*FOREIGN KEY constraint failed/,
+			/could not run this in the proof copy on SQLite \d+\.\d+\.\d+: .*FOREIGN KEY constraint failed/,
 		)
 	})
 })

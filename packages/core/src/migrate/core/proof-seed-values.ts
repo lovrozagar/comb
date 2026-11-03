@@ -127,6 +127,12 @@ function ownValue(value: unknown, index: number): unknown {
 	return number + (number < 0 ? -1 : 1) * index * 1000
 }
 
+/** The dimensions of a libsql vector column (`F32_BLOB(3)` and its kin), whose index takes only a vector of that many (SL3 of r22) */
+const vectorDimensions = (type: string): number | undefined => {
+	const dimensions = /^\s*F(?:32|64|16|B16|8|1BIT)_BLOB\s*\(\s*(\d+)\s*\)\s*$/i.exec(type)?.[1]
+	return dimensions === undefined ? undefined : Number(dimensions)
+}
+
 /**
  * The value an attempt gives `column`: its listed values (rotated by its position), a text shape,
  * or its affinity's slot, made the column's own unless the attempt is plain; an INTEGER key's past 2^40
@@ -135,6 +141,12 @@ function valueFor(column: Column, at: Attempt & { variant: number }, listed: rea
 	/* a unique column keeps the row's own slot, so no fallback repeats another row's value */
 	const slot = column.unique ? slotOf(at.row) : at.slot
 	if (listed !== undefined && listed.length > 0) return listed[(slot + 1 + column.index) % listed.length]
+	const dimensions = vectorDimensions(column.type)
+	if (dimensions !== undefined) {
+		/* a vector as libsql reads one from text, its own per row, column and seed */
+		const own = slot + 1 + column.index * 10 + at.variant * 50 + pairOf(at.row) * 200
+		return `[${Array.from({ length: dimensions }, (_, offset) => own + offset).join(",")}]`
+	}
 	const affinity = affinityOf(column.type)
 	const shape = at.shape === undefined ? undefined : SHAPES[affinity]?.[at.shape]
 	if (shape !== undefined) return shape(at.row, column.index, at.variant)

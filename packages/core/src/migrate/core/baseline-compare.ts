@@ -9,7 +9,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { openScratch } from "../drivers/local-db.ts"
+import type { ScratchEngine } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
 import { hashDir, sqlFiles } from "./atlas-dir.ts"
 import { HISTORY_TABLES, notEngineTables } from "./engine-tables.ts"
@@ -25,13 +25,14 @@ import { emptyPgObjects, separatePgObjects } from "./pg-objects.ts"
 import { beyondDatabase, nodeOf } from "./pg-outside-transaction.ts"
 import { atlasDirectives, atlasFile, pgRead } from "./pg-split.ts"
 import type { Run } from "./process.ts"
-import { codeOf } from "./sql-code.ts"
-import { normalizeSql } from "./sql-scan.ts"
+import { asciiFold, codeOf } from "./sql-code.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { type HistoryFile, replayCatalog } from "./pg-replay.ts"
 import { makesCompared } from "./pg-replay-gate.ts"
 import { UNCOMPARED } from "./baseline-uncompared.ts"
 import { ReplayFailed } from "./replay-failed.ts"
+import { objectDrift } from "./baseline-sqlite-objects.ts"
+import { isVectorIndexSql, vectorShadows, vectorStatement } from "./vector-index.ts"
 
 const SYNCED = "Schemas are synced, no changes to be made."
 /* the tables SQLite keeps behind a virtual table: fts5's, fts3 and fts4's, and rtree's */
@@ -45,88 +46,44 @@ const SHADOWS = ["config", "content", "data", "docsize", "idx", "node", "parent"
  */
 async function liveDdl(conn: Connection): Promise<string> {
 	const { rows } = await conn.execute(
-		`SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table', 'index')${notEngineTables(conn, HISTORY_TABLES)} ORDER BY rowid`,
+		`SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND type IN ('table', 'index')${notEngineTables(conn, HISTORY_TABLES)} ORDER BY rowid`,
 	)
-	return asSql(rows.map((row) => String(row[1])))
+	/* a vector index and what libsql makes for it: no SQLite but libsql's reads them, so objectDrift compares the index (SL3 of r22) */
+	const vectors = rows
+		.filter(([type, , sql]) => type === "index" && isVectorIndexSql(String(sql)))
+		.map((row) => String(row[1]))
+	const libsqls = new Set([...vectors.map(asciiFold), ...vectorShadows(vectors)])
+	return asSql(rows.filter((row) => !libsqls.has(asciiFold(String(row[1])))).map((row) => String(row[2])))
 }
 
 /* a history statement that makes or drops what Atlas OSS refuses: a trigger, a view, a virtual table, which objectDrift compares */
 const UNINSPECTED_DDL =
 	/^\s*(?:(?:--[^\n]*\n|\/\*[\s\S]*?\*\/)\s*)*(?:CREATE\s+(?:TEMP(?:ORARY)?\s+)?(?:TRIGGER|VIEW|VIRTUAL\s+TABLE)|DROP\s+(?:TRIGGER|VIEW))\b/i
 
-/* the objects Atlas OSS does not inspect on SQLite: triggers, views and virtual tables, FTS5's included (S5), but the engine's */
-const uninspectedOf = (conn: Pick<Connection, "ownedPrefix">): string =>
-	`SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND (type IN ('trigger', 'view') OR (type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'))${notEngineTables(conn)} ORDER BY rowid`
-
-/** Each object Atlas OSS does not inspect, by what it is and its name, with its definition normalized */
-function uninspected(rows: ReadonlyArray<Readonly<Record<string, unknown>>>): Map<string, string> {
-	return new Map(
-		rows.map((row) => {
-			const sql = String(row["sql"])
-			const kind =
-				row["type"] !== "table" ? String(row["type"]) : /\bUSING\s+fts5\b/i.test(sql) ? "FTS table" : "virtual table"
-			return [`${kind} ${String(row["name"])}`, normalizeSql(sql)]
-		}),
-	)
-}
-
-/** The triggers, views and virtual tables the migrations of `dir` leave, replayed a file per connection (S1 of r21) */
-async function replayedObjects(dir: string): Promise<Map<string, string>> {
-	const db = await openScratch()
-	try {
-		for (const file of sqlFiles(dir)) {
-			db.reopen()
-			try {
-				db.exec(readFileSync(join(dir, file), "utf8"))
-			} catch (error) {
-				throw new Error(
-					`comb could not replay ${file} to compare its triggers and views: ${(error as Error).message}`,
-					{
-						cause: error,
-					},
-				)
-			}
-		}
-		return uninspected(db.all(uninspectedOf({})))
-	} finally {
-		db.close()
-	}
-}
-
-/**
- * Where the database's triggers, views and virtual tables differ from the ones the migrations
- * leave, by name and normalized definition, as lines of the difference (S5 of the 0.14.1 review)
- */
-async function objectDrift(conn: Connection, dir: string): Promise<string[]> {
-	const live = uninspected(
-		(await conn.execute(uninspectedOf(conn))).rows.map(([type, name, sql]) => ({ name, sql, type })),
-	)
-	const history = await replayedObjects(dir)
-	const lines: string[] = []
-	for (const [key, sql] of live) {
-		const want = history.get(key)
-		if (want === undefined) lines.push(`-- ${key}: only in the database`)
-		else if (want !== sql) lines.push(`-- ${key}: the database has ${sql}, the migrations ${want}`)
-	}
-	for (const key of history.keys()) if (!live.has(key)) lines.push(`-- ${key}: only in the migrations`)
-	return lines
-}
-
 /**
  * The difference between the database's schema and the one the migrations of `dir` leave, as the
- * SQL that would bring the database there; "" when they agree
+ * SQL that would bring the database there; "" when they agree. The history replays on `engine`, the
+ * SQLite its files apply on (SL3 of r22).
  */
-async function sqliteDrift(conn: Connection, dir: string, exec: Run): Promise<string> {
+async function sqliteDrift(
+	conn: Connection,
+	dir: string,
+	{ engine = "runtime", exec }: { engine?: ScratchEngine | undefined; exec: Run },
+): Promise<string> {
 	const work = mkdtempSync(join(tmpdir(), "comb-baseline-"))
 	try {
 		const groups = new Set<string>()
+		const vectors = new Set<string>()
 		const copy = join(work, "history")
 		let history: FtsState = new Map()
 		mkdirSync(copy)
 		for (const file of sqlFiles(dir)) {
 			const separated = separate(readFileSync(join(dir, file), "utf8"), groups, history)
 			history = separated.state
-			writeFileSync(join(copy, file), asSql(separated.plain.filter((stmt) => !UNINSPECTED_DDL.test(stmt))))
+			writeFileSync(
+				join(copy, file),
+				asSql(separated.plain.filter((stmt) => !UNINSPECTED_DDL.test(stmt) && !vectorStatement(stmt, vectors))),
+			)
 		}
 		hashDir(exec, copy)
 		const live = separate(await liveDdl(conn), groups)
@@ -146,7 +103,7 @@ async function sqliteDrift(conn: Connection, dir: string, exec: Run): Promise<st
 		const ran = exec("atlas", [...args, "--dev-url", sqliteDevUrl()])
 		if (ran.code !== 0) throw new Error(`atlas schema diff failed: ${`${ran.stderr}${ran.stdout}`.trim()}`)
 		const atlasDiff = ran.stdout.trim() === SYNCED ? [] : [ran.stdout.trim()]
-		return [...atlasDiff, ...(await objectDrift(conn, dir))].join("\n")
+		return [...atlasDiff, ...(await objectDrift(conn, dir, engine))].join("\n")
 	} finally {
 		rmSync(work, { force: true, recursive: true })
 	}

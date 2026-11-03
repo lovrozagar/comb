@@ -84,7 +84,9 @@ describe("planApply's proof run, on a database it reads", () => {
 		await expect(run()).rejects.toThrow(/^1_bad\.sql is unsafe \(proof run: comb could not run this in the proof copy/)
 		expect(out).toEqual([
 			"Proof run: 1_bad.sql, 2_ok.sql: unproven, comb could not seed codes (CHECK constraint failed: length(code) = 20)",
-			"Proof run: 1_bad.sql: comb could not run this in the proof copy: ALTER TABLE missing ADD COLUMN x TEXT: no such table: missing",
+			expect.stringMatching(
+				/^Proof run: 1_bad\.sql: comb could not run this in the proof copy on SQLite \d+\.\d+\.\d+: ALTER TABLE missing ADD COLUMN x TEXT: no such table: missing$/,
+			),
 		])
 		await conn.close()
 	})

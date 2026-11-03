@@ -5,10 +5,11 @@
  * same copy, as statements, is what a D1 file is proven on in D1's own engine (d1-engine.ts, SD1 of r22).
  */
 import { isMirror, seedMirrors } from "./proof-mirror.ts"
-import { type LocalDb, openScratch, type ScratchDb } from "../drivers/local-db.ts"
+import { type LocalDb, openScratch, type ScratchDb, type ScratchEngine } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
 import { quote, seedTables } from "./proof-seed.ts"
 import { asciiFold } from "./sql-code.ts"
+import { isVectorIndexSql, vectorShadows } from "./vector-index.ts"
 
 /** One object of the live schema, and the table it belongs to (sqlite_master's tbl_name) */
 type LiveObject = { name: string; sql: string; table: string; type: string }
@@ -40,7 +41,11 @@ async function liveObjects(conn: Connection, engine: string): Promise<LiveObject
 
 const isVirtual = (object: LiveObject): boolean => /^CREATE VIRTUAL TABLE\b/i.test(object.sql)
 
-/** The objects the copy creates: every one but a virtual table's own module's shadow tables */
+/**
+ * The objects the copy creates: every one but those another one makes itself, a virtual table's
+ * module's shadow tables, and a vector index's shadow table, its index and libsql's table of vector
+ * indexes (SL3 of r22)
+ */
 function creatable(objects: readonly LiveObject[]): LiveObject[] {
 	const shadows = new Set(
 		objects.filter(isVirtual).flatMap((object) => {
@@ -49,7 +54,12 @@ function creatable(objects: readonly LiveObject[]): LiveObject[] {
 			return (SHADOWS[module] ?? []).map((suffix) => asciiFold(`${object.name}_${suffix}`))
 		}),
 	)
-	return objects.filter((object) => !(object.type === "table" && shadows.has(asciiFold(object.name))))
+	const made = vectorShadows(
+		objects.filter((object) => object.type === "index" && isVectorIndexSql(object.sql)).map(({ name }) => name),
+	)
+	return objects.filter(
+		(object) => !(object.type === "table" && shadows.has(asciiFold(object.name))) && !made.has(asciiFold(object.name)),
+	)
 }
 
 /** The columns, by lower-case name, a pending file reads with a `json_*` function: the seed holds JSON there */
@@ -114,9 +124,13 @@ function buildCopy(db: LocalDb, objects: readonly LiveObject[], seed: Seed): Map
 /** One copy of the target: its database, and the tables comb could not seed in it, with why */
 type Copy = { db: ScratchDb; unproven: Map<string, string> }
 
-/** A copy of `objects`, seeded as `seed` */
-async function copyOf(objects: readonly LiveObject[], seed: NonNullable<Seed>): Promise<Copy> {
-	const db = await openScratch()
+/** A copy of `objects` on `engine`, seeded as `seed` */
+async function copyOf(
+	objects: readonly LiveObject[],
+	seed: NonNullable<Seed>,
+	engine: ScratchEngine = "runtime",
+): Promise<Copy> {
+	const db = await openScratch(engine)
 	return { db, unproven: buildCopy(db, objects, seed) }
 }
 

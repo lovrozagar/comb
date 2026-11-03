@@ -145,7 +145,7 @@ describe("engine ratings: triggers, virtual tables and a file the copy refuses",
 
 	it("says why a file the copy cannot run is unproven, and so unsafe", async () => {
 		const { notes } = await rate(`UPDATE "k"SET a = b;\nCREATE INDEX k_b ON k (b);`)
-		expect(notes.join("\n")).toMatch(/comb could not run this in the proof copy: .*NOT NULL/)
+		expect(notes.join("\n")).toMatch(/comb could not run this in the proof copy on SQLite \d+\.\d+\.\d+: .*NOT NULL/)
 	})
 })
 

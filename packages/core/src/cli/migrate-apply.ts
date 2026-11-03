@@ -124,7 +124,10 @@ async function baseline(
 	{ files, matched, record }: { files: readonly FileHashes[]; matched: Matched; record: () => Promise<void> },
 	io: CliIo,
 ) {
-	const drift = await sqliteDrift(target.conn, target.migrationsDir, io.run ?? runProcess)
+	const drift = await sqliteDrift(target.conn, target.migrationsDir, {
+		engine: target.engine,
+		exec: io.run ?? runProcess,
+	})
 	if (drift !== "") {
 		throw new CliError(
 			`${target.name}'s schema is not the one its migrations leave, so baseline records nothing; the difference:\n${drift}`,
@@ -193,6 +196,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 		files: names,
 		kind: target.kind,
 		print: io.out,
+		proofEngine: target.engine,
 		whole: single === undefined,
 	})
 	const pendingNames = pending.map(({ name }) => name)

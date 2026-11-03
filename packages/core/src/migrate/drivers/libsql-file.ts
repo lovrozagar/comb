@@ -11,8 +11,17 @@ import { optionalPeer } from "../core/optional-peer.ts"
 import { LIBSQL } from "../core/peer-needs.ts"
 import { LIBSQL_CLIENT } from "./libsql-client.ts"
 
-/** The surface of libsql's Database comb calls */
-type Database = { close(): void; exec(sql: string): void; readonly inTransaction: boolean }
+/** The surface of libsql's Database comb calls: `prepare` only on a scratch (libsql-local.ts), never on a target */
+type Database = {
+	close(): void
+	exec(sql: string): void
+	readonly inTransaction: boolean
+	prepare(sql: string): {
+		all(...params: unknown[]): unknown[]
+		get(...params: unknown[]): unknown
+		run(...params: unknown[]): unknown
+	}
+}
 type DatabaseClass = new (path: string) => Database
 
 /** libsql's Database, from the copy the @libsql/client comb resolves loads, so the two never differ */
@@ -73,4 +82,4 @@ async function openLibsqlFile(file: string): Promise<FileConnection> {
 	}
 }
 
-export { openLibsqlFile }
+export { libsqlDatabase, openLibsqlFile }

@@ -14,7 +14,7 @@
  * file's own columns is cautious. A file the copy cannot run is unproven, and unproven is unsafe.
  */
 import { isMirror, mirrorFindings, mirrorRows } from "./proof-mirror.ts"
-import { type LocalDb, openScratch } from "../drivers/local-db.ts"
+import { type LocalDb, openScratch, type ScratchEngine } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
 import { notEngineTables } from "./engine-tables.ts"
 import { compare, type Shape } from "./proof-compare.ts"
@@ -77,9 +77,9 @@ function snapshot(db: LocalDb): Map<string, Shape> {
 async function reseeded(
 	objects: readonly LiveObject[],
 	applied: readonly string[],
-	json: ReadonlySet<string>,
+	{ engine, json }: { engine: ScratchEngine; json: ReadonlySet<string> },
 ): Promise<Copy | undefined> {
-	const copy = await copyOf(objects, { json, variant: 1 })
+	const copy = await copyOf(objects, { json, variant: 1 }, engine)
 	if (applied.every((sql) => applyToCopy(copy.db, sql).error === undefined)) return copy
 	copy.db.close()
 	return undefined
@@ -94,15 +94,17 @@ async function reseeded(
 async function schemaAfter(
 	objects: readonly LiveObject[],
 	files: readonly string[],
-	engine: string,
+	{ engine, engineTables }: { engine: ScratchEngine; engineTables: string },
 ): Promise<LiveObject[] | undefined> {
-	const db = await openScratch()
+	const db = await openScratch(engine)
 	try {
 		buildCopy(db, objects, undefined)
 		if (!files.every((sql) => applyToCopy(db, sql).error === undefined)) return undefined
 		return creatable(
 			db
-				.all(`SELECT type, name, sql, tbl_name FROM main.sqlite_master WHERE sql IS NOT NULL${engine} ORDER BY rowid`)
+				.all(
+					`SELECT type, name, sql, tbl_name FROM main.sqlite_master WHERE sql IS NOT NULL${engineTables} ORDER BY rowid`,
+				)
 				.map((row) => ({
 					name: String(row["name"]),
 					sql: String(row["sql"]),
@@ -136,12 +138,12 @@ function named<T>(name: string, work: () => T): T {
 async function provePending(
 	conn: Connection,
 	files: ReadonlyArray<{ name: string; sql: string }>,
-	live?: readonly LiveObject[],
+	{ engine = "runtime", live }: { engine?: ScratchEngine | undefined; live?: readonly LiveObject[] | undefined } = {},
 ): Promise<Map<string, Proof>> {
 	const json = jsonColumns(files)
 	const engineTables = notEngineTables(conn)
 	let objects = live === undefined ? creatable(await liveObjects(conn, engineTables)) : [...live]
-	let copy = await copyOf(objects, { json, variant: 0 })
+	let copy = await copyOf(objects, { json, variant: 0 }, engine)
 	const proofs = new Map<string, Proof>()
 	let applied: string[] = []
 	let failed: string | undefined
@@ -153,7 +155,7 @@ async function provePending(
 			}
 			let [before, mirrors] = [snapshot(copy.db), mirrorRows(copy.db)]
 			let run = named(name, () => applyToCopy(copy.db, sql))
-			const retry = run.error === undefined ? undefined : await reseeded(objects, applied, json)
+			const retry = run.error === undefined ? undefined : await reseeded(objects, applied, { engine, json })
 			if (retry !== undefined) {
 				copy.db.close()
 				copy = retry
@@ -161,10 +163,10 @@ async function provePending(
 				run = applyToCopy(copy.db, sql)
 			}
 			if (run.error !== undefined) {
-				const why = `comb could not run this in the proof copy: ${run.error}`
+				const why = `comb could not run this in the proof copy on ${copy.db.engine}: ${run.error}`
 				proofs.set(name, { cautious: [], failed: why, unproven: unprovenOf(copy), unsafe: [why] })
 				/* the later files are proven on the schema this one leaves, seeded fresh (M13) */
-				const after = await schemaAfter(objects, [...applied, sql], engineTables)
+				const after = await schemaAfter(objects, [...applied, sql], { engine, engineTables })
 				if (after === undefined) {
 					failed = `an earlier pending file, ${name}, could not run in the proof copy, so this one is unproven`
 					continue
@@ -172,7 +174,7 @@ async function provePending(
 				copy.db.close()
 				objects = after
 				applied = []
-				copy = await copyOf(objects, { json, variant: 0 })
+				copy = await copyOf(objects, { json, variant: 0 }, engine)
 				continue
 			}
 			applied.push(sql)
@@ -181,11 +183,11 @@ async function provePending(
 				new Map([...before].filter(([table]) => !copy.unproven.has(table))),
 				snapshot(copy.db),
 			)
-			const engine = engineFindings(run.steps, run.start)
+			const steps = engineFindings(run.steps, run.start)
 			proofs.set(name, {
-				cautious: [...engine.cautious, ...found.cautious],
+				cautious: [...steps.cautious, ...found.cautious],
 				unproven: unprovenOf(copy),
-				unsafe: [...engine.unsafe, ...found.unsafe, ...mirrorFindings(mirrors, mirrorRows(copy.db))],
+				unsafe: [...steps.unsafe, ...found.unsafe, ...mirrorFindings(mirrors, mirrorRows(copy.db))],
 			})
 		}
 	} finally {

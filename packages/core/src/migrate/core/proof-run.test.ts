@@ -196,7 +196,9 @@ describe("provePending on what it cannot seed or apply", () => {
 			{ name: "2_bad.sql", sql: "ALTER TABLE missing ADD COLUMN x TEXT;" },
 			{ name: "3_after.sql", sql: "DELETE FROM users;" },
 		])
-		expect(proofs.get("2_bad.sql")?.failed).toMatch(/^comb could not run this in the proof copy: .*missing/)
+		expect(proofs.get("2_bad.sql")?.failed).toMatch(
+			/^comb could not run this in the proof copy on SQLite \d+\.\d+\.\d+: .*missing/,
+		)
 		expect(proofs.get("3_after.sql")?.failed).toBe(
 			"an earlier pending file, 2_bad.sql, could not run in the proof copy, so this one is unproven",
 		)

@@ -38,11 +38,13 @@ describe("sqliteDrift", () => {
 			"CREATE TABLE post (id TEXT, title TEXT); CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY); CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post'); CREATE TRIGGER post_fts_ai AFTER INSERT ON post BEGIN INSERT INTO post_fts(rowid, title) VALUES (new.rowid, new.title); END;",
 		)
 		const run = atlas("Schemas are synced, no changes to be made.\n")
-		expect(await sqliteDrift(conn, join(dir, "m"), run)).toBe(
+		expect(await sqliteDrift(conn, join(dir, "m"), { exec: run })).toBe(
 			"-- FTS table post_fts: only in the database\n-- trigger post_fts_ai: only in the database",
 		)
 		expect(run.live).toEqual(["CREATE TABLE post (id TEXT, title TEXT);\n"])
-		await expect(sqliteDrift(conn, join(dir, "m"), atlas("", 1))).rejects.toThrow("atlas schema diff failed: boom")
+		await expect(sqliteDrift(conn, join(dir, "m"), { exec: atlas("", 1) })).rejects.toThrow(
+			"atlas schema diff failed: boom",
+		)
 		await conn.close()
 	})
 })
@@ -88,7 +90,7 @@ CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN SELECT 1; END;`
 		await conn.client.executeMultiple(
 			"CREATE TABLE post (id TEXT, title TEXT, body TEXT); CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post'); CREATE VIEW recent AS SELECT id FROM post;",
 		)
-		expect((await sqliteDrift(conn, join(dir, "m"), synced())).split("\n")).toEqual([
+		expect((await sqliteDrift(conn, join(dir, "m"), { exec: synced() })).split("\n")).toEqual([
 			"-- FTS table post_fts: the database has CREATE VIRTUAL TABLE post_fts USING fts5(title, content='post'), the migrations CREATE VIRTUAL TABLE post_fts USING fts5(title, body, content='post')",
 			"-- view recent: only in the database",
 			"-- trigger post_audit: only in the migrations",
@@ -99,9 +101,11 @@ CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN SELECT 1; END;`
 	it("names a virtual table other than FTS5 as one, and refuses a history it cannot replay, naming the file", async () => {
 		writeFileSync(join(dir, "m", "1_init.sql"), "CREATE VIRTUAL TABLE spots USING rtree(id, x0, x1);")
 		const conn = libsqlConnection()
-		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("-- virtual table spots: only in the migrations")
+		expect(await sqliteDrift(conn, join(dir, "m"), { exec: synced() })).toBe(
+			"-- virtual table spots: only in the migrations",
+		)
 		writeFileSync(join(dir, "m", "2_bad.sql"), "CREATE TABLE ;")
-		await expect(sqliteDrift(conn, join(dir, "m"), synced())).rejects.toThrow(
+		await expect(sqliteDrift(conn, join(dir, "m"), { exec: synced() })).rejects.toThrow(
 			"comb could not replay 2_bad.sql to compare its triggers and views:",
 		)
 		await conn.close()
@@ -121,7 +125,7 @@ CREATE TRIGGER post_fts_ad AFTER DELETE ON post BEGIN INSERT INTO post_fts(post_
 			writeFileSync(join(dir, "m", name), sql)
 			await conn.client.executeMultiple(sql)
 		}
-		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("")
+		expect(await sqliteDrift(conn, join(dir, "m"), { exec: synced() })).toBe("")
 		await conn.close()
 	})
 
@@ -131,7 +135,7 @@ CREATE TRIGGER post_fts_ad AFTER DELETE ON post BEGIN INSERT INTO post_fts(post_
 		await conn.client.executeMultiple(
 			"CREATE TABLE post (id TEXT, title TEXT, body TEXT); CREATE VIRTUAL TABLE post_fts USING fts5(title,   body, content='post'); CREATE TRIGGER post_audit AFTER UPDATE ON post BEGIN /* kept */ SELECT 1; END;",
 		)
-		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("")
+		expect(await sqliteDrift(conn, join(dir, "m"), { exec: synced() })).toBe("")
 		await conn.close()
 	})
 })
@@ -156,7 +160,7 @@ describe("sqliteDrift: the replay of the history", () => {
 			name: "live",
 			provider: { type: "libsql", url },
 		})
-		expect(await sqliteDrift(conn, join(dir, "m"), synced())).toBe("")
+		expect(await sqliteDrift(conn, join(dir, "m"), { exec: synced() })).toBe("")
 		await conn.close()
 	})
 })
@@ -256,8 +260,36 @@ describe("sqliteDrift: what Atlas OSS is handed", () => {
 			"CREATE TABLE post (id TEXT); CREATE VIRTUAL TABLE spots USING rtree(id, x0, x1);",
 		)
 		const run = atlas("Schemas are synced, no changes to be made.\n")
-		expect(await sqliteDrift(conn, join(dir, "m"), run)).toBe("")
+		expect(await sqliteDrift(conn, join(dir, "m"), { exec: run })).toBe("")
 		expect(run.live.join("")).not.toContain("spots")
+		await conn.close()
+	})
+})
+
+describe("sqliteDrift on a libsql target", () => {
+	it("hands Atlas neither side's vector index nor what libsql makes for it, and compares the index on libsql's engine (SL3 of r22)", async () => {
+		const files = {
+			"1_t.sql":
+				"CREATE TABLE t (id INTEGER PRIMARY KEY, emb F32_BLOB(3));\nCREATE INDEX t_emb ON t (libsql_vector_idx(emb));",
+			"2_drop.sql": "DROP INDEX t_emb;\nCREATE INDEX [t_vec] ON t (libsql_vector_idx(emb));",
+		}
+		const conn = libsqlConnection()
+		const history: string[] = []
+		const run: Run = (_cmd, args) => {
+			const to = args[args.indexOf("--to") + 1] as string
+			if (args[0] === "schema")
+				for (const name of Object.keys(files)) history.push(readFileSync(join(to.replace("file://", ""), name), "utf8"))
+			return { code: 0, stderr: "", stdout: args[0] === "schema" ? "Schemas are synced, no changes to be made." : "" }
+		}
+		const live = atlas("Schemas are synced, no changes to be made.\n")
+		for (const [name, sql] of Object.entries(files)) {
+			writeFileSync(join(dir, "m", name), sql)
+			await conn.client.executeMultiple(sql)
+		}
+		expect(await sqliteDrift(conn, join(dir, "m"), { engine: "libsql", exec: run })).toBe("")
+		expect(history.join("\n")).not.toMatch(/libsql_vector_idx|DROP INDEX/)
+		await sqliteDrift(conn, join(dir, "m"), { engine: "libsql", exec: live })
+		expect(live.live.join("\n")).not.toMatch(/vector|shadow|t_vec/)
 		await conn.close()
 	})
 })

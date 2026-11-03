@@ -15,6 +15,7 @@ import { absentDatabase } from "../migrate/drivers/absent.ts"
 import { DatabaseMissing } from "../migrate/drivers/missing.ts"
 import type { FileConnection } from "../migrate/core/apply.ts"
 import type { TargetKind } from "../migrate/core/classify-target.ts"
+import type { ScratchEngine } from "../migrate/drivers/local-db.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
 import type { MigrateTarget } from "./migrate-target.ts"
@@ -24,6 +25,8 @@ import { CliError, type CliIo } from "./output.ts"
 export type SqliteTarget = {
 	close(): Promise<void>
 	conn: Connection
+	/** the SQLite its files apply on, which their proof copy and a baseline's replay run on (SL3 of r22) */
+	engine: ScratchEngine
 	/** where the files apply: a SQLite file comb opens, or a libsql server */
 	kind: Exclude<TargetKind, "d1">
 	migrationsDir: string
@@ -100,10 +103,20 @@ export async function openSqliteTarget(
 	const connect = (readonly: boolean) => opener.connect({ drizzleConfigPath, migrationsDir, name, provider, readonly })
 	const place = await placeOf(provider)
 	const kind = place.at === "server" ? "sqld" : "local"
+	const engine = provider.type === "bun-sqlite" ? "runtime" : "libsql"
 	if (mode === "check" || mode === "status") {
 		const conn = await connect(true)
 		const same = () => Promise.resolve(conn)
-		return { close: () => conn.close(), conn, fresh: same, kind, migrationsDir, name: target.label, write: same }
+		return {
+			close: () => conn.close(),
+			conn,
+			engine,
+			fresh: same,
+			kind,
+			migrationsDir,
+			name: target.label,
+			write: same,
+		}
 	}
 	const conn = await readOrAbsent(connect, target.label)
 	let writer: Connection | undefined
@@ -114,6 +127,7 @@ export async function openSqliteTarget(
 			await writer?.close()
 		},
 		conn,
+		engine,
 		fresh:
 			place.at === "file"
 				? await fileOpener(provider, place.file, connect)

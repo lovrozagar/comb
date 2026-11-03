@@ -55,6 +55,16 @@ describe("valueFor", () => {
 		expect(valueFor(column(), at(), ["a", "b"])).toBe("a")
 	})
 
+	it("gives a libsql vector column a vector of its dimensions as text, its own per row and seed, and any other blob a blob (SL3 of r22)", () => {
+		const vector = column({ type: "F32_BLOB(3)" })
+		const first = valueFor(vector, at(), undefined)
+		expect(first).toMatch(/^\[\d+,\d+,\d+\]$/)
+		expect(valueFor(column({ type: " f8_blob ( 2 ) " }), at(), undefined)).toMatch(/^\[\d+,\d+\]$/)
+		expect(valueFor(vector, at({ row: 4, slot: 3 }), undefined)).not.toBe(first)
+		expect(valueFor(vector, at({ variant: 1 }), undefined)).not.toBe(first)
+		expect(valueFor(column({ type: "F32_BLOB" }), at({ shape: 0 }), undefined)).toBeInstanceOf(Uint8Array)
+	})
+
 	it("gives a reseed values the first seed never held", () => {
 		expect(valueFor(column(), at({ variant: 1 }), undefined)).not.toBe(valueFor(column(), at(), undefined))
 	})

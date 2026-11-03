@@ -10,6 +10,7 @@
  */
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import type { ScratchEngine } from "../drivers/local-db.ts"
 import type { Connection, ExtractedSchema, ParsedMigration } from "../types.ts"
 import type { Approval } from "./approval.ts"
 import type { TargetKind } from "./classify-target.ts"
@@ -48,6 +49,8 @@ type PlanOptions = {
 	engine?:
 		| ((files: ReadonlyArray<{ name: string; sql: string }>, live: readonly LiveObject[]) => Promise<void>)
 		| undefined
+	/** the SQLite the proof copy runs on: libsql's for a libsql or Turso target, which applies its files there (SL3 of r22); default the runtime's */
+	proofEngine?: ScratchEngine | undefined
 }
 
 /** The leading number of a migration file name: `20260101000000_x.sql` is 20260101000000 */
@@ -193,7 +196,9 @@ async function planApply(options: PlanOptions): Promise<Pending[]> {
 			? undefined
 			: creatable(await liveObjects(conn, notEngineTables(conn)))
 	const proofs =
-		conn === undefined || live === undefined ? new Map<string, Proof>() : await provePending(conn, classified, live)
+		conn === undefined || live === undefined
+			? new Map<string, Proof>()
+			: await provePending(conn, classified, { engine: options.proofEngine, live })
 	if (live !== undefined) await options.engine?.(classified, live)
 	const histories = options.historyTables ?? HISTORY_TABLES
 	const empty =

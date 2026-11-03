@@ -61,6 +61,27 @@ describe("openScratch", () => {
 		db.close()
 		expect(fs.existsSync(dir)).toBe(false)
 	})
+
+	it("runs on libsql's engine for a libsql target, keeping what it wrote across a reopen, and names each engine (SL3 of r22)", async () => {
+		const { openScratch } = await import("./local-db.ts")
+		const mkdtemp = vi.spyOn(fs, "mkdtempSync")
+		const libsql = await openScratch("libsql")
+		/* in memory, so no connection the proof reopens holds a descriptor libsql keeps past its close */
+		expect(mkdtemp).not.toHaveBeenCalled()
+		expect(libsql.engine).toMatch(/^libsql's SQLite 3\.\d+\.\d+$/)
+		libsql.exec(
+			"CREATE TABLE t (id INTEGER PRIMARY KEY, emb F32_BLOB(3)); CREATE INDEX t_emb ON t (libsql_vector_idx(emb))",
+		)
+		libsql.exec("PRAGMA recursive_triggers = ON; CREATE TEMP TABLE tmp (x)")
+		libsql.reopen()
+		expect(libsql.all("SELECT name FROM sqlite_master WHERE name = 't_emb'")).toEqual([{ name: "t_emb" }])
+		expect(libsql.all("PRAGMA recursive_triggers")).toEqual([{ recursive_triggers: 0 }])
+		expect(libsql.all("SELECT name FROM temp.sqlite_master")).toEqual([])
+		libsql.close()
+		const runtime = await openScratch()
+		expect(runtime.engine).toMatch(/^SQLite 3\.\d+\.\d+$/)
+		runtime.close()
+	})
 })
 
 describe("sweepScratch", () => {

@@ -29,7 +29,7 @@ describe("a SQLite baseline's drift, on Atlas OSS", () => {
 		writeFileSync(join(dir, "m", "2_again.sql"), `DROP VIEW recent;\n${VIEW}`)
 		const conn = libsqlConnection()
 		await conn.client.executeMultiple(`${TABLE}${TRIGGER}${VIEW}`)
-		expect(await sqliteDrift(conn, join(dir, "m"), run)).toBe("")
+		expect(await sqliteDrift(conn, join(dir, "m"), { exec: run })).toBe("")
 	}, 60_000)
 
 	it("names a view whose definition differs, and a table Atlas finds apart", async () => {
@@ -38,7 +38,7 @@ describe("a SQLite baseline's drift, on Atlas OSS", () => {
 		await conn.client.executeMultiple(
 			`${TABLE}ALTER TABLE post ADD COLUMN body TEXT;\n${TRIGGER}CREATE VIEW recent AS SELECT id, title FROM post;\n`,
 		)
-		const drift = await sqliteDrift(conn, join(dir, "m"), run)
+		const drift = await sqliteDrift(conn, join(dir, "m"), { exec: run })
 		expect(drift).toContain("-- view recent: the database has")
 		/* Atlas brings the database's post to the history's by rebuilding it without body */
 		expect(drift).toContain("CREATE TABLE `new_post`")
@@ -55,9 +55,9 @@ describe("a SQLite baseline's drift on a database Litestream replicates", () => 
 CREATE TABLE IF NOT EXISTS _litestream_lock (id INTEGER);
 `,
 		)
-		expect(await sqliteDrift(conn, join(dir, "m"), run)).toBe("")
+		expect(await sqliteDrift(conn, join(dir, "m"), { exec: run })).toBe("")
 		/* _cf_ is D1's prefix alone: on libsql a _cf_ table is the user's */
 		await conn.client.execute("CREATE TABLE _cf_notes (id INTEGER)")
-		expect(await sqliteDrift(conn, join(dir, "m"), run)).toContain("_cf_notes")
+		expect(await sqliteDrift(conn, join(dir, "m"), { exec: run })).toContain("_cf_notes")
 	}, 60_000)
 })
