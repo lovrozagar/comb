@@ -17,7 +17,7 @@ import type { ProjectBin } from "./process.ts"
 import { copyScript, creatable, type LiveObject } from "./proof-copy.ts"
 import { quote } from "./proof-seed.ts"
 
-type D1Statement = { all(): Promise<{ results?: Array<Record<string, unknown>> }> }
+type D1Statement = { all(): Promise<{ results?: Array<Record<string, unknown>> | undefined }> }
 type D1Database = { batch(statements: D1Statement[]): Promise<unknown>; prepare(sql: string): D1Statement }
 type PlatformProxy = { dispose(): Promise<void>; env: Record<string, unknown> }
 
