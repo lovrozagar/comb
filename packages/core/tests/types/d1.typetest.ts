@@ -47,6 +47,15 @@ declare const mapping: ShardMapping
 expectTypeOf(router.getHandle(mapping, env).handle).toEqualTypeOf<D1Database>()
 drizzle(router.getHandle(mapping, env).handle)
 
+/* AD1: `wrangler types` writes a binding bound in only some environments as optional; the router throws on an absent one at run time */
+interface StagingEnv {
+	KV: KVNamespace
+	SHARD_DB_0: D1Database
+	SHARD_DB_1?: D1Database
+}
+declare const staging: StagingEnv
+expectTypeOf(router.getHandle(mapping, staging).handle).toEqualTypeOf<D1Database>()
+
 /* an env typed by a string index signature names no binding, so the handle is the structural one */
 declare const indexed: Record<string, unknown>
 expectTypeOf(router.getHandle(mapping, indexed).handle).toEqualTypeOf<D1DatabaseLike>()

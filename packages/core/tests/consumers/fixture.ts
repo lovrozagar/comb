@@ -239,7 +239,7 @@ export async function routed(env: Env, ctx: ExecutionContext, bookmark: string |
 	const router = new ShardRouter({ totalShards: 1 })
 	const mapping = await router.resolve("org", { coreDb: env.DB, kv: env.KV }, ctx)
 	await client.prepare("SELECT 1").run()
-	/* K2 of r22: a shard's handle is the D1Database the generated Env holds, which drizzle takes */
+	/* K2 of r22: a shard's handle is the D1Database the generated Env holds, which drizzle takes, a binding bound in one environment alone among them (AD1) */
 	if (mapping) drizzle(router.getHandle(mapping, env).handle)
 	// @ts-expect-error an env with no SHARD_DB_* binding holds no shard
 	if (mapping) router.getHandle(mapping, { DB: env.DB, KV: env.KV })
@@ -254,6 +254,15 @@ export async function routed(env: Env, ctx: ExecutionContext, bookmark: string |
 	return [mapping?.target ?? "", ...tracker.getBookmarks().map((tagged) => tagged.bookmark)]
 }
 `
+
+/* the D1 and KV bindings every environment of the c3 project holds */
+const C3_DB = { binding: "DB", database_id: "00000000-0000-0000-0000-000000000000", database_name: "core" }
+const C3_SHARD_0 = {
+	binding: "SHARD_DB_0",
+	database_id: "00000000-0000-0000-0000-000000000001",
+	database_name: "shard-0",
+}
+const C3_KV = { binding: "KV", id: "00000000000000000000000000000000" }
 
 /** The files every staged consumer holds: the Worker, the types module, two tsconfigs, wrangler and vite config */
 export const APP: Record<string, string> = {
@@ -373,15 +382,24 @@ export const APP: Record<string, string> = {
 	"wrangler.toml": 'name = "consumer"\nmain = "src/worker.ts"\ncompatibility_date = "2026-10-01"\n',
 	/* a project create-cloudflare scaffolds, apart from the app's own files its src glob would take in */
 	"c3/tsconfig.json": CREATE_CLOUDFLARE_TSCONFIG,
-	/* the bindings `wrangler types` writes c3/worker-configuration.d.ts from, at the stage (K3 of r21) */
+	/*
+	 * the bindings `wrangler types` writes c3/worker-configuration.d.ts from, at the stage (K3 of r21);
+	 * SHARD_DB_1 is bound in staging alone, so wrangler writes it optional (AD1 of the area D review)
+	 */
 	"c3/wrangler.jsonc": JSON.stringify({
 		compatibility_date: "2026-10-01",
-		d1_databases: [
-			{ binding: "DB", database_id: "00000000-0000-0000-0000-000000000000", database_name: "core" },
-			{ binding: "SHARD_DB_0", database_id: "00000000-0000-0000-0000-000000000001", database_name: "shard-0" },
-			{ binding: "SHARD_DB_1", database_id: "00000000-0000-0000-0000-000000000002", database_name: "shard-1" },
-		],
-		kv_namespaces: [{ binding: "KV", id: "00000000000000000000000000000000" }],
+		d1_databases: [C3_DB, C3_SHARD_0],
+		env: {
+			staging: {
+				d1_databases: [
+					C3_DB,
+					C3_SHARD_0,
+					{ binding: "SHARD_DB_1", database_id: "00000000-0000-0000-0000-000000000002", database_name: "shard-1" },
+				],
+				kv_namespaces: [C3_KV],
+			},
+		},
+		kv_namespaces: [C3_KV],
 		main: "src/index.ts",
 		name: "c3",
 	}),
