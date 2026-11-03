@@ -11,6 +11,7 @@ import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { PEERS } from "../../src/migrate/core/peer-needs.ts"
+import { ATLAS_RANGE } from "../../src/migrate/core/process.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
 const REPO = join(ROOT, "../..")
@@ -159,6 +160,19 @@ describe("README peer dependencies table", () => {
 			),
 		),
 	]
+
+	/* AD12 of the area D review: typescript joined peerDependencies with no row, and the rows checked only PEERS's */
+	it("has a row for every peer package.json declares, at its range, and Atlas beside them", () => {
+		const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+			peerDependencies: Record<string, string>
+		}
+		const start = README.indexOf("Peer dependencies:")
+		const table = README.slice(start, README.indexOf("\n\n", README.indexOf("\n|", start)))
+		const rows = [...table.matchAll(/^\| `([^`]+)` +\| `(.+?)` +\|/gm)].map(
+			(match) => [match[1] as string, (match[2] as string).replaceAll("\\|", "|")] as const,
+		)
+		expect(Object.fromEntries(rows)).toEqual({ ...manifest.peerDependencies, atlas: ATLAS_RANGE })
+	})
 
 	it.each(PEERED)("opens %s's Required cell with what PEERS says needs it", (peer) => {
 		expect(ROWS.get(peer)).toMatch(new RegExp(`^${required(peer).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[,:;. ]|$)`))
