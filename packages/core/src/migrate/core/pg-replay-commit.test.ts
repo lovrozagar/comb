@@ -37,6 +37,7 @@ function runOf(server: { counts?: number[]; on?: string; snapshot?: Row[] }): { 
 		seen: new Map([["role kept", { names: ["kept"], row: { rolconnlimit: -1 } }]]),
 		sql,
 		strays: { databases: [], roles: [], slots: [] },
+		superuser: false,
 	}
 	return { run, sent }
 }
@@ -164,24 +165,35 @@ describe("guarded", () => {
 	})
 })
 
-/* P3 of r22: the replay's database is dropped after it, so a change to it outlives nothing */
+/* P3 of r22: the replay's database is dropped after it, so a change to it outlives nothing; P5 and PR6 of r22b: so are the roles it made or adopts */
 describe("ownOf", () => {
-	const own = ownOf({ ...runOf({}).run, created: ["made"], database: "comb_replay_1" })
-	it.each([
-		["database comb_replay_1", ["datacl"], true],
-		["database comb_replay_1", ["datacl", "datistemplate"], false],
-		["database comb_replay_1", ["datdba"], false],
-		["database comb_replay_1", [], false],
-		["database other", ["datacl"], false],
-		["setting comb_replay_1 for every role", [], true],
-		["setting comb_replay_1 for made", [], true],
-		["setting comb_replay_1 for theirs", [], false],
-		["setting other for every role", [], false],
-		["comment on database comb_replay_1", [], true],
-		["comment on database other", [], false],
-		["security label on database comb_replay_1 by selinux", [], true],
-		["security label on database other by selinux", [], false],
-	])("rates a change to %s of %j as the replay's own: %s", (subject, fields, mine) => {
-		expect(own(subject, fields)).toBe(mine)
+	const own = ownOf({ ...runOf({}).run, database: "comb_replay_1" }, new Set(["made"]))
+	const D = "comb_replay_1"
+	it.each<[string, { fields: string[]; names: Array<string | null> }, boolean]>([
+		[`database ${D}`, { fields: ["datacl"], names: [D] }, true],
+		[`database ${D}`, { fields: ["datacl", "datistemplate"], names: [D] }, false],
+		[`database ${D}`, { fields: ["datdba"], names: [D] }, false],
+		[`database ${D}`, { fields: [], names: [D] }, false],
+		["database other", { fields: ["datacl"], names: ["other"] }, false],
+		[`setting ${D} for every role`, { fields: [], names: [D, null] }, true],
+		[`setting ${D} for made`, { fields: [], names: [D, "made"] }, true],
+		["setting every database for made", { fields: [], names: [null, "made"] }, true],
+		[`setting ${D} for theirs`, { fields: [], names: [D, "theirs"] }, false],
+		["setting other for every role", { fields: [], names: ["other", null] }, false],
+		[`comment on database ${D}`, { fields: [], names: [D] }, true],
+		["comment on database other", { fields: [], names: ["other"] }, false],
+		[`security label on database ${D} by selinux`, { fields: [], names: [D] }, true],
+		["security label on database other by selinux", { fields: [], names: ["other"] }, false],
+		["role made", { fields: ["rolcanlogin"], names: ["made"] }, true],
+		["role theirs", { fields: ["rolcanlogin"], names: ["theirs"] }, false],
+		["membership made in theirs", { fields: [], names: ["made", "theirs"] }, true],
+		["membership theirs in made", { fields: [], names: ["theirs", "made"] }, true],
+		["membership theirs in other", { fields: [], names: ["theirs", "other"] }, false],
+		["comment on role made", { fields: [], names: ["made"] }, true],
+		["comment on role theirs", { fields: [], names: ["theirs"] }, false],
+		["security label on role made by selinux", { fields: [], names: ["made"] }, true],
+		["tablespace made", { fields: [], names: ["made"] }, false],
+	])("rates a change to %s of %j as the replay's own: %s", (subject, { fields, names }, mine) => {
+		expect(own({ fields, kind: "changed", names, said: subject, subject })).toBe(mine)
 	})
 })

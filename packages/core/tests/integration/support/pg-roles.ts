@@ -54,12 +54,17 @@ export const heldRole = (role: string): Promise<Array<Record<string, unknown>>> 
 export type HiddenWrite = { change: string; label: string; sql: string }
 
 /**
- * The shapes, each changing `pre` (a role that exists) or making `made`, from inside a DO block, a
- * function, EXECUTE or CALL; `pre` is reachable by the devUrl role that replays them
+ * The shapes, each changing `pre` (a role that exists), from inside a DO block, a function, EXECUTE
+ * or CALL, some beside making `made`, which the replay adopts; `pre` is reachable by the devUrl role
+ * that replays them, a `superuser` or not, and only a superuser reads a password change as a row
  */
-export function hiddenWrites(pre: string, made: string): HiddenWrite[] {
+export function hiddenWrites(pre: string, made: string, superuser: boolean): HiddenWrite[] {
 	return [
-		{ change: `role ${made} added`, label: "a DO-made role", sql: `DO $$ BEGIN CREATE ROLE ${made}; END $$;\n` },
+		{
+			change: `role ${pre} changed (rolconnlimit)`,
+			label: "a DO-made role beside an existing role's CONNECTION LIMIT",
+			sql: `DO $$ BEGIN CREATE ROLE ${made}; ALTER ROLE ${pre} CONNECTION LIMIT 7; END $$;\n`,
+		},
 		{
 			change: `role ${pre} changed (rolconnlimit)`,
 			label: "an existing role's CONNECTION LIMIT inside DO",
@@ -71,9 +76,9 @@ export function hiddenWrites(pre: string, made: string): HiddenWrite[] {
 			sql: `CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN ALTER ROLE ${pre} CONNECTION LIMIT 9; END $$;\nSELECT f();\n`,
 		},
 		{
-			change: `role ${made} added`,
-			label: "EXECUTE of built text",
-			sql: `DO $$ BEGIN EXECUTE format('CREATE ROLE %I', '${made}'); END $$;\n`,
+			change: `comment on role ${pre} added`,
+			label: "EXECUTE of built text making a role beside a comment on an existing one",
+			sql: `DO $$ BEGIN EXECUTE format('CREATE ROLE %I', '${made}'); EXECUTE format('COMMENT ON ROLE %I IS %L', '${pre}', 'x'); END $$;\n`,
 		},
 		{
 			change: `comment on role ${pre} added`,
@@ -81,7 +86,9 @@ export function hiddenWrites(pre: string, made: string): HiddenWrite[] {
 			sql: `CREATE PROCEDURE p() LANGUAGE plpgsql AS $$ BEGIN COMMENT ON ROLE ${pre} IS 'x'; END $$;\nCALL p();\n`,
 		},
 		{
-			change: "pg_authid, in a column pg_roles does not show, such as a password",
+			change: superuser
+				? `role ${pre} changed (rolpassword)`
+				: "pg_authid, in a column pg_roles does not show, such as a password",
 			label: "a password inside DO",
 			sql: `DO $$ BEGIN ALTER ROLE ${pre} PASSWORD 'other'; END $$;\n`,
 		},

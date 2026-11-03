@@ -16,6 +16,7 @@ import {
 import { loadPostgres } from "../../../src/migrate/core/pg-live-objects.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { prepareSnapshot, snapshot, snapshotChanges } from "../../../src/migrate/core/pg-server-snapshot.ts"
+import { superuserOf } from "../../../src/migrate/core/pg-replay-roles.ts"
 import { namesIn } from "../../../src/migrate/core/sql-code.ts"
 import { pgRead } from "../../../src/migrate/core/pg-split.ts"
 import { postgresOptionsOf } from "../../../src/migrate/core/pg-url.ts"
@@ -82,7 +83,7 @@ describe("the statements a txmode none replay runs bare (P1 of r21)", () => {
 			const admin = connect({ ...postgresOptionsOf(url, "devUrl"), max: 1, onnotice: () => undefined })
 			try {
 				await sql.unsafe(SETUP, [])
-				await prepareSnapshot(admin, new URL(url).pathname.slice(1))
+				await prepareSnapshot(admin, { database: new URL(url).pathname.slice(1), superuser: await superuserOf(admin) })
 				for (const statement of BARE) {
 					const before = await snapshot(admin)
 					await sql.unsafe(statement, [])

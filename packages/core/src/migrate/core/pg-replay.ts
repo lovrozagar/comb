@@ -1,39 +1,42 @@
 /**
  * The history replayed on devUrl's server, comb's objects and all, then read with the target's own
- * catalog query (P5 of r19): Postgres, not a model of it, decides what a cascade, a rename or a move
- * leaves, and the two sides compare as one read of two databases.
+ * catalog query (P5 of r19): Postgres, not a model of it, decides what a cascade, a rename or a
+ * move leaves, and the two sides compare as one read of two databases.
  *
- * The replay runs as Atlas applies (P1 ⊃ P2 of r20): each file in a transaction of its own, a
- * `-- atlas:txmode none` file statement by statement, each in a transaction of its own first and bare,
- * as Atlas sends it, where Postgres runs it only so (P1 of r22 and its amendment), in a database made for it and
- * dropped after (pg-replay-database.ts). One transaction for the whole history filled Postgres's
- * lock table and left a seed's deferred trigger events pending, and devUrl's own database lent the
- * history what it held. Committed, a statement whose scope is the server or another database would
- * outlive the replay on devUrl's server, the target's own when they share one, so the replay runs
- * none (pg-outside-transaction.ts) and says which it left out; a CREATE ROLE runs bare, as a policy
- * needs its role, and comb drops each role it made (pg-replay-roles.ts).
+ * The replay runs as Atlas applies (P1 ⊃ P2 of r20): each file in a transaction of its own, a `--
+ * atlas:txmode none` file statement by statement, each in a transaction of its own first and bare,
+ * as Atlas sends it, where Postgres runs it only so (P1 of r22 and its amendment), in a database
+ * made for it and dropped after (pg-replay-database.ts). One transaction for the whole history
+ * filled Postgres's lock table and left a seed's deferred trigger events pending, and devUrl's own
+ * database lent the history what it held. Committed, a statement whose scope is the server or
+ * another database would outlive the replay on devUrl's server, the target's own when they share
+ * one, so the replay runs none (pg-outside-transaction.ts) and says which it left out; a CREATE
+ * ROLE runs bare, as a policy needs its role, and comb drops each role it made
+ * (pg-replay-roles.ts).
  *
  * A DO block, a function, EXECUTE and CALL hide such a change from the parse tree, so Postgres
- * decides, twice (pg-server-writes.ts). A file in a transaction has its writes to the shared catalogs
- * counted before its COMMIT (P1 of r21), and one that wrote past its database, comb's own CREATE
- * ROLE aside, is refused and rolled back, naming the file and the change; the counts are this
- * backend's own, so another session's work never trips them, and with `track_counts` off they read
- * zero, so the replay refuses a server that keeps none. And around every file and every statement a
- * `txmode none` file sends bare, the server's shared catalogs are read as committed, a replay's own
- * rows left out (P1 and P2 of r22): that sees a bare statement's change, which no transaction counts,
- * and one a second connection commits, as dblink's does, which this backend's counts never see. Bare
- * runs only a statement a block refuses (an outside-only class, a DO block or CALL that commits), one
- * only a block runs (a LOCK, a SAVEPOINT, a cursor not held) and the file's own block, and a change
- * one makes past its database has committed when the read sees it: the refusal names what devUrl's
- * server keeps. The read is the server's, another session's work in it too, so a change there is the file's only when
- * the role, database or other object it is to is one the file names: a name it spells, unquoted and
- * folded as Postgres folds it, quoted and exact, or inside a string a DO body, dblink_exec or format()
- * may run (namesIn in sql-code.ts). That change is refused, naming it, and a role it added is dropped
- * with the cleanup, as is a database it added that no session is in; a change to any other object
- * is another session's and passes. A name the file builds at run time, by concatenation, from a
- * query, or in a function another file defines, is none it spells, so comb neither refuses nor drops
- * that change. A role's password reads from pg_authid alone, so a password a bare statement changes
- * is seen by a superuser's devUrl only.
+ * decides, twice (pg-server-writes.ts). A file in a transaction has its writes to the shared
+ * catalogs counted before its COMMIT (P1 of r21), and one that wrote past its database is refused
+ * and rolled back, naming the file and the change, but for what the replay drops after it
+ * (pg-replay-commit.ts): comb's own CREATE ROLE, a role such a statement adds, which the replay
+ * adopts, a change to a role it made, and its own database. The counts are this backend's own, so
+ * another session's work never trips them, and with `track_counts` off they read zero, so the
+ * replay refuses a server that keeps none. And around every file and every statement a `txmode
+ * none` file sends bare, the server's shared catalogs are read as committed, a replay's own rows
+ * left out (P1 and P2 of r22): that sees a bare statement's change, which no transaction counts,
+ * and one a second connection commits, as dblink's does, which this backend's counts never see.
+ * Bare runs only a statement a block refuses (an outside-only class, a DO block or CALL that
+ * commits), one only a block runs (a LOCK, a SAVEPOINT, a cursor not held) and the file's own
+ * block, and a change one makes past its database has committed when the read sees it: the refusal
+ * names what devUrl's server keeps. The read is the server's, another session's work in it too, so
+ * a change there is the file's only when the role, database or other object it is to is one the
+ * file names: a name it spells, unquoted and folded as Postgres folds it, quoted and exact, or
+ * inside a string a DO body, dblink_exec or format() may run (namesIn in sql-code.ts). That change
+ * is refused, naming it, and a role it added is dropped with the cleanup, as is a database it added
+ * that no session is in; a change to any other object is another session's and passes. A name the
+ * file builds at run time, by concatenation, from a query, or in a function another file defines,
+ * is none it spells, so comb neither refuses nor drops that change. A role's password reads from
+ * pg_authid alone, so a password a bare statement changes is seen by a superuser's devUrl only.
  *
  * A SIGINT or a SIGTERM, a Ctrl-C or a cancelled CI job, skips a `finally`, so either runs the
  * replay's cleanup first, once, and then ends the process as the signal would (P2 of r21); a run
@@ -42,6 +45,7 @@
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { type PgTarget, refuseUrlProblems } from "./atlas-target.ts"
 import { outsideTransaction } from "./classify-file.ts"
+import { onceCleanup, onSignals } from "./cleanup.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import { asTarget } from "./pg-live-catalog.ts"
 import { type Connect, failureOf, loadPostgres, readCatalog } from "./pg-live-objects.ts"
@@ -58,7 +62,7 @@ import {
 	type Sql,
 	sweep,
 } from "./pg-replay-database.ts"
-import { grantsMade, ownGrant, ownRole, type Run } from "./pg-replay-roles.ts"
+import { grantsMade, ownGrant, ownRole, type Run, superuserOf } from "./pg-replay-roles.ts"
 import { begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import { prepareSnapshot, snapshot } from "./pg-server-snapshot.ts"
 import { refuseUncounted } from "./pg-server-writes.ts"
@@ -80,6 +84,8 @@ type Replay = {
 	leftOut(file: string, sent: string, what: string): void
 	/** a CREATE ROLE `sent` from `file` the replay ran without some of what it says */
 	madeBare?: ((file: string, sent: string) => void) | undefined
+	/** a role `file` added inside a statement the replay cannot leave out, adopted as one it made */
+	adopted?: ((file: string, role: string) => void) | undefined
 	/** what a refusal stops */
 	stops: string
 }
@@ -108,7 +114,12 @@ async function runStatement(
  */
 async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Replay & { refused: Refuse }) {
 	const inFile = !outsideTransaction(text)
-	const file = { name, names: namesIn(text), stops: replay.stops }
+	const file = {
+		adopted: (role: string) => replay.adopted?.(name, role),
+		name,
+		names: namesIn(text),
+		stops: replay.stops,
+	}
 	let block = false
 	if (inFile) await begin(run)
 	for (const { sent, tree } of pgRead(text).statements) {
@@ -174,43 +185,6 @@ async function cleanUp(run: Run): Promise<void> {
 	for (const role of run.strays.roles) await settle(() => dropRole(run.admin, role))
 }
 
-/* the cleanup of a replay that has made nothing yet */
-const NOTHING = async (): Promise<void> => undefined
-
-/**
- * A cleanup whose step runs at most once, set once there is something to clean: a signal before
- * that cleans nothing, and the step set after it still runs
- */
-function onceCleanup(): { run: () => Promise<void>; set: (step: () => Promise<void>) => void } {
-	let step = NOTHING
-	let ran: Promise<void> | undefined
-	return {
-		run: () => (ran ??= step()),
-		set: (next) => {
-			step = next
-			ran = undefined
-		},
-	}
-}
-
-/**
- * `body`, while SIGINT and SIGTERM run `cleanup` and then end the process as the signal would: by
- * the signal again, unless the host listens for it too and so ends it its own way
- */
-async function onSignals<T>(cleanup: () => Promise<void>, body: () => Promise<T>): Promise<T> {
-	const stop = (signal: NodeJS.Signals) => {
-		void cleanup().finally(() => {
-			if (process.listenerCount(signal) === 0) process.kill(process.pid, signal)
-		})
-	}
-	process.once("SIGINT", stop).once("SIGTERM", stop)
-	try {
-		return await body()
-	} finally {
-		process.off("SIGINT", stop).off("SIGTERM", stop)
-	}
-}
-
 /** A refusal: what failed, with devUrl's error, and what that stops */
 type Refuse = (what: string, error: unknown) => ReplayFailed
 
@@ -255,11 +229,12 @@ async function onDev<T>(
 				seen: new Map(),
 				sql: connect({ ...options, database }),
 				strays: { databases: [], roles: [], slots: [] },
+				superuser: await superuserOf(admin),
 			}
 			cleanup.set(() => cleanUp(run))
 			try {
 				await prepare(run, target.schema, { files, refused, stops: replay.stops })
-				await prepareSnapshot(admin, database)
+				await prepareSnapshot(admin, run)
 				run.seen = await snapshot(admin)
 				for (const file of files)
 					await replayFile(run, file, { ...replay, leftOut: replay.leftOut ?? (() => undefined), refused })

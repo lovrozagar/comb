@@ -205,6 +205,8 @@ type Replay = {
     leftOut(file: string, sent: string, what: string): void;
     /** a CREATE ROLE `sent` from `file` the replay ran without some of what it says */
     madeBare?: ((file: string, sent: string) => void) | undefined;
+    /** a role `file` added inside a statement the replay cannot leave out, adopted as one it made */
+    adopted?: ((file: string, role: string) => void) | undefined;
     /** what a refusal stops */
     stops: string;
 };

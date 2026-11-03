@@ -6,7 +6,8 @@
  * pg_shdepend is left out, which a GRANT on a table or an owner moves. The catalogs devUrl's role can
  * read then name the change: the open transaction sees it, a second connection sees the server as it
  * was. A role cannot read pg_authid unless it is a superuser, so a role is read from pg_roles, and a
- * write it does not show, such as a password, is named as one. Probed on Postgres 17 as a superuser
+ * write it does not show, such as a password, is named as one; a superuser reads pg_authid, a
+ * password as its hash, so a password's change is named by its role (PR6 of r22b). Probed on Postgres 17 as a superuser
  * and as a CREATEDB CREATEROLE role (.tmp/grunt/r21-premise/p1-xact-stats.log, p1-snapshot.log).
  */
 import type { Sql } from "./pg-replay-database.ts"
@@ -52,7 +53,7 @@ const SUBJECT = `CASE classoid WHEN 'pg_authid'::regclass THEN 'role ' || ${ROLE
 const OBJECT_NAME = `CASE classoid WHEN 'pg_authid'::regclass THEN ${ROLE_NAME} WHEN 'pg_database'::regclass THEN (SELECT datname FROM pg_database WHERE oid = objoid) WHEN 'pg_tablespace'::regclass THEN (SELECT spcname FROM pg_tablespace WHERE oid = objoid) END`
 
 // lookup-table: how each shared catalog's rows read to a role that is not a superuser, each by a key the change names, what a row is, and the names it is about as stored
-const CATALOGS: Readonly<Record<string, { names: string; noun: string; query: string }>> = {
+const CATALOGS: Readonly<Record<string, Catalog>> = {
 	pg_auth_members: {
 		names:
 			"ARRAY[(SELECT rolname FROM pg_roles WHERE oid = m.roleid), (SELECT rolname FROM pg_roles WHERE oid = m.member)]",
@@ -110,10 +111,33 @@ const CATALOGS: Readonly<Record<string, { names: string; noun: string; query: st
 	},
 }
 
+/** How a catalog's rows read: the names each is about, what a row is, and its query */
+type Catalog = { names: string; noun: string; query: string }
+
+/* a role's row as a superuser reads it: pg_authid, its password as a hash, so no row holds one */
+const AUTHID: Catalog = {
+	names: "ARRAY[r.rolname]",
+	noun: "role",
+	query:
+		"SELECT rolname AS key, to_jsonb(r) - 'oid' - 'rolpassword' || jsonb_build_object('rolpassword', encode(sha256(convert_to(coalesce(r.rolpassword, ''), 'UTF8')), 'hex')) AS row FROM pg_authid r",
+}
+
+/** The shared catalogs as devUrl's role reads them: pg_authid itself when it is a `superuser` */
+const catalogsOf = (superuser: boolean): Readonly<Record<string, Catalog>> =>
+	superuser ? { ...CATALOGS, pg_authid: AUTHID } : CATALOGS
+
+/** A row of a catalog: the names it is about, as stored, each where its catalog puts it, and the row */
+type Row = { names: ReadonlyArray<string | null>; row: Record<string, unknown> }
+
 /** A catalog's rows as `sql` reads them, by key */
-async function rowsOf(sql: Sql, query: string): Promise<Map<string, Record<string, unknown>>> {
-	const rows = await sql.unsafe(query, [])
-	return new Map(rows.map((row) => [String(row["key"]), row["row"] as Record<string, unknown>]))
+async function rowsOf(sql: Sql, { names, query }: Catalog): Promise<Map<string, Row>> {
+	const rows = await sql.unsafe(query.replace(" AS row FROM ", ` AS row, ${names}::text[] AS names FROM `), [])
+	return new Map(
+		rows.map((row) => [
+			String(row["key"]),
+			{ names: row["names"] as Array<string | null>, row: row["row"] as Record<string, unknown> },
+		]),
+	)
 }
 
 /** The fields of a row that differ, in order */
@@ -131,66 +155,90 @@ const unseen = (catalog: string): string =>
 /** Rows by subject, each as JSON: what comb's own CREATE ROLE left them */
 type Rows = Map<string, string>
 
-/** Whether a change to `subject`, of `fields` when the row changed, is the replay's own, none when added or removed */
-type Own = (subject: string, fields: readonly string[]) => boolean
+/** One row's change: its kind, its subject, the names it is about, the fields that changed, none when added or removed, and how it reads */
+type Change = {
+	fields: string[]
+	kind: "added" | "changed" | "removed"
+	names: ReadonlyArray<string | null>
+	said: string
+	subject: string
+}
 
-/** The rows of the catalogs `written` that `mine` names, as the open transaction on `sql` reads them */
-async function subjectRows(sql: Sql, written: Writes, mine: (subject: string) => boolean): Promise<Rows> {
+/** Whether a change is the replay's own */
+type Own = (change: Change) => boolean
+
+/** The rows of the catalogs `written` that `mine` names, as the open transaction on `sql` reads them through `catalogs` */
+async function subjectRows(
+	{ catalogs, sql }: { catalogs: Readonly<Record<string, Catalog>>; sql: Sql },
+	written: Writes,
+	mine: (subject: string) => boolean,
+): Promise<Rows> {
 	const out: Rows = new Map()
 	for (const catalog of written.keys()) {
-		const read = CATALOGS[catalog]
+		const read = catalogs[catalog]
 		if (read === undefined) continue
-		for (const [key, row] of await rowsOf(sql, read.query))
+		for (const [key, { row }] of await rowsOf(sql, read))
 			if (mine(`${read.noun} ${key}`)) out.set(`${read.noun} ${key}`, JSON.stringify(row))
 	}
 	return out
 }
 
-/** What one row's change is, `subject` from `from` to `to`, with the fields that changed; undefined when none did */
-function changeOf(
-	subject: string,
-	from: Record<string, unknown> | undefined,
-	to: Record<string, unknown> | undefined,
-): { fields: string[]; said: string } | undefined {
-	if (from === undefined) return { fields: [], said: `${subject} added` }
-	if (to === undefined) return { fields: [], said: `${subject} removed` }
-	const fields = changedFields(from, to)
-	return fields.length === 0 ? undefined : { fields, said: `${subject} changed (${fields.join(", ")})` }
+/** What one row's change is, `subject` from `from` to `to`; undefined when nothing changed */
+function changeOf(subject: string, from: Row | undefined, to: Row | undefined): Change | undefined {
+	const names = (to ?? from)?.names ?? []
+	if (from === undefined) return { fields: [], kind: "added", names, said: `${subject} added`, subject }
+	if (to === undefined) return { fields: [], kind: "removed", names, said: `${subject} removed`, subject }
+	const fields = changedFields(from.row, to.row)
+	return fields.length === 0
+		? undefined
+		: { fields, kind: "changed", names, said: `${subject} changed (${fields.join(", ")})`, subject }
 }
 
 /**
- * What the `counted` writes changed, as the open transaction on `sql` sees the server against the
- * committed server `was` reads, one change per row; a row still as comb's own CREATE ROLE left it
- * (`ours`) is comb's, and a change `own` rates the replay's, which the changes leave out
+ * What the `counted` writes changed, by catalog in order, as the open transaction on `sql` sees the
+ * server against the committed server `was` reads, through `catalogs`, one change per row; a row
+ * still as comb's own CREATE ROLE left it (`ours`) is comb's, and no change
  */
-async function namedChanges(
-	{ own, sql, was }: { own: Own; sql: Sql; was: Sql },
+async function rowChanges(
+	{ catalogs, sql, was }: { catalogs: Readonly<Record<string, Catalog>>; sql: Sql; was: Sql },
 	counted: Writes,
 	ours: Rows,
-): Promise<string[]> {
-	const changes: string[] = []
+): Promise<Map<string, Change[]>> {
+	const out = new Map<string, Change[]>()
 	for (const catalog of [...counted.keys()].sort()) {
-		const read = CATALOGS[catalog]
+		const read = catalogs[catalog]
+		/* a catalog it has no read for has no row to name */
 		if (read === undefined) {
-			changes.push(unseen(catalog))
+			out.set(catalog, [])
 			continue
 		}
-		const [before, after] = [await rowsOf(was, read.query), await rowsOf(sql, read.query)]
-		const named: string[] = []
-		let mine = false
+		const [before, after] = [await rowsOf(was, read), await rowsOf(sql, read)]
+		const changes: Change[] = []
 		for (const key of [...new Set([...before.keys(), ...after.keys()])].sort()) {
 			const [from, to] = [before.get(key), after.get(key)]
 			const subject = `${read.noun} ${key}`
-			const change =
-				to !== undefined && ours.get(subject) === JSON.stringify(to) ? undefined : changeOf(subject, from, to)
-			if (change === undefined) continue
-			if (own(subject, change.fields)) mine = true
-			else named.push(change.said)
+			if (to !== undefined && ours.get(subject) === JSON.stringify(to.row)) continue
+			const change = changeOf(subject, from, to)
+			if (change !== undefined) changes.push(change)
 		}
-		/* a catalog whose every change is the replay's own counted no other */
-		if (named.length > 0 || !mine) changes.push(...(named.length > 0 ? named : [unseen(catalog)]))
+		out.set(catalog, changes)
 	}
-	return changes
+	return out
+}
+
+/**
+ * The changes of `byCatalog` the replay must refuse: each that is not its `own`, and a counted
+ * catalog with no row to name, a write devUrl's role cannot see; a catalog whose every change is
+ * the replay's own counted no other
+ */
+function refusedChanges(byCatalog: ReadonlyMap<string, Change[]>, own: Own): string[] {
+	const out: string[] = []
+	for (const [catalog, changes] of byCatalog) {
+		const named = changes.filter((change) => !own(change)).map((change) => change.said)
+		if (named.length > 0) out.push(...named)
+		else if (changes.length === 0) out.push(unseen(catalog))
+	}
+	return out
 }
 
 /** Refuses a devUrl whose server keeps no counts for its role: the replay would read every file's writes as none */
@@ -204,11 +252,15 @@ async function refuseUncounted(sql: Sql, stops: string): Promise<void> {
 export {
 	addWrites,
 	CATALOGS,
+	type Catalog,
+	catalogsOf,
+	type Change,
 	changedFields,
 	counts,
-	namedChanges,
+	refusedChanges,
 	refuseUncounted,
 	type Own,
+	rowChanges,
 	type Rows,
 	subjectRows,
 	type Writes,

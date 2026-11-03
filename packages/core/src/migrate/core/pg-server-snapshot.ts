@@ -9,7 +9,7 @@
  * holds.
  */
 import type { Sql } from "./pg-replay-database.ts"
-import { CATALOGS, changedFields } from "./pg-server-writes.ts"
+import { type Catalog, catalogsOf, changedFields } from "./pg-server-writes.ts"
 
 /* the roles a replay made, by the tag their comment carries */
 const TAGGED =
@@ -17,27 +17,21 @@ const TAGGED =
 const REPLAY_SETTING = "(SELECT datname FROM pg_database WHERE oid = setdatabase) LIKE 'comb\\_replay\\_%'"
 const REPLAY_OBJECT = "(SELECT datname FROM pg_database WHERE oid = objoid) LIKE 'comb\\_replay\\_%'"
 
-// lookup-table: each catalog's rows a replay makes, by the columns its query reads: they are no file's change
-const REPLAYS: Readonly<Record<string, { from: string; mine: string }>> = {
-	pg_auth_members: { from: "pg_auth_members m", mine: `m.roleid IN ${TAGGED} OR m.member IN ${TAGGED}` },
-	pg_authid: { from: "pg_roles r", mine: `r.oid IN ${TAGGED}` },
-	pg_database: { from: "pg_database d", mine: "d.datname LIKE 'comb\\_replay\\_%'" },
-	pg_db_role_setting: {
-		from: "pg_db_role_setting",
-		mine: `${REPLAY_SETTING} AND (setrole = 0 OR setrole IN ${TAGGED})`,
-	},
-	pg_shdescription: {
-		from: "pg_shdescription",
-		mine: `(classoid = 'pg_authid'::regclass AND objoid IN ${TAGGED}) OR (classoid = 'pg_database'::regclass AND ${REPLAY_OBJECT})`,
-	},
-	pg_shseclabel: {
-		from: "pg_shseclabel",
-		mine: `(classoid = 'pg_authid'::regclass AND objoid IN ${TAGGED}) OR (classoid = 'pg_database'::regclass AND ${REPLAY_OBJECT})`,
-	},
+/* a shared comment's or security label's row a replay makes: on a role it tagged, or on its database */
+const REPLAY_SHARED = `(classoid = 'pg_authid'::regclass AND objoid IN ${TAGGED}) OR (classoid = 'pg_database'::regclass AND ${REPLAY_OBJECT})`
+
+// lookup-table: each catalog's rows a replay makes, by the columns its query reads, which ends at its FROM: they are no file's change
+const REPLAYS: Readonly<Record<string, string>> = {
+	pg_auth_members: `m.roleid IN ${TAGGED} OR m.member IN ${TAGGED}`,
+	pg_authid: `r.oid IN ${TAGGED}`,
+	pg_database: "d.datname LIKE 'comb\\_replay\\_%'",
+	pg_db_role_setting: `${REPLAY_SETTING} AND (setrole = 0 OR setrole IN ${TAGGED})`,
+	pg_shdescription: REPLAY_SHARED,
+	pg_shseclabel: REPLAY_SHARED,
 }
 
 // lookup-table: what the server holds beside its catalogs, read as the catalogs are: a slot's fields that do not move as it is used
-const BESIDE: Readonly<Record<string, { names: string; noun: string; query: string }>> = {
+const BESIDE: Readonly<Record<string, Catalog>> = {
 	pg_replication_slots: {
 		names: "ARRAY[s.slot_name::text]",
 		noun: "replication slot",
@@ -55,23 +49,22 @@ const ownDatabase = (database: string): string =>
 	`SELECT 'database' AS noun, d.datname::text AS key, jsonb_build_object('datdba', d.datdba, 'datistemplate', d.datistemplate) AS row, ARRAY[d.datname::text] AS names FROM pg_database d WHERE d.datname = ${literalOf(database)}`
 
 /**
- * Every shared catalog's committed rows in one read, a replay's own left out: each catalog's query
- * with the rows a replay makes filtered where it reads them, and the names each row is about
+ * Every shared catalog's committed rows in one read, as devUrl's role reads them (a `superuser`
+ * reads pg_authid), a replay's own left out: each catalog's query with the rows a replay makes
+ * filtered, and the names each row is about
  */
-function snapshotRead(): string {
-	return Object.entries({ ...CATALOGS, ...BESIDE })
+function snapshotRead(superuser: boolean): string {
+	return Object.entries({ ...catalogsOf(superuser), ...BESIDE })
 		.map(([catalog, { names, noun, query }]) => {
 			const replays = REPLAYS[catalog]
-			const read = (
-				replays === undefined
-					? query
-					: query.replace(` FROM ${replays.from}`, ` FROM ${replays.from} WHERE NOT (${replays.mine})`)
-			).replace(" AS row FROM ", ` AS row, array_remove(${names}, NULL)::text[] AS names FROM `)
+			const read = (replays === undefined ? query : `${query} WHERE NOT (${replays})`).replace(
+				" AS row FROM ",
+				` AS row, array_remove(${names}, NULL)::text[] AS names FROM `,
+			)
 			return `SELECT ${literalOf(noun)} AS noun, q.key::text AS key, q.row, q.names FROM (${read}) q`
 		})
 		.join(" UNION ALL ")
 }
-const SNAPSHOT = /* @__PURE__ */ snapshotRead()
 
 /** `text` as a SQL string literal */
 function literalOf(text: string): string {
@@ -85,11 +78,15 @@ function literalOf(text: string): string {
 type Snapshot = Map<string, { names: readonly string[]; row: Record<string, unknown> }>
 
 /**
- * The read prepared on `admin` for snapshot, with the replay's own `database`'s row: planning it is
- * half its time, and a replay reads it around every file and bare statement
+ * The read prepared on `admin` for snapshot, as its role reads it, with the replay's own
+ * `database`'s row: planning it is half its time, and a replay reads it around every file and bare
+ * statement
  */
-async function prepareSnapshot(admin: Sql, database: string): Promise<void> {
-	await admin.unsafe(`PREPARE comb_snapshot AS ${SNAPSHOT} UNION ALL ${ownDatabase(database)}`, [])
+async function prepareSnapshot(
+	admin: Sql,
+	{ database, superuser }: { database: string; superuser: boolean },
+): Promise<void> {
+	await admin.unsafe(`PREPARE comb_snapshot AS ${snapshotRead(superuser)} UNION ALL ${ownDatabase(database)}`, [])
 }
 
 /** The shared catalogs as `admin`, a connection with no transaction open that prepareSnapshot prepared, reads them committed */

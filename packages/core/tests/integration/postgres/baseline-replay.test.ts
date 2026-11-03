@@ -225,14 +225,15 @@ describe("a Postgres baseline of a history that changes the server from inside a
 	const { made, mgrUrl, pre } = shapeRoles(pgUrl)
 
 	describe.each([
-		["a superuser", (url: string) => url],
+		["a superuser", (url: string) => url, true],
 		/* the role's URL, on the test's dev database */
 		[
 			"a CREATEDB CREATEROLE role that is not one",
 			(url: string) => Object.assign(new URL(mgrUrl()), { pathname: new URL(url).pathname }).toString(),
+			false,
 		],
-	])("on %s's devUrl", (_who, as) => {
-		it.each(hiddenWrites(pre, made))(
+	])("on %s's devUrl", (_who, as, superuser) => {
+		it.each(hiddenWrites(pre, made, superuser))(
 			"refuses $label naming the file and the change, every role and the target as they were",
 			async ({ change, sql }) => {
 				const held = await heldRole(pre)

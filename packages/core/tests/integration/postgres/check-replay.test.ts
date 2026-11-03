@@ -212,10 +212,10 @@ describe("check of a file that changes the server from inside a statement the re
 	const roles = async () => [await heldRole(pre), await roleOf(made), await roleOf(beside)]
 
 	describe.each([
-		["a superuser", devUrl],
-		["a CREATEDB CREATEROLE role that is not one", mgrUrl],
-	])("on %s's devUrl", (_who, url) => {
-		it.each(hiddenWrites(pre, made))(
+		["a superuser", devUrl, true],
+		["a CREATEDB CREATEROLE role that is not one", mgrUrl, false],
+	])("on %s's devUrl", (_who, url, superuser) => {
+		it.each(hiddenWrites(pre, made, superuser))(
 			"refuses $label naming the file and the change, every role as it was",
 			async ({ change, sql }) => {
 				const held = await roles()
@@ -228,12 +228,12 @@ describe("check of a file that changes the server from inside a statement the re
 			60_000,
 		)
 
-		it("passes a CREATE ROLE comb tags, and refuses a role a DO makes beside it, naming that one", async () => {
+		/* P5 of r22: a role a DO makes is the replay's to adopt, as its own CREATE ROLE is */
+		it("passes a CREATE ROLE comb tags and a role a DO makes beside it, adopting that one, and leaves neither", async () => {
 			const tagged = `-- comb:allow-unsafe: the test's role\nCREATE ROLE ${made};\nCREATE TABLE r (id int PRIMARY KEY);\nALTER TABLE r ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON r TO ${made} USING (true);\n`
 			expect((await checked(T, tagged, url())).refused).toBeUndefined()
 			const { refused } = await checked(T, `${tagged}DO $$ BEGIN CREATE ROLE ${beside}; END $$;\n`, url())
-			expect(refused).toContain(`role ${beside} added`)
-			expect(refused).not.toContain(`role ${made} added`)
+			expect(refused).toBeUndefined()
 			expect([await roleOf(made), await roleOf(beside)]).toEqual([[], []])
 		}, 60_000)
 

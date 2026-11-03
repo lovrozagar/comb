@@ -40,6 +40,7 @@ const AROUND = {
 		expect.stringMatching(/^SELECT r\.rolname/),
 		expect.stringMatching(/^SELECT pid, .* WHERE pid = pg_backend_pid\(\)$/),
 		"CREATE DATABASE <db> TEMPLATE template0",
+		"SELECT rolsuper FROM pg_roles WHERE rolname = current_user",
 		COUNTED,
 		expect.stringMatching(/^SELECT e\.extname/),
 		'SET search_path TO "public"',

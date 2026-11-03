@@ -68,16 +68,23 @@ describe("a txmode none file replays bare, as Atlas sends it (P1; sibling: r21 P
 /* the amendment to P1 of r22: bare, a change past the database commits before any read sees it, so each
    statement runs in a transaction of its own first, and its counts refuse that change uncommitted */
 describe("a txmode none file's statement runs in a transaction of its own first (P1 amendment; sibling: a DO's ALTER ROLE)", () => {
-	it("refuses a DO that makes a role, naming it, and leaves no role behind", async () => {
-		const made = unique("comb_t_bare")
+	/* P5 of r22: a role the statement adds is the replay's to adopt, a change to one the server held is not */
+	it("adopts a role a DO makes and leaves none, and refuses a DO that changes a role the server held, naming it", async () => {
+		const [made, held] = [unique("comb_t_bare"), unique("comb_t_held")]
 		try {
-			const { refused: check } = await checked(T, `${NONE}DO $$ BEGIN CREATE ROLE ${made}; END $$;\n`)
-			expect({ check, role: await roleOf(made) }).toEqual({
-				check: expect.stringContaining(`role ${made} added`),
+			await query(pgUrl(), `CREATE ROLE ${held} NOLOGIN`)
+			const { refused: adopted } = await checked(T, `${NONE}DO $$ BEGIN CREATE ROLE ${made}; END $$;\n`)
+			const { refused } = await checked(T, `${NONE}DO $$ BEGIN ALTER ROLE ${held} CONNECTION LIMIT 4; END $$;\n`)
+			expect({ adopted, refused, role: await roleOf(made) }).toEqual({
+				adopted: undefined,
+				refused: expect.stringContaining(`role ${held} changed (rolconnlimit)`),
 				role: [],
 			})
+			expect(await query(pgUrl(), `SELECT rolconnlimit FROM pg_roles WHERE rolname = '${held}'`)).toEqual([
+				{ rolconnlimit: -1 },
+			])
 		} finally {
-			await dropRoles(made)
+			await dropRoles(made, held)
 		}
 	}, 60_000)
 })

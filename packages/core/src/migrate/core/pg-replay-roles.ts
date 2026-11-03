@@ -7,17 +7,24 @@
  * the history says (P3 of r21), keeping only its memberships among roles it made itself: no role
  * the history logs in as, a superuser one least of all, exists on devUrl's server while a check
  * runs. A GRANT or REVOKE of roles the replay made runs, as their drop undoes it (P6 of r21).
+ *
+ * A role a statement the replay cannot leave out adds, such as `DO … IF NOT EXISTS … CREATE ROLE`,
+ * is adopted as one comb made when nothing else changed beside it (P5 of r22): made bare, tagged,
+ * held and dropped after. And a change to a role the replay made or adopts, to its row, its
+ * memberships, its settings, its comment or its labels, dies with it, so it is the replay's own,
+ * the role made bare again before the COMMIT (PR6 of r22b, pg-replay-commit.ts).
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { codeOf, literal, type Sql, TAG } from "./pg-replay-database.ts"
-import { addWrites, counts, type Rows, subjectRows, type Writes, writesSince } from "./pg-server-writes.ts"
+import { addWrites, catalogsOf, counts, type Rows, subjectRows, type Writes, writesSince } from "./pg-server-writes.ts"
 import type { Snapshot, Strays } from "./pg-server-snapshot.ts"
 
 /**
  * One replay's state: its connection, the server as committed (`admin`), its database, the backend
- * that owns it and the roles it made; the open transaction's own writes, comb's CREATE ROLEs', with
- * the rows they left; the shared catalogs as last read committed (`seen`), and the roles, databases
- * and replication slots a refused window added (`strays`), which the cleanup drops
+ * that owns it, whether its role is a superuser, which reads pg_authid, and the roles it made; the
+ * open transaction's own writes, comb's CREATE ROLEs', with the rows they left; the shared catalogs
+ * as last read committed (`seen`), and the roles, databases and replication slots a refused window
+ * added (`strays`), which the cleanup drops
  */
 type Run = {
 	admin: Sql
@@ -28,6 +35,13 @@ type Run = {
 	seen: Snapshot
 	sql: Sql
 	strays: Strays
+	superuser: boolean
+}
+
+/** Whether the role `sql` runs as is a superuser */
+async function superuserOf(sql: Sql): Promise<boolean> {
+	const [row] = await sql.unsafe("SELECT rolsuper FROM pg_roles WHERE rolname = current_user", [])
+	return row?.["rolsuper"] === true
 }
 
 /** `act` run, its writes to the shared catalogs counted as comb's own, with the rows of them that are `mine` */
@@ -36,7 +50,8 @@ async function own(run: Run, act: () => Promise<void>, mine: (subject: string) =
 	await act()
 	const written = writesSince((await counts(run.sql)).writes, before)
 	addWrites(run.ours.writes, written)
-	for (const [subject, row] of await subjectRows(run.sql, written, mine)) run.ours.rows.set(subject, row)
+	const read = { catalogs: catalogsOf(run.superuser), sql: run.sql }
+	for (const [subject, row] of await subjectRows(read, written, mine)) run.ours.rows.set(subject, row)
 }
 
 /* the options a replay keeps of a CREATE ROLE, each a membership, by the clause that writes it */
@@ -170,6 +185,39 @@ const ownGrant = (run: Run, node: Record<string, unknown>, sent: string): Promis
 		(subject) => grantedOf(node).some((role) => subject.startsWith(`membership ${role} to `)),
 	)
 
+/**
+ * `roles` of the replay's, changed in its open transaction, made bare again before it commits: no
+ * login, no password, and none of the attributes BARE denies, each said only where the role has it,
+ * as a role that is not a superuser may not name one it lacks (PR6 of r22b)
+ */
+async function bareAgain(run: Run, roles: readonly string[]): Promise<void> {
+	if (roles.length === 0) return
+	const rows = await run.sql.unsafe(
+		"SELECT rolname, rolsuper, rolreplication, rolbypassrls FROM pg_roles WHERE rolname = ANY($1::text[])",
+		[[...roles]],
+	)
+	for (const row of rows) {
+		const denied = [
+			row["rolsuper"] === true ? " NOSUPERUSER" : "",
+			row["rolreplication"] === true ? " NOREPLICATION" : "",
+			row["rolbypassrls"] === true ? " NOBYPASSRLS" : "",
+		].join("")
+		await run.sql.unsafe(`ALTER ROLE ${sqlIdentifier(String(row["rolname"]))} NOLOGIN${denied} PASSWORD NULL`, [])
+	}
+}
+
+/**
+ * `roles` the open transaction added, adopted as the replay's own before it commits (P5 of r22):
+ * tagged with its owner, held by a grant on its database, and dropped with the roles it made
+ */
+async function adopt(run: Run, roles: readonly string[]): Promise<void> {
+	for (const role of roles) {
+		await run.sql.unsafe(`COMMENT ON ROLE ${sqlIdentifier(role)} IS ${literal(`${TAG} ${run.owner}`)}`, [])
+		await run.sql.unsafe(`GRANT CONNECT ON DATABASE ${run.database} TO ${sqlIdentifier(role)}`, [])
+		run.created.push(role)
+	}
+}
+
 /* the roles of a list the server holds but those a replay made and tagged, which it drops after itself (P7 of r21) */
 const HELD = `SELECT r.rolname FROM pg_roles r LEFT JOIN pg_shdescription d ON d.objoid = r.oid AND d.classoid = 'pg_authid'::regclass WHERE r.rolname = ANY($1::text[]) AND (d.description IS NULL OR d.description NOT LIKE 'comb\\_replay %')`
 
@@ -178,4 +226,4 @@ async function heldRoles(sql: Sql, roles: readonly string[]): Promise<Set<string
 	return new Set((await sql.unsafe(HELD, [[...roles]])).map((row) => String(row["rolname"])))
 }
 
-export { bareRole, createRole, grantsMade, heldRoles, ownGrant, ownRole, type Run }
+export { adopt, bareAgain, bareRole, createRole, grantsMade, heldRoles, ownGrant, ownRole, type Run, superuserOf }
