@@ -13,6 +13,10 @@
  * .tmp/grunt/p20/logs/8.6-probe.log), which the caller says it is. A plain table's or index's
  * CLUSTER and REINDEX, a detach's FINALIZE and the rest run in one.
  *
+ * Beside it, the other way round (PA13 of r22b): a LOCK, a SAVEPOINT, a RELEASE or ROLLBACK TO one,
+ * and a cursor not held past its transaction run only inside a block, so the replay sends each bare
+ * in a `txmode none` file, as Atlas does, and Postgres refuses it there as on the target.
+ *
  * Beside it, the statements whose scope is the server or another database (P1 of r20, amended):
  * the dev replay runs each history file as Atlas applies it, committed, in a database of its own,
  * so a statement that reaches past that database would change devUrl's server for good, the
@@ -146,6 +150,33 @@ function outsideOnly(type: string, node: Node, partitioned: Partitioned = () => 
 	return OUTSIDE[type]?.(node, partitioned)
 }
 
+/* a DECLARE's option bit for WITH HOLD, as the parser sets it: a cursor kept past its transaction */
+const CURSOR_OPT_HOLD = 0x20
+
+// lookup-table: each statement Postgres runs only inside a transaction block, by node type, with how its refusal names it (PA13 of r22b)
+const INSIDE: Readonly<Record<string, (node: Node) => string | undefined>> = {
+	DeclareCursorStmt: (node) => ((Number(node["options"] ?? 0) & CURSOR_OPT_HOLD) === 0 ? "DECLARE CURSOR" : undefined),
+	LockStmt: () => "LOCK TABLE",
+	TransactionStmt: (node) =>
+		({
+			TRANS_STMT_RELEASE: "RELEASE SAVEPOINT",
+			TRANS_STMT_ROLLBACK_TO: "ROLLBACK TO SAVEPOINT",
+			TRANS_STMT_SAVEPOINT: "SAVEPOINT",
+		})[String(node["kind"])],
+}
+
+/** Whether a file's own transaction block is open after its bare statement of `type`, `open` before it */
+function blockAfter(open: boolean, type: string, node: Node): boolean {
+	if (type !== "TransactionStmt") return open
+	const kind = String(node["kind"])
+	if (kind === "TRANS_STMT_BEGIN" || kind === "TRANS_STMT_START") return true
+	if (kind === "TRANS_STMT_COMMIT" || kind === "TRANS_STMT_ROLLBACK") return node["chain"] === true
+	return open
+}
+
+/** What a statement is, by its parse tree's node `type`, when Postgres runs it only inside a transaction block */
+const insideOnly = (type: string, node: Node): string | undefined => INSIDE[type]?.(node)
+
 // lookup-table: the shared objects a statement names by its object type, which every database of the server sees
 const SHARED: Readonly<Record<string, string>> = {
 	OBJECT_DATABASE: "a database",
@@ -211,4 +242,4 @@ const BEYOND: Readonly<Record<string, (node: Node) => string | undefined>> = {
 /** What a statement is, by its parse tree's node `type`, when its scope is the server or another database; undefined when it is its database's */
 const beyondDatabase = (type: string, node: Node): string | undefined => BEYOND[type]?.(node)
 
-export { BEYOND, beyondDatabase, CONCURRENT, nodeOf, OUTSIDE, outsideOnly }
+export { BEYOND, beyondDatabase, blockAfter, CONCURRENT, INSIDE, insideOnly, nodeOf, OUTSIDE, outsideOnly }

@@ -4,7 +4,8 @@
  * leaves, and the two sides compare as one read of two databases.
  *
  * The replay runs as Atlas applies (P1 ⊃ P2 of r20): each file in a transaction of its own, a
- * `-- atlas:txmode none` file statement by statement, bare, as Atlas sends it (P1 of r22), in a database made for it and
+ * `-- atlas:txmode none` file statement by statement, each in a transaction of its own first and bare,
+ * as Atlas sends it, where Postgres runs it only so (P1 of r22 and its amendment), in a database made for it and
  * dropped after (pg-replay-database.ts). One transaction for the whole history filled Postgres's
  * lock table and left a seed's deferred trigger events pending, and devUrl's own database lent the
  * history what it held. Committed, a statement whose scope is the server or another database would
@@ -20,8 +21,11 @@
  * zero, so the replay refuses a server that keeps none. And around every file and every statement a
  * `txmode none` file sends bare, the server's shared catalogs are read as committed, a replay's own
  * rows left out (P1 and P2 of r22): that sees a bare statement's change, which no transaction counts,
- * and one a second connection commits, as dblink's does, which this backend's counts never see. The
- * read is the server's, another session's work in it too, so a change there is the file's only when
+ * and one a second connection commits, as dblink's does, which this backend's counts never see. Bare
+ * runs only a statement a block refuses (an outside-only class, a DO block or CALL that commits), one
+ * only a block runs (a LOCK, a SAVEPOINT, a cursor not held) and the file's own block, and a change
+ * one makes past its database has committed when the read sees it: the refusal names what devUrl's
+ * server keeps. The read is the server's, another session's work in it too, so a change there is the file's only when
  * the role, database or other object it is to is one the file names: a name it spells, unquoted and
  * folded as Postgres folds it, quoted and exact, or inside a string a DO body, dblink_exec or format()
  * may run (namesIn in sql-code.ts). That change is refused, naming it, and a role it added is dropped
@@ -42,7 +46,7 @@ import { ReplayFailed } from "./replay-failed.ts"
 import { asTarget } from "./pg-live-catalog.ts"
 import { type Connect, failureOf, loadPostgres, readCatalog } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
-import { beyondDatabase, nodeOf } from "./pg-outside-transaction.ts"
+import { beyondDatabase, blockAfter, insideOnly, nodeOf } from "./pg-outside-transaction.ts"
 import {
 	copyExtensions,
 	dropRole,
@@ -54,7 +58,7 @@ import {
 	sweep,
 } from "./pg-replay-database.ts"
 import { grantsMade, ownGrant, ownRole, type Run } from "./pg-replay-roles.ts"
-import { begin, commit, window } from "./pg-replay-commit.ts"
+import { begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import { prepareSnapshot, snapshot } from "./pg-server-snapshot.ts"
 import { refuseUncounted } from "./pg-server-writes.ts"
 import { pgRead } from "./pg-split.ts"
@@ -97,12 +101,14 @@ async function runStatement(
 
 /**
  * `file` run as Atlas applies it: in a transaction of its own unless `-- atlas:txmode none` gives it
- * up, and then each statement bare, as Atlas sends it, but comb's own CREATE ROLE and GRANT of a
- * role it made, each in a transaction of its own
+ * up, and then each statement in a transaction of its own first (guarded), bare where Postgres runs
+ * it only so; the file's own BEGIN, COMMIT and SAVEPOINT, a LOCK and a cursor not held, and all its
+ * own block runs, bare, as Atlas sends them, so Postgres refuses outside a block what apply's refuses
  */
 async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Replay & { refused: Refuse }) {
 	const inFile = !outsideTransaction(text)
 	const file = { name, names: namesIn(text), stops: replay.stops }
+	let block = false
 	if (inFile) await begin(run)
 	for (const { sent, tree } of pgRead(text).statements) {
 		const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
@@ -111,11 +117,13 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 			replay.leftOut(name, sent, beyond)
 			continue
 		}
-		const combs = !inFile && (type === "CreateRoleStmt" || type === "GrantRoleStmt")
-		if (combs) await begin(run)
-		await runStatement(run, { name, node, sent, type }, replay)
-		if (combs) await commit(run, { ...file, sent })
-		else if (!inFile) await window(run, { ...file, sent })
+		const send = () => runStatement(run, { name, node, sent, type }, replay)
+		if (inFile) await send()
+		else if (block || type === "TransactionStmt" || insideOnly(type, node) !== undefined) {
+			await send()
+			block = blockAfter(block, type, node)
+			await window(run, { ...file, sent })
+		} else await guarded(run, { ...file, sent }, send)
 	}
 	if (inFile) await commit(run, { ...file, sent: undefined })
 }

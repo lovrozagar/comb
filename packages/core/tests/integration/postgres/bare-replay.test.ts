@@ -13,18 +13,25 @@ import { dropRoles, query, roleOf, unique } from "../support/pg-roles.ts"
 
 const { checked, checkThenApply, devUrl, dir, files, options } = pgCheck()
 
+/* a txmode none file's head, its change approved */
+const NONE = "-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's change\n"
+
 /* P1 of r22: Atlas sends a txmode none file's statements bare; 0.20 wrapped each in BEGIN/COMMIT, so a batched
    backfill's COMMIT failed check and passed apply, and a LOCK TABLE passed check and failed apply */
 describe("a txmode none file replays bare, as Atlas sends it (P1; sibling: r21 P1's per-statement BEGIN)", () => {
 	const HEAD = `${T}INSERT INTO t (id) SELECT g FROM generate_series(1, 2500) g;\nCREATE PROCEDURE backfill() LANGUAGE plpgsql AS $$ BEGIN LOOP UPDATE t SET w = 1 WHERE id IN (SELECT id FROM t WHERE w IS NULL LIMIT 1000); EXIT WHEN NOT FOUND; COMMIT; END LOOP; END $$;\n`
-	const NONE = "-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's change\n"
-
 	it.each([
 		[
 			"a DO block that commits per batch",
 			"DO $$ BEGIN LOOP UPDATE t SET w = 1 WHERE id IN (SELECT id FROM t WHERE w IS NULL LIMIT 1000); EXIT WHEN NOT FOUND; COMMIT; END LOOP; END $$;\n",
 		],
 		["a CALL of a procedure that commits per batch", "CALL backfill();\n"],
+		/* each statement runs in a guarded transaction first: the file's own block, and a cursor kept past one, still run bare */
+		[
+			"a file that opens its own transaction, locking and saving inside it",
+			"BEGIN;\nLOCK TABLE t IN SHARE MODE;\nSAVEPOINT s;\nUPDATE t SET w = 2;\nRELEASE s;\nCOMMIT;\n",
+		],
+		["a cursor declared WITH HOLD", "DECLARE c CURSOR WITH HOLD FOR SELECT id FROM t;\nCLOSE c;\n"],
 	])(
 		"passes %s, as apply runs it",
 		async (_, body) => {
@@ -40,6 +47,13 @@ describe("a txmode none file replays bare, as Atlas sends it (P1; sibling: r21 P
 			"LOCK TABLE can only be used in transaction blocks",
 		],
 		["SAVEPOINT", "SAVEPOINT s;\nUPDATE t SET w = 2;\n", "SAVEPOINT can only be used in transaction blocks"],
+		["RELEASE", "RELEASE s;\n", "RELEASE SAVEPOINT can only be used in transaction blocks"],
+		["ROLLBACK TO", "ROLLBACK TO s;\n", "ROLLBACK TO SAVEPOINT can only be used in transaction blocks"],
+		[
+			"DECLARE without HOLD",
+			"DECLARE c CURSOR FOR SELECT id FROM t;\n",
+			"DECLARE CURSOR can only be used in transaction blocks",
+		],
 	])(
 		"refuses %s outside a block at check, as apply refuses it",
 		async (_, body, said) => {
@@ -49,8 +63,12 @@ describe("a txmode none file replays bare, as Atlas sends it (P1; sibling: r21 P
 		},
 		60_000,
 	)
+})
 
-	it("refuses a bare DO that makes a role, naming it, and leaves no role behind", async () => {
+/* the amendment to P1 of r22: bare, a change past the database commits before any read sees it, so each
+   statement runs in a transaction of its own first, and its counts refuse that change uncommitted */
+describe("a txmode none file's statement runs in a transaction of its own first (P1 amendment; sibling: a DO's ALTER ROLE)", () => {
+	it("refuses a DO that makes a role, naming it, and leaves no role behind", async () => {
 		const made = unique("comb_t_bare")
 		try {
 			const { refused: check } = await checked(T, `${NONE}DO $$ BEGIN CREATE ROLE ${made}; END $$;\n`)

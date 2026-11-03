@@ -3,7 +3,8 @@
  * statement's transaction, refused before its COMMIT when this backend's counts show it wrote past
  * its database (P1 of r21), and the server's shared catalogs read as committed around it and around
  * every bare statement, a change there the file's when it is to an object the file names (P1 and
- * P2 of r22).
+ * P2 of r22); a `txmode none` file's statement in a transaction of its own first, bare only when
+ * Postgres runs it outside a block alone.
  */
 import type { Run } from "./pg-replay-roles.ts"
 import { added, snapshot, snapshotChanges } from "./pg-server-snapshot.ts"
@@ -80,4 +81,27 @@ async function commit(run: Run, at: At): Promise<void> {
 	await run.sql.unsafe("COMMIT", [])
 }
 
-export { type At, begin, commit, window }
+// lookup-table: the codes Postgres refuses a statement with in a transaction block that it runs bare: an outside-only class (25001), a COMMIT inside a DO block or a procedure (2D000)
+const BARE_ONLY: ReadonlySet<unknown> = /* @__PURE__ */ new Set(["25001", "2D000"])
+
+/**
+ * A statement of a `txmode none` file `send` runs, first in a transaction of its own, refused before
+ * its COMMIT as a file's is (the amendment to P1 of r22): a change it makes past its database never
+ * commits. Postgres refuses only an outside-only class and a COMMIT inside a DO block or a procedure
+ * in a block; that try rolled back whole, so it runs bare, as Atlas sends it, with the server's
+ * catalogs read around it
+ */
+async function guarded(run: Run, at: At, send: () => Promise<void>): Promise<void> {
+	await begin(run)
+	const refused = await send().then(
+		() => undefined,
+		(error: unknown) => error,
+	)
+	if (refused === undefined) return commit(run, at)
+	if (!BARE_ONLY.has((refused as { cause?: { code?: unknown } }).cause?.code)) throw refused
+	await run.sql.unsafe("ROLLBACK", [])
+	await send()
+	return window(run, at)
+}
+
+export { type At, begin, commit, guarded, window }

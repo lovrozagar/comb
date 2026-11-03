@@ -69,9 +69,18 @@ const DROPPED = "DROP DATABASE IF EXISTS <db>"
 /* the replay's connection closed, and any backend still in its database ended, before the drop */
 const ENDED = expect.stringMatching(/^SELECT pg_terminate_backend\(pid\)/)
 
+/** Postgres's refusal of a statement starting `start` in a block, once: the guarded try rolls back and it runs bare */
+function refusedInBlockOnce(start: string): (query: string) => Error | undefined {
+	const tries = { block: 0 }
+	return (query) =>
+		query.startsWith(start) && tries.block++ === 0
+			? Object.assign(new Error(`${start} cannot run inside a transaction block`), { code: "25001" })
+			: undefined
+}
+
 describe("replayCatalog", () => {
 	it("replays each file in a transaction of its own in a database of its own, reading with the target's own query (addition B)", async () => {
-		const dev = fake([{ name: "dev_user", what: "user" }])
+		const dev = fake([{ name: "dev_user", what: "user" }], refusedInBlockOnce("CREATE INDEX CONCURRENTLY"))
 		await replayCatalog(
 			{ ...TARGET, schema: "app" },
 			{
@@ -93,6 +102,10 @@ describe("replayCatalog", () => {
 			PREPARE,
 			SNAPSHOT,
 			...inTransaction("CREATE TABLE t (a int)"),
+			"BEGIN",
+			WRITES,
+			"CREATE INDEX CONCURRENTLY i ON t (a)",
+			"ROLLBACK",
 			"CREATE INDEX CONCURRENTLY i ON t (a)",
 			SNAPSHOT,
 			CATALOG,
@@ -108,7 +121,9 @@ describe("replayCatalog", () => {
 		expect([admin.max, admin.onnotice(), admin.database]).toEqual([1, undefined, "dev"])
 		expect(replay.database).toMatch(/^comb_replay_7_9_[0-9a-f]{8}$/)
 	})
+})
 
+describe("replayCatalog of a policy", () => {
 	it("names dev's role as the target's in a policy, so CURRENT_USER compares as each database was built (addition A)", async () => {
 		const dev = fake([
 			{ name: "dev_user", what: "user" },

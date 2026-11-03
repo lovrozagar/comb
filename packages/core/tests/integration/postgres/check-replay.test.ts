@@ -244,8 +244,10 @@ describe("check of a file that changes the server from inside a statement the re
 			expect(await roleOf(made)).toEqual([])
 		}, 60_000)
 
-		/* bare, as Atlas sends it, the change commits: the refusal names it as one devUrl's server keeps (P1 of r22) */
-		it("refuses a txmode none file's bare statement that changes the server, naming what devUrl's server keeps", async () => {
+		/* a txmode none file's statement runs in a transaction of its own first, as the amendment to P1 of r22 rules,
+		   so the counts refuse it before it commits; only what Postgres runs outside a block alone runs bare */
+		it("refuses a txmode none file's statement that changes the server, the role as it was", async () => {
+			const held = await heldRole(pre)
 			const sent = `DO $$ BEGIN ALTER ROLE ${pre} CONNECTION LIMIT 5; END $$`
 			try {
 				const { refused } = await checked(
@@ -254,9 +256,9 @@ describe("check of a file that changes the server from inside a statement the re
 					url(),
 				)
 				expect(refused).toContain(
-					`20260102000000_two.sql: devUrl's server changed past the database the replay runs in while ${JSON.stringify(sent)} ran: role ${pre} changed (rolconnlimit).`,
+					`20260102000000_two.sql: devUrl's server counted a change past the database the replay runs in, made by ${JSON.stringify(sent)}: role ${pre} changed (rolconnlimit).`,
 				)
-				expect(refused).toContain(`devUrl's server keeps role ${pre} changed (rolconnlimit), which comb cannot undo`)
+				expect(await heldRole(pre)).toEqual(held)
 			} finally {
 				await query(pgUrl(), `ALTER ROLE ${pre} CONNECTION LIMIT -1`)
 			}

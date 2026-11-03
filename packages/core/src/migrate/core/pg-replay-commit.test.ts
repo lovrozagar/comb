@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { type At, begin, commit, window } from "./pg-replay-commit.ts"
+import { type At, begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import type { Run } from "./pg-replay-roles.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
@@ -123,5 +123,43 @@ describe("window", () => {
 		expect(await refusal(window(changed.run, at(["kept"])))).toMatch(
 			/apply runs; devUrl's server keeps role kept changed \(rolconnlimit\), which comb cannot undo; check stops here$/,
 		)
+	})
+})
+
+/** A send that fails with `codes` in turn, as the replay's refusal wraps devUrl's error, then passes */
+const sends = (...codes: string[]) => {
+	const tried = { times: 0 }
+	const send = async () => {
+		const code = codes[tried.times++]
+		if (code !== undefined) throw new ReplayFailed("devUrl refused it", { cause: { code } })
+	}
+	return { send, tried }
+}
+const control = (sent: string[]) => sent.filter((query) => !query.startsWith("SELECT"))
+
+/* the amendment to P1 of r22: a txmode none file's statement runs in a transaction of its own first */
+describe("guarded", () => {
+	it("commits a statement that ran in its transaction", async () => {
+		const { run, sent } = runOf({ snapshot: [["role", "kept", ["kept"], { rolconnlimit: -1 }]] })
+		const { send, tried } = sends()
+		await guarded(run, at([]), send)
+		expect({ control: control(sent), tried: tried.times }).toEqual({ control: ["BEGIN", "COMMIT"], tried: 1 })
+	})
+
+	it.each(["25001", "2D000"])(
+		"rolls back a statement Postgres refuses in a block with %s, and runs it bare",
+		async (code) => {
+			const { run, sent } = runOf({ snapshot: [["role", "kept", ["kept"], { rolconnlimit: -1 }]] })
+			const { send, tried } = sends(code)
+			await guarded(run, at([]), send)
+			expect({ control: control(sent), tried: tried.times }).toEqual({ control: ["BEGIN", "ROLLBACK"], tried: 2 })
+		},
+	)
+
+	it("refuses any other failure as it is, without a bare try", async () => {
+		const { run, sent } = runOf({})
+		const { send, tried } = sends("42P01")
+		expect(await refusal(guarded(run, at([]), send))).toBe("devUrl refused it")
+		expect({ control: control(sent), tried: tried.times }).toEqual({ control: ["BEGIN"], tried: 1 })
 	})
 })
