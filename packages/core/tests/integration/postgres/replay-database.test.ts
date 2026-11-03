@@ -260,6 +260,20 @@ describe("the replay's database", () => {
 			await dropRoles(role)
 		}
 	}, 60_000)
+
+	/* P5 of r21: the copy made the extension first, so a history file's plain CREATE EXTENSION, which apply runs, was refused */
+	it("lets the history make an extension devUrl holds, and copies one the history relies on and never makes", async () => {
+		await withScratchDb(async (dev) => {
+			await query(dev, "CREATE EXTENSION pgcrypto; CREATE EXTENSION citext")
+			await withScratchDb(async (url) => {
+				write([
+					"CREATE TABLE t (id int PRIMARY KEY);\n",
+					"CREATE EXTENSION pgcrypto;\nCREATE TABLE k (id uuid DEFAULT gen_random_uuid(), mail citext);\n",
+				])
+				expect((await check(dev, url)).refused).toBeUndefined()
+			})
+		})
+	}, 60_000)
 })
 
 /* R1 of the P1 review: a replay that made a role holds it as one that reused it does, so a shorter

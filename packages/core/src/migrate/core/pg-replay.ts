@@ -26,13 +26,24 @@ import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { type PgTarget, refuseUrlProblems } from "./atlas-target.ts"
 import { outsideTransaction } from "./classify-file.ts"
 import { ReplayFailed } from "./replay-failed.ts"
+import { asTarget } from "./pg-live-catalog.ts"
 import { type Connect, failureOf, loadPostgres, readCatalog } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
 import { beyondDatabase, nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
-import { copyExtensions, createRole, dropRole, makeDatabase, type Sql, sweep } from "./pg-replay-database.ts"
+import {
+	copyExtensions,
+	createRole,
+	dropRole,
+	extensionsOf,
+	makeDatabase,
+	type Sql,
+	sweep,
+} from "./pg-replay-database.ts"
 import {
 	addWrites,
+	counting,
 	namedChanges,
+	refuseUncounted,
 	type Rows,
 	sharedWrites,
 	subjectRows,
@@ -153,27 +164,21 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 const NO_CREATEDB =
 	"devUrl's role cannot create a database (CREATEDB), and comb replays the history file by file, as Atlas applies it, in a database of its own on devUrl's server; grant the role CREATEDB, or point devUrl at a server where it has it"
 
-/** Whether the server counts this backend's writes: with `track_counts` off they read as none */
-const counting = async (sql: Sql): Promise<boolean> =>
-	(await sql.unsafe("SELECT current_setting('track_counts') AS on", []))[0]?.["on"] === "on"
-
-/** Refuses a devUrl whose server keeps no counts for its role: the replay would read every file's writes as none */
-async function refuseUncounted(sql: Sql, stops: string): Promise<void> {
-	if (await counting(sql)) return
-	throw new ReplayFailed(
-		`devUrl's server keeps no counts for its role (track_counts is off), and comb reads from them what a history file changes past its database; set track_counts on for devUrl's role or server; ${stops}`,
-	)
-}
-
-/** The replay's database made ready: counted, holding devUrl's extensions, `schema` made and searched */
-async function prepare(run: Run, schema: string, { refused, stops }: { refused: Refuse; stops: string }) {
+/** The replay's database made ready: counted, holding devUrl's extensions the `files` do not make, `schema` made and searched */
+async function prepare(
+	run: Run,
+	schema: string,
+	{ files, refused, stops }: { files: readonly HistoryFile[]; refused: Refuse; stops: string },
+) {
 	await refuseUncounted(run.sql, stops)
-	await copyExtensions(run.admin, run.sql, (name, error) =>
-		refused(
-			`devUrl's database holds the extension ${name}, which comb could not make in the database it replays the history in`,
-			error,
-		),
-	)
+	await copyExtensions(run.admin, run.sql, {
+		makes: extensionsOf(files.map(({ sql: text }) => text)),
+		refused: (name, error) =>
+			refused(
+				`devUrl's database holds the extension ${name}, which comb could not make in the database it replays the history in`,
+				error,
+			),
+	})
 	if (schema !== "public") await run.sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(schema)}`, [])
 	await run.sql.unsafe(`SET search_path TO ${sqlIdentifier(schema)}`, [])
 }
@@ -229,7 +234,7 @@ async function onDev<T>(
 			started,
 		}
 		try {
-			await prepare(run, target.schema, { refused, stops: replay.stops })
+			await prepare(run, target.schema, { files, refused, stops: replay.stops })
 			for (const file of files)
 				await replayFile(run, file, { ...replay, leftOut: replay.leftOut ?? (() => undefined), refused })
 			return await after(run.sql)
@@ -266,35 +271,6 @@ async function replayCatalog(
 		load,
 		stops: "baseline compares nothing",
 	})
-}
-
-/** `live` read on dev, with dev's role named as the target's wherever a policy names it (the reviewer's addition A) */
-function asTarget(live: LiveObjects, targetUser: string): LiveObjects {
-	const devUser = live.user
-	if (devUser === targetUser) return live
-	const spelled = /^(for \w+, to )(.*)(, (?:permissive|restrictive))$/
-	const policies = new Map(
-		[...live.policies].map(([table, each]) => [
-			table,
-			new Map(
-				[...each].map(([name, how]) => {
-					/* the catalog read spells every policy so (pg-live-catalog.ts) */
-					const [, head, roles, tail] = spelled.exec(how) as RegExpExecArray as unknown as [
-						string,
-						string,
-						string,
-						string,
-					]
-					const mapped = roles
-						.split(", ")
-						.map((role) => (role === devUser ? targetUser : role))
-						.sort()
-					return [name, `${head}${mapped.join(", ")}${tail}`]
-				}),
-			),
-		]),
-	)
-	return { ...live, policies, user: targetUser }
 }
 
 export { type HistoryFile, onDev, replayCatalog }

@@ -3,7 +3,7 @@
  * one replay and dropped after it, so the history runs file by file, committed, as Atlas applies it,
  * and nothing devUrl's own database holds changes the verdict. devUrl's installed extensions are
  * copied in first, each in its schema at its version, as Atlas replays in devUrl's database as it
- * is. A role is the server's, not the database's: a CREATE ROLE of one that exists uses it, held by
+ * is, but for one a replayed file creates, which the file makes where it says (P5 of r21). A role is the server's, not the database's: a CREATE ROLE of one that exists uses it, held by
  * a grant on the replay's database so another replay cannot drop it meanwhile, and one comb creates
  * is tagged and dropped after. Postgres records no creation time for a database or a role, so the
  * database's name and the role's tag carry it, and a run drops those a killed run left once they
@@ -14,6 +14,8 @@
 import { randomUUID } from "node:crypto"
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import type { Connect } from "./pg-live-objects.ts"
+import { nodeOf } from "./pg-outside-transaction.ts"
+import { pgRead } from "./pg-split.ts"
 
 type Sql = ReturnType<Connect>
 
@@ -82,9 +84,28 @@ async function makeDatabase(admin: Sql, started: number, refused: () => Error): 
 const EXTENSIONS =
 	"SELECT e.extname AS name, n.nspname AS schema, e.extversion AS version FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace ORDER BY e.oid"
 
-/** Every extension `from` holds made in `to`, in its schema at its version; one `to` cannot make is `refused` */
-async function copyExtensions(from: Sql, to: Sql, refused: (name: string, error: unknown) => Error): Promise<void> {
+/** The extensions the history `texts` create, which the replay leaves them to make */
+const extensionsOf = (texts: readonly string[]): Set<string> =>
+	new Set(
+		texts.flatMap((text) =>
+			pgRead(text).statements.flatMap(({ tree }) => {
+				const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
+				return type === "CreateExtensionStmt" ? [String(node["extname"])] : []
+			}),
+		),
+	)
+
+/**
+ * Every extension `from` holds made in `to`, in its schema at its version, but those the history
+ * `makes`; one `to` cannot make is `refused`
+ */
+async function copyExtensions(
+	from: Sql,
+	to: Sql,
+	{ makes, refused }: { makes: ReadonlySet<string>; refused: (name: string, error: unknown) => Error },
+): Promise<void> {
 	for (const { name, schema, version } of await from.unsafe(EXTENSIONS, [])) {
+		if (makes.has(String(name))) continue
 		const [extension, home] = [sqlIdentifier(String(name)), sqlIdentifier(String(schema))]
 		try {
 			if (schema !== "pg_catalog" && schema !== "public") await to.unsafe(`CREATE SCHEMA IF NOT EXISTS ${home}`, [])
@@ -135,4 +156,4 @@ async function createRole(
 	}
 }
 
-export { copyExtensions, createRole, dropRole, makeDatabase, STALE_MS, sweep, type Sql }
+export { copyExtensions, createRole, dropRole, extensionsOf, makeDatabase, STALE_MS, sweep, type Sql }

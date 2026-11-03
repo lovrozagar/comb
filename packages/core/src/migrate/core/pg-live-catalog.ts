@@ -22,6 +22,7 @@
  *   table's replica identity where it is not the default. As `platform` labels, database-wide, which a
  *   platform may hold of its own: event triggers and publications. Each but an extension's.
  */
+import type { LiveObjects } from "./pg-live-types.ts"
 /** The input argument types of a routine `p`, as the parser spells them (see the routine arm) */
 const SIGNATURE = `(SELECT coalesce(string_agg(CASE WHEN tn.nspname IN ('pg_catalog', $1) THEN '' ELSE tn.nspname || '.' END || t.typname || CASE WHEN x.arr THEN '[]' ELSE '' END, ',' ORDER BY a.ord), '')
  FROM unnest(p.proargtypes::oid[]) WITH ORDINALITY AS a(oid, ord)
@@ -148,3 +149,32 @@ export const COMPARED: string = /* @__PURE__ */ (() => {
 	const kinds = ARM_KINDS.flatMap(([, named]) => named)
 	return `${kinds.slice(0, -1).join(", ")} and ${kinds.at(-1) as string}`
 })()
+
+/** `live` read on dev, with dev's role named as the target's wherever a policy names it (the reviewer's addition A) */
+export function asTarget(live: LiveObjects, targetUser: string): LiveObjects {
+	const devUser = live.user
+	if (devUser === targetUser) return live
+	const spelled = /^(for \w+, to )(.*)(, (?:permissive|restrictive))$/
+	const policies = new Map(
+		[...live.policies].map(([table, each]) => [
+			table,
+			new Map(
+				[...each].map(([name, how]) => {
+					/* the catalog read spells every policy so (CATALOG) */
+					const [, head, roles, tail] = spelled.exec(how) as RegExpExecArray as unknown as [
+						string,
+						string,
+						string,
+						string,
+					]
+					const mapped = roles
+						.split(", ")
+						.map((role) => (role === devUser ? targetUser : role))
+						.sort()
+					return [name, `${head}${mapped.join(", ")}${tail}`]
+				}),
+			),
+		]),
+	)
+	return { ...live, policies, user: targetUser }
+}

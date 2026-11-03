@@ -98,7 +98,7 @@ describe("copyExtensions", () => {
 
 	it("makes each extension in its schema at its version, making a schema of its own first", async () => {
 		const to = fake()
-		await copyExtensions(fake(() => held).sql, to.sql, () => new Error("refused"))
+		await copyExtensions(fake(() => held).sql, to.sql, { makes: new Set(), refused: () => new Error("refused") })
 		expect(to.sent).toEqual([
 			`CREATE EXTENSION IF NOT EXISTS "plpgsql" WITH SCHEMA "pg_catalog" VERSION '1.0'`,
 			`CREATE EXTENSION IF NOT EXISTS "citext" WITH SCHEMA "public" VERSION '1.6'`,
@@ -110,8 +110,19 @@ describe("copyExtensions", () => {
 	it("refuses an extension it cannot make, naming it", async () => {
 		const to = fake((query) => (query.includes("citext") ? coded("42501") : []))
 		await expect(
-			copyExtensions(fake(() => held).sql, to.sql, (name) => new Error(`cannot make ${name}`)),
+			copyExtensions(fake(() => held).sql, to.sql, {
+				makes: new Set(),
+				refused: (name) => new Error(`cannot make ${name}`),
+			}),
 		).rejects.toThrow("cannot make citext")
+	})
+
+	/* P5 of r21 */
+	it("leaves an extension the history makes to the history", async () => {
+		const to = fake()
+		await copyExtensions(fake(() => held).sql, to.sql, { makes: new Set(["citext"]), refused: () => new Error("x") })
+		expect(to.sent.some((sent) => sent.includes("citext"))).toBe(false)
+		expect(to.sent).toHaveLength(3)
 	})
 })
 

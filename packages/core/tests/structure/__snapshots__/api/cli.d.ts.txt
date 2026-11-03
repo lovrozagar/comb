@@ -305,8 +305,16 @@ declare function dropRole(admin: Sql, role: string): Promise<void>;
 declare function sweep(admin: Sql, now: number): Promise<void>;
 /** A new replay database on `admin`'s server, named for `started`; a role without CREATEDB is `refused` */
 declare function makeDatabase(admin: Sql, started: number, refused: () => Error): Promise<string>;
-/** Every extension `from` holds made in `to`, in its schema at its version; one `to` cannot make is `refused` */
-declare function copyExtensions(from: Sql, to: Sql, refused: (name: string, error: unknown) => Error): Promise<void>;
+/** The extensions the history `texts` create, which the replay leaves them to make */
+declare const extensionsOf: (texts: readonly string[]) => Set<string>;
+/**
+ * Every extension `from` holds made in `to`, in its schema at its version, but those the history
+ * `makes`; one `to` cannot make is `refused`
+ */
+declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
+    makes: ReadonlySet<string>;
+    refused: (name: string, error: unknown) => Error;
+}): Promise<void>;
 /**
  * A history's CREATE ROLE `sent` of `role`, run in the replay's `database`: an existing role is used,
  * any other made by `sent` and tagged, and either held by a grant on `database`; whether the role
@@ -320,9 +328,34 @@ declare function createRole(sql: Sql, { database, role, sent, started }: {
     sent: string;
     started: number;
 }): Promise<boolean>;
-export { copyExtensions, createRole, dropRole, makeDatabase, STALE_MS, sweep, type Sql };
+export { copyExtensions, createRole, dropRole, extensionsOf, makeDatabase, STALE_MS, sweep, type Sql };
 
 // migrate/core/pg-live-catalog.d.ts
+/**
+ * The one catalog read a Postgres baseline makes (pg-live-objects.ts), in one round trip, of what
+ * Atlas OSS leaves out of its comparison. Each row says `what` it is; `how` spells its settings as
+ * the history's are spelled (P10 of r18), so the two compare as text.
+ *
+ * - The target schema's functions and procedures, but an extension's (a member of it through
+ *   pg_depend, deptype e) and one another object makes (deptype i: a range type's constructors),
+ *   each with its input argument types as the parser spells them (the catalog's type name, an array
+ *   as its element's and [], the schema left out for pg_catalog and the target's).
+ * - Its tables' triggers, but the internal ones a constraint makes, with tgtype and whether they
+ *   fire: O and A do, D and R (replica only) do not, as the history reads ENABLE and DISABLE (P13);
+ *   a partition's clone of its parent's trigger is Postgres's, so it is left out (tgparentid).
+ * - Its views, materialized views and sequences, but an extension's and a sequence a column owns (a
+ *   serial's or an identity's, deptype a or i), a sequence with its settings; each table's policies,
+ *   with their command, roles and whether they are permissive (P9 of the 0.15.0 review).
+ * - Its domains, composite and range types and collations, but an extension's; each table's rules but
+ *   a view's own; each table's row level security where it is on; every extension but plpgsql.
+ * - The role the read connects as, which a policy's CURRENT_USER names (R2 of plan 17).
+ * - P12 of r19, as `other` labels: its aggregates; each function or procedure that is SECURITY DEFINER;
+ *   its operators; each cast over one of its types or functions; each view's and materialized view's
+ *   options (security_invoker, security_barrier, check_option); each materialized view's indexes; each
+ *   table's replica identity where it is not the default. As `platform` labels, database-wide, which a
+ *   platform may hold of its own: event triggers and publications. Each but an extension's.
+ */
+import type { LiveObjects } from "./pg-live-types.ts";
 export declare const CATALOG: string;
 /**
  * What each arm of CATALOG compares, in the arms' order, as a refusal names it: the one list COMPARED
@@ -331,3 +364,5 @@ export declare const CATALOG: string;
 export declare const ARM_KINDS: ReadonlyArray<readonly [what: string, kinds: readonly string[]]>;
 /** What a baseline compares itself, as its refusals name it */
 export declare const COMPARED: string;
+/** `live` read on dev, with dev's role named as the target's wherever a policy names it (the reviewer's addition A) */
+export declare function asTarget(live: LiveObjects, targetUser: string): LiveObjects;

@@ -10,6 +10,7 @@
  * and as a CREATEDB CREATEROLE role (.tmp/grunt/r21-premise/p1-xact-stats.log, p1-snapshot.log).
  */
 import type { Sql } from "./pg-replay-database.ts"
+import { ReplayFailed } from "./replay-failed.ts"
 
 /** Writes by shared catalog: how many rows the open transaction inserted, updated or deleted in each */
 type Writes = Map<string, number>
@@ -153,4 +154,26 @@ async function namedChanges({ sql, was }: { sql: Sql; was: Sql }, counted: Write
 	return changes
 }
 
-export { addWrites, namedChanges, type Rows, sharedWrites, subjectRows, type Writes, writesSince }
+/** Whether the server counts this backend's writes: with `track_counts` off they read as none */
+const counting = async (sql: Sql): Promise<boolean> =>
+	(await sql.unsafe("SELECT current_setting('track_counts') AS on", []))[0]?.["on"] === "on"
+
+/** Refuses a devUrl whose server keeps no counts for its role: the replay would read every file's writes as none */
+async function refuseUncounted(sql: Sql, stops: string): Promise<void> {
+	if (await counting(sql)) return
+	throw new ReplayFailed(
+		`devUrl's server keeps no counts for its role (track_counts is off), and comb reads from them what a history file changes past its database; set track_counts on for devUrl's role or server; ${stops}`,
+	)
+}
+
+export {
+	addWrites,
+	counting,
+	namedChanges,
+	refuseUncounted,
+	type Rows,
+	sharedWrites,
+	subjectRows,
+	type Writes,
+	writesSince,
+}
