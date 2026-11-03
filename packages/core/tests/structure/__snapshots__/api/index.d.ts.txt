@@ -47,8 +47,8 @@ export declare class CombError extends Error {
  * with no composition rule. `passwordText()` sets a password, at least 15 characters (a password
  * used only with a second factor may take `min: 8`); `passwordText.typed()` reads one typed to
  * sign in, holding only the max, so a password set before a minimum still signs in. Under
- * `hash: "bcrypt"` both refuse past the 72 UTF-8 bytes bcrypt reads. The column itself holds the
- * hash, which codegen holds to its declared bounds alone.
+ * `hash: "bcrypt"` both refuse past the 72 UTF-8 bytes bcrypt reads, and `set` refuses a `min` past
+ * them. The column itself holds the hash, which codegen holds to its declared bounds alone.
  */
 import * as z from "zod";
 /** The scheme a password is hashed with, where it limits what the hash reads */

@@ -13,10 +13,14 @@ import { parseField } from "../../src/codegen/__fixtures__/runtime.ts"
 import { SHARED_META_KEYS, SHARED_META_VALUES } from "../../src/codegen/generators/dtos/example-meta.ts"
 import { generateFieldSchema } from "../../src/codegen/generators/dtos/field-schema.ts"
 import { TRANSFORMS } from "../../src/codegen/generators/dtos/text-schema.ts"
+import { passwordText } from "../../src/password-text.ts"
 import { isStorableText } from "../../src/storable-text.ts"
 
 const CONTRACT = readFileSync(join(import.meta.dirname, "../../docs/meta-contract.md"), "utf8")
 const FIELD_KEYS = CONTRACT.slice(CONTRACT.indexOf("### 2.1 Field keys"), CONTRACT.indexOf("## 3. Producer API"))
+
+/* codegen's transforms, and the one passwordText publishes (C2 of r22) */
+const EMITTED: string[] = [...TRANSFORMS, ...(z.toJSONSchema(passwordText())["x-comb-transform"] as string[])]
 
 /** The code points §2.1's trim definition lists, ranges unfolded */
 function listedTrim(): number[] {
@@ -37,9 +41,9 @@ function trimmedByEcmaScript(): number[] {
 }
 
 describe("meta-contract §2.1's transforms", () => {
-	it("defines every transform codegen can emit, and no other", () => {
+	it("defines every transform comb can emit, codegen's and passwordText's nfc, and no other", () => {
 		const defined = [...FIELD_KEYS.matchAll(/^ {2}- `"(\w+)"`:/gm)].map(([, name]) => name)
-		expect(defined.toSorted()).toEqual([...TRANSFORMS].toSorted())
+		expect(defined.toSorted()).toEqual(EMITTED.toSorted())
 	})
 
 	it("lists exactly the code points ECMAScript's trim removes, all 25, U+FEFF in and U+0085 out", () => {
@@ -55,13 +59,14 @@ describe("meta-contract §2.1's transforms", () => {
 		const fixtures = JSON.parse(block) as Array<{ expect: string; input: string; transform: string }>
 		const operations: Record<string, (value: string) => string> = {
 			lowercase: (value) => value.toLowerCase(),
+			nfc: (value) => value.normalize("NFC"),
 			trim: (value) => value.trim(),
 			uppercase: (value) => value.toUpperCase(),
 		}
 		expect(fixtures.length).toBeGreaterThan(0)
 		for (const { expect: want, input, transform } of fixtures)
 			expect(operations[transform]?.(input), `${transform} ${JSON.stringify(input)}`).toBe(want)
-		expect(new Set(fixtures.map(({ transform }) => transform))).toEqual(new Set(TRANSFORMS))
+		expect(new Set(fixtures.map(({ transform }) => transform))).toEqual(new Set(EMITTED))
 	})
 })
 

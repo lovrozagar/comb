@@ -4,8 +4,8 @@
  * with no composition rule. `passwordText()` sets a password, at least 15 characters (a password
  * used only with a second factor may take `min: 8`); `passwordText.typed()` reads one typed to
  * sign in, holding only the max, so a password set before a minimum still signs in. Under
- * `hash: "bcrypt"` both refuse past the 72 UTF-8 bytes bcrypt reads. The column itself holds the
- * hash, which codegen holds to its declared bounds alone.
+ * `hash: "bcrypt"` both refuse past the 72 UTF-8 bytes bcrypt reads, and `set` refuses a `min` past
+ * them. The column itself holds the hash, which codegen holds to its declared bounds alone.
  */
 import * as z from "zod"
 import { isStorableText, STORABLE_TEXT_RULE } from "./storable-text.ts"
@@ -22,8 +22,6 @@ export type TypedPasswordOptions = { hash?: PasswordHash | undefined; max?: numb
 /** What a password set is held to: a typed one's, and the fewest characters */
 export type PasswordTextOptions = TypedPasswordOptions & { min?: number | undefined }
 
-const codePoints = (value: string): number => [...value].length
-
 const utf8Bytes = (value: string): number => new TextEncoder().encode(value).length
 
 /** Refuses a bound that is no whole number from `floor` */
@@ -32,24 +30,36 @@ function refuseBound(name: "max" | "min", bound: number, floor: number): void {
 		throw new TypeError(`passwordText's ${name} is a whole number from ${floor}, not ${bound}`)
 }
 
-/** The schema of a password of `min` (0 for none) to `max` characters, under `hash` */
+/**
+ * The schema of a password of `min` (0 for none) to `max` characters, under `hash`. zod counts a
+ * length by code point and runs the NFC overwrite before its checks, so its own min and max bind the
+ * NFC form, give the too_small and too_big issues every comb length gives, and publish themselves;
+ * the rewrite is published as the `nfc` transform, and bcrypt's bytes as `x-comb-maxUtf8Bytes`, the
+ * string's own bytes, never `x-comb-maxBytes`, which bounds a value's JSON text (C1, C2, C3 of r22)
+ */
 function password(min: number, max: number, hash: PasswordHash | undefined): z.ZodString {
 	const bcrypt = hash === "bcrypt"
-	const schema = z
-		.string()
-		.normalize("NFC")
+	const normalized = z.string().normalize("NFC")
+	const schema = (min > 0 ? normalized.min(min) : normalized)
+		.max(max)
 		.refine(isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" })
-		.refine((value) => codePoints(value) >= min, { message: `Must be at least ${min} characters` })
-		.refine((value) => codePoints(value) <= max, { message: `Must be at most ${max} characters` })
-		.refine((value) => !bcrypt || utf8Bytes(value) <= BCRYPT_BYTES, {
-			message: `Must be at most ${BCRYPT_BYTES} bytes in UTF-8`,
-		})
-	/* JSON Schema counts a length by code point, as the refines do; zod's own min and max count UTF-16 units */
-	return schema.meta({
-		maxLength: max,
-		...(min > 0 ? { minLength: min } : {}),
+	const bounded = bcrypt
+		? schema.superRefine((value, ctx) => {
+				if (utf8Bytes(value) > BCRYPT_BYTES)
+					ctx.addIssue({
+						code: "too_big",
+						inclusive: true,
+						input: value,
+						maximum: BCRYPT_BYTES,
+						message: `Must be at most ${BCRYPT_BYTES} bytes in UTF-8`,
+						origin: "string",
+					})
+			})
+		: schema
+	return bounded.meta({
 		"x-comb-text": STORABLE_TEXT_RULE,
-		...(bcrypt ? { "x-comb-maxBytes": BCRYPT_BYTES } : {}),
+		"x-comb-transform": ["nfc"],
+		...(bcrypt ? { "x-comb-maxUtf8Bytes": BCRYPT_BYTES } : {}),
 	})
 }
 
@@ -64,6 +74,9 @@ function set({ hash, max = 128, min = 15 }: PasswordTextOptions = {}): z.ZodStri
 	refuseBound("min", min, 0)
 	refuseBound("max", max, 1)
 	if (min > max) throw new TypeError(`passwordText's min ${min} is past its max ${max}`)
+	/* every code point is a byte at least, so past bcrypt's bytes no password is one it reads (CD10 of r22b) */
+	if (hash === "bcrypt" && min > BCRYPT_BYTES)
+		throw new TypeError(`passwordText's min ${min} leaves no password bcrypt reads: bcrypt reads ${BCRYPT_BYTES} bytes`)
 	return password(min, max, hash)
 }
 

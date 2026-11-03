@@ -115,7 +115,8 @@ no `anyOf` walk. A nullable trimmed text with a `max` of 9, as codegen publishes
 ```
 
 - `x-comb-transform`: the rewrites a written text takes before any check, in the order applied;
-  an email's is `["trim", "lowercase"]`, a url's `["trim"]`. A read publishes none. See §6.9 for
+  an email's is `["trim", "lowercase"]`, a url's `["trim"]`, and `passwordText()`'s `["nfc"]`. A
+  read publishes none. See §6.9 for
   what the published bounds then mean. Each value is one exact operation, which a reader in any
   language applies as written here, as its own `strip()` or `TrimSpace` differs:
   - `"trim"`: ECMAScript's `String.prototype.trim`: it removes, from both ends, these 25 code points
@@ -124,6 +125,8 @@ no `anyOf` walk. A nullable trimmed text with a `max` of 9, as codegen publishes
   - `"lowercase"`: ECMAScript's `String.prototype.toLowerCase`: Unicode's default full case
     mapping, locale-independent, with Final_Sigma. It may change a value's length.
   - `"uppercase"`: ECMAScript's `String.prototype.toUpperCase`: the same, to upper case.
+  - `"nfc"`: ECMAScript's `String.prototype.normalize("NFC")`: Unicode Normalization Form C, so a
+    decomposed `e` and U+0301 become one `é`. It may shorten a value.
 
   Fixtures for a reader's tests, each `input` with one `transform` applied:
 
@@ -134,13 +137,22 @@ no `anyOf` walk. A nullable trimmed text with a `max` of 9, as codegen publishes
   	{ "transform": "trim", "input": "\u001cann", "expect": "\u001cann" },
   	{ "transform": "lowercase", "input": "\u0130stanbul", "expect": "i\u0307stanbul" },
   	{ "transform": "lowercase", "input": "\u03a3\u0391\u03a3", "expect": "\u03c3\u03b1\u03c2" },
-  	{ "transform": "uppercase", "input": "stra\u00dfe", "expect": "STRASSE" }
+  	{ "transform": "uppercase", "input": "stra\u00dfe", "expect": "STRASSE" },
+  	{ "transform": "nfc", "input": "e\u0301", "expect": "\u00e9" },
+  	{ "transform": "nfc", "input": "\u212b", "expect": "\u00c5" }
   ]
   ```
 
-- `x-comb-text`, `x-comb-maxBytes`, and on a read `x-comb-minLength`, `x-comb-maxLength`,
-  `x-comb-minimum`, `x-comb-maximum`: the storable-text rule, a JSON byte limit, and the declared
-  bounds a read states without enforcing them.
+- `x-comb-text`: the storable-text rule: the value, after its transforms, holds no U+0000 and no
+  unpaired surrogate, which no engine stores as sent. On a JSON value it binds every string in it.
+- `x-comb-maxBytes`: the most UTF-8 bytes of the value's JSON text, `JSON.stringify` of the value as
+  sent, quotes and escapes included: a string `ab"` is 6 bytes (`"ab\""`). A `c.json` field
+  publishes it.
+- `x-comb-maxUtf8Bytes`: the most UTF-8 bytes of a string value itself, after its transforms, with
+  no quotes or escapes: `ab"` is 3 bytes. `passwordText({ hash: "bcrypt" })` publishes 72, the bytes
+  bcrypt reads.
+- `x-comb-minLength`, `x-comb-maxLength`, `x-comb-minimum`, `x-comb-maximum`: on a read, the
+  declared bounds it states without enforcing them, so a stored row past one still reads.
 
 ## 3. Producer API
 
