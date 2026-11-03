@@ -8,6 +8,8 @@ import { isMirror, seedMirrors } from "./proof-mirror.ts"
 import { type LocalDb, openScratch, type ScratchDb, type ScratchEngine } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
 import { keyGroups, quote, seedTables } from "./proof-seed.ts"
+import { keyScope } from "./proof-seed-keys.ts"
+import { segments } from "./sql-scan.ts"
 import { asciiFold } from "./sql-code.ts"
 import { isVectorIndexSql, vectorShadows } from "./vector-index.ts"
 
@@ -74,6 +76,40 @@ function jsonColumns(files: ReadonlyArray<{ sql: string }>): Set<string> {
 	)
 }
 
+/** The names `sql` holds, folded as SQLite compares them: each word of its code, and each quoted name unquoted */
+function namesIn(sql: string): string[] {
+	return segments(sql).flatMap(({ kind, text }) => {
+		if (kind === "identifier")
+			return [asciiFold(text.slice(1, -1).replaceAll(text.slice(0, 1).repeat(2), text.slice(0, 1)))]
+		return kind === "code" ? text.split(/[^\w$\u0080-\uffff]+/).map(asciiFold) : []
+	})
+}
+
+/**
+ * The tables, by folded name, pending `files` reach in the live schema `objects` (8.5 of plan 21): each table a file
+ * names, and to a fixpoint each table a view it names reads or a trigger on a reached table writes; a name in a
+ * string or a comment reaches nothing
+ */
+function touchedTables(objects: readonly LiveObject[], files: ReadonlyArray<{ sql: string }>): Set<string> {
+	const names = new Set(files.flatMap(({ sql }) => namesIn(sql)))
+	const reached = (object: LiveObject) =>
+		names.has(asciiFold(object.name)) || (object.type === "trigger" && names.has(asciiFold(object.table)))
+	const pending = objects.filter((object) => object.type === "view" || object.type === "trigger")
+	for (let found = true; found;) {
+		const next = pending.filter(reached)
+		found = next.length > 0
+		for (const object of next) {
+			pending.splice(pending.indexOf(object), 1)
+			for (const name of namesIn(object.sql)) names.add(name)
+		}
+	}
+	return new Set(
+		objects
+			.filter((object) => object.type === "table" && names.has(asciiFold(object.name)))
+			.map((object) => asciiFold(object.name)),
+	)
+}
+
 /** Why a table is unproven when the copy cannot create `object`: none for a view, which holds no rows */
 function uncreated(object: LiveObject, message: string): [table: string, why: string] | undefined {
 	if (object.type === "view") return undefined
@@ -83,7 +119,14 @@ function uncreated(object: LiveObject, message: string): [table: string, why: st
 }
 
 /** How a copy is seeded: which seed, and the columns pending files read as JSON; none for a copy of the schema alone */
-type Seed = { json: ReadonlySet<string>; variant: number } | undefined
+type Seed =
+	| {
+			json: ReadonlySet<string>
+			variant: number
+			/** the tables pending files reach, by folded name: the seed holds rows in these and their keys' tables alone (8.5) */
+			touched?: ReadonlySet<string> | undefined
+	  }
+	| undefined
 
 /**
  * The copy: tables and indexes, then the seed, then triggers and views, as the database has them;
@@ -106,16 +149,34 @@ function buildCopy(db: LocalDb, objects: readonly LiveObject[], seed: Seed): Map
 		for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
 		return unproven
 	}
+	const scope =
+		seed.touched === undefined
+			? undefined
+			: keyScope(
+					db,
+					tables.map((object) => object.name),
+					seed.touched,
+				)
+	const inScope = (object: LiveObject) => scope === undefined || scope.has(asciiFold(object.name))
 	const seedable = tables.filter(
 		(object) =>
+			inScope(object) &&
 			!unproven.has(asciiFold(object.name)) &&
 			(!isVirtual(object) || /\busing fts5\b/i.test(object.sql)) &&
 			!isMirror(object),
 	)
-	for (const object of tables.filter((each) => isVirtual(each) && !seedable.includes(each) && !isMirror(each)))
+	for (const object of tables.filter(
+		(each) => inScope(each) && isVirtual(each) && !seedable.includes(each) && !isMirror(each),
+	))
 		unproven.set(asciiFold(object.name), "a virtual table comb does not seed")
 	const definitions = new Map(seedable.map((object) => [object.name, object.sql]))
-	for (const [table, why] of [...seedTables(db, definitions, seed), ...seedMirrors(db, tables.filter(isMirror))])
+	for (const [table, why] of [
+		...seedTables(db, definitions, seed),
+		...seedMirrors(
+			db,
+			tables.filter((object) => isMirror(object) && inScope(object)),
+		),
+	])
 		unproven.set(table, why)
 	for (const object of objects.filter((each) => each.type === "trigger" || each.type === "view")) make(object)
 	return unproven
@@ -148,12 +209,13 @@ function insertsOf(db: LocalDb, name: string): string[] {
 
 /**
  * The copy the proof runs `files` on, as statements another engine can run: the live schema `objects`' tables and
- * indexes, the seed's rows of each table but a virtual one, then the triggers and views (SD1 of r22). An object
+ * indexes, the seed's rows of each table the files reach but a virtual one (touchedTables, and their keys' tables:
+ * keyScope, 8.5 of plan 21), then the triggers and views (SD1 of r22). An object
  * the copy could not create is left out, as the proof leaves it out. Rows go parents first, under defer_foreign_keys
  * for a cycle of keys: the seed meets every key, as D1 holds them all (8.4).
  */
 async function copyScript(objects: readonly LiveObject[], files: ReadonlyArray<{ sql: string }>): Promise<string[]> {
-	const copy = await copyOf(objects, { json: jsonColumns(files), variant: 0 })
+	const copy = await copyOf(objects, { json: jsonColumns(files), touched: touchedTables(objects, files), variant: 0 })
 	try {
 		const made = new Set(copy.db.all("SELECT name FROM main.sqlite_master").map((row) => String(row["name"])))
 		const kept = objects.filter((object) => made.has(object.name))
