@@ -96,7 +96,9 @@ function malformed(row: object, sort: readonly SortField[]): string | undefined 
  * A Postgres time key's text, which Postgres reads back as the key's own type, or SQLite's REAL seconds
  */
 function storedText(value: unknown, stored: KeyClass | undefined, carried: string | undefined): unknown {
-	if (!(value instanceof Date) || carried === undefined || carried === "") return value
+	if (carried === undefined || carried === "") return value
+	if (typeof value === "number") return carried
+	if (!(value instanceof Date)) return value
 	return stored === "time" ? carried : Number(carried)
 }
 
@@ -110,11 +112,14 @@ function storedText(value: unknown, stored: KeyClass | undefined, carried: strin
  */
 function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown> {
 	const stored = storedClasses(row)
-	if (stored === undefined) return row
-	const times = row["_combKeyTexts"]
-	const carried = typeof times === "string" ? times.split(",") : []
+	const texts = row["_combKeyTexts"]
+	if (stored === undefined && typeof texts !== "string") return row
+	const carried = typeof texts === "string" ? texts.split(",") : []
 	const typed = [...sort.map(({ field }) => field), COMB_ID]
-		.map((field, i) => [field, storedText(storedValue(row[field], stored[i]), stored[i], carried[i])] as const)
+		.map((field, i) => {
+			const value = stored === undefined ? row[field] : storedValue(row[field], stored[i])
+			return [field, storedText(value, stored?.[i], carried[i])] as const
+		})
 		.filter(([field, value]) => value !== row[field])
 	return typed.length === 0 ? row : { ...row, ...Object.fromEntries(typed) }
 }

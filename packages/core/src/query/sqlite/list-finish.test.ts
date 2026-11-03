@@ -3,13 +3,13 @@
  * pagination a list with no keyset refuses. The builders' own behavior is build-list-query.test.ts's.
  */
 import { type SQL, sql } from "drizzle-orm"
-import { PgDialect, pgTable, text as pgText, timestamp } from "drizzle-orm/pg-core"
+import { numeric as pgNumeric, PgDialect, pgTable, text as pgText, timestamp } from "drizzle-orm/pg-core"
 import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { SEALED } from "../__fixtures__/cursor-secret.ts"
 import { createCursor } from "../cursor-mint.ts"
 import { DateKey } from "./cursor-fit.ts"
-import { finish } from "./list-finish.ts"
+import { finish, keyTextsSQL } from "./list-finish.ts"
 
 const t = sqliteTable("t", { id: integer("id").primaryKey() })
 const tiebreak = { column: t.id, direction: "desc" as const }
@@ -130,13 +130,41 @@ describe("finish's key families and stored times on Postgres (QL1, QL2 of r22b; 
 			{ column: new DateKey(sql`1`), direction: "asc" },
 		])
 		expect(times["_combKeyTypes"]).toContain("then 'time'")
+		/* a type of the database's own is carried unless its family, the one `_combKeyTypes` selects, is a float */
+		const FAMILY = times["_combKeyTypes"]?.split(" || ',' || ")[0]
 		expect(times["_combKeyTexts"]).toBe(
-			`coalesce(("pg_ev"."at")::text, '') || ',' || coalesce(case when pg_typeof("pg_ev"."at") in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype) then ("pg_ev"."at")::text end, '') || ',' || '' || ',' || ''`,
+			`coalesce(("pg_ev"."at")::text, '') || ',' || coalesce(case when pg_typeof("pg_ev"."at") in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype) or (pg_typeof("pg_ev"."at") = 'numeric'::regtype or (pg_typeof("pg_ev"."at")::oid >= 16384 and ${FAMILY} <> 'float')) then ("pg_ev"."at")::text end, '') || ',' || '' || ',' || ''`,
 		)
 		expect(extrasOf("postgres", [{ column: pgEv.label, direction: "asc" }])).not.toHaveProperty("_combKeyTexts")
 		expect(extrasOf("postgres", [{ column: pgEv.at, direction: "asc" }], { table: pgEv as never })).toEqual({
 			_combId: expect.any(String),
 			_total: expect.any(String),
 		})
+	})
+})
+
+/* QL3 of r22b: a number key whose read rounds it carries its text on every list, a row to read back or none */
+describe("finish's carried numeric texts (QL3 of r22b; sibling: the stored times)", () => {
+	const amount = pgTable("amount", { id: pgText("id").primaryKey(), n: pgNumeric("n", { mode: "number" }) })
+
+	it("carries a numeric in number mode on an anchored list, a table list and the relational one, and nothing else there", () => {
+		const anchored = extrasOf("postgres", [{ column: amount.n, direction: "asc" }], { table: amount as never })
+		expect(anchored).not.toHaveProperty("_combKeyTypes")
+		expect(anchored["_combKeyTexts"]).toBe(`coalesce(("amount"."n")::text, '')`)
+		const table = extrasOf("sqlite", [{ column: amount.n, direction: "asc" }], { table: amount as never })
+		expect(table["_combKeyTexts"]).toBe(`coalesce(("amount"."n")::text, '')`)
+		const relational = keyTextsSQL(
+			[
+				{ column: amount.n, direction: "asc" },
+				{ column: pgEv.at, direction: "asc" },
+			],
+			"postgres",
+		)
+		expect(new PgDialect().sqlToQuery(relational).sql).toBe(`coalesce(("amount"."n")::text, '') || ',' || ''`)
+	})
+
+	it("carries an anchored Postgres expression's text only where its type may read rounded, not as a time", () => {
+		const own = extrasOf("postgres", [{ column: sql`${pgEv.at}`, direction: "asc" }], { table: pgEv as never })
+		expect(own["_combKeyTexts"]).toMatch(/^coalesce\(case when \(pg_typeof\("pg_ev"\."at"\) = 'numeric'::regtype or /)
 	})
 })

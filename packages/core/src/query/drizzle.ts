@@ -11,9 +11,10 @@ import { combErrorKeys } from "../types.ts"
 import { type CursorId, CursorRef, CURSOR_TIEBREAK_COLUMN, readCursor } from "./cursor.ts"
 import { anchored } from "./cursor-ref.ts"
 import { assertCursorWired, type CursorOptions } from "./cursor-seal.ts"
-import { assertCursorFits, bindableOn } from "./sqlite/cursor-fit.ts"
+import { assertCursorFits, bindableOn, boundCarried } from "./sqlite/cursor-fit.ts"
 import { extractFilterValue, extractFilterValues } from "./filter-values.ts"
 import { anchorGone, keysetSQL, orderByKeys, type SortKey } from "./sqlite/keyset.ts"
+import { keyTextsSQL } from "./sqlite/list-finish.ts"
 import { applySelect, type ListExtra, type ListPagination, paginate, paginationOf } from "./pagination.ts"
 import { assertLimitWithin, assertPageWithin, assertSchemaParsed } from "./trusted.ts"
 import type { ListQueryInput, ParsedFields, SortField } from "./types.ts"
@@ -33,6 +34,8 @@ type DrizzleListOptions = {
 	 */
 	extras: { _combId: (table: RelationalTable) => SQL } & Partial<{
 		_combAnchorGone: (table: RelationalTable) => SQL<number>
+		/* each sort key's stored text where its read rounds it (QL3 of r22b); on every list with a sort */
+		_combKeyTexts: (table: RelationalTable) => SQL<string>
 		_total: (table: RelationalTable) => SQL<number>
 	}>
 	/** How `paginate` pages the rows these options read (pagination.ts) */
@@ -82,17 +85,25 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 		return orderByKeys(keys, tiebreak)
 	}
 	/* every row carries what paginate reads, and a page whose rows do not is refused (Q3) */
-	const base = (extras: DrizzleListOptions["extras"]) => ({
-		extras,
-		limit: query.limit + 1,
-		orderBy,
-		pagination: paginationOf(options, {
-			cursorable: true,
-			expects: Object.keys(extras) as ListExtra[],
-			query,
-			window: query.limit + 1,
-		}),
-	})
+	/* a key whose read rounds it carries its text, which the next cursor binds (QL3 of r22b) */
+	const texts =
+		sort.length === 0
+			? {}
+			: { _combKeyTexts: (table: RelationalTable) => keyTextsSQL(keysOn(table, sort).keys, "postgres") }
+	const base = (given: DrizzleListOptions["extras"]) => {
+		const extras = { ...given, ...texts }
+		return {
+			extras,
+			limit: query.limit + 1,
+			orderBy,
+			pagination: paginationOf(options, {
+				cursorable: true,
+				expects: Object.keys(extras) as ListExtra[],
+				query,
+				window: query.limit + 1,
+			}),
+		}
+	}
 	if (!query.cursor) {
 		/* a page no schema bounded is bounded here, as buildListQuery bounds it (U5) */
 		assertPageWithin(query)
@@ -107,7 +118,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 		/* a value the keyset reads from the row is anchored; the others bind as their keys compare them */
 		const values = anchored(
 			keys,
-			cursor.values.map((value, i) => bindableOn(keys[i]?.column, value)),
+			cursor.values.map((value, i) => bindableOn(keys[i]?.column, boundCarried(keys[i]?.column, value))),
 			{ id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column },
 		)
 		return { id, keys, tiebreak, values }

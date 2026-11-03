@@ -106,3 +106,24 @@ describe("typedKeys and malformed: _combKeyTexts (QL2 of r22b; sibling: _combKey
 			expect(malformed({ _combId: 1, _combKeyTexts: times }, SORT)).toBe(`_combKeyTexts ${JSON.stringify(times)}`)
 	})
 })
+
+/* QL3 of r22b: a carried text stands in for the number the driver rounded, with or without classes */
+describe("typedKeys with a carried text (QL3 of r22b; sibling: a time key's stored value)", () => {
+	it("takes a carried text for a number, keeps any other value and an empty carriage, with no classes selected", () => {
+		const row = { _combId: 1, _combKeyTexts: "0.1000000000000000001,", k: 0.1, name: 0.5 }
+		expect(typedKeys(row, SORT)).toEqual({ ...row, k: "0.1000000000000000001" })
+		const text = { _combId: 1, _combKeyTexts: "0.25,", k: "0.25", name: "x" }
+		expect(typedKeys(text, SORT)).toBe(text)
+	})
+
+	it("takes it under the classes too", () => {
+		const row = {
+			_combId: 1,
+			_combKeyTexts: "0.1000000000000000001,",
+			_combKeyTypes: "fixed,other,other",
+			k: 0.1,
+			name: "x",
+		}
+		expect(typedKeys(row, SORT)["k"]).toBe("0.1000000000000000001")
+	})
+})

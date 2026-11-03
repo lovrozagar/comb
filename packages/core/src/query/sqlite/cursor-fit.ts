@@ -145,6 +145,7 @@ function fits(
 	if (value instanceof CursorRef) return refersBack(column, table)
 	if (column instanceof DateKey) return value instanceof Date || isInteger(value)
 	if (asRead && carriedTime(column, value)) return true
+	if (readsRounded(column) && typeof value === "string") return NUMERIC_TEXT.test(value)
 	if (is(column, Column)) return fitsDataType(column.dataType, value)
 	return (
 		typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
@@ -161,6 +162,21 @@ function bindable(value: unknown): unknown {
 		return value > 0 ? sql`9e999` : sql`-9e999`
 	return typeof value === "bigint" && Number.isSafeInteger(Number(value)) ? Number(value) : value
 }
+
+/**
+ * Whether `column` reads its stored number rounded: a Postgres numeric in drizzle's number mode, whose
+ * read is the nearest double (QL3 of r22b), so every list carries its text (`_combKeyTexts`) and a
+ * cursor binds that. A SQLite numeric stores an INTEGER or a REAL, which its driver reads as stored
+ */
+const readsRounded = (column: SQLWrapper | undefined): boolean =>
+	is(column, Column) && column.dataType === "number" && !is(column, SQLiteColumn)
+
+/* the text Postgres prints a numeric as */
+const NUMERIC_TEXT = /^(?:-?\d+(?:\.\d+)?|NaN|-?Infinity)$/
+
+/** A cursor value as a key that reads rounded binds it: its carried text cast to numeric, past the number mapper */
+const boundCarried = (column: SQLWrapper | undefined, value: unknown): unknown =>
+	readsRounded(column) && typeof value === "string" ? sql`${value}::numeric` : value
 
 /** Whether `column` is a seconds-mode SQLite timestamp: drizzle binds a Date there floored to the second */
 const inSeconds = (column: SQLWrapper | undefined): boolean =>
@@ -229,9 +245,11 @@ export {
 	bindableAs,
 	bindableOn,
 	boundAsRead,
+	boundCarried,
 	boundForKeys,
 	DateKey,
 	inSeconds,
 	readsBack,
+	readsRounded,
 	refersBack,
 }

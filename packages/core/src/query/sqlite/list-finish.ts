@@ -13,7 +13,7 @@ import type { ListDialect } from "../list-dialect.ts"
 import { assertLimitWithin, assertPageWithin } from "../trusted.ts"
 import type { ListQueryInput, SortField } from "../types.ts"
 import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts"
-import { DateKey, inSeconds, readsBack, refersBack } from "./cursor-fit.ts"
+import { DateKey, inSeconds, readsBack, readsRounded, refersBack } from "./cursor-fit.ts"
 import { cursorWhere } from "./cursor-where.ts"
 import type { SortKey } from "./keyset.ts"
 
@@ -146,14 +146,34 @@ const familyOf = (column: SQLWrapper): SQL =>
  * timestamp at 17 significant digits, which a double reads back exactly (its integer seconds are
  * exact in a Date)
  */
-function storedTextOf(dialect: ListDialect, column: SQLWrapper): SQL | null {
+function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean): SQL | null {
+	if (readsRounded(column)) return sql`coalesce((${column})::text, '')`
 	if (dialect === "sqlite")
-		return inSeconds(column)
+		return asRead && inSeconds(column)
 			? sql`case when typeof(${column}) = 'real' then printf('%!.17g', ${column}) else '' end`
 			: null
-	if (column instanceof DateKey || (is(column, Column) && column.dataType !== "object date")) return null
-	if (is(column, Column)) return sql`coalesce((${column})::text, '')`
-	return sql`coalesce(case when ${isTime(column)} then (${column})::text end, '')`
+	if (column instanceof DateKey) return null
+	if (is(column, Column))
+		return asRead && column.dataType === "object date" ? sql`coalesce((${column})::text, '')` : null
+	const carried = asRead ? sql`${isTime(column)} or ${roundsOnRead(column)}` : roundsOnRead(column)
+	return sql`coalesce(case when ${carried} then (${column})::text end, '')`
+}
+
+/**
+ * Whether a Postgres expression's type is one no driver may read exactly as a number: a numeric, or
+ * a type of the database's own (a domain or one it created) that is no float (QL3 of r22b)
+ */
+const roundsOnRead = (column: SQLWrapper): SQL =>
+	sql`(pg_typeof(${column}) = 'numeric'::regtype or (pg_typeof(${column})::oid >= 16384 and ${familyOf(column)} <> 'float'))`
+
+/** Each of `keys`' stored text, comma-joined, empty for one no list carries; asRead keys carry their time too */
+function keyTextsSQL(
+	keys: readonly SortKey[],
+	dialect: ListDialect,
+	asRead: (column: SQLWrapper) => boolean = () => false,
+): SQL<string> {
+	const each = keys.map(({ column }) => storedTextOf(dialect, column, asRead(column)) ?? sql`''`)
+	return sql<string>`${sql.join(each, sql` || ',' || `)}`
 }
 
 /**
@@ -163,10 +183,9 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper): SQL | null {
  */
 function keyTextsOf(list: Finish, keys: readonly SortKey[]): ListExtras {
 	if (list.merged !== undefined) return {}
-	const times = keys.map(({ column }) => (boundAsRead(list, column) ? storedTextOf(list.dialect, column) : null))
-	if (times.every((time) => time === null)) return {}
-	const each = times.map((time) => time ?? sql`''`)
-	return { _combKeyTexts: sql<string>`${sql.join(each, sql` || ',' || `)}`.as("_combKeyTexts") }
+	const asRead = (column: SQLWrapper) => boundAsRead(list, column)
+	if (keys.every(({ column }) => storedTextOf(list.dialect, column, asRead(column)) === null)) return {}
+	return { _combKeyTexts: keyTextsSQL(keys, list.dialect, asRead).as("_combKeyTexts") }
 }
 
 /** The extra that carries `classes`, one a sort key and the tiebreak's last, comma-joined */
@@ -195,9 +214,9 @@ function keyTypesOf(list: Finish): ListExtras {
 					...keyTypes([...keys.map(({ column }) => familyOf(column)), familyOf(tiebreak.column)]),
 					...keyTextsOf(list, keys),
 				}
-			: {}
+			: keyTextsOf(list, keys)
 	const declared = keys.every(({ column }) => is(column, Column) || column instanceof DateKey)
-	if (!asRead && (declared || !is(tiebreak.column, SQLiteColumn))) return {}
+	if (!asRead && (declared || !is(tiebreak.column, SQLiteColumn))) return keyTextsOf(list, keys)
 	return {
 		...keyTypes([...keys.map(({ column }) => storageOf(column)), sql`typeof(${tiebreak.column})`]),
 		...keyTextsOf(list, keys),
@@ -258,4 +277,4 @@ function finish(given: Finish): Finished {
 	return given.parsed.cursor ? finishCursor(given, given.parsed.cursor) : finishOffset(given)
 }
 
-export { finish, type Keyset }
+export { finish, type Keyset, keyTextsSQL }

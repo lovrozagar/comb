@@ -1,9 +1,29 @@
 import { getTableColumns, type SQL, SQL as SQLClass, sql } from "drizzle-orm"
-import { pgTable, timestamp } from "drizzle-orm/pg-core"
-import { alias, blob, customType, integer, real, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { numeric as pgNumeric, PgDialect, pgTable, timestamp } from "drizzle-orm/pg-core"
+import {
+	alias,
+	blob,
+	customType,
+	integer,
+	numeric,
+	real,
+	SQLiteDialect,
+	sqliteTable,
+	text,
+} from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 
-import { assertCursorFits, bindable, boundAsRead, boundForKeys, DateKey, readsBack, refersBack } from "./cursor-fit.ts"
+import {
+	assertCursorFits,
+	bindable,
+	boundAsRead,
+	boundCarried,
+	boundForKeys,
+	DateKey,
+	readsBack,
+	readsRounded,
+	refersBack,
+} from "./cursor-fit.ts"
 
 const columns = getTableColumns(
 	sqliteTable("t", {
@@ -188,5 +208,35 @@ describe("assertCursorFits on what libsql's intMode string reads", () => {
 		const at = new DateKey(sql`max(created_at)`)
 		expect(() => assertCursorFits([at], ["1700000000000"])).not.toThrow()
 		expect(boundForKeys([at], ["1700000000000"])).toEqual([1700000000000])
+	})
+})
+
+/* QL3 of r22b: a Postgres numeric in number mode reads rounded, so its list carries its text and a cursor binds that */
+describe("a key that reads its number rounded (QL3 of r22b; sibling: a time key's stored value)", () => {
+	const amounts = pgTable("amounts", {
+		exact: pgNumeric("exact"),
+		n: pgNumeric("n", { mode: "number" }),
+	})
+	const local = sqliteTable("local", { n: numeric("n", { mode: "number" }) })
+
+	it("is a Postgres numeric in number mode, never one read as a string, a SQLite numeric or an expression", () => {
+		expect(readsRounded(amounts.n)).toBe(true)
+		expect(readsRounded(amounts.exact)).toBe(false)
+		expect(readsRounded(local.n)).toBe(false)
+		expect(readsRounded(sql`${amounts.n}`)).toBe(false)
+		expect(readsRounded(undefined)).toBe(false)
+	})
+
+	it("takes the text Postgres prints a numeric as, whether or not the key binds as read, and no other text", () => {
+		for (const value of ["0.1000000000000000001", "-12", "NaN", "Infinity", "-Infinity", 0.1, null])
+			expect(carried(amounts.n, value, false), String(value)).toBe(true)
+		for (const value of ["1e5", "0.", ".5", "abc", ""]) expect(carried(amounts.n, value, true), value).toBe(false)
+	})
+
+	it("binds the carried text cast to numeric, and any other value as before", () => {
+		const bound = boundCarried(amounts.n, "0.1000000000000000001") as SQL
+		expect(new PgDialect().sqlToQuery(bound)).toEqual({ params: ["0.1000000000000000001"], sql: "$1::numeric" })
+		expect(boundCarried(amounts.n, 0.1)).toBe(0.1)
+		expect(boundCarried(amounts.exact, "0.1")).toBe("0.1")
 	})
 })

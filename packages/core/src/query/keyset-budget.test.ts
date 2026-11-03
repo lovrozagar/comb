@@ -49,7 +49,18 @@ const ORDERS = [
 
 /** The order string and the cursor's row for `mix` under `order` */
 function request(mix: readonly Kind[], order: readonly string[]) {
-	const row: Record<string, unknown> = { _combId: 7, _total: 2, id: 7, r1: 1, r2: 2, r3: 3, s1: "a", s2: "b", s3: "c" }
+	const row: Record<string, unknown> = {
+		_combId: 7,
+		_combKeyTexts: ",,",
+		_total: 2,
+		id: 7,
+		r1: 1,
+		r2: 2,
+		r3: 3,
+		s1: "a",
+		s2: "b",
+		s3: "c",
+	}
 	const fields = mix.map((kind, i) => {
 		const prefix = { lossy: "n", null: "r", plain: "s", ref: "s", time: "d" }[kind]
 		const field = `${prefix}${i + 1}`

@@ -21,13 +21,22 @@ const ROUNDED: Readonly<Record<"derived" | "merged" | "unread", string>> = {
 		"the key is no column of the anchor table, nor an expression over its columns alone, so no row reads the exact key back: sort by a column of the anchor table, keep it within ±(2^53 − 1), or read it as bigint",
 }
 
+// lookup-table: why a list cannot page a fraction the driver may have rounded, by the list (QL3 of r22b)
+const FRACTION: Readonly<Record<"derived" | "merged" | "unread", string>> = {
+	derived: "a derived list has no row to read the exact key back from",
+	merged: "a merged list compares the keys as the driver read them",
+	unread: "the key is no column of the anchor table, so no row reads the exact key back",
+}
+
 /**
- * The 500 for `row`'s first integer sort key past ±(2^53 − 1), which the driver rounded, on a list
- * that cannot page it (Q2 of r18, Q1 of r19): every key of a derived or a merged list, and of an
- * anchored list the keys `unread` names, which its anchor row doesn't supply (QL1 of r22b); none
- * where every such key is exact. A bigint is exact, and
- * so is a number SQLite stored as a REAL (Q1 of r20) or Postgres typed a double precision or real (Q2 of r21);
- * a number under any other class is not.
+ * The 500 for `row`'s first sort key the driver may have rounded, on a list that cannot page it (Q2
+ * of r18, Q1 of r19): every key of a derived or a merged list, and of an anchored list the keys
+ * `unread` names, which its anchor row doesn't supply (QL1 of r22b); none where every such key is
+ * exact. A bigint, a safe integer and ±Infinity or NaN are exact, and so is a number SQLite stored
+ * as a REAL (Q1 of r20) or Postgres typed a double precision or real (Q2 of r21). Under any other
+ * class, an integer past ±(2^53 − 1) and a fraction are not (QL3 of r22b): a Postgres numeric
+ * carries its text instead (`_combKeyTexts`), so no number of one reaches here; with no class,
+ * only the integer is known rounded.
  */
 function roundedKey(
 	row: Record<string, unknown>,
@@ -39,12 +48,17 @@ function roundedKey(
 	const rounded = sort.find(({ field }, i) => {
 		if (!judged(field)) return false
 		const value = row[field]
-		const double = stored !== undefined && (stored[i] === "real" || stored[i] === "float")
-		return !double && typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)
+		if (typeof value !== "number" || !Number.isFinite(value) || Number.isSafeInteger(value)) return false
+		/* with no class, only an integer past 2^53 is known rounded; under one, any number but a double's may be (QL3 of r22b) */
+		if (stored === undefined) return Number.isInteger(value)
+		return stored[i] !== "real" && stored[i] !== "float"
 	})
 	if (rounded === undefined) return undefined
+	const value = row[rounded.field] as number
 	return new CombError({
-		cause: `${rounded.field} ${BigInt(row[rounded.field] as number)} is past ±(2^53 − 1), where the driver rounded it: ${ROUNDED[kind]}`,
+		cause: Number.isInteger(value)
+			? `${rounded.field} ${BigInt(value)} is past ±(2^53 − 1), where the driver rounded it: ${ROUNDED[kind]}`
+			: `${rounded.field} ${value} is a fraction under a type no driver reads exactly as a JS number, so the driver may have rounded it: ${FRACTION[kind]}: sort by a Postgres numeric, whose text comb carries, read the key as a string, or sort by a double precision or real`,
 		errorKey: combErrorKeys.SORT_NOT_WIRED,
 		status: "internal_server_error",
 	})

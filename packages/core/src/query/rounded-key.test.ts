@@ -60,3 +60,26 @@ describe("roundedKey on the keys a list binds as read (QL1 of r22b; sibling: a d
 		expect(roundedKey(row, SORT, { unread: () => false })).toBeUndefined()
 	})
 })
+
+/* QL3 of r22b: a number under a class no double names may be a rounded read, a fraction as much as an integer */
+describe("roundedKey on a fraction under a class no double names (QL3 of r22b; sibling: Q1 of r22's integer rule)", () => {
+	it.each([
+		["postgres fixed", "fixed", true],
+		["postgres other", "other", true],
+		["sqlite text", "text", true],
+		["sqlite real", "real", false],
+		["postgres float", "float", false],
+	])("under %s (class %s), the fraction 0.1 is refused: %s", (_, cls, refused) => {
+		const error = roundedKey({ _combKeyTypes: `${cls},real,text`, a: 0.1, b: 1 }, SORT, "derived")
+		expect(error === undefined ? false : error.cause).toBe(
+			refused
+				? "a 0.1 is a fraction under a type no driver reads exactly as a JS number, so the driver may have rounded it: a derived list has no row to read the exact key back from: sort by a Postgres numeric, whose text comb carries, read the key as a string, or sort by a double precision or real"
+				: false,
+		)
+	})
+
+	it("passes ±Infinity and NaN under any class, which a double holds exactly", () => {
+		for (const a of [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NaN])
+			expect(roundedKey({ _combKeyTypes: "fixed,real,text", a, b: 1 }, SORT, "derived"), String(a)).toBeUndefined()
+	})
+})

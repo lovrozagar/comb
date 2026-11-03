@@ -303,6 +303,7 @@ type DrizzleListOptions = {
         _combId: (table: RelationalTable) => SQL;
     } & Partial<{
         _combAnchorGone: (table: RelationalTable) => SQL<number>;
+        _combKeyTexts: (table: RelationalTable) => SQL<string>;
         _total: (table: RelationalTable) => SQL<number>;
     }>;
     /** How `paginate` pages the rows these options read (pagination.ts) */

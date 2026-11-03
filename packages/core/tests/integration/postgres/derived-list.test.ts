@@ -205,15 +205,18 @@ describe("a key whose class isn't a double is exact or refused (Q1; sibling: r21
 		return ids
 	}
 
-	it.each([
-		["a domain over a domain over bigint", ledger.cents],
-		["a domain over numeric in number mode", ledger.exact],
-	])("refuses %s holding 2^60 + 1 to 2^60 + 7, asc and desc", async (_, key) => {
+	it("refuses a domain over a domain over bigint holding 2^60 + 1 to 2^60 + 7, asc and desc", async () => {
 		for (const direction of ["asc", "desc"] as const)
-			await expect(ledgerIds(key, direction)).rejects.toMatchObject({
+			await expect(ledgerIds(ledger.cents, direction)).rejects.toMatchObject({
 				cause: expect.stringMatching(/^k \d+ is past ±\(2\^53 − 1\), where the driver rounded it: a derived list/),
 				errorKey: "sort_not_wired",
 			})
+	})
+
+	/* QL3 of r22b: a numeric in number mode carries its text, so it pages where Q1 refused it */
+	it("pages every row once by a domain over numeric in number mode holding 2^60 + 1 to 2^60 + 7, asc and desc", async () => {
+		expect(await ledgerIds(ledger.exact, "asc")).toEqual(["a", "b", "c", "d"])
+		expect(await ledgerIds(ledger.exact, "desc")).toEqual(["d", "c", "b", "a"])
 	})
 
 	it("pages every row once by a domain over double precision holding 1e20 to 4e20, asc and desc", async () => {

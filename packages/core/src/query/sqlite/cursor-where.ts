@@ -11,7 +11,7 @@ import { combErrorKeys } from "../../types.ts"
 import { type CursorId, type CursorOptions, CursorRef, readCursor } from "../cursor.ts"
 import { anchored, assertNoReference } from "../cursor-ref.ts"
 import type { SortField } from "../types.ts"
-import { assertCursorFits, bindableAs, boundAsRead, boundForKeys, readsBack } from "./cursor-fit.ts"
+import { assertCursorFits, bindableAs, boundAsRead, boundCarried, boundForKeys, readsBack } from "./cursor-fit.ts"
 import { anchorGone, keysetSQL, type SortKey } from "./keyset.ts"
 
 /** What resuming after a cursor needs: it, how it was sealed, the sort, the keys, and the table */
@@ -50,9 +50,8 @@ function cursorWhere({ cursor: given, keys, merged, options, sort, table, tiebre
 		i < columns.length && (table === undefined || !readsBack(columns[i] as SQLWrapper, table))
 	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id], { asRead, table })
 	const id = bindableAs(tiebreak.column, cursor.id) as CursorId
-	const bound = boundForKeys(columns, cursor.values).map((value, i) =>
-		asRead(i) ? boundAsRead(columns[i], value) : value,
-	)
+	const carried = cursor.values.map((value, i) => boundCarried(columns[i], value))
+	const bound = boundForKeys(columns, carried).map((value, i) => (asRead(i) ? boundAsRead(columns[i], value) : value))
 	/* a key the row supplies reads its bound from the row where the cursor's value can't say it exactly */
 	const values =
 		table === undefined
