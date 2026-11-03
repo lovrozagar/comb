@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { copyExtensions, dropRole, makeDatabase, ownerOf, STALE_MS, sweep, sweepDev } from "./pg-replay-database.ts"
 
 const coded = (code: string, message = code) => Object.assign(new Error(message), { code })
@@ -144,6 +144,23 @@ describe("sweepDev, before an apply", () => {
 			sweepDev(TARGET, async () => () => ({ ...down.sql, end: async () => void ended++ })),
 		).resolves.toBeUndefined()
 		expect(ended).toBe(1)
+	})
+
+	/* a server only notices a drop of what it already dropped, which a fresh one never holds */
+	it("prints nothing of a notice its drops raise", async () => {
+		let onnotice: unknown
+		await sweepDev(TARGET, async () => (options) => {
+			onnotice = options["onnotice"]
+			return fake().sql
+		})
+		const log = vi.spyOn(console, "log").mockImplementation(() => undefined)
+		try {
+			expect(onnotice).toBeTypeOf("function")
+			;(onnotice as (notice: unknown) => void)({ message: 'role "comb_replay_1" does not exist, skipping' })
+			expect(log).not.toHaveBeenCalled()
+		} finally {
+			log.mockRestore()
+		}
 	})
 })
 
