@@ -160,9 +160,8 @@ describe("generateFieldSchema: JSON", () => {
 	})
 
 	it("builds text from its annotations: kind, transforms, then bounds", () => {
-		expect(schema("pw", 'c.text("pw", { password: true }).notNull()', "create")).toBe(
-			"z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/)",
-		)
+		/* a password column holds the hash, so it takes a required text's own rule (C1 of r21) */
+		expect(schema("pw", 'c.text("pw", { password: true }).notNull()', "create")).toBe("z.string().min(1)")
 		expect(schema("e", 'c.text("e", { email: true, min: 3, max: 50 }).notNull()', "create")).toBe(
 			'z.string().trim().toLowerCase().check(z.email()).min(6).max(50).meta(_m.email).meta({"x-comb-transform":["trim","lowercase"]})',
 		)
@@ -247,11 +246,9 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 })
 
 describe("generateFieldSchema: what the 0.8.0 codegen review found (F1, F2, F15, F16)", () => {
-	it("reads a stored password hash as a plain string, and checks the password rules only on writes (F1)", () => {
+	it("reads a stored password hash as a plain string, and checks its bounds only on writes (F1)", () => {
 		expect(schema("pw", 'c.text("pw", { password: true }).notNull()', "read")).toBe("z.string()")
-		expect(schema("pw", 'c.text("pw", { password: true }).notNull()', "update")).toBe(
-			"z.string().min(8).max(72).regex(/^[\\x20-\\x7E]+$/).optional()",
-		)
+		expect(schema("pw", 'c.text("pw", { password: true }).notNull()', "update")).toBe("z.string().min(1).optional()")
 	})
 
 	it("refuses an empty string for a required text column on update as on create (F2)", () => {
@@ -400,12 +397,12 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 		expect(generated(field, "create", { dialect: "postgres", imports: imports() })).toContain(TEXT_RULE)
 	})
 
-	it("applies a password's declared bounds and pattern on top of its own rule, and an email's pattern after the format", () => {
+	it("applies a password hash's declared bounds and pattern, with no rule of comb's, and an email's pattern after the format", () => {
 		expect(of("pw", 'c.text("pw", { password: true, min: 12, pattern: "/\\\\d/" }).notNull()', "create")).toBe(
-			"z.string().min(12).max(72).regex(/^[\\x20-\\x7E]+$/).regex(/\\d/)",
+			"z.string().min(12).regex(/\\d/)",
 		)
-		expect(of("pw", 'c.text("pw", { password: true, max: 50 }).notNull()', "create")).toBe(
-			"z.string().min(8).max(50).regex(/^[\\x20-\\x7E]+$/)",
+		expect(of("pw", 'c.text("pw", { password: true, max: 255 }).notNull()', "create")).toBe(
+			"z.string().min(1).max(255)",
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "create")).toBe(
 			/* a pattern decides what the value looks like, so it gets no example (F18) */

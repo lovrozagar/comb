@@ -16,7 +16,6 @@ const GUARD_KEY = { "x-comb-text": STORABLE_TEXT_RULE }
 type TextRange = { max: number | null; min: number | null }
 
 /* the regexes a kind holds a written text to, as the chain writes each */
-const PRINTABLE = "/^[\\x20-\\x7E]+$/"
 const ID_PATTERN = "/^\\S{1,48}$/"
 const HTTPS = "/^https:\\/\\//"
 const NAME = "/^[\\p{L}\\p{M}\\p{N}\\p{Zs}\\p{P}]+$/u"
@@ -45,14 +44,12 @@ const floorOf = ({ email, imageUri, url }: FieldConstraints): number =>
 	url ? TEXT_FLOORS.url : email ? TEXT_FLOORS.email : imageUri ? TEXT_FLOORS.imageUri : 0
 
 /**
- * A written text's effective range, the one every emitter reads (C1 of r18): a password's own
- * [8, 72] under its declared bounds, bcrypt's 72 bytes the most, which a declared max past is
- * refused (C5 of r20); an id's 1 to 48; any other text's
- * declared bounds, the column's length its max, its min at least its format's floor (C3 of r19),
- * and 1 when it is required and of no format
+ * A written text's effective range, the one every emitter reads (C1 of r18): an id's 1 to 48; any
+ * other text's declared bounds, the column's length its max, its min at least its format's floor
+ * (C3 of r19), and 1 when it is required and of no format. A password column is such a text: it
+ * stores the hash, whatever its scheme's length (C1, C4 of r21)
  */
 function textRange(annotations: FieldConstraints, field: FieldMeta): TextRange {
-	if (annotations.password) return { max: annotations.max ?? 72, min: annotations.min ?? 8 }
 	if (isIdText(annotations, field)) return { max: ID_LENGTH.maxLength, min: ID_LENGTH.minLength }
 	const max = annotations.max ?? field.length
 	const floor = floorOf(annotations)
@@ -64,16 +61,6 @@ function textRange(annotations: FieldConstraints, field: FieldMeta): TextRange {
 function refuseEmptyRange(field: FieldMeta, { max, min }: TextRange): void {
 	if (max !== null && min !== null && min > max)
 		throw new Error(`${field.name}: its length min ${min} and max ${max} leave no value; widen them`)
-}
-
-/* a format bounds what is written; what is read back is whatever the column holds: a password's
- * stored hash, an email or URL a migration or an older rule stored (F12). A written email takes
- * textBase's own normalize-then-check path */
-function stringKind(annotations: FieldConstraints, range: TextRange, mutative: boolean): string {
-	if (!mutative) return "z.string()"
-	/* its own rule, printable ASCII within bcrypt's 72 bytes, under the bounds it declares (F9) */
-	if (annotations.password) return `z.string().min(${range.min}).max(${range.max}).regex(${PRINTABLE})`
-	return "z.string()"
 }
 
 /** Every transform codegen can emit, each defined in meta-contract §2.1, which a test holds them to */
@@ -145,7 +132,6 @@ function textKeys(build: Build): Record<string, unknown> {
 	const { annotations, field, schemaType } = build
 	const mutative = isMutative(schemaType)
 	const transform = transformKey(annotations, mutative)
-	if (annotations.password) return {}
 	if (isIdText(annotations, field)) return mutative ? { ...transform, ...GUARD_KEY } : stated(ID_LENGTH)
 	if (!mutative) return readKeys(build)
 	return annotations.email ? transform : { ...transform, ...GUARD_KEY }
@@ -164,7 +150,6 @@ function kindChecks(annotations: FieldConstraints): string {
 function textBounds(build: Build, range: TextRange): string {
 	const { annotations, field, schemaType } = build
 	const mutative = isMutative(schemaType)
-	if (annotations.password) return mutative && annotations.pattern !== null ? `.regex(${annotations.pattern})` : ""
 	/* \S matches U+0000 and either half of a pair, so a written id takes the text guard after it (F48) */
 	if (isIdText(annotations, field)) return mutative ? `.regex(${ID_PATTERN})${TEXT_GUARD}` : ""
 	if (!mutative) {
@@ -205,10 +190,9 @@ export function textBase(build: Build): Base {
 			textKeys(build),
 		)
 	}
-	return plain(
-		stringKind(annotations, range, mutative) + transforms(annotations, mutative) + textBounds(build, range),
-		textKeys(build),
-	)
+	/* a format bounds what is written; what is read back is whatever the column holds: an email or
+	 * URL a migration or an older rule stored (F12) */
+	return plain(`z.string()${transforms(annotations, mutative)}${textBounds(build, range)}`, textKeys(build))
 }
 
 /** What a written text is held to: its effective range and each regex it must match, in the chain's order */
@@ -222,7 +206,6 @@ export type TextRules = TextRange & { patterns: string[] }
 export function textRules(annotations: FieldConstraints, field: FieldMeta): TextRules {
 	const range = textRange(annotations, field)
 	const declared = annotations.pattern === null ? [] : [annotations.pattern]
-	if (annotations.password) return { ...range, patterns: [PRINTABLE, ...declared] }
 	if (isIdText(annotations, field)) return { ...range, patterns: [ID_PATTERN] }
 	const kind = [annotations.url ? HTTPS : null, annotations.name ? NAME : null, annotations.imageUri ? IMAGE : null]
 	return { ...range, patterns: [...declared, ...kind.filter((each) => each !== null)] }

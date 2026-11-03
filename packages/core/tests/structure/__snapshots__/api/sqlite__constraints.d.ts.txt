@@ -52,7 +52,7 @@ type StringValidationConstraints = {
     imageUri?: boolean;
     /** Human/entity name validation (letters, marks, numbers, spaces, punctuation) */
     name?: boolean;
-    /** Password validation (min 8, max 72, printable ASCII) */
+    /** A stored password hash: kept as written, held to the declared bounds and pattern alone; validate the plaintext with `passwordText()` */
     password?: boolean;
     /** Regex pattern validation */
     pattern?: string;

@@ -1,0 +1,71 @@
+/**
+ * The plaintext a password column's hash is made from (C1, C4 of r21), after NIST SP 800-63B rev 4
+ * §3.1.1.2: any storable text, normalized to NFC and then counted by code point, never trimmed,
+ * with no composition rule. `passwordText()` sets a password, at least 15 characters (a password
+ * used only with a second factor may take `min: 8`); `passwordText.typed()` reads one typed to
+ * sign in, holding only the max, so a password set before a minimum still signs in. Under
+ * `hash: "bcrypt"` both refuse past the 72 UTF-8 bytes bcrypt reads. The column itself holds the
+ * hash, which codegen holds to its declared bounds alone.
+ */
+import * as z from "zod"
+import { isStorableText, STORABLE_TEXT_RULE } from "./storable-text.ts"
+
+/** The most UTF-8 bytes bcrypt reads of a password; it ignores the rest */
+const BCRYPT_BYTES = 72
+
+/** The scheme a password is hashed with, where it limits what the hash reads */
+export type PasswordHash = "bcrypt"
+
+/** What a typed password is held to: the most characters, and the scheme it is hashed with */
+export type TypedPasswordOptions = { hash?: PasswordHash | undefined; max?: number | undefined }
+
+/** What a password set is held to: a typed one's, and the fewest characters */
+export type PasswordTextOptions = TypedPasswordOptions & { min?: number | undefined }
+
+const codePoints = (value: string): number => [...value].length
+
+const utf8Bytes = (value: string): number => new TextEncoder().encode(value).length
+
+/** Refuses a bound that is no whole number from `floor` */
+function refuseBound(name: "max" | "min", bound: number, floor: number): void {
+	if (!Number.isInteger(bound) || bound < floor)
+		throw new TypeError(`passwordText's ${name} is a whole number from ${floor}, not ${bound}`)
+}
+
+/** The schema of a password of `min` (0 for none) to `max` characters, under `hash` */
+function password(min: number, max: number, hash: PasswordHash | undefined): z.ZodString {
+	const bcrypt = hash === "bcrypt"
+	const schema = z
+		.string()
+		.normalize("NFC")
+		.refine(isStorableText, { message: "Must not contain U+0000 or an unpaired surrogate" })
+		.refine((value) => codePoints(value) >= min, { message: `Must be at least ${min} characters` })
+		.refine((value) => codePoints(value) <= max, { message: `Must be at most ${max} characters` })
+		.refine((value) => !bcrypt || utf8Bytes(value) <= BCRYPT_BYTES, {
+			message: `Must be at most ${BCRYPT_BYTES} bytes in UTF-8`,
+		})
+	/* JSON Schema counts a length by code point, as the refines do; zod's own min and max count UTF-16 units */
+	return schema.meta({
+		maxLength: max,
+		...(min > 0 ? { minLength: min } : {}),
+		"x-comb-text": STORABLE_TEXT_RULE,
+		...(bcrypt ? { "x-comb-maxBytes": BCRYPT_BYTES } : {}),
+	})
+}
+
+/** A password typed to sign in: storable, NFC, at most `max` characters (128 by default), and bcrypt's bytes under it */
+function typed({ hash, max = 128 }: TypedPasswordOptions = {}): z.ZodString {
+	refuseBound("max", max, 1)
+	return password(0, max, hash)
+}
+
+/** A password set: a typed one's rules and at least `min` characters (15 by default) */
+function set({ hash, max = 128, min = 15 }: PasswordTextOptions = {}): z.ZodString {
+	refuseBound("min", min, 0)
+	refuseBound("max", max, 1)
+	if (min > max) throw new TypeError(`passwordText's min ${min} is past its max ${max}`)
+	return password(min, max, hash)
+}
+
+/** A password set, and `typed` for one typed to sign in */
+export const passwordText: typeof set & { typed: typeof typed } = /* @__PURE__ */ Object.assign(set, { typed })

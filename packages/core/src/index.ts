@@ -1,5 +1,11 @@
 export { isCidr } from "./cidr.ts"
 export { CombError } from "./error.ts"
+export {
+	type PasswordHash,
+	passwordText,
+	type PasswordTextOptions,
+	type TypedPasswordOptions,
+} from "./password-text.ts"
 export { isStorableText, STORABLE_TEXT_RULE, storableText } from "./storable-text.ts"
 export {
 	carryCombMeta,

@@ -27,7 +27,7 @@ const COLUMNS: Record<string, string> = {
 	name: 'c.text("name", { name: true })',
 	owner: 'c.ref("owner_id").references(() => owner.id)',
 	plain: 'c.json("plain", Profile)',
-	pw: 'c.text("pw", { password: true, max: 50 })',
+	pw: 'c.text("pw", { password: true, max: 255 })',
 	pw_pattern: 'c.text("pw_pattern", { password: true, pattern: "/\\\\d/" })',
 	required: 'c.text("required").notNull()',
 	url: 'c.text("url", { url: true, pattern: "/\\\\.com/" })',
@@ -114,7 +114,9 @@ describe("the manifest states what the DTO enforces (C2 of r20)", () => {
 			expect(of(true)).toEqual(dialect === "postgres" ? { real: none, uid: none } : {})
 			expect(id).toEqual({ max: 48, maxBytes: null, min: 1, patterns: ["^\\S{1,48}$"] })
 			/* the cases the review named, stated outright */
-			expect(stated["pw"]).toEqual({ max: 50, maxBytes: null, min: 8, patterns: ["^[\\x20-\\x7E]+$"] })
+			/* a password column holds the hash: its declared bounds and pattern, none of comb's own (C1 of r21) */
+			expect(stated["pw"]).toEqual({ max: 255, maxBytes: null, min: null, patterns: [] })
+			expect(stated["pw_pattern"]).toEqual({ max: null, maxBytes: null, min: null, patterns: ["\\d"] })
 			expect([stated["email"]?.min, stated["required"]?.min, stated["doc"]?.maxBytes]).toEqual([6, 1, 16])
 		},
 	)

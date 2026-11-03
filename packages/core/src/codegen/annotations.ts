@@ -47,20 +47,13 @@ const DROPPED: Readonly<Record<string, { keys: readonly string[]; said: string; 
 	url: { keys: ["lowercase", "uppercase"], said: "it is kept as written, but for its trim", what: "a url" },
 }
 
-/* the most bytes bcrypt reads of a password */
-const PASSWORD_MAX = 72
-
-/** Refuses a second kind, a password's max past bcrypt's 72, or a key the one declared would drop, each of which a reader of the tables file believes holds */
+/** Refuses a second kind, or a key the one declared would drop, each of which a reader of the tables file believes holds */
 function refuseKinds(constraints: Readonly<Record<string, ConstantValue>>, place: string): void {
 	const [kind, second] = KINDS.filter((each) => constraints[each] === true)
 	if (second !== undefined) throw new Error(`${place}: ${kind} and ${second} contradict; declare one`)
 	const dropped = DROPPED[kind as string]
 	const key = dropped?.keys.find((each) => constraints[each] === true)
 	if (key !== undefined) throw new Error(`${place}: ${dropped?.what} takes no ${key}: ${dropped?.said}`)
-	/* a password's 72 is bcrypt's, which the DTO holds it to whatever it declares (C5 of r20) */
-	const max = constraints["max"]
-	if (kind === "password" && typeof max === "number" && max > PASSWORD_MAX)
-		throw new Error(`${place}: a password's max is at most ${PASSWORD_MAX}: bcrypt's limit`)
 }
 
 /**

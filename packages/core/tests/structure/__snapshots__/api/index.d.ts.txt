@@ -1,6 +1,7 @@
 // index.d.ts
 export { isCidr } from "./cidr.ts";
 export { CombError } from "./error.ts";
+export { type PasswordHash, passwordText, type PasswordTextOptions, type TypedPasswordOptions, } from "./password-text.ts";
 export { isStorableText, STORABLE_TEXT_RULE, storableText } from "./storable-text.ts";
 export { carryCombMeta, COMB_FILTER_GRAMMAR, COMB_META_KEY, COMB_META_VERSION, combMeta, type CombEntityMeta, type CombEntityMetaInput, type CombFilterGrammar, type CombMeta, type CombMetaInput, type CombMetaKind, type CombMetaStamp, type CombFilterField, type CombQueryMeta, type CombQueryMetaInput, readCombEntityMeta, readCombMeta, readCombQueryMeta, } from "./meta.ts";
 export { createUlidFactory, generateId, generateUlid, type UlidFactoryOptions } from "./id.ts";
@@ -38,6 +39,38 @@ export declare class CombError extends Error {
         table?: string | undefined;
     });
 }
+
+// password-text.d.ts
+/**
+ * The plaintext a password column's hash is made from (C1, C4 of r21), after NIST SP 800-63B rev 4
+ * §3.1.1.2: any storable text, normalized to NFC and then counted by code point, never trimmed,
+ * with no composition rule. `passwordText()` sets a password, at least 15 characters (a password
+ * used only with a second factor may take `min: 8`); `passwordText.typed()` reads one typed to
+ * sign in, holding only the max, so a password set before a minimum still signs in. Under
+ * `hash: "bcrypt"` both refuse past the 72 UTF-8 bytes bcrypt reads. The column itself holds the
+ * hash, which codegen holds to its declared bounds alone.
+ */
+import * as z from "zod";
+/** The scheme a password is hashed with, where it limits what the hash reads */
+export type PasswordHash = "bcrypt";
+/** What a typed password is held to: the most characters, and the scheme it is hashed with */
+export type TypedPasswordOptions = {
+    hash?: PasswordHash | undefined;
+    max?: number | undefined;
+};
+/** What a password set is held to: a typed one's, and the fewest characters */
+export type PasswordTextOptions = TypedPasswordOptions & {
+    min?: number | undefined;
+};
+/** A password typed to sign in: storable, NFC, at most `max` characters (128 by default), and bcrypt's bytes under it */
+declare function typed({ hash, max }?: TypedPasswordOptions): z.ZodString;
+/** A password set: a typed one's rules and at least `min` characters (15 by default) */
+declare function set({ hash, max, min }?: PasswordTextOptions): z.ZodString;
+/** A password set, and `typed` for one typed to sign in */
+export declare const passwordText: typeof set & {
+    typed: typeof typed;
+};
+export {};
 
 // storable-text.d.ts
 /**
