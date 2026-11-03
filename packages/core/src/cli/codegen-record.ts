@@ -153,25 +153,31 @@ function refuseShared(runs: readonly Run[], { record, recordDir }: { record: Run
 	}
 }
 
-/** Where a held line goes */
-type Stream = "err" | "out"
+/** A held line: an err line, an out line, or a context line, said on out whether or not the files are written */
+type Stream = "context" | "err" | "out"
 
 /**
  * An io that holds its out and err lines in the order said, so each database's warnings follow its
- * header (KC10n); `commit` writes, then says every held line, and `failed` says that a run that
+ * header (KC10n); `context` holds a line said on out either way, as a database's header is (AD3 of
+ * the area D review); `commit` writes, then says every held line, and `failed` says that a run that
  * failed before its write wrote nothing, then fails with its error (KC10 of r22b)
  */
-type Held = { commit: (write: () => void) => void; failed: (error: unknown) => never; held: CliIo }
+type Held = {
+	commit: (write: () => void) => void
+	context: (line: string) => void
+	failed: (error: unknown) => never
+	held: CliIo
+}
 
 /**
- * Hold `io`'s lines until the files are written. When they are not, only the err lines are said,
- * since a warning stays true and what a run generated does not
+ * Hold `io`'s lines until the files are written. When they are not, only the err and context lines
+ * are said, since a warning and the database it is about stay true and what a run generated does not
  */
 export function holdLines(io: CliIo): Held {
 	const lines: Array<readonly [Stream, string]> = []
 	const hold = (stream: Stream) => (line: string) => void lines.push([stream, line])
 	const flush = (written: boolean) => {
-		for (const [stream, line] of lines) if (written || stream === "err") io[stream](line)
+		for (const [stream, line] of lines) if (written || stream !== "out") io[stream === "err" ? "err" : "out"](line)
 	}
 	const failed = (error: unknown): never => {
 		flush(false)
@@ -187,5 +193,5 @@ export function holdLines(io: CliIo): Held {
 		}
 		flush(true)
 	}
-	return { commit, failed, held: { ...io, err: hold("err"), out: hold("out") } }
+	return { commit, context: hold("context"), failed, held: { ...io, err: hold("err"), out: hold("out") } }
 }

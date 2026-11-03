@@ -259,7 +259,8 @@ describe("comb codegen: what a run leaves on disk (F12, F19)", () => {
 		writeFileSync(join(dir, "comb.config.ts"), `export default { databases: ${both} }\n`)
 		const io = makeIo(dir)
 		expect(await runCliWithFakes(["codegen"], io)).toBe(1)
-		expect(io.outputs).toEqual([])
+		/* each database's header, which stays true (AD3 of the area D review), and nothing it generated */
+		expect(io.outputs).toEqual(["\nCodegen: a", "\nCodegen: b"])
 		expect(io.errors).toContain("Nothing was written: codegen writes every database's files once all of them succeed")
 		expect(existsSync(join(dir, "gen"))).toBe(false)
 		const good = makeIo(dir)
@@ -402,11 +403,14 @@ describe("codegen says each warning under its database (KC10n; siblings: a faile
 		writeFileSync(join(dir, "b.tables.ts"), `${HEAD}${POST}${POST.replace("post =", "again =")}`)
 		const { code, lines } = await said(dir, ["codegen", "-g", "rows"])
 		expect(code).toBe(1)
-		expect(lines.filter((line) => line.startsWith("out "))).toEqual([])
+		/* AD3 of the area D review: a header is true whether or not anything was written, so the warnings and the error keep theirs */
+		expect(lines.filter((line) => line.startsWith("out "))).toEqual(["out \nCodegen: a", "out \nCodegen: b"])
 		const nothing = lines.indexOf(
 			"err Nothing was written: codegen writes every database's files once all of them succeed",
 		)
-		expect(lines.findIndex((line) => line.startsWith("err   warn: "))).toBeLessThan(nothing)
+		expect(lines.indexOf("out \nCodegen: a")).toBeLessThan(lines.findIndex((line) => line.startsWith("err   warn: ")))
+		expect(lines.findIndex((line) => line.startsWith("err   warn: "))).toBeLessThan(lines.indexOf("out \nCodegen: b"))
+		expect(lines.indexOf("out \nCodegen: b")).toBeLessThan(nothing)
 		expect(existsSync(join(dir, "gen"))).toBe(false)
 	})
 
@@ -415,8 +419,13 @@ describe("codegen says each warning under its database (KC10n; siblings: a faile
 		warnedPair(dir, true)
 		const { code, lines } = await said(dir, ["codegen", "-g", "rows"])
 		expect(code).toBe(1)
-		expect(lines.filter((line) => line.startsWith("out "))).toEqual([])
-		expect(lines.filter((line) => line.startsWith("err   warn: "))).toHaveLength(2)
+		expect(lines.filter(headerOrWarning).map((line) => line.replace(/warn: .*/, "warn"))).toEqual([
+			"out \nCodegen: a",
+			"err   warn",
+			"out \nCodegen: b",
+			"err   warn",
+		])
+		expect(lines.filter((line) => line.startsWith("out "))).toEqual(["out \nCodegen: a", "out \nCodegen: b"])
 		expect(lines.at(-1)).toMatch(
 			/^err databases a and b both write gen\/app\.rows\.gen\.ts; give each its own filePrefix or output$/,
 		)

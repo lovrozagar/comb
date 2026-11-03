@@ -282,9 +282,9 @@ export async function cmdCodegen(argv: readonly string[], io: CliIo): Promise<vo
 	const staged: Staged = new Map()
 	const runs: Run[] = []
 	/* each line held until the files are written, so a failed run claims none it never wrote (KC10 of r22b) */
-	const { commit, failed, held } = holdLines(io)
+	const { commit, context, failed, held } = holdLines(io)
 	for (const database of picked) {
-		if (!database.direct) held.out(`\nCodegen: ${database.name}`)
+		if (!database.direct) context(`\nCodegen: ${database.name}`)
 		runs.push(await generate(database, { only, staged }, held).catch((error: unknown) => failed(error)))
 	}
 	const direct = picked.find((database) => database.direct)
