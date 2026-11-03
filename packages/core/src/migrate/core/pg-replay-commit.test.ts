@@ -36,7 +36,7 @@ function runOf(server: { counts?: number[]; on?: string; snapshot?: Row[] }): { 
 		owner: "comb_replay_7_9",
 		seen: new Map([["role kept", { names: ["kept"], row: { rolconnlimit: -1 } }]]),
 		sql,
-		strays: { databases: [], roles: [] },
+		strays: { databases: [], roles: [], slots: [] },
 	}
 	return { run, sent }
 }
@@ -106,7 +106,7 @@ describe("window", () => {
 		expect(refused).toMatch(
 			/; comb drops role svc, database Big unless a session is in it, which the file added; devUrl's server keeps role kept changed \(rolconnlimit\), which comb cannot undo; check stops here$/,
 		)
-		expect(run.strays).toEqual({ databases: ["Big"], roles: ["svc"] })
+		expect(run.strays).toEqual({ databases: ["Big"], roles: ["svc"], slots: [] })
 	})
 
 	it("names the whole file when no one statement ran, and leaves out the parts that do not apply", async () => {

@@ -53,6 +53,13 @@ async function settle(step: () => Promise<unknown>): Promise<void> {
  * a SQLSTATE of its own (XX000, "could not find tuple for role"), so a role gone after any failure
  * is dropped
  */
+/** Drops the replication slot `slot`, if it is still there */
+async function dropSlot(admin: Sql, slot: string): Promise<void> {
+	await admin.unsafe("SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = $1", [
+		slot,
+	])
+}
+
 async function dropRole(admin: Sql, role: string): Promise<void> {
 	try {
 		await admin.unsafe(`DROP ROLE IF EXISTS ${sqlIdentifier(role)}`, [])
@@ -187,6 +194,7 @@ export {
 	codeOf,
 	copyExtensions,
 	dropRole,
+	dropSlot,
 	extensionsOf,
 	literal,
 	makeDatabase,

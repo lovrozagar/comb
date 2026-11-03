@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { applyWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { pgCheck, T, tempDir } from "../support/pg-check.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
-import { dropRoles, query, roleOf, unique } from "../support/pg-roles.ts"
+import { dropRoles, LOOPBACK, query, roleOf, unique } from "../support/pg-roles.ts"
 
 const { checked, checkThenApply, devUrl, dir, files, options } = pgCheck()
 
@@ -81,10 +81,6 @@ describe("a txmode none file's statement runs in a transaction of its own first 
 		}
 	}, 60_000)
 })
-
-/* a connection string to the server's own socket, in the database the replay runs in, as the role that replays */
-const LOOPBACK =
-	"format('host=%s port=%s dbname=%s user=%s', split_part(current_setting('unix_socket_directories'), ',', 1), current_setting('port'), current_database(), current_user)"
 
 /** The databases of the server named `name` */
 const databaseOf = (name: string) => query(pgUrl(), `SELECT datname FROM pg_database WHERE datname = '${name}'`)

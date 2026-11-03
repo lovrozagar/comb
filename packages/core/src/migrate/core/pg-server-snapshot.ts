@@ -4,6 +4,7 @@
  * backend's counts never see (pg-server-writes.ts). The read is the server's, another session's work
  * in it too, so each row carries the names of the objects it is about, and a change is a file's only
  * when one is a name the file spells (namesIn in sql-code.ts). A replay's own rows are left out.
+ * Beside the catalogs, the server's replication slots (PR2 of r22b), which no catalog holds.
  */
 import type { Sql } from "./pg-replay-database.ts"
 import { CATALOGS, changedFields } from "./pg-server-writes.ts"
@@ -33,12 +34,22 @@ const REPLAYS: Readonly<Record<string, { from: string; mine: string }>> = {
 	},
 }
 
+// lookup-table: what the server holds beside its catalogs, read as the catalogs are: a slot's fields that do not move as it is used
+const BESIDE: Readonly<Record<string, { names: string; noun: string; query: string }>> = {
+	pg_replication_slots: {
+		names: "ARRAY[s.slot_name::text]",
+		noun: "replication slot",
+		query:
+			"SELECT slot_name AS key, jsonb_build_object('type', slot_type, 'plugin', plugin, 'database', database, 'temporary', temporary) AS row FROM pg_replication_slots s",
+	},
+}
+
 /**
  * Every shared catalog's committed rows in one read, a replay's own left out: each catalog's query
  * with the rows a replay makes filtered where it reads them, and the names each row is about
  */
 function snapshotRead(): string {
-	return Object.entries(CATALOGS)
+	return Object.entries({ ...CATALOGS, ...BESIDE })
 		.map(([catalog, { names, noun, query }]) => {
 			const replays = REPLAYS[catalog]
 			const read = (
@@ -110,19 +121,25 @@ function snapshotChanges(before: Snapshot, after: Snapshot, names?: ReadonlySet<
 	return changes
 }
 
-/** The roles and databases named in `names` that `after` holds and `before` does not */
-function added(
-	before: Snapshot,
-	after: Snapshot,
-	names: ReadonlySet<string>,
-): { databases: string[]; roles: string[] } {
-	const out = { databases: [] as string[], roles: [] as string[] }
+/** What the cleanup drops, by the noun its subject starts with */
+type Strays = { databases: string[]; roles: string[]; slots: string[] }
+
+// lookup-table: the nouns of what a file adds that the cleanup drops, by where it keeps them
+const DROPPED: ReadonlyArray<[keyof Strays, string]> = [
+	["databases", "database "],
+	["roles", "role "],
+	["slots", "replication slot "],
+]
+
+/** The roles, databases and replication slots named in `names` that `after` holds and `before` does not */
+function added(before: Snapshot, after: Snapshot, names: ReadonlySet<string>): Strays {
+	const out: Strays = { databases: [], roles: [], slots: [] }
 	for (const subject of after.keys()) {
 		if (before.has(subject) || !about(subject, { after, before }, names)) continue
-		if (subject.startsWith("role ")) out.roles.push(subject.slice("role ".length))
-		else if (subject.startsWith("database ")) out.databases.push(subject.slice("database ".length))
+		const [where, noun] = DROPPED.find(([, prefix]) => subject.startsWith(prefix)) ?? []
+		if (where !== undefined) out[where].push(subject.slice(noun?.length))
 	}
 	return out
 }
 
-export { added, prepareSnapshot, type Snapshot, snapshot, snapshotChanges }
+export { added, prepareSnapshot, type Snapshot, snapshot, snapshotChanges, type Strays }

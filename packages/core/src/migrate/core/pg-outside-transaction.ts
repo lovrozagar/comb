@@ -21,8 +21,11 @@
  * the dev replay runs each history file as Atlas applies it, committed, in a database of its own,
  * so a statement that reaches past that database would change devUrl's server for good, the
  * target's own when they share one. A structure test holds every statement node type of the parser
- * to this table or to the ones ruled database-scoped.
+ * to this table or to the ones ruled database-scoped. A statement that runs a function acting on the
+ * server (pg-server-calls.ts) reaches as far (PR2 of r22b), unless the statement only defines it.
  */
+import { serverCallIn } from "./pg-server-calls.ts"
+
 type Node = Record<string, unknown>
 
 /** A statement's one node: its type and fields */
@@ -239,7 +242,31 @@ const BEYOND: Readonly<Record<string, (node: Node) => string | undefined>> = {
 	TransactionStmt: (node) => PREPARED[String(node["kind"])],
 }
 
+// lookup-table: the statements whose expressions do not run when they do: a definition's run later, if at all, and a plan's without ANALYZE and a table's made WITH NO DATA never
+const DEFINES: Readonly<Record<string, (node: Node) => boolean>> = {
+	AlterPolicyStmt: () => true,
+	CreateDomainStmt: () => true,
+	CreateFunctionStmt: () => true,
+	CreatePolicyStmt: () => true,
+	CreateStmt: () => true,
+	CreateTableAsStmt: (node) => (node["into"] as Node)["skipData"] === true,
+	CreateTrigStmt: () => true,
+	ExplainStmt: (node) => {
+		const analyze = optionsOf(node).get("analyze")
+		return analyze === undefined || isOff(analyze)
+	},
+	PrepareStmt: () => true,
+	RuleStmt: () => true,
+	ViewStmt: () => true,
+}
+
+/** What a statement that runs a function acting on the server is: a call of it */
+function serverCall(type: string, node: Node): string | undefined {
+	const call = DEFINES[type]?.(node) === true ? undefined : serverCallIn(node)
+	return call === undefined ? undefined : `a call of ${call}`
+}
+
 /** What a statement is, by its parse tree's node `type`, when its scope is the server or another database; undefined when it is its database's */
-const beyondDatabase = (type: string, node: Node): string | undefined => BEYOND[type]?.(node)
+const beyondDatabase = (type: string, node: Node): string | undefined => BEYOND[type]?.(node) ?? serverCall(type, node)
 
 export { BEYOND, beyondDatabase, blockAfter, CONCURRENT, INSIDE, insideOnly, nodeOf, OUTSIDE, outsideOnly }

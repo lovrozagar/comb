@@ -629,7 +629,8 @@ export declare function generateIncrementalMigration(options: MigrateDiffOptions
  * engine: on SQLite by the proof run (proof-engine.ts), on Postgres from its parse tree
  * (pg-tree.ts), which also rates the code a statement runs: DO blocks, routines and function
  * calls. A statement Postgres refuses inside a transaction is refused outright unless its file
- * runs outside one.
+ * runs outside one, and one it refuses outside a block is refused in a file that does, but within
+ * the file's own BEGIN.
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
 import { type Read } from "./classify-verdict.ts";
@@ -922,10 +923,11 @@ declare function reindexedOf(statements: readonly string[]): Set<string>;
 declare const outsideTransaction: (sql: string) => boolean;
 /** A statement as the gate read it: its code, its text, and the dialect it was read as */
 /** A statement as the gate reads it: its code, its text, and on Postgres its parse tree, undefined where the parser refused it */
-/** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction */
+/** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction, or only inside a block */
 type ReadStatement = {
     code: string;
     dialect: Dialect;
+    inside?: string | undefined;
     outside?: string | undefined;
     stmt: string;
     tree?: unknown;
@@ -941,5 +943,5 @@ declare const PROCESS_PRAGMAS: ReadonlySet<string>;
  * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
  * `-- comb:allow-unsafe:` overrides this
  */
-declare function refuseUnrunnable({ code, dialect, outside, stmt }: ReadStatement, sql: string, d1?: boolean): void;
+declare function refuseUnrunnable({ code, dialect, inside, outside, stmt }: ReadStatement, sql: string, d1?: boolean): void;
 export { ftsCommandFindings, outsideTransaction, preview, PROCESS_PRAGMAS, type ReadStatement, refuseUnrunnable, reindexedOf, };

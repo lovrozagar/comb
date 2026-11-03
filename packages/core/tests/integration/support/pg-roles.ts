@@ -32,6 +32,10 @@ export async function asRole(devUrl: string, role: string, attributes: string): 
 	return url.toString()
 }
 
+/* a connection string to the server's own socket, in the database the replay runs in, as the role that replays */
+export const LOOPBACK =
+	"format('host=%s port=%s dbname=%s user=%s', split_part(current_setting('unix_socket_directories'), ',', 1), current_setting('port'), current_database(), current_user)"
+
 export const dropRoles = (...roles: string[]): Promise<unknown> =>
 	query(pgUrl(), `DROP ROLE IF EXISTS ${roles.join(", ")}`)
 

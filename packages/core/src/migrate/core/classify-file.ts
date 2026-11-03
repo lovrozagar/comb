@@ -81,8 +81,15 @@ const outsideTransaction = (sql: string): boolean => {
 
 /** A statement as the gate read it: its code, its text, and the dialect it was read as */
 /** A statement as the gate reads it: its code, its text, and on Postgres its parse tree, undefined where the parser refused it */
-/** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction */
-type ReadStatement = { code: string; dialect: Dialect; outside?: string | undefined; stmt: string; tree?: unknown }
+/** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction, or only inside a block */
+type ReadStatement = {
+	code: string
+	dialect: Dialect
+	inside?: string | undefined
+	outside?: string | undefined
+	stmt: string
+	tree?: unknown
+}
 
 /** SQLite's transaction control at the top of a file, but a rollback to a savepoint, which nests */
 const SQLITE_TRANSACTION = /^(?:BEGIN|COMMIT|END|START TRANSACTION)\b|^ROLLBACK(?: TRANSACTION)?$/i
@@ -165,7 +172,7 @@ function pragmaRefusal(pragma: Pragma, d1: boolean): string | undefined {
  * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
  * `-- comb:allow-unsafe:` overrides this
  */
-function refuseUnrunnable({ code, dialect, outside, stmt }: ReadStatement, sql: string, d1 = false): void {
+function refuseUnrunnable({ code, dialect, inside, outside, stmt }: ReadStatement, sql: string, d1 = false): void {
 	if (dialect === "sqlite" && /^VACUUM\b/i.test(code)) {
 		throw new Error(
 			`${preview(stmt)}: VACUUM cannot run inside a migration's transaction; run it outside the migrations`,
@@ -186,6 +193,12 @@ function refuseUnrunnable({ code, dialect, outside, stmt }: ReadStatement, sql: 
 	if (outside !== undefined && !outsideTransaction(sql)) {
 		throw new Error(
 			`${preview(stmt)}: Postgres runs ${outside} only outside a transaction; put it in a file of its own that starts with "-- atlas:txmode none" and a blank line`,
+		)
+	}
+	/* PA13 of r22b: Atlas sends a txmode none file's statements bare, so Postgres refuses these there */
+	if (inside !== undefined && outsideTransaction(sql)) {
+		throw new Error(
+			`${preview(stmt)}: Postgres runs ${inside} only inside a transaction block ("${inside} can only be used in transaction blocks"), and Atlas sends a "-- atlas:txmode none" file's statements bare; put it between the file's own BEGIN and COMMIT, or in a file without the txmode line`,
 		)
 	}
 }

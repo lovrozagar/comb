@@ -36,20 +36,23 @@ type At = { name: string; names: ReadonlySet<string>; sent: string | undefined; 
 async function window(run: Run, { name, names, sent, stops }: At): Promise<void> {
 	const now = await snapshot(run.admin)
 	const changes = snapshotChanges(run.seen, now, names)
-	const { databases, roles } = added(run.seen, now, names)
+	const { databases, roles, slots } = added(run.seen, now, names)
 	run.seen = now
 	if (changes.length === 0) return
 	run.strays.databases.push(...databases)
 	run.strays.roles.push(...roles)
+	run.strays.slots.push(...slots)
 	const strays = [
 		...roles.map((role) => `role ${role}`),
 		...databases.map((database) => `database ${database} unless a session is in it`),
+		...slots.map((slot) => `replication slot ${slot} unless a session holds it`),
 	]
 	const dropped = strays.length === 0 ? "" : `; comb drops ${strays.join(", ")}, which the file added`
 	/* the read is committed, so a change it shows to an object the file did not add stays */
 	const dropping = new Set([
 		...roles.map((role) => `role ${role} added`),
 		...databases.map((d) => `database ${d} added`),
+		...slots.map((slot) => `replication slot ${slot} added`),
 	])
 	const kept = changes.filter((change) => !dropping.has(change))
 	const left = kept.length === 0 ? "" : `; devUrl's server keeps ${kept.join(", ")}, which comb cannot undo`

@@ -19,6 +19,7 @@ describe("snapshotChanges and added", () => {
 		["database Big", ["Big"], {}],
 		["database theirs", ["theirs"], { datconnlimit: 3 }],
 		["membership svc to kept by me", ["svc", "kept"], {}],
+		["replication slot feed", ["feed"], { type: "physical" }],
 	])
 
 	it("names every change, in order, without names to attribute by", () => {
@@ -26,6 +27,7 @@ describe("snapshotChanges and added", () => {
 			"database Big added",
 			"database theirs changed (datconnlimit)",
 			"membership svc to kept by me added",
+			"replication slot feed added",
 			"role gone removed",
 			"role kept changed (rolconnlimit)",
 			"role other added",
@@ -34,13 +36,14 @@ describe("snapshotChanges and added", () => {
 	})
 
 	it("keeps only the changes to a subject the file names, by any of its names", () => {
-		const names = new Set(["svc", "gone", "Big"])
+		const names = new Set(["svc", "gone", "Big", "feed"])
 		expect(snapshotChanges(before, after, names)).toEqual([
 			"database Big added",
 			"membership svc to kept by me added",
+			"replication slot feed added",
 			"role gone removed",
 			"role svc added",
 		])
-		expect(added(before, after, names)).toEqual({ databases: ["Big"], roles: ["svc"] })
+		expect(added(before, after, names)).toEqual({ databases: ["Big"], roles: ["svc"], slots: ["feed"] })
 	})
 })

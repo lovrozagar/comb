@@ -92,11 +92,12 @@ function pgCheck() {
 		return refused === undefined ? { out } : { out, refused }
 	}
 
-	/** `one` then `two` checked, then applied, on a fresh target replayed on `dev`: why each refused, or undefined */
-	const checkThenApply = (one: string, two: string, dev = devUrl()) =>
+	/** `one` then `two` checked, then applied, on a fresh target replayed on devUrl: why each refused, or undefined; check's lines in `out` */
+	const checkThenApply = (one: string, two: string, out: string[] = []) =>
 		withScratchDb(async (url) => {
 			files(one, two)
-			const tried = (checkOnly: boolean) => refusal(applyWithAtlas({ ...options({ devUrl: dev, url }, []), checkOnly }))
+			const tried = (checkOnly: boolean) =>
+				refusal(applyWithAtlas({ ...options({ devUrl: devUrl(), url }, checkOnly ? out : []), checkOnly }))
 			return { check: await tried(true), apply: await tried(false) }
 		})
 

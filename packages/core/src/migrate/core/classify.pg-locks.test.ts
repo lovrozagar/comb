@@ -102,3 +102,24 @@ describe("ATTACH PARTITION, REFRESH MATERIALIZED VIEW and LOCK", () => {
 		expect(rate("LOCK TABLE t IN ROW EXCLUSIVE MODE;").lockWarnings).toEqual([])
 	})
 })
+
+/* PA13 of r22b: a statement Postgres runs only inside a transaction block cannot run in a txmode none file, which Atlas sends bare */
+describe("a statement Postgres runs only inside a block, in a txmode none file (PA13; sibling: r22 P1's LOCK and SAVEPOINT on a postgres:// devUrl)", () => {
+	it.each([
+		["LOCK TABLE t IN SHARE MODE;", "LOCK TABLE"],
+		["SAVEPOINT s;", "SAVEPOINT"],
+		["RELEASE s;", "RELEASE SAVEPOINT"],
+		["ROLLBACK TO s;", "ROLLBACK TO SAVEPOINT"],
+		["DECLARE c CURSOR FOR SELECT 1;", "DECLARE CURSOR"],
+	])("refuses %j, naming Postgres's message, and rates it in a file's transaction", (sql, what) => {
+		expect(() => rate(`-- atlas:txmode none\n\n${sql}`)).toThrow(`${what} can only be used in transaction blocks`)
+		expect(() => rate(sql)).not.toThrow()
+	})
+
+	it("passes a cursor held past its transaction, and the file's own block, and warns of no lock there", () => {
+		expect(() => rate("-- atlas:txmode none\n\nDECLARE c CURSOR WITH HOLD FOR SELECT 1;")).not.toThrow()
+		expect(rate("-- atlas:txmode none\n\nBEGIN;\nLOCK TABLE t IN SHARE MODE;\nCOMMIT;").lockWarnings).toEqual([
+			"LOCK TABLE t IN SHARE MODE (locks t against writes until the file's transaction ends)",
+		])
+	})
+})

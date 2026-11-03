@@ -311,6 +311,8 @@ declare function settle(step: () => Promise<unknown>): Promise<void>;
  * a SQLSTATE of its own (XX000, "could not find tuple for role"), so a role gone after any failure
  * is dropped
  */
+/** Drops the replication slot `slot`, if it is still there */
+declare function dropSlot(admin: Sql, slot: string): Promise<void>;
 declare function dropRole(admin: Sql, role: string): Promise<void>;
 /** The backend `admin` runs on, as a replay's database name and role tag carry it: `<pid>_<start>` */
 declare function ownerOf(admin: Sql): Promise<string>;
@@ -335,7 +337,7 @@ declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
     makes: ReadonlySet<string>;
     refused: (name: string, error: unknown) => Error;
 }): Promise<void>;
-export { codeOf, copyExtensions, dropRole, extensionsOf, literal, makeDatabase, ownerOf, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
+export { codeOf, copyExtensions, dropRole, dropSlot, extensionsOf, literal, makeDatabase, ownerOf, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
 
 // migrate/core/pg-live-catalog.d.ts
 /**

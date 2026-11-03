@@ -50,6 +50,7 @@ import { beyondDatabase, blockAfter, insideOnly, nodeOf } from "./pg-outside-tra
 import {
 	copyExtensions,
 	dropRole,
+	dropSlot,
 	extensionsOf,
 	makeDatabase,
 	ownerOf,
@@ -153,8 +154,9 @@ async function prepare(
 
 /**
  * `run`'s cleanup, each step settled: its connection closed, a query in flight with it, any backend
- * still in its database ended, the database dropped, each role it made, and the roles a refused
- * window added, with its databases no session is in
+ * still in its database ended, the replication slots a refused window added, which a database's
+ * drop waits on, the database dropped, each role it made, and the roles that window added, with its
+ * databases no session is in
  */
 async function cleanUp(run: Run): Promise<void> {
 	await settle(() => run.sql.end({ timeout: 0 }))
@@ -164,6 +166,7 @@ async function cleanUp(run: Run): Promise<void> {
 			[run.database],
 		),
 	)
+	for (const slot of run.strays.slots) await settle(() => dropSlot(run.admin, slot))
 	await settle(() => run.admin.unsafe(`DROP DATABASE IF EXISTS ${run.database}`, []))
 	for (const role of run.created) await settle(() => dropRole(run.admin, role))
 	for (const name of run.strays.databases)
@@ -251,7 +254,7 @@ async function onDev<T>(
 				owner,
 				seen: new Map(),
 				sql: connect({ ...options, database }),
-				strays: { databases: [], roles: [] },
+				strays: { databases: [], roles: [], slots: [] },
 			}
 			cleanup.set(() => cleanUp(run))
 			try {
