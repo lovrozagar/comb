@@ -96,6 +96,34 @@ describe("likeSearch over a _search column searchText wrote (Q14)", () => {
 	})
 })
 
+/* QE2 of r22b: 0.14's instr compared the folded term with the raw text, where LIKE (0.13) folded ASCII case */
+describe("likeSearch folds ASCII case on any expression (QE2; sibling: a `searchText` column)", () => {
+	const post = sqliteTable("post", { title: text("title").notNull() })
+
+	it("finds a raw title by any ASCII case of its words, and no accented word, which only a _search column folds", async () => {
+		const harness = libsqlMemory()
+		try {
+			await harness.client.execute("CREATE TABLE post (title TEXT NOT NULL)")
+			for (const title of ["Hello World", "hello world", "Postgres Tips", "Café Crème"])
+				await harness.client.execute({ args: [title], sql: "INSERT INTO post VALUES (?)" })
+			const titles = async (q: string) =>
+				(
+					await harness.db
+						.select({ title: post.title })
+						.from(post)
+						.where(likeSearch(post.title)(q) as SQL)
+				).map((row) => row.title)
+			expect(await titles("Hello")).toEqual(["Hello World", "hello world"])
+			expect(await titles("postgres TIPS")).toEqual(["Postgres Tips"])
+			/* searchText folds the term's accent and SQLite's lower() folds ASCII only, so the raw title's accent never matches */
+			expect(await titles("café")).toEqual([])
+			expect(await titles("cafe")).toEqual([])
+		} finally {
+			harness.close()
+		}
+	})
+})
+
 describe("likeSearch on a term that folds to no letter or digit (R7)", () => {
 	const ROWS = ["Οδυσσέας ταξιδεύει", "page not found", "hello world", "café ´au lait"]
 

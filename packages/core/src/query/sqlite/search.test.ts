@@ -38,8 +38,8 @@ describe("likeSearch", () => {
 
 	/* U21: instr finds a folded term with no LIKE pattern, so no term meets D1's 50-byte pattern cap */
 	it("binds one instr per term, ANDed", () => {
-		expect(bound("  hello  ")).toEqual({ params: ["hello"], sql: `instr("item"."_search", ?) > 0` })
-		expect(bound("a b")?.sql).toBe(`instr("item"."_search", ?) > 0 AND instr("item"."_search", ?) > 0`)
+		expect(bound("  hello  ")).toEqual({ params: ["hello"], sql: `instr(lower("item"."_search"), ?) > 0` })
+		expect(bound("a b")?.sql).toBe(`instr(lower("item"."_search"), ?) > 0 AND instr(lower("item"."_search"), ?) > 0`)
 	})
 
 	it("folds diacritics and case the way the _search column stores them", () => {
@@ -85,7 +85,7 @@ describe("searchText: the _search column's writer, which likeSearch reads with (
 describe("likeSearch on a raw expression (C7)", () => {
 	it("takes an SQL expression as well as a column", () => {
 		const built = likeSearch(drizzleSql.raw('"_search"'))("hi")
-		expect(compile(built as SQL)).toEqual({ params: ["hi"], sql: `instr("_search", ?) > 0` })
+		expect(compile(built as SQL)).toEqual({ params: ["hi"], sql: `instr(lower("_search"), ?) > 0` })
 	})
 })
 

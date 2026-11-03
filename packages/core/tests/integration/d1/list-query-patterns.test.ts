@@ -101,3 +101,23 @@ describe("a pattern on D1 past its LIKE cap (U21)", () => {
 		expect(String(classified?.cause)).toContain("50 bytes")
 	})
 })
+
+/* QE2 of r22b: 0.14's instr compared the folded term with the raw text, where LIKE (0.13) folded ASCII case */
+describe("likeSearch folds ASCII case on any expression on D1 (QE2; sibling: a `searchText` column)", () => {
+	it("finds a raw title by any ASCII case of its words", async () => {
+		harness ??= await d1Memory()
+		await harness.CORE.exec("CREATE TABLE IF NOT EXISTS post (id integer PRIMARY KEY, title text, _search text)")
+		await harness.CORE.exec("DELETE FROM post")
+		for (const [i, title] of ["Hello World", "hello world", "Postgres Tips"].entries())
+			await harness.CORE.prepare("INSERT INTO post VALUES (?, ?, NULL)")
+				.bind(i + 1, title)
+				.run()
+		const db = drizzle(harness.CORE)
+		const titles = async (q: string) =>
+			(await db.select({ title: post.title }).from(post).where(likeSearch(post.title)(q)!).orderBy(post.id)).map(
+				(row) => row.title,
+			)
+		expect(await titles("Hello")).toEqual(["Hello World", "hello world"])
+		expect(await titles("POSTGRES")).toEqual(["Postgres Tips"])
+	})
+})
