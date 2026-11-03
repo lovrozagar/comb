@@ -49,7 +49,7 @@ describe("seedTables", () => {
 		for (const row of rows("child")) expect(parents).toContain(`${String(row["a"])}|${String(row["b"])}`)
 	})
 
-	it("calls unproven a table whose key comb cannot fill, and one whose seeded rows break their key", async () => {
+	it("calls unproven a table whose key comb cannot fill, and one whose every row breaks its key", async () => {
 		const { unproven } = await seeded({
 			bad: "CREATE TABLE bad (id INTEGER PRIMARY KEY, code TEXT NOT NULL CHECK (length(code) = 20))",
 			orphan: "CREATE TABLE orphan (b INTEGER NOT NULL REFERENCES bad(id))",
@@ -58,17 +58,19 @@ describe("seedTables", () => {
 		})
 		expect(unproven.get("bad")).toMatch(/CHECK constraint failed/)
 		expect(unproven.get("orphan")).toBe("a key it may not leave NULL references a table comb could not seed")
-		expect(unproven.get("retyped")).toBe("its seeded rows break its key to parent")
+		/* an INTEGER column holds a TEXT key's digits as a number, which no parent row matches */
+		expect(unproven.get("retyped")).toBe("FOREIGN KEY constraint failed")
 	})
 
-	it("seeds a cycle and a key to a table it does not seed, leaving each such key NULL, and a parent of two children once", async () => {
+	it("seeds a cycle, leaving a key it may NULL, a parent of two children once, and refuses a key to no table as SQLite does", async () => {
 		const { rows, unproven } = await seeded({
 			a: "CREATE TABLE a (id INTEGER PRIMARY KEY, b INTEGER REFERENCES b(id))",
 			b: "CREATE TABLE b (id INTEGER PRIMARY KEY, a INTEGER REFERENCES a(id))",
 			c: "CREATE TABLE c (id INTEGER PRIMARY KEY, a INTEGER REFERENCES a(id), gone INTEGER REFERENCES elsewhere(id))",
 		})
-		expect(unproven).toEqual(new Map())
-		expect(rows("c").every((row) => row["gone"] === null)).toBe(true)
+		/* foreign keys on, as D1 holds them: no row goes into a table whose key names a table that is not there */
+		expect(unproven).toEqual(new Map([["c", "no such table: main.elsewhere"]]))
+		expect(rows("c")).toEqual([])
 		expect(rows("a")).toHaveLength(6)
 	})
 })
@@ -147,16 +149,16 @@ describe("seedTables on common CHECK shapes (M15)", () => {
 	})
 })
 
-describe("seedTables on a table that fails after a row broke its key", () => {
-	it("keeps why a table failed to seed over its broken key, its name folded however it was written", async () => {
+describe("seedTables on a table that fails after rows went in", () => {
+	it("keeps why a table failed to seed, its name folded however it was written", async () => {
 		const db = await openMemory()
 		open.push(db)
 		const schema = {
-			Kid: "CREATE TABLE Kid (id INTEGER PRIMARY KEY, p INTEGER REFERENCES parent(id))",
+			Kid: "CREATE TABLE Kid (id INTEGER PRIMARY KEY, p TEXT REFERENCES parent(id))",
 			parent: "CREATE TABLE parent (id TEXT PRIMARY KEY)",
 		}
 		for (const sql of Object.values(schema)) db.exec(sql)
-		/* the second row breaks the key to parent, and the third is refused */
+		/* the third row is refused */
 		db.exec(
 			"CREATE TRIGGER full BEFORE INSERT ON Kid WHEN (SELECT count(*) FROM Kid) >= 2 BEGIN SELECT RAISE(ABORT, 'full'); END",
 		)
@@ -185,5 +187,89 @@ describe("seedTables on a CHECK that asks for exactly one column set", () => {
 			t: "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT, b TEXT, c INTEGER, starts_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000), ends_at INTEGER NOT NULL, CONSTRAINT one_set CHECK ((a IS NOT NULL) + (b IS NOT NULL) + (c IS NOT NULL) = 1), CHECK (ends_at > starts_at))",
 		})
 		expect(unproven).toEqual(new Map())
+	})
+})
+
+/* SD1 of r22, 8.4: the seed is a database D1 takes, whose foreign keys are always on */
+describe("seedTables under foreign keys", () => {
+	it("seeds a child made before its parent from the parent's rows, breaking no key, and leaves foreign_keys as it was", async () => {
+		const db = await openMemory()
+		open.push(db)
+		const schema = {
+			child: "CREATE TABLE child (id INTEGER PRIMARY KEY, p TEXT NOT NULL REFERENCES parent (id))",
+			parent: "CREATE TABLE parent (id TEXT PRIMARY KEY)",
+		}
+		for (const sql of Object.values(schema)) db.exec(sql)
+		db.exec("PRAGMA foreign_keys = OFF")
+		expect(seedTables(db, new Map(Object.entries(schema)), { json: new Set(), variant: 0 })).toEqual(new Map())
+		expect(db.all("SELECT count(*) AS n FROM child")[0]?.["n"]).toBeGreaterThan(0)
+		expect(db.all("PRAGMA foreign_key_check")).toEqual([])
+		expect(db.all("PRAGMA foreign_keys")[0]?.["foreign_keys"]).toBe(0)
+	})
+
+	it("seeds a self-reference whose key may not be NULL, its first row pointing at itself", async () => {
+		const { rows, unproven } = await seeded({
+			node: "CREATE TABLE node (id INTEGER PRIMARY KEY, up INTEGER NOT NULL REFERENCES node (id))",
+		})
+		expect(unproven).toEqual(new Map())
+		const ids = rows("node").map((row) => row["id"])
+		expect(rows("node").every((row) => ids.includes(row["up"]))).toBe(true)
+	})
+})
+
+/* SD1 of r22, 8.4: a cycle of keys goes in one transaction, its keys deferred until each table it points at is seeded */
+describe("seedTables on cycles of foreign keys", () => {
+	it("seeds a two-table cycle whose keys may not be NULL, each row pointing at a seeded row", async () => {
+		const { rows, unproven } = await seeded({
+			a: "CREATE TABLE a (id INTEGER PRIMARY KEY, b INTEGER NOT NULL REFERENCES b)",
+			b: "CREATE TABLE b (id INTEGER PRIMARY KEY, a INTEGER NOT NULL REFERENCES a (id), n TEXT)",
+		})
+		expect(unproven).toEqual(new Map())
+		const ids = (table: string) => rows(table).map((row) => row["id"])
+		expect(rows("a").length).toBeGreaterThan(0)
+		expect(rows("a").every((row) => ids("b").includes(row["b"]))).toBe(true)
+		expect(rows("b").every((row) => ids("a").includes(row["a"]))).toBe(true)
+	})
+
+	it("leaves a cycle it cannot close unseeded, each table naming why, and seeds what references it as it can", async () => {
+		const { rows, unproven } = await seeded({
+			a: "CREATE TABLE a (id INTEGER PRIMARY KEY, b INTEGER NOT NULL REFERENCES b (id))",
+			b: "CREATE TABLE b (id INTEGER PRIMARY KEY, a INTEGER NOT NULL UNIQUE REFERENCES a (id), c TEXT NOT NULL CHECK (c = 'x' AND c = 'y'))",
+			kid: "CREATE TABLE kid (id INTEGER PRIMARY KEY, a INTEGER REFERENCES a (id))",
+		})
+		expect([...unproven.keys()].toSorted()).toEqual(["a", "b"])
+		expect(rows("a")).toEqual([])
+		expect(rows("b")).toEqual([])
+		expect(rows("kid").length).toBeGreaterThan(0)
+	})
+
+	it("closes a cycle's key on a table with no primary key, by its rowid", async () => {
+		const { rows, unproven } = await seeded({
+			a: "CREATE TABLE a (code TEXT NOT NULL UNIQUE, b INTEGER NOT NULL REFERENCES b (id))",
+			b: "CREATE TABLE b (id INTEGER PRIMARY KEY, a TEXT NOT NULL REFERENCES a (code))",
+		})
+		expect(unproven).toEqual(new Map())
+		const ids = rows("b").map((row) => row["id"])
+		expect(rows("a").length).toBeGreaterThan(0)
+		expect(rows("a").every((row) => ids.includes(row["b"]))).toBe(true)
+	})
+
+	it("leaves a cycle's key it may NULL unset where its table goes unseeded, and seeds the rest of the cycle", async () => {
+		const { rows, unproven } = await seeded({
+			a: "CREATE TABLE a (id INTEGER PRIMARY KEY, b INTEGER REFERENCES b (id))",
+			b: "CREATE TABLE b (id INTEGER PRIMARY KEY, a INTEGER NOT NULL REFERENCES a (id), c TEXT NOT NULL CHECK (c = 'x' AND c = 'y'))",
+		})
+		expect([...unproven.keys()]).toEqual(["b"])
+		expect(rows("a").length).toBeGreaterThan(0)
+		expect(rows("a").every((row) => row["b"] === null)).toBe(true)
+	})
+
+	it("keeps why each table of a cycle failed when none of its rows went in", async () => {
+		const { unproven } = await seeded({
+			a: "CREATE TABLE a (id INTEGER PRIMARY KEY, b INTEGER NOT NULL REFERENCES b (id), c TEXT NOT NULL CHECK (c = 'x' AND c = 'y'))",
+			b: "CREATE TABLE b (id INTEGER PRIMARY KEY, a INTEGER NOT NULL REFERENCES a (id))",
+		})
+		expect(unproven.get("a")).toMatch(/CHECK constraint failed/)
+		expect(unproven.get("b")).toBe("a key it may not leave NULL references a table comb could not seed")
 	})
 })

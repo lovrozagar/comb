@@ -9,11 +9,14 @@ vi.mock("bun:sqlite", () => import("../__fixtures__/bun-sqlite-node.ts"))
 
 const LIVE = "CREATE TABLE t (id INTEGER PRIMARY KEY, v REAL NOT NULL DEFAULT 1);\nINSERT INTO t (v) VALUES (2), (3);"
 
-/** `files` proven on the checked wrangler's D1, over a live database holding t; resolves to what it threw */
-async function proven(files: Array<{ name: string; sql: string }>, table = "d1_migrations"): Promise<unknown> {
+/** `files` proven on the checked wrangler's D1, over a live database `schema` made (t by default); resolves to what it threw */
+async function proven(
+	files: Array<{ name: string; sql: string }>,
+	{ schema = LIVE, table = "d1_migrations" }: { schema?: string; table?: string } = {},
+): Promise<unknown> {
 	const live = libsqlConnection()
 	try {
-		await live.client.executeMultiple(LIVE)
+		await live.client.executeMultiple(schema)
 		const objects = creatable(await liveObjects(live, notEngineTables(live)))
 		return await proveOnD1(objects, files, { bin: wranglerBin(), table }).catch((error: unknown) => error)
 	} finally {
@@ -51,7 +54,7 @@ describe("proveOnD1: each file on D1's own engine (SD1 of r22)", () => {
 			{ name: "2_o'pt.sql", sql: "CREATE INDEX t_v ON t (v);\nPRAGMA optimize(65538);" },
 			{ name: "3_tr.sql", sql: "CREATE TRIGGER t_up AFTER UPDATE OF v ON t BEGIN SELECT abs(new.v); END;" },
 		]
-		expect(await proven(files, 'my "history"')).toBeUndefined()
+		expect(await proven(files, { table: 'my "history"' })).toBeUndefined()
 	}, 120_000)
 
 	it("refuses a file D1 refuses as it runs, naming D1's error", async () => {
@@ -102,4 +105,54 @@ describe("proveOnD1: each file on D1's own engine (SD1 of r22)", () => {
 		const failure = (await proven([{ name: "1.sql", sql: "SELECT 'BEGIN TRANSACTION';" }])) as Error
 		expect(failure.message).toMatch(/^1\.sql: 'BEGIN TRANSACTION' holds "BEGIN TRANSACTION"/)
 	})
+})
+
+describe("proveOnD1 over a schema with foreign keys, which D1 always enforces", () => {
+	it.each([
+		[
+			"a child table made before its parent",
+			"CREATE TABLE child (id INTEGER PRIMARY KEY, p INTEGER NOT NULL REFERENCES parent (id));\nCREATE TABLE parent (id INTEGER PRIMARY KEY);",
+		],
+		[
+			"a parent comb cannot seed, whose child's key cannot be empty",
+			"CREATE TABLE parent (id INTEGER PRIMARY KEY, c TEXT NOT NULL CHECK (c = 'x' AND c = 'y'));\nCREATE TABLE child (id INTEGER PRIMARY KEY, p INTEGER NOT NULL REFERENCES parent (id));",
+		],
+	])(
+		"passes a plain file over %s, whose foreign keys D1 always enforces (8.5)",
+		async (_, schema) => {
+			expect(
+				await proven([{ name: "1_probe.sql", sql: "CREATE TABLE probe (id INTEGER PRIMARY KEY);" }], { schema }),
+			).toBeUndefined()
+		},
+		120_000,
+	)
+
+	it("passes a file over a self-reference whose rows sort before the row each points at", async () => {
+		const schema = "CREATE TABLE node (id TEXT PRIMARY KEY, up TEXT REFERENCES node (id), n INTEGER) WITHOUT ROWID;"
+		expect(
+			await proven([{ name: "1_probe.sql", sql: "CREATE TABLE probe (id INTEGER PRIMARY KEY);" }], { schema }),
+		).toBeUndefined()
+	}, 120_000)
+
+	it.each([
+		[
+			"a parent its child references, the child made first",
+			"CREATE TABLE child (id INTEGER PRIMARY KEY, p INTEGER NOT NULL REFERENCES parent (id));\nCREATE TABLE parent (id INTEGER PRIMARY KEY);",
+			"DROP TABLE parent;",
+		],
+		[
+			"a table of a two-table cycle whose keys may not be NULL",
+			"CREATE TABLE a (id INTEGER PRIMARY KEY, b INTEGER NOT NULL REFERENCES b (id));\nCREATE TABLE b (id INTEGER PRIMARY KEY, a INTEGER NOT NULL REFERENCES a (id));",
+			"DROP TABLE a;",
+		],
+	])(
+		"refuses a pending DROP of %s, as D1 refuses it with its rows",
+		async (_, schema, sql) => {
+			const failure = (await proven([{ name: "1_drop.sql", sql }], { schema })) as Error
+			expect(failure.message).toMatch(
+				/^1_drop\.sql: D1 refuses this file on its own engine, as wrangler's apply would: .*FOREIGN KEY constraint failed/,
+			)
+		},
+		120_000,
+	)
 })

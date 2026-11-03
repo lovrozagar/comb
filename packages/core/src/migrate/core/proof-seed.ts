@@ -12,7 +12,10 @@
  * own. No value repeats down a column, and an INTEGER primary
  * key starts past 2^40, an id no migration writes: a file's new unique index or explicit id meets
  * no seeded row. A column checked `IN (...)` takes its listed values, and a key column its parent's
- * keys, parents seeded first (a self-reference, the row before it). A row the table refuses (a
+ * keys, parents seeded first (a self-reference, the row before it, or a first row its own). Foreign keys are on
+ * as it seeds, as D1 always holds them: a row that breaks one is refused as a CHECK refuses it. A cycle of keys
+ * goes in one transaction under defer_foreign_keys, a key into a table of the cycle seeded after it taking that
+ * table's row once seeded, and a cycle that cannot close is left unseeded. A row the table refuses (a
  * CHECK across columns, a range, a shape) takes its defaults, then each slot's values, then each
  * slot's values without the column's offset, then each affinity's shapes (proof-seed-values.ts);
  * a NULL row takes values where its NULLs are refused. A table whose rows do not all go in is
@@ -22,17 +25,13 @@ import type { LocalDb } from "../drivers/local-db.ts"
 import { affinityOf } from "./sqlite-affinity.ts"
 import { type Attempt, attempts, type Column, JSON_SHAPE, listedValues, valueFor } from "./proof-seed-values.ts"
 import { asciiFold } from "./sql-code.ts"
-
-/** A foreign key: its columns, the table they reference, and the referenced columns (none: its primary key) */
-type Key = { from: string[]; table: string; to: string[] }
+import { closeKeys, type Key, keyGroups, keysOf, mayBeNull, NO_PARENT, primaryKeyOf, quote } from "./proof-seed-keys.ts"
 
 /** How many rows a table of `columns` takes: four, and a pair per bit of its nullable columns' numbering */
 function rowCount(columns: readonly Column[]): number {
 	const nullable = columns.filter((column) => column.nullOrdinal >= 0).length
 	return 4 + 2 * Math.max(1, Math.ceil(Math.log2(Math.max(nullable, 1))))
 }
-
-const quote = (name: string): string => `"${name.replaceAll('"', '""')}"`
 
 /** The columns of a table's primary key and UNIQUE indexes */
 function uniqueColumns(db: LocalDb, table: string): Set<string> {
@@ -64,27 +63,6 @@ function columnsOf(db: LocalDb, table: string): Column[] {
 	})
 }
 
-/** A table's foreign keys, each column group of PRAGMA foreign_key_list together */
-function keysOf(db: LocalDb, table: string): Key[] {
-	const keys = new Map<number, Key>()
-	for (const row of db.all(`PRAGMA foreign_key_list(${quote(table)})`)) {
-		const id = Number(row["id"])
-		const key = keys.get(id) ?? { from: [], table: asciiFold(String(row["table"])), to: [] }
-		key.from.push(String(row["from"]))
-		if (row["to"] !== null) key.to.push(String(row["to"]))
-		keys.set(id, key)
-	}
-	return [...keys.values()]
-}
-
-/** The primary key columns of a parent, for a key that names none */
-const primaryKeyOf = (db: LocalDb, table: string): string[] =>
-	db
-		.all(`PRAGMA table_info(${quote(table)})`)
-		.filter((row) => Number(row["pk"]) > 0)
-		.toSorted((a, b) => Number(a["pk"]) - Number(b["pk"]))
-		.map((row) => String(row["name"]))
-
 /** What one table needs to be seeded: its name, definition, columns and keys, and the rows its parents hold (by folded name) */
 type Seeding = {
 	columns: Column[]
@@ -96,6 +74,8 @@ type Seeding = {
 	table: string
 	/** which seed this is: a reseed (1) holds values the first seed (0) never did */
 	variant: number
+	/** the tables of its cycle of keys seeded after it, by folded name: a key into one closes once that table is seeded */
+	later: ReadonlySet<string>
 }
 
 /** Whether row `row` leaves the column at `index` NULL: row 4 the even positions, row 5 the odd, swapped by a reseed */
@@ -137,6 +117,25 @@ function rowOf(db: LocalDb, seeding: Seeding, at: Attempt): Map<string, unknown>
 }
 
 /**
+ * The parent row a key of row `row` takes: a self-reference the row before it, which the table holds already, or
+ * a first row itself where the key may not be NULL; any other key a row of its parent, by position
+ */
+function sourceOf(
+	db: LocalDb,
+	seeding: Seeding,
+	at: { key: Key; nullable: boolean; row: number; to: readonly string[]; values: ReadonlyMap<string, unknown> },
+): Record<string, unknown> | undefined {
+	const { key, nullable, row, to, values } = at
+	if (key.table !== asciiFold(seeding.table)) {
+		const parent = seeding.parents.get(key.table) ?? []
+		return parent[row % Math.max(parent.length, 1)]
+	}
+	const before = db.all(`SELECT * FROM ${quote(seeding.table)}`).at(-1)
+	if (before !== undefined || nullable || !to.every((name) => values.get(name) != null)) return before
+	return Object.fromEntries(values)
+}
+
+/**
  * A key's columns in row `row`, from a parent row (NULL where the row leaves its first column NULL
  * and every column may be, or when the parent has no rows); false when the parent has none and
  * the key may not be NULL
@@ -147,15 +146,14 @@ function keyValues(
 	at: { key: Key; row: number; values: Map<string, unknown> },
 ): boolean {
 	const { key, row, values } = at
-	/* a self-reference points at the row before it, which the table holds already */
-	const self = key.table === asciiFold(seeding.table)
-	const parent = self ? db.all(`SELECT * FROM ${quote(seeding.table)}`) : (seeding.parents.get(key.table) ?? [])
-	const source = self ? parent.at(-1) : parent[row % Math.max(parent.length, 1)]
-	const columns = key.from.map((name) => seeding.columns.find((c) => c.name === name))
-	const nullable = columns.every((column) => column?.nullable === true)
-	if (source === undefined && !nullable) return false
+	const nullable = mayBeNull(seeding.columns, key)
+	/* a key into a table its cycle seeds later keeps its own values until that table's rows close it */
+	if (seeding.later.has(key.table) && !nullable) return true
 	const to = key.to.length > 0 ? key.to : primaryKeyOf(db, key.table)
-	const empty = nullable && nullAt(row, (columns[0] as Column).nullOrdinal, seeding.variant)
+	const source = sourceOf(db, seeding, { key, nullable, row, to, values })
+	if (source === undefined && !nullable) return false
+	const first = seeding.columns.find((column) => column.name === key.from[0]) as Column
+	const empty = nullable && nullAt(row, first.nullOrdinal, seeding.variant)
 	for (const [i, name] of key.from.entries())
 		values.set(name, source === undefined || empty ? null : source[to[i] as string])
 	return true
@@ -175,9 +173,6 @@ function insertRow(db: LocalDb, table: string, values: ReadonlyMap<string, unkno
 		return (error as Error).message
 	}
 }
-
-/* why a row cannot go in when a key it may not leave NULL has no parent row to take */
-const NO_PARENT = "a key it may not leave NULL references a table comb could not seed"
 
 /** Insert row `row` of `table` by the first attempt the table takes; or why not, its first refusal */
 function seedRow(db: LocalDb, seeding: Seeding, row: number): string | undefined {
@@ -203,57 +198,95 @@ function seedTable(db: LocalDb, seeding: Seeding): string | undefined {
 	return undefined
 }
 
-/**
- * Tables in an order that puts each parent before its children, compared by folded name as SQLite
- * resolves them; a cycle keeps the order it was given
- */
-function parentsFirst(db: LocalDb, tables: readonly string[]): string[] {
-	const written = new Map(tables.map((table) => [asciiFold(table), table]))
-	const parentsOf = new Map(tables.map((table) => [asciiFold(table), keysOf(db, table).map((key) => key.table)]))
-	const done: string[] = []
-	const visit = (key: string, path: ReadonlySet<string>) => {
-		if (done.includes(key) || path.has(key)) return
-		for (const parent of parentsOf.get(key) as string[])
-			if (parentsOf.has(parent)) visit(parent, new Set([...path, key]))
-		done.push(key)
+/** What every table's seeding shares: the definitions, the parents' rows so far, and the seed */
+type Context = {
+	/** each table comb could not seed, by folded name, with why */
+	unproven: Map<string, string>
+	tables: ReadonlyMap<string, string>
+	parents: Map<string, Array<Record<string, unknown>>>
+	json: ReadonlySet<string>
+	variant: number
+}
+
+/** Seeds one table of a group, `later` the tables of its cycle seeded after it; why it failed, or nothing */
+function seedOne(
+	db: LocalDb,
+	context: Context,
+	{ later, table }: { later: ReadonlySet<string>; table: string },
+): Seeding & { failed?: string } {
+	const seeding = {
+		columns: columnsOf(db, table),
+		json: context.json,
+		keys: keysOf(db, table),
+		later,
+		parents: context.parents,
+		sql: context.tables.get(table) as string,
+		table,
+		variant: context.variant,
 	}
-	for (const table of tables) visit(asciiFold(table), new Set())
-	return done.map((key) => written.get(key) as string)
+	const failed = seedTable(db, seeding)
+	context.parents.set(asciiFold(table), db.all(`SELECT * FROM ${quote(table)}`))
+	return failed === undefined ? seeding : { ...seeding, failed }
 }
 
 /**
- * Seed every table of `tables` (by name, each with its CREATE TABLE) in the copy; returns each
- * table comb could not seed, by its folded name, with why. Foreign keys are off while it seeds, and the seed is then
- * checked against them: a table whose rows break a key is unproven too.
+ * Seeds a cycle of keys in one transaction under defer_foreign_keys: each table in turn, then each key into a table
+ * seeded after it set to that table's rows; a cycle that cannot close is rolled back, each table unproven with why
+ */
+function seedCycle(db: LocalDb, context: Context, group: readonly string[]): void {
+	const { unproven } = context
+	db.exec("BEGIN")
+	db.exec("PRAGMA defer_foreign_keys = ON")
+	const seeded: Array<Seeding & { failed?: string }> = []
+	try {
+		for (const [i, table] of group.entries())
+			seeded.push(seedOne(db, context, { later: new Set(group.slice(i + 1).map(asciiFold)), table }))
+		for (const seeding of seeded) closeKeys(db, seeding)
+		db.exec("COMMIT")
+	} catch (error) {
+		// reason: a cycle that cannot close goes unseeded, each of its tables listed unproven with why
+		db.exec("ROLLBACK")
+		for (const table of group) {
+			unproven.set(
+				asciiFold(table),
+				`its rows cannot meet the keys of its cycle (${group.join(", ")}): ${(error as Error).message}`,
+			)
+			context.parents.set(asciiFold(table), [])
+		}
+		return
+	}
+	for (const { failed, table } of seeded) {
+		if (failed !== undefined) unproven.set(asciiFold(table), failed)
+		context.parents.set(asciiFold(table), db.all(`SELECT * FROM ${quote(table)}`))
+	}
+}
+
+/**
+ * Seed every table of `tables` (by name, each with its CREATE TABLE) in the copy, foreign keys on, as D1 holds them;
+ * returns each table comb could not seed, by its folded name, with why. Foreign keys are left as they were.
  */
 function seedTables(
 	db: LocalDb,
 	tables: ReadonlyMap<string, string>,
 	{ json, variant }: { json: ReadonlySet<string>; variant: number },
 ): Map<string, string> {
-	const unproven = new Map<string, string>()
-	const parents = new Map<string, Array<Record<string, unknown>>>()
-	db.exec("PRAGMA foreign_keys = OFF")
-	for (const table of parentsFirst(db, [...tables.keys()])) {
-		const seeding = {
-			columns: columnsOf(db, table),
-			json,
-			keys: keysOf(db, table),
-			parents,
-			sql: tables.get(table) as string,
-			table,
-			variant,
+	const context: Context = { json, parents: new Map(), tables, unproven: new Map(), variant }
+	const on = db.all("PRAGMA foreign_keys")[0]?.["foreign_keys"] === 1
+	db.exec("PRAGMA foreign_keys = ON")
+	try {
+		for (const group of keyGroups(db, [...tables.keys()])) {
+			const [table] = group as [string]
+			if (group.length > 1) seedCycle(db, context, group)
+			else {
+				/* keyed folded, as a child's key names the table */
+				const { failed } = seedOne(db, context, { later: new Set(), table })
+				if (failed !== undefined) context.unproven.set(asciiFold(table), failed)
+			}
 		}
-		const failed = seedTable(db, seeding)
-		/* keyed folded, as PRAGMA foreign_key_check and a child's key name the table */
-		if (failed !== undefined) unproven.set(asciiFold(table), failed)
-		parents.set(asciiFold(table), db.all(`SELECT * FROM ${quote(table)}`))
+	} finally {
+		if (!on) db.exec("PRAGMA foreign_keys = OFF")
 	}
-	for (const row of db.all("PRAGMA foreign_key_check")) {
-		const table = asciiFold(String(row["table"]))
-		if (!unproven.has(table)) unproven.set(table, `its seeded rows break its key to ${String(row["parent"])}`)
-	}
-	return unproven
+	return context.unproven
 }
 
-export { quote, seedTables }
+export { keyGroups, quote, seedTables }

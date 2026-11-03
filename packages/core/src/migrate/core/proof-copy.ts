@@ -7,7 +7,7 @@
 import { isMirror, seedMirrors } from "./proof-mirror.ts"
 import { type LocalDb, openScratch, type ScratchDb, type ScratchEngine } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
-import { quote, seedTables } from "./proof-seed.ts"
+import { keyGroups, quote, seedTables } from "./proof-seed.ts"
 import { asciiFold } from "./sql-code.ts"
 import { isVectorIndexSql, vectorShadows } from "./vector-index.ts"
 
@@ -149,7 +149,8 @@ function insertsOf(db: LocalDb, name: string): string[] {
 /**
  * The copy the proof runs `files` on, as statements another engine can run: the live schema `objects`' tables and
  * indexes, the seed's rows of each table but a virtual one, then the triggers and views (SD1 of r22). An object
- * the copy could not create is left out, as the proof leaves it out.
+ * the copy could not create is left out, as the proof leaves it out. Rows go parents first, under defer_foreign_keys
+ * for a cycle of keys: the seed meets every key, as D1 holds them all (8.4).
  */
 async function copyScript(objects: readonly LiveObject[], files: ReadonlyArray<{ sql: string }>): Promise<string[]> {
 	const copy = await copyOf(objects, { json: jsonColumns(files), variant: 0 })
@@ -157,10 +158,19 @@ async function copyScript(objects: readonly LiveObject[], files: ReadonlyArray<{
 		const made = new Set(copy.db.all("SELECT name FROM main.sqlite_master").map((row) => String(row["name"])))
 		const kept = objects.filter((object) => made.has(object.name))
 		const of = (...types: string[]) => kept.filter((object) => types.includes(object.type))
-		const rows = of("table")
+		const seeded = of("table")
 			.filter((object) => !isVirtual(object))
-			.flatMap((object) => insertsOf(copy.db, object.name))
-		return [...of("table", "index").map(({ sql }) => sql), ...rows, ...of("trigger", "view").map(({ sql }) => sql)]
+			.map((object) => object.name)
+		const rows = keyGroups(copy.db, seeded)
+			.flat()
+			.flatMap((name) => insertsOf(copy.db, name))
+		/* D1 holds every foreign key on: parents go first, and a cycle's rows meet its keys as the batch commits */
+		return [
+			"PRAGMA defer_foreign_keys = ON",
+			...of("table", "index").map(({ sql }) => sql),
+			...rows,
+			...of("trigger", "view").map(({ sql }) => sql),
+		]
 	} finally {
 		copy.db.close()
 	}

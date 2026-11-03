@@ -28,7 +28,9 @@ describe("copyScript (SD1 of r22): the proof's copy as statements another engine
 			const script = await copyScript(await schemaOf(live), [
 				{ sql: "UPDATE post SET title = json_extract(title, '$.a')" },
 			])
-			const kinds = script.map((sql) => (/^(CREATE (?:VIRTUAL )?\w+|INSERT)/.exec(sql) as RegExpExecArray)[1])
+			/* D1 holds every foreign key on: the batch opens deferring them, for a cycle of keys */
+			expect(script[0]).toBe("PRAGMA defer_foreign_keys = ON")
+			const kinds = script.slice(1).map((sql) => (/^(CREATE (?:VIRTUAL )?\w+|INSERT)/.exec(sql) as RegExpExecArray)[1])
 			const first = (kind: string) => kinds.indexOf(kind)
 			expect(first("CREATE TABLE")).toBe(0)
 			expect(first("CREATE INDEX")).toBeLessThan(first("INSERT"))
@@ -68,8 +70,8 @@ describe("copyScript (SD1 of r22): the proof's copy as statements another engine
 				"CREATE TABLE a (x);\nPRAGMA writable_schema = ON;\nINSERT INTO sqlite_master (type, name, tbl_name, rootpage, sql) VALUES ('table', 'broken', 'broken', 0, 'CREATE VIRTUAL TABLE broken USING no_such_module (x)');\nPRAGMA writable_schema = OFF;",
 			)
 			const script = await copyScript(await schemaOf(live), [])
-			expect(script[0]).toBe("CREATE TABLE a (x)")
-			expect(script.slice(1).every((sql) => sql.startsWith('INSERT INTO "a" ("x") VALUES ('))).toBe(true)
+			expect(script[1]).toBe("CREATE TABLE a (x)")
+			expect(script.slice(2).every((sql) => sql.startsWith('INSERT INTO "a" ("x") VALUES ('))).toBe(true)
 			expect(script.some((sql) => sql.includes("broken"))).toBe(false)
 		} finally {
 			await live.close()
