@@ -844,8 +844,8 @@ type Segment = {
 /** `sql` as consecutive segments that concatenate back to it, read as `dialect` reads it */
 declare function segments(sql: string, dialect?: Dialect): Segment[];
 /**
- * The statements of `sql`, without their terminating `;`. On SQLite a `;` ends a statement only
- * in code: never inside a literal or a comment, nor inside a trigger's BEGIN … END. On Postgres
+ * The statements of `sql`, without their terminating `;`. On SQLite they end where SQLite ends
+ * them: at a `;` in code, never inside a literal or a comment, nor inside a trigger's body. On Postgres
  * they are the statements Postgres runs, the one Postgres split (pg-split.ts, M75), read after
  * loadPostgresParser(). A stretch that holds only comments is not a statement.
  */
@@ -990,6 +990,8 @@ export type LocalDb = {
     close(): void;
     /** run statements, several at once */
     exec(sql: string): void;
+    /** the first statement SQLite reads in `sql`, as it compiled it: its text up to the ; that ends it, if one does */
+    firstStatement(sql: string): string;
     /** run one statement with parameters */
     run(sql: string, params?: readonly unknown[]): void;
 };

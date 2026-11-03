@@ -115,6 +115,15 @@ async function schemaAfter(
 	}
 }
 
+/** `work`, its refusal named for the file `name`: what the proof refuses outright, no approval overrides, so the file is named where it stops */
+function named<T>(name: string, work: () => T): T {
+	try {
+		return work()
+	} catch (error) {
+		throw new Error(`${name}: ${(error as Error).message}`, { cause: error })
+	}
+}
+
 /**
  * Prove each pending file, in order, on a seeded scratch copy of the database `conn` reaches;
  * returns each file's proof by name. A file the copy refuses is tried once more on a reseeded copy
@@ -143,7 +152,7 @@ async function provePending(
 				continue
 			}
 			let [before, mirrors] = [snapshot(copy.db), mirrorRows(copy.db)]
-			let run = applyToCopy(copy.db, sql)
+			let run = named(name, () => applyToCopy(copy.db, sql))
 			const retry = run.error === undefined ? undefined : await reseeded(objects, applied, json)
 			if (retry !== undefined) {
 				copy.db.close()

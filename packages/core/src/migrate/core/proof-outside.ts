@@ -4,6 +4,8 @@
  * loads code into the process, would act on the real machine during a read-only `check` (M40).
  */
 
+import { preview } from "./classify-file.ts"
+
 /* the functions SQLite compiles a statement that reaches outside its database into, each by the
    statement that names it: ATTACH and DETACH, and an extension loaded into the process */
 const OUTSIDE_FUNCTIONS: ReadonlyArray<[prefix: string, statement: string]> = [
@@ -27,4 +29,13 @@ function outsideReach(ops: ReadonlyArray<Record<string, unknown>>): string | und
 	return undefined
 }
 
-export { outsideReach }
+/** Refuses the statement `sql` whose program `ops` reaches outside the copy: the copy runs what it proves, so this is refused before it runs, and no approval overrides it (M40) */
+function refuseOutside(ops: ReadonlyArray<Record<string, unknown>>, sql: string): void {
+	const outside = outsideReach(ops)
+	if (outside === undefined) return
+	throw new Error(
+		`${preview(sql)}: comb never runs ${outside} in a migration: it reaches outside the database the migration applies to, and D1 refuses it`,
+	)
+}
+
+export { outsideReach, refuseOutside }

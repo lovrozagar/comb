@@ -25,6 +25,8 @@ type BunLocal = {
 		all(...params: SqliteParam[]): unknown[]
 		finalize(): void
 		run(...params: SqliteParam[]): unknown
+		/** the statement's SQL as SQLite compiled it, each parameter as bound */
+		toString(): string
 	}
 }
 
@@ -102,6 +104,7 @@ async function bunLocal(): Promise<(file: string) => LocalDb> {
 				once(db, sql, (stmt) => stmt.all(...(params as SqliteParam[]))) as Array<Record<string, unknown>>,
 			close: () => db.close(),
 			exec: (sql) => void db.exec(sql),
+			firstStatement: (sql) => once(db, sql, (stmt) => stmt.toString()),
 			run: (sql, params = []) => void once(db, sql, (stmt) => stmt.run(...(params as SqliteParam[]))),
 		}
 	}

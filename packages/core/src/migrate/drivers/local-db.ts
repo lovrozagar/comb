@@ -15,6 +15,8 @@ export type LocalDb = {
 	close(): void
 	/** run statements, several at once */
 	exec(sql: string): void
+	/** the first statement SQLite reads in `sql`, as it compiled it: its text up to the ; that ends it, if one does */
+	firstStatement(sql: string): string
 	/** run one statement with parameters */
 	run(sql: string, params?: readonly unknown[]): void
 }
@@ -25,7 +27,7 @@ export type ScratchDb = LocalDb & {
 	reopen(): void
 }
 
-type NodeStatement = { all(...params: unknown[]): unknown[]; run(...params: unknown[]): unknown }
+type NodeStatement = { all(...params: unknown[]): unknown[]; run(...params: unknown[]): unknown; sourceSQL: string }
 
 /** How this runtime opens a database file, or `:memory:` */
 type Open = (file: string) => LocalDb
@@ -44,6 +46,7 @@ async function opener(): Promise<Open> {
 			all: (sql, params = []) => db.prepare(sql).all(...params) as Array<Record<string, unknown>>,
 			close: () => db.close(),
 			exec: (sql) => db.exec(sql),
+			firstStatement: (sql) => db.prepare(sql).sourceSQL,
 			run: (sql, params = []) => void db.prepare(sql).run(...params),
 		}
 	}
@@ -108,6 +111,7 @@ export async function openScratch(): Promise<ScratchDb> {
 			}
 		},
 		exec: (sql) => db.exec(sql),
+		firstStatement: (sql) => db.firstStatement(sql),
 		reopen: () => {
 			db.close()
 			db = connect()

@@ -12,7 +12,9 @@ export class Database extends DatabaseSync {
 
 	/* bun's statements hold their table until finalized; Node's have nothing to free */
 	override prepare(sql: string) {
-		return Object.assign(super.prepare(sql), { finalize: () => undefined })
+		const stmt = super.prepare(sql)
+		/* bun's String(statement) is the SQL SQLite compiled, as Node's sourceSQL is */
+		return Object.assign(stmt, { finalize: () => undefined, toString: () => stmt.sourceSQL })
 	}
 
 	transaction(work: () => void) {

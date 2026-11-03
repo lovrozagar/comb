@@ -82,3 +82,17 @@ describe("the proof's copy on bun:sqlite never reaches outside itself", () => {
 		fs.rmSync(dir, { force: true, recursive: true })
 	})
 })
+
+describe("the proof's copy on bun:sqlite reads a statement's end as SQLite does (SL2 of r22)", () => {
+	it("gives the first statement SQLite compiles, a trigger's body whole, up to the ; that ends it", async () => {
+		const copy = await openScratch()
+		try {
+			copy.exec("CREATE TABLE a (begin INTEGER)")
+			const trigger = "CREATE TRIGGER t AFTER INSERT ON a BEGIN SELECT new.begin; END;"
+			expect(copy.firstStatement(`${trigger}\nINSERT INTO a VALUES (1)`)).toBe(trigger)
+			expect(copy.firstStatement("INSERT INTO a VALUES (1) -- a note")).toBe("INSERT INTO a VALUES (1) -- a note")
+		} finally {
+			copy.close()
+		}
+	})
+})

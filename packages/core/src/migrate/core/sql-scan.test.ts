@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { normalizeSql, segments, splitSqlStatements } from "./sql-scan.ts"
+import { CORPUS, corpusFile } from "../__fixtures__/trigger-corpus.ts"
 
 const kinds = (sql: string) => segments(sql).map(({ kind, text }) => `${kind}:${text}`)
 const pg = (sql: string) => segments(sql, "postgres").map(({ kind, text }) => `${kind}:${text}`)
@@ -141,6 +142,32 @@ describe("splitSqlStatements", () => {
 		expect(splitSqlStatements("DO $$ BEGIN DROP TABLE a; END $$; SELECT $x$;$x$", "postgres")).toEqual([
 			"DO $$ BEGIN DROP TABLE a; END $$",
 			"SELECT $x$;$x$",
+		])
+	})
+})
+
+describe("a SQLite file splits where SQLite ends a statement (SL2; sibling: libsql's skipped tail)", () => {
+	it.each(CORPUS.map(({ label, statements }) => [label, statements]))(
+		"splits %s as SQLite reads it",
+		(_, statements) => {
+			expect(splitSqlStatements(corpusFile(statements))).toEqual(statements)
+		},
+	)
+
+	it.each([
+		["a TEMP trigger over begin", "CREATE TEMP TRIGGER t AFTER INSERT ON begin BEGIN SELECT new.end; END"],
+		["a TEMPORARY trigger", "CREATE TEMPORARY TRIGGER t AFTER INSERT ON a BEGIN SELECT 1; SELECT 2; END"],
+		["an EXPLAIN of a trigger", "EXPLAIN CREATE TRIGGER t AFTER INSERT ON a BEGIN SELECT 1; END"],
+		["a trigger over a table named trigger", 'CREATE TRIGGER "trigger" AFTER INSERT ON a BEGIN SELECT end FROM e; END'],
+		["a create table naming end and temp", "CREATE TABLE temp (end INTEGER, trigger TEXT)"],
+	])("splits %s, then the statement after it", (_, first) => {
+		expect(splitSqlStatements(`${first};\nSELECT 9;`)).toEqual([first, "SELECT 9"])
+	})
+
+	it("ends a trigger at END and ; alone: a ; after a body statement leaves it open", () => {
+		expect(splitSqlStatements("CREATE TRIGGER t AFTER INSERT ON a BEGIN SELECT 1; SELECT end; END; SELECT 2")).toEqual([
+			"CREATE TRIGGER t AFTER INSERT ON a BEGIN SELECT 1; SELECT end; END",
+			"SELECT 2",
 		])
 	})
 })
