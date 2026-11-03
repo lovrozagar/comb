@@ -1082,7 +1082,7 @@ What changes for a project on 0.20. Before deploying it:
 
    Removed: none.
 
-   Changed: `CliIo`, `ListQuerySchema`, `RetrieveQuerySchema`, `ShardRouter`, `paginateMerged`.
+   Changed: `CliError`, `CliIo`, `ListQuerySchema`, `RetrieveQuerySchema`, `ShardRouter`, `paginateMerged`.
 
    `CliIo` gains an optional field that reads Atlas's version, which a test fakes as it fakes `run`. Every type a public declaration names is now one you can import, from the subpath whose function or type names it, so a helper typed around comb's API names what it takes and returns; a test holds the few kept internal to a list with each one's reason. `ListQuerySchema`, `RetrieveQuerySchema` and `paginateMerged` changed only in the names their declarations give types they reach: `ListQueryRequest`, `RetrieveRequest` and `PaginationResponse`, exported under those names.
 

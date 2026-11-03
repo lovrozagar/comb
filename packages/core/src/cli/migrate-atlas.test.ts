@@ -56,6 +56,22 @@ function postgresProject(
 	return dir
 }
 
+/* KC7 of r22b: a blank url said only "url is empty", which init's starter gives whenever DATABASE_URL is unset */
+describe("a Postgres database with a blank url", () => {
+	it("is refused naming the database, and where init's starter reads it, before Atlas runs", async () => {
+		const dir = postgresProject({}, " ")
+		for (const mode of ["status", "check", "apply"]) {
+			const atlas = pgAtlas([])
+			const io = makeIo(dir, atlas)
+			expect(await runCli(["migrate", mode, "core"], io)).toBe(1)
+			expect(io.errors).toEqual([
+				"url is empty: set the postgres provider's url for core (core); init's starter reads it from DATABASE_URL",
+			])
+			expect(atlas.calls.filter((call) => call[0] !== "version")).toEqual([])
+		}
+	})
+})
+
 describe("migrate apply and baseline: a Postgres database, through Atlas", () => {
 	it("applies the pending files through Atlas, the URL in its environment only", async () => {
 		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })

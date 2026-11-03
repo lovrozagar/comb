@@ -27,6 +27,24 @@ describe("findCombConfig and loadCombConfig", () => {
 	})
 })
 
+/* KC7 of r22b: a comb.config.ts that failed to load was reported without its file */
+describe("findCombConfig on a config that fails to load", () => {
+	it("names the file, with the error as its cause", async () => {
+		const broken = project()
+		writeFileSync(join(broken, "comb.config.ts"), "export default {\n")
+		await expect(findCombConfig(broken)).rejects.toThrow(`${join(broken, "comb.config.ts")} failed to load: `)
+		const throws = project()
+		writeFileSync(join(throws, "comb.config.ts"), 'throw new RangeError("store unreachable")\n')
+		const thrown = await findCombConfig(throws).catch((error: unknown) => error)
+		expect(thrown).toBeInstanceOf(CliError)
+		expect((thrown as Error).message).toBe(`${join(throws, "comb.config.ts")} failed to load: store unreachable`)
+		expect((thrown as Error).cause).toEqual(new RangeError("store unreachable"))
+		const value = project()
+		writeFileSync(join(value, "comb.config.ts"), "throw 7\n")
+		await expect(findCombConfig(value)).rejects.toThrow(`${join(value, "comb.config.ts")} failed to load: 7`)
+	})
+})
+
 /* K14 of the 0.15.0 review: a misspelled key fell back to its default, and codegen exited 0 */
 describe("findCombConfig on a config with a key comb does not know", () => {
 	it("refuses it by name, naming the file and where", async () => {

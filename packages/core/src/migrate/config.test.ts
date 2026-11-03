@@ -393,11 +393,18 @@ describe("loadConfig validates what the file exports, however it exports it (M12
 		}
 	})
 
-	it("passes on what a config function throws, which is no invalid config", async () => {
+	/* KC7 of r22b: a config that failed to load reached the user and --json's refused with nothing naming the file */
+	it("names the file a config failed to load from, with what a function threw or the syntax error as its cause", async () => {
 		const dir = project()
 		try {
 			writeFileSync(join(dir, "a.config.ts"), 'export default () => { throw new RangeError("no secret here") }\n')
-			await expect(loadConfig("a.config.ts", dir)).rejects.toThrow(new RangeError("no secret here"))
+			const thrown = await loadConfig("a.config.ts", dir).catch((error: unknown) => error)
+			expect((thrown as Error).message).toBe(`${join(dir, "a.config.ts")} failed to load: no secret here`)
+			expect((thrown as Error).cause).toEqual(new RangeError("no secret here"))
+			writeFileSync(join(dir, "b.config.ts"), "export default {\n")
+			await expect(loadConfig("b.config.ts", dir)).rejects.toThrow(`${join(dir, "b.config.ts")} failed to load: `)
+			writeFileSync(join(dir, "c.config.ts"), "export default () => { throw 7 }\n")
+			await expect(loadConfig("c.config.ts", dir)).rejects.toThrow(`${join(dir, "c.config.ts")} failed to load: 7`)
 		} finally {
 			rmSync(dir, { force: true, recursive: true })
 		}

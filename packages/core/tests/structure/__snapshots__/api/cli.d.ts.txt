@@ -40,7 +40,7 @@ export declare const checkPassed: (names: readonly string[]) => string;
 /** A failure the CLI reports as its message and exit code instead of a stack trace. */
 export declare class CliError extends Error {
     readonly exitCode: number;
-    constructor(message: string, exitCode?: number);
+    constructor(message: string, exitCode?: number, options?: ErrorOptions);
 }
 /** A failure a command already reported as its --json object: printed on stderr, never as a second object (K10 of r18) */
 export declare class Reported extends CliError {

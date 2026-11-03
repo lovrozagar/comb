@@ -192,7 +192,11 @@ export async function loadConfig(configPath?: string, cwd: string = process.cwd(
 		const module = (await import(pathToFileURL(resolvedPath).href)) as { default?: unknown }
 		return { config: await parseConfig(module.default ?? module), configDir: dirname(resolvedPath) }
 	} catch (error) {
-		if (!(error instanceof z.ZodError)) throw error
+		/* a syntax error, or what a config function threw, names the file it came from (KC7 of r22b) */
+		if (!(error instanceof z.ZodError))
+			throw new Error(`${resolvedPath} failed to load: ${error instanceof Error ? error.message : String(error)}`, {
+				cause: error,
+			})
 		throw new Error(`${resolvedPath} is not a valid migrate config:\n${z.prettifyError(error)}`, { cause: error })
 	}
 }

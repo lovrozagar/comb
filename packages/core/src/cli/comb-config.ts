@@ -17,14 +17,23 @@ function parsed(file: string, exported: unknown): CodegenConfig {
 	throw new CliError(`${file} is not a valid comb config:\n${z.prettifyError(result.error)}`)
 }
 
+/** The config module at `url`; a syntax error or a throw names `file`, the error as its cause (KC7 of r22b) */
+async function loadModule(file: string): Promise<{ default?: unknown }> {
+	try {
+		/* keyed by its mtime, so a process that runs codegen again after the config changed reads the change */
+		return (await import(`${pathToFileURL(file).href}?mtime=${fs.statSync(file).mtimeMs}`)) as { default?: unknown }
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		throw new CliError(`${file} failed to load: ${message}`, 1, { cause: error })
+	}
+}
+
 /** The project's comb.config.ts (or .js), or undefined when it has none */
 export async function findCombConfig(cwd: string): Promise<CodegenConfig | undefined> {
 	for (const name of ["comb.config.ts", "comb.config.js"]) {
 		const fp = path.resolve(cwd, name)
 		if (fs.existsSync(fp)) {
-			/* keyed by its mtime, so a process that runs codegen again after the config changed reads the change */
-			const url = `${pathToFileURL(fp).href}?mtime=${fs.statSync(fp).mtimeMs}`
-			const mod = (await import(url)) as { default?: unknown }
+			const mod = await loadModule(fp)
 			return parsed(fp, mod.default ?? { ...mod })
 		}
 	}
