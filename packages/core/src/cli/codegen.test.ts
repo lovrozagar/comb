@@ -354,3 +354,72 @@ describe("comb codegen: -g for a generator no database runs (F32)", () => {
 		expect(configured.errors.join("\n")).toBe("codegen does not run orm here; it runs rows")
 	})
 })
+
+/** A tables file whose one table has no primary key, which codegen warns of and runs */
+const WARNED = `import { sqliteTable, text } from "drizzle-orm/sqlite-core"\nexport const t = sqliteTable("t", { name: text("name") })\n`
+
+/** A run of `argv` whose out and err lines land in one list, in the order said, each tagged with its stream */
+async function said(dir: string, argv: readonly string[]) {
+	const lines: string[] = []
+	const io = {
+		...makeIo(dir),
+		err: (line: string) => lines.push(`err ${line}`),
+		out: (line: string) => lines.push(`out ${line}`),
+	}
+	return { code: await runCli(argv, io), lines }
+}
+
+/** Databases a and b, each a WARNED tables file, writing into ./gen/a and ./gen/b, or both into ./gen as app */
+function warnedPair(dir: string, shared = false): void {
+	writeFileSync(join(dir, "a.tables.ts"), WARNED)
+	writeFileSync(join(dir, "b.tables.ts"), WARNED)
+	const own = (name: string) =>
+		shared ? { filePrefix: "app", output: { default: "./gen" } } : { output: { default: `./gen/${name}` } }
+	const databases = { a: { ...own("a"), tables: "./a.tables.ts" }, b: { ...own("b"), tables: "./b.tables.ts" } }
+	writeFileSync(join(dir, "comb.config.ts"), `export default { databases: ${JSON.stringify(databases)} }\n`)
+}
+
+/** A "Codegen: <db>" header or a warning, as `said` tags it */
+const headerOrWarning = (line: string) => line.startsWith("out \nCodegen: ") || line.startsWith("err   warn: ")
+
+/* KC10n: KC10 held out but not err, so every database's warnings came before any "Codegen: <db>" header */
+describe("codegen says each warning under its database (KC10n; siblings: a failed run, a refused write)", () => {
+	it("prints each database's warnings after its own header, in the order said", async () => {
+		const dir = project()
+		warnedPair(dir)
+		const { code, lines } = await said(dir, ["codegen", "-g", "rows"])
+		expect(code).toBe(0)
+		expect(lines.filter(headerOrWarning).map((line) => line.replace(/warn: .*/, "warn"))).toEqual([
+			"out \nCodegen: a",
+			"err   warn",
+			"out \nCodegen: b",
+			"err   warn",
+		])
+	})
+
+	it("prints the warnings it held, then that nothing was written, when a later database fails", async () => {
+		const dir = project()
+		warnedPair(dir)
+		writeFileSync(join(dir, "b.tables.ts"), `${HEAD}${POST}${POST.replace("post =", "again =")}`)
+		const { code, lines } = await said(dir, ["codegen", "-g", "rows"])
+		expect(code).toBe(1)
+		expect(lines.filter((line) => line.startsWith("out "))).toEqual([])
+		const nothing = lines.indexOf(
+			"err Nothing was written: codegen writes every database's files once all of them succeed",
+		)
+		expect(lines.findIndex((line) => line.startsWith("err   warn: "))).toBeLessThan(nothing)
+		expect(existsSync(join(dir, "gen"))).toBe(false)
+	})
+
+	it("prints the warnings it held, and none of what it generated, when the write is refused", async () => {
+		const dir = project()
+		warnedPair(dir, true)
+		const { code, lines } = await said(dir, ["codegen", "-g", "rows"])
+		expect(code).toBe(1)
+		expect(lines.filter((line) => line.startsWith("out "))).toEqual([])
+		expect(lines.filter((line) => line.startsWith("err   warn: "))).toHaveLength(2)
+		expect(lines.at(-1)).toMatch(
+			/^err databases a and b both write gen\/app\.rows\.gen\.ts; give each its own filePrefix or output$/,
+		)
+	})
+})

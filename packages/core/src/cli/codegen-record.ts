@@ -153,8 +153,39 @@ function refuseShared(runs: readonly Run[], { record, recordDir }: { record: Run
 	}
 }
 
-/** Say on `io` that a run that failed before its write wrote nothing, then fail with its error (KC10 of r22b) */
-export function nothingWritten(io: Pick<CliIo, "err">, error: unknown): never {
-	io.err("Nothing was written: codegen writes every database's files once all of them succeed")
-	throw error
+/** Where a held line goes */
+type Stream = "err" | "out"
+
+/**
+ * An io that holds its out and err lines in the order said, so each database's warnings follow its
+ * header (KC10n); `commit` writes, then says every held line, and `failed` says that a run that
+ * failed before its write wrote nothing, then fails with its error (KC10 of r22b)
+ */
+type Held = { commit: (write: () => void) => void; failed: (error: unknown) => never; held: CliIo }
+
+/**
+ * Hold `io`'s lines until the files are written. When they are not, only the err lines are said,
+ * since a warning stays true and what a run generated does not
+ */
+export function holdLines(io: CliIo): Held {
+	const lines: Array<readonly [Stream, string]> = []
+	const hold = (stream: Stream) => (line: string) => void lines.push([stream, line])
+	const flush = (written: boolean) => {
+		for (const [stream, line] of lines) if (written || stream === "err") io[stream](line)
+	}
+	const failed = (error: unknown): never => {
+		flush(false)
+		io.err("Nothing was written: codegen writes every database's files once all of them succeed")
+		throw error
+	}
+	const commit = (write: () => void) => {
+		try {
+			write()
+		} catch (error) {
+			flush(false)
+			throw error
+		}
+		flush(true)
+	}
+	return { commit, failed, held: { ...io, err: hold("err"), out: hold("out") } }
 }

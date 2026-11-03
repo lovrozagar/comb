@@ -6,7 +6,7 @@
 import path from "node:path"
 import type { GeneratorContext } from "../codegen/generators/context-types.ts"
 import { isGeneratedContent, type Staged } from "../codegen/utils/fs.ts"
-import { claim, commitRuns, nothingWritten, type Run } from "./codegen-record.ts"
+import { claim, commitRuns, holdLines, type Run } from "./codegen-record.ts"
 import { parseArgs } from "./args.ts"
 import { type CodegenConfig, type DatabaseCodegen, databaseIn, loadCombConfig, tablesFile } from "./comb-config.ts"
 import { CliError, type CliIo } from "./output.ts"
@@ -282,18 +282,18 @@ export async function cmdCodegen(argv: readonly string[], io: CliIo): Promise<vo
 	const staged: Staged = new Map()
 	const runs: Run[] = []
 	/* each line held until the files are written, so a failed run claims none it never wrote (KC10 of r22b) */
-	const said: string[] = []
-	const held: CliIo = { ...io, out: (line) => void said.push(line) }
+	const { commit, failed, held } = holdLines(io)
 	for (const database of picked) {
 		if (!database.direct) held.out(`\nCodegen: ${database.name}`)
-		runs.push(await generate(database, { only, staged }, held).catch((error: unknown) => nothingWritten(io, error)))
+		runs.push(await generate(database, { only, staged }, held).catch((error: unknown) => failed(error)))
 	}
 	const direct = picked.find((database) => database.direct)
 	/* a run of the whole config knows every database it declares; one that names some, or runs one generator, does not */
 	const whole = direct === undefined && positionals.length === 0 && only === undefined
-	commitRuns(staged, runs, {
-		declared: whole ? picked.map((database) => database.name) : undefined,
-		recordDir: direct === undefined ? io.cwd : path.dirname(direct.tablesPath),
-	})
-	for (const line of said) io.out(line)
+	commit(() =>
+		commitRuns(staged, runs, {
+			declared: whole ? picked.map((database) => database.name) : undefined,
+			recordDir: direct === undefined ? io.cwd : path.dirname(direct.tablesPath),
+		}),
+	)
 }
