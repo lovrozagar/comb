@@ -5,6 +5,7 @@ import path from "node:path"
 import { parseArgs, refuseFurther } from "./args.ts"
 import { binOf } from "../migrate/core/optional-peer.ts"
 import { declaredFts, ftsSql } from "./comb-config.ts"
+import { checkDialect, DIALECT_NAMES, type Dialect, literalDialect, statedDialect } from "./drizzle-dialect.ts"
 import { migrateApply, needPeers } from "./migrate-apply.ts"
 import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliIo } from "./output.ts"
@@ -50,19 +51,30 @@ export default defineConfig({
  * The starter files of each dialect, in the order they are written. No atlas.hcl: comb runs Atlas
  * with a config of its own, so a project's would hold a guard no comb command reads (C11)
  */
-function starterFiles(dialect: string): ReadonlyArray<readonly [string, string]> {
+function starterFiles(dialect: Dialect): ReadonlyArray<readonly [string, string]> {
 	if (dialect === "sqlite") return [["drizzle.config.ts", DRIZZLE_CONFIG]]
-	if (dialect !== "postgres") throw new CliError(`Unknown --dialect "${dialect}": use sqlite or postgres`)
 	return [
 		["drizzle.config.ts", PG_DRIZZLE_CONFIG],
 		["comb.migrate.config.ts", PG_MIGRATE_CONFIG],
 	]
 }
 
-/** Write each starter file of the dialect --dialect names that does not exist yet */
+/**
+ * Write each starter file of the dialect --dialect names that does not exist yet, refused when the
+ * drizzle config already there states the other dialect (KC1 of r22b)
+ */
 function migrateInit(argv: readonly string[], io: CliIo): void {
-	const dialect = parseArgs(argv, "migrate init").options["dialect"]
-	for (const [name, content] of starterFiles(typeof dialect === "string" ? dialect : "sqlite")) {
+	const option = parseArgs(argv, "migrate init").options["dialect"] ?? "sqlite"
+	if (option !== "sqlite" && option !== "postgres")
+		throw new CliError(`Unknown --dialect "${String(option)}": use sqlite or postgres`)
+	const dialect: Dialect = option
+	const config = path.join(io.cwd, "drizzle.config.ts")
+	const stated = fs.existsSync(config) ? literalDialect(fs.readFileSync(config, "utf8")) : undefined
+	if (stated !== undefined) {
+		const but = `migrate init --dialect ${dialect} writes a ${DIALECT_NAMES[dialect]} project`
+		checkDialect(config, stated, { but, dialect, otherwise: ", or remove it and run init again" })
+	}
+	for (const [name, content] of starterFiles(dialect)) {
 		const file = path.join(io.cwd, name)
 		if (fs.existsSync(file)) continue
 		fs.writeFileSync(file, content)
@@ -87,6 +99,18 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const { d1, exported, fts, migrationsDir, pg, provider } = await diffTarget(db, io)
 	/* every peer the diff needs, Atlas and a declared FTS's ts-morph among them, before Atlas or drizzle-kit runs (K1 of r21, KC3 of r22) */
 	const peers = needPeers(io, "diff", { fts: fts !== undefined, provider })
+	/* after the peers, since a drizzle config imports drizzle-kit; before drizzle-kit exports none of the other dialect's tables (KC1 of r22b) */
+	checkDialect(exported.configPath, await statedDialect(exported.configPath), {
+		but:
+			db === undefined
+				? "a diff with no comb.migrate.config.ts is SQLite"
+				: `database ${db} is ${DIALECT_NAMES[exported.dialect]}`,
+		dialect: exported.dialect,
+		otherwise:
+			db === undefined
+				? undefined
+				: `, or set drizzleConfigPath on ${db} in comb.migrate.config.ts to a ${DIALECT_NAMES[exported.dialect]} drizzle config`,
+	})
 	const { exportWith, generateIncrementalMigration } = await import("../migrate/core/atlas.ts")
 	/* a D1 diff writes beside the files wrangler runs, refused where it would run them otherwise than Atlas (S4, C8) */
 	if (d1 && fs.existsSync(migrationsDir)) (await import("../migrate/core/d1-files.ts")).d1Files(migrationsDir)

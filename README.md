@@ -1100,6 +1100,8 @@ What changes for a project on 0.20. Before deploying it:
 
 8. **Drop the type argument from `getHandle`.** `ShardRouter.getHandle(mapping, env)` now types the shard's handle by the env it is passed: the type the env's `SHARD_DB_*` bindings have, which `wrangler types` writes as `D1Database`, so the handle goes to `drizzle()` as it is. An env typed by a string index signature gives the structural `D1DatabaseLike`, and an env whose known keys hold no `SHARD_DB_*` binding fails to compile. 0.20's `getHandle<D1Database>(mapping, env)` now fails to compile (TS2345), and an `Env` interface that 0.20 refused (TS2345) is taken. **Fix:** call `getHandle(mapping, env)` with the Worker's `env`. `ShardBindingOf<Env>` names the handle's type, and `ShardEnv<Env>` what the env must hold.
 
+9. **State the database's dialect in the drizzle config a diff reads.** `comb migrate diff` now imports the drizzle config before drizzle-kit runs and refuses one whose `dialect` is not the database's (`postgresql` for Postgres; `sqlite` or `turso` for SQLite, libsql, Turso and D1), or that states none, naming the file, its dialect and the database's. 0.20 ran `drizzle-kit export` with the config's dialect, which exports none of the other dialect's tables, so the diff wrote a `DROP TABLE` for each and exited 0. `comb migrate init --dialect` likewise refuses a `drizzle.config.ts` already there whose `dialect` is the other one, where 0.20 kept it silently. **Fix:** set `dialect` in each drizzle config, or point the database's `drizzleConfigPath` in comb.migrate.config.ts at one of its dialect.
+
 ## Upgrading to 0.20.1
 
 What changes for a project on 0.20.0. Before deploying it:

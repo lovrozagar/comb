@@ -13,7 +13,7 @@ afterEach(temp.clean)
 /** A project a diff runs in: its drizzle config written, as migrate init writes one */
 function diffProject(): string {
 	const dir = project()
-	writeFileSync(join(dir, "drizzle.config.ts"), "export default {}\n")
+	writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "sqlite" }\n')
 	return dir
 }
 
@@ -147,7 +147,7 @@ describe("comb migrate diff", () => {
 		}
 		const dir = project()
 		/* a diff refuses a project without a drizzle config first, which reads a file and starts nothing */
-		writeFileSync(join(dir, "drizzle.config.ts"), "export default {}\n")
+		writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "sqlite" }\n')
 		const io = { ...makeIo(dir, run), readAtlasVersion: undefined }
 		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
 		expect(io.errors).toEqual([
@@ -330,7 +330,7 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 describe("comb migrate diff: a Postgres database through comb.migrate.config.ts", () => {
 	it("diffs a Postgres database with its drizzle config, scoped to its schema, its dev URL in the environment", async () => {
 		const dir = diffProject()
-		writeFileSync(join(dir, "drizzle.pg.ts"), "export default {}\n")
+		writeFileSync(join(dir, "drizzle.pg.ts"), 'export default { dialect: "postgresql" }\n')
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
 			'export default { databases: { core: { drizzleConfigPath: "drizzle.pg.ts", migrationsDir: "pg", name: "core", provider: { devUrl: "postgres://dev:Dev-Secret-0451@localhost/dev", schema: "app", type: "postgres", url: "postgres://localhost/app" } } } }\n',
@@ -358,7 +358,8 @@ describe("comb migrate diff: a Postgres database through comb.migrate.config.ts"
 
 	/* M75: a Postgres diff reads its history and the export with Postgres's parser, so it loads it first */
 	it("loads the Postgres parser itself before it reads a Postgres diff", async () => {
-		const dir = diffProject()
+		const dir = project()
+		writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "postgresql" }\n')
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
 			'export default { databases: { core: { migrationsDir: "pg", name: "core", provider: { devUrl: "postgres://localhost/dev", type: "postgres", url: "postgres://localhost/app" } } } }\n',
