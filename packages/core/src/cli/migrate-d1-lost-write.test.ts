@@ -193,3 +193,25 @@ describe("migrate apply on D1 after a lost read-back", () => {
 		},
 	)
 })
+
+/* SD4 of r22: a file that lands in the directory while wrangler runs, as a diff or a checkout writes one */
+describe("migrate apply on D1 when wrangler applies a file comb never checked", () => {
+	it("names each file wrangler applied that comb never checked, in the message and under applied in --json", async () => {
+		const dir = worker(INIT)
+		const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
+		const late: Run = asWrangler((cmd, args, options) => {
+			if (args[1] === "migrations")
+				writeFileSync(join(dir, "atlas-migrations", "20260102000000_late.sql"), "CREATE TABLE late (id TEXT);")
+			return d1(cmd, args, options)
+		})
+		const io = makeIo(dir, Object.assign(late, { calls: d1.calls, db: d1.db }))
+		expect(await runCli(["migrate", "apply", "core", "--local", "--json"], io)).toBe(1)
+		expect(io.errors.join("\n")).toContain(
+			"wrangler also applied 20260102000000_late.sql, which comb never checked and holds no hash for: check each against git, then run comb migrate baseline <db> --hashes",
+		)
+		expect(io.errors.join("\n")).not.toContain("see the wrangler output above")
+		const reported = JSON.parse(io.outputs.at(-1) as string) as { applied: string[] }
+		expect(reported.applied).toEqual(["20260101000000_init.sql", "20260102000000_late.sql"])
+		expect(recorded(d1)).toEqual(reported.applied)
+	})
+})

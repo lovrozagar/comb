@@ -134,6 +134,27 @@ function appliedAfter(
 	}
 }
 
+/** Refuse a failed run, or one whose table gained (`added`) other than the `names` checked, naming a file never checked (SD4 of r22) */
+function refuseUnlike(
+	ran: { code: number; stderr: string; stdout: string },
+	{ added, names, table }: { added: string[]; names: string[]; table: string },
+): void {
+	const unchecked = added.filter((name) => !names.includes(name))
+	const rest = names.filter((name) => !added.includes(name))
+	const also =
+		unchecked.length === 0
+			? ""
+			: `; wrangler also applied ${unchecked.join(", ")}, which comb never checked and holds no hash for: check each against git, then run comb migrate baseline <db> --hashes`
+	const now = { applied: added, pending: rest }
+	if (ran.code !== 0) throw new Refused(`wrangler d1 migrations apply failed: ${wranglerError(ran)}${also}`, now)
+	if (unchecked.length > 0 || rest.length > 0) {
+		throw new Refused(
+			`wrangler recorded ${added.join(", ") || "nothing"} in ${table}, where comb checked ${names.join(", ")}; wrangler said: ${wranglerError(ran)}${also}`,
+			now,
+		)
+	}
+}
+
 type D1Apply = {
 	approve(migration: ParsedMigration): Promise<Approval>
 	/** only check: apply nothing */
@@ -181,20 +202,11 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 	const apply = ["d1", "migrations", "apply", target.name, ...target.flags]
 	const ran = runPeer(target.exec, target.wrangler)(apply, { input: "" })
 	const after = appliedAfter(target, options.read, { names, ok: ran.code === 0, table })
-	const [applies, rest] = [names.filter((name) => after.has(name)), names.filter((name) => !after.has(name))]
 	const moved = await moveIntents(
 		target.conn,
 		hashed.filter(({ name }) => after.has(name)),
 	)
-	if (ran.code !== 0)
-		throw new Refused(`wrangler d1 migrations apply failed: ${wranglerError(ran)}`, { applied: applies, pending: rest })
-	const added = [...after].filter((name) => !applied.has(name))
-	if (added.length !== names.length || rest.length > 0) {
-		throw new Refused(
-			`wrangler recorded ${added.join(", ") || "nothing"} in ${table}, where comb checked ${names.join(", ")}; see the wrangler output above`,
-			{ applied: applies, pending: rest },
-		)
-	}
+	refuseUnlike(ran, { added: [...after].filter((name) => !applied.has(name)), names, table })
 	if (moved !== undefined) {
 		throw new Refused(
 			`wrangler applied ${names.join(", ")}, then recording their hashes failed: ${moved}; comb migrate status reads them as recorded, and the next apply or baseline records them`,

@@ -105,7 +105,7 @@ describe("migrate apply on D1 without a migrate config: a failed apply", () => {
 		const no = makeIo(declined, fakeD1({ declines: true, dir: join(declined, "atlas-migrations") }))
 		expect(await runCli(["migrate", "apply", "core", "--local"], no)).toBe(1)
 		expect(no.errors).toEqual([
-			"wrangler recorded nothing in d1_migrations, where comb checked 20260101000000_init.sql; see the wrangler output above",
+			"wrangler recorded nothing in d1_migrations, where comb checked 20260101000000_init.sql; wrangler said: About to apply… continue? no",
 		])
 	})
 })
