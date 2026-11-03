@@ -49,6 +49,7 @@ This README is the full usage manual. An agent that reads only this file should 
 - [Package exports](#package-exports)
 - [Repository layout](#repository-layout)
 - [Develop](#develop)
+- [Upgrading to 0.20](#upgrading-to-020)
 - [Upgrading to 0.19](#upgrading-to-019)
 - [Upgrading to 0.18](#upgrading-to-018)
 - [Upgrading to 0.17](#upgrading-to-017)
@@ -828,7 +829,7 @@ A filter on a relation field (`tags.slug`, through a `relations` entry) asks abo
 
 `buildListQuery()` and `queryHelpers.listOptions()` take a filter and an order only from the list query schema's output, which carries `validated: true`. A hand-built `filterAst` or `parsedSort` without it is refused (`filter_not_wired` / `sort_not_wired`, 500): checked against nothing, it could name any column of the table, `password_hash` included. Code that validated a filter against its own fields, as `validateFilter()` does, sets `validated: true` itself. The flag covers the filter and the order, never the page: a page is always a whole number from 1, and past the default `maxPage` (10,000) it is `page_too_deep`, unless it carries a `pageBound`, which the schema sets to the `maxPage` it was built with; then that number holds it. A limit is held the same way: past the default `maxLimit` (100) it is a 400, unless a `limitBound` states another. Each comes from the schema's config, never from a request, and a parsed query with a field changed stays held to them. Either on an input you make by hand is your app stating its own bound. `buildDerivedListQuery()` needs no flag: its caller passes the filter as SQL and maps every sortable field to a column.
 
-`buildDerivedListQuery()` handles queries over a subquery or CTE, where sort columns come from a `sortColumns` map rather than the table. A derived list whose rows are one table, its sort columns that table's, names it as `anchor: { table, idColumn }`: a value too long for a cursor then goes by reference and is read back from that table, as on the table's own list. With `idColumn` alone no row holds its keys, so such a value is a 500 (`sort_not_wired`) on the page that meets it, and so is a sort key SQLite stores as INTEGER that the driver read as a number past ±(2^53 − 1), rounded (D1 always, bun:sqlite by default), which the next page would seek by; a REAL past 2^53 is a double on disk, read back exactly, and pages: read it as bigint, or name the `anchor`, whose row the keyset reads the exact key back from. A derived list must not dedupe with `DISTINCT`: SQL counts `_total` before `DISTINCT` runs, so the count would be the joined rows. Express such a join as `EXISTS` in `filterWhere`, or `GROUP BY` the id, which the count runs after. A derived list whose rows sit on several shards, such as a union of two joined selects per shard, takes `merged: {}` (with `maxRowsPerShard`, as `buildListQuery`'s does): read each shard with `applyListQuery` and page the reads with `paginateMerged`. Its rows carry each sort field under its name, which the merge orders by, and it takes no `anchor`, as a merged list reads no key by reference.
+`buildDerivedListQuery()` handles queries over a subquery or CTE, where sort columns come from a `sortColumns` map rather than the table. A derived list whose rows are one table, its sort columns that table's, names it as `anchor: { table, idColumn }`: a value too long for a cursor then goes by reference and is read back from that table, as on the table's own list. With `idColumn` alone no row holds its keys, so such a value is a 500 (`sort_not_wired`) on the page that meets it, and so is a sort key SQLite stores as INTEGER that the driver read as a number past ±(2^53 − 1), rounded (D1 always, bun:sqlite by default), which the next page would seek by; a REAL past 2^53 is a double on disk, read back exactly, and pages: read it as bigint, or name the `anchor`, whose row the keyset reads the exact key back from. A derived list must not dedupe with `DISTINCT`: SQL counts `_total` before `DISTINCT` runs, so the count would be the joined rows. Express such a join as `EXISTS` in `filterWhere`, or `GROUP BY` the id, which the count runs after. The list's database is read from the columns its id and sort columns hold, wherever an expression holds them; a list of SQL expressions alone, such as a union whose id is `` sql`inbox.uid` ``, states it with `dialect: "postgres"` or `dialect: "sqlite"`, and is a TypeError naming `dialect` without one, since Postgres types a key by its operand and SQLite by its storage class. A derived list whose rows sit on several shards, such as a union of two joined selects per shard, takes `merged: {}` (with `maxRowsPerShard`, as `buildListQuery`'s does): read each shard with `applyListQuery` and page the reads with `paginateMerged`. Its rows carry each sort field under its name, which the merge orders by, and it takes no `anchor`, as a merged list reads no key by reference.
 
 `queryHelpers.paginate(rows, built)` takes the rows and the query that read them, any of the three builders' results (a merged list's goes to `paginateMerged`), and returns `[items, pagination]`; the built query's `pagination` says what it read, so nothing is passed twice. A list ordered by a computed sort, or a table with no tiebreak column, has no cursor to resume it: its `nextCursor` is `null` while `hasMore` still says there is a next page by number. More rows than the built query reads, one past the page, are a 500 (`page_not_wired`): rows a query read without its limit and offset are no page of this list. Underneath, `filterToSQL()` and `conditionToSQL()` are exported for advanced use, along with `orderSQL()` / `orderByKeys()` / `keysetSQL()` — the one ordering and keyset implementation every builder shares — and `patternToSQL()` for `like` / `ilike`.
 
@@ -1049,6 +1050,22 @@ bun run test:bun     # bun test — the bun:sqlite replay suite
 `tests/bun/` is separate because it imports `bun:sqlite` and `bun:test`, which vitest cannot load. It replays a full Atlas-shaped drift migration against an in-memory database to prove the SQLite transforms survive a real commit with foreign keys enforced.
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org). `bun install` points `core.hooksPath` at `.githooks`, so the `commit-msg` hook enforces it locally; CI re-checks every commit on a pull request.
+
+## Upgrading to 0.20
+
+What changes for a project on 0.19. Before deploying it:
+
+1. **Know what changed in the API.** A test holds these three lists to the exports themselves.
+
+   New exports: none.
+
+   Removed: none.
+
+   Changed: `BuildDerivedListQueryOpts`.
+
+   `BuildDerivedListQueryOpts` takes `dialect`, `"postgres"` or `"sqlite"`, for a derived list whose id and keys hold no column.
+
+2. **State `dialect` on a derived list of SQL expressions alone.** `buildDerivedListQuery` reads its database from the columns its id, anchor and sort columns hold, wherever an expression holds them (inside an `` sql`…` `` template, an alias, a `{ sql, type: "date" }` key or a subquery's field), and a list whose id and keys are all SQL expressions, such as a union inbox, must state `dialect: "postgres"` or `dialect: "sqlite"`: building it without one throws a TypeError naming `dialect`, on every page. 0.19 read the database only from a column given as the option itself, so a Postgres list whose columns sat inside an expression, or that held none, sent SQLite's `typeof()` and every page failed with `function typeof(bigint) does not exist`. A list whose id and keys hold columns of both databases, or a column of neither (a MySQL table's), or that states a `dialect` its columns contradict, is refused the same way. **Fix:** add `dialect` where the TypeError names it.
 
 ## Upgrading to 0.19
 

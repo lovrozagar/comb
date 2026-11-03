@@ -444,6 +444,11 @@ type BuildDerivedListQueryOpts<TSortField extends string = string> = {
     cursorScope: string;
     /** the app's secret a cursor is sealed under, of at least 32 UTF-8 bytes */
     cursorSecret: string;
+    /**
+     * the database the list reads, needed only where its id and keys hold no column: a column says it
+     * wherever it sits, and a list of SQL expressions alone (a union, say) cannot (Q1 of r21)
+     */
+    dialect?: "postgres" | "sqlite" | undefined;
     filterWhere?: SQL | null;
     /**
      * Present when the rows come from several shards, which paginateMerged merges, as on

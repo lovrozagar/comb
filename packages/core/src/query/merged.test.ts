@@ -248,6 +248,7 @@ describe("paginateMerged on an integer sort key past 2^53", () => {
 const derived = (params: Record<string, string>) =>
 	buildDerivedListQuery({
 		...SEALED,
+		dialect: "sqlite",
 		idColumn: sql`id`,
 		merged: {},
 		parsed: parse(params),

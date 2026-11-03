@@ -38,6 +38,7 @@ describe("a derived list over a join, deduped", () => {
 		harness = await seeded()
 		const built = buildDerivedListQuery({
 			...SEALED,
+			dialect: "sqlite",
 			idColumn: sql`users.id`,
 			parsed: schema.parse({ limit: "10", order: "id.asc" }),
 			sortColumns: { id: sql`users.id` },
@@ -52,6 +53,7 @@ describe("a derived list over a join, deduped", () => {
 		harness = await seeded()
 		const built = buildDerivedListQuery({
 			...SEALED,
+			dialect: "sqlite",
 			idColumn: sql`users.id`,
 			parsed: schema.parse({ limit: "10", order: "id.asc" }),
 			sortColumns: { id: sql`users.id` },

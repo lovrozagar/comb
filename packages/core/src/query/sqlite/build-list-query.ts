@@ -1,9 +1,10 @@
-import { getTableColumns, sql, type SQL } from "drizzle-orm"
+import { getTableColumns, sql, type SQL, type SQLWrapper } from "drizzle-orm"
 import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core"
 import { own } from "../../constraint-map.ts"
 import { CombError } from "../../error.ts"
 import { combErrorKeys } from "../../types.ts"
 import { CURSOR_TIEBREAK_COLUMN } from "../cursor.ts"
+import { listDialect } from "../list-dialect.ts"
 import type { ComputedSortResolver, FilterAST, SortField } from "../types.ts"
 import { filterToSQL } from "./executor.ts"
 import { assertSchemaParsed } from "../trusted.ts"
@@ -150,6 +151,7 @@ function buildListQuery<TTable extends SQLiteTable>(
 	/* finish built the pagination its `merged` says: a merged list's query is paged by paginateMerged alone */
 	return finish({
 		cursor: { cursorScope: opts.cursorScope, cursorSecret: opts.cursorSecret, nonFinite },
+		dialect: "sqlite",
 		keyset,
 		merged: opts.merged,
 		parsed,
@@ -186,6 +188,9 @@ function buildDerivedListQuery<TSortField extends string>(
 
 	const idColumn = opts.anchor === undefined ? opts.idColumn : opts.anchor.idColumn
 	const tiebreak: SortKey = { column: idColumn, direction: sort[0]?.direction ?? "desc" }
+	/* every key the list may sort by, not only this request's: a list's dialect is its wiring's, on every page */
+	const wired = Object.values<SQLWrapper | { sql: SQLWrapper; type: "date" }>(opts.sortColumns)
+	const dialect = listDialect([idColumn, ...wired.map((key) => ("type" in key ? key.sql : key))], opts.dialect)
 	const orderBy = orderByKeys(keys, tiebreak)
 
 	/* a merged list reads no key back by reference, and a null anchor as a real NULL, as buildListQuery's does */
@@ -198,6 +203,7 @@ function buildDerivedListQuery<TSortField extends string>(
 			cursorSecret: opts.cursorSecret,
 			...(merged ? { nonFinite: "exact" as const } : {}),
 		},
+		dialect,
 		keyset: { keys, orderBy },
 		merged: opts.merged,
 		parsed: opts.parsed,

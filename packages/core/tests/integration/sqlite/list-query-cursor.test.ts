@@ -43,6 +43,7 @@ type Derived = { created_at: number; rid: number }
 async function derivedPage(db: LibSQLDatabase, cursor: string | null) {
 	const built = buildDerivedListQuery({
 		...SEALED,
+		dialect: "sqlite",
 		idColumn: sql`rid`,
 		parsed: { cursor, limit: 2, parsedSort: SORT },
 		sortColumns: { created_at: sql`created_at` },
@@ -85,6 +86,7 @@ const crafted = (values: unknown[], id: unknown = "p1") =>
 const derivedWith = (cursor: string, key: "date" | "plain" = "plain") =>
 	buildDerivedListQuery({
 		...SEALED,
+		dialect: "sqlite",
 		idColumn: sql`rid`,
 		parsed: { cursor, limit: 2, parsedSort: SORT },
 		sortColumns: { created_at: key === "date" ? { sql: sql`created_at`, type: "date" } : sql`created_at` },

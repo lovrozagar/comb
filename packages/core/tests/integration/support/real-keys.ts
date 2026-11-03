@@ -61,7 +61,7 @@ const named = (name: string) => sql`${sql.identifier(name)}`
 const keysOf = (kind: Kind) =>
 	kind.endsWith("column")
 		? { idColumn: point.id, sortColumns: { x: point.x } }
-		: { idColumn: named("id"), sortColumns: { x: named("x") } }
+		: { dialect: "sqlite" as const, idColumn: named("id"), sortColumns: { x: named("x") } }
 
 /**
  * Every id `kind` pages under `order`, by cursor or by page number, reading `one` for a derived list

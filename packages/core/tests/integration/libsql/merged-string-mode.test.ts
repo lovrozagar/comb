@@ -79,6 +79,7 @@ async function pageAll(shards: Client[], order: string, mode: "cursor" | "page")
 		const parsed = schema.parse({ order, ...(mode === "cursor" ? { cursor } : { page: String(p) }) })
 		const built = buildDerivedListQuery({
 			...SEALED,
+			dialect: "sqlite",
 			idColumn: inbox("id"),
 			merged: {},
 			parsed,

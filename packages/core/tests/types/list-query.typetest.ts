@@ -8,12 +8,18 @@ import { createListQuerySchema, createRetrieveQuerySchema } from "../../src/quer
 import type { ListQueryOutput } from "../../src/query/schema-types.ts"
 import type { FilterAST, ParsedFields, SortField } from "../../src/query/types.ts"
 import type { ListQueryInput, ListQuerySchema, RetrieveQuerySchema } from "../../src/query/index.ts"
-import { applyListQuery, buildListQuery, type ListExtras } from "../../src/query/sqlite/build-list-query.ts"
+import {
+	applyListQuery,
+	buildDerivedListQuery,
+	buildListQuery,
+	type BuildDerivedListQueryOpts,
+	type ListExtras,
+} from "../../src/query/sqlite/build-list-query.ts"
 import { keysetSQL, type KeysetPosition } from "../../src/query/sqlite/index.ts"
 import { queryHelpers } from "../../src/query/drizzle.ts"
 import { paginateMerged } from "../../src/query/merged.ts"
 import type { ListRow } from "../../src/query/index.ts"
-import { getTableColumns } from "drizzle-orm"
+import { getTableColumns, sql } from "drizzle-orm"
 import type { DrizzleD1Database } from "drizzle-orm/d1"
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
 import { SEALED } from "../../src/query/__fixtures__/cursor-secret.ts"
@@ -213,3 +219,20 @@ for (const invite of [...onePage, ...mergedPage]) {
 	expectTypeOf(invite).not.toHaveProperty("_combId")
 }
 expectTypeOf<ListRow<Invite>>().toEqualTypeOf<Omit<OrgInvite, "_combId"> | Omit<ProjectInvite, "_combId">>()
+
+/* Q1 of r21: a derived list over a column needs no `dialect`; one over expressions names one of two databases */
+const derivedTable = sqliteTable("derived_items", { id: text("id").primaryKey(), created_at: integer("created_at") })
+buildDerivedListQuery({
+	...SEALED,
+	idColumn: derivedTable.id,
+	parsed: { limit: 2, parsedSort: [{ direction: "desc", field: "created_at" }] },
+	sortColumns: { created_at: derivedTable.created_at },
+})
+buildDerivedListQuery({
+	...SEALED,
+	dialect: "postgres",
+	idColumn: sql`inbox.uid`,
+	parsed: { limit: 2, parsedSort: [{ direction: "desc", field: "at" }] },
+	sortColumns: { at: sql`inbox.at` },
+})
+expectTypeOf<BuildDerivedListQueryOpts["dialect"]>().toEqualTypeOf<"postgres" | "sqlite" | undefined>()

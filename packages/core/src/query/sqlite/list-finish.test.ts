@@ -16,6 +16,7 @@ const tiebreak = { column: t.id, direction: "desc" as const }
 const finished = (over: Partial<Parameters<typeof finish>[0]> = {}) =>
 	finish({
 		cursor: SEALED,
+		dialect: "sqlite",
 		keyset: { keys: [], orderBy: [sql`1`] },
 		parsed: { limit: 2, parsedSort: [] },
 		sort: [],

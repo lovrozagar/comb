@@ -9,6 +9,7 @@ import { combErrorKeys } from "../../types.ts"
 import type { CursorOptions } from "../cursor.ts"
 import { assertCursorWired } from "../cursor-seal.ts"
 import { COMB_ID, type ListExtra, type ListPagination, type PaginationFacts, paginationOf } from "../pagination.ts"
+import type { ListDialect } from "../list-dialect.ts"
 import { assertLimitWithin, assertPageWithin } from "../trusted.ts"
 import type { ListQueryInput, SortField } from "../types.ts"
 import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts"
@@ -24,6 +25,8 @@ type Keyset = {
 
 type Finish = {
 	cursor: CursorOptions
+	/** the database the list reads: a Postgres key is typed by its operand, a SQLite key by its storage class */
+	dialect: ListDialect
 	/** a list every shard reads, merged by paginateMerged (K5 of r17) */
 	merged?: { maxRowsPerShard?: number | undefined } | undefined
 	/** the table a cursor's references are read from; none on a derived list */
@@ -103,9 +106,6 @@ function withExtras(list: Finish, extras: ListExtras, window = list.parsed.limit
 /* the id a cursor resumes from is the tiebreak itself, so no row's own id can stand in for it (Q2) */
 const idOf = (tiebreak: SortKey | null): ListExtras => (tiebreak === null ? {} : { _combId: combId(tiebreak.column) })
 
-/** Whether `column` is a Postgres column, whose type, not a storage class, says what a value is */
-const isPg = (column: SQLWrapper): boolean => String((column as { columnType?: unknown }).columnType).startsWith("Pg")
-
 /**
  * The storage class SQLite holds a key in, a REAL ±Infinity as `+inf` or `-inf`, which D1's JSON
  * transport reads as null (Q3 of r20)
@@ -122,10 +122,9 @@ const storageOf = (column: SQLWrapper): SQL =>
  * list reads its keys back from the anchor row, so it needs it only for a key that is no declared
  * column (Q2 of r19). A Postgres list types the cursor's value by its operand.
  */
-function keyTypesOf({ keyset, merged, table, tiebreak }: Finish): ListExtras {
+function keyTypesOf({ dialect, keyset, merged, table, tiebreak }: Finish): ListExtras {
 	const keys = keyset.keys
-	if (keys === null || tiebreak === null) return {}
-	if ([tiebreak.column, ...keys.map(({ column }) => column)].some(isPg)) return {}
+	if (keys === null || tiebreak === null || dialect === "postgres") return {}
 	const asRead = merged !== undefined || table === undefined
 	const declared = keys.every(({ column }) => is(column, Column) || column instanceof DateKey)
 	if (!asRead && (declared || !is(tiebreak.column, SQLiteColumn))) return {}
