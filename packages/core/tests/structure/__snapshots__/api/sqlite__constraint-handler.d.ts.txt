@@ -43,6 +43,14 @@ export declare class CombError extends Error {
         status: StatusKey;
         table?: string | undefined;
     });
+    /** The body a client gets: the documented fields alone, however the engine enumerates them */
+    toJSON(): {
+        column?: string | undefined;
+        errorKey: string;
+        status: number;
+        statusKey: StatusKey;
+        table?: string | undefined;
+    };
 }
 
 // types.d.ts

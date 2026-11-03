@@ -84,3 +84,20 @@ describe("CombError source", () => {
 		expect(new CombError({ errorKey: "x", status: "conflict" }).source).toBeUndefined()
 	})
 })
+
+/* KT5 of r22b: the body is the documented fields, defined rather than assigned; its Bun sibling is tests/bun/error-define-fields.test.ts */
+describe("CombError's JSON body", () => {
+	it("holds the documented fields, in order, and its spread the same keys", () => {
+		const err = new CombError({ column: "email", errorKey: "user_email_taken", status: "conflict", table: "user" })
+		expect(JSON.stringify(err)).toBe(
+			'{"column":"email","errorKey":"user_email_taken","status":409,"statusKey":"conflict","table":"user"}',
+		)
+		expect(Object.keys({ ...err })).toEqual(["column", "errorKey", "status", "statusKey", "table"])
+	})
+
+	it("leaves out a column and table it was not given", () => {
+		const err = new CombError({ cause: "Not yours", errorKey: "post_locked", status: "forbidden" })
+		expect(err.toJSON()).toEqual({ errorKey: "post_locked", status: 403, statusKey: "forbidden" })
+		expect(JSON.stringify(err)).toBe('{"errorKey":"post_locked","status":403,"statusKey":"forbidden"}')
+	})
+})
