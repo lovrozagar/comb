@@ -115,6 +115,14 @@ describe("the dialect a drizzle config states", () => {
 		expect(literalDialect("export default { dialect: process.env.DIALECT }")).toBeUndefined()
 	})
 
+	/* KC1n: a dialect commented out above the real one made init refuse a config that already states its own */
+	it("reads no dialect a comment holds, and keeps a // that a string holds", () => {
+		expect(literalDialect('// dialect: "sqlite"\nexport default { dialect: "postgresql" }')).toBe("postgresql")
+		expect(literalDialect('/* dialect: "sqlite",\n */ export default { dialect: "postgresql" }')).toBe("postgresql")
+		expect(literalDialect('export default { url: "postgres://h/db", dialect: "postgresql" }')).toBe("postgresql")
+		expect(literalDialect("export default { url: 'a//b', /* x */ dialect: 'turso' }")).toBe("turso")
+	})
+
 	it("names a dialect that is not a string as the config states it", () => {
 		expect(() => checkDialect("drizzle.config.json", 5, { but: "database core is SQLite", dialect: "sqlite" })).toThrow(
 			'drizzle.config.json states dialect 5, but database core is SQLite: set dialect: "sqlite" in it',

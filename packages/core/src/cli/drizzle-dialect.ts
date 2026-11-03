@@ -33,8 +33,13 @@ export async function statedDialect(file: string): Promise<unknown> {
  * none that way; for `migrate init`, which runs before drizzle-kit, which a config imports, is installed
  */
 export function literalDialect(source: string): string | undefined {
-	return /\bdialect\s*:\s*["'`]([\w-]+)["'`]/.exec(source)?.[1]
+	/* each string kept and each comment dropped, so a dialect commented out is not read and a URL's // ends no line (KC1n) */
+	const code = source.replace(STRING_OR_COMMENT, (_match, string: string | undefined) => string ?? " ")
+	return /\bdialect\s*:\s*["'`]([\w-]+)["'`]/.exec(code)?.[1]
 }
+
+/** A string literal (captured) or a comment, whichever starts first */
+const STRING_OR_COMMENT = /("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g
 
 /** Refuse the drizzle config `file` unless the dialect it states is one `expected.dialect` takes */
 export function checkDialect(file: string, stated: unknown, expected: Expected): void {
