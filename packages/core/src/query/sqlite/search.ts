@@ -111,7 +111,7 @@ type SpellfixSearch = FtsSource & {
 	maxEditDistance?: number
 	/** corrections taken per term (default 3) */
 	maxCorrections?: number
-	/** false where spellfix1 is never loaded (D1): the terms are searched as typed and nothing is probed (Q4 of r20) */
+	/** false where spellfix1 is never loaded: the terms are searched as typed and nothing is probed (Q4 of r20); a D1 client is known without it (Q3 of r21) */
 	spellfix?: boolean | undefined
 	spellfixTable: string
 }
@@ -126,12 +126,22 @@ const LOADED: WeakMap<object, Promise<boolean>> = /* @__PURE__ */ new WeakMap()
 const clientOf = (db: SpellfixDb): object => (typeof db.$client === "object" && db.$client !== null ? db.$client : db)
 
 /**
+ * Whether `client` is D1's, a D1Database (`withSession`) or a session of one (`getBookmark`), the
+ * duck test openD1Session makes: D1 loads no extension, and openD1Session makes a session per
+ * request, which no probe kept per client would ever answer (Q3 of r21)
+ */
+const isD1 = (client: object): boolean =>
+	typeof (client as { withSession?: unknown }).withSession === "function" ||
+	typeof (client as { getBookmark?: unknown }).getBookmark === "function"
+
+/**
  * Whether `db` has spellfix1 loaded, asked once per client before any spellfix query: editdist3,
  * the function it registers, reads no table, so its absence is never a misspelled vocabulary
- * table (K1 of r19). D1's authorizer refuses pragma_module_list. Any other failure is thrown.
+ * table (K1 of r19). D1 is answered unasked (Q3 of r21). Any other failure is thrown.
  */
 function spellfixLoaded(db: SpellfixDb): Promise<boolean> {
 	const key = clientOf(db)
+	if (isD1(key)) return Promise.resolve(false)
 	const known = LOADED.get(key)
 	if (known !== undefined) return known
 	/* in an async function, so a driver that throws as it prepares (drizzle's bun:sqlite) rejects as the others do */

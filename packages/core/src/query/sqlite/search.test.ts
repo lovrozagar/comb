@@ -1,6 +1,8 @@
 import { type SQL, sql as drizzleSql } from "drizzle-orm"
 import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
+import type { D1Database } from "@cloudflare/workers-types"
+import { openD1Session } from "../../sqlite/d1/session.ts"
 import {
 	buildFtsHighlight,
 	buildFtsMatch,
@@ -299,6 +301,21 @@ describe("buildFtsWhereWithSpellfix when spellfix1 is not loaded (K1 of r19)", (
 		expect(flaky.calls).toEqual(["probe", "probe", "query"])
 	})
 
+	it("spellfix: false runs no probe and no spellfix query, searching the terms as typed", async () => {
+		const { calls, db } = probed(() => [])
+		const where = await buildFtsWhereWithSpellfix(db, { ...SOURCE, spellfix: false }, "hello")
+		expect(String(compile(where as SQL).params[0])).toBe('"hello"*')
+		expect(calls).toEqual([])
+	})
+
+	it("asks nothing for terms too short to correct", async () => {
+		const { calls, db } = probed(() => [])
+		await buildFtsWhereWithSpellfix(db, SOURCE, "a ab")
+		expect(calls).toEqual([])
+	})
+})
+
+describe("buildFtsWhereWithSpellfix's probe, kept per client", () => {
 	/* Q4 of r20: a Worker builds drizzle(env.DB) per request, each wrapper over the one client */
 	it("probes once per client, not per wrapper", async () => {
 		const { calls, db } = probed(() => {
@@ -310,16 +327,14 @@ describe("buildFtsWhereWithSpellfix when spellfix1 is not loaded (K1 of r19)", (
 		expect(calls).toEqual(["probe"])
 	})
 
-	it("spellfix: false runs no probe and no spellfix query, searching the terms as typed", async () => {
+	/* Q3 of r21: openD1Session makes a session per request, and D1 loads no extension to ask about */
+	it("probes no D1 client, a session per request or the binding, and searches the terms as typed", async () => {
 		const { calls, db } = probed(() => [])
-		const where = await buildFtsWhereWithSpellfix(db, { ...SOURCE, spellfix: false }, "hello")
-		expect(String(compile(where as SQL).params[0])).toBe('"hello"*')
-		expect(calls).toEqual([])
-	})
-
-	it("asks nothing for terms too short to correct", async () => {
-		const { calls, db } = probed(() => [])
-		await buildFtsWhereWithSpellfix(db, SOURCE, "a ab")
+		const binding = { withSession: () => ({ getBookmark: () => null }) } as unknown as D1Database
+		for (const $client of [...Array.from({ length: 4 }, () => openD1Session(binding).client), binding]) {
+			const where = await buildFtsWhereWithSpellfix({ ...db, $client }, SOURCE, "hello")
+			expect(String(compile(where as SQL).params[0])).toBe('"hello"*')
+		}
 		expect(calls).toEqual([])
 	})
 })

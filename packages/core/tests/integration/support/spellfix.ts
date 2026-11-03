@@ -3,8 +3,8 @@
  * stock bun:sqlite and libsql are. drizzle wraps a failed query as DrizzleQueryError, so SQLite's own
  * words are only on its cause. No test framework is imported, so vitest and bun:test share it.
  */
-import { sql } from "drizzle-orm"
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { type SQL, sql } from "drizzle-orm"
+import { integer, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { buildFtsWhereWithSpellfix } from "../../../src/query/sqlite/search.ts"
 
 export const item = sqliteTable("item", { id: integer("id").primaryKey(), title: text("title").notNull() })
@@ -19,7 +19,29 @@ export const SEED = [
 
 /** A drizzle database as buildFtsWhereWithSpellfix and the search read it */
 type Db = {
+	$client?: unknown
 	all(query: ReturnType<typeof sql>): Promise<unknown[]> | unknown[]
+}
+
+/* drizzle's SQLite dialect, which compiles a query for its text */
+const dialect = new (SQLiteDialect as unknown as new () => { sqlToQuery: (query: SQL) => { sql: string } })()
+
+/**
+ * The spellfix1 probes run through each wrapper `wrap` makes, as a Worker or a server makes one per
+ * request (Q4 of r20, Q3 of r21): `wrap` hands back a counted database over the same client
+ */
+export function probes(): { count: number; wrap: (db: Db) => Db } {
+	const counted = {
+		count: 0,
+		wrap: (db: Db): Db => ({
+			$client: db.$client,
+			all: (query) => {
+				if (dialect.sqlToQuery(query).sql.includes("editdist3('a', 'b')")) counted.count++
+				return db.all(query)
+			},
+		}),
+	}
+	return counted
 }
 
 /** The ids `query` finds through buildFtsWhereWithSpellfix, spellfix asked of `spellfixTable` */
