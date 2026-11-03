@@ -40,8 +40,6 @@ function d1Config(request: D1Request, resolved: MigrateTarget | undefined): { co
 			throw new CliError(`no wrangler config next to comb.migrate.config.ts; set wranglerConfig on ${db}'s d1 provider`)
 		return { config: { ...resolved.provider, wranglerConfig }, dir: resolved.migrationsDir }
 	}
-	if (args.options["env"] !== undefined)
-		throw new CliError("-e/--env needs comb.migrate.config.ts to define environments")
 	const wranglerConfig = findWranglerConfig(io.cwd)
 	if (wranglerConfig === undefined) throw new CliError(`no wrangler config in ${io.cwd} binds the D1 database ${db}`)
 	const local = args.options["local"] === true

@@ -97,7 +97,11 @@ function databaseIn(config: CombMigrateConfig, configFile: string, name: string)
 async function resolveMigrateTarget(request: TargetRequest): Promise<MigrateTarget | undefined> {
 	const { findConfigFile, loadConfig, resolveDatabaseConfig } = await import("../migrate/config.ts")
 	const configFile = findConfigFile(request.cwd)
-	if (configFile === undefined) return undefined
+	if (configFile === undefined) {
+		/* an option is refused, never dropped (P17 of r18): diff and every other command alike (AD7 of the area D review) */
+		if (request.env !== undefined) throw new CliError("-e/--env needs comb.migrate.config.ts to define environments")
+		return undefined
+	}
 	const { config, configDir } = await loadConfig(configFile, request.cwd)
 	const db = databaseIn(config, configFile, request.db)
 	assertOneDialect(request.db, db)

@@ -289,6 +289,17 @@ describe("comb migrate diff --dry-run", () => {
 	})
 })
 
+describe("comb migrate diff: its options", () => {
+	/* AD7 of the area D review: an option is refused, never dropped (P17 of r18), as status refuses this one */
+	it("refuses -e with no comb.migrate.config.ts to define it, running nothing", async () => {
+		const atlas = fakeAtlas(() => undefined)
+		const io = makeIo(diffProject(), atlas)
+		expect(await runCliWithFakes(["migrate", "diff", "core", "-e", "prod"], io)).toBe(1)
+		expect(io.errors).toEqual(["-e/--env needs comb.migrate.config.ts to define environments"])
+		expect(atlas.calls).toEqual([])
+	})
+})
+
 describe("comb migrate diff: the config it reads", () => {
 	it("fails migrate diff when the config's FTS cannot be read, instead of diffing without it (S-12)", async () => {
 		const dir = diffProject()
