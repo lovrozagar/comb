@@ -218,7 +218,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 		await applyEach(
 			() => target.fresh(),
 			pending.map(({ migration }) => migration),
-			{ print: io.out },
+			{ history: await target.write(), print: io.out },
 		)
 	io.out(`\nDone: ${pendingNames.length} applied, ${names.length - pendingNames.length} skipped`)
 	return { applied: pendingNames, pending: [] }

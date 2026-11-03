@@ -110,7 +110,7 @@ describe("applyRecorded", () => {
 					throw new TypeError("fetch failed", { cause: Object.assign(new Error("reset"), { code: "ECONNRESET" }) })
 			},
 		}
-		await applyRecorded(lost, migration, NOW)
+		await applyRecorded(lost, migration, { history: lost, retry: NOW })
 		expect(calls).toBe(1)
 		expect((await conn.execute("SELECT count(*) FROM a")).rows[0]?.[0]).toBe(1)
 		expect((await conn.execute("SELECT name FROM __drizzle_migrations")).rows).toEqual([["1_a.sql"]])
@@ -127,11 +127,13 @@ describe("applyRecorded", () => {
 				await conn.batch(statements)
 			},
 		}
-		await applyRecorded(flaky, migration, NOW)
+		await applyRecorded(flaky, migration, { history: flaky, retry: NOW })
 		expect(calls).toBe(2)
 		expect((await conn.execute("SELECT count(*) FROM a")).rows[0]?.[0]).toBe(1)
 		const broken: Connection = { ...conn, batch: async () => Promise.reject(new Error("no such table: b")) }
-		await expect(applyRecorded(broken, { ...migration, filename: "2_b.sql" }, NOW)).rejects.toThrow("no such table: b")
+		await expect(
+			applyRecorded(broken, { ...migration, filename: "2_b.sql" }, { history: broken, retry: NOW }),
+		).rejects.toThrow("no such table: b")
 	})
 })
 
@@ -147,9 +149,9 @@ describe("applyRecorded on a SQLite failure that names a 429", () => {
 		let calls = 0
 		const counted: Connection = { ...conn, batch: (statements) => (calls++, conn.batch(statements)) }
 		const unique = { filename: "2_u.sql", hash: "h2", statements: ["CREATE UNIQUE INDEX u ON t429 (body)"] }
-		await expect(applyRecorded(counted, unique, { baseDelay: 0, maxDelay: 0 })).rejects.toThrow(
-			"UNIQUE constraint failed: t429.body",
-		)
+		await expect(
+			applyRecorded(counted, unique, { history: counted, retry: { baseDelay: 0, maxDelay: 0 } }),
+		).rejects.toThrow("UNIQUE constraint failed: t429.body")
 		expect(calls).toBe(1)
 	})
 })
@@ -167,7 +169,7 @@ describe("applyEach", () => {
 			file("2_b.sql", "INSERT INTO b VALUES (1)"),
 			file("3_c.sql", "SELECT 1"),
 		]
-		const failure = await applyEach(kept(conn), files, { print: (line) => lines.push(line) }).catch(
+		const failure = await applyEach(kept(conn), files, { history: conn, print: (line) => lines.push(line) }).catch(
 			(error: unknown) => error,
 		)
 		expect(failure).toBeInstanceOf(Refused)
@@ -185,6 +187,7 @@ describe("applyEach", () => {
 		const lines: string[] = []
 		const conn = mockConnection({ batch: () => Promise.reject("lost") })
 		const failure = await applyEach(kept(conn), [file("1_a.sql", "SELECT 1")], {
+			history: conn,
 			print: (line) => lines.push(line),
 		}).catch((error: unknown) => error)
 		expect([(failure as Refused).message, (failure as Refused).applied]).toEqual(["lost", []])
@@ -200,7 +203,9 @@ describe("applyEach", () => {
 			return conn
 		}
 		const files = [file("1_a.sql", "SELECT 1"), file("2_b.sql", "SELECT 2"), file("3_c.sql", "SELECT 3")]
-		const failure = (await applyEach(open, files, { print: () => {} }).catch((error: unknown) => error)) as Refused
+		const failure = (await applyEach(open, files, { history: mockConnection(), print: () => {} }).catch(
+			(error: unknown) => error,
+		)) as Refused
 		expect([failure.message, failure.applied, failure.pending]).toEqual([
 			"SQLITE_CANTOPEN: unable to open database file",
 			["1_a.sql", "2_b.sql"],
@@ -229,12 +234,14 @@ describe("applyEach on a libsql file: a file's pragmas end with the file (S1 of 
 		try {
 			const setup = await open()
 			await ensureMigrationsTable(setup)
-			await setup.close()
 			const files = [file("0001_t.sql", IGNORE_CHECKS), file("0002_bad.sql", BREAKS_CHECK)].map((one) => ({
 				...one,
 				statements: splitSqlStatements(one.statements.join("\n")),
 			}))
-			const failure = (await applyEach(open, files, { print: () => {} }).catch((error: unknown) => error)) as Refused
+			const failure = (await applyEach(open, files, { history: setup, print: () => {} }).catch(
+				(error: unknown) => error,
+			)) as Refused
+			await setup.close()
 			expect([failure.applied, failure.pending]).toEqual([["0001_t.sql"], ["0002_bad.sql"]])
 			expect(failure.message).toContain("CHECK constraint failed")
 		} finally {
@@ -285,7 +292,9 @@ describe("applyEach on a batch whose answer is lost", () => {
 	])("a committed batch with a lost answer is unknown, not pending, on %s", async (_, open) => {
 		const conn = await open()
 		await ensureMigrationsTable(conn)
-		const failure = await applyEach(kept(losing(conn, "0002_t2.sql")), LOST_FILES, {
+		const lost = losing(conn, "0002_t2.sql")
+		const failure = await applyEach(kept(lost), LOST_FILES, {
+			history: lost,
 			print: () => {},
 			retry: NO_WAIT,
 		}).catch((error: unknown) => error)
@@ -313,9 +322,11 @@ describe("applyEach on a batch whose answer is lost", () => {
 			...conn,
 			batch: async () => Promise.reject(++calls === 1 ? reset() : new Error("no such table: b")),
 		}
-		const failure = (await applyEach(kept(refusing), LOST_FILES, { print: () => {}, retry: NO_WAIT }).catch(
-			(error: unknown) => error,
-		)) as Refused
+		const failure = (await applyEach(kept(refusing), LOST_FILES, {
+			history: conn,
+			print: () => {},
+			retry: NO_WAIT,
+		}).catch((error: unknown) => error)) as Refused
 		expect([failure.message, failure.pending, failure.unknown]).toEqual([
 			"no such table: b",
 			["0001_t1.sql", "0002_t2.sql", "0003_t3.sql"],
@@ -334,7 +345,9 @@ describe("applyEach on a batch whose answer is lost over a WebSocket", () => {
 	it("a committed batch whose WebSocket closed is unknown, not pending, on libsql over ws://", async () => {
 		const conn = libsqlConnection()
 		await ensureMigrationsTable(conn)
-		const failure = (await applyEach(kept(losing(conn, "0002_t2.sql", () => closed)), LOST_FILES, {
+		const lost = losing(conn, "0002_t2.sql", () => closed)
+		const failure = (await applyEach(kept(lost), LOST_FILES, {
+			history: lost,
 			print: () => {},
 			retry: NO_WAIT,
 		}).catch((error: unknown) => error)) as Refused

@@ -104,6 +104,10 @@ const IN_TRANSACTION: Readonly<Record<string, { refuses: (pragma: Pragma) => boo
 		refuses: () => true,
 		why: "journal_mode is the database's setting, and SQLite will not change it inside the transaction comb runs each file in; set it outside the migrations",
 	},
+	locking_mode: {
+		refuses: ({ value }) => value !== undefined,
+		why: "locking_mode EXCLUSIVE keeps the connection's lock on the database past the COMMIT of the transaction comb runs each file in, so the next file, comb's history and every other connection are locked out, and NORMAL changes nothing until then; leave it out of the migrations",
+	},
 	query_only: {
 		refuses: ({ value }) => value !== undefined,
 		why: "query_only on makes the database read-only inside the transaction comb runs each file in, so the rest of the file and its history row fail, and off does nothing on a connection comb opens; leave it out of the migrations",

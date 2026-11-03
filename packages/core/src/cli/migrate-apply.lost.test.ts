@@ -1,8 +1,10 @@
 /**
- * S3 of r21: a libsql file whose batch commits and whose answer is then lost, over http:// and
+ * S3 of r21: a libsql server's batch that commits and whose answer is then lost, over http:// and
  * ws://, is reported unknown, not pending, and the next apply reads it as applied and applies the
  * rest. The loss is the real @libsql/client's own error for each transport, from a local server
- * that closes the connection mid-request, thrown after the batch commits, the link staying down
+ * that closes the connection mid-request, thrown after the batch commits, the link staying down.
+ * The server is the project's file behind the client (SL1 of r22: a local file's own files apply
+ * through libsql's Database, which no network stands between)
  */
 import type { Client, Config, InStatement } from "@libsql/client"
 import { mkdirSync, writeFileSync } from "node:fs"
@@ -13,15 +15,17 @@ import { fakeAtlas, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, projects } from "./__fixtures__/io.ts"
 import { runCli } from "./run.ts"
 
-/* the batch whose answer is lost once it commits, and the error the link then fails each call with */
-const lose: { error?: unknown; file?: string } = {}
+/* the batch whose answer is lost once it commits, the error the link then fails each call with, and the file serving the server */
+const lose: { db?: string; error?: unknown; file?: string } = {}
+/* the project's libsql server, which the clients comb opens reach as the file lose.db; lostRequest's own reach its stub */
+const SERVER = "http://lost.invalid"
 
 vi.mock("@libsql/client", async (original) => {
 	const libsql = await original<typeof import("@libsql/client")>()
 	return {
 		...libsql,
 		createClient: (config: Config): Client => {
-			const client = libsql.createClient(config)
+			const client = libsql.createClient(config.url === SERVER ? { ...config, url: `file:${lose.db}` } : config)
 			let down = false
 			const up = () => {
 				if (down) throw lose.error
@@ -59,16 +63,17 @@ afterEach(() => {
 	delete lose.file
 })
 
-/** A project with comb.migrate.config.ts over a libsql file, and three migrations in ./m */
+/** A project with comb.migrate.config.ts over a libsql server, its file core.db, and three migrations in ./m */
 function configured(): string {
 	const dir = temp.make()
 	mkdirSync(join(dir, "m"))
 	for (const name of ["0001_t1", "0002_t2", "0003_t3"])
 		writeFileSync(join(dir, "m", `${name}.sql`), `CREATE TABLE ${name.slice(5)} (a);\n`)
 	writeSum(join(dir, "m"))
+	lose.db = join(dir, "core.db")
 	writeFileSync(
 		join(dir, "comb.migrate.config.ts"),
-		`export default { databases: { core: { migrationsDir: "./m", name: "core-dev", provider: { type: "libsql", url: ${JSON.stringify(`file:${join(dir, "core.db")}`)} } } } }\n`,
+		`export default { databases: { core: { migrationsDir: "./m", name: "core-dev", provider: { type: "libsql", url: ${JSON.stringify(SERVER)} } } } }\n`,
 	)
 	return dir
 }

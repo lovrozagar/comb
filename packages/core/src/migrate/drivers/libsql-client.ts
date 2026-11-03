@@ -18,4 +18,4 @@ const LIBSQL_CLIENT: string = "@libsql/client"
 /** @libsql/client, loaded when a libsql or Turso connection opens */
 const libsql = (): Promise<LibsqlModule> => optionalPeer(LIBSQL, () => import(LIBSQL_CLIENT) as Promise<LibsqlModule>)
 
-export { type Client, type InValue, libsql }
+export { type Client, type InValue, libsql, LIBSQL_CLIENT }

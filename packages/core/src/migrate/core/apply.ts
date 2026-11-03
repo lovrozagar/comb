@@ -117,8 +117,17 @@ export async function recordMigrationHash(conn: Connection, hash: string, name?:
 /** A file to apply: its statements, and the hash and name its record holds */
 type Recorded = { filename: string; hash: string; statements: readonly string[] }
 
+/**
+ * The connection one file applies on: its batch, then its close. It reads nothing, so a libsql file's
+ * can run on `exec` alone (SL1 of r22); a read of comb's history goes through the command's own connection
+ */
+export type FileConnection = Pick<Connection, "batch" | "close">
+
+/** How a file's batch is retried: the connection that reads comb's history after a lost answer, and the backoff */
+type ApplyOptions = { history: Pick<Connection, "execute">; retry?: RetryOptions | undefined }
+
 /** Whether comb's history records the file `name` */
-const recorded = async (conn: Connection, name: string): Promise<boolean> =>
+const recorded = async (conn: Pick<Connection, "execute">, name: string): Promise<boolean> =>
 	(await conn.execute("SELECT 1 FROM __drizzle_migrations WHERE name = ?", [name])).rows.length > 0
 
 /** A batch that failed transiently with no read of the history answering after it: whether it committed is unknown */
@@ -128,9 +137,13 @@ class Unconfirmed extends Error {}
  * `migration`'s statements and its record in one batch, retried while it fails transiently. A
  * batch can commit and its answer still fail, and its statements need not run twice safely: the
  * record it wrote says it ran, so a retry reads the history first and runs nothing again (S6).
- * When no read answers after a batch that failed transiently, the failure is an Unconfirmed (S3 of r20)
+ * When no read of `history` answers after a batch that failed transiently, the failure is an Unconfirmed (S3 of r20)
  */
-export async function applyRecorded(conn: Connection, migration: Recorded, retry?: RetryOptions): Promise<void> {
+export async function applyRecorded(
+	conn: Pick<Connection, "batch">,
+	migration: Recorded,
+	{ history, retry }: ApplyOptions,
+): Promise<void> {
 	const statements = [
 		...migration.statements.map((sql) => ({ sql })),
 		{ params: [migration.hash, Date.now(), migration.filename], sql: RECORD },
@@ -140,7 +153,7 @@ export async function applyRecorded(conn: Connection, migration: Recorded, retry
 	try {
 		await withRetry(async () => {
 			if (tried) {
-				if (await recorded(conn, migration.filename)) return
+				if (await recorded(history, migration.filename)) return
 				lost = undefined
 			}
 			tried = true
@@ -166,9 +179,9 @@ export async function applyRecorded(conn: Connection, migration: Recorded, retry
  * apply does (S2 of the 0.15.0 review); a file whose answer was lost is in neither, but unknown
  */
 export async function applyEach(
-	open: () => Promise<Connection>,
+	open: () => Promise<FileConnection>,
 	migrations: readonly Recorded[],
-	{ print, retry }: { print: (line: string) => void; retry?: RetryOptions },
+	{ history, print, retry }: ApplyOptions & { print: (line: string) => void },
 ): Promise<void> {
 	const names = migrations.map(({ filename }) => filename)
 	for (const [at, migration] of migrations.entries()) {
@@ -176,7 +189,7 @@ export async function applyEach(
 		try {
 			const conn = await open()
 			try {
-				await applyRecorded(conn, migration, retry)
+				await applyRecorded(conn, migration, { history, retry })
 			} finally {
 				await conn.close()
 			}

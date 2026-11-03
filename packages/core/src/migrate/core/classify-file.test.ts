@@ -95,6 +95,33 @@ describe("classifyMigration on SQLite's journal_mode", () => {
 	})
 })
 
+/* SL1 of r22: an EXCLUSIVE lock outlives its file's COMMIT, so the next file and comb's history are locked out */
+describe("classifyMigration on SQLite's locking_mode (SL1 of r22; sibling: journal_mode)", () => {
+	const SETS = [
+		"PRAGMA locking_mode = EXCLUSIVE",
+		"PRAGMA locking_mode=normal",
+		"PRAGMA main.locking_mode = exclusive",
+		'PRAGMA "locking_mode" = EXCLUSIVE',
+		"PRAGMA locking_mode(EXCLUSIVE)",
+		"-- comb:allow-unsafe: bulk load\nPRAGMA locking_mode = EXCLUSIVE;\nCREATE TABLE big (x INTEGER);",
+	]
+
+	it.each(SETS)("refuses %j on a local file, whatever the approval", (sql) => {
+		expect(() => lite(sql)).toThrow(/locking_mode .*locked out/)
+	})
+
+	it.each(SETS.flatMap((sql) => (["d1", "sqld"] as const).map((kind) => [sql, kind] as const)))(
+		"refuses %j on a %s target too",
+		(sql, kind) => {
+			expect(() => classifyMigration(sql, { dialect: "sqlite", kind })).toThrow(/locking_mode/)
+		},
+	)
+
+	it("rates a read of the mode as any other pragma's read", () => {
+		expect(lite("PRAGMA locking_mode").safety).toBe(lite("PRAGMA cache_size").safety)
+	})
+})
+
 /*
  * S1 of r19: a pragma's name read once, quoted or not, against a table of what each target refuses, with no override:
  * SQLite inside the transaction comb runs each file in, and D1's authorizer (wrangler --local, .tmp/grunt/p18/d1-pragma-probe.log)

@@ -4,13 +4,15 @@
  * read-only connection too, a missing database read as the empty one it is, and opens the writable
  * connection only to write, so a refused run creates no file and no Turso database, and mints no
  * full-access token (S6 of the 0.15.0 review, S3 of r18). On a local file each file applies on a
- * connection of its own, so its connection settings end with it (S1 of r21); a libsql server (sqld,
+ * connection of its own, so its connection settings end with it (S1 of r21), a libsql file's through
+ * libsql's own Database, which lets go of the file when it closes (SL1 of r22); a libsql server (sqld,
  * Turso) refuses every connection setting at check, so its files apply through the one writer (S1 of r22).
  */
 import fs from "node:fs"
 import { blank } from "../blank.ts"
 import { absentDatabase } from "../migrate/drivers/absent.ts"
 import { DatabaseMissing } from "../migrate/drivers/missing.ts"
+import type { FileConnection } from "../migrate/core/apply.ts"
 import type { TargetKind } from "../migrate/core/classify-target.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
@@ -28,7 +30,7 @@ export type SqliteTarget = {
 	/** the connection to write comb's history through, opened on first use */
 	write(): Promise<Connection>
 	/** the connection one file applies on, which the caller closes: a new one on a file; the writer, which only the target closes, on an in-memory database or a server */
-	fresh(): Promise<Connection>
+	fresh(): Promise<FileConnection>
 }
 
 type OpenRequest = { args: ParsedArgs; io: CliIo; mode: string }
@@ -44,12 +46,27 @@ async function readOrAbsent(connect: (readonly: boolean) => Promise<Connection>,
 }
 
 /** Where the database lives: `memory` in the one connection that opened it, a `file` comb opens, or a libsql `server` */
-async function placeOf(provider: ConnectionProviderConfig): Promise<"file" | "memory" | "server"> {
-	if (provider.type === "bun-sqlite") return provider.path === ":memory:" ? "memory" : "file"
-	if (provider.type !== "libsql") return "server"
+type Place = { at: "file"; file: string } | { at: "memory" | "server" }
+
+async function placeOf(provider: ConnectionProviderConfig): Promise<Place> {
+	if (provider.type === "bun-sqlite")
+		return provider.path === ":memory:" ? { at: "memory" } : { at: "file", file: provider.path }
+	if (provider.type !== "libsql") return { at: "server" }
 	const { libsqlFile } = await import("../migrate/drivers/sqlite.ts")
 	const file = provider.url === ":memory:" ? ":memory:" : libsqlFile(provider.url)
-	return file === undefined ? "server" : file === ":memory:" ? "memory" : "file"
+	if (file === undefined) return { at: "server" }
+	return file === ":memory:" ? { at: "memory" } : { at: "file", file }
+}
+
+/** How each file's own connection opens on a `file`: a libsql file's through libsql's Database (SL1 of r22), bun:sqlite's as its provider opens it */
+async function fileOpener(
+	provider: ConnectionProviderConfig,
+	file: string,
+	connect: (readonly: boolean) => Promise<Connection>,
+): Promise<() => Promise<FileConnection>> {
+	if (provider.type !== "libsql") return () => connect(false)
+	const { openLibsqlFile } = await import("../migrate/drivers/libsql-file.ts")
+	return () => openLibsqlFile(file)
 }
 
 /** Why the provider cannot connect as given: a libsql url or a turso apiToken left blank, which loads (P9 of r18, S5 of r19) */
@@ -81,7 +98,7 @@ export async function openSqliteTarget(
 	const opener = createProvider(provider, { run: io.run })
 	const connect = (readonly: boolean) => opener.connect({ drizzleConfigPath, migrationsDir, name, provider, readonly })
 	const place = await placeOf(provider)
-	const kind = place === "server" ? "sqld" : "local"
+	const kind = place.at === "server" ? "sqld" : "local"
 	if (mode === "check" || mode === "status") {
 		const conn = await connect(true)
 		const same = () => Promise.resolve(conn)
@@ -97,7 +114,9 @@ export async function openSqliteTarget(
 		},
 		conn,
 		fresh:
-			place === "file" ? () => connect(false) : async () => ({ ...(await write()), close: () => Promise.resolve() }),
+			place.at === "file"
+				? await fileOpener(provider, place.file, connect)
+				: async () => ({ ...(await write()), close: () => Promise.resolve() }),
 		kind,
 		migrationsDir,
 		name: target.label,

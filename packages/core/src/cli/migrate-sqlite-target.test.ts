@@ -128,8 +128,14 @@ describe("openSqliteTarget: a connection per file", () => {
 			expect(new Set([writer, one, two]).size).toBe(3)
 			await one.batch([{ sql: "PRAGMA recursive_triggers = 1" }, { sql: "CREATE TABLE t (a)" }])
 			await one.close()
-			expect((await two.execute("SELECT recursive_triggers FROM pragma_recursive_triggers")).rows).toEqual([[0]])
-			expect((await writer.execute("SELECT name FROM sqlite_master")).rows).toEqual([["t"]])
+			/* a trigger that inserts again recurses only with recursive_triggers on: 1 and 2 when it is off, 1 to 5 when on */
+			await two.batch([
+				{ sql: "CREATE TABLE c (n INTEGER)" },
+				{ sql: "CREATE TRIGGER c_next AFTER INSERT ON c WHEN new.n < 5 BEGIN INSERT INTO c VALUES (new.n + 1); END" },
+				{ sql: "INSERT INTO c VALUES (1)" },
+			])
+			expect((await writer.execute("SELECT count(*) FROM c")).rows).toEqual([[2]])
+			expect((await writer.execute("SELECT name FROM sqlite_master WHERE type = 'table'")).rows).toEqual([["t"], ["c"]])
 			await two.close()
 			await target.close()
 		},
