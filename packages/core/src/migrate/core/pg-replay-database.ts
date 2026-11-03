@@ -102,22 +102,14 @@ async function copyExtensions(from: Sql, to: Sql, refused: (name: string, error:
  * A history's CREATE ROLE `sent` of `role`, run in the replay's `database`: an existing role is used,
  * any other made by `sent` and tagged, and either held by a grant on `database`; whether the role
  * is a replay's, which the replay then drops, so whichever of two replays using one role ends last
- * drops it. Within a file's transaction each try is a savepoint, so a role another replay made or
- * dropped since the read is read again
+ * drops it. It runs in a transaction, as every statement a transaction allows does (P1 of r21), and
+ * each try is a savepoint, so a role another replay made or dropped since the read is read again
  */
 async function createRole(
 	sql: Sql,
-	{
-		database,
-		inFile,
-		role,
-		sent,
-		started,
-	}: { database: string; inFile: boolean; role: string; sent: string; started: number },
+	{ database, role, sent, started }: { database: string; role: string; sent: string; started: number },
 ): Promise<boolean> {
-	const mark = async (query: string) => {
-		if (inFile) await sql.unsafe(query, [])
-	}
+	const mark = (query: string) => sql.unsafe(query, [])
 	for (;;) {
 		const [found] = await sql.unsafe(
 			"SELECT d.description FROM pg_roles r LEFT JOIN pg_shdescription d ON d.objoid = r.oid AND d.classoid = 'pg_authid'::regclass WHERE r.rolname = $1",

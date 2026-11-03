@@ -13,6 +13,10 @@ const TARGET = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "publi
 /* the replay's database, named for the run's start and a random suffix */
 const DATABASE = /comb_replay_\d{13}_[0-9a-f]{8}/g
 
+/* the server's counts: whether it keeps them, and a transaction's writes to the shared catalogs */
+const COUNTED = "SELECT current_setting('track_counts') AS on"
+const WRITES = expect.stringMatching(/^SELECT s\.relname, s\.n_tup_ins/)
+
 /** A postgres.js stand-in on every connection: each query it was sent, the replay's database as <db>, answering `rows` to the catalog read */
 function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) => Error | undefined) {
 	const sent: Array<[string, unknown[]]> = []
@@ -25,6 +29,7 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 				sent.push([query.replaceAll(DATABASE, "<db>"), params])
 				const error = fail?.(query)
 				if (error !== undefined) throw error
+				if (query === COUNTED) return [{ on: "on" }]
 				return query === CATALOG ? rows : []
 			},
 		}
@@ -34,7 +39,7 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 
 /* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
 const SWEEP = [expect.stringMatching(/^SELECT datname FROM pg_database/), expect.stringMatching(/^SELECT r\.rolname/)]
-const MADE = ["CREATE DATABASE <db> TEMPLATE template0", expect.stringMatching(/^SELECT e\.extname/)]
+const MADE = ["CREATE DATABASE <db> TEMPLATE template0", COUNTED, expect.stringMatching(/^SELECT e\.extname/)]
 const DROPPED = "DROP DATABASE IF EXISTS <db>"
 
 describe("replayCatalog", () => {
@@ -59,7 +64,9 @@ describe("replayCatalog", () => {
 			'CREATE SCHEMA IF NOT EXISTS "app"',
 			'SET search_path TO "app"',
 			"BEGIN",
+			WRITES,
 			"CREATE TABLE t (a int)",
+			WRITES,
 			"COMMIT",
 			"CREATE INDEX CONCURRENTLY i ON t (a)",
 			CATALOG,

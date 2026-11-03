@@ -14,6 +14,10 @@ const file = (sql: string) => [{ name: "1_a.sql", sql }]
 /* the replay's database, named for the run's start and a random suffix */
 const DATABASE = /comb_replay_\d{13}_[0-9a-f]{8}/g
 
+/* the server's counts: whether it keeps them, and a transaction's writes to the shared catalogs */
+const COUNTED = "SELECT current_setting('track_counts') AS on"
+const WRITES = expect.stringMatching(/^SELECT s\.relname, s\.n_tup_ins/)
+
 /* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
 const AROUND = {
 	after: ["DROP DATABASE IF EXISTS <db>"],
@@ -21,6 +25,7 @@ const AROUND = {
 		expect.stringMatching(/^SELECT datname FROM pg_database/),
 		expect.stringMatching(/^SELECT r\.rolname/),
 		"CREATE DATABASE <db> TEMPLATE template0",
+		COUNTED,
 		expect.stringMatching(/^SELECT e\.extname/),
 		'SET search_path TO "public"',
 	],
@@ -35,7 +40,7 @@ function fake(fail?: (query: string) => Error | undefined) {
 			sent.push(query.replaceAll(DATABASE, "<db>"))
 			const error = fail?.(query)
 			if (error !== undefined) throw error
-			return []
+			return query === COUNTED ? [{ on: "on" }] : []
 		},
 	})
 	return { load: async () => connect, sent }
@@ -61,7 +66,7 @@ describe("replayPending (P13 of r19)", () => {
 	it("replays each file in a transaction of its own in a database of its own, printing nothing", async () => {
 		expect(await replayed("CREATE TABLE t (a int);")).toEqual({
 			out: [],
-			sent: [...AROUND.before, "BEGIN", "CREATE TABLE t (a int)", "COMMIT", ...AROUND.after],
+			sent: [...AROUND.before, "BEGIN", WRITES, "CREATE TABLE t (a int)", WRITES, "COMMIT", ...AROUND.after],
 		})
 	})
 
@@ -90,7 +95,15 @@ describe("replayPending (P13 of r19)", () => {
 				/^Check left "ALTER DATABASE app SET work_mem = '4MB'" in 1_a\.sql out of its replay on devUrl: /,
 			),
 		])
-		expect(sent).toEqual([...AROUND.before, "BEGIN", "CREATE TABLE t (a int)", "COMMIT", ...AROUND.after])
+		expect(sent).toEqual([
+			...AROUND.before,
+			"BEGIN",
+			WRITES,
+			"CREATE TABLE t (a int)",
+			WRITES,
+			"COMMIT",
+			...AROUND.after,
+		])
 	})
 
 	it("refuses a statement dev refuses, naming the file, the statement and Postgres's message", async () => {

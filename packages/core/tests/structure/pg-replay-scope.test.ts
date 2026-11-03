@@ -3,8 +3,8 @@
  * statement whose scope is the server or another database (BEYOND in pg-outside-transaction.ts).
  * Every statement node type of the parser comb loads is ruled here, so a new libpg-query node
  * cannot reach the replay unclassified: in BEYOND (some only for a shared object), CREATE ROLE (run,
- * tagged and dropped: pg-replay-database.ts), or the database's own. A DO block, a function and a
- * procedure run what they hold as written: no parse tree shows their dynamic SQL.
+ * tagged and dropped: pg-replay-database.ts), or the database's own. What a DO block, a function,
+ * EXECUTE or CALL writes no parse tree shows, so Postgres's counts decide it (pg-server-writes.ts).
  */
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"

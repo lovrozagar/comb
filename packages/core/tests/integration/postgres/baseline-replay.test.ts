@@ -14,7 +14,8 @@ import { baselineWithAtlas } from "../../../src/migrate/core/atlas-apply.ts"
 import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
-import { withScratchDb } from "../support/pg.ts"
+import { pgUrl, withScratchDb } from "../support/pg.ts"
+import { heldRole, hiddenWrites, query, roleOf, shapeRoles } from "../support/pg-roles.ts"
 import { refuseObjectDrift, UNCOMPARED } from "../../../src/migrate/core/baseline-compare.ts"
 
 beforeAll(loadPostgresParser)
@@ -216,5 +217,39 @@ describe("a Postgres baseline's gate on a docker:// dev database", () => {
 			const verdict = await refuseObjectDrift({ print: () => undefined, target }, dir)
 			expect(verdict()).toEqual([UNCOMPARED])
 		})
+	})
+})
+
+/* P1 of r21: what a file changes past its database, Postgres counts; the replay refuses it before COMMIT */
+describe("a Postgres baseline of a history that changes the server from inside a statement the replay cannot leave out", () => {
+	const { made, mgrUrl, pre } = shapeRoles(pgUrl)
+
+	describe.each([
+		["a superuser", (url: string) => url],
+		/* the role's URL, on the test's dev database */
+		[
+			"a CREATEDB CREATEROLE role that is not one",
+			(url: string) => Object.assign(new URL(mgrUrl()), { pathname: new URL(url).pathname }).toString(),
+		],
+	])("on %s's devUrl", (_who, as) => {
+		it.each(hiddenWrites(pre, made))(
+			"refuses $label naming the file and the change, every role and the target as they were",
+			async ({ change, sql }) => {
+				const held = await heldRole(pre)
+				await withScratchDb((devUrl) =>
+					withScratchDb(async (url) => {
+						const refused = await baseline(url, as(devUrl), [`-- comb:allow-unsafe: the test's change\n${sql}`])
+						expect(refused).toContain(`20260101000000_f.sql: devUrl's server counted a change past the database`)
+						expect(refused).toContain(change)
+						expect(
+							await query(url, "SELECT to_regclass('atlas_schema_revisions.atlas_schema_revisions') AS r"),
+						).toEqual([{ r: null }])
+					}),
+				)
+				expect(await heldRole(pre)).toEqual(held)
+				expect(await roleOf(made)).toEqual([])
+			},
+			60_000,
+		)
 	})
 })

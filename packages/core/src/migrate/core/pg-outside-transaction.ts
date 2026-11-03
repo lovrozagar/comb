@@ -187,4 +187,4 @@ const BEYOND: Readonly<Record<string, (node: Node) => string | undefined>> = {
 /** What a statement is, by its parse tree's node `type`, when its scope is the server or another database; undefined when it is its database's */
 const beyondDatabase = (type: string, node: Node): string | undefined => BEYOND[type]?.(node)
 
-export { BEYOND, beyondDatabase, nodeOf, outsideOnly }
+export { BEYOND, beyondDatabase, CONCURRENT, nodeOf, OUTSIDE, outsideOnly }

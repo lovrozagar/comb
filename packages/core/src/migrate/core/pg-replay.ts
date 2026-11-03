@@ -11,6 +11,16 @@
  * outlive the replay on devUrl's server, the target's own when they share one, so the replay runs
  * none (pg-outside-transaction.ts) and says which it left out; a CREATE ROLE runs, as a policy needs
  * its role, and comb drops each role it made.
+ *
+ * A DO block, a function, EXECUTE and CALL hide such a change from the parse tree, so Postgres
+ * decides (P1 of r21): each transaction's writes to the shared catalogs are counted before its COMMIT
+ * (pg-server-writes.ts), and one that wrote past its database, comb's own CREATE ROLE aside, is
+ * refused and rolled back, naming the file and the change. A `txmode none` file runs each statement
+ * a transaction allows in one of its own, so it is counted too; only the statements Postgres runs
+ * outside one run bare, and none of those writes a shared catalog
+ * (tests/integration/postgres/bare-statements.test.ts). The counts are this backend's own, so
+ * another session's work never trips them, and with `track_counts` off they read zero, so the
+ * replay refuses a server that keeps none.
  */
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import { type PgTarget, refuseUrlProblems } from "./atlas-target.ts"
@@ -18,8 +28,17 @@ import { outsideTransaction } from "./classify-file.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import { type Connect, failureOf, loadPostgres, readCatalog } from "./pg-live-objects.ts"
 import type { LiveObjects } from "./pg-live-types.ts"
-import { beyondDatabase, nodeOf } from "./pg-outside-transaction.ts"
+import { beyondDatabase, nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
 import { copyExtensions, createRole, dropRole, makeDatabase, type Sql, sweep } from "./pg-replay-database.ts"
+import {
+	addWrites,
+	namedChanges,
+	type Rows,
+	sharedWrites,
+	subjectRows,
+	type Writes,
+	writesSince,
+} from "./pg-server-writes.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
 
@@ -39,13 +58,72 @@ type Replay = {
 	stops: string
 }
 
-/** One replay's state: its connection, its database, when it started and the roles it made */
-type Run = { created: string[]; database: string; sql: Sql; started: number }
+/**
+ * One replay's state: its connection, the server as committed (`admin`), its database, when it
+ * started and the roles it made; and the open transaction's own writes, comb's CREATE ROLEs', with
+ * the rows they left
+ */
+type Run = {
+	admin: Sql
+	created: string[]
+	database: string
+	ours: { rows: Rows; writes: Writes }
+	sql: Sql
+	started: number
+}
 
-/** `file` run as Atlas applies it: in a transaction of its own unless `-- atlas:txmode none` gives it up */
+/**
+ * A transaction opened on the replay's connection, its counts so far taken as comb's own: a backend
+ * keeps a committed transaction's counts in the next one's read until it flushes them, which it
+ * never does inside a transaction (.tmp/grunt/r21-premise/p1-carry.log)
+ */
+async function begin(run: Run): Promise<void> {
+	await run.sql.unsafe("BEGIN", [])
+	run.ours = { rows: new Map(), writes: await sharedWrites(run.sql) }
+}
+
+/** A history CREATE ROLE run, its writes to the shared catalogs counted as comb's own */
+async function ownRole(run: Run, role: string, sent: string): Promise<void> {
+	const before = await sharedWrites(run.sql)
+	if (await createRole(run.sql, { ...run, role, sent })) run.created.push(role)
+	const written = writesSince(await sharedWrites(run.sql), before)
+	addWrites(run.ours.writes, written)
+	/* the role, its tag, the membership its maker gets and the grant on the replay's database */
+	const rows = await subjectRows(
+		run.sql,
+		written,
+		(subject) =>
+			subject === `role ${role}` ||
+			subject === `comment on role ${role}` ||
+			subject.startsWith(`membership ${role} to `) ||
+			subject === `database ${run.database}`,
+	)
+	for (const [subject, row] of rows) run.ours.rows.set(subject, row)
+}
+
+/**
+ * The open transaction committed, or refused, with nothing committed, when it wrote past its
+ * database: in `name`, by `sent` when the transaction is that one statement's
+ */
+async function commit(run: Run, replay: Replay, { name, sent }: { name: string; sent?: string }): Promise<void> {
+	const counted = writesSince(await sharedWrites(run.sql), run.ours.writes)
+	if (counted.size > 0) {
+		const changes = await namedChanges({ sql: run.sql, was: run.admin }, counted, run.ours.rows)
+		const by = sent === undefined ? "" : `, made by ${JSON.stringify(sent)}`
+		throw new ReplayFailed(
+			`${name}: devUrl's server counted a change past the database the replay runs in${by}: ${changes.join(", ")}. It came from inside a statement the replay cannot leave out (a DO block, a function, EXECUTE or CALL), and apply would make it on the target's server, so comb rolled it back and refuses the file; write the change as a statement of its own, which the replay leaves out and apply runs; ${replay.stops}`,
+		)
+	}
+	await run.sql.unsafe("COMMIT", [])
+}
+
+/**
+ * `file` run as Atlas applies it: in a transaction of its own unless `-- atlas:txmode none` gives it
+ * up, and then each statement a transaction allows in one of its own
+ */
 async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Replay & { refused: Refuse }) {
 	const inFile = !outsideTransaction(text)
-	if (inFile) await run.sql.unsafe("BEGIN", [])
+	if (inFile) await begin(run)
 	for (const { sent, tree } of pgRead(text).statements) {
 		const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
 		const beyond = beyondDatabase(type, node)
@@ -53,22 +131,44 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 			replay.leftOut(name, sent, beyond)
 			continue
 		}
+		const alone = !inFile && outsideOnly(type, node) === undefined
+		if (alone) await begin(run)
 		try {
-			if (type !== "CreateRoleStmt") await run.sql.unsafe(sent, [])
-			else {
-				const role = String(node["role"])
-				if (await createRole(run.sql, { ...run, inFile, role, sent })) run.created.push(role)
-			}
+			if (type === "CreateRoleStmt") await ownRole(run, String(node["role"]), sent)
+			else await run.sql.unsafe(sent, [])
 		} catch (error) {
 			throw replay.refused(`${name}: devUrl refused ${JSON.stringify(sent)} as ${replay.doing}`, error)
 		}
+		if (alone) await commit(run, replay, { name, sent })
 	}
-	if (inFile) await run.sql.unsafe("COMMIT", [])
+	if (inFile) await commit(run, replay, { name })
 }
 
 /* why a replay stops on a devUrl role that cannot make the database it replays in */
 const NO_CREATEDB =
 	"devUrl's role cannot create a database (CREATEDB), and comb replays the history file by file, as Atlas applies it, in a database of its own on devUrl's server; grant the role CREATEDB, or point devUrl at a server where it has it"
+
+/** Refuses a devUrl whose server keeps no counts for its role: the replay would read every file's writes as none */
+async function refuseUncounted(sql: Sql, stops: string): Promise<void> {
+	const [setting] = await sql.unsafe("SELECT current_setting('track_counts') AS on", [])
+	if (setting?.["on"] === "on") return
+	throw new ReplayFailed(
+		`devUrl's server keeps no counts for its role (track_counts is off), and comb reads from them what a history file changes past its database; set track_counts on for devUrl's role or server; ${stops}`,
+	)
+}
+
+/** The replay's database made ready: counted, holding devUrl's extensions, `schema` made and searched */
+async function prepare(run: Run, schema: string, { refused, stops }: { refused: Refuse; stops: string }) {
+	await refuseUncounted(run.sql, stops)
+	await copyExtensions(run.admin, run.sql, (name, error) =>
+		refused(
+			`devUrl's database holds the extension ${name}, which comb could not make in the database it replays the history in`,
+			error,
+		),
+	)
+	if (schema !== "public") await run.sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(schema)}`, [])
+	await run.sql.unsafe(`SET search_path TO ${sqlIdentifier(schema)}`, [])
+}
 
 /** `step` run, its failure left to the next run's sweep: cleaning up never replaces the replay's verdict */
 async function settle(step: () => Promise<unknown>): Promise<void> {
@@ -112,17 +212,16 @@ async function onDev<T>(
 		admin = connect(options)
 		await sweep(admin, started)
 		const database = await makeDatabase(admin, started, () => new ReplayFailed(`${NO_CREATEDB}; ${replay.stops}`))
-		const run: Run = { created: [], database, sql: connect({ ...options, database }), started }
+		const run: Run = {
+			admin,
+			created: [],
+			database,
+			ours: { rows: new Map(), writes: new Map() },
+			sql: connect({ ...options, database }),
+			started,
+		}
 		try {
-			await copyExtensions(admin, run.sql, (name, error) =>
-				refused(
-					`devUrl's database holds the extension ${name}, which comb could not make in the database it replays the history in`,
-					error,
-				),
-			)
-			if (target.schema !== "public")
-				await run.sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(target.schema)}`, [])
-			await run.sql.unsafe(`SET search_path TO ${sqlIdentifier(target.schema)}`, [])
+			await prepare(run, target.schema, { refused, stops: replay.stops })
 			for (const file of files)
 				await replayFile(run, file, { ...replay, leftOut: replay.leftOut ?? (() => undefined), refused })
 			return await after(run.sql)

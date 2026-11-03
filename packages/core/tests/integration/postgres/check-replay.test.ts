@@ -17,7 +17,8 @@ import { hashDir } from "../../../src/migrate/core/atlas-dir.ts"
 import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
-import { withScratchDb } from "../support/pg.ts"
+import { pgUrl, withScratchDb } from "../support/pg.ts"
+import { asRole, dropRoles, heldRole, hiddenWrites, query, roleOf, shapeRoles, unique } from "../support/pg-roles.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -85,12 +86,16 @@ function files(one: string, two: string): void {
 	hashDir(run, dir)
 }
 
-/** `one` then `two` checked on the shared target: what check printed, or why it refused */
-async function checked(one: string, two: string): Promise<{ out: string[]; refused?: string | undefined }> {
+/** `one` then `two` checked on the shared target, replayed on `dev`: what check printed, or why it refused */
+async function checked(
+	one: string,
+	two: string,
+	dev = devUrl(),
+): Promise<{ out: string[]; refused?: string | undefined }> {
 	files(one, two)
 	const out: string[] = []
 	try {
-		await applyWithAtlas({ ...options({ devUrl: devUrl(), url: targetUrl() }, out), checkOnly: true })
+		await applyWithAtlas({ ...options({ devUrl: dev, url: targetUrl() }, out), checkOnly: true })
 		return { out }
 	} catch (error) {
 		return { out, refused: (error as Error).message }
@@ -257,5 +262,76 @@ describe("check on a devUrl whose database holds objects of its own", () => {
 			return checkAll(dev)
 		})
 		expect(refused).toBeUndefined()
+	}, 60_000)
+})
+
+/* P1 of r21: what a file changes past its database, Postgres counts; the replay refuses it before COMMIT */
+describe("check of a file that changes the server from inside a statement the replay cannot leave out", () => {
+	const { beside, made, mgrUrl, pre } = shapeRoles(devUrl)
+
+	/** Every role the shapes reach, as the server holds them */
+	const roles = async () => [await heldRole(pre), await roleOf(made), await roleOf(beside)]
+
+	describe.each([
+		["a superuser", devUrl],
+		["a CREATEDB CREATEROLE role that is not one", mgrUrl],
+	])("on %s's devUrl", (_who, url) => {
+		it.each(hiddenWrites(pre, made))(
+			"refuses $label naming the file and the change, every role as it was",
+			async ({ change, sql }) => {
+				const held = await roles()
+				const { refused } = await checked(T, `-- comb:allow-unsafe: the test's change\n${sql}`, url())
+				expect(refused).toContain(`20260102000000_two.sql: devUrl's server counted a change past the database`)
+				expect(refused).toContain(change)
+				expect(await roles()).toEqual(held)
+				expect(held[1]).toEqual([])
+			},
+			60_000,
+		)
+
+		it("passes a CREATE ROLE comb tags, and refuses a role a DO makes beside it, naming that one", async () => {
+			const tagged = `-- comb:allow-unsafe: the test's role\nCREATE ROLE ${made};\nCREATE TABLE r (id int PRIMARY KEY);\nALTER TABLE r ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON r TO ${made} USING (true);\n`
+			expect((await checked(T, tagged, url())).refused).toBeUndefined()
+			const { refused } = await checked(T, `${tagged}DO $$ BEGIN CREATE ROLE ${beside}; END $$;\n`, url())
+			expect(refused).toContain(`role ${beside} added`)
+			expect(refused).not.toContain(`role ${made} added`)
+			expect([await roleOf(made), await roleOf(beside)]).toEqual([[], []])
+		}, 60_000)
+
+		/* the backend's counts carry a committed write into the next transaction's read until they flush */
+		it("passes a file after the one whose CREATE ROLE comb tagged", async () => {
+			const tagged = `${T}-- comb:allow-unsafe: the test's role\nCREATE ROLE ${made};\n`
+			expect((await checked(tagged, RETYPE, url())).refused).toBeUndefined()
+			expect(await roleOf(made)).toEqual([])
+		}, 60_000)
+
+		it("refuses a txmode none file's statement that changes the server, naming it", async () => {
+			const held = await roles()
+			const { refused } = await checked(
+				T,
+				`-- atlas:txmode none\n\n-- comb:allow-unsafe: the test's change\nCREATE TABLE x (id int);\nDO $$ BEGIN ALTER ROLE ${pre} CONNECTION LIMIT 5; END $$;\n`,
+				url(),
+			)
+			expect(refused).toContain(
+				`20260102000000_two.sql: devUrl's server counted a change past the database the replay runs in, made by "DO $$ BEGIN ALTER ROLE ${pre} CONNECTION LIMIT 5; END $$"`,
+			)
+			expect(refused).toContain(`role ${pre} changed (rolconnlimit)`)
+			expect(await roles()).toEqual(held)
+		}, 60_000)
+	})
+})
+
+describe("check on a devUrl whose server keeps no counts for its role", () => {
+	const quiet = unique("comb_t_quiet")
+	const dev = { quiet: "" }
+	beforeAll(async () => {
+		dev.quiet = await asRole(devUrl(), quiet, "CREATEDB")
+		await query(pgUrl(), `ALTER ROLE ${quiet} SET track_counts = off`)
+	})
+	afterAll(() => dropRoles(quiet))
+
+	it("refuses it, naming track_counts", async () => {
+		const { refused } = await checked(T, RETYPE, dev.quiet)
+		expect(refused).toContain("track_counts is off")
 	}, 60_000)
 })
