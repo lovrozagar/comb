@@ -24,8 +24,32 @@ function constraintsOf(raw: unknown, at: string): Record<string, boolean | numbe
 /* the keys a c.enum's state machine has; values, which docs/state-machines.md §4 holds in the same const, read from c.enum's second argument */
 const STATE_KEYS = ["initial", "terminal", "transitions", "values"]
 
-/** A c.enum column's state machine as JSON; an error naming the column for one of another shape */
-function statesOf(raw: unknown, at: string): SnapshotComb["states"] {
+/** What fills a column a write leaves out: a value or SQL default, a default function, an update function */
+type Fill = { default?: unknown; defaultFn?: unknown; onUpdateFn?: unknown }
+
+/**
+ * A state column's fill is its machine's `initial`, the value a row starts at (CD4 of r22b): a
+ * literal default other than it, or a fill comb cannot read as a value, is an error naming the column;
+ * a machine that declares no `initial` starts anywhere
+ */
+function refuseOtherStart(initial: string | null, fill: Fill, at: string): void {
+	if (initial === null) return
+	const literal = fill.defaultFn === undefined && fill.onUpdateFn === undefined && typeof fill.default !== "object"
+	if (!literal)
+		throw new Error(
+			`${at}: its default is no literal value, so comb cannot hold it to its state machine's initial "${initial}"; write .default("${initial}")`,
+		)
+	if (fill.default !== undefined && fill.default !== initial)
+		throw new Error(
+			`${at}: its default ${JSON.stringify(fill.default)} is not its state machine's initial "${initial}"; a row starts at initial`,
+		)
+}
+
+/**
+ * A c.enum column's state machine as JSON; an error naming the column for one of another shape, or
+ * for a fill other than its `initial`
+ */
+function statesOf(raw: unknown, at: string, fill: Fill = {}): SnapshotComb["states"] {
 	if (raw === undefined) return null
 	/* a misspelt key would leave its part of the machine unread (F9) */
 	const unknown = Object.keys(raw as object).find((key) => !STATE_KEYS.includes(key))
@@ -40,6 +64,7 @@ function statesOf(raw: unknown, at: string): SnapshotComb["states"] {
 		(terminal === undefined || STRING_LIST(terminal)) &&
 		(map === undefined || Object.values(map).every(STRING_LIST))
 	if (!valid) throw new Error(`${at}: its state machine is not { initial?, terminal?, transitions? } of state names`)
+	refuseOtherStart((initial as string | undefined) ?? null, fill, at)
 	return {
 		initial: (initial as string | undefined) ?? null,
 		terminal: (terminal as string[] | undefined) ?? null,
@@ -86,7 +111,8 @@ function changesValue(schema: unknown): boolean {
  * A c.json column's schema is the stored document: the write DTOs store its output and the read DTO
  * parses the stored row with it (CD2 of r22b), so one whose output its input refuses is an error
  * naming the column; and a NOT NULL column of one value refuses a schema that takes null, whose
- * write DTO would take a body the insert fails (CD3, the sibling of r19 C5)
+ * write DTO would take a body the insert fails (CD3, the sibling of r19 C5). `notNull` is false for
+ * a Postgres array of documents, which holds null elements whatever the column's own NOT NULL
  */
 function refuseJsonDocument(schema: unknown, at: string, notNull: boolean): void {
 	if (changesValue(schema))

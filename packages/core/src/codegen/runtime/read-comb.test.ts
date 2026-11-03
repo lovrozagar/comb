@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import * as z from "zod"
 import { constraintsOf, refuseJsonDocument, statesOf, STRING_LIST } from "./read-comb.ts"
@@ -101,5 +102,36 @@ describe("refuseJsonDocument: a schema whose output its input refuses, or a NOT 
 		)
 		expect(() => refuseJsonDocument(nullable, "t.c", false)).not.toThrow()
 		expect(() => refuseJsonDocument(z.unknown(), "t.c", true)).toThrow("takes null")
+	})
+})
+
+/* CD4 of r22b: a state column's fill is its machine's initial */
+const MACHINE = { initial: "a", terminal: ["b"] }
+const NO_LITERAL =
+	't.s: its default is no literal value, so comb cannot hold it to its state machine\'s initial "a"; write .default("a")'
+
+describe("statesOf: a state column's default is its initial", () => {
+	it("keeps any fill on a machine that declares no initial (sibling)", () => {
+		expect(() => statesOf({ terminal: ["b"] }, "t.s", { default: "b" })).not.toThrow()
+		expect(() => statesOf({ terminal: ["b"] }, "t.s", { defaultFn: () => "b" })).not.toThrow()
+	})
+
+	it("keeps no default, and a literal default of initial", () => {
+		expect(statesOf(MACHINE, "t.s", {})?.initial).toBe("a")
+		expect(statesOf(MACHINE, "t.s", { default: "a" })?.initial).toBe("a")
+	})
+
+	it("refuses a literal default other than initial, naming the column", () => {
+		expect(() => statesOf(MACHINE, "t.s", { default: "b" })).toThrow(
+			't.s: its default "b" is not its state machine\'s initial "a"; a row starts at initial',
+		)
+	})
+
+	it.each([
+		["a default function", { defaultFn: () => "a" }],
+		["an update function", { onUpdateFn: () => "a" }],
+		["an SQL default", { default: sql`'a'` }],
+	])("refuses %s, which comb cannot read as a value", (_, fill) => {
+		expect(() => statesOf(MACHINE, "t.s", fill)).toThrow(NO_LITERAL)
 	})
 })

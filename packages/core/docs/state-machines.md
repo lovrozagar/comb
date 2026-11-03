@@ -40,11 +40,11 @@ export const delivery = sqliteTable("delivery", {
 
 Three facts, each independently useful:
 
-| Key           | Meaning                                     | Optional?                                                 |
-| ------------- | ------------------------------------------- | --------------------------------------------------------- |
-| `initial`     | the value a row starts at                   | yes — omit when rows may be created in several states     |
-| `terminal`    | values from which no transition is legal    | yes — omit when every state is reachable from every other |
-| `transitions` | `from → to[]`, for non-terminal states only | yes — omit to declare only which states are final         |
+| Key           | Meaning                                                                            | Optional?                                                 |
+| ------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `initial`     | the value a row starts at: the create DTO takes it alone, and a default must be it | yes — omit when rows may be created in several states     |
+| `terminal`    | values from which no transition is legal                                           | yes — omit when every state is reachable from every other |
+| `transitions` | `from → to[]`, for non-terminal states only                                        | yes — omit to declare only which states are final         |
 
 The three are independent so an app can adopt the cheap half. Declaring `terminal` alone already
 unlocks the downstream async work; `transitions` is the part that earns the runtime check.

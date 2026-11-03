@@ -62,14 +62,13 @@ function combOf(column: Column, at: string, context: Context): SnapshotComb | nu
 			`${at}: no module of the project exports the schema its c.json is given${skipped}; export it, so the generated DTOs can import it`,
 		)
 	}
-	/* a Postgres array of documents holds null elements whatever the column's own NOT NULL */
 	if (meta.kind === "json") refuseJsonDocument(meta.schema, at, column.notNull && !(column as ReadColumn).dimensions)
 	return {
 		constraints: constraintsOf(meta.constraints, at),
 		kind: meta.kind,
 		prefix: meta.prefix ?? null,
 		schema,
-		states: statesOf(meta.states, at),
+		states: statesOf(meta.states, at, column as ReadColumn),
 		values: meta.values === undefined ? null : [...meta.values],
 	}
 }

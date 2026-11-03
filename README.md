@@ -1137,6 +1137,8 @@ What changes for a project on 0.20. Before deploying it:
 
 22. **Give `c.json` the schema of the stored document.** Codegen refuses a `c.json` schema holding a transform, a pipe or a preprocess, naming the column: the write DTOs store the schema's output and the read DTO parses the stored row with the same schema, so 0.20 took the body, stored its output, and then refused every read of that row. Move the transform to the request body's schema. An overwrite (`.trim()`, `.toLowerCase()`), a default and a coerce stay, as their output parses again. Codegen also refuses a NOT NULL `c.json` column whose schema takes null, which 0.20 let the create DTO take and the insert fail: make the column nullable, or pass the schema's non-null form.
 
+8. **Create a state column's row at its `initial`.** A `c.enum` column whose machine declares `initial` takes that value alone in the generated create DTO, published as `const` and as its example; the update DTO keeps every value. 0.20 took any state on create, so a body created a job already `done` and skipped the lifecycle `assertTransition` guards. Codegen refuses such a column's default when it is another value, or a default function, an update function or SQL, which comb cannot hold to `initial`: write `.default(initial)`, or drop `initial` where rows start in several states.
+
 ## Upgrading to 0.20.1
 
 What changes for a project on 0.20.0. Before deploying it:

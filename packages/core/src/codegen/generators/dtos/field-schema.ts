@@ -23,9 +23,16 @@ import { stated, textBase, textRules } from "./text-schema.ts"
 /** A builder's answer: its base, or `undefined` when the column is not its kind */
 type Built = Base | undefined
 
-/** A c.enum, a pgEnum or an enum text column, its values read at runtime and written out */
-function enumBase({ field }: Build): Built {
-	return field.enumValues === null ? undefined : plain(`z.enum(${JSON.stringify(field.enumValues)})`)
+/**
+ * A c.enum, a pgEnum or an enum text column, its values read at runtime and written out; a state
+ * column's create takes its machine's `initial` alone, the value a row starts at (CD4 of r22b)
+ */
+function enumBase({ element, field, schemaType }: Build): Built {
+	if (field.enumValues === null) return undefined
+	const initial = field.states?.initial ?? null
+	if (schemaType === "create" && initial !== null && element !== true)
+		return plain(`z.literal(${JSON.stringify(initial)})`)
+	return plain(`z.enum(${JSON.stringify(field.enumValues)})`)
 }
 
 /* no engine stores U+0000 or a lone UTF-16 surrogate as sent: jsonb refuses both, Postgres text

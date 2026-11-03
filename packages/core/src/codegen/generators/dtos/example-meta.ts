@@ -143,8 +143,9 @@ const RULES: Rule[] = [
 	({ combKind, prefix }) => (combKind === "id" ? inline(`"${prefix ?? "id"}_${EXAMPLE_ULID}"`) : undefined),
 	({ combKind }) =>
 		combKind === "serialId" ? shared("serialId") : combKind === "boolean" ? shared("boolean") : undefined,
-	({ enumValues }) =>
-		enumValues !== null && enumValues.length > 0 ? inline(JSON.stringify(enumValues[0])) : undefined,
+	/* a state column's example is the value a row starts at, which its create alone takes (CD4 of r22b) */
+	({ enumValues, states }) =>
+		enumValues !== null && enumValues.length > 0 ? inline(JSON.stringify(states?.initial ?? enumValues[0])) : undefined,
 	(field) =>
 		field.combKind === "integer" || field.combKind === "real" || field.combKind === "timestamp"
 			? midpoint(field, field.combKind)
