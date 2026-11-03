@@ -24,7 +24,7 @@ import {
 	orphanMessage,
 	resolveLegacy,
 } from "../migrate/core/history-match.ts"
-import { migrationHashes } from "../migrate/core/parse.ts"
+import { type AcceptedHash, migrationHashes } from "../migrate/core/parse.ts"
 import { binOf, type Peers, requirePeers } from "../migrate/core/optional-peer.ts"
 import type { Command, Provider } from "../migrate/core/peer-needs.ts"
 import { planApply, refuseSkipping } from "../migrate/core/plan-apply.ts"
@@ -135,7 +135,7 @@ async function baseline(
 	let marked = 0
 	for (const { hashes, name } of files) {
 		if (matched.applied.has(name)) continue
-		await recordMigrationHash(conn, hashes[0] as string, name)
+		await recordMigrationHash(conn, (hashes[0] as AcceptedHash).hash, name)
 		io.out(`Marked applied: ${name}`)
 		marked++
 	}

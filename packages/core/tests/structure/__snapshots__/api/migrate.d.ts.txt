@@ -143,8 +143,30 @@ export declare function generateMigrationHash(sql: string): string;
  * a migration recorded under this hash is still applied.
  */
 export declare function legacyMigrationHash(sql: string): string;
-/** Every hash `sql` may be recorded under, current first */
-export declare function migrationHashes(sql: string): string[];
+/**
+ * The hash comb 0.5.0 to 0.20 recorded, whose normalizing folded every Unicode space, which SQLite
+ * reads as part of a name: an edit from `a b` to `a\u00a0b` kept it (SL5 of r22)
+ */
+export declare function foldedMigrationHash(sql: string): string;
+/** When v0.5.0, which changed the hash, was tagged (2026-10-18T00:56:29Z, ms): a row recorded before it may hold the legacy hash */
+export declare const V0_5_0: number;
+/**
+ * When comb's hash began to keep the spaces SQLite reads as part of a name (2026-11-03T19:00:00Z, ms,
+ * SL5 of r22): a row recorded before it may hold the folded hash. A row since then holds the current
+ * one, so a match by the folded hash is an edit that folding hides.
+ */
+export declare const SPACES_KEPT_SINCE: number;
+/** A hash a file's text may be recorded under, on a row recorded before `until` */
+export type AcceptedHash = {
+    hash: string;
+    until: number;
+};
+/**
+ * Every hash `sql` may be recorded under, current first, each with the time before which a row may
+ * hold it: the current one on any row, the folded one (0.5.0 to 0.20) before SPACES_KEPT_SINCE, the
+ * pre-0.5.0 one before V0_5_0
+ */
+export declare function migrationHashes(sql: string): AcceptedHash[];
 export { extractSchema };
 export { classifyMigration, extractDropStatements };
 /**
@@ -851,11 +873,13 @@ declare function segments(sql: string, dialect?: Dialect): Segment[];
  */
 declare function splitSqlStatements(sql: string, dialect?: Dialect): string[];
 /**
- * `sql` with comments dropped and whitespace collapsed outside strings and identifiers, those
+ * `sql` with comments dropped and SQLite's whitespace collapsed outside strings and identifiers, those
  * verbatim: two migrations that differ only in layout or comments normalize alike, two that differ
- * in data or names never. A migration's hash is taken over this form.
+ * in data or names never. A migration's hash is taken over this form. `foldAll` is the form comb
+ * 0.5.0 to 0.20 hashed, which folded every Unicode space too, so `a b` and `a\u00a0b` (a column of type
+ * b, and a column named a b) normalized alike (SL5 of r22).
  */
-declare function normalizeSql(sql: string): string;
+declare function normalizeSql(sql: string, foldAll?: boolean): string;
 export { normalizeSql, segments, splitSqlStatements, type Segment };
 
 // migrate/drivers/d1.d.ts

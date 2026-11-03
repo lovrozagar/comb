@@ -97,8 +97,8 @@ export async function ensureMigrationsTable(
 }
 
 /**
- * Whether a migration is recorded under any of `hashes`; pass `migrationHashes(sql)` so a file
- * recorded under the pre-0.5.0 hash still counts as applied.
+ * Whether a migration is recorded under any of `hashes`; pass the hashes of `migrationHashes(sql)`
+ * so a file recorded under an earlier hash still counts as applied.
  */
 export async function checkMigrationHash(conn: Connection, hashes: string | readonly string[]): Promise<boolean> {
 	const list = typeof hashes === "string" ? [hashes] : [...hashes]

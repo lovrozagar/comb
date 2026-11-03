@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { LIVE_NOT_JSON, READS_LIVE_JSON } from "../../../src/cli/__fixtures__/d1.ts"
 import { runCli } from "../../../src/cli/index.ts"
 import { localD1Path } from "../../../src/migrate/core/d1-binding.ts"
-import { migrationHashes } from "../../../src/migrate/core/parse.ts"
+import { generateMigrationHash } from "../../../src/migrate/core/parse.ts"
 import { guardRebuilds } from "../../../src/migrate/core/rebuild-guard.ts"
 import { extractSchema } from "../../../src/migrate/core/schema.ts"
 import { BREAKS_CHECK, IGNORE_CHECKS, KEEP } from "../../../src/migrate/__fixtures__/pragma-scope.ts"
@@ -67,7 +67,7 @@ describe("comb migrate on D1 through wrangler, --local", () => {
 describe("comb migrate on D1 through wrangler, --local: history and the live schema", () => {
 	it("copies comb 0.7's record into d1_migrations with baseline, so apply runs only what was never applied", async () => {
 		const dir = project(INIT)
-		const hash = migrationHashes(INIT["20260101000000_init.sql"])[0] as string
+		const hash = generateMigrationHash(INIT["20260101000000_init.sql"])
 		const setup = `CREATE TABLE post (id TEXT PRIMARY KEY); CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL); INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('${hash}', 1)`
 		expect(wrangler(dir)("wrangler", ["d1", "execute", "core", "--local", `--command=${setup}`]).code).toBe(0)
 		write(dir, { "20260102000000_tag.sql": "CREATE TABLE tag (id TEXT);" })

@@ -182,4 +182,15 @@ describe("normalizeSql", () => {
 	])("normalizes %j", (sql, expected) => {
 		expect(normalizeSql(sql)).toBe(expected)
 	})
+
+	/* SL5 of r22: SQLite's whitespace is space, tab, newline, form feed and return; any other space is part of a name */
+	it.each([
+		["a column a of type b, and a column named a b", "CREATE TABLE t (a b)", "CREATE TABLE t (a b)"],
+		["an em space", "CREATE TABLE t (a b)", "CREATE TABLE t (a b)"],
+		["a byte order mark at the end", "SELECT 1", "SELECT 1﻿"],
+	])("keeps a space SQLite reads as part of a name apart from one it skips: %s", (_, ascii, unicode) => {
+		expect(normalizeSql(` ${ascii.replace(" ", " \t\n\f\r ")} `)).toBe(ascii)
+		expect(normalizeSql(unicode)).toBe(unicode)
+		expect(normalizeSql(unicode)).not.toBe(normalizeSql(ascii))
+	})
 })

@@ -38,11 +38,41 @@ export function legacyMigrationHash(sql: string): string {
 	return createHash("sha256").update(normalized).digest("hex")
 }
 
-/** Every hash `sql` may be recorded under, current first */
-export function migrationHashes(sql: string): string[] {
-	const current = generateMigrationHash(sql)
-	const legacy = legacyMigrationHash(sql)
-	return legacy === current ? [current] : [current, legacy]
+/**
+ * The hash comb 0.5.0 to 0.20 recorded, whose normalizing folded every Unicode space, which SQLite
+ * reads as part of a name: an edit from `a b` to `a\u00a0b` kept it (SL5 of r22)
+ */
+export function foldedMigrationHash(sql: string): string {
+	return createHash("sha256").update(normalizeSql(sql, true)).digest("hex")
+}
+
+/** When v0.5.0, which changed the hash, was tagged (2026-10-18T00:56:29Z, ms): a row recorded before it may hold the legacy hash */
+export const V0_5_0: number = 1792284989000
+
+/**
+ * When comb's hash began to keep the spaces SQLite reads as part of a name (2026-11-03T19:00:00Z, ms,
+ * SL5 of r22): a row recorded before it may hold the folded hash. A row since then holds the current
+ * one, so a match by the folded hash is an edit that folding hides.
+ */
+export const SPACES_KEPT_SINCE: number = 1793732400000
+
+/** A hash a file's text may be recorded under, on a row recorded before `until` */
+export type AcceptedHash = { hash: string; until: number }
+
+/**
+ * Every hash `sql` may be recorded under, current first, each with the time before which a row may
+ * hold it: the current one on any row, the folded one (0.5.0 to 0.20) before SPACES_KEPT_SINCE, the
+ * pre-0.5.0 one before V0_5_0
+ */
+export function migrationHashes(sql: string): AcceptedHash[] {
+	const accepted: AcceptedHash[] = []
+	for (const [hash, until] of [
+		[generateMigrationHash(sql), Infinity],
+		[foldedMigrationHash(sql), SPACES_KEPT_SINCE],
+		[legacyMigrationHash(sql), V0_5_0],
+	] as const)
+		if (!accepted.some((each) => each.hash === hash)) accepted.push({ hash, until })
+	return accepted
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

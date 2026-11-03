@@ -171,8 +171,8 @@ async function migratedBy07(dir: string, d1: FakeD1): Promise<void> {
 	d1.db.exec(
 		"CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL UNIQUE, created_at INTEGER)",
 	)
-	const { migrationHashes } = await import("../migrate/core/parse.ts")
-	const hash = migrationHashes(INIT["20260101000000_init.sql"])[0] as string
+	const { generateMigrationHash } = await import("../migrate/core/parse.ts")
+	const hash = generateMigrationHash(INIT["20260101000000_init.sql"])
 	d1.db.exec(`CREATE TABLE post (id TEXT); INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('${hash}', 1)`)
 	writeFileSync(join(dir, "atlas-migrations", "20260102000000_more.sql"), "CREATE TABLE tag (id TEXT);")
 	writeSum(join(dir, "atlas-migrations"))

@@ -210,19 +210,25 @@ function splitSqlStatements(sql: string, dialect: Dialect = "sqlite"): string[] 
 	return statements.filter((statement) => statement !== "")
 }
 
+/* the whitespace SQLite's tokenizer skips (sqlite3Isspace): any other space, U+00A0 or U+3000, is part of a name (SL5 of r22) */
+const SQLITE_SPACE = /[\t\n\f\r ]+/g
+
 /**
- * `sql` with comments dropped and whitespace collapsed outside strings and identifiers, those
+ * `sql` with comments dropped and SQLite's whitespace collapsed outside strings and identifiers, those
  * verbatim: two migrations that differ only in layout or comments normalize alike, two that differ
- * in data or names never. A migration's hash is taken over this form.
+ * in data or names never. A migration's hash is taken over this form. `foldAll` is the form comb
+ * 0.5.0 to 0.20 hashed, which folded every Unicode space too, so `a b` and `a\u00a0b` (a column of type
+ * b, and a column named a b) normalized alike (SL5 of r22).
  */
-function normalizeSql(sql: string): string {
+function normalizeSql(sql: string, foldAll = false): string {
+	const space = foldAll ? /\s+/g : SQLITE_SPACE
 	let out = ""
 	for (const segment of segments(sql)) {
 		const text =
-			segment.kind === "comment" ? " " : segment.kind === "code" ? segment.text.replace(/\s+/g, " ") : segment.text
+			segment.kind === "comment" ? " " : segment.kind === "code" ? segment.text.replace(space, " ") : segment.text
 		out += out.endsWith(" ") && text.startsWith(" ") ? text.slice(1) : text
 	}
-	return out.trim()
+	return foldAll ? out.trim() : out.replace(/^ | $/g, "")
 }
 
 export { normalizeSql, segments, splitSqlStatements, type Segment }

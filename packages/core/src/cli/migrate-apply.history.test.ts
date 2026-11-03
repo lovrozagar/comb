@@ -6,7 +6,7 @@ import { createClient } from "@libsql/client"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { migrationHashes } from "../migrate/core/parse.ts"
+import { generateMigrationHash } from "../migrate/core/parse.ts"
 import { fakeAtlas, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, projects } from "./__fixtures__/io.ts"
 import { runCli } from "./run.ts"
@@ -68,7 +68,7 @@ describe("comb's SQLite history and an applied file edited since (M10)", () => {
 			`CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL); ${INIT}`,
 		)
 		await client.execute({
-			args: [migrationHashes(INIT)[0] as string, 1],
+			args: [generateMigrationHash(INIT), 1],
 			sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
 		})
 		client.close()
@@ -85,7 +85,7 @@ const unnamedHistory = async (url: string) => {
 	)
 	for (const sql of [INIT, SEED])
 		await client.execute({
-			args: [migrationHashes(sql)[0] as string, 1],
+			args: [generateMigrationHash(sql), 1],
 			sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
 		})
 	client.close()
@@ -157,7 +157,7 @@ async function history012(
 		)
 		for (const [id, sql, name] of recorded)
 			await client.execute({
-				args: [id, migrationHashes(sql)[0] as string, name],
+				args: [id, generateMigrationHash(sql), name],
 				sql: "INSERT INTO __drizzle_migrations (id, hash, created_at, name) VALUES (?, ?, 1, ?)",
 			})
 		if (seq > 0)
@@ -268,7 +268,7 @@ describe("comb's SQLite history from 0.12, rebuilt (M36)", () => {
 		const { dir, url } = configured({ "1_a.sql": A })
 		const client = createClient({ url })
 		await client.executeMultiple(
-			`${A}\nCREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, name TEXT);\nINSERT INTO __drizzle_migrations VALUES (4, '${migrationHashes(A)[0] as string}', 1, '1_a.sql');`,
+			`${A}\nCREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, name TEXT);\nINSERT INTO __drizzle_migrations VALUES (4, '${generateMigrationHash(A)}', 1, '1_a.sql');`,
 		)
 		client.close()
 		expect(await runCli(["migrate", "apply", "core"], makeIo(dir, fakeAtlas()))).toBe(0)
@@ -327,7 +327,7 @@ describe("comb's SQLite history from 0.12 with a view and a trigger over it, reb
 		const { dir, url, write } = configured({ "1_a.sql": A })
 		const client = createClient({ url })
 		await client.executeMultiple(
-			`${A}\nCREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, name TEXT, note TEXT);\nINSERT INTO __drizzle_migrations VALUES (1, '${migrationHashes(A)[0] as string}', 1, '1_a.sql', 'kept');\nCREATE VIEW notes AS SELECT note FROM __drizzle_migrations;`,
+			`${A}\nCREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL, name TEXT, note TEXT);\nINSERT INTO __drizzle_migrations VALUES (1, '${generateMigrationHash(A)}', 1, '1_a.sql', 'kept');\nCREATE VIEW notes AS SELECT note FROM __drizzle_migrations;`,
 		)
 		client.close()
 		write({ "2_b.sql": B })

@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { fakeD1, localD1, wranglerBin } from "../../cli/__fixtures__/d1.ts"
 import { createD1Provider } from "../drivers/d1.ts"
 import type { D1Target, ReadConfig } from "./d1-binding.ts"
-import { hashStatements, historyTable, intentStatements, readHistory } from "./d1-history-rows.ts"
+import { hashStatements, historyTable, intentStatements, readHistory, vouched } from "./d1-history-rows.ts"
+import { foldedMigrationHash, generateMigrationHash, legacyMigrationHash, SPACES_KEPT_SINCE } from "./parse.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -37,6 +38,7 @@ describe("readHistory", () => {
 	it("reads a database with none of the history tables as nothing applied, recorded, intended or copied", async () => {
 		expect(readHistory(read, await target(), "d1_migrations")).toEqual({
 			applied: new Set(),
+			appliedAt: new Map(),
 			drizzle: undefined,
 			intents: undefined,
 			recorded: new Map(),
@@ -46,7 +48,7 @@ describe("readHistory", () => {
 	it("reads wrangler's names, comb's hashes and intents and the pre-0.8 record, a quote in a name kept", async () => {
 		const d1 = await target()
 		d1.db.exec(historyTable('my "history"'))
-		d1.db.exec(`INSERT INTO "my ""history""" (name) VALUES ('1_it''s.sql')`)
+		d1.db.exec(`INSERT INTO "my ""history""" (name, applied_at) VALUES ('1_it''s.sql', '2026-11-01 12:00:00')`)
 		d1.db.exec("CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT, created_at INTEGER)")
 		d1.db.exec("INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('h0', 1)")
 		await d1.conn.batch([
@@ -55,10 +57,32 @@ describe("readHistory", () => {
 		])
 		expect(readHistory(read, d1, 'my "history"')).toEqual({
 			applied: new Set(["1_it's.sql"]),
+			appliedAt: new Map([["1_it's.sql", Date.parse("2026-11-01T12:00:00Z")]]),
 			drizzle: new Set(["h0"]),
 			intents: new Map([["2_it's.sql", "h2"]]),
 			recorded: new Map([["1_it's.sql", "h1"]]),
 		})
+	})
+})
+
+/* SL5 of r22 and M44: the hashes a recorded row may hold for a file's text, each only where it could have been written */
+describe("vouched", () => {
+	const sql = "CREATE TABLE t (a\u00a0b);"
+	const before = { appliedAt: SPACES_KEPT_SINCE - 1, drizzle: undefined }
+
+	it("takes the current hash always, and the folded one only from an apply before comb kept the space", () => {
+		expect(vouched(sql, generateMigrationHash(sql), { appliedAt: SPACES_KEPT_SINCE + 1, drizzle: undefined })).toBe(
+			true,
+		)
+		expect(vouched(sql, foldedMigrationHash(sql), before)).toBe(true)
+		expect(vouched(sql, foldedMigrationHash(sql), { appliedAt: SPACES_KEPT_SINCE, drizzle: undefined })).toBe(false)
+	})
+
+	it("takes the pre-0.5.0 hash only where comb's pre-0.8 history holds it", () => {
+		const legacy = legacyMigrationHash("SELECT '/* kept */';")
+		expect(vouched("SELECT '/* kept */';", legacy, before)).toBe(false)
+		expect(vouched("SELECT '/* kept */';", legacy, { ...before, drizzle: new Set([legacy]) })).toBe(true)
+		expect(vouched(sql, "other", { ...before, drizzle: new Set(["other"]) })).toBe(false)
 	})
 })
 

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { matchHistory, orphanMessage } from "./history-match.ts"
+import { SPACES_KEPT_SINCE, V0_5_0 } from "./parse.ts"
 
-const file = (name: string, ...hashes: string[]) => ({ hashes, name })
+/** A file with its current hash and, after it, its pre-0.5.0 one */
+const file = (name: string, current: string, legacy?: string) => ({
+	hashes: [{ hash: current, until: Infinity }, ...(legacy === undefined ? [] : [{ hash: legacy, until: V0_5_0 }])],
+	name,
+})
 
 /** A row recorded since 0.5.0, as every row the current comb writes is */
 const NOW = Date.parse("2026-10-27T00:00:00Z")
@@ -25,6 +30,34 @@ describe("matchHistory: the legacy hash", () => {
 			{ hash: "legacy", name: "1.sql" },
 		])
 		expect(matchHistory(files, [{ createdAt: after, hash: "legacy", name: null }], true).orphans).toHaveLength(1)
+	})
+})
+
+/* SL5 of r22 (sibling: the legacy hash): 0.5.0 to 0.20 folded every Unicode space, so their hash of a file edited
+   to name another column (`a b` to `a`, a no-break space and `b`) is the one recorded for it; a row since comb kept them is not fooled */
+describe("matchHistory: the hash that folded every space", () => {
+	const files = [
+		{
+			hashes: [
+				{ hash: "kept", until: Infinity },
+				{ hash: "folded", until: SPACES_KEPT_SINCE },
+			],
+			name: "1.sql",
+		},
+	]
+
+	it("matches a row by the folded hash only when the row predates comb keeping spaces", () => {
+		const before = SPACES_KEPT_SINCE - 1
+		expect([...matchHistory(files, [{ createdAt: before, hash: "folded", name: "1.sql" }], true).applied]).toEqual([
+			"1.sql",
+		])
+		expect(matchHistory(files, [{ createdAt: before, hash: "folded", name: null }], true).named).toEqual([
+			{ hash: "folded", name: "1.sql" },
+		])
+		expect(matchHistory(files, [{ createdAt: SPACES_KEPT_SINCE, hash: "folded", name: "1.sql" }], true).edited).toEqual(
+			["1.sql"],
+		)
+		expect(matchHistory(files, [{ createdAt: NOW + 1e10, hash: "kept", name: "1.sql" }], true).edited).toEqual([])
 	})
 })
 

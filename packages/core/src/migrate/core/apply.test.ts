@@ -81,7 +81,12 @@ describe("checkMigrationHash — hashes recorded before 0.5.0 (S-13)", () => {
 			await ensureMigrationsTable(conn)
 			await recordMigrationHash(conn, legacyMigrationHash(sql), "1_legacy.sql")
 			expect(generateMigrationHash(sql)).not.toBe(legacyMigrationHash(sql))
-			expect(await checkMigrationHash(conn, migrationHashes(sql))).toBe(true)
+			expect(
+				await checkMigrationHash(
+					conn,
+					migrationHashes(sql).map(({ hash }) => hash),
+				),
+			).toBe(true)
 			expect(await checkMigrationHash(conn, generateMigrationHash(sql))).toBe(false)
 		} finally {
 			await conn.close()

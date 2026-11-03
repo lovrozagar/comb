@@ -78,7 +78,7 @@ const count = (d1: FakeD1, table: string) =>
 
 /** A database comb 0.7 migrated through `files` files, long names enough that baseline's copy takes several --command calls */
 async function history07(files: number): Promise<{ d1: FakeD1; dir: string }> {
-	const { migrationHashes } = await import("../migrate/core/parse.ts")
+	const { generateMigrationHash } = await import("../migrate/core/parse.ts")
 	const sql = Array.from({ length: files }, (_, i) => `CREATE TABLE t${i} (id TEXT);`)
 	const dir = worker(Object.fromEntries(sql.map((text, i) => [longName(i), text])))
 	const d1 = fakeD1({ dir: join(dir, "atlas-migrations") })
@@ -88,7 +88,7 @@ async function history07(files: number): Promise<{ d1: FakeD1; dir: string }> {
 	const record = d1.db.prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, 1)")
 	for (const text of sql) {
 		d1.db.exec(text)
-		record.run(migrationHashes(text)[0] as string)
+		record.run(generateMigrationHash(text))
 	}
 	return { d1, dir }
 }

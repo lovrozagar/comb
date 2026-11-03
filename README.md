@@ -1114,6 +1114,8 @@ What changes for a project on 0.20. Before deploying it:
 
 8. **On SQLite, check each database that has a trigger naming `begin` or `end`.** comb now splits a file where SQLite ends a statement. 0.20 counted every `begin`, `case` and `end` word in a trigger, so a trigger that names a `begin` column or table (`new.begin`, `ON begin`) took the statements after it into its own, which libsql ran without them while apply said `Done` and recorded the file; and an `end` in the body (`SET end = 1`) cut the trigger, so its file never applied. **Fix:** run `comb migrate status <db>` and compare each applied file after such a trigger with the database (its columns, indexes and backfilled rows); apply what is missing in a new file. A file that never applied now applies.
 
+9. **On SQLite, libsql and D1, apply a file holding a no-break or other Unicode space with 0.21.** A migration's hash now keeps every space SQLite reads as part of a name, all but space, tab, newline, form feed and return: `a b` is a column `a` of type `b`, while `a`, a no-break space and `b` is one column of that name. 0.20 folded both to one space, so a file applied as one and then edited to the other matched its recorded hash and was never named as edited. A file recorded before 2026-11-03 19:00 UTC still matches the hash 0.20 recorded for it; a 0.20 record from that time on matches only the hash 0.21 takes. **Fix:** none for a file 0.20 applied before then. Apply a file holding such a space with 0.21 from now on: one 0.20 applies after then is named as edited ("was applied, then edited").
+
 ## Upgrading to 0.20.1
 
 What changes for a project on 0.20.0. Before deploying it:

@@ -8,7 +8,7 @@ import { executeAll } from "../drivers/d1.ts"
 import { type D1Target, localMissing, type ReadConfig } from "./d1-binding.ts"
 import type { d1Files } from "./d1-files.ts"
 import { D1_HASH_INTENT_TABLE, D1_HASH_TABLE, DRIZZLE_HISTORY_TABLE } from "./d1-history-tables.ts"
-import { generateMigrationHash } from "./parse.ts"
+import { foldedMigrationHash, generateMigrationHash, legacyMigrationHash, SPACES_KEPT_SINCE } from "./parse.ts"
 
 const quoteName = (name: string): string => `"${name.replaceAll('"', '""')}"`
 const literal = (text: string): string => `'${text.replaceAll("'", "''")}'`
@@ -18,17 +18,19 @@ const historyTable = (table: string): string =>
 	`CREATE TABLE IF NOT EXISTS ${quoteName(table)} (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)`
 
 /** The names the migrations table `table` records, in order */
-const namesOf = (table: string): string => `SELECT name FROM ${quoteName(table)} ORDER BY id`
+const namesOf = (table: string): string => `SELECT name, applied_at FROM ${quoteName(table)} ORDER BY id`
 
 /** One statement's rows, as executeAll answers them */
 type Rows = Array<Record<string, unknown>>
 
 /**
- * What the history tables hold: wrangler's names, comb's hashes and intents, and comb's pre-0.8
- * record; the intents and that record undefined where their table is absent
+ * What the history tables hold: wrangler's names and when it applied each, comb's hashes and intents,
+ * and comb's pre-0.8 record; the intents and that record undefined where their table is absent
  */
 type HistoryRead = {
 	applied: Set<string>
+	/** when wrangler applied each name (ms; NaN when its applied_at is not one), which dates comb's hash for it (SL5 of r22) */
+	appliedAt: Map<string, number>
 	drizzle: Set<string> | undefined
 	intents: Map<string, string> | undefined
 	recorded: Map<string, string>
@@ -37,12 +39,16 @@ type HistoryRead = {
 /** What a database comb never reached holds: no history at all */
 const noHistory = (): HistoryRead => ({
 	applied: new Set(),
+	appliedAt: new Map(),
 	drizzle: undefined,
 	intents: undefined,
 	recorded: new Map(),
 })
 
 /** `rows` of name and hash, by name */
+/** wrangler's applied_at, SQLite's CURRENT_TIMESTAMP (`2026-11-03 19:00:00`, UTC), in ms */
+const utcTime = (value: unknown): number => Date.parse(`${String(value).replace(" ", "T")}Z`)
+
 const byName = (rows: Rows) => new Map(rows.map((row) => [String(row["name"]), String(row["hash"])]))
 
 /**
@@ -69,6 +75,7 @@ function readHistory(read: ReadConfig, target: D1Target, table: string): History
 	const at = (sql: string) => rows.get(sql) ?? []
 	return {
 		applied: new Set(at(names).map((row) => String(row["name"]))),
+		appliedAt: new Map(at(names).map((row) => [String(row["name"]), utcTime(row["applied_at"])])),
 		drizzle: present.has(DRIZZLE_HISTORY_TABLE) ? new Set(at(drizzle).map((row) => String(row["hash"]))) : undefined,
 		intents: present.has(D1_HASH_INTENT_TABLE) ? byName(at(intents)) : undefined,
 		recorded: byName(at(hashes)),
@@ -143,7 +150,25 @@ async function moveIntents(conn: D1Target["conn"], moved: Hashed): Promise<strin
 	}
 }
 
+/**
+ * Whether `hash`, recorded for a file of text `sql`, is that text: its current hash; its folded one
+ * (0.5.0 to 0.20) where wrangler applied the file, in the apply that recorded the hash, before comb
+ * kept the spaces SQLite reads as part of a name (SL5 of r22); or its pre-0.5.0 one where comb's
+ * pre-0.8 history (`drizzle`) still holds it, proof the record is from before 0.5.0, as a 0.13
+ * baseline copied it (M44)
+ */
+function vouched(
+	sql: string,
+	hash: string,
+	{ appliedAt, drizzle }: { appliedAt: number; drizzle: ReadonlySet<string> | undefined },
+): boolean {
+	if (hash === generateMigrationHash(sql)) return true
+	if (hash === foldedMigrationHash(sql)) return appliedAt < SPACES_KEPT_SINCE
+	return hash === legacyMigrationHash(sql) && drizzle?.has(hash) === true
+}
+
 export {
+	vouched,
 	type Hashed,
 	hashStatements,
 	historyTable,

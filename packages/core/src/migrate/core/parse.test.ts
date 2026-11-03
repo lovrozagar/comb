@@ -3,7 +3,10 @@ import {
 	classifyMigration,
 	extractDropStatements,
 	extractSchema,
+	foldedMigrationHash,
 	generateMigrationHash,
+	SPACES_KEPT_SINCE,
+	V0_5_0,
 	parseMigration,
 	parseRead,
 	splitSqlStatements,
@@ -331,11 +334,28 @@ describe("classifyMigration and extractDropStatements — read the code, not the
 
 describe("migrationHashes — the hashes a file may be recorded under", () => {
 	it("is the current hash alone when the pre-0.5.0 one agrees, and both when they differ", () => {
-		expect(migrationHashes("CREATE TABLE t (a TEXT);")).toEqual([generateMigrationHash("CREATE TABLE t (a TEXT);")])
+		expect(migrationHashes("CREATE TABLE t (a TEXT);")).toEqual([
+			{ hash: generateMigrationHash("CREATE TABLE t (a TEXT);"), until: Infinity },
+		])
 		/* the legacy regex cuts from -- to the newline, inside the literal too */
 		const sql = "INSERT INTO t VALUES ('a -- b\nc')"
 		expect(legacyMigrationHash(sql)).not.toBe(generateMigrationHash(sql))
-		expect(migrationHashes(sql)).toEqual([generateMigrationHash(sql), legacyMigrationHash(sql)])
+		expect(migrationHashes(sql)).toEqual([
+			{ hash: generateMigrationHash(sql), until: Infinity },
+			{ hash: legacyMigrationHash(sql), until: V0_5_0 },
+		])
+	})
+
+	/* SL5 of r22 (sibling: the pre-0.5.0 hash): 0.5.0 to 0.20 folded every Unicode space, which SQLite reads as part of a name */
+	it("takes the hash 0.5.0 to 0.20 recorded, which folded every space, on a row recorded before comb kept them", () => {
+		const sql = "CREATE TABLE t (id INTEGER PRIMARY KEY, a b);"
+		expect(foldedMigrationHash(sql)).toBe(generateMigrationHash("CREATE TABLE t (id INTEGER PRIMARY KEY, a b);"))
+		expect(generateMigrationHash(sql)).not.toBe(foldedMigrationHash(sql))
+		expect(migrationHashes(sql)).toEqual([
+			{ hash: generateMigrationHash(sql), until: Infinity },
+			{ hash: foldedMigrationHash(sql), until: SPACES_KEPT_SINCE },
+		])
+		expect(SPACES_KEPT_SINCE).toBeGreaterThan(V0_5_0)
 	})
 
 	it("keeps the legacy normalization, whose regexes cut -- inside literals", () => {

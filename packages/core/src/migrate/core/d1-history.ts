@@ -28,21 +28,14 @@ import {
 	type Rows,
 	settled,
 	settleStatements,
+	vouched,
 } from "./d1-history-rows.ts"
 import { orphanMessage } from "./history-match.ts"
-import { generateMigrationHash, legacyMigrationHash, migrationHashes } from "./parse.ts"
+import { generateMigrationHash, migrationHashes } from "./parse.ts"
 import { proveOnD1 } from "./d1-engine.ts"
 import { planApply } from "./plan-apply.ts"
 import { runPeer } from "./process.ts"
 import { Refused } from "./refused.ts"
-
-/**
- * Whether `hash`, recorded for a file of text `sql`, is that text: its current hash, or its
- * pre-0.5.0 one where comb's pre-0.8 history (`drizzle`) still holds it, proof the record is from
- * before 0.5.0, as a 0.13 baseline copied it (M44)
- */
-const vouched = (sql: string, hash: string, drizzle: ReadonlySet<string> | undefined): boolean =>
-	hash === generateMigrationHash(sql) || (hash === legacyMigrationHash(sql) && drizzle?.has(hash) === true)
 
 /** The files `__drizzle_migrations` records that the migrations table does not */
 function recordedByDrizzle(
@@ -51,7 +44,7 @@ function recordedByDrizzle(
 	applied: ReadonlySet<string>,
 ): string[] {
 	return files
-		.filter(({ name, sql }) => !applied.has(name) && migrationHashes(sql).some((hash) => hashes.has(hash)))
+		.filter(({ name, sql }) => !applied.has(name) && migrationHashes(sql).some(({ hash }) => hashes.has(hash)))
 		.map(({ name }) => name)
 }
 
@@ -76,7 +69,7 @@ async function history(
 	const table = resolveBinding(read, target)
 	if (!writes) assertLocalExists(read, target)
 	const rows = readHistory(read, target, table)
-	const { applied, drizzle: hashes, recorded } = rows
+	const { applied, appliedAt, drizzle: hashes, recorded } = rows
 	const files = d1Files(target.migrationsDir)
 	const copied = hashes === undefined ? [] : recordedByDrizzle(files, hashes, applied)
 	if (copied.length > 0) {
@@ -85,7 +78,10 @@ async function history(
 		)
 	}
 	const edited = files.find(
-		({ name, sql }) => applied.has(name) && recorded.has(name) && !vouched(sql, recorded.get(name) as string, hashes),
+		({ name, sql }) =>
+			applied.has(name) &&
+			recorded.has(name) &&
+			!vouched(sql, recorded.get(name) as string, { appliedAt: appliedAt.get(name) as number, drizzle: hashes }),
 	)
 	if (edited !== undefined) {
 		throw new Error(
@@ -229,7 +225,7 @@ async function baselineD1(
 	}
 	const files = d1Files(target.migrationsDir)
 	/* the files __drizzle_migrations vouches for */
-	const drizzled = files.filter(({ sql }) => migrationHashes(sql).some((hash) => hashes.has(hash)))
+	const drizzled = files.filter(({ sql }) => migrationHashes(sql).some(({ hash }) => hashes.has(hash)))
 	const marked = drizzled.filter(({ name }) => !applied.has(name)).map(({ name }) => name)
 	const hashed = drizzled.filter(({ name }) => applied.has(name) && !recorded.has(name)).map(({ name }) => name)
 	const copied = drizzled.filter(({ name }) => !applied.has(name) || !recorded.has(name))

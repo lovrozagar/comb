@@ -8,22 +8,21 @@
  * its path from it (`../lone.sql`), and no file of the directory is expected to match it: a file
  * that has its text, a copy of it moved into the directory, is named, since it would run again
  * (M45). A file's
- * pre-0.5.0 hash matches only a row recorded before 0.5.0: a later row was recorded under the
- * current hash, so a match by the legacy one is an edit its normalizing hides (M44).
+ * earlier hashes match only a row recorded before comb stopped recording them (migrationHashes): a
+ * later row was recorded under the current hash, so a match by an earlier one is an edit its
+ * normalizing hides, inside a literal for the pre-0.5.0 hash (M44), in a name for the folded one (SL5).
  */
+import type { AcceptedHash } from "./parse.ts"
 
-/** A file of the directory, and the hashes its text has (migrationHashes: current first, then pre-0.5.0) */
-type FileHashes = { hashes: readonly string[]; name: string }
+/** A file of the directory, and the hashes its text has (migrationHashes: current first, then the earlier ones) */
+type FileHashes = { hashes: readonly AcceptedHash[]; name: string }
 
 /** One row of the history, with when it was recorded (`created_at`, ms) */
 type HistoryRow = { createdAt: number; hash: string; name: string | null }
 
-/** When v0.5.0, which changed the hash, was tagged (2026-10-18T00:56:29Z, ms): a row recorded before it may hold the legacy hash */
-const V0_5_0 = 1792284989000
-
-/** Whether `row` records `file`'s text: its current hash, or its legacy one on a row from before 0.5.0 */
+/** Whether `row` records `file`'s text: a hash its text has, on a row recorded while comb recorded that hash */
 const holds = (file: FileHashes, row: HistoryRow): boolean =>
-	row.hash === file.hashes[0] || (row.createdAt < V0_5_0 && file.hashes.includes(row.hash))
+	file.hashes.some(({ hash, until }) => row.hash === hash && row.createdAt < until)
 
 /** What the history makes of the files */
 type Matched = {
