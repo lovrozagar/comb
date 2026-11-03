@@ -1,6 +1,7 @@
 /**
- * C4 and C5 of r18: a written c.json publishes one flat union, null in it when the column takes null,
- * and a registered schema stays a bare `$ref` whatever rules it takes, its rules in x- keys beside it.
+ * C4 and C5 of r18: a written c.json publishes its schema as a union's one option, so a registered
+ * schema stays a bare `$ref` whatever rules it takes, its rules in x- keys beside it. A nullable one
+ * wraps that union with null, as every nullable field is built, so `.unwrap()` keeps the keys (C2 of r21).
  */
 import { ts } from "ts-morph"
 import { describe, expect, it } from "vitest"
@@ -33,18 +34,22 @@ function published(schema: z.ZodType) {
 const RULE = { "x-comb-text": "no U+0000 or unpaired surrogate" }
 
 describe("a written c.json's published schema (C4, C5)", () => {
-	it("is one flat union of its schema and null when the column takes null, the rules beside it", () => {
+	it("is its schema's union beside null when the column takes null, the rules on both", () => {
 		for (const type of ["create", "update"] as const)
 			expect(published(profile('c.json("p", Profile)', type))).toEqual({
 				defs: ["C4Profile"],
-				p: { anyOf: [{ $ref: "#/$defs/C4Profile" }, { type: "null" }], ...RULE },
+				p: { anyOf: [{ anyOf: [{ $ref: "#/$defs/C4Profile" }], ...RULE }, { type: "null" }], ...RULE },
 			})
 	})
 
 	it("is the bare $ref of a registered schema under a byte limit too, the limit beside it", () => {
 		expect(published(profile('c.json("p", Profile, { maxBytes: 64 })', "create"))).toEqual({
 			defs: ["C4Profile"],
-			p: { anyOf: [{ $ref: "#/$defs/C4Profile" }, { type: "null" }], ...RULE, "x-comb-maxBytes": 64 },
+			p: {
+				anyOf: [{ anyOf: [{ $ref: "#/$defs/C4Profile" }], ...RULE, "x-comb-maxBytes": 64 }, { type: "null" }],
+				...RULE,
+				"x-comb-maxBytes": 64,
+			},
 		})
 		expect(published(profile('c.json("p", Profile, { maxBytes: 64 }).notNull()', "create"))).toEqual({
 			defs: ["C4Profile"],
@@ -117,4 +122,52 @@ describe("a plain json column's read", () => {
 		expect(nullable).toEqual(plainRead(`${type}("p").notNull()`))
 		expect(JSON.stringify(nullable)).not.toContain('{"type":"null"}')
 	})
+})
+
+/* the shared file's JSON value, as timestamps.ts writes it */
+const jsonValueSchema = z.union([
+	z.string(),
+	z.number(),
+	z.boolean(),
+	z.array(z.json()),
+	z.record(z.string(), z.json()),
+])
+
+/** The written `schemaType` schema of `raw`, a nullable JSON column, evaluated */
+function writtenJson(raw: string, schemaType: SchemaType, dialect: "postgres" | "sqlite"): z.ZodType {
+	const field = {
+		...fieldOf("p", raw, { dialect, scope: { Profile } }),
+		jsonSchemaName: raw.startsWith("c.json") ? "Profile" : null,
+	}
+	const code = generateFieldSchema(field, schemaType, {
+		dialect,
+		imports: { enumImports: new Map(), identifiers: new Map(), jsonSchemaImports: new Set() },
+	}) as string
+	return new Function("z", "Profile", "jsonValueSchema", `return ${code}`)(z, Profile, jsonValueSchema) as z.ZodType
+}
+
+/* C2 of r21: a nullable written JSON value is built as every nullable is, so zod's `.unwrap()` takes null off and keeps the keys */
+describe("a nullable written JSON value taken as required", () => {
+	it.each([
+		["a c.json", 'c.json("p", Profile, { maxBytes: 64 })', "sqlite"],
+		["a plain json", 'json("p")', "postgres"],
+		["a plain jsonb", 'jsonb("p")', "postgres"],
+		["a SQLite json-mode text", 'text("p", { mode: "json" })', "sqlite"],
+	] as const)(
+		"%s unwraps to its non-null member, which carries the field's keys and refuses null",
+		(_, raw, dialect) => {
+			for (const type of ["create", "update"] as const) {
+				const field = writtenJson(raw, type, dialect)
+				expect(field.safeParse(null).success, type).toBe(true)
+				const optional = field instanceof z.ZodOptional ? (field.unwrap() as z.ZodType) : field
+				expect(optional, type).toBeInstanceOf(z.ZodNullable)
+				const member = (optional as z.ZodNullable<z.ZodType>).unwrap()
+				const keys = (schema: z.ZodType) =>
+					Object.fromEntries(Object.entries(published(schema).p).filter(([key]) => key.startsWith("x-comb-")))
+				expect(keys(member), type).toEqual(keys(field))
+				expect(Object.keys(keys(member)), type).toContain("x-comb-text")
+				expect(member.safeParse(null).success, type).toBe(false)
+			}
+		},
+	)
 })

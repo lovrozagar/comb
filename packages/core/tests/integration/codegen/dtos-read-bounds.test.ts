@@ -91,7 +91,8 @@ for (const dialect of ["sqlite", "postgres"] as const) {
 		it("publishes a float's read as a number or the null JSON writes an infinity as", async () => {
 			const { read } = await load("float", COLUMNS)
 			const ratio = published(read)["ratio"] as Record<string, unknown>
-			expect(ratio["anyOf"]).toEqual([{ type: "number" }, { type: "null" }])
+			/* the number repeats the field's stated bounds, as a nullable field's non-null member does (C2 of r21) */
+			expect(ratio["anyOf"]).toEqual([{ type: "number", "x-comb-maximum": 1, "x-comb-minimum": 0 }, { type: "null" }])
 			expect(accepts(ratio, null)).toBe(true)
 			expect(accepts(ratio, 0.5)).toBe(true)
 			expect(accepts(ratio, "0.5")).toBe(false)

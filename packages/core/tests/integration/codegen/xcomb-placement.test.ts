@@ -1,7 +1,8 @@
 /**
  * C4 of r19: every `x-comb-*` key sits on the property's own schema (`items` for an array element's),
  * beside the `anyOf` of a nullable field, so a reader finds it with no `anyOf` walk; a nullable
- * field's non-null member repeats them, and holds no other (C1 of r20).
+ * field's non-null member repeats them, and holds no other (C1 of r20); every one of them, a written
+ * JSON value's included (C2 of r21).
  * The walk covers each DTO of a table holding every kind that publishes one.
  */
 import * as z from "zod"
@@ -10,7 +11,7 @@ import { cleanGeneratedDtos, generatedDtos } from "../support/dtos.ts"
 
 afterAll(() => cleanGeneratedDtos())
 
-const TABLE = `import { jsonb, text } from "drizzle-orm/pg-core"
+const TABLE = `import { json, jsonb, text } from "drizzle-orm/pg-core"
 import * as z from "zod"
 export const Doc = z.object({ a: z.string() })
 export const row = pgTable("row", {
@@ -26,6 +27,7 @@ export const row = pgTable("row", {
 	docs: c.json("docs", Doc).array(),
 	raw: jsonb("raw"),
 	rawn: jsonb("rawn").notNull(),
+	plain: json("plain"),
 	tags: text("tags").array(),
 	short: c.text("short", { max: 5 }).array(),
 	shortReq: c.text("short_req", { max: 5 }).array().notNull(),
@@ -52,6 +54,23 @@ function misplaced(schema: Schema, at: string): string[] {
 	return schema.items === undefined ? members : [...members, ...misplaced(schema.items, `${at}.items`)]
 }
 
+/**
+ * Each `x-comb-*` key of a nullable `schema` that one of its non-null members does not repeat with the
+ * same value, by the path to the member: the reverse of `misplaced`, so `.unwrap()` keeps every key
+ */
+function unkept(schema: Schema, at: string): string[] {
+	const members = schema.anyOf ?? []
+	const nullable = members.some(({ type }) => type === "null")
+	const missing = members.flatMap((member, i) =>
+		nullable && member["type"] !== "null"
+			? xComb(schema)
+					.filter((key) => JSON.stringify(member[key]) !== JSON.stringify(schema[key]))
+					.map((key) => `${at}.anyOf[${i}] lacks ${key}`)
+			: [],
+	)
+	return schema.items === undefined ? missing : [...missing, ...unkept(schema.items, `${at}.items`)]
+}
+
 /** The JSON Schema of each of `row`'s DTOs */
 async function documents(): Promise<Array<[string, { properties: Record<string, Schema> }]>> {
 	const dtos = await generatedDtos("c4", TABLE, { dialect: "postgres" })
@@ -71,6 +90,11 @@ describe("where a field's x-comb-* keys sit", () => {
 			expect(Object.entries(properties).flatMap(([key, schema]) => misplaced(schema, `${name}.${key}`))).toEqual([])
 	})
 
+	it("is on a nullable field's non-null member too, every key of it, in any DTO (C2 of r21)", async () => {
+		for (const [name, { properties }] of await documents())
+			expect(Object.entries(properties).flatMap(([key, schema]) => unkept(schema, `${name}.${key}`))).toEqual([])
+	})
+
 	it("is the property's own schema, nullable or not, so a reader needs no walk", async () => {
 		const [[, create], , [, read]] = (await documents()) as [
 			[string, { properties: Record<string, Schema> }],
@@ -84,6 +108,7 @@ describe("where a field's x-comb-* keys sit", () => {
 		expect(facts(create.properties["site"])).toEqual(["x-comb-text", "x-comb-transform"])
 		expect(facts(create.properties["doc"])).toEqual(["x-comb-maxBytes", "x-comb-text"])
 		expect(facts(create.properties["raw"])).toEqual(["x-comb-text"])
+		expect(facts(create.properties["plain"])).toEqual(["x-comb-text"])
 		expect(facts(read.properties["title"])).toEqual(["x-comb-maxLength", "x-comb-minLength"])
 		expect(facts(read.properties["ratio"])).toEqual(["x-comb-maximum", "x-comb-minimum"])
 		expect(facts(read.properties["count"])).toEqual(["x-comb-maximum", "x-comb-minimum"])

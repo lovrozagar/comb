@@ -61,10 +61,9 @@ function jsonBase({ annotations, field, schemaType }: Build): Built {
 	const keys = { "x-comb-text": STORABLE_TEXT_RULE, ...(limit === null ? {} : { "x-comb-maxBytes": limit }) }
 	const refined = `${schema}${jsonChecks(limit)}`
 	/* keep the union: zod publishes .meta on a refine of a registered schema inline beside its $ref (F63);
-	   null is its other member when the column takes null, so the field publishes one flat anyOf (C4 of r18) */
-	const nullable = !isRequired(field)
+	   a nullable column wraps it as every nullable base is, so `.unwrap()` keeps the keys (C2 of r21) */
 	const uses: SharedName[] = declared ? [] : ["jsonValueSchema"]
-	return { code: `z.union([${refined}${nullable ? ", z.null()" : ""}])`, keys, takesNull: nullable, uses }
+	return { code: `z.union([${refined}])`, keys, takesNull: false, uses }
 }
 
 /**
@@ -98,11 +97,12 @@ function integerOf(annotations: FieldConstraints, range: Range, schemaType: Sche
 /* a stored float may be an infinity, which z.number() refuses, which JSON writes as null, and which D1
    hands back as null: one branch takes all three and publishes { type: "null" }, the value a client
    is sent, typed number | null; NaN, which z.toJSONSchema cannot represent, still fails it (F5 of the
-   0.14.1 review, 27.12 and 27.18 of plan 15) */
-const READ_FLOAT =
-	'z.union([z.number(), z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: void 0, type: "null" })])'
+   0.14.1 review, 27.12 and 27.18 of plan 15); a field's number branch repeats the bounds stated on
+   it, as a nullable field's non-null member does (C2 of r21) */
+const readFloat = (keys: Record<string, unknown>): string =>
+	`z.union([z.number()${metaOf(keys)}, z.literal([globalThis.Infinity, -globalThis.Infinity, null]).meta({ enum: void 0, type: "null" })])`
 
-function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
+function numberBase({ annotations, dialect, element, field, schemaType }: Build): Built {
 	if (!isNumeric(field)) return field.dataType === "boolean" ? plain("z.boolean()") : undefined
 	const { max, min } = annotations
 	const kind = field.combKind
@@ -120,8 +120,10 @@ function numberBase({ annotations, dialect, field, schemaType }: Build): Built {
 		return integerOf(annotations, range, schemaType)
 	}
 	/* a read float's base takes null already, so a nullable one publishes null once (C6 of r17) */
-	if (isRead(schemaType))
-		return { code: READ_FLOAT, keys: stated({ maximum: max, minimum: min }), takesNull: true, uses: [] }
+	if (isRead(schemaType)) {
+		const keys = stated({ maximum: max, minimum: min })
+		return { code: readFloat(element === true ? {} : keys), keys, takesNull: true, uses: [] }
+	}
 	return plain(`z.number()${min === null ? "" : `.min(${min})`}${max === null ? "" : `.max(${max})`}`)
 }
 
@@ -189,7 +191,7 @@ export function fieldSchemaOf(
 		return { code: finish(build, base), uses: base.uses }
 	}
 	/* an array's element is built as a nullable column of one value, as Postgres stores it (F49) */
-	const one: Build = { ...build, field: { ...field, dimensions: 0, isNotNull: false } }
+	const one: Build = { ...build, element: true, field: { ...field, dimensions: 0, isNotNull: false } }
 	const element = baseOf(one)
 	/* the array takes null by its own column alone, whatever its elements take */
 	return { code: finish(build, plain(arrayOf(dimensions, schemaType, element))), uses: element.uses }

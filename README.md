@@ -1071,6 +1071,8 @@ What changes for a project on 0.19. Before deploying it:
 
 4. **Write a change to the server as a statement of its own, on Postgres.** `check` and baseline refuse a history file whose `DO` block, function, `EXECUTE` or `CALL` changes a role, a membership, a database, a setting, a comment or anything else the server's databases share, naming the file and the change, and roll it back on devUrl. 0.19 ran such a file as written and committed it, so a `DO $$ BEGIN CREATE ROLE app; END $$` made the role on devUrl's server for good, the target's own when they share one, and the next check stopped on Atlas's "role already exists". A devUrl whose role has `track_counts` off is refused, naming the setting. **Fix:** write the change as a plain statement (`CREATE ROLE app;`, `ALTER ROLE app CONNECTION LIMIT 5;`), which the replay leaves out or runs as before and apply runs; set `track_counts` on for devUrl's role if it is off.
 
+5. **Regenerate for a nullable written JSON field's shape.** A nullable `c.json`, `json`, `jsonb` or SQLite `text({ mode: "json" })` field in a create or update DTO is its schema's one-member union, nullable as every other field is, so `.unwrap()` takes it as a required input and keeps its `x-comb-text` and `x-comb-maxBytes`; it publishes `anyOf: [{ anyOf: [<schema>], "x-comb-*" }, { type: "null" }]`, the keys on the property as before. 0.19 built it as one union with null, so `.unwrap()` did not exist on it (TS2339) and its published non-null member carried no keys. A nullable real's read repeats its stated bounds on its number member the same way. A reader of the property's keys sees no change. **Fix:** regenerate.
+
 ## Upgrading to 0.19
 
 What changes for a project on 0.18. Before deploying it:

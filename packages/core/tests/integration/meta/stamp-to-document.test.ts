@@ -32,6 +32,7 @@ export const article = createTable("article", {
 	author_id: c.ref("author_id").references(() => author.id),
 	slug: c.text("slug", { nomutate: true }),
 	title: c.text("title", { max: 200 }),
+	notes: text("notes", { mode: "json" }),
 	created_at: c.createdAt("created_at"),
 	updated_at: c.updatedAt("updated_at"),
 	deleted_at: c.deletedAt("deleted_at"),
@@ -40,7 +41,7 @@ export const article = createTable("article", {
 ])
 `
 
-type Generated = { articleDtoReadSchema: z.ZodObject }
+type Generated = { articleDtoCreateSchema: z.ZodObject; articleDtoReadSchema: z.ZodObject }
 
 let generated: Generated
 let articleUniqueIndexes: UniqueIndexMeta[]
@@ -306,5 +307,42 @@ describe("both descriptors on one operation", () => {
 		for (const [, json] of sources) {
 			expect(searchSchemaKey(json, COMB_META_KEY).found).toBe(true)
 		}
+	})
+})
+
+/** What an object of the one field `notes` publishes for it */
+const property = (schema: z.ZodType) =>
+	(
+		z.toJSONSchema(z.object({ notes: schema }), { io: "input" }) as unknown as {
+			properties: { notes: Record<string, unknown> }
+		}
+	).properties.notes
+/** The generated create DTO's `notes` */
+const notes = () => generated.articleDtoCreateSchema.shape["notes"] as z.ZodType
+
+/* C2 of r21: a nullable written JSON value nests its schema's union beside null, its keys on both */
+describe("a nullable written JSON field's keys, as honey searches them", () => {
+	const RULE = "no U+0000 or unpaired surrogate"
+
+	it("publishes the union beside null, the rule on the property and on its non-null member", () => {
+		expect(property(notes())).toEqual({
+			anyOf: [
+				{ anyOf: [expect.objectContaining({ anyOf: expect.any(Array) })], "x-comb-text": RULE },
+				{ type: "null" },
+			],
+			"x-comb-text": RULE,
+		})
+	})
+
+	it("is found at the property by honey's search, one value however deep it repeats", () => {
+		expect(searchSchemaKey(property(notes()), "x-comb-text")).toEqual({ found: true, value: RULE })
+		expect(depthOfKey(property(notes()), "x-comb-text")).toBe(0)
+	})
+
+	it("is found at the same depth on the field taken as required, as a consumer unwraps it", () => {
+		const required = (notes() as z.ZodOptional<z.ZodNullable<z.ZodType>>).unwrap().unwrap()
+		expect(searchSchemaKey(property(required), "x-comb-text")).toEqual({ found: true, value: RULE })
+		expect(depthOfKey(property(required), "x-comb-text")).toBe(0)
+		expect(required.safeParse(null).success).toBe(false)
 	})
 })

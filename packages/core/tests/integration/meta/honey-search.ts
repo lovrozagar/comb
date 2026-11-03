@@ -3,7 +3,9 @@
  * stamps are findable by the consumer that actually reads them.
  *
  * Source of record: `@lovrozagar/honey` `packages/core/src/codegen.ts` at commit
- * cd7eb5c — `schemaChildren`, `searchSchemaKey`, `DEEP_SEARCH_MAX_DEPTH`.
+ * cd7eb5c — `schemaChildren`, `searchSchemaKey`, `DEEP_SEARCH_MAX_DEPTH`. Checked against
+ * 1.0.0-rc.15 (164a0e4), where it is `children` and `deepSearch` in
+ * `packages/core/src/meta/meta-spec-validate.ts`: the same children, levels and dedupe.
  *
  * This is deliberately a copy rather than an import: comb does not depend on
  * honey, and the point of the test is that comb's *output* satisfies honey's

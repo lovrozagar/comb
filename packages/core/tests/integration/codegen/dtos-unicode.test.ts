@@ -91,9 +91,9 @@ export const page = ${table}("page", { id: c.id("pag"), slug: c.text("slug", { m
 				expect(published.properties["slug"]).toMatchObject({ pattern: "^[a-z0-9-]+$", "x-comb-text": RULE })
 				expect(published.properties["slug"]).not.toHaveProperty("allOf")
 				expect(published.properties["prefs"]).toEqual({ anyOf: [{ $ref: "#/$defs/Prefs" }], "x-comb-text": RULE })
-				/* a nullable one flat, null the union's other member (C4 of r18) */
+				/* a nullable one is that union beside null, its rule on both, so `.unwrap()` keeps it (C2 of r21) */
 				expect(published.properties["extra"]).toEqual({
-					anyOf: [{ $ref: "#/$defs/Prefs" }, { type: "null" }],
+					anyOf: [{ anyOf: [{ $ref: "#/$defs/Prefs" }], "x-comb-text": RULE }, { type: "null" }],
 					"x-comb-text": RULE,
 				})
 				expect(published.$defs["Prefs"]?.description).toBe("The account's display preferences")

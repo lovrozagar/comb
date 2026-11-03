@@ -217,8 +217,8 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 		)
 		/* a plain drizzle column is typed from its data type: a JSON blob takes any JSON value */
 		expect(schema("x", 'blob("x")', "read")).toBe("z.json()")
-		/* written, it takes the refine in one union with null, as a c.json does, its rule as meta (F63, C5 of r19) */
-		expect(schema("x", 'blob("x")', "create")).toBe("z.union([jsonValueSchema, z.null()]).optional()")
+		/* written, it takes the refine as a union's one option, nullable as any field is, its rule as meta (F63, C5 of r19, C2 of r21) */
+		expect(schema("x", 'blob("x")', "create")).toBe("z.union([jsonValueSchema]).nullable().optional()")
 		expect(() => schema("x", 'blob("x", { mode: "buffer" })', "read")).toThrow(
 			"fixture.x: comb has no rule for a SQLiteBlobBuffer column (object buffer)",
 		)
@@ -241,7 +241,7 @@ describe("generateFieldSchema: ids, typed text and numbers", () => {
 			/^z\.number\(\)\.min\(-0\.25\)\.meta/,
 		)
 		expect(schema("r", 'c.real("r", { max: 1.5 }).notNull()', "read")).toMatch(
-			/^z\.union\(\[z\.number\(\), z\.literal\(\[globalThis\.Infinity, -globalThis\.Infinity, null\]\)\.meta\(\{ enum: void 0, type: "null" \}\)\]\).*\.meta\(\{"x-comb-maximum":1\.5\}\)/,
+			/^z\.union\(\[z\.number\(\)\.meta\(\{"x-comb-maximum":1\.5\}\), z\.literal\(\[globalThis\.Infinity, -globalThis\.Infinity, null\]\)\.meta\(\{ enum: void 0, type: "null" \}\)\]\).*\.meta\(\{"x-comb-maximum":1\.5\}\)/,
 		)
 	})
 })
@@ -329,7 +329,7 @@ describe("generateFieldSchema: a JSON column's rules, published (F26)", () => {
 		/* on SQLite too, which stores neither as sent (F11); the refined schema as a union's one option,
 		 * so it publishes anyOf: [$ref] to it (F63) */
 		expect(generateFieldSchema(plain, "create", { dialect: "sqlite", imports: imports() })).toBe(
-			"z.union([blobSchema, z.null()]).optional()",
+			"z.union([blobSchema]).nullable().optional()",
 		)
 	})
 })
