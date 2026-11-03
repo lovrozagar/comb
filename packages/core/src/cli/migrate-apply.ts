@@ -31,7 +31,7 @@ import { planApply, refuseSkipping } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import type { Connection } from "../migrate/types.ts"
 import { parseArgs, type ParsedArgs } from "./args.ts"
-import { openSqliteTarget, type SqliteTarget } from "./migrate-sqlite-target.ts"
+import { fileName, openSqliteTarget, type SqliteTarget } from "./migrate-sqlite-target.ts"
 import { resolveMigrateTarget } from "./migrate-target.ts"
 import { Refused } from "../migrate/core/refused.ts"
 import { checkPassed, CliError, type CliIo, type MigrateOutcome, Reported } from "./output.ts"
@@ -140,19 +140,6 @@ async function baseline(
 		marked++
 	}
 	io.out(`\nBaseline done: ${marked} marked, ${files.length - marked} already tracked`)
-}
-
-/**
- * A --file's name: its path from the migrations directory, `../lone.sql` outside it; refused in a
- * subdirectory of it, which no whole-directory run reads (M34)
- */
-function fileName(single: string, { cwd, dir }: { cwd: string; dir: string }): string {
-	const relative = path.relative(dir, path.resolve(cwd, single))
-	if (!relative.startsWith("..") && relative.includes(path.sep))
-		throw new CliError(
-			`${single} is in a subdirectory of ${dir}, which a whole-directory run does not read; move it to the directory's top level, or outside it`,
-		)
-	return relative
 }
 
 /** status's lines and outcome: each of `names` applied or pending, as comb's history records it */

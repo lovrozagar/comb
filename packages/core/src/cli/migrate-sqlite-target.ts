@@ -9,6 +9,7 @@
  * Turso) refuses every connection setting at check, so its files apply through the one writer (S1 of r22).
  */
 import fs from "node:fs"
+import path from "node:path"
 import { blank } from "../blank.ts"
 import { absentDatabase } from "../migrate/drivers/absent.ts"
 import { DatabaseMissing } from "../migrate/drivers/missing.ts"
@@ -122,4 +123,21 @@ export async function openSqliteTarget(
 		name: target.label,
 		write,
 	}
+}
+
+/**
+ * A --file's name: its path from the migrations directory, `../lone.sql` outside it; refused in a
+ * subdirectory of it, which no whole-directory run reads (M34), and refused by name when it is
+ * missing or no file (KC8 of r22b)
+ */
+export function fileName(single: string, { cwd, dir }: { cwd: string; dir: string }): string {
+	const file = path.resolve(cwd, single)
+	if (!fs.existsSync(file)) throw new CliError(`--file ${file} does not exist`)
+	if (!fs.statSync(file).isFile()) throw new CliError(`--file ${file} is not a file`)
+	const relative = path.relative(dir, file)
+	if (!relative.startsWith("..") && relative.includes(path.sep))
+		throw new CliError(
+			`${single} is in a subdirectory of ${dir}, which a whole-directory run does not read; move it to the directory's top level, or outside it`,
+		)
+	return relative
 }

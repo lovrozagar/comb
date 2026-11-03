@@ -128,6 +128,15 @@ describe("required positionals are enforced for every command (KC2; sibling: the
 		expect(() => parseArgs([], command)).toThrow(usage)
 	})
 
+	/* KC8 of r22b: `comb migrate status ""` looked up a database named nothing */
+	it.each([
+		[["core", ""], "migrate diff" as const, "Usage: comb migrate diff <database> [name]"],
+		[[""], "migrate status" as const, "Usage: comb migrate status <database>"],
+		[[""], "codegen" as const, "Usage: comb codegen [database...]"],
+	])("refuses an empty positional, %j on %s, with its usage", (argv, command, usage) => {
+		expect(() => parseArgs(argv, command)).toThrow(usage)
+	})
+
 	it("takes none for codegen and init, which require none, and none beside an option that stands alone", () => {
 		expect(parseArgs([], "codegen").positionals).toEqual([])
 		expect(parseArgs([], "migrate init").positionals).toEqual([])

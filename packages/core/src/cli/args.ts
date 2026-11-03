@@ -151,7 +151,9 @@ export function parseArgs(argv: readonly string[], command: Command): ParsedArgs
 	/* each `<…>` part is a minimum as each `[…]` part is a maximum, so the usage line is the rule (KC2 of r22b) */
 	const [least, most] = alone ? [0, 0] : positionalRange(command)
 	const count = reading.parsed.positionals.length
-	if (count < least || count > most) throw new CliError(usageOf(command, alone))
+	/* an empty positional names nothing, a database least of all (KC8 of r22b) */
+	if (count < least || count > most || reading.parsed.positionals.includes(""))
+		throw new CliError(usageOf(command, alone))
 	return reading.parsed
 }
 

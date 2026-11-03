@@ -102,6 +102,21 @@ describe("migrate apply: through comb.migrate.config.ts", () => {
 		expect(await tables(url)).toEqual(["__drizzle_migrations", "a", "lone"])
 	})
 
+	/* KC8 of r22b: a missing --file gave a raw ENOENT, and a directory an EISDIR naming no path */
+	it("refuses a --file that does not exist or is not a file, naming it, before it reads the history", async () => {
+		const { dir, url } = configured({})
+		mkdirSync(join(dir, "sub"))
+		for (const [file, refusal] of [
+			["missing.sql", `--file ${join(dir, "missing.sql")} does not exist`],
+			["sub", `--file ${join(dir, "sub")} is not a file`],
+		]) {
+			const run = io(dir)
+			expect(await runCli(["migrate", "apply", "core", "--file", file as string], run)).toBe(1)
+			expect(run.errors).toEqual([refusal])
+		}
+		expect(await tables(url)).toEqual([])
+	})
+
 	it("refuses a database the config does not declare, and --local", async () => {
 		const { dir } = configured({})
 		const unknown = io(dir)
