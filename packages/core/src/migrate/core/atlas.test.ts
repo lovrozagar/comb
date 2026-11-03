@@ -5,7 +5,12 @@ import { checkAtlasInstalled, exportDrizzleSchema, exportWith, generateSchemaDif
 import { OPTIONAL_PEER_RANGES } from "./optional-peer.ts"
 
 /** A drizzle-kit as a command resolves it, for a fake runner */
-const KIT = { bin: "/kit/bin.cjs", manifest: "/kit/package.json", peer: "drizzle-kit", runtime: "bun" } as const
+const KIT = {
+	bin: "/kit/bin.cjs",
+	manifest: "/kit/package.json",
+	peer: "drizzle-kit",
+	runtime: process.execPath,
+} as const
 import type { Run, RunOptions, RunResult } from "./process.ts"
 
 type Call = { cmd: string; args: readonly string[]; options: RunOptions | undefined }
@@ -140,17 +145,17 @@ describe("exportDrizzleSchema", () => {
 			"CREATE TABLE t (a integer DEFAULT 1, b integer DEFAULT 0);",
 		)
 		expect(run.calls).toEqual([
-			{ args: ["/kit/bin.cjs", "export"], cmd: "bun", options: { cwd: "/work", peer: "drizzle-kit" } },
+			{ args: ["/kit/bin.cjs", "export"], cmd: process.execPath, options: { cwd: "/work", peer: "drizzle-kit" } },
 		])
 	})
 
-	/* K1 of r22: the drizzle-kit the project at cwd holds, its bin as its package.json names it, on bun */
+	/* K1 of r22: the drizzle-kit the project at cwd holds, its bin as its package.json names it, on the runtime running comb (AD5) */
 	it("runs the drizzle-kit the project at cwd holds, and refuses a cwd that holds none", () => {
 		const run = fakeRun(ok("CREATE TABLE t (a integer);"))
 		expect(exportDrizzleSchema({ cwd: import.meta.dirname, dialect: "sqlite", run })).toBe(
 			"CREATE TABLE t (a integer);",
 		)
-		expect(run.calls[0]?.cmd).toBe("bun")
+		expect(run.calls[0]?.cmd).toBe(process.execPath)
 		expect(run.calls[0]?.args[0]).toMatch(/\/drizzle-kit\/bin\.cjs$/)
 		expect(() => exportDrizzleSchema({ cwd: tmpdir(), dialect: "sqlite", run })).toThrow(
 			`comb needs drizzle-kit (${OPTIONAL_PEER_RANGES["drizzle-kit"]}) to export the drizzle schema for comb migrate diff`,

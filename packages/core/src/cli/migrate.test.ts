@@ -27,7 +27,7 @@ function fakeAtlas(diff: (dir: string) => RunResult | undefined | void): Run & {
 	const calls: string[][] = []
 	const run: Run = (cmd, args) => {
 		calls.push([cmd, ...args])
-		if (cmd === "bun") return ok("CREATE TABLE post (id TEXT PRIMARY KEY);")
+		if (cmd === process.execPath) return ok("CREATE TABLE post (id TEXT PRIMARY KEY);")
 		if (args[0] === "version") return ok("atlas version v1.3.0")
 		const dir = dirArg(args)
 		if (args[1] === "hash") {
@@ -353,9 +353,9 @@ describe("comb migrate diff: a Postgres database through comb.migrate.config.ts"
 		const io = makeIo(dir, run)
 		expect(await runCliWithFakes(["migrate", "diff", "core", "init"], io)).toBe(0)
 		expect(io.outputs).toEqual([`Generated: ${join(dir, "pg", "1_init.sql")}`])
-		/* the drizzle-kit the command checked, its bin on bun (K1 of r22): comb's own here, as io.locatePeer finds it */
-		expect(atlas.calls.find((call) => call[0] === "bun")).toEqual([
-			"bun",
+		/* the drizzle-kit the command checked (K1 of r22), its bin on the runtime running comb (AD5): comb's own here, as io.locatePeer finds it */
+		expect(atlas.calls.find((call) => call[0] === process.execPath)).toEqual([
+			process.execPath,
 			expect.stringMatching(/\/drizzle-kit\/bin\.cjs$/),
 			"export",
 			"--config",

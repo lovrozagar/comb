@@ -39,7 +39,7 @@ async function diffWith(config: string, dialect: string | undefined) {
 	return {
 		code,
 		dir,
-		drizzleKit: atlas.calls.filter((call) => call[0] === "bun"),
+		drizzleKit: atlas.calls.filter((call) => call[0] === process.execPath),
 		errors: io.errors,
 		wrote: existsSync(join(dir, "m")),
 	}

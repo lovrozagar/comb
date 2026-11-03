@@ -142,10 +142,9 @@ describe("runPeer (K1 of r22)", () => {
 					"node: command not found; comb runs wrangler on node, and finds no node on PATH: install Node.js (https://nodejs.org)",
 				stdout: "",
 			})
-			const kit = { ...wrangler, peer: "drizzle-kit", runtime: "bun" } as const
-			expect(runPeer(run, kit)(["export"], { env: { PATH: "/nonexistent" } }).stderr).toBe(
-				"bun: command not found; comb runs drizzle-kit on bun, and finds no bun on PATH: install Bun (https://bun.sh)",
-			)
+			/* drizzle-kit runs on comb's own runtime, by its path: one that is gone has no install to name */
+			const kit = { ...wrangler, peer: "drizzle-kit", runtime: join(dir, "gone", "bun") } as const
+			expect(runPeer(run, kit)(["export"]).stderr).toBe(`${join(dir, "gone", "bun")}: command not found`)
 		} finally {
 			rmSync(dir, { force: true, recursive: true })
 		}
@@ -157,9 +156,14 @@ describe("runPeer (K1 of r22)", () => {
 			calls.push([cmd, args, options])
 			return { code: 0, stderr: "", stdout: "" }
 		}
-		const kit = { bin: "/k/bin.cjs", manifest: "/k/package.json", peer: "drizzle-kit", runtime: "bun" } as const
+		const kit = {
+			bin: "/k/bin.cjs",
+			manifest: "/k/package.json",
+			peer: "drizzle-kit" as const,
+			runtime: process.execPath,
+		}
 		runPeer(fake, kit)(["export"], { cwd: "/w" })
-		expect(calls).toEqual([["bun", ["/k/bin.cjs", "export"], { cwd: "/w", peer: "drizzle-kit" }]])
+		expect(calls).toEqual([[process.execPath, ["/k/bin.cjs", "export"], { cwd: "/w", peer: "drizzle-kit" }]])
 	})
 })
 

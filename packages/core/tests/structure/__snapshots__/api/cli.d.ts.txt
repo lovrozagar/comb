@@ -91,12 +91,15 @@ export declare function runCli(argv: readonly string[], io: CliIo): Promise<numb
 // migrate/core/process.d.ts
 /** An optional peer comb spawns rather than imports */
 export type BinPeer = "drizzle-kit" | "wrangler";
-/** A bin peer as the project holds it: its package.json, the bin file it names for the peer, and the runtime that runs it */
+/**
+ * A bin peer as the project holds it: its package.json, the bin file it names for the peer, and the
+ * runtime that runs it, `node` or the executable running comb (process.execPath)
+ */
 export type ProjectBin = {
     bin: string;
     manifest: string;
     peer: BinPeer;
-    runtime: "bun" | "node";
+    runtime: string;
 };
 export type RunResult = {
     code: number;

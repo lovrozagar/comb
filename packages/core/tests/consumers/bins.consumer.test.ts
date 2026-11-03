@@ -128,10 +128,11 @@ export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }) })
 		return { ran, result }
 	}
 
-	/* the peer each command spawns, and the runtime it keeps from 0.20.1 whatever runs comb */
+	/* the peer each command spawns, and the runtime it keeps from 0.20.1: wrangler node whatever runs comb, and
+	   drizzle-kit the runtime running comb, as `bun drizzle-kit` followed its node shebang there (AD5 of the area D review) */
 	const SPAWNS = (["bun", "node"] as const).flatMap((comb) => [
 		{ comb, command: "status", peer: "wrangler", runtime: "node" } as const,
-		{ comb, command: "diff", peer: "drizzle-kit", runtime: "bun" } as const,
+		{ comb, command: "diff", peer: "drizzle-kit", runtime: comb } as const,
 	])
 
 	describe("the workspace's own peer in range, the root's out of it", () => {

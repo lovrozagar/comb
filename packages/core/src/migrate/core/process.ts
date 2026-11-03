@@ -7,8 +7,11 @@ import { constants, devNull } from "node:os"
 /** An optional peer comb spawns rather than imports */
 export type BinPeer = "drizzle-kit" | "wrangler"
 
-/** A bin peer as the project holds it: its package.json, the bin file it names for the peer, and the runtime that runs it */
-export type ProjectBin = { bin: string; manifest: string; peer: BinPeer; runtime: "bun" | "node" }
+/**
+ * A bin peer as the project holds it: its package.json, the bin file it names for the peer, and the
+ * runtime that runs it, `node` or the executable running comb (process.execPath)
+ */
+export type ProjectBin = { bin: string; manifest: string; peer: BinPeer; runtime: string }
 
 export type RunResult = { code: number; stdout: string; stderr: string }
 
@@ -62,17 +65,14 @@ function childEnv(env: RunOptions["env"]): NodeJS.ProcessEnv {
 	return out
 }
 
-// lookup-table: each runtime a bin peer runs on, and where it is installed from
-const RUNTIMES: Readonly<Record<ProjectBin["runtime"], string>> = {
-	bun: "Bun (https://bun.sh)",
-	node: "Node.js (https://nodejs.org)",
-}
+// lookup-table: each runtime a bin peer is spawned on by name, and where it is installed from; comb's own is its path
+const RUNTIMES: Readonly<Record<string, string>> = { node: "Node.js (https://nodejs.org)" }
 
 /** What to do when `cmd` cannot start: Atlas, or a bin peer's runtime, install it; "" for any other command */
 function installHint(cmd: string, peer: BinPeer | undefined): string {
 	if (cmd === "atlas") return `; install atlas (${ATLAS_RANGE}) from ${ATLAS_INSTALL}`
 	if (peer === undefined || !Object.hasOwn(RUNTIMES, cmd)) return ""
-	return `; comb runs ${peer} on ${cmd}, and finds no ${cmd} on PATH: install ${RUNTIMES[cmd as ProjectBin["runtime"]]}`
+	return `; comb runs ${peer} on ${cmd}, and finds no ${cmd} on PATH: install ${RUNTIMES[cmd]}`
 }
 
 /** How a process the OS could not run (or had to stop) is reported: POSIX shell codes where they exist. */

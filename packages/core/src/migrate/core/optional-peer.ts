@@ -36,10 +36,11 @@ type Peer = OptionalPeer | "atlas"
 // lookup-table: each peer and its range, Atlas's among them
 const RANGES: Readonly<Record<Peer, string>> = { ...OPTIONAL_PEER_RANGES, atlas: ATLAS_RANGE }
 
-/* the peers comb spawns rather than imports, each on the runtime the ruling of r22 keeps for it: wrangler's bin is
-   a Node program that starts workerd, which comb under bun must not move onto bun */
-// lookup-table: each optional peer comb spawns, and the runtime that runs its bin
-const BIN_PEERS: Readonly<Record<BinPeer, ProjectBin["runtime"]>> = { "drizzle-kit": "bun", wrangler: "node" }
+/* the peers comb spawns rather than imports, each on the runtime 0.20.1 ran it on (the ruling of r22): wrangler's
+   bin is a Node program that starts workerd, which comb under bun must not move onto bun; 0.20.1's `bun drizzle-kit`
+   followed the bin's node shebang, so drizzle-kit runs on whatever runs comb, needing no other (AD5 of the area D review) */
+// lookup-table: each optional peer comb spawns, and the runtime that runs its bin: node, or comb's own
+const BIN_PEERS: Readonly<Record<BinPeer, "comb" | "node">> = { "drizzle-kit": "comb", wrangler: "node" }
 
 /** The bin peers a command resolved, each the one package it checked and runs */
 type Peers = { readonly [P in BinPeer]?: ProjectBin }
@@ -163,7 +164,8 @@ function binAt(peer: BinPeer, entry: string): ProjectBin {
 	/* a string bin is the package's one bin, named as the package (manifestOf found it by that name) */
 	const path = typeof bin === "string" ? bin : (bin as Record<string, unknown> | undefined)?.[peer]
 	if (typeof path !== "string") throw new Error(`${manifest} names no ${peer} bin`)
-	return { bin: join(dirname(manifest), path), manifest, peer, runtime: BIN_PEERS[peer] }
+	const runtime = BIN_PEERS[peer] === "comb" ? process.execPath : "node"
+	return { bin: join(dirname(manifest), path), manifest, peer, runtime }
 }
 
 /** The bin `need` names in the project at `cwd`, from its folder up; refused as requirePeers refuses it */

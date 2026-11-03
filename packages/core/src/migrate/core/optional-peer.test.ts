@@ -282,9 +282,15 @@ describe("requirePeers, finding a peer comb spawns (K1; sibling: drizzle-kit's r
 		expect(rootWrangler).toContain(root)
 	})
 
-	it("resolves drizzle-kit the same way, its bin a string, on bun", () => {
+	/* AD5 of the area D review: 0.20.1's `bun drizzle-kit` followed the bin's node shebang, so drizzle-kit keeps comb's own runtime */
+	it("resolves drizzle-kit the same way, its bin a string, on the runtime running comb", () => {
 		expect(requirePeers("diff", "d1", { atlas: tested, cwd: src })).toEqual({
-			"drizzle-kit": { bin: join(rootKit, "../bin.cjs"), manifest: rootKit, peer: "drizzle-kit", runtime: "bun" },
+			"drizzle-kit": {
+				bin: join(rootKit, "../bin.cjs"),
+				manifest: rootKit,
+				peer: "drizzle-kit",
+				runtime: process.execPath,
+			},
 		})
 		expect(() => requirePeers("diff", "d1", { atlas: tested, cwd: tmpdir() })).toThrow(
 			`comb needs drizzle-kit (1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0) to export the drizzle schema for comb migrate diff; install "drizzle-kit@1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"`,
