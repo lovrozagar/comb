@@ -10,11 +10,12 @@ import {
 	integer as pgInteger,
 	PgDialect,
 	pgTable,
+	pgView,
 	QueryBuilder as PgQueryBuilder,
 	text as pgText,
 } from "drizzle-orm/pg-core"
 import { int as mysqlInt, mysqlTable, varchar } from "drizzle-orm/mysql-core"
-import { integer, QueryBuilder, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { integer, QueryBuilder, SQLiteDialect, sqliteTable, sqliteView, text } from "drizzle-orm/sqlite-core"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { SEALED } from "./__fixtures__/cursor-secret.ts"
@@ -26,12 +27,21 @@ const liteInbox = sqliteTable("inbox", { at: integer("at"), uid: text("uid").pri
 const mysqlInbox = mysqlTable("inbox", { at: mysqlInt("at"), uid: varchar("uid", { length: 36 }).primaryKey() })
 const pgSub = new PgQueryBuilder().select({ at: pgInbox.at, uid: pgInbox.uid }).from(pgInbox).as("sq")
 const liteSub = new QueryBuilder().select({ at: liteInbox.at, uid: liteInbox.uid }).from(liteInbox).as("sq")
+const pgSeen = pgView("seen").as((qb) => qb.select({ at: pgInbox.at, uid: pgInbox.uid }).from(pgInbox))
+const liteSeen = sqliteView("seen").as((qb) => qb.select({ at: liteInbox.at, uid: liteInbox.uid }).from(liteInbox))
 
 type Key = SQLWrapper | { sql: SQLWrapper; type: "date" }
 type Dialect = "postgres" | "sqlite"
 const sides = {
-	postgres: { at: pgInbox.at, compile: new PgDialect(), sub: pgSub, uid: pgInbox.uid },
-	sqlite: { at: liteInbox.at, compile: new SQLiteDialect(), sub: liteSub, uid: liteInbox.uid },
+	postgres: { at: pgInbox.at, compile: new PgDialect(), sub: pgSub, table: pgInbox, uid: pgInbox.uid, view: pgSeen },
+	sqlite: {
+		at: liteInbox.at,
+		compile: new SQLiteDialect(),
+		sub: liteSub,
+		table: liteInbox,
+		uid: liteInbox.uid,
+		view: liteSeen,
+	},
 }
 
 /* every place a column can sit in a derived list's id and key, by its dialect's own columns */
@@ -51,6 +61,9 @@ const SHAPES: Array<[string, (d: Dialect) => { idColumn: SQLWrapper; key: Key }]
 		(d) => ({ idColumn: sql`coalesce(${sql.placeholder("u")}, ${sides[d].uid})`, key: sql`inbox.at` }),
 	],
 	["a subquery field", (d) => ({ idColumn: sides[d].sub.uid, key: sides[d].sub.at })],
+	/* r22 Q3: a table or view written into the SQL states its dialect as plainly as a column does */
+	["a table object as a chunk (Q3)", (d) => ({ idColumn: sql`${sides[d].table}.uid`, key: sql`inbox.at` })],
+	["a view object as a chunk (Q3)", (d) => ({ idColumn: sql`${sides[d].view}.uid`, key: sql`seen.at` })],
 ]
 
 const parsedSort = [{ direction: "desc" as const, field: "at" as const }]
@@ -139,6 +152,7 @@ describe("a derived list's wiring the dialect walk refuses (Q1 of r21)", () => {
 
 	it.each([
 		["the id", mysqlInbox.uid, sql`inbox.at`],
+		["the id, as a table object (Q3)", sql`${mysqlInbox}.uid`, sql`inbox.at`],
 		["a key, inside an expression", sql`inbox.uid`, sql`coalesce(${mysqlInbox.at}, 0)`],
 	])("refuses a column of neither dialect in %s, naming its type, even with `dialect` stated", (_, id, key) => {
 		for (const dialect of [undefined, "sqlite"] as const) {

@@ -2,9 +2,10 @@
  * The dialect a derived list is built for (Q1 of r21): the columns its id, anchor and keys hold decide,
  * wherever drizzle's SQL holds them (nested SQL, an aliased expression, a subquery's field), and a list
  * that holds none states it. A where's columns do not count: they are not what the cursor binds. Reads
- * only drizzle's public surface: `is()`, `Column.columnType`, `SQL.queryChunks` and `SQL.Aliased.sql`.
+ * only drizzle's public surface: `is()`, `Column.columnType`, `SQL.queryChunks`, `SQL.Aliased.sql`, and
+ * a `Table` or `View` chunk's columns through `getTableColumns` and `getViewSelectedFields` (r22 Q3).
  */
-import { Column, is, SQL, type SQLWrapper } from "drizzle-orm"
+import { Column, getTableColumns, getViewSelectedFields, is, SQL, type SQLWrapper, Table, View } from "drizzle-orm"
 
 type ListDialect = "postgres" | "sqlite"
 
@@ -19,6 +20,10 @@ function dialectsIn(wrapper: unknown, found: Set<ListDialect>): Set<ListDialect>
 		for (const chunk of wrapper.queryChunks) dialectsIn(chunk, found)
 	} else if (is(wrapper, SQL.Aliased)) {
 		dialectsIn(wrapper.sql, found)
+	} else if (is(wrapper, Table)) {
+		for (const column of Object.values(getTableColumns(wrapper))) dialectsIn(column, found)
+	} else if (is(wrapper, View)) {
+		for (const field of Object.values(getViewSelectedFields(wrapper))) dialectsIn(field, found)
 	}
 	return found
 }
