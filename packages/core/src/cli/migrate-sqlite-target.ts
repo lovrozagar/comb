@@ -10,7 +10,6 @@
  */
 import fs from "node:fs"
 import path from "node:path"
-import { blank } from "../blank.ts"
 import { absentDatabase } from "../migrate/drivers/absent.ts"
 import { DatabaseMissing } from "../migrate/drivers/missing.ts"
 import type { FileConnection } from "../migrate/core/apply.ts"
@@ -18,7 +17,7 @@ import type { TargetKind } from "../migrate/core/classify-target.ts"
 import type { ScratchEngine } from "../migrate/drivers/local-db.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
-import type { MigrateTarget } from "./migrate-target.ts"
+import { type MigrateTarget, refuseBlank } from "./migrate-target.ts"
 import { CliError, type CliContext } from "./output.ts"
 
 /** An open database to migrate: the connection its checks read, the one its writes go to, and how to name it */
@@ -73,15 +72,6 @@ async function fileOpener(
 	return () => openLibsqlFile(file)
 }
 
-/** Why the provider cannot connect as given: a libsql url or a turso apiToken left blank, which loads (P9 of r18, S5 of r19) */
-function emptyCredential(provider: ConnectionProviderConfig): string | undefined {
-	if (provider.type === "libsql" && blank(provider.url))
-		return "url is empty: set the libsql provider's url for this database"
-	if (provider.type === "turso" && blank(provider.apiToken))
-		return "apiToken is empty: set the turso provider's apiToken for this database"
-	return undefined
-}
-
 /** `target` opened for `request.mode`; refuses the flags only a D1 database takes */
 export async function openSqliteTarget(
 	{ args, io, mode }: OpenRequest,
@@ -92,8 +82,9 @@ export async function openSqliteTarget(
 		throw new CliError(
 			"--hashes is for a D1 database, whose history records names alone: this one records each file's hash as it applies it",
 		)
-	const empty = emptyCredential(target.provider)
-	if (empty !== undefined) throw new CliError(empty)
+	/* a libsql url or a turso apiToken left blank loads, and cannot connect (P9 of r18, S5 of r19) */
+	if (target.provider.type === "libsql") refuseBlank(target, { url: target.provider.url })
+	if (target.provider.type === "turso") refuseBlank(target, { apiToken: target.provider.apiToken })
 	if (args.options["file"] === undefined && !fs.existsSync(target.migrationsDir))
 		throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)
 	const { createProvider } = await import("../migrate/config.ts")

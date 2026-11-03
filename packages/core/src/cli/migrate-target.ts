@@ -5,6 +5,7 @@
  * diff reads (KC4 of r22b).
  */
 import path from "node:path"
+import { blank } from "../blank.ts"
 import type { CombMigrateConfig } from "../migrate/config.ts"
 import type { DatabaseConfig, Dialect, ResolvedDatabaseConfig } from "../migrate/types.ts"
 import { findCombConfig } from "./comb-config.ts"
@@ -129,4 +130,22 @@ async function resolveMigrateTarget(request: TargetRequest): Promise<MigrateTarg
 	}
 }
 
-export { type MigrateTarget, resolveMigrateTarget, type TargetRequest }
+/**
+ * Refuse a field of `target`'s provider, given as `{ <field>: <value> }`, when it is blank, as one
+ * read from an unset variable loads: the field to set and whose it is, in a project of several
+ * databases and environments (KC7 of r22b, AD9 of the area D review), then `hint`
+ */
+function refuseBlank(
+	target: Pick<MigrateTarget, "label" | "provider">,
+	given: Record<string, string>,
+	hint = "",
+): void {
+	for (const [field, value] of Object.entries(given)) {
+		if (blank(value))
+			throw new CliError(
+				`${field} is empty: set the ${target.provider.type} provider's ${field} for ${target.label}${hint}`,
+			)
+	}
+}
+
+export { type MigrateTarget, refuseBlank, resolveMigrateTarget, type TargetRequest }

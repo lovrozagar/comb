@@ -14,7 +14,7 @@ import {
 	statedDialect,
 } from "./drizzle-dialect.ts"
 import { migrateApply, needPeers } from "./migrate-apply.ts"
-import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
+import { type MigrateTarget, refuseBlank, resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliContext } from "./output.ts"
 
 const DRIZZLE_CONFIG = `import { defineConfig } from "drizzle-kit"
@@ -105,7 +105,9 @@ async function migrateDiff(argv: readonly string[], io: CliContext): Promise<voi
 	/* parseArgs refuses a diff that names no database (KC2 of r22b) */
 	const [db, name] = args.positionals as [string, string?]
 	const env = args.options["env"] as string | undefined
-	const { d1, expected, exported, fts, migrationsDir, pg, provider } = await diffTarget(db, env, io)
+	const { d1, expected, exported, fts, migrationsDir, pg, provider, target } = await diffTarget(db, env, io)
+	/* Atlas diffs on the dev database (AD9 of the area D review) */
+	if (target?.provider.type === "postgres") refuseBlank(target, { devUrl: target.provider.devUrl })
 	/* every peer the diff needs, Atlas and a declared FTS's ts-morph among them, before Atlas or drizzle-kit runs (K1 of r21, KC3 of r22) */
 	const peers = needPeers(io, "diff", { fts: fts !== undefined, provider })
 	/* after the peers, since a drizzle config imports drizzle-kit; before drizzle-kit exports none of the other dialect's tables (KC1 of r22b) */
@@ -203,6 +205,7 @@ async function diffTarget(db: string, env: string | undefined, io: CliContext) {
 		migrationsDir: target?.migrationsDir ?? path.resolve(io.cwd, "atlas-migrations"),
 		pg,
 		provider: providerOf(target),
+		target,
 	}
 }
 

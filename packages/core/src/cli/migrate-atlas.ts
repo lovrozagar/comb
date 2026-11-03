@@ -4,14 +4,13 @@
  * poolers) are printed before anything runs.
  */
 import fs from "node:fs"
-import { blank } from "../blank.ts"
 import { approveMigration } from "../migrate/core/approval.ts"
 import { applyWithAtlas, baselineWithAtlas, statusWithAtlas } from "../migrate/core/atlas-apply.ts"
 import { pgUrlProblems } from "../migrate/core/atlas-target.ts"
 import { loadPostgresParser } from "../migrate/core/pg-parser.ts"
 import type { ResolvedPostgresProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
-import type { MigrateTarget } from "./migrate-target.ts"
+import { type MigrateTarget, refuseBlank } from "./migrate-target.ts"
 import { checkPassed, CliError, type CliContext, type MigrateOutcome } from "./output.ts"
 
 type PostgresTarget = MigrateTarget & { provider: ResolvedPostgresProviderConfig }
@@ -31,11 +30,10 @@ export async function migratePostgres(
 			"--hashes is for a D1 database, whose history records names alone: Atlas records each file's hash as it applies it",
 		)
 	if (!fs.existsSync(target.migrationsDir)) throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)
-	/* whose url, and where init's starter reads it, which an unset DATABASE_URL leaves blank (KC7 of r22b) */
-	if (blank(target.provider.url))
-		throw new CliError(
-			`url is empty: set the postgres provider's url for ${target.label}; init's starter reads it from DATABASE_URL`,
-		)
+	/* where init's starter reads the url, which an unset DATABASE_URL leaves blank (KC7 of r22b) */
+	refuseBlank(target, { url: target.provider.url }, "; init's starter reads it from DATABASE_URL")
+	/* status alone never reaches the dev database */
+	if (mode !== "status") refuseBlank(target, { devUrl: target.provider.devUrl })
 	for (const warning of pgUrlProblems(target.provider, { url: true }).warnings) io.err(`Warning: ${warning}`)
 	const options = {
 		dir: target.migrationsDir,

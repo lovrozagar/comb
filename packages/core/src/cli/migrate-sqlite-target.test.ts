@@ -25,7 +25,7 @@ function resolved(provider: ConnectionProviderConfig) {
 		database: "core",
 		dialect: "sqlite" as const,
 		drizzleConfigPath: undefined,
-		label: "core",
+		label: "core (core_prod)",
 		migrationsDir: path.join(dir, "m"),
 		name: "core",
 		provider,
@@ -158,15 +158,15 @@ describe("openSqliteTarget: a connection per file", () => {
 	)
 })
 
-/* r18 P9: an empty libsql url or turso apiToken loads, and is refused by the command that would use it */
+/* r18 P9: an empty libsql url or turso apiToken loads, and is refused by the command that would use it; AD9 of the area D review: naming whose it is */
 describe("openSqliteTarget on a connection string that is empty", () => {
 	it.each([
-		[{ type: "libsql" as const, url: "" }, "url is empty: set the libsql provider's url for this database"],
-		[{ ...TURSO, apiToken: "" }, "apiToken is empty: set the turso provider's apiToken for this database"],
+		[{ type: "libsql" as const, url: "" }, "url is empty: set the libsql provider's url for core (core_prod)"],
+		[{ ...TURSO, apiToken: "" }, "apiToken is empty: set the turso provider's apiToken for core (core_prod)"],
 		/* S5 of r19: blank is empty, as Postgres's URL check reads it */
-		[{ type: "libsql" as const, url: "  " }, "url is empty: set the libsql provider's url for this database"],
-		[{ ...TURSO, apiToken: " \t" }, "apiToken is empty: set the turso provider's apiToken for this database"],
-	])("refuses %j, naming the field", async (provider, message) => {
+		[{ type: "libsql" as const, url: "  " }, "url is empty: set the libsql provider's url for core (core_prod)"],
+		[{ ...TURSO, apiToken: " \t" }, "apiToken is empty: set the turso provider's apiToken for core (core_prod)"],
+	])("refuses %j, naming the field and its database", async (provider, message) => {
 		await expect(openSqliteTarget(request("status"), resolved(provider))).rejects.toThrow(message)
 	})
 })

@@ -43,6 +43,7 @@ function pgAtlas(pending: string[]): Run & { calls: string[][]; envs: unknown[] 
 function postgresProject(
 	migrations: Record<string, string>,
 	url = "postgres://app:pw@db.example.com/app?sslmode=verify-full",
+	devUrl?: string,
 ): string {
 	const dir = project()
 	mkdirSync(join(dir, "pg"))
@@ -50,7 +51,7 @@ function postgresProject(
 	pgAtlas([])("atlas", ["migrate", "hash", "--dir", `file://${join(dir, "pg")}`])
 	writeFileSync(
 		join(dir, "comb.migrate.config.ts"),
-		`export default { databases: { core: { migrationsDir: "./pg", name: "core", provider: { type: "postgres", url: ${JSON.stringify(url)} } } } }\n`,
+		`export default { databases: { core: { migrationsDir: "./pg", name: "core", provider: { type: "postgres", url: ${JSON.stringify(url)}${devUrl === undefined ? "" : `, devUrl: ${JSON.stringify(devUrl)}`} } } } }\n`,
 	)
 	return dir
 }
@@ -68,6 +69,26 @@ describe("a Postgres database with a blank url", () => {
 			])
 			expect(atlas.calls.filter((call) => call[0] !== "version")).toEqual([])
 		}
+	})
+})
+
+/* AD9 of the area D review: a blank devUrl said only "devUrl is empty", whose database unnamed */
+describe("a Postgres database with a blank devUrl", () => {
+	it("is refused naming the database by each command that reaches it, before Atlas runs", async () => {
+		const dir = postgresProject({}, undefined, " ")
+		writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "postgresql" }\n')
+		for (const mode of ["diff", "check", "apply", "baseline"]) {
+			const atlas = pgAtlas([])
+			const io = makeIo(dir, atlas)
+			expect(await runCliWithFakes(["migrate", mode, "core"], io)).toBe(1)
+			expect(io.errors).toEqual(["devUrl is empty: set the postgres provider's devUrl for core (core)"])
+			expect(atlas.calls.filter((call) => call[0] !== "version")).toEqual([])
+		}
+	})
+
+	it("is left to status, which never reaches it", async () => {
+		const io = makeIo(postgresProject({}, undefined, " "), pgAtlas([]))
+		expect(await runCliWithFakes(["migrate", "status", "core"], io)).toBe(0)
 	})
 })
 
