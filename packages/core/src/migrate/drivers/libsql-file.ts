@@ -31,15 +31,25 @@ const libsqlDatabase = (): Promise<DatabaseClass> =>
 		Promise.resolve(createRequire(import.meta.resolve(LIBSQL_CLIENT))("libsql") as DatabaseClass),
 	)
 
+/** A finite number's literal: a safe integer as written, any other number with a point or exponent SQLite reads as REAL */
+function numberLiteral(value: number): string {
+	if (Object.is(value, -0)) return "-0.0"
+	const text = String(value)
+	return Number.isSafeInteger(value) || /[.e]/.test(text) ? text : `${text}.0`
+}
+
 /**
  * `value` as a SQL literal: the history row's hash, time and name, which `exec` takes with no
  * parameters, and the proof's seed, a blob among it, which libsql's Database panics binding
- * (.tmp/grunt/p21/areas/sqlite/sl3/bind-probe.log)
+ * (.tmp/grunt/p21/areas/sqlite/sl3/bind-probe.log). A number keeps the class bun:sqlite's binding stores it
+ * as, which BLOB and STRICT ANY affinity keep (SL3n of r22): a safe integer INTEGER, any other number REAL,
+ * -0 and an integral one past 2^53 among them (.tmp/grunt/p21/areas/sqlite/sl3n/big-probe.log)
  */
 function literal(value: unknown): string {
 	if (value === null) return "NULL"
 	if (typeof value === "string") return `'${value.replaceAll("'", "''")}'`
-	if (typeof value === "bigint" || (typeof value === "number" && Number.isFinite(value))) return String(value)
+	if (typeof value === "bigint") return String(value)
+	if (typeof value === "number" && Number.isFinite(value)) return numberLiteral(value)
 	if (value instanceof Uint8Array) return `X'${Buffer.from(value).toString("hex")}'`
 	throw new TypeError(`comb binds no ${typeof value} as a SQL literal`)
 }

@@ -3,7 +3,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { openLibsqlFile } from "./libsql-file.ts"
+import { bound, openLibsqlFile } from "./libsql-file.ts"
 
 const dirs: string[] = []
 afterEach(() => {
@@ -109,5 +109,16 @@ describe("openLibsqlFile on a failure (SL1 of r22)", () => {
 
 	it("passes on a database it cannot open as libsql reports it", async () => {
 		await expect(openLibsqlFile(path.join(dbFile(), "missing", "core.db"))).rejects.toThrow(/Unable to open/)
+	})
+})
+
+/* SL3n of r22: a number goes in as the class bun:sqlite's binding stores it (.tmp/grunt/p21/areas/sqlite/sl3n/big-probe.log) */
+describe("bound: a number's literal keeps the class bun:sqlite binds it as", () => {
+	it("writes a safe integer as INTEGER, and -0, a fraction and an integral number past 2^53 as REAL", () => {
+		expect(bound("SELECT ?, ?, ?, ?, ?, ?, ?", [1, 0, -(2 ** 53 - 1), -0, 2 ** 53, 1.5, 1e21])).toBe(
+			"SELECT 1, 0, -9007199254740991, -0.0, 9007199254740992.0, 1.5, 1e+21",
+		)
+		expect(bound("SELECT ?, ?", [90_071_992_547_409_920, 5e-324])).toBe("SELECT 90071992547409920.0, 5e-324")
+		expect(bound("SELECT ?", [2n ** 62n])).toBe("SELECT 4611686018427387904")
 	})
 })
