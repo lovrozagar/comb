@@ -179,3 +179,25 @@ describe("rowChanges read as a superuser", () => {
 		])
 	})
 })
+
+/* a shared server: another session commits while the replay reads, between the committed read and its transaction's own */
+describe("rowChanges beside another session's commit", () => {
+	it("names no change another session committed between the reads, and still names the file's own", async () => {
+		const reads = [
+			[
+				["other", { rolconnlimit: -1 }],
+				["kept", { rolconnlimit: -1 }],
+			],
+			[["kept", { rolconnlimit: -1 }]],
+		] as Array<Array<[string, Record<string, unknown>]>>
+		/* the committed server: `other` there at the first read, dropped by its session before the second */
+		const was: Sql = {
+			end: async () => undefined,
+			unsafe: async () => (reads.shift() ?? []).map(([key, row]) => ({ key, names: [key], row })),
+		}
+		const sql = server({ pg_roles: [["kept", { rolconnlimit: 5 }]] })
+		expect(await named({ own: none, sql, was }, new Map([["pg_authid", 1]]), new Map())).toEqual([
+			"role kept changed (rolconnlimit)",
+		])
+	})
+})

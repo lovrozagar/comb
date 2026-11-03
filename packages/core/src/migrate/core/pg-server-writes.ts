@@ -183,21 +183,22 @@ async function subjectRows(
 	return out
 }
 
-/** What one row's change is, `subject` from `from` to `to`; undefined when nothing changed */
+/** What one row's change is, `subject` from `from` to `to`; undefined when nothing changed, nor a row on either side */
 function changeOf(subject: string, from: Row | undefined, to: Row | undefined): Change | undefined {
-	const names = (to ?? from)?.names ?? []
-	if (from === undefined) return { fields: [], kind: "added", names, said: `${subject} added`, subject }
-	if (to === undefined) return { fields: [], kind: "removed", names, said: `${subject} removed`, subject }
+	if (from === undefined) return to && { fields: [], kind: "added", names: to.names, said: `${subject} added`, subject }
+	if (to === undefined) return { fields: [], kind: "removed", names: from.names, said: `${subject} removed`, subject }
 	const fields = changedFields(from.row, to.row)
 	return fields.length === 0
 		? undefined
-		: { fields, kind: "changed", names, said: `${subject} changed (${fields.join(", ")})`, subject }
+		: { fields, kind: "changed", names: to.names, said: `${subject} changed (${fields.join(", ")})`, subject }
 }
 
 /**
  * What the `counted` writes changed, by catalog in order, as the open transaction on `sql` sees the
  * server against the committed server `was` reads, through `catalogs`, one change per row; a row
- * still as comb's own CREATE ROLE left it (`ours`) is comb's, and no change
+ * still as comb's own CREATE ROLE left it (`ours`) is comb's, and no change. The committed server is
+ * read before the transaction's read and after it, and a change is one only against both: what
+ * another session commits meanwhile, on a server others share, is in one of them
  */
 async function rowChanges(
 	{ catalogs, sql, was }: { catalogs: Readonly<Record<string, Catalog>>; sql: Sql; was: Sql },
@@ -212,14 +213,15 @@ async function rowChanges(
 			out.set(catalog, [])
 			continue
 		}
-		const [before, after] = [await rowsOf(was, read), await rowsOf(sql, read)]
+		/* the committed server read on both sides of the transaction's own read: another session's commit between them is in one */
+		const [before, after, again] = [await rowsOf(was, read), await rowsOf(sql, read), await rowsOf(was, read)]
 		const changes: Change[] = []
 		for (const key of [...new Set([...before.keys(), ...after.keys()])].sort()) {
-			const [from, to] = [before.get(key), after.get(key)]
+			const to = after.get(key)
 			const subject = `${read.noun} ${key}`
 			if (to !== undefined && ours.get(subject) === JSON.stringify(to.row)) continue
-			const change = changeOf(subject, from, to)
-			if (change !== undefined) changes.push(change)
+			const change = changeOf(subject, before.get(key), to)
+			if (change !== undefined && changeOf(subject, again.get(key), to) !== undefined) changes.push(change)
 		}
 		out.set(catalog, changes)
 	}
