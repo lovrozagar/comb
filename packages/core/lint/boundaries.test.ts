@@ -117,7 +117,9 @@ describe("comb/boundaries: packages", () => {
 			"packages/core/src/migrate/drivers/sqlite.ts": 'import type { Client } from "@libsql/client/http"\n',
 			"packages/core/src/migrate/types.ts": 'import { z } from "zod"\nimport { x } from "vitest"\n',
 		}
+		/* K3 of r21: @cloudflare/workers-types is a devDependency, no peer, so src types D1 by its own structural types */
 		expect(reportsOf(rule, fixture)).toEqual([
+			{ file: "packages/core/src/sqlite/d1/session.ts", message: UNDECLARED("@cloudflare/workers-types") },
 			{ file: "packages/core/src/sqlite/d1/session.ts", message: UNDECLARED("miniflare") },
 			{ file: "packages/core/src/migrate/types.ts", message: UNDECLARED("vitest") },
 		])
