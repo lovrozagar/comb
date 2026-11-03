@@ -162,6 +162,15 @@ describe("checkedOnce on an inline maps array per violation", () => {
 		warn.mockRestore()
 	})
 
+	/* Q4 of r21: README's pattern-key shape, `[{ ...DB_CONSTRAINT_MAP, "ut_*": {} }]`, is a new map each time it runs */
+	it("warns once per process of a malformed key in a map spread per violation", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+		const generated: ConstraintMap = { users: {} }
+		for (let violation = 0; violation < 3; violation++) checkedOnce([{ ...generated, "sp_*_rows": {} }])
+		expect(warn.mock.calls.map(([, fields]) => (fields as { key: string }).key)).toEqual(["sp_*_rows"])
+		warn.mockRestore()
+	})
+
 	it("says nothing of a map defineConstraintMaps checked, passed in an array of its own", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 		const checked: ConstraintMap = { "ut_*": {} }

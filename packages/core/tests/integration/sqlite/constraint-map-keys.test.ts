@@ -18,7 +18,8 @@ afterEach(() => vi.restoreAllMocks())
 
 const UNIQUE = { errorKey: "unique_constraint_violation" }
 /* the record's maps: the violated table keyed right, a typo'd pattern key in another map */
-const typoed = (): ConstraintMap[] => [{ member: {} }, { "ut_*_rows": {} }]
+/* a key of its own per dialect: a malformed key is warned of once per process (Q4 of r21) */
+const typoed = (key: string): ConstraintMap[] => [{ member: {} }, { [key]: {} }]
 
 /** A libsql unique violation on member.email */
 async function sqliteViolation(): Promise<unknown> {
@@ -56,20 +57,21 @@ async function pgViolation(): Promise<unknown> {
 describe.each([
 	["libsql", sqliteViolation, classifySqliteError],
 	["Postgres", pgViolation, classifyPgError],
-] as const)("a malformed map key beside the violation's table, on %s", (_, violation, classify) => {
-	it("classifies the violation as with well-formed maps, and tells the operator once per map", async () => {
+] as const)("a malformed map key beside the violation's table, on %s", (dialect, violation, classify) => {
+	const key = `${dialect.toLowerCase()}_*_rows`
+	it("classifies the violation as with well-formed maps, and tells the operator once per key", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
 		const error = await violation()
-		const maps = typoed()
+		const maps = typoed(key)
 		expect(classify(error, maps)).toMatchObject(UNIQUE)
 		expect(classify(error, maps)).toMatchObject(UNIQUE)
 		expect(warn).toHaveBeenCalledTimes(1)
 		expect(warn).toHaveBeenCalledWith(
 			"comb.constraint-maps.error",
-			expect.objectContaining({ key: "ut_*_rows", message: expect.stringContaining("defineConstraintMaps") }),
+			expect.objectContaining({ key, message: expect.stringContaining("defineConstraintMaps") }),
 		)
 		/* the client's answer carries nothing of the app's configuration */
-		expect(String(classify(error, maps)?.cause)).not.toContain("ut_*_rows")
+		expect(String(classify(error, maps)?.cause)).not.toContain(key)
 	})
 
 	it("says nothing of maps built with defineConstraintMaps", async () => {

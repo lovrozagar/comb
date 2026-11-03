@@ -50,6 +50,9 @@ const ruleOf = (key: string): string =>
 // lookup-table: the maps defineConstraintMaps checked, or whose malformed keys were reported once: each map, not its array, which an app may build per call (Q5 of r20)
 const CHECKED: WeakSet<ConstraintMap> = /* @__PURE__ */ new WeakSet()
 
+// lookup-table: each malformed key reported, by its text, as a map spread per call is a new map each time (Q4 of r21); keys are the app's source text, so it stays that small
+const WARNED: Set<string> = /* @__PURE__ */ new Set()
+
 /**
  * The maps an app passes its error handlers, every key checked where it builds them, at module load:
  * a TypeError naming a key with a `*` anywhere but its end, never a lookup at the first violation
@@ -63,19 +66,21 @@ export function defineConstraintMaps(...maps: ConstraintMap[]): readonly Constra
 }
 
 /**
- * `maps`, a handler's first look at each map reporting its malformed keys once to the operator, through
- * the warn sink, however many arrays carry it: the violation is still classified with the well-formed
+ * `maps`, a handler's first look at each map reporting its malformed keys to the operator, through the
+ * warn sink, each key once per process however many arrays or maps carry it: the violation is still classified with the well-formed
  * keys, as the client's answer must not change, nor say anything of the app's configuration (Q4 of r19)
  */
 export function checkedOnce(maps: readonly ConstraintMap[]): readonly ConstraintMap[] {
 	for (const map of maps) {
 		if (CHECKED.has(map)) continue
 		CHECKED.add(map)
-		for (const key of Object.keys(map).filter(malformed))
+		for (const key of Object.keys(map).filter((each) => malformed(each) && !WARNED.has(each))) {
+			WARNED.add(key)
 			warnOnError("comb.constraint-maps.error", {
 				key,
 				message: `${ruleOf(key)}; it matches no table. Build the maps with defineConstraintMaps, which refuses such a key at load`,
 			})
+		}
 	}
 	return maps
 }
