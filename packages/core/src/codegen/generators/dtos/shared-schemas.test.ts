@@ -97,21 +97,36 @@ describe("rewriteBaseTypes and rewriteWithShared", () => {
 			imports(),
 		)
 		const [max9, max9Null, max4] = [n("z.string().max(9)"), n("z.string().max(9).nullable()"), n("z.string().max(4)")]
-		expect(rewriteWithShared("z.string().max(9)", s)).toBe(max9)
-		expect(rewriteWithShared("z.string().max(9).nullable()", s)).toBe(max9Null)
-		expect(rewriteWithShared("z.string().max(9).nullable().optional()", s)).toBe(`${max9Null}.optional()`)
-		expect(rewriteWithShared("z.string().max(9).optional()", s)).toBe(`${max9}.optional()`)
-		expect(rewriteWithShared("z.string().max(4).meta(_m.z).nullable()", s)).toBe(`${max4}.meta(_m.z).nullable()`)
-		expect(rewriteWithShared("z.string().max(7).meta(_m.z)", s)).toBe("_str.max(7).meta(_m.z)")
-		expect(rewriteWithShared("z.number().meta((x))", new Map())).toBe("_num.meta((x))")
-		expect(rewriteWithShared("z.number().meta(unclosed", new Map())).toBe("_num.meta(unclosed")
+		expect(rewriteWithShared("z.string().max(9)", s).code).toBe(max9)
+		expect(rewriteWithShared("z.string().max(9).nullable()", s).code).toBe(max9Null)
+		expect(rewriteWithShared("z.string().max(9).nullable().optional()", s).code).toBe(`${max9Null}.optional()`)
+		expect(rewriteWithShared("z.string().max(9).optional()", s).code).toBe(`${max9}.optional()`)
+		expect(rewriteWithShared("z.string().max(4).meta(_m.z).nullable()", s).code).toBe(`${max4}.meta(_m.z).nullable()`)
+		expect(rewriteWithShared("z.string().max(7).meta(_m.z)", s).code).toBe("_str.max(7).meta(_m.z)")
+		expect(rewriteWithShared("z.number().meta((x))", new Map()).code).toBe("_num.meta((x))")
+		expect(rewriteWithShared("z.number().meta(unclosed", new Map()).code).toBe("_num.meta(unclosed")
+	})
+
+	/* C3 of r21: the names are what the code holds, a substituted core holding its builder's own */
+	it("names the shared schema it substituted alone, or else what the field uses and its alias", () => {
+		const base = "z.union([jsonValueSchema.refine(f)])"
+		const s = buildSharedSchemas([table("a", [`${base}.nullable().optional()`])], imports())
+		const full = n(`${base}.nullable().optional()`)
+		expect(rewriteWithShared(`${base}.nullable().optional()`, s, ["jsonValueSchema"])).toEqual({
+			code: full,
+			names: [full],
+		})
+		expect(rewriteWithShared("jsonValueSchema.nullable()", new Map(), ["jsonValueSchema"]).names).toEqual([
+			"jsonValueSchema",
+		])
+		expect(rewriteWithShared("z.string().max(7)", new Map(), []).names).toEqual(["_str"])
 	})
 })
 
 describe("shared-schemas: remaining layers", () => {
 	it("chains .nullable() on a shared base that has no shared nullable variant", () => {
 		const s = buildSharedSchemas([table("a", ["z.number().max(5)"])], imports())
-		expect(rewriteWithShared("z.number().max(5).nullable()", s)).toBe(`${n("z.number().max(5)")}.nullable()`)
+		expect(rewriteWithShared("z.number().max(5).nullable()", s).code).toBe(`${n("z.number().max(5)")}.nullable()`)
 	})
 
 	/* F59: a field's own meta, an id's prefixed example among them, stays in its table's file */
@@ -119,7 +134,7 @@ describe("shared-schemas: remaining layers", () => {
 		const withMeta = 'z.string().max(5).meta({ examples: ["a"] })'
 		const s = buildSharedSchemas([table("a", [withMeta])], imports())
 		expect([...s.keys()]).toEqual(["z.string().max(5)"])
-		expect(rewriteWithShared(withMeta, s)).toBe(`${n("z.string().max(5)")}.meta({ examples: ["a"] })`)
+		expect(rewriteWithShared(withMeta, s).code).toBe(`${n("z.string().max(5)")}.meta({ examples: ["a"] })`)
 	})
 
 	/* C1 of r20: a nullable field's keys sit on its member and on the nullable, so `.unwrap()` keeps them */
@@ -128,12 +143,14 @@ describe("shared-schemas: remaining layers", () => {
 		const field = `z.string().max(5)${keys}.nullable()${keys}`
 		const s = buildSharedSchemas([table("a", [field, `${field}.optional()`])], imports())
 		expect([...s.keys()]).toEqual(["z.string().max(5)"])
-		expect(rewriteWithShared(field, s)).toBe(`${n("z.string().max(5)")}${keys}.nullable()${keys}`)
-		expect(rewriteWithShared(`${field}.optional()`, s)).toBe(
+		expect(rewriteWithShared(field, s).code).toBe(`${n("z.string().max(5)")}${keys}.nullable()${keys}`)
+		expect(rewriteWithShared(`${field}.optional()`, s).code).toBe(
 			`${n("z.string().max(5)")}${keys}.nullable()${keys}.optional()`,
 		)
 		const example = `z.string().max(5).meta(_m.string)${keys}.nullable()${keys}`
-		expect(rewriteWithShared(example, s)).toBe(`${n("z.string().max(5)")}.meta(_m.string)${keys}.nullable()${keys}`)
+		expect(rewriteWithShared(example, s).code).toBe(
+			`${n("z.string().max(5)")}.meta(_m.string)${keys}.nullable()${keys}`,
+		)
 	})
 
 	it("keeps an array whose elements carry the meta whole, never cut at that inner meta", () => {

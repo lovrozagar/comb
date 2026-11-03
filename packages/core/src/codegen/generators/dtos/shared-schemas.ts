@@ -163,21 +163,34 @@ export function buildSharedSchemas(tables: TableInfo[], imports: ImportsMeta): M
 	return run(new SharedNames(collidingPrefixes(run(new SharedNames()).keys())))
 }
 
+/** A field's code as its entity file writes it, and the names it takes from the shared file */
+export type Rewritten = { code: string; names: readonly string[] }
+
+/** A rewrite that substituted the shared schema `name` */
+const on = (name: string, code: string): Rewritten => ({ code, names: [name] })
+
 /**
  * Rewrite an inline zodType to reference shared _z* constants where possible.
  * Decomposes into core + .meta() + .nullable() + keys + .optional(), then checks if
- * the core (or core+meta, or core+meta+nullable) matches a shared constant.
+ * the core (or core+meta, or core+meta+nullable) matches a shared constant. The names are what
+ * the code holds (C3 of r21): a substituted shared schema alone, which holds the shared names its
+ * core `uses`; otherwise every one of `uses` and the base-type alias the rewrite put in.
  */
-export function rewriteWithShared(zodType: string, sharedSchemas: Map<string, SharedSchema>): string {
+export function rewriteWithShared(
+	zodType: string,
+	sharedSchemas: Map<string, SharedSchema>,
+	uses: readonly string[] = [],
+): Rewritten {
 	const full = sharedSchemas.get(zodType)
-	if (full) return full.name
+	if (full) return on(full.name, full.name)
 	const { base, keys, nullable, optional } = layersOf(zodType)
 	const withNullable = sharedSchemas.get(base + nullable)
-	if (withNullable) return withNullable.name + keys + optional
+	if (withNullable) return on(withNullable.name, withNullable.name + keys + optional)
 	const shared = sharedSchemas.get(base)
-	if (shared) return shared.name + nullable + keys + optional
+	if (shared) return on(shared.name, shared.name + nullable + keys + optional)
 	const [core, meta] = stripMeta(base)
 	const sharedCore = meta ? sharedSchemas.get(core) : undefined
-	if (sharedCore) return sharedCore.name + meta + nullable + keys + optional
-	return rewriteBaseTypes(zodType)
+	if (sharedCore) return on(sharedCore.name, sharedCore.name + meta + nullable + keys + optional)
+	const alias = BASE_TYPE_ALIASES.find(([from]) => zodType.startsWith(from))?.[1]
+	return { code: rewriteBaseTypes(zodType), names: alias === undefined ? uses : [...uses, alias] }
 }

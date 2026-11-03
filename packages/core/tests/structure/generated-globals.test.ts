@@ -4,7 +4,8 @@
  * then imports in the global's place. Every value a generated file names must be its own: declared
  * in it, imported by it, or `globalThis`. A bare global fails here, before it ships.
  * C4 of r20: and it imports nothing it never names, which a consumer's noUnusedLocals refuses, a
- * schema named as a shared one is (`jsonValueSchemaStrict`) among them.
+ * schema named as a shared one is (`jsonValueSchemaStrict`) among them. C3 of r21: a plain JSON
+ * column, whose schema is hoisted whole, imports that shared name and not `jsonValueSchema`.
  */
 import fs from "node:fs"
 import path from "node:path"
@@ -19,7 +20,7 @@ const CONFIG = `export default { databases: { core: { tables: "./src/db/db.core.
 /* a column of every kind a builder writes code for: arrays of several dimensions, JSON, enums, a state machine */
 const TABLES = {
 	postgres: `import * as z from "zod"
-import { cidr, integer, pgTable } from "drizzle-orm/pg-core"
+import { cidr, integer, json, jsonb, pgTable } from "drizzle-orm/pg-core"
 import { c } from "@lovrozagar/comb/pg/columns"
 export const docSchema = z.object({ a: z.string() })
 export const jsonValueSchemaStrict = z.object({ b: z.string() })
@@ -31,6 +32,8 @@ export const grid = pgTable("grid", {
 	tags: c.text("tags").array(),
 	doc: c.json("doc", docSchema, { maxBytes: 1024 }),
 	strict: c.json("strict", jsonValueSchemaStrict),
+	raw: jsonb("raw"),
+	loose: json("loose").notNull(),
 	net: cidr("net"),
 	state: c.enum("state", ["draft", "live", "gone"], { initial: "draft", terminal: ["gone"], transitions: { draft: ["live"], live: ["gone"] } }).notNull(),
 	pw: c.text("pw", { password: true }),
@@ -45,7 +48,7 @@ export const grid = pgTable("grid", {
 })
 `,
 	sqlite: `import * as z from "zod"
-import { sqliteTable } from "drizzle-orm/sqlite-core"
+import { sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 export const docSchema = z.object({ a: z.string() })
 export const cidrSchemaDoc = z.object({ c: z.string() })
@@ -55,6 +58,7 @@ export const item = sqliteTable("item", {
 	doc: c.json("doc", docSchema),
 	cidrDoc: c.json("cidr_doc", cidrSchemaDoc),
 	stampDoc: c.json("stamp_doc", timestampSchemaDoc).notNull(),
+	raw: text("raw", { mode: "json" }),
 	state: c.enum("state", ["draft", "live"]).notNull(),
 	name: c.text("name", { name: true, lowercase: true }),
 	flag: c.boolean("flag"),

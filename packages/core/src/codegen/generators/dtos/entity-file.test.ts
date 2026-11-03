@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { CombEntityMetaInput } from "../../../meta.ts"
 import type { ImportRef } from "../../analyzer-types.ts"
-import type { FieldInfo, SharedName, SharedSchema, TableInfo } from "./dto-types.ts"
+import { fieldOf } from "../../__fixtures__/runtime.ts"
+import type { FieldInfo, SchemaType, SharedName, SharedSchema, TableInfo } from "./dto-types.ts"
 import { type EntityFileOptions, generateEntityFile, schemaImportLines } from "./entity-file.ts"
+import { fieldSchemaOf } from "./field-schema.ts"
+import { buildSharedSchemas } from "./shared-schemas.ts"
 
 const NONE = { createdAt: false, deletedAt: false, updatedAt: false }
 
@@ -60,6 +63,32 @@ describe("generateEntityFile's shared imports", () => {
 		expect(sharedImportOf(own)).toBe("")
 		const used = using(field("doc", "create", "jsonValueSchema.nullable()"), "jsonValueSchema")
 		expect(sharedImportOf([...own, used])).toContain("{ jsonValueSchema }")
+	})
+
+	/* C3 of r21: a hoisted core holds the names its builder used, so the entity imports only the core */
+	it.each([
+		['jsonb("p")', "postgres"],
+		['jsonb("p").notNull()', "postgres"],
+		['json("p")', "postgres"],
+		['json("p").notNull()', "postgres"],
+		['text("p", { mode: "json" })', "sqlite"],
+		['text("p", { mode: "json" }).notNull()', "sqlite"],
+	] as const)("imports only names the file reads, for a plain JSON column %s", (raw, dialect) => {
+		const imports = {
+			enumImports: new Map<string, string>(),
+			identifiers: new Map<string, string>(),
+			jsonSchemaImports: new Set<string>(),
+		}
+		const fields = (["create", "update", "read"] as SchemaType[]).flatMap((type) => {
+			const built = fieldSchemaOf(fieldOf("p", raw, { dialect }), type, { dialect, imports })
+			return built === null ? [] : [{ key: "p", type, uses: built.uses, zodType: built.code }]
+		})
+		const t = table(fields)
+		const output = file(t, { sharedSchemas: buildSharedSchemas([t], imports) })
+		const line = output.split("\n").find((at) => at.includes("_shared")) ?? ""
+		const names = /\{ (.+) \}/.exec(line)?.[1]?.split(", ") ?? []
+		const body = output.replace(line, "")
+		expect(names.filter((name) => !new RegExp(`\\b${name.replaceAll("$", "\\$")}\\b`).test(body))).toEqual([])
 	})
 })
 

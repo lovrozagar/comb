@@ -5,7 +5,7 @@ import type { ImportRef } from "../../analyzer-types.ts"
 import { propertyName, snakeToCamel, snakeToPascal } from "../../utils/case.ts"
 import { byCodeUnit } from "../../utils/order.ts"
 import type { FieldInfo, SchemaType, SharedSchema, TableInfo } from "./dto-types.ts"
-import { BASE_TYPE_ALIASES, rewriteWithShared } from "./shared-schemas.ts"
+import { rewriteWithShared } from "./shared-schemas.ts"
 import { comboFields, comboOf, type TimestampCombo, timestampNames } from "./timestamps.ts"
 import { type ImportStyle, specifierFor, styled } from "../../utils/paths.ts"
 
@@ -133,18 +133,8 @@ function sharedImports(table: TableInfo, spread: Spread, shared: Map<string, Sha
 	const names = table.needsSharedMeta ? ["_m"] : []
 	if (spread.combo !== null)
 		names.push(...["Read", "ReadPartial"].map((v) => `timestamps${spread.combo}${v}${spread.suffix}`))
-	for (const field of ownFields(table, spread)) {
-		const sharedName = shared.get(field.zodType)?.name
-		if (sharedName !== undefined) {
-			names.push(sharedName)
-			continue
-		}
-		names.push(...field.uses)
-		const resolved = rewriteWithShared(field.zodType, shared)
-		names.push(...(resolved.match(/_z_[0-9a-f]{8,16}/g) ?? []))
-		const alias = BASE_TYPE_ALIASES.find(([, a]) => resolved.startsWith(a))?.[1]
-		if (alias !== undefined) names.push(alias)
-	}
+	for (const field of ownFields(table, spread))
+		names.push(...rewriteWithShared(field.zodType, shared, field.uses).names)
 	return [...new Set(names)].sort()
 }
 
@@ -162,7 +152,7 @@ function localConsts(table: TableInfo, spread: Spread, shared: Map<string, Share
 type Emit = { locals: Map<string, string>; shared: Map<string, SharedSchema>; spread: Spread; table: TableInfo }
 
 function fieldLine(field: FieldInfo, { locals, shared }: Emit): string {
-	const value = locals.get(field.zodType) ?? shared.get(field.zodType)?.name ?? rewriteWithShared(field.zodType, shared)
+	const value = locals.get(field.zodType) ?? rewriteWithShared(field.zodType, shared).code
 	return `\t${propertyName(field.key)}: ${value},`
 }
 
@@ -226,7 +216,7 @@ export function generateEntityFile(table: TableInfo, options: EntityFileOptions)
 	const locals = localConsts(table, spread, options.sharedSchemas)
 	const emit: Emit = { locals, shared: options.sharedSchemas, spread, table }
 	const localLines = [...locals].map(
-		([zodType, name]) => `const ${name} = ${rewriteWithShared(zodType, options.sharedSchemas)}`,
+		([zodType, name]) => `const ${name} = ${rewriteWithShared(zodType, options.sharedSchemas).code}`,
 	)
 	const body = [
 		...localLines,
