@@ -260,7 +260,9 @@ describe("the replay's database", () => {
 			await dropRoles(role)
 		}
 	}, 60_000)
+})
 
+describe("the replay's database beside what the history makes", () => {
 	/* P5 of r21: the copy made the extension first, so a history file's plain CREATE EXTENSION, which apply runs, was refused */
 	it("lets the history make an extension devUrl holds, and copies one the history relies on and never makes", async () => {
 		await withScratchDb(async (dev) => {
@@ -273,6 +275,31 @@ describe("the replay's database", () => {
 				expect((await check(dev, url)).refused).toBeUndefined()
 			})
 		})
+	}, 60_000)
+
+	/* P6 of r21: since Postgres 16 a role's maker needs the role granted to SET it, as `OWNER TO` does; the grant was left out */
+	it("runs a grant of a role the replay made, under a role that is no superuser, and leaves out one of a role it did not", async () => {
+		const [manager, app, other] = [unique("comb_t_mgr"), unique("comb_t_app"), unique("comb_t_other")]
+		try {
+			await onServer(`CREATE ROLE ${other}`)
+			await withScratchDb(async (dev) => {
+				const as = await asRole(dev, manager, "CREATEDB CREATEROLE")
+				await withScratchDb(async (url) => {
+					const grant = `GRANT ${app} TO CURRENT_USER`
+					const outside = `GRANT ${other} TO CURRENT_USER`
+					write([
+						`-- comb:allow-unsafe: the test's history\nCREATE ROLE ${app};\n${grant};\n${outside};\nGRANT CREATE ON SCHEMA public TO ${app};\nCREATE TABLE t (id int);\nALTER TABLE t OWNER TO ${app};\n`,
+					])
+					const { out, refused } = await check(as, url)
+					expect(refused).toBeUndefined()
+					expect(out).toContain(left(outside, 0, "GRANT or REVOKE of a role"))
+					expect(out.some((line) => line.includes(JSON.stringify(grant)))).toBe(false)
+				})
+			})
+			expect(await roleOf(app)).toEqual([])
+		} finally {
+			await dropRoles(app, other, manager)
+		}
 	}, 60_000)
 })
 

@@ -93,24 +93,46 @@ async function begin(run: Run): Promise<void> {
 	run.ours = { rows: new Map(), writes: await sharedWrites(run.sql) }
 }
 
-/** A history CREATE ROLE run, its writes to the shared catalogs counted as comb's own */
-async function ownRole(run: Run, role: string, sent: string): Promise<void> {
+/** `act` run, its writes to the shared catalogs counted as comb's own, with the rows of them that are `mine` */
+async function own(run: Run, act: () => Promise<void>, mine: (subject: string) => boolean): Promise<void> {
 	const before = await sharedWrites(run.sql)
-	if (await createRole(run.sql, { ...run, role, sent })) run.created.push(role)
+	await act()
 	const written = writesSince(await sharedWrites(run.sql), before)
 	addWrites(run.ours.writes, written)
-	/* the role, its tag, the membership its maker gets and the grant on the replay's database */
-	const rows = await subjectRows(
-		run.sql,
-		written,
+	for (const [subject, row] of await subjectRows(run.sql, written, mine)) run.ours.rows.set(subject, row)
+}
+
+/** A history CREATE ROLE run: the role, its tag, the membership its maker gets and the grant on the replay's database */
+const ownRole = (run: Run, role: string, sent: string): Promise<void> =>
+	own(
+		run,
+		async () => {
+			if (await createRole(run.sql, { ...run, role, sent })) run.created.push(role)
+		},
 		(subject) =>
 			subject === `role ${role}` ||
 			subject === `comment on role ${role}` ||
 			subject.startsWith(`membership ${role} to `) ||
 			subject === `database ${run.database}`,
 	)
-	for (const [subject, row] of rows) run.ours.rows.set(subject, row)
-}
+
+/* the roles a GRANT or REVOKE of a role names; a membership in one the replay made dies with it (P6 of r21) */
+const grantedOf = (node: Record<string, unknown>): string[] =>
+	(node["granted_roles"] as Array<{ AccessPriv: { priv_name: string } }>).map(({ AccessPriv }) => AccessPriv.priv_name)
+
+/** Whether `type` is a GRANT or REVOKE of roles this replay made alone, which it runs, as their drop undoes it */
+const grantsMade = (run: Run, type: string, node: Record<string, unknown>): boolean =>
+	type === "GrantRoleStmt" && grantedOf(node).every((role) => run.created.includes(role))
+
+/** A history GRANT or REVOKE of roles this replay made: the memberships in them are comb's own */
+const ownGrant = (run: Run, node: Record<string, unknown>, sent: string): Promise<void> =>
+	own(
+		run,
+		async () => {
+			await run.sql.unsafe(sent, [])
+		},
+		(subject) => grantedOf(node).some((role) => subject.startsWith(`membership ${role} to `)),
+	)
 
 /**
  * The open transaction committed, or refused, with nothing committed, when it wrote past its
@@ -142,7 +164,7 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 	if (inFile) await begin(run)
 	for (const { sent, tree } of pgRead(text).statements) {
 		const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
-		const beyond = beyondDatabase(type, node)
+		const beyond = grantsMade(run, type, node) ? undefined : beyondDatabase(type, node)
 		if (beyond !== undefined) {
 			replay.leftOut(name, sent, beyond)
 			continue
@@ -151,6 +173,7 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 		if (alone) await begin(run)
 		try {
 			if (type === "CreateRoleStmt") await ownRole(run, String(node["role"]), sent)
+			else if (type === "GrantRoleStmt") await ownGrant(run, node, sent)
 			else await run.sql.unsafe(sent, [])
 		} catch (error) {
 			throw replay.refused(`${name}: devUrl refused ${JSON.stringify(sent)} as ${replay.doing}`, error)
