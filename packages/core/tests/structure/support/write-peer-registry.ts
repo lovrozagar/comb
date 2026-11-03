@@ -1,6 +1,6 @@
 /**
  * Records __snapshots__/peer-registry.json from the npm registry: for each of comb's peer ranges, every
- * version it admits and its floor's own peerDependencies, so tests/structure/peers.test.ts reads the
+ * version it admits and the peerDependencies of its floor and of its newest, so tests/structure/peers.test.ts reads the
  * registry without the network: `bun tests/structure/support/write-peer-registry.ts`. Run it after any
  * peer range changes, and before a release, so a newly published version is in it.
  */
@@ -23,7 +23,9 @@ const entries = await Promise.all(
 			.filter((version) => semver.satisfies(version, range))
 			.sort(semver.compare)
 		const floor = semver.minVersion(range)?.version as string
-		return [name, { admitted, floorPeers: versions[floor]?.peerDependencies ?? {}, range }] as const
+		const newest = admitted.at(-1) as string
+		const peersOf = (version: string) => versions[version]?.peerDependencies ?? {}
+		return [name, { admitted, floorPeers: peersOf(floor), newestPeers: peersOf(newest), range }] as const
 	}),
 )
 const target = join(import.meta.dirname, "../__snapshots__/peer-registry.json")

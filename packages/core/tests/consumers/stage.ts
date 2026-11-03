@@ -160,7 +160,7 @@ export function floorOf(range: string): string {
 /* every version each peer range admits, as tests/structure/peers.test.ts holds it to the ranges */
 const REGISTRY = JSON.parse(
 	readFileSync(join(CORE, "tests/structure/__snapshots__/peer-registry.json"), "utf8"),
-) as Record<string, { admitted: string[] }>
+) as Record<string, { admitted: string[]; floorPeers: Record<string, string>; newestPeers: Record<string, string> }>
 
 /** Every version comb's range for `name` admits, oldest first, as the registry was recorded */
 export const admittedOf = (name: string): string[] => REGISTRY[name]?.admitted ?? []
@@ -178,6 +178,38 @@ function versionOf(name: string, versions: Versions): string {
 	const newest = pinned ?? admittedOf(name).at(-1)
 	if (newest === undefined) throw new Error(`the recorded registry admits no ${name}`)
 	return newest
+}
+
+/** The peers `name`@`version` declares, as the registry recorded them for its range's floor and newest */
+function recordedPeers(name: string, version: string): Record<string, string> {
+	const entry = REGISTRY[name]
+	if (entry?.admitted.at(-1) === version) return entry.newestPeers
+	if (entry !== undefined && version === floorOf(manifest.peerDependencies[name] as string)) return entry.floorPeers
+	throw new Error(`the recorded registry holds no peers of ${name}@${version}: rerun support/write-peer-registry.ts`)
+}
+
+const TYPES = "@cloudflare/workers-types"
+
+/**
+ * The tools a stage installs beside `dependencies`, each at the version `pins` names or TOOLS pins:
+ * a tool comb also peers on, typescript, installs at the version picked for the peer instead. The
+ * workers-types is one the installed wrangler's peer range admits, the catalog's where it does and
+ * the range's floor where not, as npm refuses the pair otherwise (ERESOLVE) and the stage tracks
+ * the newest wrangler, which moves its range with each release
+ */
+export function toolsFor(
+	dependencies: Record<string, string>,
+	pins: Record<string, string> = {},
+): Record<string, string> {
+	const tools: Record<string, string> = Object.fromEntries(
+		Object.entries(TOOLS)
+			.filter(([name]) => !(name in dependencies))
+			.map(([name, version]) => [name, pins[name] ?? version]),
+	)
+	const range = recordedPeers("wrangler", dependencies["wrangler"] ?? (tools["wrangler"] as string))[TYPES]
+	const types = tools[TYPES] as string
+	if (pins[TYPES] === undefined && range !== undefined && !semver.satisfies(types, range)) tools[TYPES] = floorOf(range)
+	return tools
 }
 
 /**
@@ -199,12 +231,9 @@ export function stage(
 		["@lovrozagar/comb", `file:${tarball}`],
 		...wanted.map((name) => [name, versionOf(name, versions)]),
 	])
-	/* a tool comb also peers on, typescript, installs at the version picked for the peer; a pin names a tool's too */
-	const pins = typeof versions === "string" ? {} : versions.pin
-	const devDependencies = Object.fromEntries(
-		Object.entries(TOOLS)
-			.filter(([name]) => !(name in dependencies))
-			.map(([name, version]) => [name, pins[name] ?? version]),
+	const devDependencies = toolsFor(dependencies, typeof versions === "string" ? {} : versions.pin)
+	console.log(
+		`[comb] the ${label} ${peers} stage installs ${TYPES}@${devDependencies[TYPES]} beside wrangler@${dependencies["wrangler"] ?? devDependencies["wrangler"]}`,
 	)
 	writeFileSync(
 		join(dir, "package.json"),

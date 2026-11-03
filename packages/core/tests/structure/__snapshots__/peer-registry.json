@@ -2,21 +2,27 @@
 	"@libsql/client": {
 		"admitted": ["0.17.4"],
 		"floorPeers": {},
+		"newestPeers": {},
 		"range": ">=0.17.4 <0.18"
 	},
 	"@noble/ciphers": {
 		"admitted": ["2.0.0", "2.0.1", "2.1.1", "2.2.0", "2.3.0", "2.4.0"],
 		"floorPeers": {},
+		"newestPeers": {},
 		"range": ">=2.0.0 <3"
 	},
 	"@noble/hashes": {
 		"admitted": ["2.0.0", "2.0.1", "2.2.0", "2.3.0", "2.4.0"],
 		"floorPeers": {},
+		"newestPeers": {},
 		"range": ">=2.0.0 <3"
 	},
 	"drizzle-kit": {
 		"admitted": ["1.0.0-rc.4", "1.0.0-rc.5"],
 		"floorPeers": {},
+		"newestPeers": {
+			"drizzle-orm": ">=1.0.0-rc.5"
+		},
 		"range": "1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"
 	},
 	"drizzle-orm": {
@@ -70,26 +76,82 @@
 			"@tursodatabase/database-wasm": ">=0.6.0-pre.28 || >=0.6.0",
 			"@tursodatabase/database-common": ">=0.6.0-pre.28 || >=0.6.0"
 		},
+		"newestPeers": {
+			"pg": ">=8",
+			"zod": "^3.25.0 || ^4.0.0",
+			"mssql": "^11.0.1",
+			"effect": ">=4.0.0",
+			"mysql2": ">=2",
+			"sql.js": ">=1",
+			"arktype": ">=2.0.0",
+			"sqlite3": ">=5",
+			"typebox": ">=1.2.0",
+			"valibot": ">=1.0.0-beta.7",
+			"postgres": ">=3",
+			"@types/pg": "*",
+			"bun-types": "*",
+			"expo-sqlite": ">=14.0.0",
+			"@types/mssql": "^9.1.4",
+			"@types/sql.js": "*",
+			"@effect/sql-d1": ">=4.0.0",
+			"@effect/sql-pg": ">=4.0.0",
+			"@libsql/client": ">=0.10.0",
+			"@upstash/redis": ">=1.34.7",
+			"better-sqlite3": ">=9.3.0",
+			"@xata.io/client": "*",
+			"@vercel/postgres": ">=0.8.0",
+			"@sinclair/typebox": ">=0.34.8",
+			"@effect/sql-libsql": ">=4.0.0",
+			"@effect/sql-mysql2": ">=4.0.0",
+			"@effect/sql-pglite": ">=4.0.0",
+			"@opentelemetry/api": "^1.4.1",
+			"@libsql/client-wasm": ">=0.10.0",
+			"@tursodatabase/sync": ">=0.7.1",
+			"@drizzle-team/minipg": ">=0.4.2",
+			"@electric-sql/pglite": ">=0.2.0",
+			"@sqlitecloud/drivers": ">=1.0.653",
+			"@effect/sql-sqlite-do": ">=4.0.0",
+			"@planetscale/database": ">=1.13",
+			"@tidbcloud/serverless": "*",
+			"@types/better-sqlite3": "*",
+			"@effect/sql-sqlite-bun": ">=4.0.0",
+			"@effect/sql-sqlite-node": ">=4.0.0",
+			"@effect/sql-sqlite-wasm": ">=4.0.0",
+			"@tursodatabase/database": ">=0.7.1",
+			"@aws-sdk/client-rds-data": ">=3",
+			"@neondatabase/serverless": ">=0.10.0",
+			"@cloudflare/workers-types": ">=4",
+			"@op-engineering/op-sqlite": ">=17",
+			"@tursodatabase/serverless": ">=1.4.0",
+			"@tursodatabase/database-wasm": ">=0.7.1",
+			"@tursodatabase/database-common": ">=0.7.1",
+			"@aws/aurora-dsql-postgresjs-connector": ">=0.3.0",
+			"@aws/aurora-dsql-node-postgres-connector": ">=0.1.9"
+		},
 		"range": "1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0"
 	},
 	"libpg-query": {
 		"admitted": ["17.7.4", "17.8.0", "17.8.1", "17.8.2"],
 		"floorPeers": {},
+		"newestPeers": {},
 		"range": ">=17.7.4 <18"
 	},
 	"postgres": {
 		"admitted": ["3.4.9"],
 		"floorPeers": {},
+		"newestPeers": {},
 		"range": ">=3.4.9 <4"
 	},
 	"ts-morph": {
 		"admitted": ["28.0.0"],
 		"floorPeers": {},
+		"newestPeers": {},
 		"range": ">=28.0.0 <29"
 	},
 	"typescript": {
 		"admitted": ["5.7.2", "5.7.3", "5.8.2", "5.8.3", "5.9.2", "5.9.3", "6.0.2", "6.0.3", "7.0.2"],
 		"floorPeers": {},
+		"newestPeers": {},
 		"range": ">=5.7.2"
 	},
 	"wrangler": {
@@ -114,11 +176,15 @@
 		"floorPeers": {
 			"@cloudflare/workers-types": "^5.20261001.1"
 		},
+		"newestPeers": {
+			"@cloudflare/workers-types": "^5.20261103.1"
+		},
 		"range": ">=4.147.0 <5"
 	},
 	"zod": {
 		"admitted": ["4.5.4", "4.6.0", "4.6.1", "4.6.2", "4.6.3", "4.6.4", "4.6.5", "4.6.6", "4.6.7"],
 		"floorPeers": {},
+		"newestPeers": {},
 		"range": ">=4.5.4 <5"
 	}
 }
