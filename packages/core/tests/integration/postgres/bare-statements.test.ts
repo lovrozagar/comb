@@ -84,12 +84,18 @@ describe("the statements a txmode none replay runs bare (P1 of r21)", () => {
 			const sql = connect({ ...postgresOptionsOf(url, "devUrl"), max: 1, onnotice: () => undefined })
 			try {
 				await sql.unsafe(SETUP, [])
-				await sql.unsafe(`COMMENT ON DATABASE ${new URL(url).pathname.slice(1)} IS 'counted'`, [])
+				const sentinel = `COMMENT ON DATABASE ${new URL(url).pathname.slice(1)} IS 'counted'`
 				for (const statement of BARE) {
+					/* the counts are the backend's pending ones, which it flushes when idle, at most once a second unless
+					   forced: flushed now, none lands before the reads below, and the sentinel shows one that did */
+					await sql.unsafe("SELECT pg_stat_force_next_flush()", [])
+					await sql.unsafe(sentinel, [])
 					const before = await sharedWrites(sql)
-					expect(before.get("pg_shdescription"), statement).toBeGreaterThan(0)
+					expect(before.get("pg_shdescription"), statement).toBe(1)
 					await sql.unsafe(statement, [])
-					expect(await sharedWrites(sql), statement).toEqual(before)
+					const after = await sharedWrites(sql)
+					expect(after.get("pg_shdescription"), `${statement}: the counts were flushed mid-read`).toBe(1)
+					expect(after, statement).toEqual(before)
 				}
 			} finally {
 				await sql.end()
