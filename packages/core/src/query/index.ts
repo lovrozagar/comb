@@ -37,6 +37,7 @@ export {
 	type FilterFieldSpec,
 	type FilterLimits,
 	type FilterValidationResult,
+	type LimitsGiven,
 	OPERATORS_BY_TYPE,
 	parseFilter,
 	parseFilterNumber,

@@ -13,7 +13,7 @@ export { MIN_CURSOR_SECRET_BYTES } from "./cursor-seal.ts";
 export { drizzleListOptions, type DrizzleListOptions, drizzleProject, queryHelpers } from "./drizzle.ts";
 export { extractFilterValue, extractFilterValues } from "./filter-values.ts";
 export { filterBySelect, parseSelect } from "./fields.ts";
-export { FILTER_LIMITS, FILTER_OPERATORS, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, } from "./filter.ts";
+export { FILTER_LIMITS, FILTER_OPERATORS, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, type LimitsGiven, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, } from "./filter.ts";
 export { escapeLike, globPattern, likePattern } from "./like.ts";
 export { IsoInstant } from "./iso-date.ts";
 export { COMB_FILTER_GRAMMAR, type CombFilterGrammar } from "../meta.ts";
@@ -364,7 +364,7 @@ export { filterBySelect, MAX_SELECT_DEPTH, parseSelect, readSelect, TOO_DEEP };
  * the AST and its checks. The grammar lives in filter-parse.ts, the checks in filter-validate.ts.
  */
 import { FILTER_OPERATORS, parseFilter } from "./filter-parse.ts";
-import { FILTER_LIMITS, OPERATORS_BY_TYPE, parseFilterNumber, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, validateFilter } from "./filter-validate.ts";
+import { FILTER_LIMITS, OPERATORS_BY_TYPE, parseFilterNumber, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, type LimitsGiven, validateFilter } from "./filter-validate.ts";
 import type { SortField } from "./types.ts";
 /**
  * Parse PostgREST-style `order` string into SortField array.
@@ -388,7 +388,7 @@ import type { SortField } from "./types.ts";
  * rejects unknown fields, which catches most mistakes.
  */
 declare function parseOrder(input: string | null | undefined): SortField[];
-export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, };
+export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, type LimitsGiven, };
 
 // query/like.d.ts
 /**

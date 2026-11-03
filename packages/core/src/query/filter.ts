@@ -11,6 +11,7 @@ import {
 	type FilterFieldSpec,
 	type FilterLimits,
 	type FilterValidationResult,
+	type LimitsGiven,
 	validateFilter,
 } from "./filter-validate.ts"
 import type { SortDirection, SortField } from "./types.ts"
@@ -90,4 +91,5 @@ export {
 	type FilterFieldSpec,
 	type FilterLimits,
 	type FilterValidationResult,
+	type LimitsGiven,
 }

@@ -1203,7 +1203,7 @@ export { assertNotReserved, baseListQueryShape, filterAstSchema, langQueryField,
  * the AST and its checks. The grammar lives in filter-parse.ts, the checks in filter-validate.ts.
  */
 import { FILTER_OPERATORS, parseFilter } from "./filter-parse.ts";
-import { FILTER_LIMITS, OPERATORS_BY_TYPE, parseFilterNumber, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, validateFilter } from "./filter-validate.ts";
+import { FILTER_LIMITS, OPERATORS_BY_TYPE, parseFilterNumber, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, type LimitsGiven, validateFilter } from "./filter-validate.ts";
 import type { SortField } from "./types.ts";
 /**
  * Parse PostgREST-style `order` string into SortField array.
@@ -1227,7 +1227,7 @@ import type { SortField } from "./types.ts";
  * rejects unknown fields, which catches most mistakes.
  */
 declare function parseOrder(input: string | null | undefined): SortField[];
-export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, };
+export { FILTER_LIMITS, FILTER_OPERATORS, OPERATORS_BY_TYPE, parseFilter, parseFilterNumber, parseOrder, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, type LimitsGiven, };
 
 // query/filter-validate.d.ts
 import type { FieldType, FilterAST, FilterOperator } from "./types.ts";
