@@ -65,8 +65,11 @@ function partKey(part: string, dialect: Dialect): string {
 	return dialect === "sqlite" || bare === part ? asciiFold(bare) : bare
 }
 
-/** A pragma statement as SQLite reads it: its name and schema unquoted and folded, and the value or argument it gives */
-type Pragma = { name: string; schema: string | undefined; value: string | undefined }
+/**
+ * A pragma statement as SQLite reads it: its name and schema unquoted and folded, the value or argument it gives,
+ * and whether its name was written quoted, which sqld's parser refuses (S1 of r22)
+ */
+type Pragma = { name: string; quoted: boolean; schema: string | undefined; value: string | undefined }
 
 // per-process-constant: a pragma's schema, its name, and the value after its = or in its parentheses, composed once
 const PRAGMA_HEAD = /* @__PURE__ */ new RegExp(
@@ -88,6 +91,7 @@ function pragmaOf(code: string): Pragma | undefined {
 	const value = set ?? argument
 	return {
 		name: partKey(name, "sqlite"),
+		quoted: unquotePart(name) !== name,
 		schema: schema === undefined ? undefined : partKey(schema, "sqlite"),
 		value: value === undefined ? undefined : pragmaValue(value),
 	}

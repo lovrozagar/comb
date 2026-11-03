@@ -8,14 +8,14 @@ import { runCli } from "../../../src/cli/index.ts"
 
 export type MigrateProject = { dir: string; migrationsDir: string; url: string; dispose(): void }
 
-/** A project whose core database is `local.db`, holding `migrations` in `m/`, hashed */
-export function migrateProject(migrations: Record<string, string>): MigrateProject {
+/** A project whose core database is `local.db`, or the libsql `url` given, holding `migrations` in `m/`, hashed */
+export function migrateProject(migrations: Record<string, string>, target?: { url: string }): MigrateProject {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-migrate-"))
 	const migrationsDir = path.join(dir, "m")
 	fs.mkdirSync(migrationsDir)
 	for (const [name, sql] of Object.entries(migrations)) fs.writeFileSync(path.join(migrationsDir, name), sql)
 	spawnSync("atlas", ["migrate", "hash", "--dir", `file://${migrationsDir}`])
-	const url = `file:${path.join(dir, "local.db")}`
+	const url = target?.url ?? `file:${path.join(dir, "local.db")}`
 	fs.writeFileSync(
 		path.join(dir, "comb.migrate.config.ts"),
 		`export default { databases: { core: { migrationsDir: "./m", environments: {

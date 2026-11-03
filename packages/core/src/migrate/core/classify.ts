@@ -17,6 +17,7 @@
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
 import { ftsCommandFindings, reindexedOf } from "./classify-file.ts"
+import type { TargetKind } from "./classify-target.ts"
 import { classificationOf, type Read } from "./classify-verdict.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
 import { sqliteWriteFindings } from "./classify-sqlite-write.ts"
@@ -36,8 +37,8 @@ import { splitSqlStatements } from "./sql-scan.ts"
 type ClassifyOptions = {
 	/** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
 	before?: ExtractedSchema | undefined
-	/** whether the target is a D1 database, whose authorizer runs only the pragmas Cloudflare lists (S1 of r19) */
-	d1?: boolean | undefined
+	/** where a SQLite file applies, whose own rule of what it runs check holds it to (S1 of r19, S1 of r22); local unnamed */
+	kind?: TargetKind | undefined
 	/** how the file is read; unnamed, as SQLite, the CLI's default */
 	dialect?: Dialect | undefined
 	/** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */

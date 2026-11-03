@@ -154,6 +154,15 @@ function fileName(single: string, { cwd, dir }: { cwd: string; dir: string }): s
 	return relative
 }
 
+/** status's lines and outcome: each of `names` applied or pending, as comb's history records it */
+function statusOf(names: readonly string[], applied: ReadonlySet<string>, io: CliIo): MigrateOutcome {
+	const done = names.filter((name) => applied.has(name))
+	const unapplied = names.filter((name) => !applied.has(name))
+	io.out(`Applied: ${done.join(", ") || "none"}`)
+	io.out(`Pending: ${unapplied.join(", ") || "none"}`)
+	return { applied: done, pending: unapplied }
+}
+
 /**
  * `request.mode` on a SQLite database whose history is comb's own `__drizzle_migrations`; check and
  * status only read it, and create neither it nor the database. Each recorded row is matched to one
@@ -185,13 +194,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 		return { applied: [], pending: [] }
 	}
 	const names = files.map(({ name }) => name)
-	if (mode === "status") {
-		const applied = names.filter((name) => matched.applied.has(name))
-		const unapplied = names.filter((name) => !matched.applied.has(name))
-		io.out(`Applied: ${applied.join(", ") || "none"}`)
-		io.out(`Pending: ${unapplied.join(", ") || "none"}`)
-		return { applied, pending: unapplied }
-	}
+	if (mode === "status") return statusOf(names, matched.applied, io)
 	const yes = args.options["yes"] === true
 	const pending = await planApply({
 		applied: (name) => matched.applied.has(name),
@@ -200,6 +203,7 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 		dir,
 		exec: io.run ?? runProcess,
 		files: names,
+		kind: target.kind,
 		print: io.out,
 		whole: single === undefined,
 	})

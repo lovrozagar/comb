@@ -99,7 +99,7 @@ describe("classifyMigration on SQLite's journal_mode", () => {
  * S1 of r19: a pragma's name read once, quoted or not, against a table of what each target refuses, with no override:
  * SQLite inside the transaction comb runs each file in, and D1's authorizer (wrangler --local, .tmp/grunt/p18/d1-pragma-probe.log)
  */
-const d1 = (sql: string) => classifyMigration(sql, { d1: true, dialect: "sqlite" } as never)
+const d1 = (sql: string) => classifyMigration(sql, { dialect: "sqlite", kind: "d1" })
 describe("classifyMigration on a pragma SQLite refuses inside a transaction, however its name is spelled", () => {
 	it.each([
 		'PRAGMA "journal_mode" = WAL',
@@ -324,5 +324,88 @@ describe("classifyMigration on a SQLite pragma", () => {
 		["PRAGMA defer_foreign_keys = on;", "safe"],
 	])("rates %j %s: only the two foreign-key pragmas are shapes comb recognizes", (sql, safety) => {
 		expect(lite(sql).safety).toBe(safety)
+	})
+})
+
+/*
+ * S1 of r22: a sqld target (a libsql URL over http, https, ws, wss or libsql, and Turso) refuses at parse what
+ * its server refuses, measured on the pinned sqld 0.24.32 (tests/structure/sqld-pragmas.test.ts holds the list)
+ */
+const on = (kind: "d1" | "local" | "sqld") => (sql: string) => classifyMigration(sql, { dialect: "sqlite", kind })
+describe("classifyMigration by target kind: what the libsql server (sqld) refuses (S1 of r22; sibling: D1's gate)", () => {
+	it.each([
+		"PRAGMA ignore_check_constraints = ON",
+		"PRAGMA recursive_triggers = 1",
+		"PRAGMA legacy_alter_table = ON",
+		"PRAGMA case_sensitive_like = 1",
+		"PRAGMA writable_schema = 1",
+		"PRAGMA optimize",
+		"PRAGMA main.cache_size = 10",
+		"ANALYZE",
+		"ANALYZE t",
+		"ATTACH DATABASE 'x.db' AS x",
+		"CREATE TEMP TABLE tt (a)",
+		"CREATE TEMPORARY VIEW tv AS SELECT 1",
+		"CREATE TABLE temp.tt (a)",
+		"CREATE VIRTUAL TABLE TEMP.f USING fts5 (body)",
+		'PRAGMA "user_version" = 2',
+		"PRAGMA [table_info](t)",
+		"PRAGMA nosuch",
+		"SELECT load_extension('x')",
+		"-- comb:allow-unsafe: approved\nCREATE TABLE z (id INTEGER PRIMARY KEY);\nANALYZE;",
+	])("refuses %j on sqld, whatever the approval, naming the libsql server (sqld)", (sql) => {
+		expect(() => on("sqld")(sql)).toThrow(/libsql server \(sqld\)/)
+	})
+
+	it.each([
+		"PRAGMA ignore_check_constraints = ON",
+		"PRAGMA recursive_triggers = 1",
+		"PRAGMA legacy_alter_table = ON",
+		"PRAGMA case_sensitive_like = 1",
+		"PRAGMA writable_schema = 1",
+		"ANALYZE",
+		"ANALYZE t",
+		"ATTACH DATABASE 'x.db' AS x",
+		"DETACH DATABASE x",
+		"CREATE TEMP TABLE tt (a)",
+		"SELECT load_extension('x')",
+	])("lets %j through to its rating on a local SQLite file", (sql) => {
+		expect(() => on("local")(sql)).not.toThrow()
+	})
+
+	it.each(["PRAGMA ignore_check_constraints = ON", "PRAGMA legacy_alter_table = ON", "PRAGMA optimize"])(
+		"keeps D1's own list, which runs %j",
+		(sql) => {
+			expect(() => on("d1")(sql)).not.toThrow()
+		},
+	)
+
+	it("keeps D1's own list, which refuses writable_schema", () => {
+		expect(() => on("d1")("PRAGMA writable_schema = 1")).toThrow(/D1 runs only the pragmas it authorizes/)
+	})
+})
+
+describe("classifyMigration by target kind: what the libsql server (sqld) runs (S1 of r22)", () => {
+	it.each([
+		"PRAGMA foreign_keys = ON",
+		"PRAGMA defer_foreign_keys = on",
+		'PRAGMA table_info("t")',
+		"PRAGMA main.index_list(t)",
+		"PRAGMA user_version = 3",
+		"PRAGMA page_size",
+		"PRAGMA integrity_check",
+		"REINDEX t",
+		"SAVEPOINT s",
+		"CREATE VIRTUAL TABLE f USING fts5 (body)",
+		"CREATE TABLE temporary_notes (a)",
+		'CREATE TABLE "temp".tt (a)',
+		"CREATE VIEW temp.tv AS SELECT 1",
+		"PRAGMA USER_VERSION = 1",
+		'PRAGMA "main".foreign_keys = 1',
+		"SELECT 'load_extension(x)'",
+		/* sqld parses DETACH, which fails only at run with nothing attached; the proof refuses it on every target */
+		"DETACH DATABASE x",
+	])("lets %j, which sqld parses, through to its rating on sqld", (sql) => {
+		expect(() => on("sqld")(sql)).not.toThrow()
 	})
 })

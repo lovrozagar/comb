@@ -147,7 +147,7 @@ export declare function parseMigration(sql: string, filename: string, options?: 
 /** parseMigration of a file its caller has read: on Postgres its one parse (M86) */
 export declare function parseRead(file: FileRead & {
     filename: string;
-}, { before, d1, schema }: Omit<ClassifyOptions, "dialect">): ParsedMigration;
+}, { before, kind, schema }: Omit<ClassifyOptions, "dialect">): ParsedMigration;
 
 // migrate/core/pg-parser.d.ts
 /**
@@ -651,13 +651,14 @@ export declare function generateIncrementalMigration(options: MigrateDiffOptions
  * the file's own BEGIN.
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
+import type { TargetKind } from "./classify-target.ts";
 import { type Read } from "./classify-verdict.ts";
 import { type PgRead } from "./pg-split.ts";
 type ClassifyOptions = {
     /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
     before?: ExtractedSchema | undefined;
-    /** whether the target is a D1 database, whose authorizer runs only the pragmas Cloudflare lists (S1 of r19) */
-    d1?: boolean | undefined;
+    /** where a SQLite file applies, whose own rule of what it runs check holds it to (S1 of r19, S1 of r22); local unnamed */
+    kind?: TargetKind | undefined;
     /** how the file is read; unnamed, as SQLite, the CLI's default */
     dialect?: Dialect | undefined;
     /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
@@ -855,6 +856,24 @@ type FtsDelta = {
 declare function ftsDelta({ from, plainDiff, to, toStatements }: FtsDelta): string;
 export { asSql, ftsDelta, separate, type FtsState };
 
+// migrate/core/classify-target.d.ts
+/**
+ * What each kind of SQLite target runs, which check holds a file to before anything applies (S1 of r19,
+ * S1 of r22): a local SQLite file runs what SQLite does, a D1 database what its authorizer lists, and a
+ * libsql server (sqld) what its parser and authorizer let through. No `-- comb:allow-unsafe:` clears a
+ * refusal here: the target would fail the file at apply.
+ */
+import type { Pragma } from "./sql-code.ts";
+/**
+ * Where a SQLite-family file applies, resolved once by the CLI from its provider (S1 of r22): `local` a SQLite file
+ * comb opens itself (bun:sqlite, a libsql `file:` or `:memory:`), `sqld` a libsql server (a libsql URL of any other
+ * scheme, and Turso, which runs one), `d1` a D1 database through wrangler. Each kind has its own rule of what it runs.
+ */
+type TargetKind = "d1" | "local" | "sqld";
+/** Why a target of `kind` refuses the statement `code` (the pragma it runs, if one), or undefined when it runs it */
+declare function targetRefusal(code: string, pragma: Pragma | undefined, kind: TargetKind): string | undefined;
+export { type TargetKind, targetRefusal };
+
 // migrate/core/classify-verdict.d.ts
 /**
  * A file's verdict from its statements' readings (classify.ts): each statement Postgres or D1
@@ -865,13 +884,14 @@ export { asSql, ftsDelta, separate, type FtsState };
 import type { MigrationClassification } from "../types.ts";
 import type { Finding } from "./classify-alter.ts";
 import { type ReadStatement } from "./classify-file.ts";
+import type { TargetKind } from "./classify-target.ts";
 /** A statement read, with what each rule found in it */
 type Read = ReadStatement & {
     findings: Finding[];
 };
 /** classifyMigration of the readings of `sql` */
-declare function classificationOf(reads: readonly Read[], sql: string, { d1 }?: {
-    d1?: boolean | undefined;
+declare function classificationOf(reads: readonly Read[], sql: string, { kind }?: {
+    kind?: TargetKind | undefined;
 }): MigrationClassification;
 export { classificationOf, type Read };
 
@@ -904,6 +924,77 @@ export declare function sweepScratch(dir?: string, now?: number): void;
  */
 export declare function openScratch(): Promise<ScratchDb>;
 
+// migrate/core/sql-code.d.ts
+/**
+ * The code of a statement as the destructive-change gate reads it: identifiers kept, strings and
+ * comments blanked, a `DO` body read as the code it runs. Names come back unquoted, and a list or
+ * an action list splits only at its top-level commas.
+ */
+import type { Dialect } from "../types.ts";
+/** One name part: double-quoted, backtick or bracket quoted, or bare */
+declare const IDENT: string;
+/** A possibly schema-qualified name */
+declare const QNAME: string;
+/** A written name, quoted or not, as its parts joined with `.` */
+declare const unquote: (name: string) => string;
+/** The last part of a name: the table of `"public"."post"` is `post` */
+declare const lastPart: (name: string) => string;
+/**
+ * How names are keyed: SQLite's way, or Postgres's under the schema comb scopes every URL's
+ * search_path to, where an unqualified name resolves (M72)
+ */
+type Naming = "sqlite" | {
+    schema: string;
+};
+/** The naming of `dialect`, a Postgres one under `schema` */
+declare const namingOf: (dialect: Dialect, schema?: string) => Naming;
+/** The dialect a naming reads names as */
+declare const dialectOf: (naming: Naming) => Dialect;
+/**
+ * The name a table, trigger or routine is matched by, as `naming` resolves it. SQLite matches
+ * every identifier without regard to ASCII case, quoted or not, by its last part. Postgres folds an
+ * unquoted name to lower case and keeps a quoted one exact, and resolves an unqualified name in its
+ * schema: under `app`, `users` and `app.users` are one table, `public.users` another (M72).
+ */
+declare function nameKey(name: string, naming: Naming): string;
+/**
+ * A name as SQLite folds it, and Postgres an unquoted one in UTF-8: its ASCII letters lowered and no
+ * other, so "Über" and "über" are two names and "Users" and "users" one
+ */
+declare const asciiFold: (name: string) => string;
+/**
+ * A pragma statement as SQLite reads it: its name and schema unquoted and folded, the value or argument it gives,
+ * and whether its name was written quoted, which sqld's parser refuses (S1 of r22)
+ */
+type Pragma = {
+    name: string;
+    quoted: boolean;
+    schema: string | undefined;
+    value: string | undefined;
+};
+/** The pragma `code` runs (S1 of r19: read once, so a quoted name is the name), or undefined for any other statement */
+declare function pragmaOf(code: string): Pragma | undefined;
+/** A whole name as SQLite resolves it, each part folded, with the schema it was written with (`main."Post"` is `main.post`) */
+declare const qualifiedKey: (name: string) => string;
+/** A dollar-quoted body without its tags */
+declare function bodyText(text: string): string;
+/**
+ * A statement's code: identifiers kept, a DO body read as code itself, strings and comments one
+ * space, whitespace collapsed; a SQLite pragma keeps a quoted value, its operand (S2 of r20)
+ */
+declare function codeOf(stmt: string, dialect: Dialect): string;
+/**
+ * Every name Postgres text can spell (P2 of r22): an unquoted word folded, a quoted one exact, and a
+ * string, single or dollar-quoted, as its exact contents and as the SQL it may be, which a DO body,
+ * dblink_exec or format() runs; never a comment's words
+ */
+declare function namesIn(text: string, into?: Set<string>): Set<string>;
+/** `code` split at the commas outside parentheses, each part trimmed */
+declare function splitTopLevel(code: string): string[];
+/** `code` with every parenthesized group blanked, so a word left in it is top-level */
+declare function topLevel(code: string): string;
+export { asciiFold, bodyText, codeOf, dialectOf, IDENT, lastPart, nameKey, namesIn, type Naming, namingOf, type Pragma, pragmaOf, QNAME, qualifiedKey, splitTopLevel, topLevel, unquote, };
+
 // migrate/core/classify-alter.d.ts
 /** What one statement or action makes of the migration: its level, the drops it names, and why */
 type Finding = {
@@ -932,6 +1023,7 @@ export { alterTableFindings, type Finding };
  */
 import type { Dialect } from "../types.ts";
 import type { Finding } from "./classify-alter.ts";
+import { type TargetKind } from "./classify-target.ts";
 /**
  * An FTS5 command, an insert into the table's own hidden column, that removes indexed rows
  * ('delete', 'delete-all') or whose command comb cannot read is unsafe. SQLite runs it as an
@@ -966,8 +1058,8 @@ type ReadStatement = {
  */
 declare const PROCESS_PRAGMAS: ReadonlySet<string>;
 /**
- * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
- * `-- comb:allow-unsafe:` overrides this
+ * Refuses a statement that cannot run in its file `sql` on its target, of `kind`: no `-- comb:allow-unsafe:`
+ * overrides this
  */
-declare function refuseUnrunnable({ code, dialect, inside, outside, stmt }: ReadStatement, sql: string, d1?: boolean): void;
+declare function refuseUnrunnable({ code, dialect, inside, outside, stmt }: ReadStatement, sql: string, kind?: TargetKind): void;
 export { ftsCommandFindings, outsideTransaction, preview, PROCESS_PRAGMAS, type ReadStatement, refuseUnrunnable, reindexedOf, };

@@ -161,10 +161,10 @@ async function applyD1(target: D1Target, options: D1Apply): Promise<string[]> {
 		applied: (name) => applied.has(name),
 		approve: options.approve,
 		conn,
-		d1: true,
 		dir: target.migrationsDir,
 		exec: target.exec,
 		files,
+		kind: "d1",
 		/* the binding's own history table, and comb's records of hashes and intents */
 		historyTables: [table, D1_HASH_TABLE, D1_HASH_INTENT_TABLE],
 		print: options.print,

@@ -9,6 +9,7 @@ import type { Finding } from "./classify-alter.ts"
 import { INSERT_INTO } from "./classify-sqlite-write.ts"
 import { atlasDirectives } from "./pg-split.ts"
 import { nameKey, type Pragma, pragmaOf, QNAME } from "./sql-code.ts"
+import { type TargetKind, targetRefusal } from "./classify-target.ts"
 import { normalizeSql } from "./sql-scan.ts"
 
 // per-process-constant: a pattern composed from the name grammar, compiled once
@@ -134,53 +135,32 @@ const PROCESS_PRAGMAS: ReadonlySet<string> = /* @__PURE__ */ new Set([
 const processWide = (name: string) =>
 	`${name} is the process's setting: it reaches every connection, other databases' included, and outlives the file; set it where the application opens SQLite, outside the migrations`
 
-/** The pragmas D1's authorizer runs in any form: Cloudflare's list (developers.cloudflare.com/d1/sql-api/sql-statements) */
-// lookup-table: the names D1 authorizes, read on every pragma a D1 file runs
-const D1_PRAGMAS: ReadonlySet<string> = /* @__PURE__ */ new Set([
-	"case_sensitive_like",
-	"defer_foreign_keys",
-	"foreign_key_check",
-	"foreign_key_list",
-	"foreign_keys",
-	"ignore_check_constraints",
-	"index_info",
-	"index_list",
-	"index_xinfo",
-	"legacy_alter_table",
-	"quick_check",
-	"recursive_triggers",
-	"reverse_unordered_selects",
-	"table_info",
-	"table_list",
-	"table_xinfo",
-])
-
-/** The pragmas D1 runs only as a read: optimize (Cloudflare refuses an argument), page_size and data_version (wrangler --local) */
-// lookup-table: the names D1 runs as a read only
-const D1_READS: ReadonlySet<string> = /* @__PURE__ */ new Set(["data_version", "optimize", "page_size"])
-
-/** Why the target refuses `pragma` outright, or undefined when it runs it; on D1, also what D1 does not authorize */
-function pragmaRefusal(pragma: Pragma, d1: boolean): string | undefined {
+/** Why every SQLite target refuses `pragma` outright, or undefined when it runs it */
+function pragmaRefusal(pragma: Pragma): string | undefined {
 	const rule = IN_TRANSACTION[pragma.name]
 	if (rule?.refuses(pragma) === true) return rule.why
 	if (PROCESS_PRAGMAS.has(pragma.name) && pragma.value !== undefined) return processWide(pragma.name)
-	if (!d1 || D1_PRAGMAS.has(pragma.name) || (D1_READS.has(pragma.name) && pragma.value === undefined)) return undefined
-	return `D1 runs only the pragmas it authorizes (developers.cloudflare.com/d1/sql-api/sql-statements), and wrangler's apply fails on this one with not authorized: SQLITE_AUTH; leave it out of the migrations`
+	return undefined
 }
 
 /**
- * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
- * `-- comb:allow-unsafe:` overrides this
+ * Refuses a statement that cannot run in its file `sql` on its target, of `kind`: no `-- comb:allow-unsafe:`
+ * overrides this
  */
-function refuseUnrunnable({ code, dialect, inside, outside, stmt }: ReadStatement, sql: string, d1 = false): void {
+function refuseUnrunnable(
+	{ code, dialect, inside, outside, stmt }: ReadStatement,
+	sql: string,
+	kind: TargetKind = "local",
+): void {
 	if (dialect === "sqlite" && /^VACUUM\b/i.test(code)) {
 		throw new Error(
 			`${preview(stmt)}: VACUUM cannot run inside a migration's transaction; run it outside the migrations`,
 		)
 	}
-	/* r18 S2 and r19 S1: a pragma the transaction or D1 refuses could never apply, so no approval clears it */
+	/* r18 S2, r19 S1 and r22 S1: what the transaction, D1 or sqld refuses could never apply, so no approval clears it */
 	const pragma = dialect === "sqlite" ? pragmaOf(code) : undefined
-	const refusal = pragma === undefined ? undefined : pragmaRefusal(pragma, d1)
+	const target = dialect === "sqlite" ? targetRefusal(code, pragma, kind) : undefined
+	const refusal = target ?? (pragma === undefined ? undefined : pragmaRefusal(pragma))
 	if (refusal !== undefined) throw new Error(`${preview(stmt)}: ${refusal}`)
 	/* S1 of the 0.15.0 review: the file's own BEGIN or COMMIT ends the batch that records it, so a
 	   later failure leaves what ran before it committed with no history row, to run again */
