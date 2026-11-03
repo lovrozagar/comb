@@ -5,11 +5,12 @@
  */
 import { execFileSync } from "node:child_process"
 import { globSync, readdirSync, readFileSync } from "node:fs"
-import { availableParallelism } from "node:os"
+import { availableParallelism, homedir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { DATE_KEYS, OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "../support/off-utc.ts"
 import { POSIX_EXCLUDE, POSIX_INTEGRATION, POSIX_UNIT } from "../support/posix.ts"
+import { SQLD_ARCHIVE, SQLD_PATH, SQLD_VERSION } from "../support/sqld.ts"
 import { workers } from "../support/workers.ts"
 
 const ROOT = join(import.meta.dirname, "../../../..")
@@ -142,7 +143,12 @@ const scriptOf = (command: string) => /^bun run (?:--filter \S+ )?(\S+)$/.exec(c
    hook runs, the release dry run, and the Atlas binary the test jobs fetch */
 const SETUP = {
 	commands: ["bun install --frozen-lockfile", "npm install -g npm@latest"],
-	names: ["Lint commit messages", "dry-run the release publish", "install atlas v1.3.0"],
+	names: [
+		"Lint commit messages",
+		"dry-run the release publish",
+		"install atlas v1.3.0",
+		`install sqld ${SQLD_VERSION}`,
+	],
 }
 
 /** The scripts a job's `bun run` steps run */
@@ -225,6 +231,27 @@ describe("ci.yml's suite jobs", () => {
 		expect(
 			suites.flatMap((job) => needs.filter((need) => !job.lines.includes(need)).map((need) => `${job.name}: ${need}`)),
 		).toEqual([])
+	})
+})
+
+/* plan 21 5.0: the remote libsql suites need the pinned sqld, which only the test job's own step provides */
+describe("ci.yml's sqld", () => {
+	const jobs = ciJobs(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8"))
+	const home = SQLD_PATH.slice(0, SQLD_PATH.indexOf(`/${SQLD_VERSION}/`) + SQLD_VERSION.length + 1).replace(
+		homedir(),
+		"~",
+	)
+	it("is fetched by tests/support/sqld.ts's version and archive sha256, cached by version, where test:coverage runs", () => {
+		const coverage = jobs.filter((job) => scriptsOf(job.lines).includes("test:coverage"))
+		expect(coverage.map((job) => job.name)).toEqual(["test"])
+		const lines = (coverage[0] as { lines: string }).lines
+		const step = lines.slice(lines.indexOf(`- name: install sqld ${SQLD_VERSION}`))
+		expect(step).toContain(`curl -sSfL -o sqld.tar.xz ${SQLD_ARCHIVE.url}`)
+		expect(step).toContain(`echo "${SQLD_ARCHIVE.sha256}  sqld.tar.xz" | sha256sum -c -`)
+		expect(step).toContain(`cd ${home}`)
+		expect(lines).toContain(`path: ${home}`)
+		expect(lines).toContain(`key: sqld-${SQLD_VERSION}-x86_64-linux-gnu`)
+		expect(lines.indexOf(`install sqld ${SQLD_VERSION}`)).toBeLessThan(lines.indexOf("run: bun run test:coverage"))
 	})
 })
 

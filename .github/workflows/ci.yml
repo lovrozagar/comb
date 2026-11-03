@@ -103,6 +103,21 @@ jobs:
           echo "cfc773e5b4e845bc01d680390c174648938a7f88bf30e5a2c83ae85217c21587  $RUNNER_TEMP/atlas/atlas" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/atlas/atlas"
           echo "$RUNNER_TEMP/atlas" >> "$GITHUB_PATH"
+      # The remote libsql suites are required here; tests/support/sqld.ts fails the run without the pinned
+      # binary at its path, and checks the binary's own sha256 on every start.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: sqld-cache
+        with:
+          path: ~/.cache/comb-test/sqld/0.24.32
+          key: sqld-0.24.32-x86_64-linux-gnu
+      - name: install sqld 0.24.32
+        if: steps.sqld-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.cache/comb-test/sqld/0.24.32
+          cd ~/.cache/comb-test/sqld/0.24.32
+          curl -sSfL -o sqld.tar.xz https://github.com/tursodatabase/libsql/releases/download/libsql-server-v0.24.32/libsql-server-x86_64-unknown-linux-gnu.tar.xz
+          echo "71720fc8648c19efef416efebd47145ef59b62e198770533530a858e1336879f  sqld.tar.xz" | sha256sum -c -
+          tar -xJf sqld.tar.xz
       - run: bun run test:coverage
 
   test-bun:
