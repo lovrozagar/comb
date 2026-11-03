@@ -114,25 +114,37 @@ const storageOf = (column: SQLWrapper): SQL =>
 	sql`case typeof(${column}) when 'real' then case ${column} when 9e999 then '+inf' when -9e999 then '-inf' else 'real' end else typeof(${column}) end`
 
 /**
- * SQLite's storage class of each sort key and of the tiebreak, which paginate and paginateMerged
- * read each key by. A list that binds its keys as read (a derived list with no anchor, and a merged
- * list) needs it for every key: a REAL past 2^53 is exact where an INTEGER read as a double is
- * rounded (Q1 of r20), the merge compares an integer libsql's intMode "string" reads as a decimal
- * string as that integer (Q2 of r20), and D1 reads a REAL ±Infinity as null (Q3 of r20). A table
- * list reads its keys back from the anchor row, so it needs it only for a key that is no declared
- * column (Q2 of r19). A Postgres list types the cursor's value by its operand.
+ * Postgres's family of a key: `float` for a double precision or real, a double the driver reads
+ * exactly; `fixed` for an integer or numeric, which a driver reading it as a number past 2^53
+ * rounds; `other` for any other type (Q2 of r21)
+ */
+const familyOf = (column: SQLWrapper): SQL =>
+	sql`case when pg_typeof(${column}) in ('double precision'::regtype, 'real'::regtype) then 'float' when pg_typeof(${column}) in ('smallint'::regtype, 'integer'::regtype, 'bigint'::regtype, 'numeric'::regtype) then 'fixed' else 'other' end`
+
+/** The extra that carries `classes`, one a sort key and the tiebreak's last, comma-joined */
+const keyTypes = (classes: SQL[]): ListExtras => ({
+	_combKeyTypes: sql<string>`${sql.join(classes, sql` || ',' || `)}`.as("_combKeyTypes"),
+})
+
+/**
+ * The class of each sort key and of the tiebreak, which paginate and paginateMerged read each key
+ * by. A list that binds its keys as read (a derived list with no anchor, and a merged list) needs it
+ * for every key: a SQLite REAL, and a Postgres double precision, past 2^53 is exact where an integer
+ * read as a double is rounded (Q1 of r20, Q2 of r21), the merge compares an integer libsql's intMode
+ * "string" reads as a decimal string as that integer (Q2 of r20), and D1 reads a REAL ±Infinity as
+ * null (Q3 of r20). A table list reads its keys back from the anchor row, so a SQLite one needs it
+ * only for a key that is no declared column (Q2 of r19), and a Postgres one, which types the cursor's
+ * value by its operand, never.
  */
 function keyTypesOf({ dialect, keyset, merged, table, tiebreak }: Finish): ListExtras {
 	const keys = keyset.keys
-	if (keys === null || tiebreak === null || dialect === "postgres") return {}
+	if (keys === null || tiebreak === null) return {}
 	const asRead = merged !== undefined || table === undefined
+	if (dialect === "postgres")
+		return asRead ? keyTypes([...keys.map(({ column }) => familyOf(column)), familyOf(tiebreak.column)]) : {}
 	const declared = keys.every(({ column }) => is(column, Column) || column instanceof DateKey)
 	if (!asRead && (declared || !is(tiebreak.column, SQLiteColumn))) return {}
-	const types = sql.join(
-		[...keys.map(({ column }) => storageOf(column)), sql`typeof(${tiebreak.column})`],
-		sql` || ',' || `,
-	)
-	return { _combKeyTypes: sql<string>`${types}`.as("_combKeyTypes") }
+	return keyTypes([...keys.map(({ column }) => storageOf(column)), sql`typeof(${tiebreak.column})`])
 }
 
 /** A cursor page: the rows past the cursor and one more, and the flag that says its anchor is gone */

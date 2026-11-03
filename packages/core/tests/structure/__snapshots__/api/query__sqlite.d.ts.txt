@@ -489,7 +489,7 @@ type ListExtras = {
     _combAnchorGone?: SQL.Aliased<number>;
     /** the value the list breaks ties on, which the next cursor resumes from; none when no cursor can */
     _combId?: SQL.Aliased<unknown>;
-    /** SQLite's storage class of each sort key, comma-joined, where one is an undeclared expression (Q2 of r19) */
+    /** the class of each sort key and the tiebreak, comma-joined, where the list binds them as read or one is an undeclared SQLite expression (Q2 of r19, Q2 of r21) */
     _combKeyTypes?: SQL.Aliased<string>;
     /** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
     _total?: SQL.Aliased<number>;
@@ -554,7 +554,7 @@ import type { ListQueryInput, ParsedFields, SortField } from "./types.ts";
 import type * as z from "zod";
 /**
  * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
- * r17), or the storage class of each sort key (Q2 of r19)
+ * r17), or the class of each sort key (Q2 of r19, Q2 of r21)
  */
 type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total";
 /**
@@ -797,15 +797,18 @@ import type { SortField } from "./types.ts";
 /** The column every built list selects its tiebreak as, which the next cursor's id is minted from (Q2 of r17) */
 declare const COMB_ID: "_combId";
 declare const INTEGER_TEXT: RegExp;
-/** SQLite's storage class of a list's sort key or tiebreak, as `_combKeyTypes` carries it */
-type StorageClass = "+inf" | "-inf" | "blob" | "integer" | "null" | "real" | "text";
+/**
+ * The class of a list's sort key or tiebreak, as `_combKeyTypes` carries it: SQLite's storage class,
+ * or on Postgres its family (`float`, `fixed`, `other`), which no key's value is read by
+ */
+type KeyClass = "+inf" | "-inf" | "blob" | "fixed" | "float" | "integer" | "null" | "other" | "real" | "text";
 /** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint (Q2 of r19) */
 declare const unencoded: (value: unknown) => unknown;
 /**
- * The storage class SQLite holds each of `sort`'s keys in, then the tiebreak's, from the row's
- * `_combKeyTypes`; none where the builder selected none (a Postgres list, or a table list over columns)
+ * The class of each of `sort`'s keys, then the tiebreak's, from the row's `_combKeyTypes`; none where
+ * the builder selected none (a table list over columns, or a Postgres one)
  */
-declare function storedClasses(row: Record<string, unknown>): readonly StorageClass[] | undefined;
+declare function storedClasses(row: Record<string, unknown>): readonly KeyClass[] | undefined;
 /**
  * The extra of `row` whose value no builder selects, as `_total "_total"`; undefined when each is its
  * kind. An extra rendered by hand as its own alias reads as that string (Q4 of r18).
@@ -819,7 +822,7 @@ declare function malformed(row: object, sort: readonly SortField[]): string | un
  * looks like a number stays text. The merge compares rows through it (Q2 of r20).
  */
 declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
-export { COMB_ID, INTEGER_TEXT, malformed, type StorageClass, storedClasses, typedKeys, unencoded };
+export { COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKeys, unencoded };
 
 // query/schema.d.ts
 /**

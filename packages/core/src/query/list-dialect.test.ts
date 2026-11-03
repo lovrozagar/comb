@@ -70,10 +70,10 @@ const build = (
 		sortColumns: { at: key },
 	})
 
-/** Whether the built list selects SQLite's typeof(), compiled on `dialect` */
+/** Whether the built list selects SQLite's typeof(), compiled on `dialect`: Postgres's pg_typeof() is not it (Q2 of r21) */
 const sendsTypeof = (built: ReturnType<typeof build>, dialect: Dialect): boolean => {
 	const types = (built.extras as Record<string, { sql: SQL } | undefined>)["_combKeyTypes"]
-	return types !== undefined && sides[dialect].compile.sqlToQuery(types.sql).sql.includes("typeof(")
+	return types !== undefined && /(?<!pg_)typeof\(/.test(sides[dialect].compile.sqlToQuery(types.sql).sql)
 }
 
 /** A list whose id is a Postgres column and whose key is a SQLite one */

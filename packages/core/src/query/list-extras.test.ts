@@ -14,6 +14,13 @@ describe("malformed: _combKeyTypes", () => {
 			expect(malformed({ _combId: 1, _combKeyTypes: types }, SORT), types).toBeUndefined()
 	})
 
+	/* Q2 of r21: a Postgres list's keys carry their family, which typedKeys reads no value by */
+	it("takes Postgres's families, and leaves a key of one as the driver read it", () => {
+		expect(malformed({ _combId: 1, _combKeyTypes: "float,fixed,other" }, SORT)).toBeUndefined()
+		const row = { _combKeyTypes: "fixed,other,other", k: "12", name: "42" }
+		expect(typedKeys(row, SORT)).toBe(row)
+	})
+
 	it("names one of the wrong length, of an unknown class, or rendered by hand as its alias", () => {
 		for (const types of [
 			"integer,text",

@@ -20,7 +20,7 @@ import type * as z from "zod"
 
 /**
  * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
- * r17), or the storage class of each sort key (Q2 of r19)
+ * r17), or the class of each sort key (Q2 of r19, Q2 of r21)
  */
 type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total"
 

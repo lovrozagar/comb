@@ -6,7 +6,7 @@
  */
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
-import { bigint, pgTable, text } from "drizzle-orm/pg-core"
+import { bigint, doublePrecision, type PgColumn, pgTable, text } from "drizzle-orm/pg-core"
 import type pg from "pg"
 import { describe, expect, it } from "vitest"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
@@ -14,6 +14,11 @@ import { buildDerivedListQuery } from "../../../src/query/sqlite/build-list-quer
 import { SEALED } from "../../../src/query/__fixtures__/cursor-secret.ts"
 import { usePg } from "../support/pg.ts"
 
+const score = pgTable("score", {
+	b: bigint("b", { mode: "number" }).notNull(),
+	f: doublePrecision("f").notNull(),
+	id: text("id").primaryKey(),
+})
 const orgItem = pgTable("org_i", { created_at: bigint("created_at", { mode: "number" }), id: text("id").primaryKey() })
 const inbox = sql`(SELECT 'org:' || id AS uid, created_at FROM org_i UNION ALL SELECT 'prj:' || id, created_at FROM prj_i) AS inbox`
 const ROWS = { asc: ["org:a", "org:c", "org:b", "prj:a", "prj:d"], desc: ["prj:d", "prj:a", "org:b", "org:c", "org:a"] }
@@ -88,5 +93,61 @@ describe("a Postgres derived list pages every row once (Q1 of r21)", () => {
 			expect(await page(shape, direction, "cursor")).toEqual(ORG[direction])
 			expect(await page(shape, direction, "page")).toEqual(ORG[direction])
 		}
+	})
+})
+
+/*
+ * Q2 of r21, the sibling r20 Q1's SQLite fix missed: a double precision key past 2^53 is exact as
+ * node-postgres reads it, so a derived list with no anchor pages it; a bigint read as a number is
+ * rounded, and stays refused. 0.19.0 refused both as rounded.
+ */
+describe("a Postgres derived list judges a key past 2^53 by its type (Q2 of r21)", () => {
+	const sessions = usePg()
+
+	/** Every id of `score` by `key`, one a page, by cursor; a column read through its own mode */
+	async function scores(key: SQL | PgColumn, direction: "asc" | "desc"): Promise<string[]> {
+		const client = sessions.pg()
+		await client.query(`CREATE TEMP TABLE IF NOT EXISTS score (id text PRIMARY KEY, f double precision NOT NULL, b bigint NOT NULL);
+		INSERT INTO score VALUES ('a', 1e20, 1152921504606846977), ('b', 2e20, 1152921504606846979),
+		('c', 3e20, 1152921504606846981), ('d', 4e20, 1152921504606846983) ON CONFLICT DO NOTHING`)
+		const db = drizzle({ client })
+		const ids: string[] = []
+		let cursor: string | undefined
+		for (let n = 1; n <= 8; n++) {
+			const built = buildDerivedListQuery({
+				...SEALED,
+				idColumn: score.id,
+				parsed: { cursor, limit: 1, parsedSort: [{ direction, field: "k" }] },
+				sortColumns: { k: key },
+			})
+			const query = db
+				.select({ id: score.id, k: key, ...built.extras })
+				.from(score)
+				.$dynamic()
+			const rows = await (built.where === undefined ? query : query.where(built.where))
+				.orderBy(...built.orderBy)
+				.limit(built.limit)
+			const [items, meta] = queryHelpers.paginate(rows, built)
+			ids.push(...items.map((row) => row.id))
+			if (meta.nextCursor === null) break
+			cursor = meta.nextCursor
+		}
+		return ids
+	}
+
+	it.each([
+		["a double precision column", score.f],
+		["a double precision expression", sql`${score.f} * 1`],
+	])("pages every row once by %s holding 1e20 to 4e20, asc and desc", async (_, key) => {
+		expect(await scores(key, "asc")).toEqual(["a", "b", "c", "d"])
+		expect(await scores(key, "desc")).toEqual(["d", "c", "b", "a"])
+	})
+
+	it("refuses a bigint read as a number past 2^53, which the driver rounded", async () => {
+		for (const direction of ["asc", "desc"] as const)
+			await expect(scores(score.b, direction)).rejects.toMatchObject({
+				cause: expect.stringMatching(/^k \d+ is past ±\(2\^53 − 1\), where the driver rounded it: a derived list/),
+				errorKey: "sort_not_wired",
+			})
 	})
 })
