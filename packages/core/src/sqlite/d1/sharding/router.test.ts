@@ -130,7 +130,9 @@ describe("ShardRouter", () => {
 			target: "5",
 			updatedAt: Date.now(),
 		}
-		expect(() => router.getHandle(mapping, {})).toThrow("Missing D1 binding: SHARD_DB_5")
+		/* an env read at run time, typed by an index signature: its shard 5 binding is missing */
+		const env: Record<string, unknown> = {}
+		expect(() => router.getHandle(mapping, env)).toThrow("Missing D1 binding: SHARD_DB_5")
 	})
 })
 

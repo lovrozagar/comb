@@ -1,7 +1,6 @@
 import { type CacheTargets, ShardCache } from "./cache.ts"
 import { routerSettings } from "./config.ts"
 import { eq } from "drizzle-orm"
-import type { D1DatabaseLike } from "../d1-types.ts"
 import { openD1Session } from "../session.ts"
 import {
 	assertShard,
@@ -19,7 +18,9 @@ import { warnOnError } from "../../../log.ts"
 import { assertOrgId, ORG_ID_MAX_LENGTH, shardMap } from "./shard-map.ts"
 import type {
 	LogFn,
+	ShardBindingOf,
 	ShardDbHandle,
+	ShardEnv,
 	ShardMapping,
 	ShardMove,
 	ShardPick,
@@ -181,18 +182,17 @@ class ShardRouter {
 	}
 
 	/**
-	 * Resolve a shard mapping to a concrete D1 database handle.
-	 * Reads `SHARD_DB_{target}` binding from env, typed as `D`, the app's D1 type, where it names one.
+	 * Resolve a shard mapping to a concrete D1 database handle: the env's `SHARD_DB_{target}`
+	 * binding, in the type the env holds its shard bindings as (K2 of r22). An env typed by a string
+	 * index signature gives D1DatabaseLike; one whose known keys hold no `SHARD_DB_*` is refused.
 	 */
-	getHandle<D extends D1DatabaseLike = D1DatabaseLike>(
-		mapping: ShardMapping,
-		env: Record<string, unknown>,
-	): ShardDbHandle<D> {
-		const binding = env[`SHARD_DB_${mapping.target}`]
+	getHandle<E extends object>(mapping: ShardMapping, env: E & ShardEnv<E>): ShardDbHandle<ShardBindingOf<E>> {
+		const bindings: Partial<Record<string, unknown>> = env
+		const binding = bindings[`SHARD_DB_${mapping.target}`]
 		if (!binding) {
 			throw new Error(`Missing D1 binding: SHARD_DB_${mapping.target}`)
 		}
-		return { driver: "d1", handle: binding as D }
+		return { driver: "d1", handle: binding as ShardBindingOf<E> }
 	}
 
 	/**

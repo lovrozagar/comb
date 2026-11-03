@@ -161,9 +161,10 @@ const STRICT_UNION = {
 /**
  * K3 of r21: comb's D1 modules in a Worker typed by `wrangler types` alone keep their types, the
  * binding's own: a wrong argument and an unknown method are each refused, which an untyped module,
- * as 0.19's was there, would let through
+ * as 0.19's was there, would let through; and a shard's handle is the env's own binding (K2 of r22)
  */
 const C3_D1 = `import { BookmarkTracker } from "@lovrozagar/comb/sqlite/d1/bookmark"
+import { drizzle } from "drizzle-orm/d1"
 import { openD1Session } from "@lovrozagar/comb/sqlite/d1/session"
 import { ShardRouter } from "@lovrozagar/comb/sqlite/d1/sharding"
 
@@ -174,6 +175,10 @@ export async function routed(env: Env, ctx: ExecutionContext, bookmark: string |
 	const router = new ShardRouter({ totalShards: 1 })
 	const mapping = await router.resolve("org", { coreDb: env.DB, kv: env.KV }, ctx)
 	await client.prepare("SELECT 1").run()
+	/* K2 of r22: a shard's handle is the D1Database the generated Env holds, which drizzle takes */
+	if (mapping) drizzle(router.getHandle(mapping, env).handle)
+	// @ts-expect-error an env with no SHARD_DB_* binding holds no shard
+	if (mapping) router.getHandle(mapping, { DB: env.DB, KV: env.KV })
 	// @ts-expect-error a string is no D1 database
 	openD1Session("not a database")
 	// @ts-expect-error a D1 client has no such method
@@ -291,7 +296,11 @@ export const APP: Record<string, string> = {
 	/* the bindings `wrangler types` writes c3/worker-configuration.d.ts from, at the stage (K3 of r21) */
 	"c3/wrangler.jsonc": JSON.stringify({
 		compatibility_date: "2026-10-01",
-		d1_databases: [{ binding: "DB", database_id: "00000000-0000-0000-0000-000000000000", database_name: "core" }],
+		d1_databases: [
+			{ binding: "DB", database_id: "00000000-0000-0000-0000-000000000000", database_name: "core" },
+			{ binding: "SHARD_DB_0", database_id: "00000000-0000-0000-0000-000000000001", database_name: "shard-0" },
+			{ binding: "SHARD_DB_1", database_id: "00000000-0000-0000-0000-000000000002", database_name: "shard-1" },
+		],
 		kv_namespaces: [{ binding: "KV", id: "00000000000000000000000000000000" }],
 		main: "src/index.ts",
 		name: "c3",

@@ -1078,11 +1078,11 @@ What changes for a project on 0.20. Before deploying it:
 
 1. **Know what changed in the API.** A test holds these three lists to the exports themselves.
 
-   New exports: none.
+   New exports: `ShardBindingOf`, `ShardEnv`.
 
    Removed: none.
 
-   Changed: `CliIo`.
+   Changed: `CliIo`, `ShardRouter`.
 
    `CliIo` gains an optional field that reads Atlas's version, which a test fakes as it fakes `run`.
 
@@ -1097,6 +1097,8 @@ What changes for a project on 0.20. Before deploying it:
 6. **Send a Postgres value its type modifier keeps.** A plain drizzle column's write DTO reads its modifier as Postgres does: a `time(p) with time zone` takes an offset (0.20 refused every value and took a local time); a precision refuses a longer fraction of a second on a time, timestamp or interval, which Postgres rounds, `timestamp(0)` taking `23:59:59.6` into the next day; an interval with fields refuses a part below the last (`PT1H` into `interval day`, `P1Y2M3D` into `interval year to month`), which Postgres drops without an error; a `numeric(p, s)` with `s > p` takes its values (0.20 refused all of them) and one with `s < 0` takes only a whole number ending in `-s` zeros below `10^(p - s)` (0.20 took `123456`, a 22003, and `99949`, stored as `99900`). **Fix:** regenerate; send each value at its column's precision and fields.
 
 7. **Run Atlas >=1.2.0 <2.** comb now reads `atlas version` before a command's first I/O and refuses an Atlas outside that range, or missing from `PATH`, naming it with its install page, in the same refusal as any npm peer the command lacks; 0.20 failed later with `atlas migrate hash failed: atlas: command not found`. `comb migrate status` on Postgres needs Atlas as the other commands do. A SQLite `comb migrate diff` whose comb.config.ts declares FTS now names `ts-morph` with `drizzle-kit` before any process. comb no longer sets `PGSERVICEFILE` for Atlas, which before v1.2.0 failed every Postgres command on it.
+
+8. **Drop the type argument from `getHandle`.** `ShardRouter.getHandle(mapping, env)` now types the shard's handle by the env it is passed: the type the env's `SHARD_DB_*` bindings have, which `wrangler types` writes as `D1Database`, so the handle goes to `drizzle()` as it is. An env typed by a string index signature gives the structural `D1DatabaseLike`, and an env whose known keys hold no `SHARD_DB_*` binding fails to compile. 0.20's `getHandle<D1Database>(mapping, env)` now fails to compile (TS2345), and an `Env` interface that 0.20 refused (TS2345) is taken. **Fix:** call `getHandle(mapping, env)` with the Worker's `env`. `ShardBindingOf<Env>` names the handle's type, and `ShardEnv<Env>` what the env must hold.
 
 ## Upgrading to 0.20.1
 
@@ -1120,7 +1122,7 @@ What changes for a project on 0.19. Before deploying it:
 
    `CliIo` takes `locatePeer`, which finds an optional peer's entry before a migrate command's first I/O; leave it out to find each peer as comb and `bun` do.
 
-   The D1 modules type a binding, a session and a statement by the methods comb calls on them, so a Worker typed by `wrangler types` and one typed by `@cloudflare/workers-types` both fit. `openD1Session` and `SessionHandle` are generic over the binding and hand back its own session type; `BookmarkTracker.track` takes any D1 session; `ShardMove.with` takes the caller's prepared statements; `ShardResolverDeps.coreDb` takes either binding; `ShardRouter.getHandle<D1Database>()` and `ShardDbHandle<D1Database>` type the shard's binding as the caller names it.
+   The D1 modules type a binding, a session and a statement by the methods comb calls on them, so a Worker typed by `wrangler types` and one typed by `@cloudflare/workers-types` both fit. `openD1Session` and `SessionHandle` are generic over the binding and hand back its own session type; `BookmarkTracker.track` takes any D1 session; `ShardMove.with` takes the caller's prepared statements; `ShardResolverDeps.coreDb` takes either binding; `ShardDbHandle<D1Database>` types the shard's binding as the caller names it, and from 0.21 `ShardRouter.getHandle()` reads it from the env.
 
 2. **State `dialect` on a derived list of SQL expressions alone.** `buildDerivedListQuery` reads its database from the columns its id, anchor and sort columns hold, wherever an expression holds them (inside an `` sql`…` `` template, an alias, a `{ sql, type: "date" }` key or a subquery's field), and a list whose id and keys are all SQL expressions, such as a union inbox, must state `dialect: "postgres"` or `dialect: "sqlite"`: building it without one throws a TypeError naming `dialect`, on every page. 0.19 read the database only from a column given as the option itself, so a Postgres list whose columns sat inside an expression, or that held none, sent SQLite's `typeof()` and every page failed with `function typeof(bigint) does not exist`. A list whose id and keys hold columns of both databases, or a column of neither (a MySQL table's), or that states a `dialect` its columns contradict, is refused the same way. **Fix:** add `dialect` where the TypeError names it.
 
@@ -1134,7 +1136,7 @@ What changes for a project on 0.19. Before deploying it:
 
 7. **Validate a password before it is hashed, not after.** A `password` column's DTO now holds the hash the column stores, any storable text under its declared `max` and `pattern`, where 0.19 held it to 8 to 72 printable ASCII characters and refused a declared `max` past 72: a 91-character PBKDF2 hash or a 106-character argon2id one failed the create DTO, while a plaintext passed it. A declared `pattern` now applies to the hash. **Fix:** a project that writes the hash through the DTO needs nothing; drop a `max` it declared to fit under 72 if its hashes are longer, and validate the plaintext in the request body with `passwordText()` (15 characters at least) and the sign-in body with `passwordText.typed()`. anyrow's column declares no `max`, so it drops nothing.
 
-8. **Name the binding type a shard handle is, if you pass it on.** `@cloudflare/workers-types` is no longer a peer of comb, so a Worker typed by `wrangler types` installs nothing for comb's D1 modules, and a Worker typed by `@cloudflare/workers-types` keeps it as its own dependency. 0.19 required it: a project on `wrangler types` installed it only for comb, and its globals and the package's declared `D1Database` twice. `ShardRouter.getHandle()` now types its handle structurally; one passed to `drizzle()` or a function typed by `D1Database` fails to compile (TS2345). **Fix:** call `getHandle<D1Database>(mapping, env)`; remove `@cloudflare/workers-types` if comb was the only reason it was installed.
+8. **Name the binding type a shard handle is, if you pass it on.** `@cloudflare/workers-types` is no longer a peer of comb, so a Worker typed by `wrangler types` installs nothing for comb's D1 modules, and a Worker typed by `@cloudflare/workers-types` keeps it as its own dependency. 0.19 required it: a project on `wrangler types` installed it only for comb, and its globals and the package's declared `D1Database` twice. `ShardRouter.getHandle()` now types its handle structurally; one passed to `drizzle()` or a function typed by `D1Database` fails to compile (TS2345). **Fix:** on 0.21, call `getHandle(mapping, env)`, whose handle is the env's own binding type (0.21's step 8); remove `@cloudflare/workers-types` if comb was the only reason it was installed.
 
 9. **Call `defineConfig` inside a config function, not around it.** `defineConfig` takes an object only, so `defineConfig(async () => ({…}))` fails to compile with TS2345 (`Argument of type '() => Promise<…>' is not assignable to parameter of type 'CombMigrateConfig'`). 0.19 took the function, and TypeScript checked no key of the object it returned, so a misspelled `local` or `migrationsDir` there compiled. At load, a function export that returns a function, as an untyped config of the old form wrapped in another function does, is refused naming the form. **Fix:** `export default async () => defineConfig({…})` in place of `export default defineConfig(async () => ({…}))`; an object config needs nothing. anyrow's configs need no change.
 

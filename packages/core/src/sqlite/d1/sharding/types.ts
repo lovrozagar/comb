@@ -12,8 +12,27 @@ type ShardMapping = {
 	updatedAt: number
 }
 
-/** A shard's binding, typed as the caller names it to getHandle */
+/** A shard's binding, in the type getHandle reads from the env it is passed */
 type ShardDbHandle<D extends D1DatabaseLike = D1DatabaseLike> = { driver: "d1"; handle: D }
+
+/**
+ * The binding getHandle hands back for an env of type `E` (K2 of r22): the type its `SHARD_DB_*`
+ * keys hold, as `wrangler types` writes them; an env with a string index signature names no
+ * binding's type, and gives the structural D1DatabaseLike
+ */
+type ShardBindingOf<E> = string extends keyof E
+	? D1DatabaseLike
+	: Extract<E[Extract<keyof E, `SHARD_DB_${string}`>], D1DatabaseLike>
+
+/**
+ * What getHandle asks of an env of type `E` beyond `E` itself: each `SHARD_DB_*` key holds a D1
+ * binding, and an env whose known keys hold no such key is refused, naming the key it lacks
+ */
+type ShardEnv<E> = string extends keyof E
+	? unknown
+	: [Extract<keyof E, `SHARD_DB_${string}`>] extends [never]
+		? { "SHARD_DB_<target>": D1DatabaseLike }
+		: Record<Extract<keyof E, `SHARD_DB_${string}`>, D1DatabaseLike>
 
 /**
  * The KV the router caches mappings in: the three calls it makes. Structural, so a Worker's global
@@ -67,8 +86,10 @@ interface ShardRouterConfig {
 
 export type {
 	LogFn,
+	ShardBindingOf,
 	ShardDbHandle,
 	ShardDriver,
+	ShardEnv,
 	ShardKv,
 	ShardMapping,
 	ShardMove,

@@ -3,13 +3,14 @@
  * globals and `@cloudflare/workers-types` both fit, and a session comes back in the binding's own
  * type, which drizzle() takes. Checked by `bun run typecheck`; nothing here runs.
  */
-import type { D1Database, D1DatabaseSession, D1PreparedStatement } from "@cloudflare/workers-types"
+import type { D1Database, D1DatabaseSession, D1PreparedStatement, KVNamespace } from "@cloudflare/workers-types"
+import { drizzle } from "drizzle-orm/d1"
 import { expectTypeOf } from "vitest"
 import { BookmarkTracker } from "../../src/sqlite/d1/bookmark.ts"
 import type { D1DatabaseLike, D1SessionLike } from "../../src/sqlite/d1/d1-types.ts"
 import { openD1Session } from "../../src/sqlite/d1/session.ts"
 import { ShardRouter } from "../../src/sqlite/d1/sharding/router.ts"
-import type { ShardKv } from "../../src/sqlite/d1/sharding/types.ts"
+import type { ShardKv, ShardMapping } from "../../src/sqlite/d1/sharding/types.ts"
 
 declare const db: D1Database
 declare const kv: ShardKv
@@ -29,8 +30,32 @@ new BookmarkTracker().track(openD1Session(db).session, "core")
 // @ts-expect-error a binding is no session: it has no bookmark
 new BookmarkTracker().track(db, "core")
 
-/* the router takes the caller's binding and statements, and hands a shard's binding back as the caller names it */
+/* the router takes the caller's binding and statements */
 const router = new ShardRouter({ totalShards: 1 })
 void router.move({ orgId: "o", shardId: 0, with: [statement] }, { coreDb: db, kv }, { waitUntil: () => {} })
-expectTypeOf(router.getHandle<D1Database>({} as never, {}).handle).toEqualTypeOf<D1Database>()
-expectTypeOf(router.getHandle({} as never, {}).handle).toEqualTypeOf<D1DatabaseLike>()
+
+/* K2 of r22: a shard's handle is the type the env holds it as, which `wrangler types` writes */
+interface Env {
+	KV: KVNamespace
+	SHARD_DB_0: D1Database
+	SHARD_DB_1: D1Database
+}
+declare const env: Env
+declare const mapping: ShardMapping
+expectTypeOf(router.getHandle(mapping, env).handle).toEqualTypeOf<D1Database>()
+drizzle(router.getHandle(mapping, env).handle)
+
+/* an env typed by a string index signature names no binding, so the handle is the structural one */
+declare const indexed: Record<string, unknown>
+expectTypeOf(router.getHandle(mapping, indexed).handle).toEqualTypeOf<D1DatabaseLike>()
+
+/* an env whose known keys hold no shard binding, or a shard key holding what is no D1 binding, is refused */
+interface NoShards {
+	DB: D1Database
+	KV: KVNamespace
+}
+declare const noShards: NoShards
+// @ts-expect-error an env with no SHARD_DB_* binding holds no shard
+router.getHandle(mapping, noShards)
+// @ts-expect-error a shard key holds a D1 binding
+router.getHandle(mapping, { KV: {} as KVNamespace, SHARD_DB_0: "core" })

@@ -3,8 +3,10 @@ export type { MergedListQueryResult } from "../../../query/sqlite/build-list-que
 export { ShardRouter } from "./router.ts"
 export { shardMap } from "./shard-map.ts"
 export type {
+	ShardBindingOf,
 	ShardDbHandle,
 	ShardDriver,
+	ShardEnv,
 	ShardKv,
 	ShardMapping,
 	ShardMove,

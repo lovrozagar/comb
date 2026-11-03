@@ -3,7 +3,7 @@ export { paginateMerged } from "../../../query/merged.ts";
 export type { MergedListQueryResult } from "../../../query/sqlite/build-list-query-types.ts";
 export { ShardRouter } from "./router.ts";
 export { shardMap } from "./shard-map.ts";
-export type { ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, } from "./types.ts";
+export type { ShardBindingOf, ShardDbHandle, ShardDriver, ShardEnv, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, } from "./types.ts";
 
 // query/merged.d.ts
 import { type ListPagination, type ListRow, type PaginationMeta } from "./pagination.ts";
@@ -136,8 +136,7 @@ type MergedListQueryResult = Omit<ListQueryResult, "pagination"> & {
 export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListExtras, ListQueryResult, MergedListQueryResult };
 
 // sqlite/d1/sharding/router.d.ts
-import type { D1DatabaseLike } from "../d1-types.ts";
-import type { ShardDbHandle, ShardMapping, ShardMove, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
+import type { ShardBindingOf, ShardDbHandle, ShardEnv, ShardMapping, ShardMove, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
 /**
  * Shard router — resolves org -> D1 database handle.
  *
@@ -196,10 +195,11 @@ declare class ShardRouter {
     /** Soft-delete an org's mapping and invalidate it here; a later allocate or place revives it on its shard */
     unplace(orgId: string, deps: ShardResolverDeps): Promise<void>;
     /**
-     * Resolve a shard mapping to a concrete D1 database handle.
-     * Reads `SHARD_DB_{target}` binding from env, typed as `D`, the app's D1 type, where it names one.
+     * Resolve a shard mapping to a concrete D1 database handle: the env's `SHARD_DB_{target}`
+     * binding, in the type the env holds its shard bindings as (K2 of r22). An env typed by a string
+     * index signature gives D1DatabaseLike; one whose known keys hold no `SHARD_DB_*` is refused.
      */
-    getHandle<D extends D1DatabaseLike = D1DatabaseLike>(mapping: ShardMapping, env: Record<string, unknown>): ShardDbHandle<D>;
+    getHandle<E extends object>(mapping: ShardMapping, env: E & ShardEnv<E>): ShardDbHandle<ShardBindingOf<E>>;
     /**
      * Invalidate both cache tiers. Use after whale graduation or reassignment. It reaches this
      * isolate's LRU and the KV; another isolate's LRU keeps the mapping until it expires.
@@ -255,11 +255,24 @@ type ShardMapping = {
     target: string;
     updatedAt: number;
 };
-/** A shard's binding, typed as the caller names it to getHandle */
+/** A shard's binding, in the type getHandle reads from the env it is passed */
 type ShardDbHandle<D extends D1DatabaseLike = D1DatabaseLike> = {
     driver: "d1";
     handle: D;
 };
+/**
+ * The binding getHandle hands back for an env of type `E` (K2 of r22): the type its `SHARD_DB_*`
+ * keys hold, as `wrangler types` writes them; an env with a string index signature names no
+ * binding's type, and gives the structural D1DatabaseLike
+ */
+type ShardBindingOf<E> = string extends keyof E ? D1DatabaseLike : Extract<E[Extract<keyof E, `SHARD_DB_${string}`>], D1DatabaseLike>;
+/**
+ * What getHandle asks of an env of type `E` beyond `E` itself: each `SHARD_DB_*` key holds a D1
+ * binding, and an env whose known keys hold no such key is refused, naming the key it lacks
+ */
+type ShardEnv<E> = string extends keyof E ? unknown : [Extract<keyof E, `SHARD_DB_${string}`>] extends [never] ? {
+    "SHARD_DB_<target>": D1DatabaseLike;
+} : Record<Extract<keyof E, `SHARD_DB_${string}`>, D1DatabaseLike>;
 /**
  * The KV the router caches mappings in: the three calls it makes. Structural, so a Worker's global
  * `KVNamespace` and the one `@cloudflare/workers-types` exports both fit; the two are distinct types.
@@ -315,7 +328,7 @@ interface ShardRouterConfig {
     pick?: ShardPick;
     totalShards: number;
 }
-export type { LogFn, ShardDbHandle, ShardDriver, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx, };
+export type { LogFn, ShardBindingOf, ShardDbHandle, ShardDriver, ShardEnv, ShardKv, ShardMapping, ShardMove, ShardPick, ShardPickInput, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx, };
 
 // query/pagination.d.ts
 import { type DecodedCursor } from "./cursor.ts";
@@ -601,39 +614,6 @@ type RelationConfig = {
 };
 export type { RelationConfig };
 
-// sqlite/d1/d1-types.d.ts
-/**
- * The D1 surface comb calls, as structural types of its own (K3 of r21), as the router's KV is: a
- * Worker typed by `wrangler types`, whose globals declare D1, and one typed by
- * `@cloudflare/workers-types` both fit them, so comb's D1 modules are typed in either and need
- * neither installed. Where comb hands a client on, it hands the caller's own type back.
- */
-/** A prepared statement as comb uses one: bound, then batched */
-type D1StatementLike = {
-    bind(...values: unknown[]): D1StatementLike;
-};
-/** One statement's answer in a batch: the rows comb reads */
-type D1AnswerLike<T> = {
-    results: T[];
-};
-/** A D1 session: what comb prepares and batches on, and the bookmark it hands on */
-type D1SessionLike = {
-    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
-    getBookmark(): string | null;
-    prepare(query: string): D1StatementLike;
-};
-/** A D1 database binding; one with no `withSession` is a runtime without sessions (an older Miniflare) */
-type D1DatabaseLike = {
-    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
-    prepare(query: string): D1StatementLike;
-    withSession?(constraintOrBookmark?: string): D1SessionLike;
-};
-/** The session type `D`'s `withSession` opens: the caller's own, so drizzle() takes it as it takes `D`; a D1 session where `D` names none */
-type SessionOf<D extends D1DatabaseLike> = D extends {
-    withSession(...args: never[]): infer S;
-} ? S : D1SessionLike;
-export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf };
-
 // sqlite/columns.d.ts
 /**
  * Unified column factories for SQLite
@@ -666,6 +646,39 @@ export type SqliteColumns = {
 };
 export declare const c: SqliteColumns;
 export {};
+
+// sqlite/d1/d1-types.d.ts
+/**
+ * The D1 surface comb calls, as structural types of its own (K3 of r21), as the router's KV is: a
+ * Worker typed by `wrangler types`, whose globals declare D1, and one typed by
+ * `@cloudflare/workers-types` both fit them, so comb's D1 modules are typed in either and need
+ * neither installed. Where comb hands a client on, it hands the caller's own type back.
+ */
+/** A prepared statement as comb uses one: bound, then batched */
+type D1StatementLike = {
+    bind(...values: unknown[]): D1StatementLike;
+};
+/** One statement's answer in a batch: the rows comb reads */
+type D1AnswerLike<T> = {
+    results: T[];
+};
+/** A D1 session: what comb prepares and batches on, and the bookmark it hands on */
+type D1SessionLike = {
+    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
+    getBookmark(): string | null;
+    prepare(query: string): D1StatementLike;
+};
+/** A D1 database binding; one with no `withSession` is a runtime without sessions (an older Miniflare) */
+type D1DatabaseLike = {
+    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
+    prepare(query: string): D1StatementLike;
+    withSession?(constraintOrBookmark?: string): D1SessionLike;
+};
+/** The session type `D`'s `withSession` opens: the caller's own, so drizzle() takes it as it takes `D`; a D1 session where `D` names none */
+type SessionOf<D extends D1DatabaseLike> = D extends {
+    withSession(...args: never[]): infer S;
+} ? S : D1SessionLike;
+export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf };
 
 // query/cursor.d.ts
 import { type CursorOptions } from "./cursor-seal.ts";
