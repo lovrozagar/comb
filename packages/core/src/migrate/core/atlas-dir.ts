@@ -18,7 +18,7 @@ function sqlFiles(dir: string): string[] {
 /** Write `dir`'s atlas.sum with `atlas migrate hash` */
 function hashDir(exec: Run, dir: string): void {
 	const result = exec("atlas", ["migrate", "hash", "--dir", `file://${dir}`])
-	if (result.code !== 0) throw new Error(`atlas migrate hash failed: ${result.stderr}`)
+	if (result.code !== 0) throw new Error(`atlas migrate hash failed: ${result.stderr.trim()}`)
 }
 
 /** Each file's hash as atlas.sum records it, without the `h1:` prefix */

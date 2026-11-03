@@ -355,16 +355,16 @@ describe("generateIncrementalMigration — postgres refusals", () => {
 
 describe("generateIncrementalMigration: failures", () => {
 	it("throws when the hash or the diff fails", async () => {
-		await expect(generateIncrementalMigration(options(fakeAtlas(undefined, () => fail("hash broke"))))).rejects.toThrow(
-			"atlas migrate hash failed: hash broke",
-		)
+		await expect(
+			generateIncrementalMigration(options(fakeAtlas(undefined, () => fail("hash broke\n")))),
+		).rejects.toThrow(new Error("atlas migrate hash failed: hash broke"))
 		seed("CREATE TABLE a (x);")
-		await expect(generateIncrementalMigration(options(fakeAtlas(() => fail("diff broke"))))).rejects.toThrow(
-			"atlas migrate diff failed: diff broke",
+		await expect(generateIncrementalMigration(options(fakeAtlas(() => fail("diff broke\n"))))).rejects.toThrow(
+			new Error("atlas migrate diff failed: diff broke"),
 		)
 		await expect(
 			generateIncrementalMigration(options(fakeAtlas(() => ({ code: 1, stderr: "", stdout: " out " })))),
-		).rejects.toThrow("atlas migrate diff failed: out")
+		).rejects.toThrow(new Error("atlas migrate diff failed: out"))
 	})
 
 	it("refuses a history whose atlas.sum does not match its migrations", async () => {

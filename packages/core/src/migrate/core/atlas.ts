@@ -82,7 +82,7 @@ export async function generateSchemaDiff(options: SchemaDiffOptions): Promise<Sc
 						return { ...ran, stderr: explainAtlasFailure(ran.stderr, env.scrub, { devOnly: true }) }
 					})
 
-		if (result.code !== 0) throw new Error(`Atlas diff failed: ${result.stderr}`)
+		if (result.code !== 0) throw new Error(`Atlas diff failed: ${result.stderr.trim()}`)
 		/* in sync, Atlas exits 0 and says so on stdout (probed on v1.3.0) */
 		const diff = result.stdout.trim()
 		const notices = atlasNotices(result.stderr)
@@ -160,7 +160,7 @@ export function exportDrizzleSchema(options: DrizzleExportOptions): string {
 	const result = exec("bun", ["drizzle-kit", "export", ...config], { cwd })
 
 	if (result.code !== 0) {
-		throw new Error(`drizzle-kit export failed: ${result.stderr}`)
+		throw new Error(`drizzle-kit export failed: ${result.stderr.trim()}`)
 	}
 
 	let sql = result.stdout

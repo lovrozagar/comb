@@ -42,9 +42,9 @@ describe("sqlFiles and sumHashes", () => {
 })
 
 describe("hashDir and verifySum", () => {
-	it("throws atlas's failure to hash", () => {
-		expect(() => hashDir(() => ({ code: 1, stderr: "no dir", stdout: "" }), dir)).toThrow(
-			"atlas migrate hash failed: no dir",
+	it("throws atlas's failure to hash, without its trailing newline (K6 of r21)", () => {
+		expect(() => hashDir(() => ({ code: 1, stderr: "no dir\n", stdout: "" }), dir)).toThrow(
+			new Error("atlas migrate hash failed: no dir"),
 		)
 	})
 

@@ -82,9 +82,9 @@ describe("generateSchemaDiff", () => {
 	})
 
 	it("throws atlas's stderr when the diff fails", async () => {
-		const run = fakeRun(fail('Error: near "CREATE": syntax error'))
+		const run = fakeRun(fail('Error: near "CREATE": syntax error\n'))
 		await expect(generateSchemaDiff({ dialect: "sqlite", fromSchema: "", run, toSchema: "x" })).rejects.toThrow(
-			'Atlas diff failed: Error: near "CREATE": syntax error',
+			new Error('Atlas diff failed: Error: near "CREATE": syntax error'),
 		)
 	})
 })
@@ -148,8 +148,8 @@ describe("exportDrizzleSchema", () => {
 		expect(exportDrizzleSchema({ cwd: "/w", dialect: "postgres", run: fakeRun(ok("PRAGMA x;\nDEFAULT true")) })).toBe(
 			"PRAGMA x;\nDEFAULT true",
 		)
-		expect(() => exportDrizzleSchema({ cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config")) })).toThrow(
-			"drizzle-kit export failed: no config",
+		expect(() => exportDrizzleSchema({ cwd: "/w", dialect: "sqlite", run: fakeRun(fail("no config\n")) })).toThrow(
+			new Error("drizzle-kit export failed: no config"),
 		)
 	})
 })

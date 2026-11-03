@@ -107,7 +107,7 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 						return { ...ran, stderr, stdout: env.scrub(ran.stdout) }
 					})
 		/* in sync, Atlas exits 0, says so on stdout and writes no file: the empty list below */
-		if (result.code !== 0) throw new Error(`atlas migrate diff failed: ${result.stderr || result.stdout.trim()}`)
+		if (result.code !== 0) throw new Error(`atlas migrate diff failed: ${result.stderr.trim() || result.stdout.trim()}`)
 		atlas.notices.push(...atlasNotices(result.stderr))
 		/* sorted: readdir order is the filesystem's (APFS returns no fixed order), and the first file carries the migration */
 		const added = readdirSync(dir)

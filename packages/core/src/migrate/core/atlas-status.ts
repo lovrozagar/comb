@@ -28,7 +28,7 @@ type AtlasCommand = {
 
 /**
  * What an Atlas call returned, as Atlas wrote it, for comb's decisions; `said`, its stderr as comb
- * prints it (explained, then scrubbed); `scrub`, for any other text comb prints of it
+ * prints it (explained, scrubbed, then trimmed to Atlas's words, K6 of r21); `scrub`, for any other text comb prints of it
  */
 type Ran = RunResult & { said: string; scrub(text: string): string }
 
@@ -42,7 +42,7 @@ function atlas(options: AtlasCommand, copy: string, args: readonly string[]): Ra
 		const ran = (options.exec ?? run)("atlas", ["migrate", ...args, "--dir", `file://${copy}`, ...env.args], {
 			env: env.env,
 		})
-		return { ...ran, said: explainAtlasFailure(ran.stderr, env.scrub), scrub: env.scrub }
+		return { ...ran, said: explainAtlasFailure(ran.stderr, env.scrub).trim(), scrub: env.scrub }
 	})
 }
 
@@ -71,7 +71,7 @@ function atlasStatus(
 	const ran = atlas(options, copy, ["status", "--format", STATUS_FORMAT])
 	if (ran.code !== 0 && notClean && /connected database is not clean/.test(ran.stderr)) return NO_HISTORY
 	if (ran.code !== 0)
-		throw new Error(`atlas migrate status: ${ran.said || `exit ${ran.code}: ${ran.scrub(ran.stdout)}`}`)
+		throw new Error(`atlas migrate status: ${ran.said || `exit ${ran.code}: ${ran.scrub(ran.stdout).trim()}`}`)
 	/* as Atlas wrote it: what comb prints of it is scrubbed where it prints it (checkHistory's `scrub`) */
 	return json<AtlasStatus>(ran.stdout, "status")
 }

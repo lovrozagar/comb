@@ -188,4 +188,20 @@ describe("migrate apply, check and status --json on Postgres (C5)", () => {
 			unknown: [],
 		})
 	})
+
+	/* K6 of r21: a refusal quoting Atlas is one line, as every other entry, without Atlas's trailing newline */
+	it("prints a refusal that quotes Atlas without Atlas's trailing newline", async () => {
+		const dir = postgresProject({ "1_init.sql": "SELECT 1;\n" })
+		const said = "Error: postgres: querying system variables: dial tcp 127.0.0.1:9: connect: connection refused\n"
+		for (const mode of ["status", "check", "apply"]) {
+			const atlas = pgAtlas([])
+			const refused: Run = (cmd, args, options) =>
+				args[1] === "status" ? { code: 1, stderr: said, stdout: "" } : atlas(cmd, args, options)
+			const io = makeIo(dir, refused)
+			expect(await runCli(["migrate", mode, "core", "--json"], io)).toBe(1)
+			expect((JSON.parse(io.outputs[0] as string) as { refused: string[] }).refused).toEqual([
+				`atlas migrate status: ${said.trim()}`,
+			])
+		}
+	})
 })

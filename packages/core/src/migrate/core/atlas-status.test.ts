@@ -22,8 +22,12 @@ describe("atlasStatus: Atlas's status of the snapshot", () => {
 		expect(() => atlasStatus({ dir: "", exec: notClean, print, target }, "/copy")).toThrow(
 			/^atlas migrate status: the database has objects but no migration history/,
 		)
-		expect(() => atlasStatus({ dir: "", exec: answering(2, "out"), print, target }, "/copy")).toThrow(
-			"atlas migrate status: exit 2: out",
+		/* K6 of r21: what Atlas said is quoted without its trailing newline */
+		expect(() => atlasStatus({ dir: "", exec: answering(1, "", "Error: boom\n"), print, target }, "/copy")).toThrow(
+			new Error("atlas migrate status: Error: boom"),
+		)
+		expect(() => atlasStatus({ dir: "", exec: answering(2, "out\n"), print, target }, "/copy")).toThrow(
+			new Error("atlas migrate status: exit 2: out"),
 		)
 	})
 
