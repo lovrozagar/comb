@@ -7,7 +7,7 @@
  */
 import { relative } from "node:path"
 import { ts } from "ts-morph"
-import { checkerOf, MEMBER, named, real, withEmitted } from "./declarations.ts"
+import { checkerOf, exportsBySubpath, MEMBER, named, real, withEmitted } from "./declarations.ts"
 
 /** Each unexported type as `Name (file.d.ts)`, with the chain of public names that reaches it */
 export type Unexported = Map<string, string>
@@ -44,3 +44,23 @@ export function unexportedIn(dir: string, entries: readonly string[]): Unexporte
 /** The package at `root`'s TypeScript export subpaths, as tsconfig.strict.json emits their declarations */
 export const unexportedTypes = (root: string): Unexported =>
 	withEmitted(root, ({ dir, entries }) => unexportedIn(dir, Object.values(entries)))
+
+/** What one subpath's declarations name and it does not export, and the names each subpath exports */
+export type BySubpath = { exports: Map<string, Set<string>>; found: Map<string, Unexported> }
+
+/**
+ * Each export subpath's own walk (AD4 of the area D review): a consumer names a type from the
+ * subpath whose declaration uses it, so each subpath's exports alone count as exported there
+ */
+export const unexportedBySubpath = (root: string): BySubpath =>
+	withEmitted(root, ({ dir, entries }) => {
+		const { checker, program } = checkerOf(Object.values(entries))
+		const exports = new Map(
+			exportsBySubpath(checker, program, entries).map(([subpath, symbols]) => [
+				subpath,
+				new Set(symbols.map((symbol) => symbol.name)),
+			]),
+		)
+		const found = new Map(Object.entries(entries).map(([subpath, file]) => [subpath, unexportedIn(dir, [file])]))
+		return { exports, found }
+	})
