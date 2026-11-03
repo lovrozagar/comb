@@ -49,3 +49,14 @@ describe("roundedKey", () => {
 		expect(cause === undefined ? undefined : String(cause).slice(0, REFUSED.length)).toBe(refusal)
 	})
 })
+
+/* QL1 of r22b: an anchored list judges only the keys its anchor row doesn't supply, and says so */
+describe("roundedKey on the keys a list binds as read (QL1 of r22b; sibling: a derived list's every key)", () => {
+	it("judges only the keys given, naming a key no column of the anchor table", () => {
+		const row = { a: 2 ** 60, b: 2 ** 61 }
+		expect(roundedKey(row, SORT, { unread: (field) => field === "b" })?.cause).toBe(
+			"b 2305843009213693952 is past ±(2^53 − 1), where the driver rounded it: the key is no column of the anchor table, nor an expression over its columns alone, so no row reads the exact key back: sort by a column of the anchor table, keep it within ±(2^53 − 1), or read it as bigint",
+		)
+		expect(roundedKey(row, SORT, { unread: () => false })).toBeUndefined()
+	})
+})

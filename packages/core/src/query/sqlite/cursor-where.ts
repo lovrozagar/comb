@@ -3,7 +3,7 @@
  * sort, each value checked against its key, bound as every driver binds it, and a value carried by
  * reference read from `table`'s row (a derived list, with no table, takes none).
  */
-import type { SQL } from "drizzle-orm"
+import type { SQL, SQLWrapper } from "drizzle-orm"
 import type { SQLiteTable } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../../error.ts"
@@ -11,7 +11,7 @@ import { combErrorKeys } from "../../types.ts"
 import { type CursorId, type CursorOptions, CursorRef, readCursor } from "../cursor.ts"
 import { anchored, assertNoReference } from "../cursor-ref.ts"
 import type { SortField } from "../types.ts"
-import { assertCursorFits, bindableAs, boundForKeys, exactSeconds, inSeconds } from "./cursor-fit.ts"
+import { assertCursorFits, bindableAs, boundAsRead, boundForKeys, readsBack } from "./cursor-fit.ts"
 import { anchorGone, keysetSQL, type SortKey } from "./keyset.ts"
 
 /** What resuming after a cursor needs: it, how it was sealed, the sort, the keys, and the table */
@@ -45,13 +45,18 @@ function cursorWhere({ cursor: given, keys, merged, options, sort, table, tiebre
 	}
 	if (table === undefined) assertNoReference(cursor.values)
 	const columns = keys.map(({ column }) => column)
-	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id], table)
+	/* a key no anchor row supplies binds as read: a list with no table, or a joined table's key (QL1 of r22b) */
+	const asRead = (i: number) =>
+		i < columns.length && (table === undefined || !readsBack(columns[i] as SQLWrapper, table))
+	assertCursorFits([...columns, tiebreak.column], [...cursor.values, cursor.id], { asRead, table })
 	const id = bindableAs(tiebreak.column, cursor.id) as CursorId
-	const bound = boundForKeys(columns, cursor.values)
-	/* a list with no table binds a seconds-mode timestamp to the millisecond; one with a table reads it from the row */
+	const bound = boundForKeys(columns, cursor.values).map((value, i) =>
+		asRead(i) ? boundAsRead(columns[i], value) : value,
+	)
+	/* a key the row supplies reads its bound from the row where the cursor's value can't say it exactly */
 	const values =
 		table === undefined
-			? bound.map((value, i) => (value instanceof Date && inSeconds(columns[i]) ? exactSeconds(value) : value))
+			? bound
 			: anchored(keys, bound, { id, nonFinite: options.nonFinite, table, tiebreak: tiebreak.column })
 	return { gone: anchorGone(values), where: keysetSQL({ id, keys, tiebreak, values }) }
 }

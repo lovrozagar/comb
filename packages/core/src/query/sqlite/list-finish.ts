@@ -13,7 +13,7 @@ import type { ListDialect } from "../list-dialect.ts"
 import { assertLimitWithin, assertPageWithin } from "../trusted.ts"
 import type { ListQueryInput, SortField } from "../types.ts"
 import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts"
-import { DateKey, readsBack } from "./cursor-fit.ts"
+import { DateKey, inSeconds, readsBack, refersBack } from "./cursor-fit.ts"
 import { cursorWhere } from "./cursor-where.ts"
 import type { SortKey } from "./keyset.ts"
 
@@ -80,17 +80,27 @@ function shardWindow(parsed: ListQueryInput, merged: { maxRowsPerShard?: number 
 	})
 }
 
+/**
+ * Whether the list binds `column`'s key as read, with no row to read its bound from: every key of a
+ * merged list or a list with no anchor, and an anchored list's key its anchor row doesn't supply (QL1 of r22b)
+ */
+const boundAsRead = ({ merged, table }: Finish, column: SQLWrapper): boolean =>
+	merged !== undefined || table === undefined || !readsBack(column, table)
+
 /** What paginate is told of the list, beside the extras its rows carry */
-function factsOf({ keyset, merged, parsed, sort, table, tiebreak }: Finish) {
+function factsOf(list: Finish) {
+	const { keyset, merged, parsed, sort, table, tiebreak } = list
+	const fieldsWhere = (keep: (column: SQLWrapper) => boolean) =>
+		new Set((keyset.keys ?? []).flatMap(({ column }, i) => (keep(column) ? [sort[i]?.field as string] : [])))
 	return {
+		/* the sort fields bound as the driver read them, which a rounded or unheld value can't page (QL1 of r22b) */
+		asRead: fieldsWhere((column) => boundAsRead(list, column)),
 		/* a computed sort, or no tiebreak, leaves nothing a cursor can resume from: the list pages by number (Q6) */
 		cursorable: keyset.keys !== null && tiebreak !== null,
 		/* a merged list's anchor row is on one shard only, so it never pages by reference (Q1 of r17) */
 		keyset: merged !== undefined ? "merged" : table === undefined ? "derived" : "table",
 		/* the sort fields a reference reads back on, by the rule the cursor's read holds (27.7) */
-		byReference: new Set(
-			(keyset.keys ?? []).flatMap(({ column }, i) => (readsBack(column, table) ? [sort[i]?.field as string] : [])),
-		),
+		byReference: fieldsWhere((column) => refersBack(column, table)),
 		merged: merged !== undefined,
 		query: parsed,
 		window: parsed.limit + 1,
@@ -113,16 +123,51 @@ const idOf = (tiebreak: SortKey | null): ListExtras => (tiebreak === null ? {} :
 const storageOf = (column: SQLWrapper): SQL =>
 	sql`case typeof(${column}) when 'real' then case ${column} when 9e999 then '+inf' when -9e999 then '-inf' else 'real' end else typeof(${column}) end`
 
+/* whether `column`'s Postgres type is one a driver reads as a JS Date, which keeps milliseconds where it keeps microseconds */
+const isTime = (column: SQLWrapper): SQL =>
+	sql`pg_typeof(${column}) in ('timestamp without time zone'::regtype, 'timestamp with time zone'::regtype, 'date'::regtype)`
+
 /**
  * Postgres's family of a key: `float` for a double precision or real, a double the driver reads
  * exactly; `fixed` for an integer or numeric, which a driver reading it as a number past 2^53
  * rounds; `other` for any other type (Q2 of r21). A domain is no type pg_typeof names, so one whose
  * base, followed through domains of domains, is a double is `float` too: the domains are read once
  * per query, and only for a key whose type is no built-in one (below 16384, FirstNormalObjectId),
- * as no built-in domain's base is a double (Q1 of r22)
+ * as no built-in domain's base is a double (Q1 of r22). `time` for a timestamp, timestamptz or date,
+ * whose stored value a list bound as read carries as text (QL2 of r22b)
  */
 const familyOf = (column: SQLWrapper): SQL =>
-	sql`case when pg_typeof(${column}) in ('double precision'::regtype, 'real'::regtype) then 'float' when pg_typeof(${column}) in ('smallint'::regtype, 'integer'::regtype, 'bigint'::regtype, 'numeric'::regtype) then 'fixed' when pg_typeof(${column})::oid < 16384 then 'other' when pg_typeof(${column})::oid = any(array(with recursive d(oid, base) as (select oid, typbasetype from pg_type where typtype = 'd' union all select d.oid, p.typbasetype from d join pg_type p on p.oid = d.base where p.typtype = 'd') select d.oid from d where d.base::regtype in ('double precision'::regtype, 'real'::regtype))) then 'float' else 'other' end`
+	sql`case when pg_typeof(${column}) in ('double precision'::regtype, 'real'::regtype) then 'float' when pg_typeof(${column}) in ('smallint'::regtype, 'integer'::regtype, 'bigint'::regtype, 'numeric'::regtype) then 'fixed' when ${isTime(column)} then 'time' when pg_typeof(${column})::oid < 16384 then 'other' when pg_typeof(${column})::oid = any(array(with recursive d(oid, base) as (select oid, typbasetype from pg_type where typtype = 'd' union all select d.oid, p.typbasetype from d join pg_type p on p.oid = d.base where p.typtype = 'd') select d.oid from d where d.base::regtype in ('double precision'::regtype, 'real'::regtype))) then 'float' else 'other' end`
+
+/**
+ * A key's stored time as text, where a Date can't hold it (QL2 of r22b), or null for a key that is no
+ * time: Postgres's own text of a timestamp, timestamptz or date, which it reads back as that type
+ * (a column in string mode reads as that text already); SQLite's REAL seconds of a seconds-mode
+ * timestamp at 17 significant digits, which a double reads back exactly (its integer seconds are
+ * exact in a Date)
+ */
+function storedTextOf(dialect: ListDialect, column: SQLWrapper): SQL | null {
+	if (dialect === "sqlite")
+		return inSeconds(column)
+			? sql`case when typeof(${column}) = 'real' then printf('%!.17g', ${column}) else '' end`
+			: null
+	if (column instanceof DateKey || (is(column, Column) && column.dataType !== "object date")) return null
+	if (is(column, Column)) return sql`coalesce((${column})::text, '')`
+	return sql`coalesce(case when ${isTime(column)} then (${column})::text end, '')`
+}
+
+/**
+ * The extra that carries each sort key's stored time, comma-joined, empty for a key the list reads
+ * from its anchor row or that is no time; none where no key is one. A merged list carries none: it
+ * compares its rows' keys across shards, a seconds key's Date and its carried seconds in one order
+ */
+function keyTextsOf(list: Finish, keys: readonly SortKey[]): ListExtras {
+	if (list.merged !== undefined) return {}
+	const times = keys.map(({ column }) => (boundAsRead(list, column) ? storedTextOf(list.dialect, column) : null))
+	if (times.every((time) => time === null)) return {}
+	const each = times.map((time) => time ?? sql`''`)
+	return { _combKeyTexts: sql<string>`${sql.join(each, sql` || ',' || `)}`.as("_combKeyTexts") }
+}
 
 /** The extra that carries `classes`, one a sort key and the tiebreak's last, comma-joined */
 const keyTypes = (classes: SQL[]): ListExtras => ({
@@ -131,23 +176,32 @@ const keyTypes = (classes: SQL[]): ListExtras => ({
 
 /**
  * The class of each sort key and of the tiebreak, which paginate and paginateMerged read each key
- * by. A list that binds its keys as read (a derived list with no anchor, and a merged list) needs it
- * for every key: a SQLite REAL, and a Postgres double precision, past 2^53 is exact where an integer
+ * by. A list that binds a key as read (a derived list with no anchor, a merged list, and an anchored
+ * list sorted by a key its anchor row doesn't supply, QL1 of r22b) needs it for every key: a SQLite REAL, and a Postgres double precision, past 2^53 is exact where an integer
  * read as a double is rounded (Q1 of r20, Q2 of r21), the merge compares an integer libsql's intMode
  * "string" reads as a decimal string as that integer (Q2 of r20), and D1 reads a REAL ±Infinity as
- * null (Q3 of r20). A table list reads its keys back from the anchor row, so a SQLite one needs it
- * only for a key that is no declared column (Q2 of r19), and a Postgres one, which types the cursor's
- * value by its operand, never.
+ * null (Q3 of r20). A list that reads every key back from the anchor row needs it, on SQLite,
+ * only for a key that is no declared column (Q2 of r19), and on Postgres, which types the cursor's
+ * value by its operand, never. Beside it, each time key's stored value (keyTextsOf).
  */
-function keyTypesOf({ dialect, keyset, merged, table, tiebreak }: Finish): ListExtras {
+function keyTypesOf(list: Finish): ListExtras {
+	const { dialect, keyset, tiebreak } = list
 	const keys = keyset.keys
 	if (keys === null || tiebreak === null) return {}
-	const asRead = merged !== undefined || table === undefined
+	const asRead = keys.some(({ column }) => boundAsRead(list, column))
 	if (dialect === "postgres")
-		return asRead ? keyTypes([...keys.map(({ column }) => familyOf(column)), familyOf(tiebreak.column)]) : {}
+		return asRead
+			? {
+					...keyTypes([...keys.map(({ column }) => familyOf(column)), familyOf(tiebreak.column)]),
+					...keyTextsOf(list, keys),
+				}
+			: {}
 	const declared = keys.every(({ column }) => is(column, Column) || column instanceof DateKey)
 	if (!asRead && (declared || !is(tiebreak.column, SQLiteColumn))) return {}
-	return keyTypes([...keys.map(({ column }) => storageOf(column)), sql`typeof(${tiebreak.column})`])
+	return {
+		...keyTypes([...keys.map(({ column }) => storageOf(column)), sql`typeof(${tiebreak.column})`]),
+		...keyTextsOf(list, keys),
+	}
 }
 
 /** A cursor page: the rows past the cursor and one more, and the flag that says its anchor is gone */

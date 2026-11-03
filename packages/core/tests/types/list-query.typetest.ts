@@ -121,6 +121,7 @@ const listedQuery = buildListQuery({ ...SEALED, parsed: listSchema.parse({}), ta
 type Listed = {
 	_combAnchorGone?: number
 	_combId?: unknown
+	_combKeyTexts?: string
 	_combKeyTypes?: string
 	_total?: number
 	id: number

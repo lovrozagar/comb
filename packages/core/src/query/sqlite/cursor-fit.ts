@@ -95,33 +95,56 @@ function sameTable(a: unknown, b: unknown): boolean {
 }
 
 /**
- * Whether a cursor value carried by reference on `column` reads back from `table`'s row, the list's
- * anchor: a text column of that table does, and so does an SQL expression over that table's own
- * columns alone, which the read-back evaluates on that row (27.7 of plan 15). A joined table's column
- * reads the anchor's own value back, which paged in a loop (27.14). With no anchor in reach, as on
- * the relational path, a text column reads back: there every key is the queried table's own column,
- * as keysOn (query/drizzle.ts:57-68) takes each sort field as an own property of that table and
- * refuses any other, so no relation column through `with`, nor an extras SQL, becomes a key. The mint
- * and the read both ask it, so no list mints a cursor it then refuses.
+ * Whether the anchor row `table` supplies the key `column`, so the keyset may read a bound from that
+ * row: a column of that table does, and so does an SQL expression over that table's own columns
+ * alone, which the read evaluates on that row (27.7 of plan 15). A joined table's column, or an
+ * expression over one, reads the anchor's own value back through a subquery that correlates to each
+ * candidate row, which skipped and looped rows for every bound read from the row (QL1 of r22b; 27.14
+ * guarded only text), so such a key binds as an anchorless list binds it. With no anchor in reach, as
+ * on the relational path, a column reads back: there every key is the queried table's own column, as
+ * keysOn (query/drizzle.ts:57-68) takes each sort field as an own property of that table and refuses
+ * any other, so no relation column through `with`, nor an extras SQL, becomes a key.
  */
 function readsBack(column: SQLWrapper, table: object | undefined): boolean {
-	if (is(column, Column))
-		return column.dataType.startsWith("string") && (table === undefined || sameTable(tableOf(column), table))
+	if (is(column, Column)) return table === undefined || sameTable(tableOf(column), table)
 	if (!is(column, SQL) || table === undefined) return false
 	const read = columnsOf(column)
 	return read.length > 0 && read.every((each) => sameTable(tableOf(each), table))
 }
 
 /**
- * Null fits every key. A column takes what its dataType holds; a key declared as time, a Date or
- * the epoch milliseconds its row selected; any other SQL expression (a derived sort) only what
- * every driver binds: a string, a number, a bigint or a boolean (bun:sqlite and D1 refuse a Date
- * that libsql would bind); a value carried by reference, a key that reads it back (readsBack)
+ * Whether a cursor value carried by reference on `column` reads back from `table`'s row: a key the row
+ * supplies (readsBack) whose column, if it is one, holds text. The mint and the read both ask it, so
+ * no list mints a cursor it then refuses.
  */
-function fits(column: SQLWrapper, value: unknown, table: object | undefined): boolean {
+const refersBack = (column: SQLWrapper, table: object | undefined): boolean =>
+	readsBack(column, table) && (!is(column, Column) || column.dataType.startsWith("string"))
+
+/**
+ * Whether `value` is a time key's stored value as a list that binds the key as read carries it (QL2
+ * of r22b): a Postgres date-mode column's text, or a SQLite seconds-mode timestamp's REAL seconds
+ */
+const carriedTime = (column: SQLWrapper, value: unknown): boolean =>
+	is(column, SQLiteColumn)
+		? inSeconds(column) && typeof value === "number"
+		: is(column, Column) && column.dataType === "object date" && typeof value === "string"
+
+/**
+ * Null fits every key. A column takes what its dataType holds, and a time column bound as read
+ * (`asRead`) its stored value too (carriedTime); a key declared as time, a Date or the epoch
+ * milliseconds its row selected; any other SQL expression (a derived sort) only what every driver
+ * binds: a string, a number, a bigint or a boolean (bun:sqlite and D1 refuse a Date that libsql would
+ * bind); a value carried by reference, a key that reads it back (refersBack)
+ */
+function fits(
+	column: SQLWrapper,
+	value: unknown,
+	{ asRead, table }: { asRead: boolean; table: object | undefined },
+): boolean {
 	if (value === null) return true
-	if (value instanceof CursorRef) return readsBack(column, table)
+	if (value instanceof CursorRef) return refersBack(column, table)
 	if (column instanceof DateKey) return value instanceof Date || isInteger(value)
+	if (asRead && carriedTime(column, value)) return true
 	if (is(column, Column)) return fitsDataType(column.dataType, value)
 	return (
 		typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint"
@@ -153,6 +176,17 @@ const inSeconds = (column: SQLWrapper | undefined): boolean =>
 const exactSeconds = (value: Date): SQL => sql`${value.getTime() / 1000}`
 
 /**
+ * A cursor value as a key bound as read takes it: a Date on a seconds-mode timestamp as its seconds
+ * to the millisecond; a time key's carried stored value as itself, past the column's Date mapper,
+ * Postgres reading the text as the key's own type (QL2 of r22b)
+ */
+function boundAsRead(column: SQLWrapper | undefined, value: unknown): unknown {
+	if (value instanceof Date) return inSeconds(column) ? exactSeconds(value) : value
+	const time = is(column, Column) && column.dataType === "object date"
+	return time && (typeof value === "string" || typeof value === "number") ? sql`${value}` : value
+}
+
+/**
  * A cursor value as a SQLite key binds it: an integer a number column's or a time key's driver read
  * as a decimal string as that integer, exact (Q2 of r19), which SQLite would otherwise compare as text
  */
@@ -171,9 +205,17 @@ const boundForKeys = (columns: readonly SQLWrapper[], values: readonly unknown[]
 		columns[i] instanceof DateKey && value instanceof Date ? value.getTime() : bindableAs(columns[i], value),
 	)
 
-/** Throw a 400 unless every cursor value, the tiebreak id last, fits its column, a reference read back from `table` */
-function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unknown[], table?: object): void {
-	if (columns.every((column, index) => fits(column, values[index], table))) return
+/**
+ * Throw a 400 unless every cursor value, the tiebreak id last, fits its column, a reference read back
+ * from `at.table`; `at.asRead` says which keys bind as read, where a time key may carry its stored value
+ */
+function assertCursorFits(
+	columns: readonly SQLWrapper[],
+	values: readonly unknown[],
+	at: { asRead?: (index: number) => boolean; table?: object | undefined } = {},
+): void {
+	const { asRead = () => false, table } = at
+	if (columns.every((column, index) => fits(column, values[index], { asRead: asRead(index), table }))) return
 	throw new CombError({ cause: "Invalid cursor", errorKey: combErrorKeys.INVALID_CURSOR, status: "bad_request" })
 }
 
@@ -181,4 +223,15 @@ function assertCursorFits(columns: readonly SQLWrapper[], values: readonly unkno
 const bindableOn = (column: SQLWrapper | undefined, value: unknown): unknown =>
 	is(column, SQLiteColumn) ? bindableAs(column, value) : value
 
-export { assertCursorFits, bindable, bindableAs, bindableOn, boundForKeys, DateKey, exactSeconds, inSeconds, readsBack }
+export {
+	assertCursorFits,
+	bindable,
+	bindableAs,
+	bindableOn,
+	boundAsRead,
+	boundForKeys,
+	DateKey,
+	inSeconds,
+	readsBack,
+	refersBack,
+}

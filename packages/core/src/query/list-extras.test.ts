@@ -78,3 +78,31 @@ describe("typedKeys", () => {
 		expect(typedKeys(exact, SORT)).toBe(exact)
 	})
 })
+
+/* QL2 of r22b: a time key's stored value, carried where the Date the driver read keeps milliseconds only */
+describe("typedKeys and malformed: _combKeyTexts (QL2 of r22b; sibling: _combKeyTypes)", () => {
+	const at = new Date(Date.UTC(2024, 0, 1, 0, 0, 0, 123))
+
+	it("puts a Postgres time key's text, and a SQLite REAL's seconds, in place of the Date", () => {
+		const pg = { _combKeyTexts: "2024-01-01 00:00:00.1231,", _combKeyTypes: "time,other,other", k: at, name: "a" }
+		expect(typedKeys(pg, SORT)).toMatchObject({ k: "2024-01-01 00:00:00.1231", name: "a" })
+		const lite = { _combKeyTexts: "100.00010000000000,", _combKeyTypes: "real,text,text", k: at, name: "a" }
+		expect(typedKeys(lite, SORT)).toMatchObject({ k: 100.0001, name: "a" })
+	})
+
+	it("leaves a key with nothing carried, a value that is no Date, and a row with no times as they are", () => {
+		const none = { _combKeyTexts: ",", _combKeyTypes: "time,other,other", k: at, name: "a" }
+		expect(typedKeys(none, SORT)).toBe(none)
+		const text = { _combKeyTexts: "x,y", _combKeyTypes: "time,other,other", k: "x", name: "y" }
+		expect(typedKeys(text, SORT)).toBe(text)
+		const untimed = { _combKeyTypes: "time,other,other", k: at, name: "a" }
+		expect(typedKeys(untimed, SORT)).toBe(untimed)
+	})
+
+	it("takes one stored time per sort key, and names one of the wrong length or rendered by hand as its alias", () => {
+		expect(malformed({ _combId: 1, _combKeyTexts: "a," }, SORT)).toBeUndefined()
+		expect(malformed({ _combId: 1, _combKeyTypes: "time,fixed,other" }, SORT)).toBeUndefined()
+		for (const times of ["a", "a,b,c", 7])
+			expect(malformed({ _combId: 1, _combKeyTexts: times }, SORT)).toBe(`_combKeyTexts ${JSON.stringify(times)}`)
+	})
+})

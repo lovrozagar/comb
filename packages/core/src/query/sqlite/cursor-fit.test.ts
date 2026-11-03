@@ -1,8 +1,9 @@
-import { getTableColumns, sql } from "drizzle-orm"
-import { alias, blob, customType, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { getTableColumns, type SQL, SQL as SQLClass, sql } from "drizzle-orm"
+import { pgTable, timestamp } from "drizzle-orm/pg-core"
+import { alias, blob, customType, integer, real, SQLiteDialect, sqliteTable, text } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 
-import { assertCursorFits, bindable, boundForKeys, DateKey, readsBack } from "./cursor-fit.ts"
+import { assertCursorFits, bindable, boundAsRead, boundForKeys, DateKey, readsBack, refersBack } from "./cursor-fit.ts"
 
 const columns = getTableColumns(
 	sqliteTable("t", {
@@ -93,8 +94,9 @@ describe("readsBack", () => {
 	const doc = sqliteTable("doc", { id: integer("id"), notes: text("notes"), rank: integer("rank") })
 	const other = sqliteTable("other", { label: text("label") })
 
-	it("takes a text column, and an expression over the anchor table's own columns alone, through any nesting", () => {
+	it("takes the anchor table's column of any type, and an expression over its own columns alone, through any nesting (QL1 of r22b)", () => {
 		expect(readsBack(doc.notes, undefined)).toBe(true)
+		expect(readsBack(doc.rank, doc)).toBe(true)
 		expect(readsBack(sql`lower(${doc.notes})`, doc)).toBe(true)
 		expect(readsBack(sql`coalesce(${sql`lower(${doc.notes})`}, ${doc.id})`, doc)).toBe(true)
 		expect(readsBack(sql.join([doc.notes, doc.rank], sql`, `), doc)).toBe(true)
@@ -102,9 +104,8 @@ describe("readsBack", () => {
 		expect(readsBack(sql`${doc.id} IN (${[doc.notes, doc.rank]})`, doc)).toBe(true)
 	})
 
-	it("refuses a column that holds no text, an expression with no anchor, none over a column, or one over another table", () => {
-		expect(readsBack(doc.rank, doc)).toBe(false)
-		/* a joined table's text column reads the anchor's own value back (27.14) */
+	it("refuses an expression with no anchor, none over a column, or a key over another table", () => {
+		/* a joined table's column reads the anchor's own value back (27.14), whatever it holds (QL1 of r22b) */
 		expect(readsBack(other.label, doc)).toBe(false)
 		expect(readsBack(other.label, undefined)).toBe(true)
 		/* 27.19: an alias is the table it names; another alias of the same table, or no drizzle table, is not */
@@ -117,6 +118,60 @@ describe("readsBack", () => {
 		expect(readsBack(sql.raw('lower("doc"."notes")'), doc)).toBe(false)
 		expect(readsBack(sql`${doc.notes} || ${other.label}`, doc)).toBe(false)
 		expect(readsBack(new DateKey(sql`${doc.rank}`), doc)).toBe(false)
+	})
+})
+
+describe("refersBack", () => {
+	const doc = sqliteTable("doc", { notes: text("notes"), rank: integer("rank") })
+	const other = sqliteTable("other", { label: text("label") })
+
+	it("takes a key the row supplies whose column, if it is one, holds text", () => {
+		expect(refersBack(doc.notes, doc)).toBe(true)
+		expect(refersBack(doc.notes, undefined)).toBe(true)
+		expect(refersBack(sql`lower(${doc.notes})`, doc)).toBe(true)
+		expect(refersBack(doc.rank, doc)).toBe(false)
+		expect(refersBack(other.label, doc)).toBe(false)
+	})
+})
+
+/** Whether a cursor carrying `value` fits `column`, bound as read or not */
+const carried = (column: Parameters<typeof assertCursorFits>[0][number], value: unknown, asRead: boolean) => {
+	try {
+		assertCursorFits([column], [value], { asRead: () => asRead })
+		return true
+	} catch {
+		return false
+	}
+}
+
+/** The parameters a bound value renders to */
+const shown = (value: unknown) => new SQLiteDialect().sqlToQuery(value as SQL).params
+
+/* QL2 of r22b: a key bound as read carries a time key's stored value, where a Date can't hold it */
+describe("a time key's stored value on a key bound as read (QL2 of r22b; sibling: a Date)", () => {
+	const pgEvent = pgTable("ev", { at: timestamp("at", { precision: 6 }) })
+
+	it("takes a Postgres date column's text and a SQLite seconds column's number only where the key binds as read", () => {
+		expect(carried(pgEvent.at, "2024-01-01 00:00:00.1231", true)).toBe(true)
+		expect(carried(pgEvent.at, "2024-01-01 00:00:00.1231", false)).toBe(false)
+		expect(carried(pgEvent.at, 1, true)).toBe(false)
+		expect(carried(columns.seen_at, 100.0001, true)).toBe(true)
+		expect(carried(columns.seen_at, 100.0001, false)).toBe(false)
+		expect(carried(columns.seen_at, "100", true)).toBe(false)
+		expect(carried(columns.count, "x", true)).toBe(false)
+		expect(carried(columns.seen_at, new Date(1), true)).toBe(true)
+	})
+
+	it("binds the carried value as itself, past the column's Date mapper, and a Date as before", () => {
+		expect(shown(boundAsRead(pgEvent.at, "2024-01-01 00:00:00.1231"))).toEqual(["2024-01-01 00:00:00.1231"])
+		expect(shown(boundAsRead(columns.seen_at, 100.0001))).toEqual([100.0001])
+		expect(shown(boundAsRead(columns.seen_at, new Date(100_001)))).toEqual([100.001])
+		const date = new Date(1)
+		expect(boundAsRead(pgEvent.at, date)).toBe(date)
+		expect(boundAsRead(columns.count, 5)).toBe(5)
+		expect(boundAsRead(sql`x`, "a")).toBe("a")
+		expect(boundAsRead(pgEvent.at, null)).toBeNull()
+		expect(boundAsRead(columns.seen_at, sql`9e999`)).toBeInstanceOf(SQLClass)
 	})
 })
 

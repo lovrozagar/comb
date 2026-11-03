@@ -24,13 +24,14 @@ const KEY_CLASSES: ReadonlySet<string> = /* @__PURE__ */ new Set([
 	"other",
 	"real",
 	"text",
+	"time",
 ])
 
 /**
  * The class of a list's sort key or tiebreak, as `_combKeyTypes` carries it: SQLite's storage class,
- * or on Postgres its family (`float`, `fixed`, `other`), which no key's value is read by
+ * or on Postgres its family (`float`, `fixed`, `time`, `other`), which no key's value is read by
  */
-type KeyClass = "+inf" | "-inf" | "blob" | "fixed" | "float" | "integer" | "null" | "other" | "real" | "text"
+type KeyClass = "+inf" | "-inf" | "blob" | "fixed" | "float" | "integer" | "null" | "other" | "real" | "text" | "time"
 
 /** A value as a refusal shows it: a bigint with its n, anything else as JSON */
 const shown = (value: unknown): string => (typeof value === "bigint" ? `${value}n` : JSON.stringify(value))
@@ -52,6 +53,10 @@ const isKeyTypes = (value: unknown, sort: readonly SortField[]): boolean =>
 	typeof value === "string" &&
 	value.split(",").length === sort.length + 1 &&
 	value.split(",").every((each) => KEY_CLASSES.has(each))
+
+/** Whether `value` is one stored time per sort key, comma-joined, empty where none is carried, as the builder selects it */
+const isKeyTexts = (value: unknown, sort: readonly SortField[]): boolean =>
+	typeof value === "string" && value.split(",").length === sort.length
 
 /**
  * The class of each of `sort`'s keys, then the tiebreak's, from the row's `_combKeyTypes`; none where
@@ -78,23 +83,38 @@ function malformed(row: object, sort: readonly SortField[]): string | undefined 
 	if (Object.hasOwn(row, "_total") && !isCount(total)) return `_total ${shown(total)}`
 	if (Object.hasOwn(row, COMB_ID) && id === COMB_ID) return `${COMB_ID} ${shown(id)}`
 	if (Object.hasOwn(row, "_combKeyTypes") && !isKeyTypes(types, sort)) return `_combKeyTypes ${shown(types)}`
+	const times = (row as Record<string, unknown>)["_combKeyTexts"]
+	if (Object.hasOwn(row, "_combKeyTexts") && !isKeyTexts(times, sort)) return `_combKeyTexts ${shown(times)}`
 	const read = unencoded(gone)
 	const flag = read === 0 || read === 1 || read === 0n || read === 1n || typeof read === "boolean"
 	return Object.hasOwn(row, "_combAnchorGone") && !flag ? `_combAnchorGone ${shown(gone)}` : undefined
 }
 
 /**
+ * A time key's value as the row stores it, where the builder carried it (QL2 of r22b): the Date the
+ * driver read keeps milliseconds, where Postgres keeps microseconds and SQLite's seconds any fraction.
+ * A Postgres time key's text, which Postgres reads back as the key's own type, or SQLite's REAL seconds
+ */
+function storedText(value: unknown, stored: KeyClass | undefined, carried: string | undefined): unknown {
+	if (!(value instanceof Date) || carried === undefined || carried === "") return value
+	return stored === "time" ? carried : Number(carried)
+}
+
+/**
  * `row` with each sort key, and the tiebreak, as SQLite stored it, by the class `_combKeyTypes`
  * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
  * minted from it compares as one, a string binding as text, which SQLite orders after every
- * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20). A text key that
- * looks like a number stays text. The merge compares rows through it (Q2 of r20).
+ * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20); a time key its
+ * stored value `_combKeyTexts` carries (QL2 of r22b). A text key that looks like a number stays
+ * text. The merge compares rows through it (Q2 of r20).
  */
 function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown> {
 	const stored = storedClasses(row)
 	if (stored === undefined) return row
+	const times = row["_combKeyTexts"]
+	const carried = typeof times === "string" ? times.split(",") : []
 	const typed = [...sort.map(({ field }) => field), COMB_ID]
-		.map((field, i) => [field, storedValue(row[field], stored[i])] as const)
+		.map((field, i) => [field, storedText(storedValue(row[field], stored[i]), stored[i], carried[i])] as const)
 		.filter(([field, value]) => value !== row[field])
 	return typed.length === 0 ? row : { ...row, ...Object.fromEntries(typed) }
 }

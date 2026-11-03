@@ -519,6 +519,8 @@ type ListExtras = Partial<{
     _combId: SQL.Aliased<unknown>;
     /** the class of each sort key and the tiebreak, comma-joined, where the list binds them as read or one is an undeclared SQLite expression (Q2 of r19, Q2 of r21) */
     _combKeyTypes: SQL.Aliased<string>;
+    /** each sort key's stored time where the list binds it as read, comma-joined, empty for any other key: a Postgres time key's text, a SQLite REAL seconds (QL2 of r22b) */
+    _combKeyTexts: SQL.Aliased<string>;
     /** an offset page's count of every row the filter matches; a cursor page selects none (keyset avoids it) */
     _total: SQL.Aliased<number>;
 }>;
@@ -560,7 +562,7 @@ import type * as z from "zod";
  * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
  * r17), or the class of each sort key (Q2 of r19, Q2 of r21)
  */
-type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total";
+type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyTypes" | "_total";
 /**
  * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
  * row type on its own, so narrowing on its discriminant still reaches each variant's fields (Q3 of r19)
@@ -595,6 +597,8 @@ type ListPagination = {
 };
 /** What a builder knows of its list, beside the request it parsed */
 type PaginationFacts = {
+    /** the sort fields whose keys the list binds as read, with no row to read a bound from (QL1 of r22b); every one on a derived list */
+    asRead?: ReadonlySet<string> | undefined;
     /** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
     byReference?: ReadonlySet<string> | undefined;
     cursorable: boolean;
@@ -754,6 +758,7 @@ type KeysetKind = "derived" | "merged" | "table";
  * integer key past ±(2^53 − 1), which it binds as the driver rounded it
  */
 declare function createCursor(row: Record<string, unknown>, sort: readonly SortField[], options: CursorOptions & {
+    asRead?: ReadonlySet<string> | undefined;
     byReference?: ReadonlySet<string> | undefined;
     idField?: string | undefined;
     keyset?: KeysetKind | undefined;
@@ -803,9 +808,9 @@ declare const COMB_ID: "_combId";
 declare const INTEGER_TEXT: RegExp;
 /**
  * The class of a list's sort key or tiebreak, as `_combKeyTypes` carries it: SQLite's storage class,
- * or on Postgres its family (`float`, `fixed`, `other`), which no key's value is read by
+ * or on Postgres its family (`float`, `fixed`, `time`, `other`), which no key's value is read by
  */
-type KeyClass = "+inf" | "-inf" | "blob" | "fixed" | "float" | "integer" | "null" | "other" | "real" | "text";
+type KeyClass = "+inf" | "-inf" | "blob" | "fixed" | "float" | "integer" | "null" | "other" | "real" | "text" | "time";
 /** `value` as a driver read an integer from 0: a number, a bigint, or a decimal string as its bigint (Q2 of r19) */
 declare const unencoded: (value: unknown) => unknown;
 /**
@@ -822,8 +827,9 @@ declare function malformed(row: object, sort: readonly SortField[]): string | un
  * `row` with each sort key, and the tiebreak, as SQLite stored it, by the class `_combKeyTypes`
  * carries: an integer the driver read as a decimal string as that integer (Q2 of r19), so a cursor
  * minted from it compares as one, a string binding as text, which SQLite orders after every
- * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20). A text key that
- * looks like a number stays text. The merge compares rows through it (Q2 of r20).
+ * integer; a REAL ±Infinity D1's transport read as null as itself (Q3 of r20); a time key its
+ * stored value `_combKeyTexts` carries (QL2 of r22b). A text key that looks like a number stays
+ * text. The merge compares rows through it (Q2 of r20).
  */
 declare function typedKeys(row: Record<string, unknown>, sort: readonly SortField[]): Record<string, unknown>;
 export { COMB_ID, INTEGER_TEXT, type KeyClass, malformed, storedClasses, typedKeys, unencoded };

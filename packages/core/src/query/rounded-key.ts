@@ -13,25 +13,31 @@ import { storedClasses } from "./list-extras.ts"
 import type { SortField } from "./types.ts"
 
 // lookup-table: why a list cannot page an integer sort key the driver rounded, by the list
-const ROUNDED: Readonly<Record<"derived" | "merged", string>> = {
+const ROUNDED: Readonly<Record<"derived" | "merged" | "unread", string>> = {
 	derived:
 		"a derived list has no row to read the exact key back from, so its integer sort keys must be within ±(2^53 − 1), or be read as bigint",
 	merged: "a merged list's integer sort keys must be within ±(2^53 − 1), or be read as bigint",
+	unread:
+		"the key is no column of the anchor table, nor an expression over its columns alone, so no row reads the exact key back: sort by a column of the anchor table, keep it within ±(2^53 − 1), or read it as bigint",
 }
 
 /**
  * The 500 for `row`'s first integer sort key past ±(2^53 − 1), which the driver rounded, on a list
- * that cannot page it (Q2 of r18, Q1 of r19); none where every key is exact. A bigint is exact, and
+ * that cannot page it (Q2 of r18, Q1 of r19): every key of a derived or a merged list, and of an
+ * anchored list the keys `unread` names, which its anchor row doesn't supply (QL1 of r22b); none
+ * where every such key is exact. A bigint is exact, and
  * so is a number SQLite stored as a REAL (Q1 of r20) or Postgres typed a double precision or real (Q2 of r21);
  * a number under any other class is not.
  */
 function roundedKey(
 	row: Record<string, unknown>,
 	sort: readonly SortField[],
-	kind: "derived" | "merged",
+	list: "derived" | "merged" | { unread: (field: string) => boolean },
 ): CombError | undefined {
+	const [kind, judged] = typeof list === "string" ? [list, () => true] : (["unread", list.unread] as const)
 	const stored = storedClasses(row)
 	const rounded = sort.find(({ field }, i) => {
+		if (!judged(field)) return false
 		const value = row[field]
 		const double = stored !== undefined && (stored[i] === "real" || stored[i] === "float")
 		return !double && typeof value === "number" && Number.isInteger(value) && !Number.isSafeInteger(value)

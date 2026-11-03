@@ -22,7 +22,7 @@ import type * as z from "zod"
  * One column a builder selects for paginate: the tiebreak, the gone-anchor flag, the count (Q3 of
  * r17), or the class of each sort key (Q2 of r19, Q2 of r21)
  */
-type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total"
+type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTexts" | "_combKeyTypes" | "_total"
 
 /**
  * A row as paginate and paginateMerged return it: the extras gone, from each member of a union
@@ -31,7 +31,7 @@ type ListExtra = "_combAnchorGone" | "_combId" | "_combKeyTypes" | "_total"
 type ListRow<T> = T extends unknown ? Omit<T, ListExtra> : never
 
 /** The columns a builder selects for paginate alone, stripped from every row it returns */
-const EXTRAS: readonly ListExtra[] = [COMB_ID, "_combAnchorGone", "_combKeyTypes", "_total"]
+const EXTRAS: readonly ListExtra[] = [COMB_ID, "_combAnchorGone", "_combKeyTexts", "_combKeyTypes", "_total"]
 
 /** The pagination meta paginate returns: the list response's own schema */
 type PaginationResponse = z.output<typeof paginationResponseSchema>
@@ -64,6 +64,8 @@ type ListPagination = {
 
 /** What a builder knows of its list, beside the request it parsed */
 type PaginationFacts = {
+	/** the sort fields whose keys the list binds as read, with no row to read a bound from (QL1 of r22b); every one on a derived list */
+	asRead?: ReadonlySet<string> | undefined
 	/** the sort fields whose keys read a reference back from the list's table (readsBack); every one when not given */
 	byReference?: ReadonlySet<string> | undefined
 	cursorable: boolean
@@ -90,7 +92,8 @@ function paginationOf<TMerged extends boolean = false>(
 		keyset,
 		limit: query.limit,
 		merged: (facts.merged ?? false) as TMerged,
-		mint: (row) => mintFrom(row, query.parsedSort, { ...options, byReference: facts.byReference, keyset }),
+		mint: (row) =>
+			mintFrom(row, query.parsedSort, { ...options, asRead: facts.asRead, byReference: facts.byReference, keyset }),
 		nonFinite: options.nonFinite,
 		page: query.page ?? undefined,
 		parsedFields: query.parsedFields ?? null,
@@ -179,7 +182,11 @@ function applySelect<T extends Record<string, unknown>>(row: T, parsedFields: Pa
 function mintFrom(
 	row: object,
 	parsedSort: readonly SortField[],
-	options: CursorOptions & { byReference?: ReadonlySet<string> | undefined; keyset: KeysetKind },
+	options: CursorOptions & {
+		asRead?: ReadonlySet<string> | undefined
+		byReference?: ReadonlySet<string> | undefined
+		keyset: KeysetKind
+	},
 ): string {
 	const missing = [...parsedSort.map(({ field }) => field), COMB_ID].filter((key) => !Object.hasOwn(row, key))
 	if (missing.length > 0) {

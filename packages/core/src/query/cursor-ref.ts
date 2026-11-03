@@ -32,7 +32,7 @@ import { CombError } from "../error.ts"
 import { combErrorKeys } from "../types.ts"
 import { CursorRef, effectiveNulls, lossy } from "./cursor.ts"
 import { cursorPrecision } from "./cursor-precision.ts"
-import { inSeconds } from "./sqlite/cursor-fit.ts"
+import { inSeconds, readsBack } from "./sqlite/cursor-fit.ts"
 import { AnchorBound, countLiteral, integerLiteral, type SortKey } from "./sqlite/keyset.ts"
 
 /* drizzle's own keys for a table's name before any alias, and its schema */
@@ -241,11 +241,13 @@ function assertNoReference(values: readonly unknown[]): void {
 /**
  * The cursor's values with each one the row must supply read from `table`, the row keyed `id` by
  * `tiebreak`: a reference, a Date on a seconds-mode timestamp key, a null on a SQLite number key, and an
- * integer a JS number rounds
+ * integer a JS number rounds. Only a key the row supplies (readsBack) is read from it: any other is
+ * bound as given, as an anchorless list binds it (QL1 of r22b)
  */
 function anchored(keys: readonly SortKey[], values: readonly unknown[], at: Anchor): unknown[] {
 	return values.map((value, i) => {
 		const key = keys[i] as SortKey
+		if (!readsBack(key.column, at.table)) return value
 		if (value instanceof CursorRef)
 			return new AnchorBound("row", textBound(key, value, at), !onSqlite(key.column, at.table))
 		if (value instanceof Date && Number.isNaN(value.getTime())) return new AnchorBound("row", unheldBound(key, at))

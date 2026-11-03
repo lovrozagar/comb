@@ -57,23 +57,30 @@ function createCursor(
 	row: Record<string, unknown>,
 	sort: readonly SortField[],
 	options: CursorOptions & {
-		/* the sort fields whose keys read a reference back (readsBack); every one when not given */
+		/* the sort fields whose keys the list binds as read (QL1 of r22b); every one on a derived list */
+		asRead?: ReadonlySet<string> | undefined
+		/* the sort fields whose keys read a reference back (refersBack); every one when not given */
 		byReference?: ReadonlySet<string> | undefined
 		idField?: string | undefined
 		keyset?: KeysetKind | undefined
 	},
 ): string {
-	/* a date-mode ±infinity is bounded from its row, which a derived list has none of (3.24) */
-	const unheld = sort.find(({ field }) => row[field] instanceof Date && Number.isNaN((row[field] as Date).getTime()))
-	if (unheld !== undefined && options?.keyset === "derived") {
+	/* a key bound as read has no row to read a bound from: a derived list's every key, an anchored list's joined one (QL1 of r22b) */
+	const derived = options?.keyset === "derived"
+	const asRead = (field: string) => derived || (options?.asRead?.has(field) ?? false)
+	/* a date-mode ±infinity is bounded from its row (3.24) */
+	const unheld = sort.find(
+		({ field }) => asRead(field) && row[field] instanceof Date && Number.isNaN((row[field] as Date).getTime()),
+	)
+	if (unheld !== undefined) {
 		throw new CombError({
-			cause: `the sort by ${unheld.field} reads a date no JS Date holds (a Postgres 'infinity' read in date mode, or a SQLite timestamp holding ±Infinity), which a derived list has no row to read back; select it in string mode or sort by another column`,
+			cause: `the sort by ${unheld.field} reads a date no JS Date holds (a Postgres 'infinity' read in date mode, or a SQLite timestamp holding ±Infinity), which this list has no row to read back by, ${derived ? "a derived list having none" : "its key being no column of the anchor table"}; select it in string mode or sort by another column`,
 			errorKey: combErrorKeys.SORT_NOT_WIRED,
 			status: "internal_server_error",
 		})
 	}
-	/* a derived list binds the key as the driver read it, so a rounded one skips rows or repeats one (Q1 of r19) */
-	const rounded = options?.keyset === "derived" ? roundedKey(row, sort, "derived") : undefined
+	/* a key bound as the driver read it skips rows or repeats one once rounded (Q1 of r19, QL1 of r22b) */
+	const rounded = roundedKey(row, sort, derived ? "derived" : { unread: asRead })
 	if (rounded !== undefined) throw rounded
 	const mint = (record: Record<string, unknown>) => mintCursor(record, sort, options)
 	const fits = (record: Record<string, unknown>) => mint(record).length <= MAX_CURSOR_LENGTH

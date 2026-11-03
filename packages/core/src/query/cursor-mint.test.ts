@@ -105,3 +105,30 @@ describe("createCursor on an integer key past ±(2^53 − 1)", () => {
 		expect(readCursor(createCursor({ _id: "a", score: rounded }, BY_SCORE, table), BY_SCORE, SEALED)?.id).toBe("a")
 	})
 })
+
+/* QL1 of r22b: an anchored list binds a key its anchor row doesn't supply as read, as a derived list binds every key */
+describe("createCursor on a key the list binds as read (QL1 of r22b; sibling: a derived list)", () => {
+	const BY_SCORE: SortField[] = [
+		{ direction: "asc", field: "score" },
+		{ direction: "asc", field: "at" },
+	]
+	const table = { ...SEALED, idField: "_id", keyset: "table" as const }
+
+	it("refuses a rounded or unheld value of an as-read key, and mints the same values of a key the row supplies", () => {
+		const row = { _id: "a", at: new Date(Number.NaN), score: 2 ** 60 }
+		expect(() => createCursor(row, BY_SCORE, { ...table, asRead: new Set(["score"]) })).toThrow(
+			expect.objectContaining({ cause: expect.stringMatching(/^score \d+ is past .*no column of the anchor table/) }),
+		)
+		expect(() => createCursor(row, BY_SCORE, { ...table, asRead: new Set(["at"]) })).toThrow(
+			expect.objectContaining({
+				cause: expect.stringMatching(
+					/^the sort by at reads a date no JS Date holds .*its key being no column of the anchor table/,
+				),
+			}),
+		)
+		expect(() =>
+			createCursor({ ...row, score: 1 }, BY_SCORE, { ...SEALED, idField: "_id", keyset: "derived" }),
+		).toThrow(expect.objectContaining({ cause: expect.stringMatching(/a derived list having none/) }))
+		expect(readCursor(createCursor(row, BY_SCORE, table), BY_SCORE, SEALED)?.id).toBe("a")
+	})
+})
