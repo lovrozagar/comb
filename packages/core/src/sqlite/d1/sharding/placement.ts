@@ -1,13 +1,19 @@
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm"
-import type { D1Database, D1DatabaseSession, D1PreparedStatement } from "@cloudflare/workers-types"
 import { drizzle } from "drizzle-orm/d1"
 import { CombError } from "../../../error.ts"
 import { combErrorKeys } from "../../../types.ts"
+import type { D1DatabaseLike, D1SessionLike, D1StatementLike } from "../d1-types.ts"
 import { openD1Session, type SessionConstraint } from "../session.ts"
 import { shardMap } from "./shard-map.ts"
 import type { ShardMapping, ShardMove, ShardPick, ShardPickInput } from "./types.ts"
 
 type ShardDb = ReturnType<typeof drizzle>
+
+/**
+ * drizzle over a D1 client comb types by the methods it calls (K3 of r21): drizzle types its client
+ * by @cloudflare/workers-types where that resolves, and either typing is the one runtime binding
+ */
+const d1Drizzle = (client: D1DatabaseLike | D1SessionLike): ShardDb => drizzle(client as Parameters<typeof drizzle>[0])
 type ShardRow = typeof shardMap.$inferSelect
 
 /** The default pick: the shard with the most headroom under `maxOrgsPerShard`, the lowest on a tie */
@@ -89,16 +95,16 @@ async function insertFirst(
  * Puts an org on `shardId` whatever row it had, live or soft-deleted, in one batch with the
  * caller's own statements on the core database (`with`), so all of them land or none (R4)
  */
-async function overwrite(client: D1Database | D1DatabaseSession, move: ShardMove): Promise<ShardRow> {
+async function overwrite(client: D1DatabaseLike | D1SessionLike, move: ShardMove): Promise<ShardRow> {
 	const { orgId, shardId } = move
 	const placed = { deleted_at: null, shard_id: shardId, target: String(shardId), updated_at: Date.now() }
-	const query = drizzle(client as D1Database)
+	const query = d1Drizzle(client)
 		.insert(shardMap)
 		.values({ driver: "d1", org_id: orgId, ...placed })
 		.onConflictDoUpdate({ set: placed, target: shardMap.org_id })
 		.returning()
 		.toSQL()
-	const write: D1PreparedStatement = client.prepare(query.sql).bind(...query.params)
+	const write: D1StatementLike = client.prepare(query.sql).bind(...query.params)
 	const [placedRow] = await client.batch<ShardRow>([write, ...(move.with ?? [])])
 	return placedRow?.results[0] as ShardRow
 }
@@ -116,12 +122,12 @@ async function softDelete(db: ShardDb, orgId: string): Promise<void> {
  * mapping when the org has no live row there
  */
 async function readLiveRow(
-	coreDb: D1Database,
+	coreDb: D1DatabaseLike,
 	orgId: string,
 	constraint: SessionConstraint,
-): Promise<{ mapping: ShardMapping | undefined; session: D1DatabaseSession | undefined }> {
+): Promise<{ mapping: ShardMapping | undefined; session: D1SessionLike | undefined }> {
 	const { client, session } = openD1Session(coreDb, { constraint })
-	const row = await drizzle(client)
+	const row = await d1Drizzle(client)
 		.select()
 		.from(shardMap)
 		.where(and(eq(shardMap.org_id, orgId), isNull(shardMap.deleted_at)))
@@ -130,7 +136,7 @@ async function readLiveRow(
 }
 
 /** The live mapping in the core database: the nearest replica's, else the primary's */
-async function readLive(coreDb: D1Database, orgId: string): Promise<ShardMapping | undefined> {
+async function readLive(coreDb: D1DatabaseLike, orgId: string): Promise<ShardMapping | undefined> {
 	const nearest = await readLiveRow(coreDb, orgId, "first-unconstrained")
 	/* with no session there is one database, so its miss is the primary's */
 	if (nearest.mapping || !nearest.session) return nearest.mapping
@@ -149,5 +155,16 @@ function toMapping(row: ShardRow): ShardMapping {
 	}
 }
 
-export { assertShard, headroomPick, insertFirst, overwrite, pickShard, readLive, readLiveRow, softDelete, toMapping }
+export {
+	assertShard,
+	d1Drizzle,
+	headroomPick,
+	insertFirst,
+	overwrite,
+	pickShard,
+	readLive,
+	readLiveRow,
+	softDelete,
+	toMapping,
+}
 export type { ShardDb, ShardRow }

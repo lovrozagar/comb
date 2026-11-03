@@ -5,7 +5,17 @@
  * suites run the catalog's exact floor).
  */
 import { spawnSync } from "node:child_process"
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import semver from "semver"
@@ -26,6 +36,8 @@ const catalog = (
 
 /** The tools a consumer builds with, pinned */
 const TOOLS = {
+	/* a Worker's own types, which comb no longer peers on (K3 of r21) */
+	"@cloudflare/workers-types": catalog["@cloudflare/workers-types"] as string,
 	"@types/node": catalog["@types/node"] as string,
 	tsx: "4.23.15",
 	typescript: catalog["typescript"] as string,
@@ -119,8 +131,6 @@ export function pack(): string {
 
 export type Stage = { dir: string; dispose(): void }
 
-const WORKERS_TYPES = "@cloudflare/workers-types"
-
 /** The lowest version `range` admits */
 export function floorOf(range: string): string {
 	const floor = semver.minVersion(range)
@@ -179,11 +189,9 @@ export function stage(
 		writeFileSync(join(dir, path), text)
 	}
 	ok(run(dir, "npm", ["install", "--no-audit", "--no-fund", "--loglevel=error"]), "npm install")
-	/* the floor of comb's workers-types range beside it, alone, for the cell that types against it (R4 of plan 17) */
-	if (wanted.includes(WORKERS_TYPES)) {
-		const floor = `${WORKERS_TYPES}@${floorOf(manifest.peerDependencies[WORKERS_TYPES] as string)}`
-		ok(run(dir, "npm", ["install", "--prefix", "floor", "--no-audit", "--no-fund", "--loglevel=error", floor]), floor)
-	}
+	/* the globals `wrangler types` writes for the create-cloudflare project, from its bindings (K3 of r21) */
+	if (existsSync(join(dir, "c3/wrangler.jsonc")))
+		ok(run(join(dir, "c3"), "npx", ["wrangler", "types"]), "wrangler types")
 	return { dir, dispose: () => rmSync(dir, { force: true, recursive: true }) }
 }
 

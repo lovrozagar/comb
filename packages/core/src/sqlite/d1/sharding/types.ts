@@ -1,4 +1,5 @@
-import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types"
+import type { D1DatabaseLike, D1StatementLike } from "../d1-types.ts"
+
 type ShardDriver = "d1"
 
 type ShardMapping = {
@@ -11,7 +12,8 @@ type ShardMapping = {
 	updatedAt: number
 }
 
-type ShardDbHandle = { driver: "d1"; handle: D1Database }
+/** A shard's binding, typed as the caller names it to getHandle */
+type ShardDbHandle<D extends D1DatabaseLike = D1DatabaseLike> = { driver: "d1"; handle: D }
 
 /**
  * The KV the router caches mappings in: the three calls it makes. Structural, so a Worker's global
@@ -24,7 +26,7 @@ type ShardKv = {
 }
 
 type ShardResolverDeps = {
-	coreDb: D1Database
+	coreDb: D1DatabaseLike
 	kv: ShardKv
 }
 
@@ -44,7 +46,7 @@ type LogFn = (event: string, data: Record<string, unknown>) => void
 type ShardPlacement = { orgId: string; shardId: number }
 
 /** A move: the placement, and the app's own statements on the core database to batch with it (R4) */
-type ShardMove = ShardPlacement & { with?: readonly D1PreparedStatement[] | undefined }
+type ShardMove = ShardPlacement & { with?: readonly D1StatementLike[] | undefined }
 
 /** The deps of `resolveVerified`: those of `resolve`, and how the app checks an org's rows are on the shard a mapping names */
 type ShardVerifyDeps = ShardResolverDeps & { present: (mapping: ShardMapping) => Promise<boolean> }

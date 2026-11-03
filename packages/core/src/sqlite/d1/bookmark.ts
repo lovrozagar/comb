@@ -1,4 +1,5 @@
-import type { D1DatabaseSession } from "@cloudflare/workers-types"
+import type { D1SessionLike } from "./d1-types.ts"
+
 type TaggedBookmark = { bookmark: string; tag: string }
 
 /**
@@ -7,13 +8,13 @@ type TaggedBookmark = { bookmark: string; tag: string }
  * and wire getBookmarks() into their response pipeline.
  */
 class BookmarkTracker {
-	private sessions: Array<{ session: D1DatabaseSession; tag: string }> = []
+	private sessions: Array<{ session: D1SessionLike; tag: string }> = []
 
 	/**
 	 * Register a session to be tracked for bookmark extraction. Takes openD1Session's `session` as
 	 * it comes: undefined on a runtime without sessions, which has no bookmark to track.
 	 */
-	track(session: D1DatabaseSession | undefined, tag: string): void {
+	track(session: D1SessionLike | undefined, tag: string): void {
 		if (session !== undefined) this.sessions.push({ session, tag })
 	}
 

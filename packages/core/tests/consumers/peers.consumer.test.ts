@@ -119,7 +119,12 @@ describe.each([
 		expect(result.status).toBe(0)
 	})
 
-	/* K1 of r20: 0.18.0 gave 218 TS5097 here, one per `./x.ts` specifier of comb's source the Worker reached; the Worker's globals come from workers-types, an optional peer */
+	/*
+	 * K1 of r20: 0.18.0 gave 218 TS5097 here, one per `./x.ts` specifier of comb's source the Worker
+	 * reached. K3 of r21: the Worker's globals are what `wrangler types` wrote, and no file of
+	 * @cloudflare/workers-types, which the app has installed, is read for comb's D1 modules, whose
+	 * types c3/src/d1.ts proves held by the wrong calls each refused
+	 */
 	it.runIf(peers === "all").each(["c3/tsconfig.json", "c3/tsconfig.strict.json"])(
 		"type-checks a stock create-cloudflare Worker from comb's declarations alone (%s)",
 		(config) => {
@@ -128,6 +133,7 @@ describe.each([
 			expect(result.status).toBe(0)
 			expect(combFiles(result.output).source).toEqual([])
 			expect(combFiles(result.output).declarations.length).toBeGreaterThan(0)
+			expect(result.output.split("\n").filter((line) => line.includes("@cloudflare/workers-types"))).toEqual([])
 		},
 	)
 
@@ -140,7 +146,6 @@ describe.each([
 			"tsconfig.worker.json",
 			"tsconfig.worker-es2022.json",
 			"tsconfig.worker-node.json",
-			"tsconfig.worker-node-floor.json",
 		])("type-checks every subpath under strict flags (%s)", (config) => {
 		const result = run(app.dir, "npx", ["tsc", "-p", config])
 		expect(result.output.split("\n").filter((line) => line.includes("error TS"))).toEqual([])

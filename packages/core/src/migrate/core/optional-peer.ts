@@ -14,7 +14,6 @@ import { admits, installedVersion } from "./peer-version.ts"
 
 // lookup-table: each optional peer and the range comb is tested against
 const OPTIONAL_PEER_RANGES = {
-	"@cloudflare/workers-types": ">=5.20261001.1 <6",
 	"@libsql/client": ">=0.17.4 <0.18",
 	"drizzle-kit": "1.0.0-rc.4 || 1.0.0-rc.5 || ^1.0.0",
 	"libpg-query": ">=17.7.4 <18",

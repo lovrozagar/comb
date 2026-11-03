@@ -1,11 +1,12 @@
 // sqlite/d1/session.d.ts
-import type { D1Database, D1DatabaseSession } from "@cloudflare/workers-types";
-type SessionHandle = {
-    client: D1Database;
+import type { D1DatabaseLike, SessionOf } from "./d1-types.ts";
+/** A session opened on `D`, or `D` itself where there is none: each in the caller's own type (K3 of r21) */
+type SessionHandle<D extends D1DatabaseLike = D1DatabaseLike> = {
+    client: D;
     session: undefined;
 } | {
-    client: D1DatabaseSession;
-    session: D1DatabaseSession;
+    client: SessionOf<D>;
+    session: SessionOf<D>;
 };
 /**
  * Where a session's first query reads: the primary, which has every write, or the nearest replica,
@@ -27,5 +28,38 @@ type SessionOptions = {
  * raw D1Database where there is none: drizzle() takes either, and a consumer's own helper types it
  * as drizzle's `AnyD1Database` to take both.
  */
-declare function openD1Session(d1: D1Database, { bookmark, constraint }?: SessionOptions): SessionHandle;
+declare function openD1Session<D extends D1DatabaseLike>(d1: D, { bookmark, constraint }?: SessionOptions): SessionHandle<D>;
 export { openD1Session, type SessionConstraint, type SessionHandle, type SessionOptions };
+
+// sqlite/d1/d1-types.d.ts
+/**
+ * The D1 surface comb calls, as structural types of its own (K3 of r21), as the router's KV is: a
+ * Worker typed by `wrangler types`, whose globals declare D1, and one typed by
+ * `@cloudflare/workers-types` both fit them, so comb's D1 modules are typed in either and need
+ * neither installed. Where comb hands a client on, it hands the caller's own type back.
+ */
+/** A prepared statement as comb uses one: bound, then batched */
+type D1StatementLike = {
+    bind(...values: unknown[]): D1StatementLike;
+};
+/** One statement's answer in a batch: the rows comb reads */
+type D1AnswerLike<T> = {
+    results: T[];
+};
+/** A D1 session: what comb prepares and batches on, and the bookmark it hands on */
+type D1SessionLike = {
+    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
+    getBookmark(): string | null;
+    prepare(query: string): D1StatementLike;
+};
+/** A D1 database binding; one with no `withSession` is a runtime without sessions (an older Miniflare) */
+type D1DatabaseLike = {
+    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
+    prepare(query: string): D1StatementLike;
+    withSession?(constraintOrBookmark?: string): D1SessionLike;
+};
+/** The session type `D`'s `withSession` opens: the caller's own, so drizzle() takes it as it takes `D`; a D1 session where `D` names none */
+type SessionOf<D extends D1DatabaseLike> = D extends {
+    withSession(...args: never[]): infer S;
+} ? S : D1SessionLike;
+export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf };

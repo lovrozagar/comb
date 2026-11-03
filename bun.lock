@@ -54,7 +54,6 @@
         "zod": "catalog:",
       },
       "peerDependencies": {
-        "@cloudflare/workers-types": ">=5.20261001.1 <6",
         "@libsql/client": ">=0.17.4 <0.18",
         "@noble/ciphers": ">=2.0.0 <3",
         "@noble/hashes": ">=2.0.0 <3",
@@ -67,7 +66,6 @@
         "zod": ">=4.5.4 <5",
       },
       "optionalPeers": [
-        "@cloudflare/workers-types",
         "@libsql/client",
         "drizzle-kit",
         "libpg-query",

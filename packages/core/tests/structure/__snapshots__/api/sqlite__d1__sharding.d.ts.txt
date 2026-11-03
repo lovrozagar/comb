@@ -136,6 +136,7 @@ type MergedListQueryResult = Omit<ListQueryResult, "pagination"> & {
 export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListExtras, ListQueryResult, MergedListQueryResult };
 
 // sqlite/d1/sharding/router.d.ts
+import type { D1DatabaseLike } from "../d1-types.ts";
 import type { ShardDbHandle, ShardMapping, ShardMove, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
 /**
  * Shard router — resolves org -> D1 database handle.
@@ -196,9 +197,9 @@ declare class ShardRouter {
     unplace(orgId: string, deps: ShardResolverDeps): Promise<void>;
     /**
      * Resolve a shard mapping to a concrete D1 database handle.
-     * Reads `SHARD_DB_{target}` binding from env.
+     * Reads `SHARD_DB_{target}` binding from env, typed as `D`, the app's D1 type, where it names one.
      */
-    getHandle(mapping: ShardMapping, env: Record<string, unknown>): ShardDbHandle;
+    getHandle<D extends D1DatabaseLike = D1DatabaseLike>(mapping: ShardMapping, env: Record<string, unknown>): ShardDbHandle<D>;
     /**
      * Invalidate both cache tiers. Use after whale graduation or reassignment. It reaches this
      * isolate's LRU and the KV; another isolate's LRU keeps the mapping until it expires.
@@ -243,7 +244,7 @@ export declare const shardMap: ShardMapTable;
 export {};
 
 // sqlite/d1/sharding/types.d.ts
-import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
+import type { D1DatabaseLike, D1StatementLike } from "../d1-types.ts";
 type ShardDriver = "d1";
 type ShardMapping = {
     createdAt: number;
@@ -254,9 +255,10 @@ type ShardMapping = {
     target: string;
     updatedAt: number;
 };
-type ShardDbHandle = {
+/** A shard's binding, typed as the caller names it to getHandle */
+type ShardDbHandle<D extends D1DatabaseLike = D1DatabaseLike> = {
     driver: "d1";
-    handle: D1Database;
+    handle: D;
 };
 /**
  * The KV the router caches mappings in: the three calls it makes. Structural, so a Worker's global
@@ -270,7 +272,7 @@ type ShardKv = {
     }): Promise<void>;
 };
 type ShardResolverDeps = {
-    coreDb: D1Database;
+    coreDb: D1DatabaseLike;
     kv: ShardKv;
 };
 /** What `pick` is told about a new org: how many live orgs each D1 shard holds, absent when none */
@@ -294,7 +296,7 @@ type ShardPlacement = {
 };
 /** A move: the placement, and the app's own statements on the core database to batch with it (R4) */
 type ShardMove = ShardPlacement & {
-    with?: readonly D1PreparedStatement[] | undefined;
+    with?: readonly D1StatementLike[] | undefined;
 };
 /** The deps of `resolveVerified`: those of `resolve`, and how the app checks an org's rows are on the shard a mapping names */
 type ShardVerifyDeps = ShardResolverDeps & {
@@ -544,7 +546,7 @@ type SpellfixSearch = FtsSource & {
     maxEditDistance?: number;
     /** corrections taken per term (default 3) */
     maxCorrections?: number;
-    /** false where spellfix1 is never loaded (D1): the terms are searched as typed and nothing is probed (Q4 of r20) */
+    /** false where spellfix1 is never loaded: the terms are searched as typed and nothing is probed (Q4 of r20); a D1 client is known without it (Q3 of r21) */
     spellfix?: boolean | undefined;
     spellfixTable: string;
 };
@@ -598,6 +600,39 @@ type RelationConfig = {
     throughTargetKey: string;
 };
 export type { RelationConfig };
+
+// sqlite/d1/d1-types.d.ts
+/**
+ * The D1 surface comb calls, as structural types of its own (K3 of r21), as the router's KV is: a
+ * Worker typed by `wrangler types`, whose globals declare D1, and one typed by
+ * `@cloudflare/workers-types` both fit them, so comb's D1 modules are typed in either and need
+ * neither installed. Where comb hands a client on, it hands the caller's own type back.
+ */
+/** A prepared statement as comb uses one: bound, then batched */
+type D1StatementLike = {
+    bind(...values: unknown[]): D1StatementLike;
+};
+/** One statement's answer in a batch: the rows comb reads */
+type D1AnswerLike<T> = {
+    results: T[];
+};
+/** A D1 session: what comb prepares and batches on, and the bookmark it hands on */
+type D1SessionLike = {
+    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
+    getBookmark(): string | null;
+    prepare(query: string): D1StatementLike;
+};
+/** A D1 database binding; one with no `withSession` is a runtime without sessions (an older Miniflare) */
+type D1DatabaseLike = {
+    batch<T = unknown>(statements: D1StatementLike[]): Promise<Array<D1AnswerLike<T>>>;
+    prepare(query: string): D1StatementLike;
+    withSession?(constraintOrBookmark?: string): D1SessionLike;
+};
+/** The session type `D`'s `withSession` opens: the caller's own, so drizzle() takes it as it takes `D`; a D1 session where `D` names none */
+type SessionOf<D extends D1DatabaseLike> = D extends {
+    withSession(...args: never[]): infer S;
+} ? S : D1SessionLike;
+export type { D1AnswerLike, D1DatabaseLike, D1SessionLike, D1StatementLike, SessionOf };
 
 // sqlite/columns.d.ts
 /**

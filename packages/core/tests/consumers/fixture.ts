@@ -86,9 +86,6 @@ export default defineConfig({
 })
 `
 
-/* where the stage installs the floor of comb's workers-types range, apart from the app's own */
-const FLOOR = "floor/node_modules"
-
 const STRICT = {
 	exactOptionalPropertyTypes: true,
 	noPropertyAccessFromIndexSignature: true,
@@ -160,6 +157,34 @@ const STRICT_UNION = {
 	noUnusedParameters: true,
 	verbatimModuleSyntax: true,
 }
+
+/**
+ * K3 of r21: comb's D1 modules in a Worker typed by `wrangler types` alone keep their types, the
+ * binding's own: a wrong argument and an unknown method are each refused, which an untyped module,
+ * as 0.19's was there, would let through
+ */
+const C3_D1 = `import { BookmarkTracker } from "@lovrozagar/comb/sqlite/d1/bookmark"
+import { openD1Session } from "@lovrozagar/comb/sqlite/d1/session"
+import { ShardRouter } from "@lovrozagar/comb/sqlite/d1/sharding"
+
+export async function routed(env: Env, ctx: ExecutionContext, bookmark: string | undefined): Promise<string[]> {
+	const { client, session } = openD1Session(env.DB, { bookmark })
+	const tracker = new BookmarkTracker()
+	tracker.track(session, "core")
+	const router = new ShardRouter({ totalShards: 1 })
+	const mapping = await router.resolve("org", { coreDb: env.DB, kv: env.KV }, ctx)
+	await client.prepare("SELECT 1").run()
+	// @ts-expect-error a string is no D1 database
+	openD1Session("not a database")
+	// @ts-expect-error a D1 client has no such method
+	client.nope()
+	// @ts-expect-error the router's core database is a D1 database
+	await router.resolve("org", { coreDb: "core", kv: env.KV }, ctx)
+	// @ts-expect-error a tracked session is a D1 session
+	tracker.track("session", "core")
+	return [mapping?.target ?? "", ...tracker.getBookmarks().map((tagged) => tagged.bookmark)]
+}
+`
 
 /** The files every staged consumer holds: the Worker, the types module, two tsconfigs, wrangler and vite config */
 export const APP: Record<string, string> = {
@@ -258,29 +283,21 @@ export const APP: Record<string, string> = {
 		},
 		include: ["src/types.ts"],
 	}),
-	/* the same, at the floor of comb's workers-types range, which the stage installs beside the app (R4 of plan 17) */
-	"tsconfig.worker-node-floor.json": JSON.stringify({
-		compilerOptions: {
-			...STRICT,
-			allowImportingTsExtensions: true,
-			lib: ["esnext"],
-			module: "esnext",
-			moduleResolution: "bundler",
-			noEmit: true,
-			paths: { "@cloudflare/workers-types": [`./${FLOOR}/@cloudflare/workers-types`] },
-			typeRoots: [`./${FLOOR}/@cloudflare`, "./node_modules/@types"],
-			types: ["workers-types", "node"],
-		},
-		include: ["src/types.ts"],
-	}),
 	/* everything bundled, so tooling that leaked into a runtime import would show in the output */
 	"vite.config.mjs": `export default { build: { outDir: "dist-vite" }, ssr: { noExternal: true } }\n`,
 	"wrangler.toml": 'name = "consumer"\nmain = "src/worker.ts"\ncompatibility_date = "2026-10-01"\n',
 	/* a project create-cloudflare scaffolds, apart from the app's own files its src glob would take in */
 	"c3/tsconfig.json": CREATE_CLOUDFLARE_TSCONFIG,
-	/* what `wrangler types` writes, reduced to the globals comb's surface needs */
-	"c3/worker-configuration.d.ts": '/// <reference types="@cloudflare/workers-types" />\n',
+	/* the bindings `wrangler types` writes c3/worker-configuration.d.ts from, at the stage (K3 of r21) */
+	"c3/wrangler.jsonc": JSON.stringify({
+		compatibility_date: "2026-10-01",
+		d1_databases: [{ binding: "DB", database_id: "00000000-0000-0000-0000-000000000000", database_name: "core" }],
+		kv_namespaces: [{ binding: "KV", id: "00000000000000000000000000000000" }],
+		main: "src/index.ts",
+		name: "c3",
+	}),
 	"c3/src/index.ts": WORKER,
+	"c3/src/d1.ts": C3_D1,
 	"c3/src/types.ts": WORKER_TYPES,
 	"c3/tsconfig.strict.json": JSON.stringify({ compilerOptions: STRICT_UNION, extends: "./tsconfig.json" }),
 }

@@ -1,11 +1,11 @@
 import { type CacheTargets, ShardCache } from "./cache.ts"
 import { routerSettings } from "./config.ts"
-import type { D1Database } from "@cloudflare/workers-types"
 import { eq } from "drizzle-orm"
-import { drizzle } from "drizzle-orm/d1"
+import type { D1DatabaseLike } from "../d1-types.ts"
 import { openD1Session } from "../session.ts"
 import {
 	assertShard,
+	d1Drizzle,
 	headroomPick,
 	insertFirst,
 	overwrite,
@@ -142,7 +142,7 @@ class ShardRouter {
 	 */
 	async allocate(orgId: string, deps: ShardResolverDeps, executionCtx: WaitUntilCtx): Promise<ShardMapping> {
 		assertOrgId(orgId)
-		const db = drizzle(openD1Session(deps.coreDb).client)
+		const db = d1Drizzle(openD1Session(deps.coreDb).client)
 		const existing = await db.select().from(shardMap).where(eq(shardMap.org_id, orgId)).get()
 		const shardId = existing?.shard_id ?? (await pickShard(db, this.pick, { orgId, totalShards: this.totalShards }))
 		return this.placeFirst({ orgId, shardId }, deps, executionCtx)
@@ -176,20 +176,23 @@ class ShardRouter {
 
 	/** Soft-delete an org's mapping and invalidate it here; a later allocate or place revives it on its shard */
 	async unplace(orgId: string, deps: ShardResolverDeps): Promise<void> {
-		await softDelete(drizzle(openD1Session(deps.coreDb).client), orgId)
+		await softDelete(d1Drizzle(openD1Session(deps.coreDb).client), orgId)
 		await this.invalidate(orgId, deps.kv)
 	}
 
 	/**
 	 * Resolve a shard mapping to a concrete D1 database handle.
-	 * Reads `SHARD_DB_{target}` binding from env.
+	 * Reads `SHARD_DB_{target}` binding from env, typed as `D`, the app's D1 type, where it names one.
 	 */
-	getHandle(mapping: ShardMapping, env: Record<string, unknown>): ShardDbHandle {
+	getHandle<D extends D1DatabaseLike = D1DatabaseLike>(
+		mapping: ShardMapping,
+		env: Record<string, unknown>,
+	): ShardDbHandle<D> {
 		const binding = env[`SHARD_DB_${mapping.target}`]
 		if (!binding) {
 			throw new Error(`Missing D1 binding: SHARD_DB_${mapping.target}`)
 		}
-		return { driver: "d1", handle: binding as D1Database }
+		return { driver: "d1", handle: binding as D }
 	}
 
 	/**
@@ -211,7 +214,7 @@ class ShardRouter {
 		/* read before the write, so a tombstone that came after its read never tags its row (Q6 of r18) */
 		const generation = this.cache.generationOf(orgId)
 		const tag = this.cache.tombstoneOf(orgId)
-		const { how, row } = await insertFirst(drizzle(openD1Session(deps.coreDb).client), orgId, shardId)
+		const { how, row } = await insertFirst(d1Drizzle(openD1Session(deps.coreDb).client), orgId, shardId)
 		/* written after this isolate's live tombstone, if it holds one, so tagged with it: other isolates trust it (Q17 of r17) */
 		return this.settle(row, how, { executionCtx, generation, kv: deps.kv, tag })
 	}
