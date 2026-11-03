@@ -2,6 +2,7 @@
 import type * as z from "zod"
 
 import type { FilterLimits } from "./filter.ts"
+import type { LimitsGiven } from "./filter-validate.ts"
 import type { RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS } from "./schema-params.ts"
 import type { FieldType, FilterAST, ParsedFields, SortDirection, SortField } from "./types.ts"
 
@@ -40,7 +41,7 @@ type ListQueryConfig<
 	filter?: Record<string, FieldType> | undefined
 	/** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
 	lang?: true | undefined
-	limits?: Partial<ListQueryLimits> | undefined
+	limits?: LimitsGiven<ListQueryLimits> | undefined
 	/**
 	 * Fields `q` searches, as published. Omitted: the endpoint takes no `q`.
 	 * Declaring it obliges the handler to pass a search resolver to buildListQuery,

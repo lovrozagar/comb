@@ -7,6 +7,7 @@ import * as z from "zod"
 import { EMPTY_OBJ } from "../empty.ts"
 import { filterParamMeta, orderParamMeta, searchParamMeta } from "./descriptions.ts"
 import { OPERATORS_BY_TYPE } from "./filter.ts"
+import { limitsOver } from "./filter-validate.ts"
 import { listQueryStamp } from "./list-meta.ts"
 import { filterAstOf, parsedSortOf, reportOutputIssues, sortOrderByOf } from "./list-transform.ts"
 import { encodedMessage, LIST_QUERY_LIMITS, PAGINATION_DEFAULTS, REQUEST_BYTES, withinBytes } from "./schema-limits.ts"
@@ -124,19 +125,6 @@ function outputSchemaFor(sortConfig: readonly string[], extendFields: Record<str
 	})
 }
 
-/**
- * The limits with the config's over the defaults, each a whole number from 0, a TypeError naming it
- * otherwise (C3 of r17): the query stamp publishes them, and its reader refuses any other, so a
- * limit it cannot carry would drop every query fact of the route. No cap is a large whole number
- */
-function limitsOf(given: Partial<ListQueryLimits> | undefined): ListQueryLimits {
-	for (const [key, value] of Object.entries(given ?? {})) {
-		if (!Number.isSafeInteger(value) || (value as number) < 0)
-			throw new TypeError(`createListQuerySchema: limits.${key} must be a whole number from 0; got ${String(value)}`)
-	}
-	return { ...LIST_QUERY_LIMITS, ...given }
-}
-
 function createListQuerySchema<
 	T extends OutputStableShape<T> = Record<never, never>,
 	const TSortFields extends readonly string[] = readonly string[],
@@ -144,7 +132,8 @@ function createListQuerySchema<
 	type TSortField = TSortFields[number]
 	type ExtendedOutput = ListQueryOutput<TSortField> & { [K in keyof T]: z.infer<T[K]> }
 	const { extend: extendFields, fields: fieldsConfig, filter: filterConfig = EMPTY_OBJ, sort: sortConfig } = config
-	const limits = limitsOf(config.limits)
+	/* a whole number from 0 each (C3 of r17): the query stamp publishes them, and its reader refuses any other */
+	const limits = limitsOver("createListQuerySchema", LIST_QUERY_LIMITS, config.limits)
 	const extensions = extendFields as Record<string, z.ZodType> | undefined
 	assertNotReserved("createListQuerySchema", extensions, RESERVED_LIST_KEYS)
 

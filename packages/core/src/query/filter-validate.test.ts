@@ -226,3 +226,29 @@ describe("validateFilter on a like or ilike pattern", () => {
 		expect(validateFilter(`title.like.${"[".repeat(20)}*x`, fields, { maxPatternBytes: 62 })?.valid).toBe(true)
 	})
 })
+
+/* KT1 of r22b: limits are read as exact, so a key set to undefined is the key left out, as every other option bag reads it */
+describe("an explicit undefined limit means the default (KT1; sibling: `NaN` and `-1`)", () => {
+	const fields = { a: "number", title: "string" } as const
+	const conditions = Array.from({ length: 21 }, (_, i) => `a.neq.${i}`).join(",")
+	const PAST_DEFAULT = {
+		maxConditions: conditions,
+		maxDepth: "or(and(or(and(a.eq.1,a.eq.2),a.eq.3),a.eq.4),a.eq.5)",
+		maxInValues: list(51),
+		maxPatternBytes: `title.like.${"[".repeat(20)}*x`,
+		maxValues: `${list(50)},${list(11)}`,
+	} as const
+
+	it.each(Object.entries(PAST_DEFAULT))("keeps %s's default cap when it is set to undefined", (key, filter) => {
+		const refused = errorsOf(validateFilter(filter, fields))
+		expect(validateFilter(filter, fields, { [key]: undefined })).toEqual({ errors: refused, valid: false })
+	})
+
+	it.each(
+		Object.keys(PAST_DEFAULT).flatMap((key) => [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY].map((n) => [key, n])),
+	)("refuses %s %s, naming the key, as createListQuerySchema does", (key, value) => {
+		expect(() => validateFilter("a.eq.1", fields, { [key]: value })).toThrow(
+			new TypeError(`validateFilter: limits.${key} must be a whole number from 0; got ${value}`),
+		)
+	})
+})

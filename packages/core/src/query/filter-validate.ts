@@ -65,6 +65,27 @@ const FILTER_LIMITS: FilterLimits = {
 	maxValues: 60,
 }
 
+/** A limits bag as a caller gives it: any key left out or set to undefined keeps its default (KT1 of r22b) */
+type LimitsGiven<T> = { [K in keyof T]?: number | undefined }
+
+/**
+ * `given` over `defaults`, a key set to undefined left out as every other option bag reads it, each
+ * other a whole number from 0, a TypeError naming it and `owner` otherwise (KT1 of r22b): a cap of
+ * NaN or undefined compared false, which turned it off. No cap is a large whole number
+ */
+function limitsOver<T extends Record<string, number>>(
+	owner: string,
+	defaults: T,
+	given: LimitsGiven<T> | undefined,
+): T {
+	const set = Object.entries(given ?? {}).filter((entry): entry is [string, number] => entry[1] !== undefined)
+	for (const [key, value] of set) {
+		if (!Number.isSafeInteger(value) || value < 0)
+			throw new TypeError(`${owner}: limits.${key} must be a whole number from 0; got ${String(value)}`)
+	}
+	return { ...defaults, ...Object.fromEntries(set) }
+}
+
 /** The parameters one condition binds */
 const boundBy = ({ operator, value }: FilterCondition) =>
 	Array.isArray(value) ? value.length : operator === "is" && typeof value !== "boolean" ? 0 : 1
@@ -235,14 +256,15 @@ function checkGroup(group: FilterGroup, check: Check, depth: number): Shape {
 function validateFilter(
 	filterString: string | null | undefined,
 	allowedFields: Record<string, FilterField>,
-	limits?: Partial<FilterLimits>,
+	limits?: LimitsGiven<FilterLimits> | undefined,
 ): FilterValidationResult | null {
 	const fields = checkedFields(allowedFields)
+	const caps = limitsOver("validateFilter", FILTER_LIMITS, limits)
 	if (!filterString || filterString.trim() === "") return null
 	const ast = parseFilter(filterString)
 	if (!ast) return { errors: ["Invalid filter syntax"], valid: false }
 
-	const check: Check = { errors: [], fields, limits: { ...FILTER_LIMITS, ...limits } }
+	const check: Check = { errors: [], fields, limits: caps }
 	const shape = checkGroup(ast.root, check, 0)
 	if (shape.conditions > check.limits.maxConditions) {
 		check.errors.push(`Too many filter conditions: ${shape.conditions} (max ${check.limits.maxConditions})`)
@@ -258,11 +280,13 @@ function validateFilter(
 
 export {
 	FILTER_LIMITS,
+	limitsOver,
 	OPERATORS_BY_TYPE,
 	parseFilterNumber,
 	validateFilter,
 	type FilterField,
 	type FilterFieldSpec,
 	type FilterLimits,
+	type LimitsGiven,
 	type FilterValidationResult,
 }

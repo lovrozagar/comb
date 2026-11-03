@@ -616,6 +616,7 @@ export type { ComputedFilterResolver, ComputedSortResolver, FieldSelection, Fiel
 /** The configs and outputs of the list and retrieve query schemas. Declaration-only. */
 import type * as z from "zod";
 import type { FilterLimits } from "./filter.ts";
+import type { LimitsGiven } from "./filter-validate.ts";
 import type { RESERVED_LIST_KEYS, RESERVED_RETRIEVE_KEYS } from "./schema-params.ts";
 import type { FieldType, FilterAST, ParsedFields, SortDirection, SortField } from "./types.ts";
 type FieldsConfig = {
@@ -650,7 +651,7 @@ type ListQueryConfig<T extends OutputStableShape<T> = Record<never, never>, TSor
     filter?: Record<string, FieldType> | undefined;
     /** Accept `lang` (localized text). Omitted: the endpoint takes no `lang`. */
     lang?: true | undefined;
-    limits?: Partial<ListQueryLimits> | undefined;
+    limits?: LimitsGiven<ListQueryLimits> | undefined;
     /**
      * Fields `q` searches, as published. Omitted: the endpoint takes no `q`.
      * Declaring it obliges the handler to pass a search resolver to buildListQuery,
@@ -843,6 +844,16 @@ type FilterLimits = {
     maxValues: number;
 };
 declare const FILTER_LIMITS: FilterLimits;
+/** A limits bag as a caller gives it: any key left out or set to undefined keeps its default (KT1 of r22b) */
+type LimitsGiven<T> = {
+    [K in keyof T]?: number | undefined;
+};
+/**
+ * `given` over `defaults`, a key set to undefined left out as every other option bag reads it, each
+ * other a whole number from 0, a TypeError naming it and `owner` otherwise (KT1 of r22b): a cap of
+ * NaN or undefined compared false, which turned it off. No cap is a large whole number
+ */
+declare function limitsOver<T extends Record<string, number>>(owner: string, defaults: T, given: LimitsGiven<T> | undefined): T;
 /**
  * A number field's value: finite (1e999 reads as Infinity, which no column holds), and within
  * ±(2^53 − 1), past which a double binds a neighbouring value. The value is read, not its
@@ -858,8 +869,8 @@ declare function parseFilterNumber(raw: string): {
  * or spec allows, values of their type, within `limits`. Null when there is no filter. A spec
  * that lists an operator its type cannot take, or a format on no date, throws a TypeError.
  */
-declare function validateFilter(filterString: string | null | undefined, allowedFields: Record<string, FilterField>, limits?: Partial<FilterLimits>): FilterValidationResult | null;
-export { FILTER_LIMITS, OPERATORS_BY_TYPE, parseFilterNumber, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type FilterValidationResult, };
+declare function validateFilter(filterString: string | null | undefined, allowedFields: Record<string, FilterField>, limits?: LimitsGiven<FilterLimits> | undefined): FilterValidationResult | null;
+export { FILTER_LIMITS, limitsOver, OPERATORS_BY_TYPE, parseFilterNumber, validateFilter, type FilterField, type FilterFieldSpec, type FilterLimits, type LimitsGiven, type FilterValidationResult, };
 
 // meta/contract.d.ts
 /**

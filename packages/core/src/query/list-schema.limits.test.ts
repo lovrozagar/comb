@@ -4,7 +4,7 @@ import * as z from "zod"
 import { createListQuerySchema } from "./list-schema.ts"
 import { createRetrieveQuerySchema } from "./retrieve-schema.ts"
 import { MAX_CURSOR_LENGTH } from "./cursor.ts"
-import { MAX_QUERY_BYTES, PAGINATION_DEFAULTS, REQUEST_BYTES } from "./schema-limits.ts"
+import { LIST_QUERY_LIMITS, MAX_QUERY_BYTES, PAGINATION_DEFAULTS, REQUEST_BYTES } from "./schema-limits.ts"
 
 const RESERVED = [
 	"cursor",
@@ -194,5 +194,16 @@ describe("createListQuerySchema's limits", () => {
 		expect(() =>
 			createListQuerySchema({ limits: { maxPatternBytes: 1_000_000, maxSortKeys: 0 }, sort: ["a"] }),
 		).not.toThrow()
+	})
+})
+
+/* KT1 of r22b: a key set to undefined is the key left out, so the schema enforces and publishes its default */
+/** What a schema with these limits publishes */
+const metaOf = (limits: Record<string, undefined>) =>
+	createListQuerySchema({ filter: { a: "number" }, limits, search: ["a"], sort: ["a"] }).meta()
+
+describe("an explicit undefined list limit means the default (KT1; sibling: `NaN` and `-1` above)", () => {
+	it.each(Object.keys(LIST_QUERY_LIMITS))("builds with %s set to undefined, publishing the default", (key) => {
+		expect(metaOf({ [key]: undefined })).toEqual(metaOf({}))
 	})
 })
