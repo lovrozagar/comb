@@ -40,6 +40,7 @@ import {
 	extensionsOf,
 	makeDatabase,
 	ownerOf,
+	partitionedOn,
 	settle,
 	type Sql,
 	sweep,
@@ -112,7 +113,8 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 			replay.leftOut(name, sent, beyond)
 			continue
 		}
-		const alone = !inFile && outsideOnly(type, node) === undefined
+		const partitioned = await partitionedOn(run.sql, type, node)
+		const alone = !inFile && outsideOnly(type, node, () => partitioned) === undefined
 		if (alone) await begin(run)
 		try {
 			if (type === "CreateRoleStmt") {

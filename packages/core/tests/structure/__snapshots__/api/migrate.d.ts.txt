@@ -636,8 +636,7 @@ export declare function generateIncrementalMigration(options: MigrateDiffOptions
  * runs outside one.
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts";
-import { type Finding } from "./classify-alter.ts";
-import { type ReadStatement } from "./classify-file.ts";
+import { type Read } from "./classify-verdict.ts";
 import { type PgRead } from "./pg-split.ts";
 type ClassifyOptions = {
     /** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
@@ -648,9 +647,6 @@ type ClassifyOptions = {
     dialect?: Dialect | undefined;
     /** the Postgres schema the URLs' search_path names, where an unqualified name resolves; public unnamed (M72) */
     schema?: string | undefined;
-};
-type Read = ReadStatement & {
-    findings: Finding[];
 };
 /**
  * The file as its dialect reads it; with none named, as SQLite reads it, the CLI's default. On
@@ -663,9 +659,7 @@ declare function extractDropStatements(sql: string, options?: ClassifyOptions): 
 declare const dropsOf: (reads: readonly Read[]) => string[];
 /** How destructive a migration is, which statements make it so, and which block a Postgres table */
 declare function classifyMigration(sql: string, options?: ClassifyOptions): MigrationClassification;
-/** classifyMigration of the readings of `sql` */
-declare function classificationOf(reads: readonly Read[], sql: string, { d1 }?: Pick<ClassifyOptions, "d1">): MigrationClassification;
-export { classificationOf, classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings };
+export { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings };
 
 // migrate/core/pg-split.d.ts
 import type { Dialect } from "../types.ts";
@@ -838,6 +832,55 @@ type FtsDelta = {
 declare function ftsDelta({ from, plainDiff, to, toStatements }: FtsDelta): string;
 export { asSql, ftsDelta, separate, type FtsState };
 
+// migrate/core/classify-verdict.d.ts
+/**
+ * A file's verdict from its statements' readings (classify.ts): each statement Postgres or D1
+ * cannot run refused first, then the file rated at the strictest level any reading gives a
+ * statement, with the statements that make it so, the ones that lock a table, and the ones whose
+ * effect waits on data
+ */
+import type { MigrationClassification } from "../types.ts";
+import type { Finding } from "./classify-alter.ts";
+import { type ReadStatement } from "./classify-file.ts";
+/** A statement read, with what each rule found in it */
+type Read = ReadStatement & {
+    findings: Finding[];
+};
+/** classifyMigration of the readings of `sql` */
+declare function classificationOf(reads: readonly Read[], sql: string, { d1 }?: {
+    d1?: boolean | undefined;
+}): MigrationClassification;
+export { classificationOf, type Read };
+
+// migrate/drivers/local-db.d.ts
+/** What comb does with a private database */
+export type LocalDb = {
+    /** each row a statement returns, by column */
+    all(sql: string, params?: readonly unknown[]): Array<Record<string, unknown>>;
+    close(): void;
+    /** run statements, several at once */
+    exec(sql: string): void;
+    /** run one statement with parameters */
+    run(sql: string, params?: readonly unknown[]): void;
+};
+/** A scratch database: a file only this user can open, removed on close */
+export type ScratchDb = LocalDb & {
+    /** close this connection and open a fresh one to the same file: what it holds stays, what the connection set does not */
+    reopen(): void;
+};
+/** A new in-memory database on the runtime comb runs on */
+export declare function openMemory(): Promise<LocalDb>;
+/** How old a scratch directory is before a later run reads it as one a killed run left: no run holds one this long */
+export declare const SCRATCH_STALE_MS: number;
+/** Remove the scratch directories killed runs of this user left in `dir`; one another user owns, or one in use, stays */
+export declare function sweepScratch(dir?: string, now?: number): void;
+/**
+ * A new scratch database: a file in a directory of its own that only this user can open (0700),
+ * removed with it on close. The first one a process opens sweeps what killed runs left, so a run
+ * killed before its close leaves its directory only until a later run's sweep.
+ */
+export declare function openScratch(): Promise<ScratchDb>;
+
 // migrate/core/classify-alter.d.ts
 /** What one statement or action makes of the migration: its level, the drops it names, and why */
 type Finding = {
@@ -883,9 +926,11 @@ declare function reindexedOf(statements: readonly string[]): Set<string>;
 declare const outsideTransaction: (sql: string) => boolean;
 /** A statement as the gate read it: its code, its text, and the dialect it was read as */
 /** A statement as the gate reads it: its code, its text, and on Postgres its parse tree, undefined where the parser refused it */
+/** A statement read: its code, its dialect, the statement, its parse tree, and what it is when Postgres runs it only outside a transaction */
 type ReadStatement = {
     code: string;
     dialect: Dialect;
+    outside?: string | undefined;
     stmt: string;
     tree?: unknown;
 };
@@ -900,34 +945,5 @@ declare const PROCESS_PRAGMAS: ReadonlySet<string>;
  * Refuses a statement that cannot run in its file `sql` on its target, a D1 database when `d1`: no
  * `-- comb:allow-unsafe:` overrides this
  */
-declare function refuseUnrunnable({ code, dialect, stmt, tree }: ReadStatement, sql: string, d1?: boolean): void;
+declare function refuseUnrunnable({ code, dialect, outside, stmt }: ReadStatement, sql: string, d1?: boolean): void;
 export { ftsCommandFindings, outsideTransaction, preview, PROCESS_PRAGMAS, type ReadStatement, refuseUnrunnable, reindexedOf, };
-
-// migrate/drivers/local-db.d.ts
-/** What comb does with a private database */
-export type LocalDb = {
-    /** each row a statement returns, by column */
-    all(sql: string, params?: readonly unknown[]): Array<Record<string, unknown>>;
-    close(): void;
-    /** run statements, several at once */
-    exec(sql: string): void;
-    /** run one statement with parameters */
-    run(sql: string, params?: readonly unknown[]): void;
-};
-/** A scratch database: a file only this user can open, removed on close */
-export type ScratchDb = LocalDb & {
-    /** close this connection and open a fresh one to the same file: what it holds stays, what the connection set does not */
-    reopen(): void;
-};
-/** A new in-memory database on the runtime comb runs on */
-export declare function openMemory(): Promise<LocalDb>;
-/** How old a scratch directory is before a later run reads it as one a killed run left: no run holds one this long */
-export declare const SCRATCH_STALE_MS: number;
-/** Remove the scratch directories killed runs of this user left in `dir`; one another user owns, or one in use, stays */
-export declare function sweepScratch(dir?: string, now?: number): void;
-/**
- * A new scratch database: a file in a directory of its own that only this user can open (0700),
- * removed with it on close. The first one a process opens sweeps what killed runs left, so a run
- * killed before its close leaves its directory only until a later run's sweep.
- */
-export declare function openScratch(): Promise<ScratchDb>;

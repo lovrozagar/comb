@@ -66,6 +66,42 @@ describe("outsideOnly", () => {
 })
 
 /* P1 of r20: what the dev replay leaves out, as it would outlive the replay's database on devUrl's server */
+/** What `sql`'s one statement is outside a transaction when the table or index it names is `partitioned` */
+const outsideOf = (sql: string, partitioned: (relation: unknown, index: boolean) => boolean) =>
+	outsideOnly(...nodeOf(parsePostgres(sql).stmts), partitioned)
+
+/** A partition lookup a statement that names no table or index never makes */
+const never = (): boolean => {
+	throw new Error("asked")
+}
+
+/* P9 of r21: Postgres 17 refuses these in a transaction block on a partitioned table or index alone (.tmp/grunt/p20/logs/8.6-probe.log) */
+describe("outsideOnly of a partitioned table or index", () => {
+	it.each([
+		["CLUSTER p USING p_at", "CLUSTER", false],
+		["REINDEX TABLE p", "REINDEX TABLE", false],
+		["REINDEX (VERBOSE) TABLE s.p", "REINDEX TABLE", false],
+		["REINDEX INDEX p_at", "REINDEX INDEX", true],
+	])("names %j as Postgres's refusal does, asking of its table or index", (sql, named, index) => {
+		const asked: Array<[unknown, boolean]> = []
+		expect(outsideOf(sql, (relation, isIndex) => (asked.push([relation, isIndex]), true))).toBe(named)
+		expect(asked.map(([, isIndex]) => isIndex)).toEqual([index])
+	})
+
+	it("leaves a plain table's or index's in a transaction, and asks of nothing else", () => {
+		expect(
+			["CLUSTER plain USING plain_id", "REINDEX TABLE plain", "REINDEX INDEX plain_id"].map((sql) =>
+				outsideOf(sql, () => false),
+			),
+		).toEqual([undefined, undefined, undefined])
+		expect(["CLUSTER", "REINDEX SCHEMA s", "CREATE TABLE t (a int)"].map((sql) => outsideOf(sql, never))).toEqual([
+			"CLUSTER",
+			"REINDEX SCHEMA",
+			undefined,
+		])
+	})
+})
+
 describe("beyondDatabase", () => {
 	it.each([
 		["ALTER DATABASE app SET work_mem = '4MB'", "ALTER DATABASE"],

@@ -15,13 +15,15 @@
  */
 import type { Dialect, ExtractedSchema, MigrationClassification } from "../types.ts"
 import { alterTableFindings, type Finding } from "./classify-alter.ts"
-import { ftsCommandFindings, preview, type ReadStatement, refuseUnrunnable, reindexedOf } from "./classify-file.ts"
+import { ftsCommandFindings, reindexedOf } from "./classify-file.ts"
+import { classificationOf, type Read } from "./classify-verdict.ts"
 import { ftsTriggersOf, grammarFindings } from "./classify-grammar.ts"
 import { sqliteWriteFindings } from "./classify-sqlite-write.ts"
 import { type RebuildContext, rebuildFinding } from "./classify-rebuild.ts"
 import { preparedOf, runtimeFindings } from "./classify-runtime.ts"
 import { followAdds, type Fresh, freshStart } from "./classify-write.ts"
-import { type Facts, historyFacts } from "./pg-history.ts"
+import { type Facts, historyFacts, tableOf } from "./pg-history.ts"
+import { nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
 import { pgTreeFindings } from "./pg-tree.ts"
 import { extractSchema } from "./schema.ts"
 import { type Rebuilds, rebuildsOf, TXMODE_NONE } from "./rebuild-copy.ts"
@@ -155,8 +157,6 @@ function findingsOf(code: string, ctx: FileContext): Finding[] {
 	return ctx.dialect === "postgres" ? [] : (alterTableFindings(code, ctx) ?? statementFindings(code, ctx))
 }
 
-type Read = ReadStatement & { findings: Finding[] }
-
 /**
  * One statement's findings: the rules', then on Postgres the parse tree's, which follows what the
  * statement makes, and the grammar's, which a whole-statement tree rating stands in for (P13 of r18)
@@ -174,6 +174,14 @@ function statementReadings(
 	const read = pgTreeFindings(stmt, ctx, tree)
 	return [...rules, ...grammarFindings(code, { ...ctx, ftsTriggers, ...read.grammar }), ...read.findings]
 }
+
+/** Whether a table, or an index, the history `facts` follow is partitioned */
+const partitionedIn =
+	(facts: Facts) =>
+	(relation: unknown, index: boolean): boolean => {
+		const { key } = tableOf(relation, facts.schema)
+		return index ? facts.partitionedIndexes.has(key) : facts.partitioned.has(key)
+	}
 
 /** The file read as `dialect` reads it, against `before`, a Postgres name keyed under `schema` */
 function readFile(
@@ -217,17 +225,20 @@ function readFile(
 		unguarded: guards.unguarded,
 	}
 	return statements.map((stmt, i) => {
+		const tree = read?.statements[i]?.tree
+		/* before the statement's findings follow what it makes: a table partitioned so far (P9 of r21) */
+		const outside = tree === undefined ? undefined : outsideOnly(...nodeOf(tree), partitionedIn(ctx.facts))
 		/* comb's own guard around a rebuild, exactly as comb writes it, empties and refills; it loses nothing */
 		/* every other statement is rated by the rules, and only as a shape the grammar recognizes */
 		const findings = guards.guarded.has(i)
 			? []
-			: statementReadings({ code: codes[i] as string, stmt, tree: read?.statements[i]?.tree }, ctx, ftsTriggers)
+			: statementReadings({ code: codes[i] as string, stmt, tree }, ctx, ftsTriggers)
 		/* on Postgres what a statement makes new is followed from its parse tree (pg-ddl.ts) */
 		if (dialect === "sqlite") {
 			followAdds(codes[i] as string, ctx.fresh)
 			ctx.schema = extractSchema(stmt, ctx.schema)
 		}
-		return { code: codes[i] as string, dialect, findings, stmt, tree: read?.statements[i]?.tree }
+		return { code: codes[i] as string, dialect, findings, outside, stmt, tree }
 	})
 }
 
@@ -240,16 +251,6 @@ const readings = (
 	{ before, dialect, schema }: ClassifyOptions,
 	read: PgRead | undefined = dialect === "postgres" ? pgRead(sql) : undefined,
 ): Read[] => readFile(sql, { before, dialect: dialect ?? "sqlite", schema: schema ?? "public" }, read)
-
-/** One entry per statement a kept finding names: the statement once, each of its notes once (S6 of r18) */
-const entries = (reads: readonly Read[], keep: (finding: Finding) => boolean) =>
-	reads.flatMap(({ findings, stmt }) => {
-		const kept = findings.filter(keep)
-		if (kept.length === 0) return []
-		const notes = [...new Set(kept.flatMap(({ note }) => (note === undefined ? [] : [note])))]
-		return [notes.length === 0 ? preview(stmt) : `${preview(stmt)} (${notes.join("; ")})`]
-	})
-const at = (level: Finding["level"]) => (finding: Finding) => finding.level === level
 
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 function extractDropStatements(sql: string, options: ClassifyOptions = {}): string[] {
@@ -266,35 +267,4 @@ function classifyMigration(sql: string, options: ClassifyOptions = {}): Migratio
 	return classificationOf(readings(sql, options), sql, options)
 }
 
-/** classifyMigration of the readings of `sql` */
-function classificationOf(
-	reads: readonly Read[],
-	sql: string,
-	{ d1 = false }: Pick<ClassifyOptions, "d1"> = {},
-): MigrationClassification {
-	for (const read of reads) refuseUnrunnable(read, sql, d1)
-	const unsafeStatements = [...new Set(entries(reads, at("unsafe")))]
-	/* a statement is listed once, at the strictest level any reading gives it, whatever each finding's note */
-	const unsafe = new Set(
-		reads.filter(({ findings }) => findings.some((f) => f.level === "unsafe")).map(({ stmt }) => preview(stmt)),
-	)
-	const cautiousStatements = [
-		...new Set(
-			entries(
-				reads.filter(({ stmt }) => !unsafe.has(preview(stmt))),
-				at("cautious"),
-			),
-		),
-	]
-	if (TXMODE_NONE.test(sql)) cautiousStatements.push("-- atlas:txmode none: the file is not applied in one transaction")
-	const safety = unsafeStatements.length > 0 ? "unsafe" : cautiousStatements.length > 0 ? "cautious" : "safe"
-	return {
-		cautiousStatements,
-		lockWarnings: [...new Set(entries(reads, at("lock")))],
-		pendingStatements: [...new Set(entries(reads, (finding) => finding.pending === true))],
-		safety,
-		unsafeStatements,
-	}
-}
-
-export { classificationOf, classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings }
+export { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings }

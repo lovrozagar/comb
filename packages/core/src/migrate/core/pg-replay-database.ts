@@ -20,7 +20,7 @@ import { randomUUID } from "node:crypto"
 import { sqlIdentifier } from "../../codegen/utils/case.ts"
 import type { PgTarget } from "./atlas-target.ts"
 import { type Connect, loadPostgres } from "./pg-live-objects.ts"
-import { nodeOf } from "./pg-outside-transaction.ts"
+import { nodeOf, outsideOnly } from "./pg-outside-transaction.ts"
 import { pgRead } from "./pg-split.ts"
 import { postgresOptionsOf } from "./pg-url.ts"
 
@@ -144,6 +144,22 @@ async function makeDatabase(admin: Sql, owner: string, refused: () => Error): Pr
 	return name
 }
 
+/**
+ * Whether the table or index a statement names, where outsideOnly asks, is partitioned in the
+ * replay's database as the history left it so far (P9 of r21); a statement that names none asks nothing
+ */
+async function partitionedOn(sql: Sql, type: string, node: Record<string, unknown>): Promise<boolean> {
+	let asked: { relname: string; schemaname?: string } | undefined
+	outsideOnly(type, node, (relation) => {
+		asked = relation as typeof asked
+		return false
+	})
+	if (asked === undefined) return false
+	const name = [asked.schemaname, asked.relname].flatMap((part) => (part === undefined ? [] : [sqlIdentifier(part)]))
+	const [row] = await sql.unsafe("SELECT relkind FROM pg_class WHERE oid = to_regclass($1)", [name.join(".")])
+	return row?.["relkind"] === "p" || row?.["relkind"] === "I"
+}
+
 /* the extensions a database holds, in the order they were made, so one another needs comes first */
 const EXTENSIONS =
 	"SELECT e.extname AS name, n.nspname AS schema, e.extversion AS version FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace ORDER BY e.oid"
@@ -191,6 +207,7 @@ export {
 	literal,
 	makeDatabase,
 	ownerOf,
+	partitionedOn,
 	settle,
 	STALE_MS,
 	type Sql,

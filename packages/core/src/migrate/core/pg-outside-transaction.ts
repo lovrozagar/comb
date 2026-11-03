@@ -8,8 +8,10 @@
  * ALTER DATABASE SET TABLESPACE, CREATE and DROP TABLESPACE, DISCARD ALL, COMMIT and ROLLBACK
  * PREPARED, and a subscription's slot work: CREATE SUBSCRIPTION making a slot (its default unless
  * `connect` or `create_slot` is false), DROP SUBSCRIPTION (whose slot comb cannot see), and ALTER
- * SUBSCRIPTION's REFRESH, a publication change that refreshes (its default) and a SET of failover. A plain CLUSTER, a
- * REINDEX of one table or index, a detach's FINALIZE and the rest run in one.
+ * SUBSCRIPTION's REFRESH, a publication change that refreshes (its default) and a SET of failover,
+ * and a CLUSTER, a REINDEX TABLE and a REINDEX INDEX of a partitioned table or index (P9 of r21,
+ * .tmp/grunt/p20/logs/8.6-probe.log), which the caller says it is. A plain table's or index's
+ * CLUSTER and REINDEX, a detach's FINALIZE and the rest run in one.
  *
  * Beside it, the statements whose scope is the server or another database (P1 of r20, amended):
  * the dev replay runs each history file as Atlas applies it, committed, in a database of its own,
@@ -76,8 +78,25 @@ const PUBLICATION_CHANGES: ReadonlySet<unknown> = /* @__PURE__ */ new Set([
 	"ALTER_SUBSCRIPTION_SET_PUBLICATION",
 ])
 
+/** Whether the table, or with `index` the index, a statement names is partitioned, as its caller knows it */
+type Partitioned = (relation: unknown, index: boolean) => boolean
+
+// lookup-table: the REINDEX kinds of one relation, which a transaction refuses for a partitioned one, and whether it is an index
+const ONE_REINDEX: Readonly<Record<string, { index: boolean; named: string }>> = {
+	REINDEX_OBJECT_INDEX: { index: true, named: "REINDEX INDEX" },
+	REINDEX_OBJECT_TABLE: { index: false, named: "REINDEX TABLE" },
+}
+
+/** A REINDEX's name when Postgres runs it only outside a transaction block: of more than one table, or of a partitioned one */
+function reindexOutside(node: Node, partitioned: Partitioned): string | undefined {
+	const kind = String(node["kind"])
+	const one = ONE_REINDEX[kind]
+	if (one === undefined) return WIDE_REINDEX[kind]
+	return partitioned(node["relation"], one.index) ? one.named : undefined
+}
+
 // lookup-table: each statement that needs no transaction block of its own, by node type, with what it is when it does
-const OUTSIDE: Readonly<Record<string, (node: Node) => string | undefined>> = {
+const OUTSIDE: Readonly<Record<string, (node: Node, partitioned: Partitioned) => string | undefined>> = {
 	AlterDatabaseStmt: (node) => (optionsOf(node).has("tablespace") ? "ALTER DATABASE SET TABLESPACE" : undefined),
 	AlterSubscriptionStmt: (node) => {
 		if (node["kind"] === "ALTER_SUBSCRIPTION_REFRESH") return "ALTER SUBSCRIPTION ... REFRESH"
@@ -88,7 +107,8 @@ const OUTSIDE: Readonly<Record<string, (node: Node) => string | undefined>> = {
 		return refreshes ? "ALTER SUBSCRIPTION with refresh" : undefined
 	},
 	AlterSystemStmt: () => "ALTER SYSTEM",
-	ClusterStmt: (node) => (node["relation"] === undefined ? "CLUSTER" : undefined),
+	ClusterStmt: (node, partitioned) =>
+		node["relation"] === undefined || partitioned(node["relation"], false) ? "CLUSTER" : undefined,
 	CreateSubscriptionStmt: (node) => {
 		const options = optionsOf(node)
 		const slot = !isOff(options.get("connect")) && !isOff(options.get("create_slot"))
@@ -100,7 +120,7 @@ const OUTSIDE: Readonly<Record<string, (node: Node) => string | undefined>> = {
 	DropSubscriptionStmt: () => "DROP SUBSCRIPTION",
 	DropTableSpaceStmt: () => "DROP TABLESPACE",
 	DropdbStmt: () => "DROP DATABASE",
-	ReindexStmt: (node) => WIDE_REINDEX[String(node["kind"])],
+	ReindexStmt: reindexOutside,
 	TransactionStmt: (node) =>
 		({ TRANS_STMT_COMMIT_PREPARED: "COMMIT PREPARED", TRANS_STMT_ROLLBACK_PREPARED: "ROLLBACK PREPARED" })[
 			String(node["kind"])
@@ -116,10 +136,14 @@ const CONCURRENT: Readonly<Record<string, string>> = {
 	ReindexStmt: "REINDEX",
 }
 
-/** What a statement is, by its parse tree's node `type`, when Postgres runs it only outside a transaction block; undefined when it runs in one */
-function outsideOnly(type: string, node: Node): string | undefined {
+/**
+ * What a statement is, by its parse tree's node `type`, when Postgres runs it only outside a
+ * transaction block; undefined when it runs in one. `partitioned` says whether a table or index
+ * it names is, which a caller that cannot say leaves as none
+ */
+function outsideOnly(type: string, node: Node, partitioned: Partitioned = () => false): string | undefined {
 	if (concurrent(type, node)) return `${CONCURRENT[type] as string} CONCURRENTLY`
-	return OUTSIDE[type]?.(node)
+	return OUTSIDE[type]?.(node, partitioned)
 }
 
 // lookup-table: the shared objects a statement names by its object type, which every database of the server sees

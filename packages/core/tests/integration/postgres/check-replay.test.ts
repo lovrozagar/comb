@@ -184,6 +184,15 @@ describe("check's replay of a statement only a file of its own can run", () => {
 		expect(out.join("\n")).not.toContain("Check left")
 	})
 
+	/* P9 of r21: Postgres runs these on a partitioned table or index only outside a transaction block */
+	it("runs a partitioned table's CLUSTER and REINDEX in their txmode none file as written, and passes them", async () => {
+		const { refused } = await checked(
+			`${one}CREATE INDEX ev_at ON ev (at);\n`,
+			"-- atlas:txmode none\n\nCLUSTER ev USING ev_at;\nREINDEX TABLE ev;\nREINDEX INDEX ev_at;\nREINDEX TABLE ev_2026;\n",
+		)
+		expect(refused).toBeUndefined()
+	})
+
 	/* P1 of r20: 0.18's replay cut the keyword to fit its one transaction, and passed what apply refuses */
 	it("refuses a CONCURRENTLY detach Postgres refuses, as apply would", async () => {
 		const { refused } = await checked(

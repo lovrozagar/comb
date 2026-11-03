@@ -2,14 +2,8 @@
  * SQL parsing utilities for migrations
  */
 import { createHash } from "node:crypto"
-import {
-	classificationOf,
-	classifyMigration,
-	type ClassifyOptions,
-	dropsOf,
-	extractDropStatements,
-	readings,
-} from "./classify.ts"
+import { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings } from "./classify.ts"
+import { classificationOf } from "./classify-verdict.ts"
 import { type FileRead, fileRead } from "./pg-split.ts"
 import { extractSchema, schemaOfRead } from "./schema.ts"
 import { normalizeSql, splitSqlStatements } from "./sql-scan.ts"

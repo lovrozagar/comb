@@ -108,3 +108,26 @@ describe("an added column of an array of a domain (P19 of r19)", () => {
 		).toEqual([])
 	})
 })
+
+/* P9 of r21: a CLUSTER or REINDEX of a partitioned table or index runs only outside a transaction block */
+/** check's refusal of `what` in a file's transaction */
+const OUTSIDE = (what: string) =>
+	`Postgres runs ${what} only outside a transaction; put it in a file of its own that starts with "-- atlas:txmode none" and a blank line`
+
+describe("a CLUSTER or REINDEX of a partitioned table or index (P9 of r21)", () => {
+	it.each([
+		["CLUSTER ev USING ev_at;", "CLUSTER"],
+		["REINDEX TABLE ev;", "REINDEX TABLE"],
+		["REINDEX INDEX ev_at;", "REINDEX INDEX"],
+	])("refuses %j in a file's transaction, as Postgres refuses it", (sql, what) => {
+		expect(() => rate(sql)).toThrow(OUTSIDE(what))
+		expect(() => rate(`-- atlas:txmode none\n\n${sql}`)).not.toThrow()
+	})
+
+	it("refuses one of a table the file itself partitions, and passes a plain table's and a partition's", () => {
+		expect(() => rate("CREATE TABLE q (a int) PARTITION BY LIST (a);\nREINDEX TABLE q;")).toThrow(
+			OUTSIDE("REINDEX TABLE"),
+		)
+		expect(() => rate("CLUSTER t USING t_pkey;\nREINDEX TABLE ev_a;\nREINDEX INDEX ev_a_id;")).not.toThrow()
+	})
+})
