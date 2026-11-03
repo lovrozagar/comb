@@ -54,15 +54,15 @@ describe("resolveMigrateTarget", () => {
 		expect(target).toMatchObject({ dialect: "sqlite", drizzleConfigPath: undefined, migrationsDir: join(cwd, "other") })
 	})
 
-	it("diffs without -e from the database's own provider over its environments, and applies only with -e", async () => {
+	it("diffs without -e on environments that inherit the database's provider, and applies only with -e", async () => {
 		const environments = {
-			prod: { name: "core-prod", provider: { ...PG, devUrl: "postgres://dev-prod/x", url: "postgres://p/app" } },
+			prod: { name: "core-prod", provider: { ...PG, url: "postgres://p/app" } },
 			staging: { name: "core-staging" },
 		}
 		const cwd = project({ core: { environments, migrationsDir: "m", provider: PG } })
 		expect(await resolveMigrateTarget({ cwd, db: "core", mode: "diff" })).toMatchObject({
-			label: "core (core)",
-			provider: { devUrl: "docker://postgres/17/dev", ...PG },
+			label: "core (core-prod)",
+			provider: { devUrl: "docker://postgres/17/dev", url: "postgres://p/app" },
 		})
 		expect(await resolveMigrateTarget({ cwd, db: "core", env: "staging", mode: "apply" })).toMatchObject({
 			label: "core (core-staging)",
@@ -175,5 +175,16 @@ describe("diff reads the environment it is told (KC4; sibling: the D1 environmen
 		expect(bare.errors).toEqual([
 			'database "core"\'s environments differ in whether it is D1, which a diff reads: pass -e/--env with one of: local, ci',
 		])
+	})
+})
+
+/* KC4a: a database's provider is its environments' fallback, which no apply uses alone, so a diff never reads it over them */
+describe("diff beside a database's own provider (KC4a; sibling: environments that inherit it)", () => {
+	it("refuses environments beside the database's provider that override devUrl differently", async () => {
+		const environments = envs(["local", "ci"], (name) => ({ ...PG, devUrl: `postgres://${name}/dev` }))
+		const cwd = project({ core: { environments, migrationsDir: "m", provider: PG } })
+		await expect(resolveMigrateTarget({ cwd, db: "core", mode: "diff" })).rejects.toThrow(
+			'database "core"\'s environments differ in devUrl, which a diff reads: pass -e/--env with one of: local, ci',
+		)
 	})
 })

@@ -1,8 +1,8 @@
 /**
  * The database a `comb migrate` command works on, from comb.migrate.config.ts: its provider, its
  * dialect, and its paths resolved against the config file. `apply` needs an environment when the
- * database declares them; `diff` takes one, and without it reads the database's own provider, or
- * environments that agree on what a diff reads (KC4 of r22b).
+ * database declares them; `diff` takes one, and without it reads environments that agree on what a
+ * diff reads (KC4 of r22b).
  */
 import path from "node:path"
 import type { CombMigrateConfig } from "../migrate/config.ts"
@@ -47,13 +47,12 @@ const diffReads = (provider: ResolvedDatabaseConfig["provider"]): Record<string,
 		: { "whether it is D1": provider.type === "d1" }
 
 /**
- * What a diff named no environment reads: the database's own provider when it has one, else its
- * environments' when they agree on what a diff reads, never one picked by key order
+ * What a diff named no environment reads: the database's provider when it has no environments,
+ * else its environments', each falling back to the database's, when they agree on what a diff
+ * reads; never one picked by key order (KC4 of r22b), nor the fallback no apply uses alone (KC4a)
  */
 function diffConfig(name: string, db: DatabaseConfig, resolve: Resolve): ResolvedDatabaseConfig {
 	if (db.environments === undefined) return resolve(db)
-	const shared = { drizzleConfigPath: db.drizzleConfigPath, migrationsDir: db.migrationsDir, name }
-	if (db.provider !== undefined) return resolve({ ...shared, provider: db.provider })
 	/* the config's schema refuses a database whose environments name none (K13) */
 	const [first, ...others] = Object.keys(db.environments).map((env) => resolve(db, env)) as [
 		ResolvedDatabaseConfig,
