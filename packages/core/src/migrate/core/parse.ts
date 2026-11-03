@@ -3,6 +3,7 @@
  */
 import { createHash } from "node:crypto"
 import { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings } from "./classify.ts"
+import { takenOptions } from "./classify-options.ts"
 import { classificationOf } from "./classify-verdict.ts"
 import { type FileRead, fileRead } from "./pg-split.ts"
 import { extractSchema, schemaOfRead } from "./schema.ts"
@@ -96,7 +97,8 @@ export { classifyMigration, extractDropStatements }
  * earlier files leave; its statements are applied as written, as wrangler and Atlas apply them
  */
 export function parseMigration(sql: string, filename: string, options: ClassifyOptions = {}): ParsedMigration {
-	return parseRead({ ...fileRead(sql, options.dialect ?? "sqlite"), filename }, options)
+	const taken = takenOptions("parseMigration", options)
+	return parseRead({ ...fileRead(sql, taken.dialect ?? "sqlite"), filename }, taken)
 }
 
 /** parseMigration of a file its caller has read: on Postgres its one parse (M86) */

@@ -33,6 +33,7 @@ import { noGuards, readGuards } from "./guard-read.ts"
 import { codeOf, nameKey, namingOf, QNAME, splitTopLevel, unquote } from "./sql-code.ts"
 import { type PgRead, pgRead } from "./pg-split.ts"
 import { splitSqlStatements } from "./sql-scan.ts"
+import { takenOptions } from "./classify-options.ts"
 
 type ClassifyOptions = {
 	/** the schema the earlier migrations leave, which tells a lossless SQLite table rebuild from a drop */
@@ -271,7 +272,7 @@ const readings = (
 
 /** The table, column and index drops a migration makes, as `DROP TABLE t`, `DROP COLUMN t.c`, `DROP INDEX i` */
 function extractDropStatements(sql: string, options: ClassifyOptions = {}): string[] {
-	return dropsOf(readings(sql, options))
+	return dropsOf(readings(sql, takenOptions("extractDropStatements", options)))
 }
 
 /** The drops the readings of a file find */
@@ -281,7 +282,8 @@ const dropsOf = (reads: readonly Read[]): string[] => [
 
 /** How destructive a migration is, which statements make it so, and which block a Postgres table */
 function classifyMigration(sql: string, options: ClassifyOptions = {}): MigrationClassification {
-	return classificationOf(readings(sql, options), sql, options)
+	const taken = takenOptions("classifyMigration", options)
+	return classificationOf(readings(sql, taken), sql, taken)
 }
 
 export { classifyMigration, type ClassifyOptions, dropsOf, extractDropStatements, readings }
