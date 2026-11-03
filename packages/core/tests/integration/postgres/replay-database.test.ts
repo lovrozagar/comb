@@ -19,6 +19,7 @@ import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
+import { pauses, waitFor } from "../support/pg-pause.ts"
 
 beforeAll(loadPostgresParser)
 
@@ -310,6 +311,8 @@ describe("the replay's database beside what the history makes", () => {
 /* R1 of the P1 review: a replay that made a role holds it as one that reused it does, so a shorter
    replay ending first never drops the role from under a later file of the longer one */
 describe("two replays at once, one paused between the file making a role and the file using it", () => {
+	const pause = pauses()
+
 	it("passes both, and drops the role after both", async () => {
 		const [made, resume] = [unique("comb_t_made"), unique("comb_t_resume")]
 		const other = mkdtempSync(join(tmpdir(), "comb-pg-replay-db-b-"))
@@ -318,21 +321,19 @@ describe("two replays at once, one paused between the file making a role and the
 				withScratchDb(async (url) => {
 					const policy = `CREATE TABLE t (id int PRIMARY KEY);\nALTER TABLE t ENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON t TO ${made} USING (true);\n`
 					const unsafe = "-- comb:allow-unsafe: the test's history\n"
-					/* the role is the server's, so the paused replay sees the test make the one it waits for */
-					const pause = `DO $$ BEGIN FOR i IN 1..1200 LOOP EXIT WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${resume}'); PERFORM pg_sleep(0.05); END LOOP; END $$;\n`
-					write([`${unsafe}CREATE ROLE ${made};\n`, `${unsafe}${pause}`, `${unsafe}${policy}`])
+					write([`${unsafe}CREATE ROLE ${made};\n`, `${unsafe}${waitFor(resume)}`, `${unsafe}${policy}`])
 					write([`${unsafe}CREATE ROLE ${made};\n${policy}`], other)
 					const long = check(dev, url)
 					await untilRole(made)
 					const short = await check(dev, url, other)
-					await onServer(`CREATE ROLE ${resume}`)
+					await pause.go(resume)
 					expect([short.refused, (await long).refused]).toEqual([undefined, undefined])
 					expect(await roleOf(made)).toEqual([])
 				}),
 			)
 		} finally {
 			rmSync(other, { force: true, recursive: true })
-			await dropRoles(made, resume)
+			await dropRoles(made)
 		}
 	}, 120_000)
 })

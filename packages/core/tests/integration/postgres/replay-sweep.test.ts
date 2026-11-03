@@ -18,6 +18,7 @@ import { loadPostgresParser } from "../../../src/migrate/core/pg-parser.ts"
 import { run } from "../../../src/migrate/core/process.ts"
 import type { ParsedMigration } from "../../../src/migrate/types.ts"
 import { pgUrl, withScratchDb } from "../support/pg.ts"
+import { pauses, waitFor } from "../support/pg-pause.ts"
 import { dropRoles as dropOnly, query, roleOf, unique } from "../support/pg-roles.ts"
 
 beforeAll(loadPostgresParser)
@@ -30,16 +31,19 @@ afterEach(() => rmSync(dir, { force: true, recursive: true }))
 
 const UNSAFE = "-- comb:allow-unsafe: the test's history\n"
 
+/* the go a paused history waits for */
+const pause = pauses()
+
 /** The files, named in order and hashed, in `at` */
 function write(files: readonly string[], at = dir): void {
 	files.forEach((sql, i) => writeFileSync(join(at, `20260101${String(i).padStart(6, "0")}_f${i}.sql`), sql))
 	hashDir(run, at)
 }
 
-/** A history that makes `made` and then waits, at most a minute, until the server holds `resume` */
+/** A history that makes `made` and then waits, at most a minute, until the test lets `resume` go */
 const paused = (made: string, resume: string, role = `CREATE ROLE ${made};`): string[] => [
 	`${UNSAFE}${role}\nCREATE TABLE t (id int PRIMARY KEY);\nGRANT SELECT ON t TO ${made};\n`,
-	`${UNSAFE}DO $$ BEGIN FOR i IN 1..1200 LOOP EXIT WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${resume}'); PERFORM pg_sleep(0.05); END LOOP; END $$;\n`,
+	`${UNSAFE}${waitFor(resume)}`,
 ]
 
 /** The options of a run of the directory against `url`, approving every file, collecting what it prints */
@@ -133,7 +137,7 @@ async function killedHard(
 	await untilRole(made)
 	await child.kill("SIGKILL")
 	expect((await child.ended).at(-1)).toBe("exit 137")
-	await query(pgUrl(), `CREATE ROLE ${resume}`)
+	await pause.go(resume)
 	const left = await replayDatabases(made)
 	expect(left).toHaveLength(1)
 	return left[0] as string
@@ -162,7 +166,7 @@ describe("a check killed mid-replay", () => {
 					}),
 				)
 			} finally {
-				await dropRoles(made, resume)
+				await dropRoles(made)
 			}
 		},
 		60_000,
@@ -179,7 +183,7 @@ describe("a check killed mid-replay", () => {
 				}),
 			)
 		} finally {
-			await dropRoles(made, resume)
+			await dropRoles(made)
 		}
 	}, 60_000)
 
@@ -195,7 +199,7 @@ describe("a check killed mid-replay", () => {
 				}),
 			)
 		} finally {
-			await dropRoles(made, resume)
+			await dropRoles(made)
 		}
 	}, 60_000)
 })
@@ -218,12 +222,12 @@ describe("a sweep beside a live replay and a database someone is in", () => {
 						rmSync(other, { force: true, recursive: true })
 					}
 					expect([await holds(live[0] as string), (await roleOf(made)).length]).toEqual([true, 1])
-					await query(pgUrl(), `CREATE ROLE ${resume}`)
+					await pause.go(resume)
 					expect((await long).refused).toBeUndefined()
 				}),
 			)
 		} finally {
-			await dropRoles(made, resume)
+			await dropRoles(made)
 		}
 	}, 60_000)
 
@@ -269,7 +273,7 @@ describe("a history's role the replay makes", () => {
 					expect(await query(pgUrl(), `SELECT rolcanlogin, rolsuper FROM pg_roles WHERE rolname = '${ops}'`)).toEqual([
 						{ rolcanlogin: false, rolsuper: false },
 					])
-					await query(pgUrl(), `CREATE ROLE ${resume}`)
+					await pause.go(resume)
 					const { out, refused } = await running
 					expect(refused).toBeUndefined()
 					expect(out.filter((line) => line.startsWith("Check made the role") && line.includes(ops))).toEqual([
@@ -278,7 +282,7 @@ describe("a history's role the replay makes", () => {
 				}),
 			)
 		} finally {
-			await dropRoles(ops, resume)
+			await dropRoles(ops)
 		}
 	}, 60_000)
 })
