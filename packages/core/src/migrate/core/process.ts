@@ -12,6 +12,16 @@ export type ProjectBin = { bin: string; manifest: string; peer: BinPeer; runtime
 
 export type RunResult = { code: number; stdout: string; stderr: string }
 
+/**
+ * The Atlas releases comb runs on, which comb reads from `atlas version` before a command's first
+ * I/O and refuses outside it (PA5 of r22): the floor is the oldest release comb's integration suite
+ * passes on, and the next major may change what comb reads from Atlas
+ */
+export const ATLAS_RANGE = ">=1.2.0 <2"
+
+/** Where Atlas, which no package ships, is installed from */
+export const ATLAS_INSTALL = "https://atlasgo.io/getting-started"
+
 export type RunOptions = {
 	cwd?: string | undefined
 	/** Variables set over the parent's environment for the child; an undefined value removes one. */
@@ -36,12 +46,13 @@ const DEFAULT_MAX_BUFFER = 256 * 1024 * 1024
 /**
  * The child's environment: the parent's without any PG* variable, so libpq-style defaults a shell
  * happens to export (PGSSLMODE=disable, PGPASSWORD) never change a connection comb configured, and
- * PGPASSFILE and PGSERVICEFILE pointed at nothing, so libpq's driver reads no ~/.pgpass or
- * ~/.pg_service.conf the config does not name, as comb's own reads read none (P6 of the 0.15.0
- * review, P6 of r19); then `env` over it.
+ * PGPASSFILE pointed at nothing, so libpq's driver reads no ~/.pgpass the config does not name, as
+ * comb's own reads read none (P6 of the 0.15.0 review, P6 of r19); then `env` over it. No
+ * PGSERVICEFILE: lib/pq in Atlas before v1.2.0 panics on any, and a service file is read only for a
+ * URL naming a service, which comb refuses (PA5 of r22).
  */
 function childEnv(env: RunOptions["env"]): NodeJS.ProcessEnv {
-	const out: NodeJS.ProcessEnv = { PGPASSFILE: devNull, PGSERVICEFILE: devNull }
+	const out: NodeJS.ProcessEnv = { PGPASSFILE: devNull }
 	for (const [name, value] of Object.entries<string | undefined>(process.env))
 		if (!name.startsWith("PG")) out[name] = value
 	for (const [name, value] of Object.entries(env ?? {})) {
@@ -57,8 +68,9 @@ const RUNTIMES: Readonly<Record<ProjectBin["runtime"], string>> = {
 	node: "Node.js (https://nodejs.org)",
 }
 
-/** What to do when `cmd` cannot start: for a bin peer's runtime, install it; "" for any other command */
+/** What to do when `cmd` cannot start: Atlas, or a bin peer's runtime, install it; "" for any other command */
 function installHint(cmd: string, peer: BinPeer | undefined): string {
+	if (cmd === "atlas") return `; install atlas (${ATLAS_RANGE}) from ${ATLAS_INSTALL}`
 	if (peer === undefined || !Object.hasOwn(RUNTIMES, cmd)) return ""
 	return `; comb runs ${peer} on ${cmd}, and finds no ${cmd} on PATH: install ${RUNTIMES[cmd as ProjectBin["runtime"]]}`
 }

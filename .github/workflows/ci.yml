@@ -118,6 +118,14 @@ jobs:
           curl -sSfL -o sqld.tar.xz https://github.com/tursodatabase/libsql/releases/download/libsql-server-v0.24.32/libsql-server-x86_64-unknown-linux-gnu.tar.xz
           echo "71720fc8648c19efef416efebd47145ef59b62e198770533530a858e1336879f  sqld.tar.xz" | sha256sum -c -
           tar -xJf sqld.tar.xz
+      # The Atlas floor cell is required here; tests/support/atlas-floor.ts fails it without the pinned
+      # v1.2.0 at its path, the oldest Atlas comb's ATLAS_RANGE admits.
+      - name: install atlas v1.2.0
+        run: |
+          mkdir -p "$HOME/.cache/comb-test/atlas/1.2.0"
+          curl -sSfL -o "$HOME/.cache/comb-test/atlas/1.2.0/atlas" https://release.ariga.io/atlas/atlas-linux-amd64-v1.2.0
+          echo "c12b889e3349f0e5610aec32fe327e5a6911a0e472754a0c381c30c7c0630e88  $HOME/.cache/comb-test/atlas/1.2.0/atlas" | sha256sum -c -
+          chmod +x "$HOME/.cache/comb-test/atlas/1.2.0/atlas"
       - run: bun run test:coverage
 
   test-bun:

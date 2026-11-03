@@ -506,6 +506,14 @@ export type RunResult = {
     stdout: string;
     stderr: string;
 };
+/**
+ * The Atlas releases comb runs on, which comb reads from `atlas version` before a command's first
+ * I/O and refuses outside it (PA5 of r22): the floor is the oldest release comb's integration suite
+ * passes on, and the next major may change what comb reads from Atlas
+ */
+export declare const ATLAS_RANGE = ">=1.2.0 <2";
+/** Where Atlas, which no package ships, is installed from */
+export declare const ATLAS_INSTALL = "https://atlasgo.io/getting-started";
 export type RunOptions = {
     cwd?: string | undefined;
     /** Variables set over the parent's environment for the child; an undefined value removes one. */

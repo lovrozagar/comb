@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { Run } from "../migrate/core/process.ts"
+import { ATLAS_RANGE, type Run, run as runProcess } from "../migrate/core/process.ts"
 import { makeIo, ok, projects } from "./__fixtures__/io.ts"
 import { runCli } from "./run.ts"
 import { UNCOMPARED } from "../migrate/core/baseline-compare.ts"
@@ -202,6 +202,29 @@ describe("migrate apply, check and status --json on Postgres (C5)", () => {
 			expect((JSON.parse(io.outputs[0] as string) as { refused: string[] }).refused).toEqual([
 				`atlas migrate status: ${said.trim()}`,
 			])
+		}
+	})
+})
+
+/* KC6 + PA22 of r22: a missing Atlas is a peer the command lacks, said one way by every command */
+describe("no Atlas on PATH: every Postgres command names it (KC6 + PA22; sibling: K3's PATH-free refusal)", () => {
+	it("refuses diff, status, check, apply and baseline naming Atlas, its range and its install page, before any other call", async () => {
+		const dir = postgresProject({ "1_init.sql": 'CREATE TABLE "post" ("id" integer);\n' })
+		writeFileSync(join(dir, "drizzle.config.ts"), `export default { dialect: "postgresql", schema: "./x.ts" }\n`)
+		for (const mode of ["diff", "status", "check", "apply", "baseline"]) {
+			const calls: string[] = []
+			/* comb's own runner, with a PATH that holds no atlas */
+			const noAtlas: Run = (cmd, args, options) => {
+				calls.push([cmd, ...args].join(" "))
+				return runProcess(cmd, args, { ...options, env: { ...options?.env, PATH: "/nonexistent" } })
+			}
+			const io = { ...makeIo(dir, noAtlas), readAtlasVersion: undefined }
+			expect(await runCli(["migrate", mode, "core"], io)).toBe(1)
+			const said = io.errors.join("\n")
+			expect(said).toContain(`comb needs atlas (${ATLAS_RANGE}) to hash, diff and apply migrations`)
+			expect(said).toContain("install atlas from https://atlasgo.io/getting-started")
+			expect(said).not.toContain("atlas migrate hash failed")
+			expect(calls).toEqual(["atlas version"])
 		}
 	})
 })

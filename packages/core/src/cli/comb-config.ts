@@ -4,6 +4,7 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import * as z from "zod"
 import type { CodegenConfig, DatabaseCodegen } from "../codegen/config.ts"
+import type { FtsTableConfig } from "../codegen/generators/fts-sql.ts"
 import { codegenConfigSchema } from "../codegen/config-schema.ts"
 import { CliError, type CliIo } from "./output.ts"
 
@@ -51,21 +52,28 @@ export function tablesFile(cwd: string, tables: string): string {
 	return resolved
 }
 
+/** A database comb.config.ts declares FTS on: its tables file and the FTS of each table */
+export type DeclaredFts = { fts: Record<string, FtsTableConfig>; tables: string }
+
 /**
- * The FTS5 DDL a database's config declares, for the migration diff to keep apart from what Atlas
- * sees. No config, or a database without fts, has none; any other failure is the caller's to see.
+ * The FTS the database `name` declares in comb.config.ts, which a SQLite diff builds from its tables
+ * file (KC3 of r22). No config, no database name, or no fts on the database declares none; a name
+ * the config lacks is refused with `hint`.
  */
-export async function configuredFtsSql(
+export async function declaredFts(
 	cwd: string,
-	{ hint, name: dbName }: { hint?: string | undefined; name: string | undefined },
-	io: CliIo,
-): Promise<string | undefined> {
+	{ hint, name }: { hint?: string | undefined; name: string | undefined },
+): Promise<DeclaredFts | undefined> {
 	const config = await findCombConfig(cwd)
-	if (!config || dbName === undefined) return undefined
-	const db = databaseIn(config, dbName, hint)
-	if (!db.fts || Object.keys(db.fts).length === 0) return undefined
-	const resolvedTables = tablesFile(cwd, db.tables)
+	if (!config || name === undefined) return undefined
+	const { fts, tables } = databaseIn(config, name, hint)
+	return fts === undefined || Object.keys(fts).length === 0 ? undefined : { fts, tables }
+}
+
+/** The FTS5 DDL `declared` asks for, for the migration diff to keep apart from what Atlas sees */
+export async function ftsSql(cwd: string, declared: DeclaredFts, io: CliIo): Promise<string> {
+	const resolvedTables = tablesFile(cwd, declared.tables)
 	const { analyze } = await import("../codegen/analyzer.ts")
 	const { generateFtsSql } = await import("../codegen/generators/fts-sql.ts")
-	return generateFtsSql(analyze(resolvedTables, { cwd }).tables, db.fts, io.err)
+	return generateFtsSql(analyze(resolvedTables, { cwd }).tables, declared.fts, io.err)
 }

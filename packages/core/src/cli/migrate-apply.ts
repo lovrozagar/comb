@@ -25,7 +25,8 @@ import {
 	resolveLegacy,
 } from "../migrate/core/history-match.ts"
 import { migrationHashes } from "../migrate/core/parse.ts"
-import { binOf, requirePeers } from "../migrate/core/optional-peer.ts"
+import { binOf, type Peers, requirePeers } from "../migrate/core/optional-peer.ts"
+import type { Command, Provider } from "../migrate/core/peer-needs.ts"
 import { planApply, refuseSkipping } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import type { Connection } from "../migrate/types.ts"
@@ -255,6 +256,19 @@ export async function migrateApply(mode: Mode, argv: readonly string[], io: CliI
 	}
 }
 
+/**
+ * Every peer `command` on `provider` needs, Atlas's version read through `io` among them, refused
+ * before the command connects, fetches, spawns or asks Atlas anything (K1 of r21, PA5 of r22)
+ */
+export function needPeers(
+	io: CliIo,
+	command: Command,
+	{ fts, provider }: { fts?: boolean; provider: Provider },
+): Peers {
+	const atlas = io.readAtlasVersion ?? (() => (io.run ?? runProcess)("atlas", ["version"]))
+	return requirePeers(command, provider, { atlas, cwd: io.cwd, fts, locate: io.locatePeer })
+}
+
 /** `request.mode` on the database `request.db` resolves to, on its engine */
 async function runMode(request: Request): Promise<MigrateOutcome> {
 	const { args, db, io, mode } = request
@@ -267,7 +281,7 @@ async function runMode(request: Request): Promise<MigrateOutcome> {
 	})
 	/* every peer the command needs, before it connects, fetches, spawns or asks Atlas anything (K1 of r21); a
 	   project without comb.migrate.config.ts names a D1 binding */
-	const peers = requirePeers(mode, resolved?.provider.type ?? "d1", { cwd: io.cwd, locate: io.locatePeer })
+	const peers = needPeers(io, mode, { provider: resolved?.provider.type ?? "d1" })
 	if (resolved?.provider.type === "postgres") {
 		const { migratePostgres } = await import("./migrate-atlas.ts")
 		return migratePostgres(mode, { ...resolved, provider: resolved.provider }, { args, io })

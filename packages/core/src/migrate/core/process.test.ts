@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { devNull, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { run, runPeer } from "./process.ts"
+import { ATLAS_RANGE, run, runPeer } from "./process.ts"
 
 describe("run", () => {
 	it("returns the exit code and both streams", () => {
@@ -76,13 +76,14 @@ describe("run: the child's environment", () => {
 	afterEach(() => vi.unstubAllEnvs())
 
 	/* the reviewer's reading of P6: libpq's driver reads ~/.pgpass for a URL without a password, a file the config does not name */
-	/* P6 of r19: lib/pq reads ~/.pg_service.conf as it reads ~/.pgpass, so the service file points at nothing too */
-	it("drops every PG* variable, and points the passfile and service file at nothing, so a config's connection is the only one a child uses", () => {
+	/* PA5 of r22: lib/pq before Atlas v1.2.0 panics on any PGSERVICEFILE, so comb sets none; it drops the parent's, as
+	   every PG* variable, and refuses a URL naming a service (atlas-target.ts), so no service file is ever read */
+	it("drops every PG* variable, points the passfile at nothing and sets no service file, so a config's connection is the only one a child uses", () => {
 		vi.stubEnv("PGSSLMODE", "disable")
 		vi.stubEnv("PGPASSWORD", "inherited")
 		vi.stubEnv("PGPASSFILE", "/home/someone/.pgpass")
 		vi.stubEnv("PGSERVICEFILE", "/home/someone/.pg_service.conf")
-		expect(envOf()).toEqual({ passfile: devNull, path: "string", pg: [], servicefile: devNull })
+		expect(envOf()).toEqual({ passfile: devNull, path: "string", pg: [] })
 	})
 
 	it("adds env over the rest, and an undefined value removes one", () => {
@@ -159,5 +160,16 @@ describe("runPeer (K1 of r22)", () => {
 		const kit = { bin: "/k/bin.cjs", manifest: "/k/package.json", peer: "drizzle-kit", runtime: "bun" } as const
 		runPeer(fake, kit)(["export"], { cwd: "/w" })
 		expect(calls).toEqual([["bun", ["/k/bin.cjs", "export"], { cwd: "/w", peer: "drizzle-kit" }]])
+	})
+})
+
+describe("run: Atlas missing (KC6 + PA22 of r22; sibling: a bin peer's runtime)", () => {
+	it("names Atlas's range and its install page when atlas cannot start, and no hint for another command", () => {
+		expect(run("atlas", ["migrate", "hash"], { env: { PATH: "/nonexistent" } })).toEqual({
+			code: 127,
+			stderr: `atlas: command not found; install atlas (${ATLAS_RANGE}) from https://atlasgo.io/getting-started`,
+			stdout: "",
+		})
+		expect(run("comb-no-such-command", [], {}).stderr).toBe("comb-no-such-command: command not found")
 	})
 })

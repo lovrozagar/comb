@@ -9,7 +9,7 @@ import { dirname, join } from "node:path"
 import { Miniflare } from "miniflare"
 import semver from "semver"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { PEERS } from "../../src/migrate/core/optional-peer.ts"
+import { PEERS } from "../../src/migrate/core/peer-needs.ts"
 import { APP } from "./fixture.ts"
 import {
 	admittedOf,
@@ -282,15 +282,18 @@ export const post = sqliteTable("post", { id: c.id("id", { prefix: "post" }), ti
 		postgres: `{ type: "postgres", url: "${DEAD}", devUrl: "${DEAD}" }`,
 		turso: `{ type: "turso", apiToken: "tok", databaseName: "core", org: "org" }`,
 	}
+	/* Atlas, in range on PATH here, is checked by the one `atlas version` read (PA5 of r22): a cell names the npm peers */
 	const CELLS = Object.entries(PEERS).flatMap(([provider, commands]) =>
 		Object.entries(commands).flatMap(([command, needs = []]) => {
-			const required = needs.filter((need) => need.optional !== true)
-			return required.length === 0 ? [] : [{ command, needs: required, provider }]
+			const required = needs.filter((need) => need.optional !== true && need.peer !== "atlas")
+			const atlas = needs.some((need) => need.peer === "atlas")
+			return required.length === 0 ? [] : [{ atlas, command, needs: required, provider }]
 		}),
 	)
-	/* what records a call: atlas and wrangler on PATH, and fetch inside comb's process, each appending to the log */
+	/* what records a call: atlas and wrangler on PATH, and fetch inside comb's process, each appending to the log;
+	   atlas says the version comb is tested against, and fails at anything else */
 	const RECORDERS = {
-		"bin/atlas": `#!/bin/sh\necho "atlas $*" >> "$COMB_CALLS"\nexit 1\n`,
+		"bin/atlas": `#!/bin/sh\necho "atlas $*" >> "$COMB_CALLS"\n[ "$1" = version ] && echo "atlas version v1.3.0" && exit 0\nexit 1\n`,
 		"bin/wrangler": `#!/bin/sh\necho "wrangler $*" >> "$COMB_CALLS"\nexit 1\n`,
 		"record-fetch.ts": `import { appendFileSync } from "node:fs"
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -300,9 +303,14 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 `,
 	}
 	/** comb migrate `command` core in the cell for `provider`, as a project would run it, and every call it made */
-	const runCell = (provider: string, command: string) => {
-		const dir = join(app.dir, "cells", `${provider}-${command}`)
-		write(dir, { ...PROJECT, ...RECORDERS, "comb.migrate.config.ts": configOf(PROVIDERS[provider] as string) })
+	const runCell = (provider: string, command: string, files: Record<string, string> = {}) => {
+		const dir = join(app.dir, "cells", `${provider}-${command}${Object.keys(files).length > 0 ? "-more" : ""}`)
+		write(dir, {
+			...PROJECT,
+			...RECORDERS,
+			"comb.migrate.config.ts": configOf(PROVIDERS[provider] as string),
+			...files,
+		})
 		for (const bin of ["atlas", "wrangler"]) chmodSync(join(dir, "bin", bin), 0o755)
 		const calls = join(dir, "calls.log")
 		writeFileSync(calls, "")
@@ -316,15 +324,32 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 
 	it.each(CELLS)(
 		"comb migrate $command on $provider names every peer it needs before any I/O",
-		({ command, needs, provider }) => {
+		({ atlas, command, needs, provider }) => {
 			const { calls, result } = runCell(provider, command)
 			expect(result.status).not.toBe(0)
 			const each = needs.map(({ peer, why }) => `${peer} (${peerRange(peer)}) to ${why}`)
 			expect(result.output).toContain(`comb needs ${each.join(", and ")}; `)
 			expect(result.output).toContain(`install ${needs.map(({ peer }) => `"${peer}@${peerRange(peer)}"`).join(" ")}`)
-			/* no connect, fetch, spawn or Atlas call: the Turso create and token mint among them */
-			expect(calls).toBe("")
+			/* no connect, fetch, spawn or Atlas call but Atlas's version read: the Turso create and token mint among them */
+			expect(calls).toBe(atlas ? "atlas version\n" : "")
 			expect(result.output).not.toMatch(/ECONNREFUSED|dial tcp|fetch failed|Script not found/)
+		},
+	)
+
+	/* KC3 of r22: a SQLite diff whose comb.config.ts declares FTS loads the tables file, through ts-morph */
+	it.each(["bun-sqlite", "d1", "libsql", "turso"])(
+		"comb migrate diff on %s with FTS declared names drizzle-kit and ts-morph in one refusal, before Atlas runs",
+		(provider) => {
+			const fts = `export default { databases: { core: { tables: "./post.tables.ts", fts: { post: { columns: ["title"] } } } } }\n`
+			const { calls, result } = runCell(provider, "diff", { "comb.config.ts": fts })
+			expect(result.status).not.toBe(0)
+			const kit = `drizzle-kit (${peerRange("drizzle-kit")}) to export the drizzle schema for comb migrate diff`
+			const morph = `ts-morph (${peerRange("ts-morph")}) to read the tables file whose FTS comb.config.ts declares`
+			expect(result.output).toContain(`comb needs ${kit}, and ${morph}; `)
+			expect(result.output).toContain(
+				`install "drizzle-kit@${peerRange("drizzle-kit")}" "ts-morph@${peerRange("ts-morph")}"`,
+			)
+			expect(calls).toBe("atlas version\n")
 		},
 	)
 

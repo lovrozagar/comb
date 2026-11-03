@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { Run, RunResult } from "../migrate/core/process.ts"
+import { ATLAS_RANGE, type Run, type RunResult } from "../migrate/core/process.ts"
 import { fakeAtlas as hashingAtlas, writeSum } from "./__fixtures__/d1.ts"
 import { makeIo, ok, projects, writeTables } from "./__fixtures__/io.ts"
 import { help, runCli } from "./run.ts"
@@ -138,7 +138,8 @@ describe("comb migrate init", () => {
 })
 
 describe("comb migrate diff", () => {
-	it("asks the injected runner for atlas before diffing", async () => {
+	/* KC6 of r22: a missing Atlas is refused as a peer, by the one version read, with no probe of diff's own */
+	it("reads Atlas's version through the injected runner, and refuses a missing one as a peer before diffing", async () => {
 		const calls: string[][] = []
 		const run: Run = (cmd, args) => {
 			calls.push([cmd, ...args])
@@ -147,9 +148,11 @@ describe("comb migrate diff", () => {
 		const dir = project()
 		/* a diff refuses a project without a drizzle config first, which reads a file and starts nothing */
 		writeFileSync(join(dir, "drizzle.config.ts"), "export default {}\n")
-		const io = makeIo(dir, run)
+		const io = { ...makeIo(dir, run), readAtlasVersion: undefined }
 		expect(await runCli(["migrate", "diff", "core"], io)).toBe(1)
-		expect(io.errors).toEqual(["Atlas not found. Install: https://atlasgo.io/getting-started"])
+		expect(io.errors).toEqual([
+			`comb needs atlas (${ATLAS_RANGE}) to hash, diff and apply migrations; install atlas from https://atlasgo.io/getting-started`,
+		])
 		expect(calls).toEqual([["atlas", "version"]])
 	})
 

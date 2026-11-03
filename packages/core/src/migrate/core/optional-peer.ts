@@ -3,18 +3,20 @@
  * (tests/structure/peers.test.ts holds the two equal), and the one refusal comb gives when a
  * command needs a peer the project does not have (K7 of r20): the package, its range, why comb
  * needs it here, and an install that lands in range. A peer outside its range is refused as one
- * missing, naming the version found (K2 of r21). PEERS is what each migrate command needs on each
- * provider, which the CLI resolves before any connect, fetch, spawn or Atlas call (K1, P8, S2 of
- * r21), and which the README's peer table states (K5). A peer comb spawns is resolved from the
+ * missing, naming the version found (K2 of r21). What each migrate command needs on each provider
+ * (peer-needs.ts) the CLI resolves here before any connect, fetch, spawn or Atlas call (K1, P8, S2
+ * of r21). A peer comb spawns is resolved from the
  * project, cwd up, and that one package is checked, read and run (K1 and K3 of r22): PATH never counts.
+ * Atlas, which no package ships, is a row of the same table, its version read from `atlas version`
+ * (PA5, KC6 and PA22 of r22), as is ts-morph for a SQLite diff whose comb.config.ts declares FTS (KC3).
  */
 import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { ProviderConfig } from "../types.ts"
+import { ATLAS, type BinNeed, type Command, type Need, needsOf, type Provider } from "./peer-needs.ts"
 import { admits, installedVersion, manifestOf } from "./peer-version.ts"
-import type { BinPeer, ProjectBin } from "./process.ts"
+import { ATLAS_INSTALL, ATLAS_RANGE, type BinPeer, type ProjectBin, type RunResult } from "./process.ts"
 
 // lookup-table: each optional peer and the range comb is tested against
 const OPTIONAL_PEER_RANGES = {
@@ -28,6 +30,12 @@ const OPTIONAL_PEER_RANGES = {
 
 type OptionalPeer = keyof typeof OPTIONAL_PEER_RANGES
 
+/** A peer comb needs: an npm package, or Atlas on PATH */
+type Peer = OptionalPeer | "atlas"
+
+// lookup-table: each peer and its range, Atlas's among them
+const RANGES: Readonly<Record<Peer, string>> = { ...OPTIONAL_PEER_RANGES, atlas: ATLAS_RANGE }
+
 /* the peers comb spawns rather than imports, each on the runtime the ruling of r22 keeps for it: wrangler's bin is
    a Node program that starts workerd, which comb under bun must not move onto bun */
 // lookup-table: each optional peer comb spawns, and the runtime that runs its bin
@@ -38,21 +46,22 @@ type Peers = { readonly [P in BinPeer]?: ProjectBin }
 
 const isBinPeer = (peer: OptionalPeer): peer is BinPeer => Object.hasOwn(BIN_PEERS, peer)
 
-/** A peer comb needs, and why; an `optional` one a command runs without, saying what it left out */
-type Need = { optional?: true; peer: OptionalPeer; why: string }
-
 /** A peer comb could not use: missing, or `found` at a version outside its range */
-type Problem = { found?: string | undefined; peer: OptionalPeer; why: string }
+type Problem = { found?: string | undefined; peer: Peer; why: string }
 
-/** What comb says of the peers in `problems`: each, its range and why comb needs it, and one install of them all */
+/**
+ * What comb says of the peers in `problems`: each, its range and why comb needs it, and one install
+ * of them all, Atlas's by its install page
+ */
 function refusal(problems: readonly Problem[]): string {
 	const needs = problems.map(({ found, peer, why }) => {
-		const range = OPTIONAL_PEER_RANGES[peer]
+		const range = RANGES[peer]
 		return `${peer} (${found === undefined ? range : `${range}, found ${found}`}) to ${why}`
 	})
 	/* quoted, so a shell passes each range whole: bun, npm and pnpm each install its newest admitted version */
-	const install = problems.map(({ peer }) => `"${peer}@${OPTIONAL_PEER_RANGES[peer]}"`).join(" ")
-	return `comb needs ${needs.join(", and ")}; install ${install}`
+	const npm = problems.flatMap(({ peer }) => (peer === "atlas" ? [] : [`"${peer}@${RANGES[peer]}"`]))
+	const atlas = problems.some(({ peer }) => peer === "atlas") ? [`atlas from ${ATLAS_INSTALL}`] : []
+	return `comb needs ${needs.join(", and ")}; install ${[npm.join(" "), ...atlas].filter((part) => part !== "").join(", and ")}`
 }
 
 /** What comb says when the peer `need` names is missing */
@@ -81,7 +90,7 @@ function refusalOf(error: unknown, need: Need): unknown {
 /** The problem with `peer` at `entry`, a version outside its range; undefined when it is in range */
 function outOfRange(need: Need, entry: string): Problem | undefined {
 	const found = installedVersion(need.peer, entry)
-	if (found !== undefined && admits(OPTIONAL_PEER_RANGES[need.peer], found)) return undefined
+	if (found !== undefined && admits(RANGES[need.peer], found)) return undefined
 	return { ...need, found: found ?? "no version" }
 }
 
@@ -125,48 +134,17 @@ function resolvePeer(need: Need, resolve: () => string): string {
 	return entry
 }
 
-/* ── what each command needs ───────────────────────────────────────────── */
-
-type Command = "apply" | "baseline" | "check" | "diff" | "status"
-type Provider = ProviderConfig["type"]
-
-/** What a bin peer is needed for */
-type BinNeed = Need & { peer: BinPeer }
-
-const DIFF: BinNeed = { peer: "drizzle-kit", why: "export the drizzle schema for comb migrate diff" }
-const LIBSQL: Need = { peer: "@libsql/client", why: "open a libsql or Turso database" }
-const PARSE: Need = { peer: "libpg-query", why: "read Postgres migrations" }
-const WRANGLER: BinNeed = { peer: "wrangler", why: "migrate a D1 database" }
-
-/** The peers of a provider whose every command but diff connects through `need` */
-const connecting = (need: Need): Partial<Record<Command, readonly Need[]>> => ({
-	apply: [need],
-	baseline: [need],
-	check: [need],
-	diff: [DIFF],
-	status: [need],
-})
-
-// lookup-table: the peers each migrate command needs on each provider, before its first I/O
-const PEERS: Readonly<Record<Provider, Partial<Record<Command, readonly Need[]>>>> = {
-	"bun-sqlite": { diff: [DIFF] },
-	d1: /* @__PURE__ */ connecting(WRANGLER),
-	libsql: /* @__PURE__ */ connecting(LIBSQL),
-	postgres: {
-		apply: [
-			PARSE,
-			/* without it apply sweeps nothing a killed check left on devUrl's server (pg-replay-database.ts) */
-			{ optional: true, peer: "postgres", why: "sweep what a killed check left on a postgres:// devUrl's server" },
-		],
-		baseline: [PARSE, { peer: "postgres", why: "read what Atlas OSS leaves out of a baseline's compare" }],
-		check: [
-			PARSE,
-			/* without it check rates the files alone, and says it did not replay them (pg-check-replay.ts) */
-			{ optional: true, peer: "postgres", why: "replay the history and the pending files on a postgres:// devUrl" },
-		],
-		diff: [PARSE, DIFF],
-	},
-	turso: /* @__PURE__ */ connecting(LIBSQL),
+/**
+ * The problem with the Atlas `read` finds, which reads `atlas version`: missing from PATH, saying
+ * no version, or one outside ATLAS_RANGE; undefined when it is in range. An official build and a
+ * community one say the version alike, after "version v".
+ */
+function atlasProblem(read: () => RunResult): Problem | undefined {
+	const said = read()
+	if (said.code === 127) return ATLAS
+	const found = said.code === 0 ? /\bversion v(\d+\.\d+\.\d+)/.exec(said.stdout)?.[1] : undefined
+	if (found !== undefined && admits(ATLAS_RANGE, found)) return undefined
+	return { ...ATLAS, found: found ?? "no version" }
 }
 
 /** `peer`'s package.json in the project at `cwd`: the first node_modules from its folder up that holds it */
@@ -196,30 +174,40 @@ function projectBin(need: BinNeed, cwd: string): ProjectBin {
 	)
 }
 
+/** Where requirePeers looks: `atlas` reads `atlas version`, `locate` finds an npm peer's entry, `fts` says a SQLite diff declares FTS */
+type Finders = {
+	atlas: () => RunResult
+	cwd: string
+	fts?: boolean | undefined
+	locate?: ((peer: OptionalPeer) => string) | undefined
+}
+
 /**
  * Refuses `command` on `provider` unless each peer it needs is there and in range, naming every
  * one that is not in one refusal, with one install, and gives each bin peer it found. `locate`
  * finds a peer's entry: by default a bin peer in the project from `cwd` up, any other as comb's
- * own imports resolve it.
+ * own imports resolve it. Atlas is read once, by `atlas`, where the command runs it.
  */
-function requirePeers(
-	command: Command,
-	provider: Provider,
-	{ cwd, locate }: { cwd: string; locate?: ((peer: OptionalPeer) => string) | undefined },
-): Peers {
+function requirePeers(command: Command, provider: Provider, { atlas, cwd, fts = false, locate }: Finders): Peers {
 	const find = locate ?? ((peer) => (isBinPeer(peer) ? inProject(peer, cwd) : resolved(peer)))
 	const problems: Problem[] = []
 	const peers: { [P in BinPeer]?: ProjectBin } = {}
 	let cause: unknown
-	for (const need of PEERS[provider][command] ?? []) {
+	for (const need of needsOf(command, provider, fts)) {
+		if (need.peer === "atlas") {
+			const problem = atlasProblem(atlas)
+			if (problem !== undefined) problems.push(problem)
+			continue
+		}
 		if (need.optional === true) continue
+		const peer = need.peer
 		try {
-			const entry = find(need.peer)
+			const entry = find(peer)
 			const problem = outOfRange(need, entry)
 			if (problem !== undefined) problems.push(problem)
-			else if (isBinPeer(need.peer)) peers[need.peer] = binAt(need.peer, entry)
+			else if (isBinPeer(peer)) peers[peer] = binAt(peer, entry)
 		} catch (error) {
-			if (!isMissing(error, need.peer)) throw error
+			if (!isMissing(error, peer)) throw error
 			// reason: a missing peer is one more the refusal after the loop names, with the first one's error as its cause
 			cause ??= error
 			problems.push(need)
@@ -244,21 +232,15 @@ async function importBin<T>(bin: ProjectBin): Promise<T> {
 
 export {
 	binOf,
-	type Command,
-	DIFF,
 	importBin,
-	LIBSQL,
 	MissingPeerError,
 	missingPeer,
-	type Need,
 	OPTIONAL_PEER_RANGES,
 	type OptionalPeer,
 	optionalPeer,
-	PARSE,
+	type Peer,
 	type Peers,
-	PEERS,
 	projectBin,
 	requirePeers,
 	resolvePeer,
-	WRANGLER,
 }

@@ -3,7 +3,7 @@
  * as a message and an exit code. The only CLI module that touches the console.
  */
 import { createInterface } from "node:readline/promises"
-import type { Run } from "../migrate/core/process.ts"
+import type { Run, RunResult } from "../migrate/core/process.ts"
 import type { LiveRead } from "../migrate/core/pg-live-types.ts"
 import type { replayCatalog } from "../migrate/core/pg-replay.ts"
 
@@ -21,6 +21,8 @@ export type CliIo = {
 	readyPgDev?: ((target: { devUrl: string; schema: string }) => Promise<void>) | undefined
 	/** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it (K1 of r21) */
 	locatePeer?: ((peer: string) => string) | undefined
+	/** How a migrate command reads Atlas's version before its first I/O, `atlas version` through `run` unless a test fakes it (PA5 of r22) */
+	readAtlasVersion?: (() => RunResult) | undefined
 	/** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
 	confirm?: ((question: string) => Promise<boolean>) | undefined
 }

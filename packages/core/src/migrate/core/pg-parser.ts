@@ -4,7 +4,8 @@
  * awaits it first, and a caller of `classifyMigration` on Postgres does too.
  */
 
-import { optionalPeer, PARSE } from "./optional-peer.ts"
+import { optionalPeer } from "./optional-peer.ts"
+import { PARSE } from "./peer-needs.ts"
 import { qualifySchemaElements } from "./pg-schema-elts.ts"
 
 type Parser = { parseSync(sql: string): { stmts?: unknown } }

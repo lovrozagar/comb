@@ -4,7 +4,7 @@ export { CliError, type CliIo, processIo } from "./output.ts";
 export { help, runCli } from "./run.ts";
 
 // cli/output.d.ts
-import type { Run } from "../migrate/core/process.ts";
+import type { Run, RunResult } from "../migrate/core/process.ts";
 import type { LiveRead } from "../migrate/core/pg-live-types.ts";
 import type { replayCatalog } from "../migrate/core/pg-replay.ts";
 /** Where the CLI reads its working directory, writes its output, asks, and starts processes. */
@@ -24,6 +24,8 @@ export type CliIo = {
     }) => Promise<void>) | undefined;
     /** How a migrate command finds an optional peer's entry before its first I/O, as comb and `bun` find it unless a test fakes it (K1 of r21) */
     locatePeer?: ((peer: string) => string) | undefined;
+    /** How a migrate command reads Atlas's version before its first I/O, `atlas version` through `run` unless a test fakes it (PA5 of r22) */
+    readAtlasVersion?: (() => RunResult) | undefined;
     /** Ask the person running the CLI a yes/no question; absent when nobody can answer (no TTY) */
     confirm?: ((question: string) => Promise<boolean>) | undefined;
 };
@@ -84,6 +86,14 @@ export type RunResult = {
     stdout: string;
     stderr: string;
 };
+/**
+ * The Atlas releases comb runs on, which comb reads from `atlas version` before a command's first
+ * I/O and refuses outside it (PA5 of r22): the floor is the oldest release comb's integration suite
+ * passes on, and the next major may change what comb reads from Atlas
+ */
+export declare const ATLAS_RANGE = ">=1.2.0 <2";
+/** Where Atlas, which no package ships, is installed from */
+export declare const ATLAS_INSTALL = "https://atlasgo.io/getting-started";
 export type RunOptions = {
     cwd?: string | undefined;
     /** Variables set over the parent's environment for the child; an undefined value removes one. */

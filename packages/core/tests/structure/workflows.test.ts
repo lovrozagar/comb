@@ -8,6 +8,7 @@ import { globSync, readdirSync, readFileSync } from "node:fs"
 import { availableParallelism, homedir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { ATLAS_FLOOR_PATH, ATLAS_FLOOR_SHA256, ATLAS_FLOOR_VERSION } from "../support/atlas-floor.ts"
 import { DATE_KEYS, OFF_UTC_INTEGRATION, OFF_UTC_UNIT, OFF_UTC_ZONE } from "../support/off-utc.ts"
 import { POSIX_EXCLUDE, POSIX_INTEGRATION, POSIX_UNIT } from "../support/posix.ts"
 import { SQLD_ARCHIVE, SQLD_PATH, SQLD_VERSION } from "../support/sqld.ts"
@@ -140,13 +141,14 @@ function verifyGates(): string[] {
 const scriptOf = (command: string) => /^bun run (?:--filter \S+ )?(\S+)$/.exec(command)?.[1]
 
 /* the CI steps no local gate stands for: installs, the commit-message lint lefthook's commit-msg
-   hook runs, the release dry run, and the Atlas binary the test jobs fetch */
+   hook runs, the release dry run, and the Atlas binaries the test jobs fetch */
 const SETUP = {
 	commands: ["bun install --frozen-lockfile", "npm install -g npm@latest"],
 	names: [
 		"Lint commit messages",
 		"dry-run the release publish",
 		"install atlas v1.3.0",
+		`install atlas v${ATLAS_FLOOR_VERSION}`,
 		`install sqld ${SQLD_VERSION}`,
 	],
 }
@@ -252,6 +254,24 @@ describe("ci.yml's sqld", () => {
 		expect(lines).toContain(`path: ${home}`)
 		expect(lines).toContain(`key: sqld-${SQLD_VERSION}-x86_64-linux-gnu`)
 		expect(lines.indexOf(`install sqld ${SQLD_VERSION}`)).toBeLessThan(lines.indexOf("run: bun run test:coverage"))
+	})
+})
+
+/* PA5 of r22: the Atlas floor cell needs the pinned v1.2.0 at its path, which only the test job's own step provides */
+describe("ci.yml's Atlas floor", () => {
+	const jobs = ciJobs(readFileSync(join(WORKFLOWS, "ci.yml"), "utf8"))
+	const file = ATLAS_FLOOR_PATH.replace(homedir(), "$HOME")
+	it("is fetched by tests/support/atlas-floor.ts's version and sha256 to its path, before test:coverage runs", () => {
+		const coverage = jobs.filter((job) => scriptsOf(job.lines).includes("test:coverage"))
+		const lines = (coverage[0] as { lines: string }).lines
+		const name = `- name: install atlas v${ATLAS_FLOOR_VERSION}`
+		expect(lines).toContain(name)
+		const step = lines.slice(lines.indexOf(name))
+		expect(step).toContain(
+			`curl -sSfL -o "${file}" https://release.ariga.io/atlas/atlas-linux-amd64-v${ATLAS_FLOOR_VERSION}`,
+		)
+		expect(step).toContain(`echo "${ATLAS_FLOOR_SHA256}  ${file}" | sha256sum -c -`)
+		expect(lines.indexOf(name)).toBeLessThan(lines.indexOf("run: bun run test:coverage"))
 	})
 })
 

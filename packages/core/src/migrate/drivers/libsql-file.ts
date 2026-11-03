@@ -7,7 +7,8 @@
  */
 import { createRequire } from "node:module"
 import type { FileConnection } from "../core/apply.ts"
-import { LIBSQL, optionalPeer } from "../core/optional-peer.ts"
+import { optionalPeer } from "../core/optional-peer.ts"
+import { LIBSQL } from "../core/peer-needs.ts"
 import { LIBSQL_CLIENT } from "./libsql-client.ts"
 
 /** The surface of libsql's Database comb calls */

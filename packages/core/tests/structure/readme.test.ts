@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
-import { PEERS } from "../../src/migrate/core/optional-peer.ts"
+import { PEERS } from "../../src/migrate/core/peer-needs.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
 const REPO = join(ROOT, "../..")

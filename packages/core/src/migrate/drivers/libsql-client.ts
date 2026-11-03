@@ -3,7 +3,8 @@
  * a string-typed specifier, so a project without it still type-checks /migrate (K2 of r17), and
  * through optionalPeer, so a project that needs it and lacks it is told the package and its range.
  */
-import { LIBSQL, optionalPeer } from "../core/optional-peer.ts"
+import { optionalPeer } from "../core/optional-peer.ts"
+import { LIBSQL } from "../core/peer-needs.ts"
 
 type InValue = ArrayBuffer | bigint | boolean | Date | null | number | string | Uint8Array
 type Statement = { args: InValue[]; sql: string }

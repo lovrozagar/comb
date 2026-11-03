@@ -3,9 +3,9 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { parseArgs, refuseFurther } from "./args.ts"
-import { binOf, requirePeers } from "../migrate/core/optional-peer.ts"
-import { configuredFtsSql } from "./comb-config.ts"
-import { migrateApply } from "./migrate-apply.ts"
+import { binOf } from "../migrate/core/optional-peer.ts"
+import { declaredFts, ftsSql } from "./comb-config.ts"
+import { migrateApply, needPeers } from "./migrate-apply.ts"
 import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliIo } from "./output.ts"
 
@@ -84,11 +84,10 @@ function migrateInit(argv: readonly string[], io: CliIo): void {
 async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const args = parseArgs(argv, "migrate diff")
 	const [db, name] = args.positionals
-	const { codegen, d1, exported, migrationsDir, pg, provider } = await diffTarget(db, io)
-	/* every peer the diff needs, before Atlas or drizzle-kit runs (K1 of r21) */
-	const peers = requirePeers("diff", provider, { cwd: io.cwd, locate: io.locatePeer })
-	const { checkAtlasInstalled, exportWith, generateIncrementalMigration } = await import("../migrate/core/atlas.ts")
-	if (!checkAtlasInstalled(io.run)) throw new CliError("Atlas not found. Install: https://atlasgo.io/getting-started")
+	const { d1, exported, fts, migrationsDir, pg, provider } = await diffTarget(db, io)
+	/* every peer the diff needs, Atlas and a declared FTS's ts-morph among them, before Atlas or drizzle-kit runs (K1 of r21, KC3 of r22) */
+	const peers = needPeers(io, "diff", { fts: fts !== undefined, provider })
+	const { exportWith, generateIncrementalMigration } = await import("../migrate/core/atlas.ts")
 	/* a D1 diff writes beside the files wrangler runs, refused where it would run them otherwise than Atlas (S4, C8) */
 	if (d1 && fs.existsSync(migrationsDir)) (await import("../migrate/core/d1-files.ts")).d1Files(migrationsDir)
 	const dialect = exported.dialect
@@ -100,7 +99,7 @@ async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	try {
 		const { files, notices, synced } = await generateIncrementalMigration({
 			dialect,
-			ftsSql: pg === undefined ? await configuredFtsSql(io.cwd, codegen, io) : undefined,
+			ftsSql: fts === undefined ? undefined : await ftsSql(io.cwd, fts, io),
 			migrationName: name ?? `migration_${Date.now()}`,
 			migrationsDir: dir,
 			readyDev: io.readyPgDev,
@@ -143,7 +142,7 @@ function drizzleConfig(configured: string | undefined, cwd: string): string {
 /* without comb.migrate.config.ts the migrations are SQLite's, whose diff needs what a D1 one does */
 const providerOf = (target: MigrateTarget | undefined) => target?.provider.type ?? "d1"
 
-/** What a diff of `db` reads: its Postgres provider if it has one, its drizzle export, and its migrations */
+/** What a diff of `db` reads: its Postgres provider if it has one, its drizzle export, the FTS it declares, and its migrations */
 async function diffTarget(db: string | undefined, io: CliIo) {
 	const target = db === undefined ? undefined : await resolveMigrateTarget({ cwd: io.cwd, db, mode: "diff" })
 	const pg = target?.provider.type === "postgres" ? target.provider : undefined
@@ -163,9 +162,10 @@ async function diffTarget(db: string | undefined, io: CliIo) {
 		name: target?.codegen ?? db,
 	}
 	return {
-		codegen,
 		d1: target?.provider.type === "d1",
 		exported,
+		/* Postgres has no FTS of comb's: its diff never reads comb.config.ts */
+		fts: pg === undefined ? await declaredFts(io.cwd, codegen) : undefined,
 		migrationsDir: target?.migrationsDir ?? path.resolve(io.cwd, "atlas-migrations"),
 		pg,
 		provider: providerOf(target),

@@ -3,7 +3,8 @@
  * since D1 has no HTTP API for external access.
  */
 import * as z from "zod"
-import { projectBin, WRANGLER } from "../core/optional-peer.ts"
+import { projectBin } from "../core/optional-peer.ts"
+import { WRANGLER } from "../core/peer-needs.ts"
 import { type ProjectBin, type Run, run, runPeer } from "../core/process.ts"
 import { segments } from "../core/sql-scan.ts"
 import type { Connection, ConnectionProvider, D1ProviderConfig, QueryResult } from "../types.ts"

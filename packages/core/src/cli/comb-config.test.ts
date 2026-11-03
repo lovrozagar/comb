@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeIo, projects, writeTables } from "./__fixtures__/io.ts"
-import { configuredFtsSql, databaseIn, findCombConfig, loadCombConfig, tablesFile } from "./comb-config.ts"
+import { databaseIn, declaredFts, findCombConfig, ftsSql, loadCombConfig, tablesFile } from "./comb-config.ts"
 import { CliError } from "./output.ts"
 
 const temp = projects(fixtureRoot())
@@ -68,27 +68,29 @@ describe("databaseIn and tablesFile", () => {
 	})
 })
 
-describe("configuredFtsSql", () => {
-	it("has no FTS without a config, a database name, or fts on the database", async () => {
+describe("declaredFts and ftsSql", () => {
+	it("declares no FTS without a config, a database name, or fts on the database", async () => {
 		const dir = project()
-		const io = makeIo(dir)
-		expect(await configuredFtsSql(dir, { name: "core" }, io)).toBeUndefined()
+		expect(await declaredFts(dir, { name: "core" })).toBeUndefined()
 		writeFileSync(
 			join(dir, "comb.config.ts"),
 			'export default { databases: { core: { tables: "./db.core.tables.ts", fts: {} } } }\n',
 		)
-		expect(await configuredFtsSql(dir, { name: undefined }, io)).toBeUndefined()
-		expect(await configuredFtsSql(dir, { name: "core" }, io)).toBeUndefined()
+		expect(await declaredFts(dir, { name: undefined })).toBeUndefined()
+		expect(await declaredFts(dir, { name: "core" })).toBeUndefined()
+		await expect(declaredFts(dir, { hint: "Set codegen", name: "gone" })).rejects.toThrow(". Set codegen")
 	})
 
-	it("is the FTS5 DDL the database's fts config declares", async () => {
+	it("is the FTS the database declares, and the FTS5 DDL built from it", async () => {
 		const dir = project()
 		writeTables(dir)
 		writeFileSync(
 			join(dir, "comb.config.ts"),
 			'export default { databases: { core: { tables: "./db.core.tables.ts", fts: { post: { columns: ["title"] } } } } }\n',
 		)
-		expect(await configuredFtsSql(dir, { name: "core" }, makeIo(dir))).toMatch(
+		const declared = await declaredFts(dir, { name: "core" })
+		expect(declared).toEqual({ fts: { post: { columns: ["title"] } }, tables: "./db.core.tables.ts" })
+		expect(await ftsSql(dir, declared as NonNullable<typeof declared>, makeIo(dir))).toMatch(
 			/CREATE VIRTUAL TABLE IF NOT EXISTS "post_fts" USING fts5/,
 		)
 	})
