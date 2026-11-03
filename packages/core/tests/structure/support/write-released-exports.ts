@@ -1,14 +1,26 @@
 /**
- * Regenerates __snapshots__/released-exports.json from a checkout of a release tag, which has its
- * dependencies installed: `bun tests/structure/support/write-released-exports.ts <checkout>/packages/core`.
+ * Regenerates __snapshots__/released-exports.json from a release's tarball on the npm registry, the
+ * declarations its consumers' compilers read: `bun tests/structure/support/write-released-exports.ts <version>`.
  * Run it from this package after each release, so the next version's section is held to that release.
  */
-import { readFileSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { exportsOf } from "./exports-of.ts"
+import { releasedExportsOf } from "./exports-of.ts"
 
-const root = process.argv[2]
-if (root === undefined) throw new Error("name the release's packages/core")
-const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version: string }
-const target = join(import.meta.dirname, "../__snapshots__/released-exports.json")
-writeFileSync(target, `${JSON.stringify({ exports: exportsOf(root), version }, null, "\t")}\n`)
+const version = process.argv[2]
+if (version === undefined) throw new Error("name the release's version, such as 0.20.1")
+const response = await fetch(`https://registry.npmjs.org/@lovrozagar/comb/-/comb-${version}.tgz`)
+if (!response.ok) throw new Error(`comb ${version}: the registry answered ${response.status}`)
+const dir = mkdtempSync(join(tmpdir(), "comb-released-"))
+try {
+	writeFileSync(join(dir, "comb.tgz"), new Uint8Array(await response.arrayBuffer()))
+	const untar = spawnSync("tar", ["-xzf", join(dir, "comb.tgz"), "-C", dir], { encoding: "utf8" })
+	if (untar.status !== 0) throw new Error(`tar exited ${untar.status}\n${untar.stderr}`)
+	const exports = releasedExportsOf(join(dir, "package"))
+	const target = join(import.meta.dirname, "../__snapshots__/released-exports.json")
+	writeFileSync(target, `${JSON.stringify({ exports, version }, null, "\t")}\n`)
+} finally {
+	rmSync(dir, { force: true, recursive: true })
+}

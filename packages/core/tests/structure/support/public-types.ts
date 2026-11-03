@@ -5,41 +5,16 @@
  * It walks the declarations a consumer's compiler reads, emitted from tsconfig.strict.json as the
  * pack emits them, with the walk of `.tmp/grunt/r22b/consumers-types/A-unexported-types.ts`.
  */
-import { spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
-import { createRequire } from "node:module"
-import { tmpdir } from "node:os"
-import { dirname, join, relative } from "node:path"
+import { relative } from "node:path"
 import { ts } from "ts-morph"
-import { type ExportTarget, sourceOf } from "./exports-of.ts"
+import { checkerOf, MEMBER, named, real, withEmitted } from "./declarations.ts"
 
 /** Each unexported type as `Name (file.d.ts)`, with the chain of public names that reaches it */
 export type Unexported = Map<string, string>
 
-const real = (checker: ts.TypeChecker, symbol: ts.Symbol) =>
-	symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol
-
-/** The symbol a type reference, an `extends` clause or a `typeof` names; undefined for any other node */
-function named(checker: ts.TypeChecker, node: ts.Node): ts.Symbol | undefined {
-	if (ts.isTypeReferenceNode(node)) return checker.getSymbolAtLocation(node.typeName)
-	if (ts.isTypeQueryNode(node)) return checker.getSymbolAtLocation(node.exprName)
-	if (ts.isExpressionWithTypeArguments(node)) return checker.getSymbolAtLocation(node.expression)
-	return undefined
-}
-
-const MEMBER = ts.SymbolFlags.TypeParameter | ts.SymbolFlags.Property | ts.SymbolFlags.Method
-
 /** What the declaration files `entries` export, and every local type under `dir` they name that none exports */
 export function unexportedIn(dir: string, entries: readonly string[]): Unexported {
-	const program = ts.createProgram([...entries], {
-		module: ts.ModuleKind.ESNext,
-		moduleResolution: ts.ModuleResolutionKind.Bundler,
-		noEmit: true,
-		skipLibCheck: true,
-		strict: true,
-		target: ts.ScriptTarget.ES2023,
-	})
-	const checker = program.getTypeChecker()
+	const { checker, program } = checkerOf(entries)
 	const local = (symbol: ts.Symbol) => symbol.declarations?.[0]?.getSourceFile().fileName.startsWith(dir) === true
 	const exported = new Set(
 		entries.flatMap((file) => {
@@ -67,29 +42,5 @@ export function unexportedIn(dir: string, entries: readonly string[]): Unexporte
 }
 
 /** The package at `root`'s TypeScript export subpaths, as tsconfig.strict.json emits their declarations */
-export function unexportedTypes(root: string): Unexported {
-	const out = mkdtempSync(join(tmpdir(), "comb-public-types-"))
-	try {
-		const tsc = join(
-			dirname(createRequire(join(root, "package.json")).resolve("typescript/package.json")),
-			"bin",
-			"tsc",
-		)
-		const args = ["-p", join(root, "tsconfig.strict.json"), "--noEmit", "false", "--emitDeclarationOnly"]
-		const run = spawnSync(process.execPath, [tsc, ...args, "--rootDir", join(root, "src"), "--outDir", out], {
-			encoding: "utf8",
-		})
-		if (run.status !== 0) throw new Error(`tsc failed:\n${run.stdout}${run.stderr}`)
-		const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
-			exports: Record<string, ExportTarget>
-		}
-		const entries = Object.entries(manifest.exports)
-			.filter(([key]) => key !== "./package.json")
-			.map(([, target]) => sourceOf(target))
-			.filter((source) => source.endsWith(".ts"))
-			.map((source) => join(out, source.replace(/^\.?\/?src\//, "").replace(/\.ts$/, ".d.ts")))
-		return unexportedIn(out, entries)
-	} finally {
-		rmSync(out, { force: true, recursive: true })
-	}
-}
+export const unexportedTypes = (root: string): Unexported =>
+	withEmitted(root, ({ dir, entries }) => unexportedIn(dir, Object.values(entries)))
