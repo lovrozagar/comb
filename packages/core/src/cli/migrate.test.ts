@@ -163,7 +163,7 @@ describe("comb migrate diff", () => {
 			dir,
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff"], bare)).toBe(1)
+		expect(await runCli(["migrate", "diff", "core"], bare)).toBe(1)
 		expect(bare.errors).toEqual([
 			`no drizzle config in ${dir} (drizzle.config.ts, .js, .mjs or .json): run comb migrate init, or set drizzleConfigPath on the database in comb.migrate.config.ts`,
 		])
@@ -258,13 +258,23 @@ describe("comb migrate diff --dry-run", () => {
 		expect(readdirSync(join(dir, "atlas-migrations"))).toEqual(["1_init.sql"])
 	})
 
-	it("with --dry-run and no database named, diffs an empty copy when there is no migrations directory", async () => {
+	/* KC2 of r22b: 0.20 diffed a new ./atlas-migrations against no history, whatever comb.migrate.config.ts said */
+	it("refuses no database named, with its usage, writing nothing", async () => {
 		const dir = diffProject()
 		const run = fakeAtlas((replayed) => writeFileSync(join(replayed, "20260101000000_x.sql"), "SELECT 1;\n"))
 		const io = makeIo(dir, run)
 		expect(await runCli(["migrate", "diff", "--dry-run"], io)).toBe(1)
+		expect(io.errors).toEqual(["Usage: comb migrate diff <database> [name] [--dry-run]"])
+		expect({ calls: run.calls, files: readdirSync(dir) }).toEqual({ calls: [], files: ["drizzle.config.ts"] })
+	})
+
+	it("diffs an empty copy when there is no migrations directory", async () => {
+		const dir = diffProject()
+		const run = fakeAtlas((replayed) => writeFileSync(join(replayed, "20260101000000_x.sql"), "SELECT 1;\n"))
+		const io = makeIo(dir, run)
+		expect(await runCli(["migrate", "diff", "core", "--dry-run"], io)).toBe(1)
 		expect(io.errors).toEqual([
-			"the schema has drifted from the migrations: comb migrate diff would write the SQL above",
+			"core has drifted from its migrations: comb migrate diff core would write the SQL above",
 		])
 		expect(readdirSync(dir)).toEqual(["drizzle.config.ts"])
 	})
@@ -274,7 +284,7 @@ describe("comb migrate diff --dry-run", () => {
 			diffProject(),
 			fakeAtlas(() => undefined),
 		)
-		expect(await runCli(["migrate", "diff"], io)).toBe(0)
+		expect(await runCli(["migrate", "diff", "core"], io)).toBe(0)
 		expect(io.outputs).toEqual(["Schema is already in sync — no migration needed"])
 	})
 })

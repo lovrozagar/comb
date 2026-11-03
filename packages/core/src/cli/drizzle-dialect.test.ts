@@ -75,7 +75,7 @@ describe("diff refuses a drizzle config of the other dialect (KC1; sibling: init
 		const dir = project()
 		writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "postgresql" }\n')
 		const bare = makeIo(dir, fakeAtlas())
-		expect(await runCli(["migrate", "diff"], bare)).toBe(1)
+		expect(await runCli(["migrate", "diff", "core"], bare)).toBe(1)
 		expect(bare.errors).toEqual([
 			`${join(dir, "drizzle.config.ts")} states dialect "postgresql", but a diff with no comb.migrate.config.ts is SQLite: set dialect: "sqlite" in it`,
 		])

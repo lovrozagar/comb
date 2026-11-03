@@ -113,3 +113,22 @@ describe("parseArgs: positionals past what a command reads", () => {
 		expect(parseArgs(["core", "growth", "shard-0"], "codegen").positionals).toEqual(["core", "growth", "shard-0"])
 	})
 })
+
+/* KC2 of r22b: a bare migrate diff ignored comb.migrate.config.ts and wrote the whole schema into a new ./atlas-migrations */
+describe("required positionals are enforced for every command (KC2; sibling: the `[…]` maximum)", () => {
+	it.each([
+		["migrate apply" as const, "Usage: comb migrate apply <database>"],
+		["migrate baseline" as const, "Usage: comb migrate baseline <database>"],
+		["migrate check" as const, "Usage: comb migrate check <database>"],
+		["migrate diff" as const, "Usage: comb migrate diff <database> [name]"],
+		["migrate status" as const, "Usage: comb migrate status <database>"],
+	])("refuses %s with no database, with its usage", (command, usage) => {
+		expect(() => parseArgs([], command)).toThrow(usage)
+	})
+
+	it("takes none for codegen and init, which require none, and none beside an option that stands alone", () => {
+		expect(parseArgs([], "codegen").positionals).toEqual([])
+		expect(parseArgs([], "migrate init").positionals).toEqual([])
+		expect(parseArgs(["--tables", "t.ts"], "codegen").positionals).toEqual([])
+	})
+})

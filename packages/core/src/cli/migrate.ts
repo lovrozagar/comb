@@ -5,7 +5,14 @@ import path from "node:path"
 import { parseArgs, refuseFurther } from "./args.ts"
 import { binOf } from "../migrate/core/optional-peer.ts"
 import { declaredFts, ftsSql } from "./comb-config.ts"
-import { checkDialect, DIALECT_NAMES, type Dialect, literalDialect, statedDialect } from "./drizzle-dialect.ts"
+import {
+	checkDialect,
+	DIALECT_NAMES,
+	type Dialect,
+	type Expected,
+	literalDialect,
+	statedDialect,
+} from "./drizzle-dialect.ts"
 import { migrateApply, needPeers } from "./migrate-apply.ts"
 import { type MigrateTarget, resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliIo } from "./output.ts"
@@ -95,22 +102,13 @@ function migrateInit(argv: readonly string[], io: CliIo): void {
  */
 async function migrateDiff(argv: readonly string[], io: CliIo): Promise<void> {
 	const args = parseArgs(argv, "migrate diff")
-	const [db, name] = args.positionals
-	const { d1, exported, fts, migrationsDir, pg, provider } = await diffTarget(db, io)
+	/* parseArgs refuses a diff that names no database (KC2 of r22b) */
+	const [db, name] = args.positionals as [string, string?]
+	const { d1, expected, exported, fts, migrationsDir, pg, provider } = await diffTarget(db, io)
 	/* every peer the diff needs, Atlas and a declared FTS's ts-morph among them, before Atlas or drizzle-kit runs (K1 of r21, KC3 of r22) */
 	const peers = needPeers(io, "diff", { fts: fts !== undefined, provider })
 	/* after the peers, since a drizzle config imports drizzle-kit; before drizzle-kit exports none of the other dialect's tables (KC1 of r22b) */
-	checkDialect(exported.configPath, await statedDialect(exported.configPath), {
-		but:
-			db === undefined
-				? "a diff with no comb.migrate.config.ts is SQLite"
-				: `database ${db} is ${DIALECT_NAMES[exported.dialect]}`,
-		dialect: exported.dialect,
-		otherwise:
-			db === undefined
-				? undefined
-				: `, or set drizzleConfigPath on ${db} in comb.migrate.config.ts to a ${DIALECT_NAMES[exported.dialect]} drizzle config`,
-	})
+	checkDialect(exported.configPath, await statedDialect(exported.configPath), expected)
 	const { exportWith, generateIncrementalMigration } = await import("../migrate/core/atlas.ts")
 	/* a D1 diff writes beside the files wrangler runs, refused where it would run them otherwise than Atlas (S4, C8) */
 	if (d1 && fs.existsSync(migrationsDir)) (await import("../migrate/core/d1-files.ts")).d1Files(migrationsDir)
@@ -167,8 +165,8 @@ function drizzleConfig(configured: string | undefined, cwd: string): string {
 const providerOf = (target: MigrateTarget | undefined) => target?.provider.type ?? "d1"
 
 /** What a diff of `db` reads: its Postgres provider if it has one, its drizzle export, the FTS it declares, and its migrations */
-async function diffTarget(db: string | undefined, io: CliIo) {
-	const target = db === undefined ? undefined : await resolveMigrateTarget({ cwd: io.cwd, db, mode: "diff" })
+async function diffTarget(db: string, io: CliIo) {
+	const target = await resolveMigrateTarget({ cwd: io.cwd, db, mode: "diff" })
 	const pg = target?.provider.type === "postgres" ? target.provider : undefined
 	const exported = {
 		configPath: drizzleConfig(target?.drizzleConfigPath, io.cwd),
@@ -185,8 +183,19 @@ async function diffTarget(db: string | undefined, io: CliIo) {
 				: `Set codegen: "<its comb.config.ts name>" on ${target.database} in comb.migrate.config.ts`,
 		name: target?.codegen ?? db,
 	}
+	const name = DIALECT_NAMES[exported.dialect]
+	/* the dialect its drizzle config must state (KC1 of r22b) */
+	const expected: Expected =
+		target === undefined
+			? { but: "a diff with no comb.migrate.config.ts is SQLite", dialect: "sqlite" }
+			: {
+					but: `database ${db} is ${name}`,
+					dialect: exported.dialect,
+					otherwise: `, or set drizzleConfigPath on ${db} in comb.migrate.config.ts to a ${name} drizzle config`,
+				}
 	return {
 		d1: target?.provider.type === "d1",
+		expected,
 		exported,
 		/* Postgres has no FTS of comb's: its diff never reads comb.config.ts */
 		fts: pg === undefined ? await declaredFts(io.cwd, codegen) : undefined,
@@ -197,16 +206,12 @@ async function diffTarget(db: string | undefined, io: CliIo) {
 }
 
 /** Print the files a diff would write, and fail: the schema drifted from the migrations */
-function reportDrift(db: string | undefined, files: readonly string[], io: CliIo): never {
+function reportDrift(db: string, files: readonly string[], io: CliIo): never {
 	for (const file of files) {
 		io.out(`-- ${path.basename(file)}`)
 		io.out(fs.readFileSync(file, "utf8"))
 	}
-	throw new CliError(
-		db === undefined
-			? "the schema has drifted from the migrations: comb migrate diff would write the SQL above"
-			: `${db} has drifted from its migrations: comb migrate diff ${db} would write the SQL above`,
-	)
+	throw new CliError(`${db} has drifted from its migrations: comb migrate diff ${db} would write the SQL above`)
 }
 
 /** A private copy of the migrations directory, empty when there is none */

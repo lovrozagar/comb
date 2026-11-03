@@ -144,12 +144,14 @@ export function parseArgs(argv: readonly string[], command: Command): ParsedArgs
 			reading.at++
 		}
 	}
-	/* a positional the command does not read is refused, never dropped (P17 of r18, K2 of r19) */
+	/* a positional the command does not read is refused, never dropped (P17 of r18, K2 of r19), and one it requires is required */
 	const alone = optionsOf(command).find(
 		(option) => option.alone === true && Object.hasOwn(reading.parsed.options, option.long.slice(2)),
 	)
-	if (reading.parsed.positionals.length > (alone ? 0 : mostPositionals(command)))
-		throw new CliError(usageOf(command, alone))
+	/* each `<…>` part is a minimum as each `[…]` part is a maximum, so the usage line is the rule (KC2 of r22b) */
+	const [least, most] = alone ? [0, 0] : positionalRange(command)
+	const count = reading.parsed.positionals.length
+	if (count < least || count > most) throw new CliError(usageOf(command, alone))
 	return reading.parsed
 }
 
@@ -158,10 +160,11 @@ export function refuseFurther(rest: readonly string[], usage: string): void {
 	if (rest.length > 0) throw new CliError(`Usage: comb ${usage}`)
 }
 
-/** How many positionals `command` reads, as its usage line declares them: any number for a list */
-function mostPositionals(command: Command): number {
+/** The fewest and most positionals `command` reads, as its usage line declares them: any number for a list */
+function positionalRange(command: Command): readonly [number, number] {
 	const declared = POSITIONALS[command].split(" ").filter((part) => part !== "")
-	return declared.some((part) => part.endsWith("...]") || part.endsWith("...>")) ? Infinity : declared.length
+	const least = declared.filter((part) => part.startsWith("<")).length
+	return [least, declared.some((part) => part.endsWith("...]") || part.endsWith("...>")) ? Infinity : declared.length]
 }
 
 /** How the help names an option: its alias, long name and value placeholder */

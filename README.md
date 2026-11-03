@@ -1102,6 +1102,8 @@ What changes for a project on 0.20. Before deploying it:
 
 9. **State the database's dialect in the drizzle config a diff reads.** `comb migrate diff` now imports the drizzle config before drizzle-kit runs and refuses one whose `dialect` is not the database's (`postgresql` for Postgres; `sqlite` or `turso` for SQLite, libsql, Turso and D1), or that states none, naming the file, its dialect and the database's. 0.20 ran `drizzle-kit export` with the config's dialect, which exports none of the other dialect's tables, so the diff wrote a `DROP TABLE` for each and exited 0. `comb migrate init --dialect` likewise refuses a `drizzle.config.ts` already there whose `dialect` is the other one, where 0.20 kept it silently. **Fix:** set `dialect` in each drizzle config, or point the database's `drizzleConfigPath` in comb.migrate.config.ts at one of its dialect.
 
+10. **Name the database on every `comb migrate diff`.** Each command now requires the positionals its usage line marks `<…>`, as it already refused more than its `[…]` parts allow, so `comb migrate diff` with no database is refused with `Usage: comb migrate diff <database> [name]`. 0.20 took a bare diff as a project with no comb.migrate.config.ts: it diffed into a new `./atlas-migrations` against no history, writing the whole schema again beside the database's real migrations and skipping comb.config.ts's FTS, while `status` showed nothing pending. **Fix:** run `comb migrate diff <database>`. Without a comb.migrate.config.ts, the name is the comb.config.ts database whose FTS the diff writes, and the migrations stay in `./atlas-migrations`.
+
 ## Upgrading to 0.20.1
 
 What changes for a project on 0.20.0. Before deploying it:

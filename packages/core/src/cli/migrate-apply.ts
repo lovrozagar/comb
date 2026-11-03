@@ -30,7 +30,7 @@ import type { Command, Provider } from "../migrate/core/peer-needs.ts"
 import { planApply, refuseSkipping } from "../migrate/core/plan-apply.ts"
 import { run as runProcess } from "../migrate/core/process.ts"
 import type { Connection } from "../migrate/types.ts"
-import { parseArgs, type ParsedArgs, usageOf } from "./args.ts"
+import { parseArgs, type ParsedArgs } from "./args.ts"
 import { openSqliteTarget, type SqliteTarget } from "./migrate-sqlite-target.ts"
 import { resolveMigrateTarget } from "./migrate-target.ts"
 import { Refused } from "../migrate/core/refused.ts"
@@ -233,9 +233,8 @@ async function migrateSqlite({ args, io, mode }: Request, target: Target): Promi
 /** `mode`'s argv read: its database and options; refused by usage without one database */
 function readArgv(mode: Mode, argv: readonly string[]): { args: ParsedArgs; db: string } {
 	const args = parseArgs(argv, `migrate ${mode}`)
-	const [db] = args.positionals
-	if (db === undefined) throw new CliError(usageOf(`migrate ${mode}`))
-	return { args, db }
+	/* parseArgs refuses a command that names no database (KC2 of r22b) */
+	return { args, db: args.positionals[0] as string }
 }
 
 export async function migrateApply(mode: Mode, argv: readonly string[], io: CliIo): Promise<void> {
