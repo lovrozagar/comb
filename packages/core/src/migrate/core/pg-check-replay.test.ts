@@ -21,8 +21,19 @@ const OWNER = [{ pid: 7, start: "9" }]
 const COUNTED = "SELECT current_setting('track_counts') AS on"
 const WRITES = expect.stringMatching(/^SELECT s\.relname, s\.n_tup_ins/)
 
-/** What a replayed transaction of `statements` sends: its counts read at BEGIN and again before COMMIT */
-const inTransaction = (...statements: unknown[]) => ["BEGIN", WRITES, ...statements, COUNTED, WRITES, "COMMIT"]
+/* the server's shared catalogs read as committed, around every file and bare statement (P1 and P2 of r22) */
+const SNAPSHOT = "EXECUTE comb_snapshot"
+
+/** What a replayed transaction of `statements` sends: its counts read at BEGIN and again, with the server's catalogs, before COMMIT */
+const inTransaction = (...statements: unknown[]) => [
+	"BEGIN",
+	WRITES,
+	...statements,
+	COUNTED,
+	WRITES,
+	SNAPSHOT,
+	"COMMIT",
+]
 
 /* what every replay sends before and after the history: the sweep, its database made and copied into, and dropped */
 const AROUND = {
@@ -36,6 +47,9 @@ const AROUND = {
 		COUNTED,
 		expect.stringMatching(/^SELECT e\.extname/),
 		'SET search_path TO "public"',
+		/* the read prepared on the connection that makes it, once, and read before the first file */
+		expect.stringMatching(/^PREPARE comb_snapshot AS SELECT 'membership' AS noun, /),
+		SNAPSHOT,
 	],
 }
 
