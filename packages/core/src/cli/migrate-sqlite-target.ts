@@ -17,7 +17,7 @@ import type { TargetKind } from "../migrate/core/classify-target.ts"
 import type { ScratchEngine } from "../migrate/drivers/local-db.ts"
 import type { Connection, ConnectionProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
-import { type MigrateTarget, refuseBlank } from "./migrate-target.ts"
+import { type MigrateTarget, refuseBlank, refuseNoDir } from "./migrate-target.ts"
 import { CliError, type CliContext } from "./output.ts"
 
 /** An open database to migrate: the connection its checks read, the one its writes go to, and how to name it */
@@ -85,8 +85,7 @@ export async function openSqliteTarget(
 	/* a libsql url or a turso apiToken left blank loads, and cannot connect (P9 of r18, S5 of r19) */
 	if (target.provider.type === "libsql") refuseBlank(target, { url: target.provider.url })
 	if (target.provider.type === "turso") refuseBlank(target, { apiToken: target.provider.apiToken })
-	if (args.options["file"] === undefined && !fs.existsSync(target.migrationsDir))
-		throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)
+	if (args.options["file"] === undefined) refuseNoDir(target.migrationsDir)
 	const { createProvider } = await import("../migrate/config.ts")
 	const { drizzleConfigPath, migrationsDir, name, provider } = target
 	/* one provider for the command: a Turso one mints its token once, however many connections it opens */

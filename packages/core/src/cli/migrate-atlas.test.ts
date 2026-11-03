@@ -72,6 +72,19 @@ describe("a Postgres database with a blank url", () => {
 	})
 })
 
+describe("a Postgres database's migrations directory", () => {
+	it("refuses a migrations directory that does not exist, or a file --dir names (AD10 of the area D review)", async () => {
+		const dir = postgresProject({})
+		const io = makeIo(dir, pgAtlas([]))
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--dir", "nowhere"], io)).toBe(1)
+		expect(io.errors).toEqual([`Migrations dir not found: ${join(dir, "nowhere")}`])
+		writeFileSync(join(dir, "afile.sql"), "")
+		const file = makeIo(dir, pgAtlas([]))
+		expect(await runCliWithFakes(["migrate", "baseline", "core", "--dir", "afile.sql"], file)).toBe(1)
+		expect(file.errors).toEqual([`Migrations dir ${join(dir, "afile.sql")} is not a directory`])
+	})
+})
+
 /* AD9 of the area D review: a blank devUrl said only "devUrl is empty", whose database unnamed */
 describe("a Postgres database with a blank devUrl", () => {
 	it("is refused naming the database by each command that reaches it, before Atlas runs", async () => {
@@ -165,13 +178,6 @@ describe("migrate baseline and its refusals: a Postgres database, through Atlas"
 		expect(io.errors).toEqual([
 			"--hashes is for a D1 database, whose history records names alone: Atlas records each file's hash as it applies it",
 		])
-	})
-
-	it("refuses a migrations directory that does not exist", async () => {
-		const dir = postgresProject({})
-		const io = makeIo(dir, pgAtlas([]))
-		expect(await runCliWithFakes(["migrate", "apply", "core", "--dir", "nowhere"], io)).toBe(1)
-		expect(io.errors).toEqual([`Migrations dir not found: ${join(dir, "nowhere")}`])
 	})
 
 	it("warns of a URL that may send the password unprotected", async () => {

@@ -70,6 +70,11 @@ describe("migrate apply: arguments", () => {
 		const missing = io(configuredDir)
 		expect(await runCliWithFakes(["migrate", "baseline", "core", "--dir", "nowhere"], missing)).toBe(1)
 		expect(missing.errors).toEqual([`Migrations dir not found: ${join(configuredDir, "nowhere")}`])
+		/* AD10 of the area D review: a file --dir names, refused as a missing one is */
+		writeFileSync(join(configuredDir, "afile.sql"), "")
+		const file = io(configuredDir)
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--dir", "afile.sql", "--yes"], file)).toBe(1)
+		expect(file.errors).toEqual([`Migrations dir ${join(configuredDir, "afile.sql")} is not a directory`])
 	})
 })
 

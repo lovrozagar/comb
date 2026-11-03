@@ -4,7 +4,6 @@
  * (its wrangler config and environment with it), or, in a project without one, is the binding the
  * command names in the wrangler config of the working folder.
  */
-import fs from "node:fs"
 import path from "node:path"
 import { approveMigration } from "../migrate/core/approval.ts"
 import { type D1Target, findWranglerConfig, type ReadConfig } from "../migrate/core/d1-binding.ts"
@@ -15,7 +14,7 @@ import { type ProjectBin, run as runProcess } from "../migrate/core/process.ts"
 import { connectD1, wranglerFlags } from "../migrate/drivers/d1.ts"
 import type { D1ProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
-import type { MigrateTarget } from "./migrate-target.ts"
+import { type MigrateTarget, refuseNoDir } from "./migrate-target.ts"
 import { checkPassed, CliError, type CliContext, type MigrateOutcome } from "./output.ts"
 
 type D1Mode = "apply" | "baseline" | "check" | "status"
@@ -59,7 +58,7 @@ export async function migrateD1(
 	if (args.options["file"] !== undefined)
 		throw new CliError("--file does not apply to a D1 database: wrangler applies its migrations directory")
 	const { config, dir } = d1Config(request, resolved)
-	if (!fs.existsSync(dir)) throw new CliError(`Migrations dir not found: ${dir}`)
+	refuseNoDir(dir)
 	/* the provider's databaseName, the D1 database its connection reaches whatever the environment is called (K4 of r17) */
 	const name = config.databaseName
 	const exec = io.run ?? runProcess

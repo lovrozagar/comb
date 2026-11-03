@@ -4,6 +4,7 @@
  * database declares them; `diff` takes one, and without it reads environments that agree on what a
  * diff reads (KC4 of r22b).
  */
+import fs from "node:fs"
 import path from "node:path"
 import { blank } from "../blank.ts"
 import type { CombMigrateConfig } from "../migrate/config.ts"
@@ -148,4 +149,10 @@ function refuseBlank(
 	}
 }
 
-export { type MigrateTarget, refuseBlank, resolveMigrateTarget, type TargetRequest }
+/** Refuse `dir` unless it is a directory: one missing, or a file --dir names, which reading it would fail on as ENOTDIR (AD10 of the area D review) */
+function refuseNoDir(dir: string): void {
+	if (!fs.existsSync(dir)) throw new CliError(`Migrations dir not found: ${dir}`)
+	if (!fs.statSync(dir).isDirectory()) throw new CliError(`Migrations dir ${dir} is not a directory`)
+}
+
+export { type MigrateTarget, refuseBlank, refuseNoDir, resolveMigrateTarget, type TargetRequest }

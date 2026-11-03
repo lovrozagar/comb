@@ -142,6 +142,11 @@ describe("migrate apply on D1 without a migrate config: order and refusals", () 
 		const bare = makeIo(dir)
 		expect(await runCliWithFakes(["migrate", "apply", "blog", "--local", "--dir", "nowhere"], bare)).toBe(1)
 		expect(bare.errors).toEqual([`Migrations dir not found: ${join(dir, "nowhere")}`])
+		/* AD10 of the area D review: a file --dir names, refused as a missing one is */
+		writeFileSync(join(dir, "afile.sql"), "")
+		const file = makeIo(dir)
+		expect(await runCliWithFakes(["migrate", "apply", "blog", "--local", "--dir", "afile.sql"], file)).toBe(1)
+		expect(file.errors).toEqual([`Migrations dir ${join(dir, "afile.sql")} is not a directory`])
 		/* without a runner given, comb runs the real wrangler, which the refusal comes before */
 		const real = makeIo(dir)
 		expect(await runCliWithFakes(["migrate", "apply", "blog", "--local"], real)).toBe(1)

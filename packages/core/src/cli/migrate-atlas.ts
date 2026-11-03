@@ -3,14 +3,13 @@
  * comb snapshots, classifies and approves (migrate/core/atlas-apply.ts). The URL's warnings (TLS,
  * poolers) are printed before anything runs.
  */
-import fs from "node:fs"
 import { approveMigration } from "../migrate/core/approval.ts"
 import { applyWithAtlas, baselineWithAtlas, statusWithAtlas } from "../migrate/core/atlas-apply.ts"
 import { pgUrlProblems } from "../migrate/core/atlas-target.ts"
 import { loadPostgresParser } from "../migrate/core/pg-parser.ts"
 import type { ResolvedPostgresProviderConfig } from "../migrate/types.ts"
 import type { ParsedArgs } from "./args.ts"
-import { type MigrateTarget, refuseBlank } from "./migrate-target.ts"
+import { type MigrateTarget, refuseBlank, refuseNoDir } from "./migrate-target.ts"
 import { checkPassed, CliError, type CliContext, type MigrateOutcome } from "./output.ts"
 
 type PostgresTarget = MigrateTarget & { provider: ResolvedPostgresProviderConfig }
@@ -29,7 +28,7 @@ export async function migratePostgres(
 		throw new CliError(
 			"--hashes is for a D1 database, whose history records names alone: Atlas records each file's hash as it applies it",
 		)
-	if (!fs.existsSync(target.migrationsDir)) throw new CliError(`Migrations dir not found: ${target.migrationsDir}`)
+	refuseNoDir(target.migrationsDir)
 	/* where init's starter reads the url, which an unset DATABASE_URL leaves blank (KC7 of r22b) */
 	refuseBlank(target, { url: target.provider.url }, "; init's starter reads it from DATABASE_URL")
 	/* status alone never reaches the dev database */
