@@ -1101,6 +1101,8 @@ What changes for a project on 0.19. Before deploying it:
 
 9. **Call `defineConfig` inside a config function, not around it.** `defineConfig` takes an object only, so `defineConfig(async () => ({…}))` fails to compile with TS2345 (`Argument of type '() => Promise<…>' is not assignable to parameter of type 'CombMigrateConfig'`). 0.19 took the function, and TypeScript checked no key of the object it returned, so a misspelled `local` or `migrationsDir` there compiled. At load, a function export that returns a function, as an untyped config of the old form wrapped in another function does, is refused naming the form. **Fix:** `export default async () => defineConfig({…})` in place of `export default defineConfig(async () => ({…}))`; an object config needs nothing. anyrow's configs need no change.
 
+10. **Expect a role check replays to have no login and no options, on Postgres.** A history's `CREATE ROLE` or `CREATE USER` makes the role on devUrl's server `NOLOGIN NOSUPERUSER NOREPLICATION NOBYPASSRLS` while check or baseline replays it, keeping `IN ROLE`, `ROLE` and `ADMIN` only among roles that replay made, since the replay needs only its name, for an owner, a grant or a policy. Check prints a line for each one that asked for more. 0.19 made it as written, so a `CREATE USER ops SUPERUSER PASSWORD '…'` in a pending file left a superuser that could log in to devUrl's server for as long as the check ran, and for good when a killed check left it. Apply makes the role as written. **Fix:** none.
+
 ## Upgrading to 0.19
 
 What changes for a project on 0.18. Before deploying it:
