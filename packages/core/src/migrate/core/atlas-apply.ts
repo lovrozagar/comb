@@ -103,7 +103,7 @@ async function approvePending(options: ApplyOptions, copy: string, pending: read
 	/* a check lets Postgres decide what no database runs, before any file is approved (P13 of r19) */
 	if (options.checkOnly === true) {
 		const names = pending.map((file) => file.Name)
-		await (options.replayPending ?? replayPending)(options, throughPending(copy, names))
+		await (options.replayPending ?? replayPending)(options, { files: throughPending(copy, names), pending: names })
 	}
 	const waiting = new Set(pending.map((file) => file.Name))
 	/* names are keyed as Postgres resolves them under the URL's search_path, the target's schema (M72) */

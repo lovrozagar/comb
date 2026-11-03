@@ -328,7 +328,9 @@ declare function createRole(sql: Sql, { database, role, sent, started }: {
     sent: string;
     started: number;
 }): Promise<boolean>;
-export { copyExtensions, createRole, dropRole, extensionsOf, makeDatabase, STALE_MS, sweep, type Sql };
+/** Which of `roles` the server holds, a replay's own left out: another replay's role is gone once it ends */
+declare function heldRoles(sql: Sql, roles: readonly string[]): Promise<Set<string>>;
+export { copyExtensions, createRole, dropRole, extensionsOf, heldRoles, makeDatabase, STALE_MS, sweep, type Sql };
 
 // migrate/core/pg-live-catalog.d.ts
 /**

@@ -32,7 +32,7 @@ function options(exec: Run, more: Partial<ApplyOptions> = {}): ApplyOptions & { 
 		dir,
 		exec,
 		print: () => undefined,
-		replayPending: async (_, files) => {
+		replayPending: async (_, { files }) => {
 			replayed.push(files.map((each) => each.name))
 		},
 		replayed,

@@ -9,7 +9,7 @@ import { ReplayFailed } from "./replay-failed.ts"
 beforeAll(loadPostgresParser)
 
 const TARGET = { devUrl: "postgres://dev/dev", lockTimeout: "5s", schema: "public", url: "postgres://app/app" }
-const file = (sql: string) => [{ name: "1_a.sql", sql }]
+const file = (sql: string) => ({ files: [{ name: "1_a.sql", sql }], pending: ["1_a.sql"] })
 
 /* the replay's database, named for the run's start and a random suffix */
 const DATABASE = /comb_replay_\d{13}_[0-9a-f]{8}/g
@@ -34,15 +34,24 @@ const AROUND = {
 	],
 }
 
-/** A postgres.js stand-in on every connection: each query it was sent, the replay's database as <db>, failing those `fail` names */
-function fake(fail?: (query: string) => Error | undefined) {
+/* the target's roles, read for those the pending files make, a replay's own left out */
+const ROLES = /^SELECT r\.rolname FROM pg_roles r LEFT JOIN pg_shdescription d .* NOT LIKE 'comb\\_replay %'\)$/
+const readsRoles = (sent: readonly string[]) => sent.some((query) => ROLES.test(query))
+
+/**
+ * A postgres.js stand-in on every connection: each query it was sent, the replay's database as <db>,
+ * failing those `fail` names; the server holds the `roles`
+ */
+function fake(fail?: (query: string) => Error | undefined, roles: readonly string[] = []) {
 	const sent: string[] = []
 	const connect = () => ({
 		end: async () => undefined,
-		unsafe: async (query: string) => {
+		unsafe: async (query: string, params: unknown[]) => {
 			sent.push(query.replaceAll(DATABASE, "<db>"))
 			const error = fail?.(query)
 			if (error !== undefined) throw error
+			if (ROLES.test(query))
+				return roles.filter((role) => (params[0] as string[]).includes(role)).map((rolname) => ({ rolname }))
 			return query === COUNTED ? [{ on: "on" }] : []
 		},
 	})
@@ -81,6 +90,15 @@ describe("replayPending (P13 of r19)", () => {
 		expect(sent).toEqual([])
 	})
 
+	it("says it replayed nothing on a docker:// devUrl without the postgres package, for the container's reason", async () => {
+		const { out } = await replayed("CREATE TABLE t (a int);", { devUrl: "docker://postgres/17/dev", load: noPeer })
+		expect(out).toEqual([
+			expect.stringMatching(
+				/^Check did not replay the pending files on devUrl: docker:\/\/postgres\/17\/dev is Atlas's own container/,
+			),
+		])
+	})
+
 	it("says it replayed nothing without the postgres package, naming why", async () => {
 		const { out } = await replayed("CREATE TABLE t (a int);", { load: noPeer })
 		expect(out).toEqual([
@@ -114,6 +132,71 @@ describe("replayPending (P13 of r19)", () => {
 			'1_a.sql: devUrl refused "ALTER TABLE t ALTER COLUMN v TYPE text" as check replayed the history and the pending files there: cannot alter type of a column used by a view or rule; check applies nothing',
 		)
 		await expect(replay).rejects.toBeInstanceOf(ReplayFailed)
+	})
+})
+
+/* P7 of r21: the replay uses a role the server holds, so a pending CREATE ROLE of one passed check, and apply stopped at it.
+   The history made `kept`; the pending file is 2_b.sql */
+const history = { name: "1_a.sql", sql: "CREATE ROLE kept;" }
+const twoFiles = (sql: string) => ({ files: [history, { name: "2_b.sql", sql }], pending: ["2_b.sql"] })
+
+/** What `replayPending` did with `sql` pending after a history that made `kept`: why it refused, and the queries sent */
+async function held(sql: string, roles: readonly string[], devUrl = TARGET.devUrl) {
+	const dev = fake(undefined, roles)
+	const out: string[] = []
+	const target = { ...TARGET, devUrl }
+	const refused = await replayPending({ print: (line) => out.push(line), target }, twoFiles(sql), dev.load).then(
+		() => undefined,
+		(error: Error) => error,
+	)
+	return { out, refused, sent: dev.sent }
+}
+
+describe("replayPending of a pending file that makes a role", () => {
+	it("refuses a role the target's server holds, as Postgres says it, naming the file apply would stop at, and replays nothing", async () => {
+		/* a statement comb's parser cannot read is Postgres's to refuse, and hides no role after it */
+		const { refused, sent } = await held("CREATE TABLE t (a int);\nSELEC 1;\nCREATE ROLE reader;", ["reader"])
+		expect(refused).toEqual(new ReplayFailed('role "reader" already exists; apply would stop at 2_b.sql'))
+		expect(refused).toBeInstanceOf(ReplayFailed)
+		expect(sent).toEqual([expect.stringMatching(ROLES)])
+	})
+
+	it("refuses the role apply reaches first, a rename to one included", async () => {
+		const { refused } = await held('ALTER ROLE "old" RENAME TO "Writer";\nCREATE USER reader;', ["reader", "Writer"])
+		expect(refused).toEqual(new ReplayFailed('role "Writer" already exists; apply would stop at 2_b.sql'))
+	})
+
+	it("reads no role for a history's CREATE ROLE, and replays the role a file drops first and makes anew", async () => {
+		const { refused, sent } = await held("DROP ROLE IF EXISTS kept, reader;\nCREATE ROLE reader;", ["kept", "reader"])
+		expect(refused).toBeUndefined()
+		expect(readsRoles(sent)).toBe(false)
+		const unmade = await held("CREATE TABLE t (a int);", ["kept"])
+		expect(unmade.refused).toBeUndefined()
+		expect(readsRoles(unmade.sent)).toBe(false)
+	})
+
+	it("passes a role the server does not hold, and replays the files", async () => {
+		const { refused, sent } = await held("CREATE ROLE reader;", [])
+		expect(refused).toBeUndefined()
+		expect(sent.slice(0, 2)).toEqual([expect.stringMatching(ROLES), AROUND.before[0]])
+	})
+
+	it("reads the roles on a docker:// devUrl too, which it replays nothing on", async () => {
+		const refused = await held("CREATE ROLE reader;", ["reader"], "docker://postgres/17/dev")
+		expect(refused.refused).toEqual(new ReplayFailed('role "reader" already exists; apply would stop at 2_b.sql'))
+		const passed = await held("CREATE ROLE reader;", [], "docker://postgres/17/dev")
+		expect(passed.out).toEqual([expect.stringMatching(/^Check did not replay the pending files on devUrl: docker:/)])
+		expect(passed.sent).toEqual([expect.stringMatching(ROLES)])
+	})
+
+	it("refuses when it cannot read the target's roles, naming url and the error", async () => {
+		const dev = fake((query) => (ROLES.test(query) ? new Error("permission denied for view pg_roles") : undefined))
+		const replay = replayPending({ print: () => undefined, target: TARGET }, twoFiles("CREATE ROLE reader;"), dev.load)
+		await expect(replay).rejects.toThrow(
+			new ReplayFailed(
+				"comb could not read the roles url's server holds: permission denied for view pg_roles; check applies nothing",
+			),
+		)
 	})
 })
 

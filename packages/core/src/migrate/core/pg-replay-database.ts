@@ -156,4 +156,12 @@ async function createRole(
 	}
 }
 
-export { copyExtensions, createRole, dropRole, extensionsOf, makeDatabase, STALE_MS, sweep, type Sql }
+/* the roles of a list the server holds but those a replay made and tagged, which it drops after itself (P7 of r21) */
+const HELD = `SELECT r.rolname FROM pg_roles r LEFT JOIN pg_shdescription d ON d.objoid = r.oid AND d.classoid = 'pg_authid'::regclass WHERE r.rolname = ANY($1::text[]) AND (d.description IS NULL OR d.description NOT LIKE 'comb\\_replay %')`
+
+/** Which of `roles` the server holds, a replay's own left out: another replay's role is gone once it ends */
+async function heldRoles(sql: Sql, roles: readonly string[]): Promise<Set<string>> {
+	return new Set((await sql.unsafe(HELD, [[...roles]])).map((row) => String(row["rolname"])))
+}
+
+export { copyExtensions, createRole, dropRole, extensionsOf, heldRoles, makeDatabase, STALE_MS, sweep, type Sql }

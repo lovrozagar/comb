@@ -353,3 +353,37 @@ describe("check on a devUrl whose server keeps no counts for its role", () => {
 		60_000,
 	)
 })
+
+/* P7 of r21: the replay uses a role the server holds, as the history may have made it there, so a pending
+   file's CREATE ROLE of one another database's apply made passed check, and apply stopped at it */
+describe("check of a pending CREATE ROLE of a role the target's server already holds", () => {
+	const role = unique("comb_t_held")
+	afterEach(() => dropRoles(role))
+	const make = `-- comb:allow-unsafe: the test's role\nCREATE ROLE ${role};\nCREATE TABLE r (id int PRIMARY KEY);\nGRANT SELECT ON r TO ${role};\n`
+
+	it("refuses it, naming the file apply would stop at, once another database on the server applied it", async () => {
+		await withScratchDb((other) =>
+			withScratchDb(async (url) => {
+				files(T, make)
+				await applyWithAtlas(options({ devUrl: devUrl(), url: other }, []))
+				const check = applyWithAtlas({ ...options({ devUrl: devUrl(), url }, []), checkOnly: true })
+				await expect(check).rejects.toThrow(`role "${role}" already exists; apply would stop at 20260102000000_two.sql`)
+				await expect(applyWithAtlas(options({ devUrl: devUrl(), url }, []))).rejects.toThrow(
+					`role "${role}" already exists`,
+				)
+			}),
+		)
+	}, 60_000)
+
+	it("passes a pending file using a role the target's own history made, which the replay reuses", async () => {
+		await withScratchDb(async (url) => {
+			files(make, "")
+			rmSync(join(dir, "20260102000000_two.sql"))
+			hashDir(run, dir)
+			await applyWithAtlas(options({ devUrl: devUrl(), url }, []))
+			files(make, `CREATE TABLE s (id int PRIMARY KEY);\nGRANT SELECT ON s TO ${role};\n`)
+			await applyWithAtlas({ ...options({ devUrl: devUrl(), url }, []), checkOnly: true })
+			expect(await roleOf(role)).not.toEqual([])
+		})
+	}, 60_000)
+})
