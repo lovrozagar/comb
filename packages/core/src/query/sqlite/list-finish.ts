@@ -116,10 +116,13 @@ const storageOf = (column: SQLWrapper): SQL =>
 /**
  * Postgres's family of a key: `float` for a double precision or real, a double the driver reads
  * exactly; `fixed` for an integer or numeric, which a driver reading it as a number past 2^53
- * rounds; `other` for any other type (Q2 of r21)
+ * rounds; `other` for any other type (Q2 of r21). A domain is no type pg_typeof names, so one whose
+ * base, followed through domains of domains, is a double is `float` too: the domains are read once
+ * per query, and only for a key whose type is no built-in one (below 16384, FirstNormalObjectId),
+ * as no built-in domain's base is a double (Q1 of r22)
  */
 const familyOf = (column: SQLWrapper): SQL =>
-	sql`case when pg_typeof(${column}) in ('double precision'::regtype, 'real'::regtype) then 'float' when pg_typeof(${column}) in ('smallint'::regtype, 'integer'::regtype, 'bigint'::regtype, 'numeric'::regtype) then 'fixed' else 'other' end`
+	sql`case when pg_typeof(${column}) in ('double precision'::regtype, 'real'::regtype) then 'float' when pg_typeof(${column}) in ('smallint'::regtype, 'integer'::regtype, 'bigint'::regtype, 'numeric'::regtype) then 'fixed' when pg_typeof(${column})::oid < 16384 then 'other' when pg_typeof(${column})::oid = any(array(with recursive d(oid, base) as (select oid, typbasetype from pg_type where typtype = 'd' union all select d.oid, p.typbasetype from d join pg_type p on p.oid = d.base where p.typtype = 'd') select d.oid from d where d.base::regtype in ('double precision'::regtype, 'real'::regtype))) then 'float' else 'other' end`
 
 /** The extra that carries `classes`, one a sort key and the tiebreak's last, comma-joined */
 const keyTypes = (classes: SQL[]): ListExtras => ({

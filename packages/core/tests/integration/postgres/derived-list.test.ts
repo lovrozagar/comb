@@ -6,7 +6,7 @@
  */
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-postgres"
-import { bigint, doublePrecision, type PgColumn, pgTable, text } from "drizzle-orm/pg-core"
+import { bigint, doublePrecision, numeric, type PgColumn, pgTable, text } from "drizzle-orm/pg-core"
 import type pg from "pg"
 import { describe, expect, it } from "vitest"
 import { queryHelpers } from "../../../src/query/drizzle.ts"
@@ -149,5 +149,75 @@ describe("a Postgres derived list judges a key past 2^53 by its type (Q2 of r21)
 				cause: expect.stringMatching(/^k \d+ is past ±\(2\^53 − 1\), where the driver rounded it: a derived list/),
 				errorKey: "sort_not_wired",
 			})
+	})
+})
+
+const ledger = pgTable("ledger", {
+	cents: bigint("cents", { mode: "number" }).notNull(),
+	exact: numeric("exact", { mode: "number" }).notNull(),
+	id: text("id").primaryKey(),
+	ratio: doublePrecision("ratio").notNull(),
+})
+
+/*
+ * Q1 of r22, the sibling r21 Q2's open family list missed: a domain is no family pg_typeof names, so a
+ * domain over bigint read as a number past 2^53 paged as exact, serving one row or one row eight
+ * times. The key's class follows the domain to its base type, and a class not known to be a double
+ * is refused past 2^53. 0.19.0 refused every key past 2^53 here.
+ */
+describe("a key whose class isn't a double is exact or refused (Q1; sibling: r21 Q2's open family list)", () => {
+	const sessions = usePg()
+
+	/** Every id of `ledger` by `key`, one a page, by cursor */
+	async function ledgerIds(key: PgColumn, direction: "asc" | "desc"): Promise<string[]> {
+		const client = sessions.pg()
+		const [made] = (await client.query("SELECT to_regclass('pg_temp.ledger') AS t")).rows
+		if (made?.t === null)
+			await client.query(`CREATE DOMAIN pg_temp.cents AS bigint;
+		CREATE DOMAIN pg_temp.cents2 AS pg_temp.cents;
+		CREATE DOMAIN pg_temp.exact AS numeric;
+		CREATE DOMAIN pg_temp.ratio AS double precision;
+		CREATE TEMP TABLE ledger (id text PRIMARY KEY, cents pg_temp.cents2 NOT NULL, exact pg_temp.exact NOT NULL, ratio pg_temp.ratio NOT NULL);
+		INSERT INTO ledger VALUES ('a', 1152921504606846977, 1152921504606846977, 1e20), ('b', 1152921504606846979, 1152921504606846979, 2e20),
+		('c', 1152921504606846981, 1152921504606846981, 3e20), ('d', 1152921504606846983, 1152921504606846983, 4e20)`)
+		const db = drizzle({ client })
+		const ids: string[] = []
+		let cursor: string | undefined
+		for (let n = 1; n <= 8; n++) {
+			const built = buildDerivedListQuery({
+				...SEALED,
+				idColumn: ledger.id,
+				parsed: { cursor, limit: 1, parsedSort: [{ direction, field: "k" }] },
+				sortColumns: { k: key },
+			})
+			const query = db
+				.select({ id: ledger.id, k: key, ...built.extras })
+				.from(ledger)
+				.$dynamic()
+			const rows = await (built.where === undefined ? query : query.where(built.where))
+				.orderBy(...built.orderBy)
+				.limit(built.limit)
+			const [items, meta] = queryHelpers.paginate(rows, built)
+			ids.push(...items.map((row) => row.id))
+			if (meta.nextCursor === null) break
+			cursor = meta.nextCursor
+		}
+		return ids
+	}
+
+	it.each([
+		["a domain over a domain over bigint", ledger.cents],
+		["a domain over numeric in number mode", ledger.exact],
+	])("refuses %s holding 2^60 + 1 to 2^60 + 7, asc and desc", async (_, key) => {
+		for (const direction of ["asc", "desc"] as const)
+			await expect(ledgerIds(key, direction)).rejects.toMatchObject({
+				cause: expect.stringMatching(/^k \d+ is past ±\(2\^53 − 1\), where the driver rounded it: a derived list/),
+				errorKey: "sort_not_wired",
+			})
+	})
+
+	it("pages every row once by a domain over double precision holding 1e20 to 4e20, asc and desc", async () => {
+		expect(await ledgerIds(ledger.ratio, "asc")).toEqual(["a", "b", "c", "d"])
+		expect(await ledgerIds(ledger.ratio, "desc")).toEqual(["d", "c", "b", "a"])
 	})
 })
