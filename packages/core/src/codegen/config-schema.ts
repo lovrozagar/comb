@@ -18,7 +18,8 @@ const databaseSchema = () =>
 			.record(nonBlank(), z.strictObject({ columns: z.array(nonBlank()).min(1), tokenizer: z.string().optional() }))
 			.optional(),
 		generators: z.array(z.enum(GENERATORS)).optional(),
-		output: z.partialRecord(z.enum([...GENERATORS, "default"]), nonBlank()).optional(),
+		/* an output set to undefined is that generator's left out, as codegen reads it (AD2 of the area D review) */
+		output: z.partialRecord(z.enum([...GENERATORS, "default"]), nonBlank().optional()).optional(),
 		partitions: z.record(nonBlank(), z.array(nonBlank()).min(1)).optional(),
 		tables: nonBlank(),
 	})

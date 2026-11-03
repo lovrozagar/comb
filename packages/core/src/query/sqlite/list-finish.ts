@@ -107,8 +107,11 @@ function factsOf(list: Finish) {
 	} satisfies Omit<PaginationFacts, "expects"> & { merged: boolean }
 }
 
-/** The built list over `extras`: every row carries what paginate reads, and a page whose rows do not is refused (Q3) */
-function withExtras(list: Finish, extras: ListExtras, window = list.parsed.limit + 1) {
+/**
+ * The built list over `extras`: every row carries what paginate reads, and a page whose rows do not
+ * is refused (Q3). Generic, so the caller's return checks `extras` as the ListExtras it hands out
+ */
+function withExtras<E extends object>(list: Finish, extras: E, window = list.parsed.limit + 1) {
 	const facts = { ...factsOf(list), expects: Object.keys(extras) as ListExtra[], window }
 	return { extras, pagination: paginationOf(list.cursor, facts) }
 }

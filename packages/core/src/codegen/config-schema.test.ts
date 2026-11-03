@@ -20,6 +20,12 @@ describe("codegenConfigSchema (K14 of the 0.15.0 review)", () => {
 		expect(codegenConfigSchema().parse(config)).toEqual(config)
 	})
 
+	/* AD2 of the area D review: an explicit undefined is the key left out, as CodegenConfig declares and codegen reads it */
+	it("takes an output set to undefined as that generator's output left out", () => {
+		const config = { databases: { core: { output: { default: "./src/gen", dtos: undefined }, tables: "./t.ts" } } }
+		expect(codegenConfigSchema().parse(config)).toEqual(config)
+	})
+
 	it.each([
 		["an output for no generator", { output: { dto: "./x" } }, ["databases", "core", "output"]],
 		[

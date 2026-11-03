@@ -72,7 +72,9 @@ export type Terminal = {
  * asked on stderr: a question is a human line, as every other --json sends there, so stdout stays
  * what the command prints (P4 of the 0.15.0 review)
  */
-export declare function processIo({ input, output }?: Partial<Terminal>): CliIo;
+export declare function processIo({ input, output, }?: {
+    [K in keyof Terminal]?: Terminal[K] | undefined;
+}): CliIo;
 
 // cli/run.d.ts
 import { type CliDeps, type CliIo } from "./output.ts";

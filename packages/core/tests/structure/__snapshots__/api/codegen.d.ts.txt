@@ -49,7 +49,9 @@ export type DatabaseCodegen = {
     /** The generators to run; all when omitted */
     generators?: readonly GeneratorName[] | undefined;
     /** Where each generator writes; `default` is the directory for every one not named */
-    output?: Partial<Record<GeneratorName | "default", string>> | undefined;
+    output?: {
+        [K in GeneratorName | "default"]?: string | undefined;
+    } | undefined;
     /**
      * Postgres only: each partitioned table, keyed as its constraint map keys it, to its partitions'
      * names, which live in its schema. Postgres reports a violation on the partition, and the map

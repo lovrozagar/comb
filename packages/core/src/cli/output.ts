@@ -96,7 +96,10 @@ async function ask(terminal: Terminal, question: string): Promise<boolean> {
  * asked on stderr: a question is a human line, as every other --json sends there, so stdout stays
  * what the command prints (P4 of the 0.15.0 review)
  */
-export function processIo({ input = process.stdin, output = process.stderr }: Partial<Terminal> = {}): CliIo {
+export function processIo({
+	input = process.stdin,
+	output = process.stderr,
+}: { [K in keyof Terminal]?: Terminal[K] | undefined } = {}): CliIo {
 	const terminal = { input, output }
 	return {
 		confirm: input.isTTY === true ? (question) => ask(terminal, question) : undefined,

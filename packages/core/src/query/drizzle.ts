@@ -84,13 +84,13 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 		const { keys, tiebreak } = keysOn(table, sort)
 		return orderByKeys(keys, tiebreak)
 	}
-	/* every row carries what paginate reads, and a page whose rows do not is refused (Q3) */
+	/* every row carries what paginate reads, and a page whose rows do not is refused (Q3); the return checks `extras` */
 	/* a key whose read rounds it carries its text, which the next cursor binds (QL3 of r22b) */
 	const texts =
 		sort.length === 0
 			? {}
 			: { _combKeyTexts: (table: RelationalTable) => keyTextsSQL(keysOn(table, sort).keys, "postgres") }
-	const base = (given: DrizzleListOptions["extras"]) => {
+	const base = <E extends object>(given: E) => {
 		const extras = { ...given, ...texts }
 		return {
 			extras,

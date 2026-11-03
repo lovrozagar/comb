@@ -111,7 +111,7 @@ export type EnumStates<TState extends string = string> = {
 	/** Values from which no transition is legal */
 	terminal?: readonly TState[] | undefined
 	/** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
-	transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined
+	transitions?: { readonly [K in TState]?: readonly TState[] | undefined } | undefined
 }
 
 /** What c.enum takes beside its values: its state machine, and the flags every c helper takes (F9) */

@@ -117,11 +117,14 @@ export const ids = createUlidFactory({ random: (bytes: string) => void bytes.toU
  * TS2379; what comb hands back keeps each optional key absent, never undefined
  */
 export const UNSET = `import { createUlidFactory, LruCache } from "@lovrozagar/comb"
-import { createListQuerySchema, createRetrieveQuerySchema, type DrizzleListOptions } from "@lovrozagar/comb/query"
+import { createListQuerySchema, createRetrieveQuerySchema, type DrizzleListOptions, validateFilter } from "@lovrozagar/comb/query"
 import type { ListExtras } from "@lovrozagar/comb/query/sqlite"
 import { c } from "@lovrozagar/comb/sqlite/columns"
 import { ShardRouter } from "@lovrozagar/comb/sqlite/d1/sharding"
-declare const env: { MAX?: number; NOW?: () => number; LANG?: true; TTL?: number; LOG?: (event: string) => void }
+import { defineStateMachine } from "@lovrozagar/comb/states"
+import { processIo } from "@lovrozagar/comb/cli"
+import { defineCodegenConfig } from "@lovrozagar/comb/codegen"
+declare const env: { MAX?: number; NOW?: () => number; LANG?: true; TTL?: number; LOG?: (event: string) => void; DIR?: string; IN?: NodeJS.ReadableStream; LIVE?: readonly ("draft" | "live")[] }
 export const ids = () => createUlidFactory({ now: env.NOW })
 export const cache = () => new LruCache<string, string>({ hardTtlMs: env.TTL, maxSize: 10, ttlMs: env.TTL })
 export const list = () =>
@@ -130,6 +133,13 @@ export const retrieve = () => createRetrieveQuerySchema({ fields: { scalars: ["i
 export const title = () => c.text("title", { max: env.MAX, min: env.MAX, pattern: undefined })
 export const state = () => c.enum("state", ["draft", "live"], { initial: undefined, nomutate: undefined })
 export const router = () => new ShardRouter({ kvTtlSeconds: env.TTL, log: env.LOG, lruMaxSize: env.MAX, totalShards: 4 })
+/* AD2: an input bag declared Partial<…> refused these as plain properties did before KT8 */
+export const config = () => defineCodegenConfig({ databases: { app: { output: { dtos: env.DIR }, tables: "./tables.ts" } } })
+export const io = () => processIo({ input: env.IN })
+export const machine = () => defineStateMachine({ transitions: { draft: env.LIVE }, values: ["draft", "live"] })
+export const moves = () => c.enum("state", ["draft", "live"], { transitions: { draft: env.LIVE } })
+export const limited = () => createListQuerySchema({ limits: { maxFilterLength: env.MAX }, sort: ["id"] })
+export const filtered = () => validateFilter("id:eq:1", { id: "number" }, { maxConditions: env.MAX })
 /* what comb hands back keeps a key absent, never undefined, so it goes on to drizzle's select and findMany as it is */
 type Defined<T> = { [K in keyof T]?: Exclude<T[K], undefined> }
 declare const built: { extras: ListExtras; options: DrizzleListOptions }

@@ -25,7 +25,7 @@ type StateMachine<TState extends string = string> = {
 	/** Values from which no transition is legal */
 	terminal?: readonly TState[] | undefined
 	/** Legal moves, `from` → `to[]`. Omitted states are unconstrained. */
-	transitions?: Readonly<Partial<Record<TState, readonly TState[]>>> | undefined
+	transitions?: { readonly [K in TState]?: readonly TState[] | undefined } | undefined
 	/** The column the machine governs, named in `assertTransition`'s error; `status` when omitted */
 	column?: string | undefined
 }
@@ -41,7 +41,7 @@ function defineStateMachine<const TState extends string>(machine: {
 	values: readonly TState[]
 	initial?: NoInfer<TState> | undefined
 	terminal?: readonly NoInfer<TState>[] | undefined
-	transitions?: Readonly<Partial<Record<NoInfer<TState>, readonly NoInfer<TState>[]>>> | undefined
+	transitions?: { readonly [K in NoInfer<TState>]?: readonly NoInfer<TState>[] | undefined } | undefined
 	column?: string | undefined
 }): StateMachine<TState> {
 	return machine
