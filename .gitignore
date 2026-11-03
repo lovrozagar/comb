@@ -45,3 +45,6 @@ packages/core/README.md
 packages/core/LICENSE
 packages/core/types/
 .tmp/
+
+# git worktrees
+.worktrees/
