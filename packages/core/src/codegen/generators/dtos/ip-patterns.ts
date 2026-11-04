@@ -31,11 +31,19 @@ function address(): string {
 	].join("|")
 }
 
+/*
+ * Each branch publishes its pattern and no format (A2-2 of r22, AA10's class): a format-checking
+ * reader's ipv6 refuses the short IPv4 tails the pattern takes, and none knows cidrv4 or cidrv6, which
+ * Ajv's strict mode refuses to compile. The issue keeps zod's format name; the pattern states the rule
+ */
+const unformatted = (rule: string): string => `${rule}.meta({ format: void 0 })`
+
 /** An IPv6 address, as Postgres's inet reads one */
-export const ipv6Rule = (): string => `z.stringFormat("ipv6", /^(?:${address()})$/u)`
+export const ipv6Rule = (): string => unformatted(`z.stringFormat("ipv6", /^(?:${address()})$/u)`)
 
 /** An IPv6 network, an address and its prefix length, as Postgres's inet and cidr read one */
-export const cidrv6Rule = (): string => `z.stringFormat("cidrv6", /^(?:${address()})\\/${PREFIX}$/u)`
+export const cidrv6Rule = (): string => unformatted(`z.stringFormat("cidrv6", /^(?:${address()})\\/${PREFIX}$/u)`)
 
 /** A plain inet's rule: a host address, its netmask optional */
-export const inetRule = (): string => `z.union([z.ipv4(), ${ipv6Rule()}, z.cidrv4(), ${cidrv6Rule()}])`
+export const inetRule = (): string =>
+	`z.union([${unformatted("z.ipv4()")}, ${ipv6Rule()}, ${unformatted("z.cidrv4()")}, ${cidrv6Rule()}])`

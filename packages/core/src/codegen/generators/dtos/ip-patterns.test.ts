@@ -98,9 +98,14 @@ describe("comb's IPv6 rules, as Postgres reads an address (AA12 of r22)", () => 
 		}
 	})
 
-	it("keeps zod's format and its issue: the same code, format and message", () => {
-		expect(z.toJSONSchema(schemaOf(ipv6Rule()))).toMatchObject({ format: "ipv6", type: "string" })
-		expect(z.toJSONSchema(schemaOf(cidrv6Rule()))).toMatchObject({ format: "cidrv6", type: "string" })
+	it("publishes its pattern and no format, and keeps zod's issue: the same code, format and message", () => {
+		for (const code of [ipv6Rule(), cidrv6Rule(), inetRule()])
+			expect(JSON.stringify(z.toJSONSchema(schemaOf(code)))).not.toContain('"format"')
+		expect(z.toJSONSchema(schemaOf(ipv6Rule()))).toEqual({
+			$schema: "https://json-schema.org/draft/2020-12/schema",
+			pattern: patternOf(ipv6Rule()),
+			type: "string",
+		})
 		expect(schemaOf(ipv6Rule()).safeParse("g::1").error?.issues).toEqual(z.ipv6().safeParse("g::1").error?.issues)
 		expect(schemaOf(cidrv6Rule()).safeParse("::/129").error?.issues).toEqual(
 			z.cidrv6().safeParse("::/129").error?.issues,

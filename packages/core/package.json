@@ -173,6 +173,7 @@
 		"@types/semver": "catalog:",
 		"@vitest/coverage-v8": "catalog:",
 		"ajv": "catalog:",
+		"ajv-formats": "catalog:",
 		"bun-types": "catalog:",
 		"drizzle-kit": "catalog:",
 		"drizzle-orm": "catalog:",

@@ -6,6 +6,7 @@
  * the field's zod schema takes exactly what a reader built from the published document takes.
  */
 import { Ajv2020 } from "ajv/dist/2020.js"
+import addFormats from "ajv-formats"
 import { RE2JS } from "re2js"
 import { afterAll, describe, expect, it } from "vitest"
 import * as z from "zod"
@@ -229,22 +230,22 @@ const re2Engine = Object.assign(
 	{ code: "re2" },
 )
 
-/*
- * AA10 of r22: a reader checks `format` too. Its `duration` as ajv-formats 3 defines it, RFC 3339
- * Appendix A, whose seconds take no fraction; the other formats a field publishes beside a pattern
- * are checked by that pattern, which the lanes already hold
- */
-const RFC3339_DURATION = /^P(?!$)((\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?|(\d+W)?)$/
+/** Every `x-` annotation key in `node`, which a strict reader compiles only once it is declared */
+const annotationsOf = (node: unknown): string[] =>
+	node === null || typeof node !== "object"
+		? []
+		: Object.entries(node).flatMap(([key, value]) => [...(key.startsWith("x-") ? [key] : []), ...annotationsOf(value)])
 
-/** What a reader built from the published field takes: its transforms applied, then the schema */
+/*
+ * AA10, A2-2 of r22: a reader checks `format` too, with every format ajv-formats 3 defines, in
+ * Ajv's default strict mode, which refuses a format it does not know; comb's `x-` keys are
+ * annotations it declares. What it takes: the field's transforms applied, then the schema
+ */
 function readerOf(field: Node, defs: unknown, re2 = false): (value: string) => boolean {
-	const ajv = new Ajv2020({
-		logger: false,
-		strict: false,
-		formats: { duration: RFC3339_DURATION },
-		validateFormats: true,
-		...(re2 ? { code: { regExp: re2Engine } } : {}),
-	})
+	const ajv = addFormats(
+		new Ajv2020({ logger: false, validateFormats: true, ...(re2 ? { code: { regExp: re2Engine } } : {}) }),
+	)
+	for (const key of new Set(annotationsOf({ defs, field }))) ajv.addKeyword(key)
 	const validate = ajv.compile({ ...field, $defs: defs ?? {} })
 	const transforms = (field["x-comb-transform"] as string[] | undefined) ?? []
 	return (value) =>
