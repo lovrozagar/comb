@@ -228,7 +228,7 @@ const MAX_DIMENSIONS = 6
 
 /* Postgres refuses a ragged multidimensional array: each level's sub-arrays must share one shape */
 const RECTANGULAR =
-	'.refine((value) => { const shape = (part: unknown): string => (globalThis.Array.isArray(part) ? `${part.length}[${[...new globalThis.Set(part.map(shape))].join("|")}]` : ""); return !shape(value).includes("|") }, { message: "Must be a rectangular array: every sub-array of a level the same length" })'
+	'.refine((value) => { const shape = (part: unknown): string => (globalThis.Array.isArray(part) ? `${part.length}[${[...new globalThis.Set(part.map(shape))].join("|")}]` : ""); return !shape(value).includes("|") }, { message: "Must be a rectangular array: every sub-array of a level the same length" }).meta({ "x-comb-rectangular": true })'
 
 /**
  * An array column of `element`s: written, in exactly its declared dimensions, rectangular past one;

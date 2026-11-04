@@ -139,11 +139,12 @@ function header(): string[] {
 		"/** Nullable timestamp field */",
 		"export const timestampNullableSchema = _intNN.max(globalThis.Number.MAX_SAFE_INTEGER).nullable()",
 		"",
-		"/** A JSON value that is no null at its top: null is its column's to take (C5 of r19) */",
-		"export const jsonValueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(z.json()), z.record(z.string(), z.json())])",
+		"/** A JSON value that is no null at its top: null is its column's to take (C5 of r19); one z.json() below it, so the document publishes it once (CS9 of r22b) */",
+		"const _json = z.json()",
+		"export const jsonValueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(_json), z.record(z.string(), _json)])",
 		"",
-		"/** A Postgres cidr: an address, its prefix length, and no bit set past it (F50) */",
-		'export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(comb.isCidr, { message: "Must be a network with no bit set past its prefix length" })',
+		"/** A Postgres cidr: an address, its prefix length, and no bit set past it (F50), published as x-comb-cidr (CS8 of r22b) */",
+		'export const cidrSchema = z.union([z.ipv4(), z.ipv6(), z.cidrv4(), z.cidrv6()]).refine(comb.isCidr, { message: "Must be a network with no bit set past its prefix length" }).meta({ "x-comb-cidr": true })',
 		"",
 	]
 }

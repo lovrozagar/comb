@@ -4,6 +4,7 @@
  * parse to it: whatever comb publishes, a reader applying the keys as written must reach the same
  * verdict (C1, C2 of r22).
  */
+import { isCidr } from "../cidr.ts"
 import { isStorableText } from "../storable-text.ts"
 
 /** Each `x-comb-transform` value as §2.1 defines it */
@@ -20,25 +21,39 @@ const STATED = ["x-comb-maxLength", "x-comb-maximum", "x-comb-minLength", "x-com
 /** Every field key the reader knows */
 export const CONTRACT_KEYS: readonly string[] = [
 	...STATED,
+	"x-comb-cidr",
 	"x-comb-maxBytes",
 	"x-comb-maxUtf8Bytes",
+	"x-comb-rectangular",
 	"x-comb-text",
 	"x-comb-transform",
 ]
 
 const utf8 = (value: string): number => new TextEncoder().encode(value).length
 
-/**
- * Whether a reader of the published `schema` takes `value`, applying its length bounds and its
- * `x-comb-*` keys as §2.1 defines them; a key it does not know throws, as a strict reader refuses one
- */
-export function contractReader(schema: Record<string, unknown>, value: unknown): boolean {
-	for (const key of Object.keys(schema))
-		if (key.startsWith("x-comb-") && !CONTRACT_KEYS.includes(key)) throw new Error(`the contract defines no ${key}`)
-	/* the JSON text is the value as sent, before any rewrite */
+/** Whether every sub-array of each level of `value`, across the whole level, has one length */
+function isRectangular(value: unknown[]): boolean {
+	let level: unknown[] = value
+	while (level.some((part) => Array.isArray(part))) {
+		if (!level.every((part) => Array.isArray(part))) return false
+		if (new Set(level.map((part) => (part as unknown[]).length)).size > 1) return false
+		level = level.flat()
+	}
+	return true
+}
+
+type Schema = Record<string, unknown>
+
+/** Whether `value` as sent, before any rewrite, keeps to the keys that bind its JSON text and its shape */
+function takesSent(schema: Schema, value: unknown): boolean {
 	const jsonBytes = schema["x-comb-maxBytes"]
 	if (typeof jsonBytes === "number" && utf8(JSON.stringify(value)) > jsonBytes) return false
-	if (typeof value !== "string") return true
+	return schema["x-comb-rectangular"] === undefined || !Array.isArray(value) || isRectangular(value)
+}
+
+/** Whether a string `value` keeps to the keys and bounds that bind it, its transforms applied first */
+function takesText(schema: Schema, value: string): boolean {
+	if (schema["x-comb-cidr"] !== undefined && !isCidr(value)) return false
 	const rewritten = ((schema["x-comb-transform"] ?? []) as string[]).reduce((text, name) => {
 		const transform = CONTRACT_TRANSFORMS[name]
 		if (transform === undefined) throw new Error(`the contract defines no transform ${name}`)
@@ -50,4 +65,14 @@ export function contractReader(schema: Record<string, unknown>, value: unknown):
 	if (typeof schema["maxLength"] === "number" && points > schema["maxLength"]) return false
 	const textBytes = schema["x-comb-maxUtf8Bytes"]
 	return typeof textBytes !== "number" || utf8(rewritten) <= textBytes
+}
+
+/**
+ * Whether a reader of the published `schema` takes `value`, applying its length bounds and its
+ * `x-comb-*` keys as §2.1 defines them; a key it does not know throws, as a strict reader refuses one
+ */
+export function contractReader(schema: Schema, value: unknown): boolean {
+	for (const key of Object.keys(schema))
+		if (key.startsWith("x-comb-") && !CONTRACT_KEYS.includes(key)) throw new Error(`the contract defines no ${key}`)
+	return takesSent(schema, value) && (typeof value !== "string" || takesText(schema, value))
 }

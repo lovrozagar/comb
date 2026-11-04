@@ -151,6 +151,12 @@ no `anyOf` walk. A nullable trimmed text with a `max` of 9, as codegen publishes
 - `x-comb-maxUtf8Bytes`: the most UTF-8 bytes of a string value itself, after its transforms, with
   no quotes or escapes: `ab"` is 3 bytes. `passwordText({ hash: "bcrypt" })` publishes 72, the bytes
   bcrypt reads.
+- `x-comb-cidr`: `true` on a Postgres cidr: the address, an IPv4 or IPv6 one with its prefix length
+  or without (a host), has no bit set past that length: `10.0.0.0/8` is a network, `10.0.0.1/8` is
+  not. `isCidr` from `@lovrozagar/comb` is the check.
+- `x-comb-rectangular`: `true` on a multidimensional array: every sub-array of one level, across the
+  whole level, has the same length, as Postgres stores an array: `[[1, 2], [3, 4]]` is one,
+  `[[1, 2], [3]]` is not.
 - `x-comb-minLength`, `x-comb-maxLength`, `x-comb-minimum`, `x-comb-maximum`: on a read, the
   declared bounds it states without enforcing them, so a stored row past one still reads.
 

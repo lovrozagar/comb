@@ -68,7 +68,7 @@ export const row = pgTable("row", {
 	raw: jsonb("raw"),
 	plain: json("plain"),
 	tags: text("tags").array(),
-	grid: integer("grid").array().array(),
+	grid: integer("grid").array("[][]"),
 	short: c.text("short", { max: 5 }).array(),
 	nums: c.integer("nums", { max: 9, min: 1 }).array(),
 	name: varchar("name", { length: 12 }),

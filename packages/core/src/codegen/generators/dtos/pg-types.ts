@@ -167,17 +167,25 @@ function numericNumber(sqlType: string): string | undefined {
 	return `z.number().gt(${-bound}).lt(${bound})`
 }
 
-/* a bigint in drizzle's string mode: decimal digits within int8's range, read as a BigInt once
-   they are digits, as zod runs a refine after a failed regex too */
-const INT64_TEXT =
-	'z.string().regex(/^-?\\d+$/u).refine((val) => !/^-?\\d+$/.test(val) || (globalThis.BigInt(val) >= globalThis.BigInt("-9223372036854775808") && globalThis.BigInt(val) <= globalThis.BigInt("9223372036854775807")), { message: "Must be within bigint\'s range, -2^63 to 2^63 - 1" })'
+/** A digit string as long as `limit` and not above it: `limit` itself, or a smaller digit where the two first part */
+function notAbove(limit: string): string {
+	const below = [...limit].flatMap((digit, at) =>
+		digit === "0" ? [] : [`${limit.slice(0, at)}[0-${Number(digit) - 1}]\\d{${limit.length - at - 1}}`],
+	)
+	return [...below, limit].join("|")
+}
+
+/* a bigint in drizzle's string mode: decimal digits within int8's range, as one pattern a JSON
+   Schema reader applies too (CS8 of r22b): at most 18 significant digits, or 19 not past the bound */
+const int64Text = (): string =>
+	`z.string().regex(/^(?:0*(?:\\d{1,18}|${notAbove("9223372036854775807")})|-0*(?:\\d{1,18}|${notAbove("9223372036854775808")}))$/u, { message: "Must be a whole number within bigint's range, -2^63 to 2^63 - 1" })`
 
 /*
  * float4 holds magnitudes up to 3.4028235e38, and refuses a value that rounds to zero: at or below
  * half its smallest subnormal, 2^-150 (1e-45 rounds up to 1.4e-45 and is taken; 1e-50 is not)
  */
 const REAL =
-	'z.number().min(-3.4028235e38).max(3.4028235e38).refine((val) => val === 0 || globalThis.Math.abs(val) > 7.006492321624085e-46, { message: "Must be zero or above 2^-150 in magnitude, which real would round to zero" })'
+	'z.number().min(-3.4028235e38).max(3.4028235e38).refine((val) => val === 0 || globalThis.Math.abs(val) > 7.006492321624085e-46, { message: "Must be zero or above 2^-150 in magnitude, which real would round to zero" }).meta({ not: { minimum: -7.006492321624085e-46, maximum: 7.006492321624085e-46, not: { const: 0 } } })'
 
 /** The shared schema a cidr's rule is, which the entity file imports */
 export const CIDR = "cidrSchema"
@@ -238,7 +246,7 @@ const RULES: Readonly<Record<string, (field: FieldMeta) => string | undefined>> 
 	"string interval": ({ sqlType }) => intervalRule(modifierAs(sqlType, "interval")),
 	"string macaddr": macaddr,
 	"string macaddr8": macaddr8,
-	"string int64": () => INT64_TEXT,
+	"string int64": int64Text,
 	"string numeric": ({ sqlType }) => numericText(sqlType),
 	"string time": ({ sqlType }) => timeRule(modifierAs(sqlType, "time")),
 	"string timestamp": ({ sqlType }) => timestampRule(modifierAs(sqlType, "timestamp")),
