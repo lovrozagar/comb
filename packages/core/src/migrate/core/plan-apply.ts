@@ -180,6 +180,18 @@ async function approveAll(
 	return pending
 }
 
+/** Prove the pending files on the live schema, read once for the proof and the target's own engine, which runs after it */
+async function proveLive(
+	conn: Connection,
+	classified: readonly Pending[],
+	options: PlanOptions,
+): Promise<Map<string, Proof>> {
+	const live = creatable(await liveObjects(conn, notEngineTables(conn)))
+	const proofs = await provePending(conn, classified, { engine: options.proofEngine, live })
+	await options.engine?.(classified, live)
+	return proofs
+}
+
 /** Check the pending migrations of `options.files`, prove them on the database's schema, and approve each; returns them in apply order */
 async function planApply(options: PlanOptions): Promise<Pending[]> {
 	const { conn, dir, files } = options
@@ -190,16 +202,10 @@ async function planApply(options: PlanOptions): Promise<Pending[]> {
 	const classified = classifyPending(files, texts, { applied, kind: options.kind ?? "local" })
 	/* the live guard refuses outright and names the cause, so it runs before the proof and approval (M17) */
 	if (conn !== undefined) await refuseUnseenReach(conn, classified)
-	/* the live schema, read once for the proof and the target's engine */
-	const live =
-		conn === undefined || classified.length === 0
-			? undefined
-			: creatable(await liveObjects(conn, notEngineTables(conn)))
 	const proofs =
-		conn === undefined || live === undefined
+		conn === undefined || classified.length === 0
 			? new Map<string, Proof>()
-			: await provePending(conn, classified, { engine: options.proofEngine, live })
-	if (live !== undefined) await options.engine?.(classified, live)
+			: await proveLive(conn, classified, options)
 	const histories = options.historyTables ?? HISTORY_TABLES
 	const empty =
 		conn !== undefined && applied.size === 0 && classified.length > 0 && (await isEmptyTarget(conn, histories))

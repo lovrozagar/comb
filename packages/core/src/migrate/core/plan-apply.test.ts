@@ -209,3 +209,22 @@ describe("planApply on an approved file with a cautious statement", () => {
 		])
 	})
 })
+
+/* SD1 of r22: the target's own engine runs the pending files on the live schema the proof read, and only when one is pending */
+describe("planApply's target engine", () => {
+	it("runs once on the pending files and the live schema, and not at all when every file is applied", async () => {
+		const conn = libsqlConnection()
+		await conn.client.executeMultiple("CREATE TABLE t (id TEXT);")
+		const runs: Array<[string[], string[]]> = []
+		const engine = (files: ReadonlyArray<{ name: string }>, live: ReadonlyArray<{ name: string }>) => {
+			runs.push([files.map(({ name }) => name), live.map(({ name }) => name)])
+			return Promise.resolve()
+		}
+		const files = { "1_a.sql": "CREATE TABLE t (id TEXT);", "2_b.sql": "CREATE TABLE u (id TEXT);" }
+		await plan(files, { applied: (name) => name === "1_a.sql", conn, engine }).run()
+		expect(runs).toEqual([[["2_b.sql"], ["t"]]])
+		await plan(files, { applied: () => true, conn, engine }).run()
+		expect(runs).toHaveLength(1)
+		await conn.close()
+	})
+})
