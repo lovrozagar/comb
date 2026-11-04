@@ -52,7 +52,8 @@ function enclosing(sql: string, at: number): string {
  * Refuses a file whose text wrangler rewrites before a local apply runs it (SD2 of r22): its trimSqlQuery
  * deletes the first `BEGIN TRANSACTION;` and `COMMIT;` wherever they are, in a literal or a comment too,
  * or refuses the file, while a remote apply sends the text as written. A real BEGIN or COMMIT is
- * refused before this, so the words are in a literal, a quoted name or a comment
+ * refused before this, so the words are in a literal, a quoted name or a comment, or in the code of a
+ * file SQLite cannot parse
  */
 function refuseRewritten({ name, sql }: File): void {
 	const at = sql.indexOf(TRIMMED)

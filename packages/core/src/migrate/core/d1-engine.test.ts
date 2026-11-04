@@ -46,6 +46,13 @@ describe("refuseRewritten: the text wrangler --local rewrites (SD2 of r22)", () 
 	it("names the text itself where the words stand outside any literal or comment", () => {
 		expect(enclosing("BEGIN TRANSACTION;", 0)).toBe("its text")
 	})
+
+	/* classify refuses a BEGIN that starts a statement, and the bun:sqlite proof only records a file SQLite cannot
+	   parse, so such a file's code can hold the words */
+	it("names the text, not a literal after it, where a file SQLite cannot parse holds the words in its code", () => {
+		const sql = "SELECT 1 FROM t BEGIN TRANSACTION;\nINSERT INTO t VALUES ('x');"
+		expect(() => refuseRewritten({ name: "1.sql", sql })).toThrow(/^1\.sql: its text holds "BEGIN TRANSACTION"/)
+	})
 })
 
 describe("proveOnD1: each file on D1's own engine, in a child on wrangler's runtime (SD1 of r22)", () => {

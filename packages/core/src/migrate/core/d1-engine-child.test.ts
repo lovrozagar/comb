@@ -66,6 +66,17 @@ describe("prove answers every corpus file on the scoped copy as on the whole sch
 	)
 })
 
+describe("prove: what wrangler's own split refuses", () => {
+	/* the history row wrangler appends holds the file's name, which refuseRewritten does not read: wrangler's own
+	   trimSqlQuery refuses the batch, an error with no cause, as its apply would */
+	it("refuses a file whose name holds the words wrangler trims, in wrangler's words", async () => {
+		const refused = await proven([{ name: "2_BEGIN TRANSACTION.sql", sql: "CREATE TABLE a (x);" }])
+		expect(refused).toMatch(
+			/^2_BEGIN TRANSACTION\.sql: D1 refuses this file on its own engine, as wrangler's apply would: Wrangler could not process the provided SQL file, as it contains several transactions/,
+		)
+	}, 120_000)
+})
+
 describe("prove: each file on D1's own engine (SD1 of r22)", () => {
 	it("passes files D1 runs, its history row appended to a table of any name", async () => {
 		const files = [
