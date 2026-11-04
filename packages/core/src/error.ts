@@ -10,6 +10,8 @@ export class CombError extends Error {
 	 * source under the consumer's tsconfig, and with `useDefineForClassFields: false` an assigned
 	 * `column` landed in JavaScriptCore's own non-enumerable Error.column, out of the JSON body.
 	 */
+	/** A message safe to show the client. The original error is on `source`. */
+	declare readonly cause?: string | undefined
 	declare readonly column?: string | undefined
 	declare readonly errorKey: string
 	declare readonly status: number
@@ -19,8 +21,8 @@ export class CombError extends Error {
 	declare readonly source: unknown
 
 	constructor(opts: {
-		/** A message safe to show the client. */
-		cause?: unknown
+		/** A message safe to show the client. The original error goes on `source`. */
+		cause?: string | undefined
 		column?: string | undefined
 		errorKey: string
 		/** The original error, kept for logs and never serialized. */

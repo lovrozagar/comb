@@ -24,14 +24,16 @@ describe("CombError", () => {
 		expect(err.column).toBe("email")
 	})
 
-	it("preserves cause", () => {
-		const cause = new Error("original")
+	it("keeps the client message as cause and the original error as source", () => {
+		const source = new Error("original")
 		const err = new CombError({
-			cause,
+			cause: "Database unavailable",
 			errorKey: "database_io_error",
+			source,
 			status: "internal_server_error",
 		})
-		expect(err.cause).toBe(cause)
+		expect(err.cause).toBe("Database unavailable")
+		expect(err.source).toBe(source)
 	})
 
 	it("omits cause option when undefined", () => {

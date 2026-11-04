@@ -16,6 +16,8 @@ export { classifyD1Error, d1ErrorHandler };
 // error.d.ts
 import type { StatusKey } from "./types.ts";
 export declare class CombError extends Error {
+    /** A message safe to show the client. The original error is on `source`. */
+    readonly cause?: string | undefined;
     readonly column?: string | undefined;
     readonly errorKey: string;
     readonly status: number;
@@ -24,8 +26,8 @@ export declare class CombError extends Error {
     /** The error this one was made from, for logs. Never serialized: it can hold SQL and bound values. */
     readonly source: unknown;
     constructor(opts: {
-        /** A message safe to show the client. */
-        cause?: unknown;
+        /** A message safe to show the client. The original error goes on `source`. */
+        cause?: string | undefined;
         column?: string | undefined;
         errorKey: string;
         /** The original error, kept for logs and never serialized. */

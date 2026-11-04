@@ -14,6 +14,7 @@ import {
 import { pgErrorHandler } from "../../src/pg/error-handler.ts"
 import { sqliteErrorHandler } from "../../src/sqlite/constraint-handler.ts"
 import { d1ErrorHandler } from "../../src/sqlite/d1/error-handler.ts"
+import { CombError } from "../../src/error.ts"
 import type { DatabaseErrorHandler } from "../../src/types.ts"
 
 expectTypeOf(readCombMeta).returns.toEqualTypeOf<CombMeta | null>()
@@ -27,3 +28,12 @@ expectTypeOf(sqliteErrorHandler).toMatchTypeOf<DatabaseErrorHandler>()
 expectTypeOf(d1ErrorHandler).toMatchTypeOf<DatabaseErrorHandler>()
 expectTypeOf(pgErrorHandler).toMatchTypeOf<DatabaseErrorHandler>()
 expectTypeOf(d1ErrorHandler).returns.toEqualTypeOf<void>()
+
+/*
+ * QE5 of r22b: a CombError's cause is the message a client may see, so it is a string; the
+ * original error, which can hold SQL and bound values, goes on source.
+ */
+expectTypeOf<NonNullable<ConstructorParameters<typeof CombError>[0]["cause"]>>().toEqualTypeOf<string>()
+expectTypeOf<CombError["cause"]>().toEqualTypeOf<string | undefined>()
+// @ts-expect-error -- an error object is a source, never a cause
+void new CombError({ cause: new Error("Failed query"), errorKey: "x", status: "conflict" })

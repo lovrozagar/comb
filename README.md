@@ -375,7 +375,8 @@ throw new CombError({
 	status: "conflict",
 	table: "author",
 	column: "email",
-	cause: original,
+	cause: "Email already registered",
+	source: original,
 })
 ```
 
@@ -1188,6 +1189,8 @@ What changes for a project on 0.20. Before deploying it:
 44. **Send a `timetz` offset as `Z` or `±hh:mm`.** A plain Postgres `time with time zone` column's write DTO takes the offset RFC 3339 writes, `10:00:00+02:00` or `10:00:00Z`, as its `timestamptz` beside it already did; `10:00+02`, `10:00+0200` and `10:00-0530`, which Postgres also takes, are a 400. 0.20 took them on a `timetz` alone, so the two offset rules disagreed and a client that kept to one spelling for both was refused on the other. **Fix:** write the offset with its colon and minutes, `+02:00`.
 
 45. **Match every row with an empty `nin.()` on a seconds column.** On an integer `timestamp` (seconds) column, `nin.()` lowered to `IS NOT NULL` and dropped the rows holding none, where on every other column and through `buildFilterSQL` it matched every row, as this README says. It now matches every row there too. **Fix:** none.
+
+41. **Pass a `CombError` its cause as a string.** `cause` is the message a client may see, yet it took `unknown`, and this README's own example passed the original error there, whose text holds the SQL and its bound values. `cause` is now `string`, on the constructor and on the error, and the original goes on `source`, which is never serialized. Every comb classifier already passed strings. **Fix:** move an error object passed as `cause` to `source`, and give `cause` the message the client should read.
 
 ## Upgrading to 0.20.1
 
