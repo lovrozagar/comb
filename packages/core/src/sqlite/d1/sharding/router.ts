@@ -191,13 +191,14 @@ class ShardRouter {
 	getHandle<E extends object>(mapping: ShardMapping, env: E & ShardEnv<E>): ShardDbHandle<ShardBindingOf<E>>
 	/**
 	 * Resolve a shard mapping for an env TypeScript cannot read the keys of, such as a helper's type
-	 * parameter bounded by `{ SHARD_DB_0: D1Database }`: the binding type `D` its `SHARD_DB_*` keys hold
-	 * (AD14 of the area D review). An env with no such key is still refused, holding none of them.
+	 * parameter bounded by the interface `wrangler types` writes: the binding type its `SHARD_DB_0`
+	 * holds, since shard 0 always exists, with every other `SHARD_DB_*` key it names a D1 binding
+	 * (D2-1 and D2-2 of the area D round-two review). An env bounded by no shard key is refused.
 	 */
-	getHandle<D extends D1DatabaseLike>(
+	getHandle<E extends { readonly SHARD_DB_0: D1DatabaseLike }>(
 		mapping: ShardMapping,
-		env: { readonly [K in `SHARD_DB_${string}`]?: D | undefined },
-	): ShardDbHandle<D>
+		env: E & { readonly [K in keyof E & `SHARD_DB_${string}`]?: D1DatabaseLike | undefined },
+	): ShardDbHandle<E["SHARD_DB_0"]>
 	getHandle(mapping: ShardMapping, env: object): ShardDbHandle<D1DatabaseLike> {
 		const bindings: Partial<Record<string, unknown>> = env
 		const binding = bindings[`SHARD_DB_${mapping.target}`]
