@@ -12,12 +12,16 @@ import { elementNullsOf } from "./element-types.ts"
 const DIR = fs.mkdtempSync(path.join(import.meta.dirname, "../../../.tmp-codegen-elements-"))
 afterAll(() => fs.rmSync(DIR, { force: true, recursive: true }))
 
-/** A tables file of `body` beside the modules `beside`, its path */
-function tables(name: string, body: string, beside: Record<string, string> = {}): string {
+/** A tables file of `body`, named `file`, beside the files `beside`, its path */
+function tables(
+	name: string,
+	body: string,
+	{ beside = {}, file: named = "db.core.tables.ts" }: { beside?: Record<string, string>; file?: string } = {},
+): string {
 	const dir = path.join(DIR, name)
 	fs.mkdirSync(dir, { recursive: true })
-	for (const [file, text] of Object.entries(beside)) fs.writeFileSync(path.join(dir, file), text)
-	const file = path.join(dir, "db.core.tables.ts")
+	for (const [each, text] of Object.entries(beside)) fs.writeFileSync(path.join(dir, each), text)
+	const file = path.join(dir, named)
 	fs.writeFileSync(file, `import { integer, pgTable, text } from "drizzle-orm/pg-core"\n${body}\n`)
 	return file
 }
@@ -99,10 +103,33 @@ export const row = pgTable("row", { id: text("id").primaryKey().notAColumnMethod
 			"unresolved",
 			`import type { Tag } from "./types.ts"
 export const row = pgTable("row", { tags: text("tags").array().$type<Tag>() })`,
-			{ "types.ts": "export type Tag = Missing\n" },
+			{ beside: { "types.ts": "export type Tag = Missing\n" } },
 		)
 		expect(() => elementNullsOf(file)("row", "tags", 1)).toThrow(
 			"row.tags: its element type, Missing, does not resolve, so codegen cannot read whether it takes null; fix the type its $type<E>() names",
+		)
+	})
+})
+
+/* A3-1 of r23: a tables module in JavaScript, which declares no $type, its element as its builder types it */
+describe("elementNullsOf on a JavaScript tables module", () => {
+	const JS = `export const row = pgTable("row", { tags: text("tags").array(), grid: integer("grid").array("[][]") })`
+
+	it.each(["db.core.tables.js", "db.core.tables.mjs"])("reads %s, its elements taking no null", (file) => {
+		const nulls = elementNullsOf(tables(file.replace(/\W/g, "-"), JS, { file }))
+		expect([nulls("row", "tags", 1), nulls("row", "grid", 2)]).toEqual([false, false])
+	})
+
+	it("reads one under a tsconfig that sets allowJs false", () => {
+		const beside = { "tsconfig.json": JSON.stringify({ compilerOptions: { allowJs: false } }) }
+		expect(elementNullsOf(tables("no-js", JS, { beside, file: "db.core.tables.js" }))("row", "tags", 1)).toBe(false)
+	})
+
+	it("refuses a column of a script, which no module symbol stands for, naming it", () => {
+		const file = tables("script", "")
+		fs.writeFileSync(file, "const row = 1\n")
+		expect(() => elementNullsOf(file)("row", "tags", 1)).toThrow(
+			/^row\.tags: codegen reads an array column's element type from its table's \$inferInsert, which TypeScript cannot resolve for the export row of /,
 		)
 	})
 })

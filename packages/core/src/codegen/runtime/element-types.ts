@@ -24,17 +24,24 @@ const isUnresolved = (type: ts.Type): boolean =>
 	(type as ts.Type & { intrinsicName?: string | undefined }).intrinsicName === "error"
 
 /**
- * The checker over `tablesPath`. A type error elsewhere in the file is the project's own typecheck's
- * to report: the read fails only where it cannot resolve what it needs
+ * The checker over `tablesPath`, a TypeScript or JavaScript module whatever the project's allowJs (A3-1
+ * of r23), and what it exports: none for a script, which the read refuses naming the column. A type
+ * error elsewhere in the file is the project's own typecheck's to report: the read fails only where
+ * it cannot resolve what it needs
  */
 function checkerOf(tablesPath: string): { checker: ts.TypeChecker; exports: readonly ts.Symbol[] } {
-	const options = { ...compilerOptionsFor(tablesPath), noEmit: true, skipLibCheck: true, strictNullChecks: true }
+	const options = {
+		...compilerOptionsFor(tablesPath),
+		allowJs: true,
+		noEmit: true,
+		skipLibCheck: true,
+		strictNullChecks: true,
+	}
 	const project = new Project({ compilerOptions: options, skipAddingFilesFromTsConfig: true })
-	project.addSourceFileAtPath(tablesPath)
-	const program = project.getProgram().compilerObject
-	const checker = program.getTypeChecker()
-	const source = program.getSourceFile(tablesPath) as ts.SourceFile
-	return { checker, exports: checker.getExportsOfModule(checker.getSymbolAtLocation(source) as ts.Symbol) }
+	const source = project.addSourceFileAtPath(tablesPath).compilerNode
+	const checker = project.getTypeChecker().compilerObject
+	const module = checker.getSymbolAtLocation(source)
+	return { checker, exports: module === undefined ? [] : checker.getExportsOfModule(module) }
 }
 
 /** The type of `key` in the insert of the table exported as `table`; undefined when TypeScript resolves none */

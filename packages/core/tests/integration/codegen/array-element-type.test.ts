@@ -82,4 +82,27 @@ describe("a Postgres array column's element, as drizzle's type declares it (A2-9
 		}
 		expect(read.safeParse(stored).success).toBe(true)
 	}, 120_000)
+
+	/* A3-1 of r23: a JavaScript tables module declares no $type, so its element is as its builder types it */
+	it.each(["db.core.tables.js", "db.core.tables.mjs"])(
+		"generates from %s with an array column, allowJs false",
+		async (file) => {
+			const dir = project({
+				"comb.config.ts": CONFIG.replace("./db.core.tables.ts", `./${file}`),
+				[file]: `import { pgTable, text } from "drizzle-orm/pg-core"
+import { c } from "@lovrozagar/comb/pg/columns"
+export const row = pgTable("row", { id: c.id("row"), tags: text("tags").array().notNull() })
+`,
+				"tsconfig.json": JSON.stringify({ compilerOptions: { allowJs: false } }),
+			})
+			await codegen(dir, ["-g", "dtos"])
+			const module = (await import(path.join(dir, entityFile(dir)))) as Record<string, z.ZodObject>
+			const create = module["rowDtoCreateSchema"] as z.ZodObject
+			expect([create.safeParse({ tags: ["a"] }).success, create.safeParse({ tags: [null] }).success]).toEqual([
+				true,
+				false,
+			])
+		},
+		120_000,
+	)
 })
