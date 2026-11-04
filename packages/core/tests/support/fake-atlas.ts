@@ -1,6 +1,8 @@
 /**
  * A fake Atlas for the apply tests: hash writes atlas.sum from the files' name lengths, a schema
- * diff records the history it replayed, and status, inspect, dry run and apply answer as told.
+ * diff records the history it replayed, and status, inspect, dry run and apply answer as told. An
+ * apply of n files, as comb runs each run of files that may share a session (PA1 of r22b), answers
+ * with the report's next n files, and status then leaves the files reported out of its pending.
  */
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
@@ -26,6 +28,7 @@ const revision = (version: string, more: Record<string, unknown> = {}) => ({
 })
 
 type Answers = {
+	/** the report of an apply of every pending file, which an apply of n files answers n files of at a time */
 	apply?: RunResult
 	dryRun?: RunResult
 	inspect?: RunResult
@@ -40,11 +43,41 @@ type Fake = Run & {
 	replayed: string[]
 }
 
+/**
+ * The answer to an apply of `amount` files under `whole`, an apply's report, once `taken` were
+ * reported: the report's next files, with its error and exit code when one failed or the last is
+ * among them; none once the report is spent
+ */
+function nextOf(whole: RunResult, taken: string[], amount: number): RunResult {
+	const report = JSON.parse(whole.stdout) as { applied: Array<{ Error?: unknown; Name: string }> | null; error: string }
+	const files = report.applied ?? []
+	if (taken.length === 0 && files.length === 0) return whole
+	const next = files.slice(taken.length, taken.length + amount)
+	const failed = next.findIndex((entry) => entry.Error !== undefined)
+	const ran = failed === -1 ? next : next.slice(0, failed + 1)
+	if (ran.length === 0) return NOTHING
+	taken.push(...ran.map((entry) => entry.Name))
+	const last = failed !== -1 || taken.length === files.length
+	const stdout = JSON.stringify({ ...report, applied: ran, error: last ? report.error : "" })
+	return last ? { ...whole, stdout } : ok(stdout)
+}
+
+/** `answer`, a status, with the files an apply reported left out of its pending */
+function pendingAfter(answer: RunResult, taken: readonly string[]): RunResult {
+	if (taken.length === 0 || !answer.stdout.startsWith("{")) return answer
+	const body = JSON.parse(answer.stdout) as { pending?: Array<{ Name: string }> | null }
+	return {
+		...answer,
+		stdout: JSON.stringify({ ...body, pending: (body.pending ?? []).filter((entry) => !taken.includes(entry.Name)) }),
+	}
+}
+
 /** Atlas: hash writes a sum of name lengths, status and apply answer as told */
 function fakeAtlas(answers: Answers): Fake {
 	const calls: Fake["calls"] = []
 	const replayed: string[] = []
 	let applied = false
+	const taken: string[] = []
 	const run: Run = (_cmd, args, runOptions) => {
 		calls.push({ args: [...args], env: runOptions?.env })
 		if (args[1] === "hash") {
@@ -57,7 +90,8 @@ function fakeAtlas(answers: Answers): Fake {
 			)
 			return ok()
 		}
-		if (args[1] === "status") return (applied ? answers.statusAfterApply : undefined) ?? answers.status ?? ok("{}")
+		if (args[1] === "status")
+			return (applied ? answers.statusAfterApply : undefined) ?? pendingAfter(answers.status ?? ok("{}"), taken)
 		if (args[1] === "inspect") return answers.inspect ?? ok("{}")
 		if (args[0] === "schema") {
 			const to = (args[args.indexOf("--to") + 1] as string).replace("file://", "")
@@ -66,7 +100,10 @@ function fakeAtlas(answers: Answers): Fake {
 		}
 		if (args.includes("--dry-run")) return answers.dryRun ?? NOTHING
 		applied = true
-		return answers.apply ?? NOTHING
+		const whole = answers.apply ?? NOTHING
+		/* comb's amount follows its --format and the format's value */
+		const amount = Number(args[args.indexOf("--format") + 2])
+		return Number.isInteger(amount) && whole.stdout.startsWith("{") ? nextOf(whole, taken, amount) : whole
 	}
 	return Object.assign(run, { calls, replayed })
 }

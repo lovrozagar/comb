@@ -290,6 +290,7 @@ export {
 	INSIDE,
 	insideOnly,
 	nodeOf,
+	optionsOf,
 	OUTSIDE,
 	outsideOnly,
 	transactionControl,

@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest"
 import { readLiveObjects } from "./pg-live-objects.ts"
 import { CATALOG } from "./pg-live-catalog.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
+import { SERVER_CODE } from "./pg-server-code.ts"
 import { replayCatalog } from "./pg-replay.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
@@ -41,6 +42,8 @@ function fake(rows: Array<Record<string, unknown>> = [], fail?: (query: string) 
 				if (error !== undefined) throw error
 				if (query.startsWith(COUNTS)) return [{ on: "on", writes: {} }]
 				if (query.endsWith("WHERE pid = pg_backend_pid()")) return OWNER
+				if (query.startsWith(SERVER_CODE))
+					return [{ events: false, names: [], opaque: false, reaches: [], sql: [], tables: [] }]
 				return query === CATALOG ? rows : []
 			},
 		}
@@ -97,9 +100,10 @@ describe("replayCatalog", () => {
 			...SWEEP,
 			...MADE,
 			'CREATE SCHEMA IF NOT EXISTS "app"',
-			'SET search_path TO "app"',
 			PREPARE,
 			SNAPSHOT,
+			/* the code the prepared database holds, read once before the runs */
+			SERVER_CODE,
 			...inTransaction("CREATE TABLE t (a int)"),
 			"BEGIN",
 			COUNTED,
@@ -125,6 +129,11 @@ describe("replayCatalog", () => {
 			application_name: "comb_replay 7_9",
 			client_connection_check_interval: "1s",
 		})
+		/* and one session for the files that may share one, as apply runs them in one Atlas call (PA1 of r22b), searching the schema from its start */
+		const sessions = dev.given.slice(1) as Array<{ connection: Record<string, string>; database: string }>
+		expect(sessions.map((each) => [each.database, each.connection["search_path"]])).toEqual(
+			Array.from({ length: 2 }, () => [replay.database, '"app"']),
+		)
 	})
 })
 

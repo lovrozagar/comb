@@ -52,7 +52,7 @@ type TreeContext = {
 // lookup-table: the settings whose change decides what a later statement runs, and why
 const SETTINGS: Readonly<Record<string, string>> = {
 	search_path: "sets search_path, which decides the function or table every later unqualified name resolves to",
-	session_replication_role: "disables foreign key checks and ordinary triggers for the session",
+	session_replication_role: "disables foreign key checks and ordinary triggers for the rest of the file",
 	role: 'sets the role, which changes the schemas "$user" puts on the search path and what later names resolve to',
 	session_authorization:
 		'sets the session user, which changes the schemas "$user" puts on the search path and what later names resolve to',

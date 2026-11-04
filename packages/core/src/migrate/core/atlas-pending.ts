@@ -7,7 +7,7 @@ import { join } from "node:path"
 import type { ParsedMigration } from "../types.ts"
 import { sqlFiles } from "./atlas-dir.ts"
 import { extractSchema, parseRead } from "./parse.ts"
-import { pgRead } from "./pg-split.ts"
+import { type PgRead, pgRead } from "./pg-split.ts"
 import { schemaOfRead } from "./schema.ts"
 
 /** `read()`, a file `name` Atlas cannot split refused by name */
@@ -28,24 +28,27 @@ export function classifyPending(
 	options: { target: { schema: string } },
 	copy: string,
 	waiting: ReadonlySet<string>,
-): ParsedMigration[] {
+): { files: Array<{ name: string; read: PgRead }>; migrations: ParsedMigration[] } {
 	/* names are keyed as Postgres resolves them under the URL's search_path, the target's schema (M72) */
 	const readAs = { dialect: "postgres" as const, schema: options.target.schema }
 	let schema = extractSchema("", undefined, readAs)
 	/* a file before a pending one that Postgres's parser cannot read leaves its facts unknown (M75) */
 	let unread: string | undefined
 	const migrations: ParsedMigration[] = []
-	for (const Name of sqlFiles(copy)) {
-		const sql = readFileSync(join(copy, Name), "utf8")
-		if (waiting.has(Name) && unread !== undefined) throw new Error(unread)
+	/* every file's read, whose definitions the apply's runs resolve calls against (PA1 of r22b) */
+	const files: Array<{ name: string; read: PgRead }> = []
+	for (const filename of sqlFiles(copy)) {
+		const sql = readFileSync(join(copy, filename), "utf8")
+		if (waiting.has(filename) && unread !== undefined) throw new Error(unread)
 		const before = schema
 		/* the file's one parse, for the schema it leaves and, pending, its approval (M86) */
-		const file = { dialect: "postgres" as const, read: named(Name, () => pgRead(sql)), sql }
+		const file = { dialect: "postgres" as const, read: named(filename, () => pgRead(sql)), sql }
 		schema = schemaOfRead(file, readAs.schema, before)
+		files.push({ name: filename, read: file.read })
 		const { unreadable } = file.read
 		unread ??=
-			unreadable && `comb could not read ${Name}: ${JSON.stringify(unreadable.statement)} (${unreadable.error})`
-		if (waiting.has(Name)) migrations.push(parseRead({ ...file, filename: Name }, { before, schema: readAs.schema }))
+			unreadable && `comb could not read ${filename}: ${JSON.stringify(unreadable.statement)} (${unreadable.error})`
+		if (waiting.has(filename)) migrations.push(parseRead({ ...file, filename }, { before, schema: readAs.schema }))
 	}
-	return migrations
+	return { files, migrations }
 }

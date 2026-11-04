@@ -169,7 +169,7 @@ describe("Postgres statements that change what later names resolve to, or what a
 	/* M73: what session_replication_role turns off, said in its note */
 	it("rates a SET of session_replication_role unsafe, saying what it turns off", () => {
 		expect(rate("SET session_replication_role = replica;").unsafeStatements.join("\n")).toContain(
-			"disables foreign key checks and ordinary triggers for the session",
+			"disables foreign key checks and ordinary triggers for the rest of the file",
 		)
 	})
 

@@ -58,6 +58,7 @@ import {
 	extensionsOf,
 	makeDatabase,
 	claim,
+	replayOptions,
 	settle,
 	type Sql,
 	sweep,
@@ -66,8 +67,9 @@ import { grantsMade, ownGrant, ownRole, type Run, superuserOf } from "./pg-repla
 import { begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import { prepareSnapshot, snapshot } from "./pg-server-snapshot.ts"
 import { refuseUncounted } from "./pg-server-writes.ts"
-import { pgRead } from "./pg-split.ts"
-import { postgresOptionsOf } from "./pg-url.ts"
+import { NO_SERVER_CODE, serverCode } from "./pg-server-code.ts"
+import { sessionRuns } from "./pg-session.ts"
+import { type PgRead, pgRead } from "./pg-split.ts"
 import { namesIn } from "./sql-code.ts"
 
 /** A history file as baseline reads it */
@@ -112,7 +114,11 @@ async function runStatement(
  * it only so; the file's own BEGIN, COMMIT and SAVEPOINT, a LOCK and a cursor not held, and all its
  * own block runs, bare, as Atlas sends them, so Postgres refuses outside a block what apply's refuses
  */
-async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Replay & { refused: Refuse }) {
+async function replayFile(
+	run: Run,
+	{ name, read, sql: text }: HistoryFile & { read: PgRead },
+	replay: Replay & { refused: Refuse },
+) {
 	const inFile = !outsideTransaction(text)
 	const file = {
 		adopted: (role: string) => replay.adopted?.(name, role),
@@ -122,7 +128,7 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 	}
 	let block = false
 	if (inFile) await begin(run)
-	for (const { sent, tree } of pgRead(text).statements) {
+	for (const { sent, tree } of read.statements) {
 		const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
 		const beyond = grantsMade(run, type, node) ? undefined : beyondDatabase(type, node)
 		if (beyond !== undefined) {
@@ -140,11 +146,31 @@ async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Re
 	if (inFile) await commit(run, { ...file, sent: undefined })
 }
 
+/**
+ * `files` replayed a session `open`ed for each run of them that may share one (pg-session.ts), as
+ * apply gives each run an Atlas call of its own (PA1 of r22b)
+ */
+async function replayRuns(
+	run: Run,
+	files: readonly HistoryFile[],
+	{ open, ...replay }: Replay & { open: () => Sql; refused: Refuse },
+): Promise<void> {
+	/* the code the database holds once prepared, devUrl's extensions among it, which every file may run */
+	const server = files.length > 1 ? await serverCode(run.sql) : NO_SERVER_CODE
+	/* each file's one parse, for its runs and its replay */
+	const read = files.map((file) => ({ ...file, read: pgRead(file.sql) }))
+	for (const share of sessionRuns(read, read, server)) {
+		await run.sql.end()
+		run.sql = open()
+		for (const file of share) await replayFile(run, file, replay)
+	}
+}
+
 /* why a replay stops on a devUrl role that cannot make the database it replays in */
 const NO_CREATEDB =
 	"devUrl's role cannot create a database (CREATEDB), and comb replays the history file by file, as Atlas applies it, in a database of its own on devUrl's server; grant the role CREATEDB, or point devUrl at a server where it has it"
 
-/** The replay's database made ready: counted, holding devUrl's extensions the `files` do not make, `schema` made and searched */
+/** The replay's database made ready: counted, holding devUrl's extensions the `files` do not make, and `schema` made */
 async function prepare(
 	run: Run,
 	schema: string,
@@ -160,7 +186,6 @@ async function prepare(
 			),
 	})
 	if (schema !== "public") await run.sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${sqlIdentifier(schema)}`, [])
-	await run.sql.unsafe(`SET search_path TO ${sqlIdentifier(schema)}`, [])
 }
 
 /**
@@ -187,20 +212,6 @@ async function cleanUp(run: Run): Promise<void> {
 
 /** A refusal: what failed, with devUrl's error, and what that stops */
 type Refuse = (what: string, error: unknown) => ReplayFailed
-
-/**
- * devUrl's options for one replay connection, whose notices nobody reads; with `settings`, those of
- * the replay's own connection to `database`, its session settings beside the ones the URL sets
- */
-function replayOptions(
-	devUrl: string,
-	at?: { database: string; settings: Record<string, string> },
-): Record<string, unknown> {
-	const options: Record<string, unknown> = { ...postgresOptionsOf(devUrl, "devUrl"), max: 1, onnotice: () => undefined }
-	if (at === undefined) return options
-	const connection = { ...(options["connection"] as object | undefined), ...at.settings }
-	return { ...options, connection, database: at.database }
-}
 
 /**
  * `files` replayed on `target`'s dev server in a database of their own, the schema made and searched
@@ -232,6 +243,7 @@ async function onDev<T>(
 			admin = connect(replayOptions(target.devUrl))
 			await sweep(admin, Date.now())
 			const { owner, settings } = await claim(admin)
+			const search = { ...settings, search_path: sqlIdentifier(target.schema) }
 			const database = await makeDatabase(admin, owner, () => new ReplayFailed(`${NO_CREATEDB}; ${replay.stops}`))
 			const run: Run = {
 				admin,
@@ -240,7 +252,7 @@ async function onDev<T>(
 				ours: { rows: new Map(), writes: new Map() },
 				owner,
 				seen: new Map(),
-				sql: connect(replayOptions(target.devUrl, { database, settings })),
+				sql: connect(replayOptions(target.devUrl, { database, settings: search })),
 				strays: { databases: [], roles: [], slots: [] },
 				superuser: await superuserOf(admin),
 			}
@@ -249,8 +261,8 @@ async function onDev<T>(
 				await prepare(run, target.schema, { files, refused, stops: replay.stops })
 				await prepareSnapshot(admin, run)
 				run.seen = await snapshot(admin)
-				for (const file of files)
-					await replayFile(run, file, { ...replay, leftOut: replay.leftOut ?? (() => undefined), refused })
+				const open = () => connect(replayOptions(target.devUrl, { database, settings: search }))
+				await replayRuns(run, files, { ...replay, leftOut: replay.leftOut ?? (() => undefined), open, refused })
 				return await after(run.sql)
 			} finally {
 				await cleanup.run()

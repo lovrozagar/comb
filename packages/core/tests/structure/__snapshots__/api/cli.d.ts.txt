@@ -389,6 +389,11 @@ declare function sweep(admin: Sql, now: number): Promise<void>;
  * fails is `print`ed and passed
  */
 declare function sweepDev(target: PgTarget, print: (line: string) => void, load?: () => Promise<Connect>): Promise<void>;
+/** devUrl's options for one replay connection, notices unread; with `at`, the replay's own to its database, with its settings */
+declare function replayOptions(devUrl: string, at?: {
+    database: string;
+    settings: Record<string, string>;
+}): Record<string, unknown>;
 /** A new replay database on `admin`'s server, named for its `owner`; a role without CREATEDB is `refused` */
 declare function makeDatabase(admin: Sql, owner: string, refused: () => Error): Promise<string>;
 /** The extensions the history `texts` create, which the replay leaves them to make */
@@ -401,7 +406,7 @@ declare function copyExtensions(from: Sql, to: Sql, { makes, refused }: {
     makes: ReadonlySet<string>;
     refused: (name: string, error: unknown) => Error;
 }): Promise<void>;
-export { codeOf, copyExtensions, dropRole, dropSlot, extensionsOf, literal, makeDatabase, claim, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
+export { codeOf, copyExtensions, dropRole, dropSlot, extensionsOf, literal, makeDatabase, claim, replayOptions, settle, STALE_MS, type Sql, sweep, sweepDev, TAG, };
 
 // migrate/core/pg-live-catalog.d.ts
 /**

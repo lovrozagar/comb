@@ -218,6 +218,17 @@ async function sweepDev(
 	})
 }
 
+/** devUrl's options for one replay connection, notices unread; with `at`, the replay's own to its database, with its settings */
+function replayOptions(
+	devUrl: string,
+	at?: { database: string; settings: Record<string, string> },
+): Record<string, unknown> {
+	const options: Record<string, unknown> = { ...postgresOptionsOf(devUrl, "devUrl"), max: 1, onnotice: () => undefined }
+	if (at === undefined) return options
+	const connection = { ...(options["connection"] as object | undefined), ...at.settings }
+	return { ...options, connection, database: at.database }
+}
+
 /** A new replay database on `admin`'s server, named for its `owner`; a role without CREATEDB is `refused` */
 async function makeDatabase(admin: Sql, owner: string, refused: () => Error): Promise<string> {
 	const name = `${PREFIX}${owner}_${randomUUID().replaceAll("-", "").slice(0, 8)}`
@@ -278,6 +289,7 @@ export {
 	literal,
 	makeDatabase,
 	claim,
+	replayOptions,
 	settle,
 	STALE_MS,
 	type Sql,

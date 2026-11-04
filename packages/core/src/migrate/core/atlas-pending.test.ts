@@ -25,7 +25,7 @@ function write(files: readonly string[]): void {
 
 /** The pending `names` of the snapshot classified for a target in `schema` */
 const classify = (names: readonly string[], schema = "public") =>
-	classifyPending({ target: { schema } }, copy, new Set(names))
+	classifyPending({ target: { schema } }, copy, new Set(names)).migrations
 
 describe("classifyPending", () => {
 	it("classifies the pending files alone, in order, each against the schema the files before it leave", () => {
@@ -39,6 +39,15 @@ describe("classifyPending", () => {
 		/* the pending file before it made the trigger its insert fires */
 		expect(migrations[1]?.classification.unsafeStatements).toEqual([
 			"INSERT INTO a VALUES (1) (fires trigger t, whose body runs for every row it writes)",
+		])
+	})
+
+	it("hands on every file's one read, applied and pending, in order, which the apply's runs are cut from (PA1)", () => {
+		write(["CREATE TABLE a (id int);\n", "SET search_path = app;\nCREATE TABLE b (id int);\n"])
+		const { files } = classifyPending({ target: { schema: "public" } }, copy, new Set(["2_b.sql"]))
+		expect(files.map(({ name, read }) => [name, read.statements.length])).toEqual([
+			["1_a.sql", 1],
+			["2_b.sql", 2],
 		])
 	})
 

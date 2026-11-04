@@ -158,7 +158,9 @@ describe("a file that changes session_replication_role (M73)", () => {
 			"SET LOCAL session_replication_role = replica;",
 			"SELECT set_config('session_replication_role', 'replica', true);",
 		])
-			expect(rate("", sql).notes, sql).toContain("disables foreign key checks and ordinary triggers for the session")
+			expect(rate("", sql).notes, sql).toContain(
+				"disables foreign key checks and ordinary triggers for the rest of the file",
+			)
 	})
 
 	it("reads a set_config of a setting it cannot read as one, and of another setting as any call", () => {

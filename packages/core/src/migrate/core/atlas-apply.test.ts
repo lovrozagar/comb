@@ -12,6 +12,7 @@ import type { Run } from "./process.ts"
 import { fail, fakeAtlas, file, ok, revision, status } from "../../../tests/support/fake-atlas.ts"
 import { holdingRelations, noLive } from "../__fixtures__/live-objects.ts"
 import { UNCOMPARED } from "./baseline-compare.ts"
+import { NO_SERVER_CODE, UNREAD } from "./pg-server-code.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -57,6 +58,7 @@ function options(
 		/* check's replay on dev is atlas-apply.check.test.ts's and pg-check-replay.ts's to test */
 		replayPending: async () => undefined,
 		sweepDev: async () => undefined,
+		targetCode: async () => NO_SERVER_CODE,
 		seen,
 		target: TARGET,
 		...more,
@@ -69,6 +71,8 @@ const PENDING = status({
 	status: "PENDING",
 })
 const APPLIED = ok(JSON.stringify({ applied: [{ Name: "1_a.sql" }, { Name: "2_b.sql" }], error: "", target: "2" }))
+/* Atlas's report once 1_a.sql is applied: 2_b.sql alone */
+const APPLIED_B = ok(JSON.stringify({ applied: [{ Name: "2_b.sql" }], error: "", target: "2" }))
 
 describe("applyWithAtlas", () => {
 	it("applies a verified private copy, reading each pending file from it, with the URL only in env", async () => {
@@ -84,18 +88,6 @@ describe("applyWithAtlas", () => {
 		expect(atlas.calls.map((call) => call.args.join(" ")).join("\n")).not.toContain("S3cret")
 		expect(apply?.env?.["COMB_ATLAS_URL"]).toContain("S3cret")
 		expect(run.out).toEqual(["Apply: 1_a.sql", "Apply: 2_b.sql"])
-	})
-
-	it("passes Atlas no flag that would skip comb's checks, nor an amount", async () => {
-		const atlas = fakeAtlas({ apply: APPLIED, status: PENDING })
-		await applyWithAtlas(options(atlas))
-		const args = atlas.calls.flatMap((call) => call.args)
-		for (const flag of ["--exec-order", "--allow-dirty", "--tx-mode", "--baseline", "--to-version"])
-			expect(args).not.toContain(flag)
-		for (const call of atlas.calls.filter((c) => c.args[1] === "apply")) {
-			const bare = call.args.slice(2).filter((arg, i, all) => !arg.startsWith("--") && !all[i - 1]?.startsWith("--"))
-			expect(bare).toEqual([])
-		}
 	})
 
 	it("runs the dry run before anyone is asked, and stops there on a database that needs a baseline", async () => {
@@ -120,6 +112,32 @@ describe("applyWithAtlas", () => {
 	})
 })
 
+describe("applyWithAtlas: how many files one Atlas call runs (PA1 of r22b)", () => {
+	it("passes Atlas no flag that would skip comb's checks, and the files that may share a session as one apply's amount (PA1 of r22b)", async () => {
+		const atlas = fakeAtlas({ apply: APPLIED, status: PENDING })
+		await applyWithAtlas(options(atlas))
+		const args = atlas.calls.flatMap((call) => call.args)
+		for (const flag of ["--exec-order", "--allow-dirty", "--tx-mode", "--baseline", "--to-version"])
+			expect(args).not.toContain(flag)
+		const bare = atlas.calls
+			.filter((c) => c.args[1] === "apply")
+			.map((call) => call.args.slice(2).filter((arg, i, all) => !arg.startsWith("--") && !all[i - 1]?.startsWith("--")))
+		/* the dry run takes no amount; both pending files leave the session as they found it, so one apply runs them */
+		expect(bare).toEqual([[], ["2"]])
+	})
+
+	it("gives each file a call of its own on a target comb cannot read (PA1, comb-9d's ruling)", async () => {
+		const atlas = fakeAtlas({ apply: APPLIED, status: PENDING })
+		const read: string[] = []
+		const targetCode = async (target: { url: string }) => (read.push(target.url), UNREAD)
+		await applyWithAtlas(options(atlas, { targetCode }))
+		const amounts = atlas.calls
+			.filter((c) => c.args[1] === "apply" && !c.args.includes("--dry-run"))
+			.map((c) => c.args.at(c.args.indexOf("--format") + 2))
+		expect([read.length, amounts]).toEqual([1, ["1", "1"]])
+	})
+})
+
 describe("applyWithAtlas: what it classifies against", () => {
 	it("classifies each pending file against the schema the files before it leave", async () => {
 		writeFileSync(join(dir, "1_a.sql"), "CREATE TABLE a (id int);\n")
@@ -137,7 +155,7 @@ describe("applyWithAtlas: what it classifies against", () => {
 			safety.push(migration.classification.safety),
 			{ ok: true as const }
 		)
-		await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: later }), { approve }))
+		await applyWithAtlas(options(fakeAtlas({ apply: APPLIED_B, status: later }), { approve }))
 		expect(safety).toEqual(["unsafe"])
 	})
 })
@@ -152,7 +170,7 @@ function onHistory(history: string) {
 		pending: [file("2_b.sql")],
 		status: "PENDING",
 	})
-	return options(fakeAtlas({ apply: APPLIED, status: later }))
+	return options(fakeAtlas({ apply: APPLIED_B, status: later }))
 }
 
 describe("applyWithAtlas: a file before a pending one that it cannot read (M75)", () => {
@@ -184,7 +202,7 @@ describe("applyWithAtlas: each history file parsed once", () => {
 		const parse = vi.spyOn(postgresParser(), "parseSync")
 		try {
 			const pending = status({ applied: [revision("1", { hash: "7=" })], current: "1", pending: [file("2_b.sql")] })
-			await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: pending })))
+			await applyWithAtlas(options(fakeAtlas({ apply: APPLIED_B, status: pending })))
 			expect(parse.mock.calls.filter(([sql]) => sql.includes('CREATE TABLE "a"'))).toHaveLength(1)
 		} finally {
 			parse.mockRestore()
@@ -224,13 +242,13 @@ describe("applyWithAtlas: what Atlas reports", () => {
 		)
 	})
 
-	it("takes a fresh database's files as pending, not late", async () => {
+	it("takes a fresh database's files as pending, not late, and applies those alone", async () => {
 		const fresh = status({
 			available: [file("1_a.sql")],
 			current: "No migration applied yet",
 			pending: [file("1_a.sql")],
 		})
-		expect(await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: fresh })))).toEqual(["1_a.sql", "2_b.sql"])
+		expect(await applyWithAtlas(options(fakeAtlas({ apply: APPLIED, status: fresh })))).toEqual(["1_a.sql"])
 	})
 
 	it("refuses a file older than the latest applied that Atlas skips without a word", async () => {
@@ -299,7 +317,7 @@ describe("applyWithAtlas: a file Atlas runs outside a transaction that failed ha
 	})
 
 	it("resumes an unchanged file, saying where it stopped", async () => {
-		const run = options(fakeAtlas({ apply: APPLIED, status: partial("7=") }))
+		const run = options(fakeAtlas({ apply: APPLIED_B, status: partial("7=") }))
 		await applyWithAtlas(run)
 		expect(run.out[0]).toBe(
 			'2_b.sql ran 2 of its 3 statements before it failed at ALTER TABLE "nope" (pq: relation missing); resuming after them',
