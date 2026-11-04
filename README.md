@@ -1190,7 +1190,7 @@ What changes for a project on 0.20. Before deploying it:
 
 45. **Match every row with an empty `nin.()` on a seconds column.** On an integer `timestamp` (seconds) column, `nin.()` lowered to `IS NOT NULL` and dropped the rows holding none, where on every other column and through `buildFilterSQL` it matched every row, as this README says. It now matches every row there too. **Fix:** none.
 
-41. **Pass a `CombError` its cause as a string.** `cause` is the message a client may see, yet it took `unknown`, and this README's own example passed the original error there, whose text holds the SQL and its bound values. `cause` is now `string`, on the constructor and on the error, and the original goes on `source`, which is never serialized. Every comb classifier already passed strings. **Fix:** move an error object passed as `cause` to `source`, and give `cause` the message the client should read.
+46. **Pass a `CombError` its cause as a string.** `cause` is the message a client may see, yet it took `unknown`, and this README's own example passed the original error there, whose text holds the SQL and its bound values. `cause` is now `string`, on the constructor and on the error, and the original goes on `source`, which is never serialized. Every comb classifier already passed strings. **Fix:** move an error object passed as `cause` to `source`, and give `cause` the message the client should read.
 
 ## Upgrading to 0.20.1
 
