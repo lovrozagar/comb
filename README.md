@@ -1196,7 +1196,7 @@ What changes for a project on 0.20. Before deploying it:
 
 48. **Give `createUlidFactory` any clock that reads milliseconds.** A clock with a fraction, such as `performance.timeOrigin + performance.now()`, wrote the text `undefined` into every id, 34 characters outside the ULID alphabet, and a clock past 2^48 − 1 wrapped, so its ids stopped sorting. The reading is now floored to its millisecond, and one that is not finite, is negative or is past 2^48 − 1 is a `RangeError` naming it. **Fix:** none; a clock that read outside that range now throws.
 
-44. **Read one `table` for a `pgSchema` table on Postgres.** A delete of a row a child still references named its table bare (`org`), where every other violation of it named the key the constraint maps give it (`app.org`), so a client keyed by `CombError.table` saw two tables, and a public `org` beside it looked the same. The delete's table is now resolved as every other violation's is. **Fix:** an error handler that matched the bare name on such a delete matches the qualified key.
+49. **Read one `table` for a `pgSchema` table on Postgres.** A delete of a row a child still references named its table bare (`org`), where every other violation of it named the key the constraint maps give it (`app.org`), so a client keyed by `CombError.table` saw two tables, and a public `org` beside it looked the same. The delete's table is now resolved as every other violation's is. **Fix:** an error handler that matched the bare name on such a delete matches the qualified key.
 
 ## Upgrading to 0.20.1
 
