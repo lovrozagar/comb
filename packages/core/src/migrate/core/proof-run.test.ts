@@ -335,3 +335,26 @@ describe("provePending on values moved between columns or rows of one type (G1b)
 function rebuildT(copy: string): string {
 	return `CREATE TABLE new_t (id INTEGER PRIMARY KEY, a TEXT, b TEXT, n INTEGER NOT NULL DEFAULT 0);\nINSERT INTO new_t (id, a, b, n) SELECT ${copy} FROM t;\nDROP TABLE t;\nALTER TABLE new_t RENAME TO t;`
 }
+
+/* S2 of r22: a signal's handler is a task of the event loop, so the proof gives the loop a turn per file */
+describe("provePending lets a signal in between files (S2 of r22; sibling: the replay's per-statement await)", () => {
+	it("gives the event loop a turn after each file, so a Ctrl-C mid-proof stops it then, not after the last file", async () => {
+		const conn = libsqlConnection()
+		open.push(conn)
+		await conn.client.executeMultiple("CREATE TABLE t (id INTEGER PRIMARY KEY);")
+		const files = Array.from({ length: 40 }, (_, i) => ({
+			name: `${i + 2}_c.sql`,
+			sql: `ALTER TABLE t ADD COLUMN c${i};`,
+		}))
+		let [turns, done] = [0, false]
+		const turn = () => {
+			if (done) return
+			turns++
+			setImmediate(turn)
+		}
+		setImmediate(turn)
+		await provePending(conn, files)
+		done = true
+		expect(turns).toBeGreaterThanOrEqual(files.length)
+	})
+})

@@ -146,6 +146,17 @@ function named<T>(name: string, work: () => T): T {
 }
 
 /**
+ * Each of `files` after a turn of the event loop, where a SIGINT or SIGTERM's handler runs: a file's
+ * proof runs synchronously, so without one a Ctrl-C would wait out the whole proof (S2 of r22)
+ */
+async function* turns<T>(files: readonly T[]): AsyncGenerator<T> {
+	for (const file of files) {
+		await new Promise((resolve) => setImmediate(resolve))
+		yield file
+	}
+}
+
+/**
  * Prove each pending file, in order, on a seeded scratch copy of the database `conn` reaches;
  * returns each file's proof by name. A file the copy refuses is tried once more on a reseeded copy
  * (a seed's value can meet a file's unique index or explicit id); a file refused both ways is
@@ -167,7 +178,7 @@ async function provePending(
 	let applied: string[] = []
 	let failed: string | undefined
 	try {
-		for (const { name, sql } of files) {
+		for await (const { name, sql } of turns(files)) {
 			if (failed !== undefined) {
 				proofs.set(name, { cautious: [], failed, unproven: unprovenOf(copy), unsafe: [failed] })
 				continue

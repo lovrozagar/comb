@@ -53,7 +53,7 @@ describe("openScratch", () => {
 		const mkdtemp = vi.spyOn(fs, "mkdtempSync")
 		const db = await openScratch()
 		const dir = mkdtemp.mock.results[0]?.value as string
-		expect(path.basename(dir)).toMatch(/^comb-scratch-/)
+		expect(path.basename(dir)).toMatch(new RegExp(`^comb-scratch-${process.pid}-[0-9a-f]{8}-`))
 		expect(path.dirname(dir)).toBe(os.tmpdir())
 		expect(fs.statSync(dir).mode & 0o777).toBe(0o700)
 		expect(fs.readdirSync(dir)).toEqual(["copy.db"])
@@ -84,51 +84,25 @@ describe("openScratch", () => {
 	})
 })
 
-describe("sweepScratch", () => {
-	it("removes the scratch a killed run left, and keeps a live run's, another user's, and every other directory", async () => {
-		const { SCRATCH_STALE_MS, sweepScratch } = await import("./local-db.ts")
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "comb-sweep-"))
-		try {
-			for (const name of ["comb-scratch-old", "comb-scratch-new", "comb-codegen-old"])
-				fs.mkdirSync(path.join(root, name))
-			fs.symlinkSync(path.join(root, "gone"), path.join(root, "comb-scratch-dangling"))
-			const now = fs.statSync(path.join(root, "comb-scratch-new")).mtimeMs + SCRATCH_STALE_MS / 2
-			const old = (now - SCRATCH_STALE_MS - 1000) / 1000
-			fs.utimesSync(path.join(root, "comb-scratch-old"), old, old)
-			fs.utimesSync(path.join(root, "comb-codegen-old"), old, old)
-			sweepScratch(root, now)
-			expect(fs.readdirSync(root).sort()).toEqual(["comb-codegen-old", "comb-scratch-dangling", "comb-scratch-new"])
-
-			fs.mkdirSync(path.join(root, "comb-scratch-theirs"))
-			fs.utimesSync(path.join(root, "comb-scratch-theirs"), old, old)
-			vi.spyOn(process, "getuid").mockReturnValue(-1)
-			sweepScratch(root, now)
-			expect(fs.existsSync(path.join(root, "comb-scratch-theirs"))).toBe(true)
-			/* a platform with no user ids sweeps by age alone */
-			const getuid = Object.getOwnPropertyDescriptor(process, "getuid") as PropertyDescriptor
-			Object.defineProperty(process, "getuid", { configurable: true, value: undefined })
-			try {
-				sweepScratch(root, now)
-			} finally {
-				Object.defineProperty(process, "getuid", getuid)
-			}
-			expect(fs.existsSync(path.join(root, "comb-scratch-theirs"))).toBe(false)
-		} finally {
-			fs.rmSync(root, { force: true, recursive: true })
-		}
-	})
-
-	it("sweeps the system's temp directory once, when a process opens its first scratch", async () => {
+/* S2 of r22: a scratch is named for its process, so a killed run's is swept at once, not after hours */
+describe("openScratch's sweep", () => {
+	it("removes a leftover named for a gone process at a process's first scratch, keeps a live one's, and sweeps once", async () => {
 		vi.resetModules()
-		const stale = fs.mkdtempSync(path.join(os.tmpdir(), "comb-scratch-"))
-		const old = (Date.now() - 7 * 60 * 60_000) / 1000
-		fs.utimesSync(stale, old, old)
-		const { openScratch } = await import("./local-db.ts")
-		;(await openScratch()).close()
-		expect(fs.existsSync(stale)).toBe(false)
-		/* read from the calls, not the directory: another suite's process sweeps it alongside */
-		const readdir = vi.spyOn(fs, "readdirSync")
-		;(await openScratch()).close()
-		expect(readdir.mock.calls.filter(([dir]) => dir === os.tmpdir())).toEqual([])
+		const { hostMark } = await import("../core/cleanup.ts")
+		const named = (pid: number, what: string) => path.join(os.tmpdir(), `comb-scratch-${pid}-${hostMark()}-${what}`)
+		/* a pid past any pid_max, so no process runs as it */
+		const [gone, live] = [named(4_194_305, "gone"), named(process.pid, "live")]
+		for (const dir of [gone, live]) fs.mkdirSync(dir)
+		try {
+			const { openScratch } = await import("./local-db.ts")
+			;(await openScratch()).close()
+			expect([fs.existsSync(gone), fs.existsSync(live)]).toEqual([false, true])
+			/* read from the calls, not the directory: another suite's process sweeps it alongside */
+			const readdir = vi.spyOn(fs, "readdirSync")
+			;(await openScratch()).close()
+			expect(readdir.mock.calls.filter(([dir]) => dir === os.tmpdir())).toEqual([])
+		} finally {
+			for (const dir of [gone, live]) fs.rmSync(dir, { force: true, recursive: true })
+		}
 	})
 })

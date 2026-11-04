@@ -1,5 +1,20 @@
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
-import { onceCleanup, onSignals } from "./cleanup.ts"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest"
+import {
+	hold,
+	hostMark,
+	isAlive,
+	onceCleanup,
+	onSignals,
+	SCRATCH_STALE_MS,
+	scratchDir,
+	sweepScratch,
+} from "./cleanup.ts"
+
+/* a pid past any pid_max (Linux's ceiling is 2^22), so no process ever runs as it */
+const DEAD = 4_194_305
 
 describe("onceCleanup", () => {
 	it("cleans nothing until a step is set, then runs that step once however often it is asked", async () => {
@@ -23,19 +38,16 @@ describe("onceCleanup", () => {
 })
 
 describe("onSignals", () => {
-	it("returns the body's value and leaves no listener behind", async () => {
-		const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]
+	it("returns the body's value", async () => {
 		expect(
 			await onSignals(
 				async () => undefined,
 				async () => 7,
 			),
 		).toBe(7)
-		expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before)
 	})
 
-	it("leaves no listener behind when the body throws", async () => {
-		const before = process.listenerCount("SIGTERM")
+	it("passes on what the body throws", async () => {
 		await expect(
 			onSignals(
 				async () => undefined,
@@ -44,47 +56,191 @@ describe("onSignals", () => {
 				},
 			),
 		).rejects.toThrow("body")
-		expect(process.listenerCount("SIGTERM")).toBe(before)
 	})
 })
 
-describe("onSignals on a signal", () => {
-	const kill = vi.spyOn(process, "kill").mockImplementation(() => true)
-	afterEach(() => kill.mockClear())
-	afterAll(() => kill.mockRestore())
+describe("isAlive", () => {
+	it("reads this process as running, a pid no process has as gone, and one another user runs as running", () => {
+		/* pid 1 is init: EPERM to a user who isn't root, plainly alive to root; running either way */
+		expect([isAlive(process.pid), isAlive(DEAD), isAlive(1)]).toEqual([true, false, true])
+	})
+})
 
-	it.each([["SIGINT"], ["SIGTERM"]] as const)("on %s cleans up, then ends the process by it again", async (signal) => {
-		const saved = process.listeners(signal)
-		process.removeAllListeners(signal)
-		try {
-			let cleaned!: () => void
-			const done = new Promise<void>((resolve) => (cleaned = resolve))
-			await onSignals(
-				async () => cleaned(),
-				async () => {
-					process.emit(signal, signal)
-					await done
-				},
-			)
-			await new Promise((resolve) => setImmediate(resolve))
-			expect(kill.mock.calls).toEqual([[process.pid, signal]])
-		} finally {
-			for (const listener of saved) process.on(signal, listener)
-		}
+describe("hostMark", () => {
+	afterEach(() => vi.restoreAllMocks())
+
+	it("is eight hex digits from the host and its pid namespace, and from the host alone where there is no /proc", () => {
+		const mark = hostMark()
+		expect(mark).toMatch(/^[0-9a-f]{8}$/)
+		vi.spyOn(fs, "readlinkSync").mockImplementation(() => {
+			throw Object.assign(new Error("no /proc"), { code: "ENOENT" })
+		})
+		const hostOnly = hostMark()
+		expect(hostOnly).toMatch(/^[0-9a-f]{8}$/)
+		expect(hostOnly).not.toBe(mark)
+	})
+})
+
+describe("sweepScratch (S2 of r22; sibling: P2 of r21's replay sweep by owner)", () => {
+	let dir: string
+	const left = () => fs.readdirSync(dir).sort()
+	const make = (name: string) => fs.mkdirSync(path.join(dir, name))
+	beforeEach(() => {
+		dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-sweep-"))
+	})
+	afterEach(() => {
+		vi.restoreAllMocks()
+		fs.rmSync(dir, { force: true, recursive: true })
+	})
+
+	it("removes one a gone process of this host left at once, and keeps a live one's, another host's and one with no pid", () => {
+		const mark = hostMark()
+		make(`comb-scratch-${DEAD}-${mark}-gone`)
+		make(`comb-scratch-${process.pid}-${mark}-live`)
+		make(`comb-scratch-${DEAD}-00000000-elsewhere`)
+		make("comb-scratch-nopid")
+		make(`comb-codegen-${DEAD}-${mark}-other-prefix`)
+		sweepScratch("comb-scratch-", dir)
+		expect(left()).toEqual(
+			[
+				`comb-codegen-${DEAD}-${mark}-other-prefix`,
+				`comb-scratch-${DEAD}-00000000-elsewhere`,
+				`comb-scratch-${process.pid}-${mark}-live`,
+				"comb-scratch-nopid",
+			].sort(),
+		)
+	})
+
+	it("removes any past the stale age, a live pid's too, since no run holds one that long", () => {
+		const mark = hostMark()
+		make(`comb-scratch-${process.pid}-${mark}-live`)
+		make("comb-scratch-nopid")
+		sweepScratch("comb-scratch-", dir, Date.now() + SCRATCH_STALE_MS - 60_000)
+		expect(left()).toHaveLength(2)
+		sweepScratch("comb-scratch-", dir, Date.now() + SCRATCH_STALE_MS + 60_000)
+		expect(left()).toEqual([])
+	})
+
+	it("keeps another user's, and reads every one as this user's where there are no uids", () => {
+		make(`comb-scratch-${DEAD}-${hostMark()}-theirs`)
+		const stat = fs.statSync(path.join(dir, left()[0] as string))
+		vi.spyOn(fs, "statSync").mockReturnValue({ ...stat, uid: stat.uid + 1 } as fs.Stats)
+		sweepScratch("comb-scratch-", dir)
+		expect(left()).toHaveLength(1)
+		vi.spyOn(process, "getuid").mockReturnValue(undefined as unknown as number)
+		sweepScratch("comb-scratch-", dir)
+		expect(left()).toEqual([])
+	})
+
+	it("passes over one another run removed first", () => {
+		make(`comb-scratch-${DEAD}-${hostMark()}-raced`)
+		vi.spyOn(fs, "statSync").mockImplementation(() => {
+			throw Object.assign(new Error("gone"), { code: "ENOENT" })
+		})
+		expect(() => sweepScratch("comb-scratch-", dir)).not.toThrow()
+	})
+})
+
+describe("scratchDir", () => {
+	afterEach(() => vi.restoreAllMocks())
+
+	it("makes a 0700 directory named for this process under the temp directory, and removes it", () => {
+		const scratch = scratchDir("comb-cleanup-test-")
+		expect(path.dirname(scratch.dir)).toBe(os.tmpdir())
+		expect(path.basename(scratch.dir)).toMatch(new RegExp(`^comb-cleanup-test-${process.pid}-${hostMark()}-`))
+		expect(fs.statSync(scratch.dir).mode & 0o777).toBe(0o700)
+		scratch.remove()
+		expect(fs.existsSync(scratch.dir)).toBe(false)
+	})
+
+	it("sweeps what a gone process left at a prefix's first scratch, and only then", () => {
+		const leftover = path.join(os.tmpdir(), `comb-cleanup-sweep-${DEAD}-${hostMark()}-gone`)
+		fs.mkdirSync(leftover)
+		const first = scratchDir("comb-cleanup-sweep-")
+		expect(fs.existsSync(leftover)).toBe(false)
+		fs.mkdirSync(leftover)
+		const second = scratchDir("comb-cleanup-sweep-")
+		expect(fs.existsSync(leftover)).toBe(true)
+		for (const each of [first, second]) each.remove()
+		fs.rmSync(leftover, { force: true, recursive: true })
+	})
+})
+
+const settle = () => new Promise((resolve) => setImmediate(resolve))
+/* the worker's own listeners, read as the file is collected, before any test arms comb's */
+const worker = { SIGINT: process.listeners("SIGINT"), SIGTERM: process.listeners("SIGTERM") }
+/* the signal as Node delivers it to this process, with only comb listening */
+async function deliver(signal: "SIGINT" | "SIGTERM"): Promise<void> {
+	const others = worker[signal]
+	for (const listener of others) process.off(signal, listener)
+	try {
+		process.emit(signal, signal)
+		await settle()
+	} finally {
+		for (const listener of others) process.on(signal, listener)
+	}
+}
+
+/* process.kill stubbed for each test of a describe, so the end a signal asks for is read, not done */
+function stubKill(): { calls: () => unknown[][] } {
+	let kill: MockInstance<typeof process.kill> | undefined
+	beforeEach(() => {
+		kill = vi.spyOn(process, "kill").mockImplementation(() => true)
+	})
+	afterEach(() => kill?.mockRestore())
+	return { calls: () => kill?.mock.calls ?? [] }
+}
+
+describe("a signal (S2, KC5 and PA4 of r22)", () => {
+	const kill = stubKill()
+
+	it.each([["SIGINT"], ["SIGTERM"]] as const)(
+		"on %s runs every held step once, then ends the process by it again",
+		async (signal) => {
+			const steps = [vi.fn(), vi.fn(async () => undefined)]
+			const releases = steps.map((step) => hold(step))
+			await deliver(signal)
+			expect([steps.map((step) => step.mock.calls), kill.calls()]).toEqual([
+				[[[signal]], [[signal]]],
+				[[process.pid, signal]],
+			])
+			for (const release of releases) release()
+		},
+	)
+
+	it("runs no released step, and still ends the process: the listener stays, so no signal is lost", async () => {
+		const step = vi.fn()
+		hold(step)()
+		await deliver("SIGINT")
+		expect([step.mock.calls, kill.calls()]).toEqual([[], [[process.pid, "SIGINT"]]])
+	})
+})
+
+describe("a signal, on what comb holds and with a host listening", () => {
+	const kill = stubKill()
+
+	it("removes a held scratch, and the steps onSignals holds", async () => {
+		const scratch = scratchDir("comb-cleanup-signal-")
+		const cleanup = vi.fn(async () => undefined)
+		await onSignals(cleanup, async () => deliver("SIGTERM"))
+		expect([fs.existsSync(scratch.dir), cleanup.mock.calls.length]).toEqual([false, 1])
+		scratch.remove()
 	})
 
 	it("leaves the end to a host that listens for the signal itself", async () => {
 		const host = vi.fn()
 		process.on("SIGTERM", host)
+		for (const listener of worker.SIGTERM) process.off("SIGTERM", listener)
 		try {
-			const cleanup = vi.fn(async () => undefined)
-			await onSignals(cleanup, async () => {
-				process.emit("SIGTERM", "SIGTERM")
-				await new Promise((resolve) => setImmediate(resolve))
-			})
-			expect([cleanup.mock.calls.length, host.mock.calls.length, kill.mock.calls]).toEqual([1, 1, []])
+			const step = vi.fn()
+			const release = hold(step)
+			process.emit("SIGTERM", "SIGTERM")
+			await settle()
+			release()
+			expect([step.mock.calls.length, host.mock.calls.length, kill.calls()]).toEqual([1, 1, []])
 		} finally {
 			process.off("SIGTERM", host)
+			for (const listener of worker.SIGTERM) process.on("SIGTERM", listener)
 		}
 	})
 })

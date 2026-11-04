@@ -1037,15 +1037,11 @@ export type ScratchDb = LocalDb & {
 export type ScratchEngine = "libsql" | "runtime";
 /** A new in-memory database on the runtime comb runs on */
 export declare function openMemory(): Promise<LocalDb>;
-/** How old a scratch directory is before a later run reads it as one a killed run left: no run holds one this long */
-export declare const SCRATCH_STALE_MS: number;
-/** Remove the scratch directories killed runs of this user left in `dir`; one another user owns, or one in use, stays */
-export declare function sweepScratch(dir?: string, now?: number): void;
 /**
  * A new scratch database on `engine`, that only this process can reach: on the runtime's, a file in a
  * directory of its own that only this user can open (0700), removed with it on close; on libsql's, a
- * database in memory. The first file a process opens sweeps what killed runs left, so a run killed
- * before its close leaves its directory only until a later run's sweep.
+ * database in memory. SIGINT and SIGTERM remove the directory too, and a process killed past both
+ * leaves it only until the next process's first scratch, which sweeps it (S2 of r22).
  */
 export declare function openScratch(engine?: ScratchEngine): Promise<ScratchDb>;
 

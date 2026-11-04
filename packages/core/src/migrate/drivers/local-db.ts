@@ -5,9 +5,8 @@
  * on a fresh connection, as each one applies, and its connection settings end with it (S1 of r21).
  */
 import { randomUUID } from "node:crypto"
-import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
+import { scratchDir } from "../core/cleanup.ts"
 
 /** What comb does with a private database */
 export type LocalDb = {
@@ -69,39 +68,13 @@ export async function openMemory(): Promise<LocalDb> {
 
 const SCRATCH = "comb-scratch-"
 
-/** How old a scratch directory is before a later run reads it as one a killed run left: no run holds one this long */
-export const SCRATCH_STALE_MS: number = 6 * 60 * 60_000
-
-/** Remove the scratch directories killed runs of this user left in `dir`; one another user owns, or one in use, stays */
-export function sweepScratch(dir: string = os.tmpdir(), now: number = Date.now()): void {
-	const uid = process.getuid?.()
-	for (const name of fs.readdirSync(dir)) {
-		if (!name.startsWith(SCRATCH)) continue
-		const full = path.join(dir, name)
-		try {
-			const stat = fs.statSync(full)
-			if ((uid === undefined || stat.uid === uid) && now - stat.mtimeMs > SCRATCH_STALE_MS)
-				fs.rmSync(full, { force: true, recursive: true })
-		} catch {
-			// reason: another run removed it first, or it is not ours to remove; either way nothing is left to do
-		}
-	}
-}
-
-// per-process-constant: the sweep runs once a process, at its first scratch
-let swept = false
-
 /** Where a scratch's database lives, as its connections open it, and how it goes once they are done */
 type Place = { name: string; release(): void }
 
-/** A file in a directory of its own that only this user can open (0700), removed with it */
+/** A file in a scratch directory of its own (cleanup.ts), removed with it */
 function filePlace(): Place {
-	if (!swept) {
-		swept = true
-		sweepScratch()
-	}
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), SCRATCH))
-	return { name: path.join(dir, "copy.db"), release: () => fs.rmSync(dir, { force: true, recursive: true }) }
+	const { dir, remove } = scratchDir(SCRATCH)
+	return { name: path.join(dir, "copy.db"), release: remove }
 }
 
 /**
@@ -120,8 +93,8 @@ function memoryPlace(open: Open): Place {
 /**
  * A new scratch database on `engine`, that only this process can reach: on the runtime's, a file in a
  * directory of its own that only this user can open (0700), removed with it on close; on libsql's, a
- * database in memory. The first file a process opens sweeps what killed runs left, so a run killed
- * before its close leaves its directory only until a later run's sweep.
+ * database in memory. SIGINT and SIGTERM remove the directory too, and a process killed past both
+ * leaves it only until the next process's first scratch, which sweeps it (S2 of r22).
  */
 export async function openScratch(engine: ScratchEngine = "runtime"): Promise<ScratchDb> {
 	const open = await opener(engine)
