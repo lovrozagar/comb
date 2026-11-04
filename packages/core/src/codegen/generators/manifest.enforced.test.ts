@@ -83,8 +83,8 @@ function enforced(published: Published): Pick<ManifestColumn, "max" | "maxBytes"
 		max: bound(number ? "maximum" : "maxLength"),
 		maxBytes: bound("x-comb-maxBytes"),
 		min: bound(number ? "minimum" : "minLength"),
-		/* an email's own check is its format, which textKind names */
-		patterns: published["format"] === "email" ? [] : patternsOf(published),
+		/* an email's own check is zod's email pattern, which textKind names, published alone (A2-8 of r22) */
+		patterns: patternsOf(published).filter((pattern) => pattern !== z.regexes.email.source),
 	}
 }
 

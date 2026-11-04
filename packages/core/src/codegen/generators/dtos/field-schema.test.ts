@@ -167,7 +167,7 @@ describe("generateFieldSchema: JSON", () => {
 		/* a password column holds the hash, so it takes a required text's own rule (C1 of r21) */
 		expect(schema("pw", 'c.text("pw", { password: true }).notNull()', "create")).toBe("z.string().min(1)")
 		expect(schema("e", 'c.text("e", { email: true, min: 3, max: 50 }).notNull()', "create")).toBe(
-			'z.string().trim().toLowerCase().check(z.email()).min(6).max(50).meta(_m.email).meta({"x-comb-transform":["trim","lowercase"]})',
+			'z.string().trim().toLowerCase().check(z.email()).min(6).max(50).meta({ format: void 0 }).meta(_m.email).meta({"x-comb-transform":["trim","lowercase"]})',
 		)
 		expect(
 			generateFieldSchema(fieldOf("e", 'c.text("e", { email: true }, 80).notNull()', { length: 80 }), "read", {
@@ -175,7 +175,7 @@ describe("generateFieldSchema: JSON", () => {
 			}),
 		).toBe('z.string().meta(_m.email).meta({"x-comb-maxLength":80})')
 		expect(schema("u", 'c.text("u", { url: true }).notNull()', "create")).toBe(
-			'z.string().trim().check(z.url()).min(9).regex(/^https:\\/\\//u, { message: "Must be an HTTPS URL" }).meta({ format: "uri" }).meta(_m.url).meta({"x-comb-transform":["trim"]})',
+			'z.string().trim().check(z.url()).min(9).regex(/^https:\\/\\//u, { message: "Must be an HTTPS URL" }).meta(_m.url).meta({"x-comb-transform":["trim"]})',
 		)
 		expect(schema("n", 'c.text("n", { trim: true, lowercase: true, max: 20 }).notNull()', "update")).toBe(
 			'z.string().trim().toLowerCase().min(1).max(20).meta(_m.string).meta({"x-comb-transform":["trim","lowercase"]}).optional()',
@@ -262,7 +262,7 @@ describe("generateFieldSchema: what the 0.8.0 codegen review found (F1, F2, F15,
 
 	it("normalizes an email before validating it, on create and update (F15)", () => {
 		expect(schema("e", 'c.text("e", { email: true }).notNull()', "update")).toBe(
-			'z.string().trim().toLowerCase().check(z.email()).min(6).meta(_m.email).meta({"x-comb-transform":["trim","lowercase"]}).optional()',
+			'z.string().trim().toLowerCase().check(z.email()).min(6).meta({ format: void 0 }).meta(_m.email).meta({"x-comb-transform":["trim","lowercase"]}).optional()',
 		)
 	})
 
@@ -410,7 +410,7 @@ describe("generateFieldSchema: what a reference, a password and an email declare
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "create")).toBe(
 			/* a pattern decides what the value looks like, so it gets no example (F18) */
-			'z.string().trim().toLowerCase().check(z.email()).min(6).regex(/@corp\\.io$/u).meta({"x-comb-transform":["trim","lowercase"]})',
+			'z.string().trim().toLowerCase().check(z.email()).min(6).regex(/@corp\\.io$/u).meta({ format: void 0 }).meta({"x-comb-transform":["trim","lowercase"]})',
 		)
 		expect(of("m", 'c.text("m", { email: true, pattern: "/@corp\\\\.io$/" }).notNull()', "read")).toBe("z.string()")
 	})

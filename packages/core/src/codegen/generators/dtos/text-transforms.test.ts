@@ -55,10 +55,11 @@ describe("a written text's published transforms and what it parses to", () => {
 		expect(schema.parse(input)).toBe(applied)
 	})
 
-	it("publishes a url's trim, which is comb's own, with its format and https rule beside it", () => {
+	it("publishes a url's trim, which is comb's own, with its https rule beside it and no format (A2-8 of r22)", () => {
 		const schema = written("{ url: true }")
 		expect(published(schema)).toEqual(["trim"])
-		expect(z.toJSONSchema(schema, { io: "input" })).toMatchObject({ format: "uri", pattern: "^https:\\/\\/" })
+		expect(z.toJSONSchema(schema, { io: "input" })).toMatchObject({ pattern: "^https:\\/\\/" })
+		expect(z.toJSONSchema(schema, { io: "input" })).not.toHaveProperty("format")
 		expect(schema.safeParse("https://a.io/x\n").data).toBe("https://a.io/x")
 		expect(schema.safeParse("http://a.io").success).toBe(false)
 		expect(schema.safeParse(" not a url ").success).toBe(false)

@@ -42,7 +42,8 @@ const DECLARED = `
 	lower: c.text("lower", { lowercase: true, pattern: "/^[a-z]+$/" }),
 	label: c.text("label", { name: true }),
 	image: c.text("image", { imageUri: true }),
-	mail: c.text("mail", { email: true }),`
+	mail: c.text("mail", { email: true }),
+	site: c.text("site", { url: true }),`
 
 const PG = `import { bigint, bit, cidr, date, inet, interval, macaddr, macaddr8, numeric, time, timestamp, uuid } from "drizzle-orm/pg-core"
 export const parent = pgTable("parent", { id: c.id("par") })
@@ -200,6 +201,8 @@ const POOL = [
 	"bad@",
 	"ü@example.com",
 	"a😀@example.com",
+	/* A2-8 of r22: a hyphen ending a label, which zod's email takes and the email format refuses */
+	"a@b-.cc",
 	"10:00:00+02:00",
 	"10:00:00.123456+02:00",
 	/* A2-10: fractions at and past a precision of 3 and of 0, and a non-ASCII digit in one */
@@ -233,6 +236,8 @@ const POOL = [
 	"-3",
 	"data:image/png;base64,AA",
 	"https://example.com/a.png",
+	/* A2-8 of r22: a space in a path, which the WHATWG parser escapes and the uri format refuses */
+	"https://a/b c",
 	/* AA7 of r22: where ECMAScript's \s, RE2's and Rust's part, and where \d and \w do */
 	"a\u00a0b",
 	"row_\u00a0x",

@@ -113,7 +113,9 @@ const rangeChecks = ({ max, min }: TextRange): string =>
 /** A written email's bounds and the pattern it declares, checked after the format (F9) */
 function emailBounds(annotations: FieldConstraints, range: TextRange): string {
 	const pattern = annotations.pattern === null ? "" : `.regex(${annotations.pattern})`
-	return rangeChecks(range) + pattern
+	/* z.email() publishes its pattern, the check, beside format email, whose grammar refuses a@b-.cc
+	   the pattern takes: the pattern publishes alone (A2-8 of r22) */
+	return `${rangeChecks(range)}${pattern}.meta({ format: void 0 })`
 }
 
 /**
@@ -178,9 +180,9 @@ function textBounds(build: Build, range: TextRange): string {
 function writeChecks(annotations: FieldConstraints): string {
 	const pattern = annotations.pattern === null ? "" : `.regex(${annotations.pattern})`
 	const https = annotations.url ? `.regex(${HTTPS}, { message: "Must be an HTTPS URL" })` : ""
-	/* zod drops a url's format once a regex follows it; published again, a client refuses what z.url() does (F25) */
-	const format = annotations.url ? '.meta({ format: "uri" })' : ""
-	return pattern + https + kindChecks(annotations) + TEXT_GUARD + format
+	/* z.url() checks by the WHATWG parser, which takes https://a/b c that format uri refuses, and zod
+	   drops its format once a regex follows: the https pattern publishes, and no format (A2-8 of r22) */
+	return pattern + https + kindChecks(annotations) + TEXT_GUARD
 }
 
 /** A c.text or c.id column, or any other string column: what every builder before it left */
