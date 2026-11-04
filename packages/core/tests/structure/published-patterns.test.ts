@@ -150,6 +150,7 @@ const POOL = [
 	"-P1D",
 	"P1DT",
 	"PT1.5S",
+	"PT1.4S",
 	"PT1M",
 	"P1DT1H",
 	"1 day",
@@ -220,12 +221,20 @@ const re2Engine = Object.assign(
 	{ code: "re2" },
 )
 
+/*
+ * AA10 of r22: a reader checks `format` too. Its `duration` as ajv-formats 3 defines it, RFC 3339
+ * Appendix A, whose seconds take no fraction; the other formats a field publishes beside a pattern
+ * are checked by that pattern, which the lanes already hold
+ */
+const RFC3339_DURATION = /^P(?!$)((\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?|(\d+W)?)$/
+
 /** What a reader built from the published field takes: its transforms applied, then the schema */
 function readerOf(field: Node, defs: unknown, re2 = false): (value: string) => boolean {
 	const ajv = new Ajv2020({
 		logger: false,
 		strict: false,
-		validateFormats: false,
+		formats: { duration: RFC3339_DURATION },
+		validateFormats: true,
 		...(re2 ? { code: { regExp: re2Engine } } : {}),
 	})
 	const validate = ajv.compile({ ...field, $defs: defs ?? {} })
