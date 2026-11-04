@@ -374,3 +374,44 @@ describe("comb migrate diff on a D1 database", () => {
 		expect(readdirSync(join(dir, "m")).toSorted()).toEqual(before)
 	})
 })
+
+/** Runs `body` with `process.versions.bun` as `version`, none for undefined, whatever runtime runs the test */
+async function onBun(version: string | undefined, body: () => Promise<void>): Promise<void> {
+	const own = Object.getOwnPropertyDescriptor(process.versions, "bun")
+	if (version === undefined) Reflect.deleteProperty(process.versions, "bun")
+	else Object.defineProperty(process.versions, "bun", { configurable: true, enumerable: true, value: version })
+	try {
+		await body()
+	} finally {
+		if (own === undefined) Reflect.deleteProperty(process.versions, "bun")
+		else Object.defineProperty(process.versions, "bun", own)
+	}
+}
+
+/* D2-14 of the area D round-two review: drizzle-kit runs on comb's runtime, and on Node it cannot load a JSON config */
+describe("comb migrate diff: a drizzle.config.json", () => {
+	it("is refused on Node before anything runs, naming the .ts to write instead, and diffs on Bun", async () => {
+		const dir = project()
+		const file = join(dir, "drizzle.config.json")
+		writeFileSync(file, '{ "dialect": "sqlite" }\n')
+		await onBun(undefined, async () => {
+			const run = fakeAtlas(() => undefined)
+			const io = makeIo(dir, run)
+			expect(await runCliWithFakes(["migrate", "diff", "core"], io)).toBe(1)
+			expect({ calls: run.calls, errors: io.errors }).toEqual({
+				calls: [],
+				errors: [
+					`${file} is JSON, which drizzle-kit cannot load when comb runs on Node: write it as drizzle.config.ts, export default the same object, or run comb on Bun`,
+				],
+			})
+		})
+		await onBun("1.3.0", async () => {
+			const io = makeIo(
+				dir,
+				fakeAtlas(() => undefined),
+			)
+			expect(await runCliWithFakes(["migrate", "diff", "core"], io)).toBe(0)
+			expect(io.outputs).toEqual(["Schema is already in sync — no migration needed"])
+		})
+	})
+})
