@@ -3,6 +3,8 @@
  * but an argv comb refused printed nothing there. Wherever `--json` is in argv, a refusal of the
  * argv itself is reported as that object too, its database null as none was read.
  */
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeIo, projects, runCliWithFakes } from "./__fixtures__/io.ts"
 
@@ -37,5 +39,27 @@ describe("migrate apply, check and status --json on an argv comb refuses", () =>
 		const io = makeIo(temp.make())
 		expect(await runCliWithFakes(["migrate", "status", "--json", "--help"], io)).toBe(0)
 		expect(io.outputs.join("\n")).toMatch(/^Usage: comb migrate status/)
+	})
+})
+
+/* D4-1 of the area D round-four review: an embedder's run may throw anything, and --json still reports it */
+describe("migrate apply --json when the run throws a value that is not an Error", () => {
+	it("reports the value in refused, as the one JSON object on stdout, exiting 1", async () => {
+		const dir = temp.make()
+		writeFileSync(
+			join(dir, "comb.migrate.config.ts"),
+			'export default { databases: { core: { migrationsDir: "m", name: "core", provider: { type: "libsql", url: "file:core.db" } } } }\n',
+		)
+		mkdirSync(join(dir, "m"))
+		writeFileSync(join(dir, "m", "20260101000000_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n")
+		writeFileSync(join(dir, "m", "atlas.sum"), "h1:x\n20260101000000_init.sql h1:y\n")
+		const io = makeIo(dir, () => {
+			throw "spawn exploded"
+		})
+		expect(await runCliWithFakes(["migrate", "apply", "core", "--json", "--yes"], io)).toBe(1)
+		expect(io.outputs.map((line) => JSON.parse(line) as unknown)).toEqual([
+			{ applied: [], database: "core", pending: [], refused: ["spawn exploded"], unknown: [] },
+		])
+		expect(io.errors).toEqual(["spawn exploded"])
 	})
 })
