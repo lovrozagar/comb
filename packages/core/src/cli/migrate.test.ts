@@ -1,49 +1,15 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { ATLAS_RANGE, type Run, type RunResult } from "../migrate/core/process.ts"
+import { ATLAS_RANGE, type Run } from "../migrate/core/process.ts"
 import { fakeAtlas as hashingAtlas, writeSum } from "./__fixtures__/d1.ts"
-import { makeIo, ok, projects, runCliWithFakes, writeTables } from "./__fixtures__/io.ts"
+import { makeIo, projects, runCliWithFakes, writeTables } from "./__fixtures__/io.ts"
+import { diffProject, fakeAtlas } from "./__fixtures__/diff.ts"
 import { help } from "./run.ts"
 
 const temp = projects()
 const project = temp.make
 afterEach(temp.clean)
-
-/** A project a diff runs in: its drizzle config written, as migrate init writes one */
-function diffProject(): string {
-	const dir = project()
-	writeFileSync(join(dir, "drizzle.config.ts"), 'export default { dialect: "sqlite" }\n')
-	return dir
-}
-
-const dirArg = (args: readonly string[]) => (args[args.indexOf("--dir") + 1] as string).replace("file://", "")
-
-/**
- * Atlas as the migrate commands drive it: `migrate hash` writes atlas.sum from the directory's
- * files, `migrate diff` hands the directory it replays to `diff`; drizzle-kit exports SCHEMA.
- */
-function fakeAtlas(diff: (dir: string) => RunResult | undefined | void): Run & { calls: string[][] } {
-	const calls: string[][] = []
-	const run: Run = (cmd, args) => {
-		calls.push([cmd, ...args])
-		if (cmd === process.execPath) return ok("CREATE TABLE post (id TEXT PRIMARY KEY);")
-		if (args[0] === "version") return ok("atlas version v1.3.0")
-		const dir = dirArg(args)
-		if (args[1] === "hash") {
-			writeFileSync(
-				join(dir, "atlas.sum"),
-				readdirSync(dir)
-					.filter((f) => f.endsWith(".sql"))
-					.sort()
-					.join("\n"),
-			)
-			return ok()
-		}
-		return diff(dir) ?? ok()
-	}
-	return Object.assign(run, { calls })
-}
 
 describe("comb migrate", () => {
 	it("prints the help for help or --help, and refuses no subcommand with it", async () => {
@@ -180,7 +146,7 @@ describe("comb migrate diff", () => {
 	})
 
 	it("writes the migration Atlas generates, under the name given", async () => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		const run = fakeAtlas((replayed) =>
 			writeFileSync(join(replayed, "20260101000000_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n"),
 		)
@@ -194,7 +160,7 @@ describe("comb migrate diff", () => {
 describe("comb migrate diff on a configured drizzle config", () => {
 	/* r18 S5: a directory exists too, and drizzle-kit fails on it with words that name no field */
 	it("refuses a configured drizzleConfigPath that is a directory", async () => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
 			'export default { databases: { core: { migrationsDir: "./m", drizzleConfigPath: ".", name: "core", provider: { type: "libsql", url: "file:x.db" } } } }\n',
@@ -214,7 +180,7 @@ describe("comb migrate diff: what Atlas says as it succeeds", () => {
 		"Skipped triggers, functions, stored procedures, and other advanced objects. Atlas Pro includes them in the diff."
 
 	it("is a warning, whether Atlas wrote a migration or found the schema in sync", async () => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		const wrote = makeIo(
 			dir,
 			fakeAtlas((replayed) => {
@@ -234,66 +200,11 @@ describe("comb migrate diff: what Atlas says as it succeeds", () => {
 	})
 })
 
-describe("comb migrate diff --dry-run", () => {
-	it("writes nothing: exit 0 in sync, exit 1 printing the SQL a diff would write", async () => {
-		const dir = diffProject()
-		const run = fakeAtlas((replayed) =>
-			writeFileSync(join(replayed, "20260101000000_init.sql"), "CREATE TABLE post (id TEXT PRIMARY KEY);\n"),
-		)
-		const drift = makeIo(dir, run)
-		expect(await runCliWithFakes(["migrate", "diff", "core", "--dry-run"], drift)).toBe(1)
-		expect(drift.outputs).toEqual(["-- 20260101000000_init.sql", "CREATE TABLE post (id TEXT PRIMARY KEY);\n"])
-		expect(drift.errors).toEqual([
-			"core has drifted from its migrations: comb migrate diff core would write the SQL above",
-		])
-		expect(readdirSync(dir)).toEqual(["drizzle.config.ts"])
-		mkdirSync(join(dir, "atlas-migrations"))
-		writeFileSync(join(dir, "atlas-migrations", "1_init.sql"), "SELECT 1;\n")
-		const synced = makeIo(
-			dir,
-			fakeAtlas(() => undefined),
-		)
-		expect(await runCliWithFakes(["migrate", "diff", "core", "--dry-run"], synced)).toBe(0)
-		expect(synced.outputs).toEqual(["Schema is already in sync — no migration needed"])
-		expect(readdirSync(join(dir, "atlas-migrations"))).toEqual(["1_init.sql"])
-	})
-
-	/* KC2 of r22b: 0.20 diffed a new ./atlas-migrations against no history, whatever comb.migrate.config.ts said */
-	it("refuses no database named, with its usage, writing nothing", async () => {
-		const dir = diffProject()
-		const run = fakeAtlas((replayed) => writeFileSync(join(replayed, "20260101000000_x.sql"), "SELECT 1;\n"))
-		const io = makeIo(dir, run)
-		expect(await runCliWithFakes(["migrate", "diff", "--dry-run"], io)).toBe(1)
-		expect(io.errors).toEqual(["Usage: comb migrate diff <database> [name] [-e <name>] [--dry-run]"])
-		expect({ calls: run.calls, files: readdirSync(dir) }).toEqual({ calls: [], files: ["drizzle.config.ts"] })
-	})
-
-	it("diffs an empty copy when there is no migrations directory", async () => {
-		const dir = diffProject()
-		const run = fakeAtlas((replayed) => writeFileSync(join(replayed, "20260101000000_x.sql"), "SELECT 1;\n"))
-		const io = makeIo(dir, run)
-		expect(await runCliWithFakes(["migrate", "diff", "core", "--dry-run"], io)).toBe(1)
-		expect(io.errors).toEqual([
-			"core has drifted from its migrations: comb migrate diff core would write the SQL above",
-		])
-		expect(readdirSync(dir)).toEqual(["drizzle.config.ts"])
-	})
-
-	it("says when the schema is already in sync", async () => {
-		const io = makeIo(
-			diffProject(),
-			fakeAtlas(() => undefined),
-		)
-		expect(await runCliWithFakes(["migrate", "diff", "core"], io)).toBe(0)
-		expect(io.outputs).toEqual(["Schema is already in sync — no migration needed"])
-	})
-})
-
 describe("comb migrate diff: its options", () => {
 	/* AD7 of the area D review: an option is refused, never dropped (P17 of r18), as status refuses this one */
 	it("refuses -e with no comb.migrate.config.ts to define it, running nothing", async () => {
 		const atlas = fakeAtlas(() => undefined)
-		const io = makeIo(diffProject(), atlas)
+		const io = makeIo(diffProject(project), atlas)
 		expect(await runCliWithFakes(["migrate", "diff", "core", "-e", "prod"], io)).toBe(1)
 		expect(io.errors).toEqual(["-e/--env needs comb.migrate.config.ts to define environments"])
 		expect(atlas.calls).toEqual([])
@@ -302,7 +213,7 @@ describe("comb migrate diff: its options", () => {
 
 describe("comb migrate diff: the config it reads", () => {
 	it("fails migrate diff when the config's FTS cannot be read, instead of diffing without it (S-12)", async () => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		writeFileSync(
 			join(dir, "comb.config.ts"),
 			'export default { databases: { core: { fts: { post: { columns: ["title"] } }, tables: "./missing.tables.ts" } } }\n',
@@ -316,7 +227,7 @@ describe("comb migrate diff: the config it reads", () => {
 	})
 
 	it("refuses migrate diff for a database the config does not declare", async () => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		writeTables(dir)
 		writeFileSync(
 			join(dir, "comb.config.ts"),
@@ -333,7 +244,7 @@ describe("comb migrate diff: the config it reads", () => {
 
 describe("comb migrate diff: through comb.migrate.config.ts", () => {
 	it("writes into the database's configured migrations directory, relative to the config", async () => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		mkdirSync(join(dir, "db", "m"), { recursive: true })
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
@@ -350,7 +261,7 @@ describe("comb migrate diff: through comb.migrate.config.ts", () => {
 
 describe("comb migrate diff: a Postgres database through comb.migrate.config.ts", () => {
 	it("diffs a Postgres database with its drizzle config, scoped to its schema, its dev URL in the environment", async () => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		writeFileSync(join(dir, "drizzle.pg.ts"), 'export default { dialect: "postgresql" }\n')
 		writeFileSync(
 			join(dir, "comb.migrate.config.ts"),
@@ -403,7 +314,7 @@ const MIGRATE = (codegen: string) =>
 
 describe("comb migrate diff: the name apply and check take (C7)", () => {
 	it("takes a migrate name and reads FTS from the comb.config.ts database it maps to", async () => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		mkdirSync(join(dir, "m"), { recursive: true })
 		writeFileSync(join(dir, "comb.migrate.config.ts"), MIGRATE('codegen: "shard", '))
 		writeFileSync(
@@ -420,7 +331,7 @@ describe("comb migrate diff: the name apply and check take (C7)", () => {
 	})
 
 	it("says how to map a migrate name comb.config.ts does not declare", async () => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		mkdirSync(join(dir, "m"), { recursive: true })
 		writeFileSync(join(dir, "comb.migrate.config.ts"), MIGRATE(""))
 		writeFileSync(
@@ -444,7 +355,7 @@ describe("comb migrate diff on a D1 database", () => {
 		[{ ".2_b.sql": "CREATE TABLE b (id TEXT);" }, ".2_b.sql starts with a dot"],
 		[{ "9_b.sql": "CREATE TABLE b (id TEXT);", "10_c.sql": "CREATE TABLE c (id TEXT);" }, "10_c.sql runs after"],
 	])("refuses a directory wrangler lists otherwise than Atlas, writing nothing", async (extra, message) => {
-		const dir = diffProject()
+		const dir = diffProject(project)
 		mkdirSync(join(dir, "m"), { recursive: true })
 		for (const [name, sql] of Object.entries({ "1_init.sql": "CREATE TABLE a (id TEXT);", ...extra }))
 			writeFileSync(join(dir, "m", name), sql)

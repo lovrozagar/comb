@@ -14,7 +14,7 @@ import {
 	statedDialect,
 } from "./drizzle-dialect.ts"
 import { migrateApply, needPeers } from "./migrate-apply.ts"
-import { type MigrateTarget, refuseBlank, resolveMigrateTarget } from "./migrate-target.ts"
+import { type MigrateTarget, refuseBlank, refuseNoDir, resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliContext } from "./output.ts"
 
 const DRIZZLE_CONFIG = `import { defineConfig } from "drizzle-kit"
@@ -106,6 +106,8 @@ async function migrateDiff(argv: readonly string[], io: CliContext): Promise<voi
 	const [db, name] = args.positionals as [string, string?]
 	const env = args.options["env"] as string | undefined
 	const { d1, expected, exported, fts, migrationsDir, pg, provider, target } = await diffTarget(db, env, io)
+	/* a diff starts a missing directory, and refuses a file before anything runs (D2-7 of the area D round-two review) */
+	refuseNoDir(migrationsDir, { allowMissing: true })
 	/* Atlas diffs on the dev database (AD9 of the area D review) */
 	if (target?.provider.type === "postgres") refuseBlank(target, { devUrl: target.provider.devUrl })
 	/* every peer the diff needs, Atlas and a declared FTS's ts-morph among them, before Atlas or drizzle-kit runs (K1 of r21, KC3 of r22) */
@@ -119,9 +121,7 @@ async function migrateDiff(argv: readonly string[], io: CliContext): Promise<voi
 	const dryRun = args.options["dry-run"] === true
 	/* a Postgres diff reads the history and the export as the statements Postgres runs (M75) */
 	if (dialect === "postgres") await (await import("../migrate/core/pg-parser.ts")).loadPostgresParser()
-	/* a dry run diffs a copy, since a diff writes its file and rehashes atlas.sum */
-	const dir = dryRun ? copyOf(migrationsDir) : migrationsDir
-	try {
+	await diffIn(migrationsDir, dryRun, async (dir) => {
 		const { files, notices, synced } = await generateIncrementalMigration({
 			dialect,
 			ftsSql: fts === undefined ? undefined : await ftsSql(io.cwd, fts, io),
@@ -137,8 +137,22 @@ async function migrateDiff(argv: readonly string[], io: CliContext): Promise<voi
 		if (synced) io.out("Schema is already in sync — no migration needed")
 		else if (dryRun) reportDrift(db, files, io)
 		else for (const file of files) io.out(`Generated: ${file}`)
+	})
+}
+
+/**
+ * Runs `diff` on the directory it writes in: `migrationsDir` itself, or for a dry run a private
+ * copy, since a diff writes its file and rehashes atlas.sum. The copy is empty when there is no
+ * directory, and removed however the copying or the diff ends (D2-7 of the area D round-two review).
+ */
+async function diffIn(migrationsDir: string, dryRun: boolean, diff: (dir: string) => Promise<void>): Promise<void> {
+	if (!dryRun) return diff(migrationsDir)
+	const copy = fs.mkdtempSync(path.join(os.tmpdir(), "comb-migrate-dry-run-"))
+	try {
+		if (fs.existsSync(migrationsDir)) fs.cpSync(migrationsDir, copy, { recursive: true })
+		await diff(copy)
 	} finally {
-		if (dryRun) fs.rmSync(dir, { force: true, recursive: true })
+		fs.rmSync(copy, { force: true, recursive: true })
 	}
 }
 
@@ -216,13 +230,6 @@ function reportDrift(db: string, files: readonly string[], io: CliContext): neve
 		io.out(fs.readFileSync(file, "utf8"))
 	}
 	throw new CliError(`${db} has drifted from its migrations: comb migrate diff ${db} would write the SQL above`)
-}
-
-/** A private copy of the migrations directory, empty when there is none */
-function copyOf(dir: string): string {
-	const copy = fs.mkdtempSync(path.join(os.tmpdir(), "comb-migrate-dry-run-"))
-	if (fs.existsSync(dir)) fs.cpSync(dir, copy, { recursive: true })
-	return copy
 }
 
 export async function cmdMigrate(argv: readonly string[], io: CliContext, help: string): Promise<void> {

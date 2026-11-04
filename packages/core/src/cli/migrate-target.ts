@@ -149,9 +149,16 @@ function refuseBlank(
 	}
 }
 
-/** Refuse `dir` unless it is a directory: one missing, or a file --dir names, which reading it would fail on as ENOTDIR (AD10 of the area D review) */
-function refuseNoDir(dir: string): void {
-	if (!fs.existsSync(dir)) throw new CliError(`Migrations dir not found: ${dir}`)
+/**
+ * Refuse `dir` unless it is a directory: one missing, or a file --dir names, which reading it would
+ * fail on as ENOTDIR (AD10 of the area D review). `allowMissing` takes a missing one, which a diff
+ * starts (D2-7 of the area D round-two review).
+ */
+function refuseNoDir(dir: string, { allowMissing = false }: { allowMissing?: boolean | undefined } = {}): void {
+	if (!fs.existsSync(dir)) {
+		if (allowMissing) return
+		throw new CliError(`Migrations dir not found: ${dir}`)
+	}
 	if (!fs.statSync(dir).isDirectory()) throw new CliError(`Migrations dir ${dir} is not a directory`)
 }
 
