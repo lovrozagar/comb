@@ -6,7 +6,9 @@ import { dirname, join } from "node:path/posix"
  * own; a named or default import, under its own name or another; a namespace import read as
  * `A.Name`; through an export list, a default export, a re-export or a barrel's `export *`. An import
  * resolves through the one file its relative specifier names, as written; a package's names no file
- * of src. Paths are posix, as the rule keys every file.
+ * of src. Paths are posix, as the rule keys every file. A namespace re-export, `export * as N from`,
+ * resolves to nothing: a name imported from it and read as `N.Name` finds no generic, so its type
+ * arguments flow as written. src holds no such re-export.
  */
 
 /* the declarations that are a generic alias or interface */
