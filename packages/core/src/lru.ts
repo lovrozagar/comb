@@ -66,12 +66,13 @@ class LruCache<K, V> {
 			return undefined
 		}
 
-		if (Date.now() > entry.softExpiry) {
-			if (Date.now() > entry.hardExpiry) {
-				this.cache.delete(key)
-			}
+		/* hard first: no read serves an entry past it (QE3 of r22b) */
+		const now = Date.now()
+		if (now > entry.hardExpiry) {
+			this.cache.delete(key)
 			return undefined
 		}
+		if (now > entry.softExpiry) return undefined
 
 		/* move to end (most recently used) by deleting and re-inserting */
 		this.cache.delete(key)
@@ -127,10 +128,11 @@ class LruCache<K, V> {
 		}
 
 		if (!isPositive(ttlMs)) throw new RangeError(`LruCache ttlMs must be positive, got ${ttlMs}`)
-		/* a soft TTL past the hard one would let get serve what getWithMeta has already evicted */
+		/* a soft TTL past the hard one, or none beside it, would let get serve what getWithMeta has
+		   already evicted: with a hard TTL, no soft one means fresh until the hard expiry (QE3 of r22b) */
 		const requested = ttlMs ?? this.ttlMs
 		const effectiveSoftTtl =
-			requested !== undefined && this.hardTtlMs !== undefined ? Math.min(requested, this.hardTtlMs) : requested
+			this.hardTtlMs === undefined ? requested : Math.min(requested ?? this.hardTtlMs, this.hardTtlMs)
 		const now = Date.now()
 		const softExpiry = effectiveSoftTtl ? now + effectiveSoftTtl : Number.POSITIVE_INFINITY
 		const hardExpiry = this.hardTtlMs ? now + this.hardTtlMs : softExpiry
@@ -161,12 +163,12 @@ class LruCache<K, V> {
 			return false
 		}
 
-		if (Date.now() > entry.softExpiry) {
-			if (Date.now() > entry.hardExpiry) {
-				this.cache.delete(key)
-			}
+		const now = Date.now()
+		if (now > entry.hardExpiry) {
+			this.cache.delete(key)
 			return false
 		}
+		if (now > entry.softExpiry) return false
 
 		return true
 	}

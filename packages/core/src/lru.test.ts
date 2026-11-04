@@ -197,3 +197,35 @@ describe("LruCache — a per-key TTL (E-S3)", () => {
 		expect(cache.getWithMeta("long")).toBeUndefined()
 	})
 })
+
+/* QE3 of r22b: with no soft TTL the soft expiry was Infinity, and get and has read the hard one only past it */
+describe("LruCache — a hard TTL alone (QE3 of r22b; sibling: has)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	it("serves an entry fresh until its hard TTL, then evicts it on every read", () => {
+		const cache = new LruCache<string, string>({ hardTtlMs: 100, maxSize: 10 })
+		cache.set("k", "v")
+		vi.advanceTimersByTime(100)
+		expect([cache.get("k"), cache.has("k"), cache.getWithMeta("k")]).toEqual(["v", true, { stale: false, value: "v" }])
+		vi.advanceTimersByTime(400)
+		expect(cache.has("k")).toBe(false)
+		expect(cache.size).toBe(0)
+		cache.set("k", "v")
+		vi.advanceTimersByTime(500)
+		expect(cache.get("k")).toBeUndefined()
+		expect(cache.size).toBe(0)
+	})
+
+	it("evicts past the hard TTL on get and has, whatever the soft TTL", () => {
+		const cache = new LruCache<string, string>({ hardTtlMs: 100, maxSize: 10, ttlMs: 50 })
+		cache.set("a", "v")
+		cache.set("b", "v")
+		vi.advanceTimersByTime(500)
+		expect([cache.get("a"), cache.has("b"), cache.size]).toEqual([undefined, false, 0])
+	})
+})
