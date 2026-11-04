@@ -9,8 +9,7 @@
  * and hash alone. Apply and baseline adopt only once the schema holds what replaying the prefix
  * leaves, its tables and every kind COMPARED names (pg-live-catalog.ts's ARM_KINDS) (P2 of the 0.14.1 review, P9 of 0.15.0, P10 of r18, P12 of r19).
  */
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { copyFileSync } from "node:fs"
 import { join } from "node:path"
 import { sqlFiles, sumHashes } from "./atlas-dir.ts"
 import { type AtlasStatus, versionOf } from "./atlas-history.ts"
@@ -20,6 +19,7 @@ import { loadPostgresParser } from "./pg-parser.ts"
 import { type ObjectsCompare, refuseDrift, refuseObjectDrift } from "./baseline-compare.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import type { Run } from "./process.ts"
+import { scratchDir } from "./cleanup.ts"
 
 /** The files of the snapshot `copy` that 0.12's `shared` history ran; refused when it ran them otherwise */
 function sharedPrefix(shared: AtlasStatus, copy: string): string[] {
@@ -69,7 +69,7 @@ async function proveAdoption(
 	await loadPostgresParser()
 	const { schema } = options.target
 	await replayed(() => (options.readyDev ?? readyDevSchema)(options.target), schema, ran)
-	const prefix = mkdtempSync(join(tmpdir(), "comb-adopt-"))
+	const { dir: prefix, remove: removePrefix } = scratchDir("comb-adopt-")
 	try {
 		for (const name of ran) copyFileSync(join(copy, name), join(prefix, name))
 		const refusal = `${schema} does not hold what 0.12's shared history ran (${ran.join(", ")}), so comb adopts none of it`
@@ -79,7 +79,7 @@ async function proveAdoption(
 			options.print(`Warning: Atlas: ${notice}`)
 		for (const warning of warnings()) options.print(warning)
 	} finally {
-		rmSync(prefix, { force: true, recursive: true })
+		removePrefix()
 	}
 }
 

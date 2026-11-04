@@ -7,18 +7,7 @@
  * has no fts5 module; fts-migration.ts), on Postgres the views, policies, sequences, roles and
  * extensions Atlas OSS refuses (pg-objects.ts).
  */
-import {
-	copyFileSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	renameSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs"
-import { tmpdir } from "node:os"
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
 import { freshVersion, hashDir, nextVersion, sqlFiles, verifySum } from "./atlas-dir.ts"
@@ -33,6 +22,7 @@ import { devPrelude, emptyPgObjects, pgDelta, separatePgObjects, wrapAtlasFile }
 import { atlasFile, pgStatements } from "./pg-split.ts"
 import { atlasHeader } from "./atlas-header.ts"
 import { type Run, run } from "./process.ts"
+import { scratchDir } from "./cleanup.ts"
 
 export type MigrateDiffOptions = {
 	dialect: Dialect
@@ -91,7 +81,7 @@ function afterHistory(dir: string, history: readonly string[], added: readonly s
 
 /** The files `atlas migrate diff` adds to `dir` for the target; none when it is in sync */
 function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[] {
-	const work = mkdtempSync(join(tmpdir(), "comb-migrate-diff-"))
+	const { dir: work, remove: removeWork } = scratchDir("comb-migrate-diff-")
 	try {
 		const target = join(work, "schema.sql")
 		writeFileSync(target, schema)
@@ -116,7 +106,7 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 			.sort()
 		return afterHistory(dir, [...before], added)
 	} finally {
-		rmSync(work, { force: true, recursive: true })
+		removeWork()
 	}
 }
 
@@ -124,7 +114,7 @@ function atlasDiff(atlas: Atlas, dir: string, { name, schema }: Target): string[
 function diffWithFts(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 	verifySum(atlas.exec, options.migrationsDir)
 	const groups = new Set<string>()
-	const copy = mkdtempSync(join(tmpdir(), "comb-migrate-history-"))
+	const { dir: copy, remove: removeCopy } = scratchDir("comb-migrate-history-")
 	try {
 		let history: FtsState = new Map()
 		/* the schema the whole history leaves, FTS triggers included, which the rebuild guard reads */
@@ -144,7 +134,7 @@ function diffWithFts(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 		const transform = (sql: string) => applySqliteMigrationTransforms(sql, before, history)
 		return finish({ added, atlas, copy, fts, options, plainDiff, transform })
 	} finally {
-		rmSync(copy, { force: true, recursive: true })
+		removeCopy()
 	}
 }
 
@@ -181,7 +171,7 @@ function finish({ added, atlas, copy, fts, options, plainDiff, transform }: Fini
 function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 	const { migrationName, migrationsDir } = options
 	verifySum(atlas.exec, migrationsDir)
-	const copy = mkdtempSync(join(tmpdir(), "comb-migrate-history-"))
+	const { dir: copy, remove: removeCopy } = scratchDir("comb-migrate-history-")
 	try {
 		const history = emptyPgObjects()
 		const plain = sqlFiles(migrationsDir).map((file) => {
@@ -209,7 +199,7 @@ function diffPostgres(atlas: Atlas, options: MigrateDiffOptions): Diffed {
 		const names = [...written.map(([name]) => name), ...added.slice(1)]
 		return { files: names.map((file) => join(migrationsDir, file)), synced: false }
 	} finally {
-		rmSync(copy, { force: true, recursive: true })
+		removeCopy()
 	}
 }
 

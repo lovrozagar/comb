@@ -1,8 +1,8 @@
 import type { LiveObjects } from "./pg-live-types.ts"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { createClient } from "@libsql/client"
 import { libsqlConnection } from "../__fixtures__/libsql-connection.ts"
 import { createLibsqlProvider } from "../drivers/sqlite.ts"
@@ -72,6 +72,27 @@ describe("refuseDrift: the Postgres database against its replayed history", () =
 		expect(() => refuseDrift({ exec: drifted, target: target("synced") }, join(dir, "m"))).toThrow(
 			'the difference:\n-- Modify "a" table: ***\nALTER TABLE "a" ADD COLUMN "x" int;',
 		)
+	})
+})
+
+/* KC5 of r22b: the replayable history is a scratch of its own, gone when writing it fails as when the diff ends */
+/** atlas refusing to hash a directory, and answering anything else with nothing */
+const hashRefused: Run = (_cmd, args) =>
+	args[1] === "hash" ? { code: 1, stderr: "hash refused", stdout: "" } : { code: 0, stderr: "", stdout: "" }
+
+describe("refuseDrift's replayable history", () => {
+	it("leaves nothing in the temp directory when hashing it fails", () => {
+		writeFileSync(join(dir, "m", "1_a.sql"), 'CREATE TABLE "a" ("id" int);\n')
+		const tmp = mkdtempSync(join(dir, "tmp-"))
+		vi.stubEnv("TMPDIR", tmp)
+		try {
+			expect(() => refuseDrift({ exec: hashRefused, target: target("p") }, join(dir, "m"))).toThrow(
+				"atlas migrate hash failed: hash refused",
+			)
+			expect(readdirSync(tmp)).toEqual([])
+		} finally {
+			vi.unstubAllEnvs()
+		}
 	})
 })
 

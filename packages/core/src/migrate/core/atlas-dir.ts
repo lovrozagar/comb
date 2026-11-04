@@ -3,10 +3,10 @@
  * checksum Atlas keeps over them. comb hashes copies it hands Atlas, checks a directory's sum
  * against a fresh hash, and snapshots a directory, so Atlas applies exactly the bytes comb read.
  */
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { copyFileSync, existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Run } from "./process.ts"
+import { scratchDir } from "./cleanup.ts"
 
 /** The migration files of `dir`, in the order Atlas applies them */
 function sqlFiles(dir: string): string[] {
@@ -42,7 +42,7 @@ function verifySum(exec: Run, dir: string, shown: string = dir): void {
 			`${shown} has migrations but no atlas.sum; comb migrate diff writes a migration and its sum, and atlas migrate hash --dir file://${shown} hashes ones written by hand`,
 		)
 	}
-	const check = mkdtempSync(join(tmpdir(), "comb-migrate-sum-"))
+	const { dir: check, remove: removeCheck } = scratchDir("comb-migrate-sum-")
 	try {
 		for (const file of sqlFiles(dir)) copyFileSync(join(dir, file), join(check, file))
 		hashDir(exec, check)
@@ -52,7 +52,7 @@ function verifySum(exec: Run, dir: string, shown: string = dir): void {
 			)
 		}
 	} finally {
-		rmSync(check, { force: true, recursive: true })
+		removeCheck()
 	}
 }
 
@@ -62,14 +62,14 @@ function verifySum(exec: Run, dir: string, shown: string = dir): void {
  * nothing; the caller removes it.
  */
 function snapshotDir(exec: Run, dir: string): string {
-	const copy = mkdtempSync(join(tmpdir(), "comb-migrate-snapshot-"))
+	const { dir: copy, remove: removeCopy } = scratchDir("comb-migrate-snapshot-")
 	try {
 		const sum = existsSync(join(dir, "atlas.sum")) ? ["atlas.sum"] : []
 		for (const file of [...sqlFiles(dir), ...sum]) copyFileSync(join(dir, file), join(copy, file))
 		verifySum(exec, copy, dir)
 		return copy
 	} catch (error) {
-		rmSync(copy, { force: true, recursive: true })
+		removeCopy()
 		throw error
 	}
 }

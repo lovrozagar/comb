@@ -7,8 +7,7 @@
  * schema keeps its own history: public the shared `atlas_schema_revisions`, any other its own.
  */
 import { createHash } from "node:crypto"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { blank } from "../../blank.ts"
 import { scrubAtlasOutput } from "./atlas-secrets.ts"
@@ -18,6 +17,7 @@ import { passfileErrors } from "./pg-passfile.ts"
 import { libpqUrl, type LibpqUrl, queryParams, tlsProblems, urlProblem, withParam } from "./pg-url.ts"
 import { keyProblems, stripsForAtlas } from "./pg-url-keys.ts"
 import { lockTimeoutMs } from "./pg-lock-timeout.ts"
+import { scratchDir } from "./cleanup.ts"
 
 /** A Postgres database as Atlas reaches it: target, dev database, schema and lock wait */
 type PgTarget = { devUrl: string; lockTimeout: string; schema: string; url: string }
@@ -233,8 +233,7 @@ function refuseUrlProblems(target: PgTarget, needs: AtlasNeeds): void {
  */
 function withAtlasEnv<T>(target: PgTarget, needs: AtlasNeeds, body: (atlas: AtlasEnv) => T): T {
 	refuseUrlProblems(target, needs)
-	const dir = mkdtempSync(join(tmpdir(), "comb-atlas-"))
-	const remove = () => rmSync(dir, { force: true, recursive: true })
+	const { dir, remove } = scratchDir("comb-atlas-")
 	let pending = false
 	try {
 		/* a dev-only call reads no history, and may have no target URL to scope one by */

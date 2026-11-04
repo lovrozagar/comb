@@ -116,3 +116,45 @@ describe("comb migrate diff: its migrations dir", () => {
 		}
 	})
 })
+
+/* KC5 of r22b: a Ctrl-C mid dry run left its copy of the migrations dir in the temp directory */
+describe("comb migrate diff --dry-run stopped by a signal (KC5 of r22b; sibling: S2 of r22's proof scratch)", () => {
+	it.each([["SIGINT"], ["SIGTERM"]] as const)(
+		"on %s leaves nothing in the temp directory, then ends by it",
+		async (signal) => {
+			const dir = diffProject()
+			const tmp = project()
+			vi.stubEnv("TMPDIR", tmp)
+			const kill = vi.spyOn(process, "kill").mockImplementation(() => true)
+			/* the worker's own listeners stand aside, so comb's is the only one, as in the CLI's process */
+			const worker = process.listeners(signal)
+			process.removeAllListeners(signal)
+			try {
+				const seen: string[][] = []
+				const io = makeIo(
+					dir,
+					fakeAtlas(() => {
+						seen.push(readdirSync(tmp))
+						process.emit(signal, signal)
+					}),
+				)
+				await runCliWithFakes(["migrate", "diff", "core", "--dry-run"], io)
+				await new Promise((resolve) => setImmediate(resolve))
+				expect({
+					during: seen.map((names) => names.length > 0),
+					kill: kill.mock.calls,
+					left: readdirSync(tmp),
+				}).toEqual({
+					during: [true],
+					kill: [[process.pid, signal]],
+					left: [],
+				})
+			} finally {
+				kill.mockRestore()
+				vi.unstubAllEnvs()
+				process.removeAllListeners(signal)
+				for (const listener of worker) process.on(signal, listener)
+			}
+		},
+	)
+})

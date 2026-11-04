@@ -8,8 +8,7 @@
  * limits are the engine's, with no list of comb's to keep. A file whose text wrangler would rewrite is
  * refused before anything runs.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { refuseCompiled } from "./compiled.ts"
 import type { ProofInput, ProofResult } from "./d1-engine-child.mjs"
@@ -17,6 +16,7 @@ import { binEntry } from "./optional-peer.ts"
 import { type ProjectBin, type Run, run } from "./process.ts"
 import { copyScript, type LiveObject } from "./proof-copy.ts"
 import { quote } from "./proof-seed.ts"
+import { scratchDir } from "./cleanup.ts"
 
 /** A pending file: its name, and its text as the migrations directory holds it */
 type File = { name: string; sql: string }
@@ -109,7 +109,7 @@ async function proveOnD1(
 		"check proves the pending files in a child on wrangler's runtime, which cannot read the modules a Bun single-file executable embeds: run comb migrate with bun or node, not from a compiled executable",
 	)
 	for (const file of files) refuseRewritten(file)
-	const dir = mkdtempSync(join(tmpdir(), "comb-d1-proof-"))
+	const { dir, remove: removeDir } = scratchDir("comb-d1-proof-")
 	try {
 		const input = join(dir, "input.json")
 		const output = join(dir, "result.json")
@@ -125,7 +125,7 @@ async function proveOnD1(
 		const { refused } = JSON.parse(readFileSync(output, "utf8")) as ProofResult
 		if (refused !== undefined) throw new Error(refused)
 	} finally {
-		rmSync(dir, { force: true, recursive: true })
+		removeDir()
 	}
 }
 

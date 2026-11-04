@@ -1,8 +1,7 @@
 /**
  * Atlas CLI integration for schema diffing
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { existsSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Dialect } from "../types.ts"
 import { normalizeSqliteExport, sqliteDevUrl } from "./atlas-env.ts"
@@ -14,6 +13,7 @@ import { type ProjectBin, type Run, run, runPeer } from "./process.ts"
 import { codeOf, IDENT, QNAME, unquote } from "./sql-code.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { atlasFile, pgStatements } from "./pg-split.ts"
+import { scratchDir } from "./cleanup.ts"
 
 export { applySqliteMigrationTransforms } from "./atlas-env.ts"
 export { generateIncrementalMigration, type MigrateDiffOptions, type MigrateDiffResult } from "./migrate-diff.ts"
@@ -66,7 +66,7 @@ export async function generateSchemaDiff(options: SchemaDiffOptions): Promise<Sc
 		throw new Error("a Postgres diff needs a target (devUrl and schema)")
 	if (dialect === "postgres") await (options.readyDev ?? readyDevSchema)(target as PgTarget)
 
-	const tmpDir = mkdtempSync(join(tmpdir(), "comb-schema-diff-"))
+	const { dir: tmpDir, remove: removeTmpDir } = scratchDir("comb-schema-diff-")
 
 	const fromFile = join(tmpDir, "from.sql")
 	const toFile = join(tmpDir, "to.sql")
@@ -92,7 +92,7 @@ export async function generateSchemaDiff(options: SchemaDiffOptions): Promise<Sc
 			? { diff: null, notices, synced: true }
 			: { diff, notices, synced: false }
 	} finally {
-		rmSync(tmpDir, { force: true, recursive: true })
+		removeTmpDir()
 	}
 }
 

@@ -198,18 +198,21 @@ describe("loadSnapshot on a module stuck in a synchronous loop, with a process o
 		expect([alive(loader), alive(grandchild)]).toEqual([false, false])
 	})
 
-	it("leaves nothing when codegen is Ctrl-C'd while the module loads", async () => {
+	it("leaves nothing when codegen is Ctrl-C'd while the module loads, its scratch included (KC5 of r22b)", async () => {
 		const script = path.join(dir, "codegen.ts")
 		fs.writeFileSync(
 			script,
 			`import { loadSnapshot } from ${JSON.stringify(new URL("./load.ts", import.meta.url).pathname)}\nloadSnapshot(${JSON.stringify(stuckTables())})\n`,
 		)
 		/* a terminal's Ctrl-C signals the foreground group: codegen and its supervisor */
-		const codegen = spawn("bun", [script], { detached: true, stdio: "ignore" })
+		const tmp = fs.mkdtempSync(path.join(dir, "tmp-"))
+		const codegen = spawn("bun", [script], { detached: true, env: { ...process.env, TMPDIR: tmp }, stdio: "ignore" })
+		const ended = new Promise((resolve) => codegen.on("exit", resolve))
 		const { grandchild, loader } = await pidsOf()
 		process.kill(-(codegen.pid as number), "SIGINT")
-		await new Promise((r) => setTimeout(r, 1500))
-		expect([alive(codegen.pid as number), alive(loader), alive(grandchild)]).toEqual([false, false, false])
+		await ended
+		await new Promise((r) => setTimeout(r, 200))
+		expect([alive(loader), alive(grandchild), fs.readdirSync(tmp)]).toEqual([false, false, []])
 	})
 })
 

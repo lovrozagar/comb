@@ -6,8 +6,7 @@
  * a diff (fts-migration.ts), and comb compares them by name. On Postgres Atlas reads the database
  * itself, and inspects no view, policy or sequence.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { ScratchEngine } from "../drivers/local-db.ts"
 import type { Connection } from "../types.ts"
@@ -34,6 +33,7 @@ import { UNCOMPARED } from "./baseline-uncompared.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 import { objectDrift } from "./baseline-sqlite-objects.ts"
 import { isVectorIndexSql, vectorShadows, vectorStatement } from "./vector-index.ts"
+import { type Scratch, scratchDir } from "./cleanup.ts"
 
 const SYNCED = "Schemas are synced, no changes to be made."
 /* the tables SQLite keeps behind a virtual table: fts5's, fts3 and fts4's, and rtree's */
@@ -71,7 +71,7 @@ async function sqliteDrift(
 	dir: string,
 	{ engine = "runtime", exec }: { engine?: ScratchEngine | undefined; exec: Run },
 ): Promise<string> {
-	const work = mkdtempSync(join(tmpdir(), "comb-baseline-"))
+	const { dir: work, remove: removeWork } = scratchDir("comb-baseline-")
 	try {
 		const groups = new Set<string>()
 		const vectors = new Set<string>()
@@ -106,17 +106,30 @@ async function sqliteDrift(
 		const atlasDiff = ran.stdout.trim() === SYNCED ? [] : [ran.stdout.trim()]
 		return [...atlasDiff, ...(await objectDrift(conn, dir, engine))].join("\n")
 	} finally {
-		rmSync(work, { force: true, recursive: true })
+		removeWork()
 	}
 }
 
 /**
  * The snapshot's history as Atlas can replay it on the dev database: without the objects comb
  * owns but its sequences, which a table's default may use and Atlas never inspects, and without a
- * statement whose scope is the server or another database
+ * statement whose scope is the server or another database, in a scratch the caller removes; one
+ * this fails to write is removed here
  */
-function replayableHistory(exec: Run, copy: string): string {
-	const plain = mkdtempSync(join(tmpdir(), "comb-baseline-history-"))
+function replayableHistory(exec: Run, copy: string): Scratch {
+	const scratch = scratchDir("comb-baseline-history-")
+	try {
+		writeReplayable(scratch.dir, copy)
+		hashDir(exec, scratch.dir)
+		return scratch
+	} catch (error) {
+		scratch.remove()
+		throw error
+	}
+}
+
+/** Each file of `copy` into `plain`, as replayableHistory has Atlas replay it */
+function writeReplayable(plain: string, copy: string): void {
 	const state = emptyPgObjects()
 	for (const name of sqlFiles(copy)) {
 		const sql = readFileSync(join(copy, name), "utf8")
@@ -133,8 +146,6 @@ function replayableHistory(exec: Run, copy: string): string {
 		})
 		writeFileSync(join(plain, name), atlasFile(replayed, atlasHeader(sql).text))
 	}
-	hashDir(exec, plain)
-	return plain
 }
 
 /**
@@ -146,7 +157,7 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string, ref
 	const plain = replayableHistory(options.exec, copy)
 	try {
 		const ran = withAtlasEnv(options.target, { dev: true, url: true }, (env) => {
-			const args = ["schema", "diff", "--from", "env://url", "--to", `file://${plain}`, ...env.args]
+			const args = ["schema", "diff", "--from", "env://url", "--to", `file://${plain.dir}`, ...env.args]
 			const result = options.exec("atlas", args, { env: env.env })
 			/* compared as Atlas wrote it; scrubbed only in what comb prints (M79) */
 			if (result.code !== 0) {
@@ -166,7 +177,7 @@ function refuseDrift(options: { exec: Run; target: PgTarget }, copy: string, ref
 		}
 		return ran.notices
 	} finally {
-		rmSync(plain, { force: true, recursive: true })
+		plain.remove()
 	}
 }
 

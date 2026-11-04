@@ -1,6 +1,5 @@
 /** `comb migrate`: init, diff, check, apply, baseline and status. */
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { parseArgs, refuseFurther } from "./args.ts"
 import { binOf } from "../migrate/core/optional-peer.ts"
@@ -16,6 +15,7 @@ import {
 import { migrateApply, needPeers } from "./migrate-apply.ts"
 import { type MigrateTarget, refuseBlank, refuseNoDir, resolveMigrateTarget } from "./migrate-target.ts"
 import { CliError, type CliContext } from "./output.ts"
+import { scratchDir } from "../migrate/core/cleanup.ts"
 
 const DRIZZLE_CONFIG = `import { defineConfig } from "drizzle-kit"
 
@@ -147,12 +147,12 @@ async function migrateDiff(argv: readonly string[], io: CliContext): Promise<voi
  */
 async function diffIn(migrationsDir: string, dryRun: boolean, diff: (dir: string) => Promise<void>): Promise<void> {
 	if (!dryRun) return diff(migrationsDir)
-	const copy = fs.mkdtempSync(path.join(os.tmpdir(), "comb-migrate-dry-run-"))
+	const { dir: copy, remove: removeCopy } = scratchDir("comb-migrate-dry-run-")
 	try {
 		if (fs.existsSync(migrationsDir)) fs.cpSync(migrationsDir, copy, { recursive: true })
 		await diff(copy)
 	} finally {
-		fs.rmSync(copy, { force: true, recursive: true })
+		removeCopy()
 	}
 }
 

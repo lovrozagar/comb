@@ -6,12 +6,12 @@
  * node-hooks.mjs; bun loads it itself.
  */
 import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { refuseCompiled } from "../../migrate/core/compiled.ts"
 import { resolvePeer } from "../../migrate/core/optional-peer.ts"
 import { type Run, run as defaultRun } from "../../migrate/core/process.ts"
 import type { Snapshot } from "./snapshot-types.ts"
+import { scratchDir } from "../../migrate/core/cleanup.ts"
 
 /** How long the child may take to load the tables module */
 const LOAD_TIMEOUT_MS = 60_000
@@ -100,7 +100,7 @@ function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
 		import.meta.resolve("ts-morph"),
 	)
 	const runtime = options.runtime ?? (process.versions["bun"] === undefined ? "node" : "bun")
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "comb-codegen-"))
+	const { dir, remove: removeDir } = scratchDir("comb-codegen-")
 	try {
 		const result = path.join(dir, "snapshot.json")
 		const status = path.join(dir, "status.json")
@@ -129,7 +129,7 @@ function loadSnapshot(tablesPath: string, options: LoadOptions = {}): Snapshot {
 			)
 		return read.snapshot
 	} finally {
-		fs.rmSync(dir, { force: true, recursive: true })
+		removeDir()
 	}
 }
 
