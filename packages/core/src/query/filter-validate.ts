@@ -95,11 +95,14 @@ type Typed = { value: unknown } | { error: string }
 
 const NUMBER = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/
 const INTEGER = /^-?\d+$/
+/* the least normal double, 2^-1022: below it a value reads as a subnormal or 0 */
+const MIN_NORMAL = 2 ** -1022
 /* the widest instant a JS Date holds, in epoch milliseconds either way */
 const MAX_EPOCH_MS = 8.64e15
 
 /**
- * A number field's value: finite (1e999 reads as Infinity, which no column holds), and within
+ * A number field's value: finite (1e999 reads as Infinity, which no column holds), 0 or normal
+ * (1e-400 reads as 0, which would match the rows holding 0), and within
  * ±(2^53 − 1), past which a double binds a neighbouring value. The value is read, not its
  * spelling: `9007199254740993.0` and `9.007199254740993e15` are the same unsafe integer.
  */
@@ -108,6 +111,11 @@ function parseFilterNumber(raw: string): { value: number } | { error: string } {
 	if (!NUMBER.test(raw) || !Number.isFinite(value)) return { error: `expects a number, got '${raw}'` }
 	if (Math.abs(value) > Number.MAX_SAFE_INTEGER) {
 		return { error: `expects a number within ±${Number.MAX_SAFE_INTEGER}, got '${raw}'` }
+	}
+	/* nonzero digits that read as 0 or a subnormal would bind a neighbouring value (QL12 of r22b) */
+	const nonzero = /[1-9]/.test(raw.split(/[eE]/)[0] as string)
+	if (nonzero && Math.abs(value) < MIN_NORMAL) {
+		return { error: `expects a number of magnitude 0 or at least ${MIN_NORMAL}, got '${raw}'` }
 	}
 	return { value }
 }
