@@ -251,3 +251,91 @@ describe("comb/optional-undefined across files, in tuples and on abstract member
 		expect(lint("export abstract class C { abstract log?: number | undefined; abstract flush(): void }\n")).toEqual([])
 	})
 })
+
+/* D4-2 of the area D round-four review: a generic alias flows the same way however src exports and imports it (N1-N8) */
+const ALIAS = "packages/core/src/query/alias.ts"
+const PROBE = "packages/core/src/query/probe.ts"
+const SETTER = "type Setter<T> = (value: T) => void\n"
+const made = (imports: string, ref = "Setter") =>
+	`${imports}\nexport function make(): ${ref}<Partial<{ a: number }>> { return (v) => void v }\n`
+const taken = (imports: string, ref = "Setter") =>
+	`${imports}\nexport function on(listener: ${ref}<Partial<{ a: number }>>) { listener({}) }\n`
+
+/** The files the rule reports in `fixture`, through oxlint and in process alike */
+function reported(fixture: Record<string, string>): string[] {
+	const files = oxlintReports("optional-undefined", fixture).map((report) => report.file)
+	expect(
+		reportsOnDisk(rule, fixture)
+			.map((report) => report.file)
+			.sort(),
+	).toEqual(files)
+	return files
+}
+
+describe("comb/optional-undefined on a generic alias however it is exported and imported", () => {
+	it("follows an export list, an export type list and a re-export of an import (N1, N2, N3)", () => {
+		const listed = { [ALIAS]: `${SETTER}export { Setter }\n` }
+		expect(reported({ ...listed, [PROBE]: made("import type { Setter } from './alias.ts'") })).toEqual([PROBE])
+		expect(reported({ ...listed, [PROBE]: taken("import type { Setter } from './alias.ts'") })).toEqual([])
+		const typed = { [ALIAS]: `${SETTER}export type { Setter }\n` }
+		expect(reported({ ...typed, [PROBE]: made("import type { Setter } from './alias.ts'") })).toEqual([PROBE])
+		const passed = {
+			[ALIAS]: `export ${SETTER}`,
+			"packages/core/src/query/pass.ts": "import type { Setter } from './alias.ts'\nexport type { Setter }\n",
+		}
+		expect(reported({ ...passed, [PROBE]: made("import type { Setter } from './pass.ts'") })).toEqual([PROBE])
+	})
+
+	it("follows an import under another name, a namespace import and a barrel's re-export (N4, N5, N6)", () => {
+		const declared = { [ALIAS]: `export ${SETTER}` }
+		expect(reported({ ...declared, [PROBE]: made("import type { Setter as S } from './alias.ts'", "S") })).toEqual([
+			PROBE,
+		])
+		expect(reported({ ...declared, [PROBE]: made("import type * as A from './alias.ts'", "A.Setter") })).toEqual([
+			PROBE,
+		])
+		const barrel = { ...declared, "packages/core/src/query/index.ts": "export type { Setter } from './alias.ts'\n" }
+		expect(reported({ ...barrel, [PROBE]: made("import type { Setter } from './index.ts'") })).toEqual([PROBE])
+		expect(reported({ ...barrel, [PROBE]: taken("import type { Setter } from './index.ts'") })).toEqual([])
+	})
+
+	it("reads the alias the import names when two files export one of the same name (N7, N8)", () => {
+		const flipping = "export type Box<T> = (value: T) => void\n"
+		const plain = "export type Box<T> = { value: T }\n"
+		const a = "packages/core/src/a.ts"
+		const b = "packages/core/src/b.ts"
+		const imported = made("import type { Box } from '../a.ts'", "Box")
+		expect(reported({ [a]: flipping, [b]: plain, [PROBE]: imported })).toEqual([PROBE])
+		expect(reported({ [a]: plain, [b]: flipping, [PROBE]: imported })).toEqual([])
+	})
+
+	it("follows an alias the imported one names in its own file, and nothing a package, a default or a cycle holds", () => {
+		const wrap = { [ALIAS]: `${SETTER}export type Wrap<U> = { set: Setter<U> }\n` }
+		expect(reported({ ...wrap, [PROBE]: made("import type { Wrap } from './alias.ts'", "Wrap") })).toEqual([PROBE])
+		const elsewhere = {
+			[ALIAS]: "export type { ZodType } from 'zod'\nconst plain = 1\nexport { plain }\nexport default 1\n",
+			"packages/core/src/query/a.ts": "export type { Setter } from './b.ts'\n",
+			"packages/core/src/query/b.ts": "export type { Setter } from './a.ts'\n",
+		}
+		expect(reported({ ...elsewhere, [PROBE]: made("import Setter from './alias.ts'") })).toEqual([])
+		expect(reported({ ...elsewhere, [PROBE]: made("import type { Setter } from './a.ts'") })).toEqual([])
+		expect(reported({ ...elsewhere, [PROBE]: made("import type { Setter } from 'zod'") })).toEqual([])
+		expect(reported({ ...elsewhere, [PROBE]: made("import type { Setter } from './gone.ts'") })).toEqual([])
+		expect(reported({ ...elsewhere, [PROBE]: made("import type * as G from './gone.ts'", "G.Setter") })).toEqual([])
+	})
+})
+
+describe("comb/optional-undefined on a generic alias a barrel or a default export passes on", () => {
+	it("follows a barrel's export * and a default-exported interface, and no default through export *", () => {
+		const starred = {
+			[ALIAS]: `export ${SETTER}export default interface Sink<T> { put(value: T): void }\n`,
+			"packages/core/src/query/index.ts":
+				"export * from 'zod'\nexport * as all from './alias.ts'\nexport * from './alias.ts'\n",
+		}
+		expect(reported({ ...starred, [PROBE]: made("import type { Setter } from './index.ts'") })).toEqual([PROBE])
+		expect(reported({ ...starred, [PROBE]: made("import type * as I from './index.ts'", "I.Setter") })).toEqual([PROBE])
+		expect(reported({ ...starred, [PROBE]: made("import type { Missing } from './index.ts'", "Missing") })).toEqual([])
+		expect(reported({ ...starred, [PROBE]: made("import type Sink from './alias.ts'", "Sink") })).toEqual([PROBE])
+		expect(reported({ ...starred, [PROBE]: made("import type Sink from './index.ts'", "Sink") })).toEqual([])
+	})
+})

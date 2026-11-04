@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { join } from "node:path/posix"
 import { parseSync } from "oxc-parser"
+import { moduleOf, scopeOf } from "./generic-scope.js"
 import { srcPath } from "./scope.js"
 
 /* comb reads an optional key set to undefined as the key left out. A declaration that refuses
@@ -47,12 +48,17 @@ const callerField = (node) => FIELDS.has(node.type) && !ownField(node)
 /* an optional method's type is a function, which never admits undefined */
 const METHODS = new Set(["TSAbstractMethodDefinition", "TSMethodSignature"])
 
-/* what a reference names: a type reference's type, or the type an interface extends or a class implements */
+/* what a reference names: a type reference's type, or the type an interface extends or a class
+ * implements, a namespace's member as `A.Name` */
 const HERITAGE = new Set(["TSClassImplements", "TSInterfaceHeritage"])
-const namedBy = (node) => {
-	const name = node.type === "TSTypeReference" ? node.typeName : HERITAGE.has(node.type) ? node.expression : null
-	return name?.type === "Identifier" ? name.name : null
-}
+const nameOf = (name) =>
+	name?.type === "Identifier"
+		? name.name
+		: name?.type === "TSQualifiedName" && name.left.type === "Identifier"
+			? `${name.left.name}.${name.right.name}`
+			: null
+const namedBy = (node) =>
+	nameOf(node.type === "TSTypeReference" ? node.typeName : HERITAGE.has(node.type) ? node.expression : null)
 
 /** Calls `found` with every node under `node` and the path to it, `node` itself first */
 function walk(node, path, found) {
@@ -70,18 +76,20 @@ function walk(node, path, found) {
  * How type argument `index` of `owner` flows inside the generic alias or interface of src it
  * names: flipped (true) when its type parameter sits in a function parameter there, as it is (false)
  * when it is unused or no such alias holds it, and "both" when comb reads it and hands it out alike.
- * `scope` holds src's generic aliases by name, this file's over those other files export, and in `seen` those already followed, so a
- * cycle adds nothing.
+ * `scope` looks up the generic a name in this file stands for (`lookup`), and in the file that
+ * declares one (`scopes`), and holds in `seen` those already followed, so a cycle adds nothing.
  */
 function argumentFlow(owner, index, scope) {
-	const { generics, seen } = scope
-	const alias = generics.get(namedBy(owner))
+	const { lookup, scopes, seen } = scope
+	const name = namedBy(owner)
+	const found = name === null ? undefined : lookup(name)
+	const alias = found?.declared
 	const parameter = alias?.typeParameters.params[index]
 	if (parameter === undefined || seen.has(alias)) return false
 	const flips = new Set()
 	walk(alias, [{ key: null, node: alias }], (node, path) => {
 		if (namedBy(node) !== parameter.name.name || node.type !== "TSTypeReference") return
-		const place = placeOf(path, { generics, seen: new Set([...seen, alias]) })
+		const place = placeOf(path, { lookup: scopes(found.file), scopes, seen: new Set([...seen, alias]) })
 		if (place === "input") flips.add(true).add(false)
 		else flips.add(place.flip)
 	})
@@ -114,35 +122,21 @@ function placeOf(path, scope) {
 	return flip ? "input" : "output"
 }
 
-/** The generic aliases and interfaces `program` declares at its top, by name: only those it exports when `exported` */
-function genericsIn(program, exported) {
-	const generics = new Map()
-	for (const node of program.body) {
-		const declared = node.type === "ExportNamedDeclaration" ? node.declaration : exported ? null : node
-		const generic = declared?.type === "TSTypeAliasDeclaration" || declared?.type === "TSInterfaceDeclaration"
-		if (generic && declared.typeParameters) generics.set(declared.id.name, declared)
-	}
-	return generics
-}
-
-/** Every named type reference in `program`, by name, with where each sits; `shared` holds the generics other files export */
-function referencesIn(program, shared) {
-	const generics = new Map([...shared, ...genericsIn(program, false)])
+/** Every named type reference in `program`, by name, with where each sits; `lookup` and `scopes` find the generics it names */
+function referencesIn(program, lookup, scopes) {
 	const found = []
 	walk(program, [{ key: null, node: program }], (node, path) => {
 		const name = namedBy(node)
-		if (name !== null) found.push({ name, node, place: placeOf(path, { generics, seen: new Set() }) })
+		if (name !== null) found.push({ name, node, place: placeOf(path, { lookup, scopes, seen: new Set() }) })
 	})
 	return found
 }
 
-/* the generics every source file under a src root exports, and each file's references, as read from disk once per lint run */
+/* every source file under a src root, as a module, each file's lookup, and each file's references, read from disk once per lint run */
 const roots = new Map()
 function diskReferences(root) {
 	const cached = roots.get(root)
 	if (cached) return cached
-	const byFile = new Map()
-	const generics = new Map()
 	let files = []
 	try {
 		files = readdirSync(root, { encoding: "utf8", recursive: true })
@@ -152,16 +146,18 @@ function diskReferences(root) {
 	}
 	const programs = files
 		.filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
-		.map((file) => join(root, file))
+		.map((file) => join(root, file.replaceAll("\\", "/")))
 		.map((path) => [path, parseSync(path, readFileSync(path, "utf8")).program])
-	for (const [, program] of programs)
-		for (const [name, declared] of genericsIn(program, true)) generics.set(name, declared)
-	for (const [path, program] of programs)
-		byFile.set(
+	const modules = new Map(programs.map(([path, program]) => [path, moduleOf(program, path)]))
+	const lookups = new Map([...modules].map(([path, module]) => [path, scopeOf(module, modules)]))
+	const scopes = (file) => lookups.get(file)
+	const byFile = new Map(
+		programs.map(([path, program]) => [
 			path,
-			referencesIn(program, generics).map(({ name, place }) => ({ name, place })),
-		)
-	const disk = { byFile, generics }
+			referencesIn(program, scopes(path), scopes).map(({ name, place }) => ({ name, place })),
+		]),
+	)
+	const disk = { byFile, modules, scopes }
 	roots.set(root, disk)
 	return disk
 }
@@ -211,11 +207,13 @@ export const rule = {
 		/** Reports a Partial<…> an input reaches: this file's references read afresh, every other file's from disk */
 		const partials = (program) => {
 			const disk = diskReferences(root)
-			const here = referencesIn(program, disk.generics)
+			/* this file's own generics as it reads now, every other file's as on disk */
+			const lookup = scopeOf(moduleOf(program, filename), disk.modules)
+			const here = referencesIn(program, lookup, (other) => (other === filename ? lookup : disk.scopes(other)))
 			const places = new Map()
 			const add = (name, place) => places.set(name, [...(places.get(name) ?? []), place])
 			for (const [path, references] of disk.byFile) {
-				if (path.replaceAll("\\", "/") !== filename) for (const { name, place } of references) add(name, place)
+				if (path !== filename) for (const { name, place } of references) add(name, place)
 			}
 			for (const { name, place } of here) add(name, place)
 			for (const { name, node, place } of here) {
