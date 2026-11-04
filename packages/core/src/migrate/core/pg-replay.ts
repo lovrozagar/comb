@@ -3,7 +3,8 @@
  * catalog query (P5 of r19): Postgres, not a model of it, decides what a cascade, a rename or a
  * move leaves, and the two sides compare as one read of two databases.
  *
- * The replay runs as Atlas applies (P1 ⊃ P2 of r20): each file in a transaction of its own, a `--
+ * The replay runs as Atlas applies (P1 ⊃ P2 of r20): each file on a session of its own, as apply
+ * gives each file an Atlas call (PA1 of r22b), and in a transaction of its own, a `--
  * atlas:txmode none` file statement by statement, each in a transaction of its own first and bare,
  * as Atlas sends it, where Postgres runs it only so (P1 of r22 and its amendment), in a database
  * made for it and dropped after (pg-replay-database.ts). One transaction for the whole history
@@ -57,9 +58,7 @@ import { grantsMade, ownGrant, ownRole, type Run, superuserOf } from "./pg-repla
 import { begin, commit, guarded, window } from "./pg-replay-commit.ts"
 import { prepareSnapshot, snapshot } from "./pg-server-snapshot.ts"
 import { refuseUncounted } from "./pg-server-writes.ts"
-import { NO_SERVER_CODE, serverCode } from "./pg-server-code.ts"
-import { sessionRuns } from "./pg-session.ts"
-import { type PgRead, pgRead } from "./pg-split.ts"
+import { pgRead } from "./pg-split.ts"
 import { namesIn } from "./sql-code.ts"
 
 /** A history file as baseline reads it */
@@ -104,11 +103,7 @@ async function runStatement(
  * it only so; the file's own BEGIN, COMMIT and SAVEPOINT, a LOCK and a cursor not held, and all its
  * own block runs, bare, as Atlas sends them, so Postgres refuses outside a block what apply's refuses
  */
-async function replayFile(
-	run: Run,
-	{ name, read, sql: text }: HistoryFile & { read: PgRead },
-	replay: Replay & { refused: Refuse },
-) {
+async function replayFile(run: Run, { name, sql: text }: HistoryFile, replay: Replay & { refused: Refuse }) {
 	const inFile = !outsideTransaction(text)
 	const file = {
 		adopted: (role: string) => replay.adopted?.(name, role),
@@ -118,7 +113,7 @@ async function replayFile(
 	}
 	let block = false
 	if (inFile) await begin(run)
-	for (const { sent, tree } of read.statements) {
+	for (const { sent, tree } of pgRead(text).statements) {
 		const [type, node] = tree === undefined ? ["", {}] : nodeOf(tree)
 		const beyond = grantsMade(run, type, node) ? undefined : beyondDatabase(type, node)
 		if (beyond !== undefined) {
@@ -136,23 +131,16 @@ async function replayFile(
 	if (inFile) await commit(run, { ...file, sent: undefined })
 }
 
-/**
- * `files` replayed a session `open`ed for each run of them that may share one (pg-session.ts), as
- * apply gives each run an Atlas call of its own (PA1 of r22b)
- */
-async function replayRuns(
+/** `files` replayed each on a session `open`ed for it, as apply gives each file an Atlas call (PA1 of r22b) */
+async function replayEach(
 	run: Run,
 	files: readonly HistoryFile[],
 	{ open, ...replay }: Replay & { open: () => Sql; refused: Refuse },
 ): Promise<void> {
-	/* the code the database holds once prepared, devUrl's extensions among it, which every file may run */
-	const server = files.length > 1 ? await serverCode(run.sql) : NO_SERVER_CODE
-	/* each file's one parse, for its runs and its replay */
-	const read = files.map((file) => ({ ...file, read: pgRead(file.sql) }))
-	for (const share of sessionRuns(read, read, server)) {
+	for (const file of files) {
 		await run.sql.end()
 		run.sql = open()
-		for (const file of share) await replayFile(run, file, replay)
+		await replayFile(run, file, replay)
 	}
 }
 
@@ -246,7 +234,7 @@ async function onDev<T>(
 				await prepare(run, target.schema, { files, refused, stops: replay.stops })
 				await prepareSnapshot(admin, run)
 				run.seen = await snapshot(admin)
-				await replayRuns(run, files, { ...replay, leftOut: replay.leftOut ?? (() => undefined), open, refused })
+				await replayEach(run, files, { ...replay, leftOut: replay.leftOut ?? (() => undefined), open, refused })
 				return await after(run.sql)
 			} finally {
 				await cleanup.run()

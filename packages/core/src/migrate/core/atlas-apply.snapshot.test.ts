@@ -12,7 +12,6 @@ import { noLive } from "../__fixtures__/live-objects.ts"
 import { applyWithAtlas, type ApplyOptions, baselineWithAtlas, statusWithAtlas } from "./atlas-apply.ts"
 import { sumHashes } from "./atlas-dir.ts"
 import type { ObjectsCompare } from "./baseline-compare.ts"
-import { NO_SERVER_CODE } from "./pg-server-code.ts"
 import type { LiveRead } from "./pg-live-types.ts"
 import type { Run } from "./process.ts"
 
@@ -45,7 +44,6 @@ function options(exec: Run): ApplyOptions & Pick<ObjectsCompare, "readLive" | "r
 		replayPending: async () => undefined,
 		sweepDev: async () => undefined,
 		target: { devUrl: "postgres://localhost/dev", lockTimeout: "5s", schema: "public", url: "postgres://app@db/app" },
-		targetCode: async () => NO_SERVER_CODE,
 	}
 }
 

@@ -1,9 +1,9 @@
 /**
  * PA1 of r22b: Atlas applied every pending file on one session, so a plain SET in one file, which
  * outlives its COMMIT, changed what every later file of the run wrote, and a `SET lock_timeout = 0`
- * lifted the configured lockTimeout for the rest. comb gives each run of files where only the last
- * may change the session one Atlas call, so a file that may change it ends its run and the next
- * starts on a session of its own, as r21 S1 did for SQLite; the check replay opens one per run.
+ * lifted the configured lockTimeout for the rest. comb gives each file an Atlas call of its own, so
+ * each starts on a session of its own, as r21 S1 did for SQLite; the check replay opens one per
+ * file (session-leaks.test.ts holds the shapes a file's code carried its session by).
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -129,7 +129,7 @@ describe("a session SET in one file never reaches the next (PA1; sibling: r21 S1
 const UNSAFE = "-- comb:allow-unsafe: the test reads the session\n"
 
 /** The amount of each Atlas apply an apply of `files` runs, the dry run left out, and what `read` reads after */
-async function amounts(files: readonly string[], read?: string): Promise<[string[], unknown]> {
+async function amounts(files: readonly string[], read: string): Promise<[string[], unknown]> {
 	await write(files)
 	const seen: string[] = []
 	const exec: typeof run = (cmd, args, given) => {
@@ -139,57 +139,19 @@ async function amounts(files: readonly string[], read?: string): Promise<[string
 	return withScratchDb((dev) =>
 		withScratchDb(async (url) => {
 			await applyWithAtlas({ ...options(dev, url), exec })
-			return [seen, read === undefined ? undefined : (await query(url, read))[0]?.["v"]]
+			return [seen, (await query(url, read))[0]?.["v"]]
 		}),
 	)
 }
 
-describe("files that leave the session as they found it share one Atlas call (PA1; sibling: the SET cases above)", () => {
-	it("keeps a SET LOCAL and a set_config(…, true) in their run", async () => {
+describe("each file gets an Atlas call of its own (PA1 reversed; sibling: the SET cases above)", () => {
+	it("runs files that leave the session as they found it one call each too, Atlas applying one file a call", async () => {
 		const files = [
 			"CREATE TABLE a (id int);\n",
 			"SET LOCAL lock_timeout = 0;\nCREATE TABLE b (id int);\n",
 			`${UNSAFE}SELECT set_config('lock_timeout', '0', true);\nCREATE TABLE c (id int);\n`,
 			`${UNSAFE}CREATE TABLE d AS SELECT current_setting('lock_timeout') AS v;\n`,
 		]
-		expect(await amounts(files, "SELECT v FROM d")).toEqual([["4"], "5s"])
-	}, 60_000)
-
-	it("ends a run at a DO block, so what it sets never reaches the next file", async () => {
-		const files = [
-			"CREATE TABLE a (id int);\n",
-			`${UNSAFE}DO $$ BEGIN PERFORM set_config('lock_timeout', '0', false); END $$;\n`,
-			`${UNSAFE}CREATE TABLE d AS SELECT current_setting('lock_timeout') AS v;\n`,
-		]
-		expect(await amounts(files, "SELECT v FROM d")).toEqual([["2", "1"], "5s"])
-	}, 60_000)
-})
-
-/* comb-9d's ruling on PA1: code the target holds, which no file of the directory shows, runs on the apply's session too */
-describe("a target holding code of its own gives each file a call (PA1; sibling: the runs above)", () => {
-	it("splits a directory with no code at a trigger a hand made on the target that runs SET", async () => {
-		const first = "CREATE TABLE t (id int);\n"
-		const later = [
-			`${UNSAFE}INSERT INTO t VALUES (1);\n`,
-			`${UNSAFE}CREATE TABLE d AS SELECT current_setting('lock_timeout') AS v;\n`,
-		]
-		const seen: string[] = []
-		const exec: typeof run = (cmd, args, given) => {
-			if (args[1] === "apply" && !args.includes("--dry-run")) seen.push(String(args[args.indexOf("--format") + 2]))
-			return run(cmd, args, given)
-		}
-		await withScratchDb((dev) =>
-			withScratchDb(async (url) => {
-				await write([first])
-				await applyWithAtlas(options(dev, url))
-				await query(
-					url,
-					"CREATE FUNCTION lift() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM set_config('lock_timeout', '0', false); RETURN NEW; END $$; CREATE TRIGGER lift BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION lift();",
-				)
-				await write([first, ...later])
-				await applyWithAtlas({ ...options(dev, url), exec })
-				expect([seen, (await query(url, "SELECT v FROM d"))[0]?.["v"]]).toEqual([["1", "1"], "5s"])
-			}),
-		)
+		expect(await amounts(files, "SELECT v FROM d")).toEqual([["1", "1", "1", "1"], "5s"])
 	}, 60_000)
 })

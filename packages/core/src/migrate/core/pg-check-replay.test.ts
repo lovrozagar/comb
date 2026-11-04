@@ -4,7 +4,6 @@ import { join } from "node:path"
 import { beforeAll, describe, expect, it } from "vitest"
 import { replayPending, throughPending } from "./pg-check-replay.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
-import { SERVER_CODE } from "./pg-server-code.ts"
 import { ReplayFailed } from "./replay-failed.ts"
 
 beforeAll(loadPostgresParser)
@@ -70,8 +69,6 @@ function fake(fail?: (query: string) => Error | undefined, roles: readonly strin
 			if (ROLES.test(query))
 				return roles.filter((role) => (params[0] as string[]).includes(role)).map((rolname) => ({ rolname }))
 			if (query.endsWith("WHERE pid = pg_backend_pid()")) return OWNER
-			if (query.startsWith(SERVER_CODE))
-				return [{ events: false, names: [], opaque: false, reaches: [], sql: [], tables: [] }]
 			return query.startsWith(COUNTS) ? [{ on: "on", writes: {} }] : []
 		},
 	})

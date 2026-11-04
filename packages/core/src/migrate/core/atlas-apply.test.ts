@@ -12,7 +12,6 @@ import type { Run } from "./process.ts"
 import { fail, fakeAtlas, file, ok, revision, status } from "../../../tests/support/fake-atlas.ts"
 import { holdingRelations, noLive } from "../__fixtures__/live-objects.ts"
 import { UNCOMPARED } from "./baseline-compare.ts"
-import { NO_SERVER_CODE, UNREAD } from "./pg-server-code.ts"
 
 let dir = ""
 beforeEach(() => {
@@ -58,7 +57,6 @@ function options(
 		/* check's replay on dev is atlas-apply.check.test.ts's and pg-check-replay.ts's to test */
 		replayPending: async () => undefined,
 		sweepDev: async () => undefined,
-		targetCode: async () => NO_SERVER_CODE,
 		seen,
 		target: TARGET,
 		...more,
@@ -113,7 +111,7 @@ describe("applyWithAtlas", () => {
 })
 
 describe("applyWithAtlas: how many files one Atlas call runs (PA1 of r22b)", () => {
-	it("passes Atlas no flag that would skip comb's checks, and the files that may share a session as one apply's amount (PA1 of r22b)", async () => {
+	it("passes Atlas no flag that would skip comb's checks, and gives each pending file a call of its own", async () => {
 		const atlas = fakeAtlas({ apply: APPLIED, status: PENDING })
 		await applyWithAtlas(options(atlas))
 		const args = atlas.calls.flatMap((call) => call.args)
@@ -122,19 +120,8 @@ describe("applyWithAtlas: how many files one Atlas call runs (PA1 of r22b)", () 
 		const bare = atlas.calls
 			.filter((c) => c.args[1] === "apply")
 			.map((call) => call.args.slice(2).filter((arg, i, all) => !arg.startsWith("--") && !all[i - 1]?.startsWith("--")))
-		/* the dry run takes no amount; both pending files leave the session as they found it, so one apply runs them */
-		expect(bare).toEqual([[], ["2"]])
-	})
-
-	it("gives each file a call of its own on a target comb cannot read (PA1, comb-9d's ruling)", async () => {
-		const atlas = fakeAtlas({ apply: APPLIED, status: PENDING })
-		const read: string[] = []
-		const targetCode = async (target: { url: string }) => (read.push(target.url), UNREAD)
-		await applyWithAtlas(options(atlas, { targetCode }))
-		const amounts = atlas.calls
-			.filter((c) => c.args[1] === "apply" && !c.args.includes("--dry-run"))
-			.map((c) => c.args.at(c.args.indexOf("--format") + 2))
-		expect([read.length, amounts]).toEqual([1, ["1", "1"]])
+		/* the dry run takes no amount; each file runs on a session of its own, as it would alone */
+		expect(bare).toEqual([[], ["1"], ["1"]])
 	})
 })
 

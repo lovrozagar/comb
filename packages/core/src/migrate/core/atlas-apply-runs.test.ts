@@ -1,24 +1,19 @@
 /**
- * applyRuns (atlas-apply-runs.ts): the approved files applied one Atlas call per run of them that
- * may share a session (PA1 of r22b), each later call after a status read and a history check, and
- * a call that ran other files, or none, refused as it is
+ * applyRuns (atlas-apply-runs.ts): the approved files applied one Atlas call each (PA1 of r22b),
+ * each later call after a status read and a history check, and a call that ran another file, or
+ * none, refused as it is
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { fakeAtlas, file, ok, status } from "../../../tests/support/fake-atlas.ts"
 import { deliver, stubKill, until } from "../../../tests/support/signals.ts"
 import { applyRuns } from "./atlas-apply-runs.ts"
 import type { AtlasStatus } from "./atlas-history.ts"
-import { loadPostgresParser } from "./pg-parser.ts"
-import { NO_SERVER_CODE, type ServerCode, UNREAD } from "./pg-server-code.ts"
-import { pgRead } from "./pg-split.ts"
 import type { RunResult } from "./process.ts"
 
-beforeAll(loadPostgresParser)
-
-/* three files, the second ending its run with a SET that outlives its COMMIT */
+/* three files, the second with a SET that outlives its COMMIT */
 const FILES: ReadonlyArray<[string, string]> = [
 	["1_a.sql", "CREATE TABLE a (id int);\n"],
 	["2_b.sql", "SET lock_timeout = 0;\n"],
@@ -39,17 +34,14 @@ const PENDING = status({ available: NAMES.map(file), pending: NAMES.map(file), s
 const report = (...names: string[]) =>
 	ok(JSON.stringify({ applied: names.map((Name) => ({ Name })), error: "", target: "3" }))
 
-/** applyRuns of the three files on `atlas`, beside a server holding `server`: what it returns or throws, the amounts it asked, what it printed */
-function applied(atlas: ReturnType<typeof fakeAtlas>, server: ServerCode = NO_SERVER_CODE) {
+/** applyRuns of the three files on `atlas`: what it returns or throws, the amounts it asked, what it printed */
+function applied(atlas: ReturnType<typeof fakeAtlas>) {
 	const out: string[] = []
 	const options = { dir, exec: atlas, print: (line: string) => out.push(line), target: TARGET }
-	const files = FILES.map(([name, sql]) => ({ name, read: pgRead(sql) }))
 	const run = () =>
 		applyRuns(options, dir, {
-			files,
 			foreign: { elsewhere: false, ignored: new Map(), unread: undefined },
 			report: { elsewhere: false, scrub: (text: string) => text, unread: undefined },
-			server,
 			status: JSON.parse(PENDING.stdout) as AtlasStatus,
 		})
 	const amounts = () =>
@@ -60,28 +52,23 @@ function applied(atlas: ReturnType<typeof fakeAtlas>, server: ServerCode = NO_SE
 }
 
 describe("applyRuns", () => {
-	it("applies each run of files that may share a session in one call, the status read again between", async () => {
+	it("applies each file in a call of its own, the status read again between", async () => {
 		const atlas = fakeAtlas({ apply: report(...NAMES), status: PENDING })
 		const { amounts, out, run } = applied(atlas)
 		expect(await run()).toEqual(NAMES)
-		expect([amounts(), out]).toEqual([["2", "1"], NAMES.map((name) => `Apply: ${name}`)])
-		expect(atlas.calls.filter((call) => call.args[1] === "status")).toHaveLength(1)
+		expect([amounts(), out]).toEqual([["1", "1", "1"], NAMES.map((name) => `Apply: ${name}`)])
+		expect(atlas.calls.filter((call) => call.args[1] === "status")).toHaveLength(2)
 	})
 
-	it("gives each file a call of its own beside a server comb cannot read", async () => {
-		const { amounts, run } = applied(fakeAtlas({ apply: report(...NAMES), status: PENDING }), UNREAD)
-		expect([await run(), amounts()]).toEqual([NAMES, ["1", "1", "1"]])
-	})
-
-	it("refuses a call that ran other files than the run it was given", async () => {
-		const { run } = applied(fakeAtlas({ apply: report("1_a.sql"), status: PENDING }))
-		await expect(run()).rejects.toThrow("atlas migrate apply 2 ran 1_a.sql, not the approved 1_a.sql, 2_b.sql")
+	it("refuses a call that ran another file than the one pending first", async () => {
+		const { run } = applied(fakeAtlas({ apply: report("2_b.sql"), status: PENDING }))
+		await expect(run()).rejects.toThrow("atlas migrate apply 1 ran 2_b.sql, not the approved 1_a.sql")
 	})
 
 	it("stops once another apply ran the rest", async () => {
 		const atlas = fakeAtlas({ apply: report(...NAMES), status: PENDING, statusAfterApply: status({ status: "OK" }) })
 		const { amounts, run } = applied(atlas)
-		expect([await run(), amounts()]).toEqual([["1_a.sql", "2_b.sql"], ["2"]])
+		expect([await run(), amounts()]).toEqual([["1_a.sql"], ["1"]])
 	})
 })
 
@@ -111,13 +98,13 @@ describe("applyRuns, a call that ran nothing", () => {
 		const raced = Object.assign(
 			async (cmd: string, args: readonly string[], runOptions?: Parameters<typeof atlas>[2]) =>
 				/* the status after the call that ran nothing: another apply ran 3_c.sql */
-				args[1] === "status" && ++reads === 2 ? status({ status: "OK" }) : atlas(cmd, args, runOptions),
+				args[1] === "status" && ++reads === 3 ? status({ status: "OK" }) : atlas(cmd, args, runOptions),
 			{ calls: atlas.calls, replayed: atlas.replayed },
 		)
 		const { amounts, out, run } = applied(raced)
 		expect([await run(), amounts(), out]).toEqual([
 			["1_a.sql", "2_b.sql"],
-			["2", "1"],
+			["1", "1", "1"],
 			["Apply: 1_a.sql", "Apply: 2_b.sql"],
 		])
 	})
@@ -154,7 +141,7 @@ describe("applyRuns stopped by a signal (PA4 of r22)", () => {
 	}
 
 	it.each([
-		["the first call's files", undefined, "applied 1_a.sql, 2_b.sql; not applied 3_c.sql"],
+		["the first call's file", undefined, "applied 1_a.sql; not applied 2_b.sql, 3_c.sql"],
 		["none", PENDING, "applied none; not applied 1_a.sql, 2_b.sql, 3_c.sql"],
 		["every file", status({ status: "OK" }), "applied 1_a.sql, 2_b.sql, 3_c.sql; not applied none"],
 	])("says once which approved files the history records, %s here, then ends by the signal", async (_, after, said) => {

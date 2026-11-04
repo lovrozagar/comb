@@ -4,9 +4,9 @@
  * comb classified. In order: Atlas's status, which must report no error except a file it ran
  * halfway outside a transaction; a dry run, so a database that needs a baseline fails before anyone
  * is asked (a check of a database with no history inspects it instead, atlas-clean.ts); each pending file classified and approved (approval.ts); then the apply. comb passes no
- * flag that would skip a check (--allow-dirty, --tx-mode, --baseline), and gives each run of files
- * that may share a session one call (atlas-apply-runs.ts), so no session setting of one file reaches
- * the next (PA1 of r22b). The one
+ * flag that would skip a check (--allow-dirty, --tx-mode, --baseline), and gives each file a call
+ * of its own (atlas-apply-runs.ts), so no session setting of one file reaches the next (PA1 of
+ * r22b). The one
  * --exec-order it passes, non-linear, goes only to public's dry run and apply while public's
  * history holds another schema's 0.12 row (atlas-foreign.ts, M78): Atlas would count that row as
  * public's position, and checkHistory's late check over public's own revisions replaces Atlas's.
@@ -37,10 +37,8 @@ import { Refused } from "./refused.ts"
 import { loadPostgresParser } from "./pg-parser.ts"
 import { replayPending, throughPending } from "./pg-check-replay.ts"
 import { sweepDev } from "./pg-replay-drops.ts"
-import { NO_SERVER_CODE, targetCode } from "./pg-server-code.ts"
 import { readyDevSchema } from "./pg-dev-schema.ts"
 import { classifyPending } from "./atlas-pending.ts"
-import type { PgRead } from "./pg-split.ts"
 
 type ApplyOptions = AtlasCommand & {
 	/** whether a classified migration may run: approval.ts's rule, asking a person when it must */
@@ -50,8 +48,6 @@ type ApplyOptions = AtlasCommand & {
 	/** how check replays the history and the pending files on dev: comb's own (pg-check-replay.ts) unless a test says otherwise */
 	replayPending?: typeof replayPending | undefined
 	sweepDev?: typeof sweepDev | undefined
-	/** the target's code as the apply reads it, a fake's in a test */
-	targetCode?: typeof targetCode | undefined
 }
 
 /** The files 0.12's shared history ran, while `own`, the schema's own history, records none (M77) */
@@ -96,16 +92,12 @@ const after = (copy: string, ran: readonly string[]): AtlasFile[] => filesOf(cop
  * Each pending file classified (classifyPending); on a check, then replayed on dev with the history
  * before it (pg-check-replay.ts); then each approved, its lock warnings shown
  */
-async function approvePending(
-	options: ApplyOptions,
-	copy: string,
-	pending: readonly AtlasFile[],
-): Promise<Array<{ name: string; read: PgRead }>> {
+async function approvePending(options: ApplyOptions, copy: string, pending: readonly AtlasFile[]): Promise<void> {
 	/* Postgres statements are read from Postgres's parser, loaded once */
 	await loadPostgresParser()
 	const waiting = new Set(pending.map((file) => file.Name))
 	/* what the file alone refuses goes before the replay, which never runs it (PA2 of r22b) */
-	const { files, migrations } = classifyPending(options, copy, waiting)
+	const migrations = classifyPending(options, copy, waiting)
 	/* a check lets Postgres decide what no database runs, before any file is approved (P13 of r19) */
 	if (options.checkOnly === true) {
 		const names = pending.map((file) => file.Name)
@@ -119,7 +111,6 @@ async function approvePending(
 		if (approval.approvedBy !== undefined) options.print(`Approved in ${Name}: ${approval.approvedBy}`)
 		for (const caution of approval.cautions ?? []) options.print(`Cautious in ${Name}: ${caution}`)
 	}
-	return files
 }
 
 /** Apply the pending migrations of `options.dir` through Atlas; returns the files applied, or only checked */
@@ -156,13 +147,11 @@ async function applyWithAtlas(options: ApplyOptions): Promise<string[]> {
 			const dry = await atlas(options, copy, ["apply", "--dry-run", ...execOrder(foreign), "--format", APPLY_FORMAT])
 			reported(dry, "apply --dry-run", copy)
 		}
-		const files = await approvePending(options, copy, status.pending)
+		await approvePending(options, copy, status.pending)
 		if (options.checkOnly === true) return status.pending.map((file) => file.Name)
 		/* a check killed past its cleanup left a role on devUrl's server, which a CREATE ROLE here would stop at (P2 of r21) */
 		await (options.sweepDev ?? sweepDev)(options.target, options.print)
-		/* one file is one call whatever the target holds, so only more read its code */
-		const server = status.pending.length > 1 ? await (options.targetCode ?? targetCode)(options.target) : NO_SERVER_CODE
-		return await applyRuns(options, copy, { files, foreign, report, server, status })
+		return await applyRuns(options, copy, { foreign, report, status })
 	} finally {
 		snapshot.remove()
 	}
