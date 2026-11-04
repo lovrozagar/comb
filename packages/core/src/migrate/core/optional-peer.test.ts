@@ -131,20 +131,8 @@ describe("optionalPeer, on a peer that loads", () => {
 	it("is what the load loads, at a version in range, its entry a path or a file: URL", async () => {
 		const entry = installed("postgres", "3.4.9")
 		const need = { peer: "postgres", why: "read" } as const
-		await expect(
-			optionalPeer(
-				need,
-				async () => 1,
-				() => entry,
-			),
-		).resolves.toBe(1)
-		await expect(
-			optionalPeer(
-				need,
-				async () => 2,
-				() => pathToFileURL(entry).href,
-			),
-		).resolves.toBe(2)
+		await expect(optionalPeer(need, async () => 1, { locate: () => entry })).resolves.toBe(1)
+		await expect(optionalPeer(need, async () => 2, { locate: () => pathToFileURL(entry).href })).resolves.toBe(2)
 		/* by default, the peer as comb resolves it: comb's own devDependency here */
 		await expect(optionalPeer(need, async () => 3)).resolves.toBe(3)
 	})
@@ -153,11 +141,7 @@ describe("optionalPeer, on a peer that loads", () => {
 	it("refuses a peer outside its range, naming the version found", async () => {
 		const need = { peer: "libpg-query", why: "parse" } as const
 		await expect(
-			optionalPeer(
-				need,
-				async () => 1,
-				() => installed("libpg-query", "18.2.2"),
-			),
+			optionalPeer(need, async () => 1, { locate: () => installed("libpg-query", "18.2.2") }),
 		).rejects.toThrow(
 			new MissingPeerError(
 				`comb needs libpg-query (>=17.7.4 <18, found 18.2.2) to parse; install "libpg-query@>=17.7.4 <18"`,
@@ -169,11 +153,7 @@ describe("optionalPeer, on a peer that loads", () => {
 		const entry = installed("postgres", "3.4.10")
 		writeFileSync(join(entry, "../../package.json"), JSON.stringify({ name: "postgres" }))
 		await expect(
-			optionalPeer(
-				{ peer: "postgres", why: "read" },
-				async () => 1,
-				() => entry,
-			),
+			optionalPeer({ peer: "postgres", why: "read" }, async () => 1, { locate: () => entry }),
 		).rejects.toThrow(`comb needs postgres (>=3.4.9 <4, found no version) to read; install "postgres@>=3.4.9 <4"`)
 	})
 })
@@ -352,7 +332,7 @@ describe("projectBin and binOf", () => {
 		const bin = { bin: "/nowhere/w.js", manifest: "/nowhere/package.json", peer: "wrangler", runtime: "node" } as const
 		await expect(importBin(bin, "file:///$bunfs/root/app-exe")).rejects.toThrow(
 			new Error(
-				"comb loads wrangler from the project in process, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable",
+				"comb loads wrangler from the project, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable",
 			),
 		)
 	})

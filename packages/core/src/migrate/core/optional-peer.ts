@@ -102,20 +102,32 @@ function refuseOutOfRange(need: Need, entry: string): void {
 	if (problem !== undefined) throw new MissingPeerError(refusal([problem]))
 }
 
+/**
+ * What comb says when a Bun single-file executable runs a command that loads `peers` from the
+ * project: the executable embeds comb's modules, from which no installed package resolves or loads
+ * (D4-5 and D5-2 of the area D reviews)
+ */
+const compiledRefusal = (peers: readonly string[]): string =>
+	`comb loads ${peers.join(" and ")} from the project, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable`
+
 /** The entry of `peer` as comb's own imports resolve it */
 const resolved = (peer: OptionalPeer): string => import.meta.resolve(peer)
+
+/** Where optionalPeer looks: `locate` finds the peer's entry, and `moduleUrl` (comb's own) tells a compiled executable */
+type PeerSeams = { locate?: (() => string) | undefined; moduleUrl?: string | undefined }
 
 /**
  * What `load` loads: `peer`, or a module of comb's that imports it, once `locate` (the peer's
  * entry, as comb resolves it) shows it in range. A missing `peer` throws a MissingPeerError
  * naming it, its range and the install, as does one outside its range; any other failure passes
- * on as it is.
+ * on as it is. A compiled executable is refused before either.
  */
 async function optionalPeer<T>(
 	need: Need,
 	load: () => Promise<T>,
-	locate: () => string = () => resolved(need.peer),
+	{ locate = () => resolved(need.peer), moduleUrl = import.meta.url }: PeerSeams = {},
 ): Promise<T> {
+	refuseCompiled(moduleUrl, compiledRefusal([need.peer]))
 	try {
 		refuseOutOfRange(need, locate())
 		return await load()
@@ -184,30 +196,41 @@ function projectBin(need: BinNeed, cwd: string): ProjectBin {
 	)
 }
 
-/** Where requirePeers looks: `atlas` reads `atlas version`, `locate` finds an npm peer's entry, `fts` says a SQLite diff declares FTS */
+/**
+ * Where requirePeers looks: `atlas` reads `atlas version`, `locate` finds an npm peer's entry, `fts`
+ * says a SQLite diff declares FTS, and `moduleUrl` (comb's own) tells a compiled executable
+ */
 type Finders = {
 	atlas: () => Promise<RunResult>
 	cwd: string
 	fts?: boolean | undefined
 	locate?: ((peer: OptionalPeer) => string) | undefined
+	moduleUrl?: string | undefined
 }
 
 /**
  * Refuses `command` on `provider` unless each peer it needs is there and in range, naming every
  * one that is not in one refusal, with one install, and gives each bin peer it found. `locate`
  * finds a peer's entry: by default a bin peer in the project from `cwd` up, any other as comb's
- * own imports resolve it. Atlas is read once, by `atlas`, where the command runs it.
+ * own imports resolve it. Atlas is read once, by `atlas`, where the command runs it. A compiled
+ * executable is refused first, naming each peer the command loads rather than spawns, which none
+ * there can.
  */
 async function requirePeers(
 	command: Command,
 	provider: Provider,
-	{ atlas, cwd, fts = false, locate }: Finders,
+	{ atlas, cwd, fts = false, locate, moduleUrl = import.meta.url }: Finders,
 ): Promise<Peers> {
+	const needs = needsOf(command, provider, fts)
+	const loaded = needs.flatMap((need) =>
+		need.peer === "atlas" || need.optional === true || isBinPeer(need.peer) ? [] : [need.peer],
+	)
+	if (loaded.length > 0) refuseCompiled(moduleUrl, compiledRefusal(loaded))
 	const find = locate ?? ((peer) => (isBinPeer(peer) ? inProject(peer, cwd) : resolved(peer)))
 	const problems: Problem[] = []
 	const peers: { [P in BinPeer]?: ProjectBin | undefined } = {}
 	let cause: unknown
-	for (const need of needsOf(command, provider, fts)) {
+	for (const need of needs) {
 		if (need.peer === "atlas") {
 			const problem = await atlasProblem(atlas)
 			if (problem !== undefined) problems.push(problem)
@@ -243,10 +266,7 @@ const binEntry = (bin: ProjectBin): string => createRequire(bin.manifest).resolv
 
 /** The module of the package `bin` is from, by its entry; refused in a compiled executable, which `moduleUrl` (comb's own) tells */
 async function importBin<T>(bin: ProjectBin, moduleUrl: string = import.meta.url): Promise<T> {
-	refuseCompiled(
-		moduleUrl,
-		`comb loads ${bin.peer} from the project in process, which a Bun single-file executable cannot do: run comb migrate with bun or node, not from a compiled executable`,
-	)
+	refuseCompiled(moduleUrl, compiledRefusal([bin.peer]))
 	return (await import(pathToFileURL(binEntry(bin)).href)) as T
 }
 

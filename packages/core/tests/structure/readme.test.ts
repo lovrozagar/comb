@@ -251,10 +251,19 @@ describe("README peer install upgrade item", () => {
 
 	it("says codegen's analyze and the D1 commands but diff are refused in a compiled executable, and why", () => {
 		expect(item).toContain("an app compiled to one executable")
-		expect(refused).toContain("Codegen's `analyze` and every D1 command but `migrate diff`")
+		expect(refused).toContain("Codegen's `analyze`")
 		expect(refused).toContain("(`status`, `check`, `apply` and `baseline`)")
 		expect(refused).toMatch(/cannot read the modules the executable embeds/)
 		expect(refused).toMatch(/run them with bun or node/)
+	})
+
+	/* D5-2 of the area D round-five review: libsql, Turso and Postgres load their peers in process too */
+	it("says the libsql, Turso and Postgres commands that load a peer are refused there, naming each peer", () => {
+		expect(refused).toContain("every D1, libsql and Turso command but `migrate diff`")
+		expect(refused).toContain("every Postgres command but `migrate status`")
+		expect(refused).toContain("`loadPostgresParser`")
+		for (const peer of ["wrangler", "@libsql/client", "libpg-query", "postgres"])
+			expect(refused).toContain(`\`${peer}\``)
 	})
 })
 
