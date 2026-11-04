@@ -1192,7 +1192,7 @@ What changes for a project on 0.20. Before deploying it:
 
 46. **Pass a `CombError` its cause as a string.** `cause` is the message a client may see, yet it took `unknown`, and this README's own example passed the original error there, whose text holds the SQL and its bound values. `cause` is now `string`, on the constructor and on the error, and the original goes on `source`, which is never serialized. Every comb classifier already passed strings. **Fix:** move an error object passed as `cause` to `source`, and give `cause` the message the client should read.
 
-42. **Keep the cache when `LruCache.set` refuses a TTL.** A `set` given a TTL it refuses, such as `0` or `NaN`, threw its `RangeError` only after it had dropped the key's current entry and, on a full cache, evicted the oldest. It now throws first and leaves the cache as it was. **Fix:** none.
+47. **Keep the cache when `LruCache.set` refuses a TTL.** A `set` given a TTL it refuses, such as `0` or `NaN`, threw its `RangeError` only after it had dropped the key's current entry and, on a full cache, evicted the oldest. It now throws first and leaves the cache as it was. **Fix:** none.
 
 ## Upgrading to 0.20.1
 
