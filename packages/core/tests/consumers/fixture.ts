@@ -251,6 +251,12 @@ export async function routed(env: Env, ctx: ExecutionContext, bookmark: string |
 	await client.prepare("SELECT 1").run()
 	/* K2 of r22: a shard's handle is the D1Database the generated Env holds, which drizzle takes, a binding bound in one environment alone among them (AD1) */
 	if (mapping) drizzle(router.getHandle(mapping, env).handle)
+	/* D2-1 of the area D round-two review: a helper generic over that Env, wrangler's own Cloudflare.Env, gets shard 0's binding */
+	if (mapping) {
+		const shard = mapping
+		const handleOf = <E extends Env>(given: E): D1Database => router.getHandle(shard, given).handle
+		drizzle(handleOf(env))
+	}
 	// @ts-expect-error an env with no SHARD_DB_* binding holds no shard
 	if (mapping) router.getHandle(mapping, { DB: env.DB, KV: env.KV })
 	// @ts-expect-error a string is no D1 database
