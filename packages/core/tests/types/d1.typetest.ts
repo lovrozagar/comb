@@ -75,6 +75,19 @@ declare const noShards: NoShards
 router.getHandle(mapping, noShards)
 // @ts-expect-error a shard key holds a D1 binding
 router.getHandle(mapping, { KV: {} as KVNamespace, SHARD_DB_0: "core" })
+interface NamedShard {
+	KV: KVNamespace
+	SHARD_DB_0: string
+}
+declare const named: NamedShard
+// @ts-expect-error a shard key holds a D1 binding, in an env no literal gives
+router.getHandle(mapping, named)
+
+/* AD14 of the area D review: a consumer's helper generic over its env gets the binding its bound names */
+function shardOf<E extends { SHARD_DB_0: D1Database }>(given: E): D1Database {
+	return router.getHandle(mapping, given).handle
+}
+expectTypeOf(shardOf(env)).toEqualTypeOf<D1Database>()
 
 /* K4 of r22: a consumer's helper names comb's D1 bound from the subpath it calls, and returns the binding's own session type */
 function sessionOf<D extends SessionBound>(binding: D): SessionOf<D> | undefined {

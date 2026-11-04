@@ -15,6 +15,7 @@ import {
 	toMapping,
 } from "./placement.ts"
 import { warnOnError } from "../../../log.ts"
+import type { D1DatabaseLike } from "../d1-types.ts"
 import { assertOrgId, ORG_ID_MAX_LENGTH, shardMap } from "./shard-map.ts"
 import type {
 	LogFn,
@@ -184,15 +185,26 @@ class ShardRouter {
 	/**
 	 * Resolve a shard mapping to a concrete D1 database handle: the env's `SHARD_DB_{target}`
 	 * binding, in the type the env holds its shard bindings as (K2 of r22). An env typed by a string
-	 * index signature gives D1DatabaseLike; one whose known keys hold no `SHARD_DB_*` is refused.
+	 * index signature gives the D1 binding it holds, else D1DatabaseLike; one whose known keys hold no
+	 * `SHARD_DB_*` is refused.
 	 */
-	getHandle<E extends object>(mapping: ShardMapping, env: E & ShardEnv<E>): ShardDbHandle<ShardBindingOf<E>> {
+	getHandle<E extends object>(mapping: ShardMapping, env: E & ShardEnv<E>): ShardDbHandle<ShardBindingOf<E>>
+	/**
+	 * Resolve a shard mapping for an env TypeScript cannot read the keys of, such as a helper's type
+	 * parameter bounded by `{ SHARD_DB_0: D1Database }`: the binding type `D` its `SHARD_DB_*` keys hold
+	 * (AD14 of the area D review). An env with no such key is still refused, holding none of them.
+	 */
+	getHandle<D extends D1DatabaseLike>(
+		mapping: ShardMapping,
+		env: { readonly [K in `SHARD_DB_${string}`]?: D | undefined },
+	): ShardDbHandle<D>
+	getHandle(mapping: ShardMapping, env: object): ShardDbHandle<D1DatabaseLike> {
 		const bindings: Partial<Record<string, unknown>> = env
 		const binding = bindings[`SHARD_DB_${mapping.target}`]
 		if (!binding) {
 			throw new Error(`Missing D1 binding: SHARD_DB_${mapping.target}`)
 		}
-		return { driver: "d1", handle: binding as ShardBindingOf<E> }
+		return { driver: "d1", handle: binding as D1DatabaseLike }
 	}
 
 	/**

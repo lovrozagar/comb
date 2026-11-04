@@ -141,6 +141,7 @@ type MergedListQueryResult = Omit<ListQueryResult, "pagination"> & {
 export type { BuildDerivedListQueryOpts, BuildListQueryOpts, ListExtras, ListQueryResult, MergedListQueryResult };
 
 // sqlite/d1/sharding/router.d.ts
+import type { D1DatabaseLike } from "../d1-types.ts";
 import type { ShardBindingOf, ShardDbHandle, ShardEnv, ShardMapping, ShardMove, ShardPlacement, ShardResolverDeps, ShardRouterConfig, ShardVerifyDeps, WaitUntilCtx } from "./types.ts";
 /**
  * Shard router — resolves org -> D1 database handle.
@@ -202,9 +203,18 @@ declare class ShardRouter {
     /**
      * Resolve a shard mapping to a concrete D1 database handle: the env's `SHARD_DB_{target}`
      * binding, in the type the env holds its shard bindings as (K2 of r22). An env typed by a string
-     * index signature gives D1DatabaseLike; one whose known keys hold no `SHARD_DB_*` is refused.
+     * index signature gives the D1 binding it holds, else D1DatabaseLike; one whose known keys hold no
+     * `SHARD_DB_*` is refused.
      */
     getHandle<E extends object>(mapping: ShardMapping, env: E & ShardEnv<E>): ShardDbHandle<ShardBindingOf<E>>;
+    /**
+     * Resolve a shard mapping for an env TypeScript cannot read the keys of, such as a helper's type
+     * parameter bounded by `{ SHARD_DB_0: D1Database }`: the binding type `D` its `SHARD_DB_*` keys hold
+     * (AD14 of the area D review). An env with no such key is still refused, holding none of them.
+     */
+    getHandle<D extends D1DatabaseLike>(mapping: ShardMapping, env: {
+        readonly [K in `SHARD_DB_${string}`]?: D | undefined;
+    }): ShardDbHandle<D>;
     /**
      * Invalidate both cache tiers. Use after whale graduation or reassignment. It reaches this
      * isolate's LRU and the KV; another isolate's LRU keeps the mapping until it expires.
