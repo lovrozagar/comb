@@ -45,18 +45,35 @@ type DrizzleListOptions = {
 	where: { RAW: (table: RelationalTable) => SQL }
 }>
 
-/** The sort keys and tiebreak against the queried table; a sort field it lacks is a wiring mistake */
+/**
+ * The sort keys and tiebreak against the queried table; a sort field it lacks is a wiring mistake,
+ * `sort_not_wired` as buildListQuery answers it (QL11 of r22b)
+ */
 function keysOn(table: RelationalTable, sort: readonly SortField[]): { keys: SortKey[]; tiebreak: SortKey } {
 	const column = (field: string): SQLWrapper => {
 		if (Object.hasOwn(table, field)) return (table as Record<string, SQLWrapper>)[field] as SQLWrapper
 		throw new CombError({
-			cause: `Sort field '${field}' is not a column of the queried table`,
-			errorKey: combErrorKeys.CURSOR_PAGINATION_UNSUPPORTED,
+			cause: `Sort on '${field}' has no column to run it`,
+			errorKey: combErrorKeys.SORT_NOT_WIRED,
 			status: "internal_server_error",
 		})
 	}
 	const keys = sort.map(({ direction, field, nulls }) => ({ column: column(field), direction, nulls }))
 	return { keys, tiebreak: { column: column(CURSOR_TIEBREAK_COLUMN), direction: sort[0]?.direction ?? "desc" } }
+}
+
+/**
+ * Refuse a computed sort where the options are built, not lazily in `orderBy`: the relational
+ * API orders by the table's columns alone, and no table is needed to know it (QL11 of r22b)
+ */
+function refuseComputed(sort: readonly SortField[]): void {
+	const computed = sort.find(({ field }) => field.startsWith("@"))
+	if (computed === undefined) return
+	throw new CombError({
+		cause: `Sort on '${computed.field}' is computed, which the relational listOptions cannot order by: use buildListQuery`,
+		errorKey: combErrorKeys.SORT_NOT_WIRED,
+		status: "internal_server_error",
+	})
 }
 
 /** The id a cursor resumes from: the tiebreak itself, decoded as its column decodes (Q2 of r17) */
@@ -80,6 +97,7 @@ function drizzleListOptions(query: ListQueryInput, options: CursorOptions): Driz
 	/* options that cannot seal are a wiring mistake on page 1 too, not only once a cursor comes back */
 	assertCursorWired(options)
 	const sort = query.parsedSort
+	refuseComputed(sort)
 	const orderBy = (table: RelationalTable) => {
 		const { keys, tiebreak } = keysOn(table, sort)
 		return orderByKeys(keys, tiebreak)

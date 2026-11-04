@@ -52,3 +52,37 @@ describe("every list builder on a limit no schema validated", () => {
 		)
 	})
 })
+
+/* QL11 of r22b: listOptions answered a sort wiring mistake with cursor_pagination_unsupported, on a page with no cursor */
+/** A validated page-1 query sorted by `field` */
+const parsedBy = (field: string): ListQueryInput => ({
+	limit: 20,
+	parsedSort: [{ direction: "asc", field }],
+	validated: true,
+})
+
+describe("listOptions on a sort it cannot run (QL11 of r22b; sibling: buildListQuery's sort_not_wired)", () => {
+	const t = sqliteTable("t", { id: integer("id").primaryKey(), n: integer("n") })
+
+	it("refuses a computed sort where the options are built, as sort_not_wired", () => {
+		expect(() => queryHelpers.listOptions(parsedBy("@pop"), SEALED)).toThrow(
+			expect.objectContaining({
+				cause: "Sort on '@pop' is computed, which the relational listOptions cannot order by: use buildListQuery",
+				errorKey: "sort_not_wired",
+				status: 500,
+			}),
+		)
+	})
+
+	it("refuses a sort on no column of the queried table as sort_not_wired, as buildListQuery does", () => {
+		const options = queryHelpers.listOptions(parsedBy("nope"), SEALED)
+		const notWired = expect.objectContaining({
+			cause: "Sort on 'nope' has no column to run it",
+			errorKey: "sort_not_wired",
+			status: 500,
+		})
+		expect(() => options.orderBy(t as never)).toThrow(notWired)
+		expect(() => buildListQuery({ ...SEALED, parsed: parsedBy("nope"), table: t })).toThrow(notWired)
+		expect(() => queryHelpers.listOptions(parsedBy("n"), SEALED).orderBy(t as never)).not.toThrow()
+	})
+})

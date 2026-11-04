@@ -1178,6 +1178,8 @@ What changes for a project on 0.20. Before deploying it:
 
 40. **Publish a derived list's tiebreak.** The list schema published `stableTiebreak: "id"` whatever column the list broke ties on, so a derived list keyed by `_id` told a page walker the wrong column. `createListQuerySchema` takes `tiebreak` and publishes it, `id` by default. **Fix:** a derived list whose `idColumn` is not `id` sets `tiebreak` to its name; regenerate a manifest that reads it.
 
+38. **Read `sort_not_wired` from `listOptions` as from `buildListQuery`.** `queryHelpers.listOptions` answered a sort on no column of the queried table with `cursor_pagination_unsupported`, on a page with no cursor, and only once drizzle called its `orderBy`. Such a sort is now `sort_not_wired` (500), as `buildListQuery` answers it, and a computed sort (`@pop`), which the relational API cannot order by, is refused when `listOptions` is called. **Fix:** an error handler keyed on the old key for this mistake reads `sort_not_wired`.
+
 ## Upgrading to 0.20.1
 
 What changes for a project on 0.20.0. Before deploying it:
