@@ -13,7 +13,7 @@ import type { ListDialect } from "../list-dialect.ts"
 import { assertLimitWithin, assertPageWithin } from "../trusted.ts"
 import type { ListQueryInput, SortField } from "../types.ts"
 import type { ListExtras, ListQueryResult } from "./build-list-query-types.ts"
-import { DateKey, inSeconds, readsBack, readsRounded, refersBack } from "./cursor-fit.ts"
+import { carriesOpaque, DateKey, inSeconds, readsBack, readsRounded, refersBack } from "./cursor-fit.ts"
 import { cursorWhere } from "./cursor-where.ts"
 import type { SortKey } from "./keyset.ts"
 
@@ -156,7 +156,7 @@ const familyOf = (column: SQLWrapper): SQL =>
  * time: Postgres's own text of a timestamp, timestamptz or date, which it reads back as that type
  * (a column in string mode reads as that text already); SQLite's REAL seconds of a seconds-mode
  * timestamp at 17 significant digits, which a double reads back exactly (its integer seconds are
- * exact in a Date)
+ * exact in a Date); a Postgres custom column a numeric's text alone, its time bound by its mapper (AB2)
  */
 function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean): SQL | null {
 	if (readsRounded(column)) return sql`coalesce((${column})::text, '')`
@@ -165,9 +165,10 @@ function storedTextOf(dialect: ListDialect, column: SQLWrapper, asRead: boolean)
 			? sql`case when typeof(${column}) = 'real' then printf('%!.17g', ${column}) else '' end`
 			: null
 	if (column instanceof DateKey) return null
-	if (is(column, Column))
+	if (is(column, Column) && !carriesOpaque(column))
 		return asRead && column.dataType === "object date" ? sql`coalesce((${column})::text, '')` : null
-	const carried = asRead ? sql`${isTime(column)} or ${roundsOnRead(column)}` : roundsOnRead(column)
+	const carried =
+		asRead && !carriesOpaque(column) ? sql`${isTime(column)} or ${roundsOnRead(column)}` : roundsOnRead(column)
 	return sql`coalesce(case when ${carried} then (${column})::text end, '')`
 }
 

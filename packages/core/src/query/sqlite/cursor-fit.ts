@@ -4,7 +4,7 @@
  * stale cursor, answered with a 400 before drizzle maps it (a string on a timestamp column would
  * otherwise throw a TypeError, a 500).
  */
-import { Column, is, SQL, type SQLWrapper, sql, Table } from "drizzle-orm"
+import { Column, type ColumnDataType, is, SQL, type SQLWrapper, sql, Table } from "drizzle-orm"
 import { SQLiteColumn } from "drizzle-orm/sqlite-core"
 
 import { CombError } from "../../error.ts"
@@ -14,34 +14,34 @@ import type { ListDialect } from "../list-dialect.ts"
 import { INTEGER_TEXT } from "../list-extras.ts"
 
 /**
- * Whether `value` is what a column of this drizzle `dataType` holds; a json column holds nothing a
- * cursor carries, a buffer-mode blob its bytes (QL5 of r22b). A number column holds a bigint too where the driver returns integers as one
- * (libsql's intMode "bigint", bun:sqlite's safeIntegers), or as a decimal string (libsql's intMode
- * "string", Q2 of r19), and a cursor minted from its row carries it.
+ * What a column of each drizzle `dataType` family holds, given its full `dataType`. Keyed by drizzle's
+ * own family union, so a family drizzle adds is a type error here rather than a cursor every column of
+ * it refuses (AB2 of area B). A json column holds nothing a cursor carries, nor an array one; a
+ * buffer-mode blob its bytes (QL5 of r22b). A number column holds a bigint too where the driver returns
+ * integers as one (libsql's intMode "bigint", bun:sqlite's safeIntegers), or as a decimal string
+ * (libsql's intMode "string", Q2 of r19), and a cursor minted from its row carries it. A `customType`
+ * column holds whatever its `fromDriver` read, opaque to comb: any value a cursor carries, bound back
+ * through its `toDriver`.
  */
-function fitsDataType(dataType: string, value: unknown): boolean {
-	switch (dataType.split(" ")[0]) {
-		case "string":
-			return typeof value === "string"
-		case "number":
-			return (
-				typeof value === "number" ||
-				typeof value === "bigint" ||
-				(typeof value === "string" && INTEGER_TEXT.test(value))
-			)
-		case "boolean":
-			return typeof value === "boolean"
-		case "bigint":
-			return typeof value === "bigint"
-		case "object":
-			return (
-				(dataType === "object date" && value instanceof Date) ||
-				(dataType === "object buffer" && value instanceof Uint8Array)
-			)
-		default:
-			return false
-	}
+const HOLDS: Record<ColumnDataType, (value: unknown, dataType: string) => boolean> = {
+	array: () => false,
+	bigint: (value) => typeof value === "bigint",
+	boolean: (value) => typeof value === "boolean",
+	custom: (value) =>
+		["bigint", "boolean", "number", "string"].includes(typeof value) ||
+		value instanceof Date ||
+		value instanceof Uint8Array,
+	number: (value) =>
+		typeof value === "number" || typeof value === "bigint" || (typeof value === "string" && INTEGER_TEXT.test(value)),
+	object: (value, dataType) =>
+		(dataType === "object date" && value instanceof Date) ||
+		(dataType === "object buffer" && value instanceof Uint8Array),
+	string: (value) => typeof value === "string",
 }
+
+/** Whether `value` is what a column of this drizzle `dataType` holds (HOLDS) */
+const fitsDataType = (dataType: string, value: unknown): boolean =>
+	HOLDS[dataType.split(" ")[0] as ColumnDataType]?.(value, dataType) ?? false
 
 /**
  * A derived sort key declared as time: its expression yields epoch milliseconds, and its cursor
@@ -178,9 +178,23 @@ const readsRounded = (column: SQLWrapper | undefined): boolean =>
 /* the text Postgres prints a numeric as */
 const NUMERIC_TEXT = /^(?:-?\d+(?:\.\d+)?|NaN|-?Infinity)$/
 
-/** A cursor value as a key that reads rounded binds it: its carried text cast to numeric, past the number mapper */
-const boundCarried = (column: SQLWrapper | undefined, value: unknown): unknown =>
-	readsRounded(column) && typeof value === "string" ? sql`${value}::numeric` : value
+/**
+ * Whether `column` is a Postgres `customType` column, which carries its text where Postgres's own type
+ * of it is a numeric (AB2 of area B), as an expression key does: its mapper may read one as a number
+ */
+const carriesOpaque = (column: SQLWrapper | undefined): boolean =>
+	is(column, Column) && column.dataType === "custom" && !is(column, SQLiteColumn)
+
+/**
+ * A cursor value as a key that carries its text binds it: a key that reads rounded, its text cast to
+ * numeric past the number mapper; a Postgres custom column, a numeric's text as itself, past its
+ * `toDriver`, which Postgres reads as the column's own type
+ */
+function boundCarried(column: SQLWrapper | undefined, value: unknown): unknown {
+	if (typeof value !== "string") return value
+	if (readsRounded(column)) return sql`${value}::numeric`
+	return carriesOpaque(column) && NUMERIC_TEXT.test(value) ? sql`${value}` : value
+}
 
 /** Whether `column` is a seconds-mode SQLite timestamp: drizzle binds a Date there floored to the second */
 const inSeconds = (column: SQLWrapper | undefined): boolean =>
@@ -262,6 +276,7 @@ export {
 	boundAsRead,
 	boundCarried,
 	boundForKeys,
+	carriesOpaque,
 	DateKey,
 	inSeconds,
 	readsBack,

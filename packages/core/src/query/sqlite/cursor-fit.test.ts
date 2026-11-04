@@ -1,5 +1,12 @@
 import { getTableColumns, type SQL, SQL as SQLClass, sql } from "drizzle-orm"
-import { numeric as pgNumeric, PgDialect, pgTable, timestamp } from "drizzle-orm/pg-core"
+import {
+	customType as pgCustomType,
+	numeric as pgNumeric,
+	PgDialect,
+	pgTable,
+	timestamp,
+	vector,
+} from "drizzle-orm/pg-core"
 import {
 	alias,
 	blob,
@@ -19,6 +26,7 @@ import {
 	boundAsRead,
 	boundCarried,
 	boundForKeys,
+	carriesOpaque,
 	DateKey,
 	readsBack,
 	readsRounded,
@@ -72,7 +80,6 @@ describe("assertCursorFits", () => {
 		["seen_at", "2024"],
 		["meta", { a: 1 }],
 		["big", "1"],
-		["blobby", "x"],
 	] as const)("rejects a %s cursor value of the wrong type", (column, value) => {
 		expect(fits(column, value)).toBe(false)
 	})
@@ -260,5 +267,41 @@ describe("a blob key's cursor value (QL5 of r22b; sibling: a json key, which no 
 		expect(() => assertCursorFits([files.b], ["01"])).toThrow()
 		expect(() => assertCursorFits([files.j], [new Uint8Array([1])])).toThrow()
 		expect(boundForKeys("sqlite", [files.b], [new Uint8Array([1])])).toEqual([new Uint8Array([1])])
+	})
+})
+
+/* AB2 of area B: a customType key fits what its mapper read, and a Postgres one carries a numeric's text */
+describe("a customType key's cursor value (AB2 of area B; sibling: QL5's blob)", () => {
+	const amount = pgCustomType<{ data: number; driverData: string }>({ dataType: () => "amount" })
+	const pgItems = pgTable("pg_items", { a: amount("a"), n: pgNumeric("n", { mode: "number" }) })
+
+	it("takes on a customType column any value a cursor carries, as its fromDriver read it", () => {
+		for (const value of ["x", 1, 1n, false, new Date(1), new Uint8Array([1])]) expect(fits("blobby", value)).toBe(true)
+		expect(fits("blobby", { a: 1 })).toBe(false)
+	})
+
+	it("refuses every value on a family no cursor carries, and on a dataType drizzle names no family of", () => {
+		/* drizzle gives an .array() its element's dataType; a vector is the array family */
+		const tags = pgTable("tags", { v: vector("v", { dimensions: 1 }) })
+		expect(tags.v.dataType).toBe("array vector")
+		expect(() => assertCursorFits([tags.v], [1])).toThrow()
+		const unknown = Object.assign(Object.create(columns.name) as object, { dataType: "vector" })
+		expect(() => assertCursorFits([unknown as typeof columns.name], ["a"])).toThrow()
+	})
+
+	it("carries its text only on a Postgres custom column", () => {
+		expect(carriesOpaque(pgItems.a)).toBe(true)
+		expect(carriesOpaque(columns.blobby)).toBe(false)
+		expect(carriesOpaque(pgItems.n)).toBe(false)
+		expect(carriesOpaque(sql`${pgItems.a}`)).toBe(false)
+		expect(carriesOpaque(undefined)).toBe(false)
+	})
+
+	it("binds a numeric's text past the mapper on a Postgres custom column, and any other value as before", () => {
+		const bound = boundCarried(pgItems.a, "0.1000000000000000001") as SQL
+		expect(new PgDialect().sqlToQuery(bound)).toEqual({ params: ["0.1000000000000000001"], sql: "$1" })
+		expect(boundCarried(pgItems.a, "a,b")).toBe("a,b")
+		expect(boundCarried(pgItems.a, 0.1)).toBe(0.1)
+		expect(boundCarried(columns.blobby, "1")).toBe("1")
 	})
 })

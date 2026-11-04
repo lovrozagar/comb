@@ -3,7 +3,7 @@
  * pagination a list with no keyset refuses. The builders' own behavior is build-list-query.test.ts's.
  */
 import { type SQL, sql } from "drizzle-orm"
-import { numeric as pgNumeric, PgDialect, pgTable, text as pgText, timestamp } from "drizzle-orm/pg-core"
+import { customType, numeric as pgNumeric, PgDialect, pgTable, text as pgText, timestamp } from "drizzle-orm/pg-core"
 import { integer, SQLiteDialect, sqliteTable } from "drizzle-orm/sqlite-core"
 import { describe, expect, it } from "vitest"
 import { SEALED } from "../__fixtures__/cursor-secret.ts"
@@ -180,6 +180,7 @@ const render = (column: Parameters<typeof keyTextsSQL>[0][number]["column"]) =>
  */
 describe("keyTextsSQL carries only numeric, time and seconds texts (AB1 of area B; sibling: QL3's carriage)", () => {
 	const kinds = pgTable("kinds", {
+		amount: customType<{ data: number; driverData: string }>({ dataType: () => "amount" })("amount"),
 		at: timestamp("at", { mode: "string", precision: 6 }),
 		id: pgText("id").primaryKey(),
 		label: pgText("label"),
@@ -196,6 +197,7 @@ describe("keyTextsSQL carries only numeric, time and seconds texts (AB1 of area 
 		["a string-mode timestamp", kinds.at, false],
 		["a text column", kinds.label, false],
 		["an expression", sql`${kinds.label}`, true],
+		["a customType column", kinds.amount, true],
 	]
 	const TYPES_ALLOWED = ["numeric", "timestamp without time zone", "timestamp with time zone", "date"]
 
@@ -215,6 +217,17 @@ describe("keyTextsSQL carries only numeric, time and seconds texts (AB1 of area 
 	it.each(pgKeys)("carries %s's text or nothing, by its type", (_, column, carries) => {
 		const rendered = new PgDialect().sqlToQuery(keyTextsSQL([{ column, direction: "asc" }], "postgres", () => true)).sql
 		expect(rendered === "''").toBe(!carries)
+	})
+
+	/* AB2 of area B: its mapper may read a numeric as a number; a time binds through that mapper, so it carries none */
+	it("carries a Postgres customType column's text where it is a numeric alone, bound as read or not", () => {
+		for (const asRead of [false, true]) {
+			const rendered = new PgDialect().sqlToQuery(
+				keyTextsSQL([{ column: kinds.amount, direction: "asc" }], "postgres", () => asRead),
+			).sql
+			expect(rendered).toMatch(/^coalesce\(case when \(pg_typeof\("kinds"\."amount"\) = 'numeric'::regtype or /)
+			expect(rendered).not.toContain("timestamp")
+		}
 	})
 
 	it("carries SQLite's REAL seconds of a seconds-mode timestamp alone, as a number's digits", () => {
