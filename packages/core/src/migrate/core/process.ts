@@ -107,4 +107,16 @@ export const run: Run = (cmd, args, options = {}) => {
 export const runPeer =
 	(exec: Run, bin: ProjectBin) =>
 	(args: readonly string[], options: RunOptions = {}): RunResult =>
-		exec(bin.runtime, [bin.bin, ...args], { ...options, peer: bin.peer })
+		exec(bin.runtime, [bin.bin, ...args], { ...asBun(bin, options), peer: bin.peer })
+
+/**
+ * `options` for a peer on comb's own Bun, run as bun: in a Bun single-file executable
+ * `process.execPath` is the app, which runs its own entry unless `BUN_BE_BUN` is set (D2-4 of the
+ * area D round-two review); plain bun and node ignore it
+ */
+function asBun(bin: ProjectBin, options: RunOptions): RunOptions {
+	if (bin.runtime !== process.execPath || process.versions["bun"] === undefined) return options
+	const { env, exactEnv } = options
+	if (exactEnv !== undefined) return { ...options, exactEnv: { ...exactEnv, BUN_BE_BUN: "1" } }
+	return { ...options, env: { ...env, BUN_BE_BUN: "1" } }
+}

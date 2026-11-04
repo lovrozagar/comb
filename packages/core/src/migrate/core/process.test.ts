@@ -127,6 +127,19 @@ describe("run: an exact environment and a timeout", () => {
 	})
 })
 
+/** Runs `body` with `process.versions.bun` as `version`, none for undefined, whatever runtime runs the test */
+function onBun(version: string | undefined, body: () => void): void {
+	const own = Object.getOwnPropertyDescriptor(process.versions, "bun")
+	if (version === undefined) Reflect.deleteProperty(process.versions, "bun")
+	else Object.defineProperty(process.versions, "bun", { configurable: true, enumerable: true, value: version })
+	try {
+		body()
+	} finally {
+		if (own === undefined) Reflect.deleteProperty(process.versions, "bun")
+		else Object.defineProperty(process.versions, "bun", own)
+	}
+}
+
 describe("runPeer (K1 of r22)", () => {
 	/* a bin peer runs on its runtime and the bin the project's package names, never from PATH */
 	it("runs a bin peer on its runtime, and names the runtime when it cannot start", () => {
@@ -164,6 +177,39 @@ describe("runPeer (K1 of r22)", () => {
 		}
 		runPeer(fake, kit)(["export"], { cwd: "/w" })
 		expect(calls).toEqual([[process.execPath, ["/k/bin.cjs", "export"], { cwd: "/w", peer: "drizzle-kit" }]])
+	})
+})
+
+describe("runPeer on comb's own Bun", () => {
+	/*
+	 * D2-4 of the area D round-two review: in a Bun single-file executable, process.execPath is the
+	 * app, which runs its own entry unless BUN_BE_BUN is set, so drizzle-kit would respawn the app
+	 */
+	it("runs a peer on comb's own Bun as bun, and leaves node and a peer on another runtime as they are", () => {
+		const calls: unknown[] = []
+		const fake = (cmd: string, args: readonly string[], options?: unknown) => {
+			calls.push(options)
+			return { code: 0, stderr: "", stdout: "" }
+		}
+		const kit = {
+			bin: "/k/bin.cjs",
+			manifest: "/k/package.json",
+			peer: "drizzle-kit" as const,
+			runtime: process.execPath,
+		}
+		const wrangler = { ...kit, peer: "wrangler" as const, runtime: "node" }
+		onBun("1.3.0", () => {
+			runPeer(fake, kit)(["export"], { cwd: "/w", env: { A: "a" } })
+			runPeer(fake, kit)(["export"], { exactEnv: { A: "a" } })
+			runPeer(fake, wrangler)(["d1"])
+		})
+		onBun(undefined, () => runPeer(fake, kit)(["export"]))
+		expect(calls).toEqual([
+			{ cwd: "/w", env: { A: "a", BUN_BE_BUN: "1" }, peer: "drizzle-kit" },
+			{ exactEnv: { A: "a", BUN_BE_BUN: "1" }, peer: "drizzle-kit" },
+			{ peer: "wrangler" },
+			{ peer: "drizzle-kit" },
+		])
 	})
 })
 
